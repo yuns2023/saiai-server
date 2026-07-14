@@ -511,6 +511,7 @@ import Icon from '@/components/icons/Icon.vue'
 import type { UsageLog, ApiKey, UsageQueryParams, UsageStatsResponse } from '@/types'
 import type { Column } from '@/components/common/types'
 import { formatDateTime, formatReasoningEffort, getEffectiveReasoningEffort } from '@/utils/format'
+import { escapeCsvCell } from '@/utils/csv'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
@@ -762,28 +763,6 @@ const handlePageSizeChange = (pageSize: number) => {
   loadUsageLogs()
 }
 
-/**
- * Escape CSV value to prevent injection and handle special characters
- */
-const escapeCSVValue = (value: unknown): string => {
-  if (value == null) return ''
-
-  const str = String(value)
-  const escaped = str.replace(/"/g, '""')
-
-  // Prevent formula injection by prefixing dangerous characters with single quote
-  if (/^[=+\-@\t\r]/.test(str)) {
-    return `"\'${escaped}"`
-  }
-
-  // Escape values containing comma, quote, or newline
-  if (/[,"\n\r]/.test(str)) {
-    return `"${escaped}"`
-  }
-
-  return str
-}
-
 const exportToCSV = async () => {
   if (pagination.total === 0) {
     appStore.showWarning(t('usage.noDataToExport'))
@@ -849,11 +828,11 @@ const exportToCSV = async () => {
         log.total_cost.toFixed(8),
         log.first_token_ms ?? '',
         log.duration_ms
-      ].map(escapeCSVValue)
+      ].map(escapeCsvCell)
     )
 
     const csvContent = [
-      headers.map(escapeCSVValue).join(','),
+      headers.map(escapeCsvCell).join(','),
       ...rows.map((row) => row.join(','))
     ].join('\n')
 

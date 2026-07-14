@@ -732,7 +732,6 @@ export default {
     allApiKeys: '全部密钥',
     timeRange: '时间范围',
     exportCsv: '导出 CSV',
-    exportExcel: '导出 Excel',
     exportingProgress: '正在导出数据...',
     exportedCount: '已导出 {current}/{total} 条',
     estimatedTime: '预计剩余时间：{time}',
@@ -783,8 +782,6 @@ export default {
     noDataToExport: '没有可导出的数据',
     exportSuccess: '使用数据导出成功',
     exportFailed: '使用数据导出失败',
-    exportExcelSuccess: '使用数据导出成功（Excel格式）',
-    exportExcelFailed: '使用数据导出失败',
     imageUnit: '张',
     userAgent: 'User-Agent'
   },

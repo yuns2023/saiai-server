@@ -724,7 +724,6 @@ export default {
     allApiKeys: 'All API Keys',
     timeRange: 'Time Range',
     exportCsv: 'Export CSV',
-    exportExcel: 'Export Excel',
     exportingProgress: 'Exporting data...',
     exportedCount: 'Exported {current}/{total} records',
     estimatedTime: 'Estimated time remaining: {time}',
@@ -775,8 +774,6 @@ export default {
     noDataToExport: 'No data to export',
     exportSuccess: 'Usage data exported successfully',
     exportFailed: 'Failed to export usage data',
-    exportExcelSuccess: 'Usage data exported successfully (Excel format)',
-    exportExcelFailed: 'Failed to export usage data',
     imageUnit: ' images',
     userAgent: 'User-Agent'
   },

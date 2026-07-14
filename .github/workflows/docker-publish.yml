@@ -138,6 +138,8 @@ jobs:
             exit 1
           fi
           docker run --rm --network none --entrypoint /app/sub2api "$image_ref" --version
+          docker run --rm --network none --entrypoint /bin/sh "$image_ref" \
+            -c 'test -s /app/resources/model-pricing/model_prices_and_context_window.json'
 
       - name: Publish deployment coordinates
         env:

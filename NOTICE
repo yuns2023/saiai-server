@@ -25,6 +25,11 @@ notice:
 
     Copyright (c) 2023 Berri AI
 
+The model icon SVG paths in `frontend/src/components/common/ModelIcon.vue` are
+derived from Lobe Icons, received under the MIT License with this notice:
+
+    Copyright (c) 2023 LobeHub
+
 The MIT terms applicable to those identified materials are:
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

@@ -29,16 +29,21 @@ builds:
 
 archives:
   - id: default
-    format: tar.gz
+    formats:
+      - tar.gz
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     files:
       - LICENSE*
       - README*
       - deploy/*
+      - src: backend/resources/model-pricing/*
+        dst: resources/model-pricing
+        strip_parent: true
 
 checksum:
   name_template: 'checksums.txt'
@@ -60,6 +65,7 @@ dockers:
     use: buildx
     extra_files:
       - deploy/docker-entrypoint.sh
+      - backend/resources
     build_flag_templates:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.version={{ .Version }}"
@@ -75,6 +81,7 @@ dockers:
     use: buildx
     extra_files:
       - deploy/docker-entrypoint.sh
+      - backend/resources
     build_flag_templates:
       - "--platform=linux/arm64"
       - "--label=org.opencontainers.image.version={{ .Version }}"
