@@ -25,6 +25,20 @@ secrets, infrastructure inventory, traffic captures, internal research, and
 the separate CLI/desktop source history. Client source is maintained in
 [`yuns2023/saiai-client`](https://github.com/yuns2023/saiai-client).
 
+## Initial schema-2 release pair
+
+The first release-ready public server commit for the schema-2 Gateway was:
+
+```text
+b4b208f7b63256425e0c29d96acfa360526d6142
+```
+
+It was paired with `saiai-client` tag `saiai-v0.9.0`, client source commit
+`abbc0e425efe4101f7180da892aaf80672bf21b6e`, and the manifest hash recorded in
+the [V2 Gateway contract](V2_GATEWAY_CONTRACT.md). These are public source and
+release coordinates; deployment-specific hosts, paths, credentials, and
+backup records remain outside this repository.
+
 ## Model-pricing fallback
 
 The initial public export includes

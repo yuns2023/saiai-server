@@ -61,12 +61,42 @@ Schema 2 会区分原生 Claude 能力与 OpenAI 分组可选的 `/v1/messages` 
 完整响应结构、能力字段、安全属性和成对发布规则见
 [V2 Gateway 协议](docs/V2_GATEWAY_CONTRACT.md)。
 
+先安装实际要使用的官方 Claude Code 或 Codex CLI；SAIAI 不会安装这两个上游
+客户端。然后安装 SAIAI，再只启动需要配置的产品。SAIAI 安装过程不会要求输入
+API Key。首次启动产品时，如果尚未保存共享 Gateway URL，会先询问 URL，然后只
+要求输入当前产品自己的 SAIAI Key，绝不会要求另一个产品的 Key。
+
+Windows PowerShell：
+
+```powershell
+irm https://api.saiai.top/saiai-cli/setup.ps1 | iex
+Invoke-Saiai install
+saiai codex # 或：saiai claude
+```
+
+PATH 排障、按产品 revoke、完全重置以及 Preview 更新/签名边界见客户端仓库的
+[完整 Windows 指南](https://github.com/yuns2023/saiai-client/blob/main/docs/WINDOWS.md)。
+
+Linux 或 macOS：
+
+```bash
+curl -fsSL https://api.saiai.top/saiai-cli/setup.sh | bash -s -- install
+"$HOME/.local/bin/saiai" codex # 或："$HOME/.local/bin/saiai" claude
+```
+
+Unix 安装器会打印实际绝对路径；如果通过 `SAIAI_INSTALL_DIR` 修改了默认目录，
+请使用安装器打印的路径。
+
+自托管运营者应将 `https://api.saiai.top` 替换成自己的 HTTPS Gateway 来源。可以用
+`saiai doctor` 输出适合排障的诊断摘要。V2 不迁移旧模式状态；需要完全重置 V2 时，
+执行 `saiai revoke --all` 后再按产品重新初始化。
+
 ## 开发
 
 前置环境：
 
 - `backend/go.mod` 声明的 Go 版本
-- Node.js 20，以及通过 Corepack 使用的 pnpm
+- Node.js 24，以及通过 Corepack 使用 `frontend/package.json` 固定版本的 pnpm
 - 集成测试和本地运行所需的 PostgreSQL 与 Redis
 
 常用检查：
@@ -86,6 +116,9 @@ pnpm run test:run
 开发时优先运行有针对性的测试，再交给公开 CI 完成完整矩阵。开发流程见
 [CONTRIBUTING.md](CONTRIBUTING.md)，部署模板见 [deploy/](deploy/)。公开到不受信任
 网络之前，请逐项审阅模板、生成独立强密钥、固定发布制品并配置 HTTPS。
+
+维护者发布配对的 Gateway 与客户端时，还应遵循与具体生产拓扑无关的
+[发布运维手册](docs/RELEASE_OPERATIONS.md)。
 
 ## 安全
 

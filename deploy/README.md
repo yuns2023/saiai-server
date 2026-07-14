@@ -6,8 +6,8 @@ using a template on an internet-facing host.
 
 ## Local source build
 
-The source-build Compose file is the safest starting point before the first
-public image is published:
+Use the source-build Compose file for local development or a deliberate custom
+source build:
 
 ```bash
 git clone https://github.com/yuns2023/saiai-server.git
@@ -60,7 +60,7 @@ public image workflow.
 
 Gateway schema 2 and the matching `saiai-client` release are one compatibility
 pair. Stage and verify the client release before enabling its public asset
-routes. The activation script is:
+routes. Staging is safe to do before maintenance:
 
 ```bash
 sudo install -d -m 0755 /var/lib/saiai-server/client-runtime
@@ -68,9 +68,19 @@ CLIENT_TAG='saiai-v0.9.0'
 CLIENT_MANIFEST_SHA256='092107c40b60cf0174e7278891fbb3cb097ccbe7cc05e8bef05e411687dfa02a'
 sudo env SAIAI_CLIENT_DIR=/var/lib/saiai-server/client-runtime/saiai-cli \
   scripts/sync-saiai-cli.sh stage "$CLIENT_TAG" "$CLIENT_MANIFEST_SHA256"
+```
+
+Do not run `activate` yet. Activate the staged bundle only inside the same
+maintenance window or atomic front-door switch that changes the Gateway image
+to its matching schema-2 digest:
+
+```bash
 sudo env SAIAI_CLIENT_DIR=/var/lib/saiai-server/client-runtime/saiai-cli \
   scripts/sync-saiai-cli.sh activate "$CLIENT_TAG" "$CLIENT_MANIFEST_SHA256"
 ```
+
+Verify both the Gateway and public client assets before reopening traffic.
+Rollback must restore the previous Gateway and client bundle together.
 
 The host runtime parent and the container mount target must use the same
 absolute path because the active symlink points to an immutable release bundle:
@@ -98,15 +108,21 @@ file and set `EXTRA_CA_CERT_FILE` explicitly. Never commit a CA private key.
 
 ## Upgrade and rollback
 
-1. Back up PostgreSQL and the application data directory.
-2. Pull the exact new image digest.
-3. Review schema and configuration changes.
-4. Recreate only the application service.
-5. Verify `/health` and the administration login.
-6. Keep the previous digest available for rollback.
+Copy [`release-pair.env.example`](release-pair.env.example) into a private
+operations repository and record the Gateway source SHA, image digest, client
+source/tag, manifest hash, and previous pair. Do not put credentials in that
+file.
 
-For V2 changes, record the Gateway source SHA, image digest, client tag, and
-client manifest hash together. Roll back Gateway and client assets as a pair.
+The required sequence is prepare and stage, enter maintenance, validate
+backups, activate the pair, verify locally, reopen traffic, and verify publicly.
+If a check fails, return to maintenance and restore the previous pair; do not
+leave a half-updated Gateway/client combination online. Recreate only the
+application service, and do not restore PostgreSQL automatically unless a
+confirmed migration or data recovery requires it.
+
+Follow the complete [release operations runbook](../docs/RELEASE_OPERATIONS.md)
+for immutable-image checks, backup validation, non-billable bootstrap smoke
+tests, public asset verification, rollback, and release records.
 
 ## Security reminders
 

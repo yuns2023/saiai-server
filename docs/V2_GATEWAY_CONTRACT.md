@@ -56,7 +56,7 @@ provider request, or consume model quota.
 | `claude` | The authenticated key's active group can initialize and run the managed Claude product through a native supported route. Anthropic and compatible Antigravity groups may report this capability. |
 | `codex` | The active group can initialize and run the managed Codex product. This is reported for an eligible OpenAI group. |
 | `codex_responses` | Codex can use the HTTPS Responses API through this group. |
-| `codex_websockets` | The Gateway can promise Codex WebSocket transport without further account selection. The current schema-2 Preview reports `false`; Codex uses HTTPS Responses. |
+| `codex_websockets` | The Gateway can promise Codex WebSocket transport without further account selection. The initial schema-2 release paired with client `0.9.0` reports `false`; Codex uses HTTPS Responses. |
 | `openai_messages_dispatch` | The OpenAI group has optional `/v1/messages` protocol dispatch enabled. This is protocol compatibility, not native Claude-product readiness. |
 
 The following invariant is normative:
@@ -118,6 +118,8 @@ pair. An operator must not publicly expose:
 Stage and verify both sides before switching public install/bootstrap traffic.
 Rollback also restores both sides as a pair. Release records should bind the
 Gateway image digest to the client manifest hash without recording credentials.
+The deployment-neutral [release operations runbook](RELEASE_OPERATIONS.md)
+defines the required maintenance, validation, and rollback sequence.
 
 The verified client coordinates for the initial schema-2 rollout are:
 
