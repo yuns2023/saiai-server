@@ -5,10 +5,12 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,8 +18,10 @@ type tokenRefreshAccountRepo struct {
 	mockAccountRepoForGemini
 	updateCalls    int
 	setErrorCalls  int
+	setTempCalls   int
 	clearTempCalls int
 	lastAccount    *Account
+	lastErrorMsg   string
 	updateErr      error
 }
 
@@ -29,6 +33,12 @@ func (r *tokenRefreshAccountRepo) Update(ctx context.Context, account *Account) 
 
 func (r *tokenRefreshAccountRepo) SetError(ctx context.Context, id int64, errorMsg string) error {
 	r.setErrorCalls++
+	r.lastErrorMsg = errorMsg
+	return nil
+}
+
+func (r *tokenRefreshAccountRepo) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
+	r.setTempCalls++
 	return nil
 }
 
@@ -65,8 +75,9 @@ func (s *tempUnschedCacheStub) DeleteTempUnsched(ctx context.Context, accountID 
 }
 
 type tokenRefresherStub struct {
-	credentials map[string]any
-	err         error
+	credentials  map[string]any
+	err          error
+	refreshCalls int
 }
 
 func (r *tokenRefresherStub) CanRefresh(account *Account) bool {
@@ -78,6 +89,7 @@ func (r *tokenRefresherStub) NeedsRefresh(account *Account, refreshWindowDuratio
 }
 
 func (r *tokenRefresherStub) Refresh(ctx context.Context, account *Account) (map[string]any, error) {
+	r.refreshCalls++
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -362,6 +374,36 @@ func TestTokenRefreshService_RefreshWithRetry_AntigravityNonRetryableError(t *te
 	require.Equal(t, 1, repo.setErrorCalls) // 不可重试错误应设置错误状态
 }
 
+func TestTokenRefreshService_RefreshWithRetry_OpenAIInvalidRefreshTokenIsNonRetryable(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          3,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, nil)
+	account := &Account{
+		ID:       17,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+	refreshErr := infraerrors.Newf(
+		http.StatusBadGateway,
+		"OPENAI_OAUTH_TOKEN_REFRESH_FAILED",
+		`token refresh failed: status 400, body: {"error":"invalid_refresh_token"}`,
+	)
+	refresher := &tokenRefresherStub{err: refreshErr}
+
+	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.ErrorIs(t, err, refreshErr)
+	require.Equal(t, 1, refresher.refreshCalls, "invalid refresh token must not enter retry/backoff")
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Contains(t, repo.lastErrorMsg, "invalid_refresh_token")
+	require.Equal(t, 0, repo.setTempCalls, "non-retryable credentials must not become temporarily unschedulable")
+}
+
 // TestTokenRefreshService_RefreshWithRetry_ClearsTempUnschedulable 测试刷新成功后清除临时不可调度（DB + Redis）
 func TestTokenRefreshService_RefreshWithRetry_ClearsTempUnschedulable(t *testing.T) {
 	repo := &tokenRefreshAccountRepo{}
@@ -443,6 +485,7 @@ func TestIsNonRetryableRefreshError(t *testing.T) {
 		{name: "nil_error", err: nil, expected: false},
 		{name: "network_error", err: errors.New("network timeout"), expected: false},
 		{name: "invalid_grant", err: errors.New("invalid_grant"), expected: true},
+		{name: "invalid_refresh_token", err: errors.New("invalid_refresh_token"), expected: true},
 		{name: "invalid_client", err: errors.New("invalid_client"), expected: true},
 		{name: "unauthorized_client", err: errors.New("unauthorized_client"), expected: true},
 		{name: "access_denied", err: errors.New("access_denied"), expected: true},
