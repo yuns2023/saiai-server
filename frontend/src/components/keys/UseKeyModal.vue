@@ -180,17 +180,17 @@ const activeClientTab = ref<string>('claude')
 const defaultClientTab = computed(() => {
   switch (props.platform) {
     case 'openai':
-      return props.allowMessagesDispatch ? 'v2' : 'codex'
+    case 'anthropic':
+    case 'antigravity':
+      return 'v2'
     case 'gemini':
       return 'gemini'
-    case 'antigravity':
-      return 'claude'
     default:
-      return 'claude'
+      return 'unsupported'
   }
 })
 
-watch([() => props.platform, () => props.allowMessagesDispatch], () => {
+watch(() => props.platform, () => {
   activeTab.value = 'unix'
   activeClientTab.value = defaultClientTab.value
 }, { immediate: true })
@@ -266,33 +266,22 @@ const SparkleIcon = {
 const clientTabs = computed((): TabConfig[] => {
   if (!props.platform) return []
   switch (props.platform) {
-    case 'openai': {
-      const tabs: TabConfig[] = []
-      if (props.allowMessagesDispatch) {
-        tabs.push({ id: 'v2', label: t('keys.useKeyModal.cliTabs.v2Preview'), icon: TerminalIcon })
-      }
-      tabs.push(
-        { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
-        { id: 'codex-ws', label: t('keys.useKeyModal.cliTabs.codexCliWs'), icon: TerminalIcon },
-      )
-      if (props.allowMessagesDispatch) {
-        tabs.push({ id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon })
-      }
-      return tabs
-    }
+    case 'openai':
+    case 'anthropic':
+      return [
+        { id: 'v2', label: t('keys.useKeyModal.cliTabs.v2Preview'), icon: TerminalIcon }
+      ]
     case 'gemini':
       return [
         { id: 'gemini', label: t('keys.useKeyModal.cliTabs.geminiCli'), icon: SparkleIcon }
       ]
     case 'antigravity':
       return [
-        { id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon },
+        { id: 'v2', label: t('keys.useKeyModal.cliTabs.v2Preview'), icon: TerminalIcon },
         { id: 'gemini', label: t('keys.useKeyModal.cliTabs.geminiCli'), icon: SparkleIcon }
       ]
     default:
-      return [
-        { id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon }
-      ]
+      return []
   }
 })
 
@@ -303,7 +292,7 @@ const shellTabs: TabConfig[] = [
   { id: 'powershell', label: 'PowerShell', icon: WindowsIcon }
 ]
 
-const showShellTabs = computed(() => true)
+const showShellTabs = computed(() => clientTabs.value.length > 0)
 
 const currentTabs = computed(() => {
   if (!showShellTabs.value) return []
@@ -313,41 +302,38 @@ const currentTabs = computed(() => {
 const platformDescription = computed(() => {
   switch (props.platform) {
     case 'openai':
-      if (activeClientTab.value === 'v2') {
-        return t('keys.useKeyModal.v2.description')
-      }
-      if (activeClientTab.value === 'claude') {
-        return t('keys.useKeyModal.description')
-      }
-      // Codex CLI tabs (codex / codex-ws) now also use the saiai-cli one-click flow.
-      return t('keys.useKeyModal.openai.description')
+      return t('keys.useKeyModal.v2.codexDescription')
+    case 'anthropic':
+      return t('keys.useKeyModal.v2.claudeDescription')
     case 'gemini':
       return t('keys.useKeyModal.gemini.description')
     case 'antigravity':
-      return t('keys.useKeyModal.antigravity.description')
+      return activeClientTab.value === 'gemini'
+        ? t('keys.useKeyModal.antigravity.description')
+        : t('keys.useKeyModal.v2.claudeDescription')
+    case 'sora':
+      return t('keys.useKeyModal.sora.description')
     default:
-      return t('keys.useKeyModal.description')
+      return ''
   }
 })
 
 const platformNote = computed(() => {
   switch (props.platform) {
     case 'openai':
-      if (activeClientTab.value === 'v2') {
-        return t('keys.useKeyModal.v2.note')
-      }
-      if (activeClientTab.value === 'claude') {
-        return t('keys.useKeyModal.note')
-      }
-      return t('keys.useKeyModal.openai.note')
+      return t('keys.useKeyModal.v2.codexNote')
+    case 'anthropic':
+      return t('keys.useKeyModal.v2.claudeNote')
     case 'gemini':
       return t('keys.useKeyModal.gemini.note')
     case 'antigravity':
-      return activeClientTab.value === 'claude'
-        ? t('keys.useKeyModal.antigravity.claudeNote')
-        : t('keys.useKeyModal.antigravity.geminiNote')
+      return activeClientTab.value === 'gemini'
+        ? t('keys.useKeyModal.antigravity.geminiNote')
+        : t('keys.useKeyModal.v2.claudeNote')
+    case 'sora':
+      return t('keys.useKeyModal.sora.note')
     default:
-      return t('keys.useKeyModal.note')
+      return ''
   }
 })
 
@@ -377,6 +363,17 @@ const getCliBase = (baseUrl: string) => {
   }
 }
 
+const getV2GatewayRoot = (baseUrl: string) => {
+  try {
+    const parsed = new URL(baseUrl, window.location.origin)
+    const withoutTrailingSlash = parsed.pathname.replace(/\/+$/, '')
+    parsed.pathname = withoutTrailingSlash.replace(/\/v1$/, '') || '/'
+    return parsed.href.replace(/\/$/, '')
+  } catch {
+    return baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '') || window.location.origin
+  }
+}
+
 const shellSingleQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
 const powershellSingleQuote = (value: string) => `'${value.replace(/'/g, "''")}'`
 const shellCliBootstrap = (cliBase: string, args: string) => {
@@ -396,83 +393,68 @@ const currentFiles = computed((): FileConfig[] => {
 
   switch (props.platform) {
     case 'openai':
-      if (activeClientTab.value === 'v2') {
-        return generateV2PreviewFiles(baseUrl)
-      }
-      if (activeClientTab.value === 'claude') {
-        return generateClaudeCodeFiles(baseUrl, apiKey)
-      }
-      return generateCodexCliFiles(baseUrl, apiKey, activeClientTab.value === 'codex-ws')
+      return generateV2PreviewFiles(baseUrl, 'codex')
+    case 'anthropic':
+      return generateV2PreviewFiles(baseUrl, 'claude')
     case 'gemini':
       return [generateGeminiCliContent(baseUrl, apiKey)]
     case 'antigravity':
       if (activeClientTab.value === 'gemini') {
         return [generateGeminiCliContent(`${baseUrl}/antigravity`, apiKey)]
       }
-      return generateClaudeCodeFiles(`${baseUrl}/antigravity`, apiKey)
+      return generateV2PreviewFiles(baseUrl, 'claude')
     default:
-      return generateClaudeCodeFiles(baseUrl, apiKey)
+      return []
   }
 })
 
-function generateV2PreviewFiles(baseUrl: string): FileConfig[] {
+type V2Product = 'claude' | 'codex'
+
+function generateV2PreviewFiles(baseUrl: string, product: V2Product): FileConfig[] {
   const cliBase = getCliBase(baseUrl)
+  const gatewayUrl = getV2GatewayRoot(baseUrl)
   let path: string
-  let content: string
+  let installContent: string
+  let setupContent: string
 
   switch (activeTab.value) {
     case 'unix':
       path = 'Terminal'
-      content = shellCliBootstrap(cliBase, 'install')
+      installContent = shellCliBootstrap(cliBase, 'install')
+      setupContent = `$HOME/.local/bin/saiai setup ${product} --base-url ${shellSingleQuote(gatewayUrl)}`
       break
     case 'cmd':
       path = 'Command Prompt'
-      content = cmdCliBootstrap(cliBase, 'install')
+      installContent = cmdCliBootstrap(cliBase, 'install')
+      setupContent = `"%LOCALAPPDATA%\\SAIAI\\bin\\saiai.exe" setup ${product} --base-url "${gatewayUrl.replace(/"/g, '""')}"`
       break
     case 'powershell':
       path = 'PowerShell'
-      content = powershellCliBootstrap(cliBase, 'install')
+      installContent = powershellCliBootstrap(cliBase, 'install')
+      setupContent = `& "$env:LOCALAPPDATA\\SAIAI\\bin\\saiai.exe" setup ${product} --base-url ${powershellSingleQuote(gatewayUrl)}`
       break
     default:
       path = 'Terminal'
-      content = ''
+      installContent = ''
+      setupContent = ''
   }
 
-  return [{
-    path,
-    content,
-    hint: t('keys.useKeyModal.v2.hint')
-  }]
-}
+  const setupHint = product === 'claude'
+    ? t('keys.useKeyModal.v2.claudeSetupHint')
+    : t('keys.useKeyModal.v2.codexSetupHint')
 
-function generateClaudeCodeFiles(baseUrl: string, apiKey: string): FileConfig[] {
-  const cliBase = getCliBase(baseUrl)
-  let path: string
-  let content: string
-
-  switch (activeTab.value) {
-    case 'unix':
-      path = 'Terminal'
-      content = shellCliBootstrap(cliBase, `${shellSingleQuote(baseUrl)} ${shellSingleQuote(apiKey)}`)
-      break
-    case 'cmd':
-      path = 'Command Prompt'
-      content = cmdCliBootstrap(cliBase, `${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}`)
-      break
-    case 'powershell':
-      path = 'PowerShell'
-      content = powershellCliBootstrap(cliBase, `${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}`)
-      break
-    default:
-      path = 'Terminal'
-      content = ''
-  }
-
-  return [{
-    path,
-    content,
-    hint: t('keys.useKeyModal.saiaiCliHint')
-  }]
+  return [
+    {
+      path,
+      content: installContent,
+      hint: t('keys.useKeyModal.v2.installHint')
+    },
+    {
+      path,
+      content: setupContent,
+      hint: setupHint
+    }
+  ]
 }
 
 function generateGeminiCliContent(baseUrl: string, apiKey: string): FileConfig {
@@ -518,41 +500,6 @@ ${keyword('$env:')}${variable('GEMINI_MODEL')}${operator('=')}${string(`"${model
   }
 
   return { path, content, highlighted }
-}
-
-function generateCodexCliFiles(baseUrl: string, apiKey: string, websockets: boolean): FileConfig[] {
-  // `cliBase` resolves the saiai-cli helper script origin (must always be the
-  // gateway origin, e.g. https://saiai.example.com), independent of `baseUrl`
-  // which the CLI passes through to Codex's provider config (may include path
-  // segments like `/v1`).
-  const cliBase = getCliBase(baseUrl)
-  const wsArg = websockets ? ' --websockets' : ''
-  let path: string
-  let content: string
-
-  switch (activeTab.value) {
-    case 'unix':
-      path = 'Terminal'
-      content = shellCliBootstrap(cliBase, `init-codex ${shellSingleQuote(baseUrl)} ${shellSingleQuote(apiKey)}${wsArg}`)
-      break
-    case 'cmd':
-      path = 'Command Prompt'
-      content = cmdCliBootstrap(cliBase, `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}${wsArg}`)
-      break
-    case 'powershell':
-      path = 'PowerShell'
-      content = powershellCliBootstrap(cliBase, `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}${wsArg}`)
-      break
-    default:
-      path = 'Terminal'
-      content = ''
-  }
-
-  return [{
-    path,
-    content,
-    hint: t('keys.useKeyModal.openai.saiaiCliHint')
-  }]
 }
 
 const copyContent = async (content: string, index: number) => {

@@ -11,7 +11,7 @@ claim that those Git objects are present in this public repository.
   `d8fa095798be4513e62bb83fdf5a740b8f275a05`
 - Last integrated upstream merge in that base:
   `a225a241d76b2c4f2771e28ed1fad02438505eb4`
-- SAIAI V2 schema-2 candidate reserved for the initial public rollout branch:
+- SAIAI V2 schema-2 candidate applied in the initial public rollout branch:
   `bba7566eed99e008e88f676679a0c6fc4a5101a9`
 
 The integrated upstream source carried the MIT notice for

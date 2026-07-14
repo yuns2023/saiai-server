@@ -23,6 +23,9 @@ services:
       - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-8080}:8080"
     volumes:
       - sub2api_data:/app/data
+      # V2 client bundles are staged on the host; keep the same absolute path
+      # in the container because the active link targets an immutable sibling.
+      - /var/lib/saiai-server/client-runtime:/var/lib/saiai-server/client-runtime:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -38,6 +41,7 @@ services:
       - SERVER_PORT=8080
       - SERVER_MODE=${SERVER_MODE:-release}
       - RUN_MODE=${RUN_MODE:-standard}
+      - SAIAI_CLIENT_DIR=/var/lib/saiai-server/client-runtime/saiai-cli
 
       # =======================================================================
       # Database Configuration (PostgreSQL) - Required

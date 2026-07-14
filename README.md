@@ -4,8 +4,8 @@
 
 SAIAI Server is a self-hosted AI API gateway with an administrative web UI.
 It authenticates client API keys, routes supported provider protocols, applies
-account selection and usage controls. The accompanying V2 rollout pull request
-adds the schema-2 bootstrap contract used by the SAIAI V2 client.
+account selection and usage controls, and exposes the schema-2 bootstrap
+contract used by the SAIAI V2 client.
 
 This project began as a fork of Sub2API. It is an independent community
 project: it is not an official service, website, or distribution of Sub2API or
@@ -36,7 +36,7 @@ authority for client source and binaries.
 - Vue administrative interface for users, keys, groups, accounts, and
   observability
 - PostgreSQL persistence and Redis-backed coordination
-- A reviewed candidate for authenticated, non-billable SAIAI V2 bootstrap discovery
+- Authenticated, non-billable SAIAI V2 bootstrap discovery
 
 Support for a protocol or account type does not grant a right to use an
 upstream service. Operators and users are responsible for provider terms,
@@ -50,10 +50,6 @@ publish the generated post to a parser and follows the configured fallback
 behavior.
 
 ## SAIAI V2
-
-The schema-2 implementation is introduced by the initial public V2 rollout
-pull request. Until that change is merged, the public `main` branch does not
-promise schema-2 compatibility.
 
 V2 is a clean client mode. Claude and Codex are optional, independently
 configured products; configuring one must not request the other product's key.

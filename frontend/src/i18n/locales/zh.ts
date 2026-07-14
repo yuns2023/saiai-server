@@ -605,12 +605,17 @@ export default {
         note: 'SAIAI 不再设置 provider 的 env_key，Codex CLI 仅从 ~/.codex/auth.json 读取密钥，不会受 OPENAI_API_KEY 等环境变量影响。'
       },
       v2: {
-        description:
-          '在保留现有模式的同时体验全新的 V2。V2 为 Claude 和 Codex 创建隔离目录，不读取、不导入也不迁移它们的普通配置。',
-        hint:
-          '此命令只安装 Preview 客户端，绝不会把 API Key 放进命令行。安装后运行 saiai setup，在隐藏输入中填写 Gateway URL 和 Key。',
-        note:
-          '初始化后使用 saiai claude 或 saiai codex 启动；对应 revoke 命令只清理 V2 自有状态，不影响现有模式配置。'
+        claudeDescription:
+          '安装全新的 SAIAI V2 客户端，然后只初始化 Claude。V2 不读取、不导入也不迁移现有 Claude 配置。',
+        codexDescription:
+          '安装全新的 SAIAI V2 客户端，然后只初始化 Codex。V2 不读取、不导入也不迁移现有 Codex 配置。',
+        installHint: '第 1 步：安装仅含 V2 的客户端。此命令不会接收或初始化 API Key。',
+        claudeSetupHint: '第 2 步：初始化 Claude。隐藏输入提示出现时，只输入 Claude Key。',
+        codexSetupHint: '第 2 步：初始化 Codex。隐藏输入提示出现时，只输入 Codex Key。',
+        claudeNote:
+          '使用 saiai claude 启动。saiai claude revoke 只移除 Claude V2 状态；saiai revoke --all 重置全部 V2 状态。',
+        codexNote:
+          '使用 saiai codex 启动。saiai codex revoke 只移除 Codex V2 状态；saiai revoke --all 重置全部 V2 状态。'
       },
       cliTabs: {
         v2Preview: 'SAIAI V2 Preview',
@@ -633,6 +638,10 @@ export default {
           '将以下环境变量添加到您的终端配置文件或直接在终端中运行，以配置 Gemini CLI 访问。',
         modelComment: '如果你有 Gemini 3 权限可以填：gemini-3-pro-preview',
         note: '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。'
+      },
+      sora: {
+        description: 'SAIAI V2 不通过此入口配置 Sora 客户端。',
+        note: '请使用独立的 Sora 客户端流程；Sora Key 不会生成 Claude 或 Codex 命令。'
       },
       opencode: {
         title: 'OpenCode 配置示例',

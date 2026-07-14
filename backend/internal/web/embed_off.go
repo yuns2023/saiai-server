@@ -21,9 +21,10 @@ type PublicSettingsProvider interface {
 type FrontendServer struct{}
 
 // NewFrontendServer returns an error when frontend is not embedded.
-// cliDir 参数用于保持和 embed_on.go 的签名一致，非 embed 构建下被忽略。
-func NewFrontendServer(settingsProvider PublicSettingsProvider, cliDir string) (*FrontendServer, error) {
+// cliDir 和 trustedProxies 参数用于保持和 embed_on.go 的签名一致，非 embed 构建下被忽略。
+func NewFrontendServer(settingsProvider PublicSettingsProvider, cliDir string, trustedProxies ...string) (*FrontendServer, error) {
 	_ = cliDir
+	_ = trustedProxies
 	return nil, errors.New("frontend not embedded")
 }
 

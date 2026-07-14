@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -550,7 +551,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		cliDir := t.TempDir()
 		require.NoError(t, os.WriteFile(
 			filepath.Join(cliDir, "manifest.json"),
-			[]byte(`{"version":"0.7.0","assets":{"saiai-linux-x86_64":{"sha256":"abc"}}}`),
+			[]byte(`{"manifest_schema":1,"bootstrap_schema_version":2,"version":"0.9.0","assets":{"saiai-linux-x86_64":{"sha256":"abc","size":3}}}`),
 			0o644,
 		))
 
@@ -565,7 +566,51 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.JSONEq(t, `{"version":"0.7.0","assets":{"saiai-linux-x86_64":{"sha256":"abc"}}}`, w.Body.String())
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		assert.JSONEq(t, `{"manifest_schema":1,"bootstrap_schema_version":2,"version":"0.9.0","assets":{"saiai-linux-x86_64":{"sha256":"abc","size":3}}}`, w.Body.String())
+	})
+
+	t.Run("serves_cli_binary_without_caching", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"test": "value"},
+		}
+		cliDir := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(cliDir, "saiai-linux-x86_64"),
+			[]byte("binary fixture"),
+			0o555,
+		))
+
+		server, err := NewFrontendServer(provider, cliDir)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodHead, "/saiai-cli/saiai-linux-x86_64", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	})
+
+	t.Run("does_not_cache_unavailable_cli_assets", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"test": "value"},
+		}
+		server, err := NewFrontendServer(provider, "")
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/saiai-cli/manifest.json", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 	})
 
 	t.Run("does_not_expose_configured_cli_path_when_bundle_is_missing", func(t *testing.T) {
@@ -584,6 +629,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 		assert.NotContains(t, w.Body.String(), cliDir)
 		assert.Equal(t, "saiai binaries unavailable: configured client bundle is missing; run sync-saiai-cli.sh", strings.TrimSpace(w.Body.String()))
 	})
@@ -604,8 +650,32 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 		assert.Contains(t, w.Body.String(), `DEFAULT_DOWNLOAD_BASE="http://192.168.50.10:18025/saiai-cli"`)
 		assert.NotContains(t, w.Body.String(), `DEFAULT_DOWNLOAD_BASE="https://api.saiai.top/saiai-cli"`)
+	})
+
+	t.Run("keeps_cli_wrappers_embedded_when_release_dir_contains_copies", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"test": "value"},
+		}
+		cliDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(cliDir, "setup.sh"), []byte("external wrapper must not be served"), 0o555))
+
+		server, err := NewFrontendServer(provider, cliDir)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "https://gateway.example/saiai-cli/setup.sh", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		assert.Contains(t, w.Body.String(), `DEFAULT_DOWNLOAD_BASE="https://gateway.example/saiai-cli"`)
+		assert.NotContains(t, w.Body.String(), "external wrapper must not be served")
 	})
 
 	t.Run("serves_cli_wrapper_with_forwarded_origin_download_base", func(t *testing.T) {
@@ -613,6 +683,28 @@ func TestFrontendServer_Middleware(t *testing.T) {
 			settings: map[string]string{"test": "value"},
 		}
 
+		server, err := NewFrontendServer(provider, "", "127.0.0.1/32")
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "http://api.example.com/saiai-cli/setup.ps1", nil)
+		req.RemoteAddr = "127.0.0.1:43100"
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Header.Set("X-Forwarded-Host", "attacker.example")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		assert.Contains(t, w.Body.String(), `"https://api.example.com/saiai-cli"`)
+		assert.Contains(t, w.Body.String(), `$manifestUrl = "$downloadBase/manifest.json"`)
+		assert.NotContains(t, w.Body.String(), `"https://api.saiai.top/saiai-cli"`)
+	})
+
+	t.Run("rejects_an_invalid_direct_host_instead_of_rendering_executable_text", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"test": "value"}}
 		server, err := NewFrontendServer(provider, "")
 		require.NoError(t, err)
 
@@ -620,15 +712,50 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		router.Use(server.Middleware())
 
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/saiai-cli/setup.ps1", nil)
-		req.Header.Set("X-Forwarded-Proto", "https")
-		req.Header.Set("X-Forwarded-Host", "api.example.com")
+		req := httptest.NewRequest(http.MethodGet, "http://gateway.example/saiai-cli/setup.sh", nil)
+		req.Host = "gateway.example$(touch-pwned)"
 		router.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), `return "https://api.example.com/saiai-cli"`)
-		assert.Contains(t, w.Body.String(), `$manifestUrl = "$downloadBase/manifest.json"`)
-		assert.NotContains(t, w.Body.String(), `return "https://api.saiai.top/saiai-cli"`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		assert.NotContains(t, w.Body.String(), "touch-pwned")
+	})
+
+	t.Run("never_injects_forwarded_script_metacharacters_into_any_wrapper", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"test": "value"}}
+		server, err := NewFrontendServer(provider, "", "127.0.0.1/32")
+		require.NoError(t, err)
+
+		tests := []struct {
+			path      string
+			header    string
+			malicious string
+		}{
+			{path: "/saiai-cli/setup.sh", header: "X-Forwarded-Host", malicious: "api.example$(touch-pwned)"},
+			{path: "/saiai-cli/setup.ps1", header: "X-Forwarded-Host", malicious: "api.example;Start-Process-calc"},
+			{path: "/saiai-cli/setup.cmd", header: "Forwarded", malicious: `for=10.0.0.1;host="api.example%COMSPEC%"`},
+		}
+		for _, test := range tests {
+			t.Run(test.path, func(t *testing.T) {
+				router := gin.New()
+				router.Use(server.Middleware())
+
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, "http://safe.example"+test.path, nil)
+				req.RemoteAddr = "127.0.0.1:43100"
+				req.Header.Set("X-Forwarded-Proto", "https")
+				req.Header.Set(test.header, test.malicious)
+				router.ServeHTTP(w, req)
+
+				assert.Equal(t, http.StatusOK, w.Code)
+				assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+				assert.Contains(t, w.Body.String(), "https://safe.example/saiai-cli")
+				assert.NotContains(t, w.Body.String(), test.malicious)
+				assert.NotContains(t, w.Body.String(), "touch-pwned")
+				assert.NotContains(t, w.Body.String(), "Start-Process-calc")
+				assert.NotContains(t, w.Body.String(), "%COMSPEC%")
+			})
+		}
 	})
 }
 
@@ -636,26 +763,117 @@ func TestPublicRequestOrigin(t *testing.T) {
 	t.Run("uses_request_host_for_direct_http", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://192.168.50.10:18025/saiai-cli/setup.sh", nil)
 
-		assert.Equal(t, "http://192.168.50.10:18025", publicRequestOrigin(req))
+		assert.Equal(t, "http://192.168.50.10:18025", publicRequestOrigin(req, nil))
 	})
 
-	t.Run("uses_forwarded_proto_and_host", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/saiai-cli/setup.sh", nil)
+	t.Run("uses_trusted_forwarded_proto_but_never_forwarded_host", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://api.saiai.top/saiai-cli/setup.sh", nil)
+		req.RemoteAddr = "127.0.0.1:43100"
 		req.Header.Set("X-Forwarded-Proto", "https")
-		req.Header.Set("X-Forwarded-Host", "api.saiai.top")
+		req.Header.Set("X-Forwarded-Host", "attacker.example")
 
-		assert.Equal(t, "https://api.saiai.top", publicRequestOrigin(req))
+		assert.Equal(t, "https://api.saiai.top", publicRequestOrigin(req, []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}))
 	})
 
-	t.Run("falls_back_to_forwarded_header", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/saiai-cli/setup.sh", nil)
-		req.Header.Set("Forwarded", `for=10.0.0.1;proto=https;host="saiai.example.com"`)
+	t.Run("allows_a_trusted_plaintext_tcp_relay_without_proto_for_a_private_ip_literal", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://192.168.50.10:18080/saiai-cli/setup.sh", nil)
+		req.RemoteAddr = "127.0.0.1:43100"
 
-		assert.Equal(t, "https://saiai.example.com", publicRequestOrigin(req))
+		assert.Equal(t, "http://192.168.50.10:18080", publicRequestOrigin(req, []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}))
+	})
+
+	t.Run("rejects_a_trusted_plaintext_peer_without_proto_for_non_local_authorities", func(t *testing.T) {
+		for _, authority := range []string{"api.saiai.top", "8.8.8.8:18080", "localhost:18080"} {
+			req := httptest.NewRequest(http.MethodGet, "http://"+authority+"/saiai-cli/setup.sh", nil)
+			req.RemoteAddr = "127.0.0.1:43100"
+
+			assert.Empty(t, publicRequestOrigin(req, []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}), authority)
+		}
+	})
+
+	t.Run("does_not_apply_the_tcp_relay_exception_to_present_invalid_proto_headers", func(t *testing.T) {
+		for _, values := range [][]string{{""}, {"http, https"}, {"http", "https"}, {"ftp"}} {
+			req := httptest.NewRequest(http.MethodGet, "http://192.168.50.10:18080/saiai-cli/setup.sh", nil)
+			req.RemoteAddr = "127.0.0.1:43100"
+			for _, value := range values {
+				req.Header.Add("X-Forwarded-Proto", value)
+			}
+
+			assert.Empty(t, publicRequestOrigin(req, []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}), values)
+		}
+	})
+
+	t.Run("rejects_forwarded_proto_without_the_canonical_proxy_header", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://saiai.example.com/saiai-cli/setup.sh", nil)
+		req.RemoteAddr = "127.0.0.1:43100"
+		req.Header.Set("Forwarded", `for=10.0.0.1;proto=https;host="attacker.example"`)
+
+		assert.Empty(t, publicRequestOrigin(req, []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}))
+	})
+
+	t.Run("rejects_ambiguous_forwarded_proto_values", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://saiai.example.com/saiai-cli/setup.sh", nil)
+		req.RemoteAddr = "127.0.0.1:43100"
+		req.Header.Set("X-Forwarded-Proto", "http, https")
+
+		assert.Empty(t, publicRequestOrigin(req, []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}))
+	})
+
+	t.Run("rejects_a_forwarded_downgrade_of_a_real_tls_request", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "https://saiai.example.com/saiai-cli/setup.sh", nil)
+		req.RemoteAddr = "127.0.0.1:43100"
+		req.Header.Set("X-Forwarded-Proto", "http")
+
+		assert.Empty(t, publicRequestOrigin(req, []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}))
+	})
+
+	t.Run("ignores_forwarded_origin_from_an_untrusted_peer", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://safe.example:8080/saiai-cli/setup.sh", nil)
+		req.RemoteAddr = "192.0.2.44:43100"
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Header.Set("X-Forwarded-Host", "attacker.example")
+
+		assert.Equal(t, "http://safe.example:8080", publicRequestOrigin(req, []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}))
 	})
 }
 
+func TestNormalizePublicHost(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "dns", raw: "API.Example.COM:443", want: "api.example.com:443"},
+		{name: "localhost", raw: "localhost:8080", want: "localhost:8080"},
+		{name: "ipv4", raw: "192.168.50.10:18080", want: "192.168.50.10:18080"},
+		{name: "ipv6", raw: "[2001:db8::1]:8443", want: "[2001:db8::1]:8443"},
+		{name: "shell substitution", raw: "api.example$(id)", want: ""},
+		{name: "backticks", raw: "api.example`id`", want: ""},
+		{name: "powershell separator", raw: "api.example;calc", want: ""},
+		{name: "cmd expansion", raw: "api.example%COMSPEC%", want: ""},
+		{name: "quoted host", raw: `"api.example"`, want: ""},
+		{name: "bad port", raw: "api.example:443x", want: ""},
+		{name: "userinfo", raw: "user@api.example", want: ""},
+		{name: "unbracketed ipv6", raw: "2001:db8::1", want: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, normalizePublicHost(test.raw))
+		})
+	}
+}
+
 func TestNewFrontendServer(t *testing.T) {
+	t.Run("rejects_an_invalid_trusted_proxy_boundary", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"test": "value"}}
+		for _, invalid := range []string{"not-a-proxy", "", " 127.0.0.1 "} {
+			server, err := NewFrontendServer(provider, "", "127.0.0.1/32", invalid)
+
+			require.Error(t, err)
+			assert.Nil(t, server)
+			assert.Contains(t, err.Error(), "invalid trusted proxy")
+		}
+	})
+
 	t.Run("creates_server_successfully", func(t *testing.T) {
 		provider := &mockSettingsProvider{
 			settings: map[string]string{"test": "value"},

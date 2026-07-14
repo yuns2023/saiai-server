@@ -80,7 +80,9 @@ Claude and Codex are optional, independent products:
 
 - `saiai claude` initializes only Claude on its first interactive launch;
 - `saiai codex` initializes only Codex on its first interactive launch;
-- automation uses `saiai setup claude` or `saiai setup codex`;
+- interactive automation reads the selected product credential from stdin with
+  `saiai setup claude --base-url <url> --api-key-stdin` or
+  `saiai setup codex --base-url <url> --api-key-stdin`;
 - bare `saiai setup` asks for a product before reading a credential;
 - the user is never asked for both product keys merely because one product is
   being configured; and
@@ -94,6 +96,8 @@ removes only that product and must leave the other product usable.
 
 Credentials must not appear in non-secret configuration, command arguments,
 normal logs, diagnostic output, desktop events, or bootstrap responses.
+There is intentionally no `--api-key <value>` form: unattended callers must
+opt in to `--api-key-stdin` and supply the selected product's credential only.
 
 ## Version and release compatibility
 
@@ -114,6 +118,29 @@ pair. An operator must not publicly expose:
 Stage and verify both sides before switching public install/bootstrap traffic.
 Rollback also restores both sides as a pair. Release records should bind the
 Gateway image digest to the client manifest hash without recording credentials.
+
+The verified client coordinates for the initial schema-2 rollout are:
+
+- release authority: `yuns2023/saiai-client`;
+- release tag: `saiai-v0.9.0`;
+- client source commit: `abbc0e425efe4101f7180da892aaf80672bf21b6`; and
+- manifest SHA-256:
+  `092107c40b60cf0174e7278891fbb3cb097ccbe7cc05e8bef05e411687dfa02a`.
+
+From the repository root, stage and activate that exact bundle with the same
+independently recorded hash:
+
+```bash
+manifest_sha256=092107c40b60cf0174e7278891fbb3cb097ccbe7cc05e8bef05e411687dfa02a
+SAIAI_CLIENT_DIR=/var/lib/saiai-server/client-runtime/saiai-cli \
+  scripts/sync-saiai-cli.sh stage saiai-v0.9.0 "$manifest_sha256"
+SAIAI_CLIENT_DIR=/var/lib/saiai-server/client-runtime/saiai-cli \
+  scripts/sync-saiai-cli.sh activate saiai-v0.9.0 "$manifest_sha256"
+```
+
+`stage` is the only networked operation. `activate` is offline and re-verifies
+the staged bundle. Do not activate a tag with a different hash, and record the
+Gateway image digest beside these client coordinates before deployment.
 
 ## Contract tests
 

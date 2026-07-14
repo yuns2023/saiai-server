@@ -7,12 +7,16 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,12 +57,19 @@ type FrontendServer struct {
 	cache      *HTMLCache
 	settings   PublicSettingsProvider
 	cliDir     string
+	// Forwarded origin headers are executable-wrapper inputs, so accept them
+	// only from the same explicitly configured proxy boundary used by Gin.
+	trustedProxyPrefixes []netip.Prefix
 }
 
 // NewFrontendServer creates a new frontend server with settings injection.
 // cliDir 指定外部 saiai binary 所在目录（例如 /var/lib/saiai-server/client-runtime/saiai-cli/）。
 // 为空时 /saiai-cli/saiai-* 请求会返回 503 提示运维跑 sync-saiai-cli.sh。
-func NewFrontendServer(settingsProvider PublicSettingsProvider, cliDir string) (*FrontendServer, error) {
+func NewFrontendServer(settingsProvider PublicSettingsProvider, cliDir string, trustedProxies ...string) (*FrontendServer, error) {
+	trustedProxyPrefixes, err := parseTrustedProxyPrefixes(trustedProxies)
+	if err != nil {
+		return nil, err
+	}
 	distFS, err := fs.Sub(frontendFS, "dist")
 	if err != nil {
 		return nil, err
@@ -80,12 +91,13 @@ func NewFrontendServer(settingsProvider PublicSettingsProvider, cliDir string) (
 	cache.SetBaseHTML(baseHTML)
 
 	return &FrontendServer{
-		distFS:     distFS,
-		fileServer: http.FileServer(http.FS(distFS)),
-		baseHTML:   baseHTML,
-		cache:      cache,
-		settings:   settingsProvider,
-		cliDir:     strings.TrimSpace(cliDir),
+		distFS:               distFS,
+		fileServer:           http.FileServer(http.FS(distFS)),
+		baseHTML:             baseHTML,
+		cache:                cache,
+		settings:             settingsProvider,
+		cliDir:               strings.TrimSpace(cliDir),
+		trustedProxyPrefixes: trustedProxyPrefixes,
 	}, nil
 }
 
@@ -160,6 +172,11 @@ func (s *FrontendServer) tryServeExternalCLI(c *gin.Context) bool {
 		return true
 	}
 
+	// These are mutable public URLs whose contents change only when the complete
+	// client bundle is atomically activated. Do not let a browser, CDN, or proxy
+	// combine a cached manifest from one release with a binary from another, and
+	// do not cache a temporary deployment error for these paths.
+	c.Header("Cache-Control", "no-store")
 	if s.cliDir == "" {
 		c.String(http.StatusServiceUnavailable, "saiai binaries unavailable: SAIAI_CLIENT_DIR is not configured; run sync-saiai-cli.sh")
 		c.Abort()
@@ -195,6 +212,7 @@ func (s *FrontendServer) tryServeCLIWrapper(c *gin.Context) bool {
 	default:
 		return false
 	}
+	c.Header("Cache-Control", "no-store")
 
 	data, err := fs.ReadFile(s.distFS, cleanPath)
 	if err != nil {
@@ -203,8 +221,13 @@ func (s *FrontendServer) tryServeCLIWrapper(c *gin.Context) bool {
 		return true
 	}
 
-	rendered := renderCLIWrapperDownloadBase(data, publicRequestOrigin(req)+"/saiai-cli")
-	c.Header("Cache-Control", "no-cache")
+	origin := publicRequestOrigin(req, s.trustedProxyPrefixes)
+	if origin == "" {
+		c.String(http.StatusBadRequest, "invalid public request origin")
+		c.Abort()
+		return true
+	}
+	rendered := renderCLIWrapperDownloadBase(data, origin+"/saiai-cli")
 	if req.Method == http.MethodHead {
 		c.Header("Content-Type", contentType)
 		c.Status(http.StatusOK)
@@ -225,35 +248,42 @@ func renderCLIWrapperDownloadBase(data []byte, downloadBase string) []byte {
 	return bytes.ReplaceAll(data, []byte("https://api.saiai.top/saiai-cli"), []byte(downloadBase))
 }
 
-func publicRequestOrigin(req *http.Request) string {
-	proto := firstForwardedHeaderValue(req.Header.Get("X-Forwarded-Proto"))
-	if proto == "" {
-		proto = forwardedHeaderParam(req.Header.Get("Forwarded"), "proto")
+func publicRequestOrigin(req *http.Request, trustedProxyPrefixes []netip.Prefix) string {
+	trustedForwarder := requestFromTrustedProxy(req, trustedProxyPrefixes)
+	host := normalizePublicHost(req.Host)
+	if host == "" {
+		return ""
 	}
-	proto = normalizePublicProto(proto)
-	if proto == "" && strings.EqualFold(strings.TrimSpace(req.Header.Get("X-Forwarded-Ssl")), "on") {
+
+	proto := "http"
+	if req.TLS != nil {
 		proto = "https"
-	}
-	if proto == "" {
-		if req.TLS != nil {
-			proto = "https"
+		if trustedForwarder && len(req.Header.Values("X-Forwarded-Proto")) > 0 {
+			forwardedProto, ok := strictForwardedProto(req.Header)
+			if !ok || forwardedProto != "https" {
+				return ""
+			}
+		}
+	} else if trustedForwarder {
+		if len(req.Header.Values("X-Forwarded-Proto")) == 0 {
+			// A raw plaintext TCP relay cannot add proxy headers. Preserve the
+			// documented LAN helper path only when the request authority itself is
+			// an explicitly local IP literal; public names/addresses still require
+			// the trusted HTTP proxy to provide an unambiguous scheme.
+			if !isPrivateOrLocalIPLiteralAuthority(host) {
+				return ""
+			}
+		} else if forwardedProto, ok := strictForwardedProto(req.Header); !ok {
+			return ""
 		} else {
-			proto = "http"
+			proto = forwardedProto
 		}
 	}
 
-	host := firstForwardedHeaderValue(req.Header.Get("X-Forwarded-Host"))
-	if host == "" {
-		host = forwardedHeaderParam(req.Header.Get("Forwarded"), "host")
-	}
-	host = normalizePublicHost(host)
-	if host == "" {
-		host = normalizePublicHost(req.Host)
-	}
-	if host == "" {
-		host = "localhost"
-	}
-
+	// The HTTP Host field is already carried end-to-end by a correctly
+	// configured reverse proxy. Never choose a download authority from
+	// X-Forwarded-Host/Forwarded: append-style proxy configurations can retain a
+	// client-supplied, syntactically valid attacker domain as the first value.
 	return proto + "://" + host
 }
 
@@ -266,34 +296,174 @@ func normalizePublicProto(proto string) string {
 	}
 }
 
+func strictForwardedProto(header http.Header) (string, bool) {
+	values := header.Values("X-Forwarded-Proto")
+	if len(values) != 1 {
+		return "", false
+	}
+	raw := values[0]
+	if raw != strings.TrimSpace(raw) || strings.Contains(raw, ",") {
+		return "", false
+	}
+	proto := normalizePublicProto(raw)
+	return proto, proto != ""
+}
+
+func isPrivateOrLocalIPLiteralAuthority(host string) bool {
+	hostPart := host
+	if strings.HasPrefix(host, "[") {
+		closing := strings.IndexByte(host, ']')
+		if closing <= 1 {
+			return false
+		}
+		hostPart = host[1:closing]
+	} else if strings.Count(host, ":") == 1 {
+		hostPart, _, _ = strings.Cut(host, ":")
+	}
+
+	address, err := netip.ParseAddr(hostPart)
+	if err != nil || address.Zone() != "" {
+		return false
+	}
+	address = address.Unmap()
+	return address.IsPrivate() || address.IsLoopback() || address.IsLinkLocalUnicast()
+}
+
 func normalizePublicHost(host string) string {
-	host = strings.Trim(strings.TrimSpace(host), `"`)
-	if host == "" || strings.ContainsAny(host, "/\\?#") || strings.ContainsAny(host, "\r\n\t ") {
+	host = strings.TrimSpace(host)
+	if host == "" || len(host) > 320 || strings.ContainsAny(host, "\r\n\t ") {
 		return ""
 	}
-	return host
+
+	if strings.HasPrefix(host, "[") {
+		closing := strings.IndexByte(host, ']')
+		if closing <= 1 {
+			return ""
+		}
+		address, err := netip.ParseAddr(host[1:closing])
+		if err != nil || !address.Is6() || address.Zone() != "" {
+			return ""
+		}
+		port, ok := normalizePublicPort(host[closing+1:])
+		if !ok {
+			return ""
+		}
+		return "[" + address.String() + "]" + port
+	}
+
+	hostPart := host
+	port := ""
+	if strings.Count(host, ":") == 1 {
+		var rawPort string
+		hostPart, rawPort, _ = strings.Cut(host, ":")
+		var ok bool
+		port, ok = normalizePublicPort(":" + rawPort)
+		if !ok {
+			return ""
+		}
+	} else if strings.Contains(host, ":") {
+		// HTTP Host requires brackets around an IPv6 literal.
+		return ""
+	}
+
+	if address, err := netip.ParseAddr(hostPart); err == nil {
+		if !address.Is4() || address.Zone() != "" {
+			return ""
+		}
+		return address.String() + port
+	}
+	if !validPublicDNSName(hostPart) {
+		return ""
+	}
+	return strings.ToLower(hostPart) + port
 }
 
-func firstForwardedHeaderValue(value string) string {
-	if value == "" {
-		return ""
+func normalizePublicPort(raw string) (string, bool) {
+	if raw == "" {
+		return "", true
 	}
-	return strings.TrimSpace(strings.Split(value, ",")[0])
+	if !strings.HasPrefix(raw, ":") || len(raw) == 1 {
+		return "", false
+	}
+	portText := raw[1:]
+	for _, character := range portText {
+		if character < '0' || character > '9' {
+			return "", false
+		}
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return "", false
+	}
+	return ":" + strconv.Itoa(port), true
 }
 
-func forwardedHeaderParam(value string, key string) string {
-	if value == "" || key == "" {
-		return ""
+func validPublicDNSName(host string) bool {
+	if host == "" || len(host) > 253 {
+		return false
 	}
-	first := firstForwardedHeaderValue(value)
-	for _, part := range strings.Split(first, ";") {
-		name, raw, ok := strings.Cut(strings.TrimSpace(part), "=")
-		if !ok || !strings.EqualFold(strings.TrimSpace(name), key) {
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, character := range label {
+			if (character >= 'a' && character <= 'z') ||
+				(character >= 'A' && character <= 'Z') ||
+				(character >= '0' && character <= '9') || character == '-' {
+				continue
+			}
+			return false
+		}
+	}
+	return true
+}
+
+func parseTrustedProxyPrefixes(values []string) ([]netip.Prefix, error) {
+	prefixes := make([]netip.Prefix, 0, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" || value != raw {
+			return nil, fmt.Errorf("invalid trusted proxy %q", raw)
+		}
+		if prefix, err := netip.ParsePrefix(value); err == nil {
+			prefixes = append(prefixes, prefix.Masked())
 			continue
 		}
-		return strings.Trim(strings.TrimSpace(raw), `"`)
+		if address, err := netip.ParseAddr(value); err == nil && address.Zone() == "" {
+			prefixes = append(prefixes, netip.PrefixFrom(address, address.BitLen()))
+			continue
+		}
+		return nil, fmt.Errorf("invalid trusted proxy %q", value)
 	}
-	return ""
+	return prefixes, nil
+}
+
+func requestFromTrustedProxy(req *http.Request, prefixes []netip.Prefix) bool {
+	if req == nil || len(prefixes) == 0 {
+		return false
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(req.RemoteAddr))
+	if err != nil {
+		host = strings.Trim(strings.TrimSpace(req.RemoteAddr), "[]")
+	}
+	address, err := netip.ParseAddr(host)
+	if err != nil || address.Zone() != "" {
+		return false
+	}
+	address = address.Unmap()
+	for _, prefix := range prefixes {
+		if prefix.Addr().Unmap().BitLen() != address.BitLen() {
+			continue
+		}
+		candidate := prefix
+		if prefix.Addr().Is4In6() {
+			candidate = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-96).Masked()
+		}
+		if candidate.Contains(address) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *FrontendServer) fileExists(path string) bool {
