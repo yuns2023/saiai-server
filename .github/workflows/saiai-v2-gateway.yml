@@ -1,0 +1,83 @@
+name: SAIAI V2 Gateway Gate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v2-gateway-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  v2-gateway:
+    name: v2-gateway-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Verify V2 Gateway contract
+        run: python3 scripts/saiai-cli/verify-v2-gateway.py
+
+      - name: Test install wrappers
+        run: bash scripts/saiai-cli/test-setup-wrappers.sh
+
+      - name: Test release activation
+        run: bash scripts/saiai-cli/test-sync-saiai-cli.sh
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          check-latest: false
+          cache: true
+
+      - name: Stage minimal embedded frontend fixture
+        run: |
+          mkdir -p backend/internal/web/dist/saiai-cli
+          cp frontend/index.html backend/internal/web/dist/index.html
+          cp frontend/public/logo.png backend/internal/web/dist/logo.png
+          cp frontend/public/saiai-cli/setup.sh frontend/public/saiai-cli/setup.ps1 frontend/public/saiai-cli/setup.cmd backend/internal/web/dist/saiai-cli/
+
+      - name: Test executable wrapper origin boundary
+        working-directory: backend
+        run: >-
+          go test -p 1 -tags embed ./internal/web
+          -run '^(TestFrontendServer_Middleware|TestPublicRequestOrigin|TestNormalizePublicHost|TestNewFrontendServer)$'
+          -count=1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 10.34.4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Test V2 key instructions
+        working-directory: frontend
+        run: >-
+          pnpm exec vitest run
+          src/components/keys/__tests__/UseKeyModal.spec.ts
+          --maxWorkers=1
+          --minWorkers=1
+          --no-file-parallelism

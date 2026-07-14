@@ -59,14 +59,13 @@ public image workflow.
 ## SAIAI V2 client assets
 
 Gateway schema 2 and the matching `saiai-client` release are one compatibility
-pair. The commands below apply after the initial public V2 rollout pull request
-is merged. Stage and verify the client release before enabling its public asset
+pair. Stage and verify the client release before enabling its public asset
 routes. The activation script is:
 
 ```bash
 sudo install -d -m 0755 /var/lib/saiai-server/client-runtime
 CLIENT_TAG='saiai-v0.9.0'
-CLIENT_MANIFEST_SHA256='replace-with-the-published-manifest-sha256'
+CLIENT_MANIFEST_SHA256='092107c40b60cf0174e7278891fbb3cb097ccbe7cc05e8bef05e411687dfa02a'
 sudo env SAIAI_CLIENT_DIR=/var/lib/saiai-server/client-runtime/saiai-cli \
   scripts/sync-saiai-cli.sh stage "$CLIENT_TAG" "$CLIENT_MANIFEST_SHA256"
 sudo env SAIAI_CLIENT_DIR=/var/lib/saiai-server/client-runtime/saiai-cli \

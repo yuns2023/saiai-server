@@ -1,152 +1,83 @@
-# Install the SAIAI client, optionally without initializing any client config.
-# Existing Claude Code and Codex CLI initialization entry points remain available.
-#
-# Usage via irm:
-#   irm https://api.saiai.top/saiai-cli/setup.ps1 | iex
-#   Invoke-Saiai install
-#   Invoke-Saiai "https://api.saiai.top" "<api_key>"
-#   Invoke-Saiai init-codex "https://api.saiai.top" "<api_key>"
+# Install the SAIAI V2 client binary. Product setup is performed by `saiai`.
+
+$ErrorActionPreference = "Stop"
 
 function Get-SaiaiAssetName {
-    $arch = [string]$env:PROCESSOR_ARCHITECTURE
-    $arch = $arch.Trim().ToUpperInvariant()
-    if ($arch -eq "X86") {
-        $wow64Arch = [string]$env:PROCESSOR_ARCHITEW6432
-        if (-not [string]::IsNullOrWhiteSpace($wow64Arch)) {
-            $arch = $wow64Arch.Trim().ToUpperInvariant()
-        }
+    $architecture = [string]$env:PROCESSOR_ARCHITECTURE
+    if ($architecture -ieq "X86" -and -not [string]::IsNullOrWhiteSpace($env:PROCESSOR_ARCHITEW6432)) {
+        $architecture = [string]$env:PROCESSOR_ARCHITEW6432
     }
-    switch ($arch) {
-        "X64"     { $archName = "x86_64" }
-        "AMD64"   { $archName = "x86_64" }
-        "ARM64"   { $archName = "aarch64" }
-        "AARCH64" { $archName = "aarch64" }
-        default { throw "Unsupported architecture: $arch" }
+    switch ($architecture.Trim().ToUpperInvariant()) {
+        "AMD64" { return "saiai-windows-x86_64.exe" }
+        "X64" { return "saiai-windows-x86_64.exe" }
+        "ARM64" { return "saiai-windows-aarch64.exe" }
+        "AARCH64" { return "saiai-windows-aarch64.exe" }
+        default { throw "Unsupported Windows architecture: $architecture" }
     }
-
-    return "saiai-windows-$archName.exe"
 }
 
-function Get-SaiaiDownloadBase {
-    if ($env:SAIAI_DOWNLOAD_BASE) {
-        return $env:SAIAI_DOWNLOAD_BASE.TrimEnd('/')
-    }
-    return "https://api.saiai.top/saiai-cli"
-}
+function Get-SaiaiSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
 
-function Get-SaiaiDownloadUrl {
-    $assetName = Get-SaiaiAssetName
-    $downloadBase = Get-SaiaiDownloadBase
-    return "$downloadBase/$assetName"
-}
-
-function Get-SaiaiManifestSha256 {
-    param(
-        [string]$ManifestPath,
-        [string]$AssetName
-    )
-    $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
-    if ($null -eq $manifest.assets) {
-        throw "Manifest does not include assets."
-    }
-    $assetProperty = $manifest.assets.PSObject.Properties[$AssetName]
-    if ($null -eq $assetProperty -or $null -eq $assetProperty.Value.sha256) {
-        throw "Manifest does not include sha256 for $AssetName."
-    }
-    $sha256 = [string]$assetProperty.Value.sha256
-    if ($sha256.Length -ne 64) {
-        throw "Manifest sha256 for $AssetName is invalid: $sha256"
-    }
-    return $sha256.ToLowerInvariant()
-}
-
-function Get-SaiaiFileSha256 {
-    param([string]$Path)
     if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
-        return ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash).ToLowerInvariant()
+        return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
     }
-
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
     $stream = [System.IO.File]::OpenRead($Path)
     try {
-        $hash = $sha256.ComputeHash($stream)
-        return ([BitConverter]::ToString($hash)).Replace("-", "").ToLowerInvariant()
+        return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
     }
     finally {
         $stream.Dispose()
-        $sha256.Dispose()
+        $algorithm.Dispose()
     }
 }
 
 function Get-SaiaiInstallPath {
-    if ($env:SAIAI_INSTALL_DIR) {
-        $installDir = $env:SAIAI_INSTALL_DIR
-    } elseif ($env:LOCALAPPDATA) {
-        $installDir = Join-Path $env:LOCALAPPDATA "SAIAI\bin"
-    } elseif ($env:USERPROFILE) {
-        # Reconstruct the standard per-user application location without ever
-        # falling back to the legacy ~/.saiai tree.
-        $installDir = Join-Path $env:USERPROFILE "AppData\Local\SAIAI\bin"
-    } else {
-        throw "Cannot resolve install directory; set SAIAI_INSTALL_DIR."
+    if (-not [string]::IsNullOrWhiteSpace($env:SAIAI_INSTALL_DIR)) {
+        $directory = $env:SAIAI_INSTALL_DIR
     }
-    return (Join-Path $installDir "saiai.exe")
+    elseif (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        $directory = Join-Path $env:LOCALAPPDATA "SAIAI\bin"
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        $directory = Join-Path $env:USERPROFILE "AppData\Local\SAIAI\bin"
+    }
+    else {
+        throw "Cannot resolve the per-user install directory. Set SAIAI_INSTALL_DIR."
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $directory "saiai.exe"))
 }
 
-function Add-SaiaiUserPath {
-    param([string]$InstallDir)
-    $currentUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ($null -eq $currentUserPath) {
-        $currentUserPath = ""
-    }
-    $parts = $currentUserPath.Split(';') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-    foreach ($part in $parts) {
-        if ($part.TrimEnd('\') -ieq $InstallDir.TrimEnd('\')) {
-            return
-        }
-    }
-    $newPath = if ([string]::IsNullOrWhiteSpace($currentUserPath)) { $InstallDir } else { "$currentUserPath;$InstallDir" }
-    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-    $env:Path = "$env:Path;$InstallDir"
-}
+function Add-SaiaiPath {
+    param([Parameter(Mandatory = $true)][string]$Directory)
 
-function Install-SaiaiBinary {
-    param(
-        [string]$CandidatePath,
-        [string]$InstallPath,
-        [string]$InstallDir,
-        [string]$ExpectedSha256
-    )
-
-    $null = New-Item -ItemType Directory -Path $InstallDir -Force
-    if (Test-Path -LiteralPath $InstallPath -PathType Leaf) {
-        try {
-            $installedSha256 = Get-SaiaiFileSha256 -Path $InstallPath
-            if ($installedSha256 -eq $ExpectedSha256) {
-                Write-Host "SAIAI binary already current at $InstallPath" -ForegroundColor DarkGray
-                return $InstallPath
-            }
+    $comparison = [System.StringComparison]::OrdinalIgnoreCase
+    $userPath = [string][Environment]::GetEnvironmentVariable("Path", "User")
+    $userParts = @($userPath.Split(';') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $present = $false
+    foreach ($part in $userParts) {
+        if ([string]::Equals($part.TrimEnd('\'), $Directory.TrimEnd('\'), $comparison)) {
+            $present = $true
+            break
         }
-        catch {
-            Write-Warning "Could not verify existing SAIAI binary at $InstallPath; attempting replacement."
-        }
+    }
+    if (-not $present) {
+        $newPath = if ([string]::IsNullOrWhiteSpace($userPath)) { $Directory } else { "$userPath;$Directory" }
+        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
     }
 
-    try {
-        if (Test-Path -LiteralPath $InstallPath -PathType Container) {
-            throw "Install path is a directory: $InstallPath"
+    $processParts = @(([string]$env:Path).Split(';'))
+    $processPresent = $false
+    foreach ($part in $processParts) {
+        if (-not [string]::IsNullOrWhiteSpace($part) -and
+            [string]::Equals($part.TrimEnd('\'), $Directory.TrimEnd('\'), $comparison)) {
+            $processPresent = $true
+            break
         }
-        Copy-Item -LiteralPath $CandidatePath -Destination $InstallPath -Force -ErrorAction Stop
-        Remove-Item -LiteralPath $CandidatePath -Force -ErrorAction SilentlyContinue
-        return $InstallPath
     }
-    catch {
-        if (Test-Path -LiteralPath $InstallPath -PathType Leaf) {
-            $message = "Could not replace existing SAIAI binary at $InstallPath. It may be running from saiai start. Continuing initialization with the downloaded binary; run saiai stop, rerun setup, then saiai start to update the installed copy."
-            Write-Warning $message
-            return $CandidatePath
-        }
-        throw
+    if (-not $processPresent) {
+        $env:Path = "$Directory;$env:Path"
     }
 }
 
@@ -155,85 +86,111 @@ function Invoke-Saiai {
         [Parameter(ValueFromRemainingArguments = $true)]
         [string[]]$Arguments
     )
-    $installOnly = $Arguments.Count -eq 1 -and $Arguments[0] -eq "install"
-    if ($Arguments.Count -gt 0 -and $Arguments[0] -eq "install" -and -not $installOnly) {
-        Write-Error "The install mode accepts no additional arguments. Run 'saiai setup' after installation."
-        return 1
-    }
-    if (-not $installOnly -and $Arguments.Count -lt 2) {
-        Write-Error "Usage: Invoke-Saiai install OR Invoke-Saiai <base_url> <api_key> OR Invoke-Saiai init-codex <base_url> <api_key> [--websockets]"
-        return 1
+
+    $provided = @($Arguments)
+    if ($provided.Count -gt 1 -or ($provided.Count -eq 1 -and $provided[0] -ne "install")) {
+        Write-Error "Usage: Invoke-Saiai [install]. This wrapper installs only; run 'saiai setup claude' or 'saiai setup codex' afterward."
+        return 2
     }
 
-    $assetName = Get-SaiaiAssetName
-    $downloadBase = Get-SaiaiDownloadBase
-    $downloadUrl = "$downloadBase/$assetName"
+    $asset = Get-SaiaiAssetName
+    $downloadBase = if ([string]::IsNullOrWhiteSpace($env:SAIAI_DOWNLOAD_BASE)) {
+        "https://api.saiai.top/saiai-cli"
+    }
+    else {
+        $env:SAIAI_DOWNLOAD_BASE.TrimEnd('/')
+    }
     $manifestUrl = "$downloadBase/manifest.json"
+    $assetUrl = "$downloadBase/$asset"
     $installPath = Get-SaiaiInstallPath
-    $installDir = Split-Path -Parent $installPath
-    $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("saiai-" + [guid]::NewGuid().ToString("N"))
-    $null = New-Item -ItemType Directory -Path $tmpDir -Force
-    $tmpBin = Join-Path $tmpDir "saiai.exe"
-    $tmpManifest = Join-Path $tmpDir "manifest.json"
+    $installDirectory = Split-Path -Parent $installPath
+    $backupPath = Join-Path $installDirectory "saiai-previous.exe"
+    $temporary = Join-Path ([System.IO.Path]::GetTempPath()) ("saiai-install-" + [guid]::NewGuid().ToString("N"))
+    $null = New-Item -ItemType Directory -Path $temporary -Force
+    $manifestPath = Join-Path $temporary "manifest.json"
+    $candidatePath = Join-Path $temporary "saiai.exe"
 
     try {
-        $ProgressPreference = 'SilentlyContinue'
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $webClient = New-Object Net.WebClient
-        Write-Host "Checking $manifestUrl" -ForegroundColor Cyan
-        $webClient.DownloadFile($manifestUrl, $tmpManifest)
-        $expectedSha256 = Get-SaiaiManifestSha256 -ManifestPath $tmpManifest -AssetName $assetName
-
-        Write-Host "Downloading $downloadUrl" -ForegroundColor Cyan
-        $webClient.DownloadFile($downloadUrl, $tmpBin)
-        $actualSha256 = Get-SaiaiFileSha256 -Path $tmpBin
-        if ($actualSha256 -ne $expectedSha256) {
-            throw "SHA-256 mismatch for $assetName. Expected $expectedSha256, got $actualSha256."
-        }
-        $runPath = Install-SaiaiBinary -CandidatePath $tmpBin -InstallPath $installPath -InstallDir $installDir -ExpectedSha256 $expectedSha256
-        if ($installOnly -and $runPath -ne $installPath) {
-            throw "Install-only mode could not replace $installPath. Stop the running SAIAI process and try again."
-        }
-        Add-SaiaiUserPath -InstallDir $installDir
-
-        if ($env:USERPROFILE) {
-            $env:HOME = $env:USERPROFILE
-        }
-        $isCodexInit = -not $installOnly -and $Arguments[0] -eq "init-codex"
-        if ($installOnly) {
-            $exitCode = 0
-        } else {
-            if ($isCodexInit) {
-                $forward = @()
-                if ($Arguments.Count -gt 1) {
-                    $forward = $Arguments[1..($Arguments.Count - 1)]
-                }
-                & $runPath init-codex @forward
-            } else {
-                & $runPath init @Arguments
+        $progressBefore = $ProgressPreference
+        $ProgressPreference = "SilentlyContinue"
+        $client = New-Object Net.WebClient
+        try {
+            Write-Host "Checking $manifestUrl" -ForegroundColor Cyan
+            $client.DownloadFile($manifestUrl, $manifestPath)
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            if ([int]$manifest.manifest_schema -ne 1) {
+                throw "Unsupported SAIAI manifest schema."
             }
-            $exitCode = $LASTEXITCODE
-        }
-        if ($exitCode -eq 0) {
-            Write-Host "SAIAI available at $installPath" -ForegroundColor Green
-            if ($installOnly) {
-                Write-Host "Next, run: saiai setup" -ForegroundColor Green
-            } elseif (-not $isCodexInit) {
-                Write-Host "For Claude Code, start the local proxy with: saiai start" -ForegroundColor Green
+            if ([int]$manifest.bootstrap_schema_version -ne 2) {
+                throw "Release is not compatible with SAIAI bootstrap schema 2."
             }
-        } else {
-            Write-Error "SAIAI failed with exit code $exitCode."
+            $entry = $manifest.assets.PSObject.Properties[$asset]
+            if ($null -eq $entry) {
+                throw "Manifest does not contain $asset."
+            }
+            $expectedSha256 = [string]$entry.Value.sha256
+            $expectedSize = [long]$entry.Value.size
+            if ($expectedSha256 -notmatch '^[0-9a-f]{64}$' -or $expectedSize -le 0) {
+                throw "Manifest metadata is invalid for $asset."
+            }
+
+            Write-Host "Downloading $assetUrl" -ForegroundColor Cyan
+            $client.DownloadFile($assetUrl, $candidatePath)
         }
-        return $exitCode
+        finally {
+            $client.Dispose()
+            $ProgressPreference = $progressBefore
+        }
+
+        $actualSize = (Get-Item -LiteralPath $candidatePath).Length
+        if ($actualSize -ne $expectedSize) {
+            throw "Size mismatch for $asset."
+        }
+        $actualSha256 = Get-SaiaiSha256 -Path $candidatePath
+        if ($actualSha256 -cne $expectedSha256) {
+            throw "SHA-256 mismatch for $asset."
+        }
+
+        $null = New-Item -ItemType Directory -Path $installDirectory -Force
+        if (Test-Path -LiteralPath $installPath -PathType Container) {
+            throw "Install path is a directory: $installPath"
+        }
+        if (Test-Path -LiteralPath $installPath -PathType Leaf) {
+            $installedItem = Get-Item -LiteralPath $installPath -Force
+            if (($installedItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing to replace reparse-point install path: $installPath"
+            }
+        }
+        if ((Test-Path -LiteralPath $installPath -PathType Leaf) -and
+            (Get-SaiaiSha256 -Path $installPath) -cne $actualSha256 -and
+            -not (Test-Path -LiteralPath $backupPath)) {
+            [System.IO.File]::Copy($installPath, $backupPath, $false)
+            Write-Host "Preserved the previous client at $backupPath" -ForegroundColor DarkGray
+        }
+        $stagedPath = Join-Path $installDirectory (".saiai.install." + [guid]::NewGuid().ToString("N") + ".exe")
+        try {
+            [System.IO.File]::Copy($candidatePath, $stagedPath, $false)
+            Move-Item -LiteralPath $stagedPath -Destination $installPath -Force
+        }
+        finally {
+            Remove-Item -LiteralPath $stagedPath -Force -ErrorAction SilentlyContinue
+        }
+        Add-SaiaiPath -Directory $installDirectory
+
+        Write-Host "SAIAI V2 installed at $installPath" -ForegroundColor Green
+        Write-Host "Next: & `"$installPath`" claude or & `"$installPath`" codex" -ForegroundColor Green
+        Write-Host "Explicit setup: & `"$installPath`" setup claude or & `"$installPath`" setup codex" -ForegroundColor Green
+        return 0
     }
     finally {
-        Remove-Item -LiteralPath $tmpDir -Force -Recurse -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
-if ($args.Count -ge 1) {
-    $code = Invoke-Saiai @args
-    if ($code -ne 0) {
-        exit $code
+if ($args.Count -gt 0) {
+    $exitCode = Invoke-Saiai @args
+    if ($exitCode -ne 0) {
+        exit $exitCode
     }
 }

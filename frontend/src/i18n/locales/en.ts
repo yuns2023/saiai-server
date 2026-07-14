@@ -603,9 +603,13 @@ export default {
         note: 'SAIAI no longer sets the provider env_key, so Codex CLI reads its API key only from ~/.codex/auth.json — environment variables like OPENAI_API_KEY have no effect.',
       },
       v2: {
-        description: 'Try the clean V2 mode alongside the existing mode. It creates isolated Claude and Codex homes and does not read, import, or migrate their normal configuration.',
-        hint: 'This command installs only the Preview binary and never puts the API key in the command line. After installation, run saiai setup and enter the Gateway URL and key in the hidden prompt.',
-        note: 'After setup, launch with saiai claude or saiai codex. Use the corresponding revoke command to remove only V2-owned state; existing mode configuration remains untouched.',
+        claudeDescription: 'Install the clean SAIAI V2 client, then initialize only Claude. V2 does not read, import, or migrate existing Claude configuration.',
+        codexDescription: 'Install the clean SAIAI V2 client, then initialize only Codex. V2 does not read, import, or migrate existing Codex configuration.',
+        installHint: 'Step 1: install the V2-only binary. This command never receives or initializes an API key.',
+        claudeSetupHint: 'Step 2: initialize Claude. Enter only the Claude key when the hidden prompt asks for it.',
+        codexSetupHint: 'Step 2: initialize Codex. Enter only the Codex key when the hidden prompt asks for it.',
+        claudeNote: 'Launch with saiai claude. Use saiai claude revoke to remove only Claude V2 state, or saiai revoke --all to reset all V2 state.',
+        codexNote: 'Launch with saiai codex. Use saiai codex revoke to remove only Codex V2 state, or saiai revoke --all to reset all V2 state.',
       },
       cliTabs: {
         v2Preview: 'SAIAI V2 Preview',
@@ -626,6 +630,10 @@ export default {
         description: 'Add the following environment variables to your terminal profile or run directly in terminal to configure Gemini CLI access.',
         modelComment: 'If you have Gemini 3 access, you can use: gemini-3-pro-preview',
         note: 'These environment variables will be active in the current terminal session. For permanent configuration, add them to ~/.bashrc, ~/.zshrc, or the appropriate configuration file.',
+      },
+      sora: {
+        description: 'SAIAI V2 does not configure Sora clients from this entry.',
+        note: 'Use the dedicated Sora client flow. No Claude or Codex command is generated for a Sora key.',
       },
       opencode: {
         title: 'OpenCode Example',

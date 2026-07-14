@@ -28,13 +28,14 @@ func TestClientHandlerBootstrap(t *testing.T) {
 		"code": 0,
 		"message": "success",
 		"data": {
-			"schema_version": 1,
+			"schema_version": 2,
 			"gateway_version": "1.2.3-test",
 			"capabilities": {
-				"claude": true,
+				"claude": false,
 				"codex": true,
 				"codex_responses": true,
-				"codex_websockets": false
+				"codex_websockets": false,
+				"openai_messages_dispatch": true
 			}
 		}
 	}`, recorder.Body.String())
@@ -56,13 +57,14 @@ func TestClientHandlerBootstrapKeepsEmptyGatewayVersionInContract(t *testing.T) 
 		"code": 0,
 		"message": "success",
 		"data": {
-			"schema_version": 1,
+			"schema_version": 2,
 			"gateway_version": "",
 			"capabilities": {
-				"claude": true,
+				"claude": false,
 				"codex": true,
 				"codex_responses": true,
-				"codex_websockets": false
+				"codex_websockets": false,
+				"openai_messages_dispatch": true
 			}
 		}
 	}`, recorder.Body.String())
@@ -84,7 +86,7 @@ func TestClientCapabilitiesAreEffectiveForAuthenticatedKey(t *testing.T) {
 		{
 			name: "OpenAI with Messages dispatch",
 			key:  openAIKey(true),
-			want: ClientCapabilities{Claude: true, Codex: true, CodexResponses: true},
+			want: ClientCapabilities{Codex: true, CodexResponses: true, OpenAIMessagesDispatch: true},
 		},
 		{
 			name: "Anthropic",

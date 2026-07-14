@@ -8,16 +8,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const clientBootstrapSchemaVersion = 1
+const clientBootstrapSchemaVersion = 2
 
 // ClientCapabilities describes routes that the authenticated API key can use
 // without changing its group. Fields are additive within a schema version so
 // older clients can safely ignore capabilities introduced by newer gateways.
 type ClientCapabilities struct {
-	Claude          bool `json:"claude"`
-	Codex           bool `json:"codex"`
-	CodexResponses  bool `json:"codex_responses"`
-	CodexWebSockets bool `json:"codex_websockets"`
+	// Claude reports native Claude-product readiness. OpenAI protocol
+	// translation is exposed separately and must not satisfy V2 Claude setup.
+	Claude                 bool `json:"claude"`
+	Codex                  bool `json:"codex"`
+	CodexResponses         bool `json:"codex_responses"`
+	CodexWebSockets        bool `json:"codex_websockets"`
+	OpenAIMessagesDispatch bool `json:"openai_messages_dispatch"`
 }
 
 // ClientBootstrapData is the versioned contract returned to SAIAI clients.
@@ -59,7 +62,7 @@ func clientCapabilitiesForAPIKey(apiKey *service.APIKey) ClientCapabilities {
 	case service.PlatformOpenAI:
 		capabilities.Codex = true
 		capabilities.CodexResponses = true
-		capabilities.Claude = apiKey.Group.AllowMessagesDispatch
+		capabilities.OpenAIMessagesDispatch = apiKey.Group.AllowMessagesDispatch
 	case service.PlatformAnthropic, service.PlatformAntigravity:
 		capabilities.Claude = true
 	}

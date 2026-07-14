@@ -65,13 +65,14 @@ func TestClientBootstrapRouteRequiresAPIKeyAuth(t *testing.T) {
 			"code": 0,
 			"message": "success",
 			"data": {
-				"schema_version": 1,
+				"schema_version": 2,
 				"gateway_version": "test-version",
 				"capabilities": {
-					"claude": true,
+					"claude": false,
 					"codex": true,
 					"codex_responses": true,
-					"codex_websockets": false
+					"codex_websockets": false,
+					"openai_messages_dispatch": true
 				}
 			}
 		}`, recorder.Body.String())
@@ -115,7 +116,7 @@ func TestClientBootstrapRouteWithRealAPIKeyAuthNeedsNoGatewayServices(t *testing
 		{name: "inactive group", secret: "bootstrap-secret-inactive", want: handler.ClientCapabilities{}},
 		{name: "Anthropic group", secret: "bootstrap-secret-anthropic", want: handler.ClientCapabilities{Claude: true}},
 		{name: "OpenAI without Messages dispatch", secret: "bootstrap-secret-openai-no-messages", want: handler.ClientCapabilities{Codex: true, CodexResponses: true}},
-		{name: "OpenAI with Messages dispatch", secret: "bootstrap-secret-openai-with-messages", want: handler.ClientCapabilities{Claude: true, Codex: true, CodexResponses: true}},
+		{name: "OpenAI with Messages dispatch", secret: "bootstrap-secret-openai-with-messages", want: handler.ClientCapabilities{Codex: true, CodexResponses: true, OpenAIMessagesDispatch: true}},
 	}
 
 	for _, test := range tests {

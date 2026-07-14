@@ -36,6 +36,9 @@ services:
     volumes:
       # Local directory mapping for easy migration
       - ./data:/app/data
+      # V2 client bundles are staged on the host; keep the same absolute path
+      # in the container because the active link targets an immutable sibling.
+      - /var/lib/saiai-server/client-runtime:/var/lib/saiai-server/client-runtime:ro
       # Optional: Mount custom config.yaml (uncomment and create the file first)
       # Copy config.example.yaml to config.yaml, modify it, then uncomment:
       # - ./config.yaml:/app/data/config.yaml
@@ -52,6 +55,7 @@ services:
       - SERVER_PORT=8080
       - SERVER_MODE=${SERVER_MODE:-release}
       - RUN_MODE=${RUN_MODE:-standard}
+      - SAIAI_CLIENT_DIR=/var/lib/saiai-server/client-runtime/saiai-cli
 
       # =======================================================================
       # Database Configuration (PostgreSQL)

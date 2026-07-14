@@ -71,7 +71,7 @@ func SetupRouter(
 		if clientDir == "" {
 			clientDir = os.Getenv("SAIAI_CLI_DIR")
 		}
-		frontendServer, err := web.NewFrontendServer(settingService, clientDir)
+		frontendServer, err := web.NewFrontendServer(settingService, clientDir, cfg.Server.TrustedProxies...)
 		if err != nil {
 			log.Printf("Warning: Failed to create frontend server with settings injection: %v, using legacy mode", err)
 			r.Use(web.ServeEmbeddedFrontend())
