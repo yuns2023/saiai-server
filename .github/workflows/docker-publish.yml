@@ -1,0 +1,155 @@
+name: Docker Publish
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    if: ${{ vars.ENABLE_PUBLIC_IMAGE_PUBLISH == 'true' && github.ref_protected }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout trusted main commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+      - name: Verify source commit
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Unit tests
+        working-directory: backend
+        run: make test-unit
+      - name: Integration tests
+        working-directory: backend
+        run: make test-integration
+
+  publish:
+    needs: verify
+    if: ${{ vars.ENABLE_PUBLIC_IMAGE_PUBLISH == 'true' && github.ref_protected }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    env:
+      HEAD_SHA: ${{ github.sha }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Checkout verified commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set image name
+        id: image
+        shell: bash
+        run: echo "name=ghcr.io/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Set source metadata
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha=$(git rev-parse HEAD)
+          if [ "$actual_sha" != "$HEAD_SHA" ]; then
+            echo "Checked out $actual_sha, expected $HEAD_SHA" >&2
+            exit 1
+          fi
+          {
+            echo "sha=$actual_sha"
+            echo "date=$(git show -s --format=%cI HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set image tags
+        id: tags
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+        shell: bash
+        run: |
+          {
+            echo 'tags<<EOF'
+            echo "${IMAGE_NAME}:main"
+            echo "${IMAGE_NAME}:sha-${HEAD_SHA}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            COMMIT=${{ steps.source.outputs.sha }}
+            DATE=${{ steps.source.outputs.date }}
+            SOURCE_URL=https://github.com/${{ github.repository }}
+          labels: |
+            org.opencontainers.image.created=${{ steps.source.outputs.date }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
+
+      - name: Verify pushed image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_ref="${IMAGE_NAME}@${IMAGE_DIGEST}"
+          docker pull "$image_ref"
+          image_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_ref")
+          if [ "$image_revision" != "$SOURCE_SHA" ]; then
+            echo "Image revision $image_revision does not match source $SOURCE_SHA" >&2
+            exit 1
+          fi
+          docker run --rm --network none --entrypoint /app/sub2api "$image_ref" --version
+
+      - name: Publish deployment coordinates
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        shell: bash
+        run: |
+          {
+            echo '## Production image candidate'
+            echo
+            echo "- Source commit: \`$SOURCE_SHA\`"
+            echo "- Image digest: \`$IMAGE_DIGEST\`"
+            echo "- Deploy reference: \`${IMAGE_NAME}@${IMAGE_DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,47 @@
+title = "SAIAI Server secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "SQL metric column assignment mistaken for an API key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^backend/internal/repository/ops_repo_preagg\.go$''']
+regexes = ['''token_consumed\s*=\s*EXCLUDED\.token_consumed''']
+
+[[allowlists]]
+description = "Versioned Anthropic beta feature identifiers in tests"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = [
+  '''^backend/internal/service/gateway_beta_test\.go$''',
+  '''^backend/internal/service/gateway_service_bedrock_beta_test\.go$''',
+]
+regexes = ['''(?:oauth|claude-code|interleaved-thinking|extended-cache-ttl|context-1m|effort|token-counting|fast-mode|afk-mode)-[0-9-]+''']
+
+[[allowlists]]
+description = "Configuration key name, not a configured credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^backend/internal/service/domain_constants\.go$''']
+regexes = ['''SettingKeySoraS3Bucket\s*=\s*"sora_s3_bucket"''']
+
+[[allowlists]]
+description = "Synthetic redaction fixtures"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^backend/internal/util/logredact/redact_test\.go$''']
+regexes = ['''(?:DUMMY|your-client-secret|custom_secret=(?:abc|xyz))''']
+
+[[allowlists]]
+description = "Synthetic payment documentation identifiers"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^docs/ADMIN_PAYMENT_INTEGRATION_API\.md$''']
+regexes = ['''(?:s2p_cm[0-9]+|pay-cm[0-9]+-success|sub2apipay order: cm[0-9]+)''']

@@ -1,0 +1,30 @@
+version: 1
+exceptions:
+  - package: xlsx
+    advisory: "GHSA-4r6h-8v6p-xvw6"
+    severity: high
+    reason: "Admin export only; switched to dynamic import to reduce exposure (CVE-2023-30533)"
+    mitigation: "Load only on export; restrict export permissions and data scope"
+    expires_on: "2026-10-25"
+    owner: "security@your-domain"
+  - package: xlsx
+    advisory: "GHSA-5pgg-2g8v-p4x9"
+    severity: high
+    reason: "Admin export only; switched to dynamic import to reduce exposure (CVE-2024-22363)"
+    mitigation: "Load only on export; restrict export permissions and data scope"
+    expires_on: "2026-10-25"
+    owner: "security@your-domain"
+  - package: lodash
+    advisory: "GHSA-r5fr-rjxr-66jc"
+    severity: high
+    reason: "Transitive via @lobehub/icons -> @lobehub/ui -> ahooks; app code never calls `_.template` nor imports lodash directly (verified 2026-04-24)"
+    mitigation: "No direct usage; UI chain does not expose _.template to user-controlled input. Revisit when @lobehub/ui bumps its ahooks pin"
+    expires_on: "2026-10-25"
+    owner: "security@your-domain"
+  - package: lodash-es
+    advisory: "GHSA-r5fr-rjxr-66jc"
+    severity: high
+    reason: "Transitive via @lobehub/icons -> @lobehub/ui -> mermaid -> chevrotain; app code never calls `_.template` nor imports lodash-es directly (verified 2026-04-24)"
+    mitigation: "No direct usage; mermaid/chevrotain only consume lodash-es for parser AST, no template invocation path. Revisit when mermaid bumps chevrotain"
+    expires_on: "2026-10-25"
+    owner: "security@your-domain"

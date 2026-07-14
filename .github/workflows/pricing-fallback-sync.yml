@@ -1,0 +1,46 @@
+name: Pricing Fallback Check
+
+on:
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - backend/internal/config/config.go
+      - backend/resources/model-pricing/model_prices_and_context_window.json
+      - tools/pricing_fallback_sync.sh
+      - .github/workflows/pricing-fallback-sync.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pricing-fallback-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Verify bundled pricing fallback snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          if bash tools/pricing_fallback_sync.sh check; then
+            echo 'Bundled pricing fallback is current.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo '## Pricing fallback update required'
+              echo
+              echo 'Run `tools/pricing_fallback_sync.sh sync` locally and submit the resulting change through a reviewed pull request.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

@@ -1,0 +1,287 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing SemVer tag to release (for example, v1.0.0)'
+        required: true
+        type: string
+      simple_release:
+        description: 'Only publish the x86_64 GHCR image'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  SIMPLE_RELEASE: ${{ (github.event_name == 'workflow_dispatch' && inputs.simple_release) || vars.SIMPLE_RELEASE == 'true' }}
+
+jobs:
+  validate-release:
+    if: ${{ vars.ENABLE_PUBLIC_RELEASE == 'true' && (github.event_name == 'workflow_dispatch' || github.ref_protected) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      version: ${{ steps.validate.outputs.version }}
+      commit: ${{ steps.validate.outputs.commit }}
+    env:
+      REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout main and tags
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate SemVer tag and main ancestry
+        id: validate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+
+          tag = os.environ['REQUESTED_TAG']
+          pattern = re.compile(
+              r'^v(?P<major>0|[1-9][0-9]*)\.(?P<minor>0|[1-9][0-9]*)\.(?P<patch>0|[1-9][0-9]*)'
+              r'(?:-(?P<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?'
+              r'(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
+          )
+          match = pattern.fullmatch(tag)
+          if match is None:
+              print(f'Invalid SemVer tag: {tag!r}', file=sys.stderr)
+              sys.exit(1)
+          prerelease = match.group('prerelease')
+          if prerelease:
+              for identifier in prerelease.split('.'):
+                  if identifier.isascii() and identifier.isdigit() and len(identifier) > 1 and identifier.startswith('0'):
+                      print(f'Numeric prerelease identifier has a leading zero: {identifier!r}', file=sys.stderr)
+                      sys.exit(1)
+          PY
+
+          git check-ref-format "refs/tags/$REQUESTED_TAG"
+          git fetch --force --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          git fetch --force origin "refs/tags/${REQUESTED_TAG}:refs/tags/${REQUESTED_TAG}"
+
+          tag_commit=$(git rev-parse --verify "refs/tags/${REQUESTED_TAG}^{commit}")
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "Tag $REQUESTED_TAG does not point to a commit contained in origin/main" >&2
+            exit 1
+          fi
+
+          {
+            echo "tag=$REQUESTED_TAG"
+            echo "version=${REQUESTED_TAG#v}"
+            echo "commit=$tag_commit"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo '## Validated release source'
+            echo
+            echo "- Tag: \`$REQUESTED_TAG\`"
+            echo "- Commit: \`$tag_commit\`"
+            echo '- Ancestry: contained in `origin/main`'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  update-version:
+    needs: validate-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.validate-release.outputs.commit }}
+          persist-credentials: false
+
+      - name: Generate VERSION file
+        env:
+          VERSION: ${{ needs.validate-release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$VERSION" > backend/cmd/server/VERSION
+
+      - name: Upload VERSION artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: version-file
+          path: backend/cmd/server/VERSION
+          retention-days: 1
+
+  build-frontend:
+    needs: validate-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.validate-release.outputs.commit }}
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 9.15.9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm run build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: frontend-dist
+          path: backend/internal/web/dist/
+          retention-days: 1
+
+  release:
+    needs:
+      - validate-release
+      - update-version
+      - build-frontend
+    if: ${{ vars.ENABLE_PUBLIC_RELEASE == 'true' && (github.event_name == 'workflow_dispatch' || github.ref_protected) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: release
+    permissions:
+      contents: write
+      packages: write
+    env:
+      RELEASE_TAG: ${{ needs.validate-release.outputs.tag }}
+    steps:
+      - name: Checkout validated tag
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.validate-release.outputs.tag }}
+          persist-credentials: false
+
+      - name: Verify checked-out commit
+        env:
+          EXPECTED_COMMIT: ${{ needs.validate-release.outputs.commit }}
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+
+      - name: Download VERSION artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: version-file
+          path: backend/cmd/server/
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: frontend-dist
+          path: backend/internal/web/dist/
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache-dependency-path: backend/go.sum
+
+      - name: Verify Go version
+        run: go version | grep -q 'go1.26.5'
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Load tag message safely
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_message=$(git for-each-ref --format='%(contents)' "refs/tags/${RELEASE_TAG}")
+          if [ -z "$tag_message" ]; then
+            tag_message="Release ${RELEASE_TAG}"
+          fi
+          delimiter="SAIAI_$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+          while grep -Fxq "$delimiter" <<< "$tag_message"; do
+            delimiter="SAIAI_$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+          done
+          {
+            echo "TAG_MESSAGE<<$delimiter"
+            printf '%s\n' "$tag_message"
+            echo "$delimiter"
+          } >> "$GITHUB_ENV"
+
+      - name: Set lowercase owner for GHCR
+        id: lowercase
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        shell: bash
+        run: echo "owner=$(printf '%s' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Run GoReleaser
+        if: ${{ env.SIMPLE_RELEASE != 'true' }}
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        with:
+          version: '~> v2'
+          args: release --clean --skip=validate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO_OWNER_LOWER: ${{ steps.lowercase.outputs.owner }}
+          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
+
+      - name: Run simple GoReleaser
+        if: ${{ env.SIMPLE_RELEASE == 'true' }}
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        with:
+          version: '~> v2'
+          args: release --clean --skip=validate --config=.goreleaser.simple.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO_OWNER_LOWER: ${{ steps.lowercase.outputs.owner }}
+          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
+
+      - name: Record release source
+        env:
+          RELEASE_COMMIT: ${{ needs.validate-release.outputs.commit }}
+        shell: bash
+        run: |
+          {
+            echo '## Released source'
+            echo
+            echo "- Tag: \`$RELEASE_TAG\`"
+            echo "- Commit: \`$RELEASE_COMMIT\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,96 @@
+# Build outputs and dependency caches
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.html
+dist/
+build/
+release/
+vendor/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/audit.json
+backend/bin/
+backend/server
+backend/sub2api
+backend/main
+backend/cmd/server/server
+backend/.gocache/
+.gocache/
+*.tsbuildinfo
+vite.config.d.ts
+vite.config.js
+vite.config.js.timestamp-*
+
+# Embedded frontend build output. Keep the placeholder required by go:embed.
+backend/internal/web/dist/
+!backend/internal/web/dist/
+backend/internal/web/dist/*
+!backend/internal/web/dist/.keep
+
+# Runtime data and local configuration
+backend/data/
+backend/config.yaml
+backend/.installed
+deploy/config.yaml
+deploy/docker-compose.override.yml
+docker-compose.override.yml
+.env
+.env.*
+*.env
+!.env.example
+!deploy/.env.example
+
+# Credentials and private key material must never be committed.
+*.key
+*.pem
+*.p12
+*.pfx
+.credentials.json
+.github_pat
+
+# Local research, captures, operations, and tool state
+research/
+captures/
+ops/
+output/
+tmp/
+temp/
+*.tmp
+*.temp
+*.log
+*.bak
+__pycache__/
+.cache/
+.dev/
+.serena/
+.codex/
+.claude/
+.claude-model-probe/
+.code-review-state
+code-reviews/
+aicodex
+CLAUDE.md
+
+# Platform and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Released SAIAI client binaries are staged outside Git. The three wrappers
+# remain tracked source files under frontend/public/saiai-cli/.
+frontend/public/saiai-cli/saiai-cli-*
