@@ -73,12 +73,47 @@ See [V2 Gateway contract](docs/V2_GATEWAY_CONTRACT.md) for the normative
 response shape, capability meanings, security properties, and release-pair
 rules.
 
+First install the official Claude Code or Codex CLI for the product you intend
+to use; SAIAI does not install either upstream client. Then install SAIAI and
+launch only the product you want to configure. The SAIAI installer does not ask
+for an API key. The first product launch asks for the shared Gateway URL if it
+is not already stored and for only that product's SAIAI key—never the other
+product's key.
+
+Windows PowerShell:
+
+```powershell
+irm https://api.saiai.top/saiai-cli/setup.ps1 | iex
+Invoke-Saiai install
+saiai codex # or: saiai claude
+```
+
+See the client repository's
+[complete Windows guide](https://github.com/yuns2023/saiai-client/blob/main/docs/WINDOWS.md)
+for PATH troubleshooting, per-product revoke, reset, and Preview update/signing
+boundaries.
+
+Linux or macOS:
+
+```bash
+curl -fsSL https://api.saiai.top/saiai-cli/setup.sh | bash -s -- install
+"$HOME/.local/bin/saiai" codex # or: "$HOME/.local/bin/saiai" claude
+```
+
+The Unix installer prints the actual absolute path; use that path if
+`SAIAI_INSTALL_DIR` overrides the default above.
+
+Self-hosted operators should replace `https://api.saiai.top` with their own
+HTTPS Gateway origin. Run `saiai doctor` for a safe diagnostic summary. V2
+does not migrate legacy state; use `saiai revoke --all` to discard V2 state
+and initialize it cleanly again.
+
 ## Development
 
 Prerequisites:
 
 - Go version declared by `backend/go.mod`
-- Node.js 20 and pnpm via Corepack
+- Node.js 24 and the pnpm version pinned by `frontend/package.json`, via Corepack
 - PostgreSQL and Redis for integration and local runtime work
 
 Common checks:
@@ -100,6 +135,10 @@ full validation set. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development
 workflow and [deploy/](deploy/) for deployment templates. Review every example,
 use unique secrets, pin release artifacts, and place the service behind HTTPS
 before exposing it to untrusted networks.
+
+Maintainers should also follow the deployment-neutral
+[release operations runbook](docs/RELEASE_OPERATIONS.md) for paired Gateway and
+client releases.
 
 ## Security
 

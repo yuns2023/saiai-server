@@ -17,5 +17,10 @@ listens on port 8080 by default. It expects PostgreSQL and Redis. See
 [README.md](README.md) for source builds, Compose examples, required secrets,
 V2 client-bundle mounting, upgrade, and rollback guidance.
 
+For a production release, follow the
+[paired release operations runbook](../docs/RELEASE_OPERATIONS.md). It keeps
+Gateway and client coordinates together and avoids live provider requests in
+smoke tests.
+
 This image is an independent SAIAI distribution derived from Sub2API; it is not
 an official Sub2API or upstream-provider image.

@@ -16,8 +16,9 @@ reviewable, and safe for a public repository.
 
 ## Development setup
 
-Use the Go toolchain declared in `backend/go.mod`, Node.js 20, pnpm, PostgreSQL,
-and Redis. Do not commit `.env`, generated credentials, or local runtime data.
+Use the Go toolchain declared in `backend/go.mod`, Node.js 24, the pnpm version
+pinned by `frontend/package.json`, PostgreSQL, and Redis. Do not commit `.env`,
+generated credentials, or local runtime data.
 
 ```bash
 corepack enable
@@ -40,6 +41,10 @@ pnpm run test:run
 Integration tests may require PostgreSQL, Redis, and additional local setup.
 Prefer the smallest relevant test during development. Before requesting review,
 run all checks affected by the change and state which checks were not run.
+Run local checks serially in resource-constrained environments; for Go, prefer
+small values such as `GOMAXPROCS=2` and `-p 1`. Do not run full Go test, vet,
+lint, and build jobs concurrently. Let GitHub Actions provide the full matrix
+after focused local checks pass.
 
 If an Ent schema changes, regenerate and commit the generated output:
 
@@ -66,6 +71,9 @@ behavior. Contract changes require tests for at least:
 Schema 2 is intentionally incompatible with the earlier preview. Do not add a
 state-migration path or silently weaken capability checks to simulate backward
 compatibility.
+
+Paired Gateway/client releases must follow the
+[release operations runbook](docs/RELEASE_OPERATIONS.md).
 
 ## Pull requests
 
