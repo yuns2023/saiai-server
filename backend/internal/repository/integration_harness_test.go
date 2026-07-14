@@ -117,7 +117,7 @@ func TestMain(m *testing.M) {
 	}
 
 	integrationRedis = redisclient.NewClient(&redisclient.Options{
-		Addr: fmt.Sprintf("%s:%d", redisHost, redisPort.Int()),
+		Addr: fmt.Sprintf("%s:%d", redisHost, redisPort.Num()),
 		DB:   0,
 	})
 	if err := integrationRedis.Ping(ctx).Err(); err != nil {

@@ -235,6 +235,12 @@ def main() -> int:
                 f"- {name} ({sev}) [{advisory_id}] expired on {expires_on}"
             )
 
+    stale_exceptions = sorted(set(exception_index) - seen)
+    if stale_exceptions:
+        errors.append("Exceptions not used by the current audit:")
+        for package, advisory in stale_exceptions:
+            errors.append(f"- {package} [{advisory}]")
+
     if errors:
         sys.stderr.write("\n".join(errors) + "\n")
         return 1

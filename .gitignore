@@ -58,7 +58,7 @@ docker-compose.override.yml
 # Local research, captures, operations, and tool state
 research/
 captures/
-ops/
+/ops/
 output/
 tmp/
 temp/

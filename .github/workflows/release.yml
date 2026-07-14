@@ -67,6 +67,13 @@ jobs:
               print(f'Invalid SemVer tag: {tag!r}', file=sys.stderr)
               sys.exit(1)
           prerelease = match.group('prerelease')
+          if match.group('build') is not None:
+              print('Build metadata is not supported because release versions are used as Docker tags', file=sys.stderr)
+              sys.exit(1)
+          docker_tag = tag[1:]
+          if re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}', docker_tag) is None:
+              print(f'Release version is not a valid Docker tag: {docker_tag!r}', file=sys.stderr)
+              sys.exit(1)
           if prerelease:
               for identifier in prerelease.split('.'):
                   if identifier.isascii() and identifier.isdigit() and len(identifier) > 1 and identifier.startswith('0'):
@@ -138,12 +145,12 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
-          version: 9.15.9
+          version: 10.34.4
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'pnpm'
           cache-dependency-path: frontend/pnpm-lock.yaml
 
@@ -254,8 +261,8 @@ jobs:
         if: ${{ env.SIMPLE_RELEASE != 'true' }}
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
-          version: '~> v2'
-          args: release --clean --skip=validate
+          version: v2.17.0
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPO_OWNER: ${{ github.repository_owner }}
@@ -266,8 +273,8 @@ jobs:
         if: ${{ env.SIMPLE_RELEASE == 'true' }}
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
-          version: '~> v2'
-          args: release --clean --skip=validate --config=.goreleaser.simple.yaml
+          version: v2.17.0
+          args: release --clean --config=.goreleaser.simple.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPO_OWNER: ${{ github.repository_owner }}
