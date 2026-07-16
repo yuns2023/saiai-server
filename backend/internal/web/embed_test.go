@@ -563,7 +563,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		cliDir := t.TempDir()
 		require.NoError(t, os.WriteFile(
 			filepath.Join(cliDir, "manifest.json"),
-			[]byte(`{"manifest_schema":1,"client_mode":"global-config","configuration_schema_version":1,"version":"1.0.0","assets":{"saiai-linux-x86_64":{"sha256":"abc","size":3}}}`),
+			[]byte(`{"manifest_schema":1,"client_mode":"local-proxy","configuration_schema_version":1,"version":"1.1.0","assets":{"saiai-linux-x86_64":{"sha256":"abc","size":3}}}`),
 			0o644,
 		))
 
@@ -579,7 +579,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
-		assert.JSONEq(t, `{"manifest_schema":1,"client_mode":"global-config","configuration_schema_version":1,"version":"1.0.0","assets":{"saiai-linux-x86_64":{"sha256":"abc","size":3}}}`, w.Body.String())
+		assert.JSONEq(t, `{"manifest_schema":1,"client_mode":"local-proxy","configuration_schema_version":1,"version":"1.1.0","assets":{"saiai-linux-x86_64":{"sha256":"abc","size":3}}}`, w.Body.String())
 	})
 
 	t.Run("serves_cli_binary_without_caching", func(t *testing.T) {

@@ -581,11 +581,11 @@ export default {
     useKeyModal: {
       title: 'Use API Key',
       description:
-        'Run the one-click command below to install or reuse SAIAI and configure the global Claude Code settings.',
+        'Run the one-click command below to install or reuse SAIAI, configure Claude Code, and start the per-user local proxy.',
       copy: 'Copy',
       copied: 'Copied',
-      note: 'After setup, start Claude Code normally with claude or from VSCode. The command contains this API key, so it can remain in the clipboard and shell history.',
-      saiaiCliHint: 'One command installs or reuses SAIAI, replaces the managed Gateway and Key, and removes conflicting Claude authentication, proxy, and CA settings.',
+      note: 'After setup, start Claude Code normally with claude or from VSCode. The proxy runs in the background; manage it with saiai status, saiai logs, or saiai stop. The command contains this API key, so it can remain in the clipboard and shell history.',
+      saiaiCliHint: 'Safe to re-run: unchanged binaries are not downloaded, the managed Gateway and Key are replaced, the installation CA is reused, and the local proxy is started or refreshed.',
       noGroupTitle: 'Please assign a group first',
       noGroupDescription: 'This API key has not been assigned to a group. Please click the group column in the key list to assign one before viewing the configuration.',
       openai: {
@@ -604,7 +604,7 @@ export default {
         description: 'Configure API access for Antigravity group. Select the configuration method based on your client.',
         claudeCode: 'Claude Code',
         geminiCli: 'Gemini CLI',
-        claudeNote: 'After setup, start Claude Code normally. The command contains this API key, so it can remain in the clipboard and shell history.',
+        claudeNote: 'After setup, start Claude Code normally; the local proxy runs in the background. The command contains this API key, so it can remain in the clipboard and shell history.',
         geminiNote: 'These environment variables will be active in the current terminal session. For permanent configuration, add them to ~/.bashrc, ~/.zshrc, or the appropriate configuration file.',
       },
       gemini: {

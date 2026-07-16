@@ -580,11 +580,11 @@ export default {
     useKey: '使用密钥',
     useKeyModal: {
       title: '使用 API 密钥',
-      description: '运行以下一键命令，安装或复用 SAIAI，并配置 Claude Code 全局设置。',
+      description: '运行以下一键命令，安装或复用 SAIAI，配置 Claude Code 并启动用户级本地代理。',
       copy: '复制',
       copied: '已复制',
-      note: '配置后直接运行 claude 或从 VSCode 启动。命令中包含当前 API Key，因此可能保留在剪贴板和 shell 历史中。',
-      saiaiCliHint: '一条命令安装或复用 SAIAI，替换受管 Gateway 和 Key，并清理冲突的 Claude 认证、代理及 CA 配置。',
+      note: '配置后直接运行 claude 或从 VSCode 启动；本地代理会在后台运行，可用 saiai status、saiai logs 或 saiai stop 管理。命令中包含当前 API Key，因此可能保留在剪贴板和 shell 历史中。',
+      saiaiCliHint: '可反复执行：版本未变时跳过二进制下载，替换受管 Gateway 和 Key，复用本机 CA，并启动或刷新本地代理。',
       noGroupTitle: '请先分配分组',
       noGroupDescription:
         '此 API 密钥尚未分配分组，请先在密钥列表中点击分组列进行分配，然后才能查看使用配置。',
@@ -605,7 +605,7 @@ export default {
         description: '为 Antigravity 分组配置 API 访问。请根据您使用的客户端选择对应的配置方式。',
         claudeCode: 'Claude Code',
         geminiCli: 'Gemini CLI',
-        claudeNote: '配置后直接启动 Claude Code。命令中包含当前 API Key，因此可能保留在剪贴板和 shell 历史中。',
+        claudeNote: '配置后直接启动 Claude Code；本地代理会在后台运行。命令中包含当前 API Key，因此可能保留在剪贴板和 shell 历史中。',
         geminiNote:
           '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。'
       },

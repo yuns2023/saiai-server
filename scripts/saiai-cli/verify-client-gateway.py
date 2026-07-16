@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify Gateway integration for the SAIAI global-config client bundle."""
+"""Verify Gateway integration for the SAIAI local-proxy client bundle."""
 
 from __future__ import annotations
 
@@ -65,7 +65,8 @@ def verify_user_interface() -> None:
 
     locales = text("frontend/src/i18n/locales/zh.ts") + text("frontend/src/i18n/locales/en.ts")
     require("SAIAI V2 Preview" not in locales, "locales still advertise V2 Preview")
-    require("saiai start" not in locales, "locales still require the removed local proxy")
+    for required in ("用户级本地代理", "per-user local proxy", "saiai status", "saiai stop"):
+        require(required in locales, f"local-proxy UI copy is missing {required!r}")
 
 
 def verify_activation_and_serving() -> None:
@@ -73,9 +74,10 @@ def verify_activation_and_serving() -> None:
     for required in (
         'readonly DEFAULT_REPO="yuns2023/saiai-client"',
         'readonly DEFAULT_CLIENT_LINK="/var/lib/saiai-server/client-runtime/saiai-cli"',
-        'manifest.get("client_mode") == "global-config"',
+        'manifest.get("client_mode") == "local-proxy"',
         'manifest.get("configuration_schema_version") == 1',
         '"bootstrap_schema_version" not in manifest',
+        'manifest.get("client_mode") == "global-config"',
         'manifest.get("bootstrap_schema_version") == 2',
         'expected_contract == "retained-live"',
         "is_retained_v2",
@@ -92,10 +94,11 @@ def verify_activation_and_serving() -> None:
 
     activation_tests = text("scripts/saiai-cli/test-sync-saiai-cli.sh")
     for required in (
-        "initial global-config cutover",
+        "local-proxy cutover",
         "transition-first-activate.log",
-        "global-config activate accepted a retained V2 target",
-        "stage accepted a prerelease global-config bundle",
+        "local-proxy activate accepted a retained V2 target",
+        "local-proxy activate accepted a retained global-config target",
+        "stage accepted a prerelease local-proxy bundle",
     ):
         require(required in activation_tests, f"transition test is missing {required!r}")
 
@@ -140,7 +143,7 @@ def main() -> int:
     verify_user_interface()
     verify_activation_and_serving()
     verify_ci()
-    print("SAIAI global-config Gateway integration contract verified")
+    print("SAIAI local-proxy Gateway integration contract verified")
     return 0
 
 

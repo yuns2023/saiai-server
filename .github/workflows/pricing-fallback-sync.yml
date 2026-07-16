@@ -7,11 +7,8 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - backend/internal/config/config.go
-      - backend/resources/model-pricing/model_prices_and_context_window.json
-      - tools/pricing_fallback_sync.sh
-      - .github/workflows/pricing-fallback-sync.yml
+    # This job is a required branch-protection check, so every pull request
+    # must emit a result even when pricing files are unchanged.
 
 permissions:
   contents: read
