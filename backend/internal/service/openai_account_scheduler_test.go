@@ -66,6 +66,52 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRateLimite
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 }
 
+func TestOpenAIGatewayService_SelectAccountWithScheduler_FreshFiveHourGateUsesHealthyPeer(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(10103)
+	resetAt := time.Now().Add(2 * time.Hour)
+	stalePrimary := &Account{
+		ID: 31101, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0,
+		Extra: map[string]any{"codex_5h_used_percent": 10.0, "codex_5h_reset_at": resetAt.Format(time.RFC3339)},
+	}
+	staleBackup := &Account{
+		ID: 31102, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0,
+		Extra: map[string]any{"codex_5h_used_percent": 10.0, "codex_5h_reset_at": resetAt.Format(time.RFC3339)},
+	}
+	freshPrimary := *stalePrimary
+	freshPrimary.Extra = map[string]any{"codex_5h_used_percent": 95.0, "codex_5h_reset_at": resetAt.Format(time.RFC3339)}
+	freshBackup := *staleBackup
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{stalePrimary, staleBackup},
+		accountsByID:     map[int64]*Account{freshPrimary.ID: &freshPrimary, freshBackup.ID: &freshBackup},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{freshPrimary, freshBackup}},
+		cache:              &stubGatewayCache{},
+		cfg:                &config.Config{},
+		schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"fresh_5h_gate_fallback",
+		"gpt-5.5",
+		nil,
+		OpenAIUpstreamTransportAny,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, freshBackup.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_SkipsFreshlyRateLimitedSnapshotCandidate(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10102)
@@ -87,15 +133,18 @@ func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_SkipsFreshlyRa
 func TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseSticky(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(9)
+	resetAt := time.Now().Add(2 * time.Hour)
 	account := Account{
 		ID:          1001,
 		Platform:    PlatformOpenAI,
-		Type:        AccountTypeAPIKey,
+		Type:        AccountTypeOAuth,
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: 2,
 		Extra: map[string]any{
-			"openai_apikey_responses_websockets_v2_enabled": true,
+			"codex_5h_used_percent":                        95.0,
+			"codex_5h_reset_at":                            resetAt.Format(time.RFC3339),
+			"openai_oauth_responses_websockets_v2_enabled": true,
 		},
 	}
 	cache := &stubGatewayCache{}
@@ -141,6 +190,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseSticky(
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionSticky(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10)
+	resetAt := time.Now().Add(2 * time.Hour)
 	account := Account{
 		ID:          2001,
 		Platform:    PlatformOpenAI,
@@ -148,6 +198,10 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionSticky(t *testin
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: 1,
+		Extra: map[string]any{
+			"codex_5h_used_percent": 95.0,
+			"codex_5h_reset_at":     resetAt.Format(time.RFC3339),
+		},
 	}
 	cache := &stubGatewayCache{
 		sessionBindings: map[string]int64{
@@ -493,7 +547,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceTopKFallback
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceUsesQuotaBudgetWithinPriority(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceDoesNotSoftSortBySevenDayQuota(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(12)
 	now := time.Now().UTC()
@@ -540,6 +594,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceUsesQuotaBud
 	svc := &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
 		cache:              &stubGatewayCache{},
+		cfg:                &config.Config{Gateway: config.GatewayConfig{OpenAIWS: config.GatewayOpenAIWSConfig{LBTopK: 2}}},
 		concurrencyService: NewConcurrencyService(concurrencyCache),
 	}
 
@@ -555,14 +610,15 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceUsesQuotaBud
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(3051), selection.Account.ID)
+	require.Contains(t, []int64{3051, 3052}, selection.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, 2, decision.TopK, "7d remaining quota and reset time must not remove a healthy account")
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceUsesStrictQuotaBudget(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceDoesNotSoftSortBelowFiveHourGate(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(100)
 	now := time.Now().UTC()
@@ -636,46 +692,73 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceUsesStrictQu
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(1002), selection.Account.ID)
+	require.Contains(t, []int64{1001, 1002}, selection.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	require.Equal(t, 2, decision.CandidateCount)
-	require.Equal(t, 1, decision.TopK)
+	require.Equal(t, 2, decision.TopK, "5h usage below the admission gate must not become a soft ranking layer")
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
 }
 
-func TestFilterOpenAIAccountCandidatesByQuotaBudget_UnknownQuotaKeepsCandidates(t *testing.T) {
-	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
-	candidates := []openAIAccountCandidateScore{
+func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceRejectsNewSessionAboveFiveHourGate(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(13)
+	resetAt := time.Now().Add(2 * time.Hour)
+	accounts := []Account{
 		{
-			account: &Account{
-				ID:       1001,
-				Platform: PlatformOpenAI,
-				Type:     AccountTypeOAuth,
-				Extra: map[string]any{
-					"codex_5h_used_percent": 60.0,
-					"codex_5h_reset_at":     now.Add(2 * time.Hour).Format(time.RFC3339),
-					"codex_7d_used_percent": 5.0,
-					"codex_7d_reset_at":     now.Add(7 * 24 * time.Hour).Format(time.RFC3339),
-				},
+			ID:          3061,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    0,
+			Extra: map[string]any{
+				"codex_5h_used_percent": 80.0001,
+				"codex_5h_reset_at":     resetAt.Format(time.RFC3339),
 			},
-			loadInfo: &AccountLoadInfo{AccountID: 1001},
 		},
 		{
-			account: &Account{
-				ID:       2001,
-				Platform: PlatformOpenAI,
-				Type:     AccountTypeAPIKey,
+			ID:          3062,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    0,
+			Extra: map[string]any{
+				"codex_5h_used_percent": 80.0,
+				"codex_5h_reset_at":     resetAt.Format(time.RFC3339),
 			},
-			loadInfo: &AccountLoadInfo{AccountID: 2001},
 		},
 	}
 
-	filtered := filterOpenAIAccountCandidatesByQuotaBudget(candidates, "gpt-5.5", now)
-	require.Len(t, filtered, 2)
-	require.Equal(t, int64(1001), filtered[0].account.ID)
-	require.Equal(t, int64(2001), filtered[1].account.ID)
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
+		cache:              &stubGatewayCache{},
+		cfg:                &config.Config{Gateway: config.GatewayConfig{OpenAIWS: config.GatewayOpenAIWSConfig{LBTopK: 2}}},
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"new_session_above_5h_gate",
+		"gpt-5.5",
+		nil,
+		OpenAIUpstreamTransportAny,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(3062), selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, 1, decision.TopK)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceUsesHighestPriorityTier(t *testing.T) {

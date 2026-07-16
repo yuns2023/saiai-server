@@ -2148,7 +2148,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				}
 				ordered = append(ordered, acc)
 			}
-			sortAccountsByPriorityAndLastUsed(ordered, platform == PlatformGemini)
+			sortAccountsByPriorityOnly(ordered, false)
+			shuffleWithinPriority(ordered)
 			deviceBindings, accountBindings, loadErr := s.identityService.LoadPinnedBindings(ctx, *groupID, metadataUserID, ordered)
 			if loadErr != nil {
 				return nil, loadErr
@@ -2212,7 +2213,6 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 	}
 
-	preferOAuth := platform == PlatformGemini
 	if s.debugModelRoutingEnabled() && platform == PlatformAnthropic && requestedModel != "" {
 		logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] load-aware enabled: group_id=%v model=%s session=%s platform=%s", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), platform)
 	}
@@ -2420,32 +2420,23 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 
 			if len(routingAvailable) > 0 {
-				routingAvailable = filterWithinPriorityAndLoadByTopQuotaBudget(routingAvailable, requestedModel, time.Now())
-
-				// 排序：优先级 > 负载率 > 订阅窗口预算 > 最后使用时间
+				// 排序：账号优先级 > 负载率；同层候选随机打乱。
 				sort.SliceStable(routingAvailable, func(i, j int) bool {
 					a, b := routingAvailable[i], routingAvailable[j]
 					if a.account.Priority != b.account.Priority {
 						return a.account.Priority < b.account.Priority
 					}
-					if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
-						return a.loadInfo.LoadRate < b.loadInfo.LoadRate
-					}
-					switch {
-					case a.account.LastUsedAt == nil && b.account.LastUsedAt != nil:
-						return true
-					case a.account.LastUsedAt != nil && b.account.LastUsedAt == nil:
-						return false
-					case a.account.LastUsedAt == nil && b.account.LastUsedAt == nil:
-						return false
-					default:
-						return a.account.LastUsedAt.Before(*b.account.LastUsedAt)
-					}
+					return a.loadInfo.LoadRate < b.loadInfo.LoadRate
 				})
-				shuffleWithinSortGroups(routingAvailable)
+				shuffleWithinPriorityAndLoadGroups(routingAvailable)
 
 				// 4. 尝试获取槽位
 				for _, item := range routingAvailable {
+					fresh := s.resolveFreshAccountForSessionAdmission(ctx, item.account, false)
+					if fresh == nil {
+						continue
+					}
+					item.account = fresh
 					result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.Concurrency)
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
@@ -2468,6 +2459,11 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				// 5. 所有路由账号槽位满，尝试返回等待计划（选择负载最低的）
 				// 遍历找到第一个满足会话限制的账号
 				for _, item := range routingAvailable {
+					fresh := s.resolveFreshAccountForSessionAdmission(ctx, item.account, false)
+					if fresh == nil {
+						continue
+					}
+					item.account = fresh
 					if !s.checkAndRegisterSession(ctx, item.account, sessionKeyForAccount(item.account)) {
 						continue // 会话限制已满，尝试下一个
 					}
@@ -2617,7 +2613,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				return result, pinnedErr
 			}
 		}
-		if result, ok := s.tryAcquireByLegacyOrder(ctx, candidates, groupID, sessionHash, metadataUserID, preferOAuth); ok {
+		if result, ok := s.tryAcquireByLegacyOrder(ctx, candidates, groupID, sessionHash, metadataUserID, false); ok {
 			return result, nil
 		}
 	} else {
@@ -2656,19 +2652,30 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 		}
 
-		// 分层过滤选择：优先级 → 负载率 → 订阅窗口预算 → LRU
+		// 分层过滤选择：账号优先级 → 负载率 → 同层随机。
 		for len(available) > 0 {
 			// 1. 取优先级最小的集合
 			candidates := filterByMinPriority(available)
 			// 2. 取负载率最低的集合
 			candidates = filterByMinLoadRate(candidates)
-			// 3. 同优先级、同负载内按订阅窗口预算选择更适合继续消耗的账号
-			candidates = filterByTopQuotaBudget(candidates, requestedModel, time.Now())
-			// 4. 剩余并列候选由 LRU 选择最久未用的账号
-			selected := selectByLRU(candidates, preferOAuth)
+			// 3. 剩余并列候选随机选择，不读取 5h/7d 剩余额度或 LRU。
+			selected := selectRandomAccountWithLoad(candidates, false)
 			if selected == nil {
 				break
 			}
+			fresh := s.resolveFreshAccountForSessionAdmission(ctx, selected.account, false)
+			if fresh == nil {
+				selectedID := selected.account.ID
+				newAvailable := make([]accountWithLoad, 0, len(available)-1)
+				for _, acc := range available {
+					if acc.account.ID != selectedID {
+						newAvailable = append(newAvailable, acc)
+					}
+				}
+				available = newAvailable
+				continue
+			}
+			selected.account = fresh
 
 			result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.Concurrency)
 			if err == nil && result.Acquired {
@@ -2698,8 +2705,37 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	}
 
 	// ============ Layer 3: 兜底排队 ============
-	s.sortCandidatesForFallback(candidates, preferOAuth, cfg.FallbackSelectionMode)
-	for _, acc := range candidates {
+	fallbackCandidates := make([]*Account, 0, len(candidates))
+	if err == nil {
+		withLoad := make([]accountWithLoad, 0, len(candidates))
+		for _, acc := range candidates {
+			loadInfo := loadMap[acc.ID]
+			if loadInfo == nil {
+				loadInfo = &AccountLoadInfo{AccountID: acc.ID}
+			}
+			withLoad = append(withLoad, accountWithLoad{account: acc, loadInfo: loadInfo})
+		}
+		sort.SliceStable(withLoad, func(i, j int) bool {
+			a, b := withLoad[i], withLoad[j]
+			if a.account.Priority != b.account.Priority {
+				return a.account.Priority < b.account.Priority
+			}
+			return a.loadInfo.LoadRate < b.loadInfo.LoadRate
+		})
+		shuffleWithinPriorityAndLoadGroups(withLoad)
+		for _, item := range withLoad {
+			fallbackCandidates = append(fallbackCandidates, item.account)
+		}
+	} else {
+		fallbackCandidates = append(fallbackCandidates, candidates...)
+		sortAccountsByPriorityOnly(fallbackCandidates, false)
+		shuffleWithinPriority(fallbackCandidates)
+	}
+	for _, acc := range fallbackCandidates {
+		acc = s.resolveFreshAccountForSessionAdmission(ctx, acc, false)
+		if acc == nil {
+			continue
+		}
 		// 会话数量限制检查（等待计划也需要占用会话配额）
 		if !s.checkAndRegisterSession(ctx, acc, sessionKeyForAccount(acc)) {
 			continue // 会话限制已满，尝试下一个账号
@@ -2759,12 +2795,17 @@ func sampleAccountIDs(accounts []*Account, limit int) []int64 {
 	return ids
 }
 
-func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash, metadataUserID string, preferOAuth bool) (*AccountSelectionResult, bool) {
+func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash, metadataUserID string, _ bool) (*AccountSelectionResult, bool) {
 	ordered := append([]*Account(nil), candidates...)
-	sortAccountsByPriorityAndLastUsed(ordered, preferOAuth)
+	sortAccountsByPriorityOnly(ordered, false)
+	shuffleWithinPriority(ordered)
 	sessionKeyForAccount := s.makeOAuthAccountSessionKeyFunc(ctx, metadataUserID, sessionHash)
 
 	for _, acc := range ordered {
+		acc = s.resolveFreshAccountForSessionAdmission(ctx, acc, false)
+		if acc == nil {
+			continue
+		}
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
 		if err == nil && result.Acquired {
 			// 会话数量限制检查
@@ -3475,6 +3516,33 @@ func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID in
 	return s.accountRepo.GetByID(ctx, accountID)
 }
 
+// resolveFreshAccountForSessionAdmission reloads the per-account scheduler
+// snapshot immediately before an account is used. Quota telemetry updates do
+// not rebuild the group bucket immediately, so this second read prevents a
+// stale low-utilization bucket entry from admitting a new session above 80%.
+// existingBinding is true only for an already-established sticky/pinned
+// binding; those sessions remain eligible above the admission threshold.
+func (s *GatewayService) resolveFreshAccountForSessionAdmission(ctx context.Context, account *Account, existingBinding bool) *Account {
+	if account == nil {
+		return nil
+	}
+	fresh := account
+	if s.schedulerSnapshot != nil {
+		current, err := s.getSchedulableAccount(ctx, account.ID)
+		if err != nil || current == nil {
+			return nil
+		}
+		fresh = current
+	}
+	if !s.isAccountSchedulableForSelection(fresh) {
+		return nil
+	}
+	if !existingBinding && shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
+		return nil
+	}
+	return fresh
+}
+
 // filterByMinPriority 过滤出优先级最小的账号集合
 func filterByMinPriority(accounts []accountWithLoad) []accountWithLoad {
 	if len(accounts) == 0 {
@@ -3513,6 +3581,59 @@ func filterByMinLoadRate(accounts []accountWithLoad) []accountWithLoad {
 		}
 	}
 	return result
+}
+
+// selectRandomAccountWithLoad chooses uniformly from accounts that have already
+// been narrowed to the same account priority and realtime load. Account type,
+// quota headroom, reset time, and LastUsedAt are intentionally not tie-breakers.
+func selectRandomAccountWithLoad(accounts []accountWithLoad, _ bool) *accountWithLoad {
+	if len(accounts) == 0 {
+		return nil
+	}
+	return &accounts[mathrand.Intn(len(accounts))]
+}
+
+// selectRandomAccountByMinPriority chooses uniformly from the best global
+// account-priority tier. Group-membership priority and account type are not
+// additional scheduling tiers.
+func selectRandomAccountByMinPriority(accounts []*Account) *Account {
+	if len(accounts) == 0 {
+		return nil
+	}
+	minPriority := accounts[0].Priority
+	for _, account := range accounts[1:] {
+		if account.Priority < minPriority {
+			minPriority = account.Priority
+		}
+	}
+	candidates := make([]*Account, 0, len(accounts))
+	for _, account := range accounts {
+		if account.Priority == minPriority {
+			candidates = append(candidates, account)
+		}
+	}
+	return candidates[mathrand.Intn(len(candidates))]
+}
+
+func (s *GatewayService) selectFreshRandomAccountByMinPriority(ctx context.Context, accounts []*Account) *Account {
+	work := append([]*Account(nil), accounts...)
+	for len(work) > 0 {
+		selected := selectRandomAccountByMinPriority(work)
+		if selected == nil {
+			return nil
+		}
+		if fresh := s.resolveFreshAccountForSessionAdmission(ctx, selected, false); fresh != nil {
+			return fresh
+		}
+		remaining := make([]*Account, 0, len(work)-1)
+		for _, account := range work {
+			if account.ID != selected.ID {
+				remaining = append(remaining, account)
+			}
+		}
+		work = remaining
+	}
+	return nil
 }
 
 // selectByLRU 从集合中选择最久未用的账号
@@ -3598,14 +3719,39 @@ func sortAccountsByPriorityAndLastUsed(accounts []*Account, preferOAuth bool) {
 	shuffleWithinPriorityAndLastUsed(accounts, preferOAuth)
 }
 
-// shuffleWithinSortGroups 对排序后的 accountWithLoad 切片，按 (Priority, LoadRate, LastUsedAt) 分组后组内随机打乱。
+// shuffleWithinPriorityAndLoadGroups 对排序后的 accountWithLoad 切片，按
+// (Account.Priority, LoadRate) 分组后组内随机打乱。
 // 防止并发请求读取同一快照时，确定性排序导致所有请求命中相同账号。
-func shuffleWithinSortGroups(accounts []accountWithLoad) {
+func shuffleWithinPriorityAndLoadGroups(accounts []accountWithLoad) {
 	if len(accounts) <= 1 {
 		return
 	}
 	i := 0
 	for i < len(accounts) {
+		j := i + 1
+		for j < len(accounts) && samePriorityAndLoadGroup(accounts[i], accounts[j]) {
+			j++
+		}
+		if j-i > 1 {
+			mathrand.Shuffle(j-i, func(a, b int) {
+				accounts[i+a], accounts[i+b] = accounts[i+b], accounts[i+a]
+			})
+		}
+		i = j
+	}
+}
+
+func samePriorityAndLoadGroup(a, b accountWithLoad) bool {
+	return a.account.Priority == b.account.Priority && a.loadInfo.LoadRate == b.loadInfo.LoadRate
+}
+
+// shuffleWithinSortGroups is retained for compatibility with older helper
+// tests. Production selection no longer uses LastUsedAt as a scheduling layer.
+func shuffleWithinSortGroups(accounts []accountWithLoad) {
+	if len(accounts) <= 1 {
+		return
+	}
+	for i := 0; i < len(accounts); {
 		j := i + 1
 		for j < len(accounts) && sameAccountWithLoadGroup(accounts[i], accounts[j]) {
 			j++
@@ -3648,7 +3794,7 @@ func (s *GatewayService) trySelectPinnedWithLoad(
 	ctx context.Context,
 	groupID *int64,
 	metadataUserID string,
-	requestedModel string,
+	_ string,
 	candidates []accountWithLoad,
 	deviceBindings map[int64]*PinnedDeviceBinding,
 	accountBindings map[int64]*PinnedAccountBinding,
@@ -3657,22 +3803,24 @@ func (s *GatewayService) trySelectPinnedWithLoad(
 		return nil, false, nil
 	}
 
-	eligibleExists := false
+	hasFreePinnedSlot := false
+	eligible := make([]accountWithLoad, 0, len(candidates))
 	work := make([]accountWithLoad, 0, len(candidates))
 	for _, item := range candidates {
 		_, free := pinnedCandidateStateForAccount(item.account.ID, deviceBindings, accountBindings)
-		if free {
-			eligibleExists = true
-			if item.loadInfo != nil && item.loadInfo.LoadRate < 100 {
-				work = append(work, item)
-			}
+		if !free {
+			continue
+		}
+		hasFreePinnedSlot = true
+		eligible = append(eligible, item)
+		if item.loadInfo != nil && item.loadInfo.LoadRate < 100 {
+			work = append(work, item)
 		}
 	}
 	for len(work) > 0 {
 		candidates := filterByMinPriority(work)
 		candidates = filterByMinLoadRate(candidates)
-		candidates = filterByTopQuotaBudget(candidates, requestedModel, time.Now())
-		selected := selectByLRU(candidates, false)
+		selected := selectRandomAccountWithLoad(candidates, false)
 		if selected == nil {
 			break
 		}
@@ -3680,7 +3828,18 @@ func (s *GatewayService) trySelectPinnedWithLoad(
 		selectedID := selected.account.ID
 		boundToThisDevice, free := pinnedCandidateStateForAccount(selectedID, deviceBindings, accountBindings)
 		if free {
-			eligibleExists = true
+			fresh := s.resolveFreshAccountForSessionAdmission(ctx, selected.account, boundToThisDevice)
+			if fresh == nil {
+				newWork := make([]accountWithLoad, 0, len(work)-1)
+				for _, item := range work {
+					if item.account.ID != selectedID {
+						newWork = append(newWork, item)
+					}
+				}
+				work = newWork
+				continue
+			}
+			selected.account = fresh
 			result, err := s.tryAcquireAccountSlot(ctx, selectedID, selected.account.Concurrency)
 			if err == nil && result.Acquired {
 				if !s.checkAndRegisterSession(ctx, selected.account, s.oauthAccountSessionKey(ctx, selected.account, metadataUserID, "")) {
@@ -3710,17 +3869,29 @@ func (s *GatewayService) trySelectPinnedWithLoad(
 		work = newWork
 	}
 
-	if !eligibleExists {
+	if !hasFreePinnedSlot {
 		return nil, true, ErrClaudeOAuthPinnedDevicesFull
 	}
-
 	// 所有可用 pinned 账号都在忙，返回等待计划（仍然保持 pinned 绑定规则）
-	for _, item := range candidates {
+	sort.SliceStable(eligible, func(i, j int) bool {
+		a, b := eligible[i], eligible[j]
+		if a.account.Priority != b.account.Priority {
+			return a.account.Priority < b.account.Priority
+		}
+		return a.loadInfo.LoadRate < b.loadInfo.LoadRate
+	})
+	shuffleWithinPriorityAndLoadGroups(eligible)
+	for _, item := range eligible {
 		selectedID := item.account.ID
-		_, free := pinnedCandidateStateForAccount(selectedID, deviceBindings, accountBindings)
+		boundToThisDevice, free := pinnedCandidateStateForAccount(selectedID, deviceBindings, accountBindings)
 		if !free {
 			continue
 		}
+		fresh := s.resolveFreshAccountForSessionAdmission(ctx, item.account, boundToThisDevice)
+		if fresh == nil {
+			continue
+		}
+		item.account = fresh
 		if !s.checkAndRegisterSession(ctx, item.account, s.oauthAccountSessionKey(ctx, item.account, metadataUserID, "")) {
 			continue
 		}
@@ -3750,14 +3921,35 @@ func (s *GatewayService) trySelectPinnedByLegacyOrder(
 		return nil, false, nil
 	}
 
-	eligibleExists := false
-	var waitCandidate *Account
+	hasFreePinnedSlot := false
+	eligible := make([]*Account, 0, len(ordered))
 	for _, acc := range ordered {
+		_, free := pinnedCandidateStateForAccount(acc.ID, deviceBindings, accountBindings)
+		if !free {
+			continue
+		}
+		hasFreePinnedSlot = true
+		eligible = append(eligible, acc)
+	}
+	if !hasFreePinnedSlot {
+		return nil, true, ErrClaudeOAuthPinnedDevicesFull
+	}
+	if len(eligible) == 0 {
+		return nil, true, ErrNoAvailableAccounts
+	}
+	sortAccountsByPriorityOnly(eligible, false)
+	shuffleWithinPriority(eligible)
+
+	var waitCandidate *Account
+	for _, acc := range eligible {
 		boundToThisDevice, free := pinnedCandidateStateForAccount(acc.ID, deviceBindings, accountBindings)
 		if !free {
 			continue
 		}
-		eligibleExists = true
+		acc = s.resolveFreshAccountForSessionAdmission(ctx, acc, boundToThisDevice)
+		if acc == nil {
+			continue
+		}
 		if waitCandidate == nil {
 			waitCandidate = acc
 		}
@@ -3779,9 +3971,6 @@ func (s *GatewayService) trySelectPinnedByLegacyOrder(
 				ReleaseFunc: result.ReleaseFunc,
 			}, true, nil
 		}
-	}
-	if !eligibleExists {
-		return nil, true, ErrClaudeOAuthPinnedDevicesFull
 	}
 	if waitCandidate != nil {
 		if s.checkAndRegisterSession(ctx, waitCandidate, s.oauthAccountSessionKey(ctx, waitCandidate, metadataUserID, "")) {
@@ -3864,17 +4053,11 @@ func sameLastUsedAt(a, b *time.Time) bool {
 	}
 }
 
-// sortCandidatesForFallback 根据配置选择排序策略
-// mode: "last_used"(按最后使用时间) 或 "random"(随机)
-func (s *GatewayService) sortCandidatesForFallback(accounts []*Account, preferOAuth bool, mode string) {
-	if mode == "random" {
-		// 先按优先级排序，然后在同优先级内随机打乱
-		sortAccountsByPriorityOnly(accounts, preferOAuth)
-		shuffleWithinPriority(accounts)
-	} else {
-		// 默认按最后使用时间排序
-		sortAccountsByPriorityAndLastUsed(accounts, preferOAuth)
-	}
+// sortCandidatesForFallback retains the old helper signature for compatibility.
+// Fallback selection no longer honors the legacy last_used/account-type modes.
+func (s *GatewayService) sortCandidatesForFallback(accounts []*Account, _ bool, _ string) {
+	sortAccountsByPriorityOnly(accounts, false)
+	shuffleWithinPriority(accounts)
 }
 
 // sortAccountsByPriorityOnly 仅按优先级排序
@@ -3916,7 +4099,6 @@ func shuffleWithinPriority(accounts []*Account) {
 
 // selectAccountForModelWithPlatform 选择单平台账户（完全隔离）
 func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, platform string) (*Account, error) {
-	preferOAuth := platform == PlatformGemini
 	routingAccountIDs := s.routingAccountIDsForRequest(ctx, groupID, requestedModel, platform)
 
 	var accounts []Account
@@ -3977,7 +4159,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			}
 		}
 
-		var selected *Account
+		routingEligible := make([]*Account, 0, len(accounts))
 		for i := range accounts {
 			acc := &accounts[i]
 			if _, ok := routingSet[acc.ID]; !ok {
@@ -4006,29 +4188,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 				continue
 			}
-			if selected == nil {
-				selected = acc
-				continue
-			}
-			if acc.Priority < selected.Priority {
-				selected = acc
-			} else if acc.Priority == selected.Priority {
-				switch {
-				case acc.LastUsedAt == nil && selected.LastUsedAt != nil:
-					selected = acc
-				case acc.LastUsedAt != nil && selected.LastUsedAt == nil:
-					// keep selected (never used is preferred)
-				case acc.LastUsedAt == nil && selected.LastUsedAt == nil:
-					if preferOAuth && acc.Type != selected.Type && acc.Type == AccountTypeOAuth {
-						selected = acc
-					}
-				default:
-					if acc.LastUsedAt.Before(*selected.LastUsedAt) {
-						selected = acc
-					}
-				}
-			}
+			routingEligible = append(routingEligible, acc)
 		}
+		selected := s.selectFreshRandomAccountByMinPriority(ctx, routingEligible)
 
 		if selected != nil {
 			s.setStickySessionAccount(ctx, groupID, sessionHash, selected.ID, 0)
@@ -4078,8 +4240,8 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 	ctx = s.withWindowCostPrefetch(ctx, accounts)
 	ctx = s.withRPMPrefetch(ctx, accounts)
 
-	// 3. 按优先级+最久未用选择（考虑模型支持）
-	var selected *Account
+	// 3. 按全局账号优先级选择；同优先级账号随机。
+	eligible := make([]*Account, 0, len(accounts))
 	for i := range accounts {
 		acc := &accounts[i]
 		if _, excluded := excludedIDs[acc.ID]; excluded {
@@ -4105,29 +4267,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 			continue
 		}
-		if selected == nil {
-			selected = acc
-			continue
-		}
-		if acc.Priority < selected.Priority {
-			selected = acc
-		} else if acc.Priority == selected.Priority {
-			switch {
-			case acc.LastUsedAt == nil && selected.LastUsedAt != nil:
-				selected = acc
-			case acc.LastUsedAt != nil && selected.LastUsedAt == nil:
-				// keep selected (never used is preferred)
-			case acc.LastUsedAt == nil && selected.LastUsedAt == nil:
-				if preferOAuth && acc.Type != selected.Type && acc.Type == AccountTypeOAuth {
-					selected = acc
-				}
-			default:
-				if acc.LastUsedAt.Before(*selected.LastUsedAt) {
-					selected = acc
-				}
-			}
-		}
+		eligible = append(eligible, acc)
 	}
+	selected := s.selectFreshRandomAccountByMinPriority(ctx, eligible)
 
 	if selected == nil {
 		stats := s.logDetailedSelectionFailure(ctx, groupID, sessionHash, requestedModel, platform, accounts, excludedIDs, false)
@@ -4146,7 +4288,6 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 // selectAccountWithMixedScheduling 选择账户（支持混合调度）
 // 查询原生平台账户 + 启用 mixed_scheduling 的 antigravity 账户
 func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, nativePlatform string) (*Account, error) {
-	preferOAuth := nativePlatform == PlatformGemini
 	routingAccountIDs := s.routingAccountIDsForRequest(ctx, groupID, requestedModel, nativePlatform)
 
 	var accounts []Account
@@ -4203,7 +4344,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			}
 		}
 
-		var selected *Account
+		routingEligible := make([]*Account, 0, len(accounts))
 		for i := range accounts {
 			acc := &accounts[i]
 			if _, ok := routingSet[acc.ID]; !ok {
@@ -4236,29 +4377,9 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 				continue
 			}
-			if selected == nil {
-				selected = acc
-				continue
-			}
-			if acc.Priority < selected.Priority {
-				selected = acc
-			} else if acc.Priority == selected.Priority {
-				switch {
-				case acc.LastUsedAt == nil && selected.LastUsedAt != nil:
-					selected = acc
-				case acc.LastUsedAt != nil && selected.LastUsedAt == nil:
-					// keep selected (never used is preferred)
-				case acc.LastUsedAt == nil && selected.LastUsedAt == nil:
-					if preferOAuth && acc.Platform == PlatformGemini && selected.Platform == PlatformGemini && acc.Type != selected.Type && acc.Type == AccountTypeOAuth {
-						selected = acc
-					}
-				default:
-					if acc.LastUsedAt.Before(*selected.LastUsedAt) {
-						selected = acc
-					}
-				}
-			}
+			routingEligible = append(routingEligible, acc)
 		}
+		selected := s.selectFreshRandomAccountByMinPriority(ctx, routingEligible)
 
 		if selected != nil {
 			s.setStickySessionAccount(ctx, groupID, sessionHash, selected.ID, 0)
@@ -4306,8 +4427,8 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 	ctx = s.withWindowCostPrefetch(ctx, accounts)
 	ctx = s.withRPMPrefetch(ctx, accounts)
 
-	// 3. 按优先级+最久未用选择（考虑模型支持和混合调度）
-	var selected *Account
+	// 3. 按全局账号优先级选择；同优先级账号随机。
+	eligible := make([]*Account, 0, len(accounts))
 	for i := range accounts {
 		acc := &accounts[i]
 		if _, excluded := excludedIDs[acc.ID]; excluded {
@@ -4337,29 +4458,9 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 			continue
 		}
-		if selected == nil {
-			selected = acc
-			continue
-		}
-		if acc.Priority < selected.Priority {
-			selected = acc
-		} else if acc.Priority == selected.Priority {
-			switch {
-			case acc.LastUsedAt == nil && selected.LastUsedAt != nil:
-				selected = acc
-			case acc.LastUsedAt != nil && selected.LastUsedAt == nil:
-				// keep selected (never used is preferred)
-			case acc.LastUsedAt == nil && selected.LastUsedAt == nil:
-				if preferOAuth && acc.Platform == PlatformGemini && selected.Platform == PlatformGemini && acc.Type != selected.Type && acc.Type == AccountTypeOAuth {
-					selected = acc
-				}
-			default:
-				if acc.LastUsedAt.Before(*selected.LastUsedAt) {
-					selected = acc
-				}
-			}
-		}
+		eligible = append(eligible, acc)
 	}
+	selected := s.selectFreshRandomAccountByMinPriority(ctx, eligible)
 
 	if selected == nil {
 		stats := s.logDetailedSelectionFailure(ctx, groupID, sessionHash, requestedModel, nativePlatform, accounts, excludedIDs, true)
@@ -4386,12 +4487,14 @@ type selectionFailureStats struct {
 	QuotaLimited       int
 	WindowCostLimited  int
 	RPMLimited         int
+	FiveHourLimited    int
 	SamplePlatformIDs  []int64
 	SampleMappingIDs   []int64
 	SampleRateLimitIDs []string
 	SampleQuotaIDs     []int64
 	SampleWindowIDs    []int64
 	SampleRPMIDs       []int64
+	SampleFiveHourIDs  []int64
 }
 
 type selectionFailureDiagnosis struct {
@@ -4425,16 +4528,18 @@ func (s *GatewayService) logDetailedSelectionFailure(
 		zap.Int("quota_limited", stats.QuotaLimited),
 		zap.Int("window_cost_limited", stats.WindowCostLimited),
 		zap.Int("rpm_limited", stats.RPMLimited),
+		zap.Int("five_hour_new_session_limited", stats.FiveHourLimited),
 		zap.Int64s("sample_platform_filtered", stats.SamplePlatformIDs),
 		zap.Int64s("sample_model_unsupported", stats.SampleMappingIDs),
 		zap.Strings("sample_model_rate_limited", stats.SampleRateLimitIDs),
 		zap.Int64s("sample_quota_limited", stats.SampleQuotaIDs),
 		zap.Int64s("sample_window_cost_limited", stats.SampleWindowIDs),
 		zap.Int64s("sample_rpm_limited", stats.SampleRPMIDs),
+		zap.Int64s("sample_five_hour_new_session_limited", stats.SampleFiveHourIDs),
 	)
 	logger.LegacyPrintf(
 		"service.gateway",
-		"[SelectAccountDetailed] group_id=%v model=%s platform=%s session=%s total=%d eligible=%d excluded=%d unschedulable=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d quota_limited=%d window_cost_limited=%d rpm_limited=%d sample_platform_filtered=%v sample_model_unsupported=%v sample_model_rate_limited=%v sample_quota_limited=%v sample_window_cost_limited=%v sample_rpm_limited=%v",
+		"[SelectAccountDetailed] group_id=%v model=%s platform=%s session=%s total=%d eligible=%d excluded=%d unschedulable=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d quota_limited=%d window_cost_limited=%d rpm_limited=%d five_hour_new_session_limited=%d sample_platform_filtered=%v sample_model_unsupported=%v sample_model_rate_limited=%v sample_quota_limited=%v sample_window_cost_limited=%v sample_rpm_limited=%v sample_five_hour_new_session_limited=%v",
 		derefGroupID(groupID),
 		requestedModel,
 		platform,
@@ -4449,12 +4554,14 @@ func (s *GatewayService) logDetailedSelectionFailure(
 		stats.QuotaLimited,
 		stats.WindowCostLimited,
 		stats.RPMLimited,
+		stats.FiveHourLimited,
 		stats.SamplePlatformIDs,
 		stats.SampleMappingIDs,
 		stats.SampleRateLimitIDs,
 		stats.SampleQuotaIDs,
 		stats.SampleWindowIDs,
 		stats.SampleRPMIDs,
+		stats.SampleFiveHourIDs,
 	)
 	if platform == PlatformSora {
 		s.logSoraSelectionFailureDetails(ctx, groupID, sessionHash, requestedModel, accounts, excludedIDs, allowMixedScheduling)
@@ -4501,6 +4608,9 @@ func (s *GatewayService) collectSelectionFailureStats(
 		case "rpm_limited":
 			stats.RPMLimited++
 			stats.SampleRPMIDs = appendSelectionFailureSampleID(stats.SampleRPMIDs, acc.ID)
+		case "five_hour_new_session_limited":
+			stats.FiveHourLimited++
+			stats.SampleFiveHourIDs = appendSelectionFailureSampleID(stats.SampleFiveHourIDs, acc.ID)
 		default:
 			stats.Eligible++
 		}
@@ -4557,6 +4667,9 @@ func (s *GatewayService) diagnoseSelectionFailure(
 	}
 	if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 		return selectionFailureDiagnosis{Category: "rpm_limited"}
+	}
+	if shouldRejectNewSessionForHighFiveHourUsage(acc, time.Now()) {
+		return selectionFailureDiagnosis{Category: "five_hour_new_session_limited"}
 	}
 	return selectionFailureDiagnosis{Category: "eligible"}
 }
@@ -4646,7 +4759,7 @@ func appendSelectionFailureRateSample(samples []string, accountID int64, remaini
 
 func summarizeSelectionFailureStats(stats selectionFailureStats) string {
 	return fmt.Sprintf(
-		"total=%d eligible=%d excluded=%d unschedulable=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d quota_limited=%d window_cost_limited=%d rpm_limited=%d",
+		"total=%d eligible=%d excluded=%d unschedulable=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d quota_limited=%d window_cost_limited=%d rpm_limited=%d five_hour_new_session_limited=%d",
 		stats.Total,
 		stats.Eligible,
 		stats.Excluded,
@@ -4657,6 +4770,7 @@ func summarizeSelectionFailureStats(stats selectionFailureStats) string {
 		stats.QuotaLimited,
 		stats.WindowCostLimited,
 		stats.RPMLimited,
+		stats.FiveHourLimited,
 	)
 }
 
@@ -4885,8 +4999,11 @@ func (s *GatewayService) getOAuthToken(ctx context.Context, account *Account) (s
 
 // 重试相关常量
 const (
-	// 最大尝试次数（包含首次请求）。过多重试会导致请求堆积与资源耗尽。
+	// 旧通用重试策略的最大尝试次数（包含首次请求）。
 	maxRetryAttempts = 5
+	// 外层循环为专用 HTTP 5xx 重放预留一个额外槽位。通用重试分支
+	// 仍使用 attempt < maxRetryAttempts 限制，因此不会因此多获得一次通用重试。
+	maxRetryLoopAttempts = maxRetryAttempts + 1
 
 	// 指数退避：第 N 次失败后的等待 = retryBaseDelay * 2^(N-1)，并且上限为 retryMaxDelay。
 	retryBaseDelay = 300 * time.Millisecond
@@ -4897,7 +5014,54 @@ const (
 	maxRetryElapsed = 10 * time.Second
 )
 
+func isGatewayHTTPSameAccountRetryStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// isSameAccountReplayExcludedStatus is a hard boundary shared by the direct
+// service retry loops and the handler-level pool retry loops. These responses
+// may still trigger normal account failover, but must not replay the request on
+// the account that returned them.
+func isSameAccountReplayExcludedStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusTooManyRequests,
+		http.StatusNotImplemented,
+		http.StatusHTTPVersionNotSupported,
+		529:
+		return true
+	default:
+		return false
+	}
+}
+
+// shouldRetryGatewayHTTPOnSameAccount grants one dedicated HTTP 5xx replay to
+// the initially selected account. A handler failover carries a positive switch
+// count and must not regain this budget. Transport failures and responses that
+// have already started are intentionally outside this policy.
+func shouldRetryGatewayHTTPOnSameAccount(ctx context.Context, c *gin.Context, statusCode int, retryUsed bool) bool {
+	if retryUsed || !isGatewayHTTPSameAccountRetryStatus(statusCode) {
+		return false
+	}
+	if c != nil && c.Writer != nil && c.Writer.Written() {
+		return false
+	}
+	switchCount, ok := AccountSwitchCountFromContext(ctx)
+	return !ok || switchCount == 0
+}
+
 func (s *GatewayService) shouldRetryUpstreamError(account *Account, statusCode int) bool {
+	if isSameAccountReplayExcludedStatus(statusCode) {
+		return false
+	}
+
 	// OAuth/Setup Token 账号：仅 403 重试
 	if account.IsOAuth() {
 		return statusCode == 403
@@ -5435,8 +5599,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// 重试循环
 	var resp *http.Response
 	retryStart := time.Now()
-	claudeCodeCacheSafeRetryUsed := false
-	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+	sameAccountHTTPReplayUsed := false
+	for attempt := 1; attempt <= maxRetryLoopAttempts; attempt++ {
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, oauthIdentity)
@@ -5653,8 +5817,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			_ = resp.Body.Close()
 			if readErr == nil && shouldPreserveClaudeCodeCacheOnTransientUpstreamError(ctx, account, parsed, resp, respBody) {
 				SetOpsUpstreamForwardResponseSnapshot(c, resp.StatusCode, resp.Header, respBody)
-				if !claudeCodeCacheSafeRetryUsed {
-					claudeCodeCacheSafeRetryUsed = true
+				if shouldRetryGatewayHTTPOnSameAccount(ctx, c, resp.StatusCode, sameAccountHTTPReplayUsed) {
+					sameAccountHTTPReplayUsed = true
 					upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 					if upstreamMsg == "" {
 						upstreamMsg = strings.TrimSpace(string(respBody))
@@ -5675,10 +5839,43 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					}
 					continue
 				}
-				logger.LegacyPrintf("service.gateway", "Account %d: cache-safe Claude Code transient 502 persisted after same-account retry; returning client retryable error", account.ID)
+				logger.LegacyPrintf("service.gateway", "Account %d: cache-safe Claude Code transient 502 replay unavailable or exhausted; returning client retryable error", account.ID)
 				return s.writeClientRetryableClaudeCodeUpstreamError(c, account, resp, respBody)
 			}
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		}
+
+		// A returned HTTP 500/502/503/504 is safe to classify before any response
+		// bytes are streamed downstream. Give only the initially selected account
+		// one replay, then let the handler fail over to another account.
+		if isGatewayHTTPSameAccountRetryStatus(resp.StatusCode) {
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+			_ = resp.Body.Close()
+			if shouldRetryGatewayHTTPOnSameAccount(ctx, c, resp.StatusCode, sameAccountHTTPReplayUsed) {
+				sameAccountHTTPReplayUsed = true
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: resp.StatusCode,
+					UpstreamRequestID:  resp.Header.Get("x-request-id"),
+					Kind:               "same_account_5xx_retry",
+					Message:            extractUpstreamErrorMessage(respBody),
+					Detail: func() string {
+						if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+							return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+						}
+						return ""
+					}(),
+				})
+				logger.LegacyPrintf("service.gateway", "Account %d: upstream HTTP %d, retrying same account once", account.ID, resp.StatusCode)
+				if err := sleepWithContext(ctx, retryBaseDelay); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			break
 		}
 
 		// 检查是否需要通用重试（排除400，因为400已经在上面特殊处理过了）
@@ -5782,7 +5979,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				return nil, &UpstreamFailoverError{
 					StatusCode:             resp.StatusCode,
 					ResponseBody:           respBody,
-					RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
+					RetryableOnSameAccount: !isSameAccountReplayExcludedStatus(resp.StatusCode) && !isGatewayHTTPSameAccountRetryStatus(resp.StatusCode) && account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
 				}
 			}
 			return s.handleRetryExhaustedError(ctx, resp, c, account)
@@ -5804,6 +6001,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform:           account.Platform,
 			AccountID:          account.ID,
+			AccountName:        account.Name,
 			UpstreamStatusCode: resp.StatusCode,
 			UpstreamRequestID:  resp.Header.Get("x-request-id"),
 			Kind:               "failover",
@@ -5818,7 +6016,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           respBody,
-			RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
+			RetryableOnSameAccount: !isSameAccountReplayExcludedStatus(resp.StatusCode) && !isGatewayHTTPSameAccountRetryStatus(resp.StatusCode) && account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
 		}
 	}
 	if resp.StatusCode >= 400 {
@@ -5985,7 +6183,8 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 
 	var resp *http.Response
 	retryStart := time.Now()
-	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+	httpServerErrorRetryUsed := false
+	for attempt := 1; attempt <= maxRetryLoopAttempts; attempt++ {
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
 		upstreamReq, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token)
 		releaseUpstreamCtx()
@@ -6017,6 +6216,31 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				},
 			})
 			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+		}
+
+		if isGatewayHTTPSameAccountRetryStatus(resp.StatusCode) {
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+			_ = resp.Body.Close()
+			if shouldRetryGatewayHTTPOnSameAccount(ctx, c, resp.StatusCode, httpServerErrorRetryUsed) {
+				httpServerErrorRetryUsed = true
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: resp.StatusCode,
+					UpstreamRequestID:  resp.Header.Get("x-request-id"),
+					Passthrough:        true,
+					Kind:               "same_account_5xx_retry",
+					Message:            extractUpstreamErrorMessage(respBody),
+				})
+				logger.LegacyPrintf("service.gateway", "Anthropic passthrough account %d: upstream HTTP %d, retrying same account once", account.ID, resp.StatusCode)
+				if err := sleepWithContext(ctx, retryBaseDelay); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			break
 		}
 
 		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）
@@ -6102,7 +6326,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
-				RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
+				RetryableOnSameAccount: !isSameAccountReplayExcludedStatus(resp.StatusCode) && !isGatewayHTTPSameAccountRetryStatus(resp.StatusCode) && account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
 		return s.handleRetryExhaustedError(ctx, resp, c, account)
@@ -6137,7 +6361,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           respBody,
-			RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
+			RetryableOnSameAccount: !isSameAccountReplayExcludedStatus(resp.StatusCode) && !isGatewayHTTPSameAccountRetryStatus(resp.StatusCode) && account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
 		}
 	}
 
@@ -6724,7 +6948,8 @@ func (s *GatewayService) executeBedrockUpstream(
 	var resp *http.Response
 	var err error
 	retryStart := time.Now()
-	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+	httpServerErrorRetryUsed := false
+	for attempt := 1; attempt <= maxRetryLoopAttempts; attempt++ {
 		var upstreamReq *http.Request
 		if account.IsBedrockAPIKey() {
 			upstreamReq, err = s.buildUpstreamRequestBedrockAPIKey(ctx, body, modelID, region, stream, apiKey)
@@ -6758,6 +6983,29 @@ func (s *GatewayService) executeBedrockUpstream(
 				},
 			})
 			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+		}
+
+		if isGatewayHTTPSameAccountRetryStatus(resp.StatusCode) {
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+			_ = resp.Body.Close()
+			if shouldRetryGatewayHTTPOnSameAccount(ctx, c, resp.StatusCode, httpServerErrorRetryUsed) {
+				httpServerErrorRetryUsed = true
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: resp.StatusCode,
+					Kind:               "same_account_5xx_retry",
+					Message:            extractUpstreamErrorMessage(respBody),
+				})
+				logger.LegacyPrintf("service.gateway", "[Bedrock] account %d: upstream HTTP %d, retrying same account once", account.ID, resp.StatusCode)
+				if err := sleepWithContext(ctx, retryBaseDelay); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			break
 		}
 
 		if resp.StatusCode >= 400 && resp.StatusCode != 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
@@ -6839,7 +7087,7 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
-				RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
+				RetryableOnSameAccount: !isSameAccountReplayExcludedStatus(resp.StatusCode) && !isGatewayHTTPSameAccountRetryStatus(resp.StatusCode) && account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
 		return s.handleRetryExhaustedError(ctx, resp, c, account)
@@ -6863,7 +7111,7 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           respBody,
-			RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
+			RetryableOnSameAccount: !isSameAccountReplayExcludedStatus(resp.StatusCode) && !isGatewayHTTPSameAccountRetryStatus(resp.StatusCode) && account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
 		}
 	}
 
@@ -7760,6 +8008,7 @@ func (s *GatewayService) handleErrorResponseForModel(ctx context.Context, resp *
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform:           account.Platform,
 		AccountID:          account.ID,
+		AccountName:        account.Name,
 		UpstreamStatusCode: resp.StatusCode,
 		UpstreamRequestID:  resp.Header.Get("x-request-id"),
 		Kind:               "http_error",
@@ -7879,10 +8128,10 @@ func (s *GatewayService) handleRetryExhaustedSideEffects(ctx context.Context, re
 	// OAuth/Setup Token 账号的 403：标记账号异常
 	if account.IsOAuth() && statusCode == 403 {
 		s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body)
-		logger.LegacyPrintf("service.gateway", "Account %d: marked as error after %d retries for status %d", account.ID, maxRetryAttempts, statusCode)
+		logger.LegacyPrintf("service.gateway", "Account %d: marked as error after retry policy exhausted for status %d", account.ID, statusCode)
 	} else {
 		// API Key 未配置错误码：不标记账号状态
-		logger.LegacyPrintf("service.gateway", "Account %d: upstream error %d after %d retries (not marking account)", account.ID, statusCode, maxRetryAttempts)
+		logger.LegacyPrintf("service.gateway", "Account %d: upstream error %d after retry policy exhausted (not marking account)", account.ID, statusCode)
 	}
 }
 
@@ -7984,6 +8233,7 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform:           account.Platform,
 		AccountID:          account.ID,
+		AccountName:        account.Name,
 		UpstreamStatusCode: resp.StatusCode,
 		UpstreamRequestID:  resp.Header.Get("x-request-id"),
 		Kind:               "retry_exhausted",

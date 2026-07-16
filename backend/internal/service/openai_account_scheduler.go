@@ -655,7 +655,15 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 	minTTFT, maxTTFT := 0.0, 0.0
 	hasTTFTSample := false
 	candidates := make([]openAIAccountCandidateScore, 0, len(accounts))
-	for _, account := range accounts {
+	now := time.Now()
+	for _, snapshotAccount := range accounts {
+		account := s.service.resolveFreshSchedulableOpenAIAccount(ctx, snapshotAccount, req.RequestedModel)
+		if account == nil {
+			continue
+		}
+		if shouldRejectNewSessionForHighFiveHourUsage(account, now) {
+			continue
+		}
 		loadInfo := loadMap[account.ID]
 		if loadInfo == nil {
 			loadInfo = &AccountLoadInfo{AccountID: account.ID}
@@ -691,8 +699,10 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 			hasTTFT:   hasTTFT,
 		})
 	}
+	if len(candidates) == 0 {
+		return nil, 0, 0, false, nil
+	}
 	loadSkew := calcLoadSkewByMoments(loadRateSum, loadRateSumSquares, len(candidates))
-	candidates = filterOpenAIAccountCandidatesByQuotaBudget(candidates, req.RequestedModel, time.Now())
 
 	weights := s.service.openAIWSSchedulerWeights()
 	for i := range candidates {
@@ -726,7 +736,9 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 	for i := 0; i < len(selectionOrder); i++ {
 		candidate := selectionOrder[i]
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel)
-		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+		if fresh == nil ||
+			shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) ||
+			!s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			continue
 		}
 		hadFresh = true
@@ -754,7 +766,9 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 	// WaitPlan.MaxConcurrency 使用 Concurrency（非 EffectiveLoadFactor），因为 WaitPlan 控制的是 Redis 实际并发槽位等待。
 	for _, candidate := range selectionOrder {
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel)
-		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+		if fresh == nil ||
+			shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) ||
+			!s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			continue
 		}
 		hadFresh = true
@@ -770,34 +784,6 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 	}
 
 	return nil, topK, loadSkew, hadFresh, nil
-}
-
-func filterOpenAIAccountCandidatesByQuotaBudget(candidates []openAIAccountCandidateScore, requestedModel string, now time.Time) []openAIAccountCandidateScore {
-	if len(candidates) <= 1 {
-		return candidates
-	}
-	best := -1.0
-	scores := make([]float64, len(candidates))
-	for i, candidate := range candidates {
-		score := accountQuotaBudgetForScheduling(candidate.account, requestedModel, now)
-		if !score.known {
-			return candidates
-		}
-		scores[i] = score.score
-		if score.score > best {
-			best = score.score
-		}
-	}
-	out := make([]openAIAccountCandidateScore, 0, len(candidates))
-	for i, candidate := range candidates {
-		if scores[i] >= best-quotaBudgetScoreEpsilon {
-			out = append(out, candidate)
-		}
-	}
-	if len(out) == 0 {
-		return candidates
-	}
-	return out
 }
 
 func (s *defaultOpenAIAccountScheduler) isAccountTransportCompatible(account *Account, requiredTransport OpenAIUpstreamTransport) bool {

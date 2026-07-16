@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +34,33 @@ type openAICodexSnapshotAsyncRepo struct {
 type openAICodexExtraListRepo struct {
 	stubOpenAIAccountRepo
 	rateLimitCh chan time.Time
+}
+
+type codexSnapshotWriteEvent struct {
+	call        int
+	usedPercent float64
+	err         error
+}
+
+type openAICodexSnapshotControlledRepo struct {
+	stubOpenAIAccountRepo
+	mu           sync.Mutex
+	calls        int
+	started      chan codexSnapshotWriteEvent
+	finished     chan codexSnapshotWriteEvent
+	releaseFirst chan struct{}
+	failFirst    bool
+}
+
+func awaitCodexSnapshotWriteEvent(t *testing.T, ch <-chan codexSnapshotWriteEvent, description string) codexSnapshotWriteEvent {
+	t.Helper()
+	select {
+	case event := <-ch:
+		return event
+	case <-time.After(2 * time.Second):
+		t.Fatalf("waiting for %s", description)
+		return codexSnapshotWriteEvent{}
+	}
 }
 
 func (r *openAIWSRateLimitSignalRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
@@ -71,6 +100,31 @@ func (r *openAICodexExtraListRepo) SetRateLimited(_ context.Context, _ int64, re
 		r.rateLimitCh <- resetAt
 	}
 	return nil
+}
+
+func (r *openAICodexSnapshotControlledRepo) UpdateExtra(ctx context.Context, _ int64, updates map[string]any) error {
+	r.mu.Lock()
+	r.calls++
+	call := r.calls
+	r.mu.Unlock()
+
+	usedPercent, _ := updates["codex_5h_used_percent"].(float64)
+	event := codexSnapshotWriteEvent{call: call, usedPercent: usedPercent}
+	r.started <- event
+	if call == 1 && r.releaseFirst != nil {
+		select {
+		case <-r.releaseFirst:
+		case <-ctx.Done():
+			event.err = ctx.Err()
+			r.finished <- event
+			return event.err
+		}
+	}
+	if call == 1 && r.failFirst {
+		event.err = errors.New("injected Codex snapshot persistence failure")
+	}
+	r.finished <- event
+	return event.err
 }
 
 func (r *openAICodexExtraListRepo) ListWithFilters(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64) ([]Account, *pagination.PaginationResult, error) {
@@ -437,6 +491,197 @@ func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_ThrottlesExtraWrites(t *t
 		t.Fatalf("unexpected second codex snapshot write: %v", updates)
 	case <-time.After(200 * time.Millisecond):
 	}
+}
+
+func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_BypassesThrottleAtFiveHourAdmissionBoundaries(t *testing.T) {
+	repo := &openAICodexSnapshotAsyncRepo{
+		updateExtraCh: make(chan map[string]any, 5),
+		rateLimitCh:   make(chan time.Time, 1),
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:           repo,
+		codexSnapshotThrottle: newAccountWriteThrottle(time.Hour),
+	}
+	snapshot := func(used5h float64, reset5hSeconds int) *OpenAICodexUsageSnapshot {
+		return &OpenAICodexUsageSnapshot{
+			PrimaryUsedPercent:         ptrFloat64WS(10),
+			PrimaryResetAfterSeconds:   ptrIntWS(3600),
+			PrimaryWindowMinutes:       ptrIntWS(10080),
+			SecondaryUsedPercent:       ptrFloat64WS(used5h),
+			SecondaryResetAfterSeconds: ptrIntWS(reset5hSeconds),
+			SecondaryWindowMinutes:     ptrIntWS(300),
+		}
+	}
+	awaitWrite := func(want float64) {
+		t.Helper()
+		select {
+		case updates := <-repo.updateExtraCh:
+			require.Equal(t, want, updates["codex_5h_used_percent"])
+		case <-time.After(2 * time.Second):
+			t.Fatalf("waiting for codex 5h boundary write: want=%v", want)
+		}
+	}
+
+	svc.updateCodexUsageSnapshot(context.Background(), 778, snapshot(79, 1200))
+	awaitWrite(79)
+
+	// Crossing strictly above 80% must be visible immediately to new-session admission.
+	svc.updateCodexUsageSnapshot(context.Background(), 778, snapshot(81, 1200))
+	awaitWrite(81)
+
+	// Same-side telemetry remains throttled.
+	svc.updateCodexUsageSnapshot(context.Background(), 778, snapshot(82, 1200))
+	select {
+	case updates := <-repo.updateExtraCh:
+		t.Fatalf("unexpected same-side codex snapshot write: %v", updates)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// A material reset-window shift and a later recovery both bypass throttling.
+	svc.updateCodexUsageSnapshot(context.Background(), 778, snapshot(82, 1800))
+	awaitWrite(82)
+	svc.updateCodexUsageSnapshot(context.Background(), 778, snapshot(20, 1800))
+	awaitWrite(20)
+}
+
+func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_SerializesBoundaryWritesPerAccount(t *testing.T) {
+	repo := &openAICodexSnapshotControlledRepo{
+		started:      make(chan codexSnapshotWriteEvent, 2),
+		finished:     make(chan codexSnapshotWriteEvent, 2),
+		releaseFirst: make(chan struct{}),
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:           repo,
+		codexSnapshotThrottle: newAccountWriteThrottle(time.Hour),
+	}
+	snapshot := func(used5h float64) *OpenAICodexUsageSnapshot {
+		return &OpenAICodexUsageSnapshot{
+			PrimaryUsedPercent:         ptrFloat64WS(10),
+			PrimaryResetAfterSeconds:   ptrIntWS(3600),
+			PrimaryWindowMinutes:       ptrIntWS(10080),
+			SecondaryUsedPercent:       ptrFloat64WS(used5h),
+			SecondaryResetAfterSeconds: ptrIntWS(1200),
+			SecondaryWindowMinutes:     ptrIntWS(300),
+		}
+	}
+
+	svc.updateCodexUsageSnapshot(context.Background(), 779, snapshot(79))
+	firstStarted := awaitCodexSnapshotWriteEvent(t, repo.started, "first Codex snapshot write to start")
+	require.Equal(t, 1, firstStarted.call)
+	require.Equal(t, 79.0, firstStarted.usedPercent)
+
+	svc.updateCodexUsageSnapshot(context.Background(), 779, snapshot(81))
+	select {
+	case event := <-repo.started:
+		t.Fatalf("second snapshot started before the first completed: %+v", event)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(repo.releaseFirst)
+	firstFinished := awaitCodexSnapshotWriteEvent(t, repo.finished, "first Codex snapshot write to finish")
+	require.Equal(t, 1, firstFinished.call)
+	require.NoError(t, firstFinished.err)
+	select {
+	case secondStarted := <-repo.started:
+		require.Equal(t, 2, secondStarted.call)
+		require.Equal(t, 81.0, secondStarted.usedPercent)
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiting for second serialized Codex snapshot write")
+	}
+	secondFinished := awaitCodexSnapshotWriteEvent(t, repo.finished, "second Codex snapshot write to finish")
+	require.Equal(t, 2, secondFinished.call)
+	require.NoError(t, secondFinished.err)
+}
+
+func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_FailedInFlightWritePersistsLatestPendingSnapshot(t *testing.T) {
+	repo := &openAICodexSnapshotControlledRepo{
+		started:      make(chan codexSnapshotWriteEvent, 2),
+		finished:     make(chan codexSnapshotWriteEvent, 2),
+		releaseFirst: make(chan struct{}),
+		failFirst:    true,
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:           repo,
+		codexSnapshotThrottle: newAccountWriteThrottle(time.Hour),
+	}
+	snapshot := func(used5h float64) *OpenAICodexUsageSnapshot {
+		return &OpenAICodexUsageSnapshot{
+			PrimaryUsedPercent:         ptrFloat64WS(10),
+			PrimaryResetAfterSeconds:   ptrIntWS(3600),
+			PrimaryWindowMinutes:       ptrIntWS(10080),
+			SecondaryUsedPercent:       ptrFloat64WS(used5h),
+			SecondaryResetAfterSeconds: ptrIntWS(1200),
+			SecondaryWindowMinutes:     ptrIntWS(300),
+		}
+	}
+
+	svc.updateCodexUsageSnapshot(context.Background(), 780, snapshot(81))
+	firstStarted := awaitCodexSnapshotWriteEvent(t, repo.started, "failed Codex snapshot write to start")
+	require.Equal(t, 1, firstStarted.call)
+
+	// While the first write is blocked, retain only the latest same-side
+	// snapshot. It must be persisted automatically if the active write fails.
+	svc.updateCodexUsageSnapshot(context.Background(), 780, snapshot(82))
+	svc.updateCodexUsageSnapshot(context.Background(), 780, snapshot(83))
+	svc.updateCodexUsageSnapshot(context.Background(), 780, snapshot(84))
+	select {
+	case event := <-repo.started:
+		t.Fatalf("pending snapshot started before the active write completed: %+v", event)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(repo.releaseFirst)
+	firstFinished := awaitCodexSnapshotWriteEvent(t, repo.finished, "failed Codex snapshot write to finish")
+	require.Error(t, firstFinished.err)
+	select {
+	case secondStarted := <-repo.started:
+		require.Equal(t, 2, secondStarted.call)
+		require.Equal(t, 84.0, secondStarted.usedPercent)
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiting for latest pending snapshot after Codex persistence failure")
+	}
+	secondFinished := awaitCodexSnapshotWriteEvent(t, repo.finished, "Codex snapshot retry to finish")
+	require.Equal(t, 2, secondFinished.call)
+	require.NoError(t, secondFinished.err)
+	select {
+	case event := <-repo.started:
+		t.Fatalf("expected pending snapshots to coalesce to one write, got: %+v", event)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestAccountWriteThrottle_OlderArrivalCannotReplaceLatestPendingSnapshot(t *testing.T) {
+	throttle := newAccountWriteThrottle(time.Hour)
+	accountID := int64(781)
+	baseTime := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	openObservation := codexFiveHourAdmissionObservation{
+		class:    codexFiveHourAdmissionOpen,
+		resetAt:  baseTime.Add(2 * time.Hour),
+		hasReset: true,
+	}
+	blockedObservation := codexFiveHourAdmissionObservation{
+		class:    codexFiveHourAdmissionBlocked,
+		resetAt:  baseTime.Add(2 * time.Hour),
+		hasReset: true,
+	}
+
+	active, start := throttle.BeginCodexSnapshotWrite(accountID, baseTime, openObservation, map[string]any{"codex_5h_used_percent": 79.0})
+	require.True(t, start)
+	require.NotNil(t, active)
+
+	// Simulate concurrent callers acquiring the coordinator lock out of timestamp
+	// order: the newer blocked observation is accepted before an older open one.
+	newerPending, start := throttle.BeginCodexSnapshotWrite(accountID, baseTime.Add(2*time.Second), blockedObservation, map[string]any{"codex_5h_used_percent": 81.0})
+	require.False(t, start)
+	require.Nil(t, newerPending)
+	olderPending, start := throttle.BeginCodexSnapshotWrite(accountID, baseTime.Add(time.Second), openObservation, map[string]any{"codex_5h_used_percent": 79.0})
+	require.False(t, start)
+	require.Nil(t, olderPending)
+
+	next := throttle.CompleteCodexSnapshotWrite(active, false, baseTime.Add(3*time.Second))
+	require.NotNil(t, next)
+	require.Equal(t, 81.0, next.updates["codex_5h_used_percent"])
+	require.Nil(t, throttle.CompleteCodexSnapshotWrite(next, true, baseTime.Add(4*time.Second)))
 }
 
 func ptrFloat64WS(v float64) *float64 { return &v }

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"net/http"
 	"sort"
@@ -51,7 +52,10 @@ const (
 	openAIWSRetryBackoffInitialDefault = 120 * time.Millisecond
 	openAIWSRetryBackoffMaxDefault     = 2 * time.Second
 	openAIWSRetryJitterRatioDefault    = 0.2
-	openAICompactSessionSeedKey        = "openai_compact_session_seed"
+	// HTTP 500/502/503/504 are retried once on the initially selected account.
+	// Keep this deliberately short: the second failure is handed to failover.
+	openAIHTTPSameAccountRetryBackoff = 100 * time.Millisecond
+	openAICompactSessionSeedKey       = "openai_compact_session_seed"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
 )
@@ -276,41 +280,170 @@ type openAIWSRetryMetrics struct {
 }
 
 type accountWriteThrottle struct {
-	minInterval time.Duration
-	mu          sync.Mutex
-	lastByID    map[int64]time.Time
+	minInterval           time.Duration
+	mu                    sync.Mutex
+	lastByID              map[int64]time.Time
+	lastCodexFiveHourByID map[int64]codexFiveHourAdmissionObservation
+	latestCodexSeenAtByID map[int64]time.Time
+	activeCodexWriteByID  map[int64]bool
+	pendingCodexWriteByID map[int64]*codexSnapshotWriteRequest
+}
+
+type codexFiveHourAdmissionClass uint8
+
+const (
+	codexFiveHourAdmissionUnknown codexFiveHourAdmissionClass = iota
+	codexFiveHourAdmissionOpen
+	codexFiveHourAdmissionBlocked
+)
+
+type codexFiveHourAdmissionObservation struct {
+	class    codexFiveHourAdmissionClass
+	resetAt  time.Time
+	hasReset bool
+}
+
+type codexSnapshotWriteRequest struct {
+	accountID   int64
+	receivedAt  time.Time
+	observation codexFiveHourAdmissionObservation
+	updates     map[string]any
 }
 
 func newAccountWriteThrottle(minInterval time.Duration) *accountWriteThrottle {
 	return &accountWriteThrottle{
-		minInterval: minInterval,
-		lastByID:    make(map[int64]time.Time),
+		minInterval:           minInterval,
+		lastByID:              make(map[int64]time.Time),
+		lastCodexFiveHourByID: make(map[int64]codexFiveHourAdmissionObservation),
+		latestCodexSeenAtByID: make(map[int64]time.Time),
+		activeCodexWriteByID:  make(map[int64]bool),
+		pendingCodexWriteByID: make(map[int64]*codexSnapshotWriteRequest),
 	}
 }
 
-func (t *accountWriteThrottle) Allow(id int64, now time.Time) bool {
-	if t == nil || id <= 0 || t.minInterval <= 0 {
-		return true
+func (t *accountWriteThrottle) BeginCodexSnapshotWrite(
+	id int64,
+	now time.Time,
+	observation codexFiveHourAdmissionObservation,
+	updates map[string]any,
+) (*codexSnapshotWriteRequest, bool) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	request := &codexSnapshotWriteRequest{
+		accountID:   id,
+		receivedAt:  now,
+		observation: observation,
+		updates:     updates,
+	}
+	if t == nil || id <= 0 {
+		return request, true
 	}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	if last, ok := t.lastByID[id]; ok && now.Sub(last) < t.minInterval {
-		return false
+	if t.lastCodexFiveHourByID == nil {
+		t.lastCodexFiveHourByID = make(map[int64]codexFiveHourAdmissionObservation)
 	}
-	t.lastByID[id] = now
+	if t.latestCodexSeenAtByID == nil {
+		t.latestCodexSeenAtByID = make(map[int64]time.Time)
+	}
+	if t.activeCodexWriteByID == nil {
+		t.activeCodexWriteByID = make(map[int64]bool)
+	}
+	if t.pendingCodexWriteByID == nil {
+		t.pendingCodexWriteByID = make(map[int64]*codexSnapshotWriteRequest)
+	}
+	if latest, ok := t.latestCodexSeenAtByID[id]; ok && now.Before(latest) {
+		return nil, false
+	}
+	t.latestCodexSeenAtByID[id] = now
 
-	if len(t.lastByID) > 4096 {
-		cutoff := now.Add(-4 * t.minInterval)
-		for accountID, writtenAt := range t.lastByID {
-			if writtenAt.Before(cutoff) {
-				delete(t.lastByID, accountID)
+	if t.activeCodexWriteByID[id] {
+		// Keep only the latest observation while one write is active. Completion
+		// either drops it as redundant after success or persists it immediately
+		// after failure/a material admission-state change.
+		t.pendingCodexWriteByID[id] = request
+		return nil, false
+	}
+	if !t.shouldStartCodexSnapshotWriteLocked(id, now, observation) {
+		return nil, false
+	}
+
+	t.activeCodexWriteByID[id] = true
+	return request, true
+}
+
+func (t *accountWriteThrottle) shouldStartCodexSnapshotWriteLocked(id int64, now time.Time, observation codexFiveHourAdmissionObservation) bool {
+	if previous, ok := t.lastCodexFiveHourByID[id]; ok && codexFiveHourAdmissionChanged(previous, observation) {
+		return true
+	}
+	if t.minInterval <= 0 {
+		return true
+	}
+	last, ok := t.lastByID[id]
+	return !ok || now.Sub(last) >= t.minInterval
+}
+
+func (t *accountWriteThrottle) CompleteCodexSnapshotWrite(completed *codexSnapshotWriteRequest, success bool, now time.Time) *codexSnapshotWriteRequest {
+	if t == nil || completed == nil || completed.accountID <= 0 {
+		return nil
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	id := completed.accountID
+	if success {
+		// Throttle from the snapshot observation time, not the database return
+		// time, so a slow write cannot suppress a genuinely newer snapshot.
+		t.lastByID[id] = completed.receivedAt
+		t.lastCodexFiveHourByID[id] = completed.observation
+	}
+
+	pending := t.pendingCodexWriteByID[id]
+	delete(t.pendingCodexWriteByID, id)
+	if pending != nil && (!success || t.shouldStartCodexSnapshotWriteLocked(id, pending.receivedAt, pending.observation)) {
+		return pending
+	}
+
+	delete(t.activeCodexWriteByID, id)
+	t.cleanupLocked(now)
+	return nil
+}
+
+func (t *accountWriteThrottle) cleanupLocked(now time.Time) {
+	if t == nil || t.minInterval <= 0 || len(t.latestCodexSeenAtByID) <= 4096 {
+		return
+	}
+
+	cutoff := now.Add(-4 * t.minInterval)
+	for accountID, seenAt := range t.latestCodexSeenAtByID {
+		if seenAt.Before(cutoff) {
+			if t.activeCodexWriteByID[accountID] {
+				continue
 			}
+			delete(t.lastByID, accountID)
+			delete(t.lastCodexFiveHourByID, accountID)
+			delete(t.latestCodexSeenAtByID, accountID)
 		}
 	}
+}
 
-	return true
+func codexFiveHourAdmissionChanged(previous, current codexFiveHourAdmissionObservation) bool {
+	if previous.class != current.class || previous.hasReset != current.hasReset {
+		return true
+	}
+	if !previous.hasReset {
+		return false
+	}
+	delta := current.resetAt.Sub(previous.resetAt)
+	if delta < 0 {
+		delta = -delta
+	}
+	return delta > time.Minute
 }
 
 var defaultOpenAICodexSnapshotPersistThrottle = newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval)
@@ -1169,8 +1302,8 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
 
-	// 3. 按优先级 + LRU 选择最佳账号
-	// Select by priority + LRU
+	// 3. 按账号优先级选择，并在同优先级内随机分散新会话。
+	// Select by account priority and spread new sessions randomly within it.
 	selected := s.selectBestAccount(ctx, accounts, requestedModel, excludedIDs)
 
 	if selected == nil {
@@ -1236,13 +1369,16 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	return account
 }
 
-// selectBestAccount 从候选账号中选择最佳账号（优先级 + LRU）。
+// selectBestAccount 从候选账号中选择最佳账号（账号优先级 + 同级随机）。
 // 返回 nil 表示无可用账号。
 //
-// selectBestAccount selects the best account from candidates (priority + LRU).
+// selectBestAccount selects the best account from candidates (account priority
+// plus random selection within the best priority).
 // Returns nil if no available account.
 func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, accounts []Account, requestedModel string, excludedIDs map[int64]struct{}) *Account {
-	var selected *Account
+	var bestPriorityCandidates []*Account
+	bestPriority := 0
+	now := time.Now()
 
 	for i := range accounts {
 		acc := &accounts[i]
@@ -1254,56 +1390,31 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, accounts [
 		}
 
 		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel)
-		if fresh == nil {
+		if fresh == nil || shouldRejectNewSessionForHighFiveHourUsage(fresh, now) {
 			continue
 		}
 
-		// 选择优先级最高且最久未使用的账号
-		// Select highest priority and least recently used
-		if selected == nil {
-			selected = fresh
-			continue
-		}
-
-		if s.isBetterAccount(fresh, selected) {
-			selected = fresh
+		if len(bestPriorityCandidates) == 0 || fresh.Priority < bestPriority {
+			bestPriority = fresh.Priority
+			bestPriorityCandidates = []*Account{fresh}
+		} else if fresh.Priority == bestPriority {
+			bestPriorityCandidates = append(bestPriorityCandidates, fresh)
 		}
 	}
 
-	return selected
+	if len(bestPriorityCandidates) == 0 {
+		return nil
+	}
+	return bestPriorityCandidates[rand.Intn(len(bestPriorityCandidates))]
 }
 
-// isBetterAccount 判断 candidate 是否比 current 更优。
-// 规则：优先级更高（数值更小）优先；同优先级时，未使用过的优先，其次是最久未使用的。
-//
-// isBetterAccount checks if candidate is better than current.
-// Rules: higher priority (lower value) wins; same priority: never used > least recently used.
-func (s *OpenAIGatewayService) isBetterAccount(candidate, current *Account) bool {
-	// 优先级更高（数值更小）
-	// Higher priority (lower value)
-	if candidate.Priority < current.Priority {
-		return true
-	}
-	if candidate.Priority > current.Priority {
-		return false
-	}
-
-	// 同优先级，比较最后使用时间
-	// Same priority, compare last used time
-	switch {
-	case candidate.LastUsedAt == nil && current.LastUsedAt != nil:
-		// candidate 从未使用，优先
-		return true
-	case candidate.LastUsedAt != nil && current.LastUsedAt == nil:
-		// current 从未使用，保持
-		return false
-	case candidate.LastUsedAt == nil && current.LastUsedAt == nil:
-		// 都未使用，保持
-		return false
-	default:
-		// 都使用过，选择最久未使用的
-		return candidate.LastUsedAt.Before(*current.LastUsedAt)
-	}
+func shuffleOpenAIAccountsWithinPriority(accounts []*Account) {
+	rand.Shuffle(len(accounts), func(i, j int) {
+		accounts[i], accounts[j] = accounts[j], accounts[i]
+	})
+	sort.SliceStable(accounts, func(i, j int) bool {
+		return accounts[i].Priority < accounts[j].Priority
+	})
 }
 
 // SelectAccountWithLoadAwareness selects an account with load-awareness and wait plan.
@@ -1438,10 +1549,10 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
 	if err != nil {
 		ordered := append([]*Account(nil), candidates...)
-		sortAccountsByPriorityAndLastUsed(ordered, false)
+		shuffleOpenAIAccountsWithinPriority(ordered)
 		for _, acc := range ordered {
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel)
-			if fresh == nil {
+			if fresh == nil || shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
 				continue
 			}
 			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
@@ -1472,6 +1583,9 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 		}
 
 		if len(available) > 0 {
+			rand.Shuffle(len(available), func(i, j int) {
+				available[i], available[j] = available[j], available[i]
+			})
 			sort.SliceStable(available, func(i, j int) bool {
 				a, b := available[i], available[j]
 				if a.account.Priority != b.account.Priority {
@@ -1480,22 +1594,12 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 				if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
 					return a.loadInfo.LoadRate < b.loadInfo.LoadRate
 				}
-				switch {
-				case a.account.LastUsedAt == nil && b.account.LastUsedAt != nil:
-					return true
-				case a.account.LastUsedAt != nil && b.account.LastUsedAt == nil:
-					return false
-				case a.account.LastUsedAt == nil && b.account.LastUsedAt == nil:
-					return false
-				default:
-					return a.account.LastUsedAt.Before(*b.account.LastUsedAt)
-				}
+				return false
 			})
-			shuffleWithinSortGroups(available)
 
 			for _, item := range available {
 				fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, requestedModel)
-				if fresh == nil {
+				if fresh == nil || shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
 					continue
 				}
 				result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
@@ -1514,10 +1618,36 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 	}
 
 	// ============ Layer 3: Fallback wait ============
-	sortAccountsByPriorityAndLastUsed(candidates, false)
-	for _, acc := range candidates {
+	fallbackCandidates := make([]*Account, 0, len(candidates))
+	if err == nil {
+		withLoad := make([]accountWithLoad, 0, len(candidates))
+		for _, acc := range candidates {
+			loadInfo := loadMap[acc.ID]
+			if loadInfo == nil {
+				loadInfo = &AccountLoadInfo{AccountID: acc.ID}
+			}
+			withLoad = append(withLoad, accountWithLoad{account: acc, loadInfo: loadInfo})
+		}
+		rand.Shuffle(len(withLoad), func(i, j int) {
+			withLoad[i], withLoad[j] = withLoad[j], withLoad[i]
+		})
+		sort.SliceStable(withLoad, func(i, j int) bool {
+			a, b := withLoad[i], withLoad[j]
+			if a.account.Priority != b.account.Priority {
+				return a.account.Priority < b.account.Priority
+			}
+			return a.loadInfo.LoadRate < b.loadInfo.LoadRate
+		})
+		for _, item := range withLoad {
+			fallbackCandidates = append(fallbackCandidates, item.account)
+		}
+	} else {
+		fallbackCandidates = append(fallbackCandidates, candidates...)
+		shuffleOpenAIAccountsWithinPriority(fallbackCandidates)
+	}
+	for _, acc := range fallbackCandidates {
 		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel)
-		if fresh == nil {
+		if fresh == nil || shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
 			continue
 		}
 		return &AccountSelectionResult{
@@ -1655,6 +1785,32 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode i
 		return true
 	}
 	return isOpenAITransientProcessingError(statusCode, upstreamMsg, upstreamBody)
+}
+
+func isOpenAIHTTPSameAccountRetryStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// shouldRetryOpenAIHTTPOnSameAccount grants one dedicated HTTP 5xx retry to
+// the initially selected account. Handler-level failover attempts carry a
+// positive account switch count and must not regain this budget.
+func shouldRetryOpenAIHTTPOnSameAccount(ctx context.Context, c *gin.Context, statusCode int, retryTried bool) bool {
+	if retryTried || !isOpenAIHTTPSameAccountRetryStatus(statusCode) {
+		return false
+	}
+	if c != nil && c.Writer != nil && c.Writer.Written() {
+		return false
+	}
+	switchCount, ok := AccountSwitchCountFromContext(ctx)
+	return !ok || switchCount == 0
 }
 
 func (s *OpenAIGatewayService) handleFailoverSideEffects(ctx context.Context, resp *http.Response, account *Account) {
@@ -2139,6 +2295,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	httpInvalidEncryptedContentRetryTried := false
 	httpPreviousResponseRecoveryTried := false
+	httpServerErrorRetryTried := false
 	for {
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
@@ -2218,6 +2375,37 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				}
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Skip non-WSv2 invalid_encrypted_content retry because encrypted reasoning items are missing (account: %s)", account.Name)
 			}
+			if shouldRetryOpenAIHTTPOnSameAccount(ctx, c, resp.StatusCode, httpServerErrorRetryTried) {
+				upstreamDetail := ""
+				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+					maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
+					if maxBytes <= 0 {
+						maxBytes = 2048
+					}
+					upstreamDetail = truncateString(string(respBody), maxBytes)
+				}
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: resp.StatusCode,
+					UpstreamRequestID:  resp.Header.Get("x-request-id"),
+					Kind:               "retry",
+					Message:            upstreamMsg,
+					Detail:             upstreamDetail,
+				})
+				httpServerErrorRetryTried = true
+				logger.LegacyPrintf(
+					"service.openai_gateway",
+					"[OpenAI] Retrying HTTP request on the same account after upstream status %d (account: %s, attempt: 1/1)",
+					resp.StatusCode,
+					account.Name,
+				)
+				if err := sleepWithContext(ctx, openAIHTTPSameAccountRetryBackoff); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 				upstreamDetail := ""
 				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -2242,7 +2430,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				return nil, &UpstreamFailoverError{
 					StatusCode:             resp.StatusCode,
 					ResponseBody:           respBody,
-					RetryableOnSameAccount: account.IsPoolMode() && (isPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
+					RetryableOnSameAccount: !isSameAccountReplayExcludedStatus(resp.StatusCode) && !isOpenAIHTTPSameAccountRetryStatus(resp.StatusCode) && account.IsPoolMode() && (isPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
 				}
 			}
 			return s.handleErrorResponse(ctx, resp, c, account, body)
@@ -2493,7 +2681,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
-			RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
+			RetryableOnSameAccount: !isSameAccountReplayExcludedStatus(resp.StatusCode) && account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
 		}
 	}
 
@@ -2676,7 +2864,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
-			RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
+			RetryableOnSameAccount: !isSameAccountReplayExcludedStatus(resp.StatusCode) && account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
 		}
 	}
 
@@ -3834,6 +4022,37 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 	return updates
 }
 
+func codexFiveHourAdmissionObservationFromSnapshot(snapshot *OpenAICodexUsageSnapshot, now time.Time) codexFiveHourAdmissionObservation {
+	observation := codexFiveHourAdmissionObservation{class: codexFiveHourAdmissionUnknown}
+	if snapshot == nil {
+		return observation
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	normalized := snapshot.Normalize()
+	if normalized == nil || normalized.Used5hPercent == nil || normalized.Reset5hSeconds == nil {
+		return observation
+	}
+	usedPercent := *normalized.Used5hPercent
+	resetSeconds := *normalized.Reset5hSeconds
+	if math.IsNaN(usedPercent) || math.IsInf(usedPercent, 0) || usedPercent < 0 || usedPercent > 100 || resetSeconds < 0 {
+		return observation
+	}
+	maxDurationSeconds := int64(math.MaxInt64 / int64(time.Second))
+	if int64(resetSeconds) > maxDurationSeconds {
+		return observation
+	}
+	resetAt := codexSnapshotBaseTime(snapshot, now).Add(time.Duration(resetSeconds) * time.Second).UTC()
+	observation.hasReset = true
+	observation.resetAt = resetAt
+	observation.class = codexFiveHourAdmissionOpen
+	if resetAt.After(now) && usedPercent > newSessionFiveHourUtilizationThreshold*100 {
+		observation.class = codexFiveHourAdmissionBlocked
+	}
+	return observation
+}
+
 func codexUsagePercentExhausted(value *float64) bool {
 	return value != nil && *value >= 100-1e-9
 }
@@ -3898,8 +4117,8 @@ func syncOpenAICodexRateLimitFromExtra(ctx context.Context, repo AccountReposito
 }
 
 // updateCodexUsageSnapshot saves the Codex usage snapshot to account's Extra field
-func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, accountID int64, snapshot *OpenAICodexUsageSnapshot) {
-	if snapshot == nil {
+func (s *OpenAIGatewayService) updateCodexUsageSnapshot(_ context.Context, accountID int64, snapshot *OpenAICodexUsageSnapshot) {
+	if snapshot == nil || accountID <= 0 {
 		return
 	}
 	if s == nil || s.accountRepo == nil {
@@ -3912,21 +4131,43 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, acc
 	if len(updates) == 0 && resetAt == nil {
 		return
 	}
-	shouldPersistUpdates := len(updates) > 0 && s.getCodexSnapshotThrottle().Allow(accountID, now)
-	if !shouldPersistUpdates && resetAt == nil {
-		return
+	var (
+		coordinator  *accountWriteThrottle
+		firstRequest *codexSnapshotWriteRequest
+		startWriter  bool
+	)
+	if len(updates) > 0 {
+		observation := codexFiveHourAdmissionObservationFromSnapshot(snapshot, now)
+		coordinator = s.getCodexSnapshotThrottle()
+		firstRequest, startWriter = coordinator.BeginCodexSnapshotWrite(accountID, now, observation, updates)
+	}
+	if startWriter && firstRequest != nil {
+		go s.persistCodexUsageSnapshots(coordinator, firstRequest)
 	}
 
-	go func() {
+	if resetAt != nil {
+		reset := *resetAt
+		go func() {
+			updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = s.accountRepo.SetRateLimited(updateCtx, accountID, reset)
+		}()
+	}
+}
+
+func (s *OpenAIGatewayService) persistCodexUsageSnapshots(coordinator *accountWriteThrottle, first *codexSnapshotWriteRequest) {
+	for current := first; current != nil; {
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if shouldPersistUpdates {
-			_ = s.accountRepo.UpdateExtra(updateCtx, accountID, updates)
+		err := s.accountRepo.UpdateExtra(updateCtx, current.accountID, current.updates)
+		cancel()
+		if err != nil {
+			logger.LegacyPrintf("service.openai_gateway", "failed to persist Codex usage snapshot: account=%d error=%v", current.accountID, err)
 		}
-		if resetAt != nil {
-			_ = s.accountRepo.SetRateLimited(updateCtx, accountID, *resetAt)
+		if coordinator == nil {
+			return
 		}
-	}()
+		current = coordinator.CompleteCodexSnapshotWrite(current, err == nil, time.Now())
+	}
 }
 
 func (s *OpenAIGatewayService) UpdateCodexUsageSnapshotFromHeaders(ctx context.Context, accountID int64, headers http.Header) {
