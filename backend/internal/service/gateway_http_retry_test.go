@@ -266,7 +266,7 @@ func TestGatewayService_BedrockHTTPServerErrorRetriesOnce(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusGatewayTimeout, resp.StatusCode)
 	require.Equal(t, 2, upstream.calls)
 }
@@ -296,7 +296,7 @@ func TestGatewayService_BedrockDoesNotRegainRetryAfterAccountSwitch(t *testing.T
 	)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusGatewayTimeout, resp.StatusCode)
 	require.Equal(t, 1, upstream.calls)
 }
