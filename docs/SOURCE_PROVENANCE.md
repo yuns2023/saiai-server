@@ -35,8 +35,8 @@ b4b208f7b63256425e0c29d96acfa360526d6142
 
 It was paired with `saiai-client` tag `saiai-v0.9.0`, client source commit
 `abbc0e425efe4101f7180da892aaf80672bf21b6`, verified from
-`saiai-v0.9.0^{commit}`, and the manifest hash recorded in
-the [V2 Gateway contract](V2_GATEWAY_CONTRACT.md). These are public source and
+`saiai-v0.9.0^{commit}`, and the manifest hash recorded by that historical
+release. These are public source and
 release coordinates; deployment-specific hosts, paths, credentials, and
 backup records remain outside this repository.
 

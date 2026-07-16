@@ -26,7 +26,5 @@ describe('i18n message syntax', () => {
     const accidentalLinkedMessages = messages.filter(({ value }) => /@[A-Za-z_]/.test(value))
 
     expect(accidentalLinkedMessages).toEqual([])
-    expect(en.keys.useKeyModal.proxyMode.proxyUrlPlaceholder).toContain('proxy-host')
-    expect(zh.keys.useKeyModal.proxyMode.proxyUrlPlaceholder).toContain('proxy-host')
   })
 })

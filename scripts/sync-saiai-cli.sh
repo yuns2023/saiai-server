@@ -2,8 +2,8 @@
 # Stage or activate one immutable SAIAI client GitHub Release.
 #
 # Usage:
-#   scripts/sync-saiai-cli.sh stage saiai-v0.9.0 <manifest-sha256>
-#   scripts/sync-saiai-cli.sh activate saiai-v0.9.0 <manifest-sha256>
+#   scripts/sync-saiai-cli.sh stage saiai-v1.0.0 <manifest-sha256>
+#   scripts/sync-saiai-cli.sh activate saiai-v1.0.0 <manifest-sha256>
 #
 # `stage` is the only networked operation. It downloads and verifies the full
 # release into an immutable local bundle without changing the live symlinks.
@@ -283,7 +283,8 @@ validate_bundle() {
   local root="$1"
   local expected_version="$2"
   local expected_manifest_sha256="$3"
-  python3 - "$root" "$expected_version" "$expected_manifest_sha256" "$MAX_ASSET_BYTES" "${BINARIES[@]}" -- "${WRAPPERS[@]}" <<'PY'
+  local expected_contract="${4:-global-config}"
+  python3 - "$root" "$expected_version" "$expected_manifest_sha256" "$MAX_ASSET_BYTES" "$expected_contract" "${BINARIES[@]}" -- "${WRAPPERS[@]}" <<'PY'
 import hashlib
 import json
 import os
@@ -295,8 +296,9 @@ root = sys.argv[1]
 expected_version = sys.argv[2]
 expected_manifest_sha256 = sys.argv[3]
 max_file_bytes = int(sys.argv[4])
+expected_contract = sys.argv[5]
 separator = sys.argv.index("--")
-binaries = sys.argv[5:separator]
+binaries = sys.argv[6:separator]
 wrappers = sys.argv[separator + 1:]
 required = ["manifest.json", *binaries, *wrappers]
 manifest_path = os.path.join(root, "manifest.json")
@@ -346,8 +348,26 @@ except (OSError, UnicodeError, json.JSONDecodeError) as exc:
 
 if type(manifest.get("manifest_schema")) is not int or manifest.get("manifest_schema") != 1:
     raise SystemExit("release manifest_schema must be 1")
-if type(manifest.get("bootstrap_schema_version")) is not int or manifest.get("bootstrap_schema_version") != 2:
-    raise SystemExit("release bootstrap_schema_version must be 2")
+is_global_config = (
+    manifest.get("client_mode") == "global-config"
+    and type(manifest.get("configuration_schema_version")) is int
+    and manifest.get("configuration_schema_version") == 1
+    and "bootstrap_schema_version" not in manifest
+)
+is_retained_v2 = (
+    "client_mode" not in manifest
+    and "configuration_schema_version" not in manifest
+    and type(manifest.get("bootstrap_schema_version")) is int
+    and manifest.get("bootstrap_schema_version") == 2
+)
+if expected_contract == "global-config":
+    if not is_global_config:
+        raise SystemExit("release must be global-config schema 1 without a bootstrap claim")
+elif expected_contract == "retained-live":
+    if not (is_global_config or is_retained_v2):
+        raise SystemExit("live bundle is neither global-config schema 1 nor retained V2 schema 2")
+else:
+    raise SystemExit(f"unsupported internal bundle contract: {expected_contract}")
 if manifest.get("version") != expected_version:
     raise SystemExit(
         f"manifest version differs from tag: expected {expected_version!r}, got {manifest.get('version')!r}"
@@ -443,7 +463,7 @@ if (
     or resolved != os.path.join(releases_root, *parts)
 ):
     raise SystemExit(
-        f"{label} must target an exact staged V2 bundle under {releases_root}/<tag>/<manifest-sha>: "
+        f"{label} must target an exact staged client bundle under {releases_root}/<tag>/<manifest-sha>: "
         f"{resolved}"
     )
 print(parts[0] + "\t" + parts[1])
@@ -456,7 +476,10 @@ PY
   validate_trusted_entry "$live_tag_dir" directory "$label release tag directory"
   verify_tag_directory "$live_tag_dir" "$live_hash"
   restore_bundle_permissions "$resolved"
-  validate_bundle "$resolved" "${live_tag#saiai-v}" "$live_hash" >/dev/null
+  # The first 1.0.0 cutover starts with exact retained V2 active/previous
+  # bundles. Validate those hashes and schema without allowing stage/activate
+  # targets to bypass the global-config candidate contract.
+  validate_bundle "$resolved" "${live_tag#saiai-v}" "$live_hash" retained-live >/dev/null
   VALIDATED_LIVE_BUNDLE="$resolved"
 }
 
@@ -552,6 +575,8 @@ if release.get("tag_name") != expected_tag:
     raise SystemExit(f"release tag differs: expected {expected_tag!r}, got {release.get('tag_name')!r}")
 if release.get("draft") is not False:
     raise SystemExit("refusing a draft or malformed GitHub release")
+if release.get("prerelease") is not False:
+    raise SystemExit("refusing a prerelease or malformed GitHub release")
 immutable = release.get("immutable")
 immutable_text = "true" if immutable is True else "false" if immutable is False else "unknown"
 with open(release_info_path, "w", encoding="utf-8") as handle:
@@ -609,7 +634,7 @@ PY
     rm -f -- "$auth_header_file"
   fi
 
-  echo "[stage 3/3] validating manifest schema, bootstrap schema, hashes, and sizes"
+  echo "[stage 3/3] validating global-config manifest, hashes, and sizes"
   local version manifest_sha256
   version="${TAG#saiai-v}"
   validate_trusted_bundle_tree "$STAGE_DIR" "downloaded release bundle"
@@ -659,13 +684,13 @@ activate_release() {
   local previous_present=0
   if [ -e "$ACTIVE_LINK" ] || [ -L "$ACTIVE_LINK" ]; then
     active_present=1
-    [ -L "$ACTIVE_LINK" ] || fail "SAIAI_CLIENT_DIR=$ACTIVE_LINK is a legacy flat directory or file. Use an independent V2 runtime root (set SAIAI_CLIENT_DIR and stage there) before activation; this script does not convert legacy state or manufacture a previous link from it."
+    [ -L "$ACTIVE_LINK" ] || fail "SAIAI_CLIENT_DIR=$ACTIVE_LINK is a legacy flat directory or file. Use an independent client runtime root (set SAIAI_CLIENT_DIR and stage there) before activation; this script does not convert legacy state or manufacture a previous link from it."
   fi
   if [ -e "$PREVIOUS_LINK" ] || [ -L "$PREVIOUS_LINK" ]; then
     previous_present=1
   fi
   if [ "$active_present" -eq 0 ] && [ "$previous_present" -eq 1 ]; then
-    fail "first V2 activation requires both active and previous links to be absent; refusing stale previous entry: $PREVIOUS_LINK"
+    fail "first client activation requires both active and previous links to be absent; refusing stale previous entry: $PREVIOUS_LINK"
   fi
 
   local current_release=""
@@ -708,7 +733,7 @@ activate_release() {
   if [ -L "$PREVIOUS_LINK" ]; then
     echo "  previous:      $PREVIOUS_LINK -> $(readlink -- "$PREVIOUS_LINK")"
   else
-    echo "  previous:      none (first V2 activation)"
+    echo "  previous:      none (first client activation)"
   fi
   echo "  manifest sha:  $REQUESTED_MANIFEST_SHA256"
 }

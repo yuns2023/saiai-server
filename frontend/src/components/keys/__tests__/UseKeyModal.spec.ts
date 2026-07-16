@@ -38,88 +38,95 @@ function mountModal(props: Record<string, unknown>): VueWrapper {
   })
 }
 
-const codeBlocks = (wrapper: VueWrapper) =>
-  wrapper.findAll('pre code').map((code) => code.text())
+const command = (wrapper: VueWrapper) => wrapper.find('pre code').text()
 
 describe('UseKeyModal', () => {
-  it('offers Anthropic keys only a clean Claude V2 flow', async () => {
+  it('renders one repeatable Claude command containing the escaped Gateway and Key', async () => {
     const wrapper = mountModal({})
     await nextTick()
 
-    expect(codeBlocks(wrapper)).toEqual([
-      'curl -fsSL https://example.com/saiai-cli/setup.sh | bash -s -- install',
-      "$HOME/.local/bin/saiai setup claude --base-url 'https://example.com'"
-    ])
-    expect(wrapper.text()).toContain('keys.useKeyModal.v2.claudeDescription')
-    expect(wrapper.text()).toContain('keys.useKeyModal.v2.claudeSetupHint')
-    expect(wrapper.text()).toContain('keys.useKeyModal.v2.claudeNote')
-    expect(wrapper.text()).not.toContain('keys.useKeyModal.cliTabs.codexCli')
-    expect(codeBlocks(wrapper).join('\n')).not.toContain('TEST_ONLY_API_KEY')
+    expect(wrapper.findAll('pre code')).toHaveLength(1)
+    expect(command(wrapper)).toBe(
+      "curl -fsSL https://example.com/saiai-cli/setup.sh | bash -s -- 'https://example.com' 'TEST_ONLY_API_KEY'"
+    )
+    expect(wrapper.text()).toContain('keys.useKeyModal.saiaiCliHint')
+    expect(wrapper.text()).toContain('keys.useKeyModal.note')
+    expect(wrapper.text()).not.toContain('keys.useKeyModal.cliTabs.v2Preview')
   })
 
-  it.each([false, true])('keeps OpenAI Codex-only regardless of Messages dispatch=%s', async (allowMessagesDispatch) => {
-    const wrapper = mountModal({
-      platform: 'openai',
-      allowMessagesDispatch
-    })
+  it('shell-quotes apostrophes in the Key', async () => {
+    const wrapper = mountModal({ apiKey: "TEST_ONLY_'_KEY" })
     await nextTick()
 
-    const buttons = wrapper.findAll('button').map((button) => button.text())
-    expect(buttons.some((text) => text.includes('keys.useKeyModal.cliTabs.v2Preview'))).toBe(true)
-    expect(buttons.some((text) => text.includes('keys.useKeyModal.cliTabs.claudeCode'))).toBe(false)
-    expect(buttons.some((text) => text.includes('keys.useKeyModal.cliTabs.codexCli'))).toBe(false)
-    expect(buttons.some((text) => text.includes('keys.useKeyModal.cliTabs.codexCliWs'))).toBe(false)
-    expect(codeBlocks(wrapper)).toEqual([
-      'curl -fsSL https://example.com/saiai-cli/setup.sh | bash -s -- install',
-      "$HOME/.local/bin/saiai setup codex --base-url 'https://example.com'"
-    ])
-    expect(codeBlocks(wrapper).join('\n')).not.toContain('TEST_ONLY_API_KEY')
-    expect(codeBlocks(wrapper).join('\n')).not.toContain('setup claude')
+    expect(command(wrapper)).toContain("'TEST_ONLY_'\\''_KEY'")
   })
 
-  it('uses the absolute installed binary for PowerShell first setup', async () => {
-    const wrapper = mountModal({ platform: 'openai' })
+  it('renders a PowerShell one-click command and doubles apostrophes', async () => {
+    const wrapper = mountModal({ apiKey: "TEST_ONLY_'_KEY" })
     await nextTick()
 
-    const powershell = wrapper.findAll('button').find((button) => button.text().includes('PowerShell'))
-    expect(powershell).toBeDefined()
-    await powershell!.trigger('click')
-    await nextTick()
-
-    expect(codeBlocks(wrapper)).toEqual([
-      'irm https://example.com/saiai-cli/setup.ps1 | iex; Invoke-Saiai install',
-      '& "$env:LOCALAPPDATA\\SAIAI\\bin\\saiai.exe" setup codex --base-url \'https://example.com\''
-    ])
-  })
-
-  it.each([
-    ['macOS / Linux', "$HOME/.local/bin/saiai setup codex --base-url 'https://example.com/tenant'"],
-    ['PowerShell', '& "$env:LOCALAPPDATA\\SAIAI\\bin\\saiai.exe" setup codex --base-url \'https://example.com/tenant\''],
-    ['Windows CMD', '"%LOCALAPPDATA%\\SAIAI\\bin\\saiai.exe" setup codex --base-url "https://example.com/tenant"']
-  ])('preserves a Gateway path prefix for %s', async (tabLabel, expectedSetup) => {
-    const wrapper = mountModal({
-      platform: 'openai',
-      baseUrl: 'https://example.com/tenant/v1/'
-    })
-    await nextTick()
-
-    const tab = wrapper.findAll('button').find((button) => button.text().includes(tabLabel))
+    const tab = wrapper.findAll('button').find((button) => button.text().includes('PowerShell'))
     expect(tab).toBeDefined()
     await tab!.trigger('click')
     await nextTick()
 
-    const blocks = codeBlocks(wrapper)
-    expect(blocks[0]).toContain('https://example.com/saiai-cli/setup.')
-    expect(blocks[1]).toBe(expectedSetup)
-    expect(blocks.join('\n')).not.toContain('/tenant/v1')
+    expect(command(wrapper)).toBe(
+      "irm https://example.com/saiai-cli/setup.ps1 | iex; Invoke-Saiai 'https://example.com' 'TEST_ONLY_''_KEY'"
+    )
   })
 
-  it('offers Antigravity Claude V2 plus its independent Gemini entry', async () => {
-    const wrapper = mountModal({ platform: 'antigravity' })
+  it('renders the CMD form through PowerShell with the Key included', async () => {
+    const wrapper = mountModal({})
     await nextTick()
 
-    expect(codeBlocks(wrapper)[1]).toContain('setup claude')
-    expect(codeBlocks(wrapper).join('\n')).not.toContain('TEST_ONLY_API_KEY')
+    const tab = wrapper.findAll('button').find((button) => button.text().includes('Windows CMD'))
+    expect(tab).toBeDefined()
+    await tab!.trigger('click')
+    await nextTick()
+
+    expect(command(wrapper)).toBe(
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://example.com/saiai-cli/setup.ps1 | iex; Invoke-Saiai \'https://example.com\' \'TEST_ONLY_API_KEY\'"'
+    )
+  })
+
+  it('keeps OpenAI on Codex by default and offers Messages-compatible Claude only when enabled', async () => {
+    const codex = mountModal({ platform: 'openai', allowMessagesDispatch: false })
+    await nextTick()
+    expect(command(codex)).toContain(
+      "init-codex 'https://example.com/v1' 'TEST_ONLY_API_KEY'"
+    )
+    expect(command(codex)).not.toContain('--websockets')
+    expect(codex.findAll('button').some((button) => button.text().includes('keys.useKeyModal.cliTabs.claudeCode'))).toBe(false)
+
+    const compatible = mountModal({ platform: 'openai', allowMessagesDispatch: true })
+    await nextTick()
+    const claude = compatible.findAll('button').find((button) =>
+      button.text().includes('keys.useKeyModal.cliTabs.claudeCode')
+    )
+    expect(claude).toBeDefined()
+    await claude!.trigger('click')
+    await nextTick()
+    expect(command(compatible)).toContain("'https://example.com' 'TEST_ONLY_API_KEY'")
+    expect(command(compatible)).not.toContain('init-codex')
+  })
+
+  it('adds the Codex WebSocket option only on its explicit tab', async () => {
+    const wrapper = mountModal({ platform: 'openai' })
+    await nextTick()
+    const websocket = wrapper.findAll('button').find((button) =>
+      button.text().includes('keys.useKeyModal.cliTabs.codexCliWs')
+    )
+    expect(websocket).toBeDefined()
+    await websocket!.trigger('click')
+    await nextTick()
+    expect(command(wrapper)).toContain('init-codex')
+    expect(command(wrapper)).toContain('--websockets')
+  })
+
+  it('offers Antigravity Claude config plus its independent Gemini entry', async () => {
+    const wrapper = mountModal({ platform: 'antigravity' })
+    await nextTick()
+    expect(command(wrapper)).toContain("'https://example.com/antigravity' 'TEST_ONLY_API_KEY'")
 
     const gemini = wrapper.findAll('button').find((button) =>
       button.text().includes('keys.useKeyModal.cliTabs.geminiCli')
@@ -127,39 +134,31 @@ describe('UseKeyModal', () => {
     expect(gemini).toBeDefined()
     await gemini!.trigger('click')
     await nextTick()
-
-    expect(codeBlocks(wrapper).join('\n')).toContain('GOOGLE_GEMINI_BASE_URL')
-    expect(codeBlocks(wrapper).join('\n')).toContain('TEST_ONLY_API_KEY')
+    expect(command(wrapper)).toContain('GOOGLE_GEMINI_BASE_URL')
+    expect(command(wrapper)).toContain('TEST_ONLY_API_KEY')
   })
 
-  it('keeps the direct Gemini configuration for Gemini groups', async () => {
-    const wrapper = mountModal({ platform: 'gemini' })
+  it('keeps direct Gemini configuration and does not misroute Sora', async () => {
+    const gemini = mountModal({ platform: 'gemini' })
     await nextTick()
+    expect(command(gemini)).toContain('GOOGLE_GEMINI_BASE_URL')
+    expect(command(gemini)).toContain('TEST_ONLY_API_KEY')
 
-    expect(codeBlocks(wrapper)).toHaveLength(1)
-    expect(codeBlocks(wrapper)[0]).toContain('GOOGLE_GEMINI_BASE_URL')
-    expect(codeBlocks(wrapper)[0]).toContain('TEST_ONLY_API_KEY')
-    expect(codeBlocks(wrapper)[0]).not.toContain('saiai setup')
-  })
-
-  it('does not misroute Sora keys into Claude setup', async () => {
-    const wrapper = mountModal({ platform: 'sora' })
+    const sora = mountModal({ platform: 'sora' })
     await nextTick()
-
-    expect(codeBlocks(wrapper)).toEqual([])
-    expect(wrapper.text()).toContain('keys.useKeyModal.sora.description')
-    expect(wrapper.text()).toContain('keys.useKeyModal.sora.note')
-    expect(wrapper.findAll('button').some((button) => button.text().includes('macOS / Linux'))).toBe(false)
+    expect(sora.findAll('pre code')).toHaveLength(0)
+    expect(sora.text()).toContain('keys.useKeyModal.sora.description')
   })
 
-  it('never exposes removed legacy initialization commands in V2 product flows', async () => {
+  it('does not expose withdrawn V2 setup or launcher commands', async () => {
     for (const platform of ['anthropic', 'openai'] as const) {
       const wrapper = mountModal({ platform, allowMessagesDispatch: true })
       await nextTick()
-      const output = codeBlocks(wrapper).join('\n')
-      for (const forbidden of ['init-codex', 'saiai start', 'ANTHROPIC_AUTH_TOKEN', '--websockets']) {
-        expect(output).not.toContain(forbidden)
+      const output = wrapper.findAll('pre code').map((block) => block.text()).join('\n')
+      for (const removed of ['setup claude', 'saiai claude', 'revoke --all', 'V2 Preview']) {
+        expect(output).not.toContain(removed)
       }
+      expect(output).toContain('TEST_ONLY_API_KEY')
     }
   })
 })

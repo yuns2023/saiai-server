@@ -580,45 +580,21 @@ export default {
     useKey: '使用密钥',
     useKeyModal: {
       title: '使用 API 密钥',
-      description: '运行以下一键命令，安装 SAIAI 并完成 Claude Code 初始化。',
+      description: '运行以下一键命令，安装或复用 SAIAI，并配置 Claude Code 全局设置。',
       copy: '复制',
       copied: '已复制',
-      note: '执行前会先清理当前终端中的 ANTHROPIC_AUTH_TOKEN。若您在 shell 配置或 VSCode 环境中写死了该变量，请手动删除后重启 VSCode，并打开新的终端会话。',
-      saiaiCliHint: '一键安装 SAIAI 并配置 Claude Code。使用 Claude Code 前请运行 saiai start 启动托管本地代理。',
-      proxyMode: {
-        label: '连接模式',
-        direct: '直连模式',
-        proxy: '代理模式',
-        proxyUrlLabel: '代理地址',
-        proxyUrlPlaceholder: '请向管理员索取，例如 http://proxy-host:18081',
-        proxyUrlHint: '请向管理员索取代理地址。该地址只用于生成当前命令，不会保存。',
-        saiaiCliHint:
-          '一键安装 SAIAI，写入本地代理环境变量并为 Claude Code 安装 saiai-ca.crt。'
-      },
+      note: '配置后直接运行 claude 或从 VSCode 启动。命令中包含当前 API Key，因此可能保留在剪贴板和 shell 历史中。',
+      saiaiCliHint: '一条命令安装或复用 SAIAI，替换受管 Gateway 和 Key，并清理冲突的 Claude 认证、代理及 CA 配置。',
       noGroupTitle: '请先分配分组',
       noGroupDescription:
         '此 API 密钥尚未分配分组，请先在密钥列表中点击分组列进行分配，然后才能查看使用配置。',
       openai: {
-        description: '运行以下一键命令，安装 SAIAI 并完成 Codex CLI 初始化。',
+        description: '运行以下一键命令，安装或复用 SAIAI，并配置 Codex CLI。',
         saiaiCliHint:
-          '一键安装 SAIAI，写入 Codex CLI 的 provider 配置和 ~/.codex/auth.json，使其使用 SAIAI 网关。',
-        note: 'SAIAI 不再设置 provider 的 env_key，Codex CLI 仅从 ~/.codex/auth.json 读取密钥，不会受 OPENAI_API_KEY 等环境变量影响。'
-      },
-      v2: {
-        claudeDescription:
-          '安装全新的 SAIAI V2 客户端，然后只初始化 Claude。V2 不读取、不导入也不迁移现有 Claude 配置。',
-        codexDescription:
-          '安装全新的 SAIAI V2 客户端，然后只初始化 Codex。V2 不读取、不导入也不迁移现有 Codex 配置。',
-        installHint: '第 1 步：安装仅含 V2 的客户端。此命令不会接收或初始化 API Key。',
-        claudeSetupHint: '第 2 步：初始化 Claude。隐藏输入提示出现时，只输入 Claude Key。',
-        codexSetupHint: '第 2 步：初始化 Codex。隐藏输入提示出现时，只输入 Codex Key。',
-        claudeNote:
-          '使用 saiai claude 启动。saiai claude revoke 只移除 Claude V2 状态；saiai revoke --all 重置全部 V2 状态。',
-        codexNote:
-          '使用 saiai codex 启动。saiai codex revoke 只移除 Codex V2 状态；saiai revoke --all 重置全部 V2 状态。'
+          '命令会合并 Codex provider 配置和 ~/.codex/auth.json；重复执行会替换受管 Gateway 和 Key。',
+        note: '命令中包含当前 API Key，因此可能保留在剪贴板和 shell 历史中；其他 Codex 配置会保留。'
       },
       cliTabs: {
-        v2Preview: 'SAIAI V2 Preview',
         claudeCode: 'Claude Code',
         geminiCli: 'Gemini CLI',
         codexCli: 'Codex CLI',
@@ -629,7 +605,7 @@ export default {
         description: '为 Antigravity 分组配置 API 访问。请根据您使用的客户端选择对应的配置方式。',
         claudeCode: 'Claude Code',
         geminiCli: 'Gemini CLI',
-        claudeNote: '执行前会先清理当前终端中的 ANTHROPIC_AUTH_TOKEN。若您在 shell 配置或 VSCode 环境中写死了该变量，请手动删除后重启 VSCode，并打开新的终端会话。',
+        claudeNote: '配置后直接启动 Claude Code。命令中包含当前 API Key，因此可能保留在剪贴板和 shell 历史中。',
         geminiNote:
           '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。'
       },
@@ -640,7 +616,7 @@ export default {
         note: '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。'
       },
       sora: {
-        description: 'SAIAI V2 不通过此入口配置 Sora 客户端。',
+        description: 'SAIAI 不通过此入口配置 Sora 客户端。',
         note: '请使用独立的 Sora 客户端流程；Sora Key 不会生成 Claude 或 Codex 命令。'
       },
       opencode: {

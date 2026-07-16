@@ -581,38 +581,19 @@ export default {
     useKeyModal: {
       title: 'Use API Key',
       description:
-        'Run the one-click command below to install SAIAI and initialize Claude Code.',
+        'Run the one-click command below to install or reuse SAIAI and configure the global Claude Code settings.',
       copy: 'Copy',
       copied: 'Copied',
-      note: 'The command clears ANTHROPIC_AUTH_TOKEN in the current terminal first. If you pinned this variable in your shell profile or VSCode environment, remove it manually, restart VSCode, and open a new terminal session to avoid interference.',
-      saiaiCliHint: 'One-click install SAIAI and configure Claude Code. Start the managed local proxy with saiai start before using Claude Code.',
-      proxyMode: {
-        label: 'Connection mode',
-        direct: 'Direct gateway',
-        proxy: 'Proxy mode',
-        proxyUrlLabel: 'Proxy address',
-        proxyUrlPlaceholder: 'Ask your administrator, for example http://proxy-host:18081',
-        proxyUrlHint: 'Ask your administrator for the proxy address. This address is only used to generate the current command and is not saved.',
-        saiaiCliHint: 'One-click install SAIAI. Writes local proxy environment variables and installs saiai-ca.crt for Claude Code.',
-      },
+      note: 'After setup, start Claude Code normally with claude or from VSCode. The command contains this API key, so it can remain in the clipboard and shell history.',
+      saiaiCliHint: 'One command installs or reuses SAIAI, replaces the managed Gateway and Key, and removes conflicting Claude authentication, proxy, and CA settings.',
       noGroupTitle: 'Please assign a group first',
       noGroupDescription: 'This API key has not been assigned to a group. Please click the group column in the key list to assign one before viewing the configuration.',
       openai: {
-        description: 'Run the following one-click command to install SAIAI and initialize Codex CLI.',
-        saiaiCliHint: 'One-click install SAIAI. Writes the Codex CLI provider config and ~/.codex/auth.json so Codex CLI talks to the SAIAI gateway.',
-        note: 'SAIAI no longer sets the provider env_key, so Codex CLI reads its API key only from ~/.codex/auth.json — environment variables like OPENAI_API_KEY have no effect.',
-      },
-      v2: {
-        claudeDescription: 'Install the clean SAIAI V2 client, then initialize only Claude. V2 does not read, import, or migrate existing Claude configuration.',
-        codexDescription: 'Install the clean SAIAI V2 client, then initialize only Codex. V2 does not read, import, or migrate existing Codex configuration.',
-        installHint: 'Step 1: install the V2-only binary. This command never receives or initializes an API key.',
-        claudeSetupHint: 'Step 2: initialize Claude. Enter only the Claude key when the hidden prompt asks for it.',
-        codexSetupHint: 'Step 2: initialize Codex. Enter only the Codex key when the hidden prompt asks for it.',
-        claudeNote: 'Launch with saiai claude. Use saiai claude revoke to remove only Claude V2 state, or saiai revoke --all to reset all V2 state.',
-        codexNote: 'Launch with saiai codex. Use saiai codex revoke to remove only Codex V2 state, or saiai revoke --all to reset all V2 state.',
+        description: 'Run the following one-click command to install or reuse SAIAI and configure Codex CLI.',
+        saiaiCliHint: 'The command merges the Codex provider config and ~/.codex/auth.json. Re-running replaces the managed Gateway and Key.',
+        note: 'The command contains this API key, so it can remain in the clipboard and shell history. Other Codex configuration is preserved.',
       },
       cliTabs: {
-        v2Preview: 'SAIAI V2 Preview',
         claudeCode: 'Claude Code',
         geminiCli: 'Gemini CLI',
         codexCli: 'Codex CLI',
@@ -623,7 +604,7 @@ export default {
         description: 'Configure API access for Antigravity group. Select the configuration method based on your client.',
         claudeCode: 'Claude Code',
         geminiCli: 'Gemini CLI',
-        claudeNote: 'The command clears ANTHROPIC_AUTH_TOKEN in the current terminal first. If you pinned this variable in your shell profile or VSCode environment, remove it manually, restart VSCode, and open a new terminal session to avoid interference.',
+        claudeNote: 'After setup, start Claude Code normally. The command contains this API key, so it can remain in the clipboard and shell history.',
         geminiNote: 'These environment variables will be active in the current terminal session. For permanent configuration, add them to ~/.bashrc, ~/.zshrc, or the appropriate configuration file.',
       },
       gemini: {
@@ -632,7 +613,7 @@ export default {
         note: 'These environment variables will be active in the current terminal session. For permanent configuration, add them to ~/.bashrc, ~/.zshrc, or the appropriate configuration file.',
       },
       sora: {
-        description: 'SAIAI V2 does not configure Sora clients from this entry.',
+        description: 'SAIAI does not configure Sora clients from this entry.',
         note: 'Use the dedicated Sora client flow. No Claude or Codex command is generated for a Sora key.',
       },
       opencode: {

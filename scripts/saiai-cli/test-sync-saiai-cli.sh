@@ -23,7 +23,8 @@ make_release() {
   local first_id="$3"
   local marker="$4"
   local immutable="$5"
-  python3 - "$fixtures" "$tag" "$version" "$first_id" "$marker" "$immutable" <<'PY'
+  local contract="${6:-global-config}"
+  python3 - "$fixtures" "$tag" "$version" "$first_id" "$marker" "$immutable" "$contract" <<'PY'
 import hashlib
 import json
 import pathlib
@@ -35,6 +36,7 @@ version = sys.argv[3]
 first_id = int(sys.argv[4])
 marker = sys.argv[5]
 immutable = sys.argv[6] == "true"
+contract = sys.argv[7]
 binaries = (
     "saiai-linux-x86_64",
     "saiai-linux-aarch64",
@@ -50,7 +52,7 @@ release_dir.mkdir(parents=True, exist_ok=True)
 for name in binaries:
     (release_dir / name).write_bytes(f"{name}:{marker}\n".encode())
 for name in wrappers:
-    (release_dir / name).write_bytes(f"{name}:{marker}:install-only\n".encode())
+    (release_dir / name).write_bytes(f"{name}:{marker}:global-config\n".encode())
 
 def metadata(path):
     contents = path.read_bytes()
@@ -58,11 +60,19 @@ def metadata(path):
 
 manifest = {
     "manifest_schema": 1,
-    "bootstrap_schema_version": 2,
     "version": version,
     "assets": {name: metadata(release_dir / name) for name in binaries},
     "wrappers": {name: metadata(release_dir / name) for name in wrappers},
 }
+if contract == "global-config":
+    manifest.update({
+        "client_mode": "global-config",
+        "configuration_schema_version": 1,
+    })
+elif contract == "v2":
+    manifest["bootstrap_schema_version"] = 2
+else:
+    raise SystemExit(f"unsupported fixture contract: {contract}")
 (release_dir / "manifest.json").write_text(
     json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n",
     encoding="utf-8",
@@ -80,7 +90,7 @@ for offset, name in enumerate(("manifest.json",) + binaries + wrappers):
         {
             "tag_name": tag,
             "draft": False,
-            "prerelease": True,
+            "prerelease": False,
             "immutable": immutable,
             "assets": release_assets,
         }
@@ -106,6 +116,8 @@ make_release saiai-v0.9.2 0.9.2 300 corrupt false
 make_release saiai-v0.9.3 0.9.3 400 local-corrupt false
 make_release saiai-v0.9.4 0.9.4 500 immutable true
 make_release saiai-v0.9.5 0.9.5 700 oversized-metadata false
+make_release saiai-v0.9.9 0.9.9 800 retained-v2 false v2
+make_release saiai-v0.9.6 0.9.6 900 prerelease false
 
 first_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.0/manifest.json")"
 second_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.1/manifest.json")"
@@ -113,6 +125,8 @@ corrupt_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.2/manifest.json")
 local_corrupt_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.3/manifest.json")"
 immutable_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.4/manifest.json")"
 oversized_metadata_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.5/manifest.json")"
+retained_v2_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.9/manifest.json")"
+prerelease_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.6/manifest.json")"
 
 # The fake transport does not provide Content-Length and deliberately ignores
 # curl's --max-filesize hint. Only the streaming limiter can reject this body.
@@ -121,6 +135,17 @@ import pathlib
 import sys
 
 pathlib.Path(sys.argv[1]).write_bytes(b"x" * (4 * 1024 * 1024 + 1))
+PY
+
+python3 - "${fixtures}/releases/saiai-v0.9.6/release.json" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+release = json.loads(path.read_text(encoding="utf-8"))
+release["prerelease"] = True
+path.write_text(json.dumps(release), encoding="utf-8")
 PY
 
 # Leave the release metadata coherent but corrupt one downloaded binary.
@@ -253,6 +278,13 @@ fi
 grep -Fq "download exceeded the 4194304-byte streaming limit" "${temporary}/oversized-metadata.log"
 test ! -e "${active}.releases/saiai-v0.9.5"
 grep -Fq 'download_with_stream_limit "${STAGE_DIR}/${name}" "$MAX_ASSET_BYTES"' "$sync_script"
+
+if run_for "$active" stage saiai-v0.9.6 "$prerelease_hash" >"${temporary}/prerelease.log" 2>&1; then
+  echo "stage accepted a prerelease global-config bundle" >&2
+  exit 1
+fi
+grep -Fq "refusing a prerelease" "${temporary}/prerelease.log"
+test ! -e "${active}.releases/saiai-v0.9.6"
 
 if env -u GH_TOKEN \
   PATH="${fake_bin}:${PATH}" \
@@ -390,6 +422,41 @@ test -d "$second_release"
 test ! -e "$active"
 test ! -e "${active}.previous"
 
+# The initial global-config cutover must accept the exact retained V2 active
+# bundle as its rollback source. Candidate stage/activate remains fail-closed
+# to global-config, and a following 1.x activation can revalidate the retained
+# V2 previous link before replacing it with the current global-config bundle.
+transition_active="${temporary}/transition-runtime/saiai-cli"
+run_for "$transition_active" stage saiai-v0.9.0 "$first_hash" >"${temporary}/transition-first-stage.log" 2>&1
+run_for "$transition_active" stage saiai-v0.9.1 "$second_hash" >"${temporary}/transition-second-stage.log" 2>&1
+retained_tag_dir="${transition_active}.releases/saiai-v0.9.9"
+retained_release="${retained_tag_dir}/${retained_v2_hash}"
+mkdir -p "$retained_release"
+find "${fixtures}/releases/saiai-v0.9.9" -maxdepth 1 -type f ! -name release.json -exec cp {} "$retained_release/" \;
+chmod 0755 "$retained_tag_dir" "$retained_release"
+chmod 0555 "${retained_release}"/saiai-linux-* "${retained_release}"/saiai-macos-* "${retained_release}"/saiai-windows-* "${retained_release}/setup.sh"
+chmod 0444 "${retained_release}/manifest.json" "${retained_release}/setup.ps1" "${retained_release}/setup.cmd"
+chmod 0555 "$retained_release" "$retained_tag_dir"
+ln -s "$retained_release" "$transition_active"
+
+SAIAI_TEST_OFFLINE=1 run_for "$transition_active" activate saiai-v0.9.0 "$first_hash" >"${temporary}/transition-first-activate.log" 2>&1
+transition_first="${transition_active}.releases/saiai-v0.9.0/${first_hash}"
+transition_second="${transition_active}.releases/saiai-v0.9.1/${second_hash}"
+test "$(readlink -f "$transition_active")" = "$transition_first"
+test "$(readlink -f "${transition_active}.previous")" = "$retained_release"
+
+SAIAI_TEST_OFFLINE=1 run_for "$transition_active" activate saiai-v0.9.1 "$second_hash" >"${temporary}/transition-second-activate.log" 2>&1
+test "$(readlink -f "$transition_active")" = "$transition_second"
+test "$(readlink -f "${transition_active}.previous")" = "$transition_first"
+
+if SAIAI_TEST_OFFLINE=1 run_for "$transition_active" activate saiai-v0.9.9 "$retained_v2_hash" >"${temporary}/transition-v2-target.log" 2>&1; then
+  echo "global-config activate accepted a retained V2 target" >&2
+  exit 1
+fi
+grep -Fq "release must be global-config schema 1" "${temporary}/transition-v2-target.log"
+test "$(readlink -f "$transition_active")" = "$transition_second"
+test "$(readlink -f "${transition_active}.previous")" = "$transition_first"
+
 # All live paths must be siblings in one trusted runtime parent.
 different_parent_active="${temporary}/different-parent/runtime/saiai-cli"
 if env -u GH_TOKEN \
@@ -487,7 +554,7 @@ test ! -e "$active"
 chmod g-w "${second_release}/manifest.json"
 
 # Stage is allowed beside a legacy flat path; activation is not. The operator
-# must use a separate V2 runtime root, and no synthetic previous link appears.
+# must use a separate client runtime root, and no synthetic previous link appears.
 legacy="${temporary}/legacy/saiai-cli"
 mkdir -p "$legacy"
 chmod 0755 "$(dirname "$legacy")"
@@ -500,7 +567,7 @@ if SAIAI_TEST_OFFLINE=1 run_for "$legacy" activate saiai-v0.9.1 "$second_hash" >
   exit 1
 fi
 grep -Fq "legacy flat directory or file" "${temporary}/legacy-activate.log"
-grep -Fq "independent V2 runtime root" "${temporary}/legacy-activate.log"
+grep -Fq "independent client runtime root" "${temporary}/legacy-activate.log"
 grep -Fq "keep" "${legacy}/sentinel"
 test ! -L "$legacy"
 test ! -e "${legacy}.previous"
@@ -514,7 +581,7 @@ if SAIAI_TEST_OFFLINE=1 run_for "$foreign_active" activate saiai-v0.9.1 "$second
   echo "activate accepted a foreign active symlink" >&2
   exit 1
 fi
-grep -Fq "must target an exact staged V2 bundle" "${temporary}/foreign-active.log"
+grep -Fq "must target an exact staged client bundle" "${temporary}/foreign-active.log"
 rm "$foreign_active"
 ln -s "${temporary}/missing-active-target" "$foreign_active"
 if SAIAI_TEST_OFFLINE=1 run_for "$foreign_active" activate saiai-v0.9.1 "$second_hash" >"${temporary}/broken-active.log" 2>&1; then
@@ -532,20 +599,20 @@ if SAIAI_TEST_OFFLINE=1 run_for "$stale_active" activate saiai-v0.9.1 "$second_h
   echo "first activation accepted a stale previous symlink" >&2
   exit 1
 fi
-grep -Fq "first V2 activation requires both active and previous links to be absent" "${temporary}/stale-valid-previous.log"
+grep -Fq "first client activation requires both active and previous links to be absent" "${temporary}/stale-valid-previous.log"
 rm "${stale_active}.previous"
 ln -s "${temporary}/missing-previous-target" "${stale_active}.previous"
 if SAIAI_TEST_OFFLINE=1 run_for "$stale_active" activate saiai-v0.9.1 "$second_hash" >"${temporary}/stale-broken-previous.log" 2>&1; then
   echo "first activation accepted a broken previous symlink" >&2
   exit 1
 fi
-grep -Fq "first V2 activation requires both active and previous links to be absent" "${temporary}/stale-broken-previous.log"
+grep -Fq "first client activation requires both active and previous links to be absent" "${temporary}/stale-broken-previous.log"
 
 # First activation is offline and creates no imaginary previous release.
 curl_calls_before="$(wc -l <"$curl_log")"
 SAIAI_TEST_OFFLINE=1 run_for "$active" activate saiai-v0.9.0 "$first_hash" >"${temporary}/first-activate.log" 2>&1
 test "$(wc -l <"$curl_log")" = "$curl_calls_before"
-grep -Fq "previous:      none (first V2 activation)" "${temporary}/first-activate.log"
+grep -Fq "previous:      none (first client activation)" "${temporary}/first-activate.log"
 test -L "$active"
 test "$(readlink -f "$active")" = "$first_release"
 test ! -e "${active}.previous"
@@ -579,7 +646,7 @@ if SAIAI_TEST_OFFLINE=1 run_for "$active" activate saiai-v0.9.1 "$second_hash" >
   echo "activate accepted a foreign previous symlink" >&2
   exit 1
 fi
-grep -Fq "must target an exact staged V2 bundle" "${temporary}/foreign-previous.log"
+grep -Fq "must target an exact staged client bundle" "${temporary}/foreign-previous.log"
 rm "${active}.previous"
 ln -s "${temporary}/missing-previous-target" "${active}.previous"
 if SAIAI_TEST_OFFLINE=1 run_for "$active" activate saiai-v0.9.1 "$second_hash" >"${temporary}/broken-previous.log" 2>&1; then

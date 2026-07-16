@@ -24,8 +24,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// saiaiCLIExternalFiles 是被分流到 SAIAI_CLIENT_DIR 的文件白名单。
-// 不在此白名单内的 /saiai-cli/* 请求（例如 setup.sh）继续由 embed.FS 提供。
+// saiaiCLIExternalFiles 是完整、原子激活的 SAIAI client bundle 白名单。
+// 二进制、manifest 和 wrapper 必须全部来自同一个 SAIAI_CLIENT_DIR。
 var saiaiCLIExternalFiles = map[string]struct{}{
 	"saiai-linux-x86_64":        {},
 	"saiai-linux-aarch64":       {},
@@ -34,6 +34,9 @@ var saiaiCLIExternalFiles = map[string]struct{}{
 	"saiai-windows-x86_64.exe":  {},
 	"saiai-windows-aarch64.exe": {},
 	"manifest.json":             {},
+	"setup.sh":                  {},
+	"setup.ps1":                 {},
+	"setup.cmd":                 {},
 }
 
 const (
@@ -63,8 +66,9 @@ type FrontendServer struct {
 }
 
 // NewFrontendServer creates a new frontend server with settings injection.
-// cliDir 指定外部 saiai binary 所在目录（例如 /var/lib/saiai-server/client-runtime/saiai-cli/）。
-// 为空时 /saiai-cli/saiai-* 请求会返回 503 提示运维跑 sync-saiai-cli.sh。
+// cliDir 指定完整 SAIAI client bundle 所在目录（例如
+// /var/lib/saiai-server/client-runtime/saiai-cli/）。为空或 bundle 不完整时，
+// /saiai-cli/* 返回 503，提示运维先运行 sync-saiai-cli.sh。
 func NewFrontendServer(settingsProvider PublicSettingsProvider, cliDir string, trustedProxies ...string) (*FrontendServer, error) {
 	trustedProxyPrefixes, err := parseTrustedProxyPrefixes(trustedProxies)
 	if err != nil {
@@ -119,16 +123,9 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 			return
 		}
 
-		// saiai binary 从 SAIAI_CLIENT_DIR 读 filesystem；非白名单的 /saiai-cli/*
-		// （例如 setup.sh）回退到下面的 embed.FS 服务。
+		// 完整 SAIAI bundle 从 SAIAI_CLIENT_DIR 读取。wrapper 也从这里读取，
+		// 但会按当前可信公开 origin 渲染默认下载地址。
 		if s.tryServeExternalCLI(c) {
-			return
-		}
-
-		// setup.sh / setup.ps1 / setup.cmd are embedded wrapper scripts. Render
-		// their default binary download base from the current public origin, so
-		// local and custom-domain deployments can use short one-line commands.
-		if s.tryServeCLIWrapper(c) {
 			return
 		}
 
@@ -149,8 +146,7 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 	}
 }
 
-// tryServeExternalCLI 处理 /saiai-cli/* 外部资产白名单请求：命中时从
-// s.cliDir 读 filesystem 返回 (true)；未命中返回 false 由后续逻辑处理。
+// tryServeExternalCLI 处理 /saiai-cli/* 完整外部 bundle 白名单请求。
 func (s *FrontendServer) tryServeExternalCLI(c *gin.Context) bool {
 	req := c.Request
 	if req.Method != http.MethodGet && req.Method != http.MethodHead {
@@ -178,45 +174,41 @@ func (s *FrontendServer) tryServeExternalCLI(c *gin.Context) bool {
 	// do not cache a temporary deployment error for these paths.
 	c.Header("Cache-Control", "no-store")
 	if s.cliDir == "" {
-		c.String(http.StatusServiceUnavailable, "saiai binaries unavailable: SAIAI_CLIENT_DIR is not configured; run sync-saiai-cli.sh")
+		c.String(http.StatusServiceUnavailable, "saiai client bundle unavailable: SAIAI_CLIENT_DIR is not configured; run sync-saiai-cli.sh")
 		c.Abort()
 		return true
 	}
 	info, err := os.Stat(s.cliDir)
 	if err != nil || !info.IsDir() {
-		c.String(http.StatusServiceUnavailable, "saiai binaries unavailable: configured client bundle is missing; run sync-saiai-cli.sh")
+		c.String(http.StatusServiceUnavailable, "saiai client bundle unavailable: configured client bundle is missing; run sync-saiai-cli.sh")
 		c.Abort()
 		return true
 	}
 
-	http.ServeFile(c.Writer, req, filepath.Join(s.cliDir, name))
-	c.Abort()
-	return true
-}
-
-func (s *FrontendServer) tryServeCLIWrapper(c *gin.Context) bool {
-	req := c.Request
-	if req.Method != http.MethodGet && req.Method != http.MethodHead {
-		return false
+	assetPath := filepath.Join(s.cliDir, name)
+	assetInfo, err := os.Lstat(assetPath)
+	if err != nil || !assetInfo.Mode().IsRegular() {
+		c.String(http.StatusServiceUnavailable, "saiai client bundle unavailable: configured bundle is incomplete; run sync-saiai-cli.sh")
+		c.Abort()
+		return true
 	}
 
-	cleanPath := strings.TrimPrefix(req.URL.Path, "/")
 	contentType := ""
-	switch cleanPath {
-	case "saiai-cli/setup.sh":
+	switch name {
+	case "setup.sh":
 		contentType = "text/x-shellscript; charset=utf-8"
-	case "saiai-cli/setup.ps1":
+	case "setup.ps1", "setup.cmd":
 		contentType = "text/plain; charset=utf-8"
-	case "saiai-cli/setup.cmd":
-		contentType = "text/plain; charset=utf-8"
-	default:
-		return false
 	}
-	c.Header("Cache-Control", "no-store")
+	if contentType == "" {
+		http.ServeFile(c.Writer, req, assetPath)
+		c.Abort()
+		return true
+	}
 
-	data, err := fs.ReadFile(s.distFS, cleanPath)
+	data, err := os.ReadFile(assetPath)
 	if err != nil {
-		c.String(http.StatusNotFound, "saiai-cli wrapper not found")
+		c.String(http.StatusServiceUnavailable, "saiai client bundle unavailable: wrapper cannot be read; run sync-saiai-cli.sh")
 		c.Abort()
 		return true
 	}
