@@ -2,8 +2,8 @@
 # Stage or activate one immutable SAIAI client GitHub Release.
 #
 # Usage:
-#   scripts/sync-saiai-cli.sh stage saiai-v1.0.0 <manifest-sha256>
-#   scripts/sync-saiai-cli.sh activate saiai-v1.0.0 <manifest-sha256>
+#   scripts/sync-saiai-cli.sh stage saiai-v1.1.0 <manifest-sha256>
+#   scripts/sync-saiai-cli.sh activate saiai-v1.1.0 <manifest-sha256>
 #
 # `stage` is the only networked operation. It downloads and verifies the full
 # release into an immutable local bundle without changing the live symlinks.
@@ -283,7 +283,7 @@ validate_bundle() {
   local root="$1"
   local expected_version="$2"
   local expected_manifest_sha256="$3"
-  local expected_contract="${4:-global-config}"
+  local expected_contract="${4:-local-proxy}"
   python3 - "$root" "$expected_version" "$expected_manifest_sha256" "$MAX_ASSET_BYTES" "$expected_contract" "${BINARIES[@]}" -- "${WRAPPERS[@]}" <<'PY'
 import hashlib
 import json
@@ -354,18 +354,26 @@ is_global_config = (
     and manifest.get("configuration_schema_version") == 1
     and "bootstrap_schema_version" not in manifest
 )
+is_local_proxy = (
+    manifest.get("client_mode") == "local-proxy"
+    and type(manifest.get("configuration_schema_version")) is int
+    and manifest.get("configuration_schema_version") == 1
+    and "bootstrap_schema_version" not in manifest
+)
 is_retained_v2 = (
     "client_mode" not in manifest
     and "configuration_schema_version" not in manifest
     and type(manifest.get("bootstrap_schema_version")) is int
     and manifest.get("bootstrap_schema_version") == 2
 )
-if expected_contract == "global-config":
-    if not is_global_config:
-        raise SystemExit("release must be global-config schema 1 without a bootstrap claim")
+if expected_contract == "local-proxy":
+    if not is_local_proxy:
+        raise SystemExit("release must be local-proxy schema 1 without a bootstrap claim")
 elif expected_contract == "retained-live":
-    if not (is_global_config or is_retained_v2):
-        raise SystemExit("live bundle is neither global-config schema 1 nor retained V2 schema 2")
+    if not (is_local_proxy or is_global_config or is_retained_v2):
+        raise SystemExit(
+            "live bundle is neither local-proxy/global-config schema 1 nor retained V2 schema 2"
+        )
 else:
     raise SystemExit(f"unsupported internal bundle contract: {expected_contract}")
 if manifest.get("version") != expected_version:
@@ -476,9 +484,9 @@ PY
   validate_trusted_entry "$live_tag_dir" directory "$label release tag directory"
   verify_tag_directory "$live_tag_dir" "$live_hash"
   restore_bundle_permissions "$resolved"
-  # The first 1.0.0 cutover starts with exact retained V2 active/previous
-  # bundles. Validate those hashes and schema without allowing stage/activate
-  # targets to bypass the global-config candidate contract.
+  # A contract cutover may start with exact retained global-config or V2
+  # active/previous bundles. Validate those hashes and schemas without allowing
+  # stage/activate targets to bypass the local-proxy candidate contract.
   validate_bundle "$resolved" "${live_tag#saiai-v}" "$live_hash" retained-live >/dev/null
   VALIDATED_LIVE_BUNDLE="$resolved"
 }
@@ -634,7 +642,7 @@ PY
     rm -f -- "$auth_header_file"
   fi
 
-  echo "[stage 3/3] validating global-config manifest, hashes, and sizes"
+  echo "[stage 3/3] validating local-proxy manifest, hashes, and sizes"
   local version manifest_sha256
   version="${TAG#saiai-v}"
   validate_trusted_bundle_tree "$STAGE_DIR" "downloaded release bundle"

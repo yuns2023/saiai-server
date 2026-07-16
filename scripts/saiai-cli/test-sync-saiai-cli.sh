@@ -23,7 +23,7 @@ make_release() {
   local first_id="$3"
   local marker="$4"
   local immutable="$5"
-  local contract="${6:-global-config}"
+  local contract="${6:-local-proxy}"
   python3 - "$fixtures" "$tag" "$version" "$first_id" "$marker" "$immutable" "$contract" <<'PY'
 import hashlib
 import json
@@ -52,7 +52,7 @@ release_dir.mkdir(parents=True, exist_ok=True)
 for name in binaries:
     (release_dir / name).write_bytes(f"{name}:{marker}\n".encode())
 for name in wrappers:
-    (release_dir / name).write_bytes(f"{name}:{marker}:global-config\n".encode())
+    (release_dir / name).write_bytes(f"{name}:{marker}:{contract}\n".encode())
 
 def metadata(path):
     contents = path.read_bytes()
@@ -64,7 +64,12 @@ manifest = {
     "assets": {name: metadata(release_dir / name) for name in binaries},
     "wrappers": {name: metadata(release_dir / name) for name in wrappers},
 }
-if contract == "global-config":
+if contract == "local-proxy":
+    manifest.update({
+        "client_mode": "local-proxy",
+        "configuration_schema_version": 1,
+    })
+elif contract == "global-config":
     manifest.update({
         "client_mode": "global-config",
         "configuration_schema_version": 1,
@@ -118,6 +123,7 @@ make_release saiai-v0.9.4 0.9.4 500 immutable true
 make_release saiai-v0.9.5 0.9.5 700 oversized-metadata false
 make_release saiai-v0.9.9 0.9.9 800 retained-v2 false v2
 make_release saiai-v0.9.6 0.9.6 900 prerelease false
+make_release saiai-v1.0.1 1.0.1 1000 retained-global false global-config
 
 first_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.0/manifest.json")"
 second_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.1/manifest.json")"
@@ -127,6 +133,7 @@ immutable_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.4/manifest.json
 oversized_metadata_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.5/manifest.json")"
 retained_v2_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.9/manifest.json")"
 prerelease_hash="$(manifest_hash "${fixtures}/releases/saiai-v0.9.6/manifest.json")"
+retained_global_hash="$(manifest_hash "${fixtures}/releases/saiai-v1.0.1/manifest.json")"
 
 # The fake transport does not provide Content-Length and deliberately ignores
 # curl's --max-filesize hint. Only the streaming limiter can reject this body.
@@ -280,7 +287,7 @@ test ! -e "${active}.releases/saiai-v0.9.5"
 grep -Fq 'download_with_stream_limit "${STAGE_DIR}/${name}" "$MAX_ASSET_BYTES"' "$sync_script"
 
 if run_for "$active" stage saiai-v0.9.6 "$prerelease_hash" >"${temporary}/prerelease.log" 2>&1; then
-  echo "stage accepted a prerelease global-config bundle" >&2
+  echo "stage accepted a prerelease local-proxy bundle" >&2
   exit 1
 fi
 grep -Fq "refusing a prerelease" "${temporary}/prerelease.log"
@@ -422,10 +429,9 @@ test -d "$second_release"
 test ! -e "$active"
 test ! -e "${active}.previous"
 
-# The initial global-config cutover must accept the exact retained V2 active
-# bundle as its rollback source. Candidate stage/activate remains fail-closed
-# to global-config, and a following 1.x activation can revalidate the retained
-# V2 previous link before replacing it with the current global-config bundle.
+# The local-proxy cutover must accept exact retained global-config active and V2
+# previous bundles, then make the current global-config bundle its rollback
+# source. Candidate stage/activate remains fail-closed to local-proxy.
 transition_active="${temporary}/transition-runtime/saiai-cli"
 run_for "$transition_active" stage saiai-v0.9.0 "$first_hash" >"${temporary}/transition-first-stage.log" 2>&1
 run_for "$transition_active" stage saiai-v0.9.1 "$second_hash" >"${temporary}/transition-second-stage.log" 2>&1
@@ -437,23 +443,40 @@ chmod 0755 "$retained_tag_dir" "$retained_release"
 chmod 0555 "${retained_release}"/saiai-linux-* "${retained_release}"/saiai-macos-* "${retained_release}"/saiai-windows-* "${retained_release}/setup.sh"
 chmod 0444 "${retained_release}/manifest.json" "${retained_release}/setup.ps1" "${retained_release}/setup.cmd"
 chmod 0555 "$retained_release" "$retained_tag_dir"
-ln -s "$retained_release" "$transition_active"
+retained_global_tag_dir="${transition_active}.releases/saiai-v1.0.1"
+retained_global_release="${retained_global_tag_dir}/${retained_global_hash}"
+mkdir -p "$retained_global_release"
+find "${fixtures}/releases/saiai-v1.0.1" -maxdepth 1 -type f ! -name release.json -exec cp {} "$retained_global_release/" \;
+chmod 0755 "$retained_global_tag_dir" "$retained_global_release"
+chmod 0555 "${retained_global_release}"/saiai-linux-* "${retained_global_release}"/saiai-macos-* "${retained_global_release}"/saiai-windows-* "${retained_global_release}/setup.sh"
+chmod 0444 "${retained_global_release}/manifest.json" "${retained_global_release}/setup.ps1" "${retained_global_release}/setup.cmd"
+chmod 0555 "$retained_global_release" "$retained_global_tag_dir"
+ln -s "$retained_global_release" "$transition_active"
+ln -s "$retained_release" "${transition_active}.previous"
 
 SAIAI_TEST_OFFLINE=1 run_for "$transition_active" activate saiai-v0.9.0 "$first_hash" >"${temporary}/transition-first-activate.log" 2>&1
 transition_first="${transition_active}.releases/saiai-v0.9.0/${first_hash}"
 transition_second="${transition_active}.releases/saiai-v0.9.1/${second_hash}"
 test "$(readlink -f "$transition_active")" = "$transition_first"
-test "$(readlink -f "${transition_active}.previous")" = "$retained_release"
+test "$(readlink -f "${transition_active}.previous")" = "$retained_global_release"
 
 SAIAI_TEST_OFFLINE=1 run_for "$transition_active" activate saiai-v0.9.1 "$second_hash" >"${temporary}/transition-second-activate.log" 2>&1
 test "$(readlink -f "$transition_active")" = "$transition_second"
 test "$(readlink -f "${transition_active}.previous")" = "$transition_first"
 
 if SAIAI_TEST_OFFLINE=1 run_for "$transition_active" activate saiai-v0.9.9 "$retained_v2_hash" >"${temporary}/transition-v2-target.log" 2>&1; then
-  echo "global-config activate accepted a retained V2 target" >&2
+  echo "local-proxy activate accepted a retained V2 target" >&2
   exit 1
 fi
-grep -Fq "release must be global-config schema 1" "${temporary}/transition-v2-target.log"
+grep -Fq "release must be local-proxy schema 1" "${temporary}/transition-v2-target.log"
+test "$(readlink -f "$transition_active")" = "$transition_second"
+test "$(readlink -f "${transition_active}.previous")" = "$transition_first"
+
+if SAIAI_TEST_OFFLINE=1 run_for "$transition_active" activate saiai-v1.0.1 "$retained_global_hash" >"${temporary}/transition-global-target.log" 2>&1; then
+  echo "local-proxy activate accepted a retained global-config target" >&2
+  exit 1
+fi
+grep -Fq "release must be local-proxy schema 1" "${temporary}/transition-global-target.log"
 test "$(readlink -f "$transition_active")" = "$transition_second"
 test "$(readlink -f "${transition_active}.previous")" = "$transition_first"
 

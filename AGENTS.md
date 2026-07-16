@@ -29,10 +29,12 @@ Preserve these invariants:
 - Claude and Codex capabilities are independent;
 - OpenAI Messages dispatch is protocol compatibility only and never implies
   native Claude capability; and
-- the global-config client does not call bootstrap or claim bootstrap schema
-  compatibility; and
-- the first global-config cutover keeps the reviewed Gateway image and client
-  bundle as one rollback pair.
+- the local-proxy client does not call bootstrap or claim bootstrap schema
+  compatibility;
+- its per-user CA private key is generated locally and is never shipped as a
+  release asset; and
+- the local-proxy contract cutover keeps the reviewed previous Gateway image
+  and global-config client bundle as one rollback pair.
 
 ## Change discipline
 
