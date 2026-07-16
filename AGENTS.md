@@ -18,8 +18,9 @@ repository.
 
 ## Required reading
 
-Before changing `/api/v1/client/bootstrap`, capability reporting, or V2 release
-compatibility, read [docs/V2_GATEWAY_CONTRACT.md](docs/V2_GATEWAY_CONTRACT.md).
+Before changing `/api/v1/client/bootstrap`, capability reporting, or SAIAI
+client delivery, read
+[docs/CLIENT_DELIVERY_CONTRACT.md](docs/CLIENT_DELIVERY_CONTRACT.md).
 Preserve these invariants:
 
 - schema version is 2;
@@ -28,8 +29,10 @@ Preserve these invariants:
 - Claude and Codex capabilities are independent;
 - OpenAI Messages dispatch is protocol compatibility only and never implies
   native Claude capability; and
-- Gateway schema 2 and the matching V2 client bundle are released as one
-  compatibility pair.
+- the global-config client does not call bootstrap or claim bootstrap schema
+  compatibility; and
+- the first global-config cutover keeps the reviewed Gateway image and client
+  bundle as one rollback pair.
 
 ## Change discipline
 

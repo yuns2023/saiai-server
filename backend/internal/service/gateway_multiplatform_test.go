@@ -372,8 +372,9 @@ func TestGatewayService_SelectAccountForModelWithPlatform_Antigravity(t *testing
 	require.Equal(t, PlatformAntigravity, acc.Platform, "应只返回 antigravity 平台账户")
 }
 
-// TestGatewayService_SelectAccountForModelWithPlatform_PriorityAndLastUsed 测试优先级和最后使用时间
-func TestGatewayService_SelectAccountForModelWithPlatform_PriorityAndLastUsed(t *testing.T) {
+// TestGatewayService_SelectAccountForModelWithPlatform_RandomWithinPriorityIgnoresLastUsed
+// verifies that LastUsedAt no longer acts as a soft scheduling priority.
+func TestGatewayService_SelectAccountForModelWithPlatform_RandomWithinPriorityIgnoresLastUsed(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
@@ -396,13 +397,18 @@ func TestGatewayService_SelectAccountForModelWithPlatform_PriorityAndLastUsed(t 
 		cfg:         testConfig(),
 	}
 
-	acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
-	require.NoError(t, err)
-	require.NotNil(t, acc)
-	require.Equal(t, int64(2), acc.ID, "同优先级应选择最久未用的账户")
+	seen := map[int64]bool{}
+	for i := 0; i < 200; i++ {
+		acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
+		require.NoError(t, err)
+		require.NotNil(t, acc)
+		seen[acc.ID] = true
+	}
+	require.True(t, seen[1])
+	require.True(t, seen[2])
 }
 
-func TestGatewayService_SelectAccountForModelWithPlatform_GeminiOAuthPreference(t *testing.T) {
+func TestGatewayService_SelectAccountForModelWithPlatform_GeminiRandomWithinPriorityIgnoresAccountType(t *testing.T) {
 	ctx := context.Background()
 
 	repo := &mockAccountRepoForPlatform{
@@ -424,10 +430,61 @@ func TestGatewayService_SelectAccountForModelWithPlatform_GeminiOAuthPreference(
 		cfg:         testConfig(),
 	}
 
-	acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "gemini-2.5-pro", nil, PlatformGemini)
+	seen := map[int64]bool{}
+	for i := 0; i < 200; i++ {
+		acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "gemini-2.5-pro", nil, PlatformGemini)
+		require.NoError(t, err)
+		require.NotNil(t, acc)
+		seen[acc.ID] = true
+	}
+	require.True(t, seen[1])
+	require.True(t, seen[2])
+}
+
+func TestGatewayService_SelectAccountForModelWithPlatform_HighFiveHourUsageOnlyBlocksNewSession(t *testing.T) {
+	ctx := context.Background()
+	resetAt := time.Now().Add(2 * time.Hour)
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:               1,
+				Platform:         PlatformAnthropic,
+				Type:             AccountTypeOAuth,
+				Priority:         0,
+				Status:           StatusActive,
+				Schedulable:      true,
+				SessionWindowEnd: &resetAt,
+				Extra:            map[string]any{"session_window_utilization": 0.95},
+			},
+			{
+				ID:               2,
+				Platform:         PlatformAnthropic,
+				Type:             AccountTypeOAuth,
+				Priority:         5,
+				Status:           StatusActive,
+				Schedulable:      true,
+				SessionWindowEnd: &resetAt,
+				Extra:            map[string]any{"session_window_utilization": 0.50},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	cache := &mockGatewayCacheForPlatform{}
+	svc := &GatewayService{accountRepo: repo, cache: cache, cfg: testConfig()}
+
+	selected, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
 	require.NoError(t, err)
-	require.NotNil(t, acc)
-	require.Equal(t, int64(2), acc.ID, "同优先级且未使用时应优先选择OAuth账户")
+	require.NotNil(t, selected)
+	require.Equal(t, int64(2), selected.ID, "new session must skip the higher-priority account above the 5h gate")
+
+	cache.sessionBindings = map[string]int64{"existing-high-five-hour": 1}
+	selected, err = svc.selectAccountForModelWithPlatform(ctx, nil, "existing-high-five-hour", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, int64(1), selected.ID, "existing sticky session must keep its account above the new-session gate")
 }
 
 // TestGatewayService_SelectAccountForModelWithPlatform_NoAvailableAccounts 测试无可用账户
@@ -891,12 +948,12 @@ func TestGatewayService_SelectAccountForModelWithPlatform_NoModelSupport(t *test
 	require.Contains(t, err.Error(), "supporting model")
 }
 
-func TestGatewayService_SelectAccountForModelWithPlatform_GeminiPreferOAuth(t *testing.T) {
+func TestGatewayService_SelectAccountForModelWithPlatform_GeminiAccountPriorityOverridesType(t *testing.T) {
 	ctx := context.Background()
 
 	repo := &mockAccountRepoForPlatform{
 		accounts: []Account{
-			{ID: 1, Platform: PlatformGemini, Priority: 1, Status: StatusActive, Schedulable: true, Type: AccountTypeAPIKey},
+			{ID: 1, Platform: PlatformGemini, Priority: 0, Status: StatusActive, Schedulable: true, Type: AccountTypeAPIKey},
 			{ID: 2, Platform: PlatformGemini, Priority: 1, Status: StatusActive, Schedulable: true, Type: AccountTypeOAuth},
 		},
 		accountsByID: map[int64]*Account{},
@@ -916,7 +973,7 @@ func TestGatewayService_SelectAccountForModelWithPlatform_GeminiPreferOAuth(t *t
 	acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "gemini-2.5-pro", nil, PlatformGemini)
 	require.NoError(t, err)
 	require.NotNil(t, acc)
-	require.Equal(t, int64(2), acc.ID)
+	require.Equal(t, int64(1), acc.ID)
 }
 
 func TestGatewayService_SelectAccountForModelWithPlatform_GeminiAPIKeyModelMappingFilter(t *testing.T) {
@@ -1036,7 +1093,7 @@ func TestGatewayService_SelectAccountForModelWithPlatform_StickyModelMismatchFal
 	require.Equal(t, int64(2), acc.ID)
 }
 
-func TestGatewayService_SelectAccountForModelWithPlatform_PreferNeverUsed(t *testing.T) {
+func TestGatewayService_SelectAccountForModelWithPlatform_RandomWithinPriorityIgnoresNeverUsed(t *testing.T) {
 	ctx := context.Background()
 	lastUsed := time.Now().Add(-1 * time.Hour)
 
@@ -1059,10 +1116,15 @@ func TestGatewayService_SelectAccountForModelWithPlatform_PreferNeverUsed(t *tes
 		cfg:         testConfig(),
 	}
 
-	acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
-	require.NoError(t, err)
-	require.NotNil(t, acc)
-	require.Equal(t, int64(2), acc.ID)
+	seen := map[int64]bool{}
+	for i := 0; i < 200; i++ {
+		acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
+		require.NoError(t, err)
+		require.NotNil(t, acc)
+		seen[acc.ID] = true
+	}
+	require.True(t, seen[1])
+	require.True(t, seen[2])
 }
 
 func TestGatewayService_SelectAccountForModelWithPlatform_NoAccounts(t *testing.T) {
@@ -1187,7 +1249,7 @@ func TestGatewayService_isModelSupportedByAccount(t *testing.T) {
 func TestGatewayService_selectAccountWithMixedScheduling(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("混合调度-Gemini优先选择OAuth账户", func(t *testing.T) {
+	t.Run("混合调度-Gemini同账号优先级随机且不偏好OAuth", func(t *testing.T) {
 		repo := &mockAccountRepoForPlatform{
 			accounts: []Account{
 				{ID: 1, Platform: PlatformGemini, Priority: 1, Status: StatusActive, Schedulable: true, Type: AccountTypeAPIKey},
@@ -1207,10 +1269,15 @@ func TestGatewayService_selectAccountWithMixedScheduling(t *testing.T) {
 			cfg:         testConfig(),
 		}
 
-		acc, err := svc.selectAccountWithMixedScheduling(ctx, nil, "", "gemini-2.5-pro", nil, PlatformGemini)
-		require.NoError(t, err)
-		require.NotNil(t, acc)
-		require.Equal(t, int64(2), acc.ID, "同优先级且未使用时应优先选择OAuth账户")
+		seen := map[int64]bool{}
+		for i := 0; i < 200; i++ {
+			acc, err := svc.selectAccountWithMixedScheduling(ctx, nil, "", "gemini-2.5-pro", nil, PlatformGemini)
+			require.NoError(t, err)
+			require.NotNil(t, acc)
+			seen[acc.ID] = true
+		}
+		require.True(t, seen[1])
+		require.True(t, seen[2])
 	})
 
 	t.Run("混合调度-包含启用mixed_scheduling的antigravity账户", func(t *testing.T) {
@@ -1779,7 +1846,7 @@ func TestGatewayService_selectAccountWithMixedScheduling(t *testing.T) {
 		require.Contains(t, err.Error(), "supporting model")
 	})
 
-	t.Run("混合调度-优先未使用账号", func(t *testing.T) {
+	t.Run("混合调度-同账号优先级随机且忽略LastUsedAt", func(t *testing.T) {
 		lastUsed := time.Now().Add(-2 * time.Hour)
 		repo := &mockAccountRepoForPlatform{
 			accounts: []Account{
@@ -1800,10 +1867,15 @@ func TestGatewayService_selectAccountWithMixedScheduling(t *testing.T) {
 			cfg:         testConfig(),
 		}
 
-		acc, err := svc.selectAccountWithMixedScheduling(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
-		require.NoError(t, err)
-		require.NotNil(t, acc)
-		require.Equal(t, int64(2), acc.ID)
+		seen := map[int64]bool{}
+		for i := 0; i < 200; i++ {
+			acc, err := svc.selectAccountWithMixedScheduling(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
+			require.NoError(t, err)
+			require.NotNil(t, acc)
+			seen[acc.ID] = true
+		}
+		require.True(t, seen[1])
+		require.True(t, seen[2])
 	})
 }
 
@@ -2829,7 +2901,7 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.Equal(t, int64(1), result.Account.ID)
 	})
 
-	t.Run("Gemini负载排序-优先OAuth", func(t *testing.T) {
+	t.Run("Gemini同账号优先级同负载随机且不偏好OAuth", func(t *testing.T) {
 		groupID := int64(24)
 
 		repo := &mockAccountRepoForPlatform{
@@ -2874,11 +2946,19 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 			concurrencyService: NewConcurrencyService(concurrencyCache),
 		}
 
-		result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "gemini", "gemini-2.5-pro", nil, "")
-		require.NoError(t, err)
-		require.NotNil(t, result)
-		require.NotNil(t, result.Account)
-		require.Equal(t, int64(2), result.Account.ID)
+		seen := map[int64]bool{}
+		for i := 0; i < 200; i++ {
+			result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "", "gemini-2.5-pro", nil, "")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, result.Account)
+			seen[result.Account.ID] = true
+			if result.ReleaseFunc != nil {
+				result.ReleaseFunc()
+			}
+		}
+		require.True(t, seen[1])
+		require.True(t, seen[2])
 	})
 
 	t.Run("模型路由-过滤路径覆盖", func(t *testing.T) {

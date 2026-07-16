@@ -1,0 +1,48 @@
+# Gateway account scheduling and HTTP replay
+
+This document records the public runtime contract for account choice and the
+narrow same-account HTTP replay used by the Gateway.
+
+## New-session account choice
+
+The Gateway applies hard eligibility checks first: account status, platform and
+model compatibility, account exclusions, concurrency, quota/cost limits, RPM,
+and other protocol-specific constraints. It then applies these layers in order:
+
+1. a five-hour admission gate for a new session;
+2. the global `accounts.priority` value;
+3. current load when a load snapshot is available; and
+4. random choice among peers in the same priority/load layer.
+
+Seven-day usage, remaining quota, reset proximity, `last_used_at`, account type,
+and `account_groups.priority` are not soft-ranking inputs. The group-priority
+field and its existing list ordering remain available for API compatibility,
+but the final runtime choice uses the global account priority.
+
+The five-hour gate rejects a new binding only when the utilization sample and
+future reset time are both valid and utilization is strictly greater than 80%.
+Exactly 80%, missing or malformed data, and an expired reset time pass the gate.
+An existing confirmed or pending sticky session, a previously bound pinned
+device, and an OpenAI `previous_response_id` affinity continue on their bound
+account.
+
+Codex usage snapshots are serialized by account. Crossing the five-hour
+admission boundary is persisted immediately; while a write is active only the
+latest pending observation is retained. A failed write causes that latest
+observation to be retried, and an older arrival cannot overwrite a newer one.
+
+## Same-account HTTP replay
+
+Before any response bytes have been sent, the initially selected account gets
+at most one same-account replay for HTTP `500`, `502`, `503`, or `504`. This
+applies to standard Claude forwarding, Anthropic API-key passthrough, Bedrock,
+OpenAI Responses, and OpenAI Messages compatibility forwarding.
+
+The replay does not apply to HTTP `501`, `505`, `429`, or `529`, transport
+errors, a response that has already started, or any request after an account
+switch. After the one replay is consumed, the existing account-failover policy
+may still choose a different account; the dedicated replay budget is never
+restored by that switch.
+
+All tests for this behavior use local mock upstreams and do not issue provider
+model requests.

@@ -105,6 +105,17 @@ func transient502UnexpectedEOFResponse() *http.Response {
 	}
 }
 
+func transient502WithUpstreamRequestIDResponse() *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"x-request-id": []string{"req_general_502"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"message":"temporary gateway failure"}}`)),
+	}
+}
+
 func okClaudeStreamResponse() *http.Response {
 	body := strings.Join([]string{
 		`data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-fable-5","content":[],"usage":{"input_tokens":2,"cache_read_input_tokens":1234}}}`,
@@ -179,5 +190,54 @@ func TestGatewayService_ClaudeCodeCacheSafeTransient502PersistsReturnsClientRetr
 	require.True(t, ok)
 	require.Len(t, events, 2)
 	require.Equal(t, "cache_safe_same_account_retry", events[0].Kind)
+	require.Equal(t, "cache_safe_passthrough", events[1].Kind)
+}
+
+func TestGatewayService_ClaudeCodeCacheSafe502DoesNotReplayAfterAccountSwitch(t *testing.T) {
+	c, rec, parsed := claudeCodeCacheSafeRetryContext(t)
+	upstream := &queuedClaudeCodeUpstream{responses: []func() *http.Response{
+		transient502UnexpectedEOFResponse,
+		okClaudeStreamResponse,
+	}}
+	svc := claudeCodeCacheSafeRetryService(upstream)
+	ctx := WithAccountSwitchCount(c.Request.Context(), 1, false)
+
+	result, err := svc.Forward(ctx, c, claudeCodeCacheSafeRetryAccount(), parsed)
+	require.Nil(t, result)
+	var clientRetryErr *ClientRetryableUpstreamError
+	require.ErrorAs(t, err, &clientRetryErr)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Equal(t, 1, upstream.calls)
+
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.Len(t, events, 1)
+	require.Equal(t, "cache_safe_passthrough", events[0].Kind)
+}
+
+func TestGatewayService_ClaudeCode502RetryModesShareOneReplayBudget(t *testing.T) {
+	c, rec, parsed := claudeCodeCacheSafeRetryContext(t)
+	upstream := &queuedClaudeCodeUpstream{responses: []func() *http.Response{
+		transient502WithUpstreamRequestIDResponse,
+		transient502UnexpectedEOFResponse,
+		okClaudeStreamResponse,
+	}}
+	svc := claudeCodeCacheSafeRetryService(upstream)
+
+	result, err := svc.Forward(c.Request.Context(), c, claudeCodeCacheSafeRetryAccount(), parsed)
+	require.Nil(t, result)
+	var clientRetryErr *ClientRetryableUpstreamError
+	require.ErrorAs(t, err, &clientRetryErr)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Equal(t, 2, upstream.calls, "specialized and general 502 handling must share one replay budget")
+
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.Len(t, events, 2)
+	require.Equal(t, "same_account_5xx_retry", events[0].Kind)
 	require.Equal(t, "cache_safe_passthrough", events[1].Kind)
 }

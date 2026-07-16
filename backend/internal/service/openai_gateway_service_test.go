@@ -867,7 +867,7 @@ func TestOpenAISelectAccountWithLoadAwareness_MissingLoadInfo(t *testing.T) {
 	}
 }
 
-func TestOpenAISelectAccountForModelWithExclusions_LeastRecentlyUsed(t *testing.T) {
+func TestOpenAISelectAccountForModelWithExclusions_RandomizesWithinAccountPriority(t *testing.T) {
 	oldTime := time.Now().Add(-2 * time.Hour)
 	newTime := time.Now().Add(-1 * time.Hour)
 	repo := stubOpenAIAccountRepo{
@@ -883,16 +883,21 @@ func TestOpenAISelectAccountForModelWithExclusions_LeastRecentlyUsed(t *testing.
 		cache:       cache,
 	}
 
-	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, "", "gpt-4", nil)
-	if err != nil {
-		t.Fatalf("SelectAccountForModelWithExclusions error: %v", err)
+	seen := make(map[int64]bool)
+	for i := 0; i < 100 && len(seen) < 2; i++ {
+		acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, "", "gpt-4", nil)
+		if err != nil {
+			t.Fatalf("SelectAccountForModelWithExclusions error: %v", err)
+		}
+		if acc == nil {
+			t.Fatal("expected account")
+		}
+		seen[acc.ID] = true
 	}
-	if acc == nil || acc.ID != 2 {
-		t.Fatalf("expected account 2")
-	}
+	require.Equal(t, map[int64]bool{1: true, 2: true}, seen)
 }
 
-func TestOpenAISelectAccountWithLoadAwareness_PreferNeverUsed(t *testing.T) {
+func TestOpenAISelectAccountWithLoadAwareness_RandomizesEqualPriorityAndLoad(t *testing.T) {
 	groupID := int64(1)
 	lastUsed := time.Now().Add(-1 * time.Hour)
 	repo := stubOpenAIAccountRepo{
@@ -915,12 +920,99 @@ func TestOpenAISelectAccountWithLoadAwareness_PreferNeverUsed(t *testing.T) {
 		concurrencyService: NewConcurrencyService(concurrencyCache),
 	}
 
-	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "gpt-4", nil)
-	if err != nil {
-		t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
+	seen := make(map[int64]bool)
+	for i := 0; i < 100 && len(seen) < 2; i++ {
+		selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "gpt-4", nil)
+		if err != nil {
+			t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
+		}
+		if selection == nil || selection.Account == nil {
+			t.Fatal("expected account")
+		}
+		seen[selection.Account.ID] = true
+		if selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
 	}
-	if selection == nil || selection.Account == nil || selection.Account.ID != 2 {
-		t.Fatalf("expected account 2")
+	require.Equal(t, map[int64]bool{1: true, 2: true}, seen)
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_HighFiveHourUsageOnlyBlocksNewSession(t *testing.T) {
+	resetAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	highUsage := Account{
+		ID:          1,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Priority:    0,
+		Extra: map[string]any{
+			"codex_5h_used_percent": 81.0,
+			"codex_5h_reset_at":     resetAt,
+		},
+	}
+	available := Account{
+		ID:          2,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Priority:    1,
+		Extra: map[string]any{
+			"codex_5h_used_percent": 20.0,
+			"codex_5h_reset_at":     resetAt,
+		},
+	}
+	repo := stubOpenAIAccountRepo{accounts: []Account{highUsage, available}}
+
+	t.Run("new session skips high usage account", func(t *testing.T) {
+		svc := &OpenAIGatewayService{accountRepo: repo}
+		account, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, "", "gpt-4", nil)
+		require.NoError(t, err)
+		require.NotNil(t, account)
+		require.Equal(t, int64(2), account.ID)
+	})
+
+	t.Run("existing sticky session keeps high usage account", func(t *testing.T) {
+		const sessionHash = "existing-high-usage-session"
+		cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:" + sessionHash: 1}}
+		svc := &OpenAIGatewayService{accountRepo: repo, cache: cache}
+		account, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, sessionHash, "gpt-4", nil)
+		require.NoError(t, err)
+		require.NotNil(t, account)
+		require.Equal(t, int64(1), account.ID)
+	})
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_HighFiveHourUsageSkipsNewCandidate(t *testing.T) {
+	resetAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	groupID := int64(1)
+	repo := stubOpenAIAccountRepo{accounts: []Account{
+		{
+			ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0,
+			Extra: map[string]any{"codex_5h_used_percent": 81.0, "codex_5h_reset_at": resetAt},
+		},
+		{
+			ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+			Extra: map[string]any{"codex_5h_used_percent": 20.0, "codex_5h_reset_at": resetAt},
+		},
+	}}
+	concurrencyCache := stubConcurrencyCache{loadMap: map[int64]*AccountLoadInfo{
+		1: {AccountID: 1, LoadRate: 0},
+		2: {AccountID: 2, LoadRate: 0},
+	}}
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "gpt-4", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(2), selection.Account.ID)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
 	}
 }
 

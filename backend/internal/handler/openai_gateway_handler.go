@@ -278,7 +278,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// Forward request
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
-		result, err := h.gatewayService.Forward(c.Request.Context(), c, account, body)
+		forwardCtx := service.WithAccountSwitchCount(c.Request.Context(), switchCount, false)
+		result, err := h.gatewayService.Forward(forwardCtx, c, account, body)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -646,7 +647,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 		// Forward 层需要始终拿到 group 默认映射模型，这样未命中账号级映射的
 		// Claude 兼容模型才不会在后续 Codex 规范化中意外退化到 gpt-5.1。
-		result, err := h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, body, promptCacheKey)
+		forwardCtx := service.WithAccountSwitchCount(c.Request.Context(), switchCount, false)
+		result, err := h.gatewayService.ForwardAsAnthropic(forwardCtx, c, account, body, promptCacheKey)
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {

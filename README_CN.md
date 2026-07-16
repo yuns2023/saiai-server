@@ -28,7 +28,8 @@ wrapper 镜像；客户端源码和二进制发布的权威仓库仍是 `saiai-c
 
 - 支持 Anthropic、OpenAI 及相关账号类型的兼容网关路由
 - API Key、分组、账号、额度、并发、速率限制和用量控制
-- 粘性会话与账号调度
+- 粘性会话与账号调度；具体规则见
+  [新会话准入与 HTTP 重放约定](docs/GATEWAY_ACCOUNT_SCHEDULING.md)
 - 用于管理用户、Key、分组、账号和可观测性的 Vue 管理界面
 - PostgreSQL 持久化与 Redis 协调
 - 经过审查的 SAIAI V2 bootstrap 实现，不产生模型调用费用

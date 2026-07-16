@@ -8,277 +8,76 @@ import (
 	"time"
 )
 
-const (
-	quotaBudgetNeutralScore    = 0.50
-	quotaBudgetWindowGap       = 0.08
-	quotaBudgetScoreEpsilon    = 0.000001
-	quotaBudgetMinTimeRatio    = 0.02
-	quotaBudgetRemainingWeight = 0.50
-	quotaBudgetSpendWeight     = 0.50
-)
+const newSessionFiveHourUtilizationThreshold = 0.80
 
-type accountQuotaBudgetScore struct {
-	score float64
-	known bool
-}
-
-func accountQuotaBudgetForScheduling(account *Account, requestedModel string, now time.Time) accountQuotaBudgetScore {
+// shouldRejectNewSessionForHighFiveHourUsage reports whether an OAuth-backed
+// account should be reserved for its existing sessions. The gate deliberately
+// ignores 7d usage and does not rank accounts by remaining quota: it only keeps
+// a new session off an account whose current, unexpired 5h window is over 80%.
+// Missing or malformed usage/reset data fails open.
+func shouldRejectNewSessionForHighFiveHourUsage(account *Account, now time.Time) bool {
 	if account == nil {
-		return accountQuotaBudgetScore{score: quotaBudgetNeutralScore}
+		return false
 	}
 	if now.IsZero() {
 		now = time.Now()
 	}
 
+	var (
+		usedRatio float64
+		resetAt   time.Time
+		ok        bool
+	)
 	switch {
-	case account.IsOpenAI() && account.Type == AccountTypeOAuth:
-		return openAIQuotaBudgetForScheduling(account, now)
 	case account.IsAnthropicOAuthOrSetupToken():
-		return claudeQuotaBudgetForScheduling(account, requestedModel, now)
+		usedRatio, ok = validUtilization(account.Extra, "session_window_utilization", 1)
+		if !ok || account.SessionWindowEnd == nil || account.SessionWindowEnd.IsZero() {
+			return false
+		}
+		resetAt = account.SessionWindowEnd.UTC()
+	case account.IsOpenAIOAuth():
+		usedPercent, valid := validUtilization(account.Extra, "codex_5h_used_percent", 100)
+		if !valid {
+			return false
+		}
+		usedRatio = usedPercent / 100
+		resetAt, ok = openAIFiveHourResetAt(account.Extra)
+		if !ok {
+			return false
+		}
 	default:
-		return accountQuotaBudgetScore{score: quotaBudgetNeutralScore}
+		return false
 	}
+
+	return resetAt.After(now) && usedRatio > newSessionFiveHourUtilizationThreshold
 }
 
-func openAIQuotaBudgetForScheduling(account *Account, now time.Time) accountQuotaBudgetScore {
-	extra := account.Extra
-	score7d := quotaWindowBudgetFromExtraPercent(extra, "codex_7d_used_percent", "codex_7d_reset_at", "codex_7d_reset_after_seconds", "codex_usage_updated_at", 7*24*time.Hour, now)
-	score5h := quotaWindowBudgetFromExtraPercent(extra, "codex_5h_used_percent", "codex_5h_reset_at", "codex_5h_reset_after_seconds", "codex_usage_updated_at", 5*time.Hour, now)
-	return combineQuotaWindowScores(score7d, score5h)
+func validUtilization(extra map[string]any, key string, max float64) (float64, bool) {
+	value, ok := extraNumber(extra, key)
+	if !ok || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > max {
+		return 0, false
+	}
+	return value, true
 }
 
-func claudeQuotaBudgetForScheduling(account *Account, requestedModel string, now time.Time) accountQuotaBudgetScore {
-	extra := account.Extra
-
-	used7dKey := "passive_usage_7d_utilization"
-	reset7dKey := "passive_usage_7d_reset"
-	if isClaudeSonnetModel(requestedModel) {
-		if _, ok := extraNumber(extra, "passive_usage_7d_sonnet_utilization"); ok {
-			used7dKey = "passive_usage_7d_sonnet_utilization"
-			reset7dKey = "passive_usage_7d_sonnet_reset"
-		}
+func openAIFiveHourResetAt(extra map[string]any) (time.Time, bool) {
+	if resetAt, ok := extraTime(extra, "codex_5h_reset_at"); ok && !resetAt.IsZero() {
+		return resetAt, true
 	}
 
-	score7d := quotaWindowBudgetFromExtraRatio(extra, used7dKey, reset7dKey, "", "passive_usage_sampled_at", 7*24*time.Hour, now)
-	score5h := quotaWindowBudgetFromExtraRatio(extra, "session_window_utilization", "", "", "passive_usage_sampled_at", 5*time.Hour, now)
-	if account.SessionWindowEnd != nil {
-		score5h = quotaWindowBudgetFromUsageAndReset(extraNumberOrNaN(extra, "session_window_utilization"), account.SessionWindowEnd, 5*time.Hour, now)
+	seconds, ok := extraNumber(extra, "codex_5h_reset_after_seconds")
+	if !ok || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 0 {
+		return time.Time{}, false
 	}
-	return combineQuotaWindowScores(score7d, score5h)
-}
-
-func combineQuotaWindowScores(score7d, score5h accountQuotaBudgetScore) accountQuotaBudgetScore {
-	known := score7d.known || score5h.known
-	if !score7d.known {
-		score7d.score = quotaBudgetNeutralScore
+	updatedAt, ok := extraTime(extra, "codex_usage_updated_at")
+	if !ok || updatedAt.IsZero() {
+		return time.Time{}, false
 	}
-	if !score5h.known {
-		score5h.score = quotaBudgetNeutralScore
+	maxDurationSeconds := float64(math.MaxInt64) / float64(time.Second)
+	if seconds > maxDurationSeconds {
+		return time.Time{}, false
 	}
-	return accountQuotaBudgetScore{
-		score: clampFloat(score7d.score*0.75+score5h.score*0.25, 0, 1),
-		known: known,
-	}
-}
-
-func quotaWindowBudgetFromExtraPercent(extra map[string]any, usedKey, resetAtKey, resetAfterKey, updatedAtKey string, window time.Duration, now time.Time) accountQuotaBudgetScore {
-	usedPercent, ok := extraNumber(extra, usedKey)
-	if !ok {
-		return accountQuotaBudgetScore{score: quotaBudgetNeutralScore}
-	}
-	usedRatio := usedPercent / 100.0
-	resetAt := extraResetTime(extra, resetAtKey, resetAfterKey, updatedAtKey, now)
-	return quotaWindowBudgetFromUsageAndReset(usedRatio, resetAt, window, now)
-}
-
-func quotaWindowBudgetFromExtraRatio(extra map[string]any, usedKey, resetAtKey, resetAfterKey, updatedAtKey string, window time.Duration, now time.Time) accountQuotaBudgetScore {
-	usedRatio, ok := extraNumber(extra, usedKey)
-	if !ok {
-		return accountQuotaBudgetScore{score: quotaBudgetNeutralScore}
-	}
-	resetAt := extraResetTime(extra, resetAtKey, resetAfterKey, updatedAtKey, now)
-	return quotaWindowBudgetFromUsageAndReset(usedRatio, resetAt, window, now)
-}
-
-func quotaWindowBudgetFromUsageAndReset(usedRatio float64, resetAt *time.Time, window time.Duration, now time.Time) accountQuotaBudgetScore {
-	if math.IsNaN(usedRatio) || math.IsInf(usedRatio, 0) {
-		return accountQuotaBudgetScore{score: quotaBudgetNeutralScore}
-	}
-	usedRatio = clampFloat(usedRatio, 0, 1)
-	remaining := 1 - usedRatio
-	if resetAt == nil {
-		return accountQuotaBudgetScore{score: remaining, known: true}
-	}
-	if !resetAt.After(now) {
-		return accountQuotaBudgetScore{score: 1, known: true}
-	}
-
-	windowHours := window.Hours()
-	if windowHours <= 0 {
-		windowHours = 1
-	}
-	hoursToReset := resetAt.Sub(now).Hours()
-	timeRatio := clampFloat(hoursToReset/windowHours, quotaBudgetMinTimeRatio, 1)
-	spendability := clampFloat(remaining/timeRatio, 0, 1)
-	score := remaining*quotaBudgetRemainingWeight + spendability*quotaBudgetSpendWeight
-	return accountQuotaBudgetScore{score: clampFloat(score, 0, 1), known: true}
-}
-
-func filterByBestQuotaBudget(accounts []accountWithLoad, requestedModel string, now time.Time) []accountWithLoad {
-	if len(accounts) <= 1 {
-		return accounts
-	}
-
-	best := -1.0
-	knownCount := 0
-	scores := make([]float64, len(accounts))
-	for i, item := range accounts {
-		score := accountQuotaBudgetForScheduling(item.account, requestedModel, now)
-		scores[i] = score.score
-		if score.known {
-			knownCount++
-		}
-		if score.score > best {
-			best = score.score
-		}
-	}
-	if knownCount == 0 {
-		return accounts
-	}
-
-	out := make([]accountWithLoad, 0, len(accounts))
-	for i, item := range accounts {
-		if scores[i] >= best-quotaBudgetWindowGap {
-			out = append(out, item)
-		}
-	}
-	if len(out) == 0 {
-		return accounts
-	}
-	return out
-}
-
-func filterByTopQuotaBudget(accounts []accountWithLoad, requestedModel string, now time.Time) []accountWithLoad {
-	if len(accounts) <= 1 {
-		return accounts
-	}
-
-	best := -1.0
-	scores := make([]float64, len(accounts))
-	for i, item := range accounts {
-		score := accountQuotaBudgetForScheduling(item.account, requestedModel, now)
-		if !score.known {
-			return accounts
-		}
-		scores[i] = score.score
-		if score.score > best {
-			best = score.score
-		}
-	}
-
-	out := make([]accountWithLoad, 0, len(accounts))
-	for i, item := range accounts {
-		if scores[i] >= best-quotaBudgetScoreEpsilon {
-			out = append(out, item)
-		}
-	}
-	if len(out) == 0 {
-		return accounts
-	}
-	return out
-}
-
-func filterWithinPriorityByQuotaBudget(accounts []accountWithLoad, requestedModel string, now time.Time) []accountWithLoad {
-	if len(accounts) <= 1 {
-		return accounts
-	}
-	groups := make(map[int][]accountWithLoad)
-	priorities := make([]int, 0, len(accounts))
-	seen := make(map[int]struct{})
-	for _, item := range accounts {
-		if item.account == nil {
-			continue
-		}
-		priority := item.account.Priority
-		if _, ok := seen[priority]; !ok {
-			seen[priority] = struct{}{}
-			priorities = append(priorities, priority)
-		}
-		groups[priority] = append(groups[priority], item)
-	}
-	out := make([]accountWithLoad, 0, len(accounts))
-	for _, priority := range priorities {
-		out = append(out, filterByBestQuotaBudget(groups[priority], requestedModel, now)...)
-	}
-	return out
-}
-
-func filterWithinPriorityAndLoadByTopQuotaBudget(accounts []accountWithLoad, requestedModel string, now time.Time) []accountWithLoad {
-	if len(accounts) <= 1 {
-		return accounts
-	}
-	type groupKey struct {
-		priority int
-		loadRate int
-	}
-
-	groups := make(map[groupKey][]accountWithLoad)
-	keys := make([]groupKey, 0, len(accounts))
-	seen := make(map[groupKey]struct{})
-	for _, item := range accounts {
-		if item.account == nil {
-			continue
-		}
-		loadRate := 0
-		if item.loadInfo != nil {
-			loadRate = item.loadInfo.LoadRate
-		}
-		key := groupKey{priority: item.account.Priority, loadRate: loadRate}
-		if _, ok := seen[key]; !ok {
-			seen[key] = struct{}{}
-			keys = append(keys, key)
-		}
-		groups[key] = append(groups[key], item)
-	}
-
-	out := make([]accountWithLoad, 0, len(accounts))
-	for _, key := range keys {
-		out = append(out, filterByTopQuotaBudget(groups[key], requestedModel, now)...)
-	}
-	return out
-}
-
-func extraResetTime(extra map[string]any, resetAtKey, resetAfterKey, updatedAtKey string, now time.Time) *time.Time {
-	if resetAtKey != "" {
-		if t, ok := extraTime(extra, resetAtKey); ok {
-			return &t
-		}
-	}
-	if resetAfterKey == "" {
-		return nil
-	}
-	seconds, ok := extraNumber(extra, resetAfterKey)
-	if !ok {
-		return nil
-	}
-	base := now
-	if updatedAtKey != "" {
-		if t, ok := extraTime(extra, updatedAtKey); ok {
-			base = t
-		}
-	}
-	if seconds < 0 {
-		seconds = 0
-	}
-	resetAt := base.Add(time.Duration(seconds) * time.Second)
-	return &resetAt
-}
-
-func extraNumberOrNaN(extra map[string]any, key string) float64 {
-	if v, ok := extraNumber(extra, key); ok {
-		return v
-	}
-	return math.NaN()
+	return updatedAt.Add(time.Duration(seconds * float64(time.Second))), true
 }
 
 func extraNumber(extra map[string]any, key string) (float64, bool) {
@@ -356,18 +155,4 @@ func unixTimestampToTime(ts int64) time.Time {
 		ts = ts / 1000
 	}
 	return time.Unix(ts, 0).UTC()
-}
-
-func isClaudeSonnetModel(model string) bool {
-	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "sonnet")
-}
-
-func clampFloat(value, min, max float64) float64 {
-	if value < min {
-		return min
-	}
-	if value > max {
-		return max
-	}
-	return value
 }

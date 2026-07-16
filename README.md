@@ -32,7 +32,8 @@ authority for client source and binaries.
 - Provider-compatible gateway routes for supported Anthropic, OpenAI, and
   related account types
 - API-key, group, account, quota, concurrency, rate-limit, and usage controls
-- Sticky-session and account scheduling support
+- Sticky-session and account scheduling support, with a documented
+  [new-session and HTTP replay contract](docs/GATEWAY_ACCOUNT_SCHEDULING.md)
 - Vue administrative interface for users, keys, groups, accounts, and
   observability
 - PostgreSQL persistence and Redis-backed coordination

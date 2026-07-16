@@ -23,6 +23,18 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
+func writeCLIWrapperFixtures(t *testing.T, directory string) {
+	t.Helper()
+	fixtures := map[string]string{
+		"setup.sh":  `DEFAULT_DOWNLOAD_BASE="https://api.saiai.top/saiai-cli"`,
+		"setup.ps1": `$downloadBase = "https://api.saiai.top/saiai-cli"` + "\n" + `$manifestUrl = "$downloadBase/manifest.json"`,
+		"setup.cmd": `set "DOWNLOAD_BASE=https://api.saiai.top/saiai-cli"`,
+	}
+	for name, contents := range fixtures {
+		require.NoError(t, os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o555))
+	}
+}
+
 func TestInjectSiteTitle(t *testing.T) {
 	t.Run("replaces_title_with_site_name", func(t *testing.T) {
 		html := []byte(`<html><head><title>SAiAi - AI API Gateway</title></head><body></body></html>`)
@@ -551,7 +563,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		cliDir := t.TempDir()
 		require.NoError(t, os.WriteFile(
 			filepath.Join(cliDir, "manifest.json"),
-			[]byte(`{"manifest_schema":1,"bootstrap_schema_version":2,"version":"0.9.0","assets":{"saiai-linux-x86_64":{"sha256":"abc","size":3}}}`),
+			[]byte(`{"manifest_schema":1,"client_mode":"global-config","configuration_schema_version":1,"version":"1.0.0","assets":{"saiai-linux-x86_64":{"sha256":"abc","size":3}}}`),
 			0o644,
 		))
 
@@ -567,7 +579,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
-		assert.JSONEq(t, `{"manifest_schema":1,"bootstrap_schema_version":2,"version":"0.9.0","assets":{"saiai-linux-x86_64":{"sha256":"abc","size":3}}}`, w.Body.String())
+		assert.JSONEq(t, `{"manifest_schema":1,"client_mode":"global-config","configuration_schema_version":1,"version":"1.0.0","assets":{"saiai-linux-x86_64":{"sha256":"abc","size":3}}}`, w.Body.String())
 	})
 
 	t.Run("serves_cli_binary_without_caching", func(t *testing.T) {
@@ -631,15 +643,35 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 		assert.NotContains(t, w.Body.String(), cliDir)
-		assert.Equal(t, "saiai binaries unavailable: configured client bundle is missing; run sync-saiai-cli.sh", strings.TrimSpace(w.Body.String()))
+		assert.Equal(t, "saiai client bundle unavailable: configured client bundle is missing; run sync-saiai-cli.sh", strings.TrimSpace(w.Body.String()))
+	})
+
+	t.Run("returns_503_instead_of_falling_back_when_wrapper_is_missing", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"test": "value"}}
+		cliDir := t.TempDir()
+		server, err := NewFrontendServer(provider, cliDir)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "https://gateway.example/saiai-cli/setup.sh", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		assert.Contains(t, w.Body.String(), "configured bundle is incomplete")
 	})
 
 	t.Run("serves_cli_wrapper_with_current_origin_download_base", func(t *testing.T) {
 		provider := &mockSettingsProvider{
 			settings: map[string]string{"test": "value"},
 		}
+		cliDir := t.TempDir()
+		writeCLIWrapperFixtures(t, cliDir)
 
-		server, err := NewFrontendServer(provider, "")
+		server, err := NewFrontendServer(provider, cliDir)
 		require.NoError(t, err)
 
 		router := gin.New()
@@ -655,12 +687,12 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.NotContains(t, w.Body.String(), `DEFAULT_DOWNLOAD_BASE="https://api.saiai.top/saiai-cli"`)
 	})
 
-	t.Run("keeps_cli_wrappers_embedded_when_release_dir_contains_copies", func(t *testing.T) {
+	t.Run("serves_cli_wrappers_from_the_active_external_bundle", func(t *testing.T) {
 		provider := &mockSettingsProvider{
 			settings: map[string]string{"test": "value"},
 		}
 		cliDir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(cliDir, "setup.sh"), []byte("external wrapper must not be served"), 0o555))
+		require.NoError(t, os.WriteFile(filepath.Join(cliDir, "setup.sh"), []byte("external https://api.saiai.top/saiai-cli wrapper"), 0o555))
 
 		server, err := NewFrontendServer(provider, cliDir)
 		require.NoError(t, err)
@@ -674,16 +706,17 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
-		assert.Contains(t, w.Body.String(), `DEFAULT_DOWNLOAD_BASE="https://gateway.example/saiai-cli"`)
-		assert.NotContains(t, w.Body.String(), "external wrapper must not be served")
+		assert.Equal(t, "external https://gateway.example/saiai-cli wrapper", w.Body.String())
 	})
 
 	t.Run("serves_cli_wrapper_with_forwarded_origin_download_base", func(t *testing.T) {
 		provider := &mockSettingsProvider{
 			settings: map[string]string{"test": "value"},
 		}
+		cliDir := t.TempDir()
+		writeCLIWrapperFixtures(t, cliDir)
 
-		server, err := NewFrontendServer(provider, "", "127.0.0.1/32")
+		server, err := NewFrontendServer(provider, cliDir, "127.0.0.1/32")
 		require.NoError(t, err)
 
 		router := gin.New()
@@ -705,7 +738,9 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 	t.Run("rejects_an_invalid_direct_host_instead_of_rendering_executable_text", func(t *testing.T) {
 		provider := &mockSettingsProvider{settings: map[string]string{"test": "value"}}
-		server, err := NewFrontendServer(provider, "")
+		cliDir := t.TempDir()
+		writeCLIWrapperFixtures(t, cliDir)
+		server, err := NewFrontendServer(provider, cliDir)
 		require.NoError(t, err)
 
 		router := gin.New()
@@ -723,7 +758,9 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 	t.Run("never_injects_forwarded_script_metacharacters_into_any_wrapper", func(t *testing.T) {
 		provider := &mockSettingsProvider{settings: map[string]string{"test": "value"}}
-		server, err := NewFrontendServer(provider, "", "127.0.0.1/32")
+		cliDir := t.TempDir()
+		writeCLIWrapperFixtures(t, cliDir)
+		server, err := NewFrontendServer(provider, cliDir, "127.0.0.1/32")
 		require.NoError(t, err)
 
 		tests := []struct {

@@ -1,4 +1,4 @@
-name: SAIAI V2 Gateway Gate
+name: SAIAI Client Gateway Gate
 
 on:
   push:
@@ -12,12 +12,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: v2-gateway-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: client-gateway-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  v2-gateway:
-    name: v2-gateway-contract
+  client-gateway:
+    name: client-gateway-contract
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -26,11 +26,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify V2 Gateway contract
-        run: python3 scripts/saiai-cli/verify-v2-gateway.py
-
-      - name: Test install wrappers
-        run: bash scripts/saiai-cli/test-setup-wrappers.sh
+      - name: Verify client Gateway contract
+        run: python3 scripts/saiai-cli/verify-client-gateway.py
 
       - name: Test release activation
         run: bash scripts/saiai-cli/test-sync-saiai-cli.sh
@@ -45,13 +42,14 @@ jobs:
 
       - name: Stage minimal embedded frontend fixture
         run: |
-          mkdir -p backend/internal/web/dist/saiai-cli
+          mkdir -p backend/internal/web/dist
           cp frontend/index.html backend/internal/web/dist/index.html
           cp frontend/public/logo.png backend/internal/web/dist/logo.png
-          cp frontend/public/saiai-cli/setup.sh frontend/public/saiai-cli/setup.ps1 frontend/public/saiai-cli/setup.cmd backend/internal/web/dist/saiai-cli/
 
-      - name: Test executable wrapper origin boundary
+      - name: Test external bundle and executable wrapper origin boundary
         working-directory: backend
+        env:
+          GOMAXPROCS: '2'
         run: >-
           go test -p 1 -tags embed ./internal/web
           -run '^(TestFrontendServer_Middleware|TestPublicRequestOrigin|TestNormalizePublicHost|TestNewFrontendServer)$'
@@ -73,7 +71,7 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Test V2 key instructions
+      - name: Test one-command key instructions
         working-directory: frontend
         run: >-
           pnpm exec vitest run
