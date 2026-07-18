@@ -61,6 +61,18 @@ type UsageService struct {
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 }
 
+// APIKeyUsageBreakdownRepository is kept separate from UsageLogRepository so
+// lightweight integrations can adopt the dashboard extension independently.
+type APIKeyUsageBreakdownRepository interface {
+	GetUserAPIKeyUsageBreakdown(
+		ctx context.Context,
+		userID int64,
+		startTime, endTime time.Time,
+		params pagination.PaginationParams,
+		sort string,
+	) (*usagestats.APIKeyUsageBreakdownResult, error)
+}
+
 // NewUsageService 创建使用统计服务实例
 func NewUsageService(usageRepo UsageLogRepository, userRepo UserRepository, entClient *dbent.Client, authCacheInvalidator APIKeyAuthCacheInvalidator) *UsageService {
 	return &UsageService{
@@ -308,6 +320,15 @@ func (s *UsageService) GetUserUsageTrendByUserID(ctx context.Context, userID int
 	return trend, nil
 }
 
+// GetAPIKeyUsageTrend returns usage trend data filtered by API Key.
+func (s *UsageService) GetAPIKeyUsageTrend(ctx context.Context, apiKeyID int64, startTime, endTime time.Time, granularity string) ([]usagestats.TrendDataPoint, error) {
+	trend, err := s.usageRepo.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, 0, apiKeyID, 0, 0, "", nil, nil, nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("get api key usage trend: %w", err)
+	}
+	return trend, nil
+}
+
 // GetUserModelStats returns per-user model usage stats.
 func (s *UsageService) GetUserModelStats(ctx context.Context, userID int64, startTime, endTime time.Time) ([]usagestats.ModelStat, error) {
 	stats, err := s.usageRepo.GetUserModelStats(ctx, userID, startTime, endTime)
@@ -333,6 +354,25 @@ func (s *UsageService) GetBatchAPIKeyUsageStats(ctx context.Context, apiKeyIDs [
 		return nil, fmt.Errorf("get batch api key usage stats: %w", err)
 	}
 	return stats, nil
+}
+
+// GetUserAPIKeyUsageBreakdown returns a server-scoped, paginated Key ranking.
+func (s *UsageService) GetUserAPIKeyUsageBreakdown(
+	ctx context.Context,
+	userID int64,
+	startTime, endTime time.Time,
+	params pagination.PaginationParams,
+	sort string,
+) (*usagestats.APIKeyUsageBreakdownResult, error) {
+	repo, ok := s.usageRepo.(APIKeyUsageBreakdownRepository)
+	if !ok {
+		return nil, errors.New("api key usage breakdown repository is unavailable")
+	}
+	result, err := repo.GetUserAPIKeyUsageBreakdown(ctx, userID, startTime, endTime, params, sort)
+	if err != nil {
+		return nil, fmt.Errorf("get api key usage breakdown: %w", err)
+	}
+	return result, nil
 }
 
 // ListWithFilters lists usage logs with admin filters.

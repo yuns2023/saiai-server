@@ -2,7 +2,7 @@
   <div class="card">
     <div class="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-dark-700">
       <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('dashboard.recentUsage') }}</h2>
-      <span class="badge badge-gray">{{ t('dashboard.last7Days') }}</span>
+      <span class="badge badge-gray">{{ rangeLabel || t('dashboard.last7Days') }}</span>
     </div>
     <div class="p-6">
       <div v-if="loading" class="flex items-center justify-center py-12">
@@ -31,7 +31,7 @@
           </div>
         </div>
 
-        <router-link to="/usage" class="flex items-center justify-center gap-2 py-3 text-sm font-medium text-primary-600 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300">
+        <router-link :to="viewAllTo || '/usage'" class="flex items-center justify-center gap-2 py-3 text-sm font-medium text-primary-600 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300">
           {{ t('dashboard.viewAllUsage') }}
           <Icon name="arrowRight" size="sm" />
         </router-link>
@@ -42,6 +42,7 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import type { RouteLocationRaw } from 'vue-router'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -51,6 +52,8 @@ import type { UsageLog } from '@/types'
 defineProps<{
   data: UsageLog[]
   loading: boolean
+  rangeLabel?: string
+  viewAllTo?: RouteLocationRaw
 }>()
 const { t } = useI18n()
 const formatCost = (c: number) => c.toFixed(4)

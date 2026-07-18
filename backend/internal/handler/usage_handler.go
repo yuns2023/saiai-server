@@ -282,7 +282,7 @@ func parseUserTimeRange(c *gin.Context) (time.Time, time.Time) {
 
 	if endDate != "" {
 		if t, err := timezone.ParseInUserLocation("2006-01-02", endDate, userTZ); err == nil {
-			endTime = t.Add(24 * time.Hour) // Include the end date
+			endTime = t.AddDate(0, 0, 1) // Include the end date (DST-safe)
 		} else {
 			endTime = timezone.StartOfDayInUserLocation(now.AddDate(0, 0, 1), userTZ)
 		}
@@ -291,6 +291,33 @@ func parseUserTimeRange(c *gin.Context) (time.Time, time.Time) {
 	}
 
 	return startTime, endTime
+}
+
+// dashboardAPIKeyFilter resolves an optional api_key_id and enforces current
+// user ownership before any aggregate query is executed.
+func (h *UsageHandler) dashboardAPIKeyFilter(c *gin.Context, userID int64) (*service.APIKey, bool) {
+	rawID := strings.TrimSpace(c.Query("api_key_id"))
+	if rawID == "" {
+		return nil, true
+	}
+
+	apiKeyID, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || apiKeyID <= 0 {
+		response.BadRequest(c, "Invalid api_key_id")
+		return nil, false
+	}
+
+	apiKey, err := h.apiKeyService.GetByID(c.Request.Context(), apiKeyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return nil, false
+	}
+	if apiKey.UserID != userID {
+		response.Forbidden(c, "Not authorized to access this API key's dashboard statistics")
+		return nil, false
+	}
+
+	return apiKey, true
 }
 
 // DashboardStats handles getting user dashboard statistics
@@ -302,7 +329,25 @@ func (h *UsageHandler) DashboardStats(c *gin.Context) {
 		return
 	}
 
-	stats, err := h.usageService.GetUserDashboardStats(c.Request.Context(), subject.UserID)
+	apiKey, ok := h.dashboardAPIKeyFilter(c, subject.UserID)
+	if !ok {
+		return
+	}
+
+	var stats *usagestats.UserDashboardStats
+	var err error
+	if apiKey == nil {
+		stats, err = h.usageService.GetUserDashboardStats(c.Request.Context(), subject.UserID)
+	} else {
+		stats, err = h.usageService.GetAPIKeyDashboardStats(c.Request.Context(), apiKey.ID)
+		if err == nil {
+			stats.TotalAPIKeys = 1
+			stats.ActiveAPIKeys = 0
+			if apiKey.Status == service.StatusAPIKeyActive {
+				stats.ActiveAPIKeys = 1
+			}
+		}
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -322,8 +367,18 @@ func (h *UsageHandler) DashboardTrend(c *gin.Context) {
 
 	startTime, endTime := parseUserTimeRange(c)
 	granularity := c.DefaultQuery("granularity", "day")
+	apiKey, ok := h.dashboardAPIKeyFilter(c, subject.UserID)
+	if !ok {
+		return
+	}
 
-	trend, err := h.usageService.GetUserUsageTrendByUserID(c.Request.Context(), subject.UserID, startTime, endTime, granularity)
+	var trend []usagestats.TrendDataPoint
+	var err error
+	if apiKey == nil {
+		trend, err = h.usageService.GetUserUsageTrendByUserID(c.Request.Context(), subject.UserID, startTime, endTime, granularity)
+	} else {
+		trend, err = h.usageService.GetAPIKeyUsageTrend(c.Request.Context(), apiKey.ID, startTime, endTime, granularity)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -332,7 +387,7 @@ func (h *UsageHandler) DashboardTrend(c *gin.Context) {
 	response.Success(c, gin.H{
 		"trend":       trend,
 		"start_date":  startTime.Format("2006-01-02"),
-		"end_date":    endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":    endTime.AddDate(0, 0, -1).Format("2006-01-02"),
 		"granularity": granularity,
 	})
 }
@@ -347,8 +402,18 @@ func (h *UsageHandler) DashboardModels(c *gin.Context) {
 	}
 
 	startTime, endTime := parseUserTimeRange(c)
+	apiKey, ok := h.dashboardAPIKeyFilter(c, subject.UserID)
+	if !ok {
+		return
+	}
 
-	stats, err := h.usageService.GetUserModelStats(c.Request.Context(), subject.UserID, startTime, endTime)
+	var stats []usagestats.ModelStat
+	var err error
+	if apiKey == nil {
+		stats, err = h.usageService.GetUserModelStats(c.Request.Context(), subject.UserID, startTime, endTime)
+	} else {
+		stats, err = h.usageService.GetAPIKeyModelStats(c.Request.Context(), apiKey.ID, startTime, endTime)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -357,7 +422,7 @@ func (h *UsageHandler) DashboardModels(c *gin.Context) {
 	response.Success(c, gin.H{
 		"models":     stats,
 		"start_date": startTime.Format("2006-01-02"),
-		"end_date":   endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":   endTime.AddDate(0, 0, -1).Format("2006-01-02"),
 	})
 }
 
@@ -410,4 +475,57 @@ func (h *UsageHandler) DashboardAPIKeysUsage(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"stats": stats})
+}
+
+// DashboardAPIKeyBreakdown handles a paginated, user-scoped Key usage ranking.
+// GET /api/v1/usage/dashboard/api-key-breakdown
+func (h *UsageHandler) DashboardAPIKeyBreakdown(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	startTime, endTime := parseUserTimeRange(c)
+	page, pageSize := response.ParsePagination(c)
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	sortValue := strings.TrimSpace(c.DefaultQuery("sort", "actual_cost_desc"))
+	switch sortValue {
+	case "actual_cost_desc", "requests_desc", "tokens_desc", "last_used_desc", "name_asc":
+	default:
+		response.BadRequest(c, "Invalid sort value")
+		return
+	}
+
+	result, err := h.usageService.GetUserAPIKeyUsageBreakdown(
+		c.Request.Context(),
+		subject.UserID,
+		startTime,
+		endTime,
+		pagination.PaginationParams{Page: page, PageSize: pageSize},
+		sortValue,
+	)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	pages := int((result.Total + int64(pageSize) - 1) / int64(pageSize))
+	if pages < 1 {
+		pages = 1
+	}
+	response.Success(c, gin.H{
+		"items":      result.Items,
+		"total":      result.Total,
+		"page":       page,
+		"page_size":  pageSize,
+		"pages":      pages,
+		"summary":    result.Summary,
+		"start_date": startTime.Format("2006-01-02"),
+		"end_date":   endTime.AddDate(0, 0, -1).Format("2006-01-02"),
+		"sort":       sortValue,
+	})
 }

@@ -103,6 +103,8 @@ type usageLogRepository struct {
 	bestEffortRecent    *gocache.Cache
 }
 
+var _ service.APIKeyUsageBreakdownRepository = (*usageLogRepository)(nil)
+
 const (
 	usageLogCreateBatchMaxSize  = 64
 	usageLogCreateBatchWindow   = 3 * time.Millisecond
@@ -2439,6 +2441,155 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 	stats.Tpm = tpm
 
 	return stats, nil
+}
+
+func apiKeyUsageBreakdownOrderBy(sortValue string) string {
+	switch sortValue {
+	case "requests_desc":
+		return "requests DESC, actual_cost DESC, api_key_id DESC"
+	case "tokens_desc":
+		return "total_tokens DESC, actual_cost DESC, api_key_id DESC"
+	case "last_used_desc":
+		return "last_used_at DESC NULLS LAST, api_key_id DESC"
+	case "name_asc":
+		return "LOWER(k.name) ASC, api_key_id ASC"
+	default:
+		return "actual_cost DESC, total_tokens DESC, api_key_id DESC"
+	}
+}
+
+// GetUserAPIKeyUsageBreakdown aggregates usage for the current user's
+// Key inventory over an explicit range. The query never selects raw key data.
+func (r *usageLogRepository) GetUserAPIKeyUsageBreakdown(
+	ctx context.Context,
+	userID int64,
+	startTime, endTime time.Time,
+	params pagination.PaginationParams,
+	sortValue string,
+) (*usagestats.APIKeyUsageBreakdownResult, error) {
+	result := &usagestats.APIKeyUsageBreakdownResult{
+		Items: make([]usagestats.APIKeyUsageBreakdownItem, 0),
+	}
+
+	summaryQuery := `
+		WITH usage_by_key AS (
+			SELECT
+				api_key_id,
+				COUNT(*) AS requests,
+				COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) AS total_tokens,
+				COALESCE(SUM(total_cost), 0) AS total_cost,
+				COALESCE(SUM(actual_cost), 0) AS actual_cost
+			FROM usage_logs
+			WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
+			GROUP BY api_key_id
+		)
+		SELECT
+			COUNT(k.id),
+			COALESCE(SUM(u.requests), 0),
+			COALESCE(SUM(u.total_tokens), 0),
+			COALESCE(SUM(u.total_cost), 0),
+			COALESCE(SUM(u.actual_cost), 0)
+		FROM api_keys k
+		LEFT JOIN usage_by_key u ON u.api_key_id = k.id
+		WHERE k.user_id = $1 AND k.deleted_at IS NULL
+	`
+	if err := scanSingleRow(
+		ctx,
+		r.sql,
+		summaryQuery,
+		[]any{userID, startTime, endTime},
+		&result.Total,
+		&result.Summary.Requests,
+		&result.Summary.TotalTokens,
+		&result.Summary.TotalCost,
+		&result.Summary.ActualCost,
+	); err != nil {
+		return nil, err
+	}
+
+	if result.Total == 0 {
+		return result, nil
+	}
+
+	pageSize := params.Limit()
+	page := params.Page
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * pageSize
+	itemsQuery := fmt.Sprintf(`
+		WITH usage_by_key AS (
+			SELECT
+				api_key_id,
+				COUNT(*) AS requests,
+				COALESCE(SUM(input_tokens), 0) AS input_tokens,
+				COALESCE(SUM(output_tokens), 0) AS output_tokens,
+				COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+				COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+				COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) AS total_tokens,
+				COALESCE(SUM(total_cost), 0) AS total_cost,
+				COALESCE(SUM(actual_cost), 0) AS actual_cost
+			FROM usage_logs
+			WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
+			GROUP BY api_key_id
+		)
+		SELECT
+			k.id AS api_key_id,
+			k.name AS key_name,
+			k.status,
+			k.last_used_at,
+			COALESCE(u.requests, 0) AS requests,
+			COALESCE(u.input_tokens, 0) AS input_tokens,
+			COALESCE(u.output_tokens, 0) AS output_tokens,
+			COALESCE(u.cache_creation_tokens, 0) AS cache_creation_tokens,
+			COALESCE(u.cache_read_tokens, 0) AS cache_read_tokens,
+			COALESCE(u.total_tokens, 0) AS total_tokens,
+			COALESCE(u.total_cost, 0) AS total_cost,
+			COALESCE(u.actual_cost, 0) AS actual_cost
+		FROM api_keys k
+		LEFT JOIN usage_by_key u ON u.api_key_id = k.id
+		WHERE k.user_id = $1 AND k.deleted_at IS NULL
+		ORDER BY %s
+		LIMIT $4 OFFSET $5
+	`, apiKeyUsageBreakdownOrderBy(sortValue))
+
+	rows, err := r.sql.QueryContext(ctx, itemsQuery, userID, startTime, endTime, pageSize, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var item usagestats.APIKeyUsageBreakdownItem
+		if err := rows.Scan(
+			&item.APIKeyID,
+			&item.KeyName,
+			&item.Status,
+			&item.LastUsedAt,
+			&item.Requests,
+			&item.InputTokens,
+			&item.OutputTokens,
+			&item.CacheCreationTokens,
+			&item.CacheReadTokens,
+			&item.TotalTokens,
+			&item.TotalCost,
+			&item.ActualCost,
+		); err != nil {
+			return nil, err
+		}
+		if result.Summary.ActualCost > 0 {
+			item.ActualCostShare = item.ActualCost / result.Summary.ActualCost
+		}
+		result.Items = append(result.Items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // GetUserUsageTrendByUserID 获取指定用户的使用趋势

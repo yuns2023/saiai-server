@@ -1396,6 +1396,7 @@ export interface UsageQueryParams {
   billing_type?: number | null
   start_date?: string
   end_date?: string
+  timezone?: string
 }
 
 // ==================== Account Usage Statistics ====================
