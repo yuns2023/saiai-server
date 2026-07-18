@@ -36,6 +36,47 @@ func TestApplyErrorPassthroughRule_NoBoundService(t *testing.T) {
 	assert.Equal(t, "Upstream request failed", errMsg)
 }
 
+func TestApplyErrorPassthroughRule_RedactsRestrictedUpstreamIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		passthroughBody bool
+		customMessage   string
+	}{
+		{name: "passthrough body", passthroughBody: true},
+		{name: "custom message", customMessage: "ReClaude service failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+
+			rule := newNonFailoverPassthroughRule(http.StatusBadRequest, "reclaude", http.StatusBadRequest, tc.customMessage)
+			rule.PassthroughBody = tc.passthroughBody
+			if tc.passthroughBody {
+				rule.CustomMessage = nil
+			}
+			ruleSvc := &ErrorPassthroughService{}
+			ruleSvc.setLocalCache([]*model.ErrorPassthroughRule{rule})
+			BindErrorPassthroughService(c, ruleSvc)
+
+			status, errType, errMsg, matched := applyErrorPassthroughRule(
+				c,
+				PlatformAnthropic,
+				http.StatusBadRequest,
+				[]byte(`{"error":{"message":"reclaude upstream failure"}}`),
+				http.StatusBadGateway,
+				"upstream_error",
+				"Upstream request failed",
+			)
+
+			require.True(t, matched)
+			require.Equal(t, http.StatusBadRequest, status)
+			require.Equal(t, "upstream_error", errType)
+			require.Equal(t, DeviceAuthorizationUnavailableClientMessage, errMsg)
+		})
+	}
+}
+
 func TestGatewayHandleErrorResponse_NoRuleKeepsDefault(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

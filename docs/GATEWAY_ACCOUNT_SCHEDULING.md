@@ -50,11 +50,18 @@ model requests.
 ## Account-scoped device authorization failures
 
 An Anthropic-compatible HTTP `400` that says the upstream device authorization
-has been unbound or revoked is classified as account state, not as a malformed
-customer request. The Gateway marks that account unavailable and enters normal
-account failover without replaying the request on the same broken account.
+has been unbound or revoked, or reports the equivalent branded client-state
+restart failure, is classified as account state, not as a malformed customer
+request. The Gateway marks that account unavailable and enters normal account
+failover without replaying the request on the same broken account.
 
 The raw upstream recovery instruction is retained only in restricted operator
 diagnostics. It is never returned through a client error-passthrough rule. If
 all eligible accounts fail, the client receives HTTP `502` with a neutral SAIAI
 service-channel message.
+
+Restricted upstream provider identities are protected by a non-configurable
+final response boundary across JSON, SSE, raw `400`, and configurable
+error-passthrough paths. An identity match alone redacts the client response;
+account isolation still requires the narrower account-state classification so
+an unrelated error cannot disable an otherwise healthy account.

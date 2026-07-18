@@ -7905,6 +7905,14 @@ func (s *GatewayService) handleErrorResponseForModel(ctx context.Context, resp *
 
 	switch resp.StatusCode {
 	case 400:
+		// Anthropic 400 responses are otherwise passed through verbatim for useful
+		// request validation details. Never let that compatibility behavior expose
+		// a restricted upstream provider identity when a new error wording evades
+		// the semantic account-failure classifier above.
+		if containsRestrictedUpstreamIdentity(upstreamMsg) || containsRestrictedUpstreamIdentity(string(body)) {
+			writeAnthropicError(c, http.StatusBadGateway, "upstream_error", DeviceAuthorizationUnavailableClientMessage)
+			return nil, fmt.Errorf("upstream error: %d (client response redacted)", resp.StatusCode)
+		}
 		c.Data(http.StatusBadRequest, "application/json", body)
 		summary := upstreamMsg
 		if summary == "" {

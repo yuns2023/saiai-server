@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -16,12 +17,18 @@ import (
 )
 
 func TestClassifyUpstreamFailure_DeviceAuthorizationRevoked(t *testing.T) {
+	for _, body := range [][]byte{
+		[]byte(`{"type":"error","error":{"message":"此设备已被解绑，请在终端重新完成登录"}}`),
+		[]byte(`{"type":"error","error":{"message":"reclaude 客户端状态异常，请重启 reclaude 后重试"}}`),
+		[]byte(`{"type":"error","error":{"message":"ReClaude client status is unavailable; restart ReClaude and retry"}}`),
+	} {
+		require.Equal(
+			t,
+			UpstreamFailureDeviceAuthorizationRevoked,
+			classifyUpstreamFailure(PlatformAnthropic, http.StatusBadRequest, body),
+		)
+	}
 	body := []byte(`{"type":"error","error":{"message":"此设备已被解绑，请在终端重新完成登录"}}`)
-	require.Equal(
-		t,
-		UpstreamFailureDeviceAuthorizationRevoked,
-		classifyUpstreamFailure(PlatformAnthropic, http.StatusBadRequest, body),
-	)
 	require.Equal(t, UpstreamFailureNone, classifyUpstreamFailure(PlatformOpenAI, http.StatusBadRequest, body))
 	require.Equal(t, UpstreamFailureNone, classifyUpstreamFailure(PlatformAnthropic, http.StatusUnauthorized, body))
 	require.Equal(
@@ -33,6 +40,26 @@ func TestClassifyUpstreamFailure_DeviceAuthorizationRevoked(t *testing.T) {
 			[]byte(`{"error":{"message":"prompt contains 此设备已被解绑 as ordinary text"}}`),
 		),
 	)
+	require.Equal(
+		t,
+		UpstreamFailureNone,
+		classifyUpstreamFailure(
+			PlatformAnthropic,
+			http.StatusBadRequest,
+			[]byte(`{"error":{"message":"reclaude was mentioned without a client restart failure"}}`),
+		),
+	)
+}
+
+func TestClientSafeUpstreamErrorMessage_RedactsRestrictedIdentity(t *testing.T) {
+	for _, message := range []string{
+		"reclaude 客户端状态异常",
+		"ReClaude client status unavailable",
+		`{"error":{"message":"RECLAUDE failed"}}`,
+	} {
+		require.Equal(t, DeviceAuthorizationUnavailableClientMessage, ClientSafeUpstreamErrorMessage(message))
+	}
+	require.Equal(t, "ordinary upstream error", ClientSafeUpstreamErrorMessage("ordinary upstream error"))
 }
 
 func TestRateLimitService_DeviceAuthorizationRevokedDisablesPoolAccount(t *testing.T) {
@@ -46,13 +73,38 @@ func TestRateLimitService_DeviceAuthorizationRevokedDisablesPoolAccount(t *testi
 			"pool_mode": true,
 		},
 	}
-	body := []byte(`{"error":{"message":"此设备已被解绑，请重新完成登录"}}`)
+	body := []byte(`{"error":{"message":"reclaude 客户端状态异常，请重启 reclaude 后重试"}}`)
 
 	shouldDisable := svc.HandleUpstreamError(context.Background(), account, http.StatusBadRequest, http.Header{}, body)
 
 	require.True(t, shouldDisable)
 	require.Equal(t, 1, repo.setErrorCalls)
-	require.NotContains(t, repo.lastErrorMsg, "重新完成登录")
+	require.NotContains(t, strings.ToLower(repo.lastErrorMsg), "reclaude")
+}
+
+func TestGatewayHandleErrorResponse_RedactsRestrictedIdentityBeforeRaw400Passthrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	svc := &GatewayService{}
+	account := &Account{ID: 903, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+	body := []byte(`{"error":{"message":"ReClaude upstream temporarily unavailable"}}`)
+	require.Equal(t, UpstreamFailureNone, classifyUpstreamFailure(account.Platform, http.StatusBadRequest, body))
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"X-Request-Id": []string{"req-redacted"}},
+		Body:       io.NopCloser(bytes.NewReader(body)),
+	}
+
+	_, err := svc.handleErrorResponse(context.Background(), resp, c, account)
+
+	require.Error(t, err)
+	require.NotContains(t, strings.ToLower(err.Error()), "reclaude")
+	require.Equal(t, http.StatusBadGateway, recorder.Code)
+	require.NotContains(t, strings.ToLower(recorder.Body.String()), "reclaude")
+	require.Contains(t, recorder.Body.String(), DeviceAuthorizationUnavailableClientMessage)
 }
 
 func TestGatewayHandleErrorResponse_ClassifiesDeviceAuthorizationBeforeRaw400Passthrough(t *testing.T) {
@@ -98,7 +150,7 @@ func TestGatewayForward_DeviceAuthorizationBypassesGenericAPIKeyRetryPolicy(t *t
 				StatusCode: http.StatusBadRequest,
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
 				Body: io.NopCloser(bytes.NewBufferString(
-					`{"error":{"message":"此设备已被解绑，请运行 private-upstream-cli 完成登录"}}`,
+					`{"error":{"message":"reclaude 客户端状态异常，请重启 reclaude 后重试"}}`,
 				)),
 			}
 		},

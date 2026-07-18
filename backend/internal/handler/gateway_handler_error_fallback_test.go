@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -103,13 +104,13 @@ func TestGatewayHandleFailoverExhausted_DeviceAuthorizationUsesNeutralMessage(t 
 	h := &GatewayHandler{}
 	h.handleFailoverExhausted(c, &service.UpstreamFailoverError{
 		StatusCode:   http.StatusBadRequest,
-		ResponseBody: []byte(`{"error":{"message":"此设备已被解绑，请运行 private-upstream-cli 登录"}}`),
+		ResponseBody: []byte(`{"error":{"message":"reclaude 客户端状态异常，请重启 reclaude 后重试"}}`),
 		Kind:         service.UpstreamFailureDeviceAuthorizationRevoked,
 	}, service.PlatformAnthropic, false)
 
 	require.Equal(t, http.StatusBadGateway, w.Code)
-	require.NotContains(t, w.Body.String(), "private-upstream-cli")
-	require.NotContains(t, w.Body.String(), "此设备已被解绑")
+	require.NotContains(t, strings.ToLower(w.Body.String()), "reclaude")
+	require.NotContains(t, w.Body.String(), "客户端状态异常")
 
 	var parsed map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &parsed))
@@ -128,12 +129,88 @@ func TestOpenAIGatewayAnthropicFailover_DeviceAuthorizationUsesNeutralMessage(t 
 	h := &OpenAIGatewayHandler{}
 	h.handleAnthropicFailoverExhausted(c, &service.UpstreamFailoverError{
 		StatusCode:   http.StatusBadRequest,
-		ResponseBody: []byte(`{"error":{"message":"此设备已被解绑，请运行 private-upstream-cli 登录"}}`),
+		ResponseBody: []byte(`{"error":{"message":"reclaude 客户端状态异常，请重启 reclaude 后重试"}}`),
 		Kind:         service.UpstreamFailureDeviceAuthorizationRevoked,
 	}, false)
 
 	require.Equal(t, http.StatusBadGateway, w.Code)
-	require.NotContains(t, w.Body.String(), "private-upstream-cli")
-	require.NotContains(t, w.Body.String(), "此设备已被解绑")
+	require.NotContains(t, strings.ToLower(w.Body.String()), "reclaude")
+	require.NotContains(t, w.Body.String(), "客户端状态异常")
 	require.Contains(t, w.Body.String(), service.DeviceAuthorizationUnavailableClientMessage)
+}
+
+func TestGatewayErrorWriters_RedactRestrictedUpstreamIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(*GatewayHandler, *gin.Context)
+	}{
+		{
+			name: "direct json",
+			write: func(h *GatewayHandler, c *gin.Context) {
+				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "ReClaude failed")
+			},
+		},
+		{
+			name: "streaming sse",
+			write: func(h *GatewayHandler, c *gin.Context) {
+				h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "reclaude failed", true)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+			tc.write(&GatewayHandler{}, c)
+
+			require.NotContains(t, strings.ToLower(w.Body.String()), "reclaude")
+			require.Contains(t, w.Body.String(), service.DeviceAuthorizationUnavailableClientMessage)
+		})
+	}
+}
+
+func TestOpenAIErrorWriters_RedactRestrictedUpstreamIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(*OpenAIGatewayHandler, *gin.Context)
+	}{
+		{
+			name: "openai json",
+			write: func(h *OpenAIGatewayHandler, c *gin.Context) {
+				h.writeError(c, gatewayErrorEnvelope{Status: http.StatusBadGateway, Type: "upstream_error", Message: "ReClaude failed"}, false)
+			},
+		},
+		{
+			name: "openai streaming sse",
+			write: func(h *OpenAIGatewayHandler, c *gin.Context) {
+				h.writeError(c, gatewayErrorEnvelope{Status: http.StatusBadGateway, Type: "upstream_error", Message: "reclaude failed"}, true)
+			},
+		},
+		{
+			name: "anthropic json",
+			write: func(h *OpenAIGatewayHandler, c *gin.Context) {
+				h.writeAnthropicError(c, gatewayErrorEnvelope{Status: http.StatusBadGateway, Type: "upstream_error", Message: "ReClaude failed"}, false)
+			},
+		},
+		{
+			name: "anthropic streaming sse",
+			write: func(h *OpenAIGatewayHandler, c *gin.Context) {
+				h.writeAnthropicError(c, gatewayErrorEnvelope{Status: http.StatusBadGateway, Type: "upstream_error", Message: "reclaude failed"}, true)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+			tc.write(&OpenAIGatewayHandler{}, c)
+
+			require.NotContains(t, strings.ToLower(w.Body.String()), "reclaude")
+			require.Contains(t, w.Body.String(), service.DeviceAuthorizationUnavailableClientMessage)
+		})
+	}
 }

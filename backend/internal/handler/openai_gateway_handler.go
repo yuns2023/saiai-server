@@ -1562,6 +1562,7 @@ var (
 // the error is delivered as an SSE error event so the half-written stream can
 // terminate cleanly; Retry-After is suppressed in that branch.
 func (h *OpenAIGatewayHandler) writeError(c *gin.Context, e gatewayErrorEnvelope, streamStarted bool) {
+	e.Message = service.ClientSafeUpstreamErrorMessage(e.Message)
 	if streamStarted {
 		flusher, ok := c.Writer.(http.Flusher)
 		if !ok {
@@ -1600,6 +1601,7 @@ func (h *OpenAIGatewayHandler) writeError(c *gin.Context, e gatewayErrorEnvelope
 // The Anthropic protocol error body does not include a "code" field, so
 // envelope.Code is dropped from the wire payload (still useful in logs/metrics).
 func (h *OpenAIGatewayHandler) writeAnthropicError(c *gin.Context, e gatewayErrorEnvelope, streamStarted bool) {
+	e.Message = service.ClientSafeUpstreamErrorMessage(e.Message)
 	if streamStarted {
 		flusher, ok := c.Writer.(http.Flusher)
 		if !ok {
