@@ -2557,7 +2557,7 @@ func (r *usageLogRepository) GetUserAPIKeyUsageBreakdown(
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var item usagestats.APIKeyUsageBreakdownItem
