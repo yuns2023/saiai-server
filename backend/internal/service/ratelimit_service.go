@@ -126,6 +126,14 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 func (s *RateLimitService) HandleUpstreamErrorForModel(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel string) (shouldDisable bool) {
 	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled()
 
+	// A revoked upstream device authorization is account state, not a malformed
+	// customer request. Handle it before pool/custom-code policy so the broken
+	// account cannot remain schedulable and repeatedly expose the same failure.
+	if classifyUpstreamFailure(account.Platform, statusCode, responseBody) == UpstreamFailureDeviceAuthorizationRevoked {
+		s.handleAuthError(ctx, account, "Upstream device authorization is no longer valid (400); re-authentication is required")
+		return true
+	}
+
 	// 池模式默认不标记本地账号状态；仅当用户显式配置自定义错误码时按本地策略处理。
 	if account.IsPoolMode() && !customErrorCodesEnabled {
 		slog.Info("pool_mode_error_skipped", "account_id", account.ID, "status_code", statusCode)

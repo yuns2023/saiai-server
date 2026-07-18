@@ -43,6 +43,8 @@ export interface TrendParams {
   start_date?: string
   end_date?: string
   granularity?: 'day' | 'hour'
+  api_key_id?: number
+  timezone?: string
 }
 
 export interface TrendResponse {
@@ -133,7 +135,8 @@ export async function getStats(
 export async function getStatsByDateRange(
   startDate: string,
   endDate: string,
-  apiKeyId?: number
+  apiKeyId?: number,
+  timezone?: string
 ): Promise<UsageStatsResponse> {
   const params: Record<string, unknown> = {
     start_date: startDate,
@@ -142,6 +145,9 @@ export async function getStatsByDateRange(
 
   if (apiKeyId !== undefined) {
     params.api_key_id = apiKeyId
+  }
+  if (timezone) {
+    params.timezone = timezone
   }
 
   const { data } = await apiClient.get<UsageStatsResponse>('/usage/stats', {
@@ -160,7 +166,8 @@ export async function getStatsByDateRange(
 export async function getByDateRange(
   startDate: string,
   endDate: string,
-  apiKeyId?: number
+  apiKeyId?: number,
+  timezone?: string
 ): Promise<PaginatedResponse<UsageLog>> {
   const params: UsageQueryParams = {
     start_date: startDate,
@@ -171,6 +178,9 @@ export async function getByDateRange(
 
   if (apiKeyId !== undefined) {
     params.api_key_id = apiKeyId
+  }
+  if (timezone) {
+    params.timezone = timezone
   }
 
   const { data } = await apiClient.get<PaginatedResponse<UsageLog>>('/usage', {
@@ -195,8 +205,9 @@ export async function getById(id: number): Promise<UsageLog> {
  * Get user dashboard statistics
  * @returns Dashboard statistics for current user
  */
-export async function getDashboardStats(): Promise<UserDashboardStats> {
-  const { data } = await apiClient.get<UserDashboardStats>('/usage/dashboard/stats')
+export async function getDashboardStats(apiKeyId?: number): Promise<UserDashboardStats> {
+  const params = apiKeyId === undefined ? undefined : { api_key_id: apiKeyId }
+  const { data } = await apiClient.get<UserDashboardStats>('/usage/dashboard/stats', { params })
   return data
 }
 
@@ -218,8 +229,72 @@ export async function getDashboardTrend(params?: TrendParams): Promise<TrendResp
 export async function getDashboardModels(params?: {
   start_date?: string
   end_date?: string
+  api_key_id?: number
+  timezone?: string
 }): Promise<ModelStatsResponse> {
   const { data } = await apiClient.get<ModelStatsResponse>('/usage/dashboard/models', { params })
+  return data
+}
+
+export type APIKeyUsageBreakdownSort =
+  | 'actual_cost_desc'
+  | 'requests_desc'
+  | 'tokens_desc'
+  | 'last_used_desc'
+  | 'name_asc'
+
+export interface APIKeyUsageBreakdownItem {
+  api_key_id: number
+  key_name: string
+  status: string
+  last_used_at: string | null
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  total_cost: number
+  actual_cost: number
+  actual_cost_share: number
+}
+
+export interface APIKeyUsageBreakdownSummary {
+  requests: number
+  total_tokens: number
+  total_cost: number
+  actual_cost: number
+}
+
+export interface APIKeyUsageBreakdownResponse {
+  items: APIKeyUsageBreakdownItem[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+  summary: APIKeyUsageBreakdownSummary
+  start_date: string
+  end_date: string
+  sort: APIKeyUsageBreakdownSort
+}
+
+export interface APIKeyUsageBreakdownParams {
+  start_date?: string
+  end_date?: string
+  timezone?: string
+  page?: number
+  page_size?: number
+  sort?: APIKeyUsageBreakdownSort
+}
+
+/** Get the current user's usage ranking grouped by API Key. */
+export async function getDashboardAPIKeyBreakdown(
+  params?: APIKeyUsageBreakdownParams
+): Promise<APIKeyUsageBreakdownResponse> {
+  const { data } = await apiClient.get<APIKeyUsageBreakdownResponse>(
+    '/usage/dashboard/api-key-breakdown',
+    { params }
+  )
   return data
 }
 
@@ -268,6 +343,7 @@ export const usageAPI = {
   getDashboardStats,
   getDashboardTrend,
   getDashboardModels,
+  getDashboardAPIKeyBreakdown,
   getDashboardApiKeysUsage
 }
 

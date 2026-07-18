@@ -653,9 +653,10 @@ type UpstreamFailoverError struct {
 	StatusCode             int
 	ResponseBody           []byte      // 上游响应体，用于错误透传规则匹配
 	ResponseHeaders        http.Header // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息
-	ForceCacheBilling      bool        // Antigravity 粘性会话切换时设为 true
-	RetryableOnSameAccount bool        // 临时性错误（如 Google 间歇性 400、空响应），应在同一账号上重试 N 次再切换
-	Cause                  error       // 上游/账号失败的原始原因；用于 errors.Is/As
+	Kind                   UpstreamFailureKind
+	ForceCacheBilling      bool  // Antigravity 粘性会话切换时设为 true
+	RetryableOnSameAccount bool  // 临时性错误（如 Google 间歇性 400、空响应），应在同一账号上重试 N 次再切换
+	Cause                  error // 上游/账号失败的原始原因；用于 errors.Is/As
 }
 
 func (e *UpstreamFailoverError) Error() string {
@@ -5458,6 +5459,15 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			if readErr == nil {
 				_ = resp.Body.Close()
 
+				// Account-scoped authorization failures must bypass generic API-key
+				// retry policy and request-shape rectifiers. Central error handling
+				// will isolate the account and return a provider-neutral failure if
+				// normal account failover is exhausted.
+				if classifyUpstreamFailure(account.Platform, resp.StatusCode, respBody) != UpstreamFailureNone {
+					resp.Body = io.NopCloser(bytes.NewReader(respBody))
+					return s.handleErrorResponseForModel(ctx, resp, c, account, reqModel)
+				}
+
 				if allowClaudeOAuthRectifier && s.isThinkingBlockSignatureError(respBody) && s.settingService.IsSignatureRectifierEnabled(ctx) {
 					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 						Platform:           account.Platform,
@@ -7787,6 +7797,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 func (s *GatewayService) handleErrorResponseForModel(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, requestedModel string) (*ForwardResult, error) {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	SetOpsUpstreamForwardResponseSnapshot(c, resp.StatusCode, resp.Header, body)
+	failureKind := classifyUpstreamFailure(account.Platform, resp.StatusCode, body)
 
 	// 调试日志：打印上游错误响应
 	logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (non-retryable): Account=%d(%s) Status=%d RequestID=%s Body=%s",
@@ -7819,13 +7830,17 @@ func (s *GatewayService) handleErrorResponseForModel(ctx context.Context, resp *
 		upstreamDetail = truncateString(string(body), maxBytes)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
+	opsErrorKind := "http_error"
+	if failureKind != UpstreamFailureNone {
+		opsErrorKind = string(failureKind)
+	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform:           account.Platform,
 		AccountID:          account.ID,
 		AccountName:        account.Name,
 		UpstreamStatusCode: resp.StatusCode,
 		UpstreamRequestID:  resp.Header.Get("x-request-id"),
-		Kind:               "http_error",
+		Kind:               opsErrorKind,
 		Message:            upstreamMsg,
 		Detail:             upstreamDetail,
 	})
@@ -7835,8 +7850,13 @@ func (s *GatewayService) handleErrorResponseForModel(ctx context.Context, resp *
 	if s.rateLimitService != nil {
 		shouldDisable = s.rateLimitService.HandleUpstreamErrorForModel(ctx, account, resp.StatusCode, resp.Header, body, requestedModel)
 	}
-	if shouldDisable {
-		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: body}
+	if shouldDisable || failureKind != UpstreamFailureNone {
+		return nil, &UpstreamFailoverError{
+			StatusCode:      resp.StatusCode,
+			ResponseBody:    body,
+			ResponseHeaders: resp.Header.Clone(),
+			Kind:            failureKind,
+		}
 	}
 
 	// 记录上游错误响应体摘要便于排障（可选：由配置控制；不回显到客户端）

@@ -769,6 +769,12 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 
 // handleAnthropicFailoverExhausted maps upstream failover errors to Anthropic format.
 func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
+	if failoverErr.Kind == service.UpstreamFailureDeviceAuthorizationRevoked {
+		upstreamMsg := service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)
+		service.SetOpsUpstreamError(c, failoverErr.StatusCode, upstreamMsg, "")
+		h.anthropicStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.DeviceAuthorizationUnavailableClientMessage, streamStarted)
+		return
+	}
 	status, errType, errMsg := h.mapUpstreamError(failoverErr.StatusCode)
 	h.anthropicStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }

@@ -498,6 +498,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { usageAPI, keysAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -519,6 +520,8 @@ import { resolveUsageRequestType } from '@/utils/usageRequestType'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const route = useRoute()
+const routeQuery = route?.query ?? {}
 
 let abortController: AbortController | null = null
 
@@ -575,12 +578,25 @@ const now = new Date()
 const weekAgo = new Date(now)
 weekAgo.setDate(weekAgo.getDate() - 6)
 
+const firstQueryValue = (value: unknown): string => {
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : ''
+  return typeof value === 'string' ? value : ''
+}
+const validDateQuery = (value: unknown): string | undefined => {
+  const candidate = firstQueryValue(value)
+  return /^\d{4}-\d{2}-\d{2}$/.test(candidate) ? candidate : undefined
+}
+const parsedAPIKeyID = Number(firstQueryValue(routeQuery.api_key_id))
+const initialAPIKeyID =
+  Number.isSafeInteger(parsedAPIKeyID) && parsedAPIKeyID > 0 ? parsedAPIKeyID : undefined
+const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
+
 // Date range state
-const startDate = ref(formatLocalDate(weekAgo))
-const endDate = ref(formatLocalDate(now))
+const startDate = ref(validDateQuery(routeQuery.start_date) || formatLocalDate(weekAgo))
+const endDate = ref(validDateQuery(routeQuery.end_date) || formatLocalDate(now))
 
 const filters = ref<UsageQueryParams>({
-  api_key_id: undefined,
+  api_key_id: initialAPIKeyID,
   start_date: undefined,
   end_date: undefined
 })
@@ -678,7 +694,8 @@ const loadUsageLogs = async () => {
     const params: UsageQueryParams = {
       page: pagination.page,
       page_size: pagination.page_size,
-      ...filters.value
+      ...filters.value,
+      timezone: browserTimezone
     }
 
     const response = await usageAPI.query(params, { signal })
@@ -708,6 +725,10 @@ const loadApiKeys = async () => {
   try {
     const response = await keysAPI.list(1, 100)
     apiKeys.value = response.items
+    if (initialAPIKeyID && !apiKeys.value.some((key) => key.id === initialAPIKeyID)) {
+      const selectedKey = await keysAPI.getById(initialAPIKeyID)
+      apiKeys.value.push(selectedKey)
+    }
   } catch (error) {
     console.error('Failed to load API keys:', error)
   }
@@ -719,7 +740,8 @@ const loadUsageStats = async () => {
     const stats = await usageAPI.getStatsByDateRange(
       filters.value.start_date || startDate.value,
       filters.value.end_date || endDate.value,
-      apiKeyId
+      apiKeyId,
+      browserTimezone
     )
     usageStats.value = stats
   } catch (error) {
@@ -781,7 +803,8 @@ const exportToCSV = async () => {
       const params: UsageQueryParams = {
         page: page,
         page_size: pageSize,
-        ...filters.value
+        ...filters.value,
+        timezone: browserTimezone
       }
       const response = await usageAPI.query(params)
       allLogs.push(...response.items)

@@ -28,6 +28,7 @@ wrapper 镜像；客户端源码和二进制发布的权威仓库仍是 `saiai-c
 
 - 支持 Anthropic、OpenAI 及相关账号类型的兼容网关路由
 - API Key、分组、账号、额度、并发、速率限制和用量控制
+- 用户仪表盘支持按 [API Key 用量维度](docs/API_KEY_USAGE_ANALYTICS.md)筛选、排行和导出 CSV
 - 粘性会话与账号调度；具体规则见
   [新会话准入与 HTTP 重放约定](docs/GATEWAY_ACCOUNT_SCHEDULING.md)
 - 用于管理用户、Key、分组、账号和可观测性的 Vue 管理界面

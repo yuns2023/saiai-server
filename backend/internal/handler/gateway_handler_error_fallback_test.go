@@ -93,3 +93,47 @@ func TestGatewayHandleFailoverExhausted_CarpoolDevicesFullUsesCapacityMessage(t 
 	assert.Equal(t, "rate_limit_error", errorObj["type"])
 	assert.Equal(t, service.ClaudeOAuthCarpoolDevicesFullAllAccountsMessage, errorObj["message"])
 }
+
+func TestGatewayHandleFailoverExhausted_DeviceAuthorizationUsesNeutralMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	h := &GatewayHandler{}
+	h.handleFailoverExhausted(c, &service.UpstreamFailoverError{
+		StatusCode:   http.StatusBadRequest,
+		ResponseBody: []byte(`{"error":{"message":"此设备已被解绑，请运行 private-upstream-cli 登录"}}`),
+		Kind:         service.UpstreamFailureDeviceAuthorizationRevoked,
+	}, service.PlatformAnthropic, false)
+
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.NotContains(t, w.Body.String(), "private-upstream-cli")
+	require.NotContains(t, w.Body.String(), "此设备已被解绑")
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &parsed))
+	errorObj, ok := parsed["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "upstream_error", errorObj["type"])
+	assert.Equal(t, service.DeviceAuthorizationUnavailableClientMessage, errorObj["message"])
+}
+
+func TestOpenAIGatewayAnthropicFailover_DeviceAuthorizationUsesNeutralMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	h := &OpenAIGatewayHandler{}
+	h.handleAnthropicFailoverExhausted(c, &service.UpstreamFailoverError{
+		StatusCode:   http.StatusBadRequest,
+		ResponseBody: []byte(`{"error":{"message":"此设备已被解绑，请运行 private-upstream-cli 登录"}}`),
+		Kind:         service.UpstreamFailureDeviceAuthorizationRevoked,
+	}, false)
+
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.NotContains(t, w.Body.String(), "private-upstream-cli")
+	require.NotContains(t, w.Body.String(), "此设备已被解绑")
+	require.Contains(t, w.Body.String(), service.DeviceAuthorizationUnavailableClientMessage)
+}

@@ -32,6 +32,8 @@ authority for client source and binaries.
 - Provider-compatible gateway routes for supported Anthropic, OpenAI, and
   related account types
 - API-key, group, account, quota, concurrency, rate-limit, and usage controls
+- User dashboard filtering, ranking, and CSV reporting by
+  [API Key usage dimension](docs/API_KEY_USAGE_ANALYTICS.md)
 - Sticky-session and account scheduling support, with a documented
   [new-session and HTTP replay contract](docs/GATEWAY_ACCOUNT_SCHEDULING.md)
 - Vue administrative interface for users, keys, groups, accounts, and

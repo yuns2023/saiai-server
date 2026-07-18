@@ -270,6 +270,41 @@ type BatchAPIKeyUsageStats struct {
 	TotalActualCost float64 `json:"total_actual_cost"`
 }
 
+// APIKeyUsageBreakdownItem is a user-visible usage row grouped by API Key.
+// It deliberately excludes the raw key value.
+type APIKeyUsageBreakdownItem struct {
+	APIKeyID            int64      `json:"api_key_id"`
+	KeyName             string     `json:"key_name"`
+	Status              string     `json:"status"`
+	LastUsedAt          *time.Time `json:"last_used_at"`
+	Requests            int64      `json:"requests"`
+	InputTokens         int64      `json:"input_tokens"`
+	OutputTokens        int64      `json:"output_tokens"`
+	CacheCreationTokens int64      `json:"cache_creation_tokens"`
+	CacheReadTokens     int64      `json:"cache_read_tokens"`
+	TotalTokens         int64      `json:"total_tokens"`
+	TotalCost           float64    `json:"total_cost"`
+	ActualCost          float64    `json:"actual_cost"`
+	ActualCostShare     float64    `json:"actual_cost_share"`
+}
+
+// APIKeyUsageBreakdownSummary contains totals for all matching keys, not only
+// the current page.
+type APIKeyUsageBreakdownSummary struct {
+	Requests    int64   `json:"requests"`
+	TotalTokens int64   `json:"total_tokens"`
+	TotalCost   float64 `json:"total_cost"`
+	ActualCost  float64 `json:"actual_cost"`
+}
+
+// APIKeyUsageBreakdownResult is the repository result for a paginated Key
+// ranking over an explicit time range.
+type APIKeyUsageBreakdownResult struct {
+	Items   []APIKeyUsageBreakdownItem  `json:"items"`
+	Total   int64                       `json:"total"`
+	Summary APIKeyUsageBreakdownSummary `json:"summary"`
+}
+
 // AccountUsageHistory represents daily usage history for an account
 type AccountUsageHistory struct {
 	Date       string  `json:"date"`

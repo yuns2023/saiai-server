@@ -520,7 +520,31 @@ export default {
     viewUsage: '查看使用记录',
     checkDetailedLogs: '查看详细的使用日志',
     redeemCode: '兑换码',
-    addBalanceWithCode: '使用兑换码充值'
+    addBalanceWithCode: '使用兑换码充值',
+    apiKeyFilter: 'API Key 筛选',
+    allApiKeys: '全部 API Key',
+    apiKeyFilterHint: '统计卡片、趋势、模型分布和最近记录将按所选 Key 筛选。',
+    apiKeyBreakdown: 'API Key 用量排行',
+    apiKeyBreakdownHint: '按当前时间范围汇总；仅展示 Key 名称和 ID，不展示完整密钥。',
+    exportKeyBreakdown: '导出 CSV',
+    apiKey: 'API Key',
+    status: '状态',
+    actualCost: '实际消费',
+    usageShare: '消费占比',
+    lastUsed: '最后使用',
+    cacheWrite: '缓存写入',
+    cacheRead: '缓存读取',
+    noApiKeyUsage: '暂无 API Key 数据',
+    noApiKeyUsageHint: '创建并使用 API Key 后，分项统计将显示在这里。',
+    filterThisKey: '筛选',
+    viewDetails: '明细',
+    sortActualCost: '按实际消费排序',
+    sortRequests: '按请求数排序',
+    sortTokens: '按 Token 排序',
+    sortLastUsed: '按最后使用排序',
+    sortKeyName: '按 Key 名称排序',
+    keyBreakdownExported: 'API Key 用量 CSV 已导出',
+    keyBreakdownExportFailed: '导出 API Key 用量失败'
   },
 
   // Groups (shared)
@@ -687,6 +711,7 @@ export default {
     status: {
       active: '活跃',
       inactive: '已停用',
+      disabled: '已停用',
       quota_exhausted: '额度耗尽',
       expired: '已过期'
     }

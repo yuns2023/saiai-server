@@ -1592,6 +1592,12 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
+	if failoverErr.Kind == service.UpstreamFailureDeviceAuthorizationRevoked {
+		upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
+		service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
+		h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.DeviceAuthorizationUnavailableClientMessage, streamStarted)
+		return
+	}
 
 	// 先检查透传规则
 	if h.errorPassthroughService != nil && len(responseBody) > 0 {
