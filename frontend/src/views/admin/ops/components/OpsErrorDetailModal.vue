@@ -30,15 +30,19 @@
 
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">
-            {{ isUpstreamError(detail) ? t('admin.ops.errorDetail.account') : t('admin.ops.errorDetail.user') }}
+            {{ t('admin.ops.errorDetail.user') }}
           </div>
           <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-            <template v-if="isUpstreamError(detail)">
-              {{ detail.account_name || (detail.account_id != null ? String(detail.account_id) : '—') }}
-            </template>
-            <template v-else>
-              {{ detail.user_email || (detail.user_id != null ? String(detail.user_id) : '—') }}
-            </template>
+            {{ detail.user_email || (detail.user_id != null ? String(detail.user_id) : '—') }}
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">
+            {{ t('admin.ops.errorDetail.account') }}
+          </div>
+          <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+            {{ formatAccountLabel(detail.account_name, detail.account_id) }}
           </div>
         </div>
 
@@ -138,6 +142,10 @@
             </div>
 
             <div class="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 dark:text-gray-300 sm:grid-cols-2">
+              <div>
+                <span class="text-gray-400">{{ t('admin.ops.errorDetail.upstreamEvent.account') }}:</span>
+                <span class="ml-1 font-mono">{{ formatAccountLabel(ev.accountName, ev.accountId) }}</span>
+              </div>
               <div v-if="ev.reason">
                 <span class="text-gray-400">{{ t('admin.ops.errorDetail.upstreamEvent.reason') }}:</span>
                 <span class="ml-1 font-mono font-semibold text-amber-700 dark:text-amber-300">{{ ev.reason }}</span>
@@ -199,6 +207,10 @@
 
             <div class="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 dark:text-gray-300 sm:grid-cols-2">
               <div>
+                <span class="text-gray-400">{{ t('admin.ops.errorDetail.upstreamEvent.account') }}:</span>
+                <span class="ml-1 font-mono">{{ formatAccountLabel(ev.account_name, ev.account_id) }}</span>
+              </div>
+              <div>
                 <span class="text-gray-400">{{ t('admin.ops.errorDetail.upstreamEvent.status') }}:</span>
                 <span class="ml-1 font-mono">{{ ev.status_code ?? '—' }}</span>
               </div>
@@ -230,6 +242,7 @@ import { useAppStore } from '@/stores'
 import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
 import { formatDateTime } from '@/utils/format'
 import { resolvePrimaryResponseBody, resolveUpstreamPayload } from '../utils/errorDetailResponse'
+import { formatAccountLabel, parseEmbeddedUpstreamEvents } from '../utils/errorDetailUpstream'
 
 interface Props {
   show: boolean
@@ -283,88 +296,15 @@ const title = computed(() => {
 
 const emptyText = computed(() => t('admin.ops.errorDetail.noErrorSelected'))
 
-function isUpstreamError(d: OpsErrorDetail | null): boolean {
-  if (!d) return false
-  const phase = String(d.phase || '').toLowerCase()
-  const owner = String(d.error_owner || '').toLowerCase()
-  return phase === 'upstream' && owner === 'provider'
-}
-
 const correlatedUpstream = ref<OpsErrorDetail[]>([])
 const correlatedUpstreamLoading = ref(false)
 
 const correlatedUpstreamErrors = computed<OpsErrorDetail[]>(() => correlatedUpstream.value)
 
-type EmbeddedUpstreamEvent = {
-  key: string
-  kind: string
-  message: string
-  detail: string
-  reason: string
-  statusCode: number | null
-  requestId: string
-}
-
-const embeddedUpstreamEvents = computed<EmbeddedUpstreamEvent[]>(() => {
-  const raw = String(detail.value?.upstream_errors || '').trim()
-  if (!raw || raw === '[]' || raw === '{}' || raw.toLowerCase() === 'null') return []
-  try {
-    const parsed = JSON.parse(raw)
-    const arr = Array.isArray(parsed) ? parsed : [parsed]
-    return arr
-      .map((item, idx) => normalizeEmbeddedUpstreamEvent(item, idx))
-      .filter((item): item is EmbeddedUpstreamEvent => Boolean(item))
-  } catch {
-    return [{
-      key: 'embedded-0',
-      kind: '',
-      message: '',
-      detail: raw,
-      reason: '',
-      statusCode: null,
-      requestId: ''
-    }]
-  }
-})
+const embeddedUpstreamEvents = computed(() => parseEmbeddedUpstreamEvents(detail.value?.upstream_errors))
 
 const expandedUpstreamDetailIds = ref(new Set<number>())
 const expandedEmbeddedDetailKeys = ref(new Set<string>())
-
-function normalizeEmbeddedUpstreamEvent(item: any, idx: number): EmbeddedUpstreamEvent | null {
-  if (!item || typeof item !== 'object') return null
-  const detailRaw = typeof item.detail === 'string' ? item.detail.trim() : ''
-  const detailObject = parseJSONObject(detailRaw)
-  const requestId = stringValue(item.request_id) || stringValue(item.requestId) || stringValue(detailObject?.request_id)
-  const statusCode = numberValue(item.upstream_status_code) ?? numberValue(item.status_code) ?? numberValue(detailObject?.status_code)
-  return {
-    key: `embedded-${idx}`,
-    kind: stringValue(item.kind),
-    message: stringValue(item.message),
-    detail: detailRaw || JSON.stringify(item),
-    reason: stringValue(detailObject?.reason) || stringValue(item.reason),
-    statusCode,
-    requestId
-  }
-}
-
-function parseJSONObject(raw: string): Record<string, any> | null {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-function stringValue(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
-function numberValue(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  return null
-}
 
 function getUpstreamResponsePreview(ev: OpsErrorDetail): string {
   const upstreamPayload = resolveUpstreamPayload(ev)
