@@ -23,6 +23,19 @@ stop `sub2api`, or require a maintenance page.
 
 ## Repository checks
 
+This repository is maintained by one operator, so a pull request is optional.
+An administrator may push a clean, linear commit directly to protected
+`main`. All required workflows then run for that exact SHA. A direct push is
+not production approval: the private release tool must observe every required
+check succeeding before it accepts the automatically published SHA image.
+
+`Docker Publish` runs in parallel with the required checks, publishes only the
+immutable `sha-<commit>` candidate tag, and uploads a machine-readable
+coordinate artifact. It does not repeat the backend test suite, publish a
+mutable `main` tag, or require an operator to toggle a repository variable.
+An image that finishes before CI is merely an ineligible candidate and must
+never be deployed until the exact-SHA gate passes.
+
 Run serially with bounded resources:
 
 ```bash

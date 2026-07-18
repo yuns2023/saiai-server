@@ -9,42 +9,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: docker-publish-${{ github.ref }}
-  cancel-in-progress: true
+  # Every main commit gets an immutable candidate. Do not cancel an older
+  # build merely because another direct push follows it.
+  group: docker-publish-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
-  verify:
-    if: ${{ vars.ENABLE_PUBLIC_IMAGE_PUBLISH == 'true' && github.ref_protected }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - name: Checkout trusted main commit
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-          check-latest: false
-          cache: true
-      - name: Verify source commit
-        env:
-          EXPECTED_SHA: ${{ github.sha }}
-        shell: bash
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-      - name: Unit tests
-        working-directory: backend
-        run: make test-unit
-      - name: Integration tests
-        working-directory: backend
-        run: make test-integration
-
   publish:
-    needs: verify
-    if: ${{ vars.ENABLE_PUBLIC_IMAGE_PUBLISH == 'true' && github.ref_protected }}
+    # Candidate publication runs in parallel with the required main checks.
+    # Production tooling separately refuses this digest until every required
+    # check for this exact SHA has succeeded.
+    if: ${{ github.ref_protected }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -88,7 +63,6 @@ jobs:
         run: |
           {
             echo 'tags<<EOF'
-            echo "${IMAGE_NAME}:main"
             echo "${IMAGE_NAME}:sha-${HEAD_SHA}"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
@@ -124,6 +98,7 @@ jobs:
           cache-to: type=gha,mode=min
 
       - name: Verify pushed image
+        id: verify
         env:
           IMAGE_NAME: ${{ steps.image.outputs.name }}
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
@@ -141,6 +116,51 @@ jobs:
           docker run --rm --network none --entrypoint /app/sub2api "$image_ref" --version
           docker run --rm --network none --entrypoint /bin/sh "$image_ref" \
             -c 'test -s /app/resources/model-pricing/model_prices_and_context_window.json'
+          binary_sha256=$(docker run --rm --network none --entrypoint sha256sum \
+            "$image_ref" /app/sub2api | awk '{print $1}')
+          test "${#binary_sha256}" -eq 64
+          echo "binary_sha256=$binary_sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Write immutable Gateway coordinates
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          BINARY_SHA256: ${{ steps.verify.outputs.binary_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          image = os.environ["IMAGE_NAME"]
+          digest = os.environ["IMAGE_DIGEST"]
+          document = {
+              "coordinate_schema_version": 1,
+              "repository": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}",
+              "source_commit": os.environ["SOURCE_SHA"],
+              "image": f"{image}@{digest}",
+              "image_digest": digest,
+              "binary_sha256": os.environ["BINARY_SHA256"],
+              "architecture": "amd64",
+              "workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "workflow_run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+          }
+          Path("gateway-coordinate.json").write_text(
+              json.dumps(document, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload immutable Gateway coordinates
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gateway-coordinate-${{ github.sha }}
+          path: gateway-coordinate.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Publish deployment coordinates
         env:
@@ -155,4 +175,6 @@ jobs:
             echo "- Source commit: \`$SOURCE_SHA\`"
             echo "- Image digest: \`$IMAGE_DIGEST\`"
             echo "- Deploy reference: \`${IMAGE_NAME}@${IMAGE_DIGEST}\`"
+            echo "- Coordinate artifact: \`gateway-coordinate-${SOURCE_SHA}\`"
+            echo '- Production eligibility: pending exact-SHA required checks'
           } >> "$GITHUB_STEP_SUMMARY"

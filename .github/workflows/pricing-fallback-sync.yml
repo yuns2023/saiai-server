@@ -4,11 +4,14 @@ on:
   schedule:
     - cron: '23 2 * * *'
   workflow_dispatch:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
-    # This job is a required branch-protection check, so every pull request
-    # must emit a result even when pricing files are unchanged.
+    # This is a required production-eligibility check, so both direct main
+    # pushes and pull requests must emit a result.
 
 permissions:
   contents: read
