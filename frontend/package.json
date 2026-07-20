@@ -18,7 +18,7 @@
   "dependencies": {
     "@tanstack/vue-virtual": "^3.13.23",
     "@vueuse/core": "^10.7.0",
-    "axios": "^1.16.1",
+    "axios": "^1.18.0",
     "chart.js": "^4.4.1",
     "dompurify": "^3.4.12",
     "driver.js": "^1.4.0",
