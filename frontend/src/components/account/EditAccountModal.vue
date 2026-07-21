@@ -1082,7 +1082,7 @@
             <div>
               <label class="input-label mb-0">Claude OAuth Mode</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                `carpool` keeps real client headers, records a limited set of devices, and rejects new devices after the limit is reached. `shared` folds all devices into a fixed number of shared buckets. `pinned` keeps real headers and lets each real device persistently bind to one or more pinned accounts in the same group, choosing the least-loaded bound account at request time. `single_device` keeps one fixed device/account identity and dynamically learns per-UA slots for header templates.
+                `carpool` keeps real client headers and normally limits new devices per account; the limit can be disabled explicitly. `shared` folds all devices into a fixed number of shared buckets. `pinned` keeps real headers and lets each real device persistently bind to one or more pinned accounts in the same group, choosing the least-loaded bound account at request time. `single_device` keeps one fixed device/account identity and dynamically learns per-UA slots for header templates.
               </p>
             </div>
             <div class="flex gap-2">
@@ -1135,24 +1135,47 @@
                 single_device
               </button>
             </div>
-            <div v-if="claudeOAuthMode === 'shared' || claudeOAuthMode === 'carpool'" class="grid grid-cols-2 gap-4">
-              <div>
-                <label class="input-label">{{ claudeOAuthMode === 'shared' ? 'Shared bucket count' : 'Carpool device limit' }}</label>
+            <div v-if="claudeOAuthMode === 'shared' || claudeOAuthMode === 'carpool'" class="space-y-3">
+              <label
+                v-if="claudeOAuthMode === 'carpool'"
+                class="flex items-start gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600"
+              >
                 <input
-                  v-model.number="claudeOAuthCurrentLimit"
-                  type="number"
-                  min="1"
-                  max="32"
-                  step="1"
-                  class="input"
-                  placeholder="5"
+                  v-model="claudeOAuthCarpoolUnlimitedDevices"
+                  data-testid="carpool-unlimited-devices"
+                  type="checkbox"
+                  class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                 />
-                <p class="input-hint">
-                  {{ claudeOAuthMode === 'shared'
-                    ? 'Default 5. All devices are folded into this many shared buckets.'
-                    : 'Default 5. The next unseen device is rejected after the limit is reached.' }}
-                </p>
+                <span>
+                  <span class="block text-sm font-medium text-gray-900 dark:text-white">Unlimited devices</span>
+                  <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                    Admit every valid carpool device without maintaining the local device-slot registry.
+                  </span>
+                </span>
+              </label>
+              <div v-if="claudeOAuthMode === 'shared' || !claudeOAuthCarpoolUnlimitedDevices" class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="input-label">{{ claudeOAuthMode === 'shared' ? 'Shared bucket count' : 'Carpool device limit' }}</label>
+                  <input
+                    v-model.number="claudeOAuthCurrentLimit"
+                    data-testid="claude-oauth-current-limit"
+                    type="number"
+                    min="1"
+                    max="32"
+                    step="1"
+                    class="input"
+                    placeholder="5"
+                  />
+                  <p class="input-hint">
+                    {{ claudeOAuthMode === 'shared'
+                      ? 'Default 5. All devices are folded into this many shared buckets.'
+                      : 'Default 5. The next unseen device is rejected after the limit is reached.' }}
+                  </p>
+                </div>
               </div>
+              <p v-else class="text-xs text-gray-500 dark:text-gray-400">
+                Existing bounded-mode records are preserved for use if the limit is enabled again, but unlimited-mode devices are not added to that registry.
+              </p>
             </div>
             <div v-else-if="claudeOAuthMode === 'pinned'" class="rounded-lg border border-dashed border-gray-200 px-3 py-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
               `pinned` uses the number of pinned Claude OAuth accounts in the same group as the effective device-slot pool. No extra limit field is configured here.
@@ -1247,7 +1270,11 @@
           </div>
         </div>
 
-        <div v-if="claudeOAuthMode === 'carpool'" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="claudeOAuthMode === 'carpool' && claudeOAuthCarpoolUnlimitedDevices" data-testid="carpool-unlimited-summary" class="rounded-lg border border-gray-200 p-4 text-sm text-gray-600 dark:border-dark-600 dark:text-gray-300">
+          The local carpool device limit and device registry are disabled. Existing bounded-mode records remain unchanged and will be available if the limit is enabled again.
+        </div>
+
+        <div v-else-if="claudeOAuthMode === 'carpool'" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
               <label class="input-label mb-0">Recorded Devices</label>
@@ -2093,6 +2120,7 @@ const cacheTTLOverrideEnabled = ref(false)
 const cacheTTLOverrideTarget = ref<string>('5m')
 const claudeOAuthMode = ref<'carpool' | 'shared' | 'pinned' | 'single_device'>('carpool')
 const claudeOAuthCarpoolDeviceLimit = ref<number>(5)
+const claudeOAuthCarpoolUnlimitedDevices = ref(false)
 const claudeOAuthSharedBucketCount = ref<number>(5)
 const claudeOAuthFiveHourRateLimitThresholdPercent = ref<number>(0)
 const claudeOAuthDisableTokenRefresh = ref(true)
@@ -2719,6 +2747,7 @@ function loadQuotaControlSettings(account: Account) {
   cacheTTLOverrideTarget.value = '5m'
   claudeOAuthMode.value = 'carpool'
   claudeOAuthCarpoolDeviceLimit.value = 5
+  claudeOAuthCarpoolUnlimitedDevices.value = false
   claudeOAuthSharedBucketCount.value = 5
   claudeOAuthFiveHourRateLimitThresholdPercent.value = 0
   claudeOAuthDisableTokenRefresh.value = true
@@ -2781,9 +2810,11 @@ function loadQuotaControlSettings(account: Account) {
       : account.claude_oauth_mode === 'single_device'
         ? 'single_device'
         : 'carpool'
-  claudeOAuthCarpoolDeviceLimit.value = Math.min(32, Math.max(1, account.claude_oauth_carpool_device_limit || 5))
-  claudeOAuthSharedBucketCount.value = Math.min(32, Math.max(1, account.claude_oauth_shared_bucket_count || 5))
   const accountExtra = (account.extra as Record<string, unknown>) || {}
+  claudeOAuthCarpoolDeviceLimit.value = Math.min(32, Math.max(1, account.claude_oauth_carpool_device_limit || 5))
+  claudeOAuthCarpoolUnlimitedDevices.value =
+    account.claude_oauth_carpool_unlimited_devices === true || accountExtra.claude_oauth_carpool_unlimited_devices === true
+  claudeOAuthSharedBucketCount.value = Math.min(32, Math.max(1, account.claude_oauth_shared_bucket_count || 5))
   claudeOAuthFiveHourRateLimitThresholdPercent.value =
     typeof account.claude_oauth_5h_rate_limit_threshold_percent === 'number'
       ? account.claude_oauth_5h_rate_limit_threshold_percent
@@ -2825,6 +2856,10 @@ const loadClaudeCarpoolDevices = async () => {
     return
   }
   if (claudeOAuthMode.value !== 'carpool') {
+    carpoolDevicesOverview.value = null
+    return
+  }
+  if (claudeOAuthCarpoolUnlimitedDevices.value) {
     carpoolDevicesOverview.value = null
     return
   }
@@ -2985,7 +3020,7 @@ watch(
 )
 
 watch(
-  [() => props.show, claudeOAuthMode],
+  [() => props.show, claudeOAuthMode, claudeOAuthCarpoolUnlimitedDevices],
   ([show]) => {
     if (!show) return
     void refreshClaudeOAuthModeState()
@@ -3439,12 +3474,18 @@ const handleSubmit = async () => {
       if (claudeOAuthMode.value === 'shared') {
         newExtra.claude_oauth_shared_bucket_count = Math.min(32, Math.max(1, claudeOAuthSharedBucketCount.value || 5))
         delete newExtra.claude_oauth_carpool_device_limit
+        delete newExtra.claude_oauth_carpool_unlimited_devices
         delete newExtra.claude_oauth_disable_token_refresh
         delete newExtra.claude_oauth_token_disable_before_expiry_minutes
         delete newExtra.claude_oauth_fixed_device_id
         delete newExtra.claude_oauth_fixed_headers_text
       } else if (claudeOAuthMode.value === 'carpool') {
         newExtra.claude_oauth_carpool_device_limit = Math.min(32, Math.max(1, claudeOAuthCarpoolDeviceLimit.value || 5))
+        if (claudeOAuthCarpoolUnlimitedDevices.value) {
+          newExtra.claude_oauth_carpool_unlimited_devices = true
+        } else {
+          delete newExtra.claude_oauth_carpool_unlimited_devices
+        }
         delete newExtra.claude_oauth_shared_bucket_count
         delete newExtra.claude_oauth_disable_token_refresh
         delete newExtra.claude_oauth_token_disable_before_expiry_minutes
@@ -3465,9 +3506,11 @@ const handleSubmit = async () => {
           delete newExtra.claude_oauth_fixed_headers_text
         }
         delete newExtra.claude_oauth_carpool_device_limit
+        delete newExtra.claude_oauth_carpool_unlimited_devices
         delete newExtra.claude_oauth_shared_bucket_count
       } else {
         delete newExtra.claude_oauth_carpool_device_limit
+        delete newExtra.claude_oauth_carpool_unlimited_devices
         delete newExtra.claude_oauth_shared_bucket_count
         delete newExtra.claude_oauth_disable_token_refresh
         delete newExtra.claude_oauth_token_disable_before_expiry_minutes

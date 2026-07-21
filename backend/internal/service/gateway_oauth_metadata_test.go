@@ -1650,6 +1650,72 @@ func TestPrepareOAuthRequestIdentity_CarpoolDeviceLimitTriggersFailover(t *testi
 	require.Empty(t, rec.Body.String())
 }
 
+func TestPrepareOAuthRequestIdentity_CarpoolUnlimitedDevicesBypassesLocalRegistry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cache := &identityCacheStub{
+		carpoolDevices: map[string]*CarpoolDeviceRecord{
+			carpoolDeviceCacheKey(123, "existing-device"): {
+				DeviceKey:        carpoolDeviceKey("existing-device"),
+				OriginalDeviceID: "existing-device",
+				CreatedAt:        1,
+				LastSeenAt:       1,
+			},
+		},
+	}
+	svc := &GatewayService{
+		identityService: NewIdentityService(cache, strings.Repeat("x", 32)),
+	}
+
+	originalDeviceID := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	originalUserID := FormatMetadataUserID(
+		originalDeviceID,
+		"original-account-uuid",
+		"00000000-0000-4000-8000-000000000006",
+		"2.1.80",
+	)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	req := httptest.NewRequest("POST", "/v1/messages", nil)
+	req = req.WithContext(SetClaudeCodeClient(req.Context(), true))
+	setRealClaudeCodeRequestHeaders(req, "claude-cli/2.1.80 (external, cli)")
+	c.Request = req
+
+	account := &Account{
+		ID:       123,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"account_uuid":                           "forced-account-uuid",
+			"claude_oauth_mode":                      ClaudeOAuthModeCarpool,
+			"claude_oauth_carpool_device_limit":      1,
+			"claude_oauth_carpool_unlimited_devices": true,
+		},
+	}
+	body := expectedClaudeCodeOAuthBodyForTest(t, "claude-sonnet-4-6", originalUserID, req.Header.Get("User-Agent"), "hello")
+	parsed := &ParsedRequest{
+		Model:          "claude-sonnet-4-6",
+		MetadataUserID: originalUserID,
+	}
+
+	newBody, identity, err := svc.prepareOAuthRequestIdentity(c.Request.Context(), c, account, parsed, body, false)
+	require.NoError(t, err)
+	require.NotNil(t, identity)
+	require.Equal(t, ClaudeOAuthModeCarpool, identity.Mode)
+	require.Len(t, cache.carpoolDevices, 1, "unlimited mode must not grow the non-expiring device registry")
+	require.NotContains(t, cache.carpoolDevices, carpoolDeviceCacheKey(account.ID, originalDeviceID))
+	overview, err := svc.identityService.ListCarpoolDevices(c.Request.Context(), account)
+	require.NoError(t, err)
+	require.True(t, overview.UnlimitedDevices)
+	require.Equal(t, 1, overview.RecordedCount, "bounded-mode history should be preserved")
+
+	rewritten := ParseMetadataUserID(gjson.GetBytes(newBody, "metadata.user_id").String())
+	require.NotNil(t, rewritten)
+	require.NotEqual(t, originalDeviceID, rewritten.DeviceID)
+	require.Equal(t, "forced-account-uuid", rewritten.AccountUUID)
+	require.Empty(t, rec.Body.String())
+}
+
 func TestPrepareOAuthRequestIdentity_CarpoolDeviceLimitCountTokensReturnsClientError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

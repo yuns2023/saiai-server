@@ -53,6 +53,7 @@ type cliOptions struct {
 	GroupIDs             []int64
 	Mode                 string
 	CarpoolDeviceLimit   int
+	CarpoolUnlimited     bool
 	SharedBucketCount    int
 	Concurrency          int
 	Priority             int
@@ -71,6 +72,7 @@ type importSummary struct {
 	ProxyName                string   `json:"proxy_name,omitempty"`
 	ClaudeOAuthMode          string   `json:"claude_oauth_mode"`
 	ClaudeOAuthCarpoolLimit  *int     `json:"claude_oauth_carpool_device_limit,omitempty"`
+	CarpoolUnlimited         bool     `json:"claude_oauth_carpool_unlimited_devices,omitempty"`
 	ClaudeOAuthSharedBuckets *int     `json:"claude_oauth_shared_bucket_count,omitempty"`
 	FixedDeviceID            string   `json:"claude_oauth_fixed_device_id,omitempty"`
 	FixedHeadersText         string   `json:"claude_oauth_fixed_headers_text,omitempty"`
@@ -182,6 +184,7 @@ func parseFlags(args []string) (*cliOptions, error) {
 	groupIDs := fs.String("group-ids", "", "Optional comma-separated group IDs")
 	mode := fs.String("mode", "carpool", "Claude OAuth mode: carpool, shared, pinned, or single_device")
 	carpoolLimit := fs.Int("carpool-device-limit", 5, "Carpool mode device limit")
+	carpoolUnlimited := fs.Bool("carpool-unlimited-devices", false, "Disable the local carpool device admission limit")
 	sharedBuckets := fs.Int("shared-bucket-count", 5, "Shared mode bucket count")
 	concurrency := fs.Int("concurrency", 3, "Account concurrency")
 	priority := fs.Int("priority", 0, "Account priority")
@@ -245,6 +248,7 @@ func parseFlags(args []string) (*cliOptions, error) {
 		GroupIDs:             parsedGroupIDs,
 		Mode:                 modeValue,
 		CarpoolDeviceLimit:   *carpoolLimit,
+		CarpoolUnlimited:     *carpoolUnlimited,
 		SharedBucketCount:    *sharedBuckets,
 		Concurrency:          *concurrency,
 		Priority:             *priority,
@@ -395,6 +399,9 @@ func buildCreateAccountInput(fileData *claudeAiOauthCredentials, opts *cliOption
 		extra["claude_oauth_shared_bucket_count"] = opts.SharedBucketCount
 	case "carpool":
 		extra["claude_oauth_carpool_device_limit"] = opts.CarpoolDeviceLimit
+		if opts.CarpoolUnlimited {
+			extra["claude_oauth_carpool_unlimited_devices"] = true
+		}
 	case service.ClaudeOAuthModeSingleDevice:
 		extra["claude_oauth_fixed_device_id"] = strings.TrimSpace(opts.FixedDeviceID)
 		if fixedHeadersText != "" {
@@ -457,6 +464,9 @@ func buildCreateAccountInput(fileData *claudeAiOauthCredentials, opts *cliOption
 	case "carpool":
 		v := opts.CarpoolDeviceLimit
 		summary.ClaudeOAuthCarpoolLimit = &v
+		if opts.CarpoolUnlimited {
+			summary.CarpoolUnlimited = true
+		}
 	}
 
 	return input, summary, nil
@@ -841,6 +851,9 @@ func summaryFromAPIAccount(account *apiAccount, fileData *claudeAiOauthCredentia
 			summary.ClaudeOAuthSharedBuckets = &v
 		}
 	case "carpool":
+		if enabled, ok := account.Extra["claude_oauth_carpool_unlimited_devices"].(bool); ok && enabled {
+			summary.CarpoolUnlimited = true
+		}
 		if v := int(getMapInt64(account.Extra, "claude_oauth_carpool_device_limit")); v > 0 {
 			summary.ClaudeOAuthCarpoolLimit = &v
 		}

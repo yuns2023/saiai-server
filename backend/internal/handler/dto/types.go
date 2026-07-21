@@ -198,12 +198,13 @@ type Account struct {
 	CacheTTLOverrideTarget  *string `json:"cache_ttl_override_target,omitempty"`
 
 	// Claude OAuth 模式配置（仅 Anthropic OAuth/SetupToken 账号有效）
-	ClaudeOAuthMode               *string  `json:"claude_oauth_mode,omitempty"`
-	ClaudeOAuthCarpoolDeviceLimit *int     `json:"claude_oauth_carpool_device_limit,omitempty"`
-	ClaudeOAuthSharedBucketCount  *int     `json:"claude_oauth_shared_bucket_count,omitempty"`
-	ClaudeOAuth5hRateLimitPercent *float64 `json:"claude_oauth_5h_rate_limit_threshold_percent,omitempty"`
-	ClaudeOAuthFixedDeviceID      *string  `json:"claude_oauth_fixed_device_id,omitempty"`
-	ClaudeOAuthFixedHeadersText   *string  `json:"claude_oauth_fixed_headers_text,omitempty"`
+	ClaudeOAuthMode                    *string  `json:"claude_oauth_mode,omitempty"`
+	ClaudeOAuthCarpoolDeviceLimit      *int     `json:"claude_oauth_carpool_device_limit,omitempty"`
+	ClaudeOAuthCarpoolUnlimitedDevices *bool    `json:"claude_oauth_carpool_unlimited_devices,omitempty"`
+	ClaudeOAuthSharedBucketCount       *int     `json:"claude_oauth_shared_bucket_count,omitempty"`
+	ClaudeOAuth5hRateLimitPercent      *float64 `json:"claude_oauth_5h_rate_limit_threshold_percent,omitempty"`
+	ClaudeOAuthFixedDeviceID           *string  `json:"claude_oauth_fixed_device_id,omitempty"`
+	ClaudeOAuthFixedHeadersText        *string  `json:"claude_oauth_fixed_headers_text,omitempty"`
 
 	// API Key 账号配额限制
 	QuotaLimit       *float64 `json:"quota_limit,omitempty"`

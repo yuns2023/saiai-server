@@ -1314,6 +1314,18 @@ func (a *Account) GetClaudeOAuthCarpoolDeviceLimit() int {
 	return limit
 }
 
+// IsClaudeOAuthCarpoolUnlimitedDevices reports whether the local carpool
+// device admission limit is disabled for this account. The explicit boolean
+// keeps an absent or malformed value backward-compatible with the existing
+// bounded behavior.
+func (a *Account) IsClaudeOAuthCarpoolUnlimitedDevices() bool {
+	if a == nil || !a.IsAnthropicOAuthOrSetupToken() || a.GetClaudeOAuthMode() != ClaudeOAuthModeCarpool || a.Extra == nil {
+		return false
+	}
+	enabled, ok := a.Extra["claude_oauth_carpool_unlimited_devices"].(bool)
+	return ok && enabled
+}
+
 // GetClaudeOAuthSharedBucketCount returns the configured shared bucket count for Anthropic OAuth accounts.
 func (a *Account) GetClaudeOAuthSharedBucketCount() int {
 	if !a.IsAnthropicOAuthOrSetupToken() {

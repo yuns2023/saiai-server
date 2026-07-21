@@ -274,6 +274,8 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		if mode == service.ClaudeOAuthModeCarpool {
 			carpoolLimit := a.GetClaudeOAuthCarpoolDeviceLimit()
 			out.ClaudeOAuthCarpoolDeviceLimit = &carpoolLimit
+			unlimitedDevices := a.IsClaudeOAuthCarpoolUnlimitedDevices()
+			out.ClaudeOAuthCarpoolUnlimitedDevices = &unlimitedDevices
 		}
 		if mode == service.ClaudeOAuthModeShared {
 			bucketCount := a.GetClaudeOAuthSharedBucketCount()

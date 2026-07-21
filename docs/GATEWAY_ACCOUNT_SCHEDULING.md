@@ -31,6 +31,23 @@ admission boundary is persisted immediately; while a write is active only the
 latest pending observation is retained. A failed write causes that latest
 observation to be retried, and an older arrival cannot overwrite a newer one.
 
+## Carpool device admission
+
+Anthropic OAuth and setup-token accounts in `carpool` mode normally admit a
+bounded number of distinct devices. The account-extra field
+`claude_oauth_carpool_device_limit` defaults to 5 and is constrained to 1..32.
+
+Setting the explicit account-extra boolean
+`claude_oauth_carpool_unlimited_devices` to `true` disables only this local
+device-count admission gate. Official-client request-shape checks, billing
+integrity validation, deterministic per-account device identity rewriting,
+sticky routing, concurrency, quota, and upstream rate limits remain active.
+The switch is ignored by `shared`, `pinned`, and `single_device` modes.
+
+Unlimited mode does not add devices to the non-expiring bounded-mode registry.
+Existing recorded and overflow entries are preserved so bounded mode can be
+enabled again without silently discarding operator state.
+
 ## Same-account HTTP replay
 
 Before any response bytes have been sent, the initially selected account gets

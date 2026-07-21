@@ -192,6 +192,7 @@ export interface ClaudeCarpoolOverflowDevice {
 }
 
 export interface ClaudeCarpoolDeviceOverview {
+  unlimited_devices: boolean
   recorded_limit: number
   recorded_count: number
   overflow_count: number

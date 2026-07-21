@@ -154,11 +154,12 @@ type CarpoolOverflowDeviceInfo struct {
 }
 
 type CarpoolDeviceOverview struct {
-	RecordedLimit int                          `json:"recorded_limit"`
-	RecordedCount int                          `json:"recorded_count"`
-	OverflowCount int                          `json:"overflow_count"`
-	RecordedItems []*CarpoolDeviceInfo         `json:"recorded_items"`
-	OverflowItems []*CarpoolOverflowDeviceInfo `json:"overflow_items"`
+	UnlimitedDevices bool                         `json:"unlimited_devices"`
+	RecordedLimit    int                          `json:"recorded_limit"`
+	RecordedCount    int                          `json:"recorded_count"`
+	OverflowCount    int                          `json:"overflow_count"`
+	RecordedItems    []*CarpoolDeviceInfo         `json:"recorded_items"`
+	OverflowItems    []*CarpoolOverflowDeviceInfo `json:"overflow_items"`
 }
 
 type SharedBucketState struct {
@@ -708,6 +709,12 @@ func (s *IdentityService) EnsureCarpoolDeviceAllowed(ctx context.Context, accoun
 	if account == nil {
 		return nil, nil
 	}
+	// Unlimited mode disables only the local admission registry. Avoid writing
+	// every observed device to the non-expiring Redis hash; request validation
+	// and deterministic carpool identity rewriting still run in the gateway.
+	if account.IsClaudeOAuthCarpoolUnlimitedDevices() {
+		return nil, nil
+	}
 	originalDeviceID := oauthSlotSource(originalMetadataUserID)
 	if originalDeviceID == "" {
 		return nil, nil
@@ -890,11 +897,12 @@ func (s *IdentityService) ListCarpoolDevices(ctx context.Context, account *Accou
 		return overflow[i].LastRejectedAt > overflow[j].LastRejectedAt
 	})
 	result := &CarpoolDeviceOverview{
-		RecordedLimit: account.GetClaudeOAuthCarpoolDeviceLimit(),
-		RecordedCount: len(recorded),
-		OverflowCount: len(overflow),
-		RecordedItems: make([]*CarpoolDeviceInfo, 0, len(recorded)),
-		OverflowItems: make([]*CarpoolOverflowDeviceInfo, 0, len(overflow)),
+		UnlimitedDevices: account.IsClaudeOAuthCarpoolUnlimitedDevices(),
+		RecordedLimit:    account.GetClaudeOAuthCarpoolDeviceLimit(),
+		RecordedCount:    len(recorded),
+		OverflowCount:    len(overflow),
+		RecordedItems:    make([]*CarpoolDeviceInfo, 0, len(recorded)),
+		OverflowItems:    make([]*CarpoolOverflowDeviceInfo, 0, len(overflow)),
 	}
 	for _, item := range recorded {
 		if item == nil {

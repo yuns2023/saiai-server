@@ -735,6 +735,7 @@ export interface Account {
   // Claude OAuth 模式（仅 Anthropic OAuth/SetupToken 账号有效）
   claude_oauth_mode?: 'carpool' | 'shared' | 'pinned' | 'single_device' | null
   claude_oauth_carpool_device_limit?: number | null
+  claude_oauth_carpool_unlimited_devices?: boolean | null
   claude_oauth_shared_bucket_count?: number | null
   claude_oauth_5h_rate_limit_threshold_percent?: number | null
   claude_oauth_quota_disable_threshold_percent?: number | null

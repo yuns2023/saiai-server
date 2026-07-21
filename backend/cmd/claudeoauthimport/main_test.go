@@ -83,6 +83,40 @@ func TestBuildCreateAccountInput_Carpool(t *testing.T) {
 	}
 }
 
+func TestBuildCreateAccountInput_CarpoolUnlimitedDevices(t *testing.T) {
+	fileData := &claudeAiOauthCredentials{
+		AccessToken:  "at",
+		RefreshToken: "rt",
+		ExpiresAt:    1774221722,
+	}
+	opts := &cliOptions{
+		AccountUUID:        "550e8400-e29b-41d4-a716-446655440000",
+		ProxyURL:           "http://proxy.example.com:8080",
+		Mode:               "carpool",
+		CarpoolDeviceLimit: 7,
+		CarpoolUnlimited:   true,
+		Concurrency:        2,
+	}
+
+	input, summary, err := buildCreateAccountInput(fileData, opts)
+	if err != nil {
+		t.Fatalf("buildCreateAccountInput returned error: %v", err)
+	}
+
+	if got := input.Extra["claude_oauth_carpool_unlimited_devices"]; got != true {
+		t.Fatalf("carpool unlimited flag mismatch: got=%v", got)
+	}
+	if got := input.Extra["claude_oauth_carpool_device_limit"]; got != 7 {
+		t.Fatalf("carpool limit mismatch: got=%v", got)
+	}
+	if !summary.CarpoolUnlimited {
+		t.Fatal("summary should report unlimited carpool devices")
+	}
+	if summary.ClaudeOAuthCarpoolLimit == nil || *summary.ClaudeOAuthCarpoolLimit != 7 {
+		t.Fatalf("summary carpool limit mismatch: got=%v", summary.ClaudeOAuthCarpoolLimit)
+	}
+}
+
 func TestBuildCreateAccountInput_Shared(t *testing.T) {
 	fileData := &claudeAiOauthCredentials{
 		AccessToken:  "at",

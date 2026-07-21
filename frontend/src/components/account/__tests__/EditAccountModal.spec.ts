@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 
-const { updateAccountMock, checkMixedChannelRiskMock } = vi.hoisted(() => ({
+const { updateAccountMock, checkMixedChannelRiskMock, listClaudeCarpoolDevicesMock } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
-  checkMixedChannelRiskMock: vi.fn()
+  checkMixedChannelRiskMock: vi.fn(),
+  listClaudeCarpoolDevicesMock: vi.fn()
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -25,7 +26,8 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       update: updateAccountMock,
-      checkMixedChannelRisk: checkMixedChannelRiskMock
+      checkMixedChannelRisk: checkMixedChannelRiskMock,
+      listClaudeCarpoolDevices: listClaudeCarpoolDevicesMock
     }
   }
 }))
@@ -154,6 +156,58 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
       'claude-sonnet-4-5': 'claude-sonnet-4-5'
+    })
+  })
+
+  it('persists unlimited carpool devices and hides the bounded registry', async () => {
+    const account = {
+      ...buildAccount(),
+      type: 'oauth',
+      credentials: { access_token: 'test-token' },
+      extra: {
+        claude_oauth_mode: 'carpool',
+        claude_oauth_carpool_device_limit: 5
+      },
+      claude_oauth_mode: 'carpool',
+      claude_oauth_carpool_device_limit: 5,
+      claude_oauth_carpool_unlimited_devices: false
+    } as any
+
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    listClaudeCarpoolDevicesMock.mockReset()
+    updateAccountMock.mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    listClaudeCarpoolDevicesMock.mockResolvedValue({
+      unlimited_devices: false,
+      recorded_limit: 5,
+      recorded_count: 0,
+      overflow_count: 0,
+      recorded_items: [],
+      overflow_items: []
+    })
+
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    const unlimitedToggle = wrapper.get('[data-testid="carpool-unlimited-devices"]')
+    expect((unlimitedToggle.element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('[data-testid="claude-oauth-current-limit"]').exists()).toBe(true)
+
+    await unlimitedToggle.setValue(true)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="claude-oauth-current-limit"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="carpool-unlimited-summary"]').exists()).toBe(true)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      claude_oauth_mode: 'carpool',
+      claude_oauth_carpool_device_limit: 5,
+      claude_oauth_carpool_unlimited_devices: true
     })
   })
 })
