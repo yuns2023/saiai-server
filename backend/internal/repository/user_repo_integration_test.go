@@ -109,6 +109,26 @@ func (s *UserRepoSuite) TestCreate() {
 	s.Require().Equal("create@test.com", got.Email)
 }
 
+func (s *UserRepoSuite) TestCreateHonorsExternalTransactionRollback() {
+	tx, err := s.client.Tx(s.ctx)
+	s.Require().NoError(err)
+
+	user := &service.User{
+		Email:        "external-tx-rollback@test.com",
+		PasswordHash: "test-password-hash",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+		Concurrency:  5,
+	}
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	s.Require().NoError(s.repo.Create(txCtx, user))
+	s.Require().NotZero(user.ID)
+	s.Require().NoError(tx.Rollback())
+
+	_, err = s.repo.GetByEmail(s.ctx, user.Email)
+	s.Require().ErrorIs(err, service.ErrUserNotFound)
+}
+
 func (s *UserRepoSuite) TestGetByID_NotFound() {
 	_, err := s.repo.GetByID(s.ctx, 999999)
 	s.Require().Error(err, "expected error for non-existent ID")

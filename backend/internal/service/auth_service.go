@@ -132,6 +132,10 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		if invitationCode == "" {
 			return "", nil, ErrInvitationCodeRequired
 		}
+		if s.redeemRepo == nil {
+			logger.LegacyPrintf("service.auth", "%s", "[Auth] Invitation registration enabled but redeem repository is not configured")
+			return "", nil, ErrServiceUnavailable
+		}
 		// 验证邀请码
 		redeemCode, err := s.redeemRepo.GetByCode(ctx, invitationCode)
 		if err != nil {
@@ -197,7 +201,23 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		Status:       StatusActive,
 	}
 
-	if err := s.userRepo.Create(ctx, user); err != nil {
+	registrationCtx := ctx
+	var registrationTx *dbent.Tx
+	if invitationRedeemCode != nil {
+		if s.entClient == nil {
+			logger.LegacyPrintf("service.auth", "%s", "[Auth] Invitation registration requires a database transaction")
+			return "", nil, ErrServiceUnavailable
+		}
+		registrationTx, err = s.entClient.Tx(ctx)
+		if err != nil {
+			logger.LegacyPrintf("service.auth", "[Auth] Failed to begin invitation registration transaction: %v", err)
+			return "", nil, ErrServiceUnavailable
+		}
+		defer func() { _ = registrationTx.Rollback() }()
+		registrationCtx = dbent.NewTxContext(ctx, registrationTx)
+	}
+
+	if err := s.userRepo.Create(registrationCtx, user); err != nil {
 		// 优先检查邮箱冲突错误（竞态条件下可能发生）
 		if errors.Is(err, ErrEmailExists) {
 			return "", nil, ErrEmailExists
@@ -205,15 +225,21 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		logger.LegacyPrintf("service.auth", "[Auth] Database error creating user: %v", err)
 		return "", nil, ErrServiceUnavailable
 	}
-	s.assignDefaultSubscriptions(ctx, user.ID)
-
-	// 标记邀请码为已使用（如果使用了邀请码）
+	// 创建用户和核销邀请码必须在同一事务中完成，确保并发注册时一码只创建一个账号。
 	if invitationRedeemCode != nil {
-		if err := s.redeemRepo.Use(ctx, invitationRedeemCode.ID, user.ID); err != nil {
-			// 邀请码标记失败不影响注册，只记录日志
-			logger.LegacyPrintf("service.auth", "[Auth] Failed to mark invitation code as used for user %d: %v", user.ID, err)
+		if err := s.redeemRepo.Use(registrationCtx, invitationRedeemCode.ID, user.ID); err != nil {
+			if errors.Is(err, ErrRedeemCodeUsed) {
+				return "", nil, ErrInvitationCodeInvalid
+			}
+			logger.LegacyPrintf("service.auth", "[Auth] Failed to claim invitation code for user %d: %v", user.ID, err)
+			return "", nil, ErrServiceUnavailable
+		}
+		if err := registrationTx.Commit(); err != nil {
+			logger.LegacyPrintf("service.auth", "[Auth] Failed to commit invitation registration transaction: %v", err)
+			return "", nil, ErrServiceUnavailable
 		}
 	}
+	s.assignDefaultSubscriptions(ctx, user.ID)
 	// 应用优惠码（如果提供且功能已启用）
 	if promoCode != "" && s.promoService != nil && s.settingService != nil && s.settingService.IsPromoCodeEnabled(ctx) {
 		if err := s.promoService.ApplyPromoCode(ctx, user.ID, promoCode); err != nil {

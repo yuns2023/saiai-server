@@ -37,20 +37,20 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 		return nil
 	}
 
-	// 统一使用 ent 的事务：保证用户与允许分组的更新原子化，
-	// 并避免基于 *sql.Tx 手动构造 ent client 导致的 ExecQuerier 断言错误。
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return err
-	}
-
-	var txClient *dbent.Client
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		txClient = tx.Client()
-	} else {
-		// 已处于外部事务中（ErrTxStarted），复用当前 client 并由调用方负责提交/回滚。
-		txClient = r.client
+	// 外部事务优先：调用方可以将用户创建与其他数据变更原子化。
+	// 没有外部事务时，仍使用内部事务保证用户与 allowed_groups 同步。
+	txClient := clientFromContext(ctx, r.client)
+	var tx *dbent.Tx
+	if dbent.TxFromContext(ctx) == nil {
+		var err error
+		tx, err = txClient.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
+		}
+		if err == nil {
+			defer func() { _ = tx.Rollback() }()
+			txClient = tx.Client()
+		}
 	}
 
 	created, err := txClient.User.Create().
