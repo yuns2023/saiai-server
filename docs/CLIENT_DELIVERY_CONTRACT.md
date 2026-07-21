@@ -93,7 +93,10 @@ The `1.1.0` cutover is a coordinated server/client change because the WebUI
 changes from direct global configuration to the background local proxy and the
 activation candidate contract changes with it. After that cutover, a compatible
 local-proxy `1.1.x` update normally needs only stage, validate, and activate; no
-Compose change or Gateway restart is required.
+Compose change or Gateway restart is required. For an explicitly accepted
+forward-only client-only release, the local predecessor may be pruned after
+postflight while the immutable remote Release and ledger coordinates remain
+available for an emergency re-stage.
 
 ## Retained bootstrap endpoint
 

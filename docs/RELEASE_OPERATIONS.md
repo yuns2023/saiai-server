@@ -89,7 +89,8 @@ Only after explicit production authorization:
    - manifest and all wrapper hashes from the public URL;
    - wrapper origin rendering and `Cache-Control: no-store`;
    - WebUI shows one escaped command containing only a non-production test Key;
-   - active/previous symlinks resolve to the recorded immutable bundles; and
+   - active resolves to the recorded immutable bundle; `.previous` is checked
+     only when the release explicitly retains local rollback; and
    - unrelated API service remains available.
 
 Do not log or paste a real user API Key as release evidence.
@@ -104,17 +105,26 @@ SAIAI_TEST_OFFLINE=1 scripts/sync-saiai-cli.sh activate \
   saiai-v1.1.x "$manifest_sha256"
 ```
 
-Then fetch `manifest.json` and the three wrappers from the public URL and
-compare their hashes with the ledger. Activation only replaces symlinks; it
-does not touch the Gateway process. No service lock or maintenance window is
-required beyond the script's short filesystem lock, which prevents two
-operators from changing the same symlink concurrently.
+Then fetch `manifest.json`, native assets and the three wrappers from the
+public URL. Compare native asset hashes and verify wrappers after the trusted
+public-origin rendering step. Activation only replaces symlinks; it does not
+touch the Gateway process. No service lock or maintenance window is required
+beyond the script's short filesystem lock, which prevents two operators from
+changing the same symlink concurrently.
+
+For an explicitly accepted forward-only client-only release, the predecessor
+bundle and `.previous` link may be removed after postflight. Keep the exact
+immutable GitHub Release, manifest and Ops predecessor ledger. If recovery is
+needed later, re-stage the predecessor Release and activate it; do not use a
+mutable tag or reconstruct hashes.
 
 ## Rollback
 
-For a compatible local-proxy client-only regression, activate the exact
-previous local-proxy bundle by its recorded tag and manifest hash. Do not use
-`latest`, reconstruct hashes from memory, or restore the database.
+For a compatible local-proxy client-only regression, publish a forward fix by
+default. If an emergency rollback is explicitly chosen after local predecessor
+pruning, re-stage and activate the exact previous local-proxy Release by its
+recorded tag and manifest hash. Do not use `latest`, reconstruct hashes from
+memory, or restore the database.
 
 If the regression crosses the `1.1.0` UI/client contract boundary, roll back
 the reviewed Gateway digest and matching global-config client bundle as one
