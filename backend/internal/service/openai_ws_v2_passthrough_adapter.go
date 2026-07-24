@@ -183,7 +183,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					ServiceTier: resolveOpenAIServiceTier(
 						normalizeOpenAIReportedServiceTier(turn.Usage.ServiceTier),
 						requestServiceTier,
-						account.Type == AccountTypeOAuth,
 					),
 					Stream:          true,
 					OpenAIWSMode:    true,
@@ -236,7 +235,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		ServiceTier: resolveOpenAIServiceTier(
 			normalizeOpenAIReportedServiceTier(relayResult.Usage.ServiceTier),
 			requestServiceTier,
-			account.Type == AccountTypeOAuth,
 		),
 		Stream:          true,
 		OpenAIWSMode:    true,

@@ -77,7 +77,7 @@ vi.mock('vue-i18n', async () => {
 
 const AppLayoutStub = { template: '<div><slot /></div>' }
 const TablePageLayoutStub = {
-  template: '<div><slot name="actions" /><slot name="filters" /><slot /></div>',
+  template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /><slot /></div>',
 }
 
 describe('user UsageView tooltip', () => {
@@ -162,6 +162,8 @@ describe('user UsageView tooltip', () => {
 
     await flushPromises()
     await nextTick()
+
+    expect(wrapper.text()).toContain('Fast')
 
     const setupState = (wrapper.vm as any).$?.setupState
     setupState.tooltipData = {

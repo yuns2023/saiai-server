@@ -282,6 +282,12 @@
               <span class="font-medium text-green-600 dark:text-green-400">
                 ${{ row.actual_cost.toFixed(6) }}
               </span>
+              <span
+                class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold leading-tight ring-1 ring-inset"
+                :class="getServiceTierBadgeClass(row.service_tier)"
+              >
+                {{ getUsageServiceTierLabel(row.service_tier, t) }}
+              </span>
               <!-- Cost Detail Tooltip -->
               <div
                 class="group relative"
@@ -515,7 +521,7 @@ import { formatDateTime, formatReasoningEffort, getEffectiveReasoningEffort } fr
 import { escapeCsvCell } from '@/utils/csv'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
-import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
+import { formatUsageServiceTier, getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 
 const { t } = useI18n()
@@ -529,6 +535,13 @@ let abortController: AbortController | null = null
 const tooltipVisible = ref(false)
 const tooltipPosition = ref({ x: 0, y: 0 })
 const tooltipData = ref<UsageLog | null>(null)
+
+const getServiceTierBadgeClass = (serviceTier?: string | null): string => {
+  const tier = formatUsageServiceTier(serviceTier)
+  if (tier === 'priority') return 'bg-cyan-100 text-cyan-700 ring-cyan-200 dark:bg-cyan-500/20 dark:text-cyan-300 dark:ring-cyan-500/30'
+  if (tier === 'flex') return 'bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30'
+  return 'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:ring-gray-600'
+}
 
 // Token tooltip state
 const tokenTooltipVisible = ref(false)

@@ -776,7 +776,7 @@ export default {
     perMillionTokens: '/ 1M tokens',
     cacheRead: 'Read',
     cacheWrite: 'Write',
-    serviceTier: 'Service tier',
+    serviceTier: 'Billing tier',
     serviceTierPriority: 'Fast',
     serviceTierFlex: 'Flex',
     serviceTierStandard: 'Standard',

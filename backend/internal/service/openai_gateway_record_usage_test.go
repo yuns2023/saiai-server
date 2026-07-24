@@ -949,8 +949,10 @@ func TestNormalizeOpenAIServiceTier(t *testing.T) {
 		require.Equal(t, "priority", *got)
 	})
 
-	t.Run("default ignored", func(t *testing.T) {
-		require.Nil(t, normalizeOpenAIServiceTier("default"))
+	t.Run("default preserved", func(t *testing.T) {
+		got := normalizeOpenAIServiceTier("default")
+		require.NotNil(t, got)
+		require.Equal(t, "default", *got)
 	})
 
 	t.Run("invalid ignored", func(t *testing.T) {
@@ -961,6 +963,7 @@ func TestNormalizeOpenAIServiceTier(t *testing.T) {
 func TestExtractOpenAIServiceTier(t *testing.T) {
 	require.Equal(t, "priority", *extractOpenAIServiceTier(map[string]any{"service_tier": "fast"}))
 	require.Equal(t, "flex", *extractOpenAIServiceTier(map[string]any{"service_tier": "flex"}))
+	require.Equal(t, "default", *extractOpenAIServiceTier(map[string]any{"service_tier": "default"}))
 	require.Nil(t, extractOpenAIServiceTier(map[string]any{"service_tier": 1}))
 	require.Nil(t, extractOpenAIServiceTier(nil))
 }
@@ -968,7 +971,7 @@ func TestExtractOpenAIServiceTier(t *testing.T) {
 func TestExtractOpenAIServiceTierFromBody(t *testing.T) {
 	require.Equal(t, "priority", *extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"fast"}`)))
 	require.Equal(t, "flex", *extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"flex"}`)))
-	require.Nil(t, extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"default"}`)))
+	require.Equal(t, "default", *extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"default"}`)))
 	require.Nil(t, extractOpenAIServiceTierFromBody(nil))
 }
 
@@ -979,28 +982,42 @@ func TestResolveOpenAIServiceTier(t *testing.T) {
 
 		require.NotNil(t, reported)
 		require.Equal(t, "default", *reported)
-		require.Equal(t, "priority", *resolveOpenAIServiceTier(reported, requested, true))
+		require.Equal(t, "priority", *resolveOpenAIServiceTier(reported, requested))
 	})
 
-	t.Run("Platform API default response remains authoritative", func(t *testing.T) {
+	t.Run("Platform API default response cannot downgrade requested fast", func(t *testing.T) {
 		reported := extractOpenAIReportedServiceTierFromBody([]byte(`{"type":"response.completed","response":{"service_tier":"default"}}`))
 		requested := extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"fast"}`))
 
-		require.Equal(t, "default", *resolveOpenAIServiceTier(reported, requested, false))
+		require.Equal(t, "priority", *resolveOpenAIServiceTier(reported, requested))
 	})
 
-	t.Run("concrete reported tier remains authoritative", func(t *testing.T) {
+	t.Run("reported flex cannot downgrade requested fast", func(t *testing.T) {
 		reported := extractOpenAIReportedServiceTierFromBody([]byte(`{"type":"response.completed","response":{"service_tier":"flex"}}`))
 		requested := extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"fast"}`))
 
-		require.Equal(t, "flex", *resolveOpenAIServiceTier(reported, requested, true))
+		require.Equal(t, "priority", *resolveOpenAIServiceTier(reported, requested))
 	})
 
 	t.Run("default response overrides requested flex", func(t *testing.T) {
 		reported := extractOpenAIReportedServiceTierFromBody([]byte(`{"type":"response.completed","response":{"service_tier":"default"}}`))
 		requested := extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"flex"}`))
 
-		require.Equal(t, "default", *resolveOpenAIServiceTier(reported, requested, true))
+		require.Equal(t, "default", *resolveOpenAIServiceTier(reported, requested))
+	})
+
+	t.Run("reported flex cannot downgrade requested default", func(t *testing.T) {
+		reported := extractOpenAIReportedServiceTierFromBody([]byte(`{"type":"response.completed","response":{"service_tier":"flex"}}`))
+		requested := extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"default"}`))
+
+		require.Equal(t, "default", *resolveOpenAIServiceTier(reported, requested))
+	})
+
+	t.Run("reported priority can upgrade requested default", func(t *testing.T) {
+		reported := extractOpenAIReportedServiceTierFromBody([]byte(`{"type":"response.completed","response":{"service_tier":"priority"}}`))
+		requested := extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"default"}`))
+
+		require.Equal(t, "priority", *resolveOpenAIServiceTier(reported, requested))
 	})
 }
 

@@ -177,7 +177,7 @@ func TestOpenAIGatewayService_Forward_HTTPIngressStaysHTTPWhenWSEnabled(t *testi
 	require.NotNil(t, result)
 	require.False(t, result.OpenAIWSMode, "HTTP 入站应保持 HTTP 转发")
 	require.NotNil(t, result.ServiceTier)
-	require.Equal(t, "default", *result.ServiceTier, "Platform API 应按响应中的实际处理档位计费")
+	require.Equal(t, "priority", *result.ServiceTier, "Platform API 不应把请求的 Fast 计费档位降为 Standard")
 	require.NotNil(t, upstream.lastReq, "HTTP 入站应命中 HTTP 上游")
 	require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists(), "HTTP 路径应沿用原逻辑移除 previous_response_id")
 

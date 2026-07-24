@@ -157,6 +157,12 @@
           <div class="text-sm">
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
+              <span
+                class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold leading-tight ring-1 ring-inset"
+                :class="getServiceTierBadgeClass(row.service_tier)"
+              >
+                {{ getUsageServiceTierLabel(row.service_tier, t) }}
+              </span>
               <!-- Cost Detail Tooltip -->
               <div
                 class="group relative"
@@ -349,7 +355,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatDateTime, formatReasoningEffort, getEffectiveReasoningEffort } from '@/utils/format'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
-import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
+import { formatUsageServiceTier, getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -384,6 +390,13 @@ const getRequestTypeBadgeClass = (row: AdminUsageLog): string => {
   if (requestType === 'stream') return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
   if (requestType === 'sync') return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
   return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+}
+
+const getServiceTierBadgeClass = (serviceTier?: string | null): string => {
+  const tier = formatUsageServiceTier(serviceTier)
+  if (tier === 'priority') return 'bg-cyan-100 text-cyan-700 ring-cyan-200 dark:bg-cyan-500/20 dark:text-cyan-300 dark:ring-cyan-500/30'
+  if (tier === 'flex') return 'bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30'
+  return 'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:ring-gray-600'
 }
 
 const formatCacheTokens = (tokens: number): string => {

@@ -780,7 +780,7 @@ export default {
     perMillionTokens: '/ 1M Token',
     cacheRead: '读取',
     cacheWrite: '写入',
-    serviceTier: '服务档位',
+    serviceTier: '计费档位',
     serviceTierPriority: 'Fast',
     serviceTierFlex: 'Flex',
     serviceTierStandard: 'Standard',

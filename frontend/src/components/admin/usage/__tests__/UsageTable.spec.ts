@@ -92,6 +92,8 @@ describe('admin UsageTable tooltip', () => {
       },
     })
 
+    expect(wrapper.text()).toContain('Fast')
+
     await wrapper.find('.group.relative').trigger('mouseenter')
     await nextTick()
 

@@ -2334,7 +2334,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		ServiceTier: resolveOpenAIServiceTier(
 			usage.ReportedServiceTier,
 			extractOpenAIServiceTier(reqBody),
-			account.Type == AccountTypeOAuth,
 		),
 		ReasoningEffort: extractOpenAIReasoningEffort(reqBody, originalModel),
 		Stream:          reqStream,
@@ -2955,7 +2954,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					ServiceTier: resolveOpenAIServiceTier(
 						usage.ReportedServiceTier,
 						extractOpenAIServiceTierFromBody(payload),
-						account.Type == AccountTypeOAuth,
 					),
 					ReasoningEffort: extractOpenAIReasoningEffortFromBody(payload, originalModel),
 					Stream:          reqStream,
