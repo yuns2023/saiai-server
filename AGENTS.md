@@ -36,6 +36,11 @@ Preserve these invariants:
 - the local-proxy contract cutover keeps the reviewed previous Gateway image
   and global-config client bundle as one rollback pair.
 
+Before changing OpenAI service-tier billing or its user/admin presentation,
+read the service-tier section in
+[docs/API_KEY_USAGE_ANALYTICS.md](docs/API_KEY_USAGE_ANALYTICS.md). Keep the
+HTTP, WebSocket and WebSocket v2 billing resolver aligned.
+
 ## Change discipline
 
 - Preserve unrelated work in a dirty tree.

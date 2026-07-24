@@ -43,3 +43,27 @@ this first version does not add a separate long-term per-Key aggregate table.
 The older batch Key-usage endpoint retains its compatibility fields. Its
 `total_actual_cost` default window is the last 30 days, and the Key-management
 UI labels it as such rather than as lifetime usage.
+
+## OpenAI service-tier billing
+
+Gateway forwarding and local billing have separate boundaries. Preserve the
+request and upstream response shape, but do not let a downstream Gateway's
+reported tier reduce the local charge below an explicit request tier.
+
+Normalize the supported tiers as `priority`, `default`, and `flex`, ordered
+from most to least expensive. When both request and response tiers are known,
+the effective billing tier is the more expensive one:
+
+- an explicit `priority` request remains `priority` even if the downstream
+  response reports `default`;
+- a response may raise the effective tier above the request tier; and
+- an absent or unknown value does not invent a tier.
+
+Apply the same resolver to HTTP, WebSocket, and WebSocket v2 usage recording.
+Store the effective tier with the usage record while returning the original
+upstream response unchanged.
+
+User and administrator usage tables show the effective billing tier as
+`Fast`, `Standard`, or `Flex` beside the charged amount. Historical records are
+not recalculated merely because this resolver changes; any backfill is a
+separate, explicitly reviewed billing operation.
