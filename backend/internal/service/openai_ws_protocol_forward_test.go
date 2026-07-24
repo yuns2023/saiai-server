@@ -137,7 +137,7 @@ func TestOpenAIGatewayService_Forward_HTTPIngressStaysHTTPWhenWSEnabled(t *testi
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
 			Body: io.NopCloser(strings.NewReader(
-				`{"usage":{"input_tokens":1,"output_tokens":2,"input_tokens_details":{"cached_tokens":0}}}`,
+				`{"service_tier":"default","usage":{"input_tokens":1,"output_tokens":2,"input_tokens_details":{"cached_tokens":0}}}`,
 			)),
 		},
 	}
@@ -171,11 +171,13 @@ func TestOpenAIGatewayService_Forward_HTTPIngressStaysHTTPWhenWSEnabled(t *testi
 		},
 	}
 
-	body := []byte(`{"model":"gpt-5.1","stream":false,"previous_response_id":"resp_http_keep","input":[{"type":"input_text","text":"hello"}]}`)
+	body := []byte(`{"model":"gpt-5.1","stream":false,"service_tier":"fast","previous_response_id":"resp_http_keep","input":[{"type":"input_text","text":"hello"}]}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.False(t, result.OpenAIWSMode, "HTTP 入站应保持 HTTP 转发")
+	require.NotNil(t, result.ServiceTier)
+	require.Equal(t, "default", *result.ServiceTier, "Platform API 应按响应中的实际处理档位计费")
 	require.NotNil(t, upstream.lastReq, "HTTP 入站应命中 HTTP 上游")
 	require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists(), "HTTP 路径应沿用原逻辑移除 previous_response_id")
 
@@ -199,7 +201,7 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthPreservesPreviousResponseI
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
 			Body: io.NopCloser(strings.NewReader(
-				`{"usage":{"input_tokens":1,"output_tokens":2,"input_tokens_details":{"cached_tokens":0}}}`,
+				`{"service_tier":"default","usage":{"input_tokens":1,"output_tokens":2,"input_tokens_details":{"cached_tokens":0}}}`,
 			)),
 		},
 	}
@@ -220,10 +222,12 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthPreservesPreviousResponseI
 		},
 	}
 
-	body := []byte(`{"model":"gpt-5.5","stream":false,"previous_response_id":"resp_http_keep","input":[{"type":"input_text","text":"hello"}]}`)
+	body := []byte(`{"model":"gpt-5.5","stream":false,"service_tier":"fast","previous_response_id":"resp_http_keep","input":[{"type":"input_text","text":"hello"}]}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.NotNil(t, result.ServiceTier)
+	require.Equal(t, "priority", *result.ServiceTier, "ChatGPT Codex /fast 应保留 priority 计费档位")
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "resp_http_keep", gjson.GetBytes(upstream.lastBody, "previous_response_id").String())
 }

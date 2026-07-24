@@ -2465,7 +2465,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			usage = &OpenAIUsage{}
 		}
 
-		serviceTier := preferOpenAIReportedServiceTier(usage.ReportedServiceTier, extractOpenAIServiceTier(reqBody))
+		serviceTier := resolveOpenAIServiceTier(
+			usage.ReportedServiceTier,
+			extractOpenAIServiceTier(reqBody),
+			account.Type == AccountTypeOAuth,
+		)
 
 		return &OpenAIForwardResult{
 			RequestID:       resp.Header.Get("x-request-id"),
@@ -4322,6 +4326,20 @@ func preferOpenAIReportedServiceTier(reported, requested *string) *string {
 		return reported
 	}
 	return requested
+}
+
+func resolveOpenAIServiceTier(reported, requested *string, chatGPTCodex bool) *string {
+	// The ChatGPT Codex backend can report "default" for a request that the
+	// Codex CLI explicitly sent as priority (/fast). Preserve that explicit
+	// priority request so the usage record and billing retain the fast tier.
+	//
+	// Keep this exception off the Platform API path: its response tier is the
+	// processing tier actually used and priority can legitimately fall back
+	// to default (Standard) pricing.
+	if chatGPTCodex && reported != nil && *reported == "default" && requested != nil && *requested == "priority" {
+		return requested
+	}
+	return preferOpenAIReportedServiceTier(reported, requested)
 }
 
 func getOpenAIRequestBodyMap(c *gin.Context, body []byte) (map[string]any, error) {

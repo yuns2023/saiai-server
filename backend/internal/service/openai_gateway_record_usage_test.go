@@ -972,14 +972,36 @@ func TestExtractOpenAIServiceTierFromBody(t *testing.T) {
 	require.Nil(t, extractOpenAIServiceTierFromBody(nil))
 }
 
-func TestOpenAIReportedServiceTierOverridesRequestedTier(t *testing.T) {
-	reported := extractOpenAIReportedServiceTierFromBody([]byte(`{"type":"response.completed","response":{"service_tier":"default"}}`))
-	requested := extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"priority"}`))
+func TestResolveOpenAIServiceTier(t *testing.T) {
+	t.Run("ChatGPT Codex fast request survives default response", func(t *testing.T) {
+		reported := extractOpenAIReportedServiceTierFromBody([]byte(`{"type":"response.completed","response":{"service_tier":"default"}}`))
+		requested := extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"fast"}`))
 
-	require.NotNil(t, reported)
-	require.Equal(t, "default", *reported)
-	require.Equal(t, "default", *preferOpenAIReportedServiceTier(reported, requested))
-	require.Equal(t, "flex", *extractOpenAIReportedServiceTierFromBody([]byte(`{"service_tier":"flex"}`)))
+		require.NotNil(t, reported)
+		require.Equal(t, "default", *reported)
+		require.Equal(t, "priority", *resolveOpenAIServiceTier(reported, requested, true))
+	})
+
+	t.Run("Platform API default response remains authoritative", func(t *testing.T) {
+		reported := extractOpenAIReportedServiceTierFromBody([]byte(`{"type":"response.completed","response":{"service_tier":"default"}}`))
+		requested := extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"fast"}`))
+
+		require.Equal(t, "default", *resolveOpenAIServiceTier(reported, requested, false))
+	})
+
+	t.Run("concrete reported tier remains authoritative", func(t *testing.T) {
+		reported := extractOpenAIReportedServiceTierFromBody([]byte(`{"type":"response.completed","response":{"service_tier":"flex"}}`))
+		requested := extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"fast"}`))
+
+		require.Equal(t, "flex", *resolveOpenAIServiceTier(reported, requested, true))
+	})
+
+	t.Run("default response overrides requested flex", func(t *testing.T) {
+		reported := extractOpenAIReportedServiceTierFromBody([]byte(`{"type":"response.completed","response":{"service_tier":"default"}}`))
+		requested := extractOpenAIServiceTierFromBody([]byte(`{"service_tier":"flex"}`))
+
+		require.Equal(t, "default", *resolveOpenAIServiceTier(reported, requested, true))
+	})
 }
 
 func TestExtractOpenAIUsageFromJSONBytes_CapturesReportedServiceTier(t *testing.T) {

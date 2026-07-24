@@ -2328,10 +2328,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	)
 
 	return &OpenAIForwardResult{
-		RequestID:       responseID,
-		Usage:           *usage,
-		Model:           originalModel,
-		ServiceTier:     preferOpenAIReportedServiceTier(usage.ReportedServiceTier, extractOpenAIServiceTier(reqBody)),
+		RequestID: responseID,
+		Usage:     *usage,
+		Model:     originalModel,
+		ServiceTier: resolveOpenAIServiceTier(
+			usage.ReportedServiceTier,
+			extractOpenAIServiceTier(reqBody),
+			account.Type == AccountTypeOAuth,
+		),
 		ReasoningEffort: extractOpenAIReasoningEffort(reqBody, originalModel),
 		Stream:          reqStream,
 		OpenAIWSMode:    true,
@@ -2945,10 +2949,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					)
 				}
 				return &OpenAIForwardResult{
-					RequestID:       responseID,
-					Usage:           usage,
-					Model:           originalModel,
-					ServiceTier:     preferOpenAIReportedServiceTier(usage.ReportedServiceTier, extractOpenAIServiceTierFromBody(payload)),
+					RequestID: responseID,
+					Usage:     usage,
+					Model:     originalModel,
+					ServiceTier: resolveOpenAIServiceTier(
+						usage.ReportedServiceTier,
+						extractOpenAIServiceTierFromBody(payload),
+						account.Type == AccountTypeOAuth,
+					),
 					ReasoningEffort: extractOpenAIReasoningEffortFromBody(payload, originalModel),
 					Stream:          reqStream,
 					OpenAIWSMode:    true,
