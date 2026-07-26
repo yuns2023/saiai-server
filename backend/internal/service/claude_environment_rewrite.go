@@ -177,10 +177,7 @@ func rewriteClaudeEnvironmentLine(line string) (string, bool) {
 		return line, false
 	}
 	name := strings.TrimSpace(rest[:colon])
-	value := rest[colon+1:]
-	if strings.HasPrefix(value, " ") {
-		value = value[1:]
-	}
+	value := strings.TrimPrefix(rest[colon+1:], " ")
 
 	template, ok := claudeEnvironmentFieldTemplates[name]
 	if !ok {
@@ -228,8 +225,8 @@ func splitClaudeEnvironmentLines(text string) []claudeEnvironmentLine {
 func joinClaudeEnvironmentLines(lines []claudeEnvironmentLine) string {
 	var builder strings.Builder
 	for _, line := range lines {
-		builder.WriteString(line.body)
-		builder.WriteString(line.eol)
+		_, _ = builder.WriteString(line.body)
+		_, _ = builder.WriteString(line.eol)
 	}
 	return builder.String()
 }
