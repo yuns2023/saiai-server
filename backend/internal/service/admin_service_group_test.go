@@ -619,6 +619,35 @@ func TestAdminService_UpdateGroup_PropagatesAllowClaudeContext1MBeta(t *testing.
 	require.True(t, repo.updated.AllowClaudeContext1MBeta)
 }
 
+func TestAdminService_CreateGroup_PropagatesClaudeEnvironmentRewrite(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:                     "g1",
+		Platform:                 PlatformAnthropic,
+		SubscriptionType:         SubscriptionTypeStandard,
+		ClaudeEnvironmentRewrite: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, repo.created)
+	require.True(t, repo.created.ClaudeEnvironmentRewrite)
+}
+
+func TestAdminService_UpdateGroup_PropagatesClaudeEnvironmentRewrite(t *testing.T) {
+	current := &Group{ID: 1, Platform: PlatformAnthropic, Status: StatusActive}
+	repo := &groupRepoStubForAdmin{getByID: current}
+	svc := &adminServiceImpl{groupRepo: repo}
+	value := true
+
+	_, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
+		ClaudeEnvironmentRewrite: &value,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, repo.updated)
+	require.True(t, repo.updated.ClaudeEnvironmentRewrite)
+}
+
 func TestAdminService_CreateGroup_InvalidRequestFallbackAllowsAntigravity(t *testing.T) {
 	fallbackID := int64(10)
 	repo := &groupRepoStubForInvalidRequestFallback{

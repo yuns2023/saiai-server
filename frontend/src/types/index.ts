@@ -391,6 +391,7 @@ export interface Group {
   claude_code_only: boolean
   allow_claude_context_1m_beta: boolean
   claude_oauth_request_gate_disabled: boolean
+  claude_environment_rewrite: boolean
   fallback_group_id: number | null
   fallback_group_id_on_invalid_request: number | null
   // OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
@@ -501,6 +502,7 @@ export interface CreateGroupRequest {
   claude_code_only?: boolean
   allow_claude_context_1m_beta?: boolean
   claude_oauth_request_gate_disabled?: boolean
+  claude_environment_rewrite?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
   mcp_xml_inject?: boolean
@@ -533,6 +535,7 @@ export interface UpdateGroupRequest {
   claude_code_only?: boolean
   allow_claude_context_1m_beta?: boolean
   claude_oauth_request_gate_disabled?: boolean
+  claude_environment_rewrite?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
   mcp_xml_inject?: boolean

@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const claudeEnvironmentRewriteRoutingMarker = "__saiai_claude_environment_rewrite_v1__"
+
 type Group struct {
 	ID             int64
 	Name           string
@@ -40,6 +42,7 @@ type Group struct {
 	ClaudeCodeOnly                 bool
 	AllowClaudeContext1MBeta       bool
 	ClaudeOAuthRequestGateDisabled bool
+	ClaudeEnvironmentRewrite       bool
 	FallbackGroupID                *int64
 	// 无效请求兜底分组（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64
@@ -70,6 +73,51 @@ type Group struct {
 	AccountCount            int64
 	ActiveAccountCount      int64
 	RateLimitedAccountCount int64
+}
+
+// DecodeGroupModelRouting separates SAIAI's group-scoped compatibility flags
+// from the existing model_routing JSONB storage. Keeping the marker private to
+// the repository boundary avoids a database migration and prevents it from
+// being interpreted as a user-visible model rule.
+func DecodeGroupModelRouting(stored map[string][]int64) (map[string][]int64, bool) {
+	if stored == nil {
+		return nil, false
+	}
+	routing := make(map[string][]int64, len(stored))
+	enabled := false
+	for pattern, accountIDs := range stored {
+		if pattern == claudeEnvironmentRewriteRoutingMarker {
+			enabled = len(accountIDs) == 1 && accountIDs[0] == 1
+			continue
+		}
+		routing[pattern] = accountIDs
+	}
+	if len(routing) == 0 {
+		routing = nil
+	}
+	return routing, enabled
+}
+
+// EncodeGroupModelRouting persists the environment rewrite switch in the
+// group's existing extensible JSONB field while preserving all model rules.
+func EncodeGroupModelRouting(routing map[string][]int64, environmentRewrite bool) map[string][]int64 {
+	if routing == nil && !environmentRewrite {
+		return nil
+	}
+	stored := make(map[string][]int64, len(routing)+1)
+	for pattern, accountIDs := range routing {
+		if pattern == claudeEnvironmentRewriteRoutingMarker {
+			continue
+		}
+		stored[pattern] = accountIDs
+	}
+	if environmentRewrite {
+		stored[claudeEnvironmentRewriteRoutingMarker] = []int64{1}
+	}
+	if len(stored) == 0 {
+		return nil
+	}
+	return stored
 }
 
 func (g *Group) IsActive() bool {
