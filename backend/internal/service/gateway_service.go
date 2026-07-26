@@ -5387,6 +5387,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		reqModel = mappedModel
 		logger.LegacyPrintf("service.gateway", "Model mapping applied: %s -> %s (account: %s, source=%s)", originalModel, mappedModel, account.Name, mappingSource)
 	}
+	body = s.rewriteClaudeEnvironmentIfEnabled(ctx, body, oauthIdentity)
 
 	if reqModel != "" && !s.HasModelPricing(reqModel) {
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", unavailableModelPricingMessage(originalModel))
@@ -5982,6 +5983,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", unavailableModelPricingMessage(input.OriginalModel))
 		return nil, fmt.Errorf("billing pricing not found for passthrough model %s (requested %s)", input.RequestModel, input.OriginalModel)
 	}
+	input.Body = s.rewriteClaudeEnvironmentIfEnabled(ctx, input.Body, nil)
 
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
@@ -6650,6 +6652,7 @@ func (s *GatewayService) forwardBedrock(
 	reqModel := parsed.Model
 	reqStream := parsed.Stream
 	body := parsed.Body
+	body = s.rewriteClaudeEnvironmentIfEnabled(ctx, body, nil)
 
 	region := bedrockRuntimeRegion(account)
 	mappedModel, ok := ResolveBedrockModelID(account, reqModel)
@@ -9856,6 +9859,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 			logger.LegacyPrintf("service.gateway", "CountTokens model mapping applied: %s -> %s (account: %s, source=%s)", parsed.Model, mappedModel, account.Name, mappingSource)
 		}
 	}
+	body = s.rewriteClaudeEnvironmentIfEnabled(ctx, body, oauthIdentity)
 
 	// 获取凭证
 	token, tokenType, err := s.GetAccessToken(ctx, account)
@@ -9976,6 +9980,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 }
 
 func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx context.Context, c *gin.Context, account *Account, body []byte) error {
+	body = s.rewriteClaudeEnvironmentIfEnabled(ctx, body, nil)
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to get access token")

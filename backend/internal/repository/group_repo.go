@@ -65,9 +65,9 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetSoraStorageQuotaBytes(groupIn.SoraStorageQuotaBytes).
 		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch)
 
-	// 设置模型路由配置
-	if groupIn.ModelRouting != nil {
-		builder = builder.SetModelRouting(groupIn.ModelRouting)
+	// 模型路由 JSONB 也承载无需迁移的分组兼容开关。
+	if storedRouting := service.EncodeGroupModelRouting(groupIn.ModelRouting, groupIn.ClaudeEnvironmentRewrite); storedRouting != nil {
+		builder = builder.SetModelRouting(storedRouting)
 	}
 
 	// 设置支持的模型系列（始终设置，空数组表示不限制）
@@ -186,9 +186,9 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		builder = builder.ClearFallbackGroupIDOnInvalidRequest()
 	}
 
-	// 处理 ModelRouting：nil 时清除，否则设置
-	if groupIn.ModelRouting != nil {
-		builder = builder.SetModelRouting(groupIn.ModelRouting)
+	// 处理 ModelRouting 及其中的内部兼容开关：nil 时清除，否则设置。
+	if storedRouting := service.EncodeGroupModelRouting(groupIn.ModelRouting, groupIn.ClaudeEnvironmentRewrite); storedRouting != nil {
+		builder = builder.SetModelRouting(storedRouting)
 	} else {
 		builder = builder.ClearModelRouting()
 	}

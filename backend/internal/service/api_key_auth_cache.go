@@ -57,6 +57,7 @@ type APIKeyAuthGroupSnapshot struct {
 	ClaudeCodeOnly                  bool     `json:"claude_code_only"`
 	AllowClaudeContext1MBeta        bool     `json:"allow_claude_context_1m_beta"`
 	ClaudeOAuthRequestGateDisabled  bool     `json:"claude_oauth_request_gate_disabled"`
+	ClaudeEnvironmentRewrite        bool     `json:"claude_environment_rewrite"`
 	FallbackGroupID                 *int64   `json:"fallback_group_id,omitempty"`
 	FallbackGroupIDOnInvalidRequest *int64   `json:"fallback_group_id_on_invalid_request,omitempty"`
 

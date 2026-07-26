@@ -1764,7 +1764,11 @@ export default {
         oauthRequestGateTitle: 'OAuth 请求形状保护',
         oauthRequestGateHint: '开启后，OAuth / setup-token 账号会拒绝不符合真实 Claude Code 形状的请求。仅在测试或兼容异常客户端时关闭。',
         oauthRequestGateEnabled: '保护开启',
-        oauthRequestGateDisabled: '保护关闭'
+        oauthRequestGateDisabled: '保护关闭',
+        environmentRewriteTitle: '改写 # Environment',
+        environmentRewriteHint: '开启后，转发此分组的 Claude 请求前改写 # Environment 区块及字段标签，字段值保持不变。',
+        environmentRewriteEnabled: '改写开启',
+        environmentRewriteDisabled: '改写关闭'
       },
       openaiMessages: {
         title: 'OpenAI Messages 调度配置',
