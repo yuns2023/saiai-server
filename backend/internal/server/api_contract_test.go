@@ -213,6 +213,7 @@ func TestAPIContracts(t *testing.T) {
 						"claude_code_only": false,
 						"allow_claude_context_1m_beta": false,
 						"claude_oauth_request_gate_disabled": false,
+						"claude_environment_mode": "off",
 						"claude_environment_rewrite": false,
 						"allow_messages_dispatch": false,
 						"fallback_group_id": null,

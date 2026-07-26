@@ -10,6 +10,8 @@ export interface SelectOption {
   [key: string]: any // Support extra properties for custom templates
 }
 
+export type ClaudeEnvironmentMode = 'off' | 'rewrite' | 'remove'
+
 export interface BasePaginationResponse<T> {
   items: T[]
   total: number
@@ -391,6 +393,8 @@ export interface Group {
   claude_code_only: boolean
   allow_claude_context_1m_beta: boolean
   claude_oauth_request_gate_disabled: boolean
+  claude_environment_mode: ClaudeEnvironmentMode
+  // Deprecated compatibility field for older servers and clients.
   claude_environment_rewrite: boolean
   fallback_group_id: number | null
   fallback_group_id_on_invalid_request: number | null
@@ -502,6 +506,7 @@ export interface CreateGroupRequest {
   claude_code_only?: boolean
   allow_claude_context_1m_beta?: boolean
   claude_oauth_request_gate_disabled?: boolean
+  claude_environment_mode?: ClaudeEnvironmentMode
   claude_environment_rewrite?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
@@ -535,6 +540,7 @@ export interface UpdateGroupRequest {
   claude_code_only?: boolean
   allow_claude_context_1m_beta?: boolean
   claude_oauth_request_gate_disabled?: boolean
+  claude_environment_mode?: ClaudeEnvironmentMode
   claude_environment_rewrite?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null

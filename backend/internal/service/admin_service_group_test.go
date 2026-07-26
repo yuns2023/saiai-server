@@ -648,6 +648,46 @@ func TestAdminService_UpdateGroup_PropagatesClaudeEnvironmentRewrite(t *testing.
 	require.True(t, repo.updated.ClaudeEnvironmentRewrite)
 }
 
+func TestAdminService_CreateGroup_PropagatesClaudeEnvironmentRemoveMode(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:                  "g1",
+		Platform:              PlatformAnthropic,
+		SubscriptionType:      SubscriptionTypeStandard,
+		ClaudeEnvironmentMode: ClaudeEnvironmentModeRemove,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, repo.created)
+	require.Equal(t, ClaudeEnvironmentModeRemove, repo.created.EffectiveClaudeEnvironmentMode())
+	require.False(t, repo.created.ClaudeEnvironmentRewrite)
+}
+
+func TestAdminService_UpdateGroup_ModeTakesPrecedenceOverLegacySwitch(t *testing.T) {
+	current := &Group{
+		ID:                       1,
+		Platform:                 PlatformAnthropic,
+		Status:                   StatusActive,
+		ClaudeEnvironmentRewrite: true,
+	}
+	repo := &groupRepoStubForAdmin{getByID: current}
+	svc := &adminServiceImpl{groupRepo: repo}
+	mode := ClaudeEnvironmentModeRemove
+	legacy := true
+
+	_, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
+		ClaudeEnvironmentMode:    &mode,
+		ClaudeEnvironmentRewrite: &legacy,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, repo.updated)
+	require.Equal(t, ClaudeEnvironmentModeRemove, repo.updated.EffectiveClaudeEnvironmentMode())
+	require.False(t, repo.updated.ClaudeEnvironmentRewrite)
+}
+
 func TestAdminService_CreateGroup_InvalidRequestFallbackAllowsAntigravity(t *testing.T) {
 	fallbackID := int64(10)
 	repo := &groupRepoStubForInvalidRequestFallback{

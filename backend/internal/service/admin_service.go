@@ -145,6 +145,7 @@ type CreateGroupInput struct {
 	ClaudeCodeOnly                 bool   // 仅允许 Claude Code 客户端
 	AllowClaudeContext1MBeta       bool   // 是否保留 context-1m beta
 	ClaudeOAuthRequestGateDisabled bool   // 是否关闭 Claude OAuth 请求形状保护
+	ClaudeEnvironmentMode          string // # Environment 处理模式：off/rewrite/remove
 	ClaudeEnvironmentRewrite       bool   // 是否改写 Claude Code 的 # Environment 段
 	FallbackGroupID                *int64 // 降级分组 ID
 	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
@@ -184,9 +185,10 @@ type UpdateGroupInput struct {
 	SoraImagePrice540              *float64
 	SoraVideoPricePerRequest       *float64
 	SoraVideoPricePerRequestHD     *float64
-	ClaudeCodeOnly                 *bool  // 仅允许 Claude Code 客户端
-	AllowClaudeContext1MBeta       *bool  // 是否保留 context-1m beta
-	ClaudeOAuthRequestGateDisabled *bool  // 是否关闭 Claude OAuth 请求形状保护
+	ClaudeCodeOnly                 *bool // 仅允许 Claude Code 客户端
+	AllowClaudeContext1MBeta       *bool // 是否保留 context-1m beta
+	ClaudeOAuthRequestGateDisabled *bool // 是否关闭 Claude OAuth 请求形状保护
+	ClaudeEnvironmentMode          *string
 	ClaudeEnvironmentRewrite       *bool  // 是否改写 Claude Code 的 # Environment 段
 	FallbackGroupID                *int64 // 降级分组 ID
 	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
@@ -916,6 +918,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		}
 	}
 
+	claudeEnvironmentMode := NormalizeClaudeEnvironmentMode(input.ClaudeEnvironmentMode, input.ClaudeEnvironmentRewrite)
 	group := &Group{
 		Name:                            input.Name,
 		Description:                     input.Description,
@@ -938,7 +941,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ClaudeCodeOnly:                  input.ClaudeCodeOnly,
 		AllowClaudeContext1MBeta:        input.AllowClaudeContext1MBeta,
 		ClaudeOAuthRequestGateDisabled:  input.ClaudeOAuthRequestGateDisabled,
-		ClaudeEnvironmentRewrite:        input.ClaudeEnvironmentRewrite,
+		ClaudeEnvironmentMode:           claudeEnvironmentMode,
+		ClaudeEnvironmentRewrite:        claudeEnvironmentMode == ClaudeEnvironmentModeRewrite,
 		FallbackGroupID:                 input.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: fallbackOnInvalidRequest,
 		ModelRouting:                    input.ModelRouting,
@@ -1118,8 +1122,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.ClaudeOAuthRequestGateDisabled != nil {
 		group.ClaudeOAuthRequestGateDisabled = *input.ClaudeOAuthRequestGateDisabled
 	}
-	if input.ClaudeEnvironmentRewrite != nil {
+	if input.ClaudeEnvironmentMode != nil {
+		group.ClaudeEnvironmentMode = NormalizeClaudeEnvironmentMode(*input.ClaudeEnvironmentMode, false)
+		group.ClaudeEnvironmentRewrite = group.ClaudeEnvironmentMode == ClaudeEnvironmentModeRewrite
+	} else if input.ClaudeEnvironmentRewrite != nil {
 		group.ClaudeEnvironmentRewrite = *input.ClaudeEnvironmentRewrite
+		group.ClaudeEnvironmentMode = NormalizeClaudeEnvironmentMode("", *input.ClaudeEnvironmentRewrite)
 	}
 	if input.FallbackGroupID != nil {
 		// 校验降级分组

@@ -835,31 +835,21 @@
             <div class="flex items-center justify-between gap-4">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {{ t('admin.groups.claudeCode.environmentRewriteTitle') }}
+                  {{ t('admin.groups.claudeCode.environmentModeTitle') }}
                 </label>
                 <p class="input-hint mt-1">
-                  {{ t('admin.groups.claudeCode.environmentRewriteHint') }}
+                  {{ t('admin.groups.claudeCode.environmentModeHint') }}
                 </p>
               </div>
-              <div class="flex items-center gap-3">
-                <button
-                  type="button"
-                  @click="createForm.claude_environment_rewrite = !createForm.claude_environment_rewrite"
-                  :class="[
-                    'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
-                    createForm.claude_environment_rewrite ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
-                  ]"
+              <div class="w-40 shrink-0">
+                <select
+                  v-model="createForm.claude_environment_mode"
+                  class="input"
                 >
-                  <span
-                    :class="[
-                      'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
-                      createForm.claude_environment_rewrite ? 'translate-x-6' : 'translate-x-1'
-                    ]"
-                  />
-                </button>
-                <span class="whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                  {{ createForm.claude_environment_rewrite ? t('admin.groups.claudeCode.environmentRewriteEnabled') : t('admin.groups.claudeCode.environmentRewriteDisabled') }}
-                </span>
+                  <option value="off">{{ t('admin.groups.claudeCode.environmentModeOff') }}</option>
+                  <option value="rewrite">{{ t('admin.groups.claudeCode.environmentModeRewrite') }}</option>
+                  <option value="remove">{{ t('admin.groups.claudeCode.environmentModeRemove') }}</option>
+                </select>
               </div>
             </div>
           </div>
@@ -1661,31 +1651,21 @@
             <div class="flex items-center justify-between gap-4">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {{ t('admin.groups.claudeCode.environmentRewriteTitle') }}
+                  {{ t('admin.groups.claudeCode.environmentModeTitle') }}
                 </label>
                 <p class="input-hint mt-1">
-                  {{ t('admin.groups.claudeCode.environmentRewriteHint') }}
+                  {{ t('admin.groups.claudeCode.environmentModeHint') }}
                 </p>
               </div>
-              <div class="flex items-center gap-3">
-                <button
-                  type="button"
-                  @click="editForm.claude_environment_rewrite = !editForm.claude_environment_rewrite"
-                  :class="[
-                    'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
-                    editForm.claude_environment_rewrite ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
-                  ]"
+              <div class="w-40 shrink-0">
+                <select
+                  v-model="editForm.claude_environment_mode"
+                  class="input"
                 >
-                  <span
-                    :class="[
-                      'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
-                      editForm.claude_environment_rewrite ? 'translate-x-6' : 'translate-x-1'
-                    ]"
-                  />
-                </button>
-                <span class="whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                  {{ editForm.claude_environment_rewrite ? t('admin.groups.claudeCode.environmentRewriteEnabled') : t('admin.groups.claudeCode.environmentRewriteDisabled') }}
-                </span>
+                  <option value="off">{{ t('admin.groups.claudeCode.environmentModeOff') }}</option>
+                  <option value="rewrite">{{ t('admin.groups.claudeCode.environmentModeRewrite') }}</option>
+                  <option value="remove">{{ t('admin.groups.claudeCode.environmentModeRemove') }}</option>
+                </select>
               </div>
             </div>
           </div>
@@ -2028,7 +2008,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { adminAPI } from '@/api/admin'
-import type { AdminGroup, GroupPlatform, SubscriptionType } from '@/types'
+import type { AdminGroup, ClaudeEnvironmentMode, GroupPlatform, SubscriptionType } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -2251,7 +2231,7 @@ const createForm = reactive({
   claude_code_only: false,
   allow_claude_context_1m_beta: false,
   claude_oauth_request_gate_disabled: false,
-  claude_environment_rewrite: false,
+  claude_environment_mode: 'off' as ClaudeEnvironmentMode,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
@@ -2498,7 +2478,7 @@ const editForm = reactive({
   claude_code_only: false,
   allow_claude_context_1m_beta: false,
   claude_oauth_request_gate_disabled: false,
-  claude_environment_rewrite: false,
+  claude_environment_mode: 'off' as ClaudeEnvironmentMode,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
@@ -2648,7 +2628,7 @@ const closeCreateModal = () => {
   createForm.claude_code_only = false
   createForm.allow_claude_context_1m_beta = false
   createForm.claude_oauth_request_gate_disabled = false
-  createForm.claude_environment_rewrite = false
+  createForm.claude_environment_mode = 'off'
   createForm.fallback_group_id = null
   createForm.fallback_group_id_on_invalid_request = null
   createForm.allow_messages_dispatch = false
@@ -2740,7 +2720,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.claude_code_only = group.claude_code_only || false
   editForm.allow_claude_context_1m_beta = group.allow_claude_context_1m_beta || false
   editForm.claude_oauth_request_gate_disabled = group.claude_oauth_request_gate_disabled || false
-  editForm.claude_environment_rewrite = group.claude_environment_rewrite || false
+  editForm.claude_environment_mode = group.claude_environment_mode || (group.claude_environment_rewrite ? 'rewrite' : 'off')
   editForm.fallback_group_id = group.fallback_group_id
   editForm.fallback_group_id_on_invalid_request = group.fallback_group_id_on_invalid_request
   editForm.allow_messages_dispatch = group.allow_messages_dispatch || false
@@ -2849,7 +2829,7 @@ watch(
     if (newVal !== 'anthropic') {
       createForm.allow_claude_context_1m_beta = false
       createForm.claude_oauth_request_gate_disabled = false
-      createForm.claude_environment_rewrite = false
+      createForm.claude_environment_mode = 'off'
     }
     if (!['anthropic', 'antigravity'].includes(newVal)) {
       createForm.fallback_group_id_on_invalid_request = null
@@ -2866,7 +2846,7 @@ watch(
     if (newVal !== 'anthropic') {
       editForm.allow_claude_context_1m_beta = false
       editForm.claude_oauth_request_gate_disabled = false
-      editForm.claude_environment_rewrite = false
+      editForm.claude_environment_mode = 'off'
     }
     if (!['anthropic', 'antigravity'].includes(newVal)) {
       editForm.fallback_group_id_on_invalid_request = null

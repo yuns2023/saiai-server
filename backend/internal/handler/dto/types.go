@@ -95,6 +95,7 @@ type Group struct {
 	ClaudeCodeOnly                 bool   `json:"claude_code_only"`
 	AllowClaudeContext1MBeta       bool   `json:"allow_claude_context_1m_beta"`
 	ClaudeOAuthRequestGateDisabled bool   `json:"claude_oauth_request_gate_disabled"`
+	ClaudeEnvironmentMode          string `json:"claude_environment_mode"`
 	ClaudeEnvironmentRewrite       bool   `json:"claude_environment_rewrite"`
 	FallbackGroupID                *int64 `json:"fallback_group_id"`
 	// 无效请求兜底分组

@@ -64,6 +64,36 @@ func TestRewriteClaudeEnvironmentInBodyLeavesMissingSectionByteExact(t *testing.
 	require.Equal(t, body, got)
 }
 
+func TestRemoveClaudeEnvironmentBlockPreservesFollowingSection(t *testing.T) {
+	input := "# Before\r\nkeep\r\n# Environment\r\n- Platform: win32\r\n# Context management\r\nkeep this\r\n"
+
+	got, changed := removeClaudeEnvironmentBlock(input)
+
+	require.True(t, changed)
+	require.Equal(t, "# Before\r\nkeep\r\n# Context management\r\nkeep this\r\n", got)
+}
+
+func TestRemoveClaudeEnvironmentInBodyDeletesEnvironmentOnlyTextBlock(t *testing.T) {
+	body := []byte(`{"system":[{"type":"text","text":"keep"},{"type":"text","text":"# Environment\n- Platform: linux\n","cache_control":{"type":"ephemeral"}},{"type":"text","text":"also keep"}]}`)
+
+	got, changed := applyClaudeEnvironmentModeInBody(body, ClaudeEnvironmentModeRemove)
+
+	require.True(t, changed)
+	require.Equal(t, int64(2), gjson.GetBytes(got, "system.#").Int())
+	require.Equal(t, "keep", gjson.GetBytes(got, "system.0.text").String())
+	require.Equal(t, "also keep", gjson.GetBytes(got, "system.1.text").String())
+	require.NotContains(t, string(got), claudeEnvironmentHeading)
+}
+
+func TestRemoveClaudeEnvironmentInBodyKeepsTextAroundSection(t *testing.T) {
+	body := []byte(`{"system":[{"type":"text","text":"before\n# Environment\n- Shell: bash\n# After\nvalue\n"}]}`)
+
+	got, changed := applyClaudeEnvironmentModeInBody(body, ClaudeEnvironmentModeRemove)
+
+	require.True(t, changed)
+	require.Equal(t, "before\n# After\nvalue\n", gjson.GetBytes(got, "system.0.text").String())
+}
+
 func TestRewriteClaudeEnvironmentIfEnabledIsOptInAndRepairsCCH(t *testing.T) {
 	body := []byte(`{"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.80.abc; cc_entrypoint=cli; cch=abcde;\n# Environment\n- Platform: linux\n"}]}`)
 
@@ -74,6 +104,17 @@ func TestRewriteClaudeEnvironmentIfEnabledIsOptInAndRepairsCCH(t *testing.T) {
 	enabledCtx := context.WithValue(context.Background(), ctxkey.Group, hydratedAnthropicGroup(true))
 	got := service.rewriteClaudeEnvironmentIfEnabled(enabledCtx, body, nil)
 	require.Contains(t, string(got), "# Runtime Context")
+	require.Contains(t, string(got), "cc_version=2.1.80.abc")
+	require.NotContains(t, string(got), "cch=abcde")
+}
+
+func TestRemoveClaudeEnvironmentModeRepairsCCH(t *testing.T) {
+	body := []byte(`{"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.80.abc; cc_entrypoint=cli; cch=abcde;\n# Environment\n- Platform: linux\n"}]}`)
+	ctx := context.WithValue(context.Background(), ctxkey.Group, hydratedAnthropicGroupWithMode(ClaudeEnvironmentModeRemove))
+
+	got := (&GatewayService{}).rewriteClaudeEnvironmentIfEnabled(ctx, body, nil)
+
+	require.NotContains(t, string(got), claudeEnvironmentHeading)
 	require.Contains(t, string(got), "cc_version=2.1.80.abc")
 	require.NotContains(t, string(got), "cch=abcde")
 }
@@ -109,12 +150,21 @@ func TestRewriteClaudeEnvironmentIfEnabledRequiresAnthropicGroup(t *testing.T) {
 }
 
 func TestGroupModelRoutingEnvironmentRewriteMarkerRoundTrip(t *testing.T) {
-	stored := EncodeGroupModelRouting(map[string][]int64{"claude-opus-*": {2, 3}}, true)
-	routing, enabled := DecodeGroupModelRouting(stored)
+	stored := EncodeGroupModelRouting(map[string][]int64{"claude-opus-*": {2, 3}}, ClaudeEnvironmentModeRewrite)
+	routing, mode := DecodeGroupModelRouting(stored)
 
-	require.True(t, enabled)
+	require.Equal(t, ClaudeEnvironmentModeRewrite, mode)
 	require.Equal(t, map[string][]int64{"claude-opus-*": {2, 3}}, routing)
 	require.NotContains(t, routing, claudeEnvironmentRewriteRoutingMarker)
+}
+
+func TestGroupModelRoutingEnvironmentRemoveMarkerRoundTrip(t *testing.T) {
+	stored := EncodeGroupModelRouting(nil, ClaudeEnvironmentModeRemove)
+	routing, mode := DecodeGroupModelRouting(stored)
+
+	require.Equal(t, ClaudeEnvironmentModeRemove, mode)
+	require.Nil(t, routing)
+	require.Equal(t, []int64{2}, stored[claudeEnvironmentRewriteRoutingMarker])
 }
 
 func hydratedAnthropicGroup(rewrite bool) *Group {
@@ -125,4 +175,10 @@ func hydratedAnthropicGroup(rewrite bool) *Group {
 		Hydrated:                 true,
 		ClaudeEnvironmentRewrite: rewrite,
 	}
+}
+
+func hydratedAnthropicGroupWithMode(mode string) *Group {
+	group := hydratedAnthropicGroup(false)
+	group.ClaudeEnvironmentMode = mode
+	return group
 }

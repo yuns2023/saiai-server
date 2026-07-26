@@ -224,8 +224,27 @@ func TestAPIKeyService_GetByKey_UsesL2Cache(t *testing.T) {
 	require.Equal(t, int64(2), apiKey.User.ID)
 	require.Equal(t, groupID, apiKey.Group.ID)
 	require.True(t, apiKey.Group.ClaudeEnvironmentRewrite)
+	require.Equal(t, ClaudeEnvironmentModeRewrite, apiKey.Group.EffectiveClaudeEnvironmentMode())
 	require.True(t, apiKey.Group.ModelRoutingEnabled)
 	require.Equal(t, map[string][]int64{"claude-opus-*": {1, 2}}, apiKey.Group.ModelRouting)
+}
+
+func TestAPIKeyService_SnapshotToAPIKeyPreservesClaudeEnvironmentRemoveMode(t *testing.T) {
+	svc := &APIKeyService{}
+	snapshot := &APIKeyAuthSnapshot{
+		Group: &APIKeyAuthGroupSnapshot{
+			ID:                    1,
+			Platform:              PlatformAnthropic,
+			Status:                StatusActive,
+			ClaudeEnvironmentMode: ClaudeEnvironmentModeRemove,
+		},
+	}
+
+	apiKey := svc.snapshotToAPIKey("test-key", snapshot)
+
+	require.NotNil(t, apiKey.Group)
+	require.Equal(t, ClaudeEnvironmentModeRemove, apiKey.Group.EffectiveClaudeEnvironmentMode())
+	require.False(t, apiKey.Group.ClaudeEnvironmentRewrite)
 }
 
 func TestAPIKeyService_GetByKey_NegativeCache(t *testing.T) {

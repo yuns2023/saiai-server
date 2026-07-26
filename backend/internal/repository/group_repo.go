@@ -66,7 +66,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch)
 
 	// 模型路由 JSONB 也承载无需迁移的分组兼容开关。
-	if storedRouting := service.EncodeGroupModelRouting(groupIn.ModelRouting, groupIn.ClaudeEnvironmentRewrite); storedRouting != nil {
+	if storedRouting := service.EncodeGroupModelRouting(groupIn.ModelRouting, groupIn.EffectiveClaudeEnvironmentMode()); storedRouting != nil {
 		builder = builder.SetModelRouting(storedRouting)
 	}
 
@@ -187,7 +187,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	}
 
 	// 处理 ModelRouting 及其中的内部兼容开关：nil 时清除，否则设置。
-	if storedRouting := service.EncodeGroupModelRouting(groupIn.ModelRouting, groupIn.ClaudeEnvironmentRewrite); storedRouting != nil {
+	if storedRouting := service.EncodeGroupModelRouting(groupIn.ModelRouting, groupIn.EffectiveClaudeEnvironmentMode()); storedRouting != nil {
 		builder = builder.SetModelRouting(storedRouting)
 	} else {
 		builder = builder.ClearModelRouting()

@@ -5,7 +5,13 @@ import (
 	"time"
 )
 
-const claudeEnvironmentRewriteRoutingMarker = "__saiai_claude_environment_rewrite_v1__"
+const (
+	claudeEnvironmentRewriteRoutingMarker = "__saiai_claude_environment_rewrite_v1__"
+
+	ClaudeEnvironmentModeOff     = "off"
+	ClaudeEnvironmentModeRewrite = "rewrite"
+	ClaudeEnvironmentModeRemove  = "remove"
+)
 
 type Group struct {
 	ID             int64
@@ -42,8 +48,12 @@ type Group struct {
 	ClaudeCodeOnly                 bool
 	AllowClaudeContext1MBeta       bool
 	ClaudeOAuthRequestGateDisabled bool
-	ClaudeEnvironmentRewrite       bool
-	FallbackGroupID                *int64
+	ClaudeEnvironmentMode          string
+	// ClaudeEnvironmentRewrite is retained for compatibility with cached
+	// snapshots and older API clients. New code should use
+	// EffectiveClaudeEnvironmentMode.
+	ClaudeEnvironmentRewrite bool
+	FallbackGroupID          *int64
 	// 无效请求兜底分组（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64
 
@@ -79,15 +89,22 @@ type Group struct {
 // from the existing model_routing JSONB storage. Keeping the marker private to
 // the repository boundary avoids a database migration and prevents it from
 // being interpreted as a user-visible model rule.
-func DecodeGroupModelRouting(stored map[string][]int64) (map[string][]int64, bool) {
+func DecodeGroupModelRouting(stored map[string][]int64) (map[string][]int64, string) {
 	if stored == nil {
-		return nil, false
+		return nil, ClaudeEnvironmentModeOff
 	}
 	routing := make(map[string][]int64, len(stored))
-	enabled := false
+	mode := ClaudeEnvironmentModeOff
 	for pattern, accountIDs := range stored {
 		if pattern == claudeEnvironmentRewriteRoutingMarker {
-			enabled = len(accountIDs) == 1 && accountIDs[0] == 1
+			if len(accountIDs) == 1 {
+				switch accountIDs[0] {
+				case 1:
+					mode = ClaudeEnvironmentModeRewrite
+				case 2:
+					mode = ClaudeEnvironmentModeRemove
+				}
+			}
 			continue
 		}
 		routing[pattern] = accountIDs
@@ -95,13 +112,14 @@ func DecodeGroupModelRouting(stored map[string][]int64) (map[string][]int64, boo
 	if len(routing) == 0 {
 		routing = nil
 	}
-	return routing, enabled
+	return routing, mode
 }
 
-// EncodeGroupModelRouting persists the environment rewrite switch in the
+// EncodeGroupModelRouting persists the environment handling mode in the
 // group's existing extensible JSONB field while preserving all model rules.
-func EncodeGroupModelRouting(routing map[string][]int64, environmentRewrite bool) map[string][]int64 {
-	if routing == nil && !environmentRewrite {
+func EncodeGroupModelRouting(routing map[string][]int64, environmentMode string) map[string][]int64 {
+	environmentMode = NormalizeClaudeEnvironmentMode(environmentMode, false)
+	if routing == nil && environmentMode == ClaudeEnvironmentModeOff {
 		return nil
 	}
 	stored := make(map[string][]int64, len(routing)+1)
@@ -111,13 +129,37 @@ func EncodeGroupModelRouting(routing map[string][]int64, environmentRewrite bool
 		}
 		stored[pattern] = accountIDs
 	}
-	if environmentRewrite {
+	switch environmentMode {
+	case ClaudeEnvironmentModeRewrite:
 		stored[claudeEnvironmentRewriteRoutingMarker] = []int64{1}
+	case ClaudeEnvironmentModeRemove:
+		stored[claudeEnvironmentRewriteRoutingMarker] = []int64{2}
 	}
 	if len(stored) == 0 {
 		return nil
 	}
 	return stored
+}
+
+// NormalizeClaudeEnvironmentMode resolves the new tri-state mode while
+// accepting the former boolean switch as a rewrite-mode fallback.
+func NormalizeClaudeEnvironmentMode(mode string, legacyRewrite bool) string {
+	switch mode {
+	case ClaudeEnvironmentModeOff, ClaudeEnvironmentModeRewrite, ClaudeEnvironmentModeRemove:
+		return mode
+	case "":
+		if legacyRewrite {
+			return ClaudeEnvironmentModeRewrite
+		}
+	}
+	return ClaudeEnvironmentModeOff
+}
+
+func (g *Group) EffectiveClaudeEnvironmentMode() string {
+	if g == nil {
+		return ClaudeEnvironmentModeOff
+	}
+	return NormalizeClaudeEnvironmentMode(g.ClaudeEnvironmentMode, g.ClaudeEnvironmentRewrite)
 }
 
 func (g *Group) IsActive() bool {

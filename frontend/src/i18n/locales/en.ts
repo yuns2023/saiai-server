@@ -1679,10 +1679,11 @@ export default {
         oauthRequestGateHint: 'When enabled, OAuth / setup-token accounts reject requests that do not match real Claude Code shape. Disable only for testing or compatibility exceptions.',
         oauthRequestGateEnabled: 'Protection Enabled',
         oauthRequestGateDisabled: 'Protection Disabled',
-        environmentRewriteTitle: 'Rewrite # Environment',
-        environmentRewriteHint: 'Rewrite the # Environment section and its labels before forwarding Claude requests in this group. Values are preserved.',
-        environmentRewriteEnabled: 'Rewrite Enabled',
-        environmentRewriteDisabled: 'Rewrite Disabled'
+        environmentModeTitle: '# Environment handling',
+        environmentModeHint: 'Choose whether requests in this group keep, rewrite, or remove the # Environment section before forwarding.',
+        environmentModeOff: 'Keep unchanged',
+        environmentModeRewrite: 'Rewrite',
+        environmentModeRemove: 'Remove'
       },
       openaiMessages: {
         title: 'OpenAI Messages Dispatch',

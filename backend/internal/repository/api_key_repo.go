@@ -629,7 +629,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 	if g == nil {
 		return nil
 	}
-	modelRouting, claudeEnvironmentRewrite := service.DecodeGroupModelRouting(g.ModelRouting)
+	modelRouting, claudeEnvironmentMode := service.DecodeGroupModelRouting(g.ModelRouting)
 	return &service.Group{
 		ID:                              g.ID,
 		Name:                            g.Name,
@@ -656,7 +656,8 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		ClaudeCodeOnly:                  g.ClaudeCodeOnly,
 		AllowClaudeContext1MBeta:        g.AllowClaudeContext1mBeta,
 		ClaudeOAuthRequestGateDisabled:  g.ClaudeOauthRequestGateDisabled,
-		ClaudeEnvironmentRewrite:        claudeEnvironmentRewrite,
+		ClaudeEnvironmentMode:           claudeEnvironmentMode,
+		ClaudeEnvironmentRewrite:        claudeEnvironmentMode == service.ClaudeEnvironmentModeRewrite,
 		FallbackGroupID:                 g.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: g.FallbackGroupIDOnInvalidRequest,
 		ModelRouting:                    modelRouting,

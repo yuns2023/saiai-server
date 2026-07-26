@@ -103,6 +103,7 @@ type CreateGroupRequest struct {
 	ClaudeCodeOnly                  bool     `json:"claude_code_only"`
 	AllowClaudeContext1MBeta        bool     `json:"allow_claude_context_1m_beta"`
 	ClaudeOAuthRequestGateDisabled  bool     `json:"claude_oauth_request_gate_disabled"`
+	ClaudeEnvironmentMode           string   `json:"claude_environment_mode" binding:"omitempty,oneof=off rewrite remove"`
 	ClaudeEnvironmentRewrite        bool     `json:"claude_environment_rewrite"`
 	FallbackGroupID                 *int64   `json:"fallback_group_id"`
 	FallbackGroupIDOnInvalidRequest *int64   `json:"fallback_group_id_on_invalid_request"`
@@ -144,6 +145,7 @@ type UpdateGroupRequest struct {
 	ClaudeCodeOnly                  *bool    `json:"claude_code_only"`
 	AllowClaudeContext1MBeta        *bool    `json:"allow_claude_context_1m_beta"`
 	ClaudeOAuthRequestGateDisabled  *bool    `json:"claude_oauth_request_gate_disabled"`
+	ClaudeEnvironmentMode           *string  `json:"claude_environment_mode" binding:"omitempty,oneof=off rewrite remove"`
 	ClaudeEnvironmentRewrite        *bool    `json:"claude_environment_rewrite"`
 	FallbackGroupID                 *int64   `json:"fallback_group_id"`
 	FallbackGroupIDOnInvalidRequest *int64   `json:"fallback_group_id_on_invalid_request"`
@@ -268,6 +270,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		ClaudeCodeOnly:                  req.ClaudeCodeOnly,
 		AllowClaudeContext1MBeta:        req.AllowClaudeContext1MBeta,
 		ClaudeOAuthRequestGateDisabled:  req.ClaudeOAuthRequestGateDisabled,
+		ClaudeEnvironmentMode:           req.ClaudeEnvironmentMode,
 		ClaudeEnvironmentRewrite:        req.ClaudeEnvironmentRewrite,
 		FallbackGroupID:                 req.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: req.FallbackGroupIDOnInvalidRequest,
@@ -324,6 +327,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		ClaudeCodeOnly:                  req.ClaudeCodeOnly,
 		AllowClaudeContext1MBeta:        req.AllowClaudeContext1MBeta,
 		ClaudeOAuthRequestGateDisabled:  req.ClaudeOAuthRequestGateDisabled,
+		ClaudeEnvironmentMode:           req.ClaudeEnvironmentMode,
 		ClaudeEnvironmentRewrite:        req.ClaudeEnvironmentRewrite,
 		FallbackGroupID:                 req.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: req.FallbackGroupIDOnInvalidRequest,

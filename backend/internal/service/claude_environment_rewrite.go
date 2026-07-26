@@ -35,23 +35,9 @@ type claudeEnvironmentLine struct {
 // are changed.
 func rewriteClaudeEnvironmentBlock(text string) (string, bool) {
 	lines := splitClaudeEnvironmentLines(text)
-	start := -1
-	for i := range lines {
-		if strings.TrimSpace(lines[i].body) == claudeEnvironmentHeading {
-			start = i
-			break
-		}
-	}
+	start, end := findClaudeEnvironmentSection(lines)
 	if start < 0 {
 		return text, false
-	}
-
-	end := len(lines)
-	for i := start + 1; i < len(lines); i++ {
-		if strings.HasPrefix(strings.TrimLeft(lines[i].body, " \t"), "# ") {
-			end = i
-			break
-		}
 	}
 
 	changed := false
@@ -72,17 +58,66 @@ func rewriteClaudeEnvironmentBlock(text string) (string, bool) {
 	return joinClaudeEnvironmentLines(lines), true
 }
 
-// rewriteClaudeEnvironmentInBody rewrites matching text wherever it appears in
-// the Anthropic system field. It deliberately does not depend on a fixed block
-// index because Claude Code may move the environment block between releases.
-func rewriteClaudeEnvironmentInBody(body []byte) ([]byte, bool) {
+// removeClaudeEnvironmentBlock removes only the first # Environment section
+// in one system text block, ending immediately before the next Markdown
+// heading at the same level.
+func removeClaudeEnvironmentBlock(text string) (string, bool) {
+	lines := splitClaudeEnvironmentLines(text)
+	start, end := findClaudeEnvironmentSection(lines)
+	if start < 0 {
+		return text, false
+	}
+	lines = append(lines[:start], lines[end:]...)
+	return joinClaudeEnvironmentLines(lines), true
+}
+
+func findClaudeEnvironmentSection(lines []claudeEnvironmentLine) (int, int) {
+	start := -1
+	for i := range lines {
+		if strings.TrimSpace(lines[i].body) == claudeEnvironmentHeading {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return -1, -1
+	}
+
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimLeft(lines[i].body, " \t"), "# ") {
+			end = i
+			break
+		}
+	}
+	return start, end
+}
+
+type claudeEnvironmentSystemEdit struct {
+	index  int
+	text   string
+	remove bool
+}
+
+// applyClaudeEnvironmentModeInBody transforms matching text wherever it
+// appears in the Anthropic system field. It deliberately does not depend on a
+// fixed block index because Claude Code may move the environment block between
+// releases.
+func applyClaudeEnvironmentModeInBody(body []byte, mode string) ([]byte, bool) {
+	transform := rewriteClaudeEnvironmentBlock
+	if mode == ClaudeEnvironmentModeRemove {
+		transform = removeClaudeEnvironmentBlock
+	} else if mode != ClaudeEnvironmentModeRewrite {
+		return body, false
+	}
+
 	system := gjson.GetBytes(body, "system")
 	if !system.Exists() {
 		return body, false
 	}
 
 	if system.Type == gjson.String {
-		rewritten, changed := rewriteClaudeEnvironmentBlock(system.String())
+		rewritten, changed := transform(system.String())
 		if !changed {
 			return body, false
 		}
@@ -97,40 +132,67 @@ func rewriteClaudeEnvironmentInBody(body []byte) ([]byte, bool) {
 		return body, false
 	}
 
-	out := body
-	changed := false
+	edits := make([]claudeEnvironmentSystemEdit, 0)
 	index := 0
 	system.ForEach(func(_, item gjson.Result) bool {
 		text := item.Get("text")
 		if text.Type == gjson.String {
-			rewritten, textChanged := rewriteClaudeEnvironmentBlock(text.String())
+			rewritten, textChanged := transform(text.String())
 			if textChanged {
-				path := fmt.Sprintf("system.%d.text", index)
-				if next, err := sjson.SetBytes(out, path, rewritten); err == nil {
-					out = next
-					changed = true
-				}
+				edits = append(edits, claudeEnvironmentSystemEdit{
+					index:  index,
+					text:   rewritten,
+					remove: mode == ClaudeEnvironmentModeRemove && strings.TrimSpace(rewritten) == "",
+				})
 			}
 		}
 		index++
 		return true
 	})
 
+	if len(edits) == 0 {
+		return body, false
+	}
+
+	out := body
+	changed := false
+	for i := len(edits) - 1; i >= 0; i-- {
+		edit := edits[i]
+		path := fmt.Sprintf("system.%d", edit.index)
+		var (
+			next []byte
+			err  error
+		)
+		if edit.remove {
+			next, err = sjson.DeleteBytes(out, path)
+		} else {
+			next, err = sjson.SetBytes(out, path+".text", edit.text)
+		}
+		if err == nil {
+			out = next
+			changed = true
+		}
+	}
 	if !changed {
 		return body, false
 	}
 	return out, true
 }
 
-// rewriteClaudeEnvironmentIfEnabled applies the selected group's switch and
-// repairs a real non-placeholder CCH after changing the body. Missing CCH and
-// cch=00000 retain their original compatibility shape.
+func rewriteClaudeEnvironmentInBody(body []byte) ([]byte, bool) {
+	return applyClaudeEnvironmentModeInBody(body, ClaudeEnvironmentModeRewrite)
+}
+
+// rewriteClaudeEnvironmentIfEnabled applies the selected group's environment
+// mode and repairs a real non-placeholder CCH after changing the body. Missing
+// CCH and cch=00000 retain their original compatibility shape.
 func (s *GatewayService) rewriteClaudeEnvironmentIfEnabled(ctx context.Context, body []byte, oauthIdentity *oauthRequestIdentity) []byte {
-	if !isClaudeEnvironmentRewriteEnabled(ctx) {
+	environmentMode := claudeEnvironmentModeFromContext(ctx)
+	if environmentMode == ClaudeEnvironmentModeOff {
 		return body
 	}
 
-	rewritten, changed := rewriteClaudeEnvironmentInBody(body)
+	rewritten, changed := applyClaudeEnvironmentModeInBody(body, environmentMode)
 	if !changed {
 		return body
 	}
@@ -144,15 +206,15 @@ func (s *GatewayService) rewriteClaudeEnvironmentIfEnabled(ctx context.Context, 
 	return rewriteClaudeBillingHeaderPreservingCCVersionWithMode(rewritten, seed, mode)
 }
 
-func isClaudeEnvironmentRewriteEnabled(ctx context.Context) bool {
+func claudeEnvironmentModeFromContext(ctx context.Context) string {
 	if ctx == nil {
-		return false
+		return ClaudeEnvironmentModeOff
 	}
 	group, ok := ctx.Value(ctxkey.Group).(*Group)
 	if !ok || !IsGroupContextValid(group) || group.Platform != PlatformAnthropic {
-		return false
+		return ClaudeEnvironmentModeOff
 	}
-	return group.ClaudeEnvironmentRewrite
+	return group.EffectiveClaudeEnvironmentMode()
 }
 
 func rewriteClaudeEnvironmentLine(line string) (string, bool) {
