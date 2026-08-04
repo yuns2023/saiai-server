@@ -29,6 +29,14 @@ func (f *fakePricingRemoteClient) FetchHashText(_ context.Context, _ string) (st
 	return f.hashText, nil
 }
 
+func TestBundledPricingFallbackParses(t *testing.T) {
+	pricingFile := filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json")
+	svc := &PricingService{}
+
+	require.NoError(t, svc.loadPricingData(pricingFile))
+	require.NotEmpty(t, svc.pricingData)
+}
+
 func TestParsePricingData_ParsesPriorityAndServiceTierFields(t *testing.T) {
 	svc := &PricingService{}
 	body := []byte(`{
