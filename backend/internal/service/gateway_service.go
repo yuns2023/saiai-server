@@ -1845,9 +1845,6 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 	if ParseMetadataUserID(originalUserID) == nil {
 		return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, "Claude OAuth requests require a valid metadata.user_id", ErrClaudeOAuthMetadataRequired)
 	}
-	if account.GetClaudeOAuthMode() == ClaudeOAuthModeSingleDevice && strings.TrimSpace(account.GetExtraString("account_uuid")) == "" {
-		return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, "Claude OAuth single_device mode requires account.extra.account_uuid", ErrClaudeOAuthAccountUUIDRequired)
-	}
 	if account.Type != AccountTypeSetupToken && strings.TrimSpace(account.GetExtraString("account_uuid")) == "" {
 		return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, "Claude OAuth requests require account.extra.account_uuid", ErrClaudeOAuthAccountUUIDRequired)
 	}

@@ -1183,13 +1183,18 @@
             <div v-else-if="claudeOAuthMode === 'single_device'" class="space-y-4 rounded-lg border border-dashed border-gray-200 p-4 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
               <div class="grid grid-cols-2 gap-4">
                 <div>
-                  <label class="input-label">Fixed Account UUID</label>
+                  <label class="input-label">
+                    Fixed Account UUID{{ props.account?.type === 'setup-token' ? ' (not used for setup-token)' : '' }}
+                  </label>
                   <input
                     v-model="claudeOAuthFixedAccountUUID"
+                    data-testid="claude-oauth-fixed-account-uuid"
                     type="text"
                     class="input"
-                    placeholder="e.g. 00000000-0000-4000-8000-000000000001"
+                    :disabled="props.account?.type === 'setup-token'"
+                    :placeholder="props.account?.type === 'setup-token' ? 'Forwarded as empty' : 'e.g. 00000000-0000-4000-8000-000000000001'"
                   />
+                  <p v-if="props.account?.type === 'setup-token'" class="input-hint">Setup-token requests always forward an empty account UUID.</p>
                 </div>
                 <div>
                   <label class="input-label">Fixed Device ID</label>
@@ -3112,7 +3117,7 @@ const buildGroupCompatibilityCheckPayload = () => {
     const extra: Record<string, unknown> = {
       claude_oauth_mode: claudeOAuthMode.value
     }
-    if (claudeOAuthMode.value === 'single_device' && claudeOAuthFixedAccountUUID.value.trim()) {
+    if (claudeOAuthMode.value === 'single_device' && props.account?.type !== 'setup-token' && claudeOAuthFixedAccountUUID.value.trim()) {
       extra.account_uuid = claudeOAuthFixedAccountUUID.value.trim()
     }
     payload.extra = extra
@@ -3498,7 +3503,16 @@ const handleSubmit = async () => {
         } else {
           delete newExtra.claude_oauth_token_disable_before_expiry_minutes
         }
-        newExtra.account_uuid = claudeOAuthFixedAccountUUID.value.trim()
+        if (props.account?.type === 'setup-token') {
+          delete newExtra.account_uuid
+        } else {
+          const fixedAccountUUID = claudeOAuthFixedAccountUUID.value.trim()
+          if (!fixedAccountUUID) {
+            appStore.showError('single_device requires Fixed Account UUID')
+            return
+          }
+          newExtra.account_uuid = fixedAccountUUID
+        }
         newExtra.claude_oauth_fixed_device_id = claudeOAuthFixedDeviceID.value.trim()
         if (claudeOAuthFixedHeadersText.value.trim()) {
           newExtra.claude_oauth_fixed_headers_text = claudeOAuthFixedHeadersText.value.trim()

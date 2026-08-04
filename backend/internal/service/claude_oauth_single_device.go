@@ -160,7 +160,7 @@ func validateClaudeOAuthSingleDeviceConfig(account *Account) error {
 	if account == nil || account.GetClaudeOAuthMode() != ClaudeOAuthModeSingleDevice {
 		return nil
 	}
-	if strings.TrimSpace(account.GetExtraString("account_uuid")) == "" {
+	if account.Type != AccountTypeSetupToken && strings.TrimSpace(account.GetExtraString("account_uuid")) == "" {
 		return errors.New("single_device mode requires account_uuid")
 	}
 	if strings.TrimSpace(account.GetExtraString("claude_oauth_fixed_device_id")) == "" {

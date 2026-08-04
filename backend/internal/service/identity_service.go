@@ -1039,16 +1039,21 @@ func oauthAccountUUID(account *Account, fallback string) string {
 
 func oauthAccountUUIDWithOptions(account *Account, fallback string, opts oauthUserIDRewriteOptions) string {
 	if account != nil {
-		if account.GetClaudeOAuthMode() == ClaudeOAuthModeSingleDevice {
-			if v := strings.TrimSpace(account.GetExtraString("account_uuid")); v != "" {
-				return v
-			}
-		}
 		if account.Type == AccountTypeSetupToken {
+			// single_device must retain the token-mode wire shape even if a
+			// stale account UUID was supplied by the client or stored in extra.
+			if account.GetClaudeOAuthMode() == ClaudeOAuthModeSingleDevice {
+				return ""
+			}
 			if opts.PreserveSetupTokenAccountUUID {
 				return fallback
 			}
 			return ""
+		}
+		if account.GetClaudeOAuthMode() == ClaudeOAuthModeSingleDevice {
+			if v := strings.TrimSpace(account.GetExtraString("account_uuid")); v != "" {
+				return v
+			}
 		}
 		if v := strings.TrimSpace(account.GetExtraString("account_uuid")); v != "" {
 			return v

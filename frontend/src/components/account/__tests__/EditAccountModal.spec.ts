@@ -210,4 +210,40 @@ describe('EditAccountModal', () => {
       claude_oauth_carpool_unlimited_devices: true
     })
   })
+
+  it('removes a stale account UUID from setup-token single-device accounts', async () => {
+    const account = {
+      ...buildAccount(),
+      type: 'setup-token',
+      credentials: { access_token: 'test-token' },
+      extra: {
+        account_uuid: 'stale-account-uuid',
+        claude_oauth_mode: 'single_device',
+        claude_oauth_fixed_device_id: 'fixed-device-id'
+      },
+      claude_oauth_mode: 'single_device'
+    } as any
+
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    updateAccountMock.mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    const accountUUIDInput = wrapper.get('[data-testid="claude-oauth-fixed-account-uuid"]')
+    expect((accountUUIDInput.element as HTMLInputElement).disabled).toBe(true)
+    expect((accountUUIDInput.element as HTMLInputElement).value).toBe('stale-account-uuid')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('account_uuid')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      claude_oauth_mode: 'single_device',
+      claude_oauth_fixed_device_id: 'fixed-device-id'
+    })
+  })
 })

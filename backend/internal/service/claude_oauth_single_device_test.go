@@ -37,6 +37,26 @@ func TestParseClaudeOAuthFixedHeadersText_AllowsArbitraryHeaders(t *testing.T) {
 	require.Equal(t, "claude-cli/2.1.109 (external, cli)", headers["User-Agent"])
 }
 
+func TestValidateClaudeOAuthSingleDeviceConfig_AccountUUIDPolicy(t *testing.T) {
+	baseExtra := map[string]any{
+		"claude_oauth_mode":            ClaudeOAuthModeSingleDevice,
+		"claude_oauth_fixed_device_id": "fixed-device-id",
+	}
+
+	setupToken := &Account{Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Extra: baseExtra}
+	require.NoError(t, validateClaudeOAuthSingleDeviceConfig(setupToken))
+
+	oauth := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: baseExtra}
+	require.EqualError(t, validateClaudeOAuthSingleDeviceConfig(oauth), "single_device mode requires account_uuid")
+
+	oauth.Extra = map[string]any{
+		"account_uuid":                 "fixed-account-uuid",
+		"claude_oauth_mode":            ClaudeOAuthModeSingleDevice,
+		"claude_oauth_fixed_device_id": "fixed-device-id",
+	}
+	require.NoError(t, validateClaudeOAuthSingleDeviceConfig(oauth))
+}
+
 func TestPrepareOAuthRequestIdentity_SingleDeviceRewritesFixedIdentityAndOverridesHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -258,7 +278,7 @@ func TestPrepareOAuthRequestIdentity_SingleDeviceReusesMatchedCCHProfile(t *test
 	require.NotEqual(t, defaultFilteredCCH, match.Value)
 }
 
-func TestPrepareOAuthRequestIdentity_SetupTokenSingleDeviceUsesFixedIdentityWhenGateDisabled(t *testing.T) {
+func TestPrepareOAuthRequestIdentity_SetupTokenSingleDeviceClearsAccountUUIDWhenGateDisabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cache := &identityCacheStub{}
@@ -315,24 +335,25 @@ func TestPrepareOAuthRequestIdentity_SetupTokenSingleDeviceUsesFixedIdentityWhen
 
 	rewrittenUserID := ParseMetadataUserID(gjson.GetBytes(rewrittenBody, "metadata.user_id").String())
 	require.NotNil(t, rewrittenUserID)
-	require.Equal(t, "fixed-account-uuid", rewrittenUserID.AccountUUID)
+	require.Empty(t, rewrittenUserID.AccountUUID)
 	require.Equal(t, "fixed-device-id", rewrittenUserID.DeviceID)
 	require.NotEqual(t, "client-account-uuid", rewrittenUserID.AccountUUID)
 	require.NotEqual(t, originalSessionID, rewrittenUserID.SessionID)
 	require.Empty(t, rec.Body.String())
 }
 
-func TestPrepareOAuthRequestIdentity_SetupTokenSingleDeviceRequiresFixedAccountUUID(t *testing.T) {
+func TestPrepareOAuthRequestIdentity_SetupTokenSingleDeviceAllowsEmptyAccountUUID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	svc := &GatewayService{
 		identityService: NewIdentityService(&identityCacheStub{}, strings.Repeat("x", 32)),
 	}
 
+	originalSessionID := "00000000-0000-4000-8000-000000000004"
 	originalUserID := FormatMetadataUserID(
 		strings.Repeat("b", 64),
 		"client-account-uuid",
-		"00000000-0000-4000-8000-000000000004",
+		originalSessionID,
 		"2.1.101",
 	)
 
@@ -359,12 +380,27 @@ func TestPrepareOAuthRequestIdentity_SetupTokenSingleDeviceRequiresFixedAccountU
 	)
 	parsed := &ParsedRequest{Model: "claude-sonnet-4-6", MetadataUserID: originalUserID}
 
-	_, oauthIdentity, err := svc.prepareOAuthRequestIdentity(c.Request.Context(), c, account, parsed, body, false)
-	require.ErrorIs(t, err, ErrClaudeOAuthAccountUUIDRequired)
-	require.Nil(t, oauthIdentity)
-	var clientErr *ClientRequestError
-	require.ErrorAs(t, err, &clientErr)
-	require.Contains(t, clientErr.Message, "single_device mode requires account.extra.account_uuid")
+	rewrittenBody, oauthIdentity, err := svc.prepareOAuthRequestIdentity(c.Request.Context(), c, account, parsed, body, false)
+	require.NoError(t, err)
+	require.NotNil(t, oauthIdentity)
+	require.Equal(t, ClaudeOAuthModeSingleDevice, oauthIdentity.Mode)
+
+	rewrittenUserID := ParseMetadataUserID(gjson.GetBytes(rewrittenBody, "metadata.user_id").String())
+	require.NotNil(t, rewrittenUserID)
+	require.Empty(t, rewrittenUserID.AccountUUID)
+	require.Equal(t, "fixed-device-id", rewrittenUserID.DeviceID)
+	require.NotEqual(t, originalSessionID, rewrittenUserID.SessionID)
+
+	upstreamReq, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, rewrittenBody, "setup-token", "oauth", "claude-sonnet-4-6", true, oauthIdentity)
+	require.NoError(t, err)
+	defer func() { _ = upstreamReq.Body.Close() }()
+	upstreamBody, err := io.ReadAll(upstreamReq.Body)
+	require.NoError(t, err)
+	upstreamUserID := ParseMetadataUserID(gjson.GetBytes(upstreamBody, "metadata.user_id").String())
+	require.NotNil(t, upstreamUserID)
+	require.Empty(t, upstreamUserID.AccountUUID)
+	require.Equal(t, "fixed-device-id", upstreamUserID.DeviceID)
+	require.Equal(t, upstreamUserID.SessionID, upstreamReq.Header.Get("x-claude-code-session-id"))
 	require.Empty(t, rec.Body.String())
 }
 

@@ -48,6 +48,18 @@ Unlimited mode does not add devices to the non-expiring bounded-mode registry.
 Existing recorded and overflow entries are preserved so bounded mode can be
 enabled again without silently discarding operator state.
 
+## Single-device setup-token identity
+
+Anthropic OAuth accounts in `single_device` mode require both a fixed account
+UUID and a fixed device ID. Setup-token accounts require the fixed device ID
+but do not accept a fixed account UUID: their outbound `metadata.user_id`
+always carries an empty `account_uuid`, even when the inbound request or stale
+account-extra data contains a non-empty value.
+
+The admin create/edit forms therefore ignore and remove `account_uuid` for a
+setup-token account in `single_device` mode. This section does not redefine the
+identity rules of the other OAuth modes.
+
 ## Same-account HTTP replay
 
 Before any response bytes have been sent, the initially selected account gets
