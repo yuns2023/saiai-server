@@ -7095,6 +7095,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			(&IdentityService{}).ApplyFingerprint(req, oauthIdentity.Fingerprint)
 		}
 	}
+	restoreClaudeOAuthSingleDeviceBetaHeader(req, clientHeaders, oauthIdentity)
 	if oauthIdentity != nil && len(oauthIdentity.FixedHeaders) > 0 {
 		ApplyClaudeOAuthFixedHeaders(req, oauthIdentity.FixedHeaders)
 	}
@@ -7122,11 +7123,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 
 	// 处理 anthropic-beta header（OAuth 账号需要包含 oauth beta）
 	if tokenType == "oauth" {
-		if oauthIdentity != nil && oauthIdentity.Mode == ClaudeOAuthModeSingleDevice {
-			if existingBeta := req.Header.Get("anthropic-beta"); existingBeta != "" {
-				req.Header.Set("anthropic-beta", existingBeta)
-			}
-		} else {
+		if oauthIdentity == nil || oauthIdentity.Mode != ClaudeOAuthModeSingleDevice {
 			req.Header.Set("anthropic-beta", stripBetaTokensWithSet(ensureClaudeOAuthBetasForModel(req.Header.Get("anthropic-beta"), modelID, claude.BetaOAuth), effectiveDropSet))
 		}
 	} else {
@@ -7190,6 +7187,22 @@ func copyClaudeOAuthHeaders(req *http.Request, clientHeaders http.Header) {
 		for _, v := range values {
 			req.Header.Add(key, v)
 		}
+	}
+}
+
+// restoreClaudeOAuthSingleDeviceBetaHeader keeps feature-scoped beta tokens
+// aligned with the current request. A single_device fingerprint can outlive a
+// Claude Code version or be learned from a request that used a different set
+// of beta features, so its cached AnthropicBeta value must not replace the
+// inbound value. Explicit fixed admin headers are applied after this helper,
+// preserving their existing precedence.
+func restoreClaudeOAuthSingleDeviceBetaHeader(req *http.Request, clientHeaders http.Header, oauthIdentity *oauthRequestIdentity) {
+	if req == nil || oauthIdentity == nil || oauthIdentity.Mode != ClaudeOAuthModeSingleDevice {
+		return
+	}
+	req.Header.Del("anthropic-beta")
+	for _, value := range clientHeaders.Values("anthropic-beta") {
+		req.Header.Add("anthropic-beta", value)
 	}
 }
 
@@ -10204,6 +10217,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 			(&IdentityService{}).ApplyFingerprint(req, oauthIdentity.Fingerprint)
 		}
 	}
+	restoreClaudeOAuthSingleDeviceBetaHeader(req, clientHeaders, oauthIdentity)
 	if oauthIdentity != nil && len(oauthIdentity.FixedHeaders) > 0 {
 		ApplyClaudeOAuthFixedHeaders(req, oauthIdentity.FixedHeaders)
 	}
@@ -10230,11 +10244,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 
 	// OAuth 账号：处理 anthropic-beta header
 	if tokenType == "oauth" {
-		if oauthIdentity != nil && oauthIdentity.Mode == ClaudeOAuthModeSingleDevice {
-			if existingBeta := req.Header.Get("anthropic-beta"); existingBeta != "" {
-				req.Header.Set("anthropic-beta", existingBeta)
-			}
-		} else {
+		if oauthIdentity == nil || oauthIdentity.Mode != ClaudeOAuthModeSingleDevice {
 			req.Header.Set("anthropic-beta", stripBetaTokensWithSet(ensureClaudeOAuthBetasForModel(req.Header.Get("anthropic-beta"), modelID, claude.BetaOAuth, claude.BetaTokenCounting), ctEffectiveDropSet))
 		}
 	} else {

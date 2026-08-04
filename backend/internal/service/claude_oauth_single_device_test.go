@@ -132,6 +132,73 @@ func TestPrepareOAuthRequestIdentity_SingleDeviceRewritesFixedIdentityAndOverrid
 	requireNoOrderedHeader(t, snapshot.Headers, "X-Request-Id")
 }
 
+func TestBuildUpstreamRequest_SingleDevicePreservesCurrentRequestBetaHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	inboundBeta := "claude-code-20250219,oauth-2025-04-20,server-side-fallback-2026-06-01,fallback-credit-2026-06-01"
+	c.Request.Header.Set("anthropic-beta", inboundBeta)
+
+	account := &Account{ID: 123, Platform: PlatformAnthropic, Type: AccountTypeSetupToken}
+	oauthIdentity := &oauthRequestIdentity{
+		Mode: ClaudeOAuthModeSingleDevice,
+		Fingerprint: &Fingerprint{
+			UserAgent:        "claude-cli/2.1.207 (external, cli)",
+			AnthropicBeta:    "oauth-2025-04-20,interleaved-thinking-2025-05-14",
+			AnthropicVersion: "2023-06-01",
+		},
+	}
+	body := []byte(`{"model":"claude-fable-5","max_tokens":1024,"fallbacks":[{"model":"claude-opus-4-8"}],"messages":[{"role":"user","content":"hello"}]}`)
+
+	req, err := (&GatewayService{}).buildUpstreamRequest(
+		context.Background(), c, account, body, "fake-token", "oauth", "claude-fable-5", true, oauthIdentity,
+	)
+	require.NoError(t, err)
+	defer func() { _ = req.Body.Close() }()
+
+	require.Equal(t, inboundBeta, req.Header.Get("anthropic-beta"))
+}
+
+func TestBuildCountTokensRequest_SingleDevicePreservesCurrentRequestBetaHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	inboundBeta := "claude-code-20250219,oauth-2025-04-20,token-counting-2024-11-01,server-side-fallback-2026-06-01"
+	c.Request.Header.Set("anthropic-beta", inboundBeta)
+
+	account := &Account{ID: 123, Platform: PlatformAnthropic, Type: AccountTypeSetupToken}
+	oauthIdentity := &oauthRequestIdentity{
+		Mode: ClaudeOAuthModeSingleDevice,
+		Fingerprint: &Fingerprint{
+			UserAgent:        "claude-cli/2.1.207 (external, cli)",
+			AnthropicBeta:    "oauth-2025-04-20,interleaved-thinking-2025-05-14",
+			AnthropicVersion: "2023-06-01",
+		},
+	}
+	body := []byte(`{"model":"claude-fable-5","messages":[{"role":"user","content":"hello"}]}`)
+
+	req, err := (&GatewayService{}).buildCountTokensRequest(
+		context.Background(), c, account, body, "fake-token", "oauth", "claude-fable-5", oauthIdentity,
+	)
+	require.NoError(t, err)
+	defer func() { _ = req.Body.Close() }()
+
+	require.Equal(t, inboundBeta, req.Header.Get("anthropic-beta"))
+}
+
+func TestRestoreClaudeOAuthSingleDeviceBetaHeader_RemovesCachedValueWhenInboundMissing(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", nil)
+	req.Header.Set("anthropic-beta", "oauth-2025-04-20,stale-cached-beta")
+
+	restoreClaudeOAuthSingleDeviceBetaHeader(req, http.Header{}, &oauthRequestIdentity{Mode: ClaudeOAuthModeSingleDevice})
+
+	require.Empty(t, req.Header.Values("anthropic-beta"))
+}
+
 func TestPrepareOAuthRequestIdentity_SingleDeviceReusesMatchedCCHProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
