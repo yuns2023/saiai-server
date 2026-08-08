@@ -810,20 +810,6 @@ func paymentTypeSupported(raw, requested string) bool {
 	return false
 }
 
-// Kept as a small seam for malformed-query tests without exposing net/url maps
-// throughout the service.
-func urlParseQuery(raw string) (map[string]string, error) {
-	values, err := url.ParseQuery(raw)
-	if err != nil {
-		return nil, err
-	}
-	result := make(map[string]string, len(values))
-	for key := range values {
-		result[key] = values.Get(key)
-	}
-	return result, nil
-}
-
 func nilIfBlank(value string) *string {
 	value = strings.TrimSpace(value)
 	if value == "" {

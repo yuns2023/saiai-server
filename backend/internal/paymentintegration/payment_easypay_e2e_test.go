@@ -1,4 +1,4 @@
-package handler
+package paymentintegration
 
 import (
 	"context"
@@ -20,6 +20,7 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/enttest"
+	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -123,7 +124,7 @@ func TestNativePaymentEasyPaySignedCallbackAutomaticAndManualRefundE2E(t *testin
 		repository.NewRedeemCodeRepository(client), userRepo, nil, nil, nil, client, nil,
 	)
 	paymentService := service.NewPaymentService(client, userRepo, redeemService, configService)
-	webhookHandler := NewPaymentWebhookHandler(paymentService)
+	webhookHandler := handler.NewPaymentWebhookHandler(paymentService)
 	router := gin.New()
 	router.POST("/api/v1/payment/webhook/:provider", webhookHandler.Notify)
 

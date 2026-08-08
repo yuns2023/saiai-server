@@ -145,7 +145,7 @@ GOMAXPROCS=2 go test -mod=readonly -p 1 -tags integration \
   -run '^(TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate|TestNativePaymentMigrations_UpgradeFrom084PreservesDataAndEnforcesContracts)$' \
   -count=1
 
-GOMAXPROCS=2 go test -mod=readonly -p 1 ./internal/handler \
+GOMAXPROCS=2 go test -mod=readonly -p 1 ./internal/paymentintegration \
   -run '^TestNativePaymentEasyPaySignedCallbackAutomaticAndManualRefundE2E$' \
   -count=1
 ```

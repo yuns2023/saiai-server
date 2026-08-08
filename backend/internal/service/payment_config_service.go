@@ -467,10 +467,7 @@ func normalizeProviderPaymentTypes(requested []string, supported []payment.Payme
 		}
 	}
 	if len(requested) == 0 {
-		requested = make([]string, 0, len(supported))
-		for _, paymentType := range supported {
-			requested = append(requested, paymentType)
-		}
+		requested = append(requested, supported...)
 	}
 	seen := make(map[string]struct{}, len(requested))
 	result := make([]string, 0, len(requested))

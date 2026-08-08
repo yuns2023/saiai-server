@@ -64,7 +64,11 @@ func (s *PaymentExpiryService) runOnce() {
 		log.Printf("[PaymentExpiry] get database connection failed: %s", safePaymentFailureReason(err))
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			log.Printf("[PaymentExpiry] close database connection failed: %s", safePaymentFailureReason(closeErr))
+		}
+	}()
 	var locked bool
 	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", paymentExpiryAdvisoryLockID).Scan(&locked); err != nil {
 		log.Printf("[PaymentExpiry] acquire advisory lock failed: %s", safePaymentFailureReason(err))
