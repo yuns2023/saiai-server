@@ -40,7 +40,6 @@ export interface SystemSettings {
   hide_ccs_import_button: boolean
   purchase_subscription_enabled: boolean
   purchase_subscription_url: string
-  sora_client_enabled: boolean
   backend_mode_enabled: boolean
   custom_menu_items: CustomMenuItem[]
   // SMTP settings
@@ -67,7 +66,6 @@ export interface SystemSettings {
   fallback_model_anthropic: string
   fallback_model_openai: string
   fallback_model_gemini: string
-  fallback_model_antigravity: string
 
   // Identity patch configuration (Claude -> Gemini)
   enable_identity_patch: boolean
@@ -109,7 +107,6 @@ export interface UpdateSettingsRequest {
   hide_ccs_import_button?: boolean
   purchase_subscription_enabled?: boolean
   purchase_subscription_url?: string
-  sora_client_enabled?: boolean
   backend_mode_enabled?: boolean
   custom_menu_items?: CustomMenuItem[]
   smtp_host?: string
@@ -130,7 +127,6 @@ export interface UpdateSettingsRequest {
   fallback_model_anthropic?: string
   fallback_model_openai?: string
   fallback_model_gemini?: string
-  fallback_model_antigravity?: string
   enable_identity_patch?: boolean
   identity_patch_prompt?: string
   ops_monitoring_enabled?: boolean

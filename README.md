@@ -46,11 +46,9 @@ upstream service. Operators and users are responsible for provider terms,
 account permissions, data handling, and applicable law.
 Third-party OAuth client secrets are not distributed here. Compatibility OAuth
 flows that require one remain disabled until an operator supplies a credential
-they are authorized to use and accepts the provider's terms.
-Sora watermark-free parsing has no built-in third-party endpoint. Requests must
-provide an explicit custom `watermark_parse_url`; otherwise SAIAI does not
-publish the generated post to a parser and follows the configured fallback
-behavior.
+they are authorized to use and accepts the provider's terms. Antigravity and
+Sora are retired integrations; see [retired platforms](docs/RETIRED_PLATFORMS.md)
+for the compatibility and data-retention boundary.
 
 ## SAIAI V2
 

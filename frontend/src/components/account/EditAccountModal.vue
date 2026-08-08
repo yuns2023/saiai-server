@@ -35,13 +35,11 @@
             type="text"
             class="input"
             :placeholder="
-              account.platform === 'openai' || account.platform === 'sora'
+              account.platform === 'openai'
                 ? 'https://api.openai.com'
                 : account.platform === 'gemini'
                   ? 'https://generativelanguage.googleapis.com'
-                  : account.platform === 'antigravity'
-                    ? 'https://cloudcode-pa.googleapis.com'
-                    : 'https://api.anthropic.com'
+                  : 'https://api.anthropic.com'
             "
           />
           <p class="input-hint">{{ baseUrlHint }}</p>
@@ -53,21 +51,19 @@
             type="password"
             class="input font-mono"
             :placeholder="
-              account.platform === 'openai' || account.platform === 'sora'
+              account.platform === 'openai'
                 ? 'sk-proj-...'
                 : account.platform === 'gemini'
                   ? 'AIza...'
-                  : account.platform === 'antigravity'
-                    ? 'sk-...'
-                    : 'sk-ant-...'
+                  : 'sk-ant-...'
             "
           />
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
         </div>
 
-        <!-- Model Restriction Section (不适用于 Antigravity；OpenAI 走透传，不在中转层做白名单/映射) -->
+        <!-- Model Restriction Section (OpenAI 走透传，不在中转层做白名单/映射) -->
         <div
-          v-if="account.platform !== 'antigravity' && account.platform !== 'openai'"
+          v-if="account.platform !== 'openai'"
           class="border-t border-gray-200 pt-4 dark:border-dark-600"
         >
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -615,96 +611,6 @@
         </div>
       </div>
 
-      <!-- Antigravity model restriction (applies to all antigravity types) -->
-      <!-- Antigravity 只支持模型映射模式，不支持白名单模式 -->
-      <div v-if="account.platform === 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
-
-        <!-- Mapping Mode Only (no toggle for Antigravity) -->
-        <div>
-          <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
-            <p class="text-xs text-purple-700 dark:text-purple-400">{{ t('admin.accounts.mapRequestModels') }}</p>
-          </div>
-
-          <div v-if="antigravityModelMappings.length > 0" class="mb-3 space-y-2">
-            <div
-              v-for="(mapping, index) in antigravityModelMappings"
-              :key="getAntigravityModelMappingKey(mapping)"
-              class="space-y-1"
-            >
-              <div class="flex items-center gap-2">
-                <input
-                  v-model="mapping.from"
-                  type="text"
-                  :class="[
-                    'input flex-1',
-                    !isValidWildcardPattern(mapping.from) ? 'border-red-500 dark:border-red-500' : '',
-                    mapping.to.includes('*') ? '' : ''
-                  ]"
-                  :placeholder="t('admin.accounts.requestModel')"
-                />
-                <svg class="h-4 w-4 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                </svg>
-                <input
-                  v-model="mapping.to"
-                  type="text"
-                  :class="[
-                    'input flex-1',
-                    mapping.to.includes('*') ? 'border-red-500 dark:border-red-500' : ''
-                  ]"
-                  :placeholder="t('admin.accounts.actualModel')"
-                />
-                <button
-                  type="button"
-                  @click="removeAntigravityModelMapping(index)"
-                  class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                >
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
-              </div>
-              <!-- 校验错误提示 -->
-              <p v-if="!isValidWildcardPattern(mapping.from)" class="text-xs text-red-500">
-                {{ t('admin.accounts.wildcardOnlyAtEnd') }}
-              </p>
-              <p v-if="mapping.to.includes('*')" class="text-xs text-red-500">
-                {{ t('admin.accounts.targetNoWildcard') }}
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            @click="addAntigravityModelMapping"
-            class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-          >
-            <svg class="mr-1 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            {{ t('admin.accounts.addMapping') }}
-          </button>
-
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-for="preset in antigravityPresetMappings"
-              :key="preset.label"
-              type="button"
-              @click="addAntigravityPresetMapping(preset.from, preset.to)"
-              :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
-            >
-              + {{ preset.label }}
-            </button>
-          </div>
-        </div>
-      </div>
-
       <!-- Temp Unschedulable Rules -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
         <div class="mb-3 flex items-center justify-between">
@@ -853,9 +759,9 @@
         </div>
       </div>
 
-      <!-- Intercept Warmup Requests (Anthropic/Antigravity) -->
+      <!-- Intercept Warmup Requests (Anthropic) -->
       <div
-        v-if="account?.platform === 'anthropic' || account?.platform === 'antigravity'"
+        v-if="account?.platform === 'anthropic'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -1858,63 +1764,6 @@
           <Select v-model="form.status" :options="statusOptions" />
         </div>
 
-        <!-- Mixed Scheduling (only for antigravity accounts, read-only in edit mode) -->
-        <div v-if="account?.platform === 'antigravity'" class="flex items-center gap-2">
-          <label class="flex cursor-not-allowed items-center gap-2 opacity-60">
-            <input
-              type="checkbox"
-              v-model="mixedScheduling"
-              disabled
-              class="h-4 w-4 cursor-not-allowed rounded border-gray-300 text-primary-500 focus:ring-primary-500 dark:border-dark-500"
-            />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {{ t('admin.accounts.mixedScheduling') }}
-            </span>
-          </label>
-          <div class="group relative">
-            <span
-              class="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-xs text-gray-500 hover:bg-gray-300 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500"
-            >
-              ?
-            </span>
-            <!-- Tooltip（向下显示避免被弹窗裁剪） -->
-            <div
-              class="pointer-events-none absolute left-0 top-full z-[100] mt-1.5 w-72 rounded bg-gray-900 px-3 py-2 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
-            >
-              {{ t('admin.accounts.mixedSchedulingTooltip') }}
-              <div
-                class="absolute bottom-full left-3 border-4 border-transparent border-b-gray-900 dark:border-b-gray-700"
-              ></div>
-            </div>
-          </div>
-        </div>
-        <div v-if="account?.platform === 'antigravity'" class="mt-3 flex items-center gap-2">
-          <label class="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              v-model="allowOverages"
-              class="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500 dark:border-dark-500"
-            />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {{ t('admin.accounts.allowOverages') }}
-            </span>
-          </label>
-          <div class="group relative">
-            <span
-              class="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-xs text-gray-500 hover:bg-gray-300 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500"
-            >
-              ?
-            </span>
-            <div
-              class="pointer-events-none absolute left-0 top-full z-[100] mt-1.5 w-72 rounded bg-gray-900 px-3 py-2 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
-            >
-              {{ t('admin.accounts.allowOveragesTooltip') }}
-              <div
-                class="absolute bottom-full left-3 border-4 border-transparent border-b-gray-900 dark:border-b-gray-700"
-              ></div>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- Group Selection - 仅标准模式显示 -->
@@ -1923,7 +1772,6 @@
         v-model="form.group_ids"
         :groups="groups"
         :platform="account?.platform"
-        :mixed-scheduling="mixedScheduling"
         data-tour="account-form-groups"
       />
 
@@ -2011,8 +1859,7 @@ import {
 import {
   getPresetMappingsByPlatform,
   commonErrorCodes,
-  buildModelMappingObject,
-  isValidWildcardPattern
+  buildModelMappingObject
 } from '@/composables/useModelWhitelist'
 
 interface Props {
@@ -2040,7 +1887,6 @@ const baseUrlHint = computed(() => {
   return t('admin.accounts.baseUrlHint')
 })
 
-const antigravityPresetMappings = computed(() => getPresetMappingsByPlatform('antigravity'))
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
 
 // Model mapping type
@@ -2083,15 +1929,9 @@ const selectedErrorCodes = ref<number[]>([])
 const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(false)
-const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
-const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
-const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
-const antigravityWhitelistModels = ref<string[]>([])
-const antigravityModelMappings = ref<ModelMapping[]>([])
 const tempUnschedEnabled = ref(false)
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-model-mapping')
-const getAntigravityModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-antigravity-model-mapping')
 const getTempUnschedRuleKey = createStableObjectKeyResolver<TempUnschedRuleForm>('edit-temp-unsched-rule')
 
 const showMixedChannelWarning = ref(false)
@@ -2100,7 +1940,7 @@ const mixedChannelWarningDetails = ref<{ groupName: string; currentPlatform: str
 )
 const mixedChannelWarningRawMessage = ref('')
 const mixedChannelWarningAction = ref<(() => Promise<void>) | null>(null)
-const antigravityMixedChannelConfirmed = ref(false)
+const mixedChannelConfirmed = ref(false)
 
 // Quota control state (Anthropic OAuth/SetupToken only)
 const windowCostEnabled = ref(false)
@@ -2226,7 +2066,7 @@ const tempUnschedPresets = computed(() => [
 
 // Computed: default base URL based on platform
 const defaultBaseUrl = computed(() => {
-  if (props.account?.platform === 'openai' || props.account?.platform === 'sora') return 'https://api.openai.com'
+  if (props.account?.platform === 'openai') return 'https://api.openai.com'
   if (props.account?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
   return 'https://api.anthropic.com'
 })
@@ -2288,7 +2128,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   if (!newAccount) {
     return
   }
-  antigravityMixedChannelConfirmed.value = false
+  mixedChannelConfirmed.value = false
   showMixedChannelWarning.value = false
   mixedChannelWarningDetails.value = null
   mixedChannelWarningRawMessage.value = ''
@@ -2311,12 +2151,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   interceptWarmupRequests.value = credentials?.intercept_warmup_requests === true
   autoPauseOnExpired.value = newAccount.auto_pause_on_expired === true
 
-  // Load mixed scheduling setting (only for antigravity accounts)
-  mixedScheduling.value = false
-  allowOverages.value = false
   const extra = newAccount.extra as Record<string, unknown> | undefined
-  mixedScheduling.value = extra?.mixed_scheduling === true
-  allowOverages.value = extra?.allow_overages === true
 
   // OpenAI passthrough 开关已下线；旧账号 extra 上的 openai_passthrough/openai_oauth_passthrough 字段读到也忽略。
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -2371,38 +2206,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     editResetTimezone.value = null
   }
 
-  // Load antigravity model mapping (Antigravity 只支持映射模式)
-  if (newAccount.platform === 'antigravity') {
-    const credentials = newAccount.credentials as Record<string, unknown> | undefined
-
-    // Antigravity 始终使用映射模式
-    antigravityModelRestrictionMode.value = 'mapping'
-    antigravityWhitelistModels.value = []
-
-    // 从 model_mapping 读取映射配置
-    const rawAgMapping = credentials?.model_mapping as Record<string, string> | undefined
-    if (rawAgMapping && typeof rawAgMapping === 'object') {
-      const entries = Object.entries(rawAgMapping)
-      // 无论是白名单样式(key===value)还是真正的映射，都统一转换为映射列表
-      antigravityModelMappings.value = entries.map(([from, to]) => ({ from, to }))
-    } else {
-      // 兼容旧数据：从 model_whitelist 读取，转换为映射格式
-      const rawWhitelist = credentials?.model_whitelist
-      if (Array.isArray(rawWhitelist) && rawWhitelist.length > 0) {
-        antigravityModelMappings.value = rawWhitelist
-          .map((v) => String(v).trim())
-          .filter((v) => v.length > 0)
-          .map((m) => ({ from: m, to: m }))
-      } else {
-        antigravityModelMappings.value = []
-      }
-    }
-  } else {
-    antigravityModelRestrictionMode.value = 'mapping'
-    antigravityWhitelistModels.value = []
-    antigravityModelMappings.value = []
-  }
-
   // Load quota control settings (Anthropic OAuth/SetupToken only)
   loadQuotaControlSettings(newAccount)
 
@@ -2412,7 +2215,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   if (newAccount.type === 'apikey' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
     const platformDefaultUrl =
-      newAccount.platform === 'openai' || newAccount.platform === 'sora'
+      newAccount.platform === 'openai'
         ? 'https://api.openai.com'
         : newAccount.platform === 'gemini'
           ? 'https://generativelanguage.googleapis.com'
@@ -2508,7 +2311,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     editBaseUrl.value = (credentials.base_url as string) || ''
   } else {
     const platformDefaultUrl =
-      newAccount.platform === 'openai' || newAccount.platform === 'sora'
+      newAccount.platform === 'openai'
         ? 'https://api.openai.com'
         : newAccount.platform === 'gemini'
           ? 'https://generativelanguage.googleapis.com'
@@ -2565,23 +2368,6 @@ const addPresetMapping = (from: string, to: string) => {
     return
   }
   modelMappings.value.push({ from, to })
-}
-
-const addAntigravityModelMapping = () => {
-  antigravityModelMappings.value.push({ from: '', to: '' })
-}
-
-const removeAntigravityModelMapping = (index: number) => {
-  antigravityModelMappings.value.splice(index, 1)
-}
-
-const addAntigravityPresetMapping = (from: string, to: string) => {
-  const exists = antigravityModelMappings.value.some((m) => m.from === from)
-  if (exists) {
-    appStore.showInfo(t('admin.accounts.mappingExists', { model: from }))
-    return
-  }
-  antigravityModelMappings.value.push({ from, to })
 }
 
 // Error code toggle helper
@@ -3061,7 +2847,7 @@ function toPositiveNumber(value: unknown) {
   return Math.trunc(num)
 }
 
-const needsMixedChannelCheck = () => props.account?.platform === 'antigravity' || props.account?.platform === 'anthropic'
+const needsMixedChannelCheck = () => props.account?.platform === 'anthropic'
 
 const buildMixedChannelDetails = (resp?: CheckMixedChannelResponse) => {
   const details = resp?.details
@@ -3094,8 +2880,8 @@ const openMixedChannelDialog = (opts: {
   showMixedChannelWarning.value = true
 }
 
-const withAntigravityConfirmFlag = (payload: Record<string, unknown>) => {
-  if (needsMixedChannelCheck() && antigravityMixedChannelConfirmed.value) {
+const withMixedChannelConfirmFlag = (payload: Record<string, unknown>) => {
+  if (needsMixedChannelCheck() && mixedChannelConfirmed.value) {
     return {
       ...payload,
       confirm_mixed_channel_risk: true
@@ -3125,11 +2911,11 @@ const buildGroupCompatibilityCheckPayload = () => {
   return payload
 }
 
-const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<void>): Promise<boolean> => {
+const ensureMixedChannelConfirmed = async (onConfirm: () => Promise<void>): Promise<boolean> => {
   if (!needsMixedChannelCheck()) {
     return true
   }
-  if (antigravityMixedChannelConfirmed.value) {
+  if (mixedChannelConfirmed.value) {
     return true
   }
   if (!props.account) {
@@ -3144,7 +2930,7 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
     openMixedChannelDialog({
       response: result,
       onConfirm: async () => {
-        antigravityMixedChannelConfirmed.value = true
+        mixedChannelConfirmed.value = true
         await onConfirm()
       }
     })
@@ -3160,7 +2946,7 @@ const parseDateTimeLocal = parseDateTimeLocalInput
 
 // Methods
 const handleClose = () => {
-  antigravityMixedChannelConfirmed.value = false
+  mixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
 }
@@ -3168,7 +2954,7 @@ const handleClose = () => {
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
   submitting.value = true
   try {
-    const updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
+    const updatedAccount = await adminAPI.accounts.update(accountID, withMixedChannelConfirmFlag(updatePayload))
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
     emit('updated', updatedAccount)
     handleClose()
@@ -3177,7 +2963,7 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
       openMixedChannelDialog({
         message: error.message,
         onConfirm: async () => {
-          antigravityMixedChannelConfirmed.value = true
+          mixedChannelConfirmed.value = true
           await submitUpdateAccount(accountID, updatePayload)
         }
       })
@@ -3359,47 +3145,6 @@ const handleSubmit = async () => {
 
     // OpenAI OAuth: persist model mapping to credentials
     // OpenAI OAuth 账号级模型映射 UI 已下线；此分支只为保留旧账号 credentials.model_mapping 的兼容值，不再写入。
-
-    // Antigravity: persist model mapping to credentials (applies to all antigravity types)
-    // Antigravity 只支持映射模式
-    if (props.account.platform === 'antigravity') {
-      const currentCredentials = (updatePayload.credentials as Record<string, unknown>) ||
-        ((props.account.credentials as Record<string, unknown>) || {})
-      const newCredentials: Record<string, unknown> = { ...currentCredentials }
-
-      // 移除旧字段
-      delete newCredentials.model_whitelist
-      delete newCredentials.model_mapping
-
-      // 只使用映射模式
-      const antigravityModelMapping = buildModelMappingObject(
-        'mapping',
-        [],
-        antigravityModelMappings.value
-      )
-      if (antigravityModelMapping) {
-        newCredentials.model_mapping = antigravityModelMapping
-      }
-
-      updatePayload.credentials = newCredentials
-    }
-
-    // For antigravity accounts, handle mixed_scheduling and allow_overages in extra
-    if (props.account.platform === 'antigravity') {
-      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      if (mixedScheduling.value) {
-        newExtra.mixed_scheduling = true
-      } else {
-        delete newExtra.mixed_scheduling
-      }
-      if (allowOverages.value) {
-        newExtra.allow_overages = true
-      } else {
-        delete newExtra.allow_overages
-      }
-      updatePayload.extra = newExtra
-    }
 
     // For Anthropic OAuth/SetupToken accounts, handle quota control settings in extra
     if (props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')) {
@@ -3624,7 +3369,7 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
-    const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
+    const canContinue = await ensureMixedChannelConfirmed(async () => {
       await submitUpdateAccount(accountID, updatePayload)
     })
     if (!canContinue) {

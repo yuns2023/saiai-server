@@ -1122,13 +1122,13 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
 const mixedChannelConfirmed = ref(false)
 
-// 是否需要预检查：改了分组 + 全是单一的 antigravity 或 anthropic 平台
+// 是否需要预检查：改了分组 + 全是 Anthropic 平台
 // 多平台混合的情况由 submitBulkUpdate 的 409 catch 兜底
 const canPreCheck = () =>
   enableGroups.value &&
   groupIds.value.length > 0 &&
   props.selectedPlatforms.length === 1 &&
-  (props.selectedPlatforms[0] === 'antigravity' || props.selectedPlatforms[0] === 'anthropic')
+  props.selectedPlatforms[0] === 'anthropic'
 
 const handleClose = () => {
   showMixedChannelWarning.value = false

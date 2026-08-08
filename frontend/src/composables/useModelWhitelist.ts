@@ -60,52 +60,6 @@ const geminiModels = [
   'gemini-3-pro-preview'
 ]
 
-// Sora
-const soraModels = [
-  'gpt-image', 'gpt-image-landscape', 'gpt-image-portrait',
-  'sora2-landscape-10s', 'sora2-portrait-10s',
-  'sora2-landscape-15s', 'sora2-portrait-15s',
-  'sora2-landscape-25s', 'sora2-portrait-25s',
-  'sora2pro-landscape-10s', 'sora2pro-portrait-10s',
-  'sora2pro-landscape-15s', 'sora2pro-portrait-15s',
-  'sora2pro-landscape-25s', 'sora2pro-portrait-25s',
-  'sora2pro-hd-landscape-10s', 'sora2pro-hd-portrait-10s',
-  'sora2pro-hd-landscape-15s', 'sora2pro-hd-portrait-15s',
-  'prompt-enhance-short-10s', 'prompt-enhance-short-15s', 'prompt-enhance-short-20s',
-  'prompt-enhance-medium-10s', 'prompt-enhance-medium-15s', 'prompt-enhance-medium-20s',
-  'prompt-enhance-long-10s', 'prompt-enhance-long-15s', 'prompt-enhance-long-20s'
-]
-
-// Antigravity 官方支持的模型（精确匹配）
-// 基于官方 API 返回的模型列表，只支持 Claude 4.5+ 和 Gemini 2.5+
-const antigravityModels = [
-  // Claude 4.5+ 系列
-  'claude-opus-4-6',
-  'claude-opus-4-6-thinking',
-  'claude-opus-4-5-thinking',
-  'claude-sonnet-4-6',
-  'claude-sonnet-4-5',
-  'claude-sonnet-4-5-thinking',
-  // Gemini 2.5 系列
-  'gemini-3.1-flash-image',
-  'gemini-2.5-flash-image',
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-2.5-flash-thinking',
-  'gemini-2.5-pro',
-  // Gemini 3 系列
-  'gemini-3-flash',
-  'gemini-3-pro-high',
-  'gemini-3-pro-low',
-  // Gemini 3.1 系列
-  'gemini-3.1-pro-high',
-  'gemini-3.1-pro-low',
-  'gemini-3-pro-image',
-  // 其他
-  'gpt-oss-120b-medium',
-  'tab_flash_lite_preview'
-]
-
 // 智谱 GLM
 const zhipuModels = [
   'glm-4', 'glm-4v', 'glm-4-plus', 'glm-4-0520',
@@ -236,7 +190,6 @@ const allModelsList: string[] = [
   ...openaiModels,
   ...claudeModels,
   ...geminiModels,
-  ...soraModels,
   ...zhipuModels,
   ...qwenModels,
   ...deepseekModels,
@@ -289,46 +242,12 @@ const openaiPresetMappings = [
   { label: 'Sonnet→5.4', from: 'claude-sonnet-4-6', to: 'gpt-5.4', color: 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400' }
 ]
 
-const soraPresetMappings: { label: string; from: string; to: string; color: string }[] = []
-
 const geminiPresetMappings = [
   { label: 'Flash 2.0', from: 'gemini-2.0-flash', to: 'gemini-2.0-flash', color: 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400' },
   { label: '2.5 Flash', from: 'gemini-2.5-flash', to: 'gemini-2.5-flash', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
   { label: '2.5 Image', from: 'gemini-2.5-flash-image', to: 'gemini-2.5-flash-image', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' },
   { label: '2.5 Pro', from: 'gemini-2.5-pro', to: 'gemini-2.5-pro', color: 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400' },
   { label: '3.1 Image', from: 'gemini-3.1-flash-image', to: 'gemini-3.1-flash-image', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' }
-]
-
-// Antigravity 预设映射（支持通配符）
-const antigravityPresetMappings = [
-  // Claude 通配符映射
-  { label: 'Claude→Sonnet', from: 'claude-*', to: 'claude-sonnet-4-5', color: 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400' },
-  { label: 'Sonnet→Sonnet', from: 'claude-sonnet-*', to: 'claude-sonnet-4-5', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
-  { label: 'Opus→Opus', from: 'claude-opus-*', to: 'claude-opus-4-6-thinking', color: 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400' },
-  { label: 'Haiku→Sonnet', from: 'claude-haiku-*', to: 'claude-sonnet-4-5', color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400' },
-  { label: 'Sonnet4→4.6', from: 'claude-sonnet-4-20250514', to: 'claude-sonnet-4-6', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' },
-  { label: 'Sonnet4.5→4.6', from: 'claude-sonnet-4-5-20250929', to: 'claude-sonnet-4-6', color: 'bg-cyan-100 text-cyan-700 hover:bg-cyan-200 dark:bg-cyan-900/30 dark:text-cyan-400' },
-  { label: 'Sonnet3.5→4.6', from: 'claude-3-5-sonnet-20241022', to: 'claude-sonnet-4-6', color: 'bg-teal-100 text-teal-700 hover:bg-teal-200 dark:bg-teal-900/30 dark:text-teal-400' },
-  { label: 'Opus4.5→4.6', from: 'claude-opus-4-5-20251101', to: 'claude-opus-4-6-thinking', color: 'bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-400' },
-  // Gemini 3→3.1 映射
-  { label: '3-Pro-Preview→3.1-Pro-High', from: 'gemini-3-pro-preview', to: 'gemini-3.1-pro-high', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400' },
-  { label: '3-Pro-High→3.1-Pro-High', from: 'gemini-3-pro-high', to: 'gemini-3.1-pro-high', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
-  { label: '3-Pro-Low→3.1-Pro-Low', from: 'gemini-3-pro-low', to: 'gemini-3.1-pro-low', color: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400' },
-  { label: '3.1-Pro-High透传', from: 'gemini-3.1-pro-high', to: 'gemini-3.1-pro-high', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
-  { label: '3.1-Pro-Low透传', from: 'gemini-3.1-pro-low', to: 'gemini-3.1-pro-low', color: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400' },
-  // Gemini 通配符映射
-  { label: 'Gemini 3→Flash', from: 'gemini-3*', to: 'gemini-3-flash', color: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400' },
-  { label: 'Gemini 2.5→Flash', from: 'gemini-2.5*', to: 'gemini-2.5-flash', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
-  { label: '2.5-Flash-Image透传', from: 'gemini-2.5-flash-image', to: 'gemini-2.5-flash-image', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' },
-  { label: '3.1-Flash-Image透传', from: 'gemini-3.1-flash-image', to: 'gemini-3.1-flash-image', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' },
-  { label: '3-Pro-Image→3.1', from: 'gemini-3-pro-image', to: 'gemini-3.1-flash-image', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' },
-  { label: '3-Flash透传', from: 'gemini-3-flash', to: 'gemini-3-flash', color: 'bg-lime-100 text-lime-700 hover:bg-lime-200 dark:bg-lime-900/30 dark:text-lime-400' },
-  { label: '2.5-Flash-Lite透传', from: 'gemini-2.5-flash-lite', to: 'gemini-2.5-flash-lite', color: 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400' },
-  // 精确映射
-  { label: 'Sonnet 4.6', from: 'claude-sonnet-4-6', to: 'claude-sonnet-4-6', color: 'bg-cyan-100 text-cyan-700 hover:bg-cyan-200 dark:bg-cyan-900/30 dark:text-cyan-400' },
-  { label: 'Sonnet 4.5', from: 'claude-sonnet-4-5', to: 'claude-sonnet-4-5', color: 'bg-cyan-100 text-cyan-700 hover:bg-cyan-200 dark:bg-cyan-900/30 dark:text-cyan-400' },
-  { label: 'Opus 4.6', from: 'claude-opus-4-6', to: 'claude-opus-4-6-thinking', color: 'bg-pink-100 text-pink-700 hover:bg-pink-200 dark:bg-pink-900/30 dark:text-pink-400' },
-  { label: 'Opus 4.6-thinking', from: 'claude-opus-4-6-thinking', to: 'claude-opus-4-6-thinking', color: 'bg-pink-100 text-pink-700 hover:bg-pink-200 dark:bg-pink-900/30 dark:text-pink-400' }
 ]
 
 // Bedrock 预设映射（与后端 DefaultBedrockModelMapping 保持一致）
@@ -339,26 +258,6 @@ const bedrockPresetMappings = [
   { label: 'Sonnet 4.5', from: 'claude-sonnet-4-5', to: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0', color: 'bg-cyan-100 text-cyan-700 hover:bg-cyan-200 dark:bg-cyan-900/30 dark:text-cyan-400' },
   { label: 'Haiku 4.5', from: 'claude-haiku-4-5', to: 'us.anthropic.claude-haiku-4-5-20251001-v1:0', color: 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400' },
 ]
-
-// Antigravity 默认映射（从后端 API 获取，与 constants.go 保持一致）
-// 使用 fetchAntigravityDefaultMappings() 异步获取
-import { getAntigravityDefaultModelMapping } from '@/api/admin/accounts'
-
-let _antigravityDefaultMappingsCache: { from: string; to: string }[] | null = null
-
-export async function fetchAntigravityDefaultMappings(): Promise<{ from: string; to: string }[]> {
-  if (_antigravityDefaultMappingsCache !== null) {
-    return _antigravityDefaultMappingsCache
-  }
-  try {
-    const mapping = await getAntigravityDefaultModelMapping()
-    _antigravityDefaultMappingsCache = Object.entries(mapping).map(([from, to]) => ({ from, to }))
-  } catch (e) {
-    console.warn('[fetchAntigravityDefaultMappings] API failed, using empty fallback', e)
-    _antigravityDefaultMappingsCache = []
-  }
-  return _antigravityDefaultMappingsCache
-}
 
 // =====================
 // 常用错误码
@@ -385,8 +284,6 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'anthropic':
     case 'claude': return claudeModels
     case 'gemini': return geminiModels
-    case 'sora': return soraModels
-    case 'antigravity': return antigravityModels
     case 'zhipu': return zhipuModels
     case 'qwen': return qwenModels
     case 'deepseek': return deepseekModels
@@ -410,8 +307,6 @@ export function getModelsByPlatform(platform: string): string[] {
 export function getPresetMappingsByPlatform(platform: string) {
   if (platform === 'openai') return openaiPresetMappings
   if (platform === 'gemini') return geminiPresetMappings
-  if (platform === 'sora') return soraPresetMappings
-  if (platform === 'antigravity') return antigravityPresetMappings
   if (platform === 'bedrock') return bedrockPresetMappings
   return anthropicPresetMappings
 }

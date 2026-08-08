@@ -100,64 +100,11 @@ describe('AccountUsageCell', () => {
     )
   })
 
-  it('Antigravity 图片用量会聚合新旧 image 模型', async () => {
-    getUsage.mockResolvedValue({
-      antigravity_quota: {
-        'gemini-2.5-flash-image': {
-          utilization: 45,
-          reset_time: '2026-03-01T11:00:00Z'
-        },
-        'gemini-3.1-flash-image': {
-          utilization: 20,
-          reset_time: '2026-03-01T10:00:00Z'
-        },
-        'gemini-3-pro-image': {
-          utilization: 70,
-          reset_time: '2026-03-01T09:00:00Z'
-        }
-      }
-    })
-
-    const wrapper = mount(AccountUsageCell, {
+  it('退休的 Antigravity 账号不会触发用量刷新', async () => {
+    mount(AccountUsageCell, {
       props: {
         account: makeAccount({
           id: 1001,
-          platform: 'antigravity',
-          type: 'oauth',
-          extra: {}
-        })
-      },
-      global: {
-        stubs: {
-          UsageProgressBar: {
-            props: ['label', 'utilization', 'resetsAt', 'color'],
-            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}</div>'
-          },
-          AccountQuotaInfo: true
-        }
-      }
-    })
-
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('admin.accounts.usageWindow.gemini3Image|70|2026-03-01T09:00:00Z')
-  })
-
-  it('Antigravity 会显示 AI Credits 余额信息', async () => {
-    getUsage.mockResolvedValue({
-      ai_credits: [
-        {
-          credit_type: 'GOOGLE_ONE_AI',
-          amount: 25,
-          minimum_balance: 5
-        }
-      ]
-    })
-
-    const wrapper = mount(AccountUsageCell, {
-      props: {
-        account: makeAccount({
-          id: 1002,
           platform: 'antigravity',
           type: 'oauth',
           extra: {}
@@ -173,10 +120,8 @@ describe('AccountUsageCell', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('admin.accounts.aiCreditsBalance')
-    expect(wrapper.text()).toContain('25')
+    expect(getUsage).not.toHaveBeenCalled()
   })
-
 
   it('OpenAI OAuth 快照已过期时首屏会重新请求 usage', async () => {
     getUsage.mockResolvedValue({

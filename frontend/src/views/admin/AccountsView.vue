@@ -152,7 +152,13 @@
             />
           </template>
           <template #cell-select="{ row }">
-            <input type="checkbox" :checked="selIds.includes(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <input
+              type="checkbox"
+              :checked="selIds.includes(row.id)"
+              :disabled="isRetiredPlatform(row.platform)"
+              @change="toggleSel(row.id)"
+              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-40"
+            />
           </template>
           <template #cell-id="{ row }">
             <button
@@ -571,6 +577,8 @@ const toggleColumn = (key: string) => {
 
 const isColumnVisible = (key: string) => !hiddenColumns.has(key)
 
+const isRetiredPlatform = (platform: AccountPlatform) => platform === 'antigravity' || platform === 'sora'
+
 const {
   items: accounts,
   loading,
@@ -586,22 +594,34 @@ const {
   initialParams: { platform: '', type: '', status: '', group: '', search: '' }
 })
 
+const selectableAccounts = computed(() => accounts.value.filter((account) => !isRetiredPlatform(account.platform)))
+const selectableAccountIds = computed(() => new Set(selectableAccounts.value.map((account) => account.id)))
+
 const {
   selectedIds: selIds,
   allVisibleSelected,
   isSelected,
-  setSelectedIds,
-  select,
+  setSelectedIds: setSelectedIdsUnchecked,
+  select: selectUnchecked,
   deselect,
-  toggle: toggleSel,
+  toggle: toggleUnchecked,
   clear: clearSelection,
   removeMany: removeSelectedAccounts,
   toggleVisible,
   selectVisible: selectPage
 } = useTableSelection<Account>({
-  rows: accounts,
+  rows: selectableAccounts,
   getId: (account) => account.id
 })
+
+const setSelectedIds = (ids: number[]) =>
+  setSelectedIdsUnchecked(ids.filter((id) => selectableAccountIds.value.has(id)))
+const select = (id: number) => {
+  if (selectableAccountIds.value.has(id)) selectUnchecked(id)
+}
+const toggleSel = (id: number) => {
+  if (selectableAccountIds.value.has(id)) toggleUnchecked(id)
+}
 
 useSwipeSelect(accountTableRef, {
   isSelected,
@@ -909,7 +929,6 @@ const copyAccountId = async (id: number) => {
 }
 
 const handleEdit = (a: Account) => { edAcc.value = a; showEdit.value = true }
-const isRetiredPlatform = (platform: AccountPlatform) => platform === 'antigravity' || platform === 'sora'
 const openMenu = (a: Account, e: MouseEvent) => {
   menu.acc = a
 

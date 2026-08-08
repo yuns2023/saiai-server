@@ -182,7 +182,6 @@ const defaultClientTab = computed(() => {
     case 'openai':
       return 'codex'
     case 'anthropic':
-    case 'antigravity':
       return 'claude'
     case 'gemini':
       return 'gemini'
@@ -283,11 +282,6 @@ const clientTabs = computed((): TabConfig[] => {
       return [
         { id: 'gemini', label: t('keys.useKeyModal.cliTabs.geminiCli'), icon: SparkleIcon }
       ]
-    case 'antigravity':
-      return [
-        { id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon },
-        { id: 'gemini', label: t('keys.useKeyModal.cliTabs.geminiCli'), icon: SparkleIcon }
-      ]
     default:
       return []
   }
@@ -317,12 +311,6 @@ const platformDescription = computed(() => {
       return t('keys.useKeyModal.description')
     case 'gemini':
       return t('keys.useKeyModal.gemini.description')
-    case 'antigravity':
-      return activeClientTab.value === 'gemini'
-        ? t('keys.useKeyModal.antigravity.description')
-        : t('keys.useKeyModal.description')
-    case 'sora':
-      return t('keys.useKeyModal.sora.description')
     default:
       return ''
   }
@@ -338,12 +326,6 @@ const platformNote = computed(() => {
       return t('keys.useKeyModal.note')
     case 'gemini':
       return t('keys.useKeyModal.gemini.note')
-    case 'antigravity':
-      return activeClientTab.value === 'gemini'
-        ? t('keys.useKeyModal.antigravity.geminiNote')
-        : t('keys.useKeyModal.antigravity.claudeNote')
-    case 'sora':
-      return t('keys.useKeyModal.sora.note')
     default:
       return ''
   }
@@ -413,11 +395,6 @@ const currentFiles = computed((): FileConfig[] => {
       return generateClaudeCodeFiles(getGatewayRoot(baseUrl), apiKey)
     case 'gemini':
       return [generateGeminiCliContent(baseUrl, apiKey)]
-    case 'antigravity':
-      if (activeClientTab.value === 'gemini') {
-        return [generateGeminiCliContent(`${getGatewayRoot(baseUrl)}/antigravity`, apiKey)]
-      }
-      return generateClaudeCodeFiles(`${getGatewayRoot(baseUrl)}/antigravity`, apiKey)
     default:
       return []
   }

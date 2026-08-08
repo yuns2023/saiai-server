@@ -1,8 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
-
-vi.mock('@/api/admin/accounts', () => ({
-  getAntigravityDefaultModelMapping: vi.fn()
-}))
+import { describe, expect, it } from 'vitest'
 
 import { buildModelMappingObject, getModelsByPlatform } from '../useModelWhitelist'
 
@@ -16,14 +12,6 @@ describe('useModelWhitelist', () => {
     expect(models).toContain('gpt-5.4-2026-03-05')
   })
 
-  it('antigravity 模型列表包含图片模型兼容项', () => {
-    const models = getModelsByPlatform('antigravity')
-
-    expect(models).toContain('gemini-2.5-flash-image')
-    expect(models).toContain('gemini-3.1-flash-image')
-    expect(models).toContain('gemini-3-pro-image')
-  })
-
   it('gemini 模型列表包含原生生图模型', () => {
     const models = getModelsByPlatform('gemini')
 
@@ -31,13 +19,6 @@ describe('useModelWhitelist', () => {
     expect(models).toContain('gemini-3.1-flash-image')
     expect(models.indexOf('gemini-3.1-flash-image')).toBeLessThan(models.indexOf('gemini-2.0-flash'))
     expect(models.indexOf('gemini-2.5-flash-image')).toBeLessThan(models.indexOf('gemini-2.5-flash'))
-  })
-
-  it('antigravity 模型列表会把新的 Gemini 图片模型排在前面', () => {
-    const models = getModelsByPlatform('antigravity')
-
-    expect(models.indexOf('gemini-3.1-flash-image')).toBeLessThan(models.indexOf('gemini-2.5-flash'))
-    expect(models.indexOf('gemini-2.5-flash-image')).toBeLessThan(models.indexOf('gemini-2.5-flash-lite'))
   })
 
   it('whitelist 模式会忽略通配符条目', () => {

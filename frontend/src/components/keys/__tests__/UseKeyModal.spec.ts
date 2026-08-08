@@ -123,31 +123,17 @@ describe('UseKeyModal', () => {
     expect(command(wrapper)).toContain('--websockets')
   })
 
-  it('offers Antigravity Claude config plus its independent Gemini entry', async () => {
-    const wrapper = mountModal({ platform: 'antigravity' })
-    await nextTick()
-    expect(command(wrapper)).toContain("'https://example.com/antigravity' 'TEST_ONLY_API_KEY'")
-
-    const gemini = wrapper.findAll('button').find((button) =>
-      button.text().includes('keys.useKeyModal.cliTabs.geminiCli')
-    )
-    expect(gemini).toBeDefined()
-    await gemini!.trigger('click')
-    await nextTick()
-    expect(command(wrapper)).toContain('GOOGLE_GEMINI_BASE_URL')
-    expect(command(wrapper)).toContain('TEST_ONLY_API_KEY')
-  })
-
-  it('keeps direct Gemini configuration and does not misroute Sora', async () => {
+  it('keeps direct Gemini configuration', async () => {
     const gemini = mountModal({ platform: 'gemini' })
     await nextTick()
     expect(command(gemini)).toContain('GOOGLE_GEMINI_BASE_URL')
     expect(command(gemini)).toContain('TEST_ONLY_API_KEY')
+  })
 
-    const sora = mountModal({ platform: 'sora' })
+  it.each(['antigravity', 'sora'])('does not generate setup instructions for retired %s keys', async (platform) => {
+    const wrapper = mountModal({ platform })
     await nextTick()
-    expect(sora.findAll('pre code')).toHaveLength(0)
-    expect(sora.text()).toContain('keys.useKeyModal.sora.description')
+    expect(wrapper.findAll('pre code')).toHaveLength(0)
   })
 
   it('does not expose withdrawn V2 setup or launcher commands', async () => {

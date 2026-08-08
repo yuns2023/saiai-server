@@ -629,17 +629,6 @@ export async function importData(payload: {
 }
 
 /**
- * Get Antigravity default model mapping from backend
- * @returns Default model mapping (from -> to)
- */
-export async function getAntigravityDefaultModelMapping(): Promise<Record<string, string>> {
-  const { data } = await apiClient.get<Record<string, string>>(
-    '/admin/accounts/antigravity/default-model-mapping'
-  )
-  return data
-}
-
-/**
  * Refresh OpenAI token using refresh token
  * @param refreshToken - The refresh token
  * @param proxyId - Optional proxy ID
@@ -652,28 +641,6 @@ export async function refreshOpenAIToken(
 ): Promise<Record<string, unknown>> {
   const payload: { refresh_token: string; proxy_id?: number } = {
     refresh_token: refreshToken
-  }
-  if (proxyId) {
-    payload.proxy_id = proxyId
-  }
-  const { data } = await apiClient.post<Record<string, unknown>>(endpoint, payload)
-  return data
-}
-
-/**
- * Validate Sora session token and exchange to access token
- * @param sessionToken - Sora session token
- * @param proxyId - Optional proxy ID
- * @param endpoint - API endpoint path
- * @returns Token information including access_token
- */
-export async function validateSoraSessionToken(
-  sessionToken: string,
-  proxyId?: number | null,
-  endpoint: string = '/admin/sora/st2at'
-): Promise<Record<string, unknown>> {
-  const payload: { session_token: string; proxy_id?: number } = {
-    session_token: sessionToken
   }
   if (proxyId) {
     payload.proxy_id = proxyId
@@ -751,7 +718,6 @@ export const accountsAPI = {
   generateAuthUrl,
   exchangeCode,
   refreshOpenAIToken,
-  validateSoraSessionToken,
   batchCreate,
   batchUpdateCredentials,
   bulkUpdate,
@@ -759,7 +725,6 @@ export const accountsAPI = {
   syncFromCrs,
   exportData,
   importData,
-  getAntigravityDefaultModelMapping,
   batchClearError,
   batchRefresh
 }
