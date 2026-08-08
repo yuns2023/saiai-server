@@ -335,6 +335,21 @@ func TestUpdateSessionWindowSamplesFableUsage(t *testing.T) {
 	}
 }
 
+func TestAddAnthropicFableUsageUpdatesRejectsInvalidUtilization(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{"-0.01", "1.01", "NaN", "not-a-number"} {
+		t.Run(raw, func(t *testing.T) {
+			updates := map[string]any{}
+			headers := http.Header{}
+			headers.Set("anthropic-ratelimit-unified-7d_oi-utilization", raw)
+			addAnthropicFableUsageUpdates(updates, headers)
+			if _, exists := updates["passive_usage_7d_oi_utilization"]; exists {
+				t.Fatalf("invalid Fable utilization %q was persisted: %#v", raw, updates)
+			}
+		})
+	}
+}
+
 func TestUpdateSessionWindow_ClearsUtilizationOnWindowReset(t *testing.T) {
 	// When needInitWindow=true and window is set, utilization should be cleared.
 	resetUnix := time.Now().Add(3 * time.Hour).Unix()

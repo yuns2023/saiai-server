@@ -1353,22 +1353,37 @@ func (resp *ClaudeUsageResponse) fableWeeklyWindow() *ClaudeUsageWindow {
 	if resp == nil {
 		return nil
 	}
+	var selected *ClaudeUsageLimit
+	sawInactiveFable := false
 	for i := range resp.Limits {
 		limit := &resp.Limits[i]
-		if !strings.EqualFold(strings.TrimSpace(limit.Kind), "weekly_scoped") || limit.Percent == nil {
+		if !strings.EqualFold(strings.TrimSpace(limit.Kind), "weekly_scoped") {
 			continue
 		}
-		modelName := strings.ToLower(strings.TrimSpace(limit.Scope.Model.DisplayName))
+		modelID := ""
 		if limit.Scope.Model.ID != nil {
-			modelName += " " + strings.ToLower(strings.TrimSpace(*limit.Scope.Model.ID))
+			modelID = *limit.Scope.Model.ID
 		}
-		if !strings.Contains(modelName, "fable") {
+		displayName := strings.ToLower(strings.TrimSpace(limit.Scope.Model.DisplayName))
+		if !isAnthropicFableModel(modelID) && displayName != "fable" {
 			continue
 		}
-		return &ClaudeUsageWindow{
-			Utilization: *limit.Percent,
-			ResetsAt:    limit.ResetsAt,
+		if limit.IsActive != nil && !*limit.IsActive {
+			sawInactiveFable = true
+			continue
 		}
+		if limit.Percent == nil || !(*limit.Percent >= 0 && *limit.Percent <= 100) {
+			continue
+		}
+		if selected == nil || *limit.Percent > *selected.Percent {
+			selected = limit
+		}
+	}
+	if selected != nil {
+		return &ClaudeUsageWindow{Utilization: *selected.Percent, ResetsAt: selected.ResetsAt}
+	}
+	if sawInactiveFable {
+		return nil
 	}
 	return resp.SevenDayOverageIncluded
 }

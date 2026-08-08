@@ -2816,6 +2816,7 @@ export default {
         gemini3Flash: 'G3F',
         gemini3Image: 'G31FI',
         claude: 'Claude',
+        fableWeekly: 'Fable 7-Day Dedicated Limit',
         passiveSampled: 'Passive',
         activeQuery: 'Query'
       },

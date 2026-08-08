@@ -858,7 +858,7 @@ func (s *RateLimitService) handleAnthropicModelScoped429(ctx context.Context, ac
 		return false
 	}
 	model := strings.TrimSpace(requestedModel)
-	if !isAnthropicModelScoped429Model(model) {
+	if !isAnthropicFableModel(model) {
 		return false
 	}
 	if result.fiveHourReset == nil || !result.fiveHourReset.After(time.Now()) {
@@ -888,7 +888,7 @@ func (s *RateLimitService) handleAnthropicModelScoped429(ctx context.Context, ac
 
 func (s *RateLimitService) handleAnthropicFableWindow429(ctx context.Context, account *Account, requestedModel string, headers http.Header) bool {
 	if s == nil || s.accountRepo == nil || account == nil || account.Platform != PlatformAnthropic ||
-		!account.IsAnthropicOAuthOrSetupToken() || !isAnthropicModelScoped429Model(requestedModel) {
+		!account.IsAnthropicOAuthOrSetupToken() || !isAnthropicFableModel(requestedModel) {
 		return false
 	}
 	if !strings.EqualFold(strings.TrimSpace(headers.Get("anthropic-ratelimit-unified-7d_oi-status")), "rejected") &&
@@ -934,11 +934,6 @@ func parseAnthropicFutureReset(raw string, now time.Time, maxFuture time.Duratio
 		return time.Time{}, false
 	}
 	return resetAt, true
-}
-
-func isAnthropicModelScoped429Model(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "claude-fable-5" || strings.HasPrefix(model, "claude-fable-5-")
 }
 
 func (s *RateLimitService) handleAnthropicCarpool5hQuotaWithoutReset(ctx context.Context, account *Account, responseBody []byte) bool {
@@ -1427,7 +1422,7 @@ func addAnthropicFableUsageUpdates(updates map[string]any, headers http.Header) 
 		return
 	}
 	if utilStr := headers.Get("anthropic-ratelimit-unified-7d_oi-utilization"); utilStr != "" {
-		if utilization, err := strconv.ParseFloat(utilStr, 64); err == nil {
+		if utilization, err := strconv.ParseFloat(utilStr, 64); err == nil && utilization >= 0 && utilization <= 1 {
 			updates["passive_usage_7d_oi_utilization"] = utilization
 		}
 	}

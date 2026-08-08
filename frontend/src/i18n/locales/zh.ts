@@ -2217,6 +2217,7 @@ export default {
         gemini3Flash: 'G3F',
         gemini3Image: 'G31FI',
         claude: 'Claude',
+        fableWeekly: 'Fable 7天独立额度',
         passiveSampled: '被动采样',
         activeQuery: '查询'
       },

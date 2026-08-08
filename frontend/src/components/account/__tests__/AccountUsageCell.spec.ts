@@ -84,8 +84,8 @@ describe('AccountUsageCell', () => {
       global: {
         stubs: {
           UsageProgressBar: {
-            props: ['label', 'utilization', 'resetsAt', 'color'],
-            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}|{{ color }}</div>'
+            props: ['label', 'utilization', 'resetsAt', 'tooltip', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}|{{ tooltip }}|{{ color }}</div>'
           },
           AccountQuotaInfo: true
         }
@@ -95,7 +95,9 @@ describe('AccountUsageCell', () => {
     await flushPromises()
 
     expect(getUsage).toHaveBeenCalledWith(5001, 'passive')
-    expect(wrapper.text()).toContain('7d F|43|2026-08-14T12:00:00Z|amber')
+    expect(wrapper.text()).toContain(
+      '7d F|43|2026-08-14T12:00:00Z|admin.accounts.usageWindow.fableWeekly|amber',
+    )
   })
 
   it('Antigravity 图片用量会聚合新旧 image 模型', async () => {

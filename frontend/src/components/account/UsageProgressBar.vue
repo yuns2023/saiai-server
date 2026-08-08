@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div :title="tooltip">
     <!-- Window stats row (above progress bar) -->
     <div
       v-if="windowStats && (windowStats.requests > 0 || windowStats.tokens > 0)"
@@ -67,6 +67,7 @@ const props = defineProps<{
   utilization: number // Percentage (0-100+)
   resetsAt?: string | null
   color: 'indigo' | 'emerald' | 'purple' | 'amber'
+  tooltip?: string
   windowStats?: WindowStats | null
   showNowWhenIdle?: boolean
 }>()

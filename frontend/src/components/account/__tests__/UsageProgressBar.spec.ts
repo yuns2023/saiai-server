@@ -66,4 +66,17 @@ describe('UsageProgressBar', () => {
     expect(wrapper.text()).toContain('2h 30m')
     expect(wrapper.text()).not.toContain('现在')
   })
+
+  it('在根元素上暴露额度说明', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: {
+        label: '7d F',
+        utilization: 43,
+        tooltip: 'Fable 7天独立额度',
+        color: 'amber'
+      }
+    })
+
+    expect(wrapper.attributes('title')).toBe('Fable 7天独立额度')
+  })
 })

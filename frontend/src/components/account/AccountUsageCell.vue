@@ -74,6 +74,7 @@
           label="7d F"
           :utilization="usageInfo.seven_day_fable.utilization"
           :resets-at="usageInfo.seven_day_fable.resets_at"
+          :tooltip="t('admin.accounts.usageWindow.fableWeekly')"
           color="amber"
         />
 

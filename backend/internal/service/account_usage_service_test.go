@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"testing"
 	"time"
@@ -283,6 +284,52 @@ func TestBuildUsageInfoFallsBackToFableTopLevelWindow(t *testing.T) {
 	usage := (&AccountUsageService{}).buildUsageInfo(resp, &now)
 	if usage.SevenDayFable == nil || usage.SevenDayFable.Utilization != 37 {
 		t.Fatalf("Fable fallback = %#v, want utilization 37", usage.SevenDayFable)
+	}
+}
+
+func TestFableWeeklyWindowSelectsHighestActiveValidLimit(t *testing.T) {
+	t.Parallel()
+	inactive, active := false, true
+	inactivePercent, outOfRangePercent, lowerPercent, higherPercent, nonFablePercent := 99.0, 101.0, 35.0, 62.0, 88.0
+	nanPercent := math.NaN()
+	resp := &ClaudeUsageResponse{Limits: []ClaudeUsageLimit{
+		{Kind: "weekly_scoped", Percent: &inactivePercent, IsActive: &inactive},
+		{Kind: "weekly_scoped", Percent: &outOfRangePercent, IsActive: &active},
+		{Kind: "weekly_scoped", Percent: &nanPercent, IsActive: &active},
+		{Kind: "weekly_scoped", Percent: &lowerPercent, IsActive: &active},
+		{Kind: "weekly_scoped", Percent: &higherPercent, IsActive: &active},
+		{Kind: "weekly_scoped", Percent: &nonFablePercent, IsActive: &active},
+	}}
+	fableID := "claude-fable-5"
+	nonFableID := "claude-sonnet-5"
+	for i := 0; i < 5; i++ {
+		resp.Limits[i].Scope.Model.ID = &fableID
+	}
+	resp.Limits[5].Scope.Model.ID = &nonFableID
+	resp.Limits[4].ResetsAt = "2026-08-14T12:00:00Z"
+
+	window := resp.fableWeeklyWindow()
+	if window == nil || window.Utilization != higherPercent || window.ResetsAt != resp.Limits[4].ResetsAt {
+		t.Fatalf("Fable window = %#v, want highest active valid limit", window)
+	}
+}
+
+func TestFableWeeklyWindowDoesNotReviveInactiveScopedLimitFromFallback(t *testing.T) {
+	t.Parallel()
+	inactive := false
+	percent := 90.0
+	fableID := "claude-fable-5"
+	fallback := &ClaudeUsageWindow{Utilization: 27, ResetsAt: "2026-08-14T12:00:00Z"}
+	resp := &ClaudeUsageResponse{
+		SevenDayOverageIncluded: fallback,
+		Limits: []ClaudeUsageLimit{{
+			Kind: "weekly_scoped", Percent: &percent, IsActive: &inactive,
+		}},
+	}
+	resp.Limits[0].Scope.Model.ID = &fableID
+
+	if window := resp.fableWeeklyWindow(); window != nil {
+		t.Fatalf("Fable window = %#v, want inactive scoped limit to suppress fallback", window)
 	}
 }
 

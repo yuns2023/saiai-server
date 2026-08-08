@@ -314,20 +314,49 @@ func TestHandle429_AnthropicFableInvalidSpecificResetDoesNotGuess(t *testing.T) 
 	}
 }
 
-func TestIsAnthropicModelScoped429Model(t *testing.T) {
+func TestIsAnthropicFableModel(t *testing.T) {
 	tests := []struct {
 		model string
 		want  bool
 	}{
 		{model: "claude-fable-5", want: true},
 		{model: "claude-fable-5-20260610", want: true},
+		{model: " CLAUDE-FABLE-5 ", want: true},
 		{model: "claude-sonnet-5", want: false},
 		{model: "claude-mythos-5", want: false},
+		{model: "not-claude-fable-5", want: false},
+		{model: "claude-fable-50", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
-			if got := isAnthropicModelScoped429Model(tt.model); got != tt.want {
-				t.Fatalf("isAnthropicModelScoped429Model(%q)=%v, want %v", tt.model, got, tt.want)
+			if got := isAnthropicFableModel(tt.model); got != tt.want {
+				t.Fatalf("isAnthropicFableModel(%q)=%v, want %v", tt.model, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseAnthropicFutureResetRejectsInvalidBounds(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	valid := now.Add(6 * 24 * time.Hour).Truncate(time.Second)
+	tests := []struct {
+		name string
+		raw  string
+		want time.Time
+		ok   bool
+	}{
+		{name: "seconds", raw: fmt.Sprintf("%d", valid.Unix()), want: valid, ok: true},
+		{name: "milliseconds", raw: fmt.Sprintf("%d", valid.UnixMilli()), want: valid, ok: true},
+		{name: "past", raw: fmt.Sprintf("%d", now.Add(-time.Second).Unix())},
+		{name: "too far", raw: fmt.Sprintf("%d", now.Add(8*24*time.Hour+time.Second).Unix())},
+		{name: "invalid", raw: "not-a-timestamp"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseAnthropicFutureReset(tt.raw, now, 8*24*time.Hour)
+			if ok != tt.ok || (ok && !got.Equal(tt.want)) {
+				t.Fatalf("parseAnthropicFutureReset(%q) = (%v, %v), want (%v, %v)", tt.raw, got, ok, tt.want, tt.ok)
 			}
 		})
 	}

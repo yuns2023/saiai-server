@@ -76,7 +76,8 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 }
 
 func isAnthropicFableModel(model string) bool {
-	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "fable")
+	model = strings.ToLower(strings.TrimSpace(model))
+	return model == anthropicFableRateLimitKey || strings.HasPrefix(model, anthropicFableRateLimitKey+"-")
 }
 
 func resolveFinalAntigravityModelKey(ctx context.Context, account *Account, requestedModel string) string {
