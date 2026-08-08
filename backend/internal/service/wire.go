@@ -122,6 +122,13 @@ func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository) *S
 	return svc
 }
 
+// ProvidePaymentExpiryService creates and starts the singleton-safe payment expiry worker.
+func ProvidePaymentExpiryService(db *sql.DB, paymentService *PaymentService) *PaymentExpiryService {
+	svc := NewPaymentExpiryService(db, paymentService, time.Minute)
+	svc.Start()
+	return svc
+}
+
 // ProvideTimingWheelService creates and starts TimingWheelService
 func ProvideTimingWheelService() (*TimingWheelService, error) {
 	svc, err := NewTimingWheelService()
@@ -436,4 +443,7 @@ var ProviderSet = wire.NewSet(
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
 	NewGroupCapacityService,
+	NewPaymentConfigService,
+	NewPaymentService,
+	ProvidePaymentExpiryService,
 )

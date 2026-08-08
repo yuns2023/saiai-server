@@ -349,7 +349,7 @@ export default {
     logout: '退出登录',
     github: 'GitHub',
     mySubscriptions: '我的订阅',
-    buySubscription: '充值/订阅',
+    buySubscription: '购买与充值',
     docs: '文档'
   },
 
@@ -4591,10 +4591,10 @@ export default {
     unlimited: '无限制'
   },
 
-  // Recharge / Subscription Page
+  // 原生支付页面
   purchase: {
-    title: '充值/订阅',
-    description: '通过内嵌页面完成充值/订阅',
+    title: '购买与充值',
+    description: '通过 SAIAI 原生支付购买订阅或充值余额',
     openInNewTab: '新窗口打开',
     notEnabledTitle: '该功能未开启',
     notEnabledDesc: '管理员暂未开启充值/订阅入口，请联系管理员。',

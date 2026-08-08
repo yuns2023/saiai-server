@@ -314,8 +314,8 @@ func filterUserVisibleMenuItems(raw string) json.RawMessage {
 	return result
 }
 
-// GetFrameSrcOrigins returns deduplicated http(s) origins from purchase_subscription_url
-// and all custom_menu_items URLs. Used by the router layer for CSP frame-src injection.
+// GetFrameSrcOrigins returns deduplicated http(s) origins from custom_menu_items URLs.
+// The retired external purchase iframe no longer contributes to the CSP allowlist.
 func (s *SettingService) GetFrameSrcOrigins(ctx context.Context) ([]string, error) {
 	settings, err := s.GetPublicSettings(ctx)
 	if err != nil {
@@ -332,11 +332,6 @@ func (s *SettingService) GetFrameSrcOrigins(ctx context.Context) ([]string, erro
 				origins = append(origins, origin)
 			}
 		}
-	}
-
-	// purchase subscription URL
-	if settings.PurchaseSubscriptionEnabled {
-		addOrigin(settings.PurchaseSubscriptionURL)
 	}
 
 	// all custom menu items (including admin-only, since CSP must allow all iframes)
