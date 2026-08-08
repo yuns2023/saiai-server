@@ -41,7 +41,15 @@ func (s *ClaudeUsageServiceSuite) TestFetchUsage_Success() {
 		_, _ = io.WriteString(w, `{
   "five_hour": {"utilization": 12.5, "resets_at": "2025-01-01T00:00:00Z"},
   "seven_day": {"utilization": 34.0, "resets_at": "2025-01-08T00:00:00Z"},
-  "seven_day_sonnet": {"utilization": 56.0, "resets_at": "2025-01-08T00:00:00Z"}
+  "seven_day_sonnet": {"utilization": 56.0, "resets_at": "2025-01-08T00:00:00Z"},
+  "seven_day_overage_included": {"utilization": 21.0, "resets_at": "2025-01-08T00:00:00Z"},
+  "limits": [{
+    "kind": "weekly_scoped",
+    "percent": 22.0,
+    "resets_at": "2025-01-09T00:00:00Z",
+    "is_active": false,
+    "scope": {"model": {"id": null, "display_name": "Fable"}}
+  }]
 }`)
 	}))
 
@@ -55,6 +63,12 @@ func (s *ClaudeUsageServiceSuite) TestFetchUsage_Success() {
 	require.Equal(s.T(), 12.5, resp.FiveHour.Utilization, "FiveHour utilization mismatch")
 	require.Equal(s.T(), 34.0, resp.SevenDay.Utilization, "SevenDay utilization mismatch")
 	require.Equal(s.T(), 56.0, resp.SevenDaySonnet.Utilization, "SevenDaySonnet utilization mismatch")
+	require.NotNil(s.T(), resp.SevenDayOverageIncluded)
+	require.Equal(s.T(), 21.0, resp.SevenDayOverageIncluded.Utilization)
+	require.Len(s.T(), resp.Limits, 1)
+	require.Equal(s.T(), "Fable", resp.Limits[0].Scope.Model.DisplayName)
+	require.NotNil(s.T(), resp.Limits[0].Percent)
+	require.Equal(s.T(), 22.0, *resp.Limits[0].Percent)
 
 	// Assertions on captured request data
 	require.Equal(s.T(), "Bearer at", captured.authorization, "Authorization header mismatch")

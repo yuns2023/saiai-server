@@ -308,6 +308,33 @@ func TestUpdateSessionWindow_NoUpdateWhenHeaderMatchesStored(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionWindowSamplesFableUsage(t *testing.T) {
+	reset5hUnix := time.Now().Add(3 * time.Hour).Unix()
+	resetFableUnix := time.Now().Add(6 * 24 * time.Hour).Unix()
+	existingEnd := time.Unix(reset5hUnix, 0)
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	account := &Account{ID: 78, SessionWindowEnd: &existingEnd}
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprintf("%d", reset5hUnix))
+	headers.Set("anthropic-ratelimit-unified-7d_oi-utilization", "0.43")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-reset", fmt.Sprintf("%d", resetFableUnix))
+
+	svc.UpdateSessionWindow(context.Background(), account, headers)
+
+	if len(repo.updateExtraCalls) != 1 {
+		t.Fatalf("expected one passive usage update, got %d", len(repo.updateExtraCalls))
+	}
+	updates := repo.updateExtraCalls[0].Updates
+	if got := updates["passive_usage_7d_oi_utilization"]; got != 0.43 {
+		t.Fatalf("Fable utilization = %v, want 0.43", got)
+	}
+	if got := updates["passive_usage_7d_oi_reset"]; got != resetFableUnix {
+		t.Fatalf("Fable reset = %v, want %d", got, resetFableUnix)
+	}
+}
+
 func TestUpdateSessionWindow_ClearsUtilizationOnWindowReset(t *testing.T) {
 	// When needInitWindow=true and window is set, utilization should be cleared.
 	resetUnix := time.Now().Add(3 * time.Hour).Unix()

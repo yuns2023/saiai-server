@@ -169,6 +169,12 @@ func TestIsAnthropicWindowExceeded(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "surpassed-threshold numeric one",
+			headers:  makeHeader("anthropic-ratelimit-unified-7d_oi-surpassed-threshold", "1.0"),
+			window:   "7d_oi",
+			expected: true,
+		},
+		{
 			name:     "no headers",
 			headers:  http.Header{},
 			window:   "5h",
@@ -227,11 +233,15 @@ func TestHandle429_AnthropicCarpool5hQuotaUsesSessionWindowEnd(t *testing.T) {
 func TestHandle429_AnthropicFableNoWindowExceededSetsModelRateLimit(t *testing.T) {
 	reset5h := time.Now().Add(4 * time.Hour).Truncate(time.Second)
 	reset7d := time.Now().Add(5 * 24 * time.Hour).Truncate(time.Second)
+	resetFable := time.Now().Add(6 * 24 * time.Hour).Truncate(time.Second)
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.15")
 	headers.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprintf("%d", reset5h.Unix()))
 	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.50")
 	headers.Set("anthropic-ratelimit-unified-7d-reset", fmt.Sprintf("%d", reset7d.Unix()))
+	headers.Set("anthropic-ratelimit-unified-7d_oi-utilization", "1.0")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-reset", fmt.Sprintf("%d", resetFable.Unix()))
+	headers.Set("anthropic-ratelimit-unified-7d_oi-status", "rejected")
 
 	account := &Account{ID: 208, Platform: PlatformAnthropic, Type: AccountTypeSetupToken}
 	repo := &sessionWindowMockRepo{}
@@ -256,8 +266,51 @@ func TestHandle429_AnthropicFableNoWindowExceededSetsModelRateLimit(t *testing.T
 	if call.Scope != "claude-fable-5" {
 		t.Fatalf("model rate-limit scope = %q, want claude-fable-5", call.Scope)
 	}
-	if !call.ResetAt.Equal(reset5h.UTC()) {
-		t.Fatalf("model resetAt = %v, want %v", call.ResetAt, reset5h.UTC())
+	if !call.ResetAt.Equal(resetFable.UTC()) {
+		t.Fatalf("model resetAt = %v, want %v", call.ResetAt, resetFable.UTC())
+	}
+}
+
+func TestHandle429_AnthropicFableOnlyWindowHeadersSetModelRateLimit(t *testing.T) {
+	resetFable := time.Now().Add(6 * 24 * time.Hour).Truncate(time.Second)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-7d_oi-utilization", "1.0")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-reset", fmt.Sprintf("%d", resetFable.Unix()))
+	headers.Set("anthropic-ratelimit-unified-7d_oi-status", "rejected")
+
+	account := &Account{ID: 209, Platform: PlatformAnthropic, Type: AccountTypeOAuth}
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	svc.handle429ForModel(context.Background(), account, headers, nil, "claude-fable-5-20260610")
+
+	if len(repo.rateLimitCalls) != 0 {
+		t.Fatalf("expected no account-level rate limit, got %d", len(repo.rateLimitCalls))
+	}
+	if len(repo.modelRateLimitCalls) != 1 {
+		t.Fatalf("expected one Fable model rate limit, got %d", len(repo.modelRateLimitCalls))
+	}
+	call := repo.modelRateLimitCalls[0]
+	if call.Scope != anthropicFableRateLimitKey || !call.ResetAt.Equal(resetFable) {
+		t.Fatalf("Fable limit = %#v, want scope %q reset %v", call, anthropicFableRateLimitKey, resetFable)
+	}
+}
+
+func TestHandle429_AnthropicFableInvalidSpecificResetDoesNotGuess(t *testing.T) {
+	reset5h := time.Now().Add(4 * time.Hour).Truncate(time.Second)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.15")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprintf("%d", reset5h.Unix()))
+	headers.Set("anthropic-ratelimit-unified-7d_oi-utilization", "1.0")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-status", "rejected")
+	headers.Set("anthropic-ratelimit-unified-reset", fmt.Sprintf("%d", time.Now().Add(2*time.Hour).Unix()))
+
+	account := &Account{ID: 210, Platform: PlatformAnthropic, Type: AccountTypeSetupToken}
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	svc.handle429ForModel(context.Background(), account, headers, nil, "claude-fable-5")
+
+	if len(repo.rateLimitCalls) != 0 || len(repo.modelRateLimitCalls) != 0 {
+		t.Fatalf("invalid Fable reset persisted a limit: account=%d model=%d", len(repo.rateLimitCalls), len(repo.modelRateLimitCalls))
 	}
 }
 

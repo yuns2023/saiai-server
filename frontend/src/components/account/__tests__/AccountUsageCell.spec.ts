@@ -59,6 +59,45 @@ describe('AccountUsageCell', () => {
     getUsage.mockReset()
   })
 
+  it('Anthropic 账户会显示独立的 Fable 周额度', async () => {
+    getUsage.mockResolvedValue({
+      source: 'passive',
+      five_hour: null,
+      seven_day: null,
+      seven_day_sonnet: null,
+      seven_day_fable: {
+        utilization: 43,
+        resets_at: '2026-08-14T12:00:00Z',
+        remaining_seconds: 518400
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 5001,
+          platform: 'anthropic',
+          type: 'oauth',
+          extra: {}
+        })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}|{{ color }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(getUsage).toHaveBeenCalledWith(5001, 'passive')
+    expect(wrapper.text()).toContain('7d F|43|2026-08-14T12:00:00Z|amber')
+  })
+
   it('Antigravity 图片用量会聚合新旧 image 模型', async () => {
     getUsage.mockResolvedValue({
       antigravity_quota: {

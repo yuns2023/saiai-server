@@ -236,3 +236,75 @@ func TestEstimateSetupTokenUsageZerosExpiredSessionWindow(t *testing.T) {
 		t.Fatalf("expected active session window utilization to stay 56, got %v", activeUsage.FiveHour.Utilization)
 	}
 }
+
+func TestBuildUsageInfoUsesScopedFableWindow(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	resetAt := now.Add(4 * 24 * time.Hour)
+	percent := 22.0
+	modelID := "claude-fable-5"
+	resp := &ClaudeUsageResponse{
+		SevenDayOverageIncluded: &ClaudeUsageWindow{
+			Utilization: 11,
+			ResetsAt:    now.Add(3 * 24 * time.Hour).Format(time.RFC3339),
+		},
+		Limits: []ClaudeUsageLimit{{
+			Kind:     "weekly_scoped",
+			Percent:  &percent,
+			ResetsAt: resetAt.Format(time.RFC3339),
+		}},
+	}
+	resp.Limits[0].Scope.Model.ID = &modelID
+	resp.Limits[0].Scope.Model.DisplayName = "Fable"
+
+	usage := (&AccountUsageService{}).buildUsageInfo(resp, &now)
+	if usage.SevenDayFable == nil {
+		t.Fatal("expected Fable usage window")
+	}
+	if usage.SevenDayFable.Utilization != 22 {
+		t.Fatalf("Fable utilization = %v, want 22", usage.SevenDayFable.Utilization)
+	}
+	if usage.SevenDayFable.ResetsAt == nil || !usage.SevenDayFable.ResetsAt.Equal(resetAt) {
+		t.Fatalf("Fable reset = %v, want %v", usage.SevenDayFable.ResetsAt, resetAt)
+	}
+}
+
+func TestBuildUsageInfoFallsBackToFableTopLevelWindow(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	resetAt := now.Add(5 * 24 * time.Hour)
+	resp := &ClaudeUsageResponse{
+		SevenDayOverageIncluded: &ClaudeUsageWindow{
+			Utilization: 37,
+			ResetsAt:    resetAt.Format(time.RFC3339),
+		},
+	}
+
+	usage := (&AccountUsageService{}).buildUsageInfo(resp, &now)
+	if usage.SevenDayFable == nil || usage.SevenDayFable.Utilization != 37 {
+		t.Fatalf("Fable fallback = %#v, want utilization 37", usage.SevenDayFable)
+	}
+}
+
+func TestApplyPassiveAnthropicWeeklyUsageAddsFableWithoutOverwritingActive(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	resetAt := now.Add(6 * 24 * time.Hour)
+	info := &UsageInfo{}
+	extra := map[string]any{
+		"passive_usage_7d_oi_utilization": 0.43,
+		"passive_usage_7d_oi_reset":       resetAt.Unix(),
+	}
+
+	applyPassiveAnthropicWeeklyUsage(info, extra, now)
+	if info.SevenDayFable == nil || info.SevenDayFable.Utilization != 43 {
+		t.Fatalf("passive Fable usage = %#v, want utilization 43", info.SevenDayFable)
+	}
+
+	active := &UsageProgress{Utilization: 12}
+	info.SevenDayFable = active
+	applyPassiveAnthropicWeeklyUsage(info, extra, now)
+	if info.SevenDayFable != active {
+		t.Fatal("passive usage overwrote active Fable usage")
+	}
+}

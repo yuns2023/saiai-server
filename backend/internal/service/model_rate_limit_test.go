@@ -137,6 +137,36 @@ func TestIsModelRateLimited(t *testing.T) {
 			expected:       false, // gemini 平台不走 antigravity 映射
 		},
 		{
+			name: "anthropic Fable family scope matches dated model",
+			account: &Account{
+				Platform: PlatformAnthropic,
+				Extra: map[string]any{
+					modelRateLimitsKey: map[string]any{
+						anthropicFableRateLimitKey: map[string]any{
+							"rate_limit_reset_at": future,
+						},
+					},
+				},
+			},
+			requestedModel: "claude-fable-5-20260610",
+			expected:       true,
+		},
+		{
+			name: "anthropic Fable family scope does not affect Sonnet",
+			account: &Account{
+				Platform: PlatformAnthropic,
+				Extra: map[string]any{
+					modelRateLimitsKey: map[string]any{
+						anthropicFableRateLimitKey: map[string]any{
+							"rate_limit_reset_at": future,
+						},
+					},
+				},
+			},
+			requestedModel: "claude-sonnet-5",
+			expected:       false,
+		},
+		{
 			name: "antigravity platform - claude-opus-4-5-thinking mapped to opus-4-6-thinking",
 			account: &Account{
 				Platform: PlatformAntigravity,
@@ -267,6 +297,22 @@ func TestGetModelRateLimitRemainingTime(t *testing.T) {
 			requestedModel: "claude-sonnet-4-5",
 			minExpected:    0,
 			maxExpected:    0,
+		},
+		{
+			name: "anthropic Fable family scope remaining time",
+			account: &Account{
+				Platform: PlatformAnthropic,
+				Extra: map[string]any{
+					modelRateLimitsKey: map[string]any{
+						anthropicFableRateLimitKey: map[string]any{
+							"rate_limit_reset_at": future10m,
+						},
+					},
+				},
+			},
+			requestedModel: "claude-fable-5-20260610",
+			minExpected:    9 * time.Minute,
+			maxExpected:    11 * time.Minute,
 		},
 		{
 			name:           "no rate limit data",

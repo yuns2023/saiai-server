@@ -182,6 +182,7 @@ type UsageInfo struct {
 	FiveHour           *UsageProgress `json:"five_hour"`                      // 5小时窗口
 	SevenDay           *UsageProgress `json:"seven_day,omitempty"`            // 7天窗口
 	SevenDaySonnet     *UsageProgress `json:"seven_day_sonnet,omitempty"`     // 7天Sonnet窗口
+	SevenDayFable      *UsageProgress `json:"seven_day_fable,omitempty"`      // 7天Fable窗口
 	GeminiSharedDaily  *UsageProgress `json:"gemini_shared_daily,omitempty"`  // Gemini shared pool RPD (Google One / Code Assist)
 	GeminiProDaily     *UsageProgress `json:"gemini_pro_daily,omitempty"`     // Gemini Pro 日配额
 	GeminiFlashDaily   *UsageProgress `json:"gemini_flash_daily,omitempty"`   // Gemini Flash 日配额
@@ -223,20 +224,36 @@ type UsageInfo struct {
 	Error string `json:"error,omitempty"`
 }
 
+// ClaudeUsageWindow is a single utilization window returned by the Anthropic
+// OAuth usage endpoint. Utilization is expressed as a percentage (0-100).
+type ClaudeUsageWindow struct {
+	Utilization float64 `json:"utilization"`
+	ResetsAt    string  `json:"resets_at"`
+}
+
+// ClaudeUsageLimit is the generalized limit shape used by newer Anthropic
+// OAuth usage responses. Model-scoped windows such as Fable are no longer
+// guaranteed to have a dedicated top-level field.
+type ClaudeUsageLimit struct {
+	Kind     string   `json:"kind"`
+	Percent  *float64 `json:"percent"`
+	ResetsAt string   `json:"resets_at"`
+	IsActive *bool    `json:"is_active"`
+	Scope    struct {
+		Model struct {
+			ID          *string `json:"id"`
+			DisplayName string  `json:"display_name"`
+		} `json:"model"`
+	} `json:"scope"`
+}
+
 // ClaudeUsageResponse Anthropic API返回的usage结构
 type ClaudeUsageResponse struct {
-	FiveHour struct {
-		Utilization float64 `json:"utilization"`
-		ResetsAt    string  `json:"resets_at"`
-	} `json:"five_hour"`
-	SevenDay struct {
-		Utilization float64 `json:"utilization"`
-		ResetsAt    string  `json:"resets_at"`
-	} `json:"seven_day"`
-	SevenDaySonnet struct {
-		Utilization float64 `json:"utilization"`
-		ResetsAt    string  `json:"resets_at"`
-	} `json:"seven_day_sonnet"`
+	FiveHour                ClaudeUsageWindow  `json:"five_hour"`
+	SevenDay                ClaudeUsageWindow  `json:"seven_day"`
+	SevenDaySonnet          ClaudeUsageWindow  `json:"seven_day_sonnet"`
+	SevenDayOverageIncluded *ClaudeUsageWindow `json:"seven_day_overage_included"`
+	Limits                  []ClaudeUsageLimit `json:"limits"`
 }
 
 // ClaudeUsageFetchOptions 包含获取 Claude 用量数据所需的所有选项
@@ -390,6 +407,7 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 		// 3. 构建 UsageInfo（每次都重新计算 RemainingSeconds）
 		now := time.Now()
 		usage := s.buildUsageInfo(apiResp, &now)
+		applyPassiveAnthropicWeeklyUsage(usage, account.Extra, now)
 
 		// 4. 添加窗口统计（有独立缓存，1 分钟）
 		s.addWindowStats(ctx, account, usage)
@@ -404,6 +422,7 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 	// Setup Token账号：根据session_window推算（没有profile scope，无法调用usage API）
 	if account.Type == AccountTypeSetupToken {
 		usage := s.estimateSetupTokenUsage(account)
+		applyPassiveAnthropicWeeklyUsage(usage, account.Extra, time.Now())
 		// 添加窗口统计
 		s.addWindowStats(ctx, account, usage)
 		return usage, nil
@@ -439,54 +458,47 @@ func (s *AccountUsageService) GetPassiveUsage(ctx context.Context, accountID int
 		}
 	}
 
-	// 构建 7d 窗口（从被动采样数据）
-	util7d := parseExtraFloat64(account.Extra["passive_usage_7d_utilization"])
-	reset7dRaw := parseExtraFloat64(account.Extra["passive_usage_7d_reset"])
-	if util7d > 0 || reset7dRaw > 0 {
-		var resetAt *time.Time
-		var remaining int
-		if reset7dRaw > 0 {
-			t := time.Unix(int64(reset7dRaw), 0)
-			resetAt = &t
-			remaining = int(time.Until(t).Seconds())
-			if remaining < 0 {
-				remaining = 0
-			}
-		}
-		info.SevenDay = &UsageProgress{
-			Utilization:      util7d * 100,
-			ResetsAt:         resetAt,
-			RemainingSeconds: remaining,
-		}
-		normalizeExpiredUsageProgress(info.SevenDay, now)
-	}
-
-	// 构建 7d Sonnet 窗口（从被动采样数据）
-	util7dSonnet := parseExtraFloat64(account.Extra["passive_usage_7d_sonnet_utilization"])
-	reset7dSonnetRaw := parseExtraFloat64(account.Extra["passive_usage_7d_sonnet_reset"])
-	if util7dSonnet > 0 || reset7dSonnetRaw > 0 {
-		var resetAt *time.Time
-		var remaining int
-		if reset7dSonnetRaw > 0 {
-			t := time.Unix(int64(reset7dSonnetRaw), 0)
-			resetAt = &t
-			remaining = int(time.Until(t).Seconds())
-			if remaining < 0 {
-				remaining = 0
-			}
-		}
-		info.SevenDaySonnet = &UsageProgress{
-			Utilization:      util7dSonnet * 100,
-			ResetsAt:         resetAt,
-			RemainingSeconds: remaining,
-		}
-		normalizeExpiredUsageProgress(info.SevenDaySonnet, now)
-	}
+	applyPassiveAnthropicWeeklyUsage(info, account.Extra, now)
 
 	// 添加窗口统计
 	s.addWindowStats(ctx, account, info)
 
 	return info, nil
+}
+
+func applyPassiveAnthropicWeeklyUsage(info *UsageInfo, extra map[string]any, now time.Time) {
+	if info == nil {
+		return
+	}
+	if info.SevenDay == nil {
+		info.SevenDay = buildPassiveUsageWindow(extra, "passive_usage_7d_utilization", "passive_usage_7d_reset", now)
+	}
+	if info.SevenDaySonnet == nil {
+		info.SevenDaySonnet = buildPassiveUsageWindow(extra, "passive_usage_7d_sonnet_utilization", "passive_usage_7d_sonnet_reset", now)
+	}
+	if info.SevenDayFable == nil {
+		info.SevenDayFable = buildPassiveUsageWindow(extra, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset", now)
+	}
+}
+
+func buildPassiveUsageWindow(extra map[string]any, utilizationKey, resetKey string, now time.Time) *UsageProgress {
+	utilization := parseExtraFloat64(extra[utilizationKey])
+	resetRaw := parseExtraFloat64(extra[resetKey])
+	if utilization <= 0 && resetRaw <= 0 {
+		return nil
+	}
+
+	progress := &UsageProgress{Utilization: utilization * 100}
+	if resetRaw > 0 {
+		resetAt := time.Unix(int64(resetRaw), 0)
+		progress.ResetsAt = &resetAt
+		progress.RemainingSeconds = int(resetAt.Sub(now).Seconds())
+		if progress.RemainingSeconds < 0 {
+			progress.RemainingSeconds = 0
+		}
+	}
+	normalizeExpiredUsageProgress(progress, now)
+	return progress
 }
 
 // syncActiveToPassive 将主动查询的最新数据回写到 Extra 被动缓存，
@@ -507,6 +519,12 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 		extraUpdates["passive_usage_7d_sonnet_utilization"] = usage.SevenDaySonnet.Utilization / 100
 		if usage.SevenDaySonnet.ResetsAt != nil {
 			extraUpdates["passive_usage_7d_sonnet_reset"] = usage.SevenDaySonnet.ResetsAt.Unix()
+		}
+	}
+	if usage.SevenDayFable != nil {
+		extraUpdates["passive_usage_7d_oi_utilization"] = usage.SevenDayFable.Utilization / 100
+		if usage.SevenDayFable.ResetsAt != nil {
+			extraUpdates["passive_usage_7d_oi_reset"] = usage.SevenDayFable.ResetsAt.Unix()
 		}
 	}
 
@@ -1324,7 +1342,54 @@ func (s *AccountUsageService) buildUsageInfo(resp *ClaudeUsageResponse, updatedA
 		}
 	}
 
+	if fable := resp.fableWeeklyWindow(); fable != nil {
+		info.SevenDayFable = buildClaudeUsageProgress(fable, now)
+	}
+
 	return info
+}
+
+func (resp *ClaudeUsageResponse) fableWeeklyWindow() *ClaudeUsageWindow {
+	if resp == nil {
+		return nil
+	}
+	for i := range resp.Limits {
+		limit := &resp.Limits[i]
+		if !strings.EqualFold(strings.TrimSpace(limit.Kind), "weekly_scoped") || limit.Percent == nil {
+			continue
+		}
+		modelName := strings.ToLower(strings.TrimSpace(limit.Scope.Model.DisplayName))
+		if limit.Scope.Model.ID != nil {
+			modelName += " " + strings.ToLower(strings.TrimSpace(*limit.Scope.Model.ID))
+		}
+		if !strings.Contains(modelName, "fable") {
+			continue
+		}
+		return &ClaudeUsageWindow{
+			Utilization: *limit.Percent,
+			ResetsAt:    limit.ResetsAt,
+		}
+	}
+	return resp.SevenDayOverageIncluded
+}
+
+func buildClaudeUsageProgress(window *ClaudeUsageWindow, now time.Time) *UsageProgress {
+	if window == nil {
+		return nil
+	}
+	progress := &UsageProgress{Utilization: window.Utilization}
+	if strings.TrimSpace(window.ResetsAt) == "" {
+		return progress
+	}
+	resetAt, err := parseTime(window.ResetsAt)
+	if err != nil {
+		log.Printf("Failed to parse Claude usage reset time %s: %v", window.ResetsAt, err)
+		return progress
+	}
+	progress.ResetsAt = &resetAt
+	progress.RemainingSeconds = int(resetAt.Sub(now).Seconds())
+	normalizeExpiredUsageProgress(progress, now)
+	return progress
 }
 
 // estimateSetupTokenUsage 根据session_window推算Setup Token账号的使用量
