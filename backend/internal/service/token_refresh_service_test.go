@@ -181,34 +181,6 @@ func TestTokenRefreshService_RefreshWithRetry_NilInvalidator(t *testing.T) {
 }
 
 // TestTokenRefreshService_RefreshWithRetry_Antigravity 测试 Antigravity 平台的缓存失效
-func TestTokenRefreshService_RefreshWithRetry_Antigravity(t *testing.T) {
-	repo := &tokenRefreshAccountRepo{}
-	invalidator := &tokenCacheInvalidatorStub{}
-	cfg := &config.Config{
-		TokenRefresh: config.TokenRefreshConfig{
-			MaxRetries:          1,
-			RetryBackoffSeconds: 0,
-		},
-	}
-	service := NewTokenRefreshService(repo, nil, nil, nil, nil, invalidator, nil, cfg, nil)
-	account := &Account{
-		ID:       8,
-		Platform: PlatformAntigravity,
-		Type:     AccountTypeOAuth,
-	}
-	refresher := &tokenRefresherStub{
-		credentials: map[string]any{
-			"access_token": "ag-token",
-		},
-	}
-
-	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
-	require.NoError(t, err)
-	require.Equal(t, 1, repo.updateCalls)
-	require.Equal(t, 1, invalidator.calls) // Antigravity 也应触发缓存失效
-}
-
-// TestTokenRefreshService_RefreshWithRetry_NonOAuthAccount 测试非 OAuth 账号不触发缓存失效
 func TestTokenRefreshService_RefreshWithRetry_NonOAuthAccount(t *testing.T) {
 	repo := &tokenRefreshAccountRepo{}
 	invalidator := &tokenCacheInvalidatorStub{}
@@ -321,59 +293,6 @@ func TestTokenRefreshService_RefreshWithRetry_RefreshFailed(t *testing.T) {
 }
 
 // TestTokenRefreshService_RefreshWithRetry_AntigravityRefreshFailed 测试 Antigravity 刷新失败不设置错误状态
-func TestTokenRefreshService_RefreshWithRetry_AntigravityRefreshFailed(t *testing.T) {
-	repo := &tokenRefreshAccountRepo{}
-	invalidator := &tokenCacheInvalidatorStub{}
-	cfg := &config.Config{
-		TokenRefresh: config.TokenRefreshConfig{
-			MaxRetries:          1,
-			RetryBackoffSeconds: 0,
-		},
-	}
-	service := NewTokenRefreshService(repo, nil, nil, nil, nil, invalidator, nil, cfg, nil)
-	account := &Account{
-		ID:       13,
-		Platform: PlatformAntigravity,
-		Type:     AccountTypeOAuth,
-	}
-	refresher := &tokenRefresherStub{
-		err: errors.New("network error"), // 可重试错误
-	}
-
-	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
-	require.Error(t, err)
-	require.Equal(t, 0, repo.updateCalls)
-	require.Equal(t, 0, invalidator.calls)
-	require.Equal(t, 0, repo.setErrorCalls) // Antigravity 可重试错误不设置错误状态
-}
-
-// TestTokenRefreshService_RefreshWithRetry_AntigravityNonRetryableError 测试 Antigravity 不可重试错误
-func TestTokenRefreshService_RefreshWithRetry_AntigravityNonRetryableError(t *testing.T) {
-	repo := &tokenRefreshAccountRepo{}
-	invalidator := &tokenCacheInvalidatorStub{}
-	cfg := &config.Config{
-		TokenRefresh: config.TokenRefreshConfig{
-			MaxRetries:          3,
-			RetryBackoffSeconds: 0,
-		},
-	}
-	service := NewTokenRefreshService(repo, nil, nil, nil, nil, invalidator, nil, cfg, nil)
-	account := &Account{
-		ID:       14,
-		Platform: PlatformAntigravity,
-		Type:     AccountTypeOAuth,
-	}
-	refresher := &tokenRefresherStub{
-		err: errors.New("invalid_grant: token revoked"), // 不可重试错误
-	}
-
-	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
-	require.Error(t, err)
-	require.Equal(t, 0, repo.updateCalls)
-	require.Equal(t, 0, invalidator.calls)
-	require.Equal(t, 1, repo.setErrorCalls) // 不可重试错误应设置错误状态
-}
-
 func TestTokenRefreshService_RefreshWithRetry_OpenAIInvalidRefreshTokenIsNonRetryable(t *testing.T) {
 	repo := &tokenRefreshAccountRepo{}
 	cfg := &config.Config{

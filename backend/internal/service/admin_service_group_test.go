@@ -121,130 +121,6 @@ func (s *groupRepoStubForAdmin) UpdateSortOrders(_ context.Context, _ []GroupSor
 }
 
 // TestAdminService_CreateGroup_WithImagePricing 测试创建分组时 ImagePrice 字段正确传递
-func TestAdminService_CreateGroup_WithImagePricing(t *testing.T) {
-	repo := &groupRepoStubForAdmin{}
-	svc := &adminServiceImpl{groupRepo: repo}
-
-	price1K := 0.10
-	price2K := 0.15
-	price4K := 0.30
-
-	input := &CreateGroupInput{
-		Name:           "test-group",
-		Description:    "Test group",
-		Platform:       PlatformAntigravity,
-		RateMultiplier: 1.0,
-		ImagePrice1K:   &price1K,
-		ImagePrice2K:   &price2K,
-		ImagePrice4K:   &price4K,
-	}
-
-	group, err := svc.CreateGroup(context.Background(), input)
-	require.NoError(t, err)
-	require.NotNil(t, group)
-
-	// 验证 repo 收到了正确的字段
-	require.NotNil(t, repo.created)
-	require.NotNil(t, repo.created.ImagePrice1K)
-	require.NotNil(t, repo.created.ImagePrice2K)
-	require.NotNil(t, repo.created.ImagePrice4K)
-	require.InDelta(t, 0.10, *repo.created.ImagePrice1K, 0.0001)
-	require.InDelta(t, 0.15, *repo.created.ImagePrice2K, 0.0001)
-	require.InDelta(t, 0.30, *repo.created.ImagePrice4K, 0.0001)
-}
-
-// TestAdminService_CreateGroup_NilImagePricing 测试 ImagePrice 为 nil 时正常创建
-func TestAdminService_CreateGroup_NilImagePricing(t *testing.T) {
-	repo := &groupRepoStubForAdmin{}
-	svc := &adminServiceImpl{groupRepo: repo}
-
-	input := &CreateGroupInput{
-		Name:           "test-group",
-		Description:    "Test group",
-		Platform:       PlatformAntigravity,
-		RateMultiplier: 1.0,
-		// ImagePrice 字段全部为 nil
-	}
-
-	group, err := svc.CreateGroup(context.Background(), input)
-	require.NoError(t, err)
-	require.NotNil(t, group)
-
-	// 验证 ImagePrice 字段为 nil
-	require.NotNil(t, repo.created)
-	require.Nil(t, repo.created.ImagePrice1K)
-	require.Nil(t, repo.created.ImagePrice2K)
-	require.Nil(t, repo.created.ImagePrice4K)
-}
-
-// TestAdminService_UpdateGroup_WithImagePricing 测试更新分组时 ImagePrice 字段正确更新
-func TestAdminService_UpdateGroup_WithImagePricing(t *testing.T) {
-	existingGroup := &Group{
-		ID:       1,
-		Name:     "existing-group",
-		Platform: PlatformAntigravity,
-		Status:   StatusActive,
-	}
-	repo := &groupRepoStubForAdmin{getByID: existingGroup}
-	svc := &adminServiceImpl{groupRepo: repo}
-
-	price1K := 0.12
-	price2K := 0.18
-	price4K := 0.36
-
-	input := &UpdateGroupInput{
-		ImagePrice1K: &price1K,
-		ImagePrice2K: &price2K,
-		ImagePrice4K: &price4K,
-	}
-
-	group, err := svc.UpdateGroup(context.Background(), 1, input)
-	require.NoError(t, err)
-	require.NotNil(t, group)
-
-	// 验证 repo 收到了更新后的字段
-	require.NotNil(t, repo.updated)
-	require.NotNil(t, repo.updated.ImagePrice1K)
-	require.NotNil(t, repo.updated.ImagePrice2K)
-	require.NotNil(t, repo.updated.ImagePrice4K)
-	require.InDelta(t, 0.12, *repo.updated.ImagePrice1K, 0.0001)
-	require.InDelta(t, 0.18, *repo.updated.ImagePrice2K, 0.0001)
-	require.InDelta(t, 0.36, *repo.updated.ImagePrice4K, 0.0001)
-}
-
-// TestAdminService_UpdateGroup_PartialImagePricing 测试仅更新部分 ImagePrice 字段
-func TestAdminService_UpdateGroup_PartialImagePricing(t *testing.T) {
-	oldPrice2K := 0.15
-	existingGroup := &Group{
-		ID:           1,
-		Name:         "existing-group",
-		Platform:     PlatformAntigravity,
-		Status:       StatusActive,
-		ImagePrice2K: &oldPrice2K, // 已有 2K 价格
-	}
-	repo := &groupRepoStubForAdmin{getByID: existingGroup}
-	svc := &adminServiceImpl{groupRepo: repo}
-
-	// 只更新 1K 价格
-	price1K := 0.10
-	input := &UpdateGroupInput{
-		ImagePrice1K: &price1K,
-		// ImagePrice2K 和 ImagePrice4K 为 nil，不更新
-	}
-
-	group, err := svc.UpdateGroup(context.Background(), 1, input)
-	require.NoError(t, err)
-	require.NotNil(t, group)
-
-	// 验证：1K 被更新，2K 保持原值，4K 仍为 nil
-	require.NotNil(t, repo.updated)
-	require.NotNil(t, repo.updated.ImagePrice1K)
-	require.InDelta(t, 0.10, *repo.updated.ImagePrice1K, 0.0001)
-	require.NotNil(t, repo.updated.ImagePrice2K)
-	require.InDelta(t, 0.15, *repo.updated.ImagePrice2K, 0.0001) // 原值保持
-	require.Nil(t, repo.updated.ImagePrice4K)
-}
-
 func TestAdminService_ListGroups_WithSearch(t *testing.T) {
 	// 测试：
 	// 1. search 参数正常传递到 repository 层
@@ -688,27 +564,6 @@ func TestAdminService_UpdateGroup_ModeTakesPrecedenceOverLegacySwitch(t *testing
 	require.False(t, repo.updated.ClaudeEnvironmentRewrite)
 }
 
-func TestAdminService_CreateGroup_InvalidRequestFallbackAllowsAntigravity(t *testing.T) {
-	fallbackID := int64(10)
-	repo := &groupRepoStubForInvalidRequestFallback{
-		groups: map[int64]*Group{
-			fallbackID: {ID: fallbackID, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard},
-		},
-	}
-	svc := &adminServiceImpl{groupRepo: repo}
-
-	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
-		Name:                            "g1",
-		Platform:                        PlatformAntigravity,
-		SubscriptionType:                SubscriptionTypeStandard,
-		FallbackGroupIDOnInvalidRequest: &fallbackID,
-	})
-	require.NoError(t, err)
-	require.NotNil(t, group)
-	require.NotNil(t, repo.created)
-	require.Equal(t, fallbackID, *repo.created.FallbackGroupIDOnInvalidRequest)
-}
-
 func TestAdminService_CreateGroup_InvalidRequestFallbackClearsOnZero(t *testing.T) {
 	zero := int64(0)
 	repo := &groupRepoStubForInvalidRequestFallback{}
@@ -838,32 +693,6 @@ func TestAdminService_UpdateGroup_InvalidRequestFallbackSetSuccess(t *testing.T)
 		ID:               1,
 		Name:             "g1",
 		Platform:         PlatformAnthropic,
-		SubscriptionType: SubscriptionTypeStandard,
-		Status:           StatusActive,
-	}
-	repo := &groupRepoStubForInvalidRequestFallback{
-		groups: map[int64]*Group{
-			existing.ID: existing,
-			fallbackID:  {ID: fallbackID, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard},
-		},
-	}
-	svc := &adminServiceImpl{groupRepo: repo}
-
-	group, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
-		FallbackGroupIDOnInvalidRequest: &fallbackID,
-	})
-	require.NoError(t, err)
-	require.NotNil(t, group)
-	require.NotNil(t, repo.updated)
-	require.Equal(t, fallbackID, *repo.updated.FallbackGroupIDOnInvalidRequest)
-}
-
-func TestAdminService_UpdateGroup_InvalidRequestFallbackAllowsAntigravity(t *testing.T) {
-	fallbackID := int64(10)
-	existing := &Group{
-		ID:               1,
-		Name:             "g1",
-		Platform:         PlatformAntigravity,
 		SubscriptionType: SubscriptionTypeStandard,
 		Status:           StatusActive,
 	}

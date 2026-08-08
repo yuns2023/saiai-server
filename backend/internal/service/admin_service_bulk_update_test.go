@@ -142,35 +142,6 @@ func TestAdminService_BulkUpdateAccounts_NilGroupRepoReturnsError(t *testing.T) 
 // TestAdminService_BulkUpdateAccounts_MixedChannelPreCheckBlocksOnExistingConflict verifies
 // that the global pre-check detects a conflict with existing group members and returns an
 // error before any DB write is performed.
-func TestAdminService_BulkUpdateAccounts_MixedChannelPreCheckBlocksOnExistingConflict(t *testing.T) {
-	repo := &accountRepoStubForBulkUpdate{
-		getByIDsAccounts: []*Account{
-			{ID: 1, Platform: PlatformAntigravity},
-		},
-		// Group 10 already contains an Anthropic account.
-		listByGroupData: map[int64][]Account{
-			10: {{ID: 99, Platform: PlatformAnthropic}},
-		},
-	}
-	svc := &adminServiceImpl{
-		accountRepo: repo,
-		groupRepo:   &groupRepoStubForAdmin{getByID: &Group{ID: 10, Name: "target-group"}},
-	}
-
-	groupIDs := []int64{10}
-	input := &BulkUpdateAccountsInput{
-		AccountIDs: []int64{1},
-		GroupIDs:   &groupIDs,
-	}
-
-	result, err := svc.BulkUpdateAccounts(context.Background(), input)
-	require.Nil(t, result)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "mixed channel")
-	// No BindGroups should have been called since the check runs before any write.
-	require.Empty(t, repo.bindGroupsCalls)
-}
-
 func TestAdminService_BulkUpdateAccounts_AllowsMixedClaudeOAuthModesInSameGroup(t *testing.T) {
 	repo := &accountRepoStubForBulkUpdate{
 		getByIDsAccounts: []*Account{

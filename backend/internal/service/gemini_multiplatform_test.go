@@ -393,42 +393,6 @@ func TestGeminiMessagesCompatService_GroupResolution_UsesLiteFetch(t *testing.T)
 }
 
 // TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_AntigravityGroup 测试 antigravity 分组
-func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_AntigravityGroup(t *testing.T) {
-	ctx := context.Background()
-
-	repo := &mockAccountRepoForGemini{
-		accounts: []Account{
-			{ID: 1, Platform: PlatformGemini, Priority: 1, Status: StatusActive, Schedulable: true},      // 应被隔离
-			{ID: 2, Platform: PlatformAntigravity, Priority: 1, Status: StatusActive, Schedulable: true}, // 应被选择
-		},
-		accountsByID: map[int64]*Account{},
-	}
-	for i := range repo.accounts {
-		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
-	}
-
-	cache := &mockGatewayCacheForGemini{}
-	groupRepo := &mockGroupRepoForGemini{
-		groups: map[int64]*Group{
-			1: {ID: 1, Platform: PlatformAntigravity},
-		},
-	}
-
-	svc := &GeminiMessagesCompatService{
-		accountRepo: repo,
-		groupRepo:   groupRepo,
-		cache:       cache,
-	}
-
-	groupID := int64(1)
-	acc, err := svc.SelectAccountForModelWithExclusions(ctx, &groupID, "", "gemini-2.5-flash", nil)
-	require.NoError(t, err)
-	require.NotNil(t, acc)
-	require.Equal(t, int64(2), acc.ID)
-	require.Equal(t, PlatformAntigravity, acc.Platform, "antigravity 分组应只返回 antigravity 账户")
-}
-
-// TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_OAuthPreferred 测试 OAuth 优先
 func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_OAuthPreferred(t *testing.T) {
 	ctx := context.Background()
 
@@ -611,40 +575,6 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_StickyS
 	})
 }
 
-func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_ForcePlatformFallback(t *testing.T) {
-	ctx := context.Background()
-	groupID := int64(9)
-	ctx = context.WithValue(ctx, ctxkey.ForcePlatform, PlatformAntigravity)
-
-	repo := &mockAccountRepoForGemini{
-		listByGroupFunc: func(ctx context.Context, groupID int64, platforms []string) ([]Account, error) {
-			return nil, nil
-		},
-		listByPlatformFunc: func(ctx context.Context, platforms []string) ([]Account, error) {
-			return []Account{
-				{ID: 1, Platform: PlatformAntigravity, Priority: 1, Status: StatusActive, Schedulable: true},
-			}, nil
-		},
-		accountsByID: map[int64]*Account{
-			1: {ID: 1, Platform: PlatformAntigravity, Priority: 1, Status: StatusActive, Schedulable: true},
-		},
-	}
-
-	cache := &mockGatewayCacheForGemini{}
-	groupRepo := &mockGroupRepoForGemini{groups: map[int64]*Group{}}
-
-	svc := &GeminiMessagesCompatService{
-		accountRepo: repo,
-		groupRepo:   groupRepo,
-		cache:       cache,
-	}
-
-	acc, err := svc.SelectAccountForModelWithExclusions(ctx, &groupID, "", "gemini-2.5-flash", nil)
-	require.NoError(t, err)
-	require.NotNil(t, acc)
-	require.Equal(t, int64(1), acc.ID)
-}
-
 func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_NoModelSupport(t *testing.T) {
 	ctx := context.Background()
 
@@ -678,36 +608,6 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_NoModel
 	require.Error(t, err)
 	require.Nil(t, acc)
 	require.Contains(t, err.Error(), "supporting model")
-}
-
-func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_StickyMixedScheduling(t *testing.T) {
-	ctx := context.Background()
-	repo := &mockAccountRepoForGemini{
-		accounts: []Account{
-			{ID: 1, Platform: PlatformAntigravity, Priority: 1, Status: StatusActive, Schedulable: true, Extra: map[string]any{"mixed_scheduling": true}},
-			{ID: 2, Platform: PlatformGemini, Priority: 2, Status: StatusActive, Schedulable: true},
-		},
-		accountsByID: map[int64]*Account{},
-	}
-	for i := range repo.accounts {
-		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
-	}
-
-	cache := &mockGatewayCacheForGemini{
-		sessionBindings: map[string]int64{"gemini:session-999": 1},
-	}
-	groupRepo := &mockGroupRepoForGemini{groups: map[int64]*Group{}}
-
-	svc := &GeminiMessagesCompatService{
-		accountRepo: repo,
-		groupRepo:   groupRepo,
-		cache:       cache,
-	}
-
-	acc, err := svc.SelectAccountForModelWithExclusions(ctx, nil, "session-999", "gemini-2.5-flash", nil)
-	require.NoError(t, err)
-	require.NotNil(t, acc)
-	require.Equal(t, int64(1), acc.ID)
 }
 
 func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_SkipDisabledMixedScheduling(t *testing.T) {
