@@ -110,6 +110,8 @@ jobs:
           persist-credentials: false
       - name: Verify direct-main release workflow contract
         run: python3 scripts/validate-direct-main-release.py
+      - name: Test resource-aware pre-push hook
+        run: python3 tools/test_pre_push_hook.py
       - name: Check full GoReleaser configuration
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:

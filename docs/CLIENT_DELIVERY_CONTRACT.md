@@ -2,7 +2,10 @@
 
 ## Current public client mode
 
-SAIAI Client `1.1.0` is a `local-proxy` client. The Claude one-command path
+The current SAIAI Client uses `local-proxy` mode with manifest schema 1 and
+configuration schema 1. Resolve its exact patch version, tag, source commit,
+and manifest hash from the current private Ops ledger rather than this stable
+contract. The Claude one-command path
 installs or reuses one small binary, updates the managed Claude Code settings,
 creates or reuses a per-user installation CA, and starts or refreshes a
 per-user background proxy. Users then launch `claude` normally, including from
@@ -34,7 +37,7 @@ manifest. The manifest header is:
   "manifest_schema": 1,
   "client_mode": "local-proxy",
   "configuration_schema_version": 1,
-  "version": "1.1.0"
+  "version": "1.1.x"
 }
 ```
 

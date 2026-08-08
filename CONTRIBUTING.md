@@ -46,6 +46,10 @@ small values such as `GOMAXPROCS=2` and `-p 1`. Do not run full Go test, vet,
 lint, and build jobs concurrently. Let GitHub Actions provide the full matrix
 after focused local checks pass.
 
+The versioned `scripts/git-hooks/pre-push` hook provides a bounded changed-path
+gate. Install it explicitly if desired, and use `PREPUSH_DRY_RUN=1` to inspect
+its plan without running build checks. It never installs frontend dependencies.
+
 If an Ent schema changes, regenerate and commit the generated output:
 
 ```bash

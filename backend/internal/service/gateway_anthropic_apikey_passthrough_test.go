@@ -1197,15 +1197,19 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingTimeoutAfterClientDi
 	}
 
 	done := make(chan struct{})
+	releaseUpstream := make(chan struct{})
 	go func() {
 		defer close(done)
 		_, _ = pw.Write([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":9}}}` + "\n"))
-		// 保持上游连接静默，触发数据间隔超时分支。
-		time.Sleep(1500 * time.Millisecond)
+		// Keep the upstream open until the handler returns. Sleeping for a fixed
+		// duration races the timeout with EOF on loaded CI runners and can exercise
+		// the missing-terminal-event branch instead of the timeout branch.
+		<-releaseUpstream
 		_ = pw.Close()
 	}()
 
 	result, err := svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, &Account{ID: 7}, time.Now(), "claude-3-7-sonnet-20250219")
+	close(releaseUpstream)
 	_ = pr.Close()
 	<-done
 

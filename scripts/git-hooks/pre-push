@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Resource-aware quality gate for this repository.
+
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+remote_name="${1:-origin}"
+zero_sha="0000000000000000000000000000000000000000"
+need_backend=0
+need_frontend=0
+uncertain=0
+updates=0
+
+remote_default=""
+if [ -n "$remote_name" ]; then
+  remote_default="$(git symbolic-ref -q --short "refs/remotes/$remote_name/HEAD" || true)"
+  if [ -n "$remote_default" ] && ! git rev-parse --verify --quiet "${remote_default}^{commit}" >/dev/null; then
+    remote_default=""
+  fi
+  if [ -z "$remote_default" ] && git rev-parse --verify --quiet "refs/remotes/$remote_name/main^{commit}" >/dev/null; then
+    remote_default="$remote_name/main"
+  fi
+fi
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -n "${local_ref:-}" ] || continue
+  updates=1
+
+  if [ "$local_sha" = "$zero_sha" ]; then
+    continue
+  fi
+
+  base_sha="$remote_sha"
+  if [ "$remote_sha" = "$zero_sha" ]; then
+    if [[ "$local_ref" != refs/heads/* ]] || [ -z "$remote_default" ]; then
+      uncertain=1
+      continue
+    fi
+    if ! base_sha="$(git merge-base "$local_sha" "$remote_default")"; then
+      uncertain=1
+      continue
+    fi
+  fi
+
+  if git diff --quiet "$base_sha" "$local_sha" -- backend; then
+    :
+  elif [ "$?" -eq 1 ]; then
+    need_backend=1
+  else
+    uncertain=1
+  fi
+  if git diff --quiet "$base_sha" "$local_sha" -- frontend; then
+    :
+  elif [ "$?" -eq 1 ]; then
+    need_frontend=1
+  else
+    uncertain=1
+  fi
+done
+
+if [ "$updates" -eq 0 ]; then
+  uncertain=1
+fi
+if [ "$uncertain" -eq 1 ]; then
+  [ -d "$repo_root/backend" ] && need_backend=1
+  [ -d "$repo_root/frontend" ] && need_frontend=1
+fi
+
+if [ "$need_backend" -eq 0 ] && [ "$need_frontend" -eq 0 ]; then
+  echo "[pre-push] no backend/frontend changes; skipping local build checks"
+  exit 0
+fi
+
+echo "[pre-push] plan: backend=$need_backend frontend=$need_frontend uncertain=$uncertain"
+if [ "${PREPUSH_DRY_RUN:-0}" = "1" ]; then
+  exit 0
+fi
+
+start="$(date +%s)"
+go_max_procs="${GOMAXPROCS:-2}"
+go_parallelism="${PREPUSH_GO_PARALLELISM:-1}"
+
+if [ "$need_backend" -eq 1 ]; then
+  echo "[pre-push] backend: serial go build + vet"
+  if ! (
+    cd "$repo_root/backend"
+    GOMAXPROCS="$go_max_procs" go build -p "$go_parallelism" ./... 2>&1 | sed 's/^/  /'
+  ); then
+    echo "[pre-push] ERROR: go build failed" >&2
+    exit 1
+  fi
+  if ! (
+    cd "$repo_root/backend"
+    GOMAXPROCS="$go_max_procs" go vet -p "$go_parallelism" ./... 2>&1 | sed 's/^/  /'
+  ); then
+    echo "[pre-push] ERROR: go vet failed" >&2
+    exit 1
+  fi
+fi
+
+if [ "$need_frontend" -eq 1 ]; then
+  echo "[pre-push] frontend: pnpm typecheck"
+  if ! (cd "$repo_root/frontend" && pnpm typecheck 2>&1 | sed 's/^/  /'); then
+    echo "[pre-push] ERROR: frontend typecheck failed" >&2
+    echo "[pre-push] Install locked dependencies first; the hook never installs them automatically." >&2
+    exit 1
+  fi
+fi
+
+if [ "${PREPUSH_TESTS:-0}" = "1" ] && [ "$need_backend" -eq 1 ]; then
+  echo "[pre-push] backend: serial go test -short"
+  if ! (
+    cd "$repo_root/backend"
+    GOMAXPROCS="$go_max_procs" go test -p "$go_parallelism" -short ./... 2>&1 | tail -5 | sed 's/^/  /'
+  ); then
+    echo "[pre-push] ERROR: go test failed" >&2
+    exit 1
+  fi
+fi
+
+end="$(date +%s)"
+echo "[pre-push] passed in $((end-start))s"
