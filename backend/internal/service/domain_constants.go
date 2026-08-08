@@ -1,6 +1,16 @@
 package service
 
-import "github.com/Wei-Shaw/sub2api/internal/domain"
+import (
+	"errors"
+
+	"github.com/Wei-Shaw/sub2api/internal/domain"
+)
+
+var ErrPlatformRetired = domain.ErrPlatformRetired
+
+// ErrSoraStorageQuotaExceeded is retained for the historical repository
+// contract while Sora storage columns remain in the schema.
+var ErrSoraStorageQuotaExceeded = errors.New("sora storage quota exceeded")
 
 // Status constants
 const (
@@ -11,6 +21,10 @@ const (
 	StatusUsed     = domain.StatusUsed
 	StatusExpired  = domain.StatusExpired
 )
+
+func IsRetiredPlatform(platform string) bool {
+	return domain.IsRetiredPlatform(platform)
+}
 
 // Role constants
 const (

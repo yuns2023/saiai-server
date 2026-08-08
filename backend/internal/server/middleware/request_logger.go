@@ -54,10 +54,6 @@ func shouldExposeLocalRequestID(path string) bool {
 		return false
 	case path == "/responses" || strings.HasPrefix(path, "/responses/"):
 		return false
-	case path == "/antigravity" || strings.HasPrefix(path, "/antigravity/"):
-		return false
-	case path == "/sora/v1" || strings.HasPrefix(path, "/sora/v1/"):
-		return false
 	default:
 		return true
 	}

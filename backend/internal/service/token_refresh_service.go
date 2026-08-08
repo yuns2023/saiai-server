@@ -42,7 +42,7 @@ func NewTokenRefreshService(
 	oauthService *OAuthService,
 	openaiOAuthService *OpenAIOAuthService,
 	geminiOAuthService *GeminiOAuthService,
-	antigravityOAuthService *AntigravityOAuthService,
+	_ *AntigravityOAuthService,
 	cacheInvalidator TokenCacheInvalidator,
 	schedulerCache SchedulerCache,
 	cfg *config.Config,
@@ -58,19 +58,16 @@ func NewTokenRefreshService(
 		stopCh:           make(chan struct{}),
 	}
 
-	openAIRefresher := NewOpenAITokenRefresher(openaiOAuthService, accountRepo)
-	openAIRefresher.SetSyncLinkedSoraAccounts(cfg.TokenRefresh.SyncLinkedSoraAccounts)
+	openAIRefresher := NewOpenAITokenRefresher(openaiOAuthService)
 
 	claudeRefresher := NewClaudeTokenRefresher(oauthService)
 	geminiRefresher := NewGeminiTokenRefresher(geminiOAuthService)
-	agRefresher := NewAntigravityTokenRefresher(antigravityOAuthService)
 
 	// 注册平台特定的刷新器（TokenRefresher 接口）
 	s.refreshers = []TokenRefresher{
 		claudeRefresher,
 		openAIRefresher,
 		geminiRefresher,
-		agRefresher,
 	}
 
 	// 注册对应的 OAuthRefreshExecutor（带 CacheKey 方法）
@@ -78,22 +75,9 @@ func NewTokenRefreshService(
 		claudeRefresher,
 		openAIRefresher,
 		geminiRefresher,
-		agRefresher,
 	}
 
 	return s
-}
-
-// SetSoraAccountRepo 设置 Sora 账号扩展表仓储
-// 用于在 OpenAI Token 刷新时同步更新 sora_accounts 表
-// 需要在 Start() 之前调用
-func (s *TokenRefreshService) SetSoraAccountRepo(repo SoraAccountRepository) {
-	// 将 soraAccountRepo 注入到 OpenAITokenRefresher
-	for _, refresher := range s.refreshers {
-		if openaiRefresher, ok := refresher.(*OpenAITokenRefresher); ok {
-			openaiRefresher.SetSoraAccountRepo(repo)
-		}
-	}
 }
 
 // SetPrivacyDeps 注入 OpenAI privacy opt-out 所需依赖
@@ -182,6 +166,10 @@ func (s *TokenRefreshService) processRefresh() {
 
 	for i := range accounts {
 		account := &accounts[i]
+		if IsRetiredPlatform(account.Platform) {
+			skipped++
+			continue
+		}
 
 		// 遍历所有刷新器，找到能处理此账号的
 		for idx, refresher := range s.refreshers {

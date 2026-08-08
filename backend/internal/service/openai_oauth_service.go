@@ -459,10 +459,10 @@ func sanitizeSessionToken(raw string) string {
 	return strings.TrimSpace(token)
 }
 
-// RefreshAccountToken refreshes token for an OpenAI/Sora OAuth account
+// RefreshAccountToken refreshes token for an OpenAI OAuth account.
 func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *Account) (*OpenAITokenInfo, error) {
-	if account.Platform != PlatformOpenAI && account.Platform != PlatformSora {
-		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT", "account is not an OpenAI/Sora account")
+	if account.Platform != PlatformOpenAI {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT", "account is not an OpenAI account")
 	}
 	if account.Type != AccountTypeOAuth {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT_TYPE", "account is not an OAuth account")
@@ -543,10 +543,5 @@ func (s *OpenAIOAuthService) resolveProxyURL(ctx context.Context, proxyID *int64
 }
 
 func normalizeOpenAIOAuthPlatform(platform string) string {
-	switch strings.ToLower(strings.TrimSpace(platform)) {
-	case PlatformSora:
-		return openai.OAuthPlatformSora
-	default:
-		return openai.OAuthPlatformOpenAI
-	}
+	return openai.OAuthPlatformOpenAI
 }

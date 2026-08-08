@@ -1,5 +1,14 @@
 package domain
 
+import infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+
+// ErrPlatformRetired is returned when a caller attempts to create, modify, or
+// route traffic through a provider that is retained only for historical data.
+var ErrPlatformRetired = infraerrors.BadRequest(
+	"PLATFORM_RETIRED",
+	"this platform has been retired and is no longer available",
+)
+
 // Status constants
 const (
 	StatusActive   = "active"
@@ -24,6 +33,18 @@ const (
 	PlatformAntigravity = "antigravity"
 	PlatformSora        = "sora"
 )
+
+// IsRetiredPlatform reports whether platform is retained only for historical
+// database compatibility. Retired platforms must never receive new traffic or
+// be accepted by mutating APIs.
+func IsRetiredPlatform(platform string) bool {
+	switch platform {
+	case PlatformAntigravity, PlatformSora:
+		return true
+	default:
+		return false
+	}
+}
 
 // Account type constants
 const (

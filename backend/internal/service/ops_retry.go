@@ -556,6 +556,9 @@ func (s *OpsService) executeWithAccount(ctx context.Context, reqType opsRetryReq
 	if account == nil {
 		return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "missing account"}
 	}
+	if IsRetiredPlatform(account.Platform) {
+		return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: ErrPlatformRetired.Error()}
+	}
 
 	c, w := newOpsRetryContext(ctx, errorLog)
 
@@ -567,7 +570,7 @@ func (s *OpsService) executeWithAccount(ctx context.Context, reqType opsRetryReq
 		}
 		_, err = s.openAIGatewayService.Forward(ctx, c, account, body)
 	case opsRetryTypeGeminiV1B:
-		if s.geminiCompatService == nil || s.antigravityGatewayService == nil {
+		if s.geminiCompatService == nil {
 			return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "gemini services not available"}
 		}
 		modelName := strings.TrimSpace(errorLog.Model)

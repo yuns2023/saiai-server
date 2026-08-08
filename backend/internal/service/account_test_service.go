@@ -188,6 +188,9 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
+	if IsRetiredPlatform(account.Platform) {
+		return s.sendErrorAndEnd(c, ErrPlatformRetired.Error())
+	}
 
 	// Route to platform-specific test method
 	if account.IsOpenAI() {

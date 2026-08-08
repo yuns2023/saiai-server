@@ -2060,9 +2060,7 @@ const exclusiveOptions = computed(() => [
 const platformOptions = computed(() => [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'sora', label: 'Sora' }
+  { value: 'gemini', label: 'Gemini' }
 ])
 
 const platformFilterOptions = computed(() => [

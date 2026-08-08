@@ -151,9 +151,7 @@ func extractAPIKeyForGoogle(c *gin.Context) string {
 	return ""
 }
 
-func allowGoogleQueryKey(path string) bool {
-	return strings.HasPrefix(path, "/v1beta") || strings.HasPrefix(path, "/antigravity/v1beta")
-}
+func allowGoogleQueryKey(path string) bool { return strings.HasPrefix(path, "/v1beta") }
 
 func abortWithGoogleError(c *gin.Context, status int, message string) {
 	c.JSON(status, gin.H{

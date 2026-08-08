@@ -19,9 +19,6 @@ type OpenAIOAuthHandler struct {
 }
 
 func oauthPlatformFromPath(c *gin.Context) string {
-	if strings.Contains(c.FullPath(), "/admin/sora/") {
-		return service.PlatformSora
-	}
 	return service.PlatformOpenAI
 }
 
@@ -276,11 +273,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		name = tokenInfo.Email
 	}
 	if name == "" {
-		if platform == service.PlatformSora {
-			name = "Sora OAuth Account"
-		} else {
-			name = "OpenAI OAuth Account"
-		}
+		name = "OpenAI OAuth Account"
 	}
 
 	// Create account

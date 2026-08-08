@@ -23,11 +23,6 @@ func RegisterGatewayRoutes(
 	cfg *config.Config,
 ) {
 	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
-	soraMaxBodySize := cfg.Gateway.SoraMaxBodySize
-	if soraMaxBodySize <= 0 {
-		soraMaxBodySize = cfg.Gateway.MaxBodySize
-	}
-	soraBodyLimit := middleware.RequestBodyLimit(soraMaxBodySize)
 	clientRequestID := middleware.ClientRequestID()
 	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
 	endpointNorm := handler.InboundEndpointMiddleware()
@@ -43,6 +38,7 @@ func RegisterGatewayRoutes(
 	gateway.Use(opsErrorLogger)
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
+	gateway.Use(rejectRetiredGroupPlatform)
 	gateway.Use(requireGroupAnthropic)
 	{
 		// /v1/messages: auto-route based on group platform
@@ -85,6 +81,7 @@ func RegisterGatewayRoutes(
 	gemini.Use(opsErrorLogger)
 	gemini.Use(endpointNorm)
 	gemini.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
+	gemini.Use(rejectRetiredGroupPlatform)
 	gemini.Use(requireGroupGoogle)
 	{
 		gemini.GET("/models", h.Gateway.GeminiV1BetaListModels)
@@ -94,66 +91,22 @@ func RegisterGatewayRoutes(
 	}
 
 	// OpenAI Responses API（不带v1前缀的别名）
-	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.OpenAIGateway.Responses)
-	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.OpenAIGateway.Responses)
-	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.OpenAIGateway.ResponsesWebSocket)
-	// /chat/completions 别名同样停用（除 Sora 路由下保留为独立功能）。
+	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.Responses)
+	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.Responses)
+	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.ResponsesWebSocket)
+}
 
-	// Antigravity 模型列表
-	r.GET("/antigravity/models", gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, h.Gateway.AntigravityModels)
-
-	// Antigravity 专用路由（仅使用 antigravity 账户，不混合调度）
-	antigravityV1 := r.Group("/antigravity/v1")
-	antigravityV1.Use(bodyLimit)
-	antigravityV1.Use(clientRequestID)
-	antigravityV1.Use(opsErrorLogger)
-	antigravityV1.Use(endpointNorm)
-	antigravityV1.Use(middleware.ForcePlatform(service.PlatformAntigravity))
-	antigravityV1.Use(gin.HandlerFunc(apiKeyAuth))
-	antigravityV1.Use(requireGroupAnthropic)
-	{
-		antigravityV1.POST("/messages", h.Gateway.Messages)
-		antigravityV1.POST("/messages/count_tokens", h.Gateway.CountTokens)
-		antigravityV1.GET("/models", h.Gateway.AntigravityModels)
-		antigravityV1.GET("/usage", h.Gateway.Usage)
+func rejectRetiredGroupPlatform(c *gin.Context) {
+	if service.IsRetiredPlatform(getGroupPlatform(c)) {
+		c.AbortWithStatusJSON(http.StatusGone, gin.H{
+			"error": gin.H{
+				"type":    "platform_retired",
+				"message": "This platform has been retired and is no longer available.",
+			},
+		})
+		return
 	}
-
-	antigravityV1Beta := r.Group("/antigravity/v1beta")
-	antigravityV1Beta.Use(bodyLimit)
-	antigravityV1Beta.Use(clientRequestID)
-	antigravityV1Beta.Use(opsErrorLogger)
-	antigravityV1Beta.Use(endpointNorm)
-	antigravityV1Beta.Use(middleware.ForcePlatform(service.PlatformAntigravity))
-	antigravityV1Beta.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
-	antigravityV1Beta.Use(requireGroupGoogle)
-	{
-		antigravityV1Beta.GET("/models", h.Gateway.GeminiV1BetaListModels)
-		antigravityV1Beta.GET("/models/:model", h.Gateway.GeminiV1BetaGetModel)
-		antigravityV1Beta.POST("/models/*modelAction", h.Gateway.GeminiV1BetaModels)
-	}
-
-	// Sora 专用路由（强制使用 sora 平台）
-	soraV1 := r.Group("/sora/v1")
-	soraV1.Use(soraBodyLimit)
-	soraV1.Use(clientRequestID)
-	soraV1.Use(opsErrorLogger)
-	soraV1.Use(endpointNorm)
-	soraV1.Use(middleware.ForcePlatform(service.PlatformSora))
-	soraV1.Use(gin.HandlerFunc(apiKeyAuth))
-	soraV1.Use(requireGroupAnthropic)
-	{
-		soraV1.POST("/chat/completions", h.SoraGateway.ChatCompletions)
-		soraV1.GET("/models", h.Gateway.Models)
-	}
-
-	// Sora 媒体代理（可选 API Key 验证）
-	if cfg.Gateway.SoraMediaRequireAPIKey {
-		r.GET("/sora/media/*filepath", gin.HandlerFunc(apiKeyAuth), h.SoraGateway.MediaProxy)
-	} else {
-		r.GET("/sora/media/*filepath", h.SoraGateway.MediaProxy)
-	}
-	// Sora 媒体代理（签名 URL，无需 API Key）
-	r.GET("/sora/media-signed/*filepath", h.SoraGateway.MediaProxySigned)
+	c.Next()
 }
 
 // getGroupPlatform extracts the group platform from the API Key stored in context.

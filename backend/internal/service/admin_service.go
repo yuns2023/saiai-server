@@ -445,7 +445,6 @@ type adminServiceImpl struct {
 	userRepo             UserRepository
 	groupRepo            GroupRepository
 	accountRepo          AccountRepository
-	soraAccountRepo      SoraAccountRepository // Sora 账号扩展表仓储
 	proxyRepo            ProxyRepository
 	apiKeyRepo           APIKeyRepository
 	redeemCodeRepo       RedeemCodeRepository
@@ -470,7 +469,6 @@ func NewAdminService(
 	userRepo UserRepository,
 	groupRepo GroupRepository,
 	accountRepo AccountRepository,
-	soraAccountRepo SoraAccountRepository,
 	proxyRepo ProxyRepository,
 	apiKeyRepo APIKeyRepository,
 	redeemCodeRepo RedeemCodeRepository,
@@ -489,7 +487,6 @@ func NewAdminService(
 		userRepo:             userRepo,
 		groupRepo:            groupRepo,
 		accountRepo:          accountRepo,
-		soraAccountRepo:      soraAccountRepo,
 		proxyRepo:            proxyRepo,
 		apiKeyRepo:           apiKeyRepo,
 		redeemCodeRepo:       redeemCodeRepo,
@@ -842,6 +839,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	if platform == "" {
 		platform = PlatformAnthropic
 	}
+	if IsRetiredPlatform(platform) {
+		return nil, ErrPlatformRetired
+	}
 
 	subscriptionType := input.SubscriptionType
 	if subscriptionType == "" {
@@ -1055,6 +1055,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	group, err := s.groupRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if IsRetiredPlatform(group.Platform) || IsRetiredPlatform(input.Platform) {
+		return nil, ErrPlatformRetired
 	}
 
 	if input.Name != "" {
@@ -1507,6 +1510,9 @@ func (s *adminServiceImpl) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if IsRetiredPlatform(input.Platform) {
+		return nil, ErrPlatformRetired
+	}
 	applyClaudeOAuthSingleDeviceDefaults(input.Platform, input.Type, input.Extra)
 
 	// 绑定分组
@@ -1595,18 +1601,6 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		return nil, err
 	}
 
-	// 如果是 Sora 平台账号，自动创建 sora_accounts 扩展表记录
-	if account.Platform == PlatformSora && s.soraAccountRepo != nil {
-		soraUpdates := map[string]any{
-			"access_token":  account.GetCredential("access_token"),
-			"refresh_token": account.GetCredential("refresh_token"),
-		}
-		if err := s.soraAccountRepo.Upsert(ctx, account.ID, soraUpdates); err != nil {
-			// 只记录警告日志，不阻塞账号创建
-			logger.LegacyPrintf("service.admin", "[AdminService] 创建 sora_accounts 记录失败: account_id=%d err=%v", account.ID, err)
-		}
-	}
-
 	// 绑定分组
 	if len(groupIDs) > 0 {
 		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
@@ -1621,6 +1615,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if IsRetiredPlatform(account.Platform) {
+		return nil, ErrPlatformRetired
 	}
 	wasOveragesEnabled := account.IsOveragesEnabled()
 
@@ -1789,6 +1786,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	accountByID := make(map[int64]*Account, len(accountsForPinnedDefaults))
 	for _, account := range accountsForPinnedDefaults {
 		if account != nil {
+			if IsRetiredPlatform(account.Platform) {
+				return nil, ErrPlatformRetired
+			}
 			accountByID[account.ID] = account
 		}
 	}
@@ -1987,6 +1987,9 @@ func (s *adminServiceImpl) RefreshAccountCredentials(ctx context.Context, id int
 	if err != nil {
 		return nil, err
 	}
+	if IsRetiredPlatform(account.Platform) {
+		return nil, ErrPlatformRetired
+	}
 	// TODO: Implement refresh logic
 	return account, nil
 }
@@ -2003,6 +2006,13 @@ func (s *adminServiceImpl) SetAccountError(ctx context.Context, id int64, errorM
 }
 
 func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error) {
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if IsRetiredPlatform(account.Platform) {
+		return nil, ErrPlatformRetired
+	}
 	if err := s.accountRepo.SetSchedulable(ctx, id, schedulable); err != nil {
 		return nil, err
 	}

@@ -1454,45 +1454,12 @@ func setDefaults() {
 	viper.SetDefault("gateway.tls_fingerprint.enabled", true)
 	viper.SetDefault("concurrency.ping_interval", 10)
 
-	// Sora 直连配置
-	viper.SetDefault("sora.client.base_url", "https://sora.chatgpt.com/backend")
-	viper.SetDefault("sora.client.timeout_seconds", 120)
-	viper.SetDefault("sora.client.max_retries", 3)
-	viper.SetDefault("sora.client.cloudflare_challenge_cooldown_seconds", 900)
-	viper.SetDefault("sora.client.poll_interval_seconds", 2)
-	viper.SetDefault("sora.client.max_poll_attempts", 600)
-	viper.SetDefault("sora.client.recent_task_limit", 50)
-	viper.SetDefault("sora.client.recent_task_limit_max", 200)
-	viper.SetDefault("sora.client.debug", false)
-	viper.SetDefault("sora.client.use_openai_token_provider", false)
-	viper.SetDefault("sora.client.headers", map[string]string{})
-	viper.SetDefault("sora.client.user_agent", "Sora/1.2026.007 (Android 15; 24122RKC7C; build 2600700)")
-	viper.SetDefault("sora.client.disable_tls_fingerprint", false)
-	viper.SetDefault("sora.client.curl_cffi_sidecar.enabled", true)
-	viper.SetDefault("sora.client.curl_cffi_sidecar.base_url", "http://sora-curl-cffi-sidecar:8080")
-	viper.SetDefault("sora.client.curl_cffi_sidecar.impersonate", "chrome131")
-	viper.SetDefault("sora.client.curl_cffi_sidecar.timeout_seconds", 60)
-	viper.SetDefault("sora.client.curl_cffi_sidecar.session_reuse_enabled", true)
-	viper.SetDefault("sora.client.curl_cffi_sidecar.session_ttl_seconds", 3600)
-
-	viper.SetDefault("sora.storage.type", "local")
-	viper.SetDefault("sora.storage.local_path", "")
-	viper.SetDefault("sora.storage.fallback_to_upstream", true)
-	viper.SetDefault("sora.storage.max_concurrent_downloads", 4)
-	viper.SetDefault("sora.storage.download_timeout_seconds", 120)
-	viper.SetDefault("sora.storage.max_download_bytes", int64(200<<20))
-	viper.SetDefault("sora.storage.debug", false)
-	viper.SetDefault("sora.storage.cleanup.enabled", true)
-	viper.SetDefault("sora.storage.cleanup.retention_days", 7)
-	viper.SetDefault("sora.storage.cleanup.schedule", "0 3 * * *")
-
 	// TokenRefresh
 	viper.SetDefault("token_refresh.enabled", true)
 	viper.SetDefault("token_refresh.check_interval_minutes", 5)        // 每5分钟检查一次
 	viper.SetDefault("token_refresh.refresh_before_expiry_hours", 0.5) // 提前30分钟刷新（适配Google 1小时token）
 	viper.SetDefault("token_refresh.max_retries", 3)                   // 最多重试3次
 	viper.SetDefault("token_refresh.retry_backoff_seconds", 2)         // 重试退避基础2秒
-	viper.SetDefault("token_refresh.sync_linked_sora_accounts", false) // 默认不跨平台覆盖 Sora token
 
 	// Gemini OAuth - configure via environment variables or config file
 	// GEMINI_OAUTH_CLIENT_ID and GEMINI_OAUTH_CLIENT_SECRET
@@ -1867,86 +1834,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ProxyProbeResponseReadMaxBytes <= 0 {
 		return fmt.Errorf("gateway.proxy_probe_response_read_max_bytes must be positive")
-	}
-	if c.Gateway.SoraMaxBodySize < 0 {
-		return fmt.Errorf("gateway.sora_max_body_size must be non-negative")
-	}
-	if c.Gateway.SoraStreamTimeoutSeconds < 0 {
-		return fmt.Errorf("gateway.sora_stream_timeout_seconds must be non-negative")
-	}
-	if c.Gateway.SoraRequestTimeoutSeconds < 0 {
-		return fmt.Errorf("gateway.sora_request_timeout_seconds must be non-negative")
-	}
-	if c.Gateway.SoraMediaSignedURLTTLSeconds < 0 {
-		return fmt.Errorf("gateway.sora_media_signed_url_ttl_seconds must be non-negative")
-	}
-	if mode := strings.TrimSpace(strings.ToLower(c.Gateway.SoraStreamMode)); mode != "" {
-		switch mode {
-		case "force", "error":
-		default:
-			return fmt.Errorf("gateway.sora_stream_mode must be one of: force/error")
-		}
-	}
-	if c.Sora.Client.TimeoutSeconds < 0 {
-		return fmt.Errorf("sora.client.timeout_seconds must be non-negative")
-	}
-	if c.Sora.Client.MaxRetries < 0 {
-		return fmt.Errorf("sora.client.max_retries must be non-negative")
-	}
-	if c.Sora.Client.CloudflareChallengeCooldownSeconds < 0 {
-		return fmt.Errorf("sora.client.cloudflare_challenge_cooldown_seconds must be non-negative")
-	}
-	if c.Sora.Client.PollIntervalSeconds < 0 {
-		return fmt.Errorf("sora.client.poll_interval_seconds must be non-negative")
-	}
-	if c.Sora.Client.MaxPollAttempts < 0 {
-		return fmt.Errorf("sora.client.max_poll_attempts must be non-negative")
-	}
-	if c.Sora.Client.RecentTaskLimit < 0 {
-		return fmt.Errorf("sora.client.recent_task_limit must be non-negative")
-	}
-	if c.Sora.Client.RecentTaskLimitMax < 0 {
-		return fmt.Errorf("sora.client.recent_task_limit_max must be non-negative")
-	}
-	if c.Sora.Client.RecentTaskLimitMax > 0 && c.Sora.Client.RecentTaskLimit > 0 &&
-		c.Sora.Client.RecentTaskLimitMax < c.Sora.Client.RecentTaskLimit {
-		c.Sora.Client.RecentTaskLimitMax = c.Sora.Client.RecentTaskLimit
-	}
-	if c.Sora.Client.CurlCFFISidecar.TimeoutSeconds < 0 {
-		return fmt.Errorf("sora.client.curl_cffi_sidecar.timeout_seconds must be non-negative")
-	}
-	if c.Sora.Client.CurlCFFISidecar.SessionTTLSeconds < 0 {
-		return fmt.Errorf("sora.client.curl_cffi_sidecar.session_ttl_seconds must be non-negative")
-	}
-	if !c.Sora.Client.CurlCFFISidecar.Enabled {
-		return fmt.Errorf("sora.client.curl_cffi_sidecar.enabled must be true")
-	}
-	if strings.TrimSpace(c.Sora.Client.CurlCFFISidecar.BaseURL) == "" {
-		return fmt.Errorf("sora.client.curl_cffi_sidecar.base_url is required")
-	}
-	if c.Sora.Storage.MaxConcurrentDownloads < 0 {
-		return fmt.Errorf("sora.storage.max_concurrent_downloads must be non-negative")
-	}
-	if c.Sora.Storage.DownloadTimeoutSeconds < 0 {
-		return fmt.Errorf("sora.storage.download_timeout_seconds must be non-negative")
-	}
-	if c.Sora.Storage.MaxDownloadBytes < 0 {
-		return fmt.Errorf("sora.storage.max_download_bytes must be non-negative")
-	}
-	if c.Sora.Storage.Cleanup.Enabled {
-		if c.Sora.Storage.Cleanup.RetentionDays <= 0 {
-			return fmt.Errorf("sora.storage.cleanup.retention_days must be positive")
-		}
-		if strings.TrimSpace(c.Sora.Storage.Cleanup.Schedule) == "" {
-			return fmt.Errorf("sora.storage.cleanup.schedule is required when cleanup is enabled")
-		}
-	} else {
-		if c.Sora.Storage.Cleanup.RetentionDays < 0 {
-			return fmt.Errorf("sora.storage.cleanup.retention_days must be non-negative")
-		}
-	}
-	if storageType := strings.TrimSpace(strings.ToLower(c.Sora.Storage.Type)); storageType != "" && storageType != "local" {
-		return fmt.Errorf("sora.storage.type must be 'local'")
 	}
 	if strings.TrimSpace(c.Gateway.ConnectionPoolIsolation) != "" {
 		switch c.Gateway.ConnectionPoolIsolation {

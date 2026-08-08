@@ -313,6 +313,9 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 	if err != nil {
 		return nil, fmt.Errorf("get account failed: %w", err)
 	}
+	if IsRetiredPlatform(account.Platform) {
+		return nil, ErrPlatformRetired
+	}
 
 	if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
 		usage, err := s.getOpenAIUsage(ctx, account)
