@@ -335,14 +335,9 @@ export async function resetPassword(request: ResetPasswordRequest): Promise<Rese
   return data
 }
 
-/**
- * Complete LinuxDo OAuth registration by supplying an invitation code
- * @param pendingOAuthToken - Short-lived JWT from the OAuth callback
- * @param invitationCode - Invitation code entered by the user
- * @returns Token pair on success
- */
-export async function completeLinuxDoOAuthRegistration(
-  pendingOAuthToken: string,
+export async function completeLoginOAuthRegistration(
+  provider: 'github' | 'google',
+  registrationToken: string,
   invitationCode: string
 ): Promise<{ access_token: string; refresh_token: string; expires_in: number; token_type: string }> {
   const { data } = await apiClient.post<{
@@ -350,11 +345,27 @@ export async function completeLinuxDoOAuthRegistration(
     refresh_token: string
     expires_in: number
     token_type: string
-  }>('/auth/oauth/linuxdo/complete-registration', {
-    pending_oauth_token: pendingOAuthToken,
+  }>(`/auth/oauth/${provider}/complete-registration`, {
+    oauth_registration_token: registrationToken,
     invitation_code: invitationCode
   })
   return data
+}
+
+export async function getLoginOAuthConnections(): Promise<Array<'github' | 'google'>> {
+  const { data } = await apiClient.get<{ providers: Array<'github' | 'google'> }>('/auth/oauth/connections')
+  return data.providers
+}
+
+export async function startLoginOAuthLink(
+  provider: 'github' | 'google',
+  credentials: { password?: string; totp_code?: string }
+): Promise<string> {
+  const { data } = await apiClient.post<{ authorization_url: string }>(
+    `/auth/oauth/${provider}/link/start?redirect=${encodeURIComponent('/profile')}`,
+    credentials
+  )
+  return data.authorization_url
 }
 
 export const authAPI = {
@@ -380,7 +391,9 @@ export const authAPI = {
   resetPassword,
   refreshToken,
   revokeAllSessions,
-  completeLinuxDoOAuthRegistration
+  completeLoginOAuthRegistration,
+  getLoginOAuthConnections,
+  startLoginOAuthLink
 }
 
 export default authAPI

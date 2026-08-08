@@ -73,59 +73,55 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 	}
 
 	response.Success(c, dto.SystemSettings{
-		RegistrationEnabled:                  settings.RegistrationEnabled,
-		EmailVerifyEnabled:                   settings.EmailVerifyEnabled,
-		RegistrationEmailSuffixWhitelist:     settings.RegistrationEmailSuffixWhitelist,
-		PromoCodeEnabled:                     settings.PromoCodeEnabled,
-		PasswordResetEnabled:                 settings.PasswordResetEnabled,
-		FrontendURL:                          settings.FrontendURL,
-		InvitationCodeEnabled:                settings.InvitationCodeEnabled,
-		TotpEnabled:                          settings.TotpEnabled,
-		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
-		SMTPHost:                             settings.SMTPHost,
-		SMTPPort:                             settings.SMTPPort,
-		SMTPUsername:                         settings.SMTPUsername,
-		SMTPPasswordConfigured:               settings.SMTPPasswordConfigured,
-		SMTPFrom:                             settings.SMTPFrom,
-		SMTPFromName:                         settings.SMTPFromName,
-		SMTPUseTLS:                           settings.SMTPUseTLS,
-		TurnstileEnabled:                     settings.TurnstileEnabled,
-		TurnstileSiteKey:                     settings.TurnstileSiteKey,
-		TurnstileSecretKeyConfigured:         settings.TurnstileSecretKeyConfigured,
-		LinuxDoConnectEnabled:                settings.LinuxDoConnectEnabled,
-		LinuxDoConnectClientID:               settings.LinuxDoConnectClientID,
-		LinuxDoConnectClientSecretConfigured: settings.LinuxDoConnectClientSecretConfigured,
-		LinuxDoConnectRedirectURL:            settings.LinuxDoConnectRedirectURL,
-		SiteName:                             settings.SiteName,
-		SiteLogo:                             settings.SiteLogo,
-		SiteSubtitle:                         settings.SiteSubtitle,
-		APIBaseURL:                           settings.APIBaseURL,
-		ContactInfo:                          settings.ContactInfo,
-		DocURL:                               settings.DocURL,
-		HomeContent:                          settings.HomeContent,
-		HideCcsImportButton:                  settings.HideCcsImportButton,
-		PurchaseSubscriptionEnabled:          settings.PurchaseSubscriptionEnabled,
-		PurchaseSubscriptionURL:              settings.PurchaseSubscriptionURL,
-		SoraClientEnabled:                    settings.SoraClientEnabled,
-		CustomMenuItems:                      dto.ParseCustomMenuItems(settings.CustomMenuItems),
-		DefaultConcurrency:                   settings.DefaultConcurrency,
-		DefaultBalance:                       settings.DefaultBalance,
-		DefaultSubscriptions:                 defaultSubscriptions,
-		EnableModelFallback:                  settings.EnableModelFallback,
-		FallbackModelAnthropic:               settings.FallbackModelAnthropic,
-		FallbackModelOpenAI:                  settings.FallbackModelOpenAI,
-		FallbackModelGemini:                  settings.FallbackModelGemini,
-		FallbackModelAntigravity:             settings.FallbackModelAntigravity,
-		EnableIdentityPatch:                  settings.EnableIdentityPatch,
-		IdentityPatchPrompt:                  settings.IdentityPatchPrompt,
-		OpsMonitoringEnabled:                 opsEnabled && settings.OpsMonitoringEnabled,
-		OpsRealtimeMonitoringEnabled:         settings.OpsRealtimeMonitoringEnabled,
-		OpsQueryModeDefault:                  settings.OpsQueryModeDefault,
-		OpsMetricsIntervalSeconds:            settings.OpsMetricsIntervalSeconds,
-		MinClaudeCodeVersion:                 settings.MinClaudeCodeVersion,
-		MaxClaudeCodeVersion:                 settings.MaxClaudeCodeVersion,
-		AllowUngroupedKeyScheduling:          settings.AllowUngroupedKeyScheduling,
-		BackendModeEnabled:                   settings.BackendModeEnabled,
+		RegistrationEnabled:              settings.RegistrationEnabled,
+		EmailVerifyEnabled:               settings.EmailVerifyEnabled,
+		RegistrationEmailSuffixWhitelist: settings.RegistrationEmailSuffixWhitelist,
+		PromoCodeEnabled:                 settings.PromoCodeEnabled,
+		PasswordResetEnabled:             settings.PasswordResetEnabled,
+		FrontendURL:                      settings.FrontendURL,
+		InvitationCodeEnabled:            settings.InvitationCodeEnabled,
+		TotpEnabled:                      settings.TotpEnabled,
+		TotpEncryptionKeyConfigured:      h.settingService.IsTotpEncryptionKeyConfigured(),
+		SMTPHost:                         settings.SMTPHost,
+		SMTPPort:                         settings.SMTPPort,
+		SMTPUsername:                     settings.SMTPUsername,
+		SMTPPasswordConfigured:           settings.SMTPPasswordConfigured,
+		SMTPFrom:                         settings.SMTPFrom,
+		SMTPFromName:                     settings.SMTPFromName,
+		SMTPUseTLS:                       settings.SMTPUseTLS,
+		TurnstileEnabled:                 settings.TurnstileEnabled,
+		TurnstileSiteKey:                 settings.TurnstileSiteKey,
+		TurnstileSecretKeyConfigured:     settings.TurnstileSecretKeyConfigured,
+		SiteName:                         settings.SiteName,
+		SiteLogo:                         settings.SiteLogo,
+		SiteSubtitle:                     settings.SiteSubtitle,
+		APIBaseURL:                       settings.APIBaseURL,
+		ContactInfo:                      settings.ContactInfo,
+		DocURL:                           settings.DocURL,
+		HomeContent:                      settings.HomeContent,
+		HideCcsImportButton:              settings.HideCcsImportButton,
+		PurchaseSubscriptionEnabled:      settings.PurchaseSubscriptionEnabled,
+		PurchaseSubscriptionURL:          settings.PurchaseSubscriptionURL,
+		SoraClientEnabled:                settings.SoraClientEnabled,
+		CustomMenuItems:                  dto.ParseCustomMenuItems(settings.CustomMenuItems),
+		DefaultConcurrency:               settings.DefaultConcurrency,
+		DefaultBalance:                   settings.DefaultBalance,
+		DefaultSubscriptions:             defaultSubscriptions,
+		EnableModelFallback:              settings.EnableModelFallback,
+		FallbackModelAnthropic:           settings.FallbackModelAnthropic,
+		FallbackModelOpenAI:              settings.FallbackModelOpenAI,
+		FallbackModelGemini:              settings.FallbackModelGemini,
+		FallbackModelAntigravity:         settings.FallbackModelAntigravity,
+		EnableIdentityPatch:              settings.EnableIdentityPatch,
+		IdentityPatchPrompt:              settings.IdentityPatchPrompt,
+		OpsMonitoringEnabled:             opsEnabled && settings.OpsMonitoringEnabled,
+		OpsRealtimeMonitoringEnabled:     settings.OpsRealtimeMonitoringEnabled,
+		OpsQueryModeDefault:              settings.OpsQueryModeDefault,
+		OpsMetricsIntervalSeconds:        settings.OpsMetricsIntervalSeconds,
+		MinClaudeCodeVersion:             settings.MinClaudeCodeVersion,
+		MaxClaudeCodeVersion:             settings.MaxClaudeCodeVersion,
+		AllowUngroupedKeyScheduling:      settings.AllowUngroupedKeyScheduling,
+		BackendModeEnabled:               settings.BackendModeEnabled,
 	})
 }
 
@@ -154,12 +150,6 @@ type UpdateSettingsRequest struct {
 	TurnstileEnabled   bool   `json:"turnstile_enabled"`
 	TurnstileSiteKey   string `json:"turnstile_site_key"`
 	TurnstileSecretKey string `json:"turnstile_secret_key"`
-
-	// LinuxDo Connect OAuth 登录
-	LinuxDoConnectEnabled      bool   `json:"linuxdo_connect_enabled"`
-	LinuxDoConnectClientID     string `json:"linuxdo_connect_client_id"`
-	LinuxDoConnectClientSecret string `json:"linuxdo_connect_client_secret"`
-	LinuxDoConnectRedirectURL  string `json:"linuxdo_connect_redirect_url"`
 
 	// OEM设置
 	SiteName                    string                `json:"site_name"`
@@ -268,35 +258,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		if !h.settingService.IsTotpEncryptionKeyConfigured() {
 			response.BadRequest(c, "Cannot enable TOTP: TOTP_ENCRYPTION_KEY environment variable must be configured first. Generate a key with 'openssl rand -hex 32' and set it in your environment.")
 			return
-		}
-	}
-
-	// LinuxDo Connect 参数验证
-	if req.LinuxDoConnectEnabled {
-		req.LinuxDoConnectClientID = strings.TrimSpace(req.LinuxDoConnectClientID)
-		req.LinuxDoConnectClientSecret = strings.TrimSpace(req.LinuxDoConnectClientSecret)
-		req.LinuxDoConnectRedirectURL = strings.TrimSpace(req.LinuxDoConnectRedirectURL)
-
-		if req.LinuxDoConnectClientID == "" {
-			response.BadRequest(c, "LinuxDo Client ID is required when enabled")
-			return
-		}
-		if req.LinuxDoConnectRedirectURL == "" {
-			response.BadRequest(c, "LinuxDo Redirect URL is required when enabled")
-			return
-		}
-		if err := config.ValidateAbsoluteHTTPURL(req.LinuxDoConnectRedirectURL); err != nil {
-			response.BadRequest(c, "LinuxDo Redirect URL must be an absolute http(s) URL")
-			return
-		}
-
-		// 如果未提供 client_secret，则保留现有值（如有）。
-		if req.LinuxDoConnectClientSecret == "" {
-			if previousSettings.LinuxDoConnectClientSecret == "" {
-				response.BadRequest(c, "LinuxDo Client Secret is required when enabled")
-				return
-			}
-			req.LinuxDoConnectClientSecret = previousSettings.LinuxDoConnectClientSecret
 		}
 	}
 
@@ -477,10 +438,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		TurnstileEnabled:                 req.TurnstileEnabled,
 		TurnstileSiteKey:                 req.TurnstileSiteKey,
 		TurnstileSecretKey:               req.TurnstileSecretKey,
-		LinuxDoConnectEnabled:            req.LinuxDoConnectEnabled,
-		LinuxDoConnectClientID:           req.LinuxDoConnectClientID,
-		LinuxDoConnectClientSecret:       req.LinuxDoConnectClientSecret,
-		LinuxDoConnectRedirectURL:        req.LinuxDoConnectRedirectURL,
 		SiteName:                         req.SiteName,
 		SiteLogo:                         req.SiteLogo,
 		SiteSubtitle:                     req.SiteSubtitle,
@@ -555,59 +512,55 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	response.Success(c, dto.SystemSettings{
-		RegistrationEnabled:                  updatedSettings.RegistrationEnabled,
-		EmailVerifyEnabled:                   updatedSettings.EmailVerifyEnabled,
-		RegistrationEmailSuffixWhitelist:     updatedSettings.RegistrationEmailSuffixWhitelist,
-		PromoCodeEnabled:                     updatedSettings.PromoCodeEnabled,
-		PasswordResetEnabled:                 updatedSettings.PasswordResetEnabled,
-		FrontendURL:                          updatedSettings.FrontendURL,
-		InvitationCodeEnabled:                updatedSettings.InvitationCodeEnabled,
-		TotpEnabled:                          updatedSettings.TotpEnabled,
-		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
-		SMTPHost:                             updatedSettings.SMTPHost,
-		SMTPPort:                             updatedSettings.SMTPPort,
-		SMTPUsername:                         updatedSettings.SMTPUsername,
-		SMTPPasswordConfigured:               updatedSettings.SMTPPasswordConfigured,
-		SMTPFrom:                             updatedSettings.SMTPFrom,
-		SMTPFromName:                         updatedSettings.SMTPFromName,
-		SMTPUseTLS:                           updatedSettings.SMTPUseTLS,
-		TurnstileEnabled:                     updatedSettings.TurnstileEnabled,
-		TurnstileSiteKey:                     updatedSettings.TurnstileSiteKey,
-		TurnstileSecretKeyConfigured:         updatedSettings.TurnstileSecretKeyConfigured,
-		LinuxDoConnectEnabled:                updatedSettings.LinuxDoConnectEnabled,
-		LinuxDoConnectClientID:               updatedSettings.LinuxDoConnectClientID,
-		LinuxDoConnectClientSecretConfigured: updatedSettings.LinuxDoConnectClientSecretConfigured,
-		LinuxDoConnectRedirectURL:            updatedSettings.LinuxDoConnectRedirectURL,
-		SiteName:                             updatedSettings.SiteName,
-		SiteLogo:                             updatedSettings.SiteLogo,
-		SiteSubtitle:                         updatedSettings.SiteSubtitle,
-		APIBaseURL:                           updatedSettings.APIBaseURL,
-		ContactInfo:                          updatedSettings.ContactInfo,
-		DocURL:                               updatedSettings.DocURL,
-		HomeContent:                          updatedSettings.HomeContent,
-		HideCcsImportButton:                  updatedSettings.HideCcsImportButton,
-		PurchaseSubscriptionEnabled:          updatedSettings.PurchaseSubscriptionEnabled,
-		PurchaseSubscriptionURL:              updatedSettings.PurchaseSubscriptionURL,
-		SoraClientEnabled:                    updatedSettings.SoraClientEnabled,
-		CustomMenuItems:                      dto.ParseCustomMenuItems(updatedSettings.CustomMenuItems),
-		DefaultConcurrency:                   updatedSettings.DefaultConcurrency,
-		DefaultBalance:                       updatedSettings.DefaultBalance,
-		DefaultSubscriptions:                 updatedDefaultSubscriptions,
-		EnableModelFallback:                  updatedSettings.EnableModelFallback,
-		FallbackModelAnthropic:               updatedSettings.FallbackModelAnthropic,
-		FallbackModelOpenAI:                  updatedSettings.FallbackModelOpenAI,
-		FallbackModelGemini:                  updatedSettings.FallbackModelGemini,
-		FallbackModelAntigravity:             updatedSettings.FallbackModelAntigravity,
-		EnableIdentityPatch:                  updatedSettings.EnableIdentityPatch,
-		IdentityPatchPrompt:                  updatedSettings.IdentityPatchPrompt,
-		OpsMonitoringEnabled:                 updatedSettings.OpsMonitoringEnabled,
-		OpsRealtimeMonitoringEnabled:         updatedSettings.OpsRealtimeMonitoringEnabled,
-		OpsQueryModeDefault:                  updatedSettings.OpsQueryModeDefault,
-		OpsMetricsIntervalSeconds:            updatedSettings.OpsMetricsIntervalSeconds,
-		MinClaudeCodeVersion:                 updatedSettings.MinClaudeCodeVersion,
-		MaxClaudeCodeVersion:                 updatedSettings.MaxClaudeCodeVersion,
-		AllowUngroupedKeyScheduling:          updatedSettings.AllowUngroupedKeyScheduling,
-		BackendModeEnabled:                   updatedSettings.BackendModeEnabled,
+		RegistrationEnabled:              updatedSettings.RegistrationEnabled,
+		EmailVerifyEnabled:               updatedSettings.EmailVerifyEnabled,
+		RegistrationEmailSuffixWhitelist: updatedSettings.RegistrationEmailSuffixWhitelist,
+		PromoCodeEnabled:                 updatedSettings.PromoCodeEnabled,
+		PasswordResetEnabled:             updatedSettings.PasswordResetEnabled,
+		FrontendURL:                      updatedSettings.FrontendURL,
+		InvitationCodeEnabled:            updatedSettings.InvitationCodeEnabled,
+		TotpEnabled:                      updatedSettings.TotpEnabled,
+		TotpEncryptionKeyConfigured:      h.settingService.IsTotpEncryptionKeyConfigured(),
+		SMTPHost:                         updatedSettings.SMTPHost,
+		SMTPPort:                         updatedSettings.SMTPPort,
+		SMTPUsername:                     updatedSettings.SMTPUsername,
+		SMTPPasswordConfigured:           updatedSettings.SMTPPasswordConfigured,
+		SMTPFrom:                         updatedSettings.SMTPFrom,
+		SMTPFromName:                     updatedSettings.SMTPFromName,
+		SMTPUseTLS:                       updatedSettings.SMTPUseTLS,
+		TurnstileEnabled:                 updatedSettings.TurnstileEnabled,
+		TurnstileSiteKey:                 updatedSettings.TurnstileSiteKey,
+		TurnstileSecretKeyConfigured:     updatedSettings.TurnstileSecretKeyConfigured,
+		SiteName:                         updatedSettings.SiteName,
+		SiteLogo:                         updatedSettings.SiteLogo,
+		SiteSubtitle:                     updatedSettings.SiteSubtitle,
+		APIBaseURL:                       updatedSettings.APIBaseURL,
+		ContactInfo:                      updatedSettings.ContactInfo,
+		DocURL:                           updatedSettings.DocURL,
+		HomeContent:                      updatedSettings.HomeContent,
+		HideCcsImportButton:              updatedSettings.HideCcsImportButton,
+		PurchaseSubscriptionEnabled:      updatedSettings.PurchaseSubscriptionEnabled,
+		PurchaseSubscriptionURL:          updatedSettings.PurchaseSubscriptionURL,
+		SoraClientEnabled:                updatedSettings.SoraClientEnabled,
+		CustomMenuItems:                  dto.ParseCustomMenuItems(updatedSettings.CustomMenuItems),
+		DefaultConcurrency:               updatedSettings.DefaultConcurrency,
+		DefaultBalance:                   updatedSettings.DefaultBalance,
+		DefaultSubscriptions:             updatedDefaultSubscriptions,
+		EnableModelFallback:              updatedSettings.EnableModelFallback,
+		FallbackModelAnthropic:           updatedSettings.FallbackModelAnthropic,
+		FallbackModelOpenAI:              updatedSettings.FallbackModelOpenAI,
+		FallbackModelGemini:              updatedSettings.FallbackModelGemini,
+		FallbackModelAntigravity:         updatedSettings.FallbackModelAntigravity,
+		EnableIdentityPatch:              updatedSettings.EnableIdentityPatch,
+		IdentityPatchPrompt:              updatedSettings.IdentityPatchPrompt,
+		OpsMonitoringEnabled:             updatedSettings.OpsMonitoringEnabled,
+		OpsRealtimeMonitoringEnabled:     updatedSettings.OpsRealtimeMonitoringEnabled,
+		OpsQueryModeDefault:              updatedSettings.OpsQueryModeDefault,
+		OpsMetricsIntervalSeconds:        updatedSettings.OpsMetricsIntervalSeconds,
+		MinClaudeCodeVersion:             updatedSettings.MinClaudeCodeVersion,
+		MaxClaudeCodeVersion:             updatedSettings.MaxClaudeCodeVersion,
+		AllowUngroupedKeyScheduling:      updatedSettings.AllowUngroupedKeyScheduling,
+		BackendModeEnabled:               updatedSettings.BackendModeEnabled,
 	})
 }
 
@@ -680,18 +633,6 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if req.TurnstileSecretKey != "" {
 		changed = append(changed, "turnstile_secret_key")
-	}
-	if before.LinuxDoConnectEnabled != after.LinuxDoConnectEnabled {
-		changed = append(changed, "linuxdo_connect_enabled")
-	}
-	if before.LinuxDoConnectClientID != after.LinuxDoConnectClientID {
-		changed = append(changed, "linuxdo_connect_client_id")
-	}
-	if req.LinuxDoConnectClientSecret != "" {
-		changed = append(changed, "linuxdo_connect_client_secret")
-	}
-	if before.LinuxDoConnectRedirectURL != after.LinuxDoConnectRedirectURL {
-		changed = append(changed, "linuxdo_connect_redirect_url")
 	}
 	if before.SiteName != after.SiteName {
 		changed = append(changed, "site_name")

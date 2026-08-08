@@ -75,12 +75,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/auth/linuxdo/callback',
-    name: 'LinuxDoOAuthCallback',
-    component: () => import('@/views/auth/LinuxDoCallbackView.vue'),
+    path: '/auth/oauth/callback',
+    name: 'LoginOAuthCallback',
+    component: () => import('@/views/auth/LoginOAuthCallbackView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'LinuxDo OAuth Callback'
+      title: 'Login OAuth Callback'
     }
   },
   {

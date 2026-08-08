@@ -39,6 +39,8 @@ authority for client source and binaries.
 - Vue administrative interface for users, keys, groups, accounts, and
   observability
 - PostgreSQL persistence and Redis-backed coordination
+- GitHub and Google end-user login with explicit, reauthenticated account
+  linking; see the [login OAuth security guide](docs/LOGIN_OAUTH_SECURITY.md)
 - Authenticated, non-billable SAIAI V2 bootstrap discovery
 
 Support for a protocol or account type does not grant a right to use an

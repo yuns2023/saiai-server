@@ -66,3 +66,21 @@ func TestAuthRoutesRateLimitFailCloseWhenRedisUnavailable(t *testing.T) {
 		require.Contains(t, w.Body.String(), "rate limit exceeded", "path=%s", path)
 	}
 }
+
+func TestAuthRoutesExposeOnlyConfiguredLoginOAuthProviders(t *testing.T) {
+	router := newAuthRoutesTestRouter(nil)
+	routes := make(map[string]bool)
+	for _, route := range router.Routes() {
+		routes[route.Method+" "+route.Path] = true
+	}
+
+	require.True(t, routes["GET /api/v1/auth/oauth/github/start"])
+	require.True(t, routes["GET /api/v1/auth/oauth/github/callback"])
+	require.True(t, routes["GET /api/v1/auth/oauth/google/start"])
+	require.True(t, routes["GET /api/v1/auth/oauth/google/callback"])
+	require.True(t, routes["GET /api/v1/auth/oauth/connections"])
+	require.True(t, routes["POST /api/v1/auth/oauth/github/link/start"])
+	require.True(t, routes["POST /api/v1/auth/oauth/google/link/start"])
+	require.False(t, routes["GET /api/v1/auth/oauth/linuxdo/start"])
+	require.False(t, routes["GET /api/v1/auth/oauth/linuxdo/callback"])
+}

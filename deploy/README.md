@@ -23,6 +23,11 @@ Set at least unique values for:
 - `JWT_SECRET`
 - `TOTP_ENCRYPTION_KEY`
 
+To enable end-user GitHub or Google login, also configure the corresponding
+`*_OAUTH_ENABLED`, `*_OAUTH_CLIENT_ID`, `*_OAUTH_CLIENT_SECRET`, and exact
+HTTPS `*_OAUTH_REDIRECT_URL` values. See the
+[login OAuth security guide](../docs/LOGIN_OAUTH_SECURITY.md).
+
 Generate secrets with a cryptographically secure tool such as:
 
 ```bash

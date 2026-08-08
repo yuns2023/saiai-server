@@ -83,7 +83,8 @@ const (
 	SubscriptionStatusSuspended = domain.SubscriptionStatusSuspended
 )
 
-// LinuxDoConnectSyntheticEmailDomain 是 LinuxDo Connect 用户的合成邮箱后缀（RFC 保留域名）。
+// LinuxDoConnectSyntheticEmailDomain is retained only to prevent historical
+// synthetic addresses from being claimed after LinuxDo login removal.
 const LinuxDoConnectSyntheticEmailDomain = "@linuxdo-connect.invalid"
 
 // Setting keys
@@ -113,12 +114,6 @@ const (
 
 	// TOTP 双因素认证设置
 	SettingKeyTotpEnabled = "totp_enabled" // 是否启用 TOTP 2FA 功能
-
-	// LinuxDo Connect OAuth 登录设置
-	SettingKeyLinuxDoConnectEnabled      = "linuxdo_connect_enabled"
-	SettingKeyLinuxDoConnectClientID     = "linuxdo_connect_client_id"
-	SettingKeyLinuxDoConnectClientSecret = "linuxdo_connect_client_secret"
-	SettingKeyLinuxDoConnectRedirectURL  = "linuxdo_connect_redirect_url"
 
 	// OEM设置
 	SettingKeySoraClientEnabled           = "sora_client_enabled"           // 是否启用 Sora 客户端（管理员手动控制）

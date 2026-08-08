@@ -62,14 +62,23 @@ func RegisterAuthRoutes(
 		auth.POST("/reset-password", rateLimiter.LimitWithOptions("reset-password", 10, time.Minute, middleware.RateLimitOptions{
 			FailureMode: middleware.RateLimitFailClose,
 		}), h.Auth.ResetPassword)
-		auth.GET("/oauth/linuxdo/start", h.Auth.LinuxDoOAuthStart)
-		auth.GET("/oauth/linuxdo/callback", h.Auth.LinuxDoOAuthCallback)
-		auth.POST("/oauth/linuxdo/complete-registration",
-			rateLimiter.LimitWithOptions("oauth-linuxdo-complete", 10, time.Minute, middleware.RateLimitOptions{
+		for _, provider := range []string{"github", "google"} {
+			provider := provider
+			oauthProvider := auth.Group("/oauth/" + provider)
+			oauthProvider.Use(func(c *gin.Context) {
+				c.Set("login_oauth_provider", provider)
+				c.Next()
+			})
+			oauthProvider.GET("/start", rateLimiter.LimitWithOptions("oauth-"+provider+"-start", 20, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
-			}),
-			h.Auth.CompleteLinuxDoOAuthRegistration,
-		)
+			}), h.Auth.LoginOAuthStart)
+			oauthProvider.GET("/callback", rateLimiter.LimitWithOptions("oauth-"+provider+"-callback", 30, time.Minute, middleware.RateLimitOptions{
+				FailureMode: middleware.RateLimitFailClose,
+			}), h.Auth.LoginOAuthCallback)
+			oauthProvider.POST("/complete-registration", rateLimiter.LimitWithOptions("oauth-"+provider+"-complete", 10, time.Minute, middleware.RateLimitOptions{
+				FailureMode: middleware.RateLimitFailClose,
+			}), h.Auth.CompleteLoginOAuthRegistration)
+		}
 	}
 
 	// 公开设置（无需认证）
@@ -86,5 +95,19 @@ func RegisterAuthRoutes(
 		authenticated.GET("/auth/me", h.Auth.GetCurrentUser)
 		// 撤销所有会话（需要认证）
 		authenticated.POST("/auth/revoke-all-sessions", h.Auth.RevokeAllSessions)
+		authenticated.GET("/auth/oauth/connections", h.Auth.GetLoginOAuthConnections)
+		for _, provider := range []string{"github", "google"} {
+			provider := provider
+			authenticated.POST("/auth/oauth/"+provider+"/link/start",
+				rateLimiter.LimitWithOptions("oauth-"+provider+"-link-start", 10, time.Minute, middleware.RateLimitOptions{
+					FailureMode: middleware.RateLimitFailClose,
+				}),
+				func(c *gin.Context) {
+					c.Set("login_oauth_provider", provider)
+					c.Next()
+				},
+				h.Auth.LinkLoginOAuthStart,
+			)
+		}
 	}
 }

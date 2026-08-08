@@ -338,6 +338,48 @@ var (
 			},
 		},
 	}
+	// AuthIdentitiesColumns holds the columns for the "auth_identities" table.
+	AuthIdentitiesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "provider", Type: field.TypeString, Size: 20},
+		{Name: "subject", Type: field.TypeString, Size: 255},
+		{Name: "verified_email", Type: field.TypeString, Size: 255},
+		{Name: "verified_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "user_id", Type: field.TypeInt64},
+	}
+	// AuthIdentitiesTable holds the schema information for the "auth_identities" table.
+	AuthIdentitiesTable = &schema.Table{
+		Name:       "auth_identities",
+		Columns:    AuthIdentitiesColumns,
+		PrimaryKey: []*schema.Column{AuthIdentitiesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "auth_identities_users_auth_identities",
+				Columns:    []*schema.Column{AuthIdentitiesColumns[7]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "authidentity_provider_subject",
+				Unique:  true,
+				Columns: []*schema.Column{AuthIdentitiesColumns[3], AuthIdentitiesColumns[4]},
+			},
+			{
+				Name:    "authidentity_user_id_provider",
+				Unique:  true,
+				Columns: []*schema.Column{AuthIdentitiesColumns[7], AuthIdentitiesColumns[3]},
+			},
+			{
+				Name:    "authidentity_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{AuthIdentitiesColumns[7]},
+			},
+		},
+	}
 	// ErrorPassthroughRulesColumns holds the columns for the "error_passthrough_rules" table.
 	ErrorPassthroughRulesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -486,6 +528,36 @@ var (
 				Name:    "idempotencyrecord_status_locked_until",
 				Unique:  false,
 				Columns: []*schema.Column{IdempotencyRecordsColumns[6], IdempotencyRecordsColumns[10]},
+			},
+		},
+	}
+	// OauthRegistrationSessionsColumns holds the columns for the "oauth_registration_sessions" table.
+	OauthRegistrationSessionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "token_hash", Type: field.TypeString, Unique: true, Size: 64},
+		{Name: "provider", Type: field.TypeString, Size: 20},
+		{Name: "subject", Type: field.TypeString, Size: 255},
+		{Name: "verified_email", Type: field.TypeString, Size: 255},
+		{Name: "username", Type: field.TypeString, Size: 100, Default: ""},
+		{Name: "expires_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// OauthRegistrationSessionsTable holds the schema information for the "oauth_registration_sessions" table.
+	OauthRegistrationSessionsTable = &schema.Table{
+		Name:       "oauth_registration_sessions",
+		Columns:    OauthRegistrationSessionsColumns,
+		PrimaryKey: []*schema.Column{OauthRegistrationSessionsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "oauthregistrationsession_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{OauthRegistrationSessionsColumns[8]},
+			},
+			{
+				Name:    "oauthregistrationsession_provider_subject",
+				Unique:  false,
+				Columns: []*schema.Column{OauthRegistrationSessionsColumns[4], OauthRegistrationSessionsColumns[5]},
 			},
 		},
 	}
@@ -1101,9 +1173,11 @@ var (
 		AccountGroupsTable,
 		AnnouncementsTable,
 		AnnouncementReadsTable,
+		AuthIdentitiesTable,
 		ErrorPassthroughRulesTable,
 		GroupsTable,
 		IdempotencyRecordsTable,
+		OauthRegistrationSessionsTable,
 		PromoCodesTable,
 		PromoCodeUsagesTable,
 		ProxiesTable,
@@ -1143,6 +1217,10 @@ func init() {
 	AnnouncementReadsTable.Annotation = &entsql.Annotation{
 		Table: "announcement_reads",
 	}
+	AuthIdentitiesTable.ForeignKeys[0].RefTable = UsersTable
+	AuthIdentitiesTable.Annotation = &entsql.Annotation{
+		Table: "auth_identities",
+	}
 	ErrorPassthroughRulesTable.Annotation = &entsql.Annotation{
 		Table: "error_passthrough_rules",
 	}
@@ -1151,6 +1229,9 @@ func init() {
 	}
 	IdempotencyRecordsTable.Annotation = &entsql.Annotation{
 		Table: "idempotency_records",
+	}
+	OauthRegistrationSessionsTable.Annotation = &entsql.Annotation{
+		Table: "oauth_registration_sessions",
 	}
 	PromoCodesTable.Annotation = &entsql.Annotation{
 		Table: "promo_codes",

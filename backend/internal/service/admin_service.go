@@ -567,6 +567,9 @@ func (s *adminServiceImpl) GetUser(ctx context.Context, id int64) (*User, error)
 }
 
 func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInput) (*User, error) {
+	if isReservedEmail(input.Email) {
+		return nil, ErrEmailReserved
+	}
 	user := &User{
 		Email:                 input.Email,
 		Username:              input.Username,
@@ -621,6 +624,9 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldRole := user.Role
 
 	if input.Email != "" {
+		if isReservedEmail(input.Email) {
+			return nil, ErrEmailReserved
+		}
 		user.Email = input.Email
 	}
 	if input.Password != "" {

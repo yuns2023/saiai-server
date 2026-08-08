@@ -24,13 +24,6 @@ type SystemSettings struct {
 	TurnstileSecretKey           string
 	TurnstileSecretKeyConfigured bool
 
-	// LinuxDo Connect OAuth 登录
-	LinuxDoConnectEnabled                bool
-	LinuxDoConnectClientID               string
-	LinuxDoConnectClientSecret           string
-	LinuxDoConnectClientSecretConfigured bool
-	LinuxDoConnectRedirectURL            string
-
 	SiteName                    string
 	SiteLogo                    string
 	SiteSubtitle                string
@@ -105,9 +98,10 @@ type PublicSettings struct {
 	SoraClientEnabled           bool
 	CustomMenuItems             string // JSON array of custom menu items
 
-	LinuxDoOAuthEnabled bool
-	BackendModeEnabled  bool
-	Version             string
+	GitHubOAuthEnabled bool
+	GoogleOAuthEnabled bool
+	BackendModeEnabled bool
+	Version            string
 }
 
 // SoraS3Settings Sora S3 存储配置

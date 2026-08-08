@@ -332,7 +332,7 @@ func TestLoadDefaultDatabaseSSLMode(t *testing.T) {
 	}
 }
 
-func TestValidateLinuxDoFrontendRedirectURL(t *testing.T) {
+func TestValidateLoginOAuthRedirectURL(t *testing.T) {
 	resetViperWithJWTSecret(t)
 
 	cfg, err := Load()
@@ -340,24 +340,20 @@ func TestValidateLinuxDoFrontendRedirectURL(t *testing.T) {
 		t.Fatalf("Load() error: %v", err)
 	}
 
-	cfg.LinuxDo.Enabled = true
-	cfg.LinuxDo.ClientID = "test-client"
-	cfg.LinuxDo.ClientSecret = "test-secret"
-	cfg.LinuxDo.RedirectURL = "https://example.com/api/v1/auth/oauth/linuxdo/callback"
-	cfg.LinuxDo.TokenAuthMethod = "client_secret_post"
-	cfg.LinuxDo.UsePKCE = false
-
-	cfg.LinuxDo.FrontendRedirectURL = "javascript:alert(1)"
+	cfg.GitHubOAuth.Enabled = true
+	cfg.GitHubOAuth.ClientID = "test-client"
+	cfg.GitHubOAuth.ClientSecret = "test-secret"
+	cfg.GitHubOAuth.RedirectURL = "javascript:alert(1)"
 	err = cfg.Validate()
 	if err == nil {
 		t.Fatalf("Validate() expected error for javascript scheme, got nil")
 	}
-	if !strings.Contains(err.Error(), "linuxdo_connect.frontend_redirect_url") {
-		t.Fatalf("Validate() expected frontend_redirect_url error, got: %v", err)
+	if !strings.Contains(err.Error(), "github_oauth.redirect_url") {
+		t.Fatalf("Validate() expected github redirect_url error, got: %v", err)
 	}
 }
 
-func TestValidateLinuxDoPKCERequiredForPublicClient(t *testing.T) {
+func TestValidateLoginOAuthClientSecretRequired(t *testing.T) {
 	resetViperWithJWTSecret(t)
 
 	cfg, err := Load()
@@ -365,20 +361,35 @@ func TestValidateLinuxDoPKCERequiredForPublicClient(t *testing.T) {
 		t.Fatalf("Load() error: %v", err)
 	}
 
-	cfg.LinuxDo.Enabled = true
-	cfg.LinuxDo.ClientID = "test-client"
-	cfg.LinuxDo.ClientSecret = ""
-	cfg.LinuxDo.RedirectURL = "https://example.com/api/v1/auth/oauth/linuxdo/callback"
-	cfg.LinuxDo.FrontendRedirectURL = "/auth/linuxdo/callback"
-	cfg.LinuxDo.TokenAuthMethod = "none"
-	cfg.LinuxDo.UsePKCE = false
+	cfg.GoogleOAuth.Enabled = true
+	cfg.GoogleOAuth.ClientID = "test-client"
+	cfg.GoogleOAuth.ClientSecret = ""
+	cfg.GoogleOAuth.RedirectURL = "https://example.com/api/v1/auth/oauth/google/callback"
 
 	err = cfg.Validate()
 	if err == nil {
-		t.Fatalf("Validate() expected error when token_auth_method=none and use_pkce=false, got nil")
+		t.Fatalf("Validate() expected error when client_secret is missing, got nil")
 	}
-	if !strings.Contains(err.Error(), "linuxdo_connect.use_pkce") {
-		t.Fatalf("Validate() expected use_pkce error, got: %v", err)
+	if !strings.Contains(err.Error(), "google_oauth.client_secret") {
+		t.Fatalf("Validate() expected client_secret error, got: %v", err)
+	}
+}
+
+func TestValidateLoginOAuthRejectsNonLocalHTTPRedirect(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	cfg.GoogleOAuth = LoginOAuthProviderConfig{
+		Enabled:      true,
+		ClientID:     "client",
+		ClientSecret: "secret",
+		RedirectURL:  "http://example.com/api/v1/auth/oauth/google/callback",
+	}
+	err = cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "must use https") {
+		t.Fatalf("Validate() expected https error, got: %v", err)
 	}
 }
 
@@ -777,7 +788,7 @@ func TestProvideConfig(t *testing.T) {
 	}
 }
 
-func TestValidateConfigWithLinuxDoEnabled(t *testing.T) {
+func TestValidateConfigWithLoginOAuthEnabled(t *testing.T) {
 	resetViperWithJWTSecret(t)
 
 	cfg, err := Load()
@@ -788,15 +799,10 @@ func TestValidateConfigWithLinuxDoEnabled(t *testing.T) {
 	cfg.Security.CSP.Enabled = true
 	cfg.Security.CSP.Policy = "default-src 'self'"
 
-	cfg.LinuxDo.Enabled = true
-	cfg.LinuxDo.ClientID = "client"
-	cfg.LinuxDo.ClientSecret = "secret"
-	cfg.LinuxDo.AuthorizeURL = "https://example.com/oauth2/authorize"
-	cfg.LinuxDo.TokenURL = "https://example.com/oauth2/token"
-	cfg.LinuxDo.UserInfoURL = "https://example.com/oauth2/userinfo"
-	cfg.LinuxDo.RedirectURL = "https://example.com/api/v1/auth/oauth/linuxdo/callback"
-	cfg.LinuxDo.FrontendRedirectURL = "/auth/linuxdo/callback"
-	cfg.LinuxDo.TokenAuthMethod = "client_secret_post"
+	cfg.GitHubOAuth.Enabled = true
+	cfg.GitHubOAuth.ClientID = "client"
+	cfg.GitHubOAuth.ClientSecret = "secret"
+	cfg.GitHubOAuth.RedirectURL = "https://example.com/api/v1/auth/oauth/github/callback"
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() unexpected error: %v", err)
@@ -944,27 +950,22 @@ func TestValidateConfigErrors(t *testing.T) {
 			wantErr: "security.csp.policy",
 		},
 		{
-			name: "linuxdo client id required",
+			name: "github oauth client id required",
 			mutate: func(c *Config) {
-				c.LinuxDo.Enabled = true
-				c.LinuxDo.ClientID = ""
+				c.GitHubOAuth.Enabled = true
+				c.GitHubOAuth.ClientID = ""
 			},
-			wantErr: "linuxdo_connect.client_id",
+			wantErr: "github_oauth.client_id",
 		},
 		{
-			name: "linuxdo token auth method",
+			name: "google oauth redirect url",
 			mutate: func(c *Config) {
-				c.LinuxDo.Enabled = true
-				c.LinuxDo.ClientID = "client"
-				c.LinuxDo.ClientSecret = "secret"
-				c.LinuxDo.AuthorizeURL = "https://example.com/authorize"
-				c.LinuxDo.TokenURL = "https://example.com/token"
-				c.LinuxDo.UserInfoURL = "https://example.com/userinfo"
-				c.LinuxDo.RedirectURL = "https://example.com/callback"
-				c.LinuxDo.FrontendRedirectURL = "/auth/callback"
-				c.LinuxDo.TokenAuthMethod = "invalid"
+				c.GoogleOAuth.Enabled = true
+				c.GoogleOAuth.ClientID = "client"
+				c.GoogleOAuth.ClientSecret = "secret"
+				c.GoogleOAuth.RedirectURL = "/relative/callback"
 			},
-			wantErr: "linuxdo_connect.token_auth_method",
+			wantErr: "google_oauth.redirect_url",
 		},
 		{
 			name:    "billing circuit breaker threshold",

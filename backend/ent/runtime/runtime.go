@@ -10,9 +10,11 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/announcement"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
+	"github.com/Wei-Shaw/sub2api/ent/authidentity"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
+	"github.com/Wei-Shaw/sub2api/ent/oauthregistrationsession"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -303,6 +305,76 @@ func init() {
 	announcementreadDescCreatedAt := announcementreadFields[3].Descriptor()
 	// announcementread.DefaultCreatedAt holds the default value on creation for the created_at field.
 	announcementread.DefaultCreatedAt = announcementreadDescCreatedAt.Default.(func() time.Time)
+	authidentityMixin := schema.AuthIdentity{}.Mixin()
+	authidentityMixinFields0 := authidentityMixin[0].Fields()
+	_ = authidentityMixinFields0
+	authidentityFields := schema.AuthIdentity{}.Fields()
+	_ = authidentityFields
+	// authidentityDescCreatedAt is the schema descriptor for created_at field.
+	authidentityDescCreatedAt := authidentityMixinFields0[0].Descriptor()
+	// authidentity.DefaultCreatedAt holds the default value on creation for the created_at field.
+	authidentity.DefaultCreatedAt = authidentityDescCreatedAt.Default.(func() time.Time)
+	// authidentityDescUpdatedAt is the schema descriptor for updated_at field.
+	authidentityDescUpdatedAt := authidentityMixinFields0[1].Descriptor()
+	// authidentity.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	authidentity.DefaultUpdatedAt = authidentityDescUpdatedAt.Default.(func() time.Time)
+	// authidentity.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	authidentity.UpdateDefaultUpdatedAt = authidentityDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// authidentityDescProvider is the schema descriptor for provider field.
+	authidentityDescProvider := authidentityFields[1].Descriptor()
+	// authidentity.ProviderValidator is a validator for the "provider" field. It is called by the builders before save.
+	authidentity.ProviderValidator = func() func(string) error {
+		validators := authidentityDescProvider.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+			validators[2].(func(string) error),
+		}
+		return func(provider string) error {
+			for _, fn := range fns {
+				if err := fn(provider); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// authidentityDescSubject is the schema descriptor for subject field.
+	authidentityDescSubject := authidentityFields[2].Descriptor()
+	// authidentity.SubjectValidator is a validator for the "subject" field. It is called by the builders before save.
+	authidentity.SubjectValidator = func() func(string) error {
+		validators := authidentityDescSubject.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(subject string) error {
+			for _, fn := range fns {
+				if err := fn(subject); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// authidentityDescVerifiedEmail is the schema descriptor for verified_email field.
+	authidentityDescVerifiedEmail := authidentityFields[3].Descriptor()
+	// authidentity.VerifiedEmailValidator is a validator for the "verified_email" field. It is called by the builders before save.
+	authidentity.VerifiedEmailValidator = func() func(string) error {
+		validators := authidentityDescVerifiedEmail.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(verified_email string) error {
+			for _, fn := range fns {
+				if err := fn(verified_email); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
 	errorpassthroughruleMixin := schema.ErrorPassthroughRule{}.Mixin()
 	errorpassthroughruleMixinFields0 := errorpassthroughruleMixin[0].Fields()
 	_ = errorpassthroughruleMixinFields0
@@ -500,6 +572,100 @@ func init() {
 	idempotencyrecordDescErrorReason := idempotencyrecordFields[6].Descriptor()
 	// idempotencyrecord.ErrorReasonValidator is a validator for the "error_reason" field. It is called by the builders before save.
 	idempotencyrecord.ErrorReasonValidator = idempotencyrecordDescErrorReason.Validators[0].(func(string) error)
+	oauthregistrationsessionMixin := schema.OAuthRegistrationSession{}.Mixin()
+	oauthregistrationsessionMixinFields0 := oauthregistrationsessionMixin[0].Fields()
+	_ = oauthregistrationsessionMixinFields0
+	oauthregistrationsessionFields := schema.OAuthRegistrationSession{}.Fields()
+	_ = oauthregistrationsessionFields
+	// oauthregistrationsessionDescCreatedAt is the schema descriptor for created_at field.
+	oauthregistrationsessionDescCreatedAt := oauthregistrationsessionMixinFields0[0].Descriptor()
+	// oauthregistrationsession.DefaultCreatedAt holds the default value on creation for the created_at field.
+	oauthregistrationsession.DefaultCreatedAt = oauthregistrationsessionDescCreatedAt.Default.(func() time.Time)
+	// oauthregistrationsessionDescUpdatedAt is the schema descriptor for updated_at field.
+	oauthregistrationsessionDescUpdatedAt := oauthregistrationsessionMixinFields0[1].Descriptor()
+	// oauthregistrationsession.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	oauthregistrationsession.DefaultUpdatedAt = oauthregistrationsessionDescUpdatedAt.Default.(func() time.Time)
+	// oauthregistrationsession.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	oauthregistrationsession.UpdateDefaultUpdatedAt = oauthregistrationsessionDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// oauthregistrationsessionDescTokenHash is the schema descriptor for token_hash field.
+	oauthregistrationsessionDescTokenHash := oauthregistrationsessionFields[0].Descriptor()
+	// oauthregistrationsession.TokenHashValidator is a validator for the "token_hash" field. It is called by the builders before save.
+	oauthregistrationsession.TokenHashValidator = func() func(string) error {
+		validators := oauthregistrationsessionDescTokenHash.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(token_hash string) error {
+			for _, fn := range fns {
+				if err := fn(token_hash); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// oauthregistrationsessionDescProvider is the schema descriptor for provider field.
+	oauthregistrationsessionDescProvider := oauthregistrationsessionFields[1].Descriptor()
+	// oauthregistrationsession.ProviderValidator is a validator for the "provider" field. It is called by the builders before save.
+	oauthregistrationsession.ProviderValidator = func() func(string) error {
+		validators := oauthregistrationsessionDescProvider.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+			validators[2].(func(string) error),
+		}
+		return func(provider string) error {
+			for _, fn := range fns {
+				if err := fn(provider); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// oauthregistrationsessionDescSubject is the schema descriptor for subject field.
+	oauthregistrationsessionDescSubject := oauthregistrationsessionFields[2].Descriptor()
+	// oauthregistrationsession.SubjectValidator is a validator for the "subject" field. It is called by the builders before save.
+	oauthregistrationsession.SubjectValidator = func() func(string) error {
+		validators := oauthregistrationsessionDescSubject.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(subject string) error {
+			for _, fn := range fns {
+				if err := fn(subject); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// oauthregistrationsessionDescVerifiedEmail is the schema descriptor for verified_email field.
+	oauthregistrationsessionDescVerifiedEmail := oauthregistrationsessionFields[3].Descriptor()
+	// oauthregistrationsession.VerifiedEmailValidator is a validator for the "verified_email" field. It is called by the builders before save.
+	oauthregistrationsession.VerifiedEmailValidator = func() func(string) error {
+		validators := oauthregistrationsessionDescVerifiedEmail.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(verified_email string) error {
+			for _, fn := range fns {
+				if err := fn(verified_email); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// oauthregistrationsessionDescUsername is the schema descriptor for username field.
+	oauthregistrationsessionDescUsername := oauthregistrationsessionFields[4].Descriptor()
+	// oauthregistrationsession.DefaultUsername holds the default value on creation for the username field.
+	oauthregistrationsession.DefaultUsername = oauthregistrationsessionDescUsername.Default.(string)
+	// oauthregistrationsession.UsernameValidator is a validator for the "username" field. It is called by the builders before save.
+	oauthregistrationsession.UsernameValidator = oauthregistrationsessionDescUsername.Validators[0].(func(string) error)
 	promocodeFields := schema.PromoCode{}.Fields()
 	_ = promocodeFields
 	// promocodeDescCode is the schema descriptor for code field.
