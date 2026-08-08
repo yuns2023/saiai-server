@@ -21,6 +21,7 @@ import errorPassthroughAPI from './errorPassthrough'
 import dataManagementAPI from './dataManagement'
 import apiKeysAPI from './apiKeys'
 import backupAPI from './backup'
+import paymentAPI from './payment'
 
 /**
  * Unified admin API object for convenient access
@@ -43,7 +44,8 @@ export const adminAPI = {
   errorPassthrough: errorPassthroughAPI,
   dataManagement: dataManagementAPI,
   apiKeys: apiKeysAPI,
-  backup: backupAPI
+  backup: backupAPI,
+  payment: paymentAPI
 }
 
 export {
@@ -64,8 +66,11 @@ export {
   errorPassthroughAPI,
   dataManagementAPI,
   apiKeysAPI,
-  backupAPI
+  backupAPI,
+  paymentAPI
 }
+
+export type { PaymentProvider, PaymentProviderInput, PaymentConfigUpdate, AdminPaymentOrder } from './payment'
 
 export default adminAPI
 

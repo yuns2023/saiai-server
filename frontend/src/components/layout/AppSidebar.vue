@@ -474,16 +474,7 @@ const userNavItems = computed((): NavItem[] => {
     { path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon },
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
-    ...(appStore.cachedPublicSettings?.purchase_subscription_enabled
-      ? [
-          {
-            path: '/purchase',
-            label: t('nav.buySubscription'),
-            icon: RechargeSubscriptionIcon,
-            hideInSimpleMode: true
-          }
-        ]
-      : []),
+    { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({
@@ -502,16 +493,7 @@ const personalNavItems = computed((): NavItem[] => {
     { path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon },
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
-    ...(appStore.cachedPublicSettings?.purchase_subscription_enabled
-      ? [
-          {
-            path: '/purchase',
-            label: t('nav.buySubscription'),
-            icon: RechargeSubscriptionIcon,
-            hideInSimpleMode: true
-          }
-        ]
-      : []),
+    { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({
@@ -548,6 +530,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
+    { path: '/admin/payment', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },

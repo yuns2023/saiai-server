@@ -49,6 +49,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		tokenRefreshSvc,
 		accountExpirySvc,
 		subscriptionExpirySvc,
+		nil, // paymentExpirySvc
 		&service.UsageCleanupService{},
 		idempotencyCleanupSvc,
 		pricingSvc,

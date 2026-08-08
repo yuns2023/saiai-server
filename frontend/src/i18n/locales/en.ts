@@ -349,7 +349,7 @@ export default {
     logout: 'Logout',
     github: 'GitHub',
     mySubscriptions: 'My Subscriptions',
-    buySubscription: 'Recharge / Subscription',
+    buySubscription: 'Purchase & recharge',
     docs: 'Docs'
   },
 
@@ -4429,10 +4429,10 @@ export default {
     unlimited: 'Unlimited'
   },
 
-  // Recharge / Subscription Page
+  // Native payment page
   purchase: {
-    title: 'Recharge / Subscription',
-    description: 'Recharge balance or purchase subscription via the embedded page',
+    title: 'Purchase & recharge',
+    description: 'Buy a subscription or recharge through SAIAI native payments',
     openInNewTab: 'Open in new tab',
     notEnabledTitle: 'Feature not enabled',
     notEnabledDesc: 'The administrator has not enabled the recharge/subscription entry. Please contact admin.',

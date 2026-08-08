@@ -29,6 +29,7 @@ require (
 	github.com/refraction-networking/utls v1.8.2
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/shirou/gopsutil/v4 v4.26.5
+	github.com/shopspring/decimal v1.4.0
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.43.0

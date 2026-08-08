@@ -339,6 +339,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/payment',
+    name: 'AdminPayment',
+    component: () => import('@/views/admin/PaymentView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Native Payment'
+    }
+  },
+  {
     path: '/admin/settings',
     name: 'AdminSettings',
     component: () => import('@/views/admin/SettingsView.vue'),

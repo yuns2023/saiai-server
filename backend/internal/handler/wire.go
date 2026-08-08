@@ -29,6 +29,7 @@ func ProvideAdminHandlers(
 	userAttributeHandler *admin.UserAttributeHandler,
 	errorPassthroughHandler *admin.ErrorPassthroughHandler,
 	apiKeyHandler *admin.AdminAPIKeyHandler,
+	paymentHandler *admin.PaymentHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:        dashboardHandler,
@@ -51,6 +52,7 @@ func ProvideAdminHandlers(
 		UserAttribute:    userAttributeHandler,
 		ErrorPassthrough: errorPassthroughHandler,
 		APIKey:           apiKeyHandler,
+		Payment:          paymentHandler,
 	}
 }
 
@@ -74,23 +76,27 @@ func ProvideHandlers(
 	openaiGatewayHandler *OpenAIGatewayHandler,
 	settingHandler *SettingHandler,
 	totpHandler *TotpHandler,
+	paymentHandler *PaymentHandler,
+	paymentWebhookHandler *PaymentWebhookHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
 	return &Handlers{
-		Auth:          authHandler,
-		Client:        clientHandler,
-		User:          userHandler,
-		APIKey:        apiKeyHandler,
-		Usage:         usageHandler,
-		Redeem:        redeemHandler,
-		Subscription:  subscriptionHandler,
-		Announcement:  announcementHandler,
-		Admin:         adminHandlers,
-		Gateway:       gatewayHandler,
-		OpenAIGateway: openaiGatewayHandler,
-		Setting:       settingHandler,
-		Totp:          totpHandler,
+		Auth:           authHandler,
+		Client:         clientHandler,
+		User:           userHandler,
+		APIKey:         apiKeyHandler,
+		Usage:          usageHandler,
+		Redeem:         redeemHandler,
+		Subscription:   subscriptionHandler,
+		Announcement:   announcementHandler,
+		Admin:          adminHandlers,
+		Gateway:        gatewayHandler,
+		OpenAIGateway:  openaiGatewayHandler,
+		Setting:        settingHandler,
+		Totp:           totpHandler,
+		Payment:        paymentHandler,
+		PaymentWebhook: paymentWebhookHandler,
 	}
 }
 
@@ -108,6 +114,8 @@ var ProviderSet = wire.NewSet(
 	NewGatewayHandler,
 	NewOpenAIGatewayHandler,
 	NewTotpHandler,
+	NewPaymentHandler,
+	NewPaymentWebhookHandler,
 	ProvideSettingHandler,
 
 	// Admin handlers
@@ -131,6 +139,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewUserAttributeHandler,
 	admin.NewErrorPassthroughHandler,
 	admin.NewAdminAPIKeyHandler,
+	admin.NewPaymentHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

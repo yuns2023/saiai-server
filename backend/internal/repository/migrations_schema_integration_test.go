@@ -87,6 +87,29 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 
 	// user_allowed_groups: created_at should be timestamptz
 	requireColumn(t, tx, "user_allowed_groups", "created_at", "timestamp with time zone", 0, false)
+
+	// native payment: provider snapshots, refund recovery, and subscription products.
+	requireTable(t, tx, "payment_provider_instances")
+	requireTable(t, tx, "payment_orders")
+	requireTable(t, tx, "payment_audit_logs")
+	requireTable(t, tx, "subscription_plans")
+	requireColumn(t, tx, "payment_provider_instances", "balance_credit_rate", "numeric", 0, false)
+	requireColumn(t, tx, "payment_orders", "currency", "character varying", 3, false)
+	requireColumn(t, tx, "payment_orders", "order_type", "character varying", 20, false)
+	requireColumn(t, tx, "payment_orders", "provider_snapshot_encrypted", "text", 0, false)
+	requireColumn(t, tx, "payment_orders", "refund_mode", "character varying", 20, false)
+	requireColumn(t, tx, "payment_orders", "refund_entitlement_reversed", "boolean", 0, false)
+	requireColumn(t, tx, "payment_orders", "refund_provider_call_started_at", "timestamp with time zone", 0, true)
+	requireIndex(t, tx, "payment_orders", "idx_payment_orders_provider_status")
+	requireIndex(t, tx, "payment_orders", "idx_payment_orders_order_type")
+	requireIndex(t, tx, "subscription_plans", "idx_subscription_plans_sale_sort")
+}
+
+func requireTable(t *testing.T, tx *sql.Tx, table string) {
+	t.Helper()
+	var regclass sql.NullString
+	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass($1)", "public."+table).Scan(&regclass))
+	require.True(t, regclass.Valid, "expected table %s to exist", table)
 }
 
 func requireIndex(t *testing.T, tx *sql.Tx, table, index string) {
