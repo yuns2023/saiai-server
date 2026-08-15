@@ -160,7 +160,7 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string) {
 
 func parseOpenAIImageRequest(endpoint, contentType string, body []byte) (model string, imageSize string, err error) {
 	if len(body) == 0 {
-		return "", "", fmt.Errorf("Request body is empty")
+		return "", "", fmt.Errorf("request body is empty")
 	}
 	mediaType, params, parseErr := mime.ParseMediaType(contentType)
 	if parseErr != nil {
@@ -200,7 +200,7 @@ func parseOpenAIImageRequest(endpoint, contentType string, body []byte) (model s
 		if name == "model" || name == "size" || name == "stream" {
 			value, readErr := io.ReadAll(io.LimitReader(part, 1025))
 			if readErr != nil || len(value) > 1024 {
-				part.Close()
+				_ = part.Close()
 				return "", "", fmt.Errorf("invalid %s field", name)
 			}
 			switch name {
@@ -210,12 +210,12 @@ func parseOpenAIImageRequest(endpoint, contentType string, body []byte) (model s
 				imageSize = strings.TrimSpace(string(value))
 			case "stream":
 				if strings.EqualFold(strings.TrimSpace(string(value)), "true") {
-					part.Close()
+					_ = part.Close()
 					return "", "", fmt.Errorf("streaming is not supported for the direct Image API")
 				}
 			}
 		}
-		part.Close()
+		_ = part.Close()
 	}
 	if model == "" {
 		return "", "", fmt.Errorf("model is required")

@@ -91,7 +91,7 @@ func (s *OpenAIGatewayService) ForwardImage(
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI Image API upstream request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	maxBytes := defaultOpenAIImageResponseMax
 	if s.cfg != nil && s.cfg.Gateway.OpenAIImagesResponseReadMaxBytes > 0 {
