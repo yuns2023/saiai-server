@@ -241,7 +241,7 @@ func TestEstimateSetupTokenUsageZerosExpiredSessionWindow(t *testing.T) {
 
 func TestBuildUsageInfoUsesScopedFableWindow(t *testing.T) {
 	t.Parallel()
-	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	resetAt := now.Add(4 * 24 * time.Hour)
 	percent := 22.0
 	modelID := "claude-fable-5"
@@ -273,7 +273,7 @@ func TestBuildUsageInfoUsesScopedFableWindow(t *testing.T) {
 
 func TestBuildUsageInfoFallsBackToFableTopLevelWindow(t *testing.T) {
 	t.Parallel()
-	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	resetAt := now.Add(5 * 24 * time.Hour)
 	resp := &ClaudeUsageResponse{
 		SevenDayOverageIncluded: &ClaudeUsageWindow{
