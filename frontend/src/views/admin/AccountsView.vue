@@ -290,12 +290,13 @@
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @stats="handleViewStats" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @stats="handleViewStats" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @clear-quota-snapshot="handleClearQuotaSnapshot" @reset-quota="handleResetQuota" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal :show="showBulkEdit" :account-ids="selIds" :selected-platforms="selPlatforms" :selected-types="selTypes" :proxies="proxies" :groups="groups" @close="showBulkEdit = false" @updated="handleBulkUpdated" />
     <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
+    <ConfirmDialog :show="showClearQuotaSnapshotDialog" :title="t('admin.accounts.clearQuotaSnapshot')" :message="t('admin.accounts.clearQuotaSnapshotConfirm', { name: quotaSnapshotAcc?.name })" :confirm-text="t('admin.accounts.clearQuotaSnapshot')" :cancel-text="t('common.cancel')" @confirm="confirmClearQuotaSnapshot" @cancel="closeClearQuotaSnapshotDialog" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
       <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
         <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" v-model="includeProxyOnExport" />
@@ -375,12 +376,14 @@ const includeProxyOnExport = ref(true)
 const showBulkEdit = ref(false)
 const showTempUnsched = ref(false)
 const showDeleteDialog = ref(false)
+const showClearQuotaSnapshotDialog = ref(false)
 const showReAuth = ref(false)
 const showStats = ref(false)
 const showErrorPassthrough = ref(false)
 const edAcc = ref<Account | null>(null)
 const tempUnschedAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
+const quotaSnapshotAcc = ref<Account | null>(null)
 const reAuthAcc = ref<Account | null>(null)
 const statsAcc = ref<Account | null>(null)
 const togglingSchedulable = ref<number | null>(null)
@@ -699,6 +702,7 @@ const isAnyModalOpen = computed(() => {
     showBulkEdit.value ||
     showTempUnsched.value ||
     showDeleteDialog.value ||
+    showClearQuotaSnapshotDialog.value ||
     showReAuth.value ||
     showStats.value ||
     showErrorPassthrough.value
@@ -741,6 +745,7 @@ const syncAccountRefs = (nextAccount: Account) => {
   if (reAuthAcc.value?.id === nextAccount.id) reAuthAcc.value = nextAccount
   if (tempUnschedAcc.value?.id === nextAccount.id) tempUnschedAcc.value = nextAccount
   if (deletingAcc.value?.id === nextAccount.id) deletingAcc.value = nextAccount
+  if (quotaSnapshotAcc.value?.id === nextAccount.id) quotaSnapshotAcc.value = nextAccount
   if (menu.acc?.id === nextAccount.id) menu.acc = nextAccount
 }
 
@@ -1246,6 +1251,27 @@ const handleRecoverState = async (a: Account) => {
   } catch (error: any) {
     console.error('Failed to recover account state:', error)
     appStore.showError(error?.message || t('admin.accounts.recoverStateFailed'))
+  }
+}
+const handleClearQuotaSnapshot = (a: Account) => {
+  quotaSnapshotAcc.value = a
+  showClearQuotaSnapshotDialog.value = true
+}
+const closeClearQuotaSnapshotDialog = () => {
+  showClearQuotaSnapshotDialog.value = false
+  quotaSnapshotAcc.value = null
+}
+const confirmClearQuotaSnapshot = async () => {
+  if (!quotaSnapshotAcc.value) return
+  try {
+    const updated = await adminAPI.accounts.clearQuotaSnapshot(quotaSnapshotAcc.value.id)
+    patchAccountInList(updated)
+    enterAutoRefreshSilentWindow()
+    closeClearQuotaSnapshotDialog()
+    appStore.showSuccess(t('admin.accounts.clearQuotaSnapshotSuccess'))
+  } catch (error: any) {
+    console.error('Failed to clear local quota snapshot:', error)
+    appStore.showError(error?.message || t('admin.accounts.clearQuotaSnapshotFailed'))
   }
 }
 const handleResetQuota = async (a: Account) => {

@@ -159,6 +159,7 @@ func (r *openAI429SnapshotRepo) UpdateExtra(_ context.Context, _ int64, updates 
 	r.updatedExtra = updates
 	return nil
 }
+func (r *openAI429SnapshotRepo) ClearQuotaSnapshot(context.Context, int64) error { return nil }
 
 func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	repo := &openAI429SnapshotRepo{}

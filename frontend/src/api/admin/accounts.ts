@@ -352,6 +352,17 @@ export async function recoverState(id: number): Promise<Account> {
 }
 
 /**
+ * Clear locally cached provider 5h/7d quota snapshots.
+ * This does not send an upstream request; the next normal request repopulates the snapshot.
+ */
+export async function clearQuotaSnapshot(id: number): Promise<Account> {
+  const { data } = await apiClient.post<Account>(
+    `/admin/accounts/${id}/clear-quota-snapshot`
+  )
+  return data
+}
+
+/**
  * Reset account quota usage
  * @param id - Account ID
  * @returns Updated account
@@ -710,6 +721,7 @@ export const accountsAPI = {
   getBatchTodayStats,
   clearRateLimit,
   recoverState,
+  clearQuotaSnapshot,
   resetAccountQuota,
   getTempUnschedulableStatus,
   resetTempUnschedulable,

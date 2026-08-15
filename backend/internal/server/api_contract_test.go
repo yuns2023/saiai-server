@@ -1114,6 +1114,9 @@ func (s *stubAccountRepo) UpdateSessionWindow(ctx context.Context, id int64, sta
 func (s *stubAccountRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	return errors.New("not implemented")
 }
+func (s *stubAccountRepo) ClearQuotaSnapshot(context.Context, int64) error {
+	return errors.New("not implemented")
+}
 
 func (s *stubAccountRepo) IncrementQuotaUsed(ctx context.Context, id int64, amount float64) error {
 	return errors.New("not implemented")

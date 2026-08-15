@@ -25,6 +25,7 @@ func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates 
 	r.updatedExtra = updates
 	return nil
 }
+func (r *openAIAccountTestRepo) ClearQuotaSnapshot(context.Context, int64) error { return nil }
 
 func (r *openAIAccountTestRepo) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
 	r.rateLimitedID = id

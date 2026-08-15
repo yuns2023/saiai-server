@@ -2498,6 +2498,7 @@ func (s *accountRepoStubForOAuthMode) UpdateSessionWindow(context.Context, int64
 func (s *accountRepoStubForOAuthMode) UpdateExtra(context.Context, int64, map[string]any) error {
 	return nil
 }
+func (s *accountRepoStubForOAuthMode) ClearQuotaSnapshot(context.Context, int64) error { return nil }
 func (s *accountRepoStubForOAuthMode) BulkUpdate(context.Context, []int64, AccountBulkUpdate) (int64, error) {
 	return 0, nil
 }

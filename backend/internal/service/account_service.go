@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	ErrAccountNotFound = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
-	ErrAccountNilInput = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
+	ErrAccountNotFound          = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
+	ErrAccountNilInput          = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
+	ErrQuotaSnapshotUnsupported = infraerrors.BadRequest("ACCOUNT_QUOTA_SNAPSHOT_UNSUPPORTED", "quota snapshots can only be cleared for Anthropic OAuth/setup-token or OpenAI OAuth accounts")
 )
 
 const AccountListGroupUngrouped int64 = -1
@@ -65,6 +66,7 @@ type AccountRepository interface {
 	SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error
 	ClearTempUnschedulable(ctx context.Context, id int64) error
 	ClearRateLimit(ctx context.Context, id int64) error
+	ClearQuotaSnapshot(ctx context.Context, id int64) error
 	ClearAntigravityQuotaScopes(ctx context.Context, id int64) error
 	ClearModelRateLimits(ctx context.Context, id int64) error
 	UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error

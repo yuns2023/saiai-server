@@ -76,6 +76,7 @@ func (r *openAIWSRateLimitSignalRepo) UpdateExtra(_ context.Context, _ int64, up
 	r.updateExtra = append(r.updateExtra, copied)
 	return nil
 }
+func (r *openAIWSRateLimitSignalRepo) ClearQuotaSnapshot(context.Context, int64) error { return nil }
 
 func (r *openAICodexSnapshotAsyncRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
 	if r.rateLimitCh != nil {
@@ -94,6 +95,7 @@ func (r *openAICodexSnapshotAsyncRepo) UpdateExtra(_ context.Context, _ int64, u
 	}
 	return nil
 }
+func (r *openAICodexSnapshotAsyncRepo) ClearQuotaSnapshot(context.Context, int64) error { return nil }
 
 func (r *openAICodexExtraListRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
 	if r.rateLimitCh != nil {
@@ -125,6 +127,9 @@ func (r *openAICodexSnapshotControlledRepo) UpdateExtra(ctx context.Context, _ i
 	}
 	r.finished <- event
 	return event.err
+}
+func (r *openAICodexSnapshotControlledRepo) ClearQuotaSnapshot(context.Context, int64) error {
+	return nil
 }
 
 func (r *openAICodexExtraListRepo) ListWithFilters(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64) ([]Account, *pagination.PaginationResult, error) {

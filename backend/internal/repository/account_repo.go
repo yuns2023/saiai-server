@@ -1058,6 +1058,60 @@ func (r *accountRepository) ClearRateLimit(ctx context.Context, id int64) error 
 	return nil
 }
 
+// ClearQuotaSnapshot removes only locally observed provider quota-window state.
+// It deliberately preserves credentials, account configuration, error state,
+// overload state, temporary scheduling rules, and unrelated extra fields.
+func (r *accountRepository) ClearQuotaSnapshot(ctx context.Context, id int64) error {
+	result, err := r.sql.ExecContext(ctx, `
+		UPDATE accounts
+		SET extra = COALESCE(extra, '{}'::jsonb)
+				- 'session_window_utilization'
+				- 'passive_usage_7d_utilization'
+				- 'passive_usage_7d_reset'
+				- 'passive_usage_7d_sonnet_utilization'
+				- 'passive_usage_7d_sonnet_reset'
+				- 'passive_usage_sampled_at'
+				- 'codex_primary_used_percent'
+				- 'codex_primary_reset_after_seconds'
+				- 'codex_primary_window_minutes'
+				- 'codex_secondary_used_percent'
+				- 'codex_secondary_reset_after_seconds'
+				- 'codex_secondary_window_minutes'
+				- 'codex_primary_over_secondary_percent'
+				- 'codex_usage_updated_at'
+				- 'codex_5h_used_percent'
+				- 'codex_5h_reset_after_seconds'
+				- 'codex_5h_window_minutes'
+				- 'codex_5h_reset_at'
+				- 'codex_7d_used_percent'
+				- 'codex_7d_reset_after_seconds'
+				- 'codex_7d_window_minutes'
+				- 'codex_7d_reset_at',
+			session_window_start = NULL,
+			session_window_end = NULL,
+			session_window_status = NULL,
+			rate_limited_at = NULL,
+			rate_limit_reset_at = NULL,
+			updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue quota snapshot clear failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return nil
+}
+
 func (r *accountRepository) ClearAntigravityQuotaScopes(ctx context.Context, id int64) error {
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(

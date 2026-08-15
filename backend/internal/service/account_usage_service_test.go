@@ -24,6 +24,7 @@ func (r *accountUsageCodexProbeRepo) UpdateExtra(_ context.Context, _ int64, upd
 	}
 	return nil
 }
+func (r *accountUsageCodexProbeRepo) ClearQuotaSnapshot(context.Context, int64) error { return nil }
 
 func (r *accountUsageCodexProbeRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
 	if r.rateLimitCh != nil {

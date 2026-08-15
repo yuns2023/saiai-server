@@ -1499,6 +1499,20 @@ func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) 
 	return nil
 }
 
+// ClearQuotaSnapshot clears cached provider quota-window observations so the
+// next normal request can populate them again from upstream response headers.
+// It never sends an upstream request itself.
+func (s *RateLimitService) ClearQuotaSnapshot(ctx context.Context, accountID int64) error {
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	if !account.IsAnthropicOAuthOrSetupToken() && !account.IsOpenAIOAuth() {
+		return ErrQuotaSnapshotUnsupported
+	}
+	return s.accountRepo.ClearQuotaSnapshot(ctx, accountID)
+}
+
 // RecoverAccountState 按需恢复账号的可恢复运行时状态。
 func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID int64, options AccountRecoveryOptions) (*SuccessfulTestRecoveryResult, error) {
 	account, err := s.accountRepo.GetByID(ctx, accountID)

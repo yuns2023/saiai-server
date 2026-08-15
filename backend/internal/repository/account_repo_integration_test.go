@@ -651,6 +651,64 @@ func (s *AccountRepoSuite) TestUpdateSessionWindow() {
 
 // --- UpdateExtra ---
 
+func (s *AccountRepoSuite) TestClearQuotaSnapshot_RemovesObservedWindowsAndPreservesUnrelatedState() {
+	now := time.Now().UTC().Truncate(time.Second)
+	resetAt := now.Add(5 * time.Hour)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:                "acc-clear-quota-snapshot",
+		Platform:            service.PlatformAnthropic,
+		Type:                service.AccountTypeSetupToken,
+		Status:              service.StatusActive,
+		Schedulable:         true,
+		RateLimitedAt:       &now,
+		RateLimitResetAt:    &resetAt,
+		SessionWindowStart:  &now,
+		SessionWindowEnd:    &resetAt,
+		SessionWindowStatus: "rejected",
+		Extra: map[string]any{
+			"session_window_utilization":             1.0,
+			"passive_usage_7d_utilization":           1.0,
+			"passive_usage_7d_reset":                 resetAt.Unix(),
+			"passive_usage_7d_sonnet_utilization":    1.0,
+			"passive_usage_7d_sonnet_reset":          resetAt.Unix(),
+			"passive_usage_sampled_at":               now.Format(time.RFC3339),
+			"codex_5h_used_percent":                  100.0,
+			"codex_5h_reset_at":                      resetAt.Format(time.RFC3339),
+			"codex_7d_used_percent":                  100.0,
+			"codex_7d_reset_at":                      resetAt.Format(time.RFC3339),
+			"claude_oauth_mode":                      "carpool",
+			"claude_oauth_carpool_unlimited_devices": true,
+		},
+	})
+
+	s.Require().NoError(s.repo.ClearQuotaSnapshot(s.ctx, account.ID))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(got.RateLimitedAt)
+	s.Require().Nil(got.RateLimitResetAt)
+	s.Require().Nil(got.SessionWindowStart)
+	s.Require().Nil(got.SessionWindowEnd)
+	s.Require().Empty(got.SessionWindowStatus)
+	for _, key := range []string{
+		"session_window_utilization",
+		"passive_usage_7d_utilization",
+		"passive_usage_7d_reset",
+		"passive_usage_7d_sonnet_utilization",
+		"passive_usage_7d_sonnet_reset",
+		"passive_usage_sampled_at",
+		"codex_5h_used_percent",
+		"codex_5h_reset_at",
+		"codex_7d_used_percent",
+		"codex_7d_reset_at",
+	} {
+		_, exists := got.Extra[key]
+		s.Require().False(exists, "quota snapshot key %q should be removed", key)
+	}
+	s.Require().Equal("carpool", got.Extra["claude_oauth_mode"])
+	s.Require().Equal(true, got.Extra["claude_oauth_carpool_unlimited_devices"])
+}
+
 func (s *AccountRepoSuite) TestUpdateExtra_MergesFields() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:  "acc-extra",

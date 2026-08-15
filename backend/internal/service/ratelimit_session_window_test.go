@@ -54,6 +54,7 @@ func (m *sessionWindowMockRepo) UpdateExtra(_ context.Context, id int64, updates
 	m.updateExtraCalls = append(m.updateExtraCalls, ueCall{ID: id, Updates: updates})
 	return nil
 }
+func (m *sessionWindowMockRepo) ClearQuotaSnapshot(context.Context, int64) error { return nil }
 func (m *sessionWindowMockRepo) ClearRateLimit(_ context.Context, id int64) error {
 	m.clearRateLimitIDs = append(m.clearRateLimitIDs, id)
 	return nil

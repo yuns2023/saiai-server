@@ -29,6 +29,10 @@
               <Icon name="sync" size="sm" />
               {{ t('admin.accounts.recoverState') }}
             </button>
+            <button v-if="canClearQuotaSnapshot" @click="$emit('clear-quota-snapshot', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-amber-600 hover:bg-gray-100 dark:hover:bg-dark-700">
+              <Icon name="refresh" size="sm" />
+              {{ t('admin.accounts.clearQuotaSnapshot') }}
+            </button>
             <button v-if="!isRetiredPlatform && hasQuotaLimit" @click="$emit('reset-quota', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-teal-600 hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="refresh" size="sm" />
               {{ t('admin.accounts.resetQuota') }}
@@ -47,7 +51,7 @@ import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
 
 const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null }>()
-const emit = defineEmits(['close', 'stats', 'reauth', 'refresh-token', 'recover-state', 'reset-quota'])
+const emit = defineEmits(['close', 'stats', 'reauth', 'refresh-token', 'recover-state', 'clear-quota-snapshot', 'reset-quota'])
 const { t } = useI18n()
 const isRetiredPlatform = computed(() => props.account?.platform === 'antigravity' || props.account?.platform === 'sora')
 const isRateLimited = computed(() => {
@@ -67,6 +71,15 @@ const isOverloaded = computed(() => props.account?.overload_until && new Date(pr
 const isTempUnschedulable = computed(() => props.account?.temp_unschedulable_until && new Date(props.account.temp_unschedulable_until) > new Date())
 const hasRecoverableState = computed(() => {
   return props.account?.status === 'error' || Boolean(isRateLimited.value) || Boolean(isOverloaded.value) || Boolean(isTempUnschedulable.value)
+})
+const canClearQuotaSnapshot = computed(() => {
+  const account = props.account
+  if (!account) return false
+  return (
+    account.platform === 'anthropic' && (account.type === 'oauth' || account.type === 'setup-token')
+  ) || (
+    account.platform === 'openai' && account.type === 'oauth'
+  )
 })
 const hasQuotaLimit = computed(() => {
   return (props.account?.type === 'apikey' || props.account?.type === 'bedrock') && (

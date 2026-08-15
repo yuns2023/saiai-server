@@ -19,11 +19,13 @@ type rateLimitClearRepoStub struct {
 	getByIDCalls              int
 	clearErrorCalls           int
 	clearRateLimitCalls       int
+	clearQuotaSnapshotCalls   int
 	clearAntigravityCalls     int
 	clearModelRateLimitCalls  int
 	clearTempUnschedCalls     int
 	clearErrorErr             error
 	clearRateLimitErr         error
+	clearQuotaSnapshotErr     error
 	clearAntigravityErr       error
 	clearModelRateLimitErr    error
 	clearTempUnschedulableErr error
@@ -45,6 +47,11 @@ func (r *rateLimitClearRepoStub) ClearError(ctx context.Context, id int64) error
 func (r *rateLimitClearRepoStub) ClearRateLimit(ctx context.Context, id int64) error {
 	r.clearRateLimitCalls++
 	return r.clearRateLimitErr
+}
+
+func (r *rateLimitClearRepoStub) ClearQuotaSnapshot(ctx context.Context, id int64) error {
+	r.clearQuotaSnapshotCalls++
+	return r.clearQuotaSnapshotErr
 }
 
 func (r *rateLimitClearRepoStub) ClearAntigravityQuotaScopes(ctx context.Context, id int64) error {
@@ -198,6 +205,68 @@ func TestRateLimitService_ClearRateLimit_WithoutTempUnschedCache(t *testing.T) {
 	require.Equal(t, 1, repo.clearAntigravityCalls)
 	require.Equal(t, 1, repo.clearModelRateLimitCalls)
 	require.Equal(t, 1, repo.clearTempUnschedCalls)
+}
+
+func TestRateLimitService_ClearQuotaSnapshot_AnthropicSetupToken(t *testing.T) {
+	repo := &rateLimitClearRepoStub{
+		getByIDAccount: &Account{
+			ID:       13,
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeSetupToken,
+		},
+	}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+	err := svc.ClearQuotaSnapshot(context.Background(), 13)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.getByIDCalls)
+	require.Equal(t, 1, repo.clearQuotaSnapshotCalls)
+}
+
+func TestRateLimitService_ClearQuotaSnapshot_OpenAIOAuth(t *testing.T) {
+	repo := &rateLimitClearRepoStub{
+		getByIDAccount: &Account{
+			ID:       27,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+		},
+	}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+	err := svc.ClearQuotaSnapshot(context.Background(), 27)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.clearQuotaSnapshotCalls)
+}
+
+func TestRateLimitService_ClearQuotaSnapshot_RejectsUnsupportedAccount(t *testing.T) {
+	repo := &rateLimitClearRepoStub{
+		getByIDAccount: &Account{
+			ID:       31,
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeAPIKey,
+		},
+	}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+	err := svc.ClearQuotaSnapshot(context.Background(), 31)
+	require.ErrorIs(t, err, ErrQuotaSnapshotUnsupported)
+	require.Zero(t, repo.clearQuotaSnapshotCalls)
+}
+
+func TestRateLimitService_ClearQuotaSnapshot_PropagatesRepositoryError(t *testing.T) {
+	wantErr := errors.New("clear quota snapshot failed")
+	repo := &rateLimitClearRepoStub{
+		getByIDAccount: &Account{
+			ID:       41,
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeOAuth,
+		},
+		clearQuotaSnapshotErr: wantErr,
+	}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+	err := svc.ClearQuotaSnapshot(context.Background(), 41)
+	require.ErrorIs(t, err, wantErr)
 }
 
 func TestRateLimitService_RecoverAccountAfterSuccessfulTest_ClearsErrorAndRateLimitRelatedState(t *testing.T) {

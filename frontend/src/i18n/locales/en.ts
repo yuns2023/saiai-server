@@ -2053,6 +2053,10 @@ export default {
         }
       },
       clearRateLimit: 'Clear Rate Limit',
+      clearQuotaSnapshot: 'Clear Local Quota Snapshot',
+      clearQuotaSnapshotConfirm: 'Clear the local 5h/7d quota snapshot for "{name}"? This does not change the upstream subscription or send a request. The next normal request will record the current quota again.',
+      clearQuotaSnapshotSuccess: 'Local quota snapshot cleared',
+      clearQuotaSnapshotFailed: 'Failed to clear local quota snapshot',
       resetQuota: 'Reset Quota',
       quotaLimit: 'Quota Limit',
       quotaLimitPlaceholder: '0 means unlimited',
