@@ -474,16 +474,19 @@ type OpenAIGatewayService struct {
 	openaiWSStateStoreOnce        sync.Once
 	openaiSchedulerOnce           sync.Once
 	openaiWSPassthroughDialerOnce sync.Once
+	unpricedModelGuardOnce        sync.Once
 	openaiWSPool                  *openAIWSConnPool
 	openaiWSStateStore            OpenAIWSStateStore
 	openaiScheduler               OpenAIAccountScheduler
 	openaiWSPassthroughDialer     openAIWSClientDialer
 	openaiAccountStats            *openAIAccountRuntimeStats
 
-	openaiWSFallbackUntil sync.Map // key: int64(accountID), value: time.Time
-	openaiWSRetryMetrics  openAIWSRetryMetrics
-	responseHeaderFilter  *responseheaders.CompiledHeaderFilter
-	codexSnapshotThrottle *accountWriteThrottle
+	openaiWSFallbackUntil    sync.Map // key: int64(accountID), value: time.Time
+	openaiWSRetryMetrics     openAIWSRetryMetrics
+	responseHeaderFilter     *responseheaders.CompiledHeaderFilter
+	codexSnapshotThrottle    *accountWriteThrottle
+	codexModelsManifestCache codexModelsManifestCache
+	unpricedModelGuard       *openAIUnpricedModelGuard
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -533,6 +536,7 @@ func NewOpenAIGatewayService(
 		openaiWSResolver:      NewOpenAIWSProtocolResolver(cfg),
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
+		unpricedModelGuard:    newOpenAIUnpricedModelGuard(cfg, cache),
 	}
 	svc.logOpenAIWSModeBootstrap()
 	return svc
@@ -1970,17 +1974,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
-	// 计费定价校验：在 OAuth 协议变换之后执行，使用最终模型名（OAuth 取规范化结果，其他取原样）。
-	if mappedModel != "" && !s.HasModelPricing(mappedModel) {
+	// 新模型优先透传；只有缺定价成功计数达到配置阈值时，才按模型短时熔断。
+	if mappedModel != "" && !s.HasModelPricing(mappedModel) && s.isUnpricedModelCircuitOpen(ctx, mappedModel) {
 		if c != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
+			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error": gin.H{
-					"type":    "invalid_request_error",
-					"message": unavailableModelPricingMessage(originalModel),
+					"type":    "rate_limit_error",
+					"message": unpricedModelCircuitMessage(originalModel),
 				},
 			})
 		}
-		return nil, fmt.Errorf("billing pricing not found for resolved openai model %s (requested %s)", mappedModel, originalModel)
+		return nil, fmt.Errorf("openai unpriced-model circuit open for %s (requested %s)", mappedModel, originalModel)
 	}
 
 	// Handle max_output_tokens based on platform and account type
@@ -3773,9 +3777,21 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result.ServiceTier != nil {
 		serviceTier = strings.TrimSpace(*result.ServiceTier)
 	}
+	pricingMissing := false
 	cost, err := s.billingService.CalculateCostWithServiceTier(billingModel, tokens, multiplier, serviceTier)
 	if err != nil {
-		return fmt.Errorf("calculate openai usage cost for model %s: %w", billingModel, err)
+		if !errors.Is(err, ErrModelPricingUnavailable) {
+			return fmt.Errorf("calculate openai usage cost for model %s: %w", billingModel, err)
+		}
+		cost = &CostBreakdown{}
+		pricingMissing = true
+		logger.L().Warn("openai usage recorded with zero cost because pricing is unavailable",
+			zap.String("model", unpricedModelLogValue(billingModel)),
+			zap.Int("input_tokens", tokens.InputTokens),
+			zap.Int("output_tokens", tokens.OutputTokens),
+			zap.Int("cache_creation_tokens", tokens.CacheCreationTokens),
+			zap.Int("cache_read_tokens", tokens.CacheReadTokens),
+		)
 	}
 
 	// Determine billing type
@@ -3839,31 +3855,34 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+		if pricingMissing {
+			s.recordUnpricedModelSuccess(ctx, billingModel)
+		}
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 		return nil
 	}
 
-	billingErr := func() error {
-		_, err := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
-			Cost:                  cost,
-			User:                  user,
-			APIKey:                apiKey,
-			Account:               account,
-			Subscription:          subscription,
-			BillingModel:          billingModel,
-			RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
-			IsSubscriptionBill:    isSubscriptionBilling,
-			AccountRateMultiplier: accountRateMultiplier,
-			APIKeyService:         input.APIKeyService,
-		}, s.billingDeps(), s.usageBillingRepo)
-		return err
-	}()
+	billingApplied, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+		Cost:                  cost,
+		User:                  user,
+		APIKey:                apiKey,
+		Account:               account,
+		Subscription:          subscription,
+		BillingModel:          billingModel,
+		RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
+		IsSubscriptionBill:    isSubscriptionBilling,
+		AccountRateMultiplier: accountRateMultiplier,
+		APIKeyService:         input.APIKeyService,
+	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {
 		return billingErr
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+	if pricingMissing && billingApplied {
+		s.recordUnpricedModelSuccess(ctx, billingModel)
+	}
 
 	return nil
 }

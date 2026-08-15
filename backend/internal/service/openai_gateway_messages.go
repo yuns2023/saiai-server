@@ -61,9 +61,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	mappedModel := originalModel
 	responsesReq.Model = mappedModel
 
-	if mappedModel != "" && !s.HasModelPricing(mappedModel) {
-		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", unavailableModelPricingMessage(originalModel))
-		return nil, fmt.Errorf("billing pricing not found for anthropic compat model %s", originalModel)
+	if mappedModel != "" && !s.HasModelPricing(mappedModel) && s.isUnpricedModelCircuitOpen(c.Request.Context(), mappedModel) {
+		writeAnthropicError(c, http.StatusTooManyRequests, "rate_limit_error", unpricedModelCircuitMessage(originalModel))
+		return nil, fmt.Errorf("openai unpriced-model circuit open for anthropic compat model %s", originalModel)
 	}
 
 	logger.L().Debug("openai messages: forwarding upstream",

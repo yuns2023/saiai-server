@@ -1266,6 +1266,19 @@ func TestValidateConfigErrors(t *testing.T) {
 			wantErr: "gateway.models_list_cache_ttl_seconds",
 		},
 		{
+			name:    "gateway openai unpriced model max successes",
+			mutate:  func(c *Config) { c.Gateway.OpenAIUnpricedModelMaxSuccesses = -1 },
+			wantErr: "gateway.openai_unpriced_model_max_successes",
+		},
+		{
+			name: "gateway openai unpriced model window",
+			mutate: func(c *Config) {
+				c.Gateway.OpenAIUnpricedModelMaxSuccesses = 1
+				c.Gateway.OpenAIUnpricedModelWindowSeconds = 59
+			},
+			wantErr: "gateway.openai_unpriced_model_window_seconds",
+		},
+		{
 			name:    "gateway scheduling sticky waiting",
 			mutate:  func(c *Config) { c.Gateway.Scheduling.StickySessionMaxWaiting = 0 },
 			wantErr: "gateway.scheduling.sticky_session_max_waiting",
