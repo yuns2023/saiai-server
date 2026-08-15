@@ -44,6 +44,10 @@ HTTP, WebSocket and WebSocket v2 billing resolver aligned.
 ## Change discipline
 
 - Preserve unrelated work in a dirty tree.
+- This is a single-maintainer repository. Default to one checkout with
+  short-lived branches; do not create Git worktrees unless the user explicitly
+  requests one. If the checkout is dirty, preserve and close out that work
+  before starting another task.
 - Prefer targeted searches with `rg` and narrow tests while iterating.
 - Do not run real provider requests as tests. Use local mock upstreams.
 - Do not print or commit secrets, private certificates, captures, database
