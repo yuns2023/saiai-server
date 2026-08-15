@@ -75,6 +75,8 @@ func RegisterGatewayRoutes(
 		gateway.POST("/responses", h.OpenAIGateway.Responses)
 		gateway.POST("/responses/*subpath", h.OpenAIGateway.Responses)
 		gateway.GET("/responses", h.OpenAIGateway.ResponsesWebSocket)
+		gateway.POST("/images/generations", h.OpenAIGateway.ImagesGenerations)
+		gateway.POST("/images/edits", h.OpenAIGateway.ImagesEdits)
 		// 透传哲学：ChatGPT OAuth 订阅后端不存在 /v1/chat/completions 接口；
 		// 中转层不再做 chat_completions → /responses 的协议翻译。
 		// 第三方非 codex 客户端如需对接 OAuth 订阅，请自行包一层适配。

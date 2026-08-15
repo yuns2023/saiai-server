@@ -49,6 +49,8 @@ type LiteLLMModelPricing struct {
 	Mode                                   string  `json:"mode"`
 	SupportsPromptCaching                  bool    `json:"supports_prompt_caching"`
 	OutputCostPerImage                     float64 `json:"output_cost_per_image"` // 图片生成模型每张图片价格
+	InputCostPerImageToken                 float64 `json:"input_cost_per_image_token"`
+	OutputCostPerImageToken                float64 `json:"output_cost_per_image_token"`
 }
 
 // PricingRemoteClient 远程价格数据获取接口
@@ -82,6 +84,8 @@ type LiteLLMRawEntry struct {
 	Mode                                   string   `json:"mode"`
 	SupportsPromptCaching                  bool     `json:"supports_prompt_caching"`
 	OutputCostPerImage                     *float64 `json:"output_cost_per_image"`
+	InputCostPerImageToken                 *float64 `json:"input_cost_per_image_token"`
+	OutputCostPerImageToken                *float64 `json:"output_cost_per_image_token"`
 }
 
 // PricingService 动态价格服务
@@ -390,6 +394,12 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		}
 		if entry.OutputCostPerImage != nil {
 			pricing.OutputCostPerImage = *entry.OutputCostPerImage
+		}
+		if entry.InputCostPerImageToken != nil {
+			pricing.InputCostPerImageToken = *entry.InputCostPerImageToken
+		}
+		if entry.OutputCostPerImageToken != nil {
+			pricing.OutputCostPerImageToken = *entry.OutputCostPerImageToken
 		}
 		if entry.LongContextInputTokenThreshold != nil {
 			pricing.LongContextInputTokenThreshold = *entry.LongContextInputTokenThreshold
