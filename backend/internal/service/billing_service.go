@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"log"
@@ -9,6 +10,11 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
+
+// ErrModelPricingUnavailable identifies a missing price independently from
+// calculation/storage failures. Gateways may pass a new upstream model through
+// while recording a zero-cost usage row for later reconciliation.
+var ErrModelPricingUnavailable = errors.New("pricing not found for model")
 
 // APIKeyRateLimitCacheData holds rate limit usage data cached in Redis.
 type APIKeyRateLimitCacheData struct {
@@ -315,7 +321,7 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 		return s.applyModelSpecificPricingPolicy(model, fallback), nil
 	}
 
-	return nil, fmt.Errorf("pricing not found for model: %s", model)
+	return nil, fmt.Errorf("%w: %s", ErrModelPricingUnavailable, model)
 }
 
 func isInvalidDynamicPricing(pricing *LiteLLMModelPricing) bool {
@@ -344,7 +350,7 @@ func (s *BillingService) CalculateImageTokenCost(model string, tokens ImageUsage
 		return nil, err
 	}
 	if pricing.InputPricePerToken <= 0 || pricing.InputImagePricePerToken <= 0 || pricing.OutputImagePricePerToken <= 0 {
-		return nil, fmt.Errorf("image token pricing incomplete for model: %s", model)
+		return nil, fmt.Errorf("%w: image token pricing incomplete for %s", ErrModelPricingUnavailable, model)
 	}
 	breakdown := &CostBreakdown{
 		InputCost: float64(tokens.TextInputTokens)*pricing.InputPricePerToken +

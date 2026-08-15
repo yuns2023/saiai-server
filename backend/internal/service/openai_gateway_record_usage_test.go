@@ -606,7 +606,7 @@ func TestOpenAIGatewayServiceRecordUsage_BillingFingerprintIncludesRequestPayloa
 	require.Equal(t, payloadHash, billingRepo.lastCmd.RequestPayloadHash)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_FailsClosedWhenPricingMissing(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_RecordsZeroCostWhenPricingMissing(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	subRepo := &openAIRecordUsageSubRepoStub{}
@@ -627,8 +627,15 @@ func TestOpenAIGatewayServiceRecordUsage_FailsClosedWhenPricingMissing(t *testin
 		Account: &Account{ID: 710},
 	})
 
-	require.ErrorContains(t, err, "pricing not found")
-	require.Nil(t, usageRepo.lastLog)
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, "gpt-5-unknown-preview", usageRepo.lastLog.Model)
+	require.Equal(t, 10, usageRepo.lastLog.InputTokens)
+	require.Equal(t, 6, usageRepo.lastLog.OutputTokens)
+	require.Zero(t, usageRepo.lastLog.InputCost)
+	require.Zero(t, usageRepo.lastLog.OutputCost)
+	require.Zero(t, usageRepo.lastLog.TotalCost)
+	require.Zero(t, usageRepo.lastLog.ActualCost)
 	require.Equal(t, 0, userRepo.deductCalls)
 	require.Equal(t, 0, subRepo.incrementCalls)
 }

@@ -466,6 +466,11 @@ type GatewayConfig struct {
 	UserGroupRateCacheTTLSeconds int `mapstructure:"user_group_rate_cache_ttl_seconds"`
 	// ModelsListCacheTTLSeconds: /v1/models 模型列表短缓存 TTL（秒）
 	ModelsListCacheTTLSeconds int `mapstructure:"models_list_cache_ttl_seconds"`
+	// OpenAIUnpricedModelMaxSuccesses: 缺少定价时允许成功落账为零成本的次数。
+	// 达到阈值后仅阻断该模型，0 表示关闭保护阈值。
+	OpenAIUnpricedModelMaxSuccesses int `mapstructure:"openai_unpriced_model_max_successes"`
+	// OpenAIUnpricedModelWindowSeconds: 上述计数窗口（秒）。
+	OpenAIUnpricedModelWindowSeconds int `mapstructure:"openai_unpriced_model_window_seconds"`
 
 	// UserMessageQueue: 用户消息串行队列配置
 	// 对 role:"user" 的真实用户消息实施账号级串行化 + RPM 自适应延迟
@@ -1445,6 +1450,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.usage_record.auto_scale_cooldown_seconds", 10)
 	viper.SetDefault("gateway.user_group_rate_cache_ttl_seconds", 30)
 	viper.SetDefault("gateway.models_list_cache_ttl_seconds", 15)
+	viper.SetDefault("gateway.openai_unpriced_model_max_successes", 100)
+	viper.SetDefault("gateway.openai_unpriced_model_window_seconds", 3600)
 	// TLS指纹伪装配置（默认关闭，需要账号级别单独启用）
 	// 用户消息串行队列默认值
 	viper.SetDefault("gateway.user_message_queue.enabled", false)
@@ -2079,6 +2086,13 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ModelsListCacheTTLSeconds < 10 || c.Gateway.ModelsListCacheTTLSeconds > 30 {
 		return fmt.Errorf("gateway.models_list_cache_ttl_seconds must be between 10-30")
+	}
+	if c.Gateway.OpenAIUnpricedModelMaxSuccesses < 0 {
+		return fmt.Errorf("gateway.openai_unpriced_model_max_successes must be non-negative")
+	}
+	if c.Gateway.OpenAIUnpricedModelMaxSuccesses > 0 &&
+		(c.Gateway.OpenAIUnpricedModelWindowSeconds < 60 || c.Gateway.OpenAIUnpricedModelWindowSeconds > 86400) {
+		return fmt.Errorf("gateway.openai_unpriced_model_window_seconds must be between 60-86400 when protection is enabled")
 	}
 	if c.Gateway.Scheduling.StickySessionMaxWaiting <= 0 {
 		return fmt.Errorf("gateway.scheduling.sticky_session_max_waiting must be positive")

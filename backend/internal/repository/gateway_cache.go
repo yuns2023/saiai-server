@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -11,6 +13,16 @@ import (
 
 const stickySessionPrefix = "sticky_session:"
 const pendingStickySessionPrefix = "pending_sticky_session:"
+const openAIUnpricedModelSuccessPrefix = "openai_unpriced_model_success:"
+
+var incrementOpenAIUnpricedModelSuccessScript = redis.NewScript(`
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+local ttl = redis.call('TTL', KEYS[1])
+return {count, ttl}
+`)
 
 type gatewayCache struct {
 	rdb *redis.Client
@@ -28,6 +40,50 @@ func buildSessionKey(groupID int64, sessionHash string) string {
 
 func buildPendingSessionKey(groupID int64, sessionHash string) string {
 	return fmt.Sprintf("%s%d:%s", pendingStickySessionPrefix, groupID, sessionHash)
+}
+
+func buildOpenAIUnpricedModelSuccessKey(model string) string {
+	digest := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(model))))
+	return fmt.Sprintf("%s%x", openAIUnpricedModelSuccessPrefix, digest)
+}
+
+func (c *gatewayCache) GetUnpricedModelSuccessCount(ctx context.Context, model string) (int64, time.Duration, error) {
+	key := buildOpenAIUnpricedModelSuccessKey(model)
+	count, err := c.rdb.Get(ctx, key).Int64()
+	if err == redis.Nil {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	ttl, err := c.rdb.TTL(ctx, key).Result()
+	if err != nil {
+		return 0, 0, err
+	}
+	return count, ttl, nil
+}
+
+func (c *gatewayCache) IncrementUnpricedModelSuccessCount(ctx context.Context, model string, window time.Duration) (int64, time.Duration, error) {
+	windowSeconds := int64(window / time.Second)
+	if windowSeconds < 1 {
+		windowSeconds = 1
+	}
+	values, err := incrementOpenAIUnpricedModelSuccessScript.Run(ctx, c.rdb, []string{buildOpenAIUnpricedModelSuccessKey(model)}, windowSeconds).Slice()
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(values) != 2 {
+		return 0, 0, fmt.Errorf("unexpected unpriced-model counter result length: %d", len(values))
+	}
+	count, ok := values[0].(int64)
+	if !ok {
+		return 0, 0, fmt.Errorf("unexpected unpriced-model counter type %T", values[0])
+	}
+	ttlSeconds, ok := values[1].(int64)
+	if !ok {
+		return 0, 0, fmt.Errorf("unexpected unpriced-model ttl type %T", values[1])
+	}
+	return count, time.Duration(ttlSeconds) * time.Second, nil
 }
 
 func (c *gatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -113,4 +114,14 @@ func TestCalculateImageTokenCostUsesSeparateModalities(t *testing.T) {
 	require.InDelta(t, 0.0009, cost.OutputCost, 1e-12)
 	require.InDelta(t, 0.00111, cost.TotalCost, 1e-12)
 	require.InDelta(t, 0.001665, cost.ActualCost, 1e-12)
+}
+
+func TestCalculateImageTokenCostClassifiesIncompletePricing(t *testing.T) {
+	pricing := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"custom-image-model": {InputCostPerToken: 5e-6, OutputCostPerToken: 10e-6},
+	}}
+	billing := NewBillingService(&config.Config{}, pricing)
+	_, err := billing.CalculateImageTokenCost("custom-image-model", ImageUsageTokens{ImageOutputTokens: 1}, 1)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrModelPricingUnavailable))
 }

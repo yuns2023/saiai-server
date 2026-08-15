@@ -204,6 +204,12 @@ gateway:
   #
   # 注意：开启后会影响所有客户端的行为（不仅限于 VS Code / Codex CLI），请谨慎开启。
   force_codex_cli: false
+  # Pass new OpenAI/Codex models through before pricing is available. Successful
+  # usage is recorded at zero cost and counted per model; the next request is
+  # blocked for the remainder of the window after this threshold. Set 0 to disable.
+  # 新 OpenAI/Codex 模型缺少定价时先透传并以零成本记录；达到阈值后仅熔断该模型。
+  openai_unpriced_model_max_successes: 100
+  openai_unpriced_model_window_seconds: 3600
   # OpenAI 透传模式是否放行客户端超时头（如 x-stainless-timeout）
   # 默认 false：过滤超时头，降低上游提前断流风险。
   openai_passthrough_allow_timeout_headers: false
