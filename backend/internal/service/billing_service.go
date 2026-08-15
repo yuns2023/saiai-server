@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"log"
@@ -9,6 +10,11 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
+
+// ErrModelPricingUnavailable identifies a missing price independently from
+// calculation/storage failures. Gateways may pass a new upstream model through
+// while recording a zero-cost usage row for later reconciliation.
+var ErrModelPricingUnavailable = errors.New("pricing not found for model")
 
 // APIKeyRateLimitCacheData holds rate limit usage data cached in Redis.
 type APIKeyRateLimitCacheData struct {
@@ -304,7 +310,7 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 		return s.applyModelSpecificPricingPolicy(model, fallback), nil
 	}
 
-	return nil, fmt.Errorf("pricing not found for model: %s", model)
+	return nil, fmt.Errorf("%w: %s", ErrModelPricingUnavailable, model)
 }
 
 func isInvalidDynamicPricing(pricing *LiteLLMModelPricing) bool {
