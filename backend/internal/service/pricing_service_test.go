@@ -65,6 +65,25 @@ func TestParsePricingData_ParsesPriorityAndServiceTierFields(t *testing.T) {
 	require.True(t, pricing.SupportsServiceTier)
 }
 
+func TestParsePricingData_PreservesImageTokenPrices(t *testing.T) {
+	svc := &PricingService{}
+	data, err := svc.parsePricingData([]byte(`{
+		"gpt-image-2": {
+			"input_cost_per_token": 0.000005,
+			"output_cost_per_token": 0.00001,
+			"input_cost_per_image_token": 0.000008,
+			"output_cost_per_image_token": 0.00003,
+			"litellm_provider": "openai",
+			"mode": "image_generation"
+		}
+	}`))
+	require.NoError(t, err)
+	pricing := data["gpt-image-2"]
+	require.NotNil(t, pricing)
+	require.InDelta(t, 8e-6, pricing.InputCostPerImageToken, 1e-12)
+	require.InDelta(t, 30e-6, pricing.OutputCostPerImageToken, 1e-12)
+}
+
 func TestParsePricingData_DerivesWholeRequestAbove272kPolicy(t *testing.T) {
 	svc := &PricingService{}
 	data, err := svc.parsePricingData([]byte(`{

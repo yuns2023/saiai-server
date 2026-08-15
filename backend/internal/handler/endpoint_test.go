@@ -157,3 +157,10 @@ func TestGetUpstreamEndpoint_FullFlow(t *testing.T) {
 	got := GetUpstreamEndpoint(c, service.PlatformOpenAI)
 	require.Equal(t, "/v1/responses/compact", got)
 }
+
+func TestOpenAIImageEndpointsRemainDirect(t *testing.T) {
+	for _, endpoint := range []string{EndpointImageGenerations, EndpointImageEdits} {
+		require.Equal(t, endpoint, NormalizeInboundEndpoint(endpoint))
+		require.Equal(t, endpoint, DeriveUpstreamEndpoint(endpoint, endpoint, service.PlatformOpenAI))
+	}
+}

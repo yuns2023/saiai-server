@@ -248,6 +248,13 @@ type OpenAIForwardResult struct {
 	ResponseHeaders http.Header
 	Duration        time.Duration
 	FirstTokenMs    *int
+	// Image API accounting metadata. Zero values keep Responses API behavior unchanged.
+	TextInputTokens   int
+	ImageInputTokens  int
+	ImageOutputTokens int
+	ImageCount        int
+	ImageSize         string
+	MediaType         string
 }
 
 type OpenAIWSRetryMetricsSnapshot struct {
@@ -3731,7 +3738,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// 跳过所有 token 均为零的用量记录——上游未返回 usage 时不应写入数据库
 	if result.Usage.InputTokens == 0 && result.Usage.OutputTokens == 0 &&
-		result.Usage.CacheCreationInputTokens == 0 && result.Usage.CacheReadInputTokens == 0 {
+		result.Usage.CacheCreationInputTokens == 0 && result.Usage.CacheReadInputTokens == 0 &&
+		result.ImageCount == 0 && result.ImageInputTokens == 0 && result.ImageOutputTokens == 0 {
 		return nil
 	}
 
@@ -3773,7 +3781,17 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result.ServiceTier != nil {
 		serviceTier = strings.TrimSpace(*result.ServiceTier)
 	}
-	cost, err := s.billingService.CalculateCostWithServiceTier(billingModel, tokens, multiplier, serviceTier)
+	var cost *CostBreakdown
+	var err error
+	if result.MediaType == "image" {
+		cost, err = s.billingService.CalculateImageTokenCost(billingModel, ImageUsageTokens{
+			TextInputTokens:   result.TextInputTokens,
+			ImageInputTokens:  result.ImageInputTokens,
+			ImageOutputTokens: result.ImageOutputTokens,
+		}, multiplier)
+	} else {
+		cost, err = s.billingService.CalculateCostWithServiceTier(billingModel, tokens, multiplier, serviceTier)
+	}
 	if err != nil {
 		return fmt.Errorf("calculate openai usage cost for model %s: %w", billingModel, err)
 	}
@@ -3819,6 +3837,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		DurationMs:            &durationMs,
 		FirstTokenMs:          result.FirstTokenMs,
 		CreatedAt:             time.Now(),
+		ImageCount:            result.ImageCount,
+	}
+	if strings.TrimSpace(result.ImageSize) != "" {
+		usageLog.ImageSize = &result.ImageSize
+	}
+	if strings.TrimSpace(result.MediaType) != "" {
+		usageLog.MediaType = &result.MediaType
 	}
 	// 添加 UserAgent
 	if input.UserAgent != "" {

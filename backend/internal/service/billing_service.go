@@ -59,6 +59,8 @@ type ModelPricing struct {
 	LongContextOutputMultiplier        float64 // 长上下文整次会话输出倍率
 	LongContextCacheCreationMultiplier float64 // 长上下文整次会话缓存写入价格倍率
 	LongContextCacheReadMultiplier     float64 // 长上下文整次会话缓存读取价格倍率
+	InputImagePricePerToken            float64 // 图片输入每 token 价格 (USD)
+	OutputImagePricePerToken           float64 // 图片输出每 token 价格 (USD)
 }
 
 const (
@@ -101,6 +103,13 @@ type UsageTokens struct {
 	CacheReadTokens       int
 	CacheCreation5mTokens int
 	CacheCreation1hTokens int
+}
+
+// ImageUsageTokens separates text and image token categories returned by the Image API.
+type ImageUsageTokens struct {
+	TextInputTokens   int
+	ImageInputTokens  int
+	ImageOutputTokens int
 }
 
 // CostBreakdown 费用明细
@@ -293,6 +302,8 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 				LongContextOutputMultiplier:        litellmPricing.LongContextOutputCostMultiplier,
 				LongContextCacheCreationMultiplier: litellmPricing.LongContextCacheCreationCostMultiplier,
 				LongContextCacheReadMultiplier:     litellmPricing.LongContextCacheReadCostMultiplier,
+				InputImagePricePerToken:            litellmPricing.InputCostPerImageToken,
+				OutputImagePricePerToken:           litellmPricing.OutputCostPerImageToken,
 			}), nil
 		}
 	}
@@ -323,6 +334,29 @@ func (s *BillingService) HasModelPricing(model string) bool {
 // CalculateCost 计算使用费用
 func (s *BillingService) CalculateCost(model string, tokens UsageTokens, rateMultiplier float64) (*CostBreakdown, error) {
 	return s.CalculateCostWithServiceTier(model, tokens, rateMultiplier, "")
+}
+
+// CalculateImageTokenCost bills the Image API's text-input, image-input, and
+// image-output token categories without falling back to a guessed per-image price.
+func (s *BillingService) CalculateImageTokenCost(model string, tokens ImageUsageTokens, rateMultiplier float64) (*CostBreakdown, error) {
+	pricing, err := s.GetModelPricing(model)
+	if err != nil {
+		return nil, err
+	}
+	if pricing.InputPricePerToken <= 0 || pricing.InputImagePricePerToken <= 0 || pricing.OutputImagePricePerToken <= 0 {
+		return nil, fmt.Errorf("image token pricing incomplete for model: %s", model)
+	}
+	breakdown := &CostBreakdown{
+		InputCost: float64(tokens.TextInputTokens)*pricing.InputPricePerToken +
+			float64(tokens.ImageInputTokens)*pricing.InputImagePricePerToken,
+		OutputCost: float64(tokens.ImageOutputTokens) * pricing.OutputImagePricePerToken,
+	}
+	breakdown.TotalCost = breakdown.InputCost + breakdown.OutputCost
+	if rateMultiplier <= 0 {
+		rateMultiplier = 1
+	}
+	breakdown.ActualCost = breakdown.TotalCost * rateMultiplier
+	return breakdown, nil
 }
 
 func (s *BillingService) CalculateCostWithServiceTier(model string, tokens UsageTokens, rateMultiplier float64, serviceTier string) (*CostBreakdown, error) {
