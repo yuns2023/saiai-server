@@ -43,6 +43,7 @@ while retaining passthrough and zero-cost usage recording.
 ## Deliberate boundary
 
 Text/Responses model support does not imply image protocol support.
-`gpt-image-2` requires its image generation/editing endpoints, payloads,
-responses, and per-image billing to be implemented and validated as a separate
-change before SAIAI advertises it as a supported executable model.
+`gpt-image-2` is supported through the separate `/v1/images/generations` and
+`/v1/images/edits` contract documented in `OPENAI_IMAGES_GATEWAY.md`, including
+modality-specific token billing. It must not be sent to a text endpoint merely
+because it appears in model discovery.

@@ -106,13 +106,6 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string) {
 			return
 		}
 		account := selection.Account
-		if !account.IsOpenAIApiKey() {
-			if selection.Acquired && selection.ReleaseFunc != nil {
-				selection.ReleaseFunc()
-			}
-			failedAccountIDs[account.ID] = struct{}{}
-			continue
-		}
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 		accountRelease, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, false, &streamStarted, reqLog)
 		if !acquired {
