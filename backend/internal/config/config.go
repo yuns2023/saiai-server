@@ -462,6 +462,9 @@ type GatewayConfig struct {
 	// UsageRecord: 使用量记录异步队列配置（有界队列 + 固定 worker）
 	UsageRecord GatewayUsageRecordConfig `mapstructure:"usage_record"`
 
+	// InputModeration: 异步用户输入审核 sidecar 与有界 worker 配置
+	InputModeration GatewayInputModerationConfig `mapstructure:"input_moderation"`
+
 	// UserGroupRateCacheTTLSeconds: 用户分组倍率热路径缓存 TTL（秒）
 	UserGroupRateCacheTTLSeconds int `mapstructure:"user_group_rate_cache_ttl_seconds"`
 	// ModelsListCacheTTLSeconds: /v1/models 模型列表短缓存 TTL（秒）
@@ -645,6 +648,17 @@ type GatewayUsageRecordConfig struct {
 	AutoScaleCheckIntervalSeconds int `mapstructure:"auto_scale_check_interval_seconds"`
 	// AutoScaleCooldownSeconds: 自动扩缩容冷却时间（秒）
 	AutoScaleCooldownSeconds int `mapstructure:"auto_scale_cooldown_seconds"`
+}
+
+// GatewayInputModerationConfig 异步用户输入审核配置。
+// Endpoint 为空时全局关闭；分组开关仍默认关闭，需两者同时启用才会提交任务。
+type GatewayInputModerationConfig struct {
+	Endpoint              string `mapstructure:"endpoint"`
+	WorkerCount           int    `mapstructure:"worker_count"`
+	QueueSize             int    `mapstructure:"queue_size"`
+	RequestTimeoutSeconds int    `mapstructure:"request_timeout_seconds"`
+	MaxInputChars         int    `mapstructure:"max_input_chars"`
+	MaxJobAgeHours        int    `mapstructure:"max_job_age_hours"`
 }
 
 // SoraModelFiltersConfig Sora 模型过滤配置
@@ -1452,6 +1466,12 @@ func setDefaults() {
 	viper.SetDefault("gateway.models_list_cache_ttl_seconds", 15)
 	viper.SetDefault("gateway.openai_unpriced_model_max_successes", 100)
 	viper.SetDefault("gateway.openai_unpriced_model_window_seconds", 3600)
+	viper.SetDefault("gateway.input_moderation.endpoint", "")
+	viper.SetDefault("gateway.input_moderation.worker_count", 2)
+	viper.SetDefault("gateway.input_moderation.queue_size", 256)
+	viper.SetDefault("gateway.input_moderation.request_timeout_seconds", 15)
+	viper.SetDefault("gateway.input_moderation.max_input_chars", 32768)
+	viper.SetDefault("gateway.input_moderation.max_job_age_hours", 24)
 	// TLS指纹伪装配置（默认关闭，需要账号级别单独启用）
 	// 用户消息串行队列默认值
 	viper.SetDefault("gateway.user_message_queue.enabled", false)
@@ -2031,6 +2051,21 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.UsageRecord.TaskTimeoutSeconds <= 0 {
 		return fmt.Errorf("gateway.usage_record.task_timeout_seconds must be positive")
+	}
+	if c.Gateway.InputModeration.WorkerCount <= 0 {
+		return fmt.Errorf("gateway.input_moderation.worker_count must be positive")
+	}
+	if c.Gateway.InputModeration.QueueSize <= 0 {
+		return fmt.Errorf("gateway.input_moderation.queue_size must be positive")
+	}
+	if c.Gateway.InputModeration.RequestTimeoutSeconds <= 0 {
+		return fmt.Errorf("gateway.input_moderation.request_timeout_seconds must be positive")
+	}
+	if c.Gateway.InputModeration.MaxInputChars <= 0 {
+		return fmt.Errorf("gateway.input_moderation.max_input_chars must be positive")
+	}
+	if c.Gateway.InputModeration.MaxJobAgeHours <= 0 {
+		return fmt.Errorf("gateway.input_moderation.max_job_age_hours must be positive")
 	}
 	switch strings.ToLower(strings.TrimSpace(c.Gateway.UsageRecord.OverflowPolicy)) {
 	case UsageRecordOverflowPolicyDrop, UsageRecordOverflowPolicySample, UsageRecordOverflowPolicySync:

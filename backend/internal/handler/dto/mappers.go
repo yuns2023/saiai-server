@@ -135,15 +135,26 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		return nil
 	}
 	out := &AdminGroup{
-		Group:                   groupFromServiceBase(g),
-		ModelRouting:            g.ModelRouting,
-		ModelRoutingEnabled:     g.ModelRoutingEnabled,
-		MCPXMLInject:            g.MCPXMLInject,
-		SupportedModelScopes:    g.SupportedModelScopes,
-		AccountCount:            g.AccountCount,
-		ActiveAccountCount:      g.ActiveAccountCount,
-		RateLimitedAccountCount: g.RateLimitedAccountCount,
-		SortOrder:               g.SortOrder,
+		Group:                            groupFromServiceBase(g),
+		InputModerationEnabled:           g.InputModerationEnabled,
+		InputModerationAutoDisableUser:   g.InputModerationAutoDisableUser,
+		InputModerationCategories:        g.InputModerationCategories,
+		InputModerationActionMode:        g.InputModerationActionMode,
+		InputModerationCooldownMinutes:   g.InputModerationCooldownMinutes,
+		InputModerationDisableAfterHits:  g.InputModerationDisableAfterHits,
+		InputModerationStrikeWindowHours: g.InputModerationStrikeWindowHours,
+		InputModerationDedupeMinutes:     g.InputModerationDedupeMinutes,
+		CodexClientPolicy:                g.CodexClientPolicy,
+		ClaudeDeviceLimitMode:            g.ClaudeDeviceLimitMode,
+		ClaudeDeviceBaseLimit:            g.ClaudeDeviceBaseLimit,
+		ModelRouting:                     g.ModelRouting,
+		ModelRoutingEnabled:              g.ModelRoutingEnabled,
+		MCPXMLInject:                     g.MCPXMLInject,
+		SupportedModelScopes:             g.SupportedModelScopes,
+		AccountCount:                     g.AccountCount,
+		ActiveAccountCount:               g.ActiveAccountCount,
+		RateLimitedAccountCount:          g.RateLimitedAccountCount,
+		SortOrder:                        g.SortOrder,
 	}
 	if len(g.AccountGroups) > 0 {
 		out.AccountGroups = make([]AccountGroup, 0, len(g.AccountGroups))
@@ -184,7 +195,6 @@ func groupFromServiceBase(g *service.Group) Group {
 		FallbackGroupID:                 g.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: g.FallbackGroupIDOnInvalidRequest,
 		SoraStorageQuotaBytes:           g.SoraStorageQuotaBytes,
-		AllowMessagesDispatch:           g.AllowMessagesDispatch,
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}

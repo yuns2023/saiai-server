@@ -49,6 +49,8 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 			func() {},
 			nil,
 			nil,
+			nil,
+			nil,
 			exitCh,
 		)
 		sig := <-exitCh
@@ -67,6 +69,8 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 			}, true),
 			func(_ coderws.MessageType, _ []byte) error { return errors.New("boom") },
 			func() {},
+			nil,
+			nil,
 			nil,
 			nil,
 			exitCh,
@@ -90,6 +94,8 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 			func(_ coderws.MessageType, _ []byte) error { return nil },
 			func() {},
 			forwarded,
+			nil,
+			nil,
 			func(event RelayTraceEvent) {
 				traces = append(traces, event)
 			},
@@ -99,6 +105,42 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 		require.Equal(t, "read_client", sig.stage)
 		require.Equal(t, int64(1), forwarded.Load())
 		require.NotEmpty(t, traces)
+	})
+
+	t.Run("observes each subsequent client turn before forwarding", func(t *testing.T) {
+		t.Parallel()
+
+		exitCh := make(chan relayExitSignal, 1)
+		turns := &atomic.Int32{}
+		turns.Store(1) // the first payload is observed by Relay before this loop starts
+		var observedTurn int
+		var observedPayload []byte
+		upstreamWrites := 0
+		runClientToUpstream(
+			context.Background(),
+			newPassthroughTestFrameConn([]passthroughTestFrame{
+				{msgType: coderws.MessageText, payload: []byte(`{"type":"response.create","input":"next"}`)},
+			}, true),
+			func(_ coderws.MessageType, _ []byte) error {
+				upstreamWrites++
+				return nil
+			},
+			func() {},
+			nil,
+			turns,
+			func(turn int, payload []byte) error {
+				observedTurn = turn
+				observedPayload = append([]byte(nil), payload...)
+				return nil
+			},
+			nil,
+			exitCh,
+		)
+		sig := <-exitCh
+		require.Equal(t, "read_client", sig.stage)
+		require.Equal(t, 2, observedTurn)
+		require.JSONEq(t, `{"type":"response.create","input":"next"}`, string(observedPayload))
+		require.Equal(t, 1, upstreamWrites)
 	})
 }
 

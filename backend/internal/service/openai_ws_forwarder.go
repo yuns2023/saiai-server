@@ -219,8 +219,9 @@ func (e *OpenAIWSClientCloseError) Reason() string {
 
 // OpenAIWSIngressHooks 定义入站 WS 每个 turn 的生命周期回调。
 type OpenAIWSIngressHooks struct {
-	BeforeTurn func(turn int) error
-	AfterTurn  func(turn int, result *OpenAIForwardResult, turnErr error)
+	OnClientTurn func(turn int, rawPayload []byte) error
+	BeforeTurn   func(turn int) error
+	AfterTurn    func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
 func normalizeOpenAIWSLogValue(value string) string {
@@ -2546,6 +2547,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if err != nil {
 		return err
 	}
+	if hooks != nil && hooks.OnClientTurn != nil {
+		if err := hooks.OnClientTurn(1, firstPayload.rawForHash); err != nil {
+			return err
+		}
+	}
 
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 	stateStore := s.getOpenAIWSStateStore()
@@ -3482,6 +3488,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		nextPayload, parseErr := parseClientPayload(nextClientMessage)
 		if parseErr != nil {
 			return parseErr
+		}
+		if hooks != nil && hooks.OnClientTurn != nil {
+			if err := hooks.OnClientTurn(turn+1, nextPayload.rawForHash); err != nil {
+				return err
+			}
 		}
 		if nextPayload.promptCacheKey != "" {
 			// ingress 会话在整个客户端 WS 生命周期内复用同一上游连接；

@@ -106,8 +106,8 @@ available for an emergency re-stage.
 The Gateway may retain `/api/v1/client/bootstrap` schema 2 for compatibility
 with older clients during an explicitly chosen transition window. It remains
 API-key authenticated, non-cacheable, non-billable, and must not select an
-upstream account or issue a model request. `openai_messages_dispatch` remains
-protocol compatibility and does not imply native Claude capability.
+upstream account or issue a model request. OpenAI groups expose native Responses
+only; bootstrap does not advertise Claude Messages dispatch for them.
 
 The local-proxy client neither calls nor depends on this endpoint. Retaining
 the endpoint does not make `1.1.0` a V2 client and does not permit its manifest

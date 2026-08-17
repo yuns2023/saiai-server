@@ -81,8 +81,28 @@ const (
 	FieldSupportedModelScopes = "supported_model_scopes"
 	// FieldSortOrder holds the string denoting the sort_order field in the database.
 	FieldSortOrder = "sort_order"
-	// FieldAllowMessagesDispatch holds the string denoting the allow_messages_dispatch field in the database.
-	FieldAllowMessagesDispatch = "allow_messages_dispatch"
+	// FieldInputModerationEnabled holds the string denoting the input_moderation_enabled field in the database.
+	FieldInputModerationEnabled = "input_moderation_enabled"
+	// FieldInputModerationAutoDisableUser holds the string denoting the input_moderation_auto_disable_user field in the database.
+	FieldInputModerationAutoDisableUser = "input_moderation_auto_disable_user"
+	// FieldInputModerationCategories holds the string denoting the input_moderation_categories field in the database.
+	FieldInputModerationCategories = "input_moderation_categories"
+	// FieldInputModerationActionMode holds the string denoting the input_moderation_action_mode field in the database.
+	FieldInputModerationActionMode = "input_moderation_action_mode"
+	// FieldInputModerationCooldownMinutes holds the string denoting the input_moderation_cooldown_minutes field in the database.
+	FieldInputModerationCooldownMinutes = "input_moderation_cooldown_minutes"
+	// FieldInputModerationDisableAfterHits holds the string denoting the input_moderation_disable_after_hits field in the database.
+	FieldInputModerationDisableAfterHits = "input_moderation_disable_after_hits"
+	// FieldInputModerationStrikeWindowHours holds the string denoting the input_moderation_strike_window_hours field in the database.
+	FieldInputModerationStrikeWindowHours = "input_moderation_strike_window_hours"
+	// FieldInputModerationDedupeMinutes holds the string denoting the input_moderation_dedupe_minutes field in the database.
+	FieldInputModerationDedupeMinutes = "input_moderation_dedupe_minutes"
+	// FieldCodexClientPolicy holds the string denoting the codex_client_policy field in the database.
+	FieldCodexClientPolicy = "codex_client_policy"
+	// FieldClaudeDeviceLimitMode holds the string denoting the claude_device_limit_mode field in the database.
+	FieldClaudeDeviceLimitMode = "claude_device_limit_mode"
+	// FieldClaudeDeviceBaseLimit holds the string denoting the claude_device_base_limit field in the database.
+	FieldClaudeDeviceBaseLimit = "claude_device_base_limit"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -191,7 +211,17 @@ var Columns = []string{
 	FieldMcpXMLInject,
 	FieldSupportedModelScopes,
 	FieldSortOrder,
-	FieldAllowMessagesDispatch,
+	FieldInputModerationEnabled,
+	FieldInputModerationAutoDisableUser,
+	FieldInputModerationCategories,
+	FieldInputModerationActionMode,
+	FieldInputModerationCooldownMinutes,
+	FieldInputModerationDisableAfterHits,
+	FieldInputModerationStrikeWindowHours,
+	FieldInputModerationDedupeMinutes,
+	FieldCodexClientPolicy,
+	FieldClaudeDeviceLimitMode,
+	FieldClaudeDeviceBaseLimit,
 }
 
 var (
@@ -263,8 +293,34 @@ var (
 	DefaultSupportedModelScopes []string
 	// DefaultSortOrder holds the default value on creation for the "sort_order" field.
 	DefaultSortOrder int
-	// DefaultAllowMessagesDispatch holds the default value on creation for the "allow_messages_dispatch" field.
-	DefaultAllowMessagesDispatch bool
+	// DefaultInputModerationEnabled holds the default value on creation for the "input_moderation_enabled" field.
+	DefaultInputModerationEnabled bool
+	// DefaultInputModerationAutoDisableUser holds the default value on creation for the "input_moderation_auto_disable_user" field.
+	DefaultInputModerationAutoDisableUser bool
+	// DefaultInputModerationCategories holds the default value on creation for the "input_moderation_categories" field.
+	DefaultInputModerationCategories []string
+	// DefaultInputModerationActionMode holds the default value on creation for the "input_moderation_action_mode" field.
+	DefaultInputModerationActionMode string
+	// InputModerationActionModeValidator is a validator for the "input_moderation_action_mode" field. It is called by the builders before save.
+	InputModerationActionModeValidator func(string) error
+	// DefaultInputModerationCooldownMinutes holds the default value on creation for the "input_moderation_cooldown_minutes" field.
+	DefaultInputModerationCooldownMinutes int
+	// DefaultInputModerationDisableAfterHits holds the default value on creation for the "input_moderation_disable_after_hits" field.
+	DefaultInputModerationDisableAfterHits int
+	// DefaultInputModerationStrikeWindowHours holds the default value on creation for the "input_moderation_strike_window_hours" field.
+	DefaultInputModerationStrikeWindowHours int
+	// DefaultInputModerationDedupeMinutes holds the default value on creation for the "input_moderation_dedupe_minutes" field.
+	DefaultInputModerationDedupeMinutes int
+	// DefaultCodexClientPolicy holds the default value on creation for the "codex_client_policy" field.
+	DefaultCodexClientPolicy string
+	// CodexClientPolicyValidator is a validator for the "codex_client_policy" field. It is called by the builders before save.
+	CodexClientPolicyValidator func(string) error
+	// DefaultClaudeDeviceLimitMode holds the default value on creation for the "claude_device_limit_mode" field.
+	DefaultClaudeDeviceLimitMode string
+	// ClaudeDeviceLimitModeValidator is a validator for the "claude_device_limit_mode" field. It is called by the builders before save.
+	ClaudeDeviceLimitModeValidator func(string) error
+	// DefaultClaudeDeviceBaseLimit holds the default value on creation for the "claude_device_base_limit" field.
+	DefaultClaudeDeviceBaseLimit int
 )
 
 // OrderOption defines the ordering options for the Group queries.
@@ -430,9 +486,54 @@ func BySortOrder(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldSortOrder, opts...).ToFunc()
 }
 
-// ByAllowMessagesDispatch orders the results by the allow_messages_dispatch field.
-func ByAllowMessagesDispatch(opts ...sql.OrderTermOption) OrderOption {
-	return sql.OrderByField(FieldAllowMessagesDispatch, opts...).ToFunc()
+// ByInputModerationEnabled orders the results by the input_moderation_enabled field.
+func ByInputModerationEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInputModerationEnabled, opts...).ToFunc()
+}
+
+// ByInputModerationAutoDisableUser orders the results by the input_moderation_auto_disable_user field.
+func ByInputModerationAutoDisableUser(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInputModerationAutoDisableUser, opts...).ToFunc()
+}
+
+// ByInputModerationActionMode orders the results by the input_moderation_action_mode field.
+func ByInputModerationActionMode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInputModerationActionMode, opts...).ToFunc()
+}
+
+// ByInputModerationCooldownMinutes orders the results by the input_moderation_cooldown_minutes field.
+func ByInputModerationCooldownMinutes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInputModerationCooldownMinutes, opts...).ToFunc()
+}
+
+// ByInputModerationDisableAfterHits orders the results by the input_moderation_disable_after_hits field.
+func ByInputModerationDisableAfterHits(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInputModerationDisableAfterHits, opts...).ToFunc()
+}
+
+// ByInputModerationStrikeWindowHours orders the results by the input_moderation_strike_window_hours field.
+func ByInputModerationStrikeWindowHours(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInputModerationStrikeWindowHours, opts...).ToFunc()
+}
+
+// ByInputModerationDedupeMinutes orders the results by the input_moderation_dedupe_minutes field.
+func ByInputModerationDedupeMinutes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInputModerationDedupeMinutes, opts...).ToFunc()
+}
+
+// ByCodexClientPolicy orders the results by the codex_client_policy field.
+func ByCodexClientPolicy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCodexClientPolicy, opts...).ToFunc()
+}
+
+// ByClaudeDeviceLimitMode orders the results by the claude_device_limit_mode field.
+func ByClaudeDeviceLimitMode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClaudeDeviceLimitMode, opts...).ToFunc()
+}
+
+// ByClaudeDeviceBaseLimit orders the results by the claude_device_base_limit field.
+func ByClaudeDeviceBaseLimit(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClaudeDeviceBaseLimit, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

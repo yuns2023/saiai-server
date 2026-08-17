@@ -397,13 +397,23 @@ export interface Group {
   claude_environment_rewrite: boolean
   fallback_group_id: number | null
   fallback_group_id_on_invalid_request: number | null
-  // OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
-  allow_messages_dispatch?: boolean
-  created_at: string
+	created_at: string
   updated_at: string
 }
 
 export interface AdminGroup extends Group {
+	input_moderation_enabled: boolean
+	input_moderation_auto_disable_user: boolean
+	input_moderation_categories: string[]
+	input_moderation_action_mode: 'cooldown_then_disable' | 'immediate_disable'
+	input_moderation_cooldown_minutes: number
+	input_moderation_disable_after_hits: number
+	input_moderation_strike_window_hours: number
+	input_moderation_dedupe_minutes: number
+	codex_client_policy: 'off' | 'official_clients' | 'cli_only'
+	claude_device_limit_mode: 'off' | 'audit' | 'enforce'
+	claude_device_base_limit: number
+
   // 模型路由配置（仅管理员可见，内部信息）
   model_routing: Record<string, number[]> | null
   model_routing_enabled: boolean
@@ -504,7 +514,18 @@ export interface CreateGroupRequest {
   sora_storage_quota_bytes?: number
   claude_code_only?: boolean
   allow_claude_context_1m_beta?: boolean
-  claude_oauth_request_gate_disabled?: boolean
+	claude_oauth_request_gate_disabled?: boolean
+	input_moderation_enabled?: boolean
+	input_moderation_auto_disable_user?: boolean
+	input_moderation_categories?: string[]
+	input_moderation_action_mode?: 'cooldown_then_disable' | 'immediate_disable'
+	input_moderation_cooldown_minutes?: number
+	input_moderation_disable_after_hits?: number
+	input_moderation_strike_window_hours?: number
+	input_moderation_dedupe_minutes?: number
+	codex_client_policy?: 'off' | 'official_clients' | 'cli_only'
+	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
+	claude_device_base_limit?: number
   claude_environment_mode?: ClaudeEnvironmentMode
   claude_environment_rewrite?: boolean
   fallback_group_id?: number | null
@@ -538,7 +559,18 @@ export interface UpdateGroupRequest {
   sora_storage_quota_bytes?: number
   claude_code_only?: boolean
   allow_claude_context_1m_beta?: boolean
-  claude_oauth_request_gate_disabled?: boolean
+	claude_oauth_request_gate_disabled?: boolean
+	input_moderation_enabled?: boolean
+	input_moderation_auto_disable_user?: boolean
+	input_moderation_categories?: string[]
+	input_moderation_action_mode?: 'cooldown_then_disable' | 'immediate_disable'
+	input_moderation_cooldown_minutes?: number
+	input_moderation_disable_after_hits?: number
+	input_moderation_strike_window_hours?: number
+	input_moderation_dedupe_minutes?: number
+	codex_client_policy?: 'off' | 'official_clients' | 'cli_only'
+	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
+	claude_device_base_limit?: number
   claude_environment_mode?: ClaudeEnvironmentMode
   claude_environment_rewrite?: boolean
   fallback_group_id?: number | null
@@ -997,7 +1029,7 @@ export interface AdminDataImportResult {
 
 // ==================== Usage & Redeem Types ====================
 
-export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'
+export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation' | 'claude_device'
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2'
 
 export interface UsageLog {

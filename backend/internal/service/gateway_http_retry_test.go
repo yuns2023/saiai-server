@@ -20,6 +20,14 @@ type scriptedGatewayHTTPResult struct {
 	err      error
 }
 
+func newOpenAIHTTPRetryContext(method, path string, body []byte) (*gin.Context, *httptest.ResponseRecorder) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(method, path, bytes.NewReader(body))
+	return c, recorder
+}
+
 type scriptedGatewayHTTPUpstream struct {
 	results []scriptedGatewayHTTPResult
 	calls   int

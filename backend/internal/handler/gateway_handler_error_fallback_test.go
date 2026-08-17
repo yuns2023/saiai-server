@@ -120,25 +120,6 @@ func TestGatewayHandleFailoverExhausted_DeviceAuthorizationUsesNeutralMessage(t 
 	assert.Equal(t, service.DeviceAuthorizationUnavailableClientMessage, errorObj["message"])
 }
 
-func TestOpenAIGatewayAnthropicFailover_DeviceAuthorizationUsesNeutralMessage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-
-	h := &OpenAIGatewayHandler{}
-	h.handleAnthropicFailoverExhausted(c, &service.UpstreamFailoverError{
-		StatusCode:   http.StatusBadRequest,
-		ResponseBody: []byte(`{"error":{"message":"reclaude 客户端状态异常，请重启 reclaude 后重试"}}`),
-		Kind:         service.UpstreamFailureDeviceAuthorizationRevoked,
-	}, false)
-
-	require.Equal(t, http.StatusBadGateway, w.Code)
-	require.NotContains(t, strings.ToLower(w.Body.String()), "reclaude")
-	require.NotContains(t, w.Body.String(), "客户端状态异常")
-	require.Contains(t, w.Body.String(), service.DeviceAuthorizationUnavailableClientMessage)
-}
-
 func TestGatewayErrorWriters_RedactRestrictedUpstreamIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -186,18 +167,6 @@ func TestOpenAIErrorWriters_RedactRestrictedUpstreamIdentity(t *testing.T) {
 			name: "openai streaming sse",
 			write: func(h *OpenAIGatewayHandler, c *gin.Context) {
 				h.writeError(c, gatewayErrorEnvelope{Status: http.StatusBadGateway, Type: "upstream_error", Message: "reclaude failed"}, true)
-			},
-		},
-		{
-			name: "anthropic json",
-			write: func(h *OpenAIGatewayHandler, c *gin.Context) {
-				h.writeAnthropicError(c, gatewayErrorEnvelope{Status: http.StatusBadGateway, Type: "upstream_error", Message: "ReClaude failed"}, false)
-			},
-		},
-		{
-			name: "anthropic streaming sse",
-			write: func(h *OpenAIGatewayHandler, c *gin.Context) {
-				h.writeAnthropicError(c, gatewayErrorEnvelope{Status: http.StatusBadGateway, Type: "upstream_error", Message: "reclaude failed"}, true)
 			},
 		},
 	} {

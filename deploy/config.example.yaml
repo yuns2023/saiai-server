@@ -146,6 +146,17 @@ security:
 # 网关配置
 # =============================================================================
 gateway:
+  # Optional asynchronous user-input moderation sidecar. A group must also
+  # enable input moderation in the admin UI. Queue payloads are AES-GCM encrypted
+  # in Redis Stream when a fixed totp.encryption_key is configured; otherwise
+  # the service explicitly falls back to its bounded in-memory queue.
+  input_moderation:
+    endpoint: "" # e.g. http://risk-classifier:8081/v1/classify
+    worker_count: 2
+    queue_size: 256
+    request_timeout_seconds: 15
+    max_input_chars: 32768
+    max_job_age_hours: 24
   # Timeout for waiting upstream response headers (seconds)
   # 等待上游响应头超时时间（秒）
   response_header_timeout: 600

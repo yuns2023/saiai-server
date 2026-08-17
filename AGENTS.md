@@ -27,8 +27,8 @@ Preserve these invariants:
 - bootstrap requires normal API-key authentication and is non-cacheable;
 - bootstrap performs no upstream account selection or model request;
 - Claude and Codex capabilities are independent;
-- OpenAI Messages dispatch is protocol compatibility only and never implies
-  native Claude capability; and
+- OpenAI groups expose native Responses only; do not translate Claude Messages
+  or advertise an OpenAI Messages dispatch capability; and
 - the local-proxy client does not call bootstrap or claim bootstrap schema
   compatibility;
 - its per-user CA private key is generated locally and is never shipped as a

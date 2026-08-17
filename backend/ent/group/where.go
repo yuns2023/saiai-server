@@ -210,9 +210,54 @@ func SortOrder(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldSortOrder, v))
 }
 
-// AllowMessagesDispatch applies equality check predicate on the "allow_messages_dispatch" field. It's identical to AllowMessagesDispatchEQ.
-func AllowMessagesDispatch(v bool) predicate.Group {
-	return predicate.Group(sql.FieldEQ(FieldAllowMessagesDispatch, v))
+// InputModerationEnabled applies equality check predicate on the "input_moderation_enabled" field. It's identical to InputModerationEnabledEQ.
+func InputModerationEnabled(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationEnabled, v))
+}
+
+// InputModerationAutoDisableUser applies equality check predicate on the "input_moderation_auto_disable_user" field. It's identical to InputModerationAutoDisableUserEQ.
+func InputModerationAutoDisableUser(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationAutoDisableUser, v))
+}
+
+// InputModerationActionMode applies equality check predicate on the "input_moderation_action_mode" field. It's identical to InputModerationActionModeEQ.
+func InputModerationActionMode(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationActionMode, v))
+}
+
+// InputModerationCooldownMinutes applies equality check predicate on the "input_moderation_cooldown_minutes" field. It's identical to InputModerationCooldownMinutesEQ.
+func InputModerationCooldownMinutes(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationCooldownMinutes, v))
+}
+
+// InputModerationDisableAfterHits applies equality check predicate on the "input_moderation_disable_after_hits" field. It's identical to InputModerationDisableAfterHitsEQ.
+func InputModerationDisableAfterHits(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationDisableAfterHits, v))
+}
+
+// InputModerationStrikeWindowHours applies equality check predicate on the "input_moderation_strike_window_hours" field. It's identical to InputModerationStrikeWindowHoursEQ.
+func InputModerationStrikeWindowHours(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationStrikeWindowHours, v))
+}
+
+// InputModerationDedupeMinutes applies equality check predicate on the "input_moderation_dedupe_minutes" field. It's identical to InputModerationDedupeMinutesEQ.
+func InputModerationDedupeMinutes(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationDedupeMinutes, v))
+}
+
+// CodexClientPolicy applies equality check predicate on the "codex_client_policy" field. It's identical to CodexClientPolicyEQ.
+func CodexClientPolicy(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldCodexClientPolicy, v))
+}
+
+// ClaudeDeviceLimitMode applies equality check predicate on the "claude_device_limit_mode" field. It's identical to ClaudeDeviceLimitModeEQ.
+func ClaudeDeviceLimitMode(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceBaseLimit applies equality check predicate on the "claude_device_base_limit" field. It's identical to ClaudeDeviceBaseLimitEQ.
+func ClaudeDeviceBaseLimit(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldClaudeDeviceBaseLimit, v))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
@@ -1560,14 +1605,419 @@ func SortOrderLTE(v int) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldSortOrder, v))
 }
 
-// AllowMessagesDispatchEQ applies the EQ predicate on the "allow_messages_dispatch" field.
-func AllowMessagesDispatchEQ(v bool) predicate.Group {
-	return predicate.Group(sql.FieldEQ(FieldAllowMessagesDispatch, v))
+// InputModerationEnabledEQ applies the EQ predicate on the "input_moderation_enabled" field.
+func InputModerationEnabledEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationEnabled, v))
 }
 
-// AllowMessagesDispatchNEQ applies the NEQ predicate on the "allow_messages_dispatch" field.
-func AllowMessagesDispatchNEQ(v bool) predicate.Group {
-	return predicate.Group(sql.FieldNEQ(FieldAllowMessagesDispatch, v))
+// InputModerationEnabledNEQ applies the NEQ predicate on the "input_moderation_enabled" field.
+func InputModerationEnabledNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldInputModerationEnabled, v))
+}
+
+// InputModerationAutoDisableUserEQ applies the EQ predicate on the "input_moderation_auto_disable_user" field.
+func InputModerationAutoDisableUserEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationAutoDisableUser, v))
+}
+
+// InputModerationAutoDisableUserNEQ applies the NEQ predicate on the "input_moderation_auto_disable_user" field.
+func InputModerationAutoDisableUserNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldInputModerationAutoDisableUser, v))
+}
+
+// InputModerationActionModeEQ applies the EQ predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationActionMode, v))
+}
+
+// InputModerationActionModeNEQ applies the NEQ predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldInputModerationActionMode, v))
+}
+
+// InputModerationActionModeIn applies the In predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldInputModerationActionMode, vs...))
+}
+
+// InputModerationActionModeNotIn applies the NotIn predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldInputModerationActionMode, vs...))
+}
+
+// InputModerationActionModeGT applies the GT predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldInputModerationActionMode, v))
+}
+
+// InputModerationActionModeGTE applies the GTE predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldInputModerationActionMode, v))
+}
+
+// InputModerationActionModeLT applies the LT predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldInputModerationActionMode, v))
+}
+
+// InputModerationActionModeLTE applies the LTE predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldInputModerationActionMode, v))
+}
+
+// InputModerationActionModeContains applies the Contains predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldInputModerationActionMode, v))
+}
+
+// InputModerationActionModeHasPrefix applies the HasPrefix predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldInputModerationActionMode, v))
+}
+
+// InputModerationActionModeHasSuffix applies the HasSuffix predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldInputModerationActionMode, v))
+}
+
+// InputModerationActionModeEqualFold applies the EqualFold predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldInputModerationActionMode, v))
+}
+
+// InputModerationActionModeContainsFold applies the ContainsFold predicate on the "input_moderation_action_mode" field.
+func InputModerationActionModeContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldInputModerationActionMode, v))
+}
+
+// InputModerationCooldownMinutesEQ applies the EQ predicate on the "input_moderation_cooldown_minutes" field.
+func InputModerationCooldownMinutesEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationCooldownMinutes, v))
+}
+
+// InputModerationCooldownMinutesNEQ applies the NEQ predicate on the "input_moderation_cooldown_minutes" field.
+func InputModerationCooldownMinutesNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldInputModerationCooldownMinutes, v))
+}
+
+// InputModerationCooldownMinutesIn applies the In predicate on the "input_moderation_cooldown_minutes" field.
+func InputModerationCooldownMinutesIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldInputModerationCooldownMinutes, vs...))
+}
+
+// InputModerationCooldownMinutesNotIn applies the NotIn predicate on the "input_moderation_cooldown_minutes" field.
+func InputModerationCooldownMinutesNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldInputModerationCooldownMinutes, vs...))
+}
+
+// InputModerationCooldownMinutesGT applies the GT predicate on the "input_moderation_cooldown_minutes" field.
+func InputModerationCooldownMinutesGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldInputModerationCooldownMinutes, v))
+}
+
+// InputModerationCooldownMinutesGTE applies the GTE predicate on the "input_moderation_cooldown_minutes" field.
+func InputModerationCooldownMinutesGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldInputModerationCooldownMinutes, v))
+}
+
+// InputModerationCooldownMinutesLT applies the LT predicate on the "input_moderation_cooldown_minutes" field.
+func InputModerationCooldownMinutesLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldInputModerationCooldownMinutes, v))
+}
+
+// InputModerationCooldownMinutesLTE applies the LTE predicate on the "input_moderation_cooldown_minutes" field.
+func InputModerationCooldownMinutesLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldInputModerationCooldownMinutes, v))
+}
+
+// InputModerationDisableAfterHitsEQ applies the EQ predicate on the "input_moderation_disable_after_hits" field.
+func InputModerationDisableAfterHitsEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationDisableAfterHits, v))
+}
+
+// InputModerationDisableAfterHitsNEQ applies the NEQ predicate on the "input_moderation_disable_after_hits" field.
+func InputModerationDisableAfterHitsNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldInputModerationDisableAfterHits, v))
+}
+
+// InputModerationDisableAfterHitsIn applies the In predicate on the "input_moderation_disable_after_hits" field.
+func InputModerationDisableAfterHitsIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldInputModerationDisableAfterHits, vs...))
+}
+
+// InputModerationDisableAfterHitsNotIn applies the NotIn predicate on the "input_moderation_disable_after_hits" field.
+func InputModerationDisableAfterHitsNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldInputModerationDisableAfterHits, vs...))
+}
+
+// InputModerationDisableAfterHitsGT applies the GT predicate on the "input_moderation_disable_after_hits" field.
+func InputModerationDisableAfterHitsGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldInputModerationDisableAfterHits, v))
+}
+
+// InputModerationDisableAfterHitsGTE applies the GTE predicate on the "input_moderation_disable_after_hits" field.
+func InputModerationDisableAfterHitsGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldInputModerationDisableAfterHits, v))
+}
+
+// InputModerationDisableAfterHitsLT applies the LT predicate on the "input_moderation_disable_after_hits" field.
+func InputModerationDisableAfterHitsLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldInputModerationDisableAfterHits, v))
+}
+
+// InputModerationDisableAfterHitsLTE applies the LTE predicate on the "input_moderation_disable_after_hits" field.
+func InputModerationDisableAfterHitsLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldInputModerationDisableAfterHits, v))
+}
+
+// InputModerationStrikeWindowHoursEQ applies the EQ predicate on the "input_moderation_strike_window_hours" field.
+func InputModerationStrikeWindowHoursEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationStrikeWindowHours, v))
+}
+
+// InputModerationStrikeWindowHoursNEQ applies the NEQ predicate on the "input_moderation_strike_window_hours" field.
+func InputModerationStrikeWindowHoursNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldInputModerationStrikeWindowHours, v))
+}
+
+// InputModerationStrikeWindowHoursIn applies the In predicate on the "input_moderation_strike_window_hours" field.
+func InputModerationStrikeWindowHoursIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldInputModerationStrikeWindowHours, vs...))
+}
+
+// InputModerationStrikeWindowHoursNotIn applies the NotIn predicate on the "input_moderation_strike_window_hours" field.
+func InputModerationStrikeWindowHoursNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldInputModerationStrikeWindowHours, vs...))
+}
+
+// InputModerationStrikeWindowHoursGT applies the GT predicate on the "input_moderation_strike_window_hours" field.
+func InputModerationStrikeWindowHoursGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldInputModerationStrikeWindowHours, v))
+}
+
+// InputModerationStrikeWindowHoursGTE applies the GTE predicate on the "input_moderation_strike_window_hours" field.
+func InputModerationStrikeWindowHoursGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldInputModerationStrikeWindowHours, v))
+}
+
+// InputModerationStrikeWindowHoursLT applies the LT predicate on the "input_moderation_strike_window_hours" field.
+func InputModerationStrikeWindowHoursLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldInputModerationStrikeWindowHours, v))
+}
+
+// InputModerationStrikeWindowHoursLTE applies the LTE predicate on the "input_moderation_strike_window_hours" field.
+func InputModerationStrikeWindowHoursLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldInputModerationStrikeWindowHours, v))
+}
+
+// InputModerationDedupeMinutesEQ applies the EQ predicate on the "input_moderation_dedupe_minutes" field.
+func InputModerationDedupeMinutesEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationDedupeMinutes, v))
+}
+
+// InputModerationDedupeMinutesNEQ applies the NEQ predicate on the "input_moderation_dedupe_minutes" field.
+func InputModerationDedupeMinutesNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldInputModerationDedupeMinutes, v))
+}
+
+// InputModerationDedupeMinutesIn applies the In predicate on the "input_moderation_dedupe_minutes" field.
+func InputModerationDedupeMinutesIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldInputModerationDedupeMinutes, vs...))
+}
+
+// InputModerationDedupeMinutesNotIn applies the NotIn predicate on the "input_moderation_dedupe_minutes" field.
+func InputModerationDedupeMinutesNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldInputModerationDedupeMinutes, vs...))
+}
+
+// InputModerationDedupeMinutesGT applies the GT predicate on the "input_moderation_dedupe_minutes" field.
+func InputModerationDedupeMinutesGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldInputModerationDedupeMinutes, v))
+}
+
+// InputModerationDedupeMinutesGTE applies the GTE predicate on the "input_moderation_dedupe_minutes" field.
+func InputModerationDedupeMinutesGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldInputModerationDedupeMinutes, v))
+}
+
+// InputModerationDedupeMinutesLT applies the LT predicate on the "input_moderation_dedupe_minutes" field.
+func InputModerationDedupeMinutesLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldInputModerationDedupeMinutes, v))
+}
+
+// InputModerationDedupeMinutesLTE applies the LTE predicate on the "input_moderation_dedupe_minutes" field.
+func InputModerationDedupeMinutesLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldInputModerationDedupeMinutes, v))
+}
+
+// CodexClientPolicyEQ applies the EQ predicate on the "codex_client_policy" field.
+func CodexClientPolicyEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldCodexClientPolicy, v))
+}
+
+// CodexClientPolicyNEQ applies the NEQ predicate on the "codex_client_policy" field.
+func CodexClientPolicyNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldCodexClientPolicy, v))
+}
+
+// CodexClientPolicyIn applies the In predicate on the "codex_client_policy" field.
+func CodexClientPolicyIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldCodexClientPolicy, vs...))
+}
+
+// CodexClientPolicyNotIn applies the NotIn predicate on the "codex_client_policy" field.
+func CodexClientPolicyNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldCodexClientPolicy, vs...))
+}
+
+// CodexClientPolicyGT applies the GT predicate on the "codex_client_policy" field.
+func CodexClientPolicyGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldCodexClientPolicy, v))
+}
+
+// CodexClientPolicyGTE applies the GTE predicate on the "codex_client_policy" field.
+func CodexClientPolicyGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldCodexClientPolicy, v))
+}
+
+// CodexClientPolicyLT applies the LT predicate on the "codex_client_policy" field.
+func CodexClientPolicyLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldCodexClientPolicy, v))
+}
+
+// CodexClientPolicyLTE applies the LTE predicate on the "codex_client_policy" field.
+func CodexClientPolicyLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldCodexClientPolicy, v))
+}
+
+// CodexClientPolicyContains applies the Contains predicate on the "codex_client_policy" field.
+func CodexClientPolicyContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldCodexClientPolicy, v))
+}
+
+// CodexClientPolicyHasPrefix applies the HasPrefix predicate on the "codex_client_policy" field.
+func CodexClientPolicyHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldCodexClientPolicy, v))
+}
+
+// CodexClientPolicyHasSuffix applies the HasSuffix predicate on the "codex_client_policy" field.
+func CodexClientPolicyHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldCodexClientPolicy, v))
+}
+
+// CodexClientPolicyEqualFold applies the EqualFold predicate on the "codex_client_policy" field.
+func CodexClientPolicyEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldCodexClientPolicy, v))
+}
+
+// CodexClientPolicyContainsFold applies the ContainsFold predicate on the "codex_client_policy" field.
+func CodexClientPolicyContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldCodexClientPolicy, v))
+}
+
+// ClaudeDeviceLimitModeEQ applies the EQ predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceLimitModeNEQ applies the NEQ predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceLimitModeIn applies the In predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldClaudeDeviceLimitMode, vs...))
+}
+
+// ClaudeDeviceLimitModeNotIn applies the NotIn predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldClaudeDeviceLimitMode, vs...))
+}
+
+// ClaudeDeviceLimitModeGT applies the GT predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceLimitModeGTE applies the GTE predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceLimitModeLT applies the LT predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceLimitModeLTE applies the LTE predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceLimitModeContains applies the Contains predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceLimitModeHasPrefix applies the HasPrefix predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceLimitModeHasSuffix applies the HasSuffix predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceLimitModeEqualFold applies the EqualFold predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceLimitModeContainsFold applies the ContainsFold predicate on the "claude_device_limit_mode" field.
+func ClaudeDeviceLimitModeContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldClaudeDeviceLimitMode, v))
+}
+
+// ClaudeDeviceBaseLimitEQ applies the EQ predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldClaudeDeviceBaseLimit, v))
+}
+
+// ClaudeDeviceBaseLimitNEQ applies the NEQ predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldClaudeDeviceBaseLimit, v))
+}
+
+// ClaudeDeviceBaseLimitIn applies the In predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldClaudeDeviceBaseLimit, vs...))
+}
+
+// ClaudeDeviceBaseLimitNotIn applies the NotIn predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldClaudeDeviceBaseLimit, vs...))
+}
+
+// ClaudeDeviceBaseLimitGT applies the GT predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldClaudeDeviceBaseLimit, v))
+}
+
+// ClaudeDeviceBaseLimitGTE applies the GTE predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldClaudeDeviceBaseLimit, v))
+}
+
+// ClaudeDeviceBaseLimitLT applies the LT predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldClaudeDeviceBaseLimit, v))
+}
+
+// ClaudeDeviceBaseLimitLTE applies the LTE predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldClaudeDeviceBaseLimit, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

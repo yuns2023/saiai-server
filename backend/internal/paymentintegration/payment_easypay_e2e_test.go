@@ -121,7 +121,7 @@ func TestNativePaymentEasyPaySignedCallbackAutomaticAndManualRefundE2E(t *testin
 	require.NoError(t, err)
 	userRepo := repository.NewUserRepository(client, db)
 	redeemService := service.NewRedeemService(
-		repository.NewRedeemCodeRepository(client), userRepo, nil, nil, nil, client, nil,
+		repository.NewRedeemCodeRepository(client), userRepo, nil, nil, nil, client, nil, nil, nil,
 	)
 	paymentService := service.NewPaymentService(client, userRepo, redeemService, configService)
 	webhookHandler := handler.NewPaymentWebhookHandler(paymentService)

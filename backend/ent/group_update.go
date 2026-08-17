@@ -680,17 +680,190 @@ func (_u *GroupUpdate) AddSortOrder(v int) *GroupUpdate {
 	return _u
 }
 
-// SetAllowMessagesDispatch sets the "allow_messages_dispatch" field.
-func (_u *GroupUpdate) SetAllowMessagesDispatch(v bool) *GroupUpdate {
-	_u.mutation.SetAllowMessagesDispatch(v)
+// SetInputModerationEnabled sets the "input_moderation_enabled" field.
+func (_u *GroupUpdate) SetInputModerationEnabled(v bool) *GroupUpdate {
+	_u.mutation.SetInputModerationEnabled(v)
 	return _u
 }
 
-// SetNillableAllowMessagesDispatch sets the "allow_messages_dispatch" field if the given value is not nil.
-func (_u *GroupUpdate) SetNillableAllowMessagesDispatch(v *bool) *GroupUpdate {
+// SetNillableInputModerationEnabled sets the "input_moderation_enabled" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableInputModerationEnabled(v *bool) *GroupUpdate {
 	if v != nil {
-		_u.SetAllowMessagesDispatch(*v)
+		_u.SetInputModerationEnabled(*v)
 	}
+	return _u
+}
+
+// SetInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field.
+func (_u *GroupUpdate) SetInputModerationAutoDisableUser(v bool) *GroupUpdate {
+	_u.mutation.SetInputModerationAutoDisableUser(v)
+	return _u
+}
+
+// SetNillableInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableInputModerationAutoDisableUser(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetInputModerationAutoDisableUser(*v)
+	}
+	return _u
+}
+
+// SetInputModerationCategories sets the "input_moderation_categories" field.
+func (_u *GroupUpdate) SetInputModerationCategories(v []string) *GroupUpdate {
+	_u.mutation.SetInputModerationCategories(v)
+	return _u
+}
+
+// AppendInputModerationCategories appends value to the "input_moderation_categories" field.
+func (_u *GroupUpdate) AppendInputModerationCategories(v []string) *GroupUpdate {
+	_u.mutation.AppendInputModerationCategories(v)
+	return _u
+}
+
+// SetInputModerationActionMode sets the "input_moderation_action_mode" field.
+func (_u *GroupUpdate) SetInputModerationActionMode(v string) *GroupUpdate {
+	_u.mutation.SetInputModerationActionMode(v)
+	return _u
+}
+
+// SetNillableInputModerationActionMode sets the "input_moderation_action_mode" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableInputModerationActionMode(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetInputModerationActionMode(*v)
+	}
+	return _u
+}
+
+// SetInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field.
+func (_u *GroupUpdate) SetInputModerationCooldownMinutes(v int) *GroupUpdate {
+	_u.mutation.ResetInputModerationCooldownMinutes()
+	_u.mutation.SetInputModerationCooldownMinutes(v)
+	return _u
+}
+
+// SetNillableInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableInputModerationCooldownMinutes(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetInputModerationCooldownMinutes(*v)
+	}
+	return _u
+}
+
+// AddInputModerationCooldownMinutes adds value to the "input_moderation_cooldown_minutes" field.
+func (_u *GroupUpdate) AddInputModerationCooldownMinutes(v int) *GroupUpdate {
+	_u.mutation.AddInputModerationCooldownMinutes(v)
+	return _u
+}
+
+// SetInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field.
+func (_u *GroupUpdate) SetInputModerationDisableAfterHits(v int) *GroupUpdate {
+	_u.mutation.ResetInputModerationDisableAfterHits()
+	_u.mutation.SetInputModerationDisableAfterHits(v)
+	return _u
+}
+
+// SetNillableInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableInputModerationDisableAfterHits(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetInputModerationDisableAfterHits(*v)
+	}
+	return _u
+}
+
+// AddInputModerationDisableAfterHits adds value to the "input_moderation_disable_after_hits" field.
+func (_u *GroupUpdate) AddInputModerationDisableAfterHits(v int) *GroupUpdate {
+	_u.mutation.AddInputModerationDisableAfterHits(v)
+	return _u
+}
+
+// SetInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field.
+func (_u *GroupUpdate) SetInputModerationStrikeWindowHours(v int) *GroupUpdate {
+	_u.mutation.ResetInputModerationStrikeWindowHours()
+	_u.mutation.SetInputModerationStrikeWindowHours(v)
+	return _u
+}
+
+// SetNillableInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableInputModerationStrikeWindowHours(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetInputModerationStrikeWindowHours(*v)
+	}
+	return _u
+}
+
+// AddInputModerationStrikeWindowHours adds value to the "input_moderation_strike_window_hours" field.
+func (_u *GroupUpdate) AddInputModerationStrikeWindowHours(v int) *GroupUpdate {
+	_u.mutation.AddInputModerationStrikeWindowHours(v)
+	return _u
+}
+
+// SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
+func (_u *GroupUpdate) SetInputModerationDedupeMinutes(v int) *GroupUpdate {
+	_u.mutation.ResetInputModerationDedupeMinutes()
+	_u.mutation.SetInputModerationDedupeMinutes(v)
+	return _u
+}
+
+// SetNillableInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableInputModerationDedupeMinutes(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetInputModerationDedupeMinutes(*v)
+	}
+	return _u
+}
+
+// AddInputModerationDedupeMinutes adds value to the "input_moderation_dedupe_minutes" field.
+func (_u *GroupUpdate) AddInputModerationDedupeMinutes(v int) *GroupUpdate {
+	_u.mutation.AddInputModerationDedupeMinutes(v)
+	return _u
+}
+
+// SetCodexClientPolicy sets the "codex_client_policy" field.
+func (_u *GroupUpdate) SetCodexClientPolicy(v string) *GroupUpdate {
+	_u.mutation.SetCodexClientPolicy(v)
+	return _u
+}
+
+// SetNillableCodexClientPolicy sets the "codex_client_policy" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableCodexClientPolicy(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetCodexClientPolicy(*v)
+	}
+	return _u
+}
+
+// SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
+func (_u *GroupUpdate) SetClaudeDeviceLimitMode(v string) *GroupUpdate {
+	_u.mutation.SetClaudeDeviceLimitMode(v)
+	return _u
+}
+
+// SetNillableClaudeDeviceLimitMode sets the "claude_device_limit_mode" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableClaudeDeviceLimitMode(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetClaudeDeviceLimitMode(*v)
+	}
+	return _u
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (_u *GroupUpdate) SetClaudeDeviceBaseLimit(v int) *GroupUpdate {
+	_u.mutation.ResetClaudeDeviceBaseLimit()
+	_u.mutation.SetClaudeDeviceBaseLimit(v)
+	return _u
+}
+
+// SetNillableClaudeDeviceBaseLimit sets the "claude_device_base_limit" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableClaudeDeviceBaseLimit(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetClaudeDeviceBaseLimit(*v)
+	}
+	return _u
+}
+
+// AddClaudeDeviceBaseLimit adds value to the "claude_device_base_limit" field.
+func (_u *GroupUpdate) AddClaudeDeviceBaseLimit(v int) *GroupUpdate {
+	_u.mutation.AddClaudeDeviceBaseLimit(v)
 	return _u
 }
 
@@ -979,6 +1152,21 @@ func (_u *GroupUpdate) check() error {
 			return &ValidationError{Name: "subscription_type", err: fmt.Errorf(`ent: validator failed for field "Group.subscription_type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.InputModerationActionMode(); ok {
+		if err := group.InputModerationActionModeValidator(v); err != nil {
+			return &ValidationError{Name: "input_moderation_action_mode", err: fmt.Errorf(`ent: validator failed for field "Group.input_moderation_action_mode": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.CodexClientPolicy(); ok {
+		if err := group.CodexClientPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "codex_client_policy", err: fmt.Errorf(`ent: validator failed for field "Group.codex_client_policy": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ClaudeDeviceLimitMode(); ok {
+		if err := group.ClaudeDeviceLimitModeValidator(v); err != nil {
+			return &ValidationError{Name: "claude_device_limit_mode", err: fmt.Errorf(`ent: validator failed for field "Group.claude_device_limit_mode": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -1194,8 +1382,58 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedSortOrder(); ok {
 		_spec.AddField(group.FieldSortOrder, field.TypeInt, value)
 	}
-	if value, ok := _u.mutation.AllowMessagesDispatch(); ok {
-		_spec.SetField(group.FieldAllowMessagesDispatch, field.TypeBool, value)
+	if value, ok := _u.mutation.InputModerationEnabled(); ok {
+		_spec.SetField(group.FieldInputModerationEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.InputModerationAutoDisableUser(); ok {
+		_spec.SetField(group.FieldInputModerationAutoDisableUser, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.InputModerationCategories(); ok {
+		_spec.SetField(group.FieldInputModerationCategories, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedInputModerationCategories(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldInputModerationCategories, value)
+		})
+	}
+	if value, ok := _u.mutation.InputModerationActionMode(); ok {
+		_spec.SetField(group.FieldInputModerationActionMode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.InputModerationCooldownMinutes(); ok {
+		_spec.SetField(group.FieldInputModerationCooldownMinutes, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedInputModerationCooldownMinutes(); ok {
+		_spec.AddField(group.FieldInputModerationCooldownMinutes, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.InputModerationDisableAfterHits(); ok {
+		_spec.SetField(group.FieldInputModerationDisableAfterHits, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedInputModerationDisableAfterHits(); ok {
+		_spec.AddField(group.FieldInputModerationDisableAfterHits, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.InputModerationStrikeWindowHours(); ok {
+		_spec.SetField(group.FieldInputModerationStrikeWindowHours, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedInputModerationStrikeWindowHours(); ok {
+		_spec.AddField(group.FieldInputModerationStrikeWindowHours, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.InputModerationDedupeMinutes(); ok {
+		_spec.SetField(group.FieldInputModerationDedupeMinutes, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedInputModerationDedupeMinutes(); ok {
+		_spec.AddField(group.FieldInputModerationDedupeMinutes, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CodexClientPolicy(); ok {
+		_spec.SetField(group.FieldCodexClientPolicy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClaudeDeviceLimitMode(); ok {
+		_spec.SetField(group.FieldClaudeDeviceLimitMode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClaudeDeviceBaseLimit(); ok {
+		_spec.SetField(group.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedClaudeDeviceBaseLimit(); ok {
+		_spec.AddField(group.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2156,17 +2394,190 @@ func (_u *GroupUpdateOne) AddSortOrder(v int) *GroupUpdateOne {
 	return _u
 }
 
-// SetAllowMessagesDispatch sets the "allow_messages_dispatch" field.
-func (_u *GroupUpdateOne) SetAllowMessagesDispatch(v bool) *GroupUpdateOne {
-	_u.mutation.SetAllowMessagesDispatch(v)
+// SetInputModerationEnabled sets the "input_moderation_enabled" field.
+func (_u *GroupUpdateOne) SetInputModerationEnabled(v bool) *GroupUpdateOne {
+	_u.mutation.SetInputModerationEnabled(v)
 	return _u
 }
 
-// SetNillableAllowMessagesDispatch sets the "allow_messages_dispatch" field if the given value is not nil.
-func (_u *GroupUpdateOne) SetNillableAllowMessagesDispatch(v *bool) *GroupUpdateOne {
+// SetNillableInputModerationEnabled sets the "input_moderation_enabled" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableInputModerationEnabled(v *bool) *GroupUpdateOne {
 	if v != nil {
-		_u.SetAllowMessagesDispatch(*v)
+		_u.SetInputModerationEnabled(*v)
 	}
+	return _u
+}
+
+// SetInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field.
+func (_u *GroupUpdateOne) SetInputModerationAutoDisableUser(v bool) *GroupUpdateOne {
+	_u.mutation.SetInputModerationAutoDisableUser(v)
+	return _u
+}
+
+// SetNillableInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableInputModerationAutoDisableUser(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetInputModerationAutoDisableUser(*v)
+	}
+	return _u
+}
+
+// SetInputModerationCategories sets the "input_moderation_categories" field.
+func (_u *GroupUpdateOne) SetInputModerationCategories(v []string) *GroupUpdateOne {
+	_u.mutation.SetInputModerationCategories(v)
+	return _u
+}
+
+// AppendInputModerationCategories appends value to the "input_moderation_categories" field.
+func (_u *GroupUpdateOne) AppendInputModerationCategories(v []string) *GroupUpdateOne {
+	_u.mutation.AppendInputModerationCategories(v)
+	return _u
+}
+
+// SetInputModerationActionMode sets the "input_moderation_action_mode" field.
+func (_u *GroupUpdateOne) SetInputModerationActionMode(v string) *GroupUpdateOne {
+	_u.mutation.SetInputModerationActionMode(v)
+	return _u
+}
+
+// SetNillableInputModerationActionMode sets the "input_moderation_action_mode" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableInputModerationActionMode(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetInputModerationActionMode(*v)
+	}
+	return _u
+}
+
+// SetInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field.
+func (_u *GroupUpdateOne) SetInputModerationCooldownMinutes(v int) *GroupUpdateOne {
+	_u.mutation.ResetInputModerationCooldownMinutes()
+	_u.mutation.SetInputModerationCooldownMinutes(v)
+	return _u
+}
+
+// SetNillableInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableInputModerationCooldownMinutes(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetInputModerationCooldownMinutes(*v)
+	}
+	return _u
+}
+
+// AddInputModerationCooldownMinutes adds value to the "input_moderation_cooldown_minutes" field.
+func (_u *GroupUpdateOne) AddInputModerationCooldownMinutes(v int) *GroupUpdateOne {
+	_u.mutation.AddInputModerationCooldownMinutes(v)
+	return _u
+}
+
+// SetInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field.
+func (_u *GroupUpdateOne) SetInputModerationDisableAfterHits(v int) *GroupUpdateOne {
+	_u.mutation.ResetInputModerationDisableAfterHits()
+	_u.mutation.SetInputModerationDisableAfterHits(v)
+	return _u
+}
+
+// SetNillableInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableInputModerationDisableAfterHits(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetInputModerationDisableAfterHits(*v)
+	}
+	return _u
+}
+
+// AddInputModerationDisableAfterHits adds value to the "input_moderation_disable_after_hits" field.
+func (_u *GroupUpdateOne) AddInputModerationDisableAfterHits(v int) *GroupUpdateOne {
+	_u.mutation.AddInputModerationDisableAfterHits(v)
+	return _u
+}
+
+// SetInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field.
+func (_u *GroupUpdateOne) SetInputModerationStrikeWindowHours(v int) *GroupUpdateOne {
+	_u.mutation.ResetInputModerationStrikeWindowHours()
+	_u.mutation.SetInputModerationStrikeWindowHours(v)
+	return _u
+}
+
+// SetNillableInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableInputModerationStrikeWindowHours(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetInputModerationStrikeWindowHours(*v)
+	}
+	return _u
+}
+
+// AddInputModerationStrikeWindowHours adds value to the "input_moderation_strike_window_hours" field.
+func (_u *GroupUpdateOne) AddInputModerationStrikeWindowHours(v int) *GroupUpdateOne {
+	_u.mutation.AddInputModerationStrikeWindowHours(v)
+	return _u
+}
+
+// SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
+func (_u *GroupUpdateOne) SetInputModerationDedupeMinutes(v int) *GroupUpdateOne {
+	_u.mutation.ResetInputModerationDedupeMinutes()
+	_u.mutation.SetInputModerationDedupeMinutes(v)
+	return _u
+}
+
+// SetNillableInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableInputModerationDedupeMinutes(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetInputModerationDedupeMinutes(*v)
+	}
+	return _u
+}
+
+// AddInputModerationDedupeMinutes adds value to the "input_moderation_dedupe_minutes" field.
+func (_u *GroupUpdateOne) AddInputModerationDedupeMinutes(v int) *GroupUpdateOne {
+	_u.mutation.AddInputModerationDedupeMinutes(v)
+	return _u
+}
+
+// SetCodexClientPolicy sets the "codex_client_policy" field.
+func (_u *GroupUpdateOne) SetCodexClientPolicy(v string) *GroupUpdateOne {
+	_u.mutation.SetCodexClientPolicy(v)
+	return _u
+}
+
+// SetNillableCodexClientPolicy sets the "codex_client_policy" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableCodexClientPolicy(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetCodexClientPolicy(*v)
+	}
+	return _u
+}
+
+// SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
+func (_u *GroupUpdateOne) SetClaudeDeviceLimitMode(v string) *GroupUpdateOne {
+	_u.mutation.SetClaudeDeviceLimitMode(v)
+	return _u
+}
+
+// SetNillableClaudeDeviceLimitMode sets the "claude_device_limit_mode" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableClaudeDeviceLimitMode(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetClaudeDeviceLimitMode(*v)
+	}
+	return _u
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (_u *GroupUpdateOne) SetClaudeDeviceBaseLimit(v int) *GroupUpdateOne {
+	_u.mutation.ResetClaudeDeviceBaseLimit()
+	_u.mutation.SetClaudeDeviceBaseLimit(v)
+	return _u
+}
+
+// SetNillableClaudeDeviceBaseLimit sets the "claude_device_base_limit" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableClaudeDeviceBaseLimit(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetClaudeDeviceBaseLimit(*v)
+	}
+	return _u
+}
+
+// AddClaudeDeviceBaseLimit adds value to the "claude_device_base_limit" field.
+func (_u *GroupUpdateOne) AddClaudeDeviceBaseLimit(v int) *GroupUpdateOne {
+	_u.mutation.AddClaudeDeviceBaseLimit(v)
 	return _u
 }
 
@@ -2468,6 +2879,21 @@ func (_u *GroupUpdateOne) check() error {
 			return &ValidationError{Name: "subscription_type", err: fmt.Errorf(`ent: validator failed for field "Group.subscription_type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.InputModerationActionMode(); ok {
+		if err := group.InputModerationActionModeValidator(v); err != nil {
+			return &ValidationError{Name: "input_moderation_action_mode", err: fmt.Errorf(`ent: validator failed for field "Group.input_moderation_action_mode": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.CodexClientPolicy(); ok {
+		if err := group.CodexClientPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "codex_client_policy", err: fmt.Errorf(`ent: validator failed for field "Group.codex_client_policy": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ClaudeDeviceLimitMode(); ok {
+		if err := group.ClaudeDeviceLimitModeValidator(v); err != nil {
+			return &ValidationError{Name: "claude_device_limit_mode", err: fmt.Errorf(`ent: validator failed for field "Group.claude_device_limit_mode": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -2700,8 +3126,58 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	if value, ok := _u.mutation.AddedSortOrder(); ok {
 		_spec.AddField(group.FieldSortOrder, field.TypeInt, value)
 	}
-	if value, ok := _u.mutation.AllowMessagesDispatch(); ok {
-		_spec.SetField(group.FieldAllowMessagesDispatch, field.TypeBool, value)
+	if value, ok := _u.mutation.InputModerationEnabled(); ok {
+		_spec.SetField(group.FieldInputModerationEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.InputModerationAutoDisableUser(); ok {
+		_spec.SetField(group.FieldInputModerationAutoDisableUser, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.InputModerationCategories(); ok {
+		_spec.SetField(group.FieldInputModerationCategories, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedInputModerationCategories(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldInputModerationCategories, value)
+		})
+	}
+	if value, ok := _u.mutation.InputModerationActionMode(); ok {
+		_spec.SetField(group.FieldInputModerationActionMode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.InputModerationCooldownMinutes(); ok {
+		_spec.SetField(group.FieldInputModerationCooldownMinutes, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedInputModerationCooldownMinutes(); ok {
+		_spec.AddField(group.FieldInputModerationCooldownMinutes, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.InputModerationDisableAfterHits(); ok {
+		_spec.SetField(group.FieldInputModerationDisableAfterHits, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedInputModerationDisableAfterHits(); ok {
+		_spec.AddField(group.FieldInputModerationDisableAfterHits, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.InputModerationStrikeWindowHours(); ok {
+		_spec.SetField(group.FieldInputModerationStrikeWindowHours, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedInputModerationStrikeWindowHours(); ok {
+		_spec.AddField(group.FieldInputModerationStrikeWindowHours, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.InputModerationDedupeMinutes(); ok {
+		_spec.SetField(group.FieldInputModerationDedupeMinutes, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedInputModerationDedupeMinutes(); ok {
+		_spec.AddField(group.FieldInputModerationDedupeMinutes, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CodexClientPolicy(); ok {
+		_spec.SetField(group.FieldCodexClientPolicy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClaudeDeviceLimitMode(); ok {
+		_spec.SetField(group.FieldClaudeDeviceLimitMode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClaudeDeviceBaseLimit(); ok {
+		_spec.SetField(group.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedClaudeDeviceBaseLimit(); ok {
+		_spec.AddField(group.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

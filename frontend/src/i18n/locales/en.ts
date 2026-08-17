@@ -812,6 +812,8 @@ export default {
     concurrencyReducedAdmin: 'Concurrency Reduced (Admin)',
     adminAdjustment: 'Admin Adjustment',
     subscriptionAssigned: 'Subscription Assigned',
+    claudeDevicesAdded: 'Claude Code device quota added',
+    devices: 'devices',
     subscriptionAssignedDesc: 'You have been granted access to {groupName}',
     subscriptionDays: '{days} days',
     days: ' days',
@@ -1660,10 +1662,31 @@ export default {
         environmentModeRewrite: 'Rewrite',
         environmentModeRemove: 'Remove'
       },
-      openaiMessages: {
-        title: 'OpenAI Messages Dispatch',
-        allowDispatch: 'Allow /v1/messages dispatch',
-        allowDispatchHint: 'When enabled, API keys in this OpenAI group can dispatch requests through /v1/messages endpoint'
+      inputModeration: {
+        title: 'Asynchronous Input Moderation',
+        enabled: 'Moderate the latest real user input',
+        hint: 'Requests do not wait for moderation. Only the latest user text is sent to the internal classifier; system prompts, tool results, and credentials are excluded.',
+        autoDisable: 'Automatically enforce against the site user',
+        autoDisableHint: 'Applies only to Unsafe results in selected categories. Admin users are audited but never automatically penalized.',
+        categories: 'Enforcement categories',
+        categoriesHint: 'Selecting no categories allows any Unsafe category to trigger enforcement.',
+        actionMode: 'Enforcement mode',
+        cooldownThenDisable: 'Cooldown first, permanently disable after repeated hits',
+        immediateDisable: 'Permanently disable on the first hit',
+        cooldownMinutes: 'Cooldown minutes',
+        disableAfterHits: 'Hits before permanent disable',
+        strikeWindowHours: 'Strike window (hours)',
+        dedupeMinutes: 'Same-content dedupe (minutes)'
+      },
+      clientLimits: {
+        codexPolicy: 'Codex client restriction',
+        claudeDeviceMode: 'Claude Code device restriction',
+        off: 'Off',
+        officialClients: 'Official Codex clients only',
+        cliOnly: 'Codex CLI only',
+        audit: 'Audit only',
+        enforce: 'Enforce',
+        baseDevices: 'Base device count'
       },
       invalidRequestFallback: {
         title: 'Invalid Request Fallback Group',
@@ -2945,6 +2968,7 @@ export default {
       concurrency: 'Concurrency',
       subscription: 'Subscription',
       invitation: 'Invitation',
+      claudeDevice: 'Claude Code Device',
       invitationHint: 'Invitation codes are used to restrict user registration. They are automatically marked as used after use.',
       unused: 'Unused',
       used: 'Used',
@@ -2993,6 +3017,7 @@ export default {
         concurrency: 'Concurrency',
         subscription: 'Subscription',
         invitation: 'Invitation',
+        claude_device: 'Claude Code Device',
         // Admin adjustment types (created when admin modifies user balance/concurrency)
         admin_balance: 'Balance (Admin)',
         admin_concurrency: 'Concurrency (Admin)'

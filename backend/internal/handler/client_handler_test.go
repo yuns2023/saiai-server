@@ -16,7 +16,7 @@ func TestClientHandlerBootstrap(t *testing.T) {
 
 	router := gin.New()
 	handler := NewClientHandler(BuildInfo{Version: "1.2.3-test"})
-	router.GET("/bootstrap", withBootstrapAPIKey(openAIKey(true)), handler.Bootstrap)
+	router.GET("/bootstrap", withBootstrapAPIKey(openAIKey()), handler.Bootstrap)
 
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/bootstrap", nil))
@@ -34,8 +34,7 @@ func TestClientHandlerBootstrap(t *testing.T) {
 				"claude": false,
 				"codex": true,
 				"codex_responses": true,
-				"codex_websockets": false,
-				"openai_messages_dispatch": true
+				"codex_websockets": false
 			}
 		}
 	}`, recorder.Body.String())
@@ -46,7 +45,7 @@ func TestClientHandlerBootstrapKeepsEmptyGatewayVersionInContract(t *testing.T) 
 
 	router := gin.New()
 	handler := NewClientHandler(BuildInfo{})
-	router.GET("/bootstrap", withBootstrapAPIKey(openAIKey(true)), handler.Bootstrap)
+	router.GET("/bootstrap", withBootstrapAPIKey(openAIKey()), handler.Bootstrap)
 
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/bootstrap", nil))
@@ -63,8 +62,7 @@ func TestClientHandlerBootstrapKeepsEmptyGatewayVersionInContract(t *testing.T) 
 				"claude": false,
 				"codex": true,
 				"codex_responses": true,
-				"codex_websockets": false,
-				"openai_messages_dispatch": true
+				"codex_websockets": false
 			}
 		}
 	}`, recorder.Body.String())
@@ -78,16 +76,7 @@ func TestClientCapabilitiesAreEffectiveForAuthenticatedKey(t *testing.T) {
 	}{
 		{name: "missing key", key: nil, want: ClientCapabilities{}},
 		{name: "ungrouped key", key: &service.APIKey{}, want: ClientCapabilities{}},
-		{
-			name: "OpenAI without Messages dispatch",
-			key:  openAIKey(false),
-			want: ClientCapabilities{Codex: true, CodexResponses: true},
-		},
-		{
-			name: "OpenAI with Messages dispatch",
-			key:  openAIKey(true),
-			want: ClientCapabilities{Codex: true, CodexResponses: true, OpenAIMessagesDispatch: true},
-		},
+		{name: "OpenAI", key: openAIKey(), want: ClientCapabilities{Codex: true, CodexResponses: true}},
 		{
 			name: "Anthropic",
 			key:  &service.APIKey{Group: activeGroup(service.PlatformAnthropic)},
@@ -118,10 +107,8 @@ func TestClientCapabilitiesAreEffectiveForAuthenticatedKey(t *testing.T) {
 	}
 }
 
-func openAIKey(allowMessages bool) *service.APIKey {
-	group := activeGroup(service.PlatformOpenAI)
-	group.AllowMessagesDispatch = allowMessages
-	return &service.APIKey{Group: group}
+func openAIKey() *service.APIKey {
+	return &service.APIKey{Group: activeGroup(service.PlatformOpenAI)}
 }
 
 func activeGroup(platform string) *service.Group {

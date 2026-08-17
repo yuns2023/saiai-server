@@ -35,6 +35,33 @@ func newGroupRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *groupRep
 }
 
 func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) error {
+	if groupIn.InputModerationCategories == nil {
+		groupIn.InputModerationCategories = []string{"Jailbreak", "PII", "Non-violent Illegal Acts", "Unethical Acts"}
+	}
+	if strings.TrimSpace(groupIn.InputModerationActionMode) == "" {
+		groupIn.InputModerationActionMode = service.InputModerationActionModeCooldownThenDisable
+	}
+	if groupIn.InputModerationCooldownMinutes <= 0 {
+		groupIn.InputModerationCooldownMinutes = 30
+	}
+	if groupIn.InputModerationDisableAfterHits <= 0 {
+		groupIn.InputModerationDisableAfterHits = 2
+	}
+	if groupIn.InputModerationStrikeWindowHours <= 0 {
+		groupIn.InputModerationStrikeWindowHours = 24
+	}
+	if groupIn.InputModerationDedupeMinutes <= 0 {
+		groupIn.InputModerationDedupeMinutes = 5
+	}
+	if strings.TrimSpace(groupIn.CodexClientPolicy) == "" {
+		groupIn.CodexClientPolicy = "off"
+	}
+	if strings.TrimSpace(groupIn.ClaudeDeviceLimitMode) == "" {
+		groupIn.ClaudeDeviceLimitMode = "off"
+	}
+	if groupIn.ClaudeDeviceBaseLimit <= 0 {
+		groupIn.ClaudeDeviceBaseLimit = 1
+	}
 	builder := r.client.Group.Create().
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
@@ -63,7 +90,16 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
 		SetMcpXMLInject(groupIn.MCPXMLInject).
 		SetSoraStorageQuotaBytes(groupIn.SoraStorageQuotaBytes).
-		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch)
+		SetInputModerationEnabled(groupIn.InputModerationEnabled).
+		SetInputModerationAutoDisableUser(groupIn.InputModerationAutoDisableUser).
+		SetInputModerationActionMode(groupIn.InputModerationActionMode).
+		SetInputModerationCooldownMinutes(groupIn.InputModerationCooldownMinutes).
+		SetInputModerationDisableAfterHits(groupIn.InputModerationDisableAfterHits).
+		SetInputModerationStrikeWindowHours(groupIn.InputModerationStrikeWindowHours).
+		SetInputModerationDedupeMinutes(groupIn.InputModerationDedupeMinutes).
+		SetCodexClientPolicy(groupIn.CodexClientPolicy).
+		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
+		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)
 
 	// 模型路由 JSONB 也承载无需迁移的分组兼容开关。
 	if storedRouting := service.EncodeGroupModelRouting(groupIn.ModelRouting, groupIn.EffectiveClaudeEnvironmentMode()); storedRouting != nil {
@@ -72,6 +108,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 
 	// 设置支持的模型系列（始终设置，空数组表示不限制）
 	builder = builder.SetSupportedModelScopes(groupIn.SupportedModelScopes)
+	builder = builder.SetInputModerationCategories(groupIn.InputModerationCategories)
 
 	created, err := builder.Save(ctx)
 	if err == nil {
@@ -134,7 +171,16 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
 		SetMcpXMLInject(groupIn.MCPXMLInject).
 		SetSoraStorageQuotaBytes(groupIn.SoraStorageQuotaBytes).
-		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch)
+		SetInputModerationEnabled(groupIn.InputModerationEnabled).
+		SetInputModerationAutoDisableUser(groupIn.InputModerationAutoDisableUser).
+		SetInputModerationActionMode(groupIn.InputModerationActionMode).
+		SetInputModerationCooldownMinutes(groupIn.InputModerationCooldownMinutes).
+		SetInputModerationDisableAfterHits(groupIn.InputModerationDisableAfterHits).
+		SetInputModerationStrikeWindowHours(groupIn.InputModerationStrikeWindowHours).
+		SetInputModerationDedupeMinutes(groupIn.InputModerationDedupeMinutes).
+		SetCodexClientPolicy(groupIn.CodexClientPolicy).
+		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
+		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)
 
 	// 显式处理可空字段：nil 需要 clear，非 nil 需要 set。
 	if groupIn.FiveHourLimitUSD != nil {
@@ -195,6 +241,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 
 	// 处理 SupportedModelScopes（始终设置，空数组表示不限制）
 	builder = builder.SetSupportedModelScopes(groupIn.SupportedModelScopes)
+	builder = builder.SetInputModerationCategories(groupIn.InputModerationCategories)
 
 	updated, err := builder.Save(ctx)
 	if err != nil {

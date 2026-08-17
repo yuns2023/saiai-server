@@ -73,9 +73,11 @@ export async function generate(
     value
   }
 
-  // 订阅类型专用字段
-  if (type === 'subscription') {
+  // 分组绑定类型专用字段
+  if (type === 'subscription' || type === 'claude_device') {
     payload.group_id = groupId
+  }
+  if (type === 'subscription') {
     if (validityDays && validityDays > 0) {
       payload.validity_days = validityDays
     }

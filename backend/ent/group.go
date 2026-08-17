@@ -84,8 +84,28 @@ type Group struct {
 	SupportedModelScopes []string `json:"supported_model_scopes,omitempty"`
 	// 分组显示排序，数值越小越靠前
 	SortOrder int `json:"sort_order,omitempty"`
-	// 是否允许 /v1/messages 调度到此 OpenAI 分组
-	AllowMessagesDispatch bool `json:"allow_messages_dispatch,omitempty"`
+	// 是否异步审核最新真实用户输入
+	InputModerationEnabled bool `json:"input_moderation_enabled,omitempty"`
+	// 命中分组审核策略后是否自动禁用站内用户
+	InputModerationAutoDisableUser bool `json:"input_moderation_auto_disable_user,omitempty"`
+	// 可触发自动禁用的 Unsafe 分类；空数组表示任意 Unsafe 分类
+	InputModerationCategories []string `json:"input_moderation_categories,omitempty"`
+	// InputModerationActionMode holds the value of the "input_moderation_action_mode" field.
+	InputModerationActionMode string `json:"input_moderation_action_mode,omitempty"`
+	// InputModerationCooldownMinutes holds the value of the "input_moderation_cooldown_minutes" field.
+	InputModerationCooldownMinutes int `json:"input_moderation_cooldown_minutes,omitempty"`
+	// InputModerationDisableAfterHits holds the value of the "input_moderation_disable_after_hits" field.
+	InputModerationDisableAfterHits int `json:"input_moderation_disable_after_hits,omitempty"`
+	// InputModerationStrikeWindowHours holds the value of the "input_moderation_strike_window_hours" field.
+	InputModerationStrikeWindowHours int `json:"input_moderation_strike_window_hours,omitempty"`
+	// InputModerationDedupeMinutes holds the value of the "input_moderation_dedupe_minutes" field.
+	InputModerationDedupeMinutes int `json:"input_moderation_dedupe_minutes,omitempty"`
+	// CodexClientPolicy holds the value of the "codex_client_policy" field.
+	CodexClientPolicy string `json:"codex_client_policy,omitempty"`
+	// ClaudeDeviceLimitMode holds the value of the "claude_device_limit_mode" field.
+	ClaudeDeviceLimitMode string `json:"claude_device_limit_mode,omitempty"`
+	// ClaudeDeviceBaseLimit holds the value of the "claude_device_base_limit" field.
+	ClaudeDeviceBaseLimit int `json:"claude_device_base_limit,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the GroupQuery when eager-loading is set.
 	Edges        GroupEdges `json:"edges"`
@@ -192,15 +212,15 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case group.FieldModelRouting, group.FieldSupportedModelScopes:
+		case group.FieldModelRouting, group.FieldSupportedModelScopes, group.FieldInputModerationCategories:
 			values[i] = new([]byte)
-		case group.FieldIsExclusive, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldAllowMessagesDispatch:
+		case group.FieldIsExclusive, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldInputModerationEnabled, group.FieldInputModerationAutoDisableUser:
 			values[i] = new(sql.NullBool)
 		case group.FieldRateMultiplier, group.FieldFiveHourLimitUsd, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k, group.FieldSoraImagePrice360, group.FieldSoraImagePrice540, group.FieldSoraVideoPricePerRequest, group.FieldSoraVideoPricePerRequestHd:
 			values[i] = new(sql.NullFloat64)
-		case group.FieldID, group.FieldDefaultValidityDays, group.FieldSoraStorageQuotaBytes, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder:
+		case group.FieldID, group.FieldDefaultValidityDays, group.FieldSoraStorageQuotaBytes, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldInputModerationCooldownMinutes, group.FieldInputModerationDisableAfterHits, group.FieldInputModerationStrikeWindowHours, group.FieldInputModerationDedupeMinutes, group.FieldClaudeDeviceBaseLimit:
 			values[i] = new(sql.NullInt64)
-		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType:
+		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldInputModerationActionMode, group.FieldCodexClientPolicy, group.FieldClaudeDeviceLimitMode:
 			values[i] = new(sql.NullString)
 		case group.FieldCreatedAt, group.FieldUpdatedAt, group.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -442,11 +462,73 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.SortOrder = int(value.Int64)
 			}
-		case group.FieldAllowMessagesDispatch:
+		case group.FieldInputModerationEnabled:
 			if value, ok := values[i].(*sql.NullBool); !ok {
-				return fmt.Errorf("unexpected type %T for field allow_messages_dispatch", values[i])
+				return fmt.Errorf("unexpected type %T for field input_moderation_enabled", values[i])
 			} else if value.Valid {
-				_m.AllowMessagesDispatch = value.Bool
+				_m.InputModerationEnabled = value.Bool
+			}
+		case group.FieldInputModerationAutoDisableUser:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field input_moderation_auto_disable_user", values[i])
+			} else if value.Valid {
+				_m.InputModerationAutoDisableUser = value.Bool
+			}
+		case group.FieldInputModerationCategories:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field input_moderation_categories", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.InputModerationCategories); err != nil {
+					return fmt.Errorf("unmarshal field input_moderation_categories: %w", err)
+				}
+			}
+		case group.FieldInputModerationActionMode:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field input_moderation_action_mode", values[i])
+			} else if value.Valid {
+				_m.InputModerationActionMode = value.String
+			}
+		case group.FieldInputModerationCooldownMinutes:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field input_moderation_cooldown_minutes", values[i])
+			} else if value.Valid {
+				_m.InputModerationCooldownMinutes = int(value.Int64)
+			}
+		case group.FieldInputModerationDisableAfterHits:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field input_moderation_disable_after_hits", values[i])
+			} else if value.Valid {
+				_m.InputModerationDisableAfterHits = int(value.Int64)
+			}
+		case group.FieldInputModerationStrikeWindowHours:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field input_moderation_strike_window_hours", values[i])
+			} else if value.Valid {
+				_m.InputModerationStrikeWindowHours = int(value.Int64)
+			}
+		case group.FieldInputModerationDedupeMinutes:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field input_moderation_dedupe_minutes", values[i])
+			} else if value.Valid {
+				_m.InputModerationDedupeMinutes = int(value.Int64)
+			}
+		case group.FieldCodexClientPolicy:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field codex_client_policy", values[i])
+			} else if value.Valid {
+				_m.CodexClientPolicy = value.String
+			}
+		case group.FieldClaudeDeviceLimitMode:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field claude_device_limit_mode", values[i])
+			} else if value.Valid {
+				_m.ClaudeDeviceLimitMode = value.String
+			}
+		case group.FieldClaudeDeviceBaseLimit:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field claude_device_base_limit", values[i])
+			} else if value.Valid {
+				_m.ClaudeDeviceBaseLimit = int(value.Int64)
 			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
@@ -653,8 +735,38 @@ func (_m *Group) String() string {
 	builder.WriteString("sort_order=")
 	builder.WriteString(fmt.Sprintf("%v", _m.SortOrder))
 	builder.WriteString(", ")
-	builder.WriteString("allow_messages_dispatch=")
-	builder.WriteString(fmt.Sprintf("%v", _m.AllowMessagesDispatch))
+	builder.WriteString("input_moderation_enabled=")
+	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationEnabled))
+	builder.WriteString(", ")
+	builder.WriteString("input_moderation_auto_disable_user=")
+	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationAutoDisableUser))
+	builder.WriteString(", ")
+	builder.WriteString("input_moderation_categories=")
+	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationCategories))
+	builder.WriteString(", ")
+	builder.WriteString("input_moderation_action_mode=")
+	builder.WriteString(_m.InputModerationActionMode)
+	builder.WriteString(", ")
+	builder.WriteString("input_moderation_cooldown_minutes=")
+	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationCooldownMinutes))
+	builder.WriteString(", ")
+	builder.WriteString("input_moderation_disable_after_hits=")
+	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationDisableAfterHits))
+	builder.WriteString(", ")
+	builder.WriteString("input_moderation_strike_window_hours=")
+	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationStrikeWindowHours))
+	builder.WriteString(", ")
+	builder.WriteString("input_moderation_dedupe_minutes=")
+	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationDedupeMinutes))
+	builder.WriteString(", ")
+	builder.WriteString("codex_client_policy=")
+	builder.WriteString(_m.CodexClientPolicy)
+	builder.WriteString(", ")
+	builder.WriteString("claude_device_limit_mode=")
+	builder.WriteString(_m.ClaudeDeviceLimitMode)
+	builder.WriteString(", ")
+	builder.WriteString("claude_device_base_limit=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ClaudeDeviceBaseLimit))
 	builder.WriteByte(')')
 	return builder.String()
 }

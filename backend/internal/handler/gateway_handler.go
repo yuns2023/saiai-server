@@ -45,6 +45,8 @@ type GatewayHandler struct {
 	usageService              *service.UsageService
 	apiKeyService             *service.APIKeyService
 	usageRecordWorkerPool     *service.UsageRecordWorkerPool
+	inputModerationService    *service.InputModerationService
+	claudeDeviceService       *service.ClaudeDeviceService
 	errorPassthroughService   *service.ErrorPassthroughService
 	opsService                *service.OpsService
 	concurrencyHelper         *ConcurrencyHelper
@@ -66,6 +68,8 @@ func NewGatewayHandler(
 	usageService *service.UsageService,
 	apiKeyService *service.APIKeyService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
+	inputModerationService *service.InputModerationService,
+	claudeDeviceService *service.ClaudeDeviceService,
 	errorPassthroughService *service.ErrorPassthroughService,
 	opsService *service.OpsService,
 	userMsgQueueService *service.UserMessageQueueService,
@@ -100,6 +104,8 @@ func NewGatewayHandler(
 		usageService:              usageService,
 		apiKeyService:             apiKeyService,
 		usageRecordWorkerPool:     usageRecordWorkerPool,
+		inputModerationService:    inputModerationService,
+		claudeDeviceService:       claudeDeviceService,
 		errorPassthroughService:   errorPassthroughService,
 		opsService:                opsService,
 		concurrencyHelper:         NewConcurrencyHelper(concurrencyService, SSEPingFormatClaude, pingInterval),
@@ -425,6 +431,43 @@ func (h *GatewayHandler) clearSuccessOnlyStickyOnFailure(ctx context.Context, gr
 	}
 }
 
+func (h *GatewayHandler) submitInputModeration(c *gin.Context, apiKey *service.APIKey, parsed *service.ParsedRequest) {
+	if h == nil || h.inputModerationService == nil || c == nil || c.Request == nil ||
+		apiKey == nil || apiKey.User == nil || apiKey.Group == nil || apiKey.GroupID == nil ||
+		!h.inputModerationService.EnabledForGroup(apiKey.Group) {
+		return
+	}
+	text := service.ExtractLatestRealUserText(parsed)
+	if text == "" {
+		return
+	}
+	requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
+	h.inputModerationService.Submit(service.InputModerationTask{
+		RequestID: strings.TrimSpace(requestID),
+		UserID:    apiKey.UserID,
+		APIKeyID:  apiKey.ID,
+		GroupID:   *apiKey.GroupID,
+		Text:      text,
+	})
+}
+
+func (h *GatewayHandler) checkClaudeDeviceLimit(c *gin.Context, apiKey *service.APIKey, parsed *service.ParsedRequest, streamStarted bool) bool {
+	if h == nil || h.claudeDeviceService == nil {
+		return true
+	}
+	err := h.claudeDeviceService.CheckAndRegister(c.Request.Context(), apiKey, parsed)
+	if err == nil {
+		return true
+	}
+	var limitErr *service.ClaudeDeviceLimitError
+	if errors.As(err, &limitErr) {
+		h.handleStreamingAwareError(c, http.StatusForbidden, "permission_error", "Claude Code device limit reached. Redeem a device code or contact your administrator.", streamStarted)
+		return false
+	}
+	h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Unable to validate Claude Code device", streamStarted)
+	return false
+}
+
 // Messages handles Claude API compatible messages endpoint
 // POST /v1/messages
 func (h *GatewayHandler) Messages(c *gin.Context) {
@@ -524,6 +567,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", err.Error(), streamStarted)
 		return
 	}
+	h.submitInputModeration(c, apiKey, parsedReq)
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -578,6 +622,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		reqLog.Info("gateway.billing_eligibility_check_failed", zap.Error(err))
 		status, code, message := billingErrorDetails(err)
 		h.handleStreamingAwareError(c, status, code, message, streamStarted)
+		return
+	}
+	if !h.checkClaudeDeviceLimit(c, apiKey, parsedReq, streamStarted) {
 		return
 	}
 
@@ -1837,6 +1884,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	h.submitInputModeration(c, apiKey, parsedReq)
 
 	// 获取订阅信息（可能为nil）
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
@@ -1846,6 +1894,9 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		status, code, message := billingErrorDetails(err)
 		h.errorResponse(c, status, code, message)
+		return
+	}
+	if !h.checkClaudeDeviceLimit(c, apiKey, parsedReq, false) {
 		return
 	}
 

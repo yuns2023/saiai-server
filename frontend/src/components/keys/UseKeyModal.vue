@@ -144,9 +144,8 @@ import type { GroupPlatform } from '@/types'
 interface Props {
   show: boolean
   apiKey: string
-  baseUrl: string
-  platform: GroupPlatform | null
-  allowMessagesDispatch?: boolean
+	baseUrl: string
+	platform: GroupPlatform | null
 }
 
 interface Emits {
@@ -190,7 +189,7 @@ const defaultClientTab = computed(() => {
   }
 })
 
-watch([() => props.platform, () => props.allowMessagesDispatch], () => {
+watch(() => props.platform, () => {
   activeTab.value = 'unix'
   activeClientTab.value = defaultClientTab.value
 }, { immediate: true })
@@ -265,17 +264,12 @@ const SparkleIcon = {
 
 const clientTabs = computed((): TabConfig[] => {
   if (!props.platform) return []
-  switch (props.platform) {
-    case 'openai': {
-      const tabs: TabConfig[] = [
-        { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
-        { id: 'codex-ws', label: t('keys.useKeyModal.cliTabs.codexCliWs'), icon: TerminalIcon }
-      ]
-      if (props.allowMessagesDispatch) {
-        tabs.push({ id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon })
-      }
-      return tabs
-    }
+	switch (props.platform) {
+		case 'openai':
+			return [
+				{ id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
+				{ id: 'codex-ws', label: t('keys.useKeyModal.cliTabs.codexCliWs'), icon: TerminalIcon }
+			]
     case 'anthropic':
       return [{ id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon }]
     case 'gemini':
@@ -302,11 +296,9 @@ const currentTabs = computed(() => {
 })
 
 const platformDescription = computed(() => {
-  switch (props.platform) {
-    case 'openai':
-      return activeClientTab.value === 'claude'
-        ? t('keys.useKeyModal.description')
-        : t('keys.useKeyModal.openai.description')
+	switch (props.platform) {
+		case 'openai':
+			return t('keys.useKeyModal.openai.description')
     case 'anthropic':
       return t('keys.useKeyModal.description')
     case 'gemini':
@@ -317,11 +309,9 @@ const platformDescription = computed(() => {
 })
 
 const platformNote = computed(() => {
-  switch (props.platform) {
-    case 'openai':
-      return activeClientTab.value === 'claude'
-        ? t('keys.useKeyModal.note')
-        : t('keys.useKeyModal.openai.note')
+	switch (props.platform) {
+		case 'openai':
+			return t('keys.useKeyModal.openai.note')
     case 'anthropic':
       return t('keys.useKeyModal.note')
     case 'gemini':
@@ -385,12 +375,9 @@ const currentFiles = computed((): FileConfig[] => {
   const baseUrl = props.baseUrl || window.location.origin
   const apiKey = props.apiKey
 
-  switch (props.platform) {
-    case 'openai':
-      if (activeClientTab.value === 'claude') {
-        return generateClaudeCodeFiles(getGatewayRoot(baseUrl), apiKey)
-      }
-      return generateCodexCliFiles(baseUrl, apiKey, activeClientTab.value === 'codex-ws')
+	switch (props.platform) {
+		case 'openai':
+			return generateCodexCliFiles(baseUrl, apiKey, activeClientTab.value === 'codex-ws')
     case 'anthropic':
       return generateClaudeCodeFiles(getGatewayRoot(baseUrl), apiKey)
     case 'gemini':

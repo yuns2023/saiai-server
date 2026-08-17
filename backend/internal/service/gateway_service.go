@@ -1719,11 +1719,6 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	return out, modelID
 }
 
-// GenerateSessionUUID creates a deterministic UUID4 from a seed string.
-func GenerateSessionUUID(seed string) string {
-	return generateSessionUUID(seed)
-}
-
 func generateSessionUUID(seed string) string {
 	if seed == "" {
 		return uuid.NewString()

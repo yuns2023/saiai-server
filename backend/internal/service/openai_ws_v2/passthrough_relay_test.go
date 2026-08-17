@@ -235,6 +235,29 @@ func TestRelay_BasicRelayAndUsage(t *testing.T) {
 	require.JSONEq(t, `{"type":"response.completed","response":{"id":"resp_123","usage":{"input_tokens":7,"output_tokens":3,"input_tokens_details":{"cache_write_tokens":1,"cached_tokens":2}}}}`, string(clientWrites[0].payload))
 }
 
+func TestRelay_OnClientTurnRejectsBeforeFirstUpstreamWrite(t *testing.T) {
+	t.Parallel()
+
+	clientConn := newPassthroughTestFrameConn(nil, false)
+	upstreamConn := newPassthroughTestFrameConn(nil, false)
+	firstPayload := []byte(`{"type":"response.create","model":"gpt-5.3-codex","input":"blocked"}`)
+	wantErr := errors.New("blocked turn")
+
+	result, relayExit := Relay(context.Background(), clientConn, upstreamConn, firstPayload, RelayOptions{
+		OnClientTurn: func(turn int, payload []byte) error {
+			require.Equal(t, 1, turn)
+			require.Equal(t, firstPayload, payload)
+			return wantErr
+		},
+	})
+
+	require.NotNil(t, relayExit)
+	require.Equal(t, "client_turn_rejected", relayExit.Stage)
+	require.ErrorIs(t, relayExit.Err, wantErr)
+	require.Empty(t, upstreamConn.Writes())
+	require.Zero(t, result.ClientToUpstreamFrames)
+}
+
 func TestRelay_FunctionCallOutputBytesPreserved(t *testing.T) {
 	t.Parallel()
 

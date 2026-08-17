@@ -681,30 +681,125 @@
           </div>
         </div>
 
-        <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
-        <div v-if="createForm.platform === 'openai'" class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4">
-          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{{ t('admin.groups.openaiMessages.title') }}</h4>
+        <div v-if="createForm.platform === 'openai'" class="border-t pt-4">
+          <label class="input-label">{{ t('admin.groups.clientLimits.codexPolicy') }}</label>
+          <select v-model="createForm.codex_client_policy" class="input w-full">
+            <option value="off">{{ t('admin.groups.clientLimits.off') }}</option>
+            <option value="official_clients">{{ t('admin.groups.clientLimits.officialClients') }}</option>
+            <option value="cli_only">{{ t('admin.groups.clientLimits.cliOnly') }}</option>
+          </select>
+        </div>
+        <div v-if="['anthropic', 'antigravity'].includes(createForm.platform)" class="border-t pt-4 space-y-3">
+          <label class="input-label">{{ t('admin.groups.clientLimits.claudeDeviceMode') }}</label>
+          <select v-model="createForm.claude_device_limit_mode" class="input w-full">
+            <option value="off">{{ t('admin.groups.clientLimits.off') }}</option>
+            <option value="audit">{{ t('admin.groups.clientLimits.audit') }}</option>
+            <option value="enforce">{{ t('admin.groups.clientLimits.enforce') }}</option>
+          </select>
+          <div v-if="createForm.claude_device_limit_mode !== 'off'">
+            <label class="input-label">{{ t('admin.groups.clientLimits.baseDevices') }}</label>
+            <input v-model.number="createForm.claude_device_base_limit" type="number" min="1" max="100" class="input w-full" />
+          </div>
+        </div>
 
-          <!-- 允许 Messages 调度开关 -->
-          <div class="flex items-center justify-between">
-            <label class="text-sm text-gray-600 dark:text-gray-400">{{ t('admin.groups.openaiMessages.allowDispatch') }}</label>
+        <!-- 异步用户输入审核 -->
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-400">
+          <h4 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ t('admin.groups.inputModeration.title') }}
+          </h4>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <label class="text-sm text-gray-600 dark:text-gray-400">
+                {{ t('admin.groups.inputModeration.enabled') }}
+              </label>
+              <p class="input-hint mt-1">{{ t('admin.groups.inputModeration.hint') }}</p>
+            </div>
             <button
               type="button"
-              @click="createForm.allow_messages_dispatch = !createForm.allow_messages_dispatch"
-              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
-              :class="
-                createForm.allow_messages_dispatch ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
-              "
+              @click="createForm.input_moderation_enabled = !createForm.input_moderation_enabled"
+              :class="[
+                'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
+                createForm.input_moderation_enabled ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
+              ]"
             >
               <span
-                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
-                :class="
-                  createForm.allow_messages_dispatch ? 'translate-x-6' : 'translate-x-1'
-                "
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  createForm.input_moderation_enabled ? 'translate-x-6' : 'translate-x-1'
+                ]"
               />
             </button>
           </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ t('admin.groups.openaiMessages.allowDispatchHint') }}</p>
+          <div v-if="createForm.input_moderation_enabled" class="mt-4 space-y-3">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="text-sm text-gray-600 dark:text-gray-400">
+                  {{ t('admin.groups.inputModeration.autoDisable') }}
+                </label>
+                <p class="input-hint mt-1">{{ t('admin.groups.inputModeration.autoDisableHint') }}</p>
+              </div>
+              <button
+                type="button"
+                @click="createForm.input_moderation_auto_disable_user = !createForm.input_moderation_auto_disable_user"
+                :class="[
+                  'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
+                  createForm.input_moderation_auto_disable_user ? 'bg-red-500' : 'bg-gray-300 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                    createForm.input_moderation_auto_disable_user ? 'translate-x-6' : 'translate-x-1'
+                  ]"
+                />
+              </button>
+            </div>
+            <div v-if="createForm.input_moderation_auto_disable_user" class="space-y-3">
+              <div>
+                <label class="input-label">{{ t('admin.groups.inputModeration.actionMode') }}</label>
+                <select v-model="createForm.input_moderation_action_mode" class="input w-full">
+                  <option value="cooldown_then_disable">{{ t('admin.groups.inputModeration.cooldownThenDisable') }}</option>
+                  <option value="immediate_disable">{{ t('admin.groups.inputModeration.immediateDisable') }}</option>
+                </select>
+              </div>
+              <div v-if="createForm.input_moderation_action_mode === 'cooldown_then_disable'" class="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label class="input-label">{{ t('admin.groups.inputModeration.cooldownMinutes') }}</label>
+                  <input v-model.number="createForm.input_moderation_cooldown_minutes" type="number" min="1" max="1440" class="input w-full" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.groups.inputModeration.disableAfterHits') }}</label>
+                  <input v-model.number="createForm.input_moderation_disable_after_hits" type="number" min="1" max="20" class="input w-full" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.groups.inputModeration.strikeWindowHours') }}</label>
+                  <input v-model.number="createForm.input_moderation_strike_window_hours" type="number" min="1" max="720" class="input w-full" />
+                </div>
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.groups.inputModeration.dedupeMinutes') }}</label>
+                <input v-model.number="createForm.input_moderation_dedupe_minutes" type="number" min="1" max="1440" class="input w-full" />
+              </div>
+            </div>
+            <div v-if="createForm.input_moderation_auto_disable_user">
+              <label class="input-label">{{ t('admin.groups.inputModeration.categories') }}</label>
+              <div class="grid gap-2 sm:grid-cols-2">
+                <label
+                  v-for="category in inputModerationCategoryOptions"
+                  :key="`create-moderation-${category}`"
+                  class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="createForm.input_moderation_categories.includes(category)"
+                    @change="toggleInputModerationCategory(createForm.input_moderation_categories, category)"
+                  />
+                  <span>{{ category }}</span>
+                </label>
+              </div>
+              <p class="input-hint mt-1">{{ t('admin.groups.inputModeration.categoriesHint') }}</p>
+            </div>
+          </div>
         </div>
 
         <!-- 无效请求兜底（仅 anthropic 平台，且非订阅分组） -->
@@ -1321,30 +1416,125 @@
           </div>
         </div>
 
-        <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
-        <div v-if="editForm.platform === 'openai'" class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4">
-          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{{ t('admin.groups.openaiMessages.title') }}</h4>
+        <div v-if="editForm.platform === 'openai'" class="border-t pt-4">
+          <label class="input-label">{{ t('admin.groups.clientLimits.codexPolicy') }}</label>
+          <select v-model="editForm.codex_client_policy" class="input w-full">
+            <option value="off">{{ t('admin.groups.clientLimits.off') }}</option>
+            <option value="official_clients">{{ t('admin.groups.clientLimits.officialClients') }}</option>
+            <option value="cli_only">{{ t('admin.groups.clientLimits.cliOnly') }}</option>
+          </select>
+        </div>
+        <div v-if="['anthropic', 'antigravity'].includes(editForm.platform)" class="border-t pt-4 space-y-3">
+          <label class="input-label">{{ t('admin.groups.clientLimits.claudeDeviceMode') }}</label>
+          <select v-model="editForm.claude_device_limit_mode" class="input w-full">
+            <option value="off">{{ t('admin.groups.clientLimits.off') }}</option>
+            <option value="audit">{{ t('admin.groups.clientLimits.audit') }}</option>
+            <option value="enforce">{{ t('admin.groups.clientLimits.enforce') }}</option>
+          </select>
+          <div v-if="editForm.claude_device_limit_mode !== 'off'">
+            <label class="input-label">{{ t('admin.groups.clientLimits.baseDevices') }}</label>
+            <input v-model.number="editForm.claude_device_base_limit" type="number" min="1" max="100" class="input w-full" />
+          </div>
+        </div>
 
-          <!-- 允许 Messages 调度开关 -->
-          <div class="flex items-center justify-between">
-            <label class="text-sm text-gray-600 dark:text-gray-400">{{ t('admin.groups.openaiMessages.allowDispatch') }}</label>
+        <!-- 异步用户输入审核 -->
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-400">
+          <h4 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ t('admin.groups.inputModeration.title') }}
+          </h4>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <label class="text-sm text-gray-600 dark:text-gray-400">
+                {{ t('admin.groups.inputModeration.enabled') }}
+              </label>
+              <p class="input-hint mt-1">{{ t('admin.groups.inputModeration.hint') }}</p>
+            </div>
             <button
               type="button"
-              @click="editForm.allow_messages_dispatch = !editForm.allow_messages_dispatch"
-              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
-              :class="
-                editForm.allow_messages_dispatch ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
-              "
+              @click="editForm.input_moderation_enabled = !editForm.input_moderation_enabled"
+              :class="[
+                'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
+                editForm.input_moderation_enabled ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
+              ]"
             >
               <span
-                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
-                :class="
-                  editForm.allow_messages_dispatch ? 'translate-x-6' : 'translate-x-1'
-                "
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  editForm.input_moderation_enabled ? 'translate-x-6' : 'translate-x-1'
+                ]"
               />
             </button>
           </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ t('admin.groups.openaiMessages.allowDispatchHint') }}</p>
+          <div v-if="editForm.input_moderation_enabled" class="mt-4 space-y-3">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="text-sm text-gray-600 dark:text-gray-400">
+                  {{ t('admin.groups.inputModeration.autoDisable') }}
+                </label>
+                <p class="input-hint mt-1">{{ t('admin.groups.inputModeration.autoDisableHint') }}</p>
+              </div>
+              <button
+                type="button"
+                @click="editForm.input_moderation_auto_disable_user = !editForm.input_moderation_auto_disable_user"
+                :class="[
+                  'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
+                  editForm.input_moderation_auto_disable_user ? 'bg-red-500' : 'bg-gray-300 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                    editForm.input_moderation_auto_disable_user ? 'translate-x-6' : 'translate-x-1'
+                  ]"
+                />
+              </button>
+            </div>
+            <div v-if="editForm.input_moderation_auto_disable_user" class="space-y-3">
+              <div>
+                <label class="input-label">{{ t('admin.groups.inputModeration.actionMode') }}</label>
+                <select v-model="editForm.input_moderation_action_mode" class="input w-full">
+                  <option value="cooldown_then_disable">{{ t('admin.groups.inputModeration.cooldownThenDisable') }}</option>
+                  <option value="immediate_disable">{{ t('admin.groups.inputModeration.immediateDisable') }}</option>
+                </select>
+              </div>
+              <div v-if="editForm.input_moderation_action_mode === 'cooldown_then_disable'" class="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label class="input-label">{{ t('admin.groups.inputModeration.cooldownMinutes') }}</label>
+                  <input v-model.number="editForm.input_moderation_cooldown_minutes" type="number" min="1" max="1440" class="input w-full" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.groups.inputModeration.disableAfterHits') }}</label>
+                  <input v-model.number="editForm.input_moderation_disable_after_hits" type="number" min="1" max="20" class="input w-full" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.groups.inputModeration.strikeWindowHours') }}</label>
+                  <input v-model.number="editForm.input_moderation_strike_window_hours" type="number" min="1" max="720" class="input w-full" />
+                </div>
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.groups.inputModeration.dedupeMinutes') }}</label>
+                <input v-model.number="editForm.input_moderation_dedupe_minutes" type="number" min="1" max="1440" class="input w-full" />
+              </div>
+            </div>
+            <div v-if="editForm.input_moderation_auto_disable_user">
+              <label class="input-label">{{ t('admin.groups.inputModeration.categories') }}</label>
+              <div class="grid gap-2 sm:grid-cols-2">
+                <label
+                  v-for="category in inputModerationCategoryOptions"
+                  :key="`edit-moderation-${category}`"
+                  class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="editForm.input_moderation_categories.includes(category)"
+                    @change="toggleInputModerationCategory(editForm.input_moderation_categories, category)"
+                  />
+                  <span>{{ category }}</span>
+                </label>
+              </div>
+              <p class="input-hint mt-1">{{ t('admin.groups.inputModeration.categoriesHint') }}</p>
+            </div>
+          </div>
         </div>
 
         <!-- 无效请求兜底（仅 anthropic 平台，且非订阅分组） -->
@@ -1857,6 +2047,27 @@ const showRateMultipliersModal = ref(false)
 const rateMultipliersGroup = ref<AdminGroup | null>(null)
 const sortableGroups = ref<AdminGroup[]>([])
 
+const inputModerationCategoryOptions = [
+  'Jailbreak',
+  'PII',
+  'Non-violent Illegal Acts',
+  'Unethical Acts',
+  'Violent',
+  'Sexual Content or Sexual Acts',
+  'Suicide & Self-Harm',
+  'Politically Sensitive Topics',
+  'Copyright Violation'
+]
+
+const toggleInputModerationCategory = (selected: string[], category: string) => {
+  const index = selected.indexOf(category)
+  if (index >= 0) {
+    selected.splice(index, 1)
+    return
+  }
+  selected.push(category)
+}
+
 const createForm = reactive({
   name: '',
   description: '',
@@ -1879,8 +2090,17 @@ const createForm = reactive({
   claude_environment_mode: 'off' as ClaudeEnvironmentMode,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
-  // OpenAI Messages 调度配置（仅 openai 平台使用）
-  allow_messages_dispatch: false,
+  input_moderation_enabled: false,
+  input_moderation_auto_disable_user: false,
+  input_moderation_categories: ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts'] as string[],
+  input_moderation_action_mode: 'cooldown_then_disable' as 'cooldown_then_disable' | 'immediate_disable',
+  input_moderation_cooldown_minutes: 30,
+  input_moderation_disable_after_hits: 2,
+  input_moderation_strike_window_hours: 24,
+  input_moderation_dedupe_minutes: 5,
+  codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only',
+  claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
+  claude_device_base_limit: 1,
   // 模型路由开关
   model_routing_enabled: false,
   // 从分组复制账号
@@ -2096,8 +2316,17 @@ const editForm = reactive({
   claude_environment_mode: 'off' as ClaudeEnvironmentMode,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
-  // OpenAI Messages 调度配置（仅 openai 平台使用）
-  allow_messages_dispatch: false,
+  input_moderation_enabled: false,
+  input_moderation_auto_disable_user: false,
+  input_moderation_categories: ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts'] as string[],
+  input_moderation_action_mode: 'cooldown_then_disable' as 'cooldown_then_disable' | 'immediate_disable',
+  input_moderation_cooldown_minutes: 30,
+  input_moderation_disable_after_hits: 2,
+  input_moderation_strike_window_hours: 24,
+  input_moderation_dedupe_minutes: 5,
+  codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only',
+  claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
+  claude_device_base_limit: 1,
   // 模型路由开关
   model_routing_enabled: false,
   // 从分组复制账号
@@ -2237,7 +2466,17 @@ const closeCreateModal = () => {
   createForm.claude_environment_mode = 'off'
   createForm.fallback_group_id = null
   createForm.fallback_group_id_on_invalid_request = null
-  createForm.allow_messages_dispatch = false
+  createForm.input_moderation_enabled = false
+  createForm.input_moderation_auto_disable_user = false
+  createForm.input_moderation_categories = ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts']
+  createForm.input_moderation_action_mode = 'cooldown_then_disable'
+  createForm.input_moderation_cooldown_minutes = 30
+  createForm.input_moderation_disable_after_hits = 2
+  createForm.input_moderation_strike_window_hours = 24
+  createForm.input_moderation_dedupe_minutes = 5
+  createForm.codex_client_policy = 'off'
+  createForm.claude_device_limit_mode = 'off'
+  createForm.claude_device_base_limit = 1
   createForm.copy_accounts_from_group_ids = []
   createModelRoutingRules.value = []
 }
@@ -2320,7 +2559,17 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.claude_environment_mode = group.claude_environment_mode || (group.claude_environment_rewrite ? 'rewrite' : 'off')
   editForm.fallback_group_id = group.fallback_group_id
   editForm.fallback_group_id_on_invalid_request = group.fallback_group_id_on_invalid_request
-  editForm.allow_messages_dispatch = group.allow_messages_dispatch || false
+  editForm.input_moderation_enabled = group.input_moderation_enabled || false
+  editForm.input_moderation_auto_disable_user = group.input_moderation_auto_disable_user || false
+  editForm.input_moderation_categories = [...(group.input_moderation_categories || [])]
+  editForm.input_moderation_action_mode = group.input_moderation_action_mode || 'cooldown_then_disable'
+  editForm.input_moderation_cooldown_minutes = group.input_moderation_cooldown_minutes || 30
+  editForm.input_moderation_disable_after_hits = group.input_moderation_disable_after_hits || 2
+  editForm.input_moderation_strike_window_hours = group.input_moderation_strike_window_hours || 24
+  editForm.input_moderation_dedupe_minutes = group.input_moderation_dedupe_minutes || 5
+  editForm.codex_client_policy = group.codex_client_policy || 'off'
+  editForm.claude_device_limit_mode = group.claude_device_limit_mode || 'off'
+  editForm.claude_device_base_limit = group.claude_device_base_limit || 1
   editForm.model_routing_enabled = group.model_routing_enabled || false
   editForm.copy_accounts_from_group_ids = [] // 复制账号字段每次编辑时重置为空
   // 加载模型路由规则（异步加载账号名称）
@@ -2427,9 +2676,8 @@ watch(
     if (newVal !== 'anthropic') {
       createForm.fallback_group_id_on_invalid_request = null
     }
-    if (newVal !== 'openai') {
-      createForm.allow_messages_dispatch = false
-    }
+    if (newVal !== 'openai') createForm.codex_client_policy = 'off'
+    if (!['anthropic', 'antigravity'].includes(newVal)) createForm.claude_device_limit_mode = 'off'
   }
 )
 
@@ -2444,9 +2692,8 @@ watch(
     if (newVal !== 'anthropic') {
       editForm.fallback_group_id_on_invalid_request = null
     }
-    if (newVal !== 'openai') {
-      editForm.allow_messages_dispatch = false
-    }
+    if (newVal !== 'openai') editForm.codex_client_policy = 'off'
+    if (!['anthropic', 'antigravity'].includes(newVal)) editForm.claude_device_limit_mode = 'off'
   }
 )
 

@@ -411,7 +411,17 @@ var (
 		{Name: "mcp_xml_inject", Type: field.TypeBool, Default: true},
 		{Name: "supported_model_scopes", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "sort_order", Type: field.TypeInt, Default: 0},
-		{Name: "allow_messages_dispatch", Type: field.TypeBool, Default: false},
+		{Name: "input_moderation_enabled", Type: field.TypeBool, Default: false},
+		{Name: "input_moderation_auto_disable_user", Type: field.TypeBool, Default: false},
+		{Name: "input_moderation_categories", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "input_moderation_action_mode", Type: field.TypeString, Size: 32, Default: "cooldown_then_disable"},
+		{Name: "input_moderation_cooldown_minutes", Type: field.TypeInt, Default: 30},
+		{Name: "input_moderation_disable_after_hits", Type: field.TypeInt, Default: 2},
+		{Name: "input_moderation_strike_window_hours", Type: field.TypeInt, Default: 24},
+		{Name: "input_moderation_dedupe_minutes", Type: field.TypeInt, Default: 5},
+		{Name: "codex_client_policy", Type: field.TypeString, Size: 32, Default: "off"},
+		{Name: "claude_device_limit_mode", Type: field.TypeString, Size: 16, Default: "off"},
+		{Name: "claude_device_base_limit", Type: field.TypeInt, Default: 1},
 	}
 	// GroupsTable holds the schema information for the "groups" table.
 	GroupsTable = &schema.Table{

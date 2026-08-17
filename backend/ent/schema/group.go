@@ -159,10 +159,31 @@ func (Group) Fields() []ent.Field {
 			Default(0).
 			Comment("分组显示排序，数值越小越靠前"),
 
-		// OpenAI Messages 调度配置 (added by migration 069)
-		field.Bool("allow_messages_dispatch").
+		// 异步用户输入审核配置 (added by migration 085)
+		field.Bool("input_moderation_enabled").
 			Default(false).
-			Comment("是否允许 /v1/messages 调度到此 OpenAI 分组"),
+			Comment("是否异步审核最新真实用户输入"),
+		field.Bool("input_moderation_auto_disable_user").
+			Default(false).
+			Comment("命中分组审核策略后是否自动禁用站内用户"),
+		field.JSON("input_moderation_categories", []string{}).
+			Default([]string{"Jailbreak", "PII", "Non-violent Illegal Acts", "Unethical Acts"}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("可触发自动禁用的 Unsafe 分类；空数组表示任意 Unsafe 分类"),
+		field.String("input_moderation_action_mode").
+			MaxLen(32).
+			Default("cooldown_then_disable"),
+		field.Int("input_moderation_cooldown_minutes").
+			Default(30),
+		field.Int("input_moderation_disable_after_hits").
+			Default(2),
+		field.Int("input_moderation_strike_window_hours").
+			Default(24),
+		field.Int("input_moderation_dedupe_minutes").
+			Default(5),
+		field.String("codex_client_policy").MaxLen(32).Default("off"),
+		field.String("claude_device_limit_mode").MaxLen(16).Default("off"),
+		field.Int("claude_device_base_limit").Default(1),
 	}
 }
 

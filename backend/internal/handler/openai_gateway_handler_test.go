@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -87,6 +88,30 @@ func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
 			require.True(t, ok, "应包含 error 对象")
 			assert.Equal(t, tt.errType, errorObj["type"])
 			assert.Equal(t, tt.message, errorObj["message"])
+		})
+	}
+}
+
+func TestCodexClientPolicyMatched(t *testing.T) {
+	tests := []struct {
+		name, policy, ua, originator string
+		want                         bool
+	}{
+		{name: "off", policy: "off", ua: "curl/8", want: true},
+		{name: "official vscode", policy: "official_clients", ua: "codex_vscode/1.0", want: true},
+		{name: "official rejects curl", policy: "official_clients", ua: "curl/8", want: false},
+		{name: "cli accepts cli ua", policy: "cli_only", ua: "codex_cli_rs/1.0", want: true},
+		{name: "cli rejects vscode", policy: "cli_only", ua: "codex_vscode/1.0", want: false},
+		{name: "cli accepts exact originator", policy: "cli_only", originator: "codex_cli_rs", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Request.Header.Set("User-Agent", tt.ua)
+			c.Request.Header.Set("originator", tt.originator)
+			require.Equal(t, tt.want, codexClientPolicyMatched(c, tt.policy))
 		})
 	}
 }
@@ -678,11 +703,147 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 	return httptest.NewServer(router)
 }
 
+type openAIInputModerationClientStub struct {
+	texts chan string
+}
+
+func (s *openAIInputModerationClientStub) Classify(_ context.Context, text string) (*service.InputModerationClassification, error) {
+	s.texts <- text
+	return &service.InputModerationClassification{Safety: service.InputModerationSafetySafe}, nil
+}
+
+type openAIInputModerationGroupRepoStub struct {
+	service.GroupRepository
+	group *service.Group
+}
+
+type openAIWSRevalidationAPIKeyRepoStub struct {
+	service.APIKeyRepository
+	apiKey *service.APIKey
+}
+
+type openAIWSInputRiskRepoStub struct {
+	service.InputModerationEventRepository
+	state *service.UserInputRiskState
+}
+
+func (s *openAIWSInputRiskRepoStub) GetUserInputRiskState(context.Context, int64) (*service.UserInputRiskState, error) {
+	return s.state, nil
+}
+
+func (s *openAIWSRevalidationAPIKeyRepoStub) GetByKeyForAuth(_ context.Context, _ string) (*service.APIKey, error) {
+	copy := *s.apiKey
+	if s.apiKey.User != nil {
+		userCopy := *s.apiKey.User
+		copy.User = &userCopy
+	}
+	return &copy, nil
+}
+
+func (s *openAIInputModerationGroupRepoStub) GetByIDLite(context.Context, int64) (*service.Group, error) {
+	return s.group, nil
+}
+
+func TestOpenAIGatewayHandlerSubmitInputModerationExtractsNativeResponsesText(t *testing.T) {
+	groupID := int64(7)
+	group := &service.Group{
+		ID:                     groupID,
+		InputModerationEnabled: true,
+		UpdatedAt:              time.Now(),
+	}
+	client := &openAIInputModerationClientStub{texts: make(chan string, 1)}
+	cfg := &config.Config{}
+	cfg.Gateway.InputModeration.Endpoint = "http://moderation.test/v1/classify"
+	cfg.Gateway.InputModeration.WorkerCount = 1
+	cfg.Gateway.InputModeration.QueueSize = 4
+	cfg.Gateway.InputModeration.RequestTimeoutSeconds = 1
+	cfg.Gateway.InputModeration.MaxInputChars = 1024
+	moderation := service.NewInputModerationService(
+		client,
+		nil,
+		nil,
+		nil,
+		nil,
+		&openAIInputModerationGroupRepoStub{group: group},
+		service.NewUserService(nil, nil, nil),
+		cfg,
+	)
+	defer moderation.Stop()
+	h := &OpenAIGatewayHandler{inputModerationService: moderation}
+	apiKey := &service.APIKey{
+		ID: 3, UserID: 2, GroupID: &groupID,
+		User:  &service.User{ID: 2, Status: service.StatusActive},
+		Group: group,
+	}
+
+	h.submitOpenAIInputModeration(
+		apiKey,
+		"req-native",
+		[]byte(`{"model":"gpt-5","input":[{"role":"user","content":[{"type":"input_text","text":"review this code"}]}]}`),
+		service.InputModerationSourceOpenAIResponsesHTTP,
+		1,
+	)
+
+	select {
+	case text := <-client.texts:
+		require.Equal(t, "review this code", text)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for asynchronous moderation")
+	}
+}
+
+func TestOpenAIGatewayHandlerRevalidatesUserBeforeLaterWSTurn(t *testing.T) {
+	repo := &openAIWSRevalidationAPIKeyRepoStub{apiKey: &service.APIKey{
+		ID: 3, Key: "sk-test", Status: service.StatusAPIKeyActive,
+		User: &service.User{ID: 2, Status: service.StatusActive},
+	}}
+	h := &OpenAIGatewayHandler{
+		apiKeyService: service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, &config.Config{}),
+	}
+	original := &service.APIKey{Key: "sk-test"}
+
+	require.NoError(t, h.revalidateOpenAIWSTurn(context.Background(), original, 1))
+	require.NoError(t, h.revalidateOpenAIWSTurn(context.Background(), original, 2))
+
+	repo.apiKey.User.Status = service.StatusDisabled
+	err := h.revalidateOpenAIWSTurn(context.Background(), original, 3)
+	var closeErr *service.OpenAIWSClientCloseError
+	require.ErrorAs(t, err, &closeErr)
+	require.Equal(t, coderws.StatusPolicyViolation, closeErr.StatusCode())
+	require.Equal(t, "user account is not active", closeErr.Reason())
+}
+
+func TestOpenAIGatewayHandlerRejectsLaterWSTurnDuringCooldown(t *testing.T) {
+	user := &service.User{ID: 2, Status: service.StatusActive}
+	repo := &openAIWSRevalidationAPIKeyRepoStub{apiKey: &service.APIKey{
+		ID: 3, Key: "sk-test", Status: service.StatusAPIKeyActive, User: user,
+	}}
+	cfg := &config.Config{}
+	cfg.Gateway.InputModeration.WorkerCount = 1
+	cfg.Gateway.InputModeration.QueueSize = 1
+	blockedUntil := time.Now().Add(30 * time.Minute)
+	moderation := service.NewInputModerationService(
+		nil,
+		&openAIWSInputRiskRepoStub{state: &service.UserInputRiskState{UserID: user.ID, BlockedUntil: &blockedUntil}},
+		nil, nil, nil, nil, nil, cfg,
+	)
+	defer moderation.Stop()
+	h := &OpenAIGatewayHandler{
+		apiKeyService:          service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg),
+		inputModerationService: moderation,
+	}
+
+	err := h.revalidateOpenAIWSTurn(context.Background(), &service.APIKey{Key: "sk-test"}, 2)
+	var closeErr *service.OpenAIWSClientCloseError
+	require.ErrorAs(t, err, &closeErr)
+	require.Equal(t, coderws.StatusTryAgainLater, closeErr.StatusCode())
+	require.Equal(t, "user access is temporarily suspended", closeErr.Reason())
+}
+
 // --- error envelope contract tests ---
 //
-// These lock the wire format of writeError / writeAnthropicError so monitoring,
-// runbooks, and client SDKs can rely on the new type/code split and the
-// Retry-After hint. If any of these break, downstream consumers also break.
+// These lock the wire format of writeError so monitoring, runbooks, and client
+// SDKs can rely on the type/code split and Retry-After hint.
 
 func TestWriteError_NonStreamingEmitsCodeAndRetryAfter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -744,50 +905,4 @@ func TestWriteError_StreamingEmitsSSEWithoutHeaderMutation(t *testing.T) {
 	assert.Contains(t, body, `"type":"upstream_unreachable"`)
 	assert.Contains(t, body, `"code":"upstream_request_failed"`)
 	assert.Contains(t, body, `"message":"Upstream request failed"`)
-}
-
-func TestWriteAnthropicError_OmitsCodeForProtocolCompat(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-
-	h := &OpenAIGatewayHandler{}
-	// Envelope carries Code, but the wire payload must not include it
-	// because the Anthropic Messages error schema has no `code` field.
-	h.writeAnthropicError(c, errEnvelopeNoAvailableAccount, false)
-
-	var parsed map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &parsed))
-	assert.Equal(t, "error", parsed["type"])
-	errorObj, ok := parsed["error"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "gateway_error", errorObj["type"])
-	assert.Equal(t, "No available accounts", errorObj["message"])
-	_, hasCode := errorObj["code"]
-	assert.False(t, hasCode, "Anthropic error body must not contain code field")
-}
-
-func TestWriteAnthropicError_StreamingSSEKeepsAnthropicShapeAndDropsCode(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-
-	h := &OpenAIGatewayHandler{}
-	// Envelope.RetryAfter set, but a stream has begun so headers cannot be
-	// modified; envelope.Code set, but Anthropic SSE error event must keep the
-	// protocol-canonical shape (no code field, outer type=error).
-	h.writeAnthropicError(c, errEnvelopeUpstreamUnreachable, true)
-
-	assert.Empty(t, w.Header().Get("Retry-After"), "headers must not be set after stream starts")
-
-	body := w.Body.String()
-	assert.Contains(t, body, "event: error\n")
-	assert.Contains(t, body, `"type":"error"`, "outer Anthropic envelope type must be present")
-	assert.Contains(t, body, `"type":"upstream_unreachable"`, "inner error type must come from envelope")
-	assert.Contains(t, body, `"message":"Upstream request failed"`)
-	assert.NotContains(t, body, `"code":`, "Anthropic SSE error must not leak envelope.Code")
-	// And it must not accidentally emit the OpenAI flat shape.
-	assert.NotContains(t, body, `{"error":{"type":"upstream_unreachable"`)
 }

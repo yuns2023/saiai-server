@@ -8262,7 +8262,23 @@ type GroupMutation struct {
 	appendsupported_model_scopes            []string
 	sort_order                              *int
 	addsort_order                           *int
-	allow_messages_dispatch                 *bool
+	input_moderation_enabled                *bool
+	input_moderation_auto_disable_user      *bool
+	input_moderation_categories             *[]string
+	appendinput_moderation_categories       []string
+	input_moderation_action_mode            *string
+	input_moderation_cooldown_minutes       *int
+	addinput_moderation_cooldown_minutes    *int
+	input_moderation_disable_after_hits     *int
+	addinput_moderation_disable_after_hits  *int
+	input_moderation_strike_window_hours    *int
+	addinput_moderation_strike_window_hours *int
+	input_moderation_dedupe_minutes         *int
+	addinput_moderation_dedupe_minutes      *int
+	codex_client_policy                     *string
+	claude_device_limit_mode                *string
+	claude_device_base_limit                *int
+	addclaude_device_base_limit             *int
 	clearedFields                           map[string]struct{}
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
@@ -10149,40 +10165,515 @@ func (m *GroupMutation) ResetSortOrder() {
 	m.addsort_order = nil
 }
 
-// SetAllowMessagesDispatch sets the "allow_messages_dispatch" field.
-func (m *GroupMutation) SetAllowMessagesDispatch(b bool) {
-	m.allow_messages_dispatch = &b
+// SetInputModerationEnabled sets the "input_moderation_enabled" field.
+func (m *GroupMutation) SetInputModerationEnabled(b bool) {
+	m.input_moderation_enabled = &b
 }
 
-// AllowMessagesDispatch returns the value of the "allow_messages_dispatch" field in the mutation.
-func (m *GroupMutation) AllowMessagesDispatch() (r bool, exists bool) {
-	v := m.allow_messages_dispatch
+// InputModerationEnabled returns the value of the "input_moderation_enabled" field in the mutation.
+func (m *GroupMutation) InputModerationEnabled() (r bool, exists bool) {
+	v := m.input_moderation_enabled
 	if v == nil {
 		return
 	}
 	return *v, true
 }
 
-// OldAllowMessagesDispatch returns the old "allow_messages_dispatch" field's value of the Group entity.
+// OldInputModerationEnabled returns the old "input_moderation_enabled" field's value of the Group entity.
 // If the Group object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *GroupMutation) OldAllowMessagesDispatch(ctx context.Context) (v bool, err error) {
+func (m *GroupMutation) OldInputModerationEnabled(ctx context.Context) (v bool, err error) {
 	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldAllowMessagesDispatch is only allowed on UpdateOne operations")
+		return v, errors.New("OldInputModerationEnabled is only allowed on UpdateOne operations")
 	}
 	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldAllowMessagesDispatch requires an ID field in the mutation")
+		return v, errors.New("OldInputModerationEnabled requires an ID field in the mutation")
 	}
 	oldValue, err := m.oldValue(ctx)
 	if err != nil {
-		return v, fmt.Errorf("querying old value for OldAllowMessagesDispatch: %w", err)
+		return v, fmt.Errorf("querying old value for OldInputModerationEnabled: %w", err)
 	}
-	return oldValue.AllowMessagesDispatch, nil
+	return oldValue.InputModerationEnabled, nil
 }
 
-// ResetAllowMessagesDispatch resets all changes to the "allow_messages_dispatch" field.
-func (m *GroupMutation) ResetAllowMessagesDispatch() {
-	m.allow_messages_dispatch = nil
+// ResetInputModerationEnabled resets all changes to the "input_moderation_enabled" field.
+func (m *GroupMutation) ResetInputModerationEnabled() {
+	m.input_moderation_enabled = nil
+}
+
+// SetInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field.
+func (m *GroupMutation) SetInputModerationAutoDisableUser(b bool) {
+	m.input_moderation_auto_disable_user = &b
+}
+
+// InputModerationAutoDisableUser returns the value of the "input_moderation_auto_disable_user" field in the mutation.
+func (m *GroupMutation) InputModerationAutoDisableUser() (r bool, exists bool) {
+	v := m.input_moderation_auto_disable_user
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInputModerationAutoDisableUser returns the old "input_moderation_auto_disable_user" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldInputModerationAutoDisableUser(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInputModerationAutoDisableUser is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInputModerationAutoDisableUser requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInputModerationAutoDisableUser: %w", err)
+	}
+	return oldValue.InputModerationAutoDisableUser, nil
+}
+
+// ResetInputModerationAutoDisableUser resets all changes to the "input_moderation_auto_disable_user" field.
+func (m *GroupMutation) ResetInputModerationAutoDisableUser() {
+	m.input_moderation_auto_disable_user = nil
+}
+
+// SetInputModerationCategories sets the "input_moderation_categories" field.
+func (m *GroupMutation) SetInputModerationCategories(s []string) {
+	m.input_moderation_categories = &s
+	m.appendinput_moderation_categories = nil
+}
+
+// InputModerationCategories returns the value of the "input_moderation_categories" field in the mutation.
+func (m *GroupMutation) InputModerationCategories() (r []string, exists bool) {
+	v := m.input_moderation_categories
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInputModerationCategories returns the old "input_moderation_categories" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldInputModerationCategories(ctx context.Context) (v []string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInputModerationCategories is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInputModerationCategories requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInputModerationCategories: %w", err)
+	}
+	return oldValue.InputModerationCategories, nil
+}
+
+// AppendInputModerationCategories adds s to the "input_moderation_categories" field.
+func (m *GroupMutation) AppendInputModerationCategories(s []string) {
+	m.appendinput_moderation_categories = append(m.appendinput_moderation_categories, s...)
+}
+
+// AppendedInputModerationCategories returns the list of values that were appended to the "input_moderation_categories" field in this mutation.
+func (m *GroupMutation) AppendedInputModerationCategories() ([]string, bool) {
+	if len(m.appendinput_moderation_categories) == 0 {
+		return nil, false
+	}
+	return m.appendinput_moderation_categories, true
+}
+
+// ResetInputModerationCategories resets all changes to the "input_moderation_categories" field.
+func (m *GroupMutation) ResetInputModerationCategories() {
+	m.input_moderation_categories = nil
+	m.appendinput_moderation_categories = nil
+}
+
+// SetInputModerationActionMode sets the "input_moderation_action_mode" field.
+func (m *GroupMutation) SetInputModerationActionMode(s string) {
+	m.input_moderation_action_mode = &s
+}
+
+// InputModerationActionMode returns the value of the "input_moderation_action_mode" field in the mutation.
+func (m *GroupMutation) InputModerationActionMode() (r string, exists bool) {
+	v := m.input_moderation_action_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInputModerationActionMode returns the old "input_moderation_action_mode" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldInputModerationActionMode(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInputModerationActionMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInputModerationActionMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInputModerationActionMode: %w", err)
+	}
+	return oldValue.InputModerationActionMode, nil
+}
+
+// ResetInputModerationActionMode resets all changes to the "input_moderation_action_mode" field.
+func (m *GroupMutation) ResetInputModerationActionMode() {
+	m.input_moderation_action_mode = nil
+}
+
+// SetInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field.
+func (m *GroupMutation) SetInputModerationCooldownMinutes(i int) {
+	m.input_moderation_cooldown_minutes = &i
+	m.addinput_moderation_cooldown_minutes = nil
+}
+
+// InputModerationCooldownMinutes returns the value of the "input_moderation_cooldown_minutes" field in the mutation.
+func (m *GroupMutation) InputModerationCooldownMinutes() (r int, exists bool) {
+	v := m.input_moderation_cooldown_minutes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInputModerationCooldownMinutes returns the old "input_moderation_cooldown_minutes" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldInputModerationCooldownMinutes(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInputModerationCooldownMinutes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInputModerationCooldownMinutes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInputModerationCooldownMinutes: %w", err)
+	}
+	return oldValue.InputModerationCooldownMinutes, nil
+}
+
+// AddInputModerationCooldownMinutes adds i to the "input_moderation_cooldown_minutes" field.
+func (m *GroupMutation) AddInputModerationCooldownMinutes(i int) {
+	if m.addinput_moderation_cooldown_minutes != nil {
+		*m.addinput_moderation_cooldown_minutes += i
+	} else {
+		m.addinput_moderation_cooldown_minutes = &i
+	}
+}
+
+// AddedInputModerationCooldownMinutes returns the value that was added to the "input_moderation_cooldown_minutes" field in this mutation.
+func (m *GroupMutation) AddedInputModerationCooldownMinutes() (r int, exists bool) {
+	v := m.addinput_moderation_cooldown_minutes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetInputModerationCooldownMinutes resets all changes to the "input_moderation_cooldown_minutes" field.
+func (m *GroupMutation) ResetInputModerationCooldownMinutes() {
+	m.input_moderation_cooldown_minutes = nil
+	m.addinput_moderation_cooldown_minutes = nil
+}
+
+// SetInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field.
+func (m *GroupMutation) SetInputModerationDisableAfterHits(i int) {
+	m.input_moderation_disable_after_hits = &i
+	m.addinput_moderation_disable_after_hits = nil
+}
+
+// InputModerationDisableAfterHits returns the value of the "input_moderation_disable_after_hits" field in the mutation.
+func (m *GroupMutation) InputModerationDisableAfterHits() (r int, exists bool) {
+	v := m.input_moderation_disable_after_hits
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInputModerationDisableAfterHits returns the old "input_moderation_disable_after_hits" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldInputModerationDisableAfterHits(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInputModerationDisableAfterHits is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInputModerationDisableAfterHits requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInputModerationDisableAfterHits: %w", err)
+	}
+	return oldValue.InputModerationDisableAfterHits, nil
+}
+
+// AddInputModerationDisableAfterHits adds i to the "input_moderation_disable_after_hits" field.
+func (m *GroupMutation) AddInputModerationDisableAfterHits(i int) {
+	if m.addinput_moderation_disable_after_hits != nil {
+		*m.addinput_moderation_disable_after_hits += i
+	} else {
+		m.addinput_moderation_disable_after_hits = &i
+	}
+}
+
+// AddedInputModerationDisableAfterHits returns the value that was added to the "input_moderation_disable_after_hits" field in this mutation.
+func (m *GroupMutation) AddedInputModerationDisableAfterHits() (r int, exists bool) {
+	v := m.addinput_moderation_disable_after_hits
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetInputModerationDisableAfterHits resets all changes to the "input_moderation_disable_after_hits" field.
+func (m *GroupMutation) ResetInputModerationDisableAfterHits() {
+	m.input_moderation_disable_after_hits = nil
+	m.addinput_moderation_disable_after_hits = nil
+}
+
+// SetInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field.
+func (m *GroupMutation) SetInputModerationStrikeWindowHours(i int) {
+	m.input_moderation_strike_window_hours = &i
+	m.addinput_moderation_strike_window_hours = nil
+}
+
+// InputModerationStrikeWindowHours returns the value of the "input_moderation_strike_window_hours" field in the mutation.
+func (m *GroupMutation) InputModerationStrikeWindowHours() (r int, exists bool) {
+	v := m.input_moderation_strike_window_hours
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInputModerationStrikeWindowHours returns the old "input_moderation_strike_window_hours" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldInputModerationStrikeWindowHours(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInputModerationStrikeWindowHours is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInputModerationStrikeWindowHours requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInputModerationStrikeWindowHours: %w", err)
+	}
+	return oldValue.InputModerationStrikeWindowHours, nil
+}
+
+// AddInputModerationStrikeWindowHours adds i to the "input_moderation_strike_window_hours" field.
+func (m *GroupMutation) AddInputModerationStrikeWindowHours(i int) {
+	if m.addinput_moderation_strike_window_hours != nil {
+		*m.addinput_moderation_strike_window_hours += i
+	} else {
+		m.addinput_moderation_strike_window_hours = &i
+	}
+}
+
+// AddedInputModerationStrikeWindowHours returns the value that was added to the "input_moderation_strike_window_hours" field in this mutation.
+func (m *GroupMutation) AddedInputModerationStrikeWindowHours() (r int, exists bool) {
+	v := m.addinput_moderation_strike_window_hours
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetInputModerationStrikeWindowHours resets all changes to the "input_moderation_strike_window_hours" field.
+func (m *GroupMutation) ResetInputModerationStrikeWindowHours() {
+	m.input_moderation_strike_window_hours = nil
+	m.addinput_moderation_strike_window_hours = nil
+}
+
+// SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
+func (m *GroupMutation) SetInputModerationDedupeMinutes(i int) {
+	m.input_moderation_dedupe_minutes = &i
+	m.addinput_moderation_dedupe_minutes = nil
+}
+
+// InputModerationDedupeMinutes returns the value of the "input_moderation_dedupe_minutes" field in the mutation.
+func (m *GroupMutation) InputModerationDedupeMinutes() (r int, exists bool) {
+	v := m.input_moderation_dedupe_minutes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInputModerationDedupeMinutes returns the old "input_moderation_dedupe_minutes" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldInputModerationDedupeMinutes(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInputModerationDedupeMinutes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInputModerationDedupeMinutes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInputModerationDedupeMinutes: %w", err)
+	}
+	return oldValue.InputModerationDedupeMinutes, nil
+}
+
+// AddInputModerationDedupeMinutes adds i to the "input_moderation_dedupe_minutes" field.
+func (m *GroupMutation) AddInputModerationDedupeMinutes(i int) {
+	if m.addinput_moderation_dedupe_minutes != nil {
+		*m.addinput_moderation_dedupe_minutes += i
+	} else {
+		m.addinput_moderation_dedupe_minutes = &i
+	}
+}
+
+// AddedInputModerationDedupeMinutes returns the value that was added to the "input_moderation_dedupe_minutes" field in this mutation.
+func (m *GroupMutation) AddedInputModerationDedupeMinutes() (r int, exists bool) {
+	v := m.addinput_moderation_dedupe_minutes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetInputModerationDedupeMinutes resets all changes to the "input_moderation_dedupe_minutes" field.
+func (m *GroupMutation) ResetInputModerationDedupeMinutes() {
+	m.input_moderation_dedupe_minutes = nil
+	m.addinput_moderation_dedupe_minutes = nil
+}
+
+// SetCodexClientPolicy sets the "codex_client_policy" field.
+func (m *GroupMutation) SetCodexClientPolicy(s string) {
+	m.codex_client_policy = &s
+}
+
+// CodexClientPolicy returns the value of the "codex_client_policy" field in the mutation.
+func (m *GroupMutation) CodexClientPolicy() (r string, exists bool) {
+	v := m.codex_client_policy
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCodexClientPolicy returns the old "codex_client_policy" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldCodexClientPolicy(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCodexClientPolicy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCodexClientPolicy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCodexClientPolicy: %w", err)
+	}
+	return oldValue.CodexClientPolicy, nil
+}
+
+// ResetCodexClientPolicy resets all changes to the "codex_client_policy" field.
+func (m *GroupMutation) ResetCodexClientPolicy() {
+	m.codex_client_policy = nil
+}
+
+// SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
+func (m *GroupMutation) SetClaudeDeviceLimitMode(s string) {
+	m.claude_device_limit_mode = &s
+}
+
+// ClaudeDeviceLimitMode returns the value of the "claude_device_limit_mode" field in the mutation.
+func (m *GroupMutation) ClaudeDeviceLimitMode() (r string, exists bool) {
+	v := m.claude_device_limit_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClaudeDeviceLimitMode returns the old "claude_device_limit_mode" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldClaudeDeviceLimitMode(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClaudeDeviceLimitMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClaudeDeviceLimitMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClaudeDeviceLimitMode: %w", err)
+	}
+	return oldValue.ClaudeDeviceLimitMode, nil
+}
+
+// ResetClaudeDeviceLimitMode resets all changes to the "claude_device_limit_mode" field.
+func (m *GroupMutation) ResetClaudeDeviceLimitMode() {
+	m.claude_device_limit_mode = nil
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (m *GroupMutation) SetClaudeDeviceBaseLimit(i int) {
+	m.claude_device_base_limit = &i
+	m.addclaude_device_base_limit = nil
+}
+
+// ClaudeDeviceBaseLimit returns the value of the "claude_device_base_limit" field in the mutation.
+func (m *GroupMutation) ClaudeDeviceBaseLimit() (r int, exists bool) {
+	v := m.claude_device_base_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClaudeDeviceBaseLimit returns the old "claude_device_base_limit" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldClaudeDeviceBaseLimit(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClaudeDeviceBaseLimit is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClaudeDeviceBaseLimit requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClaudeDeviceBaseLimit: %w", err)
+	}
+	return oldValue.ClaudeDeviceBaseLimit, nil
+}
+
+// AddClaudeDeviceBaseLimit adds i to the "claude_device_base_limit" field.
+func (m *GroupMutation) AddClaudeDeviceBaseLimit(i int) {
+	if m.addclaude_device_base_limit != nil {
+		*m.addclaude_device_base_limit += i
+	} else {
+		m.addclaude_device_base_limit = &i
+	}
+}
+
+// AddedClaudeDeviceBaseLimit returns the value that was added to the "claude_device_base_limit" field in this mutation.
+func (m *GroupMutation) AddedClaudeDeviceBaseLimit() (r int, exists bool) {
+	v := m.addclaude_device_base_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetClaudeDeviceBaseLimit resets all changes to the "claude_device_base_limit" field.
+func (m *GroupMutation) ResetClaudeDeviceBaseLimit() {
+	m.claude_device_base_limit = nil
+	m.addclaude_device_base_limit = nil
 }
 
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
@@ -10543,7 +11034,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 34)
+	fields := make([]string, 0, 44)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -10643,8 +11134,38 @@ func (m *GroupMutation) Fields() []string {
 	if m.sort_order != nil {
 		fields = append(fields, group.FieldSortOrder)
 	}
-	if m.allow_messages_dispatch != nil {
-		fields = append(fields, group.FieldAllowMessagesDispatch)
+	if m.input_moderation_enabled != nil {
+		fields = append(fields, group.FieldInputModerationEnabled)
+	}
+	if m.input_moderation_auto_disable_user != nil {
+		fields = append(fields, group.FieldInputModerationAutoDisableUser)
+	}
+	if m.input_moderation_categories != nil {
+		fields = append(fields, group.FieldInputModerationCategories)
+	}
+	if m.input_moderation_action_mode != nil {
+		fields = append(fields, group.FieldInputModerationActionMode)
+	}
+	if m.input_moderation_cooldown_minutes != nil {
+		fields = append(fields, group.FieldInputModerationCooldownMinutes)
+	}
+	if m.input_moderation_disable_after_hits != nil {
+		fields = append(fields, group.FieldInputModerationDisableAfterHits)
+	}
+	if m.input_moderation_strike_window_hours != nil {
+		fields = append(fields, group.FieldInputModerationStrikeWindowHours)
+	}
+	if m.input_moderation_dedupe_minutes != nil {
+		fields = append(fields, group.FieldInputModerationDedupeMinutes)
+	}
+	if m.codex_client_policy != nil {
+		fields = append(fields, group.FieldCodexClientPolicy)
+	}
+	if m.claude_device_limit_mode != nil {
+		fields = append(fields, group.FieldClaudeDeviceLimitMode)
+	}
+	if m.claude_device_base_limit != nil {
+		fields = append(fields, group.FieldClaudeDeviceBaseLimit)
 	}
 	return fields
 }
@@ -10720,8 +11241,28 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.SupportedModelScopes()
 	case group.FieldSortOrder:
 		return m.SortOrder()
-	case group.FieldAllowMessagesDispatch:
-		return m.AllowMessagesDispatch()
+	case group.FieldInputModerationEnabled:
+		return m.InputModerationEnabled()
+	case group.FieldInputModerationAutoDisableUser:
+		return m.InputModerationAutoDisableUser()
+	case group.FieldInputModerationCategories:
+		return m.InputModerationCategories()
+	case group.FieldInputModerationActionMode:
+		return m.InputModerationActionMode()
+	case group.FieldInputModerationCooldownMinutes:
+		return m.InputModerationCooldownMinutes()
+	case group.FieldInputModerationDisableAfterHits:
+		return m.InputModerationDisableAfterHits()
+	case group.FieldInputModerationStrikeWindowHours:
+		return m.InputModerationStrikeWindowHours()
+	case group.FieldInputModerationDedupeMinutes:
+		return m.InputModerationDedupeMinutes()
+	case group.FieldCodexClientPolicy:
+		return m.CodexClientPolicy()
+	case group.FieldClaudeDeviceLimitMode:
+		return m.ClaudeDeviceLimitMode()
+	case group.FieldClaudeDeviceBaseLimit:
+		return m.ClaudeDeviceBaseLimit()
 	}
 	return nil, false
 }
@@ -10797,8 +11338,28 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldSupportedModelScopes(ctx)
 	case group.FieldSortOrder:
 		return m.OldSortOrder(ctx)
-	case group.FieldAllowMessagesDispatch:
-		return m.OldAllowMessagesDispatch(ctx)
+	case group.FieldInputModerationEnabled:
+		return m.OldInputModerationEnabled(ctx)
+	case group.FieldInputModerationAutoDisableUser:
+		return m.OldInputModerationAutoDisableUser(ctx)
+	case group.FieldInputModerationCategories:
+		return m.OldInputModerationCategories(ctx)
+	case group.FieldInputModerationActionMode:
+		return m.OldInputModerationActionMode(ctx)
+	case group.FieldInputModerationCooldownMinutes:
+		return m.OldInputModerationCooldownMinutes(ctx)
+	case group.FieldInputModerationDisableAfterHits:
+		return m.OldInputModerationDisableAfterHits(ctx)
+	case group.FieldInputModerationStrikeWindowHours:
+		return m.OldInputModerationStrikeWindowHours(ctx)
+	case group.FieldInputModerationDedupeMinutes:
+		return m.OldInputModerationDedupeMinutes(ctx)
+	case group.FieldCodexClientPolicy:
+		return m.OldCodexClientPolicy(ctx)
+	case group.FieldClaudeDeviceLimitMode:
+		return m.OldClaudeDeviceLimitMode(ctx)
+	case group.FieldClaudeDeviceBaseLimit:
+		return m.OldClaudeDeviceBaseLimit(ctx)
 	}
 	return nil, fmt.Errorf("unknown Group field %s", name)
 }
@@ -11039,12 +11600,82 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetSortOrder(v)
 		return nil
-	case group.FieldAllowMessagesDispatch:
+	case group.FieldInputModerationEnabled:
 		v, ok := value.(bool)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
-		m.SetAllowMessagesDispatch(v)
+		m.SetInputModerationEnabled(v)
+		return nil
+	case group.FieldInputModerationAutoDisableUser:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInputModerationAutoDisableUser(v)
+		return nil
+	case group.FieldInputModerationCategories:
+		v, ok := value.([]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInputModerationCategories(v)
+		return nil
+	case group.FieldInputModerationActionMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInputModerationActionMode(v)
+		return nil
+	case group.FieldInputModerationCooldownMinutes:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInputModerationCooldownMinutes(v)
+		return nil
+	case group.FieldInputModerationDisableAfterHits:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInputModerationDisableAfterHits(v)
+		return nil
+	case group.FieldInputModerationStrikeWindowHours:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInputModerationStrikeWindowHours(v)
+		return nil
+	case group.FieldInputModerationDedupeMinutes:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInputModerationDedupeMinutes(v)
+		return nil
+	case group.FieldCodexClientPolicy:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCodexClientPolicy(v)
+		return nil
+	case group.FieldClaudeDeviceLimitMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClaudeDeviceLimitMode(v)
+		return nil
+	case group.FieldClaudeDeviceBaseLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClaudeDeviceBaseLimit(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
@@ -11105,6 +11736,21 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addsort_order != nil {
 		fields = append(fields, group.FieldSortOrder)
 	}
+	if m.addinput_moderation_cooldown_minutes != nil {
+		fields = append(fields, group.FieldInputModerationCooldownMinutes)
+	}
+	if m.addinput_moderation_disable_after_hits != nil {
+		fields = append(fields, group.FieldInputModerationDisableAfterHits)
+	}
+	if m.addinput_moderation_strike_window_hours != nil {
+		fields = append(fields, group.FieldInputModerationStrikeWindowHours)
+	}
+	if m.addinput_moderation_dedupe_minutes != nil {
+		fields = append(fields, group.FieldInputModerationDedupeMinutes)
+	}
+	if m.addclaude_device_base_limit != nil {
+		fields = append(fields, group.FieldClaudeDeviceBaseLimit)
+	}
 	return fields
 }
 
@@ -11147,6 +11793,16 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedFallbackGroupIDOnInvalidRequest()
 	case group.FieldSortOrder:
 		return m.AddedSortOrder()
+	case group.FieldInputModerationCooldownMinutes:
+		return m.AddedInputModerationCooldownMinutes()
+	case group.FieldInputModerationDisableAfterHits:
+		return m.AddedInputModerationDisableAfterHits()
+	case group.FieldInputModerationStrikeWindowHours:
+		return m.AddedInputModerationStrikeWindowHours()
+	case group.FieldInputModerationDedupeMinutes:
+		return m.AddedInputModerationDedupeMinutes()
+	case group.FieldClaudeDeviceBaseLimit:
+		return m.AddedClaudeDeviceBaseLimit()
 	}
 	return nil, false
 }
@@ -11274,6 +11930,41 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddSortOrder(v)
+		return nil
+	case group.FieldInputModerationCooldownMinutes:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddInputModerationCooldownMinutes(v)
+		return nil
+	case group.FieldInputModerationDisableAfterHits:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddInputModerationDisableAfterHits(v)
+		return nil
+	case group.FieldInputModerationStrikeWindowHours:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddInputModerationStrikeWindowHours(v)
+		return nil
+	case group.FieldInputModerationDedupeMinutes:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddInputModerationDedupeMinutes(v)
+		return nil
+	case group.FieldClaudeDeviceBaseLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddClaudeDeviceBaseLimit(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Group numeric field %s", name)
@@ -11500,8 +12191,38 @@ func (m *GroupMutation) ResetField(name string) error {
 	case group.FieldSortOrder:
 		m.ResetSortOrder()
 		return nil
-	case group.FieldAllowMessagesDispatch:
-		m.ResetAllowMessagesDispatch()
+	case group.FieldInputModerationEnabled:
+		m.ResetInputModerationEnabled()
+		return nil
+	case group.FieldInputModerationAutoDisableUser:
+		m.ResetInputModerationAutoDisableUser()
+		return nil
+	case group.FieldInputModerationCategories:
+		m.ResetInputModerationCategories()
+		return nil
+	case group.FieldInputModerationActionMode:
+		m.ResetInputModerationActionMode()
+		return nil
+	case group.FieldInputModerationCooldownMinutes:
+		m.ResetInputModerationCooldownMinutes()
+		return nil
+	case group.FieldInputModerationDisableAfterHits:
+		m.ResetInputModerationDisableAfterHits()
+		return nil
+	case group.FieldInputModerationStrikeWindowHours:
+		m.ResetInputModerationStrikeWindowHours()
+		return nil
+	case group.FieldInputModerationDedupeMinutes:
+		m.ResetInputModerationDedupeMinutes()
+		return nil
+	case group.FieldCodexClientPolicy:
+		m.ResetCodexClientPolicy()
+		return nil
+	case group.FieldClaudeDeviceLimitMode:
+		m.ResetClaudeDeviceLimitMode()
+		return nil
+	case group.FieldClaudeDeviceBaseLimit:
+		m.ResetClaudeDeviceBaseLimit()
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)

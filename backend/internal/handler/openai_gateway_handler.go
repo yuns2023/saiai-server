@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	pkgopenai "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -31,6 +33,7 @@ type OpenAIGatewayHandler struct {
 	billingCacheService     *service.BillingCacheService
 	apiKeyService           *service.APIKeyService
 	usageRecordWorkerPool   *service.UsageRecordWorkerPool
+	inputModerationService  *service.InputModerationService
 	errorPassthroughService *service.ErrorPassthroughService
 	concurrencyHelper       *ConcurrencyHelper
 	maxAccountSwitches      int
@@ -44,6 +47,7 @@ func NewOpenAIGatewayHandler(
 	billingCacheService *service.BillingCacheService,
 	apiKeyService *service.APIKeyService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
+	inputModerationService *service.InputModerationService,
 	errorPassthroughService *service.ErrorPassthroughService,
 	cfg *config.Config,
 ) *OpenAIGatewayHandler {
@@ -60,6 +64,7 @@ func NewOpenAIGatewayHandler(
 		billingCacheService:     billingCacheService,
 		apiKeyService:           apiKeyService,
 		usageRecordWorkerPool:   usageRecordWorkerPool,
+		inputModerationService:  inputModerationService,
 		errorPassthroughService: errorPassthroughService,
 		concurrencyHelper:       NewConcurrencyHelper(concurrencyService, SSEPingFormatComment, pingInterval),
 		maxAccountSwitches:      maxAccountSwitches,
@@ -178,11 +183,16 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	setOpsRequestContext(c, reqModel, reqStream, body)
+	if !h.validateCodexClientPolicyHTTP(c, apiKey.Group) {
+		return
+	}
 
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
 	if !h.validateFunctionCallOutputRequest(c, body, reqLog) {
 		return
 	}
+	requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
+	h.submitOpenAIInputModeration(apiKey, requestID, body, service.InputModerationSourceOpenAIResponsesHTTP, 1)
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -394,6 +404,61 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 }
 
+func (h *OpenAIGatewayHandler) submitOpenAIInputModeration(
+	apiKey *service.APIKey,
+	requestID string,
+	body []byte,
+	source string,
+	turnNumber int,
+) {
+	if h == nil || h.inputModerationService == nil || apiKey == nil || apiKey.User == nil ||
+		apiKey.Group == nil || apiKey.GroupID == nil ||
+		!h.inputModerationService.EnabledForGroup(apiKey.Group) {
+		return
+	}
+	text := service.ExtractLatestOpenAIUserText(body)
+	if text == "" {
+		return
+	}
+	h.inputModerationService.Submit(service.InputModerationTask{
+		RequestID:  strings.TrimSpace(requestID),
+		UserID:     apiKey.UserID,
+		APIKeyID:   apiKey.ID,
+		GroupID:    *apiKey.GroupID,
+		Text:       text,
+		Source:     source,
+		TurnNumber: turnNumber,
+	})
+}
+
+func codexClientPolicyMatched(c *gin.Context, policy string) bool {
+	policy = strings.ToLower(strings.TrimSpace(policy))
+	if policy == "" || policy == "off" {
+		return true
+	}
+	userAgent, originator := "", ""
+	if c != nil {
+		userAgent = c.GetHeader("User-Agent")
+		originator = strings.ToLower(strings.TrimSpace(c.GetHeader("originator")))
+	}
+	switch policy {
+	case "official_clients":
+		return pkgopenai.IsCodexOfficialClientByHeaders(userAgent, originator)
+	case "cli_only":
+		return pkgopenai.IsCodexTerminalRequest(userAgent) || originator == "codex_cli_rs" || originator == "codex_exec"
+	default:
+		return false
+	}
+}
+
+func (h *OpenAIGatewayHandler) validateCodexClientPolicyHTTP(c *gin.Context, group *service.Group) bool {
+	if group == nil || codexClientPolicyMatched(c, group.CodexClientPolicy) {
+		return true
+	}
+	h.errorResponse(c, http.StatusForbidden, "official_client_required", "This group only allows approved Codex clients")
+	return false
+}
+
 func isOpenAIRemoteCompactPath(c *gin.Context) bool {
 	if c == nil || c.Request == nil || c.Request.URL == nil {
 		return false
@@ -472,320 +537,6 @@ func (h *OpenAIGatewayHandler) logOpenAIRemoteCompactOutcome(c *gin.Context, sta
 		return
 	}
 	log.Warn("codex.remote_compact.failed")
-}
-
-// Messages handles Anthropic Messages API requests routed to OpenAI platform.
-// POST /v1/messages (when group platform is OpenAI)
-func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
-	streamStarted := false
-	defer h.recoverAnthropicMessagesPanic(c, &streamStarted)
-
-	requestStart := time.Now()
-
-	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
-	if !ok {
-		h.anthropicErrorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
-		return
-	}
-
-	subject, ok := middleware2.GetAuthSubjectFromContext(c)
-	if !ok {
-		h.anthropicErrorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
-		return
-	}
-	reqLog := requestLogger(
-		c,
-		"handler.openai_gateway.messages",
-		zap.Int64("user_id", subject.UserID),
-		zap.Int64("api_key_id", apiKey.ID),
-		zap.Any("group_id", apiKey.GroupID),
-	)
-
-	// 检查分组是否允许 /v1/messages 调度
-	if apiKey.Group != nil && !apiKey.Group.AllowMessagesDispatch {
-		h.anthropicErrorResponse(c, http.StatusForbidden, "permission_error",
-			"This group does not allow /v1/messages dispatch")
-		return
-	}
-
-	if !h.ensureResponsesDependencies(c, reqLog) {
-		return
-	}
-
-	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
-	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.anthropicErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
-		return
-	}
-	if len(body) == 0 {
-		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
-		return
-	}
-
-	if !gjson.ValidBytes(body) {
-		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
-		return
-	}
-
-	modelResult := gjson.GetBytes(body, "model")
-	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
-		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
-		return
-	}
-	reqModel := modelResult.String()
-	usageSessionID := service.ResolveOpenAIUsageSessionID(
-		c.GetHeader("session_id"),
-		c.GetHeader("conversation_id"),
-		gjson.GetBytes(body, "prompt_cache_key").String(),
-	)
-	reqStream := gjson.GetBytes(body, "stream").Bool()
-
-	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
-
-	setOpsRequestContext(c, reqModel, reqStream, body)
-
-	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
-	if h.errorPassthroughService != nil {
-		service.BindErrorPassthroughService(c, h.errorPassthroughService)
-	}
-
-	subscription, _ := middleware2.GetSubscriptionFromContext(c)
-
-	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
-	routingStart := time.Now()
-
-	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted, reqLog)
-	if !acquired {
-		return
-	}
-	if userReleaseFunc != nil {
-		defer userReleaseFunc()
-	}
-
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
-		reqLog.Info("openai_messages.billing_eligibility_check_failed", zap.Error(err))
-		status, code, message := billingErrorDetails(err)
-		h.anthropicStreamingAwareError(c, status, code, message, streamStarted)
-		return
-	}
-
-	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
-	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
-
-	// Anthropic 格式的请求在 metadata.user_id 中携带 session 标识，
-	// 而非 OpenAI 的 session_id/conversation_id headers。
-	// 从中派生 sessionHash（sticky session）和 promptCacheKey（upstream cache）。
-	if sessionHash == "" || promptCacheKey == "" {
-		if userID := strings.TrimSpace(gjson.GetBytes(body, "metadata.user_id").String()); userID != "" {
-			seed := reqModel + "-" + userID
-			if promptCacheKey == "" {
-				promptCacheKey = service.GenerateSessionUUID(seed)
-			}
-			if sessionHash == "" {
-				sessionHash = service.DeriveSessionHashFromSeed(seed)
-			}
-		}
-	}
-
-	maxAccountSwitches := h.maxAccountSwitches
-	switchCount := 0
-	failedAccountIDs := make(map[int64]struct{})
-	sameAccountRetryCount := make(map[int64]int)
-	var lastFailoverErr *service.UpstreamFailoverError
-
-	for {
-		// 清除上一次迭代的降级模型标记，避免残留影响本次迭代
-		c.Set("openai_messages_fallback_model", "")
-		reqLog.Debug("openai_messages.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
-		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithScheduler(
-			c.Request.Context(),
-			apiKey.GroupID,
-			"", // no previous_response_id
-			sessionHash,
-			reqModel,
-			failedAccountIDs,
-			service.OpenAIUpstreamTransportAny,
-		)
-		if err != nil {
-			reqLog.Warn("openai_messages.account_select_failed",
-				zap.Error(err),
-				zap.Int("excluded_account_count", len(failedAccountIDs)),
-			)
-			if len(failedAccountIDs) == 0 {
-				h.writeAnthropicError(c, errEnvelopeNoAvailableAccount, streamStarted)
-				return
-			} else {
-				if lastFailoverErr != nil {
-					h.handleAnthropicFailoverExhausted(c, lastFailoverErr, streamStarted)
-				} else {
-					h.writeAnthropicError(c, errEnvelopeUpstreamUnreachable, streamStarted)
-				}
-				return
-			}
-		}
-		if selection == nil || selection.Account == nil {
-			h.writeAnthropicError(c, errEnvelopeNoAvailableAccount, streamStarted)
-			return
-		}
-		account := selection.Account
-		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
-		reqLog.Debug("openai_messages.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
-		_ = scheduleDecision
-		setOpsSelectedAccount(c, account.ID, account.Platform)
-
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
-		if !acquired {
-			return
-		}
-
-		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
-		forwardStart := time.Now()
-
-		// Forward 层需要始终拿到 group 默认映射模型，这样未命中账号级映射的
-		// Claude 兼容模型才不会在后续 Codex 规范化中意外退化到 gpt-5.1。
-		forwardCtx := service.WithAccountSwitchCount(c.Request.Context(), switchCount, false)
-		result, err := h.gatewayService.ForwardAsAnthropic(forwardCtx, c, account, body, promptCacheKey)
-
-		forwardDurationMs := time.Since(forwardStart).Milliseconds()
-		if accountReleaseFunc != nil {
-			accountReleaseFunc()
-		}
-		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
-		responseLatencyMs := forwardDurationMs
-		if upstreamLatencyMs > 0 && forwardDurationMs > upstreamLatencyMs {
-			responseLatencyMs = forwardDurationMs - upstreamLatencyMs
-		}
-		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, responseLatencyMs)
-		if err == nil && result != nil && result.FirstTokenMs != nil {
-			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
-		}
-		if err != nil {
-			var failoverErr *service.UpstreamFailoverError
-			if errors.As(err, &failoverErr) {
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
-				// 池模式：同账号重试
-				if failoverErr.RetryableOnSameAccount {
-					retryLimit := account.GetPoolModeRetryCount()
-					if sameAccountRetryCount[account.ID] < retryLimit {
-						sameAccountRetryCount[account.ID]++
-						reqLog.Warn("openai_messages.pool_mode_same_account_retry",
-							zap.Int64("account_id", account.ID),
-							zap.Int("upstream_status", failoverErr.StatusCode),
-							zap.Int("retry_limit", retryLimit),
-							zap.Int("retry_count", sameAccountRetryCount[account.ID]),
-						)
-						select {
-						case <-c.Request.Context().Done():
-							return
-						case <-time.After(sameAccountRetryDelay):
-						}
-						continue
-					}
-				}
-				h.gatewayService.RecordOpenAIAccountSwitch()
-				failedAccountIDs[account.ID] = struct{}{}
-				lastFailoverErr = failoverErr
-				if switchCount >= maxAccountSwitches {
-					h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
-					return
-				}
-				switchCount++
-				reqLog.Warn("openai_messages.upstream_failover_switching",
-					zap.Int64("account_id", account.ID),
-					zap.Int("upstream_status", failoverErr.StatusCode),
-					zap.Int("switch_count", switchCount),
-					zap.Int("max_switches", maxAccountSwitches),
-				)
-				continue
-			}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
-			wroteFallback := h.ensureAnthropicErrorResponse(c, streamStarted)
-			reqLog.Warn("openai_messages.forward_failed",
-				zap.Int64("account_id", account.ID),
-				zap.Bool("fallback_error_response_written", wroteFallback),
-				zap.Error(err),
-			)
-			return
-		}
-		if result != nil {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, result.FirstTokenMs)
-		} else {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, nil)
-		}
-
-		userAgent := c.GetHeader("User-Agent")
-		clientIP := ip.GetClientIP(c)
-		requestPayloadHash := service.HashUsageRequestPayload(body)
-
-		h.submitUsageRecordTask(func(ctx context.Context) {
-			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:             result,
-				APIKey:             apiKey,
-				User:               apiKey.User,
-				Account:            account,
-				Subscription:       subscription,
-				SessionID:          usageSessionID,
-				InboundEndpoint:    GetInboundEndpoint(c),
-				UpstreamEndpoint:   GetUpstreamEndpoint(c, account.Platform),
-				UserAgent:          userAgent,
-				IPAddress:          clientIP,
-				RequestPayloadHash: requestPayloadHash,
-				APIKeyService:      h.apiKeyService,
-			}); err != nil {
-				logger.L().With(
-					zap.String("component", "handler.openai_gateway.messages"),
-					zap.Int64("user_id", subject.UserID),
-					zap.Int64("api_key_id", apiKey.ID),
-					zap.Any("group_id", apiKey.GroupID),
-					zap.String("model", reqModel),
-					zap.Int64("account_id", account.ID),
-				).Error("openai_messages.record_usage_failed", zap.Error(err))
-			}
-		})
-		reqLog.Debug("openai_messages.request_completed",
-			zap.Int64("account_id", account.ID),
-			zap.Int("switch_count", switchCount),
-		)
-		return
-	}
-}
-
-// anthropicErrorResponse writes an error in Anthropic Messages API format.
-// Legacy entry preserved for callers that don't need code/Retry-After. New
-// callers should construct a gatewayErrorEnvelope and call writeAnthropicError directly.
-func (h *OpenAIGatewayHandler) anthropicErrorResponse(c *gin.Context, status int, errType, message string) {
-	h.writeAnthropicError(c, gatewayErrorEnvelope{Status: status, Type: errType, Message: message}, false)
-}
-
-// anthropicStreamingAwareError handles errors that may occur during streaming,
-// using Anthropic SSE error format. Legacy entry; see writeAnthropicError.
-func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, status int, errType, message string, streamStarted bool) {
-	h.writeAnthropicError(c, gatewayErrorEnvelope{Status: status, Type: errType, Message: message}, streamStarted)
-}
-
-// handleAnthropicFailoverExhausted maps upstream failover errors to Anthropic format.
-func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
-	if failoverErr.Kind == service.UpstreamFailureDeviceAuthorizationRevoked {
-		upstreamMsg := service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)
-		service.SetOpsUpstreamError(c, failoverErr.StatusCode, upstreamMsg, "")
-		h.anthropicStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.DeviceAuthorizationUnavailableClientMessage, streamStarted)
-		return
-	}
-	status, errType, errMsg := h.mapUpstreamError(failoverErr.StatusCode)
-	h.anthropicStreamingAwareError(c, status, errType, errMsg, streamStarted)
-}
-
-// ensureAnthropicErrorResponse writes a fallback Anthropic error if no response was written.
-func (h *OpenAIGatewayHandler) ensureAnthropicErrorResponse(c *gin.Context, streamStarted bool) bool {
-	if c == nil || c.Writer == nil || c.Writer.Written() {
-		return false
-	}
-	h.writeAnthropicError(c, errEnvelopeUpstreamForwardFailed, streamStarted)
-	return true
 }
 
 func (h *OpenAIGatewayHandler) validateFunctionCallOutputRequest(c *gin.Context, body []byte, reqLog *zap.Logger) bool {
@@ -1054,6 +805,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
 		return
 	}
+	if apiKey.Group != nil && !codexClientPolicyMatched(c, apiKey.Group.CodexClientPolicy) {
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "approved Codex client required")
+		return
+	}
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(firstMessage, "previous_response_id").String())
 	previousResponseIDKind := service.ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	if previousResponseID != "" && previousResponseIDKind == service.OpenAIPreviousResponseIDKindMessageID {
@@ -1173,6 +928,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	)
 
 	hooks := &service.OpenAIWSIngressHooks{
+		OnClientTurn: func(turn int, rawPayload []byte) error {
+			if err := h.revalidateOpenAIWSTurn(ctx, apiKey, turn); err != nil {
+				return err
+			}
+			requestID, _ := ctx.Value(ctxkey.RequestID).(string)
+			h.submitOpenAIInputModeration(apiKey, requestID, rawPayload, service.InputModerationSourceOpenAIResponsesWS, turn)
+			return nil
+		},
 		BeforeTurn: func(turn int) error {
 			if turn == 1 {
 				return nil
@@ -1258,6 +1021,32 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
 }
 
+func (h *OpenAIGatewayHandler) revalidateOpenAIWSTurn(ctx context.Context, apiKey *service.APIKey, turn int) error {
+	if turn <= 1 {
+		return nil
+	}
+	if h == nil || h.apiKeyService == nil || apiKey == nil || strings.TrimSpace(apiKey.Key) == "" {
+		return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to revalidate user account", nil)
+	}
+	freshAPIKey, err := h.apiKeyService.GetByKey(ctx, apiKey.Key)
+	if err != nil {
+		return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to revalidate user account", err)
+	}
+	if freshAPIKey == nil || !freshAPIKey.IsActive() || freshAPIKey.User == nil || !freshAPIKey.User.IsActive() {
+		return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "user account is not active", nil)
+	}
+	if h.inputModerationService != nil && !freshAPIKey.User.IsAdmin() {
+		blockedUntil, err := h.inputModerationService.GetActiveCooldown(ctx, freshAPIKey.User.ID)
+		if err != nil {
+			return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to revalidate user risk state", err)
+		}
+		if blockedUntil != nil {
+			return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "user access is temporarily suspended", nil)
+		}
+	}
+	return nil
+}
+
 func (h *OpenAIGatewayHandler) recoverResponsesPanic(c *gin.Context, streamStarted *bool) {
 	recovered := recover()
 	if recovered == nil {
@@ -1275,26 +1064,6 @@ func (h *OpenAIGatewayHandler) recoverResponsesPanic(c *gin.Context, streamStart
 		zap.Any("panic", recovered),
 		zap.ByteString("stack", debug.Stack()),
 	)
-}
-
-// recoverAnthropicMessagesPanic recovers from panics in the Anthropic Messages
-// handler and returns an Anthropic-formatted error response.
-func (h *OpenAIGatewayHandler) recoverAnthropicMessagesPanic(c *gin.Context, streamStarted *bool) {
-	recovered := recover()
-	if recovered == nil {
-		return
-	}
-
-	started := streamStarted != nil && *streamStarted
-	requestLogger(c, "handler.openai_gateway.messages").Error(
-		"openai.messages_panic_recovered",
-		zap.Bool("stream_started", started),
-		zap.Any("panic", recovered),
-		zap.ByteString("stack", debug.Stack()),
-	)
-	if !started {
-		h.anthropicErrorResponse(c, http.StatusInternalServerError, "api_error", "Internal server error")
-	}
 }
 
 func (h *OpenAIGatewayHandler) ensureResponsesDependencies(c *gin.Context, reqLog *zap.Logger) bool {
@@ -1536,25 +1305,13 @@ var (
 	// errEnvelopeUpstreamUnreachable: outbound request failed without ever
 	// receiving an upstream response header (socks RST, proxy unreachable,
 	// connection reset mid-body). Use only when the callsite can prove transport
-	// failure — for catch-all "forward did not produce a response" use
-	// errEnvelopeUpstreamForwardFailed instead.
+	// failure.
 	errEnvelopeUpstreamUnreachable = gatewayErrorEnvelope{
 		Status:     http.StatusBadGateway,
 		Type:       "upstream_unreachable",
 		Code:       "upstream_request_failed",
 		Message:    "Upstream request failed",
 		RetryAfter: upstreamUnreachableRetryAfterSeconds,
-	}
-
-	// errEnvelopeUpstreamForwardFailed: forward path exited without a response
-	// for an unspecified reason — could be transport failure, an upstream body
-	// the parser couldn't normalize, an early disconnect after partial headers,
-	// etc. Conservative classification (upstream_error, no Retry-After, no code)
-	// so monitoring stays correct even when the cause is ambiguous.
-	errEnvelopeUpstreamForwardFailed = gatewayErrorEnvelope{
-		Status:  http.StatusBadGateway,
-		Type:    "upstream_error",
-		Message: "Upstream request failed",
 	}
 )
 
@@ -1595,43 +1352,6 @@ func (h *OpenAIGatewayHandler) writeError(c *gin.Context, e gatewayErrorEnvelope
 		body["code"] = e.Code
 	}
 	c.JSON(e.Status, gin.H{"error": body})
-}
-
-// writeAnthropicError emits an Anthropic Messages API format error response.
-// The Anthropic protocol error body does not include a "code" field, so
-// envelope.Code is dropped from the wire payload (still useful in logs/metrics).
-func (h *OpenAIGatewayHandler) writeAnthropicError(c *gin.Context, e gatewayErrorEnvelope, streamStarted bool) {
-	e.Message = service.ClientSafeUpstreamErrorMessage(e.Message)
-	if streamStarted {
-		flusher, ok := c.Writer.(http.Flusher)
-		if !ok {
-			return
-		}
-		payload, err := json.Marshal(gin.H{
-			"type": "error",
-			"error": gin.H{
-				"type":    e.Type,
-				"message": e.Message,
-			},
-		})
-		if err != nil {
-			_ = c.Error(err)
-			return
-		}
-		fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload) //nolint:errcheck
-		flusher.Flush()
-		return
-	}
-	if e.RetryAfter > 0 {
-		c.Header("Retry-After", strconv.Itoa(e.RetryAfter))
-	}
-	c.JSON(e.Status, gin.H{
-		"type": "error",
-		"error": gin.H{
-			"type":    e.Type,
-			"message": e.Message,
-		},
-	})
 }
 
 func setOpenAIClientTransportHTTP(c *gin.Context) {

@@ -80,6 +80,8 @@ type RedeemService struct {
 	billingCacheService  *BillingCacheService
 	entClient            *dbent.Client
 	authCacheInvalidator APIKeyAuthCacheInvalidator
+	claudeDeviceRepo     ClaudeDeviceRepository
+	groupRepo            GroupRepository
 }
 
 // NewRedeemService 创建兑换码服务实例
@@ -91,6 +93,8 @@ func NewRedeemService(
 	billingCacheService *BillingCacheService,
 	entClient *dbent.Client,
 	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	claudeDeviceRepo ClaudeDeviceRepository,
+	groupRepo GroupRepository,
 ) *RedeemService {
 	return &RedeemService{
 		redeemRepo:           redeemRepo,
@@ -100,6 +104,8 @@ func NewRedeemService(
 		billingCacheService:  billingCacheService,
 		entClient:            entClient,
 		authCacheInvalidator: authCacheInvalidator,
+		claudeDeviceRepo:     claudeDeviceRepo,
+		groupRepo:            groupRepo,
 	}
 }
 
@@ -190,6 +196,11 @@ func (s *RedeemService) CreateCode(ctx context.Context, code *RedeemCode) error 
 	}
 	if code.Type != RedeemTypeInvitation && code.Value <= 0 {
 		return errors.New("value must be greater than 0")
+	}
+	if code.Type == RedeemTypeClaudeDevice {
+		if err := s.validateClaudeDeviceRedeemCode(ctx, code); err != nil {
+			return err
+		}
 	}
 	if code.Status == "" {
 		code.Status = StatusUnused
@@ -286,6 +297,11 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 	if redeemCode.Type == RedeemTypeSubscription && redeemCode.GroupID == nil {
 		return nil, infraerrors.BadRequest("REDEEM_CODE_INVALID", "invalid subscription redeem code: missing group_id")
 	}
+	if redeemCode.Type == RedeemTypeClaudeDevice {
+		if err := s.validateClaudeDeviceRedeemCode(ctx, redeemCode); err != nil {
+			return nil, infraerrors.BadRequest("REDEEM_CODE_INVALID", err.Error())
+		}
+	}
 
 	// 获取用户信息
 	user, err := s.userRepo.GetByID(ctx, userID)
@@ -343,6 +359,14 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 			return nil, fmt.Errorf("assign or extend subscription: %w", err)
 		}
 
+	case RedeemTypeClaudeDevice:
+		if s.claudeDeviceRepo == nil {
+			return nil, fmt.Errorf("Claude device quota service unavailable")
+		}
+		if err := s.claudeDeviceRepo.AddBonusDevices(txCtx, userID, *redeemCode.GroupID, int(redeemCode.Value)); err != nil {
+			return nil, fmt.Errorf("add Claude device quota: %w", err)
+		}
+
 	default:
 		return nil, fmt.Errorf("unsupported redeem type: %s", redeemCode.Type)
 	}
@@ -362,6 +386,23 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 	}
 
 	return redeemCode, nil
+}
+
+func (s *RedeemService) validateClaudeDeviceRedeemCode(ctx context.Context, code *RedeemCode) error {
+	if code == nil || code.GroupID == nil || code.Value <= 0 || code.Value != float64(int(code.Value)) {
+		return errors.New("Claude device redeem code requires group_id and a positive integer value")
+	}
+	if s.groupRepo == nil {
+		return errors.New("Claude device redeem code group validation is unavailable")
+	}
+	group, err := s.groupRepo.GetByID(ctx, *code.GroupID)
+	if err != nil {
+		return fmt.Errorf("get Claude device redeem code group: %w", err)
+	}
+	if group.Platform != PlatformAnthropic && group.Platform != PlatformAntigravity {
+		return errors.New("Claude device redeem codes require an Anthropic or Antigravity group")
+	}
+	return nil
 }
 
 // invalidateRedeemCaches 失效兑换相关的缓存
@@ -400,6 +441,10 @@ func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64
 				defer cancel()
 				_ = s.billingCacheService.InvalidateSubscription(cacheCtx, userID, groupID)
 			}()
+		}
+	case RedeemTypeClaudeDevice:
+		if s.authCacheInvalidator != nil {
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
 		}
 	}
 }

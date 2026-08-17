@@ -9,6 +9,14 @@ var CodexCLIUserAgentPrefixes = []string{
 	"codex_cli_rs/",
 }
 
+// CodexTerminalUserAgentPrefixes is the strict terminal-only subset used by
+// group ingress policy. Keep this separate from CodexCLIUserAgentPrefixes,
+// whose historical compatibility semantics also include the VSCode client.
+var CodexTerminalUserAgentPrefixes = []string{
+	"codex_cli_rs/",
+	"codex_exec/",
+}
+
 // CodexOfficialClientUserAgentPrefixes matches Codex 官方客户端家族 User-Agent 前缀。
 // 该列表仅用于 OpenAI OAuth `codex_cli_only` 访问限制判定。
 var CodexOfficialClientUserAgentPrefixes = []string{
@@ -37,6 +45,16 @@ func IsCodexCLIRequest(userAgent string) bool {
 		return false
 	}
 	return matchCodexClientHeaderPrefixes(ua, CodexCLIUserAgentPrefixes)
+}
+
+// IsCodexTerminalRequest checks for the native Codex terminal/exec clients and
+// intentionally excludes VSCode, desktop, SDK, and other official clients.
+func IsCodexTerminalRequest(userAgent string) bool {
+	ua := normalizeCodexClientHeader(userAgent)
+	if ua == "" {
+		return false
+	}
+	return matchCodexClientHeaderPrefixes(ua, CodexTerminalUserAgentPrefixes)
 }
 
 // IsCodexOfficialClientRequest checks if the User-Agent indicates a Codex 官方客户端请求。

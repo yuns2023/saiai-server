@@ -114,9 +114,18 @@ type CreateGroupRequest struct {
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes []string `json:"supported_model_scopes"`
 	// Sora 存储配额
-	SoraStorageQuotaBytes int64 `json:"sora_storage_quota_bytes"`
-	// OpenAI Messages 调度配置（仅 openai 平台使用）
-	AllowMessagesDispatch bool `json:"allow_messages_dispatch"`
+	SoraStorageQuotaBytes            int64    `json:"sora_storage_quota_bytes"`
+	InputModerationEnabled           bool     `json:"input_moderation_enabled"`
+	InputModerationAutoDisableUser   bool     `json:"input_moderation_auto_disable_user"`
+	InputModerationCategories        []string `json:"input_moderation_categories"`
+	InputModerationActionMode        string   `json:"input_moderation_action_mode" binding:"omitempty,oneof=cooldown_then_disable immediate_disable"`
+	InputModerationCooldownMinutes   int      `json:"input_moderation_cooldown_minutes"`
+	InputModerationDisableAfterHits  int      `json:"input_moderation_disable_after_hits"`
+	InputModerationStrikeWindowHours int      `json:"input_moderation_strike_window_hours"`
+	InputModerationDedupeMinutes     int      `json:"input_moderation_dedupe_minutes"`
+	CodexClientPolicy                string   `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only"`
+	ClaudeDeviceLimitMode            string   `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
+	ClaudeDeviceBaseLimit            int      `json:"claude_device_base_limit"`
 	// 从指定分组复制账号（创建后自动绑定）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }
@@ -156,9 +165,18 @@ type UpdateGroupRequest struct {
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes *[]string `json:"supported_model_scopes"`
 	// Sora 存储配额
-	SoraStorageQuotaBytes *int64 `json:"sora_storage_quota_bytes"`
-	// OpenAI Messages 调度配置（仅 openai 平台使用）
-	AllowMessagesDispatch *bool `json:"allow_messages_dispatch"`
+	SoraStorageQuotaBytes            *int64    `json:"sora_storage_quota_bytes"`
+	InputModerationEnabled           *bool     `json:"input_moderation_enabled"`
+	InputModerationAutoDisableUser   *bool     `json:"input_moderation_auto_disable_user"`
+	InputModerationCategories        *[]string `json:"input_moderation_categories"`
+	InputModerationActionMode        *string   `json:"input_moderation_action_mode" binding:"omitempty,oneof=cooldown_then_disable immediate_disable"`
+	InputModerationCooldownMinutes   *int      `json:"input_moderation_cooldown_minutes"`
+	InputModerationDisableAfterHits  *int      `json:"input_moderation_disable_after_hits"`
+	InputModerationStrikeWindowHours *int      `json:"input_moderation_strike_window_hours"`
+	InputModerationDedupeMinutes     *int      `json:"input_moderation_dedupe_minutes"`
+	CodexClientPolicy                *string   `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only"`
+	ClaudeDeviceLimitMode            *string   `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
+	ClaudeDeviceBaseLimit            *int      `json:"claude_device_base_limit"`
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }
@@ -250,37 +268,47 @@ func (h *GroupHandler) Create(c *gin.Context) {
 	}
 
 	group, err := h.adminService.CreateGroup(c.Request.Context(), &service.CreateGroupInput{
-		Name:                            req.Name,
-		Description:                     req.Description,
-		Platform:                        req.Platform,
-		RateMultiplier:                  req.RateMultiplier,
-		IsExclusive:                     req.IsExclusive,
-		SubscriptionType:                req.SubscriptionType,
-		FiveHourLimitUSD:                req.FiveHourLimitUSD.ToServiceInput(),
-		DailyLimitUSD:                   req.DailyLimitUSD.ToServiceInput(),
-		WeeklyLimitUSD:                  req.WeeklyLimitUSD.ToServiceInput(),
-		MonthlyLimitUSD:                 req.MonthlyLimitUSD.ToServiceInput(),
-		ImagePrice1K:                    req.ImagePrice1K,
-		ImagePrice2K:                    req.ImagePrice2K,
-		ImagePrice4K:                    req.ImagePrice4K,
-		SoraImagePrice360:               req.SoraImagePrice360,
-		SoraImagePrice540:               req.SoraImagePrice540,
-		SoraVideoPricePerRequest:        req.SoraVideoPricePerRequest,
-		SoraVideoPricePerRequestHD:      req.SoraVideoPricePerRequestHD,
-		ClaudeCodeOnly:                  req.ClaudeCodeOnly,
-		AllowClaudeContext1MBeta:        req.AllowClaudeContext1MBeta,
-		ClaudeOAuthRequestGateDisabled:  req.ClaudeOAuthRequestGateDisabled,
-		ClaudeEnvironmentMode:           req.ClaudeEnvironmentMode,
-		ClaudeEnvironmentRewrite:        req.ClaudeEnvironmentRewrite,
-		FallbackGroupID:                 req.FallbackGroupID,
-		FallbackGroupIDOnInvalidRequest: req.FallbackGroupIDOnInvalidRequest,
-		ModelRouting:                    req.ModelRouting,
-		ModelRoutingEnabled:             req.ModelRoutingEnabled,
-		MCPXMLInject:                    req.MCPXMLInject,
-		SupportedModelScopes:            req.SupportedModelScopes,
-		SoraStorageQuotaBytes:           req.SoraStorageQuotaBytes,
-		AllowMessagesDispatch:           req.AllowMessagesDispatch,
-		CopyAccountsFromGroupIDs:        req.CopyAccountsFromGroupIDs,
+		Name:                             req.Name,
+		Description:                      req.Description,
+		Platform:                         req.Platform,
+		RateMultiplier:                   req.RateMultiplier,
+		IsExclusive:                      req.IsExclusive,
+		SubscriptionType:                 req.SubscriptionType,
+		FiveHourLimitUSD:                 req.FiveHourLimitUSD.ToServiceInput(),
+		DailyLimitUSD:                    req.DailyLimitUSD.ToServiceInput(),
+		WeeklyLimitUSD:                   req.WeeklyLimitUSD.ToServiceInput(),
+		MonthlyLimitUSD:                  req.MonthlyLimitUSD.ToServiceInput(),
+		ImagePrice1K:                     req.ImagePrice1K,
+		ImagePrice2K:                     req.ImagePrice2K,
+		ImagePrice4K:                     req.ImagePrice4K,
+		SoraImagePrice360:                req.SoraImagePrice360,
+		SoraImagePrice540:                req.SoraImagePrice540,
+		SoraVideoPricePerRequest:         req.SoraVideoPricePerRequest,
+		SoraVideoPricePerRequestHD:       req.SoraVideoPricePerRequestHD,
+		ClaudeCodeOnly:                   req.ClaudeCodeOnly,
+		AllowClaudeContext1MBeta:         req.AllowClaudeContext1MBeta,
+		ClaudeOAuthRequestGateDisabled:   req.ClaudeOAuthRequestGateDisabled,
+		ClaudeEnvironmentMode:            req.ClaudeEnvironmentMode,
+		ClaudeEnvironmentRewrite:         req.ClaudeEnvironmentRewrite,
+		FallbackGroupID:                  req.FallbackGroupID,
+		FallbackGroupIDOnInvalidRequest:  req.FallbackGroupIDOnInvalidRequest,
+		ModelRouting:                     req.ModelRouting,
+		ModelRoutingEnabled:              req.ModelRoutingEnabled,
+		MCPXMLInject:                     req.MCPXMLInject,
+		SupportedModelScopes:             req.SupportedModelScopes,
+		SoraStorageQuotaBytes:            req.SoraStorageQuotaBytes,
+		InputModerationEnabled:           req.InputModerationEnabled,
+		InputModerationAutoDisableUser:   req.InputModerationAutoDisableUser,
+		InputModerationCategories:        req.InputModerationCategories,
+		InputModerationActionMode:        req.InputModerationActionMode,
+		InputModerationCooldownMinutes:   req.InputModerationCooldownMinutes,
+		InputModerationDisableAfterHits:  req.InputModerationDisableAfterHits,
+		InputModerationStrikeWindowHours: req.InputModerationStrikeWindowHours,
+		InputModerationDedupeMinutes:     req.InputModerationDedupeMinutes,
+		CodexClientPolicy:                req.CodexClientPolicy,
+		ClaudeDeviceLimitMode:            req.ClaudeDeviceLimitMode,
+		ClaudeDeviceBaseLimit:            req.ClaudeDeviceBaseLimit,
+		CopyAccountsFromGroupIDs:         req.CopyAccountsFromGroupIDs,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -306,38 +334,48 @@ func (h *GroupHandler) Update(c *gin.Context) {
 	}
 
 	group, err := h.adminService.UpdateGroup(c.Request.Context(), groupID, &service.UpdateGroupInput{
-		Name:                            req.Name,
-		Description:                     req.Description,
-		Platform:                        req.Platform,
-		RateMultiplier:                  req.RateMultiplier,
-		IsExclusive:                     req.IsExclusive,
-		Status:                          req.Status,
-		SubscriptionType:                req.SubscriptionType,
-		FiveHourLimitUSD:                req.FiveHourLimitUSD.ToServiceInput(),
-		DailyLimitUSD:                   req.DailyLimitUSD.ToServiceInput(),
-		WeeklyLimitUSD:                  req.WeeklyLimitUSD.ToServiceInput(),
-		MonthlyLimitUSD:                 req.MonthlyLimitUSD.ToServiceInput(),
-		ImagePrice1K:                    req.ImagePrice1K,
-		ImagePrice2K:                    req.ImagePrice2K,
-		ImagePrice4K:                    req.ImagePrice4K,
-		SoraImagePrice360:               req.SoraImagePrice360,
-		SoraImagePrice540:               req.SoraImagePrice540,
-		SoraVideoPricePerRequest:        req.SoraVideoPricePerRequest,
-		SoraVideoPricePerRequestHD:      req.SoraVideoPricePerRequestHD,
-		ClaudeCodeOnly:                  req.ClaudeCodeOnly,
-		AllowClaudeContext1MBeta:        req.AllowClaudeContext1MBeta,
-		ClaudeOAuthRequestGateDisabled:  req.ClaudeOAuthRequestGateDisabled,
-		ClaudeEnvironmentMode:           req.ClaudeEnvironmentMode,
-		ClaudeEnvironmentRewrite:        req.ClaudeEnvironmentRewrite,
-		FallbackGroupID:                 req.FallbackGroupID,
-		FallbackGroupIDOnInvalidRequest: req.FallbackGroupIDOnInvalidRequest,
-		ModelRouting:                    req.ModelRouting,
-		ModelRoutingEnabled:             req.ModelRoutingEnabled,
-		MCPXMLInject:                    req.MCPXMLInject,
-		SupportedModelScopes:            req.SupportedModelScopes,
-		SoraStorageQuotaBytes:           req.SoraStorageQuotaBytes,
-		AllowMessagesDispatch:           req.AllowMessagesDispatch,
-		CopyAccountsFromGroupIDs:        req.CopyAccountsFromGroupIDs,
+		Name:                             req.Name,
+		Description:                      req.Description,
+		Platform:                         req.Platform,
+		RateMultiplier:                   req.RateMultiplier,
+		IsExclusive:                      req.IsExclusive,
+		Status:                           req.Status,
+		SubscriptionType:                 req.SubscriptionType,
+		FiveHourLimitUSD:                 req.FiveHourLimitUSD.ToServiceInput(),
+		DailyLimitUSD:                    req.DailyLimitUSD.ToServiceInput(),
+		WeeklyLimitUSD:                   req.WeeklyLimitUSD.ToServiceInput(),
+		MonthlyLimitUSD:                  req.MonthlyLimitUSD.ToServiceInput(),
+		ImagePrice1K:                     req.ImagePrice1K,
+		ImagePrice2K:                     req.ImagePrice2K,
+		ImagePrice4K:                     req.ImagePrice4K,
+		SoraImagePrice360:                req.SoraImagePrice360,
+		SoraImagePrice540:                req.SoraImagePrice540,
+		SoraVideoPricePerRequest:         req.SoraVideoPricePerRequest,
+		SoraVideoPricePerRequestHD:       req.SoraVideoPricePerRequestHD,
+		ClaudeCodeOnly:                   req.ClaudeCodeOnly,
+		AllowClaudeContext1MBeta:         req.AllowClaudeContext1MBeta,
+		ClaudeOAuthRequestGateDisabled:   req.ClaudeOAuthRequestGateDisabled,
+		ClaudeEnvironmentMode:            req.ClaudeEnvironmentMode,
+		ClaudeEnvironmentRewrite:         req.ClaudeEnvironmentRewrite,
+		FallbackGroupID:                  req.FallbackGroupID,
+		FallbackGroupIDOnInvalidRequest:  req.FallbackGroupIDOnInvalidRequest,
+		ModelRouting:                     req.ModelRouting,
+		ModelRoutingEnabled:              req.ModelRoutingEnabled,
+		MCPXMLInject:                     req.MCPXMLInject,
+		SupportedModelScopes:             req.SupportedModelScopes,
+		SoraStorageQuotaBytes:            req.SoraStorageQuotaBytes,
+		InputModerationEnabled:           req.InputModerationEnabled,
+		InputModerationAutoDisableUser:   req.InputModerationAutoDisableUser,
+		InputModerationCategories:        req.InputModerationCategories,
+		InputModerationActionMode:        req.InputModerationActionMode,
+		InputModerationCooldownMinutes:   req.InputModerationCooldownMinutes,
+		InputModerationDisableAfterHits:  req.InputModerationDisableAfterHits,
+		InputModerationStrikeWindowHours: req.InputModerationStrikeWindowHours,
+		InputModerationDedupeMinutes:     req.InputModerationDedupeMinutes,
+		CodexClientPolicy:                req.CodexClientPolicy,
+		ClaudeDeviceLimitMode:            req.ClaudeDeviceLimitMode,
+		ClaudeDeviceBaseLimit:            req.ClaudeDeviceBaseLimit,
+		CopyAccountsFromGroupIDs:         req.CopyAccountsFromGroupIDs,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

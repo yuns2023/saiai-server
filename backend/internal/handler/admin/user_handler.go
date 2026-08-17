@@ -20,16 +20,67 @@ type UserWithConcurrency struct {
 
 // UserHandler handles admin user management
 type UserHandler struct {
-	adminService       service.AdminService
-	concurrencyService *service.ConcurrencyService
+	adminService        service.AdminService
+	concurrencyService  *service.ConcurrencyService
+	claudeDeviceService *service.ClaudeDeviceService
 }
 
 // NewUserHandler creates a new admin user handler
-func NewUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService) *UserHandler {
+func NewUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService, claudeDeviceService *service.ClaudeDeviceService) *UserHandler {
 	return &UserHandler{
-		adminService:       adminService,
-		concurrencyService: concurrencyService,
+		adminService:        adminService,
+		concurrencyService:  concurrencyService,
+		claudeDeviceService: claudeDeviceService,
 	}
+}
+
+func (h *UserHandler) ListClaudeDevices(c *gin.Context) {
+	if h == nil || h.claudeDeviceService == nil {
+		response.Error(c, 503, "Claude device service unavailable")
+		return
+	}
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	var groupID *int64
+	if raw := strings.TrimSpace(c.Query("group_id")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			response.BadRequest(c, "Invalid group ID")
+			return
+		}
+		groupID = &value
+	}
+	items, err := h.claudeDeviceService.ListUserDevices(c.Request.Context(), userID, groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, items)
+}
+
+func (h *UserHandler) RevokeClaudeDevice(c *gin.Context) {
+	if h == nil || h.claudeDeviceService == nil {
+		response.Error(c, 503, "Claude device service unavailable")
+		return
+	}
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	deviceID, err := strconv.ParseInt(c.Param("device_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid device ID")
+		return
+	}
+	if err := h.claudeDeviceService.RevokeUserDevice(c.Request.Context(), userID, deviceID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": "Claude device revoked"})
 }
 
 // CreateUserRequest represents admin create user request

@@ -66,6 +66,10 @@ var ProviderSet = wire.NewSet(
 	NewUserAttributeValueRepository,
 	NewUserGroupRateRepository,
 	NewErrorPassthroughRepository,
+	NewInputModerationRepository,
+	NewInputModerationStateCache,
+	NewInputModerationTaskQueue,
+	NewClaudeDeviceRepository,
 
 	// Cache implementations
 	NewGatewayCache,
@@ -103,6 +107,7 @@ var ProviderSet = wire.NewSet(
 	NewClaudeUsageFetcher,
 	NewClaudeOAuthClient,
 	NewHTTPUpstream,
+	NewInputModerationClient,
 	NewOpenAIOAuthClient,
 	NewGeminiOAuthClient,
 	NewGeminiCliCodeAssistClient,

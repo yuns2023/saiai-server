@@ -466,16 +466,148 @@ func (_c *GroupCreate) SetNillableSortOrder(v *int) *GroupCreate {
 	return _c
 }
 
-// SetAllowMessagesDispatch sets the "allow_messages_dispatch" field.
-func (_c *GroupCreate) SetAllowMessagesDispatch(v bool) *GroupCreate {
-	_c.mutation.SetAllowMessagesDispatch(v)
+// SetInputModerationEnabled sets the "input_moderation_enabled" field.
+func (_c *GroupCreate) SetInputModerationEnabled(v bool) *GroupCreate {
+	_c.mutation.SetInputModerationEnabled(v)
 	return _c
 }
 
-// SetNillableAllowMessagesDispatch sets the "allow_messages_dispatch" field if the given value is not nil.
-func (_c *GroupCreate) SetNillableAllowMessagesDispatch(v *bool) *GroupCreate {
+// SetNillableInputModerationEnabled sets the "input_moderation_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableInputModerationEnabled(v *bool) *GroupCreate {
 	if v != nil {
-		_c.SetAllowMessagesDispatch(*v)
+		_c.SetInputModerationEnabled(*v)
+	}
+	return _c
+}
+
+// SetInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field.
+func (_c *GroupCreate) SetInputModerationAutoDisableUser(v bool) *GroupCreate {
+	_c.mutation.SetInputModerationAutoDisableUser(v)
+	return _c
+}
+
+// SetNillableInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableInputModerationAutoDisableUser(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetInputModerationAutoDisableUser(*v)
+	}
+	return _c
+}
+
+// SetInputModerationCategories sets the "input_moderation_categories" field.
+func (_c *GroupCreate) SetInputModerationCategories(v []string) *GroupCreate {
+	_c.mutation.SetInputModerationCategories(v)
+	return _c
+}
+
+// SetInputModerationActionMode sets the "input_moderation_action_mode" field.
+func (_c *GroupCreate) SetInputModerationActionMode(v string) *GroupCreate {
+	_c.mutation.SetInputModerationActionMode(v)
+	return _c
+}
+
+// SetNillableInputModerationActionMode sets the "input_moderation_action_mode" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableInputModerationActionMode(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetInputModerationActionMode(*v)
+	}
+	return _c
+}
+
+// SetInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field.
+func (_c *GroupCreate) SetInputModerationCooldownMinutes(v int) *GroupCreate {
+	_c.mutation.SetInputModerationCooldownMinutes(v)
+	return _c
+}
+
+// SetNillableInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableInputModerationCooldownMinutes(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetInputModerationCooldownMinutes(*v)
+	}
+	return _c
+}
+
+// SetInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field.
+func (_c *GroupCreate) SetInputModerationDisableAfterHits(v int) *GroupCreate {
+	_c.mutation.SetInputModerationDisableAfterHits(v)
+	return _c
+}
+
+// SetNillableInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableInputModerationDisableAfterHits(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetInputModerationDisableAfterHits(*v)
+	}
+	return _c
+}
+
+// SetInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field.
+func (_c *GroupCreate) SetInputModerationStrikeWindowHours(v int) *GroupCreate {
+	_c.mutation.SetInputModerationStrikeWindowHours(v)
+	return _c
+}
+
+// SetNillableInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableInputModerationStrikeWindowHours(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetInputModerationStrikeWindowHours(*v)
+	}
+	return _c
+}
+
+// SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
+func (_c *GroupCreate) SetInputModerationDedupeMinutes(v int) *GroupCreate {
+	_c.mutation.SetInputModerationDedupeMinutes(v)
+	return _c
+}
+
+// SetNillableInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableInputModerationDedupeMinutes(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetInputModerationDedupeMinutes(*v)
+	}
+	return _c
+}
+
+// SetCodexClientPolicy sets the "codex_client_policy" field.
+func (_c *GroupCreate) SetCodexClientPolicy(v string) *GroupCreate {
+	_c.mutation.SetCodexClientPolicy(v)
+	return _c
+}
+
+// SetNillableCodexClientPolicy sets the "codex_client_policy" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableCodexClientPolicy(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetCodexClientPolicy(*v)
+	}
+	return _c
+}
+
+// SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
+func (_c *GroupCreate) SetClaudeDeviceLimitMode(v string) *GroupCreate {
+	_c.mutation.SetClaudeDeviceLimitMode(v)
+	return _c
+}
+
+// SetNillableClaudeDeviceLimitMode sets the "claude_device_limit_mode" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableClaudeDeviceLimitMode(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetClaudeDeviceLimitMode(*v)
+	}
+	return _c
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (_c *GroupCreate) SetClaudeDeviceBaseLimit(v int) *GroupCreate {
+	_c.mutation.SetClaudeDeviceBaseLimit(v)
+	return _c
+}
+
+// SetNillableClaudeDeviceBaseLimit sets the "claude_device_base_limit" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableClaudeDeviceBaseLimit(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetClaudeDeviceBaseLimit(*v)
 	}
 	return _c
 }
@@ -677,9 +809,49 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultSortOrder
 		_c.mutation.SetSortOrder(v)
 	}
-	if _, ok := _c.mutation.AllowMessagesDispatch(); !ok {
-		v := group.DefaultAllowMessagesDispatch
-		_c.mutation.SetAllowMessagesDispatch(v)
+	if _, ok := _c.mutation.InputModerationEnabled(); !ok {
+		v := group.DefaultInputModerationEnabled
+		_c.mutation.SetInputModerationEnabled(v)
+	}
+	if _, ok := _c.mutation.InputModerationAutoDisableUser(); !ok {
+		v := group.DefaultInputModerationAutoDisableUser
+		_c.mutation.SetInputModerationAutoDisableUser(v)
+	}
+	if _, ok := _c.mutation.InputModerationCategories(); !ok {
+		v := group.DefaultInputModerationCategories
+		_c.mutation.SetInputModerationCategories(v)
+	}
+	if _, ok := _c.mutation.InputModerationActionMode(); !ok {
+		v := group.DefaultInputModerationActionMode
+		_c.mutation.SetInputModerationActionMode(v)
+	}
+	if _, ok := _c.mutation.InputModerationCooldownMinutes(); !ok {
+		v := group.DefaultInputModerationCooldownMinutes
+		_c.mutation.SetInputModerationCooldownMinutes(v)
+	}
+	if _, ok := _c.mutation.InputModerationDisableAfterHits(); !ok {
+		v := group.DefaultInputModerationDisableAfterHits
+		_c.mutation.SetInputModerationDisableAfterHits(v)
+	}
+	if _, ok := _c.mutation.InputModerationStrikeWindowHours(); !ok {
+		v := group.DefaultInputModerationStrikeWindowHours
+		_c.mutation.SetInputModerationStrikeWindowHours(v)
+	}
+	if _, ok := _c.mutation.InputModerationDedupeMinutes(); !ok {
+		v := group.DefaultInputModerationDedupeMinutes
+		_c.mutation.SetInputModerationDedupeMinutes(v)
+	}
+	if _, ok := _c.mutation.CodexClientPolicy(); !ok {
+		v := group.DefaultCodexClientPolicy
+		_c.mutation.SetCodexClientPolicy(v)
+	}
+	if _, ok := _c.mutation.ClaudeDeviceLimitMode(); !ok {
+		v := group.DefaultClaudeDeviceLimitMode
+		_c.mutation.SetClaudeDeviceLimitMode(v)
+	}
+	if _, ok := _c.mutation.ClaudeDeviceBaseLimit(); !ok {
+		v := group.DefaultClaudeDeviceBaseLimit
+		_c.mutation.SetClaudeDeviceBaseLimit(v)
 	}
 	return nil
 }
@@ -757,8 +929,53 @@ func (_c *GroupCreate) check() error {
 	if _, ok := _c.mutation.SortOrder(); !ok {
 		return &ValidationError{Name: "sort_order", err: errors.New(`ent: missing required field "Group.sort_order"`)}
 	}
-	if _, ok := _c.mutation.AllowMessagesDispatch(); !ok {
-		return &ValidationError{Name: "allow_messages_dispatch", err: errors.New(`ent: missing required field "Group.allow_messages_dispatch"`)}
+	if _, ok := _c.mutation.InputModerationEnabled(); !ok {
+		return &ValidationError{Name: "input_moderation_enabled", err: errors.New(`ent: missing required field "Group.input_moderation_enabled"`)}
+	}
+	if _, ok := _c.mutation.InputModerationAutoDisableUser(); !ok {
+		return &ValidationError{Name: "input_moderation_auto_disable_user", err: errors.New(`ent: missing required field "Group.input_moderation_auto_disable_user"`)}
+	}
+	if _, ok := _c.mutation.InputModerationCategories(); !ok {
+		return &ValidationError{Name: "input_moderation_categories", err: errors.New(`ent: missing required field "Group.input_moderation_categories"`)}
+	}
+	if _, ok := _c.mutation.InputModerationActionMode(); !ok {
+		return &ValidationError{Name: "input_moderation_action_mode", err: errors.New(`ent: missing required field "Group.input_moderation_action_mode"`)}
+	}
+	if v, ok := _c.mutation.InputModerationActionMode(); ok {
+		if err := group.InputModerationActionModeValidator(v); err != nil {
+			return &ValidationError{Name: "input_moderation_action_mode", err: fmt.Errorf(`ent: validator failed for field "Group.input_moderation_action_mode": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.InputModerationCooldownMinutes(); !ok {
+		return &ValidationError{Name: "input_moderation_cooldown_minutes", err: errors.New(`ent: missing required field "Group.input_moderation_cooldown_minutes"`)}
+	}
+	if _, ok := _c.mutation.InputModerationDisableAfterHits(); !ok {
+		return &ValidationError{Name: "input_moderation_disable_after_hits", err: errors.New(`ent: missing required field "Group.input_moderation_disable_after_hits"`)}
+	}
+	if _, ok := _c.mutation.InputModerationStrikeWindowHours(); !ok {
+		return &ValidationError{Name: "input_moderation_strike_window_hours", err: errors.New(`ent: missing required field "Group.input_moderation_strike_window_hours"`)}
+	}
+	if _, ok := _c.mutation.InputModerationDedupeMinutes(); !ok {
+		return &ValidationError{Name: "input_moderation_dedupe_minutes", err: errors.New(`ent: missing required field "Group.input_moderation_dedupe_minutes"`)}
+	}
+	if _, ok := _c.mutation.CodexClientPolicy(); !ok {
+		return &ValidationError{Name: "codex_client_policy", err: errors.New(`ent: missing required field "Group.codex_client_policy"`)}
+	}
+	if v, ok := _c.mutation.CodexClientPolicy(); ok {
+		if err := group.CodexClientPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "codex_client_policy", err: fmt.Errorf(`ent: validator failed for field "Group.codex_client_policy": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.ClaudeDeviceLimitMode(); !ok {
+		return &ValidationError{Name: "claude_device_limit_mode", err: errors.New(`ent: missing required field "Group.claude_device_limit_mode"`)}
+	}
+	if v, ok := _c.mutation.ClaudeDeviceLimitMode(); ok {
+		if err := group.ClaudeDeviceLimitModeValidator(v); err != nil {
+			return &ValidationError{Name: "claude_device_limit_mode", err: fmt.Errorf(`ent: validator failed for field "Group.claude_device_limit_mode": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.ClaudeDeviceBaseLimit(); !ok {
+		return &ValidationError{Name: "claude_device_base_limit", err: errors.New(`ent: missing required field "Group.claude_device_base_limit"`)}
 	}
 	return nil
 }
@@ -919,9 +1136,49 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 		_spec.SetField(group.FieldSortOrder, field.TypeInt, value)
 		_node.SortOrder = value
 	}
-	if value, ok := _c.mutation.AllowMessagesDispatch(); ok {
-		_spec.SetField(group.FieldAllowMessagesDispatch, field.TypeBool, value)
-		_node.AllowMessagesDispatch = value
+	if value, ok := _c.mutation.InputModerationEnabled(); ok {
+		_spec.SetField(group.FieldInputModerationEnabled, field.TypeBool, value)
+		_node.InputModerationEnabled = value
+	}
+	if value, ok := _c.mutation.InputModerationAutoDisableUser(); ok {
+		_spec.SetField(group.FieldInputModerationAutoDisableUser, field.TypeBool, value)
+		_node.InputModerationAutoDisableUser = value
+	}
+	if value, ok := _c.mutation.InputModerationCategories(); ok {
+		_spec.SetField(group.FieldInputModerationCategories, field.TypeJSON, value)
+		_node.InputModerationCategories = value
+	}
+	if value, ok := _c.mutation.InputModerationActionMode(); ok {
+		_spec.SetField(group.FieldInputModerationActionMode, field.TypeString, value)
+		_node.InputModerationActionMode = value
+	}
+	if value, ok := _c.mutation.InputModerationCooldownMinutes(); ok {
+		_spec.SetField(group.FieldInputModerationCooldownMinutes, field.TypeInt, value)
+		_node.InputModerationCooldownMinutes = value
+	}
+	if value, ok := _c.mutation.InputModerationDisableAfterHits(); ok {
+		_spec.SetField(group.FieldInputModerationDisableAfterHits, field.TypeInt, value)
+		_node.InputModerationDisableAfterHits = value
+	}
+	if value, ok := _c.mutation.InputModerationStrikeWindowHours(); ok {
+		_spec.SetField(group.FieldInputModerationStrikeWindowHours, field.TypeInt, value)
+		_node.InputModerationStrikeWindowHours = value
+	}
+	if value, ok := _c.mutation.InputModerationDedupeMinutes(); ok {
+		_spec.SetField(group.FieldInputModerationDedupeMinutes, field.TypeInt, value)
+		_node.InputModerationDedupeMinutes = value
+	}
+	if value, ok := _c.mutation.CodexClientPolicy(); ok {
+		_spec.SetField(group.FieldCodexClientPolicy, field.TypeString, value)
+		_node.CodexClientPolicy = value
+	}
+	if value, ok := _c.mutation.ClaudeDeviceLimitMode(); ok {
+		_spec.SetField(group.FieldClaudeDeviceLimitMode, field.TypeString, value)
+		_node.ClaudeDeviceLimitMode = value
+	}
+	if value, ok := _c.mutation.ClaudeDeviceBaseLimit(); ok {
+		_spec.SetField(group.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
+		_node.ClaudeDeviceBaseLimit = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1661,15 +1918,165 @@ func (u *GroupUpsert) AddSortOrder(v int) *GroupUpsert {
 	return u
 }
 
-// SetAllowMessagesDispatch sets the "allow_messages_dispatch" field.
-func (u *GroupUpsert) SetAllowMessagesDispatch(v bool) *GroupUpsert {
-	u.Set(group.FieldAllowMessagesDispatch, v)
+// SetInputModerationEnabled sets the "input_moderation_enabled" field.
+func (u *GroupUpsert) SetInputModerationEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldInputModerationEnabled, v)
 	return u
 }
 
-// UpdateAllowMessagesDispatch sets the "allow_messages_dispatch" field to the value that was provided on create.
-func (u *GroupUpsert) UpdateAllowMessagesDispatch() *GroupUpsert {
-	u.SetExcluded(group.FieldAllowMessagesDispatch)
+// UpdateInputModerationEnabled sets the "input_moderation_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateInputModerationEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldInputModerationEnabled)
+	return u
+}
+
+// SetInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field.
+func (u *GroupUpsert) SetInputModerationAutoDisableUser(v bool) *GroupUpsert {
+	u.Set(group.FieldInputModerationAutoDisableUser, v)
+	return u
+}
+
+// UpdateInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateInputModerationAutoDisableUser() *GroupUpsert {
+	u.SetExcluded(group.FieldInputModerationAutoDisableUser)
+	return u
+}
+
+// SetInputModerationCategories sets the "input_moderation_categories" field.
+func (u *GroupUpsert) SetInputModerationCategories(v []string) *GroupUpsert {
+	u.Set(group.FieldInputModerationCategories, v)
+	return u
+}
+
+// UpdateInputModerationCategories sets the "input_moderation_categories" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateInputModerationCategories() *GroupUpsert {
+	u.SetExcluded(group.FieldInputModerationCategories)
+	return u
+}
+
+// SetInputModerationActionMode sets the "input_moderation_action_mode" field.
+func (u *GroupUpsert) SetInputModerationActionMode(v string) *GroupUpsert {
+	u.Set(group.FieldInputModerationActionMode, v)
+	return u
+}
+
+// UpdateInputModerationActionMode sets the "input_moderation_action_mode" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateInputModerationActionMode() *GroupUpsert {
+	u.SetExcluded(group.FieldInputModerationActionMode)
+	return u
+}
+
+// SetInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field.
+func (u *GroupUpsert) SetInputModerationCooldownMinutes(v int) *GroupUpsert {
+	u.Set(group.FieldInputModerationCooldownMinutes, v)
+	return u
+}
+
+// UpdateInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateInputModerationCooldownMinutes() *GroupUpsert {
+	u.SetExcluded(group.FieldInputModerationCooldownMinutes)
+	return u
+}
+
+// AddInputModerationCooldownMinutes adds v to the "input_moderation_cooldown_minutes" field.
+func (u *GroupUpsert) AddInputModerationCooldownMinutes(v int) *GroupUpsert {
+	u.Add(group.FieldInputModerationCooldownMinutes, v)
+	return u
+}
+
+// SetInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field.
+func (u *GroupUpsert) SetInputModerationDisableAfterHits(v int) *GroupUpsert {
+	u.Set(group.FieldInputModerationDisableAfterHits, v)
+	return u
+}
+
+// UpdateInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateInputModerationDisableAfterHits() *GroupUpsert {
+	u.SetExcluded(group.FieldInputModerationDisableAfterHits)
+	return u
+}
+
+// AddInputModerationDisableAfterHits adds v to the "input_moderation_disable_after_hits" field.
+func (u *GroupUpsert) AddInputModerationDisableAfterHits(v int) *GroupUpsert {
+	u.Add(group.FieldInputModerationDisableAfterHits, v)
+	return u
+}
+
+// SetInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field.
+func (u *GroupUpsert) SetInputModerationStrikeWindowHours(v int) *GroupUpsert {
+	u.Set(group.FieldInputModerationStrikeWindowHours, v)
+	return u
+}
+
+// UpdateInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateInputModerationStrikeWindowHours() *GroupUpsert {
+	u.SetExcluded(group.FieldInputModerationStrikeWindowHours)
+	return u
+}
+
+// AddInputModerationStrikeWindowHours adds v to the "input_moderation_strike_window_hours" field.
+func (u *GroupUpsert) AddInputModerationStrikeWindowHours(v int) *GroupUpsert {
+	u.Add(group.FieldInputModerationStrikeWindowHours, v)
+	return u
+}
+
+// SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
+func (u *GroupUpsert) SetInputModerationDedupeMinutes(v int) *GroupUpsert {
+	u.Set(group.FieldInputModerationDedupeMinutes, v)
+	return u
+}
+
+// UpdateInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateInputModerationDedupeMinutes() *GroupUpsert {
+	u.SetExcluded(group.FieldInputModerationDedupeMinutes)
+	return u
+}
+
+// AddInputModerationDedupeMinutes adds v to the "input_moderation_dedupe_minutes" field.
+func (u *GroupUpsert) AddInputModerationDedupeMinutes(v int) *GroupUpsert {
+	u.Add(group.FieldInputModerationDedupeMinutes, v)
+	return u
+}
+
+// SetCodexClientPolicy sets the "codex_client_policy" field.
+func (u *GroupUpsert) SetCodexClientPolicy(v string) *GroupUpsert {
+	u.Set(group.FieldCodexClientPolicy, v)
+	return u
+}
+
+// UpdateCodexClientPolicy sets the "codex_client_policy" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateCodexClientPolicy() *GroupUpsert {
+	u.SetExcluded(group.FieldCodexClientPolicy)
+	return u
+}
+
+// SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
+func (u *GroupUpsert) SetClaudeDeviceLimitMode(v string) *GroupUpsert {
+	u.Set(group.FieldClaudeDeviceLimitMode, v)
+	return u
+}
+
+// UpdateClaudeDeviceLimitMode sets the "claude_device_limit_mode" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateClaudeDeviceLimitMode() *GroupUpsert {
+	u.SetExcluded(group.FieldClaudeDeviceLimitMode)
+	return u
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (u *GroupUpsert) SetClaudeDeviceBaseLimit(v int) *GroupUpsert {
+	u.Set(group.FieldClaudeDeviceBaseLimit, v)
+	return u
+}
+
+// UpdateClaudeDeviceBaseLimit sets the "claude_device_base_limit" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateClaudeDeviceBaseLimit() *GroupUpsert {
+	u.SetExcluded(group.FieldClaudeDeviceBaseLimit)
+	return u
+}
+
+// AddClaudeDeviceBaseLimit adds v to the "claude_device_base_limit" field.
+func (u *GroupUpsert) AddClaudeDeviceBaseLimit(v int) *GroupUpsert {
+	u.Add(group.FieldClaudeDeviceBaseLimit, v)
 	return u
 }
 
@@ -2397,17 +2804,192 @@ func (u *GroupUpsertOne) UpdateSortOrder() *GroupUpsertOne {
 	})
 }
 
-// SetAllowMessagesDispatch sets the "allow_messages_dispatch" field.
-func (u *GroupUpsertOne) SetAllowMessagesDispatch(v bool) *GroupUpsertOne {
+// SetInputModerationEnabled sets the "input_moderation_enabled" field.
+func (u *GroupUpsertOne) SetInputModerationEnabled(v bool) *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
-		s.SetAllowMessagesDispatch(v)
+		s.SetInputModerationEnabled(v)
 	})
 }
 
-// UpdateAllowMessagesDispatch sets the "allow_messages_dispatch" field to the value that was provided on create.
-func (u *GroupUpsertOne) UpdateAllowMessagesDispatch() *GroupUpsertOne {
+// UpdateInputModerationEnabled sets the "input_moderation_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateInputModerationEnabled() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
-		s.UpdateAllowMessagesDispatch()
+		s.UpdateInputModerationEnabled()
+	})
+}
+
+// SetInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field.
+func (u *GroupUpsertOne) SetInputModerationAutoDisableUser(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationAutoDisableUser(v)
+	})
+}
+
+// UpdateInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateInputModerationAutoDisableUser() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationAutoDisableUser()
+	})
+}
+
+// SetInputModerationCategories sets the "input_moderation_categories" field.
+func (u *GroupUpsertOne) SetInputModerationCategories(v []string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationCategories(v)
+	})
+}
+
+// UpdateInputModerationCategories sets the "input_moderation_categories" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateInputModerationCategories() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationCategories()
+	})
+}
+
+// SetInputModerationActionMode sets the "input_moderation_action_mode" field.
+func (u *GroupUpsertOne) SetInputModerationActionMode(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationActionMode(v)
+	})
+}
+
+// UpdateInputModerationActionMode sets the "input_moderation_action_mode" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateInputModerationActionMode() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationActionMode()
+	})
+}
+
+// SetInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field.
+func (u *GroupUpsertOne) SetInputModerationCooldownMinutes(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationCooldownMinutes(v)
+	})
+}
+
+// AddInputModerationCooldownMinutes adds v to the "input_moderation_cooldown_minutes" field.
+func (u *GroupUpsertOne) AddInputModerationCooldownMinutes(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddInputModerationCooldownMinutes(v)
+	})
+}
+
+// UpdateInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateInputModerationCooldownMinutes() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationCooldownMinutes()
+	})
+}
+
+// SetInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field.
+func (u *GroupUpsertOne) SetInputModerationDisableAfterHits(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationDisableAfterHits(v)
+	})
+}
+
+// AddInputModerationDisableAfterHits adds v to the "input_moderation_disable_after_hits" field.
+func (u *GroupUpsertOne) AddInputModerationDisableAfterHits(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddInputModerationDisableAfterHits(v)
+	})
+}
+
+// UpdateInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateInputModerationDisableAfterHits() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationDisableAfterHits()
+	})
+}
+
+// SetInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field.
+func (u *GroupUpsertOne) SetInputModerationStrikeWindowHours(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationStrikeWindowHours(v)
+	})
+}
+
+// AddInputModerationStrikeWindowHours adds v to the "input_moderation_strike_window_hours" field.
+func (u *GroupUpsertOne) AddInputModerationStrikeWindowHours(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddInputModerationStrikeWindowHours(v)
+	})
+}
+
+// UpdateInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateInputModerationStrikeWindowHours() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationStrikeWindowHours()
+	})
+}
+
+// SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
+func (u *GroupUpsertOne) SetInputModerationDedupeMinutes(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationDedupeMinutes(v)
+	})
+}
+
+// AddInputModerationDedupeMinutes adds v to the "input_moderation_dedupe_minutes" field.
+func (u *GroupUpsertOne) AddInputModerationDedupeMinutes(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddInputModerationDedupeMinutes(v)
+	})
+}
+
+// UpdateInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateInputModerationDedupeMinutes() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationDedupeMinutes()
+	})
+}
+
+// SetCodexClientPolicy sets the "codex_client_policy" field.
+func (u *GroupUpsertOne) SetCodexClientPolicy(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetCodexClientPolicy(v)
+	})
+}
+
+// UpdateCodexClientPolicy sets the "codex_client_policy" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateCodexClientPolicy() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateCodexClientPolicy()
+	})
+}
+
+// SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
+func (u *GroupUpsertOne) SetClaudeDeviceLimitMode(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClaudeDeviceLimitMode(v)
+	})
+}
+
+// UpdateClaudeDeviceLimitMode sets the "claude_device_limit_mode" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateClaudeDeviceLimitMode() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClaudeDeviceLimitMode()
+	})
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (u *GroupUpsertOne) SetClaudeDeviceBaseLimit(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClaudeDeviceBaseLimit(v)
+	})
+}
+
+// AddClaudeDeviceBaseLimit adds v to the "claude_device_base_limit" field.
+func (u *GroupUpsertOne) AddClaudeDeviceBaseLimit(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddClaudeDeviceBaseLimit(v)
+	})
+}
+
+// UpdateClaudeDeviceBaseLimit sets the "claude_device_base_limit" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateClaudeDeviceBaseLimit() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClaudeDeviceBaseLimit()
 	})
 }
 
@@ -3301,17 +3883,192 @@ func (u *GroupUpsertBulk) UpdateSortOrder() *GroupUpsertBulk {
 	})
 }
 
-// SetAllowMessagesDispatch sets the "allow_messages_dispatch" field.
-func (u *GroupUpsertBulk) SetAllowMessagesDispatch(v bool) *GroupUpsertBulk {
+// SetInputModerationEnabled sets the "input_moderation_enabled" field.
+func (u *GroupUpsertBulk) SetInputModerationEnabled(v bool) *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
-		s.SetAllowMessagesDispatch(v)
+		s.SetInputModerationEnabled(v)
 	})
 }
 
-// UpdateAllowMessagesDispatch sets the "allow_messages_dispatch" field to the value that was provided on create.
-func (u *GroupUpsertBulk) UpdateAllowMessagesDispatch() *GroupUpsertBulk {
+// UpdateInputModerationEnabled sets the "input_moderation_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateInputModerationEnabled() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
-		s.UpdateAllowMessagesDispatch()
+		s.UpdateInputModerationEnabled()
+	})
+}
+
+// SetInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field.
+func (u *GroupUpsertBulk) SetInputModerationAutoDisableUser(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationAutoDisableUser(v)
+	})
+}
+
+// UpdateInputModerationAutoDisableUser sets the "input_moderation_auto_disable_user" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateInputModerationAutoDisableUser() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationAutoDisableUser()
+	})
+}
+
+// SetInputModerationCategories sets the "input_moderation_categories" field.
+func (u *GroupUpsertBulk) SetInputModerationCategories(v []string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationCategories(v)
+	})
+}
+
+// UpdateInputModerationCategories sets the "input_moderation_categories" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateInputModerationCategories() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationCategories()
+	})
+}
+
+// SetInputModerationActionMode sets the "input_moderation_action_mode" field.
+func (u *GroupUpsertBulk) SetInputModerationActionMode(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationActionMode(v)
+	})
+}
+
+// UpdateInputModerationActionMode sets the "input_moderation_action_mode" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateInputModerationActionMode() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationActionMode()
+	})
+}
+
+// SetInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field.
+func (u *GroupUpsertBulk) SetInputModerationCooldownMinutes(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationCooldownMinutes(v)
+	})
+}
+
+// AddInputModerationCooldownMinutes adds v to the "input_moderation_cooldown_minutes" field.
+func (u *GroupUpsertBulk) AddInputModerationCooldownMinutes(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddInputModerationCooldownMinutes(v)
+	})
+}
+
+// UpdateInputModerationCooldownMinutes sets the "input_moderation_cooldown_minutes" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateInputModerationCooldownMinutes() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationCooldownMinutes()
+	})
+}
+
+// SetInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field.
+func (u *GroupUpsertBulk) SetInputModerationDisableAfterHits(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationDisableAfterHits(v)
+	})
+}
+
+// AddInputModerationDisableAfterHits adds v to the "input_moderation_disable_after_hits" field.
+func (u *GroupUpsertBulk) AddInputModerationDisableAfterHits(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddInputModerationDisableAfterHits(v)
+	})
+}
+
+// UpdateInputModerationDisableAfterHits sets the "input_moderation_disable_after_hits" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateInputModerationDisableAfterHits() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationDisableAfterHits()
+	})
+}
+
+// SetInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field.
+func (u *GroupUpsertBulk) SetInputModerationStrikeWindowHours(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationStrikeWindowHours(v)
+	})
+}
+
+// AddInputModerationStrikeWindowHours adds v to the "input_moderation_strike_window_hours" field.
+func (u *GroupUpsertBulk) AddInputModerationStrikeWindowHours(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddInputModerationStrikeWindowHours(v)
+	})
+}
+
+// UpdateInputModerationStrikeWindowHours sets the "input_moderation_strike_window_hours" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateInputModerationStrikeWindowHours() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationStrikeWindowHours()
+	})
+}
+
+// SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
+func (u *GroupUpsertBulk) SetInputModerationDedupeMinutes(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationDedupeMinutes(v)
+	})
+}
+
+// AddInputModerationDedupeMinutes adds v to the "input_moderation_dedupe_minutes" field.
+func (u *GroupUpsertBulk) AddInputModerationDedupeMinutes(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddInputModerationDedupeMinutes(v)
+	})
+}
+
+// UpdateInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateInputModerationDedupeMinutes() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationDedupeMinutes()
+	})
+}
+
+// SetCodexClientPolicy sets the "codex_client_policy" field.
+func (u *GroupUpsertBulk) SetCodexClientPolicy(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetCodexClientPolicy(v)
+	})
+}
+
+// UpdateCodexClientPolicy sets the "codex_client_policy" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateCodexClientPolicy() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateCodexClientPolicy()
+	})
+}
+
+// SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
+func (u *GroupUpsertBulk) SetClaudeDeviceLimitMode(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClaudeDeviceLimitMode(v)
+	})
+}
+
+// UpdateClaudeDeviceLimitMode sets the "claude_device_limit_mode" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateClaudeDeviceLimitMode() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClaudeDeviceLimitMode()
+	})
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (u *GroupUpsertBulk) SetClaudeDeviceBaseLimit(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClaudeDeviceBaseLimit(v)
+	})
+}
+
+// AddClaudeDeviceBaseLimit adds v to the "claude_device_base_limit" field.
+func (u *GroupUpsertBulk) AddClaudeDeviceBaseLimit(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddClaudeDeviceBaseLimit(v)
+	})
+}
+
+// UpdateClaudeDeviceBaseLimit sets the "claude_device_base_limit" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateClaudeDeviceBaseLimit() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClaudeDeviceBaseLimit()
 	})
 }
 

@@ -3,7 +3,9 @@ package middleware
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -14,8 +16,8 @@ import (
 )
 
 // NewAPIKeyAuthMiddleware 创建 API Key 认证中间件
-func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) APIKeyAuthMiddleware {
-	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg))
+func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, inputModeration *service.InputModerationService, cfg *config.Config) APIKeyAuthMiddleware {
+	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, inputModeration, cfg))
 }
 
 // apiKeyAuthWithSubscription API Key认证中间件（支持订阅验证）
@@ -25,7 +27,7 @@ func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionS
 //   - 计费执行（Billing Enforcement）：过期/配额/订阅/余额检查 —— skipBilling 时整块跳过
 //
 // /v1/usage 端点只需鉴权，不需要计费执行（允许过期/配额耗尽的 Key 查询自身用量）。
-func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) gin.HandlerFunc {
+func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, inputModeration *service.InputModerationService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// ── 1. 提取 API Key ──────────────────────────────────────────
 
@@ -109,9 +111,8 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			return
 		}
 
-		// 基础鉴权已通过 → 立即写入 identity context，让后续计费阶段任何 abort
-		// 路径（INSUFFICIENT_BALANCE / API_KEY_EXPIRED / API_KEY_QUOTA_EXHAUSTED /
-		// SUBSCRIPTION_* / USAGE_LIMIT_EXCEEDED）都能被 ops_error_logger 归因到具体用户。
+		// Write identity before moderation enforcement so ops logs can attribute
+		// cooldown rejections to the authenticated user and key.
 		c.Set(string(ContextKeyAPIKey), apiKey)
 		c.Set(string(ContextKeyUser), AuthSubject{
 			UserID:      apiKey.User.ID,
@@ -119,6 +120,27 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		})
 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
 		setGroupContext(c, apiKey.Group)
+
+		if inputModeration != nil && !apiKey.User.IsAdmin() {
+			blockedUntil, riskErr := inputModeration.GetActiveCooldown(c.Request.Context(), apiKey.User.ID)
+			if riskErr != nil {
+				AbortWithError(c, 500, "INPUT_MODERATION_CHECK_FAILED", "Failed to validate user risk state")
+				return
+			}
+			if blockedUntil != nil {
+				retryAfter := int(time.Until(*blockedUntil).Seconds())
+				if retryAfter < 1 {
+					retryAfter = 1
+				}
+				c.Header("Retry-After", strconv.Itoa(retryAfter))
+				AbortWithError(c, 429, "INPUT_MODERATION_COOLDOWN", "User access is temporarily suspended")
+				return
+			}
+		}
+
+		// 基础鉴权已通过 → 立即写入 identity context，让后续计费阶段任何 abort
+		// 路径（INSUFFICIENT_BALANCE / API_KEY_EXPIRED / API_KEY_QUOTA_EXHAUSTED /
+		// SUBSCRIPTION_* / USAGE_LIMIT_EXCEEDED）都能被 ops_error_logger 归因到具体用户。
 
 		// ── 4. SimpleMode → early return ─────────────────────────────
 

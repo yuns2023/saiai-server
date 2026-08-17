@@ -74,6 +74,16 @@ type UserService struct {
 	userRepo             UserRepository
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 	billingCache         BillingCache
+	inputRiskRepo        InputModerationEventRepository
+	inputRiskCache       InputModerationStateCache
+}
+
+func (s *UserService) SetInputModerationState(repo InputModerationEventRepository, cache InputModerationStateCache) {
+	if s == nil {
+		return
+	}
+	s.inputRiskRepo = repo
+	s.inputRiskCache = cache
 }
 
 // NewUserService 创建用户服务实例
@@ -226,7 +236,16 @@ func (s *UserService) UpdateStatus(ctx context.Context, userID int64, status str
 		return fmt.Errorf("get user: %w", err)
 	}
 
+	oldStatus := user.Status
 	user.Status = status
+	if status == StatusActive && oldStatus != StatusActive && s.inputRiskRepo != nil {
+		if err := s.inputRiskRepo.ResetUserInputRiskState(ctx, userID); err != nil {
+			return fmt.Errorf("reset input moderation state: %w", err)
+		}
+		if s.inputRiskCache != nil {
+			_ = s.inputRiskCache.ClearUserCooldown(ctx, userID)
+		}
+	}
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return fmt.Errorf("update user: %w", err)
@@ -236,6 +255,12 @@ func (s *UserService) UpdateStatus(ctx context.Context, userID int64, status str
 	}
 
 	return nil
+}
+
+func (s *UserService) InvalidateAuthCacheByUserID(ctx context.Context, userID int64) {
+	if s != nil && s.authCacheInvalidator != nil && userID > 0 {
+		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+	}
 }
 
 // Delete 删除用户（管理员功能）

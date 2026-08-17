@@ -157,9 +157,18 @@ type CreateGroupInput struct {
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes []string
 	// Sora 存储配额
-	SoraStorageQuotaBytes int64
-	// OpenAI Messages 调度配置（仅 openai 平台使用）
-	AllowMessagesDispatch bool
+	SoraStorageQuotaBytes            int64
+	InputModerationEnabled           bool
+	InputModerationAutoDisableUser   bool
+	InputModerationCategories        []string
+	InputModerationActionMode        string
+	InputModerationCooldownMinutes   int
+	InputModerationDisableAfterHits  int
+	InputModerationStrikeWindowHours int
+	InputModerationDedupeMinutes     int
+	CodexClientPolicy                string
+	ClaudeDeviceLimitMode            string
+	ClaudeDeviceBaseLimit            int
 	// 从指定分组复制账号（创建分组后在同一事务内绑定）
 	CopyAccountsFromGroupIDs []int64
 }
@@ -200,9 +209,18 @@ type UpdateGroupInput struct {
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes *[]string
 	// Sora 存储配额
-	SoraStorageQuotaBytes *int64
-	// OpenAI Messages 调度配置（仅 openai 平台使用）
-	AllowMessagesDispatch *bool
+	SoraStorageQuotaBytes            *int64
+	InputModerationEnabled           *bool
+	InputModerationAutoDisableUser   *bool
+	InputModerationCategories        *[]string
+	InputModerationActionMode        *string
+	InputModerationCooldownMinutes   *int
+	InputModerationDisableAfterHits  *int
+	InputModerationStrikeWindowHours *int
+	InputModerationDedupeMinutes     *int
+	CodexClientPolicy                *string
+	ClaudeDeviceLimitMode            *string
+	ClaudeDeviceBaseLimit            *int
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64
 }
@@ -458,6 +476,8 @@ type adminServiceImpl struct {
 	defaultSubAssigner   DefaultSubscriptionAssigner
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
+	inputRiskRepo        InputModerationEventRepository
+	inputRiskCache       InputModerationStateCache
 }
 
 type userGroupRateBatchReader interface {
@@ -482,6 +502,8 @@ func NewAdminService(
 	defaultSubAssigner DefaultSubscriptionAssigner,
 	userSubRepo UserSubscriptionRepository,
 	privacyClientFactory PrivacyClientFactory,
+	inputRiskRepo InputModerationEventRepository,
+	inputRiskCache InputModerationStateCache,
 ) AdminService {
 	return &adminServiceImpl{
 		userRepo:             userRepo,
@@ -500,6 +522,8 @@ func NewAdminService(
 		defaultSubAssigner:   defaultSubAssigner,
 		userSubRepo:          userSubRepo,
 		privacyClientFactory: privacyClientFactory,
+		inputRiskRepo:        inputRiskRepo,
+		inputRiskCache:       inputRiskCache,
 	}
 }
 
@@ -650,6 +674,14 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 
 	if input.SoraStorageQuotaBytes != nil {
 		user.SoraStorageQuotaBytes = *input.SoraStorageQuotaBytes
+	}
+	if user.Status == StatusActive && oldStatus != StatusActive && s.inputRiskRepo != nil {
+		if err := s.inputRiskRepo.ResetUserInputRiskState(ctx, user.ID); err != nil {
+			return nil, fmt.Errorf("reset input moderation state: %w", err)
+		}
+		if s.inputRiskCache != nil {
+			_ = s.inputRiskCache.ClearUserCooldown(ctx, user.ID)
+		}
 	}
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
@@ -920,36 +952,46 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 
 	claudeEnvironmentMode := NormalizeClaudeEnvironmentMode(input.ClaudeEnvironmentMode, input.ClaudeEnvironmentRewrite)
 	group := &Group{
-		Name:                            input.Name,
-		Description:                     input.Description,
-		Platform:                        platform,
-		RateMultiplier:                  input.RateMultiplier,
-		IsExclusive:                     input.IsExclusive,
-		Status:                          StatusActive,
-		SubscriptionType:                subscriptionType,
-		FiveHourLimitUSD:                fiveHourLimit,
-		DailyLimitUSD:                   dailyLimit,
-		WeeklyLimitUSD:                  weeklyLimit,
-		MonthlyLimitUSD:                 monthlyLimit,
-		ImagePrice1K:                    imagePrice1K,
-		ImagePrice2K:                    imagePrice2K,
-		ImagePrice4K:                    imagePrice4K,
-		SoraImagePrice360:               soraImagePrice360,
-		SoraImagePrice540:               soraImagePrice540,
-		SoraVideoPricePerRequest:        soraVideoPrice,
-		SoraVideoPricePerRequestHD:      soraVideoPriceHD,
-		ClaudeCodeOnly:                  input.ClaudeCodeOnly,
-		AllowClaudeContext1MBeta:        input.AllowClaudeContext1MBeta,
-		ClaudeOAuthRequestGateDisabled:  input.ClaudeOAuthRequestGateDisabled,
-		ClaudeEnvironmentMode:           claudeEnvironmentMode,
-		ClaudeEnvironmentRewrite:        claudeEnvironmentMode == ClaudeEnvironmentModeRewrite,
-		FallbackGroupID:                 input.FallbackGroupID,
-		FallbackGroupIDOnInvalidRequest: fallbackOnInvalidRequest,
-		ModelRouting:                    input.ModelRouting,
-		MCPXMLInject:                    mcpXMLInject,
-		SupportedModelScopes:            input.SupportedModelScopes,
-		SoraStorageQuotaBytes:           input.SoraStorageQuotaBytes,
-		AllowMessagesDispatch:           input.AllowMessagesDispatch,
+		Name:                             input.Name,
+		Description:                      input.Description,
+		Platform:                         platform,
+		RateMultiplier:                   input.RateMultiplier,
+		IsExclusive:                      input.IsExclusive,
+		Status:                           StatusActive,
+		SubscriptionType:                 subscriptionType,
+		FiveHourLimitUSD:                 fiveHourLimit,
+		DailyLimitUSD:                    dailyLimit,
+		WeeklyLimitUSD:                   weeklyLimit,
+		MonthlyLimitUSD:                  monthlyLimit,
+		ImagePrice1K:                     imagePrice1K,
+		ImagePrice2K:                     imagePrice2K,
+		ImagePrice4K:                     imagePrice4K,
+		SoraImagePrice360:                soraImagePrice360,
+		SoraImagePrice540:                soraImagePrice540,
+		SoraVideoPricePerRequest:         soraVideoPrice,
+		SoraVideoPricePerRequestHD:       soraVideoPriceHD,
+		ClaudeCodeOnly:                   input.ClaudeCodeOnly,
+		AllowClaudeContext1MBeta:         input.AllowClaudeContext1MBeta,
+		ClaudeOAuthRequestGateDisabled:   input.ClaudeOAuthRequestGateDisabled,
+		ClaudeEnvironmentMode:            claudeEnvironmentMode,
+		ClaudeEnvironmentRewrite:         claudeEnvironmentMode == ClaudeEnvironmentModeRewrite,
+		FallbackGroupID:                  input.FallbackGroupID,
+		FallbackGroupIDOnInvalidRequest:  fallbackOnInvalidRequest,
+		ModelRouting:                     input.ModelRouting,
+		MCPXMLInject:                     mcpXMLInject,
+		SupportedModelScopes:             input.SupportedModelScopes,
+		SoraStorageQuotaBytes:            input.SoraStorageQuotaBytes,
+		InputModerationEnabled:           input.InputModerationEnabled,
+		InputModerationAutoDisableUser:   input.InputModerationAutoDisableUser,
+		InputModerationCategories:        normalizeInputModerationCategories(input.InputModerationCategories),
+		InputModerationActionMode:        normalizeInputModerationActionMode(input.InputModerationActionMode),
+		InputModerationCooldownMinutes:   normalizePositiveInt(input.InputModerationCooldownMinutes, 30, 1, 1440),
+		InputModerationDisableAfterHits:  normalizePositiveInt(input.InputModerationDisableAfterHits, 2, 1, 20),
+		InputModerationStrikeWindowHours: normalizePositiveInt(input.InputModerationStrikeWindowHours, 24, 1, 720),
+		InputModerationDedupeMinutes:     normalizePositiveInt(input.InputModerationDedupeMinutes, 5, 1, 1440),
+		CodexClientPolicy:                normalizeCodexClientPolicy(input.CodexClientPolicy),
+		ClaudeDeviceLimitMode:            normalizeClaudeDeviceLimitMode(input.ClaudeDeviceLimitMode),
+		ClaudeDeviceBaseLimit:            normalizePositiveInt(input.ClaudeDeviceBaseLimit, 1, 1, 100),
 	}
 	if err := s.groupRepo.Create(ctx, group); err != nil {
 		return nil, err
@@ -980,6 +1022,65 @@ func normalizePrice(price *float64) *float64 {
 		return nil
 	}
 	return price
+}
+
+func normalizeInputModerationCategories(categories []string) []string {
+	if categories == nil {
+		return []string{"Jailbreak", "PII", "Non-violent Illegal Acts", "Unethical Acts"}
+	}
+	out := make([]string, 0, len(categories))
+	seen := make(map[string]struct{}, len(categories))
+	for _, category := range categories {
+		category = strings.TrimSpace(category)
+		if category == "" {
+			continue
+		}
+		key := strings.ToLower(category)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, category)
+	}
+	return out
+}
+
+func normalizeInputModerationActionMode(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), InputModerationActionModeImmediateDisable) {
+		return InputModerationActionModeImmediateDisable
+	}
+	return InputModerationActionModeCooldownThenDisable
+}
+
+func normalizePositiveInt(value, fallback, minValue, maxValue int) int {
+	if value == 0 {
+		return fallback
+	}
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func normalizeCodexClientPolicy(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "official_clients", "cli_only":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "off"
+	}
+}
+
+func normalizeClaudeDeviceLimitMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "audit", "enforce":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "off"
+	}
 }
 
 // validateFallbackGroup 校验降级分组的有效性
@@ -1175,9 +1276,38 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.SupportedModelScopes = *input.SupportedModelScopes
 	}
 
-	// OpenAI Messages 调度配置
-	if input.AllowMessagesDispatch != nil {
-		group.AllowMessagesDispatch = *input.AllowMessagesDispatch
+	if input.InputModerationEnabled != nil {
+		group.InputModerationEnabled = *input.InputModerationEnabled
+	}
+	if input.InputModerationAutoDisableUser != nil {
+		group.InputModerationAutoDisableUser = *input.InputModerationAutoDisableUser
+	}
+	if input.InputModerationCategories != nil {
+		group.InputModerationCategories = normalizeInputModerationCategories(*input.InputModerationCategories)
+	}
+	if input.InputModerationActionMode != nil {
+		group.InputModerationActionMode = normalizeInputModerationActionMode(*input.InputModerationActionMode)
+	}
+	if input.InputModerationCooldownMinutes != nil {
+		group.InputModerationCooldownMinutes = normalizePositiveInt(*input.InputModerationCooldownMinutes, 30, 1, 1440)
+	}
+	if input.InputModerationDisableAfterHits != nil {
+		group.InputModerationDisableAfterHits = normalizePositiveInt(*input.InputModerationDisableAfterHits, 2, 1, 20)
+	}
+	if input.InputModerationStrikeWindowHours != nil {
+		group.InputModerationStrikeWindowHours = normalizePositiveInt(*input.InputModerationStrikeWindowHours, 24, 1, 720)
+	}
+	if input.InputModerationDedupeMinutes != nil {
+		group.InputModerationDedupeMinutes = normalizePositiveInt(*input.InputModerationDedupeMinutes, 5, 1, 1440)
+	}
+	if input.CodexClientPolicy != nil {
+		group.CodexClientPolicy = normalizeCodexClientPolicy(*input.CodexClientPolicy)
+	}
+	if input.ClaudeDeviceLimitMode != nil {
+		group.ClaudeDeviceLimitMode = normalizeClaudeDeviceLimitMode(*input.ClaudeDeviceLimitMode)
+	}
+	if input.ClaudeDeviceBaseLimit != nil {
+		group.ClaudeDeviceBaseLimit = normalizePositiveInt(*input.ClaudeDeviceBaseLimit, 1, 1, 100)
 	}
 
 	if err := s.groupRepo.Update(ctx, group); err != nil {
@@ -2185,18 +2315,22 @@ func (s *adminServiceImpl) GetRedeemCode(ctx context.Context, id int64) (*Redeem
 }
 
 func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *GenerateRedeemCodesInput) ([]RedeemCode, error) {
-	// 如果是订阅类型，验证必须有 GroupID
-	if input.Type == RedeemTypeSubscription {
+	if input.Type == RedeemTypeSubscription || input.Type == RedeemTypeClaudeDevice {
 		if input.GroupID == nil {
-			return nil, errors.New("group_id is required for subscription type")
+			return nil, errors.New("group_id is required for this redeem type")
 		}
-		// 验证分组存在且为订阅类型
 		group, err := s.groupRepo.GetByID(ctx, *input.GroupID)
 		if err != nil {
 			return nil, fmt.Errorf("group not found: %w", err)
 		}
-		if !group.IsSubscriptionType() {
+		if input.Type == RedeemTypeSubscription && !group.IsSubscriptionType() {
 			return nil, errors.New("group must be subscription type")
+		}
+		if input.Type == RedeemTypeClaudeDevice && (input.Value <= 0 || input.Value != float64(int(input.Value))) {
+			return nil, errors.New("Claude device value must be a positive integer")
+		}
+		if input.Type == RedeemTypeClaudeDevice && group.Platform != PlatformAnthropic && group.Platform != PlatformAntigravity {
+			return nil, errors.New("Claude device redeem codes require an Anthropic or Antigravity group")
 		}
 	}
 
@@ -2212,9 +2346,10 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 			Value:  input.Value,
 			Status: StatusUnused,
 		}
-		// 订阅类型专用字段
-		if input.Type == RedeemTypeSubscription {
+		if input.Type == RedeemTypeSubscription || input.Type == RedeemTypeClaudeDevice {
 			code.GroupID = input.GroupID
+		}
+		if input.Type == RedeemTypeSubscription {
 			code.ValidityDays = input.ValidityDays
 			if code.ValidityDays <= 0 {
 				code.ValidityDays = 30 // 默认30天

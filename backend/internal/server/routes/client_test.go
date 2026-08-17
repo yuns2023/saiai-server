@@ -33,11 +33,10 @@ func TestClientBootstrapRouteRequiresAPIKeyAuth(t *testing.T) {
 				return
 			}
 			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{
-				ID:                    7,
-				Platform:              service.PlatformOpenAI,
-				Status:                service.StatusActive,
-				Hydrated:              true,
-				AllowMessagesDispatch: true,
+				ID:       7,
+				Platform: service.PlatformOpenAI,
+				Status:   service.StatusActive,
+				Hydrated: true,
 			}})
 			c.Next()
 		}),
@@ -71,8 +70,7 @@ func TestClientBootstrapRouteRequiresAPIKeyAuth(t *testing.T) {
 					"claude": false,
 					"codex": true,
 					"codex_responses": true,
-					"codex_websockets": false,
-					"openai_messages_dispatch": true
+					"codex_websockets": false
 				}
 			}
 		}`, recorder.Body.String())
@@ -92,9 +90,8 @@ func TestClientBootstrapRouteWithRealAPIKeyAuthNeedsNoGatewayServices(t *testing
 			Status:   service.StatusDisabled,
 			Hydrated: true,
 		}),
-		"bootstrap-secret-anthropic":            bootstrapRouteAPIKey(3, bootstrapRouteGroup(3, service.PlatformAnthropic, false)),
-		"bootstrap-secret-openai-no-messages":   bootstrapRouteAPIKey(4, bootstrapRouteGroup(4, service.PlatformOpenAI, false)),
-		"bootstrap-secret-openai-with-messages": bootstrapRouteAPIKey(5, bootstrapRouteGroup(5, service.PlatformOpenAI, true)),
+		"bootstrap-secret-anthropic": bootstrapRouteAPIKey(3, bootstrapRouteGroup(3, service.PlatformAnthropic)),
+		"bootstrap-secret-openai":    bootstrapRouteAPIKey(4, bootstrapRouteGroup(4, service.PlatformOpenAI)),
 	}
 	repo := &bootstrapRouteAPIKeyRepository{keys: keys}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
@@ -104,7 +101,7 @@ func TestClientBootstrapRouteWithRealAPIKeyAuthNeedsNoGatewayServices(t *testing
 	RegisterClientRoutes(
 		router.Group("/api/v1"),
 		&handler.Handlers{Client: handler.NewClientHandler(handler.BuildInfo{Version: "integration-test"})},
-		servermiddleware.NewAPIKeyAuthMiddleware(apiKeyService, nil, cfg),
+		servermiddleware.NewAPIKeyAuthMiddleware(apiKeyService, nil, nil, cfg),
 	)
 
 	tests := []struct {
@@ -115,8 +112,7 @@ func TestClientBootstrapRouteWithRealAPIKeyAuthNeedsNoGatewayServices(t *testing
 		{name: "ungrouped key", secret: "bootstrap-secret-ungrouped", want: handler.ClientCapabilities{}},
 		{name: "inactive group", secret: "bootstrap-secret-inactive", want: handler.ClientCapabilities{}},
 		{name: "Anthropic group", secret: "bootstrap-secret-anthropic", want: handler.ClientCapabilities{Claude: true}},
-		{name: "OpenAI without Messages dispatch", secret: "bootstrap-secret-openai-no-messages", want: handler.ClientCapabilities{Codex: true, CodexResponses: true}},
-		{name: "OpenAI with Messages dispatch", secret: "bootstrap-secret-openai-with-messages", want: handler.ClientCapabilities{Codex: true, CodexResponses: true, OpenAIMessagesDispatch: true}},
+		{name: "OpenAI group", secret: "bootstrap-secret-openai", want: handler.ClientCapabilities{Codex: true, CodexResponses: true}},
 	}
 
 	for _, test := range tests {
@@ -183,13 +179,12 @@ func bootstrapRouteAPIKey(id int64, group *service.Group) *service.APIKey {
 	return key
 }
 
-func bootstrapRouteGroup(id int64, platform string, allowMessages bool) *service.Group {
+func bootstrapRouteGroup(id int64, platform string) *service.Group {
 	return &service.Group{
-		ID:                    id,
-		Platform:              platform,
-		Status:                service.StatusActive,
-		Hydrated:              true,
-		AllowMessagesDispatch: allowMessages,
+		ID:       id,
+		Platform: platform,
+		Status:   service.StatusActive,
+		Hydrated: true,
 	}
 }
 

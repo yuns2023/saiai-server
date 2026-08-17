@@ -89,25 +89,14 @@ describe('UseKeyModal', () => {
     )
   })
 
-  it('keeps OpenAI on Codex by default and offers Messages-compatible Claude only when enabled', async () => {
-    const codex = mountModal({ platform: 'openai', allowMessagesDispatch: false })
+  it('keeps OpenAI on Codex by default and offers only Codex clients', async () => {
+    const codex = mountModal({ platform: 'openai' })
     await nextTick()
     expect(command(codex)).toContain(
       "init-codex 'https://example.com/v1' 'TEST_ONLY_API_KEY'"
     )
     expect(command(codex)).not.toContain('--websockets')
     expect(codex.findAll('button').some((button) => button.text().includes('keys.useKeyModal.cliTabs.claudeCode'))).toBe(false)
-
-    const compatible = mountModal({ platform: 'openai', allowMessagesDispatch: true })
-    await nextTick()
-    const claude = compatible.findAll('button').find((button) =>
-      button.text().includes('keys.useKeyModal.cliTabs.claudeCode')
-    )
-    expect(claude).toBeDefined()
-    await claude!.trigger('click')
-    await nextTick()
-    expect(command(compatible)).toContain("'https://example.com' 'TEST_ONLY_API_KEY'")
-    expect(command(compatible)).not.toContain('init-codex')
   })
 
   it('adds the Codex WebSocket option only on its explicit tab', async () => {
@@ -138,7 +127,7 @@ describe('UseKeyModal', () => {
 
   it('does not expose withdrawn V2 setup or launcher commands', async () => {
     for (const platform of ['anthropic', 'openai'] as const) {
-      const wrapper = mountModal({ platform, allowMessagesDispatch: true })
+      const wrapper = mountModal({ platform })
       await nextTick()
       const output = wrapper.findAll('pre code').map((block) => block.text()).join('\n')
       for (const removed of ['setup claude', 'saiai claude', 'revoke --all', 'V2 Preview']) {

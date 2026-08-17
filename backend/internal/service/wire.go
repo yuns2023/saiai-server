@@ -347,6 +347,18 @@ func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthC
 	return apiKeyService
 }
 
+func ProvideUserService(
+	userRepo UserRepository,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	billingCache BillingCache,
+	inputRiskRepo InputModerationEventRepository,
+	inputRiskCache InputModerationStateCache,
+) *UserService {
+	svc := NewUserService(userRepo, authCacheInvalidator, billingCache)
+	svc.SetInputModerationState(inputRiskRepo, inputRiskCache)
+	return svc
+}
+
 // ProvideBackupService creates and starts BackupService
 func ProvideBackupService(
 	settingRepo SettingRepository,
@@ -371,7 +383,7 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 var ProviderSet = wire.NewSet(
 	// Core services
 	NewAuthService,
-	NewUserService,
+	ProvideUserService,
 	NewAPIKeyService,
 	ProvideAPIKeyAuthCacheInvalidator,
 	NewGroupService,
@@ -387,6 +399,8 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementService,
 	NewAdminService,
 	NewGatewayService,
+	NewInputModerationService,
+	NewClaudeDeviceService,
 	NewOpenAIGatewayService,
 	NewOAuthService,
 	NewOpenAIOAuthService,

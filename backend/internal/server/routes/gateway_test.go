@@ -9,6 +9,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -34,6 +35,44 @@ func newGatewayRoutesTestRouter() *gin.Engine {
 	)
 
 	return router
+}
+
+func TestGatewayRoutesRejectClaudeMessagesForOpenAIGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	groupID := int64(7)
+	RegisterGatewayRoutes(
+		router,
+		&handler.Handlers{
+			Gateway:       &handler.GatewayHandler{},
+			OpenAIGateway: &handler.OpenAIGatewayHandler{},
+		},
+		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+				GroupID: &groupID,
+				Group: &service.Group{
+					ID:       groupID,
+					Platform: service.PlatformOpenAI,
+					Status:   service.StatusActive,
+					Hydrated: true,
+				},
+			})
+			c.Next()
+		}),
+		nil,
+		nil,
+		nil,
+		nil,
+		&config.Config{},
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.JSONEq(t, `{"type":"error","error":{"type":"not_found_error","message":"Messages API is not supported for this platform"}}`, w.Body.String())
 }
 
 func TestRetiredProviderRoutesAreNotRegistered(t *testing.T) {

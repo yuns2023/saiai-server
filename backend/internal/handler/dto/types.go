@@ -104,9 +104,6 @@ type Group struct {
 	// Sora 存储配额
 	SoraStorageQuotaBytes int64 `json:"sora_storage_quota_bytes"`
 
-	// OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
-	AllowMessagesDispatch bool `json:"allow_messages_dispatch"`
-
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -115,6 +112,18 @@ type Group struct {
 // 注意：普通用户接口不得返回 model_routing/account_count/account_groups 等内部信息。
 type AdminGroup struct {
 	Group
+
+	InputModerationEnabled           bool     `json:"input_moderation_enabled"`
+	InputModerationAutoDisableUser   bool     `json:"input_moderation_auto_disable_user"`
+	InputModerationCategories        []string `json:"input_moderation_categories"`
+	InputModerationActionMode        string   `json:"input_moderation_action_mode"`
+	InputModerationCooldownMinutes   int      `json:"input_moderation_cooldown_minutes"`
+	InputModerationDisableAfterHits  int      `json:"input_moderation_disable_after_hits"`
+	InputModerationStrikeWindowHours int      `json:"input_moderation_strike_window_hours"`
+	InputModerationDedupeMinutes     int      `json:"input_moderation_dedupe_minutes"`
+	CodexClientPolicy                string   `json:"codex_client_policy"`
+	ClaudeDeviceLimitMode            string   `json:"claude_device_limit_mode"`
+	ClaudeDeviceBaseLimit            int      `json:"claude_device_base_limit"`
 
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64 `json:"model_routing"`

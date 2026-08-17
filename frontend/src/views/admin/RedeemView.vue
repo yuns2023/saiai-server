@@ -234,13 +234,13 @@
                 {{ t('admin.redeem.invitationHint') }}
               </p>
             </div>
-            <!-- 订阅类型：显示分组选择和有效天数 -->
-            <template v-if="generateForm.type === 'subscription'">
+            <!-- 订阅/Claude设备类型：显示分组选择 -->
+            <template v-if="generateForm.type === 'subscription' || generateForm.type === 'claude_device'">
               <div>
                 <label class="input-label">{{ t('admin.redeem.selectGroup') }}</label>
                 <Select
                   v-model="generateForm.group_id"
-                  :options="subscriptionGroupOptions"
+                  :options="generateForm.type === 'subscription' ? subscriptionGroupOptions : claudeDeviceGroupOptions"
                   :placeholder="t('admin.redeem.selectGroupPlaceholder')"
                 >
                   <template #selected="{ option }">
@@ -267,7 +267,7 @@
                   </template>
                 </Select>
               </div>
-              <div>
+              <div v-if="generateForm.type === 'subscription'">
                 <label class="input-label">{{ t('admin.redeem.validityDays') }}</label>
                 <input
                   v-model.number="generateForm.validity_days"
@@ -442,6 +442,19 @@ const subscriptionGroupOptions = computed(() => {
     }))
 })
 
+const claudeDeviceGroupOptions = computed(() => {
+  return subscriptionGroups.value
+    .filter((g) => g.platform === 'anthropic' || g.platform === 'antigravity')
+    .map((g) => ({
+      value: g.id,
+      label: g.name,
+      description: g.description,
+      platform: g.platform,
+      subscriptionType: g.subscription_type,
+      rate: g.rate_multiplier
+    }))
+})
+
 const generatedCodesText = computed(() => {
   return generatedCodes.value.map((code) => code.code).join('\n')
 })
@@ -505,6 +518,7 @@ const typeOptions = computed(() => [
   { value: 'balance', label: t('admin.redeem.balance') },
   { value: 'concurrency', label: t('admin.redeem.concurrency') },
   { value: 'subscription', label: t('admin.redeem.subscription') },
+  { value: 'claude_device', label: t('admin.redeem.claudeDevice') },
   { value: 'invitation', label: t('admin.redeem.invitation') }
 ])
 
@@ -513,6 +527,7 @@ const filterTypeOptions = computed(() => [
   { value: 'balance', label: t('admin.redeem.balance') },
   { value: 'concurrency', label: t('admin.redeem.concurrency') },
   { value: 'subscription', label: t('admin.redeem.subscription') },
+  { value: 'claude_device', label: t('admin.redeem.claudeDevice') },
   { value: 'invitation', label: t('admin.redeem.invitation') }
 ])
 
@@ -631,7 +646,7 @@ const handlePageSizeChange = (pageSize: number) => {
 
 const handleGenerateCodes = async () => {
   // 订阅类型必须选择分组
-  if (generateForm.type === 'subscription' && !generateForm.group_id) {
+  if ((generateForm.type === 'subscription' || generateForm.type === 'claude_device') && !generateForm.group_id) {
     appStore.showError(t('admin.redeem.groupRequired'))
     return
   }
@@ -642,7 +657,7 @@ const handleGenerateCodes = async () => {
       generateForm.count,
       generateForm.type,
       generateForm.value,
-      generateForm.type === 'subscription' ? generateForm.group_id : undefined,
+      generateForm.type === 'subscription' || generateForm.type === 'claude_device' ? generateForm.group_id : undefined,
       generateForm.type === 'subscription' ? generateForm.validity_days : undefined
     )
     showGenerateDialog.value = false

@@ -73,8 +73,18 @@ type Group struct {
 	// 分组排序
 	SortOrder int
 
-	// OpenAI Messages 调度配置（仅 openai 平台使用）
-	AllowMessagesDispatch bool
+	// 异步用户输入审核和客户端策略配置。
+	InputModerationEnabled           bool
+	InputModerationAutoDisableUser   bool
+	InputModerationCategories        []string
+	InputModerationActionMode        string
+	InputModerationCooldownMinutes   int
+	InputModerationDisableAfterHits  int
+	InputModerationStrikeWindowHours int
+	InputModerationDedupeMinutes     int
+	CodexClientPolicy                string
+	ClaudeDeviceLimitMode            string
+	ClaudeDeviceBaseLimit            int
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

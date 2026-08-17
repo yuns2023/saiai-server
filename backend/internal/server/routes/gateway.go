@@ -41,10 +41,16 @@ func RegisterGatewayRoutes(
 	gateway.Use(rejectRetiredGroupPlatform)
 	gateway.Use(requireGroupAnthropic)
 	{
-		// /v1/messages: auto-route based on group platform
+		// OpenAI groups use the native Responses API only; Claude Messages is not translated.
 		gateway.POST("/messages", func(c *gin.Context) {
 			if getGroupPlatform(c) == service.PlatformOpenAI {
-				h.OpenAIGateway.Messages(c)
+				c.JSON(http.StatusNotFound, gin.H{
+					"type": "error",
+					"error": gin.H{
+						"type":    "not_found_error",
+						"message": "Messages API is not supported for this platform",
+					},
+				})
 				return
 			}
 			h.Gateway.Messages(c)

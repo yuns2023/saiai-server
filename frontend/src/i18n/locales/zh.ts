@@ -815,6 +815,8 @@ export default {
     concurrencyReducedAdmin: '并发减少（管理员）',
     adminAdjustment: '管理员调整',
     subscriptionAssigned: '订阅已分配',
+    claudeDevicesAdded: 'Claude Code 设备额度增加',
+    devices: '台设备',
     subscriptionAssignedDesc: '您已获得 {groupName} 的访问权限',
     subscriptionDays: '{days} 天',
     days: '天',
@@ -1745,10 +1747,31 @@ export default {
         environmentModeRewrite: '改写',
         environmentModeRemove: '删除'
       },
-      openaiMessages: {
-        title: 'OpenAI Messages 调度配置',
-        allowDispatch: '允许 /v1/messages 调度',
-        allowDispatchHint: '启用后，此 OpenAI 分组的 API Key 可以通过 /v1/messages 端点调度请求'
+      inputModeration: {
+        title: '异步用户输入审核',
+        enabled: '审核最新真实用户输入',
+        hint: '请求不会等待审核结果；仅把最新用户文本提交给内部分类服务，不包含系统提示、工具结果或凭证。',
+        autoDisable: '命中后自动处罚站内用户',
+        autoDisableHint: '仅 Unsafe 且命中所选分类时生效；管理员账号只记录事件，不会自动处罚。',
+        categories: '处罚分类',
+        categoriesHint: '不选择任何分类表示任意 Unsafe 分类都可触发处罚。',
+        actionMode: '处罚模式',
+        cooldownThenDisable: '首次冷却，累计命中后永久禁用',
+        immediateDisable: '首次命中立即永久禁用',
+        cooldownMinutes: '冷却分钟数',
+        disableAfterHits: '永久禁用命中次数',
+        strikeWindowHours: '累计窗口（小时）',
+        dedupeMinutes: '相同内容去重（分钟）'
+      },
+      clientLimits: {
+        codexPolicy: 'Codex 客户端限制',
+        claudeDeviceMode: 'Claude Code 设备限制',
+        off: '关闭',
+        officialClients: '仅官方 Codex 客户端',
+        cliOnly: '仅 Codex CLI',
+        audit: '仅审计',
+        enforce: '强制限制',
+        baseDevices: '基础设备数量'
       },
       invalidRequestFallback: {
         title: '无效请求兜底分组',
@@ -3078,6 +3101,7 @@ export default {
         concurrency: '并发数',
         subscription: '订阅',
         invitation: '邀请码',
+        claude_device: 'Claude Code 设备',
         // 管理员在用户管理页面调整余额/并发时产生的记录
         admin_balance: '余额（管理员）',
         admin_concurrency: '并发数（管理员）'
@@ -3087,6 +3111,7 @@ export default {
       concurrency: '并发数',
       subscription: '订阅',
       invitation: '邀请码',
+      claudeDevice: 'Claude Code 设备',
       invitationHint: '邀请码用于限制用户注册，使用后自动标记为已使用。',
       allTypes: '全部类型',
       allStatus: '全部状态',

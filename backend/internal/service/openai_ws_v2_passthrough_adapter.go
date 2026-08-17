@@ -161,6 +161,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			WriteTimeout:     s.openAIWSWriteTimeout(),
 			IdleTimeout:      s.openAIWSPassthroughIdleTimeout(),
 			FirstMessageType: coderws.MessageText,
+			OnClientTurn: func(turn int, payload []byte) error {
+				if hooks == nil || hooks.OnClientTurn == nil {
+					return nil
+				}
+				return hooks.OnClientTurn(turn, payload)
+			},
 			OnUsageParseFailure: func(eventType string, usageRaw string) {
 				logOpenAIWSV2Passthrough(
 					"usage_parse_failed event_type=%s usage_raw=%s",

@@ -401,6 +401,8 @@ const getHistoryItemTitle = (item: RedeemHistoryItem) => {
     return item.value >= 0 ? t('redeem.concurrencyAddedAdmin') : t('redeem.concurrencyReducedAdmin')
   } else if (item.type === 'subscription') {
     return t('redeem.subscriptionAssigned')
+  } else if (item.type === 'claude_device') {
+    return t('redeem.claudeDevicesAdded')
   }
   return t('common.unknown')
 }
@@ -414,6 +416,8 @@ const formatHistoryValue = (item: RedeemHistoryItem) => {
     const days = item.validity_days || Math.round(item.value)
     const groupName = item.group?.name || ''
     return groupName ? `${days}${t('redeem.days')} - ${groupName}` : `${days}${t('redeem.days')}`
+  } else if (item.type === 'claude_device') {
+    return `+${item.value} ${t('redeem.devices')}`
   } else {
     const sign = item.value >= 0 ? '+' : ''
     return `${sign}${item.value} ${t('redeem.requests')}`

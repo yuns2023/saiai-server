@@ -61,6 +61,7 @@ type RelayOptions struct {
 	UpstreamDrainTimeout time.Duration
 	FirstMessageType     coderws.MessageType
 	OnUsageParseFailure  func(eventType string, usageRaw string)
+	OnClientTurn         func(turn int, payload []byte) error
 	OnTurnComplete       func(turn RelayTurnResult)
 	OnTrace              func(event RelayTraceEvent)
 	Now                  func() time.Time
@@ -170,6 +171,14 @@ func Relay(
 		PayloadBytes: len(firstClientMessage),
 		MessageType:  relayMessageTypeString(firstMessageType),
 	})
+	clientTurns := &atomic.Int32{}
+	if options.OnClientTurn != nil {
+		turn := int(clientTurns.Add(1))
+		if err := options.OnClientTurn(turn, firstClientMessage); err != nil {
+			result.Duration = nowFn().Sub(startAt)
+			return result, &RelayExit{Stage: "client_turn_rejected", Err: err}
+		}
+	}
 
 	if err := writeUpstream(firstMessageType, firstClientMessage); err != nil {
 		result.Duration = nowFn().Sub(startAt)
@@ -193,7 +202,7 @@ func Relay(
 
 	exitCh := make(chan relayExitSignal, 3)
 	dropDownstreamWrites := atomic.Bool{}
-	go runClientToUpstream(relayCtx, clientConn, writeUpstream, markActivity, clientToUpstreamFrames, onTrace, exitCh)
+	go runClientToUpstream(relayCtx, clientConn, writeUpstream, markActivity, clientToUpstreamFrames, clientTurns, options.OnClientTurn, onTrace, exitCh)
 	go runUpstreamToClient(
 		relayCtx,
 		upstreamConn,
@@ -335,6 +344,8 @@ func runClientToUpstream(
 	writeUpstream func(msgType coderws.MessageType, payload []byte) error,
 	markActivity func(),
 	forwardedFrames *atomic.Int64,
+	clientTurns *atomic.Int32,
+	onClientTurn func(turn int, payload []byte) error,
 	onTrace func(event RelayTraceEvent),
 	exitCh chan<- relayExitSignal,
 ) {
@@ -351,6 +362,16 @@ func runClientToUpstream(
 			return
 		}
 		markActivity()
+		if onClientTurn != nil {
+			turn := 1
+			if clientTurns != nil {
+				turn = int(clientTurns.Add(1))
+			}
+			if err := onClientTurn(turn, payload); err != nil {
+				exitCh <- relayExitSignal{stage: "client_turn_rejected", err: err}
+				return
+			}
+		}
 		if err := writeUpstream(msgType, payload); err != nil {
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:        "write_upstream_failed",

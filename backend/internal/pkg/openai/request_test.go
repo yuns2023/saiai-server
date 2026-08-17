@@ -27,6 +27,27 @@ func TestIsCodexCLIRequest(t *testing.T) {
 	}
 }
 
+func TestIsCodexTerminalRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		ua   string
+		want bool
+	}{
+		{name: "Codex CLI", ua: "codex_cli_rs/0.104.0", want: true},
+		{name: "Codex exec", ua: "codex_exec/0.1.0", want: true},
+		{name: "VSCode excluded", ua: "codex_vscode/1.2.3", want: false},
+		{name: "desktop excluded", ua: "codex_app/1.2.3", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsCodexTerminalRequest(tt.ua); got != tt.want {
+				t.Fatalf("IsCodexTerminalRequest(%q) = %v, want %v", tt.ua, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsCodexOfficialClientRequest(t *testing.T) {
 	tests := []struct {
 		name string

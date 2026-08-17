@@ -73,7 +73,16 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 
 	serverErrCh := make(chan error, 1)
 	turnWSModeCh := make(chan bool, 2)
+	type observedClientTurn struct {
+		turn    int
+		payload []byte
+	}
+	clientTurnCh := make(chan observedClientTurn, 2)
 	hooks := &OpenAIWSIngressHooks{
+		OnClientTurn: func(turn int, payload []byte) error {
+			clientTurnCh <- observedClientTurn{turn: turn, payload: append([]byte(nil), payload...)}
+			return nil
+		},
 		AfterTurn: func(_ int, result *OpenAIForwardResult, turnErr error) {
 			if turnErr == nil && result != nil {
 				turnWSModeCh <- result.OpenAIWSMode
@@ -148,6 +157,12 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	require.Equal(t, "resp_ingress_turn_2", gjson.GetBytes(secondTurnEvent, "response.id").String())
 	require.True(t, <-turnWSModeCh, "首轮 turn 应标记为 WS 模式")
 	require.True(t, <-turnWSModeCh, "第二轮 turn 应标记为 WS 模式")
+	firstObserved := <-clientTurnCh
+	secondObserved := <-clientTurnCh
+	require.Equal(t, 1, firstObserved.turn)
+	require.Equal(t, 2, secondObserved.turn)
+	require.Empty(t, gjson.GetBytes(firstObserved.payload, "previous_response_id").String())
+	require.Equal(t, "resp_ingress_turn_1", gjson.GetBytes(secondObserved.payload, "previous_response_id").String())
 
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 
