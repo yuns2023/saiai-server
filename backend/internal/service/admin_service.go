@@ -2327,10 +2327,10 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 			return nil, errors.New("group must be subscription type")
 		}
 		if input.Type == RedeemTypeClaudeDevice && (input.Value <= 0 || input.Value != float64(int(input.Value))) {
-			return nil, errors.New("Claude device value must be a positive integer")
+			return nil, errors.New("claude device value must be a positive integer")
 		}
 		if input.Type == RedeemTypeClaudeDevice && group.Platform != PlatformAnthropic && group.Platform != PlatformAntigravity {
-			return nil, errors.New("Claude device redeem codes require an Anthropic or Antigravity group")
+			return nil, errors.New("claude device redeem codes require an Anthropic or Antigravity group")
 		}
 	}
 

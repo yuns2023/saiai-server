@@ -49,7 +49,7 @@ type ClaudeDeviceLimitError struct {
 }
 
 func (e *ClaudeDeviceLimitError) Error() string {
-	return fmt.Sprintf("Claude Code device limit reached (%d)", e.Limit)
+	return fmt.Sprintf("device limit reached for Claude Code (%d)", e.Limit)
 }
 
 type ClaudeDeviceService struct {

@@ -278,7 +278,7 @@ func TestInputModerationProcessUnsafeAutoDisablesUser(t *testing.T) {
 	svc := newInputModerationServiceForTest(client, events, groups, users, invalidator)
 	defer svc.Stop()
 
-	svc.process(InputModerationTask{RequestID: "req-1", UserID: 1, APIKeyID: 2, GroupID: 3, Text: "test input"})
+	require.NoError(t, svc.process(InputModerationTask{RequestID: "req-1", UserID: 1, APIKeyID: 2, GroupID: 3, Text: "test input"}))
 
 	require.Equal(t, []int64{1}, invalidator.userIDs)
 	require.Len(t, events.events, 1)
@@ -354,7 +354,7 @@ func TestInputModerationProcessNeverAutoDisablesAdmin(t *testing.T) {
 	)
 	defer svc.Stop()
 
-	svc.process(InputModerationTask{UserID: 1, APIKeyID: 2, GroupID: 3, Text: "test"})
+	require.NoError(t, svc.process(InputModerationTask{UserID: 1, APIKeyID: 2, GroupID: 3, Text: "test"}))
 
 	require.Zero(t, users.updateCalls)
 	require.Len(t, events.events, 1)
@@ -376,7 +376,7 @@ func TestInputModerationProcessRechecksPolicyAfterInference(t *testing.T) {
 	)
 	defer svc.Stop()
 
-	svc.process(InputModerationTask{UserID: 1, APIKeyID: 2, GroupID: 3, Text: "test"})
+	require.NoError(t, svc.process(InputModerationTask{UserID: 1, APIKeyID: 2, GroupID: 3, Text: "test"}))
 
 	require.Zero(t, users.updateCalls)
 	require.Empty(t, events.events)
@@ -399,9 +399,9 @@ func TestInputModerationProcessDoesNotOverrideNewerManualUserUpdate(t *testing.T
 	)
 	defer svc.Stop()
 
-	svc.process(InputModerationTask{
+	require.NoError(t, svc.process(InputModerationTask{
 		UserID: 1, APIKeyID: 2, GroupID: 3, Text: "test", EnqueuedAt: now.Add(-time.Minute),
-	})
+	}))
 
 	require.Zero(t, users.updateCalls)
 	require.Len(t, events.events, 1)

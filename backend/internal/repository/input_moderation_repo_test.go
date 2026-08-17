@@ -51,7 +51,7 @@ func TestInputModerationHTTPClientRejectsInvalidEndpoint(t *testing.T) {
 func TestInsertInputModerationEventPersistsSourceAndTurn(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 
 	createdAt := time.Unix(200, 0).UTC()
 	mock.ExpectExec("INSERT INTO input_moderation_events").
@@ -114,7 +114,7 @@ func TestApplyInputModerationIncidentCooldownThenDisable(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			t.Cleanup(func() { _ = db.Close() })
 			now := time.Unix(1000, 0).UTC()
 
 			mock.ExpectBegin()
@@ -167,7 +167,7 @@ func TestApplyInputModerationIncidentCooldownThenDisable(t *testing.T) {
 func TestApplyInputModerationIncidentDeduplicatesSameContent(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	now := time.Unix(1000, 0).UTC()
 
 	mock.ExpectBegin()
@@ -196,7 +196,7 @@ func TestApplyInputModerationIncidentDeduplicatesSameContent(t *testing.T) {
 func TestApplyInputModerationIncidentReplaysIdempotentResult(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	blockedUntil := time.Unix(2000, 0).UTC()
 
 	mock.ExpectBegin()
@@ -222,7 +222,7 @@ func TestApplyInputModerationIncidentReplaysIdempotentResult(t *testing.T) {
 func TestApplyInputModerationIncidentIgnoresJobQueuedBeforeManualReset(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	enqueuedAt := time.Unix(1000, 0).UTC()
 	resetAt := enqueuedAt.Add(time.Minute)
 

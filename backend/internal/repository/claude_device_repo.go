@@ -100,7 +100,7 @@ func (r *claudeDeviceRepository) ListUserDevices(ctx context.Context, userID int
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []service.ClaudeUserDevice
 	for rows.Next() {
 		var item service.ClaudeUserDevice
@@ -127,7 +127,7 @@ func (r *claudeDeviceRepository) RevokeUserDevice(ctx context.Context, userID, d
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("Claude device not found")
+		return fmt.Errorf("claude device not found")
 	}
 	return nil
 }
