@@ -1,7 +1,9 @@
 import asyncio
+import logging
 import os
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import torch
 from fastapi import FastAPI, HTTPException
@@ -10,6 +12,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen3Guard-Gen-0.6B").strip()
+MODEL_REVISION = os.getenv("MODEL_REVISION", "fada3b2f655b89601929198343c94cd2f64d93cc").strip()
+MODEL_PATH = Path(os.getenv("MODEL_PATH", "/models/qwen3guard").strip())
+MODEL_VERSION = f"{MODEL_ID}@{MODEL_REVISION}"
 MODEL_DEVICE = os.getenv("MODEL_DEVICE", "auto").strip()
 MAX_INPUT_CHARS = int(os.getenv("MAX_INPUT_CHARS", "32768"))
 MAX_CHUNK_TOKENS = int(os.getenv("MAX_CHUNK_TOKENS", "3072"))
@@ -31,6 +36,7 @@ SAFETY_RANK = {"Safe": 0, "Controversial": 1, "Unsafe": 2}
 tokenizer = None
 model = None
 inference_slots = asyncio.Semaphore(max(1, MAX_CONCURRENCY))
+log = logging.getLogger("saiai.input_moderation")
 
 
 class ClassifyRequest(BaseModel):
@@ -62,6 +68,24 @@ def canonical_category(value: str) -> str:
         "none": "None",
     }
     return categories.get(normalized, value.strip())
+
+
+def parse_model_output(output: str) -> tuple[str, list[str]]:
+    safety_match = SAFETY_PATTERN.search(output)
+    if safety_match is None:
+        raise ValueError("model response omitted Safety label")
+    safety = canonical_safety(safety_match.group(1))
+    categories: list[str] = []
+    seen: set[str] = set()
+    category_line = CATEGORY_LINE_PATTERN.search(output)
+    category_text = category_line.group(1) if category_line is not None else ""
+    for match in CATEGORY_PATTERN.finditer(category_text):
+        category = canonical_category(match.group(0))
+        if category == "None" or category in seen:
+            continue
+        seen.add(category)
+        categories.append(category)
+    return safety, categories
 
 
 def split_text(text: str) -> list[str]:
@@ -96,21 +120,7 @@ def classify_chunk(text: str) -> tuple[str, list[str]]:
         )
     output_ids = generated_ids[0][len(model_inputs.input_ids[0]) :].tolist()
     output = tokenizer.decode(output_ids, skip_special_tokens=True)
-    safety_match = SAFETY_PATTERN.search(output)
-    if safety_match is None:
-        raise ValueError("model response omitted Safety label")
-    safety = canonical_safety(safety_match.group(1))
-    categories: list[str] = []
-    seen: set[str] = set()
-    category_line = CATEGORY_LINE_PATTERN.search(output)
-    category_text = category_line.group(1) if category_line is not None else ""
-    for match in CATEGORY_PATTERN.finditer(category_text):
-        category = canonical_category(match.group(0))
-        if category == "None" or category in seen:
-            continue
-        seen.add(category)
-        categories.append(category)
-    return safety, categories
+    return parse_model_output(output)
 
 
 def classify(text: str) -> ClassifyResponse:
@@ -131,17 +141,19 @@ def classify(text: str) -> ClassifyResponse:
     return ClassifyResponse(
         safety=final_safety,
         categories=final_categories,
-        model_version=MODEL_ID,
+        model_version=MODEL_VERSION,
     )
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global tokenizer, model
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-    model_kwargs = {"torch_dtype": "auto"}
+    if not MODEL_PATH.is_dir():
+        raise RuntimeError("embedded model directory is missing")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, local_files_only=True)
+    model_kwargs = {"dtype": "auto", "low_cpu_mem_usage": True, "local_files_only": True}
     model_kwargs["device_map"] = MODEL_DEVICE or "auto"
-    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **model_kwargs)
+    model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, **model_kwargs)
     model.eval()
     yield
     tokenizer = None
@@ -153,11 +165,16 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="SAIAI Input Moderation Sidecar", version="1", lifespan=lifespan)
 
 
+@app.get("/livez")
+async def livez() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     if tokenizer is None or model is None:
         raise HTTPException(status_code=503, detail="model is not ready")
-    return {"status": "ok", "model_version": MODEL_ID}
+    return {"status": "ok", "model_version": MODEL_VERSION}
 
 
 @app.post("/v1/classify", response_model=ClassifyResponse)
@@ -168,5 +185,6 @@ async def classify_endpoint(request: ClassifyRequest) -> ClassifyResponse:
     async with inference_slots:
         try:
             return await asyncio.to_thread(classify, text)
-        except ValueError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except (RuntimeError, ValueError) as exc:
+            log.exception("classification failed")
+            raise HTTPException(status_code=502, detail="classification failed") from exc

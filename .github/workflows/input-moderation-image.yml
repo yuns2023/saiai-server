@@ -1,0 +1,170 @@
+name: Input Moderation Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/input-moderation-image.yml
+      - tools/input-moderation-sidecar/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: input-moderation-image-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ github.ref_protected }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    env:
+      HEAD_SHA: ${{ github.sha }}
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/saiai-input-moderation
+      MODEL_ID: Qwen/Qwen3Guard-Gen-0.6B
+      MODEL_REVISION: fada3b2f655b89601929198343c94cd2f64d93cc
+      MODEL_SAFETENSORS_SHA256: 4f3ce47ebd968cddb67de08d8764f8ede7c410a7d1fb9e08145a4c7a2f2e5c0f
+    steps:
+      - name: Checkout verified commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify source and dependency lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          python3 -m pip install --disable-pip-version-check pip-audit==2.9.0
+          pip-audit \
+            --require-hashes \
+            --no-deps \
+            --disable-pip \
+            -r tools/input-moderation-sidecar/requirements.txt
+
+      - name: Set source metadata
+        id: source
+        shell: bash
+        run: |
+          {
+            echo "sha=$(git rev-parse HEAD)"
+            echo "date=$(git show -s --format=%cI HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push immutable image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: tools/input-moderation-sidecar
+          file: tools/input-moderation-sidecar/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          build-args: |
+            COMMIT=${{ steps.source.outputs.sha }}
+            DATE=${{ steps.source.outputs.date }}
+            SOURCE_URL=https://github.com/${{ github.repository }}
+            MODEL_ID=${{ env.MODEL_ID }}
+            MODEL_REVISION=${{ env.MODEL_REVISION }}
+            MODEL_SAFETENSORS_SHA256=${{ env.MODEL_SAFETENSORS_SHA256 }}
+          labels: |
+            org.opencontainers.image.created=${{ steps.source.outputs.date }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            io.saiai.model.id=${{ env.MODEL_ID }}
+            io.saiai.model.revision=${{ env.MODEL_REVISION }}
+            io.saiai.model.safetensors.sha256=${{ env.MODEL_SAFETENSORS_SHA256 }}
+          cache-from: type=gha,scope=input-moderation
+          cache-to: type=gha,mode=max,scope=input-moderation
+
+      - name: Verify offline image and model readiness
+        id: verify
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          image_ref="${IMAGE_NAME}@${IMAGE_DIGEST}"
+          docker pull "$image_ref"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_ref")" = "$SOURCE_SHA"
+          test "$(docker image inspect --format '{{index .Config.Labels "io.saiai.model.revision"}}' "$image_ref")" = "$MODEL_REVISION"
+          docker run --rm --network none --entrypoint sha256sum "$image_ref" \
+            /models/qwen3guard/model.safetensors | grep -q "^${MODEL_SAFETENSORS_SHA256} "
+
+          container_id=$(docker run -d --network none --memory 4g --cpus 2 "$image_ref")
+          cleanup() { docker rm -f "$container_id" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 90); do
+            health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id")
+            if [ "$health" = healthy ]; then
+              break
+            fi
+            if [ "$health" = unhealthy ] || [ "$(docker inspect --format '{{.State.Running}}' "$container_id")" != true ]; then
+              docker logs "$container_id" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$container_id")" = healthy
+          image_size_bytes=$(docker image inspect --format '{{.Size}}' "$image_ref")
+          test "$image_size_bytes" -gt 0
+          echo "image_size_bytes=$image_size_bytes" >> "$GITHUB_OUTPUT"
+
+      - name: Write immutable sidecar coordinates
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          IMAGE_SIZE_BYTES: ${{ steps.verify.outputs.image_size_bytes }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          document = {
+              "coordinate_schema_version": 1,
+              "repository": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}",
+              "source_commit": os.environ["SOURCE_SHA"],
+              "image": f"{os.environ['IMAGE_NAME']}@{os.environ['IMAGE_DIGEST']}",
+              "image_digest": os.environ["IMAGE_DIGEST"],
+              "image_size_bytes": int(os.environ["IMAGE_SIZE_BYTES"]),
+              "architecture": "amd64",
+              "model_id": os.environ["MODEL_ID"],
+              "model_revision": os.environ["MODEL_REVISION"],
+              "model_safetensors_sha256": os.environ["MODEL_SAFETENSORS_SHA256"],
+              "model_license": "apache-2.0",
+              "workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "workflow_run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+          }
+          Path("input-moderation-coordinate.json").write_text(
+              json.dumps(document, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload immutable sidecar coordinates
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: input-moderation-coordinate-${{ github.sha }}
+          path: input-moderation-coordinate.json
+          if-no-files-found: error
+          retention-days: 30
