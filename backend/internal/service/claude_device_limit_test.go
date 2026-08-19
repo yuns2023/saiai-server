@@ -10,10 +10,12 @@ import (
 type claudeDeviceRepoStub struct {
 	result     *ClaudeDeviceRegistrationResult
 	deviceHash string
+	deviceID   string
 }
 
-func (s *claudeDeviceRepoStub) CheckAndRegister(_ context.Context, _, _, _ int64, deviceHash, _ string, _ int) (*ClaudeDeviceRegistrationResult, error) {
+func (s *claudeDeviceRepoStub) CheckAndRegister(_ context.Context, _, _, _ int64, deviceHash, deviceID, _ string, _ int) (*ClaudeDeviceRegistrationResult, error) {
 	s.deviceHash = deviceHash
+	s.deviceID = deviceID
 	return s.result, nil
 }
 func (*claudeDeviceRepoStub) AddBonusDevices(context.Context, int64, int64, int) error { return nil }
@@ -32,6 +34,7 @@ func TestClaudeDeviceServiceCheckAndRegister(t *testing.T) {
 	}, &ParsedRequest{MetadataUserID: `{"device_id":"device-a","account_uuid":"","session_id":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}`})
 	require.NoError(t, err)
 	require.Len(t, repo.deviceHash, 64)
+	require.Equal(t, "device-a", repo.deviceID)
 }
 
 func TestClaudeDeviceServiceRejectsMissingOrOverLimitDevice(t *testing.T) {

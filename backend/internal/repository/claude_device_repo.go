@@ -11,17 +11,21 @@ import (
 )
 
 type claudeDeviceRepository struct {
-	client *dbent.Client
-	db     *sql.DB
+	client    *dbent.Client
+	db        *sql.DB
+	encryptor service.SecretEncryptor
 }
 
-func NewClaudeDeviceRepository(client *dbent.Client, db *sql.DB) service.ClaudeDeviceRepository {
-	return &claudeDeviceRepository{client: client, db: db}
+func NewClaudeDeviceRepository(client *dbent.Client, db *sql.DB, encryptor service.SecretEncryptor) service.ClaudeDeviceRepository {
+	return &claudeDeviceRepository{client: client, db: db, encryptor: encryptor}
 }
 
-func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, groupID, apiKeyID int64, deviceHash, mode string, baseLimit int) (*service.ClaudeDeviceRegistrationResult, error) {
+func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, groupID, apiKeyID int64, deviceHash, deviceID, mode string, baseLimit int) (*service.ClaudeDeviceRegistrationResult, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("claude device repository unavailable")
+	}
+	if r.encryptor == nil {
+		return nil, fmt.Errorf("claude device encryption unavailable")
 	}
 	if baseLimit <= 0 {
 		baseLimit = 1
@@ -41,11 +45,24 @@ func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, g
 	}
 	limit := baseLimit + bonus
 	var existing bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM claude_user_devices WHERE user_id=$1 AND group_id=$2 AND device_hash=$3 AND revoked_at IS NULL)`, userID, groupID, deviceHash).Scan(&existing); err != nil {
+	var existingID int64
+	var existingEncrypted sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT id, device_id_encrypted FROM claude_user_devices WHERE user_id=$1 AND group_id=$2 AND device_hash=$3 AND revoked_at IS NULL`, userID, groupID, deviceHash).Scan(&existingID, &existingEncrypted); err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
+	existing = existingID > 0
 	if existing {
-		_, err := tx.ExecContext(ctx, `UPDATE claude_user_devices SET last_seen_at=NOW() WHERE user_id=$1 AND group_id=$2 AND device_hash=$3`, userID, groupID, deviceHash)
+		updates := `UPDATE claude_user_devices SET last_seen_at=NOW() WHERE id=$1`
+		args := []any{existingID}
+		if !existingEncrypted.Valid || strings.TrimSpace(existingEncrypted.String) == "" {
+			encrypted, err := r.encryptor.Encrypt(deviceID)
+			if err != nil {
+				return nil, fmt.Errorf("encrypt Claude device ID: %w", err)
+			}
+			updates = `UPDATE claude_user_devices SET last_seen_at=NOW(), device_id_encrypted=$2 WHERE id=$1`
+			args = append(args, encrypted)
+		}
+		_, err := tx.ExecContext(ctx, updates, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -63,10 +80,14 @@ func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, g
 		_ = tx.Commit()
 		return &service.ClaudeDeviceRegistrationResult{Allowed: false, ActiveDevices: active, EffectiveLimit: limit}, nil
 	}
+	encrypted, err := r.encryptor.Encrypt(deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt Claude device ID: %w", err)
+	}
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO claude_user_devices (user_id, group_id, device_hash, first_api_key_id, first_seen_at, last_seen_at, revoked_at)
-		VALUES ($1,$2,$3,$4,NOW(),NOW(),NULL)
-		ON CONFLICT (user_id,group_id,device_hash) DO UPDATE SET last_seen_at=NOW(), revoked_at=NULL`, userID, groupID, deviceHash, apiKeyID)
+		INSERT INTO claude_user_devices (user_id, group_id, device_hash, device_id_encrypted, first_api_key_id, first_seen_at, last_seen_at, revoked_at)
+		VALUES ($1,$2,$3,$4,$5,NOW(),NOW(),NULL)
+		ON CONFLICT (user_id,group_id,device_hash) DO UPDATE SET last_seen_at=NOW(), revoked_at=NULL, device_id_encrypted=EXCLUDED.device_id_encrypted`, userID, groupID, deviceHash, encrypted, apiKeyID)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +110,7 @@ func (r *claudeDeviceRepository) AddBonusDevices(ctx context.Context, userID, gr
 }
 
 func (r *claudeDeviceRepository) ListUserDevices(ctx context.Context, userID int64, groupID *int64) ([]service.ClaudeUserDevice, error) {
-	query := `SELECT id,user_id,group_id,device_hash,first_seen_at,last_seen_at,revoked_at FROM claude_user_devices WHERE user_id=$1`
+	query := `SELECT id,user_id,group_id,device_hash,device_id_encrypted,first_seen_at,last_seen_at,revoked_at FROM claude_user_devices WHERE user_id=$1`
 	args := []any{userID}
 	if groupID != nil {
 		query += ` AND group_id=$2`
@@ -104,9 +125,16 @@ func (r *claudeDeviceRepository) ListUserDevices(ctx context.Context, userID int
 	var out []service.ClaudeUserDevice
 	for rows.Next() {
 		var item service.ClaudeUserDevice
+		var encrypted sql.NullString
 		var revoked sql.NullTime
-		if err := rows.Scan(&item.ID, &item.UserID, &item.GroupID, &item.DeviceHash, &item.FirstSeenAt, &item.LastSeenAt, &revoked); err != nil {
+		if err := rows.Scan(&item.ID, &item.UserID, &item.GroupID, &item.DeviceHash, &encrypted, &item.FirstSeenAt, &item.LastSeenAt, &revoked); err != nil {
 			return nil, err
+		}
+		if encrypted.Valid && strings.TrimSpace(encrypted.String) != "" {
+			item.DeviceID, err = r.encryptor.Decrypt(encrypted.String)
+			if err != nil {
+				return nil, fmt.Errorf("decrypt Claude device ID: %w", err)
+			}
 		}
 		if revoked.Valid {
 			value := revoked.Time

@@ -6,6 +6,17 @@
 import { apiClient } from '../client'
 import type { AdminUser, UpdateUserRequest, PaginatedResponse, ApiKey } from '@/types'
 
+export interface ClaudeUserDevice {
+  id: number
+  user_id: number
+  group_id: number
+  device_hash: string
+  device_id?: string
+  first_seen_at: string
+  last_seen_at: string
+  revoked_at?: string | null
+}
+
 /**
  * List all users with pagination
  * @param page - Page number (default: 1)
@@ -178,6 +189,20 @@ export async function getUserUsageStats(
   return data
 }
 
+/** Get Claude Code devices registered by a user, optionally scoped to one group. */
+export async function getClaudeDevices(id: number, groupId?: number): Promise<ClaudeUserDevice[]> {
+  const { data } = await apiClient.get<ClaudeUserDevice[]>(`/admin/users/${id}/claude-devices`, {
+    params: groupId ? { group_id: groupId } : undefined
+  })
+  return data || []
+}
+
+/** Revoke one Claude Code device registration for a user. */
+export async function revokeClaudeDevice(id: number, deviceId: number): Promise<{ message: string }> {
+  const { data } = await apiClient.delete<{ message: string }>(`/admin/users/${id}/claude-devices/${deviceId}`)
+  return data
+}
+
 /**
  * Balance history item returned from the API
  */
@@ -255,6 +280,8 @@ export const usersAPI = {
   toggleStatus,
   getUserApiKeys,
   getUserUsageStats,
+  getClaudeDevices,
+  revokeClaudeDevice,
   getUserBalanceHistory,
   replaceGroup
 }

@@ -48,6 +48,21 @@ Unlimited mode does not add devices to the non-expiring bounded-mode registry.
 Existing recorded and overflow entries are preserved so bounded mode can be
 enabled again without silently discarding operator state.
 
+## User-scoped Claude Code device limits
+
+The group fields `claude_device_limit_mode` and `claude_device_base_limit`
+limit a SAIAI user within that group. They are independent of the
+account-scoped carpool registry above. Admission is keyed by `(user_id,
+group_id, device_hash)` and redeem codes add bonus capacity in the
+`user_group_claude_device_quotas` table.
+
+The registry keeps the hash for admission and stores the original
+`metadata.user_id.device_id` encrypted with the configured TOTP AES-256-GCM
+key for administrator-only device management. Existing rows created before
+the encryption column was added have no recoverable original ID until the
+device connects again. The production key must be stable across restarts;
+an auto-generated development key cannot decrypt previously stored IDs.
+
 ## Single-device setup-token identity
 
 Anthropic OAuth accounts in `single_device` mode require both a fixed account

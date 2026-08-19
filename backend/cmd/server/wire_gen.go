@@ -71,12 +71,12 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	inputModerationStateCache := repository.NewInputModerationStateCache(redisClient)
 	userService := service.ProvideUserService(userRepository, apiKeyAuthCacheInvalidator, billingCache, inputModerationEventRepository, inputModerationStateCache)
 	redeemCache := repository.NewRedeemCache(redisClient)
-	claudeDeviceRepository := repository.NewClaudeDeviceRepository(client, db)
-	redeemService := service.NewRedeemService(redeemCodeRepository, userRepository, subscriptionService, redeemCache, billingCacheService, client, apiKeyAuthCacheInvalidator, claudeDeviceRepository, groupRepository)
 	secretEncryptor, err := repository.NewAESEncryptor(configConfig)
 	if err != nil {
 		return nil, err
 	}
+	claudeDeviceRepository := repository.NewClaudeDeviceRepository(client, db, secretEncryptor)
+	redeemService := service.NewRedeemService(redeemCodeRepository, userRepository, subscriptionService, redeemCache, billingCacheService, client, apiKeyAuthCacheInvalidator, claudeDeviceRepository, groupRepository)
 	totpCache := repository.NewTotpCache(redisClient)
 	totpService := service.NewTotpService(userRepository, secretEncryptor, totpCache, settingService, emailService, emailQueueService)
 	authHandler := handler.NewAuthHandler(configConfig, authService, userService, settingService, promoService, redeemService, totpService)

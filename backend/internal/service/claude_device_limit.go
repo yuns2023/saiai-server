@@ -24,13 +24,14 @@ type ClaudeUserDevice struct {
 	UserID      int64      `json:"user_id"`
 	GroupID     int64      `json:"group_id"`
 	DeviceHash  string     `json:"device_hash"`
+	DeviceID    string     `json:"device_id,omitempty"`
 	FirstSeenAt time.Time  `json:"first_seen_at"`
 	LastSeenAt  time.Time  `json:"last_seen_at"`
 	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
 }
 
 type ClaudeDeviceRepository interface {
-	CheckAndRegister(ctx context.Context, userID, groupID, apiKeyID int64, deviceHash, mode string, baseLimit int) (*ClaudeDeviceRegistrationResult, error)
+	CheckAndRegister(ctx context.Context, userID, groupID, apiKeyID int64, deviceHash, deviceID, mode string, baseLimit int) (*ClaudeDeviceRegistrationResult, error)
 	AddBonusDevices(ctx context.Context, userID, groupID int64, count int) error
 	ListUserDevices(ctx context.Context, userID int64, groupID *int64) ([]ClaudeUserDevice, error)
 	RevokeUserDevice(ctx context.Context, userID, deviceID int64) error
@@ -82,7 +83,7 @@ func (s *ClaudeDeviceService) CheckAndRegister(ctx context.Context, apiKey *APIK
 	}
 	sum := sha256.Sum256([]byte(strings.TrimSpace(identity.DeviceID)))
 	result, err := s.repo.CheckAndRegister(
-		ctx, apiKey.UserID, *apiKey.GroupID, apiKey.ID, hex.EncodeToString(sum[:]), mode, apiKey.Group.ClaudeDeviceBaseLimit,
+		ctx, apiKey.UserID, *apiKey.GroupID, apiKey.ID, hex.EncodeToString(sum[:]), strings.TrimSpace(identity.DeviceID), mode, apiKey.Group.ClaudeDeviceBaseLimit,
 	)
 	if err != nil {
 		return err
