@@ -342,7 +342,7 @@ func (r *userSubscriptionRepository) EnsureFiveHourWindow(ctx context.Context, i
 			AND deleted_at IS NULL
 			AND (
 				five_hour_window_start IS NULL
-				OR five_hour_window_start <= $1 - INTERVAL '5 hours'
+				OR five_hour_window_start <= $1::timestamptz - INTERVAL '5 hours'
 			)
 	`
 

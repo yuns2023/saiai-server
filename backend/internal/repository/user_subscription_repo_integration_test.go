@@ -373,6 +373,25 @@ func (s *UserSubscriptionRepoSuite) TestActivateWindows() {
 	s.Require().WithinDuration(activateAt, *got.DailyWindowStart, time.Microsecond)
 }
 
+func (s *UserSubscriptionRepoSuite) TestEnsureFiveHourWindow_Expired() {
+	user := s.mustCreateUser("ensure-five-hour@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-ensure-five-hour")
+	now := time.Now()
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetFiveHourWindowStart(now.Add(-6 * time.Hour))
+		c.SetFiveHourUsageUsd(10.0)
+	})
+
+	err := s.repo.EnsureFiveHourWindow(s.ctx, sub.ID, now)
+	s.Require().NoError(err, "EnsureFiveHourWindow")
+
+	got, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err)
+	s.Require().InDelta(0.0, got.FiveHourUsageUSD, 1e-6)
+	s.Require().NotNil(got.FiveHourWindowStart)
+	s.Require().WithinDuration(now, *got.FiveHourWindowStart, time.Microsecond)
+}
+
 func (s *UserSubscriptionRepoSuite) TestResetDailyUsage() {
 	user := s.mustCreateUser("resetd@test.com", service.RoleUser)
 	group := s.mustCreateGroup("g-resetd")
