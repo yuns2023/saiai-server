@@ -63,6 +63,13 @@ the encryption column was added have no recoverable original ID until the
 device connects again. The production key must be stable across restarts;
 an auto-generated development key cannot decrypt previously stored IDs.
 
+The admin user list exposes `claude_device_count` and `claude_device_limit` as
+an aggregate for the current page. The count includes only active registrations
+and the limit includes base plus redeemed bonus capacity across groups with
+device limiting enabled; revoked registrations are excluded. A missing limit
+means that no device-limited group is represented for that user. Device IDs
+remain available only in the administrator device-detail view.
+
 ## Single-device setup-token identity
 
 Anthropic OAuth accounts in `single_device` mode require both a fixed account

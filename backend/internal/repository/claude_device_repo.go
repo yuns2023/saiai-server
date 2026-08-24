@@ -8,6 +8,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 type claudeDeviceRepository struct {
@@ -143,6 +144,66 @@ func (r *claudeDeviceRepository) ListUserDevices(ctx context.Context, userID int
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+// ListUserDeviceSummaries returns one aggregate per user for the admin user
+// list. Device registrations and bonus quotas are group-scoped, so both
+// values are summed across the groups that have device limiting enabled.
+func (r *claudeDeviceRepository) ListUserDeviceSummaries(ctx context.Context, userIDs []int64) (map[int64]service.ClaudeUserDeviceSummary, error) {
+	out := make(map[int64]service.ClaudeUserDeviceSummary)
+	if r == nil || r.db == nil || len(userIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		WITH user_groups AS (
+			SELECT DISTINCT user_id, group_id
+			FROM claude_user_devices
+			WHERE user_id = ANY($1)
+			UNION
+			SELECT user_id, group_id
+			FROM user_group_claude_device_quotas
+			WHERE user_id = ANY($1)
+		)
+		SELECT ug.user_id,
+		       COUNT(cud.id) FILTER (
+			       WHERE cud.revoked_at IS NULL
+			         AND g.claude_device_limit_mode <> 'off'
+		       )::int AS active_devices,
+		       COALESCE(SUM(
+			       CASE WHEN g.claude_device_limit_mode <> 'off'
+			            THEN GREATEST(g.claude_device_base_limit, 1) + COALESCE(q.bonus_devices, 0)
+			            ELSE 0
+			       END
+		       ), 0)::int AS effective_limit,
+		       BOOL_OR(g.claude_device_limit_mode <> 'off') AS has_limit
+		FROM user_groups ug
+		JOIN groups g ON g.id = ug.group_id AND g.deleted_at IS NULL
+		LEFT JOIN user_group_claude_device_quotas q
+		       ON q.user_id = ug.user_id AND q.group_id = ug.group_id
+		LEFT JOIN claude_user_devices cud
+		       ON cud.user_id = ug.user_id AND cud.group_id = ug.group_id
+		GROUP BY ug.user_id`, pq.Array(userIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var userID int64
+		var active, limit int
+		var hasLimit bool
+		if err := rows.Scan(&userID, &active, &limit, &hasLimit); err != nil {
+			return nil, err
+		}
+		summary := service.ClaudeUserDeviceSummary{ActiveDevices: active}
+		if hasLimit {
+			summary.EffectiveLimit = &limit
+		}
+		out[userID] = summary
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *claudeDeviceRepository) RevokeUserDevice(ctx context.Context, userID, deviceID int64) error {

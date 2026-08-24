@@ -30,15 +30,31 @@ type ClaudeUserDevice struct {
 	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
 }
 
+// ClaudeUserDeviceSummary is the aggregate shown in the admin user list.
+// Counts are summed across the user's Claude device-enabled groups because a
+// registration is scoped to a group.
+type ClaudeUserDeviceSummary struct {
+	ActiveDevices  int
+	EffectiveLimit *int
+}
+
 type ClaudeDeviceRepository interface {
 	CheckAndRegister(ctx context.Context, userID, groupID, apiKeyID int64, deviceHash, deviceID, mode string, baseLimit int) (*ClaudeDeviceRegistrationResult, error)
 	AddBonusDevices(ctx context.Context, userID, groupID int64, count int) error
 	ListUserDevices(ctx context.Context, userID int64, groupID *int64) ([]ClaudeUserDevice, error)
+	ListUserDeviceSummaries(ctx context.Context, userIDs []int64) (map[int64]ClaudeUserDeviceSummary, error)
 	RevokeUserDevice(ctx context.Context, userID, deviceID int64) error
 }
 
 func (s *ClaudeDeviceService) ListUserDevices(ctx context.Context, userID int64, groupID *int64) ([]ClaudeUserDevice, error) {
 	return s.repo.ListUserDevices(ctx, userID, groupID)
+}
+
+func (s *ClaudeDeviceService) ListUserDeviceSummaries(ctx context.Context, userIDs []int64) (map[int64]ClaudeUserDeviceSummary, error) {
+	if s == nil || s.repo == nil || len(userIDs) == 0 {
+		return map[int64]ClaudeUserDeviceSummary{}, nil
+	}
+	return s.repo.ListUserDeviceSummaries(ctx, userIDs)
 }
 
 func (s *ClaudeDeviceService) RevokeUserDevice(ctx context.Context, userID, deviceID int64) error {

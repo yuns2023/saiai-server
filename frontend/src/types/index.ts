@@ -47,6 +47,9 @@ export interface AdminUser extends User {
   group_rates?: Record<number, number>
   // 当前并发数（仅管理员列表接口返回）
   current_concurrency?: number
+  // Claude Code 当前有效设备数与有效上限（跨启用设备限制的分组汇总）
+  claude_device_count?: number
+  claude_device_limit?: number | null
   // Sora 存储配额（字节）
   sora_storage_quota_bytes: number
   sora_storage_used_bytes: number

@@ -427,6 +427,22 @@
             />
           </template>
 
+          <template #cell-claude_devices="{ row }">
+            <span
+              v-if="row.claude_device_limit !== null && row.claude_device_limit !== undefined"
+              :class="[
+                'text-sm font-medium',
+                (row.claude_device_count ?? 0) >= row.claude_device_limit
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-gray-700 dark:text-gray-300'
+              ]"
+              :title="t('admin.users.claudeDevicesSummaryHint')"
+            >
+              {{ row.claude_device_count ?? 0 }} / {{ row.claude_device_limit }}
+            </span>
+            <span v-else class="text-sm text-gray-400" :title="t('admin.users.claudeDevicesSummaryHint')">-</span>
+          </template>
+
           <template #cell-status="{ value }">
             <div class="flex items-center gap-1.5">
               <span
@@ -700,6 +716,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'balance', label: t('admin.users.columns.balance'), sortable: true },
   { key: 'usage', label: t('admin.users.columns.usage'), sortable: false },
   { key: 'concurrency', label: t('admin.users.columns.concurrency'), sortable: true },
+  { key: 'claude_devices', label: t('admin.users.columns.claudeDevices'), sortable: false },
   { key: 'status', label: t('admin.users.columns.status'), sortable: true },
   { key: 'created_at', label: t('admin.users.columns.created'), sortable: true },
   { key: 'actions', label: t('admin.users.columns.actions'), sortable: false }

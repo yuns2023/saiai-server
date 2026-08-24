@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -15,7 +16,9 @@ import (
 // UserWithConcurrency wraps AdminUser with current concurrency info
 type UserWithConcurrency struct {
 	dto.AdminUser
-	CurrentConcurrency int `json:"current_concurrency"`
+	CurrentConcurrency int  `json:"current_concurrency"`
+	ClaudeDeviceCount  int  `json:"claude_device_count"`
+	ClaudeDeviceLimit  *int `json:"claude_device_limit,omitempty"`
 }
 
 // UserHandler handles admin user management
@@ -169,6 +172,21 @@ func (h *UserHandler) List(c *gin.Context) {
 	}
 
 	// Build response with concurrency info
+	deviceSummaries := make(map[int64]service.ClaudeUserDeviceSummary)
+	if len(users) > 0 && h.claudeDeviceService != nil {
+		var summaryErr error
+		userIDs := make([]int64, len(users))
+		for i := range users {
+			userIDs[i] = users[i].ID
+		}
+		deviceSummaries, summaryErr = h.claudeDeviceService.ListUserDeviceSummaries(c.Request.Context(), userIDs)
+		if summaryErr != nil {
+			// Device visibility is an additive admin-list field; do not make the
+			// whole user list unavailable if its optional aggregate query fails.
+			slog.Warn("admin_user_claude_device_summary_failed", "error", summaryErr)
+			deviceSummaries = make(map[int64]service.ClaudeUserDeviceSummary)
+		}
+	}
 	out := make([]UserWithConcurrency, len(users))
 	for i := range users {
 		out[i] = UserWithConcurrency{
@@ -176,6 +194,10 @@ func (h *UserHandler) List(c *gin.Context) {
 		}
 		if info := loadInfo[users[i].ID]; info != nil {
 			out[i].CurrentConcurrency = info.CurrentConcurrency
+		}
+		if summary, ok := deviceSummaries[users[i].ID]; ok {
+			out[i].ClaudeDeviceCount = summary.ActiveDevices
+			out[i].ClaudeDeviceLimit = summary.EffectiveLimit
 		}
 	}
 

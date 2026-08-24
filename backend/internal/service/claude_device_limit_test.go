@@ -22,6 +22,9 @@ func (*claudeDeviceRepoStub) AddBonusDevices(context.Context, int64, int64, int)
 func (*claudeDeviceRepoStub) ListUserDevices(context.Context, int64, *int64) ([]ClaudeUserDevice, error) {
 	return nil, nil
 }
+func (*claudeDeviceRepoStub) ListUserDeviceSummaries(context.Context, []int64) (map[int64]ClaudeUserDeviceSummary, error) {
+	return nil, nil
+}
 func (*claudeDeviceRepoStub) RevokeUserDevice(context.Context, int64, int64) error { return nil }
 
 func TestClaudeDeviceServiceCheckAndRegister(t *testing.T) {
