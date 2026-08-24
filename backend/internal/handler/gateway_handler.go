@@ -442,9 +442,17 @@ func (h *GatewayHandler) submitInputModeration(c *gin.Context, apiKey *service.A
 		return
 	}
 	requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
+	deviceRef := ""
+	if parsed != nil {
+		if identity := service.ParseMetadataUserID(strings.TrimSpace(parsed.MetadataUserID)); identity != nil {
+			deviceRef = service.ClaudeDeviceLogRef(identity.DeviceID)
+		}
+	}
 	h.inputModerationService.Submit(service.InputModerationTask{
 		RequestID: strings.TrimSpace(requestID),
 		UserID:    apiKey.UserID,
+		Username:  strings.TrimSpace(apiKey.User.Username),
+		DeviceRef: deviceRef,
 		APIKeyID:  apiKey.ID,
 		GroupID:   *apiKey.GroupID,
 		Text:      text,

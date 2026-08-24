@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -107,6 +108,9 @@ func (r *claudeDeviceRepository) AddBonusDevices(ctx context.Context, userID, gr
 		INSERT INTO user_group_claude_device_quotas (user_id, group_id, bonus_devices, created_at, updated_at)
 		VALUES ($1,$2,$3,NOW(),NOW())
 		ON CONFLICT (user_id,group_id) DO UPDATE SET bonus_devices=user_group_claude_device_quotas.bonus_devices + EXCLUDED.bonus_devices, updated_at=NOW()`, userID, groupID, count)
+	if err == nil {
+		slog.Log(ctx, slog.LevelInfo, "claude_device_bonus_added", "user_id", userID, "group_id", groupID, "bonus_devices", count)
+	}
 	return err
 }
 
@@ -218,5 +222,6 @@ func (r *claudeDeviceRepository) RevokeUserDevice(ctx context.Context, userID, d
 	if rows == 0 {
 		return fmt.Errorf("claude device not found")
 	}
+	slog.Log(ctx, slog.LevelInfo, "claude_device_revoked", "user_id", userID, "device_registration_id", deviceID)
 	return nil
 }

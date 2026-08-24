@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -48,4 +49,24 @@ func TestClaudeDeviceServiceRejectsMissingOrOverLimitDevice(t *testing.T) {
 	var limitErr *ClaudeDeviceLimitError
 	require.ErrorAs(t, svc.CheckAndRegister(context.Background(), key, &ParsedRequest{}), &limitErr)
 	require.ErrorAs(t, svc.CheckAndRegister(context.Background(), key, &ParsedRequest{MetadataUserID: `{"device_id":"device-b","session_id":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}`}), &limitErr)
+}
+
+func TestClaudeDeviceLogFieldsMaskRawDeviceID(t *testing.T) {
+	groupID := int64(3)
+	fields := claudeDeviceLogFields(&APIKey{
+		UserID: 1,
+		User:   &User{Username: "alice"},
+	}, groupID, "device-secret-1234")
+
+	joined := ""
+	for i := 0; i < len(fields); i += 2 {
+		joined += fields[i].(string) + "="
+		if i+1 < len(fields) {
+			joined += fmt.Sprint(fields[i+1])
+		}
+	}
+	require.Contains(t, joined, "username=alice")
+	require.Contains(t, joined, "device_id_last4=1234")
+	require.Contains(t, joined, "device_ref=dev_")
+	require.NotContains(t, joined, "device-secret-1234")
 }

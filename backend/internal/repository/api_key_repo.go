@@ -134,6 +134,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 		WithUser(func(q *dbent.UserQuery) {
 			q.Select(
 				user.FieldID,
+				user.FieldUsername,
 				user.FieldStatus,
 				user.FieldRole,
 				user.FieldBalance,

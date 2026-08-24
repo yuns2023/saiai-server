@@ -420,7 +420,7 @@ func TestInputModerationGroupFieldsSurviveAuthCacheSnapshot(t *testing.T) {
 		ID:      2,
 		UserID:  1,
 		Status:  StatusAPIKeyActive,
-		User:    &User{ID: 1, Status: StatusActive, Role: RoleUser},
+		User:    &User{ID: 1, Username: "risk-user", Status: StatusActive, Role: RoleUser},
 		GroupID: ptrInt64(3),
 		Group: &Group{
 			ID:                               3,
@@ -438,6 +438,7 @@ func TestInputModerationGroupFieldsSurviveAuthCacheSnapshot(t *testing.T) {
 	snapshot := apiKeyService.snapshotFromAPIKey(original)
 	restored := apiKeyService.snapshotToAPIKey("sk-test", snapshot)
 
+	require.Equal(t, "risk-user", restored.User.Username)
 	require.True(t, restored.Group.InputModerationEnabled)
 	require.True(t, restored.Group.InputModerationAutoDisableUser)
 	require.Equal(t, []string{"Jailbreak", "PII"}, restored.Group.InputModerationCategories)

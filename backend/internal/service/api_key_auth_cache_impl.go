@@ -218,6 +218,7 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 		RateLimit7d: apiKey.RateLimit7d,
 		User: APIKeyAuthUserSnapshot{
 			ID:          apiKey.User.ID,
+			Username:    apiKey.User.Username,
 			Status:      apiKey.User.Status,
 			Role:        apiKey.User.Role,
 			Balance:     apiKey.User.Balance,
@@ -290,6 +291,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		RateLimit7d: snapshot.RateLimit7d,
 		User: &User{
 			ID:          snapshot.User.ID,
+			Username:    snapshot.User.Username,
 			Status:      snapshot.User.Status,
 			Role:        snapshot.User.Role,
 			Balance:     snapshot.User.Balance,

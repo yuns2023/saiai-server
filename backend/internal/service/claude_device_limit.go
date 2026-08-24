@@ -77,6 +77,36 @@ func NewClaudeDeviceService(repo ClaudeDeviceRepository) *ClaudeDeviceService {
 	return &ClaudeDeviceService{repo: repo}
 }
 
+func claudeDeviceLogFields(apiKey *APIKey, groupID int64, deviceID string) []any {
+	fields := []any{"user_id", apiKey.UserID, "group_id", groupID}
+	if apiKey.User != nil && strings.TrimSpace(apiKey.User.Username) != "" {
+		fields = append(fields, "username", strings.TrimSpace(apiKey.User.Username))
+	}
+	if deviceID = strings.TrimSpace(deviceID); deviceID != "" {
+		fields = append(fields, "device_ref", ClaudeDeviceLogRef(deviceID), "device_id_last4", deviceIDLast4(deviceID))
+	}
+	return fields
+}
+
+// ClaudeDeviceLogRef returns a stable, non-reversible identifier for log
+// correlation. It intentionally does not expose the original device_id.
+func ClaudeDeviceLogRef(deviceID string) string {
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(deviceID))
+	return "dev_" + hex.EncodeToString(sum[:])[:12]
+}
+
+func deviceIDLast4(deviceID string) string {
+	runes := []rune(strings.TrimSpace(deviceID))
+	if len(runes) <= 4 {
+		return string(runes)
+	}
+	return string(runes[len(runes)-4:])
+}
+
 func (s *ClaudeDeviceService) CheckAndRegister(ctx context.Context, apiKey *APIKey, parsed *ParsedRequest) error {
 	if s == nil || s.repo == nil || apiKey == nil || apiKey.Group == nil || apiKey.GroupID == nil || apiKey.UserID <= 0 {
 		return nil
@@ -92,22 +122,42 @@ func (s *ClaudeDeviceService) CheckAndRegister(ctx context.Context, apiKey *APIK
 	identity := ParseMetadataUserID(strings.TrimSpace(metadataUserID))
 	if identity == nil || strings.TrimSpace(identity.DeviceID) == "" {
 		if mode == "audit" {
-			slog.Warn("claude_device_identity_missing_audit", "user_id", apiKey.UserID, "group_id", *apiKey.GroupID)
+			fields := claudeDeviceLogFields(apiKey, *apiKey.GroupID, "")
+			fields = append(fields, "mode", mode)
+			slog.Log(ctx, slog.LevelWarn, "claude_device_identity_missing_audit", fields...)
 			return nil
 		}
+		fields := claudeDeviceLogFields(apiKey, *apiKey.GroupID, "")
+		fields = append(fields, "mode", mode)
+		slog.Log(ctx, slog.LevelWarn, "claude_device_identity_missing_rejected", fields...)
 		return &ClaudeDeviceLimitError{Limit: apiKey.Group.ClaudeDeviceBaseLimit}
 	}
-	sum := sha256.Sum256([]byte(strings.TrimSpace(identity.DeviceID)))
+	deviceID := strings.TrimSpace(identity.DeviceID)
+	sum := sha256.Sum256([]byte(deviceID))
 	result, err := s.repo.CheckAndRegister(
-		ctx, apiKey.UserID, *apiKey.GroupID, apiKey.ID, hex.EncodeToString(sum[:]), strings.TrimSpace(identity.DeviceID), mode, apiKey.Group.ClaudeDeviceBaseLimit,
+		ctx, apiKey.UserID, *apiKey.GroupID, apiKey.ID, hex.EncodeToString(sum[:]), deviceID, mode, apiKey.Group.ClaudeDeviceBaseLimit,
 	)
 	if err != nil {
+		fields := claudeDeviceLogFields(apiKey, *apiKey.GroupID, deviceID)
+		fields = append(fields, "mode", mode, "error", err)
+		slog.Log(ctx, slog.LevelError, "claude_device_registration_error", fields...)
 		return err
 	}
-	if result != nil && result.OverLimitAudit {
-		slog.Warn("claude_device_limit_audit", "user_id", apiKey.UserID, "group_id", *apiKey.GroupID, "active_devices", result.ActiveDevices, "effective_limit", result.EffectiveLimit)
+	if result == nil {
+		return nil
 	}
-	if result != nil && !result.Allowed {
+	fields := claudeDeviceLogFields(apiKey, *apiKey.GroupID, deviceID)
+	fields = append(fields, "mode", mode, "active_devices", result.ActiveDevices, "effective_limit", result.EffectiveLimit)
+	if result.Registered {
+		slog.Log(ctx, slog.LevelInfo, "claude_device_registered", fields...)
+	} else if result.Existing {
+		slog.Log(ctx, slog.LevelDebug, "claude_device_seen", fields...)
+	}
+	if result.OverLimitAudit {
+		slog.Log(ctx, slog.LevelWarn, "claude_device_limit_audit", fields...)
+	}
+	if !result.Allowed {
+		slog.Log(ctx, slog.LevelWarn, "claude_device_limit_rejected", fields...)
 		return &ClaudeDeviceLimitError{Limit: result.EffectiveLimit}
 	}
 	return nil

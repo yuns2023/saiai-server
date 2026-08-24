@@ -57,6 +57,8 @@ type InputModerationEvent struct {
 	JobID           string
 	RequestID       string
 	UserID          int64
+	Username        string
+	DeviceRef       string
 	APIKeyID        int64
 	GroupID         int64
 	InputHash       string
@@ -131,6 +133,8 @@ type InputModerationTask struct {
 	JobID      string    `json:"job_id"`
 	RequestID  string    `json:"request_id"`
 	UserID     int64     `json:"user_id"`
+	Username   string    `json:"username,omitempty"`
+	DeviceRef  string    `json:"device_ref,omitempty"`
 	APIKeyID   int64     `json:"api_key_id"`
 	GroupID    int64     `json:"group_id"`
 	Text       string    `json:"text"`
@@ -240,7 +244,7 @@ func (s *InputModerationService) Submit(task InputModerationTask) bool {
 		if err == nil {
 			return true
 		}
-		slog.Warn("input_moderation_durable_enqueue_failed", "user_id", task.UserID, "group_id", task.GroupID, "error", err)
+		slog.Warn("input_moderation_durable_enqueue_failed", "user_id", task.UserID, "username", task.Username, "device_ref", task.DeviceRef, "group_id", task.GroupID, "error", err)
 	}
 	_, ok := s.pool.TrySubmit(func() {
 		_ = s.process(task)
@@ -251,6 +255,8 @@ func (s *InputModerationService) Submit(task InputModerationTask) bool {
 			slog.Warn("input_moderation_queue_full",
 				"dropped", dropped,
 				"user_id", task.UserID,
+				"username", task.Username,
+				"device_ref", task.DeviceRef,
 				"api_key_id", task.APIKeyID,
 				"group_id", task.GroupID,
 			)
@@ -357,7 +363,7 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 		maxJobAge = 24 * time.Hour
 	}
 	if !task.EnqueuedAt.IsZero() && time.Since(task.EnqueuedAt) > maxJobAge {
-		slog.Warn("input_moderation_job_expired", "job_id", task.JobID, "user_id", task.UserID)
+		slog.Warn("input_moderation_job_expired", "job_id", task.JobID, "user_id", task.UserID, "username", task.Username, "device_ref", task.DeviceRef)
 		return nil
 	}
 	timeout := time.Duration(s.cfg.RequestTimeoutSeconds) * time.Second
@@ -381,6 +387,8 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 	if err != nil {
 		slog.Warn("input_moderation_classify_failed",
 			"user_id", task.UserID,
+			"username", task.Username,
+			"device_ref", task.DeviceRef,
 			"api_key_id", task.APIKeyID,
 			"group_id", task.GroupID,
 			"error", err,
@@ -419,6 +427,8 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 		JobID:         task.JobID,
 		RequestID:     truncateModerationText(strings.TrimSpace(task.RequestID), 128),
 		UserID:        task.UserID,
+		Username:      task.Username,
+		DeviceRef:     task.DeviceRef,
 		APIKeyID:      task.APIKeyID,
 		GroupID:       task.GroupID,
 		InputHash:     hex.EncodeToString(hash[:]),
@@ -447,7 +457,7 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 			DedupeWindow:     time.Duration(group.InputModerationDedupeMinutes) * time.Minute,
 		})
 		if err != nil {
-			slog.Error("input_moderation_transition_failed", "user_id", event.UserID, "group_id", event.GroupID, "error", err)
+			slog.Error("input_moderation_transition_failed", "user_id", event.UserID, "username", event.Username, "device_ref", event.DeviceRef, "group_id", event.GroupID, "error", err)
 			return err
 		}
 		incidentApplied = true
@@ -456,7 +466,7 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 			event.CountedAsStrike = !transition.Duplicate
 			if transition.BlockedUntil != nil && s.stateCache != nil {
 				if err := s.stateCache.SetUserCooldown(actionCtx, event.UserID, *transition.BlockedUntil); err != nil {
-					slog.Warn("input_moderation_cooldown_cache_set_failed", "user_id", event.UserID, "error", err)
+					slog.Warn("input_moderation_cooldown_cache_set_failed", "user_id", event.UserID, "username", event.Username, "device_ref", event.DeviceRef, "error", err)
 				}
 			}
 			if transition.UserDisabled {
@@ -472,6 +482,8 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 			slog.Error("input_moderation_event_insert_failed",
 				"job_id", event.JobID,
 				"user_id", event.UserID,
+				"username", event.Username,
+				"device_ref", event.DeviceRef,
 				"group_id", event.GroupID,
 				"action", event.Action,
 				"error", err,
@@ -482,6 +494,8 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 	slog.Info("input_moderation_decision",
 		"job_id", event.JobID,
 		"user_id", event.UserID,
+		"username", event.Username,
+		"device_ref", event.DeviceRef,
 		"api_key_id", event.APIKeyID,
 		"group_id", event.GroupID,
 		"safety", event.Safety,

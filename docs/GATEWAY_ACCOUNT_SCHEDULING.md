@@ -70,6 +70,13 @@ device limiting enabled; revoked registrations are excluded. A missing limit
 means that no device-limited group is represented for that user. Device IDs
 remain available only in the administrator device-detail view.
 
+Device-related structured logs use `user_id`, an optional username snapshot,
+`device_ref`, and the last four characters of the device ID. `device_ref` is a
+stable one-way correlation value; the raw device ID is never written to normal
+application or request logs. Registration, reconnect, limit rejection, audit
+overflow, revoke, bonus-quota, and input-moderation decision events may carry
+these fields.
+
 ## Single-device setup-token identity
 
 Anthropic OAuth accounts in `single_device` mode require both a fixed account
