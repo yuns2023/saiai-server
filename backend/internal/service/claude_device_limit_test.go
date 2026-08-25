@@ -60,7 +60,7 @@ func TestClaudeDeviceLogFieldsMaskRawDeviceID(t *testing.T) {
 
 	joined := ""
 	for i := 0; i < len(fields); i += 2 {
-		joined += fields[i].(string) + "="
+		joined += fmt.Sprint(fields[i]) + "="
 		if i+1 < len(fields) {
 			joined += fmt.Sprint(fields[i+1])
 		}
