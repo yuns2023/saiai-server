@@ -244,7 +244,7 @@
             <span class="text-sm text-gray-700 dark:text-gray-300">{{ value }}</span>
           </template>
           <template #cell-last_used_at="{ row }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatAccountLastUsed(row) }}</span>
+            <span class="text-sm text-gray-500 dark:text-dark-400" :title="accountLastUsedTitle(row)">{{ formatAccountLastUsed(row) }}</span>
           </template>
           <template #cell-expires_at="{ row, value }">
             <div class="flex flex-col items-start gap-1">
@@ -735,9 +735,15 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
 }
 
 const formatAccountLastUsed = (account: Account) => {
-  if (account.last_used_at) return formatRelativeTime(account.last_used_at)
-  if ((account.current_concurrency ?? 0) > 0) return t('admin.accounts.currentlyInUse')
+  if ((account.current_concurrency ?? 0) > 0) return t('admin.accounts.inProgress')
   return formatRelativeTime(account.last_used_at)
+}
+
+const accountLastUsedTitle = (account: Account) => {
+  if ((account.current_concurrency ?? 0) > 0) return t('admin.accounts.inProgressHint')
+  return account.last_used_at
+    ? t('admin.accounts.lastCompletedHint', { time: account.last_used_at })
+    : t('admin.accounts.lastCompletedNever')
 }
 
 const syncAccountRefs = (nextAccount: Account) => {

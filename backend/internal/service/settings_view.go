@@ -35,6 +35,7 @@ type SystemSettings struct {
 	SiteLogo                    string
 	SiteSubtitle                string
 	APIBaseURL                  string
+	APIEndpoints                []APIEndpoint
 	ContactInfo                 string
 	DocURL                      string
 	HomeContent                 string
@@ -95,6 +96,7 @@ type PublicSettings struct {
 	SiteLogo                         string
 	SiteSubtitle                     string
 	APIBaseURL                       string
+	APIEndpoints                     []APIEndpoint
 	ContactInfo                      string
 	DocURL                           string
 	HomeContent                      string
@@ -108,6 +110,15 @@ type PublicSettings struct {
 	LinuxDoOAuthEnabled bool
 	BackendModeEnabled  bool
 	Version             string
+}
+
+// APIEndpoint is a trusted, administrator-configured public gateway entrypoint
+// offered to users when generating client setup commands.
+type APIEndpoint struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Enabled bool   `json:"enabled"`
 }
 
 // SoraS3Settings Sora S3 存储配置
