@@ -28,6 +28,23 @@
           {{ platformDescription }}
         </p>
 
+        <div v-if="availableEndpoints.length" class="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+          <label for="api-endpoint" class="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ t('keys.useKeyModal.endpointLabel') }}
+          </label>
+          <select id="api-endpoint" v-model="selectedEndpointId" class="input min-w-0 flex-1 font-mono text-sm sm:max-w-xl">
+            <option v-for="endpoint in availableEndpoints" :key="endpoint.id" :value="endpoint.id">
+              {{ endpoint.name }} — {{ endpoint.url }}
+            </option>
+          </select>
+          <button type="button" class="btn btn-secondary btn-sm" @click="chooseRandomEndpoint">
+            {{ t('keys.useKeyModal.randomEndpoint') }}
+          </button>
+        </div>
+        <p v-if="selectedEndpoint" class="text-xs text-gray-500 dark:text-gray-400">
+          {{ t('keys.useKeyModal.endpointHint', { url: selectedEndpoint.url }) }}
+        </p>
+
         <!-- Client Tabs -->
         <div v-if="clientTabs.length" class="border-b border-gray-200 dark:border-dark-700">
           <nav class="-mb-px flex space-x-6" aria-label="Client">
@@ -139,12 +156,13 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useClipboard } from '@/composables/useClipboard'
-import type { GroupPlatform } from '@/types'
+import type { APIEndpoint, GroupPlatform } from '@/types'
 
 interface Props {
   show: boolean
-  apiKey: string
+	apiKey: string
 	baseUrl: string
+	apiEndpoints?: APIEndpoint[]
 	platform: GroupPlatform | null
 }
 
@@ -172,8 +190,32 @@ const { t } = useI18n()
 const { copyToClipboard: clipboardCopy } = useClipboard()
 
 const copiedIndex = ref<number | null>(null)
+const selectedEndpointId = ref('')
 const activeTab = ref<string>('unix')
 const activeClientTab = ref<string>('claude')
+
+const availableEndpoints = computed(() => (props.apiEndpoints || []).filter((endpoint) => endpoint.enabled && endpoint.url))
+const selectedEndpoint = computed(() => availableEndpoints.value.find((endpoint) => endpoint.id === selectedEndpointId.value) || null)
+const effectiveBaseUrl = computed(() => selectedEndpoint.value?.url || props.baseUrl || window.location.origin)
+
+const chooseRandomEndpoint = () => {
+  const endpoints = availableEndpoints.value
+  selectedEndpointId.value = endpoints.length
+    ? endpoints[Math.floor(Math.random() * endpoints.length)].id
+    : ''
+}
+
+watch(() => props.show, (show) => {
+  if (show) chooseRandomEndpoint()
+}, { immediate: true })
+
+watch(availableEndpoints, (endpoints) => {
+  if (endpoints.length === 0) {
+    selectedEndpointId.value = ''
+  } else if (!endpoints.some((endpoint) => endpoint.id === selectedEndpointId.value)) {
+    chooseRandomEndpoint()
+  }
+})
 
 // Reset tabs when platform changes
 const defaultClientTab = computed(() => {
@@ -372,7 +414,7 @@ const cmdCliBootstrap = (cliBase: string, args: string) =>
 // Syntax highlighting helpers
 // Generate file configs based on platform and active tab
 const currentFiles = computed((): FileConfig[] => {
-  const baseUrl = props.baseUrl || window.location.origin
+  const baseUrl = effectiveBaseUrl.value
   const apiKey = props.apiKey
 
 	switch (props.platform) {

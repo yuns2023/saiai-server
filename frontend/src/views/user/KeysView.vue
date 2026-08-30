@@ -925,6 +925,7 @@
       :show="showUseKeyModal"
       :api-key="selectedKey?.key || ''"
       :base-url="publicSettings?.api_base_url || ''"
+      :api-endpoints="publicSettings?.api_endpoints || []"
       :platform="selectedKey?.group?.platform || null"
       @close="closeUseKeyModal"
     />

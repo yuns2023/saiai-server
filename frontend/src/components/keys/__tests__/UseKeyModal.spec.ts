@@ -54,6 +54,27 @@ describe('UseKeyModal', () => {
     expect(wrapper.text()).not.toContain('keys.useKeyModal.cliTabs.v2Preview')
   })
 
+  it('randomly selects an enabled API endpoint and lets the user switch it', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.9)
+    const wrapper = mountModal({
+      apiEndpoints: [
+        { id: 'dmit', name: 'DMIT', url: 'https://dmit.example.com', enabled: true },
+        { id: 'vmiss', name: 'VMISS', url: 'https://vmiss.example.com', enabled: true },
+        { id: 'disabled', name: 'Disabled', url: 'https://disabled.example.com', enabled: false }
+      ]
+    })
+    await nextTick()
+
+    expect(wrapper.find('select').element.value).toBe('vmiss')
+    expect(command(wrapper)).toContain('https://vmiss.example.com')
+    expect(wrapper.findAll('option')).toHaveLength(2)
+
+    await wrapper.find('select').setValue('dmit')
+    await nextTick()
+    expect(command(wrapper)).toContain('https://dmit.example.com')
+    vi.restoreAllMocks()
+  })
+
   it('shell-quotes apostrophes in the Key', async () => {
     const wrapper = mountModal({ apiKey: "TEST_ONLY_'_KEY" })
     await nextTick()

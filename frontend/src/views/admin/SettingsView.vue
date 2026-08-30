@@ -902,6 +902,44 @@
               </p>
             </div>
 
+            <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-700">
+              <div class="mb-4 flex items-start justify-between gap-4">
+                <div>
+                  <h3 class="text-sm font-medium text-gray-900 dark:text-white">
+                    {{ t('admin.settings.site.apiEndpoints') }}
+                  </h3>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t('admin.settings.site.apiEndpointsHint') }}
+                  </p>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" @click="addAPIEndpoint">
+                  {{ t('admin.settings.site.addApiEndpoint') }}
+                </button>
+              </div>
+              <div v-if="form.api_endpoints.length === 0" class="text-sm text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.site.apiEndpointsEmpty') }}
+              </div>
+              <div v-else class="space-y-3">
+                <div v-for="(endpoint, index) in form.api_endpoints" :key="endpoint.id || index" class="grid grid-cols-1 gap-3 rounded-lg bg-gray-50 p-3 dark:bg-dark-800 md:grid-cols-[1fr_1.5fr_auto_auto] md:items-end">
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{{ t('admin.settings.site.apiEndpointName') }}</label>
+                    <input v-model="endpoint.name" type="text" class="input text-sm" :placeholder="t('admin.settings.site.apiEndpointNamePlaceholder')" />
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{{ t('admin.settings.site.apiEndpointUrl') }}</label>
+                    <input v-model="endpoint.url" type="url" class="input font-mono text-sm" :placeholder="t('admin.settings.site.apiEndpointUrlPlaceholder')" />
+                  </div>
+                  <label class="flex items-center gap-2 pb-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input v-model="endpoint.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" />
+                    {{ t('admin.settings.site.apiEndpointEnabled') }}
+                  </label>
+                  <button type="button" class="btn btn-secondary btn-sm pb-2" @click="removeAPIEndpoint(index)">
+                    {{ t('common.delete') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <!-- Contact Info -->
             <div>
               <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1461,6 +1499,7 @@ const form = reactive<SettingsForm>({
   site_logo: '',
   site_subtitle: 'Subscription to API Conversion Platform',
   api_base_url: '',
+  api_endpoints: [],
   contact_info: '',
   doc_url: '',
   home_content: '',
@@ -1637,6 +1676,19 @@ function moveMenuItem(index: number, direction: -1 | 1) {
   })
 }
 
+function addAPIEndpoint() {
+  form.api_endpoints.push({
+    id: `endpoint-${Date.now()}-${form.api_endpoints.length}`,
+    name: '',
+    url: '',
+    enabled: true
+  })
+}
+
+function removeAPIEndpoint(index: number) {
+  form.api_endpoints.splice(index, 1)
+}
+
 async function loadSettings() {
   loading.value = true
   try {
@@ -1738,6 +1790,7 @@ async function saveSettings() {
       site_logo: form.site_logo,
       site_subtitle: form.site_subtitle,
       api_base_url: form.api_base_url,
+      api_endpoints: form.api_endpoints,
       contact_info: form.contact_info,
       doc_url: form.doc_url,
       home_content: form.home_content,

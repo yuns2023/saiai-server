@@ -14,6 +14,17 @@ type SettingHandler struct {
 	version        string
 }
 
+func toPublicAPIEndpointDTOs(endpoints []service.APIEndpoint) []dto.APIEndpoint {
+	result := make([]dto.APIEndpoint, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		if !endpoint.Enabled {
+			continue
+		}
+		result = append(result, dto.APIEndpoint{ID: endpoint.ID, Name: endpoint.Name, URL: endpoint.URL, Enabled: true})
+	}
+	return result
+}
+
 // NewSettingHandler 创建公开设置处理器
 func NewSettingHandler(settingService *service.SettingService, version string) *SettingHandler {
 	return &SettingHandler{
@@ -45,6 +56,7 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		SiteLogo:                         settings.SiteLogo,
 		SiteSubtitle:                     settings.SiteSubtitle,
 		APIBaseURL:                       settings.APIBaseURL,
+		APIEndpoints:                     toPublicAPIEndpointDTOs(settings.APIEndpoints),
 		ContactInfo:                      settings.ContactInfo,
 		DocURL:                           settings.DocURL,
 		HomeContent:                      settings.HomeContent,

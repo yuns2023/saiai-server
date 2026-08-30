@@ -6,6 +6,13 @@
 import { apiClient } from '../client'
 import type { CustomMenuItem } from '@/types'
 
+export interface APIEndpoint {
+  id: string
+  name: string
+  url: string
+  enabled: boolean
+}
+
 export interface DefaultSubscriptionSetting {
   group_id: number
   validity_days: number
@@ -34,6 +41,7 @@ export interface SystemSettings {
   site_logo: string
   site_subtitle: string
   api_base_url: string
+  api_endpoints: APIEndpoint[]
   contact_info: string
   doc_url: string
   home_content: string
@@ -101,6 +109,7 @@ export interface UpdateSettingsRequest {
   site_logo?: string
   site_subtitle?: string
   api_base_url?: string
+  api_endpoints?: APIEndpoint[]
   contact_info?: string
   doc_url?: string
   home_content?: string

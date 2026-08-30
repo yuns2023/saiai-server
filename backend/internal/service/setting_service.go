@@ -19,6 +19,28 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+func parseAPIEndpoints(raw string) []APIEndpoint {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return []APIEndpoint{}
+	}
+	var endpoints []APIEndpoint
+	if err := json.Unmarshal([]byte(raw), &endpoints); err != nil || endpoints == nil {
+		return []APIEndpoint{}
+	}
+	return endpoints
+}
+
+func filterEnabledAPIEndpoints(endpoints []APIEndpoint) []APIEndpoint {
+	result := make([]APIEndpoint, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		if endpoint.Enabled && strings.TrimSpace(endpoint.URL) != "" {
+			result = append(result, endpoint)
+		}
+	}
+	return result
+}
+
 var (
 	ErrRegistrationDisabled   = infraerrors.Forbidden("REGISTRATION_DISABLED", "registration is currently disabled")
 	ErrSettingNotFound        = infraerrors.NotFound("SETTING_NOT_FOUND", "setting not found")
@@ -142,6 +164,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeySiteLogo,
 		SettingKeySiteSubtitle,
 		SettingKeyAPIBaseURL,
+		SettingKeyAPIEndpoints,
 		SettingKeyContactInfo,
 		SettingKeyDocURL,
 		SettingKeyHomeContent,
@@ -187,6 +210,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SiteLogo:                         settings[SettingKeySiteLogo],
 		SiteSubtitle:                     s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
 		APIBaseURL:                       settings[SettingKeyAPIBaseURL],
+		APIEndpoints:                     filterEnabledAPIEndpoints(parseAPIEndpoints(settings[SettingKeyAPIEndpoints])),
 		ContactInfo:                      settings[SettingKeyContactInfo],
 		DocURL:                           settings[SettingKeyDocURL],
 		HomeContent:                      settings[SettingKeyHomeContent],
@@ -239,6 +263,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		SiteLogo                         string          `json:"site_logo,omitempty"`
 		SiteSubtitle                     string          `json:"site_subtitle,omitempty"`
 		APIBaseURL                       string          `json:"api_base_url,omitempty"`
+		APIEndpoints                     []APIEndpoint   `json:"api_endpoints"`
 		ContactInfo                      string          `json:"contact_info,omitempty"`
 		DocURL                           string          `json:"doc_url,omitempty"`
 		HomeContent                      string          `json:"home_content,omitempty"`
@@ -264,6 +289,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		SiteLogo:                         settings.SiteLogo,
 		SiteSubtitle:                     settings.SiteSubtitle,
 		APIBaseURL:                       settings.APIBaseURL,
+		APIEndpoints:                     settings.APIEndpoints,
 		ContactInfo:                      settings.ContactInfo,
 		DocURL:                           settings.DocURL,
 		HomeContent:                      settings.HomeContent,
@@ -441,6 +467,11 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeySiteLogo] = settings.SiteLogo
 	updates[SettingKeySiteSubtitle] = settings.SiteSubtitle
 	updates[SettingKeyAPIBaseURL] = settings.APIBaseURL
+	apiEndpointsJSON, err := json.Marshal(settings.APIEndpoints)
+	if err != nil {
+		return fmt.Errorf("marshal api endpoints: %w", err)
+	}
+	updates[SettingKeyAPIEndpoints] = string(apiEndpointsJSON)
 	updates[SettingKeyContactInfo] = settings.ContactInfo
 	updates[SettingKeyDocURL] = settings.DocURL
 	updates[SettingKeyHomeContent] = settings.HomeContent
@@ -762,6 +793,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling: "false",
+		SettingKeyAPIEndpoints:                "[]",
 	}
 
 	return s.settingRepo.SetMultiple(ctx, defaults)
@@ -792,6 +824,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		SiteLogo:                         settings[SettingKeySiteLogo],
 		SiteSubtitle:                     s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
 		APIBaseURL:                       settings[SettingKeyAPIBaseURL],
+		APIEndpoints:                     parseAPIEndpoints(settings[SettingKeyAPIEndpoints]),
 		ContactInfo:                      settings[SettingKeyContactInfo],
 		DocURL:                           settings[SettingKeyDocURL],
 		HomeContent:                      settings[SettingKeyHomeContent],

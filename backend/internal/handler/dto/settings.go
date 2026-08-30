@@ -48,6 +48,7 @@ type SystemSettings struct {
 	SiteLogo                    string           `json:"site_logo"`
 	SiteSubtitle                string           `json:"site_subtitle"`
 	APIBaseURL                  string           `json:"api_base_url"`
+	APIEndpoints                []APIEndpoint    `json:"api_endpoints"`
 	ContactInfo                 string           `json:"contact_info"`
 	DocURL                      string           `json:"doc_url"`
 	HomeContent                 string           `json:"home_content"`
@@ -107,6 +108,7 @@ type PublicSettings struct {
 	SiteLogo                         string           `json:"site_logo"`
 	SiteSubtitle                     string           `json:"site_subtitle"`
 	APIBaseURL                       string           `json:"api_base_url"`
+	APIEndpoints                     []APIEndpoint    `json:"api_endpoints"`
 	ContactInfo                      string           `json:"contact_info"`
 	DocURL                           string           `json:"doc_url"`
 	HomeContent                      string           `json:"home_content"`
@@ -118,6 +120,14 @@ type PublicSettings struct {
 	SoraClientEnabled                bool             `json:"sora_client_enabled"`
 	BackendModeEnabled               bool             `json:"backend_mode_enabled"`
 	Version                          string           `json:"version"`
+}
+
+// APIEndpoint is a trusted administrator-configured public gateway entrypoint.
+type APIEndpoint struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Enabled bool   `json:"enabled"`
 }
 
 // OverloadCooldownSettings 529过载冷却配置 DTO

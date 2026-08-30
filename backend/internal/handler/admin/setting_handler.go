@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
@@ -25,6 +27,52 @@ var semverPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
 // menuItemIDPattern validates custom menu item IDs: alphanumeric, hyphens, underscores only.
 var menuItemIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+func toAPIEndpointDTOs(endpoints []service.APIEndpoint) []dto.APIEndpoint {
+	result := make([]dto.APIEndpoint, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		result = append(result, dto.APIEndpoint{ID: endpoint.ID, Name: endpoint.Name, URL: endpoint.URL, Enabled: endpoint.Enabled})
+	}
+	return result
+}
+
+func normalizeAPIEndpoints(endpoints []dto.APIEndpoint) ([]service.APIEndpoint, error) {
+	if len(endpoints) > 8 {
+		return nil, fmt.Errorf("too many API endpoints (max 8)")
+	}
+	result := make([]service.APIEndpoint, 0, len(endpoints))
+	seenIDs := make(map[string]struct{}, len(endpoints))
+	seenURLs := make(map[string]struct{}, len(endpoints))
+	for _, endpoint := range endpoints {
+		id := strings.TrimSpace(endpoint.ID)
+		name := strings.TrimSpace(endpoint.Name)
+		rawURL := strings.TrimSpace(endpoint.URL)
+		if id == "" || len(id) > 64 || !menuItemIDPattern.MatchString(id) {
+			return nil, fmt.Errorf("API endpoint id must contain only letters, numbers, hyphens, or underscores (max 64 characters)")
+		}
+		if name == "" || utf8.RuneCountInString(name) > 80 {
+			return nil, fmt.Errorf("API endpoint name is required and must be at most 80 characters")
+		}
+		parsed, err := url.Parse(rawURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, fmt.Errorf("API endpoint URL must be an absolute HTTPS URL without credentials, query, or fragment")
+		}
+		if parsed.Port() != "" && parsed.Port() != "443" {
+			return nil, fmt.Errorf("API endpoint URL must use port 443")
+		}
+		normalizedURL := strings.TrimRight(rawURL, "/")
+		if _, ok := seenIDs[id]; ok {
+			return nil, fmt.Errorf("duplicate API endpoint id: %s", id)
+		}
+		if _, ok := seenURLs[normalizedURL]; ok {
+			return nil, fmt.Errorf("duplicate API endpoint URL")
+		}
+		seenIDs[id] = struct{}{}
+		seenURLs[normalizedURL] = struct{}{}
+		result = append(result, service.APIEndpoint{ID: id, Name: name, URL: normalizedURL, Enabled: endpoint.Enabled})
+	}
+	return result, nil
+}
 
 // generateMenuItemID generates a short random hex ID for a custom menu item.
 func generateMenuItemID() (string, error) {
@@ -100,6 +148,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		SiteLogo:                             settings.SiteLogo,
 		SiteSubtitle:                         settings.SiteSubtitle,
 		APIBaseURL:                           settings.APIBaseURL,
+		APIEndpoints:                         toAPIEndpointDTOs(settings.APIEndpoints),
 		ContactInfo:                          settings.ContactInfo,
 		DocURL:                               settings.DocURL,
 		HomeContent:                          settings.HomeContent,
@@ -166,6 +215,7 @@ type UpdateSettingsRequest struct {
 	SiteLogo                    string                `json:"site_logo"`
 	SiteSubtitle                string                `json:"site_subtitle"`
 	APIBaseURL                  string                `json:"api_base_url"`
+	APIEndpoints                []dto.APIEndpoint     `json:"api_endpoints"`
 	ContactInfo                 string                `json:"contact_info"`
 	DocURL                      string                `json:"doc_url"`
 	HomeContent                 string                `json:"home_content"`
@@ -415,6 +465,15 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		customMenuJSON = string(menuBytes)
 	}
 
+	apiEndpoints := previousSettings.APIEndpoints
+	if req.APIEndpoints != nil {
+		apiEndpoints, err = normalizeAPIEndpoints(req.APIEndpoints)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	}
+
 	// Ops metrics collector interval validation (seconds).
 	if req.OpsMetricsIntervalSeconds != nil {
 		v := *req.OpsMetricsIntervalSeconds
@@ -485,6 +544,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SiteLogo:                         req.SiteLogo,
 		SiteSubtitle:                     req.SiteSubtitle,
 		APIBaseURL:                       req.APIBaseURL,
+		APIEndpoints:                     apiEndpoints,
 		ContactInfo:                      req.ContactInfo,
 		DocURL:                           req.DocURL,
 		HomeContent:                      req.HomeContent,
@@ -582,6 +642,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SiteLogo:                             updatedSettings.SiteLogo,
 		SiteSubtitle:                         updatedSettings.SiteSubtitle,
 		APIBaseURL:                           updatedSettings.APIBaseURL,
+		APIEndpoints:                         toAPIEndpointDTOs(updatedSettings.APIEndpoints),
 		ContactInfo:                          updatedSettings.ContactInfo,
 		DocURL:                               updatedSettings.DocURL,
 		HomeContent:                          updatedSettings.HomeContent,
@@ -705,6 +766,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.APIBaseURL != after.APIBaseURL {
 		changed = append(changed, "api_base_url")
 	}
+	if !equalAPIEndpoints(before.APIEndpoints, after.APIEndpoints) {
+		changed = append(changed, "api_endpoints")
+	}
 	if before.ContactInfo != after.ContactInfo {
 		changed = append(changed, "contact_info")
 	}
@@ -801,6 +865,18 @@ func normalizeDefaultSubscriptions(input []dto.DefaultSubscriptionSetting) []dto
 }
 
 func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalAPIEndpoints(a, b []service.APIEndpoint) bool {
 	if len(a) != len(b) {
 		return false
 	}

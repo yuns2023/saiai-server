@@ -604,6 +604,9 @@ export default {
       title: 'Use API Key',
       description:
         'Run the one-click command below to install or reuse SAIAI, configure Claude Code, and start the per-user local proxy.',
+      endpointLabel: 'API route',
+      randomEndpoint: 'Randomize',
+      endpointHint: 'The generated configuration will use: {url}',
       copy: 'Copy',
       copied: 'Copied',
       note: 'After setup, start Claude Code normally with claude or from VSCode. The proxy runs in the background; manage it with saiai status, saiai logs, or saiai stop. The command contains this API key, so it can remain in the clipboard and shell history.',
@@ -1896,6 +1899,10 @@ export default {
       refreshInterval30s: '30 seconds',
       autoRefreshCountdown: 'Auto refresh: {seconds}s',
       currentlyInUse: 'In use',
+      inProgress: 'In progress',
+      inProgressHint: 'A request is currently in progress; the timestamp below is the last completed request.',
+      lastCompletedHint: 'Last completed request: {time}',
+      lastCompletedNever: 'No completed request recorded',
       listPendingSyncHint: 'List changes are pending sync. Click sync to load latest rows.',
       listPendingSyncAction: 'Sync now',
       syncFromCrs: 'Sync from CRS',
@@ -2015,7 +2022,7 @@ export default {
         platformType: 'Platform/Type',
         platform: 'Platform',
         type: 'Type',
-        capacity: 'Capacity',
+        capacity: 'Current Concurrency',
         notes: 'Notes',
         priority: 'Priority',
         billingRateMultiplier: 'Billing Rate',
@@ -2026,7 +2033,7 @@ export default {
         groups: 'Groups',
         usageWindows: 'Usage Windows',
         proxy: 'Proxy',
-        lastUsed: 'Last Used',
+        lastUsed: 'Last Completed',
         expiresAt: 'Expires At',
         actions: 'Actions'
       },
@@ -2035,6 +2042,7 @@ export default {
       privacyFailed: 'Failed to disable training',
       // Capacity status tooltips
       capacity: {
+        concurrencyHint: 'Current active request slots / configured concurrency limit',
         windowCost: {
           blocked: '5h window cost exceeded, account scheduling paused',
           stickyOnly: '5h window cost at threshold, only sticky sessions allowed',
@@ -4194,6 +4202,15 @@ export default {
         apiBaseUrlPlaceholder: 'https://api.example.com',
         apiBaseUrlHint:
           'Used for "Use Key" and "Import to CC Switch" features. Leave empty to use current site URL.',
+        apiEndpoints: 'API routes',
+        apiEndpointsHint: 'When configured, users receive an enabled route at random when using a key and can switch manually. The default API URL is used when empty.',
+        apiEndpointsEmpty: 'No additional routes configured; the default API URL will be used.',
+        addApiEndpoint: 'Add route',
+        apiEndpointName: 'Route name',
+        apiEndpointNamePlaceholder: 'e.g. VMISS China optimized',
+        apiEndpointUrl: 'Route URL',
+        apiEndpointUrlPlaceholder: 'https://edge.example.com',
+        apiEndpointEnabled: 'Enabled',
         contactInfo: 'Contact Info',
         contactInfoPlaceholder: 'e.g., QQ: 123456789',
         contactInfoHint: 'Customer support contact info, displayed on redeem page, profile, etc.',
