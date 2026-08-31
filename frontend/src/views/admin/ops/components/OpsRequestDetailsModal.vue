@@ -19,6 +19,8 @@ export interface OpsRequestDetailsPreset {
 interface Props {
   modelValue: boolean
   timeRange: string
+  customStartTime?: string | null
+  customEndTime?: string | null
   preset: OpsRequestDetailsPreset
   platform?: string
   groupId?: number | null
@@ -43,12 +45,29 @@ const pageSize = ref(10)
 const close = () => emit('update:modelValue', false)
 
 const rangeLabel = computed(() => {
-  const minutes = parseTimeRangeMinutes(props.timeRange)
+  const minutes = resolveRangeMinutes()
   if (minutes >= 60) return t('admin.ops.requestDetails.rangeHours', { n: Math.round(minutes / 60) })
   return t('admin.ops.requestDetails.rangeMinutes', { n: minutes })
 })
 
+function resolveRangeMinutes(): number {
+  if (props.timeRange === 'custom' && props.customStartTime && props.customEndTime) {
+    const start = new Date(props.customStartTime).getTime()
+    const end = new Date(props.customEndTime).getTime()
+    const minutes = Math.round((end - start) / 60000)
+    if (Number.isFinite(minutes) && minutes > 0) return minutes
+  }
+  return parseTimeRangeMinutes(props.timeRange)
+}
+
 function buildTimeParams(): Pick<OpsRequestDetailsParams, 'start_time' | 'end_time'> {
+  if (props.timeRange === 'custom' && props.customStartTime && props.customEndTime) {
+    const start = new Date(props.customStartTime).getTime()
+    const end = new Date(props.customEndTime).getTime()
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+      return { start_time: props.customStartTime, end_time: props.customEndTime }
+    }
+  }
   const minutes = parseTimeRangeMinutes(props.timeRange)
   const endTime = new Date()
   const startTime = new Date(endTime.getTime() - minutes * 60 * 1000)
@@ -104,6 +123,8 @@ watch(
 watch(
   () => [
     props.timeRange,
+    props.customStartTime,
+    props.customEndTime,
     props.platform,
     props.groupId,
     props.preset.kind,
