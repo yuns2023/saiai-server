@@ -91,6 +91,8 @@ export interface SystemSettings {
 
   // 分组隔离
   allow_ungrouped_key_scheduling: boolean
+  maintenance_mode_enabled: boolean
+  maintenance_message: string
 }
 
 export interface UpdateSettingsRequest {
@@ -145,6 +147,8 @@ export interface UpdateSettingsRequest {
   min_claude_code_version?: string
   max_claude_code_version?: string
   allow_ungrouped_key_scheduling?: boolean
+  maintenance_mode_enabled?: boolean
+  maintenance_message?: string
 }
 
 /**

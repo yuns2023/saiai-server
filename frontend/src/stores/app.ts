@@ -269,6 +269,8 @@ export const useAppStore = defineStore('app', () => {
         custom_menu_items: [],
         linuxdo_oauth_enabled: false,
         backend_mode_enabled: false,
+        maintenance_mode_enabled: false,
+        maintenance_message: '',
         version: siteVersion.value
       }
     }

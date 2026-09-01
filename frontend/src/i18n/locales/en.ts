@@ -1,4 +1,8 @@
 export default {
+  maintenance: {
+    title: 'System Maintenance',
+    defaultMessage: 'The system is being upgraded. Please try again later.'
+  },
   // Home Page
   home: {
     viewOnGithub: 'View on GitHub',
@@ -4192,6 +4196,11 @@ export default {
         backendMode: 'Backend Mode',
         backendModeDescription:
           'Disables user registration, public site, and self-service features. Only admin can log in and manage the platform.',
+        maintenanceMode: 'Maintenance Mode',
+        maintenanceModeHint: 'Pause new API/model requests and show users a maintenance notice. Health checks and admin settings remain available.',
+        maintenanceMessage: 'Maintenance Message',
+        maintenanceMessagePlaceholder: 'e.g. The system is being upgraded and is expected to return in 15 minutes. Please try again later.',
+        maintenanceMessageHint: 'Up to 1000 characters. Requests resume immediately after maintenance mode is disabled.',
         siteName: 'Site Name',
         siteNamePlaceholder: 'SAiAi',
         siteNameHint: 'Displayed in emails and page titles',

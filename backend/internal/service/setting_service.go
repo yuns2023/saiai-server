@@ -56,6 +56,15 @@ var (
 	)
 )
 
+const DefaultMaintenanceMessage = "系统正在升级维护，请稍候再试。"
+
+func maintenanceMessage(value string) string {
+	if message := strings.TrimSpace(value); message != "" {
+		return message
+	}
+	return DefaultMaintenanceMessage
+}
+
 type SettingRepository interface {
 	Get(ctx context.Context, key string) (*Setting, error)
 	GetValue(ctx context.Context, key string) (string, error)
@@ -65,6 +74,20 @@ type SettingRepository interface {
 	GetAll(ctx context.Context) (map[string]string, error)
 	Delete(ctx context.Context, key string) error
 }
+
+type MaintenanceStatus struct {
+	Enabled bool
+	Message string
+}
+
+type cachedMaintenanceStatus struct {
+	status    MaintenanceStatus
+	expiresAt int64
+}
+
+var maintenanceStatusCache atomic.Value // *cachedMaintenanceStatus
+
+const maintenanceStatusCacheTTL = 2 * time.Second
 
 // cachedVersionBounds 缓存 Claude Code 版本号上下限（进程内缓存，60s TTL）
 type cachedVersionBounds struct {
@@ -139,6 +162,30 @@ func (s *SettingService) GetAllSettings(ctx context.Context) (*SystemSettings, e
 	return s.parseSettings(settings), nil
 }
 
+// GetMaintenanceStatus returns the runtime maintenance switch and its public message.
+// It is deliberately a small, short-lived cache because this method runs in the
+// request middleware for every business request.
+func (s *SettingService) GetMaintenanceStatus(ctx context.Context) (MaintenanceStatus, error) {
+	now := time.Now()
+	if cached, ok := maintenanceStatusCache.Load().(*cachedMaintenanceStatus); ok && cached != nil && now.UnixNano() < cached.expiresAt {
+		return cached.status, nil
+	}
+
+	values, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeyMaintenanceModeEnabled, SettingKeyMaintenanceMessage})
+	if err != nil {
+		return MaintenanceStatus{}, fmt.Errorf("get maintenance status: %w", err)
+	}
+	status := MaintenanceStatus{
+		Enabled: values[SettingKeyMaintenanceModeEnabled] == "true",
+		Message: maintenanceMessage(values[SettingKeyMaintenanceMessage]),
+	}
+	maintenanceStatusCache.Store(&cachedMaintenanceStatus{
+		status:    status,
+		expiresAt: now.Add(maintenanceStatusCacheTTL).UnixNano(),
+	})
+	return status, nil
+}
+
 // GetFrontendURL 获取前端基础URL（数据库优先，fallback 到配置文件）
 func (s *SettingService) GetFrontendURL(ctx context.Context) string {
 	val, err := s.settingRepo.GetValue(ctx, SettingKeyFrontendURL)
@@ -175,6 +222,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyCustomMenuItems,
 		SettingKeyLinuxDoConnectEnabled,
 		SettingKeyBackendModeEnabled,
+		SettingKeyMaintenanceModeEnabled,
+		SettingKeyMaintenanceMessage,
 	}
 
 	settings, err := s.settingRepo.GetMultiple(ctx, keys)
@@ -221,6 +270,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		CustomMenuItems:                  settings[SettingKeyCustomMenuItems],
 		LinuxDoOAuthEnabled:              linuxDoEnabled,
 		BackendModeEnabled:               settings[SettingKeyBackendModeEnabled] == "true",
+		MaintenanceModeEnabled:           settings[SettingKeyMaintenanceModeEnabled] == "true",
+		MaintenanceMessage:               maintenanceMessage(settings[SettingKeyMaintenanceMessage]),
 	}, nil
 }
 
@@ -274,6 +325,8 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		CustomMenuItems                  json.RawMessage `json:"custom_menu_items"`
 		LinuxDoOAuthEnabled              bool            `json:"linuxdo_oauth_enabled"`
 		BackendModeEnabled               bool            `json:"backend_mode_enabled"`
+		MaintenanceModeEnabled           bool            `json:"maintenance_mode_enabled"`
+		MaintenanceMessage               string          `json:"maintenance_message,omitempty"`
 		Version                          string          `json:"version,omitempty"`
 	}{
 		RegistrationEnabled:              settings.RegistrationEnabled,
@@ -300,6 +353,8 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		CustomMenuItems:                  filterUserVisibleMenuItems(settings.CustomMenuItems),
 		LinuxDoOAuthEnabled:              settings.LinuxDoOAuthEnabled,
 		BackendModeEnabled:               settings.BackendModeEnabled,
+		MaintenanceModeEnabled:           settings.MaintenanceModeEnabled,
+		MaintenanceMessage:               maintenanceMessage(settings.MaintenanceMessage),
 		Version:                          s.version,
 	}, nil
 }
@@ -518,9 +573,18 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 
 	// Backend Mode
 	updates[SettingKeyBackendModeEnabled] = strconv.FormatBool(settings.BackendModeEnabled)
+	updates[SettingKeyMaintenanceModeEnabled] = strconv.FormatBool(settings.MaintenanceModeEnabled)
+	updates[SettingKeyMaintenanceMessage] = maintenanceMessage(settings.MaintenanceMessage)
 
 	err = s.settingRepo.SetMultiple(ctx, updates)
 	if err == nil {
+		maintenanceStatusCache.Store(&cachedMaintenanceStatus{
+			status: MaintenanceStatus{
+				Enabled: settings.MaintenanceModeEnabled,
+				Message: maintenanceMessage(settings.MaintenanceMessage),
+			},
+			expiresAt: time.Now().Add(maintenanceStatusCacheTTL).UnixNano(),
+		})
 		// 先使 inflight singleflight 失效，再刷新缓存，缩小旧值覆盖新值的竞态窗口
 		versionBoundsSF.Forget("version_bounds")
 		versionBoundsCache.Store(&cachedVersionBounds{
@@ -794,6 +858,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling: "false",
 		SettingKeyAPIEndpoints:                "[]",
+		SettingKeyMaintenanceModeEnabled:      "false",
+		SettingKeyMaintenanceMessage:          DefaultMaintenanceMessage,
 	}
 
 	return s.settingRepo.SetMultiple(ctx, defaults)
@@ -834,6 +900,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		SoraClientEnabled:                settings[SettingKeySoraClientEnabled] == "true",
 		CustomMenuItems:                  settings[SettingKeyCustomMenuItems],
 		BackendModeEnabled:               settings[SettingKeyBackendModeEnabled] == "true",
+		MaintenanceModeEnabled:           settings[SettingKeyMaintenanceModeEnabled] == "true",
+		MaintenanceMessage:               maintenanceMessage(settings[SettingKeyMaintenanceMessage]),
 	}
 
 	// 解析整数类型

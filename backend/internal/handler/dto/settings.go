@@ -87,6 +87,9 @@ type SystemSettings struct {
 
 	// Backend Mode
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
+
+	MaintenanceModeEnabled bool   `json:"maintenance_mode_enabled"`
+	MaintenanceMessage     string `json:"maintenance_message"`
 }
 
 type DefaultSubscriptionSetting struct {
@@ -119,6 +122,8 @@ type PublicSettings struct {
 	LinuxDoOAuthEnabled              bool             `json:"linuxdo_oauth_enabled"`
 	SoraClientEnabled                bool             `json:"sora_client_enabled"`
 	BackendModeEnabled               bool             `json:"backend_mode_enabled"`
+	MaintenanceModeEnabled           bool             `json:"maintenance_mode_enabled"`
+	MaintenanceMessage               string           `json:"maintenance_message"`
 	Version                          string           `json:"version"`
 }
 

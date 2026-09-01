@@ -75,6 +75,10 @@ type SystemSettings struct {
 
 	// Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	BackendModeEnabled bool
+
+	// Maintenance mode: reject new business requests while keeping recovery routes available.
+	MaintenanceModeEnabled bool
+	MaintenanceMessage     string
 }
 
 type DefaultSubscriptionSetting struct {
@@ -107,9 +111,11 @@ type PublicSettings struct {
 	SoraClientEnabled           bool
 	CustomMenuItems             string // JSON array of custom menu items
 
-	LinuxDoOAuthEnabled bool
-	BackendModeEnabled  bool
-	Version             string
+	LinuxDoOAuthEnabled    bool
+	BackendModeEnabled     bool
+	MaintenanceModeEnabled bool
+	MaintenanceMessage     string
+	Version                string
 }
 
 // APIEndpoint is a trusted, administrator-configured public gateway entrypoint

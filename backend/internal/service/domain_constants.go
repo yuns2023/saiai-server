@@ -254,6 +254,10 @@ const (
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
+
+	// Maintenance mode settings.
+	SettingKeyMaintenanceModeEnabled = "maintenance_mode_enabled"
+	SettingKeyMaintenanceMessage     = "maintenance_message"
 )
 
 // AdminAPIKeyPrefix is the prefix for admin API keys (distinct from user "sk-" keys).

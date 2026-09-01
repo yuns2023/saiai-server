@@ -1,4 +1,8 @@
 export default {
+  maintenance: {
+    title: '系统维护中',
+    defaultMessage: '系统正在升级维护，请稍候再试。'
+  },
   // Home Page
   home: {
     viewOnGithub: '在 GitHub 上查看',
@@ -4353,6 +4357,11 @@ export default {
         backendMode: 'Backend 模式',
         backendModeDescription:
           '禁用用户注册、公开页面和自助服务功能。仅管理员可以登录和管理平台。',
+        maintenanceMode: '维护模式',
+        maintenanceModeHint: '开启后暂停新的 API/模型请求，用户将看到维护提示。健康检查和管理员设置仍可用。',
+        maintenanceMessage: '维护提示文案',
+        maintenanceMessagePlaceholder: '例如：系统正在升级，预计 15 分钟后恢复，请稍候再试。',
+        maintenanceMessageHint: '最多 1000 个字符。关闭维护模式后立即恢复正常请求。',
         siteName: '站点名称',
         siteNameHint: '显示在邮件和页面标题中',
         siteNamePlaceholder: 'SAiAi',

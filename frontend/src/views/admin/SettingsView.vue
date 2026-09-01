@@ -857,6 +857,36 @@
               <Toggle v-model="form.backend_mode_enabled" />
             </div>
 
+            <!-- Maintenance Mode -->
+            <div class="rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-800 dark:bg-orange-900/20">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="text-sm font-medium text-gray-900 dark:text-white">
+                    {{ t('admin.settings.site.maintenanceMode') }}
+                  </h3>
+                  <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                    {{ t('admin.settings.site.maintenanceModeHint') }}
+                  </p>
+                </div>
+                <Toggle v-model="form.maintenance_mode_enabled" />
+              </div>
+              <div v-if="form.maintenance_mode_enabled" class="mt-4 border-t border-orange-200 pt-4 dark:border-orange-800">
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.site.maintenanceMessage') }}
+                </label>
+                <textarea
+                  v-model="form.maintenance_message"
+                  rows="3"
+                  maxlength="1000"
+                  class="input"
+                  :placeholder="t('admin.settings.site.maintenanceMessagePlaceholder')"
+                ></textarea>
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.site.maintenanceMessageHint') }}
+                </p>
+              </div>
+            </div>
+
             <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
               <div>
                 <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1547,7 +1577,9 @@ const form = reactive<SettingsForm>({
   min_claude_code_version: '',
   max_claude_code_version: '',
   // 分组隔离
-  allow_ungrouped_key_scheduling: false
+  allow_ungrouped_key_scheduling: false,
+  maintenance_mode_enabled: false,
+  maintenance_message: ''
 })
 
 const defaultSubscriptionGroupOptions = computed<DefaultSubscriptionGroupOption[]>(() =>
@@ -1858,7 +1890,9 @@ async function saveSettings() {
       identity_patch_prompt: form.identity_patch_prompt,
       min_claude_code_version: form.min_claude_code_version,
       max_claude_code_version: form.max_claude_code_version,
-      allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling
+      allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
+      maintenance_mode_enabled: form.maintenance_mode_enabled,
+      maintenance_message: form.maintenance_message
     }
     const updated = await adminAPI.settings.updateSettings(payload)
     Object.assign(form, updated)

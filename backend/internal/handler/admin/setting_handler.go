@@ -175,6 +175,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		MaxClaudeCodeVersion:                 settings.MaxClaudeCodeVersion,
 		AllowUngroupedKeyScheduling:          settings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                   settings.BackendModeEnabled,
+		MaintenanceModeEnabled:               settings.MaintenanceModeEnabled,
+		MaintenanceMessage:                   settings.MaintenanceMessage,
 	})
 }
 
@@ -255,6 +257,9 @@ type UpdateSettingsRequest struct {
 
 	// Backend Mode
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
+
+	MaintenanceModeEnabled *bool   `json:"maintenance_mode_enabled"`
+	MaintenanceMessage     *string `json:"maintenance_message"`
 }
 
 // UpdateSettings 更新系统设置
@@ -516,6 +521,19 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			return
 		}
 	}
+	if req.MaintenanceMessage != nil && utf8.RuneCountInString(strings.TrimSpace(*req.MaintenanceMessage)) > 1000 {
+		response.Error(c, http.StatusBadRequest, "maintenance_message must be at most 1000 characters")
+		return
+	}
+
+	maintenanceEnabled := previousSettings.MaintenanceModeEnabled
+	if req.MaintenanceModeEnabled != nil {
+		maintenanceEnabled = *req.MaintenanceModeEnabled
+	}
+	maintenanceMessage := previousSettings.MaintenanceMessage
+	if req.MaintenanceMessage != nil {
+		maintenanceMessage = *req.MaintenanceMessage
+	}
 
 	settings := &service.SystemSettings{
 		RegistrationEnabled:              req.RegistrationEnabled,
@@ -567,6 +585,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		MaxClaudeCodeVersion:             req.MaxClaudeCodeVersion,
 		AllowUngroupedKeyScheduling:      req.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:               req.BackendModeEnabled,
+		MaintenanceModeEnabled:           maintenanceEnabled,
+		MaintenanceMessage:               maintenanceMessage,
 		OpsMonitoringEnabled: func() bool {
 			if req.OpsMonitoringEnabled != nil {
 				return *req.OpsMonitoringEnabled

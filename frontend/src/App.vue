@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router'
-import { onMounted, onBeforeUnmount, watch } from 'vue'
+import { onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import { resolveDocumentTitle } from '@/router/title'
@@ -10,10 +11,14 @@ import { getSetupStatus } from '@/api/setup'
 
 const router = useRouter()
 const route = useRoute()
+const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
+const showMaintenanceBanner = computed(
+  () => Boolean(appStore.cachedPublicSettings?.maintenance_mode_enabled) && !route.path.startsWith('/admin')
+)
 
 /**
  * Update favicon dynamically
@@ -112,6 +117,22 @@ onMounted(async () => {
 </script>
 
 <template>
+  <div
+    v-if="showMaintenanceBanner"
+    class="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/90 p-6 text-center text-white"
+  >
+    <div class="max-w-xl rounded-2xl border border-white/15 bg-white/10 p-8 shadow-2xl backdrop-blur">
+      <div class="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-orange-500/20 text-orange-300">
+        <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008M10.29 3.86l-8.2 14.25A1.5 1.5 0 003.39 20.5h17.22a1.5 1.5 0 001.3-2.25L13.71 3.86a1.97 1.97 0 00-3.42 0z" />
+        </svg>
+      </div>
+      <h1 class="text-2xl font-semibold">{{ t('maintenance.title') }}</h1>
+      <p class="mt-4 whitespace-pre-line text-base leading-7 text-slate-200">
+        {{ appStore.cachedPublicSettings?.maintenance_message || t('maintenance.defaultMessage') }}
+      </p>
+    </div>
+  </div>
   <NavigationProgress />
   <RouterView />
   <Toast />

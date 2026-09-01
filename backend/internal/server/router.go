@@ -64,6 +64,9 @@ func SetupRouter(
 		}
 		return nil
 	}))
+	// Keep liveness and the public maintenance message available while
+	// rejecting new business/API requests during an upgrade.
+	r.Use(middleware2.MaintenanceMode(settingService))
 
 	// Serve embedded frontend with settings injection if available
 	if web.HasEmbeddedFrontend() {

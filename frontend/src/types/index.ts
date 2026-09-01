@@ -112,6 +112,8 @@ export interface PublicSettings {
   custom_menu_items: CustomMenuItem[]
   linuxdo_oauth_enabled: boolean
   backend_mode_enabled: boolean
+  maintenance_mode_enabled: boolean
+  maintenance_message: string
   version: string
 }
 
