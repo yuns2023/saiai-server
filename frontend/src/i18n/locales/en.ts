@@ -4404,6 +4404,7 @@ export default {
       testEmailSent: 'Test email sent successfully',
       failedToLoad: 'Failed to load settings',
       failedToSave: 'Failed to save settings',
+      invalidUrl: '{field} must be empty or a complete http(s) URL',
       failedToTestSmtp: 'SMTP connection test failed',
       failedToSendTestEmail: 'Failed to send test email'
     },

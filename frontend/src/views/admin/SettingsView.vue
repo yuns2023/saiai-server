@@ -7,7 +7,9 @@
       </div>
 
       <!-- Settings Form -->
-      <form v-else @submit.prevent="saveSettings" class="space-y-6">
+      <!-- Validate URLs in saveSettings so hidden tabs cannot trigger a
+           browser "invalid form control is not focusable" error. -->
+      <form v-else novalidate @submit.prevent="saveSettings" class="space-y-6">
         <!-- Tab Navigation -->
         <div class="sticky top-0 z-10 overflow-x-auto settings-tabs-scroll">
           <nav class="settings-tabs">
@@ -1746,7 +1748,43 @@ function removeDefaultSubscription(index: number) {
   form.default_subscriptions.splice(index, 1)
 }
 
+function isOptionalHttpUrlValid(value: string | null | undefined): boolean {
+  const normalized = (value || '').trim()
+  if (!normalized) return true
+
+  try {
+    const parsed = new URL(normalized)
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && !!parsed.hostname
+  } catch {
+    return false
+  }
+}
+
+function validateUrlSettings(): boolean {
+  const fields: Array<{ label: string; value: string | null | undefined }> = [
+    { label: t('admin.settings.registration.frontendUrl'), value: form.frontend_url },
+    { label: t('admin.settings.linuxdo.redirectUrl'), value: form.linuxdo_connect_redirect_url },
+    { label: t('admin.settings.site.docUrl'), value: form.doc_url },
+    { label: t('admin.settings.purchase.url'), value: form.purchase_subscription_url }
+  ]
+
+  form.custom_menu_items.forEach((item, index) => {
+    fields.push({
+      label: `${t('admin.settings.customMenu.url')} #${index + 1}`,
+      value: item.url
+    })
+  })
+
+  const invalidField = fields.find((field) => !isOptionalHttpUrlValid(field.value))
+  if (!invalidField) return true
+
+  appStore.showError(t('admin.settings.invalidUrl', { field: invalidField.label }))
+  return false
+}
+
 async function saveSettings() {
+  if (!validateUrlSettings()) return
+
   saving.value = true
   try {
     const normalizedDefaultSubscriptions = form.default_subscriptions

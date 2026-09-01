@@ -4564,6 +4564,7 @@ export default {
       settingsSaved: '设置保存成功',
       smtpConnectionSuccess: 'SMTP 连接成功',
       testEmailSent: '测试邮件发送成功',
+      invalidUrl: '{field} 必须留空或填写完整的 http(s) URL',
       failedToLoad: '加载设置失败',
       failedToSave: '保存设置失败',
       failedToTestSmtp: 'SMTP 连接测试失败',
