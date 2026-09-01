@@ -20,6 +20,12 @@ const messages: Record<string, string> = {
   'admin.usage.outputCost': 'Output Cost',
   'admin.usage.cacheCreationCost': 'Cache Creation Cost',
   'admin.usage.cacheReadCost': 'Cache Read Cost',
+  'admin.usage.cacheCreation5mCost': 'Cache Creation Cost (5m)',
+  'admin.usage.cacheCreation1hCost': 'Cache Creation Cost (1h)',
+  'admin.usage.cacheCreation5mPrice': 'Cache Creation Price (5m)',
+  'admin.usage.cacheCreation1hPrice': 'Cache Creation Price (1h)',
+  'admin.usage.cacheReadPrice': 'Cache Read Price',
+  'admin.usage.cacheCreationPrice': 'Cache Creation Price',
   'usage.inputTokenPrice': 'Input price',
   'usage.outputTokenPrice': 'Output price',
   'usage.perMillionTokens': '/ 1M tokens',
@@ -120,6 +126,8 @@ describe('user UsageView tooltip', () => {
           input_cost: 0.020285,
           output_cost: 0.00303,
           cache_creation_cost: 0,
+          cache_creation_5m_cost: 0,
+          cache_creation_1h_cost: 0,
           cache_read_cost: 0.069568,
           input_tokens: 4057,
           output_tokens: 101,
@@ -175,9 +183,12 @@ describe('user UsageView tooltip', () => {
       input_cost: 0.020285,
       output_cost: 0.00303,
       cache_creation_cost: 0,
+      cache_creation_5m_cost: 0,
+      cache_creation_1h_cost: 0,
       cache_read_cost: 0.069568,
       input_tokens: 4057,
       output_tokens: 101,
+      cache_read_tokens: 278272,
     }
     setupState.tooltipVisible = true
     await nextTick()
@@ -191,6 +202,8 @@ describe('user UsageView tooltip', () => {
     expect(text).toContain('$0.092883')
     expect(text).toContain('$5.0000 / 1M tokens')
     expect(text).toContain('$30.0000 / 1M tokens')
+    expect(text).toContain('Cache Read Price')
+    expect(text).toContain('$0.2500 / 1M tokens')
   })
 
   it('exports csv with input and output unit price columns', async () => {

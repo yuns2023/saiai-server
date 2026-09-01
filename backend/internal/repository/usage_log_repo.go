@@ -28,7 +28,7 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 )
 
-const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, session_id, model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, media_type, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, created_at"
+const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, session_id, model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, input_cost, output_cost, cache_creation_cost, cache_creation_5m_cost, cache_creation_1h_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, media_type, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, created_at"
 
 const usageLogReasoningEffortInheritanceWindow = 15 * time.Minute
 
@@ -48,6 +48,8 @@ var usageLogInsertArgTypes = [...]string{
 	"integer",
 	"integer",
 	"integer",
+	"numeric",
+	"numeric",
 	"numeric",
 	"numeric",
 	"numeric",
@@ -296,6 +298,8 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			input_cost,
 			output_cost,
 			cache_creation_cost,
+			cache_creation_5m_cost,
+			cache_creation_1h_cost,
 			cache_read_cost,
 			total_cost,
 			actual_cost,
@@ -323,8 +327,8 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			$7, $8, $9,
 			$10, $11, $12, $13,
 			$14, $15,
-			$16, $17, $18, $19, $20, $21,
-			$22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40
+			$16, $17, $18, $19, $20, $21, $22, $23,
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -728,6 +732,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			input_cost,
 			output_cost,
 			cache_creation_cost,
+			cache_creation_5m_cost,
+			cache_creation_1h_cost,
 			cache_read_cost,
 			total_cost,
 			actual_cost,
@@ -752,7 +758,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			created_at
 		) AS (VALUES `)
 
-	args := make([]any, 0, len(keys)*40)
+	args := make([]any, 0, len(keys)*42)
 	argPos := 1
 	for idx, key := range keys {
 		if idx > 0 {
@@ -799,6 +805,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				input_cost,
 				output_cost,
 				cache_creation_cost,
+				cache_creation_5m_cost,
+				cache_creation_1h_cost,
 				cache_read_cost,
 				total_cost,
 				actual_cost,
@@ -841,6 +849,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				input_cost,
 				output_cost,
 				cache_creation_cost,
+				cache_creation_5m_cost,
+				cache_creation_1h_cost,
 				cache_read_cost,
 				total_cost,
 				actual_cost,
@@ -923,6 +933,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			input_cost,
 			output_cost,
 			cache_creation_cost,
+			cache_creation_5m_cost,
+			cache_creation_1h_cost,
 			cache_read_cost,
 			total_cost,
 			actual_cost,
@@ -947,7 +959,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			created_at
 		) AS (VALUES `)
 
-	args := make([]any, 0, len(preparedList)*40)
+	args := make([]any, 0, len(preparedList)*42)
 	argPos := 1
 	for idx, prepared := range preparedList {
 		if idx > 0 {
@@ -991,6 +1003,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			input_cost,
 			output_cost,
 			cache_creation_cost,
+			cache_creation_5m_cost,
+			cache_creation_1h_cost,
 			cache_read_cost,
 			total_cost,
 			actual_cost,
@@ -1033,6 +1047,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			input_cost,
 			output_cost,
 			cache_creation_cost,
+			cache_creation_5m_cost,
+			cache_creation_1h_cost,
 			cache_read_cost,
 			total_cost,
 			actual_cost,
@@ -1083,6 +1099,8 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			input_cost,
 			output_cost,
 			cache_creation_cost,
+			cache_creation_5m_cost,
+			cache_creation_1h_cost,
 			cache_read_cost,
 			total_cost,
 			actual_cost,
@@ -1110,8 +1128,8 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			$7, $8, $9,
 			$10, $11, $12, $13,
 			$14, $15,
-			$16, $17, $18, $19, $20, $21,
-			$22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40
+			$16, $17, $18, $19, $20, $21, $22, $23,
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1175,6 +1193,8 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			log.InputCost,
 			log.OutputCost,
 			log.CacheCreationCost,
+			log.CacheCreation5mCost,
+			log.CacheCreation1hCost,
 			log.CacheReadCost,
 			log.TotalCost,
 			log.ActualCost,
@@ -4431,6 +4451,8 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		inputCost             float64
 		outputCost            float64
 		cacheCreationCost     float64
+		cacheCreation5mCost   float64
+		cacheCreation1hCost   float64
 		cacheReadCost         float64
 		totalCost             float64
 		actualCost            float64
@@ -4475,6 +4497,8 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		&inputCost,
 		&outputCost,
 		&cacheCreationCost,
+		&cacheCreation5mCost,
+		&cacheCreation1hCost,
 		&cacheReadCost,
 		&totalCost,
 		&actualCost,
@@ -4516,6 +4540,8 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		InputCost:             inputCost,
 		OutputCost:            outputCost,
 		CacheCreationCost:     cacheCreationCost,
+		CacheCreation5mCost:   cacheCreation5mCost,
+		CacheCreation1hCost:   cacheCreation1hCost,
 		CacheReadCost:         cacheReadCost,
 		TotalCost:             totalCost,
 		ActualCost:            actualCost,

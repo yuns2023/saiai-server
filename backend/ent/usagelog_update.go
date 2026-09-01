@@ -371,6 +371,48 @@ func (_u *UsageLogUpdate) AddCacheCreationCost(v float64) *UsageLogUpdate {
 	return _u
 }
 
+// SetCacheCreation5mCost sets the "cache_creation_5m_cost" field.
+func (_u *UsageLogUpdate) SetCacheCreation5mCost(v float64) *UsageLogUpdate {
+	_u.mutation.ResetCacheCreation5mCost()
+	_u.mutation.SetCacheCreation5mCost(v)
+	return _u
+}
+
+// SetNillableCacheCreation5mCost sets the "cache_creation_5m_cost" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableCacheCreation5mCost(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetCacheCreation5mCost(*v)
+	}
+	return _u
+}
+
+// AddCacheCreation5mCost adds value to the "cache_creation_5m_cost" field.
+func (_u *UsageLogUpdate) AddCacheCreation5mCost(v float64) *UsageLogUpdate {
+	_u.mutation.AddCacheCreation5mCost(v)
+	return _u
+}
+
+// SetCacheCreation1hCost sets the "cache_creation_1h_cost" field.
+func (_u *UsageLogUpdate) SetCacheCreation1hCost(v float64) *UsageLogUpdate {
+	_u.mutation.ResetCacheCreation1hCost()
+	_u.mutation.SetCacheCreation1hCost(v)
+	return _u
+}
+
+// SetNillableCacheCreation1hCost sets the "cache_creation_1h_cost" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableCacheCreation1hCost(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetCacheCreation1hCost(*v)
+	}
+	return _u
+}
+
+// AddCacheCreation1hCost adds value to the "cache_creation_1h_cost" field.
+func (_u *UsageLogUpdate) AddCacheCreation1hCost(v float64) *UsageLogUpdate {
+	_u.mutation.AddCacheCreation1hCost(v)
+	return _u
+}
+
 // SetCacheReadCost sets the "cache_read_cost" field.
 func (_u *UsageLogUpdate) SetCacheReadCost(v float64) *UsageLogUpdate {
 	_u.mutation.ResetCacheReadCost()
@@ -910,6 +952,18 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedCacheCreationCost(); ok {
 		_spec.AddField(usagelog.FieldCacheCreationCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.CacheCreation5mCost(); ok {
+		_spec.SetField(usagelog.FieldCacheCreation5mCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedCacheCreation5mCost(); ok {
+		_spec.AddField(usagelog.FieldCacheCreation5mCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.CacheCreation1hCost(); ok {
+		_spec.SetField(usagelog.FieldCacheCreation1hCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedCacheCreation1hCost(); ok {
+		_spec.AddField(usagelog.FieldCacheCreation1hCost, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.CacheReadCost(); ok {
 		_spec.SetField(usagelog.FieldCacheReadCost, field.TypeFloat64, value)
@@ -1508,6 +1562,48 @@ func (_u *UsageLogUpdateOne) AddCacheCreationCost(v float64) *UsageLogUpdateOne 
 	return _u
 }
 
+// SetCacheCreation5mCost sets the "cache_creation_5m_cost" field.
+func (_u *UsageLogUpdateOne) SetCacheCreation5mCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetCacheCreation5mCost()
+	_u.mutation.SetCacheCreation5mCost(v)
+	return _u
+}
+
+// SetNillableCacheCreation5mCost sets the "cache_creation_5m_cost" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableCacheCreation5mCost(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetCacheCreation5mCost(*v)
+	}
+	return _u
+}
+
+// AddCacheCreation5mCost adds value to the "cache_creation_5m_cost" field.
+func (_u *UsageLogUpdateOne) AddCacheCreation5mCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddCacheCreation5mCost(v)
+	return _u
+}
+
+// SetCacheCreation1hCost sets the "cache_creation_1h_cost" field.
+func (_u *UsageLogUpdateOne) SetCacheCreation1hCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetCacheCreation1hCost()
+	_u.mutation.SetCacheCreation1hCost(v)
+	return _u
+}
+
+// SetNillableCacheCreation1hCost sets the "cache_creation_1h_cost" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableCacheCreation1hCost(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetCacheCreation1hCost(*v)
+	}
+	return _u
+}
+
+// AddCacheCreation1hCost adds value to the "cache_creation_1h_cost" field.
+func (_u *UsageLogUpdateOne) AddCacheCreation1hCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddCacheCreation1hCost(v)
+	return _u
+}
+
 // SetCacheReadCost sets the "cache_read_cost" field.
 func (_u *UsageLogUpdateOne) SetCacheReadCost(v float64) *UsageLogUpdateOne {
 	_u.mutation.ResetCacheReadCost()
@@ -2077,6 +2173,18 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.AddedCacheCreationCost(); ok {
 		_spec.AddField(usagelog.FieldCacheCreationCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.CacheCreation5mCost(); ok {
+		_spec.SetField(usagelog.FieldCacheCreation5mCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedCacheCreation5mCost(); ok {
+		_spec.AddField(usagelog.FieldCacheCreation5mCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.CacheCreation1hCost(); ok {
+		_spec.SetField(usagelog.FieldCacheCreation1hCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedCacheCreation1hCost(); ok {
+		_spec.AddField(usagelog.FieldCacheCreation1hCost, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.CacheReadCost(); ok {
 		_spec.SetField(usagelog.FieldCacheReadCost, field.TypeFloat64, value)

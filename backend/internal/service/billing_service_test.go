@@ -669,6 +669,8 @@ func TestCalculateCost_SupportsCacheBreakdown(t *testing.T) {
 
 	expected5m := float64(tokens.CacheCreation5mTokens) * 4e-6
 	expected1h := float64(tokens.CacheCreation1hTokens) * 5e-6
+	require.InDelta(t, expected5m, cost.CacheCreation5mCost, 1e-10)
+	require.InDelta(t, expected1h, cost.CacheCreation1hCost, 1e-10)
 	require.InDelta(t, expected5m+expected1h, cost.CacheCreationCost, 1e-10)
 }
 

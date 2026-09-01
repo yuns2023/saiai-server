@@ -1074,6 +1074,8 @@ export interface UsageLog {
   input_cost: number
   output_cost: number
   cache_creation_cost: number
+  cache_creation_5m_cost: number
+  cache_creation_1h_cost: number
   cache_read_cost: number
   total_cost: number
   actual_cost: number

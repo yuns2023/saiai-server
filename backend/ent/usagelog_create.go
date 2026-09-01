@@ -239,6 +239,34 @@ func (_c *UsageLogCreate) SetNillableCacheCreationCost(v *float64) *UsageLogCrea
 	return _c
 }
 
+// SetCacheCreation5mCost sets the "cache_creation_5m_cost" field.
+func (_c *UsageLogCreate) SetCacheCreation5mCost(v float64) *UsageLogCreate {
+	_c.mutation.SetCacheCreation5mCost(v)
+	return _c
+}
+
+// SetNillableCacheCreation5mCost sets the "cache_creation_5m_cost" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableCacheCreation5mCost(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetCacheCreation5mCost(*v)
+	}
+	return _c
+}
+
+// SetCacheCreation1hCost sets the "cache_creation_1h_cost" field.
+func (_c *UsageLogCreate) SetCacheCreation1hCost(v float64) *UsageLogCreate {
+	_c.mutation.SetCacheCreation1hCost(v)
+	return _c
+}
+
+// SetNillableCacheCreation1hCost sets the "cache_creation_1h_cost" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableCacheCreation1hCost(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetCacheCreation1hCost(*v)
+	}
+	return _c
+}
+
 // SetCacheReadCost sets the "cache_read_cost" field.
 func (_c *UsageLogCreate) SetCacheReadCost(v float64) *UsageLogCreate {
 	_c.mutation.SetCacheReadCost(v)
@@ -559,6 +587,14 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultCacheCreationCost
 		_c.mutation.SetCacheCreationCost(v)
 	}
+	if _, ok := _c.mutation.CacheCreation5mCost(); !ok {
+		v := usagelog.DefaultCacheCreation5mCost
+		_c.mutation.SetCacheCreation5mCost(v)
+	}
+	if _, ok := _c.mutation.CacheCreation1hCost(); !ok {
+		v := usagelog.DefaultCacheCreation1hCost
+		_c.mutation.SetCacheCreation1hCost(v)
+	}
 	if _, ok := _c.mutation.CacheReadCost(); !ok {
 		v := usagelog.DefaultCacheReadCost
 		_c.mutation.SetCacheReadCost(v)
@@ -660,6 +696,12 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.CacheCreationCost(); !ok {
 		return &ValidationError{Name: "cache_creation_cost", err: errors.New(`ent: missing required field "UsageLog.cache_creation_cost"`)}
+	}
+	if _, ok := _c.mutation.CacheCreation5mCost(); !ok {
+		return &ValidationError{Name: "cache_creation_5m_cost", err: errors.New(`ent: missing required field "UsageLog.cache_creation_5m_cost"`)}
+	}
+	if _, ok := _c.mutation.CacheCreation1hCost(); !ok {
+		return &ValidationError{Name: "cache_creation_1h_cost", err: errors.New(`ent: missing required field "UsageLog.cache_creation_1h_cost"`)}
 	}
 	if _, ok := _c.mutation.CacheReadCost(); !ok {
 		return &ValidationError{Name: "cache_read_cost", err: errors.New(`ent: missing required field "UsageLog.cache_read_cost"`)}
@@ -795,6 +837,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.CacheCreationCost(); ok {
 		_spec.SetField(usagelog.FieldCacheCreationCost, field.TypeFloat64, value)
 		_node.CacheCreationCost = value
+	}
+	if value, ok := _c.mutation.CacheCreation5mCost(); ok {
+		_spec.SetField(usagelog.FieldCacheCreation5mCost, field.TypeFloat64, value)
+		_node.CacheCreation5mCost = value
+	}
+	if value, ok := _c.mutation.CacheCreation1hCost(); ok {
+		_spec.SetField(usagelog.FieldCacheCreation1hCost, field.TypeFloat64, value)
+		_node.CacheCreation1hCost = value
 	}
 	if value, ok := _c.mutation.CacheReadCost(); ok {
 		_spec.SetField(usagelog.FieldCacheReadCost, field.TypeFloat64, value)
@@ -1288,6 +1338,42 @@ func (u *UsageLogUpsert) UpdateCacheCreationCost() *UsageLogUpsert {
 // AddCacheCreationCost adds v to the "cache_creation_cost" field.
 func (u *UsageLogUpsert) AddCacheCreationCost(v float64) *UsageLogUpsert {
 	u.Add(usagelog.FieldCacheCreationCost, v)
+	return u
+}
+
+// SetCacheCreation5mCost sets the "cache_creation_5m_cost" field.
+func (u *UsageLogUpsert) SetCacheCreation5mCost(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldCacheCreation5mCost, v)
+	return u
+}
+
+// UpdateCacheCreation5mCost sets the "cache_creation_5m_cost" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateCacheCreation5mCost() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldCacheCreation5mCost)
+	return u
+}
+
+// AddCacheCreation5mCost adds v to the "cache_creation_5m_cost" field.
+func (u *UsageLogUpsert) AddCacheCreation5mCost(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldCacheCreation5mCost, v)
+	return u
+}
+
+// SetCacheCreation1hCost sets the "cache_creation_1h_cost" field.
+func (u *UsageLogUpsert) SetCacheCreation1hCost(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldCacheCreation1hCost, v)
+	return u
+}
+
+// UpdateCacheCreation1hCost sets the "cache_creation_1h_cost" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateCacheCreation1hCost() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldCacheCreation1hCost)
+	return u
+}
+
+// AddCacheCreation1hCost adds v to the "cache_creation_1h_cost" field.
+func (u *UsageLogUpsert) AddCacheCreation1hCost(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldCacheCreation1hCost, v)
 	return u
 }
 
@@ -1952,6 +2038,48 @@ func (u *UsageLogUpsertOne) AddCacheCreationCost(v float64) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateCacheCreationCost() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheCreationCost()
+	})
+}
+
+// SetCacheCreation5mCost sets the "cache_creation_5m_cost" field.
+func (u *UsageLogUpsertOne) SetCacheCreation5mCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCacheCreation5mCost(v)
+	})
+}
+
+// AddCacheCreation5mCost adds v to the "cache_creation_5m_cost" field.
+func (u *UsageLogUpsertOne) AddCacheCreation5mCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddCacheCreation5mCost(v)
+	})
+}
+
+// UpdateCacheCreation5mCost sets the "cache_creation_5m_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateCacheCreation5mCost() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCacheCreation5mCost()
+	})
+}
+
+// SetCacheCreation1hCost sets the "cache_creation_1h_cost" field.
+func (u *UsageLogUpsertOne) SetCacheCreation1hCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCacheCreation1hCost(v)
+	})
+}
+
+// AddCacheCreation1hCost adds v to the "cache_creation_1h_cost" field.
+func (u *UsageLogUpsertOne) AddCacheCreation1hCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddCacheCreation1hCost(v)
+	})
+}
+
+// UpdateCacheCreation1hCost sets the "cache_creation_1h_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateCacheCreation1hCost() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCacheCreation1hCost()
 	})
 }
 
@@ -2828,6 +2956,48 @@ func (u *UsageLogUpsertBulk) AddCacheCreationCost(v float64) *UsageLogUpsertBulk
 func (u *UsageLogUpsertBulk) UpdateCacheCreationCost() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheCreationCost()
+	})
+}
+
+// SetCacheCreation5mCost sets the "cache_creation_5m_cost" field.
+func (u *UsageLogUpsertBulk) SetCacheCreation5mCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCacheCreation5mCost(v)
+	})
+}
+
+// AddCacheCreation5mCost adds v to the "cache_creation_5m_cost" field.
+func (u *UsageLogUpsertBulk) AddCacheCreation5mCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddCacheCreation5mCost(v)
+	})
+}
+
+// UpdateCacheCreation5mCost sets the "cache_creation_5m_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateCacheCreation5mCost() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCacheCreation5mCost()
+	})
+}
+
+// SetCacheCreation1hCost sets the "cache_creation_1h_cost" field.
+func (u *UsageLogUpsertBulk) SetCacheCreation1hCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCacheCreation1hCost(v)
+	})
+}
+
+// AddCacheCreation1hCost adds v to the "cache_creation_1h_cost" field.
+func (u *UsageLogUpsertBulk) AddCacheCreation1hCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddCacheCreation1hCost(v)
+	})
+}
+
+// UpdateCacheCreation1hCost sets the "cache_creation_1h_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateCacheCreation1hCost() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCacheCreation1hCost()
 	})
 }
 

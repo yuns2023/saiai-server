@@ -3712,6 +3712,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		InputCost:             cost.InputCost,
 		OutputCost:            cost.OutputCost,
 		CacheCreationCost:     cost.CacheCreationCost,
+		CacheCreation5mCost:   cost.CacheCreation5mCost,
+		CacheCreation1hCost:   cost.CacheCreation1hCost,
 		CacheReadCost:         cost.CacheReadCost,
 		TotalCost:             cost.TotalCost,
 		ActualCost:            cost.ActualCost,

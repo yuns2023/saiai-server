@@ -50,6 +50,10 @@ const (
 	FieldOutputCost = "output_cost"
 	// FieldCacheCreationCost holds the string denoting the cache_creation_cost field in the database.
 	FieldCacheCreationCost = "cache_creation_cost"
+	// FieldCacheCreation5mCost holds the string denoting the cache_creation_5m_cost field in the database.
+	FieldCacheCreation5mCost = "cache_creation_5m_cost"
+	// FieldCacheCreation1hCost holds the string denoting the cache_creation_1h_cost field in the database.
+	FieldCacheCreation1hCost = "cache_creation_1h_cost"
 	// FieldCacheReadCost holds the string denoting the cache_read_cost field in the database.
 	FieldCacheReadCost = "cache_read_cost"
 	// FieldTotalCost holds the string denoting the total_cost field in the database.
@@ -152,6 +156,8 @@ var Columns = []string{
 	FieldInputCost,
 	FieldOutputCost,
 	FieldCacheCreationCost,
+	FieldCacheCreation5mCost,
+	FieldCacheCreation1hCost,
 	FieldCacheReadCost,
 	FieldTotalCost,
 	FieldActualCost,
@@ -207,6 +213,10 @@ var (
 	DefaultOutputCost float64
 	// DefaultCacheCreationCost holds the default value on creation for the "cache_creation_cost" field.
 	DefaultCacheCreationCost float64
+	// DefaultCacheCreation5mCost holds the default value on creation for the "cache_creation_5m_cost" field.
+	DefaultCacheCreation5mCost float64
+	// DefaultCacheCreation1hCost holds the default value on creation for the "cache_creation_1h_cost" field.
+	DefaultCacheCreation1hCost float64
 	// DefaultCacheReadCost holds the default value on creation for the "cache_read_cost" field.
 	DefaultCacheReadCost float64
 	// DefaultTotalCost holds the default value on creation for the "total_cost" field.
@@ -331,6 +341,16 @@ func ByOutputCost(opts ...sql.OrderTermOption) OrderOption {
 // ByCacheCreationCost orders the results by the cache_creation_cost field.
 func ByCacheCreationCost(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCacheCreationCost, opts...).ToFunc()
+}
+
+// ByCacheCreation5mCost orders the results by the cache_creation_5m_cost field.
+func ByCacheCreation5mCost(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCacheCreation5mCost, opts...).ToFunc()
+}
+
+// ByCacheCreation1hCost orders the results by the cache_creation_1h_cost field.
+func ByCacheCreation1hCost(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCacheCreation1hCost, opts...).ToFunc()
 }
 
 // ByCacheReadCost orders the results by the cache_read_cost field.

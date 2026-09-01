@@ -439,7 +439,7 @@
       }"
     >
       <div
-        class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800"
+        class="max-h-[calc(100vh-1rem)] overflow-y-auto whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800"
       >
         <div class="space-y-1.5">
           <!-- Cost Breakdown -->
@@ -461,13 +461,37 @@
               <span class="text-gray-400">{{ t('usage.outputTokenPrice') }}</span>
               <span class="font-medium text-violet-300">{{ formatTokenPricePerMillion(tooltipData.output_cost, tooltipData.output_tokens) }} {{ t('usage.perMillionTokens') }}</span>
             </div>
-            <div v-if="tooltipData && tooltipData.cache_creation_cost > 0" class="flex items-center justify-between gap-4">
+            <div v-if="tooltipData && tooltipData.cache_creation_5m_cost > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.cacheCreation5mCost') }}</span>
+              <span class="font-medium text-white">${{ tooltipData.cache_creation_5m_cost.toFixed(6) }}</span>
+            </div>
+            <div v-if="tooltipData && tooltipData.cache_creation_5m_cost > 0 && tooltipData.cache_creation_5m_tokens > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.cacheCreation5mPrice') }}</span>
+              <span class="font-medium text-amber-300">{{ formatTokenPricePerMillion(tooltipData.cache_creation_5m_cost, tooltipData.cache_creation_5m_tokens) }} {{ t('usage.perMillionTokens') }}</span>
+            </div>
+            <div v-if="tooltipData && tooltipData.cache_creation_1h_cost > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.cacheCreation1hCost') }}</span>
+              <span class="font-medium text-white">${{ tooltipData.cache_creation_1h_cost.toFixed(6) }}</span>
+            </div>
+            <div v-if="tooltipData && tooltipData.cache_creation_1h_cost > 0 && tooltipData.cache_creation_1h_tokens > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.cacheCreation1hPrice') }}</span>
+              <span class="font-medium text-orange-300">{{ formatTokenPricePerMillion(tooltipData.cache_creation_1h_cost, tooltipData.cache_creation_1h_tokens) }} {{ t('usage.perMillionTokens') }}</span>
+            </div>
+            <div v-if="tooltipData && tooltipData.cache_creation_cost > 0 && tooltipData.cache_creation_5m_cost <= 0 && tooltipData.cache_creation_1h_cost <= 0" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('admin.usage.cacheCreationCost') }}</span>
               <span class="font-medium text-white">${{ tooltipData.cache_creation_cost.toFixed(6) }}</span>
+            </div>
+            <div v-if="tooltipData && tooltipData.cache_creation_cost > 0 && tooltipData.cache_creation_tokens > 0 && tooltipData.cache_creation_5m_cost <= 0 && tooltipData.cache_creation_1h_cost <= 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.cacheCreationPrice') }}</span>
+              <span class="font-medium text-amber-300">{{ formatTokenPricePerMillion(tooltipData.cache_creation_cost, tooltipData.cache_creation_tokens) }} {{ t('usage.perMillionTokens') }}</span>
             </div>
             <div v-if="tooltipData && tooltipData.cache_read_cost > 0" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('admin.usage.cacheReadCost') }}</span>
               <span class="font-medium text-white">${{ tooltipData.cache_read_cost.toFixed(6) }}</span>
+            </div>
+            <div v-if="tooltipData && tooltipData.cache_read_cost > 0 && tooltipData.cache_read_tokens > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.cacheReadPrice') }}</span>
+              <span class="font-medium text-sky-300">{{ formatTokenPricePerMillion(tooltipData.cache_read_cost, tooltipData.cache_read_tokens) }} {{ t('usage.perMillionTokens') }}</span>
             </div>
           </div>
           <!-- Rate and Summary -->

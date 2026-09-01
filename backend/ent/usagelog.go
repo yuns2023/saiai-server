@@ -58,6 +58,10 @@ type UsageLog struct {
 	OutputCost float64 `json:"output_cost,omitempty"`
 	// CacheCreationCost holds the value of the "cache_creation_cost" field.
 	CacheCreationCost float64 `json:"cache_creation_cost,omitempty"`
+	// CacheCreation5mCost holds the value of the "cache_creation_5m_cost" field.
+	CacheCreation5mCost float64 `json:"cache_creation_5m_cost,omitempty"`
+	// CacheCreation1hCost holds the value of the "cache_creation_1h_cost" field.
+	CacheCreation1hCost float64 `json:"cache_creation_1h_cost,omitempty"`
 	// CacheReadCost holds the value of the "cache_read_cost" field.
 	CacheReadCost float64 `json:"cache_read_cost,omitempty"`
 	// TotalCost holds the value of the "total_cost" field.
@@ -175,7 +179,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
-		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
+		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheCreation5mCost, usagelog.FieldCacheCreation1hCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
 		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount:
 			values[i] = new(sql.NullInt64)
@@ -315,6 +319,18 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field cache_creation_cost", values[i])
 			} else if value.Valid {
 				_m.CacheCreationCost = value.Float64
+			}
+		case usagelog.FieldCacheCreation5mCost:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field cache_creation_5m_cost", values[i])
+			} else if value.Valid {
+				_m.CacheCreation5mCost = value.Float64
+			}
+		case usagelog.FieldCacheCreation1hCost:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field cache_creation_1h_cost", values[i])
+			} else if value.Valid {
+				_m.CacheCreation1hCost = value.Float64
 			}
 		case usagelog.FieldCacheReadCost:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -541,6 +557,12 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("cache_creation_cost=")
 	builder.WriteString(fmt.Sprintf("%v", _m.CacheCreationCost))
+	builder.WriteString(", ")
+	builder.WriteString("cache_creation_5m_cost=")
+	builder.WriteString(fmt.Sprintf("%v", _m.CacheCreation5mCost))
+	builder.WriteString(", ")
+	builder.WriteString("cache_creation_1h_cost=")
+	builder.WriteString(fmt.Sprintf("%v", _m.CacheCreation1hCost))
 	builder.WriteString(", ")
 	builder.WriteString("cache_read_cost=")
 	builder.WriteString(fmt.Sprintf("%v", _m.CacheReadCost))

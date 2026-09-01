@@ -58,6 +58,8 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			log.InputCost,
 			log.OutputCost,
 			log.CacheCreationCost,
+			log.CacheCreation5mCost,
+			log.CacheCreation1hCost,
 			log.CacheReadCost,
 			log.TotalCost,
 			log.ActualCost,
@@ -130,6 +132,8 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			log.InputCost,
 			log.OutputCost,
 			log.CacheCreationCost,
+			log.CacheCreation5mCost,
+			log.CacheCreation1hCost,
 			log.CacheReadCost,
 			log.TotalCost,
 			log.ActualCost,
@@ -459,6 +463,8 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			0.1,               // input_cost
 			0.2,               // output_cost
 			0.3,               // cache_creation_cost
+			0.35,              // cache_creation_5m_cost
+			0.36,              // cache_creation_1h_cost
 			0.4,               // cache_read_cost
 			1.0,               // total_cost
 			0.9,               // actual_cost
@@ -504,7 +510,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},
 			sql.NullInt64{},
 			1, 2, 3, 4, 5, 6,
-			0.1, 0.2, 0.3, 0.4, 1.0, 0.9,
+			0.1, 0.2, 0.3, 0.35, 0.36, 0.4, 1.0, 0.9,
 			1.0,
 			sql.NullFloat64{},
 			int16(service.BillingTypeBalance),
@@ -547,7 +553,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},
 			sql.NullInt64{},
 			1, 2, 3, 4, 5, 6,
-			0.1, 0.2, 0.3, 0.4, 1.0, 0.9,
+			0.1, 0.2, 0.3, 0.35, 0.36, 0.4, 1.0, 0.9,
 			1.0,
 			sql.NullFloat64{},
 			int16(service.BillingTypeBalance),

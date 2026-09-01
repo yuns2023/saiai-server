@@ -120,12 +120,14 @@ type ImageUsageTokens struct {
 
 // CostBreakdown 费用明细
 type CostBreakdown struct {
-	InputCost         float64
-	OutputCost        float64
-	CacheCreationCost float64
-	CacheReadCost     float64
-	TotalCost         float64
-	ActualCost        float64 // 应用倍率后的实际费用
+	InputCost           float64
+	OutputCost          float64
+	CacheCreationCost   float64
+	CacheCreation5mCost float64
+	CacheCreation1hCost float64
+	CacheReadCost       float64
+	TotalCost           float64
+	ActualCost          float64 // 应用倍率后的实际费用
 }
 
 // BillingService 计费服务
@@ -412,20 +414,26 @@ func (s *BillingService) CalculateCostWithServiceTier(model string, tokens Usage
 	// 计算输出token费用
 	breakdown.OutputCost = float64(tokens.OutputTokens) * outputPricePerToken
 
-	// 计算缓存费用
+	// 计算缓存费用。保留 5m/1h 分项，供使用明细展示；CacheCreationCost
+	// 仍是两项之和，保持现有扣费语义不变。
 	if pricing.SupportsCacheBreakdown && (cacheCreation5mPrice > 0 || cacheCreation1hPrice > 0) {
 		// 支持详细缓存分类的模型（5分钟/1小时缓存，价格为 per-token）
 		if tokens.CacheCreation5mTokens == 0 && tokens.CacheCreation1hTokens == 0 && tokens.CacheCreationTokens > 0 {
 			// API 未返回 ephemeral 明细，回退到全部按 5m 单价计费
-			breakdown.CacheCreationCost = float64(tokens.CacheCreationTokens) * cacheCreation5mPrice
+			breakdown.CacheCreation5mCost = float64(tokens.CacheCreationTokens) * cacheCreation5mPrice
 		} else {
-			breakdown.CacheCreationCost = float64(tokens.CacheCreation5mTokens)*cacheCreation5mPrice +
-				float64(tokens.CacheCreation1hTokens)*cacheCreation1hPrice
+			breakdown.CacheCreation5mCost = float64(tokens.CacheCreation5mTokens) * cacheCreation5mPrice
+			breakdown.CacheCreation1hCost = float64(tokens.CacheCreation1hTokens) * cacheCreation1hPrice
 		}
 	} else {
 		// 标准缓存创建价格（per-token）
-		breakdown.CacheCreationCost = float64(tokens.CacheCreationTokens) * cacheCreationPricePerToken
+		breakdown.CacheCreation5mCost = float64(tokens.CacheCreation5mTokens) * cacheCreationPricePerToken
+		breakdown.CacheCreation1hCost = float64(tokens.CacheCreation1hTokens) * cacheCreationPricePerToken
+		if tokens.CacheCreation5mTokens == 0 && tokens.CacheCreation1hTokens == 0 {
+			breakdown.CacheCreation5mCost = float64(tokens.CacheCreationTokens) * cacheCreationPricePerToken
+		}
 	}
+	breakdown.CacheCreationCost = breakdown.CacheCreation5mCost + breakdown.CacheCreation1hCost
 
 	breakdown.CacheReadCost = float64(tokens.CacheReadTokens) * cacheReadPricePerToken
 
@@ -433,6 +441,8 @@ func (s *BillingService) CalculateCostWithServiceTier(model string, tokens Usage
 		breakdown.InputCost *= tierMultiplier
 		breakdown.OutputCost *= tierMultiplier
 		breakdown.CacheCreationCost *= tierMultiplier
+		breakdown.CacheCreation5mCost *= tierMultiplier
+		breakdown.CacheCreation1hCost *= tierMultiplier
 		breakdown.CacheReadCost *= tierMultiplier
 	}
 
@@ -620,12 +630,14 @@ func (s *BillingService) CalculateCostWithLongContext(model string, tokens Usage
 
 	// 合并成本
 	return &CostBreakdown{
-		InputCost:         inRangeCost.InputCost + outRangeCost.InputCost,
-		OutputCost:        inRangeCost.OutputCost,
-		CacheCreationCost: inRangeCost.CacheCreationCost,
-		CacheReadCost:     inRangeCost.CacheReadCost + outRangeCost.CacheReadCost,
-		TotalCost:         inRangeCost.TotalCost + outRangeCost.TotalCost,
-		ActualCost:        inRangeCost.ActualCost + outRangeCost.ActualCost,
+		InputCost:           inRangeCost.InputCost + outRangeCost.InputCost,
+		OutputCost:          inRangeCost.OutputCost,
+		CacheCreationCost:   inRangeCost.CacheCreationCost,
+		CacheCreation5mCost: inRangeCost.CacheCreation5mCost,
+		CacheCreation1hCost: inRangeCost.CacheCreation1hCost,
+		CacheReadCost:       inRangeCost.CacheReadCost + outRangeCost.CacheReadCost,
+		TotalCost:           inRangeCost.TotalCost + outRangeCost.TotalCost,
+		ActualCost:          inRangeCost.ActualCost + outRangeCost.ActualCost,
 	}, nil
 }
 

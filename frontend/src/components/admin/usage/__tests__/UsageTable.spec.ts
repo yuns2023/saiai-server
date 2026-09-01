@@ -10,6 +10,12 @@ const messages: Record<string, string> = {
   'admin.usage.outputCost': 'Output Cost',
   'admin.usage.cacheCreationCost': 'Cache Creation Cost',
   'admin.usage.cacheReadCost': 'Cache Read Cost',
+  'admin.usage.cacheCreation5mCost': 'Cache Creation Cost (5m)',
+  'admin.usage.cacheCreation1hCost': 'Cache Creation Cost (1h)',
+  'admin.usage.cacheCreation5mPrice': 'Cache Creation Price (5m)',
+  'admin.usage.cacheCreation1hPrice': 'Cache Creation Price (1h)',
+  'admin.usage.cacheReadPrice': 'Cache Read Price',
+  'admin.usage.cacheCreationPrice': 'Cache Creation Price',
   'usage.inputTokenPrice': 'Input price',
   'usage.outputTokenPrice': 'Output price',
   'usage.perMillionTokens': '/ 1M tokens',
@@ -70,10 +76,16 @@ describe('admin UsageTable tooltip', () => {
       service_tier: 'priority',
       input_cost: 0.020285,
       output_cost: 0.00303,
-      cache_creation_cost: 0,
+      cache_creation_cost: 0.0009,
+      cache_creation_5m_cost: 0.0004,
+      cache_creation_1h_cost: 0.0005,
       cache_read_cost: 0.069568,
       input_tokens: 4057,
       output_tokens: 101,
+      cache_creation_tokens: 200,
+      cache_creation_5m_tokens: 100,
+      cache_creation_1h_tokens: 100,
+      cache_read_tokens: 278272,
     }
 
     const wrapper = mount(UsageTable, {
@@ -108,6 +120,12 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('$0.092883')
     expect(text).toContain('$5.0000 / 1M tokens')
     expect(text).toContain('$30.0000 / 1M tokens')
+    expect(text).toContain('Cache Creation Price (5m)')
+    expect(text).toContain('$4.0000 / 1M tokens')
+    expect(text).toContain('Cache Creation Price (1h)')
+    expect(text).toContain('$5.0000 / 1M tokens')
+    expect(text).toContain('Cache Read Price')
+    expect(text).toContain('$0.2500 / 1M tokens')
     expect(text).toContain('$0.069568')
   })
 })

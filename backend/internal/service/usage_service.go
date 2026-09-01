@@ -33,6 +33,8 @@ type CreateUsageLogRequest struct {
 	InputCost             float64 `json:"input_cost"`
 	OutputCost            float64 `json:"output_cost"`
 	CacheCreationCost     float64 `json:"cache_creation_cost"`
+	CacheCreation5mCost   float64 `json:"cache_creation_5m_cost"`
+	CacheCreation1hCost   float64 `json:"cache_creation_1h_cost"`
 	CacheReadCost         float64 `json:"cache_read_cost"`
 	TotalCost             float64 `json:"total_cost"`
 	ActualCost            float64 `json:"actual_cost"`
@@ -120,6 +122,8 @@ func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*
 		InputCost:             req.InputCost,
 		OutputCost:            req.OutputCost,
 		CacheCreationCost:     req.CacheCreationCost,
+		CacheCreation5mCost:   req.CacheCreation5mCost,
+		CacheCreation1hCost:   req.CacheCreation1hCost,
 		CacheReadCost:         req.CacheReadCost,
 		TotalCost:             req.TotalCost,
 		ActualCost:            req.ActualCost,
