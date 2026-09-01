@@ -425,6 +425,8 @@ func TestAPIContracts(t *testing.T) {
 							"input_cost": 0,
 							"output_cost": 0,
 							"cache_creation_cost": 0,
+							"cache_creation_5m_cost": 0,
+							"cache_creation_1h_cost": 0,
 							"cache_read_cost": 0,
 						"total_cost": 0.5,
 						"actual_cost": 0.5,
@@ -546,6 +548,8 @@ func TestAPIContracts(t *testing.T) {
 					"max_claude_code_version": "",
 					"allow_ungrouped_key_scheduling": false,
 					"backend_mode_enabled": false,
+					"maintenance_mode_enabled": false,
+					"maintenance_message": "系统正在升级维护，请稍候再试。",
 					"custom_menu_items": []
 				}
 			}`,
