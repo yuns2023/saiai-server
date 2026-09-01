@@ -146,12 +146,16 @@ func TestCalculateOpenAI429ResetTime_ReversedWindowOrder(t *testing.T) {
 
 type openAI429SnapshotRepo struct {
 	mockAccountRepoForGemini
-	rateLimitedID int64
-	updatedExtra  map[string]any
+	rateLimitedID  int64
+	rateLimitCalls int
+	rateLimitedAt  time.Time
+	updatedExtra   map[string]any
 }
 
-func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, _ time.Time) error {
+func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
 	r.rateLimitedID = id
+	r.rateLimitCalls++
+	r.rateLimitedAt = resetAt
 	return nil
 }
 
@@ -187,6 +191,45 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	}
 	if got := repo.updatedExtra["codex_7d_used_percent"]; got != 100.0 {
 		t.Fatalf("codex_7d_used_percent = %v, want 100", got)
+	}
+}
+
+func TestHandle429_OpenAINoResetUsesShortCooldownThenEscalates(t *testing.T) {
+	repo := &openAI429SnapshotRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{ID: 456, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	for i := 1; i <= openAINoReset429EscalatedAfter; i++ {
+		before := time.Now()
+		svc.handle429(context.Background(), account, http.Header{}, []byte(`{"detail":"Rate limit exceeded"}`))
+		if repo.rateLimitCalls != i {
+			t.Fatalf("rateLimitCalls = %d, want %d", repo.rateLimitCalls, i)
+		}
+
+		want := openAINoReset429Cooldown
+		if i >= openAINoReset429EscalatedAfter {
+			want = openAINoReset429EscalatedFor
+		}
+		if got := repo.rateLimitedAt.Sub(before); got < want-time.Second || got > want+time.Second {
+			t.Fatalf("hit %d cooldown = %v, want about %v", i, got, want)
+		}
+	}
+}
+
+func TestRecordOpenAINoReset429_ResetsAfterCountWindow(t *testing.T) {
+	svc := &RateLimitService{}
+	start := time.Now()
+
+	for i := 1; i < openAINoReset429EscalatedAfter; i++ {
+		cooldown, count := svc.recordOpenAINoReset429(789, start.Add(time.Duration(i-1)*time.Second))
+		if count != i || cooldown != openAINoReset429Cooldown {
+			t.Fatalf("hit %d: count=%d cooldown=%v", i, count, cooldown)
+		}
+	}
+
+	cooldown, count := svc.recordOpenAINoReset429(789, start.Add(openAINoReset429CountWindow))
+	if count != 1 || cooldown != openAINoReset429Cooldown {
+		t.Fatalf("after count window: count=%d cooldown=%v", count, cooldown)
 	}
 }
 

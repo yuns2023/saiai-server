@@ -26,6 +26,13 @@ type RateLimitService struct {
 	tokenCacheInvalidator TokenCacheInvalidator
 	usageCacheMu          sync.RWMutex
 	usageCache            map[int64]*geminiUsageCacheEntry
+	openAINoReset429Mu    sync.Mutex
+	openAINoReset429      map[int64]openAINoReset429State
+}
+
+type openAINoReset429State struct {
+	windowStart time.Time
+	count       int
 }
 
 // SuccessfulTestRecoveryResult 表示测试成功后恢复了哪些运行时状态。
@@ -52,6 +59,14 @@ type geminiUsageTotalsBatchProvider interface {
 const (
 	geminiPrecheckCacheTTL = time.Minute
 
+	// OpenAI sometimes returns a generic 429 without reset metadata. Keep the
+	// first few such bursts cheap to recover from, then escalate a sustained
+	// burst so the account is not retried on every request.
+	openAINoReset429Cooldown       = 20 * time.Second
+	openAINoReset429EscalatedAfter = 5
+	openAINoReset429EscalatedFor   = 5 * time.Minute
+	openAINoReset429CountWindow    = 5 * time.Minute
+
 	anthropicCarpool5hQuotaExhaustedMessage  = "carpool 5h quota exhausted"
 	anthropicCarpool5hQuotaFallbackCooldown  = 30 * time.Minute
 	anthropicCarpool5hQuotaMaxWindowDuration = 6 * time.Hour
@@ -66,6 +81,37 @@ func NewRateLimitService(accountRepo AccountRepository, usageRepo UsageLogReposi
 		geminiQuotaService: geminiQuotaService,
 		tempUnschedCache:   tempUnschedCache,
 		usageCache:         make(map[int64]*geminiUsageCacheEntry),
+		openAINoReset429:   make(map[int64]openAINoReset429State),
+	}
+}
+
+// recordOpenAINoReset429 records a generic OpenAI 429 in a bounded per-account
+// window. The fifth hit in the window starts the longer protective cooldown.
+func (s *RateLimitService) recordOpenAINoReset429(accountID int64, now time.Time) (time.Duration, int) {
+	s.openAINoReset429Mu.Lock()
+	defer s.openAINoReset429Mu.Unlock()
+
+	if s.openAINoReset429 == nil {
+		s.openAINoReset429 = make(map[int64]openAINoReset429State)
+	}
+	state := s.openAINoReset429[accountID]
+	if state.windowStart.IsZero() || now.Sub(state.windowStart) >= openAINoReset429CountWindow {
+		state = openAINoReset429State{windowStart: now}
+	}
+	state.count++
+	s.openAINoReset429[accountID] = state
+
+	if state.count >= openAINoReset429EscalatedAfter {
+		return openAINoReset429EscalatedFor, state.count
+	}
+	return openAINoReset429Cooldown, state.count
+}
+
+func (s *RateLimitService) clearOpenAINoReset429(accountID int64) {
+	s.openAINoReset429Mu.Lock()
+	defer s.openAINoReset429Mu.Unlock()
+	if s.openAINoReset429 != nil {
+		delete(s.openAINoReset429, accountID)
 	}
 }
 
@@ -809,6 +855,24 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 			return
 		}
 
+		// OpenAI may return a generic 429 without any reset metadata. Treat an
+		// isolated hit as a short backoff, and escalate only a sustained burst.
+		if account.Platform == PlatformOpenAI {
+			now := time.Now()
+			cooldown, count := s.recordOpenAINoReset429(account.ID, now)
+			resetAt := now.Add(cooldown)
+			slog.Warn("openai_rate_limit_no_reset_time",
+				"account_id", account.ID,
+				"cooldown", cooldown.String(),
+				"no_reset_count", count,
+				"escalated_after", openAINoReset429EscalatedAfter,
+			)
+			if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+				slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
+			}
+			return
+		}
+
 		// 其他平台：没有重置时间，使用默认5分钟
 		resetAt := time.Now().Add(5 * time.Minute)
 		slog.Warn("rate_limit_no_reset_time", "account_id", account.ID, "platform", account.Platform, "using_default", "5m")
@@ -1481,6 +1545,7 @@ func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) 
 	if err := s.accountRepo.ClearRateLimit(ctx, accountID); err != nil {
 		return err
 	}
+	s.clearOpenAINoReset429(accountID)
 	if err := s.accountRepo.ClearAntigravityQuotaScopes(ctx, accountID); err != nil {
 		return err
 	}

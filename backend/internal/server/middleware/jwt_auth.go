@@ -57,6 +57,13 @@ func jwtAuth(authService *service.AuthService, userService *service.UserService)
 
 		// 检查用户状态
 		if !user.IsActive() {
+			// Preserve the already-validated user identity for Ops attribution. The
+			// request is still aborted and no downstream handler treats it as auth.
+			c.Set(string(ContextKeyUser), AuthSubject{
+				UserID:      user.ID,
+				Concurrency: user.Concurrency,
+			})
+			c.Set(string(ContextKeyUserRole), user.Role)
 			AbortWithError(c, 401, "USER_INACTIVE", "User account is not active")
 			return
 		}

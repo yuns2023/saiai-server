@@ -51,6 +51,14 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			return
 		}
 		if !apiKey.User.IsActive() {
+			// Preserve the already-validated identity for Ops attribution. The
+			// request is still aborted and no downstream handler treats it as auth.
+			c.Set(string(ContextKeyAPIKey), apiKey)
+			c.Set(string(ContextKeyUser), AuthSubject{
+				UserID:      apiKey.User.ID,
+				Concurrency: apiKey.User.Concurrency,
+			})
+			c.Set(string(ContextKeyUserRole), apiKey.User.Role)
 			abortWithGoogleError(c, 401, "User account is not active")
 			return
 		}

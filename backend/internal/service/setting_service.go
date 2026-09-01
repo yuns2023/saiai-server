@@ -85,8 +85,6 @@ type cachedMaintenanceStatus struct {
 	expiresAt int64
 }
 
-var maintenanceStatusCache atomic.Value // *cachedMaintenanceStatus
-
 const maintenanceStatusCacheTTL = 2 * time.Second
 
 // cachedVersionBounds 缓存 Claude Code 版本号上下限（进程内缓存，60s TTL）
@@ -134,9 +132,10 @@ type SettingService struct {
 	settingRepo           SettingRepository
 	defaultSubGroupReader DefaultSubscriptionGroupReader
 	cfg                   *config.Config
-	onUpdate              func() // Callback when settings are updated (for cache invalidation)
-	onS3Update            func() // Callback when Sora S3 settings are updated
-	version               string // Application version
+	onUpdate              func()       // Callback when settings are updated (for cache invalidation)
+	onS3Update            func()       // Callback when Sora S3 settings are updated
+	version               string       // Application version
+	maintenanceCache      atomic.Value // *cachedMaintenanceStatus
 }
 
 // NewSettingService 创建系统设置服务实例
@@ -167,7 +166,7 @@ func (s *SettingService) GetAllSettings(ctx context.Context) (*SystemSettings, e
 // request middleware for every business request.
 func (s *SettingService) GetMaintenanceStatus(ctx context.Context) (MaintenanceStatus, error) {
 	now := time.Now()
-	if cached, ok := maintenanceStatusCache.Load().(*cachedMaintenanceStatus); ok && cached != nil && now.UnixNano() < cached.expiresAt {
+	if cached, ok := s.maintenanceCache.Load().(*cachedMaintenanceStatus); ok && cached != nil && now.UnixNano() < cached.expiresAt {
 		return cached.status, nil
 	}
 
@@ -179,7 +178,7 @@ func (s *SettingService) GetMaintenanceStatus(ctx context.Context) (MaintenanceS
 		Enabled: values[SettingKeyMaintenanceModeEnabled] == "true",
 		Message: maintenanceMessage(values[SettingKeyMaintenanceMessage]),
 	}
-	maintenanceStatusCache.Store(&cachedMaintenanceStatus{
+	s.maintenanceCache.Store(&cachedMaintenanceStatus{
 		status:    status,
 		expiresAt: now.Add(maintenanceStatusCacheTTL).UnixNano(),
 	})
@@ -578,7 +577,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 
 	err = s.settingRepo.SetMultiple(ctx, updates)
 	if err == nil {
-		maintenanceStatusCache.Store(&cachedMaintenanceStatus{
+		s.maintenanceCache.Store(&cachedMaintenanceStatus{
 			status: MaintenanceStatus{
 				Enabled: settings.MaintenanceModeEnabled,
 				Message: maintenanceMessage(settings.MaintenanceMessage),

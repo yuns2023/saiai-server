@@ -1100,6 +1100,11 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				entry.Platform = apiKey.Group.Platform
 			}
 		}
+		if entry.UserID == nil {
+			if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok && subject.UserID > 0 {
+				entry.UserID = &subject.UserID
+			}
+		}
 
 		var clientIP string
 		if ip := strings.TrimSpace(ip.GetClientIP(c)); ip != "" {
