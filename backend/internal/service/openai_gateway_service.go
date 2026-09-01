@@ -55,10 +55,17 @@ const (
 	// HTTP 500/502/503/504 are retried once on the initially selected account.
 	// Keep this deliberately short: the second failure is handed to failover.
 	openAIHTTPSameAccountRetryBackoff = 100 * time.Millisecond
-	openAICompactSessionSeedKey       = "openai_compact_session_seed"
+	// A reset-less OpenAI 429 can be a short-lived burst. Retry the same request
+	// a bounded number of times before returning the upstream 429 to the client.
+	openAINoReset429RetryLimit  = 5 // total attempts, including the first request
+	openAICompactSessionSeedKey = "openai_compact_session_seed"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
 )
+
+// Kept as a variable so unit tests can avoid waiting while preserving the
+// production default.
+var openAINoReset429RetryBackoff = 3 * time.Second
 
 // OpenAI request header copying is denylist-based so newly introduced
 // OpenAI/Codex client headers are preserved unless they are explicitly unsafe
@@ -1808,6 +1815,37 @@ func shouldRetryOpenAIHTTPOnSameAccount(ctx context.Context, c *gin.Context, sta
 	return !ok || switchCount == 0
 }
 
+// isTransientOpenAINoReset429 identifies a reset-less 429 that is safe to
+// retry within the current request. Explicit quota/usage errors and any
+// parseable reset metadata keep their normal failover/rate-limit behavior.
+func (s *OpenAIGatewayService) isTransientOpenAINoReset429(resp *http.Response, body []byte) bool {
+	if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
+		return false
+	}
+	if strings.TrimSpace(resp.Header.Get("anthropic-ratelimit-unified-reset")) != "" {
+		return false
+	}
+	if s != nil && s.rateLimitService != nil && s.rateLimitService.calculateOpenAI429ResetTime(resp.Header) != nil {
+		return false
+	}
+	if parseOpenAIRateLimitResetTime(body) != nil {
+		return false
+	}
+
+	errType := strings.ToLower(strings.TrimSpace(openAIUpstreamErrorType(body)))
+	errCode := strings.ToLower(strings.TrimSpace(extractUpstreamErrorCode(body)))
+	errMsg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	for _, value := range []string{errType, errCode, errMsg} {
+		if strings.Contains(value, "insufficient_quota") ||
+			strings.Contains(value, "usage_limit") ||
+			strings.Contains(value, "insufficient balance") ||
+			strings.Contains(value, "usage limit has been reached") {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *OpenAIGatewayService) handleFailoverSideEffects(ctx context.Context, resp *http.Response, account *Account) {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, body)
@@ -2291,6 +2329,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	httpInvalidEncryptedContentRetryTried := false
 	httpPreviousResponseRecoveryTried := false
 	httpServerErrorRetryTried := false
+	httpNoReset429Attempts := 0
 	for {
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
@@ -2369,6 +2408,51 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					continue
 				}
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Skip non-WSv2 invalid_encrypted_content retry because encrypted reasoning items are missing (account: %s)", account.Name)
+			}
+			if resp.StatusCode == http.StatusTooManyRequests && s.isTransientOpenAINoReset429(resp, respBody) {
+				httpNoReset429Attempts++
+				if httpNoReset429Attempts < openAINoReset429RetryLimit {
+					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+						Platform:           account.Platform,
+						AccountID:          account.ID,
+						AccountName:        account.Name,
+						UpstreamStatusCode: resp.StatusCode,
+						UpstreamRequestID:  resp.Header.Get("x-request-id"),
+						Kind:               "retry",
+						Message:            upstreamMsg,
+					})
+					logger.LegacyPrintf(
+						"service.openai_gateway",
+						"[OpenAI] Retrying reset-less 429 on the same account (account: %s, attempt: %d/%d, backoff: %s)",
+						account.Name,
+						httpNoReset429Attempts,
+						openAINoReset429RetryLimit,
+						openAINoReset429RetryBackoff,
+					)
+					if err := sleepWithContext(ctx, openAINoReset429RetryBackoff); err != nil {
+						return nil, err
+					}
+					continue
+				}
+				// The final reset-less 429 is returned to the caller. Let the normal
+				// error path persist one short account cooldown, but do not trigger
+				// another account failover for this request.
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: resp.StatusCode,
+					UpstreamRequestID:  resp.Header.Get("x-request-id"),
+					Kind:               "retry_exhausted",
+					Message:            upstreamMsg,
+				})
+				logger.LegacyPrintf(
+					"service.openai_gateway",
+					"[OpenAI] Reset-less 429 retry exhausted; returning to client (account: %s, attempts: %d)",
+					account.Name,
+					httpNoReset429Attempts,
+				)
+				return s.handleErrorResponse(ctx, resp, c, account, body)
 			}
 			if shouldRetryOpenAIHTTPOnSameAccount(ctx, c, resp.StatusCode, httpServerErrorRetryTried) {
 				upstreamDetail := ""

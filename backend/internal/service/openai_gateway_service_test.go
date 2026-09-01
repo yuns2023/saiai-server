@@ -1613,6 +1613,104 @@ func TestOpenAIBuildUpstreamRequestPreservesCompactPathForAPIKeyBaseURL(t *testi
 	require.Equal(t, "https://example.com/v1/responses/compact", req.URL.String())
 }
 
+func TestOpenAIGatewayService_Resetless429RetriesThenSucceeds(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalBackoff := openAINoReset429RetryBackoff
+	openAINoReset429RetryBackoff = 0
+	t.Cleanup(func() { openAINoReset429RetryBackoff = originalBackoff })
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
+	c.Request.Header.Set("Content-Type", "application/json")
+	resetless429 := func() *http.Response {
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"try again"}}`)),
+		}
+	}
+	upstream := &httpUpstreamSequenceRecorder{
+		responses: []*http.Response{
+			resetless429(), resetless429(), resetless429(), resetless429(),
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"id":"resp_ok","model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1}}`)),
+			},
+		},
+	}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          1002,
+		Name:        "openai-test",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5","stream":false,"input":[{"type":"text","text":"hello"}]}`))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 5, upstream.callCount)
+}
+
+func TestOpenAIGatewayService_Resetless429ExhaustionReturnsClient429(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalBackoff := openAINoReset429RetryBackoff
+	openAINoReset429RetryBackoff = 0
+	t.Cleanup(func() { openAINoReset429RetryBackoff = originalBackoff })
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
+	c.Request.Header.Set("Content-Type", "application/json")
+	responses := make([]*http.Response, openAINoReset429RetryLimit)
+	for i := range responses {
+		responses[i] = &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"try again"}}`)),
+		}
+	}
+	upstream := &httpUpstreamSequenceRecorder{responses: responses}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          1003,
+		Name:        "openai-test",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5","stream":false,"input":[{"type":"text","text":"hello"}]}`))
+	require.Error(t, err)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	require.Equal(t, openAINoReset429RetryLimit, upstream.callCount)
+}
+
+func TestOpenAIGatewayService_Resetless429DoesNotRetryQuotaErrors(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}}
+	require.True(t, svc.isTransientOpenAINoReset429(resp, []byte(`{"error":{"type":"rate_limit_error","message":"try again"}}`)))
+	require.False(t, svc.isTransientOpenAINoReset429(resp, []byte(`{"error":{"type":"insufficient_quota","message":"quota exceeded"}}`)))
+	require.False(t, svc.isTransientOpenAINoReset429(resp, []byte(`{"error":{"type":"usage_limit_reached","message":"usage limit has been reached"}}`)))
+}
+
 func TestOpenAIForwardCompactPreservesPreviousResponseIDAndFutureFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
