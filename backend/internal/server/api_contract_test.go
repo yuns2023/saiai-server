@@ -531,6 +531,7 @@ func TestAPIContracts(t *testing.T) {
 					"default_concurrency": 5,
 					"default_balance": 1.25,
 					"default_subscriptions": [],
+					"pricing_model_aliases": {"claude-fable-5.1": "claude-fable-5", "claude-fable-5-1": "claude-fable-5"},
 					"enable_model_fallback": false,
 					"fallback_model_anthropic": "claude-3-5-sonnet-20241022",
 					"fallback_model_antigravity": "gemini-2.5-pro",
