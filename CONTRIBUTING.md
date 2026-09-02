@@ -49,6 +49,8 @@ after focused local checks pass.
 The versioned `scripts/git-hooks/pre-push` hook provides a bounded changed-path
 gate. Install it explicitly if desired, and use `PREPUSH_DRY_RUN=1` to inspect
 its plan without running build checks. It never installs frontend dependencies.
+Run `tools/install-repo-hooks.sh` once per checkout; it verifies the canonical
+Server remote before setting `core.hooksPath`.
 
 If an Ent schema changes, regenerate and commit the generated output:
 
