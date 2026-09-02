@@ -105,6 +105,22 @@ restored by that switch.
 All tests for this behavior use local mock upstreams and do not issue provider
 model requests.
 
+### Reset-less OpenAI 429 retry
+
+OpenAI HTTP `429` responses with no parseable reset metadata may represent a
+short-lived burst. When the response body does not identify an explicit quota
+or usage-limit failure, the Gateway retries the same request at most five total
+attempts (the initial request plus four retries), waiting three seconds between
+attempts. This retry is bounded by the request context and only runs before
+any client response has started.
+
+After the fifth failed attempt, the Gateway returns HTTP `429` to the client
+and applies the normal short account cooldown. A later series of independent
+failures can still reach the existing account-level escalation policy. Parsed
+reset metadata, `insufficient_quota`, `usage_limit_reached`, and equivalent
+quota messages keep their normal failover/rate-limit handling. OpenAI WebSocket
+handshake/reconnect behavior is governed by its separate WS retry policy.
+
 ## Account-scoped device authorization failures
 
 An Anthropic-compatible HTTP `400` that says the upstream device authorization
