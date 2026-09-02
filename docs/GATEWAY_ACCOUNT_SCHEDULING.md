@@ -96,10 +96,12 @@ at most one same-account replay for HTTP `500`, `502`, `503`, or `504`. This
 applies to standard Claude forwarding, Anthropic API-key passthrough, Bedrock,
 OpenAI Responses, and OpenAI Messages compatibility forwarding.
 
-The replay does not apply to HTTP `501`, `505`, `429`, or `529`, transport
-errors, a response that has already started, or any request after an account
-switch. After the one replay is consumed, the existing account-failover policy
-may still choose a different account; the dedicated replay budget is never
+The replay does not apply to HTTP `501`, `505`, or `529`, transport errors, a
+response that has already started, or any request after an account switch. A
+normal HTTP `429` also goes directly through the account-failover policy; the
+only exception is the reset-less, transient OpenAI `429` retry described below.
+After the one replay is consumed, the existing account-failover policy may
+still choose a different account; the dedicated replay budget is never
 restored by that switch.
 
 All tests for this behavior use local mock upstreams and do not issue provider
