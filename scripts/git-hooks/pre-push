@@ -66,6 +66,10 @@ if [ "$uncertain" -eq 1 ]; then
   [ -d "$repo_root/frontend" ] && need_frontend=1
 fi
 
+if [ -x "$repo_root/scripts/git-hooks/assert-repo-role.sh" ]; then
+  "$repo_root/scripts/git-hooks/assert-repo-role.sh" "$remote_name" "$need_backend" "$need_frontend"
+fi
+
 if [ "$need_backend" -eq 0 ] && [ "$need_frontend" -eq 0 ]; then
   echo "[pre-push] no backend/frontend changes; skipping local build checks"
   exit 0
