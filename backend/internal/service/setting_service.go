@@ -31,6 +31,45 @@ func parseAPIEndpoints(raw string) []APIEndpoint {
 	return endpoints
 }
 
+func parsePricingModelAliases(raw string) map[string]string {
+	if strings.TrimSpace(raw) == "" {
+		return map[string]string{
+			"claude-fable-5.1": "claude-fable-5",
+			"claude-fable-5-1": "claude-fable-5",
+		}
+	}
+	aliases := map[string]string{}
+	_ = json.Unmarshal([]byte(raw), &aliases)
+	if aliases == nil {
+		aliases = map[string]string{}
+	}
+	return aliases
+}
+
+func validatePricingModelAliases(aliases map[string]string) error {
+	for requestModel, pricingModel := range aliases {
+		requestModel = strings.ToLower(strings.TrimSpace(requestModel))
+		pricingModel = strings.ToLower(strings.TrimSpace(pricingModel))
+		if requestModel == "" || pricingModel == "" || requestModel == pricingModel {
+			return infraerrors.BadRequest("INVALID_PRICING_MODEL_ALIAS", "invalid pricing model alias")
+		}
+		seen := map[string]struct{}{requestModel: {}}
+		current := pricingModel
+		for i := 0; i < len(aliases); i++ {
+			next, ok := aliases[current]
+			if !ok {
+				break
+			}
+			current = strings.ToLower(strings.TrimSpace(next))
+			if _, exists := seen[current]; exists {
+				return infraerrors.BadRequest("INVALID_PRICING_MODEL_ALIAS", "pricing model aliases cannot contain cycles")
+			}
+			seen[current] = struct{}{}
+		}
+	}
+	return nil
+}
+
 func filterEnabledAPIEndpoints(endpoints []APIEndpoint) []APIEndpoint {
 	result := make([]APIEndpoint, 0, len(endpoints))
 	for _, endpoint := range endpoints {
@@ -462,6 +501,9 @@ func parseCustomMenuItemURLs(raw string) []string {
 
 // UpdateSettings 更新系统设置
 func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSettings) error {
+	if err := validatePricingModelAliases(settings.PricingModelAliases); err != nil {
+		return err
+	}
 	if err := s.validateDefaultSubscriptionGroups(ctx, settings.DefaultSubscriptions); err != nil {
 		return err
 	}
@@ -543,6 +585,15 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 		return fmt.Errorf("marshal default subscriptions: %w", err)
 	}
 	updates[SettingKeyDefaultSubscriptions] = string(defaultSubsJSON)
+	pricingAliases := settings.PricingModelAliases
+	if pricingAliases == nil {
+		pricingAliases = map[string]string{}
+	}
+	pricingAliasesJSON, err := json.Marshal(pricingAliases)
+	if err != nil {
+		return fmt.Errorf("marshal pricing model aliases: %w", err)
+	}
+	updates[SettingKeyPricingModelAliases] = string(pricingAliasesJSON)
 
 	// Model fallback configuration
 	updates[SettingKeyEnableModelFallback] = strconv.FormatBool(settings.EnableModelFallback)
@@ -832,6 +883,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyDefaultConcurrency:               strconv.Itoa(s.cfg.Default.UserConcurrency),
 		SettingKeyDefaultBalance:                   strconv.FormatFloat(s.cfg.Default.UserBalance, 'f', 8, 64),
 		SettingKeyDefaultSubscriptions:             "[]",
+		SettingKeyPricingModelAliases:              `{"claude-fable-5.1":"claude-fable-5","claude-fable-5-1":"claude-fable-5"}`,
 		SettingKeySMTPPort:                         "587",
 		SettingKeySMTPUseTLS:                       "false",
 		// Model fallback defaults
@@ -923,6 +975,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.DefaultBalance = s.cfg.Default.UserBalance
 	}
 	result.DefaultSubscriptions = parseDefaultSubscriptions(settings[SettingKeyDefaultSubscriptions])
+	result.PricingModelAliases = parsePricingModelAliases(settings[SettingKeyPricingModelAliases])
 
 	// 敏感信息直接返回，方便测试连接时使用
 	result.SMTPPassword = settings[SettingKeySMTPPassword]

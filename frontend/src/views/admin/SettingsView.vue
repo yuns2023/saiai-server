@@ -827,6 +827,29 @@
             </div>
           </div>
         </div>
+
+        <div class="card">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">计费模型价格映射</h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">仅影响计费使用的价格模型，不会改变发送到上游的模型名称。</p>
+          </div>
+          <div class="space-y-4 p-6">
+            <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+              映射目标必须存在于当前价格源或 fallback 价格表中。
+            </div>
+            <div v-if="Object.keys(form.pricing_model_aliases || {}).length === 0" class="text-sm text-gray-500 dark:text-gray-400">暂无价格映射。</div>
+            <div v-for="source in Object.keys(form.pricing_model_aliases || {})" :key="source" class="grid grid-cols-1 gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600 md:grid-cols-[1fr_1fr_auto] md:items-end">
+              <div><label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">请求模型</label><input :value="source" type="text" class="input font-mono text-sm" disabled /></div>
+              <div><label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">计费价格模型</label><input v-model="form.pricing_model_aliases[source]" type="text" class="input font-mono text-sm" /></div>
+              <button type="button" class="btn btn-secondary text-red-600 hover:text-red-700" @click="deletePricingAlias(source)">删除</button>
+            </div>
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
+              <input v-model="newPricingAliasSource" type="text" class="input font-mono text-sm" placeholder="例如 claude-fable-5.1" />
+              <input v-model="newPricingAliasTarget" type="text" class="input font-mono text-sm" placeholder="例如 claude-fable-5" />
+              <button type="button" class="btn btn-secondary" @click="addPricingAlias">添加映射</button>
+            </div>
+          </div>
+        </div>
         </div><!-- /Tab: Gateway — Claude Code, Scheduling -->
 
         <!-- Tab: General -->
@@ -1490,6 +1513,8 @@ const adminApiKeyMasked = ref('')
 const adminApiKeyOperating = ref(false)
 const newAdminApiKey = ref('')
 const subscriptionGroups = ref<AdminGroup[]>([])
+const newPricingAliasSource = ref('')
+const newPricingAliasTarget = ref('')
 
 // Overload Cooldown (529) 状态
 const overloadCooldownLoading = ref(true)
@@ -1527,6 +1552,10 @@ const form = reactive<SettingsForm>({
   default_balance: 0,
   default_concurrency: 1,
   default_subscriptions: [],
+  pricing_model_aliases: {
+    'claude-fable-5.1': 'claude-fable-5',
+    'claude-fable-5-1': 'claude-fable-5'
+  },
   site_name: 'SAiAi',
   site_logo: '',
   site_subtitle: 'Subscription to API Conversion Platform',
@@ -1723,6 +1752,24 @@ function removeAPIEndpoint(index: number) {
   form.api_endpoints.splice(index, 1)
 }
 
+function addPricingAlias() {
+  const source = newPricingAliasSource.value.trim().toLowerCase()
+  const target = newPricingAliasTarget.value.trim().toLowerCase()
+  if (!source || !target || source === target) {
+    appStore.showError('请输入不同的请求模型和计费价格模型')
+    return
+  }
+  form.pricing_model_aliases = { ...(form.pricing_model_aliases || {}), [source]: target }
+  newPricingAliasSource.value = ''
+  newPricingAliasTarget.value = ''
+}
+
+function deletePricingAlias(source: string) {
+  const aliases = { ...(form.pricing_model_aliases || {}) }
+  delete aliases[source]
+  form.pricing_model_aliases = aliases
+}
+
 async function loadSettings() {
   loading.value = true
   try {
@@ -1856,6 +1903,7 @@ async function saveSettings() {
       default_balance: form.default_balance,
       default_concurrency: form.default_concurrency,
       default_subscriptions: normalizedDefaultSubscriptions,
+      pricing_model_aliases: form.pricing_model_aliases || {},
       site_name: form.site_name,
       site_logo: form.site_logo,
       site_subtitle: form.site_subtitle,

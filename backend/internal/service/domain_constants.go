@@ -140,6 +140,7 @@ const (
 	SettingKeyDefaultConcurrency   = "default_concurrency"   // 新用户默认并发量
 	SettingKeyDefaultBalance       = "default_balance"       // 新用户默认余额
 	SettingKeyDefaultSubscriptions = "default_subscriptions" // 新用户默认订阅列表（JSON）
+	SettingKeyPricingModelAliases  = "pricing_model_aliases" // 计费价格模型映射（JSON 对象）
 
 	// 管理员 API Key
 	SettingKeyAdminAPIKey = "admin_api_key" // 全局管理员 API Key（用于外部系统集成）

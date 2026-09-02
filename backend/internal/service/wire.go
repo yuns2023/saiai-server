@@ -12,8 +12,13 @@ import (
 )
 
 // ProvidePricingService creates and initializes PricingService
-func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient) (*PricingService, error) {
+func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient, settingRepo SettingRepository) (*PricingService, error) {
 	svc := NewPricingService(cfg, remoteClient)
+	if settingRepo != nil {
+		if raw, err := settingRepo.GetValue(context.Background(), SettingKeyPricingModelAliases); err == nil {
+			svc.SetModelAliases(parsePricingModelAliases(raw))
+		}
+	}
 	if err := svc.Initialize(); err != nil {
 		// Pricing service initialization failure should not block startup, use fallback prices
 		println("[Service] Warning: Pricing service initialization failed:", err.Error())

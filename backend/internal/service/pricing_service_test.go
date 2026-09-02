@@ -389,3 +389,26 @@ func TestParsePricingData_PreservesServiceTierPriorityFields(t *testing.T) {
 	require.InDelta(t, 0.0000005, pricing.CacheReadInputTokenCostPriority, 1e-12)
 	require.True(t, pricing.SupportsServiceTier)
 }
+
+func TestGetModelPricing_UsesConfiguredAlias(t *testing.T) {
+	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"claude-fable-5":   {InputCostPerToken: 10e-6, CacheReadInputTokenCost: 1e-6},
+		"claude-fable-5.1": {InputCostPerToken: 20e-6, CacheReadInputTokenCost: 0.5e-6},
+	}, modelAliases: map[string]string{"claude-fable-5.1": "claude-fable-5"}}
+
+	pricing := svc.GetModelPricing("claude-fable-5.1")
+	require.NotNil(t, pricing)
+	require.InDelta(t, 10e-6, pricing.InputCostPerToken, 1e-12)
+	require.InDelta(t, 1e-6, pricing.CacheReadInputTokenCost, 1e-12)
+}
+
+func TestGetModelPricing_UsesHyphenatedConfiguredAlias(t *testing.T) {
+	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"claude-fable-5":   {InputCostPerToken: 10e-6},
+		"claude-fable-5-1": {InputCostPerToken: 20e-6},
+	}, modelAliases: map[string]string{"claude-fable-5-1": "claude-fable-5"}}
+
+	pricing := svc.GetModelPricing("claude-fable-5-1")
+	require.NotNil(t, pricing)
+	require.InDelta(t, 10e-6, pricing.InputCostPerToken, 1e-12)
+}

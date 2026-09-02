@@ -96,6 +96,7 @@ type PricingService struct {
 	pricingData  map[string]*LiteLLMModelPricing
 	lastUpdated  time.Time
 	localHash    string
+	modelAliases map[string]string
 
 	// 停止信号
 	stopCh chan struct{}
@@ -108,9 +109,29 @@ func NewPricingService(cfg *config.Config, remoteClient PricingRemoteClient) *Pr
 		cfg:          cfg,
 		remoteClient: remoteClient,
 		pricingData:  make(map[string]*LiteLLMModelPricing),
-		stopCh:       make(chan struct{}),
+		modelAliases: map[string]string{
+			"claude-fable-5.1": "claude-fable-5",
+			"claude-fable-5-1": "claude-fable-5",
+		},
+		stopCh: make(chan struct{}),
 	}
 	return s
+}
+
+// SetModelAliases replaces request-model -> pricing-model aliases used by
+// billing lookups. It never changes upstream model routing.
+func (s *PricingService) SetModelAliases(aliases map[string]string) {
+	normalized := make(map[string]string, len(aliases))
+	for requestModel, pricingModel := range aliases {
+		requestModel = strings.ToLower(strings.TrimSpace(requestModel))
+		pricingModel = strings.ToLower(strings.TrimSpace(pricingModel))
+		if requestModel != "" && pricingModel != "" && requestModel != pricingModel {
+			normalized[requestModel] = pricingModel
+		}
+	}
+	s.mu.Lock()
+	s.modelAliases = normalized
+	s.mu.Unlock()
 }
 
 // Initialize 初始化价格服务
@@ -579,6 +600,9 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 
 	// 标准化模型名称（同时兼容 "models/xxx"、VertexAI 资源名等前缀）
 	modelLower := strings.ToLower(strings.TrimSpace(modelName))
+	if alias, ok := s.modelAliases[modelLower]; ok && alias != "" {
+		modelLower = alias
+	}
 	lookupCandidates := s.buildModelLookupCandidates(modelLower)
 
 	// 1. 精确匹配
