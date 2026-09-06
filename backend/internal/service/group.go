@@ -1,8 +1,16 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+)
+
+const (
+	maxBlockedModelPatterns      = 100
+	maxBlockedModelPatternLength = 200
 )
 
 const (
@@ -63,6 +71,9 @@ type Group struct {
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled bool
 
+	// 分组模型拒绝列表。规则支持 * 通配符，空列表表示不限制。
+	BlockedModelPatterns []string
+
 	// MCP XML 协议注入开关（仅 antigravity 平台使用）
 	MCPXMLInject bool
 
@@ -93,6 +104,102 @@ type Group struct {
 	AccountCount            int64
 	ActiveAccountCount      int64
 	RateLimitedAccountCount int64
+}
+
+// NormalizeBlockedModelPatterns trims, lower-cases and de-duplicates group
+// model denylist patterns. Empty entries are ignored so the admin UI can send
+// a trailing blank line without changing the policy.
+func NormalizeBlockedModelPatterns(patterns []string) ([]string, error) {
+	if len(patterns) > maxBlockedModelPatterns {
+		return nil, fmt.Errorf("blocked_model_patterns cannot contain more than %d patterns", maxBlockedModelPatterns)
+	}
+
+	result := make([]string, 0, len(patterns))
+	seen := make(map[string]struct{}, len(patterns))
+	for _, raw := range patterns {
+		pattern := strings.ToLower(strings.TrimSpace(raw))
+		if pattern == "" {
+			continue
+		}
+		if len(pattern) > maxBlockedModelPatternLength {
+			return nil, fmt.Errorf("blocked model pattern cannot exceed %d characters", maxBlockedModelPatternLength)
+		}
+		if strings.ContainsAny(pattern, "\r\n\t") {
+			return nil, fmt.Errorf("blocked model pattern cannot contain control whitespace")
+		}
+		if _, ok := seen[pattern]; ok {
+			continue
+		}
+		seen[pattern] = struct{}{}
+		result = append(result, pattern)
+	}
+	return result, nil
+}
+
+// IsModelBlocked reports whether the requested model matches a group denylist
+// pattern. Matching is case-insensitive and supports * at any position. For
+// Claude aliases, both the inbound name and its normalized OAuth name are
+// checked so aliases cannot bypass a canonical-model rule.
+func (g *Group) IsModelBlocked(requestedModel string) bool {
+	if g == nil || len(g.BlockedModelPatterns) == 0 {
+		return false
+	}
+	model := strings.ToLower(strings.TrimSpace(requestedModel))
+	if model == "" {
+		return false
+	}
+	models := []string{model}
+	if normalized := strings.ToLower(strings.TrimSpace(claude.NormalizeModelID(model))); normalized != "" && normalized != model {
+		models = append(models, normalized)
+	}
+	if denormalized := strings.ToLower(strings.TrimSpace(claude.DenormalizeModelID(model))); denormalized != "" && denormalized != model {
+		models = append(models, denormalized)
+	}
+	for _, rawPattern := range g.BlockedModelPatterns {
+		pattern := strings.ToLower(strings.TrimSpace(rawPattern))
+		if pattern == "" {
+			continue
+		}
+		for _, candidate := range models {
+			if matchBlockedModelPattern(pattern, candidate) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// matchBlockedModelPattern implements a linear-time glob matcher with only
+// '*' wildcard semantics. It deliberately does not interpret regex syntax.
+func matchBlockedModelPattern(pattern, model string) bool {
+	pattern = strings.ToLower(pattern)
+	model = strings.ToLower(model)
+	patternIndex, modelIndex := 0, 0
+	starIndex, starMatchIndex := -1, 0
+	for modelIndex < len(model) {
+		if patternIndex < len(pattern) && pattern[patternIndex] == model[modelIndex] {
+			patternIndex++
+			modelIndex++
+			continue
+		}
+		if patternIndex < len(pattern) && pattern[patternIndex] == '*' {
+			starIndex = patternIndex
+			starMatchIndex = modelIndex
+			patternIndex++
+			continue
+		}
+		if starIndex >= 0 {
+			patternIndex = starIndex + 1
+			starMatchIndex++
+			modelIndex = starMatchIndex
+			continue
+		}
+		return false
+	}
+	for patternIndex < len(pattern) && pattern[patternIndex] == '*' {
+		patternIndex++
+	}
+	return patternIndex == len(pattern)
 }
 
 // DecodeGroupModelRouting separates SAIAI's group-scoped compatibility flags

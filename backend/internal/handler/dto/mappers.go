@@ -149,6 +149,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		ClaudeDeviceBaseLimit:            g.ClaudeDeviceBaseLimit,
 		ModelRouting:                     g.ModelRouting,
 		ModelRoutingEnabled:              g.ModelRoutingEnabled,
+		BlockedModelPatterns:             g.BlockedModelPatterns,
 		MCPXMLInject:                     g.MCPXMLInject,
 		SupportedModelScopes:             g.SupportedModelScopes,
 		AccountCount:                     g.AccountCount,

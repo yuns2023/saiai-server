@@ -50,12 +50,13 @@ func TestGroupRepoSuite(t *testing.T) {
 
 func (s *GroupRepoSuite) TestCreate() {
 	group := &service.Group{
-		Name:             "test-create",
-		Platform:         service.PlatformAnthropic,
-		RateMultiplier:   1.0,
-		IsExclusive:      false,
-		Status:           service.StatusActive,
-		SubscriptionType: service.SubscriptionTypeStandard,
+		Name:                 "test-create",
+		Platform:             service.PlatformAnthropic,
+		RateMultiplier:       1.0,
+		IsExclusive:          false,
+		Status:               service.StatusActive,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		BlockedModelPatterns: []string{"claude-fable-*", "gpt-4o"},
 	}
 
 	err := s.repo.Create(s.ctx, group)
@@ -65,6 +66,7 @@ func (s *GroupRepoSuite) TestCreate() {
 	got, err := s.repo.GetByID(s.ctx, group.ID)
 	s.Require().NoError(err, "GetByID")
 	s.Require().Equal("test-create", got.Name)
+	s.Require().Equal([]string{"claude-fable-*", "gpt-4o"}, got.BlockedModelPatterns)
 }
 
 func (s *GroupRepoSuite) TestGetByID_NotFound() {

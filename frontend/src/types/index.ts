@@ -431,6 +431,9 @@ export interface AdminGroup extends Group {
   model_routing: Record<string, number[]> | null
   model_routing_enabled: boolean
 
+  // 分组模型拒绝列表（仅管理员可见，支持 * 通配符）
+  blocked_model_patterns: string[]
+
   // MCP XML 协议注入（仅 antigravity 平台使用）
   mcp_xml_inject: boolean
   // Claude usage 模拟开关（仅 anthropic 平台使用）
@@ -543,6 +546,7 @@ export interface CreateGroupRequest {
   claude_environment_rewrite?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
+  blocked_model_patterns?: string[]
   mcp_xml_inject?: boolean
   simulate_claude_max_enabled?: boolean
   supported_model_scopes?: string[]
@@ -588,6 +592,7 @@ export interface UpdateGroupRequest {
   claude_environment_rewrite?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
+  blocked_model_patterns?: string[]
   mcp_xml_inject?: boolean
   simulate_claude_max_enabled?: boolean
   supported_model_scopes?: string[]

@@ -1814,6 +1814,11 @@ export default {
         hint: '仅当上游明确返回 prompt too long 时才会触发，留空表示不兜底',
         noFallback: '不兜底'
       },
+      blockedModels: {
+        title: '禁止使用的模型',
+        placeholder: '每行一个模式，例如 claude-fable-5-1 或 gpt-4o*',
+        hint: '命中任意模式的请求会在账号选择前被拒绝。支持任意位置的 * 通配符；留空表示允许所有模型。'
+      },
       copyAccounts: {
         title: '从分组复制账号',
         tooltip: '选择一个或多个相同平台的分组，创建后会自动将这些分组的所有账号绑定到新分组（去重）。',

@@ -153,7 +153,9 @@ type CreateGroupInput struct {
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled bool // 是否启用模型路由
-	MCPXMLInject        *bool
+	// 分组模型拒绝列表，空数组表示不限制。
+	BlockedModelPatterns []string
+	MCPXMLInject         *bool
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes []string
 	// Sora 存储配额
@@ -205,7 +207,9 @@ type UpdateGroupInput struct {
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled *bool // 是否启用模型路由
-	MCPXMLInject        *bool
+	// 分组模型拒绝列表。非 nil 时替换整个列表，空数组表示清空。
+	BlockedModelPatterns *[]string
+	MCPXMLInject         *bool
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes *[]string
 	// Sora 存储配额
@@ -885,6 +889,10 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	dailyLimit := normalizeLimit(input.DailyLimitUSD)
 	weeklyLimit := normalizeLimit(input.WeeklyLimitUSD)
 	monthlyLimit := normalizeLimit(input.MonthlyLimitUSD)
+	blockedModelPatterns, err := NormalizeBlockedModelPatterns(input.BlockedModelPatterns)
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_BLOCKED_MODEL_PATTERNS", err.Error())
+	}
 
 	// 图片价格：负数表示清除（使用默认价格），0 保留（表示免费）
 	imagePrice1K := normalizePrice(input.ImagePrice1K)
@@ -978,6 +986,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		FallbackGroupID:                  input.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest:  fallbackOnInvalidRequest,
 		ModelRouting:                     input.ModelRouting,
+		BlockedModelPatterns:             blockedModelPatterns,
 		MCPXMLInject:                     mcpXMLInject,
 		SupportedModelScopes:             input.SupportedModelScopes,
 		SoraStorageQuotaBytes:            input.SoraStorageQuotaBytes,
@@ -1266,6 +1275,13 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.ModelRoutingEnabled != nil {
 		group.ModelRoutingEnabled = *input.ModelRoutingEnabled
+	}
+	if input.BlockedModelPatterns != nil {
+		blockedModelPatterns, normalizeErr := NormalizeBlockedModelPatterns(*input.BlockedModelPatterns)
+		if normalizeErr != nil {
+			return nil, infraerrors.BadRequest("INVALID_BLOCKED_MODEL_PATTERNS", normalizeErr.Error())
+		}
+		group.BlockedModelPatterns = blockedModelPatterns
 	}
 	if input.MCPXMLInject != nil {
 		group.MCPXMLInject = *input.MCPXMLInject

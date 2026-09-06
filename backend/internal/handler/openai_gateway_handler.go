@@ -152,6 +152,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	reqModel := modelResult.String()
+	if apiKey.Group != nil && apiKey.Group.IsModelBlocked(reqModel) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", fmt.Sprintf("Model %s is not allowed for this group", reqModel))
+		return
+	}
 	usageSessionID := service.ResolveOpenAIUsageSessionID(
 		c.GetHeader("session_id"),
 		c.GetHeader("conversation_id"),
@@ -805,6 +809,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
 		return
 	}
+	if apiKey.Group != nil && apiKey.Group.IsModelBlocked(reqModel) {
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, fmt.Sprintf("model %s is not allowed for this group", reqModel))
+		return
+	}
 	if apiKey.Group != nil && !codexClientPolicyMatched(c, apiKey.Group.CodexClientPolicy) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "approved Codex client required")
 		return
@@ -929,6 +937,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 	hooks := &service.OpenAIWSIngressHooks{
 		OnClientTurn: func(turn int, rawPayload []byte) error {
+			turnModel := strings.TrimSpace(gjson.GetBytes(rawPayload, "model").String())
+			if apiKey.Group != nil && apiKey.Group.IsModelBlocked(turnModel) {
+				return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("model %s is not allowed for this group", turnModel), nil)
+			}
 			if err := h.revalidateOpenAIWSTurn(ctx, apiKey, turn); err != nil {
 				return err
 			}

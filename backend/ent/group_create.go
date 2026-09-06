@@ -418,6 +418,12 @@ func (_c *GroupCreate) SetModelRouting(v map[string][]int64) *GroupCreate {
 	return _c
 }
 
+// SetBlockedModelPatterns sets the "blocked_model_patterns" field.
+func (_c *GroupCreate) SetBlockedModelPatterns(v []string) *GroupCreate {
+	_c.mutation.SetBlockedModelPatterns(v)
+	return _c
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_c *GroupCreate) SetModelRoutingEnabled(v bool) *GroupCreate {
 	_c.mutation.SetModelRoutingEnabled(v)
@@ -793,6 +799,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultClaudeOauthRequestGateDisabled
 		_c.mutation.SetClaudeOauthRequestGateDisabled(v)
 	}
+	if _, ok := _c.mutation.BlockedModelPatterns(); !ok {
+		v := group.DefaultBlockedModelPatterns
+		_c.mutation.SetBlockedModelPatterns(v)
+	}
 	if _, ok := _c.mutation.ModelRoutingEnabled(); !ok {
 		v := group.DefaultModelRoutingEnabled
 		_c.mutation.SetModelRoutingEnabled(v)
@@ -916,6 +926,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.ClaudeOauthRequestGateDisabled(); !ok {
 		return &ValidationError{Name: "claude_oauth_request_gate_disabled", err: errors.New(`ent: missing required field "Group.claude_oauth_request_gate_disabled"`)}
+	}
+	if _, ok := _c.mutation.BlockedModelPatterns(); !ok {
+		return &ValidationError{Name: "blocked_model_patterns", err: errors.New(`ent: missing required field "Group.blocked_model_patterns"`)}
 	}
 	if _, ok := _c.mutation.ModelRoutingEnabled(); !ok {
 		return &ValidationError{Name: "model_routing_enabled", err: errors.New(`ent: missing required field "Group.model_routing_enabled"`)}
@@ -1119,6 +1132,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ModelRouting(); ok {
 		_spec.SetField(group.FieldModelRouting, field.TypeJSON, value)
 		_node.ModelRouting = value
+	}
+	if value, ok := _c.mutation.BlockedModelPatterns(); ok {
+		_spec.SetField(group.FieldBlockedModelPatterns, field.TypeJSON, value)
+		_node.BlockedModelPatterns = value
 	}
 	if value, ok := _c.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)
@@ -1861,6 +1878,18 @@ func (u *GroupUpsert) UpdateModelRouting() *GroupUpsert {
 // ClearModelRouting clears the value of the "model_routing" field.
 func (u *GroupUpsert) ClearModelRouting() *GroupUpsert {
 	u.SetNull(group.FieldModelRouting)
+	return u
+}
+
+// SetBlockedModelPatterns sets the "blocked_model_patterns" field.
+func (u *GroupUpsert) SetBlockedModelPatterns(v []string) *GroupUpsert {
+	u.Set(group.FieldBlockedModelPatterns, v)
+	return u
+}
+
+// UpdateBlockedModelPatterns sets the "blocked_model_patterns" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateBlockedModelPatterns() *GroupUpsert {
+	u.SetExcluded(group.FieldBlockedModelPatterns)
 	return u
 }
 
@@ -2738,6 +2767,20 @@ func (u *GroupUpsertOne) UpdateModelRouting() *GroupUpsertOne {
 func (u *GroupUpsertOne) ClearModelRouting() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearModelRouting()
+	})
+}
+
+// SetBlockedModelPatterns sets the "blocked_model_patterns" field.
+func (u *GroupUpsertOne) SetBlockedModelPatterns(v []string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetBlockedModelPatterns(v)
+	})
+}
+
+// UpdateBlockedModelPatterns sets the "blocked_model_patterns" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateBlockedModelPatterns() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateBlockedModelPatterns()
 	})
 }
 
@@ -3817,6 +3860,20 @@ func (u *GroupUpsertBulk) UpdateModelRouting() *GroupUpsertBulk {
 func (u *GroupUpsertBulk) ClearModelRouting() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearModelRouting()
+	})
+}
+
+// SetBlockedModelPatterns sets the "blocked_model_patterns" field.
+func (u *GroupUpsertBulk) SetBlockedModelPatterns(v []string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetBlockedModelPatterns(v)
+	})
+}
+
+// UpdateBlockedModelPatterns sets the "blocked_model_patterns" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateBlockedModelPatterns() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateBlockedModelPatterns()
 	})
 }
 

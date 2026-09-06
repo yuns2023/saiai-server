@@ -109,7 +109,7 @@ type Group struct {
 }
 
 // AdminGroup 是管理员接口使用的 group DTO（包含敏感/内部字段）。
-// 注意：普通用户接口不得返回 model_routing/account_count/account_groups 等内部信息。
+// 注意：普通用户接口不得返回 model_routing/blocked_model_patterns/account_count/account_groups 等内部信息。
 type AdminGroup struct {
 	Group
 
@@ -128,6 +128,8 @@ type AdminGroup struct {
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64 `json:"model_routing"`
 	ModelRoutingEnabled bool               `json:"model_routing_enabled"`
+	// 分组模型拒绝列表（仅管理员可见）
+	BlockedModelPatterns []string `json:"blocked_model_patterns"`
 
 	// MCP XML 协议注入（仅 antigravity 平台使用）
 	MCPXMLInject bool `json:"mcp_xml_inject"`

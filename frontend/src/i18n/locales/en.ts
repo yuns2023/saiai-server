@@ -1729,6 +1729,11 @@ export default {
         hint: 'Triggered only when upstream explicitly returns prompt too long. Leave empty to disable fallback.',
         noFallback: 'No Fallback'
       },
+      blockedModels: {
+        title: 'Blocked Models',
+        placeholder: 'One pattern per line, e.g. claude-fable-5-1 or gpt-4o*',
+        hint: 'Requests matching any pattern are rejected before account selection. Supports * anywhere; leave empty to allow all models.'
+      },
       copyAccounts: {
         title: 'Copy Accounts from Groups',
         tooltip: 'Select one or more groups of the same platform. After creation, all accounts from these groups will be automatically bound to the new group (deduplicated).',

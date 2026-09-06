@@ -90,3 +90,47 @@ func TestGroup_GetImagePrice_PartialConfig(t *testing.T) {
 	require.Nil(t, group.GetImagePrice("2K"))
 	require.Nil(t, group.GetImagePrice("4K"))
 }
+
+func TestGroup_IsModelBlocked(t *testing.T) {
+	group := &Group{BlockedModelPatterns: []string{
+		"claude-fable-5-1",
+		"claude-opus-*",
+		"gpt-*-mini",
+		"*-preview",
+	}}
+
+	tests := []struct {
+		model   string
+		blocked bool
+	}{
+		{model: "claude-fable-5-1", blocked: true},
+		{model: " CLAUDE-FABLE-5-1 ", blocked: true},
+		{model: "claude-opus-4-6", blocked: true},
+		{model: "gpt-5-mini", blocked: true},
+		{model: "vendor-preview", blocked: true},
+		{model: "gpt-5", blocked: false},
+		{model: "claude-sonnet-4-5", blocked: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			require.Equal(t, tt.blocked, group.IsModelBlocked(tt.model))
+		})
+	}
+}
+
+func TestGroup_IsModelBlockedMatchesClaudeNormalizedAlias(t *testing.T) {
+	group := &Group{BlockedModelPatterns: []string{"claude-sonnet-4-5-20250929"}}
+	require.True(t, group.IsModelBlocked("claude-sonnet-4-5"))
+
+	group = &Group{BlockedModelPatterns: []string{"claude-sonnet-4-5"}}
+	require.True(t, group.IsModelBlocked("claude-sonnet-4-5-20250929"))
+}
+
+func TestNormalizeBlockedModelPatterns(t *testing.T) {
+	got, err := NormalizeBlockedModelPatterns([]string{" Claude-Fable-* ", "claude-fable-*", "", "gpt-4o*"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"claude-fable-*", "gpt-4o*"}, got)
+
+	_, err = NormalizeBlockedModelPatterns([]string{"bad\npattern"})
+	require.Error(t, err)
+}

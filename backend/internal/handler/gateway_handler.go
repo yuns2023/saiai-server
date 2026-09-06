@@ -554,6 +554,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
+	if apiKey.Group != nil && apiKey.Group.IsModelBlocked(reqModel) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", fmt.Sprintf("Model %s is not allowed for this group", reqModel))
+		return
+	}
 
 	// Track if we've started streaming (for error handling)
 	streamStarted := false
@@ -1115,6 +1119,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 							return
 						}
+						if fallbackGroup.IsModelBlocked(reqModel) {
+							h.errorResponse(c, http.StatusForbidden, "permission_error", fmt.Sprintf("Model %s is not allowed for the fallback group", reqModel))
+							return
+						}
 						if fallbackGroup.Platform != service.PlatformAnthropic ||
 							fallbackGroup.SubscriptionType == service.SubscriptionTypeSubscription ||
 							fallbackGroup.FallbackGroupIDOnInvalidRequest != nil {
@@ -1248,9 +1256,19 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 
 	if platform == service.PlatformSora {
+		models := service.DefaultSoraModels(h.cfg)
+		if apiKey != nil && apiKey.Group != nil {
+			filtered := make([]openai.Model, 0, len(models))
+			for _, model := range models {
+				if !apiKey.Group.IsModelBlocked(model.ID) {
+					filtered = append(filtered, model)
+				}
+			}
+			models = filtered
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"object": "list",
-			"data":   service.DefaultSoraModels(h.cfg),
+			"data":   models,
 		})
 		return
 	}
@@ -1259,6 +1277,15 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, "")
 
 	if len(availableModels) > 0 {
+		if apiKey != nil && apiKey.Group != nil {
+			filtered := make([]string, 0, len(availableModels))
+			for _, modelID := range availableModels {
+				if !apiKey.Group.IsModelBlocked(modelID) {
+					filtered = append(filtered, modelID)
+				}
+			}
+			availableModels = filtered
+		}
 		// Build model list from whitelist
 		models := make([]claude.Model, 0, len(availableModels))
 		for _, modelID := range availableModels {
@@ -1276,27 +1303,65 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
-	// Fallback to default models by platform
+	// Fallback to default models by platform. Model discovery is filtered for
+	// convenience, but request-time policy remains authoritative.
 	switch platform {
 	case "openai":
+		models := openai.DefaultModels
+		if apiKey != nil && apiKey.Group != nil {
+			filtered := make([]openai.Model, 0, len(models))
+			for _, model := range models {
+				if !apiKey.Group.IsModelBlocked(model.ID) {
+					filtered = append(filtered, model)
+				}
+			}
+			models = filtered
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"object": "list",
-			"data":   openai.DefaultModels,
+			"data":   models,
 		})
 	case service.PlatformGemini:
+		models := geminicli.DefaultModels
+		if apiKey != nil && apiKey.Group != nil {
+			filtered := make([]geminicli.Model, 0, len(models))
+			for _, model := range models {
+				if !apiKey.Group.IsModelBlocked(model.ID) {
+					filtered = append(filtered, model)
+				}
+			}
+			models = filtered
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"object": "list",
-			"data":   geminicli.DefaultModels,
+			"data":   models,
 		})
 	case service.PlatformAntigravity:
-		c.JSON(http.StatusOK, gin.H{
-			"object": "list",
-			"data":   antigravity.DefaultModels(),
-		})
+		models := antigravity.DefaultModels()
+		if apiKey != nil && apiKey.Group != nil {
+			filtered := make([]antigravity.ClaudeModel, 0, len(models))
+			for _, model := range models {
+				if !apiKey.Group.IsModelBlocked(model.ID) {
+					filtered = append(filtered, model)
+				}
+			}
+			models = filtered
+		}
+		c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
 	default:
+		models := claude.DefaultModels
+		if apiKey != nil && apiKey.Group != nil {
+			filtered := make([]claude.Model, 0, len(models))
+			for _, model := range models {
+				if !apiKey.Group.IsModelBlocked(model.ID) {
+					filtered = append(filtered, model)
+				}
+			}
+			models = filtered
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"object": "list",
-			"data":   claude.DefaultModels,
+			"data":   models,
 		})
 	}
 }
@@ -1304,9 +1369,19 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 // AntigravityModels 返回 Antigravity 支持的全部模型
 // GET /antigravity/models
 func (h *GatewayHandler) AntigravityModels(c *gin.Context) {
+	models := antigravity.DefaultModels()
+	if apiKey, ok := middleware2.GetAPIKeyFromContext(c); ok && apiKey != nil && apiKey.Group != nil {
+		filtered := make([]antigravity.ClaudeModel, 0, len(models))
+		for _, model := range models {
+			if !apiKey.Group.IsModelBlocked(model.ID) {
+				filtered = append(filtered, model)
+			}
+		}
+		models = filtered
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"object": "list",
-		"data":   antigravity.DefaultModels(),
+		"data":   models,
 	})
 }
 
@@ -1872,6 +1947,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// 验证 model 必填
 	if parsedReq.Model == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
+		return
+	}
+	if apiKey.Group != nil && apiKey.Group.IsModelBlocked(parsedReq.Model) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", fmt.Sprintf("Model %s is not allowed for this group", parsedReq.Model))
 		return
 	}
 

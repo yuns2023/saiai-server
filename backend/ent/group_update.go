@@ -619,6 +619,18 @@ func (_u *GroupUpdate) ClearModelRouting() *GroupUpdate {
 	return _u
 }
 
+// SetBlockedModelPatterns sets the "blocked_model_patterns" field.
+func (_u *GroupUpdate) SetBlockedModelPatterns(v []string) *GroupUpdate {
+	_u.mutation.SetBlockedModelPatterns(v)
+	return _u
+}
+
+// AppendBlockedModelPatterns appends value to the "blocked_model_patterns" field.
+func (_u *GroupUpdate) AppendBlockedModelPatterns(v []string) *GroupUpdate {
+	_u.mutation.AppendBlockedModelPatterns(v)
+	return _u
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_u *GroupUpdate) SetModelRoutingEnabled(v bool) *GroupUpdate {
 	_u.mutation.SetModelRoutingEnabled(v)
@@ -1361,6 +1373,14 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.ModelRoutingCleared() {
 		_spec.ClearField(group.FieldModelRouting, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.BlockedModelPatterns(); ok {
+		_spec.SetField(group.FieldBlockedModelPatterns, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedBlockedModelPatterns(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldBlockedModelPatterns, value)
+		})
 	}
 	if value, ok := _u.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)
@@ -2333,6 +2353,18 @@ func (_u *GroupUpdateOne) ClearModelRouting() *GroupUpdateOne {
 	return _u
 }
 
+// SetBlockedModelPatterns sets the "blocked_model_patterns" field.
+func (_u *GroupUpdateOne) SetBlockedModelPatterns(v []string) *GroupUpdateOne {
+	_u.mutation.SetBlockedModelPatterns(v)
+	return _u
+}
+
+// AppendBlockedModelPatterns appends value to the "blocked_model_patterns" field.
+func (_u *GroupUpdateOne) AppendBlockedModelPatterns(v []string) *GroupUpdateOne {
+	_u.mutation.AppendBlockedModelPatterns(v)
+	return _u
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_u *GroupUpdateOne) SetModelRoutingEnabled(v bool) *GroupUpdateOne {
 	_u.mutation.SetModelRoutingEnabled(v)
@@ -3105,6 +3137,14 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if _u.mutation.ModelRoutingCleared() {
 		_spec.ClearField(group.FieldModelRouting, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.BlockedModelPatterns(); ok {
+		_spec.SetField(group.FieldBlockedModelPatterns, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedBlockedModelPatterns(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldBlockedModelPatterns, value)
+		})
 	}
 	if value, ok := _u.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)

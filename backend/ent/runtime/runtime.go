@@ -449,70 +449,74 @@ func init() {
 	groupDescClaudeOauthRequestGateDisabled := groupFields[22].Descriptor()
 	// group.DefaultClaudeOauthRequestGateDisabled holds the default value on creation for the claude_oauth_request_gate_disabled field.
 	group.DefaultClaudeOauthRequestGateDisabled = groupDescClaudeOauthRequestGateDisabled.Default.(bool)
+	// groupDescBlockedModelPatterns is the schema descriptor for blocked_model_patterns field.
+	groupDescBlockedModelPatterns := groupFields[26].Descriptor()
+	// group.DefaultBlockedModelPatterns holds the default value on creation for the blocked_model_patterns field.
+	group.DefaultBlockedModelPatterns = groupDescBlockedModelPatterns.Default.([]string)
 	// groupDescModelRoutingEnabled is the schema descriptor for model_routing_enabled field.
-	groupDescModelRoutingEnabled := groupFields[26].Descriptor()
+	groupDescModelRoutingEnabled := groupFields[27].Descriptor()
 	// group.DefaultModelRoutingEnabled holds the default value on creation for the model_routing_enabled field.
 	group.DefaultModelRoutingEnabled = groupDescModelRoutingEnabled.Default.(bool)
 	// groupDescMcpXMLInject is the schema descriptor for mcp_xml_inject field.
-	groupDescMcpXMLInject := groupFields[27].Descriptor()
+	groupDescMcpXMLInject := groupFields[28].Descriptor()
 	// group.DefaultMcpXMLInject holds the default value on creation for the mcp_xml_inject field.
 	group.DefaultMcpXMLInject = groupDescMcpXMLInject.Default.(bool)
 	// groupDescSupportedModelScopes is the schema descriptor for supported_model_scopes field.
-	groupDescSupportedModelScopes := groupFields[28].Descriptor()
+	groupDescSupportedModelScopes := groupFields[29].Descriptor()
 	// group.DefaultSupportedModelScopes holds the default value on creation for the supported_model_scopes field.
 	group.DefaultSupportedModelScopes = groupDescSupportedModelScopes.Default.([]string)
 	// groupDescSortOrder is the schema descriptor for sort_order field.
-	groupDescSortOrder := groupFields[29].Descriptor()
+	groupDescSortOrder := groupFields[30].Descriptor()
 	// group.DefaultSortOrder holds the default value on creation for the sort_order field.
 	group.DefaultSortOrder = groupDescSortOrder.Default.(int)
 	// groupDescInputModerationEnabled is the schema descriptor for input_moderation_enabled field.
-	groupDescInputModerationEnabled := groupFields[30].Descriptor()
+	groupDescInputModerationEnabled := groupFields[31].Descriptor()
 	// group.DefaultInputModerationEnabled holds the default value on creation for the input_moderation_enabled field.
 	group.DefaultInputModerationEnabled = groupDescInputModerationEnabled.Default.(bool)
 	// groupDescInputModerationAutoDisableUser is the schema descriptor for input_moderation_auto_disable_user field.
-	groupDescInputModerationAutoDisableUser := groupFields[31].Descriptor()
+	groupDescInputModerationAutoDisableUser := groupFields[32].Descriptor()
 	// group.DefaultInputModerationAutoDisableUser holds the default value on creation for the input_moderation_auto_disable_user field.
 	group.DefaultInputModerationAutoDisableUser = groupDescInputModerationAutoDisableUser.Default.(bool)
 	// groupDescInputModerationCategories is the schema descriptor for input_moderation_categories field.
-	groupDescInputModerationCategories := groupFields[32].Descriptor()
+	groupDescInputModerationCategories := groupFields[33].Descriptor()
 	// group.DefaultInputModerationCategories holds the default value on creation for the input_moderation_categories field.
 	group.DefaultInputModerationCategories = groupDescInputModerationCategories.Default.([]string)
 	// groupDescInputModerationActionMode is the schema descriptor for input_moderation_action_mode field.
-	groupDescInputModerationActionMode := groupFields[33].Descriptor()
+	groupDescInputModerationActionMode := groupFields[34].Descriptor()
 	// group.DefaultInputModerationActionMode holds the default value on creation for the input_moderation_action_mode field.
 	group.DefaultInputModerationActionMode = groupDescInputModerationActionMode.Default.(string)
 	// group.InputModerationActionModeValidator is a validator for the "input_moderation_action_mode" field. It is called by the builders before save.
 	group.InputModerationActionModeValidator = groupDescInputModerationActionMode.Validators[0].(func(string) error)
 	// groupDescInputModerationCooldownMinutes is the schema descriptor for input_moderation_cooldown_minutes field.
-	groupDescInputModerationCooldownMinutes := groupFields[34].Descriptor()
+	groupDescInputModerationCooldownMinutes := groupFields[35].Descriptor()
 	// group.DefaultInputModerationCooldownMinutes holds the default value on creation for the input_moderation_cooldown_minutes field.
 	group.DefaultInputModerationCooldownMinutes = groupDescInputModerationCooldownMinutes.Default.(int)
 	// groupDescInputModerationDisableAfterHits is the schema descriptor for input_moderation_disable_after_hits field.
-	groupDescInputModerationDisableAfterHits := groupFields[35].Descriptor()
+	groupDescInputModerationDisableAfterHits := groupFields[36].Descriptor()
 	// group.DefaultInputModerationDisableAfterHits holds the default value on creation for the input_moderation_disable_after_hits field.
 	group.DefaultInputModerationDisableAfterHits = groupDescInputModerationDisableAfterHits.Default.(int)
 	// groupDescInputModerationStrikeWindowHours is the schema descriptor for input_moderation_strike_window_hours field.
-	groupDescInputModerationStrikeWindowHours := groupFields[36].Descriptor()
+	groupDescInputModerationStrikeWindowHours := groupFields[37].Descriptor()
 	// group.DefaultInputModerationStrikeWindowHours holds the default value on creation for the input_moderation_strike_window_hours field.
 	group.DefaultInputModerationStrikeWindowHours = groupDescInputModerationStrikeWindowHours.Default.(int)
 	// groupDescInputModerationDedupeMinutes is the schema descriptor for input_moderation_dedupe_minutes field.
-	groupDescInputModerationDedupeMinutes := groupFields[37].Descriptor()
+	groupDescInputModerationDedupeMinutes := groupFields[38].Descriptor()
 	// group.DefaultInputModerationDedupeMinutes holds the default value on creation for the input_moderation_dedupe_minutes field.
 	group.DefaultInputModerationDedupeMinutes = groupDescInputModerationDedupeMinutes.Default.(int)
 	// groupDescCodexClientPolicy is the schema descriptor for codex_client_policy field.
-	groupDescCodexClientPolicy := groupFields[38].Descriptor()
+	groupDescCodexClientPolicy := groupFields[39].Descriptor()
 	// group.DefaultCodexClientPolicy holds the default value on creation for the codex_client_policy field.
 	group.DefaultCodexClientPolicy = groupDescCodexClientPolicy.Default.(string)
 	// group.CodexClientPolicyValidator is a validator for the "codex_client_policy" field. It is called by the builders before save.
 	group.CodexClientPolicyValidator = groupDescCodexClientPolicy.Validators[0].(func(string) error)
 	// groupDescClaudeDeviceLimitMode is the schema descriptor for claude_device_limit_mode field.
-	groupDescClaudeDeviceLimitMode := groupFields[39].Descriptor()
+	groupDescClaudeDeviceLimitMode := groupFields[40].Descriptor()
 	// group.DefaultClaudeDeviceLimitMode holds the default value on creation for the claude_device_limit_mode field.
 	group.DefaultClaudeDeviceLimitMode = groupDescClaudeDeviceLimitMode.Default.(string)
 	// group.ClaudeDeviceLimitModeValidator is a validator for the "claude_device_limit_mode" field. It is called by the builders before save.
 	group.ClaudeDeviceLimitModeValidator = groupDescClaudeDeviceLimitMode.Validators[0].(func(string) error)
 	// groupDescClaudeDeviceBaseLimit is the schema descriptor for claude_device_base_limit field.
-	groupDescClaudeDeviceBaseLimit := groupFields[40].Descriptor()
+	groupDescClaudeDeviceBaseLimit := groupFields[41].Descriptor()
 	// group.DefaultClaudeDeviceBaseLimit holds the default value on creation for the claude_device_base_limit field.
 	group.DefaultClaudeDeviceBaseLimit = groupDescClaudeDeviceBaseLimit.Default.(int)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()

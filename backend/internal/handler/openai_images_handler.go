@@ -66,6 +66,10 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	if apiKey.Group.IsModelBlocked(model) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", fmt.Sprintf("Model %s is not allowed for this group", model))
+		return
+	}
 	reqLog = reqLog.With(zap.String("model", model))
 	if err := h.gatewayService.ValidateOpenAIImagePricing(model); err != nil {
 		reqLog.Warn("openai.image_pricing_unavailable", zap.Error(err))

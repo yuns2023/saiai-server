@@ -816,6 +816,22 @@
           <p class="input-hint">{{ t('admin.groups.invalidRequestFallback.hint') }}</p>
         </div>
 
+        <!-- 分组模型拒绝列表 -->
+        <div class="border-t pt-4">
+          <div class="mb-1.5 flex items-center gap-1">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t('admin.groups.blockedModels.title') }}
+            </label>
+          </div>
+          <textarea
+            v-model="createForm.blocked_model_patterns_text"
+            rows="3"
+            class="input w-full font-mono text-sm"
+            :placeholder="t('admin.groups.blockedModels.placeholder')"
+          />
+          <p class="input-hint whitespace-pre-line">{{ t('admin.groups.blockedModels.hint') }}</p>
+        </div>
+
         <!-- 模型路由配置（仅 anthropic 平台） -->
         <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -1551,6 +1567,22 @@
           <p class="input-hint">{{ t('admin.groups.invalidRequestFallback.hint') }}</p>
         </div>
 
+        <!-- 分组模型拒绝列表 -->
+        <div class="border-t pt-4">
+          <div class="mb-1.5 flex items-center gap-1">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t('admin.groups.blockedModels.title') }}
+            </label>
+          </div>
+          <textarea
+            v-model="editForm.blocked_model_patterns_text"
+            rows="3"
+            class="input w-full font-mono text-sm"
+            :placeholder="t('admin.groups.blockedModels.placeholder')"
+          />
+          <p class="input-hint whitespace-pre-line">{{ t('admin.groups.blockedModels.hint') }}</p>
+        </div>
+
         <!-- 模型路由配置（仅 anthropic 平台） -->
         <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -2090,6 +2122,7 @@ const createForm = reactive({
   claude_environment_mode: 'off' as ClaudeEnvironmentMode,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  blocked_model_patterns_text: '',
   input_moderation_enabled: false,
   input_moderation_auto_disable_user: false,
   input_moderation_categories: ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts'] as string[],
@@ -2209,6 +2242,18 @@ const removeSelectedAccount = (rule: ModelRoutingRule, accountId: number, _isEdi
   rule.accounts = rule.accounts.filter(a => a.id !== accountId)
 }
 
+const parseBlockedModelPatterns = (value: string): string[] => {
+  const seen = new Set<string>()
+  const patterns: string[] = []
+  for (const raw of value.split(/\r?\n/)) {
+    const pattern = raw.trim().toLowerCase()
+    if (!pattern || seen.has(pattern)) continue
+    seen.add(pattern)
+    patterns.push(pattern)
+  }
+  return patterns
+}
+
 // 处理账号搜索输入框聚焦
 const onAccountSearchFocus = (rule: ModelRoutingRule, isEdit: boolean = false) => {
   const key = getRuleSearchKey(rule, isEdit)
@@ -2316,6 +2361,7 @@ const editForm = reactive({
   claude_environment_mode: 'off' as ClaudeEnvironmentMode,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  blocked_model_patterns_text: '',
   input_moderation_enabled: false,
   input_moderation_auto_disable_user: false,
   input_moderation_categories: ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts'] as string[],
@@ -2466,6 +2512,7 @@ const closeCreateModal = () => {
   createForm.claude_environment_mode = 'off'
   createForm.fallback_group_id = null
   createForm.fallback_group_id_on_invalid_request = null
+  createForm.blocked_model_patterns_text = ''
   createForm.input_moderation_enabled = false
   createForm.input_moderation_auto_disable_user = false
   createForm.input_moderation_categories = ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts']
@@ -2506,13 +2553,15 @@ const handleCreateGroup = async () => {
   submitting.value = true
   try {
     // 构建请求数据，包含模型路由配置
+    const { blocked_model_patterns_text, ...createRest } = createForm
     const requestData = {
-      ...createForm,
+      ...createRest,
       five_hour_limit_usd: normalizeOptionalLimit(createForm.five_hour_limit_usd as number | string | null),
       daily_limit_usd: normalizeOptionalLimit(createForm.daily_limit_usd as number | string | null),
       weekly_limit_usd: normalizeOptionalLimit(createForm.weekly_limit_usd as number | string | null),
       monthly_limit_usd: normalizeOptionalLimit(createForm.monthly_limit_usd as number | string | null),
-      model_routing: convertRoutingRulesToApiFormat(createModelRoutingRules.value)
+      model_routing: convertRoutingRulesToApiFormat(createModelRoutingRules.value),
+      blocked_model_patterns: parseBlockedModelPatterns(blocked_model_patterns_text)
     }
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => v === '' ? null : v
@@ -2559,6 +2608,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.claude_environment_mode = group.claude_environment_mode || (group.claude_environment_rewrite ? 'rewrite' : 'off')
   editForm.fallback_group_id = group.fallback_group_id
   editForm.fallback_group_id_on_invalid_request = group.fallback_group_id_on_invalid_request
+  editForm.blocked_model_patterns_text = (group.blocked_model_patterns || []).join('\n')
   editForm.input_moderation_enabled = group.input_moderation_enabled || false
   editForm.input_moderation_auto_disable_user = group.input_moderation_auto_disable_user || false
   editForm.input_moderation_categories = [...(group.input_moderation_categories || [])]
@@ -2586,6 +2636,7 @@ const closeEditModal = () => {
   editingGroup.value = null
   editModelRoutingRules.value = []
   editForm.copy_accounts_from_group_ids = []
+  editForm.blocked_model_patterns_text = ''
 }
 
 const handleUpdateGroup = async () => {
@@ -2598,8 +2649,9 @@ const handleUpdateGroup = async () => {
   submitting.value = true
   try {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
+    const { blocked_model_patterns_text, ...editRest } = editForm
     const payload = {
-      ...editForm,
+      ...editRest,
       five_hour_limit_usd: normalizeOptionalLimit(editForm.five_hour_limit_usd as number | string | null),
       daily_limit_usd: normalizeOptionalLimit(editForm.daily_limit_usd as number | string | null),
       weekly_limit_usd: normalizeOptionalLimit(editForm.weekly_limit_usd as number | string | null),
@@ -2609,7 +2661,8 @@ const handleUpdateGroup = async () => {
         editForm.fallback_group_id_on_invalid_request === null
           ? 0
           : editForm.fallback_group_id_on_invalid_request,
-      model_routing: convertRoutingRulesToApiFormat(editModelRoutingRules.value)
+      model_routing: convertRoutingRulesToApiFormat(editModelRoutingRules.value),
+      blocked_model_patterns: parseBlockedModelPatterns(blocked_model_patterns_text)
     }
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => v === '' ? null : v

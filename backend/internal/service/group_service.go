@@ -45,19 +45,21 @@ type GroupSortOrderUpdate struct {
 
 // CreateGroupRequest 创建分组请求
 type CreateGroupRequest struct {
-	Name           string  `json:"name"`
-	Description    string  `json:"description"`
-	RateMultiplier float64 `json:"rate_multiplier"`
-	IsExclusive    bool    `json:"is_exclusive"`
+	Name                 string   `json:"name"`
+	Description          string   `json:"description"`
+	RateMultiplier       float64  `json:"rate_multiplier"`
+	IsExclusive          bool     `json:"is_exclusive"`
+	BlockedModelPatterns []string `json:"blocked_model_patterns"`
 }
 
 // UpdateGroupRequest 更新分组请求
 type UpdateGroupRequest struct {
-	Name           *string  `json:"name"`
-	Description    *string  `json:"description"`
-	RateMultiplier *float64 `json:"rate_multiplier"`
-	IsExclusive    *bool    `json:"is_exclusive"`
-	Status         *string  `json:"status"`
+	Name                 *string   `json:"name"`
+	Description          *string   `json:"description"`
+	RateMultiplier       *float64  `json:"rate_multiplier"`
+	IsExclusive          *bool     `json:"is_exclusive"`
+	Status               *string   `json:"status"`
+	BlockedModelPatterns *[]string `json:"blocked_model_patterns"`
 }
 
 // GroupService 分组管理服务
@@ -76,6 +78,10 @@ func NewGroupService(groupRepo GroupRepository, authCacheInvalidator APIKeyAuthC
 
 // Create 创建分组
 func (s *GroupService) Create(ctx context.Context, req CreateGroupRequest) (*Group, error) {
+	blockedModelPatterns, err := NormalizeBlockedModelPatterns(req.BlockedModelPatterns)
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_BLOCKED_MODEL_PATTERNS", err.Error())
+	}
 	// 检查名称是否已存在
 	exists, err := s.groupRepo.ExistsByName(ctx, req.Name)
 	if err != nil {
@@ -87,13 +93,14 @@ func (s *GroupService) Create(ctx context.Context, req CreateGroupRequest) (*Gro
 
 	// 创建分组
 	group := &Group{
-		Name:             req.Name,
-		Description:      req.Description,
-		Platform:         PlatformAnthropic,
-		RateMultiplier:   req.RateMultiplier,
-		IsExclusive:      req.IsExclusive,
-		Status:           StatusActive,
-		SubscriptionType: SubscriptionTypeStandard,
+		Name:                 req.Name,
+		Description:          req.Description,
+		Platform:             PlatformAnthropic,
+		RateMultiplier:       req.RateMultiplier,
+		IsExclusive:          req.IsExclusive,
+		Status:               StatusActive,
+		SubscriptionType:     SubscriptionTypeStandard,
+		BlockedModelPatterns: blockedModelPatterns,
 	}
 
 	if err := s.groupRepo.Create(ctx, group); err != nil {
@@ -164,6 +171,13 @@ func (s *GroupService) Update(ctx context.Context, id int64, req UpdateGroupRequ
 
 	if req.Status != nil {
 		group.Status = *req.Status
+	}
+	if req.BlockedModelPatterns != nil {
+		blockedModelPatterns, normalizeErr := NormalizeBlockedModelPatterns(*req.BlockedModelPatterns)
+		if normalizeErr != nil {
+			return nil, infraerrors.BadRequest("INVALID_BLOCKED_MODEL_PATTERNS", normalizeErr.Error())
+		}
+		group.BlockedModelPatterns = blockedModelPatterns
 	}
 
 	if err := s.groupRepo.Update(ctx, group); err != nil {
