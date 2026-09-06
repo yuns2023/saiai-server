@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-func TestClaudeCodeNativeDowngradeCommand(t *testing.T) {
-	command := claudeCodeNativeDowngradeInstruction("2.1.258")
+func TestClaudeCodeNativeVersionInstruction(t *testing.T) {
+	command := claudeCodeNativeVersionInstruction("2.1.258")
 	if !strings.Contains(command, "curl -fsSL https://claude.ai/install.sh | bash -s 2.1.258") {
 		t.Fatalf("native downgrade command = %q", command)
 	}

@@ -33,13 +33,13 @@ import (
 
 const gatewayCompatibilityMetricsLogInterval = 1024
 
-// claudeCodeNativeDowngradeCommand is pinned to the official native installer
+// claudeCodeNativeInstallCommand is pinned to the official native installer
 // syntax verified by the SAIAI compatibility probe. The version argument is
 // supplied only after the admin setting has passed semver validation.
-const claudeCodeNativeDowngradeCommand = "curl -fsSL https://claude.ai/install.sh | bash -s %s"
+const claudeCodeNativeInstallCommand = "curl -fsSL https://claude.ai/install.sh | bash -s %s"
 
-func claudeCodeNativeDowngradeInstruction(version string) string {
-	return fmt.Sprintf(claudeCodeNativeDowngradeCommand, version) + " && export DISABLE_AUTOUPDATER=1"
+func claudeCodeNativeVersionInstruction(version string) string {
+	return fmt.Sprintf(claudeCodeNativeInstallCommand, version) + " && export DISABLE_AUTOUPDATER=1"
 }
 
 var gatewayCompatibilityMetricsLogCounter atomic.Uint64
@@ -1871,8 +1871,9 @@ func (h *GatewayHandler) checkClaudeCodeVersion(c *gin.Context) bool {
 
 	if minVersion != "" && service.CompareVersions(clientVersion, minVersion) < 0 {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error",
-			fmt.Sprintf("Your Claude Code version (%s) is below the minimum required version (%s). Please update: npm update -g @anthropic-ai/claude-code",
-				clientVersion, minVersion))
+			fmt.Sprintf("Your Claude Code version (%s) is below the minimum required version (%s). "+
+				"For the native Linux client, update with: %s",
+				clientVersion, minVersion, claudeCodeNativeVersionInstruction(minVersion)))
 		return false
 	}
 
@@ -1880,7 +1881,7 @@ func (h *GatewayHandler) checkClaudeCodeVersion(c *gin.Context) bool {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error",
 			fmt.Sprintf("Your Claude Code version (%s) exceeds the maximum allowed version (%s). "+
 				"For the native Linux client, downgrade with: %s",
-				clientVersion, maxVersion, claudeCodeNativeDowngradeInstruction(maxVersion)))
+				clientVersion, maxVersion, claudeCodeNativeVersionInstruction(maxVersion)))
 		return false
 	}
 
