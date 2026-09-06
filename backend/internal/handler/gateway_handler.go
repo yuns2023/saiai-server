@@ -33,6 +33,15 @@ import (
 
 const gatewayCompatibilityMetricsLogInterval = 1024
 
+// claudeCodeNativeDowngradeCommand is pinned to the official native installer
+// syntax verified by the SAIAI compatibility probe. The version argument is
+// supplied only after the admin setting has passed semver validation.
+const claudeCodeNativeDowngradeCommand = "curl -fsSL https://claude.ai/install.sh | bash -s %s"
+
+func claudeCodeNativeDowngradeInstruction(version string) string {
+	return fmt.Sprintf(claudeCodeNativeDowngradeCommand, version) + " && export DISABLE_AUTOUPDATER=1"
+}
+
 var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 
 // GatewayHandler handles API gateway requests
@@ -1870,9 +1879,8 @@ func (h *GatewayHandler) checkClaudeCodeVersion(c *gin.Context) bool {
 	if maxVersion != "" && service.CompareVersions(clientVersion, maxVersion) > 0 {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error",
 			fmt.Sprintf("Your Claude Code version (%s) exceeds the maximum allowed version (%s). "+
-				"Please downgrade: npm install -g @anthropic-ai/claude-code@%s && "+
-				"set CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 to prevent auto-upgrade",
-				clientVersion, maxVersion, maxVersion))
+				"For the native Linux client, downgrade with: %s",
+				clientVersion, maxVersion, claudeCodeNativeDowngradeInstruction(maxVersion)))
 		return false
 	}
 
