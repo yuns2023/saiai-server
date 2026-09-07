@@ -52,6 +52,7 @@ type openAIWSTransportMetricsDialer interface {
 func newDefaultOpenAIWSClientDialer() openAIWSClientDialer {
 	return &coderOpenAIWSClientDialer{
 		proxyClients: make(map[string]*openAIWSProxyClientEntry),
+		trace:        newOpenAIWSTraceFromEnv(),
 	}
 }
 
@@ -60,6 +61,7 @@ type coderOpenAIWSClientDialer struct {
 	proxyClients map[string]*openAIWSProxyClientEntry
 	proxyHits    atomic.Int64
 	proxyMisses  atomic.Int64
+	trace        *openAIWSTrace
 }
 
 type openAIWSProxyClientEntry struct {
@@ -76,6 +78,15 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	targetURL := strings.TrimSpace(wsURL)
 	if targetURL == "" {
 		return nil, 0, nil, errors.New("ws url is empty")
+	}
+	if d.trace != nil {
+		d.trace.write(map[string]any{
+			"event":     "handshake",
+			"direction": "to_openai",
+			"url":       wsURL,
+			"proxy":     proxyURL,
+			"headers":   traceHeaders(headers),
+		})
 	}
 
 	opts := &coderws.DialOptions{
@@ -98,6 +109,15 @@ func (d *coderOpenAIWSClientDialer) Dial(
 			status = resp.StatusCode
 			respHeaders = cloneHeader(resp.Header)
 		}
+		if d.trace != nil {
+			d.trace.write(map[string]any{
+				"event":     "handshake_response",
+				"direction": "from_openai",
+				"status":    status,
+				"headers":   traceHeaders(respHeaders),
+				"error":     errorString(err),
+			})
+		}
 		return nil, status, respHeaders, err
 	}
 	// coder/websocket 默认单消息读取上限为 32KB，Codex WS 事件（如 rate_limits/大 delta）
@@ -106,6 +126,16 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	respHeaders := http.Header(nil)
 	if resp != nil {
 		respHeaders = cloneHeader(resp.Header)
+	}
+	if d.trace != nil {
+		d.trace.write(map[string]any{
+			"event":     "handshake_response",
+			"direction": "from_openai",
+			"status":    101,
+			"headers":   traceHeaders(respHeaders),
+			"error":     "",
+		})
+		return &openAIWSTracedConn{inner: &coderOpenAIWSClientConn{conn: conn}, trace: d.trace}, 0, respHeaders, nil
 	}
 	return &coderOpenAIWSClientConn{conn: conn}, 0, respHeaders, nil
 }
