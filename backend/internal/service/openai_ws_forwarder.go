@@ -1193,6 +1193,11 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 	for k, v := range reqBody {
 		payload[k] = v
 	}
+	if account != nil && account.Type == AccountTypeOAuth {
+		// Official Codex OAuth payloads are already in the native Responses
+		// WebSocket shape. Preserve every field and value at this boundary.
+		return payload
+	}
 
 	delete(payload, "background")
 	if _, exists := payload["stream"]; !exists {
@@ -1720,7 +1725,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	)
 
 	payload := s.buildOpenAIWSCreatePayload(reqBody, account)
-	payloadStrategy, removedKeys := applyOpenAIWSRetryPayloadStrategy(payload, attempt)
+	payloadStrategy, removedKeys := "passthrough", []string(nil)
+	if account.Type != AccountTypeOAuth {
+		payloadStrategy, removedKeys = applyOpenAIWSRetryPayloadStrategy(payload, attempt)
+	}
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
 	previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	promptCacheKey := openAIWSPayloadString(payload, "prompt_cache_key")
@@ -1744,7 +1752,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
-	setOpenAIWSTurnMetadata(payload, turnMetadata)
+	if account.Type != AccountTypeOAuth {
+		setOpenAIWSTurnMetadata(payload, turnMetadata)
+	}
 	payloadEventType := openAIWSPayloadString(payload, "type")
 	if payloadEventType == "" {
 		payloadEventType = "response.create"
@@ -2371,6 +2381,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if strings.TrimSpace(token) == "" {
 		return errors.New("token is empty")
 	}
+	if account.Type == AccountTypeOAuth && !openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+		return NewOpenAIWSClientCloseError(
+			coderws.StatusPolicyViolation,
+			"OpenAI OAuth accounts require the official Codex client",
+			nil,
+		)
+	}
 
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
@@ -2475,6 +2492,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		normalized := trimmed
 		switch eventType {
 		case "":
+			if account.Type == AccountTypeOAuth {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "response.create type is required for official Codex OAuth", nil)
+			}
 			eventType = "response.create"
 			next, setErr := applyPayloadMutation(normalized, "type", eventType)
 			if setErr != nil {
@@ -2514,16 +2534,19 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
-		if turnMetadata := strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)); turnMetadata != "" {
+		if turnMetadata := strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)); turnMetadata != "" && account.Type != AccountTypeOAuth {
 			next, setErr := applyPayloadMutation(normalized, "client_metadata."+openAIWSTurnMetadataHeader, turnMetadata)
 			if setErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
 			}
 			normalized = next
 		}
-		mappedModel := account.GetMappedModel(originalModel)
-		if normalizedModel := normalizeCodexModel(mappedModel); normalizedModel != "" {
-			mappedModel = normalizedModel
+		mappedModel := originalModel
+		if account.Type != AccountTypeOAuth {
+			mappedModel = account.GetMappedModel(originalModel)
+			if normalizedModel := normalizeCodexModel(mappedModel); normalizedModel != "" {
+				mappedModel = normalizedModel
+			}
 		}
 		if mappedModel != originalModel {
 			next, setErr := applyPayloadMutation(normalized, "model", mappedModel)

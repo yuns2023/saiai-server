@@ -1871,7 +1871,20 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	reqModel, reqStream, promptCacheKey := extractOpenAIRequestMetaFromBody(body)
 	originalModel := reqModel
 
-	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
+	officialCodexClient := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	if account.Type == AccountTypeOAuth && !officialCodexClient {
+		if c != nil {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": gin.H{
+					"type":    "forbidden_error",
+					"message": "OpenAI OAuth accounts require the official Codex client",
+				},
+			})
+		}
+		return nil, errors.New("openai OAuth requires official Codex client")
+	}
+	isCodexCLI := officialCodexClient || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
+	strictNativeOAuth := account.Type == AccountTypeOAuth && officialCodexClient
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	clientTransport := GetOpenAIClientTransport(c)
 	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
@@ -1980,16 +1993,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	mappedModel := reqModel
 
 	// 规范化 reasoning.effort 参数（minimal -> none），与上游允许值对齐。
-	if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
-		if effort, ok := reasoning["effort"].(string); ok && effort == "minimal" {
-			reasoning["effort"] = "none"
-			bodyModified = true
-			markPatchSet("reasoning.effort", "none")
-			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Normalized reasoning.effort: minimal -> none (account: %s)", account.Name)
+	if !strictNativeOAuth {
+		if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
+			if effort, ok := reasoning["effort"].(string); ok && effort == "minimal" {
+				reasoning["effort"] = "none"
+				bodyModified = true
+				markPatchSet("reasoning.effort", "none")
+				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Normalized reasoning.effort: minimal -> none (account: %s)", account.Name)
+			}
 		}
 	}
 
-	if account.Type == AccountTypeOAuth {
+	if account.Type == AccountTypeOAuth && !strictNativeOAuth {
 		codexResult := applyCodexOAuthTransform(reqBody, isCodexCLI, isOpenAIResponsesCompactPath(c))
 		if codexResult.Modified {
 			bodyModified = true
