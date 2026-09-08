@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	coderws "github.com/coder/websocket"
 )
 
 // OpenAI WS tracing is deliberately opt-in. The output contains request
@@ -79,6 +81,21 @@ func (c *openAIWSTracedConn) WriteJSON(ctx context.Context, value any) error {
 		"body_b64":  base64.StdEncoding.EncodeToString(payload),
 	})
 	return c.inner.WriteJSON(ctx, value)
+}
+
+func (c *openAIWSTracedConn) WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error {
+	c.trace.write(map[string]any{
+		"event":     "frame",
+		"direction": "to_openai",
+		"kind":      strings.ToLower(msgType.String()),
+		"body_b64":  base64.StdEncoding.EncodeToString(payload),
+	})
+	if writer, ok := c.inner.(interface {
+		WriteFrame(context.Context, coderws.MessageType, []byte) error
+	}); ok {
+		return writer.WriteFrame(ctx, msgType, payload)
+	}
+	return c.inner.WriteJSON(ctx, json.RawMessage(payload))
 }
 
 func (c *openAIWSTracedConn) ReadMessage(ctx context.Context) ([]byte, error) {

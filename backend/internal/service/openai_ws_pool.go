@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	coderws "github.com/coder/websocket"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -169,6 +171,14 @@ func (l *openAIWSConnLease) WriteJSONContext(ctx context.Context, value any) err
 		return err
 	}
 	return conn.writeJSON(value, ctx)
+}
+
+func (l *openAIWSConnLease) WriteFrameWithContextTimeout(ctx context.Context, msgType coderws.MessageType, payload []byte, timeout time.Duration) error {
+	conn, err := l.activeConn()
+	if err != nil {
+		return err
+	}
+	return conn.writeFrameWithTimeout(ctx, msgType, payload, timeout)
 }
 
 func (l *openAIWSConnLease) ReadMessage(timeout time.Duration) ([]byte, error) {
@@ -360,6 +370,44 @@ func (c *openAIWSConn) writeJSON(value any, writeCtx context.Context) error {
 	}
 	if err := c.ws.WriteJSON(writeCtx, value); err != nil {
 		return err
+	}
+	c.touch()
+	return nil
+}
+
+func (c *openAIWSConn) writeFrameWithTimeout(parent context.Context, msgType coderws.MessageType, payload []byte, timeout time.Duration) error {
+	if c == nil {
+		return errOpenAIWSConnClosed
+	}
+	select {
+	case <-c.closedCh:
+		return errOpenAIWSConnClosed
+	default:
+	}
+	writeCtx := parent
+	if writeCtx == nil {
+		writeCtx = context.Background()
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		writeCtx, cancel = context.WithTimeout(writeCtx, timeout)
+		defer cancel()
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if c.ws == nil {
+		return errOpenAIWSConnClosed
+	}
+	if writer, ok := c.ws.(interface {
+		WriteFrame(context.Context, coderws.MessageType, []byte) error
+	}); ok {
+		if err := writer.WriteFrame(writeCtx, msgType, payload); err != nil {
+			return err
+		}
+	} else {
+		if err := c.ws.WriteJSON(writeCtx, json.RawMessage(payload)); err != nil {
+			return err
+		}
 	}
 	c.touch()
 	return nil
