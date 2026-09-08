@@ -509,7 +509,6 @@ func (h *OpenAIGatewayHandler) logOpenAIRemoteCompactOutcome(c *gin.Context, sta
 		zap.Int("status_code", status),
 		zap.Int64("latency_ms", latencyMs),
 		zap.String("path", path),
-		zap.Bool("force_codex_cli", h != nil && h.cfg != nil && h.cfg.Gateway.ForceCodexCLI),
 	}
 
 	if c != nil {

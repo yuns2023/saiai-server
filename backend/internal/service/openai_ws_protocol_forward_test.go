@@ -193,7 +193,9 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthPreservesPreviousResponseI
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
-	c.Request.Header.Set("User-Agent", "codex-tui/0.130.0")
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.130.0")
+	c.Request.Header.Set("OpenAI-Beta", "responses=client-native")
+	c.Request.Header.Set("originator", "codex_cli_rs")
 	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 
 	upstream := &httpUpstreamRecorder{
@@ -231,6 +233,9 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthPreservesPreviousResponseI
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "resp_http_keep", gjson.GetBytes(upstream.lastBody, "previous_response_id").String())
 	require.Equal(t, string(body), string(upstream.lastBody), "官方 Codex OAuth HTTPS body 必须保持原始 JSON 请求形状")
+	require.Equal(t, "responses=client-native", upstream.lastReq.Header.Get("OpenAI-Beta"))
+	require.Equal(t, "codex_cli_rs", upstream.lastReq.Header.Get("originator"))
+	require.Equal(t, "codex_cli_rs/0.130.0", upstream.lastReq.Header.Get("User-Agent"))
 }
 
 func TestOpenAIGatewayService_Forward_HTTPIngressOAuthRejectsNonOfficialClient(t *testing.T) {

@@ -15,8 +15,6 @@ const (
 	CodexClientRestrictionReasonMatchedOriginator = "official_client_originator_matched"
 	// CodexClientRestrictionReasonNotMatchedUA 表示请求未命中官方客户端 UA 白名单。
 	CodexClientRestrictionReasonNotMatchedUA = "official_client_user_agent_not_matched"
-	// CodexClientRestrictionReasonForceCodexCLI 表示通过 ForceCodexCLI 配置兜底放行。
-	CodexClientRestrictionReasonForceCodexCLI = "force_codex_cli_enabled"
 )
 
 // CodexClientRestrictionDetectionResult 是 codex_cli_only 统一检测入口结果。
@@ -32,12 +30,10 @@ type CodexClientRestrictionDetector interface {
 }
 
 // OpenAICodexClientRestrictionDetector 为 OpenAI OAuth codex_cli_only 的默认实现。
-type OpenAICodexClientRestrictionDetector struct {
-	cfg *config.Config
-}
+type OpenAICodexClientRestrictionDetector struct{}
 
-func NewOpenAICodexClientRestrictionDetector(cfg *config.Config) *OpenAICodexClientRestrictionDetector {
-	return &OpenAICodexClientRestrictionDetector{cfg: cfg}
+func NewOpenAICodexClientRestrictionDetector(_ *config.Config) *OpenAICodexClientRestrictionDetector {
+	return &OpenAICodexClientRestrictionDetector{}
 }
 
 func (d *OpenAICodexClientRestrictionDetector) Detect(c *gin.Context, account *Account) CodexClientRestrictionDetectionResult {
@@ -46,14 +42,6 @@ func (d *OpenAICodexClientRestrictionDetector) Detect(c *gin.Context, account *A
 			Enabled: false,
 			Matched: false,
 			Reason:  CodexClientRestrictionReasonDisabled,
-		}
-	}
-
-	if d != nil && d.cfg != nil && d.cfg.Gateway.ForceCodexCLI {
-		return CodexClientRestrictionDetectionResult{
-			Enabled: true,
-			Matched: true,
-			Reason:  CodexClientRestrictionReasonForceCodexCLI,
 		}
 	}
 

@@ -214,7 +214,6 @@ gateway:
   # 强制按 Codex CLI 处理 /openai/v1/responses 请求（用于网关未透传/改写 User-Agent 的兜底）。
   #
   # 注意：开启后会影响所有客户端的行为（不仅限于 VS Code / Codex CLI），请谨慎开启。
-  force_codex_cli: false
   # Pass new OpenAI/Codex models through before pricing is available. Successful
   # usage is recorded at zero cost and counted per model; the next request is
   # blocked for the remainder of the window after this threshold. Set 0 to disable.
