@@ -2643,6 +2643,8 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			req.Header.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
 		}
 		apiKeyID := getAPIKeyIDFromContext(c)
+		incomingSessionID := strings.TrimSpace(c.GetHeader("session_id"))
+		incomingConversationID := strings.TrimSpace(c.GetHeader("conversation_id"))
 		if isOpenAIResponsesCompactPath(c) {
 			req.Header.Set("accept", "application/json")
 			compactSession := resolveOpenAICompactSessionID(c)
@@ -2654,6 +2656,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			isolated := isolateOpenAISessionID(apiKeyID, promptCacheKey)
 			req.Header.Set("conversation_id", isolated)
 			req.Header.Set("session_id", isolated)
+		} else {
+			if incomingSessionID != "" {
+				req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, incomingSessionID))
+			}
+			if incomingConversationID != "" {
+				req.Header.Set("conversation_id", isolateOpenAISessionID(apiKeyID, incomingConversationID))
+			}
 		}
 	}
 

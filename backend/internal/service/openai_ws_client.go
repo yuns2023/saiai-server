@@ -99,6 +99,13 @@ func (d *coderOpenAIWSClientDialer) Dial(
 			return nil, 0, nil, err
 		}
 		opts.HTTPClient = proxyClient
+	} else {
+		// Keep direct WebSocket dialing aligned with the HTTP upstream path:
+		// explicitly load SAIAI_EXTRA_CA_FILE/SAIAI_EXTRA_CA_DIR so isolated
+		// staging upstreams and controlled test roots work for WSS as well.
+		opts.HTTPClient = &http.Client{Transport: &http.Transport{
+			TLSClientConfig: extracerts.TLSClientConfig(),
+		}}
 	}
 
 	conn, resp, err := coderws.Dial(ctx, targetURL, opts)
