@@ -112,3 +112,19 @@ only; bootstrap does not advertise Claude Messages dispatch for them.
 The local-proxy client neither calls nor depends on this endpoint. Retaining
 the endpoint does not make `1.1.0` a V2 client and does not permit its manifest
 to claim bootstrap compatibility.
+
+## Codex local-proxy-only group policy
+
+OpenAI groups may set `codex_client_policy=local_proxy_only` to reject the
+legacy `base_url`/API-key route while allowing the current SAIAI local-proxy
+OAuth shape. The request gate applies only to Codex model ingress
+(`/v1/responses`, Responses WebSocket and the Codex models manifest); ChatGPT
+Desktop/VSCode control-plane sidecars are not subject to it.
+
+The gate requires an official Codex client family together with non-empty
+`chatgpt-account-id` and `version` headers. This is an operational migration
+signal, not cryptographic attestation: it is intended to catch stale
+`config.toml`/`init-codex` configurations. Validate each CLI, Desktop and IDE
+version before enabling the policy for a production group. The default remains
+`off` and older clients must not be rejected until the updated client bundle is
+available.

@@ -96,8 +96,8 @@ func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
 
 func TestCodexClientPolicyMatched(t *testing.T) {
 	tests := []struct {
-		name, policy, ua, originator string
-		want                         bool
+		name, policy, ua, originator, accountID, version string
+		want                                             bool
 	}{
 		{name: "off", policy: "off", ua: "curl/8", want: true},
 		{name: "official vscode", policy: "official_clients", ua: "codex_vscode/1.0", want: true},
@@ -105,6 +105,10 @@ func TestCodexClientPolicyMatched(t *testing.T) {
 		{name: "cli accepts cli ua", policy: "cli_only", ua: "codex_cli_rs/1.0", want: true},
 		{name: "cli rejects vscode", policy: "cli_only", ua: "codex_vscode/1.0", want: false},
 		{name: "cli accepts exact originator", policy: "cli_only", originator: "codex_cli_rs", want: true},
+		{name: "local proxy accepts vscode oauth shape", policy: "local_proxy_only", ua: "codex_vscode/0.153.4", accountID: "acct", version: "0.153.4", want: true},
+		{name: "local proxy accepts desktop oauth shape", policy: "local_proxy_only", ua: "codex_chatgpt_desktop/0.153.4", originator: "codex_chatgpt_desktop", accountID: "acct", version: "0.153.4", want: true},
+		{name: "local proxy rejects base url oauth missing version", policy: "local_proxy_only", ua: "codex_exec/0.153.4", accountID: "acct", want: false},
+		{name: "local proxy rejects api key shape", policy: "local_proxy_only", ua: "codex_exec/0.153.4", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -113,9 +117,23 @@ func TestCodexClientPolicyMatched(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 			c.Request.Header.Set("User-Agent", tt.ua)
 			c.Request.Header.Set("originator", tt.originator)
+			c.Request.Header.Set("chatgpt-account-id", tt.accountID)
+			c.Request.Header.Set("version", tt.version)
 			require.Equal(t, tt.want, codexClientPolicyMatched(c, tt.policy))
 		})
 	}
+}
+
+func TestCodexLocalProxyModelsRequestMatchedAllowsDiscoveryWithoutVersion(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models?client_version=0.153.4", nil)
+	c.Request.Header.Set("User-Agent", "codex_chatgpt_desktop/0.153.4")
+	c.Request.Header.Set("originator", "codex_chatgpt_desktop")
+	c.Request.Header.Set("chatgpt-account-id", "acct")
+
+	assert.True(t, codexLocalProxyModelsRequestMatched(c))
+	assert.False(t, codexLocalProxyRequestMatched(c, c.GetHeader("User-Agent"), c.GetHeader("originator")))
 }
 
 func TestOpenAIHandleStreamingAwareError_NonStreaming(t *testing.T) {

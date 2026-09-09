@@ -24,6 +24,18 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex models manifest is only available for OpenAI groups")
 		return
 	}
+	policyMatched := codexClientPolicyMatched(c, apiKey.Group.CodexClientPolicy)
+	if apiKey.Group.CodexClientPolicy == "local_proxy_only" {
+		policyMatched = codexLocalProxyModelsRequestMatched(c)
+	}
+	if !policyMatched {
+		if apiKey.Group.CodexClientPolicy == "local_proxy_only" {
+			h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", "This group requires SAIAI local proxy mode")
+		} else {
+			h.errorResponse(c, http.StatusForbidden, "official_client_required", "This group only allows approved Codex clients")
+		}
+		return
+	}
 
 	maxSwitches := h.maxAccountSwitches
 	if maxSwitches <= 0 {

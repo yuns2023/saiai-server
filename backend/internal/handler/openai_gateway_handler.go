@@ -524,14 +524,46 @@ func codexClientPolicyMatched(c *gin.Context, policy string) bool {
 		return pkgopenai.IsCodexOfficialClientByHeaders(userAgent, originator)
 	case "cli_only":
 		return pkgopenai.IsCodexTerminalRequest(userAgent) || originator == "codex_cli_rs" || originator == "codex_exec"
+	case "local_proxy_only":
+		return codexLocalProxyRequestMatched(c, userAgent, originator)
 	default:
 		return false
 	}
 }
 
+// codexLocalProxyRequestMatched identifies the request shape emitted by the
+// SAIAI local-proxy OAuth path. The client-generated `version` and
+// `chatgpt-account-id` fields are intentionally used as compatibility signals;
+// this is a migration/accidental-configuration gate, not a cryptographic
+// attestation boundary. Base-URL + API-key requests lack both fields, while
+// the observed Base-URL + OAuth hybrid lacks `version`.
+func codexLocalProxyRequestMatched(c *gin.Context, userAgent, originator string) bool {
+	if !pkgopenai.IsCodexOfficialClientByHeaders(userAgent, originator) || c == nil {
+		return false
+	}
+	return strings.TrimSpace(c.GetHeader("chatgpt-account-id")) != "" &&
+		strings.TrimSpace(c.GetHeader("version")) != ""
+}
+
+// codexLocalProxyModelsRequestMatched intentionally omits the `version`
+// requirement. Model discovery is a control-plane compatibility request and
+// some official surfaces do not attach the model-request version header to
+// every discovery attempt; the strict version check remains on Responses
+// model ingress.
+func codexLocalProxyModelsRequestMatched(c *gin.Context) bool {
+	if c == nil || !pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+		return false
+	}
+	return strings.TrimSpace(c.GetHeader("chatgpt-account-id")) != ""
+}
+
 func (h *OpenAIGatewayHandler) validateCodexClientPolicyHTTP(c *gin.Context, group *service.Group) bool {
 	if group == nil || codexClientPolicyMatched(c, group.CodexClientPolicy) {
 		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(group.CodexClientPolicy), "local_proxy_only") {
+		h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", "This group requires SAIAI local proxy mode")
+		return false
 	}
 	h.errorResponse(c, http.StatusForbidden, "official_client_required", "This group only allows approved Codex clients")
 	return false

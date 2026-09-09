@@ -1805,6 +1805,7 @@ export default {
         off: '关闭',
         officialClients: '仅官方 Codex 客户端',
         cliOnly: '仅 Codex CLI',
+        localProxyOnly: '仅允许 SAIAI 本地代理',
         audit: '仅审计',
         enforce: '强制限制',
         baseDevices: '基础设备数量'

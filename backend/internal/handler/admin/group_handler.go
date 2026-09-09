@@ -124,7 +124,7 @@ type CreateGroupRequest struct {
 	InputModerationDisableAfterHits  int      `json:"input_moderation_disable_after_hits"`
 	InputModerationStrikeWindowHours int      `json:"input_moderation_strike_window_hours"`
 	InputModerationDedupeMinutes     int      `json:"input_moderation_dedupe_minutes"`
-	CodexClientPolicy                string   `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only"`
+	CodexClientPolicy                string   `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only local_proxy_only"`
 	ClaudeDeviceLimitMode            string   `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
 	ClaudeDeviceBaseLimit            int      `json:"claude_device_base_limit"`
 	// 从指定分组复制账号（创建后自动绑定）
@@ -176,7 +176,7 @@ type UpdateGroupRequest struct {
 	InputModerationDisableAfterHits  *int      `json:"input_moderation_disable_after_hits"`
 	InputModerationStrikeWindowHours *int      `json:"input_moderation_strike_window_hours"`
 	InputModerationDedupeMinutes     *int      `json:"input_moderation_dedupe_minutes"`
-	CodexClientPolicy                *string   `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only"`
+	CodexClientPolicy                *string   `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only local_proxy_only"`
 	ClaudeDeviceLimitMode            *string   `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
 	ClaudeDeviceBaseLimit            *int      `json:"claude_device_base_limit"`
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）

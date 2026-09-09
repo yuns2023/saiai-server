@@ -687,6 +687,7 @@
             <option value="off">{{ t('admin.groups.clientLimits.off') }}</option>
             <option value="official_clients">{{ t('admin.groups.clientLimits.officialClients') }}</option>
             <option value="cli_only">{{ t('admin.groups.clientLimits.cliOnly') }}</option>
+            <option value="local_proxy_only">{{ t('admin.groups.clientLimits.localProxyOnly') }}</option>
           </select>
         </div>
         <div v-if="['anthropic', 'antigravity'].includes(createForm.platform)" class="border-t pt-4 space-y-3">
@@ -1438,6 +1439,7 @@
             <option value="off">{{ t('admin.groups.clientLimits.off') }}</option>
             <option value="official_clients">{{ t('admin.groups.clientLimits.officialClients') }}</option>
             <option value="cli_only">{{ t('admin.groups.clientLimits.cliOnly') }}</option>
+            <option value="local_proxy_only">{{ t('admin.groups.clientLimits.localProxyOnly') }}</option>
           </select>
         </div>
         <div v-if="['anthropic', 'antigravity'].includes(editForm.platform)" class="border-t pt-4 space-y-3">
@@ -2131,7 +2133,7 @@ const createForm = reactive({
   input_moderation_disable_after_hits: 2,
   input_moderation_strike_window_hours: 24,
   input_moderation_dedupe_minutes: 5,
-  codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only',
+  codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
   claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
   claude_device_base_limit: 1,
   // 模型路由开关
@@ -2370,7 +2372,7 @@ const editForm = reactive({
   input_moderation_disable_after_hits: 2,
   input_moderation_strike_window_hours: 24,
   input_moderation_dedupe_minutes: 5,
-  codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only',
+  codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
   claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
   claude_device_base_limit: 1,
   // 模型路由开关

@@ -423,7 +423,7 @@ export interface AdminGroup extends Group {
 	input_moderation_disable_after_hits: number
 	input_moderation_strike_window_hours: number
 	input_moderation_dedupe_minutes: number
-	codex_client_policy: 'off' | 'official_clients' | 'cli_only'
+	codex_client_policy: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	claude_device_limit_mode: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit: number
 
@@ -539,7 +539,7 @@ export interface CreateGroupRequest {
 	input_moderation_disable_after_hits?: number
 	input_moderation_strike_window_hours?: number
 	input_moderation_dedupe_minutes?: number
-	codex_client_policy?: 'off' | 'official_clients' | 'cli_only'
+	codex_client_policy?: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit?: number
   claude_environment_mode?: ClaudeEnvironmentMode
@@ -585,7 +585,7 @@ export interface UpdateGroupRequest {
 	input_moderation_disable_after_hits?: number
 	input_moderation_strike_window_hours?: number
 	input_moderation_dedupe_minutes?: number
-	codex_client_policy?: 'off' | 'official_clients' | 'cli_only'
+	codex_client_policy?: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit?: number
   claude_environment_mode?: ClaudeEnvironmentMode

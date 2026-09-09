@@ -1076,7 +1076,7 @@ func normalizePositiveInt(value, fallback, minValue, maxValue int) int {
 
 func normalizeCodexClientPolicy(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "official_clients", "cli_only":
+	case "official_clients", "cli_only", "local_proxy_only":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return "off"

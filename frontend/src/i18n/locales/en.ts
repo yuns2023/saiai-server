@@ -1720,6 +1720,7 @@ export default {
         off: 'Off',
         officialClients: 'Official Codex clients only',
         cliOnly: 'Codex CLI only',
+        localProxyOnly: 'SAIAI local proxy only',
         audit: 'Audit only',
         enforce: 'Enforce',
         baseDevices: 'Base device count'
