@@ -1120,8 +1120,18 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	promptCacheKey string,
 ) (http.Header, openAIWSSessionHeaderResolution) {
 	headers := make(http.Header)
-	headers.Set("authorization", "Bearer "+token)
 	strictNativeOAuth := account != nil && account.Type == AccountTypeOAuth && c != nil && openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	if strictNativeOAuth && c.Request != nil {
+		for key, values := range c.Request.Header {
+			if !shouldCopyOpenAIWSRequestHeader(key) {
+				continue
+			}
+			for _, value := range values {
+				headers.Add(key, value)
+			}
+		}
+	}
+	headers.Set("authorization", "Bearer "+token)
 
 	sessionResolution := resolveOpenAIWSSessionHeaders(c, promptCacheKey)
 	if c != nil && c.Request != nil {
@@ -1200,6 +1210,18 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	}
 
 	return headers, sessionResolution
+}
+
+func shouldCopyOpenAIWSRequestHeader(key string) bool {
+	if !shouldCopyOpenAIRequestHeader(key) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "conversation-id", "conversation_id", "sec-websocket-extensions", "sec-websocket-key", "sec-websocket-version", "session-id", "session_id":
+		return false
+	default:
+		return true
+	}
 }
 
 func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any, account *Account) map[string]any {
