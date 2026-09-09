@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -156,6 +158,29 @@ func TestReadRequestBodyWithPrealloc_MaxBytesError(t *testing.T) {
 	require.Error(t, err)
 	var maxErr *http.MaxBytesError
 	require.ErrorAs(t, err, &maxErr)
+}
+
+func TestDecodeOpenAIRequestBody_Zstd(t *testing.T) {
+	payload := []byte(`{"model":"gpt-5.3-codex","stream":true,"input":"hello"}`)
+	var compressed bytes.Buffer
+	encoder, err := zstd.NewWriter(&compressed)
+	require.NoError(t, err)
+	_, err = encoder.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, encoder.Close())
+	wireBody := append([]byte(nil), compressed.Bytes()...)
+
+	decoded, encoded, err := decodeOpenAIRequestBody(wireBody, "zstd", 1<<20)
+	require.NoError(t, err)
+	require.True(t, encoded)
+	require.Equal(t, payload, decoded)
+	require.Equal(t, compressed.Bytes(), wireBody, "inspection decode must not mutate wire bytes")
+
+	_, _, err = decodeOpenAIRequestBody(wireBody, "zstd", int64(len(payload)-1))
+	require.ErrorContains(t, err, "decoded request body exceeds")
+
+	_, _, err = decodeOpenAIRequestBody(payload, "br", 1<<20)
+	require.ErrorContains(t, err, "unsupported request content encoding")
 }
 
 func TestOpenAIEnsureForwardErrorResponse_WritesFallbackWhenNotWritten(t *testing.T) {

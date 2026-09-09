@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -236,6 +237,60 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthPreservesPreviousResponseI
 	require.Equal(t, "responses=client-native", upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.Equal(t, "codex_cli_rs", upstream.lastReq.Header.Get("originator"))
 	require.Equal(t, "codex_cli_rs/0.130.0", upstream.lastReq.Header.Get("User-Agent"))
+}
+
+func TestOpenAIGatewayService_Forward_HTTPIngressOAuthPreservesZstdWireBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.153.4")
+	c.Request.Header.Set("OpenAI-Beta", "responses=client-native")
+	c.Request.Header.Set("originator", "codex_cli_rs")
+	c.Request.Header.Set("Content-Encoding", "zstd")
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	payload := []byte(`{"model":"gpt-5.3-codex","stream":true,"input":"hello"}`)
+	var parsedBody map[string]any
+	require.NoError(t, json.Unmarshal(payload, &parsedBody))
+	c.Set(OpenAIParsedRequestBodyKey, parsedBody)
+	encoder, err := zstd.NewWriter(nil)
+	require.NoError(t, err)
+	wireBody := encoder.EncodeAll(payload, nil)
+	encoder.Close()
+
+	upstream := &httpUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_zstd\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+			)),
+		},
+	}
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID:          167,
+		Name:        "openai-oauth-zstd",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "token",
+			"chatgpt_account_id": "chatgpt-acc",
+		},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, wireBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, wireBody, upstream.lastBody)
+	require.Equal(t, "zstd", upstream.lastReq.Header.Get("Content-Encoding"))
 }
 
 func TestOpenAIGatewayService_Forward_HTTPIngressOAuthRejectsNonOfficialClient(t *testing.T) {

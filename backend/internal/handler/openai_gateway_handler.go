@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -23,6 +25,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
@@ -122,6 +125,16 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	wireBody := body
+	requestContentEncoding := strings.TrimSpace(c.GetHeader("Content-Encoding"))
+	bodyWasEncoded := false
+	if requestContentEncoding != "" && !strings.EqualFold(requestContentEncoding, "identity") {
+		body, bodyWasEncoded, err = decodeOpenAIRequestBody(body, requestContentEncoding, h.openAIRequestBodyDecodeLimit())
+		if err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to decode request body")
+			return
+		}
+	}
 
 	setOpsRequestContext(c, "", false, body)
 	sessionHashBody := body
@@ -136,6 +149,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		if normalizedCompact {
 			body = normalizedCompactBody
+			if bodyWasEncoded {
+				wireBody = body
+				bodyWasEncoded = false
+				requestContentEncoding = ""
+				c.Request.Header.Del("Content-Encoding")
+			}
 		}
 	}
 
@@ -143,6 +162,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if !gjson.ValidBytes(body) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
+	}
+	if bodyWasEncoded {
+		var parsedBody map[string]any
+		if err := json.Unmarshal(body, &parsedBody); err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			return
+		}
+		c.Set(service.OpenAIParsedRequestBodyKey, parsedBody)
 	}
 
 	// 使用 gjson 只读提取字段做校验，避免完整 Unmarshal
@@ -293,7 +320,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		forwardCtx := service.WithAccountSwitchCount(c.Request.Context(), switchCount, false)
-		result, err := h.gatewayService.Forward(forwardCtx, c, account, body)
+		forwardBody := body
+		if bodyWasEncoded && account.Type == service.AccountTypeOAuth && pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+			c.Request.Header.Set("Content-Encoding", requestContentEncoding)
+			forwardBody = wireBody
+		} else if bodyWasEncoded {
+			c.Request.Header.Del("Content-Encoding")
+		}
+		result, err := h.gatewayService.Forward(forwardCtx, c, account, forwardBody)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -406,6 +440,46 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		)
 		return
 	}
+}
+
+func (h *OpenAIGatewayHandler) openAIRequestBodyDecodeLimit() int64 {
+	const defaultLimit = int64(256 * 1024 * 1024)
+	if h == nil || h.cfg == nil {
+		return defaultLimit
+	}
+	if h.cfg.Server.MaxRequestBodySize > 0 {
+		return h.cfg.Server.MaxRequestBodySize
+	}
+	if h.cfg.Gateway.MaxBodySize > 0 {
+		return h.cfg.Gateway.MaxBodySize
+	}
+	return defaultLimit
+}
+
+func decodeOpenAIRequestBody(body []byte, contentEncoding string, maxDecodedBytes int64) ([]byte, bool, error) {
+	encoding := strings.ToLower(strings.TrimSpace(contentEncoding))
+	if encoding == "" || encoding == "identity" {
+		return body, false, nil
+	}
+	if encoding != "zstd" {
+		return nil, false, fmt.Errorf("unsupported request content encoding: %s", encoding)
+	}
+	decoder, err := zstd.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return nil, false, fmt.Errorf("initialize zstd request decoder: %w", err)
+	}
+	defer decoder.Close()
+	if maxDecodedBytes <= 0 {
+		maxDecodedBytes = 256 * 1024 * 1024
+	}
+	decoded, err := io.ReadAll(io.LimitReader(decoder, maxDecodedBytes+1))
+	if err != nil {
+		return nil, false, fmt.Errorf("decode zstd request body: %w", err)
+	}
+	if int64(len(decoded)) > maxDecodedBytes {
+		return nil, false, fmt.Errorf("decoded request body exceeds %d bytes", maxDecodedBytes)
+	}
+	return decoded, true, nil
 }
 
 func (h *OpenAIGatewayHandler) submitOpenAIInputModeration(
