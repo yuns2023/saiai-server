@@ -919,7 +919,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	if apiKey.Group != nil && !codexClientPolicyMatched(c, apiKey.Group.CodexClientPolicy) {
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "approved Codex client required")
+		reason := "approved Codex client required"
+		if strings.EqualFold(strings.TrimSpace(apiKey.Group.CodexClientPolicy), "local_proxy_only") {
+			reason = "SAIAI local proxy required"
+		}
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, reason)
 		return
 	}
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(firstMessage, "previous_response_id").String())

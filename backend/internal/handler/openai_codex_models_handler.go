@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -25,11 +26,11 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		return
 	}
 	policyMatched := codexClientPolicyMatched(c, apiKey.Group.CodexClientPolicy)
-	if apiKey.Group.CodexClientPolicy == "local_proxy_only" {
+	if strings.EqualFold(apiKey.Group.CodexClientPolicy, "local_proxy_only") {
 		policyMatched = codexLocalProxyModelsRequestMatched(c)
 	}
 	if !policyMatched {
-		if apiKey.Group.CodexClientPolicy == "local_proxy_only" {
+		if strings.EqualFold(apiKey.Group.CodexClientPolicy, "local_proxy_only") {
 			h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", "This group requires SAIAI local proxy mode")
 		} else {
 			h.errorResponse(c, http.StatusForbidden, "official_client_required", "This group only allows approved Codex clients")
