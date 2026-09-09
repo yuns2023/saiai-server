@@ -270,11 +270,19 @@ func resolveOpenAIWSSessionHeaders(c *gin.Context, promptCacheKey string) openAI
 		ConversationSource: "none",
 	}
 	if c != nil && c.Request != nil {
-		if sessionID := strings.TrimSpace(c.Request.Header.Get("session_id")); sessionID != "" {
+		headerValue := func(names ...string) string {
+			for _, name := range names {
+				if value := strings.TrimSpace(c.Request.Header.Get(name)); value != "" {
+					return value
+				}
+			}
+			return ""
+		}
+		if sessionID := headerValue("session_id", "session-id"); sessionID != "" {
 			resolution.SessionID = sessionID
 			resolution.SessionSource = "header_session_id"
 		}
-		if conversationID := strings.TrimSpace(c.Request.Header.Get("conversation_id")); conversationID != "" {
+		if conversationID := headerValue("conversation_id", "conversation-id"); conversationID != "" {
 			resolution.ConversationID = conversationID
 			resolution.ConversationSource = "header_conversation_id"
 			if resolution.SessionID == "" {
@@ -2419,7 +2427,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if strings.TrimSpace(token) == "" {
 		return errors.New("token is empty")
 	}
-	if account.Type == AccountTypeOAuth && !openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+	officialCodexClient := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	if account.Type == AccountTypeOAuth && !officialCodexClient {
 		return NewOpenAIWSClientCloseError(
 			coderws.StatusPolicyViolation,
 			"OpenAI OAuth accounts require the official Codex client",
@@ -2439,6 +2448,26 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
+	}
+	// Official OAuth clients own their Responses WebSocket connection. Mirror
+	// that boundary upstream so handshake metadata cannot leak across client
+	// connections through the shared account pool.
+	if account.Type == AccountTypeOAuth && officialCodexClient {
+		if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+			return fmt.Errorf("websocket ingress requires ws_v2 transport, got=%s", wsDecision.Transport)
+		}
+		return s.proxyResponsesWebSocketV2Passthrough(
+			ctx,
+			c,
+			clientConn,
+			account,
+			token,
+			firstClientMessage,
+			hooks,
+			wsDecision,
+		)
+	}
+	if modeRouterV2Enabled {
 		switch ingressMode {
 		case OpenAIWSIngressModePassthrough:
 			if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {

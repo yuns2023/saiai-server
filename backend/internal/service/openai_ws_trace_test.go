@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -54,11 +55,15 @@ func TestDefaultOpenAIWSDialerOptInTraceCapturesHandshakeAndFrames(t *testing.T)
 	)
 	require.NoError(t, err)
 	require.NotNil(t, conn)
+	frameConn, ok := conn.(openaiwsv2.FrameConn)
+	require.True(t, ok, "trace wrapper must retain frame relay support")
 
-	require.NoError(t, conn.WriteJSON(ctx, map[string]any{"type": "response.create", "model": "gpt-test"}))
-	payload, err := conn.ReadMessage(ctx)
+	requestPayload := []byte(`{"type":"response.create","model":"gpt-test"}`)
+	require.NoError(t, frameConn.WriteFrame(ctx, coderws.MessageText, requestPayload))
+	messageType, payload, err := frameConn.ReadFrame(ctx)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"type":"response.create","model":"gpt-test"}`, string(payload))
+	require.Equal(t, coderws.MessageText, messageType)
+	require.Equal(t, requestPayload, payload)
 	require.NoError(t, conn.Close())
 	require.NoError(t, <-serverErr)
 

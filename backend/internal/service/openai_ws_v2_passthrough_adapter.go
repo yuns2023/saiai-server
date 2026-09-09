@@ -159,6 +159,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			IdleTimeout:      s.openAIWSPassthroughIdleTimeout(),
 			FirstMessageType: coderws.MessageText,
 			OnClientTurn: func(turn int, payload []byte) error {
+				if hooks != nil && hooks.BeforeTurn != nil {
+					if err := hooks.BeforeTurn(turn); err != nil {
+						return err
+					}
+				}
 				if hooks == nil || hooks.OnClientTurn == nil {
 					return nil
 				}

@@ -482,6 +482,37 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	require.Equal(t, isolateOpenAISessionID(0, "conv-oauth-1"), captureDialer.lastHeaders.Get("conversation_id"))
 }
 
+func TestOpenAIGatewayService_BuildOpenAIWSHeadersIsolatesHyphenatedSessionAliases(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/openai/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.153.4")
+	c.Request.Header.Set("originator", "codex_cli_rs")
+	c.Request.Header.Set("Session-Id", "session-hyphen")
+	c.Request.Header.Set("Conversation-Id", "conversation-hyphen")
+
+	account := &Account{ID: 30, Type: AccountTypeOAuth}
+	svc := &OpenAIGatewayService{}
+	headers, resolution := svc.buildOpenAIWSHeaders(
+		c,
+		account,
+		"oauth-token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		true,
+		"",
+		"",
+		"",
+	)
+
+	require.Equal(t, "header_session_id", resolution.SessionSource)
+	require.Equal(t, "header_conversation_id", resolution.ConversationSource)
+	require.Equal(t, isolateOpenAISessionID(0, "session-hyphen"), headers.Get("session_id"))
+	require.Equal(t, isolateOpenAISessionID(0, "conversation-hyphen"), headers.Get("conversation_id"))
+	require.Empty(t, headers.Get("session-id"))
+	require.Empty(t, headers.Get("conversation-id"))
+}
+
 func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 )
 
@@ -111,6 +112,23 @@ func (c *openAIWSTracedConn) ReadMessage(ctx context.Context) ([]byte, error) {
 	return payload, err
 }
 
+func (c *openAIWSTracedConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	if reader, ok := c.inner.(openaiwsv2.FrameConn); ok {
+		msgType, payload, err := reader.ReadFrame(ctx)
+		if len(payload) > 0 {
+			c.trace.write(map[string]any{
+				"event":     "frame",
+				"direction": "from_openai",
+				"kind":      strings.ToLower(msgType.String()),
+				"body_b64":  base64.StdEncoding.EncodeToString(payload),
+			})
+		}
+		return msgType, payload, err
+	}
+	payload, err := c.ReadMessage(ctx)
+	return coderws.MessageText, payload, err
+}
+
 func (c *openAIWSTracedConn) Ping(ctx context.Context) error {
 	c.trace.write(map[string]any{"event": "ping", "direction": "to_openai"})
 	return c.inner.Ping(ctx)
@@ -129,3 +147,4 @@ func errorString(err error) string {
 }
 
 var _ openAIWSClientConn = (*openAIWSTracedConn)(nil)
+var _ openaiwsv2.FrameConn = (*openAIWSTracedConn)(nil)
