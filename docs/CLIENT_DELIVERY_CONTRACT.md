@@ -147,3 +147,11 @@ SSE flushing, and request-shape invariants can be tested without contacting a
 real model. Do not enable the public route against `chatgpt.com` until token,
 session/cookie requirements, multi-turn affinity, accounting, and upstream
 error behavior have separate credentialed-staging evidence.
+
+For an explicitly authorized credentialed-staging window,
+`gateway.openai_chat_model_request_cap` places a process-lifetime hard limit on
+final `/f/conversation` upstream attempts; `init`, `prepare`, and Sentinel
+control-plane calls do not consume that limit. Recreate the isolated Gateway
+immediately before the window, set the approved cap, and restore the replay
+upstream immediately afterward. A zero cap disables this safeguard and must
+not be used for a limited live probe.
