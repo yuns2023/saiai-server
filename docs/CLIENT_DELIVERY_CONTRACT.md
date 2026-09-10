@@ -128,3 +128,22 @@ signal, not cryptographic attestation: it is intended to catch stale
 version before enabling the policy for a production group. The default remains
 `off` and older clients must not be rejected until the updated client bundle is
 available.
+
+## Experimental native ChatGPT Chat ingress
+
+Ordinary ChatGPT Desktop Chat is not the Responses protocol. The experimental
+ingress is namespaced under `/chatgpt/backend-api/*` and remains disabled by
+default through `gateway.openai_chat_enabled=false`. It accepts only an
+explicit route allowlist and only schedules OpenAI OAuth accounts. The Gateway
+removes the client Authorization/Cookie/account ID, substitutes the selected
+account OAuth token and account ID, preserves the native body/path/query and
+client identity headers, and streams the upstream event response without
+converting it to Responses. `Set-Cookie` and hop-by-hop response headers are
+not returned to the client.
+
+`gateway.openai_chat_upstream_base_url` is empty in normal operation. An
+isolated staging stack may point it at a replay/fake provider so the ingress,
+SSE flushing, and request-shape invariants can be tested without contacting a
+real model. Do not enable the public route against `chatgpt.com` until token,
+session/cookie requirements, multi-turn affinity, accounting, and upstream
+error behavior have separate credentialed-staging evidence.

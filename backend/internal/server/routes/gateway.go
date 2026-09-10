@@ -109,6 +109,21 @@ func RegisterGatewayRoutes(
 	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.Responses)
 	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.ResponsesWebSocket)
 	r.GET("/backend-api/codex/models", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.CodexModels)
+	// Experimental native ChatGPT Chat protocol. This route is disabled by
+	// default in the handler and is enabled only in isolated staging.
+	chatgpt := r.Group("/chatgpt/backend-api")
+	chatgpt.Use(bodyLimit)
+	chatgpt.Use(clientRequestID)
+	chatgpt.Use(opsErrorLogger)
+	chatgpt.Use(gin.HandlerFunc(apiKeyAuth))
+	chatgpt.Use(rejectRetiredGroupPlatform)
+	chatgpt.Use(requireGroupAnthropic)
+	{
+		chatgpt.POST("/f/conversation", h.OpenAIGateway.ChatGPTConversation)
+		chatgpt.POST("/f/conversation/*subpath", h.OpenAIGateway.ChatGPTConversation)
+		chatgpt.POST("/conversation/init", h.OpenAIGateway.ChatGPTConversation)
+		chatgpt.POST("/sentinel/chat-requirements/prepare", h.OpenAIGateway.ChatGPTConversation)
+	}
 }
 
 func rejectRetiredGroupPlatform(c *gin.Context) {

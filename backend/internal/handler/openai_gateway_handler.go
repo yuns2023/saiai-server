@@ -75,6 +75,115 @@ func NewOpenAIGatewayHandler(
 	}
 }
 
+// ChatGPTConversation handles the experimental native ChatGPT conversation
+// protocol. It is intentionally separate from Responses and disabled unless
+// Gateway.OpenAIChatEnabled is explicitly enabled.
+func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
+	if h == nil || h.cfg == nil || !h.cfg.Gateway.OpenAIChatEnabled {
+		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{
+			"type": "not_found_error", "message": "Native ChatGPT Chat is disabled",
+		}})
+		return
+	}
+	if strings.TrimSpace(h.cfg.Gateway.OpenAIChatUpstreamBaseURL) == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+			"type": "service_unavailable", "message": "Native ChatGPT Chat requires an isolated replay upstream",
+		}})
+		return
+	}
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformOpenAI {
+		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{
+			"type": "permission_error", "message": "Native ChatGPT Chat requires an OpenAI group",
+		}})
+		return
+	}
+	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	if err != nil || len(body) == 0 || !gjson.ValidBytes(body) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"type": "invalid_request_error", "message": "Invalid ChatGPT conversation body",
+		}})
+		return
+	}
+	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if model == "" {
+		model = "chatgpt"
+	}
+	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
+	var selection *service.AccountSelectionResult
+	excludedIDs := make(map[int64]struct{})
+	for len(excludedIDs) < 64 {
+		candidate, _, selectErr := h.gatewayService.SelectAccountWithScheduler(
+			c.Request.Context(), apiKey.GroupID, "", sessionHash, model, excludedIDs, service.OpenAIUpstreamTransportHTTPSSE,
+		)
+		if selectErr != nil || candidate == nil || candidate.Account == nil {
+			selection = nil
+			break
+		}
+		if candidate.Account.IsOpenAIOAuth() {
+			selection = candidate
+			break
+		}
+		excludedIDs[candidate.Account.ID] = struct{}{}
+	}
+	if selection == nil || selection.Account == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+			"type": "service_unavailable", "message": "No available OpenAI OAuth account",
+		}})
+		return
+	}
+	account := selection.Account
+	path := c.Request.URL.RequestURI()
+	resp, err := h.gatewayService.ForwardChatGPTConversation(
+		c.Request.Context(), c, account, body, path,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
+			"type": "upstream_error", "message": "Upstream ChatGPT conversation request failed",
+		}})
+		return
+	}
+	defer resp.Body.Close()
+	for key, values := range resp.Header {
+		if !shouldCopyChatGPTResponseHeader(key) {
+			continue
+		}
+		for _, value := range values {
+			c.Writer.Header().Add(key, value)
+		}
+	}
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		c.Header("Cache-Control", "no-cache")
+		c.Header("X-Accel-Buffering", "no")
+	}
+	c.Status(resp.StatusCode)
+	buffer := make([]byte, 32*1024)
+	for {
+		n, readErr := resp.Body.Read(buffer)
+		if n > 0 {
+			if _, writeErr := c.Writer.Write(buffer[:n]); writeErr != nil {
+				return
+			}
+			if flusher, ok := c.Writer.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		}
+		if readErr != nil {
+			return
+		}
+	}
+}
+
+func shouldCopyChatGPTResponseHeader(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+		"te", "trailer", "transfer-encoding", "upgrade", "content-length", "set-cookie":
+		return false
+	default:
+		return true
+	}
+}
+
 // Responses handles OpenAI Responses API endpoint
 // POST /openai/v1/responses
 func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {

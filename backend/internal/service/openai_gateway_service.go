@@ -2580,6 +2580,86 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 }
 
+// BuildChatGPTConversationRequest builds the experimental native ChatGPT
+// conversation request. The ChatGPT protocol is deliberately kept separate
+// from Responses: the body/path are not converted and only Gateway-owned
+// authentication is replaced.
+func (s *OpenAIGatewayService) BuildChatGPTConversationRequest(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	path string,
+) (*http.Request, string, error) {
+	if account == nil || !account.IsOpenAIOAuth() {
+		return nil, "", fmt.Errorf("native ChatGPT conversation requires an OpenAI OAuth account")
+	}
+	if !strings.HasPrefix(path, "/chatgpt/backend-api/") {
+		return nil, "", fmt.Errorf("invalid native ChatGPT path: %s", path)
+	}
+	token, _, err := s.GetAccessToken(ctx, account)
+	if err != nil {
+		return nil, "", fmt.Errorf("native ChatGPT OAuth token unavailable: %w", err)
+	}
+	accountID := strings.TrimSpace(account.GetChatGPTAccountID())
+	if accountID == "" {
+		return nil, "", fmt.Errorf("native ChatGPT account id is unavailable")
+	}
+	upstreamPath := strings.TrimPrefix(path, "/chatgpt")
+	baseURL := "https://chatgpt.com"
+	if s != nil && s.cfg != nil {
+		if configured := strings.TrimSpace(s.cfg.Gateway.OpenAIChatUpstreamBaseURL); configured != "" {
+			validated, err := s.validateUpstreamBaseURL(configured)
+			if err != nil {
+				return nil, "", fmt.Errorf("invalid native ChatGPT upstream: %w", err)
+			}
+			baseURL = strings.TrimRight(validated, "/")
+		}
+	}
+	targetURL := baseURL + upstreamPath
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, "", err
+	}
+	if baseURL == "https://chatgpt.com" {
+		req.Host = "chatgpt.com"
+	}
+	req.Header.Set("authorization", "Bearer "+token)
+	req.Header.Set("chatgpt-account-id", accountID)
+	for key, values := range c.Request.Header {
+		if !shouldCopyOpenAIRequestHeader(key) {
+			continue
+		}
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+	if req.Header.Get("content-type") == "" {
+		req.Header.Set("content-type", "application/json")
+	}
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+	return req, proxyURL, nil
+}
+
+// ForwardChatGPTConversation sends one experimental native ChatGPT request
+// without Responses conversion. The caller owns and must close the response.
+func (s *OpenAIGatewayService) ForwardChatGPTConversation(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	path string,
+) (*http.Response, error) {
+	req, proxyURL, err := s.BuildChatGPTConversationRequest(ctx, c, account, body, path)
+	if err != nil {
+		return nil, err
+	}
+	return s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+}
+
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
 	// Determine target URL based on account type
 	var targetURL string

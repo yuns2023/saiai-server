@@ -375,6 +375,12 @@ type GatewayConfig struct {
 	ConnectionPoolIsolation string `mapstructure:"connection_pool_isolation"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
+	// OpenAIChatEnabled enables the experimental native ChatGPT conversation
+	// protocol ingress. It is disabled by default until staging verification.
+	OpenAIChatEnabled bool `mapstructure:"openai_chat_enabled"`
+	// OpenAIChatUpstreamBaseURL overrides the native ChatGPT origin for an
+	// isolated replay/fake provider. Empty means https://chatgpt.com.
+	OpenAIChatUpstreamBaseURL string `mapstructure:"openai_chat_upstream_base_url"`
 
 	// HTTP 上游连接池配置（性能优化：支持高并发场景调优）
 	// MaxIdleConns: 所有主机的最大空闲连接总数
@@ -1356,6 +1362,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）
 	viper.SetDefault("gateway.openai_ws.enabled", true)
+	viper.SetDefault("gateway.openai_chat_enabled", false)
+	viper.SetDefault("gateway.openai_chat_upstream_base_url", "")
 	viper.SetDefault("gateway.openai_ws.mode_router_v2_enabled", false)
 	viper.SetDefault("gateway.openai_ws.ingress_mode_default", "ctx_pool")
 	viper.SetDefault("gateway.openai_ws.oauth_enabled", true)
