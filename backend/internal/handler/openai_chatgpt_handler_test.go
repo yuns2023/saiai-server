@@ -172,3 +172,22 @@ func TestChatGPTConversationRejectsUnaccountedModelRequestByDefault(t *testing.T
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	require.Contains(t, w.Body.String(), "accounting_unavailable")
 }
+
+func TestReleaseChatGPTControlSelection(t *testing.T) {
+	released := 0
+	releaseChatGPTControlSelection(&service.AccountSelectionResult{
+		Acquired: true,
+		ReleaseFunc: func() {
+			released++
+		},
+	})
+	require.Equal(t, 1, released)
+
+	releaseChatGPTControlSelection(&service.AccountSelectionResult{
+		Acquired: false,
+		ReleaseFunc: func() {
+			released++
+		},
+	})
+	require.Equal(t, 1, released)
+}

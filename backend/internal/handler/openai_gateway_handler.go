@@ -173,7 +173,13 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		return
 	}
 	account := selection.Account
-	if isModelRequest && h.concurrencyHelper != nil && h.concurrencyHelper.concurrencyService != nil {
+	if !isModelRequest {
+		// The shared scheduler opportunistically acquires an account slot even
+		// for short native-Chat control-plane requests. They are not model
+		// turns, so release that reservation immediately instead of leaking it
+		// until the final /f/conversation request blocks.
+		releaseChatGPTControlSelection(selection)
+	} else if h.concurrencyHelper != nil && h.concurrencyHelper.concurrencyService != nil {
 		accountRelease, acquired := h.acquireResponsesAccountSlot(
 			c, apiKey.GroupID, sessionHash, selection, true, &streamStarted, reqLog,
 		)
@@ -252,6 +258,12 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			}
 			return
 		}
+	}
+}
+
+func releaseChatGPTControlSelection(selection *service.AccountSelectionResult) {
+	if selection != nil && selection.Acquired && selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
 	}
 }
 
