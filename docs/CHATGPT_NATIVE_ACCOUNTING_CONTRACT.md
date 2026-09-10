@@ -28,8 +28,16 @@ result is eventually consistent and cumulative for the whole conversation.
 The UI explicitly tolerates an incomplete response and retries it. A single
 credentialed staging turn proved that the native conversation completed, but
 its raw response was intentionally deleted before token field structure was
-captured. Therefore neither native SSE usage nor thread-usage availability is
-yet verified for Plus OAuth accounts.
+captured.
+
+A later non-model probe from the `204.152.198.169` isolated test egress used a
+valid Plus OAuth access token and account ID, no Cookie, and a random
+conversation ID. The provider returned HTTP 403 with only a top-level `detail`
+field. This proves that the thread-usage endpoint is not available under the
+Gateway's current minimal OAuth boundary for that account/version/egress. It
+does not distinguish plan entitlement from a requirement for additional
+Desktop integrity/session state, because the sensitive `detail` value was not
+retained. The endpoint is therefore not an approved Plus billing source.
 
 ## Current admission rule
 
@@ -101,8 +109,9 @@ as the current turn's usage.
 ## Evidence still required before activation
 
 - a sanitized, key-path-only capture of the native stream terminal events;
-- a sanitized response-shape capture of `thread_usage/query` for each supported
-  OAuth plan type, including Plus if Plus is intended to be supported;
+- a successful sanitized response-shape capture of `thread_usage/query` for
+  each OAuth plan type intended to use that source; the current Plus/minimal-
+  OAuth probe is a 403 and does not qualify;
 - before/after snapshots for a two-turn conversation proving cumulative and
   eventual-consistency behavior;
 - model-switch, cache, reasoning, tool, and retry cases;
