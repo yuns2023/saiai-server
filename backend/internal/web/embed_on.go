@@ -47,6 +47,8 @@ const (
 //go:embed all:dist
 var frontendFS embed.FS
 
+const saiaiCLIUnavailableMessage = "SAIAI client download is temporarily unavailable. Please retry later or contact your administrator."
+
 // PublicSettingsProvider is an interface to fetch public settings
 type PublicSettingsProvider interface {
 	GetPublicSettingsForInjection(ctx context.Context) (any, error)
@@ -68,7 +70,8 @@ type FrontendServer struct {
 // NewFrontendServer creates a new frontend server with settings injection.
 // cliDir 指定完整 SAIAI client bundle 所在目录（例如
 // /var/lib/saiai-server/client-runtime/saiai-cli/）。为空或 bundle 不完整时，
-// /saiai-cli/* 返回 503，提示运维先运行 sync-saiai-cli.sh。
+// /saiai-cli/* returns a user-safe 503 when the configured bundle is unavailable.
+// Operator remediation details belong in deployment diagnostics, not the public response.
 func NewFrontendServer(settingsProvider PublicSettingsProvider, cliDir string, trustedProxies ...string) (*FrontendServer, error) {
 	trustedProxyPrefixes, err := parseTrustedProxyPrefixes(trustedProxies)
 	if err != nil {
@@ -174,13 +177,13 @@ func (s *FrontendServer) tryServeExternalCLI(c *gin.Context) bool {
 	// do not cache a temporary deployment error for these paths.
 	c.Header("Cache-Control", "no-store")
 	if s.cliDir == "" {
-		c.String(http.StatusServiceUnavailable, "saiai client bundle unavailable: SAIAI_CLIENT_DIR is not configured; run sync-saiai-cli.sh")
+		c.String(http.StatusServiceUnavailable, saiaiCLIUnavailableMessage)
 		c.Abort()
 		return true
 	}
 	info, err := os.Stat(s.cliDir)
 	if err != nil || !info.IsDir() {
-		c.String(http.StatusServiceUnavailable, "saiai client bundle unavailable: configured client bundle is missing; run sync-saiai-cli.sh")
+		c.String(http.StatusServiceUnavailable, saiaiCLIUnavailableMessage)
 		c.Abort()
 		return true
 	}
@@ -188,7 +191,7 @@ func (s *FrontendServer) tryServeExternalCLI(c *gin.Context) bool {
 	assetPath := filepath.Join(s.cliDir, name)
 	assetInfo, err := os.Lstat(assetPath)
 	if err != nil || !assetInfo.Mode().IsRegular() {
-		c.String(http.StatusServiceUnavailable, "saiai client bundle unavailable: configured bundle is incomplete; run sync-saiai-cli.sh")
+		c.String(http.StatusServiceUnavailable, saiaiCLIUnavailableMessage)
 		c.Abort()
 		return true
 	}
@@ -208,7 +211,7 @@ func (s *FrontendServer) tryServeExternalCLI(c *gin.Context) bool {
 
 	data, err := os.ReadFile(assetPath)
 	if err != nil {
-		c.String(http.StatusServiceUnavailable, "saiai client bundle unavailable: wrapper cannot be read; run sync-saiai-cli.sh")
+		c.String(http.StatusServiceUnavailable, saiaiCLIUnavailableMessage)
 		c.Abort()
 		return true
 	}

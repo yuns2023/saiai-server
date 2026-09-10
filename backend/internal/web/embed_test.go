@@ -645,7 +645,8 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 		assert.NotContains(t, w.Body.String(), cliDir)
-		assert.Equal(t, "saiai client bundle unavailable: configured client bundle is missing; run sync-saiai-cli.sh", strings.TrimSpace(w.Body.String()))
+		assert.Equal(t, saiaiCLIUnavailableMessage, strings.TrimSpace(w.Body.String()))
+		assert.NotContains(t, w.Body.String(), "sync-saiai-cli.sh")
 	})
 
 	t.Run("returns_503_instead_of_falling_back_when_wrapper_is_missing", func(t *testing.T) {
@@ -663,7 +664,8 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
-		assert.Contains(t, w.Body.String(), "configured bundle is incomplete")
+		assert.Equal(t, saiaiCLIUnavailableMessage, strings.TrimSpace(w.Body.String()))
+		assert.NotContains(t, w.Body.String(), "sync-saiai-cli.sh")
 	})
 
 	t.Run("serves_cli_wrapper_with_current_origin_download_base", func(t *testing.T) {
