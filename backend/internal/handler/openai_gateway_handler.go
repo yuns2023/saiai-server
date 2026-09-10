@@ -227,8 +227,14 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	c.Status(resp.StatusCode)
 	buffer := make([]byte, 32*1024)
 	var streamObserver *service.ChatGPTConversationStreamObserver
+	responseShapeCapture := false
 	if isModelRequest {
-		streamObserver = service.NewChatGPTConversationStreamObserver()
+		responseShapeCapture = h.cfg.Gateway.OpenAIChatResponseShapeCapture
+		if responseShapeCapture {
+			streamObserver = service.NewChatGPTConversationStreamShapeObserver()
+		} else {
+			streamObserver = service.NewChatGPTConversationStreamObserver()
+		}
 	}
 	var streamObserverErr error
 	clientDisconnected := false
@@ -263,8 +269,18 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 						zap.Bool("provider_error_seen", summary.ProviderErrorSeen),
 						zap.String("observed_model", summary.ObservedModel),
 					}
+					if responseShapeCapture {
+						fields = append(fields,
+							zap.Strings("event_types", summary.EventTypes),
+							zap.Strings("top_level_fields", summary.TopLevelFields),
+							zap.Strings("message_metadata_fields", summary.MessageMetadataFields),
+							zap.Strings("usage_like_field_paths", summary.UsageLikeFieldPaths),
+						)
+					}
 					if streamObserverErr != nil {
 						reqLog.Warn("openai.chatgpt_stream_observer_failed", append(fields, zap.Error(streamObserverErr))...)
+					} else if responseShapeCapture {
+						reqLog.Info("openai.chatgpt_response_shape_captured", fields...)
 					} else {
 						reqLog.Debug("openai.chatgpt_stream_observed", fields...)
 					}

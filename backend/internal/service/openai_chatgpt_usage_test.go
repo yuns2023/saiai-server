@@ -26,8 +26,39 @@ func TestChatGPTConversationStreamObserverParsesChunkedTerminalSignals(t *testin
 	require.True(t, summary.CompletionSeen)
 	require.True(t, summary.DoneSentinelSeen)
 	require.False(t, summary.ProviderErrorSeen)
+	require.Nil(t, summary.EventTypes)
+	require.Nil(t, summary.TopLevelFields)
+	require.Nil(t, summary.MessageMetadataFields)
+	require.Nil(t, summary.UsageLikeFieldPaths)
 	require.NotContains(t, string(observer.eventData[:cap(observer.eventData)]), "discard me")
 	require.NotContains(t, string(observer.lineBuffer[:cap(observer.lineBuffer)]), "discard me")
+}
+
+func TestChatGPTConversationStreamShapeObserverCapturesNamesOnly(t *testing.T) {
+	observer := NewChatGPTConversationStreamShapeObserver()
+	stream := "event: delta_encoding\ndata: opaque-encoded-delta\n\n" +
+		"event: message\ndata: {\"type\":\"message\",\"conversation_id\":\"conv-1\",\"usage\":{\"input_tokens\":12,\"details\":{\"cached_tokens\":3}},\"message\":{\"author\":{\"role\":\"assistant\"},\"metadata\":{\"model_slug\":\"gpt-test\",\"token_usage\":{\"output_tokens\":4},\"provider_note\":\"must-not-be-captured\"},\"content\":{\"content_type\":\"text\",\"parts\":[{\"secret_token_name\":\"must-not-be-captured\"}]}}}\n\n" +
+		"data: {\"type\":\"message_stream_complete\",\"conversation_id\":\"conv-1\"}\n\n" +
+		"data: [DONE]\n\n"
+	require.NoError(t, observer.Observe([]byte(stream)))
+
+	summary, err := observer.Finish()
+	require.NoError(t, err)
+	require.Equal(t, []string{"delta_encoding", "message", "message_stream_complete"}, summary.EventTypes)
+	require.Equal(t, []string{"conversation_id", "message", "type", "usage"}, summary.TopLevelFields)
+	require.Equal(t, []string{"model_slug", "provider_note", "token_usage"}, summary.MessageMetadataFields)
+	require.Equal(t, []string{
+		"message.metadata.token_usage",
+		"message.metadata.token_usage.output_tokens",
+		"usage",
+		"usage.details",
+		"usage.details.cached_tokens",
+		"usage.input_tokens",
+	}, summary.UsageLikeFieldPaths)
+	for _, path := range summary.UsageLikeFieldPaths {
+		require.NotContains(t, path, "secret_token_name")
+		require.NotContains(t, path, "must-not-be-captured")
+	}
 }
 
 func TestChatGPTConversationStreamObserverDoesNotTreatDoneAsCompletion(t *testing.T) {

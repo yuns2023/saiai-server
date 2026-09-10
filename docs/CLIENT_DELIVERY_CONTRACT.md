@@ -169,3 +169,7 @@ The versioned native-Chat accounting rules and activation gates are defined in
 In particular, the Desktop thread-usage endpoint returns a cumulative,
 eventually-consistent conversation snapshot; parsing it does not make it safe
 to pass directly to request-level billing.
+
+`gateway.openai_chat_response_shape_capture` is a default-off, staging-only
+diagnostic. It may record protocol field names but never field values or
+message content and must be disabled immediately after the authorized window.

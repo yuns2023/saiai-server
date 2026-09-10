@@ -46,6 +46,12 @@ default. It rejects final `/f/conversation` requests before account selection
 or provider traffic. The override may be used only with a replay provider or
 an explicitly authorized, process-capped credentialed staging window.
 
+`gateway.openai_chat_response_shape_capture=false` is also the default. An
+authorized isolated capture window may enable it to log only SSE event types,
+top-level field names, immediate `message.metadata` field names, and usage-like
+field paths. Values, conversation IDs, message content, and arbitrary message
+content keys are not logged. Disable it again when the window closes.
+
 Control-plane requests are not model turns and are never billable.
 
 ## Usage-source rules

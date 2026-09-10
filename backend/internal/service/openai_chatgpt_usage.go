@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -24,11 +25,15 @@ const maxChatGPTStreamEventBytes = 2 * 1024 * 1024
 // Desktop terminal schema does not define token usage, so this type must not
 // be treated as billable usage evidence.
 type ChatGPTConversationStreamSummary struct {
-	ConversationID    string
-	ObservedModel     string
-	CompletionSeen    bool
-	DoneSentinelSeen  bool
-	ProviderErrorSeen bool
+	ConversationID        string
+	ObservedModel         string
+	CompletionSeen        bool
+	DoneSentinelSeen      bool
+	ProviderErrorSeen     bool
+	EventTypes            []string
+	TopLevelFields        []string
+	MessageMetadataFields []string
+	UsageLikeFieldPaths   []string
 }
 
 // ChatGPTConversationStreamObserver incrementally inspects a native ChatGPT
@@ -36,19 +41,39 @@ type ChatGPTConversationStreamSummary struct {
 // message_stream_complete event used by Desktop 26.901.51231 and keeps enough
 // state for conversation affinity and future accounting research.
 type ChatGPTConversationStreamObserver struct {
-	lineBuffer []byte
-	eventData  []byte
-	summary    ChatGPTConversationStreamSummary
-	err        error
-	finished   bool
+	lineBuffer            []byte
+	eventData             []byte
+	summary               ChatGPTConversationStreamSummary
+	captureShape          bool
+	eventTypes            map[string]struct{}
+	topLevelFields        map[string]struct{}
+	messageMetadataFields map[string]struct{}
+	usageLikeFieldPaths   map[string]struct{}
+	err                   error
+	finished              bool
 }
 
 // NewChatGPTConversationStreamObserver creates a bounded, content-discarding
 // native ChatGPT stream observer.
 func NewChatGPTConversationStreamObserver() *ChatGPTConversationStreamObserver {
+	return newChatGPTConversationStreamObserver(false)
+}
+
+// NewChatGPTConversationStreamShapeObserver enables schema-only capture for an
+// explicitly authorized staging window. It records names, never field values.
+func NewChatGPTConversationStreamShapeObserver() *ChatGPTConversationStreamObserver {
+	return newChatGPTConversationStreamObserver(true)
+}
+
+func newChatGPTConversationStreamObserver(captureShape bool) *ChatGPTConversationStreamObserver {
 	return &ChatGPTConversationStreamObserver{
-		lineBuffer: make([]byte, 0, 4*1024),
-		eventData:  make([]byte, 0, 4*1024),
+		lineBuffer:            make([]byte, 0, 4*1024),
+		eventData:             make([]byte, 0, 4*1024),
+		captureShape:          captureShape,
+		eventTypes:            make(map[string]struct{}),
+		topLevelFields:        make(map[string]struct{}),
+		messageMetadataFields: make(map[string]struct{}),
+		usageLikeFieldPaths:   make(map[string]struct{}),
 	}
 }
 
@@ -116,6 +141,12 @@ func (o *ChatGPTConversationStreamObserver) Finish() (ChatGPTConversationStreamS
 		}
 		o.finished = true
 	}
+	if o.captureShape {
+		o.summary.EventTypes = sortedChatGPTSchemaNames(o.eventTypes)
+		o.summary.TopLevelFields = sortedChatGPTSchemaNames(o.topLevelFields)
+		o.summary.MessageMetadataFields = sortedChatGPTSchemaNames(o.messageMetadataFields)
+		o.summary.UsageLikeFieldPaths = sortedChatGPTSchemaNames(o.usageLikeFieldPaths)
+	}
 	return o.summary, nil
 }
 
@@ -123,6 +154,13 @@ func (o *ChatGPTConversationStreamObserver) processLine(line []byte) error {
 	line = bytes.TrimSuffix(line, []byte{'\r'})
 	if len(line) == 0 {
 		return o.dispatchEvent()
+	}
+	if bytes.HasPrefix(line, []byte("event:")) {
+		eventType := strings.TrimSpace(string(line[len("event:"):]))
+		if o.captureShape && safeChatGPTSchemaName(eventType) {
+			o.eventTypes[eventType] = struct{}{}
+		}
+		return nil
 	}
 	if !bytes.HasPrefix(line, []byte("data:")) {
 		return nil
@@ -158,6 +196,17 @@ func (o *ChatGPTConversationStreamObserver) dispatchEvent() error {
 		return nil
 	}
 
+	var rawEvent map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &rawEvent); err != nil {
+		// The native protocol also supports encoded delta events. They are
+		// opaque here and are forwarded unchanged; only JSON control events are
+		// relevant to the current completion/accounting contract.
+		return nil
+	}
+	if o.captureShape {
+		o.captureResponseShape(rawEvent)
+	}
+
 	var event struct {
 		Type           string          `json:"type"`
 		ConversationID string          `json:"conversation_id"`
@@ -171,11 +220,9 @@ func (o *ChatGPTConversationStreamObserver) dispatchEvent() error {
 			} `json:"metadata"`
 		} `json:"message"`
 	}
-	if err := json.Unmarshal(payload, &event); err != nil {
-		// The native protocol also supports encoded delta events. They are
-		// opaque here and are forwarded unchanged; only JSON control events are
-		// relevant to the current completion/accounting contract.
-		return nil
+	_ = json.Unmarshal(payload, &event)
+	if o.captureShape && safeChatGPTSchemaName(event.Type) {
+		o.eventTypes[event.Type] = struct{}{}
 	}
 	if conversationID := strings.TrimSpace(event.ConversationID); conversationID != "" {
 		o.summary.ConversationID = conversationID
@@ -198,6 +245,166 @@ func (o *ChatGPTConversationStreamObserver) dispatchEvent() error {
 		o.summary.ProviderErrorSeen = true
 	}
 	return nil
+}
+
+const (
+	maxChatGPTCapturedSchemaNames = 256
+	maxChatGPTSchemaDepth         = 8
+)
+
+func (o *ChatGPTConversationStreamObserver) captureResponseShape(event map[string]json.RawMessage) {
+	if o == nil || !o.captureShape {
+		return
+	}
+	for key, value := range event {
+		if !safeChatGPTSchemaComponent(key) {
+			continue
+		}
+		addChatGPTSchemaName(o.topLevelFields, key)
+		if key != "message" {
+			if chatGPTUsageLikeSchemaName(key) {
+				addChatGPTSchemaName(o.usageLikeFieldPaths, key)
+				collectChatGPTSchemaPaths(value, key, o.usageLikeFieldPaths, 0)
+			} else {
+				findChatGPTUsageLikePaths(value, key, o.usageLikeFieldPaths, 0)
+			}
+		}
+	}
+
+	messageRaw, ok := event["message"]
+	if !ok {
+		return
+	}
+	var message map[string]json.RawMessage
+	if json.Unmarshal(messageRaw, &message) != nil {
+		return
+	}
+	metadataRaw, ok := message["metadata"]
+	if !ok {
+		return
+	}
+	var metadata map[string]json.RawMessage
+	if json.Unmarshal(metadataRaw, &metadata) != nil {
+		return
+	}
+	for key, value := range metadata {
+		if !safeChatGPTSchemaComponent(key) {
+			continue
+		}
+		addChatGPTSchemaName(o.messageMetadataFields, key)
+		findChatGPTUsageLikePaths(value, "message.metadata."+key, o.usageLikeFieldPaths, 0)
+		if chatGPTUsageLikeSchemaName(key) {
+			addChatGPTSchemaName(o.usageLikeFieldPaths, "message.metadata."+key)
+			collectChatGPTSchemaPaths(value, "message.metadata."+key, o.usageLikeFieldPaths, 0)
+		}
+	}
+}
+
+func findChatGPTUsageLikePaths(raw json.RawMessage, prefix string, output map[string]struct{}, depth int) {
+	if depth >= maxChatGPTSchemaDepth || len(output) >= maxChatGPTCapturedSchemaNames {
+		return
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) == nil && object != nil {
+		for key, child := range object {
+			if !safeChatGPTSchemaComponent(key) {
+				continue
+			}
+			path := prefix + "." + key
+			if chatGPTUsageLikeSchemaName(key) {
+				addChatGPTSchemaName(output, path)
+				collectChatGPTSchemaPaths(child, path, output, depth+1)
+			} else {
+				findChatGPTUsageLikePaths(child, path, output, depth+1)
+			}
+		}
+		return
+	}
+	var array []json.RawMessage
+	if json.Unmarshal(raw, &array) == nil {
+		for _, child := range array {
+			findChatGPTUsageLikePaths(child, prefix+".[]", output, depth+1)
+		}
+	}
+}
+
+func collectChatGPTSchemaPaths(raw json.RawMessage, prefix string, output map[string]struct{}, depth int) {
+	if depth >= maxChatGPTSchemaDepth || len(output) >= maxChatGPTCapturedSchemaNames {
+		return
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) == nil && object != nil {
+		for key, child := range object {
+			if !safeChatGPTSchemaComponent(key) {
+				continue
+			}
+			path := prefix + "." + key
+			addChatGPTSchemaName(output, path)
+			collectChatGPTSchemaPaths(child, path, output, depth+1)
+		}
+		return
+	}
+	var array []json.RawMessage
+	if json.Unmarshal(raw, &array) == nil {
+		arrayPath := prefix + ".[]"
+		addChatGPTSchemaName(output, arrayPath)
+		for _, child := range array {
+			collectChatGPTSchemaPaths(child, arrayPath, output, depth+1)
+		}
+	}
+}
+
+func chatGPTUsageLikeSchemaName(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return strings.Contains(name, "usage") || strings.Contains(name, "token") || strings.Contains(name, "credit")
+}
+
+func safeChatGPTSchemaName(name string) bool {
+	if len(name) == 0 || len(name) > 512 {
+		return false
+	}
+	for _, char := range name {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '_' || char == '-' || char == '.' ||
+			char == '[' || char == ']' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func safeChatGPTSchemaComponent(name string) bool {
+	if len(name) == 0 || len(name) > 128 {
+		return false
+	}
+	for _, char := range name {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '_' || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func addChatGPTSchemaName(output map[string]struct{}, name string) {
+	if len(output) >= maxChatGPTCapturedSchemaNames || !safeChatGPTSchemaName(name) {
+		return
+	}
+	output[name] = struct{}{}
+}
+
+func sortedChatGPTSchemaNames(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 // ChatGPTThreadUsageGroup is one model/dimension bucket from ChatGPT's

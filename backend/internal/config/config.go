@@ -388,6 +388,11 @@ type GatewayConfig struct {
 	// OpenAIChatUnaccountedAllowed permits native Chat model requests before a
 	// verified usage parser exists. It must remain false outside isolated tests.
 	OpenAIChatUnaccountedAllowed bool `mapstructure:"openai_chat_unaccounted_allowed"`
+	// OpenAIChatResponseShapeCapture records only native Chat SSE event types,
+	// top-level field names, message.metadata field names, and usage-like field
+	// paths. It never records field values or message content and must remain
+	// disabled outside an explicitly authorized isolated capture window.
+	OpenAIChatResponseShapeCapture bool `mapstructure:"openai_chat_response_shape_capture"`
 
 	// HTTP 上游连接池配置（性能优化：支持高并发场景调优）
 	// MaxIdleConns: 所有主机的最大空闲连接总数
@@ -1373,6 +1378,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_chat_upstream_base_url", "")
 	viper.SetDefault("gateway.openai_chat_model_request_cap", 0)
 	viper.SetDefault("gateway.openai_chat_unaccounted_allowed", false)
+	viper.SetDefault("gateway.openai_chat_response_shape_capture", false)
 	viper.SetDefault("gateway.openai_ws.mode_router_v2_enabled", false)
 	viper.SetDefault("gateway.openai_ws.ingress_mode_default", "ctx_pool")
 	viper.SetDefault("gateway.openai_ws.oauth_enabled", true)
