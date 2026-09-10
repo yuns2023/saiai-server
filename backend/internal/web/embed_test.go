@@ -448,6 +448,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		apiPaths := []string{
 			"/api/v1/users",
 			"/backend-api/codex/models",
+			"/chatgpt/backend-api/f/conversation",
 			"/v1/models",
 			"/v1beta/chat",
 			"/sora/v1/models",
@@ -1005,6 +1006,7 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 		apiPaths := []string{
 			"/api/users",
 			"/backend-api/codex/models",
+			"/chatgpt/backend-api/f/conversation",
 			"/v1/models",
 			"/v1beta/chat",
 			"/sora/v1/models",
