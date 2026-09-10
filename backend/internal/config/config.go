@@ -385,6 +385,9 @@ type GatewayConfig struct {
 	// process lifetime. Zero disables the cap. This is used by credentialed
 	// staging to prevent client retries from exceeding the approved request cap.
 	OpenAIChatModelRequestCap int64 `mapstructure:"openai_chat_model_request_cap"`
+	// OpenAIChatUnaccountedAllowed permits native Chat model requests before a
+	// verified usage parser exists. It must remain false outside isolated tests.
+	OpenAIChatUnaccountedAllowed bool `mapstructure:"openai_chat_unaccounted_allowed"`
 
 	// HTTP 上游连接池配置（性能优化：支持高并发场景调优）
 	// MaxIdleConns: 所有主机的最大空闲连接总数
@@ -1369,6 +1372,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_chat_enabled", false)
 	viper.SetDefault("gateway.openai_chat_upstream_base_url", "")
 	viper.SetDefault("gateway.openai_chat_model_request_cap", 0)
+	viper.SetDefault("gateway.openai_chat_unaccounted_allowed", false)
 	viper.SetDefault("gateway.openai_ws.mode_router_v2_enabled", false)
 	viper.SetDefault("gateway.openai_ws.ingress_mode_default", "ctx_pool")
 	viper.SetDefault("gateway.openai_ws.oauth_enabled", true)

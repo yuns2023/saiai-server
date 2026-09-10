@@ -92,6 +92,7 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIChatEnabled = true
 	cfg.Gateway.OpenAIChatModelRequestCap = 1
+	cfg.Gateway.OpenAIChatUnaccountedAllowed = true
 	cfg.Gateway.OpenAIChatUpstreamBaseURL = "http://replay.example.test"
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
@@ -113,6 +114,7 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 	c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
 		ID: 3, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI},
 	})
+	c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 5, Concurrency: 2})
 
 	h.ChatGPTConversation(c)
 
@@ -141,8 +143,32 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 	c2.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
 		ID: 3, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI},
 	})
+	c2.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 5, Concurrency: 2})
 	h.ChatGPTConversation(c2)
 	require.Equal(t, http.StatusTooManyRequests, second.Code)
 	require.Contains(t, second.Body.String(), "request_cap_exceeded")
 	require.Equal(t, 1, upstream.calls)
+}
+
+func TestChatGPTConversationRejectsUnaccountedModelRequestByDefault(t *testing.T) {
+	groupID := int64(11)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIChatEnabled = true
+	cfg.Gateway.OpenAIChatUpstreamBaseURL = "http://replay.example.test"
+	h := NewOpenAIGatewayHandler(nil, nil, nil, nil, nil, nil, nil, cfg)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/chatgpt/backend-api/f/conversation",
+		bytes.NewBufferString(`{"model":"auto"}`),
+	)
+	c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+		ID: 9, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI},
+	})
+
+	h.ChatGPTConversation(c)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Body.String(), "accounting_unavailable")
 }

@@ -155,3 +155,11 @@ control-plane calls do not consume that limit. Recreate the isolated Gateway
 immediately before the window, set the approved cap, and restore the replay
 upstream immediately afterward. A zero cap disables this safeguard and must
 not be used for a limited live probe.
+
+Until a provider-response usage parser and billing contract are verified,
+`gateway.openai_chat_unaccounted_allowed` defaults to false and rejects final
+`/f/conversation` requests before account selection or upstream traffic. Only
+an isolated replay or explicitly capped credentialed-staging stack may set it
+to true. Control-plane `init`/`prepare` requests remain available for protocol
+research, but this flag must never be enabled as a production substitute for
+accounting.

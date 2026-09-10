@@ -111,6 +111,41 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	if model == "" {
 		model = "chatgpt"
 	}
+	isModelRequest := c.Request.URL.Path == "/chatgpt/backend-api/f/conversation"
+	if isModelRequest && !h.cfg.Gateway.OpenAIChatUnaccountedAllowed {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+			"type": "accounting_unavailable", "message": "Native ChatGPT Chat accounting is not enabled",
+		}})
+		return
+	}
+	streamStarted := false
+	var reqLog *zap.Logger
+	if isModelRequest {
+		subject, subjectOK := middleware2.GetAuthSubjectFromContext(c)
+		if !subjectOK {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+				"type": "api_error", "message": "User context not found",
+			}})
+			return
+		}
+		reqLog = requestLogger(
+			c,
+			"handler.openai_gateway.chatgpt_conversation",
+			zap.Int64("user_id", subject.UserID),
+			zap.Int64("api_key_id", apiKey.ID),
+		)
+		if h.concurrencyHelper != nil && h.concurrencyHelper.concurrencyService != nil {
+			userRelease, acquired := h.acquireResponsesUserSlot(
+				c, subject.UserID, subject.Concurrency, true, &streamStarted, reqLog,
+			)
+			if !acquired {
+				return
+			}
+			if userRelease != nil {
+				defer userRelease()
+			}
+		}
+	}
 	sessionHash := service.ResolveChatGPTConversationSessionHash(body)
 	if sessionHash == "" {
 		sessionHash = h.gatewayService.GenerateSessionHash(c, body)
@@ -138,8 +173,19 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		return
 	}
 	account := selection.Account
+	if isModelRequest && h.concurrencyHelper != nil && h.concurrencyHelper.concurrencyService != nil {
+		accountRelease, acquired := h.acquireResponsesAccountSlot(
+			c, apiKey.GroupID, sessionHash, selection, true, &streamStarted, reqLog,
+		)
+		if !acquired {
+			return
+		}
+		if accountRelease != nil {
+			defer accountRelease()
+		}
+	}
 	path := c.Request.URL.RequestURI()
-	if c.Request.URL.Path == "/chatgpt/backend-api/f/conversation" {
+	if isModelRequest {
 		if cap := h.cfg.Gateway.OpenAIChatModelRequestCap; cap > 0 {
 			attempt := h.openAIChatModelRequests.Add(1)
 			if attempt > cap {
