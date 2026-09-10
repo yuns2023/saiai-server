@@ -62,7 +62,10 @@ func ResolveChatGPTTurnBillingIdentity(body []byte, fallbackRequestID string) Ch
 	_, _ = hash.Write(message)
 	digest := hex.EncodeToString(hash.Sum(nil))
 	return ChatGPTTurnBillingIdentity{
-		RequestID:   "chatgpt-turn:" + digest,
+		// usage_logs.request_id is varchar(64); the full SHA-256 hex digest
+		// already provides the namespace separation needed by the per-key
+		// deduplication contract.
+		RequestID:   digest,
 		PayloadHash: digest,
 	}
 }
