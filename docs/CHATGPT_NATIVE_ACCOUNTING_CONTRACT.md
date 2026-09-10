@@ -1,8 +1,9 @@
 # Native ChatGPT Chat accounting contract
 
-Status: research/staging only. Native ChatGPT Chat must remain disabled for
-production model traffic until this contract has a verified provider usage
-source and an atomic settlement implementation.
+Status: fixed-success-turn accounting is implemented for local/replay
+validation. Native ChatGPT Chat remains disabled by default and must not carry
+production model traffic until a positive price and the normal release gates
+are explicitly approved.
 
 ## Evidence boundary
 
@@ -51,10 +52,20 @@ an approved token-billing source for this version.
 
 ## Current admission rule
 
-`gateway.openai_chat_unaccounted_allowed=false` is the production-safe
-default. It rejects final `/f/conversation` requests before account selection
-or provider traffic. The override may be used only with a replay provider or
-an explicitly authorized, process-capped credentialed staging window.
+`gateway.openai_chat_success_turn_price_usd=0` and
+`gateway.openai_chat_unaccounted_allowed=false` are the production-safe
+defaults. A final `/f/conversation` request is rejected before account
+selection or provider traffic unless the fixed price is positive and finite.
+The unaccounted override may bypass that price requirement only with a replay
+provider or an explicitly authorized, process-capped credentialed staging
+window.
+
+Final model turns detach upstream cancellation from the downstream request but
+retain its context values. `gateway.openai_chat_turn_timeout_seconds` bounds
+that upstream/drain lifetime and defaults to 600 seconds. A request already
+cancelled before forwarding is not sent. This permits a started provider turn
+to reach its real terminal event after a client write failure without allowing
+an unbounded orphan stream.
 
 `gateway.openai_chat_response_shape_capture=false` is also the default. An
 authorized isolated capture window may enable it to log only SSE event types,
@@ -64,10 +75,40 @@ content keys are not logged. Disable it again when the window closes.
 
 Control-plane requests are not model turns and are never billable.
 
+## Fixed successful-turn contract
+
+One billable unit is one final `/f/conversation` request for which all of the
+following are true:
+
+- the upstream HTTP status is 2xx;
+- the bounded SSE observer finishes without an error;
+- `message_stream_complete` is present with a conversation ID; and
+- no provider error event was observed.
+
+`[DONE]` alone is insufficient. Non-2xx responses, rejected requests, control
+requests, truncated streams, observer-limit failures, and provider error events
+cost zero turns.
+
+The usage row uses model `chatgpt-native-turn`, request type `stream`, zero
+input/output/cache tokens, and the configured base price as `total_cost`.
+`actual_cost` applies the existing group/user rate multiplier. Subscription
+usage, wallet balance, API-key quota/rate limits, and request fingerprinting
+use the existing atomic billing transaction and request-ID deduplication path;
+usage-log insertion follows the existing idempotent best-effort path. A retry
+with the same billing identity cannot charge a second turn. The preferred
+billing identity is a SHA-256 digest of the conversation ID and current message
+JSON, so Desktop retries remain stable when outer preparation fields change
+without storing the conversation ID, message ID, or content. Requests without
+a valid message ID fall back to the request-scoped billing ID.
+
+Zero tokens are intentional and must remain visible as zero: request count is
+the turn count, while RPM and cost remain meaningful and TPM is not invented.
+The incoming `model=auto` value is not used for pricing.
+
 ## Usage-source rules
 
 Only provider-reported usage with a versioned, captured schema can become a
-billing source. The following are not acceptable substitutes:
+token-based billing source. The following are not acceptable substitutes:
 
 - request/response byte length;
 - local tokenization of visible text;
@@ -118,23 +159,29 @@ as the current turn's usage.
 - Usage parsing, delta persistence, balance deduction, API-key quota updates,
   and the usage log must commit idempotently. Logging success without applied
   billing is not settlement.
-- A completed model turn whose usage remains unavailable must raise an
-  operator-visible accounting failure. Production must not silently record
-  zero tokens or zero cost.
+- Fixed-turn billing deliberately records zero tokens and the configured
+  positive turn price. Any future provider-usage billing mode must treat
+  missing usage as an operator-visible accounting failure rather than silently
+  recording zero cost.
 
-## Evidence still required before activation
+## Evidence still required before fixed-turn activation
 
 - repeat sanitized native-stream schema capture whenever the supported Desktop
   or private Chat protocol version changes;
+- verify disconnect/drain and duplicate-settlement behavior;
+- run an isolated end-to-end balance, subscription, API-key quota, and usage-
+  log test with exactly one charged turn; and
+- explicitly approve the base turn price and production group scope.
+
+## Additional evidence for a future token-based mode
+
 - a successful sanitized response-shape capture of `thread_usage/query` for
   each OAuth plan type intended to use that source; the current Plus/minimal-
   OAuth probe is a 403 and does not qualify;
 - before/after snapshots for a two-turn conversation proving cumulative and
   eventual-consistency behavior;
-- model-switch, cache, reasoning, tool, and retry cases;
-- disconnect/drain and duplicate-settlement tests; and
-- an isolated end-to-end balance/quota/usage-log test with exactly one charged
-  turn.
+- model-switch, cache, reasoning, tool, and retry cases; and
+- an atomic cumulative-snapshot settlement implementation.
 
-Until these gates pass, the implemented parser is research infrastructure, not
-a production billing path.
+The thread-usage parser remains research infrastructure. Production native
+Chat billing uses only the explicit successful-turn contract above.

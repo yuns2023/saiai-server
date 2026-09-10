@@ -2,6 +2,8 @@ package service
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +21,51 @@ var (
 )
 
 const maxChatGPTStreamEventBytes = 2 * 1024 * 1024
+
+// ChatGPTTurnBillingIdentity is a content-hiding, retry-stable identity for
+// one native Chat user message.
+type ChatGPTTurnBillingIdentity struct {
+	RequestID   string
+	PayloadHash string
+}
+
+// ResolveChatGPTTurnBillingIdentity hashes the conversation identity and the
+// last message JSON. Desktop retries keep that message stable even when outer
+// preparation fields change. A changed message or conversation produces a new
+// billing identity, while raw IDs and content never enter the usage log.
+func ResolveChatGPTTurnBillingIdentity(body []byte, fallbackRequestID string) ChatGPTTurnBillingIdentity {
+	fallback := ChatGPTTurnBillingIdentity{
+		RequestID:   strings.TrimSpace(fallbackRequestID),
+		PayloadHash: HashUsageRequestPayload(body),
+	}
+	if len(body) == 0 {
+		return fallback
+	}
+	var envelope struct {
+		ConversationID string            `json:"conversation_id"`
+		Messages       []json.RawMessage `json:"messages"`
+	}
+	if json.Unmarshal(body, &envelope) != nil || len(envelope.Messages) == 0 {
+		return fallback
+	}
+	message := bytes.TrimSpace(envelope.Messages[len(envelope.Messages)-1])
+	var identity struct {
+		ID string `json:"id"`
+	}
+	if len(message) == 0 || json.Unmarshal(message, &identity) != nil || strings.TrimSpace(identity.ID) == "" {
+		return fallback
+	}
+	hash := sha256.New()
+	_, _ = hash.Write([]byte("chatgpt-native-turn-v1\x00"))
+	_, _ = hash.Write([]byte(strings.TrimSpace(envelope.ConversationID)))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write(message)
+	digest := hex.EncodeToString(hash.Sum(nil))
+	return ChatGPTTurnBillingIdentity{
+		RequestID:   "chatgpt-turn:" + digest,
+		PayloadHash: digest,
+	}
+}
 
 // ChatGPTConversationStreamSummary contains only non-content accounting and
 // affinity signals observed in a native ChatGPT SSE response. The inspected

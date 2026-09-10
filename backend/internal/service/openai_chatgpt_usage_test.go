@@ -34,6 +34,27 @@ func TestChatGPTConversationStreamObserverParsesChunkedTerminalSignals(t *testin
 	require.NotContains(t, string(observer.lineBuffer[:cap(observer.lineBuffer)]), "discard me")
 }
 
+func TestResolveChatGPTTurnBillingIdentityIsRetryStableAndContentSensitive(t *testing.T) {
+	first := []byte(`{"conversation_id":"conv-1","client_prepare_state":{"id":"a"},"messages":[{"id":"message-1","author":{"role":"user"},"content":{"parts":["hello"]}}]}`)
+	retry := []byte(`{"conversation_id":"conv-1","client_prepare_state":{"id":"b"},"messages":[{"id":"message-1","author":{"role":"user"},"content":{"parts":["hello"]}}]}`)
+	changedContent := []byte(`{"conversation_id":"conv-1","messages":[{"id":"message-1","author":{"role":"user"},"content":{"parts":["different"]}}]}`)
+	changedConversation := []byte(`{"conversation_id":"conv-2","messages":[{"id":"message-1","author":{"role":"user"},"content":{"parts":["hello"]}}]}`)
+
+	identity := ResolveChatGPTTurnBillingIdentity(first, "fallback-1")
+	retryIdentity := ResolveChatGPTTurnBillingIdentity(retry, "fallback-2")
+	require.Equal(t, identity, retryIdentity)
+	require.Len(t, identity.PayloadHash, 64)
+	require.Equal(t, "chatgpt-turn:"+identity.PayloadHash, identity.RequestID)
+	require.NotContains(t, identity.RequestID, "conv-1")
+	require.NotContains(t, identity.RequestID, "message-1")
+	require.NotEqual(t, identity, ResolveChatGPTTurnBillingIdentity(changedContent, "fallback"))
+	require.NotEqual(t, identity, ResolveChatGPTTurnBillingIdentity(changedConversation, "fallback"))
+
+	fallback := ResolveChatGPTTurnBillingIdentity([]byte(`{"messages":[{"content":"missing id"}]}`), "local:fallback")
+	require.Equal(t, "local:fallback", fallback.RequestID)
+	require.Len(t, fallback.PayloadHash, 64)
+}
+
 func TestChatGPTConversationStreamShapeObserverCapturesNamesOnly(t *testing.T) {
 	observer := NewChatGPTConversationStreamShapeObserver()
 	stream := "event: delta_encoding\ndata: opaque-encoded-delta\n\n" +

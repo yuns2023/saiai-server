@@ -9232,6 +9232,13 @@ func resolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string)
 	return "generated:" + generateRequestID()
 }
 
+// ResolveUsageBillingRequestID captures the stable billing identity while the
+// original request context is still available. Async usage workers must pass
+// this resolved value instead of relying on their detached worker context.
+func ResolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string) string {
+	return resolveUsageBillingRequestID(ctx, upstreamRequestID)
+}
+
 func resolveUsageBillingPayloadFingerprint(ctx context.Context, requestPayloadHash string) string {
 	if payloadHash := strings.TrimSpace(requestPayloadHash); payloadHash != "" {
 		return payloadHash

@@ -388,6 +388,13 @@ type GatewayConfig struct {
 	// OpenAIChatUnaccountedAllowed permits native Chat model requests before a
 	// verified usage parser exists. It must remain false outside isolated tests.
 	OpenAIChatUnaccountedAllowed bool `mapstructure:"openai_chat_unaccounted_allowed"`
+	// OpenAIChatSuccessTurnPriceUSD is the base price for one successfully
+	// completed native Chat turn. Zero disables fixed-turn billing; final model
+	// requests remain rejected unless the isolated unaccounted override is set.
+	OpenAIChatSuccessTurnPriceUSD float64 `mapstructure:"openai_chat_success_turn_price_usd"`
+	// OpenAIChatTurnTimeoutSeconds bounds the detached upstream lifetime for a
+	// final native Chat turn after the downstream client disconnects.
+	OpenAIChatTurnTimeoutSeconds int `mapstructure:"openai_chat_turn_timeout_seconds"`
 	// OpenAIChatResponseShapeCapture records only native Chat SSE event types,
 	// top-level field names, message.metadata field names, and usage-like field
 	// paths. It never records field values or message content and must remain
@@ -1378,6 +1385,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_chat_upstream_base_url", "")
 	viper.SetDefault("gateway.openai_chat_model_request_cap", 0)
 	viper.SetDefault("gateway.openai_chat_unaccounted_allowed", false)
+	viper.SetDefault("gateway.openai_chat_success_turn_price_usd", 0)
+	viper.SetDefault("gateway.openai_chat_turn_timeout_seconds", 600)
 	viper.SetDefault("gateway.openai_chat_response_shape_capture", false)
 	viper.SetDefault("gateway.openai_ws.mode_router_v2_enabled", false)
 	viper.SetDefault("gateway.openai_ws.ingress_mode_default", "ctx_pool")

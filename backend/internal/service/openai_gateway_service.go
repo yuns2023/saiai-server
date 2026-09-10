@@ -3838,6 +3838,144 @@ type OpenAIRecordUsageInput struct {
 	APIKeyService      APIKeyQuotaUpdater
 }
 
+const OpenAIChatGPTTurnBillingModel = "chatgpt-native-turn"
+
+// OpenAIChatGPTTurnUsageInput records one completed native ChatGPT turn using
+// an explicit fixed-price contract. It intentionally contains no token usage.
+type OpenAIChatGPTTurnUsageInput struct {
+	BasePriceUSD       float64
+	RequestID          string
+	APIKey             *APIKey
+	User               *User
+	Account            *Account
+	Subscription       *UserSubscription
+	InboundEndpoint    string
+	UpstreamEndpoint   string
+	UserAgent          string
+	IPAddress          string
+	RequestPayloadHash string
+	Duration           time.Duration
+	APIKeyService      APIKeyQuotaUpdater
+}
+
+// IsValidOpenAIChatGPTTurnPrice reports whether a configured fixed price is
+// safe to use for one completed turn.
+func IsValidOpenAIChatGPTTurnPrice(priceUSD float64) bool {
+	return priceUSD > 0 && !math.IsNaN(priceUSD) && !math.IsInf(priceUSD, 0)
+}
+
+// RecordChatGPTTurnUsage records and settles exactly one successfully
+// completed native ChatGPT turn. Completion validation belongs to the caller;
+// this method rejects missing/invalid prices and never synthesizes tokens.
+func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input *OpenAIChatGPTTurnUsageInput) error {
+	if s == nil || input == nil {
+		return errors.New("record ChatGPT turn usage: input is required")
+	}
+	if !IsValidOpenAIChatGPTTurnPrice(input.BasePriceUSD) {
+		return errors.New("record ChatGPT turn usage: positive finite base price is required")
+	}
+	if input.APIKey == nil || input.User == nil || input.Account == nil {
+		return errors.New("record ChatGPT turn usage: API key, user, and account are required")
+	}
+
+	apiKey := input.APIKey
+	user := input.User
+	account := input.Account
+	multiplier := 1.0
+	if s.cfg != nil {
+		multiplier = s.cfg.Default.RateMultiplier
+	}
+	if multiplier <= 0 {
+		multiplier = 1.0
+	}
+	if apiKey.GroupID != nil && apiKey.Group != nil {
+		resolver := s.userGroupRateResolver
+		if resolver == nil {
+			resolver = newUserGroupRateResolver(nil, nil, resolveUserGroupRateCacheTTL(s.cfg), nil, "service.openai_gateway")
+		}
+		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
+		if multiplier <= 0 {
+			multiplier = 1.0
+		}
+	}
+	if math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
+		return errors.New("record ChatGPT turn usage: finite rate multiplier is required")
+	}
+	actualCost := input.BasePriceUSD * multiplier
+	if !IsValidOpenAIChatGPTTurnPrice(actualCost) {
+		return errors.New("record ChatGPT turn usage: effective fixed price is invalid")
+	}
+
+	cost := &CostBreakdown{
+		TotalCost:  input.BasePriceUSD,
+		ActualCost: actualCost,
+	}
+	isSubscriptionBilling := input.Subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	billingType := BillingTypeBalance
+	if isSubscriptionBilling {
+		billingType = BillingTypeSubscription
+	}
+	durationMs := int(input.Duration.Milliseconds())
+	accountRateMultiplier := account.BillingRateMultiplier()
+	requestID := resolveUsageBillingRequestID(ctx, input.RequestID)
+	usageLog := &UsageLog{
+		UserID:                user.ID,
+		APIKeyID:              apiKey.ID,
+		AccountID:             account.ID,
+		RequestID:             requestID,
+		Model:                 OpenAIChatGPTTurnBillingModel,
+		GroupID:               apiKey.GroupID,
+		InputTokens:           0,
+		OutputTokens:          0,
+		TotalCost:             cost.TotalCost,
+		ActualCost:            cost.ActualCost,
+		RateMultiplier:        multiplier,
+		AccountRateMultiplier: &accountRateMultiplier,
+		BillingType:           billingType,
+		RequestType:           RequestTypeStream,
+		Stream:                true,
+		DurationMs:            &durationMs,
+		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
+		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		CreatedAt:             time.Now(),
+	}
+	if input.Subscription != nil {
+		usageLog.SubscriptionID = &input.Subscription.ID
+	}
+	if input.UserAgent != "" {
+		usageLog.UserAgent = &input.UserAgent
+	}
+	if input.IPAddress != "" {
+		usageLog.IPAddress = &input.IPAddress
+	}
+
+	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+		if s.deferredService != nil {
+			s.deferredService.ScheduleLastUsedUpdate(account.ID)
+		}
+		return nil
+	}
+
+	_, err := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+		Cost:                  cost,
+		User:                  user,
+		APIKey:                apiKey,
+		Account:               account,
+		Subscription:          input.Subscription,
+		BillingModel:          OpenAIChatGPTTurnBillingModel,
+		RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
+		IsSubscriptionBill:    isSubscriptionBilling,
+		AccountRateMultiplier: accountRateMultiplier,
+		APIKeyService:         input.APIKeyService,
+	}, s.billingDeps(), s.usageBillingRepo)
+	if err != nil {
+		return err
+	}
+	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+	return nil
+}
+
 // RecordUsage records usage and deducts balance
 func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) error {
 	result := input.Result

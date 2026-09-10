@@ -156,13 +156,25 @@ immediately before the window, set the approved cap, and restore the replay
 upstream immediately afterward. A zero cap disables this safeguard and must
 not be used for a limited live probe.
 
-Until a provider-response usage parser and billing contract are verified,
-`gateway.openai_chat_unaccounted_allowed` defaults to false and rejects final
-`/f/conversation` requests before account selection or upstream traffic. Only
-an isolated replay or explicitly capped credentialed-staging stack may set it
-to true. Control-plane `init`/`prepare` requests remain available for protocol
-research, but this flag must never be enabled as a production substitute for
-accounting.
+`gateway.openai_chat_success_turn_price_usd` defaults to zero and
+`gateway.openai_chat_unaccounted_allowed` defaults to false. With both defaults,
+final `/f/conversation` requests are rejected before account selection or
+upstream traffic. A positive finite price enables fixed successful-turn
+billing; only a 2xx response with an observed `message_stream_complete` and no
+provider error costs one turn. The usage row records zero tokens under the
+stable `chatgpt-native-turn` model and charges the configured base price through
+the existing multiplier, subscription/balance, quota, and idempotent billing
+transaction.
+
+Final native Chat turns retain request-context values but detach upstream
+cancellation from a downstream disconnect so the Gateway can observe the real
+terminal result. `gateway.openai_chat_turn_timeout_seconds` defaults to 600 and
+bounds that drain; a request cancelled before forwarding is not sent.
+
+Only an isolated replay or explicitly capped credentialed-staging stack may
+set `gateway.openai_chat_unaccounted_allowed=true`. Control-plane
+`init`/`prepare` requests remain available for protocol research, but this flag
+must never be enabled as a production substitute for accounting.
 
 The versioned native-Chat accounting rules and activation gates are defined in
 [`CHATGPT_NATIVE_ACCOUNTING_CONTRACT.md`](CHATGPT_NATIVE_ACCOUNTING_CONTRACT.md).

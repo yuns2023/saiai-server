@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -25,6 +27,10 @@ func (r *chatGPTAccountRepo) ListSchedulableByGroupIDAndPlatform(context.Context
 	return []service.Account{r.account}, nil
 }
 
+func (r *chatGPTAccountRepo) ListSchedulableByPlatform(context.Context, string) ([]service.Account, error) {
+	return []service.Account{r.account}, nil
+}
+
 func (r *chatGPTAccountRepo) GetByID(context.Context, int64) (*service.Account, error) {
 	account := r.account
 	return &account, nil
@@ -34,12 +40,38 @@ type chatGPTReplayUpstream struct {
 	req          *http.Request
 	body         []byte
 	responseBody string
+	statusCode   int
 	calls        int
 }
 
 type chatGPTStickyCache struct {
 	service.GatewayCache
 	bindings map[string]int64
+}
+
+type chatGPTUsageLogCapture struct {
+	service.UsageLogRepository
+	logs []*service.UsageLog
+}
+
+type chatGPTCancelingWriter struct {
+	gin.ResponseWriter
+	cancel context.CancelFunc
+}
+
+func (w *chatGPTCancelingWriter) Write(_ []byte) (int, error) {
+	w.cancel()
+	return 0, errors.New("fixture client disconnected")
+}
+
+func (r *chatGPTUsageLogCapture) Create(_ context.Context, log *service.UsageLog) (bool, error) {
+	r.logs = append(r.logs, log)
+	return true, nil
+}
+
+func (r *chatGPTUsageLogCapture) CreateBestEffort(ctx context.Context, log *service.UsageLog) error {
+	_, err := r.Create(ctx, log)
+	return err
 }
 
 func (c *chatGPTStickyCache) GetSessionAccountID(_ context.Context, _ int64, hash string) (int64, error) {
@@ -66,8 +98,12 @@ func (u *chatGPTReplayUpstream) Do(req *http.Request, _ string, _ int64, _ int) 
 	if responseBody == "" {
 		responseBody = "data: {\"type\":\"message_stream_complete\",\"conversation_id\":\"fixture-conversation\"}\n\ndata: [DONE]\n\n"
 	}
+	statusCode := u.statusCode
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
 	return &http.Response{
-		StatusCode: http.StatusOK,
+		StatusCode: statusCode,
 		Header: http.Header{
 			"Content-Type": []string{"text/event-stream"},
 			"Set-Cookie":   []string{"upstream-secret=must-not-pass"},
@@ -193,6 +229,120 @@ func TestChatGPTConversationRejectsUnaccountedModelRequestByDefault(t *testing.T
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	require.Contains(t, w.Body.String(), "accounting_unavailable")
+}
+
+func TestChatGPTConversationBillsOnlySuccessfulTerminalTurn(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(17)
+	user := &service.User{ID: 21, Balance: 100}
+	account := service.Account{
+		ID: 22, Name: "oauth-fixed-turn", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeOAuth, Status: service.StatusActive,
+		Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID},
+		Credentials: map[string]any{
+			"access_token":       "oauth-upstream-token",
+			"chatgpt_account_id": "upstream-account",
+		},
+	}
+	upstream := &chatGPTReplayUpstream{}
+	usageRepo := &chatGPTUsageLogCapture{}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	cfg.Gateway.OpenAIChatEnabled = true
+	cfg.Gateway.OpenAIChatSuccessTurnPriceUSD = 0.02
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	billingCache := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(billingCache.Stop)
+	svc := service.NewOpenAIGatewayService(
+		&chatGPTAccountRepo{account: account}, usageRepo, nil, nil, nil, nil,
+		&chatGPTStickyCache{bindings: make(map[string]int64)}, cfg,
+		nil, nil, nil, nil, billingCache, upstream, &service.DeferredService{}, nil,
+	)
+	h := NewOpenAIGatewayHandler(svc, nil, billingCache, nil, nil, nil, nil, cfg)
+	body := []byte(`{"action":"next","messages":[{"id":"m1"}],"model":"auto"}`)
+
+	run := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.RequestID, "chatgpt-handler-turn"))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+			ID:      23,
+			GroupID: &groupID,
+			Group: &service.Group{
+				ID: groupID, Platform: service.PlatformOpenAI, RateMultiplier: 1.25,
+			},
+			User: user,
+		})
+		c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: user.ID, Concurrency: 2})
+		h.ChatGPTConversation(c)
+		return w
+	}
+
+	completed := run("/chatgpt/backend-api/f/conversation")
+	require.Equal(t, http.StatusOK, completed.Code)
+	require.Len(t, usageRepo.logs, 1)
+	require.Equal(t, service.OpenAIChatGPTTurnBillingModel, usageRepo.logs[0].Model)
+	firstIdentity := service.ResolveChatGPTTurnBillingIdentity(body, "local:chatgpt-handler-turn")
+	require.Equal(t, firstIdentity.RequestID, usageRepo.logs[0].RequestID)
+	require.Zero(t, usageRepo.logs[0].TotalTokens())
+	require.InDelta(t, 0.02, usageRepo.logs[0].TotalCost, 1e-12)
+	require.InDelta(t, 0.025, usageRepo.logs[0].ActualCost, 1e-12)
+
+	upstream.responseBody = "data: {\"conversation_id\":\"partial-conversation\"}\n\ndata: [DONE]\n\n"
+	incomplete := run("/chatgpt/backend-api/f/conversation")
+	require.Equal(t, http.StatusOK, incomplete.Code)
+	require.Len(t, usageRepo.logs, 1)
+
+	upstream.responseBody = "data: {\"error\":{\"code\":\"fixture\"}}\n\ndata: {\"type\":\"message_stream_complete\",\"conversation_id\":\"error-conversation\"}\n\ndata: [DONE]\n\n"
+	providerError := run("/chatgpt/backend-api/f/conversation")
+	require.Equal(t, http.StatusOK, providerError.Code)
+	require.Len(t, usageRepo.logs, 1)
+
+	upstream.statusCode = http.StatusInternalServerError
+	upstream.responseBody = "data: {\"type\":\"message_stream_complete\",\"conversation_id\":\"failed-status\"}\n\ndata: [DONE]\n\n"
+	failedStatus := run("/chatgpt/backend-api/f/conversation")
+	require.Equal(t, http.StatusInternalServerError, failedStatus.Code)
+	require.Len(t, usageRepo.logs, 1)
+
+	upstream.statusCode = http.StatusOK
+	control := run("/chatgpt/backend-api/conversation/init")
+	require.Equal(t, http.StatusOK, control.Code)
+	require.Len(t, usageRepo.logs, 1)
+
+	upstream.responseBody = ""
+	disconnectedBody := []byte(`{"action":"next","messages":[{"id":"m2"}],"model":"auto"}`)
+	disconnectedRecorder := httptest.NewRecorder()
+	disconnectedContext, _ := gin.CreateTestContext(disconnectedRecorder)
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	requestContext = context.WithValue(requestContext, ctxkey.RequestID, "chatgpt-disconnected-turn")
+	disconnectedContext.Request = httptest.NewRequest(
+		http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewReader(disconnectedBody),
+	).WithContext(requestContext)
+	disconnectedContext.Request.Header.Set("Content-Type", "application/json")
+	disconnectedContext.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+		ID:      23,
+		GroupID: &groupID,
+		Group: &service.Group{
+			ID: groupID, Platform: service.PlatformOpenAI, RateMultiplier: 1.25,
+		},
+		User: user,
+	})
+	disconnectedContext.Set(
+		string(servermiddleware.ContextKeyUser),
+		servermiddleware.AuthSubject{UserID: user.ID, Concurrency: 2},
+	)
+	disconnectedContext.Writer = &chatGPTCancelingWriter{
+		ResponseWriter: disconnectedContext.Writer,
+		cancel:         cancelRequest,
+	}
+	h.ChatGPTConversation(disconnectedContext)
+	require.Error(t, requestContext.Err())
+	require.Len(t, usageRepo.logs, 2)
+	disconnectedIdentity := service.ResolveChatGPTTurnBillingIdentity(disconnectedBody, "local:chatgpt-disconnected-turn")
+	require.Equal(t, disconnectedIdentity.RequestID, usageRepo.logs[1].RequestID)
 }
 
 func TestReleaseChatGPTControlSelection(t *testing.T) {
