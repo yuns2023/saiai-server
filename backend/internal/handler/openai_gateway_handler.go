@@ -111,7 +111,10 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	if model == "" {
 		model = "chatgpt"
 	}
-	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
+	sessionHash := service.ResolveChatGPTConversationSessionHash(body)
+	if sessionHash == "" {
+		sessionHash = h.gatewayService.GenerateSessionHash(c, body)
+	}
 	var selection *service.AccountSelectionResult
 	excludedIDs := make(map[int64]struct{})
 	for len(excludedIDs) < 64 {
@@ -171,9 +174,19 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	}
 	c.Status(resp.StatusCode)
 	buffer := make([]byte, 32*1024)
+	const stickyCaptureLimit = 2 * 1024 * 1024
+	stickyCapture := make([]byte, 0, 64*1024)
 	for {
 		n, readErr := resp.Body.Read(buffer)
 		if n > 0 {
+			if len(stickyCapture) < stickyCaptureLimit {
+				remaining := stickyCaptureLimit - len(stickyCapture)
+				captureBytes := n
+				if captureBytes > remaining {
+					captureBytes = remaining
+				}
+				stickyCapture = append(stickyCapture, buffer[:captureBytes]...)
+			}
 			if _, writeErr := c.Writer.Write(buffer[:n]); writeErr != nil {
 				return
 			}
@@ -182,6 +195,15 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			}
 		}
 		if readErr != nil {
+			if errors.Is(readErr, io.EOF) && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				conversationID := service.ExtractChatGPTConversationID(stickyCapture)
+				stickyHash := service.ChatGPTConversationSessionHash(conversationID)
+				if stickyHash != "" {
+					_ = h.gatewayService.BindStickySession(
+						c.Request.Context(), apiKey.GroupID, stickyHash, account.ID,
+					)
+				}
+			}
 			return
 		}
 	}

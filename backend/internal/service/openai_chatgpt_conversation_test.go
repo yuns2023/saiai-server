@@ -95,3 +95,20 @@ func TestForwardChatGPTConversationUsesConfiguredReplayUpstream(t *testing.T) {
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "http://replay.example.test/backend-api/f/conversation?fixture=1", upstream.lastReq.URL.String())
 }
+
+func TestChatGPTConversationSessionIdentity(t *testing.T) {
+	firstTurn := []byte(`{"action":"next","messages":[{}]}`)
+	require.Empty(t, ResolveChatGPTConversationSessionHash(firstTurn))
+
+	continuation := []byte(`{"conversation_id":"conv-test","parent_message_id":"msg-test"}`)
+	hash := ResolveChatGPTConversationSessionHash(continuation)
+	require.NotEmpty(t, hash)
+	require.Equal(t, ChatGPTConversationSessionHash("conv-test"), hash)
+	require.NotEqual(t, ChatGPTConversationSessionHash("conv-other"), hash)
+
+	sse := []byte("data: {\"type\":\"message\",\"conversation_id\":\"conv-test\"}\n\n" +
+		"data: [DONE]\n\n")
+	require.Equal(t, "conv-test", ExtractChatGPTConversationID(sse))
+	require.Equal(t, "conv-json", ExtractChatGPTConversationID([]byte(`{"conversation_id":"conv-json"}`)))
+	require.Empty(t, ExtractChatGPTConversationID([]byte("data: [DONE]\n\n")))
+}

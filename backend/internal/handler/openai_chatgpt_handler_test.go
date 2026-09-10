@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -35,6 +36,27 @@ type chatGPTReplayUpstream struct {
 	calls int
 }
 
+type chatGPTStickyCache struct {
+	service.GatewayCache
+	bindings map[string]int64
+}
+
+func (c *chatGPTStickyCache) GetSessionAccountID(_ context.Context, _ int64, hash string) (int64, error) {
+	return c.bindings[hash], nil
+}
+
+func (c *chatGPTStickyCache) SetSessionAccountID(_ context.Context, _ int64, hash string, accountID int64, _ time.Duration) error {
+	if c.bindings == nil {
+		c.bindings = make(map[string]int64)
+	}
+	c.bindings[hash] = accountID
+	return nil
+}
+
+func (c *chatGPTStickyCache) RefreshSessionTTL(context.Context, int64, string, time.Duration) error {
+	return nil
+}
+
 func (u *chatGPTReplayUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	u.calls++
 	u.req = req
@@ -45,7 +67,7 @@ func (u *chatGPTReplayUpstream) Do(req *http.Request, _ string, _ int64, _ int) 
 			"Content-Type": []string{"text/event-stream"},
 			"Set-Cookie":   []string{"upstream-secret=must-not-pass"},
 		},
-		Body: io.NopCloser(bytes.NewBufferString("data: fixture-one\n\ndata: [DONE]\n\n")),
+		Body: io.NopCloser(bytes.NewBufferString("data: {\"type\":\"message_stream_complete\",\"conversation_id\":\"fixture-conversation\"}\n\ndata: [DONE]\n\n")),
 	}, nil
 }
 
@@ -66,6 +88,7 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 		},
 	}
 	upstream := &chatGPTReplayUpstream{}
+	cache := &chatGPTStickyCache{bindings: make(map[string]int64)}
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIChatEnabled = true
 	cfg.Gateway.OpenAIChatModelRequestCap = 1
@@ -73,7 +96,7 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	svc := service.NewOpenAIGatewayService(
-		&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, nil, cfg,
+		&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, cache, cfg,
 		nil, nil, nil, nil, nil, upstream, nil, nil,
 	)
 	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg)
@@ -96,7 +119,7 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, "text/event-stream", w.Header().Get("Content-Type"))
 	require.Empty(t, w.Header().Get("Set-Cookie"))
-	require.Equal(t, "data: fixture-one\n\ndata: [DONE]\n\n", w.Body.String())
+	require.Equal(t, "data: {\"type\":\"message_stream_complete\",\"conversation_id\":\"fixture-conversation\"}\n\ndata: [DONE]\n\n", w.Body.String())
 	require.NotNil(t, upstream.req)
 	require.Equal(t, "http://replay.example.test/backend-api/f/conversation?fixture=1", upstream.req.URL.String())
 	require.Equal(t, string(body), string(upstream.body))
@@ -106,6 +129,10 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 	require.Equal(t, "Codex Browser", upstream.req.Header.Get("originator"))
 	require.Empty(t, upstream.req.Header.Get("Cookie"))
 	require.Equal(t, 1, upstream.calls)
+	require.Equal(
+		t, account.ID,
+		cache.bindings["openai:"+service.ChatGPTConversationSessionHash("fixture-conversation")],
+	)
 
 	second := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(second)

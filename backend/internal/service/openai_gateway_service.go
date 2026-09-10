@@ -1235,6 +1235,50 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 	return currentHash
 }
 
+// ResolveChatGPTConversationSessionHash derives a namespaced sticky-session
+// hash from the native ChatGPT continuation identity. First turns do not carry
+// conversation_id and are bound after a successful upstream response.
+func ResolveChatGPTConversationSessionHash(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	return ChatGPTConversationSessionHash(gjson.GetBytes(body, "conversation_id").String())
+}
+
+// ChatGPTConversationSessionHash keeps private ChatGPT conversation bindings
+// separate from Responses session identifiers.
+func ChatGPTConversationSessionHash(conversationID string) string {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return ""
+	}
+	currentHash, _ := deriveOpenAISessionHashes("chatgpt:" + conversationID)
+	return currentHash
+}
+
+// ExtractChatGPTConversationID reads the first top-level conversation_id from
+// a native ChatGPT JSON/SSE response. It does not retain message content.
+func ExtractChatGPTConversationID(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	if gjson.ValidBytes(body) {
+		return strings.TrimSpace(gjson.GetBytes(body, "conversation_id").String())
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
+	for scanner.Scan() {
+		data, ok := extractOpenAISSEDataLine(scanner.Text())
+		if !ok || data == "" || data == "[DONE]" || !gjson.Valid(data) {
+			continue
+		}
+		if id := strings.TrimSpace(gjson.Get(data, "conversation_id").String()); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
 // GenerateSessionHashWithFallback 先按常规信号生成会话哈希；
 // 当未携带 session_id/conversation_id/prompt_cache_key 时，使用 fallbackSeed 生成稳定哈希。
 // 该方法用于 WS ingress，避免会话信号缺失时发生跨账号漂移。
