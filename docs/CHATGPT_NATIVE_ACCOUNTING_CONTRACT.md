@@ -39,6 +39,16 @@ does not distinguish plan entitlement from a requirement for additional
 Desktop integrity/session state, because the sensitive `detail` value was not
 retained. The endpoint is therefore not an approved Plus billing source.
 
+An explicitly capped one-request capture then exercised ChatGPT Desktop
+26.901.51231 through the SAIAI local proxy and isolated Gateway to
+`chatgpt.com`. The provider returned a complete 200 SSE stream. Schema-only
+inspection observed `message_stream_complete` and `[DONE]`, but no input,
+output, cached, reasoning, total, credit, or usage counters. The only
+usage-like names were a protocol/resume `token` and
+`finish_details.stop_tokens`; neither is consumed-token usage. No response
+values or message content were retained. Native Chat SSE is therefore also not
+an approved token-billing source for this version.
+
 ## Current admission rule
 
 `gateway.openai_chat_unaccounted_allowed=false` is the production-safe
@@ -114,7 +124,8 @@ as the current turn's usage.
 
 ## Evidence still required before activation
 
-- a sanitized, key-path-only capture of the native stream terminal events;
+- repeat sanitized native-stream schema capture whenever the supported Desktop
+  or private Chat protocol version changes;
 - a successful sanitized response-shape capture of `thread_usage/query` for
   each OAuth plan type intended to use that source; the current Plus/minimal-
   OAuth probe is a 403 and does not qualify;
