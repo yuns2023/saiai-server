@@ -163,3 +163,9 @@ an isolated replay or explicitly capped credentialed-staging stack may set it
 to true. Control-plane `init`/`prepare` requests remain available for protocol
 research, but this flag must never be enabled as a production substitute for
 accounting.
+
+The versioned native-Chat accounting rules and activation gates are defined in
+[`CHATGPT_NATIVE_ACCOUNTING_CONTRACT.md`](CHATGPT_NATIVE_ACCOUNTING_CONTRACT.md).
+In particular, the Desktop thread-usage endpoint returns a cumulative,
+eventually-consistent conversation snapshot; parsing it does not make it safe
+to pass directly to request-level billing.

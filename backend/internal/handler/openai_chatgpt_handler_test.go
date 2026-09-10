@@ -31,9 +31,10 @@ func (r *chatGPTAccountRepo) GetByID(context.Context, int64) (*service.Account, 
 }
 
 type chatGPTReplayUpstream struct {
-	req   *http.Request
-	body  []byte
-	calls int
+	req          *http.Request
+	body         []byte
+	responseBody string
+	calls        int
 }
 
 type chatGPTStickyCache struct {
@@ -61,13 +62,17 @@ func (u *chatGPTReplayUpstream) Do(req *http.Request, _ string, _ int64, _ int) 
 	u.calls++
 	u.req = req
 	u.body, _ = io.ReadAll(req.Body)
+	responseBody := u.responseBody
+	if responseBody == "" {
+		responseBody = "data: {\"type\":\"message_stream_complete\",\"conversation_id\":\"fixture-conversation\"}\n\ndata: [DONE]\n\n"
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header: http.Header{
 			"Content-Type": []string{"text/event-stream"},
 			"Set-Cookie":   []string{"upstream-secret=must-not-pass"},
 		},
-		Body: io.NopCloser(bytes.NewBufferString("data: {\"type\":\"message_stream_complete\",\"conversation_id\":\"fixture-conversation\"}\n\ndata: [DONE]\n\n")),
+		Body: io.NopCloser(bytes.NewBufferString(responseBody)),
 	}, nil
 }
 
@@ -136,6 +141,23 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 		cache.bindings["openai:"+service.ChatGPTConversationSessionHash("fixture-conversation")],
 	)
 
+	// A conversation_id and [DONE] without the protocol's explicit terminal
+	// event are insufficient to confirm affinity or future accounting.
+	h.openAIChatModelRequests.Store(0)
+	upstream.responseBody = "data: {\"conversation_id\":\"partial-conversation\"}\n\ndata: [DONE]\n\n"
+	partial := httptest.NewRecorder()
+	cPartial, _ := gin.CreateTestContext(partial)
+	cPartial.Request = httptest.NewRequest(http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewReader(body))
+	cPartial.Request.Header.Set("Content-Type", "application/json")
+	cPartial.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+		ID: 3, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI},
+	})
+	cPartial.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 5, Concurrency: 2})
+	h.ChatGPTConversation(cPartial)
+	require.Equal(t, http.StatusOK, partial.Code)
+	require.NotContains(t, cache.bindings, "openai:"+service.ChatGPTConversationSessionHash("partial-conversation"))
+	require.Equal(t, 2, upstream.calls)
+
 	second := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(second)
 	c2.Request = httptest.NewRequest(http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewReader(body))
@@ -147,7 +169,7 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 	h.ChatGPTConversation(c2)
 	require.Equal(t, http.StatusTooManyRequests, second.Code)
 	require.Contains(t, second.Body.String(), "request_cap_exceeded")
-	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, 2, upstream.calls)
 }
 
 func TestChatGPTConversationRejectsUnaccountedModelRequestByDefault(t *testing.T) {

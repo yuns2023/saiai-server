@@ -226,34 +226,57 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	}
 	c.Status(resp.StatusCode)
 	buffer := make([]byte, 32*1024)
-	const stickyCaptureLimit = 2 * 1024 * 1024
-	stickyCapture := make([]byte, 0, 64*1024)
+	var streamObserver *service.ChatGPTConversationStreamObserver
+	if isModelRequest {
+		streamObserver = service.NewChatGPTConversationStreamObserver()
+	}
+	var streamObserverErr error
+	clientDisconnected := false
 	for {
 		n, readErr := resp.Body.Read(buffer)
 		if n > 0 {
-			if len(stickyCapture) < stickyCaptureLimit {
-				remaining := stickyCaptureLimit - len(stickyCapture)
-				captureBytes := n
-				if captureBytes > remaining {
-					captureBytes = remaining
+			if streamObserver != nil && streamObserverErr == nil {
+				streamObserverErr = streamObserver.Observe(buffer[:n])
+			}
+			if !clientDisconnected {
+				if _, writeErr := c.Writer.Write(buffer[:n]); writeErr != nil {
+					// Continue draining the upstream response so completion and any
+					// future accounting evidence are not lost solely because the
+					// Desktop client disconnected.
+					clientDisconnected = true
+				} else if flusher, ok := c.Writer.(http.Flusher); ok {
+					flusher.Flush()
 				}
-				stickyCapture = append(stickyCapture, buffer[:captureBytes]...)
-			}
-			if _, writeErr := c.Writer.Write(buffer[:n]); writeErr != nil {
-				return
-			}
-			if flusher, ok := c.Writer.(http.Flusher); ok {
-				flusher.Flush()
 			}
 		}
 		if readErr != nil {
-			if errors.Is(readErr, io.EOF) && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				conversationID := service.ExtractChatGPTConversationID(stickyCapture)
-				stickyHash := service.ChatGPTConversationSessionHash(conversationID)
-				if stickyHash != "" {
-					_ = h.gatewayService.BindStickySession(
-						c.Request.Context(), apiKey.GroupID, stickyHash, account.ID,
-					)
+			if errors.Is(readErr, io.EOF) && streamObserver != nil {
+				summary, finishErr := streamObserver.Finish()
+				if streamObserverErr == nil {
+					streamObserverErr = finishErr
+				}
+				if reqLog != nil {
+					fields := []zap.Field{
+						zap.Int64("account_id", account.ID),
+						zap.Bool("completion_seen", summary.CompletionSeen),
+						zap.Bool("done_sentinel_seen", summary.DoneSentinelSeen),
+						zap.Bool("provider_error_seen", summary.ProviderErrorSeen),
+						zap.String("observed_model", summary.ObservedModel),
+					}
+					if streamObserverErr != nil {
+						reqLog.Warn("openai.chatgpt_stream_observer_failed", append(fields, zap.Error(streamObserverErr))...)
+					} else {
+						reqLog.Debug("openai.chatgpt_stream_observed", fields...)
+					}
+				}
+				if streamObserverErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 &&
+					summary.CompletionSeen && !summary.ProviderErrorSeen {
+					stickyHash := service.ChatGPTConversationSessionHash(summary.ConversationID)
+					if stickyHash != "" {
+						_ = h.gatewayService.BindStickySession(
+							c.Request.Context(), apiKey.GroupID, stickyHash, account.ID,
+						)
+					}
 				}
 			}
 			return
