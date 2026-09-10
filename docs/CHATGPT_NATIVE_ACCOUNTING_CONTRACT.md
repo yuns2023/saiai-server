@@ -1,9 +1,9 @@
 # Native ChatGPT Chat accounting contract
 
-Status: fixed-success-turn accounting is implemented for local/replay
-validation. Native ChatGPT Chat remains disabled by default and must not carry
-production model traffic until a positive price and the normal release gates
-are explicitly approved.
+Status: fixed-success-turn accounting is implemented and its balance/dedup
+contract is validated against the isolated replay database. Native ChatGPT Chat
+remains disabled by default and must not carry production model traffic until a
+positive price and the normal release gates are explicitly approved.
 
 ## Evidence boundary
 
@@ -105,6 +105,19 @@ Zero tokens are intentional and must remain visible as zero: request count is
 the turn count, while RPM and cost remain meaningful and TPM is not invented.
 The incoming `model=auto` value is not used for pricing.
 
+An isolated PostgreSQL/replay validation at a base price of USD 0.02 observed:
+
+- first message: balance 100.00 to 99.98, one usage row, one dedup row;
+- exact retry of the same message in a new HTTP request: no additional balance,
+  usage, or dedup change; and
+- a different message: balance 99.98 to 99.96, two total usage and dedup rows.
+
+Both usage rows had 64-character hashed request IDs, zero input/output tokens,
+request type `stream`, and total/actual cost 0.02 at multiplier 1. A preliminary
+77-character prefixed identity applied billing but exceeded the legacy
+`usage_logs.request_id` width; the test state was reset and the final contract
+uses the full 64-character SHA-256 hex digest without a prefix.
+
 ## Usage-source rules
 
 Only provider-reported usage with a versioned, captured schema can become a
@@ -168,9 +181,9 @@ as the current turn's usage.
 
 - repeat sanitized native-stream schema capture whenever the supported Desktop
   or private Chat protocol version changes;
-- verify disconnect/drain and duplicate-settlement behavior;
-- run an isolated end-to-end balance, subscription, API-key quota, and usage-
-  log test with exactly one charged turn; and
+- run isolated database settlement coverage for subscription and API-key quota
+  modes (balance, usage-log, disconnect/drain, and duplicate settlement are
+  already covered); and
 - explicitly approve the base turn price and production group scope.
 
 ## Additional evidence for a future token-based mode
