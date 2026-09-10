@@ -30,11 +30,13 @@ func (r *chatGPTAccountRepo) GetByID(context.Context, int64) (*service.Account, 
 }
 
 type chatGPTReplayUpstream struct {
-	req  *http.Request
-	body []byte
+	req   *http.Request
+	body  []byte
+	calls int
 }
 
 func (u *chatGPTReplayUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.calls++
 	u.req = req
 	u.body, _ = io.ReadAll(req.Body)
 	return &http.Response{
@@ -66,6 +68,7 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 	upstream := &chatGPTReplayUpstream{}
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIChatEnabled = true
+	cfg.Gateway.OpenAIChatModelRequestCap = 1
 	cfg.Gateway.OpenAIChatUpstreamBaseURL = "http://replay.example.test"
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
@@ -102,4 +105,17 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 	require.Equal(t, "CodexBrowser Mozilla/5.0", upstream.req.Header.Get("User-Agent"))
 	require.Equal(t, "Codex Browser", upstream.req.Header.Get("originator"))
 	require.Empty(t, upstream.req.Header.Get("Cookie"))
+	require.Equal(t, 1, upstream.calls)
+
+	second := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(second)
+	c2.Request = httptest.NewRequest(http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewReader(body))
+	c2.Request.Header.Set("Content-Type", "application/json")
+	c2.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+		ID: 3, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI},
+	})
+	h.ChatGPTConversation(c2)
+	require.Equal(t, http.StatusTooManyRequests, second.Code)
+	require.Contains(t, second.Body.String(), "request_cap_exceeded")
+	require.Equal(t, 1, upstream.calls)
 }

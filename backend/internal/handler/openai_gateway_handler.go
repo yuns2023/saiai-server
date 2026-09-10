@@ -11,6 +11,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -41,6 +42,7 @@ type OpenAIGatewayHandler struct {
 	concurrencyHelper       *ConcurrencyHelper
 	maxAccountSwitches      int
 	cfg                     *config.Config
+	openAIChatModelRequests atomic.Int64
 }
 
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler
@@ -134,6 +136,17 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	}
 	account := selection.Account
 	path := c.Request.URL.RequestURI()
+	if c.Request.URL.Path == "/chatgpt/backend-api/f/conversation" {
+		if cap := h.cfg.Gateway.OpenAIChatModelRequestCap; cap > 0 {
+			attempt := h.openAIChatModelRequests.Add(1)
+			if attempt > cap {
+				c.JSON(http.StatusTooManyRequests, gin.H{"error": gin.H{
+					"type": "request_cap_exceeded", "message": "Native ChatGPT staging request cap exceeded",
+				}})
+				return
+			}
+		}
+	}
 	resp, err := h.gatewayService.ForwardChatGPTConversation(
 		c.Request.Context(), c, account, body, path,
 	)
