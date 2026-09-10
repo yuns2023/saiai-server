@@ -60,7 +60,12 @@ requirement from the build runner.
 `SAIAI_CLIENT_DIR` points at one immutable, validated bundle. Gateway serves the
 manifest, all binaries, and all three wrappers from that directory. There is no
 embedded-wrapper fallback: a missing wrapper returns `503` instead of combining
-files from different client releases.
+files from different client releases. Missing-bundle responses are
+end-user-facing: they provide retry/contact-administrator guidance without
+exposing private filesystem paths or operator commands. WebUI-generated
+PowerShell/CMD commands keep wrapper download and `Invoke-Saiai` inside one
+error boundary so a failed download cannot cascade into an undefined-function
+error.
 
 Wrapper responses replace only the literal default
 `https://api.saiai.top/saiai-cli` with the trusted public request origin. The
