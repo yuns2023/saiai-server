@@ -53,3 +53,23 @@ type HTTPUpstream interface {
 	//   - TLS 指纹客户端与普通客户端使用不同的缓存键，互不影响
 	DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, enableTLSFingerprint bool) (*http.Response, error)
 }
+
+// HTTPUpstreamTransportMetricsSnapshot exposes content-free connection-pool
+// observations for diagnosing queueing and protocol negotiation.
+type HTTPUpstreamTransportMetricsSnapshot struct {
+	Requests           int64 `json:"requests"`
+	GotConn            int64 `json:"got_conn"`
+	GetConnWaitMsTotal int64 `json:"get_conn_wait_ms_total"`
+	ReusedConnections  int64 `json:"reused_connections"`
+	NewConnections     int64 `json:"new_connections"`
+	HTTP1Responses     int64 `json:"http1_responses"`
+	HTTP2Responses     int64 `json:"http2_responses"`
+	OtherResponses     int64 `json:"other_responses"`
+	RequestErrors      int64 `json:"request_errors"`
+}
+
+// HTTPUpstreamTransportMetricsProvider is implemented by the production HTTP
+// upstream and can be consumed by diagnostics without changing HTTPUpstream.
+type HTTPUpstreamTransportMetricsProvider interface {
+	SnapshotTransportMetrics() HTTPUpstreamTransportMetricsSnapshot
+}

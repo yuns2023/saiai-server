@@ -402,6 +402,15 @@ type GatewayConfig struct {
 	OpenAIChatResponseShapeCapture bool `mapstructure:"openai_chat_response_shape_capture"`
 
 	// HTTP 上游连接池配置（性能优化：支持高并发场景调优）
+	// StandardUpstreamHTTP2Enabled keeps HTTP/2 enabled even though the standard
+	// transport installs a custom TLS root configuration. Disable for rollback
+	// when an upstream or proxy has broken ALPN/HTTP2 behavior.
+	StandardUpstreamHTTP2Enabled bool `mapstructure:"standard_upstream_http2_enabled"`
+	// AccountAuxConnectionReserve adds bounded HTTP/1.1 connection headroom to
+	// standard account-isolated pools so a long model stream cannot occupy every
+	// connection needed by control/auxiliary requests. TLS fingerprint pools do
+	// not use this reserve.
+	AccountAuxConnectionReserve int `mapstructure:"account_aux_connection_reserve"`
 	// MaxIdleConns: 所有主机的最大空闲连接总数
 	MaxIdleConns int `mapstructure:"max_idle_conns"`
 	// MaxIdleConnsPerHost: 每个主机的最大空闲连接数（关键参数，影响连接复用率）
@@ -1447,6 +1456,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.sora_media_require_api_key", true)
 	viper.SetDefault("gateway.sora_media_signed_url_ttl_seconds", 900)
 	viper.SetDefault("gateway.connection_pool_isolation", ConnectionPoolIsolationAccountProxy)
+	viper.SetDefault("gateway.standard_upstream_http2_enabled", true)
+	viper.SetDefault("gateway.account_aux_connection_reserve", 2)
 	// HTTP 上游连接池配置（针对 5000+ 并发用户优化）
 	viper.SetDefault("gateway.max_idle_conns", 2560)          // 最大空闲连接总数（高并发场景可调大）
 	viper.SetDefault("gateway.max_idle_conns_per_host", 120)  // 每主机最大空闲连接（HTTP/2 场景默认）
@@ -1912,6 +1923,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.MaxConnsPerHost < 0 {
 		return fmt.Errorf("gateway.max_conns_per_host must be non-negative")
+	}
+	if c.Gateway.AccountAuxConnectionReserve < 0 || c.Gateway.AccountAuxConnectionReserve > 64 {
+		return fmt.Errorf("gateway.account_aux_connection_reserve must be between 0 and 64")
 	}
 	if c.Gateway.IdleConnTimeoutSeconds <= 0 {
 		return fmt.Errorf("gateway.idle_conn_timeout_seconds must be positive")

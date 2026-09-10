@@ -303,6 +303,12 @@ gateway:
       ttft: 0.5
   # HTTP upstream connection pool settings (HTTP/2 + multi-proxy scenario defaults)
   # HTTP 上游连接池配置（HTTP/2 + 多代理场景默认值）
+  # Enable HTTP/2 on the standard transport even with custom TLS/proxy dialers.
+  # 标准 Transport 即使配置了自定义 TLS/代理拨号器也尝试 HTTP/2。
+  standard_upstream_http2_enabled: true
+  # Bounded HTTP/1.1 connection headroom for account-isolated control requests.
+  # 账号隔离池为 HTTP/1.1 控制/辅助请求保留的额外连接数（0-64）。
+  account_aux_connection_reserve: 2
   # Max idle connections across all hosts
   # 所有主机的最大空闲连接数
   max_idle_conns: 2560
