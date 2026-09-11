@@ -92,7 +92,7 @@ describe('UseKeyModal', () => {
     await nextTick()
 
     expect(command(wrapper)).toBe(
-      "try { irm https://example.com/saiai-cli/setup.ps1 | iex; Invoke-Saiai 'https://example.com' 'TEST_ONLY_''_KEY' } catch { Write-Error 'SAIAI setup failed. Please retry later or contact your administrator.' }"
+      "& { $ErrorActionPreference = 'Stop'; irm https://example.com/saiai-cli/setup.ps1 | iex; $saiaiExit = Invoke-Saiai 'https://example.com' 'TEST_ONLY_''_KEY'; if ($saiaiExit -ne 0) { throw ('SAIAI setup exited with code ' + $saiaiExit + '.') } }"
     )
   })
 
@@ -106,7 +106,7 @@ describe('UseKeyModal', () => {
     await nextTick()
 
     expect(command(wrapper)).toBe(
-      'powershell -NoProfile -ExecutionPolicy Bypass -Command "try { irm https://example.com/saiai-cli/setup.ps1 | iex; Invoke-Saiai \'https://example.com\' \'TEST_ONLY_API_KEY\' } catch { Write-Error \'SAIAI setup failed. Please retry later or contact your administrator.\' }"'
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $ErrorActionPreference = \'Stop\'; irm https://example.com/saiai-cli/setup.ps1 | iex; $saiaiExit = Invoke-Saiai \'https://example.com\' \'TEST_ONLY_API_KEY\'; if ($saiaiExit -ne 0) { throw (\'SAIAI setup exited with code \' + $saiaiExit + \'.\') } }"'
     )
   })
 

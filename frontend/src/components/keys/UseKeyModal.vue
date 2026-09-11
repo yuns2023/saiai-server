@@ -406,7 +406,7 @@ const shellCliBootstrap = (cliBase: string, args: string) => {
   return `curl -fsSL ${cliBase}/saiai-cli/setup.sh | bash -s -- ${args}`
 }
 const powershellCliBootstrap = (cliBase: string, args: string) => {
-  return `try { irm ${cliBase}/saiai-cli/setup.ps1 | iex; Invoke-Saiai ${args} } catch { Write-Error 'SAIAI setup failed. Please retry later or contact your administrator.' }`
+  return `& { $ErrorActionPreference = 'Stop'; irm ${cliBase}/saiai-cli/setup.ps1 | iex; $saiaiExit = Invoke-Saiai ${args}; if ($saiaiExit -ne 0) { throw ('SAIAI setup exited with code ' + $saiaiExit + '.') } }`
 }
 const cmdCliBootstrap = (cliBase: string, args: string) =>
   `powershell -NoProfile -ExecutionPolicy Bypass -Command "${powershellCliBootstrap(cliBase, args)}"`
