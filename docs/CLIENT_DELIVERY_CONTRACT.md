@@ -153,9 +153,13 @@ request: the Gateway selects the account bound to the optional
 `conversation_id`, substitutes Gateway-owned OAuth authentication, and passes
 through the provider's short-lived JSON result (`download_url`, `retry`, or
 `error`) without counting a model turn. The second preserves the provider's
-binary response and uses the optional `cid` conversation identity for the same
-account affinity. A native Chat implementation is not complete for image
-generation unless both resolver paths are available end to end.
+binary response. Current Desktop-signed URLs expose an opaque provider `cid`,
+not the conversation UUID; the present implementation uses it only as a
+best-effort scheduler hash and has been validated with one active staging
+account. Do not treat that value as multi-account conversation affinity. A
+native Chat implementation is not complete for image generation unless both
+resolver paths are available end to end, and production multi-account use
+still requires an explicit file-to-account binding.
 
 `gateway.openai_chat_upstream_base_url` is empty in normal operation. An
 isolated staging stack may point it at a replay/fake provider so the ingress,
