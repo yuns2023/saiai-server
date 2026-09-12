@@ -375,6 +375,30 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 // namespaced sticky identity as the conversation stream so the file belongs to
 // the account that produced it.
 func (h *OpenAIGatewayHandler) ChatGPTFileDownload(c *gin.Context) {
+	fileID := strings.TrimSpace(c.Param("file_id"))
+	if !isSafeChatGPTFileID(fileID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"type": "invalid_request_error", "message": "Invalid ChatGPT file id",
+		}})
+		return
+	}
+	h.chatGPTAssetDownload(c)
+}
+
+// ChatGPTEstuaryContent forwards the signed native ChatGPT asset bytes. The
+// Desktop first resolves a sediment:// file through ChatGPTFileDownload, then
+// follows the returned /backend-api/estuary/content URL.
+func (h *OpenAIGatewayHandler) ChatGPTEstuaryContent(c *gin.Context) {
+	if !isSafeChatGPTFileID(strings.TrimSpace(c.Query("id"))) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"type": "invalid_request_error", "message": "Invalid ChatGPT asset id",
+		}})
+		return
+	}
+	h.chatGPTAssetDownload(c)
+}
+
+func (h *OpenAIGatewayHandler) chatGPTAssetDownload(c *gin.Context) {
 	if h == nil || h.cfg == nil || !h.cfg.Gateway.OpenAIChatEnabled {
 		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{
 			"type": "not_found_error", "message": "Native ChatGPT Chat is disabled",
@@ -395,14 +419,10 @@ func (h *OpenAIGatewayHandler) ChatGPTFileDownload(c *gin.Context) {
 		}})
 		return
 	}
-	fileID := strings.TrimSpace(c.Param("file_id"))
-	if !isSafeChatGPTFileID(fileID) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-			"type": "invalid_request_error", "message": "Invalid ChatGPT file id",
-		}})
-		return
-	}
 	conversationID := strings.TrimSpace(c.Query("conversation_id"))
+	if conversationID == "" {
+		conversationID = strings.TrimSpace(c.Query("cid"))
+	}
 	sessionHash := ""
 	if conversationID != "" {
 		sessionHash = service.ChatGPTConversationSessionHash(conversationID)
@@ -436,7 +456,7 @@ func (h *OpenAIGatewayHandler) ChatGPTFileDownload(c *gin.Context) {
 	resp, err := h.gatewayService.ForwardChatGPTFileDownload(c.Request.Context(), c, account, path)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
-			"type": "upstream_error", "message": "Upstream ChatGPT file download request failed",
+			"type": "upstream_error", "message": "Upstream ChatGPT asset download request failed",
 		}})
 		return
 	}

@@ -291,6 +291,23 @@ func TestChatGPTFileDownloadForwardsDownloadURLAndConversationAffinity(t *testin
 	require.Equal(t, "upstream-account", upstream.req.Header.Get("ChatGPT-Account-ID"))
 	require.Empty(t, upstream.req.Header.Get("Cookie"))
 	require.Equal(t, 1, upstream.calls)
+
+	upstream.responseBody = "fixture-image-bytes"
+	wAsset := httptest.NewRecorder()
+	cAsset, _ := gin.CreateTestContext(wAsset)
+	cAsset.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/chatgpt/backend-api/estuary/content?id=file_fixture&cid=fixture-conversation",
+		nil,
+	)
+	cAsset.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+		ID: 3, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI},
+	})
+	h.ChatGPTEstuaryContent(cAsset)
+	require.Equal(t, http.StatusOK, wAsset.Code)
+	require.Equal(t, "fixture-image-bytes", wAsset.Body.String())
+	require.Equal(t, http.MethodGet, upstream.req.Method)
+	require.Equal(t, 2, upstream.calls)
 }
 
 func TestChatGPTConversationBillsOnlySuccessfulTerminalTurn(t *testing.T) {

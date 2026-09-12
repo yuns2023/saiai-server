@@ -119,6 +119,16 @@ func TestChatGPTConversationRouteIsRegisteredButDisabledByDefault(t *testing.T) 
 	router.ServeHTTP(fileW, fileReq)
 	require.Equal(t, http.StatusNotFound, fileW.Code)
 	require.Contains(t, fileW.Body.String(), "Native ChatGPT Chat is disabled")
+
+	assetReq := httptest.NewRequest(
+		http.MethodGet,
+		"/chatgpt/backend-api/estuary/content?id=file_fixture",
+		nil,
+	)
+	assetW := httptest.NewRecorder()
+	router.ServeHTTP(assetW, assetReq)
+	require.Equal(t, http.StatusNotFound, assetW.Code)
+	require.Contains(t, assetW.Body.String(), "Native ChatGPT Chat is disabled")
 }
 
 func TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered(t *testing.T) {
