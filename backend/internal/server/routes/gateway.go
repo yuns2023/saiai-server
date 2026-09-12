@@ -123,6 +123,7 @@ func RegisterGatewayRoutes(
 		chatgpt.POST("/f/conversation/*subpath", h.OpenAIGateway.ChatGPTConversation)
 		chatgpt.POST("/conversation/init", h.OpenAIGateway.ChatGPTConversation)
 		chatgpt.POST("/sentinel/chat-requirements/prepare", h.OpenAIGateway.ChatGPTConversation)
+		chatgpt.GET("/files/download/:file_id", h.OpenAIGateway.ChatGPTFileDownload)
 	}
 }
 

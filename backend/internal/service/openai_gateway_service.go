@@ -2635,6 +2635,30 @@ func (s *OpenAIGatewayService) BuildChatGPTConversationRequest(
 	body []byte,
 	path string,
 ) (*http.Request, string, error) {
+	return s.buildChatGPTRequest(ctx, c, account, http.MethodPost, body, path)
+}
+
+// BuildChatGPTFileDownloadRequest builds the native ChatGPT file-download
+// request used to resolve sediment:// image/file pointers returned by a
+// conversation stream. It keeps the provider's JSON response intact; the
+// caller owns the response body.
+func (s *OpenAIGatewayService) BuildChatGPTFileDownloadRequest(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	path string,
+) (*http.Request, string, error) {
+	return s.buildChatGPTRequest(ctx, c, account, http.MethodGet, nil, path)
+}
+
+func (s *OpenAIGatewayService) buildChatGPTRequest(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	method string,
+	body []byte,
+	path string,
+) (*http.Request, string, error) {
 	if account == nil || !account.IsOpenAIOAuth() {
 		return nil, "", fmt.Errorf("native ChatGPT conversation requires an OpenAI OAuth account")
 	}
@@ -2661,7 +2685,11 @@ func (s *OpenAIGatewayService) BuildChatGPTConversationRequest(
 		}
 	}
 	targetURL := baseURL + upstreamPath
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	var requestBody io.Reader
+	if body != nil {
+		requestBody = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, targetURL, requestBody)
 	if err != nil {
 		return nil, "", err
 	}
@@ -2678,7 +2706,7 @@ func (s *OpenAIGatewayService) BuildChatGPTConversationRequest(
 			req.Header.Add(key, value)
 		}
 	}
-	if req.Header.Get("content-type") == "" {
+	if method != http.MethodGet && req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
 	}
 	proxyURL := ""
@@ -2698,6 +2726,23 @@ func (s *OpenAIGatewayService) ForwardChatGPTConversation(
 	path string,
 ) (*http.Response, error) {
 	req, proxyURL, err := s.BuildChatGPTConversationRequest(ctx, c, account, body, path)
+	if err != nil {
+		return nil, err
+	}
+	return s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+}
+
+// ForwardChatGPTFileDownload forwards the native ChatGPT file-download
+// metadata request without Responses conversion. The response normally
+// contains a short-lived download_url (or retry/error status) that the
+// official Desktop resolver consumes.
+func (s *OpenAIGatewayService) ForwardChatGPTFileDownload(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	path string,
+) (*http.Response, error) {
+	req, proxyURL, err := s.BuildChatGPTFileDownloadRequest(ctx, c, account, path)
 	if err != nil {
 		return nil, err
 	}

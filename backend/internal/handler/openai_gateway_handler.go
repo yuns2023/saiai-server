@@ -368,6 +368,105 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	}
 }
 
+// ChatGPTFileDownload resolves the short-lived download URL for a native
+// ChatGPT file/image pointer (for example sediment://file_...). It is a
+// control-plane request: preserve the provider JSON and do not count it as a
+// model turn. When the Desktop supplies conversation_id, use the same
+// namespaced sticky identity as the conversation stream so the file belongs to
+// the account that produced it.
+func (h *OpenAIGatewayHandler) ChatGPTFileDownload(c *gin.Context) {
+	if h == nil || h.cfg == nil || !h.cfg.Gateway.OpenAIChatEnabled {
+		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{
+			"type": "not_found_error", "message": "Native ChatGPT Chat is disabled",
+		}})
+		return
+	}
+	fixedTurnBillingEnabled := service.IsValidOpenAIChatGPTTurnPrice(h.cfg.Gateway.OpenAIChatSuccessTurnPriceUSD)
+	if strings.TrimSpace(h.cfg.Gateway.OpenAIChatUpstreamBaseURL) == "" && !fixedTurnBillingEnabled {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+			"type": "service_unavailable", "message": "Native ChatGPT Chat requires fixed-turn billing or an explicit staging upstream",
+		}})
+		return
+	}
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformOpenAI {
+		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{
+			"type": "permission_error", "message": "Native ChatGPT Chat requires an OpenAI group",
+		}})
+		return
+	}
+	fileID := strings.TrimSpace(c.Param("file_id"))
+	if !isSafeChatGPTFileID(fileID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"type": "invalid_request_error", "message": "Invalid ChatGPT file id",
+		}})
+		return
+	}
+	conversationID := strings.TrimSpace(c.Query("conversation_id"))
+	sessionHash := ""
+	if conversationID != "" {
+		sessionHash = service.ChatGPTConversationSessionHash(conversationID)
+	}
+	var selection *service.AccountSelectionResult
+	model := "chatgpt"
+	excludedIDs := make(map[int64]struct{})
+	for len(excludedIDs) < 64 {
+		candidate, _, selectErr := h.gatewayService.SelectAccountWithScheduler(
+			c.Request.Context(), apiKey.GroupID, "", sessionHash, model, excludedIDs, service.OpenAIUpstreamTransportHTTPSSE,
+		)
+		if selectErr != nil || candidate == nil || candidate.Account == nil {
+			selection = nil
+			break
+		}
+		if candidate.Account.IsOpenAIOAuth() {
+			selection = candidate
+			break
+		}
+		excludedIDs[candidate.Account.ID] = struct{}{}
+	}
+	if selection == nil || selection.Account == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+			"type": "service_unavailable", "message": "No available OpenAI OAuth account",
+		}})
+		return
+	}
+	account := selection.Account
+	releaseChatGPTControlSelection(selection)
+	path := c.Request.URL.RequestURI()
+	resp, err := h.gatewayService.ForwardChatGPTFileDownload(c.Request.Context(), c, account, path)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
+			"type": "upstream_error", "message": "Upstream ChatGPT file download request failed",
+		}})
+		return
+	}
+	defer resp.Body.Close()
+	for key, values := range resp.Header {
+		if !shouldCopyChatGPTResponseHeader(key) {
+			continue
+		}
+		for _, value := range values {
+			c.Writer.Header().Add(key, value)
+		}
+	}
+	c.Status(resp.StatusCode)
+	_, _ = io.Copy(c.Writer, resp.Body)
+}
+
+func isSafeChatGPTFileID(fileID string) bool {
+	if len(fileID) < 6 || len(fileID) > 256 || !strings.HasPrefix(fileID, "file_") {
+		return false
+	}
+	for _, r := range fileID {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func releaseChatGPTControlSelection(selection *service.AccountSelectionResult) {
 	if selection != nil && selection.Acquired && selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()

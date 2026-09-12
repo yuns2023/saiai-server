@@ -146,6 +146,15 @@ client identity headers, and streams the upstream event response without
 converting it to Responses. `Set-Cookie` and hop-by-hop response headers are
 not returned to the client.
 
+The same experimental namespace includes the Desktop file-asset resolver
+`GET /chatgpt/backend-api/files/download/{file_id}`. It is a control-plane
+request: the Gateway selects the account bound to the optional
+`conversation_id`, substitutes Gateway-owned OAuth authentication, and passes
+through the provider's short-lived JSON result (`download_url`, `retry`, or
+`error`) without counting a model turn. A native Chat implementation is not
+complete for image generation unless this resolver path is available end to
+end.
+
 `gateway.openai_chat_upstream_base_url` is empty in normal operation. An
 isolated staging stack may point it at a replay/fake provider so the ingress,
 SSE flushing, and request-shape invariants can be tested without contacting a

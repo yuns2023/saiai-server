@@ -93,7 +93,11 @@ func (c *chatGPTStickyCache) RefreshSessionTTL(context.Context, int64, string, t
 func (u *chatGPTReplayUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	u.calls++
 	u.req = req
-	u.body, _ = io.ReadAll(req.Body)
+	if req.Body != nil {
+		u.body, _ = io.ReadAll(req.Body)
+	} else {
+		u.body = nil
+	}
 	responseBody := u.responseBody
 	if responseBody == "" {
 		responseBody = "data: {\"type\":\"message_stream_complete\",\"conversation_id\":\"fixture-conversation\"}\n\ndata: [DONE]\n\n"
@@ -229,6 +233,64 @@ func TestChatGPTConversationRejectsUnaccountedModelRequestByDefault(t *testing.T
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	require.Contains(t, w.Body.String(), "accounting_unavailable")
+}
+
+func TestChatGPTFileDownloadForwardsDownloadURLAndConversationAffinity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(19)
+	account := service.Account{
+		ID: 91, Name: "oauth-file-replay", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeOAuth, Status: service.StatusActive,
+		Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID},
+		Credentials: map[string]any{
+			"access_token":       "oauth-upstream-token",
+			"chatgpt_account_id": "upstream-account",
+		},
+	}
+	upstream := &chatGPTReplayUpstream{
+		responseBody: `{"download_url":"/backend-api/files/download/file_fixture"}`,
+	}
+	cache := &chatGPTStickyCache{bindings: make(map[string]int64)}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIChatEnabled = true
+	cfg.Gateway.OpenAIChatUnaccountedAllowed = true
+	cfg.Gateway.OpenAIChatUpstreamBaseURL = "http://replay.example.test"
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	svc := service.NewOpenAIGatewayService(
+		&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, cache, cfg,
+		nil, nil, nil, nil, nil, upstream, nil, nil,
+	)
+	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/chatgpt/backend-api/files/download/file_fixture?conversation_id=fixture-conversation",
+		nil,
+	)
+	c.Request.Header.Set("User-Agent", "CodexBrowser Mozilla/5.0")
+	c.Request.Header.Set("originator", "Codex Browser")
+	c.Request.Header.Set("Authorization", "Bearer local-gateway-key")
+	c.Request.Header.Set("Cookie", "client-secret=must-not-pass")
+	c.Params = gin.Params{{Key: "file_id", Value: "file_fixture"}}
+	c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+		ID: 3, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI},
+	})
+
+	h.ChatGPTFileDownload(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.JSONEq(t, `{"download_url":"/backend-api/files/download/file_fixture"}`, w.Body.String())
+	require.NotNil(t, upstream.req)
+	require.Equal(t, http.MethodGet, upstream.req.Method)
+	require.Equal(t, "http://replay.example.test/backend-api/files/download/file_fixture?conversation_id=fixture-conversation", upstream.req.URL.String())
+	require.Empty(t, upstream.body)
+	require.Equal(t, "Bearer oauth-upstream-token", upstream.req.Header.Get("Authorization"))
+	require.Equal(t, "upstream-account", upstream.req.Header.Get("ChatGPT-Account-ID"))
+	require.Empty(t, upstream.req.Header.Get("Cookie"))
+	require.Equal(t, 1, upstream.calls)
 }
 
 func TestChatGPTConversationBillsOnlySuccessfulTerminalTurn(t *testing.T) {
