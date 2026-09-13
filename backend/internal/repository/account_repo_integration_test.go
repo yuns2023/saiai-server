@@ -90,16 +90,18 @@ func TestAccountRepoSuite(t *testing.T) {
 // --- Create / GetByID / Update / Delete ---
 
 func (s *AccountRepoSuite) TestCreate() {
+	paygDiscount := 0.75
 	account := &service.Account{
-		Name:        "test-create",
-		Platform:    service.PlatformAnthropic,
-		Type:        service.AccountTypeOAuth,
-		Status:      service.StatusActive,
-		Credentials: map[string]any{},
-		Extra:       map[string]any{},
-		Concurrency: 3,
-		Priority:    50,
-		Schedulable: true,
+		Name:                   "test-create",
+		Platform:               service.PlatformAnthropic,
+		Type:                   service.AccountTypeOAuth,
+		Status:                 service.StatusActive,
+		Credentials:            map[string]any{},
+		Extra:                  map[string]any{},
+		Concurrency:            3,
+		Priority:               50,
+		PaygDiscountMultiplier: &paygDiscount,
+		Schedulable:            true,
 	}
 
 	err := s.repo.Create(s.ctx, account)
@@ -109,6 +111,7 @@ func (s *AccountRepoSuite) TestCreate() {
 	got, err := s.repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err, "GetByID")
 	s.Require().Equal("test-create", got.Name)
+	s.Require().Equal(paygDiscount, got.PaygDiscountRate())
 }
 
 func (s *AccountRepoSuite) TestGetByID_NotFound() {

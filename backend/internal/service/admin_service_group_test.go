@@ -193,10 +193,12 @@ func TestAdminService_ValidateFallbackGroup_DetectsCycle(t *testing.T) {
 		groups: map[int64]*Group{
 			groupID: {
 				ID:              groupID,
+				Status:          StatusActive,
 				FallbackGroupID: &fallbackID,
 			},
 			fallbackID: {
 				ID:              fallbackID,
+				Status:          StatusActive,
 				FallbackGroupID: &groupID,
 			},
 		},
@@ -429,6 +431,7 @@ func TestAdminService_CreateGroup_InvalidRequestFallbackRejectsFallbackGroup(t *
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			tc.fallback.Status = StatusActive
 			fallbackID := tc.fallback.ID
 			repo := &groupRepoStubForInvalidRequestFallback{
 				groups: map[int64]*Group{
@@ -463,6 +466,20 @@ func TestAdminService_CreateGroup_InvalidRequestFallbackNotFound(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "fallback group not found")
+	require.Nil(t, repo.created)
+}
+
+func TestAdminService_CreateGroup_InvalidRequestFallbackRejectsInactiveGroup(t *testing.T) {
+	fallbackID := int64(10)
+	repo := &groupRepoStubForInvalidRequestFallback{groups: map[int64]*Group{
+		fallbackID: {ID: fallbackID, Status: "inactive", Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard},
+	}}
+	svc := &adminServiceImpl{groupRepo: repo}
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name: "g1", Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard,
+		FallbackGroupIDOnInvalidRequest: &fallbackID,
+	})
+	require.ErrorIs(t, err, ErrGroupNotActive)
 	require.Nil(t, repo.created)
 }
 
@@ -594,7 +611,7 @@ func TestAdminService_UpdateGroup_InvalidRequestFallbackPlatformMismatch(t *test
 	repo := &groupRepoStubForInvalidRequestFallback{
 		groups: map[int64]*Group{
 			existing.ID: existing,
-			fallbackID:  {ID: fallbackID, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard},
+			fallbackID:  {ID: fallbackID, Status: StatusActive, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard},
 		},
 	}
 	svc := &adminServiceImpl{groupRepo: repo}
@@ -620,7 +637,7 @@ func TestAdminService_UpdateGroup_InvalidRequestFallbackSubscriptionMismatch(t *
 	repo := &groupRepoStubForInvalidRequestFallback{
 		groups: map[int64]*Group{
 			existing.ID: existing,
-			fallbackID:  {ID: fallbackID, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard},
+			fallbackID:  {ID: fallbackID, Status: StatusActive, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard},
 		},
 	}
 	svc := &adminServiceImpl{groupRepo: repo}
@@ -646,7 +663,7 @@ func TestAdminService_UpdateGroup_InvalidRequestFallbackClearsOnZero(t *testing.
 	repo := &groupRepoStubForInvalidRequestFallback{
 		groups: map[int64]*Group{
 			existing.ID: existing,
-			fallbackID:  {ID: fallbackID, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard},
+			fallbackID:  {ID: fallbackID, Status: StatusActive, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard},
 		},
 	}
 	svc := &adminServiceImpl{groupRepo: repo}
@@ -674,7 +691,7 @@ func TestAdminService_UpdateGroup_InvalidRequestFallbackRejectsFallbackGroup(t *
 	repo := &groupRepoStubForInvalidRequestFallback{
 		groups: map[int64]*Group{
 			existing.ID: existing,
-			fallbackID:  {ID: fallbackID, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeSubscription},
+			fallbackID:  {ID: fallbackID, Status: StatusActive, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeSubscription},
 		},
 	}
 	svc := &adminServiceImpl{groupRepo: repo}
@@ -699,7 +716,7 @@ func TestAdminService_UpdateGroup_InvalidRequestFallbackSetSuccess(t *testing.T)
 	repo := &groupRepoStubForInvalidRequestFallback{
 		groups: map[int64]*Group{
 			existing.ID: existing,
-			fallbackID:  {ID: fallbackID, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard},
+			fallbackID:  {ID: fallbackID, Status: StatusActive, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard},
 		},
 	}
 	svc := &adminServiceImpl{groupRepo: repo}

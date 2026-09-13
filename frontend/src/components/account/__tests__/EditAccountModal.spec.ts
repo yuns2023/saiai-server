@@ -99,6 +99,7 @@ function buildAccount() {
     concurrency: 1,
     priority: 1,
     rate_multiplier: 1,
+    payg_discount_multiplier: 0.8,
     status: 'active',
     group_ids: [],
     expires_at: null,
@@ -153,6 +154,7 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
       'claude-sonnet-4-5': 'claude-sonnet-4-5'
     })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.payg_discount_multiplier).toBe(0.8)
   })
 
   it('persists unlimited carpool devices and hides the bounded registry', async () => {

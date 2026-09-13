@@ -1124,6 +1124,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					if !fallbackUsed && fallbackGroupID != nil && *fallbackGroupID > 0 {
 						fallbackGroup, err := h.gatewayService.ResolveGroupByID(c.Request.Context(), *fallbackGroupID)
 						if err != nil {
+							if errors.Is(err, service.ErrGroupNotActive) {
+								h.errorResponse(c, http.StatusForbidden, "permission_error", "Fallback group is inactive")
+								return
+							}
 							reqLog.Warn("gateway.resolve_fallback_group_failed", zap.Int64("fallback_group_id", *fallbackGroupID), zap.Error(err))
 							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 							return

@@ -631,6 +631,12 @@ func (_u *GroupUpdate) AppendBlockedModelPatterns(v []string) *GroupUpdate {
 	return _u
 }
 
+// SetModelRateMultipliers sets the "model_rate_multipliers" field.
+func (_u *GroupUpdate) SetModelRateMultipliers(v map[string]float64) *GroupUpdate {
+	_u.mutation.SetModelRateMultipliers(v)
+	return _u
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_u *GroupUpdate) SetModelRoutingEnabled(v bool) *GroupUpdate {
 	_u.mutation.SetModelRoutingEnabled(v)
@@ -1381,6 +1387,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		_spec.AddModifier(func(u *sql.UpdateBuilder) {
 			sqljson.Append(u, group.FieldBlockedModelPatterns, value)
 		})
+	}
+	if value, ok := _u.mutation.ModelRateMultipliers(); ok {
+		_spec.SetField(group.FieldModelRateMultipliers, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)
@@ -2365,6 +2374,12 @@ func (_u *GroupUpdateOne) AppendBlockedModelPatterns(v []string) *GroupUpdateOne
 	return _u
 }
 
+// SetModelRateMultipliers sets the "model_rate_multipliers" field.
+func (_u *GroupUpdateOne) SetModelRateMultipliers(v map[string]float64) *GroupUpdateOne {
+	_u.mutation.SetModelRateMultipliers(v)
+	return _u
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_u *GroupUpdateOne) SetModelRoutingEnabled(v bool) *GroupUpdateOne {
 	_u.mutation.SetModelRoutingEnabled(v)
@@ -3145,6 +3160,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 		_spec.AddModifier(func(u *sql.UpdateBuilder) {
 			sqljson.Append(u, group.FieldBlockedModelPatterns, value)
 		})
+	}
+	if value, ok := _u.mutation.ModelRateMultipliers(); ok {
+		_spec.SetField(group.FieldModelRateMultipliers, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)

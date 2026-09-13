@@ -75,6 +75,8 @@ const (
 	FieldModelRouting = "model_routing"
 	// FieldBlockedModelPatterns holds the string denoting the blocked_model_patterns field in the database.
 	FieldBlockedModelPatterns = "blocked_model_patterns"
+	// FieldModelRateMultipliers holds the string denoting the model_rate_multipliers field in the database.
+	FieldModelRateMultipliers = "model_rate_multipliers"
 	// FieldModelRoutingEnabled holds the string denoting the model_routing_enabled field in the database.
 	FieldModelRoutingEnabled = "model_routing_enabled"
 	// FieldMcpXMLInject holds the string denoting the mcp_xml_inject field in the database.
@@ -210,6 +212,7 @@ var Columns = []string{
 	FieldFallbackGroupIDOnInvalidRequest,
 	FieldModelRouting,
 	FieldBlockedModelPatterns,
+	FieldModelRateMultipliers,
 	FieldModelRoutingEnabled,
 	FieldMcpXMLInject,
 	FieldSupportedModelScopes,
@@ -290,6 +293,8 @@ var (
 	DefaultClaudeOauthRequestGateDisabled bool
 	// DefaultBlockedModelPatterns holds the default value on creation for the "blocked_model_patterns" field.
 	DefaultBlockedModelPatterns []string
+	// DefaultModelRateMultipliers holds the default value on creation for the "model_rate_multipliers" field.
+	DefaultModelRateMultipliers map[string]float64
 	// DefaultModelRoutingEnabled holds the default value on creation for the "model_routing_enabled" field.
 	DefaultModelRoutingEnabled bool
 	// DefaultMcpXMLInject holds the default value on creation for the "mcp_xml_inject" field.

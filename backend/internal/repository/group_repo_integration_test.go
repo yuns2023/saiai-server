@@ -57,6 +57,7 @@ func (s *GroupRepoSuite) TestCreate() {
 		Status:               service.StatusActive,
 		SubscriptionType:     service.SubscriptionTypeStandard,
 		BlockedModelPatterns: []string{"claude-fable-*", "gpt-4o"},
+		ModelRateMultipliers: map[string]float64{"claude-fable-5-1": 0.8},
 	}
 
 	err := s.repo.Create(s.ctx, group)
@@ -67,6 +68,7 @@ func (s *GroupRepoSuite) TestCreate() {
 	s.Require().NoError(err, "GetByID")
 	s.Require().Equal("test-create", got.Name)
 	s.Require().Equal([]string{"claude-fable-*", "gpt-4o"}, got.BlockedModelPatterns)
+	s.Require().Equal(map[string]float64{"claude-fable-5-1": 0.8}, got.ModelRateMultipliers)
 }
 
 func (s *GroupRepoSuite) TestGetByID_NotFound() {

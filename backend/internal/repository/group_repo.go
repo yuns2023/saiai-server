@@ -39,6 +39,10 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 	if blockedModelPatterns == nil {
 		blockedModelPatterns = []string{}
 	}
+	modelRates := groupIn.ModelRateMultipliers
+	if modelRates == nil {
+		modelRates = map[string]float64{}
+	}
 	if groupIn.InputModerationCategories == nil {
 		groupIn.InputModerationCategories = []string{"Jailbreak", "PII", "Non-violent Illegal Acts", "Unethical Acts"}
 	}
@@ -113,6 +117,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 	// 设置支持的模型系列（始终设置，空数组表示不限制）
 	builder = builder.SetSupportedModelScopes(groupIn.SupportedModelScopes)
 	builder = builder.SetBlockedModelPatterns(blockedModelPatterns)
+	builder = builder.SetModelRateMultipliers(modelRates)
 	builder = builder.SetInputModerationCategories(groupIn.InputModerationCategories)
 
 	created, err := builder.Save(ctx)
@@ -153,6 +158,10 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	blockedModelPatterns := groupIn.BlockedModelPatterns
 	if blockedModelPatterns == nil {
 		blockedModelPatterns = []string{}
+	}
+	modelRates := groupIn.ModelRateMultipliers
+	if modelRates == nil {
+		modelRates = map[string]float64{}
 	}
 	builder := r.client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
@@ -251,6 +260,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	// 处理 SupportedModelScopes（始终设置，空数组表示不限制）
 	builder = builder.SetSupportedModelScopes(groupIn.SupportedModelScopes)
 	builder = builder.SetBlockedModelPatterns(blockedModelPatterns)
+	builder = builder.SetModelRateMultipliers(modelRates)
 	builder = builder.SetInputModerationCategories(groupIn.InputModerationCategories)
 
 	updated, err := builder.Save(ctx)

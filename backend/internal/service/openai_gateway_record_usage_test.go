@@ -243,6 +243,7 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
 	groupID := int64(11)
 	groupRate := 1.4
 	userRate := 1.8
+	paygDiscount := 0.75
 	usage := OpenAIUsage{InputTokens: 15, OutputTokens: 4, CacheReadInputTokens: 3}
 
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
@@ -262,12 +263,13 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
 			ID:      1001,
 			GroupID: i64p(groupID),
 			Group: &Group{
-				ID:             groupID,
-				RateMultiplier: groupRate,
+				ID:                   groupID,
+				RateMultiplier:       groupRate,
+				ModelRateMultipliers: map[string]float64{"gpt-5.1": 0.8},
 			},
 		},
 		User:    &User{ID: 2001},
-		Account: &Account{ID: 3001},
+		Account: &Account{ID: 3001, PaygDiscountMultiplier: &paygDiscount},
 	})
 
 	require.NoError(t, err)
@@ -278,8 +280,11 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
 	require.Equal(t, 3, usageRepo.lastLog.CacheReadTokens)
 
 	expected := expectedOpenAICost(t, svc, "gpt-5.1", usage, userRate)
+	expected.ActualCost *= 0.8 * paygDiscount
 	require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
 	require.InDelta(t, expected.ActualCost, userRepo.lastAmount, 1e-12)
+	require.Equal(t, 0.8, *usageRepo.lastLog.ModelRateMultiplier)
+	require.Equal(t, paygDiscount, *usageRepo.lastLog.AccountPaygDiscountMultiplier)
 	require.Equal(t, 1, userRepo.deductCalls)
 }
 

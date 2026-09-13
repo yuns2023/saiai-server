@@ -129,7 +129,8 @@ type AdminGroup struct {
 	ModelRouting        map[string][]int64 `json:"model_routing"`
 	ModelRoutingEnabled bool               `json:"model_routing_enabled"`
 	// 分组模型拒绝列表（仅管理员可见）
-	BlockedModelPatterns []string `json:"blocked_model_patterns"`
+	BlockedModelPatterns []string           `json:"blocked_model_patterns"`
+	ModelRateMultipliers map[string]float64 `json:"model_rate_multipliers"`
 
 	// MCP XML 协议注入（仅 antigravity 平台使用）
 	MCPXMLInject bool `json:"mcp_xml_inject"`
@@ -146,25 +147,26 @@ type AdminGroup struct {
 }
 
 type Account struct {
-	ID                 int64          `json:"id"`
-	Name               string         `json:"name"`
-	Notes              *string        `json:"notes"`
-	Platform           string         `json:"platform"`
-	Type               string         `json:"type"`
-	Credentials        map[string]any `json:"credentials"`
-	Extra              map[string]any `json:"extra"`
-	ProxyID            *int64         `json:"proxy_id"`
-	Concurrency        int            `json:"concurrency"`
-	LoadFactor         *int           `json:"load_factor,omitempty"`
-	Priority           int            `json:"priority"`
-	RateMultiplier     float64        `json:"rate_multiplier"`
-	Status             string         `json:"status"`
-	ErrorMessage       string         `json:"error_message"`
-	LastUsedAt         *time.Time     `json:"last_used_at"`
-	ExpiresAt          *int64         `json:"expires_at"`
-	AutoPauseOnExpired bool           `json:"auto_pause_on_expired"`
-	CreatedAt          time.Time      `json:"created_at"`
-	UpdatedAt          time.Time      `json:"updated_at"`
+	ID                     int64          `json:"id"`
+	Name                   string         `json:"name"`
+	Notes                  *string        `json:"notes"`
+	Platform               string         `json:"platform"`
+	Type                   string         `json:"type"`
+	Credentials            map[string]any `json:"credentials"`
+	Extra                  map[string]any `json:"extra"`
+	ProxyID                *int64         `json:"proxy_id"`
+	Concurrency            int            `json:"concurrency"`
+	LoadFactor             *int           `json:"load_factor,omitempty"`
+	Priority               int            `json:"priority"`
+	RateMultiplier         float64        `json:"rate_multiplier"`
+	PaygDiscountMultiplier float64        `json:"payg_discount_multiplier"`
+	Status                 string         `json:"status"`
+	ErrorMessage           string         `json:"error_message"`
+	LastUsedAt             *time.Time     `json:"last_used_at"`
+	ExpiresAt              *int64         `json:"expires_at"`
+	AutoPauseOnExpired     bool           `json:"auto_pause_on_expired"`
+	CreatedAt              time.Time      `json:"created_at"`
+	UpdatedAt              time.Time      `json:"updated_at"`
 
 	Schedulable bool `json:"schedulable"`
 
@@ -384,15 +386,17 @@ type UsageLog struct {
 	CacheCreation5mTokens int `json:"cache_creation_5m_tokens"`
 	CacheCreation1hTokens int `json:"cache_creation_1h_tokens"`
 
-	InputCost           float64 `json:"input_cost"`
-	OutputCost          float64 `json:"output_cost"`
-	CacheCreationCost   float64 `json:"cache_creation_cost"`
-	CacheCreation5mCost float64 `json:"cache_creation_5m_cost"`
-	CacheCreation1hCost float64 `json:"cache_creation_1h_cost"`
-	CacheReadCost       float64 `json:"cache_read_cost"`
-	TotalCost           float64 `json:"total_cost"`
-	ActualCost          float64 `json:"actual_cost"`
-	RateMultiplier      float64 `json:"rate_multiplier"`
+	InputCost                     float64  `json:"input_cost"`
+	OutputCost                    float64  `json:"output_cost"`
+	CacheCreationCost             float64  `json:"cache_creation_cost"`
+	CacheCreation5mCost           float64  `json:"cache_creation_5m_cost"`
+	CacheCreation1hCost           float64  `json:"cache_creation_1h_cost"`
+	CacheReadCost                 float64  `json:"cache_read_cost"`
+	TotalCost                     float64  `json:"total_cost"`
+	ActualCost                    float64  `json:"actual_cost"`
+	RateMultiplier                float64  `json:"rate_multiplier"`
+	ModelRateMultiplier           *float64 `json:"model_rate_multiplier"`
+	AccountPaygDiscountMultiplier *float64 `json:"account_payg_discount_multiplier"`
 
 	BillingType  int8   `json:"billing_type"`
 	RequestType  string `json:"request_type"`

@@ -206,6 +206,7 @@ func TestAPIKeyService_GetByKey_UsesL2Cache(t *testing.T) {
 				Status:                   StatusActive,
 				SubscriptionType:         SubscriptionTypeStandard,
 				RateMultiplier:           1,
+				ModelRateMultipliers:     map[string]float64{"claude-fable-5-1": 0.8},
 				ClaudeEnvironmentRewrite: true,
 				ModelRoutingEnabled:      true,
 				ModelRouting: map[string][]int64{
@@ -227,6 +228,7 @@ func TestAPIKeyService_GetByKey_UsesL2Cache(t *testing.T) {
 	require.Equal(t, ClaudeEnvironmentModeRewrite, apiKey.Group.EffectiveClaudeEnvironmentMode())
 	require.True(t, apiKey.Group.ModelRoutingEnabled)
 	require.Equal(t, map[string][]int64{"claude-opus-*": {1, 2}}, apiKey.Group.ModelRouting)
+	require.Equal(t, 0.8, apiKey.Group.ModelRateFor("claude-fable-5-1"))
 }
 
 func TestAPIKeyService_SnapshotToAPIKeyPreservesClaudeEnvironmentRemoveMode(t *testing.T) {
@@ -245,6 +247,18 @@ func TestAPIKeyService_SnapshotToAPIKeyPreservesClaudeEnvironmentRemoveMode(t *t
 	require.NotNil(t, apiKey.Group)
 	require.Equal(t, ClaudeEnvironmentModeRemove, apiKey.Group.EffectiveClaudeEnvironmentMode())
 	require.False(t, apiKey.Group.ClaudeEnvironmentRewrite)
+}
+
+func TestAPIKeyService_SnapshotFromAPIKeyPreservesModelRates(t *testing.T) {
+	svc := &APIKeyService{}
+	groupID := int64(12)
+	key := &APIKey{
+		ID: 1, UserID: 2, User: &User{ID: 2}, GroupID: &groupID,
+		Group: &Group{ID: groupID, Status: StatusActive, ModelRateMultipliers: map[string]float64{"claude-fable-5-1": 0.8}},
+	}
+	snapshot := svc.snapshotFromAPIKey(key)
+	require.NotNil(t, snapshot.Group)
+	require.Equal(t, 0.8, snapshot.Group.ModelRateMultipliers["claude-fable-5-1"])
 }
 
 func TestAPIKeyService_GetByKey_NegativeCache(t *testing.T) {

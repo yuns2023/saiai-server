@@ -724,6 +724,8 @@ export default {
     userBilled: 'User billed',
     accountBilled: 'Account billed',
     accountMultiplier: 'Account rate',
+    groupModelMultiplier: 'Group model rate',
+    paygAccountDiscount: 'Pay-as-you-go account discount',
     avgDuration: 'Avg Duration',
     inSelectedRange: 'in selected range',
     perRequest: 'per request',
@@ -1734,6 +1736,12 @@ export default {
         placeholder: 'One pattern per line, e.g. claude-fable-5-1 or gpt-4o*',
         hint: 'Requests matching any pattern are rejected before account selection. Supports * anywhere; leave empty to allow all models.'
       },
+      modelRates: {
+        title: 'Per-model rate multipliers',
+        placeholder: 'One per line: claude-fable-5-1=0.8',
+        hint: 'Exact billed-model match; empty uses the group rate. Zero makes the model free.',
+        invalid: 'Invalid model rates: use model-ID=rate from 0 to 100 with at most four decimals, one unique model per line.'
+      },
       copyAccounts: {
         title: 'Copy Accounts from Groups',
         tooltip: 'Select one or more groups of the same platform. After creation, all accounts from these groups will be automatically bound to the new group (deduplicated).',
@@ -2035,6 +2043,7 @@ export default {
         notes: 'Notes',
         priority: 'Priority',
         billingRateMultiplier: 'Billing Rate',
+        paygDiscountMultiplier: 'Payg Discount',
         weight: 'Weight',
         status: 'Status',
         schedulable: 'Schedulable',
@@ -2400,6 +2409,8 @@ export default {
       priorityHint: 'Lower value accounts are used first',
       billingRateMultiplier: 'Billing Rate Multiplier',
       billingRateMultiplierHint: '0 = free, affects account billing only',
+      paygDiscountMultiplier: 'Pay-as-you-go discount rate',
+      paygDiscountMultiplierHint: '0 to 1 with at most four decimals; 1 is full price, 0.8 is 20% off, and 0 is free. Applies only to balance billing.',
       expiresAt: 'Expires At',
       expiresAtHint: 'Leave empty for no expiration',
       higherPriorityFirst: 'Lower value means higher priority',

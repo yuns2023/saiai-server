@@ -25,3 +25,14 @@ func TestAccount_BillingRateMultiplier_NegativeFallsBackToOne(t *testing.T) {
 	a := Account{RateMultiplier: &v}
 	require.Equal(t, 1.0, a.BillingRateMultiplier())
 }
+
+func TestAccount_PaygDiscountRateAndValidation(t *testing.T) {
+	require.Equal(t, 1.0, (&Account{}).PaygDiscountRate())
+	zero := 0.0
+	require.Equal(t, 0.0, (&Account{PaygDiscountMultiplier: &zero}).PaygDiscountRate())
+	require.NoError(t, validatePaygDiscountMultiplier(&zero))
+	tooPrecise := 0.12345
+	require.Error(t, validatePaygDiscountMultiplier(&tooPrecise))
+	aboveOne := 1.01
+	require.Error(t, validatePaygDiscountMultiplier(&aboveOne))
+}

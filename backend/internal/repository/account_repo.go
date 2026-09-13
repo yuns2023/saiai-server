@@ -98,6 +98,9 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	if account.RateMultiplier != nil {
 		builder.SetRateMultiplier(*account.RateMultiplier)
 	}
+	if account.PaygDiscountMultiplier != nil {
+		builder.SetPaygDiscountMultiplier(*account.PaygDiscountMultiplier)
+	}
 	if account.LoadFactor != nil {
 		builder.SetLoadFactor(*account.LoadFactor)
 	}
@@ -334,6 +337,9 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 
 	if account.RateMultiplier != nil {
 		builder.SetRateMultiplier(*account.RateMultiplier)
+	}
+	if account.PaygDiscountMultiplier != nil {
+		builder.SetPaygDiscountMultiplier(*account.PaygDiscountMultiplier)
 	}
 	if account.LoadFactor != nil {
 		builder.SetLoadFactor(*account.LoadFactor)
@@ -1336,6 +1342,11 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		args = append(args, *updates.RateMultiplier)
 		idx++
 	}
+	if updates.PaygDiscountMultiplier != nil {
+		setClauses = append(setClauses, "payg_discount_multiplier = $"+itoa(idx))
+		args = append(args, *updates.PaygDiscountMultiplier)
+		idx++
+	}
 	if updates.LoadFactor != nil {
 		if *updates.LoadFactor <= 0 {
 			setClauses = append(setClauses, "load_factor = NULL")
@@ -1402,6 +1413,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			shouldSync = true
 		}
 		if updates.Schedulable != nil && !*updates.Schedulable {
+			shouldSync = true
+		}
+		if updates.PaygDiscountMultiplier != nil {
 			shouldSync = true
 		}
 		if shouldSync {
@@ -1654,6 +1668,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 	}
 
 	rateMultiplier := m.RateMultiplier
+	paygDiscountMultiplier := m.PaygDiscountMultiplier
 
 	return &service.Account{
 		ID:                      m.ID,
@@ -1667,6 +1682,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		Concurrency:             m.Concurrency,
 		Priority:                m.Priority,
 		RateMultiplier:          &rateMultiplier,
+		PaygDiscountMultiplier:  &paygDiscountMultiplier,
 		LoadFactor:              m.LoadFactor,
 		Status:                  m.Status,
 		ErrorMessage:            derefString(m.ErrorMessage),

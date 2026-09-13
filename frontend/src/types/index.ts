@@ -433,6 +433,7 @@ export interface AdminGroup extends Group {
 
   // 分组模型拒绝列表（仅管理员可见，支持 * 通配符）
   blocked_model_patterns: string[]
+  model_rate_multipliers: Record<string, number>
 
   // MCP XML 协议注入（仅 antigravity 平台使用）
   mcp_xml_inject: boolean
@@ -547,6 +548,7 @@ export interface CreateGroupRequest {
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
   blocked_model_patterns?: string[]
+  model_rate_multipliers?: Record<string, number>
   mcp_xml_inject?: boolean
   simulate_claude_max_enabled?: boolean
   supported_model_scopes?: string[]
@@ -593,6 +595,7 @@ export interface UpdateGroupRequest {
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
   blocked_model_patterns?: string[]
+  model_rate_multipliers?: Record<string, number>
   mcp_xml_inject?: boolean
   simulate_claude_max_enabled?: boolean
   supported_model_scopes?: string[]
@@ -741,6 +744,7 @@ export interface Account {
   current_concurrency?: number // Real-time concurrency count from Redis
   priority: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
+  payg_discount_multiplier?: number
   status: 'active' | 'inactive' | 'error'
   error_message: string | null
   last_used_at: string | null
@@ -929,6 +933,7 @@ export interface CreateAccountRequest {
   load_factor?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
+  payg_discount_multiplier?: number
   group_ids?: number[]
   expires_at?: number | null
   auto_pause_on_expired?: boolean
@@ -946,6 +951,7 @@ export interface UpdateAccountRequest {
   load_factor?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
+  payg_discount_multiplier?: number
   schedulable?: boolean
   status?: 'active' | 'inactive' | 'error'
   group_ids?: number[]
@@ -1025,6 +1031,7 @@ export interface AdminDataAccount {
   concurrency: number
   priority: number
   rate_multiplier?: number | null
+  payg_discount_multiplier?: number | null
   expires_at?: number | null
   auto_pause_on_expired?: boolean
 }
@@ -1085,6 +1092,8 @@ export interface UsageLog {
   total_cost: number
   actual_cost: number
   rate_multiplier: number
+  model_rate_multiplier?: number | null
+  account_payg_discount_multiplier?: number | null
   billing_type: number
 
   request_type?: UsageRequestType

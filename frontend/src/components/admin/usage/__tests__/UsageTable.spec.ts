@@ -25,6 +25,8 @@ const messages: Record<string, string> = {
   'usage.serviceTierStandard': 'Standard',
   'usage.rate': 'Rate',
   'usage.accountMultiplier': 'Account rate',
+  'usage.groupModelMultiplier': 'Group model rate',
+  'usage.paygAccountDiscount': 'Payg discount',
   'usage.original': 'Original',
   'usage.userBilled': 'User billed',
   'usage.accountBilled': 'Account billed',
@@ -73,6 +75,8 @@ describe('admin UsageTable tooltip', () => {
       total_cost: 0.092883,
       account_rate_multiplier: 1,
       rate_multiplier: 1,
+      model_rate_multiplier: 0.8,
+      account_payg_discount_multiplier: 0.75,
       service_tier: 'priority',
       input_cost: 0.020285,
       output_cost: 0.00303,
@@ -115,6 +119,10 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('Rate')
     expect(text).toContain('1.00x')
     expect(text).toContain('Account rate')
+    expect(text).toContain('Group model rate')
+    expect(text).toContain('Payg discount')
+    expect(text).toContain('0.8000x')
+    expect(text).toContain('0.7500x')
     expect(text).toContain('User billed')
     expect(text).toContain('Account billed')
     expect(text).toContain('$0.092883')

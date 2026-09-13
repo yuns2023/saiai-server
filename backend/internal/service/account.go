@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"hash/fnv"
+	"math"
 	"reflect"
 	"sort"
 	"strconv"
@@ -28,15 +29,17 @@ type Account struct {
 	Priority    int
 	// RateMultiplier 账号计费倍率（>=0，允许 0 表示该账号计费为 0）。
 	// 使用指针用于兼容旧版本调度缓存（Redis）中缺字段的情况：nil 表示按 1.0 处理。
-	RateMultiplier     *float64
-	LoadFactor         *int // 调度负载因子；nil 表示使用 Concurrency
-	Status             string
-	ErrorMessage       string
-	LastUsedAt         *time.Time
-	ExpiresAt          *time.Time
-	AutoPauseOnExpired bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	RateMultiplier *float64
+	// PaygDiscountMultiplier discounts balance billing only; nil in older cache entries means 1.
+	PaygDiscountMultiplier *float64
+	LoadFactor             *int // 调度负载因子；nil 表示使用 Concurrency
+	Status                 string
+	ErrorMessage           string
+	LastUsedAt             *time.Time
+	ExpiresAt              *time.Time
+	AutoPauseOnExpired     bool
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 
 	Schedulable bool
 
@@ -88,6 +91,20 @@ func (a *Account) BillingRateMultiplier() float64 {
 		return 1.0
 	}
 	return *a.RateMultiplier
+}
+
+func (a *Account) PaygDiscountRate() float64 {
+	if a == nil || a.PaygDiscountMultiplier == nil || *a.PaygDiscountMultiplier < 0 || *a.PaygDiscountMultiplier > 1 {
+		return 1
+	}
+	return *a.PaygDiscountMultiplier
+}
+
+func validatePaygDiscountMultiplier(rate *float64) error {
+	if rate != nil && (math.IsNaN(*rate) || math.IsInf(*rate, 0) || *rate < 0 || *rate > 1 || math.Abs(*rate*10000-math.Round(*rate*10000)) > 1e-7) {
+		return errors.New("payg_discount_multiplier must be between 0 and 1 with at most four decimals")
+	}
+	return nil
 }
 
 func (a *Account) EffectiveLoadFactor() int {

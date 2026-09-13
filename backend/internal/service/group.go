@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 const (
 	maxBlockedModelPatterns      = 100
 	maxBlockedModelPatternLength = 200
+	maxModelRateMultipliers      = 100
 )
 
 const (
@@ -73,6 +75,8 @@ type Group struct {
 
 	// 分组模型拒绝列表。规则支持 * 通配符，空列表表示不限制。
 	BlockedModelPatterns []string
+	// ModelRateMultipliers applies to the model ID passed to cost calculation.
+	ModelRateMultipliers map[string]float64
 
 	// MCP XML 协议注入开关（仅 antigravity 平台使用）
 	MCPXMLInject bool
@@ -104,6 +108,38 @@ type Group struct {
 	AccountCount            int64
 	ActiveAccountCount      int64
 	RateLimitedAccountCount int64
+}
+
+func NormalizeModelRateMultipliers(raw map[string]float64) (map[string]float64, error) {
+	if len(raw) > maxModelRateMultipliers {
+		return nil, fmt.Errorf("model_rate_multipliers cannot contain more than %d models", maxModelRateMultipliers)
+	}
+	out := make(map[string]float64, len(raw))
+	for model, rate := range raw {
+		name := strings.ToLower(strings.TrimSpace(model))
+		if name == "" || len(name) > 100 || strings.ContainsAny(name, "*?\r\n\t ") {
+			return nil, fmt.Errorf("model_rate_multipliers requires exact model IDs")
+		}
+		if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 || rate > 100 || math.Abs(rate*10000-math.Round(rate*10000)) > 1e-7 {
+			return nil, fmt.Errorf("model_rate_multipliers values must be between 0 and 100 with at most four decimals")
+		}
+		if _, exists := out[name]; exists {
+			return nil, fmt.Errorf("duplicate model_rate_multipliers model %q", name)
+		}
+		out[name] = rate
+	}
+	return out, nil
+}
+
+func (g *Group) ModelRateFor(model string) float64 {
+	if g == nil {
+		return 1
+	}
+	rate, ok := g.ModelRateMultipliers[strings.ToLower(strings.TrimSpace(model))]
+	if !ok || math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 || rate > 100 {
+		return 1
+	}
+	return rate
 }
 
 // NormalizeBlockedModelPatterns trims, lower-cases and de-duplicates group

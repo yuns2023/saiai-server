@@ -323,6 +323,34 @@ func (_c *UsageLogCreate) SetNillableRateMultiplier(v *float64) *UsageLogCreate 
 	return _c
 }
 
+// SetModelRateMultiplier sets the "model_rate_multiplier" field.
+func (_c *UsageLogCreate) SetModelRateMultiplier(v float64) *UsageLogCreate {
+	_c.mutation.SetModelRateMultiplier(v)
+	return _c
+}
+
+// SetNillableModelRateMultiplier sets the "model_rate_multiplier" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableModelRateMultiplier(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetModelRateMultiplier(*v)
+	}
+	return _c
+}
+
+// SetAccountPaygDiscountMultiplier sets the "account_payg_discount_multiplier" field.
+func (_c *UsageLogCreate) SetAccountPaygDiscountMultiplier(v float64) *UsageLogCreate {
+	_c.mutation.SetAccountPaygDiscountMultiplier(v)
+	return _c
+}
+
+// SetNillableAccountPaygDiscountMultiplier sets the "account_payg_discount_multiplier" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableAccountPaygDiscountMultiplier(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetAccountPaygDiscountMultiplier(*v)
+	}
+	return _c
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_c *UsageLogCreate) SetAccountRateMultiplier(v float64) *UsageLogCreate {
 	_c.mutation.SetAccountRateMultiplier(v)
@@ -611,6 +639,14 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultRateMultiplier
 		_c.mutation.SetRateMultiplier(v)
 	}
+	if _, ok := _c.mutation.ModelRateMultiplier(); !ok {
+		v := usagelog.DefaultModelRateMultiplier
+		_c.mutation.SetModelRateMultiplier(v)
+	}
+	if _, ok := _c.mutation.AccountPaygDiscountMultiplier(); !ok {
+		v := usagelog.DefaultAccountPaygDiscountMultiplier
+		_c.mutation.SetAccountPaygDiscountMultiplier(v)
+	}
 	if _, ok := _c.mutation.BillingType(); !ok {
 		v := usagelog.DefaultBillingType
 		_c.mutation.SetBillingType(v)
@@ -714,6 +750,12 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.RateMultiplier(); !ok {
 		return &ValidationError{Name: "rate_multiplier", err: errors.New(`ent: missing required field "UsageLog.rate_multiplier"`)}
+	}
+	if _, ok := _c.mutation.ModelRateMultiplier(); !ok {
+		return &ValidationError{Name: "model_rate_multiplier", err: errors.New(`ent: missing required field "UsageLog.model_rate_multiplier"`)}
+	}
+	if _, ok := _c.mutation.AccountPaygDiscountMultiplier(); !ok {
+		return &ValidationError{Name: "account_payg_discount_multiplier", err: errors.New(`ent: missing required field "UsageLog.account_payg_discount_multiplier"`)}
 	}
 	if _, ok := _c.mutation.BillingType(); !ok {
 		return &ValidationError{Name: "billing_type", err: errors.New(`ent: missing required field "UsageLog.billing_type"`)}
@@ -861,6 +903,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldRateMultiplier, field.TypeFloat64, value)
 		_node.RateMultiplier = value
+	}
+	if value, ok := _c.mutation.ModelRateMultiplier(); ok {
+		_spec.SetField(usagelog.FieldModelRateMultiplier, field.TypeFloat64, value)
+		_node.ModelRateMultiplier = value
+	}
+	if value, ok := _c.mutation.AccountPaygDiscountMultiplier(); ok {
+		_spec.SetField(usagelog.FieldAccountPaygDiscountMultiplier, field.TypeFloat64, value)
+		_node.AccountPaygDiscountMultiplier = value
 	}
 	if value, ok := _c.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)
@@ -1446,6 +1496,42 @@ func (u *UsageLogUpsert) UpdateRateMultiplier() *UsageLogUpsert {
 // AddRateMultiplier adds v to the "rate_multiplier" field.
 func (u *UsageLogUpsert) AddRateMultiplier(v float64) *UsageLogUpsert {
 	u.Add(usagelog.FieldRateMultiplier, v)
+	return u
+}
+
+// SetModelRateMultiplier sets the "model_rate_multiplier" field.
+func (u *UsageLogUpsert) SetModelRateMultiplier(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldModelRateMultiplier, v)
+	return u
+}
+
+// UpdateModelRateMultiplier sets the "model_rate_multiplier" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateModelRateMultiplier() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldModelRateMultiplier)
+	return u
+}
+
+// AddModelRateMultiplier adds v to the "model_rate_multiplier" field.
+func (u *UsageLogUpsert) AddModelRateMultiplier(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldModelRateMultiplier, v)
+	return u
+}
+
+// SetAccountPaygDiscountMultiplier sets the "account_payg_discount_multiplier" field.
+func (u *UsageLogUpsert) SetAccountPaygDiscountMultiplier(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldAccountPaygDiscountMultiplier, v)
+	return u
+}
+
+// UpdateAccountPaygDiscountMultiplier sets the "account_payg_discount_multiplier" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateAccountPaygDiscountMultiplier() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldAccountPaygDiscountMultiplier)
+	return u
+}
+
+// AddAccountPaygDiscountMultiplier adds v to the "account_payg_discount_multiplier" field.
+func (u *UsageLogUpsert) AddAccountPaygDiscountMultiplier(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldAccountPaygDiscountMultiplier, v)
 	return u
 }
 
@@ -2164,6 +2250,48 @@ func (u *UsageLogUpsertOne) AddRateMultiplier(v float64) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateRateMultiplier() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateRateMultiplier()
+	})
+}
+
+// SetModelRateMultiplier sets the "model_rate_multiplier" field.
+func (u *UsageLogUpsertOne) SetModelRateMultiplier(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetModelRateMultiplier(v)
+	})
+}
+
+// AddModelRateMultiplier adds v to the "model_rate_multiplier" field.
+func (u *UsageLogUpsertOne) AddModelRateMultiplier(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddModelRateMultiplier(v)
+	})
+}
+
+// UpdateModelRateMultiplier sets the "model_rate_multiplier" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateModelRateMultiplier() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateModelRateMultiplier()
+	})
+}
+
+// SetAccountPaygDiscountMultiplier sets the "account_payg_discount_multiplier" field.
+func (u *UsageLogUpsertOne) SetAccountPaygDiscountMultiplier(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAccountPaygDiscountMultiplier(v)
+	})
+}
+
+// AddAccountPaygDiscountMultiplier adds v to the "account_payg_discount_multiplier" field.
+func (u *UsageLogUpsertOne) AddAccountPaygDiscountMultiplier(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddAccountPaygDiscountMultiplier(v)
+	})
+}
+
+// UpdateAccountPaygDiscountMultiplier sets the "account_payg_discount_multiplier" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateAccountPaygDiscountMultiplier() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAccountPaygDiscountMultiplier()
 	})
 }
 
@@ -3082,6 +3210,48 @@ func (u *UsageLogUpsertBulk) AddRateMultiplier(v float64) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateRateMultiplier() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateRateMultiplier()
+	})
+}
+
+// SetModelRateMultiplier sets the "model_rate_multiplier" field.
+func (u *UsageLogUpsertBulk) SetModelRateMultiplier(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetModelRateMultiplier(v)
+	})
+}
+
+// AddModelRateMultiplier adds v to the "model_rate_multiplier" field.
+func (u *UsageLogUpsertBulk) AddModelRateMultiplier(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddModelRateMultiplier(v)
+	})
+}
+
+// UpdateModelRateMultiplier sets the "model_rate_multiplier" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateModelRateMultiplier() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateModelRateMultiplier()
+	})
+}
+
+// SetAccountPaygDiscountMultiplier sets the "account_payg_discount_multiplier" field.
+func (u *UsageLogUpsertBulk) SetAccountPaygDiscountMultiplier(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAccountPaygDiscountMultiplier(v)
+	})
+}
+
+// AddAccountPaygDiscountMultiplier adds v to the "account_payg_discount_multiplier" field.
+func (u *UsageLogUpsertBulk) AddAccountPaygDiscountMultiplier(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddAccountPaygDiscountMultiplier(v)
+	})
+}
+
+// UpdateAccountPaygDiscountMultiplier sets the "account_payg_discount_multiplier" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateAccountPaygDiscountMultiplier() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAccountPaygDiscountMultiplier()
 	})
 }
 

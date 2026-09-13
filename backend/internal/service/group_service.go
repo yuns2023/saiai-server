@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	ErrGroupNotFound = infraerrors.NotFound("GROUP_NOT_FOUND", "group not found")
-	ErrGroupExists   = infraerrors.Conflict("GROUP_EXISTS", "group name already exists")
+	ErrGroupNotFound  = infraerrors.NotFound("GROUP_NOT_FOUND", "group not found")
+	ErrGroupExists    = infraerrors.Conflict("GROUP_EXISTS", "group name already exists")
+	ErrGroupNotActive = infraerrors.Forbidden("GROUP_INACTIVE", "group is not active")
 )
 
 type GroupRepository interface {
@@ -45,21 +46,23 @@ type GroupSortOrderUpdate struct {
 
 // CreateGroupRequest 创建分组请求
 type CreateGroupRequest struct {
-	Name                 string   `json:"name"`
-	Description          string   `json:"description"`
-	RateMultiplier       float64  `json:"rate_multiplier"`
-	IsExclusive          bool     `json:"is_exclusive"`
-	BlockedModelPatterns []string `json:"blocked_model_patterns"`
+	Name                 string             `json:"name"`
+	Description          string             `json:"description"`
+	RateMultiplier       float64            `json:"rate_multiplier"`
+	IsExclusive          bool               `json:"is_exclusive"`
+	BlockedModelPatterns []string           `json:"blocked_model_patterns"`
+	ModelRateMultipliers map[string]float64 `json:"model_rate_multipliers"`
 }
 
 // UpdateGroupRequest 更新分组请求
 type UpdateGroupRequest struct {
-	Name                 *string   `json:"name"`
-	Description          *string   `json:"description"`
-	RateMultiplier       *float64  `json:"rate_multiplier"`
-	IsExclusive          *bool     `json:"is_exclusive"`
-	Status               *string   `json:"status"`
-	BlockedModelPatterns *[]string `json:"blocked_model_patterns"`
+	Name                 *string             `json:"name"`
+	Description          *string             `json:"description"`
+	RateMultiplier       *float64            `json:"rate_multiplier"`
+	IsExclusive          *bool               `json:"is_exclusive"`
+	Status               *string             `json:"status"`
+	BlockedModelPatterns *[]string           `json:"blocked_model_patterns"`
+	ModelRateMultipliers *map[string]float64 `json:"model_rate_multipliers"`
 }
 
 // GroupService 分组管理服务
@@ -82,6 +85,10 @@ func (s *GroupService) Create(ctx context.Context, req CreateGroupRequest) (*Gro
 	if err != nil {
 		return nil, infraerrors.BadRequest("INVALID_BLOCKED_MODEL_PATTERNS", err.Error())
 	}
+	modelRates, err := NormalizeModelRateMultipliers(req.ModelRateMultipliers)
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_MODEL_RATE_MULTIPLIERS", err.Error())
+	}
 	// 检查名称是否已存在
 	exists, err := s.groupRepo.ExistsByName(ctx, req.Name)
 	if err != nil {
@@ -101,6 +108,7 @@ func (s *GroupService) Create(ctx context.Context, req CreateGroupRequest) (*Gro
 		Status:               StatusActive,
 		SubscriptionType:     SubscriptionTypeStandard,
 		BlockedModelPatterns: blockedModelPatterns,
+		ModelRateMultipliers: modelRates,
 	}
 
 	if err := s.groupRepo.Create(ctx, group); err != nil {
@@ -178,6 +186,13 @@ func (s *GroupService) Update(ctx context.Context, id int64, req UpdateGroupRequ
 			return nil, infraerrors.BadRequest("INVALID_BLOCKED_MODEL_PATTERNS", normalizeErr.Error())
 		}
 		group.BlockedModelPatterns = blockedModelPatterns
+	}
+	if req.ModelRateMultipliers != nil {
+		modelRates, normalizeErr := NormalizeModelRateMultipliers(*req.ModelRateMultipliers)
+		if normalizeErr != nil {
+			return nil, infraerrors.BadRequest("INVALID_MODEL_RATE_MULTIPLIERS", normalizeErr.Error())
+		}
+		group.ModelRateMultipliers = modelRates
 	}
 
 	if err := s.groupRepo.Update(ctx, group); err != nil {

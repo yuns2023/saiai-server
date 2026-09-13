@@ -123,16 +123,17 @@ type UpdateUserInput struct {
 }
 
 type CreateGroupInput struct {
-	Name             string
-	Description      string
-	Platform         string
-	RateMultiplier   float64
-	IsExclusive      bool
-	SubscriptionType string   // standard/subscription
-	FiveHourLimitUSD *float64 // 5小时限额 (USD)
-	DailyLimitUSD    *float64 // 日限额 (USD)
-	WeeklyLimitUSD   *float64 // 周限额 (USD)
-	MonthlyLimitUSD  *float64 // 月限额 (USD)
+	Name                 string
+	Description          string
+	Platform             string
+	RateMultiplier       float64
+	ModelRateMultipliers map[string]float64
+	IsExclusive          bool
+	SubscriptionType     string   // standard/subscription
+	FiveHourLimitUSD     *float64 // 5小时限额 (USD)
+	DailyLimitUSD        *float64 // 日限额 (USD)
+	WeeklyLimitUSD       *float64 // 周限额 (USD)
+	MonthlyLimitUSD      *float64 // 月限额 (USD)
 	// 图片生成计费配置（仅 antigravity 平台使用）
 	ImagePrice1K *float64
 	ImagePrice2K *float64
@@ -176,17 +177,18 @@ type CreateGroupInput struct {
 }
 
 type UpdateGroupInput struct {
-	Name             string
-	Description      string
-	Platform         string
-	RateMultiplier   *float64 // 使用指针以支持设置为0
-	IsExclusive      *bool
-	Status           string
-	SubscriptionType string   // standard/subscription
-	FiveHourLimitUSD *float64 // 5小时限额 (USD)
-	DailyLimitUSD    *float64 // 日限额 (USD)
-	WeeklyLimitUSD   *float64 // 周限额 (USD)
-	MonthlyLimitUSD  *float64 // 月限额 (USD)
+	Name                 string
+	Description          string
+	Platform             string
+	RateMultiplier       *float64 // 使用指针以支持设置为0
+	ModelRateMultipliers *map[string]float64
+	IsExclusive          *bool
+	Status               string
+	SubscriptionType     string   // standard/subscription
+	FiveHourLimitUSD     *float64 // 5小时限额 (USD)
+	DailyLimitUSD        *float64 // 日限额 (USD)
+	WeeklyLimitUSD       *float64 // 周限额 (USD)
+	MonthlyLimitUSD      *float64 // 月限额 (USD)
 	// 图片生成计费配置（仅 antigravity 平台使用）
 	ImagePrice1K *float64
 	ImagePrice2K *float64
@@ -230,20 +232,21 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
-	Name               string
-	Notes              *string
-	Platform           string
-	Type               string
-	Credentials        map[string]any
-	Extra              map[string]any
-	ProxyID            *int64
-	Concurrency        int
-	Priority           int
-	RateMultiplier     *float64 // 账号计费倍率（>=0，允许 0）
-	LoadFactor         *int
-	GroupIDs           []int64
-	ExpiresAt          *int64
-	AutoPauseOnExpired *bool
+	Name                   string
+	Notes                  *string
+	Platform               string
+	Type                   string
+	Credentials            map[string]any
+	Extra                  map[string]any
+	ProxyID                *int64
+	Concurrency            int
+	Priority               int
+	RateMultiplier         *float64 // 账号计费倍率（>=0，允许 0）
+	PaygDiscountMultiplier *float64
+	LoadFactor             *int
+	GroupIDs               []int64
+	ExpiresAt              *int64
+	AutoPauseOnExpired     *bool
 	// SkipDefaultGroupBind prevents auto-binding to platform default group when GroupIDs is empty.
 	SkipDefaultGroupBind bool
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
@@ -252,37 +255,39 @@ type CreateAccountInput struct {
 }
 
 type UpdateAccountInput struct {
-	Name                  string
-	Notes                 *string
-	Type                  string // Account type: oauth, setup-token, apikey
-	Credentials           map[string]any
-	Extra                 map[string]any
-	ProxyID               *int64
-	Concurrency           *int     // 使用指针区分"未提供"和"设置为0"
-	Priority              *int     // 使用指针区分"未提供"和"设置为0"
-	RateMultiplier        *float64 // 账号计费倍率（>=0，允许 0）
-	LoadFactor            *int
-	Status                string
-	GroupIDs              *[]int64
-	ExpiresAt             *int64
-	AutoPauseOnExpired    *bool
-	SkipMixedChannelCheck bool // 跳过混合渠道检查（用户已确认风险）
+	Name                   string
+	Notes                  *string
+	Type                   string // Account type: oauth, setup-token, apikey
+	Credentials            map[string]any
+	Extra                  map[string]any
+	ProxyID                *int64
+	Concurrency            *int     // 使用指针区分"未提供"和"设置为0"
+	Priority               *int     // 使用指针区分"未提供"和"设置为0"
+	RateMultiplier         *float64 // 账号计费倍率（>=0，允许 0）
+	PaygDiscountMultiplier *float64
+	LoadFactor             *int
+	Status                 string
+	GroupIDs               *[]int64
+	ExpiresAt              *int64
+	AutoPauseOnExpired     *bool
+	SkipMixedChannelCheck  bool // 跳过混合渠道检查（用户已确认风险）
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
-	AccountIDs     []int64
-	Name           string
-	ProxyID        *int64
-	Concurrency    *int
-	Priority       *int
-	RateMultiplier *float64 // 账号计费倍率（>=0，允许 0）
-	LoadFactor     *int
-	Status         string
-	Schedulable    *bool
-	GroupIDs       *[]int64
-	Credentials    map[string]any
-	Extra          map[string]any
+	AccountIDs             []int64
+	Name                   string
+	ProxyID                *int64
+	Concurrency            *int
+	Priority               *int
+	RateMultiplier         *float64 // 账号计费倍率（>=0，允许 0）
+	PaygDiscountMultiplier *float64
+	LoadFactor             *int
+	Status                 string
+	Schedulable            *bool
+	GroupIDs               *[]int64
+	Credentials            map[string]any
+	Extra                  map[string]any
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool
@@ -893,6 +898,10 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	if err != nil {
 		return nil, infraerrors.BadRequest("INVALID_BLOCKED_MODEL_PATTERNS", err.Error())
 	}
+	modelRateMultipliers, err := NormalizeModelRateMultipliers(input.ModelRateMultipliers)
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_MODEL_RATE_MULTIPLIERS", err.Error())
+	}
 
 	// 图片价格：负数表示清除（使用默认价格），0 保留（表示免费）
 	imagePrice1K := normalizePrice(input.ImagePrice1K)
@@ -964,6 +973,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		Description:                      input.Description,
 		Platform:                         platform,
 		RateMultiplier:                   input.RateMultiplier,
+		ModelRateMultipliers:             modelRateMultipliers,
 		IsExclusive:                      input.IsExclusive,
 		Status:                           StatusActive,
 		SubscriptionType:                 subscriptionType,
@@ -1117,6 +1127,9 @@ func (s *adminServiceImpl) validateFallbackGroup(ctx context.Context, currentGro
 		if err != nil {
 			return fmt.Errorf("fallback group not found: %w", err)
 		}
+		if !fallbackGroup.IsActive() {
+			return ErrGroupNotActive
+		}
 
 		// 降级分组不能启用 claude_code_only，否则会造成死循环
 		if nextID == fallbackGroupID && fallbackGroup.ClaudeCodeOnly {
@@ -1148,6 +1161,9 @@ func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Con
 	fallbackGroup, err := s.groupRepo.GetByIDLite(ctx, fallbackGroupID)
 	if err != nil {
 		return fmt.Errorf("fallback group not found: %w", err)
+	}
+	if !fallbackGroup.IsActive() {
+		return ErrGroupNotActive
 	}
 	if fallbackGroup.Platform != PlatformAnthropic {
 		return fmt.Errorf("fallback group must be anthropic platform")
@@ -1282,6 +1298,13 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 			return nil, infraerrors.BadRequest("INVALID_BLOCKED_MODEL_PATTERNS", normalizeErr.Error())
 		}
 		group.BlockedModelPatterns = blockedModelPatterns
+	}
+	if input.ModelRateMultipliers != nil {
+		modelRates, normalizeErr := NormalizeModelRateMultipliers(*input.ModelRateMultipliers)
+		if normalizeErr != nil {
+			return nil, infraerrors.BadRequest("INVALID_MODEL_RATE_MULTIPLIERS", normalizeErr.Error())
+		}
+		group.ModelRateMultipliers = modelRates
 	}
 	if input.MCPXMLInject != nil {
 		group.MCPXMLInject = *input.MCPXMLInject
@@ -1737,6 +1760,10 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		}
 		account.RateMultiplier = input.RateMultiplier
 	}
+	if err := validatePaygDiscountMultiplier(input.PaygDiscountMultiplier); err != nil {
+		return nil, err
+	}
+	account.PaygDiscountMultiplier = input.PaygDiscountMultiplier
 	if input.LoadFactor != nil && *input.LoadFactor > 0 {
 		if *input.LoadFactor > 10000 {
 			return nil, errors.New("load_factor must be <= 10000")
@@ -1829,6 +1856,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			return nil, errors.New("rate_multiplier must be >= 0")
 		}
 		account.RateMultiplier = input.RateMultiplier
+	}
+	if err := validatePaygDiscountMultiplier(input.PaygDiscountMultiplier); err != nil {
+		return nil, err
+	}
+	if input.PaygDiscountMultiplier != nil {
+		account.PaygDiscountMultiplier = input.PaygDiscountMultiplier
 	}
 	if input.LoadFactor != nil {
 		if *input.LoadFactor <= 0 {
@@ -2022,6 +2055,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, errors.New("rate_multiplier must be >= 0")
 		}
 	}
+	if err := validatePaygDiscountMultiplier(input.PaygDiscountMultiplier); err != nil {
+		return nil, err
+	}
 
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
@@ -2042,6 +2078,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 	if input.RateMultiplier != nil {
 		repoUpdates.RateMultiplier = input.RateMultiplier
+	}
+	if input.PaygDiscountMultiplier != nil {
+		repoUpdates.PaygDiscountMultiplier = input.PaygDiscountMultiplier
 	}
 	if input.LoadFactor != nil {
 		if *input.LoadFactor <= 0 {
