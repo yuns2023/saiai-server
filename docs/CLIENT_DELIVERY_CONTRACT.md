@@ -73,11 +73,14 @@ origin boundary never trusts `X-Forwarded-Host` or `Forwarded`; it accepts
 `X-Forwarded-Proto` only from configured trusted proxies. All `/saiai-cli/*`
 responses use `Cache-Control: no-store`.
 
-The WebUI command contains the selected API Key by explicit product design. It
-must quote the Key separately for POSIX shell and PowerShell. Tests use only
-`TEST_ONLY_*` values and assert both that the command contains the Key and that
-apostrophes are escaped correctly. Release logs and ledgers must never contain
-real user keys.
+The normal Codex WebUI command is the short `init-codex` form and contains no
+API Key. The wrapper reuses the managed per-user SAIAI configuration and only
+prompts securely when no Key is available. The explicit Codex WebSocket tab
+and legacy Claude/initialization paths may still contain a selected Key; those
+paths must quote it separately for POSIX shell and PowerShell. Tests use only
+`TEST_ONLY_*` values and assert the short command does not expose the Key while
+the legacy paths escape apostrophes correctly. Release logs and ledgers must
+never contain real user keys.
 
 ## Activation
 
