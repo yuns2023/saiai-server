@@ -189,6 +189,7 @@ func TestInactiveGroupStopsExistingKeyModelRequests(t *testing.T) {
 	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(keyService, nil, nil, cfg)))
 	router.GET("/v1/messages", func(c *gin.Context) { c.Status(http.StatusOK) })
 	router.GET("/v1/usage", func(c *gin.Context) { c.Status(http.StatusOK) })
+	router.GET("/api/v1/client/bootstrap", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	request := func(path string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
@@ -199,6 +200,7 @@ func TestInactiveGroupStopsExistingKeyModelRequests(t *testing.T) {
 	}
 	require.Equal(t, http.StatusForbidden, request("/v1/messages").Code)
 	require.Equal(t, http.StatusOK, request("/v1/usage").Code)
+	require.Equal(t, http.StatusOK, request("/api/v1/client/bootstrap").Code)
 	group.Status = service.StatusActive
 	require.Equal(t, http.StatusOK, request("/v1/messages").Code)
 }
