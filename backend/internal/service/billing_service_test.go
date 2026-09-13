@@ -14,6 +14,24 @@ func newTestBillingService() *BillingService {
 	return NewBillingService(&config.Config{}, nil)
 }
 
+func TestFable51KeepsConfiguredFable5PricingAlias(t *testing.T) {
+	pricing := NewPricingService(&config.Config{}, nil)
+	pricing.pricingData = map[string]*LiteLLMModelPricing{
+		"claude-fable-5": {
+			InputCostPerToken: 10e-6, OutputCostPerToken: 50e-6,
+			CacheReadInputTokenCost: 1e-6,
+		},
+		"claude-fable-5-1": {
+			InputCostPerToken: 10e-6, OutputCostPerToken: 50e-6,
+			CacheReadInputTokenCost: 0.25e-6,
+		},
+	}
+	svc := NewBillingService(&config.Config{}, pricing)
+	cost, err := svc.CalculateCost("claude-fable-5-1", UsageTokens{CacheReadTokens: 500000}, 1)
+	require.NoError(t, err)
+	require.InDelta(t, 0.5, cost.CacheReadCost, 1e-12)
+}
+
 func newOpenAITestBillingService() *BillingService {
 	return NewBillingService(&config.Config{}, &PricingService{
 		pricingData: map[string]*LiteLLMModelPricing{

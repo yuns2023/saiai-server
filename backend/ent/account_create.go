@@ -181,6 +181,20 @@ func (_c *AccountCreate) SetNillableRateMultiplier(v *float64) *AccountCreate {
 	return _c
 }
 
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (_c *AccountCreate) SetPaygDiscountMultiplier(v float64) *AccountCreate {
+	_c.mutation.SetPaygDiscountMultiplier(v)
+	return _c
+}
+
+// SetNillablePaygDiscountMultiplier sets the "payg_discount_multiplier" field if the given value is not nil.
+func (_c *AccountCreate) SetNillablePaygDiscountMultiplier(v *float64) *AccountCreate {
+	if v != nil {
+		_c.SetPaygDiscountMultiplier(*v)
+	}
+	return _c
+}
+
 // SetStatus sets the "status" field.
 func (_c *AccountCreate) SetStatus(v string) *AccountCreate {
 	_c.mutation.SetStatus(v)
@@ -489,6 +503,10 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultRateMultiplier
 		_c.mutation.SetRateMultiplier(v)
 	}
+	if _, ok := _c.mutation.PaygDiscountMultiplier(); !ok {
+		v := account.DefaultPaygDiscountMultiplier
+		_c.mutation.SetPaygDiscountMultiplier(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := account.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -550,6 +568,9 @@ func (_c *AccountCreate) check() error {
 	}
 	if _, ok := _c.mutation.RateMultiplier(); !ok {
 		return &ValidationError{Name: "rate_multiplier", err: errors.New(`ent: missing required field "Account.rate_multiplier"`)}
+	}
+	if _, ok := _c.mutation.PaygDiscountMultiplier(); !ok {
+		return &ValidationError{Name: "payg_discount_multiplier", err: errors.New(`ent: missing required field "Account.payg_discount_multiplier"`)}
 	}
 	if _, ok := _c.mutation.Status(); !ok {
 		return &ValidationError{Name: "status", err: errors.New(`ent: missing required field "Account.status"`)}
@@ -648,6 +669,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RateMultiplier(); ok {
 		_spec.SetField(account.FieldRateMultiplier, field.TypeFloat64, value)
 		_node.RateMultiplier = value
+	}
+	if value, ok := _c.mutation.PaygDiscountMultiplier(); ok {
+		_spec.SetField(account.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
+		_node.PaygDiscountMultiplier = value
 	}
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(account.FieldStatus, field.TypeString, value)
@@ -1011,6 +1036,24 @@ func (u *AccountUpsert) UpdateRateMultiplier() *AccountUpsert {
 // AddRateMultiplier adds v to the "rate_multiplier" field.
 func (u *AccountUpsert) AddRateMultiplier(v float64) *AccountUpsert {
 	u.Add(account.FieldRateMultiplier, v)
+	return u
+}
+
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (u *AccountUpsert) SetPaygDiscountMultiplier(v float64) *AccountUpsert {
+	u.Set(account.FieldPaygDiscountMultiplier, v)
+	return u
+}
+
+// UpdatePaygDiscountMultiplier sets the "payg_discount_multiplier" field to the value that was provided on create.
+func (u *AccountUpsert) UpdatePaygDiscountMultiplier() *AccountUpsert {
+	u.SetExcluded(account.FieldPaygDiscountMultiplier)
+	return u
+}
+
+// AddPaygDiscountMultiplier adds v to the "payg_discount_multiplier" field.
+func (u *AccountUpsert) AddPaygDiscountMultiplier(v float64) *AccountUpsert {
+	u.Add(account.FieldPaygDiscountMultiplier, v)
 	return u
 }
 
@@ -1528,6 +1571,27 @@ func (u *AccountUpsertOne) AddRateMultiplier(v float64) *AccountUpsertOne {
 func (u *AccountUpsertOne) UpdateRateMultiplier() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateRateMultiplier()
+	})
+}
+
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (u *AccountUpsertOne) SetPaygDiscountMultiplier(v float64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetPaygDiscountMultiplier(v)
+	})
+}
+
+// AddPaygDiscountMultiplier adds v to the "payg_discount_multiplier" field.
+func (u *AccountUpsertOne) AddPaygDiscountMultiplier(v float64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddPaygDiscountMultiplier(v)
+	})
+}
+
+// UpdatePaygDiscountMultiplier sets the "payg_discount_multiplier" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdatePaygDiscountMultiplier() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdatePaygDiscountMultiplier()
 	})
 }
 
@@ -2250,6 +2314,27 @@ func (u *AccountUpsertBulk) AddRateMultiplier(v float64) *AccountUpsertBulk {
 func (u *AccountUpsertBulk) UpdateRateMultiplier() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateRateMultiplier()
+	})
+}
+
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (u *AccountUpsertBulk) SetPaygDiscountMultiplier(v float64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetPaygDiscountMultiplier(v)
+	})
+}
+
+// AddPaygDiscountMultiplier adds v to the "payg_discount_multiplier" field.
+func (u *AccountUpsertBulk) AddPaygDiscountMultiplier(v float64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddPaygDiscountMultiplier(v)
+	})
+}
+
+// UpdatePaygDiscountMultiplier sets the "payg_discount_multiplier" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdatePaygDiscountMultiplier() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdatePaygDiscountMultiplier()
 	})
 }
 

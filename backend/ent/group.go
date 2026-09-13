@@ -78,6 +78,8 @@ type Group struct {
 	ModelRouting map[string][]int64 `json:"model_routing,omitempty"`
 	// 分组禁止使用的模型模式，支持 * 通配符
 	BlockedModelPatterns []string `json:"blocked_model_patterns,omitempty"`
+	// 按实际计费模型设置的用户价格倍率
+	ModelRateMultipliers map[string]float64 `json:"model_rate_multipliers,omitempty"`
 	// 是否启用模型路由配置
 	ModelRoutingEnabled bool `json:"model_routing_enabled,omitempty"`
 	// 是否注入 MCP XML 调用协议提示词（仅 antigravity 平台）
@@ -214,7 +216,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case group.FieldModelRouting, group.FieldBlockedModelPatterns, group.FieldSupportedModelScopes, group.FieldInputModerationCategories:
+		case group.FieldModelRouting, group.FieldBlockedModelPatterns, group.FieldModelRateMultipliers, group.FieldSupportedModelScopes, group.FieldInputModerationCategories:
 			values[i] = new([]byte)
 		case group.FieldIsExclusive, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldInputModerationEnabled, group.FieldInputModerationAutoDisableUser:
 			values[i] = new(sql.NullBool)
@@ -444,6 +446,14 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value != nil && len(*value) > 0 {
 				if err := json.Unmarshal(*value, &_m.BlockedModelPatterns); err != nil {
 					return fmt.Errorf("unmarshal field blocked_model_patterns: %w", err)
+				}
+			}
+		case group.FieldModelRateMultipliers:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field model_rate_multipliers", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.ModelRateMultipliers); err != nil {
+					return fmt.Errorf("unmarshal field model_rate_multipliers: %w", err)
 				}
 			}
 		case group.FieldModelRoutingEnabled:
@@ -735,6 +745,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("blocked_model_patterns=")
 	builder.WriteString(fmt.Sprintf("%v", _m.BlockedModelPatterns))
+	builder.WriteString(", ")
+	builder.WriteString("model_rate_multipliers=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ModelRateMultipliers))
 	builder.WriteString(", ")
 	builder.WriteString("model_routing_enabled=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ModelRoutingEnabled))

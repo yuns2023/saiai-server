@@ -223,22 +223,26 @@ func init() {
 	accountDescRateMultiplier := accountFields[10].Descriptor()
 	// account.DefaultRateMultiplier holds the default value on creation for the rate_multiplier field.
 	account.DefaultRateMultiplier = accountDescRateMultiplier.Default.(float64)
+	// accountDescPaygDiscountMultiplier is the schema descriptor for payg_discount_multiplier field.
+	accountDescPaygDiscountMultiplier := accountFields[11].Descriptor()
+	// account.DefaultPaygDiscountMultiplier holds the default value on creation for the payg_discount_multiplier field.
+	account.DefaultPaygDiscountMultiplier = accountDescPaygDiscountMultiplier.Default.(float64)
 	// accountDescStatus is the schema descriptor for status field.
-	accountDescStatus := accountFields[11].Descriptor()
+	accountDescStatus := accountFields[12].Descriptor()
 	// account.DefaultStatus holds the default value on creation for the status field.
 	account.DefaultStatus = accountDescStatus.Default.(string)
 	// account.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	account.StatusValidator = accountDescStatus.Validators[0].(func(string) error)
 	// accountDescAutoPauseOnExpired is the schema descriptor for auto_pause_on_expired field.
-	accountDescAutoPauseOnExpired := accountFields[15].Descriptor()
+	accountDescAutoPauseOnExpired := accountFields[16].Descriptor()
 	// account.DefaultAutoPauseOnExpired holds the default value on creation for the auto_pause_on_expired field.
 	account.DefaultAutoPauseOnExpired = accountDescAutoPauseOnExpired.Default.(bool)
 	// accountDescSchedulable is the schema descriptor for schedulable field.
-	accountDescSchedulable := accountFields[16].Descriptor()
+	accountDescSchedulable := accountFields[17].Descriptor()
 	// account.DefaultSchedulable holds the default value on creation for the schedulable field.
 	account.DefaultSchedulable = accountDescSchedulable.Default.(bool)
 	// accountDescSessionWindowStatus is the schema descriptor for session_window_status field.
-	accountDescSessionWindowStatus := accountFields[24].Descriptor()
+	accountDescSessionWindowStatus := accountFields[25].Descriptor()
 	// account.SessionWindowStatusValidator is a validator for the "session_window_status" field. It is called by the builders before save.
 	account.SessionWindowStatusValidator = accountDescSessionWindowStatus.Validators[0].(func(string) error)
 	accountgroupFields := schema.AccountGroup{}.Fields()
@@ -453,70 +457,74 @@ func init() {
 	groupDescBlockedModelPatterns := groupFields[26].Descriptor()
 	// group.DefaultBlockedModelPatterns holds the default value on creation for the blocked_model_patterns field.
 	group.DefaultBlockedModelPatterns = groupDescBlockedModelPatterns.Default.([]string)
+	// groupDescModelRateMultipliers is the schema descriptor for model_rate_multipliers field.
+	groupDescModelRateMultipliers := groupFields[27].Descriptor()
+	// group.DefaultModelRateMultipliers holds the default value on creation for the model_rate_multipliers field.
+	group.DefaultModelRateMultipliers = groupDescModelRateMultipliers.Default.(map[string]float64)
 	// groupDescModelRoutingEnabled is the schema descriptor for model_routing_enabled field.
-	groupDescModelRoutingEnabled := groupFields[27].Descriptor()
+	groupDescModelRoutingEnabled := groupFields[28].Descriptor()
 	// group.DefaultModelRoutingEnabled holds the default value on creation for the model_routing_enabled field.
 	group.DefaultModelRoutingEnabled = groupDescModelRoutingEnabled.Default.(bool)
 	// groupDescMcpXMLInject is the schema descriptor for mcp_xml_inject field.
-	groupDescMcpXMLInject := groupFields[28].Descriptor()
+	groupDescMcpXMLInject := groupFields[29].Descriptor()
 	// group.DefaultMcpXMLInject holds the default value on creation for the mcp_xml_inject field.
 	group.DefaultMcpXMLInject = groupDescMcpXMLInject.Default.(bool)
 	// groupDescSupportedModelScopes is the schema descriptor for supported_model_scopes field.
-	groupDescSupportedModelScopes := groupFields[29].Descriptor()
+	groupDescSupportedModelScopes := groupFields[30].Descriptor()
 	// group.DefaultSupportedModelScopes holds the default value on creation for the supported_model_scopes field.
 	group.DefaultSupportedModelScopes = groupDescSupportedModelScopes.Default.([]string)
 	// groupDescSortOrder is the schema descriptor for sort_order field.
-	groupDescSortOrder := groupFields[30].Descriptor()
+	groupDescSortOrder := groupFields[31].Descriptor()
 	// group.DefaultSortOrder holds the default value on creation for the sort_order field.
 	group.DefaultSortOrder = groupDescSortOrder.Default.(int)
 	// groupDescInputModerationEnabled is the schema descriptor for input_moderation_enabled field.
-	groupDescInputModerationEnabled := groupFields[31].Descriptor()
+	groupDescInputModerationEnabled := groupFields[32].Descriptor()
 	// group.DefaultInputModerationEnabled holds the default value on creation for the input_moderation_enabled field.
 	group.DefaultInputModerationEnabled = groupDescInputModerationEnabled.Default.(bool)
 	// groupDescInputModerationAutoDisableUser is the schema descriptor for input_moderation_auto_disable_user field.
-	groupDescInputModerationAutoDisableUser := groupFields[32].Descriptor()
+	groupDescInputModerationAutoDisableUser := groupFields[33].Descriptor()
 	// group.DefaultInputModerationAutoDisableUser holds the default value on creation for the input_moderation_auto_disable_user field.
 	group.DefaultInputModerationAutoDisableUser = groupDescInputModerationAutoDisableUser.Default.(bool)
 	// groupDescInputModerationCategories is the schema descriptor for input_moderation_categories field.
-	groupDescInputModerationCategories := groupFields[33].Descriptor()
+	groupDescInputModerationCategories := groupFields[34].Descriptor()
 	// group.DefaultInputModerationCategories holds the default value on creation for the input_moderation_categories field.
 	group.DefaultInputModerationCategories = groupDescInputModerationCategories.Default.([]string)
 	// groupDescInputModerationActionMode is the schema descriptor for input_moderation_action_mode field.
-	groupDescInputModerationActionMode := groupFields[34].Descriptor()
+	groupDescInputModerationActionMode := groupFields[35].Descriptor()
 	// group.DefaultInputModerationActionMode holds the default value on creation for the input_moderation_action_mode field.
 	group.DefaultInputModerationActionMode = groupDescInputModerationActionMode.Default.(string)
 	// group.InputModerationActionModeValidator is a validator for the "input_moderation_action_mode" field. It is called by the builders before save.
 	group.InputModerationActionModeValidator = groupDescInputModerationActionMode.Validators[0].(func(string) error)
 	// groupDescInputModerationCooldownMinutes is the schema descriptor for input_moderation_cooldown_minutes field.
-	groupDescInputModerationCooldownMinutes := groupFields[35].Descriptor()
+	groupDescInputModerationCooldownMinutes := groupFields[36].Descriptor()
 	// group.DefaultInputModerationCooldownMinutes holds the default value on creation for the input_moderation_cooldown_minutes field.
 	group.DefaultInputModerationCooldownMinutes = groupDescInputModerationCooldownMinutes.Default.(int)
 	// groupDescInputModerationDisableAfterHits is the schema descriptor for input_moderation_disable_after_hits field.
-	groupDescInputModerationDisableAfterHits := groupFields[36].Descriptor()
+	groupDescInputModerationDisableAfterHits := groupFields[37].Descriptor()
 	// group.DefaultInputModerationDisableAfterHits holds the default value on creation for the input_moderation_disable_after_hits field.
 	group.DefaultInputModerationDisableAfterHits = groupDescInputModerationDisableAfterHits.Default.(int)
 	// groupDescInputModerationStrikeWindowHours is the schema descriptor for input_moderation_strike_window_hours field.
-	groupDescInputModerationStrikeWindowHours := groupFields[37].Descriptor()
+	groupDescInputModerationStrikeWindowHours := groupFields[38].Descriptor()
 	// group.DefaultInputModerationStrikeWindowHours holds the default value on creation for the input_moderation_strike_window_hours field.
 	group.DefaultInputModerationStrikeWindowHours = groupDescInputModerationStrikeWindowHours.Default.(int)
 	// groupDescInputModerationDedupeMinutes is the schema descriptor for input_moderation_dedupe_minutes field.
-	groupDescInputModerationDedupeMinutes := groupFields[38].Descriptor()
+	groupDescInputModerationDedupeMinutes := groupFields[39].Descriptor()
 	// group.DefaultInputModerationDedupeMinutes holds the default value on creation for the input_moderation_dedupe_minutes field.
 	group.DefaultInputModerationDedupeMinutes = groupDescInputModerationDedupeMinutes.Default.(int)
 	// groupDescCodexClientPolicy is the schema descriptor for codex_client_policy field.
-	groupDescCodexClientPolicy := groupFields[39].Descriptor()
+	groupDescCodexClientPolicy := groupFields[40].Descriptor()
 	// group.DefaultCodexClientPolicy holds the default value on creation for the codex_client_policy field.
 	group.DefaultCodexClientPolicy = groupDescCodexClientPolicy.Default.(string)
 	// group.CodexClientPolicyValidator is a validator for the "codex_client_policy" field. It is called by the builders before save.
 	group.CodexClientPolicyValidator = groupDescCodexClientPolicy.Validators[0].(func(string) error)
 	// groupDescClaudeDeviceLimitMode is the schema descriptor for claude_device_limit_mode field.
-	groupDescClaudeDeviceLimitMode := groupFields[40].Descriptor()
+	groupDescClaudeDeviceLimitMode := groupFields[41].Descriptor()
 	// group.DefaultClaudeDeviceLimitMode holds the default value on creation for the claude_device_limit_mode field.
 	group.DefaultClaudeDeviceLimitMode = groupDescClaudeDeviceLimitMode.Default.(string)
 	// group.ClaudeDeviceLimitModeValidator is a validator for the "claude_device_limit_mode" field. It is called by the builders before save.
 	group.ClaudeDeviceLimitModeValidator = groupDescClaudeDeviceLimitMode.Validators[0].(func(string) error)
 	// groupDescClaudeDeviceBaseLimit is the schema descriptor for claude_device_base_limit field.
-	groupDescClaudeDeviceBaseLimit := groupFields[41].Descriptor()
+	groupDescClaudeDeviceBaseLimit := groupFields[42].Descriptor()
 	// group.DefaultClaudeDeviceBaseLimit holds the default value on creation for the claude_device_base_limit field.
 	group.DefaultClaudeDeviceBaseLimit = groupDescClaudeDeviceBaseLimit.Default.(int)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
@@ -1217,40 +1225,48 @@ func init() {
 	usagelogDescRateMultiplier := usagelogFields[23].Descriptor()
 	// usagelog.DefaultRateMultiplier holds the default value on creation for the rate_multiplier field.
 	usagelog.DefaultRateMultiplier = usagelogDescRateMultiplier.Default.(float64)
+	// usagelogDescModelRateMultiplier is the schema descriptor for model_rate_multiplier field.
+	usagelogDescModelRateMultiplier := usagelogFields[24].Descriptor()
+	// usagelog.DefaultModelRateMultiplier holds the default value on creation for the model_rate_multiplier field.
+	usagelog.DefaultModelRateMultiplier = usagelogDescModelRateMultiplier.Default.(float64)
+	// usagelogDescAccountPaygDiscountMultiplier is the schema descriptor for account_payg_discount_multiplier field.
+	usagelogDescAccountPaygDiscountMultiplier := usagelogFields[25].Descriptor()
+	// usagelog.DefaultAccountPaygDiscountMultiplier holds the default value on creation for the account_payg_discount_multiplier field.
+	usagelog.DefaultAccountPaygDiscountMultiplier = usagelogDescAccountPaygDiscountMultiplier.Default.(float64)
 	// usagelogDescBillingType is the schema descriptor for billing_type field.
-	usagelogDescBillingType := usagelogFields[25].Descriptor()
+	usagelogDescBillingType := usagelogFields[27].Descriptor()
 	// usagelog.DefaultBillingType holds the default value on creation for the billing_type field.
 	usagelog.DefaultBillingType = usagelogDescBillingType.Default.(int8)
 	// usagelogDescStream is the schema descriptor for stream field.
-	usagelogDescStream := usagelogFields[26].Descriptor()
+	usagelogDescStream := usagelogFields[28].Descriptor()
 	// usagelog.DefaultStream holds the default value on creation for the stream field.
 	usagelog.DefaultStream = usagelogDescStream.Default.(bool)
 	// usagelogDescUserAgent is the schema descriptor for user_agent field.
-	usagelogDescUserAgent := usagelogFields[29].Descriptor()
+	usagelogDescUserAgent := usagelogFields[31].Descriptor()
 	// usagelog.UserAgentValidator is a validator for the "user_agent" field. It is called by the builders before save.
 	usagelog.UserAgentValidator = usagelogDescUserAgent.Validators[0].(func(string) error)
 	// usagelogDescIPAddress is the schema descriptor for ip_address field.
-	usagelogDescIPAddress := usagelogFields[30].Descriptor()
+	usagelogDescIPAddress := usagelogFields[32].Descriptor()
 	// usagelog.IPAddressValidator is a validator for the "ip_address" field. It is called by the builders before save.
 	usagelog.IPAddressValidator = usagelogDescIPAddress.Validators[0].(func(string) error)
 	// usagelogDescImageCount is the schema descriptor for image_count field.
-	usagelogDescImageCount := usagelogFields[31].Descriptor()
+	usagelogDescImageCount := usagelogFields[33].Descriptor()
 	// usagelog.DefaultImageCount holds the default value on creation for the image_count field.
 	usagelog.DefaultImageCount = usagelogDescImageCount.Default.(int)
 	// usagelogDescImageSize is the schema descriptor for image_size field.
-	usagelogDescImageSize := usagelogFields[32].Descriptor()
+	usagelogDescImageSize := usagelogFields[34].Descriptor()
 	// usagelog.ImageSizeValidator is a validator for the "image_size" field. It is called by the builders before save.
 	usagelog.ImageSizeValidator = usagelogDescImageSize.Validators[0].(func(string) error)
 	// usagelogDescMediaType is the schema descriptor for media_type field.
-	usagelogDescMediaType := usagelogFields[33].Descriptor()
+	usagelogDescMediaType := usagelogFields[35].Descriptor()
 	// usagelog.MediaTypeValidator is a validator for the "media_type" field. It is called by the builders before save.
 	usagelog.MediaTypeValidator = usagelogDescMediaType.Validators[0].(func(string) error)
 	// usagelogDescCacheTTLOverridden is the schema descriptor for cache_ttl_overridden field.
-	usagelogDescCacheTTLOverridden := usagelogFields[34].Descriptor()
+	usagelogDescCacheTTLOverridden := usagelogFields[36].Descriptor()
 	// usagelog.DefaultCacheTTLOverridden holds the default value on creation for the cache_ttl_overridden field.
 	usagelog.DefaultCacheTTLOverridden = usagelogDescCacheTTLOverridden.Default.(bool)
 	// usagelogDescCreatedAt is the schema descriptor for created_at field.
-	usagelogDescCreatedAt := usagelogFields[35].Descriptor()
+	usagelogDescCreatedAt := usagelogFields[37].Descriptor()
 	// usagelog.DefaultCreatedAt holds the default value on creation for the created_at field.
 	usagelog.DefaultCreatedAt = usagelogDescCreatedAt.Default.(func() time.Time)
 	userMixin := schema.User{}.Mixin()

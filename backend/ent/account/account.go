@@ -43,6 +43,8 @@ const (
 	FieldPriority = "priority"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
 	FieldRateMultiplier = "rate_multiplier"
+	// FieldPaygDiscountMultiplier holds the string denoting the payg_discount_multiplier field in the database.
+	FieldPaygDiscountMultiplier = "payg_discount_multiplier"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
 	// FieldErrorMessage holds the string denoting the error_message field in the database.
@@ -126,6 +128,7 @@ var Columns = []string{
 	FieldLoadFactor,
 	FieldPriority,
 	FieldRateMultiplier,
+	FieldPaygDiscountMultiplier,
 	FieldStatus,
 	FieldErrorMessage,
 	FieldLastUsedAt,
@@ -188,6 +191,8 @@ var (
 	DefaultPriority int
 	// DefaultRateMultiplier holds the default value on creation for the "rate_multiplier" field.
 	DefaultRateMultiplier float64
+	// DefaultPaygDiscountMultiplier holds the default value on creation for the "payg_discount_multiplier" field.
+	DefaultPaygDiscountMultiplier float64
 	// DefaultStatus holds the default value on creation for the "status" field.
 	DefaultStatus string
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
@@ -266,6 +271,11 @@ func ByPriority(opts ...sql.OrderTermOption) OrderOption {
 // ByRateMultiplier orders the results by the rate_multiplier field.
 func ByRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRateMultiplier, opts...).ToFunc()
+}
+
+// ByPaygDiscountMultiplier orders the results by the payg_discount_multiplier field.
+func ByPaygDiscountMultiplier(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPaygDiscountMultiplier, opts...).ToFunc()
 }
 
 // ByStatus orders the results by the status field.

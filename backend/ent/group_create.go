@@ -424,6 +424,12 @@ func (_c *GroupCreate) SetBlockedModelPatterns(v []string) *GroupCreate {
 	return _c
 }
 
+// SetModelRateMultipliers sets the "model_rate_multipliers" field.
+func (_c *GroupCreate) SetModelRateMultipliers(v map[string]float64) *GroupCreate {
+	_c.mutation.SetModelRateMultipliers(v)
+	return _c
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_c *GroupCreate) SetModelRoutingEnabled(v bool) *GroupCreate {
 	_c.mutation.SetModelRoutingEnabled(v)
@@ -803,6 +809,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultBlockedModelPatterns
 		_c.mutation.SetBlockedModelPatterns(v)
 	}
+	if _, ok := _c.mutation.ModelRateMultipliers(); !ok {
+		v := group.DefaultModelRateMultipliers
+		_c.mutation.SetModelRateMultipliers(v)
+	}
 	if _, ok := _c.mutation.ModelRoutingEnabled(); !ok {
 		v := group.DefaultModelRoutingEnabled
 		_c.mutation.SetModelRoutingEnabled(v)
@@ -929,6 +939,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.BlockedModelPatterns(); !ok {
 		return &ValidationError{Name: "blocked_model_patterns", err: errors.New(`ent: missing required field "Group.blocked_model_patterns"`)}
+	}
+	if _, ok := _c.mutation.ModelRateMultipliers(); !ok {
+		return &ValidationError{Name: "model_rate_multipliers", err: errors.New(`ent: missing required field "Group.model_rate_multipliers"`)}
 	}
 	if _, ok := _c.mutation.ModelRoutingEnabled(); !ok {
 		return &ValidationError{Name: "model_routing_enabled", err: errors.New(`ent: missing required field "Group.model_routing_enabled"`)}
@@ -1136,6 +1149,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.BlockedModelPatterns(); ok {
 		_spec.SetField(group.FieldBlockedModelPatterns, field.TypeJSON, value)
 		_node.BlockedModelPatterns = value
+	}
+	if value, ok := _c.mutation.ModelRateMultipliers(); ok {
+		_spec.SetField(group.FieldModelRateMultipliers, field.TypeJSON, value)
+		_node.ModelRateMultipliers = value
 	}
 	if value, ok := _c.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)
@@ -1890,6 +1907,18 @@ func (u *GroupUpsert) SetBlockedModelPatterns(v []string) *GroupUpsert {
 // UpdateBlockedModelPatterns sets the "blocked_model_patterns" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateBlockedModelPatterns() *GroupUpsert {
 	u.SetExcluded(group.FieldBlockedModelPatterns)
+	return u
+}
+
+// SetModelRateMultipliers sets the "model_rate_multipliers" field.
+func (u *GroupUpsert) SetModelRateMultipliers(v map[string]float64) *GroupUpsert {
+	u.Set(group.FieldModelRateMultipliers, v)
+	return u
+}
+
+// UpdateModelRateMultipliers sets the "model_rate_multipliers" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateModelRateMultipliers() *GroupUpsert {
+	u.SetExcluded(group.FieldModelRateMultipliers)
 	return u
 }
 
@@ -2781,6 +2810,20 @@ func (u *GroupUpsertOne) SetBlockedModelPatterns(v []string) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateBlockedModelPatterns() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateBlockedModelPatterns()
+	})
+}
+
+// SetModelRateMultipliers sets the "model_rate_multipliers" field.
+func (u *GroupUpsertOne) SetModelRateMultipliers(v map[string]float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetModelRateMultipliers(v)
+	})
+}
+
+// UpdateModelRateMultipliers sets the "model_rate_multipliers" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateModelRateMultipliers() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateModelRateMultipliers()
 	})
 }
 
@@ -3874,6 +3917,20 @@ func (u *GroupUpsertBulk) SetBlockedModelPatterns(v []string) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateBlockedModelPatterns() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateBlockedModelPatterns()
+	})
+}
+
+// SetModelRateMultipliers sets the "model_rate_multipliers" field.
+func (u *GroupUpsertBulk) SetModelRateMultipliers(v map[string]float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetModelRateMultipliers(v)
+	})
+}
+
+// UpdateModelRateMultipliers sets the "model_rate_multipliers" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateModelRateMultipliers() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateModelRateMultipliers()
 	})
 }
 

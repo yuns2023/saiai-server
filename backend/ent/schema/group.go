@@ -142,6 +142,10 @@ func (Group) Fields() []ent.Field {
 			Default([]string{}).
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
 			Comment("分组禁止使用的模型模式，支持 * 通配符"),
+		field.JSON("model_rate_multipliers", map[string]float64{}).
+			Default(map[string]float64{}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("按实际计费模型设置的用户价格倍率"),
 
 		// 模型路由开关 (added by migration 041)
 		field.Bool("model_routing_enabled").

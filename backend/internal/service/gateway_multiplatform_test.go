@@ -2697,3 +2697,15 @@ func TestGatewayService_ResolveGatewayGroup_DetectsFallbackCycle(t *testing.T) {
 	require.Nil(t, gotID)
 	require.Contains(t, err.Error(), "fallback group cycle")
 }
+
+func TestGatewayService_ResolveGatewayGroup_RejectsInactiveFallback(t *testing.T) {
+	groupID, fallbackID := int64(10), int64(11)
+	svc := &GatewayService{groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+		groupID:    {ID: groupID, Status: StatusActive, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID},
+		fallbackID: {ID: fallbackID, Status: "inactive"},
+	}}}
+	group, resolvedID, err := svc.resolveGatewayGroup(context.Background(), &groupID)
+	require.ErrorIs(t, err, ErrGroupNotActive)
+	require.Nil(t, group)
+	require.Nil(t, resolvedID)
+}

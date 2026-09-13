@@ -34,6 +34,8 @@ const messages: Record<string, string> = {
   'usage.serviceTierFlex': 'Flex',
   'usage.serviceTierStandard': 'Standard',
   'usage.rate': 'Rate',
+  'usage.groupModelMultiplier': 'Group model rate',
+  'usage.paygAccountDiscount': 'Payg discount',
   'usage.original': 'Original',
   'usage.billed': 'Billed',
   'usage.allApiKeys': 'All API Keys',
@@ -122,6 +124,8 @@ describe('user UsageView tooltip', () => {
           actual_cost: 0.092883,
           total_cost: 0.092883,
           rate_multiplier: 1,
+          model_rate_multiplier: 0.8,
+          account_payg_discount_multiplier: 0.75,
           service_tier: 'priority',
           input_cost: 0.020285,
           output_cost: 0.00303,
@@ -179,6 +183,8 @@ describe('user UsageView tooltip', () => {
       actual_cost: 0.092883,
       total_cost: 0.092883,
       rate_multiplier: 1,
+      model_rate_multiplier: 0.8,
+      account_payg_discount_multiplier: 0.75,
       service_tier: 'priority',
       input_cost: 0.020285,
       output_cost: 0.00303,
@@ -198,6 +204,10 @@ describe('user UsageView tooltip', () => {
     expect(text).toContain('Fast')
     expect(text).toContain('Rate')
     expect(text).toContain('1.00x')
+    expect(text).toContain('Group model rate')
+    expect(text).toContain('Payg discount')
+    expect(text).toContain('0.8000x')
+    expect(text).toContain('0.7500x')
     expect(text).toContain('Billed')
     expect(text).toContain('$0.092883')
     expect(text).toContain('$5.0000 / 1M tokens')

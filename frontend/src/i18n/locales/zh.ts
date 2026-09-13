@@ -728,6 +728,8 @@ export default {
     userBilled: '用户扣费',
     accountBilled: '账号计费',
     accountMultiplier: '账号倍率',
+    groupModelMultiplier: '分组模型倍率',
+    paygAccountDiscount: '账号按量折扣',
     avgDuration: '平均耗时',
     inSelectedRange: '所选范围内',
     perRequest: '每次请求',
@@ -1819,6 +1821,12 @@ export default {
         placeholder: '每行一个模式，例如 claude-fable-5-1 或 gpt-4o*',
         hint: '命中任意模式的请求会在账号选择前被拒绝。支持任意位置的 * 通配符；留空表示允许所有模型。'
       },
+      modelRates: {
+        title: '模型专属倍率',
+        placeholder: '每行一个：claude-fable-5-1=0.8',
+        hint: '按实际计费模型精确匹配；留空使用分组通用倍率，0 表示该模型免费。',
+        invalid: '模型倍率格式无效：请使用 模型ID=0到100之间的倍率，最多四位小数，每行一个且不能重复。'
+      },
       copyAccounts: {
         title: '从分组复制账号',
         tooltip: '选择一个或多个相同平台的分组，创建后会自动将这些分组的所有账号绑定到新分组（去重）。',
@@ -2077,6 +2085,7 @@ export default {
         notes: '备注',
         priority: '优先级',
         billingRateMultiplier: '账号倍率',
+        paygDiscountMultiplier: '按量折扣',
         weight: '权重',
         status: '状态',
         schedulable: '调度',
@@ -2542,6 +2551,8 @@ export default {
       priorityHint: '优先级越小的账号优先使用',
       billingRateMultiplier: '账号计费倍率',
       billingRateMultiplierHint: '0 表示不计费，仅影响账号计费',
+      paygDiscountMultiplier: '按量用户折扣倍率',
+      paygDiscountMultiplierHint: '0 到 1，最多四位小数；1 为不打折，0.8 为八折，0 为免费。仅影响按量用户扣费。',
       expiresAt: '过期时间',
       expiresAtHint: '留空表示不过期',
       higherPriorityFirst: '数值越小优先级越高',

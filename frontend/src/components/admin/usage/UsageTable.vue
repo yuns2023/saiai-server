@@ -157,6 +157,8 @@
           <div class="text-sm">
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
+              <span v-if="row.model_rate_multiplier != null && row.model_rate_multiplier !== 1" class="rounded bg-indigo-100 px-1 text-[10px] text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300" :title="t('usage.groupModelMultiplier')">{{ row.model_rate_multiplier }}x</span>
+              <span v-if="row.account_payg_discount_multiplier != null && row.account_payg_discount_multiplier !== 1" class="rounded bg-emerald-100 px-1 text-[10px] text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" :title="t('usage.paygAccountDiscount')">{{ row.account_payg_discount_multiplier }}x</span>
               <span
                 class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold leading-tight ring-1 ring-inset"
                 :class="getServiceTierBadgeClass(row.service_tier)"
@@ -348,6 +350,14 @@
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.rate') }}</span>
             <span class="font-semibold text-blue-400">{{ (tooltipData?.rate_multiplier || 1).toFixed(2) }}x</span>
+          </div>
+          <div class="flex items-center justify-between gap-6">
+            <span class="text-gray-400">{{ t('usage.groupModelMultiplier') }}</span>
+            <span class="font-semibold text-blue-400">{{ (tooltipData?.model_rate_multiplier ?? 1).toFixed(4) }}x</span>
+          </div>
+          <div class="flex items-center justify-between gap-6">
+            <span class="text-gray-400">{{ t('usage.paygAccountDiscount') }}</span>
+            <span class="font-semibold text-blue-400">{{ (tooltipData?.account_payg_discount_multiplier ?? 1).toFixed(4) }}x</span>
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.accountMultiplier') }}</span>

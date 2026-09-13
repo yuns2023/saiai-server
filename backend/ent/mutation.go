@@ -2254,52 +2254,54 @@ func (m *APIKeyMutation) ResetEdge(name string) error {
 // AccountMutation represents an operation that mutates the Account nodes in the graph.
 type AccountMutation struct {
 	config
-	op                        Op
-	typ                       string
-	id                        *int64
-	created_at                *time.Time
-	updated_at                *time.Time
-	deleted_at                *time.Time
-	name                      *string
-	notes                     *string
-	platform                  *string
-	_type                     *string
-	credentials               *map[string]interface{}
-	extra                     *map[string]interface{}
-	concurrency               *int
-	addconcurrency            *int
-	load_factor               *int
-	addload_factor            *int
-	priority                  *int
-	addpriority               *int
-	rate_multiplier           *float64
-	addrate_multiplier        *float64
-	status                    *string
-	error_message             *string
-	last_used_at              *time.Time
-	expires_at                *time.Time
-	auto_pause_on_expired     *bool
-	schedulable               *bool
-	rate_limited_at           *time.Time
-	rate_limit_reset_at       *time.Time
-	overload_until            *time.Time
-	temp_unschedulable_until  *time.Time
-	temp_unschedulable_reason *string
-	session_window_start      *time.Time
-	session_window_end        *time.Time
-	session_window_status     *string
-	clearedFields             map[string]struct{}
-	groups                    map[int64]struct{}
-	removedgroups             map[int64]struct{}
-	clearedgroups             bool
-	proxy                     *int64
-	clearedproxy              bool
-	usage_logs                map[int64]struct{}
-	removedusage_logs         map[int64]struct{}
-	clearedusage_logs         bool
-	done                      bool
-	oldValue                  func(context.Context) (*Account, error)
-	predicates                []predicate.Account
+	op                          Op
+	typ                         string
+	id                          *int64
+	created_at                  *time.Time
+	updated_at                  *time.Time
+	deleted_at                  *time.Time
+	name                        *string
+	notes                       *string
+	platform                    *string
+	_type                       *string
+	credentials                 *map[string]interface{}
+	extra                       *map[string]interface{}
+	concurrency                 *int
+	addconcurrency              *int
+	load_factor                 *int
+	addload_factor              *int
+	priority                    *int
+	addpriority                 *int
+	rate_multiplier             *float64
+	addrate_multiplier          *float64
+	payg_discount_multiplier    *float64
+	addpayg_discount_multiplier *float64
+	status                      *string
+	error_message               *string
+	last_used_at                *time.Time
+	expires_at                  *time.Time
+	auto_pause_on_expired       *bool
+	schedulable                 *bool
+	rate_limited_at             *time.Time
+	rate_limit_reset_at         *time.Time
+	overload_until              *time.Time
+	temp_unschedulable_until    *time.Time
+	temp_unschedulable_reason   *string
+	session_window_start        *time.Time
+	session_window_end          *time.Time
+	session_window_status       *string
+	clearedFields               map[string]struct{}
+	groups                      map[int64]struct{}
+	removedgroups               map[int64]struct{}
+	clearedgroups               bool
+	proxy                       *int64
+	clearedproxy                bool
+	usage_logs                  map[int64]struct{}
+	removedusage_logs           map[int64]struct{}
+	clearedusage_logs           bool
+	done                        bool
+	oldValue                    func(context.Context) (*Account, error)
+	predicates                  []predicate.Account
 }
 
 var _ ent.Mutation = (*AccountMutation)(nil)
@@ -3035,6 +3037,62 @@ func (m *AccountMutation) AddedRateMultiplier() (r float64, exists bool) {
 func (m *AccountMutation) ResetRateMultiplier() {
 	m.rate_multiplier = nil
 	m.addrate_multiplier = nil
+}
+
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (m *AccountMutation) SetPaygDiscountMultiplier(f float64) {
+	m.payg_discount_multiplier = &f
+	m.addpayg_discount_multiplier = nil
+}
+
+// PaygDiscountMultiplier returns the value of the "payg_discount_multiplier" field in the mutation.
+func (m *AccountMutation) PaygDiscountMultiplier() (r float64, exists bool) {
+	v := m.payg_discount_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPaygDiscountMultiplier returns the old "payg_discount_multiplier" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldPaygDiscountMultiplier(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPaygDiscountMultiplier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPaygDiscountMultiplier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPaygDiscountMultiplier: %w", err)
+	}
+	return oldValue.PaygDiscountMultiplier, nil
+}
+
+// AddPaygDiscountMultiplier adds f to the "payg_discount_multiplier" field.
+func (m *AccountMutation) AddPaygDiscountMultiplier(f float64) {
+	if m.addpayg_discount_multiplier != nil {
+		*m.addpayg_discount_multiplier += f
+	} else {
+		m.addpayg_discount_multiplier = &f
+	}
+}
+
+// AddedPaygDiscountMultiplier returns the value that was added to the "payg_discount_multiplier" field in this mutation.
+func (m *AccountMutation) AddedPaygDiscountMultiplier() (r float64, exists bool) {
+	v := m.addpayg_discount_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetPaygDiscountMultiplier resets all changes to the "payg_discount_multiplier" field.
+func (m *AccountMutation) ResetPaygDiscountMultiplier() {
+	m.payg_discount_multiplier = nil
+	m.addpayg_discount_multiplier = nil
 }
 
 // SetStatus sets the "status" field.
@@ -3853,7 +3911,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 28)
+	fields := make([]string, 0, 29)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -3895,6 +3953,9 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.rate_multiplier != nil {
 		fields = append(fields, account.FieldRateMultiplier)
+	}
+	if m.payg_discount_multiplier != nil {
+		fields = append(fields, account.FieldPaygDiscountMultiplier)
 	}
 	if m.status != nil {
 		fields = append(fields, account.FieldStatus)
@@ -3974,6 +4035,8 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.Priority()
 	case account.FieldRateMultiplier:
 		return m.RateMultiplier()
+	case account.FieldPaygDiscountMultiplier:
+		return m.PaygDiscountMultiplier()
 	case account.FieldStatus:
 		return m.Status()
 	case account.FieldErrorMessage:
@@ -4039,6 +4102,8 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldPriority(ctx)
 	case account.FieldRateMultiplier:
 		return m.OldRateMultiplier(ctx)
+	case account.FieldPaygDiscountMultiplier:
+		return m.OldPaygDiscountMultiplier(ctx)
 	case account.FieldStatus:
 		return m.OldStatus(ctx)
 	case account.FieldErrorMessage:
@@ -4174,6 +4239,13 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetRateMultiplier(v)
 		return nil
+	case account.FieldPaygDiscountMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPaygDiscountMultiplier(v)
+		return nil
 	case account.FieldStatus:
 		v, ok := value.(string)
 		if !ok {
@@ -4292,6 +4364,9 @@ func (m *AccountMutation) AddedFields() []string {
 	if m.addrate_multiplier != nil {
 		fields = append(fields, account.FieldRateMultiplier)
 	}
+	if m.addpayg_discount_multiplier != nil {
+		fields = append(fields, account.FieldPaygDiscountMultiplier)
+	}
 	return fields
 }
 
@@ -4308,6 +4383,8 @@ func (m *AccountMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedPriority()
 	case account.FieldRateMultiplier:
 		return m.AddedRateMultiplier()
+	case account.FieldPaygDiscountMultiplier:
+		return m.AddedPaygDiscountMultiplier()
 	}
 	return nil, false
 }
@@ -4344,6 +4421,13 @@ func (m *AccountMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRateMultiplier(v)
+		return nil
+	case account.FieldPaygDiscountMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPaygDiscountMultiplier(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Account numeric field %s", name)
@@ -4506,6 +4590,9 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldRateMultiplier:
 		m.ResetRateMultiplier()
+		return nil
+	case account.FieldPaygDiscountMultiplier:
+		m.ResetPaygDiscountMultiplier()
 		return nil
 	case account.FieldStatus:
 		m.ResetStatus()
@@ -8258,6 +8345,7 @@ type GroupMutation struct {
 	model_routing                           *map[string][]int64
 	blocked_model_patterns                  *[]string
 	appendblocked_model_patterns            []string
+	model_rate_multipliers                  *map[string]float64
 	model_routing_enabled                   *bool
 	mcp_xml_inject                          *bool
 	supported_model_scopes                  *[]string
@@ -10039,6 +10127,42 @@ func (m *GroupMutation) ResetBlockedModelPatterns() {
 	m.appendblocked_model_patterns = nil
 }
 
+// SetModelRateMultipliers sets the "model_rate_multipliers" field.
+func (m *GroupMutation) SetModelRateMultipliers(value map[string]float64) {
+	m.model_rate_multipliers = &value
+}
+
+// ModelRateMultipliers returns the value of the "model_rate_multipliers" field in the mutation.
+func (m *GroupMutation) ModelRateMultipliers() (r map[string]float64, exists bool) {
+	v := m.model_rate_multipliers
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldModelRateMultipliers returns the old "model_rate_multipliers" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldModelRateMultipliers(ctx context.Context) (v map[string]float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldModelRateMultipliers is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldModelRateMultipliers requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldModelRateMultipliers: %w", err)
+	}
+	return oldValue.ModelRateMultipliers, nil
+}
+
+// ResetModelRateMultipliers resets all changes to the "model_rate_multipliers" field.
+func (m *GroupMutation) ResetModelRateMultipliers() {
+	m.model_rate_multipliers = nil
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (m *GroupMutation) SetModelRoutingEnabled(b bool) {
 	m.model_routing_enabled = &b
@@ -11087,7 +11211,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 45)
+	fields := make([]string, 0, 46)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -11177,6 +11301,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.blocked_model_patterns != nil {
 		fields = append(fields, group.FieldBlockedModelPatterns)
+	}
+	if m.model_rate_multipliers != nil {
+		fields = append(fields, group.FieldModelRateMultipliers)
 	}
 	if m.model_routing_enabled != nil {
 		fields = append(fields, group.FieldModelRoutingEnabled)
@@ -11291,6 +11418,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.ModelRouting()
 	case group.FieldBlockedModelPatterns:
 		return m.BlockedModelPatterns()
+	case group.FieldModelRateMultipliers:
+		return m.ModelRateMultipliers()
 	case group.FieldModelRoutingEnabled:
 		return m.ModelRoutingEnabled()
 	case group.FieldMcpXMLInject:
@@ -11390,6 +11519,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldModelRouting(ctx)
 	case group.FieldBlockedModelPatterns:
 		return m.OldBlockedModelPatterns(ctx)
+	case group.FieldModelRateMultipliers:
+		return m.OldModelRateMultipliers(ctx)
 	case group.FieldModelRoutingEnabled:
 		return m.OldModelRoutingEnabled(ctx)
 	case group.FieldMcpXMLInject:
@@ -11638,6 +11769,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetBlockedModelPatterns(v)
+		return nil
+	case group.FieldModelRateMultipliers:
+		v, ok := value.(map[string]float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetModelRateMultipliers(v)
 		return nil
 	case group.FieldModelRoutingEnabled:
 		v, ok := value.(bool)
@@ -12248,6 +12386,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldBlockedModelPatterns:
 		m.ResetBlockedModelPatterns()
+		return nil
+	case group.FieldModelRateMultipliers:
+		m.ResetModelRateMultipliers()
 		return nil
 	case group.FieldModelRoutingEnabled:
 		m.ResetModelRoutingEnabled()
@@ -25090,74 +25231,78 @@ func (m *UsageCleanupTaskMutation) ResetEdge(name string) error {
 // UsageLogMutation represents an operation that mutates the UsageLog nodes in the graph.
 type UsageLogMutation struct {
 	config
-	op                          Op
-	typ                         string
-	id                          *int64
-	request_id                  *string
-	session_id                  *string
-	model                       *string
-	upstream_model              *string
-	input_tokens                *int
-	addinput_tokens             *int
-	output_tokens               *int
-	addoutput_tokens            *int
-	cache_creation_tokens       *int
-	addcache_creation_tokens    *int
-	cache_read_tokens           *int
-	addcache_read_tokens        *int
-	cache_creation_5m_tokens    *int
-	addcache_creation_5m_tokens *int
-	cache_creation_1h_tokens    *int
-	addcache_creation_1h_tokens *int
-	input_cost                  *float64
-	addinput_cost               *float64
-	output_cost                 *float64
-	addoutput_cost              *float64
-	cache_creation_cost         *float64
-	addcache_creation_cost      *float64
-	cache_creation_5m_cost      *float64
-	addcache_creation_5m_cost   *float64
-	cache_creation_1h_cost      *float64
-	addcache_creation_1h_cost   *float64
-	cache_read_cost             *float64
-	addcache_read_cost          *float64
-	total_cost                  *float64
-	addtotal_cost               *float64
-	actual_cost                 *float64
-	addactual_cost              *float64
-	rate_multiplier             *float64
-	addrate_multiplier          *float64
-	account_rate_multiplier     *float64
-	addaccount_rate_multiplier  *float64
-	billing_type                *int8
-	addbilling_type             *int8
-	stream                      *bool
-	duration_ms                 *int
-	addduration_ms              *int
-	first_token_ms              *int
-	addfirst_token_ms           *int
-	user_agent                  *string
-	ip_address                  *string
-	image_count                 *int
-	addimage_count              *int
-	image_size                  *string
-	media_type                  *string
-	cache_ttl_overridden        *bool
-	created_at                  *time.Time
-	clearedFields               map[string]struct{}
-	user                        *int64
-	cleareduser                 bool
-	api_key                     *int64
-	clearedapi_key              bool
-	account                     *int64
-	clearedaccount              bool
-	group                       *int64
-	clearedgroup                bool
-	subscription                *int64
-	clearedsubscription         bool
-	done                        bool
-	oldValue                    func(context.Context) (*UsageLog, error)
-	predicates                  []predicate.UsageLog
+	op                                  Op
+	typ                                 string
+	id                                  *int64
+	request_id                          *string
+	session_id                          *string
+	model                               *string
+	upstream_model                      *string
+	input_tokens                        *int
+	addinput_tokens                     *int
+	output_tokens                       *int
+	addoutput_tokens                    *int
+	cache_creation_tokens               *int
+	addcache_creation_tokens            *int
+	cache_read_tokens                   *int
+	addcache_read_tokens                *int
+	cache_creation_5m_tokens            *int
+	addcache_creation_5m_tokens         *int
+	cache_creation_1h_tokens            *int
+	addcache_creation_1h_tokens         *int
+	input_cost                          *float64
+	addinput_cost                       *float64
+	output_cost                         *float64
+	addoutput_cost                      *float64
+	cache_creation_cost                 *float64
+	addcache_creation_cost              *float64
+	cache_creation_5m_cost              *float64
+	addcache_creation_5m_cost           *float64
+	cache_creation_1h_cost              *float64
+	addcache_creation_1h_cost           *float64
+	cache_read_cost                     *float64
+	addcache_read_cost                  *float64
+	total_cost                          *float64
+	addtotal_cost                       *float64
+	actual_cost                         *float64
+	addactual_cost                      *float64
+	rate_multiplier                     *float64
+	addrate_multiplier                  *float64
+	model_rate_multiplier               *float64
+	addmodel_rate_multiplier            *float64
+	account_payg_discount_multiplier    *float64
+	addaccount_payg_discount_multiplier *float64
+	account_rate_multiplier             *float64
+	addaccount_rate_multiplier          *float64
+	billing_type                        *int8
+	addbilling_type                     *int8
+	stream                              *bool
+	duration_ms                         *int
+	addduration_ms                      *int
+	first_token_ms                      *int
+	addfirst_token_ms                   *int
+	user_agent                          *string
+	ip_address                          *string
+	image_count                         *int
+	addimage_count                      *int
+	image_size                          *string
+	media_type                          *string
+	cache_ttl_overridden                *bool
+	created_at                          *time.Time
+	clearedFields                       map[string]struct{}
+	user                                *int64
+	cleareduser                         bool
+	api_key                             *int64
+	clearedapi_key                      bool
+	account                             *int64
+	clearedaccount                      bool
+	group                               *int64
+	clearedgroup                        bool
+	subscription                        *int64
+	clearedsubscription                 bool
+	done                                bool
+	oldValue                            func(context.Context) (*UsageLog, error)
+	predicates                          []predicate.UsageLog
 }
 
 var _ ent.Mutation = (*UsageLogMutation)(nil)
@@ -26474,6 +26619,118 @@ func (m *UsageLogMutation) ResetRateMultiplier() {
 	m.addrate_multiplier = nil
 }
 
+// SetModelRateMultiplier sets the "model_rate_multiplier" field.
+func (m *UsageLogMutation) SetModelRateMultiplier(f float64) {
+	m.model_rate_multiplier = &f
+	m.addmodel_rate_multiplier = nil
+}
+
+// ModelRateMultiplier returns the value of the "model_rate_multiplier" field in the mutation.
+func (m *UsageLogMutation) ModelRateMultiplier() (r float64, exists bool) {
+	v := m.model_rate_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldModelRateMultiplier returns the old "model_rate_multiplier" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldModelRateMultiplier(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldModelRateMultiplier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldModelRateMultiplier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldModelRateMultiplier: %w", err)
+	}
+	return oldValue.ModelRateMultiplier, nil
+}
+
+// AddModelRateMultiplier adds f to the "model_rate_multiplier" field.
+func (m *UsageLogMutation) AddModelRateMultiplier(f float64) {
+	if m.addmodel_rate_multiplier != nil {
+		*m.addmodel_rate_multiplier += f
+	} else {
+		m.addmodel_rate_multiplier = &f
+	}
+}
+
+// AddedModelRateMultiplier returns the value that was added to the "model_rate_multiplier" field in this mutation.
+func (m *UsageLogMutation) AddedModelRateMultiplier() (r float64, exists bool) {
+	v := m.addmodel_rate_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetModelRateMultiplier resets all changes to the "model_rate_multiplier" field.
+func (m *UsageLogMutation) ResetModelRateMultiplier() {
+	m.model_rate_multiplier = nil
+	m.addmodel_rate_multiplier = nil
+}
+
+// SetAccountPaygDiscountMultiplier sets the "account_payg_discount_multiplier" field.
+func (m *UsageLogMutation) SetAccountPaygDiscountMultiplier(f float64) {
+	m.account_payg_discount_multiplier = &f
+	m.addaccount_payg_discount_multiplier = nil
+}
+
+// AccountPaygDiscountMultiplier returns the value of the "account_payg_discount_multiplier" field in the mutation.
+func (m *UsageLogMutation) AccountPaygDiscountMultiplier() (r float64, exists bool) {
+	v := m.account_payg_discount_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAccountPaygDiscountMultiplier returns the old "account_payg_discount_multiplier" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldAccountPaygDiscountMultiplier(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAccountPaygDiscountMultiplier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAccountPaygDiscountMultiplier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAccountPaygDiscountMultiplier: %w", err)
+	}
+	return oldValue.AccountPaygDiscountMultiplier, nil
+}
+
+// AddAccountPaygDiscountMultiplier adds f to the "account_payg_discount_multiplier" field.
+func (m *UsageLogMutation) AddAccountPaygDiscountMultiplier(f float64) {
+	if m.addaccount_payg_discount_multiplier != nil {
+		*m.addaccount_payg_discount_multiplier += f
+	} else {
+		m.addaccount_payg_discount_multiplier = &f
+	}
+}
+
+// AddedAccountPaygDiscountMultiplier returns the value that was added to the "account_payg_discount_multiplier" field in this mutation.
+func (m *UsageLogMutation) AddedAccountPaygDiscountMultiplier() (r float64, exists bool) {
+	v := m.addaccount_payg_discount_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetAccountPaygDiscountMultiplier resets all changes to the "account_payg_discount_multiplier" field.
+func (m *UsageLogMutation) ResetAccountPaygDiscountMultiplier() {
+	m.account_payg_discount_multiplier = nil
+	m.addaccount_payg_discount_multiplier = nil
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (m *UsageLogMutation) SetAccountRateMultiplier(f float64) {
 	m.account_rate_multiplier = &f
@@ -27269,7 +27526,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 36)
+	fields := make([]string, 0, 38)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -27341,6 +27598,12 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.rate_multiplier != nil {
 		fields = append(fields, usagelog.FieldRateMultiplier)
+	}
+	if m.model_rate_multiplier != nil {
+		fields = append(fields, usagelog.FieldModelRateMultiplier)
+	}
+	if m.account_payg_discount_multiplier != nil {
+		fields = append(fields, usagelog.FieldAccountPaygDiscountMultiplier)
 	}
 	if m.account_rate_multiplier != nil {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
@@ -27434,6 +27697,10 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.ActualCost()
 	case usagelog.FieldRateMultiplier:
 		return m.RateMultiplier()
+	case usagelog.FieldModelRateMultiplier:
+		return m.ModelRateMultiplier()
+	case usagelog.FieldAccountPaygDiscountMultiplier:
+		return m.AccountPaygDiscountMultiplier()
 	case usagelog.FieldAccountRateMultiplier:
 		return m.AccountRateMultiplier()
 	case usagelog.FieldBillingType:
@@ -27515,6 +27782,10 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldActualCost(ctx)
 	case usagelog.FieldRateMultiplier:
 		return m.OldRateMultiplier(ctx)
+	case usagelog.FieldModelRateMultiplier:
+		return m.OldModelRateMultiplier(ctx)
+	case usagelog.FieldAccountPaygDiscountMultiplier:
+		return m.OldAccountPaygDiscountMultiplier(ctx)
 	case usagelog.FieldAccountRateMultiplier:
 		return m.OldAccountRateMultiplier(ctx)
 	case usagelog.FieldBillingType:
@@ -27716,6 +27987,20 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetRateMultiplier(v)
 		return nil
+	case usagelog.FieldModelRateMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetModelRateMultiplier(v)
+		return nil
+	case usagelog.FieldAccountPaygDiscountMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAccountPaygDiscountMultiplier(v)
+		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		v, ok := value.(float64)
 		if !ok {
@@ -27853,6 +28138,12 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addrate_multiplier != nil {
 		fields = append(fields, usagelog.FieldRateMultiplier)
 	}
+	if m.addmodel_rate_multiplier != nil {
+		fields = append(fields, usagelog.FieldModelRateMultiplier)
+	}
+	if m.addaccount_payg_discount_multiplier != nil {
+		fields = append(fields, usagelog.FieldAccountPaygDiscountMultiplier)
+	}
 	if m.addaccount_rate_multiplier != nil {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
 	}
@@ -27906,6 +28197,10 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedActualCost()
 	case usagelog.FieldRateMultiplier:
 		return m.AddedRateMultiplier()
+	case usagelog.FieldModelRateMultiplier:
+		return m.AddedModelRateMultiplier()
+	case usagelog.FieldAccountPaygDiscountMultiplier:
+		return m.AddedAccountPaygDiscountMultiplier()
 	case usagelog.FieldAccountRateMultiplier:
 		return m.AddedAccountRateMultiplier()
 	case usagelog.FieldBillingType:
@@ -28029,6 +28324,20 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRateMultiplier(v)
+		return nil
+	case usagelog.FieldModelRateMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddModelRateMultiplier(v)
+		return nil
+	case usagelog.FieldAccountPaygDiscountMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAccountPaygDiscountMultiplier(v)
 		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		v, ok := value.(float64)
@@ -28232,6 +28541,12 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldRateMultiplier:
 		m.ResetRateMultiplier()
+		return nil
+	case usagelog.FieldModelRateMultiplier:
+		m.ResetModelRateMultiplier()
+		return nil
+	case usagelog.FieldAccountPaygDiscountMultiplier:
+		m.ResetAccountPaygDiscountMultiplier()
 		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		m.ResetAccountRateMultiplier()

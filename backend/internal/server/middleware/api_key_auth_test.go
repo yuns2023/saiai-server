@@ -177,6 +177,32 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 	})
 }
 
+func TestInactiveGroupStopsExistingKeyModelRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 42, Platform: service.PlatformAnthropic, Status: "inactive", Hydrated: true}
+	user := &service.User{ID: 7, Status: service.StatusActive, Balance: 10}
+	key := &service.APIKey{ID: 9, UserID: user.ID, Key: "test-inactive-group", Status: service.StatusActive, User: user, GroupID: &group.ID, Group: group}
+	repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) { return key, nil }}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	keyService := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(keyService, nil, nil, cfg)))
+	router.GET("/v1/messages", func(c *gin.Context) { c.Status(http.StatusOK) })
+	router.GET("/v1/usage", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	request := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("x-api-key", key.Key)
+		router.ServeHTTP(w, req)
+		return w
+	}
+	require.Equal(t, http.StatusForbidden, request("/v1/messages").Code)
+	require.Equal(t, http.StatusOK, request("/v1/usage").Code)
+	group.Status = service.StatusActive
+	require.Equal(t, http.StatusOK, request("/v1/messages").Code)
+}
+
 func TestAPIKeyAuthSetsGroupContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

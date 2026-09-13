@@ -2861,7 +2861,14 @@ func (s *GatewayService) resolveGroupByID(ctx context.Context, groupID int64) (*
 }
 
 func (s *GatewayService) ResolveGroupByID(ctx context.Context, groupID int64) (*Group, error) {
-	return s.resolveGroupByID(ctx, groupID)
+	group, err := s.resolveGroupByID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if !group.IsActive() {
+		return nil, ErrGroupNotActive
+	}
+	return group, nil
 }
 
 func (s *GatewayService) routingAccountIDsForRequest(ctx context.Context, groupID *int64, requestedModel string, platform string) []int64 {
@@ -2906,6 +2913,9 @@ func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64
 		group, err := s.resolveGroupByID(ctx, currentID)
 		if err != nil {
 			return nil, nil, err
+		}
+		if !group.IsActive() {
+			return nil, nil, ErrGroupNotActive
 		}
 
 		if !group.ClaudeCodeOnly || IsClaudeCodeClient(ctx) {
@@ -9512,6 +9522,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
 	}
+	modelRate, accountDiscount := applyUserBillingFactors(cost, apiKey.Group, account, billingModel, isSubscriptionBilling)
 
 	// 创建使用日志
 	durationMs := int(result.Duration.Milliseconds())
@@ -9526,41 +9537,43 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	accountRateMultiplier := account.BillingRateMultiplier()
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
 	usageLog := &UsageLog{
-		UserID:                user.ID,
-		APIKeyID:              apiKey.ID,
-		AccountID:             account.ID,
-		RequestID:             requestID,
-		SessionID:             input.SessionID,
-		Model:                 result.Model,
-		UpstreamModel:         optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
-		ReasoningEffort:       result.ReasoningEffort,
-		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
-		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
-		InputTokens:           result.Usage.InputTokens,
-		OutputTokens:          result.Usage.OutputTokens,
-		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:       result.Usage.CacheReadInputTokens,
-		CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
-		CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
-		InputCost:             cost.InputCost,
-		OutputCost:            cost.OutputCost,
-		CacheCreationCost:     cost.CacheCreationCost,
-		CacheCreation5mCost:   cost.CacheCreation5mCost,
-		CacheCreation1hCost:   cost.CacheCreation1hCost,
-		CacheReadCost:         cost.CacheReadCost,
-		TotalCost:             cost.TotalCost,
-		ActualCost:            cost.ActualCost,
-		RateMultiplier:        multiplier,
-		AccountRateMultiplier: &accountRateMultiplier,
-		BillingType:           billingType,
-		Stream:                result.Stream,
-		DurationMs:            &durationMs,
-		FirstTokenMs:          result.FirstTokenMs,
-		ImageCount:            result.ImageCount,
-		ImageSize:             imageSize,
-		MediaType:             mediaType,
-		CacheTTLOverridden:    cacheTTLOverridden,
-		CreatedAt:             time.Now(),
+		UserID:                        user.ID,
+		APIKeyID:                      apiKey.ID,
+		AccountID:                     account.ID,
+		RequestID:                     requestID,
+		SessionID:                     input.SessionID,
+		Model:                         result.Model,
+		UpstreamModel:                 optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
+		ReasoningEffort:               result.ReasoningEffort,
+		InboundEndpoint:               optionalTrimmedStringPtr(input.InboundEndpoint),
+		UpstreamEndpoint:              optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		InputTokens:                   result.Usage.InputTokens,
+		OutputTokens:                  result.Usage.OutputTokens,
+		CacheCreationTokens:           result.Usage.CacheCreationInputTokens,
+		CacheReadTokens:               result.Usage.CacheReadInputTokens,
+		CacheCreation5mTokens:         result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens:         result.Usage.CacheCreation1hTokens,
+		InputCost:                     cost.InputCost,
+		OutputCost:                    cost.OutputCost,
+		CacheCreationCost:             cost.CacheCreationCost,
+		CacheCreation5mCost:           cost.CacheCreation5mCost,
+		CacheCreation1hCost:           cost.CacheCreation1hCost,
+		CacheReadCost:                 cost.CacheReadCost,
+		TotalCost:                     cost.TotalCost,
+		ActualCost:                    cost.ActualCost,
+		RateMultiplier:                multiplier,
+		ModelRateMultiplier:           &modelRate,
+		AccountPaygDiscountMultiplier: &accountDiscount,
+		AccountRateMultiplier:         &accountRateMultiplier,
+		BillingType:                   billingType,
+		Stream:                        result.Stream,
+		DurationMs:                    &durationMs,
+		FirstTokenMs:                  result.FirstTokenMs,
+		ImageCount:                    result.ImageCount,
+		ImageSize:                     imageSize,
+		MediaType:                     mediaType,
+		CacheTTLOverridden:            cacheTTLOverridden,
+		CreatedAt:                     time.Now(),
 	}
 
 	// 添加 UserAgent
@@ -9704,6 +9717,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
 	}
+	modelRate, accountDiscount := applyUserBillingFactors(cost, apiKey.Group, account, billingModel, isSubscriptionBilling)
 
 	// 创建使用日志
 	durationMs := int(result.Duration.Milliseconds())
@@ -9714,40 +9728,42 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 	accountRateMultiplier := account.BillingRateMultiplier()
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
 	usageLog := &UsageLog{
-		UserID:                user.ID,
-		APIKeyID:              apiKey.ID,
-		AccountID:             account.ID,
-		RequestID:             requestID,
-		SessionID:             input.SessionID,
-		Model:                 result.Model,
-		UpstreamModel:         optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
-		ReasoningEffort:       result.ReasoningEffort,
-		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
-		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
-		InputTokens:           result.Usage.InputTokens,
-		OutputTokens:          result.Usage.OutputTokens,
-		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:       result.Usage.CacheReadInputTokens,
-		CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
-		CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
-		InputCost:             cost.InputCost,
-		OutputCost:            cost.OutputCost,
-		CacheCreationCost:     cost.CacheCreationCost,
-		CacheCreation5mCost:   cost.CacheCreation5mCost,
-		CacheCreation1hCost:   cost.CacheCreation1hCost,
-		CacheReadCost:         cost.CacheReadCost,
-		TotalCost:             cost.TotalCost,
-		ActualCost:            cost.ActualCost,
-		RateMultiplier:        multiplier,
-		AccountRateMultiplier: &accountRateMultiplier,
-		BillingType:           billingType,
-		Stream:                result.Stream,
-		DurationMs:            &durationMs,
-		FirstTokenMs:          result.FirstTokenMs,
-		ImageCount:            result.ImageCount,
-		ImageSize:             imageSize,
-		CacheTTLOverridden:    cacheTTLOverridden,
-		CreatedAt:             time.Now(),
+		UserID:                        user.ID,
+		APIKeyID:                      apiKey.ID,
+		AccountID:                     account.ID,
+		RequestID:                     requestID,
+		SessionID:                     input.SessionID,
+		Model:                         result.Model,
+		UpstreamModel:                 optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
+		ReasoningEffort:               result.ReasoningEffort,
+		InboundEndpoint:               optionalTrimmedStringPtr(input.InboundEndpoint),
+		UpstreamEndpoint:              optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		InputTokens:                   result.Usage.InputTokens,
+		OutputTokens:                  result.Usage.OutputTokens,
+		CacheCreationTokens:           result.Usage.CacheCreationInputTokens,
+		CacheReadTokens:               result.Usage.CacheReadInputTokens,
+		CacheCreation5mTokens:         result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens:         result.Usage.CacheCreation1hTokens,
+		InputCost:                     cost.InputCost,
+		OutputCost:                    cost.OutputCost,
+		CacheCreationCost:             cost.CacheCreationCost,
+		CacheCreation5mCost:           cost.CacheCreation5mCost,
+		CacheCreation1hCost:           cost.CacheCreation1hCost,
+		CacheReadCost:                 cost.CacheReadCost,
+		TotalCost:                     cost.TotalCost,
+		ActualCost:                    cost.ActualCost,
+		RateMultiplier:                multiplier,
+		ModelRateMultiplier:           &modelRate,
+		AccountPaygDiscountMultiplier: &accountDiscount,
+		AccountRateMultiplier:         &accountRateMultiplier,
+		BillingType:                   billingType,
+		Stream:                        result.Stream,
+		DurationMs:                    &durationMs,
+		FirstTokenMs:                  result.FirstTokenMs,
+		ImageCount:                    result.ImageCount,
+		ImageSize:                     imageSize,
+		CacheTTLOverridden:            cacheTTLOverridden,
+		CreatedAt:                     time.Now(),
 	}
 
 	// 添加 UserAgent

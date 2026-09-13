@@ -816,6 +816,12 @@
           <p class="input-hint">{{ t('admin.groups.invalidRequestFallback.hint') }}</p>
         </div>
 
+        <div class="border-t pt-4">
+          <label class="input-label">{{ t('admin.groups.modelRates.title') }}</label>
+          <textarea v-model="createForm.model_rate_multipliers_text" rows="3" class="input w-full font-mono text-sm" :placeholder="t('admin.groups.modelRates.placeholder')" />
+          <p class="input-hint">{{ t('admin.groups.modelRates.hint') }}</p>
+        </div>
+
         <!-- 分组模型拒绝列表 -->
         <div class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -1567,6 +1573,12 @@
           <p class="input-hint">{{ t('admin.groups.invalidRequestFallback.hint') }}</p>
         </div>
 
+        <div class="border-t pt-4">
+          <label class="input-label">{{ t('admin.groups.modelRates.title') }}</label>
+          <textarea v-model="editForm.model_rate_multipliers_text" rows="3" class="input w-full font-mono text-sm" :placeholder="t('admin.groups.modelRates.placeholder')" />
+          <p class="input-hint">{{ t('admin.groups.modelRates.hint') }}</p>
+        </div>
+
         <!-- 分组模型拒绝列表 -->
         <div class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -2123,6 +2135,7 @@ const createForm = reactive({
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
   blocked_model_patterns_text: '',
+  model_rate_multipliers_text: '',
   input_moderation_enabled: false,
   input_moderation_auto_disable_user: false,
   input_moderation_categories: ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts'] as string[],
@@ -2254,6 +2267,23 @@ const parseBlockedModelPatterns = (value: string): string[] => {
   return patterns
 }
 
+const parseModelRateMultipliers = (value: string): Record<string, number> => {
+  const rates: Record<string, number> = {}
+  for (const raw of value.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line) continue
+    const pieces = line.split('=')
+    const model = pieces[0]?.trim().toLowerCase() || ''
+    const rate = Number(pieces[1]?.trim())
+    if (pieces.length !== 2 || !model || model.length > 100 || /[\s*?]/.test(model) ||
+      !pieces[1]?.trim() || !Number.isFinite(rate) || rate < 0 || rate > 100 || Math.abs(rate * 10000 - Math.round(rate * 10000)) > 1e-7 || model in rates) {
+      throw new Error(t('admin.groups.modelRates.invalid'))
+    }
+    rates[model] = rate
+  }
+  return rates
+}
+
 // 处理账号搜索输入框聚焦
 const onAccountSearchFocus = (rule: ModelRoutingRule, isEdit: boolean = false) => {
   const key = getRuleSearchKey(rule, isEdit)
@@ -2362,6 +2392,7 @@ const editForm = reactive({
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
   blocked_model_patterns_text: '',
+  model_rate_multipliers_text: '',
   input_moderation_enabled: false,
   input_moderation_auto_disable_user: false,
   input_moderation_categories: ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts'] as string[],
@@ -2513,6 +2544,7 @@ const closeCreateModal = () => {
   createForm.fallback_group_id = null
   createForm.fallback_group_id_on_invalid_request = null
   createForm.blocked_model_patterns_text = ''
+  createForm.model_rate_multipliers_text = ''
   createForm.input_moderation_enabled = false
   createForm.input_moderation_auto_disable_user = false
   createForm.input_moderation_categories = ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts']
@@ -2553,7 +2585,7 @@ const handleCreateGroup = async () => {
   submitting.value = true
   try {
     // 构建请求数据，包含模型路由配置
-    const { blocked_model_patterns_text, ...createRest } = createForm
+    const { blocked_model_patterns_text, model_rate_multipliers_text, ...createRest } = createForm
     const requestData = {
       ...createRest,
       five_hour_limit_usd: normalizeOptionalLimit(createForm.five_hour_limit_usd as number | string | null),
@@ -2561,7 +2593,8 @@ const handleCreateGroup = async () => {
       weekly_limit_usd: normalizeOptionalLimit(createForm.weekly_limit_usd as number | string | null),
       monthly_limit_usd: normalizeOptionalLimit(createForm.monthly_limit_usd as number | string | null),
       model_routing: convertRoutingRulesToApiFormat(createModelRoutingRules.value),
-      blocked_model_patterns: parseBlockedModelPatterns(blocked_model_patterns_text)
+      blocked_model_patterns: parseBlockedModelPatterns(blocked_model_patterns_text),
+      model_rate_multipliers: parseModelRateMultipliers(model_rate_multipliers_text)
     }
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => v === '' ? null : v
@@ -2578,7 +2611,7 @@ const handleCreateGroup = async () => {
       onboardingStore.nextStep(500)
     }
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.groups.failedToCreate'))
+    appStore.showError(error.response?.data?.detail || error.message || t('admin.groups.failedToCreate'))
     console.error('Error creating group:', error)
     // Don't advance tour on error
   } finally {
@@ -2609,6 +2642,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.fallback_group_id = group.fallback_group_id
   editForm.fallback_group_id_on_invalid_request = group.fallback_group_id_on_invalid_request
   editForm.blocked_model_patterns_text = (group.blocked_model_patterns || []).join('\n')
+  editForm.model_rate_multipliers_text = Object.entries(group.model_rate_multipliers || {}).map(([model, rate]) => `${model}=${rate}`).join('\n')
   editForm.input_moderation_enabled = group.input_moderation_enabled || false
   editForm.input_moderation_auto_disable_user = group.input_moderation_auto_disable_user || false
   editForm.input_moderation_categories = [...(group.input_moderation_categories || [])]
@@ -2637,6 +2671,7 @@ const closeEditModal = () => {
   editModelRoutingRules.value = []
   editForm.copy_accounts_from_group_ids = []
   editForm.blocked_model_patterns_text = ''
+  editForm.model_rate_multipliers_text = ''
 }
 
 const handleUpdateGroup = async () => {
@@ -2649,7 +2684,7 @@ const handleUpdateGroup = async () => {
   submitting.value = true
   try {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
-    const { blocked_model_patterns_text, ...editRest } = editForm
+    const { blocked_model_patterns_text, model_rate_multipliers_text, ...editRest } = editForm
     const payload = {
       ...editRest,
       five_hour_limit_usd: normalizeOptionalLimit(editForm.five_hour_limit_usd as number | string | null),
@@ -2662,7 +2697,8 @@ const handleUpdateGroup = async () => {
           ? 0
           : editForm.fallback_group_id_on_invalid_request,
       model_routing: convertRoutingRulesToApiFormat(editModelRoutingRules.value),
-      blocked_model_patterns: parseBlockedModelPatterns(blocked_model_patterns_text)
+      blocked_model_patterns: parseBlockedModelPatterns(blocked_model_patterns_text),
+      model_rate_multipliers: parseModelRateMultipliers(model_rate_multipliers_text)
     }
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => v === '' ? null : v
@@ -2675,7 +2711,7 @@ const handleUpdateGroup = async () => {
     closeEditModal()
     loadGroups()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.groups.failedToUpdate'))
+    appStore.showError(error.response?.data?.detail || error.message || t('admin.groups.failedToUpdate'))
     console.error('Error updating group:', error)
   } finally {
     submitting.value = false

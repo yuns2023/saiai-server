@@ -115,6 +115,11 @@ func RateMultiplier(v float64) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldRateMultiplier, v))
 }
 
+// PaygDiscountMultiplier applies equality check predicate on the "payg_discount_multiplier" field. It's identical to PaygDiscountMultiplierEQ.
+func PaygDiscountMultiplier(v float64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldPaygDiscountMultiplier, v))
+}
+
 // Status applies equality check predicate on the "status" field. It's identical to StatusEQ.
 func Status(v string) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldStatus, v))
@@ -783,6 +788,46 @@ func RateMultiplierLT(v float64) predicate.Account {
 // RateMultiplierLTE applies the LTE predicate on the "rate_multiplier" field.
 func RateMultiplierLTE(v float64) predicate.Account {
 	return predicate.Account(sql.FieldLTE(FieldRateMultiplier, v))
+}
+
+// PaygDiscountMultiplierEQ applies the EQ predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierEQ(v float64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldPaygDiscountMultiplier, v))
+}
+
+// PaygDiscountMultiplierNEQ applies the NEQ predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierNEQ(v float64) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldPaygDiscountMultiplier, v))
+}
+
+// PaygDiscountMultiplierIn applies the In predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierIn(vs ...float64) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldPaygDiscountMultiplier, vs...))
+}
+
+// PaygDiscountMultiplierNotIn applies the NotIn predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierNotIn(vs ...float64) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldPaygDiscountMultiplier, vs...))
+}
+
+// PaygDiscountMultiplierGT applies the GT predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierGT(v float64) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldPaygDiscountMultiplier, v))
+}
+
+// PaygDiscountMultiplierGTE applies the GTE predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierGTE(v float64) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldPaygDiscountMultiplier, v))
+}
+
+// PaygDiscountMultiplierLT applies the LT predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierLT(v float64) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldPaygDiscountMultiplier, v))
+}
+
+// PaygDiscountMultiplierLTE applies the LTE predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierLTE(v float64) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldPaygDiscountMultiplier, v))
 }
 
 // StatusEQ applies the EQ predicate on the "status" field.

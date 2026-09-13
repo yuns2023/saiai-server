@@ -38,30 +38,31 @@ type APIKeyAuthUserSnapshot struct {
 
 // APIKeyAuthGroupSnapshot 分组快照
 type APIKeyAuthGroupSnapshot struct {
-	ID                              int64    `json:"id"`
-	Name                            string   `json:"name"`
-	Platform                        string   `json:"platform"`
-	Status                          string   `json:"status"`
-	SubscriptionType                string   `json:"subscription_type"`
-	RateMultiplier                  float64  `json:"rate_multiplier"`
-	FiveHourLimitUSD                *float64 `json:"five_hour_limit_usd,omitempty"`
-	DailyLimitUSD                   *float64 `json:"daily_limit_usd,omitempty"`
-	WeeklyLimitUSD                  *float64 `json:"weekly_limit_usd,omitempty"`
-	MonthlyLimitUSD                 *float64 `json:"monthly_limit_usd,omitempty"`
-	ImagePrice1K                    *float64 `json:"image_price_1k,omitempty"`
-	ImagePrice2K                    *float64 `json:"image_price_2k,omitempty"`
-	ImagePrice4K                    *float64 `json:"image_price_4k,omitempty"`
-	SoraImagePrice360               *float64 `json:"sora_image_price_360,omitempty"`
-	SoraImagePrice540               *float64 `json:"sora_image_price_540,omitempty"`
-	SoraVideoPricePerRequest        *float64 `json:"sora_video_price_per_request,omitempty"`
-	SoraVideoPricePerRequestHD      *float64 `json:"sora_video_price_per_request_hd,omitempty"`
-	ClaudeCodeOnly                  bool     `json:"claude_code_only"`
-	AllowClaudeContext1MBeta        bool     `json:"allow_claude_context_1m_beta"`
-	ClaudeOAuthRequestGateDisabled  bool     `json:"claude_oauth_request_gate_disabled"`
-	ClaudeEnvironmentMode           string   `json:"claude_environment_mode,omitempty"`
-	ClaudeEnvironmentRewrite        bool     `json:"claude_environment_rewrite"`
-	FallbackGroupID                 *int64   `json:"fallback_group_id,omitempty"`
-	FallbackGroupIDOnInvalidRequest *int64   `json:"fallback_group_id_on_invalid_request,omitempty"`
+	ID                              int64              `json:"id"`
+	Name                            string             `json:"name"`
+	Platform                        string             `json:"platform"`
+	Status                          string             `json:"status"`
+	SubscriptionType                string             `json:"subscription_type"`
+	RateMultiplier                  float64            `json:"rate_multiplier"`
+	ModelRateMultipliers            map[string]float64 `json:"model_rate_multipliers,omitempty"`
+	FiveHourLimitUSD                *float64           `json:"five_hour_limit_usd,omitempty"`
+	DailyLimitUSD                   *float64           `json:"daily_limit_usd,omitempty"`
+	WeeklyLimitUSD                  *float64           `json:"weekly_limit_usd,omitempty"`
+	MonthlyLimitUSD                 *float64           `json:"monthly_limit_usd,omitempty"`
+	ImagePrice1K                    *float64           `json:"image_price_1k,omitempty"`
+	ImagePrice2K                    *float64           `json:"image_price_2k,omitempty"`
+	ImagePrice4K                    *float64           `json:"image_price_4k,omitempty"`
+	SoraImagePrice360               *float64           `json:"sora_image_price_360,omitempty"`
+	SoraImagePrice540               *float64           `json:"sora_image_price_540,omitempty"`
+	SoraVideoPricePerRequest        *float64           `json:"sora_video_price_per_request,omitempty"`
+	SoraVideoPricePerRequestHD      *float64           `json:"sora_video_price_per_request_hd,omitempty"`
+	ClaudeCodeOnly                  bool               `json:"claude_code_only"`
+	AllowClaudeContext1MBeta        bool               `json:"allow_claude_context_1m_beta"`
+	ClaudeOAuthRequestGateDisabled  bool               `json:"claude_oauth_request_gate_disabled"`
+	ClaudeEnvironmentMode           string             `json:"claude_environment_mode,omitempty"`
+	ClaudeEnvironmentRewrite        bool               `json:"claude_environment_rewrite"`
+	FallbackGroupID                 *int64             `json:"fallback_group_id,omitempty"`
+	FallbackGroupIDOnInvalidRequest *int64             `json:"fallback_group_id_on_invalid_request,omitempty"`
 
 	// Model routing and denylist policy are used by gateway request admission/
 	// account selection, so they must be part of the auth cache snapshot.

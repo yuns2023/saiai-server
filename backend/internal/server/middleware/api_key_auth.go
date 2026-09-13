@@ -118,7 +118,6 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			AbortWithError(c, 401, "USER_INACTIVE", "User account is not active")
 			return
 		}
-
 		// Write identity before moderation enforcement so ops logs can attribute
 		// cooldown rejections to the authenticated user and key.
 		c.Set(string(ContextKeyAPIKey), apiKey)
@@ -128,6 +127,13 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		})
 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
 		setGroupContext(c, apiKey.Group)
+		// Disabling a group must stop already-issued keys as well as new key
+		// bindings. Keep the read-only usage endpoint available to its owner.
+		if c.Request.URL.Path != "/v1/usage" && apiKey.GroupID != nil &&
+			(apiKey.Group == nil || !apiKey.Group.IsActive()) {
+			AbortWithError(c, 403, "GROUP_INACTIVE", "API key group is not active")
+			return
+		}
 
 		if inputModeration != nil && !apiKey.User.IsAdmin() {
 			blockedUntil, riskErr := inputModeration.GetActiveCooldown(c.Request.Context(), apiKey.User.ID)
