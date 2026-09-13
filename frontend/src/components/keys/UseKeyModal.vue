@@ -397,6 +397,18 @@ const getGatewayRoot = (baseUrl: string) => {
   }
 }
 
+const getCodexBaseUrl = (baseUrl: string) => {
+  try {
+    const parsed = new URL(baseUrl, window.location.origin)
+    const path = parsed.pathname.replace(/\/+$/, '')
+    parsed.pathname = path.endsWith('/v1') ? (path || '/v1') : `${path || ''}/v1`
+    return parsed.href.replace(/\/$/, '')
+  } catch {
+    const normalized = baseUrl.replace(/\/+$/, '')
+    return normalized.endsWith('/v1') ? normalized : `${normalized}/v1`
+  }
+}
+
 const shellSingleQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
 const powershellSingleQuote = (value: string) => `'${value.replace(/'/g, "''")}'`
 const shellCliBootstrap = (cliBase: string, args: string) => {
@@ -461,8 +473,9 @@ function generateClaudeCodeFiles(baseUrl: string, apiKey: string): FileConfig[] 
 
 function generateCodexCliFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const cliBase = getCliBase(baseUrl)
-  const codexArguments = `init-codex ${shellSingleQuote(baseUrl)} ${shellSingleQuote(apiKey)}`
-  const powershellCodexArguments = `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}`
+  const codexBaseUrl = getCodexBaseUrl(baseUrl)
+  const codexArguments = `init-codex ${shellSingleQuote(codexBaseUrl)} ${shellSingleQuote(apiKey)}`
+  const powershellCodexArguments = `init-codex ${powershellSingleQuote(codexBaseUrl)} ${powershellSingleQuote(apiKey)}`
   let path: string
   let content: string
 

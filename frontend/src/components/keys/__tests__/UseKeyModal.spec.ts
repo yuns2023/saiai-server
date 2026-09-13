@@ -120,6 +120,15 @@ describe('UseKeyModal', () => {
     expect(codex.findAll('button').some((button) => button.text().includes('keys.useKeyModal.cliTabs.claudeCode'))).toBe(false)
   })
 
+  it('adds the Responses /v1 suffix when the selected endpoint is a Gateway root', async () => {
+    const codex = mountModal({ platform: 'openai', baseUrl: 'https://example.com' })
+    await nextTick()
+
+    expect(command(codex)).toContain(
+      "init-codex 'https://example.com/v1' 'TEST_ONLY_API_KEY'"
+    )
+  })
+
   it('renders the short PowerShell Codex command with the Gateway and Key', async () => {
     const codex = mountModal({ platform: 'openai' })
     await nextTick()
