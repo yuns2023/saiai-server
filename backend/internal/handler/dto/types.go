@@ -395,8 +395,8 @@ type UsageLog struct {
 	TotalCost                     float64  `json:"total_cost"`
 	ActualCost                    float64  `json:"actual_cost"`
 	RateMultiplier                float64  `json:"rate_multiplier"`
-	ModelRateMultiplier           *float64 `json:"model_rate_multiplier"`
-	AccountPaygDiscountMultiplier *float64 `json:"account_payg_discount_multiplier"`
+	ModelRateMultiplier           *float64 `json:"model_rate_multiplier,omitempty"`
+	AccountPaygDiscountMultiplier *float64 `json:"account_payg_discount_multiplier,omitempty"`
 
 	BillingType  int8   `json:"billing_type"`
 	RequestType  string `json:"request_type"`
