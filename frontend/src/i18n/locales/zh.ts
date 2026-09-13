@@ -620,14 +620,13 @@ export default {
       openai: {
         description: '运行以下一键命令，安装或复用 SAIAI，并配置 Codex CLI。',
         saiaiCliHint:
-          '短命令会复用本机受管 SAIAI 配置，不把 API Key 暴露在剪贴板和 shell 历史中；重复执行会刷新本地代理，其他 Codex 配置会保留。',
-        note: '普通 Codex 命令不包含 API Key，会复用本机用户配置；WebSocket 页签为兼容传输选择保留显式初始化参数。'
+          '命令会带上当前 Gateway 地址和 API Key，配置 Codex CLI；可重复执行以替换受管 Gateway 和 Key，其他 Codex 配置会保留。',
+        note: '命令中包含 API Key，因此可能保留在剪贴板和 shell 历史中。这里不再提供 WebSocket 专用配置。'
       },
       cliTabs: {
         claudeCode: 'Claude Code',
         geminiCli: 'Gemini CLI',
         codexCli: 'Codex CLI',
-        codexCliWs: 'Codex CLI (WebSocket)',
         opencode: 'OpenCode'
       },
       gemini: {

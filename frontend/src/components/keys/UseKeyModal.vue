@@ -308,10 +308,7 @@ const clientTabs = computed((): TabConfig[] => {
   if (!props.platform) return []
 	switch (props.platform) {
 		case 'openai':
-			return [
-				{ id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
-				{ id: 'codex-ws', label: t('keys.useKeyModal.cliTabs.codexCliWs'), icon: TerminalIcon }
-			]
+			return [{ id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon }]
     case 'anthropic':
       return [{ id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon }]
     case 'gemini':
@@ -413,6 +410,10 @@ const powershellCliBootstrap = (cliBase: string, args: string) => {
 }
 const cmdCliBootstrap = (cliBase: string, args: string) =>
   `powershell -NoProfile -ExecutionPolicy Bypass -Command "${powershellCliBootstrap(cliBase, args)}"`
+const powershellCodexBootstrap = (cliBase: string, args: string) =>
+  `irm ${cliBase}/saiai-cli/setup.ps1 | iex; Invoke-Saiai ${args}`
+const cmdCodexBootstrap = (cliBase: string, args: string) =>
+  `powershell -NoProfile -ExecutionPolicy Bypass -Command "${powershellCodexBootstrap(cliBase, args)}"`
 
 // Syntax highlighting helpers
 // Generate file configs based on platform and active tab
@@ -422,7 +423,7 @@ const currentFiles = computed((): FileConfig[] => {
 
 	switch (props.platform) {
 		case 'openai':
-			return generateCodexCliFiles(baseUrl, apiKey, activeClientTab.value === 'codex-ws')
+			return generateCodexCliFiles(baseUrl, apiKey)
     case 'anthropic':
       return generateClaudeCodeFiles(getGatewayRoot(baseUrl), apiKey)
     case 'gemini':
@@ -458,19 +459,10 @@ function generateClaudeCodeFiles(baseUrl: string, apiKey: string): FileConfig[] 
   return [{ path, content, hint: t('keys.useKeyModal.saiaiCliHint') }]
 }
 
-function generateCodexCliFiles(baseUrl: string, apiKey: string, websockets: boolean): FileConfig[] {
+function generateCodexCliFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const cliBase = getCliBase(baseUrl)
-  const websocketArgument = websockets ? ' --websockets' : ''
-  // The current wrapper can reuse the managed per-user configuration, so the
-  // normal Codex command must not expose the API key in shell history. Keep
-  // the legacy argument form only for the explicit WebSocket tab, where the
-  // transport flag still has to be selected during initialization.
-  const codexArguments = websockets
-    ? `init-codex ${shellSingleQuote(baseUrl)} ${shellSingleQuote(apiKey)}${websocketArgument}`
-    : 'init-codex'
-  const powershellCodexArguments = websockets
-    ? `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}${websocketArgument}`
-    : 'init-codex'
+  const codexArguments = `init-codex ${shellSingleQuote(baseUrl)} ${shellSingleQuote(apiKey)}`
+  const powershellCodexArguments = `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}`
   let path: string
   let content: string
 
@@ -481,11 +473,11 @@ function generateCodexCliFiles(baseUrl: string, apiKey: string, websockets: bool
       break
     case 'cmd':
       path = 'Command Prompt'
-      content = cmdCliBootstrap(cliBase, powershellCodexArguments)
+      content = cmdCodexBootstrap(cliBase, powershellCodexArguments)
       break
     case 'powershell':
       path = 'PowerShell'
-      content = powershellCliBootstrap(cliBase, powershellCodexArguments)
+      content = powershellCodexBootstrap(cliBase, powershellCodexArguments)
       break
     default:
       path = 'Terminal'
