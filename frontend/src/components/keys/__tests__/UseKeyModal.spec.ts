@@ -113,11 +113,22 @@ describe('UseKeyModal', () => {
   it('keeps OpenAI on Codex by default and offers only Codex clients', async () => {
     const codex = mountModal({ platform: 'openai' })
     await nextTick()
-    expect(command(codex)).toContain(
-      "init-codex 'https://example.com/v1' 'TEST_ONLY_API_KEY'"
-    )
+    expect(command(codex)).toContain('setup.sh | bash -s -- init-codex')
+    expect(command(codex)).not.toContain('TEST_ONLY_API_KEY')
     expect(command(codex)).not.toContain('--websockets')
     expect(codex.findAll('button').some((button) => button.text().includes('keys.useKeyModal.cliTabs.claudeCode'))).toBe(false)
+  })
+
+  it('renders the short PowerShell Codex command without the API key', async () => {
+    const codex = mountModal({ platform: 'openai' })
+    await nextTick()
+    const tab = codex.findAll('button').find((button) => button.text().includes('PowerShell'))
+    expect(tab).toBeDefined()
+    await tab!.trigger('click')
+    await nextTick()
+
+    expect(command(codex)).toContain('Invoke-Saiai init-codex')
+    expect(command(codex)).not.toContain('TEST_ONLY_API_KEY')
   })
 
   it('adds the Codex WebSocket option only on its explicit tab', async () => {
@@ -154,7 +165,11 @@ describe('UseKeyModal', () => {
       for (const removed of ['setup claude', 'saiai claude', 'revoke --all', 'V2 Preview']) {
         expect(output).not.toContain(removed)
       }
-      expect(output).toContain('TEST_ONLY_API_KEY')
+      if (platform === 'anthropic') {
+        expect(output).toContain('TEST_ONLY_API_KEY')
+      } else {
+        expect(output).not.toContain('TEST_ONLY_API_KEY')
+      }
     }
   })
 })

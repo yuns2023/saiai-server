@@ -403,10 +403,13 @@ const getGatewayRoot = (baseUrl: string) => {
 const shellSingleQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
 const powershellSingleQuote = (value: string) => `'${value.replace(/'/g, "''")}'`
 const shellCliBootstrap = (cliBase: string, args: string) => {
-  return `curl -fsSL ${cliBase}/saiai-cli/setup.sh | bash -s -- ${args}`
+  return args
+    ? `curl -fsSL ${cliBase}/saiai-cli/setup.sh | bash -s -- ${args}`
+    : `curl -fsSL ${cliBase}/saiai-cli/setup.sh | bash`
 }
 const powershellCliBootstrap = (cliBase: string, args: string) => {
-  return `& { $ErrorActionPreference = 'Stop'; irm ${cliBase}/saiai-cli/setup.ps1 | iex; $saiaiExit = Invoke-Saiai ${args}; if ($saiaiExit -ne 0) { throw ('SAIAI setup exited with code ' + $saiaiExit + '.') } }`
+  const invocation = args ? `Invoke-Saiai ${args}` : 'Invoke-Saiai'
+  return `& { $ErrorActionPreference = 'Stop'; irm ${cliBase}/saiai-cli/setup.ps1 | iex; $saiaiExit = ${invocation}; if ($saiaiExit -ne 0) { throw ('SAIAI setup exited with code ' + $saiaiExit + '.') } }`
 }
 const cmdCliBootstrap = (cliBase: string, args: string) =>
   `powershell -NoProfile -ExecutionPolicy Bypass -Command "${powershellCliBootstrap(cliBase, args)}"`
@@ -458,21 +461,31 @@ function generateClaudeCodeFiles(baseUrl: string, apiKey: string): FileConfig[] 
 function generateCodexCliFiles(baseUrl: string, apiKey: string, websockets: boolean): FileConfig[] {
   const cliBase = getCliBase(baseUrl)
   const websocketArgument = websockets ? ' --websockets' : ''
+  // The current wrapper can reuse the managed per-user configuration, so the
+  // normal Codex command must not expose the API key in shell history. Keep
+  // the legacy argument form only for the explicit WebSocket tab, where the
+  // transport flag still has to be selected during initialization.
+  const codexArguments = websockets
+    ? `init-codex ${shellSingleQuote(baseUrl)} ${shellSingleQuote(apiKey)}${websocketArgument}`
+    : 'init-codex'
+  const powershellCodexArguments = websockets
+    ? `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}${websocketArgument}`
+    : 'init-codex'
   let path: string
   let content: string
 
   switch (activeTab.value) {
     case 'unix':
       path = 'Terminal'
-      content = shellCliBootstrap(cliBase, `init-codex ${shellSingleQuote(baseUrl)} ${shellSingleQuote(apiKey)}${websocketArgument}`)
+      content = shellCliBootstrap(cliBase, codexArguments)
       break
     case 'cmd':
       path = 'Command Prompt'
-      content = cmdCliBootstrap(cliBase, `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}${websocketArgument}`)
+      content = cmdCliBootstrap(cliBase, powershellCodexArguments)
       break
     case 'powershell':
       path = 'PowerShell'
-      content = powershellCliBootstrap(cliBase, `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}${websocketArgument}`)
+      content = powershellCliBootstrap(cliBase, powershellCodexArguments)
       break
     default:
       path = 'Terminal'
