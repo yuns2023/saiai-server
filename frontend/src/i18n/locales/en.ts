@@ -1738,9 +1738,9 @@ export default {
       },
       modelRates: {
         title: 'Per-model rate multipliers',
-        placeholder: 'One per line: claude-fable-5-1=0.8',
-        hint: 'Exact billed-model match; empty uses the group rate. Zero makes the model free.',
-        invalid: 'Invalid model rates: use model-ID=rate from 0 to 100 with at most four decimals, one unique model per line.'
+        placeholder: 'One per line: claude-fable-*=0.6',
+        hint: 'Matches billed model IDs. A trailing * matches a prefix; exact rules win, then the longest prefix. Empty uses the group rate. Zero makes matching models free.',
+        invalid: 'Invalid model rates: use a model ID or a nonempty prefix ending in *=rate from 0 to 100 with at most four decimals, one unique rule per line.'
       },
       copyAccounts: {
         title: 'Copy Accounts from Groups',
