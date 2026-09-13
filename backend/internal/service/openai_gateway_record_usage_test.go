@@ -265,7 +265,7 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
 			Group: &Group{
 				ID:                   groupID,
 				RateMultiplier:       groupRate,
-				ModelRateMultipliers: map[string]float64{"gpt-5.1": 0.8},
+				ModelRateMultipliers: map[string]float64{"gpt-*": 0.8},
 			},
 		},
 		User:    &User{ID: 2001},

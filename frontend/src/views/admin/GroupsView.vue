@@ -2275,7 +2275,7 @@ const parseModelRateMultipliers = (value: string): Record<string, number> => {
     const pieces = line.split('=')
     const model = pieces[0]?.trim().toLowerCase() || ''
     const rate = Number(pieces[1]?.trim())
-    if (pieces.length !== 2 || !model || model.length > 100 || /[\s*?]/.test(model) ||
+    if (pieces.length !== 2 || !model || model.length > 100 || !/^[^\s*?]+\*?$/.test(model) ||
       !pieces[1]?.trim() || !Number.isFinite(rate) || rate < 0 || rate > 100 || Math.abs(rate * 10000 - Math.round(rate * 10000)) > 1e-7 || model in rates) {
       throw new Error(t('admin.groups.modelRates.invalid'))
     }

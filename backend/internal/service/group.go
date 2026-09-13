@@ -75,7 +75,8 @@ type Group struct {
 
 	// 分组模型拒绝列表。规则支持 * 通配符，空列表表示不限制。
 	BlockedModelPatterns []string
-	// ModelRateMultipliers applies to the model ID passed to cost calculation.
+	// ModelRateMultipliers applies to the billed model ID. A trailing * matches
+	// a model prefix; an exact key takes precedence over any prefix.
 	ModelRateMultipliers map[string]float64
 
 	// MCP XML 协议注入开关（仅 antigravity 平台使用）
@@ -117,8 +118,10 @@ func NormalizeModelRateMultipliers(raw map[string]float64) (map[string]float64, 
 	out := make(map[string]float64, len(raw))
 	for model, rate := range raw {
 		name := strings.ToLower(strings.TrimSpace(model))
-		if name == "" || len(name) > 100 || strings.ContainsAny(name, "*?\r\n\t ") {
-			return nil, fmt.Errorf("model_rate_multipliers requires exact model IDs")
+		star := strings.IndexByte(name, '*')
+		if name == "" || len(name) > 100 || strings.ContainsAny(name, "?\r\n\t ") ||
+			(star >= 0 && (star == 0 || star != len(name)-1)) {
+			return nil, fmt.Errorf("model_rate_multipliers requires model IDs or nonempty prefixes ending in *")
 		}
 		if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 || rate > 100 || math.Abs(rate*10000-math.Round(rate*10000)) > 1e-7 {
 			return nil, fmt.Errorf("model_rate_multipliers values must be between 0 and 100 with at most four decimals")
@@ -135,11 +138,30 @@ func (g *Group) ModelRateFor(model string) float64 {
 	if g == nil {
 		return 1
 	}
-	rate, ok := g.ModelRateMultipliers[strings.ToLower(strings.TrimSpace(model))]
-	if !ok || math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 || rate > 100 {
+	name := strings.ToLower(strings.TrimSpace(model))
+	if name == "" {
 		return 1
 	}
-	return rate
+	if rate, ok := g.ModelRateMultipliers[name]; ok {
+		if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 || rate > 100 {
+			return 1
+		}
+		return rate
+	}
+
+	bestRate, bestPrefixLength := 1.0, 0
+	for pattern, rate := range g.ModelRateMultipliers {
+		if len(pattern) <= 1 || pattern[len(pattern)-1] != '*' ||
+			strings.IndexByte(pattern, '*') != len(pattern)-1 ||
+			math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 || rate > 100 {
+			continue
+		}
+		prefix := pattern[:len(pattern)-1]
+		if len(prefix) > bestPrefixLength && strings.HasPrefix(name, prefix) {
+			bestRate, bestPrefixLength = rate, len(prefix)
+		}
+	}
+	return bestRate
 }
 
 // NormalizeBlockedModelPatterns trims, lower-cases and de-duplicates group
