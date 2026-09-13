@@ -92,7 +92,7 @@ describe('UseKeyModal', () => {
     await nextTick()
 
     expect(command(wrapper)).toBe(
-      "& { $ErrorActionPreference = 'Stop'; irm https://example.com/saiai-cli/setup.ps1 | iex; $saiaiExit = Invoke-Saiai 'https://example.com' 'TEST_ONLY_''_KEY'; if ($saiaiExit -ne 0) { throw ('SAIAI setup exited with code ' + $saiaiExit + '.') } }"
+      "irm https://example.com/saiai-cli/setup.ps1 | iex; Invoke-Saiai 'https://example.com' 'TEST_ONLY_''_KEY'"
     )
   })
 
@@ -106,7 +106,7 @@ describe('UseKeyModal', () => {
     await nextTick()
 
     expect(command(wrapper)).toBe(
-      'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $ErrorActionPreference = \'Stop\'; irm https://example.com/saiai-cli/setup.ps1 | iex; $saiaiExit = Invoke-Saiai \'https://example.com\' \'TEST_ONLY_API_KEY\'; if ($saiaiExit -ne 0) { throw (\'SAIAI setup exited with code \' + $saiaiExit + \'.\') } }"'
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://example.com/saiai-cli/setup.ps1 | iex; Invoke-Saiai \'https://example.com\' \'TEST_ONLY_API_KEY\'"'
     )
   })
 

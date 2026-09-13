@@ -417,8 +417,7 @@ const shellCliBootstrap = (cliBase: string, args: string) => {
     : `curl -fsSL ${cliBase}/saiai-cli/setup.sh | bash`
 }
 const powershellCliBootstrap = (cliBase: string, args: string) => {
-  const invocation = args ? `Invoke-Saiai ${args}` : 'Invoke-Saiai'
-  return `& { $ErrorActionPreference = 'Stop'; irm ${cliBase}/saiai-cli/setup.ps1 | iex; $saiaiExit = ${invocation}; if ($saiaiExit -ne 0) { throw ('SAIAI setup exited with code ' + $saiaiExit + '.') } }`
+  return `irm ${cliBase}/saiai-cli/setup.ps1 | iex; Invoke-Saiai ${args}`
 }
 const cmdCliBootstrap = (cliBase: string, args: string) =>
   `powershell -NoProfile -ExecutionPolicy Bypass -Command "${powershellCliBootstrap(cliBase, args)}"`

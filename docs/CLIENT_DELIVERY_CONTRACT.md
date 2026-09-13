@@ -63,9 +63,8 @@ embedded-wrapper fallback: a missing wrapper returns `503` instead of combining
 files from different client releases. Missing-bundle responses are
 end-user-facing: they provide retry/contact-administrator guidance without
 exposing private filesystem paths or operator commands. WebUI-generated
-PowerShell/CMD commands keep wrapper download and `Invoke-Saiai` inside one
-error boundary so a failed download cannot cascade into an undefined-function
-error.
+PowerShell/CMD commands stay as one-line legacy commands; wrapper/native output
+is surfaced directly instead of adding a second UI error wrapper.
 
 Wrapper responses replace only the literal default
 `https://api.saiai.top/saiai-cli` with the trusted public request origin. The
@@ -74,12 +73,12 @@ origin boundary never trusts `X-Forwarded-Host` or `Forwarded`; it accepts
 responses use `Cache-Control: no-store`.
 
 The normal Codex WebUI command is the short `init-codex <base_url> <api_key>`
-form. It includes the selected Gateway and API Key, so it must quote the Key
-separately for POSIX shell and PowerShell. The WebUI exposes only the normal
-Codex CLI path; WebSocket-specific setup is not exposed. Tests use only
-`TEST_ONLY_*` values and assert the command stays concise while escaping
-apostrophes correctly. Release logs and ledgers must never contain real user
-keys.
+form, and Claude uses the equivalent short `<base_url> <api_key>` form. Both
+include the selected Gateway and API Key, so each shell must quote the Key
+correctly. The WebUI exposes only the normal Codex CLI path; WebSocket-specific
+setup is not exposed. Tests use only `TEST_ONLY_*` values and assert the
+commands stay concise while escaping apostrophes correctly. Release logs and
+ledgers must never contain real user keys.
 
 ## Activation
 
