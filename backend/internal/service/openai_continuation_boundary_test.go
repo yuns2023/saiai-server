@@ -33,6 +33,49 @@ func TestOpenAIContinuationAccountBoundary(t *testing.T) {
 	require.True(t, OpenAIContinuationAccountMatches("", 0, 22))
 }
 
+func TestOpenAIContinuationRejectsScheduledAccountSwitch(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(17)
+	rateLimitedUntil := time.Now().Add(time.Hour)
+	accountA := Account{
+		ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 1,
+		RateLimitResetAt: &rateLimitedUntil,
+		Extra:            map[string]any{"responses_websockets_v2_enabled": true},
+	}
+	accountB := Account{
+		ID: 22, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 1,
+		Extra: map[string]any{"responses_websockets_v2_enabled": true},
+	}
+	cache := &stubGatewayCache{}
+	store := NewOpenAIWSStateStore(cache)
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{accountA, accountB}},
+		cache:              cache,
+		cfg:                newOpenAIWSV2TestConfig(),
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: store,
+	}
+	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_from_a", accountA.ID, time.Hour))
+	owner, err := svc.OpenAIContinuationAccountID(ctx, &groupID, "resp_from_a")
+	require.NoError(t, err)
+	require.Equal(t, accountA.ID, owner)
+
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "resp_from_a", "session-from-a", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	if selection.ReleaseFunc != nil {
+		defer selection.ReleaseFunc()
+	}
+	require.Equal(t, accountB.ID, selection.Account.ID)
+	require.False(t, OpenAIContinuationAccountMatches("resp_from_a", owner, selection.Account.ID))
+	retainedOwner, err := svc.OpenAIContinuationAccountID(ctx, &groupID, "resp_from_a")
+	require.NoError(t, err)
+	require.Equal(t, accountA.ID, retainedOwner, "failed scheduling must not erase response ownership")
+}
+
 func TestOpenAIHTTPResponseBindsAccountBeforeContinuation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	groupID := int64(17)
