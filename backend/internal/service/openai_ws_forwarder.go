@@ -270,11 +270,19 @@ func resolveOpenAIWSSessionHeaders(c *gin.Context, promptCacheKey string) openAI
 		ConversationSource: "none",
 	}
 	if c != nil && c.Request != nil {
-		if sessionID := strings.TrimSpace(c.Request.Header.Get("session_id")); sessionID != "" {
+		headerValue := func(names ...string) string {
+			for _, name := range names {
+				if value := strings.TrimSpace(c.Request.Header.Get(name)); value != "" {
+					return value
+				}
+			}
+			return ""
+		}
+		if sessionID := headerValue("session_id", "session-id"); sessionID != "" {
 			resolution.SessionID = sessionID
 			resolution.SessionSource = "header_session_id"
 		}
-		if conversationID := strings.TrimSpace(c.Request.Header.Get("conversation_id")); conversationID != "" {
+		if conversationID := headerValue("conversation_id", "conversation-id"); conversationID != "" {
 			resolution.ConversationID = conversationID
 			resolution.ConversationSource = "header_conversation_id"
 			if resolution.SessionID == "" {
@@ -1120,6 +1128,17 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	promptCacheKey string,
 ) (http.Header, openAIWSSessionHeaderResolution) {
 	headers := make(http.Header)
+	strictNativeOAuth := account != nil && account.Type == AccountTypeOAuth && c != nil && openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	if strictNativeOAuth && c.Request != nil {
+		for key, values := range c.Request.Header {
+			if !shouldCopyOpenAIWSRequestHeader(key) {
+				continue
+			}
+			for _, value := range values {
+				headers.Add(key, value)
+			}
+		}
+	}
 	headers.Set("authorization", "Bearer "+token)
 
 	sessionResolution := resolveOpenAIWSSessionHeaders(c, promptCacheKey)
@@ -1156,34 +1175,61 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
 			headers.Set("chatgpt-account-id", chatgptAccountID)
 		}
-		headers.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
+		if strictNativeOAuth {
+			if originator := strings.TrimSpace(c.GetHeader("originator")); originator != "" {
+				headers.Set("originator", originator)
+			}
+		} else {
+			headers.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
+		}
 	}
 
-	betaValue := openAIWSBetaV2Value
-	if decision.Transport == OpenAIUpstreamTransportResponsesWebsocket {
-		betaValue = openAIWSBetaV1Value
+	if strictNativeOAuth {
+		if beta := strings.TrimSpace(c.GetHeader("OpenAI-Beta")); beta != "" {
+			headers.Set("OpenAI-Beta", beta)
+		}
+	} else {
+		betaValue := openAIWSBetaV2Value
+		if decision.Transport == OpenAIUpstreamTransportResponsesWebsocket {
+			betaValue = openAIWSBetaV1Value
+		}
+		headers.Set("OpenAI-Beta", betaValue)
 	}
-	headers.Set("OpenAI-Beta", betaValue)
 
-	customUA := ""
-	if account != nil {
-		customUA = account.GetOpenAIUserAgent()
-	}
-	if strings.TrimSpace(customUA) != "" {
-		headers.Set("user-agent", customUA)
-	} else if c != nil {
+	if strictNativeOAuth {
 		if ua := strings.TrimSpace(c.GetHeader("User-Agent")); ua != "" {
 			headers.Set("user-agent", ua)
 		}
-	}
-	if s != nil && s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		headers.Set("user-agent", codexCLIUserAgent)
-	}
-	if account != nil && account.Type == AccountTypeOAuth && !openai.IsCodexCLIRequest(headers.Get("user-agent")) {
-		headers.Set("user-agent", codexCLIUserAgent)
+	} else {
+		customUA := ""
+		if account != nil {
+			customUA = account.GetOpenAIUserAgent()
+		}
+		if strings.TrimSpace(customUA) != "" {
+			headers.Set("user-agent", customUA)
+		} else if c != nil {
+			if ua := strings.TrimSpace(c.GetHeader("User-Agent")); ua != "" {
+				headers.Set("user-agent", ua)
+			}
+		}
+		if account != nil && account.Type == AccountTypeOAuth && !openai.IsCodexCLIRequest(headers.Get("user-agent")) {
+			headers.Set("user-agent", codexCLIUserAgent)
+		}
 	}
 
 	return headers, sessionResolution
+}
+
+func shouldCopyOpenAIWSRequestHeader(key string) bool {
+	if !shouldCopyOpenAIRequestHeader(key) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "conversation-id", "conversation_id", "sec-websocket-extensions", "sec-websocket-key", "sec-websocket-version", "session-id", "session_id":
+		return false
+	default:
+		return true
+	}
 }
 
 func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any, account *Account) map[string]any {
@@ -1192,6 +1238,11 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 	payload := make(map[string]any, len(reqBody)+1)
 	for k, v := range reqBody {
 		payload[k] = v
+	}
+	if account != nil && account.Type == AccountTypeOAuth {
+		// Official Codex OAuth payloads are already in the native Responses
+		// WebSocket shape. Preserve every field and value at this boundary.
+		return payload
 	}
 
 	delete(payload, "background")
@@ -1720,7 +1771,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	)
 
 	payload := s.buildOpenAIWSCreatePayload(reqBody, account)
-	payloadStrategy, removedKeys := applyOpenAIWSRetryPayloadStrategy(payload, attempt)
+	payloadStrategy, removedKeys := "passthrough", []string(nil)
+	if account.Type != AccountTypeOAuth {
+		payloadStrategy, removedKeys = applyOpenAIWSRetryPayloadStrategy(payload, attempt)
+	}
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
 	previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	promptCacheKey := openAIWSPayloadString(payload, "prompt_cache_key")
@@ -1744,7 +1798,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
-	setOpenAIWSTurnMetadata(payload, turnMetadata)
+	if account.Type != AccountTypeOAuth {
+		setOpenAIWSTurnMetadata(payload, turnMetadata)
+	}
 	payloadEventType := openAIWSPayloadString(payload, "type")
 	if payloadEventType == "" {
 		payloadEventType = "response.create"
@@ -2371,6 +2427,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if strings.TrimSpace(token) == "" {
 		return errors.New("token is empty")
 	}
+	officialCodexClient := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	if account.Type == AccountTypeOAuth && !officialCodexClient {
+		return NewOpenAIWSClientCloseError(
+			coderws.StatusPolicyViolation,
+			"OpenAI OAuth accounts require the official Codex client",
+			nil,
+		)
+	}
 
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
@@ -2384,6 +2448,26 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
+	}
+	// Official OAuth clients own their Responses WebSocket connection. Mirror
+	// that boundary upstream so handshake metadata cannot leak across client
+	// connections through the shared account pool.
+	if account.Type == AccountTypeOAuth && officialCodexClient {
+		if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+			return fmt.Errorf("websocket ingress requires ws_v2 transport, got=%s", wsDecision.Transport)
+		}
+		return s.proxyResponsesWebSocketV2Passthrough(
+			ctx,
+			c,
+			clientConn,
+			account,
+			token,
+			firstClientMessage,
+			hooks,
+			wsDecision,
+		)
+	}
+	if modeRouterV2Enabled {
 		switch ingressMode {
 		case OpenAIWSIngressModePassthrough:
 			if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
@@ -2475,6 +2559,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		normalized := trimmed
 		switch eventType {
 		case "":
+			if account.Type == AccountTypeOAuth {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "response.create type is required for official Codex OAuth", nil)
+			}
 			eventType = "response.create"
 			next, setErr := applyPayloadMutation(normalized, "type", eventType)
 			if setErr != nil {
@@ -2514,16 +2601,19 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
-		if turnMetadata := strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)); turnMetadata != "" {
+		if turnMetadata := strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)); turnMetadata != "" && account.Type != AccountTypeOAuth {
 			next, setErr := applyPayloadMutation(normalized, "client_metadata."+openAIWSTurnMetadataHeader, turnMetadata)
 			if setErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
 			}
 			normalized = next
 		}
-		mappedModel := account.GetMappedModel(originalModel)
-		if normalizedModel := normalizeCodexModel(mappedModel); normalizedModel != "" {
-			mappedModel = normalizedModel
+		mappedModel := originalModel
+		if account.Type != AccountTypeOAuth {
+			mappedModel = account.GetMappedModel(originalModel)
+			if normalizedModel := normalizeCodexModel(mappedModel); normalizedModel != "" {
+				mappedModel = normalizedModel
+			}
 		}
 		if mappedModel != originalModel {
 			next, setErr := applyPayloadMutation(normalized, "model", mappedModel)
@@ -2578,7 +2668,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 	}
 
-	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
+	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
 	wsHeaders, _ := s.buildOpenAIWSHeaders(c, account, token, wsDecision, isCodexCLI, turnState, strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)), firstPayload.promptCacheKey)
 	baseAcquireReq := openAIWSAcquireRequest{
 		Account: account,
@@ -2751,10 +2841,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
-		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
+		var writeErr error
+		if account.Type == AccountTypeOAuth {
+			writeErr = lease.WriteFrameWithContextTimeout(ctx, coderws.MessageText, payload, s.openAIWSWriteTimeout())
+		} else {
+			writeErr = lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout())
+		}
+		if writeErr != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
-				fmt.Errorf("write upstream websocket request: %w", err),
+				fmt.Errorf("write upstream websocket request: %w", writeErr),
 				false,
 			)
 		}

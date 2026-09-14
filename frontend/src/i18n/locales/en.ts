@@ -619,8 +619,8 @@ export default {
       noGroupDescription: 'This API key has not been assigned to a group. Please click the group column in the key list to assign one before viewing the configuration.',
       openai: {
         description: 'Run the following one-click command to install or reuse SAIAI and configure Codex CLI.',
-        saiaiCliHint: 'The command merges the Codex provider config and ~/.codex/auth.json. Re-running replaces the managed Gateway and Key.',
-        note: 'The command contains this API key, so it can remain in the clipboard and shell history. Other Codex configuration is preserved.',
+        saiaiCliHint: 'The command includes the selected Gateway and API key, configures Codex CLI, and can be run again to replace the managed Gateway and Key while preserving other Codex configuration.',
+        note: 'This command contains the API key and may remain in the clipboard and shell history. The WebSocket-specific setup is not exposed here.',
       },
       cliTabs: {
         claudeCode: 'Claude Code',
@@ -1721,6 +1721,7 @@ export default {
         off: 'Off',
         officialClients: 'Official Codex clients only',
         cliOnly: 'Codex CLI only',
+        localProxyOnly: 'SAIAI local proxy only',
         audit: 'Audit only',
         enforce: 'Enforce',
         baseDevices: 'Base device count'

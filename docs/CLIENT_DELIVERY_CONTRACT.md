@@ -60,7 +60,11 @@ requirement from the build runner.
 `SAIAI_CLIENT_DIR` points at one immutable, validated bundle. Gateway serves the
 manifest, all binaries, and all three wrappers from that directory. There is no
 embedded-wrapper fallback: a missing wrapper returns `503` instead of combining
-files from different client releases.
+files from different client releases. Missing-bundle responses are
+end-user-facing: they provide retry/contact-administrator guidance without
+exposing private filesystem paths or operator commands. WebUI-generated
+PowerShell/CMD commands stay as one-line legacy commands; wrapper/native output
+is surfaced directly instead of adding a second UI error wrapper.
 
 Wrapper responses replace only the literal default
 `https://api.saiai.top/saiai-cli` with the trusted public request origin. The
@@ -68,11 +72,13 @@ origin boundary never trusts `X-Forwarded-Host` or `Forwarded`; it accepts
 `X-Forwarded-Proto` only from configured trusted proxies. All `/saiai-cli/*`
 responses use `Cache-Control: no-store`.
 
-The WebUI command contains the selected API Key by explicit product design. It
-must quote the Key separately for POSIX shell and PowerShell. Tests use only
-`TEST_ONLY_*` values and assert both that the command contains the Key and that
-apostrophes are escaped correctly. Release logs and ledgers must never contain
-real user keys.
+The normal Codex WebUI command is the short `init-codex <base_url> <api_key>`
+form, and Claude uses the equivalent short `<base_url> <api_key>` form. Both
+include the selected Gateway and API Key, so each shell must quote the Key
+correctly. The WebUI exposes only the normal Codex CLI path; WebSocket-specific
+setup is not exposed. Tests use only `TEST_ONLY_*` values and assert the
+commands stay concise while escaping apostrophes correctly. Release logs and
+ledgers must never contain real user keys.
 
 The OpenAI API Key setup UI offers one Codex CLI command. It does not expose a
 separate WebSocket setup tab; the Client's explicit `init-codex --websockets`
@@ -116,3 +122,91 @@ only; bootstrap does not advertise Claude Messages dispatch for them.
 The local-proxy client neither calls nor depends on this endpoint. Retaining
 the endpoint does not make `1.1.0` a V2 client and does not permit its manifest
 to claim bootstrap compatibility.
+
+## Codex local-proxy-only group policy
+
+OpenAI groups may set `codex_client_policy=local_proxy_only` to reject the
+legacy `base_url`/API-key route while allowing the current SAIAI local-proxy
+OAuth shape. The request gate applies only to Codex model ingress
+(`/v1/responses`, Responses WebSocket and the Codex models manifest); ChatGPT
+Desktop/VSCode control-plane sidecars are not subject to it.
+
+The gate requires an official Codex client family together with non-empty
+`chatgpt-account-id` and `version` headers. This is an operational migration
+signal, not cryptographic attestation: it is intended to catch stale
+`config.toml`/`init-codex` configurations. Validate each CLI, Desktop and IDE
+version before enabling the policy for a production group. The default remains
+`off` and older clients must not be rejected until the updated client bundle is
+available.
+
+## Experimental native ChatGPT Chat ingress
+
+Ordinary ChatGPT Desktop Chat is not the Responses protocol. The experimental
+ingress is namespaced under `/chatgpt/backend-api/*` and remains disabled by
+default through `gateway.openai_chat_enabled=false`. It accepts only an
+explicit route allowlist and only schedules OpenAI OAuth accounts. The Gateway
+removes the client Authorization/Cookie/account ID, substitutes the selected
+account OAuth token and account ID, preserves the native body/path/query and
+client identity headers, and streams the upstream event response without
+converting it to Responses. `Set-Cookie` and hop-by-hop response headers are
+not returned to the client.
+
+The same experimental namespace includes the Desktop file-asset resolver
+`GET /chatgpt/backend-api/files/download/{file_id}` and the signed asset-byte
+path `GET /chatgpt/backend-api/estuary/content`. The first is a control-plane
+request: the Gateway selects the account bound to the optional
+`conversation_id`, substitutes Gateway-owned OAuth authentication, and passes
+through the provider's short-lived JSON result (`download_url`, `retry`, or
+`error`) without counting a model turn. The second preserves the provider's
+binary response. Current Desktop-signed URLs expose an opaque provider `cid`,
+not the conversation UUID; the present implementation uses it only as a
+best-effort scheduler hash and has been validated with one active staging
+account. Do not treat that value as multi-account conversation affinity. A
+native Chat implementation is not complete for image generation unless both
+resolver paths are available end to end, and production multi-account use
+still requires an explicit file-to-account binding.
+
+`gateway.openai_chat_upstream_base_url` is empty in normal operation. An
+isolated staging stack may point it at a replay/fake provider so the ingress,
+SSE flushing, and request-shape invariants can be tested without contacting a
+real model. Do not enable the public route against `chatgpt.com` until token,
+session/cookie requirements, multi-turn affinity, accounting, and upstream
+error behavior have separate credentialed-staging evidence.
+
+For an explicitly authorized credentialed-staging window,
+`gateway.openai_chat_model_request_cap` places a process-lifetime hard limit on
+final `/f/conversation` upstream attempts; `init`, `prepare`, and Sentinel
+control-plane calls do not consume that limit. Recreate the isolated Gateway
+immediately before the window, set the approved cap, and restore the replay
+upstream immediately afterward. A zero cap disables this safeguard and must
+not be used for a limited live probe.
+
+`gateway.openai_chat_success_turn_price_usd` defaults to zero and
+`gateway.openai_chat_unaccounted_allowed` defaults to false. With both defaults,
+final `/f/conversation` requests are rejected before account selection or
+upstream traffic. A positive finite price enables fixed successful-turn
+billing; only a 2xx response with an observed `message_stream_complete` and no
+provider error costs one turn. The usage row records zero tokens under the
+stable `chatgpt-native-turn` model and charges the configured base price through
+the existing multiplier, subscription/balance, quota, and idempotent billing
+transaction.
+
+Final native Chat turns retain request-context values but detach upstream
+cancellation from a downstream disconnect so the Gateway can observe the real
+terminal result. `gateway.openai_chat_turn_timeout_seconds` defaults to 600 and
+bounds that drain; a request cancelled before forwarding is not sent.
+
+Only an isolated replay or explicitly capped credentialed-staging stack may
+set `gateway.openai_chat_unaccounted_allowed=true`. Control-plane
+`init`/`prepare` requests remain available for protocol research, but this flag
+must never be enabled as a production substitute for accounting.
+
+The versioned native-Chat accounting rules and activation gates are defined in
+[`CHATGPT_NATIVE_ACCOUNTING_CONTRACT.md`](CHATGPT_NATIVE_ACCOUNTING_CONTRACT.md).
+In particular, the Desktop thread-usage endpoint returns a cumulative,
+eventually-consistent conversation snapshot; parsing it does not make it safe
+to pass directly to request-level billing.
+
+`gateway.openai_chat_response_shape_capture` is a default-off, staging-only
+diagnostic. It may record protocol field names but never field values or
+message content and must be disabled immediately after the authorized window.

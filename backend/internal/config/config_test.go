@@ -76,6 +76,26 @@ func TestLoadDefaultSchedulingConfig(t *testing.T) {
 	}
 }
 
+func TestLoadStandardUpstreamConnectionDefaultsAndRollback(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.True(t, cfg.Gateway.StandardUpstreamHTTP2Enabled)
+		require.Equal(t, 2, cfg.Gateway.AccountAuxConnectionReserve)
+	})
+
+	t.Run("rollback overrides", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		t.Setenv("GATEWAY_STANDARD_UPSTREAM_HTTP2_ENABLED", "false")
+		t.Setenv("GATEWAY_ACCOUNT_AUX_CONNECTION_RESERVE", "0")
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.False(t, cfg.Gateway.StandardUpstreamHTTP2Enabled)
+		require.Zero(t, cfg.Gateway.AccountAuxConnectionReserve)
+	})
+}
+
 func TestLoadAnthropicStreamTerminalGraceConfig(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		resetViperWithJWTSecret(t)
@@ -1136,6 +1156,11 @@ func TestValidateConfigErrors(t *testing.T) {
 			name:    "gateway max conns per host",
 			mutate:  func(c *Config) { c.Gateway.MaxConnsPerHost = -1 },
 			wantErr: "gateway.max_conns_per_host",
+		},
+		{
+			name:    "gateway account auxiliary connection reserve",
+			mutate:  func(c *Config) { c.Gateway.AccountAuxConnectionReserve = 65 },
+			wantErr: "gateway.account_aux_connection_reserve",
 		},
 		{
 			name:    "gateway connection isolation",

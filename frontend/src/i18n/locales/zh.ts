@@ -620,8 +620,8 @@ export default {
       openai: {
         description: '运行以下一键命令，安装或复用 SAIAI，并配置 Codex CLI。',
         saiaiCliHint:
-          '命令会合并 Codex provider 配置和 ~/.codex/auth.json；重复执行会替换受管 Gateway 和 Key。',
-        note: '命令中包含当前 API Key，因此可能保留在剪贴板和 shell 历史中；其他 Codex 配置会保留。'
+          '命令会带上当前 Gateway 地址和 API Key，配置 Codex CLI；可重复执行以替换受管 Gateway 和 Key，其他 Codex 配置会保留。',
+        note: '命令中包含 API Key，因此可能保留在剪贴板和 shell 历史中。这里不再提供 WebSocket 专用配置。'
       },
       cliTabs: {
         claudeCode: 'Claude Code',
@@ -1806,6 +1806,7 @@ export default {
         off: '关闭',
         officialClients: '仅官方 Codex 客户端',
         cliOnly: '仅 Codex CLI',
+        localProxyOnly: '仅允许 SAIAI 本地代理',
         audit: '仅审计',
         enforce: '强制限制',
         baseDevices: '基础设备数量'

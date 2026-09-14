@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	stdhttptrace "net/http/httptrace"
 	"net/url"
 	"strings"
 	"sync"
@@ -55,6 +56,8 @@ const (
 
 var errUpstreamClientLimitReached = errors.New("upstream client cache limit reached")
 
+const httpUpstreamTransportMetricsLogInterval = 1024
+
 // poolSettings 连接池配置参数
 // 封装 Transport 所需的各项连接池参数
 type poolSettings struct {
@@ -93,9 +96,34 @@ type upstreamClientEntry struct {
 // 7. 代理变更时清空旧连接池，避免复用错误代理
 // 8. 账号并发数与连接池上限对应（账号隔离策略下）
 type httpUpstreamService struct {
-	cfg     *config.Config                  // 全局配置
-	mu      sync.RWMutex                    // 保护 clients map 的读写锁
-	clients map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
+	cfg              *config.Config                  // 全局配置
+	mu               sync.RWMutex                    // 保护 clients map 的读写锁
+	clients          map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
+	transportMetrics httpUpstreamTransportMetrics
+}
+
+var _ service.HTTPUpstreamTransportMetricsProvider = (*httpUpstreamService)(nil)
+
+type httpUpstreamTransportMetrics struct {
+	requests           atomic.Int64
+	gotConn            atomic.Int64
+	getConnWaitMsTotal atomic.Int64
+	reusedConnections  atomic.Int64
+	newConnections     atomic.Int64
+	http1Responses     atomic.Int64
+	http2Responses     atomic.Int64
+	otherResponses     atomic.Int64
+	requestErrors      atomic.Int64
+	aggregateLogCount  atomic.Uint64
+}
+
+type httpUpstreamConnObservation struct {
+	getConnStartedAt atomic.Int64
+	gotConn          atomic.Int64
+	waitMsTotal      atomic.Int64
+	reused           atomic.Bool
+	wasIdle          atomic.Bool
+	idleMs           atomic.Int64
 }
 
 // NewHTTPUpstream 创建通用 HTTP 上游服务
@@ -110,6 +138,121 @@ func NewHTTPUpstream(cfg *config.Config) service.HTTPUpstream {
 	return &httpUpstreamService{
 		cfg:     cfg,
 		clients: make(map[string]*upstreamClientEntry),
+	}
+}
+
+// SnapshotTransportMetrics returns aggregate, content-free transport metrics.
+func (s *httpUpstreamService) SnapshotTransportMetrics() service.HTTPUpstreamTransportMetricsSnapshot {
+	if s == nil {
+		return service.HTTPUpstreamTransportMetricsSnapshot{}
+	}
+	return service.HTTPUpstreamTransportMetricsSnapshot{
+		Requests:           s.transportMetrics.requests.Load(),
+		GotConn:            s.transportMetrics.gotConn.Load(),
+		GetConnWaitMsTotal: s.transportMetrics.getConnWaitMsTotal.Load(),
+		ReusedConnections:  s.transportMetrics.reusedConnections.Load(),
+		NewConnections:     s.transportMetrics.newConnections.Load(),
+		HTTP1Responses:     s.transportMetrics.http1Responses.Load(),
+		HTTP2Responses:     s.transportMetrics.http2Responses.Load(),
+		OtherResponses:     s.transportMetrics.otherResponses.Load(),
+		RequestErrors:      s.transportMetrics.requestErrors.Load(),
+	}
+}
+
+func (s *httpUpstreamService) withConnectionObservation(req *http.Request) (*http.Request, *httpUpstreamConnObservation) {
+	observation := &httpUpstreamConnObservation{}
+	if s == nil || req == nil {
+		return req, observation
+	}
+	s.transportMetrics.requests.Add(1)
+	trace := &stdhttptrace.ClientTrace{
+		GetConn: func(_ string) {
+			observation.getConnStartedAt.Store(time.Now().UnixNano())
+		},
+		GotConn: func(info stdhttptrace.GotConnInfo) {
+			now := time.Now()
+			waitMs := int64(0)
+			if started := observation.getConnStartedAt.Load(); started > 0 {
+				waitMs = now.Sub(time.Unix(0, started)).Milliseconds()
+				if waitMs < 0 {
+					waitMs = 0
+				}
+			}
+			observation.gotConn.Add(1)
+			observation.waitMsTotal.Add(waitMs)
+			observation.reused.Store(info.Reused)
+			observation.wasIdle.Store(info.WasIdle)
+			observation.idleMs.Store(info.IdleTime.Milliseconds())
+			s.transportMetrics.gotConn.Add(1)
+			s.transportMetrics.getConnWaitMsTotal.Add(waitMs)
+			if info.Reused {
+				s.transportMetrics.reusedConnections.Add(1)
+			} else {
+				s.transportMetrics.newConnections.Add(1)
+			}
+		},
+	}
+	return req.WithContext(stdhttptrace.WithClientTrace(req.Context(), trace)), observation
+}
+
+func (s *httpUpstreamService) recordTransportOutcome(
+	observation *httpUpstreamConnObservation,
+	resp *http.Response,
+	err error,
+	transportKind string,
+	accountID int64,
+	accountConcurrency int,
+	proxyEnabled bool,
+) {
+	if s == nil {
+		return
+	}
+	protocol := ""
+	if err != nil {
+		s.transportMetrics.requestErrors.Add(1)
+	}
+	if resp != nil {
+		protocol = resp.Proto
+		switch resp.ProtoMajor {
+		case 1:
+			s.transportMetrics.http1Responses.Add(1)
+		case 2:
+			s.transportMetrics.http2Responses.Add(1)
+		default:
+			s.transportMetrics.otherResponses.Add(1)
+		}
+	}
+	if observation == nil {
+		observation = &httpUpstreamConnObservation{}
+	}
+	slog.Debug("http_upstream_transport",
+		"transport_kind", transportKind,
+		"account_id", accountID,
+		"account_concurrency", accountConcurrency,
+		"proxy_enabled", proxyEnabled,
+		"standard_http2_enabled", s.standardUpstreamHTTP2Enabled(),
+		"account_aux_connection_reserve", s.accountAuxConnectionReserve(),
+		"protocol", protocol,
+		"got_conn_count", observation.gotConn.Load(),
+		"get_conn_wait_ms", observation.waitMsTotal.Load(),
+		"connection_reused", observation.reused.Load(),
+		"connection_was_idle", observation.wasIdle.Load(),
+		"connection_idle_ms", observation.idleMs.Load(),
+		"request_error", err != nil,
+	)
+	if s.transportMetrics.aggregateLogCount.Add(1)%httpUpstreamTransportMetricsLogInterval == 0 {
+		metrics := s.SnapshotTransportMetrics()
+		slog.Info("http_upstream_transport_metrics",
+			"requests", metrics.Requests,
+			"got_conn", metrics.GotConn,
+			"get_conn_wait_ms_total", metrics.GetConnWaitMsTotal,
+			"reused_connections", metrics.ReusedConnections,
+			"new_connections", metrics.NewConnections,
+			"http1_responses", metrics.HTTP1Responses,
+			"http2_responses", metrics.HTTP2Responses,
+			"other_responses", metrics.OtherResponses,
+			"request_errors", metrics.RequestErrors,
+		)
 	}
 }
 
@@ -143,7 +286,9 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	}
 
 	// 执行请求
+	req, connectionObservation := s.withConnectionObservation(req)
 	resp, err := entry.client.Do(req)
+	s.recordTransportOutcome(connectionObservation, resp, err, "standard", accountID, accountConcurrency, strings.TrimSpace(proxyURL) != "")
 	if err != nil {
 		// 请求失败，立即减少计数
 		atomic.AddInt64(&entry.inFlight, -1)
@@ -225,7 +370,9 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	}
 
 	// 执行请求
+	req, connectionObservation := s.withConnectionObservation(req)
 	resp, err := entry.client.Do(req)
+	s.recordTransportOutcome(connectionObservation, resp, err, "tls_fingerprint", accountID, accountConcurrency, strings.TrimSpace(proxyURL) != "")
 	if err != nil {
 		// 请求失败，立即减少计数
 		atomic.AddInt64(&entry.inFlight, -1)
@@ -320,7 +467,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 
 	// 创建带 TLS 指纹的 Transport
 	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "cache_key", cacheKey, "proxy", proxyKey)
-	settings := s.resolvePoolSettings(isolation, accountConcurrency)
+	settings := s.resolvePoolSettings(isolation, accountConcurrency, false)
 	transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
 	if err != nil {
 		s.mu.Unlock()
@@ -422,7 +569,11 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	// 构建缓存键（根据隔离策略不同）
 	cacheKey := buildCacheKey(isolation, proxyKey, accountID)
 	// 构建连接池配置键（用于检测配置变更）
-	poolKey := s.buildPoolKey(isolation, accountConcurrency)
+	poolKey := s.buildPoolKey(isolation, accountConcurrency) + fmt.Sprintf(
+		":standard:h2:%t:reserve:%d",
+		s.standardUpstreamHTTP2Enabled(),
+		s.accountAuxConnectionReserve(),
+	)
 
 	now := time.Now()
 	nowUnix := now.UnixNano()
@@ -465,12 +616,13 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	}
 
 	// 缓存未命中或需要重建，创建新客户端
-	settings := s.resolvePoolSettings(isolation, accountConcurrency)
+	settings := s.resolvePoolSettings(isolation, accountConcurrency, true)
 	transport, err := buildUpstreamTransport(settings, parsedProxy)
 	if err != nil {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("build transport: %w", err)
 	}
+	transport.ForceAttemptHTTP2 = s.standardUpstreamHTTP2Enabled()
 	client := &http.Client{Transport: transport}
 	if s.shouldValidateResolvedIP() {
 		client.CheckRedirect = s.redirectChecker
@@ -649,17 +801,47 @@ func (s *httpUpstreamService) clientIdleTTL() time.Duration {
 //   - poolSettings: 连接池配置
 //
 // 说明:
-//   - 账户隔离模式下，连接池大小与账户并发数对应
-//   - 这确保了单账户不会占用过多连接资源
-func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcurrency int) poolSettings {
+//   - 账户隔离模式下，基础连接池大小与账户并发数对应
+//   - 标准 Transport 额外加入有界辅助连接余量；TLS 指纹池保持原大小
+func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcurrency int, standardTransport bool) poolSettings {
 	settings := defaultPoolSettings(s.cfg)
-	// 账户隔离模式下，根据账户并发数调整连接池大小
+	// 账户隔离模式下，根据账户并发数调整连接池大小。标准 Transport
+	// 保留少量控制请求余量，避免 HTTP/1.1 长流占满全部连接。
 	if (isolation == config.ConnectionPoolIsolationAccount || isolation == config.ConnectionPoolIsolationAccountProxy) && accountConcurrency > 0 {
-		settings.maxIdleConns = accountConcurrency
-		settings.maxIdleConnsPerHost = accountConcurrency
-		settings.maxConnsPerHost = accountConcurrency
+		poolSize := accountConcurrency
+		if standardTransport {
+			reserve := s.accountAuxConnectionReserve()
+			maxInt := int(^uint(0) >> 1)
+			if reserve > 0 && poolSize <= maxInt-reserve {
+				poolSize += reserve
+			}
+		}
+		settings.maxIdleConns = poolSize
+		settings.maxIdleConnsPerHost = poolSize
+		settings.maxConnsPerHost = poolSize
 	}
 	return settings
+}
+
+func (s *httpUpstreamService) standardUpstreamHTTP2Enabled() bool {
+	if s == nil || s.cfg == nil {
+		return true
+	}
+	return s.cfg.Gateway.StandardUpstreamHTTP2Enabled
+}
+
+func (s *httpUpstreamService) accountAuxConnectionReserve() int {
+	if s == nil || s.cfg == nil {
+		return 2
+	}
+	reserve := s.cfg.Gateway.AccountAuxConnectionReserve
+	if reserve < 0 {
+		return 0
+	}
+	if reserve > 64 {
+		return 64
+	}
+	return reserve
 }
 
 // buildPoolKey 构建连接池配置键

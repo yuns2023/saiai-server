@@ -397,16 +397,34 @@ const getGatewayRoot = (baseUrl: string) => {
   }
 }
 
+const getCodexBaseUrl = (baseUrl: string) => {
+  try {
+    const parsed = new URL(baseUrl, window.location.origin)
+    const path = parsed.pathname.replace(/\/+$/, '')
+    parsed.pathname = path.endsWith('/v1') ? (path || '/v1') : `${path || ''}/v1`
+    return parsed.href.replace(/\/$/, '')
+  } catch {
+    const normalized = baseUrl.replace(/\/+$/, '')
+    return normalized.endsWith('/v1') ? normalized : `${normalized}/v1`
+  }
+}
+
 const shellSingleQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
 const powershellSingleQuote = (value: string) => `'${value.replace(/'/g, "''")}'`
 const shellCliBootstrap = (cliBase: string, args: string) => {
-  return `curl -fsSL ${cliBase}/saiai-cli/setup.sh | bash -s -- ${args}`
+  return args
+    ? `curl -fsSL ${cliBase}/saiai-cli/setup.sh | bash -s -- ${args}`
+    : `curl -fsSL ${cliBase}/saiai-cli/setup.sh | bash`
 }
 const powershellCliBootstrap = (cliBase: string, args: string) => {
   return `irm ${cliBase}/saiai-cli/setup.ps1 | iex; Invoke-Saiai ${args}`
 }
 const cmdCliBootstrap = (cliBase: string, args: string) =>
   `powershell -NoProfile -ExecutionPolicy Bypass -Command "${powershellCliBootstrap(cliBase, args)}"`
+const powershellCodexBootstrap = (cliBase: string, args: string) =>
+  `irm ${cliBase}/saiai-cli/setup.ps1 | iex; Invoke-Saiai ${args}`
+const cmdCodexBootstrap = (cliBase: string, args: string) =>
+  `powershell -NoProfile -ExecutionPolicy Bypass -Command "${powershellCodexBootstrap(cliBase, args)}"`
 
 // Syntax highlighting helpers
 // Generate file configs based on platform and active tab
@@ -454,21 +472,24 @@ function generateClaudeCodeFiles(baseUrl: string, apiKey: string): FileConfig[] 
 
 function generateCodexCliFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const cliBase = getCliBase(baseUrl)
+  const codexBaseUrl = getCodexBaseUrl(baseUrl)
+  const codexArguments = `init-codex ${shellSingleQuote(codexBaseUrl)} ${shellSingleQuote(apiKey)}`
+  const powershellCodexArguments = `init-codex ${powershellSingleQuote(codexBaseUrl)} ${powershellSingleQuote(apiKey)}`
   let path: string
   let content: string
 
   switch (activeTab.value) {
     case 'unix':
       path = 'Terminal'
-      content = shellCliBootstrap(cliBase, `init-codex ${shellSingleQuote(baseUrl)} ${shellSingleQuote(apiKey)}`)
+      content = shellCliBootstrap(cliBase, codexArguments)
       break
     case 'cmd':
       path = 'Command Prompt'
-      content = cmdCliBootstrap(cliBase, `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}`)
+      content = cmdCodexBootstrap(cliBase, powershellCodexArguments)
       break
     case 'powershell':
       path = 'PowerShell'
-      content = powershellCliBootstrap(cliBase, `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}`)
+      content = powershellCodexBootstrap(cliBase, powershellCodexArguments)
       break
     default:
       path = 'Terminal'

@@ -373,13 +373,44 @@ type GatewayConfig struct {
 	GeminiDebugResponseHeaders bool `mapstructure:"gemini_debug_response_headers"`
 	// ConnectionPoolIsolation: 上游连接池隔离策略（proxy/account/account_proxy）
 	ConnectionPoolIsolation string `mapstructure:"connection_pool_isolation"`
-	// ForceCodexCLI: 强制将 OpenAI `/v1/responses` 请求按 Codex CLI 处理。
-	// 用于网关未透传/改写 User-Agent 时的兼容兜底（默认关闭，避免影响其他客户端）。
-	ForceCodexCLI bool `mapstructure:"force_codex_cli"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
+	// OpenAIChatEnabled enables the experimental native ChatGPT conversation
+	// protocol ingress. It is disabled by default until staging verification.
+	OpenAIChatEnabled bool `mapstructure:"openai_chat_enabled"`
+	// OpenAIChatUpstreamBaseURL overrides the native ChatGPT origin for an
+	// isolated replay/fake provider. Empty means https://chatgpt.com.
+	OpenAIChatUpstreamBaseURL string `mapstructure:"openai_chat_upstream_base_url"`
+	// OpenAIChatModelRequestCap limits final /f/conversation requests for a
+	// process lifetime. Zero disables the cap. This is used by credentialed
+	// staging to prevent client retries from exceeding the approved request cap.
+	OpenAIChatModelRequestCap int64 `mapstructure:"openai_chat_model_request_cap"`
+	// OpenAIChatUnaccountedAllowed permits native Chat model requests before a
+	// verified usage parser exists. It must remain false outside isolated tests.
+	OpenAIChatUnaccountedAllowed bool `mapstructure:"openai_chat_unaccounted_allowed"`
+	// OpenAIChatSuccessTurnPriceUSD is the base price for one successfully
+	// completed native Chat turn. Zero disables fixed-turn billing; final model
+	// requests remain rejected unless the isolated unaccounted override is set.
+	OpenAIChatSuccessTurnPriceUSD float64 `mapstructure:"openai_chat_success_turn_price_usd"`
+	// OpenAIChatTurnTimeoutSeconds bounds the detached upstream lifetime for a
+	// final native Chat turn after the downstream client disconnects.
+	OpenAIChatTurnTimeoutSeconds int `mapstructure:"openai_chat_turn_timeout_seconds"`
+	// OpenAIChatResponseShapeCapture records only native Chat SSE event types,
+	// top-level field names, message.metadata field names, and usage-like field
+	// paths. It never records field values or message content and must remain
+	// disabled outside an explicitly authorized isolated capture window.
+	OpenAIChatResponseShapeCapture bool `mapstructure:"openai_chat_response_shape_capture"`
 
 	// HTTP 上游连接池配置（性能优化：支持高并发场景调优）
+	// StandardUpstreamHTTP2Enabled keeps HTTP/2 enabled even though the standard
+	// transport installs a custom TLS root configuration. Disable for rollback
+	// when an upstream or proxy has broken ALPN/HTTP2 behavior.
+	StandardUpstreamHTTP2Enabled bool `mapstructure:"standard_upstream_http2_enabled"`
+	// AccountAuxConnectionReserve adds bounded HTTP/1.1 connection headroom to
+	// standard account-isolated pools so a long model stream cannot occupy every
+	// connection needed by control/auxiliary requests. TLS fingerprint pools do
+	// not use this reserve.
+	AccountAuxConnectionReserve int `mapstructure:"account_aux_connection_reserve"`
 	// MaxIdleConns: 所有主机的最大空闲连接总数
 	MaxIdleConns int `mapstructure:"max_idle_conns"`
 	// MaxIdleConnsPerHost: 每个主机的最大空闲连接数（关键参数，影响连接复用率）
@@ -1357,9 +1388,15 @@ func setDefaults() {
 	viper.SetDefault("gateway.failover_on_400", false)
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
-	viper.SetDefault("gateway.force_codex_cli", false)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）
 	viper.SetDefault("gateway.openai_ws.enabled", true)
+	viper.SetDefault("gateway.openai_chat_enabled", false)
+	viper.SetDefault("gateway.openai_chat_upstream_base_url", "")
+	viper.SetDefault("gateway.openai_chat_model_request_cap", 0)
+	viper.SetDefault("gateway.openai_chat_unaccounted_allowed", false)
+	viper.SetDefault("gateway.openai_chat_success_turn_price_usd", 0)
+	viper.SetDefault("gateway.openai_chat_turn_timeout_seconds", 600)
+	viper.SetDefault("gateway.openai_chat_response_shape_capture", false)
 	viper.SetDefault("gateway.openai_ws.mode_router_v2_enabled", false)
 	viper.SetDefault("gateway.openai_ws.ingress_mode_default", "ctx_pool")
 	viper.SetDefault("gateway.openai_ws.oauth_enabled", true)
@@ -1419,6 +1456,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.sora_media_require_api_key", true)
 	viper.SetDefault("gateway.sora_media_signed_url_ttl_seconds", 900)
 	viper.SetDefault("gateway.connection_pool_isolation", ConnectionPoolIsolationAccountProxy)
+	viper.SetDefault("gateway.standard_upstream_http2_enabled", true)
+	viper.SetDefault("gateway.account_aux_connection_reserve", 2)
 	// HTTP 上游连接池配置（针对 5000+ 并发用户优化）
 	viper.SetDefault("gateway.max_idle_conns", 2560)          // 最大空闲连接总数（高并发场景可调大）
 	viper.SetDefault("gateway.max_idle_conns_per_host", 120)  // 每主机最大空闲连接（HTTP/2 场景默认）
@@ -1884,6 +1923,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.MaxConnsPerHost < 0 {
 		return fmt.Errorf("gateway.max_conns_per_host must be non-negative")
+	}
+	if c.Gateway.AccountAuxConnectionReserve < 0 || c.Gateway.AccountAuxConnectionReserve > 64 {
+		return fmt.Errorf("gateway.account_aux_connection_reserve must be between 0 and 64")
 	}
 	if c.Gateway.IdleConnTimeoutSeconds <= 0 {
 		return fmt.Errorf("gateway.idle_conn_timeout_seconds must be positive")
