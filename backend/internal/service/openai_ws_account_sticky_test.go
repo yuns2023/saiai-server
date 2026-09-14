@@ -82,7 +82,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_RateLimitedMiss(
 	require.Nil(t, selection, "限额中的账号不应继续命中 previous_response_id 粘连")
 	boundAccountID, getErr := store.GetResponseAccount(ctx, groupID, "resp_prev_rl")
 	require.NoError(t, getErr)
-	require.Zero(t, boundAccountID)
+	require.Equal(t, account.ID, boundAccountID, "unavailable account must retain response ownership until the binding expires")
 }
 
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Excluded(t *testing.T) {

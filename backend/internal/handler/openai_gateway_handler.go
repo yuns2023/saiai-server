@@ -683,6 +683,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	// Generate session hash (header first; fallback to prompt_cache_key)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
+	continuationAccountID := int64(0)
+	if previousResponseID != "" {
+		var ownerErr error
+		continuationAccountID, ownerErr = h.gatewayService.OpenAIContinuationAccountID(c.Request.Context(), apiKey.GroupID, previousResponseID)
+		if ownerErr != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "continuation_lookup_failed", "Unable to verify the conversation account")
+			return
+		}
+	}
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -735,6 +744,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Float64("load_skew", scheduleDecision.LoadSkew),
 		)
 		account := selection.Account
+		if !service.OpenAIContinuationAccountMatches(previousResponseID, continuationAccountID, account.ID) {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			h.errorResponse(c, http.StatusConflict, "continuation_account_unavailable", "This conversation cannot continue on a different upstream account. Start a new conversation and retry.")
+			return
+		}
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
@@ -1407,6 +1423,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		firstMessage,
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
 	)
+	continuationAccountID := int64(0)
+	if previousResponseID != "" {
+		continuationAccountID, err = h.gatewayService.OpenAIContinuationAccountID(ctx, apiKey.GroupID, previousResponseID)
+		if err != nil {
+			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "unable to verify conversation account")
+			return
+		}
+	}
 	selection, scheduleDecision, err := h.gatewayService.SelectAccountWithScheduler(
 		ctx,
 		apiKey.GroupID,
@@ -1427,6 +1451,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 
 	account := selection.Account
+	if !service.OpenAIContinuationAccountMatches(previousResponseID, continuationAccountID, account.ID) {
+		if selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "conversation cannot continue on a different upstream account; start a new conversation")
+		return
+	}
 	accountMaxConcurrency := account.Concurrency
 	if selection.WaitPlan != nil && selection.WaitPlan.MaxConcurrency > 0 {
 		accountMaxConcurrency = selection.WaitPlan.MaxConcurrency
