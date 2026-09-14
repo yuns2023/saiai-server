@@ -45,11 +45,11 @@ func OpenAIContinuationAccountMatches(previousResponseID string, ownerAccountID,
 		(ownerAccountID > 0 && selectedAccountID == ownerAccountID)
 }
 
-func openAIWSAccountTurnStateSessionHash(accountID int64, sessionHash string) string {
+func openAIWSAccountTurnStateSessionHash(apiKeyID, accountID int64, sessionHash string) string {
 	if accountID <= 0 || strings.TrimSpace(sessionHash) == "" {
 		return ""
 	}
-	return fmt.Sprintf("account:%d:%s", accountID, sessionHash)
+	return fmt.Sprintf("key:%d:account:%d:%s", apiKeyID, accountID, sessionHash)
 }
 
 func (s *OpenAIGatewayService) openAISessionHashForTurnState(c *gin.Context, promptCacheKey string) string {
@@ -63,7 +63,7 @@ func (s *OpenAIGatewayService) openAISessionHashForTurnState(c *gin.Context, pro
 // resolveOpenAIWSTurnStateForAccount accepts a client-supplied state token for
 // OAuth only when this Gateway has observed it for the selected account. A
 // token from a previous account is never forwarded after a pool switch.
-func (s *OpenAIGatewayService) resolveOpenAIWSTurnStateForAccount(account *Account, groupID int64, sessionHash, incoming string) string {
+func (s *OpenAIGatewayService) resolveOpenAIWSTurnStateForAccount(account *Account, groupID, apiKeyID int64, sessionHash, incoming string) string {
 	incoming = strings.TrimSpace(incoming)
 	if s == nil || account == nil || sessionHash == "" {
 		if account != nil && account.Type == AccountTypeOAuth {
@@ -78,7 +78,7 @@ func (s *OpenAIGatewayService) resolveOpenAIWSTurnStateForAccount(account *Accou
 		}
 		return incoming
 	}
-	stored, ok := store.GetSessionTurnState(groupID, openAIWSAccountTurnStateSessionHash(account.ID, sessionHash))
+	stored, ok := store.GetSessionTurnState(groupID, openAIWSAccountTurnStateSessionHash(apiKeyID, account.ID, sessionHash))
 	if account.Type != AccountTypeOAuth {
 		if incoming != "" {
 			return incoming

@@ -154,7 +154,7 @@ normal expiry, rather than becoming available to a different account.
 
 The provider-facing `session_id` and `conversation_id` headers are stable per
 SAIAI Key, selected account, and incoming value. The Gateway also stores and
-replays `x-codex-turn-state` under the selected account, and does not forward an
+replays `x-codex-turn-state` under the SAIAI Key and selected account, and does not forward an
 unrecognized client token to another pooled account. Client-visible IDs and
 the official Codex `client_metadata` body remain unchanged; the Gateway does
 not copy the reduced turn-metadata header over the full body representation.

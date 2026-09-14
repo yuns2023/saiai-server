@@ -2633,7 +2633,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if sessionHash != "" {
 				s.getOpenAIWSStateStore().BindSessionTurnState(
 					getOpenAIGroupIDFromContext(c),
-					openAIWSAccountTurnStateSessionHash(account.ID, sessionHash),
+					openAIWSAccountTurnStateSessionHash(getAPIKeyIDFromContext(c), account.ID, sessionHash),
 					state,
 					s.openAIWSSessionStickyTTL(),
 				)
@@ -2844,7 +2844,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		// client may still carry an old token after the scheduler switches.
 		req.Header.Del(openAIWSTurnStateHeader)
 		sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
-		if state := s.resolveOpenAIWSTurnStateForAccount(account, getOpenAIGroupIDFromContext(c), sessionHash, c.GetHeader(openAIWSTurnStateHeader)); state != "" {
+		if state := s.resolveOpenAIWSTurnStateForAccount(account, getOpenAIGroupIDFromContext(c), getAPIKeyIDFromContext(c), sessionHash, c.GetHeader(openAIWSTurnStateHeader)); state != "" {
 			req.Header.Set(openAIWSTurnStateHeader, state)
 		}
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。

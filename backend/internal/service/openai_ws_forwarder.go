@@ -1835,7 +1835,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		sessionHash, legacySessionHash = openAIWSSessionHashesFromID(promptCacheKey)
 		attachOpenAILegacySessionHashToGin(c, legacySessionHash)
 	}
-	turnState = s.resolveOpenAIWSTurnStateForAccount(account, groupID, sessionHash, turnState)
+	turnState = s.resolveOpenAIWSTurnStateForAccount(account, groupID, getAPIKeyIDFromContext(c), sessionHash, turnState)
 	preferredConnID := ""
 	if stateStore != nil && previousResponseID != "" {
 		if connID, ok := stateStore.GetResponseConn(previousResponseID); ok {
@@ -1991,7 +1991,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	)
 	if handshakeTurnState != "" {
 		if stateStore != nil && sessionHash != "" {
-			stateStore.BindSessionTurnState(groupID, openAIWSAccountTurnStateSessionHash(account.ID, sessionHash), handshakeTurnState, s.openAIWSSessionStickyTTL())
+			stateStore.BindSessionTurnState(groupID, openAIWSAccountTurnStateSessionHash(getAPIKeyIDFromContext(c), account.ID, sessionHash), handshakeTurnState, s.openAIWSSessionStickyTTL())
 		}
 		if c != nil {
 			c.Header(http.CanonicalHeaderKey(openAIWSTurnStateHeader), handshakeTurnState)
@@ -2646,7 +2646,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	stateStore := s.getOpenAIWSStateStore()
 	groupID := getOpenAIGroupIDFromContext(c)
 	sessionHash := s.GenerateSessionHash(c, firstPayload.rawForHash)
-	turnState = s.resolveOpenAIWSTurnStateForAccount(account, groupID, sessionHash, turnState)
+	turnState = s.resolveOpenAIWSTurnStateForAccount(account, groupID, getAPIKeyIDFromContext(c), sessionHash, turnState)
 
 	preferredConnID := ""
 	if stateStore != nil && firstPayload.previousResponseID != "" {
@@ -2787,7 +2787,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader)); handshakeTurnState != "" {
 			turnState = handshakeTurnState
 			if stateStore != nil && sessionHash != "" {
-				stateStore.BindSessionTurnState(groupID, openAIWSAccountTurnStateSessionHash(account.ID, sessionHash), handshakeTurnState, s.openAIWSSessionStickyTTL())
+				stateStore.BindSessionTurnState(groupID, openAIWSAccountTurnStateSessionHash(getAPIKeyIDFromContext(c), account.ID, sessionHash), handshakeTurnState, s.openAIWSSessionStickyTTL())
 			}
 			updatedHeaders := cloneHeader(baseAcquireReq.Headers)
 			if updatedHeaders == nil {
