@@ -568,7 +568,7 @@ stage_release() {
   echo "[stage 1/3] resolving $REPO release $TAG"
   download_with_stream_limit "$release_json" "$MAX_RELEASE_METADATA_BYTES" \
     -fsSL --retry 3 --connect-timeout 15 \
-    "${api_headers[@]}" "${auth_headers[@]}" \
+    "${api_headers[@]}" "${auth_headers[@]+${auth_headers[@]}}" \
     "${GITHUB_API_URL}/repos/${REPO}/releases/tags/${TAG}"
 
   python3 - "$release_json" "$TAG" "$release_info" "${RELEASE_FILES[@]}" >"$asset_map" <<'PY'
@@ -633,7 +633,7 @@ PY
       -fsSL --retry 3 --connect-timeout 15 \
       -H "Accept: application/octet-stream" \
       -H "X-GitHub-Api-Version: 2022-11-28" \
-      "${auth_headers[@]}" \
+      "${auth_headers[@]+${auth_headers[@]}}" \
       "${GITHUB_API_URL}/repos/${REPO}/releases/assets/${asset_id}"
   done <"$asset_map"
 

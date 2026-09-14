@@ -91,6 +91,10 @@ def verify_activation_and_serving() -> None:
     ):
         require(required in sync, f"activation contract is missing {required!r}")
     require('TAG="${1:-latest}"' not in sync, "activation still accepts latest")
+    require(
+        '"${auth_headers[@]+${auth_headers[@]}}"' in sync,
+        "activation is not compatible with Bash 4.2 empty arrays under nounset",
+    )
 
     activation_tests = text("scripts/saiai-cli/test-sync-saiai-cli.sh")
     for required in (
