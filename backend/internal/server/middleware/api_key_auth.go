@@ -127,10 +127,10 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		})
 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
 		setGroupContext(c, apiKey.Group)
-		// Disabling a group must stop already-issued keys as well as new key
-		// bindings. Keep non-model usage and client-capability reads available.
-		if c.Request.URL.Path != "/v1/usage" && c.Request.URL.Path != "/api/v1/client/bootstrap" && apiKey.GroupID != nil &&
-			(apiKey.Group == nil || !apiKey.Group.IsActive()) {
+		// Disabling a group must stop every API-key route for already-issued
+		// keys as well as new key bindings. In particular, do not let usage or
+		// bootstrap metadata remain available for a disabled group.
+		if apiKey.GroupID != nil && (apiKey.Group == nil || !apiKey.Group.IsActive()) {
 			AbortWithError(c, 403, "GROUP_INACTIVE", "API key group is not active")
 			return
 		}

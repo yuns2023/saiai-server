@@ -119,6 +119,10 @@ API-key authenticated, non-cacheable, non-billable, and must not select an
 upstream account or issue a model request. OpenAI groups expose native Responses
 only; bootstrap does not advertise Claude Messages dispatch for them.
 
+An API Key bound to a non-active group is rejected before bootstrap handling,
+the same as every other API-key route. Disabling a group therefore prevents its
+issued Keys from using bootstrap metadata as well as model and usage endpoints.
+
 The local-proxy client neither calls nor depends on this endpoint. Retaining
 the endpoint does not make `1.1.0` a V2 client and does not permit its manifest
 to claim bootstrap compatibility.

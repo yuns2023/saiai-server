@@ -177,7 +177,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 	})
 }
 
-func TestInactiveGroupStopsExistingKeyModelRequests(t *testing.T) {
+func TestInactiveGroupStopsExistingKeyRequests(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 42, Platform: service.PlatformAnthropic, Status: "inactive", Hydrated: true}
 	user := &service.User{ID: 7, Status: service.StatusActive, Balance: 10}
@@ -198,9 +198,11 @@ func TestInactiveGroupStopsExistingKeyModelRequests(t *testing.T) {
 		router.ServeHTTP(w, req)
 		return w
 	}
-	require.Equal(t, http.StatusForbidden, request("/v1/messages").Code)
-	require.Equal(t, http.StatusOK, request("/v1/usage").Code)
-	require.Equal(t, http.StatusOK, request("/api/v1/client/bootstrap").Code)
+	for _, path := range []string{"/v1/messages", "/v1/usage", "/api/v1/client/bootstrap"} {
+		response := request(path)
+		require.Equal(t, http.StatusForbidden, response.Code, path)
+		require.Contains(t, response.Body.String(), "GROUP_INACTIVE", path)
+	}
 	group.Status = service.StatusActive
 	require.Equal(t, http.StatusOK, request("/v1/messages").Code)
 }

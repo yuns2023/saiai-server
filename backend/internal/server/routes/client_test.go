@@ -105,14 +105,15 @@ func TestClientBootstrapRouteWithRealAPIKeyAuthNeedsNoGatewayServices(t *testing
 	)
 
 	tests := []struct {
-		name   string
-		secret string
-		want   handler.ClientCapabilities
+		name       string
+		secret     string
+		wantStatus int
+		want       handler.ClientCapabilities
 	}{
-		{name: "ungrouped key", secret: "bootstrap-secret-ungrouped", want: handler.ClientCapabilities{}},
-		{name: "inactive group", secret: "bootstrap-secret-inactive", want: handler.ClientCapabilities{}},
-		{name: "Anthropic group", secret: "bootstrap-secret-anthropic", want: handler.ClientCapabilities{Claude: true}},
-		{name: "OpenAI group", secret: "bootstrap-secret-openai", want: handler.ClientCapabilities{Codex: true, CodexResponses: true}},
+		{name: "ungrouped key", secret: "bootstrap-secret-ungrouped", wantStatus: http.StatusOK, want: handler.ClientCapabilities{}},
+		{name: "inactive group", secret: "bootstrap-secret-inactive", wantStatus: http.StatusForbidden},
+		{name: "Anthropic group", secret: "bootstrap-secret-anthropic", wantStatus: http.StatusOK, want: handler.ClientCapabilities{Claude: true}},
+		{name: "OpenAI group", secret: "bootstrap-secret-openai", wantStatus: http.StatusOK, want: handler.ClientCapabilities{Codex: true, CodexResponses: true}},
 	}
 
 	for _, test := range tests {
@@ -122,10 +123,14 @@ func TestClientBootstrapRouteWithRealAPIKeyAuthNeedsNoGatewayServices(t *testing
 			request.Header.Set("Authorization", "Bearer "+test.secret)
 			router.ServeHTTP(recorder, request)
 
-			require.Equal(t, http.StatusOK, recorder.Code)
+			require.Equal(t, test.wantStatus, recorder.Code)
 			require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
 			require.Equal(t, "Authorization", recorder.Header().Get("Vary"))
 			require.NotContains(t, recorder.Body.String(), test.secret)
+			if test.wantStatus != http.StatusOK {
+				require.JSONEq(t, `{"code":"GROUP_INACTIVE","message":"API key group is not active"}`, recorder.Body.String())
+				return
+			}
 
 			var body struct {
 				Code int                         `json:"code"`
@@ -155,7 +160,8 @@ func TestClientBootstrapRouteWithRealAPIKeyAuthNeedsNoGatewayServices(t *testing
 	// A real APIKeyAuthMiddleware performed every lookup and successful touch.
 	// No account selector, gateway service, or upstream transport is constructed.
 	require.Equal(t, len(tests)+1, repo.lookupCalls)
-	require.Equal(t, len(tests), repo.touchCalls)
+	// The disabled group's key is rejected before TouchLastUsed.
+	require.Equal(t, len(tests)-1, repo.touchCalls)
 }
 
 func bootstrapRouteAPIKey(id int64, group *service.Group) *service.APIKey {
