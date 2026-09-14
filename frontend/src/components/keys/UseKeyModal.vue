@@ -308,10 +308,7 @@ const clientTabs = computed((): TabConfig[] => {
   if (!props.platform) return []
 	switch (props.platform) {
 		case 'openai':
-			return [
-				{ id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
-				{ id: 'codex-ws', label: t('keys.useKeyModal.cliTabs.codexCliWs'), icon: TerminalIcon }
-			]
+			return [{ id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon }]
     case 'anthropic':
       return [{ id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon }]
     case 'gemini':
@@ -419,7 +416,7 @@ const currentFiles = computed((): FileConfig[] => {
 
 	switch (props.platform) {
 		case 'openai':
-			return generateCodexCliFiles(baseUrl, apiKey, activeClientTab.value === 'codex-ws')
+			return generateCodexCliFiles(baseUrl, apiKey)
     case 'anthropic':
       return generateClaudeCodeFiles(getGatewayRoot(baseUrl), apiKey)
     case 'gemini':
@@ -455,24 +452,23 @@ function generateClaudeCodeFiles(baseUrl: string, apiKey: string): FileConfig[] 
   return [{ path, content, hint: t('keys.useKeyModal.saiaiCliHint') }]
 }
 
-function generateCodexCliFiles(baseUrl: string, apiKey: string, websockets: boolean): FileConfig[] {
+function generateCodexCliFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const cliBase = getCliBase(baseUrl)
-  const websocketArgument = websockets ? ' --websockets' : ''
   let path: string
   let content: string
 
   switch (activeTab.value) {
     case 'unix':
       path = 'Terminal'
-      content = shellCliBootstrap(cliBase, `init-codex ${shellSingleQuote(baseUrl)} ${shellSingleQuote(apiKey)}${websocketArgument}`)
+      content = shellCliBootstrap(cliBase, `init-codex ${shellSingleQuote(baseUrl)} ${shellSingleQuote(apiKey)}`)
       break
     case 'cmd':
       path = 'Command Prompt'
-      content = cmdCliBootstrap(cliBase, `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}${websocketArgument}`)
+      content = cmdCliBootstrap(cliBase, `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}`)
       break
     case 'powershell':
       path = 'PowerShell'
-      content = powershellCliBootstrap(cliBase, `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}${websocketArgument}`)
+      content = powershellCliBootstrap(cliBase, `init-codex ${powershellSingleQuote(baseUrl)} ${powershellSingleQuote(apiKey)}`)
       break
     default:
       path = 'Terminal'

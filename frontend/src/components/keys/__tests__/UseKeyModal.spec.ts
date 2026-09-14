@@ -117,20 +117,10 @@ describe('UseKeyModal', () => {
       "init-codex 'https://example.com/v1' 'TEST_ONLY_API_KEY'"
     )
     expect(command(codex)).not.toContain('--websockets')
+    expect(codex.findAll('button').map((button) => button.text()).filter((label) =>
+      label.startsWith('keys.useKeyModal.cliTabs.')
+    )).toEqual(['keys.useKeyModal.cliTabs.codexCli'])
     expect(codex.findAll('button').some((button) => button.text().includes('keys.useKeyModal.cliTabs.claudeCode'))).toBe(false)
-  })
-
-  it('adds the Codex WebSocket option only on its explicit tab', async () => {
-    const wrapper = mountModal({ platform: 'openai' })
-    await nextTick()
-    const websocket = wrapper.findAll('button').find((button) =>
-      button.text().includes('keys.useKeyModal.cliTabs.codexCliWs')
-    )
-    expect(websocket).toBeDefined()
-    await websocket!.trigger('click')
-    await nextTick()
-    expect(command(wrapper)).toContain('init-codex')
-    expect(command(wrapper)).toContain('--websockets')
   })
 
   it('keeps direct Gemini configuration', async () => {

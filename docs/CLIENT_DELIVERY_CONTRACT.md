@@ -74,6 +74,10 @@ must quote the Key separately for POSIX shell and PowerShell. Tests use only
 apostrophes are escaped correctly. Release logs and ledgers must never contain
 real user keys.
 
+The OpenAI API Key setup UI offers one Codex CLI command. It does not expose a
+separate WebSocket setup tab; the Client's explicit `init-codex --websockets`
+option remains available for compatibility.
+
 ## Activation
 
 `scripts/sync-saiai-cli.sh stage <tag> <manifest-sha256>` is the only networked
