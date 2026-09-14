@@ -210,7 +210,12 @@ func newLongConnectionTLSServer(
 			slowStarted <- r.Proto
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
-			w.(http.Flusher).Flush()
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				http.Error(w, "streaming fixture requires a flusher", http.StatusInternalServerError)
+				return
+			}
+			flusher.Flush()
 			<-releaseSlow
 			_, _ = io.WriteString(w, "data: done\n\n")
 		case "/fast":
