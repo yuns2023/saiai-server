@@ -110,7 +110,7 @@ describe('UseKeyModal', () => {
     )
   })
 
-  it('keeps OpenAI on Codex by default and offers only Codex clients', async () => {
+  it('keeps OpenAI on Codex by default and includes the Gateway and Key', async () => {
     const codex = mountModal({ platform: 'openai' })
     await nextTick()
     expect(command(codex)).toContain(
@@ -121,6 +121,28 @@ describe('UseKeyModal', () => {
       label.startsWith('keys.useKeyModal.cliTabs.')
     )).toEqual(['keys.useKeyModal.cliTabs.codexCli'])
     expect(codex.findAll('button').some((button) => button.text().includes('keys.useKeyModal.cliTabs.claudeCode'))).toBe(false)
+  })
+
+  it('adds the Responses /v1 suffix when the selected endpoint is a Gateway root', async () => {
+    const codex = mountModal({ platform: 'openai', baseUrl: 'https://example.com' })
+    await nextTick()
+
+    expect(command(codex)).toContain(
+      "init-codex 'https://example.com/v1' 'TEST_ONLY_API_KEY'"
+    )
+  })
+
+  it('renders the short PowerShell Codex command with the Gateway and Key', async () => {
+    const codex = mountModal({ platform: 'openai' })
+    await nextTick()
+    const tab = codex.findAll('button').find((button) => button.text().includes('PowerShell'))
+    expect(tab).toBeDefined()
+    await tab!.trigger('click')
+    await nextTick()
+
+    expect(command(codex)).toBe(
+      "irm https://example.com/saiai-cli/setup.ps1 | iex; Invoke-Saiai init-codex 'https://example.com/v1' 'TEST_ONLY_API_KEY'"
+    )
   })
 
   it('keeps direct Gemini configuration', async () => {

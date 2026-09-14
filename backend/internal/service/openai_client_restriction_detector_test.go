@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -106,19 +105,4 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 		require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
 	})
 
-	t.Run("开启 ForceCodexCLI 时允许通过", func(t *testing.T) {
-		detector := NewOpenAICodexClientRestrictionDetector(&config.Config{
-			Gateway: config.GatewayConfig{ForceCodexCLI: true},
-		})
-		account := &Account{
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeOAuth,
-			Extra:    map[string]any{"codex_cli_only": true},
-		}
-
-		result := detector.Detect(newCodexDetectorTestContext("curl/8.0", "my_client"), account)
-		require.True(t, result.Enabled)
-		require.True(t, result.Matched)
-		require.Equal(t, CodexClientRestrictionReasonForceCodexCLI, result.Reason)
-	})
 }

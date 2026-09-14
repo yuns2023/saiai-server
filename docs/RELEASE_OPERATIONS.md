@@ -88,7 +88,8 @@ Only after explicit production authorization:
    - health and retained bootstrap endpoints as applicable;
    - manifest and all wrapper hashes from the public URL;
    - wrapper origin rendering and `Cache-Control: no-store`;
-   - WebUI shows one escaped command containing only a non-production test Key;
+   - WebUI shows the short normal Codex command with only a non-production
+     test Gateway and Key, with shell-specific escaping;
    - active resolves to the recorded immutable bundle; `.previous` is checked
      only when the release explicitly retains local rollback; and
    - unrelated API service remains available.

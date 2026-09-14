@@ -112,11 +112,13 @@ def verify_activation_and_serving() -> None:
         "publicRequestOrigin(req, s.trustedProxyPrefixes)",
         "requestFromTrustedProxy",
         'c.Header("Cache-Control", "no-store")',
-        "configured bundle is incomplete",
+        "saiaiCLIUnavailableMessage",
+        "temporarily unavailable. Please retry later or contact your administrator.",
     ):
         require(required in embed, f"external wrapper boundary is missing {required!r}")
     require("tryServeCLIWrapper" not in embed, "Gateway still has an embedded-wrapper fallback")
     require('req.Header.Get("X-Forwarded-Host")' not in embed, "wrapper authority trusts X-Forwarded-Host")
+    require("sync-saiai-cli.sh" not in embed, "public wrapper error exposes operator remediation")
 
     for relative in (
         *(f"scripts/saiai-cli/{name}" for name in WRAPPERS),

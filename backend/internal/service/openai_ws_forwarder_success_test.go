@@ -394,8 +394,19 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+	c.Request.Header.Set("OpenAI-Beta", "responses_websockets=client-native")
+	c.Request.Header.Set("originator", "codex_cli_rs")
 	c.Request.Header.Set("session_id", "sess-oauth-1")
 	c.Request.Header.Set("conversation_id", "conv-oauth-1")
+	c.Request.Header.Set("Thread-Id", "thread-oauth-1")
+	c.Request.Header.Set("Version", "0.153.4")
+	c.Request.Header.Set("X-Client-Request-Id", "request-oauth-1")
+	c.Request.Header.Set("X-Codex-Beta-Features", "feature-a")
+	c.Request.Header.Set("X-Codex-Routing-Hint", "route-a")
+	c.Request.Header.Set("X-Codex-Turn-Metadata", "turn-oauth-1")
+	c.Request.Header.Set("X-Codex-Window-Id", "window-oauth-1")
+	c.Request.Header.Set("Sec-WebSocket-Key", "must-not-forward")
+	c.Request.Header.Set("X-Forwarded-For", "must-not-forward")
 
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.Enabled = false
@@ -450,15 +461,56 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 
 	require.NotNil(t, captureConn.lastWrite)
 	requestJSON := requestToJSONString(captureConn.lastWrite)
-	require.True(t, gjson.Get(requestJSON, "store").Exists(), "OAuth WSv2 应显式写入 store 字段")
-	require.False(t, gjson.Get(requestJSON, "store").Bool(), "默认策略应将 OAuth store 置为 false")
-	require.True(t, gjson.Get(requestJSON, "stream").Exists(), "WSv2 payload 应保留 stream 字段")
-	require.True(t, gjson.Get(requestJSON, "stream").Bool(), "OAuth Codex 规范化后应强制 stream=true")
-	require.Equal(t, openAIWSBetaV2Value, captureDialer.lastHeaders.Get("OpenAI-Beta"))
+	require.JSONEq(t, string(body), requestJSON, "官方 Codex OAuth WebSocket payload 必须保持原始 JSON 请求形状")
+	require.Equal(t, true, gjson.Get(requestJSON, "store").Bool(), "官方 Codex OAuth payload 应保留原始 store")
+	require.Equal(t, false, gjson.Get(requestJSON, "stream").Bool(), "官方 Codex OAuth payload 应保留原始 stream")
+	require.Equal(t, "responses_websockets=client-native", captureDialer.lastHeaders.Get("OpenAI-Beta"))
+	require.Equal(t, "codex_cli_rs", captureDialer.lastHeaders.Get("originator"))
+	require.Equal(t, "codex_cli_rs/0.98.0", captureDialer.lastHeaders.Get("User-Agent"))
+	require.Equal(t, "thread-oauth-1", captureDialer.lastHeaders.Get("Thread-Id"))
+	require.Equal(t, "0.153.4", captureDialer.lastHeaders.Get("Version"))
+	require.Equal(t, "request-oauth-1", captureDialer.lastHeaders.Get("X-Client-Request-Id"))
+	require.Equal(t, "feature-a", captureDialer.lastHeaders.Get("X-Codex-Beta-Features"))
+	require.Equal(t, "route-a", captureDialer.lastHeaders.Get("X-Codex-Routing-Hint"))
+	require.Equal(t, "turn-oauth-1", captureDialer.lastHeaders.Get("X-Codex-Turn-Metadata"))
+	require.Equal(t, "window-oauth-1", captureDialer.lastHeaders.Get("X-Codex-Window-Id"))
+	require.Empty(t, captureDialer.lastHeaders.Get("Sec-WebSocket-Key"))
+	require.Empty(t, captureDialer.lastHeaders.Get("X-Forwarded-For"))
 	// OAuth 账号的 session_id/conversation_id 应被 isolateOpenAISessionID 隔离，
 	// 测试中未设置 api_key 到 context，apiKeyID=0。
 	require.Equal(t, isolateOpenAISessionID(0, "sess-oauth-1"), captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, isolateOpenAISessionID(0, "conv-oauth-1"), captureDialer.lastHeaders.Get("conversation_id"))
+}
+
+func TestOpenAIGatewayService_BuildOpenAIWSHeadersIsolatesHyphenatedSessionAliases(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/openai/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.153.4")
+	c.Request.Header.Set("originator", "codex_cli_rs")
+	c.Request.Header.Set("Session-Id", "session-hyphen")
+	c.Request.Header.Set("Conversation-Id", "conversation-hyphen")
+
+	account := &Account{ID: 30, Type: AccountTypeOAuth}
+	svc := &OpenAIGatewayService{}
+	headers, resolution := svc.buildOpenAIWSHeaders(
+		c,
+		account,
+		"oauth-token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		true,
+		"",
+		"",
+		"",
+	)
+
+	require.Equal(t, "header_session_id", resolution.SessionSource)
+	require.Equal(t, "header_conversation_id", resolution.ConversationSource)
+	require.Equal(t, isolateOpenAISessionID(0, "session-hyphen"), headers.Get("session_id"))
+	require.Equal(t, isolateOpenAISessionID(0, "conversation-hyphen"), headers.Get("conversation_id"))
+	require.Empty(t, headers.Get("session-id"))
+	require.Empty(t, headers.Get("conversation-id"))
 }
 
 func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testing.T) {
@@ -472,7 +524,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testi
 	}{
 		{name: "desktop originator preserved", originator: "Codex Desktop", wantOriginator: "Codex Desktop"},
 		{name: "vscode originator preserved", originator: "codex_vscode", wantOriginator: "codex_vscode"},
-		{name: "official ua fallback to codex_cli_rs", userAgent: "Codex Desktop/1.2.3", wantOriginator: "codex_cli_rs"},
+		{name: "official ua without originator remains absent", userAgent: "Codex Desktop/1.2.3", wantOriginator: ""},
 	}
 
 	for _, tt := range tests {

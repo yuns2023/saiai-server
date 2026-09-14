@@ -1,14 +1,17 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -23,6 +26,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
@@ -38,6 +42,7 @@ type OpenAIGatewayHandler struct {
 	concurrencyHelper       *ConcurrencyHelper
 	maxAccountSwitches      int
 	cfg                     *config.Config
+	openAIChatModelRequests atomic.Int64
 }
 
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler
@@ -69,6 +74,432 @@ func NewOpenAIGatewayHandler(
 		concurrencyHelper:       NewConcurrencyHelper(concurrencyService, SSEPingFormatComment, pingInterval),
 		maxAccountSwitches:      maxAccountSwitches,
 		cfg:                     cfg,
+	}
+}
+
+// ChatGPTConversation handles the experimental native ChatGPT conversation
+// protocol. It is intentionally separate from Responses and disabled unless
+// Gateway.OpenAIChatEnabled is explicitly enabled.
+func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
+	requestStart := time.Now()
+	if h == nil || h.cfg == nil || !h.cfg.Gateway.OpenAIChatEnabled {
+		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{
+			"type": "not_found_error", "message": "Native ChatGPT Chat is disabled",
+		}})
+		return
+	}
+	fixedTurnPriceUSD := h.cfg.Gateway.OpenAIChatSuccessTurnPriceUSD
+	fixedTurnBillingEnabled := service.IsValidOpenAIChatGPTTurnPrice(fixedTurnPriceUSD)
+	if strings.TrimSpace(h.cfg.Gateway.OpenAIChatUpstreamBaseURL) == "" && !fixedTurnBillingEnabled {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+			"type": "service_unavailable", "message": "Native ChatGPT Chat requires fixed-turn billing or an explicit staging upstream",
+		}})
+		return
+	}
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformOpenAI {
+		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{
+			"type": "permission_error", "message": "Native ChatGPT Chat requires an OpenAI group",
+		}})
+		return
+	}
+	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	if err != nil || len(body) == 0 || !gjson.ValidBytes(body) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"type": "invalid_request_error", "message": "Invalid ChatGPT conversation body",
+		}})
+		return
+	}
+	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if model == "" {
+		model = "chatgpt"
+	}
+	isModelRequest := c.Request.URL.Path == "/chatgpt/backend-api/f/conversation"
+	if isModelRequest && !fixedTurnBillingEnabled && !h.cfg.Gateway.OpenAIChatUnaccountedAllowed {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+			"type": "accounting_unavailable", "message": "Native ChatGPT Chat accounting is not enabled",
+		}})
+		return
+	}
+	streamStarted := false
+	var reqLog *zap.Logger
+	var subscription *service.UserSubscription
+	if isModelRequest {
+		subject, subjectOK := middleware2.GetAuthSubjectFromContext(c)
+		if !subjectOK {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+				"type": "api_error", "message": "User context not found",
+			}})
+			return
+		}
+		reqLog = requestLogger(
+			c,
+			"handler.openai_gateway.chatgpt_conversation",
+			zap.Int64("user_id", subject.UserID),
+			zap.Int64("api_key_id", apiKey.ID),
+		)
+		if fixedTurnBillingEnabled {
+			if h.billingCacheService == nil || apiKey.User == nil ||
+				((apiKey.Quota > 0 || apiKey.HasRateLimits()) && h.apiKeyService == nil) {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+					"type": "accounting_unavailable", "message": "Native ChatGPT Chat billing dependencies are unavailable",
+				}})
+				return
+			}
+			subscription, _ = middleware2.GetSubscriptionFromContext(c)
+			if err := h.billingCacheService.CheckBillingEligibility(
+				c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription,
+			); err != nil {
+				status, code, message := billingErrorDetails(err)
+				h.errorResponse(c, status, code, message)
+				return
+			}
+		}
+		if h.concurrencyHelper != nil && h.concurrencyHelper.concurrencyService != nil {
+			userRelease, acquired := h.acquireResponsesUserSlot(
+				c, subject.UserID, subject.Concurrency, true, &streamStarted, reqLog,
+			)
+			if !acquired {
+				return
+			}
+			if userRelease != nil {
+				defer userRelease()
+			}
+		}
+	}
+	sessionHash := service.ResolveChatGPTConversationSessionHash(body)
+	if sessionHash == "" {
+		sessionHash = h.gatewayService.GenerateSessionHash(c, body)
+	}
+	var selection *service.AccountSelectionResult
+	excludedIDs := make(map[int64]struct{})
+	for len(excludedIDs) < 64 {
+		candidate, _, selectErr := h.gatewayService.SelectAccountWithScheduler(
+			c.Request.Context(), apiKey.GroupID, "", sessionHash, model, excludedIDs, service.OpenAIUpstreamTransportHTTPSSE,
+		)
+		if selectErr != nil || candidate == nil || candidate.Account == nil {
+			selection = nil
+			break
+		}
+		if candidate.Account.IsOpenAIOAuth() {
+			selection = candidate
+			break
+		}
+		excludedIDs[candidate.Account.ID] = struct{}{}
+	}
+	if selection == nil || selection.Account == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+			"type": "service_unavailable", "message": "No available OpenAI OAuth account",
+		}})
+		return
+	}
+	account := selection.Account
+	if !isModelRequest {
+		// The shared scheduler opportunistically acquires an account slot even
+		// for short native-Chat control-plane requests. They are not model
+		// turns, so release that reservation immediately instead of leaking it
+		// until the final /f/conversation request blocks.
+		releaseChatGPTControlSelection(selection)
+	} else if h.concurrencyHelper != nil && h.concurrencyHelper.concurrencyService != nil {
+		accountRelease, acquired := h.acquireResponsesAccountSlot(
+			c, apiKey.GroupID, sessionHash, selection, true, &streamStarted, reqLog,
+		)
+		if !acquired {
+			return
+		}
+		if accountRelease != nil {
+			defer accountRelease()
+		}
+	}
+	path := c.Request.URL.RequestURI()
+	if isModelRequest {
+		if cap := h.cfg.Gateway.OpenAIChatModelRequestCap; cap > 0 {
+			attempt := h.openAIChatModelRequests.Add(1)
+			if attempt > cap {
+				c.JSON(http.StatusTooManyRequests, gin.H{"error": gin.H{
+					"type": "request_cap_exceeded", "message": "Native ChatGPT staging request cap exceeded",
+				}})
+				return
+			}
+		}
+	}
+	forwardCtx := c.Request.Context()
+	cancelForward := func() {}
+	if isModelRequest {
+		if forwardCtx.Err() != nil {
+			return
+		}
+		turnTimeout := time.Duration(h.cfg.Gateway.OpenAIChatTurnTimeoutSeconds) * time.Second
+		if turnTimeout <= 0 {
+			turnTimeout = 10 * time.Minute
+		}
+		forwardCtx, cancelForward = context.WithTimeout(context.WithoutCancel(forwardCtx), turnTimeout)
+	}
+	defer cancelForward()
+	resp, err := h.gatewayService.ForwardChatGPTConversation(forwardCtx, c, account, body, path)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
+			"type": "upstream_error", "message": "Upstream ChatGPT conversation request failed",
+		}})
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	for key, values := range resp.Header {
+		if !shouldCopyChatGPTResponseHeader(key) {
+			continue
+		}
+		for _, value := range values {
+			c.Writer.Header().Add(key, value)
+		}
+	}
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		c.Header("Cache-Control", "no-cache")
+		c.Header("X-Accel-Buffering", "no")
+	}
+	c.Status(resp.StatusCode)
+	buffer := make([]byte, 32*1024)
+	var streamObserver *service.ChatGPTConversationStreamObserver
+	responseShapeCapture := false
+	if isModelRequest {
+		responseShapeCapture = h.cfg.Gateway.OpenAIChatResponseShapeCapture
+		if responseShapeCapture {
+			streamObserver = service.NewChatGPTConversationStreamShapeObserver()
+		} else {
+			streamObserver = service.NewChatGPTConversationStreamObserver()
+		}
+	}
+	var streamObserverErr error
+	clientDisconnected := false
+	for {
+		n, readErr := resp.Body.Read(buffer)
+		if n > 0 {
+			if streamObserver != nil && streamObserverErr == nil {
+				streamObserverErr = streamObserver.Observe(buffer[:n])
+			}
+			if !clientDisconnected {
+				if _, writeErr := c.Writer.Write(buffer[:n]); writeErr != nil {
+					// Continue draining the upstream response so completion and any
+					// future accounting evidence are not lost solely because the
+					// Desktop client disconnected.
+					clientDisconnected = true
+				} else if flusher, ok := c.Writer.(http.Flusher); ok {
+					flusher.Flush()
+				}
+			}
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) && streamObserver != nil {
+				summary, finishErr := streamObserver.Finish()
+				if streamObserverErr == nil {
+					streamObserverErr = finishErr
+				}
+				if reqLog != nil {
+					fields := []zap.Field{
+						zap.Int64("account_id", account.ID),
+						zap.Bool("completion_seen", summary.CompletionSeen),
+						zap.Bool("done_sentinel_seen", summary.DoneSentinelSeen),
+						zap.Bool("provider_error_seen", summary.ProviderErrorSeen),
+						zap.String("observed_model", summary.ObservedModel),
+					}
+					if responseShapeCapture {
+						fields = append(fields,
+							zap.Strings("event_types", summary.EventTypes),
+							zap.Strings("top_level_fields", summary.TopLevelFields),
+							zap.Strings("message_metadata_fields", summary.MessageMetadataFields),
+							zap.Strings("usage_like_field_paths", summary.UsageLikeFieldPaths),
+						)
+					}
+					if streamObserverErr != nil {
+						reqLog.Warn("openai.chatgpt_stream_observer_failed", append(fields, zap.Error(streamObserverErr))...)
+					} else if responseShapeCapture {
+						reqLog.Info("openai.chatgpt_response_shape_captured", fields...)
+					} else {
+						reqLog.Debug("openai.chatgpt_stream_observed", fields...)
+					}
+				}
+				if streamObserverErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 &&
+					summary.CompletionSeen && !summary.ProviderErrorSeen {
+					stickyHash := service.ChatGPTConversationSessionHash(summary.ConversationID)
+					if stickyHash != "" {
+						_ = h.gatewayService.BindStickySession(
+							c.Request.Context(), apiKey.GroupID, stickyHash, account.ID,
+						)
+					}
+					if fixedTurnBillingEnabled {
+						userAgent := c.GetHeader("User-Agent")
+						clientIP := ip.GetClientIP(c)
+						inboundEndpoint := GetInboundEndpoint(c)
+						upstreamEndpoint := strings.TrimPrefix(c.Request.URL.Path, "/chatgpt")
+						upstreamRequestID := resp.Header.Get("x-request-id")
+						if strings.TrimSpace(upstreamRequestID) == "" {
+							upstreamRequestID = resp.Header.Get("x-openai-request-id")
+						}
+						fallbackRequestID := service.ResolveUsageBillingRequestID(c.Request.Context(), upstreamRequestID)
+						billingIdentity := service.ResolveChatGPTTurnBillingIdentity(body, fallbackRequestID)
+						duration := time.Since(requestStart)
+						h.submitUsageRecordTask(func(ctx context.Context) {
+							if err := h.gatewayService.RecordChatGPTTurnUsage(ctx, &service.OpenAIChatGPTTurnUsageInput{
+								BasePriceUSD:       fixedTurnPriceUSD,
+								RequestID:          billingIdentity.RequestID,
+								APIKey:             apiKey,
+								User:               apiKey.User,
+								Account:            account,
+								Subscription:       subscription,
+								InboundEndpoint:    inboundEndpoint,
+								UpstreamEndpoint:   upstreamEndpoint,
+								UserAgent:          userAgent,
+								IPAddress:          clientIP,
+								RequestPayloadHash: billingIdentity.PayloadHash,
+								Duration:           duration,
+								APIKeyService:      h.apiKeyService,
+							}); err != nil {
+								logger.L().With(
+									zap.String("component", "handler.openai_gateway.chatgpt_conversation"),
+									zap.Int64("api_key_id", apiKey.ID),
+									zap.Int64("account_id", account.ID),
+								).Error("openai.chatgpt_record_turn_failed", zap.Error(err))
+							}
+						})
+					}
+				}
+			}
+			return
+		}
+	}
+}
+
+// ChatGPTFileDownload resolves the short-lived download URL for a native
+// ChatGPT file/image pointer (for example sediment://file_...). It is a
+// control-plane request: preserve the provider JSON and do not count it as a
+// model turn. When the Desktop supplies conversation_id, use the same
+// namespaced sticky identity as the conversation stream so the file belongs to
+// the account that produced it.
+func (h *OpenAIGatewayHandler) ChatGPTFileDownload(c *gin.Context) {
+	fileID := strings.TrimSpace(c.Param("file_id"))
+	if !isSafeChatGPTFileID(fileID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"type": "invalid_request_error", "message": "Invalid ChatGPT file id",
+		}})
+		return
+	}
+	h.chatGPTAssetDownload(c)
+}
+
+// ChatGPTEstuaryContent forwards the signed native ChatGPT asset bytes. The
+// Desktop first resolves a sediment:// file through ChatGPTFileDownload, then
+// follows the returned /backend-api/estuary/content URL.
+func (h *OpenAIGatewayHandler) ChatGPTEstuaryContent(c *gin.Context) {
+	if !isSafeChatGPTFileID(strings.TrimSpace(c.Query("id"))) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"type": "invalid_request_error", "message": "Invalid ChatGPT asset id",
+		}})
+		return
+	}
+	h.chatGPTAssetDownload(c)
+}
+
+func (h *OpenAIGatewayHandler) chatGPTAssetDownload(c *gin.Context) {
+	if h == nil || h.cfg == nil || !h.cfg.Gateway.OpenAIChatEnabled {
+		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{
+			"type": "not_found_error", "message": "Native ChatGPT Chat is disabled",
+		}})
+		return
+	}
+	fixedTurnBillingEnabled := service.IsValidOpenAIChatGPTTurnPrice(h.cfg.Gateway.OpenAIChatSuccessTurnPriceUSD)
+	if strings.TrimSpace(h.cfg.Gateway.OpenAIChatUpstreamBaseURL) == "" && !fixedTurnBillingEnabled {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+			"type": "service_unavailable", "message": "Native ChatGPT Chat requires fixed-turn billing or an explicit staging upstream",
+		}})
+		return
+	}
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformOpenAI {
+		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{
+			"type": "permission_error", "message": "Native ChatGPT Chat requires an OpenAI group",
+		}})
+		return
+	}
+	conversationID := strings.TrimSpace(c.Query("conversation_id"))
+	if conversationID == "" {
+		conversationID = strings.TrimSpace(c.Query("cid"))
+	}
+	sessionHash := ""
+	if conversationID != "" {
+		sessionHash = service.ChatGPTConversationSessionHash(conversationID)
+	}
+	var selection *service.AccountSelectionResult
+	model := "chatgpt"
+	excludedIDs := make(map[int64]struct{})
+	for len(excludedIDs) < 64 {
+		candidate, _, selectErr := h.gatewayService.SelectAccountWithScheduler(
+			c.Request.Context(), apiKey.GroupID, "", sessionHash, model, excludedIDs, service.OpenAIUpstreamTransportHTTPSSE,
+		)
+		if selectErr != nil || candidate == nil || candidate.Account == nil {
+			selection = nil
+			break
+		}
+		if candidate.Account.IsOpenAIOAuth() {
+			selection = candidate
+			break
+		}
+		excludedIDs[candidate.Account.ID] = struct{}{}
+	}
+	if selection == nil || selection.Account == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+			"type": "service_unavailable", "message": "No available OpenAI OAuth account",
+		}})
+		return
+	}
+	account := selection.Account
+	releaseChatGPTControlSelection(selection)
+	path := c.Request.URL.RequestURI()
+	resp, err := h.gatewayService.ForwardChatGPTFileDownload(c.Request.Context(), c, account, path)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
+			"type": "upstream_error", "message": "Upstream ChatGPT asset download request failed",
+		}})
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	for key, values := range resp.Header {
+		if !shouldCopyChatGPTResponseHeader(key) {
+			continue
+		}
+		for _, value := range values {
+			c.Writer.Header().Add(key, value)
+		}
+	}
+	c.Status(resp.StatusCode)
+	_, _ = io.Copy(c.Writer, resp.Body)
+}
+
+func isSafeChatGPTFileID(fileID string) bool {
+	if len(fileID) < 6 || len(fileID) > 256 || !strings.HasPrefix(fileID, "file_") {
+		return false
+	}
+	for _, r := range fileID {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func releaseChatGPTControlSelection(selection *service.AccountSelectionResult) {
+	if selection != nil && selection.Acquired && selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func shouldCopyChatGPTResponseHeader(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+		"te", "trailer", "transfer-encoding", "upgrade", "content-length", "set-cookie":
+		return false
+	default:
+		return true
 	}
 }
 
@@ -122,6 +553,16 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	wireBody := body
+	requestContentEncoding := strings.TrimSpace(c.GetHeader("Content-Encoding"))
+	bodyWasEncoded := false
+	if requestContentEncoding != "" && !strings.EqualFold(requestContentEncoding, "identity") {
+		body, bodyWasEncoded, err = decodeOpenAIRequestBody(body, requestContentEncoding, h.openAIRequestBodyDecodeLimit())
+		if err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to decode request body")
+			return
+		}
+	}
 
 	setOpsRequestContext(c, "", false, body)
 	sessionHashBody := body
@@ -136,6 +577,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		if normalizedCompact {
 			body = normalizedCompactBody
+			if bodyWasEncoded {
+				wireBody = body
+				bodyWasEncoded = false
+				requestContentEncoding = ""
+				c.Request.Header.Del("Content-Encoding")
+			}
 		}
 	}
 
@@ -143,6 +590,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if !gjson.ValidBytes(body) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
+	}
+	if bodyWasEncoded {
+		var parsedBody map[string]any
+		if err := json.Unmarshal(body, &parsedBody); err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			return
+		}
+		c.Set(service.OpenAIParsedRequestBodyKey, parsedBody)
 	}
 
 	// 使用 gjson 只读提取字段做校验，避免完整 Unmarshal
@@ -293,7 +748,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		forwardCtx := service.WithAccountSwitchCount(c.Request.Context(), switchCount, false)
-		result, err := h.gatewayService.Forward(forwardCtx, c, account, body)
+		forwardBody := body
+		if bodyWasEncoded && account.Type == service.AccountTypeOAuth && pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+			c.Request.Header.Set("Content-Encoding", requestContentEncoding)
+			forwardBody = wireBody
+		} else if bodyWasEncoded {
+			c.Request.Header.Del("Content-Encoding")
+		}
+		result, err := h.gatewayService.Forward(forwardCtx, c, account, forwardBody)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -408,6 +870,46 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 }
 
+func (h *OpenAIGatewayHandler) openAIRequestBodyDecodeLimit() int64 {
+	const defaultLimit = int64(256 * 1024 * 1024)
+	if h == nil || h.cfg == nil {
+		return defaultLimit
+	}
+	if h.cfg.Server.MaxRequestBodySize > 0 {
+		return h.cfg.Server.MaxRequestBodySize
+	}
+	if h.cfg.Gateway.MaxBodySize > 0 {
+		return h.cfg.Gateway.MaxBodySize
+	}
+	return defaultLimit
+}
+
+func decodeOpenAIRequestBody(body []byte, contentEncoding string, maxDecodedBytes int64) ([]byte, bool, error) {
+	encoding := strings.ToLower(strings.TrimSpace(contentEncoding))
+	if encoding == "" || encoding == "identity" {
+		return body, false, nil
+	}
+	if encoding != "zstd" {
+		return nil, false, fmt.Errorf("unsupported request content encoding: %s", encoding)
+	}
+	decoder, err := zstd.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return nil, false, fmt.Errorf("initialize zstd request decoder: %w", err)
+	}
+	defer decoder.Close()
+	if maxDecodedBytes <= 0 {
+		maxDecodedBytes = 256 * 1024 * 1024
+	}
+	decoded, err := io.ReadAll(io.LimitReader(decoder, maxDecodedBytes+1))
+	if err != nil {
+		return nil, false, fmt.Errorf("decode zstd request body: %w", err)
+	}
+	if int64(len(decoded)) > maxDecodedBytes {
+		return nil, false, fmt.Errorf("decoded request body exceeds %d bytes", maxDecodedBytes)
+	}
+	return decoded, true, nil
+}
+
 func (h *OpenAIGatewayHandler) submitOpenAIInputModeration(
 	apiKey *service.APIKey,
 	requestID string,
@@ -450,14 +952,46 @@ func codexClientPolicyMatched(c *gin.Context, policy string) bool {
 		return pkgopenai.IsCodexOfficialClientByHeaders(userAgent, originator)
 	case "cli_only":
 		return pkgopenai.IsCodexTerminalRequest(userAgent) || originator == "codex_cli_rs" || originator == "codex_exec"
+	case "local_proxy_only":
+		return codexLocalProxyRequestMatched(c, userAgent, originator)
 	default:
 		return false
 	}
 }
 
+// codexLocalProxyRequestMatched identifies the request shape emitted by the
+// SAIAI local-proxy OAuth path. The client-generated `version` and
+// `chatgpt-account-id` fields are intentionally used as compatibility signals;
+// this is a migration/accidental-configuration gate, not a cryptographic
+// attestation boundary. Base-URL + API-key requests lack both fields, while
+// the observed Base-URL + OAuth hybrid lacks `version`.
+func codexLocalProxyRequestMatched(c *gin.Context, userAgent, originator string) bool {
+	if !pkgopenai.IsCodexOfficialClientByHeaders(userAgent, originator) || c == nil {
+		return false
+	}
+	return strings.TrimSpace(c.GetHeader("chatgpt-account-id")) != "" &&
+		strings.TrimSpace(c.GetHeader("version")) != ""
+}
+
+// codexLocalProxyModelsRequestMatched intentionally omits the `version`
+// requirement. Model discovery is a control-plane compatibility request and
+// some official surfaces do not attach the model-request version header to
+// every discovery attempt; the strict version check remains on Responses
+// model ingress.
+func codexLocalProxyModelsRequestMatched(c *gin.Context) bool {
+	if c == nil || !pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+		return false
+	}
+	return strings.TrimSpace(c.GetHeader("chatgpt-account-id")) != ""
+}
+
 func (h *OpenAIGatewayHandler) validateCodexClientPolicyHTTP(c *gin.Context, group *service.Group) bool {
 	if group == nil || codexClientPolicyMatched(c, group.CodexClientPolicy) {
 		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(group.CodexClientPolicy), "local_proxy_only") {
+		h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", "This group requires SAIAI local proxy mode")
+		return false
 	}
 	h.errorResponse(c, http.StatusForbidden, "official_client_required", "This group only allows approved Codex clients")
 	return false
@@ -509,7 +1043,6 @@ func (h *OpenAIGatewayHandler) logOpenAIRemoteCompactOutcome(c *gin.Context, sta
 		zap.Int("status_code", status),
 		zap.Int64("latency_ms", latencyMs),
 		zap.String("path", path),
-		zap.Bool("force_codex_cli", h != nil && h.cfg != nil && h.cfg.Gateway.ForceCodexCLI),
 	}
 
 	if c != nil {
@@ -814,7 +1347,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	if apiKey.Group != nil && !codexClientPolicyMatched(c, apiKey.Group.CodexClientPolicy) {
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "approved Codex client required")
+		reason := "approved Codex client required"
+		if strings.EqualFold(strings.TrimSpace(apiKey.Group.CodexClientPolicy), "local_proxy_only") {
+			reason = "SAIAI local proxy required"
+		}
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, reason)
 		return
 	}
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(firstMessage, "previous_response_id").String())

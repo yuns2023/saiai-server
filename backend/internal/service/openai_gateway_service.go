@@ -1235,6 +1235,50 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 	return currentHash
 }
 
+// ResolveChatGPTConversationSessionHash derives a namespaced sticky-session
+// hash from the native ChatGPT continuation identity. First turns do not carry
+// conversation_id and are bound after a successful upstream response.
+func ResolveChatGPTConversationSessionHash(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	return ChatGPTConversationSessionHash(gjson.GetBytes(body, "conversation_id").String())
+}
+
+// ChatGPTConversationSessionHash keeps private ChatGPT conversation bindings
+// separate from Responses session identifiers.
+func ChatGPTConversationSessionHash(conversationID string) string {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return ""
+	}
+	currentHash, _ := deriveOpenAISessionHashes("chatgpt:" + conversationID)
+	return currentHash
+}
+
+// ExtractChatGPTConversationID reads the first top-level conversation_id from
+// a native ChatGPT JSON/SSE response. It does not retain message content.
+func ExtractChatGPTConversationID(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	if gjson.ValidBytes(body) {
+		return strings.TrimSpace(gjson.GetBytes(body, "conversation_id").String())
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
+	for scanner.Scan() {
+		data, ok := extractOpenAISSEDataLine(scanner.Text())
+		if !ok || data == "" || data == "[DONE]" || !gjson.Valid(data) {
+			continue
+		}
+		if id := strings.TrimSpace(gjson.Get(data, "conversation_id").String()); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
 // GenerateSessionHashWithFallback 先按常规信号生成会话哈希；
 // 当未携带 session_id/conversation_id/prompt_cache_key 时，使用 fallbackSeed 生成稳定哈希。
 // 该方法用于 WS ingress，避免会话信号缺失时发生跨账号漂移。
@@ -1871,7 +1915,20 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	reqModel, reqStream, promptCacheKey := extractOpenAIRequestMetaFromBody(body)
 	originalModel := reqModel
 
-	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
+	officialCodexClient := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	if account.Type == AccountTypeOAuth && !officialCodexClient {
+		if c != nil {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": gin.H{
+					"type":    "forbidden_error",
+					"message": "OpenAI OAuth accounts require the official Codex client",
+				},
+			})
+		}
+		return nil, errors.New("openai OAuth requires official Codex client")
+	}
+	isCodexCLI := officialCodexClient
+	strictNativeOAuth := account.Type == AccountTypeOAuth && officialCodexClient
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	clientTransport := GetOpenAIClientTransport(c)
 	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
@@ -1980,16 +2037,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	mappedModel := reqModel
 
 	// 规范化 reasoning.effort 参数（minimal -> none），与上游允许值对齐。
-	if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
-		if effort, ok := reasoning["effort"].(string); ok && effort == "minimal" {
-			reasoning["effort"] = "none"
-			bodyModified = true
-			markPatchSet("reasoning.effort", "none")
-			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Normalized reasoning.effort: minimal -> none (account: %s)", account.Name)
+	if !strictNativeOAuth {
+		if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
+			if effort, ok := reasoning["effort"].(string); ok && effort == "minimal" {
+				reasoning["effort"] = "none"
+				bodyModified = true
+				markPatchSet("reasoning.effort", "none")
+				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Normalized reasoning.effort: minimal -> none (account: %s)", account.Name)
+			}
 		}
 	}
 
-	if account.Type == AccountTypeOAuth {
+	if account.Type == AccountTypeOAuth && !strictNativeOAuth {
 		codexResult := applyCodexOAuthTransform(reqBody, isCodexCLI, isOpenAIResponsesCompactPath(c))
 		if codexResult.Modified {
 			bodyModified = true
@@ -2565,6 +2624,131 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 }
 
+// BuildChatGPTConversationRequest builds the experimental native ChatGPT
+// conversation request. The ChatGPT protocol is deliberately kept separate
+// from Responses: the body/path are not converted and only Gateway-owned
+// authentication is replaced.
+func (s *OpenAIGatewayService) BuildChatGPTConversationRequest(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	path string,
+) (*http.Request, string, error) {
+	return s.buildChatGPTRequest(ctx, c, account, http.MethodPost, body, path)
+}
+
+// BuildChatGPTFileDownloadRequest builds the native ChatGPT file-download
+// request used to resolve sediment:// image/file pointers returned by a
+// conversation stream. It keeps the provider's JSON response intact; the
+// caller owns the response body.
+func (s *OpenAIGatewayService) BuildChatGPTFileDownloadRequest(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	path string,
+) (*http.Request, string, error) {
+	return s.buildChatGPTRequest(ctx, c, account, http.MethodGet, nil, path)
+}
+
+func (s *OpenAIGatewayService) buildChatGPTRequest(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	method string,
+	body []byte,
+	path string,
+) (*http.Request, string, error) {
+	if account == nil || !account.IsOpenAIOAuth() {
+		return nil, "", fmt.Errorf("native ChatGPT conversation requires an OpenAI OAuth account")
+	}
+	if !strings.HasPrefix(path, "/chatgpt/backend-api/") {
+		return nil, "", fmt.Errorf("invalid native ChatGPT path: %s", path)
+	}
+	token, _, err := s.GetAccessToken(ctx, account)
+	if err != nil {
+		return nil, "", fmt.Errorf("native ChatGPT OAuth token unavailable: %w", err)
+	}
+	accountID := strings.TrimSpace(account.GetChatGPTAccountID())
+	if accountID == "" {
+		return nil, "", fmt.Errorf("native ChatGPT account id is unavailable")
+	}
+	upstreamPath := strings.TrimPrefix(path, "/chatgpt")
+	baseURL := "https://chatgpt.com"
+	if s != nil && s.cfg != nil {
+		if configured := strings.TrimSpace(s.cfg.Gateway.OpenAIChatUpstreamBaseURL); configured != "" {
+			validated, err := s.validateUpstreamBaseURL(configured)
+			if err != nil {
+				return nil, "", fmt.Errorf("invalid native ChatGPT upstream: %w", err)
+			}
+			baseURL = strings.TrimRight(validated, "/")
+		}
+	}
+	targetURL := baseURL + upstreamPath
+	var requestBody io.Reader
+	if body != nil {
+		requestBody = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, targetURL, requestBody)
+	if err != nil {
+		return nil, "", err
+	}
+	if baseURL == "https://chatgpt.com" {
+		req.Host = "chatgpt.com"
+	}
+	req.Header.Set("authorization", "Bearer "+token)
+	req.Header.Set("chatgpt-account-id", accountID)
+	for key, values := range c.Request.Header {
+		if !shouldCopyOpenAIRequestHeader(key) {
+			continue
+		}
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+	if method != http.MethodGet && req.Header.Get("content-type") == "" {
+		req.Header.Set("content-type", "application/json")
+	}
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+	return req, proxyURL, nil
+}
+
+// ForwardChatGPTConversation sends one experimental native ChatGPT request
+// without Responses conversion. The caller owns and must close the response.
+func (s *OpenAIGatewayService) ForwardChatGPTConversation(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	path string,
+) (*http.Response, error) {
+	req, proxyURL, err := s.BuildChatGPTConversationRequest(ctx, c, account, body, path)
+	if err != nil {
+		return nil, err
+	}
+	return s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+}
+
+// ForwardChatGPTFileDownload forwards the native ChatGPT file-download
+// metadata request without Responses conversion. The response normally
+// contains a short-lived download_url (or retry/error status) that the
+// official Desktop resolver consumes.
+func (s *OpenAIGatewayService) ForwardChatGPTFileDownload(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	path string,
+) (*http.Response, error) {
+	req, proxyURL, err := s.BuildChatGPTFileDownloadRequest(ctx, c, account, path)
+	if err != nil {
+		return nil, err
+	}
+	return s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+}
+
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
 	// Determine target URL based on account type
 	var targetURL string
@@ -2596,6 +2780,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 
 	// Set authentication header
 	req.Header.Set("authorization", "Bearer "+token)
+	strictNativeOAuth := account.Type == AccountTypeOAuth && c != nil && openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
 
 	// Set headers specific to OAuth accounts (ChatGPT internal API)
 	if account.Type == AccountTypeOAuth {
@@ -2622,9 +2807,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		req.Header.Del("conversation_id")
 		req.Header.Del("session_id")
 
-		req.Header.Set("OpenAI-Beta", "responses=experimental")
-		req.Header.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
+		if !strictNativeOAuth {
+			req.Header.Set("OpenAI-Beta", "responses=experimental")
+			req.Header.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
+		}
 		apiKeyID := getAPIKeyIDFromContext(c)
+		incomingSessionID := strings.TrimSpace(c.GetHeader("session_id"))
+		incomingConversationID := strings.TrimSpace(c.GetHeader("conversation_id"))
 		if isOpenAIResponsesCompactPath(c) {
 			req.Header.Set("accept", "application/json")
 			compactSession := resolveOpenAICompactSessionID(c)
@@ -2636,19 +2825,23 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			isolated := isolateOpenAISessionID(apiKeyID, promptCacheKey)
 			req.Header.Set("conversation_id", isolated)
 			req.Header.Set("session_id", isolated)
+		} else {
+			if incomingSessionID != "" {
+				req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, incomingSessionID))
+			}
+			if incomingConversationID != "" {
+				req.Header.Set("conversation_id", isolateOpenAISessionID(apiKeyID, incomingConversationID))
+			}
 		}
 	}
 
-	// Apply custom User-Agent if configured
-	customUA := account.GetOpenAIUserAgent()
-	if customUA != "" {
-		req.Header.Set("user-agent", customUA)
-	}
+	if !strictNativeOAuth {
+		// Apply custom User-Agent if configured
+		customUA := account.GetOpenAIUserAgent()
+		if customUA != "" {
+			req.Header.Set("user-agent", customUA)
+		}
 
-	// 若开启 ForceCodexCLI，则强制将上游 User-Agent 伪装为 Codex CLI。
-	// 用于网关未透传/改写 User-Agent 时，仍能命中 Codex 侧识别逻辑。
-	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		req.Header.Set("user-agent", codexCLIUserAgent)
 	}
 
 	// Ensure required headers exist
@@ -3688,6 +3881,144 @@ type OpenAIRecordUsageInput struct {
 	IPAddress          string // 请求的客户端 IP 地址
 	RequestPayloadHash string
 	APIKeyService      APIKeyQuotaUpdater
+}
+
+const OpenAIChatGPTTurnBillingModel = "chatgpt-native-turn"
+
+// OpenAIChatGPTTurnUsageInput records one completed native ChatGPT turn using
+// an explicit fixed-price contract. It intentionally contains no token usage.
+type OpenAIChatGPTTurnUsageInput struct {
+	BasePriceUSD       float64
+	RequestID          string
+	APIKey             *APIKey
+	User               *User
+	Account            *Account
+	Subscription       *UserSubscription
+	InboundEndpoint    string
+	UpstreamEndpoint   string
+	UserAgent          string
+	IPAddress          string
+	RequestPayloadHash string
+	Duration           time.Duration
+	APIKeyService      APIKeyQuotaUpdater
+}
+
+// IsValidOpenAIChatGPTTurnPrice reports whether a configured fixed price is
+// safe to use for one completed turn.
+func IsValidOpenAIChatGPTTurnPrice(priceUSD float64) bool {
+	return priceUSD > 0 && !math.IsNaN(priceUSD) && !math.IsInf(priceUSD, 0)
+}
+
+// RecordChatGPTTurnUsage records and settles exactly one successfully
+// completed native ChatGPT turn. Completion validation belongs to the caller;
+// this method rejects missing/invalid prices and never synthesizes tokens.
+func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input *OpenAIChatGPTTurnUsageInput) error {
+	if s == nil || input == nil {
+		return errors.New("record ChatGPT turn usage: input is required")
+	}
+	if !IsValidOpenAIChatGPTTurnPrice(input.BasePriceUSD) {
+		return errors.New("record ChatGPT turn usage: positive finite base price is required")
+	}
+	if input.APIKey == nil || input.User == nil || input.Account == nil {
+		return errors.New("record ChatGPT turn usage: API key, user, and account are required")
+	}
+
+	apiKey := input.APIKey
+	user := input.User
+	account := input.Account
+	multiplier := 1.0
+	if s.cfg != nil {
+		multiplier = s.cfg.Default.RateMultiplier
+	}
+	if multiplier <= 0 {
+		multiplier = 1.0
+	}
+	if apiKey.GroupID != nil && apiKey.Group != nil {
+		resolver := s.userGroupRateResolver
+		if resolver == nil {
+			resolver = newUserGroupRateResolver(nil, nil, resolveUserGroupRateCacheTTL(s.cfg), nil, "service.openai_gateway")
+		}
+		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
+		if multiplier <= 0 {
+			multiplier = 1.0
+		}
+	}
+	if math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
+		return errors.New("record ChatGPT turn usage: finite rate multiplier is required")
+	}
+	actualCost := input.BasePriceUSD * multiplier
+	if !IsValidOpenAIChatGPTTurnPrice(actualCost) {
+		return errors.New("record ChatGPT turn usage: effective fixed price is invalid")
+	}
+
+	cost := &CostBreakdown{
+		TotalCost:  input.BasePriceUSD,
+		ActualCost: actualCost,
+	}
+	isSubscriptionBilling := input.Subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	billingType := BillingTypeBalance
+	if isSubscriptionBilling {
+		billingType = BillingTypeSubscription
+	}
+	durationMs := int(input.Duration.Milliseconds())
+	accountRateMultiplier := account.BillingRateMultiplier()
+	requestID := resolveUsageBillingRequestID(ctx, input.RequestID)
+	usageLog := &UsageLog{
+		UserID:                user.ID,
+		APIKeyID:              apiKey.ID,
+		AccountID:             account.ID,
+		RequestID:             requestID,
+		Model:                 OpenAIChatGPTTurnBillingModel,
+		GroupID:               apiKey.GroupID,
+		InputTokens:           0,
+		OutputTokens:          0,
+		TotalCost:             cost.TotalCost,
+		ActualCost:            cost.ActualCost,
+		RateMultiplier:        multiplier,
+		AccountRateMultiplier: &accountRateMultiplier,
+		BillingType:           billingType,
+		RequestType:           RequestTypeStream,
+		Stream:                true,
+		DurationMs:            &durationMs,
+		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
+		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		CreatedAt:             time.Now(),
+	}
+	if input.Subscription != nil {
+		usageLog.SubscriptionID = &input.Subscription.ID
+	}
+	if input.UserAgent != "" {
+		usageLog.UserAgent = &input.UserAgent
+	}
+	if input.IPAddress != "" {
+		usageLog.IPAddress = &input.IPAddress
+	}
+
+	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+		if s.deferredService != nil {
+			s.deferredService.ScheduleLastUsedUpdate(account.ID)
+		}
+		return nil
+	}
+
+	_, err := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+		Cost:                  cost,
+		User:                  user,
+		APIKey:                apiKey,
+		Account:               account,
+		Subscription:          input.Subscription,
+		BillingModel:          OpenAIChatGPTTurnBillingModel,
+		RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
+		IsSubscriptionBill:    isSubscriptionBilling,
+		AccountRateMultiplier: accountRateMultiplier,
+		APIKeyService:         input.APIKeyService,
+	}, s.billingDeps(), s.usageBillingRepo)
+	if err != nil {
+		return err
+	}
+	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+	return nil
 }
 
 // RecordUsage records usage and deducts balance

@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -193,7 +194,9 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthPreservesPreviousResponseI
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
-	c.Request.Header.Set("User-Agent", "codex-tui/0.130.0")
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.130.0")
+	c.Request.Header.Set("OpenAI-Beta", "responses=client-native")
+	c.Request.Header.Set("originator", "codex_cli_rs")
 	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 
 	upstream := &httpUpstreamRecorder{
@@ -222,7 +225,7 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthPreservesPreviousResponseI
 		},
 	}
 
-	body := []byte(`{"model":"gpt-5.5","stream":false,"service_tier":"fast","previous_response_id":"resp_http_keep","input":[{"type":"input_text","text":"hello"}]}`)
+	body := []byte(`{"model":"gpt-5.5","stream":false,"store":true,"service_tier":"fast","reasoning":{"effort":"minimal"},"previous_response_id":"resp_http_keep","input":[{"type":"input_text","text":"hello"}],"metadata":{"trace":"keep"}}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -230,6 +233,94 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthPreservesPreviousResponseI
 	require.Equal(t, "priority", *result.ServiceTier, "ChatGPT Codex /fast 应保留 priority 计费档位")
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "resp_http_keep", gjson.GetBytes(upstream.lastBody, "previous_response_id").String())
+	require.Equal(t, string(body), string(upstream.lastBody), "官方 Codex OAuth HTTPS body 必须保持原始 JSON 请求形状")
+	require.Equal(t, "responses=client-native", upstream.lastReq.Header.Get("OpenAI-Beta"))
+	require.Equal(t, "codex_cli_rs", upstream.lastReq.Header.Get("originator"))
+	require.Equal(t, "codex_cli_rs/0.130.0", upstream.lastReq.Header.Get("User-Agent"))
+}
+
+func TestOpenAIGatewayService_Forward_HTTPIngressOAuthPreservesZstdWireBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.153.4")
+	c.Request.Header.Set("OpenAI-Beta", "responses=client-native")
+	c.Request.Header.Set("originator", "codex_cli_rs")
+	c.Request.Header.Set("Content-Encoding", "zstd")
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	payload := []byte(`{"model":"gpt-5.3-codex","stream":true,"input":"hello"}`)
+	var parsedBody map[string]any
+	require.NoError(t, json.Unmarshal(payload, &parsedBody))
+	c.Set(OpenAIParsedRequestBodyKey, parsedBody)
+	encoder, err := zstd.NewWriter(nil)
+	require.NoError(t, err)
+	wireBody := encoder.EncodeAll(payload, nil)
+	require.NoError(t, encoder.Close())
+
+	upstream := &httpUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_zstd\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+			)),
+		},
+	}
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID:          167,
+		Name:        "openai-oauth-zstd",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "token",
+			"chatgpt_account_id": "chatgpt-acc",
+		},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, wireBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, wireBody, upstream.lastBody)
+	require.Equal(t, "zstd", upstream.lastReq.Header.Get("Content-Encoding"))
+}
+
+func TestOpenAIGatewayService_Forward_HTTPIngressOAuthRejectsNonOfficialClient(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "curl/8.0.1")
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	upstream := &httpUpstreamRecorder{}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID:          167,
+		Name:        "openai-oauth",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "chatgpt-acc"},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.5","input":[{"type":"input_text","text":"hello"}]}`))
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "official Codex client")
+	require.Nil(t, upstream.lastReq, "非官方 OAuth 请求不得触达上游")
 }
 
 func TestOpenAIGatewayService_Forward_HTTPIngressOAuthRetriesStalePreviousResponseID(t *testing.T) {

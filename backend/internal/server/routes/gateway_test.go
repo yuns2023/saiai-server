@@ -96,6 +96,41 @@ func TestRetiredProviderRoutesAreNotRegistered(t *testing.T) {
 	}
 }
 
+func TestChatGPTConversationRouteIsRegisteredButDisabledByDefault(t *testing.T) {
+	router := newGatewayRoutesTestRouter()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/chatgpt/backend-api/f/conversation",
+		strings.NewReader(`{"model":"auto"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.Contains(t, w.Body.String(), "Native ChatGPT Chat is disabled")
+
+	fileReq := httptest.NewRequest(
+		http.MethodGet,
+		"/chatgpt/backend-api/files/download/file_fixture",
+		nil,
+	)
+	fileW := httptest.NewRecorder()
+	router.ServeHTTP(fileW, fileReq)
+	require.Equal(t, http.StatusNotFound, fileW.Code)
+	require.Contains(t, fileW.Body.String(), "Native ChatGPT Chat is disabled")
+
+	assetReq := httptest.NewRequest(
+		http.MethodGet,
+		"/chatgpt/backend-api/estuary/content?id=file_fixture",
+		nil,
+	)
+	assetW := httptest.NewRecorder()
+	router.ServeHTTP(assetW, assetReq)
+	require.Equal(t, http.StatusNotFound, assetW.Code)
+	require.Contains(t, assetW.Body.String(), "Native ChatGPT Chat is disabled")
+}
+
 func TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
 
