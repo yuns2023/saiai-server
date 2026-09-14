@@ -258,7 +258,7 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthPreservesZstdWireBody(t *t
 	encoder, err := zstd.NewWriter(nil)
 	require.NoError(t, err)
 	wireBody := encoder.EncodeAll(payload, nil)
-	encoder.Close()
+	require.NoError(t, encoder.Close())
 
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{

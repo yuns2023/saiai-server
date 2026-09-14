@@ -243,7 +243,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		}})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	for key, values := range resp.Header {
 		if !shouldCopyChatGPTResponseHeader(key) {
 			continue
@@ -460,7 +460,7 @@ func (h *OpenAIGatewayHandler) chatGPTAssetDownload(c *gin.Context) {
 		}})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	for key, values := range resp.Header {
 		if !shouldCopyChatGPTResponseHeader(key) {
 			continue

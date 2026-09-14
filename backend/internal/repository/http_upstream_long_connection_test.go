@@ -79,7 +79,8 @@ func TestHTTP1AuxReservePreventsControlRequestHeadOfLineBlocking(t *testing.T) {
 
 func TestAccountAuxReserveDoesNotChangeTLSFingerprintPoolSize(t *testing.T) {
 	cfg := longConnectionTestConfig(true, 2)
-	svc := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	svc, ok := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	require.True(t, ok)
 	standard := svc.resolvePoolSettings(config.ConnectionPoolIsolationAccountProxy, 1, true)
 	fingerprinted := svc.resolvePoolSettings(config.ConnectionPoolIsolationAccountProxy, 1, false)
 	require.Equal(t, 3, standard.maxConnsPerHost)
@@ -91,11 +92,13 @@ func TestAccountAuxReserveDoesNotChangeTLSFingerprintPoolSize(t *testing.T) {
 func TestStandardHTTP2RollbackSwitchAppliesToDirectAndProxyTransports(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		cfg := longConnectionTestConfig(enabled, 2)
-		svc := NewHTTPUpstream(cfg).(*httpUpstreamService)
+		svc, ok := NewHTTPUpstream(cfg).(*httpUpstreamService)
+		require.True(t, ok)
 		for _, proxyURL := range []string{"", "http://proxy.example:8080", "socks5h://proxy.example:1080"} {
 			entry, err := svc.getOrCreateClient(proxyURL, 1, 1)
 			require.NoError(t, err)
-			transport := entry.client.Transport.(*http.Transport)
+			transport, ok := entry.client.Transport.(*http.Transport)
+			require.True(t, ok)
 			require.Equal(t, enabled, transport.ForceAttemptHTTP2)
 			require.Equal(t, 3, transport.MaxConnsPerHost)
 		}
@@ -114,11 +117,13 @@ func TestStandardHTTP2NegotiatesThroughHTTPConnectProxy(t *testing.T) {
 	proxyServer := newHTTPConnectProxy(t)
 
 	cfg := longConnectionTestConfig(true, 2)
-	svc := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	svc, ok := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	require.True(t, ok)
 	entry, err := svc.getOrCreateClient(proxyServer.URL, 1, 1)
 	require.NoError(t, err)
-	transport := entry.client.Transport.(*http.Transport)
-	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // local fixture only
+	transport, ok := entry.client.Transport.(*http.Transport)
+	require.True(t, ok)
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- local fixture only
 	t.Cleanup(transport.CloseIdleConnections)
 
 	req, err := http.NewRequest(http.MethodGet, target.URL, nil)
@@ -142,11 +147,13 @@ func TestStandardHTTP2NegotiatesThroughSOCKS5HProxy(t *testing.T) {
 	proxyURL := newSOCKS5TestProxy(t)
 
 	cfg := longConnectionTestConfig(true, 2)
-	svc := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	svc, ok := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	require.True(t, ok)
 	entry, err := svc.getOrCreateClient(proxyURL, 1, 1)
 	require.NoError(t, err)
-	transport := entry.client.Transport.(*http.Transport)
-	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // local fixture only
+	transport, ok := entry.client.Transport.(*http.Transport)
+	require.True(t, ok)
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- local fixture only
 	t.Cleanup(transport.CloseIdleConnections)
 
 	req, err := http.NewRequest(http.MethodGet, target.URL, nil)
@@ -178,11 +185,13 @@ func newLongConnectionTestUpstream(
 	accountConcurrency int,
 ) (*httpUpstreamService, *http.Transport) {
 	t.Helper()
-	svc := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	svc, ok := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	require.True(t, ok)
 	entry, err := svc.getOrCreateClient("", 1, accountConcurrency)
 	require.NoError(t, err)
-	transport := entry.client.Transport.(*http.Transport)
-	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // local fixture only
+	transport, ok := entry.client.Transport.(*http.Transport)
+	require.True(t, ok)
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- local fixture only
 	t.Cleanup(transport.CloseIdleConnections)
 	return svc, transport
 }
@@ -271,7 +280,7 @@ func newSOCKS5TestProxy(t *testing.T) string {
 }
 
 func handleSOCKS5TestConnection(client net.Conn) {
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	_ = client.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(client)
 	header := make([]byte, 2)
@@ -326,7 +335,7 @@ func handleSOCKS5TestConnection(client net.Conn) {
 		_, _ = client.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0})
 		return
 	}
-	defer upstream.Close()
+	defer func() { _ = upstream.Close() }()
 	if _, err := client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0}); err != nil {
 		return
 	}
