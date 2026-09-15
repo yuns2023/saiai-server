@@ -95,3 +95,29 @@ func TestAdminService_UpdateUserBalance_NoChangeNoInvalidate(t *testing.T) {
 	require.Empty(t, invalidator.userIDs)
 	require.Empty(t, redeemRepo.created)
 }
+
+func TestAdminService_UpdateUserPaygDiscount_InvalidatesAuthCache(t *testing.T) {
+	one := 1.0
+	discount := 0.75
+	baseRepo := &userRepoStub{user: &User{ID: 7, Role: RoleUser, Status: StatusActive, PaygDiscountMultiplier: &one}}
+	repo := &balanceUserRepoStub{userRepoStub: baseRepo}
+	invalidator := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{userRepo: repo, authCacheInvalidator: invalidator}
+
+	updated, err := svc.UpdateUser(context.Background(), 7, &UpdateUserInput{PaygDiscountMultiplier: &discount})
+	require.NoError(t, err)
+	require.Equal(t, discount, updated.PaygDiscountRate())
+	require.Equal(t, []int64{7}, invalidator.userIDs)
+}
+
+func TestAdminService_UpdateUserPaygDiscount_RejectsInvalidValue(t *testing.T) {
+	one := 1.0
+	invalid := 0.12345
+	baseRepo := &userRepoStub{user: &User{ID: 7, Role: RoleUser, Status: StatusActive, PaygDiscountMultiplier: &one}}
+	repo := &balanceUserRepoStub{userRepoStub: baseRepo}
+	svc := &adminServiceImpl{userRepo: repo}
+
+	_, err := svc.UpdateUser(context.Background(), 7, &UpdateUserInput{PaygDiscountMultiplier: &invalid})
+	require.Error(t, err)
+	require.Empty(t, repo.updated)
+}

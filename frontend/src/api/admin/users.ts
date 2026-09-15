@@ -85,6 +85,7 @@ export async function create(userData: {
   email: string
   password: string
   balance?: number
+  payg_discount_multiplier?: number
   concurrency?: number
   allowed_groups?: number[] | null
 }): Promise<AdminUser> {

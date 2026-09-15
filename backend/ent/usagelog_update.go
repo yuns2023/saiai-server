@@ -539,6 +539,27 @@ func (_u *UsageLogUpdate) AddAccountPaygDiscountMultiplier(v float64) *UsageLogU
 	return _u
 }
 
+// SetUserPaygDiscountMultiplier sets the "user_payg_discount_multiplier" field.
+func (_u *UsageLogUpdate) SetUserPaygDiscountMultiplier(v float64) *UsageLogUpdate {
+	_u.mutation.ResetUserPaygDiscountMultiplier()
+	_u.mutation.SetUserPaygDiscountMultiplier(v)
+	return _u
+}
+
+// SetNillableUserPaygDiscountMultiplier sets the "user_payg_discount_multiplier" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableUserPaygDiscountMultiplier(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetUserPaygDiscountMultiplier(*v)
+	}
+	return _u
+}
+
+// AddUserPaygDiscountMultiplier adds value to the "user_payg_discount_multiplier" field.
+func (_u *UsageLogUpdate) AddUserPaygDiscountMultiplier(v float64) *UsageLogUpdate {
+	_u.mutation.AddUserPaygDiscountMultiplier(v)
+	return _u
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_u *UsageLogUpdate) SetAccountRateMultiplier(v float64) *UsageLogUpdate {
 	_u.mutation.ResetAccountRateMultiplier()
@@ -1042,6 +1063,12 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedAccountPaygDiscountMultiplier(); ok {
 		_spec.AddField(usagelog.FieldAccountPaygDiscountMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.UserPaygDiscountMultiplier(); ok {
+		_spec.SetField(usagelog.FieldUserPaygDiscountMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedUserPaygDiscountMultiplier(); ok {
+		_spec.AddField(usagelog.FieldUserPaygDiscountMultiplier, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)
@@ -1784,6 +1811,27 @@ func (_u *UsageLogUpdateOne) AddAccountPaygDiscountMultiplier(v float64) *UsageL
 	return _u
 }
 
+// SetUserPaygDiscountMultiplier sets the "user_payg_discount_multiplier" field.
+func (_u *UsageLogUpdateOne) SetUserPaygDiscountMultiplier(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetUserPaygDiscountMultiplier()
+	_u.mutation.SetUserPaygDiscountMultiplier(v)
+	return _u
+}
+
+// SetNillableUserPaygDiscountMultiplier sets the "user_payg_discount_multiplier" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableUserPaygDiscountMultiplier(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetUserPaygDiscountMultiplier(*v)
+	}
+	return _u
+}
+
+// AddUserPaygDiscountMultiplier adds value to the "user_payg_discount_multiplier" field.
+func (_u *UsageLogUpdateOne) AddUserPaygDiscountMultiplier(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddUserPaygDiscountMultiplier(v)
+	return _u
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_u *UsageLogUpdateOne) SetAccountRateMultiplier(v float64) *UsageLogUpdateOne {
 	_u.mutation.ResetAccountRateMultiplier()
@@ -2317,6 +2365,12 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.AddedAccountPaygDiscountMultiplier(); ok {
 		_spec.AddField(usagelog.FieldAccountPaygDiscountMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.UserPaygDiscountMultiplier(); ok {
+		_spec.SetField(usagelog.FieldUserPaygDiscountMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedUserPaygDiscountMultiplier(); ok {
+		_spec.AddField(usagelog.FieldUserPaygDiscountMultiplier, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)

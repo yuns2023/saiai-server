@@ -66,6 +66,8 @@ const (
 	FieldModelRateMultiplier = "model_rate_multiplier"
 	// FieldAccountPaygDiscountMultiplier holds the string denoting the account_payg_discount_multiplier field in the database.
 	FieldAccountPaygDiscountMultiplier = "account_payg_discount_multiplier"
+	// FieldUserPaygDiscountMultiplier holds the string denoting the user_payg_discount_multiplier field in the database.
+	FieldUserPaygDiscountMultiplier = "user_payg_discount_multiplier"
 	// FieldAccountRateMultiplier holds the string denoting the account_rate_multiplier field in the database.
 	FieldAccountRateMultiplier = "account_rate_multiplier"
 	// FieldBillingType holds the string denoting the billing_type field in the database.
@@ -168,6 +170,7 @@ var Columns = []string{
 	FieldRateMultiplier,
 	FieldModelRateMultiplier,
 	FieldAccountPaygDiscountMultiplier,
+	FieldUserPaygDiscountMultiplier,
 	FieldAccountRateMultiplier,
 	FieldBillingType,
 	FieldStream,
@@ -235,6 +238,8 @@ var (
 	DefaultModelRateMultiplier float64
 	// DefaultAccountPaygDiscountMultiplier holds the default value on creation for the "account_payg_discount_multiplier" field.
 	DefaultAccountPaygDiscountMultiplier float64
+	// DefaultUserPaygDiscountMultiplier holds the default value on creation for the "user_payg_discount_multiplier" field.
+	DefaultUserPaygDiscountMultiplier float64
 	// DefaultBillingType holds the default value on creation for the "billing_type" field.
 	DefaultBillingType int8
 	// DefaultStream holds the default value on creation for the "stream" field.
@@ -391,6 +396,11 @@ func ByModelRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 // ByAccountPaygDiscountMultiplier orders the results by the account_payg_discount_multiplier field.
 func ByAccountPaygDiscountMultiplier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldAccountPaygDiscountMultiplier, opts...).ToFunc()
+}
+
+// ByUserPaygDiscountMultiplier orders the results by the user_payg_discount_multiplier field.
+func ByUserPaygDiscountMultiplier(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUserPaygDiscountMultiplier, opts...).ToFunc()
 }
 
 // ByAccountRateMultiplier orders the results by the account_rate_multiplier field.

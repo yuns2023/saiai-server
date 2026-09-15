@@ -37,6 +37,20 @@
         <label class="input-label">{{ t('admin.users.columns.concurrency') }}</label>
         <input v-model.number="form.concurrency" type="number" class="input" />
       </div>
+      <div>
+        <label class="input-label">{{ t('admin.users.paygDiscountMultiplier') }}</label>
+        <input
+          v-model.number="form.payg_discount_multiplier"
+          data-testid="user-payg-discount"
+          type="number"
+          min="0"
+          max="1"
+          step="0.0001"
+          required
+          class="input"
+        />
+        <p class="input-hint">{{ t('admin.users.paygDiscountMultiplierHint') }}</p>
+      </div>
       <UserAttributeForm v-model="form.customAttributes" :user-id="user?.id" />
     </form>
     <template #footer>
@@ -66,11 +80,11 @@ const emit = defineEmits(['close', 'success'])
 const { t } = useI18n(); const appStore = useAppStore(); const { copyToClipboard } = useClipboard()
 
 const submitting = ref(false); const passwordCopied = ref(false)
-const form = reactive({ email: '', password: '', username: '', notes: '', concurrency: 1, customAttributes: {} as UserAttributeValuesMap })
+const form = reactive({ email: '', password: '', username: '', notes: '', concurrency: 1, payg_discount_multiplier: 1, customAttributes: {} as UserAttributeValuesMap })
 
 watch(() => props.user, (u) => {
   if (u) {
-    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', concurrency: u.concurrency, customAttributes: {} })
+    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', concurrency: u.concurrency, payg_discount_multiplier: u.payg_discount_multiplier ?? 1, customAttributes: {} })
     passwordCopied.value = false
   }
 }, { immediate: true })
@@ -95,9 +109,13 @@ const handleUpdateUser = async () => {
     appStore.showError(t('admin.users.concurrencyMin'))
     return
   }
+  if (form.payg_discount_multiplier < 0 || form.payg_discount_multiplier > 1) {
+    appStore.showError(t('admin.users.paygDiscountMultiplierInvalid'))
+    return
+  }
   submitting.value = true
   try {
-    const data: any = { email: form.email, username: form.username, notes: form.notes, concurrency: form.concurrency }
+    const data: any = { email: form.email, username: form.username, notes: form.notes, concurrency: form.concurrency, payg_discount_multiplier: form.payg_discount_multiplier }
     if (form.password.trim()) data.password = form.password.trim()
     await adminAPI.users.update(props.user.id, data)
     if (Object.keys(form.customAttributes).length > 0) await adminAPI.userAttributes.updateUserAttributeValues(props.user.id, form.customAttributes)

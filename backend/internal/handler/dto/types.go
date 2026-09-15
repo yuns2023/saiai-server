@@ -23,7 +23,8 @@ type User struct {
 type AdminUser struct {
 	User
 
-	Notes string `json:"notes"`
+	Notes                  string  `json:"notes"`
+	PaygDiscountMultiplier float64 `json:"payg_discount_multiplier"`
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier
 	GroupRates            map[int64]float64 `json:"group_rates,omitempty"`
@@ -397,6 +398,7 @@ type UsageLog struct {
 	RateMultiplier                float64  `json:"rate_multiplier"`
 	ModelRateMultiplier           *float64 `json:"model_rate_multiplier,omitempty"`
 	AccountPaygDiscountMultiplier *float64 `json:"account_payg_discount_multiplier,omitempty"`
+	UserPaygDiscountMultiplier    *float64 `json:"user_payg_discount_multiplier,omitempty"`
 
 	BillingType  int8   `json:"billing_type"`
 	RequestType  string `json:"request_type"`

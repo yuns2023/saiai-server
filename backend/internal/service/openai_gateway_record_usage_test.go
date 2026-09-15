@@ -268,8 +268,8 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
 				ModelRateMultipliers: map[string]float64{"gpt-*": 0.8},
 			},
 		},
-		User:    &User{ID: 2001},
-		Account: &Account{ID: 3001, PaygDiscountMultiplier: &paygDiscount},
+		User:    &User{ID: 2001, PaygDiscountMultiplier: &paygDiscount},
+		Account: &Account{ID: 3001},
 	})
 
 	require.NoError(t, err)
@@ -284,7 +284,7 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
 	require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
 	require.InDelta(t, expected.ActualCost, userRepo.lastAmount, 1e-12)
 	require.Equal(t, 0.8, *usageRepo.lastLog.ModelRateMultiplier)
-	require.Equal(t, paygDiscount, *usageRepo.lastLog.AccountPaygDiscountMultiplier)
+	require.Equal(t, paygDiscount, *usageRepo.lastLog.UserPaygDiscountMultiplier)
 	require.Equal(t, 1, userRepo.deductCalls)
 }
 

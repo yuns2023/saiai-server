@@ -185,6 +185,11 @@ func AccountPaygDiscountMultiplier(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldAccountPaygDiscountMultiplier, v))
 }
 
+// UserPaygDiscountMultiplier applies equality check predicate on the "user_payg_discount_multiplier" field. It's identical to UserPaygDiscountMultiplierEQ.
+func UserPaygDiscountMultiplier(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUserPaygDiscountMultiplier, v))
+}
+
 // AccountRateMultiplier applies equality check predicate on the "account_rate_multiplier" field. It's identical to AccountRateMultiplierEQ.
 func AccountRateMultiplier(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldAccountRateMultiplier, v))
@@ -1323,6 +1328,46 @@ func AccountPaygDiscountMultiplierLT(v float64) predicate.UsageLog {
 // AccountPaygDiscountMultiplierLTE applies the LTE predicate on the "account_payg_discount_multiplier" field.
 func AccountPaygDiscountMultiplierLTE(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldAccountPaygDiscountMultiplier, v))
+}
+
+// UserPaygDiscountMultiplierEQ applies the EQ predicate on the "user_payg_discount_multiplier" field.
+func UserPaygDiscountMultiplierEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUserPaygDiscountMultiplier, v))
+}
+
+// UserPaygDiscountMultiplierNEQ applies the NEQ predicate on the "user_payg_discount_multiplier" field.
+func UserPaygDiscountMultiplierNEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldUserPaygDiscountMultiplier, v))
+}
+
+// UserPaygDiscountMultiplierIn applies the In predicate on the "user_payg_discount_multiplier" field.
+func UserPaygDiscountMultiplierIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldUserPaygDiscountMultiplier, vs...))
+}
+
+// UserPaygDiscountMultiplierNotIn applies the NotIn predicate on the "user_payg_discount_multiplier" field.
+func UserPaygDiscountMultiplierNotIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldUserPaygDiscountMultiplier, vs...))
+}
+
+// UserPaygDiscountMultiplierGT applies the GT predicate on the "user_payg_discount_multiplier" field.
+func UserPaygDiscountMultiplierGT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldUserPaygDiscountMultiplier, v))
+}
+
+// UserPaygDiscountMultiplierGTE applies the GTE predicate on the "user_payg_discount_multiplier" field.
+func UserPaygDiscountMultiplierGTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldUserPaygDiscountMultiplier, v))
+}
+
+// UserPaygDiscountMultiplierLT applies the LT predicate on the "user_payg_discount_multiplier" field.
+func UserPaygDiscountMultiplierLT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldUserPaygDiscountMultiplier, v))
+}
+
+// UserPaygDiscountMultiplierLTE applies the LTE predicate on the "user_payg_discount_multiplier" field.
+func UserPaygDiscountMultiplierLTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldUserPaygDiscountMultiplier, v))
 }
 
 // AccountRateMultiplierEQ applies the EQ predicate on the "account_rate_multiplier" field.

@@ -74,6 +74,8 @@ type UsageLog struct {
 	ModelRateMultiplier float64 `json:"model_rate_multiplier,omitempty"`
 	// AccountPaygDiscountMultiplier holds the value of the "account_payg_discount_multiplier" field.
 	AccountPaygDiscountMultiplier float64 `json:"account_payg_discount_multiplier,omitempty"`
+	// UserPaygDiscountMultiplier holds the value of the "user_payg_discount_multiplier" field.
+	UserPaygDiscountMultiplier float64 `json:"user_payg_discount_multiplier,omitempty"`
 	// AccountRateMultiplier holds the value of the "account_rate_multiplier" field.
 	AccountRateMultiplier *float64 `json:"account_rate_multiplier,omitempty"`
 	// BillingType holds the value of the "billing_type" field.
@@ -183,7 +185,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
-		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheCreation5mCost, usagelog.FieldCacheCreation1hCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldModelRateMultiplier, usagelog.FieldAccountPaygDiscountMultiplier, usagelog.FieldAccountRateMultiplier:
+		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheCreation5mCost, usagelog.FieldCacheCreation1hCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldModelRateMultiplier, usagelog.FieldAccountPaygDiscountMultiplier, usagelog.FieldUserPaygDiscountMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
 		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount:
 			values[i] = new(sql.NullInt64)
@@ -371,6 +373,12 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field account_payg_discount_multiplier", values[i])
 			} else if value.Valid {
 				_m.AccountPaygDiscountMultiplier = value.Float64
+			}
+		case usagelog.FieldUserPaygDiscountMultiplier:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field user_payg_discount_multiplier", values[i])
+			} else if value.Valid {
+				_m.UserPaygDiscountMultiplier = value.Float64
 			}
 		case usagelog.FieldAccountRateMultiplier:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -597,6 +605,9 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("account_payg_discount_multiplier=")
 	builder.WriteString(fmt.Sprintf("%v", _m.AccountPaygDiscountMultiplier))
+	builder.WriteString(", ")
+	builder.WriteString("user_payg_discount_multiplier=")
+	builder.WriteString(fmt.Sprintf("%v", _m.UserPaygDiscountMultiplier))
 	builder.WriteString(", ")
 	if v := _m.AccountRateMultiplier; v != nil {
 		builder.WriteString("account_rate_multiplier=")

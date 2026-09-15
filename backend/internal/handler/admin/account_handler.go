@@ -510,6 +510,10 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if req.PaygDiscountMultiplier != nil {
+		response.BadRequest(c, "payg_discount_multiplier is a user setting; configure it in user management")
+		return
+	}
 	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
@@ -522,23 +526,22 @@ func (h *AccountHandler) Create(c *gin.Context) {
 
 	result, err := executeAdminIdempotent(c, "admin.accounts.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		account, execErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
-			Name:                   req.Name,
-			Notes:                  req.Notes,
-			Platform:               req.Platform,
-			Type:                   req.Type,
-			Credentials:            req.Credentials,
-			Extra:                  req.Extra,
-			ProxyID:                req.ProxyID,
-			Concurrency:            req.Concurrency,
-			Priority:               req.Priority,
-			RateMultiplier:         req.RateMultiplier,
-			PaygDiscountMultiplier: req.PaygDiscountMultiplier,
-			LoadFactor:             req.LoadFactor,
-			GroupIDs:               req.GroupIDs,
-			ExpiresAt:              req.ExpiresAt,
-			AutoPauseOnExpired:     req.AutoPauseOnExpired,
-			SkipDefaultGroupBind:   req.SkipDefaultGroupBind != nil && *req.SkipDefaultGroupBind,
-			SkipMixedChannelCheck:  skipCheck,
+			Name:                  req.Name,
+			Notes:                 req.Notes,
+			Platform:              req.Platform,
+			Type:                  req.Type,
+			Credentials:           req.Credentials,
+			Extra:                 req.Extra,
+			ProxyID:               req.ProxyID,
+			Concurrency:           req.Concurrency,
+			Priority:              req.Priority,
+			RateMultiplier:        req.RateMultiplier,
+			LoadFactor:            req.LoadFactor,
+			GroupIDs:              req.GroupIDs,
+			ExpiresAt:             req.ExpiresAt,
+			AutoPauseOnExpired:    req.AutoPauseOnExpired,
+			SkipDefaultGroupBind:  req.SkipDefaultGroupBind != nil && *req.SkipDefaultGroupBind,
+			SkipMixedChannelCheck: skipCheck,
 		})
 		if execErr != nil {
 			return nil, execErr
@@ -584,6 +587,10 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if req.PaygDiscountMultiplier != nil {
+		response.BadRequest(c, "payg_discount_multiplier is a user setting; configure it in user management")
+		return
+	}
 	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
@@ -595,22 +602,21 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
 	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
-		Name:                   req.Name,
-		Notes:                  req.Notes,
-		Type:                   req.Type,
-		Credentials:            req.Credentials,
-		Extra:                  req.Extra,
-		ProxyID:                req.ProxyID,
-		Concurrency:            req.Concurrency, // 指针类型，nil 表示未提供
-		Priority:               req.Priority,    // 指针类型，nil 表示未提供
-		RateMultiplier:         req.RateMultiplier,
-		PaygDiscountMultiplier: req.PaygDiscountMultiplier,
-		LoadFactor:             req.LoadFactor,
-		Status:                 req.Status,
-		GroupIDs:               req.GroupIDs,
-		ExpiresAt:              req.ExpiresAt,
-		AutoPauseOnExpired:     req.AutoPauseOnExpired,
-		SkipMixedChannelCheck:  skipCheck,
+		Name:                  req.Name,
+		Notes:                 req.Notes,
+		Type:                  req.Type,
+		Credentials:           req.Credentials,
+		Extra:                 req.Extra,
+		ProxyID:               req.ProxyID,
+		Concurrency:           req.Concurrency, // 指针类型，nil 表示未提供
+		Priority:              req.Priority,    // 指针类型，nil 表示未提供
+		RateMultiplier:        req.RateMultiplier,
+		LoadFactor:            req.LoadFactor,
+		Status:                req.Status,
+		GroupIDs:              req.GroupIDs,
+		ExpiresAt:             req.ExpiresAt,
+		AutoPauseOnExpired:    req.AutoPauseOnExpired,
+		SkipMixedChannelCheck: skipCheck,
 	})
 	if err != nil {
 		// 检查是否为混合渠道错误
@@ -1361,6 +1367,15 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 		results := make([]gin.H, 0, len(req.Accounts))
 
 		for _, item := range req.Accounts {
+			if item.PaygDiscountMultiplier != nil {
+				failed++
+				results = append(results, gin.H{
+					"name":    item.Name,
+					"success": false,
+					"error":   "payg_discount_multiplier is a user setting; configure it in user management",
+				})
+				continue
+			}
 			if item.RateMultiplier != nil && *item.RateMultiplier < 0 {
 				failed++
 				results = append(results, gin.H{
@@ -1377,21 +1392,20 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 			skipCheck := item.ConfirmMixedChannelRisk != nil && *item.ConfirmMixedChannelRisk
 
 			account, err := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
-				Name:                   item.Name,
-				Notes:                  item.Notes,
-				Platform:               item.Platform,
-				Type:                   item.Type,
-				Credentials:            item.Credentials,
-				Extra:                  item.Extra,
-				ProxyID:                item.ProxyID,
-				Concurrency:            item.Concurrency,
-				Priority:               item.Priority,
-				RateMultiplier:         item.RateMultiplier,
-				PaygDiscountMultiplier: item.PaygDiscountMultiplier,
-				GroupIDs:               item.GroupIDs,
-				ExpiresAt:              item.ExpiresAt,
-				AutoPauseOnExpired:     item.AutoPauseOnExpired,
-				SkipMixedChannelCheck:  skipCheck,
+				Name:                  item.Name,
+				Notes:                 item.Notes,
+				Platform:              item.Platform,
+				Type:                  item.Type,
+				Credentials:           item.Credentials,
+				Extra:                 item.Extra,
+				ProxyID:               item.ProxyID,
+				Concurrency:           item.Concurrency,
+				Priority:              item.Priority,
+				RateMultiplier:        item.RateMultiplier,
+				GroupIDs:              item.GroupIDs,
+				ExpiresAt:             item.ExpiresAt,
+				AutoPauseOnExpired:    item.AutoPauseOnExpired,
+				SkipMixedChannelCheck: skipCheck,
 			})
 			if err != nil {
 				failed++
@@ -1433,7 +1447,6 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-
 	// Validate value type based on field
 	if req.Field == "intercept_warmup_requests" {
 		// Must be boolean
@@ -1515,6 +1528,10 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if req.PaygDiscountMultiplier != nil {
+		response.BadRequest(c, "payg_discount_multiplier is a user setting; configure it in user management")
+		return
+	}
 	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
@@ -1530,7 +1547,6 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		req.Concurrency != nil ||
 		req.Priority != nil ||
 		req.RateMultiplier != nil ||
-		req.PaygDiscountMultiplier != nil ||
 		req.LoadFactor != nil ||
 		req.Status != "" ||
 		req.Schedulable != nil ||
@@ -1544,20 +1560,19 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	}
 
 	result, err := h.adminService.BulkUpdateAccounts(c.Request.Context(), &service.BulkUpdateAccountsInput{
-		AccountIDs:             req.AccountIDs,
-		Name:                   req.Name,
-		ProxyID:                req.ProxyID,
-		Concurrency:            req.Concurrency,
-		Priority:               req.Priority,
-		RateMultiplier:         req.RateMultiplier,
-		PaygDiscountMultiplier: req.PaygDiscountMultiplier,
-		LoadFactor:             req.LoadFactor,
-		Status:                 req.Status,
-		Schedulable:            req.Schedulable,
-		GroupIDs:               req.GroupIDs,
-		Credentials:            req.Credentials,
-		Extra:                  req.Extra,
-		SkipMixedChannelCheck:  skipCheck,
+		AccountIDs:            req.AccountIDs,
+		Name:                  req.Name,
+		ProxyID:               req.ProxyID,
+		Concurrency:           req.Concurrency,
+		Priority:              req.Priority,
+		RateMultiplier:        req.RateMultiplier,
+		LoadFactor:            req.LoadFactor,
+		Status:                req.Status,
+		Schedulable:           req.Schedulable,
+		GroupIDs:              req.GroupIDs,
+		Credentials:           req.Credentials,
+		Extra:                 req.Extra,
+		SkipMixedChannelCheck: skipCheck,
 	})
 	if err != nil {
 		var mixedErr *service.MixedChannelError

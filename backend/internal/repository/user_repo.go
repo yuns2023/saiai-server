@@ -60,6 +60,7 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 		SetPasswordHash(userIn.PasswordHash).
 		SetRole(userIn.Role).
 		SetBalance(userIn.Balance).
+		SetNillablePaygDiscountMultiplier(userIn.PaygDiscountMultiplier).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
 		SetSoraStorageQuotaBytes(userIn.SoraStorageQuotaBytes).
@@ -143,6 +144,7 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		SetPasswordHash(userIn.PasswordHash).
 		SetRole(userIn.Role).
 		SetBalance(userIn.Balance).
+		SetNillablePaygDiscountMultiplier(userIn.PaygDiscountMultiplier).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
 		SetSoraStorageQuotaBytes(userIn.SoraStorageQuotaBytes).

@@ -25272,6 +25272,8 @@ type UsageLogMutation struct {
 	addmodel_rate_multiplier            *float64
 	account_payg_discount_multiplier    *float64
 	addaccount_payg_discount_multiplier *float64
+	user_payg_discount_multiplier       *float64
+	adduser_payg_discount_multiplier    *float64
 	account_rate_multiplier             *float64
 	addaccount_rate_multiplier          *float64
 	billing_type                        *int8
@@ -26731,6 +26733,62 @@ func (m *UsageLogMutation) ResetAccountPaygDiscountMultiplier() {
 	m.addaccount_payg_discount_multiplier = nil
 }
 
+// SetUserPaygDiscountMultiplier sets the "user_payg_discount_multiplier" field.
+func (m *UsageLogMutation) SetUserPaygDiscountMultiplier(f float64) {
+	m.user_payg_discount_multiplier = &f
+	m.adduser_payg_discount_multiplier = nil
+}
+
+// UserPaygDiscountMultiplier returns the value of the "user_payg_discount_multiplier" field in the mutation.
+func (m *UsageLogMutation) UserPaygDiscountMultiplier() (r float64, exists bool) {
+	v := m.user_payg_discount_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUserPaygDiscountMultiplier returns the old "user_payg_discount_multiplier" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldUserPaygDiscountMultiplier(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUserPaygDiscountMultiplier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUserPaygDiscountMultiplier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUserPaygDiscountMultiplier: %w", err)
+	}
+	return oldValue.UserPaygDiscountMultiplier, nil
+}
+
+// AddUserPaygDiscountMultiplier adds f to the "user_payg_discount_multiplier" field.
+func (m *UsageLogMutation) AddUserPaygDiscountMultiplier(f float64) {
+	if m.adduser_payg_discount_multiplier != nil {
+		*m.adduser_payg_discount_multiplier += f
+	} else {
+		m.adduser_payg_discount_multiplier = &f
+	}
+}
+
+// AddedUserPaygDiscountMultiplier returns the value that was added to the "user_payg_discount_multiplier" field in this mutation.
+func (m *UsageLogMutation) AddedUserPaygDiscountMultiplier() (r float64, exists bool) {
+	v := m.adduser_payg_discount_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetUserPaygDiscountMultiplier resets all changes to the "user_payg_discount_multiplier" field.
+func (m *UsageLogMutation) ResetUserPaygDiscountMultiplier() {
+	m.user_payg_discount_multiplier = nil
+	m.adduser_payg_discount_multiplier = nil
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (m *UsageLogMutation) SetAccountRateMultiplier(f float64) {
 	m.account_rate_multiplier = &f
@@ -27526,7 +27584,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 38)
+	fields := make([]string, 0, 39)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -27604,6 +27662,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.account_payg_discount_multiplier != nil {
 		fields = append(fields, usagelog.FieldAccountPaygDiscountMultiplier)
+	}
+	if m.user_payg_discount_multiplier != nil {
+		fields = append(fields, usagelog.FieldUserPaygDiscountMultiplier)
 	}
 	if m.account_rate_multiplier != nil {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
@@ -27701,6 +27762,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.ModelRateMultiplier()
 	case usagelog.FieldAccountPaygDiscountMultiplier:
 		return m.AccountPaygDiscountMultiplier()
+	case usagelog.FieldUserPaygDiscountMultiplier:
+		return m.UserPaygDiscountMultiplier()
 	case usagelog.FieldAccountRateMultiplier:
 		return m.AccountRateMultiplier()
 	case usagelog.FieldBillingType:
@@ -27786,6 +27849,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldModelRateMultiplier(ctx)
 	case usagelog.FieldAccountPaygDiscountMultiplier:
 		return m.OldAccountPaygDiscountMultiplier(ctx)
+	case usagelog.FieldUserPaygDiscountMultiplier:
+		return m.OldUserPaygDiscountMultiplier(ctx)
 	case usagelog.FieldAccountRateMultiplier:
 		return m.OldAccountRateMultiplier(ctx)
 	case usagelog.FieldBillingType:
@@ -28001,6 +28066,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetAccountPaygDiscountMultiplier(v)
 		return nil
+	case usagelog.FieldUserPaygDiscountMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUserPaygDiscountMultiplier(v)
+		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		v, ok := value.(float64)
 		if !ok {
@@ -28144,6 +28216,9 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addaccount_payg_discount_multiplier != nil {
 		fields = append(fields, usagelog.FieldAccountPaygDiscountMultiplier)
 	}
+	if m.adduser_payg_discount_multiplier != nil {
+		fields = append(fields, usagelog.FieldUserPaygDiscountMultiplier)
+	}
 	if m.addaccount_rate_multiplier != nil {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
 	}
@@ -28201,6 +28276,8 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedModelRateMultiplier()
 	case usagelog.FieldAccountPaygDiscountMultiplier:
 		return m.AddedAccountPaygDiscountMultiplier()
+	case usagelog.FieldUserPaygDiscountMultiplier:
+		return m.AddedUserPaygDiscountMultiplier()
 	case usagelog.FieldAccountRateMultiplier:
 		return m.AddedAccountRateMultiplier()
 	case usagelog.FieldBillingType:
@@ -28338,6 +28415,13 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddAccountPaygDiscountMultiplier(v)
+		return nil
+	case usagelog.FieldUserPaygDiscountMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddUserPaygDiscountMultiplier(v)
 		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		v, ok := value.(float64)
@@ -28548,6 +28632,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 	case usagelog.FieldAccountPaygDiscountMultiplier:
 		m.ResetAccountPaygDiscountMultiplier()
 		return nil
+	case usagelog.FieldUserPaygDiscountMultiplier:
+		m.ResetUserPaygDiscountMultiplier()
+		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		m.ResetAccountRateMultiplier()
 		return nil
@@ -28748,6 +28835,8 @@ type UserMutation struct {
 	role                          *string
 	balance                       *float64
 	addbalance                    *float64
+	payg_discount_multiplier      *float64
+	addpayg_discount_multiplier   *float64
 	concurrency                   *int
 	addconcurrency                *int
 	status                        *string
@@ -29174,6 +29263,62 @@ func (m *UserMutation) AddedBalance() (r float64, exists bool) {
 func (m *UserMutation) ResetBalance() {
 	m.balance = nil
 	m.addbalance = nil
+}
+
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (m *UserMutation) SetPaygDiscountMultiplier(f float64) {
+	m.payg_discount_multiplier = &f
+	m.addpayg_discount_multiplier = nil
+}
+
+// PaygDiscountMultiplier returns the value of the "payg_discount_multiplier" field in the mutation.
+func (m *UserMutation) PaygDiscountMultiplier() (r float64, exists bool) {
+	v := m.payg_discount_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPaygDiscountMultiplier returns the old "payg_discount_multiplier" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldPaygDiscountMultiplier(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPaygDiscountMultiplier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPaygDiscountMultiplier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPaygDiscountMultiplier: %w", err)
+	}
+	return oldValue.PaygDiscountMultiplier, nil
+}
+
+// AddPaygDiscountMultiplier adds f to the "payg_discount_multiplier" field.
+func (m *UserMutation) AddPaygDiscountMultiplier(f float64) {
+	if m.addpayg_discount_multiplier != nil {
+		*m.addpayg_discount_multiplier += f
+	} else {
+		m.addpayg_discount_multiplier = &f
+	}
+}
+
+// AddedPaygDiscountMultiplier returns the value that was added to the "payg_discount_multiplier" field in this mutation.
+func (m *UserMutation) AddedPaygDiscountMultiplier() (r float64, exists bool) {
+	v := m.addpayg_discount_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetPaygDiscountMultiplier resets all changes to the "payg_discount_multiplier" field.
+func (m *UserMutation) ResetPaygDiscountMultiplier() {
+	m.payg_discount_multiplier = nil
+	m.addpayg_discount_multiplier = nil
 }
 
 // SetConcurrency sets the "concurrency" field.
@@ -30106,7 +30251,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 16)
+	fields := make([]string, 0, 17)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -30127,6 +30272,9 @@ func (m *UserMutation) Fields() []string {
 	}
 	if m.balance != nil {
 		fields = append(fields, user.FieldBalance)
+	}
+	if m.payg_discount_multiplier != nil {
+		fields = append(fields, user.FieldPaygDiscountMultiplier)
 	}
 	if m.concurrency != nil {
 		fields = append(fields, user.FieldConcurrency)
@@ -30177,6 +30325,8 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.Role()
 	case user.FieldBalance:
 		return m.Balance()
+	case user.FieldPaygDiscountMultiplier:
+		return m.PaygDiscountMultiplier()
 	case user.FieldConcurrency:
 		return m.Concurrency()
 	case user.FieldStatus:
@@ -30218,6 +30368,8 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldRole(ctx)
 	case user.FieldBalance:
 		return m.OldBalance(ctx)
+	case user.FieldPaygDiscountMultiplier:
+		return m.OldPaygDiscountMultiplier(ctx)
 	case user.FieldConcurrency:
 		return m.OldConcurrency(ctx)
 	case user.FieldStatus:
@@ -30294,6 +30446,13 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetBalance(v)
 		return nil
+	case user.FieldPaygDiscountMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPaygDiscountMultiplier(v)
+		return nil
 	case user.FieldConcurrency:
 		v, ok := value.(int)
 		if !ok {
@@ -30368,6 +30527,9 @@ func (m *UserMutation) AddedFields() []string {
 	if m.addbalance != nil {
 		fields = append(fields, user.FieldBalance)
 	}
+	if m.addpayg_discount_multiplier != nil {
+		fields = append(fields, user.FieldPaygDiscountMultiplier)
+	}
 	if m.addconcurrency != nil {
 		fields = append(fields, user.FieldConcurrency)
 	}
@@ -30387,6 +30549,8 @@ func (m *UserMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case user.FieldBalance:
 		return m.AddedBalance()
+	case user.FieldPaygDiscountMultiplier:
+		return m.AddedPaygDiscountMultiplier()
 	case user.FieldConcurrency:
 		return m.AddedConcurrency()
 	case user.FieldSoraStorageQuotaBytes:
@@ -30408,6 +30572,13 @@ func (m *UserMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddBalance(v)
+		return nil
+	case user.FieldPaygDiscountMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPaygDiscountMultiplier(v)
 		return nil
 	case user.FieldConcurrency:
 		v, ok := value.(int)
@@ -30498,6 +30669,9 @@ func (m *UserMutation) ResetField(name string) error {
 		return nil
 	case user.FieldBalance:
 		m.ResetBalance()
+		return nil
+	case user.FieldPaygDiscountMultiplier:
+		m.ResetPaygDiscountMultiplier()
 		return nil
 	case user.FieldConcurrency:
 		m.ResetConcurrency()

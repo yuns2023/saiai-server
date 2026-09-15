@@ -94,12 +94,14 @@ func (s *UserRepoSuite) mustCreateSubscription(userID, groupID int64, mutate fun
 // --- Create / GetByID / GetByEmail / Update / Delete ---
 
 func (s *UserRepoSuite) TestCreate() {
+	discount := 0.8
 	user := s.mustCreateUser(&service.User{
-		Email:        "create@test.com",
-		Username:     "testuser",
-		PasswordHash: "test-password-hash",
-		Role:         service.RoleUser,
-		Status:       service.StatusActive,
+		Email:                  "create@test.com",
+		Username:               "testuser",
+		PasswordHash:           "test-password-hash",
+		Role:                   service.RoleUser,
+		Status:                 service.StatusActive,
+		PaygDiscountMultiplier: &discount,
 	})
 
 	s.Require().NotZero(user.ID, "expected ID to be set")
@@ -107,6 +109,7 @@ func (s *UserRepoSuite) TestCreate() {
 	got, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err, "GetByID")
 	s.Require().Equal("create@test.com", got.Email)
+	s.Require().Equal(discount, got.PaygDiscountRate())
 }
 
 func (s *UserRepoSuite) TestCreateHonorsExternalTransactionRollback() {
@@ -153,11 +156,14 @@ func (s *UserRepoSuite) TestUpdate() {
 	got, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err)
 	got.Username = "updated"
+	discount := 0.75
+	got.PaygDiscountMultiplier = &discount
 	s.Require().NoError(s.repo.Update(s.ctx, got), "Update")
 
 	updated, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err, "GetByID after update")
 	s.Require().Equal("updated", updated.Username)
+	s.Require().Equal(discount, updated.PaygDiscountRate())
 }
 
 func (s *UserRepoSuite) TestDelete() {

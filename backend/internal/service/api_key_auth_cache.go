@@ -28,12 +28,13 @@ type APIKeyAuthSnapshot struct {
 
 // APIKeyAuthUserSnapshot 用户快照
 type APIKeyAuthUserSnapshot struct {
-	ID          int64   `json:"id"`
-	Username    string  `json:"username,omitempty"`
-	Status      string  `json:"status"`
-	Role        string  `json:"role"`
-	Balance     float64 `json:"balance"`
-	Concurrency int     `json:"concurrency"`
+	ID                     int64    `json:"id"`
+	Username               string   `json:"username,omitempty"`
+	Status                 string   `json:"status"`
+	Role                   string   `json:"role"`
+	Balance                float64  `json:"balance"`
+	PaygDiscountMultiplier *float64 `json:"payg_discount_multiplier,omitempty"`
+	Concurrency            int      `json:"concurrency"`
 }
 
 // APIKeyAuthGroupSnapshot 分组快照

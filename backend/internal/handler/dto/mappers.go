@@ -59,11 +59,12 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 		return nil
 	}
 	return &AdminUser{
-		User:                  *base,
-		Notes:                 u.Notes,
-		GroupRates:            u.GroupRates,
-		SoraStorageQuotaBytes: u.SoraStorageQuotaBytes,
-		SoraStorageUsedBytes:  u.SoraStorageUsedBytes,
+		User:                   *base,
+		Notes:                  u.Notes,
+		PaygDiscountMultiplier: u.PaygDiscountRate(),
+		GroupRates:             u.GroupRates,
+		SoraStorageQuotaBytes:  u.SoraStorageQuotaBytes,
+		SoraStorageUsedBytes:   u.SoraStorageUsedBytes,
 	}
 }
 
@@ -596,6 +597,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		RateMultiplier:                l.RateMultiplier,
 		ModelRateMultiplier:           l.ModelRateMultiplier,
 		AccountPaygDiscountMultiplier: l.AccountPaygDiscountMultiplier,
+		UserPaygDiscountMultiplier:    l.UserPaygDiscountMultiplier,
 		BillingType:                   l.BillingType,
 		RequestType:                   requestType.String(),
 		Stream:                        stream,

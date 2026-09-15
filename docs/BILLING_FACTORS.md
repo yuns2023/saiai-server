@@ -5,7 +5,7 @@ recorded usage and the applicable model or media price. Balance-billed
 `actual_cost` is:
 
 ```text
-total_cost × effective group/user rate × group billed-model rate × account payg discount
+total_cost × effective group/user rate × group billed-model rate × user payg discount
 ```
 
 The group model rate matches the model ID passed to cost calculation
@@ -18,17 +18,23 @@ rules do not change upstream routing, and `billingModel` can differ from the
 displayed upstream model.
 
 The group model rate is between `0` and `100`.
-The account payg discount is between `0` and `1`, defaults to `1`, and applies
-only to balance billing. Both configured factors allow up to four decimal
+The user payg discount is between `0` and `1`, defaults to `1`, and applies
+to all of that user's API keys, groups, and selected upstream accounts, but only
+to balance billing. Both configured factors allow up to four decimal
 places. A zero factor makes that component free. These factors
 do not change account cost (`total_cost × account_rate_multiplier`) or
 subscription window usage, which continues to use `total_cost`.
 
+Administrators configure the discount on the user create/edit forms. The
+legacy `accounts.payg_discount_multiplier` column remains available only for
+rollback and historical-data compatibility and does not affect new billing.
+
 Usage logs retain the effective group/user rate and snapshots of the model
-rate and payg discount. Older rows read as `1` for both new factors. Changing
-an account or group later cannot change the explanation of a past bill.
+rate and user payg discount. Rows created before migration 095 retain the old
+account discount snapshot separately; new rows keep that legacy factor at `1`.
+Changing a user or group later cannot change the explanation of a past bill.
 
 The existing configured model-pricing aliases remain authoritative. In
 particular, a configured Fable 5.1 → Fable 5 alias continues to use the Fable 5
-price for every token category. The new account discount and group model rate
+price for every token category. The user discount and group model rate
 are separate user-billing factors and do not change that base price mapping.
