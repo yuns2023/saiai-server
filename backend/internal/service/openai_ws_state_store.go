@@ -40,10 +40,11 @@ type openAIWSSessionConnBinding struct {
 }
 
 // OpenAIWSStateStore 管理 WSv2 的粘连状态。
-// - response_id -> account_id 用于续链路由
+// - group + SAIAI Key + response_id -> account_id 用于续链路由
 // - response_id -> conn_id 用于连接内上下文复用
 //
-// response_id -> account_id 优先走 GatewayCache（Redis），同时维护本地热缓存。
+// response_id -> account_id 优先走 GatewayCache（Redis），同时维护本地热缓存；
+// 兼容方法使用 apiKeyID=0，Codex Responses 使用实际 Key ID。
 // response_id -> conn_id 仅在本进程内有效。
 type OpenAIWSStateStore interface {
 	BindResponseAccount(ctx context.Context, groupID int64, responseID string, accountID int64, ttl time.Duration) error
