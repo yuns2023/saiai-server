@@ -146,8 +146,9 @@ available.
 ## Codex Responses account-switch boundary
 
 Completed HTTP and WebSocket Responses bind their provider-issued response ID to
-the selected upstream account. A request with `previous_response_id` is sent
-only to that bound account; an unknown binding or a switch to another account
+the requesting SAIAI Key and selected upstream account within the group. An
+official Codex OAuth request with `previous_response_id` is sent only to that
+Key's bound account; an unknown binding or a switch to another account
 returns a conversation-restart error before provider egress. This includes
 temporarily unavailable accounts: their response ownership remains until its
 normal expiry, rather than becoming available to a different account.
@@ -159,7 +160,7 @@ unrecognized client token to another pooled account. Client-visible IDs and
 the official Codex `client_metadata` body remain unchanged; the Gateway does
 not copy the reduced turn-metadata header over the full body representation.
 
-Existing continuations without a recorded response-to-account binding may
+Existing official Codex OAuth continuations without a recorded response-to-account binding may
 need a fresh Codex conversation after activation. This is intentional: the
 Gateway cannot establish which upstream account issued an unknown response ID.
 

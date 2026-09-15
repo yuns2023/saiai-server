@@ -22,6 +22,7 @@ const (
 
 type OpenAIAccountScheduleRequest struct {
 	GroupID            *int64
+	APIKeyID           int64
 	SessionHash        string
 	StickyAccountID    int64
 	PreviousResponseID string
@@ -234,9 +235,10 @@ func (s *defaultOpenAIAccountScheduler) Select(
 
 	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
 	if previousResponseID != "" {
-		selection, err := s.service.SelectAccountByPreviousResponseID(
+		selection, err := s.service.SelectAccountByPreviousResponseIDForAPIKey(
 			ctx,
 			req.GroupID,
+			req.APIKeyID,
 			previousResponseID,
 			req.RequestedModel,
 			req.ExcludedIDs,
@@ -865,6 +867,19 @@ func (s *OpenAIGatewayService) SelectAccountWithScheduler(
 	excludedIDs map[int64]struct{},
 	requiredTransport OpenAIUpstreamTransport,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	return s.SelectAccountWithSchedulerForAPIKey(ctx, groupID, 0, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport)
+}
+
+func (s *OpenAIGatewayService) SelectAccountWithSchedulerForAPIKey(
+	ctx context.Context,
+	groupID *int64,
+	apiKeyID int64,
+	previousResponseID string,
+	sessionHash string,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	requiredTransport OpenAIUpstreamTransport,
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	decision := OpenAIAccountScheduleDecision{}
 	scheduler := s.getOpenAIAccountScheduler()
 	if scheduler == nil {
@@ -882,6 +897,7 @@ func (s *OpenAIGatewayService) SelectAccountWithScheduler(
 
 	return scheduler.Select(ctx, OpenAIAccountScheduleRequest{
 		GroupID:            groupID,
+		APIKeyID:           apiKeyID,
 		SessionHash:        sessionHash,
 		StickyAccountID:    stickyAccountID,
 		PreviousResponseID: previousResponseID,

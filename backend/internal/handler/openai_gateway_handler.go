@@ -683,15 +683,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	// Generate session hash (header first; fallback to prompt_cache_key)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
-	continuationAccountID := int64(0)
-	if previousResponseID != "" {
-		var ownerErr error
-		continuationAccountID, ownerErr = h.gatewayService.OpenAIContinuationAccountID(c.Request.Context(), apiKey.GroupID, previousResponseID)
-		if ownerErr != nil {
-			h.errorResponse(c, http.StatusServiceUnavailable, "continuation_lookup_failed", "Unable to verify the conversation account")
-			return
-		}
-	}
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -702,9 +693,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	for {
 		// Select account supporting the requested model
 		reqLog.Debug("openai.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
-		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithScheduler(
+		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForAPIKey(
 			c.Request.Context(),
 			apiKey.GroupID,
+			apiKey.ID,
 			previousResponseID,
 			sessionHash,
 			reqModel,
@@ -744,12 +736,22 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Float64("load_skew", scheduleDecision.LoadSkew),
 		)
 		account := selection.Account
-		if !service.OpenAIContinuationAccountMatches(previousResponseID, continuationAccountID, account.ID) {
-			if selection.ReleaseFunc != nil {
-				selection.ReleaseFunc()
+		if enforceCodexContinuationAccountBoundary(c, account) && previousResponseID != "" {
+			continuationAccountID, ownerErr := h.gatewayService.OpenAIContinuationAccountID(c.Request.Context(), apiKey.GroupID, apiKey.ID, previousResponseID)
+			if ownerErr != nil {
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				h.errorResponse(c, http.StatusServiceUnavailable, "continuation_lookup_failed", "Unable to verify the conversation account")
+				return
 			}
-			h.errorResponse(c, http.StatusConflict, "continuation_account_unavailable", "This conversation cannot continue on a different upstream account. Start a new conversation and retry.")
-			return
+			if !service.OpenAIContinuationAccountMatches(previousResponseID, continuationAccountID, account.ID) {
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				h.errorResponse(c, http.StatusConflict, "continuation_account_unavailable", "This conversation cannot continue on a different upstream account. Start a new conversation and retry.")
+				return
+			}
 		}
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
@@ -987,6 +989,13 @@ func codexLocalProxyRequestMatched(c *gin.Context, userAgent, originator string)
 	}
 	return strings.TrimSpace(c.GetHeader("chatgpt-account-id")) != "" &&
 		strings.TrimSpace(c.GetHeader("version")) != ""
+}
+
+func enforceCodexContinuationAccountBoundary(c *gin.Context, account *service.Account) bool {
+	if account == nil || !account.IsOpenAIOAuth() || c == nil {
+		return false
+	}
+	return codexLocalProxyRequestMatched(c, c.GetHeader("User-Agent"), strings.ToLower(strings.TrimSpace(c.GetHeader("originator"))))
 }
 
 // codexLocalProxyModelsRequestMatched intentionally omits the `version`
@@ -1423,17 +1432,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		firstMessage,
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
 	)
-	continuationAccountID := int64(0)
-	if previousResponseID != "" {
-		continuationAccountID, err = h.gatewayService.OpenAIContinuationAccountID(ctx, apiKey.GroupID, previousResponseID)
-		if err != nil {
-			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "unable to verify conversation account")
-			return
-		}
-	}
-	selection, scheduleDecision, err := h.gatewayService.SelectAccountWithScheduler(
+	selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForAPIKey(
 		ctx,
 		apiKey.GroupID,
+		apiKey.ID,
 		previousResponseID,
 		sessionHash,
 		reqModel,
@@ -1451,12 +1453,22 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 
 	account := selection.Account
-	if !service.OpenAIContinuationAccountMatches(previousResponseID, continuationAccountID, account.ID) {
-		if selection.ReleaseFunc != nil {
-			selection.ReleaseFunc()
+	if enforceCodexContinuationAccountBoundary(c, account) && previousResponseID != "" {
+		continuationAccountID, ownerErr := h.gatewayService.OpenAIContinuationAccountID(ctx, apiKey.GroupID, apiKey.ID, previousResponseID)
+		if ownerErr != nil {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "unable to verify conversation account")
+			return
 		}
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "conversation cannot continue on a different upstream account; start a new conversation")
-		return
+		if !service.OpenAIContinuationAccountMatches(previousResponseID, continuationAccountID, account.ID) {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "conversation cannot continue on a different upstream account; start a new conversation")
+			return
+		}
 	}
 	accountMaxConcurrency := account.Concurrency
 	if selection.WaitPlan != nil && selection.WaitPlan.MaxConcurrency > 0 {

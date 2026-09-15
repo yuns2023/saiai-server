@@ -2008,6 +2008,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		account,
 		stateStore,
 		groupID,
+		getAPIKeyIDFromContext(c),
 	); err != nil {
 		return nil, err
 	}
@@ -2354,7 +2355,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 	if responseID != "" && stateStore != nil {
 		ttl := s.openAIWSResponseStickyTTL()
-		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
+		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccountForAPIKey(ctx, groupID, getAPIKeyIDFromContext(c), responseID, account.ID, ttl))
 		stateStore.BindResponseConn(responseID, lease.ConnID(), ttl)
 	}
 	if stateStore != nil && storeDisabled && sessionHash != "" {
@@ -3550,7 +3551,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 		if responseID != "" && stateStore != nil {
 			ttl := s.openAIWSResponseStickyTTL()
-			logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
+			logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccountForAPIKey(ctx, groupID, getAPIKeyIDFromContext(c), responseID, account.ID, ttl))
 			stateStore.BindResponseConn(responseID, connID, ttl)
 		}
 		if stateStore != nil && storeDisabled && sessionHash != "" {
@@ -3652,6 +3653,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	account *Account,
 	stateStore OpenAIWSStateStore,
 	groupID int64,
+	apiKeyID int64,
 ) error {
 	if s == nil {
 		return nil
@@ -3787,7 +3789,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	lease.MarkPrewarmed()
 	if prewarmResponseID != "" && stateStore != nil {
 		ttl := s.openAIWSResponseStickyTTL()
-		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, prewarmResponseID, stateStore.BindResponseAccount(ctx, groupID, prewarmResponseID, account.ID, ttl))
+		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, prewarmResponseID, stateStore.BindResponseAccountForAPIKey(ctx, groupID, apiKeyID, prewarmResponseID, account.ID, ttl))
 		stateStore.BindResponseConn(prewarmResponseID, lease.ConnID(), ttl)
 	}
 	logOpenAIWSModeInfo(
@@ -3919,6 +3921,17 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 	requestedModel string,
 	excludedIDs map[int64]struct{},
 ) (*AccountSelectionResult, error) {
+	return s.SelectAccountByPreviousResponseIDForAPIKey(ctx, groupID, 0, previousResponseID, requestedModel, excludedIDs)
+}
+
+func (s *OpenAIGatewayService) SelectAccountByPreviousResponseIDForAPIKey(
+	ctx context.Context,
+	groupID *int64,
+	apiKeyID int64,
+	previousResponseID string,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+) (*AccountSelectionResult, error) {
 	if s == nil {
 		return nil, nil
 	}
@@ -3931,7 +3944,7 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 		return nil, nil
 	}
 
-	accountID, err := store.GetResponseAccount(ctx, derefGroupID(groupID), responseID)
+	accountID, err := store.GetResponseAccountForAPIKey(ctx, derefGroupID(groupID), apiKeyID, responseID)
 	if err != nil || accountID <= 0 {
 		return nil, nil
 	}
@@ -3963,7 +3976,7 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 			derefGroupID(groupID),
 			accountID,
 			responseID,
-			store.BindResponseAccount(ctx, derefGroupID(groupID), responseID, accountID, s.openAIWSResponseStickyTTL()),
+			store.BindResponseAccountForAPIKey(ctx, derefGroupID(groupID), apiKeyID, responseID, accountID, s.openAIWSResponseStickyTTL()),
 		)
 		return &AccountSelectionResult{
 			Account:     account,

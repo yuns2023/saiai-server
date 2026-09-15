@@ -15,12 +15,12 @@ const openAIResponseIDContextKey = "openai_response_id_for_account_binding"
 // continuation before scheduling can replace a stale sticky binding. A
 // provider-issued response ID is accepted only with an explicit account
 // binding; session stickiness cannot prove who issued an old response.
-func (s *OpenAIGatewayService) OpenAIContinuationAccountID(ctx context.Context, groupID *int64, previousResponseID string) (int64, error) {
+func (s *OpenAIGatewayService) OpenAIContinuationAccountID(ctx context.Context, groupID *int64, apiKeyID int64, previousResponseID string) (int64, error) {
 	if s == nil || strings.TrimSpace(previousResponseID) == "" {
 		return 0, nil
 	}
 	if store := s.getOpenAIWSStateStore(); store != nil {
-		return store.GetResponseAccount(ctx, derefGroupID(groupID), strings.TrimSpace(previousResponseID))
+		return store.GetResponseAccountForAPIKey(ctx, derefGroupID(groupID), apiKeyID, strings.TrimSpace(previousResponseID))
 	}
 	return 0, nil
 }

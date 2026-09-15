@@ -19,12 +19,15 @@ func TestOpenAIContinuationAccountBoundary(t *testing.T) {
 	groupID := int64(17)
 	store := NewOpenAIWSStateStore(nil)
 	svc := &OpenAIGatewayService{openaiWSStateStore: store}
-	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_from_a", 11, time.Hour))
-	otherGroupOwner, err := store.GetResponseAccount(ctx, groupID+1, "resp_from_a")
+	require.NoError(t, store.BindResponseAccountForAPIKey(ctx, groupID, 5, "resp_from_a", 11, time.Hour))
+	otherGroupOwner, err := store.GetResponseAccountForAPIKey(ctx, groupID+1, 5, "resp_from_a")
 	require.NoError(t, err)
 	require.Zero(t, otherGroupOwner, "a response binding must not cross group boundaries")
+	otherKeyOwner, err := store.GetResponseAccountForAPIKey(ctx, groupID, 6, "resp_from_a")
+	require.NoError(t, err)
+	require.Zero(t, otherKeyOwner, "a response binding must not cross SAIAI Key boundaries")
 
-	owner, err := svc.OpenAIContinuationAccountID(ctx, &groupID, "resp_from_a")
+	owner, err := svc.OpenAIContinuationAccountID(ctx, &groupID, 5, "resp_from_a")
 	require.NoError(t, err)
 	require.Equal(t, int64(11), owner)
 	require.True(t, OpenAIContinuationAccountMatches("resp_from_a", owner, 11))
@@ -57,12 +60,12 @@ func TestOpenAIContinuationRejectsScheduledAccountSwitch(t *testing.T) {
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 		openaiWSStateStore: store,
 	}
-	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_from_a", accountA.ID, time.Hour))
-	owner, err := svc.OpenAIContinuationAccountID(ctx, &groupID, "resp_from_a")
+	require.NoError(t, store.BindResponseAccountForAPIKey(ctx, groupID, 5, "resp_from_a", accountA.ID, time.Hour))
+	owner, err := svc.OpenAIContinuationAccountID(ctx, &groupID, 5, "resp_from_a")
 	require.NoError(t, err)
 	require.Equal(t, accountA.ID, owner)
 
-	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "resp_from_a", "session-from-a", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+	selection, _, err := svc.SelectAccountWithSchedulerForAPIKey(ctx, &groupID, 5, "resp_from_a", "session-from-a", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
@@ -71,7 +74,7 @@ func TestOpenAIContinuationRejectsScheduledAccountSwitch(t *testing.T) {
 	}
 	require.Equal(t, accountB.ID, selection.Account.ID)
 	require.False(t, OpenAIContinuationAccountMatches("resp_from_a", owner, selection.Account.ID))
-	retainedOwner, err := svc.OpenAIContinuationAccountID(ctx, &groupID, "resp_from_a")
+	retainedOwner, err := svc.OpenAIContinuationAccountID(ctx, &groupID, 5, "resp_from_a")
 	require.NoError(t, err)
 	require.Equal(t, accountA.ID, retainedOwner, "failed scheduling must not erase response ownership")
 }
@@ -84,7 +87,7 @@ func TestOpenAIHTTPResponseBindsAccountBeforeContinuation(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	c.Request.Header.Set("session_id", "one-client-session")
-	c.Set("api_key", &APIKey{GroupID: &groupID})
+	c.Set("api_key", &APIKey{ID: 5, GroupID: &groupID})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -99,10 +102,13 @@ func TestOpenAIHTTPResponseBindsAccountBeforeContinuation(t *testing.T) {
 	_, err := svc.Forward(context.Background(), c, accountA, []byte(`{"model":"gpt-5.1","stream":false,"input":[]}`))
 	require.NoError(t, err)
 
-	owner, err := svc.OpenAIContinuationAccountID(context.Background(), &groupID, responseID)
+	owner, err := svc.OpenAIContinuationAccountID(context.Background(), &groupID, 5, responseID)
 	require.NoError(t, err)
 	require.Equal(t, accountA.ID, owner)
 	require.False(t, OpenAIContinuationAccountMatches(responseID, owner, 22))
+	otherKeyOwner, err := svc.OpenAIContinuationAccountID(context.Background(), &groupID, 6, responseID)
+	require.NoError(t, err)
+	require.Zero(t, otherKeyOwner)
 }
 
 func TestOpenAIHTTPStreamingResponseBindsAccountAfterCompletion(t *testing.T) {
@@ -112,7 +118,7 @@ func TestOpenAIHTTPStreamingResponseBindsAccountAfterCompletion(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	c.Request.Header.Set("session_id", "one-client-session")
-	c.Set("api_key", &APIKey{GroupID: &groupID})
+	c.Set("api_key", &APIKey{ID: 5, GroupID: &groupID})
 
 	stream := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_created_interim\"}}\n\n" +
 		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stream_a\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
@@ -128,10 +134,10 @@ func TestOpenAIHTTPStreamingResponseBindsAccountAfterCompletion(t *testing.T) {
 	}
 	_, err := svc.Forward(context.Background(), c, accountA, []byte(`{"model":"gpt-5.1","stream":true,"input":[]}`))
 	require.NoError(t, err)
-	owner, err := svc.OpenAIContinuationAccountID(context.Background(), &groupID, "resp_stream_a")
+	owner, err := svc.OpenAIContinuationAccountID(context.Background(), &groupID, 5, "resp_stream_a")
 	require.NoError(t, err)
 	require.Equal(t, accountA.ID, owner)
-	interimOwner, err := svc.OpenAIContinuationAccountID(context.Background(), &groupID, "resp_created_interim")
+	interimOwner, err := svc.OpenAIContinuationAccountID(context.Background(), &groupID, 5, "resp_created_interim")
 	require.NoError(t, err)
 	require.Zero(t, interimOwner)
 }
@@ -142,7 +148,7 @@ func TestOpenAIFailedStreamDoesNotBindResponseAccount(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	c.Set("api_key", &APIKey{GroupID: &groupID})
+	c.Set("api_key", &APIKey{ID: 5, GroupID: &groupID})
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -155,7 +161,7 @@ func TestOpenAIFailedStreamDoesNotBindResponseAccount(t *testing.T) {
 	}
 	_, err := svc.Forward(context.Background(), c, accountA, []byte(`{"model":"gpt-5.1","stream":true,"input":[]}`))
 	require.NoError(t, err)
-	owner, err := svc.OpenAIContinuationAccountID(context.Background(), &groupID, "resp_failed_a")
+	owner, err := svc.OpenAIContinuationAccountID(context.Background(), &groupID, 5, "resp_failed_a")
 	require.NoError(t, err)
 	require.Zero(t, owner)
 }

@@ -2610,8 +2610,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			responseID = openAIResponseIDForAccountBinding(c)
 		}
 		if responseID != "" {
-			bindErr := s.getOpenAIWSStateStore().BindResponseAccount(
-				ctx, getOpenAIGroupIDFromContext(c), responseID, account.ID, s.openAIWSResponseStickyTTL(),
+			bindErr := s.getOpenAIWSStateStore().BindResponseAccountForAPIKey(
+				ctx, getOpenAIGroupIDFromContext(c), getAPIKeyIDFromContext(c), responseID, account.ID, s.openAIWSResponseStickyTTL(),
 			)
 			if bindErr != nil {
 				logger.LegacyPrintf("service.openai_gateway", "Failed to bind OpenAI response account: %v", bindErr)
