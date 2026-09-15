@@ -92,7 +92,8 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
 	c.Request.Header.Set("User-Agent", "unit-test-agent/1.0")
 	groupID := int64(1001)
-	c.Set("api_key", &APIKey{GroupID: &groupID})
+	userID := int64(55)
+	c.Set("api_key", &APIKey{UserID: userID, GroupID: &groupID})
 
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.Enabled = false
@@ -160,7 +161,7 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	require.False(t, received.Stream, "应保持客户端 stream=false 的原始语义")
 
 	store := svc.getOpenAIWSStateStore()
-	mappedAccountID, getErr := store.GetResponseAccount(context.Background(), groupID, "resp_new_1")
+	mappedAccountID, getErr := store.GetResponseAccountForUser(context.Background(), userID, "resp_new_1")
 	require.NoError(t, getErr)
 	require.Equal(t, account.ID, mappedAccountID)
 	connID, ok := store.GetResponseConn("resp_new_1")
