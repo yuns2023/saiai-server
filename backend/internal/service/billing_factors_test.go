@@ -27,6 +27,22 @@ func TestApplyUserBillingFactors(t *testing.T) {
 	require.Equal(t, 10.0, cost.TotalCost)
 }
 
+func TestApplyUserBillingFactors_IgnoresLegacyAccountDiscount(t *testing.T) {
+	userDiscount := 0.8
+	legacyAccountDiscount := 0.5
+	user := &User{PaygDiscountMultiplier: &userDiscount}
+	account := &Account{PaygDiscountMultiplier: &legacyAccountDiscount}
+	keys := []*APIKey{{ID: 1, User: user}, {ID: 2, User: user}}
+
+	for _, key := range keys {
+		cost := &CostBreakdown{TotalCost: 10, ActualCost: 10}
+		_, discount := applyUserBillingFactors(cost, &Group{}, key.User, "gpt-5.1", false)
+		require.Equal(t, userDiscount, discount)
+		require.Equal(t, 8.0, cost.ActualCost)
+		require.Equal(t, legacyAccountDiscount, account.PaygDiscountRate())
+	}
+}
+
 func TestNormalizeModelRateMultipliers(t *testing.T) {
 	rates, err := NormalizeModelRateMultipliers(map[string]float64{" CLAUDE-FABLE-* ": 0, "gpt-5.6": 1.2})
 	require.NoError(t, err)
