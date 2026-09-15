@@ -40,15 +40,19 @@ type openAIWSSessionConnBinding struct {
 }
 
 // OpenAIWSStateStore 管理 WSv2 的粘连状态。
-// - response_id -> account_id 用于续链路由
+// - group + SAIAI Key + response_id -> account_id 用于续链路由
 // - response_id -> conn_id 用于连接内上下文复用
 //
-// response_id -> account_id 优先走 GatewayCache（Redis），同时维护本地热缓存。
+// response_id -> account_id 优先走 GatewayCache（Redis），同时维护本地热缓存；
+// 兼容方法使用 apiKeyID=0，Codex Responses 使用实际 Key ID。
 // response_id -> conn_id 仅在本进程内有效。
 type OpenAIWSStateStore interface {
 	BindResponseAccount(ctx context.Context, groupID int64, responseID string, accountID int64, ttl time.Duration) error
 	GetResponseAccount(ctx context.Context, groupID int64, responseID string) (int64, error)
 	DeleteResponseAccount(ctx context.Context, groupID int64, responseID string) error
+	BindResponseAccountForAPIKey(ctx context.Context, groupID, apiKeyID int64, responseID string, accountID int64, ttl time.Duration) error
+	GetResponseAccountForAPIKey(ctx context.Context, groupID, apiKeyID int64, responseID string) (int64, error)
+	DeleteResponseAccountForAPIKey(ctx context.Context, groupID, apiKeyID int64, responseID string) error
 
 	BindResponseConn(responseID, connID string, ttl time.Duration)
 	GetResponseConn(responseID string) (string, bool)
@@ -92,38 +96,48 @@ func NewOpenAIWSStateStore(cache GatewayCache) OpenAIWSStateStore {
 }
 
 func (s *defaultOpenAIWSStateStore) BindResponseAccount(ctx context.Context, groupID int64, responseID string, accountID int64, ttl time.Duration) error {
+	return s.BindResponseAccountForAPIKey(ctx, groupID, 0, responseID, accountID, ttl)
+}
+
+func (s *defaultOpenAIWSStateStore) BindResponseAccountForAPIKey(ctx context.Context, groupID, apiKeyID int64, responseID string, accountID int64, ttl time.Duration) error {
 	id := normalizeOpenAIWSResponseID(responseID)
 	if id == "" || accountID <= 0 {
 		return nil
 	}
+	localKey := openAIWSResponseAccountLocalKey(groupID, apiKeyID, id)
 	ttl = normalizeOpenAIWSTTL(ttl)
 	s.maybeCleanup()
 
 	expiresAt := time.Now().Add(ttl)
 	s.responseToAccountMu.Lock()
-	ensureBindingCapacity(s.responseToAccount, id, openAIWSStateStoreMaxEntriesPerMap)
-	s.responseToAccount[id] = openAIWSAccountBinding{accountID: accountID, expiresAt: expiresAt}
+	ensureBindingCapacity(s.responseToAccount, localKey, openAIWSStateStoreMaxEntriesPerMap)
+	s.responseToAccount[localKey] = openAIWSAccountBinding{accountID: accountID, expiresAt: expiresAt}
 	s.responseToAccountMu.Unlock()
 
 	if s.cache == nil {
 		return nil
 	}
-	cacheKey := openAIWSResponseAccountCacheKey(id)
+	cacheKey := openAIWSResponseAccountCacheKey(apiKeyID, id)
 	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
 	defer cancel()
 	return s.cache.SetSessionAccountID(cacheCtx, groupID, cacheKey, accountID, ttl)
 }
 
 func (s *defaultOpenAIWSStateStore) GetResponseAccount(ctx context.Context, groupID int64, responseID string) (int64, error) {
+	return s.GetResponseAccountForAPIKey(ctx, groupID, 0, responseID)
+}
+
+func (s *defaultOpenAIWSStateStore) GetResponseAccountForAPIKey(ctx context.Context, groupID, apiKeyID int64, responseID string) (int64, error) {
 	id := normalizeOpenAIWSResponseID(responseID)
 	if id == "" {
 		return 0, nil
 	}
+	localKey := openAIWSResponseAccountLocalKey(groupID, apiKeyID, id)
 	s.maybeCleanup()
 
 	now := time.Now()
 	s.responseToAccountMu.RLock()
-	if binding, ok := s.responseToAccount[id]; ok {
+	if binding, ok := s.responseToAccount[localKey]; ok {
 		if now.Before(binding.expiresAt) {
 			accountID := binding.accountID
 			s.responseToAccountMu.RUnlock()
@@ -136,7 +150,7 @@ func (s *defaultOpenAIWSStateStore) GetResponseAccount(ctx context.Context, grou
 		return 0, nil
 	}
 
-	cacheKey := openAIWSResponseAccountCacheKey(id)
+	cacheKey := openAIWSResponseAccountCacheKey(apiKeyID, id)
 	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
 	defer cancel()
 	accountID, err := s.cache.GetSessionAccountID(cacheCtx, groupID, cacheKey)
@@ -148,12 +162,17 @@ func (s *defaultOpenAIWSStateStore) GetResponseAccount(ctx context.Context, grou
 }
 
 func (s *defaultOpenAIWSStateStore) DeleteResponseAccount(ctx context.Context, groupID int64, responseID string) error {
+	return s.DeleteResponseAccountForAPIKey(ctx, groupID, 0, responseID)
+}
+
+func (s *defaultOpenAIWSStateStore) DeleteResponseAccountForAPIKey(ctx context.Context, groupID, apiKeyID int64, responseID string) error {
 	id := normalizeOpenAIWSResponseID(responseID)
 	if id == "" {
 		return nil
 	}
+	localKey := openAIWSResponseAccountLocalKey(groupID, apiKeyID, id)
 	s.responseToAccountMu.Lock()
-	delete(s.responseToAccount, id)
+	delete(s.responseToAccount, localKey)
 	s.responseToAccountMu.Unlock()
 
 	if s.cache == nil {
@@ -161,7 +180,7 @@ func (s *defaultOpenAIWSStateStore) DeleteResponseAccount(ctx context.Context, g
 	}
 	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
 	defer cancel()
-	return s.cache.DeleteSessionAccountID(cacheCtx, groupID, openAIWSResponseAccountCacheKey(id))
+	return s.cache.DeleteSessionAccountID(cacheCtx, groupID, openAIWSResponseAccountCacheKey(apiKeyID, id))
 }
 
 func (s *defaultOpenAIWSStateStore) BindResponseConn(responseID, connID string, ttl time.Duration) {
@@ -412,9 +431,13 @@ func normalizeOpenAIWSResponseID(responseID string) string {
 	return strings.TrimSpace(responseID)
 }
 
-func openAIWSResponseAccountCacheKey(responseID string) string {
-	sum := sha256.Sum256([]byte(responseID))
+func openAIWSResponseAccountCacheKey(apiKeyID int64, responseID string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("key:%d:response:%s", apiKeyID, responseID)))
 	return openAIWSResponseAccountCachePrefix + hex.EncodeToString(sum[:])
+}
+
+func openAIWSResponseAccountLocalKey(groupID, apiKeyID int64, responseID string) string {
+	return fmt.Sprintf("%d:%d:%s", groupID, apiKeyID, responseID)
 }
 
 func normalizeOpenAIWSTTL(ttl time.Duration) time.Duration {

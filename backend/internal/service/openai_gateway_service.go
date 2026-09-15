@@ -991,6 +991,21 @@ func isolateOpenAISessionID(apiKeyID int64, raw string) string {
 	return fmt.Sprintf("%016x", h.Sum64())
 }
 
+// isolateOpenAISessionIDForAccount gives each selected upstream account its
+// own provider-facing session namespace while preserving the established
+// 16-character hex wire shape. The client-facing identity and sticky-session
+// selection remain based on the original value.
+func isolateOpenAISessionIDForAccount(apiKeyID, accountID int64, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	h := xxhash.New()
+	_, _ = fmt.Fprintf(h, "v2:k%d:a%d:", apiKeyID, accountID)
+	_, _ = h.WriteString(raw)
+	return fmt.Sprintf("%016x", h.Sum64())
+}
+
 func logCodexCLIOnlyDetection(ctx context.Context, c *gin.Context, account *Account, apiKeyID int64, result CodexClientRestrictionDetectionResult, body []byte) {
 	if !result.Enabled {
 		return
@@ -2578,6 +2593,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Handle normal response
 		var usage *OpenAIUsage
 		var firstTokenMs *int
+		responseID := ""
 		if reqStream {
 			streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, mappedModel)
 			if err != nil {
@@ -2585,10 +2601,20 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			usage = streamResult.usage
 			firstTokenMs = streamResult.firstTokenMs
+			responseID = streamResult.responseID
 		} else {
 			usage, err = s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, mappedModel)
 			if err != nil {
 				return nil, err
+			}
+			responseID = openAIResponseIDForAccountBinding(c)
+		}
+		if responseID != "" {
+			bindErr := s.getOpenAIWSStateStore().BindResponseAccountForAPIKey(
+				ctx, getOpenAIGroupIDFromContext(c), getAPIKeyIDFromContext(c), responseID, account.ID, s.openAIWSResponseStickyTTL(),
+			)
+			if bindErr != nil {
+				logger.LegacyPrintf("service.openai_gateway", "Failed to bind OpenAI response account: %v", bindErr)
 			}
 		}
 
@@ -2601,6 +2627,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		if usage == nil {
 			usage = &OpenAIUsage{}
+		}
+		if state := strings.TrimSpace(resp.Header.Get(openAIWSTurnStateHeader)); state != "" {
+			sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
+			if sessionHash != "" {
+				s.getOpenAIWSStateStore().BindSessionTurnState(
+					getOpenAIGroupIDFromContext(c),
+					openAIWSAccountTurnStateSessionHash(getAPIKeyIDFromContext(c), account.ID, sessionHash),
+					state,
+					s.openAIWSSessionStickyTTL(),
+				)
+			}
 		}
 
 		serviceTier := resolveOpenAIServiceTier(
@@ -2803,6 +2840,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		}
 	}
 	if account.Type == AccountTypeOAuth {
+		// A turn-state token belongs to the account that issued it. The
+		// client may still carry an old token after the scheduler switches.
+		req.Header.Del(openAIWSTurnStateHeader)
+		sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
+		if state := s.resolveOpenAIWSTurnStateForAccount(account, getOpenAIGroupIDFromContext(c), getAPIKeyIDFromContext(c), sessionHash, c.GetHeader(openAIWSTurnStateHeader)); state != "" {
+			req.Header.Set(openAIWSTurnStateHeader, state)
+		}
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
 		req.Header.Del("conversation_id")
 		req.Header.Del("session_id")
@@ -2817,20 +2861,20 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		if isOpenAIResponsesCompactPath(c) {
 			req.Header.Set("accept", "application/json")
 			compactSession := resolveOpenAICompactSessionID(c)
-			req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, compactSession))
+			req.Header.Set("session_id", isolateOpenAISessionIDForAccount(apiKeyID, account.ID, compactSession))
 		} else {
 			req.Header.Set("accept", "text/event-stream")
 		}
 		if promptCacheKey != "" {
-			isolated := isolateOpenAISessionID(apiKeyID, promptCacheKey)
+			isolated := isolateOpenAISessionIDForAccount(apiKeyID, account.ID, promptCacheKey)
 			req.Header.Set("conversation_id", isolated)
 			req.Header.Set("session_id", isolated)
 		} else {
 			if incomingSessionID != "" {
-				req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, incomingSessionID))
+				req.Header.Set("session_id", isolateOpenAISessionIDForAccount(apiKeyID, account.ID, incomingSessionID))
 			}
 			if incomingConversationID != "" {
-				req.Header.Set("conversation_id", isolateOpenAISessionID(apiKeyID, incomingConversationID))
+				req.Header.Set("conversation_id", isolateOpenAISessionIDForAccount(apiKeyID, account.ID, incomingConversationID))
 			}
 		}
 	}
@@ -3050,6 +3094,7 @@ func openAIUpstreamErrorType(body []byte) string {
 type openaiStreamingResult struct {
 	usage        *OpenAIUsage
 	firstTokenMs *int
+	responseID   string
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string) (*openaiStreamingResult, error) {
@@ -3130,6 +3175,8 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 	errorEventSent := false
 	clientDisconnected := false // 客户端断开后继续 drain 上游以收集 usage
 	sawTerminalEvent := false
+	sawSuccessfulTerminal := false
+	responseID := ""
 	sendErrorEvent := func(reason string) {
 		if errorEventSent || clientDisconnected {
 			return
@@ -3151,7 +3198,11 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 
 	needModelReplace := originalModel != mappedModel
 	resultWithUsage := func() *openaiStreamingResult {
-		return &openaiStreamingResult{usage: usage, firstTokenMs: firstTokenMs}
+		result := &openaiStreamingResult{usage: usage, firstTokenMs: firstTokenMs}
+		if sawSuccessfulTerminal {
+			result.responseID = responseID
+		}
+		return result
 	}
 	finalizeStream := func() (*openaiStreamingResult, error) {
 		if !clientDisconnected {
@@ -3203,6 +3254,20 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			}
 
 			dataBytes := []byte(data)
+			eventResponseID := strings.TrimSpace(gjson.GetBytes(dataBytes, "response.id").String())
+			if responseID == "" {
+				responseID = eventResponseID
+			}
+			switch gjson.GetBytes(dataBytes, "type").String() {
+			case "response.completed", "response.done":
+				status := strings.TrimSpace(gjson.GetBytes(dataBytes, "response.status").String())
+				sawSuccessfulTerminal = status == "" || status == "completed"
+				if sawSuccessfulTerminal && eventResponseID != "" {
+					responseID = eventResponseID
+				}
+			case "response.failed":
+				sawSuccessfulTerminal = false
+			}
 			if openAIStreamEventIsTerminal(data) {
 				sawTerminalEvent = true
 			}
@@ -3484,6 +3549,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		return nil, fmt.Errorf("parse response: invalid json response")
 	}
 	usage := &usageValue
+	if status := strings.TrimSpace(gjson.GetBytes(body, "status").String()); status == "" || status == "completed" {
+		setOpenAIResponseIDForAccountBinding(c, gjson.GetBytes(body, "id").String())
+	}
 
 	// Replace model in response if needed
 	if originalModel != mappedModel {
@@ -3515,6 +3583,9 @@ func (s *OpenAIGatewayService) handleOAuthSSEToJSON(resp *http.Response, c *gin.
 
 	usage := &OpenAIUsage{}
 	if ok {
+		if status := strings.TrimSpace(gjson.GetBytes(finalResponse, "status").String()); status == "" || status == "completed" {
+			setOpenAIResponseIDForAccountBinding(c, gjson.GetBytes(finalResponse, "id").String())
+		}
 		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
 			*usage = parsedUsage
 		}

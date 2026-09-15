@@ -143,6 +143,27 @@ version before enabling the policy for a production group. The default remains
 `off` and older clients must not be rejected until the updated client bundle is
 available.
 
+## Codex Responses account-switch boundary
+
+Completed HTTP and WebSocket Responses bind their provider-issued response ID to
+the requesting SAIAI Key and selected upstream account within the group. An
+official Codex OAuth request with `previous_response_id` is sent only to that
+Key's bound account; an unknown binding or a switch to another account
+returns a conversation-restart error before provider egress. This includes
+temporarily unavailable accounts: their response ownership remains until its
+normal expiry, rather than becoming available to a different account.
+
+The provider-facing `session_id` and `conversation_id` headers are stable per
+SAIAI Key, selected account, and incoming value. The Gateway also stores and
+replays `x-codex-turn-state` under the SAIAI Key and selected account, and does not forward an
+unrecognized client token to another pooled account. Client-visible IDs and
+the official Codex `client_metadata` body remain unchanged; the Gateway does
+not copy the reduced turn-metadata header over the full body representation.
+
+Existing official Codex OAuth continuations without a recorded response-to-account binding may
+need a fresh Codex conversation after activation. This is intentional: the
+Gateway cannot establish which upstream account issued an unknown response ID.
+
 ## Experimental native ChatGPT Chat ingress
 
 Ordinary ChatGPT Desktop Chat is not the Responses protocol. The experimental

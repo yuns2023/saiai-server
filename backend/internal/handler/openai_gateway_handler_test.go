@@ -124,6 +124,21 @@ func TestCodexClientPolicyMatched(t *testing.T) {
 	}
 }
 
+func TestEnforceCodexContinuationAccountBoundary(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_exec/0.154.0")
+	c.Request.Header.Set("originator", "codex_exec")
+	c.Request.Header.Set("chatgpt-account-id", "account-shape")
+	c.Request.Header.Set("version", "0.154.0")
+
+	require.True(t, enforceCodexContinuationAccountBoundary(c, &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}))
+	require.False(t, enforceCodexContinuationAccountBoundary(c, &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}))
+	c.Request.Header.Del("version")
+	require.False(t, enforceCodexContinuationAccountBoundary(c, &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}))
+}
+
 func TestCodexLocalProxyModelsRequestMatchedAllowsDiscoveryWithoutVersion(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

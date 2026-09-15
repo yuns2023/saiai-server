@@ -48,3 +48,13 @@ func TestIsolateOpenAISessionID(t *testing.T) {
 		assert.NotEqual(t, result, other)
 	})
 }
+
+func TestIsolateOpenAISessionIDForAccount(t *testing.T) {
+	first := isolateOpenAISessionIDForAccount(42, 11, "same-session")
+	require.Equal(t, first, isolateOpenAISessionIDForAccount(42, 11, "same-session"))
+	require.NotEqual(t, first, isolateOpenAISessionIDForAccount(42, 22, "same-session"))
+	require.NotEqual(t, first, isolateOpenAISessionIDForAccount(43, 11, "same-session"))
+	require.NotEqual(t, first, isolateOpenAISessionID(42, "same-session"))
+	require.Len(t, first, 16)
+	require.Empty(t, isolateOpenAISessionIDForAccount(42, 11, " "))
+}
