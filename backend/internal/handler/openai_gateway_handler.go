@@ -693,10 +693,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	for {
 		// Select account supporting the requested model
 		reqLog.Debug("openai.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
-		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForAPIKey(
+		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForUser(
 			c.Request.Context(),
 			apiKey.GroupID,
-			apiKey.ID,
+			subject.UserID,
 			previousResponseID,
 			sessionHash,
 			reqModel,
@@ -737,7 +737,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		)
 		account := selection.Account
 		if enforceCodexContinuationAccountBoundary(c, account) && previousResponseID != "" {
-			continuationAccountID, ownerErr := h.gatewayService.OpenAIContinuationAccountID(c.Request.Context(), apiKey.GroupID, apiKey.ID, previousResponseID)
+			continuationAccountID, ownerErr := h.gatewayService.OpenAIContinuationAccountID(c.Request.Context(), subject.UserID, previousResponseID)
 			if ownerErr != nil {
 				if selection.ReleaseFunc != nil {
 					selection.ReleaseFunc()
@@ -1432,10 +1432,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		firstMessage,
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
 	)
-	selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForAPIKey(
+	selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForUser(
 		ctx,
 		apiKey.GroupID,
-		apiKey.ID,
+		subject.UserID,
 		previousResponseID,
 		sessionHash,
 		reqModel,
@@ -1454,7 +1454,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 	account := selection.Account
 	if enforceCodexContinuationAccountBoundary(c, account) && previousResponseID != "" {
-		continuationAccountID, ownerErr := h.gatewayService.OpenAIContinuationAccountID(ctx, apiKey.GroupID, apiKey.ID, previousResponseID)
+		continuationAccountID, ownerErr := h.gatewayService.OpenAIContinuationAccountID(ctx, subject.UserID, previousResponseID)
 		if ownerErr != nil {
 			if selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()

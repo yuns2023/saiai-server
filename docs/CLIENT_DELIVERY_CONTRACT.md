@@ -146,19 +146,25 @@ available.
 ## Codex Responses account-switch boundary
 
 Completed HTTP and WebSocket Responses bind their provider-issued response ID to
-the requesting SAIAI Key and selected upstream account within the group. An
-official Codex OAuth request with `previous_response_id` is sent only to that
-Key's bound account; an unknown binding or a switch to another account
+the requesting SAIAI user and selected upstream account. An official Codex
+OAuth request with `previous_response_id` is sent only to that user's bound
+account; an unknown binding or a switch to another account
 returns a conversation-restart error before provider egress. This includes
 temporarily unavailable accounts: their response ownership remains until its
 normal expiry, rather than becoming available to a different account.
 
 The provider-facing `session_id` and `conversation_id` headers are stable per
-SAIAI Key, selected account, and incoming value. The Gateway also stores and
-replays `x-codex-turn-state` under the SAIAI Key and selected account, and does not forward an
+SAIAI user, selected account, and incoming value. The Gateway also stores and
+replays `x-codex-turn-state` under the user and selected account, and does not forward an
 unrecognized client token to another pooled account. Client-visible IDs and
 the official Codex `client_metadata` body remain unchanged; the Gateway does
 not copy the reduced turn-metadata header over the full body representation.
+
+SAIAI Keys and groups do not define the upstream state namespace. The same user
+may continue through another Key or group when the bound upstream account is
+also schedulable in the new group. Current-group account membership remains a
+hard routing constraint; a cached owner never makes an unavailable or unbound
+account eligible in that group.
 
 Existing official Codex OAuth continuations without a recorded response-to-account binding may
 need a fresh Codex conversation after activation. This is intentional: the

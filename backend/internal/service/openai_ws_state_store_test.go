@@ -14,20 +14,19 @@ func TestOpenAIWSStateStore_BindGetDeleteResponseAccount(t *testing.T) {
 	cache := &stubGatewayCache{}
 	store := NewOpenAIWSStateStore(cache)
 	ctx := context.Background()
-	groupID := int64(7)
-	apiKeyID := int64(55)
+	userID := int64(55)
 
-	require.NoError(t, store.BindResponseAccountForAPIKey(ctx, groupID, apiKeyID, "resp_abc", 101, time.Minute))
+	require.NoError(t, store.BindResponseAccountForUser(ctx, userID, "resp_abc", 101, time.Minute))
 
-	accountID, err := store.GetResponseAccountForAPIKey(ctx, groupID, apiKeyID, "resp_abc")
+	accountID, err := store.GetResponseAccountForUser(ctx, userID, "resp_abc")
 	require.NoError(t, err)
 	require.Equal(t, int64(101), accountID)
-	otherKeyAccountID, err := store.GetResponseAccountForAPIKey(ctx, groupID, apiKeyID+1, "resp_abc")
+	otherUserAccountID, err := store.GetResponseAccountForUser(ctx, userID+1, "resp_abc")
 	require.NoError(t, err)
-	require.Zero(t, otherKeyAccountID)
+	require.Zero(t, otherUserAccountID)
 
-	require.NoError(t, store.DeleteResponseAccountForAPIKey(ctx, groupID, apiKeyID, "resp_abc"))
-	accountID, err = store.GetResponseAccountForAPIKey(ctx, groupID, apiKeyID, "resp_abc")
+	require.NoError(t, store.DeleteResponseAccountForUser(ctx, userID, "resp_abc"))
+	accountID, err = store.GetResponseAccountForUser(ctx, userID, "resp_abc")
 	require.NoError(t, err)
 	require.Zero(t, accountID)
 }
@@ -85,7 +84,7 @@ func TestOpenAIWSStateStore_GetResponseAccount_NoStaleAfterCacheMiss(t *testing.
 	ctx := context.Background()
 	groupID := int64(17)
 	responseID := "resp_cache_stale"
-	cacheKey := openAIWSResponseAccountCacheKey(0, responseID)
+	cacheKey := openAIWSResponseAccountGroupCacheKey(responseID)
 
 	cache.sessionBindings[cacheKey] = 501
 	accountID, err := store.GetResponseAccount(ctx, groupID, responseID)
