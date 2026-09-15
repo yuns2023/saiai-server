@@ -11,18 +11,18 @@ import (
 func TestApplyUserBillingFactors(t *testing.T) {
 	group := &Group{ModelRateMultipliers: map[string]float64{"claude-fable-*": 0.8}}
 	discount := 0.75
-	account := &Account{PaygDiscountMultiplier: &discount}
+	user := &User{PaygDiscountMultiplier: &discount}
 	cost := &CostBreakdown{TotalCost: 10, ActualCost: 11}
-	modelRate, accountRate := applyUserBillingFactors(cost, group, account, "CLAUDE-FABLE-5-1", false)
+	modelRate, userRate := applyUserBillingFactors(cost, group, user, "CLAUDE-FABLE-5-1", false)
 	require.Equal(t, 0.8, modelRate)
-	require.Equal(t, 0.75, accountRate)
+	require.Equal(t, 0.75, userRate)
 	require.InDelta(t, 6.6, cost.ActualCost, 1e-12)
 	require.Equal(t, 10.0, cost.TotalCost)
 
 	cost = &CostBreakdown{TotalCost: 10, ActualCost: 11}
-	modelRate, accountRate = applyUserBillingFactors(cost, group, account, "claude-fable-5-1", true)
+	modelRate, userRate = applyUserBillingFactors(cost, group, user, "claude-fable-5-1", true)
 	require.Equal(t, 0.8, modelRate)
-	require.Equal(t, 1.0, accountRate)
+	require.Equal(t, 1.0, userRate)
 	require.InDelta(t, 8.8, cost.ActualCost, 1e-12)
 	require.Equal(t, 10.0, cost.TotalCost)
 }

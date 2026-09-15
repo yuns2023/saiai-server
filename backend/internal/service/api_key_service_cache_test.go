@@ -186,6 +186,7 @@ func TestAPIKeyService_GetByKey_UsesL2Cache(t *testing.T) {
 	svc := NewAPIKeyService(repo, nil, nil, nil, nil, cache, cfg)
 
 	groupID := int64(9)
+	discount := 0.8
 	cacheEntry := &APIKeyAuthCacheEntry{
 		Snapshot: &APIKeyAuthSnapshot{
 			APIKeyID: 1,
@@ -193,11 +194,12 @@ func TestAPIKeyService_GetByKey_UsesL2Cache(t *testing.T) {
 			GroupID:  &groupID,
 			Status:   StatusActive,
 			User: APIKeyAuthUserSnapshot{
-				ID:          2,
-				Status:      StatusActive,
-				Role:        RoleUser,
-				Balance:     10,
-				Concurrency: 3,
+				ID:                     2,
+				Status:                 StatusActive,
+				Role:                   RoleUser,
+				Balance:                10,
+				PaygDiscountMultiplier: &discount,
+				Concurrency:            3,
 			},
 			Group: &APIKeyAuthGroupSnapshot{
 				ID:                       groupID,
@@ -223,6 +225,7 @@ func TestAPIKeyService_GetByKey_UsesL2Cache(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), apiKey.ID)
 	require.Equal(t, int64(2), apiKey.User.ID)
+	require.Equal(t, discount, apiKey.User.PaygDiscountRate())
 	require.Equal(t, groupID, apiKey.Group.ID)
 	require.True(t, apiKey.Group.ClaudeEnvironmentRewrite)
 	require.Equal(t, ClaudeEnvironmentModeRewrite, apiKey.Group.EffectiveClaudeEnvironmentMode())

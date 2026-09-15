@@ -125,6 +125,27 @@ func (_u *UserUpdate) AddBalance(v float64) *UserUpdate {
 	return _u
 }
 
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (_u *UserUpdate) SetPaygDiscountMultiplier(v float64) *UserUpdate {
+	_u.mutation.ResetPaygDiscountMultiplier()
+	_u.mutation.SetPaygDiscountMultiplier(v)
+	return _u
+}
+
+// SetNillablePaygDiscountMultiplier sets the "payg_discount_multiplier" field if the given value is not nil.
+func (_u *UserUpdate) SetNillablePaygDiscountMultiplier(v *float64) *UserUpdate {
+	if v != nil {
+		_u.SetPaygDiscountMultiplier(*v)
+	}
+	return _u
+}
+
+// AddPaygDiscountMultiplier adds value to the "payg_discount_multiplier" field.
+func (_u *UserUpdate) AddPaygDiscountMultiplier(v float64) *UserUpdate {
+	_u.mutation.AddPaygDiscountMultiplier(v)
+	return _u
+}
+
 // SetConcurrency sets the "concurrency" field.
 func (_u *UserUpdate) SetConcurrency(v int) *UserUpdate {
 	_u.mutation.ResetConcurrency()
@@ -721,6 +742,12 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedBalance(); ok {
 		_spec.AddField(user.FieldBalance, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.PaygDiscountMultiplier(); ok {
+		_spec.SetField(user.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedPaygDiscountMultiplier(); ok {
+		_spec.AddField(user.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
+	}
 	if value, ok := _u.mutation.Concurrency(); ok {
 		_spec.SetField(user.FieldConcurrency, field.TypeInt, value)
 	}
@@ -1286,6 +1313,27 @@ func (_u *UserUpdateOne) SetNillableBalance(v *float64) *UserUpdateOne {
 // AddBalance adds value to the "balance" field.
 func (_u *UserUpdateOne) AddBalance(v float64) *UserUpdateOne {
 	_u.mutation.AddBalance(v)
+	return _u
+}
+
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (_u *UserUpdateOne) SetPaygDiscountMultiplier(v float64) *UserUpdateOne {
+	_u.mutation.ResetPaygDiscountMultiplier()
+	_u.mutation.SetPaygDiscountMultiplier(v)
+	return _u
+}
+
+// SetNillablePaygDiscountMultiplier sets the "payg_discount_multiplier" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillablePaygDiscountMultiplier(v *float64) *UserUpdateOne {
+	if v != nil {
+		_u.SetPaygDiscountMultiplier(*v)
+	}
+	return _u
+}
+
+// AddPaygDiscountMultiplier adds value to the "payg_discount_multiplier" field.
+func (_u *UserUpdateOne) AddPaygDiscountMultiplier(v float64) *UserUpdateOne {
+	_u.mutation.AddPaygDiscountMultiplier(v)
 	return _u
 }
 
@@ -1914,6 +1962,12 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.AddedBalance(); ok {
 		_spec.AddField(user.FieldBalance, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.PaygDiscountMultiplier(); ok {
+		_spec.SetField(user.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedPaygDiscountMultiplier(); ok {
+		_spec.AddField(user.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.Concurrency(); ok {
 		_spec.SetField(user.FieldConcurrency, field.TypeInt, value)

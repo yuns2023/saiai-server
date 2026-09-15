@@ -43,6 +43,8 @@ export interface User {
 export interface AdminUser extends User {
   // 管理员备注（普通用户接口不返回）
   notes: string
+  // 用户全局按量折扣倍率（仅管理员接口返回）
+  payg_discount_multiplier: number
   // 用户专属分组倍率配置 (group_id -> rate_multiplier)
   group_rates?: Record<number, number>
   // 当前并发数（仅管理员列表接口返回）
@@ -744,7 +746,7 @@ export interface Account {
   current_concurrency?: number // Real-time concurrency count from Redis
   priority: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
-  payg_discount_multiplier?: number
+  payg_discount_multiplier?: number // Legacy read-only compatibility field; not used for new billing
   status: 'active' | 'inactive' | 'error'
   error_message: string | null
   last_used_at: string | null
@@ -933,7 +935,6 @@ export interface CreateAccountRequest {
   load_factor?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
-  payg_discount_multiplier?: number
   group_ids?: number[]
   expires_at?: number | null
   auto_pause_on_expired?: boolean
@@ -951,7 +952,6 @@ export interface UpdateAccountRequest {
   load_factor?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
-  payg_discount_multiplier?: number
   schedulable?: boolean
   status?: 'active' | 'inactive' | 'error'
   group_ids?: number[]
@@ -1094,6 +1094,7 @@ export interface UsageLog {
   rate_multiplier: number
   model_rate_multiplier?: number | null
   account_payg_discount_multiplier?: number | null
+  user_payg_discount_multiplier?: number | null
   billing_type: number
 
   request_type?: UsageRequestType
@@ -1370,6 +1371,7 @@ export interface UpdateUserRequest {
   notes?: string
   role?: 'admin' | 'user'
   balance?: number
+  payg_discount_multiplier?: number
   concurrency?: number
   status?: 'active' | 'disabled'
   allowed_groups?: number[] | null

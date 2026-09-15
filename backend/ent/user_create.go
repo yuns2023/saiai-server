@@ -112,6 +112,20 @@ func (_c *UserCreate) SetNillableBalance(v *float64) *UserCreate {
 	return _c
 }
 
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (_c *UserCreate) SetPaygDiscountMultiplier(v float64) *UserCreate {
+	_c.mutation.SetPaygDiscountMultiplier(v)
+	return _c
+}
+
+// SetNillablePaygDiscountMultiplier sets the "payg_discount_multiplier" field if the given value is not nil.
+func (_c *UserCreate) SetNillablePaygDiscountMultiplier(v *float64) *UserCreate {
+	if v != nil {
+		_c.SetPaygDiscountMultiplier(*v)
+	}
+	return _c
+}
+
 // SetConcurrency sets the "concurrency" field.
 func (_c *UserCreate) SetConcurrency(v int) *UserCreate {
 	_c.mutation.SetConcurrency(v)
@@ -432,6 +446,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultBalance
 		_c.mutation.SetBalance(v)
 	}
+	if _, ok := _c.mutation.PaygDiscountMultiplier(); !ok {
+		v := user.DefaultPaygDiscountMultiplier
+		_c.mutation.SetPaygDiscountMultiplier(v)
+	}
 	if _, ok := _c.mutation.Concurrency(); !ok {
 		v := user.DefaultConcurrency
 		_c.mutation.SetConcurrency(v)
@@ -497,6 +515,9 @@ func (_c *UserCreate) check() error {
 	}
 	if _, ok := _c.mutation.Balance(); !ok {
 		return &ValidationError{Name: "balance", err: errors.New(`ent: missing required field "User.balance"`)}
+	}
+	if _, ok := _c.mutation.PaygDiscountMultiplier(); !ok {
+		return &ValidationError{Name: "payg_discount_multiplier", err: errors.New(`ent: missing required field "User.payg_discount_multiplier"`)}
 	}
 	if _, ok := _c.mutation.Concurrency(); !ok {
 		return &ValidationError{Name: "concurrency", err: errors.New(`ent: missing required field "User.concurrency"`)}
@@ -583,6 +604,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Balance(); ok {
 		_spec.SetField(user.FieldBalance, field.TypeFloat64, value)
 		_node.Balance = value
+	}
+	if value, ok := _c.mutation.PaygDiscountMultiplier(); ok {
+		_spec.SetField(user.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
+		_node.PaygDiscountMultiplier = value
 	}
 	if value, ok := _c.mutation.Concurrency(); ok {
 		_spec.SetField(user.FieldConcurrency, field.TypeInt, value)
@@ -904,6 +929,24 @@ func (u *UserUpsert) AddBalance(v float64) *UserUpsert {
 	return u
 }
 
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (u *UserUpsert) SetPaygDiscountMultiplier(v float64) *UserUpsert {
+	u.Set(user.FieldPaygDiscountMultiplier, v)
+	return u
+}
+
+// UpdatePaygDiscountMultiplier sets the "payg_discount_multiplier" field to the value that was provided on create.
+func (u *UserUpsert) UpdatePaygDiscountMultiplier() *UserUpsert {
+	u.SetExcluded(user.FieldPaygDiscountMultiplier)
+	return u
+}
+
+// AddPaygDiscountMultiplier adds v to the "payg_discount_multiplier" field.
+func (u *UserUpsert) AddPaygDiscountMultiplier(v float64) *UserUpsert {
+	u.Add(user.FieldPaygDiscountMultiplier, v)
+	return u
+}
+
 // SetConcurrency sets the "concurrency" field.
 func (u *UserUpsert) SetConcurrency(v int) *UserUpsert {
 	u.Set(user.FieldConcurrency, v)
@@ -1182,6 +1225,27 @@ func (u *UserUpsertOne) AddBalance(v float64) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateBalance() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateBalance()
+	})
+}
+
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (u *UserUpsertOne) SetPaygDiscountMultiplier(v float64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetPaygDiscountMultiplier(v)
+	})
+}
+
+// AddPaygDiscountMultiplier adds v to the "payg_discount_multiplier" field.
+func (u *UserUpsertOne) AddPaygDiscountMultiplier(v float64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddPaygDiscountMultiplier(v)
+	})
+}
+
+// UpdatePaygDiscountMultiplier sets the "payg_discount_multiplier" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdatePaygDiscountMultiplier() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdatePaygDiscountMultiplier()
 	})
 }
 
@@ -1652,6 +1716,27 @@ func (u *UserUpsertBulk) AddBalance(v float64) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateBalance() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateBalance()
+	})
+}
+
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (u *UserUpsertBulk) SetPaygDiscountMultiplier(v float64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetPaygDiscountMultiplier(v)
+	})
+}
+
+// AddPaygDiscountMultiplier adds v to the "payg_discount_multiplier" field.
+func (u *UserUpsertBulk) AddPaygDiscountMultiplier(v float64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddPaygDiscountMultiplier(v)
+	})
+}
+
+// UpdatePaygDiscountMultiplier sets the "payg_discount_multiplier" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdatePaygDiscountMultiplier() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdatePaygDiscountMultiplier()
 	})
 }
 

@@ -427,6 +427,10 @@
             />
           </template>
 
+          <template #cell-payg_discount_multiplier="{ row }">
+            <span class="text-sm font-mono text-gray-700 dark:text-gray-300">{{ (row.payg_discount_multiplier ?? 1).toFixed(4) }}x</span>
+          </template>
+
           <template #cell-claude_devices="{ row }">
             <span
               v-if="row.claude_device_limit !== null && row.claude_device_limit !== undefined"
@@ -714,6 +718,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'groups', label: t('admin.users.columns.groups'), sortable: false },
   { key: 'subscriptions', label: t('admin.users.columns.subscriptions'), sortable: false },
   { key: 'balance', label: t('admin.users.columns.balance'), sortable: true },
+  { key: 'payg_discount_multiplier', label: t('admin.users.columns.paygDiscountMultiplier'), sortable: false },
   { key: 'usage', label: t('admin.users.columns.usage'), sortable: false },
   { key: 'concurrency', label: t('admin.users.columns.concurrency'), sortable: true },
   { key: 'claude_devices', label: t('admin.users.columns.claudeDevices'), sortable: false },

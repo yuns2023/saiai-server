@@ -90,6 +90,11 @@ func Balance(v float64) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldBalance, v))
 }
 
+// PaygDiscountMultiplier applies equality check predicate on the "payg_discount_multiplier" field. It's identical to PaygDiscountMultiplierEQ.
+func PaygDiscountMultiplier(v float64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldPaygDiscountMultiplier, v))
+}
+
 // Concurrency applies equality check predicate on the "concurrency" field. It's identical to ConcurrencyEQ.
 func Concurrency(v int) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldConcurrency, v))
@@ -498,6 +503,46 @@ func BalanceLT(v float64) predicate.User {
 // BalanceLTE applies the LTE predicate on the "balance" field.
 func BalanceLTE(v float64) predicate.User {
 	return predicate.User(sql.FieldLTE(FieldBalance, v))
+}
+
+// PaygDiscountMultiplierEQ applies the EQ predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierEQ(v float64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldPaygDiscountMultiplier, v))
+}
+
+// PaygDiscountMultiplierNEQ applies the NEQ predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierNEQ(v float64) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldPaygDiscountMultiplier, v))
+}
+
+// PaygDiscountMultiplierIn applies the In predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierIn(vs ...float64) predicate.User {
+	return predicate.User(sql.FieldIn(FieldPaygDiscountMultiplier, vs...))
+}
+
+// PaygDiscountMultiplierNotIn applies the NotIn predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierNotIn(vs ...float64) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldPaygDiscountMultiplier, vs...))
+}
+
+// PaygDiscountMultiplierGT applies the GT predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierGT(v float64) predicate.User {
+	return predicate.User(sql.FieldGT(FieldPaygDiscountMultiplier, v))
+}
+
+// PaygDiscountMultiplierGTE applies the GTE predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierGTE(v float64) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldPaygDiscountMultiplier, v))
+}
+
+// PaygDiscountMultiplierLT applies the LT predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierLT(v float64) predicate.User {
+	return predicate.User(sql.FieldLT(FieldPaygDiscountMultiplier, v))
+}
+
+// PaygDiscountMultiplierLTE applies the LTE predicate on the "payg_discount_multiplier" field.
+func PaygDiscountMultiplierLTE(v float64) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldPaygDiscountMultiplier, v))
 }
 
 // ConcurrencyEQ applies the EQ predicate on the "concurrency" field.

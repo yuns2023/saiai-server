@@ -217,12 +217,13 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 		RateLimit1d: apiKey.RateLimit1d,
 		RateLimit7d: apiKey.RateLimit7d,
 		User: APIKeyAuthUserSnapshot{
-			ID:          apiKey.User.ID,
-			Username:    apiKey.User.Username,
-			Status:      apiKey.User.Status,
-			Role:        apiKey.User.Role,
-			Balance:     apiKey.User.Balance,
-			Concurrency: apiKey.User.Concurrency,
+			ID:                     apiKey.User.ID,
+			Username:               apiKey.User.Username,
+			Status:                 apiKey.User.Status,
+			Role:                   apiKey.User.Role,
+			Balance:                apiKey.User.Balance,
+			PaygDiscountMultiplier: apiKey.User.PaygDiscountMultiplier,
+			Concurrency:            apiKey.User.Concurrency,
 		},
 	}
 	if apiKey.Group != nil {
@@ -292,12 +293,13 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		RateLimit1d: snapshot.RateLimit1d,
 		RateLimit7d: snapshot.RateLimit7d,
 		User: &User{
-			ID:          snapshot.User.ID,
-			Username:    snapshot.User.Username,
-			Status:      snapshot.User.Status,
-			Role:        snapshot.User.Role,
-			Balance:     snapshot.User.Balance,
-			Concurrency: snapshot.User.Concurrency,
+			ID:                     snapshot.User.ID,
+			Username:               snapshot.User.Username,
+			Status:                 snapshot.User.Status,
+			Role:                   snapshot.User.Role,
+			Balance:                snapshot.User.Balance,
+			PaygDiscountMultiplier: snapshot.User.PaygDiscountMultiplier,
+			Concurrency:            snapshot.User.Concurrency,
 		},
 	}
 	if snapshot.Group != nil {

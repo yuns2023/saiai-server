@@ -36,3 +36,11 @@ func TestAccount_PaygDiscountRateAndValidation(t *testing.T) {
 	aboveOne := 1.01
 	require.Error(t, validatePaygDiscountMultiplier(&aboveOne))
 }
+
+func TestUser_PaygDiscountRate(t *testing.T) {
+	require.Equal(t, 1.0, (&User{}).PaygDiscountRate())
+	discount := 0.75
+	require.Equal(t, discount, (&User{PaygDiscountMultiplier: &discount}).PaygDiscountRate())
+	invalid := -0.1
+	require.Equal(t, 1.0, (&User{PaygDiscountMultiplier: &invalid}).PaygDiscountRate())
+}

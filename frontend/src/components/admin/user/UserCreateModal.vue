@@ -35,6 +35,20 @@
           <input v-model.number="form.concurrency" type="number" class="input" />
         </div>
       </div>
+      <div>
+        <label class="input-label">{{ t('admin.users.paygDiscountMultiplier') }}</label>
+        <input
+          v-model.number="form.payg_discount_multiplier"
+          data-testid="user-payg-discount"
+          type="number"
+          min="0"
+          max="1"
+          step="0.0001"
+          required
+          class="input"
+        />
+        <p class="input-hint">{{ t('admin.users.paygDiscountMultiplierHint') }}</p>
+      </div>
     </form>
     <template #footer>
       <div class="flex justify-end gap-3">
@@ -57,7 +71,7 @@ import Icon from '@/components/icons/Icon.vue'
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n()
 
-const form = reactive({ email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1 })
+const form = reactive({ email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1 })
 
 const { loading, submit } = useForm({
   form,
@@ -68,7 +82,7 @@ const { loading, submit } = useForm({
   successMsg: t('admin.users.userCreated')
 })
 
-watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1 }) })
+watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1 }) })
 
 const generateRandomPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*'

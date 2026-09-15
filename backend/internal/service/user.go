@@ -7,19 +7,22 @@ import (
 )
 
 type User struct {
-	ID            int64
-	Email         string
-	Username      string
-	Notes         string
-	PasswordHash  string
-	Role          string
-	Balance       float64
-	Concurrency   int
-	Status        string
-	AllowedGroups []int64
-	TokenVersion  int64 // Incremented on password change to invalidate existing tokens
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID           int64
+	Email        string
+	Username     string
+	Notes        string
+	PasswordHash string
+	Role         string
+	Balance      float64
+	// PaygDiscountMultiplier discounts this user's balance billing across keys,
+	// groups, and upstream accounts. Nil in older auth cache entries means 1.
+	PaygDiscountMultiplier *float64
+	Concurrency            int
+	Status                 string
+	AllowedGroups          []int64
+	TokenVersion           int64 // Incremented on password change to invalidate existing tokens
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier
@@ -36,6 +39,13 @@ type User struct {
 
 	APIKeys       []APIKey
 	Subscriptions []UserSubscription
+}
+
+func (u *User) PaygDiscountRate() float64 {
+	if u == nil || u.PaygDiscountMultiplier == nil || *u.PaygDiscountMultiplier < 0 || *u.PaygDiscountMultiplier > 1 {
+		return 1
+	}
+	return *u.PaygDiscountMultiplier
 }
 
 func (u *User) IsAdmin() bool {

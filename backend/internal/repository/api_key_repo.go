@@ -138,6 +138,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				user.FieldStatus,
 				user.FieldRole,
 				user.FieldBalance,
+				user.FieldPaygDiscountMultiplier,
 				user.FieldConcurrency,
 			)
 		}).
@@ -618,23 +619,25 @@ func userEntityToService(u *dbent.User) *service.User {
 	if u == nil {
 		return nil
 	}
+	paygDiscountMultiplier := u.PaygDiscountMultiplier
 	return &service.User{
-		ID:                    u.ID,
-		Email:                 u.Email,
-		Username:              u.Username,
-		Notes:                 u.Notes,
-		PasswordHash:          u.PasswordHash,
-		Role:                  u.Role,
-		Balance:               u.Balance,
-		Concurrency:           u.Concurrency,
-		Status:                u.Status,
-		SoraStorageQuotaBytes: u.SoraStorageQuotaBytes,
-		SoraStorageUsedBytes:  u.SoraStorageUsedBytes,
-		TotpSecretEncrypted:   u.TotpSecretEncrypted,
-		TotpEnabled:           u.TotpEnabled,
-		TotpEnabledAt:         u.TotpEnabledAt,
-		CreatedAt:             u.CreatedAt,
-		UpdatedAt:             u.UpdatedAt,
+		ID:                     u.ID,
+		Email:                  u.Email,
+		Username:               u.Username,
+		Notes:                  u.Notes,
+		PasswordHash:           u.PasswordHash,
+		Role:                   u.Role,
+		Balance:                u.Balance,
+		PaygDiscountMultiplier: &paygDiscountMultiplier,
+		Concurrency:            u.Concurrency,
+		Status:                 u.Status,
+		SoraStorageQuotaBytes:  u.SoraStorageQuotaBytes,
+		SoraStorageUsedBytes:   u.SoraStorageUsedBytes,
+		TotpSecretEncrypted:    u.TotpSecretEncrypted,
+		TotpEnabled:            u.TotpEnabled,
+		TotpEnabledAt:          u.TotpEnabledAt,
+		CreatedAt:              u.CreatedAt,
+		UpdatedAt:              u.UpdatedAt,
 	}
 }
 
