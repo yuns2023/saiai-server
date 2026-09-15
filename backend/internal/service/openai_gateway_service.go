@@ -977,6 +977,27 @@ func getAPIKeyIDFromContext(c *gin.Context) int64 {
 	return apiKey.ID
 }
 
+func getOpenAIUserIDFromContext(c *gin.Context) int64 {
+	if c == nil {
+		return 0
+	}
+	v, exists := c.Get("api_key")
+	if !exists {
+		return 0
+	}
+	apiKey, ok := v.(*APIKey)
+	if !ok || apiKey == nil {
+		return 0
+	}
+	if apiKey.UserID > 0 {
+		return apiKey.UserID
+	}
+	if apiKey.User != nil {
+		return apiKey.User.ID
+	}
+	return 0
+}
+
 // isolateOpenAISessionID 将 apiKeyID 混入 session 标识符，
 // 确保不同 API Key 的用户即使使用相同的原始 session_id/conversation_id，
 // 到达上游的标识符也不同，防止跨用户会话碰撞。
@@ -991,17 +1012,17 @@ func isolateOpenAISessionID(apiKeyID int64, raw string) string {
 	return fmt.Sprintf("%016x", h.Sum64())
 }
 
-// isolateOpenAISessionIDForAccount gives each selected upstream account its
-// own provider-facing session namespace while preserving the established
+// isolateOpenAIUserSessionIDForAccount gives each user and selected upstream
+// account its own provider-facing session namespace while preserving the established
 // 16-character hex wire shape. The client-facing identity and sticky-session
 // selection remain based on the original value.
-func isolateOpenAISessionIDForAccount(apiKeyID, accountID int64, raw string) string {
+func isolateOpenAIUserSessionIDForAccount(userID, accountID int64, raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
 	}
 	h := xxhash.New()
-	_, _ = fmt.Fprintf(h, "v2:k%d:a%d:", apiKeyID, accountID)
+	_, _ = fmt.Fprintf(h, "v3:u%d:a%d:", userID, accountID)
 	_, _ = h.WriteString(raw)
 	return fmt.Sprintf("%016x", h.Sum64())
 }
@@ -2610,8 +2631,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			responseID = openAIResponseIDForAccountBinding(c)
 		}
 		if responseID != "" {
-			bindErr := s.getOpenAIWSStateStore().BindResponseAccountForAPIKey(
-				ctx, getOpenAIGroupIDFromContext(c), getAPIKeyIDFromContext(c), responseID, account.ID, s.openAIWSResponseStickyTTL(),
+			bindErr := s.getOpenAIWSStateStore().BindResponseAccountForUser(
+				ctx, getOpenAIUserIDFromContext(c), responseID, account.ID, s.openAIWSResponseStickyTTL(),
 			)
 			if bindErr != nil {
 				logger.LegacyPrintf("service.openai_gateway", "Failed to bind OpenAI response account: %v", bindErr)
@@ -2632,8 +2653,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
 			if sessionHash != "" {
 				s.getOpenAIWSStateStore().BindSessionTurnState(
-					getOpenAIGroupIDFromContext(c),
-					openAIWSAccountTurnStateSessionHash(getAPIKeyIDFromContext(c), account.ID, sessionHash),
+					0,
+					openAIWSUserTurnStateSessionHash(getOpenAIUserIDFromContext(c), account.ID, sessionHash),
 					state,
 					s.openAIWSSessionStickyTTL(),
 				)
@@ -2844,7 +2865,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		// client may still carry an old token after the scheduler switches.
 		req.Header.Del(openAIWSTurnStateHeader)
 		sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
-		if state := s.resolveOpenAIWSTurnStateForAccount(account, getOpenAIGroupIDFromContext(c), getAPIKeyIDFromContext(c), sessionHash, c.GetHeader(openAIWSTurnStateHeader)); state != "" {
+		if state := s.resolveOpenAIWSTurnStateForAccount(account, getOpenAIUserIDFromContext(c), sessionHash, c.GetHeader(openAIWSTurnStateHeader)); state != "" {
 			req.Header.Set(openAIWSTurnStateHeader, state)
 		}
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
@@ -2855,26 +2876,26 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			req.Header.Set("OpenAI-Beta", "responses=experimental")
 			req.Header.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
 		}
-		apiKeyID := getAPIKeyIDFromContext(c)
+		userID := getOpenAIUserIDFromContext(c)
 		incomingSessionID := strings.TrimSpace(c.GetHeader("session_id"))
 		incomingConversationID := strings.TrimSpace(c.GetHeader("conversation_id"))
 		if isOpenAIResponsesCompactPath(c) {
 			req.Header.Set("accept", "application/json")
 			compactSession := resolveOpenAICompactSessionID(c)
-			req.Header.Set("session_id", isolateOpenAISessionIDForAccount(apiKeyID, account.ID, compactSession))
+			req.Header.Set("session_id", isolateOpenAIUserSessionIDForAccount(userID, account.ID, compactSession))
 		} else {
 			req.Header.Set("accept", "text/event-stream")
 		}
 		if promptCacheKey != "" {
-			isolated := isolateOpenAISessionIDForAccount(apiKeyID, account.ID, promptCacheKey)
+			isolated := isolateOpenAIUserSessionIDForAccount(userID, account.ID, promptCacheKey)
 			req.Header.Set("conversation_id", isolated)
 			req.Header.Set("session_id", isolated)
 		} else {
 			if incomingSessionID != "" {
-				req.Header.Set("session_id", isolateOpenAISessionIDForAccount(apiKeyID, account.ID, incomingSessionID))
+				req.Header.Set("session_id", isolateOpenAIUserSessionIDForAccount(userID, account.ID, incomingSessionID))
 			}
 			if incomingConversationID != "" {
-				req.Header.Set("conversation_id", isolateOpenAISessionIDForAccount(apiKeyID, account.ID, incomingConversationID))
+				req.Header.Set("conversation_id", isolateOpenAIUserSessionIDForAccount(userID, account.ID, incomingConversationID))
 			}
 		}
 	}

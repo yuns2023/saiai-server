@@ -15,12 +15,12 @@ const openAIResponseIDContextKey = "openai_response_id_for_account_binding"
 // continuation before scheduling can replace a stale sticky binding. A
 // provider-issued response ID is accepted only with an explicit account
 // binding; session stickiness cannot prove who issued an old response.
-func (s *OpenAIGatewayService) OpenAIContinuationAccountID(ctx context.Context, groupID *int64, apiKeyID int64, previousResponseID string) (int64, error) {
+func (s *OpenAIGatewayService) OpenAIContinuationAccountID(ctx context.Context, userID int64, previousResponseID string) (int64, error) {
 	if s == nil || strings.TrimSpace(previousResponseID) == "" {
 		return 0, nil
 	}
 	if store := s.getOpenAIWSStateStore(); store != nil {
-		return store.GetResponseAccountForAPIKey(ctx, derefGroupID(groupID), apiKeyID, strings.TrimSpace(previousResponseID))
+		return store.GetResponseAccountForUser(ctx, userID, strings.TrimSpace(previousResponseID))
 	}
 	return 0, nil
 }
@@ -45,11 +45,11 @@ func OpenAIContinuationAccountMatches(previousResponseID string, ownerAccountID,
 		(ownerAccountID > 0 && selectedAccountID == ownerAccountID)
 }
 
-func openAIWSAccountTurnStateSessionHash(apiKeyID, accountID int64, sessionHash string) string {
+func openAIWSUserTurnStateSessionHash(userID, accountID int64, sessionHash string) string {
 	if accountID <= 0 || strings.TrimSpace(sessionHash) == "" {
 		return ""
 	}
-	return fmt.Sprintf("key:%d:account:%d:%s", apiKeyID, accountID, sessionHash)
+	return fmt.Sprintf("user:%d:account:%d:%s", userID, accountID, sessionHash)
 }
 
 func (s *OpenAIGatewayService) openAISessionHashForTurnState(c *gin.Context, promptCacheKey string) string {
@@ -63,7 +63,7 @@ func (s *OpenAIGatewayService) openAISessionHashForTurnState(c *gin.Context, pro
 // resolveOpenAIWSTurnStateForAccount accepts a client-supplied state token for
 // OAuth only when this Gateway has observed it for the selected account. A
 // token from a previous account is never forwarded after a pool switch.
-func (s *OpenAIGatewayService) resolveOpenAIWSTurnStateForAccount(account *Account, groupID, apiKeyID int64, sessionHash, incoming string) string {
+func (s *OpenAIGatewayService) resolveOpenAIWSTurnStateForAccount(account *Account, userID int64, sessionHash, incoming string) string {
 	incoming = strings.TrimSpace(incoming)
 	if s == nil || account == nil || sessionHash == "" {
 		if account != nil && account.Type == AccountTypeOAuth {
@@ -78,7 +78,7 @@ func (s *OpenAIGatewayService) resolveOpenAIWSTurnStateForAccount(account *Accou
 		}
 		return incoming
 	}
-	stored, ok := store.GetSessionTurnState(groupID, openAIWSAccountTurnStateSessionHash(apiKeyID, account.ID, sessionHash))
+	stored, ok := store.GetSessionTurnState(0, openAIWSUserTurnStateSessionHash(userID, account.ID, sessionHash))
 	if account.Type != AccountTypeOAuth {
 		if incoming != "" {
 			return incoming

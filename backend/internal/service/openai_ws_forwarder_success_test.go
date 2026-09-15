@@ -92,7 +92,8 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
 	c.Request.Header.Set("User-Agent", "unit-test-agent/1.0")
 	groupID := int64(1001)
-	c.Set("api_key", &APIKey{GroupID: &groupID})
+	userID := int64(55)
+	c.Set("api_key", &APIKey{UserID: userID, GroupID: &groupID})
 
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.Enabled = false
@@ -160,7 +161,7 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	require.False(t, received.Stream, "应保持客户端 stream=false 的原始语义")
 
 	store := svc.getOpenAIWSStateStore()
-	mappedAccountID, getErr := store.GetResponseAccount(context.Background(), groupID, "resp_new_1")
+	mappedAccountID, getErr := store.GetResponseAccountForUser(context.Background(), userID, "resp_new_1")
 	require.NoError(t, getErr)
 	require.Equal(t, account.ID, mappedAccountID)
 	connID, ok := store.GetResponseConn("resp_new_1")
@@ -476,10 +477,10 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	require.Equal(t, "window-oauth-1", captureDialer.lastHeaders.Get("X-Codex-Window-Id"))
 	require.Empty(t, captureDialer.lastHeaders.Get("Sec-WebSocket-Key"))
 	require.Empty(t, captureDialer.lastHeaders.Get("X-Forwarded-For"))
-	// OAuth 账号的 session_id/conversation_id 按 API Key 和所选账号隔离，
-	// 测试中未设置 api_key 到 context，apiKeyID=0。
-	require.Equal(t, isolateOpenAISessionIDForAccount(0, account.ID, "sess-oauth-1"), captureDialer.lastHeaders.Get("session_id"))
-	require.Equal(t, isolateOpenAISessionIDForAccount(0, account.ID, "conv-oauth-1"), captureDialer.lastHeaders.Get("conversation_id"))
+	// OAuth 账号的 session_id/conversation_id 按用户和所选账号隔离，
+	// 测试中未设置 api_key 到 context，userID=0。
+	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "sess-oauth-1"), captureDialer.lastHeaders.Get("session_id"))
+	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "conv-oauth-1"), captureDialer.lastHeaders.Get("conversation_id"))
 }
 
 func TestOpenAIGatewayService_BuildOpenAIWSHeadersIsolatesHyphenatedSessionAliases(t *testing.T) {
@@ -507,8 +508,8 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersIsolatesHyphenatedSessionAlias
 
 	require.Equal(t, "header_session_id", resolution.SessionSource)
 	require.Equal(t, "header_conversation_id", resolution.ConversationSource)
-	require.Equal(t, isolateOpenAISessionIDForAccount(0, account.ID, "session-hyphen"), headers.Get("session_id"))
-	require.Equal(t, isolateOpenAISessionIDForAccount(0, account.ID, "conversation-hyphen"), headers.Get("conversation_id"))
+	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "session-hyphen"), headers.Get("session_id"))
+	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "conversation-hyphen"), headers.Get("conversation_id"))
 	require.Empty(t, headers.Get("session-id"))
 	require.Empty(t, headers.Get("conversation-id"))
 }
@@ -651,8 +652,8 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 	require.NotNil(t, result)
 	require.Equal(t, "resp_prompt_cache_key", result.RequestID)
 
-	// OAuth 账号的 session_id 按 API Key 和账号隔离（apiKeyID=0，未在 context 设置）。
-	require.Equal(t, isolateOpenAISessionIDForAccount(0, account.ID, "pcache_123"), captureDialer.lastHeaders.Get("session_id"))
+	// OAuth 账号的 session_id 按用户和账号隔离（userID=0，未在 context 设置）。
+	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "pcache_123"), captureDialer.lastHeaders.Get("session_id"))
 	require.Empty(t, captureDialer.lastHeaders.Get("conversation_id"))
 	require.NotNil(t, captureConn.lastWrite)
 	require.True(t, gjson.Get(requestToJSONString(captureConn.lastWrite), "stream").Exists())
@@ -812,7 +813,7 @@ func TestOpenAIGatewayService_Forward_WSv2_TurnStateAndMetadataReplayOnReconnect
 
 	sessionHash := svc.GenerateSessionHash(c1, reqBody)
 	store := svc.getOpenAIWSStateStore()
-	turnState, ok := store.GetSessionTurnState(0, openAIWSAccountTurnStateSessionHash(0, account.ID, sessionHash))
+	turnState, ok := store.GetSessionTurnState(0, openAIWSUserTurnStateSessionHash(0, account.ID, sessionHash))
 	require.True(t, ok)
 	require.Equal(t, "turn_state_first", turnState)
 

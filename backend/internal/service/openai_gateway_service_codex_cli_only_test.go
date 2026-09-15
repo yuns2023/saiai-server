@@ -95,6 +95,18 @@ func TestGetAPIKeyIDFromContext(t *testing.T) {
 	})
 }
 
+func TestGetOpenAIUserIDFromContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	require.Zero(t, getOpenAIUserIDFromContext(nil))
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	require.Zero(t, getOpenAIUserIDFromContext(c))
+	c.Set("api_key", &APIKey{ID: 5, UserID: 55, User: &User{ID: 66}})
+	require.Equal(t, int64(55), getOpenAIUserIDFromContext(c))
+	c.Set("api_key", &APIKey{ID: 6, User: &User{ID: 66}})
+	require.Equal(t, int64(66), getOpenAIUserIDFromContext(c))
+}
+
 func TestLogCodexCLIOnlyDetection_NilSafety(t *testing.T) {
 	// 不校验日志内容，仅保证在 nil 入参下不会 panic。
 	require.NotPanics(t, func() {

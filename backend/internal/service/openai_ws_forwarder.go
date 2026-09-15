@@ -1150,14 +1150,14 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 			headers.Set("accept-language", v)
 		}
 	}
-	// OAuth 账号：将 apiKeyID 混入 session 标识符，防止跨用户会话碰撞。
+	// OAuth 账号：将 userID 和上游账号混入 session 标识符；同一用户跨 Key/组稳定。
 	if account != nil && account.Type == AccountTypeOAuth {
-		apiKeyID := getAPIKeyIDFromContext(c)
+		userID := getOpenAIUserIDFromContext(c)
 		if sessionResolution.SessionID != "" {
-			headers.Set("session_id", isolateOpenAISessionIDForAccount(apiKeyID, account.ID, sessionResolution.SessionID))
+			headers.Set("session_id", isolateOpenAIUserSessionIDForAccount(userID, account.ID, sessionResolution.SessionID))
 		}
 		if sessionResolution.ConversationID != "" {
-			headers.Set("conversation_id", isolateOpenAISessionIDForAccount(apiKeyID, account.ID, sessionResolution.ConversationID))
+			headers.Set("conversation_id", isolateOpenAIUserSessionIDForAccount(userID, account.ID, sessionResolution.ConversationID))
 		}
 	} else {
 		if sessionResolution.SessionID != "" {
@@ -1835,7 +1835,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		sessionHash, legacySessionHash = openAIWSSessionHashesFromID(promptCacheKey)
 		attachOpenAILegacySessionHashToGin(c, legacySessionHash)
 	}
-	turnState = s.resolveOpenAIWSTurnStateForAccount(account, groupID, getAPIKeyIDFromContext(c), sessionHash, turnState)
+	turnState = s.resolveOpenAIWSTurnStateForAccount(account, getOpenAIUserIDFromContext(c), sessionHash, turnState)
 	preferredConnID := ""
 	if stateStore != nil && previousResponseID != "" {
 		if connID, ok := stateStore.GetResponseConn(previousResponseID); ok {
@@ -1991,7 +1991,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	)
 	if handshakeTurnState != "" {
 		if stateStore != nil && sessionHash != "" {
-			stateStore.BindSessionTurnState(groupID, openAIWSAccountTurnStateSessionHash(getAPIKeyIDFromContext(c), account.ID, sessionHash), handshakeTurnState, s.openAIWSSessionStickyTTL())
+			stateStore.BindSessionTurnState(0, openAIWSUserTurnStateSessionHash(getOpenAIUserIDFromContext(c), account.ID, sessionHash), handshakeTurnState, s.openAIWSSessionStickyTTL())
 		}
 		if c != nil {
 			c.Header(http.CanonicalHeaderKey(openAIWSTurnStateHeader), handshakeTurnState)
@@ -2008,7 +2008,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		account,
 		stateStore,
 		groupID,
-		getAPIKeyIDFromContext(c),
+		getOpenAIUserIDFromContext(c),
 	); err != nil {
 		return nil, err
 	}
@@ -2355,7 +2355,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 	if responseID != "" && stateStore != nil {
 		ttl := s.openAIWSResponseStickyTTL()
-		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccountForAPIKey(ctx, groupID, getAPIKeyIDFromContext(c), responseID, account.ID, ttl))
+		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccountForUser(ctx, getOpenAIUserIDFromContext(c), responseID, account.ID, ttl))
 		stateStore.BindResponseConn(responseID, lease.ConnID(), ttl)
 	}
 	if stateStore != nil && storeDisabled && sessionHash != "" {
@@ -2647,7 +2647,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	stateStore := s.getOpenAIWSStateStore()
 	groupID := getOpenAIGroupIDFromContext(c)
 	sessionHash := s.GenerateSessionHash(c, firstPayload.rawForHash)
-	turnState = s.resolveOpenAIWSTurnStateForAccount(account, groupID, getAPIKeyIDFromContext(c), sessionHash, turnState)
+	turnState = s.resolveOpenAIWSTurnStateForAccount(account, getOpenAIUserIDFromContext(c), sessionHash, turnState)
 
 	preferredConnID := ""
 	if stateStore != nil && firstPayload.previousResponseID != "" {
@@ -2788,7 +2788,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader)); handshakeTurnState != "" {
 			turnState = handshakeTurnState
 			if stateStore != nil && sessionHash != "" {
-				stateStore.BindSessionTurnState(groupID, openAIWSAccountTurnStateSessionHash(getAPIKeyIDFromContext(c), account.ID, sessionHash), handshakeTurnState, s.openAIWSSessionStickyTTL())
+				stateStore.BindSessionTurnState(0, openAIWSUserTurnStateSessionHash(getOpenAIUserIDFromContext(c), account.ID, sessionHash), handshakeTurnState, s.openAIWSSessionStickyTTL())
 			}
 			updatedHeaders := cloneHeader(baseAcquireReq.Headers)
 			if updatedHeaders == nil {
@@ -3551,7 +3551,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 		if responseID != "" && stateStore != nil {
 			ttl := s.openAIWSResponseStickyTTL()
-			logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccountForAPIKey(ctx, groupID, getAPIKeyIDFromContext(c), responseID, account.ID, ttl))
+			logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccountForUser(ctx, getOpenAIUserIDFromContext(c), responseID, account.ID, ttl))
 			stateStore.BindResponseConn(responseID, connID, ttl)
 		}
 		if stateStore != nil && storeDisabled && sessionHash != "" {
@@ -3653,7 +3653,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	account *Account,
 	stateStore OpenAIWSStateStore,
 	groupID int64,
-	apiKeyID int64,
+	userID int64,
 ) error {
 	if s == nil {
 		return nil
@@ -3789,7 +3789,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	lease.MarkPrewarmed()
 	if prewarmResponseID != "" && stateStore != nil {
 		ttl := s.openAIWSResponseStickyTTL()
-		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, prewarmResponseID, stateStore.BindResponseAccountForAPIKey(ctx, groupID, apiKeyID, prewarmResponseID, account.ID, ttl))
+		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, prewarmResponseID, stateStore.BindResponseAccountForUser(ctx, userID, prewarmResponseID, account.ID, ttl))
 		stateStore.BindResponseConn(prewarmResponseID, lease.ConnID(), ttl)
 	}
 	logOpenAIWSModeInfo(
@@ -3921,13 +3921,25 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 	requestedModel string,
 	excludedIDs map[int64]struct{},
 ) (*AccountSelectionResult, error) {
-	return s.SelectAccountByPreviousResponseIDForAPIKey(ctx, groupID, 0, previousResponseID, requestedModel, excludedIDs)
+	return s.selectAccountByPreviousResponseID(ctx, groupID, 0, false, previousResponseID, requestedModel, excludedIDs)
 }
 
-func (s *OpenAIGatewayService) SelectAccountByPreviousResponseIDForAPIKey(
+func (s *OpenAIGatewayService) SelectAccountByPreviousResponseIDForUser(
 	ctx context.Context,
 	groupID *int64,
-	apiKeyID int64,
+	userID int64,
+	previousResponseID string,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+) (*AccountSelectionResult, error) {
+	return s.selectAccountByPreviousResponseID(ctx, groupID, userID, true, previousResponseID, requestedModel, excludedIDs)
+}
+
+func (s *OpenAIGatewayService) selectAccountByPreviousResponseID(
+	ctx context.Context,
+	groupID *int64,
+	userID int64,
+	useUserScope bool,
 	previousResponseID string,
 	requestedModel string,
 	excludedIDs map[int64]struct{},
@@ -3944,9 +3956,31 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseIDForAPIKey(
 		return nil, nil
 	}
 
-	accountID, err := store.GetResponseAccountForAPIKey(ctx, derefGroupID(groupID), apiKeyID, responseID)
+	var accountID int64
+	var err error
+	if useUserScope {
+		accountID, err = store.GetResponseAccountForUser(ctx, userID, responseID)
+	} else {
+		accountID, err = store.GetResponseAccount(ctx, derefGroupID(groupID), responseID)
+	}
 	if err != nil || accountID <= 0 {
 		return nil, nil
+	}
+	if useUserScope {
+		accounts, listErr := s.listSchedulableAccounts(ctx, groupID)
+		if listErr != nil {
+			return nil, listErr
+		}
+		availableInGroup := false
+		for i := range accounts {
+			if accounts[i].ID == accountID {
+				availableInGroup = true
+				break
+			}
+		}
+		if !availableInGroup {
+			return nil, nil
+		}
 	}
 	if excludedIDs != nil {
 		if _, excluded := excludedIDs[accountID]; excluded {
@@ -3972,11 +4006,17 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseIDForAPIKey(
 
 	result, acquireErr := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 	if acquireErr == nil && result.Acquired {
+		var bindErr error
+		if useUserScope {
+			bindErr = store.BindResponseAccountForUser(ctx, userID, responseID, accountID, s.openAIWSResponseStickyTTL())
+		} else {
+			bindErr = store.BindResponseAccount(ctx, derefGroupID(groupID), responseID, accountID, s.openAIWSResponseStickyTTL())
+		}
 		logOpenAIWSBindResponseAccountWarn(
 			derefGroupID(groupID),
 			accountID,
 			responseID,
-			store.BindResponseAccountForAPIKey(ctx, derefGroupID(groupID), apiKeyID, responseID, accountID, s.openAIWSResponseStickyTTL()),
+			bindErr,
 		)
 		return &AccountSelectionResult{
 			Account:     account,
