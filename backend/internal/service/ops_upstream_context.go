@@ -11,17 +11,17 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 )
 
 // Gin context keys used by Ops error logger for capturing upstream error details.
 // These keys are set by gateway services and consumed by handler/ops_error_logger.go.
 const (
-	OpsUpstreamStatusCodeKey   = "ops_upstream_status_code"
-	OpsUpstreamErrorMessageKey = "ops_upstream_error_message"
-	OpsUpstreamErrorDetailKey  = "ops_upstream_error_detail"
-	OpsUpstreamErrorsKey       = "ops_upstream_errors"
-	OpsOAuthAttributionKey     = "ops_oauth_attribution"
+	OpsUpstreamStatusCodeKey     = "ops_upstream_status_code"
+	OpsUpstreamErrorMessageKey   = "ops_upstream_error_message"
+	OpsUpstreamErrorDetailKey    = "ops_upstream_error_detail"
+	OpsUpstreamErrorsKey         = "ops_upstream_errors"
+	OpsOAuthAttributionKey       = "ops_oauth_attribution"
+	opsClaudeOAuthAuditComponent = "audit.claude_oauth_attribution"
 
 	// Best-effort capture of the current upstream request body so ops can
 	// retry the specific upstream attempt (not just the client request).
@@ -203,20 +203,23 @@ func logClaudeOAuthAttribution(c *gin.Context, account *Account, prepared bool) 
 	if prepared {
 		stage = "prepared"
 	}
-	logger.L().Info("claude_oauth_request_attribution",
-		zap.String("component", "audit.claude_oauth_attribution"),
-		zap.String("request_id", requestIDFromGinContext(c)),
-		zap.Int64("account_id", account.ID),
-		zap.String("platform", PlatformAnthropic),
-		zap.String("account_type", attribution.AccountType),
-		zap.String("traffic_mode", attribution.TrafficMode),
-		zap.String("selection_source", attribution.SelectionSource),
-		zap.String("request_kind", attribution.RequestKind),
-		zap.String("stage", stage),
-		zap.Bool("identity_prepared", attribution.IdentityPrepared),
-		zap.Bool("identity_rewritten", attribution.IdentityRewritten),
-		zap.Bool("native_billing", attribution.NativeBilling),
-		zap.Bool("transport_isolated", attribution.TransportIsolated))
+	// OAuth attribution is an Ops audit record, not a best-effort runtime log.
+	// Write it directly to the sink so runtime level and sampling changes cannot
+	// suppress it. The sink owns redaction, bounded queuing, and persistence.
+	logger.WriteSinkEvent("info", opsClaudeOAuthAuditComponent, "claude_oauth_request_attribution", map[string]any{
+		"request_id":         requestIDFromGinContext(c),
+		"account_id":         account.ID,
+		"platform":           PlatformAnthropic,
+		"account_type":       attribution.AccountType,
+		"traffic_mode":       attribution.TrafficMode,
+		"selection_source":   attribution.SelectionSource,
+		"request_kind":       attribution.RequestKind,
+		"stage":              stage,
+		"identity_prepared":  attribution.IdentityPrepared,
+		"identity_rewritten": attribution.IdentityRewritten,
+		"native_billing":     attribution.NativeBilling,
+		"transport_isolated": attribution.TransportIsolated,
+	})
 }
 
 func CaptureOpsRequestHeaders(req *http.Request) []OpsCapturedHeaderLine {

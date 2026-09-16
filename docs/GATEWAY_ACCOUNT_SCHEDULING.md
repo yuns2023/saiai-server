@@ -95,6 +95,10 @@ Every Anthropic OAuth/setup-token forwarding attempt emits the structured
 `claude_oauth_request_attribution` event after request identity preparation.
 The event is indexed under the `audit.claude_oauth_attribution` component, so
 administrators can query it through the existing Ops system-log API and UI.
+It is written directly to the bounded Ops log sink and is therefore not
+suppressed by the normal runtime log level or sampling configuration. Sink
+queue drops and database write failures remain visible through the existing
+system-log ingestion health counters.
 The event contains only the internal request ID, selected account ID, account
 type, traffic mode, request kind, preparation stage, and these routing facts:
 

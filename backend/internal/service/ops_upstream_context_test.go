@@ -1,12 +1,16 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -114,6 +118,88 @@ func TestSetOpsClaudeOAuthSelectionAttribution_PreservesStickyBindingSource(t *t
 		got, ok := GetOpsOAuthAttribution(c)
 		require.True(t, ok)
 		require.Equal(t, source, got.SelectionSource)
+	}
+}
+
+func TestLogClaudeOAuthAttribution_WritesOnceToOpsSinkAboveRuntimeLogLevel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	_, releaseLogCapture := captureStructuredLog(t)
+	defer releaseLogCapture()
+	require.NoError(t, logger.SetLevel("error"))
+	defer func() { require.NoError(t, logger.SetLevel("debug")) }()
+
+	captured := make([]*OpsInsertSystemLogInput, 0, 1)
+	flushed := make(chan struct{}, 1)
+	repo := &opsRepoMock{
+		BatchInsertSystemLogsFn: func(_ context.Context, inputs []*OpsInsertSystemLogInput) (int64, error) {
+			captured = append(captured, inputs...)
+			select {
+			case flushed <- struct{}{}:
+			default:
+			}
+			return int64(len(inputs)), nil
+		},
+	}
+	sink := NewOpsSystemLogSink(repo)
+	sink.batchSize = 1
+	sink.flushInterval = time.Hour
+	sink.Start()
+	logger.SetSink(sink)
+	defer func() {
+		logger.SetSink(nil)
+		sink.Stop()
+	}()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	requestCtx := context.WithValue(context.Background(), ctxkey.RequestID, "req-oauth-audit")
+	c.Request = httptest.NewRequest("POST", "/v1/messages", nil).WithContext(requestCtx)
+	account := &Account{
+		ID:       42,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"claude_oauth_mode": ClaudeOAuthModeShared,
+		},
+	}
+	SetOpsClaudeOAuthSelectionAttribution(c, account, "sticky_pending", "messages")
+	beforeHash := sha256.Sum256([]byte(`{"metadata":{"user_id":"private-before"}}`))
+	updateOpsClaudeOAuthIdentityAttribution(c, account, beforeHash, []byte(`{"metadata":{"user_id":"private-after"}}`), &oauthRequestIdentity{
+		NativeBillingStyle: true,
+		TransportAccountID: 99,
+	})
+
+	logClaudeOAuthAttribution(c, account, true)
+	select {
+	case <-flushed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for OAuth attribution sink flush")
+	}
+	require.Len(t, captured, 1, "one attribution attempt must create one indexed record")
+	item := captured[0]
+	require.Equal(t, "info", item.Level)
+	require.Equal(t, opsClaudeOAuthAuditComponent, item.Component)
+	require.Equal(t, "claude_oauth_request_attribution", item.Message)
+	require.Equal(t, "req-oauth-audit", item.RequestID)
+	require.NotNil(t, item.AccountID)
+	require.Equal(t, account.ID, *item.AccountID)
+	require.Equal(t, PlatformAnthropic, item.Platform)
+
+	var extra map[string]any
+	require.NoError(t, json.Unmarshal([]byte(item.ExtraJSON), &extra))
+	require.Equal(t, AccountTypeOAuth, extra["account_type"])
+	require.Equal(t, ClaudeOAuthModeShared, extra["traffic_mode"])
+	require.Equal(t, "sticky_pending", extra["selection_source"])
+	require.Equal(t, "messages", extra["request_kind"])
+	require.Equal(t, "prepared", extra["stage"])
+	require.Equal(t, true, extra["identity_prepared"])
+	require.Equal(t, true, extra["identity_rewritten"])
+	require.Equal(t, true, extra["native_billing"])
+	require.Equal(t, true, extra["transport_isolated"])
+
+	encoded := strings.ToLower(item.ExtraJSON)
+	for _, forbidden := range []string{"private-before", "private-after", "device_id", "session_id", "account_uuid", "access_token", "oauth_token"} {
+		require.NotContains(t, encoded, forbidden)
 	}
 }
 
