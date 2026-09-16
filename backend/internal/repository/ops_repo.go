@@ -1463,8 +1463,8 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 }
 
 func buildOpsSystemLogsWhere(filter *service.OpsSystemLogFilter) (string, []any, bool) {
-	clauses := make([]string, 0, 10)
-	args := make([]any, 0, 10)
+	clauses := make([]string, 0, 16)
+	args := make([]any, 0, 16)
 	clauses = append(clauses, "1=1")
 	hasConstraint := false
 
@@ -1526,6 +1526,35 @@ func buildOpsSystemLogsWhere(filter *service.OpsSystemLogFilter) (string, []any,
 			clauses = append(clauses, "(l.message ILIKE $"+n+" OR COALESCE(l.request_id,'') ILIKE $"+n+" OR COALESCE(l.client_request_id,'') ILIKE $"+n+" OR COALESCE(l.extra::text,'') ILIKE $"+n+")")
 			hasConstraint = true
 		}
+
+		oauthFilters := []struct {
+			column string
+			value  string
+		}{
+			{"account_type", filter.OAuthAccountType},
+			{"traffic_mode", filter.OAuthTrafficMode},
+			{"selection_source", filter.OAuthSelectionSource},
+			{"request_kind", filter.OAuthRequestKind},
+			{"stage", filter.OAuthStage},
+		}
+		hasOAuthFilter := false
+		for _, item := range oauthFilters {
+			if strings.TrimSpace(item.value) != "" {
+				hasOAuthFilter = true
+				break
+			}
+		}
+		if hasOAuthFilter {
+			clauses = append(clauses, "COALESCE(l.component,'') = 'audit.claude_oauth_attribution'")
+			hasConstraint = true
+		}
+		for _, item := range oauthFilters {
+			if v := strings.ToLower(strings.TrimSpace(item.value)); v != "" {
+				args = append(args, v)
+				clauses = append(clauses, "COALESCE(l.extra->>'"+item.column+"','') = $"+itoa(len(args)))
+				hasConstraint = true
+			}
+		}
 	}
 
 	return "WHERE " + strings.Join(clauses, " AND "), args, hasConstraint
@@ -1536,17 +1565,22 @@ func buildOpsSystemLogsCleanupWhere(filter *service.OpsSystemLogCleanupFilter) (
 		filter = &service.OpsSystemLogCleanupFilter{}
 	}
 	listFilter := &service.OpsSystemLogFilter{
-		StartTime:       filter.StartTime,
-		EndTime:         filter.EndTime,
-		Level:           filter.Level,
-		Component:       filter.Component,
-		RequestID:       filter.RequestID,
-		ClientRequestID: filter.ClientRequestID,
-		UserID:          filter.UserID,
-		AccountID:       filter.AccountID,
-		Platform:        filter.Platform,
-		Model:           filter.Model,
-		Query:           filter.Query,
+		StartTime:            filter.StartTime,
+		EndTime:              filter.EndTime,
+		Level:                filter.Level,
+		Component:            filter.Component,
+		RequestID:            filter.RequestID,
+		ClientRequestID:      filter.ClientRequestID,
+		UserID:               filter.UserID,
+		AccountID:            filter.AccountID,
+		Platform:             filter.Platform,
+		Model:                filter.Model,
+		Query:                filter.Query,
+		OAuthAccountType:     filter.OAuthAccountType,
+		OAuthTrafficMode:     filter.OAuthTrafficMode,
+		OAuthSelectionSource: filter.OAuthSelectionSource,
+		OAuthRequestKind:     filter.OAuthRequestKind,
+		OAuthStage:           filter.OAuthStage,
 	}
 	return buildOpsSystemLogsWhere(listFilter)
 }

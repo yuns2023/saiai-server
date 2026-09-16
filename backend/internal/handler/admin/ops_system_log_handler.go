@@ -16,15 +16,48 @@ type opsSystemLogCleanupRequest struct {
 	StartTime string `json:"start_time"`
 	EndTime   string `json:"end_time"`
 
-	Level           string `json:"level"`
-	Component       string `json:"component"`
-	RequestID       string `json:"request_id"`
-	ClientRequestID string `json:"client_request_id"`
-	UserID          *int64 `json:"user_id"`
-	AccountID       *int64 `json:"account_id"`
-	Platform        string `json:"platform"`
-	Model           string `json:"model"`
-	Query           string `json:"q"`
+	Level                string `json:"level"`
+	Component            string `json:"component"`
+	RequestID            string `json:"request_id"`
+	ClientRequestID      string `json:"client_request_id"`
+	UserID               *int64 `json:"user_id"`
+	AccountID            *int64 `json:"account_id"`
+	Platform             string `json:"platform"`
+	Model                string `json:"model"`
+	Query                string `json:"q"`
+	OAuthAccountType     string `json:"oauth_account_type"`
+	OAuthTrafficMode     string `json:"oauth_traffic_mode"`
+	OAuthSelectionSource string `json:"oauth_selection_source"`
+	OAuthRequestKind     string `json:"oauth_request_kind"`
+	OAuthStage           string `json:"oauth_stage"`
+}
+
+var opsOAuthFilterValues = map[string]map[string]struct{}{
+	"oauth_account_type": {
+		service.AccountTypeOAuth: {}, service.AccountTypeSetupToken: {},
+	},
+	"oauth_traffic_mode": {
+		service.ClaudeOAuthModeCarpool: {}, service.ClaudeOAuthModeShared: {},
+		service.ClaudeOAuthModePinned: {}, service.ClaudeOAuthModeSingleDevice: {},
+	},
+	"oauth_selection_source": {
+		"scheduler": {}, "sticky": {}, "sticky_confirmed": {}, "sticky_pending": {}, "failover": {}, "unknown": {},
+	},
+	"oauth_request_kind": {"messages": {}, "count_tokens": {}, "unknown": {}},
+	"oauth_stage":        {"prepared": {}, "rejected": {}},
+}
+
+func normalizeOpsOAuthFilter(name, value string) (string, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "", true
+	}
+	allowed, ok := opsOAuthFilterValues[name]
+	if !ok {
+		return "", false
+	}
+	_, ok = allowed[value]
+	return value, ok
 }
 
 // ListSystemLogs returns indexed system logs.
@@ -62,6 +95,24 @@ func (h *OpsHandler) ListSystemLogs(c *gin.Context) {
 		Platform:        strings.TrimSpace(c.Query("platform")),
 		Model:           strings.TrimSpace(c.Query("model")),
 		Query:           strings.TrimSpace(c.Query("q")),
+	}
+	oauthFilterTargets := []struct {
+		name   string
+		target *string
+	}{
+		{"oauth_account_type", &filter.OAuthAccountType},
+		{"oauth_traffic_mode", &filter.OAuthTrafficMode},
+		{"oauth_selection_source", &filter.OAuthSelectionSource},
+		{"oauth_request_kind", &filter.OAuthRequestKind},
+		{"oauth_stage", &filter.OAuthStage},
+	}
+	for _, item := range oauthFilterTargets {
+		value, valid := normalizeOpsOAuthFilter(item.name, c.Query(item.name))
+		if !valid {
+			response.BadRequest(c, "Invalid "+item.name)
+			return
+		}
+		*item.target = value
 	}
 	if v := strings.TrimSpace(c.Query("user_id")); v != "" {
 		id, parseErr := strconv.ParseInt(v, 10, 64)
@@ -149,6 +200,25 @@ func (h *OpsHandler) CleanupSystemLogs(c *gin.Context) {
 		Platform:        strings.TrimSpace(req.Platform),
 		Model:           strings.TrimSpace(req.Model),
 		Query:           strings.TrimSpace(req.Query),
+	}
+	oauthCleanupValues := []struct {
+		name   string
+		value  string
+		target *string
+	}{
+		{"oauth_account_type", req.OAuthAccountType, &filter.OAuthAccountType},
+		{"oauth_traffic_mode", req.OAuthTrafficMode, &filter.OAuthTrafficMode},
+		{"oauth_selection_source", req.OAuthSelectionSource, &filter.OAuthSelectionSource},
+		{"oauth_request_kind", req.OAuthRequestKind, &filter.OAuthRequestKind},
+		{"oauth_stage", req.OAuthStage, &filter.OAuthStage},
+	}
+	for _, item := range oauthCleanupValues {
+		value, valid := normalizeOpsOAuthFilter(item.name, item.value)
+		if !valid {
+			response.BadRequest(c, "Invalid "+item.name)
+			return
+		}
+		*item.target = value
 	}
 
 	deleted, err := h.opsService.CleanupSystemLogs(c.Request.Context(), filter, subject.UserID)

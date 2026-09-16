@@ -408,12 +408,19 @@ func int64PtrOrNil(v int64) *int64 {
 	return &v
 }
 
-func oauthSelectionSource(accountID, sessionBoundAccountID int64, failover bool) string {
+func oauthSelectionSource(accountID, sessionBoundAccountID int64, stickyBindingSource string, failover bool) string {
 	if failover {
 		return "failover"
 	}
 	if accountID > 0 && accountID == sessionBoundAccountID {
-		return "sticky"
+		switch stickyBindingSource {
+		case service.StickySessionBindingSourceConfirmed:
+			return "sticky_confirmed"
+		case service.StickySessionBindingSourcePending:
+			return "sticky_pending"
+		default:
+			return "sticky"
+		}
 	}
 	return "scheduler"
 }
@@ -680,8 +687,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// 查询粘性会话绑定的账号 ID
 	var sessionBoundAccountID int64
+	var stickyBindingSource string
 	if sessionKey != "" {
-		sessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), apiKey.GroupID, sessionKey)
+		sessionBoundAccountID, stickyBindingSource, _ = h.gatewayService.GetCachedSessionAccountIDWithSource(c.Request.Context(), apiKey.GroupID, sessionKey)
 		if sessionBoundAccountID > 0 {
 			prefetchedGroupID := int64(0)
 			if apiKey.GroupID != nil {
@@ -957,7 +965,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
-			service.SetOpsClaudeOAuthSelectionAttribution(c, account, oauthSelectionSource(account.ID, sessionBoundAccountID, len(fs.FailedAccountIDs) > 0 || fallbackUsed), "messages")
+			service.SetOpsClaudeOAuthSelectionAttribution(c, account, oauthSelectionSource(account.ID, sessionBoundAccountID, stickyBindingSource, len(fs.FailedAccountIDs) > 0 || fallbackUsed), "messages")
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
 			if account.IsInterceptWarmupEnabled() {
@@ -2018,7 +2026,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
-	sessionBoundAccountID, _ := h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), apiKey.GroupID, sessionHash)
+	sessionBoundAccountID, stickyBindingSource, _ := h.gatewayService.GetCachedSessionAccountIDWithSource(c.Request.Context(), apiKey.GroupID, sessionHash)
 
 	// 选择支持该模型的账号
 	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
@@ -2028,7 +2036,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 	setOpsSelectedAccount(c, account.ID, account.Platform)
-	service.SetOpsClaudeOAuthSelectionAttribution(c, account, oauthSelectionSource(account.ID, sessionBoundAccountID, false), "count_tokens")
+	service.SetOpsClaudeOAuthSelectionAttribution(c, account, oauthSelectionSource(account.ID, sessionBoundAccountID, stickyBindingSource, false), "count_tokens")
 
 	// 转发请求（不记录使用量）
 	forwardStart := time.Now()

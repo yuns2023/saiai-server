@@ -565,14 +565,28 @@ func (s *GatewayService) getPendingStickySessionAccountID(ctx context.Context, g
 }
 
 func (s *GatewayService) getStickySessionAccountIDForSelection(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
+	accountID, _, err := s.getStickySessionAccountIDWithSource(ctx, groupID, sessionHash)
+	return accountID, err
+}
+
+const (
+	StickySessionBindingSourceConfirmed = "confirmed"
+	StickySessionBindingSourcePending   = "pending"
+)
+
+func (s *GatewayService) getStickySessionAccountIDWithSource(ctx context.Context, groupID *int64, sessionHash string) (int64, string, error) {
 	if s == nil || s.cache == nil || strings.TrimSpace(sessionHash) == "" {
-		return 0, nil
+		return 0, "", nil
 	}
 	accountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 	if err == nil && accountID > 0 {
-		return accountID, nil
+		return accountID, StickySessionBindingSourceConfirmed, nil
 	}
-	return s.getPendingStickySessionAccountID(ctx, groupID, sessionHash)
+	accountID, err = s.getPendingStickySessionAccountID(ctx, groupID, sessionHash)
+	if err != nil || accountID <= 0 {
+		return 0, "", err
+	}
+	return accountID, StickySessionBindingSourcePending, nil
 }
 
 // shouldClearStickySession 检查账号是否处于不可调度状态，需要清理粘性会话绑定。
@@ -1315,14 +1329,17 @@ func (s *GatewayService) accountUsesSuccessOnlyStickyForAccount(ctx context.Cont
 // GetCachedSessionAccountID retrieves the account ID bound to a sticky session.
 // Returns 0 if no binding exists or on error.
 func (s *GatewayService) GetCachedSessionAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
+	accountID, _, err := s.GetCachedSessionAccountIDWithSource(ctx, groupID, sessionHash)
+	return accountID, err
+}
+
+// GetCachedSessionAccountIDWithSource retrieves the account ID selected by a
+// confirmed or pending sticky binding. Source is empty when no binding exists.
+func (s *GatewayService) GetCachedSessionAccountIDWithSource(ctx context.Context, groupID *int64, sessionHash string) (int64, string, error) {
 	if sessionHash == "" || s.cache == nil {
-		return 0, nil
+		return 0, "", nil
 	}
-	accountID, err := s.getStickySessionAccountIDForSelection(ctx, groupID, sessionHash)
-	if err != nil {
-		return 0, err
-	}
-	return accountID, nil
+	return s.getStickySessionAccountIDWithSource(ctx, groupID, sessionHash)
 }
 
 // FindGeminiSession 查找 Gemini 会话（基于内容摘要链的 Fallback 匹配）

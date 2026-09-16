@@ -3,14 +3,15 @@ package service
 import (
 	"crypto/sha256"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // Gin context keys used by Ops error logger for capturing upstream error details.
@@ -148,7 +149,7 @@ func updateOpsClaudeOAuthIdentityAttribution(c *gin.Context, account *Account, b
 
 func normalizeOAuthSelectionSource(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "sticky", "scheduler", "failover":
+	case "sticky", "sticky_confirmed", "sticky_pending", "scheduler", "failover":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return "unknown"
@@ -202,18 +203,20 @@ func logClaudeOAuthAttribution(c *gin.Context, account *Account, prepared bool) 
 	if prepared {
 		stage = "prepared"
 	}
-	slog.Info("claude_oauth_request_attribution",
-		"request_id", requestIDFromGinContext(c),
-		"account_id", account.ID,
-		"account_type", attribution.AccountType,
-		"traffic_mode", attribution.TrafficMode,
-		"selection_source", attribution.SelectionSource,
-		"request_kind", attribution.RequestKind,
-		"stage", stage,
-		"identity_prepared", attribution.IdentityPrepared,
-		"identity_rewritten", attribution.IdentityRewritten,
-		"native_billing", attribution.NativeBilling,
-		"transport_isolated", attribution.TransportIsolated)
+	logger.L().Info("claude_oauth_request_attribution",
+		zap.String("component", "audit.claude_oauth_attribution"),
+		zap.String("request_id", requestIDFromGinContext(c)),
+		zap.Int64("account_id", account.ID),
+		zap.String("platform", PlatformAnthropic),
+		zap.String("account_type", attribution.AccountType),
+		zap.String("traffic_mode", attribution.TrafficMode),
+		zap.String("selection_source", attribution.SelectionSource),
+		zap.String("request_kind", attribution.RequestKind),
+		zap.String("stage", stage),
+		zap.Bool("identity_prepared", attribution.IdentityPrepared),
+		zap.Bool("identity_rewritten", attribution.IdentityRewritten),
+		zap.Bool("native_billing", attribution.NativeBilling),
+		zap.Bool("transport_isolated", attribution.TransportIsolated))
 }
 
 func CaptureOpsRequestHeaders(req *http.Request) []OpsCapturedHeaderLine {

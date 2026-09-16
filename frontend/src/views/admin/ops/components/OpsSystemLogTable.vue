@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { opsAPI, type OpsRuntimeLogConfig, type OpsSystemLog, type OpsSystemLogSinkHealth } from '@/api/admin/ops'
+import {
+  opsAPI,
+  type OpsRuntimeLogConfig,
+  type OpsSystemLog,
+  type OpsSystemLogCleanupRequest,
+  type OpsSystemLogSinkHealth
+} from '@/api/admin/ops'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import { useClipboard } from '@/composables/useClipboard'
@@ -58,6 +64,11 @@ const filters = reactive({
   account_id: '',
   platform: '',
   model: '',
+  oauth_account_type: '' as OpsSystemLogCleanupRequest['oauth_account_type'] | '',
+  oauth_traffic_mode: '' as OpsSystemLogCleanupRequest['oauth_traffic_mode'] | '',
+  oauth_selection_source: '' as OpsSystemLogCleanupRequest['oauth_selection_source'] | '',
+  oauth_request_kind: '' as OpsSystemLogCleanupRequest['oauth_request_kind'] | '',
+  oauth_stage: '' as OpsSystemLogCleanupRequest['oauth_stage'] | '',
   q: ''
 })
 
@@ -327,6 +338,13 @@ const formatSystemLogDetail = (row: OpsSystemLog) => {
   if (row.model) corrParts.push(`model=${row.model}`)
   if (corrParts.length > 0) parts.push(corrParts.join(' '))
 
+  const oauthParts: string[] = []
+  for (const key of ['account_type', 'traffic_mode', 'selection_source', 'request_kind', 'stage']) {
+    const value = getExtraString(extra, key)
+    if (value) oauthParts.push(`${key}=${value}`)
+  }
+  if (oauthParts.length > 0) parts.push(oauthParts.join(' '))
+
   const errors = getExtraString(extra, 'errors')
   if (errors) parts.push(`errors=${errors}`)
   const err = getExtraString(extra, 'err') || getExtraString(extra, 'error')
@@ -369,6 +387,11 @@ const buildQuery = () => {
   }
   if (filters.platform.trim()) query.platform = filters.platform.trim()
   if (filters.model.trim()) query.model = filters.model.trim()
+  if (filters.oauth_account_type) query.oauth_account_type = filters.oauth_account_type
+  if (filters.oauth_traffic_mode) query.oauth_traffic_mode = filters.oauth_traffic_mode
+  if (filters.oauth_selection_source) query.oauth_selection_source = filters.oauth_selection_source
+  if (filters.oauth_request_kind) query.oauth_request_kind = filters.oauth_request_kind
+  if (filters.oauth_stage) query.oauth_stage = filters.oauth_stage
   if (filters.q.trim()) query.q = filters.q.trim()
   return query
 }
@@ -461,7 +484,7 @@ const cleanupCurrentFilter = async () => {
   const ok = window.confirm('确认按当前筛选条件清理系统日志？该操作不可撤销。')
   if (!ok) return
   try {
-    const payload = {
+    const payload: OpsSystemLogCleanupRequest = {
       start_time: toRFC3339(filters.start_time),
       end_time: toRFC3339(filters.end_time),
       level: filters.level.trim() || undefined,
@@ -472,6 +495,11 @@ const cleanupCurrentFilter = async () => {
       account_id: filters.account_id.trim() ? Number.parseInt(filters.account_id.trim(), 10) : undefined,
       platform: filters.platform.trim() || undefined,
       model: filters.model.trim() || undefined,
+      oauth_account_type: filters.oauth_account_type || undefined,
+      oauth_traffic_mode: filters.oauth_traffic_mode || undefined,
+      oauth_selection_source: filters.oauth_selection_source || undefined,
+      oauth_request_kind: filters.oauth_request_kind || undefined,
+      oauth_stage: filters.oauth_stage || undefined,
       q: filters.q.trim() || undefined
     }
     const res = await opsAPI.cleanupSystemLogs(payload)
@@ -496,6 +524,11 @@ const resetFilters = () => {
   filters.account_id = ''
   filters.platform = props.platformFilter || ''
   filters.model = ''
+  filters.oauth_account_type = ''
+  filters.oauth_traffic_mode = ''
+  filters.oauth_selection_source = ''
+  filters.oauth_request_kind = ''
+  filters.oauth_stage = ''
   filters.q = ''
   page.value = 1
   fetchLogs()
@@ -668,6 +701,53 @@ onMounted(async () => {
       <label class="text-xs text-gray-600 dark:text-gray-300">
         模型
         <input v-model="filters.model" type="text" class="input mt-1" />
+      </label>
+      <label class="text-xs text-gray-600 dark:text-gray-300">
+        OAuth 账号类型
+        <select v-model="filters.oauth_account_type" class="input mt-1">
+          <option value="">全部</option>
+          <option value="oauth">oauth</option>
+          <option value="setup_token">setup_token</option>
+        </select>
+      </label>
+      <label class="text-xs text-gray-600 dark:text-gray-300">
+        OAuth 流量模式
+        <select v-model="filters.oauth_traffic_mode" class="input mt-1">
+          <option value="">全部</option>
+          <option value="carpool">carpool</option>
+          <option value="shared">shared</option>
+          <option value="pinned">pinned</option>
+          <option value="single_device">single_device</option>
+        </select>
+      </label>
+      <label class="text-xs text-gray-600 dark:text-gray-300">
+        OAuth 选择来源
+        <select v-model="filters.oauth_selection_source" class="input mt-1">
+          <option value="">全部</option>
+          <option value="scheduler">scheduler</option>
+          <option value="sticky_confirmed">sticky_confirmed</option>
+          <option value="sticky_pending">sticky_pending</option>
+          <option value="sticky">sticky（历史）</option>
+          <option value="failover">failover</option>
+          <option value="unknown">unknown</option>
+        </select>
+      </label>
+      <label class="text-xs text-gray-600 dark:text-gray-300">
+        OAuth 请求类型
+        <select v-model="filters.oauth_request_kind" class="input mt-1">
+          <option value="">全部</option>
+          <option value="messages">messages</option>
+          <option value="count_tokens">count_tokens</option>
+          <option value="unknown">unknown</option>
+        </select>
+      </label>
+      <label class="text-xs text-gray-600 dark:text-gray-300">
+        OAuth 阶段
+        <select v-model="filters.oauth_stage" class="input mt-1">
+          <option value="">全部</option>
+          <option value="prepared">prepared</option>
+          <option value="rejected">rejected</option>
+        </select>
       </label>
       <label class="text-xs text-gray-600 dark:text-gray-300">
         关键词

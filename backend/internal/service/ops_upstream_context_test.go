@@ -97,6 +97,26 @@ func TestSetOpsClaudeOAuthSelectionAttribution_IgnoresNonOAuthAccount(t *testing
 	require.False(t, ok)
 }
 
+func TestSetOpsClaudeOAuthSelectionAttribution_PreservesStickyBindingSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	account := &Account{
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"claude_oauth_mode": ClaudeOAuthModeShared,
+		},
+	}
+
+	for _, source := range []string{"sticky_confirmed", "sticky_pending", "sticky"} {
+		SetOpsClaudeOAuthSelectionAttribution(c, account, source, "messages")
+		got, ok := GetOpsOAuthAttribution(c)
+		require.True(t, ok)
+		require.Equal(t, source, got.SelectionSource)
+	}
+}
+
 func TestSanitizeOpsUpstreamErrors_DropsUnrecognizedOAuthAttribution(t *testing.T) {
 	entry := &OpsInsertErrorLogInput{UpstreamErrors: []*OpsUpstreamErrorEvent{{
 		Kind:    "http_error",

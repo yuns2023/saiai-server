@@ -72,6 +72,32 @@ func TestOpsSystemLogHandler_ListInvalidAccountID(t *testing.T) {
 	}
 }
 
+func TestOpsSystemLogHandler_ListInvalidOAuthFilter(t *testing.T) {
+	svc := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewOpsHandler(svc)
+	r := newOpsSystemLogTestRouter(h, false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/logs?oauth_selection_source=device-secret", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", w.Code)
+	}
+}
+
+func TestOpsSystemLogHandler_ListValidOAuthFilters(t *testing.T) {
+	svc := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewOpsHandler(svc)
+	r := newOpsSystemLogTestRouter(h, false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/logs?oauth_account_type=oauth&oauth_traffic_mode=pinned&oauth_selection_source=sticky_pending&oauth_request_kind=messages&oauth_stage=prepared", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", w.Code)
+	}
+}
+
 func TestOpsSystemLogHandler_ListMonitoringDisabled(t *testing.T) {
 	svc := service.NewOpsService(nil, nil, &config.Config{
 		Ops: config.OpsConfig{Enabled: false},
@@ -143,6 +169,20 @@ func TestOpsSystemLogHandler_CleanupInvalidTime(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/logs/cleanup", bytes.NewBufferString(`{"start_time":"bad","request_id":"r1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", w.Code)
+	}
+}
+
+func TestOpsSystemLogHandler_CleanupInvalidOAuthFilter(t *testing.T) {
+	svc := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewOpsHandler(svc)
+	r := newOpsSystemLogTestRouter(h, true)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/logs/cleanup", bytes.NewBufferString(`{"oauth_stage":"forwarded-secret"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {

@@ -93,11 +93,14 @@ identity rules of the other OAuth modes.
 
 Every Anthropic OAuth/setup-token forwarding attempt emits the structured
 `claude_oauth_request_attribution` event after request identity preparation.
+The event is indexed under the `audit.claude_oauth_attribution` component, so
+administrators can query it through the existing Ops system-log API and UI.
 The event contains only the internal request ID, selected account ID, account
 type, traffic mode, request kind, preparation stage, and these routing facts:
 
-- `selection_source` is `scheduler`, `sticky`, `failover`, or `unknown`;
-  `sticky` currently covers both confirmed and pending sticky bindings;
+- `selection_source` is `scheduler`, `sticky_confirmed`, `sticky_pending`,
+  `failover`, or `unknown`; the legacy `sticky` value remains queryable for
+  events written before this distinction was introduced;
 - `identity_prepared` and `identity_rewritten` report whether the OAuth
   identity was prepared and whether the request bytes changed;
 - `native_billing` identifies the native billing-style path; and
@@ -110,6 +113,14 @@ experienced it. The attribution schema accepts only fixed account-type,
 traffic-mode, selection-source, and request-kind enums. It never stores token
 values, metadata device/session/account UUIDs, email context, fingerprints,
 rewritten headers, request bodies, or transport isolation IDs.
+
+`GET /api/v1/admin/ops/system-logs` accepts the bounded filters
+`oauth_account_type`, `oauth_traffic_mode`, `oauth_selection_source`,
+`oauth_request_kind`, and `oauth_stage`. Supplying any of them automatically
+limits the query to the OAuth attribution audit component. The paginated
+response `total` is the matching count for the selected time window. The same
+filters are supported by the filtered cleanup endpoint so an OAuth-filtered UI
+cleanup cannot accidentally delete a broader set of logs.
 
 ## Same-account HTTP replay
 

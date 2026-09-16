@@ -45,9 +45,11 @@ func resetOpsErrorLoggerStateForTest(t *testing.T) {
 }
 
 func TestOAuthSelectionSource(t *testing.T) {
-	require.Equal(t, "scheduler", oauthSelectionSource(10, 0, false))
-	require.Equal(t, "sticky", oauthSelectionSource(10, 10, false))
-	require.Equal(t, "failover", oauthSelectionSource(10, 10, true))
+	require.Equal(t, "scheduler", oauthSelectionSource(10, 0, "", false))
+	require.Equal(t, "sticky_confirmed", oauthSelectionSource(10, 10, service.StickySessionBindingSourceConfirmed, false))
+	require.Equal(t, "sticky_pending", oauthSelectionSource(10, 10, service.StickySessionBindingSourcePending, false))
+	require.Equal(t, "sticky", oauthSelectionSource(10, 10, "", false))
+	require.Equal(t, "failover", oauthSelectionSource(10, 10, service.StickySessionBindingSourceConfirmed, true))
 }
 
 func TestAttachOpsRequestBodyToEntry_SanitizeAndTrim(t *testing.T) {

@@ -917,6 +917,11 @@ export interface OpsSystemLogQuery {
   platform?: string
   model?: string
   q?: string
+  oauth_account_type?: 'oauth' | 'setup_token'
+  oauth_traffic_mode?: 'carpool' | 'shared' | 'pinned' | 'single_device'
+  oauth_selection_source?: 'scheduler' | 'sticky' | 'sticky_confirmed' | 'sticky_pending' | 'failover' | 'unknown'
+  oauth_request_kind?: 'messages' | 'count_tokens' | 'unknown'
+  oauth_stage?: 'prepared' | 'rejected'
 }
 
 export interface OpsSystemLogCleanupRequest {
@@ -931,6 +936,11 @@ export interface OpsSystemLogCleanupRequest {
   platform?: string
   model?: string
   q?: string
+  oauth_account_type?: 'oauth' | 'setup_token'
+  oauth_traffic_mode?: 'carpool' | 'shared' | 'pinned' | 'single_device'
+  oauth_selection_source?: 'scheduler' | 'sticky' | 'sticky_confirmed' | 'sticky_pending' | 'failover' | 'unknown'
+  oauth_request_kind?: 'messages' | 'count_tokens' | 'unknown'
+  oauth_stage?: 'prepared' | 'rejected'
 }
 
 export interface OpsSystemLogSinkHealth {

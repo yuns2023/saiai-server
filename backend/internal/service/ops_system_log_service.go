@@ -89,13 +89,18 @@ func marshalSystemLogCleanupConditions(filter *OpsSystemLogCleanupFilter) string
 		return "{}"
 	}
 	payload := map[string]any{
-		"level":             strings.TrimSpace(filter.Level),
-		"component":         strings.TrimSpace(filter.Component),
-		"request_id":        strings.TrimSpace(filter.RequestID),
-		"client_request_id": strings.TrimSpace(filter.ClientRequestID),
-		"platform":          strings.TrimSpace(filter.Platform),
-		"model":             strings.TrimSpace(filter.Model),
-		"query":             strings.TrimSpace(filter.Query),
+		"level":                  strings.TrimSpace(filter.Level),
+		"component":              strings.TrimSpace(filter.Component),
+		"request_id":             strings.TrimSpace(filter.RequestID),
+		"client_request_id":      strings.TrimSpace(filter.ClientRequestID),
+		"platform":               strings.TrimSpace(filter.Platform),
+		"model":                  strings.TrimSpace(filter.Model),
+		"query":                  strings.TrimSpace(filter.Query),
+		"oauth_account_type":     strings.TrimSpace(filter.OAuthAccountType),
+		"oauth_traffic_mode":     strings.TrimSpace(filter.OAuthTrafficMode),
+		"oauth_selection_source": strings.TrimSpace(filter.OAuthSelectionSource),
+		"oauth_request_kind":     strings.TrimSpace(filter.OAuthRequestKind),
+		"oauth_stage":            strings.TrimSpace(filter.OAuthStage),
 	}
 	if filter.UserID != nil {
 		payload["user_id"] = *filter.UserID

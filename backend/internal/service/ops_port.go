@@ -285,13 +285,18 @@ type OpsSystemLogFilter struct {
 	Level     string
 	Component string
 
-	RequestID       string
-	ClientRequestID string
-	UserID          *int64
-	AccountID       *int64
-	Platform        string
-	Model           string
-	Query           string
+	RequestID            string
+	ClientRequestID      string
+	UserID               *int64
+	AccountID            *int64
+	Platform             string
+	Model                string
+	Query                string
+	OAuthAccountType     string
+	OAuthTrafficMode     string
+	OAuthSelectionSource string
+	OAuthRequestKind     string
+	OAuthStage           string
 
 	Page     int
 	PageSize int
@@ -304,13 +309,18 @@ type OpsSystemLogCleanupFilter struct {
 	Level     string
 	Component string
 
-	RequestID       string
-	ClientRequestID string
-	UserID          *int64
-	AccountID       *int64
-	Platform        string
-	Model           string
-	Query           string
+	RequestID            string
+	ClientRequestID      string
+	UserID               *int64
+	AccountID            *int64
+	Platform             string
+	Model                string
+	Query                string
+	OAuthAccountType     string
+	OAuthTrafficMode     string
+	OAuthSelectionSource string
+	OAuthRequestKind     string
+	OAuthStage           string
 }
 
 type OpsSystemLogList struct {

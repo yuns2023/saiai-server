@@ -81,6 +81,51 @@ func TestBuildOpsSystemLogsCleanupWhere_WithClientRequestIDAndUserID(t *testing.
 	}
 }
 
+func TestBuildOpsSystemLogsWhere_WithOAuthAttributionFilters(t *testing.T) {
+	filter := &service.OpsSystemLogFilter{
+		OAuthAccountType:     service.AccountTypeOAuth,
+		OAuthTrafficMode:     service.ClaudeOAuthModePinned,
+		OAuthSelectionSource: "sticky_pending",
+		OAuthRequestKind:     "messages",
+		OAuthStage:           "prepared",
+	}
+
+	where, args, hasConstraint := buildOpsSystemLogsWhere(filter)
+	if !hasConstraint {
+		t.Fatalf("expected hasConstraint=true")
+	}
+	if len(args) != 5 {
+		t.Fatalf("args len = %d, want 5", len(args))
+	}
+	for _, fragment := range []string{
+		"COALESCE(l.component,'') = 'audit.claude_oauth_attribution'",
+		"l.extra->>'account_type'",
+		"l.extra->>'traffic_mode'",
+		"l.extra->>'selection_source'",
+		"l.extra->>'request_kind'",
+		"l.extra->>'stage'",
+	} {
+		if !contains(where, fragment) {
+			t.Fatalf("where should include %q: %s", fragment, where)
+		}
+	}
+}
+
+func TestBuildOpsSystemLogsCleanupWhere_WithOAuthAttributionFilter(t *testing.T) {
+	where, args, hasConstraint := buildOpsSystemLogsCleanupWhere(&service.OpsSystemLogCleanupFilter{
+		OAuthSelectionSource: "sticky_confirmed",
+	})
+	if !hasConstraint {
+		t.Fatalf("expected hasConstraint=true")
+	}
+	if len(args) != 1 || args[0] != "sticky_confirmed" {
+		t.Fatalf("unexpected args: %#v", args)
+	}
+	if !contains(where, "audit.claude_oauth_attribution") || !contains(where, "l.extra->>'selection_source'") {
+		t.Fatalf("unexpected where: %s", where)
+	}
+}
+
 func contains(s string, sub string) bool {
 	return strings.Contains(s, sub)
 }
