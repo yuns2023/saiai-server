@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -45,18 +46,53 @@ func TestMaintenanceModeBlocksBusinessRequestsAndKeepsRecoveryRoutes(t *testing.
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(MaintenanceMode(svc))
-	r.GET("/v1/messages", func(c *gin.Context) { c.Status(http.StatusOK) })
+	for _, path := range []string{
+		"/api/v1/messages",
+		"/v1/messages",
+		"/v1beta/messages",
+		"/sora/v1/generations",
+		"/antigravity/v1/messages",
+		"/responses",
+		"/responses/compact",
+	} {
+		r.Any(path, func(c *gin.Context) { c.Status(http.StatusOK) })
+	}
 	r.GET("/health", func(c *gin.Context) { c.Status(http.StatusOK) })
 	r.GET("/api/v1/settings/public", func(c *gin.Context) { c.Status(http.StatusOK) })
 	r.GET("/api/v1/admin/settings", func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	blocked := httptest.NewRecorder()
-	r.ServeHTTP(blocked, httptest.NewRequest(http.MethodPost, "/v1/messages", nil))
-	if blocked.Code != http.StatusServiceUnavailable {
-		t.Fatalf("business request status=%d, want 503", blocked.Code)
-	}
-	if blocked.Header().Get("Retry-After") != "60" {
-		t.Fatalf("Retry-After=%q, want 60", blocked.Header().Get("Retry-After"))
+	for _, path := range []string{
+		"/api/v1/messages",
+		"/v1/messages",
+		"/v1beta/messages",
+		"/sora/v1/generations",
+		"/antigravity/v1/messages",
+		"/responses",
+		"/responses/compact",
+	} {
+		blocked := httptest.NewRecorder()
+		r.ServeHTTP(blocked, httptest.NewRequest(http.MethodPost, path, nil))
+		if blocked.Code != http.StatusServiceUnavailable {
+			t.Errorf("business request %s status=%d, want 503", path, blocked.Code)
+			continue
+		}
+		if blocked.Header().Get("Retry-After") != "60" {
+			t.Errorf("business request %s Retry-After=%q, want 60", path, blocked.Header().Get("Retry-After"))
+		}
+		var body struct {
+			Message string `json:"message"`
+			Reason  string `json:"reason"`
+			Meta    struct {
+				RetryAfterSeconds string `json:"retry_after_seconds"`
+			} `json:"metadata"`
+		}
+		if err := json.Unmarshal(blocked.Body.Bytes(), &body); err != nil {
+			t.Errorf("business request %s response is not JSON: %v", path, err)
+			continue
+		}
+		if body.Message != "系统升级中，请稍候。" || body.Reason != "MAINTENANCE" || body.Meta.RetryAfterSeconds != "60" {
+			t.Errorf("business request %s body=%s, want maintenance contract", path, blocked.Body.String())
+		}
 	}
 
 	for _, path := range []string{"/health", "/api/v1/settings/public", "/api/v1/admin/settings"} {
