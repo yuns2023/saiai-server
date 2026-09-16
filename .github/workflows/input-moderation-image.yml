@@ -42,11 +42,18 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          # accelerate 1.14.0 has no fixed release for PYSEC-2026-3804.
+          # Keep this exception version-bound so any dependency update forces
+          # a review; the image/runtime checks below enforce the compensating
+          # single-file, hash-pinned, root-owned checkpoint controls.
+          test "$(sed -n 's/^accelerate==//p' tools/input-moderation-sidecar/requirements.in)" = "1.14.0"
+          grep -q '^accelerate==1\.14\.0 \\' tools/input-moderation-sidecar/requirements.txt
           python3 -m pip install --disable-pip-version-check pip-audit==2.9.0
           pip-audit \
             --require-hashes \
             --no-deps \
             --disable-pip \
+            --ignore-vuln PYSEC-2026-3804 \
             -r tools/input-moderation-sidecar/requirements.txt
 
       - name: Set source metadata

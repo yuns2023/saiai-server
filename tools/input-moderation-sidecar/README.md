@@ -12,6 +12,12 @@ Sharded checkpoint index files and symlinked weights are rejected before model
 loading, and the final image keeps `/models/qwen3guard` root-owned and
 read-only to the unprivileged sidecar user.
 
+`accelerate==1.14.0` currently has no fixed release for `PYSEC-2026-3804`.
+The image audit exception is bound to that exact version and advisory while the
+single-file, hash-pinned, root-owned checkpoint controls remain enforced. Other
+dependency findings still fail the image workflow, and the upstream advisory
+remains open for upgrade tracking.
+
 ```http
 POST /v1/classify
 Content-Type: application/json
