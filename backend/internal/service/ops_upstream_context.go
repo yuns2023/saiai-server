@@ -1,7 +1,9 @@
 package service
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"sort"
@@ -18,6 +20,7 @@ const (
 	OpsUpstreamErrorMessageKey = "ops_upstream_error_message"
 	OpsUpstreamErrorDetailKey  = "ops_upstream_error_detail"
 	OpsUpstreamErrorsKey       = "ops_upstream_errors"
+	OpsOAuthAttributionKey     = "ops_oauth_attribution"
 
 	// Best-effort capture of the current upstream request body so ops can
 	// retry the specific upstream attempt (not just the client request).
@@ -80,6 +83,137 @@ type OpsCapturedHeaderLine struct {
 	Index int    `json:"index"`
 	Name  string `json:"name"`
 	Value string `json:"value"`
+}
+
+// OpsOAuthAttribution contains only non-sensitive routing facts used to join a
+// client request to its selected Anthropic OAuth/setup-token path. It must not
+// contain token, device, session, account UUID, email, or rewritten header
+// values.
+type OpsOAuthAttribution struct {
+	AccountType       string `json:"account_type,omitempty"`
+	TrafficMode       string `json:"traffic_mode,omitempty"`
+	SelectionSource   string `json:"selection_source,omitempty"`
+	RequestKind       string `json:"request_kind,omitempty"`
+	IdentityPrepared  bool   `json:"identity_prepared,omitempty"`
+	IdentityRewritten bool   `json:"identity_rewritten,omitempty"`
+	NativeBilling     bool   `json:"native_billing,omitempty"`
+	TransportIsolated bool   `json:"transport_isolated,omitempty"`
+}
+
+func SetOpsClaudeOAuthSelectionAttribution(c *gin.Context, account *Account, selectionSource, requestKind string) {
+	if c == nil || account == nil || !account.IsAnthropicOAuthOrSetupToken() {
+		return
+	}
+	attribution := OpsOAuthAttribution{
+		AccountType:     normalizeOAuthAccountType(account.Type),
+		TrafficMode:     normalizeOAuthTrafficMode(account.GetClaudeOAuthMode()),
+		SelectionSource: normalizeOAuthSelectionSource(selectionSource),
+		RequestKind:     normalizeOAuthRequestKind(requestKind),
+	}
+	c.Set(OpsOAuthAttributionKey, attribution)
+}
+
+func GetOpsOAuthAttribution(c *gin.Context) (OpsOAuthAttribution, bool) {
+	if c == nil {
+		return OpsOAuthAttribution{}, false
+	}
+	raw, ok := c.Get(OpsOAuthAttributionKey)
+	if !ok {
+		return OpsOAuthAttribution{}, false
+	}
+	attribution, ok := raw.(OpsOAuthAttribution)
+	if !ok || normalizeOAuthAccountType(attribution.AccountType) == "" || normalizeOAuthTrafficMode(attribution.TrafficMode) == "" {
+		return OpsOAuthAttribution{}, false
+	}
+	return attribution, true
+}
+
+func updateOpsClaudeOAuthIdentityAttribution(c *gin.Context, account *Account, beforeHash [sha256.Size]byte, after []byte, identity *oauthRequestIdentity) {
+	if c == nil || account == nil || !account.IsAnthropicOAuthOrSetupToken() {
+		return
+	}
+	attribution, ok := GetOpsOAuthAttribution(c)
+	if !ok {
+		SetOpsClaudeOAuthSelectionAttribution(c, account, "unknown", "messages")
+		attribution, _ = GetOpsOAuthAttribution(c)
+	}
+	attribution.IdentityPrepared = identity != nil
+	attribution.IdentityRewritten = beforeHash != sha256.Sum256(after)
+	if identity != nil {
+		attribution.NativeBilling = identity.NativeBillingStyle
+		attribution.TransportIsolated = identity.TransportAccountID > 0 && identity.TransportAccountID != account.ID
+	}
+	c.Set(OpsOAuthAttributionKey, attribution)
+}
+
+func normalizeOAuthSelectionSource(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "sticky", "scheduler", "failover":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "unknown"
+	}
+}
+
+func normalizeOAuthAccountType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case AccountTypeOAuth:
+		return AccountTypeOAuth
+	case AccountTypeSetupToken:
+		return AccountTypeSetupToken
+	default:
+		return ""
+	}
+}
+
+func normalizeOAuthTrafficMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case ClaudeOAuthModeCarpool:
+		return ClaudeOAuthModeCarpool
+	case ClaudeOAuthModeShared:
+		return ClaudeOAuthModeShared
+	case ClaudeOAuthModePinned:
+		return ClaudeOAuthModePinned
+	case ClaudeOAuthModeSingleDevice:
+		return ClaudeOAuthModeSingleDevice
+	default:
+		return ""
+	}
+}
+
+func normalizeOAuthRequestKind(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "messages", "count_tokens":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "unknown"
+	}
+}
+
+func logClaudeOAuthAttribution(c *gin.Context, account *Account, prepared bool) {
+	if account == nil || !account.IsAnthropicOAuthOrSetupToken() {
+		return
+	}
+	attribution, ok := GetOpsOAuthAttribution(c)
+	if !ok {
+		return
+	}
+	stage := "rejected"
+	if prepared {
+		stage = "prepared"
+	}
+	slog.Info("claude_oauth_request_attribution",
+		"request_id", requestIDFromGinContext(c),
+		"account_id", account.ID,
+		"account_type", attribution.AccountType,
+		"traffic_mode", attribution.TrafficMode,
+		"selection_source", attribution.SelectionSource,
+		"request_kind", attribution.RequestKind,
+		"stage", stage,
+		"identity_prepared", attribution.IdentityPrepared,
+		"identity_rewritten", attribution.IdentityRewritten,
+		"native_billing", attribution.NativeBilling,
+		"transport_isolated", attribution.TransportIsolated)
 }
 
 func CaptureOpsRequestHeaders(req *http.Request) []OpsCapturedHeaderLine {
@@ -337,9 +471,10 @@ type OpsUpstreamErrorEvent struct {
 	Passthrough bool `json:"passthrough,omitempty"`
 
 	// Context
-	Platform    string `json:"platform,omitempty"`
-	AccountID   int64  `json:"account_id,omitempty"`
-	AccountName string `json:"account_name,omitempty"`
+	Platform    string               `json:"platform,omitempty"`
+	AccountID   int64                `json:"account_id,omitempty"`
+	AccountName string               `json:"account_name,omitempty"`
+	OAuth       *OpsOAuthAttribution `json:"oauth,omitempty"`
 
 	// Outcome
 	UpstreamStatusCode int    `json:"upstream_status_code,omitempty"`
@@ -375,6 +510,12 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	ev.Detail = strings.TrimSpace(ev.Detail)
 	if ev.Message != "" {
 		ev.Message = sanitizeUpstreamErrorMessage(ev.Message)
+	}
+	if ev.OAuth == nil {
+		if attribution, ok := GetOpsOAuthAttribution(c); ok {
+			copy := attribution
+			ev.OAuth = &copy
+		}
 	}
 
 	// If the caller didn't explicitly pass upstream request body but the gateway

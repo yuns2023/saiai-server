@@ -353,6 +353,18 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		out.Platform = strings.TrimSpace(out.Platform)
 		out.UpstreamRequestID = truncateString(strings.TrimSpace(out.UpstreamRequestID), 128)
 		out.Kind = truncateString(strings.TrimSpace(out.Kind), 64)
+		if out.OAuth != nil {
+			oauth := *out.OAuth
+			oauth.AccountType = normalizeOAuthAccountType(oauth.AccountType)
+			oauth.TrafficMode = normalizeOAuthTrafficMode(oauth.TrafficMode)
+			oauth.SelectionSource = normalizeOAuthSelectionSource(oauth.SelectionSource)
+			oauth.RequestKind = normalizeOAuthRequestKind(oauth.RequestKind)
+			if oauth.AccountType == "" || oauth.TrafficMode == "" {
+				out.OAuth = nil
+			} else {
+				out.OAuth = &oauth
+			}
+		}
 
 		if out.AccountID < 0 {
 			out.AccountID = 0

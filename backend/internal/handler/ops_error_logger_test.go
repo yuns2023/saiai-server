@@ -44,6 +44,12 @@ func resetOpsErrorLoggerStateForTest(t *testing.T) {
 	opsErrorLogDrained.Store(false)
 }
 
+func TestOAuthSelectionSource(t *testing.T) {
+	require.Equal(t, "scheduler", oauthSelectionSource(10, 0, false))
+	require.Equal(t, "sticky", oauthSelectionSource(10, 10, false))
+	require.Equal(t, "failover", oauthSelectionSource(10, 10, true))
+}
+
 func TestAttachOpsRequestBodyToEntry_SanitizeAndTrim(t *testing.T) {
 	resetOpsErrorLoggerStateForTest(t)
 	gin.SetMode(gin.TestMode)

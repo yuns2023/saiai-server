@@ -5355,8 +5355,16 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 	oauthIdentity := (*oauthRequestIdentity)(nil)
 	if account != nil && account.IsOAuth() {
+		originalOAuthBodyHash := sha256.Sum256(body)
+		if account.IsAnthropicOAuthOrSetupToken() {
+			if _, ok := GetOpsOAuthAttribution(c); !ok {
+				SetOpsClaudeOAuthSelectionAttribution(c, account, "unknown", "messages")
+			}
+		}
 		var prepErr error
 		body, oauthIdentity, prepErr = s.prepareOAuthRequestIdentity(ctx, c, account, parsed, body, false)
+		updateOpsClaudeOAuthIdentityAttribution(c, account, originalOAuthBodyHash, body, oauthIdentity)
+		logClaudeOAuthAttribution(c, account, prepErr == nil)
 		if prepErr != nil {
 			return nil, prepErr
 		}
@@ -9852,8 +9860,16 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 
 	oauthIdentity := (*oauthRequestIdentity)(nil)
 	if account != nil && account.IsOAuth() {
+		originalOAuthBodyHash := sha256.Sum256(body)
+		if account.IsAnthropicOAuthOrSetupToken() {
+			if _, ok := GetOpsOAuthAttribution(c); !ok {
+				SetOpsClaudeOAuthSelectionAttribution(c, account, "unknown", "count_tokens")
+			}
+		}
 		var prepErr error
 		body, oauthIdentity, prepErr = s.prepareOAuthRequestIdentity(ctx, c, account, parsed, body, true)
+		updateOpsClaudeOAuthIdentityAttribution(c, account, originalOAuthBodyHash, body, oauthIdentity)
+		logClaudeOAuthAttribution(c, account, prepErr == nil)
 		if prepErr != nil {
 			return prepErr
 		}

@@ -89,6 +89,28 @@ The admin create/edit forms therefore ignore and remove `account_uuid` for a
 setup-token account in `single_device` mode. This section does not redefine the
 identity rules of the other OAuth modes.
 
+## Claude OAuth request attribution
+
+Every Anthropic OAuth/setup-token forwarding attempt emits the structured
+`claude_oauth_request_attribution` event after request identity preparation.
+The event contains only the internal request ID, selected account ID, account
+type, traffic mode, request kind, preparation stage, and these routing facts:
+
+- `selection_source` is `scheduler`, `sticky`, `failover`, or `unknown`;
+  `sticky` currently covers both confirmed and pending sticky bindings;
+- `identity_prepared` and `identity_rewritten` report whether the OAuth
+  identity was prepared and whether the request bytes changed;
+- `native_billing` identifies the native billing-style path; and
+- `transport_isolated` reports whether a derived transport isolation ID was
+  used instead of the selected account ID.
+
+Upstream error-attempt JSON carries the same values under `oauth`, so a
+recovered retry or failover remains attributable to the account attempt that
+experienced it. The attribution schema accepts only fixed account-type,
+traffic-mode, selection-source, and request-kind enums. It never stores token
+values, metadata device/session/account UUIDs, email context, fingerprints,
+rewritten headers, request bodies, or transport isolation IDs.
+
 ## Same-account HTTP replay
 
 Before any response bytes have been sent, the initially selected account gets

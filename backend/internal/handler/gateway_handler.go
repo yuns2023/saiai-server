@@ -408,6 +408,16 @@ func int64PtrOrNil(v int64) *int64 {
 	return &v
 }
 
+func oauthSelectionSource(accountID, sessionBoundAccountID int64, failover bool) string {
+	if failover {
+		return "failover"
+	}
+	if accountID > 0 && accountID == sessionBoundAccountID {
+		return "sticky"
+	}
+	return "scheduler"
+}
+
 func useSuccessOnlySticky(isClaudeCodeClient bool, account *service.Account) bool {
 	if account == nil {
 		return false
@@ -947,6 +957,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
+			service.SetOpsClaudeOAuthSelectionAttribution(c, account, oauthSelectionSource(account.ID, sessionBoundAccountID, len(fs.FailedAccountIDs) > 0 || fallbackUsed), "messages")
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
 			if account.IsInterceptWarmupEnabled() {
@@ -2007,6 +2018,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	sessionBoundAccountID, _ := h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), apiKey.GroupID, sessionHash)
 
 	// 选择支持该模型的账号
 	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
@@ -2016,6 +2028,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 	setOpsSelectedAccount(c, account.ID, account.Platform)
+	service.SetOpsClaudeOAuthSelectionAttribution(c, account, oauthSelectionSource(account.ID, sessionBoundAccountID, false), "count_tokens")
 
 	// 转发请求（不记录使用量）
 	forwardStart := time.Now()
