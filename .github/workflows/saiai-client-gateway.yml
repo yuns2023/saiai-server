@@ -77,5 +77,4 @@ jobs:
           pnpm exec vitest run
           src/components/keys/__tests__/UseKeyModal.spec.ts
           --maxWorkers=1
-          --minWorkers=1
           --no-file-parallelism
