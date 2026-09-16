@@ -108,6 +108,13 @@ jobs:
           test "$(docker image inspect --format '{{index .Config.Labels "io.saiai.model.revision"}}' "$image_ref")" = "$MODEL_REVISION"
           docker run --rm --network none --entrypoint sha256sum "$image_ref" \
             /models/qwen3guard/model.safetensors | grep -q "^${MODEL_SAFETENSORS_SHA256} "
+          docker run --rm --network none --entrypoint sh "$image_ref" -c '
+            test "$(stat -c "%u:%g" /models/qwen3guard)" = "0:0"
+            test ! -w /models/qwen3guard
+            test "$(stat -c "%u:%g" /models/qwen3guard/model.safetensors)" = "0:0"
+            test ! -w /models/qwen3guard/model.safetensors
+            ! find /models/qwen3guard -maxdepth 1 -name "*.index.json" -print -quit | grep -q .
+          '
 
           container_id=$(docker run -d --network none --memory 4g --cpus 2 "$image_ref")
           cleanup() { docker rm -f "$container_id" >/dev/null 2>&1 || true; }

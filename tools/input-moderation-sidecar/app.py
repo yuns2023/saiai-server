@@ -49,6 +49,19 @@ class ClassifyResponse(BaseModel):
     model_version: str
 
 
+def validate_model_checkpoint_layout(model_path: Path) -> None:
+    if model_path.is_symlink() or not model_path.is_dir():
+        raise RuntimeError("embedded model directory is missing")
+
+    weights = model_path / "model.safetensors"
+    if weights.is_symlink() or not weights.is_file():
+        raise RuntimeError("embedded model must use a regular model.safetensors file")
+
+    checkpoint_indexes = sorted(model_path.glob("*.index.json"))
+    if checkpoint_indexes:
+        raise RuntimeError("sharded checkpoint indexes are not supported")
+
+
 def canonical_safety(value: str) -> str:
     return value[:1].upper() + value[1:].lower()
 
@@ -148,8 +161,7 @@ def classify(text: str) -> ClassifyResponse:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global tokenizer, model
-    if not MODEL_PATH.is_dir():
-        raise RuntimeError("embedded model directory is missing")
+    validate_model_checkpoint_layout(MODEL_PATH)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, local_files_only=True)
     model_kwargs = {"dtype": "auto", "low_cpu_mem_usage": True, "local_files_only": True}
     model_kwargs["device_map"] = MODEL_DEVICE or "auto"

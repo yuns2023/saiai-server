@@ -7,6 +7,11 @@ revision `fada3b2f655b89601929198343c94cd2f64d93cc`. The build verifies the
 and embeds the complete snapshot in the image. Runtime is offline and exposes
 the small contract consumed by the Gateway:
 
+The runtime accepts only the pinned single-file `model.safetensors` layout.
+Sharded checkpoint index files and symlinked weights are rejected before model
+loading, and the final image keeps `/models/qwen3guard` root-owned and
+read-only to the unprivileged sidecar user.
+
 ```http
 POST /v1/classify
 Content-Type: application/json

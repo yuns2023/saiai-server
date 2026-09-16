@@ -56,7 +56,9 @@ RUN groupadd --gid 10001 sidecar && \
 WORKDIR /app
 
 COPY --from=builder /usr/local /usr/local
-COPY --from=builder --chown=sidecar:sidecar /models/qwen3guard /models/qwen3guard
+# Keep immutable checkpoint bytes owned by root; the unprivileged runtime only
+# needs read access and must not be able to replace model metadata or weights.
+COPY --from=builder /models/qwen3guard /models/qwen3guard
 COPY --chown=sidecar:sidecar app.py ./
 
 USER sidecar
