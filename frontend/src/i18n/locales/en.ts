@@ -2249,6 +2249,17 @@ export default {
       openai: {
         baseUrlHint: 'Leave default for official OpenAI API',
         apiKeyHint: 'Your OpenAI API Key',
+        upstreamProtocol: 'Upstream Protocol',
+        upstreamProtocolPlatformCompat: 'OpenAI Platform Compatible',
+        upstreamProtocolPlatformCompatDesc:
+          'Keeps the existing API-key compatibility behavior, including platform normalization and retry handling.',
+        upstreamProtocolCodexNativeRelayV1: 'Codex Native Relay v1',
+        upstreamProtocolCodexNativeRelayV1Desc:
+          'For an upstream SAIAI Gateway: replaces only the per-hop API key while preserving Codex HTTP/SSE bodies, continuation, compression, and identity headers. The chain has no fixed hop limit and detects loops.',
+        upstreamProtocolCodexNativeRelayV1Warning:
+          'Base URL must point to an upstream Gateway that supports this protocol. v1 does not support WebSocket and disables local pool retries and custom error remapping.',
+        nativeRelayBaseUrlRequired:
+          'Codex Native Relay requires an upstream Gateway Base URL and cannot use the official api.openai.com endpoint.',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',

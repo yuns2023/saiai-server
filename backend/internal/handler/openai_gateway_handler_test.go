@@ -216,6 +216,29 @@ func TestDecodeOpenAIRequestBody_Zstd(t *testing.T) {
 	require.ErrorContains(t, err, "unsupported request content encoding")
 }
 
+func TestShouldPreserveOpenAIEncodedWireBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.153.4")
+	c.Request.Header.Set("originator", "codex_cli_rs")
+
+	relay := &service.Account{
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+		Extra: map[string]any{
+			"openai_upstream_protocol": service.OpenAIUpstreamProtocolCodexNativeRelayV1,
+		},
+	}
+	require.True(t, shouldPreserveOpenAIEncodedWireBody(c, relay))
+	require.True(t, shouldPreserveOpenAIEncodedWireBody(c, &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}))
+	require.False(t, shouldPreserveOpenAIEncodedWireBody(c, &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}))
+
+	c.Request.Header.Set("User-Agent", "curl/8.0")
+	c.Request.Header.Del("originator")
+	require.False(t, shouldPreserveOpenAIEncodedWireBody(c, relay))
+}
+
 func TestOpenAIEnsureForwardErrorResponse_WritesFallbackWhenNotWritten(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

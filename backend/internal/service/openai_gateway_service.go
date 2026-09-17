@@ -13,6 +13,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,11 +62,18 @@ const (
 	openAICompactSessionSeedKey = "openai_compact_session_seed"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
+	openAINativeRelayChainHeader          = "X-SAIAI-OpenAI-Relay-Chain"
 )
 
 // Kept as a variable so unit tests can avoid waiting while preserving the
 // production default.
 var openAINoReset429RetryBackoff = 3 * time.Second
+
+// The relay identifier is intentionally random and process-local: it detects
+// cycles without exposing hostnames, deployment names, or other topology.
+// There is no semantic hop-count limit; ordinary HTTP header-size limits are
+// the only practical bound on the opaque chain.
+var openAINativeRelayInstanceID = uuid.NewString()
 
 // OpenAI request header copying is denylist-based so newly introduced
 // OpenAI/Codex client headers are preserved unless they are explicitly unsafe
@@ -92,6 +100,40 @@ var openaiDeniedRequestHeaders = map[string]struct{}{
 	"x-forwarded-port":    {},
 	"x-forwarded-proto":   {},
 	"x-real-ip":           {},
+	strings.ToLower(openAINativeRelayChainHeader): {},
+}
+
+func openAINativeRelayChainContains(chain, instanceID string) bool {
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" {
+		return false
+	}
+	for _, entry := range strings.Split(chain, ",") {
+		if strings.TrimSpace(entry) == instanceID {
+			return true
+		}
+	}
+	return false
+}
+
+func appendOpenAINativeRelayChain(chain, instanceID string) string {
+	chain = strings.TrimSpace(chain)
+	instanceID = strings.TrimSpace(instanceID)
+	if chain == "" {
+		return instanceID
+	}
+	if instanceID == "" {
+		return chain
+	}
+	return chain + ", " + instanceID
+}
+
+func isOfficialOpenAIPlatformBaseURL(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(parsed.Hostname()), "api.openai.com")
 }
 
 func shouldCopyOpenAIRequestHeader(key string) bool {
@@ -501,6 +543,7 @@ type OpenAIGatewayService struct {
 	codexSnapshotThrottle    *accountWriteThrottle
 	codexModelsManifestCache codexModelsManifestCache
 	unpricedModelGuard       *openAIUnpricedModelGuard
+	nativeRelayInstanceID    string
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -551,9 +594,17 @@ func NewOpenAIGatewayService(
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 		unpricedModelGuard:    newOpenAIUnpricedModelGuard(cfg, cache),
+		nativeRelayInstanceID: openAINativeRelayInstanceID,
 	}
 	svc.logOpenAIWSModeBootstrap()
 	return svc
+}
+
+func (s *OpenAIGatewayService) openAINativeRelayID() string {
+	if s != nil && strings.TrimSpace(s.nativeRelayInstanceID) != "" {
+		return strings.TrimSpace(s.nativeRelayInstanceID)
+	}
+	return openAINativeRelayInstanceID
 }
 
 // HasModelPricing 检查模型是否有可用的定价数据（用于转发前预检查）
@@ -1952,6 +2003,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	originalModel := reqModel
 
 	officialCodexClient := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	nativeRelay := account.IsOpenAICodexNativeRelay()
 	if account.Type == AccountTypeOAuth && !officialCodexClient {
 		if c != nil {
 			c.JSON(http.StatusForbidden, gin.H{
@@ -1963,10 +2015,50 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		return nil, errors.New("openai OAuth requires official Codex client")
 	}
+	if nativeRelay {
+		if !officialCodexClient {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": gin.H{
+					"type":    "forbidden_error",
+					"message": "Codex native relay requires the official Codex client request shape",
+				},
+			})
+			return nil, errors.New("openai Codex native relay requires official Codex client")
+		}
+		relayBaseURL := strings.TrimSpace(account.GetCredential("base_url"))
+		if relayBaseURL == "" || isOfficialOpenAIPlatformBaseURL(relayBaseURL) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"type":    "invalid_request_error",
+					"message": "Codex native relay requires an upstream Gateway Base URL and cannot target api.openai.com",
+				},
+			})
+			return nil, errors.New("openai Codex native relay requires a non-OpenAI Gateway base_url")
+		}
+		if openAINativeRelayChainContains(c.GetHeader(openAINativeRelayChainHeader), s.openAINativeRelayID()) {
+			c.JSON(http.StatusLoopDetected, gin.H{
+				"error": gin.H{
+					"type":    "relay_loop_detected",
+					"message": "OpenAI relay loop detected",
+				},
+			})
+			return nil, errors.New("openai native relay loop detected")
+		}
+	}
 	isCodexCLI := officialCodexClient
 	strictNativeOAuth := account.Type == AccountTypeOAuth && officialCodexClient
+	strictNativeRequest := strictNativeOAuth || nativeRelay
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	clientTransport := GetOpenAIClientTransport(c)
+	if nativeRelay && clientTransport == OpenAIClientTransportWS {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"type":    "invalid_request_error",
+				"message": "Codex native relay v1 supports HTTP/SSE only; WebSocket ingress is not supported",
+			},
+		})
+		return nil, errors.New("openai Codex native relay v1 does not support websocket ingress")
+	}
 	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
 	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, clientTransport)
 	if c != nil {
@@ -2073,7 +2165,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	mappedModel := reqModel
 
 	// 规范化 reasoning.effort 参数（minimal -> none），与上游允许值对齐。
-	if !strictNativeOAuth {
+	if !strictNativeRequest {
 		if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
 			if effort, ok := reasoning["effort"].(string); ok && effort == "minimal" {
 				reasoning["effort"] = "none"
@@ -2170,8 +2262,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// server-side state referenced by previous_response_id. A stale anchor is
 	// recovered later by one targeted retry when safe.
 	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 && !isOpenAIResponsesCompactPath(c) {
-		keepOAuthCodexPrevious := account.Type == AccountTypeOAuth && hasNonEmptyString(reqBody["previous_response_id"])
-		if _, has := reqBody["previous_response_id"]; has && !keepOAuthCodexPrevious {
+		keepNativePrevious := strictNativeRequest && hasNonEmptyString(reqBody["previous_response_id"])
+		if _, has := reqBody["previous_response_id"]; has && !keepNativePrevious {
 			delete(reqBody, "previous_response_id")
 			bodyModified = true
 			markPatchDelete("previous_response_id")
@@ -2470,6 +2562,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			if nativeRelay {
+				return s.handleNativeRelayErrorResponse(resp, c, account, respBody)
+			}
 
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
@@ -2808,6 +2903,7 @@ func (s *OpenAIGatewayService) ForwardChatGPTFileDownload(
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	nativeRelay := account != nil && account.IsOpenAICodexNativeRelay()
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {
@@ -2830,6 +2926,18 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		targetURL = openaiPlatformAPIURL
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
+	if nativeRelay && c != nil && c.Request != nil && c.Request.URL != nil && c.Request.URL.RawQuery != "" {
+		parsedTarget, err := url.Parse(targetURL)
+		if err != nil {
+			return nil, fmt.Errorf("parse native relay target URL: %w", err)
+		}
+		if parsedTarget.RawQuery == "" {
+			parsedTarget.RawQuery = c.Request.URL.RawQuery
+		} else {
+			parsedTarget.RawQuery += "&" + c.Request.URL.RawQuery
+		}
+		targetURL = parsedTarget.String()
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
@@ -2839,6 +2947,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// Set authentication header
 	req.Header.Set("authorization", "Bearer "+token)
 	strictNativeOAuth := account.Type == AccountTypeOAuth && c != nil && openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	strictNativeRequest := strictNativeOAuth || nativeRelay
 
 	// Set headers specific to OAuth accounts (ChatGPT internal API)
 	if account.Type == AccountTypeOAuth {
@@ -2859,6 +2968,15 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		for _, v := range values {
 			req.Header.Add(key, v)
 		}
+	}
+	if nativeRelay {
+		if accountID := strings.TrimSpace(c.GetHeader("chatgpt-account-id")); accountID != "" {
+			req.Header.Set("chatgpt-account-id", accountID)
+		}
+		req.Header.Set(
+			openAINativeRelayChainHeader,
+			appendOpenAINativeRelayChain(c.GetHeader(openAINativeRelayChainHeader), s.openAINativeRelayID()),
+		)
 	}
 	if account.Type == AccountTypeOAuth {
 		// A turn-state token belongs to the account that issued it. The
@@ -2900,7 +3018,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		}
 	}
 
-	if !strictNativeOAuth {
+	if !strictNativeRequest {
 		// Apply custom User-Agent if configured
 		customUA := account.GetOpenAIUserAgent()
 		if customUA != "" {
@@ -3118,6 +3236,35 @@ type openaiStreamingResult struct {
 	responseID   string
 }
 
+// handleNativeRelayErrorResponse returns the upstream response without local
+// retry, failover, status remapping, or account-state mutation. Each relay hop
+// gets one attempt, preventing retry multiplication across a relay chain.
+func (s *OpenAIGatewayService) handleNativeRelayErrorResponse(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+) (*OpenAIForwardResult, error) {
+	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, "")
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:           account.Platform,
+		AccountID:          account.ID,
+		AccountName:        account.Name,
+		UpstreamStatusCode: resp.StatusCode,
+		UpstreamRequestID:  resp.Header.Get("x-request-id"),
+		Kind:               "relay_http_error",
+		Message:            upstreamMsg,
+	})
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	c.Status(resp.StatusCode)
+	_, _ = c.Writer.Write(body)
+	if upstreamMsg == "" {
+		return nil, fmt.Errorf("native relay upstream error: %d", resp.StatusCode)
+	}
+	return nil, fmt.Errorf("native relay upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
+}
+
 func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string) (*openaiStreamingResult, error) {
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -3294,10 +3441,12 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			}
 
 			// Correct Codex tool calls if needed (apply_patch -> edit, etc.)
-			if correctedData, corrected := s.toolCorrector.CorrectToolCallsInSSEBytes(dataBytes); corrected {
-				dataBytes = correctedData
-				data = string(correctedData)
-				line = "data: " + data
+			if !account.IsOpenAICodexNativeRelay() {
+				if correctedData, corrected := s.toolCorrector.CorrectToolCallsInSSEBytes(dataBytes); corrected {
+					dataBytes = correctedData
+					data = string(correctedData)
+					line = "data: " + data
+				}
 			}
 
 			// 写入客户端（客户端断开后继续 drain 上游）

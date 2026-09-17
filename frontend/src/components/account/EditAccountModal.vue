@@ -61,6 +61,31 @@
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
         </div>
 
+        <div v-if="account.platform === 'openai'">
+          <label class="input-label">{{ t('admin.accounts.openai.upstreamProtocol') }}</label>
+          <select v-model="openaiUpstreamProtocol" class="input">
+            <option :value="OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT">
+              {{ t('admin.accounts.openai.upstreamProtocolPlatformCompat') }}
+            </option>
+            <option :value="OPENAI_UPSTREAM_PROTOCOL_CODEX_NATIVE_RELAY_V1">
+              {{ t('admin.accounts.openai.upstreamProtocolCodexNativeRelayV1') }}
+            </option>
+          </select>
+          <p class="input-hint">
+            {{
+              isOpenAINativeRelay
+                ? t('admin.accounts.openai.upstreamProtocolCodexNativeRelayV1Desc')
+                : t('admin.accounts.openai.upstreamProtocolPlatformCompatDesc')
+            }}
+          </p>
+          <div
+            v-if="isOpenAINativeRelay"
+            class="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+          >
+            {{ t('admin.accounts.openai.upstreamProtocolCodexNativeRelayV1Warning') }}
+          </div>
+        </div>
+
         <!-- Model Restriction Section (OpenAI 走透传，不在中转层做白名单/映射) -->
         <div
           v-if="account.platform !== 'openai'"
@@ -240,7 +265,7 @@
         </div>
 
         <!-- Pool Mode Section -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="!isOpenAINativeRelay" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
@@ -292,7 +317,7 @@
         </div>
 
         <!-- Custom Error Codes Section -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="!isOpenAINativeRelay" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.customErrorCodes') }}</label>
@@ -834,7 +859,7 @@
 
       <!-- OpenAI WS Mode 三态（off/ctx_pool/passthrough） -->
       <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'apikey')"
+        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || (account?.type === 'apikey' && !isOpenAINativeRelay))"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -1857,6 +1882,12 @@ import {
   resolveOpenAIWSModeFromExtra
 } from '@/utils/openaiWsMode'
 import {
+  OPENAI_UPSTREAM_PROTOCOL_CODEX_NATIVE_RELAY_V1,
+  OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT,
+  resolveOpenAIUpstreamProtocol,
+  type OpenAIUpstreamProtocol
+} from '@/utils/openaiUpstreamProtocol'
+import {
   getPresetMappingsByPlatform,
   commonErrorCodes,
   buildModelMappingObject
@@ -1997,6 +2028,13 @@ const deletingPinnedBinding = ref(false)
 
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_PASSTHROUGH)
+const openaiUpstreamProtocol = ref<OpenAIUpstreamProtocol>(OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT)
+const isOpenAINativeRelay = computed(
+  () =>
+    props.account?.platform === 'openai' &&
+    props.account?.type === 'apikey' &&
+    openaiUpstreamProtocol.value === OPENAI_UPSTREAM_PROTOCOL_CODEX_NATIVE_RELAY_V1
+)
 const codexCLIOnlyEnabled = ref(false)
 const anthropicPassthroughEnabled = ref(false)
 const editQuotaLimit = ref<number | null>(null)
@@ -2156,9 +2194,13 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // OpenAI passthrough 开关已下线；旧账号 extra 上的 openai_passthrough/openai_oauth_passthrough 字段读到也忽略。
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
+  openaiUpstreamProtocol.value = OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT
   codexCLIOnlyEnabled.value = false
   anthropicPassthroughEnabled.value = false
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'apikey')) {
+    if (newAccount.type === 'apikey') {
+      openaiUpstreamProtocol.value = resolveOpenAIUpstreamProtocol(extra?.openai_upstream_protocol)
+    }
     openaiOAuthResponsesWebSocketV2Mode.value = resolveOpenAIWSModeFromExtra(extra, {
       modeKey: 'openai_oauth_responses_websockets_v2_mode',
       enabledKey: 'openai_oauth_responses_websockets_v2_enabled',
@@ -3004,6 +3046,13 @@ const handleSubmit = async () => {
     if (props.account.type === 'apikey') {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
       const newBaseUrl = editBaseUrl.value.trim() || defaultBaseUrl.value
+      if (
+        isOpenAINativeRelay.value &&
+        (!editBaseUrl.value.trim() || /^https?:\/\/api\.openai\.com(?:\/|$)/i.test(newBaseUrl))
+      ) {
+        appStore.showError(t('admin.accounts.openai.nativeRelayBaseUrlRequired'))
+        return
+      }
       // OpenAI 透传哲学：账号级模型映射 UI 已下线，对 OpenAI 账号始终跳过 model_mapping 编辑（保留旧值兜底）。
       const shouldApplyModelMapping = props.account.platform !== 'openai'
 
@@ -3038,7 +3087,7 @@ const handleSubmit = async () => {
       }
 
       // Add pool mode if enabled
-      if (poolModeEnabled.value) {
+      if (!isOpenAINativeRelay.value && poolModeEnabled.value) {
         newCredentials.pool_mode = true
         newCredentials.pool_mode_retry_count = normalizePoolModeRetryCount(poolModeRetryCount.value)
       } else {
@@ -3047,7 +3096,7 @@ const handleSubmit = async () => {
       }
 
       // Add custom error codes if enabled
-      if (customErrorCodesEnabled.value) {
+      if (!isOpenAINativeRelay.value && customErrorCodesEnabled.value) {
         newCredentials.custom_error_codes_enabled = true
         newCredentials.custom_error_codes = [...selectedErrorCodes.value]
       } else {
@@ -3301,8 +3350,10 @@ const handleSubmit = async () => {
         newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
         newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
       } else if (props.account.type === 'apikey') {
-        newExtra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
-        newExtra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
+        newExtra.openai_upstream_protocol = openaiUpstreamProtocol.value
+        const wsMode = isOpenAINativeRelay.value ? OPENAI_WS_MODE_OFF : openaiAPIKeyResponsesWebSocketV2Mode.value
+        newExtra.openai_apikey_responses_websockets_v2_mode = wsMode
+        newExtra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(wsMode)
       }
       delete newExtra.responses_websockets_v2_enabled
       delete newExtra.openai_ws_enabled

@@ -767,7 +767,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		forwardStart := time.Now()
 		forwardCtx := service.WithAccountSwitchCount(c.Request.Context(), switchCount, false)
 		forwardBody := body
-		if bodyWasEncoded && account.Type == service.AccountTypeOAuth && pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+		if bodyWasEncoded && shouldPreserveOpenAIEncodedWireBody(c, account) {
 			c.Request.Header.Set("Content-Encoding", requestContentEncoding)
 			forwardBody = wireBody
 		} else if bodyWasEncoded {
@@ -886,6 +886,16 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		)
 		return
 	}
+}
+
+func shouldPreserveOpenAIEncodedWireBody(c *gin.Context, account *service.Account) bool {
+	if c == nil || account == nil {
+		return false
+	}
+	if account.Type != service.AccountTypeOAuth && !account.IsOpenAICodexNativeRelay() {
+		return false
+	}
+	return pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
 }
 
 func (h *OpenAIGatewayHandler) openAIRequestBodyDecodeLimit() int64 {

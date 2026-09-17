@@ -824,6 +824,35 @@ func (a *Account) IsOpenAIApiKey() bool {
 	return a.IsOpenAI() && a.Type == AccountTypeAPIKey
 }
 
+const (
+	// OpenAIUpstreamProtocolPlatformCompat keeps the existing OpenAI-compatible
+	// API Key behavior. Missing values intentionally resolve to this mode.
+	OpenAIUpstreamProtocolPlatformCompat = "platform_compat"
+	// OpenAIUpstreamProtocolCodexNativeRelayV1 forwards the official Codex
+	// Responses HTTP request shape to another Gateway using per-hop API-key auth.
+	OpenAIUpstreamProtocolCodexNativeRelayV1 = "codex_native_relay_v1"
+)
+
+// GetOpenAIUpstreamProtocol returns the versioned protocol selected for an
+// OpenAI API Key account. Unknown values fail closed to the legacy platform
+// compatibility path so a typo cannot silently enable transparent relaying.
+func (a *Account) GetOpenAIUpstreamProtocol() string {
+	if a == nil || !a.IsOpenAIApiKey() || a.Extra == nil {
+		return OpenAIUpstreamProtocolPlatformCompat
+	}
+	protocol, _ := a.Extra["openai_upstream_protocol"].(string)
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case OpenAIUpstreamProtocolCodexNativeRelayV1:
+		return OpenAIUpstreamProtocolCodexNativeRelayV1
+	default:
+		return OpenAIUpstreamProtocolPlatformCompat
+	}
+}
+
+func (a *Account) IsOpenAICodexNativeRelay() bool {
+	return a.GetOpenAIUpstreamProtocol() == OpenAIUpstreamProtocolCodexNativeRelayV1
+}
+
 func (a *Account) GetOpenAIBaseURL() string {
 	if !a.IsOpenAI() {
 		return ""

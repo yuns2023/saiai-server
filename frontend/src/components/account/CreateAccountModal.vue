@@ -695,6 +695,31 @@
           <p class="input-hint">{{ apiKeyHint }}</p>
         </div>
 
+        <div v-if="form.platform === 'openai'">
+          <label class="input-label">{{ t('admin.accounts.openai.upstreamProtocol') }}</label>
+          <select v-model="openaiUpstreamProtocol" class="input">
+            <option :value="OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT">
+              {{ t('admin.accounts.openai.upstreamProtocolPlatformCompat') }}
+            </option>
+            <option :value="OPENAI_UPSTREAM_PROTOCOL_CODEX_NATIVE_RELAY_V1">
+              {{ t('admin.accounts.openai.upstreamProtocolCodexNativeRelayV1') }}
+            </option>
+          </select>
+          <p class="input-hint">
+            {{
+              isOpenAINativeRelay
+                ? t('admin.accounts.openai.upstreamProtocolCodexNativeRelayV1Desc')
+                : t('admin.accounts.openai.upstreamProtocolPlatformCompatDesc')
+            }}
+          </p>
+          <div
+            v-if="isOpenAINativeRelay"
+            class="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+          >
+            {{ t('admin.accounts.openai.upstreamProtocolCodexNativeRelayV1Warning') }}
+          </div>
+        </div>
+
         <!-- Gemini API Key tier selection -->
         <div v-if="form.platform === 'gemini'">
           <label class="input-label">{{ t('admin.accounts.gemini.tier.label') }}</label>
@@ -884,7 +909,7 @@
         </div>
 
         <!-- Pool Mode Section -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="!isOpenAINativeRelay" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
@@ -936,7 +961,7 @@
         </div>
 
         <!-- Custom Error Codes Section -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="!isOpenAINativeRelay" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.customErrorCodes') }}</label>
@@ -2071,7 +2096,7 @@
 
       <!-- OpenAI WS Mode 三态（off/ctx_pool/passthrough） -->
       <div
-        v-if="form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
+        v-if="form.platform === 'openai' && (accountCategory === 'oauth-based' || (accountCategory === 'apikey' && !isOpenAINativeRelay))"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -2579,6 +2604,11 @@ import {
   resolveOpenAIWSModeConcurrencyHintKey,
   type OpenAIWSMode
 } from '@/utils/openaiWsMode'
+import {
+  OPENAI_UPSTREAM_PROTOCOL_CODEX_NATIVE_RELAY_V1,
+  OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT,
+  type OpenAIUpstreamProtocol
+} from '@/utils/openaiUpstreamProtocol'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
 
 // Type for exposed OAuthAuthorizationFlow component
@@ -2708,6 +2738,13 @@ const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_PASSTHROUGH)
+const openaiUpstreamProtocol = ref<OpenAIUpstreamProtocol>(OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT)
+const isOpenAINativeRelay = computed(
+  () =>
+    form.platform === 'openai' &&
+    accountCategory.value === 'apikey' &&
+    openaiUpstreamProtocol.value === OPENAI_UPSTREAM_PROTOCOL_CODEX_NATIVE_RELAY_V1
+)
 const codexCLIOnlyEnabled = ref(false)
 const anthropicPassthroughEnabled = ref(false)
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
@@ -2987,6 +3024,7 @@ watch(
     if (newPlatform !== 'openai') {
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
+      openaiUpstreamProtocol.value = OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT
       codexCLIOnlyEnabled.value = false
     }
     if (newPlatform !== 'anthropic') {
@@ -3354,6 +3392,7 @@ const resetForm = () => {
   autoPauseOnExpired.value = true
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
+  openaiUpstreamProtocol.value = OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT
   codexCLIOnlyEnabled.value = false
   anthropicPassthroughEnabled.value = false
   // Reset quota control state
@@ -3412,8 +3451,10 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
   } else if (accountCategory.value === 'apikey') {
-    extra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
-    extra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
+    extra.openai_upstream_protocol = openaiUpstreamProtocol.value
+    const wsMode = isOpenAINativeRelay.value ? OPENAI_WS_MODE_OFF : openaiAPIKeyResponsesWebSocketV2Mode.value
+    extra.openai_apikey_responses_websockets_v2_mode = wsMode
+    extra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(wsMode)
   }
   // 清理兼容旧键，统一改用分类型开关。
   delete extra.responses_websockets_v2_enabled
@@ -3580,9 +3621,18 @@ const handleSubmit = async () => {
         ? 'https://generativelanguage.googleapis.com'
         : 'https://api.anthropic.com'
 
+  const configuredBaseUrl = apiKeyBaseUrl.value.trim()
+  if (
+    isOpenAINativeRelay.value &&
+    (!configuredBaseUrl || /^https?:\/\/api\.openai\.com(?:\/|$)/i.test(configuredBaseUrl))
+  ) {
+    appStore.showError(t('admin.accounts.openai.nativeRelayBaseUrlRequired'))
+    return
+  }
+
   // Build credentials with optional model mapping
   const credentials: Record<string, unknown> = {
-    base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
+    base_url: configuredBaseUrl || defaultBaseUrl,
     api_key: apiKeyValue.value.trim()
   }
   if (form.platform === 'gemini') {
@@ -3598,13 +3648,13 @@ const handleSubmit = async () => {
   }
 
   // Add pool mode if enabled
-  if (poolModeEnabled.value) {
+  if (!isOpenAINativeRelay.value && poolModeEnabled.value) {
     credentials.pool_mode = true
     credentials.pool_mode_retry_count = normalizePoolModeRetryCount(poolModeRetryCount.value)
   }
 
   // Add custom error codes if enabled
-  if (customErrorCodesEnabled.value) {
+  if (!isOpenAINativeRelay.value && customErrorCodesEnabled.value) {
     credentials.custom_error_codes_enabled = true
     credentials.custom_error_codes = [...selectedErrorCodes.value]
   }
