@@ -3351,7 +3351,7 @@ const handleSubmit = async () => {
         newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
       } else if (props.account.type === 'apikey') {
         newExtra.openai_upstream_protocol = openaiUpstreamProtocol.value
-        const wsMode = isOpenAINativeRelay.value ? OPENAI_WS_MODE_OFF : openaiAPIKeyResponsesWebSocketV2Mode.value
+        const wsMode = isOpenAINativeRelay.value ? OPENAI_WS_MODE_PASSTHROUGH : openaiAPIKeyResponsesWebSocketV2Mode.value
         newExtra.openai_apikey_responses_websockets_v2_mode = wsMode
         newExtra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(wsMode)
       }

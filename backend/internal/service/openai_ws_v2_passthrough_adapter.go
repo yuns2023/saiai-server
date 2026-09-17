@@ -60,6 +60,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	clientConn *coderws.Conn,
 	account *Account,
 	token string,
+	firstClientMessageType coderws.MessageType,
 	firstClientMessage []byte,
 	hooks *OpenAIWSIngressHooks,
 	wsDecision OpenAIWSProtocolDecision,
@@ -84,13 +85,25 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		account.ID,
 		truncateOpenAIWSLogValue(requestModel, openAIWSLogValueMaxLen),
 		truncateOpenAIWSLogValue(requestPreviousResponseID, openAIWSIDValueMaxLen),
-		openaiwsv2RelayMessageTypeName(coderws.MessageText),
+		openaiwsv2RelayMessageTypeName(firstClientMessageType),
 		len(firstClientMessage),
 	)
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
 	if err != nil {
 		return fmt.Errorf("build ws url: %w", err)
+	}
+	if account.IsOpenAICodexNativeRelay() && c != nil && c.Request != nil && c.Request.URL != nil && c.Request.URL.RawQuery != "" {
+		parsedWSURL, parseErr := url.Parse(wsURL)
+		if parseErr != nil {
+			return fmt.Errorf("parse native relay ws url: %w", parseErr)
+		}
+		if parsedWSURL.RawQuery == "" {
+			parsedWSURL.RawQuery = c.Request.URL.RawQuery
+		} else {
+			parsedWSURL.RawQuery += "&" + c.Request.URL.RawQuery
+		}
+		wsURL = parsedWSURL.String()
 	}
 	wsHost := "-"
 	wsPath := "-"
@@ -106,11 +119,16 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		account.ProxyID != nil && account.Proxy != nil,
 	)
 
-	isCodexCLI := false
-	if c != nil {
-		isCodexCLI = openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	var headers http.Header
+	if account.IsOpenAICodexNativeRelay() {
+		headers = s.buildOpenAINativeRelayWSHeaders(c, token)
+	} else {
+		isCodexCLI := false
+		if c != nil {
+			isCodexCLI = openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+		}
+		headers, _ = s.buildOpenAIWSHeaders(c, account, token, wsDecision, isCodexCLI, "", "", "")
 	}
-	headers, _ := s.buildOpenAIWSHeaders(c, account, token, wsDecision, isCodexCLI, "", "", "")
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
@@ -157,7 +175,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		Options: openaiwsv2.RelayOptions{
 			WriteTimeout:     s.openAIWSWriteTimeout(),
 			IdleTimeout:      s.openAIWSPassthroughIdleTimeout(),
-			FirstMessageType: coderws.MessageText,
+			FirstMessageType: firstClientMessageType,
 			OnClientTurn: func(turn int, payload []byte) error {
 				if hooks != nil && hooks.BeforeTurn != nil {
 					if err := hooks.BeforeTurn(turn); err != nil {
@@ -300,6 +318,39 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		hooks.AfterTurn(turnCount+1, nil, turnErr)
 	}
 	return turnErr
+}
+
+// buildOpenAINativeRelayWSHeaders preserves application-level Codex handshake
+// metadata while leaving WebSocket transport headers to coder/websocket. Only
+// per-hop authentication and the internal relay chain are replaced.
+func (s *OpenAIGatewayService) buildOpenAINativeRelayWSHeaders(c *gin.Context, token string) http.Header {
+	headers := make(http.Header)
+	if c != nil && c.Request != nil {
+		for key, values := range c.Request.Header {
+			if !shouldCopyOpenAINativeRelayWSHeader(key) {
+				continue
+			}
+			for _, value := range values {
+				headers.Add(key, value)
+			}
+		}
+		if accountID := strings.TrimSpace(c.GetHeader("chatgpt-account-id")); accountID != "" {
+			headers.Set("chatgpt-account-id", accountID)
+		}
+		headers.Set(
+			openAINativeRelayChainHeader,
+			appendOpenAINativeRelayChain(c.GetHeader(openAINativeRelayChainHeader), s.openAINativeRelayID()),
+		)
+	}
+	headers.Set("authorization", "Bearer "+token)
+	return headers
+}
+
+func shouldCopyOpenAINativeRelayWSHeader(key string) bool {
+	if !shouldCopyOpenAIRequestHeader(key) {
+		return false
+	}
+	return !strings.HasPrefix(strings.ToLower(strings.TrimSpace(key)), "sec-websocket-")
 }
 
 func (s *OpenAIGatewayService) mapOpenAIWSPassthroughDialError(

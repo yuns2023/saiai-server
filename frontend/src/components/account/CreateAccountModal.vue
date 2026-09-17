@@ -3452,7 +3452,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
   } else if (accountCategory.value === 'apikey') {
     extra.openai_upstream_protocol = openaiUpstreamProtocol.value
-    const wsMode = isOpenAINativeRelay.value ? OPENAI_WS_MODE_OFF : openaiAPIKeyResponsesWebSocketV2Mode.value
+    const wsMode = isOpenAINativeRelay.value ? OPENAI_WS_MODE_PASSTHROUGH : openaiAPIKeyResponsesWebSocketV2Mode.value
     extra.openai_apikey_responses_websockets_v2_mode = wsMode
     extra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(wsMode)
   }

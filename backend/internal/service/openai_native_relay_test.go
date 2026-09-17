@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -197,20 +199,215 @@ func TestOpenAICodexNativeRelayDetectsLoopBeforeUpstream(t *testing.T) {
 	require.Nil(t, upstream.lastReq)
 }
 
-func TestOpenAICodexNativeRelayRejectsWebSocketV1(t *testing.T) {
+func TestOpenAICodexNativeRelayWebSocketUsesDedicatedPassthrough(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	c, rec := newOfficialCodexRelayContext("/v1/responses")
-	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
-	upstream := &httpUpstreamRecorder{}
-	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, nativeRelayInstanceID: "relay-a"}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	account := newOpenAINativeRelayAccount("https://relay.example")
 
-	result, err := svc.Forward(context.Background(), c, newOpenAINativeRelayAccount("https://relay.example"), []byte(`{"model":"gpt-5.5"}`))
+	require.True(t, account.IsOpenAIResponsesWebSocketV2Enabled())
+	require.Equal(t, OpenAIWSIngressModePassthrough, account.ResolveOpenAIResponsesWebSocketV2Mode(OpenAIWSIngressModeOff))
+	decision := NewOpenAIWSProtocolResolver(cfg).Resolve(account)
+	require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
+	require.Equal(t, "ws_v2_mode_passthrough", decision.Reason)
+}
 
-	require.Error(t, err)
-	require.Nil(t, result)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Contains(t, rec.Body.String(), "HTTP/SSE only")
-	require.Nil(t, upstream.lastReq)
+func TestOpenAICodexNativeRelayBuildsWebSocketHandshakeHeaders(t *testing.T) {
+	c, _ := newOfficialCodexRelayContext("/v1/responses")
+	c.Request.Header.Set("session_id", "session-client")
+	c.Request.Header.Set("conversation_id", "conversation-client")
+	c.Request.Header.Set("X-Codex-Future", "keep")
+	c.Request.Header.Set("Sec-WebSocket-Key", "transport-owned")
+	c.Request.Header.Set(openAINativeRelayChainHeader, "relay-z")
+	svc := &OpenAIGatewayService{nativeRelayInstanceID: "relay-a"}
+
+	headers := svc.buildOpenAINativeRelayWSHeaders(c, "next-hop-key")
+
+	require.Equal(t, "Bearer next-hop-key", headers.Get("Authorization"))
+	require.Equal(t, "client-account", headers.Get("chatgpt-account-id"))
+	require.Equal(t, "codex_cli_rs/0.153.4", headers.Get("User-Agent"))
+	require.Equal(t, "codex_cli_rs", headers.Get("originator"))
+	require.Equal(t, "responses=client-native", headers.Get("OpenAI-Beta"))
+	require.Equal(t, "0.153.4", headers.Get("Version"))
+	require.Equal(t, "session-client", headers.Get("session_id"))
+	require.Equal(t, "conversation-client", headers.Get("conversation_id"))
+	require.Equal(t, "keep", headers.Get("X-Codex-Future"))
+	require.Equal(t, "relay-z, relay-a", headers.Get(openAINativeRelayChainHeader))
+	require.Empty(t, headers.Get("Cookie"))
+	require.Empty(t, headers.Get("Sec-WebSocket-Key"))
+}
+
+func TestOpenAICodexNativeRelayWebSocketPreservesFramesAndUsesOneConnection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = false
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	upstreamFrame := []byte(`{"type":"response.completed","response":{"id":"resp_native_ws","model":"gpt-5.5","usage":{"input_tokens":2,"output_tokens":3}}}`)
+	upstreamConn := &openAIWSCaptureConn{
+		events:     [][]byte{upstreamFrame},
+		eventTypes: []coderws.MessageType{coderws.MessageBinary},
+	}
+	dialer := &openAIWSCaptureDialer{conn: upstreamConn}
+	svc := &OpenAIGatewayService{
+		cfg:                       cfg,
+		openaiWSResolver:          NewOpenAIWSProtocolResolver(cfg),
+		openaiWSPassthroughDialer: dialer,
+		nativeRelayInstanceID:     "relay-a",
+	}
+	account := newOpenAINativeRelayAccount("https://relay.example/v1")
+	account.Status = StatusActive
+	account.Schedulable = true
+
+	serverErrCh := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+		ginCtx.Request = r.Clone(r.Context())
+		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		msgType, firstMessage, readErr := conn.Read(readCtx)
+		cancel()
+		if readErr != nil {
+			serverErrCh <- readErr
+			return
+		}
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(
+			r.Context(), ginCtx, conn, account, "next-hop-key", msgType, firstMessage, nil,
+		)
+	}))
+	defer wsServer.Close()
+
+	clientHeaders := make(http.Header)
+	clientHeaders.Set("User-Agent", "codex_cli_rs/0.153.4")
+	clientHeaders.Set("originator", "codex_cli_rs")
+	clientHeaders.Set("OpenAI-Beta", "responses=client-native")
+	clientHeaders.Set("Version", "0.153.4")
+	clientHeaders.Set("chatgpt-account-id", "client-account")
+	clientHeaders.Set("session_id", "session-client")
+	clientHeaders.Set(openAINativeRelayChainHeader, "relay-z")
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http")+"?transport=native&trace=keep", &coderws.DialOptions{HTTPHeader: clientHeaders})
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	firstFrame := []byte(`{"type":"response.create", "model":"gpt-5.5", "future":{"keep":true}}`)
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+	err = clientConn.Write(writeCtx, coderws.MessageBinary, firstFrame)
+	cancelWrite()
+	require.NoError(t, err)
+
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+	responseType, responseFrame, err := clientConn.Read(readCtx)
+	cancelRead()
+	require.NoError(t, err)
+	require.Equal(t, coderws.MessageBinary, responseType)
+	require.Equal(t, upstreamFrame, responseFrame)
+	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
+
+	select {
+	case serverErr := <-serverErrCh:
+		require.NoError(t, serverErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiting for native relay websocket shutdown timed out")
+	}
+
+	require.Equal(t, 1, dialer.DialCount())
+	upstreamConn.mu.Lock()
+	require.Equal(t, []coderws.MessageType{coderws.MessageBinary}, upstreamConn.writeTypes)
+	require.Len(t, upstreamConn.rawWrites, 1)
+	require.Equal(t, firstFrame, upstreamConn.rawWrites[0])
+	upstreamConn.mu.Unlock()
+
+	dialer.mu.Lock()
+	handshakeURL := dialer.lastURL
+	handshakeHeaders := cloneHeader(dialer.lastHeaders)
+	dialer.mu.Unlock()
+	require.Equal(t, "wss://relay.example/v1/responses?transport=native&trace=keep", handshakeURL)
+	require.Equal(t, "Bearer next-hop-key", handshakeHeaders.Get("Authorization"))
+	require.Equal(t, "relay-z, relay-a", handshakeHeaders.Get(openAINativeRelayChainHeader))
+	require.Equal(t, "client-account", handshakeHeaders.Get("chatgpt-account-id"))
+	require.Equal(t, "session-client", handshakeHeaders.Get("session_id"))
+}
+
+func TestOpenAICodexNativeRelayWebSocketRejectsLoopBeforeDial(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	dialer := &openAIWSCaptureDialer{conn: &openAIWSCaptureConn{}}
+	svc := &OpenAIGatewayService{
+		cfg:                       cfg,
+		openaiWSResolver:          NewOpenAIWSProtocolResolver(cfg),
+		openaiWSPassthroughDialer: dialer,
+		nativeRelayInstanceID:     "relay-a",
+	}
+	account := newOpenAINativeRelayAccount("https://relay.example/v1")
+
+	serverErrCh := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		msgType, firstMessage, readErr := conn.Read(readCtx)
+		cancel()
+		if readErr != nil {
+			serverErrCh <- readErr
+			return
+		}
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+		ginCtx.Request = r.Clone(r.Context())
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(
+			r.Context(), ginCtx, conn, account, "next-hop-key", msgType, firstMessage, nil,
+		)
+	}))
+	defer wsServer.Close()
+
+	headers := make(http.Header)
+	headers.Set("User-Agent", "codex_cli_rs/0.153.4")
+	headers.Set("originator", "codex_cli_rs")
+	headers.Set(openAINativeRelayChainHeader, "relay-z, relay-a")
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), &coderws.DialOptions{HTTPHeader: headers})
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5"}`))
+	cancelWrite()
+	require.NoError(t, err)
+
+	select {
+	case proxyErr := <-serverErrCh:
+		require.Error(t, proxyErr)
+		require.Contains(t, proxyErr.Error(), "relay loop detected")
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiting for native relay websocket loop rejection timed out")
+	}
+	require.Zero(t, dialer.DialCount())
 }
 
 func TestOpenAICodexNativeRelayRequiresGatewayBaseURL(t *testing.T) {

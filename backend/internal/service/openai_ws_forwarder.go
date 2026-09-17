@@ -2409,6 +2409,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	clientConn *coderws.Conn,
 	account *Account,
 	token string,
+	firstClientMessageType coderws.MessageType,
 	firstClientMessage []byte,
 	hooks *OpenAIWSIngressHooks,
 ) error {
@@ -2428,6 +2429,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return errors.New("token is empty")
 	}
 	officialCodexClient := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	nativeRelay := account.IsOpenAICodexNativeRelay()
 	if account.Type == AccountTypeOAuth && !officialCodexClient {
 		return NewOpenAIWSClientCloseError(
 			coderws.StatusPolicyViolation,
@@ -2435,8 +2437,51 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			nil,
 		)
 	}
+	if nativeRelay {
+		if !officialCodexClient {
+			return NewOpenAIWSClientCloseError(
+				coderws.StatusPolicyViolation,
+				"Codex native relay requires the official Codex client request shape",
+				nil,
+			)
+		}
+		relayBaseURL := strings.TrimSpace(account.GetCredential("base_url"))
+		if relayBaseURL == "" || isOfficialOpenAIPlatformBaseURL(relayBaseURL) {
+			return NewOpenAIWSClientCloseError(
+				coderws.StatusPolicyViolation,
+				"Codex native relay requires an upstream Gateway Base URL and cannot target api.openai.com",
+				nil,
+			)
+		}
+		if openAINativeRelayChainContains(c.GetHeader(openAINativeRelayChainHeader), s.openAINativeRelayID()) {
+			return NewOpenAIWSClientCloseError(
+				coderws.StatusPolicyViolation,
+				"OpenAI relay loop detected",
+				nil,
+			)
+		}
+	}
 
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
+	// Native relay owns an explicit raw, one-to-one WebSocket path regardless
+	// of whether the compatibility mode router is enabled. Never let this
+	// protocol fall through to the shared connection pool/frame rewriter.
+	if nativeRelay {
+		if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+			return fmt.Errorf("native relay websocket ingress requires ws_v2 transport, got=%s", wsDecision.Transport)
+		}
+		return s.proxyResponsesWebSocketV2Passthrough(
+			ctx,
+			c,
+			clientConn,
+			account,
+			token,
+			firstClientMessageType,
+			firstClientMessage,
+			hooks,
+			wsDecision,
+		)
+	}
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
 	ingressMode := OpenAIWSIngressModeCtxPool
 	if modeRouterV2Enabled {
@@ -2462,6 +2507,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			clientConn,
 			account,
 			token,
+			firstClientMessageType,
 			firstClientMessage,
 			hooks,
 			wsDecision,
@@ -2479,6 +2525,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				clientConn,
 				account,
 				token,
+				firstClientMessageType,
 				firstClientMessage,
 				hooks,
 				wsDecision,

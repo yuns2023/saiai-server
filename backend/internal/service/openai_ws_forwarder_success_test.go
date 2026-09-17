@@ -1328,6 +1328,7 @@ func TestOpenAIGatewayService_Forward_WSv2ReadTimeoutAppliesPerRead(t *testing.T
 type openAIWSCaptureDialer struct {
 	mu          sync.Mutex
 	conn        *openAIWSCaptureConn
+	lastURL     string
 	lastHeaders http.Header
 	handshake   http.Header
 	dialCount   int
@@ -1340,9 +1341,9 @@ func (d *openAIWSCaptureDialer) Dial(
 	proxyURL string,
 ) (openAIWSClientConn, int, http.Header, error) {
 	_ = ctx
-	_ = wsURL
 	_ = proxyURL
 	d.mu.Lock()
+	d.lastURL = wsURL
 	d.lastHeaders = cloneHeader(headers)
 	d.dialCount++
 	respHeaders := cloneHeader(d.handshake)
@@ -1360,8 +1361,11 @@ type openAIWSCaptureConn struct {
 	mu         sync.Mutex
 	readDelays []time.Duration
 	events     [][]byte
+	eventTypes []coderws.MessageType
 	lastWrite  map[string]any
 	writes     []map[string]any
+	writeTypes []coderws.MessageType
+	rawWrites  [][]byte
 	closed     bool
 }
 
@@ -1426,14 +1430,25 @@ func (c *openAIWSCaptureConn) ReadMessage(ctx context.Context) ([]byte, error) {
 }
 
 func (c *openAIWSCaptureConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	c.mu.Lock()
+	msgType := coderws.MessageText
+	if len(c.eventTypes) > 0 {
+		msgType = c.eventTypes[0]
+		c.eventTypes = c.eventTypes[1:]
+	}
+	c.mu.Unlock()
 	payload, err := c.ReadMessage(ctx)
 	if err != nil {
 		return coderws.MessageText, nil, err
 	}
-	return coderws.MessageText, payload, nil
+	return msgType, payload, nil
 }
 
-func (c *openAIWSCaptureConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+func (c *openAIWSCaptureConn) WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error {
+	c.mu.Lock()
+	c.writeTypes = append(c.writeTypes, msgType)
+	c.rawWrites = append(c.rawWrites, append([]byte(nil), payload...))
+	c.mu.Unlock()
 	return c.WriteJSON(ctx, json.RawMessage(payload))
 }
 

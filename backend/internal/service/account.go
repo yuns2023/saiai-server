@@ -987,6 +987,12 @@ func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
+	// The native relay protocol owns a dedicated one-to-one WebSocket path.
+	// Do not require a second account flag that can silently disable part of
+	// the selected upstream protocol.
+	if a.IsOpenAICodexNativeRelay() {
+		return true
+	}
 	if a.IsOpenAIOAuth() {
 		if enabled, ok := a.Extra["openai_oauth_responses_websockets_v2_enabled"].(bool); ok {
 			return enabled
@@ -1052,6 +1058,12 @@ func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) stri
 	resolvedDefault := normalizeOpenAIWSIngressDefaultMode(defaultMode)
 	if a == nil || !a.IsOpenAI() {
 		return OpenAIWSIngressModeOff
+	}
+	// Native relay WebSockets must never enter the shared connection pool or
+	// the frame-rewriting compatibility path. One downstream connection owns
+	// exactly one upstream connection.
+	if a.IsOpenAICodexNativeRelay() {
+		return OpenAIWSIngressModePassthrough
 	}
 	if a.Extra == nil {
 		return resolvedDefault

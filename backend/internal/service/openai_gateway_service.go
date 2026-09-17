@@ -2050,15 +2050,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	strictNativeRequest := strictNativeOAuth || nativeRelay
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	clientTransport := GetOpenAIClientTransport(c)
-	if nativeRelay && clientTransport == OpenAIClientTransportWS {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{
-				"type":    "invalid_request_error",
-				"message": "Codex native relay v1 supports HTTP/SSE only; WebSocket ingress is not supported",
-			},
-		})
-		return nil, errors.New("openai Codex native relay v1 does not support websocket ingress")
-	}
 	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
 	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, clientTransport)
 	if c != nil {

@@ -2402,9 +2402,9 @@ export default {
         upstreamProtocolPlatformCompatDesc: '沿用当前 API Key 兼容行为，网关可按平台规则规范化请求并处理重试。',
         upstreamProtocolCodexNativeRelayV1: 'Codex 原生中转 v1',
         upstreamProtocolCodexNativeRelayV1Desc:
-          '面向上游 SAIAI Gateway：仅逐跳替换 API Key，保留 Codex HTTP/SSE 请求体、continuation、压缩和身份头。链路不设固定层数，并进行环路检测。',
+          '面向上游 SAIAI Gateway：仅逐跳替换 API Key，保留 Codex HTTP/SSE 请求、WebSocket 帧、continuation、压缩和身份头。链路不设固定层数，并进行环路检测。',
         upstreamProtocolCodexNativeRelayV1Warning:
-          'Base URL 必须指向支持该协议的上游 Gateway。v1 不支持 WebSocket，也不会启用本层池模式重试或自定义错误码转换。',
+          'Base URL 必须指向支持该协议的上游 Gateway。WebSocket 使用一对一专用中继；本层仍不启用池模式重试或自定义错误码转换。',
         nativeRelayBaseUrlRequired: 'Codex 原生中转必须填写上游 Gateway Base URL，不能使用官方 api.openai.com。',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
