@@ -1628,14 +1628,14 @@ func positiveIntQuery(c *gin.Context, name string, fallback, maximum int) int {
 
 // usageQuotaLimited 处理 quota_limited 模式的响应
 func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, usageData gin.H, modelStats any, recentUsage gin.H) {
+	keyLimits := gin.H{"configured": true}
 	resp := gin.H{
 		"mode":       "quota_limited",
 		"isValid":    apiKey.Status == service.StatusAPIKeyActive || apiKey.Status == service.StatusAPIKeyQuotaExhausted || apiKey.Status == service.StatusAPIKeyExpired,
 		"status":     usageAPIKeyStatus(apiKey),
 		"unit":       "USD",
-		"key_limits": gin.H{"configured": true},
+		"key_limits": keyLimits,
 	}
-	keyLimits := resp["key_limits"].(gin.H)
 
 	// 总额度信息
 	if apiKey.Quota > 0 {
