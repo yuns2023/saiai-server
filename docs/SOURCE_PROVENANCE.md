@@ -62,6 +62,14 @@ corresponding notice is preserved in [NOTICE](../NOTICE). When the fallback is
 refreshed, maintainers should update the recorded snapshot hash or record the
 new provenance in the change.
 
+The `Pricing Fallback Check` workflow compares the bundled snapshot with the
+mutable upstream source on every protected `main` commit, scheduled run, and
+manual run. Pull requests that change the pricing URL, synchronization tool,
+workflow, or bundled snapshot run the same comparison. Unrelated pull requests
+emit a successful required-check result without contacting the mutable
+upstream; their merged `main` commit must still pass the freshness gate before
+it is eligible for production.
+
 This document identifies known source snapshots only. It does not assert that
 all dependencies, icons, fonts, generated files, or other third-party assets
 share the same license. Their own source headers, lockfiles, notices, and
