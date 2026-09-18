@@ -55,6 +55,9 @@ HTTP, WebSocket and WebSocket v2 billing resolver aligned.
 - Preserve unrelated JSON/configuration fields when implementing mutations.
 - Add tests for behavior changes and update documentation when public contracts
   change.
+- Keep public repository coordinates in contributor documentation, not in the
+  end-user WebUI. The frontend regression test must continue to reject the
+  canonical Server repository URL from shipped source.
 - Keep `scripts/git-hooks/pre-push` resource-aware. It scopes checks to pushed
   backend/frontend paths, runs serially with bounded Go concurrency, supports
   `PREPUSH_DRY_RUN=1`, and never installs dependencies automatically.

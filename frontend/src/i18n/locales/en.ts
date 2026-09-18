@@ -385,7 +385,6 @@ export default {
     collapse: 'Collapse',
     expand: 'Expand',
     logout: 'Logout',
-    github: 'GitHub',
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Purchase & recharge',
     docs: 'Docs'
