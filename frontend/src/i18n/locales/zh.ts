@@ -109,7 +109,8 @@ export default {
       button: '免费注册'
     },
     footer: {
-      allRightsReserved: '保留所有权利。'
+      allRightsReserved: '保留所有权利。',
+      keyUsage: 'Key 用量查询'
     }
   },
 
@@ -120,7 +121,7 @@ export default {
     placeholder: 'sk-ant-mirror-xxxxxxxxxxxx',
     query: '查询',
     querying: '查询中...',
-    privacyNote: '您的 Key 仅在浏览器本地处理，不会被存储',
+    privacyNote: 'Key 仅通过请求头用于本次查询，不会写入 URL 或浏览器存储',
     dateRange: '统计范围:',
     dateRangeToday: '今日',
     dateRange7d: '7 天',
@@ -143,6 +144,13 @@ export default {
     // Status
     quotaMode: 'Key 限额模式',
     walletBalance: '钱包余额',
+    subscriptionPlan: '订阅套餐',
+    statusActive: '可用',
+    statusQuotaExhausted: 'Key 额度已用尽',
+    statusExpired: 'Key 已过期',
+    statusDisabled: 'Key 已停用',
+    statusUnknown: '状态未知',
+    subscriptionNotFound: '当前没有有效订阅',
     // Ring card titles
     totalQuota: '总额度',
     limit5h: '5 小时限额',
@@ -150,8 +158,15 @@ export default {
     limit7d: '7 天限额',
     limitWeekly: '周限额',
     limitMonthly: '月限额',
+    subscriptionLimit5h: '订阅共享 · 5 小时',
+    subscriptionLimitDaily: '订阅共享 · 日限额',
+    subscriptionLimitWeekly: '订阅共享 · 周限额',
+    subscriptionLimitMonthly: '订阅共享 · 月限额',
     // Detail rows
     remainingQuota: '剩余额度',
+    keyRemainingQuota: 'Key 剩余额度',
+    sharedSubscriptionRemaining: '订阅共享可用额度',
+    billingSource: '计费来源',
     expiresAt: '过期时间',
     todayExpires: '(今日到期)',
     daysLeft: '({days} 天)',

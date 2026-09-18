@@ -1435,6 +1435,14 @@ func cloneAPIKeyWithGroup(apiKey *service.APIKey, group *service.Group) *service
 //   - quota_limited: API Key has quota or rate limits configured. Returns key-level limits/usage.
 //   - unrestricted:  No key-level limits. Returns subscription or wallet balance info.
 func (h *GatewayHandler) Usage(c *gin.Context) {
+	// The response contains account billing data. Prevent browsers and reverse
+	// proxies from retaining it, and make authorization-sensitive variants
+	// explicit for intermediaries that honor Vary.
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	c.Writer.Header().Add("Vary", "Authorization")
+	c.Writer.Header().Add("Vary", "X-API-Key")
+
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
@@ -1467,7 +1475,7 @@ func (h *GatewayHandler) Usage(c *gin.Context) {
 	isQuotaLimited := apiKey.Quota > 0 || apiKey.HasRateLimits()
 
 	if isQuotaLimited {
-		h.usageQuotaLimited(c, ctx, apiKey, usageData, modelStats)
+		h.usageQuotaLimited(c, ctx, apiKey, subject, usageData, modelStats)
 		return
 	}
 
@@ -1530,11 +1538,12 @@ func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64) gin
 }
 
 // usageQuotaLimited 处理 quota_limited 模式的响应
-func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, apiKey *service.APIKey, usageData gin.H, modelStats any) {
+func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, usageData gin.H, modelStats any) {
 	resp := gin.H{
 		"mode":    "quota_limited",
 		"isValid": apiKey.Status == service.StatusAPIKeyActive || apiKey.Status == service.StatusAPIKeyQuotaExhausted || apiKey.Status == service.StatusAPIKeyExpired,
-		"status":  apiKey.Status,
+		"status":  usageAPIKeyStatus(apiKey),
+		"unit":    "USD",
 	}
 
 	// 总额度信息
@@ -1547,7 +1556,6 @@ func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, 
 			"unit":      "USD",
 		}
 		resp["remaining"] = remaining
-		resp["unit"] = "USD"
 	}
 
 	// 速率限制信息（从 DB 获取实时用量）
@@ -1609,6 +1617,14 @@ func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, 
 		resp["days_until_expiry"] = apiKey.GetDaysUntilExpiry()
 	}
 
+	// Key-level limits and billing source are independent. A subscription Key
+	// may also carry its own quota/rate limits, so include both views instead of
+	// hiding the subscription behind quota_limited mode.
+	if err := h.attachUsageBillingDetails(c, ctx, resp, apiKey, subject, false); err != nil {
+		h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to get user info")
+		return
+	}
+
 	if usageData != nil {
 		resp["usage"] = usageData
 	}
@@ -1621,57 +1637,20 @@ func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, 
 
 // usageUnrestricted 处理 unrestricted 模式的响应（向后兼容）
 func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, usageData gin.H, modelStats any) {
-	// 订阅模式
-	if apiKey.Group != nil && apiKey.Group.IsSubscriptionType() {
-		resp := gin.H{
-			"mode":     "unrestricted",
-			"isValid":  true,
-			"planName": apiKey.Group.Name,
-			"unit":     "USD",
-		}
-
-		// 订阅信息可能不在 context 中（/v1/usage 路径跳过了中间件的计费检查）
-		subscription, ok := middleware2.GetSubscriptionFromContext(c)
-		if ok {
-			remaining := h.calculateSubscriptionRemaining(apiKey.Group, subscription)
-			resp["remaining"] = remaining
-			resp["subscription"] = gin.H{
-				"five_hour_usage_usd": subscription.FiveHourUsageUSD,
-				"daily_usage_usd":     subscription.DailyUsageUSD,
-				"weekly_usage_usd":    subscription.WeeklyUsageUSD,
-				"monthly_usage_usd":   subscription.MonthlyUsageUSD,
-				"five_hour_limit_usd": apiKey.Group.FiveHourLimitUSD,
-				"daily_limit_usd":     apiKey.Group.DailyLimitUSD,
-				"weekly_limit_usd":    apiKey.Group.WeeklyLimitUSD,
-				"monthly_limit_usd":   apiKey.Group.MonthlyLimitUSD,
-				"expires_at":          subscription.ExpiresAt,
-			}
-		}
-
-		if usageData != nil {
-			resp["usage"] = usageData
-		}
-		if modelStats != nil {
-			resp["model_stats"] = modelStats
-		}
-		c.JSON(http.StatusOK, resp)
-		return
+	resp := gin.H{
+		"mode":    "unrestricted",
+		"isValid": true,
+		"status":  usageAPIKeyStatus(apiKey),
+		"unit":    "USD",
+	}
+	if apiKey.ExpiresAt != nil {
+		resp["expires_at"] = apiKey.ExpiresAt
+		resp["days_until_expiry"] = apiKey.GetDaysUntilExpiry()
 	}
 
-	// 余额模式
-	latestUser, err := h.userService.GetByID(ctx, subject.UserID)
-	if err != nil {
+	if err := h.attachUsageBillingDetails(c, ctx, resp, apiKey, subject, true); err != nil {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to get user info")
 		return
-	}
-
-	resp := gin.H{
-		"mode":      "unrestricted",
-		"isValid":   true,
-		"planName":  "钱包余额",
-		"remaining": latestUser.Balance,
-		"unit":      "USD",
-		"balance":   latestUser.Balance,
 	}
 	if usageData != nil {
 		resp["usage"] = usageData
@@ -1682,11 +1661,133 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 	c.JSON(http.StatusOK, resp)
 }
 
+// attachUsageBillingDetails adds the billing source independently from any
+// Key-level quota. keepTopLevelRemainingForBilling preserves the legacy
+// unrestricted response while avoiding ambiguity when a Key quota already
+// owns the top-level remaining field.
+func (h *GatewayHandler) attachUsageBillingDetails(
+	c *gin.Context,
+	ctx context.Context,
+	resp gin.H,
+	apiKey *service.APIKey,
+	subject middleware2.AuthSubject,
+	keepTopLevelRemainingForBilling bool,
+) error {
+	if apiKey.Group != nil && apiKey.Group.IsSubscriptionType() {
+		resp["billing_mode"] = "subscription"
+		resp["planName"] = apiKey.Group.Name
+
+		// /v1/usage skips billing enforcement, but standard mode still loads an
+		// active subscription into context. Missing subscription data is stated
+		// explicitly rather than falling back to the user's wallet.
+		subscription, ok := middleware2.GetSubscriptionFromContext(c)
+		if !ok {
+			resp["subscription_status"] = "not_found"
+			return nil
+		}
+
+		details := buildSubscriptionUsageDetails(apiKey.Group, subscription)
+		resp["subscription_status"] = subscription.Status
+		resp["subscription"] = details
+		if keepTopLevelRemainingForBilling {
+			resp["remaining"] = details["remaining"]
+		}
+		return nil
+	}
+
+	resp["billing_mode"] = "balance"
+	resp["planName"] = "钱包余额"
+
+	latestUser := apiKey.User
+	if h.userService != nil {
+		user, err := h.userService.GetByID(ctx, subject.UserID)
+		if err != nil {
+			return err
+		}
+		latestUser = user
+	}
+	if latestUser == nil {
+		return errors.New("API key user is unavailable")
+	}
+
+	resp["balance"] = latestUser.Balance
+	if keepTopLevelRemainingForBilling {
+		resp["remaining"] = latestUser.Balance
+	}
+	return nil
+}
+
+func usageAPIKeyStatus(apiKey *service.APIKey) string {
+	if apiKey.IsExpired() {
+		return service.StatusAPIKeyExpired
+	}
+	if apiKey.IsQuotaExhausted() {
+		return service.StatusAPIKeyQuotaExhausted
+	}
+	return apiKey.Status
+}
+
+// buildSubscriptionUsageDetails returns an effective read-only snapshot. An
+// expired rolling window is reported with zero usage and no reset time; the
+// normal request path remains responsible for asynchronously persisting the
+// reset/activation state.
+func buildSubscriptionUsageDetails(group *service.Group, subscription *service.UserSubscription) gin.H {
+	effective := effectiveSubscriptionUsageSnapshot(subscription)
+	details := gin.H{
+		"status":              effective.Status,
+		"shared":              true,
+		"remaining":           calculateSubscriptionRemaining(group, effective),
+		"five_hour_usage_usd": effective.FiveHourUsageUSD,
+		"daily_usage_usd":     effective.DailyUsageUSD,
+		"weekly_usage_usd":    effective.WeeklyUsageUSD,
+		"monthly_usage_usd":   effective.MonthlyUsageUSD,
+		"five_hour_limit_usd": group.FiveHourLimitUSD,
+		"daily_limit_usd":     group.DailyLimitUSD,
+		"weekly_limit_usd":    group.WeeklyLimitUSD,
+		"monthly_limit_usd":   group.MonthlyLimitUSD,
+		"expires_at":          effective.ExpiresAt,
+		"days_remaining":      effective.DaysRemaining(),
+	}
+	addSubscriptionResetTime(details, "five_hour_reset_at", effective.FiveHourWindowStart, service.RateLimitWindow5h)
+	addSubscriptionResetTime(details, "daily_reset_at", effective.DailyWindowStart, service.RateLimitWindow1d)
+	addSubscriptionResetTime(details, "weekly_reset_at", effective.WeeklyWindowStart, service.RateLimitWindow7d)
+	addSubscriptionResetTime(details, "monthly_reset_at", effective.MonthlyWindowStart, 30*24*time.Hour)
+	return details
+}
+
+func effectiveSubscriptionUsageSnapshot(subscription *service.UserSubscription) *service.UserSubscription {
+	effective := *subscription
+	if service.IsWindowExpired(effective.FiveHourWindowStart, service.RateLimitWindow5h) {
+		effective.FiveHourUsageUSD = 0
+		effective.FiveHourWindowStart = nil
+	}
+	if service.IsWindowExpired(effective.DailyWindowStart, service.RateLimitWindow1d) {
+		effective.DailyUsageUSD = 0
+		effective.DailyWindowStart = nil
+	}
+	if service.IsWindowExpired(effective.WeeklyWindowStart, service.RateLimitWindow7d) {
+		effective.WeeklyUsageUSD = 0
+		effective.WeeklyWindowStart = nil
+	}
+	if service.IsWindowExpired(effective.MonthlyWindowStart, 30*24*time.Hour) {
+		effective.MonthlyUsageUSD = 0
+		effective.MonthlyWindowStart = nil
+	}
+	return &effective
+}
+
+func addSubscriptionResetTime(details gin.H, field string, windowStart *time.Time, duration time.Duration) {
+	if windowStart == nil || service.IsWindowExpired(windowStart, duration) {
+		return
+	}
+	details[field] = windowStart.Add(duration)
+}
+
 // calculateSubscriptionRemaining 计算订阅剩余可用额度
 // 逻辑：
 // 1. 如果日/周/月任一限额达到100%，返回0
 // 2. 否则返回所有已配置周期中剩余额度的最小值
-func (h *GatewayHandler) calculateSubscriptionRemaining(group *service.Group, sub *service.UserSubscription) float64 {
+func calculateSubscriptionRemaining(group *service.Group, sub *service.UserSubscription) float64 {
 	var remainingValues []float64
 
 	// 检查5小时限额

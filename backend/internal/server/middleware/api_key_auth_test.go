@@ -564,6 +564,69 @@ func TestAPIKeyAuthTouchesLastUsedInStandardMode(t *testing.T) {
 	require.Equal(t, 1, touchCalls)
 }
 
+func TestUsageLookupLoadsSubscriptionInSimpleModeAndIsNotCacheable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dailyLimit := 10.0
+	group := &service.Group{
+		ID:               42,
+		Name:             "subscription",
+		Status:           service.StatusActive,
+		Platform:         service.PlatformAnthropic,
+		Hydrated:         true,
+		SubscriptionType: service.SubscriptionTypeSubscription,
+		DailyLimitUSD:    &dailyLimit,
+	}
+	user := &service.User{ID: 7, Status: service.StatusActive}
+	apiKey := &service.APIKey{
+		ID:      100,
+		UserID:  user.ID,
+		Key:     "test-usage-key",
+		Status:  service.StatusActive,
+		User:    user,
+		GroupID: &group.ID,
+		Group:   group,
+	}
+	subscription := &service.UserSubscription{
+		ID:        55,
+		UserID:    user.ID,
+		GroupID:   group.ID,
+		Status:    service.SubscriptionStatusActive,
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}
+
+	keyRepo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) {
+		clone := *apiKey
+		return &clone, nil
+	}}
+	subRepo := &stubUserSubscriptionRepo{getActive: func(_ context.Context, userID, groupID int64) (*service.UserSubscription, error) {
+		require.Equal(t, user.ID, userID)
+		require.Equal(t, group.ID, groupID)
+		clone := *subscription
+		return &clone, nil
+	}}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	keyService := service.NewAPIKeyService(keyRepo, nil, nil, nil, nil, nil, cfg)
+	subscriptionService := service.NewSubscriptionService(nil, subRepo, nil, nil, cfg)
+
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(keyService, subscriptionService, nil, cfg)))
+	router.GET("/v1/usage", func(c *gin.Context) {
+		loaded, ok := GetSubscriptionFromContext(c)
+		require.True(t, ok)
+		require.Equal(t, subscription.ID, loaded.ID)
+		c.Status(http.StatusOK)
+	})
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/usage", nil)
+	req.Header.Set("Authorization", "Bearer "+apiKey.Key)
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+	require.Contains(t, recorder.Header().Values("Vary"), "Authorization")
+}
+
 func newAuthTestRouter(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, subscriptionService, nil, cfg)))

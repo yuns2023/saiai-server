@@ -29,6 +29,14 @@ func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionS
 // /v1/usage 端点只需鉴权，不需要计费执行（允许过期/配额耗尽的 Key 查询自身用量）。
 func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, inputModeration *service.InputModerationService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		isUsageLookup := c.Request.URL.Path == "/v1/usage"
+		if isUsageLookup {
+			c.Header("Cache-Control", "no-store")
+			c.Header("Pragma", "no-cache")
+			c.Writer.Header().Add("Vary", "Authorization")
+			c.Writer.Header().Add("Vary", "X-API-Key")
+		}
+
 		// ── 1. 提取 API Key ──────────────────────────────────────────
 
 		queryKey := strings.TrimSpace(c.Query("key"))
@@ -158,7 +166,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		// ── 4. SimpleMode → early return ─────────────────────────────
 
-		if cfg.RunMode == config.RunModeSimple {
+		if cfg.RunMode == config.RunModeSimple && !isUsageLookup {
 			_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
 			c.Next()
 			return
@@ -167,7 +175,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// ── 5. 加载订阅（订阅模式时始终加载） ───────────────────────
 
 		// skipBilling: /v1/usage 只需鉴权，跳过所有计费执行
-		skipBilling := c.Request.URL.Path == "/v1/usage"
+		skipBilling := isUsageLookup
 
 		var subscription *service.UserSubscription
 		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()

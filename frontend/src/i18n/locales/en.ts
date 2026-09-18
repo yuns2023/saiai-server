@@ -109,7 +109,8 @@ export default {
       button: 'Sign Up Free'
     },
     footer: {
-      allRightsReserved: 'All rights reserved.'
+      allRightsReserved: 'All rights reserved.',
+      keyUsage: 'Key Usage'
     }
   },
 
@@ -120,7 +121,7 @@ export default {
     placeholder: 'sk-ant-mirror-xxxxxxxxxxxx',
     query: 'Query',
     querying: 'Querying...',
-    privacyNote: 'Your Key is processed locally in the browser and will not be stored',
+    privacyNote: 'The Key is sent only in a request header and is not written to the URL or browser storage',
     dateRange: 'Date Range:',
     dateRangeToday: 'Today',
     dateRange7d: '7 Days',
@@ -143,6 +144,13 @@ export default {
     // Status
     quotaMode: 'Key Quota Mode',
     walletBalance: 'Wallet Balance',
+    subscriptionPlan: 'Subscription Plan',
+    statusActive: 'Available',
+    statusQuotaExhausted: 'Key Quota Exhausted',
+    statusExpired: 'Key Expired',
+    statusDisabled: 'Key Disabled',
+    statusUnknown: 'Unknown Status',
+    subscriptionNotFound: 'No active subscription',
     // Ring card titles
     totalQuota: 'Total Quota',
     limit5h: '5-Hour Limit',
@@ -150,8 +158,15 @@ export default {
     limit7d: '7-Day Limit',
     limitWeekly: 'Weekly Limit',
     limitMonthly: 'Monthly Limit',
+    subscriptionLimit5h: 'Shared Plan · 5-Hour',
+    subscriptionLimitDaily: 'Shared Plan · Daily',
+    subscriptionLimitWeekly: 'Shared Plan · Weekly',
+    subscriptionLimitMonthly: 'Shared Plan · Monthly',
     // Detail rows
     remainingQuota: 'Remaining Quota',
+    keyRemainingQuota: 'Key Remaining Quota',
+    sharedSubscriptionRemaining: 'Shared Plan Available Quota',
+    billingSource: 'Billing Source',
     expiresAt: 'Expires At',
     todayExpires: '(expires today)',
     daysLeft: '({days} days)',

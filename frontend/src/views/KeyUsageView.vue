@@ -58,6 +58,9 @@
               v-model="apiKey"
               :type="keyVisible ? 'text' : 'password'"
               :placeholder="t('keyUsage.placeholder')"
+              autocomplete="off"
+              autocapitalize="none"
+              :spellcheck="false"
               class="input-ring w-full h-12 pl-12 pr-12 rounded-xl border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 transition-all dark:border-dark-700 dark:bg-dark-900 dark:text-white dark:placeholder:text-dark-500"
               @keydown.enter="queryKey"
             />
@@ -397,8 +400,79 @@ const isQuerying = ref(false)
 const showResults = ref(false)
 const showLoading = ref(false)
 const showDatePicker = ref(false)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const resultData = ref<any>(null)
+
+interface UsageLimit {
+  window: string
+  limit: number
+  used: number
+  remaining: number
+  reset_at?: string | null
+}
+
+interface SubscriptionUsage {
+  status: string
+  shared: boolean
+  remaining: number
+  five_hour_usage_usd: number
+  daily_usage_usd: number
+  weekly_usage_usd: number
+  monthly_usage_usd: number
+  five_hour_limit_usd?: number | null
+  daily_limit_usd?: number | null
+  weekly_limit_usd?: number | null
+  monthly_limit_usd?: number | null
+  five_hour_reset_at?: string | null
+  daily_reset_at?: string | null
+  weekly_reset_at?: string | null
+  monthly_reset_at?: string | null
+  expires_at: string
+  days_remaining: number
+}
+
+interface UsageTotals {
+  requests?: number
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_tokens?: number
+  cache_read_tokens?: number
+  total_tokens?: number
+  actual_cost?: number
+}
+
+interface ModelUsageStat extends UsageTotals {
+  model?: string
+  cost?: number
+}
+
+interface KeyUsageResponse {
+  mode: 'quota_limited' | 'unrestricted'
+  billing_mode?: 'subscription' | 'balance'
+  isValid: boolean
+  status: string
+  planName?: string
+  remaining?: number
+  balance?: number
+  quota?: {
+    limit: number
+    used: number
+    remaining: number
+  }
+  rate_limits?: UsageLimit[]
+  expires_at?: string | null
+  days_until_expiry?: number
+  subscription_status?: string
+  subscription?: SubscriptionUsage
+  usage?: {
+    today?: UsageTotals
+    total?: UsageTotals
+    rpm?: number
+    tpm?: number
+    average_duration_ms?: number
+  }
+  model_stats?: ModelUsageStat[]
+}
+
+const resultData = ref<KeyUsageResponse | null>(null)
 const now = ref(new Date())
 let resetTimer: ReturnType<typeof setInterval> | null = null
 
@@ -508,24 +582,25 @@ const statusInfo = computed(() => {
   const data = resultData.value
   if (!data) return null
 
-  if (data.mode === 'quota_limited') {
-    const isValid = data.isValid !== false
-    const statusMap: Record<string, string> = {
-      active: 'Active',
-      quota_exhausted: 'Quota Exhausted',
-      expired: 'Expired',
-    }
-    return {
-      label: t('keyUsage.quotaMode'),
-      statusText: statusMap[data.status] || data.status || 'Unknown',
-      isActive: isValid && data.status === 'active',
-    }
+  const statusMap: Record<string, string> = {
+    active: t('keyUsage.statusActive'),
+    quota_exhausted: t('keyUsage.statusQuotaExhausted'),
+    expired: t('keyUsage.statusExpired'),
+    disabled: t('keyUsage.statusDisabled'),
   }
+  const isSubscription = data.billing_mode === 'subscription' || data.subscription != null
+  const subscriptionMissing = data.billing_mode === 'subscription' && data.subscription_status === 'not_found'
 
   return {
-    label: data.planName || t('keyUsage.walletBalance'),
-    statusText: 'Active',
-    isActive: true,
+    label: isSubscription
+      ? (data.planName || t('keyUsage.subscriptionPlan'))
+      : data.mode === 'quota_limited'
+        ? t('keyUsage.quotaMode')
+        : t('keyUsage.walletBalance'),
+    statusText: subscriptionMissing
+      ? t('keyUsage.subscriptionNotFound')
+      : (statusMap[data.status] || data.status || t('keyUsage.statusUnknown')),
+    isActive: data.isValid !== false && data.status === 'active' && !subscriptionMissing,
   }
 })
 
@@ -535,43 +610,47 @@ const ringItems = computed<RingItem[]>(() => {
 
   const items: RingItem[] = []
 
-  if (data.mode === 'quota_limited') {
-    if (data.quota) {
-      const pct = data.quota.limit > 0 ? Math.min(Math.round((data.quota.used / data.quota.limit) * 100), 100) : 0
-      items.push({ title: t('keyUsage.totalQuota'), pct, amount: `${usd(data.quota.used)} / ${usd(data.quota.limit)}`, iconType: 'dollar' })
+  if (data.quota) {
+    const pct = data.quota.limit > 0 ? Math.min(Math.round((data.quota.used / data.quota.limit) * 100), 100) : 0
+    items.push({ title: t('keyUsage.totalQuota'), pct, amount: `${usd(data.quota.used)} / ${usd(data.quota.limit)}`, iconType: 'dollar' })
+  }
+  if (data.rate_limits) {
+    const windowLabels: Record<string, string> = { '5h': t('keyUsage.limit5h'), '1d': t('keyUsage.limitDaily'), '7d': t('keyUsage.limit7d') }
+    const windowIcons: Record<string, 'clock' | 'calendar'> = { '5h': 'clock', '1d': 'calendar', '7d': 'calendar' }
+    for (const rl of data.rate_limits) {
+      const pct = rl.limit > 0 ? Math.min(Math.round((rl.used / rl.limit) * 100), 100) : 0
+      items.push({
+        title: windowLabels[rl.window] || rl.window,
+        pct,
+        amount: `${usd(rl.used)} / ${usd(rl.limit)}`,
+        iconType: windowIcons[rl.window] || 'clock',
+        resetAt: rl.reset_at,
+      })
     }
-    if (data.rate_limits) {
-      const windowLabels: Record<string, string> = { '5h': t('keyUsage.limit5h'), '1d': t('keyUsage.limitDaily'), '7d': t('keyUsage.limit7d') }
-      const windowIcons: Record<string, 'clock' | 'calendar'> = { '5h': 'clock', '1d': 'calendar', '7d': 'calendar' }
-      for (const rl of data.rate_limits) {
-        const pct = rl.limit > 0 ? Math.min(Math.round((rl.used / rl.limit) * 100), 100) : 0
+  }
+  if (data.subscription) {
+    const sub = data.subscription
+    const limits: Array<{ label: string; usage: number; limit?: number | null; resetAt?: string | null; iconType: 'clock' | 'calendar' }> = [
+      { label: t('keyUsage.subscriptionLimit5h'), usage: sub.five_hour_usage_usd, limit: sub.five_hour_limit_usd, resetAt: sub.five_hour_reset_at, iconType: 'clock' },
+      { label: t('keyUsage.subscriptionLimitDaily'), usage: sub.daily_usage_usd, limit: sub.daily_limit_usd, resetAt: sub.daily_reset_at, iconType: 'calendar' },
+      { label: t('keyUsage.subscriptionLimitWeekly'), usage: sub.weekly_usage_usd, limit: sub.weekly_limit_usd, resetAt: sub.weekly_reset_at, iconType: 'calendar' },
+      { label: t('keyUsage.subscriptionLimitMonthly'), usage: sub.monthly_usage_usd, limit: sub.monthly_limit_usd, resetAt: sub.monthly_reset_at, iconType: 'calendar' },
+    ]
+    for (const limit of limits) {
+      if (limit.limit != null && limit.limit > 0) {
+        const pct = Math.min(Math.round((limit.usage / limit.limit) * 100), 100)
         items.push({
-          title: windowLabels[rl.window] || rl.window,
+          title: limit.label,
           pct,
-          amount: `${usd(rl.used)} / ${usd(rl.limit)}`,
-          iconType: windowIcons[rl.window] || 'clock',
-          resetAt: rl.reset_at,
+          amount: `${usd(limit.usage)} / ${usd(limit.limit)}`,
+          iconType: limit.iconType,
+          resetAt: limit.resetAt,
         })
       }
     }
-  } else {
-    if (data.subscription) {
-      const sub = data.subscription
-      const limits = [
-        { label: t('keyUsage.limitDaily'), usage: sub.daily_usage_usd, limit: sub.daily_limit_usd },
-        { label: t('keyUsage.limitWeekly'), usage: sub.weekly_usage_usd, limit: sub.weekly_limit_usd },
-        { label: t('keyUsage.limitMonthly'), usage: sub.monthly_usage_usd, limit: sub.monthly_limit_usd },
-      ]
-      for (const l of limits) {
-        if (l.limit != null && l.limit > 0) {
-          const pct = Math.min(Math.round((l.usage / l.limit) * 100), 100)
-          items.push({ title: l.label, pct, amount: `${usd(l.usage)} / ${usd(l.limit)}`, iconType: 'calendar' })
-        }
-      }
-    }
-    if (!data.subscription && data.balance != null) {
-      items.push({ title: t('keyUsage.walletBalance'), pct: 0, amount: usd(data.balance), isBalance: true, iconType: 'dollar' })
-    }
+  }
+  if (data.balance != null && data.billing_mode !== 'subscription' && !data.subscription) {
+    items.push({ title: t('keyUsage.walletBalance'), pct: 0, amount: usd(data.balance), isBalance: true, iconType: 'dollar' })
   }
 
   return items
@@ -609,87 +688,69 @@ const detailRows = computed<DetailRow[]>(() => {
   const ICON_DOLLAR = '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>'
   const ICON_CHECK = '<polyline points="20 6 9 17 4 12"/>'
 
-  if (data.mode === 'quota_limited') {
-    if (data.quota) {
-      const remainColor = data.quota.remaining <= 0 ? 'text-rose-500'
-        : data.quota.remaining < data.quota.limit * 0.1 ? 'text-amber-500'
-        : 'text-emerald-500'
-      rows.push({
-        iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-500', iconSvg: ICON_SHIELD,
-        label: t('keyUsage.remainingQuota'), value: usd(data.quota.remaining), valueClass: remainColor,
-      })
-    }
-    if (data.expires_at) {
-      const daysLeft = data.days_until_expiry
-      let expiryStr = formatDate(data.expires_at)
-      if (daysLeft != null) {
-        expiryStr += daysLeft > 0 ? ` ${t('keyUsage.daysLeft', { days: daysLeft })}` : daysLeft === 0 ? ` ${t('keyUsage.todayExpires')}` : ''
-      }
-      rows.push({
-        iconBg: 'bg-amber-500/10', iconColor: 'text-amber-500', iconSvg: ICON_CALENDAR,
-        label: t('keyUsage.expiresAt'), value: expiryStr, valueClass: '',
-      })
-    }
-    if (data.rate_limits) {
-      const windowMap: Record<string, string> = { '5h': '5H', '1d': locale.value === 'zh' ? '日' : 'D', '7d': '7D' }
-      for (const rl of data.rate_limits) {
-        const pct = rl.limit > 0 ? (rl.used / rl.limit) * 100 : 0
-        let valueStr = `${usd(rl.used)} / ${usd(rl.limit)}`
-        const resetStr = formatResetTime(rl.reset_at)
-        if (resetStr) {
-          valueStr += ` (⟳ ${resetStr})`
-        }
-        rows.push({
-          iconBg: 'bg-primary-500/10', iconColor: 'text-primary-500', iconSvg: ICON_DOLLAR,
-          label: `${t('keyUsage.usedQuota')} (${windowMap[rl.window] || rl.window})`,
-          value: valueStr,
-          valueClass: getUsageColor(pct),
-        })
-      }
-    }
-  } else {
-    rows.push({
-      iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-500', iconSvg: ICON_CHECK,
-      label: t('keyUsage.subscriptionType'), value: data.planName || t('keyUsage.walletBalance'), valueClass: '',
-    })
+  rows.push({
+    iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-500', iconSvg: ICON_CHECK,
+    label: t('keyUsage.billingSource'), value: data.planName || t('keyUsage.walletBalance'), valueClass: '',
+  })
 
-    if (data.subscription) {
-      const sub = data.subscription
-      if (sub.daily_limit_usd > 0) {
-        const pct = (sub.daily_usage_usd / sub.daily_limit_usd) * 100
-        rows.push({
-          iconBg: 'bg-primary-500/10', iconColor: 'text-primary-500', iconSvg: ICON_DOLLAR,
-          label: `${t('keyUsage.usedQuota')} (${locale.value === 'zh' ? '日' : 'D'})`, value: `${usd(sub.daily_usage_usd)} / ${usd(sub.daily_limit_usd)}`, valueClass: getUsageColor(pct),
-        })
-      }
-      if (sub.weekly_limit_usd > 0) {
-        const pct = (sub.weekly_usage_usd / sub.weekly_limit_usd) * 100
-        rows.push({
-          iconBg: 'bg-indigo-500/10', iconColor: 'text-indigo-500', iconSvg: ICON_DOLLAR,
-          label: `${t('keyUsage.usedQuota')} (${locale.value === 'zh' ? '周' : 'W'})`, value: `${usd(sub.weekly_usage_usd)} / ${usd(sub.weekly_limit_usd)}`, valueClass: getUsageColor(pct),
-        })
-      }
-      if (sub.monthly_limit_usd > 0) {
-        const pct = (sub.monthly_usage_usd / sub.monthly_limit_usd) * 100
-        rows.push({
-          iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-500', iconSvg: ICON_DOLLAR,
-          label: `${t('keyUsage.usedQuota')} (${locale.value === 'zh' ? '月' : 'M'})`, value: `${usd(sub.monthly_usage_usd)} / ${usd(sub.monthly_limit_usd)}`, valueClass: getUsageColor(pct),
-        })
-      }
-      if (sub.expires_at) {
-        rows.push({
-          iconBg: 'bg-amber-500/10', iconColor: 'text-amber-500', iconSvg: ICON_CALENDAR,
-          label: t('keyUsage.subscriptionExpires'), value: formatDate(sub.expires_at), valueClass: '',
-        })
-      }
-    }
-
-    const remainColor = data.remaining != null
-      ? (data.remaining <= 0 ? 'text-rose-500' : data.remaining < 10 ? 'text-amber-500' : 'text-emerald-500')
-      : ''
+  if (data.quota) {
+    const remainColor = data.quota.remaining <= 0 ? 'text-rose-500'
+      : data.quota.remaining < data.quota.limit * 0.1 ? 'text-amber-500'
+      : 'text-emerald-500'
     rows.push({
       iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-500', iconSvg: ICON_SHIELD,
-      label: t('keyUsage.remainingQuota'), value: data.remaining != null ? usd(data.remaining) : '-', valueClass: remainColor,
+      label: t('keyUsage.keyRemainingQuota'), value: usd(data.quota.remaining), valueClass: remainColor,
+    })
+  }
+  if (data.expires_at) {
+    const daysLeft = data.days_until_expiry
+    let expiryStr = formatDate(data.expires_at)
+    if (daysLeft != null) {
+      expiryStr += daysLeft > 0 ? ` ${t('keyUsage.daysLeft', { days: daysLeft })}` : daysLeft === 0 ? ` ${t('keyUsage.todayExpires')}` : ''
+    }
+    rows.push({
+      iconBg: 'bg-amber-500/10', iconColor: 'text-amber-500', iconSvg: ICON_CALENDAR,
+      label: t('keyUsage.expiresAt'), value: expiryStr, valueClass: '',
+    })
+  }
+  if (data.rate_limits) {
+    const windowMap: Record<string, string> = { '5h': '5H', '1d': locale.value === 'zh' ? '日' : 'D', '7d': '7D' }
+    for (const rl of data.rate_limits) {
+      const pct = rl.limit > 0 ? (rl.used / rl.limit) * 100 : 0
+      let valueStr = `${usd(rl.used)} / ${usd(rl.limit)}`
+      const resetStr = formatResetTime(rl.reset_at)
+      if (resetStr) {
+        valueStr += ` (⟳ ${resetStr})`
+      }
+      rows.push({
+        iconBg: 'bg-primary-500/10', iconColor: 'text-primary-500', iconSvg: ICON_DOLLAR,
+        label: `${t('keyUsage.usedQuota')} (${windowMap[rl.window] || rl.window})`,
+        value: valueStr,
+        valueClass: getUsageColor(pct),
+      })
+    }
+  }
+
+  if (data.subscription) {
+    const sub = data.subscription
+    const remainColor = sub.remaining < 0 ? ''
+      : sub.remaining <= 0 ? 'text-rose-500'
+        : sub.remaining < 10 ? 'text-amber-500'
+          : 'text-emerald-500'
+    rows.push({
+      iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-500', iconSvg: ICON_SHIELD,
+      label: t('keyUsage.sharedSubscriptionRemaining'), value: usd(sub.remaining), valueClass: remainColor,
+    })
+    if (sub.expires_at) {
+      rows.push({
+        iconBg: 'bg-amber-500/10', iconColor: 'text-amber-500', iconSvg: ICON_CALENDAR,
+        label: t('keyUsage.subscriptionExpires'), value: formatDate(sub.expires_at), valueClass: '',
+      })
+    }
+  } else if (data.billing_mode === 'subscription' && data.subscription_status === 'not_found') {
+    rows.push({
+      iconBg: 'bg-amber-500/10', iconColor: 'text-amber-500', iconSvg: ICON_SHIELD,
+      label: t('keyUsage.subscriptionType'), value: t('keyUsage.subscriptionNotFound'), valueClass: 'text-amber-500',
     })
   }
 
@@ -728,8 +789,7 @@ const usageStatCells = computed<StatCell[]>(() => {
   ]
 })
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const modelStats = computed<any[]>(() => resultData.value?.model_stats || [])
+const modelStats = computed<ModelUsageStat[]>(() => resultData.value?.model_stats || [])
 
 // ==================== Utility Functions ====================
 
@@ -752,18 +812,20 @@ function formatDate(iso: string | null | undefined): string {
 
 // ==================== API Query ====================
 
-async function fetchUsage(key: string) {
+async function fetchUsage(key: string): Promise<KeyUsageResponse> {
   const dateParams = getDateParams()
   const url = '/v1/usage' + (dateParams ? '?' + dateParams : '')
   const res = await fetch(url, {
     headers: { 'Authorization': 'Bearer ' + key },
+    cache: 'no-store',
+    referrerPolicy: 'no-referrer',
   })
   if (!res.ok) {
     const body = await res.json().catch(() => null)
     const msg = body?.error?.message || body?.message || `${t('keyUsage.queryFailed')} (${res.status})`
     throw new Error(msg)
   }
-  return await res.json()
+  return await res.json() as KeyUsageResponse
 }
 
 async function queryKey() {

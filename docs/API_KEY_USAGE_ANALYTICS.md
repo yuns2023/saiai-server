@@ -44,6 +44,39 @@ The older batch Key-usage endpoint retains its compatibility fields. Its
 `total_actual_cost` default window is the last 30 days, and the Key-management
 UI labels it as such rather than as lifetime usage.
 
+## Self-service Key lookup
+
+`GET /v1/usage` is the read-only, API-Key-authenticated contract behind the
+public `/key-usage` page. Send the Key in `Authorization: Bearer ...` or an
+existing supported Key header. Keys in query parameters are rejected. The
+endpoint performs no upstream/model request and returns `Cache-Control:
+no-store`.
+
+The response keeps the legacy `mode` field for existing clients:
+
+- `quota_limited` means the Key itself has a total quota or a rolling 5-hour,
+  daily, or 7-day limit;
+- `unrestricted` means the Key has no Key-level quota.
+
+`billing_mode` is independent and is either `subscription` or `balance`. A Key
+can therefore be `quota_limited` while also using a subscription. In that
+case, the response includes both the Key's `quota` / `rate_limits` and the
+shared `subscription` object. Clients must not treat `mode` as the billing
+source.
+
+Subscription window values are shared by the user's subscription to the bound
+group, not reserved for one Key. The object includes 5-hour, daily, weekly,
+and monthly limits when configured, effective usage, the minimum currently
+available amount, expiry, and reset times. A window that has elapsed is
+reported as zero usage without mutating persistence; normal billing traffic
+performs the asynchronous window maintenance. `subscription_status` is
+`not_found` when the Key is bound to a subscription group but no active
+subscription is available.
+
+Usage totals and model aggregation remain scoped to the queried Key. The
+optional `start_date` and `end_date` parameters affect model aggregation only;
+they never carry credentials.
+
 ## OpenAI service-tier billing
 
 Gateway forwarding and local billing have separate boundaries. Preserve the
