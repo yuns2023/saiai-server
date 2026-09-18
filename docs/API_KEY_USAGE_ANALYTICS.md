@@ -62,7 +62,22 @@ The response keeps the legacy `mode` field for existing clients:
 can therefore be `quota_limited` while also using a subscription. In that
 case, the response includes both the Key's `quota` / `rate_limits` and the
 shared `subscription` object. Clients must not treat `mode` as the billing
-source.
+source. New clients should use the structured `billing` and `key_limits`
+objects; the legacy top-level fields remain for compatibility.
+
+The wallet disclosure rule is intentionally narrow:
+
+- a balance-billed Key with no total or window spending limit receives its
+  current wallet balance;
+- once any Key spending limit is configured, the response identifies the
+  billing source and whether it is currently available but omits the wallet
+  amount; and
+- subscription Keys never fall back to a wallet display when an active
+  subscription cannot be found.
+
+The database and compatibility API retain the historical `rate_limit_*` field
+names. They are monetary spending limits in rolling windows, not request or
+token throughput limits. User-facing text calls them “spending window limits.”
 
 Subscription window values are shared by the user's subscription to the bound
 group, not reserved for one Key. The object includes 5-hour, daily, weekly,
@@ -73,9 +88,13 @@ performs the asynchronous window maintenance. `subscription_status` is
 `not_found` when the Key is bound to a subscription group but no active
 subscription is available.
 
-Usage totals and model aggregation remain scoped to the queried Key. The
-optional `start_date` and `end_date` parameters affect model aggregation only;
-they never carry credentials.
+Usage totals, model aggregation, and recent records remain scoped to the
+queried Key. The optional inclusive-calendar `start_date` and `end_date`
+parameters apply to all three public range views; they never carry
+credentials. `records_page` and `records_page_size` paginate recent records,
+with a maximum page size of 50. A recent record exposes only its timestamp,
+model, token classes, total tokens, actual cost, duration, and request type. It
+does not expose user, account, Key, session, request, IP, or payload identifiers.
 
 ## OpenAI service-tier billing
 

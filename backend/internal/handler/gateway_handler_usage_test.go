@@ -65,14 +65,57 @@ func TestGatewayUsageReturnsSubscriptionAndKeyQuotaTogether(t *testing.T) {
 	require.Equal(t, "subscription", response["billing_mode"])
 	require.Equal(t, "Team subscription", response["planName"])
 	require.Equal(t, float64(17), response["remaining"])
+	require.NotContains(t, response, "balance")
 
 	quota := response["quota"].(map[string]any)
 	require.Equal(t, float64(17), quota["remaining"])
+	keyLimits := response["key_limits"].(map[string]any)
+	require.Equal(t, true, keyLimits["configured"])
+	require.NotNil(t, keyLimits["total"])
+	billing := response["billing"].(map[string]any)
+	require.Equal(t, "subscription", billing["type"])
+	require.Equal(t, true, billing["available"])
+	require.Equal(t, true, billing["shared"])
 	sub := response["subscription"].(map[string]any)
 	require.Equal(t, true, sub["shared"])
 	require.Equal(t, float64(4), sub["daily_usage_usd"])
 	require.Equal(t, float64(6), sub["remaining"])
 	require.NotEmpty(t, sub["daily_reset_at"])
+}
+
+func TestGatewayUsageDoesNotFallBackToWalletWhenSubscriptionIsMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{
+		ID:               43,
+		Name:             "Missing subscription",
+		SubscriptionType: service.SubscriptionTypeSubscription,
+	}
+	user := &service.User{ID: 11, Balance: 500}
+	apiKey := &service.APIKey{
+		ID:     104,
+		UserID: user.ID,
+		Status: service.StatusAPIKeyActive,
+		User:   user,
+		Group:  group,
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/usage", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID})
+
+	(&GatewayHandler{}).Usage(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, "subscription", response["billing_mode"])
+	require.Equal(t, "not_found", response["subscription_status"])
+	require.NotContains(t, response, "balance")
+	require.NotContains(t, response, "remaining")
+	billing := response["billing"].(map[string]any)
+	require.Equal(t, false, billing["available"])
 }
 
 func TestGatewayUsageReturnsWalletAndKeyQuotaTogether(t *testing.T) {
@@ -101,7 +144,106 @@ func TestGatewayUsageReturnsWalletAndKeyQuotaTogether(t *testing.T) {
 	require.Equal(t, "quota_limited", response["mode"])
 	require.Equal(t, "balance", response["billing_mode"])
 	require.Equal(t, float64(18), response["remaining"])
-	require.Equal(t, float64(9), response["balance"])
+	require.NotContains(t, response, "balance")
+	billing := response["billing"].(map[string]any)
+	require.Equal(t, "wallet", billing["type"])
+	require.Equal(t, true, billing["available"])
+	require.Equal(t, false, billing["balance_visible"])
+	require.NotContains(t, billing, "balance")
+}
+
+func TestGatewayUsageShowsWalletBalanceOnlyWithoutKeyLimits(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	user := &service.User{ID: 9, Balance: 13}
+	apiKey := &service.APIKey{
+		ID:     102,
+		UserID: user.ID,
+		Status: service.StatusAPIKeyActive,
+		User:   user,
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/usage", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID})
+
+	(&GatewayHandler{}).Usage(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, "unrestricted", response["mode"])
+	require.Equal(t, float64(13), response["balance"])
+	require.Equal(t, float64(13), response["remaining"])
+	keyLimits := response["key_limits"].(map[string]any)
+	require.Equal(t, false, keyLimits["configured"])
+	billing := response["billing"].(map[string]any)
+	require.Equal(t, "wallet", billing["type"])
+	require.Equal(t, true, billing["balance_visible"])
+	require.Equal(t, float64(13), billing["balance"])
+}
+
+func TestGatewayUsageHidesWalletBalanceForWindowLimitOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	user := &service.User{ID: 10, Balance: 27}
+	apiKey := &service.APIKey{
+		ID:          103,
+		UserID:      user.ID,
+		Status:      service.StatusAPIKeyActive,
+		RateLimit1d: 8,
+		User:        user,
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/usage", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID})
+
+	(&GatewayHandler{}).Usage(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, "quota_limited", response["mode"])
+	require.NotContains(t, response, "balance")
+	require.NotContains(t, response, "remaining")
+	billing := response["billing"].(map[string]any)
+	require.Equal(t, false, billing["balance_visible"])
+}
+
+func TestPublicKeyUsageRecordsExcludeInternalIdentifiers(t *testing.T) {
+	duration := 241
+	logs := []service.UsageLog{{
+		ID:                  91,
+		UserID:              7,
+		APIKeyID:            100,
+		AccountID:           88,
+		Model:               "claude-sonnet",
+		InputTokens:         11,
+		OutputTokens:        7,
+		CacheCreationTokens: 3,
+		CacheReadTokens:     5,
+		ActualCost:          0.42,
+		DurationMs:          &duration,
+		RequestType:         service.RequestTypeStream,
+		CreatedAt:           time.Unix(100, 0),
+	}}
+
+	encoded, err := json.Marshal(publicKeyUsageRecords(logs))
+	require.NoError(t, err)
+	var records []map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &records))
+	require.Len(t, records, 1)
+	require.Equal(t, float64(26), records[0]["total_tokens"])
+	require.Equal(t, "stream", records[0]["request_type"])
+	require.NotContains(t, records[0], "id")
+	require.NotContains(t, records[0], "user_id")
+	require.NotContains(t, records[0], "api_key_id")
+	require.NotContains(t, records[0], "account_id")
+	require.NotContains(t, records[0], "session_id")
+	require.NotContains(t, records[0], "ip_address")
 }
 
 func TestBuildSubscriptionUsageDetailsTreatsExpiredWindowsAsReset(t *testing.T) {

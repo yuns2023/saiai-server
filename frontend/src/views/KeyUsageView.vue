@@ -333,6 +333,73 @@
               </table>
             </div>
           </div>
+
+          <!-- Recent Key-scoped Usage Records -->
+          <div
+            v-if="resultData.recent_usage"
+            class="fade-up fade-up-delay-4 rounded-2xl border border-gray-200 bg-white/90 backdrop-blur-sm overflow-hidden dark:border-dark-700 dark:bg-dark-900/90"
+          >
+            <div class="px-8 py-5 border-b border-gray-200 dark:border-dark-700">
+              <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.recentUsage') }}</h3>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full">
+                <thead>
+                  <tr class="border-b border-gray-200 bg-gray-50 dark:border-dark-700 dark:bg-dark-950">
+                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.time') }}</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.model') }}</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.requestType') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.inputTokens') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.outputTokens') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.cacheTokens') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.totalTokens') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.cost') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.duration') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="recentUsageRecords.length === 0">
+                    <td colspan="9" class="px-4 py-8 text-center text-sm text-gray-500 dark:text-dark-400">
+                      {{ t('keyUsage.noRecentUsage') }}
+                    </td>
+                  </tr>
+                  <tr
+                    v-for="(record, i) in recentUsageRecords"
+                    :key="`${record.created_at}-${i}`"
+                    class="border-b border-gray-100 last:border-b-0 dark:border-dark-800"
+                  >
+                    <td class="px-4 py-3 text-sm whitespace-nowrap text-gray-700 dark:text-dark-200">{{ formatDateTime(record.created_at) }}</td>
+                    <td class="px-4 py-3 text-sm font-medium whitespace-nowrap text-gray-900 dark:text-white">{{ record.model || '-' }}</td>
+                    <td class="px-4 py-3 text-sm whitespace-nowrap text-gray-700 dark:text-dark-200">{{ record.request_type || '-' }}</td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(record.input_tokens) }}</td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(record.output_tokens) }}</td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(record.cache_creation_tokens + record.cache_read_tokens) }}</td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(record.total_tokens) }}</td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right font-medium text-gray-900 dark:text-white">{{ usd(record.actual_cost) }}</td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ record.duration_ms != null ? `${record.duration_ms} ms` : '-' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div
+              v-if="recentUsagePagination.pages > 1"
+              class="flex items-center justify-between gap-4 border-t border-gray-200 px-6 py-4 dark:border-dark-700"
+            >
+              <button
+                :disabled="isQuerying || recentUsagePagination.page <= 1"
+                class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 disabled:opacity-40 dark:border-dark-700 dark:text-dark-200"
+                @click="changeRecordPage(recentUsagePagination.page - 1)"
+              >{{ t('keyUsage.previous') }}</button>
+              <span class="text-xs text-gray-500 dark:text-dark-400">
+                {{ t('keyUsage.pageInfo', { page: recentUsagePagination.page, pages: recentUsagePagination.pages }) }}
+              </span>
+              <button
+                :disabled="isQuerying || recentUsagePagination.page >= recentUsagePagination.pages"
+                class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 disabled:opacity-40 dark:border-dark-700 dark:text-dark-200"
+                @click="changeRecordPage(recentUsagePagination.page + 1)"
+              >{{ t('keyUsage.next') }}</button>
+            </div>
+          </div>
         </div>
       </div>
     </main>
@@ -437,11 +504,42 @@ interface UsageTotals {
   cache_read_tokens?: number
   total_tokens?: number
   actual_cost?: number
+  cost?: number
+  cache_tokens?: number
+  average_duration_ms?: number
 }
 
 interface ModelUsageStat extends UsageTotals {
   model?: string
-  cost?: number
+}
+
+interface BillingInfo {
+  type: 'wallet' | 'subscription'
+  available?: boolean
+  balance_visible?: boolean
+  balance?: number
+  plan_name?: string
+  shared?: boolean
+}
+
+interface RecentUsageRecord {
+  created_at: string
+  model: string
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  actual_cost: number
+  duration_ms?: number
+  request_type: string
+}
+
+interface UsagePagination {
+  total: number
+  page: number
+  page_size: number
+  pages: number
 }
 
 interface KeyUsageResponse {
@@ -452,6 +550,10 @@ interface KeyUsageResponse {
   planName?: string
   remaining?: number
   balance?: number
+  billing?: BillingInfo
+  key_limits?: {
+    configured: boolean
+  }
   quota?: {
     limit: number
     used: number
@@ -465,11 +567,16 @@ interface KeyUsageResponse {
   usage?: {
     today?: UsageTotals
     total?: UsageTotals
+    range?: UsageTotals
     rpm?: number
     tpm?: number
     average_duration_ms?: number
   }
   model_stats?: ModelUsageStat[]
+  recent_usage?: {
+    records: RecentUsageRecord[]
+    pagination: UsagePagination
+  }
 }
 
 const resultData = ref<KeyUsageResponse | null>(null)
@@ -482,6 +589,8 @@ type DateRangeKey = 'today' | '7d' | '30d' | 'custom'
 const currentRange = ref<DateRangeKey>('today')
 const customStartDate = ref('')
 const customEndDate = ref('')
+const recordPage = ref(1)
+const RECORD_PAGE_SIZE = 10
 
 const dateRanges = computed(() => [
   { key: 'today' as const, label: t('keyUsage.dateRangeToday') },
@@ -492,6 +601,7 @@ const dateRanges = computed(() => [
 
 function setDateRange(key: DateRangeKey) {
   currentRange.value = key
+  recordPage.value = 1
   if (key !== 'custom') {
     queryKey()
   }
@@ -499,7 +609,12 @@ function setDateRange(key: DateRangeKey) {
 
 function getDateParams(): string {
   const now = new Date()
-  const fmt = (d: Date) => d.toISOString().split('T')[0]
+  const fmt = (d: Date) => {
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
 
   if (currentRange.value === 'custom') {
     if (customStartDate.value && customEndDate.value) {
@@ -512,9 +627,9 @@ function getDateParams(): string {
   let start: string
   switch (currentRange.value) {
     case 'today': start = end; break
-    case '7d': start = fmt(new Date(now.getTime() - 7 * 86400000)); break
-    case '30d': start = fmt(new Date(now.getTime() - 30 * 86400000)); break
-    default: start = fmt(new Date(now.getTime() - 30 * 86400000))
+    case '7d': start = fmt(new Date(now.getTime() - 6 * 86400000)); break
+    case '30d': start = fmt(new Date(now.getTime() - 29 * 86400000)); break
+    default: start = fmt(new Date(now.getTime() - 29 * 86400000))
   }
   return `start_date=${start}&end_date=${end}`
 }
@@ -590,17 +705,24 @@ const statusInfo = computed(() => {
   }
   const isSubscription = data.billing_mode === 'subscription' || data.subscription != null
   const subscriptionMissing = data.billing_mode === 'subscription' && data.subscription_status === 'not_found'
+  const hasKeyLimits = data.key_limits?.configured ?? data.mode === 'quota_limited'
+  const billingUnavailable = data.billing?.available === false
+  const subscriptionLabel = data.billing?.plan_name || data.planName || t('keyUsage.subscriptionPlan')
 
   return {
     label: isSubscription
-      ? (data.planName || t('keyUsage.subscriptionPlan'))
-      : data.mode === 'quota_limited'
-        ? t('keyUsage.quotaMode')
-        : t('keyUsage.walletBalance'),
+      ? hasKeyLimits
+        ? t('keyUsage.subscriptionWithKeyLimits', { plan: subscriptionLabel })
+        : subscriptionLabel
+      : hasKeyLimits
+        ? t('keyUsage.keyLimitsConfigured')
+        : t('keyUsage.payAsYouGo'),
     statusText: subscriptionMissing
       ? t('keyUsage.subscriptionNotFound')
+      : billingUnavailable
+        ? t('keyUsage.accountUnavailable')
       : (statusMap[data.status] || data.status || t('keyUsage.statusUnknown')),
-    isActive: data.isValid !== false && data.status === 'active' && !subscriptionMissing,
+    isActive: data.isValid !== false && data.status === 'active' && !subscriptionMissing && !billingUnavailable,
   }
 })
 
@@ -649,8 +771,12 @@ const ringItems = computed<RingItem[]>(() => {
       }
     }
   }
-  if (data.balance != null && data.billing_mode !== 'subscription' && !data.subscription) {
-    items.push({ title: t('keyUsage.walletBalance'), pct: 0, amount: usd(data.balance), isBalance: true, iconType: 'dollar' })
+  const walletBalanceVisible = data.billing
+    ? data.billing.type === 'wallet' && data.billing.balance_visible === true
+    : data.mode === 'unrestricted' && data.billing_mode !== 'subscription' && !data.subscription
+  const walletBalance = data.billing?.balance ?? data.balance
+  if (walletBalanceVisible && walletBalance != null) {
+    items.push({ title: t('keyUsage.walletBalance'), pct: 0, amount: usd(walletBalance), isBalance: true, iconType: 'dollar' })
   }
 
   return items
@@ -690,7 +816,11 @@ const detailRows = computed<DetailRow[]>(() => {
 
   rows.push({
     iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-500', iconSvg: ICON_CHECK,
-    label: t('keyUsage.billingSource'), value: data.planName || t('keyUsage.walletBalance'), valueClass: '',
+    label: t('keyUsage.billingSource'),
+    value: data.billing_mode === 'subscription'
+      ? (data.billing?.plan_name || data.planName || t('keyUsage.subscriptionPlan'))
+      : t('keyUsage.payAsYouGo'),
+    valueClass: '',
   })
 
   if (data.quota) {
@@ -766,30 +896,28 @@ const usageStatCells = computed<StatCell[]>(() => {
   const usage = resultData.value?.usage
   if (!usage) return []
 
-  const today = usage.today || {}
-  const total = usage.total || {}
+  const range = usage.range || usage.today || {}
 
   return [
-    { label: t('keyUsage.todayRequests'), value: fmtNum(today.requests) },
-    { label: t('keyUsage.todayInputTokens'), value: fmtNum(today.input_tokens) },
-    { label: t('keyUsage.todayOutputTokens'), value: fmtNum(today.output_tokens) },
-    { label: t('keyUsage.todayTokens'), value: fmtNum(today.total_tokens) },
-    { label: t('keyUsage.todayCacheCreation'), value: fmtNum(today.cache_creation_tokens) },
-    { label: t('keyUsage.todayCacheRead'), value: fmtNum(today.cache_read_tokens) },
-    { label: t('keyUsage.todayCost'), value: usd(today.actual_cost) },
+    { label: t('keyUsage.rangeRequests'), value: fmtNum(range.requests) },
+    { label: t('keyUsage.rangeInputTokens'), value: fmtNum(range.input_tokens) },
+    { label: t('keyUsage.rangeOutputTokens'), value: fmtNum(range.output_tokens) },
+    { label: t('keyUsage.rangeCacheTokens'), value: fmtNum(range.cache_tokens ?? ((range.cache_creation_tokens || 0) + (range.cache_read_tokens || 0))) },
+    { label: t('keyUsage.rangeTotalTokens'), value: fmtNum(range.total_tokens) },
+    { label: t('keyUsage.rangeCost'), value: usd(range.actual_cost) },
+    { label: t('keyUsage.avgDuration'), value: range.average_duration_ms ? `${Math.round(range.average_duration_ms)} ms` : '-' },
     { label: t('keyUsage.rpmTpm'), value: `${usage.rpm || 0} / ${usage.tpm || 0}` },
-    { label: t('keyUsage.totalRequests'), value: fmtNum(total.requests) },
-    { label: t('keyUsage.totalInputTokens'), value: fmtNum(total.input_tokens) },
-    { label: t('keyUsage.totalOutputTokens'), value: fmtNum(total.output_tokens) },
-    { label: t('keyUsage.totalTokensLabel'), value: fmtNum(total.total_tokens) },
-    { label: t('keyUsage.totalCacheCreation'), value: fmtNum(total.cache_creation_tokens) },
-    { label: t('keyUsage.totalCacheRead'), value: fmtNum(total.cache_read_tokens) },
-    { label: t('keyUsage.totalCost'), value: usd(total.actual_cost) },
-    { label: t('keyUsage.avgDuration'), value: usage.average_duration_ms ? `${Math.round(usage.average_duration_ms)} ms` : '-' },
   ]
 })
 
 const modelStats = computed<ModelUsageStat[]>(() => resultData.value?.model_stats || [])
+const recentUsageRecords = computed<RecentUsageRecord[]>(() => resultData.value?.recent_usage?.records || [])
+const recentUsagePagination = computed<UsagePagination>(() => resultData.value?.recent_usage?.pagination || {
+  total: 0,
+  page: 1,
+  page_size: RECORD_PAGE_SIZE,
+  pages: 0,
+})
 
 // ==================== Utility Functions ====================
 
@@ -810,11 +938,20 @@ function formatDate(iso: string | null | undefined): string {
   return d.toLocaleDateString(loc, { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
+function formatDateTime(iso: string): string {
+  const d = new Date(iso)
+  const loc = locale.value === 'zh' ? 'zh-CN' : 'en-US'
+  return d.toLocaleString(loc, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
 // ==================== API Query ====================
 
 async function fetchUsage(key: string): Promise<KeyUsageResponse> {
   const dateParams = getDateParams()
-  const url = '/v1/usage' + (dateParams ? '?' + dateParams : '')
+  const params = new URLSearchParams(dateParams)
+  params.set('records_page', String(recordPage.value))
+  params.set('records_page_size', String(RECORD_PAGE_SIZE))
+  const url = '/v1/usage?' + params.toString()
   const res = await fetch(url, {
     headers: { 'Authorization': 'Bearer ' + key },
     cache: 'no-store',
@@ -829,6 +966,17 @@ async function fetchUsage(key: string): Promise<KeyUsageResponse> {
 }
 
 async function queryKey() {
+  recordPage.value = 1
+  await runQuery(true, true)
+}
+
+async function changeRecordPage(page: number) {
+  if (page < 1 || page > recentUsagePagination.value.pages || isQuerying.value) return
+  recordPage.value = page
+  await runQuery(false, false)
+}
+
+async function runQuery(showSkeleton: boolean, notifySuccess: boolean) {
   if (isQuerying.value) return
   const key = apiKey.value.trim()
   if (!key) {
@@ -838,8 +986,8 @@ async function queryKey() {
 
   isQuerying.value = true
   showResults.value = true
-  showLoading.value = true
-  resultData.value = null
+  showLoading.value = showSkeleton
+  if (showSkeleton) resultData.value = null
 
   try {
     const data = await fetchUsage(key)
@@ -852,9 +1000,9 @@ async function queryKey() {
       triggerRingAnimation(ringItems.value)
     })
 
-    appStore.showSuccess(t('keyUsage.querySuccess'))
+    if (notifySuccess) appStore.showSuccess(t('keyUsage.querySuccess'))
   } catch (err) {
-    showResults.value = false
+    if (showSkeleton) showResults.value = false
     showLoading.value = false
     appStore.showError((err as Error).message || t('keyUsage.queryFailedRetry'))
   } finally {

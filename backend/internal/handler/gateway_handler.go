@@ -23,7 +23,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -1431,9 +1433,10 @@ func cloneAPIKeyWithGroup(apiKey *service.APIKey, group *service.Group) *service
 // Usage handles getting account balance and usage statistics for CC Switch integration
 // GET /v1/usage
 //
-// Two modes:
-//   - quota_limited: API Key has quota or rate limits configured. Returns key-level limits/usage.
-//   - unrestricted:  No key-level limits. Returns subscription or wallet balance info.
+// The legacy mode field describes Key-local spending limits only. Billing
+// source is independent and is exposed through billing/billing_mode:
+//   - quota_limited: API Key has a cumulative quota or spending-window limit.
+//   - unrestricted:  API Key has no Key-local spending limit.
 func (h *GatewayHandler) Usage(c *gin.Context) {
 	// The response contains account billing data. Prevent browsers and reverse
 	// proxies from retaining it, and make authorization-sensitive variants
@@ -1460,8 +1463,8 @@ func (h *GatewayHandler) Usage(c *gin.Context) {
 	// 解析可选的日期范围参数（用于 model_stats 查询）
 	startTime, endTime := h.parseUsageDateRange(c)
 
-	// Best-effort: 获取用量统计（按当前 API Key 过滤），失败不影响基础响应
-	usageData := h.buildUsageData(ctx, apiKey.ID)
+	// Best-effort: all usage data is scoped to the authenticated API Key.
+	usageData := h.buildUsageData(ctx, apiKey.ID, startTime, endTime)
 
 	// Best-effort: 获取模型统计
 	var modelStats any
@@ -1470,16 +1473,17 @@ func (h *GatewayHandler) Usage(c *gin.Context) {
 			modelStats = stats
 		}
 	}
+	recentUsage := h.buildRecentKeyUsage(ctx, c, apiKey.ID, startTime, endTime)
 
 	// 判断模式: key 有总额度或速率限制 → quota_limited，否则 → unrestricted
 	isQuotaLimited := apiKey.Quota > 0 || apiKey.HasRateLimits()
 
 	if isQuotaLimited {
-		h.usageQuotaLimited(c, ctx, apiKey, subject, usageData, modelStats)
+		h.usageQuotaLimited(c, ctx, apiKey, subject, usageData, modelStats, recentUsage)
 		return
 	}
 
-	h.usageUnrestricted(c, ctx, apiKey, subject, usageData, modelStats)
+	h.usageUnrestricted(c, ctx, apiKey, subject, usageData, modelStats, recentUsage)
 }
 
 // parseUsageDateRange 解析 start_date / end_date query params，默认返回近 30 天范围
@@ -1502,16 +1506,15 @@ func (h *GatewayHandler) parseUsageDateRange(c *gin.Context) (time.Time, time.Ti
 }
 
 // buildUsageData 构建 today/total 用量摘要
-func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64) gin.H {
+func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64, startTime, endTime time.Time) gin.H {
 	if h.usageService == nil {
 		return nil
 	}
-	dashStats, err := h.usageService.GetAPIKeyDashboardStats(ctx, apiKeyID)
-	if err != nil || dashStats == nil {
-		return nil
-	}
-	return gin.H{
-		"today": gin.H{
+	data := gin.H{}
+	if dashStats, err := h.usageService.GetAPIKeyDashboardStats(ctx, apiKeyID); err == nil && dashStats != nil {
+		// Preserve the established fields for compatibility. The public page uses
+		// range below so its date selector has one consistent meaning.
+		data["today"] = gin.H{
 			"requests":              dashStats.TodayRequests,
 			"input_tokens":          dashStats.TodayInputTokens,
 			"output_tokens":         dashStats.TodayOutputTokens,
@@ -1520,8 +1523,8 @@ func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64) gin
 			"total_tokens":          dashStats.TodayTokens,
 			"cost":                  dashStats.TodayCost,
 			"actual_cost":           dashStats.TodayActualCost,
-		},
-		"total": gin.H{
+		}
+		data["total"] = gin.H{
 			"requests":              dashStats.TotalRequests,
 			"input_tokens":          dashStats.TotalInputTokens,
 			"output_tokens":         dashStats.TotalOutputTokens,
@@ -1530,31 +1533,121 @@ func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64) gin
 			"total_tokens":          dashStats.TotalTokens,
 			"cost":                  dashStats.TotalCost,
 			"actual_cost":           dashStats.TotalActualCost,
+		}
+		data["average_duration_ms"] = dashStats.AverageDurationMs
+		data["rpm"] = dashStats.Rpm
+		data["tpm"] = dashStats.Tpm
+	}
+	if stats, err := h.usageService.GetStatsByAPIKey(ctx, apiKeyID, startTime, endTime); err == nil && stats != nil {
+		data["range"] = gin.H{
+			"requests":            stats.TotalRequests,
+			"input_tokens":        stats.TotalInputTokens,
+			"output_tokens":       stats.TotalOutputTokens,
+			"cache_tokens":        stats.TotalCacheTokens,
+			"total_tokens":        stats.TotalTokens,
+			"cost":                stats.TotalCost,
+			"actual_cost":         stats.TotalActualCost,
+			"average_duration_ms": stats.AverageDurationMs,
+		}
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	return data
+}
+
+type publicKeyUsageRecord struct {
+	CreatedAt           time.Time `json:"created_at"`
+	Model               string    `json:"model"`
+	InputTokens         int       `json:"input_tokens"`
+	OutputTokens        int       `json:"output_tokens"`
+	CacheCreationTokens int       `json:"cache_creation_tokens"`
+	CacheReadTokens     int       `json:"cache_read_tokens"`
+	TotalTokens         int       `json:"total_tokens"`
+	ActualCost          float64   `json:"actual_cost"`
+	DurationMs          *int      `json:"duration_ms,omitempty"`
+	RequestType         string    `json:"request_type"`
+}
+
+func publicKeyUsageRecords(logs []service.UsageLog) []publicKeyUsageRecord {
+	records := make([]publicKeyUsageRecord, 0, len(logs))
+	for i := range logs {
+		log := &logs[i]
+		records = append(records, publicKeyUsageRecord{
+			CreatedAt:           log.CreatedAt,
+			Model:               log.Model,
+			InputTokens:         log.InputTokens,
+			OutputTokens:        log.OutputTokens,
+			CacheCreationTokens: log.CacheCreationTokens,
+			CacheReadTokens:     log.CacheReadTokens,
+			TotalTokens:         log.TotalTokens(),
+			ActualCost:          log.ActualCost,
+			DurationMs:          log.DurationMs,
+			RequestType:         log.EffectiveRequestType().String(),
+		})
+	}
+	return records
+}
+
+func (h *GatewayHandler) buildRecentKeyUsage(ctx context.Context, c *gin.Context, apiKeyID int64, startTime, endTime time.Time) gin.H {
+	if h.usageService == nil {
+		return nil
+	}
+	page := positiveIntQuery(c, "records_page", 1, 1_000_000)
+	pageSize := positiveIntQuery(c, "records_page_size", 10, 50)
+	logs, result, err := h.usageService.ListWithFilters(ctx, pagination.PaginationParams{Page: page, PageSize: pageSize}, usagestats.UsageLogFilters{
+		APIKeyID:   apiKeyID,
+		StartTime:  &startTime,
+		EndTime:    &endTime,
+		ExactTotal: true,
+	})
+	if err != nil || result == nil {
+		return nil
+	}
+	return gin.H{
+		"records": publicKeyUsageRecords(logs),
+		"pagination": gin.H{
+			"total":     result.Total,
+			"page":      result.Page,
+			"page_size": result.PageSize,
+			"pages":     result.Pages,
 		},
-		"average_duration_ms": dashStats.AverageDurationMs,
-		"rpm":                 dashStats.Rpm,
-		"tpm":                 dashStats.Tpm,
 	}
 }
 
-// usageQuotaLimited 处理 quota_limited 模式的响应
-func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, usageData gin.H, modelStats any) {
-	resp := gin.H{
-		"mode":    "quota_limited",
-		"isValid": apiKey.Status == service.StatusAPIKeyActive || apiKey.Status == service.StatusAPIKeyQuotaExhausted || apiKey.Status == service.StatusAPIKeyExpired,
-		"status":  usageAPIKeyStatus(apiKey),
-		"unit":    "USD",
+func positiveIntQuery(c *gin.Context, name string, fallback, maximum int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(c.Query(name)))
+	if err != nil || value < 1 {
+		return fallback
 	}
+	if value > maximum {
+		return maximum
+	}
+	return value
+}
+
+// usageQuotaLimited 处理 quota_limited 模式的响应
+func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, usageData gin.H, modelStats any, recentUsage gin.H) {
+	resp := gin.H{
+		"mode":       "quota_limited",
+		"isValid":    apiKey.Status == service.StatusAPIKeyActive || apiKey.Status == service.StatusAPIKeyQuotaExhausted || apiKey.Status == service.StatusAPIKeyExpired,
+		"status":     usageAPIKeyStatus(apiKey),
+		"unit":       "USD",
+		"key_limits": gin.H{"configured": true},
+	}
+	keyLimits := resp["key_limits"].(gin.H)
 
 	// 总额度信息
 	if apiKey.Quota > 0 {
 		remaining := apiKey.GetQuotaRemaining()
-		resp["quota"] = gin.H{
+		quota := gin.H{
 			"limit":     apiKey.Quota,
 			"used":      apiKey.QuotaUsed,
 			"remaining": remaining,
 			"unit":      "USD",
 		}
+		resp["quota"] = quota
+		keyLimits["total"] = quota
 		resp["remaining"] = remaining
 	}
 
@@ -1607,6 +1700,7 @@ func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, 
 			}
 			if len(rateLimits) > 0 {
 				resp["rate_limits"] = rateLimits
+				keyLimits["windows"] = rateLimits
 			}
 		}
 	}
@@ -1631,17 +1725,21 @@ func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, 
 	if modelStats != nil {
 		resp["model_stats"] = modelStats
 	}
+	if recentUsage != nil {
+		resp["recent_usage"] = recentUsage
+	}
 
 	c.JSON(http.StatusOK, resp)
 }
 
 // usageUnrestricted 处理 unrestricted 模式的响应（向后兼容）
-func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, usageData gin.H, modelStats any) {
+func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, usageData gin.H, modelStats any, recentUsage gin.H) {
 	resp := gin.H{
-		"mode":    "unrestricted",
-		"isValid": true,
-		"status":  usageAPIKeyStatus(apiKey),
-		"unit":    "USD",
+		"mode":       "unrestricted",
+		"isValid":    true,
+		"status":     usageAPIKeyStatus(apiKey),
+		"unit":       "USD",
+		"key_limits": gin.H{"configured": false},
 	}
 	if apiKey.ExpiresAt != nil {
 		resp["expires_at"] = apiKey.ExpiresAt
@@ -1657,6 +1755,9 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 	}
 	if modelStats != nil {
 		resp["model_stats"] = modelStats
+	}
+	if recentUsage != nil {
+		resp["recent_usage"] = recentUsage
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -1676,6 +1777,12 @@ func (h *GatewayHandler) attachUsageBillingDetails(
 	if apiKey.Group != nil && apiKey.Group.IsSubscriptionType() {
 		resp["billing_mode"] = "subscription"
 		resp["planName"] = apiKey.Group.Name
+		billing := gin.H{
+			"type":      "subscription",
+			"plan_name": apiKey.Group.Name,
+			"shared":    true,
+		}
+		resp["billing"] = billing
 
 		// /v1/usage skips billing enforcement, but standard mode still loads an
 		// active subscription into context. Missing subscription data is stated
@@ -1683,12 +1790,17 @@ func (h *GatewayHandler) attachUsageBillingDetails(
 		subscription, ok := middleware2.GetSubscriptionFromContext(c)
 		if !ok {
 			resp["subscription_status"] = "not_found"
+			billing["status"] = "not_found"
+			billing["available"] = false
 			return nil
 		}
 
 		details := buildSubscriptionUsageDetails(apiKey.Group, subscription)
 		resp["subscription_status"] = subscription.Status
 		resp["subscription"] = details
+		billing["status"] = subscription.Status
+		billing["available"] = subscription.IsActive()
+		billing["subscription"] = details
 		if keepTopLevelRemainingForBilling {
 			resp["remaining"] = details["remaining"]
 		}
@@ -1710,8 +1822,15 @@ func (h *GatewayHandler) attachUsageBillingDetails(
 		return errors.New("API key user is unavailable")
 	}
 
-	resp["balance"] = latestUser.Balance
+	billing := gin.H{
+		"type":            "wallet",
+		"available":       latestUser.Balance > 0,
+		"balance_visible": keepTopLevelRemainingForBilling,
+	}
+	resp["billing"] = billing
 	if keepTopLevelRemainingForBilling {
+		billing["balance"] = latestUser.Balance
+		resp["balance"] = latestUser.Balance
 		resp["remaining"] = latestUser.Balance
 	}
 	return nil
