@@ -162,6 +162,14 @@ type CarpoolDeviceOverview struct {
 	OverflowItems    []*CarpoolOverflowDeviceInfo `json:"overflow_items"`
 }
 
+// CarpoolDailyRotationResult describes one idempotent daily rotation attempt.
+// Applied is false when the same account/day has already been processed.
+type CarpoolDailyRotationResult struct {
+	Applied       bool
+	RecordedCount int
+	Evicted       *CarpoolDeviceRecord
+}
+
 type SharedBucketState struct {
 	Bucket        int    `json:"bucket"`
 	LastSeenAt    int64  `json:"last_seen_at"`
@@ -220,6 +228,7 @@ type IdentityCache interface {
 	ListCarpoolDevices(ctx context.Context, accountID int64) ([]*CarpoolDeviceRecord, error)
 	ListCarpoolOverflowDevices(ctx context.Context, accountID int64) ([]*CarpoolOverflowRecord, error)
 	DeleteCarpoolDevice(ctx context.Context, accountID int64, deviceKey string) error
+	RotateCarpoolDeviceForDay(ctx context.Context, accountID int64, limit int, day string) (*CarpoolDailyRotationResult, error)
 	EnsureSharedBucketTopology(ctx context.Context, accountID int64, bucketCount int) error
 	GetOrAssignSharedBucket(ctx context.Context, accountID int64, originalDeviceID string, bucketCount, preferredBucket int) (int, error)
 	GetSharedBucketState(ctx context.Context, accountID int64, bucket int) (*SharedBucketState, error)

@@ -48,6 +48,20 @@ Unlimited mode does not add devices to the non-expiring bounded-mode registry.
 Existing recorded and overflow entries are preserved so bounded mode can be
 enabled again without silently discarding operator state.
 
+Setting `claude_oauth_carpool_auto_expand_enabled` to `true` enables daily
+bounded-registry maintenance at 00:00 in the configured server timezone. While
+the configured device limit is below 16, the worker increases it by one per
+calendar day, up to 16. At a configured limit of 16 or more, the worker leaves
+the administrator's limit unchanged and, only when the recorded-device count
+has reached that limit, removes one device with the oldest `last_seen_at`.
+Ties are resolved by `created_at` and then the hashed device key.
+
+The daily operation is idempotent per account and calendar day. A removed
+device has no cooldown or deny-list entry and may immediately register again
+through normal admission if a slot remains free. Administrators may delete
+recorded devices at any time. The switch is ignored in unlimited mode and does
+not automatically increase an administrator-configured limit beyond 16.
+
 ## User-scoped Claude Code device limits
 
 The group fields `claude_device_limit_mode` and `claude_device_base_limit`

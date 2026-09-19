@@ -47,6 +47,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		opsSystemLogSinkSvc,
 		schedulerSnapshotSvc,
 		tokenRefreshSvc,
+		&service.CarpoolMaintenanceService{},
 		accountExpirySvc,
 		subscriptionExpirySvc,
 		nil, // paymentExpirySvc

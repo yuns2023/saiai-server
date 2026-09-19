@@ -1625,6 +1625,23 @@
                       : 'Default 5. The next unseen device is rejected after the limit is reached.' }}
                   </p>
                 </div>
+                <label
+                  v-if="claudeOAuthMode === 'carpool'"
+                  class="col-span-2 flex items-start gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600"
+                >
+                  <input
+                    v-model="claudeOAuthCarpoolAutoExpand"
+                    data-testid="carpool-auto-expand"
+                    type="checkbox"
+                    class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <span>
+                    <span class="block text-sm font-medium text-gray-900 dark:text-white">Daily automatic expansion and rotation</span>
+                    <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                      At 00:00, increase the limit by one up to 16. At limits of 16 or more, remove one least-recently-seen device when full.
+                    </span>
+                  </span>
+                </label>
               </div>
               <p v-else class="text-xs text-gray-500 dark:text-gray-400">
                 Existing bounded-mode records are preserved for use if the limit is enabled again, but unlimited-mode devices are not added to that registry.
@@ -2798,6 +2815,7 @@ const cacheTTLOverrideTarget = ref<string>('5m')
 const claudeOAuthMode = ref<'carpool' | 'shared' | 'pinned' | 'single_device'>('carpool')
 const claudeOAuthCarpoolDeviceLimit = ref<number>(5)
 const claudeOAuthCarpoolUnlimitedDevices = ref(false)
+const claudeOAuthCarpoolAutoExpand = ref(false)
 const claudeOAuthSharedBucketCount = ref<number>(5)
 const claudeOAuthFiveHourRateLimitThresholdPercent = ref<number>(0)
 const claudeOAuthDisableTokenRefresh = ref(true)
@@ -3414,6 +3432,7 @@ const resetForm = () => {
   claudeOAuthMode.value = 'carpool'
   claudeOAuthCarpoolDeviceLimit.value = 5
   claudeOAuthCarpoolUnlimitedDevices.value = false
+  claudeOAuthCarpoolAutoExpand.value = false
   claudeOAuthSharedBucketCount.value = 5
   claudeOAuthFiveHourRateLimitThresholdPercent.value = 0
   claudeOAuthDisableTokenRefresh.value = true
@@ -4083,12 +4102,15 @@ const buildAnthropicOAuthExtra = (baseExtra: Record<string, unknown>) => {
     extra.claude_oauth_5h_rate_limit_threshold_percent = Math.min(100, Math.max(0, claudeOAuthFiveHourRateLimitThresholdPercent.value))
   }
   delete extra.claude_oauth_carpool_unlimited_devices
+  delete extra.claude_oauth_carpool_auto_expand_enabled
   if (claudeOAuthMode.value === 'shared') {
     extra.claude_oauth_shared_bucket_count = Math.min(32, Math.max(1, claudeOAuthSharedBucketCount.value || 5))
   } else if (claudeOAuthMode.value === 'carpool') {
     extra.claude_oauth_carpool_device_limit = Math.min(32, Math.max(1, claudeOAuthCarpoolDeviceLimit.value || 5))
     if (claudeOAuthCarpoolUnlimitedDevices.value) {
       extra.claude_oauth_carpool_unlimited_devices = true
+    } else if (claudeOAuthCarpoolAutoExpand.value) {
+      extra.claude_oauth_carpool_auto_expand_enabled = true
     }
   } else if (claudeOAuthMode.value === 'single_device') {
     extra.claude_oauth_disable_token_refresh = claudeOAuthDisableTokenRefresh.value

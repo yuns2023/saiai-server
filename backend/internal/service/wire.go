@@ -191,6 +191,14 @@ func ProvideIdentityService(cache IdentityCache, cfg *config.Config) *IdentitySe
 	return NewIdentityService(cache, cfg.JWT.Secret)
 }
 
+// ProvideCarpoolMaintenanceService creates and starts the daily carpool
+// expansion/rotation worker.
+func ProvideCarpoolMaintenanceService(accountRepo AccountRepository, cache IdentityCache, cfg *config.Config) *CarpoolMaintenanceService {
+	svc := NewCarpoolMaintenanceService(accountRepo, cache, cfg)
+	svc.Start()
+	return svc
+}
+
 // Retired Antigravity dependencies remain typed for compatibility with
 // constructors used by tests, but the production graph receives nil sentinels
 // and never starts provider workers or clients.
@@ -444,6 +452,7 @@ var ProviderSet = wire.NewSet(
 	NewUsageRecordWorkerPool,
 	ProvideSchedulerSnapshotService,
 	ProvideIdentityService,
+	ProvideCarpoolMaintenanceService,
 	NewCRSSyncService,
 	ProvideTokenRefreshService,
 	ProvideAccountExpiryService,

@@ -6,6 +6,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,4 +44,12 @@ func TestFingerprintKey(t *testing.T) {
 			require.Equal(t, tc.expected, got)
 		})
 	}
+}
+
+func TestCarpoolDeviceRecordOlderUsesStableLRUOrder(t *testing.T) {
+	current := &service.CarpoolDeviceRecord{DeviceKey: "b", CreatedAt: 20, LastSeenAt: 30}
+	require.True(t, carpoolDeviceRecordOlder(&service.CarpoolDeviceRecord{DeviceKey: "z", CreatedAt: 99, LastSeenAt: 29}, current))
+	require.True(t, carpoolDeviceRecordOlder(&service.CarpoolDeviceRecord{DeviceKey: "z", CreatedAt: 19, LastSeenAt: 30}, current))
+	require.True(t, carpoolDeviceRecordOlder(&service.CarpoolDeviceRecord{DeviceKey: "a", CreatedAt: 20, LastSeenAt: 30}, current))
+	require.False(t, carpoolDeviceRecordOlder(&service.CarpoolDeviceRecord{DeviceKey: "c", CreatedAt: 20, LastSeenAt: 30}, current))
 }

@@ -20,6 +20,7 @@ type identityCacheStub struct {
 	slotFingerprints    map[string]*Fingerprint
 	carpoolDevices      map[string]*CarpoolDeviceRecord
 	carpoolOverflow     map[string]*CarpoolOverflowRecord
+	carpoolMaintenance  map[int64]string
 	sharedBucketStates  map[string]*SharedBucketState
 	sharedBucketBinds   map[string]int
 	sharedBucketCount   map[int64]int
@@ -187,6 +188,44 @@ func (s *identityCacheStub) DeleteCarpoolDevice(_ context.Context, accountID int
 		delete(s.carpoolOverflow, fmt.Sprintf("%d:%s", accountID, strings.TrimSpace(deviceKey)))
 	}
 	return nil
+}
+func (s *identityCacheStub) RotateCarpoolDeviceForDay(_ context.Context, accountID int64, limit int, day string) (*CarpoolDailyRotationResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.carpoolMaintenance == nil {
+		s.carpoolMaintenance = map[int64]string{}
+	}
+	if s.carpoolMaintenance[accountID] == day {
+		return &CarpoolDailyRotationResult{}, nil
+	}
+	s.carpoolMaintenance[accountID] = day
+
+	prefix := fmt.Sprintf("%d:", accountID)
+	var oldestKey string
+	var oldest *CarpoolDeviceRecord
+	recordedCount := 0
+	for key, record := range s.carpoolDevices {
+		if record == nil || !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		recordedCount++
+		if oldest == nil || record.LastSeenAt < oldest.LastSeenAt ||
+			(record.LastSeenAt == oldest.LastSeenAt && (record.CreatedAt < oldest.CreatedAt ||
+				(record.CreatedAt == oldest.CreatedAt && record.DeviceKey < oldest.DeviceKey))) {
+			copyRecord := *record
+			oldest = &copyRecord
+			oldestKey = key
+		}
+	}
+	result := &CarpoolDailyRotationResult{Applied: true, RecordedCount: recordedCount}
+	if recordedCount >= limit && oldest != nil {
+		delete(s.carpoolDevices, oldestKey)
+		if s.carpoolOverflow != nil {
+			delete(s.carpoolOverflow, oldestKey)
+		}
+		result.Evicted = oldest
+	}
+	return result, nil
 }
 func (s *identityCacheStub) EnsureSharedBucketTopology(_ context.Context, accountID int64, bucketCount int) error {
 	s.mu.Lock()

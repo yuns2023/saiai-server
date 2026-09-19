@@ -26,6 +26,7 @@ const (
 	slotMaskedSessionPrefix    = "masked_session_slot_v2:"
 	carpoolRecordedPrefix      = "claude_carpool_recorded_v1:"
 	carpoolOverflowPrefix      = "claude_carpool_overflow_v1:"
+	carpoolMaintenancePrefix   = "claude_carpool_maintenance_v1:"
 	sharedBucketMetaPrefix     = "shared_bucket_meta_v1:"
 	sharedBucketBindingPref    = "shared_bucket_binding_v1:"
 	sharedBucketConfigPref     = "shared_bucket_config_v1:"
@@ -82,6 +83,10 @@ func carpoolRecordedKey(accountID int64) string {
 
 func carpoolOverflowKey(accountID int64) string {
 	return fmt.Sprintf("%s%d", carpoolOverflowPrefix, accountID)
+}
+
+func carpoolMaintenanceKey(accountID int64) string {
+	return fmt.Sprintf("%s%d", carpoolMaintenancePrefix, accountID)
 }
 
 func carpoolDeviceField(originalDeviceID string) string {
@@ -373,6 +378,91 @@ func (c *identityCache) DeleteCarpoolDevice(ctx context.Context, accountID int64
 	pipe.HDel(ctx, carpoolOverflowKey(accountID), field)
 	_, err := pipe.Exec(ctx)
 	return err
+}
+
+func (c *identityCache) RotateCarpoolDeviceForDay(ctx context.Context, accountID int64, limit int, day string) (*service.CarpoolDailyRotationResult, error) {
+	trimmedDay := strings.TrimSpace(day)
+	if accountID <= 0 || limit <= 0 || trimmedDay == "" {
+		return &service.CarpoolDailyRotationResult{}, nil
+	}
+
+	recordedKey := carpoolRecordedKey(accountID)
+	overflowKey := carpoolOverflowKey(accountID)
+	maintenanceKey := carpoolMaintenanceKey(accountID)
+
+	for attempt := 0; attempt < carpoolDeviceWriteMaxRetries; attempt++ {
+		var out *service.CarpoolDailyRotationResult
+		err := c.rdb.Watch(ctx, func(tx *redis.Tx) error {
+			lastDay, err := tx.Get(ctx, maintenanceKey).Result()
+			if err != nil && err != redis.Nil {
+				return err
+			}
+			if err == nil && lastDay == trimmedDay {
+				out = &service.CarpoolDailyRotationResult{}
+				return nil
+			}
+
+			values, err := tx.HGetAll(ctx, recordedKey).Result()
+			if err != nil {
+				return err
+			}
+			result := &service.CarpoolDailyRotationResult{
+				Applied:       true,
+				RecordedCount: len(values),
+			}
+
+			var oldest *service.CarpoolDeviceRecord
+			oldestField := ""
+			if len(values) >= limit {
+				for field, raw := range values {
+					var record service.CarpoolDeviceRecord
+					if err := json.Unmarshal([]byte(raw), &record); err != nil {
+						return err
+					}
+					if oldest == nil || carpoolDeviceRecordOlder(&record, oldest) {
+						copyRecord := record
+						oldest = &copyRecord
+						oldestField = field
+					}
+				}
+			}
+
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				if oldestField != "" {
+					pipe.HDel(ctx, recordedKey, oldestField)
+					pipe.HDel(ctx, overflowKey, oldestField)
+				}
+				pipe.Set(ctx, maintenanceKey, trimmedDay, 0)
+				return nil
+			})
+			if err == nil {
+				result.Evicted = oldest
+				out = result
+			}
+			return err
+		}, recordedKey, overflowKey, maintenanceKey)
+		if err == nil {
+			if out == nil {
+				out = &service.CarpoolDailyRotationResult{}
+			}
+			return out, nil
+		}
+		if errors.Is(err, redis.TxFailedErr) {
+			continue
+		}
+		return nil, err
+	}
+	return nil, redis.TxFailedErr
+}
+
+func carpoolDeviceRecordOlder(candidate, current *service.CarpoolDeviceRecord) bool {
+	if candidate.LastSeenAt != current.LastSeenAt {
+		return candidate.LastSeenAt < current.LastSeenAt
+	}
+	if candidate.CreatedAt != current.CreatedAt {
+		return candidate.CreatedAt < current.CreatedAt
+	}
+	return candidate.DeviceKey < current.DeviceKey
 }
 
 func (c *identityCache) EnsureSharedBucketTopology(ctx context.Context, accountID int64, bucketCount int) error {

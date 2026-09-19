@@ -68,6 +68,7 @@ func provideCleanup(
 	opsSystemLogSink *service.OpsSystemLogSink,
 	schedulerSnapshot *service.SchedulerSnapshotService,
 	tokenRefresh *service.TokenRefreshService,
+	carpoolMaintenance *service.CarpoolMaintenanceService,
 	accountExpiry *service.AccountExpiryService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	paymentExpiry *service.PaymentExpiryService,
@@ -152,6 +153,12 @@ func provideCleanup(
 			}},
 			{"TokenRefreshService", func() error {
 				tokenRefresh.Stop()
+				return nil
+			}},
+			{"CarpoolMaintenanceService", func() error {
+				if carpoolMaintenance != nil {
+					carpoolMaintenance.Stop()
+				}
 				return nil
 			}},
 			{"AccountExpiryService", func() error {

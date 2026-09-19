@@ -194,6 +194,7 @@ describe('EditAccountModal', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="claude-oauth-current-limit"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="carpool-auto-expand"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="carpool-unlimited-summary"]').exists()).toBe(true)
 
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
@@ -204,6 +205,54 @@ describe('EditAccountModal', () => {
       claude_oauth_mode: 'carpool',
       claude_oauth_carpool_device_limit: 5,
       claude_oauth_carpool_unlimited_devices: true
+    })
+  })
+
+  it('persists daily carpool automatic expansion and rotation', async () => {
+    const account = {
+      ...buildAccount(),
+      type: 'oauth',
+      credentials: { access_token: 'test-token' },
+      extra: {
+        claude_oauth_mode: 'carpool',
+        claude_oauth_carpool_device_limit: 20,
+        claude_oauth_carpool_auto_expand_enabled: false
+      },
+      claude_oauth_mode: 'carpool',
+      claude_oauth_carpool_device_limit: 20,
+      claude_oauth_carpool_unlimited_devices: false,
+      claude_oauth_carpool_auto_expand_enabled: false
+    } as any
+
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    listClaudeCarpoolDevicesMock.mockReset()
+    updateAccountMock.mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    listClaudeCarpoolDevicesMock.mockResolvedValue({
+      unlimited_devices: false,
+      recorded_limit: 20,
+      recorded_count: 20,
+      overflow_count: 0,
+      recorded_items: [],
+      overflow_items: []
+    })
+
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    const autoExpandToggle = wrapper.get('[data-testid="carpool-auto-expand"]')
+    expect((autoExpandToggle.element as HTMLInputElement).checked).toBe(false)
+    await autoExpandToggle.setValue(true)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      claude_oauth_mode: 'carpool',
+      claude_oauth_carpool_device_limit: 20,
+      claude_oauth_carpool_auto_expand_enabled: true
     })
   })
 

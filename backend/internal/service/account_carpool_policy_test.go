@@ -69,3 +69,28 @@ func TestAccountIsClaudeOAuthCarpoolUnlimitedDevices(t *testing.T) {
 		})
 	}
 }
+
+func TestAccountIsClaudeOAuthCarpoolAutoExpandEnabled(t *testing.T) {
+	account := &Account{
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"claude_oauth_mode":                        ClaudeOAuthModeCarpool,
+			"claude_oauth_carpool_auto_expand_enabled": true,
+		},
+	}
+	if !account.IsClaudeOAuthCarpoolAutoExpandEnabled() {
+		t.Fatal("expected bounded carpool account to enable automatic expansion")
+	}
+
+	account.Extra["claude_oauth_carpool_unlimited_devices"] = true
+	if account.IsClaudeOAuthCarpoolAutoExpandEnabled() {
+		t.Fatal("unlimited carpool account must not run bounded maintenance")
+	}
+
+	delete(account.Extra, "claude_oauth_carpool_unlimited_devices")
+	account.Extra["claude_oauth_mode"] = ClaudeOAuthModeShared
+	if account.IsClaudeOAuthCarpoolAutoExpandEnabled() {
+		t.Fatal("automatic expansion must be ignored outside carpool mode")
+	}
+}

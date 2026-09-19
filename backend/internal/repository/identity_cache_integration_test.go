@@ -173,6 +173,108 @@ func (s *IdentityCacheSuite) TestGetOrCreateCarpoolDevice_OverflowIsCapped() {
 	}
 }
 
+func (s *IdentityCacheSuite) TestRotateCarpoolDeviceForDay_EvictsLRUOnceAndAllowsRejoin() {
+	const accountID int64 = 431
+
+	_, err := s.cache.GetOrCreateCarpoolDevice(s.ctx, accountID, "old-device", service.ClientHints{}, 3, 100)
+	require.NoError(s.T(), err)
+	_, err = s.cache.GetOrCreateCarpoolDevice(s.ctx, accountID, "newer-device-a", service.ClientHints{}, 3, 200)
+	require.NoError(s.T(), err)
+	_, err = s.cache.GetOrCreateCarpoolDevice(s.ctx, accountID, "newer-device-b", service.ClientHints{}, 3, 300)
+	require.NoError(s.T(), err)
+
+	rotation, err := s.cache.RotateCarpoolDeviceForDay(s.ctx, accountID, 3, "2026-09-19")
+	require.NoError(s.T(), err)
+	require.True(s.T(), rotation.Applied)
+	require.NotNil(s.T(), rotation.Evicted)
+	require.Equal(s.T(), "old-device", rotation.Evicted.OriginalDeviceID)
+
+	repeated, err := s.cache.RotateCarpoolDeviceForDay(s.ctx, accountID, 3, "2026-09-19")
+	require.NoError(s.T(), err)
+	require.False(s.T(), repeated.Applied)
+	require.Nil(s.T(), repeated.Evicted)
+
+	// The evicted device has no cooldown and can claim the newly freed slot
+	// through the normal admission path.
+	rejoined, err := s.cache.GetOrCreateCarpoolDevice(s.ctx, accountID, "old-device", service.ClientHints{}, 3, 400)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "old-device", rejoined.OriginalDeviceID)
+	recorded, err := s.cache.ListCarpoolDevices(s.ctx, accountID)
+	require.NoError(s.T(), err)
+	require.Len(s.T(), recorded, 3)
+
+	nextDay, err := s.cache.RotateCarpoolDeviceForDay(s.ctx, accountID, 3, "2026-09-20")
+	require.NoError(s.T(), err)
+	require.True(s.T(), nextDay.Applied)
+	require.NotNil(s.T(), nextDay.Evicted)
+	require.Equal(s.T(), "newer-device-a", nextDay.Evicted.OriginalDeviceID)
+}
+
+func (s *IdentityCacheSuite) TestRotateCarpoolDeviceForDay_DoesNotEvictBelowLimit() {
+	const accountID int64 = 432
+
+	_, err := s.cache.GetOrCreateCarpoolDevice(s.ctx, accountID, "device-a", service.ClientHints{}, 4, 100)
+	require.NoError(s.T(), err)
+	_, err = s.cache.GetOrCreateCarpoolDevice(s.ctx, accountID, "device-b", service.ClientHints{}, 4, 200)
+	require.NoError(s.T(), err)
+
+	rotation, err := s.cache.RotateCarpoolDeviceForDay(s.ctx, accountID, 4, "2026-09-19")
+	require.NoError(s.T(), err)
+	require.True(s.T(), rotation.Applied)
+	require.Equal(s.T(), 2, rotation.RecordedCount)
+	require.Nil(s.T(), rotation.Evicted)
+
+	recorded, err := s.cache.ListCarpoolDevices(s.ctx, accountID)
+	require.NoError(s.T(), err)
+	require.Len(s.T(), recorded, 2)
+}
+
+func (s *IdentityCacheSuite) TestRotateCarpoolDeviceForDay_ConcurrentRunsEvictOnlyOnce() {
+	const accountID int64 = 433
+	for i, deviceID := range []string{"device-a", "device-b", "device-c"} {
+		_, err := s.cache.GetOrCreateCarpoolDevice(s.ctx, accountID, deviceID, service.ClientHints{}, 3, int64(100+i))
+		require.NoError(s.T(), err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan *service.CarpoolDailyRotationResult, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			result, err := s.cache.RotateCarpoolDeviceForDay(s.ctx, accountID, 3, "2026-09-19")
+			results <- result
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for err := range errs {
+		require.NoError(s.T(), err)
+	}
+	applied := 0
+	evicted := 0
+	for result := range results {
+		if result.Applied {
+			applied++
+		}
+		if result.Evicted != nil {
+			evicted++
+		}
+	}
+	require.Equal(s.T(), 1, applied)
+	require.Equal(s.T(), 1, evicted)
+	recorded, err := s.cache.ListCarpoolDevices(s.ctx, accountID)
+	require.NoError(s.T(), err)
+	require.Len(s.T(), recorded, 2)
+}
+
 func (s *IdentityCacheSuite) TestSharedBucketState_CRUD() {
 	const accountID int64 = 44
 	state := &service.SharedBucketState{
