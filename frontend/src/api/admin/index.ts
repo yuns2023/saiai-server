@@ -22,6 +22,7 @@ import dataManagementAPI from './dataManagement'
 import apiKeysAPI from './apiKeys'
 import backupAPI from './backup'
 import paymentAPI from './payment'
+import accessLevelsAPI from './accessLevels'
 
 /**
  * Unified admin API object for convenient access
@@ -45,7 +46,8 @@ export const adminAPI = {
   dataManagement: dataManagementAPI,
   apiKeys: apiKeysAPI,
   backup: backupAPI,
-  payment: paymentAPI
+  payment: paymentAPI,
+  accessLevels: accessLevelsAPI
 }
 
 export {
@@ -67,7 +69,8 @@ export {
   dataManagementAPI,
   apiKeysAPI,
   backupAPI,
-  paymentAPI
+  paymentAPI,
+  accessLevelsAPI
 }
 
 export type { PaymentProvider, PaymentProviderInput, PaymentConfigUpdate, AdminPaymentOrder } from './payment'

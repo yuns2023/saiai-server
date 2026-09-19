@@ -372,6 +372,7 @@ export default {
     profile: 'Profile',
     users: 'Users',
     groups: 'Groups',
+    accessLevels: 'Access Levels',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
     proxies: 'Proxies',
@@ -1339,6 +1340,18 @@ export default {
     },
 
     // Users
+    accessLevels: {
+      title: 'Access Levels', description: 'Control group access and default PAYG discounts by balance tier',
+      create: 'Create level', edit: 'Edit level', empty: 'No access levels configured',
+      name: 'Display name', rank: 'Rank', threshold: 'Balance threshold', discount: 'PAYG discount multiplier',
+      discountHint: '1 is full price; 0.8 means 20% off. User-specific overrides take precedence and are not stacked.',
+      maintenanceMode: 'Require balance to maintain level', maintenanceOnHint: 'Enabled: levels automatically rise and fall with current balance.',
+      maintenanceOffHint: 'Disabled: balance increases can promote users, but spending does not automatically demote them.',
+      loadFailed: 'Failed to load access levels', saveFailed: 'Failed to save access level', saved: 'Access level saved',
+      deleted: 'Access level deleted', deleteFailed: 'Failed to delete access level', deleteConfirm: 'Delete access level “{name}”?', modeSaved: 'Level mode updated'
+    },
+
+    // Users
     users: {
       title: 'User Management',
       description: 'Manage users and their permissions',
@@ -1363,6 +1376,13 @@ export default {
       enterUsername: 'Enter username (optional)',
       enterNotes: 'Enter notes (admin only)',
       notesHint: 'This note is only visible to administrators',
+      accessLevel: 'Access level',
+      accessLevelAutomatic: 'Automatic (based on balance)',
+      accessLevelHint: 'Current effective level: {level}. A manual selection overrides automatic changes.',
+      customPaygDiscount: 'Use a user-specific PAYG discount override',
+      discountOverride: 'user override',
+      discountFromLevel: 'from level',
+      manualLevel: 'manual',
       enterNewPassword: 'Enter new password (optional)',
       leaveEmptyToKeep: 'Leave empty to keep current password',
       generatePassword: 'Generate random password',
@@ -1373,6 +1393,7 @@ export default {
       paygDiscountMultiplierHint: '0 to 1 with at most four decimals; 1 is full price, 0.8 is 20% off, and 0 is free. Applies to all of this user\'s keys, groups, and upstream accounts, for balance billing only.',
       paygDiscountMultiplierInvalid: 'Pay-as-you-go discount must be between 0 and 1',
       columns: {
+        accessLevel: 'Access Level',
         user: 'User',
         email: 'Email',
         username: 'Username',
@@ -1593,6 +1614,9 @@ export default {
     groups: {
       title: 'Group Management',
       description: 'Manage API key groups and rate multipliers',
+      requiredLevel: 'Minimum access level',
+      noRequiredLevel: 'No level requirement (legacy access rules only)',
+      requiredLevelHint: 'Users must meet this level in addition to exclusive-group or subscription requirements.',
       searchGroups: 'Search groups...',
       createGroup: 'Create Group',
       editGroup: 'Edit Group',

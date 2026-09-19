@@ -73,6 +73,14 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 		})
 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
 		setGroupContext(c, apiKey.Group)
+		if apiKey.GroupID != nil && (apiKey.Group == nil || !apiKey.Group.IsActive()) {
+			abortWithGoogleError(c, 403, "API key group is not active")
+			return
+		}
+		if apiKey.Group != nil && !apiKey.User.MeetsRequiredLevel(apiKey.Group.RequiredLevel) {
+			abortWithGoogleError(c, 403, "Your current access level does not permit this group")
+			return
+		}
 
 		// 简易模式：跳过余额和订阅检查
 		if cfg.RunMode == config.RunModeSimple {

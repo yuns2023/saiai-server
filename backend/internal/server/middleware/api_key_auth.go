@@ -142,6 +142,10 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			AbortWithError(c, 403, "GROUP_INACTIVE", "API key group is not active")
 			return
 		}
+		if apiKey.Group != nil && !apiKey.User.MeetsRequiredLevel(apiKey.Group.RequiredLevel) {
+			AbortWithError(c, 403, "USER_LEVEL_REQUIRED", "Your current access level does not permit this group")
+			return
+		}
 
 		if inputModeration != nil && !apiKey.User.IsAdmin() {
 			blockedUntil, riskErr := inputModeration.GetActiveCooldown(c.Request.Context(), apiKey.User.ID)

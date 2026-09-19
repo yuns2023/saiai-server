@@ -76,6 +76,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetPlatform(groupIn.Platform).
 		SetRateMultiplier(groupIn.RateMultiplier).
 		SetIsExclusive(groupIn.IsExclusive).
+		SetNillableRequiredLevelID(groupIn.RequiredLevelID).
 		SetStatus(groupIn.Status).
 		SetSubscriptionType(groupIn.SubscriptionType).
 		SetNillableFiveHourLimitUsd(groupIn.FiveHourLimitUSD).
@@ -147,6 +148,7 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 	// AccountCount is intentionally not loaded here; use GetByID when needed.
 	m, err := r.client.Group.Query().
 		Where(group.IDEQ(id)).
+		WithRequiredLevel().
 		Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrGroupNotFound, nil)
@@ -199,6 +201,11 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetCodexClientPolicy(groupIn.CodexClientPolicy).
 		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
 		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)
+	if groupIn.RequiredLevelID != nil {
+		builder = builder.SetRequiredLevelID(*groupIn.RequiredLevelID)
+	} else {
+		builder = builder.ClearRequiredLevelID()
+	}
 
 	// 显式处理可空字段：nil 需要 clear，非 nil 需要 set。
 	if groupIn.FiveHourLimitUSD != nil {
@@ -314,6 +321,7 @@ func (r *groupRepository) ListWithFilters(ctx context.Context, params pagination
 	}
 
 	groups, err := q.
+		WithRequiredLevel().
 		Offset(params.Offset()).
 		Limit(params.Limit()).
 		Order(dbent.Asc(group.FieldSortOrder), dbent.Asc(group.FieldID)).
@@ -346,6 +354,7 @@ func (r *groupRepository) ListWithFilters(ctx context.Context, params pagination
 func (r *groupRepository) ListActive(ctx context.Context) ([]service.Group, error) {
 	groups, err := r.client.Group.Query().
 		Where(group.StatusEQ(service.StatusActive)).
+		WithRequiredLevel().
 		Order(dbent.Asc(group.FieldSortOrder), dbent.Asc(group.FieldID)).
 		All(ctx)
 	if err != nil {
@@ -376,6 +385,7 @@ func (r *groupRepository) ListActive(ctx context.Context) ([]service.Group, erro
 func (r *groupRepository) ListActiveByPlatform(ctx context.Context, platform string) ([]service.Group, error) {
 	groups, err := r.client.Group.Query().
 		Where(group.StatusEQ(service.StatusActive), group.PlatformEQ(platform)).
+		WithRequiredLevel().
 		Order(dbent.Asc(group.FieldSortOrder), dbent.Asc(group.FieldID)).
 		All(ctx)
 	if err != nil {

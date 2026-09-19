@@ -61,6 +61,9 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 		SetRole(userIn.Role).
 		SetBalance(userIn.Balance).
 		SetNillablePaygDiscountMultiplier(userIn.PaygDiscountMultiplier).
+		SetPaygDiscountOverrideEnabled(userIn.PaygDiscountOverrideEnabled).
+		SetNillableAutoLevelID(userIn.AutoLevelID).
+		SetNillableManualLevelID(userIn.ManualLevelID).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
 		SetSoraStorageQuotaBytes(userIn.SoraStorageQuotaBytes).
@@ -84,7 +87,7 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 }
 
 func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, error) {
-	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
+	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).WithAutoLevel().WithManualLevel().Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
@@ -101,7 +104,7 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 }
 
 func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service.User, error) {
-	m, err := r.client.User.Query().Where(dbuser.EmailEQ(email)).Only(ctx)
+	m, err := r.client.User.Query().Where(dbuser.EmailEQ(email)).WithAutoLevel().WithManualLevel().Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
@@ -145,6 +148,7 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		SetRole(userIn.Role).
 		SetBalance(userIn.Balance).
 		SetNillablePaygDiscountMultiplier(userIn.PaygDiscountMultiplier).
+		SetPaygDiscountOverrideEnabled(userIn.PaygDiscountOverrideEnabled).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
 		SetSoraStorageQuotaBytes(userIn.SoraStorageQuotaBytes).
@@ -230,6 +234,8 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	}
 
 	users, err := q.
+		WithAutoLevel().
+		WithManualLevel().
 		Offset(params.Offset()).
 		Limit(params.Limit()).
 		Order(dbent.Desc(dbuser.FieldID)).
@@ -477,6 +483,8 @@ func (r *userRepository) GetFirstAdmin(ctx context.Context) (*service.User, erro
 			dbuser.RoleEQ(service.RoleAdmin),
 			dbuser.StatusEQ(service.StatusActive),
 		).
+		WithAutoLevel().
+		WithManualLevel().
 		Order(dbent.Asc(dbuser.FieldID)).
 		First(ctx)
 	if err != nil {
@@ -560,6 +568,9 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 		return
 	}
 	dst.ID = src.ID
+	dst.AutoLevelID = src.AutoLevelID
+	dst.ManualLevelID = src.ManualLevelID
+	dst.PaygDiscountOverrideEnabled = src.PaygDiscountOverrideEnabled
 	dst.CreatedAt = src.CreatedAt
 	dst.UpdatedAt = src.UpdatedAt
 }

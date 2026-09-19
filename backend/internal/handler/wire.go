@@ -12,6 +12,7 @@ func ProvideAdminHandlers(
 	dashboardHandler *admin.DashboardHandler,
 	userHandler *admin.UserHandler,
 	groupHandler *admin.GroupHandler,
+	accessLevelHandler *admin.AccessLevelHandler,
 	accountHandler *admin.AccountHandler,
 	announcementHandler *admin.AnnouncementHandler,
 	dataManagementHandler *admin.DataManagementHandler,
@@ -35,6 +36,7 @@ func ProvideAdminHandlers(
 		Dashboard:        dashboardHandler,
 		User:             userHandler,
 		Group:            groupHandler,
+		AccessLevel:      accessLevelHandler,
 		Account:          accountHandler,
 		Announcement:     announcementHandler,
 		DataManagement:   dataManagementHandler,
@@ -59,6 +61,20 @@ func ProvideAdminHandlers(
 // ProvideSettingHandler creates SettingHandler with version from BuildInfo
 func ProvideSettingHandler(settingService *service.SettingService, buildInfo BuildInfo) *SettingHandler {
 	return NewSettingHandler(settingService, buildInfo.Version)
+}
+
+// ProvideAdminSettingHandler creates the admin settings handler and keeps the
+// runtime pricing alias cache connected when settings change.
+func ProvideAdminSettingHandler(
+	settingService *service.SettingService,
+	emailService *service.EmailService,
+	turnstileService *service.TurnstileService,
+	opsService *service.OpsService,
+	pricingService *service.PricingService,
+) *admin.SettingHandler {
+	handler := admin.NewSettingHandler(settingService, emailService, turnstileService, opsService)
+	handler.SetPricingService(pricingService)
+	return handler
 }
 
 // ProvideHandlers creates the Handlers struct
@@ -122,6 +138,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewDashboardHandler,
 	admin.NewUserHandler,
 	admin.NewGroupHandler,
+	admin.NewAccessLevelHandler,
 	admin.NewAccountHandler,
 	admin.NewAnnouncementHandler,
 	admin.NewDataManagementHandler,
@@ -132,7 +149,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewProxyHandler,
 	admin.NewRedeemHandler,
 	admin.NewPromoHandler,
-	admin.NewSettingHandler,
+	ProvideAdminSettingHandler,
 	admin.NewOpsHandler,
 	admin.NewSubscriptionHandler,
 	admin.NewUsageHandler,

@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/dialect/sql/sqljson"
 	"entgo.io/ent/schema/field"
+	"github.com/Wei-Shaw/sub2api/ent/accesslevel"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
@@ -127,6 +128,26 @@ func (_u *GroupUpdate) SetNillableIsExclusive(v *bool) *GroupUpdate {
 	if v != nil {
 		_u.SetIsExclusive(*v)
 	}
+	return _u
+}
+
+// SetRequiredLevelID sets the "required_level_id" field.
+func (_u *GroupUpdate) SetRequiredLevelID(v int64) *GroupUpdate {
+	_u.mutation.SetRequiredLevelID(v)
+	return _u
+}
+
+// SetNillableRequiredLevelID sets the "required_level_id" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableRequiredLevelID(v *int64) *GroupUpdate {
+	if v != nil {
+		_u.SetRequiredLevelID(*v)
+	}
+	return _u
+}
+
+// ClearRequiredLevelID clears the value of the "required_level_id" field.
+func (_u *GroupUpdate) ClearRequiredLevelID() *GroupUpdate {
+	_u.mutation.ClearRequiredLevelID()
 	return _u
 }
 
@@ -975,6 +996,11 @@ func (_u *GroupUpdate) AddAllowedUsers(v ...*User) *GroupUpdate {
 	return _u.AddAllowedUserIDs(ids...)
 }
 
+// SetRequiredLevel sets the "required_level" edge to the AccessLevel entity.
+func (_u *GroupUpdate) SetRequiredLevel(v *AccessLevel) *GroupUpdate {
+	return _u.SetRequiredLevelID(v.ID)
+}
+
 // Mutation returns the GroupMutation object of the builder.
 func (_u *GroupUpdate) Mutation() *GroupMutation {
 	return _u.mutation
@@ -1104,6 +1130,12 @@ func (_u *GroupUpdate) RemoveAllowedUsers(v ...*User) *GroupUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAllowedUserIDs(ids...)
+}
+
+// ClearRequiredLevel clears the "required_level" edge to the AccessLevel entity.
+func (_u *GroupUpdate) ClearRequiredLevel() *GroupUpdate {
+	_u.mutation.ClearRequiredLevel()
+	return _u
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -1758,6 +1790,35 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		edge.Target.Fields = specE.Fields
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.RequiredLevelCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   group.RequiredLevelTable,
+			Columns: []string{group.RequiredLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RequiredLevelIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   group.RequiredLevelTable,
+			Columns: []string{group.RequiredLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{group.Label}
@@ -1870,6 +1931,26 @@ func (_u *GroupUpdateOne) SetNillableIsExclusive(v *bool) *GroupUpdateOne {
 	if v != nil {
 		_u.SetIsExclusive(*v)
 	}
+	return _u
+}
+
+// SetRequiredLevelID sets the "required_level_id" field.
+func (_u *GroupUpdateOne) SetRequiredLevelID(v int64) *GroupUpdateOne {
+	_u.mutation.SetRequiredLevelID(v)
+	return _u
+}
+
+// SetNillableRequiredLevelID sets the "required_level_id" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableRequiredLevelID(v *int64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetRequiredLevelID(*v)
+	}
+	return _u
+}
+
+// ClearRequiredLevelID clears the value of the "required_level_id" field.
+func (_u *GroupUpdateOne) ClearRequiredLevelID() *GroupUpdateOne {
+	_u.mutation.ClearRequiredLevelID()
 	return _u
 }
 
@@ -2718,6 +2799,11 @@ func (_u *GroupUpdateOne) AddAllowedUsers(v ...*User) *GroupUpdateOne {
 	return _u.AddAllowedUserIDs(ids...)
 }
 
+// SetRequiredLevel sets the "required_level" edge to the AccessLevel entity.
+func (_u *GroupUpdateOne) SetRequiredLevel(v *AccessLevel) *GroupUpdateOne {
+	return _u.SetRequiredLevelID(v.ID)
+}
+
 // Mutation returns the GroupMutation object of the builder.
 func (_u *GroupUpdateOne) Mutation() *GroupMutation {
 	return _u.mutation
@@ -2847,6 +2933,12 @@ func (_u *GroupUpdateOne) RemoveAllowedUsers(v ...*User) *GroupUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAllowedUserIDs(ids...)
+}
+
+// ClearRequiredLevel clears the "required_level" edge to the AccessLevel entity.
+func (_u *GroupUpdateOne) ClearRequiredLevel() *GroupUpdateOne {
+	_u.mutation.ClearRequiredLevel()
+	return _u
 }
 
 // Where appends a list predicates to the GroupUpdate builder.
@@ -3529,6 +3621,35 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 		createE.defaults()
 		_, specE := createE.createSpec()
 		edge.Target.Fields = specE.Fields
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.RequiredLevelCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   group.RequiredLevelTable,
+			Columns: []string{group.RequiredLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RequiredLevelIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   group.RequiredLevelTable,
+			Columns: []string{group.RequiredLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	_node = &Group{config: _u.config}

@@ -372,6 +372,7 @@ export default {
     profile: '个人资料',
     users: '用户管理',
     groups: '分组管理',
+    accessLevels: '用户等级',
     subscriptions: '订阅管理',
     accounts: '账号管理',
     proxies: 'IP管理',
@@ -1359,6 +1360,18 @@ export default {
     },
 
     // Users Management
+    accessLevels: {
+      title: '用户等级', description: '按余额等级控制分组访问，并设置按量计费默认折扣',
+      create: '新建等级', edit: '编辑等级', empty: '尚未配置用户等级',
+      name: '等级名称', rank: '等级顺序', threshold: '余额门槛', discount: '按量折扣倍率',
+      discountHint: '1 为原价，0.8 为八折。用户专属折扣优先，且不会与等级折扣叠加。',
+      maintenanceMode: '余额不足时自动降级', maintenanceOnHint: '已开启：等级会随当前余额自动升降。',
+      maintenanceOffHint: '已关闭：余额增加可升级，后续消费不会自动降级。',
+      loadFailed: '加载用户等级失败', saveFailed: '保存用户等级失败', saved: '用户等级已保存',
+      deleted: '用户等级已删除', deleteFailed: '删除用户等级失败', deleteConfirm: '确定删除等级“{name}”吗？', modeSaved: '等级模式已更新'
+    },
+
+    // Users Management
     users: {
       title: '用户管理',
       description: '管理用户账户和权限',
@@ -1388,6 +1401,13 @@ export default {
       enterUsername: '请输入用户名（选填）',
       enterNotes: '请输入备注（仅管理员可见）',
       notesHint: '此备注仅对管理员可见',
+      accessLevel: '用户等级',
+      accessLevelAutomatic: '自动（按余额计算）',
+      accessLevelHint: '当前生效等级：{level}。手工指定后将优先于自动等级。',
+      customPaygDiscount: '为该用户使用专属按量折扣',
+      discountOverride: '用户专属',
+      discountFromLevel: '等级默认',
+      manualLevel: '手工',
       enterNewPassword: '请输入新密码（选填）',
       leaveEmptyToKeep: '留空则保持原密码不变',
       generatePassword: '生成随机密码',
@@ -1398,6 +1418,7 @@ export default {
       paygDiscountMultiplierHint: '0 到 1，最多四位小数；1 为不打折，0.8 为八折，0 为免费。适用于该用户的所有 Key、分组和上游账号，仅影响余额扣费。',
       paygDiscountMultiplierInvalid: '按量折扣倍率必须在 0 到 1 之间',
       columns: {
+        accessLevel: '用户等级',
         user: '用户',
         email: '邮箱',
         username: '用户名',
@@ -1647,6 +1668,9 @@ export default {
     groups: {
       title: '分组管理',
       description: '管理 API 密钥分组和费率配置',
+      requiredLevel: '最低用户等级',
+      noRequiredLevel: '不限制等级（仅沿用原分组权限）',
+      requiredLevelHint: '用户满足该等级后，仍需同时满足专属分组授权或订阅要求。',
       searchGroups: '搜索分组...',
       createGroup: '创建分组',
       editGroup: '编辑分组',

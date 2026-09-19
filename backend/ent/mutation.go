@@ -12,6 +12,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
+	"github.com/Wei-Shaw/sub2api/ent/accesslevel"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	"github.com/Wei-Shaw/sub2api/ent/announcement"
@@ -51,6 +52,7 @@ const (
 
 	// Node types.
 	TypeAPIKey                  = "APIKey"
+	TypeAccessLevel             = "AccessLevel"
 	TypeAccount                 = "Account"
 	TypeAccountGroup            = "AccountGroup"
 	TypeAnnouncement            = "Announcement"
@@ -2249,6 +2251,963 @@ func (m *APIKeyMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown APIKey edge %s", name)
+}
+
+// AccessLevelMutation represents an operation that mutates the AccessLevel nodes in the graph.
+type AccessLevelMutation struct {
+	config
+	op                          Op
+	typ                         string
+	id                          *int64
+	name                        *string
+	rank                        *int
+	addrank                     *int
+	balance_threshold           *float64
+	addbalance_threshold        *float64
+	payg_discount_multiplier    *float64
+	addpayg_discount_multiplier *float64
+	created_at                  *time.Time
+	updated_at                  *time.Time
+	clearedFields               map[string]struct{}
+	auto_users                  map[int64]struct{}
+	removedauto_users           map[int64]struct{}
+	clearedauto_users           bool
+	manual_users                map[int64]struct{}
+	removedmanual_users         map[int64]struct{}
+	clearedmanual_users         bool
+	required_groups             map[int64]struct{}
+	removedrequired_groups      map[int64]struct{}
+	clearedrequired_groups      bool
+	done                        bool
+	oldValue                    func(context.Context) (*AccessLevel, error)
+	predicates                  []predicate.AccessLevel
+}
+
+var _ ent.Mutation = (*AccessLevelMutation)(nil)
+
+// accesslevelOption allows management of the mutation configuration using functional options.
+type accesslevelOption func(*AccessLevelMutation)
+
+// newAccessLevelMutation creates new mutation for the AccessLevel entity.
+func newAccessLevelMutation(c config, op Op, opts ...accesslevelOption) *AccessLevelMutation {
+	m := &AccessLevelMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeAccessLevel,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withAccessLevelID sets the ID field of the mutation.
+func withAccessLevelID(id int64) accesslevelOption {
+	return func(m *AccessLevelMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *AccessLevel
+		)
+		m.oldValue = func(ctx context.Context) (*AccessLevel, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().AccessLevel.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withAccessLevel sets the old AccessLevel of the mutation.
+func withAccessLevel(node *AccessLevel) accesslevelOption {
+	return func(m *AccessLevelMutation) {
+		m.oldValue = func(context.Context) (*AccessLevel, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m AccessLevelMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m AccessLevelMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *AccessLevelMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *AccessLevelMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().AccessLevel.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetName sets the "name" field.
+func (m *AccessLevelMutation) SetName(s string) {
+	m.name = &s
+}
+
+// Name returns the value of the "name" field in the mutation.
+func (m *AccessLevelMutation) Name() (r string, exists bool) {
+	v := m.name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldName returns the old "name" field's value of the AccessLevel entity.
+// If the AccessLevel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessLevelMutation) OldName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldName: %w", err)
+	}
+	return oldValue.Name, nil
+}
+
+// ResetName resets all changes to the "name" field.
+func (m *AccessLevelMutation) ResetName() {
+	m.name = nil
+}
+
+// SetRank sets the "rank" field.
+func (m *AccessLevelMutation) SetRank(i int) {
+	m.rank = &i
+	m.addrank = nil
+}
+
+// Rank returns the value of the "rank" field in the mutation.
+func (m *AccessLevelMutation) Rank() (r int, exists bool) {
+	v := m.rank
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRank returns the old "rank" field's value of the AccessLevel entity.
+// If the AccessLevel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessLevelMutation) OldRank(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRank is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRank requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRank: %w", err)
+	}
+	return oldValue.Rank, nil
+}
+
+// AddRank adds i to the "rank" field.
+func (m *AccessLevelMutation) AddRank(i int) {
+	if m.addrank != nil {
+		*m.addrank += i
+	} else {
+		m.addrank = &i
+	}
+}
+
+// AddedRank returns the value that was added to the "rank" field in this mutation.
+func (m *AccessLevelMutation) AddedRank() (r int, exists bool) {
+	v := m.addrank
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetRank resets all changes to the "rank" field.
+func (m *AccessLevelMutation) ResetRank() {
+	m.rank = nil
+	m.addrank = nil
+}
+
+// SetBalanceThreshold sets the "balance_threshold" field.
+func (m *AccessLevelMutation) SetBalanceThreshold(f float64) {
+	m.balance_threshold = &f
+	m.addbalance_threshold = nil
+}
+
+// BalanceThreshold returns the value of the "balance_threshold" field in the mutation.
+func (m *AccessLevelMutation) BalanceThreshold() (r float64, exists bool) {
+	v := m.balance_threshold
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBalanceThreshold returns the old "balance_threshold" field's value of the AccessLevel entity.
+// If the AccessLevel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessLevelMutation) OldBalanceThreshold(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBalanceThreshold is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBalanceThreshold requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBalanceThreshold: %w", err)
+	}
+	return oldValue.BalanceThreshold, nil
+}
+
+// AddBalanceThreshold adds f to the "balance_threshold" field.
+func (m *AccessLevelMutation) AddBalanceThreshold(f float64) {
+	if m.addbalance_threshold != nil {
+		*m.addbalance_threshold += f
+	} else {
+		m.addbalance_threshold = &f
+	}
+}
+
+// AddedBalanceThreshold returns the value that was added to the "balance_threshold" field in this mutation.
+func (m *AccessLevelMutation) AddedBalanceThreshold() (r float64, exists bool) {
+	v := m.addbalance_threshold
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetBalanceThreshold resets all changes to the "balance_threshold" field.
+func (m *AccessLevelMutation) ResetBalanceThreshold() {
+	m.balance_threshold = nil
+	m.addbalance_threshold = nil
+}
+
+// SetPaygDiscountMultiplier sets the "payg_discount_multiplier" field.
+func (m *AccessLevelMutation) SetPaygDiscountMultiplier(f float64) {
+	m.payg_discount_multiplier = &f
+	m.addpayg_discount_multiplier = nil
+}
+
+// PaygDiscountMultiplier returns the value of the "payg_discount_multiplier" field in the mutation.
+func (m *AccessLevelMutation) PaygDiscountMultiplier() (r float64, exists bool) {
+	v := m.payg_discount_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPaygDiscountMultiplier returns the old "payg_discount_multiplier" field's value of the AccessLevel entity.
+// If the AccessLevel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessLevelMutation) OldPaygDiscountMultiplier(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPaygDiscountMultiplier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPaygDiscountMultiplier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPaygDiscountMultiplier: %w", err)
+	}
+	return oldValue.PaygDiscountMultiplier, nil
+}
+
+// AddPaygDiscountMultiplier adds f to the "payg_discount_multiplier" field.
+func (m *AccessLevelMutation) AddPaygDiscountMultiplier(f float64) {
+	if m.addpayg_discount_multiplier != nil {
+		*m.addpayg_discount_multiplier += f
+	} else {
+		m.addpayg_discount_multiplier = &f
+	}
+}
+
+// AddedPaygDiscountMultiplier returns the value that was added to the "payg_discount_multiplier" field in this mutation.
+func (m *AccessLevelMutation) AddedPaygDiscountMultiplier() (r float64, exists bool) {
+	v := m.addpayg_discount_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetPaygDiscountMultiplier resets all changes to the "payg_discount_multiplier" field.
+func (m *AccessLevelMutation) ResetPaygDiscountMultiplier() {
+	m.payg_discount_multiplier = nil
+	m.addpayg_discount_multiplier = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *AccessLevelMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *AccessLevelMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the AccessLevel entity.
+// If the AccessLevel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessLevelMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *AccessLevelMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *AccessLevelMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *AccessLevelMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the AccessLevel entity.
+// If the AccessLevel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessLevelMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *AccessLevelMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// AddAutoUserIDs adds the "auto_users" edge to the User entity by ids.
+func (m *AccessLevelMutation) AddAutoUserIDs(ids ...int64) {
+	if m.auto_users == nil {
+		m.auto_users = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.auto_users[ids[i]] = struct{}{}
+	}
+}
+
+// ClearAutoUsers clears the "auto_users" edge to the User entity.
+func (m *AccessLevelMutation) ClearAutoUsers() {
+	m.clearedauto_users = true
+}
+
+// AutoUsersCleared reports if the "auto_users" edge to the User entity was cleared.
+func (m *AccessLevelMutation) AutoUsersCleared() bool {
+	return m.clearedauto_users
+}
+
+// RemoveAutoUserIDs removes the "auto_users" edge to the User entity by IDs.
+func (m *AccessLevelMutation) RemoveAutoUserIDs(ids ...int64) {
+	if m.removedauto_users == nil {
+		m.removedauto_users = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.auto_users, ids[i])
+		m.removedauto_users[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedAutoUsers returns the removed IDs of the "auto_users" edge to the User entity.
+func (m *AccessLevelMutation) RemovedAutoUsersIDs() (ids []int64) {
+	for id := range m.removedauto_users {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// AutoUsersIDs returns the "auto_users" edge IDs in the mutation.
+func (m *AccessLevelMutation) AutoUsersIDs() (ids []int64) {
+	for id := range m.auto_users {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetAutoUsers resets all changes to the "auto_users" edge.
+func (m *AccessLevelMutation) ResetAutoUsers() {
+	m.auto_users = nil
+	m.clearedauto_users = false
+	m.removedauto_users = nil
+}
+
+// AddManualUserIDs adds the "manual_users" edge to the User entity by ids.
+func (m *AccessLevelMutation) AddManualUserIDs(ids ...int64) {
+	if m.manual_users == nil {
+		m.manual_users = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.manual_users[ids[i]] = struct{}{}
+	}
+}
+
+// ClearManualUsers clears the "manual_users" edge to the User entity.
+func (m *AccessLevelMutation) ClearManualUsers() {
+	m.clearedmanual_users = true
+}
+
+// ManualUsersCleared reports if the "manual_users" edge to the User entity was cleared.
+func (m *AccessLevelMutation) ManualUsersCleared() bool {
+	return m.clearedmanual_users
+}
+
+// RemoveManualUserIDs removes the "manual_users" edge to the User entity by IDs.
+func (m *AccessLevelMutation) RemoveManualUserIDs(ids ...int64) {
+	if m.removedmanual_users == nil {
+		m.removedmanual_users = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.manual_users, ids[i])
+		m.removedmanual_users[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedManualUsers returns the removed IDs of the "manual_users" edge to the User entity.
+func (m *AccessLevelMutation) RemovedManualUsersIDs() (ids []int64) {
+	for id := range m.removedmanual_users {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ManualUsersIDs returns the "manual_users" edge IDs in the mutation.
+func (m *AccessLevelMutation) ManualUsersIDs() (ids []int64) {
+	for id := range m.manual_users {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetManualUsers resets all changes to the "manual_users" edge.
+func (m *AccessLevelMutation) ResetManualUsers() {
+	m.manual_users = nil
+	m.clearedmanual_users = false
+	m.removedmanual_users = nil
+}
+
+// AddRequiredGroupIDs adds the "required_groups" edge to the Group entity by ids.
+func (m *AccessLevelMutation) AddRequiredGroupIDs(ids ...int64) {
+	if m.required_groups == nil {
+		m.required_groups = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.required_groups[ids[i]] = struct{}{}
+	}
+}
+
+// ClearRequiredGroups clears the "required_groups" edge to the Group entity.
+func (m *AccessLevelMutation) ClearRequiredGroups() {
+	m.clearedrequired_groups = true
+}
+
+// RequiredGroupsCleared reports if the "required_groups" edge to the Group entity was cleared.
+func (m *AccessLevelMutation) RequiredGroupsCleared() bool {
+	return m.clearedrequired_groups
+}
+
+// RemoveRequiredGroupIDs removes the "required_groups" edge to the Group entity by IDs.
+func (m *AccessLevelMutation) RemoveRequiredGroupIDs(ids ...int64) {
+	if m.removedrequired_groups == nil {
+		m.removedrequired_groups = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.required_groups, ids[i])
+		m.removedrequired_groups[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedRequiredGroups returns the removed IDs of the "required_groups" edge to the Group entity.
+func (m *AccessLevelMutation) RemovedRequiredGroupsIDs() (ids []int64) {
+	for id := range m.removedrequired_groups {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// RequiredGroupsIDs returns the "required_groups" edge IDs in the mutation.
+func (m *AccessLevelMutation) RequiredGroupsIDs() (ids []int64) {
+	for id := range m.required_groups {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetRequiredGroups resets all changes to the "required_groups" edge.
+func (m *AccessLevelMutation) ResetRequiredGroups() {
+	m.required_groups = nil
+	m.clearedrequired_groups = false
+	m.removedrequired_groups = nil
+}
+
+// Where appends a list predicates to the AccessLevelMutation builder.
+func (m *AccessLevelMutation) Where(ps ...predicate.AccessLevel) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the AccessLevelMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *AccessLevelMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.AccessLevel, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *AccessLevelMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *AccessLevelMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (AccessLevel).
+func (m *AccessLevelMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *AccessLevelMutation) Fields() []string {
+	fields := make([]string, 0, 6)
+	if m.name != nil {
+		fields = append(fields, accesslevel.FieldName)
+	}
+	if m.rank != nil {
+		fields = append(fields, accesslevel.FieldRank)
+	}
+	if m.balance_threshold != nil {
+		fields = append(fields, accesslevel.FieldBalanceThreshold)
+	}
+	if m.payg_discount_multiplier != nil {
+		fields = append(fields, accesslevel.FieldPaygDiscountMultiplier)
+	}
+	if m.created_at != nil {
+		fields = append(fields, accesslevel.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, accesslevel.FieldUpdatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *AccessLevelMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case accesslevel.FieldName:
+		return m.Name()
+	case accesslevel.FieldRank:
+		return m.Rank()
+	case accesslevel.FieldBalanceThreshold:
+		return m.BalanceThreshold()
+	case accesslevel.FieldPaygDiscountMultiplier:
+		return m.PaygDiscountMultiplier()
+	case accesslevel.FieldCreatedAt:
+		return m.CreatedAt()
+	case accesslevel.FieldUpdatedAt:
+		return m.UpdatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *AccessLevelMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case accesslevel.FieldName:
+		return m.OldName(ctx)
+	case accesslevel.FieldRank:
+		return m.OldRank(ctx)
+	case accesslevel.FieldBalanceThreshold:
+		return m.OldBalanceThreshold(ctx)
+	case accesslevel.FieldPaygDiscountMultiplier:
+		return m.OldPaygDiscountMultiplier(ctx)
+	case accesslevel.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case accesslevel.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown AccessLevel field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *AccessLevelMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case accesslevel.FieldName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetName(v)
+		return nil
+	case accesslevel.FieldRank:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRank(v)
+		return nil
+	case accesslevel.FieldBalanceThreshold:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBalanceThreshold(v)
+		return nil
+	case accesslevel.FieldPaygDiscountMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPaygDiscountMultiplier(v)
+		return nil
+	case accesslevel.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case accesslevel.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown AccessLevel field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *AccessLevelMutation) AddedFields() []string {
+	var fields []string
+	if m.addrank != nil {
+		fields = append(fields, accesslevel.FieldRank)
+	}
+	if m.addbalance_threshold != nil {
+		fields = append(fields, accesslevel.FieldBalanceThreshold)
+	}
+	if m.addpayg_discount_multiplier != nil {
+		fields = append(fields, accesslevel.FieldPaygDiscountMultiplier)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *AccessLevelMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case accesslevel.FieldRank:
+		return m.AddedRank()
+	case accesslevel.FieldBalanceThreshold:
+		return m.AddedBalanceThreshold()
+	case accesslevel.FieldPaygDiscountMultiplier:
+		return m.AddedPaygDiscountMultiplier()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *AccessLevelMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case accesslevel.FieldRank:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRank(v)
+		return nil
+	case accesslevel.FieldBalanceThreshold:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddBalanceThreshold(v)
+		return nil
+	case accesslevel.FieldPaygDiscountMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPaygDiscountMultiplier(v)
+		return nil
+	}
+	return fmt.Errorf("unknown AccessLevel numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *AccessLevelMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *AccessLevelMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *AccessLevelMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown AccessLevel nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *AccessLevelMutation) ResetField(name string) error {
+	switch name {
+	case accesslevel.FieldName:
+		m.ResetName()
+		return nil
+	case accesslevel.FieldRank:
+		m.ResetRank()
+		return nil
+	case accesslevel.FieldBalanceThreshold:
+		m.ResetBalanceThreshold()
+		return nil
+	case accesslevel.FieldPaygDiscountMultiplier:
+		m.ResetPaygDiscountMultiplier()
+		return nil
+	case accesslevel.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case accesslevel.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown AccessLevel field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *AccessLevelMutation) AddedEdges() []string {
+	edges := make([]string, 0, 3)
+	if m.auto_users != nil {
+		edges = append(edges, accesslevel.EdgeAutoUsers)
+	}
+	if m.manual_users != nil {
+		edges = append(edges, accesslevel.EdgeManualUsers)
+	}
+	if m.required_groups != nil {
+		edges = append(edges, accesslevel.EdgeRequiredGroups)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *AccessLevelMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case accesslevel.EdgeAutoUsers:
+		ids := make([]ent.Value, 0, len(m.auto_users))
+		for id := range m.auto_users {
+			ids = append(ids, id)
+		}
+		return ids
+	case accesslevel.EdgeManualUsers:
+		ids := make([]ent.Value, 0, len(m.manual_users))
+		for id := range m.manual_users {
+			ids = append(ids, id)
+		}
+		return ids
+	case accesslevel.EdgeRequiredGroups:
+		ids := make([]ent.Value, 0, len(m.required_groups))
+		for id := range m.required_groups {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *AccessLevelMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 3)
+	if m.removedauto_users != nil {
+		edges = append(edges, accesslevel.EdgeAutoUsers)
+	}
+	if m.removedmanual_users != nil {
+		edges = append(edges, accesslevel.EdgeManualUsers)
+	}
+	if m.removedrequired_groups != nil {
+		edges = append(edges, accesslevel.EdgeRequiredGroups)
+	}
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *AccessLevelMutation) RemovedIDs(name string) []ent.Value {
+	switch name {
+	case accesslevel.EdgeAutoUsers:
+		ids := make([]ent.Value, 0, len(m.removedauto_users))
+		for id := range m.removedauto_users {
+			ids = append(ids, id)
+		}
+		return ids
+	case accesslevel.EdgeManualUsers:
+		ids := make([]ent.Value, 0, len(m.removedmanual_users))
+		for id := range m.removedmanual_users {
+			ids = append(ids, id)
+		}
+		return ids
+	case accesslevel.EdgeRequiredGroups:
+		ids := make([]ent.Value, 0, len(m.removedrequired_groups))
+		for id := range m.removedrequired_groups {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *AccessLevelMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 3)
+	if m.clearedauto_users {
+		edges = append(edges, accesslevel.EdgeAutoUsers)
+	}
+	if m.clearedmanual_users {
+		edges = append(edges, accesslevel.EdgeManualUsers)
+	}
+	if m.clearedrequired_groups {
+		edges = append(edges, accesslevel.EdgeRequiredGroups)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *AccessLevelMutation) EdgeCleared(name string) bool {
+	switch name {
+	case accesslevel.EdgeAutoUsers:
+		return m.clearedauto_users
+	case accesslevel.EdgeManualUsers:
+		return m.clearedmanual_users
+	case accesslevel.EdgeRequiredGroups:
+		return m.clearedrequired_groups
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *AccessLevelMutation) ClearEdge(name string) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown AccessLevel unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *AccessLevelMutation) ResetEdge(name string) error {
+	switch name {
+	case accesslevel.EdgeAutoUsers:
+		m.ResetAutoUsers()
+		return nil
+	case accesslevel.EdgeManualUsers:
+		m.ResetManualUsers()
+		return nil
+	case accesslevel.EdgeRequiredGroups:
+		m.ResetRequiredGroups()
+		return nil
+	}
+	return fmt.Errorf("unknown AccessLevel edge %s", name)
 }
 
 // AccountMutation represents an operation that mutates the Account nodes in the graph.
@@ -8388,6 +9347,8 @@ type GroupMutation struct {
 	allowed_users                           map[int64]struct{}
 	removedallowed_users                    map[int64]struct{}
 	clearedallowed_users                    bool
+	required_level                          *int64
+	clearedrequired_level                   bool
 	done                                    bool
 	oldValue                                func(context.Context) (*Group, error)
 	predicates                              []predicate.Group
@@ -8787,6 +9748,55 @@ func (m *GroupMutation) OldIsExclusive(ctx context.Context) (v bool, err error) 
 // ResetIsExclusive resets all changes to the "is_exclusive" field.
 func (m *GroupMutation) ResetIsExclusive() {
 	m.is_exclusive = nil
+}
+
+// SetRequiredLevelID sets the "required_level_id" field.
+func (m *GroupMutation) SetRequiredLevelID(i int64) {
+	m.required_level = &i
+}
+
+// RequiredLevelID returns the value of the "required_level_id" field in the mutation.
+func (m *GroupMutation) RequiredLevelID() (r int64, exists bool) {
+	v := m.required_level
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequiredLevelID returns the old "required_level_id" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldRequiredLevelID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequiredLevelID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequiredLevelID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequiredLevelID: %w", err)
+	}
+	return oldValue.RequiredLevelID, nil
+}
+
+// ClearRequiredLevelID clears the value of the "required_level_id" field.
+func (m *GroupMutation) ClearRequiredLevelID() {
+	m.required_level = nil
+	m.clearedFields[group.FieldRequiredLevelID] = struct{}{}
+}
+
+// RequiredLevelIDCleared returns if the "required_level_id" field was cleared in this mutation.
+func (m *GroupMutation) RequiredLevelIDCleared() bool {
+	_, ok := m.clearedFields[group.FieldRequiredLevelID]
+	return ok
+}
+
+// ResetRequiredLevelID resets all changes to the "required_level_id" field.
+func (m *GroupMutation) ResetRequiredLevelID() {
+	m.required_level = nil
+	delete(m.clearedFields, group.FieldRequiredLevelID)
 }
 
 // SetStatus sets the "status" field.
@@ -11177,6 +12187,33 @@ func (m *GroupMutation) ResetAllowedUsers() {
 	m.removedallowed_users = nil
 }
 
+// ClearRequiredLevel clears the "required_level" edge to the AccessLevel entity.
+func (m *GroupMutation) ClearRequiredLevel() {
+	m.clearedrequired_level = true
+	m.clearedFields[group.FieldRequiredLevelID] = struct{}{}
+}
+
+// RequiredLevelCleared reports if the "required_level" edge to the AccessLevel entity was cleared.
+func (m *GroupMutation) RequiredLevelCleared() bool {
+	return m.RequiredLevelIDCleared() || m.clearedrequired_level
+}
+
+// RequiredLevelIDs returns the "required_level" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// RequiredLevelID instead. It exists only for internal usage by the builders.
+func (m *GroupMutation) RequiredLevelIDs() (ids []int64) {
+	if id := m.required_level; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetRequiredLevel resets all changes to the "required_level" edge.
+func (m *GroupMutation) ResetRequiredLevel() {
+	m.required_level = nil
+	m.clearedrequired_level = false
+}
+
 // Where appends a list predicates to the GroupMutation builder.
 func (m *GroupMutation) Where(ps ...predicate.Group) {
 	m.predicates = append(m.predicates, ps...)
@@ -11211,7 +12248,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 46)
+	fields := make([]string, 0, 47)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -11232,6 +12269,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.is_exclusive != nil {
 		fields = append(fields, group.FieldIsExclusive)
+	}
+	if m.required_level != nil {
+		fields = append(fields, group.FieldRequiredLevelID)
 	}
 	if m.status != nil {
 		fields = append(fields, group.FieldStatus)
@@ -11372,6 +12412,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.RateMultiplier()
 	case group.FieldIsExclusive:
 		return m.IsExclusive()
+	case group.FieldRequiredLevelID:
+		return m.RequiredLevelID()
 	case group.FieldStatus:
 		return m.Status()
 	case group.FieldPlatform:
@@ -11473,6 +12515,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldRateMultiplier(ctx)
 	case group.FieldIsExclusive:
 		return m.OldIsExclusive(ctx)
+	case group.FieldRequiredLevelID:
+		return m.OldRequiredLevelID(ctx)
 	case group.FieldStatus:
 		return m.OldStatus(ctx)
 	case group.FieldPlatform:
@@ -11608,6 +12652,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetIsExclusive(v)
+		return nil
+	case group.FieldRequiredLevelID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequiredLevelID(v)
 		return nil
 	case group.FieldStatus:
 		v, ok := value.(string)
@@ -12185,6 +13236,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	if m.FieldCleared(group.FieldDescription) {
 		fields = append(fields, group.FieldDescription)
 	}
+	if m.FieldCleared(group.FieldRequiredLevelID) {
+		fields = append(fields, group.FieldRequiredLevelID)
+	}
 	if m.FieldCleared(group.FieldFiveHourLimitUsd) {
 		fields = append(fields, group.FieldFiveHourLimitUsd)
 	}
@@ -12246,6 +13300,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldDescription:
 		m.ClearDescription()
+		return nil
+	case group.FieldRequiredLevelID:
+		m.ClearRequiredLevelID()
 		return nil
 	case group.FieldFiveHourLimitUsd:
 		m.ClearFiveHourLimitUsd()
@@ -12317,6 +13374,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldIsExclusive:
 		m.ResetIsExclusive()
+		return nil
+	case group.FieldRequiredLevelID:
+		m.ResetRequiredLevelID()
 		return nil
 	case group.FieldStatus:
 		m.ResetStatus()
@@ -12441,7 +13501,7 @@ func (m *GroupMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *GroupMutation) AddedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.api_keys != nil {
 		edges = append(edges, group.EdgeAPIKeys)
 	}
@@ -12459,6 +13519,9 @@ func (m *GroupMutation) AddedEdges() []string {
 	}
 	if m.allowed_users != nil {
 		edges = append(edges, group.EdgeAllowedUsers)
+	}
+	if m.required_level != nil {
+		edges = append(edges, group.EdgeRequiredLevel)
 	}
 	return edges
 }
@@ -12503,13 +13566,17 @@ func (m *GroupMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case group.EdgeRequiredLevel:
+		if id := m.required_level; id != nil {
+			return []ent.Value{*id}
+		}
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *GroupMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.removedapi_keys != nil {
 		edges = append(edges, group.EdgeAPIKeys)
 	}
@@ -12577,7 +13644,7 @@ func (m *GroupMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *GroupMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.clearedapi_keys {
 		edges = append(edges, group.EdgeAPIKeys)
 	}
@@ -12595,6 +13662,9 @@ func (m *GroupMutation) ClearedEdges() []string {
 	}
 	if m.clearedallowed_users {
 		edges = append(edges, group.EdgeAllowedUsers)
+	}
+	if m.clearedrequired_level {
+		edges = append(edges, group.EdgeRequiredLevel)
 	}
 	return edges
 }
@@ -12615,6 +13685,8 @@ func (m *GroupMutation) EdgeCleared(name string) bool {
 		return m.clearedaccounts
 	case group.EdgeAllowedUsers:
 		return m.clearedallowed_users
+	case group.EdgeRequiredLevel:
+		return m.clearedrequired_level
 	}
 	return false
 }
@@ -12623,6 +13695,9 @@ func (m *GroupMutation) EdgeCleared(name string) bool {
 // if that edge is not defined in the schema.
 func (m *GroupMutation) ClearEdge(name string) error {
 	switch name {
+	case group.EdgeRequiredLevel:
+		m.ClearRequiredLevel()
+		return nil
 	}
 	return fmt.Errorf("unknown Group unique edge %s", name)
 }
@@ -12648,6 +13723,9 @@ func (m *GroupMutation) ResetEdge(name string) error {
 		return nil
 	case group.EdgeAllowedUsers:
 		m.ResetAllowedUsers()
+		return nil
+	case group.EdgeRequiredLevel:
+		m.ResetRequiredLevel()
 		return nil
 	}
 	return fmt.Errorf("unknown Group edge %s", name)
@@ -28824,62 +29902,67 @@ func (m *UsageLogMutation) ResetEdge(name string) error {
 // UserMutation represents an operation that mutates the User nodes in the graph.
 type UserMutation struct {
 	config
-	op                            Op
-	typ                           string
-	id                            *int64
-	created_at                    *time.Time
-	updated_at                    *time.Time
-	deleted_at                    *time.Time
-	email                         *string
-	password_hash                 *string
-	role                          *string
-	balance                       *float64
-	addbalance                    *float64
-	payg_discount_multiplier      *float64
-	addpayg_discount_multiplier   *float64
-	concurrency                   *int
-	addconcurrency                *int
-	status                        *string
-	username                      *string
-	notes                         *string
-	totp_secret_encrypted         *string
-	totp_enabled                  *bool
-	totp_enabled_at               *time.Time
-	sora_storage_quota_bytes      *int64
-	addsora_storage_quota_bytes   *int64
-	sora_storage_used_bytes       *int64
-	addsora_storage_used_bytes    *int64
-	clearedFields                 map[string]struct{}
-	api_keys                      map[int64]struct{}
-	removedapi_keys               map[int64]struct{}
-	clearedapi_keys               bool
-	redeem_codes                  map[int64]struct{}
-	removedredeem_codes           map[int64]struct{}
-	clearedredeem_codes           bool
-	subscriptions                 map[int64]struct{}
-	removedsubscriptions          map[int64]struct{}
-	clearedsubscriptions          bool
-	assigned_subscriptions        map[int64]struct{}
-	removedassigned_subscriptions map[int64]struct{}
-	clearedassigned_subscriptions bool
-	announcement_reads            map[int64]struct{}
-	removedannouncement_reads     map[int64]struct{}
-	clearedannouncement_reads     bool
-	allowed_groups                map[int64]struct{}
-	removedallowed_groups         map[int64]struct{}
-	clearedallowed_groups         bool
-	usage_logs                    map[int64]struct{}
-	removedusage_logs             map[int64]struct{}
-	clearedusage_logs             bool
-	attribute_values              map[int64]struct{}
-	removedattribute_values       map[int64]struct{}
-	clearedattribute_values       bool
-	promo_code_usages             map[int64]struct{}
-	removedpromo_code_usages      map[int64]struct{}
-	clearedpromo_code_usages      bool
-	done                          bool
-	oldValue                      func(context.Context) (*User, error)
-	predicates                    []predicate.User
+	op                             Op
+	typ                            string
+	id                             *int64
+	created_at                     *time.Time
+	updated_at                     *time.Time
+	deleted_at                     *time.Time
+	email                          *string
+	password_hash                  *string
+	role                           *string
+	balance                        *float64
+	addbalance                     *float64
+	payg_discount_multiplier       *float64
+	addpayg_discount_multiplier    *float64
+	payg_discount_override_enabled *bool
+	concurrency                    *int
+	addconcurrency                 *int
+	status                         *string
+	username                       *string
+	notes                          *string
+	totp_secret_encrypted          *string
+	totp_enabled                   *bool
+	totp_enabled_at                *time.Time
+	sora_storage_quota_bytes       *int64
+	addsora_storage_quota_bytes    *int64
+	sora_storage_used_bytes        *int64
+	addsora_storage_used_bytes     *int64
+	clearedFields                  map[string]struct{}
+	api_keys                       map[int64]struct{}
+	removedapi_keys                map[int64]struct{}
+	clearedapi_keys                bool
+	redeem_codes                   map[int64]struct{}
+	removedredeem_codes            map[int64]struct{}
+	clearedredeem_codes            bool
+	subscriptions                  map[int64]struct{}
+	removedsubscriptions           map[int64]struct{}
+	clearedsubscriptions           bool
+	assigned_subscriptions         map[int64]struct{}
+	removedassigned_subscriptions  map[int64]struct{}
+	clearedassigned_subscriptions  bool
+	announcement_reads             map[int64]struct{}
+	removedannouncement_reads      map[int64]struct{}
+	clearedannouncement_reads      bool
+	allowed_groups                 map[int64]struct{}
+	removedallowed_groups          map[int64]struct{}
+	clearedallowed_groups          bool
+	usage_logs                     map[int64]struct{}
+	removedusage_logs              map[int64]struct{}
+	clearedusage_logs              bool
+	attribute_values               map[int64]struct{}
+	removedattribute_values        map[int64]struct{}
+	clearedattribute_values        bool
+	promo_code_usages              map[int64]struct{}
+	removedpromo_code_usages       map[int64]struct{}
+	clearedpromo_code_usages       bool
+	auto_level                     *int64
+	clearedauto_level              bool
+	manual_level                   *int64
+	clearedmanual_level            bool
+	done                           bool
+	oldValue                       func(context.Context) (*User, error)
+	predicates                     []predicate.User
 }
 
 var _ ent.Mutation = (*UserMutation)(nil)
@@ -29319,6 +30402,140 @@ func (m *UserMutation) AddedPaygDiscountMultiplier() (r float64, exists bool) {
 func (m *UserMutation) ResetPaygDiscountMultiplier() {
 	m.payg_discount_multiplier = nil
 	m.addpayg_discount_multiplier = nil
+}
+
+// SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
+func (m *UserMutation) SetPaygDiscountOverrideEnabled(b bool) {
+	m.payg_discount_override_enabled = &b
+}
+
+// PaygDiscountOverrideEnabled returns the value of the "payg_discount_override_enabled" field in the mutation.
+func (m *UserMutation) PaygDiscountOverrideEnabled() (r bool, exists bool) {
+	v := m.payg_discount_override_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPaygDiscountOverrideEnabled returns the old "payg_discount_override_enabled" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldPaygDiscountOverrideEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPaygDiscountOverrideEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPaygDiscountOverrideEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPaygDiscountOverrideEnabled: %w", err)
+	}
+	return oldValue.PaygDiscountOverrideEnabled, nil
+}
+
+// ResetPaygDiscountOverrideEnabled resets all changes to the "payg_discount_override_enabled" field.
+func (m *UserMutation) ResetPaygDiscountOverrideEnabled() {
+	m.payg_discount_override_enabled = nil
+}
+
+// SetAutoLevelID sets the "auto_level_id" field.
+func (m *UserMutation) SetAutoLevelID(i int64) {
+	m.auto_level = &i
+}
+
+// AutoLevelID returns the value of the "auto_level_id" field in the mutation.
+func (m *UserMutation) AutoLevelID() (r int64, exists bool) {
+	v := m.auto_level
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAutoLevelID returns the old "auto_level_id" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldAutoLevelID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAutoLevelID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAutoLevelID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAutoLevelID: %w", err)
+	}
+	return oldValue.AutoLevelID, nil
+}
+
+// ClearAutoLevelID clears the value of the "auto_level_id" field.
+func (m *UserMutation) ClearAutoLevelID() {
+	m.auto_level = nil
+	m.clearedFields[user.FieldAutoLevelID] = struct{}{}
+}
+
+// AutoLevelIDCleared returns if the "auto_level_id" field was cleared in this mutation.
+func (m *UserMutation) AutoLevelIDCleared() bool {
+	_, ok := m.clearedFields[user.FieldAutoLevelID]
+	return ok
+}
+
+// ResetAutoLevelID resets all changes to the "auto_level_id" field.
+func (m *UserMutation) ResetAutoLevelID() {
+	m.auto_level = nil
+	delete(m.clearedFields, user.FieldAutoLevelID)
+}
+
+// SetManualLevelID sets the "manual_level_id" field.
+func (m *UserMutation) SetManualLevelID(i int64) {
+	m.manual_level = &i
+}
+
+// ManualLevelID returns the value of the "manual_level_id" field in the mutation.
+func (m *UserMutation) ManualLevelID() (r int64, exists bool) {
+	v := m.manual_level
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldManualLevelID returns the old "manual_level_id" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldManualLevelID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldManualLevelID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldManualLevelID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldManualLevelID: %w", err)
+	}
+	return oldValue.ManualLevelID, nil
+}
+
+// ClearManualLevelID clears the value of the "manual_level_id" field.
+func (m *UserMutation) ClearManualLevelID() {
+	m.manual_level = nil
+	m.clearedFields[user.FieldManualLevelID] = struct{}{}
+}
+
+// ManualLevelIDCleared returns if the "manual_level_id" field was cleared in this mutation.
+func (m *UserMutation) ManualLevelIDCleared() bool {
+	_, ok := m.clearedFields[user.FieldManualLevelID]
+	return ok
+}
+
+// ResetManualLevelID resets all changes to the "manual_level_id" field.
+func (m *UserMutation) ResetManualLevelID() {
+	m.manual_level = nil
+	delete(m.clearedFields, user.FieldManualLevelID)
 }
 
 // SetConcurrency sets the "concurrency" field.
@@ -30217,6 +31434,60 @@ func (m *UserMutation) ResetPromoCodeUsages() {
 	m.removedpromo_code_usages = nil
 }
 
+// ClearAutoLevel clears the "auto_level" edge to the AccessLevel entity.
+func (m *UserMutation) ClearAutoLevel() {
+	m.clearedauto_level = true
+	m.clearedFields[user.FieldAutoLevelID] = struct{}{}
+}
+
+// AutoLevelCleared reports if the "auto_level" edge to the AccessLevel entity was cleared.
+func (m *UserMutation) AutoLevelCleared() bool {
+	return m.AutoLevelIDCleared() || m.clearedauto_level
+}
+
+// AutoLevelIDs returns the "auto_level" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// AutoLevelID instead. It exists only for internal usage by the builders.
+func (m *UserMutation) AutoLevelIDs() (ids []int64) {
+	if id := m.auto_level; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetAutoLevel resets all changes to the "auto_level" edge.
+func (m *UserMutation) ResetAutoLevel() {
+	m.auto_level = nil
+	m.clearedauto_level = false
+}
+
+// ClearManualLevel clears the "manual_level" edge to the AccessLevel entity.
+func (m *UserMutation) ClearManualLevel() {
+	m.clearedmanual_level = true
+	m.clearedFields[user.FieldManualLevelID] = struct{}{}
+}
+
+// ManualLevelCleared reports if the "manual_level" edge to the AccessLevel entity was cleared.
+func (m *UserMutation) ManualLevelCleared() bool {
+	return m.ManualLevelIDCleared() || m.clearedmanual_level
+}
+
+// ManualLevelIDs returns the "manual_level" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// ManualLevelID instead. It exists only for internal usage by the builders.
+func (m *UserMutation) ManualLevelIDs() (ids []int64) {
+	if id := m.manual_level; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetManualLevel resets all changes to the "manual_level" edge.
+func (m *UserMutation) ResetManualLevel() {
+	m.manual_level = nil
+	m.clearedmanual_level = false
+}
+
 // Where appends a list predicates to the UserMutation builder.
 func (m *UserMutation) Where(ps ...predicate.User) {
 	m.predicates = append(m.predicates, ps...)
@@ -30251,7 +31522,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 17)
+	fields := make([]string, 0, 20)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -30275,6 +31546,15 @@ func (m *UserMutation) Fields() []string {
 	}
 	if m.payg_discount_multiplier != nil {
 		fields = append(fields, user.FieldPaygDiscountMultiplier)
+	}
+	if m.payg_discount_override_enabled != nil {
+		fields = append(fields, user.FieldPaygDiscountOverrideEnabled)
+	}
+	if m.auto_level != nil {
+		fields = append(fields, user.FieldAutoLevelID)
+	}
+	if m.manual_level != nil {
+		fields = append(fields, user.FieldManualLevelID)
 	}
 	if m.concurrency != nil {
 		fields = append(fields, user.FieldConcurrency)
@@ -30327,6 +31607,12 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.Balance()
 	case user.FieldPaygDiscountMultiplier:
 		return m.PaygDiscountMultiplier()
+	case user.FieldPaygDiscountOverrideEnabled:
+		return m.PaygDiscountOverrideEnabled()
+	case user.FieldAutoLevelID:
+		return m.AutoLevelID()
+	case user.FieldManualLevelID:
+		return m.ManualLevelID()
 	case user.FieldConcurrency:
 		return m.Concurrency()
 	case user.FieldStatus:
@@ -30370,6 +31656,12 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldBalance(ctx)
 	case user.FieldPaygDiscountMultiplier:
 		return m.OldPaygDiscountMultiplier(ctx)
+	case user.FieldPaygDiscountOverrideEnabled:
+		return m.OldPaygDiscountOverrideEnabled(ctx)
+	case user.FieldAutoLevelID:
+		return m.OldAutoLevelID(ctx)
+	case user.FieldManualLevelID:
+		return m.OldManualLevelID(ctx)
 	case user.FieldConcurrency:
 		return m.OldConcurrency(ctx)
 	case user.FieldStatus:
@@ -30452,6 +31744,27 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPaygDiscountMultiplier(v)
+		return nil
+	case user.FieldPaygDiscountOverrideEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPaygDiscountOverrideEnabled(v)
+		return nil
+	case user.FieldAutoLevelID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAutoLevelID(v)
+		return nil
+	case user.FieldManualLevelID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetManualLevelID(v)
 		return nil
 	case user.FieldConcurrency:
 		v, ok := value.(int)
@@ -30612,6 +31925,12 @@ func (m *UserMutation) ClearedFields() []string {
 	if m.FieldCleared(user.FieldDeletedAt) {
 		fields = append(fields, user.FieldDeletedAt)
 	}
+	if m.FieldCleared(user.FieldAutoLevelID) {
+		fields = append(fields, user.FieldAutoLevelID)
+	}
+	if m.FieldCleared(user.FieldManualLevelID) {
+		fields = append(fields, user.FieldManualLevelID)
+	}
 	if m.FieldCleared(user.FieldTotpSecretEncrypted) {
 		fields = append(fields, user.FieldTotpSecretEncrypted)
 	}
@@ -30634,6 +31953,12 @@ func (m *UserMutation) ClearField(name string) error {
 	switch name {
 	case user.FieldDeletedAt:
 		m.ClearDeletedAt()
+		return nil
+	case user.FieldAutoLevelID:
+		m.ClearAutoLevelID()
+		return nil
+	case user.FieldManualLevelID:
+		m.ClearManualLevelID()
 		return nil
 	case user.FieldTotpSecretEncrypted:
 		m.ClearTotpSecretEncrypted()
@@ -30673,6 +31998,15 @@ func (m *UserMutation) ResetField(name string) error {
 	case user.FieldPaygDiscountMultiplier:
 		m.ResetPaygDiscountMultiplier()
 		return nil
+	case user.FieldPaygDiscountOverrideEnabled:
+		m.ResetPaygDiscountOverrideEnabled()
+		return nil
+	case user.FieldAutoLevelID:
+		m.ResetAutoLevelID()
+		return nil
+	case user.FieldManualLevelID:
+		m.ResetManualLevelID()
+		return nil
 	case user.FieldConcurrency:
 		m.ResetConcurrency()
 		return nil
@@ -30706,7 +32040,7 @@ func (m *UserMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *UserMutation) AddedEdges() []string {
-	edges := make([]string, 0, 9)
+	edges := make([]string, 0, 11)
 	if m.api_keys != nil {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -30733,6 +32067,12 @@ func (m *UserMutation) AddedEdges() []string {
 	}
 	if m.promo_code_usages != nil {
 		edges = append(edges, user.EdgePromoCodeUsages)
+	}
+	if m.auto_level != nil {
+		edges = append(edges, user.EdgeAutoLevel)
+	}
+	if m.manual_level != nil {
+		edges = append(edges, user.EdgeManualLevel)
 	}
 	return edges
 }
@@ -30795,13 +32135,21 @@ func (m *UserMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case user.EdgeAutoLevel:
+		if id := m.auto_level; id != nil {
+			return []ent.Value{*id}
+		}
+	case user.EdgeManualLevel:
+		if id := m.manual_level; id != nil {
+			return []ent.Value{*id}
+		}
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *UserMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 9)
+	edges := make([]string, 0, 11)
 	if m.removedapi_keys != nil {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -30896,7 +32244,7 @@ func (m *UserMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *UserMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 9)
+	edges := make([]string, 0, 11)
 	if m.clearedapi_keys {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -30924,6 +32272,12 @@ func (m *UserMutation) ClearedEdges() []string {
 	if m.clearedpromo_code_usages {
 		edges = append(edges, user.EdgePromoCodeUsages)
 	}
+	if m.clearedauto_level {
+		edges = append(edges, user.EdgeAutoLevel)
+	}
+	if m.clearedmanual_level {
+		edges = append(edges, user.EdgeManualLevel)
+	}
 	return edges
 }
 
@@ -30949,6 +32303,10 @@ func (m *UserMutation) EdgeCleared(name string) bool {
 		return m.clearedattribute_values
 	case user.EdgePromoCodeUsages:
 		return m.clearedpromo_code_usages
+	case user.EdgeAutoLevel:
+		return m.clearedauto_level
+	case user.EdgeManualLevel:
+		return m.clearedmanual_level
 	}
 	return false
 }
@@ -30957,6 +32315,12 @@ func (m *UserMutation) EdgeCleared(name string) bool {
 // if that edge is not defined in the schema.
 func (m *UserMutation) ClearEdge(name string) error {
 	switch name {
+	case user.EdgeAutoLevel:
+		m.ClearAutoLevel()
+		return nil
+	case user.EdgeManualLevel:
+		m.ClearManualLevel()
+		return nil
 	}
 	return fmt.Errorf("unknown User unique edge %s", name)
 }
@@ -30991,6 +32355,12 @@ func (m *UserMutation) ResetEdge(name string) error {
 		return nil
 	case user.EdgePromoCodeUsages:
 		m.ResetPromoCodeUsages()
+		return nil
+	case user.EdgeAutoLevel:
+		m.ResetAutoLevel()
+		return nil
+	case user.EdgeManualLevel:
+		m.ResetManualLevel()
 		return nil
 	}
 	return fmt.Errorf("unknown User edge %s", name)

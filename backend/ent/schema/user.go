@@ -50,6 +50,14 @@ func (User) Fields() []ent.Field {
 		field.Float("payg_discount_multiplier").
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
 			Default(1.0),
+		field.Bool("payg_discount_override_enabled").
+			Default(false),
+		field.Int64("auto_level_id").
+			Optional().
+			Nillable(),
+		field.Int64("manual_level_id").
+			Optional().
+			Nillable(),
 		field.Int("concurrency").
 			Default(5),
 		field.String("status").
@@ -96,6 +104,14 @@ func (User) Edges() []ent.Edge {
 		edge.To("usage_logs", UsageLog.Type),
 		edge.To("attribute_values", UserAttributeValue.Type),
 		edge.To("promo_code_usages", PromoCodeUsage.Type),
+		edge.From("auto_level", AccessLevel.Type).
+			Ref("auto_users").
+			Field("auto_level_id").
+			Unique(),
+		edge.From("manual_level", AccessLevel.Type).
+			Ref("manual_users").
+			Field("manual_level_id").
+			Unique(),
 	}
 }
 
@@ -104,5 +120,7 @@ func (User) Indexes() []ent.Index {
 		// email 字段已在 Fields() 中声明 Unique()，无需重复索引
 		index.Fields("status"),
 		index.Fields("deleted_at"),
+		index.Fields("auto_level_id"),
+		index.Fields("manual_level_id"),
 	}
 }

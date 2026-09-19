@@ -90,6 +90,11 @@ func IsExclusive(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldIsExclusive, v))
 }
 
+// RequiredLevelID applies equality check predicate on the "required_level_id" field. It's identical to RequiredLevelIDEQ.
+func RequiredLevelID(v int64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldRequiredLevelID, v))
+}
+
 // Status applies equality check predicate on the "status" field. It's identical to StatusEQ.
 func Status(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldStatus, v))
@@ -578,6 +583,36 @@ func IsExclusiveEQ(v bool) predicate.Group {
 // IsExclusiveNEQ applies the NEQ predicate on the "is_exclusive" field.
 func IsExclusiveNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldIsExclusive, v))
+}
+
+// RequiredLevelIDEQ applies the EQ predicate on the "required_level_id" field.
+func RequiredLevelIDEQ(v int64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldRequiredLevelID, v))
+}
+
+// RequiredLevelIDNEQ applies the NEQ predicate on the "required_level_id" field.
+func RequiredLevelIDNEQ(v int64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldRequiredLevelID, v))
+}
+
+// RequiredLevelIDIn applies the In predicate on the "required_level_id" field.
+func RequiredLevelIDIn(vs ...int64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldRequiredLevelID, vs...))
+}
+
+// RequiredLevelIDNotIn applies the NotIn predicate on the "required_level_id" field.
+func RequiredLevelIDNotIn(vs ...int64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldRequiredLevelID, vs...))
+}
+
+// RequiredLevelIDIsNil applies the IsNil predicate on the "required_level_id" field.
+func RequiredLevelIDIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldRequiredLevelID))
+}
+
+// RequiredLevelIDNotNil applies the NotNil predicate on the "required_level_id" field.
+func RequiredLevelIDNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldRequiredLevelID))
 }
 
 // StatusEQ applies the EQ predicate on the "status" field.
@@ -2150,6 +2185,29 @@ func HasAllowedUsers() predicate.Group {
 func HasAllowedUsersWith(preds ...predicate.User) predicate.Group {
 	return predicate.Group(func(s *sql.Selector) {
 		step := newAllowedUsersStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasRequiredLevel applies the HasEdge predicate on the "required_level" edge.
+func HasRequiredLevel() predicate.Group {
+	return predicate.Group(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, RequiredLevelTable, RequiredLevelColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasRequiredLevelWith applies the HasEdge predicate on the "required_level" edge with a given conditions (other predicates).
+func HasRequiredLevelWith(preds ...predicate.AccessLevel) predicate.Group {
+	return predicate.Group(func(s *sql.Selector) {
+		step := newRequiredLevelStep()
 		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
 			for _, p := range preds {
 				p(s)

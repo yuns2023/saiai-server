@@ -38,6 +38,17 @@ export interface User {
   subscriptions?: UserSubscription[] // User's active subscriptions
   created_at: string
   updated_at: string
+  effective_level?: AccessLevel | null
+}
+
+export interface AccessLevel {
+  id: number
+  name: string
+  rank: number
+  balance_threshold: number
+  payg_discount_multiplier: number
+  created_at: string
+  updated_at: string
 }
 
 export interface AdminUser extends User {
@@ -45,6 +56,10 @@ export interface AdminUser extends User {
   notes: string
   // 用户全局按量折扣倍率（仅管理员接口返回）
   payg_discount_multiplier: number
+  effective_payg_discount_multiplier: number
+  payg_discount_override_enabled: boolean
+  auto_level?: AccessLevel | null
+  manual_level?: AccessLevel | null
   // 用户专属分组倍率配置 (group_id -> rate_multiplier)
   group_rates?: Record<number, number>
   // 当前并发数（仅管理员列表接口返回）
@@ -387,6 +402,8 @@ export interface Group {
   rate_multiplier: number
   is_exclusive: boolean
   status: 'active' | 'inactive'
+  required_level_id: number | null
+  required_level?: AccessLevel | null
   subscription_type: SubscriptionType
   five_hour_limit_usd: number | null
   daily_limit_usd: number | null
@@ -518,6 +535,7 @@ export interface CreateGroupRequest {
   platform?: GroupPlatform
   rate_multiplier?: number
   is_exclusive?: boolean
+  required_level_id?: number | null
   subscription_type?: SubscriptionType
   five_hour_limit_usd?: number | null
   daily_limit_usd?: number | null
@@ -564,6 +582,7 @@ export interface UpdateGroupRequest {
   platform?: GroupPlatform
   rate_multiplier?: number
   is_exclusive?: boolean
+  required_level_id?: number | null
   status?: 'active' | 'inactive'
   subscription_type?: SubscriptionType
   five_hour_limit_usd?: number | null
@@ -1374,6 +1393,7 @@ export interface UpdateUserRequest {
   role?: 'admin' | 'user'
   balance?: number
   payg_discount_multiplier?: number
+  payg_discount_override_enabled?: boolean
   concurrency?: number
   status?: 'active' | 'disabled'
   allowed_groups?: number[] | null

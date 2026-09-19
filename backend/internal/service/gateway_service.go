@@ -9181,6 +9181,10 @@ type apiKeyAuthCacheInvalidator interface {
 	InvalidateAuthCacheByKey(ctx context.Context, key string)
 }
 
+type userAuthCacheInvalidator interface {
+	InvalidateAuthCacheByUserID(ctx context.Context, userID int64)
+}
+
 type usageLogBestEffortWriter interface {
 	CreateBestEffort(ctx context.Context, log *UsageLog) error
 }
@@ -9222,6 +9226,8 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 		if cost.ActualCost > 0 {
 			if err := deps.userRepo.DeductBalance(billingCtx, p.User.ID, cost.ActualCost); err != nil {
 				slog.Error("deduct balance failed", "user_id", p.User.ID, "error", err)
+			} else if invalidator, ok := p.APIKeyService.(userAuthCacheInvalidator); ok {
+				invalidator.InvalidateAuthCacheByUserID(billingCtx, p.User.ID)
 			}
 			deps.billingCacheService.QueueDeductBalance(p.User.ID, cost.ActualCost)
 		}
@@ -9375,6 +9381,11 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	if result.APIKeyQuotaExhausted {
 		if invalidator, ok := p.APIKeyService.(apiKeyAuthCacheInvalidator); ok && p.APIKey != nil && p.APIKey.Key != "" {
 			invalidator.InvalidateAuthCacheByKey(billingCtx, p.APIKey.Key)
+		}
+	}
+	if result.UserAccessLevelChanged {
+		if invalidator, ok := p.APIKeyService.(userAuthCacheInvalidator); ok && p.User != nil {
+			invalidator.InvalidateAuthCacheByUserID(billingCtx, p.User.ID)
 		}
 	}
 

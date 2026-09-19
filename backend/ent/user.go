@@ -9,6 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
+	"github.com/Wei-Shaw/sub2api/ent/accesslevel"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 )
 
@@ -33,6 +34,12 @@ type User struct {
 	Balance float64 `json:"balance,omitempty"`
 	// PaygDiscountMultiplier holds the value of the "payg_discount_multiplier" field.
 	PaygDiscountMultiplier float64 `json:"payg_discount_multiplier,omitempty"`
+	// PaygDiscountOverrideEnabled holds the value of the "payg_discount_override_enabled" field.
+	PaygDiscountOverrideEnabled bool `json:"payg_discount_override_enabled,omitempty"`
+	// AutoLevelID holds the value of the "auto_level_id" field.
+	AutoLevelID *int64 `json:"auto_level_id,omitempty"`
+	// ManualLevelID holds the value of the "manual_level_id" field.
+	ManualLevelID *int64 `json:"manual_level_id,omitempty"`
 	// Concurrency holds the value of the "concurrency" field.
 	Concurrency int `json:"concurrency,omitempty"`
 	// Status holds the value of the "status" field.
@@ -77,11 +84,15 @@ type UserEdges struct {
 	AttributeValues []*UserAttributeValue `json:"attribute_values,omitempty"`
 	// PromoCodeUsages holds the value of the promo_code_usages edge.
 	PromoCodeUsages []*PromoCodeUsage `json:"promo_code_usages,omitempty"`
+	// AutoLevel holds the value of the auto_level edge.
+	AutoLevel *AccessLevel `json:"auto_level,omitempty"`
+	// ManualLevel holds the value of the manual_level edge.
+	ManualLevel *AccessLevel `json:"manual_level,omitempty"`
 	// UserAllowedGroups holds the value of the user_allowed_groups edge.
 	UserAllowedGroups []*UserAllowedGroup `json:"user_allowed_groups,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [10]bool
+	loadedTypes [12]bool
 }
 
 // APIKeysOrErr returns the APIKeys value or an error if the edge
@@ -165,10 +176,32 @@ func (e UserEdges) PromoCodeUsagesOrErr() ([]*PromoCodeUsage, error) {
 	return nil, &NotLoadedError{edge: "promo_code_usages"}
 }
 
+// AutoLevelOrErr returns the AutoLevel value or an error if the edge
+// was not loaded in eager-loading, or loaded but was not found.
+func (e UserEdges) AutoLevelOrErr() (*AccessLevel, error) {
+	if e.AutoLevel != nil {
+		return e.AutoLevel, nil
+	} else if e.loadedTypes[9] {
+		return nil, &NotFoundError{label: accesslevel.Label}
+	}
+	return nil, &NotLoadedError{edge: "auto_level"}
+}
+
+// ManualLevelOrErr returns the ManualLevel value or an error if the edge
+// was not loaded in eager-loading, or loaded but was not found.
+func (e UserEdges) ManualLevelOrErr() (*AccessLevel, error) {
+	if e.ManualLevel != nil {
+		return e.ManualLevel, nil
+	} else if e.loadedTypes[10] {
+		return nil, &NotFoundError{label: accesslevel.Label}
+	}
+	return nil, &NotLoadedError{edge: "manual_level"}
+}
+
 // UserAllowedGroupsOrErr returns the UserAllowedGroups value or an error if the edge
 // was not loaded in eager-loading.
 func (e UserEdges) UserAllowedGroupsOrErr() ([]*UserAllowedGroup, error) {
-	if e.loadedTypes[9] {
+	if e.loadedTypes[11] {
 		return e.UserAllowedGroups, nil
 	}
 	return nil, &NotLoadedError{edge: "user_allowed_groups"}
@@ -179,11 +212,11 @@ func (*User) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case user.FieldTotpEnabled:
+		case user.FieldPaygDiscountOverrideEnabled, user.FieldTotpEnabled:
 			values[i] = new(sql.NullBool)
 		case user.FieldBalance, user.FieldPaygDiscountMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case user.FieldID, user.FieldConcurrency, user.FieldSoraStorageQuotaBytes, user.FieldSoraStorageUsedBytes:
+		case user.FieldID, user.FieldAutoLevelID, user.FieldManualLevelID, user.FieldConcurrency, user.FieldSoraStorageQuotaBytes, user.FieldSoraStorageUsedBytes:
 			values[i] = new(sql.NullInt64)
 		case user.FieldEmail, user.FieldPasswordHash, user.FieldRole, user.FieldStatus, user.FieldUsername, user.FieldNotes, user.FieldTotpSecretEncrypted:
 			values[i] = new(sql.NullString)
@@ -258,6 +291,26 @@ func (_m *User) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field payg_discount_multiplier", values[i])
 			} else if value.Valid {
 				_m.PaygDiscountMultiplier = value.Float64
+			}
+		case user.FieldPaygDiscountOverrideEnabled:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field payg_discount_override_enabled", values[i])
+			} else if value.Valid {
+				_m.PaygDiscountOverrideEnabled = value.Bool
+			}
+		case user.FieldAutoLevelID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field auto_level_id", values[i])
+			} else if value.Valid {
+				_m.AutoLevelID = new(int64)
+				*_m.AutoLevelID = value.Int64
+			}
+		case user.FieldManualLevelID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field manual_level_id", values[i])
+			} else if value.Valid {
+				_m.ManualLevelID = new(int64)
+				*_m.ManualLevelID = value.Int64
 			}
 		case user.FieldConcurrency:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -373,6 +426,16 @@ func (_m *User) QueryPromoCodeUsages() *PromoCodeUsageQuery {
 	return NewUserClient(_m.config).QueryPromoCodeUsages(_m)
 }
 
+// QueryAutoLevel queries the "auto_level" edge of the User entity.
+func (_m *User) QueryAutoLevel() *AccessLevelQuery {
+	return NewUserClient(_m.config).QueryAutoLevel(_m)
+}
+
+// QueryManualLevel queries the "manual_level" edge of the User entity.
+func (_m *User) QueryManualLevel() *AccessLevelQuery {
+	return NewUserClient(_m.config).QueryManualLevel(_m)
+}
+
 // QueryUserAllowedGroups queries the "user_allowed_groups" edge of the User entity.
 func (_m *User) QueryUserAllowedGroups() *UserAllowedGroupQuery {
 	return NewUserClient(_m.config).QueryUserAllowedGroups(_m)
@@ -426,6 +489,19 @@ func (_m *User) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("payg_discount_multiplier=")
 	builder.WriteString(fmt.Sprintf("%v", _m.PaygDiscountMultiplier))
+	builder.WriteString(", ")
+	builder.WriteString("payg_discount_override_enabled=")
+	builder.WriteString(fmt.Sprintf("%v", _m.PaygDiscountOverrideEnabled))
+	builder.WriteString(", ")
+	if v := _m.AutoLevelID; v != nil {
+		builder.WriteString("auto_level_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.ManualLevelID; v != nil {
+		builder.WriteString("manual_level_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteString(", ")
 	builder.WriteString("concurrency=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Concurrency))

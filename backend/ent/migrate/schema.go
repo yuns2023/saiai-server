@@ -93,6 +93,34 @@ var (
 			},
 		},
 	}
+	// AccessLevelsColumns holds the columns for the "access_levels" table.
+	AccessLevelsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "rank", Type: field.TypeInt},
+		{Name: "balance_threshold", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
+		{Name: "payg_discount_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// AccessLevelsTable holds the schema information for the "access_levels" table.
+	AccessLevelsTable = &schema.Table{
+		Name:       "access_levels",
+		Columns:    AccessLevelsColumns,
+		PrimaryKey: []*schema.Column{AccessLevelsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "accesslevel_rank",
+				Unique:  true,
+				Columns: []*schema.Column{AccessLevelsColumns[2]},
+			},
+			{
+				Name:    "accesslevel_balance_threshold",
+				Unique:  false,
+				Columns: []*schema.Column{AccessLevelsColumns[3]},
+			},
+		},
+	}
 	// AccountsColumns holds the columns for the "accounts" table.
 	AccountsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -425,12 +453,21 @@ var (
 		{Name: "codex_client_policy", Type: field.TypeString, Size: 32, Default: "off"},
 		{Name: "claude_device_limit_mode", Type: field.TypeString, Size: 16, Default: "off"},
 		{Name: "claude_device_base_limit", Type: field.TypeInt, Default: 1},
+		{Name: "required_level_id", Type: field.TypeInt64, Nullable: true},
 	}
 	// GroupsTable holds the schema information for the "groups" table.
 	GroupsTable = &schema.Table{
 		Name:       "groups",
 		Columns:    GroupsColumns,
 		PrimaryKey: []*schema.Column{GroupsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "groups_access_levels_required_groups",
+				Columns:    []*schema.Column{GroupsColumns[47]},
+				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+		},
 		Indexes: []*schema.Index{
 			{
 				Name:    "group_status",
@@ -461,6 +498,11 @@ var (
 				Name:    "group_sort_order",
 				Unique:  false,
 				Columns: []*schema.Column{GroupsColumns[35]},
+			},
+			{
+				Name:    "group_required_level_id",
+				Unique:  false,
+				Columns: []*schema.Column{GroupsColumns[47]},
 			},
 		},
 	}
@@ -1060,6 +1102,7 @@ var (
 		{Name: "role", Type: field.TypeString, Size: 20, Default: "user"},
 		{Name: "balance", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
 		{Name: "payg_discount_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
+		{Name: "payg_discount_override_enabled", Type: field.TypeBool, Default: false},
 		{Name: "concurrency", Type: field.TypeInt, Default: 5},
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
 		{Name: "username", Type: field.TypeString, Size: 100, Default: ""},
@@ -1069,22 +1112,48 @@ var (
 		{Name: "totp_enabled_at", Type: field.TypeTime, Nullable: true},
 		{Name: "sora_storage_quota_bytes", Type: field.TypeInt64, Default: 0},
 		{Name: "sora_storage_used_bytes", Type: field.TypeInt64, Default: 0},
+		{Name: "auto_level_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "manual_level_id", Type: field.TypeInt64, Nullable: true},
 	}
 	// UsersTable holds the schema information for the "users" table.
 	UsersTable = &schema.Table{
 		Name:       "users",
 		Columns:    UsersColumns,
 		PrimaryKey: []*schema.Column{UsersColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "users_access_levels_auto_users",
+				Columns:    []*schema.Column{UsersColumns[19]},
+				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+			{
+				Symbol:     "users_access_levels_manual_users",
+				Columns:    []*schema.Column{UsersColumns[20]},
+				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+		},
 		Indexes: []*schema.Index{
 			{
 				Name:    "user_status",
 				Unique:  false,
-				Columns: []*schema.Column{UsersColumns[10]},
+				Columns: []*schema.Column{UsersColumns[11]},
 			},
 			{
 				Name:    "user_deleted_at",
 				Unique:  false,
 				Columns: []*schema.Column{UsersColumns[3]},
+			},
+			{
+				Name:    "user_auto_level_id",
+				Unique:  false,
+				Columns: []*schema.Column{UsersColumns[19]},
+			},
+			{
+				Name:    "user_manual_level_id",
+				Unique:  false,
+				Columns: []*schema.Column{UsersColumns[20]},
 			},
 		},
 	}
@@ -1301,6 +1370,7 @@ var (
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		APIKeysTable,
+		AccessLevelsTable,
 		AccountsTable,
 		AccountGroupsTable,
 		AnnouncementsTable,
@@ -1334,6 +1404,9 @@ func init() {
 	APIKeysTable.Annotation = &entsql.Annotation{
 		Table: "api_keys",
 	}
+	AccessLevelsTable.Annotation = &entsql.Annotation{
+		Table: "access_levels",
+	}
 	AccountsTable.ForeignKeys[0].RefTable = ProxiesTable
 	AccountsTable.Annotation = &entsql.Annotation{
 		Table: "accounts",
@@ -1354,6 +1427,7 @@ func init() {
 	ErrorPassthroughRulesTable.Annotation = &entsql.Annotation{
 		Table: "error_passthrough_rules",
 	}
+	GroupsTable.ForeignKeys[0].RefTable = AccessLevelsTable
 	GroupsTable.Annotation = &entsql.Annotation{
 		Table: "groups",
 	}
@@ -1405,6 +1479,8 @@ func init() {
 	UsageLogsTable.Annotation = &entsql.Annotation{
 		Table: "usage_logs",
 	}
+	UsersTable.ForeignKeys[0].RefTable = AccessLevelsTable
+	UsersTable.ForeignKeys[1].RefTable = AccessLevelsTable
 	UsersTable.Annotation = &entsql.Annotation{
 		Table: "users",
 	}
