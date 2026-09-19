@@ -1814,6 +1814,24 @@
         </div>
       </div>
 
+      <div
+        v-if="account.platform !== 'openai'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <label class="input-label" for="edit-account-blocked-model-patterns">
+          {{ t('admin.accounts.accountBlockedModels') }}
+        </label>
+        <textarea
+          id="edit-account-blocked-model-patterns"
+          v-model="blockedModelPatternsText"
+          rows="3"
+          class="input font-mono text-sm"
+          data-testid="account-blocked-model-patterns"
+          :placeholder="t('admin.accounts.accountBlockedModelsPlaceholder')"
+        />
+        <p class="input-hint">{{ t('admin.accounts.accountBlockedModelsHint') }}</p>
+      </div>
+
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div>
           <label class="input-label">{{ t('common.status') }}</label>
@@ -1904,6 +1922,10 @@ import { applyInterceptWarmup } from '@/components/account/credentialsBuilder'
 import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import {
+  formatAccountBlockedModelPatterns,
+  parseAccountBlockedModelPatterns
+} from '@/utils/accountBlockedModels'
+import {
   // OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
   OPENAI_WS_MODE_PASSTHROUGH,
@@ -1982,6 +2004,7 @@ const isBedrockAPIKeyMode = computed(() =>
 const modelMappings = ref<ModelMapping[]>([])
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
+const blockedModelPatternsText = ref('')
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
 const poolModeEnabled = ref(false)
@@ -2223,6 +2246,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   autoPauseOnExpired.value = newAccount.auto_pause_on_expired === true
 
   const extra = newAccount.extra as Record<string, unknown> | undefined
+  blockedModelPatternsText.value = formatAccountBlockedModelPatterns(extra?.blocked_model_patterns)
 
   // OpenAI passthrough 开关已下线；旧账号 extra 上的 openai_passthrough/openai_oauth_passthrough 字段读到也忽略。
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -3472,6 +3496,19 @@ const handleSubmit = async () => {
         newExtra.quota_reset_timezone = editResetTimezone.value || 'UTC'
       } else {
         delete newExtra.quota_reset_timezone
+      }
+      updatePayload.extra = newExtra
+    }
+
+    if (props.account.platform !== 'openai') {
+      const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
+        (props.account.extra as Record<string, unknown>) || {}
+      const newExtra: Record<string, unknown> = { ...currentExtra }
+      const blockedModelPatterns = parseAccountBlockedModelPatterns(blockedModelPatternsText.value)
+      if (blockedModelPatterns.length > 0) {
+        newExtra.blocked_model_patterns = blockedModelPatterns
+      } else {
+        delete newExtra.blocked_model_patterns
       }
       updatePayload.extra = newExtra
     }

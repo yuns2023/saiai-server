@@ -2490,6 +2490,9 @@ export default {
           '仅对 Anthropic API Key 生效。开启后，messages/count_tokens 请求将透传上游并仅替换认证，保留计费/并发/审计及必要安全过滤；关闭即可回滚到现有兼容链路。'
       },
       modelRestriction: '模型限制（可选）',
+      accountBlockedModels: '账号禁止模型',
+      accountBlockedModelsPlaceholder: '例如：claude-fable-*（每行一个）',
+      accountBlockedModelsHint: '匹配到的模型不会分配给此账号；支持 * 通配符。留空表示不限制。',
       modelWhitelist: '模型白名单',
       modelMapping: '模型映射',
       selectAllowedModels: '选择允许的模型。留空则支持所有模型。',

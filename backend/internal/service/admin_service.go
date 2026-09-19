@@ -1732,6 +1732,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if IsRetiredPlatform(input.Platform) {
 		return nil, ErrPlatformRetired
 	}
+	if err := NormalizeAccountBlockedModelPatternsExtra(input.Extra); err != nil {
+		return nil, err
+	}
 	applyClaudeOAuthSingleDeviceDefaults(input.Platform, input.Type, input.Extra)
 
 	// 绑定分组
@@ -1843,6 +1846,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		return nil, ErrPlatformRetired
 	}
 	wasOveragesEnabled := account.IsOveragesEnabled()
+	if err := NormalizeAccountBlockedModelPatternsExtra(input.Extra); err != nil {
+		return nil, err
+	}
 
 	if input.Name != "" {
 		account.Name = input.Name
@@ -2007,6 +2013,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	if len(input.AccountIDs) == 0 {
 		return result, nil
+	}
+	if err := NormalizeAccountBlockedModelPatternsExtra(input.Extra); err != nil {
+		return nil, err
 	}
 	accountsForPinnedDefaults, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 	if err != nil {

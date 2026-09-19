@@ -2346,6 +2346,9 @@ export default {
           'Only applies to Anthropic API Key accounts. When enabled, messages/count_tokens are forwarded in passthrough mode with auth replacement only, while billing/concurrency/audit and safety filtering are preserved. Disable to roll back immediately.'
       },
       modelRestriction: 'Model Restriction (Optional)',
+      accountBlockedModels: 'Account Model Denylist',
+      accountBlockedModelsPlaceholder: 'Example: claude-fable-* (one per line)',
+      accountBlockedModelsHint: 'Matching models will not be assigned to this account. Supports * wildcards; leave empty for no restriction.',
       modelWhitelist: 'Model Whitelist',
       modelMapping: 'Model Mapping',
       selectAllowedModels: 'Select allowed models. Leave empty to support all models.',
