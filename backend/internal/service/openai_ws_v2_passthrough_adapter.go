@@ -25,6 +25,14 @@ const openaiWSV2PassthroughModeFields = "ws_mode=passthrough ws_router=v2"
 
 var _ openaiwsv2.FrameConn = (*openAIWSClientFrameConn)(nil)
 
+func openAIWSOptionalString(value string) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
 func (c *openAIWSClientFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
 	if c == nil || c.conn == nil {
 		return coderws.MessageText, nil, errOpenAIWSConnClosed
@@ -78,7 +86,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return errors.New("token is empty")
 	}
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
-	requestServiceTier := extractOpenAIServiceTierFromBody(firstClientMessage)
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
 	logOpenAIWSV2Passthrough(
 		"relay_start account_id=%d model=%s previous_response_id=%s first_message_type=%s first_message_bytes=%d",
@@ -187,6 +194,20 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				return hooks.OnClientTurn(turn, payload)
 			},
+			TurnMetadata: func(turn int, payload []byte) openaiwsv2.RelayTurnMetadata {
+				metadata := openaiwsv2.RelayTurnMetadata{
+					Turn:               turn,
+					RequestModel:       strings.TrimSpace(gjson.GetBytes(payload, "model").String()),
+					RequestPayloadHash: HashUsageRequestPayload(payload),
+				}
+				if effort := extractOpenAIReasoningEffortFromBody(payload, metadata.RequestModel); effort != nil {
+					metadata.ReasoningEffort = *effort
+				}
+				if serviceTier := extractOpenAIServiceTierFromBody(payload); serviceTier != nil {
+					metadata.RequestServiceTier = *serviceTier
+				}
+				return metadata
+			},
 			OnUsageParseFailure: func(eventType string, usageRaw string) {
 				logOpenAIWSV2Passthrough(
 					"usage_parse_failed event_type=%s usage_raw=%s",
@@ -195,7 +216,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				)
 			},
 			OnTurnComplete: func(turn openaiwsv2.RelayTurnResult) {
-				turnNo := int(completedTurns.Add(1))
+				completionNo := int(completedTurns.Add(1))
+				turnNo := turn.Turn
+				if turnNo <= 0 {
+					turnNo = completionNo
+				}
+				requestServiceTier := normalizeOpenAIServiceTier(turn.RequestServiceTier)
 				turnResult := &OpenAIForwardResult{
 					RequestID: turn.RequestID,
 					Usage: OpenAIUsage{
@@ -205,7 +231,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 						ReportedServiceTier:      normalizeOpenAIReportedServiceTier(turn.Usage.ServiceTier),
 					},
-					Model: turn.RequestModel,
+					Model:              turn.RequestModel,
+					ReasoningEffort:    openAIWSOptionalString(turn.ReasoningEffort),
+					RequestPayloadHash: turn.RequestPayloadHash,
 					ServiceTier: resolveOpenAIServiceTier(
 						normalizeOpenAIReportedServiceTier(turn.Usage.ServiceTier),
 						requestServiceTier,
@@ -257,10 +285,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			CacheReadInputTokens:     relayResult.Usage.CacheReadInputTokens,
 			ReportedServiceTier:      normalizeOpenAIReportedServiceTier(relayResult.Usage.ServiceTier),
 		},
-		Model: relayResult.RequestModel,
+		Model:              relayResult.RequestModel,
+		ReasoningEffort:    openAIWSOptionalString(relayResult.ReasoningEffort),
+		RequestPayloadHash: relayResult.RequestPayloadHash,
 		ServiceTier: resolveOpenAIServiceTier(
 			normalizeOpenAIReportedServiceTier(relayResult.Usage.ServiceTier),
-			requestServiceTier,
+			normalizeOpenAIServiceTier(relayResult.RequestServiceTier),
 		),
 		Stream:          true,
 		OpenAIWSMode:    true,

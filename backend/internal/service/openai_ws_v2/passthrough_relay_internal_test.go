@@ -51,6 +51,8 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 			nil,
 			nil,
 			nil,
+			nil,
+			nil,
 			exitCh,
 		)
 		sig := <-exitCh
@@ -69,6 +71,8 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 			}, true),
 			func(_ coderws.MessageType, _ []byte) error { return errors.New("boom") },
 			func() {},
+			nil,
+			nil,
 			nil,
 			nil,
 			nil,
@@ -94,6 +98,8 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 			func(_ coderws.MessageType, _ []byte) error { return nil },
 			func() {},
 			forwarded,
+			nil,
+			nil,
 			nil,
 			nil,
 			func(event RelayTraceEvent) {
@@ -128,11 +134,13 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 			func() {},
 			nil,
 			turns,
+			&relayState{turns: newRelayTurnTracker()},
 			func(turn int, payload []byte) error {
 				observedTurn = turn
 				observedPayload = append([]byte(nil), payload...)
 				return nil
 			},
+			nil,
 			nil,
 			exitCh,
 		)
@@ -356,7 +364,7 @@ func TestEmitTurnCompleteCoverage(t *testing.T) {
 	called := 0
 	emitTurnComplete(func(turn RelayTurnResult) {
 		called++
-	}, &relayState{requestModel: "gpt-5"}, observedUpstreamEvent{
+	}, &relayState{}, observedUpstreamEvent{
 		terminal:   false,
 		eventType:  "response.output_text.delta",
 		responseID: "resp_ignored",
@@ -367,7 +375,7 @@ func TestEmitTurnCompleteCoverage(t *testing.T) {
 	// 缺少 response_id 时不应触发。
 	emitTurnComplete(func(turn RelayTurnResult) {
 		called++
-	}, &relayState{requestModel: "gpt-5"}, observedUpstreamEvent{
+	}, &relayState{}, observedUpstreamEvent{
 		terminal:  true,
 		eventType: "response.completed",
 	})
@@ -441,10 +449,67 @@ func TestRelayTurnTimingHelpersCoverage(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestRelayTurnTracker_BindsMetadataByResponseID(t *testing.T) {
+	t.Parallel()
+
+	tracker := newRelayTurnTracker()
+	first := RelayTurnMetadata{
+		Turn:               1,
+		RequestModel:       "gpt-6-astra",
+		ReasoningEffort:    "high",
+		RequestServiceTier: "flex",
+		RequestPayloadHash: "hash-astra",
+	}
+	second := RelayTurnMetadata{
+		Turn:               2,
+		RequestModel:       "gpt-5.6-sol",
+		ReasoningEffort:    "xhigh",
+		RequestServiceTier: "priority",
+		RequestPayloadHash: "hash-sol",
+	}
+	tracker.register(first)
+	tracker.register(second)
+
+	boundFirst, ok := tracker.bind("resp_astra")
+	require.True(t, ok)
+	require.Equal(t, first, boundFirst)
+	boundSecond, ok := tracker.bind("resp_sol")
+	require.True(t, ok)
+	require.Equal(t, second, boundSecond)
+
+	completedSecond, ok := tracker.complete("resp_sol")
+	require.True(t, ok)
+	require.Equal(t, second, completedSecond)
+	completedFirst, ok := tracker.complete("resp_astra")
+	require.True(t, ok)
+	require.Equal(t, first, completedFirst)
+
+	last, ok := tracker.lastCompletedMetadata()
+	require.True(t, ok)
+	require.Equal(t, first, last)
+	_, ok = tracker.bind("resp_sol")
+	require.False(t, ok, "重复 response_id 不得占用后续 turn")
+}
+
+func TestRelayTurnTracker_CancelPendingWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	tracker := newRelayTurnTracker()
+	tracker.register(RelayTurnMetadata{Turn: 1, RequestModel: "gpt-6-astra"})
+	tracker.register(RelayTurnMetadata{Turn: 2, RequestModel: "gpt-5.6-sol"})
+	tracker.cancelPending(2)
+
+	metadata, ok := tracker.bind("resp_astra")
+	require.True(t, ok)
+	require.Equal(t, 1, metadata.Turn)
+	_, ok = tracker.bind("resp_unexpected")
+	require.False(t, ok)
+}
+
 func TestObserveUpstreamMessage_ResponseIDFallbackPolicy(t *testing.T) {
 	t.Parallel()
 
-	state := &relayState{requestModel: "gpt-5"}
+	state := &relayState{}
 	startAt := time.Unix(0, 0)
 	now := startAt
 	nowFn := func() time.Time {

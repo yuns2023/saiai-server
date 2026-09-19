@@ -292,11 +292,14 @@ type OpenAIForwardResult struct {
 	// ReasoningEffort is extracted from request body (reasoning.effort) or derived from model suffix.
 	// Stored for usage records display; nil means not provided / not applicable.
 	ReasoningEffort *string
-	Stream          bool
-	OpenAIWSMode    bool
-	ResponseHeaders http.Header
-	Duration        time.Duration
-	FirstTokenMs    *int
+	// RequestPayloadHash identifies the exact request payload associated with this result.
+	// WebSocket transports populate it per turn so usage records do not reuse the first frame's hash.
+	RequestPayloadHash string
+	Stream             bool
+	OpenAIWSMode       bool
+	ResponseHeaders    http.Header
+	Duration           time.Duration
+	FirstTokenMs       *int
 	// Image API accounting metadata. Zero values keep Responses API behavior unchanged.
 	TextInputTokens   int
 	ImageInputTokens  int
