@@ -9,6 +9,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.noGroup': 'No Group',
   'admin.dashboard.requests': 'Requests',
   'admin.dashboard.tokens': 'Tokens',
+  'admin.dashboard.metricShare': 'Share',
   'admin.dashboard.actual': 'Actual',
   'admin.dashboard.standard': 'Standard',
   'admin.dashboard.metricTokens': 'By Tokens',
@@ -110,5 +111,6 @@ describe('GroupDistributionChart', () => {
       dataset: { data: [0.9, 0.1] },
     })
     expect(label).toBe('group-b: $0.900 (90.0%)')
+    expect(rows[0].text()).toContain('90.0%')
   })
 })

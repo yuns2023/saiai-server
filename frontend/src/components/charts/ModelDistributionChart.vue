@@ -113,6 +113,7 @@
               <th class="pb-2 text-left">{{ t('admin.dashboard.model') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.requests') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.tokens') }}</th>
+              <th class="pb-2 text-right">{{ t('admin.dashboard.metricShare') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.actual') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.standard') }}</th>
             </tr>
@@ -139,6 +140,9 @@
                 <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
                   {{ formatTokens(model.total_tokens) }}
                 </td>
+                <td class="py-1.5 text-right text-gray-500 dark:text-gray-400">
+                  {{ formatPercentage(getMetricShare(model)) }}
+                </td>
                 <td class="py-1.5 text-right text-green-600 dark:text-green-400">
                   ${{ formatCost(model.actual_cost) }}
                 </td>
@@ -147,7 +151,7 @@
                 </td>
               </tr>
               <tr v-if="expandedKey === `model-${model.model}`">
-                <td colspan="5" class="p-0">
+                <td colspan="6" class="p-0">
                   <UserBreakdownSubTable
                     :items="breakdownItems"
                     :loading="breakdownLoading"
@@ -244,6 +248,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
 import type { ModelStat, UserSpendingRankingItem, UserBreakdownItem } from '@/types'
 import { getUserBreakdown } from '@/api/admin/dashboard'
+import { distributionChartColors, stableChartColor } from '@/utils/chartColors'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
@@ -270,6 +275,8 @@ const props = withDefaults(defineProps<{
   rankingError?: boolean
   startDate?: string
   endDate?: string
+  startTime?: string
+  endTime?: string
 }>(), {
   upstreamModelStats: () => [],
   mappingModelStats: () => [],
@@ -304,6 +311,8 @@ const toggleBreakdown = async (type: string, id: string) => {
     const res = await getUserBreakdown({
       start_date: props.startDate,
       end_date: props.endDate,
+      start_time: props.startTime,
+      end_time: props.endTime,
       model: id,
       model_source: props.source,
     })
@@ -324,20 +333,7 @@ const emit = defineEmits<{
 const enableRankingView = computed(() => props.enableRankingView)
 const activeView = ref<'model_distribution' | 'spending_ranking'>('model_distribution')
 
-const chartColors = [
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899',
-  '#14b8a6',
-  '#f97316',
-  '#6366f1',
-  '#84cc16',
-  '#06b6d4',
-  '#a855f7'
-]
+const chartColors = distributionChartColors
 
 const displayModelStats = computed(() => {
   const sourceStats = props.source === 'upstream'
@@ -359,7 +355,7 @@ const chartData = computed(() => {
     datasets: [
       {
         data: displayModelStats.value.map((m) => props.metric === 'actual_cost' ? m.actual_cost : m.total_tokens),
-        backgroundColor: chartColors.slice(0, displayModelStats.value.length),
+        backgroundColor: displayModelStats.value.map((model) => stableChartColor(model.model)),
         borderWidth: 0
       }
     ]
@@ -478,6 +474,14 @@ const formatTokens = (value: number): string => {
 const formatNumber = (value: number): string => {
   return value.toLocaleString()
 }
+
+const getMetricShare = (model: ModelStat): number => {
+  const metricKey = props.metric === 'actual_cost' ? 'actual_cost' : 'total_tokens'
+  const total = displayModelStats.value.reduce((sum, item) => sum + item[metricKey], 0)
+  return total > 0 ? (model[metricKey] / total) * 100 : 0
+}
+
+const formatPercentage = (value: number): string => `${value.toFixed(1)}%`
 
 const getRankingUserLabel = (item: UserSpendingRankingItem): string => {
   if (item.email) return item.email

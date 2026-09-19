@@ -166,25 +166,35 @@ func (h *UsageHandler) List(c *gin.Context) {
 
 	// Parse date range
 	var startTime, endTime *time.Time
-	userTZ := c.Query("timezone") // Get user's timezone from request
-	if startDateStr := c.Query("start_date"); startDateStr != "" {
-		t, err := timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
-			return
-		}
-		startTime = &t
+	preciseStart, preciseEnd, preciseProvided, preciseErr := parsePreciseTimeRange(c)
+	if preciseErr != nil {
+		response.BadRequest(c, preciseErr.Error())
+		return
 	}
-
-	if endDateStr := c.Query("end_date"); endDateStr != "" {
-		t, err := timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
-			return
+	if preciseProvided {
+		startTime = &preciseStart
+		endTime = &preciseEnd
+	} else {
+		userTZ := c.Query("timezone") // Get user's timezone from request
+		if startDateStr := c.Query("start_date"); startDateStr != "" {
+			t, err := timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
+			if err != nil {
+				response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
+				return
+			}
+			startTime = &t
 		}
-		// Use half-open range [start, end), move to next calendar day start (DST-safe).
-		t = t.AddDate(0, 0, 1)
-		endTime = &t
+
+		if endDateStr := c.Query("end_date"); endDateStr != "" {
+			t, err := timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
+			if err != nil {
+				response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
+				return
+			}
+			// Use half-open range [start, end), move to next calendar day start (DST-safe).
+			t = t.AddDate(0, 0, 1)
+			endTime = &t
+		}
 	}
 
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize}
@@ -308,7 +318,15 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 	startDateStr := c.Query("start_date")
 	endDateStr := c.Query("end_date")
 
-	if startDateStr != "" && endDateStr != "" {
+	preciseStart, preciseEnd, preciseProvided, preciseErr := parsePreciseTimeRange(c)
+	if preciseErr != nil {
+		response.BadRequest(c, preciseErr.Error())
+		return
+	}
+	if preciseProvided {
+		startTime = preciseStart
+		endTime = preciseEnd
+	} else if startDateStr != "" && endDateStr != "" {
 		var err error
 		startTime, err = timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
 		if err != nil {

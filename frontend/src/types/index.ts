@@ -1491,6 +1491,8 @@ export interface UsageQueryParams {
   billing_type?: number | null
   start_date?: string
   end_date?: string
+  start_time?: string
+  end_time?: string
   timezone?: string
 }
 

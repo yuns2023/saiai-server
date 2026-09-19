@@ -302,16 +302,20 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) 
 			"total_requests",
 			"total_input_tokens",
 			"total_output_tokens",
+			"total_cache_creation_tokens",
+			"total_cache_read_tokens",
 			"total_cache_tokens",
 			"total_cost",
 			"total_actual_cost",
 			"total_account_cost",
 			"avg_duration_ms",
-		}).AddRow(int64(1), int64(2), int64(3), int64(4), 1.2, 1.0, 1.2, 20.0))
+		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 1.2, 20.0))
 
 	stats, err := repo.GetStatsWithFilters(context.Background(), filters)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), stats.TotalRequests)
+	require.Equal(t, int64(1), stats.TotalCacheCreationTokens)
+	require.Equal(t, int64(3), stats.TotalCacheReadTokens)
 	require.Equal(t, int64(9), stats.TotalTokens)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -330,16 +334,20 @@ func TestUsageLogRepositoryGetStatsWithFiltersSessionID(t *testing.T) {
 			"total_requests",
 			"total_input_tokens",
 			"total_output_tokens",
+			"total_cache_creation_tokens",
+			"total_cache_read_tokens",
 			"total_cache_tokens",
 			"total_cost",
 			"total_actual_cost",
 			"total_account_cost",
 			"avg_duration_ms",
-		}).AddRow(int64(1), int64(2), int64(3), int64(4), 1.2, 1.0, 1.2, 20.0))
+		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 1.2, 20.0))
 
 	stats, err := repo.GetStatsWithFilters(context.Background(), filters)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), stats.TotalRequests)
+	require.Equal(t, int64(1), stats.TotalCacheCreationTokens)
+	require.Equal(t, int64(3), stats.TotalCacheReadTokens)
 	require.Equal(t, int64(9), stats.TotalTokens)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

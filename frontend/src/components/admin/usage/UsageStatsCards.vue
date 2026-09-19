@@ -19,6 +19,11 @@
           {{ t('usage.in') }}: {{ formatTokens(stats?.total_input_tokens || 0) }} /
           {{ t('usage.out') }}: {{ formatTokens(stats?.total_output_tokens || 0) }}
         </p>
+        <p class="text-xs text-gray-400">
+          {{ t('usage.cacheWrite') }}: {{ formatTokens(stats?.total_cache_creation_tokens || 0) }} /
+          {{ t('usage.cacheRead') }}: {{ formatTokens(stats?.total_cache_read_tokens || 0) }}
+          <span v-if="cacheShare > 0">· {{ t('usage.cacheShare') }} {{ cacheShare.toFixed(1) }}%</span>
+        </p>
       </div>
     </div>
     <div class="card p-4 flex items-center gap-3">
@@ -26,19 +31,17 @@
         <Icon name="dollar" size="md" />
       </div>
       <div class="min-w-0 flex-1">
-        <p class="text-xs font-medium text-gray-500">{{ t('usage.totalCost') }}</p>
+        <p class="text-xs font-medium text-gray-500">{{ t('usage.userBilled') }}</p>
         <p class="text-xl font-bold text-green-600">
-          ${{ ((stats?.total_account_cost ?? stats?.total_actual_cost) || 0).toFixed(4) }}
+          ${{ (stats?.total_actual_cost || 0).toFixed(4) }}
         </p>
-        <p class="text-xs text-gray-400" v-if="stats?.total_account_cost != null">
-          {{ t('usage.userBilled') }}:
-          <span class="text-gray-300">${{ (stats?.total_actual_cost || 0).toFixed(4) }}</span>
-          · {{ t('usage.standardCost') }}:
-          <span class="text-gray-300">${{ (stats?.total_cost || 0).toFixed(4) }}</span>
-        </p>
-        <p class="text-xs text-gray-400" v-else>
+        <p class="text-xs text-gray-400">
           {{ t('usage.standardCost') }}:
-          <span class="line-through">${{ (stats?.total_cost || 0).toFixed(4) }}</span>
+          <span>${{ (stats?.total_cost || 0).toFixed(4) }}</span>
+          <template v-if="stats?.total_account_cost != null">
+            · {{ t('usage.accountBilled') }}:
+            <span>${{ (stats?.total_account_cost || 0).toFixed(4) }}</span>
+          </template>
         </p>
       </div>
     </div>
@@ -52,13 +55,20 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import Icon from '@/components/icons/Icon.vue'
 
-defineProps<{ stats: AdminUsageStatsResponse | null }>()
+const props = defineProps<{ stats: AdminUsageStatsResponse | null }>()
 
 const { t } = useI18n()
+
+const cacheShare = computed(() => {
+  const total = props.stats?.total_tokens || 0
+  if (total <= 0) return 0
+  return ((props.stats?.total_cache_tokens || 0) / total) * 100
+})
 
 const formatDuration = (ms: number) =>
   ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`

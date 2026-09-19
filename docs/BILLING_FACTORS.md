@@ -38,3 +38,23 @@ The existing configured model-pricing aliases remain authoritative. In
 particular, a configured Fable 5.1 → Fable 5 alias continues to use the Fable 5
 price for every token category. The user discount and group model rate
 are separate user-billing factors and do not change that base price mapping.
+
+## Administrator usage presentation
+
+The administrator usage UI names the three cost values by their billing role:
+
+- `total_cost` is the **configured base** before user or account multipliers;
+- `actual_cost` is **user billed** and drives the cost distribution view; and
+- `total_cost × account_rate_multiplier` is **account billed** when an account
+  filter makes that aggregate meaningful.
+
+The total-token summary is the sum of input, output, cache-creation, and
+cache-read tokens. The UI exposes both cache classes and their share so the
+headline total can be reconciled without inspecting individual records.
+
+Administrator dashboard and usage range endpoints accept either inclusive
+calendar dates (`start_date` / `end_date`) or a paired, half-open RFC3339 range
+(`[start_time, end_time)`). The timestamp pair takes precedence. The “Last 24
+hours” preset uses the timestamp form; calendar presets retain local-day
+semantics. Cleanup remains calendar-date-only and must not silently widen a
+rolling timestamp range.

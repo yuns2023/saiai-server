@@ -16,6 +16,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.model': 'Model',
   'admin.dashboard.requests': 'Requests',
   'admin.dashboard.tokens': 'Tokens',
+  'admin.dashboard.metricShare': 'Share',
   'admin.dashboard.actual': 'Actual',
   'admin.dashboard.standard': 'Standard',
   'admin.dashboard.metricTokens': 'By Tokens',
@@ -124,6 +125,25 @@ describe('ModelDistributionChart', () => {
       dataset: { data: [1.4, 0.2] },
     })
     expect(label).toBe('model-b: $1.40 (87.5%)')
+    expect(rows[0].text()).toContain('87.5%')
+  })
+
+  it('keeps each model color stable when the active metric changes', () => {
+    const tokenWrapper = mount(ModelDistributionChart, {
+      props: { modelStats },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+    const costWrapper = mount(ModelDistributionChart, {
+      props: { modelStats, metric: 'actual_cost' },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+
+    const tokenData = JSON.parse(tokenWrapper.find('.chart-data').text())
+    const costData = JSON.parse(costWrapper.find('.chart-data').text())
+    const tokenColors = Object.fromEntries(tokenData.labels.map((label: string, index: number) => [label, tokenData.datasets[0].backgroundColor[index]]))
+    const costColors = Object.fromEntries(costData.labels.map((label: string, index: number) => [label, costData.datasets[0].backgroundColor[index]]))
+
+    expect(costColors).toEqual(tokenColors)
   })
 
   it('renders Others in the spending ranking table and uses a dedicated chart color', async () => {
