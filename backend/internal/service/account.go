@@ -1194,7 +1194,7 @@ const (
 	ClaudeOAuthModePinned                             = "pinned"
 	ClaudeOAuthModeSingleDevice                       = "single_device"
 	DefaultClaudeOAuthCarpoolDeviceLimit              = 5
-	ClaudeOAuthCarpoolAutoExpandLimit                 = 16
+	DefaultClaudeOAuthCarpoolAutoMaintenanceTarget    = 16
 	DefaultClaudeOAuthSharedBucketCount               = 5
 	DefaultClaudeOAuthTokenDisableBeforeExpiryMinutes = 3
 	maxClaudeOAuthSharedBucketCount                   = 32
@@ -1397,6 +1397,23 @@ func (a *Account) IsClaudeOAuthCarpoolAutoExpandEnabled() bool {
 	}
 	enabled, ok := a.Extra["claude_oauth_carpool_auto_expand_enabled"].(bool)
 	return ok && enabled
+}
+
+// GetClaudeOAuthCarpoolAutoMaintenanceTarget returns the per-account limit at
+// which daily expansion stops and full-registry rotation begins. Missing or
+// malformed values retain the historical default of 16.
+func (a *Account) GetClaudeOAuthCarpoolAutoMaintenanceTarget() int {
+	if a == nil || !a.IsAnthropicOAuthOrSetupToken() {
+		return 0
+	}
+	target := a.getExtraInt("claude_oauth_carpool_auto_maintenance_target")
+	if target <= 0 {
+		target = DefaultClaudeOAuthCarpoolAutoMaintenanceTarget
+	}
+	if target > maxClaudeOAuthCarpoolDeviceLimit {
+		return maxClaudeOAuthCarpoolDeviceLimit
+	}
+	return target
 }
 
 // GetClaudeOAuthCarpoolLastMaintenanceDay returns the configured-timezone

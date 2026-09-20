@@ -1638,10 +1638,24 @@
                   <span>
                     <span class="block text-sm font-medium text-gray-900 dark:text-white">Daily automatic expansion and rotation</span>
                     <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-                      At 00:00, increase the limit by one up to 16. At exactly 16, remove one least-recently-seen device when full. Limits above 16 remain under administrator control.
+                      At 00:00, increase the limit by one up to the account target. At the target, remove one least-recently-seen device when full. Limits above the target remain under administrator control.
                     </span>
                   </span>
                 </label>
+                <div v-if="claudeOAuthMode === 'carpool' && claudeOAuthCarpoolAutoExpand" class="col-span-2">
+                  <label class="input-label">Automatic maintenance target</label>
+                  <input
+                    v-model.number="claudeOAuthCarpoolAutoMaintenanceTarget"
+                    data-testid="carpool-auto-maintenance-target"
+                    type="number"
+                    min="1"
+                    max="32"
+                    step="1"
+                    class="input"
+                    placeholder="16"
+                  />
+                  <p class="input-hint">Default 16. The current limit grows toward this value; a higher administrator-set limit is left unchanged.</p>
+                </div>
               </div>
               <p v-else class="text-xs text-gray-500 dark:text-gray-400">
                 Existing bounded-mode records are preserved for use if the limit is enabled again, but unlimited-mode devices are not added to that registry.
@@ -2816,6 +2830,7 @@ const claudeOAuthMode = ref<'carpool' | 'shared' | 'pinned' | 'single_device'>('
 const claudeOAuthCarpoolDeviceLimit = ref<number>(5)
 const claudeOAuthCarpoolUnlimitedDevices = ref(false)
 const claudeOAuthCarpoolAutoExpand = ref(false)
+const claudeOAuthCarpoolAutoMaintenanceTarget = ref<number>(16)
 const claudeOAuthSharedBucketCount = ref<number>(5)
 const claudeOAuthFiveHourRateLimitThresholdPercent = ref<number>(0)
 const claudeOAuthDisableTokenRefresh = ref(true)
@@ -3433,6 +3448,7 @@ const resetForm = () => {
   claudeOAuthCarpoolDeviceLimit.value = 5
   claudeOAuthCarpoolUnlimitedDevices.value = false
   claudeOAuthCarpoolAutoExpand.value = false
+  claudeOAuthCarpoolAutoMaintenanceTarget.value = 16
   claudeOAuthSharedBucketCount.value = 5
   claudeOAuthFiveHourRateLimitThresholdPercent.value = 0
   claudeOAuthDisableTokenRefresh.value = true
@@ -4103,10 +4119,12 @@ const buildAnthropicOAuthExtra = (baseExtra: Record<string, unknown>) => {
   }
   delete extra.claude_oauth_carpool_unlimited_devices
   delete extra.claude_oauth_carpool_auto_expand_enabled
+  delete extra.claude_oauth_carpool_auto_maintenance_target
   if (claudeOAuthMode.value === 'shared') {
     extra.claude_oauth_shared_bucket_count = Math.min(32, Math.max(1, claudeOAuthSharedBucketCount.value || 5))
   } else if (claudeOAuthMode.value === 'carpool') {
     extra.claude_oauth_carpool_device_limit = Math.min(32, Math.max(1, claudeOAuthCarpoolDeviceLimit.value || 5))
+    extra.claude_oauth_carpool_auto_maintenance_target = Math.min(32, Math.max(1, claudeOAuthCarpoolAutoMaintenanceTarget.value || 16))
     if (claudeOAuthCarpoolUnlimitedDevices.value) {
       extra.claude_oauth_carpool_unlimited_devices = true
     } else if (claudeOAuthCarpoolAutoExpand.value) {

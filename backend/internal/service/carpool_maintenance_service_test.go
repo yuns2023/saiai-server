@@ -120,7 +120,36 @@ func TestCarpoolMaintenanceRunOnceExpandsToSixteenOnlyOncePerDay(t *testing.T) {
 	require.Equal(t, 1, len(repo.updates))
 }
 
-func TestCarpoolMaintenanceRunOnceLeavesAdminLimitAboveSixteenAlone(t *testing.T) {
+func TestCarpoolMaintenanceRunOnceUsesPerAccountTarget(t *testing.T) {
+	expanding := newAutoCarpoolAccount(6, 16)
+	expanding.Extra["claude_oauth_carpool_auto_maintenance_target"] = 20
+	rotating := newAutoCarpoolAccount(7, 20)
+	rotating.Extra["claude_oauth_carpool_auto_maintenance_target"] = 20
+	repo := &carpoolMaintenanceAccountRepoStub{accounts: map[int64]*Account{
+		6: expanding,
+		7: rotating,
+	}}
+	cache := &carpoolMaintenanceCacheStub{results: map[int64]*CarpoolDailyRotationResult{
+		7: {
+			Applied:       true,
+			RecordedCount: 20,
+			Evicted: &CarpoolDeviceRecord{
+				DeviceKey:  "oldest-device",
+				LastSeenAt: 10,
+			},
+		},
+	}}
+	svc := NewCarpoolMaintenanceService(repo, cache, &config.Config{Timezone: "UTC"})
+
+	stats, err := svc.runOnce(context.Background(), time.Date(2026, time.September, 19, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Expanded)
+	require.Equal(t, 1, stats.Rotated)
+	require.Equal(t, 17, expanding.GetClaudeOAuthCarpoolDeviceLimit())
+	require.Equal(t, []carpoolMaintenanceRotationCall{{accountID: 7, limit: 20, day: "2026-09-19"}}, cache.calls)
+}
+
+func TestCarpoolMaintenanceRunOnceLeavesAdminLimitAboveTargetAlone(t *testing.T) {
 	account := newAutoCarpoolAccount(2, 20)
 	repo := &carpoolMaintenanceAccountRepoStub{accounts: map[int64]*Account{2: account}}
 	cache := &carpoolMaintenanceCacheStub{results: map[int64]*CarpoolDailyRotationResult{

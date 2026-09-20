@@ -216,12 +216,14 @@ describe('EditAccountModal', () => {
       extra: {
         claude_oauth_mode: 'carpool',
         claude_oauth_carpool_device_limit: 20,
-        claude_oauth_carpool_auto_expand_enabled: false
+        claude_oauth_carpool_auto_expand_enabled: false,
+        claude_oauth_carpool_auto_maintenance_target: 24
       },
       claude_oauth_mode: 'carpool',
       claude_oauth_carpool_device_limit: 20,
       claude_oauth_carpool_unlimited_devices: false,
-      claude_oauth_carpool_auto_expand_enabled: false
+      claude_oauth_carpool_auto_expand_enabled: false,
+      claude_oauth_carpool_auto_maintenance_target: 24
     } as any
 
     updateAccountMock.mockReset()
@@ -243,7 +245,11 @@ describe('EditAccountModal', () => {
 
     const autoExpandToggle = wrapper.get('[data-testid="carpool-auto-expand"]')
     expect((autoExpandToggle.element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('[data-testid="carpool-auto-maintenance-target"]').exists()).toBe(false)
     await autoExpandToggle.setValue(true)
+    const targetInput = wrapper.get('[data-testid="carpool-auto-maintenance-target"]')
+    expect((targetInput.element as HTMLInputElement).value).toBe('24')
+    await targetInput.setValue(18)
 
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()
@@ -252,7 +258,8 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
       claude_oauth_mode: 'carpool',
       claude_oauth_carpool_device_limit: 20,
-      claude_oauth_carpool_auto_expand_enabled: true
+      claude_oauth_carpool_auto_expand_enabled: true,
+      claude_oauth_carpool_auto_maintenance_target: 18
     })
   })
 

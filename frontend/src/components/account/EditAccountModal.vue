@@ -1116,10 +1116,24 @@
                   <span>
                     <span class="block text-sm font-medium text-gray-900 dark:text-white">Daily automatic expansion and rotation</span>
                     <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-                      At 00:00, increase the limit by one up to 16. At exactly 16, remove one least-recently-seen device when full. Limits above 16 remain under administrator control.
+                      At 00:00, increase the limit by one up to the account target. At the target, remove one least-recently-seen device when full. Limits above the target remain under administrator control.
                     </span>
                   </span>
                 </label>
+                <div v-if="claudeOAuthMode === 'carpool' && claudeOAuthCarpoolAutoExpand" class="col-span-2">
+                  <label class="input-label">Automatic maintenance target</label>
+                  <input
+                    v-model.number="claudeOAuthCarpoolAutoMaintenanceTarget"
+                    data-testid="carpool-auto-maintenance-target"
+                    type="number"
+                    min="1"
+                    max="32"
+                    step="1"
+                    class="input"
+                    placeholder="16"
+                  />
+                  <p class="input-hint">Default 16. The current limit grows toward this value; a higher administrator-set limit is left unchanged.</p>
+                </div>
               </div>
               <p v-else class="text-xs text-gray-500 dark:text-gray-400">
                 Existing bounded-mode records are preserved for use if the limit is enabled again, but unlimited-mode devices are not added to that registry.
@@ -2015,6 +2029,7 @@ const claudeOAuthMode = ref<'carpool' | 'shared' | 'pinned' | 'single_device'>('
 const claudeOAuthCarpoolDeviceLimit = ref<number>(5)
 const claudeOAuthCarpoolUnlimitedDevices = ref(false)
 const claudeOAuthCarpoolAutoExpand = ref(false)
+const claudeOAuthCarpoolAutoMaintenanceTarget = ref<number>(16)
 const claudeOAuthSharedBucketCount = ref<number>(5)
 const claudeOAuthFiveHourRateLimitThresholdPercent = ref<number>(0)
 const claudeOAuthDisableTokenRefresh = ref(true)
@@ -2600,6 +2615,7 @@ function loadQuotaControlSettings(account: Account) {
   claudeOAuthCarpoolDeviceLimit.value = 5
   claudeOAuthCarpoolUnlimitedDevices.value = false
   claudeOAuthCarpoolAutoExpand.value = false
+  claudeOAuthCarpoolAutoMaintenanceTarget.value = 16
   claudeOAuthSharedBucketCount.value = 5
   claudeOAuthFiveHourRateLimitThresholdPercent.value = 0
   claudeOAuthDisableTokenRefresh.value = true
@@ -2668,6 +2684,12 @@ function loadQuotaControlSettings(account: Account) {
     account.claude_oauth_carpool_unlimited_devices === true || accountExtra.claude_oauth_carpool_unlimited_devices === true
   claudeOAuthCarpoolAutoExpand.value =
     account.claude_oauth_carpool_auto_expand_enabled === true || accountExtra.claude_oauth_carpool_auto_expand_enabled === true
+  const autoMaintenanceTarget = typeof account.claude_oauth_carpool_auto_maintenance_target === 'number'
+    ? account.claude_oauth_carpool_auto_maintenance_target
+    : typeof accountExtra.claude_oauth_carpool_auto_maintenance_target === 'number'
+      ? accountExtra.claude_oauth_carpool_auto_maintenance_target
+      : 16
+  claudeOAuthCarpoolAutoMaintenanceTarget.value = Math.min(32, Math.max(1, autoMaintenanceTarget))
   claudeOAuthSharedBucketCount.value = Math.min(32, Math.max(1, account.claude_oauth_shared_bucket_count || 5))
   claudeOAuthFiveHourRateLimitThresholdPercent.value =
     typeof account.claude_oauth_5h_rate_limit_threshold_percent === 'number'
@@ -3296,12 +3318,14 @@ const handleSubmit = async () => {
         delete newExtra.claude_oauth_carpool_device_limit
         delete newExtra.claude_oauth_carpool_unlimited_devices
         delete newExtra.claude_oauth_carpool_auto_expand_enabled
+        delete newExtra.claude_oauth_carpool_auto_maintenance_target
         delete newExtra.claude_oauth_disable_token_refresh
         delete newExtra.claude_oauth_token_disable_before_expiry_minutes
         delete newExtra.claude_oauth_fixed_device_id
         delete newExtra.claude_oauth_fixed_headers_text
       } else if (claudeOAuthMode.value === 'carpool') {
         newExtra.claude_oauth_carpool_device_limit = Math.min(32, Math.max(1, claudeOAuthCarpoolDeviceLimit.value || 5))
+        newExtra.claude_oauth_carpool_auto_maintenance_target = Math.min(32, Math.max(1, claudeOAuthCarpoolAutoMaintenanceTarget.value || 16))
         if (claudeOAuthCarpoolUnlimitedDevices.value) {
           newExtra.claude_oauth_carpool_unlimited_devices = true
           delete newExtra.claude_oauth_carpool_auto_expand_enabled
@@ -3344,11 +3368,13 @@ const handleSubmit = async () => {
         delete newExtra.claude_oauth_carpool_device_limit
         delete newExtra.claude_oauth_carpool_unlimited_devices
         delete newExtra.claude_oauth_carpool_auto_expand_enabled
+        delete newExtra.claude_oauth_carpool_auto_maintenance_target
         delete newExtra.claude_oauth_shared_bucket_count
       } else {
         delete newExtra.claude_oauth_carpool_device_limit
         delete newExtra.claude_oauth_carpool_unlimited_devices
         delete newExtra.claude_oauth_carpool_auto_expand_enabled
+        delete newExtra.claude_oauth_carpool_auto_maintenance_target
         delete newExtra.claude_oauth_shared_bucket_count
         delete newExtra.claude_oauth_disable_token_refresh
         delete newExtra.claude_oauth_token_disable_before_expiry_minutes

@@ -22,6 +22,8 @@ func TestAccountFromServiceShallowIncludesCarpoolPolicy(t *testing.T) {
 	require.False(t, *out.ClaudeOAuthCarpoolUnlimitedDevices)
 	require.NotNil(t, out.ClaudeOAuthCarpoolAutoExpand)
 	require.True(t, *out.ClaudeOAuthCarpoolAutoExpand)
+	require.NotNil(t, out.ClaudeOAuthCarpoolAutoMaintenanceTarget)
+	require.Equal(t, service.DefaultClaudeOAuthCarpoolAutoMaintenanceTarget, *out.ClaudeOAuthCarpoolAutoMaintenanceTarget)
 	require.NotNil(t, out.ClaudeOAuthCarpoolDeviceLimit)
 	require.Equal(t, service.DefaultClaudeOAuthCarpoolDeviceLimit, *out.ClaudeOAuthCarpoolDeviceLimit)
 }
