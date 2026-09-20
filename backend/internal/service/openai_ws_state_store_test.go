@@ -2,13 +2,39 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAIWSStateStore_ResponseReplayIsUserScopedClonedAndBounded(t *testing.T) {
+	store := NewOpenAIWSStateStore(nil)
+	input := []json.RawMessage{json.RawMessage(`{"type":"input_text","text":"hello"}`)}
+	require.True(t, store.BindResponseReplayForUser(55, "resp_replay", input, 30*time.Millisecond))
+
+	replayed, ok := store.GetResponseReplayForUser(55, "resp_replay")
+	require.True(t, ok)
+	require.Equal(t, input, replayed)
+	_, ok = store.GetResponseReplayForUser(56, "resp_replay")
+	require.False(t, ok)
+
+	replayed[0][0] = '['
+	again, ok := store.GetResponseReplayForUser(55, "resp_replay")
+	require.True(t, ok)
+	require.Equal(t, byte('{'), again[0][0], "callers must not mutate the stored replay input")
+
+	oversized := []json.RawMessage{json.RawMessage(`"` + strings.Repeat("x", openAIWSReplayMaxEntryBytes) + `"`)}
+	require.False(t, store.BindResponseReplayForUser(55, "resp_oversized", oversized, time.Minute))
+
+	time.Sleep(60 * time.Millisecond)
+	_, ok = store.GetResponseReplayForUser(55, "resp_replay")
+	require.False(t, ok)
+}
 
 func TestOpenAIWSStateStore_BindGetDeleteResponseAccount(t *testing.T) {
 	cache := &stubGatewayCache{}

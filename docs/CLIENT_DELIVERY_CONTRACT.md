@@ -148,10 +148,27 @@ available.
 Completed HTTP and WebSocket Responses bind their provider-issued response ID to
 the requesting SAIAI user and selected upstream account. An official Codex
 OAuth request with `previous_response_id` is sent only to that user's bound
-account; an unknown binding or a switch to another account
-returns a conversation-restart error before provider egress. This includes
-temporarily unavailable accounts: their response ownership remains until its
-normal expiry, rather than becoming available to a different account.
+account. An unknown binding or an ordinary switch to another account returns a
+conversation-restart error before provider egress.
+
+There is one narrow WebSocket exception for an exhausted OAuth account. The
+Gateway may migrate a turn to another compatible account when all of these are
+true:
+
+- the owner is currently rate-limited, or the current upstream emits an
+  explicit quota/rate-limit error;
+- no frame from the current turn has been sent to the client;
+- the Gateway has a complete user-scoped replay input for the referenced
+  response; and
+- the replay contains no unresolved provider-side `item_reference`.
+
+The migration removes `previous_response_id` and account-bound encrypted
+reasoning, retains safe reasoning summaries, rebuilds the canonical input
+sequence, and retries at most three replacement accounts. A partial response,
+missing/oversized replay state, unknown ownership, or ambiguous pipelined turn
+fails closed instead of risking duplicate output, tool execution, or billing.
+Replay input is bounded, process-local memory with the normal one-hour response
+affinity lifetime; conversation content is not written to Redis or logs.
 
 The provider-facing `session_id` and `conversation_id` headers are stable per
 SAIAI user, selected account, and incoming value. The Gateway also stores and

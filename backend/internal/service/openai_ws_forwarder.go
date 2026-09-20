@@ -219,9 +219,10 @@ func (e *OpenAIWSClientCloseError) Reason() string {
 
 // OpenAIWSIngressHooks 定义入站 WS 每个 turn 的生命周期回调。
 type OpenAIWSIngressHooks struct {
-	OnClientTurn func(turn int, rawPayload []byte) error
-	BeforeTurn   func(turn int) error
-	AfterTurn    func(turn int, result *OpenAIForwardResult, turnErr error)
+	OnClientTurn       func(turn int, rawPayload []byte) error
+	BeforeTurn         func(turn int) error
+	AfterTurn          func(turn int, result *OpenAIForwardResult, turnErr error)
+	OnAccountExhausted func(failure *OpenAIWSAccountFailoverError) (*OpenAIWSFailoverTarget, error)
 }
 
 func normalizeOpenAIWSLogValue(value string) string {
@@ -2401,8 +2402,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}, nil
 }
 
-// ProxyResponsesWebSocketFromClient 处理客户端入站 WebSocket（OpenAI Responses WS Mode）并转发到上游。
-// 当前实现按“单请求 -> 终止事件 -> 下一请求”的顺序代理，适配 Codex CLI 的 turn 模式。
+// ProxyResponsesWebSocketFromClient forwards an inbound Responses WebSocket
+// and performs a bounded account failover only for a replay-safe quota error
+// that occurred before the current turn emitted any downstream frame.
 func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	ctx context.Context,
 	c *gin.Context,
@@ -2412,6 +2414,127 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	firstClientMessageType coderws.MessageType,
 	firstClientMessage []byte,
 	hooks *OpenAIWSIngressHooks,
+) error {
+	currentAccount := account
+	currentToken := token
+	currentMessageType := firstClientMessageType
+	currentMessage := cloneOpenAIWSPayloadBytes(firstClientMessage)
+	turnOffset := 0
+	retryFirstTurn := false
+	var resumableClient *openAIWSResumableClientFrameConn
+	if account != nil && account.Type == AccountTypeOAuth && !account.IsOpenAICodexNativeRelay() &&
+		hooks != nil && hooks.OnAccountExhausted != nil && c != nil &&
+		openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+		resumableClient = newOpenAIWSResumableClientFrameConn(ctx, clientConn)
+		defer resumableClient.Stop()
+	}
+
+	for failoverCount := 0; ; failoverCount++ {
+		attemptHooks := hooks
+		if retryFirstTurn {
+			attemptHooks = remapOpenAIWSIngressHooksForFailover(hooks, turnOffset)
+		}
+		err := s.proxyResponsesWebSocketFromClientOnce(
+			ctx,
+			c,
+			clientConn,
+			currentAccount,
+			currentToken,
+			currentMessageType,
+			currentMessage,
+			attemptHooks,
+			resumableClient,
+		)
+		if err == nil {
+			return nil
+		}
+
+		var failoverErr *OpenAIWSAccountFailoverError
+		if !errors.As(err, &failoverErr) || failoverErr == nil || hooks == nil || hooks.OnAccountExhausted == nil {
+			return err
+		}
+		logicalTurn := turnOffset + failoverErr.Turn()
+		failoverErr.turn = logicalTurn
+		if failoverCount >= openAIWSMaxAccountFailovers {
+			return NewOpenAIWSClientCloseError(
+				coderws.StatusTryAgainLater,
+				"all compatible upstream accounts are currently unavailable",
+				err,
+			)
+		}
+		target, targetErr := hooks.OnAccountExhausted(failoverErr)
+		if targetErr != nil {
+			return targetErr
+		}
+		if target == nil || target.Account == nil || target.Account.ID <= 0 || strings.TrimSpace(target.Token) == "" {
+			return NewOpenAIWSClientCloseError(
+				coderws.StatusTryAgainLater,
+				"no compatible upstream account is available",
+				err,
+			)
+		}
+		if currentAccount != nil && target.Account.ID == currentAccount.ID {
+			return NewOpenAIWSClientCloseError(
+				coderws.StatusTryAgainLater,
+				"upstream account failover selected the exhausted account",
+				err,
+			)
+		}
+		currentAccount = target.Account
+		currentToken = target.Token
+		currentMessageType = failoverErr.MessageType()
+		currentMessage = failoverErr.ReplayPayload()
+		turnOffset = logicalTurn - 1
+		retryFirstTurn = true
+	}
+}
+
+func remapOpenAIWSIngressHooksForFailover(hooks *OpenAIWSIngressHooks, turnOffset int) *OpenAIWSIngressHooks {
+	if hooks == nil {
+		return nil
+	}
+	logicalTurn := func(turn int) int {
+		if turn <= 0 {
+			turn = 1
+		}
+		return turnOffset + turn
+	}
+	return &OpenAIWSIngressHooks{
+		BeforeTurn: func(turn int) error {
+			if hooks.BeforeTurn == nil {
+				return nil
+			}
+			return hooks.BeforeTurn(logicalTurn(turn))
+		},
+		OnClientTurn: func(turn int, rawPayload []byte) error {
+			if turn == 1 || hooks.OnClientTurn == nil {
+				// The failed turn was already validated and moderated before its
+				// first upstream attempt. Do not duplicate those side effects.
+				return nil
+			}
+			return hooks.OnClientTurn(logicalTurn(turn), rawPayload)
+		},
+		AfterTurn: func(turn int, result *OpenAIForwardResult, turnErr error) {
+			if hooks.AfterTurn != nil {
+				hooks.AfterTurn(logicalTurn(turn), result, turnErr)
+			}
+		},
+		OnAccountExhausted: hooks.OnAccountExhausted,
+	}
+}
+
+// proxyResponsesWebSocketFromClientOnce handles one upstream account. The
+// exported wrapper above owns bounded cross-account retries.
+func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
+	ctx context.Context,
+	c *gin.Context,
+	clientConn *coderws.Conn,
+	account *Account,
+	token string,
+	firstClientMessageType coderws.MessageType,
+	firstClientMessage []byte,
+	hooks *OpenAIWSIngressHooks,
+	resumableClient *openAIWSResumableClientFrameConn,
 ) error {
 	if s == nil {
 		return errors.New("service is nil")
@@ -2480,6 +2603,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			firstClientMessage,
 			hooks,
 			wsDecision,
+			resumableClient,
 		)
 	}
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
@@ -2511,6 +2635,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			firstClientMessage,
 			hooks,
 			wsDecision,
+			resumableClient,
 		)
 	}
 	if modeRouterV2Enabled {
@@ -2529,6 +2654,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				firstClientMessage,
 				hooks,
 				wsDecision,
+				resumableClient,
 			)
 		case OpenAIWSIngressModeCtxPool, OpenAIWSIngressModeShared, OpenAIWSIngressModeDedicated:
 			// continue

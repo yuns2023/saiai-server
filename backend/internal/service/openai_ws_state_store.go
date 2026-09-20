@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -17,6 +18,9 @@ const (
 	openAIWSStateStoreCleanupMaxPerMap = 512
 	openAIWSStateStoreMaxEntriesPerMap = 65536
 	openAIWSStateStoreRedisTimeout     = 3 * time.Second
+	openAIWSReplayMaxEntryBytes        = 2 * 1024 * 1024
+	openAIWSReplayMaxTotalBytes        = 64 * 1024 * 1024
+	openAIWSReplayMaxEntries           = 4096
 )
 
 type openAIWSAccountBinding struct {
@@ -39,13 +43,20 @@ type openAIWSSessionConnBinding struct {
 	expiresAt time.Time
 }
 
+type openAIWSReplayBinding struct {
+	input     []json.RawMessage
+	sizeBytes int
+	expiresAt time.Time
+}
+
 // OpenAIWSStateStore 管理 WSv2 的粘连状态。
 // - user_id + response_id -> account_id 用于跨 Key/分组续链路由
 // - response_id -> conn_id 用于连接内上下文复用
 //
 // response_id -> account_id 优先走 GatewayCache（Redis），同时维护本地热缓存；
 // 兼容方法保留分组命名空间，Codex Responses 使用用户命名空间。
-// response_id -> conn_id 仅在本进程内有效。
+// response_id -> conn_id 仅在本进程内有效。跨账号回放内容也仅在本进程内按用户保存，
+// 不写入 Redis 或日志。
 type OpenAIWSStateStore interface {
 	BindResponseAccount(ctx context.Context, groupID int64, responseID string, accountID int64, ttl time.Duration) error
 	GetResponseAccount(ctx context.Context, groupID int64, responseID string) (int64, error)
@@ -53,6 +64,9 @@ type OpenAIWSStateStore interface {
 	BindResponseAccountForUser(ctx context.Context, userID int64, responseID string, accountID int64, ttl time.Duration) error
 	GetResponseAccountForUser(ctx context.Context, userID int64, responseID string) (int64, error)
 	DeleteResponseAccountForUser(ctx context.Context, userID int64, responseID string) error
+	BindResponseReplayForUser(userID int64, responseID string, input []json.RawMessage, ttl time.Duration) bool
+	GetResponseReplayForUser(userID int64, responseID string) ([]json.RawMessage, bool)
+	DeleteResponseReplayForUser(userID int64, responseID string)
 
 	BindResponseConn(responseID, connID string, ttl time.Duration)
 	GetResponseConn(responseID string) (string, bool)
@@ -78,6 +92,9 @@ type defaultOpenAIWSStateStore struct {
 	sessionToTurnState   map[string]openAIWSTurnStateBinding
 	sessionToConnMu      sync.RWMutex
 	sessionToConn        map[string]openAIWSSessionConnBinding
+	responseReplayMu     sync.RWMutex
+	responseReplay       map[string]openAIWSReplayBinding
+	responseReplayBytes  int
 
 	lastCleanupUnixNano atomic.Int64
 }
@@ -90,9 +107,102 @@ func NewOpenAIWSStateStore(cache GatewayCache) OpenAIWSStateStore {
 		responseToConn:     make(map[string]openAIWSConnBinding, 256),
 		sessionToTurnState: make(map[string]openAIWSTurnStateBinding, 256),
 		sessionToConn:      make(map[string]openAIWSSessionConnBinding, 256),
+		responseReplay:     make(map[string]openAIWSReplayBinding, 256),
 	}
 	store.lastCleanupUnixNano.Store(time.Now().UnixNano())
 	return store
+}
+
+// BindResponseReplayForUser keeps a bounded, process-local, user-scoped replay
+// input. Conversation content is intentionally not written to Redis or logs.
+func (s *defaultOpenAIWSStateStore) BindResponseReplayForUser(userID int64, responseID string, input []json.RawMessage, ttl time.Duration) bool {
+	id := normalizeOpenAIWSResponseID(responseID)
+	if id == "" || len(input) == 0 {
+		return false
+	}
+	key := openAIWSResponseAccountUserLocalKey(userID, id)
+	cloned := cloneOpenAIWSRawMessages(input)
+	sizeBytes := openAIWSReplayInputSize(cloned)
+	if sizeBytes <= 0 || sizeBytes > openAIWSReplayMaxEntryBytes || sizeBytes > openAIWSReplayMaxTotalBytes {
+		return false
+	}
+	ttl = normalizeOpenAIWSTTL(ttl)
+	s.maybeCleanup()
+
+	s.responseReplayMu.Lock()
+	defer s.responseReplayMu.Unlock()
+	if existing, ok := s.responseReplay[key]; ok {
+		s.responseReplayBytes -= existing.sizeBytes
+		delete(s.responseReplay, key)
+	}
+	for len(s.responseReplay) >= openAIWSReplayMaxEntries || s.responseReplayBytes+sizeBytes > openAIWSReplayMaxTotalBytes {
+		if !s.evictOneResponseReplayLocked() {
+			break
+		}
+	}
+	if len(s.responseReplay) >= openAIWSReplayMaxEntries || s.responseReplayBytes+sizeBytes > openAIWSReplayMaxTotalBytes {
+		return false
+	}
+	s.responseReplay[key] = openAIWSReplayBinding{
+		input:     cloned,
+		sizeBytes: sizeBytes,
+		expiresAt: time.Now().Add(ttl),
+	}
+	s.responseReplayBytes += sizeBytes
+	return true
+}
+
+func (s *defaultOpenAIWSStateStore) GetResponseReplayForUser(userID int64, responseID string) ([]json.RawMessage, bool) {
+	id := normalizeOpenAIWSResponseID(responseID)
+	if id == "" {
+		return nil, false
+	}
+	key := openAIWSResponseAccountUserLocalKey(userID, id)
+	s.maybeCleanup()
+
+	now := time.Now()
+	s.responseReplayMu.RLock()
+	binding, ok := s.responseReplay[key]
+	s.responseReplayMu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	if !now.Before(binding.expiresAt) {
+		s.DeleteResponseReplayForUser(userID, responseID)
+		return nil, false
+	}
+	return cloneOpenAIWSRawMessages(binding.input), true
+}
+
+func (s *defaultOpenAIWSStateStore) DeleteResponseReplayForUser(userID int64, responseID string) {
+	id := normalizeOpenAIWSResponseID(responseID)
+	if id == "" {
+		return
+	}
+	key := openAIWSResponseAccountUserLocalKey(userID, id)
+	s.responseReplayMu.Lock()
+	if binding, ok := s.responseReplay[key]; ok {
+		s.responseReplayBytes -= binding.sizeBytes
+		delete(s.responseReplay, key)
+	}
+	s.responseReplayMu.Unlock()
+}
+
+func (s *defaultOpenAIWSStateStore) evictOneResponseReplayLocked() bool {
+	for key, binding := range s.responseReplay {
+		s.responseReplayBytes -= binding.sizeBytes
+		delete(s.responseReplay, key)
+		return true
+	}
+	return false
+}
+
+func openAIWSReplayInputSize(input []json.RawMessage) int {
+	total := 2
+	for _, item := range input {
+		total += len(item) + 1
+	}
+	return total
 }
 
 func (s *defaultOpenAIWSStateStore) BindResponseAccount(ctx context.Context, groupID int64, responseID string, accountID int64, ttl time.Duration) error {
@@ -360,6 +470,10 @@ func (s *defaultOpenAIWSStateStore) maybeCleanup() {
 	s.sessionToConnMu.Lock()
 	cleanupExpiredSessionConnBindings(s.sessionToConn, now, openAIWSStateStoreCleanupMaxPerMap)
 	s.sessionToConnMu.Unlock()
+
+	s.responseReplayMu.Lock()
+	cleanupExpiredReplayBindings(s.responseReplay, now, openAIWSStateStoreCleanupMaxPerMap, &s.responseReplayBytes)
+	s.responseReplayMu.Unlock()
 }
 
 func cleanupExpiredAccountBindings(bindings map[string]openAIWSAccountBinding, now time.Time, maxScan int) {
@@ -418,6 +532,25 @@ func cleanupExpiredSessionConnBindings(bindings map[string]openAIWSSessionConnBi
 	for key, binding := range bindings {
 		if now.After(binding.expiresAt) {
 			delete(bindings, key)
+		}
+		scanned++
+		if scanned >= maxScan {
+			break
+		}
+	}
+}
+
+func cleanupExpiredReplayBindings(bindings map[string]openAIWSReplayBinding, now time.Time, maxScan int, totalBytes *int) {
+	if len(bindings) == 0 || maxScan <= 0 {
+		return
+	}
+	scanned := 0
+	for key, binding := range bindings {
+		if now.After(binding.expiresAt) {
+			delete(bindings, key)
+			if totalBytes != nil {
+				*totalBytes -= binding.sizeBytes
+			}
 		}
 		scanned++
 		if scanned >= maxScan {

@@ -120,6 +120,7 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 		turns := &atomic.Int32{}
 		turns.Store(1) // the first payload is observed by Relay before this loop starts
 		var observedTurn int
+		var observedMessageType coderws.MessageType
 		var observedPayload []byte
 		upstreamWrites := 0
 		runClientToUpstream(
@@ -135,8 +136,9 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 			nil,
 			turns,
 			&relayState{turns: newRelayTurnTracker()},
-			func(turn int, payload []byte) error {
+			func(turn int, messageType coderws.MessageType, payload []byte) error {
 				observedTurn = turn
+				observedMessageType = messageType
 				observedPayload = append([]byte(nil), payload...)
 				return nil
 			},
@@ -147,6 +149,7 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 		sig := <-exitCh
 		require.Equal(t, "read_client", sig.stage)
 		require.Equal(t, 2, observedTurn)
+		require.Equal(t, coderws.MessageText, observedMessageType)
 		require.JSONEq(t, `{"type":"response.create","input":"next"}`, string(observedPayload))
 		require.Equal(t, 1, upstreamWrites)
 	})

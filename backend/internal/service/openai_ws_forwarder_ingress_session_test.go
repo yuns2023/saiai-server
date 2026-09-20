@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -440,6 +441,163 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OfficialOAuthOwn
 	upstreamConn2.mu.Unlock()
 	require.True(t, upstream1Closed, "downstream 关闭后必须关闭对应 upstream websocket")
 	require.True(t, upstream2Closed, "downstream 关闭后必须关闭对应 upstream websocket")
+}
+
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OfficialOAuthQuotaFailoverReplaysCurrentTurn(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	resetAt := time.Now().Add(90 * time.Minute)
+	accountAConn := &openAIWSCaptureConn{
+		readDelays: []time.Duration{0, 150 * time.Millisecond},
+		events: [][]byte{
+			[]byte(`{"type":"response.completed","response":{"id":"resp_failover_a_1","status":"completed","model":"gpt-5.3-codex","output":[{"type":"reasoning","encrypted_content":"account-a-only","summary":[{"type":"summary_text","text":"safe"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first answer"}]}],"usage":{"input_tokens":2,"output_tokens":3}}}`),
+			[]byte(fmt.Sprintf(`{"type":"error","error":{"code":"usage_limit_reached","type":"usage_limit_reached","message":"usage limit reached","resets_at":%d}}`, resetAt.Unix())),
+		},
+	}
+	accountBConn := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(`{"type":"response.completed","response":{"id":"resp_failover_b_2","status":"completed","model":"gpt-5.3-codex","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"second answer"}]}],"usage":{"input_tokens":8,"output_tokens":2}}}`),
+	}}
+	accountA := &Account{
+		ID: 461, Name: "openai-oauth-a", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token-a", "chatgpt_account_id": "chatgpt-a"},
+		Extra:       map[string]any{"responses_websockets_v2_enabled": true},
+	}
+	accountB := &Account{
+		ID: 462, Name: "openai-oauth-b", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token-b", "chatgpt_account_id": "chatgpt-b"},
+		Extra:       map[string]any{"responses_websockets_v2_enabled": true},
+	}
+	dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{accountAConn, accountBConn}}
+	stateStore := NewOpenAIWSStateStore(nil)
+	repo := &openAIWSRateLimitSignalRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{*accountA, *accountB}}}
+	rateSvc := &RateLimitService{accountRepo: repo}
+	svc := &OpenAIGatewayService{
+		accountRepo:               repo,
+		rateLimitService:          rateSvc,
+		cfg:                       cfg,
+		httpUpstream:              &httpUpstreamRecorder{},
+		cache:                     &stubGatewayCache{},
+		openaiWSResolver:          NewOpenAIWSProtocolResolver(cfg),
+		openaiWSStateStore:        stateStore,
+		toolCorrector:             NewCodexToolCorrector(),
+		openaiWSPassthroughDialer: dialer,
+	}
+	serverErrCh := make(chan error, 1)
+	failoverTurnCh := make(chan int, 1)
+	validatedTurnCh := make(chan int, 4)
+	hooks := &OpenAIWSIngressHooks{
+		OnClientTurn: func(turn int, _ []byte) error {
+			validatedTurnCh <- turn
+			return nil
+		},
+		OnAccountExhausted: func(failure *OpenAIWSAccountFailoverError) (*OpenAIWSFailoverTarget, error) {
+			failoverTurnCh <- failure.Turn()
+			return &OpenAIWSFailoverTarget{Account: accountB, Token: "oauth-token-b"}, nil
+		},
+	}
+
+	groupID := int64(19)
+	userID := int64(77)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+		req := r.Clone(r.Context())
+		req.Header = req.Header.Clone()
+		req.Header.Set("User-Agent", "codex_cli_rs/0.153.4")
+		req.Header.Set("originator", "codex_cli_rs")
+		ginCtx.Request = req
+		ginCtx.Set("api_key", &APIKey{ID: 9, UserID: userID, GroupID: &groupID})
+
+		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		msgType, firstMessage, readErr := conn.Read(readCtx)
+		cancel()
+		if readErr != nil {
+			serverErrCh <- readErr
+			return
+		}
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, accountA, "oauth-token-a", msgType, firstMessage, hooks)
+	}))
+	defer wsServer.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	writeMessage := func(payload string) {
+		writeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(payload)))
+	}
+	readMessage := func() []byte {
+		readCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		msgType, payload, readErr := clientConn.Read(readCtx)
+		require.NoError(t, readErr)
+		require.Equal(t, coderws.MessageText, msgType)
+		return payload
+	}
+
+	writeMessage(`{"type":"response.create","model":"gpt-5.3-codex","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}]}`)
+	firstEvent := readMessage()
+	require.Equal(t, "resp_failover_a_1", gjson.GetBytes(firstEvent, "response.id").String())
+
+	writeMessage(`{"type":"response.create","model":"gpt-5.3-codex","previous_response_id":"resp_failover_a_1","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`)
+	secondEvent := readMessage()
+	require.Equal(t, "response.completed", gjson.GetBytes(secondEvent, "type").String())
+	require.Equal(t, "resp_failover_b_2", gjson.GetBytes(secondEvent, "response.id").String())
+	require.Equal(t, 2, <-failoverTurnCh)
+	require.Equal(t, 1, <-validatedTurnCh)
+	require.Equal(t, 2, <-validatedTurnCh)
+	select {
+	case duplicateTurn := <-validatedTurnCh:
+		t.Fatalf("重放不应重复触发 turn 校验，收到 turn=%d", duplicateTurn)
+	default:
+	}
+
+	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
+	select {
+	case serverErr := <-serverErrCh:
+		require.NoError(t, serverErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("等待 OAuth quota failover websocket 结束超时")
+	}
+
+	require.Equal(t, 2, dialer.DialCount())
+	require.Len(t, accountAConn.rawWrites, 2)
+	require.Len(t, accountBConn.rawWrites, 1)
+	replayed := accountBConn.rawWrites[0]
+	require.False(t, gjson.GetBytes(replayed, "previous_response_id").Exists())
+	require.Len(t, gjson.GetBytes(replayed, "input").Array(), 4)
+	require.False(t, gjson.GetBytes(replayed, "input.1.encrypted_content").Exists())
+	require.Equal(t, "safe", gjson.GetBytes(replayed, "input.1.summary.0.text").String())
+	require.Equal(t, "function_call_output", gjson.GetBytes(replayed, "input.3.type").String())
+
+	owner, ownerErr := stateStore.GetResponseAccountForUser(context.Background(), userID, "resp_failover_b_2")
+	require.NoError(t, ownerErr)
+	require.Equal(t, accountB.ID, owner)
+	require.Len(t, repo.rateLimitCalls, 1)
+	require.WithinDuration(t, resetAt, repo.rateLimitCalls[0], 2*time.Second)
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeRelaysByCaddyAdapter(t *testing.T) {

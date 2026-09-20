@@ -68,9 +68,20 @@ type RelayTurnMetadata struct {
 }
 
 type RelayExit struct {
-	Stage           string
-	Err             error
-	WroteDownstream bool
+	Stage            string
+	Err              error
+	WroteDownstream  bool
+	WroteCurrentTurn bool
+}
+
+// RelayUpstreamFrame describes an upstream application frame before it is
+// observed or forwarded. WroteCurrentTurn is reset after every terminal event,
+// allowing callers to suppress and safely retry an early turn-local error
+// without confusing output from prior completed turns with current output.
+type RelayUpstreamFrame struct {
+	MessageType      coderws.MessageType
+	Payload          []byte
+	WroteCurrentTurn bool
 }
 
 type RelayOptions struct {
@@ -79,7 +90,8 @@ type RelayOptions struct {
 	UpstreamDrainTimeout time.Duration
 	FirstMessageType     coderws.MessageType
 	OnUsageParseFailure  func(eventType string, usageRaw string)
-	OnClientTurn         func(turn int, payload []byte) error
+	OnClientTurn         func(turn int, messageType coderws.MessageType, payload []byte) error
+	BeforeUpstreamFrame  func(frame RelayUpstreamFrame) error
 	TurnMetadata         func(turn int, payload []byte) RelayTurnMetadata
 	OnTurnComplete       func(turn RelayTurnResult)
 	OnTrace              func(event RelayTraceEvent)
@@ -104,13 +116,15 @@ type relayState struct {
 	firstTokenMs           *int
 	turnTimingByID         map[string]*relayTurnTiming
 	turns                  *relayTurnTracker
+	beforeUpstreamFrame    func(frame RelayUpstreamFrame) error
 }
 
 type relayExitSignal struct {
-	stage           string
-	err             error
-	graceful        bool
-	wroteDownstream bool
+	stage            string
+	err              error
+	graceful         bool
+	wroteDownstream  bool
+	wroteCurrentTurn bool
 }
 
 type observedUpstreamEvent struct {
@@ -168,7 +182,10 @@ func Relay(
 		firstMessageType = coderws.MessageText
 	}
 	startAt := nowFn()
-	state := &relayState{turns: newRelayTurnTracker()}
+	state := &relayState{
+		turns:               newRelayTurnTracker(),
+		beforeUpstreamFrame: options.BeforeUpstreamFrame,
+	}
 	onTrace := options.OnTrace
 
 	relayCtx, relayCancel := context.WithCancel(ctx)
@@ -204,7 +221,7 @@ func Relay(
 	if isRelayClientTurn(firstClientMessage) {
 		turn := int(clientTurns.Add(1))
 		if options.OnClientTurn != nil {
-			if err := options.OnClientTurn(turn, firstClientMessage); err != nil {
+			if err := options.OnClientTurn(turn, firstMessageType, firstClientMessage); err != nil {
 				result.Duration = nowFn().Sub(startAt)
 				return result, &RelayExit{Stage: "client_turn_rejected", Err: err}
 			}
@@ -325,9 +342,10 @@ func Relay(
 			Error:           relayErrorString(exitErr),
 		})
 		return result, &RelayExit{
-			Stage:           stage,
-			Err:             exitErr,
-			WroteDownstream: combinedWroteDownstream,
+			Stage:            stage,
+			Err:              exitErr,
+			WroteDownstream:  combinedWroteDownstream,
+			WroteCurrentTurn: firstExit.wroteCurrentTurn,
 		}
 	}
 	if firstExit.graceful && (!hasSecondExit || secondExit.graceful) {
@@ -348,9 +366,10 @@ func Relay(
 			Error:           relayErrorString(firstExit.err),
 		})
 		return result, &RelayExit{
-			Stage:           firstExit.stage,
-			Err:             firstExit.err,
-			WroteDownstream: combinedWroteDownstream,
+			Stage:            firstExit.stage,
+			Err:              firstExit.err,
+			WroteDownstream:  combinedWroteDownstream,
+			WroteCurrentTurn: firstExit.wroteCurrentTurn,
 		}
 	}
 	if hasSecondExit && !secondExit.graceful {
@@ -362,9 +381,10 @@ func Relay(
 			Error:           relayErrorString(secondExit.err),
 		})
 		return result, &RelayExit{
-			Stage:           secondExit.stage,
-			Err:             secondExit.err,
-			WroteDownstream: combinedWroteDownstream,
+			Stage:            secondExit.stage,
+			Err:              secondExit.err,
+			WroteDownstream:  combinedWroteDownstream,
+			WroteCurrentTurn: secondExit.wroteCurrentTurn,
 		}
 	}
 	emitRelayTrace(onTrace, RelayTraceEvent{
@@ -384,7 +404,7 @@ func runClientToUpstream(
 	forwardedFrames *atomic.Int64,
 	clientTurns *atomic.Int32,
 	state *relayState,
-	onClientTurn func(turn int, payload []byte) error,
+	onClientTurn func(turn int, messageType coderws.MessageType, payload []byte) error,
 	turnMetadata func(turn int, payload []byte) RelayTurnMetadata,
 	onTrace func(event RelayTraceEvent),
 	exitCh chan<- relayExitSignal,
@@ -410,7 +430,7 @@ func runClientToUpstream(
 				turn = int(clientTurns.Add(1))
 			}
 			if onClientTurn != nil {
-				if err := onClientTurn(turn, payload); err != nil {
+				if err := onClientTurn(turn, msgType, payload); err != nil {
 					exitCh <- relayExitSignal{stage: "client_turn_rejected", err: err}
 					return
 				}
@@ -458,6 +478,7 @@ func runUpstreamToClient(
 	exitCh chan<- relayExitSignal,
 ) {
 	wroteDownstream := false
+	wroteCurrentTurn := false
 	for {
 		msgType, payload, err := upstreamConn.ReadFrame(ctx)
 		if err != nil {
@@ -469,14 +490,38 @@ func runUpstreamToClient(
 				WroteDownstream: wroteDownstream,
 			})
 			exitCh <- relayExitSignal{
-				stage:           "read_upstream",
-				err:             err,
-				graceful:        isDisconnectError(err),
-				wroteDownstream: wroteDownstream,
+				stage:            "read_upstream",
+				err:              err,
+				graceful:         isDisconnectError(err),
+				wroteDownstream:  wroteDownstream,
+				wroteCurrentTurn: wroteCurrentTurn,
 			}
 			return
 		}
 		markActivity()
+		if state != nil && state.beforeUpstreamFrame != nil {
+			if inspectErr := state.beforeUpstreamFrame(RelayUpstreamFrame{
+				MessageType:      msgType,
+				Payload:          payload,
+				WroteCurrentTurn: wroteCurrentTurn,
+			}); inspectErr != nil {
+				emitRelayTrace(onTrace, RelayTraceEvent{
+					Stage:           "upstream_frame_rejected",
+					Direction:       "upstream_to_client",
+					MessageType:     relayMessageTypeString(msgType),
+					PayloadBytes:    len(payload),
+					WroteDownstream: wroteDownstream,
+					Error:           inspectErr.Error(),
+				})
+				exitCh <- relayExitSignal{
+					stage:            "inspect_upstream",
+					err:              inspectErr,
+					wroteDownstream:  wroteDownstream,
+					wroteCurrentTurn: wroteCurrentTurn,
+				}
+				return
+			}
+		}
 		observedEvent := observedUpstreamEvent{}
 		switch msgType {
 		case coderws.MessageText:
@@ -498,9 +543,10 @@ func runUpstreamToClient(
 			})
 			if observedEvent.terminal {
 				exitCh <- relayExitSignal{
-					stage:           "drain_terminal",
-					graceful:        true,
-					wroteDownstream: wroteDownstream,
+					stage:            "drain_terminal",
+					graceful:         true,
+					wroteDownstream:  wroteDownstream,
+					wroteCurrentTurn: wroteCurrentTurn,
 				}
 				return
 			}
@@ -516,15 +562,22 @@ func runUpstreamToClient(
 				WroteDownstream: wroteDownstream,
 				Error:           err.Error(),
 			})
-			exitCh <- relayExitSignal{stage: "write_client", err: err, wroteDownstream: wroteDownstream}
+			exitCh <- relayExitSignal{
+				stage:            "write_client",
+				err:              err,
+				wroteDownstream:  wroteDownstream,
+				wroteCurrentTurn: wroteCurrentTurn,
+			}
 			return
 		}
 		wroteDownstream = true
+		wroteCurrentTurn = true
 		if forwardedFrames != nil {
 			forwardedFrames.Add(1)
 		}
 		if observedEvent.terminal && state != nil {
 			state.terminalFrameForwarded.Store(true)
+			wroteCurrentTurn = false
 		}
 		markActivity()
 	}
@@ -590,7 +643,7 @@ func relayDirectionFromStage(stage string) string {
 	switch stage {
 	case "read_client", "write_upstream":
 		return "client_to_upstream"
-	case "read_upstream", "write_client", "drain_terminal":
+	case "read_upstream", "inspect_upstream", "write_client", "drain_terminal":
 		return "upstream_to_client"
 	case "idle_timeout":
 		return "watchdog"

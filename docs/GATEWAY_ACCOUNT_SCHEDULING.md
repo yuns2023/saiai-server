@@ -176,6 +176,21 @@ reset metadata, `insufficient_quota`, `usage_limit_reached`, and equivalent
 quota messages keep their normal failover/rate-limit handling. OpenAI WebSocket
 handshake/reconnect behavior is governed by its separate WS retry policy.
 
+### OpenAI Responses WebSocket quota failover
+
+Official Codex OAuth WebSockets suppress an explicit upstream quota error only
+when the current turn has emitted no downstream frame and a complete local
+replay input is available. The exhausted account is persisted/excluded, a
+transport-compatible replacement is selected, account-bound continuation state
+is removed, and the reconstructed turn is sent on a new upstream WebSocket
+without closing the downstream client connection.
+
+The retry is bounded to three account switches. It does not apply to native
+relay accounts, unresolved `item_reference` inputs, missing or oversized replay
+state, ambiguous pipelined turns, or a turn that already emitted any frame.
+Those cases preserve the normal client-visible failure rather than replaying a
+possibly billable or side-effecting turn.
+
 ## Account-scoped device authorization failures
 
 An Anthropic-compatible HTTP `400` that says the upstream device authorization

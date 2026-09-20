@@ -235,6 +235,42 @@ func TestRelay_BasicRelayAndUsage(t *testing.T) {
 	require.JSONEq(t, `{"type":"response.completed","response":{"id":"resp_123","usage":{"input_tokens":7,"output_tokens":3,"input_tokens_details":{"cache_write_tokens":1,"cached_tokens":2}}}}`, string(clientWrites[0].payload))
 }
 
+func TestRelay_BeforeUpstreamFrameTracksCurrentTurnOutput(t *testing.T) {
+	t.Parallel()
+
+	clientConn := newPassthroughTestFrameConn(nil, false)
+	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{
+			msgType: coderws.MessageText,
+			payload: []byte(`{"type":"response.created","response":{"id":"resp_partial"}}`),
+		},
+		{
+			msgType: coderws.MessageText,
+			payload: []byte(`{"type":"error","error":{"code":"usage_limit_reached","message":"usage limit reached"}}`),
+		},
+		{
+			msgType: coderws.MessageText,
+			payload: []byte(`{"type":"response.completed","response":{"id":"resp_partial","usage":{"input_tokens":1,"output_tokens":0}}}`),
+		},
+	}, true)
+
+	wroteCurrentTurn := make([]bool, 0, 3)
+	_, relayExit := Relay(
+		context.Background(),
+		clientConn,
+		upstreamConn,
+		[]byte(`{"type":"response.create","model":"gpt-5.3-codex","input":[]}`),
+		RelayOptions{
+			BeforeUpstreamFrame: func(frame RelayUpstreamFrame) error {
+				wroteCurrentTurn = append(wroteCurrentTurn, frame.WroteCurrentTurn)
+				return nil
+			},
+		},
+	)
+	require.Nil(t, relayExit)
+	require.Equal(t, []bool{false, true, true}, wroteCurrentTurn)
+}
+
 func TestRelay_OnClientTurnRejectsBeforeFirstUpstreamWrite(t *testing.T) {
 	t.Parallel()
 
@@ -244,8 +280,9 @@ func TestRelay_OnClientTurnRejectsBeforeFirstUpstreamWrite(t *testing.T) {
 	wantErr := errors.New("blocked turn")
 
 	result, relayExit := Relay(context.Background(), clientConn, upstreamConn, firstPayload, RelayOptions{
-		OnClientTurn: func(turn int, payload []byte) error {
+		OnClientTurn: func(turn int, messageType coderws.MessageType, payload []byte) error {
 			require.Equal(t, 1, turn)
+			require.Equal(t, coderws.MessageText, messageType)
 			require.Equal(t, firstPayload, payload)
 			return wantErr
 		},

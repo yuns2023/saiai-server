@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -21,9 +22,95 @@ type openAIWSClientFrameConn struct {
 	conn *coderws.Conn
 }
 
+type openAIWSResumableClientFrame struct {
+	messageType coderws.MessageType
+	payload     []byte
+	err         error
+}
+
+// openAIWSResumableClientFrameConn owns the single physical downstream reader
+// for the lifetime of the ingress connection. Per-upstream relay cancellation
+// only cancels a channel wait; it never cancels coder/websocket.Read and thus
+// cannot accidentally close the downstream connection during account failover.
+type openAIWSResumableClientFrameConn struct {
+	conn    *coderws.Conn
+	cancel  context.CancelFunc
+	frames  chan openAIWSResumableClientFrame
+	writeMu sync.Mutex
+}
+
 const openaiWSV2PassthroughModeFields = "ws_mode=passthrough ws_router=v2"
 
 var _ openaiwsv2.FrameConn = (*openAIWSClientFrameConn)(nil)
+var _ openaiwsv2.FrameConn = (*openAIWSResumableClientFrameConn)(nil)
+
+func newOpenAIWSResumableClientFrameConn(ctx context.Context, conn *coderws.Conn) *openAIWSResumableClientFrameConn {
+	readCtx, cancel := context.WithCancel(ctx)
+	result := &openAIWSResumableClientFrameConn{
+		conn:   conn,
+		cancel: cancel,
+		frames: make(chan openAIWSResumableClientFrame, 4),
+	}
+	go result.readLoop(readCtx)
+	return result
+}
+
+func (c *openAIWSResumableClientFrameConn) readLoop(ctx context.Context) {
+	defer close(c.frames)
+	for {
+		messageType, payload, err := c.conn.Read(ctx)
+		frame := openAIWSResumableClientFrame{
+			messageType: messageType,
+			payload:     cloneOpenAIWSPayloadBytes(payload),
+			err:         err,
+		}
+		select {
+		case c.frames <- frame:
+		case <-ctx.Done():
+			return
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (c *openAIWSResumableClientFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	if c == nil || c.conn == nil {
+		return coderws.MessageText, nil, errOpenAIWSConnClosed
+	}
+	select {
+	case <-ctx.Done():
+		return coderws.MessageText, nil, ctx.Err()
+	case frame, ok := <-c.frames:
+		if !ok {
+			return coderws.MessageText, nil, errOpenAIWSConnClosed
+		}
+		return frame.messageType, frame.payload, frame.err
+	}
+}
+
+func (c *openAIWSResumableClientFrameConn) WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error {
+	if c == nil || c.conn == nil {
+		return errOpenAIWSConnClosed
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.conn.Write(ctx, msgType, payload)
+}
+
+// Close is intentionally a no-op. The ingress handler owns the downstream
+// socket; an individual upstream relay must not close it while failover is in
+// progress.
+func (c *openAIWSResumableClientFrameConn) Close() error {
+	return nil
+}
+
+func (c *openAIWSResumableClientFrameConn) Stop() {
+	if c != nil && c.cancel != nil {
+		c.cancel()
+	}
+}
 
 func openAIWSOptionalString(value string) *string {
 	trimmed := strings.TrimSpace(value)
@@ -72,6 +159,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	firstClientMessage []byte,
 	hooks *OpenAIWSIngressHooks,
 	wsDecision OpenAIWSProtocolDecision,
+	resumableClient *openAIWSResumableClientFrameConn,
 ) error {
 	if s == nil {
 		return errors.New("service is nil")
@@ -87,6 +175,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
+	stateStore := s.getOpenAIWSStateStore()
+	userID := getOpenAIUserIDFromContext(c)
+	var replayTracker *openAIWSPassthroughReplayTracker
+	if account.Type == AccountTypeOAuth && !account.IsOpenAICodexNativeRelay() && hooks != nil && hooks.OnAccountExhausted != nil {
+		replayTracker = newOpenAIWSPassthroughReplayTracker(stateStore, userID)
+	}
 	logOpenAIWSV2Passthrough(
 		"relay_start account_id=%d model=%s previous_response_id=%s first_message_type=%s first_message_bytes=%d",
 		account.ID,
@@ -174,25 +268,61 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 
 	completedTurns := atomic.Int32{}
+	var relayClient openaiwsv2.FrameConn = &openAIWSClientFrameConn{conn: clientConn}
+	if resumableClient != nil {
+		relayClient = resumableClient
+	}
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
-		ClientConn:         &openAIWSClientFrameConn{conn: clientConn},
+		ClientConn:         relayClient,
 		UpstreamConn:       upstreamFrameConn,
 		FirstClientMessage: firstClientMessage,
 		Options: openaiwsv2.RelayOptions{
 			WriteTimeout:     s.openAIWSWriteTimeout(),
 			IdleTimeout:      s.openAIWSPassthroughIdleTimeout(),
 			FirstMessageType: firstClientMessageType,
-			OnClientTurn: func(turn int, payload []byte) error {
+			OnClientTurn: func(turn int, messageType coderws.MessageType, payload []byte) error {
 				if hooks != nil && hooks.BeforeTurn != nil {
 					if err := hooks.BeforeTurn(turn); err != nil {
 						return err
 					}
 				}
-				if hooks == nil || hooks.OnClientTurn == nil {
+				if hooks != nil && hooks.OnClientTurn != nil {
+					if err := hooks.OnClientTurn(turn, payload); err != nil {
+						return err
+					}
+				}
+				replayTracker.RegisterTurn(turn, messageType, payload)
+				return nil
+			},
+			BeforeUpstreamFrame: func(frame openaiwsv2.RelayUpstreamFrame) error {
+				if frame.MessageType != coderws.MessageText {
 					return nil
 				}
-				return hooks.OnClientTurn(turn, payload)
+				eventType := strings.TrimSpace(gjson.GetBytes(frame.Payload, "type").String())
+				if eventType == "error" {
+					errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(frame.Payload)
+					s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, frame.Payload, errCodeRaw, errTypeRaw, errMsgRaw)
+					if isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) &&
+						!frame.WroteCurrentTurn &&
+						hooks != nil && hooks.OnAccountExhausted != nil &&
+						account.Type == AccountTypeOAuth && !account.IsOpenAICodexNativeRelay() {
+						errMessage := strings.TrimSpace(errMsgRaw)
+						if errMessage == "" {
+							errMessage = "upstream account quota exhausted"
+						}
+						if failoverErr, ok := replayTracker.BuildFailoverError(account.ID, errors.New(errMessage)); ok {
+							logOpenAIWSV2Passthrough(
+								"relay_account_failover account_id=%d turn=%d action=suppress_quota_error_and_replay",
+								account.ID,
+								failoverErr.Turn(),
+							)
+							return failoverErr
+						}
+					}
+				}
+				replayTracker.ObserveUpstreamFrame(frame.Payload)
+				return nil
 			},
 			TurnMetadata: func(turn int, payload []byte) openaiwsv2.RelayTurnMetadata {
 				metadata := openaiwsv2.RelayTurnMetadata{
@@ -256,6 +386,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					turnResult.Usage.OutputTokens,
 					turnResult.Usage.CacheReadInputTokens,
 				)
+				if stateStore != nil && turnResult.RequestID != "" &&
+					(turn.TerminalEventType == "response.completed" || turn.TerminalEventType == "response.done") {
+					logOpenAIWSBindResponseAccountWarn(
+						getOpenAIGroupIDFromContext(c),
+						account.ID,
+						turnResult.RequestID,
+						stateStore.BindResponseAccountForUser(ctx, userID, turnResult.RequestID, account.ID, s.openAIWSResponseStickyTTL()),
+					)
+				}
 				if hooks != nil && hooks.AfterTurn != nil {
 					hooks.AfterTurn(turnNo, turnResult, nil)
 				}
