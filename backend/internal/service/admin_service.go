@@ -701,6 +701,13 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 	if input.PaygDiscountOverrideEnabled != nil {
 		user.PaygDiscountOverrideEnabled = *input.PaygDiscountOverrideEnabled
+		if !user.PaygDiscountOverrideEnabled {
+			// Keep the stored value neutral when returning to level pricing. This
+			// also prevents a legacy non-default multiplier from being interpreted
+			// as an override by compatibility handling in PaygDiscountRate.
+			defaultDiscount := 1.0
+			user.PaygDiscountMultiplier = &defaultDiscount
+		}
 	}
 
 	if input.AllowedGroups != nil {

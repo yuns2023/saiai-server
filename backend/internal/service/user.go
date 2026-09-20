@@ -51,8 +51,11 @@ func (u *User) PaygDiscountRate() float64 {
 		return 1
 	}
 	// A user-specific discount is an override, never an additional stacked
-	// discount. Preserve legacy in-memory/cache objects that predate levels.
-	if u.PaygDiscountOverrideEnabled || u.EffectiveAccessLevel() == nil {
+	// discount. Preserve legacy in-memory/cache objects that predate levels:
+	// before the override flag existed, a non-default multiplier was the only
+	// way to express an explicit user discount.
+	if u.PaygDiscountOverrideEnabled || u.EffectiveAccessLevel() == nil ||
+		(u.PaygDiscountMultiplier != nil && *u.PaygDiscountMultiplier != 1) {
 		if u.PaygDiscountMultiplier != nil && *u.PaygDiscountMultiplier >= 0 && *u.PaygDiscountMultiplier <= 1 {
 			return *u.PaygDiscountMultiplier
 		}

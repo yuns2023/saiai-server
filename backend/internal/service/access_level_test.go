@@ -19,6 +19,10 @@ func TestUserAccessLevelAndDiscount(t *testing.T) {
 	require.True(t, user.MeetsRequiredLevel(required))
 	require.Equal(t, 0.8, user.PaygDiscountRate())
 
+	legacyDiscount := 0.75
+	legacyUser := &User{AutoLevel: vip, PaygDiscountMultiplier: &legacyDiscount}
+	require.Equal(t, legacyDiscount, legacyUser.PaygDiscountRate(), "legacy explicit discounts must survive level rollout")
+
 	manualDiscount := 0.7
 	user.PaygDiscountMultiplier = &manualDiscount
 	user.PaygDiscountOverrideEnabled = true
