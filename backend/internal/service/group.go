@@ -24,14 +24,16 @@ const (
 )
 
 type Group struct {
-	ID             int64
-	Name           string
-	Description    string
-	Platform       string
-	RateMultiplier float64
-	IsExclusive    bool
-	Status         string
-	Hydrated       bool // indicates the group was loaded from a trusted repository source
+	ID              int64
+	Name            string
+	Description     string
+	Platform        string
+	RateMultiplier  float64
+	IsExclusive     bool
+	Status          string
+	Hydrated        bool // indicates the group was loaded from a trusted repository source
+	RequiredLevelID *int64
+	RequiredLevel   *AccessLevel
 
 	SubscriptionType    string
 	FiveHourLimitUSD    *float64
@@ -164,8 +166,8 @@ func (g *Group) ModelRateFor(model string) float64 {
 	return bestRate
 }
 
-// NormalizeBlockedModelPatterns trims, lower-cases and de-duplicates group
-// model denylist patterns. Empty entries are ignored so the admin UI can send
+// NormalizeBlockedModelPatterns trims, lower-cases and de-duplicates model
+// denylist patterns. Empty entries are ignored so the admin UI can send
 // a trailing blank line without changing the policy.
 func NormalizeBlockedModelPatterns(patterns []string) ([]string, error) {
 	if len(patterns) > maxBlockedModelPatterns {
@@ -202,6 +204,10 @@ func (g *Group) IsModelBlocked(requestedModel string) bool {
 	if g == nil || len(g.BlockedModelPatterns) == 0 {
 		return false
 	}
+	return isModelBlockedByPatterns(g.BlockedModelPatterns, requestedModel)
+}
+
+func isModelBlockedByPatterns(patterns []string, requestedModel string) bool {
 	model := strings.ToLower(strings.TrimSpace(requestedModel))
 	if model == "" {
 		return false
@@ -213,7 +219,7 @@ func (g *Group) IsModelBlocked(requestedModel string) bool {
 	if denormalized := strings.ToLower(strings.TrimSpace(claude.DenormalizeModelID(model))); denormalized != "" && denormalized != model {
 		models = append(models, denormalized)
 	}
-	for _, rawPattern := range g.BlockedModelPatterns {
+	for _, rawPattern := range patterns {
 		pattern := strings.ToLower(strings.TrimSpace(rawPattern))
 		if pattern == "" {
 			continue

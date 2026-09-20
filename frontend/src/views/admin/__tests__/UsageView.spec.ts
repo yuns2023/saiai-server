@@ -26,13 +26,6 @@ const messages: Record<string, string> = {
   'admin.usage.failedToLoadUser': 'Failed to load user',
 }
 
-const formatLocalDate = (date: Date): string => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     usage: {
@@ -127,6 +120,8 @@ describe('admin UsageView distribution metric toggles', () => {
       total_requests: 0,
       total_input_tokens: 0,
       total_output_tokens: 0,
+      total_cache_creation_tokens: 0,
+      total_cache_read_tokens: 0,
       total_cache_tokens: 0,
       total_tokens: 0,
       total_cost: 0,
@@ -176,12 +171,14 @@ describe('admin UsageView distribution metric toggles', () => {
 
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
     expect(getModelStats).toHaveBeenCalledTimes(1)
-    const now = new Date()
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({
-      start_date: formatLocalDate(yesterday),
-      end_date: formatLocalDate(now),
-      granularity: 'hour'
+    const snapshotParams = getSnapshotV2.mock.calls[0][0]
+    expect(snapshotParams.start_date).toBeUndefined()
+    expect(snapshotParams.end_date).toBeUndefined()
+    expect(snapshotParams.granularity).toBe('hour')
+    expect(new Date(snapshotParams.end_time).getTime() - new Date(snapshotParams.start_time).getTime()).toBe(24 * 60 * 60 * 1000)
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({
+      start_time: snapshotParams.start_time,
+      end_time: snapshotParams.end_time
     }))
 
     const modelChart = wrapper.find('[data-test="model-chart"]')

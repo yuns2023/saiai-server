@@ -267,6 +267,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/access-levels',
+    name: 'AdminAccessLevels',
+    component: () => import('@/views/admin/AccessLevelsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Access Levels',
+      titleKey: 'admin.accessLevels.title',
+      descriptionKey: 'admin.accessLevels.description'
+    }
+  },
+  {
     path: '/admin/subscriptions',
     name: 'AdminSubscriptions',
     component: () => import('@/views/admin/SubscriptionsView.vue'),

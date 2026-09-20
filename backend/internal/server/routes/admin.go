@@ -26,6 +26,8 @@ func RegisterAdminRoutes(
 		// 分组管理
 		registerGroupRoutes(admin, h)
 
+		registerAccessLevelRoutes(admin, h)
+
 		// 账号管理
 		registerAccountRoutes(admin, h)
 
@@ -74,6 +76,18 @@ func RegisterAdminRoutes(
 		// API Key 管理
 		registerAdminAPIKeyRoutes(admin, h)
 
+	}
+}
+
+func registerAccessLevelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	levels := admin.Group("/access-levels")
+	{
+		levels.GET("", h.Admin.AccessLevel.List)
+		levels.POST("", h.Admin.AccessLevel.Create)
+		levels.PUT("/:id", h.Admin.AccessLevel.Update)
+		levels.DELETE("/:id", h.Admin.AccessLevel.Delete)
+		levels.GET("/settings", h.Admin.AccessLevel.GetSettings)
+		levels.PUT("/settings", h.Admin.AccessLevel.UpdateSettings)
 	}
 }
 
@@ -204,6 +218,8 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		users.PUT("/:id", h.Admin.User.Update)
 		users.DELETE("/:id", h.Admin.User.Delete)
 		users.POST("/:id/balance", h.Admin.User.UpdateBalance)
+		users.PUT("/:id/access-level", h.Admin.AccessLevel.SetUserManualLevel)
+		users.DELETE("/:id/access-level", h.Admin.AccessLevel.ClearUserManualLevel)
 		users.GET("/:id/api-keys", h.Admin.User.GetUserAPIKeys)
 		users.GET("/:id/usage", h.Admin.User.GetUserUsage)
 		users.GET("/:id/balance-history", h.Admin.User.GetBalanceHistory)

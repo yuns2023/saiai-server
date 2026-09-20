@@ -211,6 +211,8 @@ interface Props {
   exporting: boolean
   startDate: string
   endDate: string
+  startTime?: string
+  endTime?: string
   showActions?: boolean
   showSessionDiagnostics?: boolean
 }
@@ -403,17 +405,11 @@ const onDocumentClick = (e: MouseEvent) => {
 }
 
 watch(
-  () => props.startDate,
-  (value) => {
-    filters.value.start_date = value
-  },
-  { immediate: true }
-)
-
-watch(
-  () => props.endDate,
-  (value) => {
-    filters.value.end_date = value
+  () => [props.startDate, props.endDate, props.startTime, props.endTime] as const,
+  ([startDate, endDate, startTime, endTime]) => {
+    const preciseRange = Boolean(startTime || endTime)
+    filters.value.start_date = preciseRange ? undefined : startDate
+    filters.value.end_date = preciseRange ? undefined : endDate
   },
   { immediate: true }
 )
@@ -454,7 +450,12 @@ onMounted(async () => {
   try {
     const [gs, ms] = await Promise.all([
       adminAPI.groups.list(1, 1000),
-      adminAPI.dashboard.getModelStats({ start_date: props.startDate, end_date: props.endDate })
+      adminAPI.dashboard.getModelStats({
+        start_date: props.startTime ? undefined : props.startDate,
+        end_date: props.endTime ? undefined : props.endDate,
+        start_time: props.startTime,
+        end_time: props.endTime
+      })
     ])
 
     groupOptions.value.push(...gs.items.map((g: any) => ({ value: g.id, label: g.name })))

@@ -31,6 +31,12 @@ const (
 	FieldBalance = "balance"
 	// FieldPaygDiscountMultiplier holds the string denoting the payg_discount_multiplier field in the database.
 	FieldPaygDiscountMultiplier = "payg_discount_multiplier"
+	// FieldPaygDiscountOverrideEnabled holds the string denoting the payg_discount_override_enabled field in the database.
+	FieldPaygDiscountOverrideEnabled = "payg_discount_override_enabled"
+	// FieldAutoLevelID holds the string denoting the auto_level_id field in the database.
+	FieldAutoLevelID = "auto_level_id"
+	// FieldManualLevelID holds the string denoting the manual_level_id field in the database.
+	FieldManualLevelID = "manual_level_id"
 	// FieldConcurrency holds the string denoting the concurrency field in the database.
 	FieldConcurrency = "concurrency"
 	// FieldStatus holds the string denoting the status field in the database.
@@ -67,6 +73,10 @@ const (
 	EdgeAttributeValues = "attribute_values"
 	// EdgePromoCodeUsages holds the string denoting the promo_code_usages edge name in mutations.
 	EdgePromoCodeUsages = "promo_code_usages"
+	// EdgeAutoLevel holds the string denoting the auto_level edge name in mutations.
+	EdgeAutoLevel = "auto_level"
+	// EdgeManualLevel holds the string denoting the manual_level edge name in mutations.
+	EdgeManualLevel = "manual_level"
 	// EdgeUserAllowedGroups holds the string denoting the user_allowed_groups edge name in mutations.
 	EdgeUserAllowedGroups = "user_allowed_groups"
 	// Table holds the table name of the user in the database.
@@ -132,6 +142,20 @@ const (
 	PromoCodeUsagesInverseTable = "promo_code_usages"
 	// PromoCodeUsagesColumn is the table column denoting the promo_code_usages relation/edge.
 	PromoCodeUsagesColumn = "user_id"
+	// AutoLevelTable is the table that holds the auto_level relation/edge.
+	AutoLevelTable = "users"
+	// AutoLevelInverseTable is the table name for the AccessLevel entity.
+	// It exists in this package in order to avoid circular dependency with the "accesslevel" package.
+	AutoLevelInverseTable = "access_levels"
+	// AutoLevelColumn is the table column denoting the auto_level relation/edge.
+	AutoLevelColumn = "auto_level_id"
+	// ManualLevelTable is the table that holds the manual_level relation/edge.
+	ManualLevelTable = "users"
+	// ManualLevelInverseTable is the table name for the AccessLevel entity.
+	// It exists in this package in order to avoid circular dependency with the "accesslevel" package.
+	ManualLevelInverseTable = "access_levels"
+	// ManualLevelColumn is the table column denoting the manual_level relation/edge.
+	ManualLevelColumn = "manual_level_id"
 	// UserAllowedGroupsTable is the table that holds the user_allowed_groups relation/edge.
 	UserAllowedGroupsTable = "user_allowed_groups"
 	// UserAllowedGroupsInverseTable is the table name for the UserAllowedGroup entity.
@@ -152,6 +176,9 @@ var Columns = []string{
 	FieldRole,
 	FieldBalance,
 	FieldPaygDiscountMultiplier,
+	FieldPaygDiscountOverrideEnabled,
+	FieldAutoLevelID,
+	FieldManualLevelID,
 	FieldConcurrency,
 	FieldStatus,
 	FieldUsername,
@@ -205,6 +232,8 @@ var (
 	DefaultBalance float64
 	// DefaultPaygDiscountMultiplier holds the default value on creation for the "payg_discount_multiplier" field.
 	DefaultPaygDiscountMultiplier float64
+	// DefaultPaygDiscountOverrideEnabled holds the default value on creation for the "payg_discount_override_enabled" field.
+	DefaultPaygDiscountOverrideEnabled bool
 	// DefaultConcurrency holds the default value on creation for the "concurrency" field.
 	DefaultConcurrency int
 	// DefaultStatus holds the default value on creation for the "status" field.
@@ -271,6 +300,21 @@ func ByBalance(opts ...sql.OrderTermOption) OrderOption {
 // ByPaygDiscountMultiplier orders the results by the payg_discount_multiplier field.
 func ByPaygDiscountMultiplier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPaygDiscountMultiplier, opts...).ToFunc()
+}
+
+// ByPaygDiscountOverrideEnabled orders the results by the payg_discount_override_enabled field.
+func ByPaygDiscountOverrideEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPaygDiscountOverrideEnabled, opts...).ToFunc()
+}
+
+// ByAutoLevelID orders the results by the auto_level_id field.
+func ByAutoLevelID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAutoLevelID, opts...).ToFunc()
+}
+
+// ByManualLevelID orders the results by the manual_level_id field.
+func ByManualLevelID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldManualLevelID, opts...).ToFunc()
 }
 
 // ByConcurrency orders the results by the concurrency field.
@@ -444,6 +488,20 @@ func ByPromoCodeUsages(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	}
 }
 
+// ByAutoLevelField orders the results by auto_level field.
+func ByAutoLevelField(field string, opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newAutoLevelStep(), sql.OrderByField(field, opts...))
+	}
+}
+
+// ByManualLevelField orders the results by manual_level field.
+func ByManualLevelField(field string, opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newManualLevelStep(), sql.OrderByField(field, opts...))
+	}
+}
+
 // ByUserAllowedGroupsCount orders the results by user_allowed_groups count.
 func ByUserAllowedGroupsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -518,6 +576,20 @@ func newPromoCodeUsagesStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(PromoCodeUsagesInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, PromoCodeUsagesTable, PromoCodeUsagesColumn),
+	)
+}
+func newAutoLevelStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(AutoLevelInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2O, true, AutoLevelTable, AutoLevelColumn),
+	)
+}
+func newManualLevelStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(ManualLevelInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2O, true, ManualLevelTable, ManualLevelColumn),
 	)
 }
 func newUserAllowedGroupsStep() *sqlgraph.Step {

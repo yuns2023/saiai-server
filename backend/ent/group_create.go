@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"github.com/Wei-Shaw/sub2api/ent/accesslevel"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
@@ -114,6 +115,20 @@ func (_c *GroupCreate) SetIsExclusive(v bool) *GroupCreate {
 func (_c *GroupCreate) SetNillableIsExclusive(v *bool) *GroupCreate {
 	if v != nil {
 		_c.SetIsExclusive(*v)
+	}
+	return _c
+}
+
+// SetRequiredLevelID sets the "required_level_id" field.
+func (_c *GroupCreate) SetRequiredLevelID(v int64) *GroupCreate {
+	_c.mutation.SetRequiredLevelID(v)
+	return _c
+}
+
+// SetNillableRequiredLevelID sets the "required_level_id" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableRequiredLevelID(v *int64) *GroupCreate {
+	if v != nil {
+		_c.SetRequiredLevelID(*v)
 	}
 	return _c
 }
@@ -712,6 +727,11 @@ func (_c *GroupCreate) AddAllowedUsers(v ...*User) *GroupCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddAllowedUserIDs(ids...)
+}
+
+// SetRequiredLevel sets the "required_level" edge to the AccessLevel entity.
+func (_c *GroupCreate) SetRequiredLevel(v *AccessLevel) *GroupCreate {
+	return _c.SetRequiredLevelID(v.ID)
 }
 
 // Mutation returns the GroupMutation object of the builder.
@@ -1318,6 +1338,23 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 		edge.Target.Fields = specE.Fields
 		_spec.Edges = append(_spec.Edges, edge)
 	}
+	if nodes := _c.mutation.RequiredLevelIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   group.RequiredLevelTable,
+			Columns: []string{group.RequiredLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.RequiredLevelID = &nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
+	}
 	return _node, _spec
 }
 
@@ -1457,6 +1494,24 @@ func (u *GroupUpsert) SetIsExclusive(v bool) *GroupUpsert {
 // UpdateIsExclusive sets the "is_exclusive" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateIsExclusive() *GroupUpsert {
 	u.SetExcluded(group.FieldIsExclusive)
+	return u
+}
+
+// SetRequiredLevelID sets the "required_level_id" field.
+func (u *GroupUpsert) SetRequiredLevelID(v int64) *GroupUpsert {
+	u.Set(group.FieldRequiredLevelID, v)
+	return u
+}
+
+// UpdateRequiredLevelID sets the "required_level_id" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateRequiredLevelID() *GroupUpsert {
+	u.SetExcluded(group.FieldRequiredLevelID)
+	return u
+}
+
+// ClearRequiredLevelID clears the value of the "required_level_id" field.
+func (u *GroupUpsert) ClearRequiredLevelID() *GroupUpsert {
+	u.SetNull(group.FieldRequiredLevelID)
 	return u
 }
 
@@ -2285,6 +2340,27 @@ func (u *GroupUpsertOne) SetIsExclusive(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateIsExclusive() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetRequiredLevelID sets the "required_level_id" field.
+func (u *GroupUpsertOne) SetRequiredLevelID(v int64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetRequiredLevelID(v)
+	})
+}
+
+// UpdateRequiredLevelID sets the "required_level_id" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateRequiredLevelID() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateRequiredLevelID()
+	})
+}
+
+// ClearRequiredLevelID clears the value of the "required_level_id" field.
+func (u *GroupUpsertOne) ClearRequiredLevelID() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearRequiredLevelID()
 	})
 }
 
@@ -3392,6 +3468,27 @@ func (u *GroupUpsertBulk) SetIsExclusive(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateIsExclusive() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetRequiredLevelID sets the "required_level_id" field.
+func (u *GroupUpsertBulk) SetRequiredLevelID(v int64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetRequiredLevelID(v)
+	})
+}
+
+// UpdateRequiredLevelID sets the "required_level_id" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateRequiredLevelID() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateRequiredLevelID()
+	})
+}
+
+// ClearRequiredLevelID clears the value of the "required_level_id" field.
+func (u *GroupUpsertBulk) ClearRequiredLevelID() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearRequiredLevelID()
 	})
 }
 

@@ -29,6 +29,8 @@ const (
 	FieldRateMultiplier = "rate_multiplier"
 	// FieldIsExclusive holds the string denoting the is_exclusive field in the database.
 	FieldIsExclusive = "is_exclusive"
+	// FieldRequiredLevelID holds the string denoting the required_level_id field in the database.
+	FieldRequiredLevelID = "required_level_id"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
 	// FieldPlatform holds the string denoting the platform field in the database.
@@ -119,6 +121,8 @@ const (
 	EdgeAccounts = "accounts"
 	// EdgeAllowedUsers holds the string denoting the allowed_users edge name in mutations.
 	EdgeAllowedUsers = "allowed_users"
+	// EdgeRequiredLevel holds the string denoting the required_level edge name in mutations.
+	EdgeRequiredLevel = "required_level"
 	// EdgeAccountGroups holds the string denoting the account_groups edge name in mutations.
 	EdgeAccountGroups = "account_groups"
 	// EdgeUserAllowedGroups holds the string denoting the user_allowed_groups edge name in mutations.
@@ -163,6 +167,13 @@ const (
 	// AllowedUsersInverseTable is the table name for the User entity.
 	// It exists in this package in order to avoid circular dependency with the "user" package.
 	AllowedUsersInverseTable = "users"
+	// RequiredLevelTable is the table that holds the required_level relation/edge.
+	RequiredLevelTable = "groups"
+	// RequiredLevelInverseTable is the table name for the AccessLevel entity.
+	// It exists in this package in order to avoid circular dependency with the "accesslevel" package.
+	RequiredLevelInverseTable = "access_levels"
+	// RequiredLevelColumn is the table column denoting the required_level relation/edge.
+	RequiredLevelColumn = "required_level_id"
 	// AccountGroupsTable is the table that holds the account_groups relation/edge.
 	AccountGroupsTable = "account_groups"
 	// AccountGroupsInverseTable is the table name for the AccountGroup entity.
@@ -189,6 +200,7 @@ var Columns = []string{
 	FieldDescription,
 	FieldRateMultiplier,
 	FieldIsExclusive,
+	FieldRequiredLevelID,
 	FieldStatus,
 	FieldPlatform,
 	FieldSubscriptionType,
@@ -374,6 +386,11 @@ func ByRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 // ByIsExclusive orders the results by the is_exclusive field.
 func ByIsExclusive(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIsExclusive, opts...).ToFunc()
+}
+
+// ByRequiredLevelID orders the results by the required_level_id field.
+func ByRequiredLevelID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequiredLevelID, opts...).ToFunc()
 }
 
 // ByStatus orders the results by the status field.
@@ -630,6 +647,13 @@ func ByAllowedUsers(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	}
 }
 
+// ByRequiredLevelField orders the results by required_level field.
+func ByRequiredLevelField(field string, opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newRequiredLevelStep(), sql.OrderByField(field, opts...))
+	}
+}
+
 // ByAccountGroupsCount orders the results by account_groups count.
 func ByAccountGroupsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -697,6 +721,13 @@ func newAllowedUsersStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(AllowedUsersInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.M2M, true, AllowedUsersTable, AllowedUsersPrimaryKey...),
+	)
+}
+func newRequiredLevelStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(RequiredLevelInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2O, true, RequiredLevelTable, RequiredLevelColumn),
 	)
 }
 func newAccountGroupsStep() *sqlgraph.Step {

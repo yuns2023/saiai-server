@@ -28,13 +28,15 @@ type APIKeyAuthSnapshot struct {
 
 // APIKeyAuthUserSnapshot 用户快照
 type APIKeyAuthUserSnapshot struct {
-	ID                     int64    `json:"id"`
-	Username               string   `json:"username,omitempty"`
-	Status                 string   `json:"status"`
-	Role                   string   `json:"role"`
-	Balance                float64  `json:"balance"`
-	PaygDiscountMultiplier *float64 `json:"payg_discount_multiplier,omitempty"`
-	Concurrency            int      `json:"concurrency"`
+	ID                          int64        `json:"id"`
+	Username                    string       `json:"username,omitempty"`
+	Status                      string       `json:"status"`
+	Role                        string       `json:"role"`
+	Balance                     float64      `json:"balance"`
+	PaygDiscountMultiplier      *float64     `json:"payg_discount_multiplier,omitempty"`
+	PaygDiscountOverrideEnabled bool         `json:"payg_discount_override_enabled,omitempty"`
+	EffectiveLevel              *AccessLevel `json:"effective_level,omitempty"`
+	Concurrency                 int          `json:"concurrency"`
 }
 
 // APIKeyAuthGroupSnapshot 分组快照
@@ -45,6 +47,7 @@ type APIKeyAuthGroupSnapshot struct {
 	Status                          string             `json:"status"`
 	SubscriptionType                string             `json:"subscription_type"`
 	RateMultiplier                  float64            `json:"rate_multiplier"`
+	RequiredLevel                   *AccessLevel       `json:"required_level,omitempty"`
 	ModelRateMultipliers            map[string]float64 `json:"model_rate_multipliers,omitempty"`
 	FiveHourLimitUSD                *float64           `json:"five_hour_limit_usd,omitempty"`
 	DailyLimitUSD                   *float64           `json:"daily_limit_usd,omitempty"`

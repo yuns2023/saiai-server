@@ -97,27 +97,29 @@ type AdminService interface {
 
 // CreateUserInput represents input for creating a new user via admin operations.
 type CreateUserInput struct {
-	Email                  string
-	Password               string
-	Username               string
-	Notes                  string
-	Balance                float64
-	PaygDiscountMultiplier *float64
-	Concurrency            int
-	AllowedGroups          []int64
-	SoraStorageQuotaBytes  int64
+	Email                       string
+	Password                    string
+	Username                    string
+	Notes                       string
+	Balance                     float64
+	PaygDiscountMultiplier      *float64
+	PaygDiscountOverrideEnabled bool
+	Concurrency                 int
+	AllowedGroups               []int64
+	SoraStorageQuotaBytes       int64
 }
 
 type UpdateUserInput struct {
-	Email                  string
-	Password               string
-	Username               *string
-	Notes                  *string
-	Balance                *float64 // 使用指针区分"未提供"和"设置为0"
-	PaygDiscountMultiplier *float64
-	Concurrency            *int // 使用指针区分"未提供"和"设置为0"
-	Status                 string
-	AllowedGroups          *[]int64 // 使用指针区分"未提供"和"设置为空数组"
+	Email                       string
+	Password                    string
+	Username                    *string
+	Notes                       *string
+	Balance                     *float64 // 使用指针区分"未提供"和"设置为0"
+	PaygDiscountMultiplier      *float64
+	PaygDiscountOverrideEnabled *bool
+	Concurrency                 *int // 使用指针区分"未提供"和"设置为0"
+	Status                      string
+	AllowedGroups               *[]int64 // 使用指针区分"未提供"和"设置为空数组"
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates            map[int64]*float64
@@ -131,6 +133,7 @@ type CreateGroupInput struct {
 	RateMultiplier       float64
 	ModelRateMultipliers map[string]float64
 	IsExclusive          bool
+	RequiredLevelID      *int64
 	SubscriptionType     string   // standard/subscription
 	FiveHourLimitUSD     *float64 // 5小时限额 (USD)
 	DailyLimitUSD        *float64 // 日限额 (USD)
@@ -185,6 +188,7 @@ type UpdateGroupInput struct {
 	RateMultiplier       *float64 // 使用指针以支持设置为0
 	ModelRateMultipliers *map[string]float64
 	IsExclusive          *bool
+	RequiredLevelID      *int64
 	Status               string
 	SubscriptionType     string   // standard/subscription
 	FiveHourLimitUSD     *float64 // 5小时限额 (USD)
@@ -489,6 +493,7 @@ type adminServiceImpl struct {
 	privacyClientFactory PrivacyClientFactory
 	inputRiskRepo        InputModerationEventRepository
 	inputRiskCache       InputModerationStateCache
+	accessLevelRepo      AccessLevelRepository
 }
 
 type userGroupRateBatchReader interface {
@@ -515,6 +520,7 @@ func NewAdminService(
 	privacyClientFactory PrivacyClientFactory,
 	inputRiskRepo InputModerationEventRepository,
 	inputRiskCache InputModerationStateCache,
+	accessLevelRepo AccessLevelRepository,
 ) AdminService {
 	return &adminServiceImpl{
 		userRepo:             userRepo,
@@ -535,6 +541,7 @@ func NewAdminService(
 		privacyClientFactory: privacyClientFactory,
 		inputRiskRepo:        inputRiskRepo,
 		inputRiskCache:       inputRiskCache,
+		accessLevelRepo:      accessLevelRepo,
 	}
 }
 
@@ -606,16 +613,17 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		return nil, err
 	}
 	user := &User{
-		Email:                  input.Email,
-		Username:               input.Username,
-		Notes:                  input.Notes,
-		Role:                   RoleUser, // Always create as regular user, never admin
-		Balance:                input.Balance,
-		PaygDiscountMultiplier: input.PaygDiscountMultiplier,
-		Concurrency:            input.Concurrency,
-		Status:                 StatusActive,
-		AllowedGroups:          input.AllowedGroups,
-		SoraStorageQuotaBytes:  input.SoraStorageQuotaBytes,
+		Email:                       input.Email,
+		Username:                    input.Username,
+		Notes:                       input.Notes,
+		Role:                        RoleUser, // Always create as regular user, never admin
+		Balance:                     input.Balance,
+		PaygDiscountMultiplier:      input.PaygDiscountMultiplier,
+		PaygDiscountOverrideEnabled: input.PaygDiscountOverrideEnabled || input.PaygDiscountMultiplier != nil,
+		Concurrency:                 input.Concurrency,
+		Status:                      StatusActive,
+		AllowedGroups:               input.AllowedGroups,
+		SoraStorageQuotaBytes:       input.SoraStorageQuotaBytes,
 	}
 	if err := user.SetPassword(input.Password); err != nil {
 		return nil, err
@@ -689,6 +697,17 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 	if input.PaygDiscountMultiplier != nil {
 		user.PaygDiscountMultiplier = input.PaygDiscountMultiplier
+		user.PaygDiscountOverrideEnabled = true
+	}
+	if input.PaygDiscountOverrideEnabled != nil {
+		user.PaygDiscountOverrideEnabled = *input.PaygDiscountOverrideEnabled
+		if !user.PaygDiscountOverrideEnabled {
+			// Keep the stored value neutral when returning to level pricing. This
+			// also prevents a legacy non-default multiplier from being interpreted
+			// as an override by compatibility handling in PaygDiscountRate.
+			defaultDiscount := 1.0
+			user.PaygDiscountMultiplier = &defaultDiscount
+		}
 	}
 
 	if input.AllowedGroups != nil {
@@ -710,7 +729,6 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, err
 	}
-
 	// 同步用户专属分组倍率
 	if input.GroupRates != nil && s.userGroupRateRepo != nil {
 		if err := s.userGroupRateRepo.SyncUserGroupRates(ctx, user.ID, input.GroupRates); err != nil {
@@ -790,6 +808,9 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, err
+	}
+	if refreshed, refreshErr := s.userRepo.GetByID(ctx, userID); refreshErr == nil {
+		user = refreshed
 	}
 	balanceDiff := user.Balance - oldBalance
 	if s.authCacheInvalidator != nil && balanceDiff != 0 {
@@ -890,6 +911,15 @@ func (s *adminServiceImpl) GetGroup(ctx context.Context, id int64) (*Group, erro
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
+	if input.RequiredLevelID != nil {
+		if *input.RequiredLevelID <= 0 {
+			input.RequiredLevelID = nil
+		} else if s.accessLevelRepo != nil {
+			if _, err := s.accessLevelRepo.GetByID(ctx, *input.RequiredLevelID); err != nil {
+				return nil, err
+			}
+		}
+	}
 	platform := input.Platform
 	if platform == "" {
 		platform = PlatformAnthropic
@@ -989,6 +1019,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		RateMultiplier:                   input.RateMultiplier,
 		ModelRateMultipliers:             modelRateMultipliers,
 		IsExclusive:                      input.IsExclusive,
+		RequiredLevelID:                  input.RequiredLevelID,
 		Status:                           StatusActive,
 		SubscriptionType:                 subscriptionType,
 		FiveHourLimitUSD:                 fiveHourLimit,
@@ -1214,6 +1245,18 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.IsExclusive != nil {
 		group.IsExclusive = *input.IsExclusive
+	}
+	if input.RequiredLevelID != nil {
+		if *input.RequiredLevelID > 0 {
+			if s.accessLevelRepo != nil {
+				if _, err := s.accessLevelRepo.GetByID(ctx, *input.RequiredLevelID); err != nil {
+					return nil, err
+				}
+			}
+			group.RequiredLevelID = input.RequiredLevelID
+		} else {
+			group.RequiredLevelID = nil
+		}
 	}
 	if input.Status != "" {
 		group.Status = input.Status
@@ -1696,6 +1739,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if IsRetiredPlatform(input.Platform) {
 		return nil, ErrPlatformRetired
 	}
+	if err := NormalizeAccountBlockedModelPatternsExtra(input.Extra); err != nil {
+		return nil, err
+	}
 	applyClaudeOAuthSingleDeviceDefaults(input.Platform, input.Type, input.Extra)
 
 	// 绑定分组
@@ -1807,6 +1853,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		return nil, ErrPlatformRetired
 	}
 	wasOveragesEnabled := account.IsOveragesEnabled()
+	if err := NormalizeAccountBlockedModelPatternsExtra(input.Extra); err != nil {
+		return nil, err
+	}
 
 	if input.Name != "" {
 		account.Name = input.Name
@@ -1971,6 +2020,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	if len(input.AccountIDs) == 0 {
 		return result, nil
+	}
+	if err := NormalizeAccountBlockedModelPatternsExtra(input.Extra); err != nil {
+		return nil, err
 	}
 	accountsForPinnedDefaults, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 	if err != nil {

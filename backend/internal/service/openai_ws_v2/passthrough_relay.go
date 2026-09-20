@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,6 +31,9 @@ type Usage struct {
 
 type RelayResult struct {
 	RequestModel            string
+	ReasoningEffort         string
+	RequestServiceTier      string
+	RequestPayloadHash      string
 	Usage                   Usage
 	RequestID               string
 	TerminalEventType       string
@@ -41,12 +45,26 @@ type RelayResult struct {
 }
 
 type RelayTurnResult struct {
-	RequestModel      string
-	Usage             Usage
-	RequestID         string
-	TerminalEventType string
-	Duration          time.Duration
-	FirstTokenMs      *int
+	Turn               int
+	RequestModel       string
+	ReasoningEffort    string
+	RequestServiceTier string
+	RequestPayloadHash string
+	Usage              Usage
+	RequestID          string
+	TerminalEventType  string
+	Duration           time.Duration
+	FirstTokenMs       *int
+}
+
+// RelayTurnMetadata is request-side accounting data captured before a turn is
+// written upstream. It is observational only; the relayed frame is unchanged.
+type RelayTurnMetadata struct {
+	Turn               int
+	RequestModel       string
+	ReasoningEffort    string
+	RequestServiceTier string
+	RequestPayloadHash string
 }
 
 type RelayExit struct {
@@ -62,6 +80,7 @@ type RelayOptions struct {
 	FirstMessageType     coderws.MessageType
 	OnUsageParseFailure  func(eventType string, usageRaw string)
 	OnClientTurn         func(turn int, payload []byte) error
+	TurnMetadata         func(turn int, payload []byte) RelayTurnMetadata
 	OnTurnComplete       func(turn RelayTurnResult)
 	OnTrace              func(event RelayTraceEvent)
 	Now                  func() time.Time
@@ -79,12 +98,12 @@ type RelayTraceEvent struct {
 
 type relayState struct {
 	usage                  Usage
-	requestModel           string
 	lastResponseID         string
 	terminalEventType      string
 	terminalFrameForwarded atomic.Bool
 	firstTokenMs           *int
 	turnTimingByID         map[string]*relayTurnTiming
+	turns                  *relayTurnTracker
 }
 
 type relayExitSignal struct {
@@ -106,6 +125,15 @@ type observedUpstreamEvent struct {
 type relayTurnTiming struct {
 	startAt      time.Time
 	firstTokenMs *int
+}
+
+type relayTurnTracker struct {
+	mu               sync.Mutex
+	pending          []RelayTurnMetadata
+	byResponseID     map[string]RelayTurnMetadata
+	seenResponseIDs  map[string]struct{}
+	lastCompleted    RelayTurnMetadata
+	hasLastCompleted bool
 }
 
 func Relay(
@@ -140,7 +168,7 @@ func Relay(
 		firstMessageType = coderws.MessageText
 	}
 	startAt := nowFn()
-	state := &relayState{requestModel: result.RequestModel}
+	state := &relayState{turns: newRelayTurnTracker()}
 	onTrace := options.OnTrace
 
 	relayCtx, relayCancel := context.WithCancel(ctx)
@@ -172,15 +200,25 @@ func Relay(
 		MessageType:  relayMessageTypeString(firstMessageType),
 	})
 	clientTurns := &atomic.Int32{}
-	if options.OnClientTurn != nil {
+	firstTurnRegistered := false
+	if isRelayClientTurn(firstClientMessage) {
 		turn := int(clientTurns.Add(1))
-		if err := options.OnClientTurn(turn, firstClientMessage); err != nil {
-			result.Duration = nowFn().Sub(startAt)
-			return result, &RelayExit{Stage: "client_turn_rejected", Err: err}
+		if options.OnClientTurn != nil {
+			if err := options.OnClientTurn(turn, firstClientMessage); err != nil {
+				result.Duration = nowFn().Sub(startAt)
+				return result, &RelayExit{Stage: "client_turn_rejected", Err: err}
+			}
 		}
+		metadata := relayTurnMetadata(turn, firstClientMessage, options.TurnMetadata)
+		state.turns.register(metadata)
+		applyRelayTurnMetadataToResult(&result, metadata)
+		firstTurnRegistered = true
 	}
 
 	if err := writeUpstream(firstMessageType, firstClientMessage); err != nil {
+		if firstTurnRegistered {
+			state.turns.cancelPending(1)
+		}
 		result.Duration = nowFn().Sub(startAt)
 		emitRelayTrace(onTrace, RelayTraceEvent{
 			Stage:        "write_first_message_failed",
@@ -202,7 +240,7 @@ func Relay(
 
 	exitCh := make(chan relayExitSignal, 3)
 	dropDownstreamWrites := atomic.Bool{}
-	go runClientToUpstream(relayCtx, clientConn, writeUpstream, markActivity, clientToUpstreamFrames, clientTurns, options.OnClientTurn, onTrace, exitCh)
+	go runClientToUpstream(relayCtx, clientConn, writeUpstream, markActivity, clientToUpstreamFrames, clientTurns, state, options.OnClientTurn, options.TurnMetadata, onTrace, exitCh)
 	go runUpstreamToClient(
 		relayCtx,
 		upstreamConn,
@@ -345,7 +383,9 @@ func runClientToUpstream(
 	markActivity func(),
 	forwardedFrames *atomic.Int64,
 	clientTurns *atomic.Int32,
+	state *relayState,
 	onClientTurn func(turn int, payload []byte) error,
+	turnMetadata func(turn int, payload []byte) RelayTurnMetadata,
 	onTrace func(event RelayTraceEvent),
 	exitCh chan<- relayExitSignal,
 ) {
@@ -362,17 +402,28 @@ func runClientToUpstream(
 			return
 		}
 		markActivity()
-		if onClientTurn != nil {
+		turn := 0
+		turnRegistered := false
+		if isRelayClientTurn(payload) {
 			turn := 1
 			if clientTurns != nil {
 				turn = int(clientTurns.Add(1))
 			}
-			if err := onClientTurn(turn, payload); err != nil {
-				exitCh <- relayExitSignal{stage: "client_turn_rejected", err: err}
-				return
+			if onClientTurn != nil {
+				if err := onClientTurn(turn, payload); err != nil {
+					exitCh <- relayExitSignal{stage: "client_turn_rejected", err: err}
+					return
+				}
+			}
+			if state != nil && state.turns != nil {
+				state.turns.register(relayTurnMetadata(turn, payload, turnMetadata))
+				turnRegistered = true
 			}
 		}
 		if err := writeUpstream(msgType, payload); err != nil {
+			if turnRegistered && state != nil && state.turns != nil {
+				state.turns.cancelPending(turn)
+			}
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:        "write_upstream_failed",
 				Direction:    "client_to_upstream",
@@ -578,6 +629,9 @@ func observeUpstreamMessage(
 	if responseID == "" && isTerminalEvent(eventType) {
 		responseID = strings.TrimSpace(values[3].String())
 	}
+	if responseID != "" && state.turns != nil {
+		state.turns.bind(responseID)
+	}
 	now := nowFn()
 
 	if state.firstTokenMs == nil && isTokenEvent(eventType) {
@@ -625,25 +679,150 @@ func emitTurnComplete(
 	state *relayState,
 	observed observedUpstreamEvent,
 ) {
-	if onTurnComplete == nil || !observed.terminal {
+	if !observed.terminal {
 		return
 	}
 	responseID := strings.TrimSpace(observed.responseID)
 	if responseID == "" {
 		return
 	}
-	requestModel := ""
-	if state != nil {
-		requestModel = state.requestModel
+	metadata := RelayTurnMetadata{}
+	if state != nil && state.turns != nil {
+		metadata, _ = state.turns.complete(responseID)
+	}
+	if onTurnComplete == nil {
+		return
 	}
 	onTurnComplete(RelayTurnResult{
-		RequestModel:      requestModel,
-		Usage:             observed.usage,
-		RequestID:         responseID,
-		TerminalEventType: observed.eventType,
-		Duration:          observed.duration,
-		FirstTokenMs:      openAIWSRelayCloneIntPtr(observed.firstToken),
+		Turn:               metadata.Turn,
+		RequestModel:       metadata.RequestModel,
+		ReasoningEffort:    metadata.ReasoningEffort,
+		RequestServiceTier: metadata.RequestServiceTier,
+		RequestPayloadHash: metadata.RequestPayloadHash,
+		Usage:              observed.usage,
+		RequestID:          responseID,
+		TerminalEventType:  observed.eventType,
+		Duration:           observed.duration,
+		FirstTokenMs:       openAIWSRelayCloneIntPtr(observed.firstToken),
 	})
+}
+
+func newRelayTurnTracker() *relayTurnTracker {
+	return &relayTurnTracker{
+		pending:         make([]RelayTurnMetadata, 0, 4),
+		byResponseID:    make(map[string]RelayTurnMetadata, 4),
+		seenResponseIDs: make(map[string]struct{}, 4),
+	}
+}
+
+func (t *relayTurnTracker) register(metadata RelayTurnMetadata) {
+	if t == nil || metadata.Turn <= 0 {
+		return
+	}
+	t.mu.Lock()
+	t.pending = append(t.pending, metadata)
+	t.mu.Unlock()
+}
+
+func (t *relayTurnTracker) cancelPending(turn int) {
+	if t == nil || turn <= 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for index := len(t.pending) - 1; index >= 0; index-- {
+		if t.pending[index].Turn != turn {
+			continue
+		}
+		t.pending = append(t.pending[:index], t.pending[index+1:]...)
+		return
+	}
+}
+
+func (t *relayTurnTracker) bind(responseID string) (RelayTurnMetadata, bool) {
+	if t == nil || strings.TrimSpace(responseID) == "" {
+		return RelayTurnMetadata{}, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if metadata, ok := t.byResponseID[responseID]; ok {
+		return metadata, true
+	}
+	if _, seen := t.seenResponseIDs[responseID]; seen {
+		return RelayTurnMetadata{}, false
+	}
+	if len(t.pending) == 0 {
+		return RelayTurnMetadata{}, false
+	}
+	// Client frames and the corresponding response.created events are ordered on
+	// the WebSocket. Bind once by FIFO, then use response_id for all later events
+	// so concurrently active responses may complete in any order.
+	metadata := t.pending[0]
+	t.pending = t.pending[1:]
+	t.byResponseID[responseID] = metadata
+	t.seenResponseIDs[responseID] = struct{}{}
+	return metadata, true
+}
+
+func (t *relayTurnTracker) complete(responseID string) (RelayTurnMetadata, bool) {
+	if t == nil || strings.TrimSpace(responseID) == "" {
+		return RelayTurnMetadata{}, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	metadata, ok := t.byResponseID[responseID]
+	if !ok {
+		return RelayTurnMetadata{}, false
+	}
+	delete(t.byResponseID, responseID)
+	t.lastCompleted = metadata
+	t.hasLastCompleted = true
+	return metadata, true
+}
+
+func (t *relayTurnTracker) lastCompletedMetadata() (RelayTurnMetadata, bool) {
+	if t == nil {
+		return RelayTurnMetadata{}, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastCompleted, t.hasLastCompleted
+}
+
+func isRelayClientTurn(payload []byte) bool {
+	// Control frames such as response.cancel are relayed unchanged but do not
+	// create a billable turn or consume a pending metadata slot.
+	return strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create"
+}
+
+func relayTurnMetadata(
+	turn int,
+	payload []byte,
+	capture func(turn int, payload []byte) RelayTurnMetadata,
+) RelayTurnMetadata {
+	metadata := RelayTurnMetadata{
+		Turn:         turn,
+		RequestModel: strings.TrimSpace(gjson.GetBytes(payload, "model").String()),
+	}
+	if capture == nil {
+		return metadata
+	}
+	captured := capture(turn, payload)
+	captured.Turn = turn
+	if strings.TrimSpace(captured.RequestModel) == "" {
+		captured.RequestModel = metadata.RequestModel
+	}
+	return captured
+}
+
+func applyRelayTurnMetadataToResult(result *RelayResult, metadata RelayTurnMetadata) {
+	if result == nil {
+		return
+	}
+	result.RequestModel = metadata.RequestModel
+	result.ReasoningEffort = metadata.ReasoningEffort
+	result.RequestServiceTier = metadata.RequestServiceTier
+	result.RequestPayloadHash = metadata.RequestPayloadHash
 }
 
 func openAIWSRelayGetOrInitTurnTiming(state *relayState, responseID string, now time.Time) *relayTurnTiming {
@@ -757,7 +936,9 @@ func enrichResult(result *RelayResult, state *relayState, duration time.Duration
 	if state == nil {
 		return
 	}
-	result.RequestModel = state.requestModel
+	if metadata, ok := state.turns.lastCompletedMetadata(); ok {
+		applyRelayTurnMetadataToResult(result, metadata)
+	}
 	result.Usage = state.usage
 	result.RequestID = state.lastResponseID
 	result.TerminalEventType = state.terminalEventType

@@ -44,6 +44,7 @@ func ProvideSessionLimitCache(rdb *redis.Client, cfg *config.Config) service.Ses
 // ProviderSet is the Wire provider set for all repositories
 var ProviderSet = wire.NewSet(
 	NewUserRepository,
+	NewAccessLevelRepository,
 	NewAPIKeyRepository,
 	NewGroupRepository,
 	NewAccountRepository,

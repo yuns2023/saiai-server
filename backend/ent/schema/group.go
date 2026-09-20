@@ -47,6 +47,10 @@ func (Group) Fields() []ent.Field {
 			Default(1.0),
 		field.Bool("is_exclusive").
 			Default(false),
+		field.Int64("required_level_id").
+			Optional().
+			Nillable().
+			Comment("使用该分组所需的最低用户等级；为空时保留原公开/专属规则"),
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),
@@ -208,6 +212,10 @@ func (Group) Edges() []ent.Edge {
 		edge.From("allowed_users", User.Type).
 			Ref("allowed_groups").
 			Through("user_allowed_groups", UserAllowedGroup.Type),
+		edge.From("required_level", AccessLevel.Type).
+			Ref("required_groups").
+			Field("required_level_id").
+			Unique(),
 		// 注意：fallback_group_id 直接作为字段使用，不定义 edge
 		// 这样允许多个分组指向同一个降级分组（M2O 关系）
 	}
@@ -222,5 +230,6 @@ func (Group) Indexes() []ent.Index {
 		index.Fields("is_exclusive"),
 		index.Fields("deleted_at"),
 		index.Fields("sort_order"),
+		index.Fields("required_level_id"),
 	}
 }

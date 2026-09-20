@@ -2,9 +2,11 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
@@ -17,6 +19,7 @@ type adminUsageRepoCapture struct {
 	service.UsageLogRepository
 	listFilters  usagestats.UsageLogFilters
 	statsFilters usagestats.UsageLogFilters
+	statsResult  *usagestats.UsageStats
 }
 
 func (s *adminUsageRepoCapture) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
@@ -31,6 +34,9 @@ func (s *adminUsageRepoCapture) ListWithFilters(ctx context.Context, params pagi
 
 func (s *adminUsageRepoCapture) GetStatsWithFilters(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.UsageStats, error) {
 	s.statsFilters = filters
+	if s.statsResult != nil {
+		return s.statsResult, nil
+	}
 	return &usagestats.UsageStats{}, nil
 }
 
@@ -183,4 +189,70 @@ func TestAdminUsageStatsInvalidStream(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestAdminUsageListUsesPreciseTimeRange(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage?start_time=2026-09-18T13%3A58%3A00Z&end_time=2026-09-19T13%3A58%3A00Z", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.listFilters.StartTime)
+	require.NotNil(t, repo.listFilters.EndTime)
+	require.Equal(t, 24*time.Hour, repo.listFilters.EndTime.Sub(*repo.listFilters.StartTime))
+}
+
+func TestAdminUsageStatsUsesPreciseTimeRange(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage/stats?start_time=2026-09-18T13%3A58%3A00Z&end_time=2026-09-19T13%3A58%3A00Z", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.statsFilters.StartTime)
+	require.NotNil(t, repo.statsFilters.EndTime)
+	require.Equal(t, 24*time.Hour, repo.statsFilters.EndTime.Sub(*repo.statsFilters.StartTime))
+}
+
+func TestAdminUsageStatsReturnsCacheTokenClasses(t *testing.T) {
+	repo := &adminUsageRepoCapture{statsResult: &usagestats.UsageStats{
+		TotalCacheCreationTokens: 25,
+		TotalCacheReadTokens:     75,
+		TotalCacheTokens:         100,
+		TotalTokens:              200,
+	}}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage/stats", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var body struct {
+		Data usagestats.UsageStats `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, int64(25), body.Data.TotalCacheCreationTokens)
+	require.Equal(t, int64(75), body.Data.TotalCacheReadTokens)
+	require.Equal(t, int64(100), body.Data.TotalCacheTokens)
+}
+
+func TestAdminUsageRejectsIncompletePreciseTimeRange(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	for _, path := range []string{
+		"/admin/usage?start_time=2026-09-18T13%3A58%3A00Z",
+		"/admin/usage/stats?end_time=2026-09-19T13%3A58%3A00Z",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code, path)
+	}
 }

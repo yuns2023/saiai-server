@@ -4611,13 +4611,16 @@ func summarizeSelectionFailureStats(stats selectionFailureStats) string {
 // isModelSupportedByAccountWithContext 根据账户平台检查模型支持（带 context）
 // 对于 Antigravity 平台，会先获取映射后的最终模型名（包括 thinking 后缀）再检查支持
 func (s *GatewayService) isModelSupportedByAccountWithContext(ctx context.Context, account *Account, requestedModel string) bool {
+	if account.IsModelBlocked(requestedModel) {
+		return false
+	}
 	if account.Platform == PlatformAntigravity {
 		if strings.TrimSpace(requestedModel) == "" {
 			return true
 		}
 		// 使用与转发阶段一致的映射逻辑：自定义映射优先 → 默认映射兜底
 		mapped := mapAntigravityModel(account, requestedModel)
-		if mapped == "" {
+		if mapped == "" || account.IsModelBlocked(mapped) {
 			return false
 		}
 		// 应用 thinking 后缀后检查最终模型是否在账号映射中
@@ -4635,11 +4638,15 @@ func (s *GatewayService) isModelSupportedByAccountWithContext(ctx context.Contex
 
 // isModelSupportedByAccount 根据账户平台检查模型支持（无 context，用于非 Antigravity 平台）
 func (s *GatewayService) isModelSupportedByAccount(account *Account, requestedModel string) bool {
+	if account.IsModelBlocked(requestedModel) {
+		return false
+	}
 	if account.Platform == PlatformAntigravity {
 		if strings.TrimSpace(requestedModel) == "" {
 			return true
 		}
-		return mapAntigravityModel(account, requestedModel) != ""
+		mapped := mapAntigravityModel(account, requestedModel)
+		return mapped != "" && !account.IsModelBlocked(mapped)
 	}
 	if account.Platform == PlatformSora {
 		return s.isSoraModelSupportedByAccount(account, requestedModel)
@@ -9181,6 +9188,10 @@ type apiKeyAuthCacheInvalidator interface {
 	InvalidateAuthCacheByKey(ctx context.Context, key string)
 }
 
+type userAuthCacheInvalidator interface {
+	InvalidateAuthCacheByUserID(ctx context.Context, userID int64)
+}
+
 type usageLogBestEffortWriter interface {
 	CreateBestEffort(ctx context.Context, log *UsageLog) error
 }
@@ -9222,6 +9233,8 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 		if cost.ActualCost > 0 {
 			if err := deps.userRepo.DeductBalance(billingCtx, p.User.ID, cost.ActualCost); err != nil {
 				slog.Error("deduct balance failed", "user_id", p.User.ID, "error", err)
+			} else if invalidator, ok := p.APIKeyService.(userAuthCacheInvalidator); ok {
+				invalidator.InvalidateAuthCacheByUserID(billingCtx, p.User.ID)
 			}
 			deps.billingCacheService.QueueDeductBalance(p.User.ID, cost.ActualCost)
 		}
@@ -9375,6 +9388,11 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	if result.APIKeyQuotaExhausted {
 		if invalidator, ok := p.APIKeyService.(apiKeyAuthCacheInvalidator); ok && p.APIKey != nil && p.APIKey.Key != "" {
 			invalidator.InvalidateAuthCacheByKey(billingCtx, p.APIKey.Key)
+		}
+	}
+	if result.UserAccessLevelChanged {
+		if invalidator, ok := p.APIKeyService.(userAuthCacheInvalidator); ok && p.User != nil {
+			invalidator.InvalidateAuthCacheByUserID(billingCtx, p.User.ID)
 		}
 	}
 

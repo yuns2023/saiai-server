@@ -218,6 +218,9 @@
                   v-model:end-date="endDate"
                   @change="onDateRangeChange"
                 />
+                <span v-if="selectedRangeDetail" class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ selectedRangeDetail }}
+                </span>
               </div>
               <div class="ml-auto flex items-center gap-2">
                 <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -248,6 +251,8 @@
               :ranking-error="rankingError"
               :start-date="startDate"
               :end-date="endDate"
+              :start-time="activeRangePreset === 'last24Hours' ? rollingStartTime : undefined"
+              :end-time="activeRangePreset === 'last24Hours' ? rollingEndTime : undefined"
               @ranking-click="goToUserUsage"
             />
             <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
@@ -364,6 +369,50 @@ const granularity = ref<'day' | 'hour'>('hour')
 const defaultRange = getLast24HoursRangeDates()
 const startDate = ref(defaultRange.start)
 const endDate = ref(defaultRange.end)
+const activeRangePreset = ref<string | null>('last24Hours')
+const createRolling24HourRange = (end = new Date()): { start: string; end: string } => ({
+  start: new Date(end.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+  end: end.toISOString()
+})
+const defaultRollingRange = createRolling24HourRange()
+const rollingStartTime = ref(defaultRollingRange.start)
+const rollingEndTime = ref(defaultRollingRange.end)
+
+const refreshRollingRange = () => {
+  const range = createRolling24HourRange()
+  rollingStartTime.value = range.start
+  rollingEndTime.value = range.end
+}
+
+const activeRangeParams = () => {
+  if (activeRangePreset.value === 'last24Hours') {
+    return {
+      start_date: undefined,
+      end_date: undefined,
+      start_time: rollingStartTime.value,
+      end_time: rollingEndTime.value
+    }
+  }
+  return {
+    start_date: startDate.value,
+    end_date: endDate.value,
+    start_time: undefined,
+    end_time: undefined
+  }
+}
+
+const selectedRangeDetail = computed(() => {
+  if (activeRangePreset.value !== 'last24Hours') return ''
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
+  return `${formatter.format(new Date(rollingStartTime.value))} – ${formatter.format(new Date(rollingEndTime.value))} · ${timezone}`
+})
 
 // Granularity options for Select component
 const granularityOptions = computed(() => [
@@ -545,8 +594,7 @@ const goToUserUsage = (item: UserSpendingRankingItem) => {
     path: '/admin/usage',
     query: {
       user_id: String(item.user_id),
-      start_date: startDate.value,
-      end_date: endDate.value
+      ...activeRangeParams()
     }
   })
 }
@@ -557,6 +605,13 @@ const onDateRangeChange = (range: {
   endDate: string
   preset: string | null
 }) => {
+  startDate.value = range.startDate
+  endDate.value = range.endDate
+  activeRangePreset.value = range.preset
+  if (range.preset === 'last24Hours') {
+    refreshRollingRange()
+  }
+
   // Auto-select granularity based on date range
   const start = new Date(range.startDate)
   const end = new Date(range.endDate)
@@ -581,8 +636,7 @@ const loadDashboardSnapshot = async (includeStats: boolean) => {
   chartsLoading.value = true
   try {
     const response = await adminAPI.dashboard.getSnapshotV2({
-      start_date: startDate.value,
-      end_date: endDate.value,
+      ...activeRangeParams(),
       granularity: granularity.value,
       include_stats: includeStats,
       include_trend: true,
@@ -613,8 +667,7 @@ const loadUsersTrend = async () => {
   userTrendLoading.value = true
   try {
     const response = await adminAPI.dashboard.getUserUsageTrend({
-      start_date: startDate.value,
-      end_date: endDate.value,
+      ...activeRangeParams(),
       granularity: granularity.value,
       limit: 12
     })
@@ -637,8 +690,7 @@ const loadUserSpendingRanking = async () => {
   rankingError.value = false
   try {
     const response = await adminAPI.dashboard.getUserSpendingRanking({
-      start_date: startDate.value,
-      end_date: endDate.value,
+      ...activeRangeParams(),
       limit: rankingLimit
     })
     if (currentSeq !== rankingLoadSeq) return

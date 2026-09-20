@@ -101,8 +101,9 @@ func valueOrZero(v *int64) int64 {
 }
 
 type UsageBillingApplyResult struct {
-	Applied              bool
-	APIKeyQuotaExhausted bool
+	Applied                bool
+	APIKeyQuotaExhausted   bool
+	UserAccessLevelChanged bool
 }
 
 type UsageBillingRepository interface {

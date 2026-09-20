@@ -725,6 +725,40 @@
         </div>
       </div>
 
+      <!-- Account-level model denylist -->
+      <div
+        v-if="supportsAccountBlockedModels"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="mb-3 flex items-center justify-between">
+          <label
+            id="bulk-edit-blocked-models-label"
+            class="input-label mb-0"
+            for="bulk-edit-blocked-models-enabled"
+          >
+            {{ t('admin.accounts.accountBlockedModels') }}
+          </label>
+          <input
+            id="bulk-edit-blocked-models-enabled"
+            v-model="enableBlockedModels"
+            type="checkbox"
+            aria-controls="bulk-edit-blocked-models"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <textarea
+          id="bulk-edit-blocked-models"
+          v-model="blockedModelPatternsText"
+          rows="3"
+          :disabled="!enableBlockedModels"
+          class="input font-mono text-sm"
+          :class="!enableBlockedModels && 'cursor-not-allowed opacity-50'"
+          :placeholder="t('admin.accounts.accountBlockedModelsPlaceholder')"
+          aria-labelledby="bulk-edit-blocked-models-label"
+        />
+        <p class="input-hint">{{ t('admin.accounts.accountBlockedModelsHint') }}</p>
+      </div>
+
       <!-- Groups -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -821,6 +855,7 @@ import {
   buildModelMappingObject as buildModelMappingPayload,
   getPresetMappingsByPlatform
 } from '@/composables/useModelWhitelist'
+import { parseAccountBlockedModelPatterns } from '@/utils/accountBlockedModels'
 
 interface Props {
   show: boolean
@@ -842,6 +877,9 @@ const appStore = useAppStore()
 
 // Platform awareness
 const isMixedPlatform = computed(() => props.selectedPlatforms.length > 1)
+const supportsAccountBlockedModels = computed(
+  () => props.selectedPlatforms.length > 0 && props.selectedPlatforms.every(platform => platform !== 'openai')
+)
 
 // 是否全部为 Anthropic OAuth/SetupToken（RPM 配置仅在此条件下显示）
 const allAnthropicOAuthOrSetupToken = computed(() => {
@@ -887,6 +925,7 @@ const enableRateMultiplier = ref(false)
 const enableStatus = ref(false)
 const enableGroups = ref(false)
 const enableRpmLimit = ref(false)
+const enableBlockedModels = ref(false)
 
 // State - field values
 const submitting = ref(false)
@@ -912,6 +951,7 @@ const bulkBaseRpm = ref<number | null>(null)
 const bulkRpmStrategy = ref<'tiered' | 'sticky_exempt'>('tiered')
 const bulkRpmStickyBuffer = ref<number | null>(null)
 const userMsgQueueMode = ref<string | null>(null)
+const blockedModelPatternsText = ref('')
 const umqModeOptions = computed(() => [
   { value: '', label: t('admin.accounts.quotaControl.rpmLimit.umqModeOff') },
   { value: 'throttle', label: t('admin.accounts.quotaControl.rpmLimit.umqModeThrottle') },
@@ -1117,6 +1157,12 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     umqExtra.user_msg_queue_enabled = false  // 清理旧字段（JSONB merge）
   }
 
+  if (supportsAccountBlockedModels.value && enableBlockedModels.value) {
+    if (!updates.extra) updates.extra = {}
+    const blockedModelsExtra = updates.extra as Record<string, unknown>
+    blockedModelsExtra.blocked_model_patterns = parseAccountBlockedModelPatterns(blockedModelPatternsText.value)
+  }
+
   return Object.keys(updates).length > 0 ? updates : null
 }
 
@@ -1179,6 +1225,7 @@ const handleSubmit = async () => {
     enableStatus.value ||
     enableGroups.value ||
     enableRpmLimit.value ||
+    (supportsAccountBlockedModels.value && enableBlockedModels.value) ||
     userMsgQueueMode.value !== null
 
   if (!hasAnyFieldEnabled) {
@@ -1270,6 +1317,7 @@ watch(
       enableStatus.value = false
       enableGroups.value = false
       enableRpmLimit.value = false
+      enableBlockedModels.value = false
 
       // Reset all values
       baseUrl.value = ''
@@ -1291,6 +1339,7 @@ watch(
       bulkRpmStrategy.value = 'tiered'
       bulkRpmStickyBuffer.value = null
       userMsgQueueMode.value = null
+      blockedModelPatternsText.value = ''
 
       // Reset mixed channel warning state
       showMixedChannelWarning.value = false

@@ -13,16 +13,17 @@ func UserFromServiceShallow(u *service.User) *User {
 		return nil
 	}
 	return &User{
-		ID:            u.ID,
-		Email:         u.Email,
-		Username:      u.Username,
-		Role:          u.Role,
-		Balance:       u.Balance,
-		Concurrency:   u.Concurrency,
-		Status:        u.Status,
-		AllowedGroups: u.AllowedGroups,
-		CreatedAt:     u.CreatedAt,
-		UpdatedAt:     u.UpdatedAt,
+		ID:             u.ID,
+		Email:          u.Email,
+		Username:       u.Username,
+		Role:           u.Role,
+		Balance:        u.Balance,
+		Concurrency:    u.Concurrency,
+		Status:         u.Status,
+		AllowedGroups:  u.AllowedGroups,
+		CreatedAt:      u.CreatedAt,
+		UpdatedAt:      u.UpdatedAt,
+		EffectiveLevel: AccessLevelFromService(u.EffectiveAccessLevel()),
 	}
 }
 
@@ -59,12 +60,16 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 		return nil
 	}
 	return &AdminUser{
-		User:                   *base,
-		Notes:                  u.Notes,
-		PaygDiscountMultiplier: u.PaygDiscountRate(),
-		GroupRates:             u.GroupRates,
-		SoraStorageQuotaBytes:  u.SoraStorageQuotaBytes,
-		SoraStorageUsedBytes:   u.SoraStorageUsedBytes,
+		User:                            *base,
+		Notes:                           u.Notes,
+		PaygDiscountMultiplier:          u.PaygDiscountRate(),
+		EffectivePaygDiscountMultiplier: u.PaygDiscountRate(),
+		PaygDiscountOverrideEnabled:     u.PaygDiscountOverrideEnabled,
+		AutoLevel:                       AccessLevelFromService(u.AutoLevel),
+		ManualLevel:                     AccessLevelFromService(u.ManualLevel),
+		GroupRates:                      u.GroupRates,
+		SoraStorageQuotaBytes:           u.SoraStorageQuotaBytes,
+		SoraStorageUsedBytes:            u.SoraStorageUsedBytes,
 	}
 }
 
@@ -178,6 +183,8 @@ func groupFromServiceBase(g *service.Group) Group {
 		RateMultiplier:                  g.RateMultiplier,
 		IsExclusive:                     g.IsExclusive,
 		Status:                          g.Status,
+		RequiredLevelID:                 g.RequiredLevelID,
+		RequiredLevel:                   AccessLevelFromService(g.RequiredLevel),
 		SubscriptionType:                g.SubscriptionType,
 		FiveHourLimitUSD:                g.FiveHourLimitUSD,
 		DailyLimitUSD:                   g.DailyLimitUSD,
@@ -200,6 +207,18 @@ func groupFromServiceBase(g *service.Group) Group {
 		SoraStorageQuotaBytes:           g.SoraStorageQuotaBytes,
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
+	}
+}
+
+func AccessLevelFromService(level *service.AccessLevel) *AccessLevel {
+	if level == nil {
+		return nil
+	}
+	return &AccessLevel{
+		ID: level.ID, Name: level.Name, Rank: level.Rank,
+		BalanceThreshold:       level.BalanceThreshold,
+		PaygDiscountMultiplier: level.PaygDiscountMultiplier,
+		CreatedAt:              level.CreatedAt, UpdatedAt: level.UpdatedAt,
 	}
 }
 

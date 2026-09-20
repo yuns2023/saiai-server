@@ -86,4 +86,24 @@ describe('BulkEditAccountModal', () => {
       }
     })
   })
+
+  it('批量设置账号模型黑名单时写入 extra', async () => {
+    const wrapper = mountModal({
+      accountIds: [253],
+      selectedPlatforms: ['anthropic'],
+      selectedTypes: ['setup-token']
+    })
+
+    await wrapper.get('#bulk-edit-blocked-models-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-blocked-models').setValue(' Claude-Fable-* \nclaude-fable-*')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([253], {
+      extra: {
+        blocked_model_patterns: ['claude-fable-*']
+      }
+    })
+  })
 })

@@ -15,6 +15,7 @@ import (
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"github.com/Wei-Shaw/sub2api/ent/accesslevel"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	"github.com/Wei-Shaw/sub2api/ent/announcement"
@@ -51,6 +52,8 @@ type Client struct {
 	Schema *migrate.Schema
 	// APIKey is the client for interacting with the APIKey builders.
 	APIKey *APIKeyClient
+	// AccessLevel is the client for interacting with the AccessLevel builders.
+	AccessLevel *AccessLevelClient
 	// Account is the client for interacting with the Account builders.
 	Account *AccountClient
 	// AccountGroup is the client for interacting with the AccountGroup builders.
@@ -111,6 +114,7 @@ func NewClient(opts ...Option) *Client {
 func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
 	c.APIKey = NewAPIKeyClient(c.config)
+	c.AccessLevel = NewAccessLevelClient(c.config)
 	c.Account = NewAccountClient(c.config)
 	c.AccountGroup = NewAccountGroupClient(c.config)
 	c.Announcement = NewAnnouncementClient(c.config)
@@ -228,6 +232,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		ctx:                     ctx,
 		config:                  cfg,
 		APIKey:                  NewAPIKeyClient(cfg),
+		AccessLevel:             NewAccessLevelClient(cfg),
 		Account:                 NewAccountClient(cfg),
 		AccountGroup:            NewAccountGroupClient(cfg),
 		Announcement:            NewAnnouncementClient(cfg),
@@ -272,6 +277,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		ctx:                     ctx,
 		config:                  cfg,
 		APIKey:                  NewAPIKeyClient(cfg),
+		AccessLevel:             NewAccessLevelClient(cfg),
 		Account:                 NewAccountClient(cfg),
 		AccountGroup:            NewAccountGroupClient(cfg),
 		Announcement:            NewAnnouncementClient(cfg),
@@ -325,11 +331,11 @@ func (c *Client) Close() error {
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
-		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
-		c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord, c.PaymentAuditLog,
-		c.PaymentOrder, c.PaymentProviderInstance, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.APIKey, c.AccessLevel, c.Account, c.AccountGroup, c.Announcement,
+		c.AnnouncementRead, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
+		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
 		c.UserAttributeDefinition, c.UserAttributeValue, c.UserSubscription,
 	} {
 		n.Use(hooks...)
@@ -340,11 +346,11 @@ func (c *Client) Use(hooks ...Hook) {
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
-		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
-		c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord, c.PaymentAuditLog,
-		c.PaymentOrder, c.PaymentProviderInstance, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.APIKey, c.AccessLevel, c.Account, c.AccountGroup, c.Announcement,
+		c.AnnouncementRead, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
+		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
 		c.UserAttributeDefinition, c.UserAttributeValue, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
@@ -356,6 +362,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 	switch m := m.(type) {
 	case *APIKeyMutation:
 		return c.APIKey.mutate(ctx, m)
+	case *AccessLevelMutation:
+		return c.AccessLevel.mutate(ctx, m)
 	case *AccountMutation:
 		return c.Account.mutate(ctx, m)
 	case *AccountGroupMutation:
@@ -589,6 +597,187 @@ func (c *APIKeyClient) mutate(ctx context.Context, m *APIKeyMutation) (Value, er
 		return (&APIKeyDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown APIKey mutation op: %q", m.Op())
+	}
+}
+
+// AccessLevelClient is a client for the AccessLevel schema.
+type AccessLevelClient struct {
+	config
+}
+
+// NewAccessLevelClient returns a client for the AccessLevel from the given config.
+func NewAccessLevelClient(c config) *AccessLevelClient {
+	return &AccessLevelClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `accesslevel.Hooks(f(g(h())))`.
+func (c *AccessLevelClient) Use(hooks ...Hook) {
+	c.hooks.AccessLevel = append(c.hooks.AccessLevel, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `accesslevel.Intercept(f(g(h())))`.
+func (c *AccessLevelClient) Intercept(interceptors ...Interceptor) {
+	c.inters.AccessLevel = append(c.inters.AccessLevel, interceptors...)
+}
+
+// Create returns a builder for creating a AccessLevel entity.
+func (c *AccessLevelClient) Create() *AccessLevelCreate {
+	mutation := newAccessLevelMutation(c.config, OpCreate)
+	return &AccessLevelCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of AccessLevel entities.
+func (c *AccessLevelClient) CreateBulk(builders ...*AccessLevelCreate) *AccessLevelCreateBulk {
+	return &AccessLevelCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *AccessLevelClient) MapCreateBulk(slice any, setFunc func(*AccessLevelCreate, int)) *AccessLevelCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &AccessLevelCreateBulk{err: fmt.Errorf("calling to AccessLevelClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*AccessLevelCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &AccessLevelCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for AccessLevel.
+func (c *AccessLevelClient) Update() *AccessLevelUpdate {
+	mutation := newAccessLevelMutation(c.config, OpUpdate)
+	return &AccessLevelUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *AccessLevelClient) UpdateOne(_m *AccessLevel) *AccessLevelUpdateOne {
+	mutation := newAccessLevelMutation(c.config, OpUpdateOne, withAccessLevel(_m))
+	return &AccessLevelUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *AccessLevelClient) UpdateOneID(id int64) *AccessLevelUpdateOne {
+	mutation := newAccessLevelMutation(c.config, OpUpdateOne, withAccessLevelID(id))
+	return &AccessLevelUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for AccessLevel.
+func (c *AccessLevelClient) Delete() *AccessLevelDelete {
+	mutation := newAccessLevelMutation(c.config, OpDelete)
+	return &AccessLevelDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *AccessLevelClient) DeleteOne(_m *AccessLevel) *AccessLevelDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *AccessLevelClient) DeleteOneID(id int64) *AccessLevelDeleteOne {
+	builder := c.Delete().Where(accesslevel.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &AccessLevelDeleteOne{builder}
+}
+
+// Query returns a query builder for AccessLevel.
+func (c *AccessLevelClient) Query() *AccessLevelQuery {
+	return &AccessLevelQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeAccessLevel},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a AccessLevel entity by its id.
+func (c *AccessLevelClient) Get(ctx context.Context, id int64) (*AccessLevel, error) {
+	return c.Query().Where(accesslevel.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *AccessLevelClient) GetX(ctx context.Context, id int64) *AccessLevel {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryAutoUsers queries the auto_users edge of a AccessLevel.
+func (c *AccessLevelClient) QueryAutoUsers(_m *AccessLevel) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(accesslevel.Table, accesslevel.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, accesslevel.AutoUsersTable, accesslevel.AutoUsersColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryManualUsers queries the manual_users edge of a AccessLevel.
+func (c *AccessLevelClient) QueryManualUsers(_m *AccessLevel) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(accesslevel.Table, accesslevel.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, accesslevel.ManualUsersTable, accesslevel.ManualUsersColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryRequiredGroups queries the required_groups edge of a AccessLevel.
+func (c *AccessLevelClient) QueryRequiredGroups(_m *AccessLevel) *GroupQuery {
+	query := (&GroupClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(accesslevel.Table, accesslevel.FieldID, id),
+			sqlgraph.To(group.Table, group.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, accesslevel.RequiredGroupsTable, accesslevel.RequiredGroupsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *AccessLevelClient) Hooks() []Hook {
+	return c.hooks.AccessLevel
+}
+
+// Interceptors returns the client interceptors.
+func (c *AccessLevelClient) Interceptors() []Interceptor {
+	return c.inters.AccessLevel
+}
+
+func (c *AccessLevelClient) mutate(ctx context.Context, m *AccessLevelMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&AccessLevelCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&AccessLevelUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&AccessLevelUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&AccessLevelDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown AccessLevel mutation op: %q", m.Op())
 	}
 }
 
@@ -1551,6 +1740,22 @@ func (c *GroupClient) QueryAllowedUsers(_m *Group) *UserQuery {
 			sqlgraph.From(group.Table, group.FieldID, id),
 			sqlgraph.To(user.Table, user.FieldID),
 			sqlgraph.Edge(sqlgraph.M2M, true, group.AllowedUsersTable, group.AllowedUsersPrimaryKey...),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryRequiredLevel queries the required_level edge of a Group.
+func (c *GroupClient) QueryRequiredLevel(_m *Group) *AccessLevelQuery {
+	query := (&AccessLevelClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(group.Table, group.FieldID, id),
+			sqlgraph.To(accesslevel.Table, accesslevel.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, group.RequiredLevelTable, group.RequiredLevelColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -3776,6 +3981,38 @@ func (c *UserClient) QueryPromoCodeUsages(_m *User) *PromoCodeUsageQuery {
 	return query
 }
 
+// QueryAutoLevel queries the auto_level edge of a User.
+func (c *UserClient) QueryAutoLevel(_m *User) *AccessLevelQuery {
+	query := (&AccessLevelClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(accesslevel.Table, accesslevel.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, user.AutoLevelTable, user.AutoLevelColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryManualLevel queries the manual_level edge of a User.
+func (c *UserClient) QueryManualLevel(_m *User) *AccessLevelQuery {
+	query := (&AccessLevelClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(accesslevel.Table, accesslevel.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, user.ManualLevelTable, user.ManualLevelColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryUserAllowedGroups queries the user_allowed_groups edge of a User.
 func (c *UserClient) QueryUserAllowedGroups(_m *User) *UserAllowedGroupQuery {
 	query := (&UserAllowedGroupClient{config: c.config}).Query()
@@ -4453,7 +4690,7 @@ func (c *UserSubscriptionClient) mutate(ctx context.Context, m *UserSubscription
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		APIKey, Account, AccountGroup, Announcement, AnnouncementRead,
+		APIKey, AccessLevel, Account, AccountGroup, Announcement, AnnouncementRead,
 		ErrorPassthroughRule, Group, IdempotencyRecord, PaymentAuditLog, PaymentOrder,
 		PaymentProviderInstance, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
 		SecuritySecret, Setting, SubscriptionPlan, UsageCleanupTask, UsageLog, User,
@@ -4461,7 +4698,7 @@ type (
 		UserSubscription []ent.Hook
 	}
 	inters struct {
-		APIKey, Account, AccountGroup, Announcement, AnnouncementRead,
+		APIKey, AccessLevel, Account, AccountGroup, Announcement, AnnouncementRead,
 		ErrorPassthroughRule, Group, IdempotencyRecord, PaymentAuditLog, PaymentOrder,
 		PaymentProviderInstance, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
 		SecuritySecret, Setting, SubscriptionPlan, UsageCleanupTask, UsageLog, User,

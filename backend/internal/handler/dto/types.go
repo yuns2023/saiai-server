@@ -3,16 +3,17 @@ package dto
 import "time"
 
 type User struct {
-	ID            int64     `json:"id"`
-	Email         string    `json:"email"`
-	Username      string    `json:"username"`
-	Role          string    `json:"role"`
-	Balance       float64   `json:"balance"`
-	Concurrency   int       `json:"concurrency"`
-	Status        string    `json:"status"`
-	AllowedGroups []int64   `json:"allowed_groups"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID             int64        `json:"id"`
+	Email          string       `json:"email"`
+	Username       string       `json:"username"`
+	Role           string       `json:"role"`
+	Balance        float64      `json:"balance"`
+	Concurrency    int          `json:"concurrency"`
+	Status         string       `json:"status"`
+	AllowedGroups  []int64      `json:"allowed_groups"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
+	EffectiveLevel *AccessLevel `json:"effective_level,omitempty"`
 
 	APIKeys       []APIKey           `json:"api_keys,omitempty"`
 	Subscriptions []UserSubscription `json:"subscriptions,omitempty"`
@@ -23,8 +24,12 @@ type User struct {
 type AdminUser struct {
 	User
 
-	Notes                  string  `json:"notes"`
-	PaygDiscountMultiplier float64 `json:"payg_discount_multiplier"`
+	Notes                           string       `json:"notes"`
+	PaygDiscountMultiplier          float64      `json:"payg_discount_multiplier"`
+	EffectivePaygDiscountMultiplier float64      `json:"effective_payg_discount_multiplier"`
+	PaygDiscountOverrideEnabled     bool         `json:"payg_discount_override_enabled"`
+	AutoLevel                       *AccessLevel `json:"auto_level,omitempty"`
+	ManualLevel                     *AccessLevel `json:"manual_level,omitempty"`
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier
 	GroupRates            map[int64]float64 `json:"group_rates,omitempty"`
@@ -67,13 +72,15 @@ type APIKey struct {
 }
 
 type Group struct {
-	ID             int64   `json:"id"`
-	Name           string  `json:"name"`
-	Description    string  `json:"description"`
-	Platform       string  `json:"platform"`
-	RateMultiplier float64 `json:"rate_multiplier"`
-	IsExclusive    bool    `json:"is_exclusive"`
-	Status         string  `json:"status"`
+	ID              int64        `json:"id"`
+	Name            string       `json:"name"`
+	Description     string       `json:"description"`
+	Platform        string       `json:"platform"`
+	RateMultiplier  float64      `json:"rate_multiplier"`
+	IsExclusive     bool         `json:"is_exclusive"`
+	Status          string       `json:"status"`
+	RequiredLevelID *int64       `json:"required_level_id"`
+	RequiredLevel   *AccessLevel `json:"required_level,omitempty"`
 
 	SubscriptionType string   `json:"subscription_type"`
 	FiveHourLimitUSD *float64 `json:"five_hour_limit_usd"`
@@ -107,6 +114,16 @@ type Group struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type AccessLevel struct {
+	ID                     int64     `json:"id"`
+	Name                   string    `json:"name"`
+	Rank                   int       `json:"rank"`
+	BalanceThreshold       float64   `json:"balance_threshold"`
+	PaygDiscountMultiplier float64   `json:"payg_discount_multiplier"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 // AdminGroup 是管理员接口使用的 group DTO（包含敏感/内部字段）。

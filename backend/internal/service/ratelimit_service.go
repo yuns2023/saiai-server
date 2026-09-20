@@ -771,6 +771,22 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 	}
 	if account.Platform == PlatformAnthropic {
 		s.sampleAnthropicFableUsage(ctx, account, headers)
+		// Fable can return credits_required together with an aggregate reset
+		// header even when the account's shared 5h/7d windows are healthy. The
+		// aggregate value is not an account-wide quota reset and must not make
+		// every model on the account unschedulable.
+		fableModel := requestedModel
+		if !isAnthropicFableModel(fableModel) {
+			fableModel = account.GetMappedModel(requestedModel)
+		}
+		if account.IsAnthropicOAuthOrSetupToken() && isAnthropicFableModel(fableModel) &&
+			isAnthropicFableCreditsRequired(responseBody) {
+			slog.Warn("anthropic_fable_credits_required_skipped",
+				"account_id", account.ID,
+				"requested_model", strings.TrimSpace(requestedModel),
+				"reason", "model-specific credits requirement is not an account-level rate limit")
+			return
+		}
 	}
 
 	// 2. Anthropic 平台：尝试解析 per-window 头（5h / 7d），选择实际触发的窗口
@@ -909,6 +925,27 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 	}
 
 	slog.Info("account_rate_limited", "account_id", account.ID, "reset_at", resetAt)
+}
+
+func isAnthropicFableCreditsRequired(responseBody []byte) bool {
+	if len(responseBody) == 0 {
+		return false
+	}
+	var payload struct {
+		Error struct {
+			Message string `json:"message"`
+			Details struct {
+				ErrorCode string `json:"error_code"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(payload.Error.Details.ErrorCode), "credits_required") {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(payload.Error.Message), "Usage credits are required for this model.")
 }
 
 func (s *RateLimitService) handleAnthropicModelScoped429(ctx context.Context, account *Account, requestedModel string, result *anthropic429Result) bool {

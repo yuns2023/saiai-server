@@ -2206,6 +2206,23 @@
         </div>
       </div>
 
+      <div
+        v-if="form.platform !== 'openai'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <label class="input-label" for="create-account-blocked-model-patterns">
+          {{ t('admin.accounts.accountBlockedModels') }}
+        </label>
+        <textarea
+          id="create-account-blocked-model-patterns"
+          v-model="blockedModelPatternsText"
+          rows="3"
+          class="input font-mono text-sm"
+          :placeholder="t('admin.accounts.accountBlockedModelsPlaceholder')"
+        />
+        <p class="input-hint">{{ t('admin.accounts.accountBlockedModelsHint') }}</p>
+      </div>
+
       <div>
         <div class="flex items-center justify-between">
           <div>
@@ -2627,6 +2644,7 @@ import { applyInterceptWarmup } from '@/components/account/credentialsBuilder'
 import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { buildClaudeSetupTokenCredentials } from '@/utils/claudeSetupToken'
+import { parseAccountBlockedModelPatterns } from '@/utils/accountBlockedModels'
 import {
   // OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
@@ -2758,6 +2776,7 @@ const editResetTimezone = ref<string | null>(null)
 const modelMappings = ref<ModelMapping[]>([])
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
+const blockedModelPatternsText = ref('')
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
 const poolModeEnabled = ref(false)
@@ -3363,7 +3382,10 @@ const ensureMixedChannelConfirmed = async (onConfirm: () => Promise<void>): Prom
 const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
-    await adminAPI.accounts.create(withMixedChannelConfirmFlag(payload))
+    const normalizedPayload = payload.platform === 'openai'
+      ? payload
+      : { ...payload, extra: buildAccountBlockedModelsExtra(payload.extra as Record<string, unknown> | undefined) }
+    await adminAPI.accounts.create(withMixedChannelConfirmFlag(normalizedPayload))
     appStore.showSuccess(t('admin.accounts.accountCreated'))
     emit('created')
     handleClose()
@@ -3456,6 +3478,7 @@ const resetForm = () => {
   claudeOAuthFixedAccountUUID.value = ''
   claudeOAuthFixedDeviceID.value = ''
   claudeOAuthFixedHeadersText.value = ''
+  blockedModelPatternsText.value = ''
   tempUnschedEnabled.value = false
   tempUnschedRules.value = []
   geminiOAuthType.value = 'code_assist'
@@ -3519,6 +3542,17 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
     delete extra.anthropic_passthrough
   }
 
+  return Object.keys(extra).length > 0 ? extra : undefined
+}
+
+const buildAccountBlockedModelsExtra = (base?: Record<string, unknown>): Record<string, unknown> | undefined => {
+  const extra: Record<string, unknown> = { ...(base || {}) }
+  const patterns = parseAccountBlockedModelPatterns(blockedModelPatternsText.value)
+  if (patterns.length > 0) {
+    extra.blocked_model_patterns = patterns
+  } else {
+    delete extra.blocked_model_patterns
+  }
   return Object.keys(extra).length > 0 ? extra : undefined
 }
 
@@ -4153,7 +4187,7 @@ const buildAnthropicOAuthExtra = (baseExtra: Record<string, unknown>) => {
     }
   }
 
-  return extra
+  return buildAccountBlockedModelsExtra(extra) || {}
 }
 
 // Anthropic OAuth 授权码兑换

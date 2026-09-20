@@ -314,6 +314,44 @@ func TestHandle429_AnthropicFableInvalidSpecificResetDoesNotGuess(t *testing.T) 
 	}
 }
 
+func TestHandle429_AnthropicFableCreditsRequiredDoesNotSetAccountRateLimit(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-reset", fmt.Sprintf("%d", time.Now().Add(12*24*time.Hour).Unix()))
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.15")
+	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.06")
+
+	account := &Account{ID: 253, Platform: PlatformAnthropic, Type: AccountTypeSetupToken}
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	body := []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"Usage credits are required for this model.","details":{"error_code":"credits_required","model":"claude-fable-5-1","disabled_reason":"org_level_disabled","exhausted_included_allowance":false,"can_user_purchase_credits":true}}}`)
+
+	svc.handle429ForModel(context.Background(), account, headers, body, "claude-fable-5-1")
+
+	if len(repo.rateLimitCalls) != 0 || len(repo.modelRateLimitCalls) != 0 || len(repo.sessionWindowCalls) != 0 {
+		t.Fatalf("credits_required persisted rate-limit state: account=%d model=%d session=%d", len(repo.rateLimitCalls), len(repo.modelRateLimitCalls), len(repo.sessionWindowCalls))
+	}
+}
+
+func TestIsAnthropicFableCreditsRequired(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "details code", body: `{"error":{"message":"different wording","details":{"error_code":"credits_required"}}}`, want: true},
+		{name: "message fallback", body: `{"error":{"message":"Usage credits are required for this model."}}`, want: true},
+		{name: "long context is distinct", body: `{"error":{"message":"Usage credits are required for long context requests."}}`, want: false},
+		{name: "malformed", body: `{`, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isAnthropicFableCreditsRequired([]byte(tt.body)); got != tt.want {
+				t.Fatalf("isAnthropicFableCreditsRequired()=%v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsAnthropicFableModel(t *testing.T) {
 	tests := []struct {
 		model string

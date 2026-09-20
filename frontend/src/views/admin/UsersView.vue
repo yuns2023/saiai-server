@@ -428,7 +428,13 @@
           </template>
 
           <template #cell-payg_discount_multiplier="{ row }">
-            <span class="text-sm font-mono text-gray-700 dark:text-gray-300">{{ (row.payg_discount_multiplier ?? 1).toFixed(4) }}x</span>
+            <div class="text-sm font-mono text-gray-700 dark:text-gray-300">{{ (row.effective_payg_discount_multiplier ?? row.payg_discount_multiplier ?? 1).toFixed(4) }}x</div>
+            <div class="text-xs text-gray-400">{{ row.payg_discount_override_enabled ? t('admin.users.discountOverride') : t('admin.users.discountFromLevel') }}</div>
+          </template>
+
+          <template #cell-access_level="{ row }">
+            <span class="rounded-full bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">{{ row.effective_level?.name || '-' }}</span>
+            <span v-if="row.manual_level" class="ml-1 text-xs text-gray-400">{{ t('admin.users.manualLevel') }}</span>
           </template>
 
           <template #cell-claude_devices="{ row }">
@@ -718,6 +724,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'groups', label: t('admin.users.columns.groups'), sortable: false },
   { key: 'subscriptions', label: t('admin.users.columns.subscriptions'), sortable: false },
   { key: 'balance', label: t('admin.users.columns.balance'), sortable: true },
+  { key: 'access_level', label: t('admin.users.columns.accessLevel'), sortable: false },
   { key: 'payg_discount_multiplier', label: t('admin.users.columns.paygDiscountMultiplier'), sortable: false },
   { key: 'usage', label: t('admin.users.columns.usage'), sortable: false },
   { key: 'concurrency', label: t('admin.users.columns.concurrency'), sortable: true },

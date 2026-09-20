@@ -298,4 +298,47 @@ describe('EditAccountModal', () => {
       claude_oauth_fixed_device_id: 'fixed-device-id'
     })
   })
+
+  it('persists an account model denylist for a setup-token account', async () => {
+    const account = {
+      ...buildAccount(),
+      id: 253,
+      type: 'setup-token',
+      credentials: { access_token: 'test-token' },
+      extra: {
+        claude_oauth_mode: 'carpool',
+        blocked_model_patterns: ['claude-fable-*']
+      },
+      claude_oauth_mode: 'carpool'
+    } as any
+
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    listClaudeCarpoolDevicesMock.mockReset()
+    updateAccountMock.mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    listClaudeCarpoolDevicesMock.mockResolvedValue({
+      unlimited_devices: false,
+      recorded_limit: 5,
+      recorded_count: 0,
+      overflow_count: 0,
+      recorded_items: [],
+      overflow_items: []
+    })
+
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    const denylist = wrapper.get('[data-testid="account-blocked-model-patterns"]')
+    expect((denylist.element as HTMLTextAreaElement).value).toBe('claude-fable-*')
+    await denylist.setValue(' Claude-Fable-* \nclaude-fable-*\nclaude-mythos-*')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      claude_oauth_mode: 'carpool',
+      blocked_model_patterns: ['claude-fable-*', 'claude-mythos-*']
+    })
+  })
 })

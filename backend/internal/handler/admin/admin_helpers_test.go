@@ -20,15 +20,44 @@ func TestParseTimeRange(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/?start_date=2024-01-01&end_date=2024-01-02&timezone=UTC", nil)
 	c.Request = req
 
-	start, end := parseTimeRange(c)
+	start, end, err := parseTimeRange(c)
+	require.NoError(t, err)
 	require.Equal(t, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), start)
 	require.Equal(t, time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC), end)
 
 	req = httptest.NewRequest(http.MethodGet, "/?start_date=bad&timezone=UTC", nil)
 	c.Request = req
-	start, end = parseTimeRange(c)
+	start, end, err = parseTimeRange(c)
+	require.NoError(t, err)
 	require.False(t, start.IsZero())
 	require.False(t, end.IsZero())
+}
+
+func TestParseTimeRangePreciseRollingWindow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/?start_time=2026-09-18T13%3A58%3A00Z&end_time=2026-09-19T13%3A58%3A00Z&start_date=2026-09-18&end_date=2026-09-19",
+		nil,
+	)
+
+	start, end, err := parseTimeRange(c)
+	require.NoError(t, err)
+	require.Equal(t, 24*time.Hour, end.Sub(start))
+	require.Equal(t, time.Date(2026, 9, 18, 13, 58, 0, 0, time.UTC), start)
+	require.Equal(t, time.Date(2026, 9, 19, 13, 58, 0, 0, time.UTC), end)
+}
+
+func TestParseTimeRangeRejectsIncompletePreciseWindow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/?start_time=2026-09-18T13%3A58%3A00Z", nil)
+
+	_, _, err := parseTimeRange(c)
+	require.EqualError(t, err, "start_time and end_time must be provided together")
 }
 
 func TestParseOpsViewParam(t *testing.T) {

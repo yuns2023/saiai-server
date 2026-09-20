@@ -16,13 +16,18 @@ type User struct {
 	Balance      float64
 	// PaygDiscountMultiplier discounts this user's balance billing across keys,
 	// groups, and upstream accounts. Nil in older auth cache entries means 1.
-	PaygDiscountMultiplier *float64
-	Concurrency            int
-	Status                 string
-	AllowedGroups          []int64
-	TokenVersion           int64 // Incremented on password change to invalidate existing tokens
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	PaygDiscountMultiplier      *float64
+	PaygDiscountOverrideEnabled bool
+	AutoLevelID                 *int64
+	ManualLevelID               *int64
+	AutoLevel                   *AccessLevel
+	ManualLevel                 *AccessLevel
+	Concurrency                 int
+	Status                      string
+	AllowedGroups               []int64
+	TokenVersion                int64 // Incremented on password change to invalidate existing tokens
+	CreatedAt                   time.Time
+	UpdatedAt                   time.Time
 
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier
@@ -42,10 +47,41 @@ type User struct {
 }
 
 func (u *User) PaygDiscountRate() float64 {
-	if u == nil || u.PaygDiscountMultiplier == nil || *u.PaygDiscountMultiplier < 0 || *u.PaygDiscountMultiplier > 1 {
+	if u == nil {
 		return 1
 	}
-	return *u.PaygDiscountMultiplier
+	// A user-specific discount is an override, never an additional stacked
+	// discount. Preserve legacy in-memory/cache objects that predate levels:
+	// before the override flag existed, a non-default multiplier was the only
+	// way to express an explicit user discount.
+	if u.PaygDiscountOverrideEnabled || u.EffectiveAccessLevel() == nil ||
+		(u.PaygDiscountMultiplier != nil && *u.PaygDiscountMultiplier != 1) {
+		if u.PaygDiscountMultiplier != nil && *u.PaygDiscountMultiplier >= 0 && *u.PaygDiscountMultiplier <= 1 {
+			return *u.PaygDiscountMultiplier
+		}
+	}
+	if level := u.EffectiveAccessLevel(); level != nil && level.PaygDiscountMultiplier >= 0 && level.PaygDiscountMultiplier <= 1 {
+		return level.PaygDiscountMultiplier
+	}
+	return 1
+}
+
+func (u *User) EffectiveAccessLevel() *AccessLevel {
+	if u == nil {
+		return nil
+	}
+	if u.ManualLevel != nil {
+		return u.ManualLevel
+	}
+	return u.AutoLevel
+}
+
+func (u *User) MeetsRequiredLevel(required *AccessLevel) bool {
+	if required == nil {
+		return true
+	}
+	effective := u.EffectiveAccessLevel()
+	return effective != nil && effective.Rank >= required.Rank
 }
 
 func (u *User) IsAdmin() bool {
@@ -72,6 +108,16 @@ func (u *User) CanBindGroup(groupID int64, isExclusive bool) bool {
 		}
 	}
 	return false
+}
+
+// CanAccessGroup combines the legacy public/exclusive entitlement with the
+// group's level prerequisite. Explicit group grants and subscriptions do not
+// bypass the level requirement.
+func (u *User) CanAccessGroup(group *Group) bool {
+	if group == nil || !u.MeetsRequiredLevel(group.RequiredLevel) {
+		return false
+	}
+	return u.CanBindGroup(group.ID, group.IsExclusive)
 }
 
 func (u *User) SetPassword(password string) error {

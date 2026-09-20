@@ -113,9 +113,11 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	}
 
 	if cmd.BalanceCost > 0 {
-		if err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost); err != nil {
+		levelChanged, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost)
+		if err != nil {
 			return err
 		}
+		result.UserAccessLevelChanged = levelChanged
 	}
 
 	if cmd.APIKeyQuotaCost > 0 {
@@ -181,24 +183,31 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 	return service.ErrSubscriptionNotFound
 }
 
-func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) error {
-	res, err := tx.ExecContext(ctx, `
+func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (bool, error) {
+	var oldLevelID sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT auto_level_id FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE
+	`, userID).Scan(&oldLevelID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, service.ErrUserNotFound
+		}
+		return false, err
+	}
+	var newLevelID sql.NullInt64
+	err := tx.QueryRowContext(ctx, `
 		UPDATE users
 		SET balance = balance - $1,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
-	`, amount, userID)
+		RETURNING auto_level_id
+	`, amount, userID).Scan(&newLevelID)
 	if err != nil {
-		return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, service.ErrUserNotFound
+		}
+		return false, err
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected > 0 {
-		return nil
-	}
-	return service.ErrUserNotFound
+	return oldLevelID.Valid != newLevelID.Valid || (oldLevelID.Valid && oldLevelID.Int64 != newLevelID.Int64), nil
 }
 
 func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID int64, amount float64) (bool, error) {

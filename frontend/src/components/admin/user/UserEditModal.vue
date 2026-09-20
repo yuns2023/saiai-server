@@ -38,6 +38,20 @@
         <input v-model.number="form.concurrency" type="number" class="input" />
       </div>
       <div>
+        <label class="input-label">{{ t('admin.users.accessLevel') }}</label>
+        <select v-model="form.manual_level_id" class="input">
+          <option :value="null">{{ t('admin.users.accessLevelAutomatic') }}</option>
+          <option v-for="level in accessLevels" :key="level.id" :value="level.id">{{ level.name }} ({{ level.balance_threshold }})</option>
+        </select>
+        <p class="input-hint">{{ t('admin.users.accessLevelHint', { level: user.effective_level?.name || '-' }) }}</p>
+      </div>
+      <div>
+        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+          <input v-model="form.payg_discount_override_enabled" type="checkbox" class="rounded" />
+          {{ t('admin.users.customPaygDiscount') }}
+        </label>
+      </div>
+      <div v-if="form.payg_discount_override_enabled">
         <label class="input-label">{{ t('admin.users.paygDiscountMultiplier') }}</label>
         <input
           v-model.number="form.payg_discount_multiplier"
@@ -70,7 +84,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
 import { adminAPI } from '@/api/admin'
-import type { AdminUser, UserAttributeValuesMap } from '@/types'
+import type { AccessLevel, AdminUser, UserAttributeValuesMap } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import UserAttributeForm from '@/components/user/UserAttributeForm.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -80,11 +94,13 @@ const emit = defineEmits(['close', 'success'])
 const { t } = useI18n(); const appStore = useAppStore(); const { copyToClipboard } = useClipboard()
 
 const submitting = ref(false); const passwordCopied = ref(false)
-const form = reactive({ email: '', password: '', username: '', notes: '', concurrency: 1, payg_discount_multiplier: 1, customAttributes: {} as UserAttributeValuesMap })
+const accessLevels = ref<AccessLevel[]>([])
+const form = reactive({ email: '', password: '', username: '', notes: '', concurrency: 1, payg_discount_multiplier: 1, payg_discount_override_enabled: false, manual_level_id: null as number | null, customAttributes: {} as UserAttributeValuesMap })
 
 watch(() => props.user, (u) => {
   if (u) {
-    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', concurrency: u.concurrency, payg_discount_multiplier: u.payg_discount_multiplier ?? 1, customAttributes: {} })
+    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', concurrency: u.concurrency, payg_discount_multiplier: u.payg_discount_multiplier ?? 1, payg_discount_override_enabled: u.payg_discount_override_enabled ?? true, manual_level_id: u.manual_level?.id ?? null, customAttributes: {} })
+    if (adminAPI.accessLevels) adminAPI.accessLevels.list().then((items) => { accessLevels.value = items }).catch(() => { accessLevels.value = [] })
     passwordCopied.value = false
   }
 }, { immediate: true })
@@ -109,15 +125,20 @@ const handleUpdateUser = async () => {
     appStore.showError(t('admin.users.concurrencyMin'))
     return
   }
-  if (form.payg_discount_multiplier < 0 || form.payg_discount_multiplier > 1) {
+  if (form.payg_discount_override_enabled && (form.payg_discount_multiplier < 0 || form.payg_discount_multiplier > 1)) {
     appStore.showError(t('admin.users.paygDiscountMultiplierInvalid'))
     return
   }
   submitting.value = true
   try {
-    const data: any = { email: form.email, username: form.username, notes: form.notes, concurrency: form.concurrency, payg_discount_multiplier: form.payg_discount_multiplier }
+    const data: any = { email: form.email, username: form.username, notes: form.notes, concurrency: form.concurrency, payg_discount_override_enabled: form.payg_discount_override_enabled }
+    if (form.payg_discount_override_enabled) data.payg_discount_multiplier = form.payg_discount_multiplier
     if (form.password.trim()) data.password = form.password.trim()
     await adminAPI.users.update(props.user.id, data)
+    if (adminAPI.accessLevels) {
+      if (form.manual_level_id) await adminAPI.accessLevels.setUserManualLevel(props.user.id, form.manual_level_id)
+      else await adminAPI.accessLevels.clearUserManualLevel(props.user.id)
+    }
     if (Object.keys(form.customAttributes).length > 0) await adminAPI.userAttributes.updateUserAttributeValues(props.user.id, form.customAttributes)
     appStore.showSuccess(t('admin.users.userUpdated'))
     emit('success'); emit('close')

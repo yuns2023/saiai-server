@@ -38,6 +38,17 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 
 	// groups: model denylist used by request admission
 	requireColumn(t, tx, "groups", "blocked_model_patterns", "jsonb", 0, false)
+	requireColumn(t, tx, "groups", "required_level_id", "bigint", 0, true)
+
+	// balance-driven access levels and user discount override provenance
+	var accessLevelsRegclass sql.NullString
+	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.access_levels')").Scan(&accessLevelsRegclass))
+	require.True(t, accessLevelsRegclass.Valid, "expected access_levels table to exist")
+	requireColumn(t, tx, "access_levels", "balance_threshold", "numeric", 0, false)
+	requireColumn(t, tx, "access_levels", "payg_discount_multiplier", "numeric", 0, false)
+	requireColumn(t, tx, "users", "auto_level_id", "bigint", 0, true)
+	requireColumn(t, tx, "users", "manual_level_id", "bigint", 0, true)
+	requireColumn(t, tx, "users", "payg_discount_override_enabled", "boolean", 0, false)
 
 	// redeem_codes: subscription fields
 	requireColumn(t, tx, "redeem_codes", "group_id", "bigint", 0, true)

@@ -95,6 +95,21 @@ func PaygDiscountMultiplier(v float64) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldPaygDiscountMultiplier, v))
 }
 
+// PaygDiscountOverrideEnabled applies equality check predicate on the "payg_discount_override_enabled" field. It's identical to PaygDiscountOverrideEnabledEQ.
+func PaygDiscountOverrideEnabled(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldPaygDiscountOverrideEnabled, v))
+}
+
+// AutoLevelID applies equality check predicate on the "auto_level_id" field. It's identical to AutoLevelIDEQ.
+func AutoLevelID(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldAutoLevelID, v))
+}
+
+// ManualLevelID applies equality check predicate on the "manual_level_id" field. It's identical to ManualLevelIDEQ.
+func ManualLevelID(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldManualLevelID, v))
+}
+
 // Concurrency applies equality check predicate on the "concurrency" field. It's identical to ConcurrencyEQ.
 func Concurrency(v int) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldConcurrency, v))
@@ -543,6 +558,76 @@ func PaygDiscountMultiplierLT(v float64) predicate.User {
 // PaygDiscountMultiplierLTE applies the LTE predicate on the "payg_discount_multiplier" field.
 func PaygDiscountMultiplierLTE(v float64) predicate.User {
 	return predicate.User(sql.FieldLTE(FieldPaygDiscountMultiplier, v))
+}
+
+// PaygDiscountOverrideEnabledEQ applies the EQ predicate on the "payg_discount_override_enabled" field.
+func PaygDiscountOverrideEnabledEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldPaygDiscountOverrideEnabled, v))
+}
+
+// PaygDiscountOverrideEnabledNEQ applies the NEQ predicate on the "payg_discount_override_enabled" field.
+func PaygDiscountOverrideEnabledNEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldPaygDiscountOverrideEnabled, v))
+}
+
+// AutoLevelIDEQ applies the EQ predicate on the "auto_level_id" field.
+func AutoLevelIDEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldAutoLevelID, v))
+}
+
+// AutoLevelIDNEQ applies the NEQ predicate on the "auto_level_id" field.
+func AutoLevelIDNEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldAutoLevelID, v))
+}
+
+// AutoLevelIDIn applies the In predicate on the "auto_level_id" field.
+func AutoLevelIDIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldIn(FieldAutoLevelID, vs...))
+}
+
+// AutoLevelIDNotIn applies the NotIn predicate on the "auto_level_id" field.
+func AutoLevelIDNotIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldAutoLevelID, vs...))
+}
+
+// AutoLevelIDIsNil applies the IsNil predicate on the "auto_level_id" field.
+func AutoLevelIDIsNil() predicate.User {
+	return predicate.User(sql.FieldIsNull(FieldAutoLevelID))
+}
+
+// AutoLevelIDNotNil applies the NotNil predicate on the "auto_level_id" field.
+func AutoLevelIDNotNil() predicate.User {
+	return predicate.User(sql.FieldNotNull(FieldAutoLevelID))
+}
+
+// ManualLevelIDEQ applies the EQ predicate on the "manual_level_id" field.
+func ManualLevelIDEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldManualLevelID, v))
+}
+
+// ManualLevelIDNEQ applies the NEQ predicate on the "manual_level_id" field.
+func ManualLevelIDNEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldManualLevelID, v))
+}
+
+// ManualLevelIDIn applies the In predicate on the "manual_level_id" field.
+func ManualLevelIDIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldIn(FieldManualLevelID, vs...))
+}
+
+// ManualLevelIDNotIn applies the NotIn predicate on the "manual_level_id" field.
+func ManualLevelIDNotIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldManualLevelID, vs...))
+}
+
+// ManualLevelIDIsNil applies the IsNil predicate on the "manual_level_id" field.
+func ManualLevelIDIsNil() predicate.User {
+	return predicate.User(sql.FieldIsNull(FieldManualLevelID))
+}
+
+// ManualLevelIDNotNil applies the NotNil predicate on the "manual_level_id" field.
+func ManualLevelIDNotNil() predicate.User {
+	return predicate.User(sql.FieldNotNull(FieldManualLevelID))
 }
 
 // ConcurrencyEQ applies the EQ predicate on the "concurrency" field.
@@ -1194,6 +1279,52 @@ func HasPromoCodeUsages() predicate.User {
 func HasPromoCodeUsagesWith(preds ...predicate.PromoCodeUsage) predicate.User {
 	return predicate.User(func(s *sql.Selector) {
 		step := newPromoCodeUsagesStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasAutoLevel applies the HasEdge predicate on the "auto_level" edge.
+func HasAutoLevel() predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, AutoLevelTable, AutoLevelColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasAutoLevelWith applies the HasEdge predicate on the "auto_level" edge with a given conditions (other predicates).
+func HasAutoLevelWith(preds ...predicate.AccessLevel) predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := newAutoLevelStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasManualLevel applies the HasEdge predicate on the "manual_level" edge.
+func HasManualLevel() predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, ManualLevelTable, ManualLevelColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasManualLevelWith applies the HasEdge predicate on the "manual_level" edge with a given conditions (other predicates).
+func HasManualLevelWith(preds ...predicate.AccessLevel) predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := newManualLevelStep()
 		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
 			for _, p := range preds {
 				p(s)

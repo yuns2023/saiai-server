@@ -207,6 +207,39 @@ func TestInactiveGroupStopsExistingKeyRequests(t *testing.T) {
 	require.Equal(t, http.StatusOK, request("/v1/messages").Code)
 }
 
+func TestAccessLevelStopsExistingKeyRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{
+		ID: 42, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true,
+		RequiredLevel: &service.AccessLevel{ID: 2, Name: "stable", Rank: 2},
+	}
+	user := &service.User{
+		ID: 7, Status: service.StatusActive, Balance: 10,
+		AutoLevel: &service.AccessLevel{ID: 1, Name: "trial", Rank: 1},
+	}
+	key := &service.APIKey{ID: 9, UserID: user.ID, Key: "test-level-gate", Status: service.StatusActive, User: user, GroupID: &group.ID, Group: group}
+	repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) { return key, nil }}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	keyService := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(keyService, nil, nil, cfg)))
+	router.GET("/v1/messages", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	request := func() *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/messages", nil)
+		req.Header.Set("x-api-key", key.Key)
+		router.ServeHTTP(w, req)
+		return w
+	}
+	rejected := request()
+	require.Equal(t, http.StatusForbidden, rejected.Code)
+	require.Contains(t, rejected.Body.String(), "USER_LEVEL_REQUIRED")
+
+	user.AutoLevel = &service.AccessLevel{ID: 2, Name: "stable", Rank: 2}
+	require.Equal(t, http.StatusOK, request().Code)
+}
+
 func TestAPIKeyAuthSetsGroupContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

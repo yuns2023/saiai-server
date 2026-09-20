@@ -82,6 +82,7 @@
               <th class="pb-2 text-left">{{ t('usage.endpoint') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.requests') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.tokens') }}</th>
+              <th class="pb-2 text-right">{{ t('admin.dashboard.metricShare') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.actual') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.standard') }}</th>
             </tr>
@@ -105,6 +106,9 @@
                 <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
                   {{ formatTokens(item.total_tokens) }}
                 </td>
+                <td class="py-1.5 text-right text-gray-500 dark:text-gray-400">
+                  {{ formatPercentage(getMetricShare(item)) }}
+                </td>
                 <td class="py-1.5 text-right text-green-600 dark:text-green-400">
                   ${{ formatCost(item.actual_cost) }}
                 </td>
@@ -113,7 +117,7 @@
                 </td>
               </tr>
               <tr v-if="expandedKey === item.endpoint">
-                <td colspan="5" class="p-0">
+                <td colspan="6" class="p-0">
                   <UserBreakdownSubTable
                     :items="breakdownItems"
                     :loading="breakdownLoading"
@@ -140,6 +144,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
 import type { EndpointStat, UserBreakdownItem } from '@/types'
 import { getUserBreakdown } from '@/api/admin/dashboard'
+import { stableChartColor } from '@/utils/chartColors'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
@@ -161,6 +166,8 @@ const props = withDefaults(
     showSourceToggle?: boolean
     startDate?: string
     endDate?: string
+    startTime?: string
+    endTime?: string
   }>(),
   {
     upstreamEndpointStats: () => [],
@@ -195,6 +202,8 @@ const toggleBreakdown = async (endpoint: string) => {
     const res = await getUserBreakdown({
       start_date: props.startDate,
       end_date: props.endDate,
+      start_time: props.startTime,
+      end_time: props.endTime,
       endpoint,
       endpoint_type: props.source,
     })
@@ -205,21 +214,6 @@ const toggleBreakdown = async (endpoint: string) => {
     breakdownLoading.value = false
   }
 }
-
-const chartColors = [
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899',
-  '#14b8a6',
-  '#f97316',
-  '#6366f1',
-  '#84cc16',
-  '#06b6d4',
-  '#a855f7'
-]
 
 const displayEndpointStats = computed(() => {
   const sourceStats = props.source === 'upstream'
@@ -243,7 +237,7 @@ const chartData = computed(() => {
         data: displayEndpointStats.value.map((item) =>
           props.metric === 'actual_cost' ? item.actual_cost : item.total_tokens
         ),
-        backgroundColor: chartColors.slice(0, displayEndpointStats.value.length),
+        backgroundColor: displayEndpointStats.value.map((item) => stableChartColor(item.endpoint)),
         borderWidth: 0
       }
     ]
@@ -287,6 +281,14 @@ const formatTokens = (value: number): string => {
 const formatNumber = (value: number): string => {
   return value.toLocaleString()
 }
+
+const getMetricShare = (item: EndpointStat): number => {
+  const metricKey = props.metric === 'actual_cost' ? 'actual_cost' : 'total_tokens'
+  const total = displayEndpointStats.value.reduce((sum, entry) => sum + entry[metricKey], 0)
+  return total > 0 ? (item[metricKey] / total) * 100 : 0
+}
+
+const formatPercentage = (value: number): string => `${value.toFixed(1)}%`
 
 const formatCost = (value: number): string => {
   if (value >= 1000) {

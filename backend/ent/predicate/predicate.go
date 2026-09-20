@@ -9,6 +9,9 @@ import (
 // APIKey is the predicate function for apikey builders.
 type APIKey func(*sql.Selector)
 
+// AccessLevel is the predicate function for accesslevel builders.
+type AccessLevel func(*sql.Selector)
+
 // Account is the predicate function for account builders.
 type Account func(*sql.Selector)
 

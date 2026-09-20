@@ -68,8 +68,8 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIKey, error) {
 	m, err := r.activeQuery().
 		Where(apikey.IDEQ(id)).
-		WithUser().
-		WithGroup().
+		WithUser(func(q *dbent.UserQuery) { q.WithAutoLevel().WithManualLevel() }).
+		WithGroup(func(q *dbent.GroupQuery) { q.WithRequiredLevel() }).
 		Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
@@ -102,8 +102,8 @@ func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (stri
 func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.APIKey, error) {
 	m, err := r.activeQuery().
 		Where(apikey.KeyEQ(key)).
-		WithUser().
-		WithGroup().
+		WithUser(func(q *dbent.UserQuery) { q.WithAutoLevel().WithManualLevel() }).
+		WithGroup(func(q *dbent.GroupQuery) { q.WithRequiredLevel() }).
 		Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
@@ -139,8 +139,13 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				user.FieldRole,
 				user.FieldBalance,
 				user.FieldPaygDiscountMultiplier,
+				user.FieldPaygDiscountOverrideEnabled,
+				user.FieldAutoLevelID,
+				user.FieldManualLevelID,
 				user.FieldConcurrency,
 			)
+			q.WithAutoLevel()
+			q.WithManualLevel()
 		}).
 		WithGroup(func(q *dbent.GroupQuery) {
 			q.Select(
@@ -150,6 +155,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldStatus,
 				group.FieldSubscriptionType,
 				group.FieldRateMultiplier,
+				group.FieldRequiredLevelID,
 				group.FieldModelRateMultipliers,
 				group.FieldFiveHourLimitUsd,
 				group.FieldDailyLimitUsd,
@@ -184,6 +190,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldClaudeDeviceLimitMode,
 				group.FieldClaudeDeviceBaseLimit,
 			)
+			q.WithRequiredLevel()
 		}).
 		Only(ctx)
 	if err != nil {
@@ -621,23 +628,28 @@ func userEntityToService(u *dbent.User) *service.User {
 	}
 	paygDiscountMultiplier := u.PaygDiscountMultiplier
 	return &service.User{
-		ID:                     u.ID,
-		Email:                  u.Email,
-		Username:               u.Username,
-		Notes:                  u.Notes,
-		PasswordHash:           u.PasswordHash,
-		Role:                   u.Role,
-		Balance:                u.Balance,
-		PaygDiscountMultiplier: &paygDiscountMultiplier,
-		Concurrency:            u.Concurrency,
-		Status:                 u.Status,
-		SoraStorageQuotaBytes:  u.SoraStorageQuotaBytes,
-		SoraStorageUsedBytes:   u.SoraStorageUsedBytes,
-		TotpSecretEncrypted:    u.TotpSecretEncrypted,
-		TotpEnabled:            u.TotpEnabled,
-		TotpEnabledAt:          u.TotpEnabledAt,
-		CreatedAt:              u.CreatedAt,
-		UpdatedAt:              u.UpdatedAt,
+		ID:                          u.ID,
+		Email:                       u.Email,
+		Username:                    u.Username,
+		Notes:                       u.Notes,
+		PasswordHash:                u.PasswordHash,
+		Role:                        u.Role,
+		Balance:                     u.Balance,
+		PaygDiscountMultiplier:      &paygDiscountMultiplier,
+		PaygDiscountOverrideEnabled: u.PaygDiscountOverrideEnabled,
+		AutoLevelID:                 u.AutoLevelID,
+		ManualLevelID:               u.ManualLevelID,
+		Concurrency:                 u.Concurrency,
+		Status:                      u.Status,
+		SoraStorageQuotaBytes:       u.SoraStorageQuotaBytes,
+		SoraStorageUsedBytes:        u.SoraStorageUsedBytes,
+		TotpSecretEncrypted:         u.TotpSecretEncrypted,
+		TotpEnabled:                 u.TotpEnabled,
+		TotpEnabledAt:               u.TotpEnabledAt,
+		CreatedAt:                   u.CreatedAt,
+		UpdatedAt:                   u.UpdatedAt,
+		AutoLevel:                   accessLevelEntityToService(u.Edges.AutoLevel),
+		ManualLevel:                 accessLevelEntityToService(u.Edges.ManualLevel),
 	}
 }
 
@@ -656,6 +668,8 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		IsExclusive:                      g.IsExclusive,
 		Status:                           g.Status,
 		Hydrated:                         true,
+		RequiredLevelID:                  g.RequiredLevelID,
+		RequiredLevel:                    accessLevelEntityToService(g.Edges.RequiredLevel),
 		SubscriptionType:                 g.SubscriptionType,
 		FiveHourLimitUSD:                 g.FiveHourLimitUsd,
 		DailyLimitUSD:                    g.DailyLimitUsd,

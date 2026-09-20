@@ -44,6 +44,7 @@
               <th class="pb-2 text-left">{{ t('admin.dashboard.group') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.requests') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.tokens') }}</th>
+              <th class="pb-2 text-right">{{ t('admin.dashboard.metricShare') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.actual') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.standard') }}</th>
             </tr>
@@ -72,6 +73,9 @@
                 <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
                   {{ formatTokens(group.total_tokens) }}
                 </td>
+                <td class="py-1.5 text-right text-gray-500 dark:text-gray-400">
+                  {{ formatPercentage(getMetricShare(group)) }}
+                </td>
                 <td class="py-1.5 text-right text-green-600 dark:text-green-400">
                   ${{ formatCost(group.actual_cost) }}
                 </td>
@@ -81,7 +85,7 @@
               </tr>
               <!-- User breakdown sub-rows -->
               <tr v-if="expandedKey === `group-${group.group_id}`">
-                <td colspan="5" class="p-0">
+                <td colspan="6" class="p-0">
                   <UserBreakdownSubTable
                     :items="breakdownItems"
                     :loading="breakdownLoading"
@@ -111,6 +115,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
 import type { GroupStat, UserBreakdownItem } from '@/types'
 import { getUserBreakdown } from '@/api/admin/dashboard'
+import { stableChartColor } from '@/utils/chartColors'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
@@ -125,6 +130,8 @@ const props = withDefaults(defineProps<{
   showMetricToggle?: boolean
   startDate?: string
   endDate?: string
+  startTime?: string
+  endTime?: string
 }>(), {
   loading: false,
   metric: 'tokens',
@@ -152,6 +159,8 @@ const toggleBreakdown = async (type: string, id: number | string) => {
     const res = await getUserBreakdown({
       start_date: props.startDate,
       end_date: props.endDate,
+      start_time: props.startTime,
+      end_time: props.endTime,
       group_id: Number(id),
     })
     breakdownItems.value = res.users || []
@@ -161,19 +170,6 @@ const toggleBreakdown = async (type: string, id: number | string) => {
     breakdownLoading.value = false
   }
 }
-
-const chartColors = [
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899',
-  '#14b8a6',
-  '#f97316',
-  '#6366f1',
-  '#84cc16'
-]
 
 const displayGroupStats = computed(() => {
   if (!props.groupStats?.length) return []
@@ -190,7 +186,9 @@ const chartData = computed(() => {
     datasets: [
       {
         data: displayGroupStats.value.map((g) => props.metric === 'actual_cost' ? g.actual_cost : g.total_tokens),
-        backgroundColor: chartColors.slice(0, displayGroupStats.value.length),
+        backgroundColor: displayGroupStats.value.map((group) =>
+          stableChartColor(`${group.group_id}:${group.group_name || ''}`)
+        ),
         borderWidth: 0
       }
     ]
@@ -234,6 +232,14 @@ const formatTokens = (value: number): string => {
 const formatNumber = (value: number): string => {
   return value.toLocaleString()
 }
+
+const getMetricShare = (group: GroupStat): number => {
+  const metricKey = props.metric === 'actual_cost' ? 'actual_cost' : 'total_tokens'
+  const total = displayGroupStats.value.reduce((sum, item) => sum + item[metricKey], 0)
+  return total > 0 ? (group[metricKey] / total) * 100 : 0
+}
+
+const formatPercentage = (value: number): string => `${value.toFixed(1)}%`
 
 const formatCost = (value: number): string => {
   if (value >= 1000) {

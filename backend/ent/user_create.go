@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"github.com/Wei-Shaw/sub2api/ent/accesslevel"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
@@ -122,6 +123,48 @@ func (_c *UserCreate) SetPaygDiscountMultiplier(v float64) *UserCreate {
 func (_c *UserCreate) SetNillablePaygDiscountMultiplier(v *float64) *UserCreate {
 	if v != nil {
 		_c.SetPaygDiscountMultiplier(*v)
+	}
+	return _c
+}
+
+// SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
+func (_c *UserCreate) SetPaygDiscountOverrideEnabled(v bool) *UserCreate {
+	_c.mutation.SetPaygDiscountOverrideEnabled(v)
+	return _c
+}
+
+// SetNillablePaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field if the given value is not nil.
+func (_c *UserCreate) SetNillablePaygDiscountOverrideEnabled(v *bool) *UserCreate {
+	if v != nil {
+		_c.SetPaygDiscountOverrideEnabled(*v)
+	}
+	return _c
+}
+
+// SetAutoLevelID sets the "auto_level_id" field.
+func (_c *UserCreate) SetAutoLevelID(v int64) *UserCreate {
+	_c.mutation.SetAutoLevelID(v)
+	return _c
+}
+
+// SetNillableAutoLevelID sets the "auto_level_id" field if the given value is not nil.
+func (_c *UserCreate) SetNillableAutoLevelID(v *int64) *UserCreate {
+	if v != nil {
+		_c.SetAutoLevelID(*v)
+	}
+	return _c
+}
+
+// SetManualLevelID sets the "manual_level_id" field.
+func (_c *UserCreate) SetManualLevelID(v int64) *UserCreate {
+	_c.mutation.SetManualLevelID(v)
+	return _c
+}
+
+// SetNillableManualLevelID sets the "manual_level_id" field if the given value is not nil.
+func (_c *UserCreate) SetNillableManualLevelID(v *int64) *UserCreate {
+	if v != nil {
+		_c.SetManualLevelID(*v)
 	}
 	return _c
 }
@@ -387,6 +430,16 @@ func (_c *UserCreate) AddPromoCodeUsages(v ...*PromoCodeUsage) *UserCreate {
 	return _c.AddPromoCodeUsageIDs(ids...)
 }
 
+// SetAutoLevel sets the "auto_level" edge to the AccessLevel entity.
+func (_c *UserCreate) SetAutoLevel(v *AccessLevel) *UserCreate {
+	return _c.SetAutoLevelID(v.ID)
+}
+
+// SetManualLevel sets the "manual_level" edge to the AccessLevel entity.
+func (_c *UserCreate) SetManualLevel(v *AccessLevel) *UserCreate {
+	return _c.SetManualLevelID(v.ID)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_c *UserCreate) Mutation() *UserMutation {
 	return _c.mutation
@@ -449,6 +502,10 @@ func (_c *UserCreate) defaults() error {
 	if _, ok := _c.mutation.PaygDiscountMultiplier(); !ok {
 		v := user.DefaultPaygDiscountMultiplier
 		_c.mutation.SetPaygDiscountMultiplier(v)
+	}
+	if _, ok := _c.mutation.PaygDiscountOverrideEnabled(); !ok {
+		v := user.DefaultPaygDiscountOverrideEnabled
+		_c.mutation.SetPaygDiscountOverrideEnabled(v)
 	}
 	if _, ok := _c.mutation.Concurrency(); !ok {
 		v := user.DefaultConcurrency
@@ -518,6 +575,9 @@ func (_c *UserCreate) check() error {
 	}
 	if _, ok := _c.mutation.PaygDiscountMultiplier(); !ok {
 		return &ValidationError{Name: "payg_discount_multiplier", err: errors.New(`ent: missing required field "User.payg_discount_multiplier"`)}
+	}
+	if _, ok := _c.mutation.PaygDiscountOverrideEnabled(); !ok {
+		return &ValidationError{Name: "payg_discount_override_enabled", err: errors.New(`ent: missing required field "User.payg_discount_override_enabled"`)}
 	}
 	if _, ok := _c.mutation.Concurrency(); !ok {
 		return &ValidationError{Name: "concurrency", err: errors.New(`ent: missing required field "User.concurrency"`)}
@@ -608,6 +668,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.PaygDiscountMultiplier(); ok {
 		_spec.SetField(user.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
 		_node.PaygDiscountMultiplier = value
+	}
+	if value, ok := _c.mutation.PaygDiscountOverrideEnabled(); ok {
+		_spec.SetField(user.FieldPaygDiscountOverrideEnabled, field.TypeBool, value)
+		_node.PaygDiscountOverrideEnabled = value
 	}
 	if value, ok := _c.mutation.Concurrency(); ok {
 		_spec.SetField(user.FieldConcurrency, field.TypeInt, value)
@@ -793,6 +857,40 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 		}
 		_spec.Edges = append(_spec.Edges, edge)
 	}
+	if nodes := _c.mutation.AutoLevelIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   user.AutoLevelTable,
+			Columns: []string{user.AutoLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.AutoLevelID = &nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.ManualLevelIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   user.ManualLevelTable,
+			Columns: []string{user.ManualLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.ManualLevelID = &nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
+	}
 	return _node, _spec
 }
 
@@ -944,6 +1042,54 @@ func (u *UserUpsert) UpdatePaygDiscountMultiplier() *UserUpsert {
 // AddPaygDiscountMultiplier adds v to the "payg_discount_multiplier" field.
 func (u *UserUpsert) AddPaygDiscountMultiplier(v float64) *UserUpsert {
 	u.Add(user.FieldPaygDiscountMultiplier, v)
+	return u
+}
+
+// SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
+func (u *UserUpsert) SetPaygDiscountOverrideEnabled(v bool) *UserUpsert {
+	u.Set(user.FieldPaygDiscountOverrideEnabled, v)
+	return u
+}
+
+// UpdatePaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field to the value that was provided on create.
+func (u *UserUpsert) UpdatePaygDiscountOverrideEnabled() *UserUpsert {
+	u.SetExcluded(user.FieldPaygDiscountOverrideEnabled)
+	return u
+}
+
+// SetAutoLevelID sets the "auto_level_id" field.
+func (u *UserUpsert) SetAutoLevelID(v int64) *UserUpsert {
+	u.Set(user.FieldAutoLevelID, v)
+	return u
+}
+
+// UpdateAutoLevelID sets the "auto_level_id" field to the value that was provided on create.
+func (u *UserUpsert) UpdateAutoLevelID() *UserUpsert {
+	u.SetExcluded(user.FieldAutoLevelID)
+	return u
+}
+
+// ClearAutoLevelID clears the value of the "auto_level_id" field.
+func (u *UserUpsert) ClearAutoLevelID() *UserUpsert {
+	u.SetNull(user.FieldAutoLevelID)
+	return u
+}
+
+// SetManualLevelID sets the "manual_level_id" field.
+func (u *UserUpsert) SetManualLevelID(v int64) *UserUpsert {
+	u.Set(user.FieldManualLevelID, v)
+	return u
+}
+
+// UpdateManualLevelID sets the "manual_level_id" field to the value that was provided on create.
+func (u *UserUpsert) UpdateManualLevelID() *UserUpsert {
+	u.SetExcluded(user.FieldManualLevelID)
+	return u
+}
+
+// ClearManualLevelID clears the value of the "manual_level_id" field.
+func (u *UserUpsert) ClearManualLevelID() *UserUpsert {
+	u.SetNull(user.FieldManualLevelID)
 	return u
 }
 
@@ -1246,6 +1392,62 @@ func (u *UserUpsertOne) AddPaygDiscountMultiplier(v float64) *UserUpsertOne {
 func (u *UserUpsertOne) UpdatePaygDiscountMultiplier() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdatePaygDiscountMultiplier()
+	})
+}
+
+// SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
+func (u *UserUpsertOne) SetPaygDiscountOverrideEnabled(v bool) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetPaygDiscountOverrideEnabled(v)
+	})
+}
+
+// UpdatePaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdatePaygDiscountOverrideEnabled() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdatePaygDiscountOverrideEnabled()
+	})
+}
+
+// SetAutoLevelID sets the "auto_level_id" field.
+func (u *UserUpsertOne) SetAutoLevelID(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetAutoLevelID(v)
+	})
+}
+
+// UpdateAutoLevelID sets the "auto_level_id" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateAutoLevelID() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateAutoLevelID()
+	})
+}
+
+// ClearAutoLevelID clears the value of the "auto_level_id" field.
+func (u *UserUpsertOne) ClearAutoLevelID() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearAutoLevelID()
+	})
+}
+
+// SetManualLevelID sets the "manual_level_id" field.
+func (u *UserUpsertOne) SetManualLevelID(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetManualLevelID(v)
+	})
+}
+
+// UpdateManualLevelID sets the "manual_level_id" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateManualLevelID() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateManualLevelID()
+	})
+}
+
+// ClearManualLevelID clears the value of the "manual_level_id" field.
+func (u *UserUpsertOne) ClearManualLevelID() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearManualLevelID()
 	})
 }
 
@@ -1737,6 +1939,62 @@ func (u *UserUpsertBulk) AddPaygDiscountMultiplier(v float64) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdatePaygDiscountMultiplier() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdatePaygDiscountMultiplier()
+	})
+}
+
+// SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
+func (u *UserUpsertBulk) SetPaygDiscountOverrideEnabled(v bool) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetPaygDiscountOverrideEnabled(v)
+	})
+}
+
+// UpdatePaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdatePaygDiscountOverrideEnabled() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdatePaygDiscountOverrideEnabled()
+	})
+}
+
+// SetAutoLevelID sets the "auto_level_id" field.
+func (u *UserUpsertBulk) SetAutoLevelID(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetAutoLevelID(v)
+	})
+}
+
+// UpdateAutoLevelID sets the "auto_level_id" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateAutoLevelID() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateAutoLevelID()
+	})
+}
+
+// ClearAutoLevelID clears the value of the "auto_level_id" field.
+func (u *UserUpsertBulk) ClearAutoLevelID() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearAutoLevelID()
+	})
+}
+
+// SetManualLevelID sets the "manual_level_id" field.
+func (u *UserUpsertBulk) SetManualLevelID(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetManualLevelID(v)
+	})
+}
+
+// UpdateManualLevelID sets the "manual_level_id" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateManualLevelID() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateManualLevelID()
+	})
+}
+
+// ClearManualLevelID clears the value of the "manual_level_id" field.
+func (u *UserUpsertBulk) ClearManualLevelID() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearManualLevelID()
 	})
 }
 

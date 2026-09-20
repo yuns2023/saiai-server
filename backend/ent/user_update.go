@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"github.com/Wei-Shaw/sub2api/ent/accesslevel"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
@@ -143,6 +144,60 @@ func (_u *UserUpdate) SetNillablePaygDiscountMultiplier(v *float64) *UserUpdate 
 // AddPaygDiscountMultiplier adds value to the "payg_discount_multiplier" field.
 func (_u *UserUpdate) AddPaygDiscountMultiplier(v float64) *UserUpdate {
 	_u.mutation.AddPaygDiscountMultiplier(v)
+	return _u
+}
+
+// SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
+func (_u *UserUpdate) SetPaygDiscountOverrideEnabled(v bool) *UserUpdate {
+	_u.mutation.SetPaygDiscountOverrideEnabled(v)
+	return _u
+}
+
+// SetNillablePaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field if the given value is not nil.
+func (_u *UserUpdate) SetNillablePaygDiscountOverrideEnabled(v *bool) *UserUpdate {
+	if v != nil {
+		_u.SetPaygDiscountOverrideEnabled(*v)
+	}
+	return _u
+}
+
+// SetAutoLevelID sets the "auto_level_id" field.
+func (_u *UserUpdate) SetAutoLevelID(v int64) *UserUpdate {
+	_u.mutation.SetAutoLevelID(v)
+	return _u
+}
+
+// SetNillableAutoLevelID sets the "auto_level_id" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableAutoLevelID(v *int64) *UserUpdate {
+	if v != nil {
+		_u.SetAutoLevelID(*v)
+	}
+	return _u
+}
+
+// ClearAutoLevelID clears the value of the "auto_level_id" field.
+func (_u *UserUpdate) ClearAutoLevelID() *UserUpdate {
+	_u.mutation.ClearAutoLevelID()
+	return _u
+}
+
+// SetManualLevelID sets the "manual_level_id" field.
+func (_u *UserUpdate) SetManualLevelID(v int64) *UserUpdate {
+	_u.mutation.SetManualLevelID(v)
+	return _u
+}
+
+// SetNillableManualLevelID sets the "manual_level_id" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableManualLevelID(v *int64) *UserUpdate {
+	if v != nil {
+		_u.SetManualLevelID(*v)
+	}
+	return _u
+}
+
+// ClearManualLevelID clears the value of the "manual_level_id" field.
+func (_u *UserUpdate) ClearManualLevelID() *UserUpdate {
+	_u.mutation.ClearManualLevelID()
 	return _u
 }
 
@@ -440,6 +495,16 @@ func (_u *UserUpdate) AddPromoCodeUsages(v ...*PromoCodeUsage) *UserUpdate {
 	return _u.AddPromoCodeUsageIDs(ids...)
 }
 
+// SetAutoLevel sets the "auto_level" edge to the AccessLevel entity.
+func (_u *UserUpdate) SetAutoLevel(v *AccessLevel) *UserUpdate {
+	return _u.SetAutoLevelID(v.ID)
+}
+
+// SetManualLevel sets the "manual_level" edge to the AccessLevel entity.
+func (_u *UserUpdate) SetManualLevel(v *AccessLevel) *UserUpdate {
+	return _u.SetManualLevelID(v.ID)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdate) Mutation() *UserMutation {
 	return _u.mutation
@@ -634,6 +699,18 @@ func (_u *UserUpdate) RemovePromoCodeUsages(v ...*PromoCodeUsage) *UserUpdate {
 	return _u.RemovePromoCodeUsageIDs(ids...)
 }
 
+// ClearAutoLevel clears the "auto_level" edge to the AccessLevel entity.
+func (_u *UserUpdate) ClearAutoLevel() *UserUpdate {
+	_u.mutation.ClearAutoLevel()
+	return _u
+}
+
+// ClearManualLevel clears the "manual_level" edge to the AccessLevel entity.
+func (_u *UserUpdate) ClearManualLevel() *UserUpdate {
+	_u.mutation.ClearManualLevel()
+	return _u
+}
+
 // Save executes the query and returns the number of nodes affected by the update operation.
 func (_u *UserUpdate) Save(ctx context.Context) (int, error) {
 	if err := _u.defaults(); err != nil {
@@ -747,6 +824,9 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedPaygDiscountMultiplier(); ok {
 		_spec.AddField(user.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.PaygDiscountOverrideEnabled(); ok {
+		_spec.SetField(user.FieldPaygDiscountOverrideEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.Concurrency(); ok {
 		_spec.SetField(user.FieldConcurrency, field.TypeInt, value)
@@ -1207,6 +1287,64 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.AutoLevelCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   user.AutoLevelTable,
+			Columns: []string{user.AutoLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AutoLevelIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   user.AutoLevelTable,
+			Columns: []string{user.AutoLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ManualLevelCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   user.ManualLevelTable,
+			Columns: []string{user.ManualLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ManualLevelIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   user.ManualLevelTable,
+			Columns: []string{user.ManualLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{user.Label}
@@ -1334,6 +1472,60 @@ func (_u *UserUpdateOne) SetNillablePaygDiscountMultiplier(v *float64) *UserUpda
 // AddPaygDiscountMultiplier adds value to the "payg_discount_multiplier" field.
 func (_u *UserUpdateOne) AddPaygDiscountMultiplier(v float64) *UserUpdateOne {
 	_u.mutation.AddPaygDiscountMultiplier(v)
+	return _u
+}
+
+// SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
+func (_u *UserUpdateOne) SetPaygDiscountOverrideEnabled(v bool) *UserUpdateOne {
+	_u.mutation.SetPaygDiscountOverrideEnabled(v)
+	return _u
+}
+
+// SetNillablePaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillablePaygDiscountOverrideEnabled(v *bool) *UserUpdateOne {
+	if v != nil {
+		_u.SetPaygDiscountOverrideEnabled(*v)
+	}
+	return _u
+}
+
+// SetAutoLevelID sets the "auto_level_id" field.
+func (_u *UserUpdateOne) SetAutoLevelID(v int64) *UserUpdateOne {
+	_u.mutation.SetAutoLevelID(v)
+	return _u
+}
+
+// SetNillableAutoLevelID sets the "auto_level_id" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableAutoLevelID(v *int64) *UserUpdateOne {
+	if v != nil {
+		_u.SetAutoLevelID(*v)
+	}
+	return _u
+}
+
+// ClearAutoLevelID clears the value of the "auto_level_id" field.
+func (_u *UserUpdateOne) ClearAutoLevelID() *UserUpdateOne {
+	_u.mutation.ClearAutoLevelID()
+	return _u
+}
+
+// SetManualLevelID sets the "manual_level_id" field.
+func (_u *UserUpdateOne) SetManualLevelID(v int64) *UserUpdateOne {
+	_u.mutation.SetManualLevelID(v)
+	return _u
+}
+
+// SetNillableManualLevelID sets the "manual_level_id" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableManualLevelID(v *int64) *UserUpdateOne {
+	if v != nil {
+		_u.SetManualLevelID(*v)
+	}
+	return _u
+}
+
+// ClearManualLevelID clears the value of the "manual_level_id" field.
+func (_u *UserUpdateOne) ClearManualLevelID() *UserUpdateOne {
+	_u.mutation.ClearManualLevelID()
 	return _u
 }
 
@@ -1631,6 +1823,16 @@ func (_u *UserUpdateOne) AddPromoCodeUsages(v ...*PromoCodeUsage) *UserUpdateOne
 	return _u.AddPromoCodeUsageIDs(ids...)
 }
 
+// SetAutoLevel sets the "auto_level" edge to the AccessLevel entity.
+func (_u *UserUpdateOne) SetAutoLevel(v *AccessLevel) *UserUpdateOne {
+	return _u.SetAutoLevelID(v.ID)
+}
+
+// SetManualLevel sets the "manual_level" edge to the AccessLevel entity.
+func (_u *UserUpdateOne) SetManualLevel(v *AccessLevel) *UserUpdateOne {
+	return _u.SetManualLevelID(v.ID)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdateOne) Mutation() *UserMutation {
 	return _u.mutation
@@ -1825,6 +2027,18 @@ func (_u *UserUpdateOne) RemovePromoCodeUsages(v ...*PromoCodeUsage) *UserUpdate
 	return _u.RemovePromoCodeUsageIDs(ids...)
 }
 
+// ClearAutoLevel clears the "auto_level" edge to the AccessLevel entity.
+func (_u *UserUpdateOne) ClearAutoLevel() *UserUpdateOne {
+	_u.mutation.ClearAutoLevel()
+	return _u
+}
+
+// ClearManualLevel clears the "manual_level" edge to the AccessLevel entity.
+func (_u *UserUpdateOne) ClearManualLevel() *UserUpdateOne {
+	_u.mutation.ClearManualLevel()
+	return _u
+}
+
 // Where appends a list predicates to the UserUpdate builder.
 func (_u *UserUpdateOne) Where(ps ...predicate.User) *UserUpdateOne {
 	_u.mutation.Where(ps...)
@@ -1968,6 +2182,9 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.AddedPaygDiscountMultiplier(); ok {
 		_spec.AddField(user.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.PaygDiscountOverrideEnabled(); ok {
+		_spec.SetField(user.FieldPaygDiscountOverrideEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.Concurrency(); ok {
 		_spec.SetField(user.FieldConcurrency, field.TypeInt, value)
@@ -2421,6 +2638,64 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(promocodeusage.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.AutoLevelCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   user.AutoLevelTable,
+			Columns: []string{user.AutoLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AutoLevelIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   user.AutoLevelTable,
+			Columns: []string{user.AutoLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ManualLevelCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   user.ManualLevelTable,
+			Columns: []string{user.ManualLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ManualLevelIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   user.ManualLevelTable,
+			Columns: []string{user.ManualLevelColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(accesslevel.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

@@ -384,6 +384,11 @@
           />
           <p class="input-hint">{{ t('admin.groups.rateMultiplierHint') }}</p>
         </div>
+        <div>
+          <label class="input-label">{{ t('admin.groups.requiredLevel') }}</label>
+          <Select v-model="createForm.required_level_id" :options="accessLevelOptions" />
+          <p class="input-hint">{{ t('admin.groups.requiredLevelHint') }}</p>
+        </div>
         <div v-if="createForm.subscription_type !== 'subscription'" data-tour="group-form-exclusive">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1133,6 +1138,11 @@
             class="input"
             data-tour="group-form-multiplier"
           />
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.groups.requiredLevel') }}</label>
+          <Select v-model="editForm.required_level_id" :options="accessLevelOptions" />
+          <p class="input-hint">{{ t('admin.groups.requiredLevelHint') }}</p>
         </div>
         <div v-if="editForm.subscription_type !== 'subscription'">
           <div class="mb-1.5 flex items-center gap-1">
@@ -1894,7 +1904,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { adminAPI } from '@/api/admin'
-import type { AdminGroup, ClaudeEnvironmentMode, GroupPlatform, SubscriptionType } from '@/types'
+import type { AccessLevel, AdminGroup, ClaudeEnvironmentMode, GroupPlatform, SubscriptionType } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -2062,6 +2072,12 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
 })
 
 const groups = ref<AdminGroup[]>([])
+const accessLevels = ref<AccessLevel[]>([])
+
+const accessLevelOptions = computed(() => [
+  { value: null, label: t('admin.groups.noRequiredLevel') },
+  ...accessLevels.value.map((level) => ({ value: level.id, label: `${level.name} (≥ ${level.balance_threshold})` }))
+])
 const loading = ref(false)
 const usageMap = ref<Map<number, { today_cost: number; total_cost: number }>>(new Map())
 const usageLoading = ref(false)
@@ -2119,6 +2135,7 @@ const createForm = reactive({
   description: '',
   platform: 'anthropic' as GroupPlatform,
   rate_multiplier: 1.0,
+  required_level_id: null as number | null,
   is_exclusive: false,
   subscription_type: 'standard' as SubscriptionType,
   five_hour_limit_usd: null as number | null,
@@ -2375,6 +2392,7 @@ const editForm = reactive({
   description: '',
   platform: 'anthropic' as GroupPlatform,
   rate_multiplier: 1.0,
+  required_level_id: null as number | null,
   is_exclusive: false,
   status: 'active' as 'active' | 'inactive',
   subscription_type: 'standard' as SubscriptionType,
@@ -2530,6 +2548,7 @@ const closeCreateModal = () => {
   createForm.description = ''
   createForm.platform = 'anthropic'
   createForm.rate_multiplier = 1.0
+  createForm.required_level_id = null
   createForm.is_exclusive = false
   createForm.subscription_type = 'standard'
   createForm.five_hour_limit_usd = null
@@ -2627,6 +2646,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.description = group.description || ''
   editForm.platform = group.platform
   editForm.rate_multiplier = group.rate_multiplier
+  editForm.required_level_id = group.required_level_id ?? null
   editForm.is_exclusive = group.is_exclusive
   editForm.status = group.status
   editForm.subscription_type = group.subscription_type || 'standard'
@@ -2694,6 +2714,7 @@ const handleUpdateGroup = async () => {
       weekly_limit_usd: normalizeOptionalLimit(editForm.weekly_limit_usd as number | string | null),
       monthly_limit_usd: normalizeOptionalLimit(editForm.monthly_limit_usd as number | string | null),
       fallback_group_id: editForm.fallback_group_id === null ? 0 : editForm.fallback_group_id,
+      required_level_id: editForm.required_level_id === null ? 0 : editForm.required_level_id,
       fallback_group_id_on_invalid_request:
         editForm.fallback_group_id_on_invalid_request === null
           ? 0
@@ -2841,6 +2862,7 @@ const saveSortOrder = async () => {
 
 onMounted(() => {
   loadGroups()
+  adminAPI.accessLevels.list().then((items) => { accessLevels.value = items }).catch(() => { accessLevels.value = [] })
   document.addEventListener('click', handleClickOutside)
 })
 

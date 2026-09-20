@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"github.com/Wei-Shaw/sub2api/ent/accesslevel"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
@@ -42,6 +43,8 @@ type UserQuery struct {
 	withUsageLogs             *UsageLogQuery
 	withAttributeValues       *UserAttributeValueQuery
 	withPromoCodeUsages       *PromoCodeUsageQuery
+	withAutoLevel             *AccessLevelQuery
+	withManualLevel           *AccessLevelQuery
 	withUserAllowedGroups     *UserAllowedGroupQuery
 	modifiers                 []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
@@ -278,6 +281,50 @@ func (_q *UserQuery) QueryPromoCodeUsages() *PromoCodeUsageQuery {
 	return query
 }
 
+// QueryAutoLevel chains the current query on the "auto_level" edge.
+func (_q *UserQuery) QueryAutoLevel() *AccessLevelQuery {
+	query := (&AccessLevelClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, selector),
+			sqlgraph.To(accesslevel.Table, accesslevel.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, user.AutoLevelTable, user.AutoLevelColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryManualLevel chains the current query on the "manual_level" edge.
+func (_q *UserQuery) QueryManualLevel() *AccessLevelQuery {
+	query := (&AccessLevelClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, selector),
+			sqlgraph.To(accesslevel.Table, accesslevel.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, user.ManualLevelTable, user.ManualLevelColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
 // QueryUserAllowedGroups chains the current query on the "user_allowed_groups" edge.
 func (_q *UserQuery) QueryUserAllowedGroups() *UserAllowedGroupQuery {
 	query := (&UserAllowedGroupClient{config: _q.config}).Query()
@@ -501,6 +548,8 @@ func (_q *UserQuery) Clone() *UserQuery {
 		withUsageLogs:             _q.withUsageLogs.Clone(),
 		withAttributeValues:       _q.withAttributeValues.Clone(),
 		withPromoCodeUsages:       _q.withPromoCodeUsages.Clone(),
+		withAutoLevel:             _q.withAutoLevel.Clone(),
+		withManualLevel:           _q.withManualLevel.Clone(),
 		withUserAllowedGroups:     _q.withUserAllowedGroups.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
@@ -607,6 +656,28 @@ func (_q *UserQuery) WithPromoCodeUsages(opts ...func(*PromoCodeUsageQuery)) *Us
 	return _q
 }
 
+// WithAutoLevel tells the query-builder to eager-load the nodes that are connected to
+// the "auto_level" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UserQuery) WithAutoLevel(opts ...func(*AccessLevelQuery)) *UserQuery {
+	query := (&AccessLevelClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withAutoLevel = query
+	return _q
+}
+
+// WithManualLevel tells the query-builder to eager-load the nodes that are connected to
+// the "manual_level" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UserQuery) WithManualLevel(opts ...func(*AccessLevelQuery)) *UserQuery {
+	query := (&AccessLevelClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withManualLevel = query
+	return _q
+}
+
 // WithUserAllowedGroups tells the query-builder to eager-load the nodes that are connected to
 // the "user_allowed_groups" edge. The optional arguments are used to configure the query builder of the edge.
 func (_q *UserQuery) WithUserAllowedGroups(opts ...func(*UserAllowedGroupQuery)) *UserQuery {
@@ -696,7 +767,7 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 	var (
 		nodes       = []*User{}
 		_spec       = _q.querySpec()
-		loadedTypes = [10]bool{
+		loadedTypes = [12]bool{
 			_q.withAPIKeys != nil,
 			_q.withRedeemCodes != nil,
 			_q.withSubscriptions != nil,
@@ -706,6 +777,8 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 			_q.withUsageLogs != nil,
 			_q.withAttributeValues != nil,
 			_q.withPromoCodeUsages != nil,
+			_q.withAutoLevel != nil,
+			_q.withManualLevel != nil,
 			_q.withUserAllowedGroups != nil,
 		}
 	)
@@ -792,6 +865,18 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 		if err := _q.loadPromoCodeUsages(ctx, query, nodes,
 			func(n *User) { n.Edges.PromoCodeUsages = []*PromoCodeUsage{} },
 			func(n *User, e *PromoCodeUsage) { n.Edges.PromoCodeUsages = append(n.Edges.PromoCodeUsages, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withAutoLevel; query != nil {
+		if err := _q.loadAutoLevel(ctx, query, nodes, nil,
+			func(n *User, e *AccessLevel) { n.Edges.AutoLevel = e }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withManualLevel; query != nil {
+		if err := _q.loadManualLevel(ctx, query, nodes, nil,
+			func(n *User, e *AccessLevel) { n.Edges.ManualLevel = e }); err != nil {
 			return nil, err
 		}
 	}
@@ -1112,6 +1197,70 @@ func (_q *UserQuery) loadPromoCodeUsages(ctx context.Context, query *PromoCodeUs
 	}
 	return nil
 }
+func (_q *UserQuery) loadAutoLevel(ctx context.Context, query *AccessLevelQuery, nodes []*User, init func(*User), assign func(*User, *AccessLevel)) error {
+	ids := make([]int64, 0, len(nodes))
+	nodeids := make(map[int64][]*User)
+	for i := range nodes {
+		if nodes[i].AutoLevelID == nil {
+			continue
+		}
+		fk := *nodes[i].AutoLevelID
+		if _, ok := nodeids[fk]; !ok {
+			ids = append(ids, fk)
+		}
+		nodeids[fk] = append(nodeids[fk], nodes[i])
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	query.Where(accesslevel.IDIn(ids...))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nodeids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected foreign-key "auto_level_id" returned %v`, n.ID)
+		}
+		for i := range nodes {
+			assign(nodes[i], n)
+		}
+	}
+	return nil
+}
+func (_q *UserQuery) loadManualLevel(ctx context.Context, query *AccessLevelQuery, nodes []*User, init func(*User), assign func(*User, *AccessLevel)) error {
+	ids := make([]int64, 0, len(nodes))
+	nodeids := make(map[int64][]*User)
+	for i := range nodes {
+		if nodes[i].ManualLevelID == nil {
+			continue
+		}
+		fk := *nodes[i].ManualLevelID
+		if _, ok := nodeids[fk]; !ok {
+			ids = append(ids, fk)
+		}
+		nodeids[fk] = append(nodeids[fk], nodes[i])
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	query.Where(accesslevel.IDIn(ids...))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nodeids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected foreign-key "manual_level_id" returned %v`, n.ID)
+		}
+		for i := range nodes {
+			assign(nodes[i], n)
+		}
+	}
+	return nil
+}
 func (_q *UserQuery) loadUserAllowedGroups(ctx context.Context, query *UserAllowedGroupQuery, nodes []*User, init func(*User), assign func(*User, *UserAllowedGroup)) error {
 	fks := make([]driver.Value, 0, len(nodes))
 	nodeids := make(map[int64]*User)
@@ -1170,6 +1319,12 @@ func (_q *UserQuery) querySpec() *sqlgraph.QuerySpec {
 			if fields[i] != user.FieldID {
 				_spec.Node.Columns = append(_spec.Node.Columns, fields[i])
 			}
+		}
+		if _q.withAutoLevel != nil {
+			_spec.Node.AddColumnOnce(user.FieldAutoLevelID)
+		}
+		if _q.withManualLevel != nil {
+			_spec.Node.AddColumnOnce(user.FieldManualLevelID)
 		}
 	}
 	if ps := _q.predicates; len(ps) > 0 {

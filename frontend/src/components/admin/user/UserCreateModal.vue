@@ -36,6 +36,12 @@
         </div>
       </div>
       <div>
+        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+          <input v-model="form.payg_discount_override_enabled" type="checkbox" class="rounded" />
+          {{ t('admin.users.customPaygDiscount') }}
+        </label>
+      </div>
+      <div v-if="form.payg_discount_override_enabled">
         <label class="input-label">{{ t('admin.users.paygDiscountMultiplier') }}</label>
         <input
           v-model.number="form.payg_discount_multiplier"
@@ -71,18 +77,20 @@ import Icon from '@/components/icons/Icon.vue'
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n()
 
-const form = reactive({ email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1 })
+const form = reactive({ email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1, payg_discount_override_enabled: false })
 
 const { loading, submit } = useForm({
   form,
   submitFn: async (data) => {
-    await adminAPI.users.create(data)
+    const payload = { ...data } as any
+    if (!payload.payg_discount_override_enabled) delete payload.payg_discount_multiplier
+    await adminAPI.users.create(payload)
     emit('success'); emit('close')
   },
   successMsg: t('admin.users.userCreated')
 })
 
-watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1 }) })
+watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1, payg_discount_override_enabled: false }) })
 
 const generateRandomPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*'

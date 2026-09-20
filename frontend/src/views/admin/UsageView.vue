@@ -13,6 +13,9 @@
                 v-model:end-date="endDate"
                 @change="onDateRangeChange"
               />
+              <span v-if="selectedRangeDetail" class="text-xs text-gray-500 dark:text-gray-400">
+                {{ selectedRangeDetail }}
+              </span>
             </div>
             <div class="ml-auto flex items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
@@ -34,6 +37,8 @@
             :show-metric-toggle="true"
             :start-date="startDate"
             :end-date="endDate"
+            :start-time="filters.start_time"
+            :end-time="filters.end_time"
           />
           <GroupDistributionChart
             v-model:metric="groupDistributionMetric"
@@ -42,6 +47,8 @@
             :show-metric-toggle="true"
             :start-date="startDate"
             :end-date="endDate"
+            :start-time="filters.start_time"
+            :end-time="filters.end_time"
           />
         </div>
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -57,11 +64,13 @@
             :title="t('usage.endpointDistribution')"
             :start-date="startDate"
             :end-date="endDate"
+            :start-time="filters.start_time"
+            :end-time="filters.end_time"
           />
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
       </div>
-      <UsageFilters v-model="filters" :start-date="startDate" :end-date="endDate" :exporting="exporting" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToCsv">
+      <UsageFilters v-model="filters" :start-date="startDate" :end-date="endDate" :start-time="filters.start_time" :end-time="filters.end_time" :exporting="exporting" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToCsv">
         <template #after-reset>
           <div class="relative" ref="columnDropdownRef">
             <button
@@ -205,6 +214,10 @@ const getLast24HoursRangeDates = (): { start: string; end: string } => {
     end: formatLD(end)
   }
 }
+const createRolling24HourRange = (end = new Date()): { start: string; end: string } => ({
+  start: new Date(end.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+  end: end.toISOString()
+})
 const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
   const startTime = new Date(`${start}T00:00:00`).getTime()
   const endTime = new Date(`${end}T00:00:00`).getTime()
@@ -212,9 +225,49 @@ const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
   return daysDiff <= 1 ? 'hour' : 'day'
 }
 const defaultRange = getLast24HoursRangeDates()
+const defaultRollingRange = createRolling24HourRange()
 const startDate = ref(defaultRange.start); const endDate = ref(defaultRange.end)
-const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, session_id: undefined, request_type: undefined, billing_type: null, account_switch: undefined, start_date: startDate.value, end_date: endDate.value })
+const activeRangePreset = ref<string | null>('last24Hours')
+const rollingStartTime = ref(defaultRollingRange.start)
+const rollingEndTime = ref(defaultRollingRange.end)
+const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, session_id: undefined, request_type: undefined, billing_type: null, account_switch: undefined, start_time: rollingStartTime.value, end_time: rollingEndTime.value })
 const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
+
+const refreshRollingRange = () => {
+  const range = createRolling24HourRange()
+  rollingStartTime.value = range.start
+  rollingEndTime.value = range.end
+}
+
+const activeRangeParams = (): Pick<AdminUsageQueryParams, 'start_date' | 'end_date' | 'start_time' | 'end_time'> => {
+  if (activeRangePreset.value === 'last24Hours') {
+    return {
+      start_date: undefined,
+      end_date: undefined,
+      start_time: rollingStartTime.value,
+      end_time: rollingEndTime.value
+    }
+  }
+  return {
+    start_date: startDate.value,
+    end_date: endDate.value,
+    start_time: undefined,
+    end_time: undefined
+  }
+}
+
+const selectedRangeDetail = computed(() => {
+  if (activeRangePreset.value !== 'last24Hours') return ''
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
+  return `${formatter.format(new Date(rollingStartTime.value))} – ${formatter.format(new Date(rollingEndTime.value))} · ${timezone}`
+})
 
 const getSingleQueryValue = (value: string | null | Array<string | null> | undefined): string | undefined => {
   if (Array.isArray(value)) return value.find((item): item is string => typeof item === 'string' && item.length > 0)
@@ -231,6 +284,8 @@ const getNumericQueryValue = (value: string | null | Array<string | null> | unde
 const applyRouteQueryFilters = () => {
   const queryStartDate = getSingleQueryValue(route.query.start_date)
   const queryEndDate = getSingleQueryValue(route.query.end_date)
+  const queryStartTime = getSingleQueryValue(route.query.start_time)
+  const queryEndTime = getSingleQueryValue(route.query.end_time)
   const queryUserId = getNumericQueryValue(route.query.user_id)
   const querySessionId = getSingleQueryValue(route.query.session_id)
 
@@ -241,12 +296,19 @@ const applyRouteQueryFilters = () => {
     endDate.value = queryEndDate
   }
 
+  if (queryStartTime && queryEndTime) {
+    rollingStartTime.value = queryStartTime
+    rollingEndTime.value = queryEndTime
+    activeRangePreset.value = 'last24Hours'
+  } else if (queryStartDate || queryEndDate) {
+    activeRangePreset.value = null
+  }
+
   filters.value = {
     ...filters.value,
     user_id: queryUserId,
     session_id: querySessionId,
-    start_date: startDate.value,
-    end_date: endDate.value
+    ...activeRangeParams()
   }
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
 }
@@ -254,10 +316,13 @@ const applyRouteQueryFilters = () => {
 const onDateRangeChange = (range: { startDate: string; endDate: string; preset: string | null }) => {
   startDate.value = range.startDate
   endDate.value = range.endDate
+  activeRangePreset.value = range.preset
+  if (range.preset === 'last24Hours') {
+    refreshRollingRange()
+  }
   filters.value = {
     ...filters.value,
-    start_date: range.startDate,
-    end_date: range.endDate
+    ...activeRangeParams()
   }
   granularity.value = getGranularityForRange(range.startDate, range.endDate)
   applyFilters()
@@ -315,8 +380,10 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
     const requestType = filters.value.request_type
     const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
     const baseParams = {
-      start_date: filters.value.start_date || startDate.value,
-      end_date: filters.value.end_date || endDate.value,
+      start_date: filters.value.start_date,
+      end_date: filters.value.end_date,
+      start_time: filters.value.start_time,
+      end_time: filters.value.end_time,
       user_id: filters.value.user_id,
       model: filters.value.model,
       api_key_id: filters.value.api_key_id,
@@ -364,8 +431,10 @@ const loadChartData = async () => {
     const requestType = filters.value.request_type
     const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
     const snapshot = await adminAPI.dashboard.getSnapshotV2({
-      start_date: filters.value.start_date || startDate.value,
-      end_date: filters.value.end_date || endDate.value,
+      start_date: filters.value.start_date,
+      end_date: filters.value.end_date,
+      start_time: filters.value.start_time,
+      end_time: filters.value.end_time,
       granularity: granularity.value,
       user_id: filters.value.user_id,
       model: filters.value.model,
@@ -396,6 +465,10 @@ const applyFilters = () => {
   loadChartData()
 }
 const refreshData = () => {
+  if (activeRangePreset.value === 'last24Hours') {
+    refreshRollingRange()
+    filters.value = { ...filters.value, ...activeRangeParams() }
+  }
   resetModelStatsCache()
   loadLogs()
   loadStats()
@@ -406,14 +479,22 @@ const resetFilters = () => {
   const range = getLast24HoursRangeDates()
   startDate.value = range.start
   endDate.value = range.end
-  filters.value = { start_date: startDate.value, end_date: endDate.value, session_id: undefined, request_type: undefined, billing_type: null, account_switch: undefined }
+  activeRangePreset.value = 'last24Hours'
+  refreshRollingRange()
+  filters.value = { ...activeRangeParams(), session_id: undefined, request_type: undefined, billing_type: null, account_switch: undefined }
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
   applyFilters()
 }
 const handlePageChange = (p: number) => { pagination.page = p; loadLogs() }
 const handlePageSizeChange = (s: number) => { pagination.page_size = s; pagination.page = 1; loadLogs() }
 const cancelExport = () => exportAbortController?.abort()
-const openCleanupDialog = () => { cleanupDialogVisible.value = true }
+const openCleanupDialog = () => {
+  if (filters.value.start_time || filters.value.end_time) {
+    appStore.showWarning(t('admin.usage.cleanup.calendarRangeRequired'))
+    return
+  }
+  cleanupDialogVisible.value = true
+}
 const getRequestTypeLabel = (log: AdminUsageLog): string => {
   const requestType = resolveUsageRequestType(log)
   if (requestType === 'ws_v2') return t('usage.ws')

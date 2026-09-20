@@ -42,13 +42,6 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-const formatLocalDate = (date: Date): string => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 const createDashboardStats = (): DashboardStats => ({
   total_users: 0,
   today_new_users: 0,
@@ -130,14 +123,19 @@ describe('admin DashboardView', () => {
 
     await flushPromises()
 
-    const now = new Date()
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
-    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({
-      start_date: formatLocalDate(yesterday),
-      end_date: formatLocalDate(now),
-      granularity: 'hour'
+    const params = getSnapshotV2.mock.calls[0][0]
+    expect(params.start_date).toBeUndefined()
+    expect(params.end_date).toBeUndefined()
+    expect(params.granularity).toBe('hour')
+    expect(new Date(params.end_time).getTime() - new Date(params.start_time).getTime()).toBe(24 * 60 * 60 * 1000)
+    expect(getUserUsageTrend).toHaveBeenCalledWith(expect.objectContaining({
+      start_time: params.start_time,
+      end_time: params.end_time
+    }))
+    expect(getUserSpendingRanking).toHaveBeenCalledWith(expect.objectContaining({
+      start_time: params.start_time,
+      end_time: params.end_time
     }))
   })
 })
