@@ -120,7 +120,7 @@ func TestCarpoolMaintenanceRunOnceExpandsToSixteenOnlyOncePerDay(t *testing.T) {
 	require.Equal(t, 1, len(repo.updates))
 }
 
-func TestCarpoolMaintenanceRunOnceRotatesAtAdminLimitAboveSixteen(t *testing.T) {
+func TestCarpoolMaintenanceRunOnceLeavesAdminLimitAboveSixteenAlone(t *testing.T) {
 	account := newAutoCarpoolAccount(2, 20)
 	repo := &carpoolMaintenanceAccountRepoStub{accounts: map[int64]*Account{2: account}}
 	cache := &carpoolMaintenanceCacheStub{results: map[int64]*CarpoolDailyRotationResult{
@@ -137,10 +137,11 @@ func TestCarpoolMaintenanceRunOnceRotatesAtAdminLimitAboveSixteen(t *testing.T) 
 
 	stats, err := svc.runOnce(context.Background(), time.Date(2026, time.September, 19, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
-	require.Equal(t, 1, stats.Rotated)
+	require.Equal(t, 1, stats.FreeCapacity)
+	require.Zero(t, stats.Rotated)
 	require.Equal(t, 20, account.GetClaudeOAuthCarpoolDeviceLimit())
 	require.Equal(t, "2026-09-19", account.GetClaudeOAuthCarpoolLastMaintenanceDay())
-	require.Equal(t, []carpoolMaintenanceRotationCall{{accountID: 2, limit: 20, day: "2026-09-19"}}, cache.calls)
+	require.Empty(t, cache.calls)
 	require.NotContains(t, repo.updates[0].values, carpoolDeviceLimitKey)
 }
 

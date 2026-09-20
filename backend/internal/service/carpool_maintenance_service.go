@@ -25,9 +25,9 @@ const (
 var carpoolMaintenanceCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
 // CarpoolMaintenanceService expands bounded carpool capacity up to 16 and,
-// once the configured limit is at least 16, frees one LRU device whenever the
-// registry is full. The configured limit is never reduced or automatically
-// increased beyond 16.
+// once the configured limit is exactly 16, frees one LRU device whenever the
+// registry is full. A limit above 16 is administrator-controlled and is never
+// changed or rotated by this maintenance job.
 type CarpoolMaintenanceService struct {
 	accountRepo AccountRepository
 	cache       IdentityCache
@@ -161,6 +161,17 @@ func (s *CarpoolMaintenanceService) runOnce(ctx context.Context, now time.Time) 
 				continue
 			}
 			stats.Expanded++
+			continue
+		}
+		if limit > ClaudeOAuthCarpoolAutoExpandLimit {
+			// Administrators who explicitly allow more than 16 devices own that
+			// capacity and device lifecycle. Do not evict or change their slots.
+			if updateErr := s.accountRepo.UpdateExtra(ctx, current.ID, map[string]any{carpoolLastMaintenanceKey: day}); updateErr != nil {
+				stats.Failed++
+				runErr = errors.Join(runErr, fmt.Errorf("account %d record maintenance day: %w", current.ID, updateErr))
+				continue
+			}
+			stats.FreeCapacity++
 			continue
 		}
 

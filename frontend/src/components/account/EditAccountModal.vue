@@ -1116,7 +1116,7 @@
                   <span>
                     <span class="block text-sm font-medium text-gray-900 dark:text-white">Daily automatic expansion and rotation</span>
                     <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-                      At 00:00, increase the limit by one up to 16. At limits of 16 or more, remove one least-recently-seen device when full.
+                      At 00:00, increase the limit by one up to 16. At exactly 16, remove one least-recently-seen device when full. Limits above 16 remain under administrator control.
                     </span>
                   </span>
                 </label>
