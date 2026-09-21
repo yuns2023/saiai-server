@@ -1498,7 +1498,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return
 			}
 			firstMessage = migratedPayload
-			previousResponseID = ""
 			preflightContinuationMigrated = true
 			h.gatewayService.RecordOpenAIAccountSwitch()
 			reqLog.Info("openai.websocket_continuation_account_failover_prepared",
