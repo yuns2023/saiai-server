@@ -1485,6 +1485,10 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	if err != nil {
 		return nil
 	}
+	if !s.isOpenAIAccountCurrentlyInGroup(ctx, accountID, groupID) {
+		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		return nil
+	}
 
 	// 检查账号是否需要清理粘性会话
 	// Check if sticky session should be cleared
@@ -1503,6 +1507,33 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	// Refresh session TTL and return account
 	_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, s.openAIWSSessionStickyTTL())
 	return account
+}
+
+// isOpenAIAccountCurrentlyInGroup performs an authoritative membership check
+// for a sticky hit. Scheduler snapshots are intentionally avoided here: a
+// group removal must revoke a sticky route before its snapshot refreshes.
+func (s *OpenAIGatewayService) isOpenAIAccountCurrentlyInGroup(ctx context.Context, accountID int64, groupID *int64) bool {
+	if s == nil || s.accountRepo == nil || accountID <= 0 {
+		return false
+	}
+	var (
+		accounts []Account
+		err      error
+	)
+	if groupID == nil {
+		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, PlatformOpenAI)
+	} else {
+		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, PlatformOpenAI)
+	}
+	if err != nil {
+		return false
+	}
+	for i := range accounts {
+		if accounts[i].ID == accountID {
+			return true
+		}
+	}
+	return false
 }
 
 // selectBestAccount 从候选账号中选择最佳账号（账号优先级 + 同级随机）。
@@ -1622,32 +1653,41 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 		if accountID > 0 && !isExcluded(accountID) {
 			account, err := s.getSchedulableAccount(ctx, accountID)
 			if err == nil {
-				clearSticky := shouldClearStickySession(account, requestedModel)
-				if clearSticky {
+				if !s.isOpenAIAccountCurrentlyInGroup(ctx, accountID, groupID) {
 					_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+					account = nil
 				}
-				if !clearSticky && account.IsSchedulable() && account.IsOpenAI() {
-					result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
-					if err == nil && result.Acquired {
-						_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, s.openAIWSSessionStickyTTL())
-						return &AccountSelectionResult{
-							Account:     account,
-							Acquired:    true,
-							ReleaseFunc: result.ReleaseFunc,
-						}, nil
+				if account == nil {
+					// The membership check already removed the stale sticky binding.
+					// Continue with the normal group-scoped selection below.
+				} else {
+					clearSticky := shouldClearStickySession(account, requestedModel)
+					if clearSticky {
+						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					}
+					if !clearSticky && account.IsSchedulable() && account.IsOpenAI() {
+						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
+						if err == nil && result.Acquired {
+							_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, s.openAIWSSessionStickyTTL())
+							return &AccountSelectionResult{
+								Account:     account,
+								Acquired:    true,
+								ReleaseFunc: result.ReleaseFunc,
+							}, nil
+						}
 
-					waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
-					if waitingCount < cfg.StickySessionMaxWaiting {
-						return &AccountSelectionResult{
-							Account: account,
-							WaitPlan: &AccountWaitPlan{
-								AccountID:      accountID,
-								MaxConcurrency: account.Concurrency,
-								Timeout:        cfg.StickySessionWaitTimeout,
-								MaxWaiting:     cfg.StickySessionMaxWaiting,
-							},
-						}, nil
+						waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
+						if waitingCount < cfg.StickySessionMaxWaiting {
+							return &AccountSelectionResult{
+								Account: account,
+								WaitPlan: &AccountWaitPlan{
+									AccountID:      accountID,
+									MaxConcurrency: account.Concurrency,
+									Timeout:        cfg.StickySessionWaitTimeout,
+									MaxWaiting:     cfg.StickySessionMaxWaiting,
+								},
+							}, nil
+						}
 					}
 				}
 			}

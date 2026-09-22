@@ -30,6 +30,27 @@ type stubOpenAIAccountRepo struct {
 	accounts []Account
 }
 
+// groupFilteredOpenAIAccountRepo models the repository's authoritative group
+// query; unlike the general stub, it does not return accounts removed from the
+// requested group.
+type groupFilteredOpenAIAccountRepo struct{ stubOpenAIAccountRepo }
+
+func (r groupFilteredOpenAIAccountRepo) ListSchedulableByGroupIDAndPlatform(_ context.Context, groupID int64, platform string) ([]Account, error) {
+	var result []Account
+	for _, account := range r.accounts {
+		if account.Platform != platform || !account.IsSchedulable() {
+			continue
+		}
+		for _, membership := range account.AccountGroups {
+			if membership.GroupID == groupID {
+				result = append(result, account)
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
 type snapshotUpdateAccountRepo struct {
 	stubOpenAIAccountRepo
 	updateExtraCalls chan map[string]any
@@ -438,6 +459,36 @@ func TestOpenAISelectAccountWithLoadAwareness_StickyUnschedulableClearsSession(t
 	if cache.sessionBindings["openai:"+sessionHash] != 2 {
 		t.Fatalf("expected sticky session to bind to account 2")
 	}
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_StickyRemovedFromGroupClearsSession(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(45)
+	sessionHash := "removed-from-group"
+	oldAccount := Account{
+		ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 1,
+		AccountGroups: []AccountGroup{{GroupID: 99}},
+	}
+	currentAccount := Account{
+		ID: 2, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 1,
+		AccountGroups: []AccountGroup{{GroupID: groupID}},
+	}
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:" + sessionHash: oldAccount.ID}}
+	svc := &OpenAIGatewayService{
+		accountRepo:        groupFilteredOpenAIAccountRepo{stubOpenAIAccountRepo{accounts: []Account{oldAccount, currentAccount}}},
+		cache:              cache,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, sessionHash, "gpt-5.1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, currentAccount.ID, selection.Account.ID)
+	require.Equal(t, 1, cache.deletedSessions["openai:"+sessionHash])
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}

@@ -4139,21 +4139,10 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseID(
 	if err != nil || accountID <= 0 {
 		return nil, nil
 	}
-	if useUserScope {
-		accounts, listErr := s.listSchedulableAccounts(ctx, groupID)
-		if listErr != nil {
-			return nil, listErr
-		}
-		availableInGroup := false
-		for i := range accounts {
-			if accounts[i].ID == accountID {
-				availableInGroup = true
-				break
-			}
-		}
-		if !availableInGroup {
-			return nil, nil
-		}
+	if !s.isOpenAIAccountCurrentlyInGroup(ctx, accountID, groupID) {
+		// Retain response ownership for its normal TTL, but never let a
+		// historical binding bypass a later group-membership change.
+		return nil, nil
 	}
 	if excludedIDs != nil {
 		if _, excluded := excludedIDs[accountID]; excluded {
