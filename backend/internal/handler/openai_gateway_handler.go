@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -709,7 +710,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
 			if len(failedAccountIDs) == 0 {
-				h.writeError(c, errEnvelopeNoAvailableAccount, streamStarted)
+				h.writeOpenAISelectionError(c, err, streamStarted)
 				return
 			}
 			if lastFailoverErr != nil {
@@ -886,6 +887,25 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		)
 		return
 	}
+}
+
+func (h *OpenAIGatewayHandler) writeOpenAISelectionError(c *gin.Context, err error, streamStarted bool) {
+	var quotaGuardErr *service.OpenAINewSessionQuotaGuardError
+	if !errors.As(err, &quotaGuardErr) {
+		h.writeError(c, errEnvelopeNoAvailableAccount, streamStarted)
+		return
+	}
+
+	envelope := gatewayErrorEnvelope{
+		Status:  http.StatusServiceUnavailable,
+		Type:    "gateway_error",
+		Code:    "openai_new_session_quota_guard",
+		Message: "OpenAI accounts in this group are temporarily reserved for existing sessions because their 5-hour quota is near its limit. Please retry later.",
+	}
+	if quotaGuardErr.RetryAfter > 0 {
+		envelope.RetryAfter = max(1, int(math.Ceil(quotaGuardErr.RetryAfter.Seconds())))
+	}
+	h.writeError(c, envelope, streamStarted)
 }
 
 func shouldPreserveOpenAIEncodedWireBody(c *gin.Context, account *service.Account) bool {

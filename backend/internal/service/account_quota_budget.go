@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -10,12 +11,46 @@ import (
 
 const newSessionFiveHourUtilizationThreshold = 0.80
 
+// NewSessionQuotaGuardPolicy controls the optional admission guard for new
+// conversations. Existing sticky or pinned conversations are not affected.
+type NewSessionQuotaGuardPolicy struct {
+	Enabled          bool
+	ThresholdPercent float64
+}
+
+// OpenAINewSessionQuotaGuardError distinguishes a deliberate new-session
+// admission hold from a genuinely empty or unhealthy account pool.
+type OpenAINewSessionQuotaGuardError struct {
+	RetryAfter time.Duration
+}
+
+func (e *OpenAINewSessionQuotaGuardError) Error() string {
+	if e == nil || e.RetryAfter <= 0 {
+		return "OpenAI new-session quota guard is active"
+	}
+	return fmt.Sprintf("OpenAI new-session quota guard is active; retry after %s", e.RetryAfter.Round(time.Second))
+}
+
+func defaultNewSessionQuotaGuardPolicy() NewSessionQuotaGuardPolicy {
+	return NewSessionQuotaGuardPolicy{Enabled: true, ThresholdPercent: newSessionFiveHourUtilizationThreshold * 100}
+}
+
 // shouldRejectNewSessionForHighFiveHourUsage reports whether an OAuth-backed
 // account should be reserved for its existing sessions. The gate deliberately
 // ignores 7d usage and does not rank accounts by remaining quota: it only keeps
 // a new session off an account whose current, unexpired 5h window is over 80%.
 // Missing or malformed usage/reset data fails open.
 func shouldRejectNewSessionForHighFiveHourUsage(account *Account, now time.Time) bool {
+	return shouldRejectNewSessionForHighFiveHourUsageWithPolicy(account, now, defaultNewSessionQuotaGuardPolicy())
+}
+
+func shouldRejectNewSessionForHighFiveHourUsageWithPolicy(account *Account, now time.Time, policy NewSessionQuotaGuardPolicy) bool {
+	if !policy.Enabled {
+		return false
+	}
+	if policy.ThresholdPercent < 1 || policy.ThresholdPercent > 100 {
+		policy = defaultNewSessionQuotaGuardPolicy()
+	}
 	if account == nil {
 		return false
 	}
@@ -49,7 +84,18 @@ func shouldRejectNewSessionForHighFiveHourUsage(account *Account, now time.Time)
 		return false
 	}
 
-	return resetAt.After(now) && usedRatio > newSessionFiveHourUtilizationThreshold
+	return resetAt.After(now) && usedRatio > policy.ThresholdPercent/100
+}
+
+func openAINewSessionQuotaGuardRetryAfter(account *Account, now time.Time, policy NewSessionQuotaGuardPolicy) time.Duration {
+	if !shouldRejectNewSessionForHighFiveHourUsageWithPolicy(account, now, policy) {
+		return 0
+	}
+	resetAt, ok := openAIFiveHourResetAt(account.Extra)
+	if !ok {
+		return 0
+	}
+	return resetAt.Sub(now)
 }
 
 func validUtilization(extra map[string]any, key string, max float64) (float64, bool) {

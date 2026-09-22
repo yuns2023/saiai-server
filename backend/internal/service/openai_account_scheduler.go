@@ -607,6 +607,20 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	})
 
 	candidateCount := len(filtered)
+	policy := s.service.newSessionQuotaGuardPolicy()
+	allQuotaGuarded := true
+	var earliestRetryAfter time.Duration
+	for _, account := range filtered {
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, account, req.RequestedModel)
+		if fresh == nil || !s.service.shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
+			allQuotaGuarded = false
+			break
+		}
+		if retryAfter := openAINewSessionQuotaGuardRetryAfter(fresh, time.Now(), policy); retryAfter > 0 &&
+			(earliestRetryAfter == 0 || retryAfter < earliestRetryAfter) {
+			earliestRetryAfter = retryAfter
+		}
+	}
 	lastTopK := 0
 	lastLoadSkew := 0.0
 	for start := 0; start < len(filtered); {
@@ -630,6 +644,9 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		start = end
 	}
 
+	if allQuotaGuarded {
+		return nil, candidateCount, lastTopK, lastLoadSkew, &OpenAINewSessionQuotaGuardError{RetryAfter: earliestRetryAfter}
+	}
 	return nil, candidateCount, lastTopK, lastLoadSkew, ErrNoAvailableAccounts
 }
 
@@ -667,7 +684,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 		if account == nil {
 			continue
 		}
-		if shouldRejectNewSessionForHighFiveHourUsage(account, now) {
+		if s.service.shouldRejectNewSessionForHighFiveHourUsage(account, now) {
 			continue
 		}
 		loadInfo := loadMap[account.ID]
@@ -743,7 +760,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 		candidate := selectionOrder[i]
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel)
 		if fresh == nil ||
-			shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) ||
+			s.service.shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) ||
 			!s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			continue
 		}
@@ -773,7 +790,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 	for _, candidate := range selectionOrder {
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel)
 		if fresh == nil ||
-			shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) ||
+			s.service.shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) ||
 			!s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			continue
 		}

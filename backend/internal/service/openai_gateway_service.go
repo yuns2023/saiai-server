@@ -1526,7 +1526,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, accounts [
 		}
 
 		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel)
-		if fresh == nil || shouldRejectNewSessionForHighFiveHourUsage(fresh, now) {
+		if fresh == nil || s.shouldRejectNewSessionForHighFiveHourUsage(fresh, now) {
 			continue
 		}
 
@@ -1688,7 +1688,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 		shuffleOpenAIAccountsWithinPriority(ordered)
 		for _, acc := range ordered {
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel)
-			if fresh == nil || shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
+			if fresh == nil || s.shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
 				continue
 			}
 			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
@@ -1735,7 +1735,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 
 			for _, item := range available {
 				fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, requestedModel)
-				if fresh == nil || shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
+				if fresh == nil || s.shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
 					continue
 				}
 				result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
@@ -1783,7 +1783,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 	}
 	for _, acc := range fallbackCandidates {
 		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel)
-		if fresh == nil || shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
+		if fresh == nil || s.shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
 			continue
 		}
 		return &AccountSelectionResult{
@@ -1869,12 +1869,31 @@ func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig
 		return s.cfg.Gateway.Scheduling
 	}
 	return config.GatewaySchedulingConfig{
-		StickySessionMaxWaiting:  3,
-		StickySessionWaitTimeout: 45 * time.Second,
-		FallbackWaitTimeout:      30 * time.Second,
-		FallbackMaxWaiting:       100,
-		LoadBatchEnabled:         true,
-		SlotCleanupInterval:      30 * time.Second,
+		OpenAINewSessionQuotaGuardEnabled:          true,
+		OpenAINewSessionQuotaGuardThresholdPercent: 80,
+		StickySessionMaxWaiting:                    3,
+		StickySessionWaitTimeout:                   45 * time.Second,
+		FallbackWaitTimeout:                        30 * time.Second,
+		FallbackMaxWaiting:                         100,
+		LoadBatchEnabled:                           true,
+		SlotCleanupInterval:                        30 * time.Second,
+	}
+}
+
+func (s *OpenAIGatewayService) shouldRejectNewSessionForHighFiveHourUsage(account *Account, now time.Time) bool {
+	return shouldRejectNewSessionForHighFiveHourUsageWithPolicy(account, now, s.newSessionQuotaGuardPolicy())
+}
+
+func (s *OpenAIGatewayService) newSessionQuotaGuardPolicy() NewSessionQuotaGuardPolicy {
+	cfg := s.schedulingConfig()
+	if cfg.OpenAINewSessionQuotaGuardThresholdPercent < 1 || cfg.OpenAINewSessionQuotaGuardThresholdPercent > 100 {
+		// Keep the historical safe default for tests and embedding callers that
+		// construct Config directly instead of going through config.Load.
+		return defaultNewSessionQuotaGuardPolicy()
+	}
+	return NewSessionQuotaGuardPolicy{
+		Enabled:          cfg.OpenAINewSessionQuotaGuardEnabled,
+		ThresholdPercent: cfg.OpenAINewSessionQuotaGuardThresholdPercent,
 	}
 }
 

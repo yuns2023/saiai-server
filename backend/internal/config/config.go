@@ -724,6 +724,12 @@ type TLSProfileConfig struct {
 
 // GatewaySchedulingConfig accounts scheduling configuration.
 type GatewaySchedulingConfig struct {
+	// OpenAINewSessionQuotaGuard reserves an OpenAI OAuth account for existing
+	// conversations once its active five-hour window is nearly consumed.
+	// It is deliberately separate from provider 429 rate limiting.
+	OpenAINewSessionQuotaGuardEnabled          bool    `mapstructure:"openai_new_session_quota_guard_enabled"`
+	OpenAINewSessionQuotaGuardThresholdPercent float64 `mapstructure:"openai_new_session_quota_guard_threshold_percent"`
+
 	// 粘性会话排队配置
 	StickySessionMaxWaiting  int           `mapstructure:"sticky_session_max_waiting"`
 	StickySessionWaitTimeout time.Duration `mapstructure:"sticky_session_wait_timeout"`
@@ -1317,6 +1323,11 @@ func setDefaults() {
 	// RateLimit
 	viper.SetDefault("rate_limit.overload_cooldown_minutes", 10)
 	viper.SetDefault("rate_limit.oauth_401_cooldown_minutes", 10)
+
+	// Gateway scheduling. Keep the established admission protection enabled
+	// unless an operator explicitly turns it off.
+	viper.SetDefault("gateway.scheduling.openai_new_session_quota_guard_enabled", true)
+	viper.SetDefault("gateway.scheduling.openai_new_session_quota_guard_threshold_percent", 80.0)
 
 	// Pricing - 运行时远端源与镜像内 fallback 文件必须保持同源。
 	// 当前默认使用 LiteLLM 主分支价格表；仓库内 fallback 快照由 GitHub Actions 定时同步。
@@ -2173,6 +2184,10 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.Scheduling.StickySessionMaxWaiting <= 0 {
 		return fmt.Errorf("gateway.scheduling.sticky_session_max_waiting must be positive")
+	}
+	if c.Gateway.Scheduling.OpenAINewSessionQuotaGuardThresholdPercent < 1 ||
+		c.Gateway.Scheduling.OpenAINewSessionQuotaGuardThresholdPercent > 100 {
+		return fmt.Errorf("gateway.scheduling.openai_new_session_quota_guard_threshold_percent must be between 1-100")
 	}
 	if c.Gateway.Scheduling.StickySessionWaitTimeout <= 0 {
 		return fmt.Errorf("gateway.scheduling.sticky_session_wait_timeout must be positive")

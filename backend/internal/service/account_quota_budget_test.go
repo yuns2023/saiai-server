@@ -213,3 +213,19 @@ func TestShouldRejectNewSessionForHighFiveHourUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldRejectNewSessionForHighFiveHourUsageWithPolicy(t *testing.T) {
+	now := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"codex_5h_used_percent": 94.0,
+			"codex_5h_reset_at":     now.Add(time.Hour).Format(time.RFC3339),
+		},
+	}
+	require.True(t, shouldRejectNewSessionForHighFiveHourUsageWithPolicy(account, now, NewSessionQuotaGuardPolicy{Enabled: true, ThresholdPercent: 80}))
+	require.False(t, shouldRejectNewSessionForHighFiveHourUsageWithPolicy(account, now, NewSessionQuotaGuardPolicy{Enabled: false, ThresholdPercent: 80}))
+	require.False(t, shouldRejectNewSessionForHighFiveHourUsageWithPolicy(account, now, NewSessionQuotaGuardPolicy{Enabled: true, ThresholdPercent: 95}))
+	require.Equal(t, time.Hour, openAINewSessionQuotaGuardRetryAfter(account, now, NewSessionQuotaGuardPolicy{Enabled: true, ThresholdPercent: 80}))
+}

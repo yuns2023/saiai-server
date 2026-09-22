@@ -74,6 +74,12 @@ func TestLoadDefaultSchedulingConfig(t *testing.T) {
 	if cfg.Gateway.Scheduling.SlotCleanupInterval != 30*time.Second {
 		t.Fatalf("SlotCleanupInterval = %v, want 30s", cfg.Gateway.Scheduling.SlotCleanupInterval)
 	}
+	if !cfg.Gateway.Scheduling.OpenAINewSessionQuotaGuardEnabled {
+		t.Fatal("OpenAINewSessionQuotaGuardEnabled = false, want true")
+	}
+	if cfg.Gateway.Scheduling.OpenAINewSessionQuotaGuardThresholdPercent != 80 {
+		t.Fatalf("OpenAINewSessionQuotaGuardThresholdPercent = %v, want 80", cfg.Gateway.Scheduling.OpenAINewSessionQuotaGuardThresholdPercent)
+	}
 }
 
 func TestLoadStandardUpstreamConnectionDefaultsAndRollback(t *testing.T) {
@@ -263,6 +269,8 @@ func TestLoadIdempotencyConfigFromEnv(t *testing.T) {
 func TestLoadSchedulingConfigFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_SCHEDULING_STICKY_SESSION_MAX_WAITING", "5")
+	t.Setenv("GATEWAY_SCHEDULING_OPENAI_NEW_SESSION_QUOTA_GUARD_ENABLED", "false")
+	t.Setenv("GATEWAY_SCHEDULING_OPENAI_NEW_SESSION_QUOTA_GUARD_THRESHOLD_PERCENT", "95")
 
 	cfg, err := Load()
 	if err != nil {
@@ -271,6 +279,12 @@ func TestLoadSchedulingConfigFromEnv(t *testing.T) {
 
 	if cfg.Gateway.Scheduling.StickySessionMaxWaiting != 5 {
 		t.Fatalf("StickySessionMaxWaiting = %d, want 5", cfg.Gateway.Scheduling.StickySessionMaxWaiting)
+	}
+	if cfg.Gateway.Scheduling.OpenAINewSessionQuotaGuardEnabled {
+		t.Fatal("OpenAINewSessionQuotaGuardEnabled = true, want false")
+	}
+	if cfg.Gateway.Scheduling.OpenAINewSessionQuotaGuardThresholdPercent != 95 {
+		t.Fatalf("OpenAINewSessionQuotaGuardThresholdPercent = %v, want 95", cfg.Gateway.Scheduling.OpenAINewSessionQuotaGuardThresholdPercent)
 	}
 }
 

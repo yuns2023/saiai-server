@@ -359,6 +359,13 @@ gateway:
   # Scheduling configuration
   # 调度配置
   scheduling:
+    # Reserve near-exhausted OpenAI OAuth accounts for existing conversations.
+    # Disabling this admits new sessions regardless of the upstream 5h usage.
+    # 为已有会话保留接近耗尽的 OpenAI OAuth 账号；关闭后不再按上游 5 小时用量拒绝新会话。
+    openai_new_session_quota_guard_enabled: true
+    # Block new sessions only above this upstream 5h utilization percentage (1-100).
+    # 仅当上游 5 小时用量超过此百分比时阻止新会话（1-100）。
+    openai_new_session_quota_guard_threshold_percent: 80
     # Sticky session max waiting queue size
     # 粘性会话最大排队长度
     sticky_session_max_waiting: 3

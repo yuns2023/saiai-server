@@ -3557,7 +3557,7 @@ func (s *GatewayService) resolveFreshAccountForSessionAdmission(ctx context.Cont
 	if !s.isAccountSchedulableForSelection(fresh) {
 		return nil
 	}
-	if !existingBinding && shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
+	if !existingBinding && s.shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
 		return nil
 	}
 	return fresh
@@ -4502,10 +4502,21 @@ func (s *GatewayService) diagnoseSelectionFailure(
 	if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 		return selectionFailureDiagnosis{Category: "rpm_limited"}
 	}
-	if shouldRejectNewSessionForHighFiveHourUsage(acc, time.Now()) {
+	if s.shouldRejectNewSessionForHighFiveHourUsage(acc, time.Now()) {
 		return selectionFailureDiagnosis{Category: "five_hour_new_session_limited"}
 	}
 	return selectionFailureDiagnosis{Category: "eligible"}
+}
+
+func (s *GatewayService) shouldRejectNewSessionForHighFiveHourUsage(account *Account, now time.Time) bool {
+	policy := defaultNewSessionQuotaGuardPolicy()
+	if s != nil && s.cfg != nil &&
+		s.cfg.Gateway.Scheduling.OpenAINewSessionQuotaGuardThresholdPercent >= 1 &&
+		s.cfg.Gateway.Scheduling.OpenAINewSessionQuotaGuardThresholdPercent <= 100 {
+		policy.Enabled = s.cfg.Gateway.Scheduling.OpenAINewSessionQuotaGuardEnabled
+		policy.ThresholdPercent = s.cfg.Gateway.Scheduling.OpenAINewSessionQuotaGuardThresholdPercent
+	}
+	return shouldRejectNewSessionForHighFiveHourUsageWithPolicy(account, now, policy)
 }
 
 func (s *GatewayService) logSoraSelectionFailureDetails(
