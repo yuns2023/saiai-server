@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/tidwall/gjson"
 )
 
 // RateLimitService 处理限流和过载状态管理
@@ -172,6 +173,20 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 func (s *RateLimitService) HandleUpstreamErrorForModel(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel string) (shouldDisable bool) {
 	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled()
 
+	// Anthropic reports a permanently banned account as a 400 authentication
+	// error. This is account state, rather than a malformed customer request,
+	// and must take precedence over pool/custom-code policy so that the account
+	// is removed from scheduling immediately.
+	if isAnthropicAccountBannedError(account, statusCode, responseBody) {
+		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
+		msg := "Anthropic account banned (400)"
+		if upstreamMsg != "" {
+			msg += ": " + truncateForLog([]byte(upstreamMsg), 512)
+		}
+		s.handleAuthError(ctx, account, msg)
+		return true
+	}
+
 	// A revoked upstream device authorization is account state, not a malformed
 	// customer request. Handle it before pool/custom-code policy so the broken
 	// account cannot remain schedulable and repeatedly expose the same failure.
@@ -303,6 +318,19 @@ func (s *RateLimitService) HandleUpstreamErrorForModel(ctx context.Context, acco
 	}
 
 	return shouldDisable
+}
+
+// isAnthropicAccountBannedError recognizes only Anthropic's structured,
+// permanent account-ban response. Do not broaden this to arbitrary 400s: many
+// valid customer-request failures are also returned as 400.
+func isAnthropicAccountBannedError(account *Account, statusCode int, responseBody []byte) bool {
+	if account == nil || account.Platform != PlatformAnthropic || statusCode != http.StatusBadRequest {
+		return false
+	}
+
+	errorType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "error.type").String()))
+	errorCode := strings.ToLower(strings.TrimSpace(extractUpstreamErrorCode(responseBody)))
+	return errorType == "authentication_error" && errorCode == "account_banned"
 }
 
 // PreCheckUsage proactively checks local quota before dispatching a request.

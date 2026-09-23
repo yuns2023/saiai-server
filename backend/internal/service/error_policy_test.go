@@ -264,6 +264,74 @@ func TestHandleUpstreamError_PoolModeCustomErrorCodesOverride(t *testing.T) {
 	})
 }
 
+func TestRateLimitService_AnthropicAccountBannedDisablesAccount(t *testing.T) {
+	tests := []struct {
+		name          string
+		account       *Account
+		statusCode    int
+		body          []byte
+		shouldDisable bool
+		setErrorCalls int
+	}{
+		{
+			name: "structured_ban_disables_even_in_pool_mode_with_custom_policy",
+			account: &Account{
+				ID:       71,
+				Type:     AccountTypeOAuth,
+				Platform: PlatformAnthropic,
+				Credentials: map[string]any{
+					"pool_mode":                  true,
+					"custom_error_codes_enabled": true,
+					"custom_error_codes":         []any{float64(http.StatusUnauthorized)},
+				},
+			},
+			statusCode:    http.StatusBadRequest,
+			body:          []byte(`{"type":"error","error":{"type":"authentication_error","code":"account_banned","message":"account is no longer available"}}`),
+			shouldDisable: true,
+			setErrorCalls: 1,
+		},
+		{
+			name: "same_code_with_non_authentication_type_does_not_disable",
+			account: &Account{
+				ID:       72,
+				Type:     AccountTypeOAuth,
+				Platform: PlatformAnthropic,
+			},
+			statusCode:    http.StatusBadRequest,
+			body:          []byte(`{"type":"error","error":{"type":"invalid_request_error","code":"account_banned"}}`),
+			shouldDisable: false,
+			setErrorCalls: 0,
+		},
+		{
+			name: "authentication_error_with_another_code_does_not_disable",
+			account: &Account{
+				ID:       73,
+				Type:     AccountTypeOAuth,
+				Platform: PlatformAnthropic,
+			},
+			statusCode:    http.StatusBadRequest,
+			body:          []byte(`{"type":"error","error":{"type":"authentication_error","code":"invalid_api_key"}}`),
+			shouldDisable: false,
+			setErrorCalls: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &errorPolicyRepoStub{}
+			svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+			shouldDisable := svc.HandleUpstreamError(context.Background(), tt.account, tt.statusCode, http.Header{}, tt.body)
+
+			require.Equal(t, tt.shouldDisable, shouldDisable)
+			require.Equal(t, tt.setErrorCalls, repo.setErrCalls)
+			if tt.setErrorCalls > 0 {
+				require.Contains(t, repo.lastErrorMsg, "Anthropic account banned (400)")
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // TestApplyErrorPolicy — 4 table-driven cases for the wrapper method
 // ---------------------------------------------------------------------------
