@@ -132,6 +132,31 @@ func TestAdminUsageListInvalidExactTotal(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestAdminUsageListTotalCostThreshold(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage?total_cost_gt=2.50", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.listFilters.TotalCostGT)
+	require.Equal(t, 2.5, *repo.listFilters.TotalCostGT)
+}
+
+func TestAdminUsageListRejectsInvalidTotalCostThreshold(t *testing.T) {
+	for _, value := range []string{"0", "-1", "NaN", "+Inf", "1000001", "wrong"} {
+		t.Run(value, func(t *testing.T) {
+			router := newAdminUsageRequestTypeTestRouter(&adminUsageRepoCapture{})
+			req := httptest.NewRequest(http.MethodGet, "/admin/usage?total_cost_gt="+value, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+		})
+	}
+}
+
 func TestAdminUsageStatsRequestTypePriority(t *testing.T) {
 	repo := &adminUsageRepoCapture{}
 	router := newAdminUsageRequestTypeTestRouter(repo)

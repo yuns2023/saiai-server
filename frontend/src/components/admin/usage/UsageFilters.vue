@@ -161,6 +161,33 @@
           <Select v-model="filters.group_id" :options="groupOptions" searchable @change="emitChange" />
         </div>
 
+        <div class="w-full sm:w-auto">
+          <label class="input-label" for="usage-total-cost-threshold">{{ t('admin.usage.highCostThreshold') }}</label>
+          <div class="flex items-center gap-2">
+            <label class="flex cursor-pointer items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                :checked="filters.total_cost_gt !== undefined"
+                :aria-label="t('admin.usage.highCostOnly')"
+                @change="toggleHighCost"
+              />
+              {{ t('admin.usage.highCostOnly') }}
+            </label>
+            <span class="text-sm">&gt; $</span>
+            <input
+              id="usage-total-cost-threshold"
+              v-model.number="highCostThreshold"
+              type="number"
+              min="0.01"
+              max="1000000"
+              step="0.01"
+              class="input w-24"
+              @change="updateHighCostThreshold"
+            />
+          </div>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.usage.highCostScope') }}</p>
+        </div>
+
         <!-- Session account-switch filter -->
         <div v-if="showSessionDiagnostics" class="w-full sm:w-auto sm:min-w-[190px]">
           <label class="input-label">{{ t('admin.usage.sessionDiagnostics') }}</label>
@@ -271,6 +298,28 @@ const billingTypeOptions = ref<SelectOption[]>([
   { value: 0, label: t('admin.usage.billingTypeBalance') },
   { value: 1, label: t('admin.usage.billingTypeSubscription') }
 ])
+
+const highCostThreshold = ref<number>(2)
+const normalizedHighCostThreshold = () => {
+  const value = Number(highCostThreshold.value)
+  if (!Number.isFinite(value) || value <= 0 || value > 1_000_000) {
+    highCostThreshold.value = 2
+  }
+  return highCostThreshold.value
+}
+const toggleHighCost = () => {
+  filters.value.total_cost_gt = filters.value.total_cost_gt === undefined
+    ? normalizedHighCostThreshold()
+    : undefined
+  emitChange()
+}
+const updateHighCostThreshold = () => {
+  const value = normalizedHighCostThreshold()
+  if (filters.value.total_cost_gt !== undefined) {
+    filters.value.total_cost_gt = value
+    emitChange()
+  }
+}
 
 const emitChange = () => emit('change')
 

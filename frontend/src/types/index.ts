@@ -1536,6 +1536,7 @@ export interface UsageQueryParams {
   request_type?: UsageRequestType
   stream?: boolean
   billing_type?: number | null
+  total_cost_gt?: number
   start_date?: string
   end_date?: string
   start_time?: string

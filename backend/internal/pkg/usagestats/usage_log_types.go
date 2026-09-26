@@ -239,6 +239,7 @@ type UsageLogFilters struct {
 	RequestType *int16
 	Stream      *bool
 	BillingType *int8
+	TotalCostGT *float64 // Filter individual requests by original cost, before discounts.
 	StartTime   *time.Time
 	EndTime     *time.Time
 	// AccountSwitch restricts results to sessions that used more than one account

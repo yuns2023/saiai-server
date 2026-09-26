@@ -1,5 +1,14 @@
 # User API Key usage analytics
 
+## Admin high-cost request filter
+
+`GET /api/v1/admin/usage` accepts optional `total_cost_gt`, a positive USD
+amount up to 1,000,000. It returns individual usage records whose original
+`total_cost` is strictly greater than that amount, before group multipliers or
+user discounts. The admin UI starts with a $2 threshold that can be changed
+or turned off. The filter applies to the record list and its CSV export;
+summary cards and charts continue to cover the selected time range.
+
 The user dashboard treats an API Key as a general reporting dimension. It does
 not create or expose employee, member, or cost-center entities. A customer can
 choose any naming convention for Key names.

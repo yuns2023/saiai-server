@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -55,6 +56,18 @@ func parseOptionalBoolQuery(c *gin.Context, name string) (bool, error) {
 	return value, nil
 }
 
+func parsePositiveCostQuery(c *gin.Context, name string) (*float64, error) {
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > 1_000_000 {
+		return nil, fmt.Errorf("invalid %s value, use a positive amount up to 1000000", name)
+	}
+	return &value, nil
+}
+
 // CreateUsageCleanupTaskRequest represents cleanup task creation request
 type CreateUsageCleanupTaskRequest struct {
 	StartDate   string  `json:"start_date"`
@@ -74,6 +87,11 @@ type CreateUsageCleanupTaskRequest struct {
 // GET /api/v1/admin/usage
 func (h *UsageHandler) List(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
+	totalCostGT, costErr := parsePositiveCostQuery(c, "total_cost_gt")
+	if costErr != nil {
+		response.BadRequest(c, costErr.Error())
+		return
+	}
 	exactTotal := false
 	if exactTotalRaw := strings.TrimSpace(c.Query("exact_total")); exactTotalRaw != "" {
 		parsed, err := strconv.ParseBool(exactTotalRaw)
@@ -208,6 +226,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		RequestType:   requestType,
 		Stream:        stream,
 		BillingType:   billingType,
+		TotalCostGT:   totalCostGT,
 		StartTime:     startTime,
 		EndTime:       endTime,
 		AccountSwitch: accountSwitch,

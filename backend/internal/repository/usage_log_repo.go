@@ -2789,6 +2789,10 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 		conditions = append(conditions, fmt.Sprintf("billing_type = $%d", len(args)+1))
 		args = append(args, int16(*filters.BillingType))
 	}
+	if filters.TotalCostGT != nil {
+		conditions = append(conditions, fmt.Sprintf("total_cost > $%d", len(args)+1))
+		args = append(args, *filters.TotalCostGT)
+	}
 	if filters.StartTime != nil {
 		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", len(args)+1))
 		args = append(args, *filters.StartTime)

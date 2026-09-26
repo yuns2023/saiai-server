@@ -500,7 +500,7 @@ const resetFilters = () => {
   endDate.value = range.end
   activeRangePreset.value = 'last24Hours'
   refreshRollingRange()
-  filters.value = { ...activeRangeParams(), session_id: undefined, request_type: undefined, billing_type: null, account_switch: undefined }
+  filters.value = { ...activeRangeParams(), session_id: undefined, request_type: undefined, billing_type: null, account_switch: undefined, total_cost_gt: undefined }
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
   applyFilters()
 }

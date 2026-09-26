@@ -25,6 +25,33 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('UsageFilters', () => {
+  it('uses a configurable $2 default for high-cost request records', async () => {
+    listGroups.mockResolvedValue({ items: [] })
+    getModelStats.mockResolvedValue({ models: [] })
+    const modelValue: Record<string, unknown> = {}
+    const wrapper = mount(UsageFilters, {
+      props: {
+        modelValue,
+        exporting: false,
+        startDate: '2026-09-18',
+        endDate: '2026-09-19',
+        showActions: false,
+      },
+      global: { stubs: { Select: true } },
+    })
+    await flushPromises()
+
+    const enabled = wrapper.get('input[type="checkbox"][aria-label="admin.usage.highCostOnly"]')
+    const amount = wrapper.get('#usage-total-cost-threshold')
+    expect((amount.element as HTMLInputElement).value).toBe('2')
+    await enabled.setValue(true)
+    expect(modelValue.total_cost_gt).toBe(2)
+    await amount.setValue('3.5')
+    expect(modelValue.total_cost_gt).toBe(3.5)
+    await enabled.setValue(false)
+    expect(modelValue.total_cost_gt).toBeUndefined()
+  })
+
   it('keeps precise timestamps exclusive from legacy calendar dates', async () => {
     listGroups.mockResolvedValue({ items: [] })
     getModelStats.mockResolvedValue({ models: [] })
