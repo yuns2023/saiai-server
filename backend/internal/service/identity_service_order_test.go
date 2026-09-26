@@ -13,21 +13,23 @@ import (
 )
 
 type identityCacheStub struct {
-	mu                  sync.Mutex
-	accountFingerprints map[int64]*Fingerprint
-	maskedSessionID     string
-	slotMaskedSessions  map[string]string
-	slotFingerprints    map[string]*Fingerprint
-	carpoolDevices      map[string]*CarpoolDeviceRecord
-	carpoolOverflow     map[string]*CarpoolOverflowRecord
-	carpoolMaintenance  map[int64]string
-	sharedBucketStates  map[string]*SharedBucketState
-	sharedBucketBinds   map[string]int
-	sharedBucketCount   map[int64]int
-	singleDeviceSlots   map[string]int
-	singleDeviceStates  map[string]*SingleDeviceSlotState
-	pinnedDeviceBinds   map[string]map[int64]*PinnedDeviceBinding
-	pinnedAccountBinds  map[string]*PinnedAccountBinding
+	mu                        sync.Mutex
+	accountFingerprints       map[int64]*Fingerprint
+	maskedSessionID           string
+	slotMaskedSessions        map[string]string
+	slotFingerprints          map[string]*Fingerprint
+	carpoolDevices            map[string]*CarpoolDeviceRecord
+	carpoolOverflow           map[string]*CarpoolOverflowRecord
+	carpoolMaintenance        map[int64]string
+	singleDeviceAdmissions    map[string]*CarpoolDeviceRecord
+	singleDeviceAdmissionDays map[int64]string
+	sharedBucketStates        map[string]*SharedBucketState
+	sharedBucketBinds         map[string]int
+	sharedBucketCount         map[int64]int
+	singleDeviceSlots         map[string]int
+	singleDeviceStates        map[string]*SingleDeviceSlotState
+	pinnedDeviceBinds         map[string]map[int64]*PinnedDeviceBinding
+	pinnedAccountBinds        map[string]*PinnedAccountBinding
 }
 
 func (s *identityCacheStub) GetFingerprint(_ context.Context, accountID int64) (*Fingerprint, error) {
@@ -145,6 +147,71 @@ func (s *identityCacheStub) GetOrCreateCarpoolDevice(_ context.Context, accountI
 	cp := *overflow
 	s.carpoolOverflow[cacheKey] = &cp
 	return nil, ErrClaudeOAuthCarpoolDevicesFull
+}
+
+func (s *identityCacheStub) GetOrCreateSingleDeviceAdmission(_ context.Context, accountID int64, originalDeviceID string, _ ClientHints, limit int, nowUnix int64) (*CarpoolDeviceRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.singleDeviceAdmissions == nil {
+		s.singleDeviceAdmissions = map[string]*CarpoolDeviceRecord{}
+	}
+	key := carpoolDeviceCacheKey(accountID, originalDeviceID)
+	if record := s.singleDeviceAdmissions[key]; record != nil {
+		record.LastSeenAt = nowUnix
+		return record, nil
+	}
+	count := 0
+	for _, record := range s.singleDeviceAdmissions {
+		if record != nil && record.OriginalDeviceID != "" {
+			count++
+		}
+	}
+	if count >= limit {
+		return nil, ErrClaudeOAuthSingleDeviceAdmissionFull
+	}
+	record := &CarpoolDeviceRecord{OriginalDeviceID: originalDeviceID, CreatedAt: nowUnix, LastSeenAt: nowUnix}
+	s.singleDeviceAdmissions[key] = record
+	return record, nil
+}
+
+func (s *identityCacheStub) RotateSingleDeviceAdmissionForDay(_ context.Context, accountID int64, limit int, day string) (*CarpoolDailyRotationResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.singleDeviceAdmissionDays == nil {
+		s.singleDeviceAdmissionDays = map[int64]string{}
+	}
+	if s.singleDeviceAdmissionDays[accountID] == day {
+		return &CarpoolDailyRotationResult{}, nil
+	}
+	s.singleDeviceAdmissionDays[accountID] = day
+	return &CarpoolDailyRotationResult{Applied: true}, nil
+}
+
+func (s *identityCacheStub) ListSingleDeviceAdmission(_ context.Context, accountID int64) ([]*CarpoolDeviceRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := []*CarpoolDeviceRecord{}
+	for key, record := range s.singleDeviceAdmissions {
+		if strings.HasPrefix(key, fmt.Sprintf("%d:", accountID)) {
+			items = append(items, record)
+		}
+	}
+	return items, nil
+}
+
+func (s *identityCacheStub) ListSingleDeviceAdmissionOverflow(_ context.Context, _ int64) ([]*CarpoolOverflowRecord, error) {
+	return nil, nil
+}
+
+func (s *identityCacheStub) DeleteSingleDeviceAdmission(_ context.Context, accountID int64, deviceKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, record := range s.singleDeviceAdmissions {
+		if strings.HasPrefix(key, fmt.Sprintf("%d:", accountID)) && record.DeviceKey == deviceKey {
+			delete(s.singleDeviceAdmissions, key)
+		}
+	}
+	return nil
 }
 func (s *identityCacheStub) ListCarpoolDevices(_ context.Context, _ int64) ([]*CarpoolDeviceRecord, error) {
 	s.mu.Lock()
@@ -505,6 +572,24 @@ func pinnedDeviceCacheKey(groupID int64, originalDeviceID string) string {
 
 func pinnedAccountCacheKey(groupID, accountID int64) string {
 	return fmt.Sprintf("%d:%d", groupID, accountID)
+}
+
+func TestSingleDeviceAdmissionCountsOriginalDeviceNotUASlot(t *testing.T) {
+	cache := &identityCacheStub{}
+	svc := NewIdentityService(cache, strings.Repeat("x", 32))
+	account := &Account{ID: 41, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{
+		"claude_oauth_mode":                            ClaudeOAuthModeSingleDevice,
+		"claude_oauth_fixed_device_id":                 "one-fixed-upstream-device",
+		"claude_oauth_single_device_admission_enabled": true,
+		"claude_oauth_single_device_admission_limit":   1,
+	}}
+	cli := http.Header{"User-Agent": {"claude-cli/2.1.180 (external, cli)"}}
+	vscode := http.Header{"User-Agent": {"claude-cli/2.1.180 (external, claude-vscode)"}}
+	first := FormatMetadataUserID("incoming-a", "", "session-a", "2.1.180")
+	second := FormatMetadataUserID("incoming-b", "", "session-b", "2.1.180")
+	require.NoError(t, svc.EnsureSingleDeviceAdmissionAllowed(context.Background(), account, first, cli))
+	require.NoError(t, svc.EnsureSingleDeviceAdmissionAllowed(context.Background(), account, first, vscode))
+	require.ErrorIs(t, svc.EnsureSingleDeviceAdmissionAllowed(context.Background(), account, second, cli), ErrClaudeOAuthSingleDeviceAdmissionFull)
 }
 
 func TestIdentityService_RewriteUserID_PreservesTopLevelFieldOrder(t *testing.T) {

@@ -50,6 +50,7 @@ const claudeOAuthPinnedDeviceIDContext = "claude-oauth-device-id:v1-pinned"
 const slotTransportAccountStride = int64(16)
 
 var ErrClaudeOAuthCarpoolDevicesFull = errors.New("claude oauth carpool devices full")
+var ErrClaudeOAuthSingleDeviceAdmissionFull = errors.New("claude oauth single_device incoming devices full")
 var ErrClaudeOAuthPinnedDevicesFull = errors.New("claude oauth pinned devices full")
 
 // Fingerprint represents account fingerprint data
@@ -225,6 +226,11 @@ type IdentityCache interface {
 	GetSlotFingerprint(ctx context.Context, accountID int64, slot int) (*Fingerprint, error)
 	SetSlotFingerprint(ctx context.Context, accountID int64, slot int, fp *Fingerprint) error
 	GetOrCreateCarpoolDevice(ctx context.Context, accountID int64, originalDeviceID string, hints ClientHints, limit int, nowUnix int64) (*CarpoolDeviceRecord, error)
+	GetOrCreateSingleDeviceAdmission(ctx context.Context, accountID int64, originalDeviceID string, hints ClientHints, limit int, nowUnix int64) (*CarpoolDeviceRecord, error)
+	RotateSingleDeviceAdmissionForDay(ctx context.Context, accountID int64, limit int, day string) (*CarpoolDailyRotationResult, error)
+	ListSingleDeviceAdmission(ctx context.Context, accountID int64) ([]*CarpoolDeviceRecord, error)
+	ListSingleDeviceAdmissionOverflow(ctx context.Context, accountID int64) ([]*CarpoolOverflowRecord, error)
+	DeleteSingleDeviceAdmission(ctx context.Context, accountID int64, deviceKey string) error
 	ListCarpoolDevices(ctx context.Context, accountID int64) ([]*CarpoolDeviceRecord, error)
 	ListCarpoolOverflowDevices(ctx context.Context, accountID int64) ([]*CarpoolOverflowRecord, error)
 	DeleteCarpoolDevice(ctx context.Context, accountID int64, deviceKey string) error
@@ -739,6 +745,18 @@ func (s *IdentityService) EnsureCarpoolDeviceAllowed(ctx context.Context, accoun
 	)
 }
 
+func (s *IdentityService) EnsureSingleDeviceAdmissionAllowed(ctx context.Context, account *Account, originalMetadataUserID string, headers http.Header) error {
+	if account == nil || !account.IsClaudeOAuthSingleDeviceAdmissionEnabled() {
+		return nil
+	}
+	originalDeviceID := oauthSlotSource(originalMetadataUserID)
+	if originalDeviceID == "" {
+		return ErrClaudeOAuthMetadataRequired
+	}
+	_, err := s.cache.GetOrCreateSingleDeviceAdmission(ctx, account.ID, originalDeviceID, ExtractClientHints(headers), account.GetClaudeOAuthSingleDeviceAdmissionLimit(), time.Now().Unix())
+	return err
+}
+
 func (s *IdentityService) GetOrCreateSharedSlotFingerprint(ctx context.Context, account *Account, originalMetadataUserID string, headers http.Header) (int, *Fingerprint, error) {
 	if account == nil {
 		return 0, nil, nil
@@ -952,6 +970,53 @@ func (s *IdentityService) DeleteCarpoolDevice(ctx context.Context, account *Acco
 		return nil
 	}
 	return s.cache.DeleteCarpoolDevice(ctx, account.ID, deviceKey)
+}
+
+func (s *IdentityService) ListSingleDeviceAdmission(ctx context.Context, account *Account) (*CarpoolDeviceOverview, error) {
+	if account == nil {
+		return &CarpoolDeviceOverview{}, nil
+	}
+	recorded, err := s.cache.ListSingleDeviceAdmission(ctx, account.ID)
+	if err != nil {
+		return nil, err
+	}
+	overflow, err := s.cache.ListSingleDeviceAdmissionOverflow(ctx, account.ID)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(recorded, func(i, j int) bool { return recorded[i].LastSeenAt > recorded[j].LastSeenAt })
+	result := &CarpoolDeviceOverview{
+		UnlimitedDevices: !account.IsClaudeOAuthSingleDeviceAdmissionEnabled(),
+		RecordedLimit:    account.GetClaudeOAuthSingleDeviceAdmissionLimit(),
+		RecordedCount:    len(recorded),
+		OverflowCount:    len(overflow),
+		RecordedItems:    make([]*CarpoolDeviceInfo, 0, len(recorded)),
+		OverflowItems:    make([]*CarpoolOverflowDeviceInfo, 0, len(overflow)),
+	}
+	for _, item := range recorded {
+		result.RecordedItems = append(result.RecordedItems, &CarpoolDeviceInfo{
+			DeviceKey: item.DeviceKey, OriginalDeviceID: item.OriginalDeviceID,
+			CreatedAt: item.CreatedAt, LastSeenAt: item.LastSeenAt,
+			LastUserAgent: item.LastUserAgent, LastOS: item.LastOS, LastArch: item.LastArch,
+			LastRuntime: item.LastRuntime, LastRuntimeVersion: item.LastRuntimeVersion,
+			LastSDKVersion: item.LastSDKVersion,
+		})
+	}
+	for _, item := range overflow {
+		result.OverflowItems = append(result.OverflowItems, &CarpoolOverflowDeviceInfo{
+			DeviceKey: item.DeviceKey, OriginalDeviceID: item.OriginalDeviceID,
+			FirstRejectedAt: item.FirstRejectedAt, LastRejectedAt: item.LastRejectedAt,
+			RejectCount: item.RejectCount, LastUserAgent: item.LastUserAgent,
+		})
+	}
+	return result, nil
+}
+
+func (s *IdentityService) DeleteSingleDeviceAdmission(ctx context.Context, account *Account, deviceKey string) error {
+	if account == nil {
+		return nil
+	}
+	return s.cache.DeleteSingleDeviceAdmission(ctx, account.ID, deviceKey)
 }
 
 func (s *IdentityService) ListSharedBuckets(ctx context.Context, account *Account) ([]*SharedBucketInfo, error) {

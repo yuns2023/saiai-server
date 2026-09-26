@@ -125,6 +125,14 @@ func (s *CarpoolMaintenanceService) runOnce(ctx context.Context, now time.Time) 
 	var runErr error
 	for i := range accounts {
 		account := &accounts[i]
+		if account.IsClaudeOAuthSingleDeviceAdmissionAutoExpandEnabled() {
+			stats.Eligible++
+			if err := s.maintainSingleDeviceAdmission(ctx, account, day, &stats); err != nil {
+				stats.Failed++
+				runErr = errors.Join(runErr, fmt.Errorf("account %d single_device admission: %w", account.ID, err))
+			}
+			continue
+		}
 		if !account.IsClaudeOAuthCarpoolAutoExpandEnabled() {
 			continue
 		}
@@ -208,6 +216,58 @@ func (s *CarpoolMaintenanceService) runOnce(ctx context.Context, now time.Time) 
 	}
 
 	return stats, runErr
+}
+
+func (s *CarpoolMaintenanceService) maintainSingleDeviceAdmission(ctx context.Context, account *Account, day string, stats *carpoolMaintenanceStats) error {
+	if account.GetClaudeOAuthSingleDeviceAdmissionLastMaintenanceDay() == day {
+		stats.AlreadyProcessed++
+		return nil
+	}
+	current, err := s.accountRepo.GetByID(ctx, account.ID)
+	if err != nil {
+		return err
+	}
+	if !current.IsClaudeOAuthSingleDeviceAdmissionAutoExpandEnabled() {
+		return nil
+	}
+	if current.GetClaudeOAuthSingleDeviceAdmissionLastMaintenanceDay() == day {
+		stats.AlreadyProcessed++
+		return nil
+	}
+	const limitKey = "claude_oauth_single_device_admission_limit"
+	const dayKey = "claude_oauth_single_device_admission_last_maintenance_day"
+	limit := current.GetClaudeOAuthSingleDeviceAdmissionLimit()
+	target := current.GetClaudeOAuthSingleDeviceAdmissionTarget()
+	if limit < target {
+		if err := s.accountRepo.UpdateExtra(ctx, current.ID, map[string]any{limitKey: min(limit+1, target), dayKey: day}); err != nil {
+			return err
+		}
+		stats.Expanded++
+		return nil
+	}
+	if limit > target {
+		if err := s.accountRepo.UpdateExtra(ctx, current.ID, map[string]any{dayKey: day}); err != nil {
+			return err
+		}
+		stats.FreeCapacity++
+		return nil
+	}
+	rotation, err := s.cache.RotateSingleDeviceAdmissionForDay(ctx, current.ID, limit, day)
+	if err != nil {
+		return err
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, current.ID, map[string]any{dayKey: day}); err != nil {
+		return err
+	}
+	if rotation == nil || !rotation.Applied {
+		stats.AlreadyProcessed++
+	} else if rotation.Evicted == nil {
+		stats.FreeCapacity++
+	} else {
+		stats.Rotated++
+		logger.LegacyPrintf("service.carpool_maintenance", "[CarpoolMaintenance] rotated single_device incoming device account_id=%d device_key=%s", current.ID, rotation.Evicted.DeviceKey)
+	}
+	return nil
 }
 
 func (s *CarpoolMaintenanceService) location() *time.Location {

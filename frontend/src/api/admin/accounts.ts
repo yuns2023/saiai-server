@@ -259,6 +259,16 @@ export async function deleteClaudeCarpoolDevice(id: number, deviceKey: string): 
   return data
 }
 
+export async function listClaudeSingleDeviceAdmissions(id: number): Promise<ClaudeCarpoolDeviceOverview> {
+  const { data } = await apiClient.get<ClaudeCarpoolDeviceOverview>(`/admin/accounts/${id}/claude-single-device-admissions`)
+  return data
+}
+
+export async function deleteClaudeSingleDeviceAdmission(id: number, deviceKey: string): Promise<{ message: string }> {
+  const { data } = await apiClient.delete<{ message: string }>(`/admin/accounts/${id}/claude-single-device-admissions/${encodeURIComponent(deviceKey)}`)
+  return data
+}
+
 export async function listClaudeSharedBuckets(id: number): Promise<ClaudeSharedBucket[]> {
   const { data } = await apiClient.get<{ items: ClaudeSharedBucket[] }>(`/admin/accounts/${id}/claude-shared-buckets`)
   return data.items || []
@@ -708,6 +718,8 @@ export const accountsAPI = {
   toggleStatus,
   listClaudeCarpoolDevices,
   deleteClaudeCarpoolDevice,
+  listClaudeSingleDeviceAdmissions,
+  deleteClaudeSingleDeviceAdmission,
   listClaudeSharedBuckets,
   deleteClaudeSharedBucket,
   listClaudeSingleDeviceSlots,

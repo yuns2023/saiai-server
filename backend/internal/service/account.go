@@ -1457,6 +1457,78 @@ func (a *Account) GetClaudeOAuthFixedHeadersText() string {
 	return strings.TrimSpace(a.getExtraString("claude_oauth_fixed_headers_text"))
 }
 
+// GetClaudeOAuthFixedHeadersTextForEdit also returns text parked while the
+// switch is off. Only the active key is read by the upstream request path.
+func (a *Account) GetClaudeOAuthFixedHeadersTextForEdit() string {
+	if a == nil || !a.IsAnthropicOAuthOrSetupToken() {
+		return ""
+	}
+	if text := a.GetClaudeOAuthFixedHeadersText(); text != "" {
+		return text
+	}
+	return strings.TrimSpace(a.getExtraString("claude_oauth_fixed_headers_saved_text"))
+}
+
+// IsClaudeOAuthFixedHeadersEnabled gates administrator supplied outbound headers.
+// The migration explicitly enables legacy accounts with configured headers.
+// Missing or malformed flags are disabled for newly created accounts.
+func (a *Account) IsClaudeOAuthFixedHeadersEnabled() bool {
+	if a == nil || a.GetClaudeOAuthMode() != ClaudeOAuthModeSingleDevice || a.Extra == nil {
+		return false
+	}
+	if enabled, ok := a.Extra["claude_oauth_fixed_headers_enabled"].(bool); ok {
+		return enabled
+	}
+	return false
+}
+
+// Single-device admission counts incoming device IDs, independent of UA slots
+// and the fixed upstream device identity. Existing accounts remain unbounded.
+func (a *Account) IsClaudeOAuthSingleDeviceAdmissionEnabled() bool {
+	if a == nil || a.GetClaudeOAuthMode() != ClaudeOAuthModeSingleDevice || a.Extra == nil {
+		return false
+	}
+	enabled, ok := a.Extra["claude_oauth_single_device_admission_enabled"].(bool)
+	return ok && enabled
+}
+
+func (a *Account) GetClaudeOAuthSingleDeviceAdmissionLimit() int {
+	if a == nil || !a.IsAnthropicOAuthOrSetupToken() {
+		return 0
+	}
+	limit := a.getExtraInt("claude_oauth_single_device_admission_limit")
+	if limit <= 0 {
+		limit = DefaultClaudeOAuthCarpoolDeviceLimit
+	}
+	return min(limit, maxClaudeOAuthCarpoolDeviceLimit)
+}
+
+func (a *Account) GetClaudeOAuthSingleDeviceAdmissionTarget() int {
+	if a == nil || !a.IsAnthropicOAuthOrSetupToken() {
+		return 0
+	}
+	target := a.getExtraInt("claude_oauth_single_device_admission_target")
+	if target <= 0 {
+		target = DefaultClaudeOAuthCarpoolAutoMaintenanceTarget
+	}
+	return min(target, maxClaudeOAuthCarpoolDeviceLimit)
+}
+
+func (a *Account) IsClaudeOAuthSingleDeviceAdmissionAutoExpandEnabled() bool {
+	if !a.IsClaudeOAuthSingleDeviceAdmissionEnabled() {
+		return false
+	}
+	enabled, ok := a.Extra["claude_oauth_single_device_admission_auto_expand_enabled"].(bool)
+	return ok && enabled
+}
+
+func (a *Account) GetClaudeOAuthSingleDeviceAdmissionLastMaintenanceDay() string {
+	if a == nil {
+		return ""
+	}
+	return strings.TrimSpace(a.getExtraString("claude_oauth_single_device_admission_last_maintenance_day"))
+}
+
 // IsTLSFingerprintEnabled 检查是否启用 TLS 指纹伪装
 // 仅适用于 Anthropic OAuth/SetupToken 类型账号
 // 启用后将模拟 Claude Code (Bun/BoringSSL) 客户端的 TLS 握手特征

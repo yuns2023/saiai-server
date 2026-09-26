@@ -728,6 +728,66 @@ func (h *AccountHandler) ListClaudeCarpoolDevices(c *gin.Context) {
 	response.Success(c, devices)
 }
 
+// ListClaudeSingleDeviceAdmissions lists original incoming devices independently
+// of the single fixed upstream identity and the learned UA slots.
+func (h *AccountHandler) ListClaudeSingleDeviceAdmissions(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if account.GetClaudeOAuthMode() != service.ClaudeOAuthModeSingleDevice {
+		response.BadRequest(c, "Incoming device management requires a single_device account")
+		return
+	}
+	if h.identityService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Identity service unavailable")
+		return
+	}
+	devices, err := h.identityService.ListSingleDeviceAdmission(c.Request.Context(), account)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, devices)
+}
+
+func (h *AccountHandler) DeleteClaudeSingleDeviceAdmission(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	deviceKey := strings.TrimSpace(c.Param("deviceKey"))
+	if deviceKey == "" {
+		response.BadRequest(c, "Invalid device key")
+		return
+	}
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if account.GetClaudeOAuthMode() != service.ClaudeOAuthModeSingleDevice {
+		response.BadRequest(c, "Incoming device management requires a single_device account")
+		return
+	}
+	if h.identityService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Identity service unavailable")
+		return
+	}
+	if err := h.identityService.DeleteSingleDeviceAdmission(c.Request.Context(), account, deviceKey); err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"message": "incoming device deleted"})
+}
+
 // DeleteClaudeCarpoolDevice handles deleting a recorded Claude OAuth carpool device.
 // DELETE /api/v1/admin/accounts/:id/claude-carpool-devices/:deviceKey
 func (h *AccountHandler) DeleteClaudeCarpoolDevice(c *gin.Context) {

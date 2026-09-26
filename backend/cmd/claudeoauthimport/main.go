@@ -406,6 +406,7 @@ func buildCreateAccountInput(fileData *claudeAiOauthCredentials, opts *cliOption
 		extra["claude_oauth_fixed_device_id"] = strings.TrimSpace(opts.FixedDeviceID)
 		if fixedHeadersText != "" {
 			extra["claude_oauth_fixed_headers_text"] = fixedHeadersText
+			extra["claude_oauth_fixed_headers_enabled"] = true
 		}
 	}
 

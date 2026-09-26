@@ -112,6 +112,30 @@ func (s *IdentityCacheSuite) TestGetOrCreateCarpoolDevice_ConcurrentDifferentDev
 	require.Len(s.T(), overflow, 1)
 }
 
+func (s *IdentityCacheSuite) TestSingleDeviceAdmissionIsIndependentAndRotatesOncePerDay() {
+	const accountID int64 = 404
+	ctx := s.ctx
+	_, err := s.cache.GetOrCreateCarpoolDevice(ctx, accountID, "carpool-only", service.ClientHints{}, 1, 10)
+	require.NoError(s.T(), err)
+	_, err = s.cache.GetOrCreateSingleDeviceAdmission(ctx, accountID, "incoming-a", service.ClientHints{}, 1, 10)
+	require.NoError(s.T(), err)
+	_, err = s.cache.GetOrCreateSingleDeviceAdmission(ctx, accountID, "incoming-b", service.ClientHints{}, 1, 11)
+	require.ErrorIs(s.T(), err, service.ErrClaudeOAuthSingleDeviceAdmissionFull)
+	rotation, err := s.cache.RotateSingleDeviceAdmissionForDay(ctx, accountID, 1, "2026-09-24")
+	require.NoError(s.T(), err)
+	require.True(s.T(), rotation.Applied)
+	require.Equal(s.T(), "incoming-a", rotation.Evicted.OriginalDeviceID)
+	second, err := s.cache.RotateSingleDeviceAdmissionForDay(ctx, accountID, 1, "2026-09-24")
+	require.NoError(s.T(), err)
+	require.False(s.T(), second.Applied)
+	_, err = s.cache.GetOrCreateSingleDeviceAdmission(ctx, accountID, "incoming-b", service.ClientHints{}, 1, 12)
+	require.NoError(s.T(), err)
+	carpool, err := s.cache.ListCarpoolDevices(ctx, accountID)
+	require.NoError(s.T(), err)
+	require.Len(s.T(), carpool, 1)
+	require.Equal(s.T(), "carpool-only", carpool[0].OriginalDeviceID)
+}
+
 func (s *IdentityCacheSuite) TestGetOrCreateCarpoolDevice_ConcurrentSameDeviceReusesRecord() {
 	const accountID int64 = 43
 

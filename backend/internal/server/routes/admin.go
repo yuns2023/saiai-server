@@ -267,6 +267,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
 		accounts.GET("/:id/claude-carpool-devices", h.Admin.Account.ListClaudeCarpoolDevices)
 		accounts.DELETE("/:id/claude-carpool-devices/:deviceKey", h.Admin.Account.DeleteClaudeCarpoolDevice)
+		accounts.GET("/:id/claude-single-device-admissions", h.Admin.Account.ListClaudeSingleDeviceAdmissions)
+		accounts.DELETE("/:id/claude-single-device-admissions/:deviceKey", h.Admin.Account.DeleteClaudeSingleDeviceAdmission)
 		accounts.GET("/:id/claude-shared-buckets", h.Admin.Account.ListClaudeSharedBuckets)
 		accounts.DELETE("/:id/claude-shared-buckets/:bucket", h.Admin.Account.DeleteClaudeSharedBucket)
 		accounts.GET("/:id/claude-single-device-slots", h.Admin.Account.ListClaudeSingleDeviceSlots)

@@ -166,10 +166,47 @@ func validateClaudeOAuthSingleDeviceConfig(account *Account) error {
 	if strings.TrimSpace(account.GetExtraString("claude_oauth_fixed_device_id")) == "" {
 		return errors.New("single_device mode requires claude_oauth_fixed_device_id")
 	}
-	if text := strings.TrimSpace(account.getExtraString("claude_oauth_fixed_headers_text")); text != "" {
+	if text := strings.TrimSpace(account.getExtraString("claude_oauth_fixed_headers_text")); account.IsClaudeOAuthFixedHeadersEnabled() && text != "" {
 		if err := ValidateClaudeOAuthSingleDeviceFixedHeaders(text); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// normalizeSingleDeviceFixedHeaders keeps the old Server's active text field
+// empty whenever the new switch is off. This makes application rollback safe:
+// the old Server ignores the switch but cannot apply parked text.
+func normalizeSingleDeviceFixedHeaders(account *Account) {
+	if account == nil || account.Extra == nil || !account.IsAnthropicOAuthOrSetupToken() {
+		return
+	}
+	const active = "claude_oauth_fixed_headers_text"
+	const saved = "claude_oauth_fixed_headers_saved_text"
+	if account.GetClaudeOAuthMode() != ClaudeOAuthModeSingleDevice {
+		delete(account.Extra, active)
+		delete(account.Extra, saved)
+		return
+	}
+	activeText := strings.TrimSpace(account.getExtraString(active))
+	savedText := strings.TrimSpace(account.getExtraString(saved))
+	text := activeText
+	if text == "" {
+		text = savedText
+	}
+	if account.IsClaudeOAuthFixedHeadersEnabled() {
+		delete(account.Extra, saved)
+		if text == "" {
+			delete(account.Extra, active)
+		} else {
+			account.Extra[active] = text
+		}
+		return
+	}
+	delete(account.Extra, active)
+	if text == "" {
+		delete(account.Extra, saved)
+	} else {
+		account.Extra[saved] = text
+	}
 }
