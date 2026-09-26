@@ -80,23 +80,29 @@ vi.mock('vue-router', () => ({
 }))
 
 const AppLayoutStub = { template: '<div><slot /></div>' }
-const UsageFiltersStub = { template: '<div><slot name="after-reset" /></div>' }
+const UsageFiltersStub = {
+  props: ['modelValue'],
+  emits: ['update:modelValue', 'change'],
+  template: '<div><button data-test="filter-user" @click="$emit(\'update:modelValue\', { ...modelValue, user_id: 42 }); $emit(\'change\')">filter user</button><slot name="after-reset" /></div>'
+}
 const ModelDistributionChartStub = {
-  props: ['metric'],
+  props: ['metric', 'breakdownFilters'],
   emits: ['update:metric'],
   template: `
     <div data-test="model-chart">
       <span class="metric">{{ metric }}</span>
+      <span class="breakdown-user">{{ breakdownFilters?.user_id }}</span>
       <button class="switch-metric" @click="$emit('update:metric', 'actual_cost')">switch</button>
     </div>
   `,
 }
 const GroupDistributionChartStub = {
-  props: ['metric'],
+  props: ['metric', 'breakdownFilters'],
   emits: ['update:metric'],
   template: `
     <div data-test="group-chart">
       <span class="metric">{{ metric }}</span>
+      <span class="breakdown-user">{{ breakdownFilters?.user_id }}</span>
       <button class="switch-metric" @click="$emit('update:metric', 'actual_cost')">switch</button>
     </div>
   `,
@@ -200,5 +206,35 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(modelChart.find('.metric').text()).toBe('actual_cost')
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+  })
+
+  it('passes the selected user to distribution breakdowns', async () => {
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: true,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="filter-user"]').trigger('click')
+    await flushPromises()
+    expect(getModelStats).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: 42 }))
+    expect(wrapper.find('[data-test="model-chart"] .breakdown-user').text()).toBe('42')
+    expect(wrapper.find('[data-test="group-chart"] .breakdown-user').text()).toBe('42')
   })
 })

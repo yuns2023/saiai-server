@@ -62,6 +62,37 @@ func TestGetUserBreakdown_GroupIDFilter(t *testing.T) {
 	require.Equal(t, 50, repo.capturedLimit) // default limit
 }
 
+func TestGetUserBreakdown_UsagePageFilters(t *testing.T) {
+	repo := &userBreakdownRepoCapture{}
+	router := newUserBreakdownRouter(repo)
+	req := httptest.NewRequest(http.MethodGet,
+		"/admin/dashboard/user-breakdown?start_date=2026-03-01&end_date=2026-03-16&user_id=12&api_key_id=34&account_id=56&group_id=78&model=claude-opus&model_filter=claude-opus&session_id=abcdef123456&request_type=stream&billing_type=1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, int64(12), repo.capturedDim.UserID)
+	require.Equal(t, int64(34), repo.capturedDim.APIKeyID)
+	require.Equal(t, int64(56), repo.capturedDim.AccountID)
+	require.Equal(t, int64(78), repo.capturedDim.GroupID)
+	require.Equal(t, "claude-opus", repo.capturedDim.Model)
+	require.Equal(t, "claude-opus", repo.capturedDim.ModelFilter)
+	require.Equal(t, "abcdef123456", repo.capturedDim.SessionID)
+	require.NotNil(t, repo.capturedDim.RequestType)
+	require.Nil(t, repo.capturedDim.Stream)
+	require.NotNil(t, repo.capturedDim.BillingType)
+	require.Equal(t, int8(1), *repo.capturedDim.BillingType)
+}
+
+func TestGetUserBreakdown_InvalidUserIDRejected(t *testing.T) {
+	repo := &userBreakdownRepoCapture{}
+	router := newUserBreakdownRouter(repo)
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/user-breakdown?user_id=invalid&model=claude-opus", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 func TestGetUserBreakdown_ModelFilter(t *testing.T) {
 	repo := &userBreakdownRepoCapture{}
 	router := newUserBreakdownRouter(repo)

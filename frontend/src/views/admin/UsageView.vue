@@ -39,6 +39,7 @@
             :end-date="endDate"
             :start-time="filters.start_time"
             :end-time="filters.end_time"
+            :breakdown-filters="breakdownFilters"
           />
           <GroupDistributionChart
             v-model:metric="groupDistributionMetric"
@@ -49,6 +50,7 @@
             :end-date="endDate"
             :start-time="filters.start_time"
             :end-time="filters.end_time"
+            :breakdown-filters="breakdownFilters"
           />
         </div>
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -66,6 +68,7 @@
             :end-date="endDate"
             :start-time="filters.start_time"
             :end-time="filters.end_time"
+            :breakdown-filters="{ ...breakdownFilters, model_filter: filters.model }"
           />
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
@@ -144,6 +147,7 @@ import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
+import type { UserBreakdownParams } from '@/api/admin/dashboard'
 import Icon from '@/components/icons/Icon.vue'
 import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
 
@@ -231,6 +235,20 @@ const activeRangePreset = ref<string | null>('last24Hours')
 const rollingStartTime = ref(defaultRollingRange.start)
 const rollingEndTime = ref(defaultRollingRange.end)
 const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, session_id: undefined, request_type: undefined, billing_type: null, account_switch: undefined, start_time: rollingStartTime.value, end_time: rollingEndTime.value })
+const breakdownFilters = computed<UserBreakdownParams>(() => {
+  const requestType = filters.value.request_type
+  const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
+  return {
+    user_id: filters.value.user_id,
+    api_key_id: filters.value.api_key_id,
+    account_id: filters.value.account_id,
+    group_id: filters.value.group_id,
+    session_id: filters.value.session_id,
+    request_type: requestType,
+    stream: legacyStream === null ? undefined : legacyStream,
+    billing_type: filters.value.billing_type,
+  }
+})
 const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
 
 const refreshRollingRange = () => {

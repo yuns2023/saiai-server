@@ -698,12 +698,56 @@ func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
 	}
 
 	dim := usagestats.UserBreakdownDimension{}
-	if v := c.Query("group_id"); v != "" {
-		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
-			dim.GroupID = id
+	for _, field := range []struct {
+		name  string
+		value *int64
+	}{
+		{"user_id", &dim.UserID},
+		{"api_key_id", &dim.APIKeyID},
+		{"account_id", &dim.AccountID},
+		{"group_id", &dim.GroupID},
+	} {
+		if raw := c.Query(field.name); raw != "" {
+			id, parseErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil || id <= 0 {
+				response.BadRequest(c, "Invalid "+field.name)
+				return
+			}
+			*field.value = id
 		}
 	}
 	dim.Model = c.Query("model")
+	dim.ModelFilter = c.Query("model_filter")
+	dim.SessionID, err = normalizeSessionIDFilter(c.Query("session_id"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if raw := strings.TrimSpace(c.Query("request_type")); raw != "" {
+		parsed, parseErr := service.ParseUsageRequestType(raw)
+		if parseErr != nil {
+			response.BadRequest(c, parseErr.Error())
+			return
+		}
+		value := int16(parsed)
+		dim.RequestType = &value
+	} else if raw := c.Query("stream"); raw != "" {
+		value, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			response.BadRequest(c, "Invalid stream value, use true or false")
+			return
+		}
+		dim.Stream = &value
+	}
+	if raw := c.Query("billing_type"); raw != "" {
+		value, parseErr := strconv.ParseInt(raw, 10, 8)
+		if parseErr != nil {
+			response.BadRequest(c, "Invalid billing_type")
+			return
+		}
+		billingType := int8(value)
+		dim.BillingType = &billingType
+	}
 	rawModelSource := strings.TrimSpace(c.DefaultQuery("model_source", usagestats.ModelSourceRequested))
 	if !usagestats.IsValidModelSource(rawModelSource) {
 		response.BadRequest(c, "Invalid model_source, use requested/upstream/mapping")

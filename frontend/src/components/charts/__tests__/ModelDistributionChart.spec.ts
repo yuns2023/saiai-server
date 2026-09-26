@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 
 import ModelDistributionChart from '../ModelDistributionChart.vue'
+
+const { getUserBreakdown } = vi.hoisted(() => ({ getUserBreakdown: vi.fn() }))
+vi.mock('@/api/admin/dashboard', () => ({ getUserBreakdown }))
 
 const messages: Record<string, string> = {
   'admin.dashboard.modelDistribution': 'Model Distribution',
@@ -67,6 +70,48 @@ describe('ModelDistributionChart', () => {
       actual_cost: 1.4,
     },
   ]
+
+  it('passes usage page filters to the expanded user breakdown', async () => {
+    getUserBreakdown.mockResolvedValue({ users: [] })
+    const wrapper = mount(ModelDistributionChart, {
+      props: {
+        modelStats: [modelStats[0]],
+        startTime: '2026-09-26T00:00:00Z',
+        endTime: '2026-09-27T00:00:00Z',
+        breakdownFilters: { user_id: 42, api_key_id: 7, billing_type: 1 },
+      },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+
+    await wrapper.find('tbody tr').trigger('click')
+    await flushPromises()
+    expect(getUserBreakdown).toHaveBeenCalledWith(expect.objectContaining({
+      user_id: 42,
+      api_key_id: 7,
+      billing_type: 1,
+      model: 'model-a',
+      model_source: 'requested',
+      start_time: '2026-09-26T00:00:00Z',
+      end_time: '2026-09-27T00:00:00Z',
+    }))
+  })
+
+  it('clears an expanded breakdown when the selected user changes', async () => {
+    let resolveBreakdown!: (value: unknown) => void
+    getUserBreakdown.mockReturnValue(new Promise((resolve) => { resolveBreakdown = resolve }))
+    const wrapper = mount(ModelDistributionChart, {
+      props: { modelStats: [modelStats[0]], breakdownFilters: { user_id: 1 } },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+
+    await wrapper.find('tbody tr').trigger('click')
+    await wrapper.setProps({ breakdownFilters: { user_id: 2 } })
+    resolveBreakdown({ users: [{ user_id: 1, email: 'old@example.com', requests: 1, total_tokens: 1, cost: 1, actual_cost: 1 }] })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('old@example.com')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(1)
+  })
 
   it('uses total_tokens and token ordering by default', () => {
     const wrapper = mount(ModelDistributionChart, {

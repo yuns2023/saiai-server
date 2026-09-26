@@ -170,11 +170,19 @@ type UserBreakdownItem struct {
 
 // UserBreakdownDimension specifies the dimension to filter for user breakdown.
 type UserBreakdownDimension struct {
-	GroupID      int64  // filter by group_id (>0 to enable)
+	GroupID      int64 // filter by group_id (>0 to enable)
+	UserID       int64
+	APIKeyID     int64
+	AccountID    int64
 	Model        string // filter by model name (non-empty to enable)
+	ModelFilter  string // requested model filter from the usage page
 	ModelType    string // "requested", "upstream", or "mapping"
 	Endpoint     string // filter by endpoint value (non-empty to enable)
 	EndpointType string // "inbound", "upstream", or "path"
+	SessionID    string
+	RequestType  *int16
+	Stream       *bool
+	BillingType  *int8
 }
 
 // APIKeyUsageTrendPoint represents API key usage trend data point

@@ -172,7 +172,15 @@ export interface UserBreakdownParams {
   end_date?: string
   start_time?: string
   end_time?: string
+  user_id?: number
+  api_key_id?: number
+  account_id?: number
   group_id?: number
+  model_filter?: string
+  session_id?: string
+  request_type?: UsageRequestType
+  stream?: boolean
+  billing_type?: number | null
   model?: string
   model_source?: 'requested' | 'upstream' | 'mapping'
   endpoint?: string

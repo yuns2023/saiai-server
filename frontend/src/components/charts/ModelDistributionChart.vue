@@ -240,13 +240,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
 import type { ModelStat, UserSpendingRankingItem, UserBreakdownItem } from '@/types'
+import type { UserBreakdownParams } from '@/api/admin/dashboard'
 import { getUserBreakdown } from '@/api/admin/dashboard'
 import { distributionChartColors, stableChartColor } from '@/utils/chartColors'
 
@@ -277,6 +278,7 @@ const props = withDefaults(defineProps<{
   endDate?: string
   startTime?: string
   endTime?: string
+  breakdownFilters?: UserBreakdownParams
 }>(), {
   upstreamModelStats: () => [],
   mappingModelStats: () => [],
@@ -297,18 +299,29 @@ const props = withDefaults(defineProps<{
 const expandedKey = ref<string | null>(null)
 const breakdownItems = ref<UserBreakdownItem[]>([])
 const breakdownLoading = ref(false)
+let breakdownRequestId = 0
+
+watch(() => [props.breakdownFilters, props.startDate, props.endDate, props.startTime, props.endTime, props.source], () => {
+  breakdownRequestId++
+  expandedKey.value = null
+  breakdownItems.value = []
+  breakdownLoading.value = false
+}, { deep: true })
 
 const toggleBreakdown = async (type: string, id: string) => {
   const key = `${type}-${id}`
   if (expandedKey.value === key) {
+    breakdownRequestId++
     expandedKey.value = null
     return
   }
+  const requestId = ++breakdownRequestId
   expandedKey.value = key
   breakdownLoading.value = true
   breakdownItems.value = []
   try {
     const res = await getUserBreakdown({
+      ...props.breakdownFilters,
       start_date: props.startDate,
       end_date: props.endDate,
       start_time: props.startTime,
@@ -316,11 +329,11 @@ const toggleBreakdown = async (type: string, id: string) => {
       model: id,
       model_source: props.source,
     })
-    breakdownItems.value = res.users || []
+    if (requestId === breakdownRequestId) breakdownItems.value = res.users || []
   } catch {
-    breakdownItems.value = []
+    if (requestId === breakdownRequestId) breakdownItems.value = []
   } finally {
-    breakdownLoading.value = false
+    if (requestId === breakdownRequestId) breakdownLoading.value = false
   }
 }
 
