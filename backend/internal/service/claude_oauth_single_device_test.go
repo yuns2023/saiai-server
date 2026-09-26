@@ -29,6 +29,23 @@ func TestNormalizeClaudeOAuthSingleDeviceSlotKey(t *testing.T) {
 	)
 }
 
+func TestNormalizeSingleDeviceFixedHeadersRollbackSafe(t *testing.T) {
+	account := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{
+		"claude_oauth_mode":                  ClaudeOAuthModeSingleDevice,
+		"claude_oauth_fixed_headers_enabled": false,
+		"claude_oauth_fixed_headers_text":    "X-Stainless-Lang: js",
+	}}
+	normalizeSingleDeviceFixedHeaders(account)
+	require.Empty(t, account.GetClaudeOAuthFixedHeadersText())
+	require.Equal(t, "X-Stainless-Lang: js", account.GetClaudeOAuthFixedHeadersTextForEdit())
+	require.Equal(t, "X-Stainless-Lang: js", account.Extra["claude_oauth_fixed_headers_saved_text"])
+
+	account.Extra["claude_oauth_fixed_headers_enabled"] = true
+	normalizeSingleDeviceFixedHeaders(account)
+	require.Equal(t, "X-Stainless-Lang: js", account.GetClaudeOAuthFixedHeadersText())
+	require.NotContains(t, account.Extra, "claude_oauth_fixed_headers_saved_text")
+}
+
 func TestParseClaudeOAuthFixedHeadersText_AllowsArbitraryHeaders(t *testing.T) {
 	headers, err := ParseClaudeOAuthFixedHeadersText("X-Stainless-Arch: x64\nx-app: cli\nUser-Agent: claude-cli/2.1.109 (external, cli)")
 	require.NoError(t, err)
@@ -92,10 +109,11 @@ func TestPrepareOAuthRequestIdentity_SingleDeviceRewritesFixedIdentityAndOverrid
 		Platform: PlatformAnthropic,
 		Type:     AccountTypeOAuth,
 		Extra: map[string]any{
-			"account_uuid":                    "fixed-account-uuid",
-			"claude_oauth_mode":               ClaudeOAuthModeSingleDevice,
-			"claude_oauth_fixed_device_id":    "fixed-device-id",
-			"claude_oauth_fixed_headers_text": "User-Agent: claude-cli/2.1.109 (external, cli)\nX-Stainless-Arch: x64\nX-Stainless-Lang: js",
+			"account_uuid":                       "fixed-account-uuid",
+			"claude_oauth_mode":                  ClaudeOAuthModeSingleDevice,
+			"claude_oauth_fixed_device_id":       "fixed-device-id",
+			"claude_oauth_fixed_headers_enabled": true,
+			"claude_oauth_fixed_headers_text":    "User-Agent: claude-cli/2.1.109 (external, cli)\nX-Stainless-Arch: x64\nX-Stainless-Lang: js",
 		},
 	}
 	body := expectedOAuthBillingBodyForTest(t,
@@ -316,10 +334,11 @@ func TestPrepareOAuthRequestIdentity_SetupTokenSingleDeviceClearsAccountUUIDWhen
 		Platform: PlatformAnthropic,
 		Type:     AccountTypeSetupToken,
 		Extra: map[string]any{
-			"account_uuid":                    "fixed-account-uuid",
-			"claude_oauth_mode":               ClaudeOAuthModeSingleDevice,
-			"claude_oauth_fixed_device_id":    "fixed-device-id",
-			"claude_oauth_fixed_headers_text": "X-Stainless-Arch: x64\nX-Stainless-Lang: js",
+			"account_uuid":                       "fixed-account-uuid",
+			"claude_oauth_mode":                  ClaudeOAuthModeSingleDevice,
+			"claude_oauth_fixed_device_id":       "fixed-device-id",
+			"claude_oauth_fixed_headers_enabled": true,
+			"claude_oauth_fixed_headers_text":    "X-Stainless-Arch: x64\nX-Stainless-Lang: js",
 		},
 	}
 	body := expectedOAuthBillingBodyForTest(t,
@@ -340,6 +359,16 @@ func TestPrepareOAuthRequestIdentity_SetupTokenSingleDeviceClearsAccountUUIDWhen
 	require.NotEqual(t, "client-account-uuid", rewrittenUserID.AccountUUID)
 	require.NotEqual(t, originalSessionID, rewrittenUserID.SessionID)
 	require.Empty(t, rec.Body.String())
+
+	account.Extra["claude_oauth_fixed_headers_enabled"] = false
+	_, withoutFixedHeaders, err := svc.prepareOAuthRequestIdentity(c.Request.Context(), c, account, parsed, body, false)
+	require.NoError(t, err)
+	require.Empty(t, withoutFixedHeaders.FixedHeaders)
+	require.Equal(t, "claude-cli (external, sdk-cli)", withoutFixedHeaders.SlotKey)
+	delete(account.Extra, "claude_oauth_fixed_headers_enabled")
+	_, defaultOff, err := svc.prepareOAuthRequestIdentity(c.Request.Context(), c, account, parsed, body, false)
+	require.NoError(t, err)
+	require.Empty(t, defaultOff.FixedHeaders)
 }
 
 func TestPrepareOAuthRequestIdentity_SetupTokenSingleDeviceAllowsEmptyAccountUUID(t *testing.T) {
@@ -462,10 +491,11 @@ func TestIdentityService_GetOrCreateSingleDeviceSlotFingerprint_FixedUserAgentSk
 		Platform: PlatformAnthropic,
 		Type:     AccountTypeOAuth,
 		Extra: map[string]any{
-			"account_uuid":                    "fixed-account-uuid",
-			"claude_oauth_mode":               ClaudeOAuthModeSingleDevice,
-			"claude_oauth_fixed_device_id":    "fixed-device-id",
-			"claude_oauth_fixed_headers_text": "User-Agent: claude-cli/2.1.109 (external, cli)\nX-Stainless-Lang: js",
+			"account_uuid":                       "fixed-account-uuid",
+			"claude_oauth_mode":                  ClaudeOAuthModeSingleDevice,
+			"claude_oauth_fixed_device_id":       "fixed-device-id",
+			"claude_oauth_fixed_headers_enabled": true,
+			"claude_oauth_fixed_headers_text":    "User-Agent: claude-cli/2.1.109 (external, cli)\nX-Stainless-Lang: js",
 		},
 	}
 

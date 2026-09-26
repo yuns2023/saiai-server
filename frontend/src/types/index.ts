@@ -828,6 +828,12 @@ export interface Account {
   claude_oauth_token_disable_before_expiry_minutes?: number | null
   claude_oauth_fixed_device_id?: string | null
   claude_oauth_fixed_headers_text?: string | null
+  claude_oauth_fixed_headers_saved_text?: string | null
+  claude_oauth_fixed_headers_enabled?: boolean | null
+  claude_oauth_single_device_admission_enabled?: boolean | null
+  claude_oauth_single_device_admission_limit?: number | null
+  claude_oauth_single_device_admission_target?: number | null
+  claude_oauth_single_device_admission_auto_expand_enabled?: boolean | null
 
   // 客户端亲和调度（仅 Anthropic/Antigravity 平台有效）
   // 启用后新会话会优先调度到客户端之前使用过的账号

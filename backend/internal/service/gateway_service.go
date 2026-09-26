@@ -1903,7 +1903,21 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 		if !containsBetaToken(clientHeaders.Get("anthropic-beta"), claude.BetaOAuth) {
 			return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, "Claude OAuth single_device mode requires anthropic-beta to include oauth-2025-04-20", ErrClaudeOAuthLoginStateRequired)
 		}
-		fixedHeaders, err := ParseClaudeOAuthFixedHeadersText(account.GetClaudeOAuthFixedHeadersText())
+		if err := s.identityService.EnsureSingleDeviceAdmissionAllowed(ctx, account, originalUserID, clientHeaders); err != nil {
+			if errors.Is(err, ErrClaudeOAuthSingleDeviceAdmissionFull) {
+				const message = "This single_device account has reached its incoming device limit."
+				if forCountTokens {
+					return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, message, err)
+				}
+				return body, nil, s.claudeOAuthAccountFailoverError(c, account, http.StatusTooManyRequests, "rate_limit_error", message, err)
+			}
+			return body, nil, err
+		}
+		fixedHeadersText := ""
+		if account.IsClaudeOAuthFixedHeadersEnabled() {
+			fixedHeadersText = account.GetClaudeOAuthFixedHeadersText()
+		}
+		fixedHeaders, err := ParseClaudeOAuthFixedHeadersText(fixedHeadersText)
 		if err != nil {
 			return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, "Claude OAuth single_device fixed headers are invalid", err)
 		}

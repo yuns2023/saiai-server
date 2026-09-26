@@ -299,6 +299,44 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('keeps legacy fixed headers enabled and saves separate incoming device controls', async () => {
+    const account = {
+      ...buildAccount(),
+      type: 'setup-token',
+      credentials: { access_token: 'test-token' },
+      extra: {
+        claude_oauth_mode: 'single_device',
+        claude_oauth_fixed_device_id: 'fixed-device-id',
+        claude_oauth_fixed_headers_enabled: true,
+        claude_oauth_fixed_headers_text: 'X-Stainless-Lang: js'
+      },
+      claude_oauth_mode: 'single_device'
+    } as any
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    updateAccountMock.mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const fixedToggle = wrapper.get('[data-testid="single-device-fixed-headers-enabled"]')
+    expect((fixedToggle.element as HTMLInputElement).checked).toBe(true)
+    await fixedToggle.setValue(false)
+    await wrapper.get('[data-testid="single-device-admission-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="single-device-admission-auto-expand"]').setValue(true)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      claude_oauth_fixed_headers_enabled: false,
+      claude_oauth_fixed_headers_saved_text: 'X-Stainless-Lang: js',
+      claude_oauth_single_device_admission_enabled: true,
+      claude_oauth_single_device_admission_limit: 5,
+      claude_oauth_single_device_admission_auto_expand_enabled: true,
+      claude_oauth_single_device_admission_target: 16
+    })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('claude_oauth_fixed_headers_text')
+  })
+
   it('persists an account model denylist for a setup-token account', async () => {
     const account = {
       ...buildAccount(),

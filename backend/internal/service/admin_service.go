@@ -1795,6 +1795,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	normalizeSingleDeviceFixedHeaders(account)
 	if err := validateClaudeOAuthSingleDeviceConfig(account); err != nil {
 		return nil, err
 	}
@@ -1949,6 +1950,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if input.AutoPauseOnExpired != nil {
 		account.AutoPauseOnExpired = *input.AutoPauseOnExpired
 	}
+	normalizeSingleDeviceFixedHeaders(account)
 	if err := validateClaudeOAuthSingleDeviceConfig(account); err != nil {
 		return nil, err
 	}

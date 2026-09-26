@@ -19,24 +19,27 @@ import (
 )
 
 const (
-	fingerprintKeyPrefix       = "fingerprint:"
-	slotFingerprintPrefix      = "fingerprint_slot_v2:"
-	fingerprintTTL             = 7 * 24 * time.Hour // 7天，配合每24小时懒续期可保持活跃账号永不过期
-	maskedSessionKeyPrefix     = "masked_session:"
-	slotMaskedSessionPrefix    = "masked_session_slot_v2:"
-	carpoolRecordedPrefix      = "claude_carpool_recorded_v1:"
-	carpoolOverflowPrefix      = "claude_carpool_overflow_v1:"
-	carpoolMaintenancePrefix   = "claude_carpool_maintenance_v1:"
-	sharedBucketMetaPrefix     = "shared_bucket_meta_v1:"
-	sharedBucketBindingPref    = "shared_bucket_binding_v1:"
-	sharedBucketConfigPref     = "shared_bucket_config_v1:"
-	singleDeviceSlotBindPrefix = "single_device_slot_binding_v1:"
-	singleDeviceSlotMetaPrefix = "single_device_slot_meta_v1:"
-	singleDeviceSlotNextPrefix = "single_device_slot_next_v1:"
-	pinnedDeviceBindingsKey    = "pinned_device_bindings_v1:"
-	pinnedAccountBindingKey    = "pinned_account_binding_v1:"
-	maxSharedBucketSlots       = 32
-	carpoolOverflowMaxItems    = 256
+	fingerprintKeyPrefix                   = "fingerprint:"
+	slotFingerprintPrefix                  = "fingerprint_slot_v2:"
+	fingerprintTTL                         = 7 * 24 * time.Hour // 7天，配合每24小时懒续期可保持活跃账号永不过期
+	maskedSessionKeyPrefix                 = "masked_session:"
+	slotMaskedSessionPrefix                = "masked_session_slot_v2:"
+	carpoolRecordedPrefix                  = "claude_carpool_recorded_v1:"
+	carpoolOverflowPrefix                  = "claude_carpool_overflow_v1:"
+	carpoolMaintenancePrefix               = "claude_carpool_maintenance_v1:"
+	singleDeviceAdmissionRecordedPrefix    = "claude_single_device_admission_recorded_v1:"
+	singleDeviceAdmissionOverflowPrefix    = "claude_single_device_admission_overflow_v1:"
+	singleDeviceAdmissionMaintenancePrefix = "claude_single_device_admission_maintenance_v1:"
+	sharedBucketMetaPrefix                 = "shared_bucket_meta_v1:"
+	sharedBucketBindingPref                = "shared_bucket_binding_v1:"
+	sharedBucketConfigPref                 = "shared_bucket_config_v1:"
+	singleDeviceSlotBindPrefix             = "single_device_slot_binding_v1:"
+	singleDeviceSlotMetaPrefix             = "single_device_slot_meta_v1:"
+	singleDeviceSlotNextPrefix             = "single_device_slot_next_v1:"
+	pinnedDeviceBindingsKey                = "pinned_device_bindings_v1:"
+	pinnedAccountBindingKey                = "pinned_account_binding_v1:"
+	maxSharedBucketSlots                   = 32
+	carpoolOverflowMaxItems                = 256
 	// Session TTL 使用随机范围 [5, 60] 分钟
 	// 避免固定 15 分钟 TTL 产生非自然的 session 存活分布
 	maskedSessionTTLMin = 5 * time.Minute
@@ -169,16 +172,34 @@ func (c *identityCache) SetSlotFingerprint(ctx context.Context, accountID int64,
 }
 
 func (c *identityCache) GetOrCreateCarpoolDevice(ctx context.Context, accountID int64, originalDeviceID string, hints service.ClientHints, limit int, nowUnix int64) (*service.CarpoolDeviceRecord, error) {
+	return c.getOrCreateAdmissionDevice(ctx, accountID, originalDeviceID, hints, limit, nowUnix, carpoolRecordedKey(accountID), carpoolOverflowKey(accountID), service.ErrClaudeOAuthCarpoolDevicesFull)
+}
+
+func (c *identityCache) GetOrCreateSingleDeviceAdmission(ctx context.Context, accountID int64, originalDeviceID string, hints service.ClientHints, limit int, nowUnix int64) (*service.CarpoolDeviceRecord, error) {
+	return c.getOrCreateAdmissionDevice(ctx, accountID, originalDeviceID, hints, limit, nowUnix, singleDeviceAdmissionRecordedKey(accountID), singleDeviceAdmissionOverflowKey(accountID), service.ErrClaudeOAuthSingleDeviceAdmissionFull)
+}
+
+func singleDeviceAdmissionRecordedKey(accountID int64) string {
+	return fmt.Sprintf("%s%d", singleDeviceAdmissionRecordedPrefix, accountID)
+}
+
+func singleDeviceAdmissionOverflowKey(accountID int64) string {
+	return fmt.Sprintf("%s%d", singleDeviceAdmissionOverflowPrefix, accountID)
+}
+
+func singleDeviceAdmissionMaintenanceKey(accountID int64) string {
+	return fmt.Sprintf("%s%d", singleDeviceAdmissionMaintenancePrefix, accountID)
+}
+
+func (c *identityCache) getOrCreateAdmissionDevice(ctx context.Context, accountID int64, originalDeviceID string, hints service.ClientHints, limit int, nowUnix int64, recordedKey, overflowKey string, fullErr error) (*service.CarpoolDeviceRecord, error) {
 	trimmedDeviceID := strings.TrimSpace(originalDeviceID)
 	if trimmedDeviceID == "" {
 		return nil, nil
 	}
 	if limit <= 0 {
-		return nil, service.ErrClaudeOAuthCarpoolDevicesFull
+		return nil, fullErr
 	}
 
-	recordedKey := carpoolRecordedKey(accountID)
-	overflowKey := carpoolOverflowKey(accountID)
 	deviceField := carpoolDeviceField(trimmedDeviceID)
 	if deviceField == "" {
 		return nil, nil
@@ -294,12 +315,12 @@ func (c *identityCache) GetOrCreateCarpoolDevice(ctx context.Context, accountID 
 			if err != nil {
 				return err
 			}
-			return service.ErrClaudeOAuthCarpoolDevicesFull
+			return fullErr
 		}, recordedKey, overflowKey)
 		if err == nil {
 			return out, nil
 		}
-		if errors.Is(err, service.ErrClaudeOAuthCarpoolDevicesFull) {
+		if errors.Is(err, fullErr) {
 			return nil, err
 		}
 		if errors.Is(err, redis.TxFailedErr) {
@@ -337,7 +358,15 @@ func applyCarpoolDeviceHints(record *service.CarpoolDeviceRecord, hints service.
 }
 
 func (c *identityCache) ListCarpoolDevices(ctx context.Context, accountID int64) ([]*service.CarpoolDeviceRecord, error) {
-	values, err := c.rdb.HVals(ctx, carpoolRecordedKey(accountID)).Result()
+	return c.listAdmissionDevices(ctx, carpoolRecordedKey(accountID))
+}
+
+func (c *identityCache) ListSingleDeviceAdmission(ctx context.Context, accountID int64) ([]*service.CarpoolDeviceRecord, error) {
+	return c.listAdmissionDevices(ctx, singleDeviceAdmissionRecordedKey(accountID))
+}
+
+func (c *identityCache) listAdmissionDevices(ctx context.Context, key string) ([]*service.CarpoolDeviceRecord, error) {
+	values, err := c.rdb.HVals(ctx, key).Result()
 	if err != nil && err != redis.Nil {
 		return nil, err
 	}
@@ -353,7 +382,15 @@ func (c *identityCache) ListCarpoolDevices(ctx context.Context, accountID int64)
 }
 
 func (c *identityCache) ListCarpoolOverflowDevices(ctx context.Context, accountID int64) ([]*service.CarpoolOverflowRecord, error) {
-	values, err := c.rdb.HVals(ctx, carpoolOverflowKey(accountID)).Result()
+	return c.listAdmissionOverflow(ctx, carpoolOverflowKey(accountID))
+}
+
+func (c *identityCache) ListSingleDeviceAdmissionOverflow(ctx context.Context, accountID int64) ([]*service.CarpoolOverflowRecord, error) {
+	return c.listAdmissionOverflow(ctx, singleDeviceAdmissionOverflowKey(accountID))
+}
+
+func (c *identityCache) listAdmissionOverflow(ctx context.Context, key string) ([]*service.CarpoolOverflowRecord, error) {
+	values, err := c.rdb.HVals(ctx, key).Result()
 	if err != nil && err != redis.Nil {
 		return nil, err
 	}
@@ -369,26 +406,38 @@ func (c *identityCache) ListCarpoolOverflowDevices(ctx context.Context, accountI
 }
 
 func (c *identityCache) DeleteCarpoolDevice(ctx context.Context, accountID int64, deviceKey string) error {
+	return c.deleteAdmissionDevice(ctx, carpoolRecordedKey(accountID), carpoolOverflowKey(accountID), deviceKey)
+}
+
+func (c *identityCache) DeleteSingleDeviceAdmission(ctx context.Context, accountID int64, deviceKey string) error {
+	return c.deleteAdmissionDevice(ctx, singleDeviceAdmissionRecordedKey(accountID), singleDeviceAdmissionOverflowKey(accountID), deviceKey)
+}
+
+func (c *identityCache) deleteAdmissionDevice(ctx context.Context, recordedKey, overflowKey, deviceKey string) error {
 	field := strings.TrimSpace(deviceKey)
 	if field == "" {
 		return nil
 	}
 	pipe := c.rdb.TxPipeline()
-	pipe.HDel(ctx, carpoolRecordedKey(accountID), field)
-	pipe.HDel(ctx, carpoolOverflowKey(accountID), field)
+	pipe.HDel(ctx, recordedKey, field)
+	pipe.HDel(ctx, overflowKey, field)
 	_, err := pipe.Exec(ctx)
 	return err
 }
 
 func (c *identityCache) RotateCarpoolDeviceForDay(ctx context.Context, accountID int64, limit int, day string) (*service.CarpoolDailyRotationResult, error) {
+	return c.rotateAdmissionDeviceForDay(ctx, accountID, limit, day, carpoolRecordedKey(accountID), carpoolOverflowKey(accountID), carpoolMaintenanceKey(accountID))
+}
+
+func (c *identityCache) RotateSingleDeviceAdmissionForDay(ctx context.Context, accountID int64, limit int, day string) (*service.CarpoolDailyRotationResult, error) {
+	return c.rotateAdmissionDeviceForDay(ctx, accountID, limit, day, singleDeviceAdmissionRecordedKey(accountID), singleDeviceAdmissionOverflowKey(accountID), singleDeviceAdmissionMaintenanceKey(accountID))
+}
+
+func (c *identityCache) rotateAdmissionDeviceForDay(ctx context.Context, accountID int64, limit int, day, recordedKey, overflowKey, maintenanceKey string) (*service.CarpoolDailyRotationResult, error) {
 	trimmedDay := strings.TrimSpace(day)
 	if accountID <= 0 || limit <= 0 || trimmedDay == "" {
 		return &service.CarpoolDailyRotationResult{}, nil
 	}
-
-	recordedKey := carpoolRecordedKey(accountID)
-	overflowKey := carpoolOverflowKey(accountID)
-	maintenanceKey := carpoolMaintenanceKey(accountID)
 
 	for attempt := 0; attempt < carpoolDeviceWriteMaxRetries; attempt++ {
 		var out *service.CarpoolDailyRotationResult

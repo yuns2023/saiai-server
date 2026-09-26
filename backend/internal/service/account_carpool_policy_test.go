@@ -121,3 +121,33 @@ func TestAccountGetClaudeOAuthCarpoolAutoMaintenanceTarget(t *testing.T) {
 		t.Fatalf("invalid target fallback = %d, want %d", got, DefaultClaudeOAuthCarpoolAutoMaintenanceTarget)
 	}
 }
+
+func TestSingleDeviceAdmissionAndFixedHeaderDefaults(t *testing.T) {
+	account := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{
+		"claude_oauth_mode":               ClaudeOAuthModeSingleDevice,
+		"claude_oauth_fixed_headers_text": "X-Stainless-Lang: js",
+	}}
+	if account.IsClaudeOAuthFixedHeadersEnabled() {
+		t.Fatal("new accounts without an explicit flag must keep fixed headers disabled")
+	}
+	account.Extra["claude_oauth_fixed_headers_enabled"] = true // migration result for existing accounts
+	if !account.IsClaudeOAuthFixedHeadersEnabled() {
+		t.Fatal("migrated legacy accounts must remain enabled")
+	}
+	if account.IsClaudeOAuthSingleDeviceAdmissionEnabled() {
+		t.Fatal("existing accounts must remain unbounded")
+	}
+	account.Extra["claude_oauth_fixed_headers_enabled"] = false
+	if account.IsClaudeOAuthFixedHeadersEnabled() {
+		t.Fatal("explicit false must disable fixed headers")
+	}
+	account.Extra["claude_oauth_single_device_admission_enabled"] = true
+	account.Extra["claude_oauth_single_device_admission_auto_expand_enabled"] = true
+	if !account.IsClaudeOAuthSingleDeviceAdmissionAutoExpandEnabled() {
+		t.Fatal("enabled admission should permit daily maintenance")
+	}
+	account.Extra["claude_oauth_single_device_admission_enabled"] = false
+	if account.IsClaudeOAuthSingleDeviceAdmissionAutoExpandEnabled() {
+		t.Fatal("disabled admission must disable daily maintenance")
+	}
+}

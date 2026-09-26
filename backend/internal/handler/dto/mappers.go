@@ -321,10 +321,20 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 			out.ClaudeOAuthSharedBucketCount = &bucketCount
 		}
 		if mode == service.ClaudeOAuthModeSingleDevice {
+			fixedHeadersEnabled := a.IsClaudeOAuthFixedHeadersEnabled()
+			out.ClaudeOAuthFixedHeadersEnabled = &fixedHeadersEnabled
+			admissionEnabled := a.IsClaudeOAuthSingleDeviceAdmissionEnabled()
+			out.ClaudeOAuthSingleDeviceAdmissionEnabled = &admissionEnabled
+			admissionLimit := a.GetClaudeOAuthSingleDeviceAdmissionLimit()
+			out.ClaudeOAuthSingleDeviceAdmissionLimit = &admissionLimit
+			admissionTarget := a.GetClaudeOAuthSingleDeviceAdmissionTarget()
+			out.ClaudeOAuthSingleDeviceAdmissionTarget = &admissionTarget
+			autoExpand := a.IsClaudeOAuthSingleDeviceAdmissionAutoExpandEnabled()
+			out.ClaudeOAuthSingleDeviceAdmissionAutoExpand = &autoExpand
 			if fixedDeviceID := a.GetClaudeOAuthFixedDeviceID(); fixedDeviceID != "" {
 				out.ClaudeOAuthFixedDeviceID = &fixedDeviceID
 			}
-			if fixedHeadersText := a.GetClaudeOAuthFixedHeadersText(); fixedHeadersText != "" {
+			if fixedHeadersText := a.GetClaudeOAuthFixedHeadersTextForEdit(); fixedHeadersText != "" {
 				out.ClaudeOAuthFixedHeadersText = &fixedHeadersText
 			}
 		}

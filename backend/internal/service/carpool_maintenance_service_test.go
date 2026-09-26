@@ -68,8 +68,43 @@ func cloneCarpoolMaintenanceAccount(account *Account) Account {
 
 type carpoolMaintenanceCacheStub struct {
 	IdentityCache
-	results map[int64]*CarpoolDailyRotationResult
-	calls   []carpoolMaintenanceRotationCall
+	results           map[int64]*CarpoolDailyRotationResult
+	calls             []carpoolMaintenanceRotationCall
+	singleDeviceCalls []carpoolMaintenanceRotationCall
+}
+
+func (s *carpoolMaintenanceCacheStub) RotateSingleDeviceAdmissionForDay(_ context.Context, accountID int64, limit int, day string) (*CarpoolDailyRotationResult, error) {
+	s.singleDeviceCalls = append(s.singleDeviceCalls, carpoolMaintenanceRotationCall{accountID: accountID, limit: limit, day: day})
+	if result := s.results[accountID]; result != nil {
+		return result, nil
+	}
+	return &CarpoolDailyRotationResult{Applied: true}, nil
+}
+
+func TestSingleDeviceAdmissionMaintenanceExpandsThenRotates(t *testing.T) {
+	account := &Account{ID: 99, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{
+		"claude_oauth_mode":                                        ClaudeOAuthModeSingleDevice,
+		"claude_oauth_single_device_admission_enabled":             true,
+		"claude_oauth_single_device_admission_auto_expand_enabled": true,
+		"claude_oauth_single_device_admission_limit":               1,
+		"claude_oauth_single_device_admission_target":              2,
+	}}
+	repo := &carpoolMaintenanceAccountRepoStub{accounts: map[int64]*Account{99: account}}
+	cache := &carpoolMaintenanceCacheStub{results: map[int64]*CarpoolDailyRotationResult{99: {Applied: true, RecordedCount: 2, Evicted: &CarpoolDeviceRecord{DeviceKey: "oldest"}}}}
+	svc := NewCarpoolMaintenanceService(repo, cache, &config.Config{Timezone: "UTC"})
+	dayOne := time.Date(2026, time.September, 24, 0, 0, 0, 0, time.UTC)
+	stats, err := svc.runOnce(context.Background(), dayOne)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Expanded)
+	require.Equal(t, 2, account.GetClaudeOAuthSingleDeviceAdmissionLimit())
+	require.Empty(t, cache.singleDeviceCalls)
+	stats, err = svc.runOnce(context.Background(), dayOne.Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.AlreadyProcessed)
+	stats, err = svc.runOnce(context.Background(), dayOne.Add(24*time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Rotated)
+	require.Equal(t, []carpoolMaintenanceRotationCall{{accountID: 99, limit: 2, day: "2026-09-25"}}, cache.singleDeviceCalls)
 }
 
 type carpoolMaintenanceRotationCall struct {

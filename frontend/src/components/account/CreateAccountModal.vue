@@ -1690,10 +1690,25 @@
                   />
                 </div>
               </div>
+              <div class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+                <label class="flex items-center gap-2"><input v-model="claudeOAuthSingleDeviceAdmissionEnabled" type="checkbox" data-testid="single-device-admission-enabled" />Limit incoming devices</label>
+                <template v-if="claudeOAuthSingleDeviceAdmissionEnabled">
+                  <label class="input-label">Incoming device limit</label>
+                  <input v-model.number="claudeOAuthSingleDeviceAdmissionLimit" type="number" min="1" max="32" class="input" />
+                  <label class="flex items-center gap-2"><input v-model="claudeOAuthSingleDeviceAdmissionAutoExpand" type="checkbox" data-testid="single-device-admission-auto-expand" />Daily automatic expansion and rotation</label>
+                  <template v-if="claudeOAuthSingleDeviceAdmissionAutoExpand">
+                    <label class="input-label">Automatic maintenance target</label>
+                    <input v-model.number="claudeOAuthSingleDeviceAdmissionTarget" type="number" min="1" max="32" class="input" />
+                    <p class="input-hint">At midnight, increase the limit by one until the target. When full at the target, remove the least recently seen incoming device. The upstream device ID stays fixed.</p>
+                  </template>
+                </template>
+              </div>
               <div>
+                <label class="flex items-center gap-2 mb-2"><input v-model="claudeOAuthFixedHeadersEnabled" type="checkbox" data-testid="single-device-fixed-headers-enabled" />Enable fixed headers</label>
                 <label class="input-label">Fixed headers</label>
                 <textarea
                   v-model="claudeOAuthFixedHeadersText"
+                  :disabled="!claudeOAuthFixedHeadersEnabled"
                   class="input min-h-[160px] font-mono text-xs"
                   placeholder="User-Agent: claude-cli/2.1.109 (external, cli)&#10;X-Stainless-Arch: x64&#10;X-Stainless-Lang: js&#10;X-Stainless-OS: Linux"
                 />
@@ -2857,6 +2872,11 @@ const claudeOAuthTokenDisableBeforeExpiryMinutes = ref<number>(3)
 const claudeOAuthFixedAccountUUID = ref('')
 const claudeOAuthFixedDeviceID = ref('')
 const claudeOAuthFixedHeadersText = ref('')
+const claudeOAuthFixedHeadersEnabled = ref(false)
+const claudeOAuthSingleDeviceAdmissionEnabled = ref(false)
+const claudeOAuthSingleDeviceAdmissionLimit = ref(5)
+const claudeOAuthSingleDeviceAdmissionAutoExpand = ref(false)
+const claudeOAuthSingleDeviceAdmissionTarget = ref(16)
 const claudeOAuthCurrentLimit = computed({
   get: () => (claudeOAuthMode.value === 'shared' ? claudeOAuthSharedBucketCount.value : claudeOAuthCarpoolDeviceLimit.value),
   set: (value: number) => {
@@ -3478,6 +3498,11 @@ const resetForm = () => {
   claudeOAuthFixedAccountUUID.value = ''
   claudeOAuthFixedDeviceID.value = ''
   claudeOAuthFixedHeadersText.value = ''
+  claudeOAuthFixedHeadersEnabled.value = false
+  claudeOAuthSingleDeviceAdmissionEnabled.value = false
+  claudeOAuthSingleDeviceAdmissionLimit.value = 5
+  claudeOAuthSingleDeviceAdmissionAutoExpand.value = false
+  claudeOAuthSingleDeviceAdmissionTarget.value = 16
   blockedModelPatternsText.value = ''
   tempUnschedEnabled.value = false
   tempUnschedRules.value = []
@@ -4154,6 +4179,8 @@ const buildAnthropicOAuthExtra = (baseExtra: Record<string, unknown>) => {
   delete extra.claude_oauth_carpool_unlimited_devices
   delete extra.claude_oauth_carpool_auto_expand_enabled
   delete extra.claude_oauth_carpool_auto_maintenance_target
+  delete extra.claude_oauth_single_device_admission_enabled
+  delete extra.claude_oauth_single_device_admission_auto_expand_enabled
   if (claudeOAuthMode.value === 'shared') {
     extra.claude_oauth_shared_bucket_count = Math.min(32, Math.max(1, claudeOAuthSharedBucketCount.value || 5))
   } else if (claudeOAuthMode.value === 'carpool') {
@@ -4165,6 +4192,12 @@ const buildAnthropicOAuthExtra = (baseExtra: Record<string, unknown>) => {
       extra.claude_oauth_carpool_auto_expand_enabled = true
     }
   } else if (claudeOAuthMode.value === 'single_device') {
+    extra.claude_oauth_single_device_admission_enabled = claudeOAuthSingleDeviceAdmissionEnabled.value
+    if (claudeOAuthSingleDeviceAdmissionEnabled.value) {
+      extra.claude_oauth_single_device_admission_limit = Math.min(32, Math.max(1, claudeOAuthSingleDeviceAdmissionLimit.value || 5))
+      extra.claude_oauth_single_device_admission_target = Math.min(32, Math.max(1, claudeOAuthSingleDeviceAdmissionTarget.value || 16))
+      extra.claude_oauth_single_device_admission_auto_expand_enabled = claudeOAuthSingleDeviceAdmissionAutoExpand.value
+    }
     extra.claude_oauth_disable_token_refresh = claudeOAuthDisableTokenRefresh.value
     if (claudeOAuthDisableTokenRefresh.value) {
       extra.claude_oauth_token_disable_before_expiry_minutes = claudeOAuthTokenDisableBeforeExpiryMinutes.value ?? 3
@@ -4182,8 +4215,13 @@ const buildAnthropicOAuthExtra = (baseExtra: Record<string, unknown>) => {
       throw new Error('single_device requires Fixed Device ID')
     }
     extra.claude_oauth_fixed_device_id = claudeOAuthFixedDeviceID.value.trim()
+    extra.claude_oauth_fixed_headers_enabled = claudeOAuthFixedHeadersEnabled.value
     if (claudeOAuthFixedHeadersText.value.trim()) {
-      extra.claude_oauth_fixed_headers_text = claudeOAuthFixedHeadersText.value.trim()
+      if (claudeOAuthFixedHeadersEnabled.value) {
+        extra.claude_oauth_fixed_headers_text = claudeOAuthFixedHeadersText.value.trim()
+      } else {
+        extra.claude_oauth_fixed_headers_saved_text = claudeOAuthFixedHeadersText.value.trim()
+      }
     }
   }
 

@@ -105,6 +105,29 @@ The admin create/edit forms therefore ignore and remove `account_uuid` for a
 setup-token account in `single_device` mode. This section does not redefine the
 identity rules of the other OAuth modes.
 
+Administrator-supplied fixed headers have a separate enable switch, disabled
+when absent. Migration 097 explicitly enables the switch for existing
+`single_device` accounts with non-empty fixed header text and no prior flag.
+New accounts therefore default to disabled even when text is supplied through
+the API. Turning the switch off moves text to
+`claude_oauth_fixed_headers_saved_text` and removes the old active-text key.
+The editor retains the text for later use, while a rollback to an older Server
+cannot reactivate it. Incoming UA variants continue updating their slots.
+
+An optional incoming-device admission registry counts the original client
+`metadata.user_id.device_id`, independently of UA slots and the single fixed
+upstream device ID. It is disabled by default for existing accounts. When
+enabled, its limit defaults to 5 and is constrained to 1..32. A separate
+daily-maintenance switch raises the limit by one each calendar day in the
+configured server timezone until the account target (default 16). Once the
+limit equals the target, a full registry loses its oldest `last_seen_at`
+device at 00:00. A limit above the target is administrator-controlled. The
+evicted client can immediately register again if capacity remains; no
+cooldown or deny-list is created. This maintenance never rotates the fixed
+upstream device ID or the UA slots. Administrators can inspect the separate
+incoming-device registry and remove an entry in the account editor; the
+dedicated admin API uses `/claude-single-device-admissions`.
+
 ## Claude OAuth request attribution
 
 Every Anthropic OAuth/setup-token forwarding attempt emits the structured
