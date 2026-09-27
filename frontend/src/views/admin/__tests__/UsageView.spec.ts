@@ -83,7 +83,7 @@ const AppLayoutStub = { template: '<div><slot /></div>' }
 const UsageFiltersStub = {
   props: ['modelValue'],
   emits: ['update:modelValue', 'change'],
-  template: '<div><button data-test="filter-user" @click="$emit(\'update:modelValue\', { ...modelValue, user_id: 42 }); $emit(\'change\')">filter user</button><slot name="after-reset" /></div>'
+  template: '<div><button data-test="filter-user" @click="$emit(\'update:modelValue\', { ...modelValue, user_id: 42, model: \'claude-opus\' }); $emit(\'change\')">filter user</button><slot name="after-reset" /></div>'
 }
 const ModelDistributionChartStub = {
   props: ['metric', 'breakdownFilters'],
@@ -106,6 +106,10 @@ const GroupDistributionChartStub = {
       <button class="switch-metric" @click="$emit('update:metric', 'actual_cost')">switch</button>
     </div>
   `,
+}
+const EndpointDistributionChartStub = {
+  props: ['breakdownFilters'],
+  template: '<div data-test="endpoint-chart" />',
 }
 
 describe('admin UsageView distribution metric toggles', () => {
@@ -208,7 +212,7 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
   })
 
-  it('passes the selected user to distribution breakdowns', async () => {
+  it('passes the selected user and model to every distribution breakdown', async () => {
     const wrapper = mount(UsageView, {
       global: {
         stubs: {
@@ -226,7 +230,7 @@ describe('admin UsageView distribution metric toggles', () => {
           TokenUsageTrend: true,
           ModelDistributionChart: ModelDistributionChartStub,
           GroupDistributionChart: GroupDistributionChartStub,
-          EndpointDistributionChart: true,
+          EndpointDistributionChart: EndpointDistributionChartStub,
         },
       },
     })
@@ -236,5 +240,15 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(getModelStats).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: 42 }))
     expect(wrapper.find('[data-test="model-chart"] .breakdown-user').text()).toBe('42')
     expect(wrapper.find('[data-test="group-chart"] .breakdown-user').text()).toBe('42')
+    expect(wrapper.findComponent(EndpointDistributionChartStub).props('breakdownFilters')).toEqual(expect.objectContaining({
+      user_id: 42,
+      model_filter: 'claude-opus',
+    }))
+    for (const chart of [ModelDistributionChartStub, GroupDistributionChartStub]) {
+      expect(wrapper.findComponent(chart).props('breakdownFilters')).toEqual(expect.objectContaining({
+        user_id: 42,
+        model_filter: 'claude-opus',
+      }))
+    }
   })
 })

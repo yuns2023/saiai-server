@@ -68,7 +68,7 @@
             :end-date="endDate"
             :start-time="filters.start_time"
             :end-time="filters.end_time"
-            :breakdown-filters="{ ...breakdownFilters, model_filter: filters.model }"
+            :breakdown-filters="breakdownFilters"
           />
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
@@ -243,6 +243,7 @@ const breakdownFilters = computed<UserBreakdownParams>(() => {
     api_key_id: filters.value.api_key_id,
     account_id: filters.value.account_id,
     group_id: filters.value.group_id,
+    model_filter: filters.value.model,
     session_id: filters.value.session_id,
     request_type: requestType,
     stream: legacyStream === null ? undefined : legacyStream,
