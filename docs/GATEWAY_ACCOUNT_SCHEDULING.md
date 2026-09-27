@@ -112,7 +112,10 @@ New accounts therefore default to disabled even when text is supplied through
 the API. Turning the switch off moves text to
 `claude_oauth_fixed_headers_saved_text` and removes the old active-text key.
 The editor retains the text for later use, while a rollback to an older Server
-cannot reactivate it. Incoming UA variants continue updating their slots.
+cannot reactivate it. Without a fixed `User-Agent`, incoming UA variants
+continue updating their slots.
+When an enabled fixed header supplies `User-Agent`, its value selects the UA
+slot and incoming UA versions do not update that slot's fingerprint.
 
 An optional incoming-device admission registry counts the original client
 `metadata.user_id.device_id`, independently of UA slots and the single fixed
