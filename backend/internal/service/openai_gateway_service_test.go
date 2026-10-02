@@ -1807,8 +1807,8 @@ func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t 
 		originator     string
 		wantOriginator string
 	}{
-		{name: "desktop originator preserved", originator: "Codex Desktop", wantOriginator: "Codex Desktop"},
-		{name: "vscode originator preserved", originator: "codex_vscode", wantOriginator: "codex_vscode"},
+		{name: "desktop originator preserved", userAgent: "codex_cli_rs/0.153.4", originator: "Codex Desktop", wantOriginator: "Codex Desktop"},
+		{name: "vscode originator preserved", userAgent: "codex_cli_rs/0.153.4", originator: "codex_vscode", wantOriginator: "codex_vscode"},
 		{name: "official ua without originator remains absent", userAgent: "Codex Desktop/1.2.3", wantOriginator: ""},
 	}
 

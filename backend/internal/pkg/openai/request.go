@@ -17,8 +17,8 @@ var CodexTerminalUserAgentPrefixes = []string{
 	"codex_exec/",
 }
 
-// CodexOfficialClientUserAgentPrefixes matches Codex 官方客户端家族 User-Agent 前缀。
-// 该列表仅用于 OpenAI OAuth `codex_cli_only` 访问限制判定。
+// CodexOfficialClientUserAgentPrefixes lists the product tokens accepted by
+// Codex ingress. A product must start the User-Agent and have a version.
 var CodexOfficialClientUserAgentPrefixes = []string{
 	"codex_cli_rs/",
 	"codex_vscode/",
@@ -27,18 +27,24 @@ var CodexOfficialClientUserAgentPrefixes = []string{
 	"codex_atlas/",
 	"codex_exec/",
 	"codex_sdk_ts/",
-	"codex ",
+	"codex desktop/",
 }
 
-// CodexOfficialClientOriginatorPrefixes matches Codex 官方客户端家族 originator 前缀。
-// 说明：OpenAI 官方 Codex 客户端并不只使用固定的 codex_app 标识。
-// 例如 codex_cli_rs、codex_vscode、codex_chatgpt_desktop、codex_atlas、codex_exec、codex_sdk_ts 等。
-var CodexOfficialClientOriginatorPrefixes = []string{
-	"codex_",
-	"codex ",
+// CodexOfficialClientOriginators is an exact allowlist. An originator is a
+// compatibility signal, not proof of client identity, and cannot replace a UA.
+var CodexOfficialClientOriginators = []string{
+	"codex_cli_rs",
+	"codex_vscode",
+	"codex_app",
+	"codex_chatgpt_desktop",
+	"codex_atlas",
+	"codex_exec",
+	"codex_sdk_ts",
+	"codex desktop",
 }
 
-// IsCodexCLIRequest checks if the User-Agent indicates a Codex CLI request
+// IsCodexCLIRequest retains the historical substring check for compatibility
+// header rewriting. Admission must use IsCodexOfficialClientByHeaders instead.
 func IsCodexCLIRequest(userAgent string) bool {
 	ua := normalizeCodexClientHeader(userAgent)
 	if ua == "" {
@@ -54,7 +60,7 @@ func IsCodexTerminalRequest(userAgent string) bool {
 	if ua == "" {
 		return false
 	}
-	return matchCodexClientHeaderPrefixes(ua, CodexTerminalUserAgentPrefixes)
+	return matchCodexUserAgentPrefixes(ua, CodexTerminalUserAgentPrefixes)
 }
 
 // IsCodexOfficialClientRequest checks if the User-Agent indicates a Codex 官方客户端请求。
@@ -64,7 +70,7 @@ func IsCodexOfficialClientRequest(userAgent string) bool {
 	if ua == "" {
 		return false
 	}
-	return matchCodexClientHeaderPrefixes(ua, CodexOfficialClientUserAgentPrefixes)
+	return matchCodexUserAgentPrefixes(ua, CodexOfficialClientUserAgentPrefixes)
 }
 
 // IsCodexOfficialClientOriginator checks if originator indicates a Codex 官方客户端请求。
@@ -73,13 +79,45 @@ func IsCodexOfficialClientOriginator(originator string) bool {
 	if v == "" {
 		return false
 	}
-	return matchCodexClientHeaderPrefixes(v, CodexOfficialClientOriginatorPrefixes)
+	for _, allowed := range CodexOfficialClientOriginators {
+		if v == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 // IsCodexOfficialClientByHeaders checks whether the request headers indicate an
-// official Codex client family request.
+// official Codex client family request. Missing or non-Codex UAs fail closed,
+// even when originator claims Codex. A present originator must be allowlisted.
+// These caller-controlled fields do not provide cryptographic attestation.
 func IsCodexOfficialClientByHeaders(userAgent, originator string) bool {
-	return IsCodexOfficialClientRequest(userAgent) || IsCodexOfficialClientOriginator(originator)
+	return IsCodexOfficialClientRequest(userAgent) &&
+		(normalizeCodexClientHeader(originator) == "" || IsCodexOfficialClientOriginator(originator))
+}
+
+func matchCodexUserAgentPrefixes(value string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if !strings.HasPrefix(value, prefix) {
+			continue
+		}
+		// Official UAs append platform/app details after the product/version.
+		// Reject missing versions, nested products and arbitrary suffix text in
+		// the version token; release/prerelease/build versions remain accepted.
+		versionAndDetails := strings.TrimPrefix(value, prefix)
+		if versionAndDetails == "" || versionAndDetails[0] < '0' || versionAndDetails[0] > '9' {
+			return false
+		}
+		parts := strings.Fields(versionAndDetails)
+		for _, r := range parts[0] {
+			if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || r == '.' || r == '-' || r == '+' {
+				continue
+			}
+			return false
+		}
+		return true
+	}
+	return false
 }
 
 func normalizeCodexClientHeader(value string) string {

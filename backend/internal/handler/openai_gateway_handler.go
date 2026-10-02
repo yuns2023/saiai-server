@@ -999,7 +999,8 @@ func codexClientPolicyMatched(c *gin.Context, policy string) bool {
 	case "official_clients":
 		return pkgopenai.IsCodexOfficialClientByHeaders(userAgent, originator)
 	case "cli_only":
-		return pkgopenai.IsCodexTerminalRequest(userAgent) || originator == "codex_cli_rs" || originator == "codex_exec"
+		return pkgopenai.IsCodexOfficialClientByHeaders(userAgent, originator) &&
+			pkgopenai.IsCodexTerminalRequest(userAgent)
 	case "local_proxy_only":
 		return codexLocalProxyRequestMatched(c, userAgent, originator)
 	default:
@@ -1044,12 +1045,27 @@ func (h *OpenAIGatewayHandler) validateCodexClientPolicyHTTP(c *gin.Context, gro
 	if group == nil || codexClientPolicyMatched(c, group.CodexClientPolicy) {
 		return true
 	}
+	logCodexClientPolicyRejection(c, group)
 	if strings.EqualFold(strings.TrimSpace(group.CodexClientPolicy), "local_proxy_only") {
 		h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", "This group requires SAIAI local proxy mode")
 		return false
 	}
 	h.errorResponse(c, http.StatusForbidden, "official_client_required", "This group only allows approved Codex clients")
 	return false
+}
+
+func logCodexClientPolicyRejection(c *gin.Context, group *service.Group) {
+	reason := "invalid_client_headers"
+	if pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) &&
+		strings.EqualFold(strings.TrimSpace(group.CodexClientPolicy), "local_proxy_only") {
+		reason = "required_proxy_headers_missing"
+	}
+	// Never include raw headers, account IDs or request bodies in this event.
+	requestLogger(c, "handler.openai_gateway.client_policy",
+		zap.Int64("group_id", group.ID),
+		zap.String("policy", group.CodexClientPolicy),
+		zap.String("reason", reason),
+	).Warn("openai.codex_client_policy_rejected")
 }
 
 func isOpenAIRemoteCompactPath(c *gin.Context) bool {
@@ -1403,6 +1419,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	if apiKey.Group != nil && !codexClientPolicyMatched(c, apiKey.Group.CodexClientPolicy) {
+		logCodexClientPolicyRejection(c, apiKey.Group)
 		reason := "approved Codex client required"
 		if strings.EqualFold(strings.TrimSpace(apiKey.Group.CodexClientPolicy), "local_proxy_only") {
 			reason = "SAIAI local proxy required"

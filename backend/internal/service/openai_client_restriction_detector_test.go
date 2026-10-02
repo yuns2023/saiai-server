@@ -77,7 +77,7 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 		require.Equal(t, CodexClientRestrictionReasonMatchedUA, result.Reason)
 	})
 
-	t.Run("开启后 originator 命中", func(t *testing.T) {
+	t.Run("开启后 curl 不能通过 originator 放行", func(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(nil)
 		account := &Account{
 			Platform: PlatformOpenAI,
@@ -87,8 +87,17 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 
 		result := detector.Detect(newCodexDetectorTestContext("curl/8.0", "codex_chatgpt_desktop"), account)
 		require.True(t, result.Enabled)
-		require.True(t, result.Matched)
-		require.Equal(t, CodexClientRestrictionReasonMatchedOriginator, result.Reason)
+		require.False(t, result.Matched)
+		require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
+	})
+
+	t.Run("开启后官方 UA 与未知 originator 拒绝", func(t *testing.T) {
+		detector := NewOpenAICodexClientRestrictionDetector(nil)
+		account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"codex_cli_only": true}}
+		result := detector.Detect(newCodexDetectorTestContext("codex_cli_rs/0.159.2", "codex_fake"), account)
+		require.True(t, result.Enabled)
+		require.False(t, result.Matched)
+		require.Equal(t, CodexClientRestrictionReasonNotMatchedOriginator, result.Reason)
 	})
 
 	t.Run("开启后非官方客户端拒绝", func(t *testing.T) {

@@ -30,6 +30,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		policyMatched = codexLocalProxyModelsRequestMatched(c)
 	}
 	if !policyMatched {
+		logCodexClientPolicyRejection(c, apiKey.Group)
 		if strings.EqualFold(apiKey.Group.CodexClientPolicy, "local_proxy_only") {
 			h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", "This group requires SAIAI local proxy mode")
 		} else {

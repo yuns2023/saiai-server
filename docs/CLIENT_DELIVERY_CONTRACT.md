@@ -135,10 +135,30 @@ OAuth shape. The request gate applies only to Codex model ingress
 (`/v1/responses`, Responses WebSocket and the Codex models manifest); ChatGPT
 Desktop/VSCode control-plane sidecars are not subject to it.
 
-The gate requires an official Codex client family together with non-empty
-`chatgpt-account-id` and `version` headers. This is an operational migration
+The gate requires a recognized Codex product/version at the start of the
+`User-Agent`, together with non-empty `chatgpt-account-id` and `version`
+headers. A missing UA, a non-Codex UA (including curl), an embedded Codex
+substring, or a missing product version is rejected even when `originator`
+claims Codex. A present `originator` must match the exact allowlist:
+`codex_cli_rs`, `codex_vscode`, `codex_app`, `codex_chatgpt_desktop`,
+`codex_atlas`, `codex_exec`, `codex_sdk_ts`, or `Codex Desktop`
+(case-insensitive). Official UAs without `originator` remain accepted;
+app-server UAs may carry a different allowlisted surface originator.
+
+The same client-header admission applies to the `official_clients` and
+`cli_only` group policies, OAuth account restrictions, and native relay
+accounts, across HTTP and WebSocket. `cli_only` additionally requires the
+terminal/exec UA; an originator cannot convert a VSCode UA into a terminal UA.
+The models catalog retains its existing exception for missing `version`, but
+still requires valid client headers and non-empty `chatgpt-account-id` under
+`local_proxy_only`. Group policy rejection logs contain only correlation,
+policy and reason fields, without raw headers, account IDs or request bodies.
+
+This is an operational migration
 signal, not cryptographic attestation: it is intended to catch stale
-`config.toml`/`init-codex` configurations. Validate each CLI, Desktop and IDE
+`config.toml`/`init-codex` configurations and reject contradictory client
+headers. A caller able to reproduce all allowed request fields can still
+imitate the accepted shape. Validate each CLI, Desktop and IDE
 version before enabling the policy for a production group. The default remains
 `off` and older clients must not be rejected until the updated client bundle is
 available.
