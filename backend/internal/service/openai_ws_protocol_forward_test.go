@@ -329,7 +329,7 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthRetriesStalePreviousRespon
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
-	c.Request.Header.Set("User-Agent", "codex-tui/0.130.0")
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.130.0")
 	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 
 	upstream := &httpUpstreamSequenceRecorder{
@@ -382,7 +382,7 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthKeepsPreviousResponseIDFor
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
-	c.Request.Header.Set("User-Agent", "codex-tui/0.130.0")
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.130.0")
 	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 
 	upstream := &httpUpstreamSequenceRecorder{
@@ -428,7 +428,7 @@ func TestOpenAIGatewayService_Forward_HTTPIngressPassesThroughInvalidRequest(t *
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
-	c.Request.Header.Set("User-Agent", "codex-tui/0.130.0")
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.130.0")
 	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 
 	upstream := &httpUpstreamSequenceRecorder{
