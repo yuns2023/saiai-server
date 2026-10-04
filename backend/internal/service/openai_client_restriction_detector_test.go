@@ -25,6 +25,17 @@ func newCodexDetectorTestContext(ua string, originator string) *gin.Context {
 func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	for _, version := range []string{"0.154.0", "0.160.0"} {
+		t.Run("official TUI "+version, func(t *testing.T) {
+			detector := NewOpenAICodexClientRestrictionDetector(nil)
+			account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"codex_cli_only": true}}
+			result := detector.Detect(newCodexDetectorTestContext("codex-tui/"+version, "codex-tui"), account)
+			require.True(t, result.Enabled)
+			require.True(t, result.Matched)
+			require.Equal(t, CodexClientRestrictionReasonMatchedUA, result.Reason)
+		})
+	}
+
 	t.Run("未开启开关时绕过", func(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(nil)
 		account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{}}

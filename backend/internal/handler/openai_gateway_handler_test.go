@@ -101,8 +101,11 @@ func TestCodexClientPolicyMatched(t *testing.T) {
 	}{
 		{name: "off", policy: "off", ua: "curl/8", want: true},
 		{name: "official vscode", policy: "official_clients", ua: "codex_vscode/1.0", want: true},
+		{name: "official TUI", policy: "official_clients", ua: "codex-tui/0.160.0", originator: "codex-tui", want: true},
 		{name: "official rejects curl", policy: "official_clients", ua: "curl/8", want: false},
 		{name: "cli accepts cli ua", policy: "cli_only", ua: "codex_cli_rs/1.0", want: true},
+		{name: "cli accepts TUI ua", policy: "cli_only", ua: "codex-tui/0.154.0", originator: "codex-tui", want: true},
+		{name: "cli rejects vscode with TUI originator", policy: "cli_only", ua: "codex_vscode/0.160.0", originator: "codex-tui", want: false},
 		{name: "cli rejects vscode", policy: "cli_only", ua: "codex_vscode/1.0", want: false},
 		{name: "cli rejects originator without UA", policy: "cli_only", originator: "codex_cli_rs", want: false},
 		{name: "cli rejects curl with exact originator", policy: "cli_only", ua: "curl/7.76.1", originator: "codex_exec", want: false},
@@ -114,6 +117,11 @@ func TestCodexClientPolicyMatched(t *testing.T) {
 		{name: "local proxy rejects missing UA", policy: "local_proxy_only", originator: "codex_cli_rs", accountID: "acct", version: "0.159.2", want: false},
 		{name: "local proxy rejects unknown originator", policy: "local_proxy_only", ua: "codex_cli_rs/0.159.2", originator: "codex_fake", accountID: "acct", version: "0.159.2", want: false},
 		{name: "local proxy accepts CLI without originator", policy: "local_proxy_only", ua: "codex_cli_rs/0.159.2", accountID: "acct", version: "0.159.2", want: true},
+		{name: "local proxy accepts TUI bootstrap", policy: "local_proxy_only", ua: "codex-tui/0.154.0", originator: "codex_cli_rs", accountID: "acct", version: "0.154.0", want: true},
+		{name: "local proxy accepts TUI 0.154", policy: "local_proxy_only", ua: "codex-tui/0.154.0", originator: "codex-tui", accountID: "acct", version: "0.154.0", want: true},
+		{name: "local proxy accepts TUI 0.160", policy: "local_proxy_only", ua: "codex-tui/0.160.0", originator: "codex-tui", accountID: "acct", version: "0.160.0", want: true},
+		{name: "local proxy rejects TUI missing version", policy: "local_proxy_only", ua: "codex-tui/0.160.0", originator: "codex-tui", accountID: "acct", want: false},
+		{name: "local proxy rejects TUI missing account", policy: "local_proxy_only", ua: "codex-tui/0.160.0", originator: "codex-tui", version: "0.160.0", want: false},
 		{name: "local proxy accepts vscode oauth shape", policy: "local_proxy_only", ua: "codex_vscode/0.153.4", accountID: "acct", version: "0.153.4", want: true},
 		{name: "local proxy accepts desktop oauth shape", policy: "local_proxy_only", ua: "codex_chatgpt_desktop/0.153.4", originator: "codex_chatgpt_desktop", accountID: "acct", version: "0.153.4", want: true},
 		{name: "local proxy rejects base url oauth missing version", policy: "local_proxy_only", ua: "codex_exec/0.153.4", accountID: "acct", want: false},
@@ -158,6 +166,27 @@ func TestCodexLocalProxyModelsRequestMatchedAllowsDiscoveryWithoutVersion(t *tes
 
 	assert.True(t, codexLocalProxyModelsRequestMatched(c))
 	assert.False(t, codexLocalProxyRequestMatched(c, c.GetHeader("User-Agent"), c.GetHeader("originator")))
+}
+
+func TestCodexTUIModelsAndContinuationAccountBoundary(t *testing.T) {
+	for _, version := range []string{"0.154.0", "0.160.0"} {
+		t.Run(version, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			context.Request = httptest.NewRequest(http.MethodGet, "/v1/models?client_version="+version, nil)
+			context.Request.Header.Set("User-Agent", "codex-tui/"+version)
+			context.Request.Header.Set("originator", "codex-tui")
+			context.Request.Header.Set("chatgpt-account-id", "TEST_ONLY_ACCOUNT")
+			account := &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}
+			require.True(t, codexLocalProxyModelsRequestMatched(context))
+			require.False(t, enforceCodexContinuationAccountBoundary(context, account))
+			context.Request.Header.Set("version", version)
+			require.True(t, enforceCodexContinuationAccountBoundary(context, account))
+			context.Request.Header.Del("chatgpt-account-id")
+			require.False(t, codexLocalProxyModelsRequestMatched(context))
+			require.False(t, enforceCodexContinuationAccountBoundary(context, account))
+		})
+	}
 }
 
 func TestOpenAIHandleStreamingAwareError_NonStreaming(t *testing.T) {

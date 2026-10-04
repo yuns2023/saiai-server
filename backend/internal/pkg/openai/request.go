@@ -7,6 +7,7 @@ import "strings"
 var CodexCLIUserAgentPrefixes = []string{
 	"codex_vscode/",
 	"codex_cli_rs/",
+	"codex-tui/",
 }
 
 // CodexTerminalUserAgentPrefixes is the strict terminal-only subset used by
@@ -14,6 +15,7 @@ var CodexCLIUserAgentPrefixes = []string{
 // whose historical compatibility semantics also include the VSCode client.
 var CodexTerminalUserAgentPrefixes = []string{
 	"codex_cli_rs/",
+	"codex-tui/",
 	"codex_exec/",
 }
 
@@ -21,6 +23,7 @@ var CodexTerminalUserAgentPrefixes = []string{
 // Codex ingress. A product must start the User-Agent and have a version.
 var CodexOfficialClientUserAgentPrefixes = []string{
 	"codex_cli_rs/",
+	"codex-tui/",
 	"codex_vscode/",
 	"codex_app/",
 	"codex_chatgpt_desktop/",
@@ -34,6 +37,7 @@ var CodexOfficialClientUserAgentPrefixes = []string{
 // compatibility signal, not proof of client identity, and cannot replace a UA.
 var CodexOfficialClientOriginators = []string{
 	"codex_cli_rs",
+	"codex-tui",
 	"codex_vscode",
 	"codex_app",
 	"codex_chatgpt_desktop",

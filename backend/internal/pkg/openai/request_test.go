@@ -9,6 +9,7 @@ func TestIsCodexCLIRequest(t *testing.T) {
 		want bool
 	}{
 		{name: "codex_cli_rs 前缀", ua: "codex_cli_rs/0.1.0", want: true},
+		{name: "codex-tui 前缀", ua: "codex-tui/0.154.0", want: true},
 		{name: "codex_vscode 前缀", ua: "codex_vscode/1.2.3", want: true},
 		{name: "大小写混合", ua: "Codex_CLI_Rs/0.1.0", want: true},
 		{name: "复合 UA 包含 codex", ua: "Mozilla/5.0 codex_cli_rs/0.1.0", want: true},
@@ -34,6 +35,9 @@ func TestIsCodexTerminalRequest(t *testing.T) {
 		want bool
 	}{
 		{name: "Codex CLI", ua: "codex_cli_rs/0.104.0", want: true},
+		{name: "Codex TUI", ua: "codex-tui/0.154.0 (Ubuntu 24.4.0; x86_64) xterm-256color", want: true},
+		{name: "embedded TUI excluded", ua: "curl/8.0 codex-tui/0.160.0", want: false},
+		{name: "TUI missing version excluded", ua: "codex-tui/", want: false},
 		{name: "Codex exec", ua: "codex_exec/0.1.0", want: true},
 		{name: "VSCode excluded", ua: "codex_vscode/1.2.3", want: false},
 		{name: "desktop excluded", ua: "codex_app/1.2.3", want: false},
@@ -57,6 +61,11 @@ func TestIsCodexOfficialClientRequest(t *testing.T) {
 		want bool
 	}{
 		{name: "codex_cli_rs 前缀", ua: "codex_cli_rs/0.98.0", want: true},
+		{name: "codex-tui native 0.154", ua: "codex-tui/0.154.0 (Ubuntu 24.4.0; x86_64) xterm-256color (codex-tui; 0.154.0)", want: true},
+		{name: "codex-tui native 0.160", ua: "codex-tui/0.160.0 (Ubuntu 24.4.0; x86_64) xterm-256color (codex-tui; 0.160.0)", want: true},
+		{name: "embedded TUI product", ua: "curl/8.0 codex-tui/0.160.0", want: false},
+		{name: "unknown TUI product suffix", ua: "codex-tui-fake/0.160.0", want: false},
+		{name: "missing TUI version", ua: "codex-tui/", want: false},
 		{name: "codex_vscode 前缀", ua: "codex_vscode/1.0.0", want: true},
 		{name: "codex_app 前缀", ua: "codex_app/0.1.0", want: true},
 		{name: "codex_chatgpt_desktop 前缀", ua: "codex_chatgpt_desktop/1.0.0", want: true},
@@ -96,6 +105,9 @@ func TestIsCodexOfficialClientOriginator(t *testing.T) {
 		want       bool
 	}{
 		{name: "codex_cli_rs", originator: "codex_cli_rs", want: true},
+		{name: "codex-tui", originator: "codex-tui", want: true},
+		{name: "unknown TUI originator suffix", originator: "codex-tui-fake", want: false},
+		{name: "TUI originator version", originator: "codex-tui/0.160.0", want: false},
 		{name: "codex_vscode", originator: "codex_vscode", want: true},
 		{name: "codex_app", originator: "codex_app", want: true},
 		{name: "codex_chatgpt_desktop", originator: "codex_chatgpt_desktop", want: true},
@@ -137,6 +149,12 @@ func TestIsCodexOfficialClientByHeaders(t *testing.T) {
 		{name: "official UA with unknown originator", ua: "codex_cli_rs/0.159.2", originator: "codex_fake", want: false},
 		{name: "official UA with non-Codex originator", ua: "codex_cli_rs/0.159.2", originator: "my_client", want: false},
 		{name: "CLI with exact originator", ua: "codex_cli_rs/0.159.2", originator: "codex_cli_rs", want: true},
+		{name: "TUI with exact originator", ua: "codex-tui/0.160.0", originator: "codex-tui", want: true},
+		{name: "TUI bootstrap with CLI originator", ua: "codex-tui/0.154.0", originator: "codex_cli_rs", want: true},
+		{name: "app-server with TUI originator", ua: "codex_cli_rs/0.154.0", originator: "codex-tui", want: true},
+		{name: "TUI without originator", ua: "codex-tui/0.154.0", want: true},
+		{name: "curl with TUI originator", ua: "curl/8.0", originator: "codex-tui", want: false},
+		{name: "TUI with unknown originator", ua: "codex-tui/0.160.0", originator: "codex-tui-fake", want: false},
 		{name: "app-server desktop originator", ua: "codex_cli_rs/0.153.4", originator: "Codex Desktop", want: true},
 		{name: "app-server VSCode originator", ua: "codex_cli_rs/0.153.4", originator: "codex_vscode", want: true},
 		{name: "仅 ua 命中 desktop", ua: "Codex Desktop/1.2.3", want: true},
