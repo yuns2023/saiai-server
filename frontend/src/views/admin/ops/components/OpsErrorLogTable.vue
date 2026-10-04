@@ -66,7 +66,7 @@
               <td class="whitespace-nowrap px-4 py-2">
                 <span
                   :class="[
-                    'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset',
+                    'inline-flex items-center rounded-sm px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset',
                     getTypeBadge(log).className
                   ]"
                 >
@@ -76,7 +76,7 @@
 
               <!-- Platform -->
               <td class="whitespace-nowrap px-4 py-2">
-                <span class="inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+                <span class="inline-flex items-center rounded-sm bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-gray-600 dark:bg-dark-700 dark:text-gray-300">
                   {{ log.platform || '-' }}
                 </span>
               </td>
@@ -126,7 +126,7 @@
                 <div class="flex items-center gap-1.5">
                   <span
                     :class="[
-                      'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset',
+                      'inline-flex items-center rounded-sm px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset',
                       getStatusClass(log.status_code)
                     ]"
                   >
@@ -134,7 +134,7 @@
                   </span>
                   <span
                     v-if="log.severity"
-                    :class="['rounded px-1.5 py-0.5 text-[10px] font-bold', getSeverityClass(log.severity)]"
+                    :class="['rounded-sm px-1.5 py-0.5 text-[10px] font-bold', getSeverityClass(log.severity)]"
                   >
                     {{ log.severity }}
                   </span>

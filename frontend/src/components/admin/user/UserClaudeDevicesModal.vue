@@ -35,7 +35,7 @@
       <div v-else-if="devices.length === 0" class="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
         {{ t('admin.users.claudeDeviceModal.empty') }}
       </div>
-      <div v-else class="max-h-[28rem] space-y-3 overflow-y-auto">
+      <div v-else class="max-h-112 space-y-3 overflow-y-auto">
         <div v-for="device in devices" :key="device.id" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 space-y-1">

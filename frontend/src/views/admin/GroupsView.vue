@@ -171,17 +171,17 @@
               <div>
                 <span class="text-gray-500 dark:text-gray-400">{{ t('admin.groups.accountsAvailable') }}</span>
                 <span class="ml-1 font-medium text-emerald-600 dark:text-emerald-400">{{ (row.active_account_count || 0) - (row.rate_limited_account_count || 0) }}</span>
-                <span class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300">{{ t('admin.groups.accountsUnit') }}</span>
+                <span class="ml-1 inline-flex items-center rounded-sm bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300">{{ t('admin.groups.accountsUnit') }}</span>
               </div>
               <div v-if="row.rate_limited_account_count">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('admin.groups.accountsRateLimited') }}</span>
                 <span class="ml-1 font-medium text-amber-600 dark:text-amber-400">{{ row.rate_limited_account_count }}</span>
-                <span class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300">{{ t('admin.groups.accountsUnit') }}</span>
+                <span class="ml-1 inline-flex items-center rounded-sm bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300">{{ t('admin.groups.accountsUnit') }}</span>
               </div>
               <div>
                 <span class="text-gray-500 dark:text-gray-400">{{ t('admin.groups.accountsTotal') }}</span>
                 <span class="ml-1 font-medium text-gray-700 dark:text-gray-300">{{ row.account_count || 0 }}</span>
-                <span class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300">{{ t('admin.groups.accountsUnit') }}</span>
+                <span class="ml-1 inline-flex items-center rounded-sm bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300">{{ t('admin.groups.accountsUnit') }}</span>
               </div>
             </div>
           </template>
@@ -409,7 +409,7 @@
                   <p class="mb-2 text-xs leading-relaxed text-gray-300">
                     {{ t('admin.groups.exclusiveTooltip.description') }}
                   </p>
-                  <div class="rounded bg-gray-800 p-2 dark:bg-gray-700">
+                  <div class="rounded-sm bg-gray-800 p-2 dark:bg-gray-700">
                     <p class="text-xs leading-relaxed text-gray-300">
                       <span class="inline-flex items-center gap-1 text-primary-400"><Icon name="lightbulb" size="xs" /> {{ t('admin.groups.exclusiveTooltip.example') }}</span>
                       {{ t('admin.groups.exclusiveTooltip.exampleContent') }}
@@ -432,7 +432,7 @@
             >
               <span
                 :class="[
-                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                   createForm.is_exclusive ? 'translate-x-6' : 'translate-x-1'
                 ]"
               />
@@ -583,7 +583,7 @@
             >
               <span
                 :class="[
-                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                   createForm.claude_code_only ? 'translate-x-6' : 'translate-x-1'
                 ]"
               />
@@ -623,7 +623,7 @@
               >
                 <span
                   :class="[
-                    'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                    'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                     createForm.allow_claude_context_1m_beta ? 'translate-x-6' : 'translate-x-1'
                   ]"
                 />
@@ -651,7 +651,7 @@
                 >
                   <span
                     :class="[
-                      'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                      'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                       !createForm.claude_oauth_request_gate_disabled ? 'translate-x-6' : 'translate-x-1'
                     ]"
                   />
@@ -730,7 +730,7 @@
             >
               <span
                 :class="[
-                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                   createForm.input_moderation_enabled ? 'translate-x-6' : 'translate-x-1'
                 ]"
               />
@@ -754,7 +754,7 @@
               >
                 <span
                   :class="[
-                    'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                    'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                     createForm.input_moderation_auto_disable_user ? 'translate-x-6' : 'translate-x-1'
                   ]"
                 />
@@ -880,7 +880,7 @@
             >
               <span
                 :class="[
-                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                   createForm.model_routing_enabled ? 'translate-x-6' : 'translate-x-1'
                 ]"
               />
@@ -1164,7 +1164,7 @@
                   <p class="mb-2 text-xs leading-relaxed text-gray-300">
                     {{ t('admin.groups.exclusiveTooltip.description') }}
                   </p>
-                  <div class="rounded bg-gray-800 p-2 dark:bg-gray-700">
+                  <div class="rounded-sm bg-gray-800 p-2 dark:bg-gray-700">
                     <p class="text-xs leading-relaxed text-gray-300">
                       <span class="inline-flex items-center gap-1 text-primary-400"><Icon name="lightbulb" size="xs" /> {{ t('admin.groups.exclusiveTooltip.example') }}</span>
                       {{ t('admin.groups.exclusiveTooltip.exampleContent') }}
@@ -1187,7 +1187,7 @@
             >
               <span
                 :class="[
-                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                   editForm.is_exclusive ? 'translate-x-6' : 'translate-x-1'
                 ]"
               />
@@ -1346,7 +1346,7 @@
             >
               <span
                 :class="[
-                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                   editForm.claude_code_only ? 'translate-x-6' : 'translate-x-1'
                 ]"
               />
@@ -1386,7 +1386,7 @@
               >
                 <span
                   :class="[
-                    'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                    'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                     editForm.allow_claude_context_1m_beta ? 'translate-x-6' : 'translate-x-1'
                   ]"
                 />
@@ -1414,7 +1414,7 @@
                 >
                   <span
                     :class="[
-                      'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                      'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                       !editForm.claude_oauth_request_gate_disabled ? 'translate-x-6' : 'translate-x-1'
                     ]"
                   />
@@ -1493,7 +1493,7 @@
             >
               <span
                 :class="[
-                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                   editForm.input_moderation_enabled ? 'translate-x-6' : 'translate-x-1'
                 ]"
               />
@@ -1517,7 +1517,7 @@
               >
                 <span
                   :class="[
-                    'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                    'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                     editForm.input_moderation_auto_disable_user ? 'translate-x-6' : 'translate-x-1'
                   ]"
                 />
@@ -1643,7 +1643,7 @@
             >
               <span
                 :class="[
-                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform',
                   editForm.model_routing_enabled ? 'translate-x-6' : 'translate-x-1'
                 ]"
               />

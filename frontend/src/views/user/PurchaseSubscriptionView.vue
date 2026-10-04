@@ -20,8 +20,8 @@
         <div class="grid gap-6 lg:grid-cols-[1fr_1fr]">
           <form class="card space-y-5" @submit.prevent="createOrder">
             <div class="grid grid-cols-2 gap-2 rounded-xl bg-gray-100 p-1 dark:bg-dark-800">
-              <button type="button" class="rounded-lg px-3 py-2 text-sm font-medium" :class="purchaseMode === 'balance' ? 'bg-white text-primary-700 shadow dark:bg-dark-700 dark:text-primary-300' : 'text-gray-500'" @click="purchaseMode = 'balance'">{{ text.balance }}</button>
-              <button type="button" class="rounded-lg px-3 py-2 text-sm font-medium" :class="purchaseMode === 'subscription' ? 'bg-white text-primary-700 shadow dark:bg-dark-700 dark:text-primary-300' : 'text-gray-500'" :disabled="plans.length === 0" @click="purchaseMode = 'subscription'">{{ text.subscription }}</button>
+              <button type="button" class="rounded-lg px-3 py-2 text-sm font-medium" :class="purchaseMode === 'balance' ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-700 dark:text-primary-300' : 'text-gray-500'" @click="purchaseMode = 'balance'">{{ text.balance }}</button>
+              <button type="button" class="rounded-lg px-3 py-2 text-sm font-medium" :class="purchaseMode === 'subscription' ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-700 dark:text-primary-300' : 'text-gray-500'" :disabled="plans.length === 0" @click="purchaseMode = 'subscription'">{{ text.subscription }}</button>
             </div>
 
             <div v-if="purchaseMode === 'subscription'">

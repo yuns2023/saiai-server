@@ -49,6 +49,8 @@ const colorClass = computed(() => {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 .spinner {
   @apply inline-block rounded-full border-solid border-current border-r-transparent;
   animation: spin 0.75s linear infinite;

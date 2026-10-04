@@ -75,7 +75,7 @@
             aria-label="User Menu"
           >
             <div
-              class="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 text-sm font-medium text-white shadow-sm"
+              class="flex h-8 w-8 items-center justify-center rounded-xl bg-linear-to-br from-primary-500 to-primary-600 text-sm font-medium text-white shadow-xs"
             >
               {{ userInitials }}
             </div>

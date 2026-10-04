@@ -119,9 +119,9 @@ onMounted(async () => {
 <template>
   <div
     v-if="showMaintenanceBanner"
-    class="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/90 p-6 text-center text-white"
+    class="fixed inset-0 z-200 flex items-center justify-center bg-slate-950/90 p-6 text-center text-white"
   >
-    <div class="max-w-xl rounded-2xl border border-white/15 bg-white/10 p-8 shadow-2xl backdrop-blur">
+    <div class="max-w-xl rounded-2xl border border-white/15 bg-white/10 p-8 shadow-2xl backdrop-blur-sm">
       <div class="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-orange-500/20 text-orange-300">
         <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008M10.29 3.86l-8.2 14.25A1.5 1.5 0 003.39 20.5h17.22a1.5 1.5 0 001.3-2.25L13.71 3.86a1.97 1.97 0 00-3.42 0z" />

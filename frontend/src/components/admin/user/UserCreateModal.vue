@@ -37,7 +37,7 @@
       </div>
       <div>
         <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-          <input v-model="form.payg_discount_override_enabled" type="checkbox" class="rounded" />
+          <input v-model="form.payg_discount_override_enabled" type="checkbox" class="rounded-sm" />
           {{ t('admin.users.customPaygDiscount') }}
         </label>
       </div>

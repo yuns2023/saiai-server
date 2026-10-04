@@ -110,7 +110,7 @@
                     {{ t('admin.settings.adminApiKey.currentKey') }}
                   </label>
                   <code
-                    class="rounded bg-gray-100 px-2 py-1 font-mono text-sm text-gray-900 dark:bg-dark-700 dark:text-gray-100"
+                    class="rounded-sm bg-gray-100 px-2 py-1 font-mono text-sm text-gray-900 dark:bg-dark-700 dark:text-gray-100"
                   >
                     {{ adminApiKeyMasked }}
                   </code>
@@ -149,7 +149,7 @@
                 </p>
                 <div class="flex items-center gap-2">
                   <code
-                    class="flex-1 select-all break-all rounded border border-green-300 bg-white px-3 py-2 font-mono text-sm dark:border-green-700 dark:bg-dark-800"
+                    class="flex-1 select-all break-all rounded-sm border border-green-300 bg-white px-3 py-2 font-mono text-sm dark:border-green-700 dark:bg-dark-800"
                   >
                     {{ newAdminApiKey }}
                   </code>
@@ -315,7 +315,7 @@
                   <span
                     v-for="suffix in registrationEmailSuffixWhitelistTags"
                     :key="suffix"
-                    class="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 text-xs font-mono text-gray-700 dark:bg-dark-600 dark:text-gray-200"
+                    class="inline-flex items-center gap-1 rounded-sm bg-gray-100 px-2 py-1 text-xs font-mono text-gray-700 dark:bg-dark-600 dark:text-gray-200"
                   >
                     <span class="text-gray-400 dark:text-gray-500">@</span>
                     <span>{{ suffix }}</span>
@@ -329,13 +329,13 @@
                   </span>
 
                   <div
-                    class="flex min-w-[220px] flex-1 items-center gap-1 rounded border border-transparent px-2 py-1 focus-within:border-primary-300 dark:focus-within:border-primary-700"
+                    class="flex min-w-[220px] flex-1 items-center gap-1 rounded-sm border border-transparent px-2 py-1 focus-within:border-primary-300 dark:focus-within:border-primary-700"
                   >
                     <span class="font-mono text-sm text-gray-400 dark:text-gray-500">@</span>
                     <input
                       v-model="registrationEmailSuffixWhitelistDraft"
                       type="text"
-                      class="w-full bg-transparent text-sm font-mono text-gray-900 outline-none placeholder:text-gray-400 dark:text-white dark:placeholder:text-gray-500"
+                      class="w-full bg-transparent text-sm font-mono text-gray-900 outline-hidden placeholder:text-gray-400 dark:text-white dark:placeholder:text-gray-500"
                       :placeholder="t('admin.settings.registration.emailSuffixWhitelistPlaceholder')"
                       @input="handleRegistrationEmailSuffixWhitelistDraftInput"
                       @keydown="handleRegistrationEmailSuffixWhitelistDraftKeydown"
@@ -599,7 +599,7 @@
                     </button>
                     <code
                       v-if="linuxdoRedirectUrlSuggestion"
-                      class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+                      class="select-all break-all rounded-sm bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
                     >
                       {{ linuxdoRedirectUrlSuggestion }}
                     </code>
@@ -683,7 +683,7 @@
 
               <div
                 v-if="form.default_subscriptions.length === 0"
-                class="rounded border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500 dark:border-dark-600 dark:text-gray-400"
+                class="rounded-sm border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500 dark:border-dark-600 dark:text-gray-400"
               >
                 {{ t('admin.settings.defaults.defaultSubscriptionsEmpty') }}
               </div>
@@ -692,7 +692,7 @@
                 <div
                   v-for="(item, index) in form.default_subscriptions"
                   :key="`default-sub-${index}`"
-                  class="grid grid-cols-1 gap-3 rounded border border-gray-200 p-3 md:grid-cols-[1fr_160px_auto] dark:border-dark-600"
+                  class="grid grid-cols-1 gap-3 rounded-sm border border-gray-200 p-3 md:grid-cols-[1fr_160px_auto] dark:border-dark-600"
                 >
                   <div>
                     <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
@@ -985,7 +985,7 @@
                     <input v-model="endpoint.url" type="url" class="input font-mono text-sm" :placeholder="t('admin.settings.site.apiEndpointUrlPlaceholder')" />
                   </div>
                   <label class="flex items-center gap-2 pb-2 text-sm text-gray-700 dark:text-gray-300">
-                    <input v-model="endpoint.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" />
+                    <input v-model="endpoint.enabled" type="checkbox" class="h-4 w-4 rounded-sm border-gray-300 text-primary-600" />
                     {{ t('admin.settings.site.apiEndpointEnabled') }}
                   </label>
                   <button type="button" class="btn btn-secondary btn-sm pb-2" @click="removeAPIEndpoint(index)">
@@ -1105,7 +1105,7 @@
                   <button
                     v-if="index > 0"
                     type="button"
-                    class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700"
+                    class="rounded-sm p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700"
                     :title="t('admin.settings.customMenu.moveUp')"
                     @click="moveMenuItem(index, -1)"
                   >
@@ -1115,7 +1115,7 @@
                   <button
                     v-if="index < form.custom_menu_items.length - 1"
                     type="button"
-                    class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700"
+                    class="rounded-sm p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700"
                     :title="t('admin.settings.customMenu.moveDown')"
                     @click="moveMenuItem(index, 1)"
                   >
@@ -1124,7 +1124,7 @@
                   <!-- Delete -->
                   <button
                     type="button"
-                    class="rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                    class="rounded-sm p-1 text-red-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
                     :title="t('admin.settings.customMenu.remove')"
                     @click="removeMenuItem(index)"
                   >
@@ -2115,6 +2115,8 @@ onMounted(() => {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 .default-sub-group-select :deep(.select-trigger) {
   @apply h-[42px];
 }

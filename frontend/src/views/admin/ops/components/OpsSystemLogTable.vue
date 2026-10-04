@@ -574,7 +574,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-900/60">
+  <section class="rounded-2xl border border-gray-200 bg-white p-4 shadow-xs dark:border-dark-700 dark:bg-dark-900/60">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
         <h3 class="text-sm font-bold text-gray-900 dark:text-white">系统日志</h3>
@@ -830,7 +830,7 @@ onMounted(async () => {
             {{ copiedCaptureSection === 'inbound_headers' ? '已复制' : '复制' }}
           </button>
         </div>
-        <pre class="max-h-[260px] overflow-auto rounded-md bg-gray-950 p-3 text-xs leading-relaxed text-gray-100 whitespace-pre-wrap break-words">{{ getCaptureSectionText('inbound_headers') }}</pre>
+        <pre class="max-h-[260px] overflow-auto rounded-md bg-gray-950 p-3 text-xs leading-relaxed text-gray-100 whitespace-pre-wrap wrap-break-word">{{ getCaptureSectionText('inbound_headers') }}</pre>
       </div>
 
       <div>
@@ -840,7 +840,7 @@ onMounted(async () => {
             {{ copiedCaptureSection === 'inbound_body' ? '已复制' : '复制' }}
           </button>
         </div>
-        <pre class="max-h-[420px] overflow-auto rounded-md bg-gray-950 p-3 text-xs leading-relaxed text-gray-100 whitespace-pre-wrap break-words">{{ getCaptureSectionText('inbound_body') }}</pre>
+        <pre class="max-h-[420px] overflow-auto rounded-md bg-gray-950 p-3 text-xs leading-relaxed text-gray-100 whitespace-pre-wrap wrap-break-word">{{ getCaptureSectionText('inbound_body') }}</pre>
       </div>
 
       <div>
@@ -850,7 +850,7 @@ onMounted(async () => {
             {{ copiedCaptureSection === 'outbound_headers' ? '已复制' : '复制' }}
           </button>
         </div>
-        <pre class="max-h-[260px] overflow-auto rounded-md bg-gray-950 p-3 text-xs leading-relaxed text-gray-100 whitespace-pre-wrap break-words">{{ getCaptureSectionText('outbound_headers') }}</pre>
+        <pre class="max-h-[260px] overflow-auto rounded-md bg-gray-950 p-3 text-xs leading-relaxed text-gray-100 whitespace-pre-wrap wrap-break-word">{{ getCaptureSectionText('outbound_headers') }}</pre>
       </div>
 
       <div>
@@ -860,7 +860,7 @@ onMounted(async () => {
             {{ copiedCaptureSection === 'outbound_body' ? '已复制' : '复制' }}
           </button>
         </div>
-        <pre class="max-h-[420px] overflow-auto rounded-md bg-gray-950 p-3 text-xs leading-relaxed text-gray-100 whitespace-pre-wrap break-words">{{ getCaptureSectionText('outbound_body') }}</pre>
+        <pre class="max-h-[420px] overflow-auto rounded-md bg-gray-950 p-3 text-xs leading-relaxed text-gray-100 whitespace-pre-wrap wrap-break-word">{{ getCaptureSectionText('outbound_body') }}</pre>
       </div>
     </div>
   </BaseDialog>

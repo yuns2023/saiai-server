@@ -77,7 +77,7 @@
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.status') }}</div>
           <div class="mt-1">
-            <span :class="['inline-flex items-center rounded-lg px-2 py-1 text-xs font-black ring-1 ring-inset shadow-sm', statusClass]">
+            <span :class="['inline-flex items-center rounded-lg px-2 py-1 text-xs font-black ring-1 ring-inset shadow-xs', statusClass]">
               {{ detail.status_code }}
             </span>
           </div>
@@ -160,7 +160,7 @@
               </div>
             </div>
 
-            <div v-if="ev.message" class="mt-3 break-words text-sm font-medium text-gray-900 dark:text-white">{{ ev.message }}</div>
+            <div v-if="ev.message" class="mt-3 wrap-break-word text-sm font-medium text-gray-900 dark:text-white">{{ ev.message }}</div>
 
             <pre
               v-if="expandedEmbeddedDetailKeys.has(ev.key)"
@@ -220,7 +220,7 @@
               </div>
             </div>
 
-            <div v-if="ev.message" class="mt-3 break-words text-sm font-medium text-gray-900 dark:text-white">{{ ev.message }}</div>
+            <div v-if="ev.message" class="mt-3 wrap-break-word text-sm font-medium text-gray-900 dark:text-white">{{ ev.message }}</div>
 
             <pre
               v-if="expandedUpstreamDetailIds.has(ev.id)"

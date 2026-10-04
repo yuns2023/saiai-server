@@ -123,7 +123,7 @@ export default {
         }
       },
       backdropBlur: {
-        xs: '2px'
+        '2xs': '2px'
       },
       borderRadius: {
         '4xl': '2rem'

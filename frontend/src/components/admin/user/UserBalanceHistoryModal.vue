@@ -15,7 +15,7 @@
               <p class="truncate font-medium text-gray-900 dark:text-white">{{ user.email }}</p>
               <span
                 v-if="user.username"
-                class="flex-shrink-0 rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-600 dark:bg-primary-900/20 dark:text-primary-400"
+                class="flex-shrink-0 rounded-sm bg-primary-50 px-1.5 py-0.5 text-xs text-primary-600 dark:bg-primary-900/20 dark:text-primary-400"
               >
                 {{ user.username }}
               </span>
@@ -88,7 +88,7 @@
       </div>
 
       <!-- History list -->
-      <div v-else class="max-h-[28rem] space-y-3 overflow-y-auto">
+      <div v-else class="max-h-112 space-y-3 overflow-y-auto">
         <div
           v-for="item in history"
           :key="item.id"

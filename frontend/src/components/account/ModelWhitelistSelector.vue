@@ -10,7 +10,7 @@
           <span
             v-for="model in modelValue"
             :key="model"
-            class="inline-flex items-center justify-between gap-1 rounded bg-gray-100 px-2 py-1 text-xs text-gray-700 dark:bg-dark-600 dark:text-gray-300"
+            class="inline-flex items-center justify-between gap-1 rounded-sm bg-gray-100 px-2 py-1 text-xs text-gray-700 dark:bg-dark-600 dark:text-gray-300"
           >
             <span class="flex items-center gap-1 truncate">
               <ModelIcon :model="model" size="14px" />
@@ -56,7 +56,7 @@
           >
             <span
               :class="[
-                'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
+                'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border',
                 modelValue.includes(model.value)
                   ? 'border-primary-500 bg-primary-500 text-white'
                   : 'border-gray-300 dark:border-dark-500'
