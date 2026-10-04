@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -178,9 +179,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	stateStore := s.getOpenAIWSStateStore()
 	userID := getOpenAIUserIDFromContext(c)
 	var replayTracker *openAIWSPassthroughReplayTracker
-	if account.Type == AccountTypeOAuth && !account.IsOpenAICodexNativeRelay() && hooks != nil && hooks.OnAccountExhausted != nil {
+	if resumableClient != nil && account.Type == AccountTypeOAuth && !account.IsOpenAICodexNativeRelay() && hooks != nil && hooks.OnAccountExhausted != nil {
 		replayTracker = newOpenAIWSPassthroughReplayTracker(stateStore, userID)
 	}
+	var exhaustedUntil atomic.Int64
+	var quotaFrameObserved atomic.Bool
 	logOpenAIWSV2Passthrough(
 		"relay_start account_id=%d model=%s previous_response_id=%s first_message_type=%s first_message_bytes=%d",
 		account.ID,
@@ -250,6 +253,27 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			statusCode,
 			truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen),
 		)
+		if statusCode == http.StatusTooManyRequests && !account.IsOpenAICodexNativeRelay() {
+			if s.rateLimitService != nil {
+				s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, handshakeHeaders, nil)
+			}
+			if replayTracker != nil {
+				if hooks.BeforeTurn != nil {
+					if validationErr := hooks.BeforeTurn(1); validationErr != nil {
+						return validationErr
+					}
+				}
+				if hooks.OnClientTurn != nil {
+					if validationErr := hooks.OnClientTurn(1, firstClientMessage); validationErr != nil {
+						return validationErr
+					}
+				}
+				replayTracker.RegisterTurn(1, firstClientMessageType, firstClientMessage)
+				if failure, ready := replayTracker.BuildFailoverError(account.ID, err); ready {
+					return failure
+				}
+			}
+		}
 		return s.mapOpenAIWSPassthroughDialError(err, statusCode, handshakeHeaders)
 	}
 	defer func() {
@@ -266,6 +290,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
+	turnResponseHeaders := func() http.Header {
+		responseHeaders := cloneHeader(handshakeHeaders)
+		if quotaFrameObserved.Load() {
+			for name := range responseHeaders {
+				if strings.HasPrefix(strings.ToLower(name), "x-codex-") {
+					delete(responseHeaders, name)
+				}
+			}
+		}
+		return responseHeaders
+	}
 
 	completedTurns := atomic.Int32{}
 	var relayClient openaiwsv2.FrameConn = &openAIWSClientFrameConn{conn: clientConn}
@@ -278,9 +313,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		UpstreamConn:       upstreamFrameConn,
 		FirstClientMessage: firstClientMessage,
 		Options: openaiwsv2.RelayOptions{
-			WriteTimeout:     s.openAIWSWriteTimeout(),
-			IdleTimeout:      s.openAIWSPassthroughIdleTimeout(),
-			FirstMessageType: firstClientMessageType,
+			WriteTimeout:        s.openAIWSWriteTimeout(),
+			IdleTimeout:         s.openAIWSPassthroughIdleTimeout(),
+			FirstMessageType:    firstClientMessageType,
+			BufferResponseStart: replayTracker != nil,
 			OnClientTurn: func(turn int, messageType coderws.MessageType, payload []byte) error {
 				if hooks != nil && hooks.BeforeTurn != nil {
 					if err := hooks.BeforeTurn(turn); err != nil {
@@ -293,6 +329,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 				}
 				replayTracker.RegisterTurn(turn, messageType, payload)
+				if exhaustedUntil.Load() > time.Now().Unix() {
+					if failure, ready := replayTracker.BuildFailoverError(account.ID, errors.New("observed Codex quota exhausted")); ready {
+						return failure
+					}
+				}
 				return nil
 			},
 			BeforeUpstreamFrame: func(frame openaiwsv2.RelayUpstreamFrame) error {
@@ -300,11 +341,22 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					return nil
 				}
 				eventType := strings.TrimSpace(gjson.GetBytes(frame.Payload, "type").String())
-				if eventType == "error" {
-					errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(frame.Payload)
-					s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, frame.Payload, errCodeRaw, errTypeRaw, errMsgRaw)
+				if eventType == "codex.rate_limits" && account.Type == AccountTypeOAuth && !account.IsOpenAICodexNativeRelay() {
+					if snapshot := parseOpenAIWSCodexRateLimitEvent(frame.Payload, time.Now()); snapshot != nil {
+						quotaFrameObserved.Store(true)
+						s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
+						if resetAt := codexRateLimitResetAtFromSnapshot(snapshot, time.Now()); resetAt != nil && resetAt.After(time.Now()) {
+							exhaustedUntil.Store(resetAt.Unix())
+						}
+					}
+				}
+				if quotaPayload := openAIWSQuotaErrorPayload(frame.Payload); len(quotaPayload) > 0 {
+					errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(quotaPayload)
+					quotaHeaders := openAIWSQuotaErrorHeaders(handshakeHeaders, frame.Payload)
+					s.persistOpenAIWSRateLimitSignal(ctx, account, quotaHeaders, quotaPayload, errCodeRaw, errTypeRaw, errMsgRaw)
 					if isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) &&
 						!frame.WroteCurrentTurn &&
+						isOpenAIWSQuotaReplaySafe(frame.Payload) &&
 						hooks != nil && hooks.OnAccountExhausted != nil &&
 						account.Type == AccountTypeOAuth && !account.IsOpenAICodexNativeRelay() {
 						errMessage := strings.TrimSpace(errMsgRaw)
@@ -370,7 +422,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					),
 					Stream:          true,
 					OpenAIWSMode:    true,
-					ResponseHeaders: cloneHeader(handshakeHeaders),
+					ResponseHeaders: turnResponseHeaders(),
 					Duration:        turn.Duration,
 					FirstTokenMs:    turn.FirstTokenMs,
 				}
@@ -433,7 +485,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		),
 		Stream:          true,
 		OpenAIWSMode:    true,
-		ResponseHeaders: cloneHeader(handshakeHeaders),
+		ResponseHeaders: turnResponseHeaders(),
 		Duration:        relayResult.Duration,
 		FirstTokenMs:    relayResult.FirstTokenMs,
 	}
