@@ -1149,12 +1149,16 @@ func (s *RateLimitService) calculateOpenAI429ResetTime(headers http.Header) *tim
 	is5hExhausted := normalized.Used5hPercent != nil && *normalized.Used5hPercent >= 100
 
 	// 优先使用被触发限制的重置时间
-	if is7dExhausted && normalized.Reset7dSeconds != nil {
+	useSevenDayReset := is7dExhausted && normalized.Reset7dSeconds != nil && *normalized.Reset7dSeconds > 0
+	if useSevenDayReset && is5hExhausted && normalized.Reset5hSeconds != nil && *normalized.Reset5hSeconds > *normalized.Reset7dSeconds {
+		useSevenDayReset = false
+	}
+	if useSevenDayReset {
 		resetAt := now.Add(time.Duration(*normalized.Reset7dSeconds) * time.Second)
 		slog.Info("openai_429_7d_limit_exhausted", "reset_after_seconds", *normalized.Reset7dSeconds, "reset_at", resetAt)
 		return &resetAt
 	}
-	if is5hExhausted && normalized.Reset5hSeconds != nil {
+	if is5hExhausted && normalized.Reset5hSeconds != nil && *normalized.Reset5hSeconds > 0 {
 		resetAt := now.Add(time.Duration(*normalized.Reset5hSeconds) * time.Second)
 		slog.Info("openai_429_5h_limit_exhausted", "reset_after_seconds", *normalized.Reset5hSeconds, "reset_at", resetAt)
 		return &resetAt

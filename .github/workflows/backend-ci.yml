@@ -71,6 +71,15 @@ jobs:
       - name: Unit tests
         working-directory: backend
         run: make test-unit
+      - name: WebSocket quota failover race tests
+        working-directory: backend
+        env:
+          CGO_ENABLED: '1'
+          GOMAXPROCS: '2'
+        run: |
+          go test -race -tags=unit -p 1 ./internal/service/openai_ws_v2 -parallel=2 -count=1 -timeout=180s
+          go test -race -tags=unit -p 1 ./internal/service -run 'Test(OpenAIWS|OpenAICodexNativeRelay|OpenAIGatewayService_.*WS|OpenAIGatewayService_ProxyResponsesWebSocket|OpenAIGatewayService_UpdateCodexUsageSnapshot|OpenAIGatewayService_GetSchedulableAccount_ExhaustedCodex|ParseOpenAIWSCodexRateLimitEvent|PrepareOpenAIWSContinuation|BuildOpenAIWSFailover|CalculateOpenAI429ResetTime|ParseOpenAIRateLimit)' -parallel=2 -count=1 -timeout=300s
+          go test -race -tags=unit -p 1 ./internal/handler -run 'Test(OpenAIResponsesWebSocket|OpenAIGatewayHandler.*WSTurn)' -parallel=2 -count=1 -timeout=180s
       - name: Integration tests
         working-directory: backend
         run: make test-integration

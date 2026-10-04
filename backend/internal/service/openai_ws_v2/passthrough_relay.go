@@ -92,6 +92,7 @@ type RelayOptions struct {
 	OnUsageParseFailure  func(eventType string, usageRaw string)
 	OnClientTurn         func(turn int, messageType coderws.MessageType, payload []byte) error
 	BeforeUpstreamFrame  func(frame RelayUpstreamFrame) error
+	BufferResponseStart  bool
 	TurnMetadata         func(turn int, payload []byte) RelayTurnMetadata
 	OnTurnComplete       func(turn RelayTurnResult)
 	OnTrace              func(event RelayTraceEvent)
@@ -117,6 +118,7 @@ type relayState struct {
 	turnTimingByID         map[string]*relayTurnTiming
 	turns                  *relayTurnTracker
 	beforeUpstreamFrame    func(frame RelayUpstreamFrame) error
+	bufferResponseStart    bool
 }
 
 type relayExitSignal struct {
@@ -185,6 +187,7 @@ func Relay(
 	state := &relayState{
 		turns:               newRelayTurnTracker(),
 		beforeUpstreamFrame: options.BeforeUpstreamFrame,
+		bufferResponseStart: options.BufferResponseStart,
 	}
 	onTrace := options.OnTrace
 
@@ -479,6 +482,22 @@ func runUpstreamToClient(
 ) {
 	wroteDownstream := false
 	wroteCurrentTurn := false
+	bufferedFrames := make([]relayBufferedFrame, 0, 2)
+	bufferedBytes := 0
+	bufferResponseStart := state != nil && state.bufferResponseStart
+	forwardFrame := func(messageType coderws.MessageType, payload []byte) error {
+		if err := writeClient(messageType, payload); err != nil {
+			return err
+		}
+		wroteDownstream = true
+		if !bufferResponseStart || !isRelayQuotaControl(messageType, payload) {
+			wroteCurrentTurn = true
+		}
+		if forwardedFrames != nil {
+			forwardedFrames.Add(1)
+		}
+		return nil
+	}
 	for {
 		msgType, payload, err := upstreamConn.ReadFrame(ctx)
 		if err != nil {
@@ -553,27 +572,43 @@ func runUpstreamToClient(
 			markActivity()
 			continue
 		}
-		if err := writeClient(msgType, payload); err != nil {
+		if bufferResponseStart && !wroteCurrentTurn &&
+			(isRelayBufferableResponseStart(msgType, payload) || (len(bufferedFrames) > 0 && isRelayQuotaControl(msgType, payload))) &&
+			len(bufferedFrames) < 8 && bufferedBytes+len(payload) <= 64*1024 {
+			bufferedFrames = append(bufferedFrames, relayBufferedFrame{messageType: msgType, payload: append([]byte(nil), payload...)})
+			bufferedBytes += len(payload)
+			continue
+		}
+		var writeErr error
+		for _, bufferedFrame := range bufferedFrames {
+			if writeErr = forwardFrame(bufferedFrame.messageType, bufferedFrame.payload); writeErr != nil {
+				break
+			}
+		}
+		for frameIndex := range bufferedFrames {
+			bufferedFrames[frameIndex] = relayBufferedFrame{}
+		}
+		bufferedFrames = bufferedFrames[:0]
+		bufferedBytes = 0
+		if writeErr == nil {
+			writeErr = forwardFrame(msgType, payload)
+		}
+		if writeErr != nil {
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "write_client_failed",
 				Direction:       "upstream_to_client",
 				MessageType:     relayMessageTypeString(msgType),
 				PayloadBytes:    len(payload),
 				WroteDownstream: wroteDownstream,
-				Error:           err.Error(),
+				Error:           writeErr.Error(),
 			})
 			exitCh <- relayExitSignal{
 				stage:            "write_client",
-				err:              err,
+				err:              writeErr,
 				wroteDownstream:  wroteDownstream,
 				wroteCurrentTurn: wroteCurrentTurn,
 			}
 			return
-		}
-		wroteDownstream = true
-		wroteCurrentTurn = true
-		if forwardedFrames != nil {
-			forwardedFrames.Add(1)
 		}
 		if observedEvent.terminal && state != nil {
 			state.terminalFrameForwarded.Store(true)
@@ -581,6 +616,36 @@ func runUpstreamToClient(
 		}
 		markActivity()
 	}
+}
+
+type relayBufferedFrame struct {
+	messageType coderws.MessageType
+	payload     []byte
+}
+
+func isRelayQuotaControl(messageType coderws.MessageType, payload []byte) bool {
+	return messageType == coderws.MessageText && gjson.ValidBytes(payload) && gjson.GetBytes(payload, "type").String() == "codex.rate_limits"
+}
+
+func isRelayBufferableResponseStart(messageType coderws.MessageType, payload []byte) bool {
+	if messageType != coderws.MessageText || !gjson.ValidBytes(payload) {
+		return false
+	}
+	eventType := gjson.GetBytes(payload, "type").String()
+	if eventType != "response.created" && eventType != "response.in_progress" {
+		return false
+	}
+	response := gjson.GetBytes(payload, "response")
+	errorObject := response.Get("error")
+	if !response.IsObject() || strings.TrimSpace(response.Get("id").String()) == "" || (errorObject.Exists() && errorObject.Type != gjson.Null) || response.Get("usage.output_tokens").Int() > 0 {
+		return false
+	}
+	status := response.Get("status").String()
+	if status != "" && status != "in_progress" && status != "queued" {
+		return false
+	}
+	output := response.Get("output")
+	return !output.Exists() || (output.IsArray() && len(output.Array()) == 0)
 }
 
 func runIdleWatchdog(

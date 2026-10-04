@@ -4697,30 +4697,41 @@ func codexRateLimitResetAtFromSnapshot(snapshot *OpenAICodexUsageSnapshot, fallb
 		return nil
 	}
 	baseTime := codexSnapshotBaseTime(snapshot, fallbackNow)
-	if codexUsagePercentExhausted(normalized.Used7dPercent) && normalized.Reset7dSeconds != nil {
-		resetAt := baseTime.Add(time.Duration(*normalized.Reset7dSeconds) * time.Second)
-		return &resetAt
+	var resetAt *time.Time
+	for _, window := range []struct {
+		usedPercent  *float64
+		resetSeconds *int
+	}{
+		{normalized.Used5hPercent, normalized.Reset5hSeconds},
+		{normalized.Used7dPercent, normalized.Reset7dSeconds},
+	} {
+		if !codexUsagePercentExhausted(window.usedPercent) || window.resetSeconds == nil {
+			continue
+		}
+		candidate := baseTime.Add(time.Duration(*window.resetSeconds) * time.Second)
+		if candidate.After(fallbackNow) && (resetAt == nil || candidate.After(*resetAt)) {
+			resetAt = &candidate
+		}
 	}
-	if codexUsagePercentExhausted(normalized.Used5hPercent) && normalized.Reset5hSeconds != nil {
-		resetAt := baseTime.Add(time.Duration(*normalized.Reset5hSeconds) * time.Second)
-		return &resetAt
-	}
-	return nil
+	return resetAt
 }
 
 func codexRateLimitResetAtFromExtra(extra map[string]any, now time.Time) *time.Time {
 	if len(extra) == 0 {
 		return nil
 	}
-	if progress := buildCodexUsageProgressFromExtra(extra, "7d", now); progress != nil && codexUsagePercentExhausted(&progress.Utilization) && progress.ResetsAt != nil && now.Before(*progress.ResetsAt) {
-		resetAt := progress.ResetsAt.UTC()
-		return &resetAt
+	var resetAt *time.Time
+	for _, window := range []string{"5h", "7d"} {
+		progress := buildCodexUsageProgressFromExtra(extra, window, now)
+		if progress == nil || !codexUsagePercentExhausted(&progress.Utilization) || progress.ResetsAt == nil || !now.Before(*progress.ResetsAt) {
+			continue
+		}
+		candidate := progress.ResetsAt.UTC()
+		if resetAt == nil || candidate.After(*resetAt) {
+			resetAt = &candidate
+		}
 	}
-	if progress := buildCodexUsageProgressFromExtra(extra, "5h", now); progress != nil && codexUsagePercentExhausted(&progress.Utilization) && progress.ResetsAt != nil && now.Before(*progress.ResetsAt) {
-		resetAt := progress.ResetsAt.UTC()
-		return &resetAt
-	}
-	return nil
+	return resetAt
 }
 
 func applyOpenAICodexRateLimitFromExtra(account *Account, now time.Time) (*time.Time, bool) {
