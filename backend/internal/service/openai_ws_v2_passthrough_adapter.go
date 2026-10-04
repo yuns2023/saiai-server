@@ -35,6 +35,7 @@ type openAIWSResumableClientFrame struct {
 // cannot accidentally close the downstream connection during account failover.
 type openAIWSResumableClientFrameConn struct {
 	conn    *coderws.Conn
+	ctx     context.Context
 	cancel  context.CancelFunc
 	frames  chan openAIWSResumableClientFrame
 	writeMu sync.Mutex
@@ -49,6 +50,7 @@ func newOpenAIWSResumableClientFrameConn(ctx context.Context, conn *coderws.Conn
 	readCtx, cancel := context.WithCancel(ctx)
 	result := &openAIWSResumableClientFrameConn{
 		conn:   conn,
+		ctx:    readCtx,
 		cancel: cancel,
 		frames: make(chan openAIWSResumableClientFrame, 4),
 	}
@@ -97,7 +99,16 @@ func (c *openAIWSResumableClientFrameConn) WriteFrame(ctx context.Context, msgTy
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	return c.conn.Write(ctx, msgType, payload)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	writeCtx := c.ctx
+	if deadline, ok := ctx.Deadline(); ok {
+		var cancel context.CancelFunc
+		writeCtx, cancel = context.WithDeadline(writeCtx, deadline)
+		defer cancel()
+	}
+	return c.conn.Write(writeCtx, msgType, payload)
 }
 
 // Close is intentionally a no-op. The ingress handler owns the downstream

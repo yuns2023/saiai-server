@@ -45,6 +45,11 @@ commit that attempt. Once any turn output has been forwarded, or a failed
 terminal reports output/tokens, the Gateway does not replay the turn. This
 avoids duplicating visible replies, tool calls or usage.
 
+The resumable downstream writer belongs to the ingress connection, not an
+individual upstream attempt. Rotating an exhausted account does not cancel an
+in-flight downstream write and accidentally close the user's socket. Ingress
+cancellation and the configured write deadline still apply.
+
 Continuation replay requires a complete process-local history for that
 user/response pair. It removes account-bound `previous_response_id` and
 encrypted reasoning data only on cross-account replay, while reconstructing
