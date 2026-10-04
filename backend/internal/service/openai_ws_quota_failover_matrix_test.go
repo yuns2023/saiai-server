@@ -189,7 +189,7 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 					serverErrors <- acceptErr
 					return
 				}
-				defer connection.CloseNow()
+				defer func() { _ = connection.CloseNow() }()
 				ginContext, _ := gin.CreateTestContext(httptest.NewRecorder())
 				ginContext.Request = request.Clone(request.Context())
 				ginContext.Request.Header.Set("User-Agent", "codex_cli_rs/0.153.4")
@@ -207,7 +207,7 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 			defer cancel()
 			client, _, dialErr := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 			require.NoError(testContext, dialErr)
-			defer client.CloseNow()
+			defer func() { _ = client.CloseNow() }()
 			firstRequest := []byte(`{"type":"response.create","model":"gpt-6-astra","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}]}`)
 			if scenario.noHistory {
 				firstRequest = []byte(`{"type":"response.create","model":"gpt-6-astra","previous_response_id":"resp_unknown","input":[]}`)

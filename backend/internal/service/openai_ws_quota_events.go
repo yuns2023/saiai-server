@@ -74,7 +74,7 @@ func openAIWSQuotaErrorPayload(payload []byte) []byte {
 	if eventType == "error" {
 		return payload
 	}
-	if eventType != "response.failed" && !(eventType == "response.done" && gjson.GetBytes(payload, "response.status").String() == "failed") {
+	if eventType != "response.failed" && (eventType != "response.done" || gjson.GetBytes(payload, "response.status").String() != "failed") {
 		return nil
 	}
 	errorObject := gjson.GetBytes(payload, "response.error")
