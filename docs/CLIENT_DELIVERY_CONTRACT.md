@@ -141,7 +141,7 @@ headers. A missing UA, a non-Codex UA (including curl), an embedded Codex
 substring, or a missing product version is rejected even when `originator`
 claims Codex. A present `originator` must match the exact allowlist:
 `codex_cli_rs`, `codex-tui`, `codex_vscode`, `codex_app`, `codex_chatgpt_desktop`,
-`codex_atlas`, `codex_exec`, `codex_sdk_ts`, or `Codex Desktop`
+`codex_work_desktop`, `codex_atlas`, `codex_exec`, `codex_sdk_ts`, or `Codex Desktop`
 (case-insensitive). Official UAs without `originator` remain accepted;
 app-server UAs may carry a different allowlisted surface originator.
 
@@ -152,6 +152,12 @@ Both native shapes are recognized without rewriting client identity or
 relaxing the version/account requirements on Responses. Terminal admission
 includes this exact product; embedded products and unknown suffixes remain
 rejected.
+
+The Windows Desktop work surface uses `codex_work_desktop/<version>` and the
+exact `codex_work_desktop` originator. Recognize this native shape without
+rewriting it to a terminal identity. Responses still requires the account and
+version headers, unknown product/originator suffixes remain rejected, and the
+work Desktop UA does not qualify for `cli_only`.
 
 The same client-header admission applies to the `official_clients` and
 `cli_only` group policies, OAuth account restrictions, and native relay

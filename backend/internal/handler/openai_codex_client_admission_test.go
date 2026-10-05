@@ -31,6 +31,10 @@ func TestOpenAICodexAdmissionRejectsBeforeScheduling(t *testing.T) {
 		{"embedded TUI product", "curl/8.0 codex-tui/0.160.0", "codex-tui"},
 		{"unknown TUI originator", "codex-tui/0.160.0", "codex-tui-fake"},
 		{"missing TUI version", "codex-tui/", "codex-tui"},
+		{"curl with work desktop originator", "curl/8.0", "codex_work_desktop"},
+		{"embedded work desktop", "curl/8.0 codex_work_desktop/0.159.0-alpha.12.1", "codex_work_desktop"},
+		{"unknown work desktop originator", "codex_work_desktop/0.159.0-alpha.12.1", "codex_work_desktop_fake"},
+		{"missing work desktop version", "codex_work_desktop/", "codex_work_desktop"},
 	}
 	for _, policy := range []string{"official_clients", "cli_only", "local_proxy_only"} {
 		for _, tc := range cases {
@@ -139,6 +143,59 @@ func TestOpenAICodexTUIAdmissionReachesScheduling(t *testing.T) {
 				require.NoError(t, connection.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"TEST_ONLY_MODEL","input":"TEST_ONLY_INPUT"}`)))
 				_, _, err = connection.Read(ctx)
 				require.Equal(t, coderws.StatusInternalError, coderws.CloseStatus(err))
+				require.Equal(t, int32(2), slotCalls.Load())
+			})
+		}
+	}
+}
+
+func TestOpenAICodexWorkDesktopAdmissionReachesScheduling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, policy := range []string{"official_clients", "local_proxy_only"} {
+		for _, version := range []string{"0.155.0-alpha.9.2", "0.159.0-alpha.12.1"} {
+			t.Run(policy+"/"+version, func(t *testing.T) {
+				var slotCalls atomic.Int32
+				cache := &concurrencyCacheMock{
+					acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) {
+						slotCalls.Add(1)
+						return false, errors.New("TEST_ONLY_STOP_BEFORE_UPSTREAM")
+					},
+				}
+				handler := newOpenAIHandlerForPreviousResponseIDValidation(t, cache)
+				groupID := int64(2)
+				apiKey := &service.APIKey{
+					ID: 101, GroupID: &groupID,
+					Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, CodexClientPolicy: policy},
+					User:  &service.User{ID: 1},
+				}
+				router := gin.New()
+				router.Use(func(requestContext *gin.Context) {
+					requestContext.Set(string(middleware.ContextKeyAPIKey), apiKey)
+					requestContext.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1, Concurrency: 1})
+				})
+				router.POST("/v1/responses", handler.Responses)
+				router.GET("/v1/responses", handler.ResponsesWebSocket)
+				headers := http.Header{}
+				headers.Set("User-Agent", "codex_work_desktop/"+version+" (Windows 10.0.26200; x86_64) unknown (codex_work_desktop; 26.930.2377.0)")
+				headers.Set("originator", "codex_work_desktop")
+				headers.Set("version", version)
+				headers.Set("chatgpt-account-id", "TEST_ONLY_ACCOUNT")
+				recorder := httptest.NewRecorder()
+				request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"TEST_ONLY_MODEL","stream":true,"input":"TEST_ONLY_INPUT"}`))
+				request.Header = headers.Clone()
+				router.ServeHTTP(recorder, request)
+				require.Equal(t, int32(1), slotCalls.Load())
+				require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+				server := httptest.NewServer(router)
+				defer server.Close()
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				connection, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", &coderws.DialOptions{HTTPHeader: headers})
+				require.NoError(t, err)
+				defer func() { _ = connection.CloseNow() }()
+				require.NoError(t, connection.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"TEST_ONLY_MODEL","input":"TEST_ONLY_INPUT"}`)))
+				_, _, err = connection.Read(ctx)
+				require.Error(t, err)
 				require.Equal(t, int32(2), slotCalls.Load())
 			})
 		}
