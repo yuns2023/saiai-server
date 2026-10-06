@@ -638,8 +638,27 @@ export default {
     quota: '额度',
     lastUsedAt: '上次使用时间',
     useKey: '使用密钥',
+    moreActions: '更多操作',
+    showKey: '查看原始密钥',
+    hideKey: '隐藏密钥',
+    copyKey: '复制原始密钥',
+    rawKeyHint: '手动配置时才需要原始密钥；使用一键配置无需单独复制它。',
+    rawKeyWarning: '不要向他人发送密钥。复制后，密钥可能保留在剪贴板或粘贴它的终端历史中。',
     useKeyModal: {
       title: '使用 API 密钥',
+      createdTitle: '密钥已创建，下一步开始配置',
+      createdHint: '复制下方配置命令，在本机终端执行，然后启动客户端。',
+      terminal: '终端',
+      steps: {
+        copy: '复制配置命令',
+        copyHint: '命令已包含所选线路和当前密钥，无需另行复制密钥。',
+        run: '在本机执行',
+        runHint: '打开 {terminal}，粘贴命令并执行。请先安装要使用的官方客户端。',
+        start: '启动客户端',
+        claudeStart: '配置完成后运行 claude，或重新打开 VSCode 中的 Claude Code。',
+        codexStart: '终端运行 saiai codex；桌面运行 saiai desktop codex；VSCode 请彻底退出后重新打开。',
+        geminiStart: '在执行环境变量命令的同一终端运行 gemini。'
+      },
       description: '运行以下一键命令，安装或复用 SAIAI，配置 Claude Code 并启动用户级本地代理。',
       endpointLabel: 'API 线路',
       randomEndpoint: '重新随机',
@@ -5076,7 +5095,7 @@ export default {
       createKey: {
         title: '➕ 创建新密钥',
         description:
-          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">点击按钮创建您的第一个 API 密钥。</p><p style="padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>💡 提示：</b>创建后密钥只显示一次，请务必复制保存</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 点击"创建密钥"</p></div>'
+          '<p>创建您的第一个 API 密钥。创建完成后会自动打开配置说明，以后也可以随时点击“使用密钥”重新查看。</p>'
       },
       keyName: {
         title: '✏️ 密钥名称',
@@ -5093,7 +5112,12 @@ export default {
       keySubmit: {
         title: '🎉 完成创建',
         description:
-          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">点击确认创建您的 API 密钥。</p><div style="padding: 8px 12px; background: #fee2e2; border-left: 3px solid #ef4444; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚠️ 重要：</b><ul style="margin: 8px 0 0 16px;"><li>创建后请立即复制密钥（sk-xxx）</li><li>密钥只显示一次，丢失需重新生成</li></ul></div><p style="padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>🚀 如何使用：</b><br/>将密钥配置到支持 OpenAI 接口的任何客户端（如 ChatBox、OpenCat 等），即可开始使用！</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 点击"创建"按钮</p></div>'
+          '<p>点击创建生成密钥，随后会打开“使用密钥”。复制配置命令，在本机终端执行即可。需要原始密钥时，可以从“更多操作”查看或复制。</p>'
+      },
+      keySetup: {
+        title: '配置客户端',
+        description: '<p>复制这条命令，在所选终端执行，再按提示启动客户端。仅复制命令不会完成本机配置。以后也能通过“使用密钥”重新打开这些说明。</p>',
+        doneBtn: '我知道了'
       }
     }
   },

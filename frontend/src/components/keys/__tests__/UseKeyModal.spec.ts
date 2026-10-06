@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
@@ -41,6 +41,53 @@ function mountModal(props: Record<string, unknown>): VueWrapper {
 const command = (wrapper: VueWrapper) => wrapper.find('pre code').text()
 
 describe('UseKeyModal', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it.each(['anthropic', 'openai'])('defaults Windows browsers to PowerShell for %s', async (platform) => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
+    const wrapper = mountModal({ platform })
+    await nextTick()
+    expect(command(wrapper)).toContain('setup.ps1')
+    expect(command(wrapper)).not.toContain('setup.sh')
+    const unixTab = wrapper.findAll('button').find((button) => button.text() === 'macOS / Linux')
+    await unixTab!.trigger('click')
+    expect(command(wrapper)).toContain('setup.sh')
+  })
+
+  it.each(['MacIntel', 'Linux x86_64'])('defaults %s to the terminal command', async (platform) => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0')
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform)
+    const wrapper = mountModal({})
+    await nextTick()
+    expect(command(wrapper)).toContain('setup.sh')
+  })
+
+  it('resets shell and copy feedback when reopened for another key', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0)')
+    const wrapper = mountModal({})
+    await nextTick()
+    const unixTab = wrapper.findAll('button').find((button) => button.text() === 'macOS / Linux')
+    await unixTab!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text() === 'keys.useKeyModal.copy')!.trigger('click')
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true, apiKey: 'TEST_ONLY_NEXT_KEY' })
+    expect(command(wrapper)).toContain('setup.ps1')
+    expect(command(wrapper)).toContain('TEST_ONLY_NEXT_KEY')
+    expect(wrapper.findAll('button').some((button) => button.text() === 'keys.useKeyModal.copied')).toBe(false)
+  })
+
+  it('shows creation and execution guidance without treating a copied command as completed setup', async () => {
+    const wrapper = mountModal({ newlyCreated: true, platform: 'openai' })
+    await nextTick()
+    expect(wrapper.text()).toContain('keys.useKeyModal.createdTitle')
+    expect(wrapper.text()).toContain('keys.useKeyModal.steps.runHint')
+    expect(wrapper.text()).toContain('keys.useKeyModal.steps.codexStart')
+    expect(wrapper.find('[data-tour="key-setup-command"]').exists()).toBe(true)
+    await wrapper.findAll('button').find((button) => button.text() === 'keys.useKeyModal.copy')!.trigger('click')
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(wrapper.find('[data-tour="key-setup-command"]').exists()).toBe(true)
+  })
+
   it('renders one repeatable Claude command containing the escaped Gateway and Key', async () => {
     const wrapper = mountModal({})
     await nextTick()

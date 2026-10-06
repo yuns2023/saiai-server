@@ -67,32 +67,6 @@
             </div>
           </template>
 
-          <template #cell-key="{ value, row }">
-            <div class="flex items-center gap-2">
-              <code class="code text-xs">
-                {{ maskKey(value) }}
-              </code>
-              <button
-                @click="copyToClipboard(value, row.id)"
-                class="rounded-lg p-1 transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
-                :class="
-                  copiedKeyId === row.id
-                    ? 'text-green-500'
-                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-                "
-                :title="copiedKeyId === row.id ? t('keys.copied') : t('keys.copyToClipboard')"
-              >
-                <Icon
-                  v-if="copiedKeyId === row.id"
-                  name="check"
-                  size="sm"
-                  :stroke-width="2"
-                />
-                <Icon v-else name="clipboard" size="sm" />
-              </button>
-            </div>
-          </template>
-
           <template #cell-name="{ value, row }">
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
@@ -104,6 +78,13 @@
                 :title="t('keys.ipRestrictionEnabled')"
               />
             </div>
+          </template>
+
+          <template #cell-use_key="{ row }">
+            <button @click="openUseKeyModal(row)" class="btn btn-primary btn-sm whitespace-nowrap" data-tour="key-use-btn">
+              <Icon name="terminal" size="sm" />
+              <span>{{ t('keys.useKey') }}</span>
+            </button>
           </template>
 
           <template #cell-group="{ row }">
@@ -319,14 +300,13 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
-              <!-- Use Key Button -->
+            <div class="flex items-center gap-2 whitespace-nowrap">
               <button
-                @click="openUseKeyModal(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
+                @click="advancedKey = row"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
               >
-                <Icon name="terminal" size="sm" />
-                <span class="text-xs">{{ t('keys.useKey') }}</span>
+                <Icon name="more" size="sm" />
+                <span class="text-xs">{{ t('keys.moreActions') }}</span>
               </button>
               <!-- Toggle Status Button -->
               <button
@@ -926,8 +906,16 @@
       :api-key="selectedKey?.key || ''"
       :base-url="publicSettings?.api_base_url || ''"
       :api-endpoints="publicSettings?.api_endpoints || []"
-      :platform="selectedKey?.group?.platform || null"
+      :platform="selectedKeyPlatform"
+      :newly-created="useKeyNewlyCreated"
       @close="closeUseKeyModal"
+    />
+
+    <KeyAdvancedDialog
+      :show="advancedKey !== null"
+      :api-key="advancedKey?.key || ''"
+      :key-name="advancedKey?.name || ''"
+      @close="advancedKey = null"
     />
 
     <!-- Group Selector Dropdown (Teleported to body to avoid overflow clipping) -->
@@ -1018,6 +1006,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import SearchInput from '@/components/common/SearchInput.vue'
 	import Icon from '@/components/icons/Icon.vue'
 	import UseKeyModal from '@/components/keys/UseKeyModal.vue'
+import KeyAdvancedDialog from '@/components/keys/KeyAdvancedDialog.vue'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
 	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform } from '@/types'
@@ -1049,7 +1038,7 @@ const { copyToClipboard: clipboardCopy } = useClipboard()
 const columns = computed<Column[]>(() => [
   { key: 'id', label: 'ID', sortable: true },
   { key: 'name', label: t('common.name'), sortable: true },
-  { key: 'key', label: t('keys.apiKey'), sortable: false },
+  { key: 'use_key', label: t('keys.useKey'), sortable: false },
   { key: 'group', label: t('keys.group'), sortable: false },
   { key: 'usage', label: t('keys.usage'), sortable: false },
   { key: 'rate_limit', label: t('keys.rateLimitColumn'), sortable: false },
@@ -1087,8 +1076,12 @@ const showDeleteDialog = ref(false)
 const showResetQuotaDialog = ref(false)
 const showResetRateLimitDialog = ref(false)
 const showUseKeyModal = ref(false)
+const useKeyNewlyCreated = ref(false)
+const advancedKey = ref<ApiKey | null>(null)
 const selectedKey = ref<ApiKey | null>(null)
-const copiedKeyId = ref<number | null>(null)
+const selectedKeyPlatform = computed(() => selectedKey.value?.group?.platform
+  ?? groups.value.find((group) => group.id === selectedKey.value?.group_id)?.platform
+  ?? null)
 const copiedApiKeyId = ref<number | null>(null)
 const groupSelectorKeyId = ref<number | null>(null)
 const publicSettings = ref<PublicSettings | null>(null)
@@ -1208,21 +1201,6 @@ const filteredGroupOptions = computed(() => {
   })
 })
 
-const maskKey = (key: string): string => {
-  if (key.length <= 12) return key
-  return `${key.slice(0, 8)}...${key.slice(-4)}`
-}
-
-const copyToClipboard = async (text: string, keyId: number) => {
-  const success = await clipboardCopy(text, t('keys.copied'))
-  if (success) {
-    copiedKeyId.value = keyId
-    setTimeout(() => {
-      copiedKeyId.value = null
-    }, 800)
-  }
-}
-
 const copyApiKeyId = async (keyId: number) => {
   const success = await clipboardCopy(String(keyId), t('keys.copied'))
   if (success) {
@@ -1309,13 +1287,15 @@ const loadPublicSettings = async () => {
   }
 }
 
-const openUseKeyModal = (key: ApiKey) => {
+const openUseKeyModal = (key: ApiKey, newlyCreated = false) => {
   selectedKey.value = key
+  useKeyNewlyCreated.value = newlyCreated
   showUseKeyModal.value = true
 }
 
 const closeUseKeyModal = () => {
   showUseKeyModal.value = false
+  useKeyNewlyCreated.value = false
   selectedKey.value = null
 }
 
@@ -1484,6 +1464,7 @@ const handleSubmit = async () => {
 
   submitting.value = true
   try {
+    let createdKey: ApiKey | null = null
     if (showEditModal.value && selectedKey.value) {
       await keysAPI.update(selectedKey.value.id, {
         name: formData.value.name,
@@ -1500,7 +1481,7 @@ const handleSubmit = async () => {
       appStore.showSuccess(t('keys.keyUpdatedSuccess'))
     } else {
       const customKey = formData.value.use_custom_key ? formData.value.custom_key : undefined
-      await keysAPI.create(
+      createdKey = await keysAPI.create(
         formData.value.name,
         formData.value.group_id,
         customKey,
@@ -1517,6 +1498,7 @@ const handleSubmit = async () => {
       }
     }
     closeModals()
+    if (createdKey) openUseKeyModal(createdKey, true)
     loadApiKeys()
   } catch (error: any) {
     const errorMsg = error.response?.data?.detail || t('keys.failedToSave')

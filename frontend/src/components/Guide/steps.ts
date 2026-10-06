@@ -305,5 +305,16 @@ export const getUserSteps = (t: (key: string) => string): DriveStep[] => [
       align: 'center',
       showButtons: ['close']
     }
+  },
+  {
+    element: '[data-tour="key-setup-command"]',
+    popover: {
+      title: t('onboarding.user.keySetup.title'),
+      description: t('onboarding.user.keySetup.description'),
+      side: 'top',
+      align: 'center',
+      showButtons: ['next', 'close'],
+      nextBtnText: t('onboarding.user.keySetup.doneBtn')
+    }
   }
 ]

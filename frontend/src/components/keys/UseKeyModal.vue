@@ -6,6 +6,10 @@
     @close="emit('close')"
   >
     <div class="space-y-4">
+      <div v-if="newlyCreated && showShellTabs" class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-800 dark:bg-emerald-900/20" role="status">
+        <p class="font-semibold text-emerald-800 dark:text-emerald-200">{{ t('keys.useKeyModal.createdTitle') }}</p>
+        <p class="mt-1 text-sm text-emerald-700 dark:text-emerald-300">{{ t('keys.useKeyModal.createdHint') }}</p>
+      </div>
       <!-- No Group Assigned Warning -->
       <div v-if="!platform" class="flex items-start gap-3 p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
         <svg class="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -27,6 +31,21 @@
         <p class="text-sm text-gray-600 dark:text-gray-400">
           {{ platformDescription }}
         </p>
+
+        <ol v-if="showShellTabs" class="grid gap-3 rounded-xl bg-gray-50 p-4 text-sm dark:bg-dark-800 sm:grid-cols-3">
+          <li>
+            <span class="font-semibold">1. {{ t('keys.useKeyModal.steps.copy') }}</span>
+            <p class="mt-1 text-gray-500 dark:text-gray-400">{{ t('keys.useKeyModal.steps.copyHint') }}</p>
+          </li>
+          <li>
+            <span class="font-semibold">2. {{ t('keys.useKeyModal.steps.run') }}</span>
+            <p class="mt-1 text-gray-500 dark:text-gray-400">{{ t('keys.useKeyModal.steps.runHint', { terminal: terminalName }) }}</p>
+          </li>
+          <li>
+            <span class="font-semibold">3. {{ t('keys.useKeyModal.steps.start') }}</span>
+            <p class="mt-1 text-gray-500 dark:text-gray-400">{{ startHint }}</p>
+          </li>
+        </ol>
 
         <div v-if="availableEndpoints.length" class="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
           <label for="api-endpoint" class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -90,7 +109,7 @@
         </div>
 
         <!-- Code Blocks (Stacked for multi-file platforms) -->
-        <div class="space-y-4">
+        <div class="space-y-4" data-tour="key-setup-command">
           <div
             v-for="(file, index) in currentFiles"
             :key="index"
@@ -164,6 +183,7 @@ interface Props {
 	baseUrl: string
 	apiEndpoints?: APIEndpoint[]
 	platform: GroupPlatform | null
+  newlyCreated?: boolean
 }
 
 interface Emits {
@@ -191,8 +211,18 @@ const { copyToClipboard: clipboardCopy } = useClipboard()
 
 const copiedIndex = ref<number | null>(null)
 const selectedEndpointId = ref('')
-const activeTab = ref<string>('unix')
+const activeTab = ref<string>(getDefaultShellTab())
 const activeClientTab = ref<string>('claude')
+
+function getDefaultShellTab() {
+  return /Windows/i.test(navigator.userAgent) || /^Win(32|64|CE)$/i.test(navigator.platform)
+    ? 'powershell'
+    : 'unix'
+}
+
+const terminalName = computed(() => activeTab.value === 'powershell'
+  ? 'PowerShell'
+  : activeTab.value === 'cmd' ? 'Windows CMD' : t('keys.useKeyModal.terminal'))
 
 const availableEndpoints = computed(() => (props.apiEndpoints || []).filter((endpoint) => endpoint.enabled && endpoint.url))
 const selectedEndpoint = computed(() => availableEndpoints.value.find((endpoint) => endpoint.id === selectedEndpointId.value) || null)
@@ -206,8 +236,14 @@ const chooseRandomEndpoint = () => {
 }
 
 watch(() => props.show, (show) => {
-  if (show) chooseRandomEndpoint()
+  copiedIndex.value = null
+  if (show) {
+    activeTab.value = getDefaultShellTab()
+    chooseRandomEndpoint()
+  }
 }, { immediate: true })
+
+watch(() => props.apiKey, () => { copiedIndex.value = null })
 
 watch(availableEndpoints, (endpoints) => {
   if (endpoints.length === 0) {
@@ -231,14 +267,16 @@ const defaultClientTab = computed(() => {
   }
 })
 
+const startHint = computed(() => t(`keys.useKeyModal.steps.${defaultClientTab.value}Start`))
+
 watch(() => props.platform, () => {
-  activeTab.value = 'unix'
+  activeTab.value = getDefaultShellTab()
   activeClientTab.value = defaultClientTab.value
 }, { immediate: true })
 
 // Reset shell tab when client changes
 watch(activeClientTab, () => {
-  activeTab.value = 'unix'
+  activeTab.value = getDefaultShellTab()
 })
 
 // Icon components

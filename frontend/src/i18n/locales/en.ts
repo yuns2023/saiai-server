@@ -638,8 +638,27 @@ export default {
     quota: 'Quota',
     lastUsedAt: 'Last Used',
     useKey: 'Use Key',
+    moreActions: 'More actions',
+    showKey: 'Show raw key',
+    hideKey: 'Hide key',
+    copyKey: 'Copy raw key',
+    rawKeyHint: 'The raw key is only needed for manual configuration. One-command setup does not require copying it separately.',
+    rawKeyWarning: 'Do not share your key. A copied key can remain in the clipboard or in the history of a terminal where you paste it.',
     useKeyModal: {
       title: 'Use API Key',
+      createdTitle: 'Key created — configure your client next',
+      createdHint: 'Copy the configuration command below, run it in your local terminal, then start your client.',
+      terminal: 'Terminal',
+      steps: {
+        copy: 'Copy the setup command',
+        copyHint: 'The command includes the selected route and this key; there is no need to copy the key separately.',
+        run: 'Run it locally',
+        runHint: 'Open {terminal}, paste the command and run it. Install the official client you want to use first.',
+        start: 'Start your client',
+        claudeStart: 'After setup, run claude or reopen Claude Code in VSCode.',
+        codexStart: 'Run saiai codex for the terminal or saiai desktop codex for Desktop. Fully quit and reopen VSCode for the extension.',
+        geminiStart: 'Run gemini in the same terminal where you set the environment variables.'
+      },
       description:
         'Run the one-click command below to install or reuse SAIAI, configure Claude Code, and start the per-user local proxy.',
       endpointLabel: 'API route',
@@ -4894,7 +4913,7 @@ export default {
       },
       createKey: {
         title: '➕ Create New Key',
-        description: '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">Click the button to create your first API key.</p><p style="padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>💡 Tip:</b> Key is only shown once after creation, make sure to copy and save</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 Click "Create Key"</p></div>'
+        description: '<p>Create your first API key. The setup instructions open automatically after creation. You can reopen them anytime with Use Key.</p>'
       },
       keyName: {
         title: '✏️ Key Name',
@@ -4908,7 +4927,12 @@ export default {
       },
       keySubmit: {
         title: '🎉 Complete Creation',
-        description: '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">Click to confirm and create your API key.</p><div style="padding: 8px 12px; background: #fee2e2; border-left: 3px solid #ef4444; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚠️ Important:</b><ul style="margin: 8px 0 0 16px;"><li>Copy the key (sk-xxx) immediately after creation</li><li>Key is only shown once, need to regenerate if lost</li></ul></div><p style="padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>🚀 How to Use:</b><br/>Configure the key in any OpenAI-compatible client (like ChatBox, OpenCat, etc.) and start using!</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 Click "Create" button</p></div>'
+        description: '<p>Click Create to generate your key and open Use Key. Copy the setup command and run it in your local terminal. More actions remains available when you need the raw key.</p>'
+      },
+      keySetup: {
+        title: 'Configure your client',
+        description: '<p>Copy this command and run it in the selected terminal, then follow the client startup instructions. Copying alone does not configure your machine. You can reopen these instructions with Use Key.</p>',
+        doneBtn: 'Got it'
       }
     }
   },
