@@ -325,6 +325,9 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_REQUEST_FAILED", "create Codex models request: %v", err)
 	}
 	req.Header = request.headers.Clone()
+	if request.preserveClientHeaders {
+		req = req.WithContext(WithNativeCodexRedirectPolicy(req.Context()))
+	}
 	if ifNoneMatch = strings.TrimSpace(ifNoneMatch); ifNoneMatch != "" && (!request.preserveClientHeaders || len(req.Header.Values("If-None-Match")) == 0) {
 		req.Header.Set("If-None-Match", ifNoneMatch)
 	}
@@ -343,6 +346,11 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		})
 		if clientErr != nil {
 			return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_PROXY_INVALID", "invalid proxy configuration: %v", clientErr)
+		}
+		if NativeCodexRejectsRedirects(req.Context()) {
+			nativeClient := *client
+			nativeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+			client = &nativeClient
 		}
 		resp, err = client.Do(req)
 	}

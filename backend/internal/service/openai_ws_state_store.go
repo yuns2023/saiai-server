@@ -64,6 +64,8 @@ type OpenAIWSStateStore interface {
 	BindResponseAccountForUser(ctx context.Context, userID int64, responseID string, accountID int64, ttl time.Duration) error
 	GetResponseAccountForUser(ctx context.Context, userID int64, responseID string) (int64, error)
 	DeleteResponseAccountForUser(ctx context.Context, userID int64, responseID string) error
+	BindTurnStateAccountForUser(ctx context.Context, userID int64, turnState string, accountID int64, ttl time.Duration) error
+	GetTurnStateAccountForUser(ctx context.Context, userID int64, turnState string) (int64, error)
 	BindResponseReplayForUser(userID int64, responseID string, input []json.RawMessage, ttl time.Duration) bool
 	GetResponseReplayForUser(userID int64, responseID string) ([]json.RawMessage, bool)
 	DeleteResponseReplayForUser(userID int64, responseID string)
@@ -213,6 +215,28 @@ func (s *defaultOpenAIWSStateStore) BindResponseAccount(ctx context.Context, gro
 func (s *defaultOpenAIWSStateStore) BindResponseAccountForUser(ctx context.Context, userID int64, responseID string, accountID int64, ttl time.Duration) error {
 	id := normalizeOpenAIWSResponseID(responseID)
 	return s.bindResponseAccount(ctx, 0, openAIWSResponseAccountUserLocalKey(userID, id), openAIWSResponseAccountUserCacheKey(userID, id), id, accountID, ttl)
+}
+
+// Only the digest and owner are cached. The provider's opaque turn token must
+// not be persisted in Redis, and ownership must survive a Gateway restart or
+// a request reaching another instance. This uses a distinct namespace from
+// response IDs and does not depend on a connection or changing session header.
+func openAITurnStateAccountKey(userID int64, turnState string) string {
+	if turnState == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("user:%d:turn-state:%s", userID, turnState)))
+	return "openai_turn_state:" + hex.EncodeToString(sum[:])
+}
+
+func (s *defaultOpenAIWSStateStore) BindTurnStateAccountForUser(ctx context.Context, userID int64, turnState string, accountID int64, ttl time.Duration) error {
+	key := openAITurnStateAccountKey(userID, turnState)
+	return s.bindResponseAccount(ctx, 0, key, key, key, accountID, ttl)
+}
+
+func (s *defaultOpenAIWSStateStore) GetTurnStateAccountForUser(ctx context.Context, userID int64, turnState string) (int64, error) {
+	key := openAITurnStateAccountKey(userID, turnState)
+	return s.getResponseAccount(ctx, 0, key, key, key)
 }
 
 func (s *defaultOpenAIWSStateStore) bindResponseAccount(ctx context.Context, cacheGroupID int64, localKey, cacheKey, responseID string, accountID int64, ttl time.Duration) error {

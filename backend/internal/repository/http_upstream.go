@@ -287,7 +287,15 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 
 	// 执行请求
 	req, connectionObservation := s.withConnectionObservation(req)
-	resp, err := entry.client.Do(req)
+	client := entry.client
+	if service.NativeCodexRejectsRedirects(req.Context()) {
+		// Clone the client, preserving its pooled transport and timeouts. Never
+		// change the shared client's policy for unrelated API-key/Claude calls.
+		nativeClient := *client
+		nativeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		client = &nativeClient
+	}
+	resp, err := client.Do(req)
 	s.recordTransportOutcome(connectionObservation, resp, err, "standard", accountID, accountConcurrency, strings.TrimSpace(proxyURL) != "")
 	if err != nil {
 		// 请求失败，立即减少计数

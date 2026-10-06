@@ -1,6 +1,23 @@
 package service
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
+
+type nativeCodexRedirectPolicyKey struct{}
+
+// WithNativeCodexRedirectPolicy prevents a transport from issuing an implicit
+// second application request. This policy stays in local context, not a wire
+// header, and does not affect clients that use compatibility forwarding.
+func WithNativeCodexRedirectPolicy(ctx context.Context) context.Context {
+	return context.WithValue(ctx, nativeCodexRedirectPolicyKey{}, true)
+}
+
+func NativeCodexRejectsRedirects(ctx context.Context) bool {
+	value, _ := ctx.Value(nativeCodexRedirectPolicyKey{}).(bool)
+	return value
+}
 
 // HTTPUpstream 上游 HTTP 请求接口
 // 用于向上游 API（Claude、OpenAI、Gemini 等）发送请求

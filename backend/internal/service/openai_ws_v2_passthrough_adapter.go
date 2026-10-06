@@ -266,6 +266,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 
 	dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
 	defer cancelDial()
+	if account.IsOpenAIOAuth() || account.IsOpenAICodexNativeRelay() {
+		dialCtx = WithNativeCodexRedirectPolicy(dialCtx)
+	}
 	upstreamConn, statusCode, handshakeHeaders, err := dialer.Dial(dialCtx, wsURL, headers, proxyURL)
 	if err != nil {
 		logOpenAIWSV2Passthrough(

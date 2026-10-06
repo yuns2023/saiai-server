@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -84,6 +85,7 @@ func TestOpenAINativeOAuth_NormalHTTPAndCompactPreserveNativePayload(t *testing.
 				require.Equal(t, 1, upstream.callCount)
 				require.Equal(t, sha256.Sum256(wire), sha256.Sum256(upstream.bodies[0]))
 				headers := upstream.reqs[0].Header
+				require.True(t, NativeCodexRejectsRedirects(upstream.reqs[0].Context()))
 				for _, key := range []string{"User-Agent", "originator", "Version", "OpenAI-Beta", "X-Codex-Future-Control", "X-Oai-Attestation"} {
 					require.Equal(t, c.Request.Header.Values(key), headers.Values(key), key)
 				}
@@ -227,6 +229,53 @@ func TestOpenAINativeOAuth_ModelsPreservesClientIdentity(t *testing.T) {
 	require.Equal(t, c.Request.Header.Values("X-Codex-Future-Control"), outgoing.Header.Values("X-Codex-Future-Control"))
 	require.Equal(t, c.Request.URL.RawQuery, outgoing.URL.RawQuery)
 	require.Equal(t, "Bearer MOCK_ONLY", outgoing.Header.Get("Authorization"))
+	require.True(t, NativeCodexRejectsRedirects(outgoing.Context()))
+}
+
+func TestOpenAINativeOAuth_ModelsAndWSDoNotFollowRedirects(t *testing.T) {
+	var redirected atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/target" {
+			redirected.Add(1)
+			w.WriteHeader(200)
+			return
+		}
+		w.Header().Set("Location", "/target")
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	ctx := WithNativeCodexRedirectPolicy(context.Background())
+	conn, status, _, err := newDefaultOpenAIWSClientDialer().Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), http.Header{"User-Agent": {"codex_cli_rs/0.159.2"}}, "")
+	require.Error(t, err)
+	require.Nil(t, conn)
+	require.Equal(t, http.StatusTemporaryRedirect, status)
+	require.Zero(t, redirected.Load())
+	client, err := httpclient.GetClient(httpclient.Options{Timeout: codexModelsManifestRequestTimeout, ResponseHeaderTimeout: 10 * time.Second})
+	require.NoError(t, err)
+	original := client.Transport
+	defer func() { client.Transport = original }()
+	client.Transport = auditOAuthPolicyRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/target" {
+			redirected.Add(1)
+		}
+		return auditOAuthPolicyResponse(http.StatusTemporaryRedirect, http.Header{"Location": {"/target"}}, ""), nil
+	})
+	c, _ := auditOAuthPolicyContext("/v1/models")
+	_, err = auditOAuthPolicyService(nil).FetchNativeCodexModelsManifest(context.Background(), auditOAuthPolicyAccount(), "", "", c.Request.Header)
+	require.Error(t, err)
+	require.Zero(t, redirected.Load())
+}
+
+func TestOpenAINativeOAuth_HTTPRedirectIsReturnedWithoutSuccessOrReplay(t *testing.T) {
+	c, rec := auditOAuthPolicyContext("/v1/responses")
+	body := `{"error":{"code":"mock_redirect","future":true}}`
+	upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{auditOAuthPolicyResponse(307, http.Header{"Location": {"/mock_target"}, "Content-Type": {"application/json"}}, body)}}
+	_, err := auditOAuthPolicyService(upstream).Forward(context.Background(), c, auditOAuthPolicyAccount(), []byte(`{"model":"gpt-5.5","stream":true}`))
+	require.Error(t, err)
+	require.Equal(t, 307, rec.Code)
+	require.Equal(t, "/mock_target", rec.Header().Get("Location"))
+	require.Equal(t, body, rec.Body.String())
+	require.Equal(t, 1, upstream.callCount)
 }
 
 func TestOpenAINativeOAuth_WSFramesAndHandshakeArePreserved(t *testing.T) {
@@ -536,4 +585,93 @@ func TestOpenAINativeOAuth_WSRejectsUnverifiedFrameStateBeforeDial(t *testing.T)
 		t.Fatal("state rejection did not finish")
 	}
 	require.Zero(t, dialer.DialCount())
+}
+
+func TestOpenAINativeOAuth_TurnStateOwnershipSurvivesRestartWithoutPersistingToken(t *testing.T) {
+	cache := &stubGatewayCache{}
+	first := &OpenAIGatewayService{cache: cache, cfg: &config.Config{}}
+	account := auditOAuthPolicyAccount()
+	first.bindOpenAINativeTurnState(account, 55, "old_session", "MOCK_OPAQUE_STATE")
+	for key := range cache.sessionBindings {
+		require.NotContains(t, key, "MOCK_OPAQUE_STATE")
+		require.True(t, strings.HasPrefix(key, "openai_turn_state:"))
+	}
+	second := &OpenAIGatewayService{cache: cache, cfg: &config.Config{}}
+	headers := make(http.Header)
+	headers.Set(openAIWSTurnStateHeader, "MOCK_OPAQUE_STATE")
+	// A restart and a different transport/session header do not change owner.
+	require.NoError(t, second.validateOpenAINativeTurnState(account, 55, "", headers))
+	require.NoError(t, second.validateOpenAINativeTurnState(account, 55, "new_session", headers))
+	require.ErrorIs(t, second.validateOpenAINativeTurnState(account, 56, "old_session", headers), errOpenAITurnStateAccountMismatch)
+	other := *account
+	other.ID++
+	require.ErrorIs(t, second.validateOpenAINativeTurnState(&other, 55, "old_session", headers), errOpenAITurnStateAccountMismatch)
+}
+
+func TestOpenAINativeOAuth_TurnStateSelectsOwnerBeforeStaleSessionSticky(t *testing.T) {
+	group := int64(7)
+	owner := *auditOAuthPolicyAccount()
+	owner.Status, owner.Schedulable = StatusActive, true
+	peer := owner
+	peer.ID++
+	cache := &stubGatewayCache{}
+	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{},
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{owner, peer}},
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{})}
+	svc.bindOpenAINativeTurnState(&owner, 55, "mock_session", "MOCK_ROUTING_STATE")
+	for _, fromFrame := range []bool{false, true} {
+		t.Run(map[bool]string{false: "header", true: "frame"}[fromFrame], func(t *testing.T) {
+			c, _ := auditOAuthPolicyContext("/v1/responses")
+			payload := []byte(`{"model":"gpt-5.5"}`)
+			if fromFrame {
+				payload = []byte(`{"model":"gpt-5.5","client_metadata":{"x-codex-turn-state":"MOCK_ROUTING_STATE"}}`)
+			} else {
+				c.Request.Header.Set(openAIWSTurnStateHeader, "MOCK_ROUTING_STATE")
+			}
+			require.NoError(t, svc.BindStickySession(c.Request.Context(), &group, "mock_session", peer.ID))
+			selection, decision, err := svc.SelectAccountForNativeCodexRequest(c, &group, 55, "", "mock_session", "gpt-5.5", nil, OpenAIUpstreamTransportHTTPSSE, payload)
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.Equal(t, owner.ID, selection.Account.ID)
+			require.Equal(t, "turn_state", decision.Layer)
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			selection, _, err = svc.SelectAccountForNativeCodexRequest(c, &group, 55, "", "mock_session", "gpt-5.5", map[int64]struct{}{owner.ID: {}}, OpenAIUpstreamTransportHTTPSSE, payload)
+			require.ErrorIs(t, err, errOpenAITurnStateAccountMismatch)
+			require.Nil(t, selection, "a bound continuation must never fall through to a peer")
+		})
+	}
+}
+
+func TestOpenAINativeOAuth_HTTPRejectsUnknownBodyTurnStateBeforeProviderIO(t *testing.T) {
+	c, rec := auditOAuthPolicyContext("/v1/responses")
+	upstream := &httpUpstreamSequenceRecorder{}
+	_, err := auditOAuthPolicyService(upstream).Forward(context.Background(), c, auditOAuthPolicyAccount(), []byte(`{"model":"gpt-5.5","client_metadata":{"x-codex-turn-state":"MOCK_UNKNOWN"}}`))
+	require.ErrorIs(t, err, errOpenAITurnStateAccountMismatch)
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Zero(t, upstream.callCount)
+}
+
+func TestOpenAINativeOAuth_PreviousResponseOwnerSurvivesHTTPFallback(t *testing.T) {
+	group := int64(7)
+	owner := *auditOAuthPolicyAccount()
+	owner.Status, owner.Schedulable = StatusActive, true
+	owner.Extra = map[string]any{"openai_ws_force_http": true}
+	peer := owner
+	peer.ID++
+	svc := &OpenAIGatewayService{cache: &stubGatewayCache{}, cfg: &config.Config{},
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{owner, peer}},
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{})}
+	ctx := context.Background()
+	require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccountForUser(ctx, 55, "resp_mock_http", owner.ID, time.Hour))
+	require.NoError(t, svc.BindStickySession(ctx, &group, "mock_session", peer.ID))
+	selection, decision, err := svc.SelectAccountWithSchedulerForUser(ctx, &group, 55, "resp_mock_http", "mock_session", "gpt-5.5", nil, OpenAIUpstreamTransportHTTPSSE)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, owner.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
 }

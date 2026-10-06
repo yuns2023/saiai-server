@@ -694,8 +694,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	for {
 		// Select account supporting the requested model
 		reqLog.Debug("openai.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
-		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForUser(
-			c.Request.Context(),
+		selection, scheduleDecision, err := h.gatewayService.SelectAccountForNativeCodexRequest(
+			c,
 			apiKey.GroupID,
 			subject.UserID,
 			previousResponseID,
@@ -703,6 +703,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			reqModel,
 			failedAccountIDs,
 			service.OpenAIUpstreamTransportAny,
+			sessionHashBody,
 		)
 		if err != nil {
 			reqLog.Warn("openai.account_select_failed",
@@ -890,6 +891,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 }
 
 func (h *OpenAIGatewayHandler) writeOpenAISelectionError(c *gin.Context, err error, streamStarted bool) {
+	if service.IsOpenAITurnStateAccountMismatch(err) {
+		h.writeError(c, gatewayErrorEnvelope{
+			Status: http.StatusConflict, Type: "invalid_request_error", Code: "turn_state_account_mismatch",
+			Message: "This conversation's upstream account is unavailable or its state cannot be verified. Start a new conversation and retry.",
+		}, streamStarted)
+		return
+	}
 	var quotaGuardErr *service.OpenAINewSessionQuotaGuardError
 	if !errors.As(err, &quotaGuardErr) {
 		h.writeError(c, errEnvelopeNoAvailableAccount, streamStarted)
@@ -1481,8 +1489,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
 	)
 	excludedAccountIDs := make(map[int64]struct{}, 4)
-	selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForUser(
-		ctx,
+	selection, scheduleDecision, err := h.gatewayService.SelectAccountForNativeCodexRequest(
+		c,
 		apiKey.GroupID,
 		subject.UserID,
 		previousResponseID,
@@ -1490,9 +1498,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		reqModel,
 		excludedAccountIDs,
 		service.OpenAIUpstreamTransportResponsesWebsocketV2,
+		firstMessage,
 	)
 	if err != nil {
 		reqLog.Warn("openai.websocket_account_select_failed", zap.Error(err))
+		if service.IsOpenAITurnStateAccountMismatch(err) {
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "conversation turn state cannot be verified for an available account")
+			return
+		}
 		closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
 		return
 	}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
@@ -81,6 +82,10 @@ func (s *OpenAIGatewayService) WriteNativeCodexResponseHeaders(dst, src http.Hea
 
 var errOpenAITurnStateAccountMismatch = errors.New("Codex turn state cannot be verified for the selected account; start a fresh conversation")
 
+func IsOpenAITurnStateAccountMismatch(err error) bool {
+	return errors.Is(err, errOpenAITurnStateAccountMismatch)
+}
+
 const openAINativeTurnStateSessionHashKey = "openai_native_turn_state_session_hash"
 
 func (s *OpenAIGatewayService) openAINativeResponseSessionHash(c *gin.Context) string {
@@ -95,17 +100,28 @@ func (s *OpenAIGatewayService) openAINativeResponseSessionHash(c *gin.Context) s
 // An opaque token must not be guessed, replaced with a cached token, or sent
 // to another pooled account. Preserve a verified supplied token byte-for-byte;
 // fail before provider I/O when ownership cannot be established. Absence stays
-// absent. This intentionally fails closed after process-local state expires.
+// absent. Ownership is shared through Redis; a local-only token cache is a
+// compatibility fallback for already observed in-flight state.
 func (s *OpenAIGatewayService) validateOpenAINativeTurnState(account *Account, userID int64, sessionHash string, incoming http.Header) error {
 	values := incoming.Values(openAIWSTurnStateHeader)
 	if len(values) == 0 {
 		return nil
 	}
-	if len(values) != 1 || values[0] == "" || sessionHash == "" || s == nil {
+	if len(values) != 1 || values[0] == "" || account == nil || s == nil {
 		return errOpenAITurnStateAccountMismatch
 	}
 	store := s.getOpenAIWSStateStore()
 	if store == nil {
+		return errOpenAITurnStateAccountMismatch
+	}
+	owner, err := store.GetTurnStateAccountForUser(context.Background(), userID, values[0])
+	if err != nil {
+		return err
+	}
+	if owner > 0 {
+		if owner == account.ID {
+			return nil
+		}
 		return errOpenAITurnStateAccountMismatch
 	}
 	stored, ok := store.GetSessionTurnState(0, openAIWSUserTurnStateSessionHash(userID, account.ID, sessionHash))
@@ -124,10 +140,18 @@ func openAINativeTurnStateKey(userID, accountID int64, sessionHash, state string
 }
 
 func (s *OpenAIGatewayService) bindOpenAINativeTurnState(account *Account, userID int64, sessionHash, state string) {
-	if state == "" || sessionHash == "" {
+	if state == "" || account == nil || s == nil {
 		return
 	}
 	store := s.getOpenAIWSStateStore()
+	// Persist only a user-scoped digest and owner. Keep the bounded local
+	// entries even if Redis is temporarily unavailable.
+	if err := store.BindTurnStateAccountForUser(context.Background(), userID, state, account.ID, s.openAIWSSessionStickyTTL()); err != nil {
+		logOpenAIWSV2Passthrough("turn_state_owner_bind_failed account_id=%d", account.ID)
+	}
+	if sessionHash == "" {
+		return
+	}
 	store.BindSessionTurnState(0, openAIWSUserTurnStateSessionHash(userID, account.ID, sessionHash), state, s.openAIWSSessionStickyTTL())
 	// Concurrent turns can legitimately have different tokens. Ownership is a
 	// set of observed tokens, rather than only the last value for the session.

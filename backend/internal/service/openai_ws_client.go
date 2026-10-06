@@ -108,6 +108,11 @@ func (d *coderOpenAIWSClientDialer) Dial(
 		}}
 	}
 
+	if NativeCodexRejectsRedirects(ctx) {
+		nativeClient := *opts.HTTPClient
+		nativeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		opts.HTTPClient = &nativeClient
+	}
 	conn, resp, err := coderws.Dial(ctx, targetURL, opts)
 	if err != nil {
 		status := 0

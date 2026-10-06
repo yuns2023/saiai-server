@@ -4166,9 +4166,10 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseID(
 		// because its original account is temporarily unavailable.
 		return nil, nil
 	}
-	// 非 WSv2 场景（如 force_http/全局关闭）不应使用 previous_response_id 粘连，
-	// 以保持“回滚到 HTTP”后的历史行为一致性。
-	if s.getOpenAIWSProtocolResolver().Resolve(account).Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+	// Native OAuth owns continuations independently of transport. Preserve
+	// affinity after a client falls back to HTTP or WS is disabled. Legacy
+	// group-scoped/API-key scheduling retains its previous WS-only behavior.
+	if !(useUserScope && account.IsOpenAIOAuth()) && s.getOpenAIWSProtocolResolver().Resolve(account).Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 		return nil, nil
 	}
 	if shouldClearStickySession(account, requestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {

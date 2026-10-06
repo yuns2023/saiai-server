@@ -1312,9 +1312,12 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 		return ""
 	}
 
-	sessionID := strings.TrimSpace(c.GetHeader("session_id"))
-	if sessionID == "" {
-		sessionID = strings.TrimSpace(c.GetHeader("conversation_id"))
+	sessionID := ""
+	for _, name := range []string{"session_id", "session-id", "conversation_id", "conversation-id"} {
+		if value := strings.TrimSpace(c.GetHeader(name)); value != "" {
+			sessionID = value
+			break
+		}
 	}
 	if sessionID == "" && len(body) > 0 {
 		sessionID = strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
@@ -2165,6 +2168,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	if strictNativeOAuth && c != nil {
 		c.Set(openAINativeTurnStateSessionHashKey, s.openAISessionHashForTurnState(c, promptCacheKey))
+		if metadata, ok := reqBody["client_metadata"].(map[string]any); ok {
+			if value, present := metadata[openAIWSTurnStateHeader]; present {
+				state, stringValue := value.(string)
+				headers := make(http.Header)
+				headers.Set(openAIWSTurnStateHeader, state)
+				if !stringValue || s.validateOpenAINativeTurnState(account, getOpenAIUserIDFromContext(c), s.openAINativeResponseSessionHash(c), headers) != nil {
+					c.JSON(http.StatusConflict, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "turn_state_account_mismatch", "message": errOpenAITurnStateAccountMismatch.Error()}})
+					return nil, errOpenAITurnStateAccountMismatch
+				}
+			}
+		}
 	}
 	requestedReasoningEffort := extractOpenAIReasoningEffort(reqBody, originalModel)
 
@@ -2623,6 +2637,23 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				},
 			})
 			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+		}
+
+		if strictNativeRequest && resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			// The transport did not follow this redirect. Preserve the status
+			// and response instead of presenting it as a successful model turn.
+			payload, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+			_ = resp.Body.Close()
+			if token != "" {
+				payload = bytes.ReplaceAll(payload, []byte(token), []byte("[REDACTED]"))
+			}
+			s.writeOpenAIResponseHeaders(c.Writer.Header(), resp.Header, account)
+			c.Status(resp.StatusCode)
+			_, _ = c.Writer.Write(payload)
+			if readErr != nil {
+				return nil, readErr
+			}
+			return nil, fmt.Errorf("native Codex upstream redirect rejected: status %d", resp.StatusCode)
 		}
 
 		// Handle error response
@@ -3090,6 +3121,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// Ensure required headers exist
 	if !strictNativeRequest && req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
+	}
+	if strictNativeRequest {
+		req = req.WithContext(WithNativeCodexRedirectPolicy(req.Context()))
 	}
 
 	return req, nil
