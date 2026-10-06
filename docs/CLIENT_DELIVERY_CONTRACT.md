@@ -84,6 +84,18 @@ The OpenAI API Key setup UI offers one Codex CLI command. It does not expose a
 separate WebSocket setup tab; the Client's explicit `init-codex --websockets`
 option remains available for compatibility.
 
+Post-setup guidance is separate from the one-command configuration. With a
+compatible active Client, it retains normal Claude/VSCode use, describes
+`saiai claude` only as child-environment recovery for inherited configuration
+conflicts, and lists `saiai codex`, `saiai desktop codex` and VSCode restart
+instructions. It does not add a mode selector, run a command in the browser or
+claim that copying completed setup. The recovery launcher respects explicit
+user/project settings and does not repair the VSCode host environment; Desktop
+guidance covers Codex features, not ordinary ChatGPT. These advertised entrypoints
+must be supported by the exact Client bundle selected for the release. This does
+not restore withdrawn V2 setup/runtime/bootstrap behavior or permit a mismatched
+Gateway/Client release.
+
 ## Activation
 
 `scripts/sync-saiai-cli.sh stage <tag> <manifest-sha256>` is the only networked

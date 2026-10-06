@@ -63,3 +63,54 @@ change with no Client release, database migration or deployment authority.
 - These are local implementation checks, not deployment or acceptance evidence.
   Administrator interfaces, backend APIs, Client bundles and migrations are
   unchanged. Test activation and production promotion remain separate steps.
+
+## Follow-up: concise post-setup launch instructions
+
+Keep one configuration command per platform/shell and reduce the upper workflow
+to copy, run and start. Official-client installation is a visible prerequisite;
+the setup wrapper installs SAIAI, not Claude Code or Codex itself. Put the
+launch instructions below the configuration command:
+
+- Claude: normal `claude` and VSCode extension restart remain the primary paths.
+  Show `saiai claude` as a short recovery hint for conflicting inherited
+  address/authentication/proxy environment, not a new setup tab or default mode.
+  The expanded details explain that it affects only this Claude launch, leaves
+  explicit user/project settings in force and does not repair the IDE host.
+- Codex: separate copyable `saiai codex` and `saiai desktop codex` commands from
+  the fully-quit-and-reopen VSCode instruction. Clearly limit Desktop to Codex
+  features and advise normal Desktop exit before first use.
+- Copy buttons copy only; they never execute a command, probe a local process,
+  send a model request or report configuration completion. Launch commands do
+  not contain a Gateway address or Key. Copy feedback resets on context changes
+  and ignores stale asynchronous results.
+- Keep the repeat-setup route/key replacement hint and clipboard/terminal-history
+  warning visible. Put CA/download/service-management details in a native,
+  initially closed disclosure that resets on key/platform/dialog changes.
+- Preserve Gemini environment commands and the tour's configuration-command
+  anchor. No backend, initialization, service or command-generation change is
+  included.
+
+The Gateway contract verifier distinguishes this child-environment recovery
+launcher from withdrawn V2 configuration. V2 setup/runtime/revoke UI remains
+forbidden, and the recovery command must not replace either setup generator.
+Any release carrying these instructions must pair with an active Client bundle
+that implements the advertised commands; a frontend change is not authority to
+promote an experimental Client or deploy against an older incompatible bundle.
+
+### Follow-up validation
+
+- The full frontend suite passes: 68 files and 444 tests, including platform
+  visibility, unchanged bootstrap commands, launch-only copying, failed/late
+  clipboard results, context reset and copy-timer ordering. Typecheck and
+  production build pass; lint retains six pre-existing warnings and no errors.
+- The Gateway contract check and five positive/negative verifier tests pass.
+  CI runs these negative cases without relaxing V2 or activation rules.
+- Five local Chromium scenarios pass with synthetic identities, fully mocked
+  APIs and Windows/macOS/Linux user agents: Chinese Windows Claude and Codex,
+  Chinese mobile Claude, English mobile Codex and English dark desktop Codex.
+  They cover clipboard payloads, collapsed/reopened details, recovery/IDE
+  boundaries, creation-to-setup flow and viewport overflow. They are browser
+  simulations, not native-client, authenticated-backend or public-site acceptance.
+- No setup/launch command executes, no real key is used and no provider/model
+  request occurs. These are implementation checks, not release authorization;
+  source delivery, exact-source CI and test activation remain separate steps.

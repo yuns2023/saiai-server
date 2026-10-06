@@ -651,35 +651,48 @@ export default {
       terminal: '终端',
       steps: {
         copy: '复制配置命令',
-        copyHint: '命令已包含所选线路和当前密钥，无需另行复制密钥。',
-        run: '在本机执行',
-        runHint: '打开 {terminal}，粘贴命令并执行。请先安装要使用的官方客户端。',
+        run: '在终端执行',
+        runHint: '在 {terminal} 中粘贴并执行以下命令。',
         start: '启动客户端',
-        claudeStart: '配置完成后运行 claude，或重新打开 VSCode 中的 Claude Code。',
-        codexStart: '终端运行 saiai codex；桌面运行 saiai desktop codex；VSCode 请彻底退出后重新打开。',
         geminiStart: '在执行环境变量命令的同一终端运行 gemini。'
       },
-      description: '运行以下一键命令，安装或复用 SAIAI，配置 Claude Code 并启动用户级本地代理。',
+      description: '请先安装 Claude Code。下方命令安装或复用 SAIAI，并完成配置。',
       endpointLabel: 'API 线路',
       randomEndpoint: '重新随机',
       endpointHint: '当前生成的配置将使用：{url}',
       copy: '复制',
+      copySetup: '复制配置命令',
       copied: '已复制',
-      note: '配置后直接运行 claude 或从 VSCode 启动；本地代理会在后台运行，可用 saiai status、saiai logs 或 saiai stop 管理。命令中包含当前 API Key，因此可能保留在剪贴板和 shell 历史中。',
-      saiaiCliHint: '可反复执行：版本未变时跳过二进制下载，替换受管 Gateway 和 Key，复用本机 CA，并启动或刷新本地代理。',
+      note: '配置命令含密钥，可能保留在剪贴板和终端历史中，请勿分享。',
+      saiaiCliHint: '可重复执行，更新当前线路和密钥。',
+      detailsTitle: '配置说明',
+      saiaiCliDetails: '配置会启动或刷新用户级本地代理。重复执行会更新受管 Gateway 和 Key，复用有效的本机 CA；已安装文件与当前包一致时跳过二进制下载。',
+      proxyManagement: '本地代理在后台运行，可用 saiai status 查看状态、saiai logs 查看日志、saiai stop 停止。',
+      launch: {
+        title: '配置完成后，启动客户端',
+        terminal: '终端',
+        desktop: '桌面',
+        copy: '复制启动命令：{command}',
+        claudeVscode: '重启 VSCode 后打开 Claude Code 扩展。',
+        codexVscode: '完全退出 VSCode，再重新打开 Codex 扩展。',
+        claudeRecoveryHint: '旧环境配置冲突时，改用',
+        claudeRecoveryDetails: 'saiai claude 仅调整本次 Claude 启动的地址、认证和代理环境，不修改系统环境或配置文件。用户／项目设置仍生效；它不用于修复 VSCode 扩展环境。',
+        desktopHint: '桌面入口仅支持 Codex 功能。首次使用前，请正常退出已打开的 Codex 桌面版。'
+      },
       noGroupTitle: '请先分配分组',
       noGroupDescription:
         '此 API 密钥尚未分配分组，请先在密钥列表中点击分组列进行分配，然后才能查看使用配置。',
       openai: {
-        description: '运行以下一键命令，安装或复用 SAIAI，并配置 Codex CLI。',
+        description: '请先安装要使用的 Codex 客户端。下方命令安装或复用 SAIAI，并完成配置。',
         saiaiCliHint:
-          '命令会带上当前 Gateway 地址和 API Key，配置 Codex CLI；可重复执行以替换受管 Gateway 和 Key，其他 Codex 配置会保留。',
-        note: '命令中包含 API Key，因此可能保留在剪贴板和 shell 历史中。这里不再提供 WebSocket 专用配置。'
+          '可重复执行，更新当前线路和密钥。',
+        saiaiCliDetails: '命令包含当前 Gateway 和 Key，可重复执行以更新受管配置，保留模型选择等无关配置。请查看终端输出，确认要使用的客户端配置成功后再启动。',
+        note: '配置命令含密钥，可能保留在剪贴板和终端历史中，请勿分享。'
       },
       cliTabs: {
         claudeCode: 'Claude Code',
         geminiCli: 'Gemini CLI',
-        codexCli: 'Codex CLI',
+        codexCli: 'Codex',
         opencode: 'OpenCode'
       },
       gemini: {

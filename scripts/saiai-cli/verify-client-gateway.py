@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -27,6 +28,26 @@ def text(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def verify_post_setup_guidance(modal: str) -> None:
+    setup_generators = re.findall(
+        r"function generate(?:ClaudeCode|CodexCli)Files\b[\s\S]*?(?=\nfunction |\Z)", modal
+    )
+    require(len(setup_generators) == 2, "expected separate Claude/Codex setup generators")
+    for generator in setup_generators:
+        require("saiai claude" not in generator, "recovery launcher must not replace one-command setup")
+    for required in (
+        'v-if="hasManagedLaunch" data-testid="client-launch"',
+        'v-if="platform === \'anthropic\'"',
+        'data-launch-command="saiai claude"',
+        "copyCommand('saiai claude', 'saiai claude')",
+        "command: 'claude'",
+        "command: 'saiai codex'",
+        "command: 'saiai desktop codex'",
+        "keys.useKeyModal.launch.claudeRecoveryDetails",
+    ):
+        require(required in modal, f"post-setup launch guidance is missing {required!r}")
+
+
 def verify_user_interface() -> None:
     modal = text("frontend/src/components/keys/UseKeyModal.vue")
     for required in (
@@ -46,10 +67,10 @@ def verify_user_interface() -> None:
         "getV2GatewayRoot",
         "setup ${product}",
         "keys.useKeyModal.v2",
-        "saiai claude",
         "revoke --all",
     ):
         require(withdrawn not in modal, f"UI still exposes withdrawn V2 behavior: {withdrawn}")
+    verify_post_setup_guidance(modal)
 
     tests = text("frontend/src/components/keys/__tests__/UseKeyModal.spec.ts")
     for required in (
@@ -59,6 +80,8 @@ def verify_user_interface() -> None:
         "doubles apostrophes",
         "OpenAI on Codex by default",
         "does not expose withdrawn V2",
+        "keeps recovery launch separate from setup and normal VSCode guidance",
+        "without credentials or configuration completion",
     ):
         require(required in tests, f"UI escaping/visibility test is missing {required!r}")
     require("sk-test" not in tests, "UI test uses a key-shaped fixture instead of TEST_ONLY data")

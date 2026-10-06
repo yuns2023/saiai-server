@@ -32,19 +32,10 @@
           {{ platformDescription }}
         </p>
 
-        <ol v-if="showShellTabs" class="grid gap-3 rounded-xl bg-gray-50 p-4 text-sm dark:bg-dark-800 sm:grid-cols-3">
-          <li>
-            <span class="font-semibold">1. {{ t('keys.useKeyModal.steps.copy') }}</span>
-            <p class="mt-1 text-gray-500 dark:text-gray-400">{{ t('keys.useKeyModal.steps.copyHint') }}</p>
-          </li>
-          <li>
-            <span class="font-semibold">2. {{ t('keys.useKeyModal.steps.run') }}</span>
-            <p class="mt-1 text-gray-500 dark:text-gray-400">{{ t('keys.useKeyModal.steps.runHint', { terminal: terminalName }) }}</p>
-          </li>
-          <li>
-            <span class="font-semibold">3. {{ t('keys.useKeyModal.steps.start') }}</span>
-            <p class="mt-1 text-gray-500 dark:text-gray-400">{{ startHint }}</p>
-          </li>
+        <ol v-if="showShellTabs" class="flex flex-wrap gap-x-5 gap-y-2 rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold dark:bg-dark-800">
+          <li>1. {{ t('keys.useKeyModal.steps.copy') }}</li>
+          <li>2. {{ t('keys.useKeyModal.steps.run') }}</li>
+          <li>3. {{ t('keys.useKeyModal.steps.start') }}</li>
         </ol>
 
         <div v-if="availableEndpoints.length" class="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
@@ -108,6 +99,10 @@
           </nav>
         </div>
 
+        <p v-if="showShellTabs" class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('keys.useKeyModal.steps.runHint', { terminal: terminalName }) }}
+        </p>
+
         <!-- Code Blocks (Stacked for multi-file platforms) -->
         <div class="space-y-4" data-tour="key-setup-command">
           <div
@@ -125,19 +120,20 @@
               <div class="flex items-center justify-between px-4 py-2 bg-gray-800 dark:bg-dark-800 border-b border-gray-700 dark:border-dark-700">
                 <span class="text-xs text-gray-400 font-mono">{{ file.path }}</span>
                 <button
-                  @click="copyContent(file.content, index)"
+                  type="button"
+                  @click="copyCommand(file.content, `setup-${index}`)"
                   class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors"
-                  :class="copiedIndex === index
+                  :class="copiedCommand === `setup-${index}`
                     ? 'bg-green-500/20 text-green-400'
-                    : 'bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white'"
+                    : hasManagedLaunch ? 'bg-primary-600 text-white hover:bg-primary-500' : 'bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white'"
                 >
-                  <svg v-if="copiedIndex === index" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                  <svg v-if="copiedCommand === `setup-${index}`" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                   <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
                   </svg>
-                  {{ copiedIndex === index ? t('keys.useKeyModal.copied') : t('keys.useKeyModal.copy') }}
+                  {{ copiedCommand === `setup-${index}` ? t('keys.useKeyModal.copied') : t(hasManagedLaunch ? 'keys.useKeyModal.copySetup' : 'keys.useKeyModal.copy') }}
                 </button>
               </div>
               <!-- Code Content -->
@@ -146,6 +142,46 @@
           </div>
         </div>
 
+        <section v-if="hasManagedLaunch" data-testid="client-launch" class="space-y-3 rounded-xl bg-gray-50 p-4 dark:bg-dark-800">
+          <h4 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('keys.useKeyModal.launch.title') }}</h4>
+          <ul class="space-y-2 text-sm">
+            <li v-for="entry in launchCommands" :key="entry.command" class="flex flex-wrap items-center gap-2">
+              <span class="w-14 shrink-0 text-gray-600 dark:text-gray-400">{{ entry.label }}</span>
+              <code class="rounded bg-white px-2 py-1 font-mono text-gray-900 dark:bg-dark-700 dark:text-gray-100">{{ entry.command }}</code>
+              <button
+                type="button"
+                :aria-label="t('keys.useKeyModal.launch.copy', { command: entry.command })"
+                :data-launch-command="entry.command"
+                class="btn btn-secondary btn-sm"
+                @click="copyCommand(entry.command, entry.command)"
+              >
+                <Icon :name="copiedCommand === entry.command ? 'check' : 'clipboard'" size="sm" />
+                {{ t(copiedCommand === entry.command ? 'keys.useKeyModal.copied' : 'keys.useKeyModal.copy') }}
+              </button>
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="w-14 shrink-0 text-gray-600 dark:text-gray-400">VSCode</span>
+              <p>{{ t(platform === 'anthropic' ? 'keys.useKeyModal.launch.claudeVscode' : 'keys.useKeyModal.launch.codexVscode') }}</p>
+            </li>
+          </ul>
+          <div v-if="platform === 'anthropic'" class="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <span>{{ t('keys.useKeyModal.launch.claudeRecoveryHint') }}</span>
+            <code class="font-mono">saiai claude</code>
+            <button
+              type="button"
+              :aria-label="t('keys.useKeyModal.launch.copy', { command: 'saiai claude' })"
+              data-launch-command="saiai claude"
+              class="btn btn-secondary btn-sm"
+              @click="copyCommand('saiai claude', 'saiai claude')"
+            >
+              <Icon :name="copiedCommand === 'saiai claude' ? 'check' : 'clipboard'" size="sm" />
+              {{ t(copiedCommand === 'saiai claude' ? 'keys.useKeyModal.copied' : 'keys.useKeyModal.copy') }}
+            </button>
+          </div>
+          <p v-else class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.useKeyModal.launch.desktopHint') }}</p>
+        </section>
+        <p v-else-if="platform === 'gemini'" class="text-sm text-gray-600 dark:text-gray-400">{{ t('keys.useKeyModal.steps.geminiStart') }}</p>
+
         <!-- Usage Note -->
         <div v-if="showPlatformNote" class="flex items-start gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
           <Icon name="infoCircle" size="md" class="text-blue-500 flex-shrink-0 mt-0.5" />
@@ -153,6 +189,18 @@
             {{ platformNote }}
           </p>
         </div>
+
+        <details v-if="hasManagedLaunch" ref="configurationDetails" class="text-xs text-gray-500 dark:text-gray-400">
+          <summary class="cursor-pointer py-1">{{ t('keys.useKeyModal.detailsTitle') }}</summary>
+          <div class="mt-2 space-y-2">
+            <template v-if="platform === 'anthropic'">
+              <p>{{ t('keys.useKeyModal.saiaiCliDetails') }}</p>
+              <p>{{ t('keys.useKeyModal.proxyManagement') }}</p>
+              <p>{{ t('keys.useKeyModal.launch.claudeRecoveryDetails') }}</p>
+            </template>
+            <p v-else>{{ t('keys.useKeyModal.openai.saiaiCliDetails') }}</p>
+          </div>
+        </details>
       </template>
     </div>
 
@@ -170,7 +218,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, h, watch, type Component } from 'vue'
+import { ref, computed, h, watch, onUnmounted, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -209,7 +257,10 @@ const emit = defineEmits<Emits>()
 const { t } = useI18n()
 const { copyToClipboard: clipboardCopy } = useClipboard()
 
-const copiedIndex = ref<number | null>(null)
+const copiedCommand = ref<string | null>(null)
+const configurationDetails = ref<HTMLDetailsElement | null>(null)
+let copyFeedbackTimer: ReturnType<typeof setTimeout> | undefined
+let copyRequest = 0
 const selectedEndpointId = ref('')
 const activeTab = ref<string>(getDefaultShellTab())
 const activeClientTab = ref<string>('claude')
@@ -236,14 +287,19 @@ const chooseRandomEndpoint = () => {
 }
 
 watch(() => props.show, (show) => {
-  copiedIndex.value = null
   if (show) {
     activeTab.value = getDefaultShellTab()
     chooseRandomEndpoint()
   }
 }, { immediate: true })
 
-watch(() => props.apiKey, () => { copiedIndex.value = null })
+watch([() => props.show, () => props.apiKey, () => props.platform], () => {
+  resetCopyFeedback()
+  if (configurationDetails.value) configurationDetails.value.open = false
+})
+
+watch([effectiveBaseUrl, activeTab], resetCopyFeedback)
+onUnmounted(resetCopyFeedback)
 
 watch(availableEndpoints, (endpoints) => {
   if (endpoints.length === 0) {
@@ -267,7 +323,19 @@ const defaultClientTab = computed(() => {
   }
 })
 
-const startHint = computed(() => t(`keys.useKeyModal.steps.${defaultClientTab.value}Start`))
+const hasManagedLaunch = computed(() => props.platform === 'anthropic' || props.platform === 'openai')
+const launchCommands = computed(() => {
+  if (props.platform === 'anthropic') {
+    return [{ label: t('keys.useKeyModal.launch.terminal'), command: 'claude' }]
+  }
+  if (props.platform === 'openai') {
+    return [
+      { label: t('keys.useKeyModal.launch.terminal'), command: 'saiai codex' },
+      { label: t('keys.useKeyModal.launch.desktop'), command: 'saiai desktop codex' }
+    ]
+  }
+  return []
+})
 
 watch(() => props.platform, () => {
   activeTab.value = getDefaultShellTab()
@@ -582,13 +650,20 @@ ${keyword('$env:')}${variable('GEMINI_MODEL')}${operator('=')}${string(`"${model
   return { path, content, highlighted }
 }
 
-const copyContent = async (content: string, index: number) => {
-  const success = await clipboardCopy(content, t('keys.copied'))
-  if (success) {
-    copiedIndex.value = index
-    setTimeout(() => {
-      copiedIndex.value = null
-    }, 2000)
-  }
+function resetCopyFeedback() {
+  copyRequest += 1
+  clearTimeout(copyFeedbackTimer)
+  copiedCommand.value = null
+}
+
+const copyCommand = async (content: string, feedbackId: string) => {
+  resetCopyFeedback()
+  const request = copyRequest
+  const success = await clipboardCopy(content, t('keys.useKeyModal.copied'))
+  if (!success || !props.show || request !== copyRequest) return
+  copiedCommand.value = feedbackId
+  copyFeedbackTimer = setTimeout(() => {
+    copiedCommand.value = null
+  }, 2000)
 }
 </script>

@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 vi.mock('vue-i18n', () => ({
@@ -8,16 +8,15 @@ vi.mock('vue-i18n', () => ({
   })
 }))
 
-vi.mock('@/composables/useClipboard', () => ({
-  useClipboard: () => ({
-    copyToClipboard: vi.fn().mockResolvedValue(true)
-  })
-}))
+const { copyToClipboard } = vi.hoisted(() => ({ copyToClipboard: vi.fn() }))
+vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copyToClipboard }) }))
 
 import UseKeyModal from '../UseKeyModal.vue'
 
+const mountedModals: VueWrapper[] = []
+
 function mountModal(props: Record<string, unknown>): VueWrapper {
-  return mount(UseKeyModal, {
+  const wrapper = mount(UseKeyModal, {
     props: {
       show: true,
       apiKey: 'TEST_ONLY_API_KEY',
@@ -36,12 +35,19 @@ function mountModal(props: Record<string, unknown>): VueWrapper {
       }
     }
   })
+  mountedModals.push(wrapper)
+  return wrapper
 }
 
 const command = (wrapper: VueWrapper) => wrapper.find('pre code').text()
 
 describe('UseKeyModal', () => {
-  afterEach(() => { vi.restoreAllMocks() })
+  beforeEach(() => { copyToClipboard.mockReset().mockResolvedValue(true) })
+  afterEach(() => {
+    mountedModals.splice(0).forEach((wrapper) => wrapper.unmount())
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
 
   it.each(['anthropic', 'openai'])('defaults Windows browsers to PowerShell for %s', async (platform) => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
@@ -68,7 +74,7 @@ describe('UseKeyModal', () => {
     await nextTick()
     const unixTab = wrapper.findAll('button').find((button) => button.text() === 'macOS / Linux')
     await unixTab!.trigger('click')
-    await wrapper.findAll('button').find((button) => button.text() === 'keys.useKeyModal.copy')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text() === 'keys.useKeyModal.copySetup')!.trigger('click')
     await wrapper.setProps({ show: false })
     await wrapper.setProps({ show: true, apiKey: 'TEST_ONLY_NEXT_KEY' })
     expect(command(wrapper)).toContain('setup.ps1')
@@ -81,9 +87,9 @@ describe('UseKeyModal', () => {
     await nextTick()
     expect(wrapper.text()).toContain('keys.useKeyModal.createdTitle')
     expect(wrapper.text()).toContain('keys.useKeyModal.steps.runHint')
-    expect(wrapper.text()).toContain('keys.useKeyModal.steps.codexStart')
+    expect(wrapper.text()).toContain('keys.useKeyModal.launch.codexVscode')
     expect(wrapper.find('[data-tour="key-setup-command"]').exists()).toBe(true)
-    await wrapper.findAll('button').find((button) => button.text() === 'keys.useKeyModal.copy')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text() === 'keys.useKeyModal.copySetup')!.trigger('click')
     expect(wrapper.emitted('close')).toBeUndefined()
     expect(wrapper.find('[data-tour="key-setup-command"]').exists()).toBe(true)
   })
@@ -197,6 +203,9 @@ describe('UseKeyModal', () => {
     await nextTick()
     expect(command(gemini)).toContain('GOOGLE_GEMINI_BASE_URL')
     expect(command(gemini)).toContain('TEST_ONLY_API_KEY')
+    expect(gemini.find('[data-testid="client-launch"]').exists()).toBe(false)
+    expect(gemini.text()).toContain('keys.useKeyModal.steps.geminiStart')
+    expect(gemini.find('details').exists()).toBe(false)
   })
 
   it.each(['antigravity', 'sora'])('does not generate setup instructions for retired %s keys', async (platform) => {
@@ -215,5 +224,126 @@ describe('UseKeyModal', () => {
       }
       expect(output).toContain('TEST_ONLY_API_KEY')
     }
+  })
+
+  it('keeps recovery launch separate from setup and normal VSCode guidance', async () => {
+    const wrapper = mountModal({})
+    await nextTick()
+    const launch = wrapper.find('[data-testid="client-launch"]')
+    expect(launch.findAll('code').map((element) => element.text())).toEqual(['claude', 'saiai claude'])
+    expect(launch.text()).toContain('keys.useKeyModal.launch.claudeVscode')
+    expect(launch.text()).toContain('keys.useKeyModal.launch.claudeRecoveryHint')
+    expect(launch.text()).not.toContain('saiai codex')
+    expect(command(wrapper)).not.toContain('saiai claude')
+    expect(copyToClipboard).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-tour="key-setup-command"]').element.compareDocumentPosition(launch.element) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+  })
+
+  it('lists Codex terminal, Desktop and VSCode actions without a new setup mode', async () => {
+    const wrapper = mountModal({ platform: 'openai' })
+    await nextTick()
+    const launch = wrapper.find('[data-testid="client-launch"]')
+    expect(launch.findAll('code').map((element) => element.text())).toEqual(['saiai codex', 'saiai desktop codex'])
+    expect(launch.text()).toContain('keys.useKeyModal.launch.codexVscode')
+    expect(launch.text()).toContain('keys.useKeyModal.launch.desktopHint')
+    expect(wrapper.text()).not.toContain('saiai claude')
+    expect(wrapper.findAll('pre code')).toHaveLength(1)
+  })
+
+  it.each([
+    { platform: 'anthropic', launchCommand: 'claude' },
+    { platform: 'anthropic', launchCommand: 'saiai claude' },
+    { platform: 'openai', launchCommand: 'saiai codex' },
+    { platform: 'openai', launchCommand: 'saiai desktop codex' }
+  ])('copies only $launchCommand without credentials or configuration completion', async ({ platform, launchCommand }) => {
+    const wrapper = mountModal({ platform, newlyCreated: true })
+    await wrapper.find(`[data-launch-command="${launchCommand}"]`).trigger('click')
+    await flushPromises()
+    expect(copyToClipboard).toHaveBeenCalledExactlyOnceWith(launchCommand, 'keys.useKeyModal.copied')
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(wrapper.text()).toContain('keys.useKeyModal.createdTitle')
+    expect(wrapper.find(`[data-launch-command="${launchCommand}"]`).attributes('aria-label')).toBe('keys.useKeyModal.launch.copy')
+  })
+
+  it('keeps details collapsed and the credential warning outside the disclosure', async () => {
+    const wrapper = mountModal({})
+    expect(wrapper.find('details').attributes('open')).toBeUndefined()
+    expect(wrapper.find('details').text()).toContain('keys.useKeyModal.launch.claudeRecoveryDetails')
+    expect(wrapper.find('details').text()).not.toContain('keys.useKeyModal.note')
+    expect(wrapper.text()).toContain('keys.useKeyModal.note')
+    const details = wrapper.find('details').element as HTMLDetailsElement
+    details.open = true
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    expect(details.open).toBe(false)
+    details.open = true
+    await wrapper.setProps({ apiKey: 'TEST_ONLY_NEXT_KEY' })
+    expect(details.open).toBe(false)
+  })
+
+  it('does not display copied launch feedback after clipboard failure', async () => {
+    copyToClipboard.mockResolvedValue(false)
+    const wrapper = mountModal({})
+    await wrapper.find('[data-launch-command="claude"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('keys.useKeyModal.copied')
+  })
+
+  it.each([
+    { label: 'close', changedProps: { show: false } },
+    { label: 'key change', changedProps: { apiKey: 'TEST_ONLY_NEXT_KEY' } },
+    { label: 'platform change', changedProps: { platform: 'openai' } },
+    { label: 'route change', changedProps: { baseUrl: 'https://next.example.invalid' } }
+  ])('ignores pending clipboard feedback after $label', async ({ changedProps }) => {
+    let finishCopy: (success: boolean) => void = () => {}
+    copyToClipboard.mockImplementation(() => new Promise<boolean>((resolve) => { finishCopy = resolve }))
+    const wrapper = mountModal({})
+    await wrapper.find('[data-launch-command="claude"]').trigger('click')
+    await wrapper.setProps(changedProps)
+    finishCopy(true)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('keys.useKeyModal.copied')
+  })
+
+  it('does not let an older copy timer clear newer launch feedback', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountModal({ platform: 'openai' })
+    const terminal = wrapper.find('[data-launch-command="saiai codex"]')
+    const desktop = wrapper.find('[data-launch-command="saiai desktop codex"]')
+    await terminal.trigger('click')
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(1000)
+    await desktop.trigger('click')
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(terminal.text()).toBe('keys.useKeyModal.copy')
+    expect(desktop.text()).toBe('keys.useKeyModal.copied')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(desktop.text()).toBe('keys.useKeyModal.copy')
+  })
+
+  it('does not let an older pending copy replace newer launch feedback', async () => {
+    let finishFirstCopy: (success: boolean) => void = () => {}
+    copyToClipboard.mockImplementationOnce(() => new Promise<boolean>((resolve) => { finishFirstCopy = resolve }))
+    const wrapper = mountModal({ platform: 'openai' })
+    const terminal = wrapper.find('[data-launch-command="saiai codex"]')
+    const desktop = wrapper.find('[data-launch-command="saiai desktop codex"]')
+    await terminal.trigger('click')
+    await desktop.trigger('click')
+    await flushPromises()
+    finishFirstCopy(true)
+    await flushPromises()
+    expect(terminal.text()).toBe('keys.useKeyModal.copy')
+    expect(desktop.text()).toBe('keys.useKeyModal.copied')
+  })
+
+  it('clears setup copy feedback when the selected shell changes', async () => {
+    const wrapper = mountModal({})
+    await wrapper.findAll('button').find((button) => button.text() === 'keys.useKeyModal.copySetup')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('keys.useKeyModal.copied')
+    await wrapper.findAll('button').find((button) => button.text() === 'PowerShell')!.trigger('click')
+    expect(wrapper.text()).not.toContain('keys.useKeyModal.copied')
+    expect(command(wrapper)).toContain('setup.ps1')
   })
 })
