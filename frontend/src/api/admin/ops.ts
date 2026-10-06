@@ -14,6 +14,52 @@ export interface OpsRequestOptions {
   signal?: AbortSignal
 }
 
+export type OpsLogFilterReason = 'user_inactive' | 'invalid_api_key' | 'api_key_required'
+
+export interface OpsLogFilterRule {
+  id: string
+  name: string
+  enabled: boolean
+  source: 'local_auth' | 'upstream'
+  reason?: OpsLogFilterReason
+  platform?: string
+  group_id?: number | null
+  status_codes?: number[]
+  keywords?: string[]
+  match_mode: 'all' | 'any'
+}
+
+export interface OpsLogFilterConfig {
+  rules: OpsLogFilterRule[]
+  revision: string
+  counts: Record<string, number>
+  count_scope: 'process'
+}
+
+export interface OpsLogFilterProposal {
+  rule: OpsLogFilterRule | null
+  verified: boolean
+  requires_global_confirmation: boolean
+}
+
+export async function getLogFilters(options: OpsRequestOptions = {}): Promise<OpsLogFilterConfig> {
+  const { data } = await apiClient.get<OpsLogFilterConfig>('/admin/ops/log-filters', options)
+  return data
+}
+
+export async function updateLogFilters(
+  config: Pick<OpsLogFilterConfig, 'rules' | 'revision'>,
+  options: OpsRequestOptions = {}
+): Promise<OpsLogFilterConfig> {
+  const { data } = await apiClient.put<OpsLogFilterConfig>('/admin/ops/log-filters', config, options)
+  return data
+}
+
+export async function getLogFilterProposal(errorId: number, options: OpsRequestOptions = {}): Promise<OpsLogFilterProposal> {
+  const { data } = await apiClient.get<OpsLogFilterProposal>(`/admin/ops/errors/${errorId}/log-filter-proposal`, options)
+  return data
+}
+
 export interface OpsRetryRequest {
   mode: OpsRetryMode
   pinned_account_id?: number
@@ -1390,6 +1436,9 @@ async function updateMetricThresholds(thresholds: OpsMetricThresholds): Promise<
 }
 
 export const opsAPI = {
+  getLogFilters,
+  updateLogFilters,
+  getLogFilterProposal,
   getDashboardSnapshotV2,
   getDashboardOverview,
   getThroughputTrend,

@@ -39,6 +39,7 @@ interface Emits {
   (e: 'openRequestDetails', preset?: OpsRequestDetailsPreset): void
   (e: 'openErrorDetails', kind: 'request' | 'upstream'): void
   (e: 'openSettings'): void
+  (event: 'openLogFilters'): void
   (e: 'openAlertRules'): void
   (e: 'enterFullscreen'): void
   (e: 'exitFullscreen'): void
@@ -959,6 +960,15 @@ function handleToolbarRefresh() {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
           </svg>
           <span class="hidden sm:inline">{{ t('admin.ops.alertRules.manage') }}</span>
+        </button>
+
+        <button
+          type="button"
+          class="flex h-8 items-center gap-1.5 rounded-lg bg-gray-100 px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
+          @click="emit('openLogFilters')"
+        >
+          <Icon name="filter" size="sm" />
+          <span>{{ t('admin.ops.logFilters.title') }}</span>
         </button>
 
         <!-- Settings Button (hidden in fullscreen) -->

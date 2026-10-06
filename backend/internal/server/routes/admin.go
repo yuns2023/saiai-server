@@ -134,6 +134,9 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// Advanced settings (DB-backed)
 		ops.GET("/advanced-settings", h.Admin.Ops.GetAdvancedSettings)
 		ops.PUT("/advanced-settings", h.Admin.Ops.UpdateAdvancedSettings)
+		ops.GET("/log-filters", h.Admin.Ops.GetLogFilters)
+		ops.PUT("/log-filters", h.Admin.Ops.UpdateLogFilters)
+		ops.GET("/errors/:id/log-filter-proposal", h.Admin.Ops.GetLogFilterProposal)
 		ops.GET("/full-request-body-logging", h.Admin.Ops.GetFullRequestBodyLoggingSettings)
 		ops.PUT("/full-request-body-logging", h.Admin.Ops.UpdateFullRequestBodyLoggingSettings)
 

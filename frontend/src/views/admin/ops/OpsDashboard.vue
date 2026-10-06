@@ -34,6 +34,7 @@
         @open-request-details="handleOpenRequestDetails"
         @open-error-details="openErrorDetails"
         @open-settings="showSettingsDialog = true"
+        @open-log-filters="openLogFilters()"
         @open-alert-rules="showAlertRulesCard = true"
         @enter-fullscreen="enterFullscreen"
         @exit-fullscreen="exitFullscreen"
@@ -105,7 +106,7 @@
 
       <!-- Settings Dialog (hidden in fullscreen mode) -->
       <template v-if="!isFullscreen">
-        <OpsSettingsDialog :show="showSettingsDialog" @close="showSettingsDialog = false" @saved="onSettingsSaved" />
+        <OpsSettingsDialog :show="showSettingsDialog" @close="showSettingsDialog = false" @saved="onSettingsSaved" @open-log-filters="openLogFilters()" />
 
         <BaseDialog :show="showAlertRulesCard" :title="t('admin.ops.alertRules.title')" width="extra-wide" @close="showAlertRulesCard = false">
           <OpsAlertRulesCard />
@@ -123,7 +124,7 @@
           @openErrorDetail="openError"
         />
 
-        <OpsErrorDetailModal v-model:show="showErrorModal" :error-id="selectedErrorId" :error-type="errorDetailsType" />
+        <OpsErrorDetailModal v-model:show="showErrorModal" :error-id="selectedErrorId" :error-type="errorDetailsType" @filter-error="openLogFilters($event)" />
 
         <OpsRequestDetailsModal
           v-model="showRequestDetails"
@@ -136,6 +137,13 @@
           @openErrorDetail="openError"
         />
       </template>
+      <OpsLogFiltersDialog
+        :show="showLogFiltersDialog"
+        :platform="platform"
+        :group-id="groupId"
+        :error-id="logFilterErrorId"
+        @close="showLogFiltersDialog = false"
+      />
     </div>
   </component>
 </template>
@@ -172,6 +180,7 @@ import OpsOpenAITokenStatsCard from './components/OpsOpenAITokenStatsCard.vue'
 import OpsSystemLogTable from './components/OpsSystemLogTable.vue'
 import OpsRequestDetailsModal, { type OpsRequestDetailsPreset } from './components/OpsRequestDetailsModal.vue'
 import OpsSettingsDialog from './components/OpsSettingsDialog.vue'
+import OpsLogFiltersDialog from './components/OpsLogFiltersDialog.vue'
 import OpsAlertRulesCard from './components/OpsAlertRulesCard.vue'
 
 const route = useRoute()
@@ -240,7 +249,7 @@ function enterFullscreen() {
 }
 
 function handleKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && isFullscreen.value) {
+  if (e.key === 'Escape' && isFullscreen.value && !showLogFiltersDialog.value) {
     exitFullscreen()
   }
 }
@@ -390,7 +399,18 @@ const requestDetailsPreset = ref<OpsRequestDetailsPreset>({
 })
 
 const showSettingsDialog = ref(false)
+const showLogFiltersDialog = ref(false)
+const logFilterErrorId = ref<number | null>(null)
 const showAlertRulesCard = ref(false)
+
+function openLogFilters(errorId: number | null = null) {
+  showSettingsDialog.value = false
+  showErrorModal.value = false
+  showErrorDetails.value = false
+  showRequestDetails.value = false
+  logFilterErrorId.value = errorId
+  showLogFiltersDialog.value = true
+}
 
 // Auto refresh settings
 const showAlertEvents = ref(true)
@@ -787,7 +807,7 @@ watch(
 
 onMounted(async () => {
   // Fullscreen mode: listen for ESC key
-  window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('keydown', handleKeydown, true)
 
   await adminSettingsStore.fetch()
   if (!adminSettingsStore.opsMonitoringEnabled) {
@@ -822,7 +842,7 @@ async function loadThresholds() {
 }
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('keydown', handleKeydown, true)
   abortDashboardFetch()
   pauseCountdown()
 })

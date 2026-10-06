@@ -179,7 +179,7 @@ func (s *APIKeyService) loadAuthCacheEntry(ctx context.Context, key, cacheKey st
 	apiKey.Key = key
 	snapshot := s.snapshotFromAPIKey(apiKey)
 	if snapshot == nil {
-		return nil, fmt.Errorf("get api key: %w", ErrAPIKeyNotFound)
+		return nil, fmt.Errorf("get api key: %w: %w", ErrAPIKeyNotFound, ErrAPIKeyAuthDataIncomplete)
 	}
 	entry := &APIKeyAuthCacheEntry{Snapshot: snapshot}
 	s.setAuthCacheEntry(ctx, cacheKey, entry, s.authCfg.l2TTL)

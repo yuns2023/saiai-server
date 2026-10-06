@@ -88,6 +88,7 @@ type OpsService struct {
 	antigravityGatewayService   *AntigravityGatewayService
 	systemLogSink               *OpsSystemLogSink
 	fullRequestBodyLoggingCache atomic.Value // stores *opsFullRequestBodyLoggingCacheEntry
+	logFilterState              opsLogFilterState
 }
 
 func NewOpsService(

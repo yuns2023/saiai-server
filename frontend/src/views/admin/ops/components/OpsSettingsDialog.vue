@@ -6,6 +6,7 @@ import { opsAPI } from '@/api/admin/ops'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
+import { mergeLegacyLogFilters } from '../utils/opsLogFilters'
 import type { OpsAlertRuntimeSettings, EmailNotificationConfig, AlertSeverity, OpsAdvancedSettings, OpsMetricThresholds, OpsFullRequestBodyLoggingSettings } from '../types'
 
 const { t } = useI18n()
@@ -18,6 +19,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   saved: []
+  openLogFilters: []
 }>()
 
 const loading = ref(false)
@@ -223,10 +225,13 @@ async function saveAllSettings() {
         bodyCaptureSettings.value.capture_upstream = false
       }
     }
+    const advancedToSave = advancedSettings.value
+      ? mergeLegacyLogFilters(advancedSettings.value, await opsAPI.getAdvancedSettings())
+      : null
     await Promise.all([
       runtimeSettings.value ? opsAPI.updateAlertRuntimeSettings(runtimeSettings.value) : Promise.resolve(),
       emailConfig.value ? opsAPI.updateEmailNotificationConfig(emailConfig.value) : Promise.resolve(),
-      advancedSettings.value ? opsAPI.updateAdvancedSettings(advancedSettings.value) : Promise.resolve(),
+      advancedToSave ? opsAPI.updateAdvancedSettings(advancedToSave) : Promise.resolve(),
       bodyCaptureSettings.value ? opsAPI.updateFullRequestBodyLoggingSettings(bodyCaptureSettings.value) : Promise.resolve(),
       opsAPI.updateMetricThresholds(metricThresholds.value)
     ])
@@ -517,57 +522,8 @@ async function saveAllSettings() {
 
           <!-- Error Filtering -->
           <div class="space-y-3">
-            <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.errorFiltering') }}</h5>
-
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.ignoreCountTokensErrors') }}</label>
-                <p class="mt-1 text-xs text-gray-500">
-                  {{ t('admin.ops.settings.ignoreCountTokensErrorsHint') }}
-                </p>
-              </div>
-              <Toggle v-model="advancedSettings.ignore_count_tokens_errors" />
-            </div>
-
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.ignoreContextCanceled') }}</label>
-                <p class="mt-1 text-xs text-gray-500">
-                  {{ t('admin.ops.settings.ignoreContextCanceledHint') }}
-                </p>
-              </div>
-              <Toggle v-model="advancedSettings.ignore_context_canceled" />
-            </div>
-
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.ignoreNoAvailableAccounts') }}</label>
-                <p class="mt-1 text-xs text-gray-500">
-                  {{ t('admin.ops.settings.ignoreNoAvailableAccountsHint') }}
-                </p>
-              </div>
-              <Toggle v-model="advancedSettings.ignore_no_available_accounts" />
-            </div>
-
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.ignoreInvalidApiKeyErrors') }}</label>
-                <p class="mt-1 text-xs text-gray-500">
-                  {{ t('admin.ops.settings.ignoreInvalidApiKeyErrorsHint') }}
-                </p>
-              </div>
-              <Toggle v-model="advancedSettings.ignore_invalid_api_key_errors" />
-            </div>
-
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.ignoreInsufficientBalanceErrors') }}</label>
-                <p class="mt-1 text-xs text-gray-500">
-                  {{ t('admin.ops.settings.ignoreInsufficientBalanceErrorsHint') }}
-                </p>
-              </div>
-              <Toggle v-model="advancedSettings.ignore_insufficient_balance_errors" />
-            </div>
+            <button type="button" class="btn btn-secondary" @click="emit('openLogFilters')">{{ t('admin.ops.logFilters.title') }}</button>
+            <p class="text-xs text-gray-500">{{ t('admin.ops.logFilters.settingsLinkHint') }}</p>
           </div>
 
           <!-- Request Body Capture -->

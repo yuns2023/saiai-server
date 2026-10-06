@@ -28,6 +28,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 		}
 		apiKeyString := extractAPIKeyForGoogle(c)
 		if apiKeyString == "" {
+			service.MarkOpsLocalAuthRejected(c, service.OpsLocalAuthAPIKeyRequired)
 			abortWithGoogleError(c, 401, "API key is required")
 			return
 		}
@@ -35,6 +36,9 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 		apiKey, err := apiKeyService.GetByKey(c.Request.Context(), apiKeyString)
 		if err != nil {
 			if errors.Is(err, service.ErrAPIKeyNotFound) {
+				if !errors.Is(err, service.ErrAPIKeyAuthDataIncomplete) {
+					service.MarkOpsLocalAuthRejected(c, service.OpsLocalAuthInvalidAPIKey)
+				}
 				abortWithGoogleError(c, 401, "Invalid API key")
 				return
 			}
@@ -59,6 +63,9 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 				Concurrency: apiKey.User.Concurrency,
 			})
 			c.Set(string(ContextKeyUserRole), apiKey.User.Role)
+			if apiKey.User.ID > 0 && apiKey.User.ID == apiKey.UserID && apiKey.User.Status == service.StatusDisabled {
+				service.MarkOpsLocalAuthRejected(c, service.OpsLocalAuthUserInactive)
+			}
 			abortWithGoogleError(c, 401, "User account is not active")
 			return
 		}

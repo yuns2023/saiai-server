@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"net/http"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -718,6 +719,21 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		}
 
 		status := c.Writer.Status()
+		localAuthReason := service.GetOpsLocalAuthRejectReason(c)
+		if localAuthReason != "" && status == http.StatusUnauthorized {
+			apiKey, _ := middleware2.GetAPIKeyFromContext(c)
+			event := service.OpsLogFilterEvent{
+				Source: "local_auth", Reason: localAuthReason, StatusCode: status,
+				Platform: resolveOpsPlatform(apiKey, guessPlatformFromPath(c.Request.URL.Path)),
+				Message:  parseOpsErrorResponse(w.buf.Bytes()).Message,
+			}
+			if apiKey != nil {
+				event.GroupID = apiKey.GroupID
+			}
+			if ops.FilterOpsLogEvents(c.Request.Context(), []service.OpsLogFilterEvent{event}) {
+				return
+			}
+		}
 		if status < 400 {
 			// Even when the client request succeeds, we still want to persist upstream error attempts
 			// (retries/failover) so ops can observe upstream instability that gets "covered" by retries.
@@ -930,6 +946,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			}
 
 			// Store request headers/body only when an upstream error occurred to keep overhead minimal.
+			if filterOpsUpstreamLog(c, ops, entry) {
+				return
+			}
 			entry.RequestHeadersJSON = extractOpsRequestHeadersForLog(c, ops)
 			attachOpsRequestBodyToEntry(c, entry, ops)
 			recordOpsRequestCaptureForError(c, ops, entry)
@@ -956,7 +975,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		}
 
 		// Skip logging if the error should be filtered based on settings
-		if shouldSkipOpsErrorLog(c.Request.Context(), ops, parsed.Message, string(body), c.Request.URL.Path) {
+		if shouldSkipOpsErrorLog(c.Request.Context(), ops, parsed.Message, string(body), c.Request.URL.Path, localAuthReason) {
 			return
 		}
 
@@ -1030,6 +1049,15 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			IsRetryable: classifyOpsIsRetryable(normalizedType, status),
 			RetryCount:  0,
 			CreatedAt:   time.Now(),
+		}
+		if localAuthReason != "" && status == http.StatusUnauthorized {
+			entry.ErrorType = service.OpsLocalAuthErrorType(localAuthReason)
+			entry.ErrorPhase = "auth"
+			entry.ErrorSource = "client_request"
+			entry.ErrorOwner = "client"
+			entry.Severity = "P3"
+			entry.IsRetryable = false
+			entry.IsBusinessLimited = localAuthReason == service.OpsLocalAuthUserInactive
 		}
 		applyOpsLatencyFieldsFromContext(c, entry)
 
@@ -1114,12 +1142,74 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 		// Persist only a minimal, whitelisted set of request headers to improve retry fidelity.
 		// Do NOT store Authorization/Cookie/etc.
+		if filterOpsUpstreamLog(c, ops, entry) {
+			return
+		}
 		entry.RequestHeadersJSON = extractOpsRequestHeadersForLog(c, ops)
 		attachOpsRequestBodyToEntry(c, entry, ops)
 		recordOpsRequestCaptureForError(c, ops, entry)
 
 		enqueueOpsErrorLog(ops, entry)
 	}
+}
+
+func filterOpsUpstreamLog(ctx *gin.Context, ops *service.OpsService, entry *service.OpsInsertErrorLogInput) bool {
+	if entry == nil {
+		return false
+	}
+	terminalStatus := 0
+	if value, exists := ctx.Get(service.OpsUpstreamStatusCodeKey); exists {
+		switch status := value.(type) {
+		case int:
+			terminalStatus = status
+		case int64:
+			terminalStatus = int(status)
+		}
+	}
+	if entry.StatusCode >= 400 && (terminalStatus < 400 || terminalStatus != entry.StatusCode) {
+		return false
+	}
+	events := make([]service.OpsLogFilterEvent, 0, len(entry.UpstreamErrors)+1)
+	for _, upstream := range entry.UpstreamErrors {
+		if upstream == nil || upstream.UpstreamStatusCode < 400 {
+			return false
+		}
+		platform := upstream.Platform
+		if platform == "" {
+			platform = entry.Platform
+		}
+		events = append(events, service.OpsLogFilterEvent{
+			Source: "upstream", Platform: platform, GroupID: entry.GroupID,
+			StatusCode: upstream.UpstreamStatusCode, Message: upstream.Message + "\n" + upstream.Detail,
+		})
+	}
+	if entry.UpstreamStatusCode != nil {
+		message := ""
+		if entry.UpstreamErrorMessage != nil {
+			message = *entry.UpstreamErrorMessage
+		}
+		if entry.UpstreamErrorDetail != nil {
+			message += "\n" + *entry.UpstreamErrorDetail
+		}
+		events = append(events, service.OpsLogFilterEvent{
+			Source: "upstream", Platform: entry.Platform, GroupID: entry.GroupID,
+			StatusCode: *entry.UpstreamStatusCode, Message: message,
+		})
+	}
+	if terminalStatus > 0 {
+		events = append(events, service.OpsLogFilterEvent{
+			Source: "upstream", Platform: entry.Platform, GroupID: entry.GroupID,
+			StatusCode: terminalStatus,
+			Message:    ctx.GetString(service.OpsUpstreamErrorMessageKey) + "\n" + ctx.GetString(service.OpsUpstreamErrorDetailKey),
+		})
+	}
+	if entry.StatusCode >= 400 {
+		events = append(events, service.OpsLogFilterEvent{
+			Source: "upstream", Platform: entry.Platform, GroupID: entry.GroupID,
+			StatusCode: entry.StatusCode, Message: entry.ErrorMessage,
+		})
+	}
+	return ops.FilterOpsLogEvents(ctx.Request.Context(), events)
 }
 
 var opsRetryRequestHeaderAllowlist = []string{
@@ -1476,7 +1566,7 @@ func strconvItoa(v int) string {
 
 // shouldSkipOpsErrorLog determines if an error should be skipped from logging based on settings.
 // Returns true for errors that should be filtered according to OpsAdvancedSettings.
-func shouldSkipOpsErrorLog(ctx context.Context, ops *service.OpsService, message, body, requestPath string) bool {
+func shouldSkipOpsErrorLog(ctx context.Context, ops *service.OpsService, message, body, requestPath, localAuthReason string) bool {
 	if ops == nil {
 		return false
 	}
@@ -1512,7 +1602,7 @@ func shouldSkipOpsErrorLog(ctx context.Context, ops *service.OpsService, message
 
 	// Check if invalid/missing API key errors should be ignored (user misconfiguration)
 	if settings.IgnoreInvalidApiKeyErrors {
-		if strings.Contains(bodyLower, opsErrInvalidAPIKey) || strings.Contains(bodyLower, opsErrAPIKeyRequired) {
+		if localAuthReason == service.OpsLocalAuthInvalidAPIKey || localAuthReason == service.OpsLocalAuthAPIKeyRequired {
 			return true
 		}
 	}

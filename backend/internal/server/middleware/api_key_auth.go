@@ -70,6 +70,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		// 如果所有header都没有API key
 		if apiKeyString == "" {
+			service.MarkOpsLocalAuthRejected(c, service.OpsLocalAuthAPIKeyRequired)
 			AbortWithError(c, 401, "API_KEY_REQUIRED", "API key is required in Authorization header (Bearer scheme), x-api-key header, or x-goog-api-key header")
 			return
 		}
@@ -79,6 +80,9 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		apiKey, err := apiKeyService.GetByKey(c.Request.Context(), apiKeyString)
 		if err != nil {
 			if errors.Is(err, service.ErrAPIKeyNotFound) {
+				if !errors.Is(err, service.ErrAPIKeyAuthDataIncomplete) {
+					service.MarkOpsLocalAuthRejected(c, service.OpsLocalAuthInvalidAPIKey)
+				}
 				AbortWithError(c, 401, "INVALID_API_KEY", "Invalid API key")
 				return
 			}
@@ -123,6 +127,9 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				Concurrency: apiKey.User.Concurrency,
 			})
 			c.Set(string(ContextKeyUserRole), apiKey.User.Role)
+			if apiKey.User.ID > 0 && apiKey.User.ID == apiKey.UserID && apiKey.User.Status == service.StatusDisabled {
+				service.MarkOpsLocalAuthRejected(c, service.OpsLocalAuthUserInactive)
+			}
 			AbortWithError(c, 401, "USER_INACTIVE", "User account is not active")
 			return
 		}
