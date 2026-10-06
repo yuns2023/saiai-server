@@ -190,7 +190,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	stateStore := s.getOpenAIWSStateStore()
 	userID := getOpenAIUserIDFromContext(c)
 	var replayTracker *openAIWSPassthroughReplayTracker
-	if resumableClient != nil && account.Type == AccountTypeOAuth && !account.IsOpenAICodexNativeRelay() && hooks != nil && hooks.OnAccountExhausted != nil {
+	if resumableClient != nil && account.Type == AccountTypeOAuth && !account.IsOpenAICodexNativeRelay() && (c == nil || c.Request == nil || len(c.Request.Header.Values(openAIWSTurnStateHeader)) == 0) && hooks != nil && hooks.OnAccountExhausted != nil {
 		replayTracker = newOpenAIWSPassthroughReplayTracker(stateStore, userID)
 	}
 	var exhaustedUntil atomic.Int64
@@ -208,7 +208,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if err != nil {
 		return fmt.Errorf("build ws url: %w", err)
 	}
-	if account.IsOpenAICodexNativeRelay() && c != nil && c.Request != nil && c.Request.URL != nil && c.Request.URL.RawQuery != "" {
+	if (account.IsOpenAICodexNativeRelay() || account.Type == AccountTypeOAuth) && c != nil && c.Request != nil && c.Request.URL != nil && c.Request.URL.RawQuery != "" {
 		parsedWSURL, parseErr := url.Parse(wsURL)
 		if parseErr != nil {
 			return fmt.Errorf("parse native relay ws url: %w", parseErr)
@@ -241,6 +241,16 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		isCodexCLI := false
 		if c != nil {
 			isCodexCLI = openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+		}
+		if account.Type == AccountTypeOAuth && c != nil && c.Request != nil {
+			promptCacheKey := gjson.GetBytes(firstClientMessage, "prompt_cache_key").String()
+			sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
+			if err := s.validateOpenAINativeTurnState(account, userID, sessionHash, c.Request.Header); err != nil {
+				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+			}
+			if err := s.validateOpenAINativeFrameTurnState(c, account, firstClientMessage); err != nil {
+				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+			}
 		}
 		headers, _ = s.buildOpenAIWSHeaders(c, account, token, wsDecision, isCodexCLI, "", "", "")
 	}
@@ -290,6 +300,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	defer func() {
 		_ = upstreamConn.Close()
 	}()
+	if account.Type == AccountTypeOAuth {
+		sessionHash := s.openAISessionHashForTurnState(c, gjson.GetBytes(firstClientMessage, "prompt_cache_key").String())
+		if state := handshakeHeaders.Get(openAIWSTurnStateHeader); state != "" && sessionHash != "" {
+			s.bindOpenAINativeTurnState(account, userID, sessionHash, state)
+		}
+	}
 	logOpenAIWSV2Passthrough(
 		"relay_dial_ok account_id=%d status_code=%d upstream_request_id=%s",
 		account.ID,
@@ -329,6 +345,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			FirstMessageType:    firstClientMessageType,
 			BufferResponseStart: replayTracker != nil,
 			OnClientTurn: func(turn int, messageType coderws.MessageType, payload []byte) error {
+				if account.IsOpenAIOAuth() {
+					if err := s.validateOpenAINativeFrameTurnState(c, account, payload); err != nil {
+						return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+					}
+				}
 				if hooks != nil && hooks.BeforeTurn != nil {
 					if err := hooks.BeforeTurn(turn); err != nil {
 						return err
@@ -348,6 +369,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return nil
 			},
 			BeforeUpstreamFrame: func(frame openaiwsv2.RelayUpstreamFrame) error {
+				s.observeOpenAINativeMetadataTurnState(c, account, s.openAISessionHashForTurnState(c, gjson.GetBytes(firstClientMessage, "prompt_cache_key").String()), frame.Payload)
 				if frame.MessageType != coderws.MessageText {
 					return nil
 				}
@@ -558,8 +580,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 func (s *OpenAIGatewayService) buildOpenAINativeRelayWSHeaders(c *gin.Context, token string) http.Header {
 	headers := make(http.Header)
 	if c != nil && c.Request != nil {
+		hop := openAIConnectionHeaders(c.Request.Header)
 		for key, values := range c.Request.Header {
-			if !shouldCopyOpenAINativeRelayWSHeader(key) {
+			if !shouldCopyOpenAINativeRelayWSHeader(key) || hop[strings.ToLower(key)] {
 				continue
 			}
 			for _, value := range values {
@@ -582,7 +605,12 @@ func shouldCopyOpenAINativeRelayWSHeader(key string) bool {
 	if !shouldCopyOpenAIRequestHeader(key) {
 		return false
 	}
-	return !strings.HasPrefix(strings.ToLower(strings.TrimSpace(key)), "sec-websocket-")
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions", "sec-websocket-accept":
+		return false
+	default:
+		return true
+	}
 }
 
 func (s *OpenAIGatewayService) mapOpenAIWSPassthroughDialError(

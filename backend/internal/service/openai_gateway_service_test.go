@@ -1545,7 +1545,7 @@ func TestNormalizeOpenAICompactRequestBodyPreservesFutureFields(t *testing.T) {
 	require.JSONEq(t, string(body), string(got))
 }
 
-func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T) {
+func TestOpenAIBuildUpstreamRequestCompactDoesNotSynthesizeAcceptOrSessionForOAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1564,9 +1564,9 @@ func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T)
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token", false, "", true)
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL+"/compact", req.URL.String())
-	require.Equal(t, "application/json", req.Header.Get("Accept"))
+	require.Empty(t, req.Header.Get("Accept"))
 	require.Equal(t, "0.128.0", req.Header.Get("Version"))
-	require.NotEmpty(t, req.Header.Get("Session_Id"))
+	require.Empty(t, req.Header.Get("Session_Id"))
 	require.Equal(t, "chatgpt-acc", req.Header.Get("chatgpt-account-id"))
 }
 
@@ -2141,7 +2141,7 @@ func TestHandleOAuthSSEToJSON_CompletedEventReturnsJSON(t *testing.T) {
 		`data: [DONE]`,
 	}, "\n"))
 
-	usage, err := svc.handleOAuthSSEToJSON(resp, c, body, "gpt-4o", "gpt-4o")
+	usage, err := svc.handleOAuthSSEToJSON(resp, c, &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}, body, "gpt-4o", "gpt-4o")
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 7, usage.InputTokens)
@@ -2169,7 +2169,7 @@ func TestHandleOAuthSSEToJSON_NoFinalResponseKeepsSSEBody(t *testing.T) {
 		`data: [DONE]`,
 	}, "\n"))
 
-	usage, err := svc.handleOAuthSSEToJSON(resp, c, body, "gpt-4o", "gpt-4o")
+	usage, err := svc.handleOAuthSSEToJSON(resp, c, &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}, body, "gpt-4o", "gpt-4o")
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 0, usage.InputTokens)
@@ -2193,7 +2193,7 @@ func TestHandleOAuthSSEToJSON_ResponseFailedReturnsProtocolError(t *testing.T) {
 		`data: [DONE]`,
 	}, "\n"))
 
-	usage, err := svc.handleOAuthSSEToJSON(resp, c, body, "gpt-4o", "gpt-4o")
+	usage, err := svc.handleOAuthSSEToJSON(resp, c, &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}, body, "gpt-4o", "gpt-4o")
 	require.Nil(t, usage)
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadGateway, rec.Code)

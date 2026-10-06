@@ -91,6 +91,7 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 		handshake   bool
 		committed   bool
 		noHistory   bool
+		bound       bool
 		noSpare     bool
 		window      int
 	}{
@@ -107,6 +108,7 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 		{name: "tool_call_is_not_replayed", committed: true, prefix: []string{`{"type":"response.output_item.added","response_id":"resp_quota_a_2","item":{"type":"function_call","call_id":"call_quota","name":"test_tool","arguments":"{}"}}`}},
 		{name: "failed_output_is_not_replayed", committed: true, failedEvent: true},
 		{name: "unknown_history_is_not_replayed", noHistory: true},
+		{name: "owned_continuation_is_not_rewritten", bound: true},
 		{name: "no_replacement_fails_closed", noSpare: true},
 	}
 	for _, scenario := range scenarios {
@@ -212,6 +214,10 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 			if scenario.noHistory {
 				firstRequest = []byte(`{"type":"response.create","model":"gpt-6-astra","previous_response_id":"resp_unknown","input":[]}`)
 			}
+			secondRequest := []byte(`{ "type":"response.create", "model":"gpt-6-astra", "future":{"retain":true}, "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"fresh"}]}] }`)
+			if scenario.bound {
+				secondRequest = []byte(`{"type":"response.create","model":"gpt-6-astra","previous_response_id":"resp_quota_a_1","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`)
+			}
 			require.NoError(testContext, client.Write(ctx, coderws.MessageText, firstRequest))
 			if !scenario.handshake && !scenario.noHistory {
 				_, payload, readErr := client.Read(ctx)
@@ -222,7 +228,7 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 					require.NoError(testContext, readErr)
 					require.Equal(testContext, "codex.rate_limits", gjson.GetBytes(payload, "type").String())
 				}
-				require.NoError(testContext, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-6-astra","previous_response_id":"resp_quota_a_1","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`)))
+				require.NoError(testContext, client.Write(ctx, coderws.MessageText, secondRequest))
 			}
 			var lastPayload []byte
 			var replacementQuotaObserved bool
@@ -246,7 +252,7 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 					break
 				}
 			}
-			if scenario.committed || scenario.noHistory {
+			if scenario.committed || scenario.noHistory || scenario.bound {
 				require.Equal(testContext, int32(0), switches.Load())
 				if scenario.failedEvent {
 					require.Equal(testContext, "response.failed", gjson.GetBytes(lastPayload, "type").String())
@@ -269,7 +275,7 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 			case <-ctx.Done():
 				testContext.Fatal("quota failover did not finish")
 			}
-			if scenario.committed || scenario.noHistory || scenario.noSpare {
+			if scenario.committed || scenario.noHistory || scenario.bound || scenario.noSpare {
 				return
 			}
 			var lastHeaders http.Header
@@ -282,13 +288,13 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 			require.Len(testContext, accountBConnection.rawWrites, 1)
 			require.False(testContext, gjson.GetBytes(accountBConnection.rawWrites[0], "previous_response_id").Exists())
 			if scenario.handshake {
+				require.Equal(testContext, firstRequest, accountBConnection.rawWrites[0])
 				require.Len(testContext, validatedTurns, 1)
 				require.Len(testContext, completedTurns, 1)
 			} else {
 				require.Len(testContext, validatedTurns, 2)
 				require.Len(testContext, completedTurns, 2)
-				require.Len(testContext, gjson.GetBytes(accountBConnection.rawWrites[0], "input").Array(), 4)
-				require.False(testContext, gjson.GetBytes(accountBConnection.rawWrites[0], "input.1.encrypted_content").Exists())
+				require.Equal(testContext, secondRequest, accountBConnection.rawWrites[0])
 			}
 			select {
 			case actualReset := <-repository.rateLimitCh:

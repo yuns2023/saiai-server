@@ -88,6 +88,9 @@ var openaiDeniedRequestHeaders = map[string]struct{}{
 	"keep-alive":          {},
 	"proxy-authenticate":  {},
 	"proxy-authorization": {},
+	"proxy-connection":    {},
+	"forwarded":           {},
+	"via":                 {},
 	"te":                  {},
 	"trailer":             {},
 	"transfer-encoding":   {},
@@ -144,7 +147,7 @@ func shouldCopyOpenAIRequestHeader(key string) bool {
 	if _, denied := openaiDeniedRequestHeaders[normalized]; denied {
 		return false
 	}
-	if strings.HasPrefix(normalized, "cf-") {
+	if strings.HasPrefix(normalized, "cf-") || strings.HasPrefix(normalized, "x-forwarded-") || strings.HasPrefix(normalized, "x-envoy-") {
 		return false
 	}
 	return true
@@ -2110,6 +2113,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	isCodexCLI := officialCodexClient
 	strictNativeOAuth := account.Type == AccountTypeOAuth && officialCodexClient
 	strictNativeRequest := strictNativeOAuth || nativeRelay
+	nativeBodyDigest := sha256.Sum256(body)
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	clientTransport := GetOpenAIClientTransport(c)
 	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
@@ -2158,6 +2162,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if v, ok := reqBody["prompt_cache_key"].(string); ok {
 			promptCacheKey = strings.TrimSpace(v)
 		}
+	}
+	if strictNativeOAuth && c != nil {
+		c.Set(openAINativeTurnStateSessionHashKey, s.openAISessionHashForTurnState(c, promptCacheKey))
 	}
 	requestedReasoningEffort := extractOpenAIReasoningEffort(reqBody, originalModel)
 
@@ -2213,8 +2220,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	// 透传哲学：不做 instructions 兜底注入、不做账号级模型映射、不做客户端模型名规范化。
-	// OAuth 账号的协议级 body 改写（含 normalizeCodexModel、store/stream 兜底、instructions 默认值）
-	// 由下方 applyCodexOAuthTransform 统一处理。
+	// Accepted native OAuth/native-relay traffic keeps the client wire body.
+	// Compatibility transforms below are excluded by strictNativeRequest.
 	mappedModel := reqModel
 
 	// 规范化 reasoning.effort 参数（minimal -> none），与上游允许值对齐。
@@ -2312,10 +2319,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	// API-key HTTP fallback still drops previous_response_id as before.
 	// OAuth Codex HTTP must keep it: tool/search continuations can depend on
-	// server-side state referenced by previous_response_id. A stale anchor is
-	// recovered later by one targeted retry when safe.
+	// server-side state referenced by previous_response_id. The client, rather
+	// than the Gateway, must decide how to recover a stale anchor.
 	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 && !isOpenAIResponsesCompactPath(c) {
-		keepNativePrevious := strictNativeRequest && hasNonEmptyString(reqBody["previous_response_id"])
+		keepNativePrevious := strictNativeRequest
 		if _, has := reqBody["previous_response_id"]; has && !keepNativePrevious {
 			delete(reqBody, "previous_response_id")
 			bodyModified = true
@@ -2567,15 +2574,23 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	httpInvalidEncryptedContentRetryTried := false
-	httpPreviousResponseRecoveryTried := false
 	httpServerErrorRetryTried := false
 	httpNoReset429Attempts := 0
 	for {
+		// Every attempt must retain the client wire body, including compression.
+		// Future compatibility/recovery code must fail closed if it mutates it.
+		if strictNativeRequest && sha256.Sum256(body) != nativeBodyDigest {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"type": "upstream_error", "message": "Native Codex request preservation failed"}})
+			return nil, errors.New("native Codex request body changed before upstream send")
+		}
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, reqStream, promptCacheKey, isCodexCLI)
 		releaseUpstreamCtx()
 		if err != nil {
+			if errors.Is(err, errOpenAITurnStateAccountMismatch) {
+				c.JSON(http.StatusConflict, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "turn_state_account_mismatch", "message": err.Error()}})
+			}
 			return nil, err
 		}
 
@@ -2614,6 +2629,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if resp.StatusCode >= 400 {
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			_ = resp.Body.Close()
+			if strictNativeRequest && token != "" {
+				respBody = bytes.ReplaceAll(respBody, []byte(token), []byte("[REDACTED]"))
+			}
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			if nativeRelay {
 				return s.handleNativeRelayErrorResponse(resp, c, account, respBody)
@@ -2622,24 +2640,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			upstreamCode := extractUpstreamErrorCode(respBody)
-			if !httpPreviousResponseRecoveryTried &&
-				account.Type == AccountTypeOAuth &&
-				resp.StatusCode == http.StatusBadRequest &&
-				upstreamCode == "previous_response_not_found" &&
-				hasNonEmptyString(reqBody["previous_response_id"]) &&
-				!RequiresPreviousResponseIDForToolContinuation(reqBody) {
-				delete(reqBody, "previous_response_id")
-				var marshalErr error
-				body, marshalErr = json.Marshal(reqBody)
-				if marshalErr != nil {
-					return nil, fmt.Errorf("serialize previous_response_id retry body: %w", marshalErr)
-				}
-				setOpsUpstreamRequestBody(c, body)
-				httpPreviousResponseRecoveryTried = true
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying OAuth HTTP request once after previous_response_not_found (account: %s)", account.Name)
-				continue
-			}
-			if !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && upstreamCode == "invalid_encrypted_content" {
+			if !strictNativeRequest && !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && upstreamCode == "invalid_encrypted_content" {
 				if trimOpenAIEncryptedReasoningItems(reqBody) {
 					body, err = json.Marshal(reqBody)
 					if err != nil {
@@ -2800,12 +2801,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if state := strings.TrimSpace(resp.Header.Get(openAIWSTurnStateHeader)); state != "" {
 			sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
 			if sessionHash != "" {
-				s.getOpenAIWSStateStore().BindSessionTurnState(
-					0,
-					openAIWSUserTurnStateSessionHash(getOpenAIUserIDFromContext(c), account.ID, sessionHash),
-					state,
-					s.openAIWSSessionStickyTTL(),
-				)
+				s.bindOpenAINativeTurnState(account, getOpenAIUserIDFromContext(c), sessionHash, state)
 			}
 		}
 
@@ -2979,7 +2975,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		targetURL = openaiPlatformAPIURL
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
-	if nativeRelay && c != nil && c.Request != nil && c.Request.URL != nil && c.Request.URL.RawQuery != "" {
+	if (nativeRelay || account.Type == AccountTypeOAuth) && c != nil && c.Request != nil && c.Request.URL != nil && c.Request.URL.RawQuery != "" {
 		parsedTarget, err := url.Parse(targetURL)
 		if err != nil {
 			return nil, fmt.Errorf("parse native relay target URL: %w", err)
@@ -3014,14 +3010,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	}
 
 	// Copy client headers by denylist so future OpenAI/Codex headers remain compatible.
-	for key, values := range c.Request.Header {
-		if !shouldCopyOpenAIRequestHeader(key) {
-			continue
-		}
-		for _, v := range values {
-			req.Header.Add(key, v)
-		}
-	}
+	copyOpenAINativeRequestHeaders(req.Header, c.Request.Header, false)
 	if nativeRelay {
 		if accountID := strings.TrimSpace(c.GetHeader("chatgpt-account-id")); accountID != "" {
 			req.Header.Set("chatgpt-account-id", accountID)
@@ -3032,43 +3021,61 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		)
 	}
 	if account.Type == AccountTypeOAuth {
-		// A turn-state token belongs to the account that issued it. The
-		// client may still carry an old token after the scheduler switches.
-		req.Header.Del(openAIWSTurnStateHeader)
-		sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
-		if state := s.resolveOpenAIWSTurnStateForAccount(account, getOpenAIUserIDFromContext(c), sessionHash, c.GetHeader(openAIWSTurnStateHeader)); state != "" {
-			req.Header.Set(openAIWSTurnStateHeader, state)
-		}
-		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
-		req.Header.Del("conversation_id")
-		req.Header.Del("session_id")
+		if strictNativeOAuth {
+			sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
+			if err := s.validateOpenAINativeTurnState(account, getOpenAIUserIDFromContext(c), sessionHash, c.Request.Header); err != nil {
+				return nil, err
+			}
+			// Preserve presence and independently namespace each supplied identity.
+			for _, name := range []string{"session_id", "conversation_id", "session-id", "conversation-id"} {
+				if values, present := c.Request.Header[http.CanonicalHeaderKey(name)]; present {
+					isolated := make([]string, len(values))
+					for i, value := range values {
+						isolated[i] = isolateOpenAIUserSessionIDForAccount(getOpenAIUserIDFromContext(c), account.ID, value)
+					}
+					req.Header[http.CanonicalHeaderKey(name)] = isolated
+				}
+			}
+		} else {
+			// A turn-state token belongs to the account that issued it. The
+			// client may still carry an old token after the scheduler switches.
+			req.Header.Del(openAIWSTurnStateHeader)
+			sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
+			if state := s.resolveOpenAIWSTurnStateForAccount(account, getOpenAIUserIDFromContext(c), sessionHash, c.GetHeader(openAIWSTurnStateHeader)); state != "" {
+				req.Header.Set(openAIWSTurnStateHeader, state)
+			}
+			// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
+			req.Header.Del("conversation_id")
+			req.Header.Del("session_id")
 
-		if !strictNativeOAuth {
-			req.Header.Set("OpenAI-Beta", "responses=experimental")
-			req.Header.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
-		}
-		userID := getOpenAIUserIDFromContext(c)
-		incomingSessionID := strings.TrimSpace(c.GetHeader("session_id"))
-		incomingConversationID := strings.TrimSpace(c.GetHeader("conversation_id"))
-		if isOpenAIResponsesCompactPath(c) {
-			req.Header.Set("accept", "application/json")
-			compactSession := resolveOpenAICompactSessionID(c)
-			req.Header.Set("session_id", isolateOpenAIUserSessionIDForAccount(userID, account.ID, compactSession))
-		} else {
-			req.Header.Set("accept", "text/event-stream")
-		}
-		if promptCacheKey != "" {
-			isolated := isolateOpenAIUserSessionIDForAccount(userID, account.ID, promptCacheKey)
-			req.Header.Set("conversation_id", isolated)
-			req.Header.Set("session_id", isolated)
-		} else {
-			if incomingSessionID != "" {
-				req.Header.Set("session_id", isolateOpenAIUserSessionIDForAccount(userID, account.ID, incomingSessionID))
+			if !strictNativeOAuth {
+				req.Header.Set("OpenAI-Beta", "responses=experimental")
+				req.Header.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
 			}
-			if incomingConversationID != "" {
-				req.Header.Set("conversation_id", isolateOpenAIUserSessionIDForAccount(userID, account.ID, incomingConversationID))
+			userID := getOpenAIUserIDFromContext(c)
+			incomingSessionID := strings.TrimSpace(c.GetHeader("session_id"))
+			incomingConversationID := strings.TrimSpace(c.GetHeader("conversation_id"))
+			if isOpenAIResponsesCompactPath(c) {
+				req.Header.Set("accept", "application/json")
+				compactSession := resolveOpenAICompactSessionID(c)
+				req.Header.Set("session_id", isolateOpenAIUserSessionIDForAccount(userID, account.ID, compactSession))
+			} else {
+				req.Header.Set("accept", "text/event-stream")
+			}
+			if promptCacheKey != "" {
+				isolated := isolateOpenAIUserSessionIDForAccount(userID, account.ID, promptCacheKey)
+				req.Header.Set("conversation_id", isolated)
+				req.Header.Set("session_id", isolated)
+			} else {
+				if incomingSessionID != "" {
+					req.Header.Set("session_id", isolateOpenAIUserSessionIDForAccount(userID, account.ID, incomingSessionID))
+				}
+				if incomingConversationID != "" {
+					req.Header.Set("conversation_id", isolateOpenAIUserSessionIDForAccount(userID, account.ID, incomingConversationID))
+				}
 			}
 		}
+
 	}
 
 	if !strictNativeRequest {
@@ -3081,7 +3088,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	}
 
 	// Ensure required headers exist
-	if req.Header.Get("content-type") == "" {
+	if !strictNativeRequest && req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
 	}
 
@@ -3194,6 +3201,13 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 			ResponseBody:           body,
 			RetryableOnSameAccount: !isSameAccountReplayExcludedStatus(resp.StatusCode) && account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
 		}
+	}
+
+	if account.IsOpenAIOAuth() && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusPaymentRequired && resp.StatusCode != http.StatusForbidden {
+		s.writeOpenAINativeResponseHeaders(c.Writer.Header(), resp.Header)
+		c.Status(resp.StatusCode)
+		_, _ = c.Writer.Write(body)
+		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
 	}
 
 	if resp.StatusCode == http.StatusBadRequest && (isOpenAIResponsesCompactPath(c) || isOpenAIInvalidRequestErrorBody(body)) {
@@ -3309,7 +3323,7 @@ func (s *OpenAIGatewayService) handleNativeRelayErrorResponse(
 		Kind:               "relay_http_error",
 		Message:            upstreamMsg,
 	})
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	s.writeOpenAIResponseHeaders(c.Writer.Header(), resp.Header, account)
 	c.Status(resp.StatusCode)
 	_, _ = c.Writer.Write(body)
 	if upstreamMsg == "" {
@@ -3319,9 +3333,7 @@ func (s *OpenAIGatewayService) handleNativeRelayErrorResponse(
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string) (*openaiStreamingResult, error) {
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	}
+	s.writeOpenAIResponseHeaders(c.Writer.Header(), resp.Header, account)
 
 	// Set SSE response headers
 	c.Header("Content-Type", "text/event-stream")
@@ -3330,7 +3342,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 	c.Header("X-Accel-Buffering", "no")
 
 	// Pass through other headers
-	if v := resp.Header.Get("x-request-id"); v != "" {
+	if v := resp.Header.Get("x-request-id"); v != "" && !account.IsOpenAIOAuth() && !account.IsOpenAICodexNativeRelay() {
 		c.Header("x-request-id", v)
 	}
 
@@ -3475,6 +3487,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			}
 
 			dataBytes := []byte(data)
+			s.observeOpenAINativeMetadataTurnState(c, account, s.openAINativeResponseSessionHash(c), dataBytes)
 			eventResponseID := strings.TrimSpace(gjson.GetBytes(dataBytes, "response.id").String())
 			if responseID == "" {
 				responseID = eventResponseID
@@ -3494,7 +3507,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			}
 
 			// Correct Codex tool calls if needed (apply_patch -> edit, etc.)
-			if !account.IsOpenAICodexNativeRelay() {
+			if !account.IsOpenAIOAuth() && !account.IsOpenAICodexNativeRelay() {
 				if correctedData, corrected := s.toolCorrector.CorrectToolCallsInSSEBytes(dataBytes); corrected {
 					dataBytes = correctedData
 					data = string(correctedData)
@@ -3763,7 +3776,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	if account.Type == AccountTypeOAuth {
 		bodyLooksLikeSSE := bytes.Contains(body, []byte("data:")) || bytes.Contains(body, []byte("event:"))
 		if isEventStreamResponse(resp.Header) || bodyLooksLikeSSE {
-			return s.handleOAuthSSEToJSON(resp, c, body, originalModel, mappedModel)
+			return s.handleOAuthSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 		}
 	}
 
@@ -3781,10 +3794,10 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 	}
 
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	s.writeOpenAIResponseHeaders(c.Writer.Header(), resp.Header, account)
 
 	contentType := "application/json"
-	if s.cfg != nil && !s.cfg.Security.ResponseHeaders.Enabled {
+	if account.IsOpenAIOAuth() || account.IsOpenAICodexNativeRelay() || (s.cfg != nil && !s.cfg.Security.ResponseHeaders.Enabled) {
 		if upstreamType := resp.Header.Get("Content-Type"); upstreamType != "" {
 			contentType = upstreamType
 		}
@@ -3800,8 +3813,13 @@ func isEventStreamResponse(header http.Header) bool {
 	return strings.Contains(contentType, "text/event-stream")
 }
 
-func (s *OpenAIGatewayService) handleOAuthSSEToJSON(resp *http.Response, c *gin.Context, body []byte, originalModel, mappedModel string) (*OpenAIUsage, error) {
+func (s *OpenAIGatewayService) handleOAuthSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel, mappedModel string) (*OpenAIUsage, error) {
 	bodyText := string(body)
+	for _, line := range strings.Split(bodyText, "\n") {
+		if data, ok := extractOpenAISSEDataLine(line); ok {
+			s.observeOpenAINativeMetadataTurnState(c, account, s.openAINativeResponseSessionHash(c), []byte(data))
+		}
+	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
 	usage := &OpenAIUsage{}
@@ -3816,8 +3834,6 @@ func (s *OpenAIGatewayService) handleOAuthSSEToJSON(resp *http.Response, c *gin.
 		if originalModel != mappedModel {
 			body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 		}
-		// Correct tool calls in final response
-		body = s.correctToolCallsInResponseBody(body)
 	} else {
 		terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 		if terminalOK && terminalType == "response.failed" {
@@ -3834,7 +3850,7 @@ func (s *OpenAIGatewayService) handleOAuthSSEToJSON(resp *http.Response, c *gin.
 		body = []byte(bodyText)
 	}
 
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	s.writeOpenAINativeResponseHeaders(c.Writer.Header(), resp.Header)
 
 	contentType := "application/json; charset=utf-8"
 	if !ok {

@@ -59,7 +59,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			return
 		}
 
-		manifest, err := h.gatewayService.FetchCodexModelsManifest(c.Request.Context(), account, c.Query("client_version"), c.GetHeader("If-None-Match"), c.Request.Header)
+		manifest, err := h.gatewayService.FetchNativeCodexModelsManifest(c.Request.Context(), account, c.Request.URL.RawQuery, c.GetHeader("If-None-Match"), c.Request.Header)
 		if err != nil {
 			if c.Request.Context().Err() != nil {
 				return
@@ -73,7 +73,10 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			return
 		}
 
-		if manifest.ETag != "" {
+		if account.IsOpenAIOAuth() || account.IsOpenAICodexNativeRelay() {
+			h.gatewayService.WriteNativeCodexResponseHeaders(c.Writer.Header(), manifest.Headers)
+		}
+		if manifest.ETag != "" && !account.IsOpenAIOAuth() && !account.IsOpenAICodexNativeRelay() {
 			c.Header("ETag", manifest.ETag)
 		}
 		if manifest.NotModified {

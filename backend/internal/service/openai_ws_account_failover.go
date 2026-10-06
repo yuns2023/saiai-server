@@ -16,7 +16,7 @@ const openAIWSMaxAccountFailovers = 3
 
 // OpenAIWSAccountFailoverError is returned only when an upstream account
 // reports a quota/rate-limit error before the current turn emitted any client
-// frame and the turn can be reconstructed without account-bound state.
+// frame and the exact current frame can be sent without account-bound state.
 type OpenAIWSAccountFailoverError struct {
 	accountID   int64
 	turn        int
@@ -78,29 +78,22 @@ type OpenAIWSFailoverTarget struct {
 }
 
 type openAIWSPassthroughReplayTurn struct {
-	turn               int
-	messageType        coderws.MessageType
-	payload            []byte
-	previousResponseID string
-	fullInput          []json.RawMessage
-	replayReady        bool
-	responseID         string
+	turn        int
+	messageType coderws.MessageType
+	payload     []byte
+	responseID  string
 }
 
-// openAIWSPassthroughReplayTracker keeps only the canonical Responses input
-// sequence needed to migrate a not-yet-started turn. It never logs content.
+// Only pending raw frames are retained for a byte-identical fresh-turn retry.
+// Native OAuth no longer reconstructs or caches a sanitized conversation.
 type openAIWSPassthroughReplayTracker struct {
 	mu         sync.Mutex
-	store      OpenAIWSStateStore
-	userID     int64
 	pending    []*openAIWSPassthroughReplayTurn
 	byResponse map[string]*openAIWSPassthroughReplayTurn
 }
 
-func newOpenAIWSPassthroughReplayTracker(store OpenAIWSStateStore, userID int64) *openAIWSPassthroughReplayTracker {
+func newOpenAIWSPassthroughReplayTracker(_ OpenAIWSStateStore, _ int64) *openAIWSPassthroughReplayTracker {
 	return &openAIWSPassthroughReplayTracker{
-		store:      store,
-		userID:     userID,
 		pending:    make([]*openAIWSPassthroughReplayTurn, 0, 2),
 		byResponse: make(map[string]*openAIWSPassthroughReplayTurn, 2),
 	}
@@ -110,40 +103,10 @@ func (t *openAIWSPassthroughReplayTracker) RegisterTurn(turn int, messageType co
 	if t == nil || turn <= 0 || strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" {
 		return
 	}
-	previousResponseID := strings.TrimSpace(gjson.GetBytes(payload, "previous_response_id").String())
-	var previousInput []json.RawMessage
-	previousInputExists := false
-	replayReady := previousResponseID == ""
-	if previousResponseID != "" && t.store != nil {
-		previousInput, previousInputExists = t.store.GetResponseReplayForUser(t.userID, previousResponseID)
-		replayReady = previousInputExists
-	}
-	fullInput, fullInputExists, err := buildOpenAIWSReplayInputSequence(
-		previousInput,
-		previousInputExists,
-		payload,
-		previousResponseID != "",
-	)
-	if err != nil {
-		replayReady = false
-		fullInput = nil
-		fullInputExists = false
-	}
-	if previousResponseID == "" {
-		// A first/full create can be retried even when input is intentionally absent.
-		replayReady = true
-	}
-	if previousResponseID != "" && !fullInputExists {
-		replayReady = false
-	}
-
 	entry := &openAIWSPassthroughReplayTurn{
-		turn:               turn,
-		messageType:        messageType,
-		payload:            cloneOpenAIWSPayloadBytes(payload),
-		previousResponseID: previousResponseID,
-		fullInput:          cloneOpenAIWSRawMessages(fullInput),
-		replayReady:        replayReady,
+		turn:        turn,
+		messageType: messageType,
+		payload:     cloneOpenAIWSPayloadBytes(payload),
 	}
 	t.mu.Lock()
 	t.pending = append(t.pending, entry)
@@ -165,18 +128,7 @@ func (t *openAIWSPassthroughReplayTracker) ObserveUpstreamFrame(payload []byte) 
 	if entry == nil || !isOpenAIWSReplaySuccessfulTerminal(eventType, response) {
 		return
 	}
-	output, outputExists, err := openAIWSExtractResponseOutputSequence(payload)
-	if err != nil || !outputExists || !entry.replayReady {
-		t.removePendingLocked(entry)
-		return
-	}
-	combined := make([]json.RawMessage, 0, len(entry.fullInput)+len(output))
-	combined = append(combined, cloneOpenAIWSRawMessages(entry.fullInput)...)
-	combined = append(combined, cloneOpenAIWSRawMessages(output)...)
-	sanitized, sanitizeErr := sanitizeOpenAIWSReplayInput(combined)
-	if sanitizeErr == nil && len(sanitized) > 0 && t.store != nil {
-		t.store.BindResponseReplayForUser(t.userID, responseID, sanitized, openaiStickySessionTTL)
-	}
+
 	t.removePendingLocked(entry)
 }
 
@@ -190,10 +142,10 @@ func (t *openAIWSPassthroughReplayTracker) BuildFailoverError(accountID int64, c
 		return nil, false
 	}
 	entry := t.pending[0]
-	if entry == nil || !entry.replayReady {
+	if entry == nil {
 		return nil, false
 	}
-	replayPayload, ok, err := buildOpenAIWSFailoverPayload(entry.payload, entry.fullInput, entry.previousResponseID != "")
+	replayPayload, ok, err := buildOpenAINativeWSFailoverPayload(entry.payload)
 	if err != nil || !ok {
 		return nil, false
 	}
@@ -245,21 +197,6 @@ func (t *openAIWSPassthroughReplayTracker) removePendingLocked(target *openAIWSP
 	}
 }
 
-func openAIWSExtractResponseOutputSequence(payload []byte) ([]json.RawMessage, bool, error) {
-	output := gjson.GetBytes(payload, "response.output")
-	if !output.Exists() {
-		return nil, false, nil
-	}
-	if output.Type != gjson.JSON || !strings.HasPrefix(strings.TrimSpace(output.Raw), "[") {
-		return nil, true, errors.New("response.output is not an array")
-	}
-	var items []json.RawMessage
-	if err := json.Unmarshal([]byte(output.Raw), &items); err != nil {
-		return nil, true, err
-	}
-	return items, true, nil
-}
-
 func isOpenAIWSReplaySuccessfulTerminal(eventType string, response gjson.Result) bool {
 	eventType = strings.TrimSpace(eventType)
 	if eventType != "response.completed" && eventType != "response.done" {
@@ -301,24 +238,46 @@ func buildOpenAIWSFailoverPayload(currentPayload []byte, fullInput []json.RawMes
 	return updated, true, nil
 }
 
-func sanitizeOpenAIWSReplayInput(input []json.RawMessage) ([]json.RawMessage, error) {
-	sanitized := make([]json.RawMessage, 0, len(input))
-	for _, raw := range input {
-		var item any
-		if err := json.Unmarshal(raw, &item); err != nil {
-			return nil, err
-		}
-		next, _, keep := sanitizeEncryptedReasoningInputItem(item)
-		if !keep {
-			continue
-		}
-		encoded, err := json.Marshal(next)
-		if err != nil {
-			return nil, err
-		}
-		sanitized = append(sanitized, encoded)
+// Native OAuth failover is allowed only for a fresh, portable frame. Never
+// rebuild history, remove an anchor, or strip opaque provider state to make a
+// request fit another account. Even JSON whitespace/order remains intact.
+func buildOpenAINativeWSFailoverPayload(payload []byte) ([]byte, bool, error) {
+	var body any
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return nil, false, err
 	}
-	return sanitized, nil
+	if openAINativePayloadHasAccountState(body) {
+		return nil, false, nil
+	}
+	return cloneOpenAIWSPayloadBytes(payload), true, nil
+}
+
+func openAINativePayloadHasAccountState(value any) bool {
+	switch value := value.(type) {
+	case map[string]any:
+		for name, child := range value {
+			switch name {
+			case "previous_response_id", "encrypted_content", "encrypted_function_args", "x-codex-turn-state", "turn_state":
+				// Presence itself is meaningful; do not guess the portability of
+				// empty, null, malformed, or future account-bound state.
+				return true
+			case "type":
+				if child == "item_reference" || child == "function_call_output" {
+					return true
+				}
+			}
+			if openAINativePayloadHasAccountState(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range value {
+			if openAINativePayloadHasAccountState(child) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func openAIWSReplayHasItemReference(input []json.RawMessage) bool {
@@ -346,6 +305,11 @@ func (s *OpenAIGatewayService) PrepareOpenAIWSContinuationFailoverPayload(
 	owner, err := s.getSchedulableAccount(ctx, ownerAccountID)
 	if err != nil {
 		return nil, false, err
+	}
+	// An OAuth continuation cannot be migrated without changing its anchor
+	// and opaque reasoning. Let Codex choose an explicit fresh request.
+	if owner != nil && owner.IsOpenAIOAuth() {
+		return nil, false, nil
 	}
 	if owner == nil || !owner.IsRateLimited() {
 		return nil, false, nil

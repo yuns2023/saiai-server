@@ -16,8 +16,8 @@ files, user/project configuration, SAIAI Key quotas, or native-relay accounts.
   and weekly snapshots. Only the default Codex limit and explicit 300-minute
   or 10080-minute windows are interpreted as account quotas. Unknown and
   model-specific limit families are not converted into account-wide limits.
-- A known exhausted window with a valid future reset also prevents the next
-  turn on that existing connection from being sent to the exhausted account.
+- A known exhausted window with a valid future reset can move a portable fresh
+  turn to another account before sending it on the exhausted connection.
   Missing/invalid reset data does not create a permanent disable or invent a
   reset time; an actual provider error still follows the normal error policy.
 - Exhausted accounts are excluded from replacement selection. Existing
@@ -50,11 +50,15 @@ individual upstream attempt. Rotating an exhausted account does not cancel an
 in-flight downstream write and accidentally close the user's socket. Ingress
 cancellation and the configured write deadline still apply.
 
-Continuation replay requires a complete process-local history for that
-user/response pair. It removes account-bound `previous_response_id` and
-encrypted reasoning data only on cross-account replay, while reconstructing
-the known input sequence. Missing history, provider item references, or
-ambiguous pipelined turns fail closed. A pool without a compatible replacement
+Only a fresh frame without known account-bound state can migrate, preserving
+its message type and exact payload bytes. OAuth continuation replay is prohibited
+even when process-local history is available: neither `previous_response_id`
+nor encrypted reasoning may be removed to make a request fit another account.
+Provider item references, tool outputs, turn-state and ambiguous pipelined turns
+also prohibit replay. A bound continuation stays with its owner and exposes the
+provider error; it does not reconstruct a sanitized history. See
+[native request preservation](OPENAI_OAUTH_NATIVE_PASSTHROUGH.md).
+A pool without a compatible replacement
 returns a retryable failure; it does not loop indefinitely or change the
 user's OAuth/profile state.
 
@@ -77,7 +81,7 @@ UI behaviors.
 The quota matrix uses local WebSocket clients and mock upstreams only. It
 covers five-hour/weekly limits, quota control frames, empty start frames,
 nested failure envelopes, a quota-exhausted next turn, handshake 429, partial
-text/tool output, unavailable replacements, and unavailable replay history.
+text/tool output, unavailable replacements, and owned/unknown continuations.
 Relay tests additionally check byte ordering and bounded-buffer fail-closed
 behavior. No real provider/model requests are made by these tests.
 

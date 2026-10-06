@@ -508,10 +508,10 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersIsolatesHyphenatedSessionAlias
 
 	require.Equal(t, "header_session_id", resolution.SessionSource)
 	require.Equal(t, "header_conversation_id", resolution.ConversationSource)
-	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "session-hyphen"), headers.Get("session_id"))
-	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "conversation-hyphen"), headers.Get("conversation_id"))
-	require.Empty(t, headers.Get("session-id"))
-	require.Empty(t, headers.Get("conversation-id"))
+	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "session-hyphen"), headers.Get("session-id"))
+	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "conversation-hyphen"), headers.Get("conversation-id"))
+	require.Empty(t, headers.Get("session_id"))
+	require.Empty(t, headers.Get("conversation_id"))
 }
 
 func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testing.T) {
@@ -597,7 +597,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testi
 	}
 }
 
-func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheKey(t *testing.T) {
+func TestOpenAIGatewayService_Forward_WSv2_DoesNotSynthesizeOAuthHeaderFromPromptCacheKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -655,8 +655,8 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 	require.NotNil(t, result)
 	require.Equal(t, "resp_prompt_cache_key", result.RequestID)
 
-	// OAuth 账号的 session_id 按用户和账号隔离（userID=0，未在 context 设置）。
-	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "pcache_123"), captureDialer.lastHeaders.Get("session_id"))
+	// Native OAuth keeps a missing identity header absent.
+	require.Empty(t, captureDialer.lastHeaders.Get("session_id"))
 	require.Empty(t, captureDialer.lastHeaders.Get("conversation_id"))
 	require.NotNil(t, captureConn.lastWrite)
 	require.True(t, gjson.Get(requestToJSONString(captureConn.lastWrite), "stream").Exists())

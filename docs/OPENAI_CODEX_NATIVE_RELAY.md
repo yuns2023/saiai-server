@@ -64,6 +64,9 @@ preservation and per-hop authentication rules above.
 The terminal OAuth Gateway applies its normal account selection and replaces
 `Authorization` and `chatgpt-account-id` with the selected provider account's
 values. The internal relay-chain header is removed before the provider request.
+Its application query/header/payload and continuation behavior follows
+[native OAuth request preservation](OPENAI_OAUTH_NATIVE_PASSTHROUGH.md). Safe
+unknown response controls remain available across native relay hops.
 
 Successful SSE is forwarded through the normal Gateway streaming and billing
 pipeline. The JSON event semantics are preserved, but v1 does not promise

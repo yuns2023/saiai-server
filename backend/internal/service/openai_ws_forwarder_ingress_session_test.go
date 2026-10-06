@@ -443,7 +443,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OfficialOAuthOwn
 	require.True(t, upstream2Closed, "downstream 关闭后必须关闭对应 upstream websocket")
 }
 
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OfficialOAuthQuotaFailoverReplaysCurrentTurn(t *testing.T) {
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OfficialOAuthQuotaDoesNotRewriteContinuation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -564,9 +564,9 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OfficialOAuthQuo
 
 	writeMessage(`{"type":"response.create","model":"gpt-5.3-codex","previous_response_id":"resp_failover_a_1","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`)
 	secondEvent := readMessage()
-	require.Equal(t, "response.completed", gjson.GetBytes(secondEvent, "type").String())
-	require.Equal(t, "resp_failover_b_2", gjson.GetBytes(secondEvent, "response.id").String())
-	require.Equal(t, 2, <-failoverTurnCh)
+	require.Equal(t, "error", gjson.GetBytes(secondEvent, "type").String())
+	require.Equal(t, "usage_limit_reached", gjson.GetBytes(secondEvent, "error.code").String())
+	require.Empty(t, failoverTurnCh)
 	require.Equal(t, 1, <-validatedTurnCh)
 	require.Equal(t, 2, <-validatedTurnCh)
 	select {
@@ -583,19 +583,10 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OfficialOAuthQuo
 		t.Fatal("等待 OAuth quota failover websocket 结束超时")
 	}
 
-	require.Equal(t, 2, dialer.DialCount())
+	require.Equal(t, 1, dialer.DialCount())
 	require.Len(t, accountAConn.rawWrites, 2)
-	require.Len(t, accountBConn.rawWrites, 1)
-	replayed := accountBConn.rawWrites[0]
-	require.False(t, gjson.GetBytes(replayed, "previous_response_id").Exists())
-	require.Len(t, gjson.GetBytes(replayed, "input").Array(), 4)
-	require.False(t, gjson.GetBytes(replayed, "input.1.encrypted_content").Exists())
-	require.Equal(t, "safe", gjson.GetBytes(replayed, "input.1.summary.0.text").String())
-	require.Equal(t, "function_call_output", gjson.GetBytes(replayed, "input.3.type").String())
-
-	owner, ownerErr := stateStore.GetResponseAccountForUser(context.Background(), userID, "resp_failover_b_2")
-	require.NoError(t, ownerErr)
-	require.Equal(t, accountB.ID, owner)
+	require.Empty(t, accountBConn.rawWrites)
+	require.Equal(t, "resp_failover_a_1", gjson.GetBytes(accountAConn.rawWrites[1], "previous_response_id").String())
 	require.Len(t, repo.rateLimitCalls, 1)
 	require.WithinDuration(t, resetAt, repo.rateLimitCalls[0], 2*time.Second)
 }

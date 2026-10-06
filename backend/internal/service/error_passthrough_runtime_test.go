@@ -152,7 +152,7 @@ func TestOpenAIHandleErrorResponse_CompactBadRequestPassthrough(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
 	errField, ok := payload["error"].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, "invalid_request_error", errField["type"])
+	assert.NotContains(t, errField, "type")
 	assert.Contains(t, errField["message"], "requires a newer version of Codex")
 }
 
@@ -175,12 +175,7 @@ func TestOpenAIHandleErrorResponse_BadRequestDetailPassthrough(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
-	errField, ok := payload["error"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "invalid_request_error", errField["type"])
-	assert.Contains(t, errField["message"], "not supported when using Codex with a ChatGPT account")
+	require.Equal(t, respBody, rec.Body.Bytes())
 }
 
 func TestGeminiWriteGeminiMappedError_NoRuleKeepsDefault(t *testing.T) {

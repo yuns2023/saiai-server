@@ -39,6 +39,7 @@ type CodexModelsManifest struct {
 	ETag         string
 	upstreamETag string
 	NotModified  bool
+	Headers      http.Header
 }
 
 type codexModelsManifestUpstreamError struct {
@@ -68,13 +69,14 @@ func isRetryableCodexModelsManifestTransportError(err error) bool {
 }
 
 type codexModelsManifestRequest struct {
-	url                string
-	headers            http.Header
-	proxyURL           string
-	accountID          int64
-	accountConcurrency int
-	useAPIKeyUpstream  bool
-	nativeRelay        bool
+	url                   string
+	headers               http.Header
+	proxyURL              string
+	accountID             int64
+	accountConcurrency    int
+	useAPIKeyUpstream     bool
+	nativeRelay           bool
+	preserveClientHeaders bool
 }
 
 type codexModelsManifestCacheEntry struct {
@@ -158,6 +160,17 @@ func (c *codexModelsManifestCache) set(key string, manifest *CodexModelsManifest
 // shape conversion needed by Codex clients and a bounded stale-while-revalidate
 // cache. Native-relay accounts preserve the manifest and identity headers.
 func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string, clientHeaders ...http.Header) (*CodexModelsManifest, error) {
+	return s.fetchCodexModelsManifest(ctx, account, clientVersion, ifNoneMatch, "", false, clientHeaders...)
+}
+
+// FetchNativeCodexModelsManifest preserves the catalog request emitted by the
+// client, including query order/duplicates and future application headers.
+func (s *OpenAIGatewayService) FetchNativeCodexModelsManifest(ctx context.Context, account *Account, rawQuery, ifNoneMatch string, headers http.Header) (*CodexModelsManifest, error) {
+	query, _ := url.ParseQuery(rawQuery)
+	return s.fetchCodexModelsManifest(ctx, account, query.Get("client_version"), ifNoneMatch, rawQuery, true, headers)
+}
+
+func (s *OpenAIGatewayService) fetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch, rawQuery string, nativeIngress bool, clientHeaders ...http.Header) (*CodexModelsManifest, error) {
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
@@ -204,24 +217,25 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_REQUEST_FAILED", "build Codex models URL: %v", err)
 	}
+	if nativeIngress && (nativeRelay || account.IsOpenAIOAuth()) {
+		requestURL.RawQuery = rawQuery
+	}
 	headers := make(http.Header)
+	preserveHeaders := nativeRelay || (account.IsOpenAIOAuth() && incomingHeaders != nil)
+	if preserveHeaders {
+		copyOpenAINativeRequestHeaders(headers, incomingHeaders, false)
+	}
 	if nativeRelay {
-		for key, values := range incomingHeaders {
-			if !shouldCopyOpenAIRequestHeader(key) {
-				continue
-			}
-			for _, value := range values {
-				headers.Add(key, value)
-			}
-		}
 		if accountID := strings.TrimSpace(incomingHeaders.Get("chatgpt-account-id")); accountID != "" {
 			headers.Set("chatgpt-account-id", accountID)
 		}
 		headers.Set(openAINativeRelayChainHeader, appendOpenAINativeRelayChain(incomingHeaders.Get(openAINativeRelayChainHeader), s.openAINativeRelayID()))
 	}
 	headers.Set("Authorization", "Bearer "+token)
-	headers.Set("Accept", "application/json")
-	if !nativeRelay {
+	if !preserveHeaders && headers.Get("Accept") == "" {
+		headers.Set("Accept", "application/json")
+	}
+	if !preserveHeaders {
 		headers.Set("Originator", "codex_cli_rs")
 		headers.Set("Version", clientVersion)
 		headers.Set("User-Agent", codexCLIUserAgent)
@@ -230,7 +244,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		if accountID := strings.TrimSpace(account.GetChatGPTAccountID()); accountID != "" {
 			headers.Set("ChatGPT-Account-ID", accountID)
 		}
-	} else if !nativeRelay {
+	} else if !preserveHeaders {
 		if customUA := strings.TrimSpace(account.GetOpenAIUserAgent()); customUA != "" {
 			headers.Set("User-Agent", customUA)
 		}
@@ -241,13 +255,14 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		proxyURL = account.Proxy.URL()
 	}
 	request := codexModelsManifestRequest{
-		url:                requestURL.String(),
-		headers:            headers,
-		proxyURL:           proxyURL,
-		accountID:          account.ID,
-		accountConcurrency: account.Concurrency,
-		useAPIKeyUpstream:  useAPIKeyUpstream,
-		nativeRelay:        nativeRelay,
+		url:                   requestURL.String(),
+		headers:               headers,
+		proxyURL:              proxyURL,
+		accountID:             account.ID,
+		accountConcurrency:    account.Concurrency,
+		useAPIKeyUpstream:     useAPIKeyUpstream,
+		nativeRelay:           nativeRelay,
+		preserveClientHeaders: preserveHeaders,
 	}
 	if nativeRelay {
 		return s.fetchCodexModelsManifestUpstream(ctx, request, ifNoneMatch)
@@ -310,7 +325,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_REQUEST_FAILED", "create Codex models request: %v", err)
 	}
 	req.Header = request.headers.Clone()
-	if ifNoneMatch = strings.TrimSpace(ifNoneMatch); ifNoneMatch != "" {
+	if ifNoneMatch = strings.TrimSpace(ifNoneMatch); ifNoneMatch != "" && (!request.preserveClientHeaders || len(req.Header.Values("If-None-Match")) == 0) {
 		req.Header.Set("If-None-Match", ifNoneMatch)
 	}
 
@@ -340,7 +355,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotModified {
-		return &CodexModelsManifest{ETag: resp.Header.Get("ETag"), NotModified: true}, nil
+		return &CodexModelsManifest{ETag: resp.Header.Get("ETag"), NotModified: true, Headers: resp.Header.Clone()}, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, &codexModelsManifestUpstreamError{
@@ -381,7 +396,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_INVALID_MANIFEST", "adjust Codex models manifest: %v", err)
 		}
 	}
-	manifest := &CodexModelsManifest{Body: body, ETag: resp.Header.Get("ETag")}
+	manifest := &CodexModelsManifest{Body: body, ETag: resp.Header.Get("ETag"), Headers: resp.Header.Clone()}
 	if request.useAPIKeyUpstream && !request.nativeRelay {
 		manifest.upstreamETag = manifest.ETag
 		if !bytes.Equal(body, upstreamBody) {

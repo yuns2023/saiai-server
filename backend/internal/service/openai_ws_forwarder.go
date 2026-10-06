@@ -1131,14 +1131,23 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	headers := make(http.Header)
 	strictNativeOAuth := account != nil && account.Type == AccountTypeOAuth && c != nil && openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
 	if strictNativeOAuth && c.Request != nil {
-		for key, values := range c.Request.Header {
-			if !shouldCopyOpenAIWSRequestHeader(key) {
-				continue
-			}
-			for _, value := range values {
-				headers.Add(key, value)
+		copyOpenAINativeRequestHeaders(headers, c.Request.Header, true)
+		headers.Set("authorization", "Bearer "+token)
+		if accountID := account.GetChatGPTAccountID(); accountID != "" {
+			headers.Set("chatgpt-account-id", accountID)
+		}
+		// The dedicated native relay validates supplied turn-state before calling
+		// this builder. Do not collapse multi-value identity/control headers.
+		for _, name := range []string{"session_id", "conversation_id", "session-id", "conversation-id"} {
+			if values, present := c.Request.Header[http.CanonicalHeaderKey(name)]; present {
+				isolated := make([]string, len(values))
+				for i, value := range values {
+					isolated[i] = isolateOpenAIUserSessionIDForAccount(getOpenAIUserIDFromContext(c), account.ID, value)
+				}
+				headers[http.CanonicalHeaderKey(name)] = isolated
 			}
 		}
+		return headers, resolveOpenAIWSSessionHeaders(c, "")
 	}
 	// The copied client value may have come from a different pooled account.
 	// Only the account-validated value supplied below may reach the upstream.

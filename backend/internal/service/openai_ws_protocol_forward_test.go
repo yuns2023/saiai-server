@@ -323,7 +323,7 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthRejectsNonOfficialClient(t
 	require.Nil(t, upstream.lastReq, "非官方 OAuth 请求不得触达上游")
 }
 
-func TestOpenAIGatewayService_Forward_HTTPIngressOAuthRetriesStalePreviousResponseID(t *testing.T) {
+func TestOpenAIGatewayService_Forward_HTTPIngressOAuthReturnsStalePreviousResponseIDUnchanged(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -369,11 +369,12 @@ func TestOpenAIGatewayService_Forward_HTTPIngressOAuthRetriesStalePreviousRespon
 
 	body := []byte(`{"model":"gpt-5.5","stream":false,"previous_response_id":"resp_stale","input":[{"type":"input_text","text":"hello"}]}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, 2, upstream.callCount)
-	require.Equal(t, "resp_stale", gjson.GetBytes(upstream.bodies[0], "previous_response_id").String())
-	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "previous_response_not_found", gjson.Get(rec.Body.String(), "error.code").String())
+	require.Equal(t, 1, upstream.callCount)
+	require.Equal(t, body, upstream.bodies[0])
 }
 
 func TestOpenAIGatewayService_Forward_HTTPIngressOAuthKeepsPreviousResponseIDForToolOutput(t *testing.T) {
