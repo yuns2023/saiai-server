@@ -6,14 +6,60 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
+
+type nativeChatQuotaUpdater struct{}
+
+func (nativeChatQuotaUpdater) UpdateQuotaUsed(context.Context, int64, float64) error      { return nil }
+func (nativeChatQuotaUpdater) UpdateRateLimitUsage(context.Context, int64, float64) error { return nil }
+
+func TestNativeChatResumeConcurrentBillingChargesOneOriginalTurn(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	user := mustCreateUser(t, client, &service.User{Email: "native-chat-" + uuid.NewString() + "@example.invalid", PasswordHash: "TEST_ONLY", Balance: 100})
+	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "TEST_ONLY_" + uuid.NewString(), Name: "native-chat", Quota: 1})
+	account := mustCreateAccount(t, client, &service.Account{Name: "native-chat-" + uuid.NewString(), Type: service.AccountTypeOAuth, Platform: service.PlatformOpenAI})
+	cfg := &config.Config{}
+	cfg.Default.RateMultiplier = 1.5
+	cache := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(cache.Stop)
+	svc := service.NewOpenAIGatewayService(nil, nil, NewUsageBillingRepository(client, integrationDB), nil, nil, nil, nil, cfg, nil, nil, nil, nil, cache, nil, &service.DeferredService{}, nil)
+	identity := service.ResolveChatGPTTurnBillingIdentity([]byte(`{"messages":[{"id":"TEST_ONLY_INITIAL_MESSAGE"}],"model":"gpt-6-pro"}`), "")
+	input := &service.OpenAIChatGPTTurnUsageInput{RequestID: identity.RequestID, RequestPayloadHash: identity.PayloadHash,
+		BasePriceUSD: 0.05, RequestedModel: "gpt-6-pro", Account: account, APIKey: key, User: user, InboundEndpoint: "/chatgpt/backend-api/f/conversation/resume"}
+	input.APIKeyService = nativeChatQuotaUpdater{}
+	// Two racing completed delivery streams and a later replay share the
+	// original generation identity, rather than their HTTP resume request IDs.
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); results <- svc.RecordChatGPTTurnUsage(ctx, input) }()
+	}
+	wg.Wait()
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+	require.NoError(t, svc.RecordChatGPTTurnUsage(ctx, input))
+	var balance, quota float64
+	var dedup int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT balance FROM users WHERE id=$1", user.ID).Scan(&balance))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT quota_used FROM api_keys WHERE id=$1", key.ID).Scan(&quota))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT count(*) FROM usage_billing_dedup WHERE request_id=$1 AND api_key_id=$2", identity.RequestID, key.ID).Scan(&dedup))
+	require.InDelta(t, 99.925, balance, 1e-9)
+	require.InDelta(t, 0.075, quota, 1e-9)
+	require.Equal(t, 1, dedup)
+}
 
 func TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling(t *testing.T) {
 	ctx := context.Background()

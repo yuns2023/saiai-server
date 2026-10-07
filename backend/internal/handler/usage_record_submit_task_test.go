@@ -24,6 +24,15 @@ func newUsageRecordTestPool(t *testing.T) *service.UsageRecordWorkerPool {
 	return pool
 }
 
+func TestChatGPTBillingTaskStoppedPoolSettlesSynchronously(t *testing.T) {
+	pool := newUsageRecordTestPool(t)
+	pool.Stop()
+	h := &OpenAIGatewayHandler{usageRecordWorkerPool: pool}
+	calls := 0
+	h.submitChatGPTUsageRecordTask(func(ctx context.Context) { require.NoError(t, ctx.Err()); calls++ })
+	require.Equal(t, 1, calls)
+}
+
 func TestGatewayHandlerSubmitUsageRecordTask_WithPool(t *testing.T) {
 	pool := newUsageRecordTestPool(t)
 	h := &GatewayHandler{usageRecordWorkerPool: pool}

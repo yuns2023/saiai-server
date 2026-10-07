@@ -176,6 +176,21 @@ type UsageLog struct {
 	FailoverEvents      []UsageLogFailoverEvent
 }
 
+// IsNativeChatTurn identifies fixed-turn rows without adding schema columns.
+func (l *UsageLog) IsNativeChatTurn() bool {
+	if l == nil {
+		return false
+	}
+	if l.Model == OpenAIChatGPTTurnBillingModel {
+		return true
+	}
+	if l.InboundEndpoint == nil {
+		return false
+	}
+	return *l.InboundEndpoint == "/chatgpt/backend-api/f/conversation" ||
+		*l.InboundEndpoint == "/chatgpt/backend-api/f/conversation/resume"
+}
+
 type UsageLogSessionAccount struct {
 	ID   int64
 	Name string

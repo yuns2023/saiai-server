@@ -52,22 +52,38 @@ an approved token-billing source for this version.
 
 ## Current admission rule
 
-Administrators can adjust the model-independent successful-turn base price at
-**Settings → Gateway → ChatGPT Chat billing**. The dedicated admin-only
-`GET`/`PUT /api/v1/admin/settings/chatgpt-billing` resource contains the numeric
-`success_turn_price_usd` field. PUT requires that field and changes only the
-native Chat price. Values must be finite and non-negative; zero disables paid
-native Chat turns rather than enabling free traffic. Existing group/user
-multipliers still apply. This setting does not change Responses/Codex prices
-or the model in the forwarded request.
+Administrators can adjust five model-independent successful-turn prices at
+**Settings → Gateway → ChatGPT Chat billing**. The admin-only
+`GET`/`PUT /api/v1/admin/settings/chatgpt-billing` resource contains
+`success_turn_price_usd` (automatic/unrecognized fallback) and an optional
+complete `tier_prices_usd` table with `instant`, `medium`, `high`, `extreme`,
+and `pro`. A legacy PUT with only the fallback field retains uniform pricing.
+Prices must be numeric, finite and non-negative; an explicit zero disables
+requests in that tier, without opting into free/unaccounted traffic. Missing,
+null or unknown entries in a supplied tier table are rejected. Group/user
+multipliers still apply. These prices are retail turn prices, not measured
+provider consumption. Responses/Codex token pricing is independent.
 
-The persisted `openai_chat_success_turn_price_usd` setting takes precedence
-over startup configuration, including an explicit zero. Only an absent setting
-falls back to the configured price. Database failures or malformed stored
-values reject final model turns before upstream traffic. Each turn snapshots
-its price once on admission, so updates apply immediately to new requests
-across Gateway instances without changing the price of a stream in progress.
-Catalog and initialization requests do not read or require this price.
+The native Chat request is inspected without rewriting its bytes. Desktop
+26.1002.6548.0 was observed with five presets: an instantaneous model with no
+thinking effort, `standard`, `extended`, `max`, and a Pro model with no effort.
+The first maps to `instant`; the three explicit native efforts map to
+`medium`, `high`, and `extreme`; a Pro model maps to `pro`. Unknown presets and automatic choices without an explicit recognized effort
+use the fallback. An explicit standard/extended/max effort keeps its selected
+price even when the model choice is automatic. Do not insert synthetic effort fields.
+
+The persisted `openai_chat_success_turn_price_usd` key atomically stores either
+the legacy numeric price or the whole JSON price table. It overrides startup
+configuration, including zero; only an absent setting uses startup pricing.
+Database failures or malformed settings fail closed before provider traffic.
+Every admitted turn snapshots its initial model, effort, price, billing identity
+and selected account in shared Redis. Retries/resumes preserve that snapshot;
+a later admin save never reprices it. Metadata changes using the same message
+identity are rejected. Records expire after one hour and contain hashes and
+accounting metadata, not content, conversation IDs, credentials or resume tokens.
+An older Gateway cannot read tier JSON: rollback requires restoring the scoped
+legacy price through this admin resource before rolling back the application.
+No schema migration or whole-database restore is needed.
 
 `gateway.openai_chat_success_turn_price_usd=0` and
 `gateway.openai_chat_unaccounted_allowed=false` are the production-safe
@@ -96,7 +112,9 @@ top-level field names, immediate `message.metadata` field names, and usage-like
 field paths. Values, conversation IDs, message content, and arbitrary message
 content keys are not logged. Disable it again when the window closes.
 
-Control-plane requests are not model turns and are never billable. When native
+Catalog, initialization, preparation and assets are not model turns. Resume
+requests deliver a previous turn; a successful resume settles that original
+turn once, rather than creating another billable unit. When native
 Chat is explicitly enabled, catalog, initialization, preparation, and asset
 requests do not require a model-turn price or a replay upstream. They still
 require an authenticated OpenAI group and a schedulable OAuth account. The
@@ -104,25 +122,45 @@ final `/f/conversation` request retains its separate billing/staging gate.
 
 ## Fixed successful-turn contract
 
-One billable unit is one final `/f/conversation` request for which all of the
-following are true:
+One billable unit is one native user-message generation whose initial
+`/f/conversation` stream or associated `/f/conversation/resume` stream has all
+of these signals:
 
 - the upstream HTTP status is 2xx;
 - the bounded SSE observer finishes without an error;
-- `message_stream_complete` is present with a conversation ID; and
+- `message_stream_complete` is present with the expected conversation ID; and
 - no provider error event was observed.
+
+An initial `resume_conversation_token` or `stream_handoff` with a conversation
+ID establishes delivery ownership before its chunk is flushed to Desktop.
+A resume envelope may contain native delivery extensions and an offset, but
+must not contain new generation input. The same authenticated user, Key and
+group must own the pending record, and its OAuth account must still be eligible
+in that group. Missing/expired contexts and unavailable owners fail closed.
+Overlapping unsettled handoffs cannot overwrite one another. Completion
+promotes ordinary conversation affinity. Resumes acquire bounded user/account
+stream slots and release them on termination; background provider work between
+HTTP delivery legs is not an active Gateway stream slot.
 
 `[DONE]` alone is insufficient. Non-2xx responses, rejected requests, control
 requests, truncated streams, observer-limit failures, and provider error events
 cost zero turns.
 
-The usage row uses model `chatgpt-native-turn`, request type `stream`, zero
-input/output/cache tokens, and the configured base price as `total_cost`.
+The usage row retains the actual requested model, the observed assistant model
+when different, and the original native thinking effort. The atomic billing
+command keeps its stable `chatgpt-native-turn` namespace and original message
+fingerprint. Rows use request type `stream`, placeholder zero tokens, and the
+admitted base price as `total_cost`. APIs identify native rows with
+`billing_unit=turn`, `token_usage_source=unknown`, and their `chat_tier`; the
+usage tables display one successful turn and unavailable token consumption,
+rather than interpreting placeholder zeros as measured usage.
 `actual_cost` applies the existing group/user rate multiplier. Subscription
 usage, wallet balance, API-key quota/rate limits, and request fingerprinting
 use the existing atomic billing transaction and request-ID deduplication path;
 usage-log insertion follows the existing idempotent best-effort path. A retry
-with the same billing identity cannot charge a second turn. The preferred
+with the same billing identity cannot charge a second turn. A full or stopped
+usage queue falls back to synchronous native-Chat settlement; a terminal marker
+permits the next turn while an accepted billing job waits in the queue. The preferred
 billing identity is a SHA-256 digest of the conversation ID and current message
 JSON, so Desktop retries remain stable when outer preparation fields change
 without storing the conversation ID, message ID, or content. Requests without

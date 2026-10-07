@@ -69,6 +69,17 @@ describe('admin UsageTable tooltip', () => {
     } as DOMRect)
   })
 
+  it('shows native Chat turns and unknown consumption instead of zero tokens', () => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_CHAT', model: 'gpt-6-pro', billing_unit: 'turn', chat_tier: 'pro',
+        input_tokens: 0, output_tokens: 0, image_count: 0 }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-tokens" :row="data[0]" /><slot name="cell-reasoning_effort" :row="data[0]" /></div>' } } }
+    })
+    expect(wrapper.text()).toContain('usage.nativeChatTurn')
+    expect(wrapper.text()).toContain('usage.nativeChatUsageUnknown')
+    expect(wrapper.text()).toContain('usage.chatTiers.pro')
+  })
+
   it('shows service tier and billing breakdown in cost tooltip', async () => {
     const row = {
       request_id: 'req-admin-1',

@@ -100,6 +100,8 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		return
 	}
 	isModelRequest := c.Request.URL.Path == "/chatgpt/backend-api/f/conversation"
+	isResumeRequest := c.Request.URL.Path == "/chatgpt/backend-api/f/conversation/resume"
+	isTurnStream := isModelRequest || isResumeRequest
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformOpenAI {
 		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{
@@ -114,8 +116,45 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		}})
 		return
 	}
-	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-	setOpsRequestContext(c, model, isModelRequest, body)
+	model, thinkingEffort := service.ChatGPTRequestMetadata(body)
+	if isTurnStream && (!service.ValidChatGPTMetadataValue(model, 100) || !service.ValidChatGPTMetadataValue(thinkingEffort, 32)) {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Invalid ChatGPT model metadata")
+		return
+	}
+	setOpsRequestContext(c, model, isTurnStream, body)
+	var turnCache service.ChatGPTTurnCache
+	var turn *service.ChatGPTTurnSnapshot
+	var turnScope service.ChatGPTTurnScope
+	resumeConversationID := ""
+	if isResumeRequest {
+		subject, ok := middleware2.GetAuthSubjectFromContext(c)
+		if !ok {
+			h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
+			return
+		}
+		turnScope = service.ChatGPTTurnScope{UserID: subject.UserID, APIKeyID: apiKey.ID, GroupID: apiKey.Group.ID}
+	}
+	if isResumeRequest {
+		resumeConversationID, err = service.ResolveChatGPTResumeConversation(body)
+		if err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Invalid ChatGPT resume body")
+			return
+		}
+		turnCache, err = h.gatewayService.ChatGPTTurnCache()
+		if err == nil {
+			turn, err = turnCache.GetChatGPTResume(c.Request.Context(), turnScope.ResumeKey(resumeConversationID))
+		}
+		if err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "accounting_unavailable", "Native ChatGPT Chat accounting context is unavailable; retry later")
+			return
+		}
+		if turn == nil {
+			h.errorResponse(c, http.StatusConflict, "resume_context_unavailable", "ChatGPT resume context is unavailable; start a new turn")
+			return
+		}
+		model, thinkingEffort = turn.RequestedModel, turn.ThinkingEffort
+		setOpsRequestContext(c, model, true, body)
+	}
 	// Snapshot the current price once, before provider traffic. An admin change
 	// during a long-running stream must not reprice that in-flight turn.
 	fixedTurnPriceUSD := h.cfg.Gateway.OpenAIChatSuccessTurnPriceUSD
@@ -127,28 +166,47 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			}})
 			return
 		}
-		fixedTurnPriceUSD = settings.SuccessTurnPriceUSD
+		fixedTurnPriceUSD = settings.PriceFor(model, thinkingEffort)
+	}
+	if isResumeRequest {
+		fixedTurnPriceUSD = turn.BasePriceUSD
 	}
 	fixedTurnBillingEnabled := service.IsValidOpenAIChatGPTTurnPrice(fixedTurnPriceUSD)
 	boundedStaging := h.cfg.Gateway.OpenAIChatUnaccountedAllowed &&
 		h.cfg.Gateway.OpenAIProviderAttemptBudget.Enabled && h.cfg.Gateway.OpenAIChatModelRequestCap > 0
-	if isModelRequest && strings.TrimSpace(h.cfg.Gateway.OpenAIChatUpstreamBaseURL) == "" &&
+	if isTurnStream && strings.TrimSpace(h.cfg.Gateway.OpenAIChatUpstreamBaseURL) == "" &&
 		!fixedTurnBillingEnabled && !boundedStaging {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
 			"type": "service_unavailable", "message": "Native ChatGPT Chat requires fixed-turn billing or an explicit bounded staging session",
 		}})
 		return
 	}
-	if isModelRequest && !fixedTurnBillingEnabled && !h.cfg.Gateway.OpenAIChatUnaccountedAllowed {
+	if isTurnStream && !fixedTurnBillingEnabled && !h.cfg.Gateway.OpenAIChatUnaccountedAllowed {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
 			"type": "accounting_unavailable", "message": "Native ChatGPT Chat accounting is not enabled",
 		}})
 		return
 	}
 	streamStarted := false
+	forwardCtx := c.Request.Context()
+	cancelForward := func() {}
+	if isTurnStream {
+		if forwardCtx.Err() != nil {
+			return
+		}
+		turnTimeout := time.Duration(h.cfg.Gateway.OpenAIChatTurnTimeoutSeconds) * time.Second
+		if turnTimeout <= 0 {
+			turnTimeout = 10 * time.Minute
+		}
+		forwardCtx, cancelForward = context.WithTimeout(context.WithoutCancel(forwardCtx), turnTimeout)
+		// Native stream leases follow the bounded drain, including after the
+		// downstream disconnects. Provider-facing bytes and headers are unchanged.
+		c.Request = c.Request.WithContext(forwardCtx)
+	}
+	defer cancelForward()
 	var reqLog *zap.Logger
 	var subscription *service.UserSubscription
-	if isModelRequest {
+	if isTurnStream {
 		subject, subjectOK := middleware2.GetAuthSubjectFromContext(c)
 		if !subjectOK {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
@@ -156,6 +214,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			}})
 			return
 		}
+		turnScope = service.ChatGPTTurnScope{UserID: subject.UserID, APIKeyID: apiKey.ID, GroupID: apiKey.Group.ID}
 		reqLog = requestLogger(
 			c,
 			"handler.openai_gateway.chatgpt_conversation",
@@ -191,22 +250,81 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			}
 		}
 	}
+	billingIdentity := service.ResolveChatGPTTurnBillingIdentity(body, service.ResolveUsageBillingRequestID(c.Request.Context(), ""))
+	if isModelRequest {
+		turnCache, err = h.gatewayService.ChatGPTTurnCache()
+		if err != nil && fixedTurnBillingEnabled {
+			h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "accounting_unavailable", "Native ChatGPT Chat accounting context is unavailable", streamStarted)
+			return
+		}
+		if turnCache != nil {
+			turn, err = turnCache.GetChatGPTTurn(forwardCtx, turnScope.TurnKey(billingIdentity))
+			if err != nil {
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "accounting_unavailable", "Native ChatGPT Chat accounting context is unavailable", streamStarted)
+				return
+			}
+			if turn != nil && (turn.RequestedModel != model || turn.ThinkingEffort != thinkingEffort) {
+				h.handleStreamingAwareError(c, http.StatusConflict, "turn_identity_conflict", "ChatGPT turn metadata changed; use a new message identity", streamStarted)
+				return
+			}
+			if conversationID := strings.TrimSpace(gjson.GetBytes(body, "conversation_id").String()); conversationID != "" {
+				active, activeErr := turnCache.GetChatGPTResume(forwardCtx, turnScope.ResumeKey(conversationID))
+				if activeErr != nil {
+					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "accounting_unavailable", "Native ChatGPT Chat accounting context is unavailable", streamStarted)
+					return
+				}
+				if active != nil && !active.Completed && !active.TerminalSeen && active.Identity != billingIdentity {
+					h.handleStreamingAwareError(c, http.StatusConflict, "turn_pending", "A ChatGPT turn is still pending in this conversation", streamStarted)
+					return
+				}
+			}
+		}
+	}
 	sessionHash := service.ResolveChatGPTConversationSessionHash(body)
 	if sessionHash == "" {
 		sessionHash = h.gatewayService.GenerateSessionHash(c, body)
 	}
-	selection, _, selectErr := h.gatewayService.SelectChatGPTOAuthAccount(
-		c.Request.Context(), apiKey.GroupID, sessionHash, model,
-	)
+	var selection *service.AccountSelectionResult
+	var selectErr error
+	if turn != nil {
+		selection, selectErr = h.gatewayService.SelectChatGPTBoundAccount(forwardCtx, apiKey.GroupID, turn.AccountID)
+	} else {
+		selection, _, selectErr = h.gatewayService.SelectChatGPTOAuthAccount(forwardCtx, apiKey.GroupID, sessionHash, model)
+	}
 	if selectErr != nil || selection == nil || selection.Account == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
 			"type": "service_unavailable", "message": "No available OpenAI OAuth account",
 		}})
 		return
 	}
+	if isModelRequest && turnCache != nil {
+		turn, err = turnCache.PutChatGPTTurnIfAbsent(forwardCtx, turnScope.TurnKey(billingIdentity), &service.ChatGPTTurnSnapshot{
+			Identity: billingIdentity, AccountID: selection.Account.ID, BasePriceUSD: fixedTurnPriceUSD,
+			RequestedModel: model, ThinkingEffort: thinkingEffort, StartedAt: requestStart,
+		}, service.ChatGPTTurnContextTTL)
+		if err != nil || turn == nil || turn.RequestedModel != model || turn.ThinkingEffort != thinkingEffort {
+			releaseChatGPTControlSelection(selection)
+			h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "accounting_unavailable", "Native ChatGPT Chat accounting context is unavailable", streamStarted)
+			return
+		}
+		if selection.Account.ID != turn.AccountID {
+			releaseChatGPTControlSelection(selection)
+			selection, selectErr = h.gatewayService.SelectChatGPTBoundAccount(forwardCtx, apiKey.GroupID, turn.AccountID)
+			if selectErr != nil || selection == nil {
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "service_unavailable", "ChatGPT turn account is unavailable", streamStarted)
+				return
+			}
+		}
+	}
+	if turn != nil {
+		billingIdentity = turn.Identity
+		fixedTurnPriceUSD = turn.BasePriceUSD
+		fixedTurnBillingEnabled = service.IsValidOpenAIChatGPTTurnPrice(fixedTurnPriceUSD)
+		requestStart = turn.StartedAt
+	}
 	account := selection.Account
 	setOpsSelectedAccount(c, account.ID, service.PlatformOpenAI)
-	if !isModelRequest {
+	if !isTurnStream {
 		// The shared scheduler opportunistically acquires an account slot even
 		// for short native-Chat control-plane requests. They are not model
 		// turns, so release that reservation immediately instead of leaking it
@@ -214,7 +332,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		releaseChatGPTControlSelection(selection)
 	} else if h.concurrencyHelper != nil && h.concurrencyHelper.concurrencyService != nil {
 		accountRelease, acquired := h.acquireResponsesAccountSlot(
-			c, apiKey.GroupID, sessionHash, selection, true, &streamStarted, reqLog,
+			c, apiKey.GroupID, "", selection, true, &streamStarted, reqLog,
 		)
 		if !acquired {
 			return
@@ -237,19 +355,6 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			}
 		}
 	}
-	forwardCtx := c.Request.Context()
-	cancelForward := func() {}
-	if isModelRequest {
-		if forwardCtx.Err() != nil {
-			return
-		}
-		turnTimeout := time.Duration(h.cfg.Gateway.OpenAIChatTurnTimeoutSeconds) * time.Second
-		if turnTimeout <= 0 {
-			turnTimeout = 10 * time.Minute
-		}
-		forwardCtx, cancelForward = context.WithTimeout(context.WithoutCancel(forwardCtx), turnTimeout)
-	}
-	defer cancelForward()
 	resp, err := h.gatewayService.ForwardChatGPTConversation(forwardCtx, c, account, body, path)
 	if err != nil {
 		if service.WriteOpenAIProviderAttemptBudgetError(c, err) {
@@ -277,7 +382,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	buffer := make([]byte, 32*1024)
 	var streamObserver *service.ChatGPTConversationStreamObserver
 	responseShapeCapture := false
-	if isModelRequest {
+	if isTurnStream {
 		responseShapeCapture = h.cfg.Gateway.OpenAIChatResponseShapeCapture
 		if responseShapeCapture {
 			streamObserver = service.NewChatGPTConversationStreamShapeObserver()
@@ -287,11 +392,26 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	}
 	var streamObserverErr error
 	clientDisconnected := false
+	handoffBound := false
 	for {
 		n, readErr := resp.Body.Read(buffer)
 		if n > 0 {
 			if streamObserver != nil && streamObserverErr == nil {
 				streamObserverErr = streamObserver.Observe(buffer[:n])
+				signals := streamObserver.Snapshot()
+				if streamObserverErr == nil && !handoffBound && signals.HandoffSeen && signals.ConversationID != "" &&
+					resp.StatusCode >= 200 && resp.StatusCode < 300 && !signals.ProviderErrorSeen {
+					if turnCache == nil || turn == nil {
+						streamObserverErr = errors.New("ChatGPT handoff accounting context unavailable")
+					} else {
+						streamObserverErr = turnCache.BindChatGPTResume(forwardCtx, turnScope.ResumeKey(signals.ConversationID), turnScope.TurnKey(turn.Identity))
+						handoffBound = streamObserverErr == nil
+					}
+					if streamObserverErr != nil {
+						h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "accounting_unavailable", "ChatGPT handoff accounting context is unavailable", c.Writer.Written())
+						return
+					}
+				}
 			}
 			if !clientDisconnected {
 				if _, writeErr := c.Writer.Write(buffer[:n]); writeErr != nil {
@@ -335,28 +455,31 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 					}
 				}
 				if streamObserverErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 &&
-					summary.CompletionSeen && !summary.ProviderErrorSeen {
+					summary.CompletionSeen && !summary.ProviderErrorSeen &&
+					(!isResumeRequest || summary.ConversationID == resumeConversationID) {
+					if turnCache != nil && turn != nil {
+						if err := turnCache.MarkChatGPTTurnTerminal(forwardCtx, turnScope.TurnKey(turn.Identity)); err != nil {
+							logger.L().Error("openai.chatgpt_mark_terminal_failed", zap.Error(err))
+						}
+					}
 					stickyHash := service.ChatGPTConversationSessionHash(summary.ConversationID)
 					if stickyHash != "" {
 						_ = h.gatewayService.BindStickySession(
 							c.Request.Context(), apiKey.GroupID, stickyHash, account.ID,
 						)
 					}
-					if fixedTurnBillingEnabled {
+					if fixedTurnBillingEnabled && (turn == nil || !turn.Completed) {
 						userAgent := c.GetHeader("User-Agent")
 						clientIP := ip.GetClientIP(c)
 						inboundEndpoint := GetInboundEndpoint(c)
 						upstreamEndpoint := strings.TrimPrefix(c.Request.URL.Path, "/chatgpt")
-						upstreamRequestID := resp.Header.Get("x-request-id")
-						if strings.TrimSpace(upstreamRequestID) == "" {
-							upstreamRequestID = resp.Header.Get("x-openai-request-id")
-						}
-						fallbackRequestID := service.ResolveUsageBillingRequestID(c.Request.Context(), upstreamRequestID)
-						billingIdentity := service.ResolveChatGPTTurnBillingIdentity(body, fallbackRequestID)
 						duration := time.Since(requestStart)
-						h.submitUsageRecordTask(func(ctx context.Context) {
+						h.submitChatGPTUsageRecordTask(func(ctx context.Context) {
 							if err := h.gatewayService.RecordChatGPTTurnUsage(ctx, &service.OpenAIChatGPTTurnUsageInput{
 								BasePriceUSD:       fixedTurnPriceUSD,
+								RequestedModel:     model,
+								ObservedModel:      summary.ObservedModel,
+								ThinkingEffort:     thinkingEffort,
 								RequestID:          billingIdentity.RequestID,
 								APIKey:             apiKey,
 								User:               apiKey.User,
@@ -375,8 +498,16 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 									zap.Int64("api_key_id", apiKey.ID),
 									zap.Int64("account_id", account.ID),
 								).Error("openai.chatgpt_record_turn_failed", zap.Error(err))
+								return
+							}
+							if turnCache != nil && turn != nil {
+								if err := turnCache.CompleteChatGPTTurn(ctx, turnScope.TurnKey(turn.Identity)); err != nil {
+									logger.L().Error("openai.chatgpt_complete_context_failed", zap.Error(err))
+								}
 							}
 						})
+					} else if !fixedTurnBillingEnabled && turnCache != nil && turn != nil {
+						_ = turnCache.CompleteChatGPTTurn(forwardCtx, turnScope.TurnKey(turn.Identity))
 					}
 				}
 			}
@@ -1912,6 +2043,22 @@ func (h *OpenAIGatewayHandler) submitUsageRecordTask(task service.UsageRecordTas
 		h.usageRecordWorkerPool.Submit(task)
 		return
 	}
+	h.runUsageRecordTask(task)
+}
+
+// Native Chat has no provider token usage with which to reconstruct a dropped
+// charge. A full/stopped usage queue must settle synchronously instead.
+func (h *OpenAIGatewayHandler) submitChatGPTUsageRecordTask(task service.UsageRecordTask) {
+	if task == nil {
+		return
+	}
+	if h.usageRecordWorkerPool != nil && h.usageRecordWorkerPool.Submit(task) != service.UsageRecordSubmitModeDropped {
+		return
+	}
+	h.runUsageRecordTask(task)
+}
+
+func (h *OpenAIGatewayHandler) runUsageRecordTask(task service.UsageRecordTask) {
 	// 回退路径：worker 池未注入时同步执行，避免退回到无界 goroutine 模式。
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

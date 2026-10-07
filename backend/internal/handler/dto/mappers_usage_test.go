@@ -8,6 +8,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestUsageLogFromServiceNativeChatReportsUnknownTokenUsage(t *testing.T) {
+	endpoint := "/chatgpt/backend-api/f/conversation/resume"
+	effort := "extended"
+	log := &service.UsageLog{Model: "gpt-5-6-thinking", ReasoningEffort: &effort, InboundEndpoint: &endpoint, TotalCost: 0.03}
+	user := UsageLogFromService(log)
+	admin := UsageLogFromServiceAdmin(log)
+	require.Equal(t, "turn", user.BillingUnit)
+	require.Equal(t, "unknown", user.TokenUsageSource)
+	require.Equal(t, "high", user.ChatTier)
+	require.Equal(t, user.BillingUnit, admin.BillingUnit)
+	require.Equal(t, user.TokenUsageSource, admin.TokenUsageSource)
+	legacy := UsageLogFromService(&service.UsageLog{Model: service.OpenAIChatGPTTurnBillingModel})
+	require.Equal(t, "turn", legacy.BillingUnit)
+	require.Equal(t, "unknown", legacy.TokenUsageSource)
+	responses := UsageLogFromService(&service.UsageLog{Model: "gpt-6", InputTokens: 12, OutputTokens: 2})
+	require.Empty(t, responses.BillingUnit)
+	require.Empty(t, responses.TokenUsageSource)
+}
+
 func TestUsageLogFromService_IncludesOpenAIWSMode(t *testing.T) {
 	t.Parallel()
 

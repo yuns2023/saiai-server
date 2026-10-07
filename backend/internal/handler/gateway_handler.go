@@ -1557,6 +1557,8 @@ func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64, sta
 }
 
 type publicKeyUsageRecord struct {
+	BillingUnit         string    `json:"billing_unit,omitempty"`
+	TokenUsageSource    string    `json:"token_usage_source,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	Model               string    `json:"model"`
 	InputTokens         int       `json:"input_tokens"`
@@ -1573,7 +1575,12 @@ func publicKeyUsageRecords(logs []service.UsageLog) []publicKeyUsageRecord {
 	records := make([]publicKeyUsageRecord, 0, len(logs))
 	for i := range logs {
 		log := &logs[i]
+		unit, source := "", ""
+		if log.IsNativeChatTurn() {
+			unit, source = "turn", "unknown"
+		}
 		records = append(records, publicKeyUsageRecord{
+			BillingUnit: unit, TokenUsageSource: source,
 			CreatedAt:           log.CreatedAt,
 			Model:               log.Model,
 			InputTokens:         log.InputTokens,

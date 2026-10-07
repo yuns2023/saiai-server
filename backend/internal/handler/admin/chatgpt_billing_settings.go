@@ -4,6 +4,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"io"
 )
 
 func (h *SettingHandler) GetChatGPTBillingSettings(c *gin.Context) {
@@ -16,14 +17,12 @@ func (h *SettingHandler) GetChatGPTBillingSettings(c *gin.Context) {
 }
 
 func (h *SettingHandler) UpdateChatGPTBillingSettings(c *gin.Context) {
-	var req struct {
-		SuccessTurnPriceUSD *float64 `json:"success_turn_price_usd"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.SuccessTurnPriceUSD == nil {
+	raw, readErr := io.ReadAll(io.LimitReader(c.Request.Body, 8193))
+	settings, err := service.DecodeChatGPTBillingSettings(raw)
+	if readErr != nil || len(raw) > 8192 || err != nil {
 		response.BadRequest(c, "A numeric success_turn_price_usd is required")
 		return
 	}
-	settings := &service.OpenAIChatGPTBillingSettings{SuccessTurnPriceUSD: *req.SuccessTurnPriceUSD}
 	if err := h.settingService.SetOpenAIChatGPTBillingSettings(c.Request.Context(), settings); err != nil {
 		response.ErrorFrom(c, err)
 		return

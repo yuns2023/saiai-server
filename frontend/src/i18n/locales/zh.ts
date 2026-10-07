@@ -777,6 +777,9 @@ export default {
 
   // Usage
   usage: {
+    nativeChatTurn: '1 次成功聊天',
+    nativeChatUsageUnknown: 'Token 消耗未返回',
+    chatTiers: { instant: '即时', medium: '中', high: '高', extreme: '极高', pro: 'Pro', default: '自动 / 未识别' },
     title: '使用记录',
     description: '查看和分析您的 API 使用历史',
     costDetails: '成本明细',
@@ -4464,10 +4467,16 @@ export default {
     settings: {
       title: '系统设置',
       chatgptBilling: {
+        instant: '即时',
+        medium: '中',
+        high: '高',
+        extreme: '极高',
+        pro: 'Pro',
+        default: '自动 / 未识别档位',
         title: 'ChatGPT 普通聊天计费',
-        description: '普通 Chat 的所有模型统一按成功轮次计费；Codex 继续使用原有计费方式。',
+        description: '所有普通 Chat 模型共用五档成功轮次价格；自动或未识别档位使用默认价格。',
         price: '每成功轮次基础价格（美元）',
-        priceHint: '失败或未完整完成不计费。现有分组和用户倍率照常适用。填写 0 将停用普通 Chat 请求。',
+        priceHint: '失败或未完整完成不计费；Pro 完成异步续流后结算一次。现有分组和用户倍率适用。某档填写 0 停用该档请求。价格不表示 OpenAI 实际消耗。',
         save: '保存聊天价格',
         saved: '聊天价格已保存，对新请求立即生效。',
         loadFailed: '无法读取聊天价格，请重试。',

@@ -80,6 +80,7 @@ type ChatGPTConversationStreamSummary struct {
 	CompletionSeen        bool
 	DoneSentinelSeen      bool
 	ProviderErrorSeen     bool
+	HandoffSeen           bool
 	EventTypes            []string
 	TopLevelFields        []string
 	MessageMetadataFields []string
@@ -167,6 +168,12 @@ func (o *ChatGPTConversationStreamObserver) Observe(p []byte) error {
 	return nil
 }
 
+// Snapshot exposes only the latest routing/accounting signals before a chunk
+// is flushed downstream. Handoff ownership must exist before Desktop resumes.
+func (o *ChatGPTConversationStreamObserver) Snapshot() ChatGPTConversationStreamSummary {
+	return o.summary
+}
+
 // Finish flushes the final unterminated line/event and returns a copy of the
 // observed non-content summary.
 func (o *ChatGPTConversationStreamObserver) Finish() (ChatGPTConversationStreamSummary, error) {
@@ -207,6 +214,9 @@ func (o *ChatGPTConversationStreamObserver) processLine(line []byte) error {
 	}
 	if bytes.HasPrefix(line, []byte("event:")) {
 		eventType := strings.TrimSpace(string(line[len("event:"):]))
+		if eventType == "error" {
+			o.summary.ProviderErrorSeen = true
+		}
 		if o.captureShape && safeChatGPTSchemaName(eventType) {
 			o.eventTypes[eventType] = struct{}{}
 		}
@@ -280,19 +290,45 @@ func (o *ChatGPTConversationStreamObserver) dispatchEvent() error {
 			o.summary.CompletionSeen = true
 		}
 	}
+	if event.Type == "stream_handoff" || event.Type == "resume_conversation_token" {
+		o.summary.HandoffSeen = true
+	}
 	if event.Message != nil && event.Message.Metadata != nil {
 		role := ""
 		if event.Message.Author != nil {
 			role = strings.TrimSpace(event.Message.Author.Role)
 		}
 		if role == "" || role == "assistant" {
-			if model := strings.TrimSpace(event.Message.Metadata.ModelSlug); model != "" {
+			if model := strings.TrimSpace(event.Message.Metadata.ModelSlug); model != "" && ValidChatGPTMetadataValue(model, 100) {
 				o.summary.ObservedModel = model
 			}
 		}
 	}
+	if event.Type == "error" {
+		o.summary.ProviderErrorSeen = true
+	}
 	if raw := bytes.TrimSpace(event.Error); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
 		o.summary.ProviderErrorSeen = true
+	}
+	// Native delta events wrap the initial assistant message in v. Read only
+	// this known envelope; encoded patches and content remain untouched.
+	// Explicit RawMessage lookup avoids projecting unrelated nested content.
+	if v, ok := rawEvent["v"]; ok {
+		var nested map[string]json.RawMessage
+		if json.Unmarshal(v, &nested) == nil {
+			if message, ok := nested["message"]; ok {
+				var assistant struct {
+					Author   struct{ Role string }
+					Metadata map[string]json.RawMessage
+				}
+				if json.Unmarshal(message, &assistant) == nil && (assistant.Author.Role == "" || assistant.Author.Role == "assistant") {
+					var model string
+					if json.Unmarshal(assistant.Metadata["model_slug"], &model) == nil && strings.TrimSpace(model) != "" && ValidChatGPTMetadataValue(strings.TrimSpace(model), 100) {
+						o.summary.ObservedModel = strings.TrimSpace(model)
+					}
+				}
+			}
+		}
 	}
 	return nil
 }

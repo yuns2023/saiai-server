@@ -282,10 +282,12 @@ not be used for a limited live probe.
 final `/f/conversation` requests are rejected before account selection or
 upstream traffic. A positive finite price enables fixed successful-turn
 billing; only a 2xx response with an observed `message_stream_complete` and no
-provider error costs one turn. The usage row records zero tokens under the
-stable `chatgpt-native-turn` model and charges the configured base price through
-the existing multiplier, subscription/balance, quota, and idempotent billing
-transaction.
+provider error costs one turn. The usage row retains the native requested/observed model and thinking effort;
+it reports unavailable token usage and charges the admitted tier price through
+the existing multiplier, subscription/balance, quota and idempotent billing
+transaction. Pro handoff/resume completion settles the original user message
+once using its shared accounting snapshot. See the native accounting contract
+for the price table, ownership and rollback rules.
 
 Final native Chat turns retain request-context values but detach upstream
 cancellation from a downstream disconnect so the Gateway can observe the real

@@ -553,6 +553,8 @@ type OpenAIGatewayService struct {
 	codexModelsManifestCache codexModelsManifestCache
 	unpricedModelGuard       *openAIUnpricedModelGuard
 	nativeRelayInstanceID    string
+	chatGPTTurnCacheOnce     sync.Once
+	chatGPTTurnMemoryCache   ChatGPTTurnCache
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -4264,6 +4266,9 @@ const OpenAIChatGPTTurnBillingModel = "chatgpt-native-turn"
 // an explicit fixed-price contract. It intentionally contains no token usage.
 type OpenAIChatGPTTurnUsageInput struct {
 	BasePriceUSD       float64
+	RequestedModel     string
+	ObservedModel      string
+	ThinkingEffort     string
 	RequestID          string
 	APIKey             *APIKey
 	User               *User
@@ -4338,12 +4343,18 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 	durationMs := int(input.Duration.Milliseconds())
 	accountRateMultiplier := account.BillingRateMultiplier()
 	requestID := resolveUsageBillingRequestID(ctx, input.RequestID)
+	requestedModel := strings.TrimSpace(input.RequestedModel)
+	if requestedModel == "" {
+		requestedModel = OpenAIChatGPTTurnBillingModel
+	}
 	usageLog := &UsageLog{
 		UserID:                user.ID,
 		APIKeyID:              apiKey.ID,
 		AccountID:             account.ID,
 		RequestID:             requestID,
-		Model:                 OpenAIChatGPTTurnBillingModel,
+		Model:                 requestedModel,
+		UpstreamModel:         optionalNonEqualStringPtr(input.ObservedModel, requestedModel),
+		ReasoningEffort:       optionalTrimmedStringPtr(input.ThinkingEffort),
 		GroupID:               apiKey.GroupID,
 		InputTokens:           0,
 		OutputTokens:          0,

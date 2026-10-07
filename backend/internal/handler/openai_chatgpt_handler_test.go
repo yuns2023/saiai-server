@@ -54,11 +54,15 @@ func (r *chatGPTAccountRepo) GetByID(_ context.Context, id int64) (*service.Acco
 
 type chatGPTSlotCache struct {
 	service.ConcurrencyCache
-	active   map[string]int64
-	attempts map[int64]int
+	active             map[string]int64
+	attempts           map[int64]int
+	users              map[string]int64
+	lastUserContext    context.Context
+	lastAccountContext context.Context
 }
 
-func (s *chatGPTSlotCache) AcquireAccountSlot(_ context.Context, id int64, max int, requestID string) (bool, error) {
+func (s *chatGPTSlotCache) AcquireAccountSlot(ctx context.Context, id int64, max int, requestID string) (bool, error) {
+	s.lastAccountContext = ctx
 	s.attempts[id]++
 	count := 0
 	for _, activeID := range s.active {
@@ -71,6 +75,28 @@ func (s *chatGPTSlotCache) AcquireAccountSlot(_ context.Context, id int64, max i
 	}
 	s.active[requestID] = id
 	return true, nil
+}
+
+func (s *chatGPTSlotCache) AcquireUserSlot(ctx context.Context, id int64, max int, requestID string) (bool, error) {
+	s.lastUserContext = ctx
+	if s.users == nil {
+		s.users = make(map[string]int64)
+	}
+	count := 0
+	for _, uid := range s.users {
+		if uid == id {
+			count++
+		}
+	}
+	if count >= max {
+		return false, nil
+	}
+	s.users[requestID] = id
+	return true, nil
+}
+func (s *chatGPTSlotCache) ReleaseUserSlot(_ context.Context, _ int64, requestID string) error {
+	delete(s.users, requestID)
+	return nil
 }
 
 func (s *chatGPTSlotCache) ReleaseAccountSlot(_ context.Context, _ int64, requestID string) error {
@@ -667,7 +693,7 @@ func TestChatGPTConversationBillsOnlySuccessfulTerminalTurn(t *testing.T) {
 	completed := run("/chatgpt/backend-api/f/conversation")
 	require.Equal(t, http.StatusOK, completed.Code)
 	require.Len(t, usageRepo.logs, 1)
-	require.Equal(t, service.OpenAIChatGPTTurnBillingModel, usageRepo.logs[0].Model)
+	require.Equal(t, "auto", usageRepo.logs[0].Model)
 	firstIdentity := service.ResolveChatGPTTurnBillingIdentity(body, "local:chatgpt-handler-turn")
 	require.Equal(t, firstIdentity.RequestID, usageRepo.logs[0].RequestID)
 	require.Zero(t, usageRepo.logs[0].TotalTokens())
@@ -733,13 +759,14 @@ func TestChatGPTConversationBillsOnlySuccessfulTerminalTurn(t *testing.T) {
 
 type chatGPTPriceReader struct {
 	price float64
+	tiers map[string]float64
 	err   error
 	reads int
 }
 
 func (r *chatGPTPriceReader) GetOpenAIChatGPTBillingSettings(context.Context) (*service.OpenAIChatGPTBillingSettings, error) {
 	r.reads++
-	return &service.OpenAIChatGPTBillingSettings{SuccessTurnPriceUSD: r.price}, r.err
+	return &service.OpenAIChatGPTBillingSettings{SuccessTurnPriceUSD: r.price, TierPricesUSD: r.tiers}, r.err
 }
 
 func TestChatGPTBillingSettingsFailureAndZeroOverrideBlockBeforeSelection(t *testing.T) {

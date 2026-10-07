@@ -282,7 +282,10 @@ export async function updateOverloadCooldownSettings(
 
 export interface ChatGPTBillingSettings {
   success_turn_price_usd: number
+  tier_prices_usd?: Record<ChatGPTBillingTier, number>
 }
+
+export type ChatGPTBillingTier = 'instant' | 'medium' | 'high' | 'extreme' | 'pro'
 
 export async function getChatGPTBillingSettings(): Promise<ChatGPTBillingSettings> {
   const { data } = await apiClient.get<ChatGPTBillingSettings>('/admin/settings/chatgpt-billing')

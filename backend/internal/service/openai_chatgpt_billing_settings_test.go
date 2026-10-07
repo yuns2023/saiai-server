@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -15,6 +17,63 @@ type chatGPTBillingSettingsRepo struct {
 	values   map[string]string
 	readErr  error
 	writeErr error
+}
+
+func TestChatGPTFiveTierPricesAndLegacyFallback(t *testing.T) {
+	repo := &chatGPTBillingSettingsRepo{values: map[string]string{SettingKeyOpenAIChatSuccessTurnPriceUSD: "0.02"}}
+	svc := NewSettingService(repo, nil)
+	settings, err := svc.GetOpenAIChatGPTBillingSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0.02, settings.PriceFor("gpt-6-pro", ""))
+	settings.TierPricesUSD = map[string]float64{"instant": 0.01, "medium": 0.02, "high": 0.03, "extreme": 0.04, "pro": 0.05}
+	require.NoError(t, svc.SetOpenAIChatGPTBillingSettings(context.Background(), settings))
+	loaded, err := svc.GetOpenAIChatGPTBillingSettings(context.Background())
+	require.NoError(t, err)
+	for _, row := range []struct {
+		model, effort, tier string
+		price               float64
+	}{
+		{"gpt-5-6", "", "instant", 0.01}, {"gpt-5-5-instant", "", "instant", 0.01},
+		{"gpt-5-6-thinking", "standard", "medium", 0.02}, {"gpt-5-5-thinking", "extended", "high", 0.03},
+		{"gpt-5-6-thinking", "max", "extreme", 0.04}, {"gpt-6-pro", "", "pro", 0.05},
+		{"gpt-5-6-pro", "", "pro", 0.05}, {"auto", "", "default", 0.02}, {"auto", "max", "extreme", 0.04},
+		{"new-native-model", "new-effort", "default", 0.02}, {"gpt-5-6-thinking", "", "default", 0.02},
+	} {
+		require.Equal(t, row.tier, ChatGPTBillingTier(row.model, row.effort))
+		require.Equal(t, row.price, loaded.PriceFor(row.model, row.effort))
+	}
+	loaded.TierPricesUSD["pro"] = 0
+	require.NoError(t, svc.SetOpenAIChatGPTBillingSettings(context.Background(), loaded))
+	loaded, err = svc.GetOpenAIChatGPTBillingSettings(context.Background())
+	require.NoError(t, err)
+	require.Zero(t, loaded.PriceFor("gpt-6-pro", ""))
+	require.Equal(t, 0.02, loaded.PriceFor("auto", ""))
+	// A legacy uniform-price PUT atomically switches back to a uniform price.
+	require.NoError(t, svc.SetOpenAIChatGPTBillingSettings(context.Background(), &OpenAIChatGPTBillingSettings{SuccessTurnPriceUSD: 0.06}))
+	loaded, err = svc.GetOpenAIChatGPTBillingSettings(context.Background())
+	require.NoError(t, err)
+	require.Nil(t, loaded.TierPricesUSD)
+	require.Equal(t, 0.06, loaded.PriceFor("gpt-6-pro", ""))
+}
+
+func TestChatGPTTierPriceStorageRejectsPartialAndNullTables(t *testing.T) {
+	valid := `{"success_turn_price_usd":0.02,"tier_prices_usd":{"instant":0.01,"medium":0.02,"high":0.03,"extreme":0.04,"pro":0.05}}`
+	var shape map[string]any
+	require.NoError(t, json.Unmarshal([]byte(valid), &shape))
+	for _, raw := range []string{
+		`{"tier_prices_usd":{}}`,
+		`{"success_turn_price_usd":0.02,"tier_prices_usd":{}}`,
+		`{"success_turn_price_usd":0.02,"tier_prices_usd":{"pro":0.05}}`,
+		strings.Replace(valid, `"pro":0.05`, `"pro":null`, 1),
+		strings.Replace(valid, `"pro":0.05`, `"pro":-1`, 1),
+		strings.Replace(valid, `"pro":0.05`, `"pro":1e999`, 1),
+		strings.Replace(valid, `"pro":0.05`, `"other":0.05`, 1),
+	} {
+		repo := &chatGPTBillingSettingsRepo{values: map[string]string{SettingKeyOpenAIChatSuccessTurnPriceUSD: raw}}
+		settings, err := NewSettingService(repo, &config.Config{}).GetOpenAIChatGPTBillingSettings(context.Background())
+		require.Error(t, err, raw)
+		require.Nil(t, settings)
+	}
 }
 
 func (r *chatGPTBillingSettingsRepo) GetValue(_ context.Context, key string) (string, error) {

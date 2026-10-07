@@ -371,10 +371,10 @@
                     <td class="px-4 py-3 text-sm whitespace-nowrap text-gray-700 dark:text-dark-200">{{ formatDateTime(record.created_at) }}</td>
                     <td class="px-4 py-3 text-sm font-medium whitespace-nowrap text-gray-900 dark:text-white">{{ record.model || '-' }}</td>
                     <td class="px-4 py-3 text-sm whitespace-nowrap text-gray-700 dark:text-dark-200">{{ record.request_type || '-' }}</td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(record.input_tokens) }}</td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(record.output_tokens) }}</td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(record.cache_creation_tokens + record.cache_read_tokens) }}</td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(record.total_tokens) }}</td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.input_tokens) }}</span></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.output_tokens) }}</span></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.cache_creation_tokens + record.cache_read_tokens) }}</span></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.total_tokens) }}</span></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right font-medium text-gray-900 dark:text-white">{{ usd(record.actual_cost) }}</td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ record.duration_ms != null ? `${record.duration_ms} ms` : '-' }}</td>
                   </tr>
@@ -515,6 +515,8 @@ interface BillingInfo {
 }
 
 interface RecentUsageRecord {
+  billing_unit?: 'turn'
+  token_usage_source?: 'unknown'
   created_at: string
   model: string
   input_tokens: number

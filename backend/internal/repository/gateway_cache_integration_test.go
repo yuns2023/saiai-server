@@ -107,3 +107,58 @@ func (s *GatewayCacheSuite) TestGetSessionAccountID_CorruptedValue() {
 func TestGatewayCacheSuite(t *testing.T) {
 	suite.Run(t, new(GatewayCacheSuite))
 }
+
+func (s *GatewayCacheSuite) TestChatGPTTurnContextAtomicSnapshotAndScope() {
+	firstCache := s.cache.(service.ChatGPTTurnCache)
+	secondCache := NewGatewayCache(s.rdb).(service.ChatGPTTurnCache)
+	scope := service.ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
+	first := &service.ChatGPTTurnSnapshot{Identity: service.ChatGPTTurnBillingIdentity{RequestID: "first", PayloadHash: "digest"},
+		AccountID: 19, BasePriceUSD: 0.05, RequestedModel: "gpt-6-pro", StartedAt: time.Now().UTC()}
+	key := scope.TurnKey(first.Identity)
+	alias := scope.ResumeKey("TEST_ONLY_PRIVATE_CONVERSATION")
+	copy, err := firstCache.PutChatGPTTurnIfAbsent(s.ctx, key, first, time.Minute)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), first, copy)
+	changed := *first
+	changed.BasePriceUSD = 0.09
+	changed.AccountID = 20
+	copy, err = secondCache.PutChatGPTTurnIfAbsent(s.ctx, key, &changed, time.Hour)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), 0.05, copy.BasePriceUSD)
+	require.Equal(s.T(), int64(19), copy.AccountID)
+	require.NoError(s.T(), firstCache.BindChatGPTResume(s.ctx, alias, key))
+	copy, err = secondCache.GetChatGPTResume(s.ctx, alias)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), first, copy)
+	ttl, err := s.rdb.PTTL(s.ctx, key).Result()
+	require.NoError(s.T(), err)
+	require.LessOrEqual(s.T(), ttl, time.Minute)
+	for _, other := range []service.ChatGPTTurnScope{{2, 2, 3}, {1, 3, 3}, {1, 2, 4}} {
+		copy, err = secondCache.GetChatGPTResume(s.ctx, other.ResumeKey("TEST_ONLY_PRIVATE_CONVERSATION"))
+		require.NoError(s.T(), err)
+		require.Nil(s.T(), copy)
+	}
+	changed.Identity.RequestID = "second"
+	_, err = secondCache.PutChatGPTTurnIfAbsent(s.ctx, scope.TurnKey(changed.Identity), &changed, time.Minute)
+	require.NoError(s.T(), err)
+	require.Error(s.T(), secondCache.BindChatGPTResume(s.ctx, alias, scope.TurnKey(changed.Identity)))
+	require.NoError(s.T(), firstCache.MarkChatGPTTurnTerminal(s.ctx, key))
+	copy, err = secondCache.GetChatGPTTurn(s.ctx, key)
+	require.NoError(s.T(), err)
+	require.True(s.T(), copy.TerminalSeen)
+	require.False(s.T(), copy.Completed)
+	require.NoError(s.T(), secondCache.BindChatGPTResume(s.ctx, alias, scope.TurnKey(changed.Identity)))
+	require.NoError(s.T(), firstCache.CompleteChatGPTTurn(s.ctx, key))
+	require.NoError(s.T(), secondCache.BindChatGPTResume(s.ctx, alias, scope.TurnKey(changed.Identity)))
+	copy, err = firstCache.GetChatGPTResume(s.ctx, alias)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "second", copy.Identity.RequestID)
+	raw, err := s.rdb.Get(s.ctx, key).Result()
+	require.NoError(s.T(), err)
+	require.NotContains(s.T(), raw, "TEST_ONLY_PRIVATE_CONVERSATION")
+	require.NoError(s.T(), s.rdb.Del(s.ctx, scope.TurnKey(changed.Identity)).Err())
+	copy, err = firstCache.GetChatGPTResume(s.ctx, alias)
+	require.NoError(s.T(), err)
+	require.Nil(s.T(), copy)
+	require.Error(s.T(), firstCache.BindChatGPTResume(s.ctx, alias, scope.TurnKey(changed.Identity)))
+}

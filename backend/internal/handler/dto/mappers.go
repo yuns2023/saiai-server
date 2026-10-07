@@ -596,6 +596,15 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 	// 普通用户 DTO：严禁包含管理员字段（例如 account_rate_multiplier、ip_address、account）。
 	requestType := l.EffectiveRequestType()
 	stream, openAIWSMode := service.ApplyLegacyRequestFields(requestType, l.Stream, l.OpenAIWSMode)
+	billingUnit, tokenUsageSource, chatTier := "", "", ""
+	if l.IsNativeChatTurn() {
+		billingUnit, tokenUsageSource = "turn", "unknown"
+		effort := ""
+		if l.ReasoningEffort != nil {
+			effort = *l.ReasoningEffort
+		}
+		chatTier = service.ChatGPTBillingTier(l.Model, effort)
+	}
 	return UsageLog{
 		ID:                            l.ID,
 		UserID:                        l.UserID,
@@ -604,6 +613,9 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		RequestID:                     l.RequestID,
 		SessionID:                     l.SessionID,
 		Model:                         l.Model,
+		BillingUnit:                   billingUnit,
+		TokenUsageSource:              tokenUsageSource,
+		ChatTier:                      chatTier,
 		UpstreamModel:                 l.UpstreamModel,
 		ServiceTier:                   l.ServiceTier,
 		ReasoningEffort:               l.ReasoningEffort,

@@ -1085,6 +1085,9 @@ export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invit
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2'
 
 export interface UsageLog {
+  billing_unit?: 'turn'
+  token_usage_source?: 'unknown'
+  chat_tier?: 'instant' | 'medium' | 'high' | 'extreme' | 'pro' | 'default'
   id: number
   user_id: number
   api_key_id: number

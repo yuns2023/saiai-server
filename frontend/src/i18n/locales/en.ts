@@ -774,6 +774,9 @@ export default {
 
   // Usage
   usage: {
+    nativeChatTurn: '1 successful Chat turn',
+    nativeChatUsageUnknown: 'Token usage unavailable',
+    chatTiers: { instant: 'Instant', medium: 'Medium', high: 'High', extreme: 'Extreme', pro: 'Pro', default: 'Automatic / unknown' },
     title: 'Usage Records',
     description: 'View and analyze your API usage history',
     costDetails: 'Cost Breakdown',
@@ -4302,10 +4305,16 @@ export default {
     settings: {
       title: 'System Settings',
       chatgptBilling: {
+        instant: 'Instant',
+        medium: 'Medium',
+        high: 'High',
+        extreme: 'Extreme',
+        pro: 'Pro',
+        default: 'Automatic / unknown tier',
         title: 'ChatGPT Chat billing',
-        description: 'All ordinary Chat models share a price per successful turn. Codex keeps its existing billing.',
+        description: 'All ordinary Chat models share five successful-turn prices. Automatic or unrecognized tiers use the fallback price.',
         price: 'Base price per successful turn (USD)',
-        priceHint: 'Failed or incomplete turns are not charged. Existing group and user multipliers apply. Set 0 to disable ordinary Chat requests.',
+        priceHint: 'Failed or incomplete turns are not charged. Pro is settled once after its resumed stream completes. Group and user multipliers apply. Set a tier to 0 to disable it. Prices do not measure provider consumption.',
         save: 'Save Chat price',
         saved: 'Chat price saved. New requests use it immediately.',
         loadFailed: 'Unable to load the Chat price. Please retry.',
