@@ -105,6 +105,11 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 	cfg.Default.RateMultiplier = 1
 	cfg.Gateway.MaxBodySize = 16 << 20
 	cfg.Security.URLAllowlist.AllowPrivateHosts = true
+	cfg.Pricing.DataDir, cfg.Pricing.UpdateIntervalHours = t.TempDir(), 24
+	require.NoError(t, os.WriteFile(filepath.Join(cfg.Pricing.DataDir, "model_pricing.json"), []byte(`{"gpt-image-2":{"input_cost_per_token":0.000005,"input_cost_per_image_token":0.000008,"output_cost_per_image_token":0.00003}}`), 0600))
+	pricing := service.NewPricingService(cfg, nil)
+	require.NoError(t, pricing.Initialize()) // fresh local file; no remote client
+	defer pricing.Stop()
 	cfg.Gateway.OpenAIWS.Enabled, cfg.Gateway.OpenAIWS.OAuthEnabled, cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true, true, true
 	keyService := service.NewAPIKeyService(&nativeRoutesKeyRepo{key: key, lab: lab}, nil, nil, nil, nil, nil, cfg)
 	billingCache := service.NewBillingCacheService(nil, &nativeRoutesUserRepo{user: user, lab: lab}, nil, nil, cfg)
@@ -113,7 +118,7 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 	concurrency := service.NewConcurrencyService(concurrencyCache)
 	cache := &nativeRoutesCache{lab: lab}
 	svc := service.NewOpenAIGatewayService(&nativeRoutesAccountRepo{account: account}, &nativeRoutesUsageRepo{lab: lab}, lab,
-		nil, nil, nil, cache, cfg, nil, concurrency, service.NewBillingService(cfg, nil), nil, billingCache,
+		nil, nil, nil, cache, cfg, nil, concurrency, service.NewBillingService(cfg, pricing), nil, billingCache,
 		repository.NewHTTPUpstream(cfg), &service.DeferredService{}, nil)
 	defer svc.CloseOpenAIWSPool()
 	gatewayHandler := handler.NewOpenAIGatewayHandler(svc, concurrency, billingCache, keyService, nil, nil, nil, cfg)
@@ -142,10 +147,19 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 	})
 	RegisterGatewayRoutes(router, &handler.Handlers{Gateway: &handler.GatewayHandler{}, OpenAIGateway: gatewayHandler},
 		middleware.NewAPIKeyAuthMiddleware(keyService, nil, nil, cfg), keyService, nil, nil, nil, cfg)
-	router.GET("/_proof/reset", func(c *gin.Context) { lab.reset(); c.Status(204) })
+	router.GET("/_proof/reset", func(c *gin.Context) {
+		lab.reset()
+		lab.mu.Lock()
+		lab.imagegen = c.Query("imagegen") == "1"
+		lab.mu.Unlock()
+		c.Status(204)
+	})
 	router.GET("/_proof/report", func(c *gin.Context) { lab.mu.Lock(); defer lab.mu.Unlock(); c.JSON(200, lab.records) })
 	router.GET("/_proof/control", func(c *gin.Context) { c.JSON(200, lab.control()) })
-	router.GET("/_proof/events", func(c *gin.Context) { c.JSON(200, nativeRoutesEvents(c.Query("response"), c.Query("tool") == "1")) })
+	router.GET("/_proof/events", func(c *gin.Context) {
+		c.JSON(200, nativeRoutesToolEvents(c.Query("response"), c.Query("tool") == "1", c.Query("imagegen") == "1"))
+	})
+	router.GET("/_proof/image-response", func(c *gin.Context) { c.Data(200, "application/json", nativeRoutesImageResponse()) })
 	gateway := httptest.NewServer(router)
 	defer gateway.Close()
 	defer lab.closeTunnels()
@@ -156,6 +170,9 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 			"Version": {"0.159.2"}, "Chatgpt-Account-Id": {"mock_client_account"}, "X-Codex-Future": {"first", "second"},
 			"Session_id": {"MOCK_SESSION_A", "MOCK_SESSION_B"}, "Session-Id": {"MOCK_HYPHEN_SESSION"},
 			"Conversation_id": {"MOCK_CONVERSATION"}, "Conversation-Id": {"MOCK_HYPHEN_CONVERSATION_A", "MOCK_HYPHEN_CONVERSATION_B"}}
+		if strings.HasPrefix(path, "/v1/codex/images/") {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		if authorized {
 			req.Header.Set("Authorization", "Bearer "+key.Key)
 		}
@@ -226,26 +243,63 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 		require.Equal(t, 409, resp.StatusCode, string(body))
 		require.Empty(t, lab.providerRecords())
 	})
-	t.Run("official_binary", func(t *testing.T) {
-		codex, client := os.Getenv("SAIAI_PROOF_CODEX_BINARY"), os.Getenv("SAIAI_PROOF_CLIENT_BINARY")
-		if codex == "" || client == "" {
-			t.Skip("set official Codex and candidate SAIAI paths for the production-route wire proof")
+	for _, operation := range []string{"generations", "edits"} {
+		t.Run("native_images_encoded_"+operation, func(t *testing.T) {
+			lab.reset()
+			body := []byte(`{ "model":"gpt-image-2", "prompt":"TEST_ONLY", "images":[{"image_url":"data:image/png;base64,VEVTVF9PTkxZ"}], "future":true }`)
+			encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+			require.NoError(t, err)
+			encoded := encoder.EncodeAll(body, nil)
+			encoder.Close()
+			resp, data := request("POST", "/v1/codex/images/"+operation+"?opaque=a%2Fb&opaque=%2B", encoded, true, true)
+			require.Equal(t, 200, resp.StatusCode, string(data))
+			require.Equal(t, nativeRoutesImageResponse(), data)
+			require.Equal(t, "TEST_ONLY-image-request", resp.Header.Get("X-Codex-Imagegen-Request-Id"))
+			seen := lab.providerRecords()
+			require.Len(t, seen, 1)
+			require.Equal(t, "/backend-api/codex/images/"+operation, seen[0]["path"])
+			require.Equal(t, "opaque=a%2Fb&opaque=%2B", seen[0]["query"])
+			digest := sha256.Sum256(encoded)
+			require.Equal(t, hex.EncodeToString(digest[:]), seen[0]["sha256"])
+			require.Eventually(t, func() bool { return lab.control()["usage_records"] == 1 }, time.Second, time.Millisecond)
+			require.Equal(t, 1, lab.control()["billing_applications"])
+			require.Zero(t, concurrencyCache.accounts.Load())
+			require.Zero(t, concurrencyCache.users.Load())
+		})
+	}
+	for _, imagegen := range []bool{false, true} {
+		name := "official_binary"
+		if imagegen {
+			name = "official_binary_imagegen"
 		}
-		driver, err := filepath.Abs("../../service/testdata/native_official_codex_probe.py")
-		require.NoError(t, err)
-		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
-		defer cancel()
-		command := exec.CommandContext(ctx, "python3", driver, "--codex", codex, "--client", client, "--gateway", gateway.URL, "--production-routes")
-		output, err := command.CombinedOutput()
-		require.NoError(t, err, "isolated public-route proof: %s", output)
-		var report map[string]any
-		require.NoError(t, json.Unmarshal(output, &report))
-		require.Equal(t, "pass", report["result"])
-		if path := os.Getenv("SAIAI_PROOF_REPORT"); path != "" {
-			require.NoError(t, os.WriteFile(path, output, 0600))
-		}
-		t.Logf("public-route proof: %s", output)
-	})
+		t.Run(name, func(t *testing.T) {
+			codex, client := os.Getenv("SAIAI_PROOF_CODEX_BINARY"), os.Getenv("SAIAI_PROOF_CLIENT_BINARY")
+			if codex == "" || client == "" {
+				t.Skip("set official Codex and candidate SAIAI paths for the production-route wire proof")
+			}
+			driver, err := filepath.Abs("../../service/testdata/native_official_codex_probe.py")
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+			defer cancel()
+			args := []string{driver, "--codex", codex, "--client", client, "--gateway", gateway.URL, "--production-routes"}
+			if imagegen {
+				args = append(args, "--imagegen")
+			}
+			command := exec.CommandContext(ctx, "python3", args...)
+			output, err := command.CombinedOutput()
+			require.NoError(t, err, "isolated public-route proof: %s", output)
+			var report map[string]any
+			require.NoError(t, json.Unmarshal(output, &report))
+			require.Equal(t, "pass", report["result"])
+			if path := os.Getenv("SAIAI_PROOF_REPORT"); path != "" {
+				if imagegen {
+					path += ".imagegen.json"
+				}
+				require.NoError(t, os.WriteFile(path, output, 0600))
+			}
+			t.Logf("public-route proof: %s", output)
+		})
+	}
 	t.Run("attempt_budget_spans_http_ws_and_rejected_reconnects", func(t *testing.T) {
 		lab.reset()
 		cfg.Gateway.OpenAIProviderAttemptBudget = config.OpenAIProviderAttemptBudgetConfig{Enabled: true,
@@ -288,7 +342,11 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 		}
 		require.NoError(t, conn.Close(coderws.StatusNormalClosure, "TEST_ONLY done"))
 		for i := 0; i < 2; i++ {
-			response, data := request("POST", "/v1/responses", body, false, true)
+			path, payload := "/v1/responses", body
+			if i == 0 {
+				path, payload = "/v1/codex/images/generations", []byte(`{"model":"gpt-image-2","prompt":"TEST_ONLY"}`)
+			}
+			response, data := request("POST", path, payload, false, true)
 			require.Equal(t, 200, response.StatusCode, string(data))
 		}
 		before := len(lab.providerRecords())
@@ -346,6 +404,7 @@ type nativeRoutesLab struct {
 	response, usageRecords, billingApplications int
 	authChecks, balanceChecks                   int
 	connections                                 []net.Conn
+	imagegen                                    bool
 	sequence, tunnels, blocked                  atomic.Int64
 }
 
@@ -361,6 +420,7 @@ func (l *nativeRoutesLab) reset() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.records, l.response, l.usageRecords, l.billingApplications = nil, 0, 0, 0
+	l.imagegen = false
 	l.authChecks, l.balanceChecks = 0, 0
 }
 func (l *nativeRoutesLab) control() map[string]any {
@@ -441,6 +501,12 @@ func (l *nativeRoutesLab) provider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	l.record("provider", "http", r, body, 0)
+	if strings.HasPrefix(r.URL.Path, "/backend-api/codex/images/") {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Codex-Imagegen-Request-Id", "TEST_ONLY-image-request")
+		_, _ = w.Write(nativeRoutesImageResponse())
+		return
+	}
 	if strings.HasSuffix(r.URL.Path, "/compact") {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"resp_mock_compact","output":[],"future":true}`))
@@ -470,17 +536,30 @@ func (l *nativeRoutesLab) next(body []byte) [][]byte {
 	l.mu.Lock()
 	l.response++
 	number := l.response
+	imagegen := l.imagegen
 	l.mu.Unlock()
-	return nativeRoutesEvents(fmt.Sprintf("resp_mock_%d", number), number == 1)
+	return nativeRoutesToolEvents(fmt.Sprintf("resp_mock_%d", number), number == 1, imagegen)
 }
 func nativeRoutesEvents(responseID string, tool bool) [][]byte {
+	return nativeRoutesToolEvents(responseID, tool, false)
+}
+
+func nativeRoutesImageResponse() []byte {
+	return []byte(`{"created":1,"background":"opaque","data":[{"b64_json":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==","generation_id":"gen_TEST_ONLY"}],"usage":{"input_tokens":5,"input_tokens_details":{"text_tokens":5,"image_tokens":0},"output_tokens":7}}`)
+}
+
+func nativeRoutesToolEvents(responseID string, tool, imagegen bool) [][]byte {
 	if responseID == "" {
 		responseID = "resp_mock_1"
 	}
 	items := []map[string]any{{"type": "response.created", "response": map[string]any{"id": responseID}},
 		{"type": "response.metadata", "headers": map[string]any{"x-codex-turn-state": "MOCK_FRAME_STATE"}}}
 	if tool {
-		items = append(items, map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "function_call", "call_id": "mock_plan_call", "name": "update_plan", "arguments": `{"plan":[{"step":"Mock protocol check","status":"completed"}]}`}})
+		call := map[string]any{"type": "function_call", "call_id": "mock_plan_call", "name": "update_plan", "arguments": `{"plan":[{"step":"Mock protocol check","status":"completed"}]}`}
+		if imagegen {
+			call = map[string]any{"type": "function_call", "call_id": "mock_image_call", "name": "imagegen", "namespace": "image_gen", "arguments": `{"prompt":"TEST_ONLY-cat","transparent_background":false}`}
+		}
+		items = append(items, map[string]any{"type": "response.output_item.done", "item": call})
 	} else {
 		items = append(items, map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "message", "role": "assistant", "id": "msg_mock_1", "content": []map[string]any{{"type": "output_text", "text": "MOCK_ONLY_SUCCESS"}}}})
 	}

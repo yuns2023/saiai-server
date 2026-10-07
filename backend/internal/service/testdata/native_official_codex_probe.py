@@ -153,9 +153,10 @@ class Capture(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-    def __init__(self, tls, ca_path, gateway, downstream=None, http_fallback=False):
+    def __init__(self, tls, ca_path, gateway, downstream=None, http_fallback=False, imagegen=False):
         self.tls, self.ca_path, self.gateway = tls, ca_path, gateway
         self.downstream, self.http_fallback = downstream, http_fallback
+        self.imagegen = imagegen
         self.records, self.errors, self.blocked, self.number = [], [], 0, 0
         self.lock = threading.Lock()
         super().__init__(("127.0.0.1", 0), CaptureHandler)
@@ -173,7 +174,7 @@ class Capture(socketserver.ThreadingTCPServer):
             else:
                 self.number += 1
                 response, tool = f"resp_mock_{self.number}", self.number == 1
-        events = request_json(self.gateway, f"/_proof/events?response={response}&tool={int(tool)}")
+        events = request_json(self.gateway, f"/_proof/events?response={response}&tool={int(tool)}&imagegen={int(self.imagegen)}")
         return [bytes(event) if isinstance(event, list) else base64.b64decode(event) for event in events]
 
 
@@ -204,7 +205,7 @@ class CaptureHandler(socketserver.BaseRequestHandler):
                         if server.http_fallback:
                             stream.sendall(b"HTTP/1.1 426 Upgrade Required\r\nContent-Length: 0\r\n\r\n")
                             return
-                    elif target_path.partition("?")[0].endswith("/responses"):
+                    elif target_path.partition("?")[0].endswith("/responses") or "/codex/images/" in target_path.partition("?")[0]:
                         server.record("http", method, target_path, headers, body)
                     elif target_path.partition("?")[0].endswith("/models"):
                         server.record("models", method, target_path, headers)
@@ -253,6 +254,9 @@ class CaptureHandler(socketserver.BaseRequestHandler):
                             self.respond(stream, response, "text/event-stream", b"X-Codex-Turn-State: MOCK_FRAME_STATE\r\n")
                         elif target_path.partition("?")[0].endswith("/models"):
                             self.respond(stream, b'{"models":[]}', "application/json")
+                        elif "/codex/images/" in target_path.partition("?")[0]:
+                            response = request_json(server.gateway, "/_proof/image-response")
+                            self.respond(stream, json.dumps(response).encode(), "application/json", b"X-Codex-Imagegen-Request-Id: TEST_ONLY-image-request\r\n")
                         else:
                             response = {}
                             if target_path.partition("?")[0].endswith("accounts/check"):
@@ -405,8 +409,9 @@ def comparisons(captured, receipts):
             unexpected.append(f"{kind} counts {counts}")
             continue
         for index, records in enumerate(zip(*groups)):
-            suffix = "models" if kind == "models" else "responses"
-            if records[1]["path"] != f"/v1/{suffix}" or records[2]["path"] != f"/backend-api/codex/{suffix}" or records[0]["path"] != records[2]["path"]:
+            suffix = records[0]["path"].removeprefix("/backend-api/codex/")
+            gateway_path = f"/v1/codex/{suffix}" if suffix.startswith("images/") else f"/v1/{suffix}"
+            if records[1]["path"] != gateway_path or records[2]["path"] != f"/backend-api/codex/{suffix}" or records[0]["path"] != records[2]["path"]:
                 unexpected.append(f"{kind}[{index}] endpoint mapping")
             dimensions = ["sha256", "query", "message_type", "method"]
             if kind in {"http", "frame"}:
@@ -431,6 +436,7 @@ def main():
     parser.add_argument("--gateway", required=True)
     parser.add_argument("--production-routes", action="store_true",
                         help="verify public-route auth, standard billing and usage evidence")
+    parser.add_argument("--imagegen", action="store_true", help="exercise the actual built-in image_gen extension against loopback Images")
     args = parser.parse_args()
     if not args.gateway.startswith("http://127.0.0.1:"):
         raise ValueError("only a loopback mock Gateway is accepted")
@@ -440,22 +446,24 @@ def main():
     report["saiai_sha256"] = file_sha256(args.client)
     report["driver_sha256"] = file_sha256(__file__)
     report["application_header_comparison"] = "exact_values_presence_and_multiplicity"
+    report["built_in_imagegen_exercised"] = args.imagegen
     with tempfile.TemporaryDirectory(prefix="saiai-native-official-", dir=os.environ.get("SAIAI_PROOF_TMPDIR")) as temporary:
         root = Path(temporary)
         tls, ca, key = certificates(root)
         version_env = environment(root/"version", ca, "http://127.0.0.1:1")
         report["codex_version"] = subprocess.check_output([args.codex, "--version"], env=version_env, stderr=subprocess.DEVNULL, text=True).strip()
         report["saiai_version"] = subprocess.check_output([args.client, "--version"], env=version_env, stderr=subprocess.DEVNULL, text=True).strip()
-        for surface, fallback in [("cli", False), ("cli", True), ("app-server", False), ("app-server", True)]:
+        cases = [("app-server", True)] if args.imagegen else [("cli", False), ("cli", True), ("app-server", False), ("app-server", True)]
+        for surface, fallback in cases:
             baseline = None
             for chain in [False, True]:
-                request_json(args.gateway, "/_proof/reset")
+                request_json(args.gateway, f"/_proof/reset?imagegen={int(args.imagegen)}")
                 state = root/f"{surface}-{int(fallback)}-{int(chain)}"
                 state.mkdir()
                 with socket.socket() as reserve:
                     reserve.bind(("127.0.0.1", 0))
                     proxy_port = reserve.getsockname()[1]
-                capture = Capture(tls, ca, args.gateway, ("127.0.0.1", proxy_port) if chain else None, fallback)
+                capture = Capture(tls, ca, args.gateway, ("127.0.0.1", proxy_port) if chain else None, fallback, args.imagegen)
                 thread = threading.Thread(target=capture.serve_forever, daemon=True)
                 thread.start()
                 env = environment(state, ca, f"http://127.0.0.1:{capture.server_address[1]}")
@@ -484,6 +492,14 @@ def main():
                     requests = [r for r in capture.records if r["kind"] in {"http", "frame"} and not r["warmup"]]
                     if not requests or not any(r["has_tool_output"] for r in requests) or not any(r["has_turn_state"] for r in requests):
                         raise RuntimeError("official tool continuation or native turn-state was not exercised")
+                    if args.imagegen:
+                        images = [r for r in requests if "/codex/images/" in r["path"]]
+                        saved_images = list((state/"codex/generated_images").rglob("*.png"))
+                        if len(images) != 1 or not saved_images:
+                            raise RuntimeError("actual built-in image_gen did not call native Images and save its result")
+                        control["native_image_requests"] = len(images)
+                        control["image_saved"] = True
+                        control["image_sha256"] = file_sha256(saved_images[0])
                     if chain:
                         receipts = request_json(args.gateway, "/_proof/report")
                         # 426 is returned by the capture fixture before SAIAI;

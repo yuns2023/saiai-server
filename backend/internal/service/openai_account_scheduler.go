@@ -911,7 +911,7 @@ func (s *OpenAIGatewayService) SelectAccountWithScheduler(
 	return s.selectAccountWithScheduler(ctx, groupID, 0, false, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport)
 }
 
-// SelectChatGPTOAuthAccount filters the native Chat protocol's account type
+// SelectChatGPTOAuthAccount filters native Chat and Codex Images account type
 // before scheduling acquires a slot or confirms a sticky. Responses continues
 // to use the generic selector and may use either OAuth or API-key accounts.
 func (s *OpenAIGatewayService) SelectChatGPTOAuthAccount(

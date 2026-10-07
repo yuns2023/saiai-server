@@ -2184,6 +2184,9 @@ func (c *Config) Validate() error {
 	if err := c.Gateway.OpenAIProviderAttemptBudget.Validate(); err != nil {
 		return err
 	}
+	if c.Gateway.OpenAIProviderAttemptBudget.Enabled && strings.TrimSpace(c.Gateway.OpenAIChatUpstreamBaseURL) != "" {
+		return fmt.Errorf("gateway.openai_chat_upstream_base_url must be unset for a bounded direct-OpenAI acceptance session")
+	}
 	if c.Gateway.OpenAIUnpricedModelMaxSuccesses < 0 {
 		return fmt.Errorf("gateway.openai_unpriced_model_max_successes must be non-negative")
 	}

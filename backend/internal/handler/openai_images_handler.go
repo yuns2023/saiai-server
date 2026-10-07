@@ -15,6 +15,7 @@ import (
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -23,14 +24,22 @@ import (
 )
 
 func (h *OpenAIGatewayHandler) ImagesGenerations(c *gin.Context) {
-	h.images(c, service.OpenAIImageEndpointGenerations)
+	h.images(c, service.OpenAIImageEndpointGenerations, false)
 }
 
 func (h *OpenAIGatewayHandler) ImagesEdits(c *gin.Context) {
-	h.images(c, service.OpenAIImageEndpointEdits)
+	h.images(c, service.OpenAIImageEndpointEdits, false)
 }
 
-func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string) {
+func (h *OpenAIGatewayHandler) CodexImagesGenerations(c *gin.Context) {
+	h.images(c, service.OpenAIImageEndpointGenerations, true)
+}
+
+func (h *OpenAIGatewayHandler) CodexImagesEdits(c *gin.Context) {
+	h.images(c, service.OpenAIImageEndpointEdits, true)
+}
+
+func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string, nativeCodex bool) {
 	startedAt := time.Now()
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -51,6 +60,13 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "OpenAI Image API requires an OpenAI group")
 		return
 	}
+	if nativeCodex && !h.validateCodexClientPolicyHTTP(c, apiKey.Group) {
+		return
+	}
+	if nativeCodex && !openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+		h.errorResponse(c, http.StatusForbidden, "official_client_required", "Native Codex images require the official Codex client")
+		return
+	}
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
@@ -61,11 +77,25 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
-	model, imageSize, err := parseOpenAIImageRequest(endpoint, c.GetHeader("Content-Type"), body)
+	metadataBody, metadataEndpoint := body, endpoint
+	if nativeCodex {
+		// Both native Codex generation and edit requests are JSON. Decode only
+		// for routing/billing; the original encoded bytes go to the provider.
+		metadataBody, _, err = decodeOpenAIRequestBody(body, c.GetHeader("Content-Encoding"), h.openAIRequestBodyDecodeLimit())
+		if err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Invalid native Codex image body encoding")
+			return
+		}
+		metadataEndpoint = service.OpenAIImageEndpointGenerations
+	}
+	model, imageSize, err := parseOpenAIImageRequest(metadataEndpoint, c.GetHeader("Content-Type"), metadataBody)
 	if err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	// Never retain image data in ops capture; keep the requested model even
+	// when admission, pricing or account selection later fails.
+	setOpsRequestContext(c, model, false, nil)
 	if apiKey.Group.IsModelBlocked(model) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", fmt.Sprintf("Model %s is not allowed for this group", model))
 		return
@@ -76,10 +106,6 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Image billing is unavailable for the requested model")
 		return
 	}
-	// Image edits can contain user-provided binary data. Keep only routing metadata
-	// in operational context; never enqueue the request body for capture.
-	setOpsRequestContext(c, model, false, nil)
-
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	streamStarted := false
 	userRelease, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, false, &streamStarted, reqLog)
@@ -99,13 +125,22 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string) {
 	var lastFailoverErr *service.UpstreamFailoverError
 	switchCount := 0
 	for {
-		selection, _, err := h.gatewayService.SelectAccountWithScheduler(
-			c.Request.Context(), apiKey.GroupID, "", "", model, failedAccountIDs, service.OpenAIUpstreamTransportHTTPSSE)
+		var selection *service.AccountSelectionResult
+		if nativeCodex {
+			selection, _, err = h.gatewayService.SelectChatGPTOAuthAccount(c.Request.Context(), apiKey.GroupID, "", model)
+		} else {
+			selection, _, err = h.gatewayService.SelectAccountWithScheduler(
+				c.Request.Context(), apiKey.GroupID, "", "", model, failedAccountIDs, service.OpenAIUpstreamTransportHTTPSSE)
+		}
 		if err != nil || selection == nil || selection.Account == nil {
 			if lastFailoverErr != nil {
 				h.handleFailoverExhausted(c, lastFailoverErr, false)
 			} else {
-				h.writeError(c, errEnvelopeNoAvailableAccount, false)
+				if nativeCodex {
+					h.errorResponse(c, http.StatusServiceUnavailable, "service_unavailable", "No available OpenAI OAuth account")
+				} else {
+					h.writeError(c, errEnvelopeNoAvailableAccount, false)
+				}
 			}
 			return
 		}
@@ -115,12 +150,22 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string) {
 		if !acquired {
 			return
 		}
-		result, forwardErr := h.gatewayService.ForwardImage(c.Request.Context(), c, account, endpoint, body, model, imageSize)
+		var result *service.OpenAIForwardResult
+		var forwardErr error
+		if nativeCodex {
+			result, forwardErr = h.gatewayService.ForwardNativeCodexImage(c.Request.Context(), c, account, endpoint, body, model, imageSize)
+		} else {
+			result, forwardErr = h.gatewayService.ForwardImage(c.Request.Context(), c, account, endpoint, body, model, imageSize)
+		}
 		if accountRelease != nil {
 			accountRelease()
 		}
 		if forwardErr != nil {
 			if service.WriteOpenAIProviderAttemptBudgetError(c, forwardErr) {
+				return
+			}
+			if nativeCodex && service.IsOpenAITurnStateAccountMismatch(forwardErr) {
+				h.errorResponse(c, http.StatusConflict, "turn_state_account_mismatch", "Codex turn state cannot be verified for the selected account")
 				return
 			}
 			var failoverErr *service.UpstreamFailoverError

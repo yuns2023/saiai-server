@@ -33,5 +33,8 @@ func TestOpenAIProviderAttemptBudgetConfig(t *testing.T) {
 		cfg, err := Load()
 		require.NoError(t, err)
 		require.Equal(t, valid, cfg.Gateway.OpenAIProviderAttemptBudget)
+		t.Setenv("GATEWAY_OPENAI_CHAT_UPSTREAM_BASE_URL", "https://another-gateway.example.test")
+		_, err = Load()
+		require.ErrorContains(t, err, "must be unset")
 	})
 }

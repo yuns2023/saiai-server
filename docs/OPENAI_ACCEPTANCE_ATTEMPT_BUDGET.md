@@ -8,6 +8,8 @@ Only direct OpenAI OAuth and official Platform API-key accounts are accepted
 inside the bounded scope. A custom API-key upstream or Gateway relay is
 refused, since that next Gateway could multiply one dispatch into hidden
 provider retries. Account eligibility is checked again after WS failover.
+The native Chat upstream-base override must also be unset; enabled startup
+validation rejects an overridden destination inside a bounded session.
 
 ```yaml
 gateway:
@@ -28,7 +30,7 @@ environment variables. Invalid enabled configuration fails startup validation.
 
 Reservations occur immediately before HTTP model dispatch or an upstream WS
 application-frame write. All HTTP Responses attempts (including compact),
-final native Chat `/f/conversation` attempts, direct Images model attempts,
+final native Chat `/f/conversation` attempts, direct and native Codex Images model attempts,
 pooled WS writes, and dedicated passthrough WS text/binary frames count. Both
 client `generate=false` requests and Gateway-generated prewarm writes count.
 Unknown WS application frames also count without parsing or rewriting them.
