@@ -23,7 +23,7 @@ func (c OpenAIProviderAttemptBudgetConfig) Validate() error {
 		return nil
 	}
 	if len(c.ID) < 1 || len(c.ID) > 64 || strings.IndexFunc(c.ID, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_')
+		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_'
 	}) >= 0 {
 		return fmt.Errorf("gateway.openai_provider_attempt_budget.id must be 1-64 ASCII letters, digits, hyphens or underscores")
 	}

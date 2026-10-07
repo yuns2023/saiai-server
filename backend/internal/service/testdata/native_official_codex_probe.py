@@ -408,6 +408,15 @@ def comparisons(captured, receipts):
         if len(set(counts)) != 1:
             unexpected.append(f"{kind} counts {counts}")
             continue
+        if kind == "models":
+            # Official startup may fetch the catalog concurrently with two
+            # distinct User-Agents. Arrival order at separate network hops is
+            # not request identity; compare the complete request multiset.
+            def catalog_identity(record):
+                headers = {name.lower(): values for name, values in record["headers"].items()
+                           if name.lower() not in APP_HEADERS}
+                return json.dumps([record["method"], record["query"], record["sha256"], headers], sort_keys=True)
+            groups = [sorted(group, key=catalog_identity) for group in groups]
         for index, records in enumerate(zip(*groups)):
             suffix = records[0]["path"].removeprefix("/backend-api/codex/")
             gateway_path = f"/v1/codex/{suffix}" if suffix.startswith("images/") else f"/v1/{suffix}"
@@ -422,7 +431,8 @@ def comparisons(captured, receipts):
             headers = [{name.lower(): values for name, values in r["headers"].items()} for r in records]
             for name in set().union(*(h.keys() for h in headers)) - APP_HEADERS:
                 if any(h.get(name) != headers[0].get(name) for h in headers[1:]):
-                    unexpected.append(f"{kind}[{index}] header {name}")
+                    detail = f" {[h.get(name) for h in headers]}" if name == "user-agent" else ""
+                    unexpected.append(f"{kind}[{index}] header {name}{detail}")
         checks[kind] = counts[0]
     if unexpected:
         raise RuntimeError("unexpected request changes: " + ", ".join(unexpected))

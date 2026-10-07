@@ -53,7 +53,7 @@ func (s *OpenAIGatewayService) withOpenAIProviderAttemptBudget(ctx context.Conte
 	budget := &openAIProviderAttemptBudget{policy: policy, store: store, expiresAt: expiresAt,
 		invalid: apiKeyID <= 0 || policy.Validate() != nil,
 		unsupportedAccount: account == nil || account.IsOpenAICodexNativeRelay() ||
-			!(account.IsOpenAIOAuth() || account.IsOpenAIApiKey() && isOfficialOpenAIPlatformBaseURL(account.GetOpenAIBaseURL()))}
+			!account.IsOpenAIOAuth() && (!account.IsOpenAIApiKey() || !isOfficialOpenAIPlatformBaseURL(account.GetOpenAIBaseURL()))}
 	return context.WithValue(ctx, openAIProviderAttemptBudgetContextKey{}, budget)
 }
 

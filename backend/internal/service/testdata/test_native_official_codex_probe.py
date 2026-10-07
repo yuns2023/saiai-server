@@ -20,6 +20,31 @@ def fixture():
 
 
 class PreservationComparatorTests(unittest.TestCase):
+    def test_concurrent_catalog_requests_match_without_relaxing_identity(self):
+        captured, receipts = fixture()
+        captured[0].update(kind="models", method="GET", path="/backend-api/codex/models")
+        captured[0]["headers"]["user-agent"] = ["TEST_ONLY-startup"]
+        other = copy.deepcopy(captured[0])
+        other["headers"]["user-agent"] = ["TEST_ONLY-initialized"]
+        captured.append(other)
+        receipts = []
+        for stage, order in (("gateway", captured), ("provider", list(reversed(captured)))):
+            for row in order:
+                record = copy.deepcopy(row)
+                record.update(stage=stage, path="/v1/models" if stage == "gateway" else row["path"])
+                receipts.append(record)
+        self.assertEqual(comparisons(captured, receipts)["models"], 2)
+        for mutation in ("changed", "dropped", "duplicated"):
+            broken = copy.deepcopy(receipts)
+            if mutation == "changed":
+                broken[-1]["headers"]["user-agent"] = ["TEST_ONLY-rewritten"]
+            elif mutation == "dropped":
+                broken.pop()
+            else:
+                broken[-1] = copy.deepcopy(broken[-2])
+            with self.subTest(mutation=mutation), self.assertRaises(RuntimeError):
+                comparisons(captured, broken)
+
     def test_unchanged_values_and_endpoint_mapping_pass(self):
         captured, receipts = fixture()
         self.assertEqual(comparisons(captured, receipts),
