@@ -67,7 +67,8 @@ func TestChatGPTTurnImagesMergeAcrossResumeWithoutExtendingLease(t *testing.T) {
 	initial := &ChatGPTTurnSnapshot{Identity: ChatGPTTurnBillingIdentity{RequestID: "turn", PayloadHash: "digest"}, AccountID: 1, BasePriceUSD: .01, StartedAt: time.Now()}
 	_, err := cache.PutChatGPTTurnIfAbsent(ctx, "turn", initial, time.Minute)
 	require.NoError(t, err)
-	mem := cache.(*chatGPTMemoryTurnCache)
+	mem, ok := cache.(*chatGPTMemoryTurnCache)
+	require.True(t, ok)
 	expiry := mem.turns["turn"].expires
 	first, second := chatGPTImageDigest("private-one"), chatGPTImageDigest("private-two")
 	_, err = cache.MergeChatGPTTurnImages(ctx, "turn", ChatGPTImageEvidence{GenerationSeen: true, AssetHashes: []string{first}})

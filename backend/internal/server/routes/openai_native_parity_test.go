@@ -301,6 +301,9 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 		})
 	}
 	t.Run("attempt_budget_spans_http_ws_and_rejected_reconnects", func(t *testing.T) {
+		require.Eventually(t, func() bool {
+			return concurrencyCache.accounts.Load() == 0 && concurrencyCache.users.Load() == 0
+		}, time.Second, time.Millisecond)
 		lab.reset()
 		cfg.Gateway.OpenAIProviderAttemptBudget = config.OpenAIProviderAttemptBudgetConfig{Enabled: true,
 			ID: "TEST_ONLY-public-routes", APIKeyID: key.ID, MaxAttempts: 5,
@@ -310,6 +313,11 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 		body := []byte(`{ "model":"gpt-5.5", "stream":true, "future":true, "input":[] }`)
 		resp, data := request("POST", "/v1/responses", body, false, true)
 		require.Equal(t, 200, resp.StatusCode, string(data))
+		// HTTP EOF can reach the client before the handler releases its lease.
+		// This sequential budget test must wait before opening its WebSocket.
+		require.Eventually(t, func() bool {
+			return concurrencyCache.accounts.Load() == 0 && concurrencyCache.users.Load() == 0
+		}, time.Second, time.Millisecond)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		headers := http.Header{"Authorization": {"Bearer " + key.Key}, "User-Agent": {"codex_cli_rs/0.160.0"},
