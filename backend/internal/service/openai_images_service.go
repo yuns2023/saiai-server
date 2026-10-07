@@ -151,6 +151,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImageAPIKey(
 
 	usage := parseOpenAIImageUsage(responseBody)
 	return &OpenAIForwardResult{
+		UpstreamEndpoint:  req.URL.Path,
 		RequestID:         resp.Header.Get("x-request-id"),
 		Usage:             OpenAIUsage{InputTokens: usage.totalInputTokens(), OutputTokens: usage.ImageOutputTokens},
 		Model:             model,
@@ -312,6 +313,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImageOAuth(
 		actualSize = imageSize
 	}
 	return &OpenAIForwardResult{
+		UpstreamEndpoint:  upstreamReq.URL.Path,
 		RequestID:         resp.Header.Get("x-request-id"),
 		Usage:             OpenAIUsage{InputTokens: parsedResponse.Usage.totalInputTokens(), OutputTokens: parsedResponse.Usage.ImageOutputTokens},
 		Model:             model,

@@ -32,6 +32,7 @@ func TestNativeCodexImagesPreserveProtocolAndShareAttemptBudget(t *testing.T) {
 			result, err := svc.ForwardNativeCodexImage(context.Background(), c, account, endpoint, body, "gpt-image-2", "auto")
 			require.NoError(t, err)
 			require.Equal(t, "https://chatgpt.com/backend-api/codex/images/"+endpoint, upstream.reqs[0].URL.Scheme+"://"+upstream.reqs[0].URL.Host+upstream.reqs[0].URL.Path)
+			require.Equal(t, "/backend-api/codex/images/"+endpoint, result.UpstreamEndpoint)
 			require.Equal(t, "opaque=a%2Fb&opaque=%2B", upstream.reqs[0].URL.RawQuery)
 			require.Equal(t, body, upstream.bodies[0])
 			require.Equal(t, []string{"first", "second"}, upstream.reqs[0].Header.Values("X-Codex-Future"))

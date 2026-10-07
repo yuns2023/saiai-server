@@ -85,7 +85,8 @@ func (s *OpenAIGatewayService) ForwardNativeCodexImage(
 		requestID = resp.Header.Get("X-Codex-Imagegen-Request-Id")
 	}
 	return &OpenAIForwardResult{
-		RequestID: requestID, Usage: OpenAIUsage{InputTokens: usage.totalInputTokens(), OutputTokens: usage.ImageOutputTokens},
+		UpstreamEndpoint: req.URL.Path,
+		RequestID:        requestID, Usage: OpenAIUsage{InputTokens: usage.totalInputTokens(), OutputTokens: usage.ImageOutputTokens},
 		Model: model, BillingModel: model, UpstreamModel: model, ResponseHeaders: resp.Header.Clone(), Duration: time.Since(started),
 		TextInputTokens: usage.TextInputTokens, ImageInputTokens: usage.ImageInputTokens, ImageOutputTokens: usage.ImageOutputTokens,
 		ImageCount: len(gjson.GetBytes(responseBody, "data").Array()), ImageSize: imageSize, MediaType: "image",

@@ -119,3 +119,16 @@ User and administrator usage tables show the effective billing tier as
 `Fast`, `Standard`, or `Flex` beside the charged amount. Historical records are
 not recalculated merely because this resolver changes; any backfill is a
 separate, explicitly reviewed billing operation.
+
+## Image request endpoints
+
+Image usage records keep the client-facing endpoint and the actual provider
+request path separately. Native Codex image requests use
+`/backend-api/codex/images/generations` or `/backend-api/codex/images/edits`.
+API-key image requests retain the configured provider base path. The public
+Images API compatibility adapter for OAuth accounts records its actual Codex
+Responses path, `/backend-api/codex/responses`.
+
+These paths come from the forwarded request, rather than from an inferred
+OpenAI default. Query parameters and credentials are not included. This is
+usage metadata only; existing records and request/response bodies are unchanged.
