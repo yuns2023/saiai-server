@@ -60,6 +60,12 @@ The unaccounted override may bypass that price requirement only with a replay
 provider or an explicitly authorized, process-capped credentialed staging
 window.
 
+Direct OpenAI staging keeps the upstream override empty. It requires all three
+of `openai_chat_unaccounted_allowed=true`, an enabled shared provider-attempt
+budget, and a positive `openai_chat_model_request_cap`. The process cap does
+not arm, reset, or replace the Redis fence: its API-key scope, allowance, fixed
+deadline and armed state are enforced again immediately before provider send.
+
 Final model turns detach upstream cancellation from the downstream request but
 retain its context values. `gateway.openai_chat_turn_timeout_seconds` bounds
 that upstream/drain lifetime and defaults to 600 seconds. A request already

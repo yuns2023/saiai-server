@@ -132,6 +132,8 @@ func TestChatGPTControlsDoNotRequireModelBilling(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewBufferString(`{"model":"auto","messages":[]}`))
+		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{ID: 3, GroupID: &groupID,
+			Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}})
 		h.ChatGPTConversation(c)
 		if enabled {
 			require.Equal(t, http.StatusServiceUnavailable, w.Code)
@@ -141,6 +143,55 @@ func TestChatGPTControlsDoNotRequireModelBilling(t *testing.T) {
 		}
 		require.Equal(t, previousCalls, upstream.calls, "model turns must remain blocked")
 		require.Empty(t, cache.active)
+	}
+}
+
+func TestChatGPTBoundedStagingRequiresBothFencesAndNeverBypassesUnarmedBudget(t *testing.T) {
+	groupID := int64(9)
+	account := service.Account{ID: 19, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 10,
+		Credentials: map[string]any{"access_token": "TEST_ONLY", "chatgpt_account_id": "TEST_ONLY_ACCOUNT"}}
+	for _, tc := range []struct {
+		name                string
+		unaccounted, budget bool
+		cap                 int64
+		budgetRejection     bool
+	}{
+		{"no_staging_permission", false, true, 1, false},
+		{"no_shared_budget", true, false, 1, false},
+		{"no_chat_cap", true, true, 0, false},
+		{"unarmed_shared_budget", true, true, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAIChatEnabled = true
+			cfg.Gateway.OpenAIChatUnaccountedAllowed = tc.unaccounted
+			cfg.Gateway.OpenAIChatModelRequestCap = tc.cap
+			cfg.Gateway.OpenAIProviderAttemptBudget = config.OpenAIProviderAttemptBudgetConfig{Enabled: tc.budget,
+				ID: "TEST_ONLY_native_chat", APIKeyID: 3, MaxAttempts: 15, ExpiresAt: time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}
+			cache := &chatGPTSlotCache{active: make(map[string]int64), attempts: make(map[int64]int)}
+			concurrency := service.NewConcurrencyService(cache)
+			upstream := &chatGPTReplayUpstream{}
+			svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, nil,
+				cfg, nil, concurrency, nil, nil, nil, upstream, nil, nil)
+			h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewBufferString(`{"model":"auto","messages":[]}`))
+			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{ID: 3, GroupID: &groupID,
+				Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}})
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 5, Concurrency: 2})
+			h.ChatGPTConversation(c)
+			require.Equal(t, http.StatusServiceUnavailable, w.Code)
+			require.Equal(t, "auto", c.Request.Context().Value(ctxkey.Model), "local rejection must retain the requested model")
+			if tc.budgetRejection {
+				require.Contains(t, w.Body.String(), "attempt_budget_unavailable")
+			} else {
+				require.Contains(t, w.Body.String(), "requires fixed-turn billing")
+			}
+			require.Nil(t, upstream.req, "neither fence may permit an unarmed provider send")
+			require.Empty(t, cache.active)
+		})
 	}
 }
 
