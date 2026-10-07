@@ -227,6 +227,9 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	defer cancelForward()
 	resp, err := h.gatewayService.ForwardChatGPTConversation(forwardCtx, c, account, body, path)
 	if err != nil {
+		if service.WriteOpenAIProviderAttemptBudgetError(c, err) {
+			return
+		}
 		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
 			"type": "upstream_error", "message": "Upstream ChatGPT conversation request failed",
 		}})

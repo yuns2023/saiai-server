@@ -434,7 +434,7 @@ def main():
     args = parser.parse_args()
     if not args.gateway.startswith("http://127.0.0.1:"):
         raise ValueError("only a loopback mock Gateway is accepted")
-    report = {"result": "pass", "client_config_schema": 2, "real_provider_requests": 0, "cases": [], "body_capture_persisted": False}
+    report = {"result": "pass", "client_config_file_version": 2, "real_provider_requests": 0, "cases": [], "body_capture_persisted": False}
     report["gateway_fixture"] = "production_routes_loopback_tls" if args.production_routes else "service_builders_recording_mocks"
     report["codex_sha256"] = file_sha256(args.codex)
     report["saiai_sha256"] = file_sha256(args.client)

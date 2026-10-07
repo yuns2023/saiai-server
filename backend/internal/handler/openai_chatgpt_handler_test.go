@@ -161,6 +161,42 @@ func TestChatGPTControlsRepeatedFailuresDoNotConsumeCodexSlots(t *testing.T) {
 	}
 }
 
+func TestChatGPTUnarmedAttemptBudgetReleasesSelectedAccountSlot(t *testing.T) {
+	groupID := int64(9)
+	account := service.Account{ID: 19, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 10,
+		Credentials: map[string]any{"access_token": "TEST_ONLY", "chatgpt_account_id": "TEST_ONLY_ACCOUNT"}}
+	slots := &chatGPTSlotCache{active: make(map[string]int64), attempts: make(map[int64]int)}
+	concurrency := service.NewConcurrencyService(slots)
+	upstream := &chatGPTReplayUpstream{}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIChatEnabled = true
+	cfg.Gateway.OpenAIChatUnaccountedAllowed = true
+	cfg.Gateway.OpenAIChatUpstreamBaseURL = "http://replay.example.test"
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIProviderAttemptBudget = config.OpenAIProviderAttemptBudgetConfig{Enabled: true,
+		ID: "TEST_ONLY-unarmed", APIKeyID: 3, MaxAttempts: 5, ExpiresAt: time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}
+	svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, nil,
+		cfg, nil, concurrency, nil, nil, nil, upstream, nil, nil)
+	// Selection reserves the account. The handler's fallback cleanup owns that
+	// reservation even when the optional user-concurrency helper is absent.
+	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg)
+	for i := 0; i < 100; i++ {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewBufferString(`{"model":"auto","messages":[]}`))
+		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{ID: 3, GroupID: &groupID,
+			Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}})
+		c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 5, Concurrency: 2})
+		h.ChatGPTConversation(c)
+		require.Equal(t, http.StatusServiceUnavailable, w.Code)
+		require.Contains(t, w.Body.String(), "attempt_budget_unavailable")
+		require.Empty(t, slots.active)
+	}
+	require.Equal(t, 100, slots.attempts[account.ID])
+	require.Nil(t, upstream.req, "unarmed acceptance must not dispatch any provider request")
+}
+
 type chatGPTReplayUpstream struct {
 	req          *http.Request
 	body         []byte

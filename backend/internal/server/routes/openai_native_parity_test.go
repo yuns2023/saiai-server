@@ -109,7 +109,8 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 	keyService := service.NewAPIKeyService(&nativeRoutesKeyRepo{key: key, lab: lab}, nil, nil, nil, nil, nil, cfg)
 	billingCache := service.NewBillingCacheService(nil, &nativeRoutesUserRepo{user: user, lab: lab}, nil, nil, cfg)
 	defer billingCache.Stop()
-	concurrency := service.NewConcurrencyService(&nativeRoutesConcurrency{})
+	concurrencyCache := &nativeRoutesConcurrency{}
+	concurrency := service.NewConcurrencyService(concurrencyCache)
 	cache := &nativeRoutesCache{lab: lab}
 	svc := service.NewOpenAIGatewayService(&nativeRoutesAccountRepo{account: account}, &nativeRoutesUsageRepo{lab: lab}, lab,
 		nil, nil, nil, cache, cfg, nil, concurrency, service.NewBillingService(cfg, nil), nil, billingCache,
@@ -244,6 +245,80 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 			require.NoError(t, os.WriteFile(path, output, 0600))
 		}
 		t.Logf("public-route proof: %s", output)
+	})
+	t.Run("attempt_budget_spans_http_ws_and_rejected_reconnects", func(t *testing.T) {
+		lab.reset()
+		cfg.Gateway.OpenAIProviderAttemptBudget = config.OpenAIProviderAttemptBudgetConfig{Enabled: true,
+			ID: "TEST_ONLY-public-routes", APIKeyID: key.ID, MaxAttempts: 5,
+			ExpiresAt: time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}
+		cache.budgetUsed = new(int64) // explicitly arm this in-memory test fixture
+		defer func() { cfg.Gateway.OpenAIProviderAttemptBudget.Enabled = false }()
+		body := []byte(`{ "model":"gpt-5.5", "stream":true, "future":true, "input":[] }`)
+		resp, data := request("POST", "/v1/responses", body, false, true)
+		require.Equal(t, 200, resp.StatusCode, string(data))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		headers := http.Header{"Authorization": {"Bearer " + key.Key}, "User-Agent": {"codex_cli_rs/0.160.0"},
+			"Originator": {"codex_exec"}, "Version": {"0.160.0"}, "Chatgpt-Account-Id": {"TEST_ONLY_CLIENT_ACCOUNT"}}
+		conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(gateway.URL, "http")+"/v1/responses?future=a%2Fb&future=a+b", &coderws.DialOptions{HTTPHeader: headers})
+		require.NoError(t, err)
+		defer conn.CloseNow()
+		for _, payload := range [][]byte{
+			[]byte(`{ "type":"response.create", "model":"gpt-5.5", "generate":false, "input":[], "future":true }`),
+			[]byte(`{ "type":"response.create", "model":"gpt-5.5", "reasoning":{"effort":"high"}, "input":[], "future":true }`),
+		} {
+			require.NoError(t, conn.Write(ctx, coderws.MessageBinary, payload))
+			for {
+				_, event, readErr := conn.Read(ctx)
+				require.NoError(t, readErr)
+				if gjson.GetBytes(event, "type").String() == "response.completed" {
+					break
+				}
+			}
+			seen := lab.providerRecords()
+			var last map[string]any
+			for _, record := range seen {
+				if record["kind"] == "frame" {
+					last = record
+				}
+			}
+			sum := sha256.Sum256(payload)
+			require.Equal(t, hex.EncodeToString(sum[:]), last["sha256"])
+			require.Equal(t, int(coderws.MessageBinary), last["message_type"])
+		}
+		require.NoError(t, conn.Close(coderws.StatusNormalClosure, "TEST_ONLY done"))
+		for i := 0; i < 2; i++ {
+			response, data := request("POST", "/v1/responses", body, false, true)
+			require.Equal(t, 200, response.StatusCode, string(data))
+		}
+		before := len(lab.providerRecords())
+		for i := 0; i < 100; i++ {
+			response, data := request("POST", "/v1/responses", body, false, true)
+			require.Equal(t, http.StatusTooManyRequests, response.StatusCode)
+			require.Contains(t, string(data), "attempt_budget_exhausted")
+			require.NotContains(t, string(data), "response.completed")
+		}
+		require.Equal(t, before, len(lab.providerRecords()), "refused attempts must not reach provider")
+		reconnect, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(gateway.URL, "http")+"/v1/responses", &coderws.DialOptions{HTTPHeader: headers})
+		require.NoError(t, err)
+		defer reconnect.CloseNow()
+		require.NoError(t, reconnect.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","input":[]}`)))
+		_, refusal, readErr := reconnect.Read(ctx)
+		if readErr == nil {
+			require.Contains(t, string(refusal), "budget exhausted")
+			require.NotContains(t, string(refusal), "response.completed")
+			_, _, readErr = reconnect.Read(ctx)
+		}
+		require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(readErr))
+		modelAttempts := 0
+		for _, record := range lab.providerRecords() {
+			if record["kind"] == "http" || record["kind"] == "frame" {
+				modelAttempts++
+			}
+		}
+		require.Equal(t, 5, modelAttempts)
+		require.Equal(t, int64(5), *cache.budgetUsed)
+		require.Eventually(t, func() bool { return concurrencyCache.users.Load() == 0 && concurrencyCache.accounts.Load() == 0 }, time.Second, 10*time.Millisecond)
 	})
 	require.Zero(t, lab.blocked.Load(), "no unexpected provider destination")
 }
@@ -472,7 +547,21 @@ func (r *nativeRoutesUserRepo) GetByID(context.Context, int64) (*service.User, e
 
 type nativeRoutesCache struct {
 	service.GatewayCache
-	lab *nativeRoutesLab
+	lab        *nativeRoutesLab
+	budgetUsed *int64
+}
+
+func (c *nativeRoutesCache) ReserveOpenAIProviderAttempt(_ context.Context, _ string, _ int64, limit int64, _ time.Time) (int64, error) {
+	c.lab.mu.Lock()
+	defer c.lab.mu.Unlock()
+	if c.budgetUsed == nil {
+		return 0, service.ErrOpenAIProviderAttemptBudgetUnarmed
+	}
+	if *c.budgetUsed >= limit {
+		return *c.budgetUsed, service.ErrOpenAIProviderAttemptBudgetExhausted
+	}
+	*c.budgetUsed++
+	return *c.budgetUsed, nil
 }
 
 func (c *nativeRoutesCache) GetSessionAccountID(_ context.Context, _ int64, key string) (int64, error) {
@@ -496,16 +585,27 @@ func (c *nativeRoutesCache) DeleteSessionAccountID(_ context.Context, _ int64, k
 	return nil
 }
 
-type nativeRoutesConcurrency struct{ service.ConcurrencyCache }
+type nativeRoutesConcurrency struct {
+	service.ConcurrencyCache
+	users, accounts atomic.Int64
+}
 
-func (*nativeRoutesConcurrency) AcquireUserSlot(context.Context, int64, int, string) (bool, error) {
+func (c *nativeRoutesConcurrency) AcquireUserSlot(context.Context, int64, int, string) (bool, error) {
+	c.users.Add(1)
 	return true, nil
 }
-func (*nativeRoutesConcurrency) ReleaseUserSlot(context.Context, int64, string) error { return nil }
-func (*nativeRoutesConcurrency) AcquireAccountSlot(context.Context, int64, int, string) (bool, error) {
+func (c *nativeRoutesConcurrency) ReleaseUserSlot(context.Context, int64, string) error {
+	c.users.Add(-1)
+	return nil
+}
+func (c *nativeRoutesConcurrency) AcquireAccountSlot(context.Context, int64, int, string) (bool, error) {
+	c.accounts.Add(1)
 	return true, nil
 }
-func (*nativeRoutesConcurrency) ReleaseAccountSlot(context.Context, int64, string) error { return nil }
+func (c *nativeRoutesConcurrency) ReleaseAccountSlot(context.Context, int64, string) error {
+	c.accounts.Add(-1)
+	return nil
+}
 func (*nativeRoutesConcurrency) GetAccountsLoadBatch(_ context.Context, accounts []service.AccountWithConcurrency) (map[int64]*service.AccountLoadInfo, error) {
 	result := make(map[int64]*service.AccountLoadInfo)
 	for _, account := range accounts {

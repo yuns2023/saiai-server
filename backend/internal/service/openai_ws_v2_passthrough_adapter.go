@@ -320,6 +320,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
+	upstreamFrameConn = &openAIProviderBudgetFrameConn{FrameConn: upstreamFrameConn, budgetContext: ctx}
 	turnResponseHeaders := func() http.Header {
 		responseHeaders := cloneHeader(handshakeHeaders)
 		if quotaFrameObserved.Load() {

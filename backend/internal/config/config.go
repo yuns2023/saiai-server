@@ -374,7 +374,8 @@ type GatewayConfig struct {
 	// ConnectionPoolIsolation: 上游连接池隔离策略（proxy/account/account_proxy）
 	ConnectionPoolIsolation string `mapstructure:"connection_pool_isolation"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
-	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
+	OpenAIWS                    GatewayOpenAIWSConfig             `mapstructure:"openai_ws"`
+	OpenAIProviderAttemptBudget OpenAIProviderAttemptBudgetConfig `mapstructure:"openai_provider_attempt_budget"`
 	// OpenAIChatEnabled enables the experimental native ChatGPT conversation
 	// protocol ingress. It is disabled by default until staging verification.
 	OpenAIChatEnabled bool `mapstructure:"openai_chat_enabled"`
@@ -1401,6 +1402,11 @@ func setDefaults() {
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）
 	viper.SetDefault("gateway.openai_ws.enabled", true)
+	viper.SetDefault("gateway.openai_provider_attempt_budget.enabled", false)
+	viper.SetDefault("gateway.openai_provider_attempt_budget.id", "")
+	viper.SetDefault("gateway.openai_provider_attempt_budget.api_key_id", 0)
+	viper.SetDefault("gateway.openai_provider_attempt_budget.max_attempts", 0)
+	viper.SetDefault("gateway.openai_provider_attempt_budget.expires_at", "")
 	viper.SetDefault("gateway.openai_chat_enabled", false)
 	viper.SetDefault("gateway.openai_chat_upstream_base_url", "")
 	viper.SetDefault("gateway.openai_chat_model_request_cap", 0)
@@ -2174,6 +2180,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ModelsListCacheTTLSeconds < 10 || c.Gateway.ModelsListCacheTTLSeconds > 30 {
 		return fmt.Errorf("gateway.models_list_cache_ttl_seconds must be between 10-30")
+	}
+	if err := c.Gateway.OpenAIProviderAttemptBudget.Validate(); err != nil {
+		return err
 	}
 	if c.Gateway.OpenAIUnpricedModelMaxSuccesses < 0 {
 		return fmt.Errorf("gateway.openai_unpriced_model_max_successes must be non-negative")

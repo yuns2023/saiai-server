@@ -137,6 +137,9 @@ func wrapOpenAIWSIngressTurnError(stage string, cause error, wroteDownstream boo
 }
 
 func isOpenAIWSIngressTurnRetryable(err error) bool {
+	if isOpenAIProviderAttemptBudgetError(err) {
+		return false
+	}
 	var turnErr *openAIWSIngressTurnError
 	if !errors.As(err, &turnErr) || turnErr == nil {
 		return false
@@ -2416,6 +2419,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	firstClientMessage []byte,
 	hooks *OpenAIWSIngressHooks,
 ) error {
+	ctx = s.withOpenAIProviderAttemptBudget(ctx, c, account)
 	currentAccount := account
 	currentToken := token
 	currentMessageType := firstClientMessageType
@@ -2436,7 +2440,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			attemptHooks = remapOpenAIWSIngressHooksForFailover(hooks, turnOffset)
 		}
 		err := s.proxyResponsesWebSocketFromClientOnce(
-			ctx,
+			s.withOpenAIProviderAttemptBudget(ctx, c, currentAccount),
 			c,
 			clientConn,
 			currentAccount,
@@ -2448,6 +2452,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		)
 		if err == nil {
 			return nil
+		}
+		if isOpenAIProviderAttemptBudgetError(err) {
+			_, _, message, _ := openAIProviderAttemptBudgetErrorDetails(err)
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, message, err)
 		}
 
 		var failoverErr *OpenAIWSAccountFailoverError

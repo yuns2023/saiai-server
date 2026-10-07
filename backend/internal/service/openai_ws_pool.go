@@ -368,6 +368,9 @@ func (c *openAIWSConn) writeJSON(value any, writeCtx context.Context) error {
 	if writeCtx == nil {
 		writeCtx = context.Background()
 	}
+	if err := reserveOpenAIProviderAttempt(writeCtx); err != nil {
+		return err
+	}
 	if err := c.ws.WriteJSON(writeCtx, value); err != nil {
 		return err
 	}
@@ -397,6 +400,9 @@ func (c *openAIWSConn) writeFrameWithTimeout(parent context.Context, msgType cod
 	defer c.writeMu.Unlock()
 	if c.ws == nil {
 		return errOpenAIWSConnClosed
+	}
+	if err := reserveOpenAIProviderAttempt(writeCtx); err != nil {
+		return err
 	}
 	if writer, ok := c.ws.(interface {
 		WriteFrame(context.Context, coderws.MessageType, []byte) error

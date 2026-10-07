@@ -62,6 +62,7 @@ func (s *OpenAIGatewayService) ForwardImage(
 	model string,
 	imageSize string,
 ) (*OpenAIForwardResult, error) {
+	ctx = s.withOpenAIProviderAttemptBudget(ctx, c, account)
 	if account == nil || !account.IsOpenAI() {
 		return nil, fmt.Errorf("OpenAI Image API requires an OpenAI account")
 	}
@@ -114,7 +115,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImageAPIKey(
 		proxyURL = account.Proxy.URL()
 	}
 	started := time.Now()
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.doOpenAIUpstream(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI Image API upstream request failed: %w", err)
 	}
@@ -251,7 +252,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImageOAuth(
 		proxyURL = account.Proxy.URL()
 	}
 	started := time.Now()
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI OAuth image upstream request failed: %w", err)
 	}

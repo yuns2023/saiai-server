@@ -707,6 +707,9 @@ func (s *OpenAIGatewayService) getOpenAIWSProtocolResolver() OpenAIWSProtocolRes
 }
 
 func classifyOpenAIWSReconnectReason(err error) (string, bool) {
+	if isOpenAIProviderAttemptBudgetError(err) {
+		return "attempt_budget_denied", false
+	}
 	if err == nil {
 		return "", false
 	}
@@ -753,6 +756,9 @@ func classifyOpenAIWSReconnectReason(err error) (string, bool) {
 }
 
 func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType string, clientMessage string, upstreamMessage string, ok bool) {
+	if status, code, message, denied := openAIProviderAttemptBudgetErrorDetails(err); denied {
+		return status, code, message, "", true
+	}
 	if err == nil {
 		return 0, "", "", "", false
 	}
@@ -2052,6 +2058,7 @@ func (s *OpenAIGatewayService) handleFailoverSideEffects(ctx context.Context, re
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	ctx = s.withOpenAIProviderAttemptBudget(ctx, c, account)
 	startTime := time.Now()
 
 	restrictionResult := s.detectCodexClientRestriction(c, account)
@@ -2616,9 +2623,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
-		resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
+			if WriteOpenAIProviderAttemptBudgetError(c, err) {
+				return nil, err
+			}
 			// Ensure the client receives an error response (handlers assume Forward writes on non-failover errors).
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")
@@ -2970,11 +2980,14 @@ func (s *OpenAIGatewayService) ForwardChatGPTConversation(
 	body []byte,
 	path string,
 ) (*http.Response, error) {
+	if strings.HasSuffix(strings.SplitN(path, "?", 2)[0], "/f/conversation") {
+		ctx = s.withOpenAIProviderAttemptBudget(ctx, c, account)
+	}
 	req, proxyURL, err := s.BuildChatGPTConversationRequest(ctx, c, account, body, path)
 	if err != nil {
 		return nil, err
 	}
-	return s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	return s.doOpenAIUpstream(req, proxyURL, account.ID, account.Concurrency)
 }
 
 // ForwardChatGPTFileDownload forwards the native ChatGPT file-download

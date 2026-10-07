@@ -120,6 +120,9 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string) {
 			accountRelease()
 		}
 		if forwardErr != nil {
+			if service.WriteOpenAIProviderAttemptBudgetError(c, forwardErr) {
+				return
+			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(forwardErr, &failoverErr) {
 				failedAccountIDs[account.ID] = struct{}{}
