@@ -112,10 +112,8 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		return
 	}
 	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-	if model == "" {
-		model = "chatgpt"
-	}
 	isModelRequest := c.Request.URL.Path == "/chatgpt/backend-api/f/conversation"
+	setOpsRequestContext(c, model, isModelRequest, body)
 	if isModelRequest && !fixedTurnBillingEnabled && !h.cfg.Gateway.OpenAIChatUnaccountedAllowed {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
 			"type": "accounting_unavailable", "message": "Native ChatGPT Chat accounting is not enabled",
@@ -172,29 +170,17 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	if sessionHash == "" {
 		sessionHash = h.gatewayService.GenerateSessionHash(c, body)
 	}
-	var selection *service.AccountSelectionResult
-	excludedIDs := make(map[int64]struct{})
-	for len(excludedIDs) < 64 {
-		candidate, _, selectErr := h.gatewayService.SelectAccountWithScheduler(
-			c.Request.Context(), apiKey.GroupID, "", sessionHash, model, excludedIDs, service.OpenAIUpstreamTransportHTTPSSE,
-		)
-		if selectErr != nil || candidate == nil || candidate.Account == nil {
-			selection = nil
-			break
-		}
-		if candidate.Account.IsOpenAIOAuth() {
-			selection = candidate
-			break
-		}
-		excludedIDs[candidate.Account.ID] = struct{}{}
-	}
-	if selection == nil || selection.Account == nil {
+	selection, _, selectErr := h.gatewayService.SelectChatGPTOAuthAccount(
+		c.Request.Context(), apiKey.GroupID, sessionHash, model,
+	)
+	if selectErr != nil || selection == nil || selection.Account == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
 			"type": "service_unavailable", "message": "No available OpenAI OAuth account",
 		}})
 		return
 	}
 	account := selection.Account
+	setOpsSelectedAccount(c, account.ID, service.PlatformOpenAI)
 	if !isModelRequest {
 		// The shared scheduler opportunistically acquires an account slot even
 		// for short native-Chat control-plane requests. They are not model
@@ -211,6 +197,8 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		if accountRelease != nil {
 			defer accountRelease()
 		}
+	} else {
+		defer releaseChatGPTControlSelection(selection)
 	}
 	path := c.Request.URL.RequestURI()
 	if isModelRequest {
@@ -400,6 +388,24 @@ func (h *OpenAIGatewayHandler) ChatGPTEstuaryContent(c *gin.Context) {
 }
 
 func (h *OpenAIGatewayHandler) chatGPTAssetDownload(c *gin.Context) {
+	// Estuary cid is an opaque provider asset identifier, not a conversation
+	// UUID. Preserve it in the query without inventing a conversation binding.
+	conversationID := strings.TrimSpace(c.Query("conversation_id"))
+	sessionHash := ""
+	if conversationID != "" {
+		sessionHash = service.ChatGPTConversationSessionHash(conversationID)
+	}
+	h.chatGPTControlGET(c, sessionHash, "Upstream ChatGPT asset download request failed")
+}
+
+// ChatGPTModels forwards the ordinary Chat catalog without translating it to
+// a Codex catalog or synthesizing model names.
+func (h *OpenAIGatewayHandler) ChatGPTModels(c *gin.Context) {
+	h.chatGPTControlGET(c, "", "Upstream ChatGPT model catalog request failed")
+}
+
+func (h *OpenAIGatewayHandler) chatGPTControlGET(c *gin.Context, sessionHash, failureMessage string) {
+	setOpsRequestContext(c, "", false, nil)
 	if h == nil || h.cfg == nil || !h.cfg.Gateway.OpenAIChatEnabled {
 		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{
 			"type": "not_found_error", "message": "Native ChatGPT Chat is disabled",
@@ -420,44 +426,26 @@ func (h *OpenAIGatewayHandler) chatGPTAssetDownload(c *gin.Context) {
 		}})
 		return
 	}
-	conversationID := strings.TrimSpace(c.Query("conversation_id"))
-	if conversationID == "" {
-		conversationID = strings.TrimSpace(c.Query("cid"))
+	if sessionHash == "" {
+		sessionHash = h.gatewayService.GenerateSessionHash(c, nil)
 	}
-	sessionHash := ""
-	if conversationID != "" {
-		sessionHash = service.ChatGPTConversationSessionHash(conversationID)
-	}
-	var selection *service.AccountSelectionResult
-	model := "chatgpt"
-	excludedIDs := make(map[int64]struct{})
-	for len(excludedIDs) < 64 {
-		candidate, _, selectErr := h.gatewayService.SelectAccountWithScheduler(
-			c.Request.Context(), apiKey.GroupID, "", sessionHash, model, excludedIDs, service.OpenAIUpstreamTransportHTTPSSE,
-		)
-		if selectErr != nil || candidate == nil || candidate.Account == nil {
-			selection = nil
-			break
-		}
-		if candidate.Account.IsOpenAIOAuth() {
-			selection = candidate
-			break
-		}
-		excludedIDs[candidate.Account.ID] = struct{}{}
-	}
-	if selection == nil || selection.Account == nil {
+	selection, _, selectErr := h.gatewayService.SelectChatGPTOAuthAccount(
+		c.Request.Context(), apiKey.GroupID, sessionHash, "",
+	)
+	if selectErr != nil || selection == nil || selection.Account == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
 			"type": "service_unavailable", "message": "No available OpenAI OAuth account",
 		}})
 		return
 	}
 	account := selection.Account
+	setOpsSelectedAccount(c, account.ID, service.PlatformOpenAI)
 	releaseChatGPTControlSelection(selection)
 	path := c.Request.URL.RequestURI()
-	resp, err := h.gatewayService.ForwardChatGPTFileDownload(c.Request.Context(), c, account, path)
+	resp, err := h.gatewayService.ForwardChatGPTControl(c.Request.Context(), c, account, path)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
-			"type": "upstream_error", "message": "Upstream ChatGPT asset download request failed",
+			"type": "upstream_error", "message": failureMessage,
 		}})
 		return
 	}
@@ -1399,31 +1387,32 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			zap.String("close_reason", closeReason),
 			zap.Duration("read_timeout", 30*time.Second),
 		)
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "missing first response.create message")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "missing first response.create message")
 		return
 	}
 	if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "unsupported websocket message type")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "unsupported websocket message type")
 		return
 	}
 	if !gjson.ValidBytes(firstMessage) {
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "invalid JSON payload")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "invalid JSON payload")
 		return
 	}
 	originalFirstMessage := append([]byte(nil), firstMessage...)
 
 	reqModel := strings.TrimSpace(gjson.GetBytes(firstMessage, "model").String())
+	setOpsRequestContext(c, reqModel, true, firstMessage)
 	usageSessionID := service.ResolveOpenAIUsageSessionID(
 		c.GetHeader("session_id"),
 		c.GetHeader("conversation_id"),
 		gjson.GetBytes(firstMessage, "prompt_cache_key").String(),
 	)
 	if reqModel == "" {
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
 		return
 	}
 	if apiKey.Group != nil && apiKey.Group.IsModelBlocked(reqModel) {
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, fmt.Sprintf("model %s is not allowed for this group", reqModel))
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, fmt.Sprintf("model %s is not allowed for this group", reqModel))
 		return
 	}
 	if apiKey.Group != nil && !codexClientPolicyMatched(c, apiKey.Group.CodexClientPolicy) {
@@ -1432,13 +1421,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		if strings.EqualFold(strings.TrimSpace(apiKey.Group.CodexClientPolicy), "local_proxy_only") {
 			reason = "SAIAI local proxy required"
 		}
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, reason)
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, reason)
 		return
 	}
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(firstMessage, "previous_response_id").String())
 	previousResponseIDKind := service.ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	if previousResponseID != "" && previousResponseIDKind == service.OpenAIPreviousResponseIDKindMessageID {
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "previous_response_id must be a response.id (resp_*), not a message id")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "previous_response_id must be a response.id (resp_*), not a message id")
 		return
 	}
 	reqLog = reqLog.With(
@@ -1447,7 +1436,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		zap.Bool("has_previous_response_id", previousResponseID != ""),
 		zap.String("previous_response_id_kind", previousResponseIDKind),
 	)
-	setOpsRequestContext(c, reqModel, true, firstMessage)
 
 	var currentUserRelease func()
 	var currentAccountRelease func()
@@ -1467,11 +1455,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, subject.UserID, subject.Concurrency)
 	if err != nil {
 		reqLog.Warn("openai.websocket_user_slot_acquire_failed", zap.Error(err))
-		closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire user concurrency slot")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusInternalError, "failed to acquire user concurrency slot")
 		return
 	}
 	if !userAcquired {
-		closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "too many concurrent requests, please retry later")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusTryAgainLater, "too many concurrent requests, please retry later")
 		return
 	}
 	currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
@@ -1479,7 +1467,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		reqLog.Info("openai.websocket_billing_eligibility_check_failed", zap.Error(err))
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "billing check failed")
 		return
 	}
 
@@ -1503,18 +1491,19 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	if err != nil {
 		reqLog.Warn("openai.websocket_account_select_failed", zap.Error(err))
 		if service.IsOpenAITurnStateAccountMismatch(err) {
-			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "conversation turn state cannot be verified for an available account")
+			closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "conversation turn state cannot be verified for an available account")
 			return
 		}
-		closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusTryAgainLater, "no available account")
 		return
 	}
 	if selection == nil || selection.Account == nil {
-		closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusTryAgainLater, "no available account")
 		return
 	}
 
 	account := selection.Account
+	setOpsSelectedAccount(c, account.ID, account.Platform)
 	preflightContinuationMigrated := false
 	if enforceCodexContinuationAccountBoundary(c, account) && previousResponseID != "" {
 		continuationAccountID, ownerErr := h.gatewayService.OpenAIContinuationAccountID(ctx, subject.UserID, previousResponseID)
@@ -1522,7 +1511,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			if selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()
 			}
-			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "unable to verify conversation account")
+			closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusTryAgainLater, "unable to verify conversation account")
 			return
 		}
 		if !service.OpenAIContinuationAccountMatches(previousResponseID, continuationAccountID, account.ID) {
@@ -1537,14 +1526,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if selection.ReleaseFunc != nil {
 					selection.ReleaseFunc()
 				}
-				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "unable to rebuild conversation context for account failover")
+				closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusTryAgainLater, "unable to rebuild conversation context for account failover")
 				return
 			}
 			if !migrated {
 				if selection.ReleaseFunc != nil {
 					selection.ReleaseFunc()
 				}
-				closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "conversation cannot continue on a different upstream account; replay context is unavailable")
+				closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "conversation cannot continue on a different upstream account; replay context is unavailable")
 				return
 			}
 			firstMessage = migratedPayload
@@ -1563,7 +1552,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	accountReleaseFunc := selection.ReleaseFunc
 	if !selection.Acquired {
 		if selection.WaitPlan == nil {
-			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "account is busy, please retry later")
+			closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusTryAgainLater, "account is busy, please retry later")
 			return
 		}
 		fastReleaseFunc, fastAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(
@@ -1573,11 +1562,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		)
 		if err != nil {
 			reqLog.Warn("openai.websocket_account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire account concurrency slot")
+			closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusInternalError, "failed to acquire account concurrency slot")
 			return
 		}
 		if !fastAcquired {
-			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "account is busy, please retry later")
+			closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusTryAgainLater, "account is busy, please retry later")
 			return
 		}
 		accountReleaseFunc = fastReleaseFunc
@@ -1590,7 +1579,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	token, _, err := h.gatewayService.GetAccessToken(ctx, account)
 	if err != nil {
 		reqLog.Warn("openai.websocket_get_access_token_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-		closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to get access token")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusInternalError, "failed to get access token")
 		return
 	}
 
@@ -1781,10 +1770,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		)
 		var closeErr *service.OpenAIWSClientCloseError
 		if errors.As(err, &closeErr) {
-			closeOpenAIClientWS(wsConn, closeErr.StatusCode(), closeErr.Reason())
+			closeOpenAIClientWSWithOps(c, wsConn, closeErr.StatusCode(), closeErr.Reason())
 			return
 		}
-		closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "upstream websocket proxy failed")
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusInternalError, "upstream websocket proxy failed")
 		return
 	}
 	reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
@@ -2090,6 +2079,7 @@ var (
 func (h *OpenAIGatewayHandler) writeError(c *gin.Context, e gatewayErrorEnvelope, streamStarted bool) {
 	e.Message = service.ClientSafeUpstreamErrorMessage(e.Message)
 	if streamStarted {
+		setOpsLocalFailure(c, opsLocalFailure{status: e.Status, errType: e.Type, code: e.Code, message: e.Message})
 		flusher, ok := c.Writer.(http.Flusher)
 		if !ok {
 			return

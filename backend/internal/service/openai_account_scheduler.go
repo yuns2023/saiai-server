@@ -21,15 +21,16 @@ const (
 )
 
 type OpenAIAccountScheduleRequest struct {
-	GroupID            *int64
-	UserID             int64
-	UseUserScope       bool
-	SessionHash        string
-	StickyAccountID    int64
-	PreviousResponseID string
-	RequestedModel     string
-	RequiredTransport  OpenAIUpstreamTransport
-	ExcludedIDs        map[int64]struct{}
+	GroupID             *int64
+	UserID              int64
+	UseUserScope        bool
+	SessionHash         string
+	StickyAccountID     int64
+	PreviousResponseID  string
+	RequestedModel      string
+	RequiredAccountType string
+	RequiredTransport   OpenAIUpstreamTransport
+	ExcludedIDs         map[int64]struct{}
 }
 
 type OpenAIAccountScheduleDecision struct {
@@ -251,7 +252,10 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			return nil, decision, err
 		}
 		if selection != nil && selection.Account != nil {
-			if !s.isAccountTransportCompatible(selection.Account, req.RequiredTransport) {
+			if !s.isAccountRequestCompatible(selection.Account, req) {
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
 				selection = nil
 			}
 		}
@@ -329,11 +333,16 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
+	if req.RequiredAccountType != "" && account.Type != req.RequiredAccountType {
+		// A sticky from a different protocol is not an eligible reservation.
+		// Leave the other protocol's binding intact and continue selection.
+		return nil, nil
+	}
 	if shouldClearStickySession(account, req.RequestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
-	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+	if !s.isAccountRequestCompatible(account, req) {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
@@ -589,7 +598,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		if !account.IsSchedulable() || !account.IsOpenAI() {
 			continue
 		}
-		if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+		if !s.isAccountRequestCompatible(account, req) {
 			continue
 		}
 		filtered = append(filtered, account)
@@ -685,7 +694,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 	now := time.Now()
 	for _, snapshotAccount := range accounts {
 		account := s.service.resolveFreshSchedulableOpenAIAccount(ctx, snapshotAccount, req.RequestedModel)
-		if account == nil {
+		if account == nil || !s.isAccountRequestCompatible(account, req) {
 			continue
 		}
 		if s.service.shouldRejectNewSessionForHighFiveHourUsage(account, now) {
@@ -765,7 +774,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel)
 		if fresh == nil ||
 			s.service.shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) ||
-			!s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+			!s.isAccountRequestCompatible(fresh, req) {
 			continue
 		}
 		hadFresh = true
@@ -795,7 +804,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel)
 		if fresh == nil ||
 			s.service.shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) ||
-			!s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+			!s.isAccountRequestCompatible(fresh, req) {
 			continue
 		}
 		hadFresh = true
@@ -811,6 +820,13 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 	}
 
 	return nil, topK, loadSkew, hadFresh, nil
+}
+
+func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(account *Account, req OpenAIAccountScheduleRequest) bool {
+	if account == nil || (req.RequiredAccountType != "" && account.Type != req.RequiredAccountType) {
+		return false
+	}
+	return s.isAccountTransportCompatible(account, req.RequiredTransport)
 }
 
 func (s *defaultOpenAIAccountScheduler) isAccountTransportCompatible(account *Account, requiredTransport OpenAIUpstreamTransport) bool {
@@ -893,6 +909,37 @@ func (s *OpenAIGatewayService) SelectAccountWithScheduler(
 	requiredTransport OpenAIUpstreamTransport,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	return s.selectAccountWithScheduler(ctx, groupID, 0, false, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport)
+}
+
+// SelectChatGPTOAuthAccount filters the native Chat protocol's account type
+// before scheduling acquires a slot or confirms a sticky. Responses continues
+// to use the generic selector and may use either OAuth or API-key accounts.
+func (s *OpenAIGatewayService) SelectChatGPTOAuthAccount(
+	ctx context.Context,
+	groupID *int64,
+	sessionHash string,
+	requestedModel string,
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	scheduler := s.getOpenAIAccountScheduler()
+	if scheduler == nil {
+		return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts
+	}
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
+		GroupID: groupID, SessionHash: sessionHash, RequestedModel: requestedModel,
+		RequiredAccountType: AccountTypeOAuth, RequiredTransport: OpenAIUpstreamTransportHTTPSSE,
+	})
+	if err != nil || selection == nil || selection.Account == nil || !selection.Account.IsOpenAIOAuth() {
+		// Retain a defensive ownership boundary for custom schedulers and
+		// selections returned alongside an error; rejected reservations are ours.
+		if selection != nil && selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
+		if err == nil {
+			err = ErrNoAvailableAccounts
+		}
+		return nil, decision, err
+	}
+	return selection, decision, nil
 }
 
 func (s *OpenAIGatewayService) SelectAccountWithSchedulerForUser(

@@ -5,8 +5,23 @@
  * 同时避免引入额外 UI 依赖。
  */
 
-import type { OpsSeverity } from '@/api/admin/ops'
+import type { OpsErrorLog, OpsSeverity } from '@/api/admin/ops'
 import { formatBytes } from '@/utils/format'
+
+export function getOpsModelLabel(log: Pick<OpsErrorLog, 'model' | 'request_path'>, t: (key: string) => string): string {
+  if (log.model) return log.model
+  const path = log.request_path || ''
+  if (path === '/chatgpt/backend-api/conversation/init' ||
+      path === '/chatgpt/backend-api/sentinel/chat-requirements/prepare' ||
+      path.startsWith('/chatgpt/backend-api/f/conversation/')) {
+    return t('admin.ops.errorDetail.noModelInitialization')
+  }
+  if (path === '/chatgpt/backend-api/models') return t('admin.ops.errorDetail.noModelCatalog')
+  if (path.startsWith('/chatgpt/backend-api/files/download/') || path === '/chatgpt/backend-api/estuary/content') {
+    return t('admin.ops.errorDetail.noModelAsset')
+  }
+  return '—'
+}
 
 export function getSeverityClass(severity: OpsSeverity): string {
   const classes: Record<string, string> = {

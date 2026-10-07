@@ -3659,6 +3659,9 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        noModelInitialization: 'Initialization / no model call',
+        noModelCatalog: 'Model catalog / no model call',
+        noModelAsset: 'File download / no model call',
         title: 'Error Detail',
         titleWithId: 'Error #{id}',
         noErrorSelected: 'No error selected.',

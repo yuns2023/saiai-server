@@ -98,6 +98,10 @@ func TestRetiredProviderRoutesAreNotRegistered(t *testing.T) {
 
 func TestChatGPTConversationRouteIsRegisteredButDisabledByDefault(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
+	modelW := httptest.NewRecorder()
+	router.ServeHTTP(modelW, httptest.NewRequest(http.MethodGet, "/chatgpt/backend-api/models?language=en", nil))
+	require.Equal(t, http.StatusNotFound, modelW.Code)
+	require.Contains(t, modelW.Body.String(), "Native ChatGPT Chat is disabled")
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/chatgpt/backend-api/f/conversation",

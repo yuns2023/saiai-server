@@ -74,8 +74,13 @@
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.model') }}</div>
           <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-            {{ detail.model || '—' }}
+            {{ getOpsModelLabel(detail, t) }}
           </div>
+        </div>
+
+        <div v-if="detail.request_path" class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900/40">
+          <div class="text-xs font-semibold text-gray-400">{{ t('admin.ops.errorDetail.requestPath') }}</div>
+          <div class="mt-1 break-all font-mono text-xs text-gray-900 dark:text-gray-100">{{ detail.request_path }}</div>
         </div>
 
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
@@ -247,6 +252,7 @@ import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
 import { formatDateTime } from '@/utils/format'
 import { resolvePrimaryResponseBody, resolveUpstreamPayload } from '../utils/errorDetailResponse'
 import { formatAccountLabel, parseEmbeddedUpstreamEvents } from '../utils/errorDetailUpstream'
+import { getOpsModelLabel } from '../utils/opsFormatters'
 
 interface Props {
   show: boolean

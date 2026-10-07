@@ -121,6 +121,7 @@ func RegisterGatewayRoutes(
 	chatgpt.Use(rejectRetiredGroupPlatform)
 	chatgpt.Use(requireGroupAnthropic)
 	{
+		chatgpt.GET("/models", h.OpenAIGateway.ChatGPTModels)
 		chatgpt.POST("/f/conversation", h.OpenAIGateway.ChatGPTConversation)
 		chatgpt.POST("/f/conversation/*subpath", h.OpenAIGateway.ChatGPTConversation)
 		chatgpt.POST("/conversation/init", h.OpenAIGateway.ChatGPTConversation)

@@ -20,20 +20,145 @@ import (
 
 type chatGPTAccountRepo struct {
 	service.AccountRepository
-	account service.Account
+	account  service.Account
+	accounts []service.Account
 }
 
 func (r *chatGPTAccountRepo) ListSchedulableByGroupIDAndPlatform(context.Context, int64, string) ([]service.Account, error) {
+	if r.accounts != nil {
+		return r.accounts, nil
+	}
 	return []service.Account{r.account}, nil
 }
 
 func (r *chatGPTAccountRepo) ListSchedulableByPlatform(context.Context, string) ([]service.Account, error) {
+	if r.accounts != nil {
+		return r.accounts, nil
+	}
 	return []service.Account{r.account}, nil
 }
 
-func (r *chatGPTAccountRepo) GetByID(context.Context, int64) (*service.Account, error) {
+func (r *chatGPTAccountRepo) GetByID(_ context.Context, id int64) (*service.Account, error) {
+	if r.accounts != nil {
+		for _, account := range r.accounts {
+			if account.ID == id {
+				return &account, nil
+			}
+		}
+		return nil, errors.New("account not found")
+	}
 	account := r.account
 	return &account, nil
+}
+
+type chatGPTSlotCache struct {
+	service.ConcurrencyCache
+	active   map[string]int64
+	attempts map[int64]int
+}
+
+func (s *chatGPTSlotCache) AcquireAccountSlot(_ context.Context, id int64, max int, requestID string) (bool, error) {
+	s.attempts[id]++
+	count := 0
+	for _, activeID := range s.active {
+		if activeID == id {
+			count++
+		}
+	}
+	if count >= max {
+		return false, nil
+	}
+	s.active[requestID] = id
+	return true, nil
+}
+
+func (s *chatGPTSlotCache) ReleaseAccountSlot(_ context.Context, _ int64, requestID string) error {
+	delete(s.active, requestID)
+	return nil
+}
+
+func (s *chatGPTSlotCache) GetAccountWaitingCount(context.Context, int64) (int, error) {
+	return 0, nil
+}
+
+func (s *chatGPTSlotCache) GetAccountsLoadBatch(_ context.Context, accounts []service.AccountWithConcurrency) (map[int64]*service.AccountLoadInfo, error) {
+	load := make(map[int64]*service.AccountLoadInfo)
+	for _, account := range accounts {
+		load[account.ID] = &service.AccountLoadInfo{AccountID: account.ID}
+	}
+	return load, nil
+}
+
+func TestChatGPTControlsRepeatedFailuresDoNotConsumeCodexSlots(t *testing.T) {
+	groupID := int64(9)
+	key := service.Account{ID: 18, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 10}
+	oauth := key
+	oauth.ID = 19
+	oauth.Type = service.AccountTypeOAuth
+	oauth.Priority = 10
+	oauth.Credentials = map[string]any{"access_token": "oauth-upstream-token", "chatgpt_account_id": "upstream-account"}
+	for _, mixedPool := range []bool{false, true} {
+		t.Run(map[bool]string{false: "key_only", true: "mixed_pool"}[mixedPool], func(t *testing.T) {
+			accounts := []service.Account{key}
+			if mixedPool {
+				accounts = append(accounts, oauth)
+			}
+			cache := &chatGPTSlotCache{active: make(map[string]int64), attempts: make(map[int64]int)}
+			concurrency := service.NewConcurrencyService(cache)
+			upstream := &chatGPTReplayUpstream{responseBody: `{"models":[{"slug":"auto","title":"Automatic"}],"unknown_extension":{"kept":true}}`}
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAIChatEnabled = true
+			cfg.Gateway.OpenAIChatUpstreamBaseURL = "http://replay.example.test"
+			cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+			svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{accounts: accounts}, nil, nil, nil, nil, nil, nil, cfg, nil, concurrency, nil, nil, nil, upstream, nil, nil)
+			h := NewOpenAIGatewayHandler(svc, concurrency, nil, nil, nil, nil, nil, cfg)
+			controls := []struct {
+				method  string
+				path    string
+				handler gin.HandlerFunc
+			}{
+				{http.MethodPost, "/chatgpt/backend-api/conversation/init", h.ChatGPTConversation},
+				{http.MethodPost, "/chatgpt/backend-api/f/conversation/prepare", h.ChatGPTConversation},
+				{http.MethodPost, "/chatgpt/backend-api/sentinel/chat-requirements/prepare", h.ChatGPTConversation},
+				{http.MethodGet, "/chatgpt/backend-api/models?language=zh-CN&x=a%2Bb&x=c", h.ChatGPTModels},
+				{http.MethodGet, "/chatgpt/backend-api/estuary/content?id=file_fixture&cid=opaque-content-id", h.ChatGPTEstuaryContent},
+			}
+			for i := 0; i < 100; i++ {
+				for _, control := range controls {
+					w := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(w)
+					c.Request = httptest.NewRequest(control.method, control.path, bytes.NewBufferString(`{"client_extension": [1,2]}`))
+					c.Request.Header.Add("X-Codex-Unknown", "first")
+					c.Request.Header.Add("X-Codex-Unknown", "second")
+					c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{ID: 3, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}})
+					control.handler(c)
+					if mixedPool {
+						require.Equal(t, http.StatusOK, w.Code, control.path)
+						require.Equal(t, upstream.responseBody, w.Body.String())
+						require.Equal(t, "http://replay.example.test"+control.path[len("/chatgpt"):], upstream.req.URL.String())
+						require.Equal(t, control.method, upstream.req.Method)
+						require.Equal(t, []string{"first", "second"}, upstream.req.Header.Values("X-Codex-Unknown"))
+						if control.method == http.MethodPost {
+							require.Equal(t, `{"client_extension": [1,2]}`, string(upstream.body))
+						}
+					} else {
+						require.Equal(t, http.StatusServiceUnavailable, w.Code, control.path)
+					}
+					require.Empty(t, cache.active, "control reservations must be released on every exit")
+					require.Zero(t, cache.attempts[key.ID], "native Chat must not reserve an API-key slot")
+				}
+			}
+			if !mixedPool {
+				require.Zero(t, upstream.calls)
+			}
+			selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "", "gpt-5.1", nil, service.OpenAIUpstreamTransportHTTPSSE)
+			require.NoError(t, err)
+			require.True(t, selection.Acquired)
+			require.Equal(t, key.ID, selection.Account.ID)
+			selection.ReleaseFunc()
+			require.Empty(t, cache.active)
+		})
+	}
 }
 
 type chatGPTReplayUpstream struct {
@@ -47,6 +172,7 @@ type chatGPTReplayUpstream struct {
 type chatGPTStickyCache struct {
 	service.GatewayCache
 	bindings map[string]int64
+	reads    []string
 }
 
 type chatGPTUsageLogCapture struct {
@@ -75,6 +201,7 @@ func (r *chatGPTUsageLogCapture) CreateBestEffort(ctx context.Context, log *serv
 }
 
 func (c *chatGPTStickyCache) GetSessionAccountID(_ context.Context, _ int64, hash string) (int64, error) {
+	c.reads = append(c.reads, hash)
 	return c.bindings[hash], nil
 }
 
@@ -293,6 +420,7 @@ func TestChatGPTFileDownloadForwardsDownloadURLAndConversationAffinity(t *testin
 	require.Equal(t, 1, upstream.calls)
 
 	upstream.responseBody = "fixture-image-bytes"
+	cache.reads = nil
 	wAsset := httptest.NewRecorder()
 	cAsset, _ := gin.CreateTestContext(wAsset)
 	cAsset.Request = httptest.NewRequest(
@@ -307,7 +435,33 @@ func TestChatGPTFileDownloadForwardsDownloadURLAndConversationAffinity(t *testin
 	require.Equal(t, http.StatusOK, wAsset.Code)
 	require.Equal(t, "fixture-image-bytes", wAsset.Body.String())
 	require.Equal(t, http.MethodGet, upstream.req.Method)
+	require.Equal(t, "http://replay.example.test/backend-api/estuary/content?id=file_fixture&cid=fixture-conversation", upstream.req.URL.String())
+	require.Empty(t, cache.reads, "opaque cid must not look up a conversation binding")
 	require.Equal(t, 2, upstream.calls)
+}
+
+func TestChatGPTMissingOAuthRecordsRequestedModelBeforeSelection(t *testing.T) {
+	groupID := int64(9)
+	key := service.Account{ID: 18, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 10}
+	cache := &chatGPTSlotCache{active: make(map[string]int64), attempts: make(map[int64]int)}
+	upstream := &chatGPTReplayUpstream{}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIChatEnabled = true
+	cfg.Gateway.OpenAIChatUnaccountedAllowed = true
+	cfg.Gateway.OpenAIChatUpstreamBaseURL = "http://replay.example.test"
+	svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{account: key}, nil, nil, nil, nil, nil, nil, cfg, nil, service.NewConcurrencyService(cache), nil, nil, nil, upstream, nil, nil)
+	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewBufferString(`{"model":"mock-requested","messages":[]}`))
+	c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{ID: 3, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}})
+	c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 5, Concurrency: 2})
+	h.ChatGPTConversation(c)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Equal(t, "mock-requested", c.GetString(opsModelKey))
+	require.True(t, c.GetBool(opsStreamKey))
+	require.Empty(t, cache.attempts)
+	require.Zero(t, upstream.calls)
 }
 
 func TestChatGPTConversationBillsOnlySuccessfulTerminalTurn(t *testing.T) {

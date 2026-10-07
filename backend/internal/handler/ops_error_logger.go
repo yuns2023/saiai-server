@@ -716,7 +716,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			return
 		}
 
-		status := c.Writer.Status()
+		status, failureBody, localFailure := opsFailureResponse(c, c.Writer.Status(), w.buf.Bytes())
 		localAuthReason := service.GetOpsLocalAuthRejectReason(c)
 		if localAuthReason != "" && status == http.StatusUnauthorized {
 			apiKey, _ := middleware2.GetAPIKeyFromContext(c)
@@ -962,7 +962,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			return
 		}
 
-		body := w.buf.Bytes()
+		body := failureBody
 		parsed := parseOpsErrorResponse(body)
 
 		// Skip logging if a passthrough rule with skip_monitoring=true matched.
@@ -1047,6 +1047,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			IsRetryable: classifyOpsIsRetryable(normalizedType, status),
 			RetryCount:  0,
 			CreatedAt:   time.Now(),
+		}
+		if localFailure {
+			entry.ErrorSource = "gateway"
 		}
 		if localAuthReason != "" && status == http.StatusUnauthorized {
 			entry.ErrorType = service.OpsLocalAuthErrorType(localAuthReason)
@@ -1347,6 +1350,8 @@ func parseOpsErrorResponse(body []byte) parsedOpsError {
 		var code string
 		if v, ok := errObj["code"]; ok {
 			switch n := v.(type) {
+			case string:
+				code = n
 			case float64:
 				code = strconvItoa(int(n))
 			case int:
@@ -1427,6 +1432,10 @@ func classifyOpsPhase(errType, message, code string) string {
 	// Standardized phases: request|auth|routing|upstream|network|internal
 	// Map billing/concurrency/response => request; scheduling => routing.
 	switch strings.TrimSpace(code) {
+	case "no_available_account", "account_concurrency":
+		return "routing"
+	case "user_concurrency":
+		return "request"
 	case opsCodeInsufficientBalance, opsCodeUsageLimitExceeded, opsCodeSubscriptionNotFound, opsCodeSubscriptionInvalid:
 		return "request"
 	}
@@ -1437,6 +1446,9 @@ func classifyOpsPhase(errType, message, code string) string {
 	case "billing_error", "subscription_error":
 		return "request"
 	case "rate_limit_error":
+		if strings.Contains(msg, "concurrency limit exceeded for account") {
+			return "routing"
+		}
 		if strings.Contains(msg, "concurrency") || strings.Contains(msg, "pending") || strings.Contains(msg, "queue") {
 			return "request"
 		}
@@ -1446,7 +1458,8 @@ func classifyOpsPhase(errType, message, code string) string {
 	case "upstream_error", "overloaded_error":
 		return "upstream"
 	case "api_error":
-		if strings.Contains(msg, opsErrNoAvailableAccounts) {
+		if strings.Contains(msg, opsErrNoAvailableAccounts) || strings.Contains(msg, "no available openai oauth account") ||
+			strings.Contains(msg, "no available openai accounts") || msg == "no available account" {
 			return "routing"
 		}
 		return "internal"

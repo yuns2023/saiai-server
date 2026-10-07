@@ -2881,6 +2881,18 @@ func (s *OpenAIGatewayService) BuildChatGPTFileDownloadRequest(
 	account *Account,
 	path string,
 ) (*http.Request, string, error) {
+	return s.BuildChatGPTControlRequest(ctx, c, account, path)
+}
+
+// BuildChatGPTControlRequest preserves the native model-catalog or asset GET
+// path and query. Native Chat catalogs have their own schema, separate from
+// Codex /v1/models.
+func (s *OpenAIGatewayService) BuildChatGPTControlRequest(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	path string,
+) (*http.Request, string, error) {
 	return s.buildChatGPTRequest(ctx, c, account, http.MethodGet, nil, path)
 }
 
@@ -2975,7 +2987,18 @@ func (s *OpenAIGatewayService) ForwardChatGPTFileDownload(
 	account *Account,
 	path string,
 ) (*http.Response, error) {
-	req, proxyURL, err := s.BuildChatGPTFileDownloadRequest(ctx, c, account, path)
+	return s.ForwardChatGPTControl(ctx, c, account, path)
+}
+
+// ForwardChatGPTControl forwards a native read-only control request. The
+// caller owns the unchanged response body.
+func (s *OpenAIGatewayService) ForwardChatGPTControl(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	path string,
+) (*http.Response, error) {
+	req, proxyURL, err := s.BuildChatGPTControlRequest(ctx, c, account, path)
 	if err != nil {
 		return nil, err
 	}

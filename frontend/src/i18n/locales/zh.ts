@@ -3820,6 +3820,9 @@ export default {
       },
       // Error Detail Modal
       errorDetail: {
+        noModelInitialization: '初始化 / 无模型调用',
+        noModelCatalog: '模型目录 / 无模型调用',
+        noModelAsset: '文件下载 / 无模型调用',
         title: '错误详情',
         titleWithId: '错误 #{id}',
         noErrorSelected: '未选择错误。',

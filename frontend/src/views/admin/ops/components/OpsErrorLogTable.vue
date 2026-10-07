@@ -83,11 +83,11 @@
 
               <!-- Model -->
               <td class="px-4 py-2">
-                <div class="max-w-[120px] truncate" :title="log.model">
+                <div class="max-w-[120px] truncate" :title="getOpsModelLabel(log, t)">
                   <span v-if="log.model" class="font-mono text-[11px] text-gray-700 dark:text-gray-300">
                     {{ log.model }}
                   </span>
-                  <span v-else class="text-xs text-gray-400">-</span>
+                  <span v-else class="text-xs text-gray-400">{{ getOpsModelLabel(log, t) }}</span>
                 </div>
               </td>
 
@@ -183,7 +183,7 @@
 import { useI18n } from 'vue-i18n'
 import Pagination from '@/components/common/Pagination.vue'
 import type { OpsErrorLog } from '@/api/admin/ops'
-import { getSeverityClass, formatDateTime } from '../utils/opsFormatters'
+import { getSeverityClass, formatDateTime, getOpsModelLabel } from '../utils/opsFormatters'
 
 const { t } = useI18n()
 

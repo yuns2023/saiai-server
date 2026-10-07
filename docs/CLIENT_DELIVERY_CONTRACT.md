@@ -240,7 +240,14 @@ client identity headers, and streams the upstream event response without
 converting it to Responses. `Set-Cookie` and hop-by-hop response headers are
 not returned to the client.
 
-The same experimental namespace includes the Desktop file-asset resolver
+The same experimental namespace forwards the ordinary Chat model catalog
+`GET /chatgpt/backend-api/models` with its native schema, path and raw query.
+It is independent from the Codex `/v1/models` catalog. Initialization,
+catalog and asset requests are control requests, not model turns. Account
+type eligibility is enforced before reserving a concurrency slot; a pool
+containing only API-key accounts fails without reserving those accounts.
+
+The namespace also includes the Desktop file-asset resolver
 `GET /chatgpt/backend-api/files/download/{file_id}` and the signed asset-byte
 path `GET /chatgpt/backend-api/estuary/content`. The first is a control-plane
 request: the Gateway selects the account bound to the optional
@@ -248,9 +255,9 @@ request: the Gateway selects the account bound to the optional
 through the provider's short-lived JSON result (`download_url`, `retry`, or
 `error`) without counting a model turn. The second preserves the provider's
 binary response. Current Desktop-signed URLs expose an opaque provider `cid`,
-not the conversation UUID; the present implementation uses it only as a
-best-effort scheduler hash and has been validated with one active staging
-account. Do not treat that value as multi-account conversation affinity. A
+not the conversation UUID; it is preserved in the upstream query and is not
+used to create a conversation binding. The resolver has been validated with
+one active staging account. Do not treat that value as multi-account conversation affinity. A
 native Chat implementation is not complete for image generation unless both
 resolver paths are available end to end, and production multi-account use
 still requires an explicit file-to-account binding.
@@ -295,6 +302,13 @@ The versioned native-Chat accounting rules and activation gates are defined in
 In particular, the Desktop thread-usage endpoint returns a cumulative,
 eventually-consistent conversation snapshot; parsing it does not make it safe
 to pass directly to request-level billing.
+
+Ops records the requested model before native Chat or WebSocket account
+selection fails. A control request with no model carries no synthesized model.
+After an HTTP 101 upgrade or SSE keepalive, a local terminal rejection is still
+recorded with its semantic error status, the original transport status and,
+for WebSockets, the close code. This does not change the wire status, close
+frame, upstream payload or stream completion events.
 
 `gateway.openai_chat_response_shape_capture` is a default-off, staging-only
 diagnostic. It may record protocol field names but never field values or
