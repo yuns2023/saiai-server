@@ -91,7 +91,8 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	}
 	fixedTurnPriceUSD := h.cfg.Gateway.OpenAIChatSuccessTurnPriceUSD
 	fixedTurnBillingEnabled := service.IsValidOpenAIChatGPTTurnPrice(fixedTurnPriceUSD)
-	if strings.TrimSpace(h.cfg.Gateway.OpenAIChatUpstreamBaseURL) == "" && !fixedTurnBillingEnabled {
+	isModelRequest := c.Request.URL.Path == "/chatgpt/backend-api/f/conversation"
+	if isModelRequest && strings.TrimSpace(h.cfg.Gateway.OpenAIChatUpstreamBaseURL) == "" && !fixedTurnBillingEnabled {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
 			"type": "service_unavailable", "message": "Native ChatGPT Chat requires fixed-turn billing or an explicit staging upstream",
 		}})
@@ -112,7 +113,6 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		return
 	}
 	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-	isModelRequest := c.Request.URL.Path == "/chatgpt/backend-api/f/conversation"
 	setOpsRequestContext(c, model, isModelRequest, body)
 	if isModelRequest && !fixedTurnBillingEnabled && !h.cfg.Gateway.OpenAIChatUnaccountedAllowed {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
@@ -412,13 +412,6 @@ func (h *OpenAIGatewayHandler) chatGPTControlGET(c *gin.Context, sessionHash, fa
 	if h == nil || h.cfg == nil || !h.cfg.Gateway.OpenAIChatEnabled {
 		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{
 			"type": "not_found_error", "message": "Native ChatGPT Chat is disabled",
-		}})
-		return
-	}
-	fixedTurnBillingEnabled := service.IsValidOpenAIChatGPTTurnPrice(h.cfg.Gateway.OpenAIChatSuccessTurnPriceUSD)
-	if strings.TrimSpace(h.cfg.Gateway.OpenAIChatUpstreamBaseURL) == "" && !fixedTurnBillingEnabled {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
-			"type": "service_unavailable", "message": "Native ChatGPT Chat requires fixed-turn billing or an explicit staging upstream",
 		}})
 		return
 	}

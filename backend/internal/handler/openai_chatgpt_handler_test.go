@@ -89,6 +89,61 @@ func (s *chatGPTSlotCache) GetAccountsLoadBatch(_ context.Context, accounts []se
 	return load, nil
 }
 
+func TestChatGPTControlsDoNotRequireModelBilling(t *testing.T) {
+	groupID := int64(9)
+	account := service.Account{ID: 19, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 10,
+		Credentials: map[string]any{"access_token": "TEST_ONLY", "chatgpt_account_id": "TEST_ONLY_ACCOUNT"}}
+	cache := &chatGPTSlotCache{active: make(map[string]int64), attempts: make(map[int64]int)}
+	concurrency := service.NewConcurrencyService(cache)
+	upstream := &chatGPTReplayUpstream{responseBody: `{"models":[{"slug":"auto"}],"extension":{"kept":true}}`}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIChatEnabled = true
+	// Match native staging: no replay override, no price, and no permission
+	// to send unaccounted model turns. Non-billable controls still work.
+	svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, nil,
+		cfg, nil, concurrency, nil, nil, nil, upstream, nil, nil)
+	h := NewOpenAIGatewayHandler(svc, concurrency, nil, nil, nil, nil, nil, cfg)
+	controls := []struct {
+		method, path string
+		handler      gin.HandlerFunc
+	}{
+		{http.MethodPost, "/chatgpt/backend-api/conversation/init", h.ChatGPTConversation},
+		{http.MethodPost, "/chatgpt/backend-api/f/conversation/prepare", h.ChatGPTConversation},
+		{http.MethodPost, "/chatgpt/backend-api/sentinel/chat-requirements/prepare", h.ChatGPTConversation},
+		{http.MethodGet, "/chatgpt/backend-api/models?language=zh-CN&x=a%2Bb&x=c", h.ChatGPTModels},
+		{http.MethodGet, "/chatgpt/backend-api/estuary/content?id=file_fixture&cid=opaque-content-id", h.ChatGPTEstuaryContent},
+	}
+	for _, control := range controls {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(control.method, control.path, bytes.NewBufferString(`{"client_extension": [1,2]}`))
+		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{ID: 3, GroupID: &groupID,
+			Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}})
+		control.handler(c)
+		require.Equal(t, http.StatusOK, w.Code, control.path)
+		require.Equal(t, upstream.responseBody, w.Body.String())
+		require.Equal(t, "https://chatgpt.com"+control.path[len("/chatgpt"):], upstream.req.URL.String())
+		require.Empty(t, cache.active)
+	}
+	previousCalls := upstream.calls
+	for _, enabled := range []bool{true, false} {
+		cfg.Gateway.OpenAIChatEnabled = enabled
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewBufferString(`{"model":"auto","messages":[]}`))
+		h.ChatGPTConversation(c)
+		if enabled {
+			require.Equal(t, http.StatusServiceUnavailable, w.Code)
+			require.Contains(t, w.Body.String(), "requires fixed-turn billing")
+		} else {
+			require.Equal(t, http.StatusNotFound, w.Code)
+		}
+		require.Equal(t, previousCalls, upstream.calls, "model turns must remain blocked")
+		require.Empty(t, cache.active)
+	}
+}
+
 func TestChatGPTControlsRepeatedFailuresDoNotConsumeCodexSlots(t *testing.T) {
 	groupID := int64(9)
 	key := service.Account{ID: 18, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 10}

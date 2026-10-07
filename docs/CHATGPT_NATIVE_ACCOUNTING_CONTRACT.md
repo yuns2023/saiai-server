@@ -73,7 +73,11 @@ top-level field names, immediate `message.metadata` field names, and usage-like
 field paths. Values, conversation IDs, message content, and arbitrary message
 content keys are not logged. Disable it again when the window closes.
 
-Control-plane requests are not model turns and are never billable.
+Control-plane requests are not model turns and are never billable. When native
+Chat is explicitly enabled, catalog, initialization, preparation, and asset
+requests do not require a model-turn price or a replay upstream. They still
+require an authenticated OpenAI group and a schedulable OAuth account. The
+final `/f/conversation` request retains its separate billing/staging gate.
 
 ## Fixed successful-turn contract
 
