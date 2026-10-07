@@ -394,12 +394,19 @@ func TestOpenAINativeOAuth_SSEPreservesUnknownJSONEvents(t *testing.T) {
 	require.Equal(t, events, observed)
 }
 
-func TestOpenAINativeOAuth_HeaderPresenceAndSessionIsolation(t *testing.T) {
+func TestOpenAINativeOAuth_HeaderPresenceAndSessionValues(t *testing.T) {
+	identities := map[string][]string{
+		"session_id":      {"client_session", "client_session_second"},
+		"session-id":      {"client_session_hyphen", "client_session_hyphen_second"},
+		"conversation_id": {"", "client_conversation_second"},
+		"conversation-id": {"client_conversation_hyphen", "client_conversation_hyphen_second"},
+	}
 	for _, path := range []string{"/v1/responses", "/v1/responses/compact"} {
 		c, _ := auditOAuthPolicyContext(path + "?dup=a%2Fb&dup=a+b&empty=&flag")
 		c.Request.Header["Accept"] = []string{"application/json; profile=future", "text/event-stream"}
-		c.Request.Header.Set("session_id", "client_session")
-		c.Request.Header.Set("Conversation-Id", "client_conversation")
+		for name, values := range identities {
+			c.Request.Header[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
+		}
 		c.Request.Header.Set("Connection", "keep-alive, X-Mock-Hop")
 		c.Request.Header.Set("X-Mock-Hop", "private_hop")
 		c.Request.Header.Set("Forwarded", "for=192.0.2.1")
@@ -410,22 +417,51 @@ func TestOpenAINativeOAuth_HeaderPresenceAndSessionIsolation(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, c.Request.URL.RawQuery, req.URL.RawQuery)
 		require.Equal(t, c.Request.Header.Values("Accept"), req.Header.Values("Accept"))
-		require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "client_session"), req.Header.Get("session_id"))
-		require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "client_conversation"), req.Header.Get("Conversation-Id"))
-		require.Empty(t, req.Header.Values("conversation_id"))
+		for name, values := range identities {
+			require.Equal(t, values, req.Header.Values(name), name)
+		}
 		for _, name := range []string{"Connection", "X-Mock-Hop", "Forwarded", "Via"} {
 			require.Empty(t, req.Header.Values(name), name)
 		}
-		c.Request.Header.Del("session_id")
-		c.Request.Header.Del("Conversation-Id")
+		for name := range identities {
+			c.Request.Header.Del(name)
+		}
 		c.Request.Header.Del("Accept")
 		req, err = svc.buildUpstreamRequest(context.Background(), c, account, nil, "MOCK_ONLY", false, "cache_key", true)
 		require.NoError(t, err)
-		require.Empty(t, req.Header.Values("session_id"))
-		require.Empty(t, req.Header.Values("conversation_id"))
+		for name := range identities {
+			require.Empty(t, req.Header.Values(name), name)
+		}
 		require.Empty(t, req.Header.Values("Accept"))
 		require.Empty(t, req.Header.Values("Content-Type"))
 	}
+}
+
+func TestOpenAINativeOAuth_UnchangedSessionValuesKeepUserAndAccountOwnership(t *testing.T) {
+	svc := auditOAuthPolicyService(nil)
+	account := auditOAuthPolicyAccount()
+	c, _ := auditOAuthPolicyContext("/v1/responses")
+	c.Set("api_key", &APIKey{ID: 7, UserID: 55})
+	c.Request.Header.Set("session_id", "same_client_session")
+	c.Request.Header.Set(openAIWSTurnStateHeader, "MOCK_USER_55_STATE")
+	sessionHash := svc.openAISessionHashForTurnState(c, "")
+	svc.bindOpenAINativeTurnState(account, 55, sessionHash, "MOCK_USER_55_STATE")
+	req, err := svc.buildUpstreamRequest(context.Background(), c, account, nil, "MOCK_ONLY", false, "", true)
+	require.NoError(t, err)
+	require.Equal(t, "same_client_session", req.Header.Get("session_id"))
+	require.Equal(t, "MOCK_USER_55_STATE", req.Header.Get(openAIWSTurnStateHeader))
+
+	c.Set("api_key", &APIKey{ID: 8, UserID: 56})
+	req, err = svc.buildUpstreamRequest(context.Background(), c, account, nil, "MOCK_ONLY", false, "", true)
+	require.ErrorIs(t, err, errOpenAITurnStateAccountMismatch, "matching wire session IDs cannot share another user's state")
+	require.Nil(t, req)
+
+	c.Set("api_key", &APIKey{ID: 7, UserID: 55})
+	otherAccount := auditOAuthPolicyAccount()
+	otherAccount.ID++
+	req, err = svc.buildUpstreamRequest(context.Background(), c, otherAccount, nil, "MOCK_ONLY", false, "", true)
+	require.ErrorIs(t, err, errOpenAITurnStateAccountMismatch, "matching wire session IDs cannot migrate account-bound state")
+	require.Nil(t, req)
 }
 
 func TestOpenAINativeOAuth_UnknownTurnStateRejectedBeforeHTTPProviderIO(t *testing.T) {

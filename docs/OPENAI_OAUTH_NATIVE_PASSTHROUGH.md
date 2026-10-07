@@ -14,15 +14,22 @@ Neither local proof establishes real-provider or deployed-pair acceptance.
 | Authentication | Replace Authorization and chatgpt-account-id with the selected provider account. Withhold client Cookie and proxy/API credentials. |
 | Destination | Map the Gateway endpoint to the native provider endpoint; preserve application query bytes, duplicates, order, and escaping. |
 | Transport | Rebuild Host, lengths, connection framing and WS transport headers; remove hop headers, including Connection-nominated fields, forwarding and proxy headers. Accept-Encoding remains transport-owned. |
-| Session isolation | Namespace supplied session/conversation IDs by user and selected account. Preserve each header's name, multiplicity and presence; do not derive absent headers from prompt_cache_key. This is a Gateway pool contract, not an asserted OpenAI requirement. |
 | Internal routing | Relay hops append their opaque loop marker; terminal OAuth removes it. |
 
 All other application headers remain client-authored, including User-Agent,
 originator, version, OpenAI-Beta, Accept, attestation and future control headers.
 Absent Accept/Content-Type remain absent. Model discovery preserves the actual
 client identity and query instead of impersonating a fixed CLI version.
+Session/conversation header names, values, multiplicity and presence remain
+client-authored, including underscore and hyphen aliases. Do not namespace
+their wire values or derive an absent header from prompt_cache_key. Turn-state
+and response ownership keep their user/account scope inside Gateway caches;
+preserving wire values does not relax continuation ownership checks.
 Explicit administrative probes without client headers retain their separate
 probe defaults.
+The public `/v1/models` route also recognizes the official client identity when
+`client_version` is absent. Its absence must not divert a native request into
+the generic model-list handler or synthesize a query parameter.
 
 ## Payloads, state and retries
 
@@ -112,7 +119,11 @@ app-server through the actual SAIAI executable, using isolated profiles and a
 TLS loopback capture that blocks other destinations. It compares capture,
 Gateway ingress and mock provider egress: method, endpoint mapping, raw query,
 encoded/decompressed body digests, frame type/order/digests, application header
-values/presence, and selected-account credential replacement. The direct mock
+values/presence, including exact session/conversation values, and selected-
+account credential replacement. The report pins both executable SHA-256s and
+the proof driver SHA-256. Offline negative controls require the comparator to
+reject rewritten session values, dropped/overwritten future headers, changed
+wire dimensions, missing receipts and incorrect endpoint mapping. The direct mock
 baseline separately checks the request interaction sequence, model/reasoning
 and exact turn-state fingerprints/response anchors/tool-output presence;
 independent client sessions have different
@@ -121,6 +132,16 @@ random IDs and their body digests are not claimed to match each other.
 This lab uses production request builders/relays but a thin test ingress;
 authentication, billing and the public middleware chain are covered separately
 by handler/unit tests, rather than a running production DB/Gateway instance.
+
+The public-route proof additionally runs RegisterGatewayRoutes, the actual
+API-key authentication middleware, admission, standard-mode balance checks,
+account selection, usage recording and billing application. Only persistent
+repositories/Redis are in-memory doubles. Production HTTPUpstream, the models
+client and the WS dialer use real TCP/TLS through a loopback-only account proxy;
+the provider-side HTTP/WS receiver records the bytes it actually receives.
+Every accepted non-warmup model payload must have exactly one usage record and
+one billing application. Missing authentication and unknown state must reach
+no provider request; JSON/zstd compact and Responses bodies are also checked.
 
 ```sh
 SAIAI_PROOF_CODEX_BINARY=/absolute/path/to/official/codex \
@@ -133,6 +154,11 @@ GOMAXPROCS=2 go test -p 1 -tags=unit ./internal/service \
 Python dependencies: cryptography and zstandard. Optional SAIAI_PROOF_TMPDIR
 selects the temporary lab parent. Profiles, synthetic auth, CA/private key and
 child process groups are removed on exit. Raw capture remains in memory.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+  -s backend/internal/service/testdata -p 'test_native_official_codex_probe.py'
+```
 
 ```sh
 cd backend
@@ -148,3 +174,16 @@ initiated HTTP fallback, tools and a second app-server turn. It does not cover
 Windows/macOS, a Desktop UI or an installed IDE extension, real provider
 acceptance, answer quality, Luna routing or a deployed Server/Client pair.
 Real provider model and catalog request count in these tests is zero.
+
+Run the public-route proof with the same binary/report variables:
+
+```sh
+GOMAXPROCS=2 go test -p 1 -tags=unit ./internal/server/routes \
+  -run '^TestNativeCodexGatewayRoutes$' -count=1 -timeout=180s
+```
+
+Its ordinary synthetic route/transport cases run without the binary variables;
+the official-binary subtest skips unless both paths are supplied. The official
+probe reports which Gateway fixture was used, avoiding a constructed-request
+claim being confused with observed transport bytes. Use a fresh test process
+(`-count=1`) for the fixture's ephemeral CA, matching process-wide CA loading.

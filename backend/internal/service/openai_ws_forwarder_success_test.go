@@ -477,21 +477,20 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	require.Equal(t, "window-oauth-1", captureDialer.lastHeaders.Get("X-Codex-Window-Id"))
 	require.Empty(t, captureDialer.lastHeaders.Get("Sec-WebSocket-Key"))
 	require.Empty(t, captureDialer.lastHeaders.Get("X-Forwarded-For"))
-	// OAuth 账号的 session_id/conversation_id 按用户和所选账号隔离，
-	// 测试中未设置 api_key 到 context，userID=0。
-	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "sess-oauth-1"), captureDialer.lastHeaders.Get("session_id"))
-	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "conv-oauth-1"), captureDialer.lastHeaders.Get("conversation_id"))
+	// Native OAuth preserves client session values; ownership is scoped internally.
+	require.Equal(t, "sess-oauth-1", captureDialer.lastHeaders.Get("session_id"))
+	require.Equal(t, "conv-oauth-1", captureDialer.lastHeaders.Get("conversation_id"))
 }
 
-func TestOpenAIGatewayService_BuildOpenAIWSHeadersIsolatesHyphenatedSessionAliases(t *testing.T) {
+func TestOpenAIGatewayService_BuildOpenAIWSHeadersPreservesHyphenatedSessionAliases(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodGet, "/openai/v1/responses", nil)
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.153.4")
 	c.Request.Header.Set("originator", "codex_cli_rs")
-	c.Request.Header.Set("Session-Id", "session-hyphen")
-	c.Request.Header.Set("Conversation-Id", "conversation-hyphen")
+	c.Request.Header["Session-Id"] = []string{"session-hyphen", "session-hyphen-second"}
+	c.Request.Header["Conversation-Id"] = []string{"conversation-hyphen", "conversation-hyphen-second"}
 
 	account := &Account{ID: 30, Type: AccountTypeOAuth}
 	svc := &OpenAIGatewayService{}
@@ -508,8 +507,8 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersIsolatesHyphenatedSessionAlias
 
 	require.Equal(t, "header_session_id", resolution.SessionSource)
 	require.Equal(t, "header_conversation_id", resolution.ConversationSource)
-	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "session-hyphen"), headers.Get("session-id"))
-	require.Equal(t, isolateOpenAIUserSessionIDForAccount(0, account.ID, "conversation-hyphen"), headers.Get("conversation-id"))
+	require.Equal(t, c.Request.Header.Values("Session-Id"), headers.Values("session-id"))
+	require.Equal(t, c.Request.Header.Values("Conversation-Id"), headers.Values("conversation-id"))
 	require.Empty(t, headers.Get("session_id"))
 	require.Empty(t, headers.Get("conversation_id"))
 }

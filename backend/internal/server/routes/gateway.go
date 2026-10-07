@@ -5,6 +5,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	pkgopenai "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -70,7 +71,8 @@ func RegisterGatewayRoutes(
 			h.Gateway.CountTokens(c)
 		})
 		gateway.GET("/models", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI && c.Query("client_version") != "" {
+			if getGroupPlatform(c) == service.PlatformOpenAI && (c.Query("client_version") != "" ||
+				pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))) {
 				h.OpenAIGateway.CodexModels(c)
 				return
 			}

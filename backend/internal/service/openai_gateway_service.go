@@ -3057,16 +3057,8 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			if err := s.validateOpenAINativeTurnState(account, getOpenAIUserIDFromContext(c), sessionHash, c.Request.Header); err != nil {
 				return nil, err
 			}
-			// Preserve presence and independently namespace each supplied identity.
-			for _, name := range []string{"session_id", "conversation_id", "session-id", "conversation-id"} {
-				if values, present := c.Request.Header[http.CanonicalHeaderKey(name)]; present {
-					isolated := make([]string, len(values))
-					for i, value := range values {
-						isolated[i] = isolateOpenAIUserSessionIDForAccount(getOpenAIUserIDFromContext(c), account.ID, value)
-					}
-					req.Header[http.CanonicalHeaderKey(name)] = isolated
-				}
-			}
+			// Session/conversation headers were copied verbatim above. User and
+			// account isolation belongs to internal ownership keys, not wire values.
 		} else {
 			// A turn-state token belongs to the account that issued it. The
 			// client may still carry an old token after the scheduler switches.

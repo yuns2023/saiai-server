@@ -41,6 +41,14 @@ APP_HEADERS = {"authorization", "cookie", "chatgpt-account-id", "host", "content
                "sec-websocket-version", "accept-encoding", "transfer-encoding"}
 
 
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as binary:
+        for block in iter(lambda: binary.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def request_json(base: str, path: str):
     # Disable environment proxies; this endpoint is the loopback Go fixture.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -408,10 +416,7 @@ def comparisons(captured, receipts):
                     unexpected.append(f"{kind}[{index}] {dimension}")
             headers = [{name.lower(): values for name, values in r["headers"].items()} for r in records]
             for name in set().union(*(h.keys() for h in headers)) - APP_HEADERS:
-                if name in {"session_id", "session-id", "conversation_id", "conversation-id"}:
-                    if headers[0].get(name) != headers[1].get(name) or len(headers[1].get(name, [])) != len(headers[2].get(name, [])):
-                        unexpected.append(f"{kind}[{index}] namespace presence {name}")
-                elif any(h.get(name) != headers[0].get(name) for h in headers[1:]):
+                if any(h.get(name) != headers[0].get(name) for h in headers[1:]):
                     unexpected.append(f"{kind}[{index}] header {name}")
         checks[kind] = counts[0]
     if unexpected:
@@ -424,10 +429,17 @@ def main():
     parser.add_argument("--codex", required=True)
     parser.add_argument("--client", required=True)
     parser.add_argument("--gateway", required=True)
+    parser.add_argument("--production-routes", action="store_true",
+                        help="verify public-route auth, standard billing and usage evidence")
     args = parser.parse_args()
     if not args.gateway.startswith("http://127.0.0.1:"):
         raise ValueError("only a loopback mock Gateway is accepted")
     report = {"result": "pass", "client_config_schema": 2, "real_provider_requests": 0, "cases": [], "body_capture_persisted": False}
+    report["gateway_fixture"] = "production_routes_loopback_tls" if args.production_routes else "service_builders_recording_mocks"
+    report["codex_sha256"] = file_sha256(args.codex)
+    report["saiai_sha256"] = file_sha256(args.client)
+    report["driver_sha256"] = file_sha256(__file__)
+    report["application_header_comparison"] = "exact_values_presence_and_multiplicity"
     with tempfile.TemporaryDirectory(prefix="saiai-native-official-", dir=os.environ.get("SAIAI_PROOF_TMPDIR")) as temporary:
         root = Path(temporary)
         tls, ca, key = certificates(root)
@@ -483,6 +495,18 @@ def main():
                         stable = lambda rows: [{k: r[k] for k in ["model", "reasoning", "has_turn_state", "turn_state_sha256", "previous_response_id", "has_tool_output", "warmup", "message_type"]} for r in rows if r["kind"] in {"http", "frame"}]
                         if stable(capture.records) != baseline:
                             raise RuntimeError("official direct and SAIAI request interaction differs")
+                        if args.production_routes:
+                            deadline = time.monotonic() + 4
+                            while True:
+                                gateway_control = request_json(args.gateway, "/_proof/control")
+                                if gateway_control["usage_records"] >= len(requests) or time.monotonic() > deadline:
+                                    break
+                                time.sleep(0.02)
+                            if gateway_control["usage_records"] != len(requests) or gateway_control["billing_applications"] != len(requests):
+                                raise RuntimeError("public-route usage or billing count differs from accepted model payloads")
+                            if gateway_control["auth_checks"] < 1 or gateway_control["balance_checks"] < 1 or gateway_control["run_mode"] != "standard" or gateway_control["blocked_provider_destinations"]:
+                                raise RuntimeError("public-route authentication, billing or closed egress evidence incomplete")
+                            control["gateway"] = gateway_control
                         report["cases"].append({"surface": surface, "transport": "http-client-fallback" if fallback else "ws", "control": control,
                                                 "compared_requests": checks, "unexpected_changes": 0, "blocked_other_destinations": capture.blocked,
                                                 "turn_state_values_match_direct": True,

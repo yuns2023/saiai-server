@@ -1136,17 +1136,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		if accountID := account.GetChatGPTAccountID(); accountID != "" {
 			headers.Set("chatgpt-account-id", accountID)
 		}
-		// The dedicated native relay validates supplied turn-state before calling
-		// this builder. Do not collapse multi-value identity/control headers.
-		for _, name := range []string{"session_id", "conversation_id", "session-id", "conversation-id"} {
-			if values, present := c.Request.Header[http.CanonicalHeaderKey(name)]; present {
-				isolated := make([]string, len(values))
-				for i, value := range values {
-					isolated[i] = isolateOpenAIUserSessionIDForAccount(getOpenAIUserIDFromContext(c), account.ID, value)
-				}
-				headers[http.CanonicalHeaderKey(name)] = isolated
-			}
-		}
+		// The native relay validates turn-state ownership before calling this
+		// builder. Preserve client session/conversation values on the wire;
+		// user/account scoping stays in the internal ownership store.
 		return headers, resolveOpenAIWSSessionHeaders(c, "")
 	}
 	// The copied client value may have come from a different pooled account.
@@ -1238,7 +1230,7 @@ func shouldCopyOpenAIWSRequestHeader(key string) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "conversation-id", "conversation_id", "sec-websocket-extensions", "sec-websocket-key", "sec-websocket-version", "session-id", "session_id":
+	case "sec-websocket-extensions", "sec-websocket-key", "sec-websocket-version", "sec-websocket-accept":
 		return false
 	default:
 		return true

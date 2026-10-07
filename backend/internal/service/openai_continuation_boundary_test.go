@@ -259,7 +259,10 @@ func TestOpenAITurnStateNeverCrossesOAuthAccounts(t *testing.T) {
 	requestB, err := svc.buildUpstreamRequest(context.Background(), c, accountB, []byte(`{"model":"gpt-5.1"}`), "test-token", false, "", true)
 	require.NoError(t, err)
 	require.Empty(t, requestB.Header.Get(openAIWSTurnStateHeader))
-	require.NotEqual(t, requestA.Header.Get("session_id"), requestB.Header.Get("session_id"))
+	require.Equal(t, "one-client-session", requestA.Header.Get("session_id"))
+	require.Equal(t, "one-client-session", requestB.Header.Get("session_id"))
+	require.NotEqual(t, openAIWSUserTurnStateSessionHash(userID, accountA.ID, userHashA),
+		openAIWSUserTurnStateSessionHash(userID, accountB.ID, userHashA), "account isolation remains internal")
 	c.Request.Header.Set(openAIWSTurnStateHeader, "state-from-a")
 	userHash := svc.GenerateSessionHash(c, nil)
 	store.BindSessionTurnState(0, openAIWSUserTurnStateSessionHash(userID, accountA.ID, userHash), "state-from-a", time.Hour)
