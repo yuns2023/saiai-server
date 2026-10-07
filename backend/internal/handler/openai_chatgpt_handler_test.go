@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -103,7 +104,7 @@ func TestChatGPTControlsDoNotRequireModelBilling(t *testing.T) {
 	// to send unaccounted model turns. Non-billable controls still work.
 	svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, nil,
 		cfg, nil, concurrency, nil, nil, nil, upstream, nil, nil)
-	h := NewOpenAIGatewayHandler(svc, concurrency, nil, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(svc, concurrency, nil, nil, nil, nil, nil, cfg, nil)
 	controls := []struct {
 		method, path string
 		handler      gin.HandlerFunc
@@ -174,7 +175,7 @@ func TestChatGPTBoundedStagingRequiresBothFencesAndNeverBypassesUnarmedBudget(t 
 			upstream := &chatGPTReplayUpstream{}
 			svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, nil,
 				cfg, nil, concurrency, nil, nil, nil, upstream, nil, nil)
-			h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg)
+			h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil)
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
 			c.Request = httptest.NewRequest(http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewBufferString(`{"model":"auto","messages":[]}`))
@@ -217,7 +218,7 @@ func TestChatGPTControlsRepeatedFailuresDoNotConsumeCodexSlots(t *testing.T) {
 			cfg.Gateway.OpenAIChatUpstreamBaseURL = "http://replay.example.test"
 			cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 			svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{accounts: accounts}, nil, nil, nil, nil, nil, nil, cfg, nil, concurrency, nil, nil, nil, upstream, nil, nil)
-			h := NewOpenAIGatewayHandler(svc, concurrency, nil, nil, nil, nil, nil, cfg)
+			h := NewOpenAIGatewayHandler(svc, concurrency, nil, nil, nil, nil, nil, cfg, nil)
 			controls := []struct {
 				method  string
 				path    string
@@ -286,7 +287,7 @@ func TestChatGPTUnarmedAttemptBudgetReleasesSelectedAccountSlot(t *testing.T) {
 		cfg, nil, concurrency, nil, nil, nil, upstream, nil, nil)
 	// Selection reserves the account. The handler's fallback cleanup owns that
 	// reservation even when the optional user-concurrency helper is absent.
-	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil)
 	for i := 0; i < 100; i++ {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -309,6 +310,7 @@ type chatGPTReplayUpstream struct {
 	responseBody string
 	statusCode   int
 	calls        int
+	onSend       func()
 }
 
 type chatGPTStickyCache struct {
@@ -360,6 +362,9 @@ func (c *chatGPTStickyCache) RefreshSessionTTL(context.Context, int64, string, t
 }
 
 func (u *chatGPTReplayUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	if u.onSend != nil {
+		u.onSend()
+	}
 	u.calls++
 	u.req = req
 	if req.Body != nil {
@@ -414,7 +419,7 @@ func TestChatGPTConversationStreamsReplayWithoutProtocolConversion(t *testing.T)
 		&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, cache, cfg,
 		nil, nil, nil, nil, nil, upstream, nil, nil,
 	)
-	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil)
 
 	body := []byte(`{"action":"next","messages":[{"id":"m1"}],"model":"auto","timezone":"America/Los_Angeles","timezone_offset_min":420}`)
 	w := httptest.NewRecorder()
@@ -486,7 +491,7 @@ func TestChatGPTConversationRejectsUnaccountedModelRequestByDefault(t *testing.T
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIChatEnabled = true
 	cfg.Gateway.OpenAIChatUpstreamBaseURL = "http://replay.example.test"
-	h := NewOpenAIGatewayHandler(nil, nil, nil, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(nil, nil, nil, nil, nil, nil, nil, cfg, nil)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(
@@ -530,7 +535,7 @@ func TestChatGPTFileDownloadForwardsDownloadURLAndConversationAffinity(t *testin
 		&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, cache, cfg,
 		nil, nil, nil, nil, nil, upstream, nil, nil,
 	)
-	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil)
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -592,7 +597,7 @@ func TestChatGPTMissingOAuthRecordsRequestedModelBeforeSelection(t *testing.T) {
 	cfg.Gateway.OpenAIChatUnaccountedAllowed = true
 	cfg.Gateway.OpenAIChatUpstreamBaseURL = "http://replay.example.test"
 	svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{account: key}, nil, nil, nil, nil, nil, nil, cfg, nil, service.NewConcurrencyService(cache), nil, nil, nil, upstream, nil, nil)
-	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewBufferString(`{"model":"mock-requested","messages":[]}`))
@@ -624,7 +629,7 @@ func TestChatGPTConversationBillsOnlySuccessfulTerminalTurn(t *testing.T) {
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.Default.RateMultiplier = 1
 	cfg.Gateway.OpenAIChatEnabled = true
-	cfg.Gateway.OpenAIChatSuccessTurnPriceUSD = 0.02
+	cfg.Gateway.OpenAIChatSuccessTurnPriceUSD = 0.07
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	billingCache := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
@@ -634,7 +639,10 @@ func TestChatGPTConversationBillsOnlySuccessfulTerminalTurn(t *testing.T) {
 		&chatGPTStickyCache{bindings: make(map[string]int64)}, cfg,
 		nil, nil, nil, nil, billingCache, upstream, &service.DeferredService{}, nil,
 	)
-	h := NewOpenAIGatewayHandler(svc, nil, billingCache, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(svc, nil, billingCache, nil, nil, nil, nil, cfg, nil)
+	priceSettings := &chatGPTPriceReader{price: 0.02}
+	h.chatGPTBillingSettings = priceSettings
+	upstream.onSend = func() { priceSettings.price = 0.03 }
 	body := []byte(`{"action":"next","messages":[{"id":"m1"}],"model":"auto"}`)
 
 	run := func(path string) *httptest.ResponseRecorder {
@@ -665,6 +673,7 @@ func TestChatGPTConversationBillsOnlySuccessfulTerminalTurn(t *testing.T) {
 	require.Zero(t, usageRepo.logs[0].TotalTokens())
 	require.InDelta(t, 0.02, usageRepo.logs[0].TotalCost, 1e-12)
 	require.InDelta(t, 0.025, usageRepo.logs[0].ActualCost, 1e-12)
+	require.Equal(t, body, upstream.body, "price lookup must not rewrite the model or body")
 
 	upstream.responseBody = "data: {\"conversation_id\":\"partial-conversation\"}\n\ndata: [DONE]\n\n"
 	incomplete := run("/chatgpt/backend-api/f/conversation")
@@ -718,6 +727,46 @@ func TestChatGPTConversationBillsOnlySuccessfulTerminalTurn(t *testing.T) {
 	require.Len(t, usageRepo.logs, 2)
 	disconnectedIdentity := service.ResolveChatGPTTurnBillingIdentity(disconnectedBody, "local:chatgpt-disconnected-turn")
 	require.Equal(t, disconnectedIdentity.RequestID, usageRepo.logs[1].RequestID)
+	require.InDelta(t, 0.03, usageRepo.logs[1].TotalCost, 1e-12, "new turns use the updated price")
+	require.Equal(t, 5, priceSettings.reads, "control requests must not read the model-turn price")
+}
+
+type chatGPTPriceReader struct {
+	price float64
+	err   error
+	reads int
+}
+
+func (r *chatGPTPriceReader) GetOpenAIChatGPTBillingSettings(context.Context) (*service.OpenAIChatGPTBillingSettings, error) {
+	r.reads++
+	return &service.OpenAIChatGPTBillingSettings{SuccessTurnPriceUSD: r.price}, r.err
+}
+
+func TestChatGPTBillingSettingsFailureAndZeroOverrideBlockBeforeSelection(t *testing.T) {
+	for _, broken := range []bool{false, true} {
+		t.Run(fmt.Sprintf("readFailure=%t", broken), func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAIChatEnabled = true
+			cfg.Gateway.OpenAIChatSuccessTurnPriceUSD = 0.02
+			reader := &chatGPTPriceReader{}
+			if broken {
+				reader.err = errors.New("settings database unavailable")
+				cfg.Gateway.OpenAIChatUnaccountedAllowed = true
+				cfg.Gateway.OpenAIProviderAttemptBudget.Enabled = true
+				cfg.Gateway.OpenAIChatModelRequestCap = 1
+			}
+			h := NewOpenAIGatewayHandler(nil, nil, nil, nil, nil, nil, nil, cfg, nil)
+			h.chatGPTBillingSettings = reader
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/chatgpt/backend-api/f/conversation", bytes.NewBufferString(`{"model":"requested-model","messages":[]}`))
+			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{ID: 3, Group: &service.Group{ID: 9, Platform: service.PlatformOpenAI}})
+			h.ChatGPTConversation(c)
+			require.Equal(t, http.StatusServiceUnavailable, w.Code)
+			require.Equal(t, 1, reader.reads)
+			require.Equal(t, "requested-model", c.GetString(opsModelKey))
+		})
+	}
 }
 
 func TestReleaseChatGPTControlSelection(t *testing.T) {

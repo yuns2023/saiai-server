@@ -172,6 +172,7 @@
 
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
+        <ChatGPTBillingSettings />
 
         <!-- Overload Cooldown (529) Settings -->
         <div class="card">
@@ -1471,6 +1472,7 @@ import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import ImageUpload from '@/components/common/ImageUpload.vue'
+import ChatGPTBillingSettings from '@/components/admin/ChatGPTBillingSettings.vue'
 import BackupSettings from '@/views/admin/BackupView.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { useAppStore } from '@/stores'

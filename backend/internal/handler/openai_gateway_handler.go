@@ -32,9 +32,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// OpenAIGatewayHandler handles OpenAI API gateway requests
+type chatGPTBillingSettingsReader interface {
+	GetOpenAIChatGPTBillingSettings(context.Context) (*service.OpenAIChatGPTBillingSettings, error)
+}
+
+// OpenAIGatewayHandler handles OpenAI API gateway requests.
 type OpenAIGatewayHandler struct {
 	gatewayService          *service.OpenAIGatewayService
+	chatGPTBillingSettings  chatGPTBillingSettingsReader
 	billingCacheService     *service.BillingCacheService
 	apiKeyService           *service.APIKeyService
 	usageRecordWorkerPool   *service.UsageRecordWorkerPool
@@ -56,6 +61,7 @@ func NewOpenAIGatewayHandler(
 	inputModerationService *service.InputModerationService,
 	errorPassthroughService *service.ErrorPassthroughService,
 	cfg *config.Config,
+	settingService *service.SettingService,
 ) *OpenAIGatewayHandler {
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 3
@@ -65,7 +71,7 @@ func NewOpenAIGatewayHandler(
 			maxAccountSwitches = cfg.Gateway.MaxAccountSwitches
 		}
 	}
-	return &OpenAIGatewayHandler{
+	h := &OpenAIGatewayHandler{
 		gatewayService:          gatewayService,
 		billingCacheService:     billingCacheService,
 		apiKeyService:           apiKeyService,
@@ -76,6 +82,10 @@ func NewOpenAIGatewayHandler(
 		maxAccountSwitches:      maxAccountSwitches,
 		cfg:                     cfg,
 	}
+	if settingService != nil {
+		h.chatGPTBillingSettings = settingService
+	}
+	return h
 }
 
 // ChatGPTConversation handles the experimental native ChatGPT conversation
@@ -89,8 +99,6 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		}})
 		return
 	}
-	fixedTurnPriceUSD := h.cfg.Gateway.OpenAIChatSuccessTurnPriceUSD
-	fixedTurnBillingEnabled := service.IsValidOpenAIChatGPTTurnPrice(fixedTurnPriceUSD)
 	isModelRequest := c.Request.URL.Path == "/chatgpt/backend-api/f/conversation"
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformOpenAI {
@@ -108,6 +116,20 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	}
 	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	setOpsRequestContext(c, model, isModelRequest, body)
+	// Snapshot the current price once, before provider traffic. An admin change
+	// during a long-running stream must not reprice that in-flight turn.
+	fixedTurnPriceUSD := h.cfg.Gateway.OpenAIChatSuccessTurnPriceUSD
+	if isModelRequest && h.chatGPTBillingSettings != nil {
+		settings, priceErr := h.chatGPTBillingSettings.GetOpenAIChatGPTBillingSettings(c.Request.Context())
+		if priceErr != nil || settings == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+				"type": "accounting_unavailable", "message": "Native ChatGPT Chat billing settings are unavailable",
+			}})
+			return
+		}
+		fixedTurnPriceUSD = settings.SuccessTurnPriceUSD
+	}
+	fixedTurnBillingEnabled := service.IsValidOpenAIChatGPTTurnPrice(fixedTurnPriceUSD)
 	boundedStaging := h.cfg.Gateway.OpenAIChatUnaccountedAllowed &&
 		h.cfg.Gateway.OpenAIProviderAttemptBudget.Enabled && h.cfg.Gateway.OpenAIChatModelRequestCap > 0
 	if isModelRequest && strings.TrimSpace(h.cfg.Gateway.OpenAIChatUpstreamBaseURL) == "" &&

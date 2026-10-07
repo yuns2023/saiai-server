@@ -52,6 +52,23 @@ an approved token-billing source for this version.
 
 ## Current admission rule
 
+Administrators can adjust the model-independent successful-turn base price at
+**Settings → Gateway → ChatGPT Chat billing**. The dedicated admin-only
+`GET`/`PUT /api/v1/admin/settings/chatgpt-billing` resource contains the numeric
+`success_turn_price_usd` field. PUT requires that field and changes only the
+native Chat price. Values must be finite and non-negative; zero disables paid
+native Chat turns rather than enabling free traffic. Existing group/user
+multipliers still apply. This setting does not change Responses/Codex prices
+or the model in the forwarded request.
+
+The persisted `openai_chat_success_turn_price_usd` setting takes precedence
+over startup configuration, including an explicit zero. Only an absent setting
+falls back to the configured price. Database failures or malformed stored
+values reject final model turns before upstream traffic. Each turn snapshots
+its price once on admission, so updates apply immediately to new requests
+across Gateway instances without changing the price of a stream in progress.
+Catalog and initialization requests do not read or require this price.
+
 `gateway.openai_chat_success_turn_price_usd=0` and
 `gateway.openai_chat_unaccounted_allowed=false` are the production-safe
 defaults. A final `/f/conversation` request is rejected before account

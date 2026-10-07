@@ -4463,6 +4463,17 @@ export default {
     // Settings
     settings: {
       title: '系统设置',
+      chatgptBilling: {
+        title: 'ChatGPT 普通聊天计费',
+        description: '普通 Chat 的所有模型统一按成功轮次计费；Codex 继续使用原有计费方式。',
+        price: '每成功轮次基础价格（美元）',
+        priceHint: '失败或未完整完成不计费。现有分组和用户倍率照常适用。填写 0 将停用普通 Chat 请求。',
+        save: '保存聊天价格',
+        saved: '聊天价格已保存，对新请求立即生效。',
+        loadFailed: '无法读取聊天价格，请重试。',
+        retry: '重试',
+        saveFailed: '保存聊天价格失败，请重试。',
+      },
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',
       tabs: {
         general: '通用设置',

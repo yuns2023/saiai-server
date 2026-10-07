@@ -45,7 +45,7 @@ func TestOpenAIImagesUsageRecordsActualProviderEndpoint(t *testing.T) {
 			t.Cleanup(billingCache.Stop)
 			svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{account: account}, usageRepo, nil, nil, nil, nil,
 				nil, cfg, nil, concurrency, service.NewBillingService(cfg, nil), nil, billingCache, upstream, &service.DeferredService{}, nil)
-			h := NewOpenAIGatewayHandler(svc, concurrency, billingCache, &service.APIKeyService{}, nil, nil, nil, cfg)
+			h := NewOpenAIGatewayHandler(svc, concurrency, billingCache, &service.APIKeyService{}, nil, nil, nil, cfg, nil)
 			body := []byte(`{ "model":"gpt-image-2", "prompt":"TEST_ONLY", "future_extension":true }`)
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)

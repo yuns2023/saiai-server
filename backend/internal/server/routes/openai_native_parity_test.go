@@ -121,7 +121,7 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 		nil, nil, nil, cache, cfg, nil, concurrency, service.NewBillingService(cfg, pricing), nil, billingCache,
 		repository.NewHTTPUpstream(cfg), &service.DeferredService{}, nil)
 	defer svc.CloseOpenAIWSPool()
-	gatewayHandler := handler.NewOpenAIGatewayHandler(svc, concurrency, billingCache, keyService, nil, nil, nil, cfg)
+	gatewayHandler := handler.NewOpenAIGatewayHandler(svc, concurrency, billingCache, keyService, nil, nil, nil, cfg, nil)
 	router := gin.New()
 	// Observe before the versioned public middleware chain. Body reads are
 	// restored exactly, and the WS observer only tees reads after Hijack.

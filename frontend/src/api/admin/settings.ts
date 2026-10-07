@@ -280,6 +280,22 @@ export async function updateOverloadCooldownSettings(
   return data
 }
 
+export interface ChatGPTBillingSettings {
+  success_turn_price_usd: number
+}
+
+export async function getChatGPTBillingSettings(): Promise<ChatGPTBillingSettings> {
+  const { data } = await apiClient.get<ChatGPTBillingSettings>('/admin/settings/chatgpt-billing')
+  return data
+}
+
+export async function updateChatGPTBillingSettings(
+  settings: ChatGPTBillingSettings
+): Promise<ChatGPTBillingSettings> {
+  const { data } = await apiClient.put<ChatGPTBillingSettings>('/admin/settings/chatgpt-billing', settings)
+  return data
+}
+
 export const settingsAPI = {
   getSettings,
   updateSettings,
@@ -289,7 +305,9 @@ export const settingsAPI = {
   regenerateAdminApiKey,
   deleteAdminApiKey,
   getOverloadCooldownSettings,
-  updateOverloadCooldownSettings
+  updateOverloadCooldownSettings,
+  getChatGPTBillingSettings,
+  updateChatGPTBillingSettings
 }
 
 export default settingsAPI

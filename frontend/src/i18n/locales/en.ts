@@ -4301,6 +4301,17 @@ export default {
     // Settings
     settings: {
       title: 'System Settings',
+      chatgptBilling: {
+        title: 'ChatGPT Chat billing',
+        description: 'All ordinary Chat models share a price per successful turn. Codex keeps its existing billing.',
+        price: 'Base price per successful turn (USD)',
+        priceHint: 'Failed or incomplete turns are not charged. Existing group and user multipliers apply. Set 0 to disable ordinary Chat requests.',
+        save: 'Save Chat price',
+        saved: 'Chat price saved. New requests use it immediately.',
+        loadFailed: 'Unable to load the Chat price. Please retry.',
+        retry: 'Retry',
+        saveFailed: 'Unable to save the Chat price. Please retry.',
+      },
       description: 'Manage registration, email verification, default values, and SMTP settings',
       tabs: {
         general: 'General',
