@@ -3,9 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestChatGPTTurnCacheSnapshotScopeAndExpiry(t *testing.T) {
@@ -16,6 +17,7 @@ func TestChatGPTTurnCacheSnapshotScopeAndExpiry(t *testing.T) {
 	key := scope.TurnKey(first.Identity)
 	copy, err := cache.PutChatGPTTurnIfAbsent(ctx, key, first, time.Minute)
 	require.NoError(t, err)
+	require.Equal(t, first, copy)
 	second := *first
 	second.BasePriceUSD = 0.09
 	second.AccountID = 20
@@ -49,7 +51,8 @@ func TestChatGPTTurnCacheSnapshotScopeAndExpiry(t *testing.T) {
 	raw, err := json.Marshal(resume)
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "PRIVATE_CONVERSATION")
-	mem := cache.(*chatGPTMemoryTurnCache)
+	mem, ok := cache.(*chatGPTMemoryTurnCache)
+	require.True(t, ok)
 	entry := mem.turns[scope.TurnKey(other.Identity)]
 	entry.expires = time.Now().Add(-time.Second)
 	mem.turns[scope.TurnKey(other.Identity)] = entry
