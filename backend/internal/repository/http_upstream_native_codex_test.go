@@ -23,7 +23,7 @@ func TestHTTPUpstream_NativeCodexPreservesWireAndRejectsImplicitRedirects(t *tes
 					encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
 					require.NoError(t, err)
 					wire = encoder.EncodeAll(wire, nil)
-					encoder.Close()
+					require.NoError(t, encoder.Close())
 				}
 				var redirects atomic.Int32
 				type observedRequest struct {

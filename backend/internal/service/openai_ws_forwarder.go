@@ -4161,7 +4161,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseID(
 	// Native OAuth owns continuations independently of transport. Preserve
 	// affinity after a client falls back to HTTP or WS is disabled. Legacy
 	// group-scoped/API-key scheduling retains its previous WS-only behavior.
-	if !(useUserScope && account.IsOpenAIOAuth()) && s.getOpenAIWSProtocolResolver().Resolve(account).Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+	if (!useUserScope || !account.IsOpenAIOAuth()) && s.getOpenAIWSProtocolResolver().Resolve(account).Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 		return nil, nil
 	}
 	if shouldClearStickySession(account, requestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {

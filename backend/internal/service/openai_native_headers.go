@@ -80,7 +80,7 @@ func (s *OpenAIGatewayService) WriteNativeCodexResponseHeaders(dst, src http.Hea
 	s.writeOpenAINativeResponseHeaders(dst, src)
 }
 
-var errOpenAITurnStateAccountMismatch = errors.New("Codex turn state cannot be verified for the selected account; start a fresh conversation")
+var errOpenAITurnStateAccountMismatch = errors.New("codex turn state cannot be verified for the selected account; start a fresh conversation")
 
 func IsOpenAITurnStateAccountMismatch(err error) bool {
 	return errors.Is(err, errOpenAITurnStateAccountMismatch)
