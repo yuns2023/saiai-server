@@ -471,7 +471,9 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 					if fixedTurnBillingEnabled && (turn == nil || !turn.Completed) {
 						userAgent := c.GetHeader("User-Agent")
 						clientIP := ip.GetClientIP(c)
-						inboundEndpoint := GetInboundEndpoint(c)
+						// Gin registers resume through /*subpath. Store the concrete
+						// native path so usage DTOs retain turn/unknown-token metadata.
+						inboundEndpoint := c.Request.URL.Path
 						upstreamEndpoint := strings.TrimPrefix(c.Request.URL.Path, "/chatgpt")
 						duration := time.Since(requestStart)
 						h.submitChatGPTUsageRecordTask(func(ctx context.Context) {

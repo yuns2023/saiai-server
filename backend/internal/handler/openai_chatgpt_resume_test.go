@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"net/http"
-	"net/http/httptest"
-	"testing"
 )
 
 type chatGPTSharedTurnCache struct {
@@ -58,26 +59,30 @@ func TestChatGPTProHandoffResumeUsesOriginalAccountPriceAndIdentity(t *testing.T
 	disconnect := false
 	run := func(h *OpenAIGatewayHandler, path, body string, keyID, userID, gid int64) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
 		clientContext, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		c.Request = c.Request.WithContext(clientContext)
-		if disconnect {
-			c.Writer = &chatGPTDisconnectLeaseWriter{c.Writer, cancel, func() {
-				require.Error(t, clientContext.Err())
-				require.NoError(t, slots.lastAccountContext.Err(), "account lease must follow the upstream drain")
-				require.NoError(t, slots.lastUserContext.Err(), "user lease must follow the upstream drain")
-				require.Len(t, slots.active, 1)
-				require.Len(t, slots.users, 1)
-			}}
+		router := gin.New()
+		forward := func(c *gin.Context) {
+			if disconnect {
+				c.Writer = &chatGPTDisconnectLeaseWriter{c.Writer, cancel, func() {
+					require.Error(t, clientContext.Err())
+					require.NoError(t, slots.lastAccountContext.Err(), "account lease must follow the upstream drain")
+					require.NoError(t, slots.lastUserContext.Err(), "user lease must follow the upstream drain")
+					require.Len(t, slots.active, 1)
+					require.Len(t, slots.users, 1)
+				}}
+			}
+			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{ID: keyID, GroupID: &gid,
+				Group: &service.Group{ID: gid, Platform: service.PlatformOpenAI, RateMultiplier: 1.25}, User: user})
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: userID, Concurrency: 2})
+			h.ChatGPTConversation(c)
 		}
-		c.Request.Header.Set("Content-Type", "application/json")
-		c.Request.Header.Set("User-Agent", "TEST_ONLY_Desktop")
-		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{ID: keyID, GroupID: &gid,
-			Group: &service.Group{ID: gid, Platform: service.PlatformOpenAI, RateMultiplier: 1.25}, User: user})
-		c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: userID, Concurrency: 2})
-		h.ChatGPTConversation(c)
+		router.POST("/chatgpt/backend-api/f/conversation", forward)
+		router.POST("/chatgpt/backend-api/f/conversation/*subpath", forward)
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body)).WithContext(clientContext)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("User-Agent", "TEST_ONLY_Desktop")
+		router.ServeHTTP(w, request)
 		require.Empty(t, slots.active, "every completed HTTP leg must release its slot")
 		require.Empty(t, slots.users)
 		return w
@@ -139,6 +144,8 @@ func TestChatGPTProHandoffResumeUsesOriginalAccountPriceAndIdentity(t *testing.T
 	require.Equal(t, "Bearer TEST_ONLY_OAUTH", provider.req.Header.Get("Authorization"))
 	require.Len(t, usage.logs, 1)
 	log := usage.logs[0]
+	require.Equal(t, "/chatgpt/backend-api/f/conversation/resume", *log.InboundEndpoint)
+	require.True(t, log.IsNativeChatTurn(), "the real wildcard resume route must retain native billing metadata")
 	require.Equal(t, identity.RequestID, log.RequestID)
 	require.Equal(t, "gpt-6-pro", log.Model)
 	require.Nil(t, log.ReasoningEffort)
