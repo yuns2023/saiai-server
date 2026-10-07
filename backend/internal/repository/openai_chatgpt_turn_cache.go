@@ -15,6 +15,33 @@ var chatGPTBindResume = redis.NewScript("local ttl = redis.call('PTTL', KEYS[2])
 var chatGPTReadResume = redis.NewScript("local key = redis.call('GET', KEYS[1]); if not key then return false end; return redis.call('GET', key)")
 var chatGPTCompleteTurn = redis.NewScript("local raw = redis.call('GET', KEYS[1]); local ttl = redis.call('PTTL', KEYS[1]); if not raw or ttl <= 0 then return 0 end; local value = cjson.decode(raw); value.Completed = true; redis.call('SET', KEYS[1], cjson.encode(value), 'PX', ttl); return 1")
 var chatGPTMarkTerminal = redis.NewScript("local raw = redis.call('GET', KEYS[1]); local ttl = redis.call('PTTL', KEYS[1]); if not raw or ttl <= 0 then return 0 end; local value = cjson.decode(raw); value.TerminalSeen = true; redis.call('SET', KEYS[1], cjson.encode(value), 'PX', ttl); return 1")
+var chatGPTMergeImages = redis.NewScript(`
+local raw = redis.call('GET', KEYS[1])
+local ttl = redis.call('PTTL', KEYS[1])
+if not raw or ttl <= 0 then return false end
+local value = cjson.decode(raw)
+local incoming = cjson.decode(ARGV[1])
+local previous = type(value.Images) == 'table' and value.Images or {}
+local hashes = {}
+local seen = {}
+local function merge(list)
+  if type(list) ~= 'table' then return end
+  for _, hash in ipairs(list) do
+    if not seen[hash] and #hashes < 64 then
+      seen[hash] = true
+      table.insert(hashes, hash)
+    end
+  end
+end
+merge(previous.AssetHashes)
+merge(incoming.AssetHashes)
+table.sort(hashes)
+value.Images = {GenerationSeen = previous.GenerationSeen == true or incoming.GenerationSeen == true or #hashes > 0,
+                AssetHashes = #hashes > 0 and hashes or cjson.null}
+local result = cjson.encode(value)
+redis.call('SET', KEYS[1], result, 'PX', ttl)
+return result
+`)
 
 var _ service.ChatGPTTurnCache = (*gatewayCache)(nil)
 
@@ -87,4 +114,18 @@ func (c *gatewayCache) MarkChatGPTTurnTerminal(ctx context.Context, key string) 
 		return errors.New("native Chat turn context expired")
 	}
 	return nil
+}
+
+func (c *gatewayCache) MergeChatGPTTurnImages(ctx context.Context, key string, images service.ChatGPTImageEvidence) (*service.ChatGPTTurnSnapshot, error) {
+	images = service.MergeChatGPTImageEvidence(service.ChatGPTImageEvidence{}, images)
+	raw, err := json.Marshal(images)
+	if err != nil {
+		return nil, err
+	}
+	result, err := chatGPTMergeImages.Run(ctx, c.rdb, []string{key}, string(raw)).Text()
+	snapshot, err := decodeChatGPTTurn(result, err)
+	if err == nil && snapshot == nil {
+		return nil, errors.New("native Chat turn context expired")
+	}
+	return snapshot, err
 }

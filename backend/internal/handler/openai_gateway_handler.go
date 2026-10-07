@@ -391,6 +391,21 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		}
 	}
 	var streamObserverErr error
+	mergeTurnImages := func() {
+		if streamObserver == nil || turnCache == nil || turn == nil {
+			return
+		}
+		evidence := streamObserver.ImageEvidence()
+		if !evidence.GenerationSeen {
+			return
+		}
+		updated, err := turnCache.MergeChatGPTTurnImages(forwardCtx, turnScope.TurnKey(turn.Identity), evidence)
+		if err != nil {
+			logger.L().Warn("openai.chatgpt_image_metadata_merge_failed", zap.Error(err))
+			return
+		}
+		turn = updated
+	}
 	clientDisconnected := false
 	handoffBound := false
 	for {
@@ -401,6 +416,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				signals := streamObserver.Snapshot()
 				if streamObserverErr == nil && !handoffBound && signals.HandoffSeen && signals.ConversationID != "" &&
 					resp.StatusCode >= 200 && resp.StatusCode < 300 && !signals.ProviderErrorSeen {
+					mergeTurnImages()
 					if turnCache == nil || turn == nil {
 						streamObserverErr = errors.New("ChatGPT handoff accounting context unavailable")
 					} else {
@@ -430,6 +446,14 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				if streamObserverErr == nil {
 					streamObserverErr = finishErr
 				}
+				if streamObserverErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && !summary.ProviderErrorSeen {
+					mergeTurnImages()
+					if turn != nil {
+						images := service.MergeChatGPTImageEvidence(turn.Images, streamObserver.ImageEvidence())
+						summary.ImageGenerationSeen = images.GenerationSeen
+						summary.ImageCount = len(images.AssetHashes)
+					}
+				}
 				if reqLog != nil {
 					fields := []zap.Field{
 						zap.Int64("account_id", account.ID),
@@ -437,6 +461,8 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 						zap.Bool("done_sentinel_seen", summary.DoneSentinelSeen),
 						zap.Bool("provider_error_seen", summary.ProviderErrorSeen),
 						zap.String("observed_model", summary.ObservedModel),
+						zap.Bool("image_generation_seen", summary.ImageGenerationSeen),
+						zap.Int("observed_image_count", summary.ImageCount),
 					}
 					if responseShapeCapture {
 						fields = append(fields,
@@ -478,22 +504,24 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 						duration := time.Since(requestStart)
 						h.submitChatGPTUsageRecordTask(func(ctx context.Context) {
 							if err := h.gatewayService.RecordChatGPTTurnUsage(ctx, &service.OpenAIChatGPTTurnUsageInput{
-								BasePriceUSD:       fixedTurnPriceUSD,
-								RequestedModel:     model,
-								ObservedModel:      summary.ObservedModel,
-								ThinkingEffort:     thinkingEffort,
-								RequestID:          billingIdentity.RequestID,
-								APIKey:             apiKey,
-								User:               apiKey.User,
-								Account:            account,
-								Subscription:       subscription,
-								InboundEndpoint:    inboundEndpoint,
-								UpstreamEndpoint:   upstreamEndpoint,
-								UserAgent:          userAgent,
-								IPAddress:          clientIP,
-								RequestPayloadHash: billingIdentity.PayloadHash,
-								Duration:           duration,
-								APIKeyService:      h.apiKeyService,
+								BasePriceUSD:        fixedTurnPriceUSD,
+								RequestedModel:      model,
+								ObservedModel:       summary.ObservedModel,
+								ThinkingEffort:      thinkingEffort,
+								ImageGenerationSeen: summary.ImageGenerationSeen,
+								ImageCount:          summary.ImageCount,
+								RequestID:           billingIdentity.RequestID,
+								APIKey:              apiKey,
+								User:                apiKey.User,
+								Account:             account,
+								Subscription:        subscription,
+								InboundEndpoint:     inboundEndpoint,
+								UpstreamEndpoint:    upstreamEndpoint,
+								UserAgent:           userAgent,
+								IPAddress:           clientIP,
+								RequestPayloadHash:  billingIdentity.PayloadHash,
+								Duration:            duration,
+								APIKeyService:       h.apiKeyService,
 							}); err != nil {
 								logger.L().With(
 									zap.String("component", "handler.openai_gateway.chatgpt_conversation"),

@@ -120,6 +120,35 @@ requests do not require a model-turn price or a replay upstream. They still
 require an authenticated OpenAI group and a schedulable OAuth account. The
 final `/f/conversation` request retains its separate billing/staging gate.
 
+## Native image generation within a Chat turn
+
+ChatGPT can generate images inside its native conversation stream. This does
+not imply a separate public Images API request. A successful turn containing a
+recognized image tool retains the same fixed Chat price and billing identity;
+the usage row additionally exposes `media_type=image` and `image_count` for
+observed completed assets. These fields are descriptive and are excluded from
+the atomic Chat debit fingerprint, so richer retry metadata cannot create a
+new debit or a fingerprint conflict. Downloads and repeated asset opens remain
+control requests and create no additional usage record.
+
+The bounded observer accepts known image tool messages, generated multimodal
+asset parts, explicit image-part patches for an identified tool message, and
+completed structured `image_generation_call` items. User uploads, unrelated
+tools, failed images and incomplete previews are excluded. Only SHA-256 asset
+digests are retained for deduplication across handoff/resume, with a maximum of
+64 observed assets and the original one-hour turn expiry. Raw pointers, image
+bytes, prompts and tool content are not persisted.
+
+Image counts describe the recognized response schemas. Opaque deltas, implicit
+patch paths and future schemas are forwarded unchanged and may leave the
+completed count unknown or incomplete. A known image tool with no recognized
+completed asset is displayed as image generation with an unconfirmed count,
+not as a proven zero. The UI labels positive counts as observed completed
+images and keeps the successful-turn price and unknown token usage visible.
+Mock fixtures and the installed Desktop renderer establish this schema
+boundary; they are not a new credentialed image-generation acceptance. Existing
+historical rows are not retroactively inferred from download activity.
+
 ## Fixed successful-turn contract
 
 One billable unit is one native user-message generation whose initial

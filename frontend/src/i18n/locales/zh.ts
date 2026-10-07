@@ -778,6 +778,8 @@ export default {
   // Usage
   usage: {
     nativeChatTurn: '1 次成功聊天',
+    nativeChatImagesObserved: '画图：已识别成品 {count} 张',
+    nativeChatImageCountUnknown: '含画图调用，成品数量未确认',
     nativeChatUsageUnknown: 'Token 消耗未返回',
     chatTiers: { instant: '即时', medium: '中', high: '高', extreme: '极高', pro: 'Pro', default: '自动 / 未识别' },
     title: '使用记录',

@@ -775,6 +775,8 @@ export default {
   // Usage
   usage: {
     nativeChatTurn: '1 successful Chat turn',
+    nativeChatImagesObserved: 'Image generation: {count} observed completed images',
+    nativeChatImageCountUnknown: 'Image generation observed; completed count unconfirmed',
     nativeChatUsageUnknown: 'Token usage unavailable',
     chatTiers: { instant: 'Instant', medium: 'Medium', high: 'High', extreme: 'Extreme', pro: 'Pro', default: 'Automatic / unknown' },
     title: 'Usage Records',

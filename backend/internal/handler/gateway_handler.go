@@ -1569,6 +1569,8 @@ type publicKeyUsageRecord struct {
 	ActualCost          float64   `json:"actual_cost"`
 	DurationMs          *int      `json:"duration_ms,omitempty"`
 	RequestType         string    `json:"request_type"`
+	ImageCount          int       `json:"image_count"`
+	MediaType           *string   `json:"media_type,omitempty"`
 }
 
 func publicKeyUsageRecords(logs []service.UsageLog) []publicKeyUsageRecord {
@@ -1591,6 +1593,8 @@ func publicKeyUsageRecords(logs []service.UsageLog) []publicKeyUsageRecord {
 			ActualCost:          log.ActualCost,
 			DurationMs:          log.DurationMs,
 			RequestType:         log.EffectiveRequestType().String(),
+			ImageCount:          log.ImageCount,
+			MediaType:           log.MediaType,
 		})
 	}
 	return records

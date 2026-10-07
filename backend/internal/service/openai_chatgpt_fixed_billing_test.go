@@ -55,16 +55,18 @@ func TestRecordChatGPTTurnUsageUsesFixedPriceWithoutTokens(t *testing.T) {
 	ctx := context.WithValue(context.Background(), ctxkey.RequestID, "turn-request")
 
 	err := svc.RecordChatGPTTurnUsage(ctx, &OpenAIChatGPTTurnUsageInput{
-		BasePriceUSD:       0.02,
-		APIKey:             apiKey,
-		User:               user,
-		Account:            account,
-		InboundEndpoint:    "/chatgpt/backend-api/f/conversation",
-		UpstreamEndpoint:   "/backend-api/f/conversation",
-		UserAgent:          "ChatGPT fixture",
-		IPAddress:          "127.0.0.1",
-		RequestPayloadHash: "payload-hash",
-		Duration:           1500 * time.Millisecond,
+		BasePriceUSD:        0.02,
+		APIKey:              apiKey,
+		User:                user,
+		Account:             account,
+		InboundEndpoint:     "/chatgpt/backend-api/f/conversation",
+		UpstreamEndpoint:    "/backend-api/f/conversation",
+		UserAgent:           "ChatGPT fixture",
+		IPAddress:           "127.0.0.1",
+		RequestPayloadHash:  "payload-hash",
+		Duration:            1500 * time.Millisecond,
+		ImageGenerationSeen: true,
+		ImageCount:          2,
 	})
 	require.NoError(t, err)
 	require.Len(t, billingRepo.commands, 1)
@@ -74,6 +76,8 @@ func TestRecordChatGPTTurnUsageUsesFixedPriceWithoutTokens(t *testing.T) {
 	require.Equal(t, "payload-hash", command.RequestPayloadHash)
 	require.Zero(t, command.InputTokens)
 	require.Zero(t, command.OutputTokens)
+	require.Zero(t, command.ImageCount, "observed images must not change the turn debit fingerprint")
+	require.Empty(t, command.MediaType)
 	require.InDelta(t, 0.03, command.BalanceCost, 1e-12)
 	require.NotEmpty(t, command.RequestFingerprint)
 
@@ -83,11 +87,22 @@ func TestRecordChatGPTTurnUsageUsesFixedPriceWithoutTokens(t *testing.T) {
 	require.Equal(t, RequestTypeStream, log.RequestType)
 	require.True(t, log.Stream)
 	require.Zero(t, log.TotalTokens())
+	require.Equal(t, 2, log.ImageCount)
+	require.Equal(t, "image", *log.MediaType)
 	require.InDelta(t, 0.02, log.TotalCost, 1e-12)
 	require.InDelta(t, 0.03, log.ActualCost, 1e-12)
 	require.Equal(t, 1500, *log.DurationMs)
 	require.Equal(t, "/chatgpt/backend-api/f/conversation", *log.InboundEndpoint)
 	require.Equal(t, "/backend-api/f/conversation", *log.UpstreamEndpoint)
+
+	// A delivery replay may expose fewer images. The already-settled request
+	// must retain the same debit fingerprint and price.
+	require.NoError(t, svc.RecordChatGPTTurnUsage(ctx, &OpenAIChatGPTTurnUsageInput{
+		BasePriceUSD: 0.02, APIKey: apiKey, User: user, Account: account,
+		RequestPayloadHash: "payload-hash",
+	}))
+	require.Len(t, billingRepo.commands, 2)
+	require.Equal(t, command.RequestFingerprint, billingRepo.commands[1].RequestFingerprint)
 }
 
 func TestRecordChatGPTTurnUsageRejectsInvalidPriceAndDependencies(t *testing.T) {
@@ -104,6 +119,11 @@ func TestRecordChatGPTTurnUsageRejectsInvalidPriceAndDependencies(t *testing.T) 
 		require.ErrorContains(t, svc.RecordChatGPTTurnUsage(context.Background(), &input), "base price")
 	}
 	require.ErrorContains(t, svc.RecordChatGPTTurnUsage(context.Background(), &OpenAIChatGPTTurnUsageInput{BasePriceUSD: 0.01}), "API key")
+	for _, count := range []int{-1, MaxChatGPTObservedImages + 1} {
+		input := *validInput
+		input.ImageCount = count
+		require.ErrorContains(t, svc.RecordChatGPTTurnUsage(context.Background(), &input), "image count")
+	}
 
 	cfg := &config.Config{}
 	cfg.Default.RateMultiplier = math.Inf(1)

@@ -4,6 +4,7 @@ package repository
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,6 +134,18 @@ func (s *GatewayCacheSuite) TestChatGPTTurnContextAtomicSnapshotAndScope() {
 	ttl, err := s.rdb.PTTL(s.ctx, key).Result()
 	require.NoError(s.T(), err)
 	require.LessOrEqual(s.T(), ttl, time.Minute)
+	firstHash, secondHash := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	copy, err = firstCache.MergeChatGPTTurnImages(s.ctx, key, service.ChatGPTImageEvidence{GenerationSeen: true})
+	require.NoError(s.T(), err, "zero observed images must decode as an empty array, not a Lua object")
+	require.True(s.T(), copy.Images.GenerationSeen)
+	_, err = firstCache.MergeChatGPTTurnImages(s.ctx, key, service.ChatGPTImageEvidence{AssetHashes: []string{firstHash}})
+	require.NoError(s.T(), err)
+	copy, err = secondCache.MergeChatGPTTurnImages(s.ctx, key, service.ChatGPTImageEvidence{AssetHashes: []string{firstHash, secondHash, "PRIVATE_INVALID_POINTER"}})
+	require.NoError(s.T(), err)
+	require.ElementsMatch(s.T(), []string{firstHash, secondHash}, copy.Images.AssetHashes)
+	updatedTTL, err := s.rdb.PTTL(s.ctx, key).Result()
+	require.NoError(s.T(), err)
+	require.LessOrEqual(s.T(), updatedTTL, ttl)
 	for _, other := range []service.ChatGPTTurnScope{{2, 2, 3}, {1, 3, 3}, {1, 2, 4}} {
 		copy, err = secondCache.GetChatGPTResume(s.ctx, other.ResumeKey("TEST_ONLY_PRIVATE_CONVERSATION"))
 		require.NoError(s.T(), err)

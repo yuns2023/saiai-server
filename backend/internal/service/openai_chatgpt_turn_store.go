@@ -27,6 +27,7 @@ type ChatGPTTurnSnapshot struct {
 	StartedAt      time.Time
 	Completed      bool
 	TerminalSeen   bool
+	Images         ChatGPTImageEvidence
 }
 
 // ChatGPTTurnCache is implemented by the shared Redis Gateway cache. Operations
@@ -38,6 +39,7 @@ type ChatGPTTurnCache interface {
 	GetChatGPTResume(context.Context, string) (*ChatGPTTurnSnapshot, error)
 	CompleteChatGPTTurn(context.Context, string) error
 	MarkChatGPTTurnTerminal(context.Context, string) error
+	MergeChatGPTTurnImages(context.Context, string, ChatGPTImageEvidence) (*ChatGPTTurnSnapshot, error)
 }
 
 type ChatGPTTurnScope struct{ UserID, APIKeyID, GroupID int64 }
@@ -150,6 +152,13 @@ type chatGPTMemoryAlias struct {
 	turnKey string
 	expires time.Time
 }
+
+func cloneChatGPTTurnSnapshot(input ChatGPTTurnSnapshot) *ChatGPTTurnSnapshot {
+	copy := input
+	copy.Images.AssetHashes = append([]string(nil), input.Images.AssetHashes...)
+	return &copy
+}
+
 type chatGPTMemoryTurnCache struct {
 	mu      sync.Mutex
 	turns   map[string]chatGPTMemoryEntry
@@ -177,8 +186,7 @@ func (s *chatGPTMemoryTurnCache) GetChatGPTTurn(_ context.Context, key string) (
 	defer s.mu.Unlock()
 	s.cleanup()
 	if entry, ok := s.turns[key]; ok {
-		copy := entry.snapshot
-		return &copy, nil
+		return cloneChatGPTTurnSnapshot(entry.snapshot), nil
 	}
 	return nil, nil
 }
@@ -187,15 +195,27 @@ func (s *chatGPTMemoryTurnCache) PutChatGPTTurnIfAbsent(_ context.Context, key s
 	defer s.mu.Unlock()
 	s.cleanup()
 	if entry, ok := s.turns[key]; ok {
-		copy := entry.snapshot
-		return &copy, nil
+		return cloneChatGPTTurnSnapshot(entry.snapshot), nil
 	}
 	if len(s.turns) >= 4096 {
 		return nil, errors.New("native Chat replay cache is full")
 	}
-	s.turns[key] = chatGPTMemoryEntry{*input, time.Now().Add(ttl)}
-	copy := *input
-	return &copy, nil
+	snapshot := cloneChatGPTTurnSnapshot(*input)
+	s.turns[key] = chatGPTMemoryEntry{*snapshot, time.Now().Add(ttl)}
+	return cloneChatGPTTurnSnapshot(*snapshot), nil
+}
+
+func (s *chatGPTMemoryTurnCache) MergeChatGPTTurnImages(_ context.Context, key string, images ChatGPTImageEvidence) (*ChatGPTTurnSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanup()
+	entry, ok := s.turns[key]
+	if !ok {
+		return nil, errors.New("native Chat turn context expired")
+	}
+	entry.snapshot.Images = MergeChatGPTImageEvidence(entry.snapshot.Images, images)
+	s.turns[key] = entry
+	return cloneChatGPTTurnSnapshot(entry.snapshot), nil
 }
 func (s *chatGPTMemoryTurnCache) BindChatGPTResume(_ context.Context, aliasKey, turnKey string) error {
 	s.mu.Lock()
@@ -228,8 +248,7 @@ func (s *chatGPTMemoryTurnCache) GetChatGPTResume(_ context.Context, key string)
 	if !ok {
 		return nil, nil
 	}
-	copy := entry.snapshot
-	return &copy, nil
+	return cloneChatGPTTurnSnapshot(entry.snapshot), nil
 }
 func (s *chatGPTMemoryTurnCache) CompleteChatGPTTurn(_ context.Context, key string) error {
 	s.mu.Lock()

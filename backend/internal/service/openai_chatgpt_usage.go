@@ -81,6 +81,8 @@ type ChatGPTConversationStreamSummary struct {
 	DoneSentinelSeen      bool
 	ProviderErrorSeen     bool
 	HandoffSeen           bool
+	ImageGenerationSeen   bool
+	ImageCount            int
 	EventTypes            []string
 	TopLevelFields        []string
 	MessageMetadataFields []string
@@ -102,6 +104,7 @@ type ChatGPTConversationStreamObserver struct {
 	usageLikeFieldPaths   map[string]struct{}
 	err                   error
 	finished              bool
+	images                chatGPTImageObserver
 }
 
 // NewChatGPTConversationStreamObserver creates a bounded, content-discarding
@@ -330,7 +333,24 @@ func (o *ChatGPTConversationStreamObserver) dispatchEvent() error {
 			}
 		}
 	}
+	o.images.observeEvent(rawEvent)
+	o.summary.ImageGenerationSeen = o.images.seen
+	o.summary.ImageCount = len(o.images.assets)
 	return nil
+}
+
+// ImageEvidence exposes bounded asset digests only, for deduplication across a
+// native turn's stream handoff. It never exposes file pointers or image bytes.
+func (o *ChatGPTConversationStreamObserver) ImageEvidence() ChatGPTImageEvidence {
+	if o == nil {
+		return ChatGPTImageEvidence{}
+	}
+	evidence := ChatGPTImageEvidence{GenerationSeen: o.images.seen}
+	for digest := range o.images.assets {
+		evidence.AssetHashes = append(evidence.AssetHashes, digest)
+	}
+	sort.Strings(evidence.AssetHashes)
+	return evidence
 }
 
 const (

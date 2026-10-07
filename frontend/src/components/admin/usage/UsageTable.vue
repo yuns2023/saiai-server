@@ -108,6 +108,9 @@
         <template #cell-tokens="{ row }">
           <div v-if="row.billing_unit === 'turn'" class="text-sm" :title="t('usage.nativeChatUsageUnknown')">
             {{ t('usage.nativeChatTurn') }}
+            <div v-if="row.media_type === 'image'" class="text-xs text-indigo-600 dark:text-indigo-400">
+              {{ row.image_count > 0 ? t('usage.nativeChatImagesObserved', { count: row.image_count }) : t('usage.nativeChatImageCountUnknown') }}
+            </div>
             <div class="text-xs text-gray-500">{{ t('usage.nativeChatUsageUnknown') }}</div>
           </div>
           <!-- 图片生成请求 -->

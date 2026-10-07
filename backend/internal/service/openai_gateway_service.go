@@ -4265,22 +4265,24 @@ const OpenAIChatGPTTurnBillingModel = "chatgpt-native-turn"
 // OpenAIChatGPTTurnUsageInput records one completed native ChatGPT turn using
 // an explicit fixed-price contract. It intentionally contains no token usage.
 type OpenAIChatGPTTurnUsageInput struct {
-	BasePriceUSD       float64
-	RequestedModel     string
-	ObservedModel      string
-	ThinkingEffort     string
-	RequestID          string
-	APIKey             *APIKey
-	User               *User
-	Account            *Account
-	Subscription       *UserSubscription
-	InboundEndpoint    string
-	UpstreamEndpoint   string
-	UserAgent          string
-	IPAddress          string
-	RequestPayloadHash string
-	Duration           time.Duration
-	APIKeyService      APIKeyQuotaUpdater
+	BasePriceUSD        float64
+	RequestedModel      string
+	ObservedModel       string
+	ThinkingEffort      string
+	ImageGenerationSeen bool
+	ImageCount          int
+	RequestID           string
+	APIKey              *APIKey
+	User                *User
+	Account             *Account
+	Subscription        *UserSubscription
+	InboundEndpoint     string
+	UpstreamEndpoint    string
+	UserAgent           string
+	IPAddress           string
+	RequestPayloadHash  string
+	Duration            time.Duration
+	APIKeyService       APIKeyQuotaUpdater
 }
 
 // IsValidOpenAIChatGPTTurnPrice reports whether a configured fixed price is
@@ -4301,6 +4303,9 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 	}
 	if input.APIKey == nil || input.User == nil || input.Account == nil {
 		return errors.New("record ChatGPT turn usage: API key, user, and account are required")
+	}
+	if input.ImageCount < 0 || input.ImageCount > MaxChatGPTObservedImages {
+		return errors.New("record ChatGPT turn usage: observed image count is out of bounds")
 	}
 
 	apiKey := input.APIKey
@@ -4370,6 +4375,12 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
 		CreatedAt:             time.Now(),
 	}
+	// Image classification describes this same fixed-price Chat turn. It must
+	// never change the billing namespace, invent image tokens, or add a charge.
+	usageLog.ImageCount = input.ImageCount
+	if input.ImageGenerationSeen || input.ImageCount > 0 {
+		usageLog.MediaType = optionalTrimmedStringPtr("image")
+	}
 	if input.Subscription != nil {
 		usageLog.SubscriptionID = &input.Subscription.ID
 	}
@@ -4388,7 +4399,12 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		return nil
 	}
 
-	_, err := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+	// Delivery can expose more image metadata on a retry. It is descriptive,
+	// not part of this turn's tariff, and must not alter the debit fingerprint.
+	billingLog := *usageLog
+	billingLog.ImageCount = 0
+	billingLog.MediaType = nil
+	_, err := applyUsageBilling(ctx, requestID, &billingLog, &postUsageBillingParams{
 		Cost:                  cost,
 		User:                  user,
 		APIKey:                apiKey,

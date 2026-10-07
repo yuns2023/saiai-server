@@ -80,6 +80,18 @@ describe('admin UsageTable tooltip', () => {
     expect(wrapper.text()).toContain('usage.chatTiers.pro')
   })
 
+  it.each([0, 2])('keeps native image generation inside its Chat turn with observed count %i', (count) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_CHAT_IMAGE', model: 'gpt-5-6', billing_unit: 'turn',
+        input_tokens: 0, output_tokens: 0, image_count: count, media_type: 'image' }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-tokens" :row="data[0]" /></div>' } } }
+    })
+    expect(wrapper.text()).toContain('usage.nativeChatTurn')
+    expect(wrapper.text()).toContain(count > 0 ? 'usage.nativeChatImagesObserved' : 'usage.nativeChatImageCountUnknown')
+    expect(wrapper.text()).toContain('usage.nativeChatUsageUnknown')
+    expect(wrapper.text()).not.toContain('2K')
+  })
+
   it('shows service tier and billing breakdown in cost tooltip', async () => {
     const row = {
       request_id: 'req-admin-1',

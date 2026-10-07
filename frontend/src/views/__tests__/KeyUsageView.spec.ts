@@ -143,6 +143,33 @@ describe('KeyUsageView', () => {
     wrapper.unmount()
   })
 
+  it('shows native Chat image generation as one turn without invented token consumption', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        mode: 'quota_limited', isValid: true, status: 'active', key_limits: { configured: true },
+        billing: { type: 'wallet', available: false, balance_visible: false },
+        recent_usage: {
+          records: [{ created_at: '2026-10-07T10:00:00Z', model: 'gpt-5-6', billing_unit: 'turn',
+            token_usage_source: 'unknown', media_type: 'image', image_count: 1,
+            input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0,
+            total_tokens: 0, actual_cost: .01, request_type: 'stream' }],
+          pagination: { total: 1, page: 1, page_size: 10, pages: 1 },
+        },
+      }),
+    } as Response)
+    const wrapper = mount(KeyUsageView, {
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, LocaleSwitcher: true, Icon: true } },
+    })
+    await wrapper.get('input[type="password"]').setValue('TEST_ONLY_KEY')
+    await wrapper.get('input[type="password"]').trigger('keydown.enter')
+    await flushPromises()
+    expect(wrapper.text()).toContain('usage.nativeChatTurn')
+    expect(wrapper.text()).toContain('usage.nativeChatImagesObserved')
+    expect(wrapper.findAll('td').filter(cell => cell.text() === '—')).toHaveLength(4)
+    wrapper.unmount()
+  })
+
   it('does not expose wallet balance when Key spending limits are configured', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,

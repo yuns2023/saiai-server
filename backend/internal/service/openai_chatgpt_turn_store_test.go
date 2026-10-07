@@ -61,6 +61,32 @@ func TestChatGPTTurnCacheSnapshotScopeAndExpiry(t *testing.T) {
 	require.Nil(t, resume)
 }
 
+func TestChatGPTTurnImagesMergeAcrossResumeWithoutExtendingLease(t *testing.T) {
+	ctx := context.Background()
+	cache := NewChatGPTMemoryTurnCache()
+	initial := &ChatGPTTurnSnapshot{Identity: ChatGPTTurnBillingIdentity{RequestID: "turn", PayloadHash: "digest"}, AccountID: 1, BasePriceUSD: .01, StartedAt: time.Now()}
+	_, err := cache.PutChatGPTTurnIfAbsent(ctx, "turn", initial, time.Minute)
+	require.NoError(t, err)
+	mem := cache.(*chatGPTMemoryTurnCache)
+	expiry := mem.turns["turn"].expires
+	first, second := chatGPTImageDigest("private-one"), chatGPTImageDigest("private-two")
+	_, err = cache.MergeChatGPTTurnImages(ctx, "turn", ChatGPTImageEvidence{GenerationSeen: true, AssetHashes: []string{first}})
+	require.NoError(t, err)
+	updated, err := cache.MergeChatGPTTurnImages(ctx, "turn", ChatGPTImageEvidence{AssetHashes: []string{first, second, "raw-private-pointer"}})
+	require.NoError(t, err)
+	require.True(t, updated.Images.GenerationSeen)
+	require.ElementsMatch(t, []string{first, second}, updated.Images.AssetHashes)
+	require.Equal(t, expiry, mem.turns["turn"].expires)
+	require.Equal(t, .01, updated.BasePriceUSD)
+	require.NoError(t, cache.BindChatGPTResume(ctx, "alias", "turn"))
+	updated.Images.AssetHashes[0] = "mutated-client-copy"
+	resume, err := cache.GetChatGPTResume(ctx, "alias")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{first, second}, resume.Images.AssetHashes)
+	_, err = cache.MergeChatGPTTurnImages(ctx, "missing", ChatGPTImageEvidence{GenerationSeen: true})
+	require.Error(t, err)
+}
+
 func TestChatGPTResumeRejectsGenerationInputs(t *testing.T) {
 	id, err := ResolveChatGPTResumeConversation([]byte(`{"conversation_id":"fixture","offset":0,"client_extension":true}`))
 	require.NoError(t, err)

@@ -370,7 +370,12 @@
                   >
                     <td class="px-4 py-3 text-sm whitespace-nowrap text-gray-700 dark:text-dark-200">{{ formatDateTime(record.created_at) }}</td>
                     <td class="px-4 py-3 text-sm font-medium whitespace-nowrap text-gray-900 dark:text-white">{{ record.model || '-' }}</td>
-                    <td class="px-4 py-3 text-sm whitespace-nowrap text-gray-700 dark:text-dark-200">{{ record.request_type || '-' }}</td>
+                    <td class="px-4 py-3 text-sm whitespace-nowrap text-gray-700 dark:text-dark-200">
+                      {{ record.billing_unit === 'turn' ? t('usage.nativeChatTurn') : record.request_type || '-' }}
+                      <div v-if="record.billing_unit === 'turn' && record.media_type === 'image'" class="text-xs text-indigo-600 dark:text-indigo-400">
+                        {{ record.image_count > 0 ? t('usage.nativeChatImagesObserved', { count: record.image_count }) : t('usage.nativeChatImageCountUnknown') }}
+                      </div>
+                    </td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.input_tokens) }}</span></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.output_tokens) }}</span></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.cache_creation_tokens + record.cache_read_tokens) }}</span></td>
@@ -527,6 +532,8 @@ interface RecentUsageRecord {
   actual_cost: number
   duration_ms?: number
   request_type: string
+  image_count: number
+  media_type?: string
 }
 
 interface UsagePagination {

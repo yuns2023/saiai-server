@@ -90,6 +90,8 @@ func TestChatGPTProHandoffResumeUsesOriginalAccountPriceAndIdentity(t *testing.T
 	scope := service.ChatGPTTurnScope{UserID: user.ID, APIKeyID: 23, GroupID: groupID}
 	body := `{ "action":"next", "messages":[{"id":"TEST_ONLY_USER_MESSAGE","content":{"parts":["private synthetic text"]}}], "model":"gpt-6-pro", "extension":{"kept":true} }`
 	handoff := "data: {\"type\":\"resume_conversation_token\",\"conversation_id\":\"TEST_ONLY_CONVERSATION\",\"token\":\"TEST_ONLY_SECRET_RESUME_TOKEN\"}\n\ndata: {\"type\":\"stream_handoff\",\"conversation_id\":\"TEST_ONLY_CONVERSATION\"}\n\n"
+	imageEvent := "data: {\"message\":{\"id\":\"image-tool\",\"status\":\"finished_successfully\",\"author\":{\"role\":\"tool\",\"name\":\"image_gen\"},\"content\":{\"content_type\":\"multimodal_text\",\"parts\":[{\"content_type\":\"image_asset_pointer\",\"asset_pointer\":\"sediment://PRIVATE_GENERATED_IMAGE\"}]}}}\n\n"
+	handoff = imageEvent + handoff
 	provider.responseBody = handoff
 	provider.onSend = func() { require.Len(t, slots.active, 1) }
 	first := run(newHandler(), "/chatgpt/backend-api/f/conversation", body, 23, 21, groupID)
@@ -104,6 +106,8 @@ func TestChatGPTProHandoffResumeUsesOriginalAccountPriceAndIdentity(t *testing.T
 	require.Equal(t, int64(22), pending.AccountID)
 	identity := service.ResolveChatGPTTurnBillingIdentity([]byte(body), "")
 	require.Equal(t, identity, pending.Identity)
+	require.True(t, pending.Images.GenerationSeen)
+	require.Len(t, pending.Images.AssetHashes, 1)
 	// A separate service instance shares the pending context, even while an
 	// admin read is failing and the current tariff has changed.
 	prices.tiers["pro"] = 0.09
@@ -135,6 +139,7 @@ func TestChatGPTProHandoffResumeUsesOriginalAccountPriceAndIdentity(t *testing.T
 	run(secondHandler, "/chatgpt/backend-api/f/conversation/resume", resumeBody, 23, 21, groupID)
 	require.Empty(t, usage.logs, "completion of another conversation cannot settle this turn")
 	complete := "data: {\"v\":{\"message\":{\"author\":{\"role\":\"assistant\"},\"metadata\":{\"model_slug\":\"gpt-6-pro\"}}}}\n\ndata: {\"type\":\"message_stream_complete\",\"conversation_id\":\"TEST_ONLY_CONVERSATION\"}\n\ndata: [DONE]\n\n"
+	complete = imageEvent + complete // a repeated asset on resume must count once
 	provider.responseBody = complete
 	success := run(secondHandler, "/chatgpt/backend-api/f/conversation/resume?extension=a%2Bb", resumeBody, 23, 21, groupID)
 	require.Equal(t, http.StatusOK, success.Code)
@@ -150,6 +155,8 @@ func TestChatGPTProHandoffResumeUsesOriginalAccountPriceAndIdentity(t *testing.T
 	require.Equal(t, "gpt-6-pro", log.Model)
 	require.Nil(t, log.ReasoningEffort)
 	require.Zero(t, log.TotalTokens())
+	require.Equal(t, 1, log.ImageCount)
+	require.Equal(t, "image", *log.MediaType)
 	require.InDelta(t, 0.05, log.TotalCost, 1e-12)
 	require.InDelta(t, 0.0625, log.ActualCost, 1e-12)
 	require.Equal(t, int64(22), log.AccountID)
