@@ -197,31 +197,26 @@ OAuth request with `previous_response_id` is sent only to that user's bound
 account. An unknown binding or an ordinary switch to another account returns a
 conversation-restart error before provider egress.
 
-There is one narrow WebSocket exception for an exhausted OAuth account. The
-Gateway may migrate a turn to another compatible account when all of these are
-true:
+Native OAuth quota failover may send a fresh, uncommitted WebSocket request to
+another compatible account only when no output has reached the client and no
+account-bound continuation or input is present. The replay keeps the original
+application message bytes. A previous response anchor, encrypted reasoning,
+item reference, tool output or turn-state blocks account migration; the Gateway
+does not remove these fields or rebuild a reduced conversation history. The
+provider failure is returned so Codex can choose its next request. API-key
+compatibility recovery remains a separate path.
 
-- the owner is currently rate-limited, or the current upstream emits an
-  explicit quota/rate-limit error;
-- no frame from the current turn has been sent to the client;
-- the Gateway has a complete user-scoped replay input for the referenced
-  response; and
-- the replay contains no unresolved provider-side `item_reference`.
-
-The migration removes `previous_response_id` and account-bound encrypted
-reasoning, retains safe reasoning summaries, rebuilds the canonical input
-sequence, and retries at most three replacement accounts. A partial response,
-missing/oversized replay state, unknown ownership, or ambiguous pipelined turn
-fails closed instead of risking duplicate output, tool execution, or billing.
-Replay input is bounded, process-local memory with the normal one-hour response
-affinity lifetime; conversation content is not written to Redis or logs.
-
-The provider-facing `session_id` and `conversation_id` headers are stable per
-SAIAI user, selected account, and incoming value. The Gateway also stores and
-replays `x-codex-turn-state` under the user and selected account, and does not forward an
-unrecognized client token to another pooled account. Client-visible IDs and
-the official Codex `client_metadata` body remain unchanged; the Gateway does
-not copy the reduced turn-metadata header over the full body representation.
+The provider-facing `session_id` and `conversation_id`, including hyphenated
+aliases, preserve the client's exact values, multiplicity and presence. User
+and account isolation belongs to internal ownership keys. A supplied
+`x-codex-turn-state` is forwarded unchanged only when its user/account ownership
+can be verified; missing state remains absent, and unknown state fails before
+provider egress. Ownership is observed from response headers and native
+`response.metadata` events without changing those event payloads. The official
+Codex `client_metadata` body remains unchanged; the Gateway does not replace it
+with a reduced turn-metadata header. See
+[`OPENAI_OAUTH_NATIVE_PASSTHROUGH.md`](OPENAI_OAUTH_NATIVE_PASSTHROUGH.md) for the
+full preservation contract, allowed per-hop differences and versioned evidence.
 
 SAIAI Keys and groups do not define the upstream state namespace. The same user
 may continue through another Key or group when the bound upstream account is
