@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -82,6 +83,14 @@ func TestNativeChatOversizedImageDimensionsPersistUsageAndOneDebit(t *testing.T)
 	usage.db = nil
 	svc := service.NewOpenAIGatewayService(nil, usage, NewUsageBillingRepository(client, integrationDB), nil, nil, nil, nil, cfg, nil, nil, nil, nil, cache, nil, &service.DeferredService{}, nil)
 	identity := service.ResolveChatGPTTurnBillingIdentity([]byte(`{"messages":[{"id":"TEST_ONLY_OVERSIZED_IMAGE"}],"model":"gpt-5-6"}`), "")
+	// This test writes outside a transaction. Remove only its own records so
+	// later dashboard tests do not count the synthetic request or active user.
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(context.Background(), "DELETE FROM usage_logs WHERE request_id=$1 AND api_key_id=$2", identity.RequestID, key.ID)
+		assert.NoError(t, err)
+		_, err = integrationDB.ExecContext(context.Background(), "DELETE FROM usage_billing_dedup WHERE request_id=$1 AND api_key_id=$2", identity.RequestID, key.ID)
+		assert.NoError(t, err)
+	})
 	input := &service.OpenAIChatGPTTurnUsageInput{RequestID: identity.RequestID, RequestPayloadHash: identity.PayloadHash,
 		BasePriceUSD: .01, ImageCount: 1, ImageCostUSD: .02, ImageSize: "32768x32768", RequestedModel: "gpt-5-6",
 		Account: account, APIKey: key, User: user, InboundEndpoint: "/chatgpt/backend-api/f/conversation", APIKeyService: nativeChatQuotaUpdater{}}
