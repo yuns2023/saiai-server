@@ -57,7 +57,7 @@ func safeChatGPTConversationID(id string) bool {
 		return false
 	}
 	for _, c := range id {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' {
 			return false
 		}
 	}
@@ -96,7 +96,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversationRead(c *gin.Context) {
 		h.errorResponse(c, 502, "upstream_error", "Chat conversation read failed")
 		return
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	for name, values := range response.Header {
 		if shouldCopyChatGPTResponseHeader(name) {
 			for _, value := range values {
@@ -180,7 +180,7 @@ func (h *OpenAIGatewayHandler) chatGPTScopedAssetDownload(c *gin.Context) {
 		h.errorResponse(c, 502, "upstream_error", "Chat asset download failed")
 		return
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	for name, values := range response.Header {
 		if shouldCopyChatGPTResponseHeader(name) {
 			for _, value := range values {
@@ -254,7 +254,7 @@ func (h *OpenAIGatewayHandler) ChatGPTUpdatesWebSocket(c *gin.Context) {
 	if err != nil {
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 	conn.SetReadLimit(64 * 1024)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), service.ChatGPTTurnContextTTL)
 	defer cancel()
@@ -389,7 +389,7 @@ func (h *OpenAIGatewayHandler) readChatGPTCompletedSnapshot(ctx context.Context,
 	if err != nil {
 		return
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return
 	}
@@ -492,7 +492,7 @@ func (h *OpenAIGatewayHandler) runChatGPTUpdatesAccount(ctx context.Context, c *
 	if err != nil {
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 	logger.L().Info("openai.chatgpt_updates_provider_connected", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", accountID))
 	workerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

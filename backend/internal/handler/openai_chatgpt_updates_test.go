@@ -121,7 +121,7 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 			if err != nil {
 				return
 			}
-			defer conn.CloseNow()
+			defer func() { _ = conn.CloseNow() }()
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
@@ -207,7 +207,7 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 	defer cancel()
 	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(gateway.URL, "http")+"/chatgpt/backend-api/saiai/chat-updates", nil)
 	require.NoError(t, err)
-	defer client.CloseNow()
+	defer func() { _ = client.CloseNow() }()
 	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`[{"id":1,"command":{"type":"connect","presence":{"type":"presence","state":"foreground"}}},{"id":2,"command":{"type":"subscribe","topic_id":"conversations"}}]`)))
 	for i := 0; i < 2; i++ {
 		_, _, err := client.Read(ctx)

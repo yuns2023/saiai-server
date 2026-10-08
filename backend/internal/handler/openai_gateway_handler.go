@@ -340,12 +340,6 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			}
 		}
 	}
-	if turn != nil {
-		billingIdentity = turn.Identity
-		fixedTurnPriceUSD = turn.BasePriceUSD
-		fixedTurnBillingEnabled = service.IsValidOpenAIChatGPTTurnPrice(fixedTurnPriceUSD)
-		requestStart = turn.StartedAt
-	}
 	account := selection.Account
 	setOpsSelectedAccount(c, account.ID, service.PlatformOpenAI)
 	if !isTurnStream {
