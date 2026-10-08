@@ -436,11 +436,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			},
 			OnTurnComplete: func(turn openaiwsv2.RelayTurnResult) {
 				if turn.Failure != nil {
+					// Error metadata is persisted independently of the unchanged
+					// frame. Remove the selected credential even when it is opaque
+					// and would not match the general log redactor's patterns.
+					redactCredential := func(value string) string {
+						return strings.ReplaceAll(value, token, "[REDACTED]")
+					}
 					failure := &OpenAIWSUpstreamFailure{
 						Turn: turn.Turn, AccountID: account.ID, Model: turn.RequestModel,
-						ResponseID: turn.RequestID, EventType: turn.TerminalEventType,
-						Status: turn.Failure.Status, ErrorType: turn.Failure.ErrorType,
-						Code: turn.Failure.Code, Message: ClientSafeUpstreamErrorMessage(turn.Failure.Message),
+						ResponseID: redactCredential(turn.RequestID), EventType: turn.TerminalEventType,
+						Status: turn.Failure.Status, ErrorType: redactCredential(turn.Failure.ErrorType),
+						Code: redactCredential(turn.Failure.Code), Message: ClientSafeUpstreamErrorMessage(redactCredential(turn.Failure.Message)),
 					}
 					if hooks != nil && hooks.OnUpstreamError != nil {
 						hooks.OnUpstreamError(failure)

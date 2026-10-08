@@ -21,7 +21,7 @@ func TestOpenAIWSPassthroughProviderRefusalHasNoSuccessfulUsage(t *testing.T) {
 	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
 	request := []byte(` {"type":"response.create","model":"test-luna","reasoning":{"effort":"low"},"input":[],"tools":[{"type":"image_gen"}]} `)
-	frame := []byte(` {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'test-luna' model is not supported when using Codex with a ChatGPT account."}} `)
+	frame := []byte(` {"type":"error","status":400,"error":{"type":"invalid_request_error","code":"TEST_ONLY_TOKEN","message":"The 'test-luna' model is not supported when using Codex with a ChatGPT account. Synthetic echoed credential TEST_ONLY_TOKEN"}} `)
 	upstream := &openAIWSCaptureConn{events: [][]byte{frame}}
 	dialer := &openAIWSCaptureDialer{conn: upstream}
 	svc := &OpenAIGatewayService{cfg: cfg, openaiWSPassthroughDialer: dialer, cache: &stubGatewayCache{}}
@@ -75,6 +75,8 @@ func TestOpenAIWSPassthroughProviderRefusalHasNoSuccessfulUsage(t *testing.T) {
 	require.Equal(t, "test-luna", failures[0].Model)
 	require.Equal(t, 1, failures[0].Turn)
 	require.Equal(t, int64(452), failures[0].AccountID)
+	require.NotContains(t, failures[0].Message, "TEST_ONLY_TOKEN")
+	require.Equal(t, "[REDACTED]", failures[0].Code)
 	require.Equal(t, request, upstream.rawWrites[0])
 	require.Equal(t, 1, dialer.DialCount(), "do not retry or switch accounts for a generic model refusal")
 }
