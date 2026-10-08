@@ -518,6 +518,9 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Bool("completion_seen", summary.CompletionSeen),
 						zap.Bool("async_pending", turn != nil && turn.AsyncPending),
+						zap.Bool("handoff_seen", summary.HandoffSeen),
+						zap.Bool("async_status_seen", summary.AsyncStatusSeen),
+						zap.Int("async_status", summary.AsyncStatus),
 						zap.Bool("done_sentinel_seen", summary.DoneSentinelSeen),
 						zap.Bool("provider_error_seen", summary.ProviderErrorSeen),
 						zap.String("observed_model", summary.ObservedModel),
@@ -536,6 +539,8 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 						reqLog.Warn("openai.chatgpt_stream_observer_failed", append(fields, zap.Error(streamObserverErr))...)
 					} else if responseShapeCapture {
 						reqLog.Info("openai.chatgpt_response_shape_captured", fields...)
+					} else if h.cfg.Gateway.OpenAIChatUpdatesEnabled {
+						reqLog.Info("openai.chatgpt_stream_observed", fields...)
 					} else {
 						reqLog.Debug("openai.chatgpt_stream_observed", fields...)
 					}

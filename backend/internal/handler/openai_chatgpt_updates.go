@@ -118,12 +118,17 @@ func (h *OpenAIGatewayHandler) ChatGPTConversationRead(c *gin.Context) {
 }
 
 func (h *OpenAIGatewayHandler) observeChatGPTSnapshot(ctx context.Context, c *gin.Context, key *service.APIKey, cache service.ChatGPTTurnCache, scope service.ChatGPTTurnScope, account *service.Account, turn *service.ChatGPTTurnSnapshot, id string, raw []byte) {
-	if turn.Completed {
-		return
-	}
 	summary, images, completed, err := service.InspectChatGPTConversationSnapshot(raw, id, turn.UserMessageHash)
 	if err != nil || !completed {
 		logger.L().Debug("openai.chatgpt_async_snapshot_unverified", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", account.ID), zap.Bool("observer_error", err != nil), zap.Int("snapshot_bytes", len(raw)))
+		return
+	}
+	if turn.Completed {
+		// Delivery may still need file ownership after a settled turn. Do not
+		// reopen the frozen bill or charge a second time.
+		if err := service.BindChatGPTDeliveryAssets(ctx, cache, scope, turn, images); err != nil {
+			logger.L().Warn("openai.chatgpt_async_asset_binding_failed", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", account.ID))
+		}
 		return
 	}
 	turnKey := scope.TurnKey(turn.Identity)
@@ -210,6 +215,12 @@ func (s *chatGPTSubscriptions) contains(topic string) bool {
 	return ok
 }
 
+func (s *chatGPTSubscriptions) active() bool {
+	s.RLock()
+	defer s.RUnlock()
+	return len(s.Topics) > 0
+}
+
 type chatGPTProviderFrame struct {
 	AccountID int64
 	Raw       []byte
@@ -223,7 +234,9 @@ func (h *OpenAIGatewayHandler) reserveChatGPTUpdates(scope service.ChatGPTTurnSc
 		h.chatGPTUpdatesConnections = make(map[string]int)
 	}
 	id := scope.UpdatesKey()
-	if h.chatGPTUpdatesConnections[id] >= 2 || h.chatGPTUpdatesActive >= 64 {
+	// One official Desktop opens separate conversation, messaging and app
+	// notification transports. Leave room for all three plus a reconnect.
+	if h.chatGPTUpdatesConnections[id] >= 4 || h.chatGPTUpdatesActive >= 64 {
 		return nil, false
 	}
 	h.chatGPTUpdatesConnections[id]++
@@ -258,14 +271,22 @@ func (h *OpenAIGatewayHandler) ChatGPTUpdatesWebSocket(c *gin.Context) {
 	conn.SetReadLimit(64 * 1024)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), service.ChatGPTTurnContextTTL)
 	defer cancel()
+	closeStatus, closeReason := coderws.StatusNormalClosure, "client_closed"
+	defer func() {
+		_ = conn.Close(closeStatus, "Chat update connection closed")
+		cancel()
+		logger.L().Info("openai.chatgpt_updates_closed", zap.Int64("api_key_id", key.ID), zap.String("reason", closeReason))
+	}()
+	logger.L().Info("openai.chatgpt_updates_opened", zap.Int64("api_key_id", key.ID))
 	subscriptions := &chatGPTSubscriptions{Topics: make(map[string]chatGPTSubscription), Presence: "foreground"}
 	output := make(chan []byte, 8)
 	frames := make(chan chatGPTProviderFrame)
-	failed := make(chan struct{}, 2)
+	failed := make(chan string, 2)
 	go func() {
+		reason := "context_ended"
 		defer func() {
 			select {
-			case failed <- struct{}{}:
+			case failed <- reason:
 			default:
 			}
 		}()
@@ -278,19 +299,18 @@ func (h *OpenAIGatewayHandler) ChatGPTUpdatesWebSocket(c *gin.Context) {
 				err := conn.Write(writeCtx, coderws.MessageText, raw)
 				stop()
 				if err != nil {
+					reason = "client_write_failed"
 					return
 				}
 			}
 		}
 	}()
 	go func() {
-		defer func() {
-			select {
-			case failed <- struct{}{}:
-			default:
-			}
-		}()
-		h.readChatGPTCommands(ctx, conn, cache, scope, subscriptions, output)
+		reason := h.readChatGPTCommands(ctx, conn, cache, scope, subscriptions, output)
+		select {
+		case failed <- reason:
+		default:
+		}
 	}()
 	workers := make(map[int64]context.CancelFunc)
 	snapshotAttempts := make(map[string]int)
@@ -304,12 +324,26 @@ func (h *OpenAIGatewayHandler) ChatGPTUpdatesWebSocket(c *gin.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			closeReason = "context_ended"
 			return
-		case <-failed:
+		case closeReason = <-failed:
+			if closeReason != "client_closed" && closeReason != "context_ended" {
+				closeStatus = coderws.StatusPolicyViolation
+			}
 			return
 		case <-ticker.C:
+			// Unsupported auxiliary topics must neither select an account nor
+			// consume a provider notification connection.
+			if !subscriptions.active() {
+				for id, stop := range workers {
+					stop()
+					delete(workers, id)
+				}
+				continue
+			}
 			accounts, err := cache.ListChatGPTUpdateAccounts(ctx, scope.UpdatesKey())
 			if err != nil {
+				closeStatus, closeReason = coderws.StatusInternalError, "ownership_unavailable"
 				return
 			}
 			present := make(map[int64]bool)
@@ -331,11 +365,12 @@ func (h *OpenAIGatewayHandler) ChatGPTUpdatesWebSocket(c *gin.Context) {
 			}
 		case frame := <-frames:
 			if frame.Failed {
-				_ = conn.Close(coderws.StatusInternalError, "Chat update provider connection failed")
+				closeStatus, closeReason = coderws.StatusInternalError, "provider_failed"
 				return
 			}
 			updates, err := service.FilterChatGPTUpdates(ctx, cache, scope, frame.AccountID, frame.Raw, subscriptions.contains)
 			if err != nil {
+				closeStatus, closeReason = coderws.StatusInternalError, "provider_frame_rejected"
 				return
 			}
 			for _, update := range updates {
@@ -399,11 +434,20 @@ func (h *OpenAIGatewayHandler) readChatGPTCompletedSnapshot(ctx context.Context,
 	}
 }
 
-func (h *OpenAIGatewayHandler) readChatGPTCommands(ctx context.Context, conn *coderws.Conn, cache service.ChatGPTTurnCache, scope service.ChatGPTTurnScope, subscriptions *chatGPTSubscriptions, output chan<- []byte) {
+func (h *OpenAIGatewayHandler) readChatGPTCommands(ctx context.Context, conn *coderws.Conn, cache service.ChatGPTTurnCache, scope service.ChatGPTTurnScope, subscriptions *chatGPTSubscriptions, output chan<- []byte) string {
 	for {
 		kind, raw, err := conn.Read(ctx)
-		if err != nil || kind != coderws.MessageText {
-			return
+		if err != nil {
+			if ctx.Err() != nil {
+				return "context_ended"
+			}
+			if status := coderws.CloseStatus(err); status == coderws.StatusNormalClosure || status == coderws.StatusGoingAway {
+				return "client_closed"
+			}
+			return "client_read_failed"
+		}
+		if kind != coderws.MessageText {
+			return "invalid_command_frame"
 		}
 		var commands []struct {
 			ID      int64 `json:"id"`
@@ -417,26 +461,43 @@ func (h *OpenAIGatewayHandler) readChatGPTCommands(ctx context.Context, conn *co
 				} `json:"presence"`
 			} `json:"command"`
 		}
-		if json.Unmarshal(raw, &commands) != nil || len(commands) > 32 {
-			return
+		if json.Unmarshal(raw, &commands) != nil || len(commands) == 0 || len(commands) > 32 {
+			return "invalid_command_batch"
 		}
 		for _, command := range commands {
 			if command.ID < 1 {
-				return
+				return "invalid_command_id"
 			}
 			name, topic := command.Command.Type, command.Command.Topic
+			topicAllowed := true
 			if name == "subscribe" || name == "unsubscribe" {
-				if topic != "conversations" {
+				if !service.ValidChatGPTMetadataValue(topic, 512) || topic == "" || len(command.Command.Offset) > 512 {
+					return "invalid_command_topic"
+				}
+				if !service.ChatGPTConversationUpdateTopic(topic) {
 					if !service.ValidChatGPTUpdateTopic(topic) {
-						return
-					}
-					owner, err := cache.GetChatGPTResume(ctx, scope.TopicKey(topic))
-					if err != nil || owner == nil {
-						return
+						topicAllowed = false
+					} else if name == "subscribe" {
+						owner, err := cache.GetChatGPTResume(ctx, scope.TopicKey(topic))
+						if err != nil {
+							return "ownership_unavailable"
+						}
+						topicAllowed = owner != nil
 					}
 				}
 			} else if name != "connect" && name != "presence" {
-				return
+				return "invalid_command_type"
+			}
+			if !topicAllowed {
+				// Desktop batches independent subscriptions. Reject only this
+				// command, never tear down the valid conversation subscription.
+				wire, _ := json.Marshal([]any{map[string]any{"id": command.ID, "reply": map[string]any{"type": "error", "code": "topic_unavailable"}}})
+				select {
+				case output <- wire:
+				case <-ctx.Done():
+					return "context_ended"
+				}
+				continue
 			}
 			subscriptions.Lock()
 			subscriptions.Revision++
@@ -444,7 +505,7 @@ func (h *OpenAIGatewayHandler) readChatGPTCommands(ctx context.Context, conn *co
 			case "subscribe":
 				if len(subscriptions.Topics) >= 32 || len(command.Command.Offset) > 512 {
 					subscriptions.Unlock()
-					return
+					return "subscription_limit"
 				}
 				subscriptions.Topics[topic] = chatGPTSubscription{command.Command.Offset, subscriptions.Revision}
 			case "unsubscribe":
@@ -467,7 +528,7 @@ func (h *OpenAIGatewayHandler) readChatGPTCommands(ctx context.Context, conn *co
 			select {
 			case output <- wire:
 			case <-ctx.Done():
-				return
+				return "context_ended"
 			}
 		}
 	}
@@ -484,12 +545,16 @@ func (h *OpenAIGatewayHandler) runChatGPTUpdatesAccount(ctx context.Context, c *
 	}()
 	account, err := h.gatewayService.GetChatGPTBoundAccount(ctx, key.GroupID, accountID)
 	if err != nil {
+		logger.L().Warn("openai.chatgpt_updates_provider_failed", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", accountID), zap.String("stage", "account_eligibility"))
 		return
 	}
 	connectCtx, stop := context.WithTimeout(ctx, 15*time.Second)
 	conn, err := h.gatewayService.OpenChatGPTUpdates(connectCtx, c, account)
 	stop()
 	if err != nil {
+		// OpenChatGPTUpdates returns fixed diagnostics, never the dialer's
+		// credential-bearing error or URL.
+		logger.L().Warn("openai.chatgpt_updates_provider_failed", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", accountID), zap.String("stage", service.ChatGPTUpdatesFailureStage(err)))
 		return
 	}
 	defer func() { _ = conn.CloseNow() }()
@@ -547,7 +612,7 @@ func (h *OpenAIGatewayHandler) writeChatGPTSubscriptions(ctx context.Context, co
 			if sent[topic] == subscription.Revision {
 				continue
 			}
-			if topic != "conversations" {
+			if !service.ChatGPTConversationUpdateTopic(topic) {
 				owner, err := cache.GetChatGPTResume(ctx, scope.TopicKey(topic))
 				if err != nil {
 					return
@@ -557,7 +622,7 @@ func (h *OpenAIGatewayHandler) writeChatGPTSubscriptions(ctx context.Context, co
 				}
 			}
 			offset := subscription.Offset
-			if topic == "conversations" {
+			if service.ChatGPTConversationUpdateTopic(topic) {
 				offset = "0"
 			}
 			command := map[string]any{"type": "subscribe", "topic_id": topic}

@@ -16,6 +16,30 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Return a fixed classification only. Underlying transport errors can include
+// the credentialed provider URL and must never enter application logs.
+func ChatGPTUpdatesFailureStage(err error) string {
+	if err == nil {
+		return "none"
+	}
+	switch err.Error() {
+	case "native Chat updates bootstrap failed":
+		return "bootstrap_transport"
+	case "native Chat updates bootstrap rejected":
+		return "bootstrap_status"
+	case "native Chat updates bootstrap exceeds limit":
+		return "bootstrap_body"
+	case "invalid native Chat updates destination":
+		return "destination_validation"
+	case "invalid native Chat updates proxy":
+		return "proxy_configuration"
+	case "native Chat updates transport failed":
+		return "websocket_dial"
+	default:
+		return "unknown"
+	}
+}
+
 // OpenChatGPTUpdates keeps the short-lived provider URL in memory. Never use
 // the Responses trace dialer here: the URL itself may contain a credential.
 func (s *OpenAIGatewayService) OpenChatGPTUpdates(ctx context.Context, c *gin.Context, account *Account) (*coderws.Conn, error) {
@@ -167,11 +191,19 @@ func FilterChatGPTUpdates(ctx context.Context, cache ChatGPTTurnCache, scope Cha
 		if json.Unmarshal(payload, &event) != nil {
 			continue
 		}
+		if ChatGPTConversationUpdateTopic(topic) && event.Type == "conversation-updates" {
+			updates, err := filterChatGPTUpdateBatch(ctx, cache, scope, accountID, topic, payload)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, updates...)
+			continue
+		}
 		id := event.Payload.ConversationID
 		var owner *ChatGPTTurnSnapshot
 		var err error
-		if topic == "conversations" {
-			if id == "" || len(id) > 512 || (event.Type != "conversation-update" && event.Type != "conversation-history-update") {
+		if ChatGPTConversationUpdateTopic(topic) {
+			if id == "" || len(id) > 512 || (event.Type != "conversation-update" && event.Type != "conversation-history-update" && event.Type != "conversation-created" && event.Type != "conversation-turn-complete") {
 				continue
 			}
 			owner, err = cache.GetChatGPTResume(ctx, scope.ResumeKey(id))
@@ -206,6 +238,9 @@ func FilterChatGPTUpdates(ctx context.Context, cache ChatGPTTurnCache, scope Cha
 			}
 		}
 		if event.Payload.UpdateType == "stream-handoff" {
+			if _, err := cache.SetChatGPTTurnAsyncStatus(ctx, scope.TurnKey(owner.Identity), 3); err != nil {
+				return nil, err
+			}
 			for _, option := range event.Payload.Content.Options {
 				if option.Type == "subscribe_ws_topic" && ValidChatGPTUpdateTopic(option.Topic) {
 					if err := cache.BindChatGPTResume(ctx, scope.TopicKey(option.Topic), scope.TurnKey(owner.Identity)); err != nil {
@@ -215,16 +250,58 @@ func FilterChatGPTUpdates(ctx context.Context, cache ChatGPTTurnCache, scope Cha
 			}
 		}
 		wire := entry
-		if topic == "conversations" {
+		if ChatGPTConversationUpdateTopic(topic) {
 			wire, _ = json.Marshal(struct {
 				Type    string          `json:"type"`
 				Topic   string          `json:"topic_id"`
 				Payload json.RawMessage `json:"payload"`
 			}{"message", topic, payload})
 		}
-		hint := event.Payload.UpdateType == "async-task-completed" || event.Payload.Type == "done" ||
+		hint := event.Type == "conversation-turn-complete" || event.Payload.UpdateType == "async-task-completed" || event.Payload.Type == "done" ||
 			(event.Payload.Content.AsyncStatus != nil && *event.Payload.Content.AsyncStatus == 4)
 		result = append(result, ChatGPTUpdate{Raw: wire, ConversationID: id, CompletionHint: hint})
+	}
+	return result, nil
+}
+
+// Alder batches may mix conversations. Split them into individually owned
+// updates without carrying account-wide batch metadata or recovery offsets.
+func filterChatGPTUpdateBatch(ctx context.Context, cache ChatGPTTurnCache, scope ChatGPTTurnScope, accountID int64, topic string, payload []byte) ([]ChatGPTUpdate, error) {
+	var batch struct {
+		Payload struct {
+			Updates []json.RawMessage `json:"updates"`
+		} `json:"payload"`
+	}
+	if json.Unmarshal(payload, &batch) != nil || len(batch.Payload.Updates) > 256 {
+		return nil, errors.New("invalid native Chat update batch")
+	}
+	var result []ChatGPTUpdate
+	for _, raw := range batch.Payload.Updates {
+		var update struct {
+			ID      string          `json:"conversation_id"`
+			Type    string          `json:"type"`
+			Message json.RawMessage `json:"message"`
+		}
+		if json.Unmarshal(raw, &update) != nil || update.ID == "" || len(update.ID) > 512 {
+			continue
+		}
+		owner, err := cache.GetChatGPTResume(ctx, scope.ResumeKey(update.ID))
+		if err != nil {
+			return nil, err
+		}
+		if owner == nil || owner.AccountID != accountID {
+			continue
+		}
+		var images chatGPTImageObserver
+		images.observeMessage(update.Message)
+		if evidence := images.evidence(); evidence.GenerationSeen {
+			if err := BindChatGPTDeliveryAssets(ctx, cache, scope, owner, evidence); err != nil {
+				return nil, err
+			}
+		}
+		wire, _ := json.Marshal(map[string]any{"type": "message", "topic_id": topic,
+			"payload": map[string]any{"type": "conversation-updates", "payload": map[string]any{"updates": []json.RawMessage{raw}}}})
+		result = append(result, ChatGPTUpdate{Raw: wire, ConversationID: update.ID, CompletionHint: update.Type == "stream-message-done"})
 	}
 	return result, nil
 }

@@ -120,6 +120,12 @@ func ValidChatGPTUpdateTopic(topic string) bool {
 	return len(topic) <= 512 && (strings.HasPrefix(topic, "conversation-") || strings.HasPrefix(topic, "conv-turn-low-ttl-")) && ValidChatGPTMetadataValue(topic, 512)
 }
 
+// Desktop subscribes to both catalogs on the same transport. Neither catalog
+// grants account-wide visibility: each delivered event still needs an owner.
+func ChatGPTConversationUpdateTopic(topic string) bool {
+	return topic == "conversations" || topic == "alder-conversations"
+}
+
 func ChatGPTUserMessageHash(body []byte) string {
 	messages := gjson.GetBytes(body, "messages").Array()
 	if len(messages) == 0 {

@@ -76,6 +76,8 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 	const original = `{"action":"next","model":"gpt-5-6-thinking","thinking_effort":"extended","messages":[{"id":"user","author":{"role":"user"},"content":{"parts":["TEST_ONLY draw"]}}],"client_extension":{"keep":true}}`
 	snapshot := `{"conversation_id":"TEST_ONLY_CONVERSATION","async_status":4,"current_node":"final","mapping":{"user":{"parent":null,"message":{"id":"user","author":{"role":"user"}}},"image":{"parent":"user","message":{"id":"image","author":{"role":"tool","name":"image_gen"},"status":"finished_successfully","content":{"content_type":"multimodal_text","parts":[{"content_type":"image_asset_pointer","asset_pointer":"sediment://file_TEST_ONLY","width":3840,"height":2160}]}}},"final":{"parent":"image","message":{"id":"final","author":{"role":"assistant"},"status":"finished_successfully","end_turn":true,"metadata":{"model_slug":"gpt-5-6-thinking"}}}}}`
 	var modelCalls, snapshotCalls, bootstrapCalls atomic.Int64
+	var snapshotBody atomic.Value
+	snapshotBody.Store(snapshot)
 	var assetCalls atomic.Int64
 	var capturedBody string
 	var capturedMu sync.Mutex
@@ -94,17 +96,17 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 				t.Error("invalid provider credential boundary")
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = io.WriteString(w, "data: {\"type\":\"conversation_async_status\",\"conversation_id\":\"TEST_ONLY_CONVERSATION\",\"async_status\":3}\n\n"+terminal)
+			_, _ = io.WriteString(w, "data: {\"type\":\"stream_handoff\",\"options\":[{\"type\":\"subscribe_ws_topic\",\"topic_id\":\"conv-turn-low-ttl-TEST_ONLY\"}]}\n\n"+terminal)
 		case "/backend-api/f/conversation/resume":
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = io.WriteString(w, terminal)
 		case "/backend-api/conversation/TEST_ONLY_CONVERSATION":
-			snapshotCalls.Add(1)
-			if r.Header.Get("Sec-Websocket-Key") != "" || r.Header.Get("Accept-Encoding") != "identity" {
+			readNumber := snapshotCalls.Add(1)
+			if r.Header.Get("Sec-Websocket-Key") != "" || (readNumber == 1 && r.Header.Get("Accept-Encoding") != "identity") {
 				t.Error("internal snapshot must not copy WebSocket negotiation or encoding")
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, snapshot)
+			_, _ = io.WriteString(w, snapshotBody.Load().(string))
 		case "/backend-api/celsius/ws/user":
 			bootstrapCalls.Add(1)
 			w.Header().Set("Content-Type", "application/json")
@@ -208,8 +210,10 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(gateway.URL, "http")+"/chatgpt/backend-api/saiai/chat-updates", nil)
 	require.NoError(t, err)
 	defer func() { _ = client.CloseNow() }()
-	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`[{"id":1,"command":{"type":"connect","presence":{"type":"presence","state":"foreground"}}},{"id":2,"command":{"type":"subscribe","topic_id":"conversations"}}]`)))
-	for i := 0; i < 2; i++ {
+	// Exact Desktop startup includes both catalogs. An auxiliary subscription
+	// in the same batch must not take down the owned conversation transport.
+	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`[{"id":1,"command":{"type":"connect","presence":{"type":"presence","state":"foreground"}}},{"id":2,"command":{"type":"subscribe","topic_id":"conversations"}},{"id":3,"command":{"type":"subscribe","topic_id":"alder-conversations"}},{"id":4,"command":{"type":"subscribe","topic_id":"app_notifications"}}]`)))
+	for i := 0; i < 4; i++ {
 		_, _, err := client.Read(ctx)
 		require.NoError(t, err)
 	}
@@ -224,6 +228,9 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 	require.NoError(t, err)
 	require.True(t, pending.AsyncPending)
 	require.False(t, pending.TerminalSeen)
+	topicOwner, err := cache.GetChatGPTResume(ctx, scope.TopicKey("conv-turn-low-ttl-TEST_ONLY"))
+	require.NoError(t, err)
+	require.NotNil(t, topicOwner)
 	w = request("POST", "/chatgpt/backend-api/f/conversation/resume", `{"conversation_id":"TEST_ONLY_CONVERSATION","offset":0}`, 23)
 	require.Equal(t, 200, w.Code)
 	require.Equal(t, 0, usage.count(), "a delivery leg omitting async status cannot erase pending state")
@@ -261,6 +268,13 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 	require.Equal(t, int64(1), snapshotCalls.Load())
 	require.Equal(t, 1, usage.count())
 	require.Equal(t, int64(1), modelCalls.Load())
+	snapshotBody.Store(strings.ReplaceAll(snapshot, "file_TEST_ONLY", "file_COMPLETED_DELIVERY"))
+	w = request("GET", "/chatgpt/backend-api/conversation/TEST_ONLY_CONVERSATION", "", 23)
+	require.Equal(t, 200, w.Code)
+	downloadOwner, err := cache.GetChatGPTResume(ctx, scope.AssetKey(service.ChatGPTAssetLookupHashes("file_COMPLETED_DELIVERY")[0]))
+	require.NoError(t, err)
+	require.NotNil(t, downloadOwner, "completed turn delivery still binds verified files")
+	require.Equal(t, 1, usage.count(), "late delivery cannot reopen a sealed bill")
 	w = request("GET", "/chatgpt/backend-api/files/download/file_TEST_ONLY", "", 24)
 	require.Equal(t, 404, w.Code)
 	require.Equal(t, int64(0), assetCalls.Load())
@@ -274,4 +288,25 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 		defer h.chatGPTUpdatesMu.Unlock()
 		return h.chatGPTUpdatesActive == 0
 	}, 2*time.Second, 10*time.Millisecond)
+	malformed, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(gateway.URL, "http")+"/chatgpt/backend-api/saiai/chat-updates", nil)
+	require.NoError(t, err)
+	defer func() { _ = malformed.CloseNow() }()
+	require.NoError(t, malformed.Write(ctx, coderws.MessageText, []byte(`{"command":"invalid"}`)))
+	_, _, err = malformed.Read(ctx)
+	require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err), "protocol rejection must send a close frame, not reset the transport")
+}
+
+func TestChatGPTUpdatesCapacityIncludesOfficialAuxiliaryTransports(t *testing.T) {
+	h := &OpenAIGatewayHandler{}
+	scope := service.ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
+	for range 4 {
+		release, ok := h.reserveChatGPTUpdates(scope)
+		require.True(t, ok)
+		t.Cleanup(release)
+	}
+	_, ok := h.reserveChatGPTUpdates(scope)
+	require.False(t, ok)
+	release, ok := h.reserveChatGPTUpdates(service.ChatGPTTurnScope{UserID: 2, APIKeyID: 2, GroupID: 3})
+	require.True(t, ok, "one scope cannot exhaust a different user's reservation")
+	t.Cleanup(release)
 }

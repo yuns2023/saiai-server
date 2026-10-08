@@ -318,6 +318,10 @@ func (o *ChatGPTConversationStreamObserver) dispatchEvent() error {
 		}
 	}
 	if event.Type == "stream_handoff" {
+		// A handoff is positive evidence of unfinished delivery even when the
+		// provider omits conversation_async_status on this HTTP leg. A later
+		// explicit inactive status or verified snapshot may finish the turn.
+		o.summary.AsyncStatusSeen, o.summary.AsyncStatus = true, 3
 		for _, option := range event.Options {
 			if option.Type == "subscribe_ws_topic" && ValidChatGPTUpdateTopic(option.TopicID) && len(o.summary.UpdateTopics) < 16 {
 				o.summary.UpdateTopics = append(o.summary.UpdateTopics, option.TopicID)

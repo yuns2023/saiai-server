@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -10,6 +11,25 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestChatGPTHandoffWithoutAsyncStatusDefersCompletion(t *testing.T) {
+	for _, before := range []string{"", "data: {\"type\":\"conversation_async_status\",\"async_status\":4}\n\n"} {
+		o := NewChatGPTConversationStreamObserver()
+		require.NoError(t, o.Observe([]byte(before+"data: {\"type\":\"stream_handoff\",\"options\":[{\"type\":\"subscribe_ws_topic\",\"topic_id\":\"conv-turn-low-ttl-TEST_ONLY\"}]}\n\ndata: {\"type\":\"message_stream_complete\",\"conversation_id\":\"TEST_ONLY\"}\n\n")))
+		summary := o.Snapshot()
+		require.True(t, summary.CompletionSeen)
+		require.True(t, summary.AsyncStatusSeen)
+		require.True(t, ChatGPTAsyncPending(summary.AsyncStatus))
+		require.Equal(t, []string{"conv-turn-low-ttl-TEST_ONLY"}, summary.UpdateTopics)
+		require.NoError(t, o.Observe([]byte("data: {\"type\":\"conversation_async_status\",\"async_status\":4}\n\n")))
+		require.False(t, ChatGPTAsyncPending(o.Snapshot().AsyncStatus))
+	}
+}
+
+func TestChatGPTUpdateFailureDiagnosticsDoNotExposeTransportErrors(t *testing.T) {
+	require.Equal(t, "unknown", ChatGPTUpdatesFailureStage(errors.New("dial wss://ws.chatgpt.com/?access_token=TEST_ONLY_SECRET")))
+	require.Equal(t, "websocket_dial", ChatGPTUpdatesFailureStage(errors.New("native Chat updates transport failed")))
+}
 
 func TestChatGPTAsyncStatusIsNotAStreamCompletion(t *testing.T) {
 	for _, status := range []string{"3", "5", "6", "7", "8", "null", `"3"`, `{}`} {
@@ -79,8 +99,18 @@ func TestChatGPTUpdateFilteringIsolatesScopeAccountCatchupsAndTopics(t *testing.
 	require.NoError(t, cache.BindChatGPTUpdates(ctx, scope.ResumeKey("owned"), scope.TurnKey(turn.Identity), scope.UpdatesKey()))
 	topic := "conv-turn-low-ttl-TEST_ONLY"
 	require.NoError(t, cache.BindChatGPTResume(ctx, scope.TopicKey(topic), scope.TurnKey(turn.Identity)))
-	subscribed := func(topic string) bool { return topic == "conversations" || topic == "conv-turn-low-ttl-TEST_ONLY" }
+	subscribed := func(topic string) bool {
+		return ChatGPTConversationUpdateTopic(topic) || topic == "conv-turn-low-ttl-TEST_ONLY"
+	}
 	owned := `{"type":"message","topic_id":"conversations","offset":"ACCOUNT_CURSOR","payload":{"type":"conversation-update","payload":{"conversation_id":"owned","update_type":"async-task-completed","update_content":{"message":{"content":"OWNED_CONTENT"}}}}}`
+	alder := strings.Replace(owned, `"topic_id":"conversations"`, `"topic_id":"alder-conversations"`, 1)
+	filteredAlder, err := FilterChatGPTUpdates(ctx, cache, scope, 11, []byte(alder), subscribed)
+	require.NoError(t, err)
+	require.Len(t, filteredAlder, 1)
+	require.NotContains(t, string(filteredAlder[0].Raw), "ACCOUNT_CURSOR")
+	filteredAlder, err = FilterChatGPTUpdates(ctx, cache, scope, 12, []byte(alder), subscribed)
+	require.NoError(t, err)
+	require.Empty(t, filteredAlder)
 	foreign := strings.ReplaceAll(owned, "owned", "foreign")
 	stream := `{"type":"message","topic_id":"` + topic + `","offset":"TURN_CURSOR","payload":{"type":"conversation-turn-stream","payload":{"conversation_id":"owned","turn_id":"turn","type":"done"}}}`
 	batch := []byte(` [` + foreign + `,` + owned + `,{"id":3,"reply":{"type":"subscribe","catchups":[` + foreign + `,` + owned + `]}},` + stream + `,{"type":"unknown","payload":{"conversation_id":"owned"}}] `)
@@ -119,6 +149,26 @@ func TestChatGPTUpdateFilteringIsolatesScopeAccountCatchupsAndTopics(t *testing.
 	accounts, err = cache.ListChatGPTUpdateAccounts(ctx, (ChatGPTTurnScope{1, 3, 3}).UpdatesKey())
 	require.NoError(t, err)
 	require.Empty(t, accounts)
+	alderBatch := `{"type":"message","topic_id":"alder-conversations","offset":"PRIVATE_CURSOR","payload":{"type":"conversation-updates","unscoped":"PRIVATE_BATCH_METADATA","payload":{"updates":[{"conversation_id":"foreign","type":"replace-turn-message","message":"FOREIGN_BODY"},{"conversation_id":"owned","type":"stream-message-done","message":{"status":"finished_successfully","author":{"role":"tool","name":"image_gen"},"content":{"content_type":"multimodal_text","parts":[{"content_type":"image_asset_pointer","asset_pointer":"sediment://file_BATCH","width":1024,"height":1024}]}}}]}}}`
+	batchUpdates, err := FilterChatGPTUpdates(ctx, cache, scope, 11, []byte(alderBatch), subscribed)
+	require.NoError(t, err)
+	require.Len(t, batchUpdates, 1)
+	require.True(t, batchUpdates[0].CompletionHint)
+	require.Equal(t, "owned", batchUpdates[0].ConversationID)
+	for _, forbidden := range []string{"foreign", "FOREIGN_BODY", "PRIVATE_CURSOR", "PRIVATE_BATCH_METADATA"} {
+		require.NotContains(t, string(batchUpdates[0].Raw), forbidden)
+	}
+	asset, err = cache.GetChatGPTResume(ctx, scope.AssetKey(ChatGPTAssetLookupHashes("file_BATCH")[0]))
+	require.NoError(t, err)
+	require.NotNil(t, asset)
+	batchUpdates, err = FilterChatGPTUpdates(ctx, cache, scope, 12, []byte(alderBatch), subscribed)
+	require.NoError(t, err)
+	require.Empty(t, batchUpdates)
+	completeEvent := `{"type":"conversation-turn-complete","payload":{"conversation_id":"owned"}}`
+	batchUpdates, err = FilterChatGPTUpdates(ctx, cache, scope, 11, []byte(completeEvent), subscribed)
+	require.NoError(t, err)
+	require.Len(t, batchUpdates, 1)
+	require.True(t, batchUpdates[0].CompletionHint)
 }
 
 func TestChatGPTUpdateURLsStayOnProviderOrExplicitReplayOrigin(t *testing.T) {

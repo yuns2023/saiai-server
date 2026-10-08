@@ -26,7 +26,10 @@ turn expiry. Raw conversation IDs, topic IDs, provider subscription URLs,
 credentials, message content and image pointers are not persisted.
 
 The broker multiplexes at most 16 accounts per scope, 32 topics per connection,
-two connections per scope and 64 per process. It checks group/account
+four connections per scope and 64 per process. Official Desktop opens distinct
+conversation, messaging and app-notification transports; the fourth reservation
+permits a reconnect. Unsupported auxiliary topics remain local and open no
+provider connection. It checks group/account
 eligibility during delivery. Expired ownership, unavailable owners and Redis
 errors fail closed. It does not fail over an owned conversation to another
 account. This bounded lease does not implement permanent conversation history.
@@ -41,7 +44,10 @@ provider destination still needs versioned staging verification.
 ## Native protocol boundaries
 
 The Gateway accepts native connect, presence, subscribe and unsubscribe
-commands. The logical `conversations` subscription is scoped locally. Turn
+commands. The logical `conversations` and `alder-conversations` subscriptions
+are scoped locally. Both occur in one official Desktop startup batch. Unsupported
+auxiliary or unowned turn subscriptions receive a per-command unavailable reply;
+they cannot close an otherwise valid conversation subscription. Turn
 topics must have been observed in a successful owned stream handoff. Provider
 command replies are consumed internally; catchup messages undergo the same
 ownership filtering as live messages. Unknown account-wide events are dropped.
@@ -49,6 +55,10 @@ ownership filtering as live messages. Unknown account-wide events are dropped.
 Allowed conversation events must identify an owned conversation on that same
 account. Turn stream messages must match their owned topic and, when supplied,
 the bound conversation. Encoded stream items remain opaque and unchanged.
+Native `conversation-updates` batches are split into individually owned updates;
+unscoped batch metadata and account-wide cursors are omitted. Conversation turn
+completion and stream-message completion hints can trigger the same verified
+snapshot read as async-task completion.
 Known handoff topics and generated image assets are bound before delivery.
 Single-conversation GETs and image downloads require the same ownership and
 original account; they do not select an arbitrary pool account.
@@ -62,7 +72,9 @@ Turn-topic offsets and native payloads are preserved. This is a delivery broker,
 not a byte-identical account-wide subscription claim. A local subscription ack
 does not prove the provider connection is established.
 
-Frames are bounded (64 KiB client commands, 2 MiB provider frames), queues have
+Malformed commands receive a protocol close frame rather than an abrupt reset.
+Connection/closure diagnostics use fixed classifications, never frames, topic
+identities or credentialed URLs. Frames are bounded (64 KiB client commands, 2 MiB provider frames), queues have
 bounded backpressure, writes/timeouts are bounded, and the connection lifetime
 is at most one hour. Disconnect closes its provider connections and releases
 broker reservations. Provider failures close the downstream transport so the
@@ -76,8 +88,12 @@ credentialed URLs.
 `message_stream_complete` ends one delivery stream. It cannot settle a turn
 while observed async status remains STREAMING (3), REALTIME (5/6/7), malformed
 or unknown. Pending state is shared across resumes, including resumes that omit
-status. The Redis seal checks pending state atomically with image evidence;
+status. A `stream_handoff` also establishes pending work even when the provider
+omits the async-status event. Only a subsequent explicit inactive status or a
+verified completed conversation snapshot can clear it. The Redis seal checks pending state atomically with image evidence;
 late delivery cannot change an already sealed bill.
+An owned completed-branch read can still bind image downloads after settlement;
+it cannot reopen the frozen bill or create a second charge.
 
 A native completion hint may trigger a read-only GET of the owned conversation
 on its original account, at most three times per conversation per connection.

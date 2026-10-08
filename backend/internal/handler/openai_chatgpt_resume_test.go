@@ -108,6 +108,7 @@ func TestChatGPTProHandoffResumeUsesOriginalAccountPriceAndIdentity(t *testing.T
 	identity := service.ResolveChatGPTTurnBillingIdentity([]byte(body), "")
 	require.Equal(t, identity, pending.Identity)
 	require.True(t, pending.Images.GenerationSeen)
+	require.True(t, pending.AsyncPending, "handoff without an async-status event still leaves work pending")
 	require.Len(t, pending.Images.AssetHashes, 1)
 	// A separate service instance shares the pending context, even while an
 	// admin read is failing and the current tariff has changed.
@@ -141,6 +142,10 @@ func TestChatGPTProHandoffResumeUsesOriginalAccountPriceAndIdentity(t *testing.T
 	run(secondHandler, "/chatgpt/backend-api/f/conversation/resume", resumeBody, 23, 21, groupID)
 	require.Empty(t, usage.logs, "completion of another conversation cannot settle this turn")
 	complete := "data: {\"v\":{\"message\":{\"author\":{\"role\":\"assistant\"},\"metadata\":{\"model_slug\":\"gpt-6-pro\"}}}}\n\ndata: {\"type\":\"message_stream_complete\",\"conversation_id\":\"TEST_ONLY_CONVERSATION\"}\n\ndata: [DONE]\n\n"
+	provider.responseBody = complete
+	run(secondHandler, "/chatgpt/backend-api/f/conversation/resume", resumeBody, 23, 21, groupID)
+	require.Empty(t, usage.logs, "a delivery-leg terminator cannot erase a previous handoff")
+	complete = "data: {\"type\":\"conversation_async_status\",\"conversation_id\":\"TEST_ONLY_CONVERSATION\",\"async_status\":4}\n\n" + complete
 	complete = imageEvent + complete // a repeated asset on resume must count once
 	provider.responseBody = complete
 	success := run(secondHandler, "/chatgpt/backend-api/f/conversation/resume?extension=a%2Bb", resumeBody, 23, 21, groupID)
