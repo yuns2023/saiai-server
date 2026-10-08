@@ -49,7 +49,9 @@ func TestChatGPTUpstreamHTMLControlsPreserveWireResponseAndAttributeProvider(t *
 			require.Empty(t, cache.active)
 			require.True(t, service.NativeCodexRejectsRedirects(upstream.req.Context()))
 			require.Equal(t, 403, c.GetInt(service.OpsUpstreamStatusCodeKey))
-			require.Len(t, c.MustGet(service.OpsUpstreamErrorsKey).([]*service.OpsUpstreamErrorEvent), 1)
+			events, ok := c.MustGet(service.OpsUpstreamErrorsKey).([]*service.OpsUpstreamErrorEvent)
+			require.True(t, ok)
+			require.Len(t, events, 1)
 
 			parsed := parseOpsErrorResponse(w.Body.Bytes())
 			upstreamStatus := c.GetInt(service.OpsUpstreamStatusCodeKey)
