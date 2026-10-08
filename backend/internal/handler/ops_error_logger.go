@@ -1140,6 +1140,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			clientIP = ip
 			entry.ClientIP = &clientIP
 		}
+		applyOpsNativeChatUpstreamClassification(entry)
 
 		// Persist only a minimal, whitelisted set of request headers to improve retry fidelity.
 		// Do NOT store Authorization/Cookie/etc.
@@ -1151,6 +1152,27 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		recordOpsRequestCaptureForError(c, ops, entry)
 
 		enqueueOpsErrorLog(ops, entry)
+	}
+}
+
+// Native Chat relays the raw provider error body, including HTML. Classify from
+// the observed upstream attempt instead of interpreting HTML as a local error.
+func applyOpsNativeChatUpstreamClassification(entry *service.OpsInsertErrorLogInput) {
+	if entry == nil || !strings.HasPrefix(entry.RequestPath, "/chatgpt/backend-api/") ||
+		entry.UpstreamStatusCode == nil || *entry.UpstreamStatusCode < 400 ||
+		*entry.UpstreamStatusCode != entry.StatusCode {
+		return
+	}
+	entry.ErrorSource = "upstream_http"
+	entry.ErrorOwner = "provider"
+	if entry.ErrorPhase == "internal" && entry.ErrorType == "api_error" {
+		entry.ErrorPhase = "upstream"
+		entry.ErrorType = "upstream_error"
+		if entry.UpstreamErrorMessage != nil {
+			entry.ErrorMessage = *entry.UpstreamErrorMessage
+		}
+		entry.Severity = classifyOpsSeverity(entry.ErrorType, entry.StatusCode)
+		entry.IsRetryable = classifyOpsIsRetryable(entry.ErrorType, entry.StatusCode)
 	}
 }
 

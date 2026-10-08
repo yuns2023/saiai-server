@@ -41,6 +41,7 @@ func TestBuildChatGPTConversationRequestPreservesNativeShape(t *testing.T) {
 	require.Empty(t, proxyURL)
 	require.Equal(t, "https://chatgpt.com/backend-api/f/conversation?foo=bar", req.URL.String())
 	require.Equal(t, "chatgpt.com", req.Host)
+	require.True(t, NativeCodexRejectsRedirects(req.Context()))
 	require.Equal(t, "Bearer oauth-upstream-token", req.Header.Get("Authorization"))
 	require.Equal(t, "upstream-account", req.Header.Get("ChatGPT-Account-ID"))
 	require.Equal(t, "CodexBrowser Mozilla/5.0", req.Header.Get("User-Agent"))

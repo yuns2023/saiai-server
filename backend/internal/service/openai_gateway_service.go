@@ -2949,6 +2949,9 @@ func (s *OpenAIGatewayService) buildChatGPTRequest(
 	if body != nil {
 		requestBody = bytes.NewReader(body)
 	}
+	// A native Chat redirect is a provider response, not permission for the
+	// Gateway to issue a second request with a changed path/method/body.
+	ctx = WithNativeCodexRedirectPolicy(ctx)
 	req, err := http.NewRequestWithContext(ctx, method, targetURL, requestBody)
 	if err != nil {
 		return nil, "", err
@@ -2992,7 +2995,9 @@ func (s *OpenAIGatewayService) ForwardChatGPTConversation(
 	if err != nil {
 		return nil, err
 	}
-	return s.doOpenAIUpstream(req, proxyURL, account.ID, account.Concurrency)
+	started := time.Now()
+	resp, err := s.doOpenAIUpstream(req, proxyURL, account.ID, account.Concurrency)
+	return observeChatGPTUpstreamResult(c, account, resp, err, started)
 }
 
 // ForwardChatGPTFileDownload forwards the native ChatGPT file-download
@@ -3020,7 +3025,9 @@ func (s *OpenAIGatewayService) ForwardChatGPTControl(
 	if err != nil {
 		return nil, err
 	}
-	return s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	started := time.Now()
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	return observeChatGPTUpstreamResult(c, account, resp, err, started)
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {

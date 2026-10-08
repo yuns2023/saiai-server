@@ -335,6 +335,7 @@ type chatGPTReplayUpstream struct {
 	body         []byte
 	responseBody string
 	statusCode   int
+	contentType  string
 	calls        int
 	onSend       func()
 }
@@ -406,10 +407,14 @@ func (u *chatGPTReplayUpstream) Do(req *http.Request, _ string, _ int64, _ int) 
 	if statusCode == 0 {
 		statusCode = http.StatusOK
 	}
+	contentType := u.contentType
+	if contentType == "" {
+		contentType = "text/event-stream"
+	}
 	return &http.Response{
 		StatusCode: statusCode,
 		Header: http.Header{
-			"Content-Type": []string{"text/event-stream"},
+			"Content-Type": []string{contentType},
 			"Set-Cookie":   []string{"upstream-secret=must-not-pass"},
 		},
 		Body: io.NopCloser(bytes.NewBufferString(responseBody)),

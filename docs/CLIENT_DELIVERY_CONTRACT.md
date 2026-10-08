@@ -315,3 +315,12 @@ frame, upstream payload or stream completion events.
 `gateway.openai_chat_response_shape_capture` is a default-off, staging-only
 diagnostic. It may record protocol field names but never field values or
 message content and must be disabled immediately after the authorized window.
+
+Native Chat POST and GET requests also disable transport-level redirects. The
+provider's redirect remains a response for the official client to handle; the
+Gateway must not silently issue another request with a changed method or body.
+An upstream error remains byte-for-byte unchanged on the wire. Ops records its
+upstream status and selected account, and identifies HTML browser-verification
+pages with a fixed message rather than classifying their HTML as a Gateway
+internal error. Detection inspects at most 16 KiB while the error is relayed;
+it does not persist that prefix, retry, solve a challenge, or disable OAuth.
