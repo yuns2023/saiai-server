@@ -106,7 +106,13 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 				t.Error("internal snapshot must not copy WebSocket negotiation or encoding")
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, snapshotBody.Load().(string))
+			body, ok := snapshotBody.Load().(string)
+			if !ok {
+				t.Error("snapshot fixture is missing")
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, _ = io.WriteString(w, body)
 		case "/backend-api/celsius/ws/user":
 			bootstrapCalls.Add(1)
 			w.Header().Set("Content-Type", "application/json")
