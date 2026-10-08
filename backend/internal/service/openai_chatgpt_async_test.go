@@ -87,7 +87,7 @@ func TestChatGPTSnapshotRequiresCurrentOwnedCompletedBranch(t *testing.T) {
 	require.Len(t, images.AssetHashes, 1, "historical images must not be charged again")
 	require.Equal(t, []string{"3840x2160"}, images.AssetSizes)
 	for _, change := range []struct{ old, next string }{
-		{`"async_status":4`, `"async_status":3`}, {`"async_status":4`, `"async_status":null`},
+		{`"async_status":4`, `"async_status":3`}, {`"async_status":4`, `"async_status":99`},
 		{`"end_turn":true`, `"end_turn":false`}, {`"status":"finished_successfully"`, `"status":"in_progress"`},
 		{`"role":"assistant"`, `"role":"tool"`}, {`"parent":"image"`, `"parent":"old"`},
 		{`"id":"user"`, `"id":"another-user"`}, {`"conversation_id":"TEST_ONLY_CONVERSATION"`, `"conversation_id":"OTHER"`},
@@ -99,7 +99,7 @@ func TestChatGPTSnapshotRequiresCurrentOwnedCompletedBranch(t *testing.T) {
 
 func TestChatGPTSnapshotDeliveryPrecedesBillingAndSupportsFinalImageTool(t *testing.T) {
 	fixture := strings.Replace(chatGPTCompletedSnapshotFixture, `"current_node":"final"`, `"current_node":"image"`, 1)
-	for _, status := range []string{"3", "5", "null", "99"} {
+	for _, status := range []string{"3", "5", "99"} {
 		raw := strings.Replace(fixture, `"async_status":4`, `"async_status":`+status, 1)
 		result, err := InspectChatGPTConversationDelivery([]byte(raw), "TEST_ONLY_CONVERSATION", ChatGPTMessageIDHash("user"))
 		require.NoError(t, err)

@@ -57,6 +57,7 @@ func InspectChatGPTConversationDelivery(raw []byte, conversationID, userMessageH
 	id := snapshot.CurrentNode
 	leafAssistant, leafImageTool := false, false
 	plainAssistantBranch, leafText := true, false
+	finishedImageBranch := true
 	for len(branch) < 256 && id != "" && !visited[id] {
 		visited[id] = true
 		node, exists := snapshot.Mapping[id]
@@ -82,7 +83,8 @@ func InspectChatGPTConversationDelivery(raw []byte, conversationID, userMessageH
 		if json.Unmarshal(node.Message, &message) != nil || message.ID != id {
 			break
 		}
-		if message.Metadata.IsError || message.Status == "finished_failed" {
+		if message.Metadata.IsError || message.Status == "finished_failed" ||
+			message.Content.Type == "error" || message.Content.Type == "system_error" {
 			result.Outcome = "failed_message"
 			return result, nil
 		}
@@ -103,15 +105,28 @@ func InspectChatGPTConversationDelivery(raw []byte, conversationID, userMessageH
 			}
 			result.Images, result.DeliveryImages = images.evidence(), delivery.evidence()
 			result.Summary.ImageGenerationSeen, result.Summary.ImageCount = result.Images.GenerationSeen, len(result.Images.AssetHashes)
+			var leafImages chatGPTImageObserver
+			if leafImageTool && len(branch) > 0 {
+				leafImages.observeMessage(branch[0])
+			}
+			terminalImageLeaf := leafAssistant || len(leafImages.evidence().AssetHashes) > 0
 			result.Outcome = "async_pending"
 			if snapshot.AsyncStatus == nil {
 				// Synchronous text turns omit async_status. A verified current
 				// branch ending in a successful end_turn assistant text message
-				// is sufficient, provided no tool or image work occurred. Missing
-				// status on an image/tool branch must still defer settlement.
+				// is sufficient, provided no tool or image work occurred.
 				if leafAssistant && leafText && plainAssistantBranch && !result.Images.GenerationSeen && !result.DeliveryImages.GenerationSeen {
 					result.Completed, result.Summary.CompletionSeen = true, true
 					result.Outcome = "completed_synchronous_assistant"
+				} else if terminalImageLeaf && finishedImageBranch && len(result.Images.AssetHashes) > 0 &&
+					len(result.Images.AssetHashes) == len(result.DeliveryImages.AssetHashes) {
+					// Native synchronous image turns also omit async_status. Require
+					// a successful terminal leaf, only finished assistant/image-tool
+					// messages on this owned branch, and final evidence for every
+					// deliverable asset. A preview, unfinished tool, arbitrary tool or
+					// historical image cannot establish this completion.
+					result.Completed, result.Summary.CompletionSeen = true, true
+					result.Outcome = "completed_synchronous_image"
 				}
 				return result, nil
 			}
@@ -122,11 +137,7 @@ func InspectChatGPTConversationDelivery(raw []byte, conversationID, userMessageH
 			// Native image turns may end at the image tool itself. Require an
 			// inactive provider state and a completed image on that leaf; an
 			// older ancestor image or an arbitrary tool is insufficient.
-			var leafImages chatGPTImageObserver
-			if leafImageTool && len(branch) > 0 {
-				leafImages.observeMessage(branch[0])
-			}
-			if !leafAssistant && len(leafImages.evidence().AssetHashes) == 0 {
+			if !terminalImageLeaf {
 				return result, nil
 			}
 			result.Completed, result.Summary.CompletionSeen = true, true
@@ -140,6 +151,8 @@ func InspectChatGPTConversationDelivery(raw []byte, conversationID, userMessageH
 			result.Summary.ObservedModel = message.Metadata.ModelSlug
 		}
 		plainAssistantBranch = plainAssistantBranch && message.Author.Role == "assistant"
+		finishedImageBranch = finishedImageBranch && message.Status == "finished_successfully" &&
+			(message.Author.Role == "assistant" || message.Author.Role == "tool" && chatGPTImageTool(message.Author.Name))
 		branch = append(branch, node.Message)
 		if node.Parent == nil {
 			break
