@@ -374,13 +374,14 @@
                       {{ record.billing_unit === 'turn' ? t('usage.nativeChatTurn') : record.request_type || '-' }}
                       <div v-if="record.billing_unit === 'turn' && record.media_type === 'image'" class="text-xs text-indigo-600 dark:text-indigo-400">
                         {{ record.image_count > 0 ? t('usage.nativeChatImagesObserved', { count: record.image_count }) : t('usage.nativeChatImageCountUnknown') }}
+                        <div v-if="record.image_count > 0">{{ record.image_size === 'mixed' ? t('usage.imageSizeMixed') : record.image_size || t('usage.imageSizeUnknown') }}</div>
                       </div>
                     </td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.input_tokens) }}</span></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.output_tokens) }}</span></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.cache_creation_tokens + record.cache_read_tokens) }}</span></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.total_tokens) }}</span></td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right font-medium text-gray-900 dark:text-white">{{ usd(record.actual_cost) }}</td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right font-medium text-gray-900 dark:text-white">{{ usd(record.actual_cost) }}<NativeChatCharges :record="record" /></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ record.duration_ms != null ? `${record.duration_ms} ms` : '-' }}</td>
                   </tr>
                 </tbody>
@@ -435,6 +436,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
+import NativeChatCharges from '@/components/common/NativeChatCharges.vue'
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
@@ -521,6 +523,8 @@ interface BillingInfo {
 
 interface RecentUsageRecord {
   billing_unit?: 'turn'
+  native_chat_turn_cost_usd?: number
+  native_chat_image_cost_usd?: number
   token_usage_source?: 'unknown'
   created_at: string
   model: string
@@ -533,6 +537,7 @@ interface RecentUsageRecord {
   duration_ms?: number
   request_type: string
   image_count: number
+  image_size?: string
   media_type?: string
 }
 

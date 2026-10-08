@@ -22,12 +22,14 @@ type ChatGPTTurnSnapshot struct {
 	Identity       ChatGPTTurnBillingIdentity
 	AccountID      int64
 	BasePriceUSD   float64
+	ImagePricesUSD map[string]float64
 	RequestedModel string
 	ThinkingEffort string
 	StartedAt      time.Time
 	Completed      bool
 	TerminalSeen   bool
 	Images         ChatGPTImageEvidence
+	ImageBilling   *ChatGPTImageBilling
 }
 
 // ChatGPTTurnCache is implemented by the shared Redis Gateway cache. Operations
@@ -40,6 +42,7 @@ type ChatGPTTurnCache interface {
 	CompleteChatGPTTurn(context.Context, string) error
 	MarkChatGPTTurnTerminal(context.Context, string) error
 	MergeChatGPTTurnImages(context.Context, string, ChatGPTImageEvidence) (*ChatGPTTurnSnapshot, error)
+	SealChatGPTTurnBilling(context.Context, string) (*ChatGPTTurnSnapshot, error)
 }
 
 type ChatGPTTurnScope struct{ UserID, APIKeyID, GroupID int64 }
@@ -156,6 +159,12 @@ type chatGPTMemoryAlias struct {
 func cloneChatGPTTurnSnapshot(input ChatGPTTurnSnapshot) *ChatGPTTurnSnapshot {
 	copy := input
 	copy.Images.AssetHashes = append([]string(nil), input.Images.AssetHashes...)
+	copy.Images.AssetSizes = append([]string(nil), input.Images.AssetSizes...)
+	copy.ImagePricesUSD = CloneChatGPTImagePrices(input.ImagePricesUSD)
+	if input.ImageBilling != nil {
+		billing := *input.ImageBilling
+		copy.ImageBilling = &billing
+	}
 	return &copy
 }
 
@@ -214,6 +223,26 @@ func (s *chatGPTMemoryTurnCache) MergeChatGPTTurnImages(_ context.Context, key s
 		return nil, errors.New("native Chat turn context expired")
 	}
 	entry.snapshot.Images = MergeChatGPTImageEvidence(entry.snapshot.Images, images)
+	s.turns[key] = entry
+	return cloneChatGPTTurnSnapshot(entry.snapshot), nil
+}
+
+func (s *chatGPTMemoryTurnCache) SealChatGPTTurnBilling(_ context.Context, key string) (*ChatGPTTurnSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanup()
+	entry, ok := s.turns[key]
+	if !ok {
+		return nil, errors.New("native Chat turn context expired")
+	}
+	if entry.snapshot.ImageBilling == nil {
+		billing, err := CalculateChatGPTImageBilling(entry.snapshot.Images, entry.snapshot.ImagePricesUSD)
+		if err != nil {
+			return nil, err
+		}
+		entry.snapshot.ImageBilling = billing
+	}
+	entry.snapshot.TerminalSeen = true
 	s.turns[key] = entry
 	return cloneChatGPTTurnSnapshot(entry.snapshot), nil
 }

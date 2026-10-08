@@ -158,6 +158,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	// Snapshot the current price once, before provider traffic. An admin change
 	// during a long-running stream must not reprice that in-flight turn.
 	fixedTurnPriceUSD := h.cfg.Gateway.OpenAIChatSuccessTurnPriceUSD
+	var imagePricesUSD map[string]float64
 	if isModelRequest && h.chatGPTBillingSettings != nil {
 		settings, priceErr := h.chatGPTBillingSettings.GetOpenAIChatGPTBillingSettings(c.Request.Context())
 		if priceErr != nil || settings == nil {
@@ -167,9 +168,11 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			return
 		}
 		fixedTurnPriceUSD = settings.PriceFor(model, thinkingEffort)
+		imagePricesUSD = service.CloneChatGPTImagePrices(settings.ImagePricesUSD)
 	}
 	if isResumeRequest {
 		fixedTurnPriceUSD = turn.BasePriceUSD
+		imagePricesUSD = service.CloneChatGPTImagePrices(turn.ImagePricesUSD)
 	}
 	fixedTurnBillingEnabled := service.IsValidOpenAIChatGPTTurnPrice(fixedTurnPriceUSD)
 	boundedStaging := h.cfg.Gateway.OpenAIChatUnaccountedAllowed &&
@@ -300,6 +303,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	if isModelRequest && turnCache != nil {
 		turn, err = turnCache.PutChatGPTTurnIfAbsent(forwardCtx, turnScope.TurnKey(billingIdentity), &service.ChatGPTTurnSnapshot{
 			Identity: billingIdentity, AccountID: selection.Account.ID, BasePriceUSD: fixedTurnPriceUSD,
+			ImagePricesUSD: imagePricesUSD,
 			RequestedModel: model, ThinkingEffort: thinkingEffort, StartedAt: requestStart,
 		}, service.ChatGPTTurnContextTTL)
 		if err != nil || turn == nil || turn.RequestedModel != model || turn.ThinkingEffort != thinkingEffort {
@@ -391,20 +395,21 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		}
 	}
 	var streamObserverErr error
-	mergeTurnImages := func() {
+	mergeTurnImages := func() error {
 		if streamObserver == nil || turnCache == nil || turn == nil {
-			return
+			return nil
 		}
 		evidence := streamObserver.ImageEvidence()
 		if !evidence.GenerationSeen {
-			return
+			return nil
 		}
 		updated, err := turnCache.MergeChatGPTTurnImages(forwardCtx, turnScope.TurnKey(turn.Identity), evidence)
 		if err != nil {
 			logger.L().Warn("openai.chatgpt_image_metadata_merge_failed", zap.Error(err))
-			return
+			return err
 		}
 		turn = updated
+		return nil
 	}
 	clientDisconnected := false
 	handoffBound := false
@@ -416,12 +421,14 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				signals := streamObserver.Snapshot()
 				if streamObserverErr == nil && !handoffBound && signals.HandoffSeen && signals.ConversationID != "" &&
 					resp.StatusCode >= 200 && resp.StatusCode < 300 && !signals.ProviderErrorSeen {
-					mergeTurnImages()
-					if turnCache == nil || turn == nil {
-						streamObserverErr = errors.New("ChatGPT handoff accounting context unavailable")
-					} else {
-						streamObserverErr = turnCache.BindChatGPTResume(forwardCtx, turnScope.ResumeKey(signals.ConversationID), turnScope.TurnKey(turn.Identity))
-						handoffBound = streamObserverErr == nil
+					streamObserverErr = mergeTurnImages()
+					if streamObserverErr == nil {
+						if turnCache == nil || turn == nil {
+							streamObserverErr = errors.New("ChatGPT handoff accounting context unavailable")
+						} else {
+							streamObserverErr = turnCache.BindChatGPTResume(forwardCtx, turnScope.ResumeKey(signals.ConversationID), turnScope.TurnKey(turn.Identity))
+							handoffBound = streamObserverErr == nil
+						}
 					}
 					if streamObserverErr != nil {
 						h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "accounting_unavailable", "ChatGPT handoff accounting context is unavailable", c.Writer.Written())
@@ -447,8 +454,8 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 					streamObserverErr = finishErr
 				}
 				if streamObserverErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && !summary.ProviderErrorSeen {
-					mergeTurnImages()
-					if turn != nil {
+					streamObserverErr = mergeTurnImages()
+					if streamObserverErr == nil && turn != nil {
 						images := service.MergeChatGPTImageEvidence(turn.Images, streamObserver.ImageEvidence())
 						summary.ImageGenerationSeen = images.GenerationSeen
 						summary.ImageCount = len(images.AssetHashes)
@@ -483,10 +490,16 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				if streamObserverErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 &&
 					summary.CompletionSeen && !summary.ProviderErrorSeen &&
 					(!isResumeRequest || summary.ConversationID == resumeConversationID) {
+					imageBilling, err := service.CalculateChatGPTImageBilling(streamObserver.ImageEvidence(), imagePricesUSD)
 					if turnCache != nil && turn != nil {
-						if err := turnCache.MarkChatGPTTurnTerminal(forwardCtx, turnScope.TurnKey(turn.Identity)); err != nil {
-							logger.L().Error("openai.chatgpt_mark_terminal_failed", zap.Error(err))
+						turn, err = turnCache.SealChatGPTTurnBilling(forwardCtx, turnScope.TurnKey(turn.Identity))
+						if err == nil && turn != nil {
+							imageBilling = turn.ImageBilling
 						}
+					}
+					if err != nil || imageBilling == nil {
+						logger.L().Error("openai.chatgpt_seal_billing_failed", zap.Error(err))
+						return
 					}
 					stickyHash := service.ChatGPTConversationSessionHash(summary.ConversationID)
 					if stickyHash != "" {
@@ -509,7 +522,9 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 								ObservedModel:       summary.ObservedModel,
 								ThinkingEffort:      thinkingEffort,
 								ImageGenerationSeen: summary.ImageGenerationSeen,
-								ImageCount:          summary.ImageCount,
+								ImageCount:          imageBilling.Count,
+								ImageSize:           imageBilling.Size,
+								ImageCostUSD:        imageBilling.CostUSD,
 								RequestID:           billingIdentity.RequestID,
 								APIKey:              apiKey,
 								User:                apiKey.User,

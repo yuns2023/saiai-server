@@ -377,16 +377,18 @@ type AdminRedeemCode struct {
 
 // UsageLog 是普通用户接口使用的 usage log DTO（不包含管理员字段）。
 type UsageLog struct {
-	ID               int64   `json:"id"`
-	UserID           int64   `json:"user_id"`
-	APIKeyID         int64   `json:"api_key_id"`
-	AccountID        int64   `json:"account_id"`
-	RequestID        string  `json:"request_id"`
-	SessionID        *string `json:"session_id,omitempty"`
-	Model            string  `json:"model"`
-	BillingUnit      string  `json:"billing_unit,omitempty"`
-	TokenUsageSource string  `json:"token_usage_source,omitempty"`
-	ChatTier         string  `json:"chat_tier,omitempty"`
+	ID                     int64    `json:"id"`
+	UserID                 int64    `json:"user_id"`
+	APIKeyID               int64    `json:"api_key_id"`
+	AccountID              int64    `json:"account_id"`
+	RequestID              string   `json:"request_id"`
+	SessionID              *string  `json:"session_id,omitempty"`
+	Model                  string   `json:"model"`
+	BillingUnit            string   `json:"billing_unit,omitempty"`
+	TokenUsageSource       string   `json:"token_usage_source,omitempty"`
+	ChatTier               string   `json:"chat_tier,omitempty"`
+	NativeChatTurnCostUSD  *float64 `json:"native_chat_turn_cost_usd,omitempty"`
+	NativeChatImageCostUSD *float64 `json:"native_chat_image_cost_usd,omitempty"`
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Omitted when no mapping was applied (requested model was used as-is).
 	UpstreamModel *string `json:"upstream_model,omitempty"`

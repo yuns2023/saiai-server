@@ -1086,6 +1086,8 @@ export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2'
 
 export interface UsageLog {
   billing_unit?: 'turn'
+  native_chat_turn_cost_usd?: number
+  native_chat_image_cost_usd?: number
   token_usage_source?: 'unknown'
   chat_tier?: 'instant' | 'medium' | 'high' | 'extreme' | 'pro' | 'default'
   id: number

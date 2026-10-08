@@ -27,6 +27,20 @@ func TestUsageLogFromServiceNativeChatReportsUnknownTokenUsage(t *testing.T) {
 	require.Empty(t, responses.TokenUsageSource)
 }
 
+func TestNativeChatDTOContainsEffectiveHistoricalImageCosts(t *testing.T) {
+	path, size := "/chatgpt/backend-api/f/conversation", "2048x2048"
+	log := &service.UsageLog{Model: "gpt-5-6", InboundEndpoint: &path, ImageCount: 1, ImageSize: &size,
+		InputCost: .01, OutputCost: .04, TotalCost: .05, ActualCost: .075}
+	for _, mapped := range []UsageLog{*UsageLogFromService(log), UsageLogFromServiceAdmin(log).UsageLog} {
+		require.Equal(t, "turn", mapped.BillingUnit)
+		require.Equal(t, "2048x2048", *mapped.ImageSize)
+		require.InDelta(t, .015, *mapped.NativeChatTurnCostUSD, 1e-12)
+		require.InDelta(t, .06, *mapped.NativeChatImageCostUSD, 1e-12)
+	}
+	response := UsageLogFromService(&service.UsageLog{Model: "gpt-6-luna", TotalCost: .05, ActualCost: .05})
+	require.Nil(t, response.NativeChatImageCostUSD)
+}
+
 func TestUsageLogFromService_IncludesOpenAIWSMode(t *testing.T) {
 	t.Parallel()
 

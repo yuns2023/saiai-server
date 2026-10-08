@@ -4271,6 +4271,8 @@ type OpenAIChatGPTTurnUsageInput struct {
 	ThinkingEffort      string
 	ImageGenerationSeen bool
 	ImageCount          int
+	ImageSize           string
+	ImageCostUSD        float64
 	RequestID           string
 	APIKey              *APIKey
 	User                *User
@@ -4291,6 +4293,10 @@ func IsValidOpenAIChatGPTTurnPrice(priceUSD float64) bool {
 	return priceUSD > 0 && !math.IsNaN(priceUSD) && !math.IsInf(priceUSD, 0)
 }
 
+func IsValidOpenAIChatGPTSnapshotPrice(priceUSD float64) bool {
+	return validChatGPTConfiguredPrice(priceUSD)
+}
+
 // RecordChatGPTTurnUsage records and settles exactly one successfully
 // completed native ChatGPT turn. Completion validation belongs to the caller;
 // this method rejects missing/invalid prices and never synthesizes tokens.
@@ -4306,6 +4312,9 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 	}
 	if input.ImageCount < 0 || input.ImageCount > MaxChatGPTObservedImages {
 		return errors.New("record ChatGPT turn usage: observed image count is out of bounds")
+	}
+	if !validChatGPTConfiguredPrice(input.ImageCostUSD) || (input.ImageCount == 0 && input.ImageCostUSD != 0) {
+		return errors.New("record ChatGPT turn usage: image cost is invalid")
 	}
 
 	apiKey := input.APIKey
@@ -4331,13 +4340,16 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 	if math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
 		return errors.New("record ChatGPT turn usage: finite rate multiplier is required")
 	}
-	actualCost := input.BasePriceUSD * multiplier
+	totalCost := input.BasePriceUSD + input.ImageCostUSD
+	actualCost := totalCost * multiplier
 	if !IsValidOpenAIChatGPTTurnPrice(actualCost) {
 		return errors.New("record ChatGPT turn usage: effective fixed price is invalid")
 	}
 
 	cost := &CostBreakdown{
-		TotalCost:  input.BasePriceUSD,
+		InputCost:  input.BasePriceUSD,
+		OutputCost: input.ImageCostUSD,
+		TotalCost:  totalCost,
 		ActualCost: actualCost,
 	}
 	isSubscriptionBilling := input.Subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
@@ -4353,16 +4365,20 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		requestedModel = OpenAIChatGPTTurnBillingModel
 	}
 	usageLog := &UsageLog{
-		UserID:                user.ID,
-		APIKeyID:              apiKey.ID,
-		AccountID:             account.ID,
-		RequestID:             requestID,
-		Model:                 requestedModel,
-		UpstreamModel:         optionalNonEqualStringPtr(input.ObservedModel, requestedModel),
-		ReasoningEffort:       optionalTrimmedStringPtr(input.ThinkingEffort),
-		GroupID:               apiKey.GroupID,
-		InputTokens:           0,
-		OutputTokens:          0,
+		UserID:          user.ID,
+		APIKeyID:        apiKey.ID,
+		AccountID:       account.ID,
+		RequestID:       requestID,
+		Model:           requestedModel,
+		UpstreamModel:   optionalNonEqualStringPtr(input.ObservedModel, requestedModel),
+		ReasoningEffort: optionalTrimmedStringPtr(input.ThinkingEffort),
+		GroupID:         apiKey.GroupID,
+		InputTokens:     0,
+		OutputTokens:    0,
+		// Native Chat uses these existing cost components for the text turn
+		// and generated output assets, independently of unknown token counts.
+		InputCost:             cost.InputCost,
+		OutputCost:            cost.OutputCost,
 		TotalCost:             cost.TotalCost,
 		ActualCost:            cost.ActualCost,
 		RateMultiplier:        multiplier,
@@ -4375,9 +4391,10 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
 		CreatedAt:             time.Now(),
 	}
-	// Image classification describes this same fixed-price Chat turn. It must
-	// never change the billing namespace, invent image tokens, or add a charge.
+	// Settle the Chat fee and configured completed-image surcharge together.
+	// ImageCount is descriptive; costs were frozen before this call.
 	usageLog.ImageCount = input.ImageCount
+	usageLog.ImageSize = optionalTrimmedStringPtr(input.ImageSize)
 	if input.ImageGenerationSeen || input.ImageCount > 0 {
 		usageLog.MediaType = optionalTrimmedStringPtr("image")
 	}
@@ -4399,8 +4416,8 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		return nil
 	}
 
-	// Delivery can expose more image metadata on a retry. It is descriptive,
-	// not part of this turn's tariff, and must not alter the debit fingerprint.
+	// The sealed cost carries the tariff. Descriptive delivery counts must not
+	// independently change the stable debit fingerprint.
 	billingLog := *usageLog
 	billingLog.ImageCount = 0
 	billingLog.MediaType = nil

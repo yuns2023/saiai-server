@@ -16,13 +16,13 @@ describe('ChatGPT billing settings', () => {
   it('loads the saved price and saves only the new Chat price', async () => {
     const wrapper = mount(ChatGPTBillingSettings)
     await flushPromises()
-    expect(wrapper.findAll('input')).toHaveLength(6)
+    expect(wrapper.findAll('input')).toHaveLength(7)
     expect((wrapper.get('[data-tier=instant]').element as HTMLInputElement).value).toBe('0.02')
     await wrapper.get('[data-tier=instant]').setValue('0.03')
     mocks.update.mockResolvedValue({ success_turn_price_usd: 0.03 })
     await wrapper.get('button').trigger('click')
     await flushPromises()
-    expect(mocks.update).toHaveBeenCalledWith({ success_turn_price_usd: 0.02, tier_prices_usd: { instant: 0.03, medium: 0.02, high: 0.02, extreme: 0.02, pro: 0.02 } })
+    expect(mocks.update).toHaveBeenCalledWith({ success_turn_price_usd: 0.02, tier_prices_usd: { instant: 0.03, medium: 0.02, high: 0.02, extreme: 0.02, pro: 0.02 }, image_prices_usd: null })
     expect(mocks.success).toHaveBeenCalledOnce()
     expect(wrapper.get('button').attributes('type')).toBe('button')
   })
@@ -40,7 +40,7 @@ describe('ChatGPT billing settings', () => {
     mocks.update.mockResolvedValue({ success_turn_price_usd: 0 })
     await wrapper.get('button').trigger('click')
     await flushPromises()
-    expect(mocks.update).toHaveBeenCalledWith({ success_turn_price_usd: 0.02, tier_prices_usd: { instant: 0, medium: 0.02, high: 0.02, extreme: 0.02, pro: 0.02 } })
+    expect(mocks.update).toHaveBeenCalledWith({ success_turn_price_usd: 0.02, tier_prices_usd: { instant: 0, medium: 0.02, high: 0.02, extreme: 0.02, pro: 0.02 }, image_prices_usd: null })
   })
 
   it('requires a successful load before offering a save, and can retry', async () => {
@@ -76,7 +76,7 @@ describe('ChatGPT billing settings', () => {
     expect((wrapper.get('[data-tier=pro]').element as HTMLInputElement).value).toBe('0.05')
     await wrapper.get('[data-tier=pro]').setValue('0.06')
     await wrapper.get('[data-tier=default]').setValue('0.025')
-    const updated = { success_turn_price_usd: 0.025, tier_prices_usd: { ...settings.tier_prices_usd, pro: 0.06 } }
+    const updated = { success_turn_price_usd: 0.025, tier_prices_usd: { ...settings.tier_prices_usd, pro: 0.06 }, image_prices_usd: null }
     mocks.update.mockResolvedValue(updated)
     await wrapper.get('button').trigger('click')
     await flushPromises()
@@ -84,4 +84,25 @@ describe('ChatGPT billing settings', () => {
     expect((wrapper.get('[data-tier=high]').element as HTMLInputElement).value).toBe('0.03')
   })
 
+  it('enables four independent image prices including unknown, validates, and can disable', async () => {
+    const wrapper = mount(ChatGPTBillingSettings)
+    await flushPromises()
+    await wrapper.get('[data-testid=image-billing-enabled]').setValue(true)
+    expect(wrapper.findAll('[data-image-tier]')).toHaveLength(4)
+    await wrapper.get('[data-image-tier=unknown]').setValue('')
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-image-tier=unknown]').setValue('0.015')
+    const configured = { success_turn_price_usd: 0.02,
+      tier_prices_usd: { instant: 0.02, medium: 0.02, high: 0.02, extreme: 0.02, pro: 0.02 },
+      image_prices_usd: { '1K': 0.02, '2K': 0.04, '4K': 0.08, unknown: 0.015 } }
+    mocks.update.mockResolvedValue(configured)
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenLastCalledWith(configured)
+    await wrapper.get('[data-testid=image-billing-enabled]').setValue(false)
+    mocks.update.mockResolvedValue({ ...configured, image_prices_usd: null })
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenLastCalledWith({ ...configured, image_prices_usd: null })
+  })
 })

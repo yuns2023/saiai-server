@@ -15,18 +15,18 @@ const MaxChatGPTObservedImages = 64
 type ChatGPTImageEvidence struct {
 	GenerationSeen bool
 	AssetHashes    []string
+	// Sizes align with hashes; empty means unknown. Only observed dimensions
+	// are retained, never pointers, prompts or image bytes.
+	AssetSizes []string
 }
 
 // MergeChatGPTImageEvidence unions content-hiding identities across delivery
 // retries. Invalid digests and excess assets are ignored, never persisted.
 func MergeChatGPTImageEvidence(first, second ChatGPTImageEvidence) ChatGPTImageEvidence {
 	out := ChatGPTImageEvidence{GenerationSeen: first.GenerationSeen || second.GenerationSeen}
-	seen := make(map[string]struct{})
-	for _, hashes := range [][]string{first.AssetHashes, second.AssetHashes} {
-		for _, hash := range hashes {
-			if len(seen) >= MaxChatGPTObservedImages {
-				break
-			}
+	seen := make(map[string]string)
+	for _, evidence := range []ChatGPTImageEvidence{first, second} {
+		for i, hash := range evidence.AssetHashes {
 			if len(hash) != sha256.Size*2 {
 				continue
 			}
@@ -34,17 +34,33 @@ func MergeChatGPTImageEvidence(first, second ChatGPTImageEvidence) ChatGPTImageE
 				continue
 			}
 			hash = strings.ToLower(hash)
-			if _, ok := seen[hash]; ok {
-				continue
+			if len(seen) >= MaxChatGPTObservedImages {
+				if _, exists := seen[hash]; !exists {
+					continue
+				}
 			}
-			seen[hash] = struct{}{}
-			out.AssetHashes = append(out.AssetHashes, hash)
+			size := ""
+			if i < len(evidence.AssetSizes) {
+				size = normalizeChatGPTImageSize(evidence.AssetSizes[i])
+			}
+			prior, exists := seen[hash]
+			if exists && prior != "" && size != "" && prior != size {
+				seen[hash] = "conflict"
+			} else if !exists || prior == "" {
+				seen[hash] = size
+			}
 		}
+	}
+	for hash := range seen {
+		out.AssetHashes = append(out.AssetHashes, hash)
 	}
 	if len(out.AssetHashes) > 0 {
 		out.GenerationSeen = true
 	}
 	sort.Strings(out.AssetHashes)
+	for _, hash := range out.AssetHashes {
+		out.AssetSizes = append(out.AssetSizes, seen[hash])
+	}
 	return out
 }
 
@@ -54,6 +70,7 @@ type chatGPTImageObserver struct {
 	currentComplete bool
 	currentID       string            // digest of the current message identity
 	assets          map[string]string // asset digest -> message digest
+	sizes           map[string]string // asset digest -> observed dimensions
 }
 
 func chatGPTImageDigest(value string) string {
@@ -158,6 +175,7 @@ func (o *chatGPTImageObserver) observeMessage(raw json.RawMessage) {
 			for asset, owner := range o.assets {
 				if owner == o.currentID {
 					delete(o.assets, asset)
+					delete(o.sizes, asset)
 				}
 			}
 		}
@@ -189,7 +207,7 @@ func chatGPTImagePending(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null" && string(raw) != "false"
 }
 
-func (o *chatGPTImageObserver) addAsset(asset string) {
+func (o *chatGPTImageObserver) addAsset(asset, size string) {
 	if asset == "" {
 		return
 	}
@@ -197,16 +215,26 @@ func (o *chatGPTImageObserver) addAsset(asset string) {
 	digest := chatGPTImageDigest(asset)
 	if o.assets == nil {
 		o.assets = make(map[string]string)
+		o.sizes = make(map[string]string)
 	}
-	if len(o.assets) < MaxChatGPTObservedImages {
+	_, exists := o.assets[digest]
+	if exists || len(o.assets) < MaxChatGPTObservedImages {
 		o.assets[digest] = o.currentID
+		prior := o.sizes[digest]
+		if prior != "" && size != "" && prior != size {
+			o.sizes[digest] = "conflict"
+		} else if prior == "" {
+			o.sizes[digest] = size
+		}
 	}
 }
 
 func (o *chatGPTImageObserver) observePart(raw json.RawMessage, inProgress bool) {
 	var envelope struct {
-		Type  string          `json:"content_type"`
-		Image json.RawMessage `json:"image_asset_pointer"`
+		Type   string          `json:"content_type"`
+		Image  json.RawMessage `json:"image_asset_pointer"`
+		Width  int             `json:"width"`
+		Height int             `json:"height"`
 	}
 	if json.Unmarshal(raw, &envelope) != nil || envelope.Type != "image_asset_pointer" {
 		return
@@ -217,6 +245,7 @@ func (o *chatGPTImageObserver) observePart(raw json.RawMessage, inProgress bool)
 	var part struct {
 		Type     string `json:"content_type"`
 		Asset    string `json:"asset_pointer"`
+		Width    int    `json:"width"`
 		Height   int    `json:"height"`
 		Metadata struct {
 			Generation *struct {
@@ -239,12 +268,19 @@ func (o *chatGPTImageObserver) observePart(raw json.RawMessage, inProgress bool)
 		complete = !inProgress
 	}
 	if complete && !inProgress && (strings.HasPrefix(part.Asset, "sediment://") || strings.HasPrefix(part.Asset, "file-service://")) {
-		o.addAsset(part.Asset)
+		size := ChatGPTImageDimensions(part.Width, part.Height)
+		outer := ChatGPTImageDimensions(envelope.Width, envelope.Height)
+		if size == "" {
+			size = outer
+		} else if outer != "" && outer != size {
+			size = "conflict"
+		}
+		o.addAsset(part.Asset, size)
 	}
 }
 
 func (o *chatGPTImageObserver) observeCalls(text string) {
-	var calls []struct{ Type, Status, Result string }
+	var calls []struct{ Type, Status, Result, Size string }
 	if json.Unmarshal([]byte(text), &calls) != nil {
 		return
 	}
@@ -258,7 +294,11 @@ func (o *chatGPTImageObserver) observeCalls(text string) {
 		}
 		if strings.HasPrefix(call.Result, "sediment://") || strings.HasPrefix(call.Result, "file-service://") ||
 			strings.HasPrefix(call.Result, "data:image/") || strings.HasPrefix(call.Result, "iVBORw0KGgo") {
-			o.addAsset(call.Result)
+			size := chatGPTImageResultDimensions(call.Result)
+			if size == "" {
+				size = normalizeChatGPTImageSize(call.Size)
+			}
+			o.addAsset(call.Result, size)
 		}
 	}
 }

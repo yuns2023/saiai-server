@@ -73,3 +73,29 @@ func TestChatGPTBillingSettingsAdminReadSaveValidation(t *testing.T) {
 	require.Equal(t, http.StatusOK, run(http.MethodPut, `{"success_turn_price_usd":0}`).Code)
 	require.Zero(t, readPrice())
 }
+
+func TestChatGPTImagePriceAdminUpdatesAndLegacyOmission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &chatGPTAdminSettingsRepo{values: map[string]string{}}
+	svc := service.NewSettingService(repo, nil)
+	h := NewSettingHandler(svc, nil, nil, nil)
+	router := gin.New()
+	router.PUT("/settings/chatgpt-billing", h.UpdateChatGPTBillingSettings)
+	put := func(body string) int {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/settings/chatgpt-billing", bytes.NewBufferString(body)))
+		return w.Code
+	}
+	require.Equal(t, http.StatusOK, put(`{"success_turn_price_usd":0.01,"image_prices_usd":{"1K":0.02,"2K":0.04,"4K":0.08,"unknown":0.015}}`))
+	require.Equal(t, http.StatusOK, put(`{"success_turn_price_usd":0.03}`))
+	current, err := svc.GetOpenAIChatGPTBillingSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, .015, current.ImagePricesUSD["unknown"], "an old UI must not silently disable image billing")
+	before := repo.values[service.SettingKeyOpenAIChatSuccessTurnPriceUSD]
+	require.Equal(t, http.StatusBadRequest, put(`{"success_turn_price_usd":0.03,"image_prices_usd":{"2K":0.04}}`))
+	require.Equal(t, before, repo.values[service.SettingKeyOpenAIChatSuccessTurnPriceUSD])
+	require.Equal(t, http.StatusOK, put(`{"success_turn_price_usd":0.03,"image_prices_usd":null}`))
+	current, err = svc.GetOpenAIChatGPTBillingSettings(context.Background())
+	require.NoError(t, err)
+	require.Nil(t, current.ImagePricesUSD)
+}

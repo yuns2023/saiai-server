@@ -597,6 +597,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 	requestType := l.EffectiveRequestType()
 	stream, openAIWSMode := service.ApplyLegacyRequestFields(requestType, l.Stream, l.OpenAIWSMode)
 	billingUnit, tokenUsageSource, chatTier := "", "", ""
+	turnCost, imageCost := l.NativeChatChargeCosts()
 	if l.IsNativeChatTurn() {
 		billingUnit, tokenUsageSource = "turn", "unknown"
 		effort := ""
@@ -616,6 +617,8 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		BillingUnit:                   billingUnit,
 		TokenUsageSource:              tokenUsageSource,
 		ChatTier:                      chatTier,
+		NativeChatTurnCostUSD:         turnCost,
+		NativeChatImageCostUSD:        imageCost,
 		UpstreamModel:                 l.UpstreamModel,
 		ServiceTier:                   l.ServiceTier,
 		ReasoningEffort:               l.ReasoningEffort,

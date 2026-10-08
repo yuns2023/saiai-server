@@ -161,4 +161,19 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('$0.2500 / 1M tokens')
     expect(text).toContain('$0.069568')
   })
+
+  it('shows unknown native image dimensions and stored charge components even without billing_unit', () => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_IMAGE', model: 'gpt-5-6',
+        inbound_endpoint: '/chatgpt/backend-api/f/conversation', media_type: 'image', image_count: 1,
+        image_size: null, actual_cost: .05, total_cost: .05, output_cost: .04,
+        native_chat_turn_cost_usd: .01, native_chat_image_cost_usd: .04 }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-tokens" :row="data[0]" /><slot name="cell-cost" :row="data[0]" /></div>' } } }
+    })
+    expect(wrapper.text()).toContain('usage.imageSizeUnknown')
+    expect(wrapper.text()).not.toContain('2K')
+    expect(wrapper.get('[data-testid=native-chat-charges]').text()).toContain('0.010000')
+    expect(wrapper.get('[data-testid=native-chat-charges]').text()).toContain('0.040000')
+    expect(wrapper.text()).not.toContain('usage.serviceTierStandard')
+  })
 })

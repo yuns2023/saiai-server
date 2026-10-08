@@ -53,13 +53,19 @@ an approved token-billing source for this version.
 ## Current admission rule
 
 Administrators can adjust five model-independent successful-turn prices at
-**Settings → Gateway → ChatGPT Chat billing**. The admin-only
+**Settings → Gateway → ChatGPT Chat and image billing**. The admin-only
 `GET`/`PUT /api/v1/admin/settings/chatgpt-billing` resource contains
 `success_turn_price_usd` (automatic/unrecognized fallback) and an optional
 complete `tier_prices_usd` table with `instant`, `medium`, `high`, `extreme`,
-and `pro`. A legacy PUT with only the fallback field retains uniform pricing.
-Prices must be numeric, finite and non-negative; an explicit zero disables
-requests in that tier, without opting into free/unaccounted traffic. Missing,
+and `pro`. An optional complete `image_prices_usd` table contains `1K`, `2K`,
+`4K`, and `unknown` surcharges per recognized completed image. Omission on PUT
+preserves the existing image table, so an older UI cannot silently disable it;
+explicit `null` disables image surcharges. On an installation that never
+enabled them, omission keeps the legacy image-inclusive turn price. A legacy
+PUT with only the fallback field still selects uniform Chat turn pricing.
+Prices must be numeric, finite and non-negative; an explicit zero Chat price disables
+requests in that tier, while a zero image price waives only that image surcharge.
+Neither opts into free/unaccounted model turns. Missing,
 null or unknown entries in a supplied tier table are rejected. Group/user
 multipliers still apply. These prices are retail turn prices, not measured
 provider consumption. Responses/Codex token pricing is independent.
@@ -76,7 +82,7 @@ The persisted `openai_chat_success_turn_price_usd` key atomically stores either
 the legacy numeric price or the whole JSON price table. It overrides startup
 configuration, including zero; only an absent setting uses startup pricing.
 Database failures or malformed settings fail closed before provider traffic.
-Every admitted turn snapshots its initial model, effort, price, billing identity
+Every admitted turn snapshots its initial model, effort, Chat and image prices, billing identity
 and selected account in shared Redis. Retries/resumes preserve that snapshot;
 a later admin save never reprices it. Metadata changes using the same message
 identity are rejected. Records expire after one hour and contain hashes and
@@ -124,19 +130,32 @@ final `/f/conversation` request retains its separate billing/staging gate.
 
 ChatGPT can generate images inside its native conversation stream. This does
 not imply a separate public Images API request. A successful turn containing a
-recognized image tool retains the same fixed Chat price and billing identity;
-the usage row additionally exposes `media_type=image` and `image_count` for
-observed completed assets. These fields are descriptive and are excluded from
-the atomic Chat debit fingerprint, so richer retry metadata cannot create a
-new debit or a fingerprint conflict. Downloads and repeated asset opens remain
-control requests and create no additional usage record.
+recognized image tool retains the same billing identity. With image surcharges
+disabled, it retains the original Chat-only price. With them enabled, one
+atomic debit includes the initial Chat fee plus the sum of the snapshotted
+per-image prices. `media_type=image` and `image_count` describe recognized
+completed assets. Hashes deduplicate repeated assets across handoff/resume.
+The first successful terminal delivery atomically seals the count, observed
+dimensions, and image fee before queueing settlement; later metadata cannot
+change that debit or create a fingerprint conflict. Downloads and repeated
+asset opens remain control requests and create no additional usage record.
+
+Resolution brackets use both observed output dimensions and the longer edge:
+`1K` is at most 1024 pixels, `2K` is at most 2048, and `4K` is at most 4096.
+For example, 1536×1024 falls in the 2K price bracket; its displayed dimensions
+remain 1536×1024. Missing, contradictory, invalid or larger dimensions use the
+explicit `unknown` price, never an inferred 2K price. Generation and editing
+share this table. Format, quality, thinking effort and requested size are not
+used to guess output dimensions or image prices. Configuring a 4K price does
+not advertise upstream 4K support or alter any provider request.
 
 The bounded observer accepts known image tool messages, generated multimodal
 asset parts, explicit image-part patches for an identified tool message, and
 completed structured `image_generation_call` items. User uploads, unrelated
 tools, failed images and incomplete previews are excluded. Only SHA-256 asset
-digests are retained for deduplication across handoff/resume, with a maximum of
-64 observed assets and the original one-hour turn expiry. Raw pointers, image
+digests and bounded observed dimensions are retained for deduplication across
+handoff/resume, with a maximum of 64 observed assets, an 8 KiB snapshot bound,
+and the original one-hour turn expiry. Raw pointers, image
 bytes, prompts and tool content are not persisted.
 
 Image counts describe the recognized response schemas. Opaque deltas, implicit
@@ -144,7 +163,7 @@ patch paths and future schemas are forwarded unchanged and may leave the
 completed count unknown or incomplete. A known image tool with no recognized
 completed asset is displayed as image generation with an unconfirmed count,
 not as a proven zero. The UI labels positive counts as observed completed
-images and keeps the successful-turn price and unknown token usage visible.
+images and keeps the Chat/image charge components and unknown token usage visible.
 Mock fixtures and the installed Desktop renderer establish this schema
 boundary; they are not a new credentialed image-generation acceptance. Existing
 historical rows are not retroactively inferred from download activity.
@@ -179,7 +198,13 @@ The usage row retains the actual requested model, the observed assistant model
 when different, and the original native thinking effort. The atomic billing
 command keeps its stable `chatgpt-native-turn` namespace and original message
 fingerprint. Rows use request type `stream`, placeholder zero tokens, and the
-admitted base price as `total_cost`. APIs identify native rows with
+admitted Chat fee plus the sealed image surcharge as `total_cost`. For native
+rows only, existing `input_cost`/`output_cost` persist the Chat/image base cost
+components without adding database columns or inventing tokens. APIs expose
+their effective charges after multipliers as `native_chat_turn_cost_usd` and
+`native_chat_image_cost_usd`; user/admin/public-Key views label these explicitly.
+Legacy rows with no output cost retain a zero image surcharge and are never
+repriced from current settings. APIs identify native rows with
 `billing_unit=turn`, `token_usage_source=unknown`, and their `chat_tier`; the
 usage tables display one successful turn and unavailable token consumption,
 rather than interpreting placeholder zeros as measured usage.

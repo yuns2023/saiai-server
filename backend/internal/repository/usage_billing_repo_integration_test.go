@@ -36,6 +36,7 @@ func TestNativeChatResumeConcurrentBillingChargesOneOriginalTurn(t *testing.T) {
 	identity := service.ResolveChatGPTTurnBillingIdentity([]byte(`{"messages":[{"id":"TEST_ONLY_INITIAL_MESSAGE"}],"model":"gpt-6-pro"}`), "")
 	input := &service.OpenAIChatGPTTurnUsageInput{RequestID: identity.RequestID, RequestPayloadHash: identity.PayloadHash,
 		BasePriceUSD: 0.05, RequestedModel: "gpt-6-pro", Account: account, APIKey: key, User: user, InboundEndpoint: "/chatgpt/backend-api/f/conversation/resume"}
+	input.ImageCount, input.ImageCostUSD, input.ImageSize = 2, .06, "mixed"
 	input.APIKeyService = nativeChatQuotaUpdater{}
 	// Two racing completed delivery streams and a later replay share the
 	// original generation identity, rather than their HTTP resume request IDs.
@@ -51,13 +52,16 @@ func TestNativeChatResumeConcurrentBillingChargesOneOriginalTurn(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.NoError(t, svc.RecordChatGPTTurnUsage(ctx, input))
+	conflicting := *input
+	conflicting.ImageCostUSD = .99
+	require.ErrorIs(t, svc.RecordChatGPTTurnUsage(ctx, &conflicting), service.ErrUsageBillingRequestConflict)
 	var balance, quota float64
 	var dedup int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT balance FROM users WHERE id=$1", user.ID).Scan(&balance))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT quota_used FROM api_keys WHERE id=$1", key.ID).Scan(&quota))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT count(*) FROM usage_billing_dedup WHERE request_id=$1 AND api_key_id=$2", identity.RequestID, key.ID).Scan(&dedup))
-	require.InDelta(t, 99.925, balance, 1e-9)
-	require.InDelta(t, 0.075, quota, 1e-9)
+	require.InDelta(t, 99.835, balance, 1e-9)
+	require.InDelta(t, 0.165, quota, 1e-9)
 	require.Equal(t, 1, dedup)
 }
 

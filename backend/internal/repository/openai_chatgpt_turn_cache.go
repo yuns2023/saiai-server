@@ -24,20 +24,59 @@ local incoming = cjson.decode(ARGV[1])
 local previous = type(value.Images) == 'table' and value.Images or {}
 local hashes = {}
 local seen = {}
-local function merge(list)
+local sizes = {}
+local function merge(list, dimensions)
   if type(list) ~= 'table' then return end
-  for _, hash in ipairs(list) do
+  for i, hash in ipairs(list) do
+    local size = type(dimensions) == 'table' and dimensions[i] or ''
     if not seen[hash] and #hashes < 64 then
       seen[hash] = true
+      sizes[hash] = size
       table.insert(hashes, hash)
+    elseif seen[hash] then
+      local old = sizes[hash] or ''
+      if old ~= '' and size ~= '' and old ~= size then
+        sizes[hash] = 'conflict'
+      elseif old == '' then
+        sizes[hash] = size
+      end
     end
   end
 end
-merge(previous.AssetHashes)
-merge(incoming.AssetHashes)
+merge(previous.AssetHashes, previous.AssetSizes)
+merge(incoming.AssetHashes, incoming.AssetSizes)
 table.sort(hashes)
+local dimensions = {}
+for _, hash in ipairs(hashes) do table.insert(dimensions, sizes[hash] or '') end
 value.Images = {GenerationSeen = previous.GenerationSeen == true or incoming.GenerationSeen == true or #hashes > 0,
-                AssetHashes = #hashes > 0 and hashes or cjson.null}
+                AssetHashes = #hashes > 0 and hashes or cjson.null,
+                AssetSizes = #dimensions > 0 and dimensions or cjson.null}
+local result = cjson.encode(value)
+redis.call('SET', KEYS[1], result, 'PX', ttl)
+return result
+`)
+
+// Compare the image snapshot before sealing. A concurrent delivery may merge
+// new evidence between GET and EVAL; retry instead of freezing a stale price.
+var chatGPTSealBilling = redis.NewScript(`
+local raw = redis.call('GET', KEYS[1])
+local ttl = redis.call('PTTL', KEYS[1])
+if not raw or ttl <= 0 then return false end
+local value = cjson.decode(raw)
+if type(value.ImageBilling) ~= 'table' then
+  local images = type(value.Images) == 'table' and value.Images or {}
+  local expected = cjson.decode(ARGV[1])
+  local hashes = type(images.AssetHashes) == 'table' and images.AssetHashes or {}
+  local prior = type(images.AssetSizes) == 'table' and images.AssetSizes or {}
+  local compared = type(expected.AssetHashes) == 'table' and expected.AssetHashes or {}
+  local dimensions = type(expected.AssetSizes) == 'table' and expected.AssetSizes or {}
+  if #hashes ~= #compared then return 'retry' end
+  for i, hash in ipairs(hashes) do
+    if hash ~= compared[i] or (prior[i] or '') ~= (dimensions[i] or '') then return 'retry' end
+  end
+  value.ImageBilling = cjson.decode(ARGV[2])
+end
+value.TerminalSeen = true
 local result = cjson.encode(value)
 redis.call('SET', KEYS[1], result, 'PX', ttl)
 return result
@@ -55,7 +94,7 @@ func decodeChatGPTTurn(raw string, err error) (*service.ChatGPTTurnSnapshot, err
 	var snapshot service.ChatGPTTurnSnapshot
 	if len(raw) > 8192 || json.Unmarshal([]byte(raw), &snapshot) != nil || snapshot.AccountID <= 0 ||
 		snapshot.Identity.RequestID == "" || snapshot.Identity.PayloadHash == "" || snapshot.StartedAt.IsZero() ||
-		snapshot.BasePriceUSD < 0 {
+		!service.IsValidOpenAIChatGPTSnapshotPrice(snapshot.BasePriceUSD) || !service.ValidChatGPTImagePrices(snapshot.ImagePricesUSD) {
 		return nil, errors.New("invalid native Chat accounting snapshot")
 	}
 	return &snapshot, nil
@@ -73,6 +112,9 @@ func (c *gatewayCache) PutChatGPTTurnIfAbsent(ctx context.Context, key string, s
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		return nil, err
+	}
+	if len(raw) > 8192 {
+		return nil, errors.New("native Chat snapshot exceeds accounting bound")
 	}
 	result, err := chatGPTPutTurn.Run(ctx, c.rdb, []string{key}, string(raw), ttl.Milliseconds()).Text()
 	return decodeChatGPTTurn(result, err)
@@ -128,4 +170,35 @@ func (c *gatewayCache) MergeChatGPTTurnImages(ctx context.Context, key string, i
 		return nil, errors.New("native Chat turn context expired")
 	}
 	return snapshot, err
+}
+
+func (c *gatewayCache) SealChatGPTTurnBilling(ctx context.Context, key string) (*service.ChatGPTTurnSnapshot, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		snapshot, err := c.GetChatGPTTurn(ctx, key)
+		if err != nil || snapshot == nil {
+			return nil, errors.New("native Chat turn context unavailable for billing")
+		}
+		billing, err := service.CalculateChatGPTImageBilling(snapshot.Images, snapshot.ImagePricesUSD)
+		if err != nil {
+			return nil, err
+		}
+		imagesJSON, err := json.Marshal(snapshot.Images)
+		if err != nil {
+			return nil, err
+		}
+		billingJSON, err := json.Marshal(billing)
+		if err != nil {
+			return nil, err
+		}
+		result, err := chatGPTSealBilling.Run(ctx, c.rdb, []string{key}, string(imagesJSON), string(billingJSON)).Text()
+		if err == nil && result == "retry" {
+			continue
+		}
+		sealed, err := decodeChatGPTTurn(result, err)
+		if err == nil && sealed == nil {
+			return nil, errors.New("native Chat turn context expired")
+		}
+		return sealed, err
+	}
+	return nil, errors.New("native Chat image evidence changed while sealing billing")
 }

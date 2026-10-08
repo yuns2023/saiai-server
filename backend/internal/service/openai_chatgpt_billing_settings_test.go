@@ -149,3 +149,23 @@ func TestChatGPTBillingSettingsRejectInvalidWrites(t *testing.T) {
 	require.Error(t, svc.SetOpenAIChatGPTBillingSettings(context.Background(), &OpenAIChatGPTBillingSettings{SuccessTurnPriceUSD: 0.03}))
 	require.Equal(t, "0.02", repo.values[SettingKeyOpenAIChatSuccessTurnPriceUSD])
 }
+
+func TestChatGPTImagePriceSettingsPersistAndRejectIncompleteTables(t *testing.T) {
+	repo := &chatGPTBillingSettingsRepo{values: map[string]string{"unrelated": "kept"}}
+	svc := NewSettingService(repo, nil)
+	prices := map[string]float64{"1K": .02, "2K": .04, "4K": .08, "unknown": .01}
+	require.NoError(t, svc.SetOpenAIChatGPTBillingSettings(context.Background(), &OpenAIChatGPTBillingSettings{SuccessTurnPriceUSD: .01, ImagePricesUSD: prices}))
+	loaded, err := svc.GetOpenAIChatGPTBillingSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, prices, loaded.ImagePricesUSD)
+	prices["unknown"] = 0
+	require.NoError(t, svc.SetOpenAIChatGPTBillingSettings(context.Background(), &OpenAIChatGPTBillingSettings{SuccessTurnPriceUSD: .01, ImagePricesUSD: prices}))
+	for _, table := range []string{`{}`, `{"2K":0.04}`, `{"1K":null,"2K":0.04,"4K":0.08,"unknown":0.01}`, `{"1K":0.02,"2K":-1,"4K":0.08,"unknown":0.01}`, `{"1K":0.02,"2K":0.04,"4K":0.08,"auto":0.01}`} {
+		_, err := DecodeChatGPTBillingSettings([]byte(`{"success_turn_price_usd":0.01,"image_prices_usd":` + table + `}`))
+		require.Error(t, err, table)
+	}
+	disabled, err := DecodeChatGPTBillingSettings([]byte(`{"success_turn_price_usd":0.01,"image_prices_usd":null}`))
+	require.NoError(t, err)
+	require.Nil(t, disabled.ImagePricesUSD)
+	require.Equal(t, "kept", repo.values["unrelated"])
+}

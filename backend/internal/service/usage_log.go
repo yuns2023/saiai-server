@@ -191,6 +191,21 @@ func (l *UsageLog) IsNativeChatTurn() bool {
 		*l.InboundEndpoint == "/chatgpt/backend-api/f/conversation/resume"
 }
 
+// NativeChatChargeCosts exposes historical, effective charge components. The
+// existing input/output cost columns store the Chat fee/image surcharge for
+// native turns; they are never estimates of unreported provider token usage.
+func (l *UsageLog) NativeChatChargeCosts() (turnCost, imageCost *float64) {
+	if !l.IsNativeChatTurn() {
+		return nil, nil
+	}
+	turn, image := l.ActualCost, 0.0
+	if l.TotalCost > 0 && l.OutputCost > 0 {
+		image = l.OutputCost * (l.ActualCost / l.TotalCost)
+		turn = l.ActualCost - image
+	}
+	return &turn, &image
+}
+
 type UsageLogSessionAccount struct {
 	ID   int64
 	Name string

@@ -283,7 +283,10 @@ export async function updateOverloadCooldownSettings(
 export interface ChatGPTBillingSettings {
   success_turn_price_usd: number
   tier_prices_usd?: Record<ChatGPTBillingTier, number>
+  image_prices_usd?: Record<ChatGPTImagePriceTier, number> | null
 }
+
+export type ChatGPTImagePriceTier = '1K' | '2K' | '4K' | 'unknown'
 
 export type ChatGPTBillingTier = 'instant' | 'medium' | 'high' | 'extreme' | 'pro'
 

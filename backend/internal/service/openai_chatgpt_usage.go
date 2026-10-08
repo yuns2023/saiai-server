@@ -350,6 +350,9 @@ func (o *ChatGPTConversationStreamObserver) ImageEvidence() ChatGPTImageEvidence
 		evidence.AssetHashes = append(evidence.AssetHashes, digest)
 	}
 	sort.Strings(evidence.AssetHashes)
+	for _, digest := range evidence.AssetHashes {
+		evidence.AssetSizes = append(evidence.AssetSizes, o.images.sizes[digest])
+	}
 	return evidence
 }
 

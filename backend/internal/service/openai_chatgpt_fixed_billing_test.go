@@ -164,3 +164,38 @@ func TestRecordChatGPTTurnUsageUsesSubscriptionCostContract(t *testing.T) {
 	require.InDelta(t, 0.04, usageRepo.logs[0].TotalCost, 1e-12)
 	require.InDelta(t, 0.12, usageRepo.logs[0].ActualCost, 1e-12)
 }
+
+func TestRecordChatGPTImageSurchargeUsesSameAtomicDebitAndHistoricalCosts(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Default.RateMultiplier = 1.5
+	usage := &chatGPTFixedUsageLogRepo{}
+	repo := &chatGPTFixedBillingRepo{}
+	cache := NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(cache.Stop)
+	svc := NewOpenAIGatewayService(nil, usage, repo, nil, nil, nil, nil, cfg, nil, nil, nil, nil, cache, nil, &DeferredService{}, nil)
+	input := &OpenAIChatGPTTurnUsageInput{BasePriceUSD: .01, ImageCount: 1, ImageCostUSD: .04, ImageSize: "2048x2048",
+		RequestID: "TEST_ONLY_IMAGE_TURN", RequestPayloadHash: "TEST_ONLY_HASH", RequestedModel: "gpt-5-6", InboundEndpoint: "/chatgpt/backend-api/f/conversation",
+		APIKey: &APIKey{ID: 1}, User: &User{ID: 2}, Account: &Account{ID: 3, Type: AccountTypeOAuth}}
+	require.NoError(t, svc.RecordChatGPTTurnUsage(context.Background(), input))
+	require.Len(t, repo.commands, 1, "Chat and images must share one atomic balance/quota debit")
+	require.InDelta(t, .075, repo.commands[0].BalanceCost, 1e-12)
+	require.Zero(t, repo.commands[0].InputTokens)
+	require.Zero(t, repo.commands[0].OutputTokens)
+	log := usage.logs[0]
+	require.InDelta(t, .05, log.TotalCost, 1e-12)
+	require.InDelta(t, .075, log.ActualCost, 1e-12)
+	require.InDelta(t, .01, log.InputCost, 1e-12)
+	require.InDelta(t, .04, log.OutputCost, 1e-12)
+	require.Equal(t, "2048x2048", *log.ImageSize)
+	turn, image := log.NativeChatChargeCosts()
+	require.InDelta(t, .015, *turn, 1e-12)
+	require.InDelta(t, .06, *image, 1e-12)
+	legacyTurn, legacyImage := (&UsageLog{Model: OpenAIChatGPTTurnBillingModel, TotalCost: .01, ActualCost: .02, ImageCount: 1}).NativeChatChargeCosts()
+	require.Equal(t, .02, *legacyTurn)
+	require.Zero(t, *legacyImage, "old descriptive image counts cannot create a retroactive surcharge")
+	for _, cost := range []float64{-1, math.NaN(), math.Inf(1)} {
+		invalid := *input
+		invalid.ImageCostUSD = cost
+		require.Error(t, svc.RecordChatGPTTurnUsage(context.Background(), &invalid))
+	}
+}

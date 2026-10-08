@@ -758,15 +758,16 @@ func TestChatGPTConversationBillsOnlySuccessfulTerminalTurn(t *testing.T) {
 }
 
 type chatGPTPriceReader struct {
-	price float64
-	tiers map[string]float64
-	err   error
-	reads int
+	price  float64
+	tiers  map[string]float64
+	images map[string]float64
+	err    error
+	reads  int
 }
 
 func (r *chatGPTPriceReader) GetOpenAIChatGPTBillingSettings(context.Context) (*service.OpenAIChatGPTBillingSettings, error) {
 	r.reads++
-	return &service.OpenAIChatGPTBillingSettings{SuccessTurnPriceUSD: r.price, TierPricesUSD: r.tiers}, r.err
+	return &service.OpenAIChatGPTBillingSettings{SuccessTurnPriceUSD: r.price, TierPricesUSD: r.tiers, ImagePricesUSD: r.images}, r.err
 }
 
 func TestChatGPTBillingSettingsFailureAndZeroOverrideBlockBeforeSelection(t *testing.T) {

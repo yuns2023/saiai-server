@@ -217,14 +217,17 @@ func TestPublicKeyUsageRecordsDescribeNativeChatImages(t *testing.T) {
 	path, media := "/chatgpt/backend-api/f/conversation", "image"
 	records := publicKeyUsageRecords([]service.UsageLog{{
 		Model: "gpt-5-6", InboundEndpoint: &path, MediaType: &media,
-		ImageCount: 2, ActualCost: .01, RequestType: service.RequestTypeStream,
+		ImageCount: 2, ActualCost: .05, TotalCost: .05, OutputCost: .04, RequestType: service.RequestTypeStream,
 	}})
 	require.Len(t, records, 1)
 	require.Equal(t, "turn", records[0].BillingUnit)
 	require.Equal(t, "unknown", records[0].TokenUsageSource)
 	require.Equal(t, "image", *records[0].MediaType)
 	require.Equal(t, 2, records[0].ImageCount)
-	require.InDelta(t, .01, records[0].ActualCost, 1e-12)
+	require.InDelta(t, .05, records[0].ActualCost, 1e-12)
+	require.InDelta(t, .01, *records[0].NativeChatTurnCostUSD, 1e-12)
+	require.InDelta(t, .04, *records[0].NativeChatImageCostUSD, 1e-12)
+	require.Nil(t, records[0].ImageSize)
 }
 
 func TestPublicKeyUsageRecordsExcludeInternalIdentifiers(t *testing.T) {

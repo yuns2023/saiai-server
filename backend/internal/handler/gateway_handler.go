@@ -1557,20 +1557,23 @@ func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64, sta
 }
 
 type publicKeyUsageRecord struct {
-	BillingUnit         string    `json:"billing_unit,omitempty"`
-	TokenUsageSource    string    `json:"token_usage_source,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	Model               string    `json:"model"`
-	InputTokens         int       `json:"input_tokens"`
-	OutputTokens        int       `json:"output_tokens"`
-	CacheCreationTokens int       `json:"cache_creation_tokens"`
-	CacheReadTokens     int       `json:"cache_read_tokens"`
-	TotalTokens         int       `json:"total_tokens"`
-	ActualCost          float64   `json:"actual_cost"`
-	DurationMs          *int      `json:"duration_ms,omitempty"`
-	RequestType         string    `json:"request_type"`
-	ImageCount          int       `json:"image_count"`
-	MediaType           *string   `json:"media_type,omitempty"`
+	BillingUnit            string    `json:"billing_unit,omitempty"`
+	TokenUsageSource       string    `json:"token_usage_source,omitempty"`
+	NativeChatTurnCostUSD  *float64  `json:"native_chat_turn_cost_usd,omitempty"`
+	NativeChatImageCostUSD *float64  `json:"native_chat_image_cost_usd,omitempty"`
+	CreatedAt              time.Time `json:"created_at"`
+	Model                  string    `json:"model"`
+	InputTokens            int       `json:"input_tokens"`
+	OutputTokens           int       `json:"output_tokens"`
+	CacheCreationTokens    int       `json:"cache_creation_tokens"`
+	CacheReadTokens        int       `json:"cache_read_tokens"`
+	TotalTokens            int       `json:"total_tokens"`
+	ActualCost             float64   `json:"actual_cost"`
+	DurationMs             *int      `json:"duration_ms,omitempty"`
+	RequestType            string    `json:"request_type"`
+	ImageCount             int       `json:"image_count"`
+	ImageSize              *string   `json:"image_size,omitempty"`
+	MediaType              *string   `json:"media_type,omitempty"`
 }
 
 func publicKeyUsageRecords(logs []service.UsageLog) []publicKeyUsageRecord {
@@ -1578,11 +1581,13 @@ func publicKeyUsageRecords(logs []service.UsageLog) []publicKeyUsageRecord {
 	for i := range logs {
 		log := &logs[i]
 		unit, source := "", ""
+		turnCost, imageCost := log.NativeChatChargeCosts()
 		if log.IsNativeChatTurn() {
 			unit, source = "turn", "unknown"
 		}
 		records = append(records, publicKeyUsageRecord{
 			BillingUnit: unit, TokenUsageSource: source,
+			NativeChatTurnCostUSD: turnCost, NativeChatImageCostUSD: imageCost,
 			CreatedAt:           log.CreatedAt,
 			Model:               log.Model,
 			InputTokens:         log.InputTokens,
@@ -1594,6 +1599,7 @@ func publicKeyUsageRecords(logs []service.UsageLog) []publicKeyUsageRecord {
 			DurationMs:          log.DurationMs,
 			RequestType:         log.EffectiveRequestType().String(),
 			ImageCount:          log.ImageCount,
+			ImageSize:           log.ImageSize,
 			MediaType:           log.MediaType,
 		})
 	}

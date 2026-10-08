@@ -106,10 +106,11 @@
         </template>
 
         <template #cell-tokens="{ row }">
-          <div v-if="row.billing_unit === 'turn'" class="text-sm" :title="t('usage.nativeChatUsageUnknown')">
+          <div v-if="isNativeChatUsage(row)" class="text-sm" :title="t('usage.nativeChatUsageUnknown')">
             {{ t('usage.nativeChatTurn') }}
             <div v-if="row.media_type === 'image'" class="text-xs text-indigo-600 dark:text-indigo-400">
               {{ row.image_count > 0 ? t('usage.nativeChatImagesObserved', { count: row.image_count }) : t('usage.nativeChatImageCountUnknown') }}
+              <div v-if="row.image_count > 0">{{ row.image_size === 'mixed' ? t('usage.imageSizeMixed') : row.image_size || t('usage.imageSizeUnknown') }}</div>
             </div>
             <div class="text-xs text-gray-500">{{ t('usage.nativeChatUsageUnknown') }}</div>
           </div>
@@ -119,7 +120,7 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             <span class="font-medium text-gray-900 dark:text-white">{{ row.image_count }}{{ t('usage.imageUnit') }}</span>
-            <span class="text-gray-400">({{ row.image_size || '2K' }})</span>
+            <span class="text-gray-400">({{ row.image_size || t('usage.imageSizeUnknown') }})</span>
           </div>
           <!-- Token 请求 -->
           <div v-else class="flex items-center gap-1.5">
@@ -167,7 +168,7 @@
               <span v-if="row.model_rate_multiplier != null && row.model_rate_multiplier !== 1" class="rounded-sm bg-indigo-100 px-1 text-[10px] text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300" :title="t('usage.groupModelMultiplier')">{{ row.model_rate_multiplier }}x</span>
               <span v-if="row.user_payg_discount_multiplier != null && row.user_payg_discount_multiplier !== 1" class="rounded-sm bg-emerald-100 px-1 text-[10px] text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" :title="t('usage.paygUserDiscount')">{{ row.user_payg_discount_multiplier }}x</span>
               <span v-if="row.account_payg_discount_multiplier != null && row.account_payg_discount_multiplier !== 1" class="rounded-sm bg-amber-100 px-1 text-[10px] text-amber-700 dark:bg-amber-500/20 dark:text-amber-300" :title="t('usage.legacyPaygAccountDiscount')">{{ row.account_payg_discount_multiplier }}x</span>
-              <span v-if="row.billing_unit !== 'turn'"
+              <span v-if="!isNativeChatUsage(row)"
                 class="inline-flex items-center rounded-sm px-1.5 py-0.5 text-[10px] font-semibold leading-tight ring-1 ring-inset"
                 :class="getServiceTierBadgeClass(row.service_tier)"
               >
@@ -184,6 +185,7 @@
                 </div>
               </div>
             </div>
+            <NativeChatCharges :record="row" />
             <div v-if="row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-gray-400">
               A ${{ (row.total_cost * row.account_rate_multiplier).toFixed(6) }}
             </div>
@@ -302,11 +304,11 @@
           <div class="mb-2 border-b border-gray-700 pb-1.5">
             <div class="text-xs font-semibold text-gray-300 mb-1">{{ t('usage.costDetails') }}</div>
             <div v-if="tooltipData && tooltipData.input_cost > 0" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('admin.usage.inputCost') }}</span>
+              <span class="text-gray-400">{{ t(isNativeChatUsage(tooltipData) ? 'usage.nativeChatTurnFee' : 'admin.usage.inputCost') }}</span>
               <span class="font-medium text-white">${{ tooltipData.input_cost.toFixed(6) }}</span>
             </div>
             <div v-if="tooltipData && tooltipData.output_cost > 0" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('admin.usage.outputCost') }}</span>
+              <span class="text-gray-400">{{ t(isNativeChatUsage(tooltipData) ? 'usage.nativeChatImageFee' : 'admin.usage.outputCost') }}</span>
               <span class="font-medium text-white">${{ tooltipData.output_cost.toFixed(6) }}</span>
             </div>
             <div v-if="tooltipData && tooltipData.input_tokens > 0" class="flex items-center justify-between gap-4">
@@ -401,6 +403,8 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatDateTime, formatReasoningEffort, getEffectiveReasoningEffort } from '@/utils/format'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
+import { isNativeChatUsage } from '@/utils/nativeChatUsage'
+import NativeChatCharges from '@/components/common/NativeChatCharges.vue'
 import { formatUsageServiceTier, getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import DataTable from '@/components/common/DataTable.vue'

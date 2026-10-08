@@ -50,6 +50,7 @@ func TestChatGPTProHandoffResumeUsesOriginalAccountPriceAndIdentity(t *testing.T
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
 	t.Cleanup(billing.Stop)
 	prices := &chatGPTPriceReader{price: 0.02, tiers: map[string]float64{"instant": 0.01, "medium": 0.02, "high": 0.03, "extreme": 0.04, "pro": 0.05}}
+	prices.images = map[string]float64{"1K": .02, "2K": .04, "4K": .08, "unknown": .02}
 	newHandler := func() *OpenAIGatewayHandler {
 		svc := service.NewOpenAIGatewayService(accounts, usage, nil, nil, nil, nil, shared, cfg, nil, concurrency, nil, nil, billing, provider, &service.DeferredService{}, nil)
 		h := NewOpenAIGatewayHandler(svc, concurrency, billing, nil, nil, nil, nil, cfg, nil)
@@ -111,6 +112,7 @@ func TestChatGPTProHandoffResumeUsesOriginalAccountPriceAndIdentity(t *testing.T
 	// A separate service instance shares the pending context, even while an
 	// admin read is failing and the current tariff has changed.
 	prices.tiers["pro"] = 0.09
+	prices.images["unknown"] = .99
 	prices.err = errors.New("TEST_ONLY settings temporarily unavailable")
 	secondHandler := newHandler()
 	resumeBody := `{ "conversation_id":"TEST_ONLY_CONVERSATION", "offset":0, "extension":{"kept":true} }`
@@ -157,8 +159,11 @@ func TestChatGPTProHandoffResumeUsesOriginalAccountPriceAndIdentity(t *testing.T
 	require.Zero(t, log.TotalTokens())
 	require.Equal(t, 1, log.ImageCount)
 	require.Equal(t, "image", *log.MediaType)
-	require.InDelta(t, 0.05, log.TotalCost, 1e-12)
-	require.InDelta(t, 0.0625, log.ActualCost, 1e-12)
+	require.InDelta(t, 0.05, log.InputCost, 1e-12)
+	require.InDelta(t, 0.02, log.OutputCost, 1e-12)
+	require.InDelta(t, 0.07, log.TotalCost, 1e-12)
+	require.InDelta(t, 0.0875, log.ActualCost, 1e-12)
+	require.Nil(t, log.ImageSize, "unknown output must not be recorded as 2K")
 	require.Equal(t, int64(22), log.AccountID)
 	require.Equal(t, 1, prices.reads, "delivery retries must not read/reprice the initial turn")
 	disconnect = true

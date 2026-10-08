@@ -17,6 +17,9 @@ import (
 type OpenAIChatGPTBillingSettings struct {
 	SuccessTurnPriceUSD float64            `json:"success_turn_price_usd"`
 	TierPricesUSD       map[string]float64 `json:"tier_prices_usd,omitempty"`
+	// Nil disables the image surcharge. Unknown dimensions have their own rate;
+	// they must never inherit the 2K rate.
+	ImagePricesUSD map[string]float64 `json:"image_prices_usd,omitempty"`
 }
 
 var chatGPTInstantModel = regexp.MustCompile(`^gpt-[0-9]+(-[0-9]+)*(-instant)?$`)
@@ -57,19 +60,18 @@ func validChatGPTBillingSettings(s *OpenAIChatGPTBillingSettings) bool {
 	if s == nil || !validChatGPTConfiguredPrice(s.SuccessTurnPriceUSD) {
 		return false
 	}
-	if s.TierPricesUSD == nil {
-		return true
-	}
-	if len(s.TierPricesUSD) != 5 {
-		return false
-	}
-	for _, tier := range []string{"instant", "medium", "high", "extreme", "pro"} {
-		price, ok := s.TierPricesUSD[tier]
-		if !ok || !validChatGPTConfiguredPrice(price) {
+	if s.TierPricesUSD != nil {
+		if len(s.TierPricesUSD) != 5 {
 			return false
 		}
+		for _, tier := range []string{"instant", "medium", "high", "extreme", "pro"} {
+			price, ok := s.TierPricesUSD[tier]
+			if !ok || !validChatGPTConfiguredPrice(price) {
+				return false
+			}
+		}
 	}
-	return true
+	return ValidChatGPTImagePrices(s.ImagePricesUSD)
 }
 
 // DecodeChatGPTBillingSettings rejects omitted/null prices instead of silently
@@ -78,6 +80,7 @@ func DecodeChatGPTBillingSettings(raw []byte) (*OpenAIChatGPTBillingSettings, er
 	var wire struct {
 		Success *float64            `json:"success_turn_price_usd"`
 		Tiers   map[string]*float64 `json:"tier_prices_usd"`
+		Images  map[string]*float64 `json:"image_prices_usd"`
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil || wire.Success == nil {
 		return nil, errors.New("missing numeric fallback price")
@@ -90,6 +93,15 @@ func DecodeChatGPTBillingSettings(raw []byte) (*OpenAIChatGPTBillingSettings, er
 				return nil, errors.New("missing numeric tier price")
 			}
 			s.TierPricesUSD[tier] = *price
+		}
+	}
+	if wire.Images != nil {
+		s.ImagePricesUSD = make(map[string]float64, len(wire.Images))
+		for size, price := range wire.Images {
+			if price == nil {
+				return nil, errors.New("missing numeric image price")
+			}
+			s.ImagePricesUSD[size] = *price
 		}
 	}
 	if !validChatGPTBillingSettings(s) {
@@ -138,7 +150,7 @@ func (s *SettingService) SetOpenAIChatGPTBillingSettings(ctx context.Context, se
 	if !validChatGPTBillingSettings(settings) {
 		return infraerrors.BadRequest("CHATGPT_TURN_PRICE_INVALID", "Price must be a finite, non-negative USD amount")
 	}
-	if settings.TierPricesUSD != nil {
+	if settings.TierPricesUSD != nil || settings.ImagePricesUSD != nil {
 		raw, err := json.Marshal(settings)
 		if err != nil {
 			return err
