@@ -54,11 +54,11 @@ func (s *OpenAIGatewayService) OpenChatGPTUpdates(ctx context.Context, c *gin.Co
 			}
 		}
 	}
-	conn, response, err := coderws.Dial(ctx, bootstrap.URL, &coderws.DialOptions{HTTPClient: client, HTTPHeader: headers, CompressionMode: coderws.CompressionDisabled})
+	conn, dialResponse, err := coderws.Dial(ctx, bootstrap.URL, &coderws.DialOptions{HTTPClient: client, HTTPHeader: headers, CompressionMode: coderws.CompressionDisabled})
 	if err != nil {
 		transport.CloseIdleConnections()
-		if response != nil && response.Body != nil {
-			_ = response.Body.Close()
+		if dialResponse != nil && dialResponse.Body != nil {
+			_ = dialResponse.Body.Close()
 		}
 		// Dial errors can embed the credentialed URL. Return a fixed error.
 		return nil, errors.New("native Chat updates transport failed")
