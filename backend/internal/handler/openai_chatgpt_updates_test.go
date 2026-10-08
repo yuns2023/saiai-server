@@ -69,6 +69,39 @@ func TestChatGPTAsyncSettlementKeepsOriginalSubscription(t *testing.T) {
 	require.False(t, key.Group.IsSubscriptionType(), "settlement must not mutate shared auth objects")
 }
 
+func TestChatGPTSynchronousTextSnapshotSettlesFrozenPriceOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := context.Background()
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	usage := &chatGPTLockedUsage{}
+	svc := service.NewOpenAIGatewayService(nil, usage, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil)
+	scope := service.ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
+	cache := service.NewChatGPTMemoryTurnCache()
+	turn := &service.ChatGPTTurnSnapshot{Identity: service.ChatGPTTurnBillingIdentity{RequestID: "TEST_ONLY_SYNC", PayloadHash: "TEST_ONLY_SYNC"}, AccountID: 4, BasePriceUSD: .03, RequestedModel: "gpt-5-6-thinking", ThinkingEffort: "extended", StartedAt: time.Now(), AsyncPending: true, UserMessageHash: service.ChatGPTMessageIDHash("user")}
+	_, err := cache.PutChatGPTTurnIfAbsent(ctx, scope.TurnKey(turn.Identity), turn, time.Minute)
+	require.NoError(t, err)
+	key := &service.APIKey{ID: 2, GroupID: &scope.GroupID, Group: &service.Group{ID: 3, RateMultiplier: 1}, User: &service.User{ID: 1}}
+	account := &service.Account{ID: 4}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/chatgpt/backend-api/conversation/TEST_ONLY_CONVERSATION", nil)
+	raw := []byte(`{"conversation_id":"TEST_ONLY_CONVERSATION","current_node":"final","mapping":{"user":{"parent":null,"message":{"id":"user","author":{"role":"user"}}},"final":{"parent":"user","message":{"id":"final","author":{"role":"assistant"},"status":"finished_successfully","end_turn":true,"content":{"content_type":"text","parts":["TEST_ONLY"]},"metadata":{"model_slug":"gpt-5-6-thinking"}}}}}`)
+	h.observeChatGPTSnapshot(ctx, c, key, cache, scope, account, turn, "TEST_ONLY_CONVERSATION", raw)
+	completed, err := cache.GetChatGPTTurn(ctx, scope.TurnKey(turn.Identity))
+	require.NoError(t, err)
+	require.True(t, completed.Completed)
+	require.False(t, completed.AsyncPending)
+	h.observeChatGPTSnapshot(ctx, c, key, cache, scope, account, completed, "TEST_ONLY_CONVERSATION", raw)
+	require.Equal(t, 1, usage.count())
+	require.InDelta(t, .03, usage.logs[0].ActualCost, .000001)
+	require.Equal(t, "gpt-5-6-thinking", usage.logs[0].Model)
+	require.Nil(t, usage.logs[0].UpstreamModel, "equal observed/requested models use the existing compact log contract")
+	require.Equal(t, "extended", *usage.logs[0].ReasoningEffort)
+	require.Equal(t, 0, usage.logs[0].ImageCount)
+	require.Equal(t, 0, usage.logs[0].InputTokens)
+}
+
 func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T) {
 	for _, handoff := range []string{
 		"data: {\"type\":\"stream_handoff\",\"options\":[{\"type\":\"subscribe_ws_topic\",\"topic_id\":\"conv-turn-low-ttl-TEST_ONLY\"}]}\n\n",

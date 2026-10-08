@@ -20,6 +20,53 @@ import (
 
 // Run against a disposable, network-disabled Redis over a task-owned Unix
 // socket. Normal unit jobs skip it; it never accepts a production Redis URL.
+func TestNativeChatRedisUploadOwnershipIsAtomicScopedAndNeverExtended(t *testing.T) {
+	socket := os.Getenv("SAIAI_TEST_REDIS_SOCKET")
+	if socket == "" {
+		t.Skip("disposable Redis socket not supplied")
+	}
+	require.True(t, filepath.IsAbs(socket))
+	ctx := context.Background()
+	rdb := redis.NewClient(&redis.Options{Network: "unix", Addr: socket, DialTimeout: 3 * time.Second})
+	t.Cleanup(func() { _ = rdb.Close() })
+	cache := &gatewayCache{rdb: rdb}
+	scope := service.ChatGPTTurnScope{UserID: time.Now().UnixNano(), APIKeyID: 2, GroupID: 3}
+	session := scope.UploadSessionKey("TEST_ONLY_DEVICE")
+	file, capability := scope.UploadedFileKey("file-TEST_ONLY"), scope.UploadURLKey("TEST_ONLY_CAPABILITY")
+	t.Cleanup(func() { _ = rdb.Del(ctx, session, file, capability).Err() })
+	var wg sync.WaitGroup
+	results := make(chan int64, 8)
+	for i := int64(1); i <= 8; i++ {
+		wg.Add(1)
+		go func(owner int64) {
+			defer wg.Done()
+			winner, err := cache.ClaimChatGPTUploadOwner(ctx, session, owner, time.Minute)
+			if err != nil {
+				t.Errorf("claim failed: %v", err)
+			}
+			results <- winner
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	winner, err := cache.GetChatGPTUploadOwner(ctx, session)
+	require.NoError(t, err)
+	require.Positive(t, winner)
+	for value := range results {
+		require.Equal(t, winner, value)
+	}
+	require.NoError(t, cache.BindChatGPTUploadOwner(ctx, []string{file}, winner, time.Minute))
+	ttl := rdb.PTTL(ctx, file).Val()
+	require.Error(t, cache.BindChatGPTUploadOwner(ctx, []string{capability, file}, winner+10, time.Hour))
+	require.False(t, rdb.Exists(ctx, capability).Val() > 0, "a conflict must leave no partial binding")
+	require.NoError(t, cache.BindChatGPTUploadOwner(ctx, []string{file, capability}, winner, time.Hour))
+	require.LessOrEqual(t, rdb.PTTL(ctx, file).Val(), ttl, "repeated binding must not extend existing ownership")
+	other := service.ChatGPTTurnScope{UserID: scope.UserID, APIKeyID: 4, GroupID: 3}
+	missing, err := cache.GetChatGPTUploadOwner(ctx, other.UploadedFileKey("file-TEST_ONLY"))
+	require.NoError(t, err)
+	require.Zero(t, missing)
+}
+
 func TestNativeChatImageBillingRedisSealsConcurrentReplaysAndRetainsTTL(t *testing.T) {
 	socket := os.Getenv("SAIAI_TEST_REDIS_SOCKET")
 	if socket == "" {

@@ -134,9 +134,14 @@ func RegisterGatewayRoutes(
 		chatgpt.POST("/f/conversation/*subpath", h.OpenAIGateway.ChatGPTConversation)
 		chatgpt.POST("/conversation/init", h.OpenAIGateway.ChatGPTConversation)
 		chatgpt.POST("/sentinel/chat-requirements/prepare", h.OpenAIGateway.ChatGPTConversation)
+		chatgpt.POST("/files", h.OpenAIGateway.ChatGPTUpload)
+		chatgpt.POST("/files/process_upload_stream", h.OpenAIGateway.ChatGPTUpload)
+		chatgpt.POST("/estuary/upload_content_bytes", h.OpenAIGateway.ChatGPTUpload)
 		chatgpt.GET("/files/download/:file_id", h.OpenAIGateway.ChatGPTFileDownload)
 		chatgpt.GET("/estuary/content", h.OpenAIGateway.ChatGPTEstuaryContent)
 	}
+	r.POST("/chatgpt/api/estuary/upload_content_bytes", bodyLimit, clientRequestID, opsErrorLogger,
+		gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.ChatGPTUpload)
 }
 
 func rejectRetiredGroupPlatform(c *gin.Context) {

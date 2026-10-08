@@ -262,13 +262,19 @@ type chatGPTMemoryTurnCache struct {
 	turns          map[string]chatGPTMemoryEntry
 	aliases        map[string]chatGPTMemoryAlias
 	updateAccounts map[string]map[int64]time.Time
+	uploads        map[string]chatGPTMemoryUpload
 }
 
 func NewChatGPTMemoryTurnCache() ChatGPTTurnCache {
-	return &chatGPTMemoryTurnCache{turns: make(map[string]chatGPTMemoryEntry), aliases: make(map[string]chatGPTMemoryAlias), updateAccounts: make(map[string]map[int64]time.Time)}
+	return &chatGPTMemoryTurnCache{turns: make(map[string]chatGPTMemoryEntry), aliases: make(map[string]chatGPTMemoryAlias), updateAccounts: make(map[string]map[int64]time.Time), uploads: make(map[string]chatGPTMemoryUpload)}
 }
 func (s *chatGPTMemoryTurnCache) cleanup() {
 	now := time.Now()
+	for key, upload := range s.uploads {
+		if !now.Before(upload.expires) {
+			delete(s.uploads, key)
+		}
+	}
 	for key, entry := range s.turns {
 		if !now.Before(entry.expires) {
 			delete(s.turns, key)

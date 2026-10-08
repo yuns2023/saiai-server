@@ -146,7 +146,13 @@ func (h *OpenAIGatewayHandler) observeChatGPTSnapshot(ctx context.Context, c *gi
 	turnKey := scope.TurnKey(turn.Identity)
 	turn, err = service.MergeChatGPTDeliveryImages(ctx, cache, scope, turn, images)
 	if err == nil {
-		turn, err = cache.SetChatGPTTurnAsyncStatus(ctx, turnKey, summary.AsyncStatus)
+		status := summary.AsyncStatus
+		if inspection.Outcome == "completed_synchronous_assistant" && !summary.AsyncStatusSeen {
+			// Normalize the verified synchronous completion to our inactive
+			// cache state; do not synthesize a provider response/status field.
+			status = 1
+		}
+		turn, err = cache.SetChatGPTTurnAsyncStatus(ctx, turnKey, status)
 	}
 	if err == nil {
 		subscription, _ := middleware.GetSubscriptionFromContext(c)
@@ -171,6 +177,7 @@ func (h *OpenAIGatewayHandler) chatGPTScopedAssetDownload(c *gin.Context) {
 		id = c.Query("id")
 	}
 	var turn *service.ChatGPTTurnSnapshot
+	var uploadOwner int64
 	for _, digest := range service.ChatGPTAssetLookupHashes(id) {
 		var err error
 		turn, err = cache.GetChatGPTResume(c.Request.Context(), scope.AssetKey(digest))
@@ -182,7 +189,17 @@ func (h *OpenAIGatewayHandler) chatGPTScopedAssetDownload(c *gin.Context) {
 			break
 		}
 	}
-	if turn == nil {
+	if turn == nil && service.ValidChatGPTUploadFileID(id) {
+		if uploads, cacheErr := h.gatewayService.ChatGPTUploadCache(); cacheErr == nil {
+			var lookupErr error
+			uploadOwner, lookupErr = uploads.GetChatGPTUploadOwner(c.Request.Context(), scope.UploadedFileKey(id))
+			if lookupErr != nil {
+				h.errorResponse(c, 503, "upload_context_unavailable", "Chat upload ownership is unavailable")
+				return
+			}
+		}
+	}
+	if turn == nil && uploadOwner == 0 {
 		// A first preview request may race the snapshot observer. A claimed
 		// conversation is only a lookup hint: validate its existing scoped
 		// owner, inspect that branch, then look up the exact asset again.
@@ -204,11 +221,15 @@ func (h *OpenAIGatewayHandler) chatGPTScopedAssetDownload(c *gin.Context) {
 			}
 		}
 	}
-	if turn == nil {
+	if turn == nil && uploadOwner == 0 {
 		h.errorResponse(c, 404, "asset_context_unavailable", "Chat asset ownership is unavailable")
 		return
 	}
-	account, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), key.GroupID, turn.AccountID)
+	owner := uploadOwner
+	if turn != nil {
+		owner = turn.AccountID
+	}
+	account, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), key.GroupID, owner)
 	if err != nil {
 		h.errorResponse(c, 503, "service_unavailable", "Chat asset account is unavailable")
 		return

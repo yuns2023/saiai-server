@@ -187,3 +187,36 @@ the official-binary subtest skips unless both paths are supplied. The official
 probe reports which Gateway fixture was used, avoiding a constructed-request
 claim being confused with observed transport bytes. Use a fresh test process
 (`-count=1`) for the fixture's ephemeral CA, matching process-wide CA loading.
+
+## Native Chat synchronous text and input upload boundary
+
+The isolated native Chat experiment has separate fixed-success-turn billing.
+An owned current snapshot without `async_status` may complete only when its
+current leaf is a successful `end_turn` assistant text message and the branch
+back to the original user contains only assistants and no image work. Explicit
+active/unknown async states, tool/image branches and foreign messages remain
+pending or rejected. Only an internal terminal accounting state is normalized;
+no provider response or generation request is rewritten. Frozen turn identity,
+price and atomic settlement prevent repeat notifications charging twice.
+
+Native Chat input uploads add exact POST routes for `/backend-api/files`,
+`/backend-api/files/process_upload_stream`, and both native Estuary
+`/backend-api/estuary/upload_content_bytes` and `/api/estuary/upload_content_bytes`
+addresses. Their original body, multipart bytes, query and application headers
+reach the same native provider endpoints; OAuth/account credentials are the
+usual necessary replacements. Processing events flush without modification.
+A native HTTP-200 error envelope stays an error envelope. Upload control never
+counts as a paid model turn or generated image and never holds a model slot.
+
+Only user/Key/group-scoped digests and selected account IDs enter Redis, with
+one-hour immutable ownership and a five-minute upload-selection lease. Signed
+capability strings and file contents are not cached. The next model turn uses
+the observed file owner, rejects mixed/foreign/missing owners before provider
+contact, and does not drop attachments to recover. Account unavailability does
+not migrate an existing upload. Original conversation ownership still applies.
+Direct HTTPS blob PUT goes through the client's ordinary CONNECT tunnel.
+Current upload body limit is 32 MiB including multipart overhead; Library,
+project uploads and reservation workflows are outside this basic paste scope.
+No database migration is required. Synthetic local tests establish routing,
+byte preservation and accounting isolation; real Desktop paste acceptance
+remains a separate test-environment check.

@@ -2922,7 +2922,7 @@ func (s *OpenAIGatewayService) buildChatGPTRequest(
 	if account == nil || !account.IsOpenAIOAuth() {
 		return nil, "", fmt.Errorf("native ChatGPT conversation requires an OpenAI OAuth account")
 	}
-	if !strings.HasPrefix(path, "/chatgpt/backend-api/") {
+	if !strings.HasPrefix(path, "/chatgpt/backend-api/") && strings.SplitN(path, "?", 2)[0] != "/chatgpt/api/estuary/upload_content_bytes" {
 		return nil, "", fmt.Errorf("invalid native ChatGPT path: %s", path)
 	}
 	token, _, err := s.GetAccessToken(ctx, account)

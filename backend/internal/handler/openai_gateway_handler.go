@@ -293,6 +293,19 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				}
 				conversationOwnerID = active.AccountID
 			}
+			fileIDs, attachmentErr := service.ChatGPTRequestUploadFileIDs(body)
+			if attachmentErr != nil {
+				h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", "Invalid Chat attachment identities", streamStarted)
+				return
+			}
+			attachmentOwner, attachmentErr := h.chatGPTAttachmentOwner(forwardCtx, turnScope, turnCache, fileIDs)
+			if attachmentErr != nil || (attachmentOwner != 0 && ((conversationOwnerID != 0 && conversationOwnerID != attachmentOwner) || (turn != nil && turn.AccountID != attachmentOwner))) {
+				h.handleStreamingAwareError(c, http.StatusConflict, "attachment_context_unavailable", "Chat attachments must belong to this conversation account", streamStarted)
+				return
+			}
+			if attachmentOwner != 0 {
+				conversationOwnerID = attachmentOwner
+			}
 		}
 	}
 	sessionHash := service.ResolveChatGPTConversationSessionHash(body)
@@ -688,17 +701,7 @@ func (h *OpenAIGatewayHandler) chatGPTControlGET(c *gin.Context, sessionHash, fa
 }
 
 func isSafeChatGPTFileID(fileID string) bool {
-	if len(fileID) < 6 || len(fileID) > 256 || !strings.HasPrefix(fileID, "file_") {
-		return false
-	}
-	for _, r := range fileID {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
-			continue
-		}
-		return false
-	}
-	return true
+	return service.ValidChatGPTUploadFileID(fileID)
 }
 
 func releaseChatGPTControlSelection(selection *service.AccountSelectionResult) {

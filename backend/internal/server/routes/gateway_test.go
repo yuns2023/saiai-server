@@ -98,6 +98,12 @@ func TestRetiredProviderRoutesAreNotRegistered(t *testing.T) {
 
 func TestChatGPTConversationRouteIsRegisteredButDisabledByDefault(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
+	for _, path := range []string{"/chatgpt/backend-api/files", "/chatgpt/backend-api/files/process_upload_stream", "/chatgpt/backend-api/estuary/upload_content_bytes", "/chatgpt/api/estuary/upload_content_bytes"} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"file_size":16}`)))
+		require.Equal(t, http.StatusNotImplemented, w.Code)
+		require.Contains(t, w.Body.String(), "native_chat_updates_unsupported")
+	}
 	modelW := httptest.NewRecorder()
 	router.ServeHTTP(modelW, httptest.NewRequest(http.MethodGet, "/chatgpt/backend-api/models?language=en", nil))
 	require.Equal(t, http.StatusNotFound, modelW.Code)
