@@ -24,7 +24,7 @@ type OpsErrorLog struct {
 	// Standardized classification
 	// - phase: request|auth|routing|upstream|network|internal
 	// - owner: client|provider|platform
-	// - source: client_request|upstream_http|gateway
+	// - source: client_request|upstream_http|upstream_ws|gateway
 	Phase string `json:"phase"`
 	Type  string `json:"type"`
 

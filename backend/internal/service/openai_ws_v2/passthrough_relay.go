@@ -55,6 +55,16 @@ type RelayTurnResult struct {
 	TerminalEventType  string
 	Duration           time.Duration
 	FirstTokenMs       *int
+	Failure            *RelayFailure
+}
+
+// RelayFailure is observed application error metadata, never a replacement
+// frame. Status is zero when the provider did not supply a valid status.
+type RelayFailure struct {
+	Status    int
+	ErrorType string
+	Code      string
+	Message   string
 }
 
 // RelayTurnMetadata is request-side accounting data captured before a turn is
@@ -136,6 +146,7 @@ type observedUpstreamEvent struct {
 	usage      Usage
 	duration   time.Duration
 	firstToken *int
+	failure    *RelayFailure
 }
 
 type relayTurnTiming struct {
@@ -319,7 +330,7 @@ func Relay(
 	result.UpstreamToClientFrames = upstreamToClientFrames.Load()
 	result.DroppedDownstreamFrames = droppedDownstreamFrames.Load()
 	if firstExit.stage == "read_client" && firstExit.graceful {
-		if state.terminalFrameForwarded.Load() && (!hasSecondExit || secondExit.graceful) {
+		if state.terminalFrameForwarded.Load() && !state.turns.hasOutstanding() && (!hasSecondExit || secondExit.graceful) {
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "relay_complete",
 				Graceful:        true,
@@ -731,7 +742,7 @@ func observeUpstreamMessage(
 	nowFn func() time.Time,
 	onUsageParseFailure func(eventType string, usageRaw string),
 ) observedUpstreamEvent {
-	if state == nil || len(message) == 0 {
+	if state == nil || len(message) == 0 || !gjson.ValidBytes(message) {
 		return observedUpstreamEvent{}
 	}
 	values := gjson.GetManyBytes(message, "type", "response.id", "response_id", "id")
@@ -764,6 +775,7 @@ func observeUpstreamMessage(
 		responseID: responseID,
 		usage:      parsedUsage,
 	}
+	observed.failure = parseRelayFailure(message, eventType)
 	if responseID != "" {
 		turnTiming := openAIWSRelayGetOrInitTurnTiming(state, responseID, now)
 		if turnTiming != nil && turnTiming.firstTokenMs == nil && isTokenEvent(eventType) {
@@ -797,18 +809,23 @@ func emitTurnComplete(
 	state *relayState,
 	observed observedUpstreamEvent,
 ) {
-	if !observed.terminal {
+	if !observed.terminal && observed.failure == nil {
 		return
 	}
 	responseID := strings.TrimSpace(observed.responseID)
-	if responseID == "" {
+	if responseID == "" && observed.failure == nil {
 		return
 	}
 	metadata := RelayTurnMetadata{}
+	var matched bool
 	if state != nil && state.turns != nil {
-		metadata, _ = state.turns.complete(responseID)
+		if observed.failure != nil && responseID == "" {
+			metadata, matched = state.turns.failUnbound()
+		} else {
+			metadata, matched = state.turns.complete(responseID)
+		}
 	}
-	if onTurnComplete == nil {
+	if onTurnComplete == nil || (observed.failure != nil && !matched) {
 		return
 	}
 	onTurnComplete(RelayTurnResult{
@@ -822,7 +839,61 @@ func emitTurnComplete(
 		TerminalEventType:  observed.eventType,
 		Duration:           observed.duration,
 		FirstTokenMs:       openAIWSRelayCloneIntPtr(observed.firstToken),
+		Failure:            observed.failure,
 	})
+}
+
+func parseRelayFailure(message []byte, eventType string) *RelayFailure {
+	var object gjson.Result
+	switch eventType {
+	case "error":
+		object = gjson.GetBytes(message, "error")
+		if !object.IsObject() {
+			return nil
+		}
+	case "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
+		object = gjson.GetBytes(message, "response.error")
+	default:
+		return nil
+	}
+	failure := &RelayFailure{ErrorType: object.Get("type").String(), Code: object.Get("code").String(), Message: object.Get("message").String()}
+	for _, field := range []string{"status", "error.status", "response.error.status"} {
+		value := gjson.GetBytes(message, field)
+		if value.Type == gjson.Number && value.Float() == float64(value.Int()) && value.Int() >= 400 && value.Int() <= 599 {
+			failure.Status = int(value.Int())
+			break
+		}
+	}
+	if failure.ErrorType == "" {
+		failure.ErrorType = "upstream_error"
+	}
+	if failure.Message == "" {
+		failure.Message = "Upstream WebSocket " + eventType
+	}
+	return failure
+}
+
+// A top-level error can precede response.created. Without a response id, only
+// one outstanding request can be attributed safely. Keep transport state and
+// quota-replay visibility unchanged when observing such an error.
+func (t *relayTurnTracker) failUnbound() (RelayTurnMetadata, bool) {
+	if t == nil {
+		return RelayTurnMetadata{}, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.pending) == 1 && len(t.byResponseID) == 0 {
+		metadata := t.pending[0]
+		t.pending = t.pending[:0]
+		return metadata, true
+	}
+	if len(t.pending) == 0 && len(t.byResponseID) == 1 {
+		for responseID, metadata := range t.byResponseID {
+			delete(t.byResponseID, responseID)
+			return metadata, true
+		}
+	}
+	return RelayTurnMetadata{}, false
 }
 
 func newRelayTurnTracker() *relayTurnTracker {
@@ -840,6 +911,15 @@ func (t *relayTurnTracker) register(metadata RelayTurnMetadata) {
 	t.mu.Lock()
 	t.pending = append(t.pending, metadata)
 	t.mu.Unlock()
+}
+
+func (t *relayTurnTracker) hasOutstanding() bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.pending) > 0 || len(t.byResponseID) > 0
 }
 
 func (t *relayTurnTracker) cancelPending(turn int) {

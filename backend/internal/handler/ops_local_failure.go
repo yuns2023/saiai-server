@@ -68,6 +68,8 @@ func closeOpenAIClientWSWithOps(c *gin.Context, conn *coderws.Conn, status coder
 			failure.status, failure.errType, failure.code = http.StatusTooManyRequests, "rate_limit_error", "user_concurrency"
 		}
 	}
-	setOpsLocalFailure(c, failure)
+	if !opsWSHasCurrentUpstreamFailure(c) {
+		setOpsLocalFailure(c, failure)
+	}
 	closeOpenAIClientWS(conn, status, reason)
 }

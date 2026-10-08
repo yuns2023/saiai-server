@@ -3968,6 +3968,7 @@ export default {
         },
         originDetail: {
           upstream_http: '上游 HTTP',
+          upstream_ws: '上游 WebSocket 错误帧',
           gateway: '网关',
           client_request: '客户端请求',
           phaseDerived: '按阶段判定：{phase}'
@@ -3981,6 +3982,7 @@ export default {
           duration: '耗时',
           status: '状态码',
           origin: '错误来源',
+          message: '错误原因',
           requestId: '请求ID',
           actions: '操作'
         }

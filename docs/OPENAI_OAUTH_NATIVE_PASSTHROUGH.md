@@ -98,6 +98,25 @@ An actual selected upstream credential echoed in an error is redacted. Existing
 explicit error rules, account-health side effects and pooled 401/402/403 auth
 status mapping remain separate administrative boundaries.
 
+WebSocket passthrough observes top-level `error` and failed/incomplete/cancelled
+response events independently of successful completion. A correlated refusal
+is queued once per turn in Ops while the connection remains open, with the
+requested model, selected account, sanitized type/code/message and an explicit
+provider status when present. HTTP 101 is recorded as transport metadata; it
+does not replace a logical 400. If the provider omits a status, monitoring uses
+502 and leaves the upstream status unset. The later generic socket-close 500
+does not replace an observed refusal from the current turn. A later turn
+resets that outcome, so its failure cannot inherit an earlier model/status.
+
+These observations do not rewrite frames, synthesize response IDs or successful
+completion, retry a rejected model, or change quota-replay visibility. Only a
+successful terminal callback produces a usage record. Without a response ID,
+associate an error only when exactly one request is outstanding; do not guess
+between simultaneous requests. Malformed/binary/control frames stay on the
+raw relay path. Request Details displays the saved reason and distinguishes
+upstream WebSocket error frames from HTTP and local Gateway failures. Actual
+socket close/EOF metadata remains in the connection's transport log.
+
 ## Local evidence
 
 The regression suite uses synthetic credentials, recording HTTP transports,
