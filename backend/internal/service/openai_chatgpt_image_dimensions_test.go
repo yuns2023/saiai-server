@@ -21,6 +21,7 @@ func TestChatGPTImageDimensionsFromReturnedPNGJPEGAndWebPBytes(t *testing.T) {
 	require.Equal(t, "2x3", chatGPTImageResultDimensions(png64))
 	require.Equal(t, "2x3", chatGPTImageResultDimensions("data:image/png;base64,"+png64))
 	require.Equal(t, "2x3", chatGPTImageResultDimensions("data:image/jpeg;base64,"+base64.StdEncoding.EncodeToString(jpegBytes.Bytes())))
+	require.Equal(t, "2x3", chatGPTImageResultDimensions(base64.StdEncoding.EncodeToString(jpegBytes.Bytes())))
 	for _, variant := range []string{"VP8X", "VP8 ", "VP8L"} {
 		header := make([]byte, 32)
 		copy(header[:4], "RIFF")
@@ -41,6 +42,7 @@ func TestChatGPTImageDimensionsFromReturnedPNGJPEGAndWebPBytes(t *testing.T) {
 			binary.LittleEndian.PutUint32(header[21:25], uint32(2047|(1151<<14)))
 		}
 		require.Equal(t, "2048x1152", chatGPTImageResultDimensions("data:image/webp;base64,"+base64.StdEncoding.EncodeToString(header)), variant)
+		require.Equal(t, "2048x1152", chatGPTImageResultDimensions(base64.StdEncoding.EncodeToString(header)), variant)
 	}
 	for _, result := range []string{"sediment://PRIVATE_ASSET", "data:image/png,invalid", "data:image/png;base64,not-an-image", "data:image/webp;base64,AAAA"} {
 		require.Empty(t, chatGPTImageResultDimensions(result))

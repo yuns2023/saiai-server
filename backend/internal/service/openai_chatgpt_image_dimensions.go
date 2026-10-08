@@ -21,7 +21,7 @@ func chatGPTImageResultDimensions(result string) string {
 			return ""
 		}
 		encoded = data
-	} else if !strings.HasPrefix(result, "iVBORw0KGgo") {
+	} else if !strings.HasPrefix(result, "iVBORw0KGgo") && !strings.HasPrefix(result, "/9j/") && !strings.HasPrefix(result, "UklGR") {
 		return ""
 	}
 	header, err := io.ReadAll(io.LimitReader(base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded)), 64*1024))
