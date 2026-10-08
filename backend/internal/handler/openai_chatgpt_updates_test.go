@@ -102,6 +102,44 @@ func TestChatGPTSynchronousTextSnapshotSettlesFrozenPriceOnce(t *testing.T) {
 	require.Equal(t, 0, usage.logs[0].InputTokens)
 }
 
+func TestChatGPTSynchronousImageSnapshotSettlesBaseAndFinalImageOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := context.Background()
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	usage := &chatGPTLockedUsage{}
+	svc := service.NewOpenAIGatewayService(nil, usage, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil)
+	scope := service.ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
+	cache := service.NewChatGPTMemoryTurnCache()
+	turn := &service.ChatGPTTurnSnapshot{Identity: service.ChatGPTTurnBillingIdentity{RequestID: "TEST_ONLY_SYNC_IMAGE", PayloadHash: "TEST_ONLY_SYNC_IMAGE"}, AccountID: 4, BasePriceUSD: .01,
+		ImagePricesUSD: map[string]float64{"1K": .02, "2K": .04, "4K": .08, "unknown": .02}, RequestedModel: "gpt-5-6-instant", StartedAt: time.Now(), AsyncPending: true, UserMessageHash: service.ChatGPTMessageIDHash("user")}
+	_, err := cache.PutChatGPTTurnIfAbsent(ctx, scope.TurnKey(turn.Identity), turn, time.Minute)
+	require.NoError(t, err)
+	key := &service.APIKey{ID: 2, GroupID: &scope.GroupID, Group: &service.Group{ID: 3, RateMultiplier: 1}, User: &service.User{ID: 1}}
+	account := &service.Account{ID: 4}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/chatgpt/backend-api/conversation/TEST_ONLY_CONVERSATION", nil)
+	raw := []byte(`{"conversation_id":"TEST_ONLY_CONVERSATION","current_node":"image","mapping":{"user":{"parent":null,"message":{"id":"user","author":{"role":"user"}}},"image":{"parent":"user","message":{"id":"image","author":{"role":"tool","name":"image_gen"},"status":"finished_successfully","content":{"content_type":"multimodal_text","parts":[{"content_type":"image_asset_pointer","asset_pointer":"sediment://TEST_ONLY_IMAGE","width":2048,"height":2048}]},"metadata":{"model_slug":"gpt-5-6-instant"}}}}}`)
+	preview := bytes.ReplaceAll(raw, []byte(`"status":"finished_successfully"`), []byte(`"status":"in_progress"`))
+	h.observeChatGPTSnapshot(ctx, c, key, cache, scope, account, turn, "TEST_ONLY_CONVERSATION", preview)
+	require.Equal(t, 0, usage.count(), "a delivered preview is not a completed image")
+	for i := 0; i < 3; i++ {
+		// Repeated reads may hold the original stale pending snapshot.
+		h.observeChatGPTSnapshot(ctx, c, key, cache, scope, account, turn, "TEST_ONLY_CONVERSATION", raw)
+	}
+	completed, err := cache.GetChatGPTTurn(ctx, scope.TurnKey(turn.Identity))
+	require.NoError(t, err)
+	require.True(t, completed.Completed)
+	require.False(t, completed.AsyncPending)
+	require.Equal(t, 1, usage.count())
+	require.InDelta(t, .05, usage.logs[0].ActualCost, .000001)
+	require.Equal(t, 1, usage.logs[0].ImageCount)
+	require.NotNil(t, usage.logs[0].ImageSize)
+	require.Equal(t, "2048x2048", *usage.logs[0].ImageSize)
+	require.Zero(t, usage.logs[0].InputTokens)
+}
+
 func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T) {
 	for _, handoff := range []string{
 		"data: {\"type\":\"stream_handoff\",\"options\":[{\"type\":\"subscribe_ws_topic\",\"topic_id\":\"conv-turn-low-ttl-TEST_ONLY\"}]}\n\n",

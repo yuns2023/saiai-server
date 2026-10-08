@@ -117,6 +117,20 @@ schemas, errors and mismatched conversations cannot settle. Only generated
 images on this new branch count; historical images do not count again. Replayed
 message updates bind download ownership without adding images to a bill.
 
+Synchronous image snapshots may omit or null `async_status`, just as native
+text snapshots can. That absence alone establishes no completion. A current
+branch owned by the original user message can settle only when it ends in a
+successful terminal assistant or a successful recognized image-tool leaf,
+every assistant/image-tool message on the new branch finished successfully,
+and every deliverable image has final generated-asset evidence. Preview-only,
+partially generated, unfinished, failed, arbitrary-tool and foreign branches
+stay pending or fail. Any explicit active/unknown async status vetoes this
+shortcut. The internal cache normalizes verified synchronous completion to
+inactive; provider JSON and the client stream remain unchanged. The original
+frozen base-turn and image prices settle together once, including repeated
+snapshot reads. Existing pending generations are not replayed or manually
+backcharged by a deployment.
+
 HTTP, resume and background delivery settle the original message identity,
 snapshotted model/effort, Chat/image tariffs and subscription identity through
 one atomic debit namespace. The usage row remains attributed to the original

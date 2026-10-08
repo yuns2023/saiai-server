@@ -147,7 +147,7 @@ func (h *OpenAIGatewayHandler) observeChatGPTSnapshot(ctx context.Context, c *gi
 	turn, err = service.MergeChatGPTDeliveryImages(ctx, cache, scope, turn, images)
 	if err == nil {
 		status := summary.AsyncStatus
-		if inspection.Outcome == "completed_synchronous_assistant" && !summary.AsyncStatusSeen {
+		if inspection.Completed && !summary.AsyncStatusSeen {
 			// Normalize the verified synchronous completion to our inactive
 			// cache state; do not synthesize a provider response/status field.
 			status = 1
