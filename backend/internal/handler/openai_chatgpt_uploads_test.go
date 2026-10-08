@@ -19,13 +19,20 @@ import (
 )
 
 func (c *chatGPTSharedTurnCache) GetChatGPTUploadOwner(ctx context.Context, key string) (int64, error) {
-	return c.ChatGPTTurnCache.(service.ChatGPTUploadCache).GetChatGPTUploadOwner(ctx, key)
+	return c.uploadCache().GetChatGPTUploadOwner(ctx, key)
 }
 func (c *chatGPTSharedTurnCache) ClaimChatGPTUploadOwner(ctx context.Context, key string, owner int64, ttl time.Duration) (int64, error) {
-	return c.ChatGPTTurnCache.(service.ChatGPTUploadCache).ClaimChatGPTUploadOwner(ctx, key, owner, ttl)
+	return c.uploadCache().ClaimChatGPTUploadOwner(ctx, key, owner, ttl)
 }
 func (c *chatGPTSharedTurnCache) BindChatGPTUploadOwner(ctx context.Context, keys []string, owner int64, ttl time.Duration) error {
-	return c.ChatGPTTurnCache.(service.ChatGPTUploadCache).BindChatGPTUploadOwner(ctx, keys, owner, ttl)
+	return c.uploadCache().BindChatGPTUploadOwner(ctx, keys, owner, ttl)
+}
+func (c *chatGPTSharedTurnCache) uploadCache() service.ChatGPTUploadCache {
+	cache, ok := c.ChatGPTTurnCache.(service.ChatGPTUploadCache)
+	if !ok {
+		panic("TEST_ONLY upload cache fixture is missing")
+	}
+	return cache
 }
 
 func TestChatGPTNativeUploadPreservesBytesAndBindsSubsequentModelToOwner(t *testing.T) {
