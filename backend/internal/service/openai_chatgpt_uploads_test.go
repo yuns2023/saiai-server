@@ -11,7 +11,8 @@ import (
 
 func TestChatGPTUploadOwnershipIsScopedImmutableAndContentHiding(t *testing.T) {
 	ctx := context.Background()
-	cache := NewChatGPTMemoryTurnCache().(ChatGPTUploadCache)
+	cache, ok := NewChatGPTMemoryTurnCache().(ChatGPTUploadCache)
+	require.True(t, ok)
 	scope := ChatGPTTurnScope{1, 2, 3}
 	keys, err := ChatGPTUploadResponseKeys(scope, []byte(`{"file_id":"file-TEST_ONLY","upload_url":"/backend-api/estuary/upload_content_bytes?upload_url=TEST_ONLY_SIGNED_CAPABILITY"}`))
 	require.NoError(t, err)

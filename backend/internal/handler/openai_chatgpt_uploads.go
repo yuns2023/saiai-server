@@ -159,7 +159,7 @@ type chatGPTUploadFlushWriter struct{ gin.ResponseWriter }
 
 func (w chatGPTUploadFlushWriter) Write(p []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(p)
-	w.ResponseWriter.Flush()
+	w.Flush()
 	return n, err
 }
 
