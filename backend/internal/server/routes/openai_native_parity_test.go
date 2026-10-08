@@ -375,7 +375,7 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 			require.NotContains(t, string(refusal), "response.completed")
 			_, _, readErr = reconnect.Read(ctx)
 		}
-		require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(readErr))
+		require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(readErr), "%v", readErr)
 		modelAttempts := 0
 		for _, record := range lab.providerRecords() {
 			if record["kind"] == "http" || record["kind"] == "frame" {
@@ -739,7 +739,72 @@ func (w *nativeRoutesObserverWriter) Hijack() (net.Conn, *bufio.ReadWriter, erro
 		observer.observe(prefetched)
 	}
 	reader := bufio.NewReader(io.MultiReader(bytes.NewReader(prefetched), observer))
+	// coder/websocket.Accept preserves Reader.Buffered(), then resets its
+	// underlying reader to the hijacked connection. Keep the prefetched bytes
+	// visible there, or a fast client's frame header can be discarded.
+	if len(prefetched) > 0 {
+		if _, err := reader.Peek(len(prefetched)); err != nil {
+			_ = conn.Close()
+			return nil, nil, err
+		}
+	}
 	return observer, bufio.NewReadWriter(reader, buffer.Writer), nil
+}
+
+type nativeRoutesPrefetchedWriter struct {
+	gin.ResponseWriter
+	response *httptest.ResponseRecorder
+	conn     net.Conn
+	buffer   *bufio.ReadWriter
+}
+
+func (w *nativeRoutesPrefetchedWriter) Header() http.Header  { return w.response.Header() }
+func (w *nativeRoutesPrefetchedWriter) WriteHeader(code int) { w.response.WriteHeader(code) }
+func (w *nativeRoutesPrefetchedWriter) WriteHeaderNow()      {}
+func (w *nativeRoutesPrefetchedWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return w.conn, w.buffer, nil
+}
+
+func TestNativeRoutesObserverPreservesPrefetchedWebSocketFrames(t *testing.T) {
+	payload := []byte(`{"type":"response.create","model":"TEST_ONLY"}`)
+	mask := []byte{1, 2, 3, 4}
+	frame := append([]byte{0x82, 0x80 | byte(len(payload))}, mask...)
+	for i, b := range payload {
+		frame = append(frame, b^mask[i%4])
+	}
+	for _, prefix := range []int{0, 1, 2, 6, len(frame)} {
+		t.Run(strconv.Itoa(prefix), func(t *testing.T) {
+			server, client := net.Pipe()
+			t.Cleanup(func() { _ = server.Close(); _ = client.Close() })
+			reader := bufio.NewReader(bytes.NewReader(frame[:prefix]))
+			if prefix > 0 {
+				_, err := reader.Peek(prefix)
+				require.NoError(t, err)
+			}
+			request := httptest.NewRequest("GET", "http://example.invalid/v1/responses", nil)
+			request.Header = http.Header{"Connection": {"Upgrade"}, "Upgrade": {"websocket"},
+				"Sec-Websocket-Version": {"13"}, "Sec-Websocket-Key": {"MDEyMzQ1Njc4OWFiY2RlZg=="}}
+			lab := &nativeRoutesLab{}
+			writer := &nativeRoutesObserverWriter{lab: lab, request: request,
+				ResponseWriter: &nativeRoutesPrefetchedWriter{response: httptest.NewRecorder(), conn: server,
+					buffer: bufio.NewReadWriter(reader, bufio.NewWriter(io.Discard))}}
+			conn, err := coderws.Accept(writer, request, nil)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = conn.CloseNow() })
+			go func() { _, _ = client.Write(frame[prefix:]) }()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			kind, body, err := conn.Read(ctx)
+			require.NoError(t, err)
+			require.Equal(t, coderws.MessageBinary, kind)
+			require.Equal(t, payload, body)
+			lab.mu.Lock()
+			defer lab.mu.Unlock()
+			require.Len(t, lab.records, 1, "capture the unchanged frame exactly once")
+			sum := sha256.Sum256(payload)
+			require.Equal(t, hex.EncodeToString(sum[:]), lab.records[0]["sha256"])
+		})
+	}
 }
 
 type nativeRoutesObserverConn struct {
