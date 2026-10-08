@@ -199,3 +199,24 @@ func TestRecordChatGPTImageSurchargeUsesSameAtomicDebitAndHistoricalCosts(t *tes
 		require.Error(t, svc.RecordChatGPTTurnUsage(context.Background(), &invalid))
 	}
 }
+
+func TestRecordChatGPTOversizedImageDimensionsKeepUsageLogAndCharge(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Default.RateMultiplier = 1
+	usage := &chatGPTFixedUsageLogRepo{}
+	repo := &chatGPTFixedBillingRepo{}
+	cache := NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(cache.Stop)
+	svc := NewOpenAIGatewayService(nil, usage, repo, nil, nil, nil, nil, cfg, nil, nil, nil, nil, cache, nil, &DeferredService{}, nil)
+	input := &OpenAIChatGPTTurnUsageInput{BasePriceUSD: .01, ImageCount: 1, ImageCostUSD: .02, ImageSize: "32768x32768",
+		RequestID: "TEST_ONLY_OVERSIZED_IMAGE", RequestPayloadHash: "TEST_ONLY_HASH", RequestedModel: "gpt-5-6",
+		InboundEndpoint: "/chatgpt/backend-api/f/conversation", APIKey: &APIKey{ID: 1}, User: &User{ID: 2}, Account: &Account{ID: 3, Type: AccountTypeOAuth}}
+	require.NoError(t, svc.RecordChatGPTTurnUsage(context.Background(), input))
+	require.Len(t, usage.logs, 1)
+	require.Nil(t, usage.logs[0].ImageSize, "dimensions that exceed the SQL field must remain unknown rather than drop the whole usage row")
+	require.Equal(t, 1, usage.logs[0].ImageCount)
+	require.InDelta(t, .01, usage.logs[0].InputCost, 1e-12)
+	require.InDelta(t, .02, usage.logs[0].OutputCost, 1e-12)
+	require.Len(t, repo.commands, 1)
+	require.InDelta(t, .03, repo.commands[0].BalanceCost, 1e-12)
+}

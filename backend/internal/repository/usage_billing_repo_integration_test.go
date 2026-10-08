@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
@@ -63,6 +64,49 @@ func TestNativeChatResumeConcurrentBillingChargesOneOriginalTurn(t *testing.T) {
 	require.InDelta(t, 99.835, balance, 1e-9)
 	require.InDelta(t, 0.165, quota, 1e-9)
 	require.Equal(t, 1, dedup)
+}
+
+func TestNativeChatOversizedImageDimensionsPersistUsageAndOneDebit(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	user := mustCreateUser(t, client, &service.User{Email: "native-image-size-" + uuid.NewString() + "@example.invalid", PasswordHash: "TEST_ONLY", Balance: 100})
+	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "TEST_ONLY_" + uuid.NewString(), Name: "native-image-size", Quota: 1})
+	account := mustCreateAccount(t, client, &service.Account{Name: "native-image-size-" + uuid.NewString(), Type: service.AccountTypeOAuth, Platform: service.PlatformOpenAI})
+	cfg := &config.Config{}
+	cfg.Default.RateMultiplier = 1
+	cache := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(cache.Stop)
+	usage := newUsageLogRepositoryWithSQL(client, integrationDB)
+	// Use the real SQL insert synchronously so the test can immediately check
+	// both persistence and the independently committed balance/quota debit.
+	usage.db = nil
+	svc := service.NewOpenAIGatewayService(nil, usage, NewUsageBillingRepository(client, integrationDB), nil, nil, nil, nil, cfg, nil, nil, nil, nil, cache, nil, &service.DeferredService{}, nil)
+	identity := service.ResolveChatGPTTurnBillingIdentity([]byte(`{"messages":[{"id":"TEST_ONLY_OVERSIZED_IMAGE"}],"model":"gpt-5-6"}`), "")
+	input := &service.OpenAIChatGPTTurnUsageInput{RequestID: identity.RequestID, RequestPayloadHash: identity.PayloadHash,
+		BasePriceUSD: .01, ImageCount: 1, ImageCostUSD: .02, ImageSize: "32768x32768", RequestedModel: "gpt-5-6",
+		Account: account, APIKey: key, User: user, InboundEndpoint: "/chatgpt/backend-api/f/conversation", APIKeyService: nativeChatQuotaUpdater{}}
+	require.NoError(t, svc.RecordChatGPTTurnUsage(ctx, input))
+	require.NoError(t, svc.RecordChatGPTTurnUsage(ctx, input))
+	var imageSize sql.NullString
+	var imageCount int
+	var chatCost, imageCost, totalCost, actualCost float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT image_size,image_count,input_cost,output_cost,total_cost,actual_cost FROM usage_logs WHERE request_id=$1 AND api_key_id=$2", identity.RequestID, key.ID).Scan(&imageSize, &imageCount, &chatCost, &imageCost, &totalCost, &actualCost))
+	require.False(t, imageSize.Valid)
+	require.Equal(t, 1, imageCount)
+	require.InDelta(t, .01, chatCost, 1e-12)
+	require.InDelta(t, .02, imageCost, 1e-12)
+	require.InDelta(t, .03, totalCost, 1e-12)
+	require.InDelta(t, .03, actualCost, 1e-12)
+	var balance, quota float64
+	var dedup, logs int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT balance FROM users WHERE id=$1", user.ID).Scan(&balance))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT quota_used FROM api_keys WHERE id=$1", key.ID).Scan(&quota))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT count(*) FROM usage_billing_dedup WHERE request_id=$1 AND api_key_id=$2", identity.RequestID, key.ID).Scan(&dedup))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT count(*) FROM usage_logs WHERE request_id=$1 AND api_key_id=$2", identity.RequestID, key.ID).Scan(&logs))
+	require.InDelta(t, 99.97, balance, 1e-9)
+	require.InDelta(t, .03, quota, 1e-9)
+	require.Equal(t, 1, dedup)
+	require.Equal(t, 1, logs)
 }
 
 func TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling(t *testing.T) {

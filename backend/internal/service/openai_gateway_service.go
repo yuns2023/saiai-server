@@ -4394,7 +4394,14 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 	// Settle the Chat fee and configured completed-image surcharge together.
 	// ImageCount is descriptive; costs were frozen before this call.
 	usageLog.ImageCount = input.ImageCount
-	usageLog.ImageSize = optionalTrimmedStringPtr(input.ImageSize)
+	imageSize := strings.TrimSpace(input.ImageSize)
+	// The existing image_size column is VARCHAR(10). Oversized dimensions
+	// remain in the sealed billing snapshot, but must not make the completed
+	// usage insert fail after its debit has already succeeded.
+	if len(imageSize) > 10 {
+		imageSize = ""
+	}
+	usageLog.ImageSize = optionalTrimmedStringPtr(imageSize)
 	if input.ImageGenerationSeen || input.ImageCount > 0 {
 		usageLog.MediaType = optionalTrimmedStringPtr("image")
 	}

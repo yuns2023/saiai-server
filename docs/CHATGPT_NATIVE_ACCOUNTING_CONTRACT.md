@@ -149,6 +149,11 @@ share this table. Format, quality, thinking effort and requested size are not
 used to guess output dimensions or image prices. Configuring a 4K price does
 not advertise upstream 4K support or alter any provider request.
 
+The existing usage-log size column holds at most ten characters. Observed
+dimensions too long for that field remain in the sealed turn snapshot and use
+the normal unknown-resolution tariff, while the usage row displays unknown
+dimensions. They must not cause the entire usage insert to fail after a debit.
+
 The bounded observer accepts known image tool messages, generated multimodal
 asset parts, explicit image-part patches for an identified tool message, and
 completed structured `image_generation_call` items. User uploads, unrelated
