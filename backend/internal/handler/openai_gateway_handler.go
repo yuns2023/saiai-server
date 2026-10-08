@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -38,17 +39,20 @@ type chatGPTBillingSettingsReader interface {
 
 // OpenAIGatewayHandler handles OpenAI API gateway requests.
 type OpenAIGatewayHandler struct {
-	gatewayService          *service.OpenAIGatewayService
-	chatGPTBillingSettings  chatGPTBillingSettingsReader
-	billingCacheService     *service.BillingCacheService
-	apiKeyService           *service.APIKeyService
-	usageRecordWorkerPool   *service.UsageRecordWorkerPool
-	inputModerationService  *service.InputModerationService
-	errorPassthroughService *service.ErrorPassthroughService
-	concurrencyHelper       *ConcurrencyHelper
-	maxAccountSwitches      int
-	cfg                     *config.Config
-	openAIChatModelRequests atomic.Int64
+	gatewayService            *service.OpenAIGatewayService
+	chatGPTBillingSettings    chatGPTBillingSettingsReader
+	billingCacheService       *service.BillingCacheService
+	apiKeyService             *service.APIKeyService
+	usageRecordWorkerPool     *service.UsageRecordWorkerPool
+	inputModerationService    *service.InputModerationService
+	errorPassthroughService   *service.ErrorPassthroughService
+	concurrencyHelper         *ConcurrencyHelper
+	maxAccountSwitches        int
+	cfg                       *config.Config
+	openAIChatModelRequests   atomic.Int64
+	chatGPTUpdatesMu          sync.Mutex
+	chatGPTUpdatesConnections map[string]int
+	chatGPTUpdatesActive      int
 }
 
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler
@@ -126,6 +130,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	var turn *service.ChatGPTTurnSnapshot
 	var turnScope service.ChatGPTTurnScope
 	resumeConversationID := ""
+	var conversationOwnerID int64
 	if isResumeRequest {
 		subject, ok := middleware2.GetAuthSubjectFromContext(c)
 		if !ok {
@@ -233,12 +238,14 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				return
 			}
 			subscription, _ = middleware2.GetSubscriptionFromContext(c)
-			if err := h.billingCacheService.CheckBillingEligibility(
-				c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription,
-			); err != nil {
-				status, code, message := billingErrorDetails(err)
-				h.errorResponse(c, status, code, message)
-				return
+			if isModelRequest {
+				if err := h.billingCacheService.CheckBillingEligibility(
+					c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription,
+				); err != nil {
+					status, code, message := billingErrorDetails(err)
+					h.errorResponse(c, status, code, message)
+					return
+				}
 			}
 		}
 		if h.concurrencyHelper != nil && h.concurrencyHelper.concurrencyService != nil {
@@ -280,6 +287,11 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusConflict, "turn_pending", "A ChatGPT turn is still pending in this conversation", streamStarted)
 					return
 				}
+				if active == nil {
+					h.handleStreamingAwareError(c, http.StatusConflict, "conversation_context_unavailable", "ChatGPT conversation ownership is unavailable; start a new conversation", streamStarted)
+					return
+				}
+				conversationOwnerID = active.AccountID
 			}
 		}
 	}
@@ -291,6 +303,8 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	var selectErr error
 	if turn != nil {
 		selection, selectErr = h.gatewayService.SelectChatGPTBoundAccount(forwardCtx, apiKey.GroupID, turn.AccountID)
+	} else if conversationOwnerID > 0 {
+		selection, selectErr = h.gatewayService.SelectChatGPTBoundAccount(forwardCtx, apiKey.GroupID, conversationOwnerID)
 	} else {
 		selection, _, selectErr = h.gatewayService.SelectChatGPTOAuthAccount(forwardCtx, apiKey.GroupID, sessionHash, model)
 	}
@@ -301,9 +315,15 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		return
 	}
 	if isModelRequest && turnCache != nil {
+		var subscriptionID int64
+		if subscription != nil {
+			subscriptionID = subscription.ID
+		}
 		turn, err = turnCache.PutChatGPTTurnIfAbsent(forwardCtx, turnScope.TurnKey(billingIdentity), &service.ChatGPTTurnSnapshot{
 			Identity: billingIdentity, AccountID: selection.Account.ID, BasePriceUSD: fixedTurnPriceUSD,
-			ImagePricesUSD: imagePricesUSD,
+			ImagePricesUSD:         imagePricesUSD,
+			UserMessageHash:        service.ChatGPTUserMessageHash(body),
+			BillingSnapshotVersion: 1, SubscriptionID: subscriptionID,
 			RequestedModel: model, ThinkingEffort: thinkingEffort, StartedAt: requestStart,
 		}, service.ChatGPTTurnContextTTL)
 		if err != nil || turn == nil || turn.RequestedModel != model || turn.ThinkingEffort != thinkingEffort {
@@ -403,7 +423,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		if !evidence.GenerationSeen {
 			return nil
 		}
-		updated, err := turnCache.MergeChatGPTTurnImages(forwardCtx, turnScope.TurnKey(turn.Identity), evidence)
+		updated, err := service.MergeChatGPTDeliveryImages(forwardCtx, turnCache, turnScope, turn, evidence)
 		if err != nil {
 			logger.L().Warn("openai.chatgpt_image_metadata_merge_failed", zap.Error(err))
 			return err
@@ -412,26 +432,61 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		return nil
 	}
 	clientDisconnected := false
-	handoffBound := false
+	boundConversation := ""
+	boundTopics := make(map[string]bool)
+	lastAsyncStatus := 0
+	mergeAsyncStatus := func(signals service.ChatGPTConversationStreamSummary) error {
+		if !signals.AsyncStatusSeen || signals.AsyncStatus == lastAsyncStatus || turnCache == nil || turn == nil {
+			return nil
+		}
+		var statusErr error
+		turn, statusErr = turnCache.SetChatGPTTurnAsyncStatus(forwardCtx, turnScope.TurnKey(turn.Identity), signals.AsyncStatus)
+		if statusErr == nil {
+			lastAsyncStatus = signals.AsyncStatus
+		}
+		return statusErr
+	}
+	bindDelivery := func(signals service.ChatGPTConversationStreamSummary) error {
+		if turnCache == nil || turn == nil {
+			return errors.New("ChatGPT delivery accounting context unavailable")
+		}
+		if signals.ConversationID != "" {
+			requestedConversation := strings.TrimSpace(gjson.GetBytes(body, "conversation_id").String())
+			if (boundConversation != "" && boundConversation != signals.ConversationID) ||
+				(requestedConversation != "" && requestedConversation != signals.ConversationID) ||
+				(isResumeRequest && signals.ConversationID != resumeConversationID) {
+				return errors.New("ChatGPT delivery identity changed")
+			}
+			if boundConversation == "" {
+				if err := turnCache.BindChatGPTUpdates(forwardCtx, turnScope.ResumeKey(signals.ConversationID), turnScope.TurnKey(turn.Identity), turnScope.UpdatesKey()); err != nil {
+					return err
+				}
+				boundConversation = signals.ConversationID
+			}
+		}
+		for _, topic := range signals.UpdateTopics {
+			if !boundTopics[topic] {
+				if err := turnCache.BindChatGPTResume(forwardCtx, turnScope.TopicKey(topic), turnScope.TurnKey(turn.Identity)); err != nil {
+					return err
+				}
+				boundTopics[topic] = true
+			}
+		}
+		return mergeAsyncStatus(signals)
+	}
 	for {
 		n, readErr := resp.Body.Read(buffer)
 		if n > 0 {
 			if streamObserver != nil && streamObserverErr == nil {
 				streamObserverErr = streamObserver.Observe(buffer[:n])
 				signals := streamObserver.Snapshot()
-				if streamObserverErr == nil && !handoffBound && signals.HandoffSeen && signals.ConversationID != "" &&
-					resp.StatusCode >= 200 && resp.StatusCode < 300 && !signals.ProviderErrorSeen {
-					streamObserverErr = mergeTurnImages()
+				if streamObserverErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && !signals.ProviderErrorSeen {
+					streamObserverErr = bindDelivery(signals)
 					if streamObserverErr == nil {
-						if turnCache == nil || turn == nil {
-							streamObserverErr = errors.New("ChatGPT handoff accounting context unavailable")
-						} else {
-							streamObserverErr = turnCache.BindChatGPTResume(forwardCtx, turnScope.ResumeKey(signals.ConversationID), turnScope.TurnKey(turn.Identity))
-							handoffBound = streamObserverErr == nil
-						}
+						streamObserverErr = mergeTurnImages()
 					}
 					if streamObserverErr != nil {
-						h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "accounting_unavailable", "ChatGPT handoff accounting context is unavailable", c.Writer.Written())
+						h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "accounting_unavailable", "ChatGPT delivery accounting context is unavailable", c.Writer.Written())
 						return
 					}
 				}
@@ -454,6 +509,9 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 					streamObserverErr = finishErr
 				}
 				if streamObserverErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && !summary.ProviderErrorSeen {
+					streamObserverErr = bindDelivery(summary)
+				}
+				if streamObserverErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && !summary.ProviderErrorSeen {
 					streamObserverErr = mergeTurnImages()
 					if streamObserverErr == nil && turn != nil {
 						images := service.MergeChatGPTImageEvidence(turn.Images, streamObserver.ImageEvidence())
@@ -465,6 +523,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 					fields := []zap.Field{
 						zap.Int64("account_id", account.ID),
 						zap.Bool("completion_seen", summary.CompletionSeen),
+						zap.Bool("async_pending", turn != nil && turn.AsyncPending),
 						zap.Bool("done_sentinel_seen", summary.DoneSentinelSeen),
 						zap.Bool("provider_error_seen", summary.ProviderErrorSeen),
 						zap.String("observed_model", summary.ObservedModel),
@@ -489,70 +548,19 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				}
 				if streamObserverErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 &&
 					summary.CompletionSeen && !summary.ProviderErrorSeen &&
+					(turn == nil || !turn.AsyncPending) &&
 					(!isResumeRequest || summary.ConversationID == resumeConversationID) {
-					imageBilling, err := service.CalculateChatGPTImageBilling(streamObserver.ImageEvidence(), imagePricesUSD)
-					if turnCache != nil && turn != nil {
-						turn, err = turnCache.SealChatGPTTurnBilling(forwardCtx, turnScope.TurnKey(turn.Identity))
-						if err == nil && turn != nil {
-							imageBilling = turn.ImageBilling
-						}
-					}
-					if err != nil || imageBilling == nil {
+					if err := h.settleChatGPTTurn(forwardCtx, turnCache, turnScope, turn, &service.OpenAIChatGPTTurnUsageInput{
+						ObservedModel: summary.ObservedModel, APIKey: apiKey, User: apiKey.User, Account: account,
+						Subscription: subscription, InboundEndpoint: c.Request.URL.Path,
+						UpstreamEndpoint: strings.TrimPrefix(c.Request.URL.Path, "/chatgpt"),
+						UserAgent:        c.GetHeader("User-Agent"), IPAddress: ip.GetClientIP(c),
+					}); err != nil && !errors.Is(err, service.ErrChatGPTTurnPending) {
 						logger.L().Error("openai.chatgpt_seal_billing_failed", zap.Error(err))
 						return
 					}
-					stickyHash := service.ChatGPTConversationSessionHash(summary.ConversationID)
-					if stickyHash != "" {
-						_ = h.gatewayService.BindStickySession(
-							c.Request.Context(), apiKey.GroupID, stickyHash, account.ID,
-						)
-					}
-					if fixedTurnBillingEnabled && (turn == nil || !turn.Completed) {
-						userAgent := c.GetHeader("User-Agent")
-						clientIP := ip.GetClientIP(c)
-						// Gin registers resume through /*subpath. Store the concrete
-						// native path so usage DTOs retain turn/unknown-token metadata.
-						inboundEndpoint := c.Request.URL.Path
-						upstreamEndpoint := strings.TrimPrefix(c.Request.URL.Path, "/chatgpt")
-						duration := time.Since(requestStart)
-						h.submitChatGPTUsageRecordTask(func(ctx context.Context) {
-							if err := h.gatewayService.RecordChatGPTTurnUsage(ctx, &service.OpenAIChatGPTTurnUsageInput{
-								BasePriceUSD:        fixedTurnPriceUSD,
-								RequestedModel:      model,
-								ObservedModel:       summary.ObservedModel,
-								ThinkingEffort:      thinkingEffort,
-								ImageGenerationSeen: summary.ImageGenerationSeen,
-								ImageCount:          imageBilling.Count,
-								ImageSize:           imageBilling.Size,
-								ImageCostUSD:        imageBilling.CostUSD,
-								RequestID:           billingIdentity.RequestID,
-								APIKey:              apiKey,
-								User:                apiKey.User,
-								Account:             account,
-								Subscription:        subscription,
-								InboundEndpoint:     inboundEndpoint,
-								UpstreamEndpoint:    upstreamEndpoint,
-								UserAgent:           userAgent,
-								IPAddress:           clientIP,
-								RequestPayloadHash:  billingIdentity.PayloadHash,
-								Duration:            duration,
-								APIKeyService:       h.apiKeyService,
-							}); err != nil {
-								logger.L().With(
-									zap.String("component", "handler.openai_gateway.chatgpt_conversation"),
-									zap.Int64("api_key_id", apiKey.ID),
-									zap.Int64("account_id", account.ID),
-								).Error("openai.chatgpt_record_turn_failed", zap.Error(err))
-								return
-							}
-							if turnCache != nil && turn != nil {
-								if err := turnCache.CompleteChatGPTTurn(ctx, turnScope.TurnKey(turn.Identity)); err != nil {
-									logger.L().Error("openai.chatgpt_complete_context_failed", zap.Error(err))
-								}
-							}
-						})
-					} else if !fixedTurnBillingEnabled && turnCache != nil && turn != nil {
-						_ = turnCache.CompleteChatGPTTurn(forwardCtx, turnScope.TurnKey(turn.Identity))
+					if stickyHash := service.ChatGPTConversationSessionHash(summary.ConversationID); stickyHash != "" {
+						_ = h.gatewayService.BindStickySession(forwardCtx, apiKey.GroupID, stickyHash, account.ID)
 					}
 				}
 			}
@@ -592,6 +600,10 @@ func (h *OpenAIGatewayHandler) ChatGPTEstuaryContent(c *gin.Context) {
 }
 
 func (h *OpenAIGatewayHandler) chatGPTAssetDownload(c *gin.Context) {
+	if h.cfg != nil && h.cfg.Gateway.OpenAIChatUpdatesEnabled {
+		h.chatGPTScopedAssetDownload(c)
+		return
+	}
 	// Estuary cid is an opaque provider asset identifier, not a conversation
 	// UUID. Preserve it in the query without inventing a conversation binding.
 	conversationID := strings.TrimSpace(c.Query("conversation_id"))

@@ -16,20 +16,32 @@ import (
 
 const ChatGPTTurnContextTTL = time.Hour
 
+var ErrChatGPTTurnPending = errors.New("native Chat turn is still pending")
+
+// Native statuses 1/2 and UNREAD (4) are quiescent. STREAMING (3),
+// REALTIME (5/6/7) and unknown states cannot establish completion.
+func ChatGPTAsyncPending(status int) bool {
+	return status != 1 && status != 2 && status != 4
+}
+
 // ChatGPTTurnSnapshot contains accounting metadata only. Message content,
 // conversation IDs, credentials and resume tokens must never be stored here.
 type ChatGPTTurnSnapshot struct {
-	Identity       ChatGPTTurnBillingIdentity
-	AccountID      int64
-	BasePriceUSD   float64
-	ImagePricesUSD map[string]float64
-	RequestedModel string
-	ThinkingEffort string
-	StartedAt      time.Time
-	Completed      bool
-	TerminalSeen   bool
-	Images         ChatGPTImageEvidence
-	ImageBilling   *ChatGPTImageBilling
+	Identity               ChatGPTTurnBillingIdentity
+	AccountID              int64
+	BasePriceUSD           float64
+	ImagePricesUSD         map[string]float64
+	RequestedModel         string
+	ThinkingEffort         string
+	StartedAt              time.Time
+	Completed              bool
+	TerminalSeen           bool
+	AsyncPending           bool
+	UserMessageHash        string
+	BillingSnapshotVersion int
+	SubscriptionID         int64
+	Images                 ChatGPTImageEvidence
+	ImageBilling           *ChatGPTImageBilling
 }
 
 // ChatGPTTurnCache is implemented by the shared Redis Gateway cache. Operations
@@ -43,6 +55,9 @@ type ChatGPTTurnCache interface {
 	MarkChatGPTTurnTerminal(context.Context, string) error
 	MergeChatGPTTurnImages(context.Context, string, ChatGPTImageEvidence) (*ChatGPTTurnSnapshot, error)
 	SealChatGPTTurnBilling(context.Context, string) (*ChatGPTTurnSnapshot, error)
+	SetChatGPTTurnAsyncStatus(context.Context, string, int) (*ChatGPTTurnSnapshot, error)
+	BindChatGPTUpdates(context.Context, string, string, string) error
+	ListChatGPTUpdateAccounts(context.Context, string) ([]int64, error)
 }
 
 type ChatGPTTurnScope struct{ UserID, APIKeyID, GroupID int64 }
@@ -60,6 +75,65 @@ func (s ChatGPTTurnScope) TurnKey(identity ChatGPTTurnBillingIdentity) string {
 func (s ChatGPTTurnScope) ResumeKey(conversationID string) string {
 	digest := sha256.Sum256([]byte(strings.TrimSpace(conversationID)))
 	return fmt.Sprintf("chatgpt:resume:{%s}:%x", s.namespace(), digest)
+}
+
+func (s ChatGPTTurnScope) UpdatesKey() string {
+	return fmt.Sprintf("chatgpt:updates:{%s}", s.namespace())
+}
+
+func (s ChatGPTTurnScope) TopicKey(topic string) string {
+	digest := sha256.Sum256([]byte(topic))
+	return fmt.Sprintf("chatgpt:topic:{%s}:%x", s.namespace(), digest)
+}
+
+func (s ChatGPTTurnScope) AssetKey(digest string) string {
+	return fmt.Sprintf("chatgpt:asset:{%s}:%s", s.namespace(), digest)
+}
+
+func ChatGPTAssetLookupHashes(fileID string) []string {
+	return []string{chatGPTImageDigest("sediment://" + fileID), chatGPTImageDigest("file-service://" + fileID), chatGPTImageDigest(fileID)}
+}
+
+func MergeChatGPTDeliveryImages(ctx context.Context, cache ChatGPTTurnCache, scope ChatGPTTurnScope, turn *ChatGPTTurnSnapshot, images ChatGPTImageEvidence) (*ChatGPTTurnSnapshot, error) {
+	updated, err := cache.MergeChatGPTTurnImages(ctx, scope.TurnKey(turn.Identity), images)
+	if err != nil {
+		return nil, err
+	}
+	if err := BindChatGPTDeliveryAssets(ctx, cache, scope, updated, updated.Images); err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+// A conversation update may replay an older branch. It establishes download
+// ownership; only a verified current-branch snapshot adds its images to a bill.
+func BindChatGPTDeliveryAssets(ctx context.Context, cache ChatGPTTurnCache, scope ChatGPTTurnScope, turn *ChatGPTTurnSnapshot, images ChatGPTImageEvidence) error {
+	for _, digest := range images.AssetHashes {
+		if err := cache.BindChatGPTResume(ctx, scope.AssetKey(digest), scope.TurnKey(turn.Identity)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ValidChatGPTUpdateTopic(topic string) bool {
+	return len(topic) <= 512 && (strings.HasPrefix(topic, "conversation-") || strings.HasPrefix(topic, "conv-turn-low-ttl-")) && ValidChatGPTMetadataValue(topic, 512)
+}
+
+func ChatGPTUserMessageHash(body []byte) string {
+	messages := gjson.GetBytes(body, "messages").Array()
+	if len(messages) == 0 {
+		return ""
+	}
+	return ChatGPTMessageIDHash(messages[len(messages)-1].Get("id").String())
+}
+
+func ChatGPTMessageIDHash(id string) string {
+	if id == "" || len(id) > 512 {
+		return ""
+	}
+	digest := sha256.Sum256([]byte("chatgpt-message-id-v1\x00" + id))
+	return hex.EncodeToString(digest[:])
 }
 
 func ChatGPTRequestMetadata(body []byte) (model, effort string) {
@@ -113,6 +187,29 @@ func (s *OpenAIGatewayService) ChatGPTTurnCache() (ChatGPTTurnCache, error) {
 // SelectChatGPTBoundAccount never fails over a resume to another provider
 // account. The owner must still be schedulable in the authenticated group.
 func (s *OpenAIGatewayService) SelectChatGPTBoundAccount(ctx context.Context, groupID *int64, ownerID int64) (*AccountSelectionResult, error) {
+	account, err := s.GetChatGPTBoundAccount(ctx, groupID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	max := account.Concurrency
+	if max < 1 {
+		max = 1
+	}
+	selection := &AccountSelectionResult{Account: account, WaitPlan: &AccountWaitPlan{MaxConcurrency: max, Timeout: 30 * time.Second, MaxWaiting: 3}}
+	if s.concurrencyService != nil {
+		acquired, err := s.concurrencyService.AcquireAccountSlot(ctx, account.ID, max)
+		if err != nil {
+			return nil, err
+		}
+		if acquired.Acquired {
+			selection.Acquired, selection.ReleaseFunc = true, acquired.ReleaseFunc
+		}
+	}
+	return selection, nil
+}
+
+// Read-only delivery checks account eligibility without holding a model slot.
+func (s *OpenAIGatewayService) GetChatGPTBoundAccount(ctx context.Context, groupID *int64, ownerID int64) (*Account, error) {
 	if s == nil || s.accountRepo == nil || groupID == nil || ownerID <= 0 {
 		return nil, ErrNoAvailableAccounts
 	}
@@ -128,21 +225,7 @@ func (s *OpenAIGatewayService) SelectChatGPTBoundAccount(ctx context.Context, gr
 		if err != nil || account == nil || account.ID != ownerID || !account.IsOpenAIOAuth() || !account.IsSchedulable() {
 			return nil, ErrNoAvailableAccounts
 		}
-		max := account.Concurrency
-		if max < 1 {
-			max = 1
-		}
-		selection := &AccountSelectionResult{Account: account, WaitPlan: &AccountWaitPlan{MaxConcurrency: max, Timeout: 30 * time.Second, MaxWaiting: 3}}
-		if s.concurrencyService != nil {
-			acquired, err := s.concurrencyService.AcquireAccountSlot(ctx, account.ID, max)
-			if err != nil {
-				return nil, err
-			}
-			if acquired.Acquired {
-				selection.Acquired, selection.ReleaseFunc = true, acquired.ReleaseFunc
-			}
-		}
-		return selection, nil
+		return account, nil
 	}
 	return nil, ErrNoAvailableAccounts
 }
@@ -169,13 +252,14 @@ func cloneChatGPTTurnSnapshot(input ChatGPTTurnSnapshot) *ChatGPTTurnSnapshot {
 }
 
 type chatGPTMemoryTurnCache struct {
-	mu      sync.Mutex
-	turns   map[string]chatGPTMemoryEntry
-	aliases map[string]chatGPTMemoryAlias
+	mu             sync.Mutex
+	turns          map[string]chatGPTMemoryEntry
+	aliases        map[string]chatGPTMemoryAlias
+	updateAccounts map[string]map[int64]time.Time
 }
 
 func NewChatGPTMemoryTurnCache() ChatGPTTurnCache {
-	return &chatGPTMemoryTurnCache{turns: make(map[string]chatGPTMemoryEntry), aliases: make(map[string]chatGPTMemoryAlias)}
+	return &chatGPTMemoryTurnCache{turns: make(map[string]chatGPTMemoryEntry), aliases: make(map[string]chatGPTMemoryAlias), updateAccounts: make(map[string]map[int64]time.Time)}
 }
 func (s *chatGPTMemoryTurnCache) cleanup() {
 	now := time.Now()
@@ -187,6 +271,16 @@ func (s *chatGPTMemoryTurnCache) cleanup() {
 	for key, alias := range s.aliases {
 		if !now.Before(alias.expires) {
 			delete(s.aliases, key)
+		}
+	}
+	for key, accounts := range s.updateAccounts {
+		for account, expiry := range accounts {
+			if !now.Before(expiry) {
+				delete(accounts, account)
+			}
+		}
+		if len(accounts) == 0 {
+			delete(s.updateAccounts, key)
 		}
 	}
 }
@@ -235,6 +329,9 @@ func (s *chatGPTMemoryTurnCache) SealChatGPTTurnBilling(_ context.Context, key s
 	if !ok {
 		return nil, errors.New("native Chat turn context expired")
 	}
+	if entry.snapshot.AsyncPending && entry.snapshot.ImageBilling == nil {
+		return nil, ErrChatGPTTurnPending
+	}
 	if entry.snapshot.ImageBilling == nil {
 		billing, err := CalculateChatGPTImageBilling(entry.snapshot.Images, entry.snapshot.ImagePricesUSD)
 		if err != nil {
@@ -246,10 +343,29 @@ func (s *chatGPTMemoryTurnCache) SealChatGPTTurnBilling(_ context.Context, key s
 	s.turns[key] = entry
 	return cloneChatGPTTurnSnapshot(entry.snapshot), nil
 }
+
+func (s *chatGPTMemoryTurnCache) SetChatGPTTurnAsyncStatus(_ context.Context, key string, status int) (*ChatGPTTurnSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanup()
+	entry, ok := s.turns[key]
+	if !ok {
+		return nil, errors.New("native Chat turn context expired")
+	}
+	if entry.snapshot.ImageBilling == nil {
+		entry.snapshot.AsyncPending = ChatGPTAsyncPending(status)
+		s.turns[key] = entry
+	}
+	return cloneChatGPTTurnSnapshot(entry.snapshot), nil
+}
 func (s *chatGPTMemoryTurnCache) BindChatGPTResume(_ context.Context, aliasKey, turnKey string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanup()
+	return s.bindResume(aliasKey, turnKey)
+}
+
+func (s *chatGPTMemoryTurnCache) bindResume(aliasKey, turnKey string) error {
 	entry, ok := s.turns[turnKey]
 	if !ok {
 		return errors.New("native Chat turn context expired")
@@ -264,6 +380,47 @@ func (s *chatGPTMemoryTurnCache) BindChatGPTResume(_ context.Context, aliasKey, 
 	}
 	s.aliases[aliasKey] = chatGPTMemoryAlias{turnKey, entry.expires}
 	return nil
+}
+
+func (s *chatGPTMemoryTurnCache) BindChatGPTUpdates(_ context.Context, aliasKey, turnKey, indexKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanup()
+	entry, ok := s.turns[turnKey]
+	if !ok {
+		return errors.New("native Chat turn context expired")
+	}
+	accounts := s.updateAccounts[indexKey]
+	if len(accounts) >= 16 {
+		if _, exists := accounts[entry.snapshot.AccountID]; !exists {
+			return errors.New("native Chat update account limit exceeded")
+		}
+	}
+	if accounts == nil && len(s.updateAccounts) >= 4096 {
+		return errors.New("native Chat update scopes are full")
+	}
+	if err := s.bindResume(aliasKey, turnKey); err != nil {
+		return err
+	}
+	if accounts == nil {
+		accounts = make(map[int64]time.Time)
+		s.updateAccounts[indexKey] = accounts
+	}
+	if entry.expires.After(accounts[entry.snapshot.AccountID]) {
+		accounts[entry.snapshot.AccountID] = entry.expires
+	}
+	return nil
+}
+
+func (s *chatGPTMemoryTurnCache) ListChatGPTUpdateAccounts(_ context.Context, indexKey string) ([]int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanup()
+	accounts := make([]int64, 0, len(s.updateAccounts[indexKey]))
+	for account := range s.updateAccounts[indexKey] {
+		accounts = append(accounts, account)
+	}
+	return accounts, nil
 }
 func (s *chatGPTMemoryTurnCache) GetChatGPTResume(_ context.Context, key string) (*ChatGPTTurnSnapshot, error) {
 	s.mu.Lock()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -13,8 +14,51 @@ import (
 var chatGPTPutTurn = redis.NewScript("redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2], 'NX'); return redis.call('GET', KEYS[1])")
 var chatGPTBindResume = redis.NewScript("local ttl = redis.call('PTTL', KEYS[2]); if ttl <= 0 then return 0 end; local old = redis.call('GET', KEYS[1]); if old and old ~= KEYS[2] then local raw = redis.call('GET', old); if raw then local prior = cjson.decode(raw); if not prior.Completed and not prior.TerminalSeen then return 0 end end end; redis.call('SET', KEYS[1], KEYS[2], 'PX', ttl); return 1")
 var chatGPTReadResume = redis.NewScript("local key = redis.call('GET', KEYS[1]); if not key then return false end; return redis.call('GET', key)")
+var chatGPTBindUpdates = redis.NewScript(`
+local ttl = redis.call('PTTL', KEYS[2])
+local raw = redis.call('GET', KEYS[2])
+if not raw or ttl <= 0 then return 0 end
+local value = cjson.decode(raw)
+local now = redis.call('TIME')
+now = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', now)
+local member = tostring(value.AccountID)
+if not redis.call('ZSCORE', KEYS[3], member) and redis.call('ZCARD', KEYS[3]) >= 16 then return 0 end
+local old = redis.call('GET', KEYS[1])
+if old and old ~= KEYS[2] then
+  local prior = redis.call('GET', old)
+  if prior then
+    prior = cjson.decode(prior)
+    if not prior.Completed and not prior.TerminalSeen then return 0 end
+  end
+end
+redis.call('SET', KEYS[1], KEYS[2], 'PX', ttl)
+local previous = tonumber(redis.call('ZSCORE', KEYS[3], member) or '0')
+redis.call('ZADD', KEYS[3], math.max(previous, now + ttl), member)
+local last = redis.call('ZREVRANGE', KEYS[3], 0, 0, 'WITHSCORES')
+redis.call('PEXPIRE', KEYS[3], math.max(1, tonumber(last[2]) - now))
+return 1
+`)
+var chatGPTListUpdateAccounts = redis.NewScript(`
+local now = redis.call('TIME')
+now = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now)
+return redis.call('ZRANGE', KEYS[1], 0, 15)
+`)
 var chatGPTCompleteTurn = redis.NewScript("local raw = redis.call('GET', KEYS[1]); local ttl = redis.call('PTTL', KEYS[1]); if not raw or ttl <= 0 then return 0 end; local value = cjson.decode(raw); value.Completed = true; redis.call('SET', KEYS[1], cjson.encode(value), 'PX', ttl); return 1")
 var chatGPTMarkTerminal = redis.NewScript("local raw = redis.call('GET', KEYS[1]); local ttl = redis.call('PTTL', KEYS[1]); if not raw or ttl <= 0 then return 0 end; local value = cjson.decode(raw); value.TerminalSeen = true; redis.call('SET', KEYS[1], cjson.encode(value), 'PX', ttl); return 1")
+var chatGPTSetAsyncStatus = redis.NewScript(`
+local raw = redis.call('GET', KEYS[1])
+local ttl = redis.call('PTTL', KEYS[1])
+if not raw or ttl <= 0 then return false end
+local value = cjson.decode(raw)
+if type(value.ImageBilling) ~= 'table' then
+  value.AsyncPending = ARGV[1] == 'true'
+  raw = cjson.encode(value)
+  redis.call('SET', KEYS[1], raw, 'PX', ttl)
+end
+return raw
+`)
 var chatGPTMergeImages = redis.NewScript(`
 local raw = redis.call('GET', KEYS[1])
 local ttl = redis.call('PTTL', KEYS[1])
@@ -64,6 +108,7 @@ local ttl = redis.call('PTTL', KEYS[1])
 if not raw or ttl <= 0 then return false end
 local value = cjson.decode(raw)
 if type(value.ImageBilling) ~= 'table' then
+  if value.AsyncPending then return 'pending' end
   local images = type(value.Images) == 'table' and value.Images or {}
   local expected = cjson.decode(ARGV[1])
   local hashes = type(images.AssetHashes) == 'table' and images.AssetHashes or {}
@@ -136,6 +181,33 @@ func (c *gatewayCache) GetChatGPTResume(ctx context.Context, key string) (*servi
 	return decodeChatGPTTurn(raw, err)
 }
 
+func (c *gatewayCache) BindChatGPTUpdates(ctx context.Context, aliasKey, turnKey, indexKey string) error {
+	ok, err := chatGPTBindUpdates.Run(ctx, c.rdb, []string{aliasKey, turnKey, indexKey}).Int()
+	if err != nil {
+		return err
+	}
+	if ok != 1 {
+		return errors.New("native Chat update context expired, full or conflicts")
+	}
+	return nil
+}
+
+func (c *gatewayCache) ListChatGPTUpdateAccounts(ctx context.Context, key string) ([]int64, error) {
+	values, err := chatGPTListUpdateAccounts.Run(ctx, c.rdb, []string{key}).StringSlice()
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(values))
+	for _, value := range values {
+		id, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || id <= 0 {
+			return nil, errors.New("invalid native Chat update owner")
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 func (c *gatewayCache) CompleteChatGPTTurn(ctx context.Context, key string) error {
 	ok, err := chatGPTCompleteTurn.Run(ctx, c.rdb, []string{key}).Int()
 	if err != nil {
@@ -191,6 +263,9 @@ func (c *gatewayCache) SealChatGPTTurnBilling(ctx context.Context, key string) (
 			return nil, err
 		}
 		result, err := chatGPTSealBilling.Run(ctx, c.rdb, []string{key}, string(imagesJSON), string(billingJSON)).Text()
+		if err == nil && result == "pending" {
+			return nil, service.ErrChatGPTTurnPending
+		}
 		if err == nil && result == "retry" {
 			continue
 		}
@@ -201,4 +276,17 @@ func (c *gatewayCache) SealChatGPTTurnBilling(ctx context.Context, key string) (
 		return sealed, err
 	}
 	return nil, errors.New("native Chat image evidence changed while sealing billing")
+}
+
+func (c *gatewayCache) SetChatGPTTurnAsyncStatus(ctx context.Context, key string, status int) (*service.ChatGPTTurnSnapshot, error) {
+	pending := "false"
+	if service.ChatGPTAsyncPending(status) {
+		pending = "true"
+	}
+	raw, err := chatGPTSetAsyncStatus.Run(ctx, c.rdb, []string{key}, pending).Text()
+	snapshot, err := decodeChatGPTTurn(raw, err)
+	if err == nil && snapshot == nil {
+		return nil, errors.New("native Chat turn context expired")
+	}
+	return snapshot, err
 }

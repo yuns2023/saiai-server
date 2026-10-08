@@ -182,7 +182,15 @@ of these signals:
 - the upstream HTTP status is 2xx;
 - the bounded SSE observer finishes without an error;
 - `message_stream_complete` is present with the expected conversation ID; and
-- no provider error event was observed.
+- no provider error event was observed; and
+- no unresolved native async work remains. A stream terminal with active,
+  malformed or unknown async state is not a completed user turn.
+
+The experimental background-delivery candidate preserves pending state across
+delivery legs and can verify completion from an owned current conversation
+snapshot. See [the native updates contract](CHATGPT_NATIVE_UPDATES_CONTRACT.md)
+for the feature gate, isolation, intentional delivery transformations and
+remaining official-client acceptance boundary.
 
 An initial `resume_conversation_token` or `stream_handoff` with a conversation
 ID establishes delivery ownership before its chunk is flushed to Desktop.

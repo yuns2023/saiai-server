@@ -3030,6 +3030,25 @@ func (s *OpenAIGatewayService) ForwardChatGPTControl(
 	return observeChatGPTUpstreamResult(c, account, resp, err, started)
 }
 
+// Gateway-owned delivery reads require a bounded JSON observer. They carry no
+// generation input and explicitly request identity encoding. Client-emitted
+// native requests continue through ForwardChatGPTControl unchanged.
+func (s *OpenAIGatewayService) ForwardChatGPTDeliveryControl(ctx context.Context, c *gin.Context, account *Account, path string) (*http.Response, error) {
+	req, proxyURL, err := s.BuildChatGPTControlRequest(ctx, c, account, path)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept-Encoding", "identity")
+	for name := range req.Header {
+		if strings.HasPrefix(strings.ToLower(name), "sec-websocket-") {
+			req.Header.Del(name)
+		}
+	}
+	started := time.Now()
+	resp, err := s.doOpenAIUpstream(req, proxyURL, account.ID, account.Concurrency)
+	return observeChatGPTUpstreamResult(c, account, resp, err, started)
+}
+
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
 	nativeRelay := account != nil && account.IsOpenAICodexNativeRelay()
 	// Determine target URL based on account type

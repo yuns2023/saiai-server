@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -186,7 +187,11 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// ── 5. 加载订阅（订阅模式时始终加载） ───────────────────────
 
 		// skipBilling: /v1/usage 只需鉴权，跳过所有计费执行
-		skipBilling := isUsageLookup
+		skipBilling := isUsageLookup || isNativeChatDeliveryLookup(c, cfg)
+		if !isUsageLookup && skipBilling && (apiKey.Status == service.StatusAPIKeyExpired || apiKey.IsExpired()) {
+			AbortWithError(c, 403, "API_KEY_EXPIRED", "API key 已过期")
+			return
+		}
 
 		var subscription *service.UserSubscription
 		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
@@ -271,6 +276,29 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		c.Next()
 	}
+}
+
+// Delivering an admitted turn must remain possible after its debit exhausts
+// balance/quota. Normal authentication, user/IP checks and the handler's
+// user/Key/group/owner checks still apply. Never exempt generation endpoints.
+func isNativeChatDeliveryLookup(c *gin.Context, cfg *config.Config) bool {
+	if cfg == nil || !cfg.Gateway.OpenAIChatEnabled || !cfg.Gateway.OpenAIChatUpdatesEnabled {
+		return false
+	}
+	if c.Request.Method == http.MethodPost {
+		return c.Request.URL.Path == "/chatgpt/backend-api/f/conversation/resume"
+	}
+	if c.Request.Method != http.MethodGet {
+		return false
+	}
+	switch c.FullPath() {
+	case "/chatgpt/backend-api/celsius/ws/user", "/chatgpt/backend-api/saiai/chat-updates",
+		"/chatgpt/backend-api/conversation/:conversation_id", "/chatgpt/backend-api/conversations/:conversation_id",
+		"/chatgpt/backend-api/conversations/:conversation_id/messages", "/chatgpt/backend-api/files/download/:file_id",
+		"/chatgpt/backend-api/estuary/content":
+		return true
+	}
+	return false
 }
 
 // GetAPIKeyFromContext 从上下文中获取API key

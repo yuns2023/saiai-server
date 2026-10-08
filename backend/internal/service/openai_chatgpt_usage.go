@@ -81,6 +81,9 @@ type ChatGPTConversationStreamSummary struct {
 	DoneSentinelSeen      bool
 	ProviderErrorSeen     bool
 	HandoffSeen           bool
+	AsyncStatusSeen       bool
+	AsyncStatus           int
+	UpdateTopics          []string
 	ImageGenerationSeen   bool
 	ImageCount            int
 	EventTypes            []string
@@ -273,8 +276,13 @@ func (o *ChatGPTConversationStreamObserver) dispatchEvent() error {
 	var event struct {
 		Type           string          `json:"type"`
 		ConversationID string          `json:"conversation_id"`
-		Error          json.RawMessage `json:"error"`
-		Message        *struct {
+		AsyncStatus    json.RawMessage `json:"async_status"`
+		Options        []struct {
+			Type    string `json:"type"`
+			TopicID string `json:"topic_id"`
+		} `json:"options"`
+		Error   json.RawMessage `json:"error"`
+		Message *struct {
 			Author *struct {
 				Role string `json:"role"`
 			} `json:"author"`
@@ -288,6 +296,9 @@ func (o *ChatGPTConversationStreamObserver) dispatchEvent() error {
 		o.eventTypes[event.Type] = struct{}{}
 	}
 	if conversationID := strings.TrimSpace(event.ConversationID); conversationID != "" {
+		if o.summary.ConversationID != "" && o.summary.ConversationID != conversationID {
+			return errors.New("native Chat delivery conversation identity changed")
+		}
 		o.summary.ConversationID = conversationID
 		if event.Type == "message_stream_complete" {
 			o.summary.CompletionSeen = true
@@ -295,6 +306,23 @@ func (o *ChatGPTConversationStreamObserver) dispatchEvent() error {
 	}
 	if event.Type == "stream_handoff" || event.Type == "resume_conversation_token" {
 		o.summary.HandoffSeen = true
+	}
+	if event.Type == "conversation_async_status" {
+		o.summary.AsyncStatusSeen = true
+		// Unknown, malformed and future states remain pending. They must not
+		// silently acquire the old synchronous completion semantics.
+		o.summary.AsyncStatus = -1
+		var status int
+		if json.Unmarshal(event.AsyncStatus, &status) == nil && status >= 1 && status <= 7 {
+			o.summary.AsyncStatus = status
+		}
+	}
+	if event.Type == "stream_handoff" {
+		for _, option := range event.Options {
+			if option.Type == "subscribe_ws_topic" && ValidChatGPTUpdateTopic(option.TopicID) && len(o.summary.UpdateTopics) < 16 {
+				o.summary.UpdateTopics = append(o.summary.UpdateTopics, option.TopicID)
+			}
+		}
 	}
 	if event.Message != nil && event.Message.Metadata != nil {
 		role := ""
@@ -345,13 +373,17 @@ func (o *ChatGPTConversationStreamObserver) ImageEvidence() ChatGPTImageEvidence
 	if o == nil {
 		return ChatGPTImageEvidence{}
 	}
-	evidence := ChatGPTImageEvidence{GenerationSeen: o.images.seen}
-	for digest := range o.images.assets {
+	return o.images.evidence()
+}
+
+func (o *chatGPTImageObserver) evidence() ChatGPTImageEvidence {
+	evidence := ChatGPTImageEvidence{GenerationSeen: o.seen}
+	for digest := range o.assets {
 		evidence.AssetHashes = append(evidence.AssetHashes, digest)
 	}
 	sort.Strings(evidence.AssetHashes)
 	for _, digest := range evidence.AssetHashes {
-		evidence.AssetSizes = append(evidence.AssetSizes, o.images.sizes[digest])
+		evidence.AssetSizes = append(evidence.AssetSizes, o.sizes[digest])
 	}
 	return evidence
 }

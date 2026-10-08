@@ -379,6 +379,8 @@ type GatewayConfig struct {
 	// OpenAIChatEnabled enables the experimental native ChatGPT conversation
 	// protocol ingress. It is disabled by default until staging verification.
 	OpenAIChatEnabled bool `mapstructure:"openai_chat_enabled"`
+	// Requires a compatible local proxy and scoped conversation ownership.
+	OpenAIChatUpdatesEnabled bool `mapstructure:"openai_chat_updates_enabled"`
 	// OpenAIChatUpstreamBaseURL overrides the native ChatGPT origin for an
 	// isolated replay/fake provider. Empty means https://chatgpt.com.
 	OpenAIChatUpstreamBaseURL string `mapstructure:"openai_chat_upstream_base_url"`
@@ -1408,6 +1410,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_provider_attempt_budget.max_attempts", 0)
 	viper.SetDefault("gateway.openai_provider_attempt_budget.expires_at", "")
 	viper.SetDefault("gateway.openai_chat_enabled", false)
+	viper.SetDefault("gateway.openai_chat_updates_enabled", false)
 	viper.SetDefault("gateway.openai_chat_upstream_base_url", "")
 	viper.SetDefault("gateway.openai_chat_model_request_cap", 0)
 	viper.SetDefault("gateway.openai_chat_unaccounted_allowed", false)

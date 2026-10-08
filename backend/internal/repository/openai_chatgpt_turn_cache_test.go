@@ -89,3 +89,63 @@ func TestNativeChatImageBillingRedisSealsConcurrentReplaysAndRetainsTTL(t *testi
 	require.False(t, pending.TerminalSeen)
 	require.Nil(t, pending.ImageBilling)
 }
+
+func TestNativeChatRedisPendingSealAndScopedUpdateOwnership(t *testing.T) {
+	socket := os.Getenv("SAIAI_TEST_REDIS_SOCKET")
+	if socket == "" {
+		t.Skip("disposable Redis socket not supplied")
+	}
+	require.True(t, filepath.IsAbs(socket))
+	ctx := context.Background()
+	rdb := redis.NewClient(&redis.Options{Network: "unix", Addr: socket, DialTimeout: 3 * time.Second})
+	t.Cleanup(func() { _ = rdb.Close() })
+	require.NoError(t, rdb.Ping(ctx).Err())
+	cache := &gatewayCache{rdb: rdb}
+	scope := service.ChatGPTTurnScope{UserID: time.Now().UnixNano(), APIKeyID: 2, GroupID: 3}
+	turn := &service.ChatGPTTurnSnapshot{Identity: service.ChatGPTTurnBillingIdentity{RequestID: uuid.NewString(), PayloadHash: "TEST_ONLY"}, AccountID: 11, BasePriceUSD: .03, StartedAt: time.Now()}
+	key, alias, index := scope.TurnKey(turn.Identity), scope.ResumeKey("PRIVATE_CONVERSATION"), scope.UpdatesKey()
+	t.Cleanup(func() { _ = rdb.Del(ctx, key, alias, index).Err() })
+	_, err := cache.PutChatGPTTurnIfAbsent(ctx, key, turn, time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, cache.BindChatGPTUpdates(ctx, alias, key, index))
+	ttl := rdb.PTTL(ctx, key).Val()
+	ids, err := cache.ListChatGPTUpdateAccounts(ctx, index)
+	require.NoError(t, err)
+	require.Equal(t, []int64{11}, ids)
+	for _, other := range []service.ChatGPTTurnScope{{scope.UserID + 1, 2, 3}, {scope.UserID, 3, 3}, {scope.UserID, 2, 4}} {
+		missing, err := cache.GetChatGPTResume(ctx, other.ResumeKey("PRIVATE_CONVERSATION"))
+		require.NoError(t, err)
+		require.Nil(t, missing)
+		ids, err := cache.ListChatGPTUpdateAccounts(ctx, other.UpdatesKey())
+		require.NoError(t, err)
+		require.Empty(t, ids)
+	}
+	stale, err := cache.GetChatGPTTurn(ctx, key)
+	require.NoError(t, err)
+	_, err = cache.SetChatGPTTurnAsyncStatus(ctx, key, 3)
+	require.NoError(t, err)
+	images, err := json.Marshal(stale.Images)
+	require.NoError(t, err)
+	result, err := chatGPTSealBilling.Run(ctx, rdb, []string{key}, string(images), `{"Count":0,"Size":"","CostUSD":0}`).Text()
+	require.NoError(t, err)
+	require.Equal(t, "pending", result, "a stale reader must not seal after active work was observed")
+	_, err = cache.SealChatGPTTurnBilling(ctx, key)
+	require.ErrorIs(t, err, service.ErrChatGPTTurnPending)
+	pending, err := cache.GetChatGPTTurn(ctx, key)
+	require.NoError(t, err)
+	require.False(t, pending.TerminalSeen)
+	require.Nil(t, pending.ImageBilling)
+	_, err = cache.SetChatGPTTurnAsyncStatus(ctx, key, 4)
+	require.NoError(t, err)
+	sealed, err := cache.SealChatGPTTurnBilling(ctx, key)
+	require.NoError(t, err)
+	require.True(t, sealed.TerminalSeen)
+	late, err := cache.SetChatGPTTurnAsyncStatus(ctx, key, 3)
+	require.NoError(t, err)
+	require.False(t, late.AsyncPending)
+	require.LessOrEqual(t, rdb.PTTL(ctx, key).Val(), ttl)
+	require.LessOrEqual(t, rdb.PTTL(ctx, index).Val(), ttl)
+	raw, err := rdb.Get(ctx, key).Result()
+	require.NoError(t, err)
+	require.NotContains(t, raw, "PRIVATE_CONVERSATION")
+}
