@@ -435,6 +435,27 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				)
 			},
 			OnTurnComplete: func(turn openaiwsv2.RelayTurnResult) {
+				if turn.Failure != nil {
+					// Error metadata is persisted independently of the unchanged
+					// frame. Remove the selected credential even when it is opaque
+					// and would not match the general log redactor's patterns.
+					redactCredential := func(value string) string {
+						return strings.ReplaceAll(value, token, "[REDACTED]")
+					}
+					failure := &OpenAIWSUpstreamFailure{
+						Turn: turn.Turn, AccountID: account.ID, Model: turn.RequestModel,
+						ResponseID: redactCredential(turn.RequestID), EventType: turn.TerminalEventType,
+						Status: turn.Failure.Status, ErrorType: redactCredential(turn.Failure.ErrorType),
+						Code: redactCredential(turn.Failure.Code), Message: ClientSafeUpstreamErrorMessage(redactCredential(turn.Failure.Message)),
+					}
+					if hooks != nil && hooks.OnUpstreamError != nil {
+						hooks.OnUpstreamError(failure)
+					}
+					if hooks != nil && hooks.AfterTurn != nil {
+						hooks.AfterTurn(turn.Turn, nil, failure)
+					}
+					return
+				}
 				completionNo := int(completedTurns.Add(1))
 				turnNo := turn.Turn
 				if turnNo <= 0 {
@@ -540,10 +561,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			relayResult.DroppedDownstreamFrames,
 			turnCount,
 		)
-		// 正常路径按 terminal 事件逐 turn 已回调；仅在零 turn 场景兜底回调一次。
-		if turnCount == 0 && hooks != nil && hooks.AfterTurn != nil {
-			hooks.AfterTurn(1, result, nil)
-		}
+		// Only observed successful terminal events may produce usage. An error
+		// frame or an empty/gracefully closed connection is not a model success.
 		return nil
 	}
 	logOpenAIWSV2Passthrough(

@@ -1820,11 +1820,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 	hooks := &service.OpenAIWSIngressHooks{
 		OnClientTurn: func(turn int, rawPayload []byte) error {
+			opsWSStartTurn(c, turn)
 			policyPayload := rawPayload
 			if turn == 1 && preflightContinuationMigrated {
 				policyPayload = originalFirstMessage
 			}
 			turnModel := strings.TrimSpace(gjson.GetBytes(policyPayload, "model").String())
+			c.Set(opsModelKey, turnModel)
 			if apiKey.Group != nil && apiKey.Group.IsModelBlocked(turnModel) {
 				return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("model %s is not allowed for this group", turnModel), nil)
 			}
@@ -1871,6 +1873,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			if turnErr != nil || result == nil {
 				return
 			}
+			opsWSSuccessfulTurn(c, turn)
 			turnAccount := account
 			if turnAccount.Type == service.AccountTypeOAuth {
 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(ctx, turnAccount.ID, result.ResponseHeaders)
@@ -1902,6 +1905,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					)
 				}
 			})
+		},
+		OnUpstreamError: func(failure *service.OpenAIWSUpstreamFailure) {
+			recordOpenAIWSUpstreamFailure(c, failure)
 		},
 		OnAccountExhausted: func(failure *service.OpenAIWSAccountFailoverError) (*service.OpenAIWSFailoverTarget, error) {
 			if failure == nil || failure.AccountID() <= 0 {

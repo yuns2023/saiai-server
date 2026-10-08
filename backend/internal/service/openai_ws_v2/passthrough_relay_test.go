@@ -538,7 +538,7 @@ func TestRelay_MultipleUpstreamMessages(t *testing.T) {
 func TestRelay_OnTurnComplete_PerTerminalEvent(t *testing.T) {
 	t.Parallel()
 
-	clientConn := newPassthroughTestFrameConn(nil, false)
+	clientConn := newPassthroughTestFrameConn([]passthroughTestFrame{{msgType: coderws.MessageText, payload: []byte(`{"type":"response.create","model":"second-model"}`)}}, false)
 	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
 		{
 			msgType: coderws.MessageText,
@@ -555,7 +555,7 @@ func TestRelay_OnTurnComplete_PerTerminalEvent(t *testing.T) {
 	defer cancel()
 
 	turns := make([]RelayTurnResult, 0, 2)
-	result, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{
+	result, relayExit := Relay(ctx, clientConn, &delayedReadFrameConn{base: upstreamConn, firstDelay: 20 * time.Millisecond}, firstPayload, RelayOptions{
 		OnTurnComplete: func(turn RelayTurnResult) {
 			turns = append(turns, turn)
 		},
@@ -568,6 +568,7 @@ func TestRelay_OnTurnComplete_PerTerminalEvent(t *testing.T) {
 	require.Equal(t, 1, turns[0].Usage.OutputTokens)
 	require.Equal(t, "resp_turn_2", turns[1].RequestID)
 	require.Equal(t, "response.failed", turns[1].TerminalEventType)
+	require.NotNil(t, turns[1].Failure)
 	require.Equal(t, 3, turns[1].Usage.InputTokens)
 	require.Equal(t, 4, turns[1].Usage.OutputTokens)
 	require.Equal(t, 5, result.Usage.InputTokens)

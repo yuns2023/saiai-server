@@ -707,6 +707,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			releaseOpsCaptureWriter(w)
 		}()
 		c.Writer = w
+		c.Set(opsWSRecorderKey, &opsWSFailureRecorder{ops: ops})
 		c.Next()
 
 		if ops == nil {

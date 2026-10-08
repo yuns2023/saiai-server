@@ -174,7 +174,7 @@ function getErrorOriginLabel(row: OpsRequestDetail): string {
   const source = String(row.error_source || '').toLowerCase()
   const phase = String(row.phase || '').toLowerCase()
 
-  if (owner === 'provider' || source === 'upstream_http') {
+  if (owner === 'provider' || source === 'upstream_http' || source === 'upstream_ws') {
     return t('admin.ops.requestDetails.origin.provider')
   }
   if (owner === 'platform' || source === 'gateway') {
@@ -202,6 +202,9 @@ function getErrorOriginDetail(row: OpsRequestDetail): string {
 
   if (source === 'upstream_http') {
     return t('admin.ops.requestDetails.originDetail.upstream_http')
+  }
+  if (source === 'upstream_ws') {
+    return t('admin.ops.requestDetails.originDetail.upstream_ws')
   }
   if (source === 'gateway') {
     return t('admin.ops.requestDetails.originDetail.gateway')
@@ -302,6 +305,9 @@ function getAPIKeyTitle(row: OpsRequestDetail): string {
                     {{ t('admin.ops.requestDetails.table.origin') }}
                   </th>
                   <th class="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    {{ t('admin.ops.requestDetails.table.message') }}
+                  </th>
+                  <th class="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                     {{ t('admin.ops.requestDetails.table.requestId') }}
                   </th>
                   <th class="px-4 py-3 text-right text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
@@ -346,6 +352,10 @@ function getAPIKeyTitle(row: OpsRequestDetail): string {
                         {{ getErrorOriginDetail(row) }}
                       </span>
                     </div>
+                    <span v-else>-</span>
+                  </td>
+                  <td class="max-w-[280px] px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
+                    <span v-if="row.kind === 'error' && row.message" class="line-clamp-2 break-words" :title="row.message">{{ row.message }}</span>
                     <span v-else>-</span>
                   </td>
                   <td class="px-4 py-3">

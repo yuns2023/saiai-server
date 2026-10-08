@@ -225,8 +225,23 @@ type OpenAIWSIngressHooks struct {
 	OnClientTurn       func(turn int, rawPayload []byte) error
 	BeforeTurn         func(turn int) error
 	AfterTurn          func(turn int, result *OpenAIForwardResult, turnErr error)
+	OnUpstreamError    func(failure *OpenAIWSUpstreamFailure)
 	OnAccountExhausted func(failure *OpenAIWSAccountFailoverError) (*OpenAIWSFailoverTarget, error)
 }
+
+type OpenAIWSUpstreamFailure struct {
+	Turn       int
+	AccountID  int64
+	Model      string
+	ResponseID string
+	EventType  string
+	Status     int
+	ErrorType  string
+	Code       string
+	Message    string
+}
+
+func (e *OpenAIWSUpstreamFailure) Error() string { return e.Message }
 
 func normalizeOpenAIWSLogValue(value string) string {
 	trimmed := strings.TrimSpace(value)

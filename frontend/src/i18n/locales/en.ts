@@ -3807,6 +3807,7 @@ export default {
         },
         originDetail: {
           upstream_http: 'Upstream HTTP',
+          upstream_ws: 'Upstream WebSocket error frame',
           gateway: 'Gateway',
           client_request: 'Client Request',
           phaseDerived: 'Derived from phase: {phase}'
@@ -3820,6 +3821,7 @@ export default {
           duration: 'Duration',
           status: 'Status',
           origin: 'Error Origin',
+          message: 'Error Reason',
           requestId: 'Request ID',
           actions: 'Actions'
         }
