@@ -7,14 +7,28 @@ import (
 
 const MaxChatGPTConversationSnapshotBytes = 8 * 1024 * 1024
 
-// InspectChatGPTConversationSnapshot verifies the current completed branch,
-// not an arbitrary historical assistant response. Only metadata and image
-// digests escape this function; callers relay the original JSON bytes.
+// ChatGPTSnapshotInspection separates file ownership from billable completion.
+// Outcome is a fixed diagnostic enum. No pointers or message content escape.
+type ChatGPTSnapshotInspection struct {
+	Summary        ChatGPTConversationStreamSummary
+	Images         ChatGPTImageEvidence
+	DeliveryImages ChatGPTImageEvidence
+	Completed      bool
+	Outcome        string
+}
+
 func InspectChatGPTConversationSnapshot(raw []byte, conversationID, userMessageHash string) (ChatGPTConversationStreamSummary, ChatGPTImageEvidence, bool, error) {
-	var summary ChatGPTConversationStreamSummary
-	var images chatGPTImageObserver
+	result, err := InspectChatGPTConversationDelivery(raw, conversationID, userMessageHash)
+	return result.Summary, result.Images, result.Completed, err
+}
+
+// InspectChatGPTConversationDelivery verifies the current branch against the
+// original user-message digest before exposing any asset ownership. Preview
+// delivery does not establish successful completion or add images to a bill.
+func InspectChatGPTConversationDelivery(raw []byte, conversationID, userMessageHash string) (ChatGPTSnapshotInspection, error) {
+	result := ChatGPTSnapshotInspection{Outcome: "invalid_snapshot"}
 	if len(raw) > MaxChatGPTConversationSnapshotBytes || userMessageHash == "" {
-		return summary, images.evidence(), false, errors.New("native Chat snapshot cannot establish turn ownership")
+		return result, errors.New("native Chat snapshot cannot establish turn ownership")
 	}
 	var snapshot struct {
 		ID             string `json:"id"`
@@ -27,21 +41,21 @@ func InspectChatGPTConversationSnapshot(raw []byte, conversationID, userMessageH
 		} `json:"mapping"`
 	}
 	if json.Unmarshal(raw, &snapshot) != nil || len(snapshot.Mapping) > 4096 {
-		return summary, images.evidence(), false, errors.New("invalid native Chat snapshot")
+		return result, errors.New("invalid native Chat snapshot")
 	}
 	if (snapshot.ID != "" && snapshot.ID != conversationID) ||
 		(snapshot.ConversationID != "" && snapshot.ConversationID != conversationID) ||
 		(snapshot.ID == "" && snapshot.ConversationID == "") {
-		return summary, images.evidence(), false, errors.New("native Chat snapshot identity mismatch")
+		return result, errors.New("native Chat snapshot identity mismatch")
 	}
-	summary.ConversationID = conversationID
-	if snapshot.AsyncStatus == nil || ChatGPTAsyncPending(*snapshot.AsyncStatus) {
-		return summary, images.evidence(), false, nil
+	result.Summary.ConversationID = conversationID
+	if snapshot.AsyncStatus != nil {
+		result.Summary.AsyncStatusSeen, result.Summary.AsyncStatus = true, *snapshot.AsyncStatus
 	}
-	summary.AsyncStatusSeen, summary.AsyncStatus = true, *snapshot.AsyncStatus
 	branch := make([]json.RawMessage, 0, 16)
 	visited := make(map[string]bool)
 	id := snapshot.CurrentNode
+	leafAssistant, leafImageTool := false, false
 	for len(branch) < 256 && id != "" && !visited[id] {
 		visited[id] = true
 		node, exists := snapshot.Mapping[id]
@@ -52,6 +66,7 @@ func InspectChatGPTConversationSnapshot(raw []byte, conversationID, userMessageH
 			ID     string `json:"id"`
 			Author struct {
 				Role string `json:"role"`
+				Name string `json:"name"`
 			} `json:"author"`
 			Status   string `json:"status"`
 			EndTurn  *bool  `json:"end_turn"`
@@ -63,26 +78,50 @@ func InspectChatGPTConversationSnapshot(raw []byte, conversationID, userMessageH
 		if json.Unmarshal(node.Message, &message) != nil || message.ID != id {
 			break
 		}
-		if len(branch) == 0 && (message.Author.Role != "assistant" || message.Status != "finished_successfully" || message.EndTurn == nil || !*message.EndTurn || message.Metadata.IsError) {
-			return summary, images.evidence(), false, nil
+		if message.Metadata.IsError || message.Status == "finished_failed" {
+			result.Outcome = "failed_message"
+			return result, nil
+		}
+		if len(branch) == 0 {
+			leafAssistant = message.Author.Role == "assistant" && message.Status == "finished_successfully" && message.EndTurn != nil && *message.EndTurn
+			leafImageTool = message.Author.Role == "tool" && chatGPTImageTool(message.Author.Name) && message.Status == "finished_successfully"
 		}
 		if message.Author.Role == "user" {
 			if ChatGPTMessageIDHash(message.ID) != userMessageHash {
 				break
 			}
+			var images chatGPTImageObserver
+			delivery := chatGPTImageObserver{deliveryOnly: true}
 			for i := len(branch) - 1; i >= 0; i-- {
 				images.observeMessage(branch[i])
+				delivery.observeMessage(branch[i])
 			}
-			evidence := images.evidence()
-			summary.CompletionSeen = true
-			summary.ImageGenerationSeen, summary.ImageCount = evidence.GenerationSeen, len(evidence.AssetHashes)
-			return summary, evidence, true, nil
+			result.Images, result.DeliveryImages = images.evidence(), delivery.evidence()
+			result.Summary.ImageGenerationSeen, result.Summary.ImageCount = result.Images.GenerationSeen, len(result.Images.AssetHashes)
+			result.Outcome = "async_pending"
+			if snapshot.AsyncStatus == nil || ChatGPTAsyncPending(*snapshot.AsyncStatus) {
+				return result, nil
+			}
+			result.Outcome = "leaf_not_terminal"
+			// Native image turns may end at the image tool itself. Require an
+			// inactive provider state and a completed image on that leaf; an
+			// older ancestor image or an arbitrary tool is insufficient.
+			var leafImages chatGPTImageObserver
+			if leafImageTool && len(branch) > 0 {
+				leafImages.observeMessage(branch[0])
+			}
+			if !leafAssistant && len(leafImages.evidence().AssetHashes) == 0 {
+				return result, nil
+			}
+			result.Completed, result.Summary.CompletionSeen = true, true
+			result.Outcome = "completed_assistant"
+			if !leafAssistant {
+				result.Outcome = "completed_image_tool"
+			}
+			return result, nil
 		}
-		if message.Metadata.IsError || message.Status == "finished_failed" {
-			return summary, images.evidence(), false, nil
-		}
-		if summary.ObservedModel == "" && message.Author.Role == "assistant" && ValidChatGPTMetadataValue(message.Metadata.ModelSlug, 100) {
-			summary.ObservedModel = message.Metadata.ModelSlug
+		if result.Summary.ObservedModel == "" && message.Author.Role == "assistant" && ValidChatGPTMetadataValue(message.Metadata.ModelSlug, 100) {
+			result.Summary.ObservedModel = message.Metadata.ModelSlug
 		}
 		branch = append(branch, node.Message)
 		if node.Parent == nil {
@@ -90,5 +129,6 @@ func InspectChatGPTConversationSnapshot(raw []byte, conversationID, userMessageH
 		}
 		id = *node.Parent
 	}
-	return summary, images.evidence(), false, errors.New("native Chat snapshot branch does not belong to the pending message")
+	result.Outcome = "branch_not_owned"
+	return result, errors.New("native Chat snapshot branch does not belong to the pending message")
 }

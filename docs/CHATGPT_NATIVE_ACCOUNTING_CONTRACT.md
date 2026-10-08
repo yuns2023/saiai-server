@@ -187,8 +187,10 @@ of these signals:
   malformed or unknown async state is not a completed user turn.
 
 The experimental background-delivery candidate preserves pending state across
-delivery legs and can verify completion from an owned current conversation
-snapshot. See [the native updates contract](CHATGPT_NATIVE_UPDATES_CONTRACT.md)
+delivery legs and requires an owned current conversation snapshot before
+settlement. An HTTP terminal or resume token alone cannot establish completion
+in this mode. Download ownership for observed previews remains separate from
+completed-image billing. See [the native updates contract](CHATGPT_NATIVE_UPDATES_CONTRACT.md)
 for the feature gate, isolation, intentional delivery transformations and
 remaining official-client acceptance boundary.
 

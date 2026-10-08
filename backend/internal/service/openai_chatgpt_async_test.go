@@ -26,6 +26,14 @@ func TestChatGPTHandoffWithoutAsyncStatusDefersCompletion(t *testing.T) {
 	}
 }
 
+func TestChatGPTResumeTokenDoesNotEstablishHandoffOrCompletion(t *testing.T) {
+	o := NewChatGPTConversationStreamObserver()
+	require.NoError(t, o.Observe([]byte("data: {\"type\":\"resume_conversation_token\",\"conversation_id\":\"TEST_ONLY\",\"token\":\"TEST_ONLY_SECRET\"}\n\n")))
+	require.False(t, o.Snapshot().HandoffSeen)
+	require.False(t, o.Snapshot().CompletionSeen)
+	require.False(t, o.Snapshot().AsyncStatusSeen)
+}
+
 func TestChatGPTUpdateFailureDiagnosticsDoNotExposeTransportErrors(t *testing.T) {
 	require.Equal(t, "unknown", ChatGPTUpdatesFailureStage(errors.New("dial wss://ws.chatgpt.com/?access_token=TEST_ONLY_SECRET")))
 	require.Equal(t, "websocket_dial", ChatGPTUpdatesFailureStage(errors.New("native Chat updates transport failed")))
@@ -86,6 +94,46 @@ func TestChatGPTSnapshotRequiresCurrentOwnedCompletedBranch(t *testing.T) {
 	} {
 		_, _, complete, _ := InspectChatGPTConversationSnapshot([]byte(strings.ReplaceAll(chatGPTCompletedSnapshotFixture, change.old, change.next)), "TEST_ONLY_CONVERSATION", ChatGPTMessageIDHash("user"))
 		require.False(t, complete, change.old)
+	}
+}
+
+func TestChatGPTSnapshotDeliveryPrecedesBillingAndSupportsFinalImageTool(t *testing.T) {
+	fixture := strings.Replace(chatGPTCompletedSnapshotFixture, `"current_node":"final"`, `"current_node":"image"`, 1)
+	for _, status := range []string{"3", "5", "null", "99"} {
+		raw := strings.Replace(fixture, `"async_status":4`, `"async_status":`+status, 1)
+		result, err := InspectChatGPTConversationDelivery([]byte(raw), "TEST_ONLY_CONVERSATION", ChatGPTMessageIDHash("user"))
+		require.NoError(t, err)
+		require.False(t, result.Completed)
+		require.Len(t, result.DeliveryImages.AssetHashes, 1)
+	}
+	result, err := InspectChatGPTConversationDelivery([]byte(fixture), "TEST_ONLY_CONVERSATION", ChatGPTMessageIDHash("user"))
+	require.NoError(t, err)
+	require.True(t, result.Completed)
+	require.Equal(t, "completed_image_tool", result.Outcome)
+	require.Len(t, result.Images.AssetHashes, 1)
+	preview := strings.ReplaceAll(strings.Replace(fixture, `"async_status":4`, `"async_status":5`, 1), `"status":"finished_successfully"`, `"status":"in_progress"`)
+	result, err = InspectChatGPTConversationDelivery([]byte(preview), "TEST_ONLY_CONVERSATION", ChatGPTMessageIDHash("user"))
+	require.NoError(t, err)
+	require.False(t, result.Completed)
+	require.Empty(t, result.Images.AssetHashes)
+	require.Len(t, result.DeliveryImages.AssetHashes, 1)
+	for _, raw := range []string{
+		strings.Replace(preview, `"parent":"user"`, `"parent":"old"`, 1),
+		strings.Replace(preview, `"id":"user"`, `"id":"foreign"`, 1),
+		strings.Replace(preview, `"conversation_id":"TEST_ONLY_CONVERSATION"`, `"conversation_id":"FOREIGN"`, 1),
+	} {
+		result, err = InspectChatGPTConversationDelivery([]byte(raw), "TEST_ONLY_CONVERSATION", ChatGPTMessageIDHash("user"))
+		require.Error(t, err)
+		require.Empty(t, result.DeliveryImages.AssetHashes)
+	}
+	for _, raw := range []string{
+		strings.Replace(fixture, `"name":"image_gen"`, `"name":"browser"`, 1),
+		strings.Replace(fixture, `"status":"finished_successfully"`, `"metadata":{"is_error":true},"status":"finished_successfully"`, 1),
+	} {
+		result, err = InspectChatGPTConversationDelivery([]byte(raw), "TEST_ONLY_CONVERSATION", ChatGPTMessageIDHash("user"))
+		require.NoError(t, err)
+		require.False(t, result.Completed)
+		require.Empty(t, result.DeliveryImages.AssetHashes)
 	}
 }
 

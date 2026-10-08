@@ -70,6 +70,15 @@ func TestChatGPTAsyncSettlementKeepsOriginalSubscription(t *testing.T) {
 }
 
 func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T) {
+	for _, handoff := range []string{
+		"data: {\"type\":\"stream_handoff\",\"options\":[{\"type\":\"subscribe_ws_topic\",\"topic_id\":\"conv-turn-low-ttl-TEST_ONLY\"}]}\n\n",
+		"data: {\"type\":\"resume_conversation_token\",\"conversation_id\":\"TEST_ONLY_CONVERSATION\",\"token\":\"TEST_ONLY_SECRET\"}\n\n",
+	} {
+		t.Run(strings.Split(handoff, `"`)[3], func(t *testing.T) { testChatGPTAsyncImageDelivery(t, handoff) })
+	}
+}
+
+func testChatGPTAsyncImageDelivery(t *testing.T, handoff string) {
 	gin.SetMode(gin.TestMode)
 	const conversation = "TEST_ONLY_CONVERSATION"
 	const terminal = "data: {\"type\":\"message_stream_complete\",\"conversation_id\":\"TEST_ONLY_CONVERSATION\"}\n\ndata: [DONE]\n\n"
@@ -77,7 +86,7 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 	snapshot := `{"conversation_id":"TEST_ONLY_CONVERSATION","async_status":4,"current_node":"final","mapping":{"user":{"parent":null,"message":{"id":"user","author":{"role":"user"}}},"image":{"parent":"user","message":{"id":"image","author":{"role":"tool","name":"image_gen"},"status":"finished_successfully","content":{"content_type":"multimodal_text","parts":[{"content_type":"image_asset_pointer","asset_pointer":"sediment://file_TEST_ONLY","width":3840,"height":2160}]}}},"final":{"parent":"image","message":{"id":"final","author":{"role":"assistant"},"status":"finished_successfully","end_turn":true,"metadata":{"model_slug":"gpt-5-6-thinking"}}}}}`
 	var modelCalls, snapshotCalls, bootstrapCalls atomic.Int64
 	var snapshotBody atomic.Value
-	snapshotBody.Store(snapshot)
+	snapshotBody.Store(strings.ReplaceAll(strings.ReplaceAll(snapshot, `"async_status":4`, `"async_status":5`), `"status":"finished_successfully"`, `"status":"in_progress"`))
 	var assetCalls atomic.Int64
 	var capturedBody string
 	var capturedMu sync.Mutex
@@ -96,7 +105,7 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 				t.Error("invalid provider credential boundary")
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = io.WriteString(w, "data: {\"type\":\"stream_handoff\",\"options\":[{\"type\":\"subscribe_ws_topic\",\"topic_id\":\"conv-turn-low-ttl-TEST_ONLY\"}]}\n\n"+terminal)
+			_, _ = io.WriteString(w, handoff+terminal)
 		case "/backend-api/f/conversation/resume":
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = io.WriteString(w, terminal)
@@ -117,7 +126,7 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 			bootstrapCalls.Add(1)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]string{"websocket_url": "ws" + strings.TrimPrefix(provider.URL, "http") + "/updates?token=TEST_ONLY_PROVIDER_SECRET"})
-		case "/backend-api/files/download/file_TEST_ONLY":
+		case "/backend-api/files/download/file_TEST_ONLY", "/backend-api/files/download/file_RECOVERED_DELIVERY":
 			assetCalls.Add(1)
 			if r.Header.Get("Authorization") != "Bearer TEST_ONLY_OAUTH" {
 				t.Error("asset changed OAuth owner")
@@ -236,13 +245,22 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 	require.False(t, pending.TerminalSeen)
 	topicOwner, err := cache.GetChatGPTResume(ctx, scope.TopicKey("conv-turn-low-ttl-TEST_ONLY"))
 	require.NoError(t, err)
-	require.NotNil(t, topicOwner)
+	if strings.Contains(handoff, "stream_handoff") {
+		require.NotNil(t, topicOwner)
+	} else {
+		require.Nil(t, topicOwner)
+	}
+	previewOwner, err := cache.GetChatGPTResume(ctx, scope.AssetKey(service.ChatGPTAssetLookupHashes("file_TEST_ONLY")[0]))
+	require.NoError(t, err)
+	require.NotNil(t, previewOwner, "an owned preview must be downloadable before completion")
+	require.Empty(t, previewOwner.Images.AssetHashes, "preview ownership must not add a billable image")
 	w = request("POST", "/chatgpt/backend-api/f/conversation/resume", `{"conversation_id":"TEST_ONLY_CONVERSATION","offset":0}`, 23)
 	require.Equal(t, 200, w.Code)
 	require.Equal(t, 0, usage.count(), "a delivery leg omitting async status cannot erase pending state")
 	w = request("GET", "/chatgpt/backend-api/conversation/TEST_ONLY_CONVERSATION", "", 24)
 	require.Equal(t, 404, w.Code)
-	require.Equal(t, int64(0), snapshotCalls.Load())
+	require.Equal(t, int64(2), snapshotCalls.Load())
+	snapshotBody.Store(snapshot)
 	select {
 	case <-ready:
 	case <-ctx.Done():
@@ -271,7 +289,7 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 	providerFrames <- `[` + owned + `]`
 	_, _, err = client.Read(ctx)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), snapshotCalls.Load())
+	require.Equal(t, int64(3), snapshotCalls.Load())
 	require.Equal(t, 1, usage.count())
 	require.Equal(t, int64(1), modelCalls.Load())
 	snapshotBody.Store(strings.ReplaceAll(snapshot, "file_TEST_ONLY", "file_COMPLETED_DELIVERY"))
@@ -281,12 +299,27 @@ func TestChatGPTAsyncImageDeliverySettlesOnlyOwnedCompletedTurnOnce(t *testing.T
 	require.NoError(t, err)
 	require.NotNil(t, downloadOwner, "completed turn delivery still binds verified files")
 	require.Equal(t, 1, usage.count(), "late delivery cannot reopen a sealed bill")
+	// A missing file binding can be recovered only from an already-owned
+	// conversation, including after billing has frozen.
+	snapshotBody.Store(strings.ReplaceAll(snapshot, "file_TEST_ONLY", "file_RECOVERED_DELIVERY"))
+	w = request("GET", "/chatgpt/backend-api/files/download/file_TEST_ONLY?conversation_id=TEST_ONLY_CONVERSATION", "", 24)
+	require.Equal(t, 404, w.Code)
+	require.Equal(t, int64(4), snapshotCalls.Load(), "foreign keys must not trigger an owner snapshot")
+	w = request("GET", "/chatgpt/backend-api/files/download/file_RECOVERED_DELIVERY?conversation_id=TEST_ONLY_CONVERSATION", "", 23)
+	require.Equal(t, 200, w.Code)
+	downloadOwner, err = cache.GetChatGPTResume(ctx, scope.AssetKey(service.ChatGPTAssetLookupHashes("file_RECOVERED_DELIVERY")[0]))
+	require.NoError(t, err)
+	require.NotNil(t, downloadOwner)
+	require.Equal(t, 1, usage.count())
+	w = request("GET", "/chatgpt/backend-api/files/download/file_FOREIGN?conversation_id=TEST_ONLY_CONVERSATION", "", 23)
+	require.Equal(t, 404, w.Code, "an owned conversation cannot authorize an unobserved file")
+	require.Equal(t, int64(1), assetCalls.Load())
 	w = request("GET", "/chatgpt/backend-api/files/download/file_TEST_ONLY", "", 24)
 	require.Equal(t, 404, w.Code)
-	require.Equal(t, int64(0), assetCalls.Load())
+	require.Equal(t, int64(1), assetCalls.Load())
 	w = request("GET", "/chatgpt/backend-api/files/download/file_TEST_ONLY", "", 23)
 	require.Equal(t, 200, w.Code)
-	require.Equal(t, int64(1), assetCalls.Load())
+	require.Equal(t, int64(2), assetCalls.Load())
 	require.Equal(t, 1, usage.count(), "downloads are not new billable turns")
 	require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
 	require.Eventually(t, func() bool {

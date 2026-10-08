@@ -118,19 +118,31 @@ func (h *OpenAIGatewayHandler) ChatGPTConversationRead(c *gin.Context) {
 }
 
 func (h *OpenAIGatewayHandler) observeChatGPTSnapshot(ctx context.Context, c *gin.Context, key *service.APIKey, cache service.ChatGPTTurnCache, scope service.ChatGPTTurnScope, account *service.Account, turn *service.ChatGPTTurnSnapshot, id string, raw []byte) {
-	summary, images, completed, err := service.InspectChatGPTConversationSnapshot(raw, id, turn.UserMessageHash)
-	if err != nil || !completed {
-		logger.L().Debug("openai.chatgpt_async_snapshot_unverified", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", account.ID), zap.Bool("observer_error", err != nil), zap.Int("snapshot_bytes", len(raw)))
+	inspection, err := service.InspectChatGPTConversationDelivery(raw, id, turn.UserMessageHash)
+	logger.L().Info("openai.chatgpt_snapshot_observed", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", account.ID),
+		zap.String("outcome", inspection.Outcome), zap.Bool("observer_error", err != nil),
+		zap.Bool("async_status_seen", inspection.Summary.AsyncStatusSeen), zap.Int("async_status", inspection.Summary.AsyncStatus),
+		zap.Int("delivery_asset_count", len(inspection.DeliveryImages.AssetHashes)), zap.Int("observed_image_count", len(inspection.Images.AssetHashes)),
+		zap.Bool("billing_already_completed", turn.Completed))
+	if err != nil {
+		return
+	}
+	// Verified preview and final pointers can be delivered independently of
+	// billing completion. Never merge preview assets into billable evidence.
+	if err := service.BindChatGPTDeliveryAssets(ctx, cache, scope, turn, inspection.DeliveryImages); err != nil {
+		logger.L().Warn("openai.chatgpt_async_asset_binding_failed", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", account.ID))
 		return
 	}
 	if turn.Completed {
-		// Delivery may still need file ownership after a settled turn. Do not
-		// reopen the frozen bill or charge a second time.
-		if err := service.BindChatGPTDeliveryAssets(ctx, cache, scope, turn, images); err != nil {
-			logger.L().Warn("openai.chatgpt_async_asset_binding_failed", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", account.ID))
+		return
+	}
+	if !inspection.Completed {
+		if _, err := cache.SetChatGPTTurnAsyncStatus(ctx, scope.TurnKey(turn.Identity), -1); err != nil {
+			logger.L().Warn("openai.chatgpt_async_pending_update_failed", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", account.ID))
 		}
 		return
 	}
+	summary, images := inspection.Summary, inspection.Images
 	turnKey := scope.TurnKey(turn.Identity)
 	turn, err = service.MergeChatGPTDeliveryImages(ctx, cache, scope, turn, images)
 	if err == nil {
@@ -168,6 +180,28 @@ func (h *OpenAIGatewayHandler) chatGPTScopedAssetDownload(c *gin.Context) {
 		}
 		if turn != nil {
 			break
+		}
+	}
+	if turn == nil {
+		// A first preview request may race the snapshot observer. A claimed
+		// conversation is only a lookup hint: validate its existing scoped
+		// owner, inspect that branch, then look up the exact asset again.
+		if conversationID := c.Query("conversation_id"); safeChatGPTConversationID(conversationID) {
+			owner, readErr := cache.GetChatGPTResume(c.Request.Context(), scope.ResumeKey(conversationID))
+			if readErr == nil && owner != nil {
+				h.readChatGPTOwnedSnapshot(c.Request.Context(), c, key, cache, scope, owner.AccountID, conversationID, true)
+				for _, digest := range service.ChatGPTAssetLookupHashes(id) {
+					found, lookupErr := cache.GetChatGPTResume(c.Request.Context(), scope.AssetKey(digest))
+					if lookupErr != nil {
+						h.errorResponse(c, 503, "accounting_unavailable", "Chat asset ownership is unavailable")
+						return
+					}
+					turn = found
+					if turn != nil {
+						break
+					}
+				}
+			}
 		}
 	}
 	if turn == nil {
@@ -409,8 +443,12 @@ func chatGPTControlContext(c *gin.Context) *gin.Context {
 // Completion hints trigger one read, never generation or model retries. The
 // snapshot still has to prove inactivity, branch ownership and final success.
 func (h *OpenAIGatewayHandler) readChatGPTCompletedSnapshot(ctx context.Context, c *gin.Context, key *service.APIKey, cache service.ChatGPTTurnCache, scope service.ChatGPTTurnScope, accountID int64, id string) {
+	h.readChatGPTOwnedSnapshot(ctx, c, key, cache, scope, accountID, id, false)
+}
+
+func (h *OpenAIGatewayHandler) readChatGPTOwnedSnapshot(ctx context.Context, c *gin.Context, key *service.APIKey, cache service.ChatGPTTurnCache, scope service.ChatGPTTurnScope, accountID int64, id string, allowCompleted bool) {
 	turn, err := cache.GetChatGPTResume(ctx, scope.ResumeKey(id))
-	if err != nil || turn == nil || turn.AccountID != accountID || turn.Completed {
+	if err != nil || turn == nil || turn.AccountID != accountID || (turn.Completed && !allowCompleted) {
 		return
 	}
 	account, err := h.gatewayService.GetChatGPTBoundAccount(ctx, key.GroupID, accountID)

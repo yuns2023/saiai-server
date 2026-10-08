@@ -92,16 +92,27 @@ status. A `stream_handoff` also establishes pending work even when the provider
 omits the async-status event. Only a subsequent explicit inactive status or a
 verified completed conversation snapshot can clear it. The Redis seal checks pending state atomically with image evidence;
 late delivery cannot change an already sealed bill.
-An owned completed-branch read can still bind image downloads after settlement;
-it cannot reopen the frozen bill or create a second charge.
+With updates enabled, every successful delivery terminal triggers one bounded
+read of its owned conversation before settlement, including streams that carry
+only a resume token and omit async status. A resume token is a retry capability,
+not evidence of either a handoff or final completion. Missing or unfinished
+snapshot evidence leaves the turn pending for later client reads/notifications.
+
+An owned current-branch read can bind image previews before final completion
+and image downloads after settlement. Delivery evidence never adds a preview
+to the bill, reopens a frozen bill or creates a second charge. A download with
+missing asset ownership may use an existing scoped `conversation_id` binding
+to read that original account's snapshot, then must resolve the exact asset
+again. A supplied conversation ID alone grants no file access.
 
 A native completion hint may trigger a read-only GET of the owned conversation
 on its original account, at most three times per conversation per connection.
 This is not another model request. Gateway-owned
 delivery reads request identity encoding and remove WebSocket negotiation
 headers. The JSON must prove an inactive native state (1/2/4), a successful
-terminal assistant message with `end_turn=true`, and a current branch descending
-from the original user's message hash. Old branches, incomplete tasks, missing
+terminal assistant message with `end_turn=true` or a successful recognized
+image-tool leaf containing a completed generated image, and a current branch
+descending from the original user's message hash. Old branches, incomplete tasks, missing
 schemas, errors and mismatched conversations cannot settle. Only generated
 images on this new branch count; historical images do not count again. Replayed
 message updates bind download ownership without adding images to a bill.

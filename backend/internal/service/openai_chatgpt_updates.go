@@ -229,7 +229,7 @@ func FilterChatGPTUpdates(ctx context.Context, cache ChatGPTTurnCache, scope Cha
 			continue
 		}
 		if len(event.Payload.Content.Message) > 0 {
-			var observer chatGPTImageObserver
+			observer := chatGPTImageObserver{deliveryOnly: true}
 			observer.observeMessage(event.Payload.Content.Message)
 			if images := observer.evidence(); images.GenerationSeen {
 				if err := BindChatGPTDeliveryAssets(ctx, cache, scope, owner, images); err != nil {
@@ -292,7 +292,7 @@ func filterChatGPTUpdateBatch(ctx context.Context, cache ChatGPTTurnCache, scope
 		if owner == nil || owner.AccountID != accountID {
 			continue
 		}
-		var images chatGPTImageObserver
+		images := chatGPTImageObserver{deliveryOnly: true}
 		images.observeMessage(update.Message)
 		if evidence := images.evidence(); evidence.GenerationSeen {
 			if err := BindChatGPTDeliveryAssets(ctx, cache, scope, owner, evidence); err != nil {

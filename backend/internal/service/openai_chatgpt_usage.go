@@ -304,7 +304,7 @@ func (o *ChatGPTConversationStreamObserver) dispatchEvent() error {
 			o.summary.CompletionSeen = true
 		}
 	}
-	if event.Type == "stream_handoff" || event.Type == "resume_conversation_token" {
+	if event.Type == "stream_handoff" {
 		o.summary.HandoffSeen = true
 	}
 	if event.Type == "conversation_async_status" {

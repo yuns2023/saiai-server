@@ -65,6 +65,9 @@ func MergeChatGPTImageEvidence(first, second ChatGPTImageEvidence) ChatGPTImageE
 }
 
 type chatGPTImageObserver struct {
+	// Delivery can authorize an observed preview pointer on an owned branch.
+	// It must never be used to count or price completed generated images.
+	deliveryOnly    bool
 	seen            bool
 	currentTool     bool
 	currentComplete bool
@@ -233,6 +236,7 @@ func (o *chatGPTImageObserver) observePart(raw json.RawMessage, inProgress bool)
 	var envelope struct {
 		Type   string          `json:"content_type"`
 		Image  json.RawMessage `json:"image_asset_pointer"`
+		Asset  string          `json:"asset_pointer"`
 		Width  int             `json:"width"`
 		Height int             `json:"height"`
 	}
@@ -257,7 +261,10 @@ func (o *chatGPTImageObserver) observePart(raw json.RawMessage, inProgress bool)
 	if json.Unmarshal(raw, &part) != nil {
 		return
 	}
-	generated := o.currentTool || part.Metadata.Generation != nil || len(part.Metadata.Dalle) > 0 && string(part.Metadata.Dalle) != "null"
+	if envelope.Asset != "" {
+		part.Asset = envelope.Asset
+	}
+	generated := o.deliveryOnly || o.currentTool || part.Metadata.Generation != nil || len(part.Metadata.Dalle) > 0 && string(part.Metadata.Dalle) != "null"
 	if !generated {
 		return
 	}
@@ -267,7 +274,7 @@ func (o *chatGPTImageObserver) observePart(raw json.RawMessage, inProgress bool)
 		inProgress = part.Metadata.Generation.Height < part.Height
 		complete = !inProgress
 	}
-	if complete && !inProgress && (strings.HasPrefix(part.Asset, "sediment://") || strings.HasPrefix(part.Asset, "file-service://")) {
+	if (o.deliveryOnly || complete && !inProgress) && (strings.HasPrefix(part.Asset, "sediment://") || strings.HasPrefix(part.Asset, "file-service://")) {
 		size := ChatGPTImageDimensions(part.Width, part.Height)
 		outer := ChatGPTImageDimensions(envelope.Width, envelope.Height)
 		if size == "" {

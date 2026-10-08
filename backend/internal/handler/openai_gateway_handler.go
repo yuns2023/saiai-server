@@ -325,6 +325,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			UserMessageHash:        service.ChatGPTUserMessageHash(body),
 			BillingSnapshotVersion: 1, SubscriptionID: subscriptionID,
 			RequestedModel: model, ThinkingEffort: thinkingEffort, StartedAt: requestStart,
+			AsyncPending: h.cfg.Gateway.OpenAIChatUpdatesEnabled,
 		}, service.ChatGPTTurnContextTTL)
 		if err != nil || turn == nil || turn.RequestedModel != model || turn.ThinkingEffort != thinkingEffort {
 			releaseChatGPTControlSelection(selection)
@@ -416,6 +417,11 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		evidence := streamObserver.ImageEvidence()
 		if !evidence.GenerationSeen {
 			return nil
+		}
+		if h.cfg.Gateway.OpenAIChatUpdatesEnabled {
+			// Streaming previews/replayed messages authorize delivery only.
+			// Billable images come from the verified final current branch.
+			return service.BindChatGPTDeliveryAssets(forwardCtx, turnCache, turnScope, turn, evidence)
 		}
 		updated, err := service.MergeChatGPTDeliveryImages(forwardCtx, turnCache, turnScope, turn, evidence)
 		if err != nil {
@@ -547,8 +553,19 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				}
 				if streamObserverErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 &&
 					summary.CompletionSeen && !summary.ProviderErrorSeen &&
-					(turn == nil || !turn.AsyncPending) &&
 					(!isResumeRequest || summary.ConversationID == resumeConversationID) {
+					if h.cfg.Gateway.OpenAIChatUpdatesEnabled {
+						// HTTP delivery completion and a resume token do not prove
+						// that background work finished. Verify the owned branch;
+						// later updates/client reads can finish pending work.
+						if safeChatGPTConversationID(summary.ConversationID) {
+							h.readChatGPTCompletedSnapshot(forwardCtx, c, apiKey, turnCache, turnScope, account.ID, summary.ConversationID)
+						}
+						return
+					}
+					if turn != nil && turn.AsyncPending {
+						return
+					}
 					if err := h.settleChatGPTTurn(forwardCtx, turnCache, turnScope, turn, &service.OpenAIChatGPTTurnUsageInput{
 						ObservedModel: summary.ObservedModel, APIKey: apiKey, User: apiKey.User, Account: account,
 						Subscription: subscription, InboundEndpoint: c.Request.URL.Path,
