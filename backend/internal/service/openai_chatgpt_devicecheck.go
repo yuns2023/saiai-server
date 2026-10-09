@@ -137,7 +137,11 @@ func copyChatGPTDeviceCookie(c *gin.Context, account *Account, headers http.Head
 // Honor the real proof's lifetime, bounded to 30 days. Session cookies have a
 // 24-hour ownership lease. An expired lease requires a real registration again.
 func ChatGPTDeviceCookieTTL(cookie *http.Cookie, now time.Time) (time.Duration, error) {
-	if cookie.Name != "_devicecheck" || !cookie.Secure || !cookie.HttpOnly || cookie.Path != "/" ||
+	// The native cookie manager consumes the real proof and its expiry. Keep
+	// the provider's Path/Secure/HttpOnly attributes unchanged, rather than
+	// requiring a guessed response shape. Its issuer and scoped owner provide
+	// the credential boundary; this does not widen which cookies are relayed.
+	if cookie.Name != "_devicecheck" ||
 		(cookie.Domain != "" && strings.TrimPrefix(strings.ToLower(cookie.Domain), ".") != "chatgpt.com") ||
 		cookie.MaxAge < 0 {
 		return 0, ErrChatGPTDeviceCookie

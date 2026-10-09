@@ -37,12 +37,17 @@ func TestChatGPTDeviceProofIdentityLifetimeAndRedaction(t *testing.T) {
 	ttl, err := ChatGPTDeviceCookieTTL(&valid, now)
 	require.NoError(t, err)
 	require.Equal(t, 10*time.Minute, ttl)
-	for _, mutate := range []func(*http.Cookie){func(c *http.Cookie) { c.Domain = "foreign.invalid" }, func(c *http.Cookie) { c.Secure = false }, func(c *http.Cookie) { c.HttpOnly = false }, func(c *http.Cookie) { c.Name = "session" }, func(c *http.Cookie) { c.Value = "saiai-local-proxy" }, func(c *http.Cookie) { c.MaxAge = -1 }} {
+	for _, mutate := range []func(*http.Cookie){func(c *http.Cookie) { c.Domain = "foreign.invalid" }, func(c *http.Cookie) { c.Name = "session" }, func(c *http.Cookie) { c.Value = "saiai-local-proxy" }, func(c *http.Cookie) { c.MaxAge = -1 }} {
 		bad := valid
 		mutate(&bad)
 		_, err = ChatGPTDeviceCookieTTL(&bad, now)
 		require.Error(t, err)
 	}
+	variant := valid
+	variant.Path, variant.Secure, variant.HttpOnly = "/backend-api", false, false
+	ttl, err = ChatGPTDeviceCookieTTL(&variant, now)
+	require.NoError(t, err, "provider cookie attributes are preserved, not guessed")
+	require.Equal(t, 10*time.Minute, ttl)
 	valid.MaxAge = 0
 	valid.Expires = now.Add(-time.Second)
 	_, err = ChatGPTDeviceCookieTTL(&valid, now)
