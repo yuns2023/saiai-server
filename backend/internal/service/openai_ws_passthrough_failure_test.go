@@ -23,7 +23,7 @@ func TestOpenAIWSPassthroughProviderRefusalHasNoSuccessfulUsage(t *testing.T) {
 	request := []byte(` {"type":"response.create","model":"test-luna","reasoning":{"effort":"low"},"input":[],"tools":[{"type":"image_gen"}]} `)
 	frame := []byte(` {"type":"error","status":400,"error":{"type":"invalid_request_error","code":"TEST_ONLY_TOKEN","message":"The 'test-luna' model is not supported when using Codex with a ChatGPT account. Synthetic echoed credential TEST_ONLY_TOKEN"}} `)
 	upstream := &openAIWSCaptureConn{events: [][]byte{frame}}
-	dialer := &openAIWSCaptureDialer{conn: upstream}
+	dialer := &openAIWSCaptureDialer{conn: upstream, handshake: http.Header{"X-Request-Id": []string{"TEST_ONLY_UPSTREAM_TRACE"}}}
 	svc := &OpenAIGatewayService{cfg: cfg, openaiWSPassthroughDialer: dialer, cache: &stubGatewayCache{}}
 	account := &Account{ID: 452, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	done := make(chan struct{})
@@ -75,6 +75,8 @@ func TestOpenAIWSPassthroughProviderRefusalHasNoSuccessfulUsage(t *testing.T) {
 	require.Equal(t, "test-luna", failures[0].Model)
 	require.Equal(t, 1, failures[0].Turn)
 	require.Equal(t, int64(452), failures[0].AccountID)
+	require.Equal(t, HashUsageRequestPayload(request), failures[0].RequestPayloadHash)
+	require.Equal(t, "TEST_ONLY_UPSTREAM_TRACE", failures[0].UpstreamRequestID)
 	require.NotContains(t, failures[0].Message, "TEST_ONLY_TOKEN")
 	require.Equal(t, "[REDACTED]", failures[0].Code)
 	require.Equal(t, request, upstream.rawWrites[0])

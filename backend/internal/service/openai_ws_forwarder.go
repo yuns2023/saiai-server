@@ -239,6 +239,9 @@ type OpenAIWSUpstreamFailure struct {
 	ErrorType  string
 	Code       string
 	Message    string
+	// Digests and provider trace IDs are diagnostic metadata, never request bodies.
+	RequestPayloadHash string
+	UpstreamRequestID  string
 }
 
 func (e *OpenAIWSUpstreamFailure) Error() string { return e.Message }

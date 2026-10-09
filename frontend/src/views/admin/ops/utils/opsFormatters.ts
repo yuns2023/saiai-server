@@ -18,6 +18,9 @@ export function getOpsModelLabel(log: Pick<OpsErrorLog, 'model' | 'request_path'
     return t('admin.ops.errorDetail.noModelInitialization')
   }
   if (path === '/chatgpt/backend-api/models') return t('admin.ops.errorDetail.noModelCatalog')
+  if (/^\/chatgpt\/backend-api\/conversation\/[^/?]+$/.test(path)) {
+    return t('admin.ops.errorDetail.noModelHistory')
+  }
   if (path.startsWith('/chatgpt/backend-api/files/download/') || path === '/chatgpt/backend-api/estuary/content') {
     return t('admin.ops.errorDetail.noModelAsset')
   }

@@ -33,9 +33,13 @@ import (
 // executable. The Python driver terminates TLS and records digests in memory
 // before forwarding to SAIAI. All provider transports are replaced with local
 // mocks; production credentials, captures, DB and Redis are never read.
+// SAIAI_PROOF_FIXTURE_ENDPOINT may instead name an absolute temporary file for
+// an external installed-client driver. The loopback fixture stops when its
+// companion .stop file appears, or after its bounded lifetime.
 func TestOpenAINativeOAuth_OfficialBinaryLoopback(t *testing.T) {
 	codex, client := os.Getenv("SAIAI_PROOF_CODEX_BINARY"), os.Getenv("SAIAI_PROOF_CLIENT_BINARY")
-	if codex == "" || client == "" {
+	externalEndpoint := os.Getenv("SAIAI_PROOF_FIXTURE_ENDPOINT")
+	if (codex == "" || client == "") && externalEndpoint == "" {
 		t.Skip("set SAIAI_PROOF_CODEX_BINARY and SAIAI_PROOF_CLIENT_BINARY for the isolated official-binary proof")
 	}
 	gin.SetMode(gin.TestMode)
@@ -59,6 +63,8 @@ func TestOpenAINativeOAuth_OfficialBinaryLoopback(t *testing.T) {
 		if r.URL.Path == "/_proof/reset" {
 			lab.mu.Lock()
 			lab.records, lab.response = nil, 0
+			lab.omitMetadata = r.URL.Query().Get("omit_metadata") == "1"
+			lab.failSecond = r.URL.Query().Get("fail_second") == "1"
 			lab.mu.Unlock()
 			w.WriteHeader(204)
 			return
@@ -70,7 +76,7 @@ func TestOpenAINativeOAuth_OfficialBinaryLoopback(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/_proof/events" {
-			_ = json.NewEncoder(w).Encode(nativeOfficialMockEvents(r.URL.Query().Get("response"), r.URL.Query().Get("tool") == "1"))
+			_ = json.NewEncoder(w).Encode(lab.events(r.URL.Query().Get("response"), r.URL.Query().Get("tool") == "1"))
 			return
 		}
 		c, _ := gin.CreateTestContext(w)
@@ -141,6 +147,22 @@ func TestOpenAINativeOAuth_OfficialBinaryLoopback(t *testing.T) {
 		_, _ = svc.Forward(r.Context(), c, account, wire)
 	}))
 	defer server.Close()
+	// An external, isolated official-binary driver can reach only this loopback
+	// fixture through its own tunnel. No live provider transport is installed.
+	if externalEndpoint != "" {
+		require.True(t, filepath.IsAbs(externalEndpoint))
+		require.NoError(t, os.WriteFile(externalEndpoint, []byte(server.URL), 0600))
+		defer os.Remove(externalEndpoint)
+		deadline := time.Now().Add(8 * time.Minute)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(externalEndpoint + ".stop"); err == nil {
+				_ = os.Remove(externalEndpoint + ".stop")
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatal("external official-binary fixture deadline")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
 	driver, err := filepath.Abs("testdata/native_official_codex_probe.py")
@@ -159,9 +181,11 @@ func TestOpenAINativeOAuth_OfficialBinaryLoopback(t *testing.T) {
 }
 
 type nativeOfficialProofLab struct {
-	mu       sync.Mutex
-	records  []map[string]any
-	response int
+	mu           sync.Mutex
+	records      []map[string]any
+	response     int
+	omitMetadata bool
+	failSecond   bool
 }
 
 func (l *nativeOfficialProofLab) record(stage, kind string, r *http.Request, payload []byte, messageType int) {
@@ -202,13 +226,27 @@ func (l *nativeOfficialProofLab) record(stage, kind string, r *http.Request, pay
 func (l *nativeOfficialProofLab) next(payload []byte) [][]byte {
 	warmup := gjson.GetBytes(payload, "generate")
 	if warmup.Exists() && !warmup.Bool() {
-		return nativeOfficialMockEvents("resp_mock_warmup", false)
+		return l.events("resp_mock_warmup", false)
 	}
 	l.mu.Lock()
 	l.response++
 	number := l.response
 	l.mu.Unlock()
-	return nativeOfficialMockEvents(fmt.Sprintf("resp_mock_%d", number), number == 1)
+	return l.events(fmt.Sprintf("resp_mock_%d", number), number == 1)
+}
+
+func (l *nativeOfficialProofLab) events(responseID string, tool bool) [][]byte {
+	l.mu.Lock()
+	omit, fail := l.omitMetadata, l.failSecond
+	l.mu.Unlock()
+	if fail && responseID == "resp_mock_2" {
+		return [][]byte{[]byte(`{"type":"error","status":503,"error":{"code":"server_error","type":"api_error","message":"MOCK_ONLY_PROVIDER_503"}}`)}
+	}
+	events := nativeOfficialMockEvents(responseID, tool)
+	if omit {
+		events = append(events[:1], events[2:]...)
+	}
+	return events
 }
 
 func nativeOfficialMockEvents(responseID string, tool bool) [][]byte {

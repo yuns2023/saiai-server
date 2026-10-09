@@ -47,6 +47,8 @@ type ChatGPTTurnSnapshot struct {
 // ChatGPTTurnCache is implemented by the shared Redis Gateway cache. Operations
 // are atomic across instances and retain the original expiry and price.
 type ChatGPTTurnCache interface {
+	BindChatGPTDeliveryOwner(context.Context, string, *ChatGPTDeliveryOwner) error
+	GetChatGPTDeliveryOwner(context.Context, string) (*ChatGPTDeliveryOwner, error)
 	GetChatGPTTurn(context.Context, string) (*ChatGPTTurnSnapshot, error)
 	PutChatGPTTurnIfAbsent(context.Context, string, *ChatGPTTurnSnapshot, time.Duration) (*ChatGPTTurnSnapshot, error)
 	BindChatGPTResume(context.Context, string, string) error
@@ -108,6 +110,9 @@ func MergeChatGPTDeliveryImages(ctx context.Context, cache ChatGPTTurnCache, sco
 // A conversation update may replay an older branch. It establishes download
 // ownership; only a verified current-branch snapshot adds its images to a bill.
 func BindChatGPTDeliveryAssets(ctx context.Context, cache ChatGPTTurnCache, scope ChatGPTTurnScope, turn *ChatGPTTurnSnapshot, images ChatGPTImageEvidence) error {
+	if err := BindChatGPTOwnedDeliveryAssets(ctx, cache, scope, turn.AccountID, images); err != nil {
+		return err
+	}
 	for _, digest := range images.AssetHashes {
 		if err := cache.BindChatGPTResume(ctx, scope.AssetKey(digest), scope.TurnKey(turn.Identity)); err != nil {
 			return err
@@ -263,13 +268,19 @@ type chatGPTMemoryTurnCache struct {
 	aliases        map[string]chatGPTMemoryAlias
 	updateAccounts map[string]map[int64]time.Time
 	uploads        map[string]chatGPTMemoryUpload
+	deliveryOwners map[string]chatGPTMemoryDeliveryOwner
 }
 
 func NewChatGPTMemoryTurnCache() ChatGPTTurnCache {
-	return &chatGPTMemoryTurnCache{turns: make(map[string]chatGPTMemoryEntry), aliases: make(map[string]chatGPTMemoryAlias), updateAccounts: make(map[string]map[int64]time.Time), uploads: make(map[string]chatGPTMemoryUpload)}
+	return &chatGPTMemoryTurnCache{turns: make(map[string]chatGPTMemoryEntry), aliases: make(map[string]chatGPTMemoryAlias), updateAccounts: make(map[string]map[int64]time.Time), uploads: make(map[string]chatGPTMemoryUpload), deliveryOwners: make(map[string]chatGPTMemoryDeliveryOwner)}
 }
 func (s *chatGPTMemoryTurnCache) cleanup() {
 	now := time.Now()
+	for key, entry := range s.deliveryOwners {
+		if !now.Before(entry.expires) {
+			delete(s.deliveryOwners, key)
+		}
+	}
 	for key, upload := range s.uploads {
 		if !now.Before(upload.expires) {
 			delete(s.uploads, key)

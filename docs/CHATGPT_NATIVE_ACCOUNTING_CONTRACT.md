@@ -121,6 +121,10 @@ and selected account in shared Redis. Retries/resumes preserve that snapshot;
 a later admin save never reprices it. Metadata changes using the same message
 identity are rejected. Records expire after one hour and contain hashes and
 accounting metadata, not content, conversation IDs, credentials or resume tokens.
+Conversation/asset routing ownership has a separate 30-day lease described in
+`CHATGPT_NATIVE_UPDATES_CONTRACT.md`. It neither extends these accounting
+records nor recreates them when history or an image is read. A new successful
+generation has its own billing identity and price snapshot.
 An older Gateway cannot read tier JSON: rollback requires restoring the scoped
 legacy price through this admin resource before rolling back the application.
 No schema migration or whole-database restore is needed.

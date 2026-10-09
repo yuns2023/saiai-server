@@ -21,8 +21,8 @@ successful native response establishes a hashed conversation-to-turn binding
 before that chunk is delivered. The same binding fixes the selected OAuth
 account. Account discovery contains only IDs of accounts already used by that
 scope, never arbitrary pool members. Redis is mandatory outside replay/simple
-mode. All related keys share a scope hash tag and retain the original one-hour
-turn expiry. Raw conversation IDs, topic IDs, provider subscription URLs,
+mode. Active turn, replay, topic and subscription keys share a scope hash tag
+and retain the original one-hour turn expiry. Raw conversation IDs, topic IDs, provider subscription URLs,
 credentials, message content and image pointers are not persisted.
 
 The broker multiplexes at most 16 accounts per scope, 32 topics per connection,
@@ -34,7 +34,19 @@ permits a reconnect. Unsupported auxiliary topics remain local and open no
 provider connection. It checks group/account
 eligibility during delivery. Expired ownership, unavailable owners and Redis
 errors fail closed. It does not fail over an owned conversation to another
-account. This bounded lease does not implement permanent conversation history.
+account.
+
+Historical conversation reads, known image downloads and a new generation in
+an owned conversation use a separate 30-day routing lease. Activity on a known
+conversation renews that lease without extending or recreating its bill. The
+lease stores only scoped conversation/asset digests, the original account ID,
+and the latest user-message digest and turn start time. An older delayed turn
+cannot replace a newer branch identity; another account cannot replace the
+owner. This is a bounded delivery lease, not permanent conversation storage.
+A still-live legacy turn lazily establishes the new lease. Already-expired
+legacy context cannot be recovered by guessing an account: start a new
+conversation. The same isolation and current account/group checks apply after
+accounting expiry. History and downloads cannot create a successful usage row.
 
 The provider's account-wide subscription URL remains in server memory. It is
 never returned to Desktop or passed through the Responses trace logger. Only

@@ -447,6 +447,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						ResponseID: redactCredential(turn.RequestID), EventType: turn.TerminalEventType,
 						Status: turn.Failure.Status, ErrorType: redactCredential(turn.Failure.ErrorType),
 						Code: redactCredential(turn.Failure.Code), Message: ClientSafeUpstreamErrorMessage(redactCredential(turn.Failure.Message)),
+						RequestPayloadHash: turn.RequestPayloadHash,
+						UpstreamRequestID:  redactCredential(handshakeHeaders.Get("x-request-id")),
 					}
 					if hooks != nil && hooks.OnUpstreamError != nil {
 						hooks.OnUpstreamError(failure)

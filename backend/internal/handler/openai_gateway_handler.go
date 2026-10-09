@@ -286,7 +286,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				return
 			}
 			if conversationID := strings.TrimSpace(gjson.GetBytes(body, "conversation_id").String()); conversationID != "" {
-				active, activeErr := turnCache.GetChatGPTResume(forwardCtx, turnScope.ResumeKey(conversationID))
+				owner, active, activeErr := service.ResolveChatGPTConversationOwner(forwardCtx, turnCache, turnScope, conversationID)
 				if activeErr != nil {
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "accounting_unavailable", "Native ChatGPT Chat accounting context is unavailable", streamStarted)
 					return
@@ -295,15 +295,15 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusConflict, "turn_pending", "A ChatGPT turn is still pending in this conversation", streamStarted)
 					return
 				}
-				if active == nil {
+				if owner == nil {
 					h.handleStreamingAwareError(c, http.StatusConflict, "conversation_context_unavailable", "ChatGPT conversation ownership is unavailable; start a new conversation", streamStarted)
 					return
 				}
-				if conversationOwnerID != 0 && conversationOwnerID != active.AccountID {
+				if conversationOwnerID != 0 && conversationOwnerID != owner.AccountID {
 					h.handleStreamingAwareError(c, http.StatusConflict, "integrity_context_unavailable", "Chat device and conversation accounts differ", streamStarted)
 					return
 				}
-				conversationOwnerID = active.AccountID
+				conversationOwnerID = owner.AccountID
 			}
 			fileIDs, attachmentErr := service.ChatGPTRequestUploadFileIDs(body)
 			if attachmentErr != nil {
@@ -510,7 +510,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				return errors.New("ChatGPT delivery identity changed")
 			}
 			if boundConversation == "" {
-				if err := turnCache.BindChatGPTUpdates(forwardCtx, turnScope.ResumeKey(signals.ConversationID), turnScope.TurnKey(turn.Identity), turnScope.UpdatesKey()); err != nil {
+				if err := service.BindChatGPTConversationDelivery(forwardCtx, turnCache, turnScope, turn, signals.ConversationID); err != nil {
 					return err
 				}
 				boundConversation = signals.ConversationID

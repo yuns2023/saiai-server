@@ -136,20 +136,22 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	// 可能超过该阈值，需显式提高上限，避免本地 read_fail(message too big)。
 	conn.SetReadLimit(openAIWSMessageReadLimitBytes)
 	respHeaders := http.Header(nil)
+	status := http.StatusSwitchingProtocols
 	if resp != nil {
+		status = resp.StatusCode
 		respHeaders = cloneHeader(resp.Header)
 	}
 	if d.trace != nil {
 		d.trace.write(map[string]any{
 			"event":     "handshake_response",
 			"direction": "from_openai",
-			"status":    101,
+			"status":    status,
 			"headers":   traceHeaders(respHeaders),
 			"error":     "",
 		})
-		return &openAIWSTracedConn{inner: &coderOpenAIWSClientConn{conn: conn}, trace: d.trace}, 0, respHeaders, nil
+		return &openAIWSTracedConn{inner: &coderOpenAIWSClientConn{conn: conn}, trace: d.trace}, status, respHeaders, nil
 	}
-	return &coderOpenAIWSClientConn{conn: conn}, 0, respHeaders, nil
+	return &coderOpenAIWSClientConn{conn: conn}, status, respHeaders, nil
 }
 
 func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client, error) {

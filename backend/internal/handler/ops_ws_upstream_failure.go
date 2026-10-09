@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -96,6 +97,15 @@ func recordOpenAIWSUpstreamFailure(c *gin.Context, failure *service.OpenAIWSUpst
 	if failure.ResponseID != "" {
 		payload["response_id"] = truncateString(logredact.RedactText(failure.ResponseID), 128)
 	}
+	if len(failure.RequestPayloadHash) == 64 {
+		if _, err := hex.DecodeString(failure.RequestPayloadHash); err == nil {
+			payload["request_payload_sha256"] = failure.RequestPayloadHash
+		}
+	}
+	upstreamRequestID := opsWSErrorIdentifier(failure.UpstreamRequestID)
+	if upstreamRequestID != "" {
+		payload["upstream_request_id"] = upstreamRequestID
+	}
 	body, _ := json.Marshal(payload)
 	requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
 	clientRequestID, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string)
@@ -108,7 +118,8 @@ func recordOpenAIWSUpstreamFailure(c *gin.Context, failure *service.OpenAIWSUpst
 		UpstreamErrorDetail: func() *string { detail := string(body); return &detail }(),
 		UpstreamErrors: []*service.OpsUpstreamErrorEvent{{
 			Platform: service.PlatformOpenAI, AccountID: failure.AccountID, UpstreamStatusCode: failure.Status,
-			Kind: "websocket_error", Message: message, Detail: string(body),
+			UpstreamRequestID: upstreamRequestID,
+			Kind:              "websocket_error", Message: message, Detail: string(body),
 		}},
 	}
 	if failure.AccountID > 0 {

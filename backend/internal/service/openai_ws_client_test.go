@@ -1,13 +1,53 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCoderOpenAIWSClientDialerPreservesUpgradeEvidenceAndLargeFrames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "TEST_ONLY_UPSTREAM_TRACE")
+		w.Header().Set("X-Codex-Turn-State", "TEST_ONLY_HANDSHAKE_STATE")
+		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		conn.SetReadLimit(openAIWSMessageReadLimitBytes)
+		kind, payload, err := conn.Read(r.Context())
+		if err == nil {
+			_ = conn.Write(r.Context(), kind, payload)
+		}
+	}))
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	conn, status, headers, err := newDefaultOpenAIWSClientDialer().Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil, "")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	require.Equal(t, 101, status, "successful upgrades cannot be reported as status zero")
+	require.Equal(t, "TEST_ONLY_UPSTREAM_TRACE", headers.Get("X-Request-Id"))
+	require.Equal(t, "TEST_ONLY_HANDSHAKE_STATE", headers.Get("X-Codex-Turn-State"))
+	frame, ok := conn.(interface {
+		WriteFrame(context.Context, coderws.MessageType, []byte) error
+	})
+	require.True(t, ok)
+	// Exercise the production network dialer, compression and the read limit.
+	payload := []byte(` {"type":"response.create","model":"MOCK_ONLY","input":"` + strings.Repeat("x", 75*1024) + `"} `)
+	require.NoError(t, frame.WriteFrame(ctx, coderws.MessageText, payload))
+	got, err := conn.ReadMessage(ctx)
+	require.NoError(t, err)
+	require.Equal(t, payload, got)
+}
 
 func TestCoderOpenAIWSClientDialer_ProxyHTTPClientReuse(t *testing.T) {
 	dialer := newDefaultOpenAIWSClientDialer()

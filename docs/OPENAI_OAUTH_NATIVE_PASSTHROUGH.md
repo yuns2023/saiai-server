@@ -7,6 +7,12 @@ and text/binary application frames. It is a development contract; the optional
 official-binary proof exercises actual client emission against a local mock.
 Neither local proof establishes real-provider or deployed-pair acceptance.
 
+WebSocket application failures retain the failing turn's original request
+SHA-256 and an available provider handshake `x-request-id` in Ops diagnostics.
+These are observations, not request transformations or body capture. Unknown
+provider IDs remain absent. The production dialer reports the actual upgrade
+status separately from any application error inside that connection.
+
 ## Allowed differences
 
 | Boundary | Explicit transformation |

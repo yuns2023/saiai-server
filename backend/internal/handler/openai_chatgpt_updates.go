@@ -76,16 +76,16 @@ func (h *OpenAIGatewayHandler) ChatGPTConversationRead(c *gin.Context) {
 		h.errorResponse(c, 400, "invalid_request_error", "Invalid Chat conversation identity")
 		return
 	}
-	turn, err := cache.GetChatGPTResume(c.Request.Context(), scope.ResumeKey(id))
+	owner, turn, err := service.ResolveChatGPTConversationOwner(c.Request.Context(), cache, scope, id)
 	if err != nil {
 		h.errorResponse(c, 503, "accounting_unavailable", "Chat conversation ownership is unavailable")
 		return
 	}
-	if turn == nil {
+	if owner == nil {
 		h.errorResponse(c, 404, "conversation_context_unavailable", "Chat conversation ownership is unavailable")
 		return
 	}
-	account, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), key.GroupID, turn.AccountID)
+	account, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), key.GroupID, owner.AccountID)
 	if err != nil {
 		h.errorResponse(c, 503, "service_unavailable", "Chat conversation account is unavailable")
 		return
@@ -113,7 +113,19 @@ func (h *OpenAIGatewayHandler) ChatGPTConversationRead(c *gin.Context) {
 		return
 	}
 	if readErr == nil && response.StatusCode >= 200 && response.StatusCode < 300 && response.Header.Get("Content-Encoding") == "" {
-		h.observeChatGPTSnapshot(c.Request.Context(), c, key, cache, scope, account, turn, id, captured.Bytes())
+		h.observeChatGPTDeliverySnapshot(c.Request.Context(), c, key, cache, scope, account, owner, turn, id, captured.Bytes())
+	}
+}
+
+// Historical delivery retains ownership without recreating an expired bill.
+func (h *OpenAIGatewayHandler) observeChatGPTDeliverySnapshot(ctx context.Context, c *gin.Context, key *service.APIKey, cache service.ChatGPTTurnCache, scope service.ChatGPTTurnScope, account *service.Account, owner *service.ChatGPTDeliveryOwner, turn *service.ChatGPTTurnSnapshot, id string, raw []byte) {
+	if turn != nil {
+		h.observeChatGPTSnapshot(ctx, c, key, cache, scope, account, turn, id, raw)
+		return
+	}
+	inspection, err := service.InspectChatGPTConversationDelivery(raw, id, owner.UserMessageHash)
+	if err == nil {
+		_ = service.BindChatGPTOwnedDeliveryAssets(ctx, cache, scope, account.ID, inspection.DeliveryImages)
 	}
 }
 
@@ -178,6 +190,7 @@ func (h *OpenAIGatewayHandler) chatGPTScopedAssetDownload(c *gin.Context) {
 	}
 	var turn *service.ChatGPTTurnSnapshot
 	var uploadOwner int64
+	var deliveryOwner int64
 	for _, digest := range service.ChatGPTAssetLookupHashes(id) {
 		var err error
 		turn, err = cache.GetChatGPTResume(c.Request.Context(), scope.AssetKey(digest))
@@ -188,8 +201,17 @@ func (h *OpenAIGatewayHandler) chatGPTScopedAssetDownload(c *gin.Context) {
 		if turn != nil {
 			break
 		}
+		owner, err := cache.GetChatGPTDeliveryOwner(c.Request.Context(), scope.AssetOwnerKey(digest))
+		if err != nil {
+			h.errorResponse(c, 503, "accounting_unavailable", "Chat asset ownership is unavailable")
+			return
+		}
+		if owner != nil {
+			deliveryOwner = owner.AccountID
+			break
+		}
 	}
-	if turn == nil && service.ValidChatGPTUploadFileID(id) {
+	if turn == nil && deliveryOwner == 0 && service.ValidChatGPTUploadFileID(id) {
 		if uploads, cacheErr := h.gatewayService.ChatGPTUploadCache(); cacheErr == nil {
 			var lookupErr error
 			uploadOwner, lookupErr = uploads.GetChatGPTUploadOwner(c.Request.Context(), scope.UploadedFileKey(id))
@@ -199,12 +221,12 @@ func (h *OpenAIGatewayHandler) chatGPTScopedAssetDownload(c *gin.Context) {
 			}
 		}
 	}
-	if turn == nil && uploadOwner == 0 {
+	if turn == nil && uploadOwner == 0 && deliveryOwner == 0 {
 		// A first preview request may race the snapshot observer. A claimed
 		// conversation is only a lookup hint: validate its existing scoped
 		// owner, inspect that branch, then look up the exact asset again.
 		if conversationID := c.Query("conversation_id"); safeChatGPTConversationID(conversationID) {
-			owner, readErr := cache.GetChatGPTResume(c.Request.Context(), scope.ResumeKey(conversationID))
+			owner, _, readErr := service.ResolveChatGPTConversationOwner(c.Request.Context(), cache, scope, conversationID)
 			if readErr == nil && owner != nil {
 				h.readChatGPTOwnedSnapshot(c.Request.Context(), c, key, cache, scope, owner.AccountID, conversationID, true)
 				for _, digest := range service.ChatGPTAssetLookupHashes(id) {
@@ -217,15 +239,27 @@ func (h *OpenAIGatewayHandler) chatGPTScopedAssetDownload(c *gin.Context) {
 					if turn != nil {
 						break
 					}
+					longOwner, lookupErr := cache.GetChatGPTDeliveryOwner(c.Request.Context(), scope.AssetOwnerKey(digest))
+					if lookupErr != nil {
+						h.errorResponse(c, 503, "accounting_unavailable", "Chat asset ownership is unavailable")
+						return
+					}
+					if longOwner != nil {
+						deliveryOwner = longOwner.AccountID
+						break
+					}
 				}
 			}
 		}
 	}
-	if turn == nil && uploadOwner == 0 {
+	if turn == nil && uploadOwner == 0 && deliveryOwner == 0 {
 		h.errorResponse(c, 404, "asset_context_unavailable", "Chat asset ownership is unavailable")
 		return
 	}
 	owner := uploadOwner
+	if deliveryOwner != 0 {
+		owner = deliveryOwner
+	}
 	if turn != nil {
 		owner = turn.AccountID
 	}
@@ -476,8 +510,8 @@ func (h *OpenAIGatewayHandler) readChatGPTCompletedSnapshot(ctx context.Context,
 }
 
 func (h *OpenAIGatewayHandler) readChatGPTOwnedSnapshot(ctx context.Context, c *gin.Context, key *service.APIKey, cache service.ChatGPTTurnCache, scope service.ChatGPTTurnScope, accountID int64, id string, allowCompleted bool) {
-	turn, err := cache.GetChatGPTResume(ctx, scope.ResumeKey(id))
-	if err != nil || turn == nil || turn.AccountID != accountID || (turn.Completed && !allowCompleted) {
+	owner, turn, err := service.ResolveChatGPTConversationOwner(ctx, cache, scope, id)
+	if err != nil || owner == nil || owner.AccountID != accountID || (!allowCompleted && (turn == nil || turn.Completed)) {
 		return
 	}
 	account, err := h.gatewayService.GetChatGPTBoundAccount(ctx, key.GroupID, accountID)
@@ -497,7 +531,7 @@ func (h *OpenAIGatewayHandler) readChatGPTOwnedSnapshot(ctx context.Context, c *
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, service.MaxChatGPTConversationSnapshotBytes+1))
 	if err == nil {
-		h.observeChatGPTSnapshot(readCtx, copy, key, cache, scope, account, turn, id, raw)
+		h.observeChatGPTDeliverySnapshot(readCtx, copy, key, cache, scope, account, owner, turn, id, raw)
 	}
 }
 

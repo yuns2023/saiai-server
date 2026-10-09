@@ -3670,6 +3670,7 @@ export default {
       errorDetail: {
         noModelInitialization: 'Initialization / no model call',
         noModelCatalog: 'Model catalog / no model call',
+        noModelHistory: 'History read / no model call',
         noModelAsset: 'File download / no model call',
         title: 'Error Detail',
         titleWithId: 'Error #{id}',
