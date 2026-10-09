@@ -12,6 +12,7 @@ export function getOpsModelLabel(log: Pick<OpsErrorLog, 'model' | 'request_path'
   if (log.model) return log.model
   const path = log.request_path || ''
   if (path === '/chatgpt/backend-api/conversation/init' ||
+      path === '/chatgpt/backend-api/ios/attestation_challenge' ||
       path === '/chatgpt/backend-api/sentinel/chat-requirements/prepare' ||
       path.startsWith('/chatgpt/backend-api/f/conversation/')) {
     return t('admin.ops.errorDetail.noModelInitialization')

@@ -7,6 +7,22 @@ positive price and the normal release gates are explicitly approved.
 
 ## Evidence boundary
 
+macOS Desktop 26.930.51102 requests `GET /ios/attestation_challenge` through
+its native backend client before generation; Windows/web preparation uses the
+separate Sentinel POST. The managed route is
+`GET /chatgpt/backend-api/ios/attestation_challenge`. It forwards the real
+provider challenge and integrity headers rather than returning an empty local
+success. It is a control request with no model-turn charge or retained model
+slot. The unchanged challenge response (including its encoding) is inspected
+only to bind a scoped digest to its OAuth owner for five minutes. A generation
+carrying `app_attest_challenge` must use that owner and agree with any existing
+conversation or attachment ownership. Unknown, expired or foreign challenges
+fail before generation; the Gateway never fabricates integrity tokens or
+silently switches accounts. Multi-account continuation with an incompatible
+challenge is rejected, not repaired by altering the client's integrity data.
+These local replay checks do not establish actual Apple DeviceCheck/provider
+acceptance on an installed Desktop.
+
 Public OpenAI Responses usage is not the native ChatGPT conversation
 protocol. The public Responses stream reports usage in its completed response,
 including input, output, cached-input, and total tokens. Those field names and

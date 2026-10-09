@@ -98,6 +98,10 @@ func TestRetiredProviderRoutesAreNotRegistered(t *testing.T) {
 
 func TestChatGPTConversationRouteIsRegisteredButDisabledByDefault(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
+	attestation := httptest.NewRecorder()
+	router.ServeHTTP(attestation, httptest.NewRequest(http.MethodGet, "/chatgpt/backend-api/ios/attestation_challenge", nil))
+	require.Equal(t, http.StatusNotFound, attestation.Code)
+	require.Contains(t, attestation.Body.String(), "Native ChatGPT Chat is disabled")
 	for _, path := range []string{"/chatgpt/backend-api/files", "/chatgpt/backend-api/files/process_upload_stream", "/chatgpt/backend-api/estuary/upload_content_bytes", "/chatgpt/api/estuary/upload_content_bytes"} {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"file_size":16}`)))

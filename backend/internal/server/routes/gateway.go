@@ -125,6 +125,7 @@ func RegisterGatewayRoutes(
 	chatgpt.Use(requireGroupAnthropic)
 	{
 		chatgpt.GET("/models", h.OpenAIGateway.ChatGPTModels)
+		chatgpt.GET("/ios/attestation_challenge", h.OpenAIGateway.ChatGPTAttestationChallenge)
 		chatgpt.GET("/celsius/ws/user", h.OpenAIGateway.ChatGPTUpdatesBootstrap)
 		chatgpt.GET("/saiai/chat-updates", h.OpenAIGateway.ChatGPTUpdatesWebSocket)
 		chatgpt.GET("/conversation/:conversation_id", h.OpenAIGateway.ChatGPTConversationRead)

@@ -11,6 +11,7 @@ describe('Ops model label', () => {
 
   it('identifies native control requests without inventing a model', () => {
     expect(getOpsModelLabel({ model: '', request_path: '/chatgpt/backend-api/conversation/init' }, t)).toBe('admin.ops.errorDetail.noModelInitialization')
+    expect(getOpsModelLabel({ model: '', request_path: '/chatgpt/backend-api/ios/attestation_challenge' }, t)).toBe('admin.ops.errorDetail.noModelInitialization')
     expect(getOpsModelLabel({ model: '', request_path: '/chatgpt/backend-api/models' }, t)).toBe('admin.ops.errorDetail.noModelCatalog')
     expect(getOpsModelLabel({ model: '', request_path: '/chatgpt/backend-api/estuary/content' }, t)).toBe('admin.ops.errorDetail.noModelAsset')
   })

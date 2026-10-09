@@ -308,6 +308,29 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			}
 		}
 	}
+	if isModelRequest {
+		challenge, challengeErr := service.ChatGPTRequestAttestation(body)
+		if challengeErr != nil {
+			h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", "Invalid Chat integrity metadata", streamStarted)
+			return
+		}
+		if challenge != "" {
+			cache, cacheErr := h.gatewayService.ChatGPTUploadCache()
+			var owner int64
+			if cacheErr == nil {
+				owner, cacheErr = cache.GetChatGPTUploadOwner(forwardCtx, turnScope.AttestationKey(challenge))
+			}
+			if cacheErr != nil {
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "integrity_context_unavailable", "Chat integrity ownership is unavailable", streamStarted)
+				return
+			}
+			if owner == 0 || (conversationOwnerID != 0 && conversationOwnerID != owner) || (turn != nil && turn.AccountID != owner) {
+				h.handleStreamingAwareError(c, http.StatusConflict, "integrity_context_unavailable", "Chat integrity must belong to this conversation account; refresh integrity before retrying", streamStarted)
+				return
+			}
+			conversationOwnerID = owner
+		}
+	}
 	sessionHash := service.ResolveChatGPTConversationSessionHash(body)
 	if sessionHash == "" {
 		sessionHash = h.gatewayService.GenerateSessionHash(c, body)
