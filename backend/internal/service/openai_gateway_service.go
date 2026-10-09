@@ -2925,6 +2925,10 @@ func (s *OpenAIGatewayService) buildChatGPTRequest(
 	if !strings.HasPrefix(path, "/chatgpt/backend-api/") && strings.SplitN(path, "?", 2)[0] != "/chatgpt/api/estuary/upload_content_bytes" {
 		return nil, "", fmt.Errorf("invalid native ChatGPT path: %s", path)
 	}
+	deviceHeaders := make(http.Header)
+	if err := copyChatGPTDeviceCookie(c, account, deviceHeaders); err != nil {
+		return nil, "", err
+	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, "", fmt.Errorf("native ChatGPT OAuth token unavailable: %w", err)
@@ -2961,6 +2965,9 @@ func (s *OpenAIGatewayService) buildChatGPTRequest(
 	}
 	req.Header.Set("authorization", "Bearer "+token)
 	req.Header.Set("chatgpt-account-id", accountID)
+	if cookie := deviceHeaders.Get("Cookie"); cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
 	for key, values := range c.Request.Header {
 		if !shouldCopyOpenAIRequestHeader(key) {
 			continue

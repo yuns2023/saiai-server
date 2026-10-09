@@ -50,8 +50,8 @@ func (h *OpenAIGatewayHandler) ChatGPTUpload(c *gin.Context) {
 			h.errorResponse(c, 400, "invalid_request_error", "Invalid Chat upload size")
 			return
 		}
-		device := c.GetHeader("OAI-Device-ID")
-		if len(device) > 512 {
+		device, deviceErr := service.ChatGPTDeviceID(c.Request.Header)
+		if deviceErr != nil {
 			h.errorResponse(c, 400, "invalid_request_error", "Invalid Chat device identity")
 			return
 		}

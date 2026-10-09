@@ -30,15 +30,26 @@ func (h *OpenAIGatewayHandler) ChatGPTAttestationChallenge(c *gin.Context) {
 		h.errorResponse(c, 503, "integrity_context_unavailable", "Chat integrity ownership is unavailable")
 		return
 	}
-	device := c.GetHeader("OAI-Device-ID")
-	if len(device) > 512 {
+	device, err := service.ChatGPTDeviceID(c.Request.Header)
+	if err != nil {
 		h.errorResponse(c, 400, "invalid_request_error", "Invalid Chat device identity")
+		return
+	}
+	cookieOwner, ok := h.chatGPTDeviceCookieOwner(c, scope)
+	if !ok {
 		return
 	}
 	// Share the existing short upload affinity when present, so creating an
 	// attachment and preparing integrity cannot silently use different accounts.
 	sessionKey := scope.UploadSessionKey(device)
 	owner, err := cache.GetChatGPTUploadOwner(c.Request.Context(), sessionKey)
+	if err == nil && cookieOwner != 0 {
+		if owner != 0 && owner != cookieOwner {
+			h.errorResponse(c, 409, "integrity_context_unavailable", "Chat device and upload accounts differ")
+			return
+		}
+		owner = cookieOwner
+	}
 	if err == nil && owner == 0 {
 		// The integrity GET has no conversation ID. When this scope has exactly
 		// one live conversation account, retain it after the short upload lease

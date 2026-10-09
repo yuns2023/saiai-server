@@ -282,13 +282,16 @@ type chatGPTProviderFrame struct {
 	Failed    bool
 }
 
-func (h *OpenAIGatewayHandler) reserveChatGPTUpdates(scope service.ChatGPTTurnScope) (func(), bool) {
+func (h *OpenAIGatewayHandler) reserveChatGPTUpdates(scope service.ChatGPTTurnScope, device ...string) (func(), bool) {
 	h.chatGPTUpdatesMu.Lock()
 	defer h.chatGPTUpdatesMu.Unlock()
 	if h.chatGPTUpdatesConnections == nil {
 		h.chatGPTUpdatesConnections = make(map[string]int)
 	}
 	id := scope.UpdatesKey()
+	if len(device) > 0 && device[0] != "" {
+		id = scope.DeviceCookieKey(device[0], "updates-connections")
+	}
 	// One official Desktop opens separate conversation, messaging and app
 	// notification transports. Leave room for all three plus a reconnect.
 	if h.chatGPTUpdatesConnections[id] >= 4 || h.chatGPTUpdatesActive >= 64 {
@@ -312,7 +315,12 @@ func (h *OpenAIGatewayHandler) ChatGPTUpdatesWebSocket(c *gin.Context) {
 	if !ok {
 		return
 	}
-	release, ok := h.reserveChatGPTUpdates(scope)
+	device, err := service.ChatGPTDeviceID(c.Request.Header)
+	if err != nil {
+		h.errorResponse(c, 400, "invalid_request_error", "Invalid Chat device identity")
+		return
+	}
+	release, ok := h.reserveChatGPTUpdates(scope, device)
 	if !ok {
 		h.errorResponse(c, 429, "concurrency_limit", "Too many Chat update connections")
 		return
