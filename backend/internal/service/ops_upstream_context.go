@@ -423,6 +423,12 @@ func captureOpsHeadersFromMap(headers http.Header) []OpsCapturedHeaderLine {
 func isSensitiveOpsUpstreamHeader(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "authorization",
+		"x-sentinel-dc",
+		"openai-sentinel-chat-requirements-token",
+		"openai-sentinel-chat-requirements-prepare-token",
+		"openai-sentinel-proof-token",
+		"openai-sentinel-turnstile-token",
+		"openai-sentinel-token",
 		"proxy-authorization",
 		"x-api-key",
 		"x-goog-api-key",

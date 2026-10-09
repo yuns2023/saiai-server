@@ -7,6 +7,24 @@ positive price and the normal release gates are explicitly approved.
 
 ## Evidence boundary
 
+Mac Desktop 26.930 also registers a real Apple token with `POST /devicecheck`
+and consumes a provider-issued `_devicecheck` Cookie before native Chat. The
+managed route `/chatgpt/backend-api/devicecheck` preserves its body/query and
+integrity headers. It is a non-billable control request with no model slot.
+Only the original `_devicecheck` response header is returned; unrelated auth
+cookies remain excluded. A scoped digest binds that proof to its original
+OAuth account and the native cookie manager's `oai-did` (falling back to
+`OAI-Device-ID` when absent), without persisting the Cookie or Apple token.
+Native headers are not rewritten. Subsequent challenge, catalog, preparation
+and generation must agree with that proof and any existing ownership.
+Foreign, ambiguous or expired proofs are rejected before provider traffic; an
+unusable local proof is expired so the official client can register again.
+The Gateway performs no automatic provider retry. Ownership follows the real
+Cookie expiry, capped at 30 days; session cookies use 24 hours. Device tokens,
+challenge values and device proof headers are redacted from diagnostics.
+Local mocks establish this missing protocol boundary, not live device-check
+acceptance or proof that every upstream unusual-activity denial is resolved.
+
 macOS Desktop 26.930.51102 requests `GET /ios/attestation_challenge` through
 its native backend client before generation; Windows/web preparation uses the
 separate Sentinel POST. The managed route is

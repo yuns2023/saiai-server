@@ -131,6 +131,14 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	var turnScope service.ChatGPTTurnScope
 	resumeConversationID := ""
 	var conversationOwnerID int64
+	if subject, present := middleware2.GetAuthSubjectFromContext(c); present {
+		cookieScope := service.ChatGPTTurnScope{UserID: subject.UserID, APIKeyID: apiKey.ID, GroupID: apiKey.Group.ID}
+		var valid bool
+		conversationOwnerID, valid = h.chatGPTDeviceCookieOwner(c, cookieScope)
+		if !valid {
+			return
+		}
+	}
 	if isResumeRequest {
 		subject, ok := middleware2.GetAuthSubjectFromContext(c)
 		if !ok {
@@ -291,6 +299,10 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusConflict, "conversation_context_unavailable", "ChatGPT conversation ownership is unavailable; start a new conversation", streamStarted)
 					return
 				}
+				if conversationOwnerID != 0 && conversationOwnerID != active.AccountID {
+					h.handleStreamingAwareError(c, http.StatusConflict, "integrity_context_unavailable", "Chat device and conversation accounts differ", streamStarted)
+					return
+				}
 				conversationOwnerID = active.AccountID
 			}
 			fileIDs, attachmentErr := service.ChatGPTRequestUploadFileIDs(body)
@@ -337,6 +349,10 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	}
 	var selection *service.AccountSelectionResult
 	var selectErr error
+	if turn != nil && conversationOwnerID != 0 && turn.AccountID != conversationOwnerID {
+		h.handleStreamingAwareError(c, http.StatusConflict, "integrity_context_unavailable", "Chat device and turn accounts differ", streamStarted)
+		return
+	}
 	if turn != nil {
 		selection, selectErr = h.gatewayService.SelectChatGPTBoundAccount(forwardCtx, apiKey.GroupID, turn.AccountID)
 	} else if conversationOwnerID > 0 {
@@ -690,9 +706,21 @@ func (h *OpenAIGatewayHandler) chatGPTControlGET(c *gin.Context, sessionHash, fa
 	if sessionHash == "" {
 		sessionHash = h.gatewayService.GenerateSessionHash(c, nil)
 	}
-	selection, _, selectErr := h.gatewayService.SelectChatGPTOAuthAccount(
-		c.Request.Context(), apiKey.GroupID, sessionHash, "",
-	)
+	var owner int64
+	if subject, present := middleware2.GetAuthSubjectFromContext(c); present {
+		var valid bool
+		owner, valid = h.chatGPTDeviceCookieOwner(c, service.ChatGPTTurnScope{UserID: subject.UserID, APIKeyID: apiKey.ID, GroupID: apiKey.Group.ID})
+		if !valid {
+			return
+		}
+	}
+	var selection *service.AccountSelectionResult
+	var selectErr error
+	if owner != 0 {
+		selection, selectErr = h.gatewayService.SelectChatGPTBoundAccount(c.Request.Context(), apiKey.GroupID, owner)
+	} else {
+		selection, _, selectErr = h.gatewayService.SelectChatGPTOAuthAccount(c.Request.Context(), apiKey.GroupID, sessionHash, "")
+	}
 	if selectErr != nil || selection == nil || selection.Account == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
 			"type": "service_unavailable", "message": "No available OpenAI OAuth account",

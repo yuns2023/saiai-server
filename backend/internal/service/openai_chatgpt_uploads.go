@@ -181,7 +181,7 @@ func (s *chatGPTMemoryTurnCache) ClaimChatGPTUploadOwner(_ context.Context, key 
 	if prior, ok := s.uploads[key]; ok {
 		return prior.accountID, nil
 	}
-	if accountID <= 0 || ttl <= 0 || ttl > ChatGPTUploadTTL || len(s.uploads) >= 4096 {
+	if accountID <= 0 || !ValidChatGPTUploadClaimTTL(key, ttl) || len(s.uploads) >= 4096 {
 		return 0, errors.New("invalid native Chat upload claim")
 	}
 	s.uploads[key] = chatGPTMemoryUpload{accountID, time.Now().Add(ttl)}

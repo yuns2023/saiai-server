@@ -420,3 +420,29 @@ func TestChatGPTUpdatesCapacityIncludesOfficialAuxiliaryTransports(t *testing.T)
 	require.True(t, ok, "one scope cannot exhaust a different user's reservation")
 	t.Cleanup(release)
 }
+
+func TestChatGPTUpdatesCapacitySeparatesDevicesAndKeepsProcessBound(t *testing.T) {
+	h := &OpenAIGatewayHandler{}
+	scope := service.ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
+	var releases []func()
+	for _, device := range []string{"TEST_ONLY_MAC", "TEST_ONLY_WINDOWS"} {
+		for range 4 {
+			release, ok := h.reserveChatGPTUpdates(scope, device)
+			require.True(t, ok)
+			releases = append(releases, release)
+		}
+		_, ok := h.reserveChatGPTUpdates(scope, device)
+		require.False(t, ok)
+	}
+	releases[0]()
+	release, ok := h.reserveChatGPTUpdates(scope, "TEST_ONLY_MAC")
+	require.True(t, ok)
+	release()
+	for _, release := range releases[1:] {
+		release()
+	}
+	require.Zero(t, h.chatGPTUpdatesActive)
+	h.chatGPTUpdatesActive = 64
+	_, ok = h.reserveChatGPTUpdates(scope, "TEST_ONLY_NEW_DEVICE")
+	require.False(t, ok)
+}

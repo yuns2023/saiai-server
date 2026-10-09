@@ -37,7 +37,7 @@ func (c *gatewayCache) GetChatGPTUploadOwner(ctx context.Context, key string) (i
 	return owner, nil
 }
 func (c *gatewayCache) ClaimChatGPTUploadOwner(ctx context.Context, key string, owner int64, ttl time.Duration) (int64, error) {
-	if owner <= 0 || ttl <= 0 || ttl > service.ChatGPTUploadTTL {
+	if owner <= 0 || !service.ValidChatGPTUploadClaimTTL(key, ttl) {
 		return 0, errors.New("invalid native Chat upload claim")
 	}
 	raw, err := chatGPTClaimUpload.Run(ctx, c.rdb, []string{key}, strconv.FormatInt(owner, 10), ttl.Milliseconds()).Text()

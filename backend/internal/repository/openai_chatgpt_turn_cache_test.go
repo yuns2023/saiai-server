@@ -67,6 +67,34 @@ func TestNativeChatRedisUploadOwnershipIsAtomicScopedAndNeverExtended(t *testing
 	require.Zero(t, missing)
 }
 
+func TestNativeChatRedisDeviceProofLifetimeKeepsOriginalOwner(t *testing.T) {
+	socket := os.Getenv("SAIAI_TEST_REDIS_SOCKET")
+	if socket == "" {
+		t.Skip("disposable Redis socket not supplied")
+	}
+	require.True(t, filepath.IsAbs(socket))
+	ctx := context.Background()
+	rdb := redis.NewClient(&redis.Options{Network: "unix", Addr: socket, DialTimeout: 3 * time.Second})
+	t.Cleanup(func() { _ = rdb.Close() })
+	cache := &gatewayCache{rdb: rdb}
+	scope := service.ChatGPTTurnScope{UserID: time.Now().UnixNano(), APIKeyID: 2, GroupID: 3}
+	key := scope.DeviceCookieKey("TEST_ONLY_DEVICE", "TEST_ONLY_PROOF")
+	t.Cleanup(func() { _ = rdb.Del(ctx, key).Err() })
+	owner, err := cache.ClaimChatGPTUploadOwner(ctx, key, 17, 24*time.Hour)
+	require.NoError(t, err)
+	require.EqualValues(t, 17, owner)
+	ttl := rdb.PTTL(ctx, key).Val()
+	require.Greater(t, ttl, 23*time.Hour)
+	owner, err = cache.ClaimChatGPTUploadOwner(ctx, key, 19, 30*24*time.Hour)
+	require.NoError(t, err)
+	require.EqualValues(t, 17, owner, "another account must not steal an issued proof")
+	require.LessOrEqual(t, rdb.PTTL(ctx, key).Val(), ttl, "a repeated claim must not renew the proof")
+	_, err = cache.ClaimChatGPTUploadOwner(ctx, scope.UploadSessionKey("TEST_ONLY_DEVICE"), 17, 24*time.Hour)
+	require.Error(t, err, "ordinary upload leases must retain the one-hour limit")
+	_, err = cache.ClaimChatGPTUploadOwner(ctx, key, 17, 31*24*time.Hour)
+	require.Error(t, err)
+}
+
 func TestNativeChatImageBillingRedisSealsConcurrentReplaysAndRetainsTTL(t *testing.T) {
 	socket := os.Getenv("SAIAI_TEST_REDIS_SOCKET")
 	if socket == "" {

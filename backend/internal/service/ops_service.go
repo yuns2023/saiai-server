@@ -811,6 +811,9 @@ func isSensitiveKey(key string) bool {
 	// Exact matches (common credential fields).
 	switch k {
 	case "authorization",
+		"app_attest_challenge",
+		"attestation_challenge",
+		"x-sentinel-dc",
 		"proxy-authorization",
 		"x-api-key",
 		"api_key",

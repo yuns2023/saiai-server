@@ -26,7 +26,9 @@ turn expiry. Raw conversation IDs, topic IDs, provider subscription URLs,
 credentials, message content and image pointers are not persisted.
 
 The broker multiplexes at most 16 accounts per scope, 32 topics per connection,
-four connections per scope and 64 per process. Official Desktop opens distinct
+four connections per device within the user/Key/group scope and 64 per process.
+The device ID is digested and never changes subscription ownership. Requests
+without a device retain the four-per-scope legacy limit. Official Desktop opens distinct
 conversation, messaging and app-notification transports; the fourth reservation
 permits a reconnect. Unsupported auxiliary topics remain local and open no
 provider connection. It checks group/account
