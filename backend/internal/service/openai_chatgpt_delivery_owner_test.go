@@ -12,7 +12,8 @@ import (
 func TestChatGPTDeliveryOwnershipSurvivesAccountingExpiryWithoutRevivingBill(t *testing.T) {
 	ctx := context.Background()
 	cache := NewChatGPTMemoryTurnCache()
-	mem := cache.(*chatGPTMemoryTurnCache)
+	mem, ok := cache.(*chatGPTMemoryTurnCache)
+	require.True(t, ok)
 	scope := ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
 	turn := &ChatGPTTurnSnapshot{Identity: ChatGPTTurnBillingIdentity{RequestID: "TEST_ONLY_TURN", PayloadHash: "TEST_ONLY_HASH"}, AccountID: 19, BasePriceUSD: .01, StartedAt: time.Now(), UserMessageHash: ChatGPTMessageIDHash("TEST_ONLY_USER")}
 	turnKey := scope.TurnKey(turn.Identity)
