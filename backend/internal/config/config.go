@@ -356,6 +356,11 @@ type SoraStorageCleanupConfig struct {
 	RetentionDays int    `mapstructure:"retention_days"`
 }
 
+const (
+	DefaultOpenAIChatUpdatesConnectionsPerDevice = 8
+	MaxOpenAIChatUpdatesConnections              = 64
+)
+
 // GatewayConfig API网关相关配置
 type GatewayConfig struct {
 	// 等待上游响应头的超时时间（秒），0表示无超时
@@ -381,6 +386,9 @@ type GatewayConfig struct {
 	OpenAIChatEnabled bool `mapstructure:"openai_chat_enabled"`
 	// Requires a compatible local proxy and scoped conversation ownership.
 	OpenAIChatUpdatesEnabled bool `mapstructure:"openai_chat_updates_enabled"`
+	// Per-device delivery sockets are separate from account model concurrency.
+	// Zero uses the default; the process-wide safety bound remains 64.
+	OpenAIChatUpdatesConnectionsPerDevice int `mapstructure:"openai_chat_updates_connections_per_device"`
 	// OpenAIChatUpstreamBaseURL overrides the native ChatGPT origin for an
 	// isolated replay/fake provider. Empty means https://chatgpt.com.
 	OpenAIChatUpstreamBaseURL string `mapstructure:"openai_chat_upstream_base_url"`
@@ -1411,6 +1419,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_provider_attempt_budget.expires_at", "")
 	viper.SetDefault("gateway.openai_chat_enabled", false)
 	viper.SetDefault("gateway.openai_chat_updates_enabled", false)
+	viper.SetDefault("gateway.openai_chat_updates_connections_per_device", DefaultOpenAIChatUpdatesConnectionsPerDevice)
 	viper.SetDefault("gateway.openai_chat_upstream_base_url", "")
 	viper.SetDefault("gateway.openai_chat_model_request_cap", 0)
 	viper.SetDefault("gateway.openai_chat_unaccounted_allowed", false)
@@ -2177,6 +2186,9 @@ func (c *Config) Validate() error {
 		if c.Gateway.UsageRecord.AutoScaleCooldownSeconds < 0 {
 			return fmt.Errorf("gateway.usage_record.auto_scale_cooldown_seconds must be non-negative")
 		}
+	}
+	if c.Gateway.OpenAIChatUpdatesConnectionsPerDevice < 0 || c.Gateway.OpenAIChatUpdatesConnectionsPerDevice > MaxOpenAIChatUpdatesConnections {
+		return fmt.Errorf("gateway.openai_chat_updates_connections_per_device must be between 0-%d (0 uses the default)", MaxOpenAIChatUpdatesConnections)
 	}
 	if c.Gateway.UserGroupRateCacheTTLSeconds <= 0 {
 		return fmt.Errorf("gateway.user_group_rate_cache_ttl_seconds must be positive")

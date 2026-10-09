@@ -410,7 +410,7 @@ func testChatGPTAsyncImageDelivery(t *testing.T, handoff string) {
 func TestChatGPTUpdatesCapacityIncludesOfficialAuxiliaryTransports(t *testing.T) {
 	h := &OpenAIGatewayHandler{}
 	scope := service.ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
-	for range 4 {
+	for range 8 {
 		release, ok := h.reserveChatGPTUpdates(scope)
 		require.True(t, ok)
 		t.Cleanup(release)
@@ -476,7 +476,7 @@ func TestChatGPTUpdatesBootstrapSeparatesBrowserWebSocketsWithoutDeviceHeaders(t
 		}
 	})
 	for _, endpoint := range []string{mac, windows} {
-		for range 4 {
+		for range 8 {
 			// A browser handshake sends no custom OAI device header.
 			client, response, err := coderws.Dial(ctx, endpoint, nil)
 			require.NoError(t, err)
@@ -541,7 +541,7 @@ func TestChatGPTUpdatesCapacitySeparatesDevicesAndKeepsProcessBound(t *testing.T
 	scope := service.ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
 	var releases []func()
 	for _, device := range []string{"TEST_ONLY_MAC", "TEST_ONLY_WINDOWS"} {
-		for range 4 {
+		for range 8 {
 			release, ok := h.reserveChatGPTUpdates(scope, device)
 			require.True(t, ok)
 			releases = append(releases, release)
@@ -560,4 +560,31 @@ func TestChatGPTUpdatesCapacitySeparatesDevicesAndKeepsProcessBound(t *testing.T
 	h.chatGPTUpdatesActive = 64
 	_, ok = h.reserveChatGPTUpdates(scope, "TEST_ONLY_NEW_DEVICE")
 	require.False(t, ok)
+}
+
+func TestChatGPTUpdatesConfiguredCapacityRetainsProcessBoundAndRelease(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIChatUpdatesConnectionsPerDevice = 16
+	h := &OpenAIGatewayHandler{cfg: cfg}
+	scope := service.ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
+	var releases []func()
+	for _, device := range []string{"ONE", "TWO", "THREE", "FOUR"} {
+		for range 16 {
+			release, ok := h.reserveChatGPTUpdates(scope, device)
+			require.True(t, ok)
+			releases = append(releases, release)
+		}
+		_, ok := h.reserveChatGPTUpdates(scope, device)
+		require.False(t, ok)
+	}
+	_, ok := h.reserveChatGPTUpdates(scope, "FIVE")
+	require.False(t, ok, "a higher device limit must retain the 64-connection process bound")
+	releases[0]()
+	release, ok := h.reserveChatGPTUpdates(scope, "FIVE")
+	require.True(t, ok, "disconnect releases capacity for another device")
+	release()
+	for _, release := range releases[1:] {
+		release()
+	}
+	require.Zero(t, h.chatGPTUpdatesActive)
 }

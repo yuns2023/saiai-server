@@ -34,11 +34,12 @@ and retain the original one-hour turn expiry. Raw conversation IDs, topic IDs, p
 credentials, message content and image pointers are not persisted.
 
 The broker multiplexes at most 16 accounts per scope, 32 topics per connection,
-four connections per device within the user/Key/group scope and 64 per process.
+eight connections per device by default within the user/Key/group scope and 64 per process.
 The device ID is digested and never changes subscription ownership. Requests
-without a device retain the four-per-scope legacy limit. Official Desktop opens distinct
-conversation, messaging and app-notification transports; the fourth reservation
-permits a reconnect. Unsupported auxiliary topics remain local and open no
+without a device retain the same configured per-scope legacy limit. Official Desktop opens distinct
+conversation, messaging and app-notification transports. The original four-slot
+estimate left only one reconnect reservation; eight leaves more room for
+multiple windows and overlapping reconnects. Unsupported auxiliary topics remain local and open no
 provider connection. It checks group/account
 eligibility during delivery. Expired ownership, unavailable owners and Redis
 errors fail closed. It does not fail over an owned conversation to another
@@ -48,6 +49,14 @@ These notification reservations are independent of account model concurrency
 and have no per-connection billing. Opening them does not use one of the
 account's model-request slots. Connection diagnostics distinguish bootstrap
 device hints, device headers and the legacy shared scope.
+
+Administrators can tune `gateway.openai_chat_updates_connections_per_device`
+or `GATEWAY_OPENAI_CHAT_UPDATES_CONNECTIONS_PER_DEVICE`, for example to 16.
+The accepted range is 1–64; zero selects the default eight. Negative values or
+values above the unchanged global 64-connection bound fail configuration
+validation. The effective limit applies to both identified devices and the
+legacy unidentified scope; it never changes account model concurrency or
+turn/image pricing. Configuration changes require a Gateway restart.
 
 Historical conversation reads, known image downloads and a new generation in
 an owned conversation use a separate 30-day routing lease. Activity on a known

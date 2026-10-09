@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -361,6 +362,13 @@ type chatGPTProviderFrame struct {
 	Failed    bool
 }
 
+func (h *OpenAIGatewayHandler) chatGPTUpdatesDeviceLimit() int {
+	if h.cfg != nil && h.cfg.Gateway.OpenAIChatUpdatesConnectionsPerDevice > 0 {
+		return min(h.cfg.Gateway.OpenAIChatUpdatesConnectionsPerDevice, config.MaxOpenAIChatUpdatesConnections)
+	}
+	return config.DefaultOpenAIChatUpdatesConnectionsPerDevice
+}
+
 func (h *OpenAIGatewayHandler) reserveChatGPTUpdates(scope service.ChatGPTTurnScope, device ...string) (func(), bool) {
 	h.chatGPTUpdatesMu.Lock()
 	defer h.chatGPTUpdatesMu.Unlock()
@@ -371,9 +379,9 @@ func (h *OpenAIGatewayHandler) reserveChatGPTUpdates(scope service.ChatGPTTurnSc
 	if len(device) > 0 && device[0] != "" {
 		id = scope.DeviceCookieKey(device[0], "updates-connections")
 	}
-	// One official Desktop opens separate conversation, messaging and app
-	// notification transports. Leave room for all three plus a reconnect.
-	if h.chatGPTUpdatesConnections[id] >= 4 || h.chatGPTUpdatesActive >= 64 {
+	// Multiple renderer windows and reconnects need headroom beyond the three
+	// notification transports of one Desktop. Keep total delivery sockets bounded.
+	if h.chatGPTUpdatesConnections[id] >= h.chatGPTUpdatesDeviceLimit() || h.chatGPTUpdatesActive >= config.MaxOpenAIChatUpdatesConnections {
 		return nil, false
 	}
 	h.chatGPTUpdatesConnections[id]++
@@ -409,7 +417,8 @@ func (h *OpenAIGatewayHandler) ChatGPTUpdatesWebSocket(c *gin.Context) {
 	}
 	if !ok {
 		logger.L().Warn("openai.chatgpt_updates_connection_limit", zap.Int64("api_key_id", key.ID),
-			zap.String("device_scope_source", deviceSource), zap.Int("device_limit", 4), zap.Int("process_limit", 64))
+			zap.String("device_scope_source", deviceSource), zap.Int("device_limit", h.chatGPTUpdatesDeviceLimit()),
+			zap.Int("process_limit", config.MaxOpenAIChatUpdatesConnections))
 		h.errorResponse(c, 429, "concurrency_limit", "Too many Chat update connections")
 		return
 	}
@@ -428,7 +437,8 @@ func (h *OpenAIGatewayHandler) ChatGPTUpdatesWebSocket(c *gin.Context) {
 		cancel()
 		logger.L().Info("openai.chatgpt_updates_closed", zap.Int64("api_key_id", key.ID), zap.String("reason", closeReason))
 	}()
-	logger.L().Info("openai.chatgpt_updates_opened", zap.Int64("api_key_id", key.ID), zap.String("device_scope_source", deviceSource))
+	logger.L().Info("openai.chatgpt_updates_opened", zap.Int64("api_key_id", key.ID), zap.String("device_scope_source", deviceSource),
+		zap.Int("device_limit", h.chatGPTUpdatesDeviceLimit()), zap.Int("process_limit", config.MaxOpenAIChatUpdatesConnections))
 	subscriptions := &chatGPTSubscriptions{Topics: make(map[string]chatGPTSubscription), Presence: "foreground"}
 	output := make(chan []byte, 8)
 	frames := make(chan chatGPTProviderFrame)

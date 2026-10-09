@@ -102,6 +102,38 @@ func TestLoadStandardUpstreamConnectionDefaultsAndRollback(t *testing.T) {
 	})
 }
 
+func TestLoadChatGPTUpdatesConnectionCapacity(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.Equal(t, 8, cfg.Gateway.OpenAIChatUpdatesConnectionsPerDevice)
+	})
+	for _, test := range []struct {
+		value string
+		want  int
+		fail  bool
+	}{
+		{"16", 16, false},
+		{"64", 64, false},
+		{"0", 0, false},
+		{"-1", 0, true},
+		{"65", 0, true},
+	} {
+		t.Run(test.value, func(t *testing.T) {
+			resetViperWithJWTSecret(t)
+			t.Setenv("GATEWAY_OPENAI_CHAT_UPDATES_CONNECTIONS_PER_DEVICE", test.value)
+			cfg, err := Load()
+			if test.fail {
+				require.ErrorContains(t, err, "openai_chat_updates_connections_per_device")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.want, cfg.Gateway.OpenAIChatUpdatesConnectionsPerDevice)
+		})
+	}
+}
+
 func TestLoadAnthropicStreamTerminalGraceConfig(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		resetViperWithJWTSecret(t)
