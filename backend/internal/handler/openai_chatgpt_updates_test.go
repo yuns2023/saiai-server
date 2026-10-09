@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -419,6 +420,120 @@ func TestChatGPTUpdatesCapacityIncludesOfficialAuxiliaryTransports(t *testing.T)
 	release, ok := h.reserveChatGPTUpdates(service.ChatGPTTurnScope{UserID: 2, APIKeyID: 2, GroupID: 3})
 	require.True(t, ok, "one scope cannot exhaust a different user's reservation")
 	t.Cleanup(release)
+}
+
+func TestChatGPTUpdatesBootstrapSeparatesBrowserWebSocketsWithoutDeviceHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Gateway.OpenAIChatEnabled = true
+	cfg.Gateway.OpenAIChatUpdatesEnabled = true
+	cache := &chatGPTSharedTurnCache{&chatGPTStickyCache{bindings: make(map[string]int64)}, service.NewChatGPTMemoryTurnCache()}
+	svc := service.NewOpenAIGatewayService(nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(3)
+		user := &service.User{ID: 1}
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 2, GroupID: &groupID, User: user,
+			Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}})
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: user.ID})
+	})
+	router.GET("/chatgpt/backend-api/celsius/ws/user", h.ChatGPTUpdatesBootstrap)
+	router.GET("/chatgpt/backend-api/saiai/chat-updates", h.ChatGPTUpdatesWebSocket)
+	gateway := httptest.NewServer(router)
+	t.Cleanup(gateway.Close)
+	bootstrap := func(header, device string) string {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/chatgpt/backend-api/celsius/ws/user", nil)
+		if device != "" {
+			r.Header.Set(header, device)
+		}
+		router.ServeHTTP(w, r)
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		var response struct {
+			URL string `json:"websocket_url"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		u, err := url.Parse(response.URL)
+		require.NoError(t, err)
+		if device != "" {
+			require.NotContains(t, response.URL, device)
+			require.Len(t, u.Query().Get(chatGPTUpdatesDeviceQuery), 64)
+		}
+		return "ws" + strings.TrimPrefix(gateway.URL, "http") + "/chatgpt" + u.RequestURI()
+	}
+	mac := bootstrap("OAI-DID", "TEST_ONLY_MAC_DEVICE")
+	windows := bootstrap("OAI-Device-ID", "TEST_ONLY_WINDOWS_DEVICE")
+	require.NotEqual(t, mac, windows)
+	require.Equal(t, mac, bootstrap("OAI-DID", "TEST_ONLY_MAC_DEVICE"), "reconnects share one device allowance")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var clients []*coderws.Conn
+	t.Cleanup(func() {
+		for _, client := range clients {
+			_ = client.CloseNow()
+		}
+	})
+	for _, endpoint := range []string{mac, windows} {
+		for range 4 {
+			// A browser handshake sends no custom OAI device header.
+			client, response, err := coderws.Dial(ctx, endpoint, nil)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusSwitchingProtocols, response.StatusCode)
+			clients = append(clients, client)
+		}
+		_, response, err := coderws.Dial(ctx, endpoint, nil)
+		require.Error(t, err)
+		require.Equal(t, http.StatusTooManyRequests, response.StatusCode)
+	}
+	for _, client := range clients {
+		require.NoError(t, client.CloseNow())
+	}
+	require.Eventually(t, func() bool {
+		h.chatGPTUpdatesMu.Lock()
+		defer h.chatGPTUpdatesMu.Unlock()
+		return h.chatGPTUpdatesActive == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestChatGPTUpdatesDeviceHintValidationAndLegacyHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	scope := service.ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
+	hint := chatGPTUpdatesDeviceHint(scope, "TEST_ONLY_DEVICE")
+	for _, test := range []struct {
+		name, query, device string
+		fail                bool
+	}{
+		{"legacy no identity", "", "", false},
+		{"legacy header", "", "TEST_ONLY_DEVICE", false},
+		{"browser hint", "?saiai_device=" + hint, "", false},
+		{"matching header and hint", "?saiai_device=" + hint, "TEST_ONLY_DEVICE", false},
+		{"different header", "?saiai_device=" + hint, "TEST_ONLY_OTHER", true},
+		{"duplicate hint", "?saiai_device=" + hint + "&saiai_device=" + hint, "", true},
+		{"empty hint", "?saiai_device=", "", true},
+		{"invalid hint", "?saiai_device=" + strings.Repeat("g", 64), "", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/chatgpt/backend-api/saiai/chat-updates"+test.query, nil)
+			if test.device != "" {
+				c.Request.Header.Set("OAI-Device-ID", test.device)
+			}
+			value, err := chatGPTUpdatesHandshakeDevice(c, scope)
+			if test.fail {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if test.device != "" || test.query != "" {
+				require.Equal(t, hint, value)
+			} else {
+				require.Empty(t, value)
+			}
+		})
+	}
+	require.NotEqual(t, hint, chatGPTUpdatesDeviceHint(service.ChatGPTTurnScope{UserID: 1, APIKeyID: 4, GroupID: 3}, "TEST_ONLY_DEVICE"))
 }
 
 func TestChatGPTUpdatesCapacitySeparatesDevicesAndKeepsProcessBound(t *testing.T) {

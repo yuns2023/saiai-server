@@ -3,6 +3,8 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -44,12 +46,55 @@ func (h *OpenAIGatewayHandler) chatGPTDeliveryContext(c *gin.Context) (*service.
 
 // The returned URL contains no provider credentials. The local proxy replaces
 // authentication again on the WebSocket handshake. Bootstrap selects no account.
+const chatGPTUpdatesDeviceQuery = "saiai_device"
+
+func chatGPTUpdatesDeviceHint(scope service.ChatGPTTurnScope, device string) string {
+	if device == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(scope.DeviceCookieKey(device, "updates-connections")))
+	return hex.EncodeToString(digest[:])
+}
+
+// Browser WebSockets cannot repeat the bootstrap's custom device headers.
+// Carry a scoped digest in our own URL, without exposing the original identity.
+// This is a capacity hint, not authentication or conversation ownership proof.
+func chatGPTUpdatesHandshakeDevice(c *gin.Context, scope service.ChatGPTTurnScope) (string, error) {
+	device, err := service.ChatGPTDeviceID(c.Request.Header)
+	if err != nil {
+		return "", err
+	}
+	headerHint := chatGPTUpdatesDeviceHint(scope, device)
+	values, present := c.Request.URL.Query()[chatGPTUpdatesDeviceQuery]
+	if !present {
+		return headerHint, nil
+	}
+	if len(values) != 1 || len(values[0]) != sha256.Size*2 {
+		return "", errors.New("invalid Chat update device hint")
+	}
+	if _, err := hex.DecodeString(values[0]); err != nil || values[0] != strings.ToLower(values[0]) ||
+		(headerHint != "" && headerHint != values[0]) {
+		return "", errors.New("invalid Chat update device hint")
+	}
+	return values[0], nil
+}
+
 func (h *OpenAIGatewayHandler) ChatGPTUpdatesBootstrap(c *gin.Context) {
-	if _, _, _, ok := h.chatGPTDeliveryContext(c); !ok {
+	_, _, scope, ok := h.chatGPTDeliveryContext(c)
+	if !ok {
 		return
 	}
+	device, err := service.ChatGPTDeviceID(c.Request.Header)
+	if err != nil {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Invalid Chat device identity")
+		return
+	}
+	endpoint := "wss://chatgpt.com/backend-api/saiai/chat-updates"
+	if hint := chatGPTUpdatesDeviceHint(scope, device); hint != "" {
+		endpoint += "?" + chatGPTUpdatesDeviceQuery + "=" + hint
+	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, gin.H{"websocket_url": "wss://chatgpt.com/backend-api/saiai/chat-updates"})
+	c.JSON(http.StatusOK, gin.H{"websocket_url": endpoint})
 }
 
 func safeChatGPTConversationID(id string) bool {
@@ -349,13 +394,22 @@ func (h *OpenAIGatewayHandler) ChatGPTUpdatesWebSocket(c *gin.Context) {
 	if !ok {
 		return
 	}
-	device, err := service.ChatGPTDeviceID(c.Request.Header)
+	device, err := chatGPTUpdatesHandshakeDevice(c, scope)
 	if err != nil {
 		h.errorResponse(c, 400, "invalid_request_error", "Invalid Chat device identity")
 		return
 	}
 	release, ok := h.reserveChatGPTUpdates(scope, device)
+	deviceSource := "legacy_shared_scope"
+	if device != "" {
+		deviceSource = "header"
+		if c.Request.URL.Query().Has(chatGPTUpdatesDeviceQuery) {
+			deviceSource = "bootstrap_hint"
+		}
+	}
 	if !ok {
+		logger.L().Warn("openai.chatgpt_updates_connection_limit", zap.Int64("api_key_id", key.ID),
+			zap.String("device_scope_source", deviceSource), zap.Int("device_limit", 4), zap.Int("process_limit", 64))
 		h.errorResponse(c, 429, "concurrency_limit", "Too many Chat update connections")
 		return
 	}
@@ -374,7 +428,7 @@ func (h *OpenAIGatewayHandler) ChatGPTUpdatesWebSocket(c *gin.Context) {
 		cancel()
 		logger.L().Info("openai.chatgpt_updates_closed", zap.Int64("api_key_id", key.ID), zap.String("reason", closeReason))
 	}()
-	logger.L().Info("openai.chatgpt_updates_opened", zap.Int64("api_key_id", key.ID))
+	logger.L().Info("openai.chatgpt_updates_opened", zap.Int64("api_key_id", key.ID), zap.String("device_scope_source", deviceSource))
 	subscriptions := &chatGPTSubscriptions{Topics: make(map[string]chatGPTSubscription), Presence: "foreground"}
 	output := make(chan []byte, 8)
 	frames := make(chan chatGPTProviderFrame)

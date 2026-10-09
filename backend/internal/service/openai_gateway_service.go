@@ -3509,6 +3509,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 	clientDisconnected := false // 客户端断开后继续 drain 上游以收集 usage
 	sawTerminalEvent := false
 	sawSuccessfulTerminal := false
+	var providerStreamFailure error
 	responseID := ""
 	sendErrorEvent := func(reason string) {
 		if errorEventSent || clientDisconnected {
@@ -3547,6 +3548,9 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 		if !sawTerminalEvent {
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
 		}
+		if providerStreamFailure != nil {
+			return resultWithUsage(), providerStreamFailure
+		}
 		return resultWithUsage(), nil
 	}
 	handleScanErr := func(scanErr error) (*openaiStreamingResult, error, bool) {
@@ -3555,7 +3559,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 		}
 		if sawTerminalEvent {
 			logger.LegacyPrintf("service.openai_gateway", "Upstream scan ended after terminal event: %v", scanErr)
-			return resultWithUsage(), nil, true
+			return resultWithUsage(), providerStreamFailure, true
 		}
 		// 客户端断开/取消请求时，上游读取往往会返回 context canceled。
 		// /v1/responses 的 SSE 事件必须符合 OpenAI 协议；这里不注入自定义 error event，避免下游 SDK 解析失败。
@@ -3587,6 +3591,13 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			}
 
 			dataBytes := []byte(data)
+			if providerStreamFailure == nil {
+				providerStreamFailure = observeOpenAIStreamFailure(c, account, resp, dataBytes)
+				if providerStreamFailure != nil {
+					sawTerminalEvent = true
+					sawSuccessfulTerminal = false
+				}
+			}
 			s.observeOpenAINativeMetadataTurnState(c, account, s.openAINativeResponseSessionHash(c), dataBytes)
 			eventResponseID := strings.TrimSpace(gjson.GetBytes(dataBytes, "response.id").String())
 			if responseID == "" {
@@ -3595,7 +3606,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			switch gjson.GetBytes(dataBytes, "type").String() {
 			case "response.completed", "response.done":
 				status := strings.TrimSpace(gjson.GetBytes(dataBytes, "response.status").String())
-				sawSuccessfulTerminal = status == "" || status == "completed"
+				sawSuccessfulTerminal = providerStreamFailure == nil && (status == "" || status == "completed")
 				if sawSuccessfulTerminal && eventResponseID != "" {
 					responseID = eventResponseID
 				}
