@@ -123,6 +123,17 @@ raw relay path. Request Details displays the saved reason and distinguishes
 upstream WebSocket error frames from HTTP and local Gateway failures. Actual
 socket close/EOF metadata remains in the connection's transport log.
 
+Native OAuth/native-relay HTTPS streaming also observes top-level `error` and
+`response.failed` events inside an HTTP 200 response. It preserves the SSE
+payload and transport status while recording a failed application outcome in
+Ops, without creating a successful continuation or usage record. Error metadata
+retains type/code, the available provider request ID and the actual transport
+status; provider messages and arbitrary extra fields are excluded to avoid
+capturing prompt content. Application status records its source explicitly:
+an event status, an error-object status, or classification from the error type
+and code. `server_is_overloaded` / `service_unavailable_error` classifies as 503;
+that classification does not claim the HTTP transport returned 503.
+
 ## Local evidence
 
 The regression suite uses synthetic credentials, recording HTTP transports,

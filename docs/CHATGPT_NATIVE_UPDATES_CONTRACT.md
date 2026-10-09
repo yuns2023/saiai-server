@@ -16,6 +16,14 @@ authenticated Gateway WebSocket endpoint and substitutes the SAIAI Key.
 Bootstrap neither selects an OAuth account nor contacts the provider. An old
 Gateway returns an unsupported response; a compatible Client is required.
 
+Browser WebSocket handshakes may omit the custom device headers sent with
+bootstrap. When bootstrap has a device identity, its managed URL carries a
+`saiai_device` query value containing a user/Key/group-scoped digest. Header and
+query identities must agree when both are present. This digest groups capacity
+only: it is not authentication, conversation ownership or provider attestation.
+The original device ID is not exposed, and the query does not reach the
+provider. Existing local-proxy query preservation requires no Client update.
+
 Each subscription is scoped by authenticated user, API Key and group. A
 successful native response establishes a hashed conversation-to-turn binding
 before that chunk is delivered. The same binding fixes the selected OAuth
@@ -35,6 +43,11 @@ provider connection. It checks group/account
 eligibility during delivery. Expired ownership, unavailable owners and Redis
 errors fail closed. It does not fail over an owned conversation to another
 account.
+
+These notification reservations are independent of account model concurrency
+and have no per-connection billing. Opening them does not use one of the
+account's model-request slots. Connection diagnostics distinguish bootstrap
+device hints, device headers and the legacy shared scope.
 
 Historical conversation reads, known image downloads and a new generation in
 an owned conversation use a separate 30-day routing lease. Activity on a known
