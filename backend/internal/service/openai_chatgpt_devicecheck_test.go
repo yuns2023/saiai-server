@@ -23,7 +23,8 @@ func TestChatGPTDeviceProofIdentityLifetimeAndRedaction(t *testing.T) {
 	scope := ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
 	key := scope.DeviceCookieKey("TEST_ONLY_DEVICE", "TEST_ONLY_PROOF")
 	require.NotContains(t, key, "TEST_ONLY")
-	cache := NewChatGPTMemoryTurnCache().(ChatGPTUploadCache)
+	cache, ok := NewChatGPTMemoryTurnCache().(ChatGPTUploadCache)
+	require.True(t, ok)
 	_, err = cache.ClaimChatGPTUploadOwner(context.Background(), key, 22, 24*time.Hour)
 	require.NoError(t, err, "session device proofs need their own longer ownership lease")
 	_, err = cache.ClaimChatGPTUploadOwner(context.Background(), scope.UploadSessionKey("TEST_ONLY_DEVICE"), 22, 24*time.Hour)
@@ -46,7 +47,8 @@ func TestChatGPTDeviceProofIdentityLifetimeAndRedaction(t *testing.T) {
 	valid.Expires = now.Add(-time.Second)
 	_, err = ChatGPTDeviceCookieTTL(&valid, now)
 	require.Error(t, err)
-	redacted := redactSensitiveJSON(map[string]any{"app_attest_challenge": "TEST_ONLY_SECRET", "attestation_challenge": "TEST_ONLY_SECRET", "device_token": "TEST_ONLY_SECRET", "x-sentinel-dc": "TEST_ONLY_SECRET", "Cookie": "TEST_ONLY_SECRET", "input_tokens": 12}).(map[string]any)
+	redacted, ok := redactSensitiveJSON(map[string]any{"app_attest_challenge": "TEST_ONLY_SECRET", "attestation_challenge": "TEST_ONLY_SECRET", "device_token": "TEST_ONLY_SECRET", "x-sentinel-dc": "TEST_ONLY_SECRET", "Cookie": "TEST_ONLY_SECRET", "input_tokens": 12}).(map[string]any)
+	require.True(t, ok)
 	for _, name := range []string{"app_attest_challenge", "attestation_challenge", "device_token", "x-sentinel-dc", "Cookie"} {
 		require.Equal(t, "[REDACTED]", redacted[name])
 	}
