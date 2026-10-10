@@ -82,10 +82,10 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // upstream_endpoint
 			log.CacheTTLOverridden,
 			createdAt,
-			1.0,         // default model rate
-			1.0,         // legacy account payg discount
-			1.0,         // default user payg discount
-			[]byte(nil), // historical pricing snapshot
+			1.0, // default model rate
+			1.0, // legacy account payg discount
+			1.0, // default user payg discount
+			nil, // historical pricing snapshot
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -160,10 +160,10 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(),
 			log.CacheTTLOverridden,
 			createdAt,
-			1.0,         // default model rate
-			1.0,         // legacy account payg discount
-			1.0,         // default user payg discount
-			[]byte(nil), // historical pricing snapshot
+			1.0, // default model rate
+			1.0, // legacy account payg discount
+			1.0, // default user payg discount
+			nil, // historical pricing snapshot
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 

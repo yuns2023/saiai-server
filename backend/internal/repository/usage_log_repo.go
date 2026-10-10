@@ -4951,7 +4951,7 @@ func (r *usageLogRepository) ListRecentPricingModels(ctx context.Context) ([]str
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	models := []string{}
 	for rows.Next() {
 		var model string
