@@ -14,6 +14,7 @@
         <input v-model="search" class="input min-w-64 flex-1" :placeholder="t('admin.modelPricing.search')" :aria-label="t('admin.modelPricing.search')" />
         <label class="flex items-center gap-2 text-sm"><input v-model="configured" type="checkbox" @change="page = 1; load()" />{{ t('admin.modelPricing.configured') }}</label>
         <select v-model="tier" class="input w-auto" :aria-label="t('admin.modelPricing.tier')"><option value="default">Standard</option><option value="priority">Fast / Priority</option><option value="flex">Flex</option></select>
+        <select v-model="contextMode" class="input w-auto" :aria-label="t('admin.modelPricing.contextMode')"><option value="short">{{ t('admin.modelPricing.shortContext') }}</option><option value="long">{{ t('usage.longContext') }}</option></select>
         <button class="btn btn-secondary" :disabled="loading">{{ t('common.search') }}</button>
       </form>
       <div v-if="loadError" role="alert" class="text-red-600">{{ loadError }} <button class="underline" @click="load">{{ t('admin.modelPricing.retry') }}</button></div>
@@ -24,8 +25,8 @@
             <thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-dark-900"><tr><th class="px-4 py-3">{{ t('admin.modelPricing.model') }}</th><th v-for="field in standardFields" :key="field" class="px-4 py-3 whitespace-nowrap">{{ fieldLabel(field) }}<div class="mt-1 font-normal">{{ t('admin.modelPricing.priceColumns') }}</div></th><th class="px-4 py-3">{{ t('common.actions') }}</th></tr></thead>
             <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
               <tr v-for="row in items" :key="row.model" class="text-sm text-gray-700 dark:text-gray-200">
-                <td class="px-4 py-4"><div class="font-mono">{{ row.model }}</div><div v-if="row.alias" class="mt-1 text-xs text-gray-500">{{ t('admin.modelPricing.alias') }} → {{ row.alias }}</div><div class="mt-1 text-xs text-gray-500">{{ row.available ? `${sourceLabel(row.source)} · ${row.resolved_model}` : t('admin.modelPricing.unavailable') }}</div><span v-if="row.recent" class="mr-1 mt-1 inline-block rounded bg-blue-100 px-2 text-xs text-blue-800">{{ t('admin.modelPricing.recent') }}</span><span v-if="Object.keys(row.override).length" class="mt-1 inline-block rounded bg-amber-100 px-2 text-xs text-amber-800">{{ t('admin.modelPricing.custom') }}</span></td>
-                <td v-for="field in standardFields" :key="field" class="px-4 py-4 font-mono whitespace-nowrap"><span class="text-gray-400">{{ displayPrice(row.tiers?.[tier]?.reference[field]) }}</span><span class="mx-1">→</span><span :class="row.tiers?.[tier]?.effective[field] !== row.tiers?.[tier]?.reference[field] ? 'text-amber-600 dark:text-amber-400' : ''">{{ displayPrice(row.tiers?.[tier]?.effective[field]) }}</span></td>
+                <td class="px-4 py-4"><div class="font-mono">{{ row.model }}</div><div v-if="row.alias" class="mt-1 text-xs text-gray-500">{{ t('admin.modelPricing.alias') }} → {{ row.alias }}</div><div class="mt-1 text-xs text-gray-500">{{ row.available ? `${sourceLabel(row.source)} · ${row.resolved_model}` : t('admin.modelPricing.unavailable') }}</div><div v-if="row.effective?.long_context_threshold" class="mt-1 text-xs text-amber-700 dark:text-amber-400" data-testid="model-long-context-rule">{{ t('admin.modelPricing.contextBoundary', { threshold: row.effective.long_context_threshold.toLocaleString() }) }}</div><div v-if="contextMode === 'long' && !row.long_context_tiers?.[tier]" class="mt-1 text-xs text-gray-500">{{ t('admin.modelPricing.noLongContextTier') }}</div><span v-if="row.recent" class="mr-1 mt-1 inline-block rounded bg-blue-100 px-2 text-xs text-blue-800">{{ t('admin.modelPricing.recent') }}</span><span v-if="Object.keys(row.override).length" class="mt-1 inline-block rounded bg-amber-100 px-2 text-xs text-amber-800">{{ t('admin.modelPricing.custom') }}</span></td>
+                <td v-for="field in standardFields" :key="field" class="px-4 py-4 font-mono whitespace-nowrap"><span class="text-gray-400">{{ displayPrice(displayedPair(row)?.reference[field]) }}</span><span class="mx-1">→</span><span :class="displayedPair(row)?.effective[field] !== displayedPair(row)?.reference[field] ? 'text-amber-600 dark:text-amber-400' : ''">{{ displayPrice(displayedPair(row)?.effective[field]) }}</span></td>
                 <td class="px-4 py-4"><button class="btn btn-secondary btn-sm" :disabled="row.mode === 'image_generation'" @click="edit(row)">{{ t('common.edit') }}</button></td>
               </tr>
               <tr v-if="!items.length"><td colspan="7" class="p-8 text-center text-gray-500">{{ t('admin.modelPricing.empty') }}</td></tr>
@@ -39,14 +40,21 @@
         <div v-if="selected" class="space-y-5">
           <p class="text-sm text-gray-500">{{ t('admin.modelPricing.overrideHint') }}</p>
           <div><label class="input-label" for="price-alias">{{ t('admin.modelPricing.alias') }}</label><input id="price-alias" v-model="alias" class="input font-mono" :placeholder="t('admin.modelPricing.aliasHint')" /><p class="mt-1 text-xs text-gray-500">{{ t('admin.modelPricing.aliasScope') }}</p></div>
+          <h3 class="text-sm font-medium">{{ t('admin.modelPricing.shortContext') }}</h3>
           <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-dark-700">
             <table class="w-full text-sm"><thead class="text-left text-gray-500"><tr><th class="p-2">{{ t('admin.modelPricing.unit') }}</th><th class="p-2">{{ t('admin.modelPricing.referencePrice') }}</th><th class="p-2">{{ currentPreview ? t('admin.modelPricing.candidatePrice') : t('admin.modelPricing.effectivePrice') }}</th></tr></thead><tbody><tr v-for="field in standardFields" :key="field"><td class="p-2">{{ fieldLabel(field) }}</td><td class="p-2 font-mono">{{ displayPrice(currentPreview?.unit_prices?.reference[field] ?? selected.tiers?.[previewTier]?.reference[field]) }}</td><td class="p-2 font-mono">{{ displayPrice(currentPreview?.unit_prices?.effective[field] ?? selected.tiers?.[previewTier]?.effective[field]) }}</td></tr></tbody></table>
           </div>
+          <section v-if="editorPolicy?.long_context_threshold" class="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30" data-testid="long-context-price-table">
+            <h3 class="text-sm font-semibold text-amber-800 dark:text-amber-300">{{ t('usage.longContext') }} &gt;{{ Number(editorPolicy.long_context_threshold).toLocaleString() }} tokens</h3>
+            <p class="mt-1 text-xs text-gray-600 dark:text-gray-400">{{ t('admin.modelPricing.contextInputHint') }}</p>
+            <div v-if="editorLongPrices?.effective" class="mt-2 overflow-x-auto"><table class="w-full text-sm"><thead class="text-left text-gray-500"><tr><th class="p-2">{{ t('admin.modelPricing.unit') }}</th><th class="p-2">{{ t('admin.modelPricing.referencePrice') }}</th><th class="p-2">{{ currentPreview ? t('admin.modelPricing.candidatePrice') : t('admin.modelPricing.effectivePrice') }}</th></tr></thead><tbody><tr v-for="field in standardFields" :key="field"><td class="p-2">{{ fieldLabel(field) }}</td><td class="p-2 font-mono">{{ displayPrice(editorLongPrices.reference?.[field]) }}</td><td class="p-2 font-mono">{{ displayPrice(editorLongPrices.effective[field]) }}</td></tr></tbody></table></div>
+            <p v-else class="mt-2 text-xs text-gray-500">{{ t('admin.modelPricing.noLongContextTier') }}</p>
+          </section>
           <div class="grid gap-3 sm:grid-cols-2">
             <div v-for="field in priceFields" :key="field"><label class="input-label" :for="`price-${field}`">{{ fieldLabel(field) }}</label><input :id="`price-${field}`" v-model="priceInputs[field]" type="number" min="0" max="1000000" step="any" class="input" :placeholder="t('admin.modelPricing.inherit')" /></div>
           </div>
           <p class="text-xs text-gray-500">{{ t('admin.modelPricing.priorityHint') }}</p>
-          <p v-if="selected.effective?.long_context_threshold" class="text-xs text-gray-500">{{ t('admin.modelPricing.longContext', { threshold: selected.effective.long_context_threshold, input: selected.effective.long_context_input_multiplier, output: selected.effective.long_context_output_multiplier, read: selected.effective.long_context_cache_read_multiplier, write: selected.effective.long_context_cache_write_multiplier }) }}</p>
+          <p v-if="editorPolicy?.long_context_threshold" class="text-xs text-gray-500">{{ t('admin.modelPricing.longContext', { threshold: editorPolicy.long_context_threshold, input: editorPolicy.long_context_input_multiplier, output: editorPolicy.long_context_output_multiplier, read: editorPolicy.long_context_cache_read_multiplier, write: editorPolicy.long_context_cache_write_multiplier }) }}</p>
           <button class="text-sm text-primary-600 underline" @click="clearOverrides">{{ t('admin.modelPricing.reset') }}</button>
           <div class="border-t border-gray-200 pt-4 dark:border-dark-700">
             <h3 class="font-medium">{{ t('admin.modelPricing.preview') }}</h3><p class="mt-1 text-xs text-gray-500">{{ t('admin.modelPricing.previewHint') }}</p>
@@ -55,7 +63,7 @@
             <div class="mt-3 grid gap-3 sm:grid-cols-3"><div v-for="field in factorFields" :key="field"><label class="input-label" :for="`factor-${field}`">{{ t(`admin.modelPricing.${field}`) }}</label><input :id="`factor-${field}`" v-model.number="factors[field]" type="number" :min="field === 'group_rate' ? 0.0001 : 0" :max="field === 'user_discount' ? 1 : 100" step="0.0001" class="input" :disabled="subscription" /></div></div>
             <p v-if="subscription" class="mt-2 text-xs text-gray-500">{{ t('admin.modelPricing.subscriptionHint') }}</p>
             <button class="btn btn-secondary mt-3" :disabled="previewing || saving" @click="runPreview">{{ previewing ? t('common.loading') : t('admin.modelPricing.calculate') }}</button>
-            <div v-if="currentPreview" class="mt-3 rounded-lg bg-gray-50 p-4 text-sm dark:bg-dark-900"><dl class="grid gap-2 sm:grid-cols-2"><div>{{ t('admin.modelPricing.referenceCost') }}: <strong>{{ money(currentPreview.cost.pricing_snapshot.reference_total_cost) }}</strong></div><div>{{ t('admin.modelPricing.siteCost') }}: <strong>{{ money(currentPreview.cost.total_cost) }}</strong></div><div>{{ t('admin.modelPricing.charged') }}: <strong>{{ money(currentPreview.charged_amount) }}</strong></div><div>{{ t('admin.modelPricing.resolved') }}: <span class="font-mono">{{ currentPreview.cost.pricing_snapshot.resolved_model }}</span></div></dl></div>
+            <div v-if="currentPreview" class="mt-3 rounded-lg bg-gray-50 p-4 text-sm dark:bg-dark-900"><p class="mb-2 font-medium">{{ t('admin.modelPricing.contextMode') }}: {{ t(currentPreview.cost.pricing_snapshot.long_context?.applied ? 'usage.longContext' : 'admin.modelPricing.shortContext') }}</p><LongContextIndicator :info="currentPreview.cost.pricing_snapshot.long_context" detailed class="mb-3" /><dl class="grid gap-2 sm:grid-cols-2"><div>{{ t('admin.modelPricing.referenceCost') }}: <strong>{{ money(currentPreview.cost.pricing_snapshot.reference_total_cost) }}</strong></div><div>{{ t('admin.modelPricing.siteCost') }}: <strong>{{ money(currentPreview.cost.total_cost) }}</strong></div><div>{{ t('admin.modelPricing.charged') }}: <strong>{{ money(currentPreview.charged_amount) }}</strong></div><div>{{ t('admin.modelPricing.resolved') }}: <span class="font-mono">{{ currentPreview.cost.pricing_snapshot.resolved_model }}</span></div></dl></div>
             <p v-else class="mt-3 text-xs text-gray-500">{{ t('admin.modelPricing.reviewHint') }}</p>
           </div>
         </div>
@@ -77,6 +85,7 @@ import { priceFields, type PriceOverride, type ModelPrice, type PricingMetadata,
 import { useAppStore } from '@/stores/app'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import LongContextIndicator from '@/components/common/LongContextIndicator.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -87,6 +96,8 @@ const metadata = ref<PricingMetadata | null>(null)
 const search = ref('')
 const configured = ref(false)
 const tier = ref('default')
+const contextMode = ref('short')
+const displayedPair = (row: ModelPrice) => contextMode.value === 'long' ? row.long_context_tiers?.[tier.value] : row.tiers?.[tier.value]
 const page = ref(1)
 const total = ref(0)
 const loading = ref(false)
@@ -106,6 +117,8 @@ const showHistory = ref(false)
 const edits = ref<PriceEdit[]>([])
 const signature = computed(() => JSON.stringify([selected.value?.model, alias.value, priceInputs, tokens, factors, subscription.value, previewTier.value]))
 const currentPreview = computed(() => previewSignature.value === signature.value ? result.value : null)
+const editorPolicy = computed(() => currentPreview.value?.cost.pricing_snapshot.effective ?? selected.value?.effective)
+const editorLongPrices = computed(() => currentPreview.value?.long_context_unit_prices ?? selected.value?.long_context_tiers?.[previewTier.value])
 const fieldLabel = (field: string) => t(`admin.modelPricing.fields.${field}`)
 const sourceLabel = (source: string) => t(`admin.modelPricing.sources.${source || 'unknown'}`)
 const displayPrice = (value?: number) => value == null ? '—' : `$${Number(value.toPrecision(8))}`

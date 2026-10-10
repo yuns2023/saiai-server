@@ -63,4 +63,27 @@ describe('Model pricing editor', () => {
     expect(button(wrapper, 'common.save').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
+  it('switches context prices and displays preview evidence independently of service tier', async () => {
+    const longRow = structuredClone(row) as typeof row & { long_context_tiers: unknown }
+    Object.assign(longRow.effective, { long_context_threshold: 272000 })
+    longRow.long_context_tiers = { default: { reference: { input: 20, output: 75, cache_read: 2 }, effective: { input: 20, output: 75, cache_read: 2 } } }
+    list.mockResolvedValue({ items: [longRow], total: 1 })
+    preview.mockResolvedValue({ ...cost, cost: { ...cost.cost, pricing_snapshot: { ...cost.cost.pricing_snapshot,
+      effective: { long_context_threshold: 272000 }, long_context: { applied: true, mode: 'whole_request', threshold: 272000,
+        total_input_tokens: 341248, input_multiplier: 2, output_multiplier: 1.5, cache_read_multiplier: 2, cache_write_multiplier: 2 } } } })
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.get('[data-testid=model-long-context-rule]').exists()).toBe(true)
+    await wrapper.get('select[aria-label="admin.modelPricing.contextMode"]').setValue('long')
+    expect(wrapper.text()).toContain('$75')
+    await wrapper.get('select[aria-label="admin.modelPricing.tier"]').setValue('priority')
+    expect(wrapper.text()).toContain('admin.modelPricing.noLongContextTier')
+    expect(wrapper.text()).not.toContain('$75')
+    await wrapper.get('select[aria-label="admin.modelPricing.tier"]').setValue('default')
+    await button(wrapper, 'common.edit').trigger('click')
+    expect(wrapper.get('[data-testid=long-context-price-table]').text()).toContain('$75')
+    await button(wrapper, 'admin.modelPricing.calculate').trigger('click'); await flushPromises()
+    expect(wrapper.get('[data-testid=long-context-indicator]').text()).toContain('>272K')
+    wrapper.unmount()
+  })
+
 })

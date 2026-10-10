@@ -775,6 +775,14 @@ export default {
 
   // Usage
   usage: {
+    longContext: 'Long context',
+    longContextInferred: 'Inferred',
+    longContextTrigger: 'Input {total} tokens exceeds the {threshold}-token threshold (including cache).',
+    longContextWholeRequest: 'Long-context prices apply to the whole request; overall discounts are separate.',
+    longContextExcess: 'Only input and cache reads above the threshold receive the surcharge.',
+    longContextMultipliers: 'Input ×{input} · Output ×{output} · Cache read ×{read} · Cache write ×{write}',
+    longContextInferredHint: 'This older record has no price snapshot. Inferred from model and input size; the historical configuration cannot be confirmed. Stored charges are unchanged.',
+
     nativeChatTurn: '1 successful Chat turn',
     nativeChatImagesObserved: 'Image generation: {count} observed completed images',
     nativeChatImageCountUnknown: 'Image generation observed; completed count unconfirmed',
@@ -1423,6 +1431,11 @@ export default {
       'aliasScope': 'Aliases change billing only, not upstream routing. Overrides apply only to this billed model.',
       'inherit': 'Inherit source price',
       'priorityHint': 'Standard and Priority prices are independent. Flex retains the existing tier rules for Standard prices.',
+      'contextMode': 'Context pricing',
+      'shortContext': 'Short context',
+      'contextBoundary': 'Long-context prices apply above {threshold} input tokens (including cache)',
+      'contextInputHint': 'Input includes uncached input, cache reads and writes. Above the threshold, these rates apply to the whole request; overall discounts are separate.',
+      'noLongContextTier': 'The current billing policy has no long-context surcharge for this model / service tier.',
       'longContext': 'Long context: {threshold} input tokens; whole-request input ×{input}, output ×{output}, cache read ×{read}, cache write ×{write}.',
       'reset': 'Clear all unit-price overrides and inherit source prices',
       'preview': 'Cost preview',

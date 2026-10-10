@@ -778,6 +778,14 @@ export default {
 
   // Usage
   usage: {
+    longContext: '长上下文',
+    longContextInferred: '历史推断',
+    longContextTrigger: '本次输入总量 {total} tokens，超过阈值 {threshold} tokens（含缓存）。',
+    longContextWholeRequest: '整次请求按长上下文单价计费，整体折扣另行计算。',
+    longContextExcess: '仅超出阈值的输入和缓存读取部分加价。',
+    longContextMultipliers: '输入 ×{input} · 输出 ×{output} · 缓存读取 ×{read} · 缓存写入 ×{write}',
+    longContextInferredHint: '此旧记录没有价格快照；按模型和输入量推断，无法确认当时的配置。费用仍为已保存的历史金额。',
+
     nativeChatTurn: '1 次成功聊天',
     nativeChatImagesObserved: '画图：已识别成品 {count} 张',
     nativeChatImageCountUnknown: '含画图调用，成品数量未确认',
@@ -1443,6 +1451,11 @@ export default {
       'aliasScope': '映射只改变计价，不改变上游路由。自定义单价只作用于当前计费模型。',
       'inherit': '跟随价格源',
       'priorityHint': 'Standard 单价与 Priority 单价独立设置；Flex 继续使用 Standard 价格的现有档位规则。',
+      'contextMode': '上下文计价档位',
+      'shortContext': '普通上下文',
+      'contextBoundary': '输入（含缓存）超过 {threshold} tokens 时使用长上下文单价',
+      'contextInputHint': '输入总量包含新输入、缓存读取和缓存写入；超过阈值后整次请求使用此档单价，整体折扣另行计算。',
+      'noLongContextTier': '当前计费规则未为此模型／服务档位启用长上下文加价。',
       'longContext': '长上下文阈值：{threshold} 输入 token；整次输入 ×{input}，输出 ×{output}，缓存读取 ×{read}，写入 ×{write}。',
       'reset': '清除全部单价覆盖，恢复跟随价格源',
       'preview': '费用试算',

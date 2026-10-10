@@ -24,18 +24,19 @@ import (
 func (h *SettingHandler) SetBillingService(s *service.BillingService) { h.billingService = s }
 
 type modelPriceRow struct {
-	Recent        bool                                     `json:"recent"`
-	Model         string                                   `json:"model"`
-	Alias         string                                   `json:"alias,omitempty"`
-	ResolvedModel string                                   `json:"resolved_model"`
-	Source        string                                   `json:"source"`
-	Version       string                                   `json:"version"`
-	Reference     *service.ModelPricing                    `json:"reference"`
-	Effective     *service.ModelPricing                    `json:"effective"`
-	Override      service.ModelPriceOverride               `json:"override"`
-	Tiers         map[string]map[string]map[string]float64 `json:"tiers"`
-	Mode          string                                   `json:"mode"`
-	Available     bool                                     `json:"available"`
+	Recent           bool                                     `json:"recent"`
+	Model            string                                   `json:"model"`
+	Alias            string                                   `json:"alias,omitempty"`
+	ResolvedModel    string                                   `json:"resolved_model"`
+	Source           string                                   `json:"source"`
+	Version          string                                   `json:"version"`
+	Reference        *service.ModelPricing                    `json:"reference"`
+	Effective        *service.ModelPricing                    `json:"effective"`
+	Override         service.ModelPriceOverride               `json:"override"`
+	Tiers            map[string]map[string]map[string]float64 `json:"tiers"`
+	LongContextTiers map[string]map[string]map[string]float64 `json:"long_context_tiers"`
+	Mode             string                                   `json:"mode"`
+	Available        bool                                     `json:"available"`
 }
 
 func modelPricingRow(pricing *service.PricingService, billing *service.BillingService, model, alias string, override service.ModelPriceOverride) modelPriceRow {
@@ -50,8 +51,12 @@ func modelPricingRow(pricing *service.PricingService, billing *service.BillingSe
 		row.Mode = r.Dynamic.Mode
 	}
 	row.Tiers = map[string]map[string]map[string]float64{}
+	row.LongContextTiers = map[string]map[string]map[string]float64{}
 	for _, tier := range []string{"default", "priority", "flex"} {
 		row.Tiers[tier] = map[string]map[string]float64{"reference": billing.DisplayUnitPrices(p.Reference, tier), "effective": billing.DisplayUnitPrices(p, tier)}
+		if longPrices := billing.DisplayLongContextUnitPrices(p, tier); longPrices != nil {
+			row.LongContextTiers[tier] = map[string]map[string]float64{"reference": billing.DisplayLongContextUnitPrices(p.Reference, tier), "effective": longPrices}
+		}
 	}
 	row.Effective = p
 	row.Reference = p.Reference
@@ -326,7 +331,7 @@ func (h *SettingHandler) PreviewModelPricing(c *gin.Context) {
 	if req.Subscription {
 		quotaCost = cost.TotalCost
 	}
-	response.Success(c, gin.H{"cost": cost, "charged_amount": quotaCost, "subscription": req.Subscription, "unit_prices": gin.H{"reference": candidate.DisplayUnitPrices(cost.PricingSnapshot.Reference, tier), "effective": candidate.DisplayUnitPrices(cost.PricingSnapshot.Effective, tier)}})
+	response.Success(c, gin.H{"cost": cost, "charged_amount": quotaCost, "subscription": req.Subscription, "unit_prices": gin.H{"reference": candidate.DisplayUnitPrices(cost.PricingSnapshot.Reference, tier), "effective": candidate.DisplayUnitPrices(cost.PricingSnapshot.Effective, tier)}, "long_context_unit_prices": gin.H{"reference": candidate.DisplayLongContextUnitPrices(cost.PricingSnapshot.Reference, tier), "effective": candidate.DisplayLongContextUnitPrices(cost.PricingSnapshot.Effective, tier)}})
 }
 
 func (h *SettingHandler) SetPricingUsageReader(repo service.UsageLogRepository) {

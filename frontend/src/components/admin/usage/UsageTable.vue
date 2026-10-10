@@ -185,6 +185,7 @@
                 </div>
               </div>
             </div>
+            <LongContextIndicator :info="usageLongContext(row)" class="mt-1" />
             <NativeChatCharges :record="row" />
             <div v-if="row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-gray-400">
               A ${{ (row.total_cost * row.account_rate_multiplier).toFixed(6) }}
@@ -377,6 +378,7 @@
             <span class="text-gray-400">{{ t('usage.accountMultiplier') }}</span>
             <span class="font-semibold text-blue-400">{{ (tooltipData?.account_rate_multiplier ?? 1).toFixed(2) }}x</span>
           </div>
+          <LongContextIndicator :info="usageLongContext(tooltipData)" detailed class="border-t border-gray-700 pt-2" />
           <div v-if="tooltipData?.pricing_snapshot" class="space-y-2 border-t border-gray-700 pt-2">
             <div class="flex items-center justify-between gap-6"><span class="text-gray-400">{{ t('admin.modelPricing.referenceCost') }}</span><span>${{ tooltipData.pricing_snapshot.reference_total_cost.toFixed(6) }}</span></div>
             <div class="flex items-center justify-between gap-6"><span class="text-gray-400">{{ t('admin.modelPricing.resolved') }}</span><span class="font-mono">{{ tooltipData.pricing_snapshot.resolved_model }}</span></div>
@@ -408,6 +410,8 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatDateTime, formatReasoningEffort, getEffectiveReasoningEffort } from '@/utils/format'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
+import { usageLongContext } from '@/utils/usageLongContext'
+import LongContextIndicator from '@/components/common/LongContextIndicator.vue'
 import { isNativeChatUsage } from '@/utils/nativeChatUsage'
 import NativeChatCharges from '@/components/common/NativeChatCharges.vue'
 import { formatUsageServiceTier, getUsageServiceTierLabel } from '@/utils/usageServiceTier'

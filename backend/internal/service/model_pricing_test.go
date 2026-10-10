@@ -157,3 +157,60 @@ func TestModelPricingStaleVersionNeverPersistsAndReadersRemainAvailable(t *testi
 	require.NoError(t, err)
 	require.Zero(t, cost.TotalCost)
 }
+
+func TestModelPricingLongContextEvidenceAndDisplayUseActualCalculator(t *testing.T) {
+	p, b := testModelPricing(t)
+	p.pricingData["gpt-6-astra"] = &LiteLLMModelPricing{InputCostPerToken: 10e-6, OutputCostPerToken: 50e-6, CacheReadInputTokenCost: 1e-6, CacheCreationInputTokenCost: 12.5e-6,
+		LongContextInputTokenThreshold: 272000, LongContextInputCostMultiplier: 2, LongContextOutputCostMultiplier: 1.5, LongContextCacheReadCostMultiplier: 2, LongContextCacheCreationCostMultiplier: 2}
+	p.SetModelPricingConfig(map[string]string{"alias-astra": "gpt-6-astra"}, map[string]ModelPriceOverride{"alias-astra": {CacheRead: priceTestNumber(0)}})
+	pricing, err := b.GetModelPricing("alias-astra")
+	require.NoError(t, err)
+	long := b.DisplayLongContextUnitPrices(pricing, "default")
+	require.InDelta(t, 20, long["input"], 1e-12)
+	require.InDelta(t, 75, long["output"], 1e-12)
+	require.Zero(t, long["cache_read"])
+	require.InDelta(t, 25, long["cache_write_5m"], 1e-12)
+	require.InDelta(t, 10, b.DisplayUnitPrices(pricing, "default")["input"], 1e-12)
+	require.Nil(t, b.DisplayLongContextUnitPrices(pricing, "priority"))
+	require.InDelta(t, 10, b.DisplayLongContextUnitPrices(pricing, "flex")["input"], 1e-12)
+	for _, tier := range []string{"default", "flex", "priority"} {
+		for _, total := range []int{272000, 272001} {
+			tokens := UsageTokens{InputTokens: 1000, OutputTokens: 424, CacheReadTokens: total - 2000, CacheCreationTokens: 1000, CacheCreation5mTokens: 1000}
+			cost, err := b.CalculateCostWithServiceTier("alias-astra", tokens, .4, tier)
+			require.NoError(t, err)
+			info := cost.PricingSnapshot.LongContext
+			require.Equal(t, total, info.TotalInputTokens)
+			require.Equal(t, total > 272000 && tier != "priority", info.Applied)
+			require.Equal(t, "whole_request", info.Mode)
+			require.Equal(t, 272000, info.Threshold)
+			require.Equal(t, 1.5, info.OutputMultiplier)
+			require.InDelta(t, cost.TotalCost*.4, cost.ActualCost, 1e-12)
+			if info.Applied {
+				pair := b.DisplayLongContextUnitPrices(pricing, tier)
+				require.InDelta(t, pair["input"]*1000/1e6, cost.InputCost, 1e-12)
+				require.InDelta(t, pair["output"]*424/1e6, cost.OutputCost, 1e-12)
+			}
+		}
+	}
+	cost, err := b.CalculateCost("alias-astra", UsageTokens{InputTokens: 272001}, 1)
+	require.NoError(t, err)
+	saved, err := json.Marshal(cost.PricingSnapshot)
+	require.NoError(t, err)
+	p.SetModelPricingConfig(nil, nil)
+	var restored PricingSnapshot
+	require.NoError(t, json.Unmarshal(saved, &restored))
+	require.True(t, restored.LongContext.Applied)
+	require.Zero(t, restored.Effective.CacheReadPricePerToken)
+}
+
+func TestModelPricingSplitLongContextEvidenceIsSeparateFromWholeRequest(t *testing.T) {
+	_, b := testModelPricing(t)
+	cost, err := b.CalculateCostWithLongContext("claude-fable-5", UsageTokens{InputTokens: 10000, CacheReadTokens: 210000}, 1, 200000, 2)
+	require.NoError(t, err)
+	info := cost.PricingSnapshot.LongContext
+	require.True(t, info.Applied)
+	require.Equal(t, "excess_input", info.Mode)
+	require.Equal(t, 220000, info.TotalInputTokens)
+	require.Equal(t, 1.0, info.OutputMultiplier)
+	require.Equal(t, 1.0, info.CacheWriteMultiplier)
+}

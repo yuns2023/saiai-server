@@ -176,4 +176,19 @@ describe('admin UsageTable tooltip', () => {
     expect(wrapper.get('[data-testid=native-chat-charges]').text()).toContain('0.040000')
     expect(wrapper.text()).not.toContain('usage.serviceTierStandard')
   })
+  it('shows a visible historical long-context advisory in the fee column without changing stored charges', async () => {
+    const wrapper = mount(UsageTable, { props: { data: [{ request_id: 'TEST_ONLY_LONG', model: 'gpt-6-astra',
+      input_tokens: 1058, cache_read_tokens: 341248, output_tokens: 424, actual_cost: .294182, total_cost: .735456,
+      cache_creation_tokens: 0, service_tier: 'default' }], loading: false, columns: [] },
+      global: { stubs: { DataTable: DataTableStub, Teleport: true, Icon: true } } })
+    const badge = wrapper.get('[data-testid="long-context-indicator"]')
+    expect(badge.text()).toContain('>272K')
+    expect(badge.text()).toContain('usage.longContextInferred')
+    expect(wrapper.text()).toContain('$0.294182')
+    await wrapper.find('.group.relative').trigger('mouseenter'); await nextTick()
+    expect(wrapper.text()).toContain('usage.longContextWholeRequest')
+    expect(wrapper.text()).toContain('usage.longContextInferredHint')
+    wrapper.unmount()
+  })
+
 })

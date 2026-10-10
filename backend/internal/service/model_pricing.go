@@ -181,19 +181,33 @@ func (s *PricingService) PricingMetadata() map[string]any {
 // the reference and effective unit prices at calculation time, independent of
 // later feed updates, aliases, overrides or provider service-tier policies.
 type PricingSnapshot struct {
-	Version                    string             `json:"version"`
-	Alias                      string             `json:"alias,omitempty"`
-	Override                   ModelPriceOverride `json:"override"`
-	Mode                       string             `json:"mode,omitempty"`
-	BilledModel                string             `json:"billed_model"`
-	ResolvedModel              string             `json:"resolved_model"`
-	Source                     string             `json:"source"`
-	ServiceTier                string             `json:"service_tier,omitempty"`
-	Reference                  *ModelPricing      `json:"reference"`
-	Effective                  *ModelPricing      `json:"effective"`
-	ReferenceTotalCost         float64            `json:"reference_total_cost"`
-	LongContextThreshold       int                `json:"long_context_threshold,omitempty"`
-	LongContextExtraMultiplier float64            `json:"long_context_extra_multiplier,omitempty"`
+	LongContext                *LongContextPricing `json:"long_context,omitempty"`
+	Version                    string              `json:"version"`
+	Alias                      string              `json:"alias,omitempty"`
+	Override                   ModelPriceOverride  `json:"override"`
+	Mode                       string              `json:"mode,omitempty"`
+	BilledModel                string              `json:"billed_model"`
+	ResolvedModel              string              `json:"resolved_model"`
+	Source                     string              `json:"source"`
+	ServiceTier                string              `json:"service_tier,omitempty"`
+	Reference                  *ModelPricing       `json:"reference"`
+	Effective                  *ModelPricing       `json:"effective"`
+	ReferenceTotalCost         float64             `json:"reference_total_cost"`
+	LongContextThreshold       int                 `json:"long_context_threshold,omitempty"`
+	LongContextExtraMultiplier float64             `json:"long_context_extra_multiplier,omitempty"`
+}
+
+// LongContextPricing records the rule selected by the calculator, rather than
+// inferring a historical invoice from today's model catalogue.
+type LongContextPricing struct {
+	Applied              bool    `json:"applied"`
+	Mode                 string  `json:"mode"`
+	Threshold            int     `json:"threshold"`
+	TotalInputTokens     int     `json:"total_input_tokens"`
+	InputMultiplier      float64 `json:"input_multiplier"`
+	OutputMultiplier     float64 `json:"output_multiplier"`
+	CacheReadMultiplier  float64 `json:"cache_read_multiplier"`
+	CacheWriteMultiplier float64 `json:"cache_write_multiplier"`
 }
 
 func (s *BillingService) finishModelPricing(p *ModelPricing, r pricingResolution) *ModelPricing {
@@ -295,13 +309,31 @@ func (s *PricingService) PreviewPricing(model string, alias *string, override *M
 
 // UI tier prices are derived by the billing calculator, not duplicated rules.
 func (s *BillingService) DisplayUnitPrices(p *ModelPricing, tier string) map[string]float64 {
+	return s.displayContextUnitPrices(p, tier, false)
+}
+
+// DisplayLongContextUnitPrices follows the same tier selection and whole-request
+// rule as actual billing. Unsupported tiers have no separate long-context price.
+func (s *BillingService) DisplayLongContextUnitPrices(p *ModelPricing, tier string) map[string]float64 {
+	if p == nil || !s.shouldApplySessionLongContextPricing(UsageTokens{InputTokens: p.LongContextInputThreshold + 1}, p) || normalizeBillingServiceTier(tier) == "priority" {
+		return nil
+	}
+	return s.displayContextUnitPrices(p, tier, true)
+}
+
+func (s *BillingService) displayContextUnitPrices(p *ModelPricing, tier string, long bool) map[string]float64 {
 	if p == nil {
 		return nil
 	}
 	copy := *p
-	copy.LongContextInputThreshold = 0
-	c := s.calculateTokenCost(UsageTokens{InputTokens: 1, OutputTokens: 1, CacheReadTokens: 1, CacheCreationTokens: 2, CacheCreation5mTokens: 1, CacheCreation1hTokens: 1}, 1, tier, &copy)
-	return map[string]float64{"input": c.InputCost * 1e6, "output": c.OutputCost * 1e6, "cache_read": c.CacheReadCost * 1e6, "cache_write_5m": c.CacheCreation5mCost * 1e6, "cache_write_1h": c.CacheCreation1hCost * 1e6}
+	tokens := UsageTokens{InputTokens: 1, OutputTokens: 1, CacheReadTokens: 1, CacheCreationTokens: 2, CacheCreation5mTokens: 1, CacheCreation1hTokens: 1}
+	if long {
+		tokens.InputTokens = p.LongContextInputThreshold + 1
+	} else {
+		copy.LongContextInputThreshold = 0
+	}
+	c := s.calculateTokenCost(tokens, 1, tier, &copy)
+	return map[string]float64{"input": c.InputCost / float64(tokens.InputTokens) * 1e6, "output": c.OutputCost * 1e6, "cache_read": c.CacheReadCost * 1e6, "cache_write_5m": c.CacheCreation5mCost * 1e6, "cache_write_1h": c.CacheCreation1hCost * 1e6}
 }
 
 var ErrPricingChanged = errors.New("prices changed; reload and review before saving")

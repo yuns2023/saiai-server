@@ -394,6 +394,13 @@ func (s *BillingService) calculateCostAndSnapshot(model string, tokens UsageToke
 		effective.Snapshot = nil
 		snapshot.Effective = &effective
 		snapshot.ServiceTier = normalizeBillingServiceTier(serviceTier)
+		snapshot.LongContext = &LongContextPricing{
+			Applied: s.shouldApplySessionLongContextPricing(tokens, pricing) && snapshot.ServiceTier != "priority",
+			Mode:    "whole_request", Threshold: pricing.LongContextInputThreshold,
+			TotalInputTokens: tokens.InputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens,
+			InputMultiplier:  pricing.LongContextInputMultiplier, OutputMultiplier: pricing.LongContextOutputMultiplier,
+			CacheReadMultiplier: pricing.LongContextCacheReadMultiplier, CacheWriteMultiplier: pricing.LongContextCacheCreationMultiplier,
+		}
 		snapshot.ReferenceTotalCost = s.calculateTokenCost(tokens, 1, serviceTier, pricing.Reference).TotalCost
 		cost.PricingSnapshot = &snapshot
 	}
@@ -657,6 +664,10 @@ func (s *BillingService) CalculateCostWithLongContext(model string, tokens Usage
 		inRangeCost.PricingSnapshot.ReferenceTotalCost += outRangeCost.PricingSnapshot.ReferenceTotalCost
 		inRangeCost.PricingSnapshot.LongContextThreshold = threshold
 		inRangeCost.PricingSnapshot.LongContextExtraMultiplier = extraMultiplier
+		inRangeCost.PricingSnapshot.LongContext = &LongContextPricing{
+			Applied: true, Mode: "excess_input", Threshold: threshold, TotalInputTokens: total,
+			InputMultiplier: extraMultiplier, OutputMultiplier: 1, CacheReadMultiplier: extraMultiplier, CacheWriteMultiplier: 1,
+		}
 	}
 
 	// 合并成本

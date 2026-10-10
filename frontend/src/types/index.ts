@@ -1168,8 +1168,39 @@ export interface UsageLogFailoverEvent {
   created_at: string
 }
 
+export interface LongContextPricing {
+  applied: boolean
+  mode: 'whole_request' | 'excess_input'
+  threshold: number
+  total_input_tokens: number
+  input_multiplier: number
+  output_multiplier: number
+  cache_read_multiplier: number
+  cache_write_multiplier: number
+  inferred?: boolean
+}
+
+export interface UsagePricingSnapshot {
+  version: string
+  billed_model: string
+  resolved_model: string
+  source: string
+  reference_total_cost: number
+  service_tier?: string
+  effective?: {
+    long_context_threshold?: number
+    long_context_input_multiplier?: number
+    long_context_output_multiplier?: number
+    long_context_cache_read_multiplier?: number
+    long_context_cache_write_multiplier?: number
+  }
+  long_context?: LongContextPricing
+  long_context_threshold?: number
+  long_context_extra_multiplier?: number
+}
+
 export interface AdminUsageLog extends UsageLog {
-  pricing_snapshot?: { version: string; billed_model: string; resolved_model: string; source: string; reference_total_cost: number } | null
+  pricing_snapshot?: UsagePricingSnapshot | null
   // 账号计费倍率（仅管理员可见）
   account_rate_multiplier?: number | null
 

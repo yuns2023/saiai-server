@@ -44,7 +44,13 @@ All routes require the existing administrator middleware and return no-store:
   pagination over the price catalogue, built-in fallbacks and configured
   aliases/overrides, with recently billed models from the last 24h included.
   Configured and recent models sort first. Recent usage reads have a one-second
-  deadline and a 30-second cache. Tier prices come from the billing calculator.
+  deadline and a 30-second cache. Tier prices come from the billing calculator. `long_context_tiers` exposes
+  whole-request long-context prices separately, only for supported billing tiers.
+  The list can switch between short and long context; the editor shows both tables
+  and the preview reports which rule applied. 272K means 272,000 input tokens,
+  including cache, rather than kilobytes. Pricing UI follows existing Gateway tier
+  behavior (including Priority exclusions); it is not an assertion of official
+  pricing parity for every tier.
 - `PUT /api/v1/admin/settings/model-pricing`: update one exact model's alias
   and unit prices, checking the displayed `expected_version` first. A 409
   requires reload/review; stale edits never overwrite newer runtime prices.
@@ -70,7 +76,14 @@ logs. Newly calculated text-token charges persist the exact reference/effective
 prices, billed/resolved model identities, configuration/data version, service
 tier and reference amount. HTTP, WebSocket and shared text-token billing recorders
 use the same snapshot. The administrator usage tooltip shows the reference
-amount, resolved model and version. Existing rows stay NULL; no historical
+amount, resolved model and version. Its fee column also displays an amber long-context
+badge, with total input tokens, the strictly exceeded threshold, and separate input,
+output, cache-read and cache-write multipliers. New snapshots retain the actual
+calculator decision, including non-applied policies and the distinction between
+whole-request and excess-input-only pricing. Early snapshots derive this decision
+from their stored policy. Older NULL snapshots receive a clearly marked inference
+only for known models; they cannot prove the historical alias/override configuration.
+No current catalogue lookup or historical repricing is performed for usage display. Existing rows stay NULL; no historical
 charge is recalculated or backfilled. Legacy split long-context snapshots
 also retain the threshold and extra multiplier.
 
@@ -82,6 +95,6 @@ usage projection. This development change does not deploy or mutate production.
 Targeted BillingService, Gateway/OpenAI usage, administrator-handler, DTO and
 usage-repository tests pass, including explicit zero prices, inherited aliases,
 cache splits, subscription charges, persisted snapshots, stale edits and
-nonblocking billing reads during persistence. The related frontend suite passes
-36 tests. Frontend type checks/build and the embedded Server build also pass.
+nonblocking billing reads during persistence. The related frontend suites cover the editor, usage badges, strict threshold
+boundaries, recorded evidence, historical inference and tier exclusions. Frontend type checks/build and the embedded Server build also pass.
 No provider/model traffic or production changes are part of these checks.

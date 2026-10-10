@@ -60,7 +60,7 @@ func modelPriceHandlerFixture(t *testing.T) (*SettingHandler, *service.PricingSe
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "model_pricing.json"), []byte(`{"model-base":{"input_cost_per_token":0.00001,"output_cost_per_token":0.00005,"cache_read_input_token_cost":0.000001,"cache_creation_input_token_cost":0.0000125,"cache_creation_input_token_cost_above_1hr":0.00002,"mode":"chat"}}`), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "model_pricing.json"), []byte(`{"model-base":{"input_cost_per_token":0.00001,"output_cost_per_token":0.00005,"cache_read_input_token_cost":0.000001,"cache_creation_input_token_cost":0.0000125,"cache_creation_input_token_cost_above_1hr":0.00002,"long_context_input_token_threshold":272000,"long_context_input_cost_multiplier":2,"long_context_output_cost_multiplier":1.5,"long_context_cache_read_cost_multiplier":2,"long_context_cache_creation_cost_multiplier":2,"mode":"chat"}}`), 0600))
 	cfg := &config.Config{}
 	cfg.Pricing.DataDir = dir
 	cfg.Pricing.UpdateIntervalHours = 24
@@ -231,4 +231,34 @@ func TestModelPricingGeneralSettingsSavePreservesFallbackAliasesAndOverrides(t *
 	require.Equal(t, version, p.ResolvePricing("new-model").Version)
 	require.Equal(t, saved, repo.values[service.SettingKeyModelPriceOverrides])
 	require.Equal(t, "claude-3-5-haiku", p.ResolvePricing("new-model").Alias)
+}
+
+func TestModelPricingAdminListsAndPreviewsLongContextTierPrices(t *testing.T) {
+	_, _, _, router := modelPriceHandlerFixture(t)
+	w := priceHandlerRequest(router, http.MethodGet, "/prices?search=model-base", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var list struct {
+		Data struct {
+			Items []modelPriceRow `json:"items"`
+		}
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	require.Len(t, list.Data.Items, 1)
+	row := list.Data.Items[0]
+	require.NotEmpty(t, row.LongContextTiers["default"])
+	require.NotContains(t, row.LongContextTiers, "priority")
+	require.InDelta(t, row.Tiers["default"]["effective"]["input"]*2, row.LongContextTiers["default"]["effective"]["input"], 1e-12)
+	body := map[string]any{"model": "model-base", "tokens": map[string]any{"input_tokens": 1000, "cache_read_tokens": 272000}, "service_tier": "default", "group_rate": 1, "model_rate": 1, "user_discount": 1, "subscription": true}
+	w = priceHandlerRequest(router, http.MethodPost, "/preview", body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var reply struct {
+		Data struct {
+			Cost   service.CostBreakdown         `json:"cost"`
+			Prices map[string]map[string]float64 `json:"long_context_unit_prices"`
+		}
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &reply))
+	require.True(t, reply.Data.Cost.PricingSnapshot.LongContext.Applied)
+	require.Equal(t, 273000, reply.Data.Cost.PricingSnapshot.LongContext.TotalInputTokens)
+	require.InDelta(t, row.LongContextTiers["default"]["effective"]["output"], reply.Data.Prices["effective"]["output"], 1e-12)
 }

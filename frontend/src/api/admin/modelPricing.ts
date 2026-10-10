@@ -1,3 +1,4 @@
+import type { LongContextPricing } from '@/types'
 import { apiClient } from '../client'
 
 export const priceFields = ['input', 'output', 'cache_read', 'cache_write_5m', 'cache_write_1h', 'priority_input', 'priority_output', 'priority_cache_read', 'priority_cache_write'] as const
@@ -25,6 +26,7 @@ export interface ModelPrice {
   effective: UnitPrices | null
   override: PriceOverride
   tiers: Record<string, PricePair>
+  long_context_tiers?: Record<string, PricePair>
 }
 export interface PricingMetadata { source: string; source_url: string; updated_at: string; source_hash: string; model_count: number }
 export interface PriceList { items: ModelPrice[]; total: number; page: number; page_size: number; metadata: PricingMetadata }
@@ -43,6 +45,7 @@ export interface PreviewInput {
 }
 export interface PricePreview {
   unit_prices: PricePair
+  long_context_unit_prices?: PricePair
   charged_amount: number
   subscription: boolean
   cost: {
@@ -53,7 +56,7 @@ export interface PricePreview {
     cache_read_cost: number
     total_cost: number
     actual_cost: number
-    pricing_snapshot: { version: string; reference_total_cost: number; reference: UnitPrices; effective: UnitPrices; resolved_model: string }
+    pricing_snapshot: { long_context?: LongContextPricing; version: string; reference_total_cost: number; reference: UnitPrices; effective: UnitPrices; resolved_model: string }
   }
 }
 export async function list(params: { search: string; configured: boolean; page: number }): Promise<PriceList> {
