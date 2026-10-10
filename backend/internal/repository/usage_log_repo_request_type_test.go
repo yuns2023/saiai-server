@@ -82,9 +82,10 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // upstream_endpoint
 			log.CacheTTLOverridden,
 			createdAt,
-			1.0, // default model rate
-			1.0, // legacy account payg discount
-			1.0, // default user payg discount
+			1.0,         // default model rate
+			1.0,         // legacy account payg discount
+			1.0,         // default user payg discount
+			[]byte(nil), // historical pricing snapshot
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -159,9 +160,10 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(),
 			log.CacheTTLOverridden,
 			createdAt,
-			1.0, // default model rate
-			1.0, // legacy account payg discount
-			1.0, // default user payg discount
+			1.0,         // default model rate
+			1.0,         // legacy account payg discount
+			1.0,         // default user payg discount
+			[]byte(nil), // historical pricing snapshot
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
@@ -501,9 +503,10 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			false,
 			now,
-			1.0, // model rate
-			1.0, // legacy account payg discount
-			1.0, // user payg discount
+			1.0,         // model rate
+			1.0,         // legacy account payg discount
+			1.0,         // user payg discount
+			[]byte(nil), // historical pricing snapshot
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -547,9 +550,10 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			false,
 			now,
-			1.0, // model rate
-			1.0, // legacy account payg discount
-			1.0, // user payg discount
+			1.0,         // model rate
+			1.0,         // legacy account payg discount
+			1.0,         // user payg discount
+			[]byte(nil), // historical pricing snapshot
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -593,9 +597,10 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			false,
 			now,
-			1.0, // model rate
-			1.0, // legacy account payg discount
-			1.0, // user payg discount
+			1.0,         // model rate
+			1.0,         // legacy account payg discount
+			1.0,         // user payg discount
+			[]byte(nil), // historical pricing snapshot
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -607,7 +612,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 func TestPrepareUsageLogInsertBillingFactorDefaultsAndFreeRate(t *testing.T) {
 	log := &service.UsageLog{RequestID: "billing-factors", RateMultiplier: 1}
 	prepared := prepareUsageLogInsert(log)
-	require.Len(t, prepared.args, 45)
+	require.Len(t, prepared.args, 46)
 	require.Equal(t, 1.0, prepared.args[42])
 	require.Equal(t, 1.0, prepared.args[43])
 	require.Equal(t, 1.0, prepared.args[44])

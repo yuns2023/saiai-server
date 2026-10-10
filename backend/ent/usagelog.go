@@ -3,6 +3,7 @@
 package ent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -52,6 +53,8 @@ type UsageLog struct {
 	CacheCreation5mTokens int `json:"cache_creation_5m_tokens,omitempty"`
 	// CacheCreation1hTokens holds the value of the "cache_creation_1h_tokens" field.
 	CacheCreation1hTokens int `json:"cache_creation_1h_tokens,omitempty"`
+	// PricingSnapshot holds the value of the "pricing_snapshot" field.
+	PricingSnapshot map[string]interface{} `json:"pricing_snapshot,omitempty"`
 	// InputCost holds the value of the "input_cost" field.
 	InputCost float64 `json:"input_cost,omitempty"`
 	// OutputCost holds the value of the "output_cost" field.
@@ -183,6 +186,8 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case usagelog.FieldPricingSnapshot:
+			values[i] = new([]byte)
 		case usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheCreation5mCost, usagelog.FieldCacheCreation1hCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldModelRateMultiplier, usagelog.FieldAccountPaygDiscountMultiplier, usagelog.FieldUserPaygDiscountMultiplier, usagelog.FieldAccountRateMultiplier:
@@ -307,6 +312,14 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field cache_creation_1h_tokens", values[i])
 			} else if value.Valid {
 				_m.CacheCreation1hTokens = int(value.Int64)
+			}
+		case usagelog.FieldPricingSnapshot:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field pricing_snapshot", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.PricingSnapshot); err != nil {
+					return fmt.Errorf("unmarshal field pricing_snapshot: %w", err)
+				}
 			}
 		case usagelog.FieldInputCost:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -572,6 +585,9 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("cache_creation_1h_tokens=")
 	builder.WriteString(fmt.Sprintf("%v", _m.CacheCreation1hTokens))
+	builder.WriteString(", ")
+	builder.WriteString("pricing_snapshot=")
+	builder.WriteString(fmt.Sprintf("%v", _m.PricingSnapshot))
 	builder.WriteString(", ")
 	builder.WriteString("input_cost=")
 	builder.WriteString(fmt.Sprintf("%v", _m.InputCost))

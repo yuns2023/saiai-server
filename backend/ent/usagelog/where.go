@@ -890,6 +890,16 @@ func CacheCreation1hTokensLTE(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldCacheCreation1hTokens, v))
 }
 
+// PricingSnapshotIsNil applies the IsNil predicate on the "pricing_snapshot" field.
+func PricingSnapshotIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldPricingSnapshot))
+}
+
+// PricingSnapshotNotNil applies the NotNil predicate on the "pricing_snapshot" field.
+func PricingSnapshotNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldPricingSnapshot))
+}
+
 // InputCostEQ applies the EQ predicate on the "input_cost" field.
 func InputCostEQ(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldInputCost, v))

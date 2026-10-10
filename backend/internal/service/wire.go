@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -15,10 +18,33 @@ import (
 func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient, settingRepo SettingRepository) (*PricingService, error) {
 	svc := NewPricingService(cfg, remoteClient)
 	if settingRepo != nil {
-		if raw, err := settingRepo.GetValue(context.Background(), SettingKeyPricingModelAliases); err == nil {
-			svc.SetModelAliases(parsePricingModelAliases(raw))
+		aliases, _ := svc.ModelPricingConfig()
+		raw, err := settingRepo.GetValue(context.Background(), SettingKeyPricingModelAliases)
+		if err == nil {
+			aliases = parsePricingModelAliases(raw)
+		} else if !errors.Is(err, ErrSettingNotFound) {
+			return nil, err
 		}
+		if err = validatePricingModelAliases(aliases); err != nil {
+			return nil, err
+		}
+		overrides := map[string]ModelPriceOverride{}
+		body, err := settingRepo.GetValue(context.Background(), SettingKeyModelPriceOverrides)
+		if err == nil {
+			if err = json.Unmarshal([]byte(body), &overrides); err != nil {
+				return nil, fmt.Errorf("invalid model price overrides: %w", err)
+			}
+			for _, o := range overrides {
+				if err = o.Validate(); err != nil {
+					return nil, err
+				}
+			}
+		} else if !errors.Is(err, ErrSettingNotFound) {
+			return nil, err
+		}
+		svc.SetModelPricingConfig(aliases, overrides)
 	}
+
 	if err := svc.Initialize(); err != nil {
 		// Pricing service initialization failure should not block startup, use fallback prices
 		println("[Service] Warning: Pricing service initialization failed:", err.Error())

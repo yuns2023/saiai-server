@@ -683,6 +683,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	}
 	return &AdminUsageLog{
 		UsageLog:              usageLogFromServiceUser(l),
+		PricingSnapshot:       l.PricingSnapshot,
 		AccountRateMultiplier: l.AccountRateMultiplier,
 		IPAddress:             l.IPAddress,
 		Account:               AccountSummaryFromService(l.Account),

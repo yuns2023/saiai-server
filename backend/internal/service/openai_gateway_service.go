@@ -4423,6 +4423,7 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		// and generated output assets, independently of unknown token counts.
 		InputCost:             cost.InputCost,
 		OutputCost:            cost.OutputCost,
+		PricingSnapshot:       cost.PricingSnapshot,
 		TotalCost:             cost.TotalCost,
 		ActualCost:            cost.ActualCost,
 		RateMultiplier:        multiplier,
@@ -4601,6 +4602,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		CacheCreation5mCost:        cost.CacheCreation5mCost,
 		CacheCreation1hCost:        cost.CacheCreation1hCost,
 		CacheReadCost:              cost.CacheReadCost,
+		PricingSnapshot:            cost.PricingSnapshot,
 		TotalCost:                  cost.TotalCost,
 		ActualCost:                 cost.ActualCost,
 		RateMultiplier:             multiplier,

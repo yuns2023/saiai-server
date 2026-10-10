@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ var (
 // LiteLLMModelPricing LiteLLM价格数据结构
 // 只保留我们需要的字段，使用指针来处理可能缺失的值
 type LiteLLMModelPricing struct {
+	ResolvedModel                          string  `json:"-"`
 	InputCostPerToken                      float64 `json:"input_cost_per_token"`
 	InputCostPerTokenAbove272k             float64 `json:"input_cost_per_token_above_272k_tokens"`
 	InputCostPerTokenPriority              float64 `json:"input_cost_per_token_priority"`
@@ -90,13 +92,17 @@ type LiteLLMRawEntry struct {
 
 // PricingService 动态价格服务
 type PricingService struct {
-	cfg          *config.Config
-	remoteClient PricingRemoteClient
-	mu           sync.RWMutex
-	pricingData  map[string]*LiteLLMModelPricing
-	lastUpdated  time.Time
-	localHash    string
-	modelAliases map[string]string
+	writerMu       sync.Mutex
+	cfg            *config.Config
+	remoteClient   PricingRemoteClient
+	mu             sync.RWMutex
+	pricingData    map[string]*LiteLLMModelPricing
+	lastUpdated    time.Time
+	localHash      string
+	modelAliases   map[string]string
+	modelOverrides map[string]ModelPriceOverride
+	configHash     string
+	priceSource    string
 
 	// 停止信号
 	stopCh chan struct{}
@@ -115,12 +121,15 @@ func NewPricingService(cfg *config.Config, remoteClient PricingRemoteClient) *Pr
 		},
 		stopCh: make(chan struct{}),
 	}
+	s.updateConfigHashLocked()
 	return s
 }
 
 // SetModelAliases replaces request-model -> pricing-model aliases used by
 // billing lookups. It never changes upstream model routing.
 func (s *PricingService) SetModelAliases(aliases map[string]string) {
+	s.writerMu.Lock()
+	defer s.writerMu.Unlock()
 	normalized := make(map[string]string, len(aliases))
 	for requestModel, pricingModel := range aliases {
 		requestModel = strings.ToLower(strings.TrimSpace(requestModel))
@@ -131,6 +140,7 @@ func (s *PricingService) SetModelAliases(aliases map[string]string) {
 	}
 	s.mu.Lock()
 	s.modelAliases = normalized
+	s.updateConfigHashLocked()
 	s.mu.Unlock()
 }
 
@@ -322,8 +332,11 @@ func (s *PricingService) downloadPricingDataWithLocalHash(localHash string) erro
 	}
 
 	// 更新内存数据
+	s.writerMu.Lock()
+	defer s.writerMu.Unlock()
 	s.mu.Lock()
 	s.pricingData = data
+	s.priceSource = "remote"
 	s.lastUpdated = time.Now()
 	s.localHash = hashStr
 	s.mu.Unlock()
@@ -368,6 +381,7 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		}
 
 		pricing := &LiteLLMModelPricing{
+			ResolvedModel:         modelName,
 			LiteLLMProvider:       entry.LiteLLMProvider,
 			Mode:                  entry.Mode,
 			SupportsPromptCaching: entry.SupportsPromptCaching,
@@ -503,8 +517,11 @@ func (s *PricingService) loadPricingData(filePath string) error {
 	hash := sha256.Sum256(data)
 	hashStr := hex.EncodeToString(hash[:])
 
+	s.writerMu.Lock()
+	defer s.writerMu.Unlock()
 	s.mu.Lock()
 	s.pricingData = pricingData
+	s.priceSource = "local_cache"
 	s.localHash = hashStr
 
 	info, _ := os.Stat(filePath)
@@ -540,7 +557,13 @@ func (s *PricingService) useFallbackPricing() error {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to copy fallback: %v", err)
 	}
 
-	return s.loadPricingData(fallbackFile)
+	if err := s.loadPricingData(fallbackFile); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.priceSource = "bundled_fallback"
+	s.mu.Unlock()
+	return nil
 }
 
 // fetchRemoteHash 从远程获取哈希值
@@ -591,8 +614,10 @@ func (s *PricingService) computeFileHash(filePath string) (string, error) {
 
 // GetModelPricing 获取模型价格（带模糊匹配）
 func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	return s.ResolvePricing(modelName).Dynamic
+}
+
+func (s *PricingService) lookupModelPricingLocked(modelName string) *LiteLLMModelPricing {
 
 	if modelName == "" {
 		return nil
@@ -600,9 +625,7 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 
 	// 标准化模型名称（同时兼容 "models/xxx"、VertexAI 资源名等前缀）
 	modelLower := strings.ToLower(strings.TrimSpace(modelName))
-	if alias, ok := s.modelAliases[modelLower]; ok && alias != "" {
-		modelLower = alias
-	}
+	modelLower = s.resolveAliasLocked(modelLower)
 	lookupCandidates := s.buildModelLookupCandidates(modelLower)
 
 	// 1. 精确匹配
@@ -627,7 +650,8 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	// 3. 尝试模糊匹配（去掉版本号后缀）
 	// claude-opus-4-5-20251101 -> claude-opus-4.5
 	baseName := s.extractBaseName(lookupCandidates[0])
-	for key, pricing := range s.pricingData {
+	for _, key := range s.sortedModelNamesLocked() {
+		pricing := s.pricingData[key]
 		keyBase := s.extractBaseName(strings.ToLower(key))
 		if keyBase == baseName {
 			return pricing
@@ -744,7 +768,18 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 
 	// 确定模型属于哪个系列
 	var matchedFamily string
-	for family, patterns := range familyPatterns {
+	families := make([]string, 0, len(familyPatterns))
+	for family := range familyPatterns {
+		families = append(families, family)
+	}
+	sort.Slice(families, func(i, j int) bool {
+		if len(families[i]) != len(families[j]) {
+			return len(families[i]) > len(families[j])
+		}
+		return families[i] < families[j]
+	})
+	for _, family := range families {
+		patterns := familyPatterns[family]
 		for _, pattern := range patterns {
 			if strings.Contains(model, pattern) || strings.Contains(model, strings.ReplaceAll(pattern, "-", "")) {
 				matchedFamily = family
@@ -792,7 +827,8 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 	// 在价格数据中查找该系列的模型
 	patterns := familyPatterns[matchedFamily]
 	for _, pattern := range patterns {
-		for key, pricing := range s.pricingData {
+		for _, key := range s.sortedModelNamesLocked() {
+			pricing := s.pricingData[key]
 			keyLower := strings.ToLower(key)
 			if strings.Contains(keyLower, pattern) {
 				logger.LegacyPrintf("service.pricing", "[Pricing] Fuzzy matched %s -> %s", model, key)

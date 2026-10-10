@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -85,11 +86,17 @@ func generateMenuItemID() (string, error) {
 
 // SettingHandler 系统设置处理器
 type SettingHandler struct {
-	settingService   *service.SettingService
-	emailService     *service.EmailService
-	turnstileService *service.TurnstileService
-	opsService       *service.OpsService
-	pricingService   *service.PricingService
+	pricingUsageReader  service.ModelPricingUsageReader
+	pricingRecentMu     sync.Mutex
+	pricingRecentAt     time.Time
+	pricingRecentModels []string
+	settingService      *service.SettingService
+	emailService        *service.EmailService
+	turnstileService    *service.TurnstileService
+	opsService          *service.OpsService
+	pricingService      *service.PricingService
+	billingService      *service.BillingService
+	pricingConfigMu     sync.Mutex
 }
 
 // SetPricingService wires the runtime pricing alias cache.
@@ -273,6 +280,8 @@ type UpdateSettingsRequest struct {
 // UpdateSettings 更新系统设置
 // PUT /api/v1/admin/settings
 func (h *SettingHandler) UpdateSettings(c *gin.Context) {
+	h.pricingConfigMu.Lock()
+	defer h.pricingConfigMu.Unlock()
 	var req UpdateSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -627,7 +636,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}(),
 	}
 
-	if h.pricingService != nil {
+	if h.pricingService != nil && req.PricingModelAliases != nil {
 		for requestModel, pricingModel := range settings.PricingModelAliases {
 			if strings.TrimSpace(requestModel) == "" || strings.TrimSpace(pricingModel) == "" {
 				response.BadRequest(c, "Pricing model aliases cannot contain empty model names")
@@ -643,7 +652,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if h.pricingService != nil {
+	if h.pricingService != nil && req.PricingModelAliases != nil {
 		h.pricingService.SetModelAliases(settings.PricingModelAliases)
 	}
 

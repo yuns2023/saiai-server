@@ -377,6 +377,11 @@
             <span class="text-gray-400">{{ t('usage.accountMultiplier') }}</span>
             <span class="font-semibold text-blue-400">{{ (tooltipData?.account_rate_multiplier ?? 1).toFixed(2) }}x</span>
           </div>
+          <div v-if="tooltipData?.pricing_snapshot" class="space-y-2 border-t border-gray-700 pt-2">
+            <div class="flex items-center justify-between gap-6"><span class="text-gray-400">{{ t('admin.modelPricing.referenceCost') }}</span><span>${{ tooltipData.pricing_snapshot.reference_total_cost.toFixed(6) }}</span></div>
+            <div class="flex items-center justify-between gap-6"><span class="text-gray-400">{{ t('admin.modelPricing.resolved') }}</span><span class="font-mono">{{ tooltipData.pricing_snapshot.resolved_model }}</span></div>
+            <div class="flex items-center justify-between gap-6"><span class="text-gray-400">{{ t('admin.modelPricing.snapshot') }}</span><span class="font-mono">{{ tooltipData.pricing_snapshot.version.slice(0, 12) }}</span></div>
+          </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.original') }}</span>
             <span class="font-medium text-white">${{ tooltipData?.total_cost?.toFixed(6) || '0.000000' }}</span>

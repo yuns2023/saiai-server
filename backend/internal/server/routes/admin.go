@@ -392,6 +392,10 @@ func registerPromoCodeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	adminSettings := admin.Group("/settings")
 	{
+		adminSettings.GET("/model-pricing", h.Admin.Setting.ListModelPricing)
+		adminSettings.PUT("/model-pricing", h.Admin.Setting.UpdateModelPricing)
+		adminSettings.POST("/model-pricing/preview", h.Admin.Setting.PreviewModelPricing)
+		adminSettings.GET("/model-pricing/history", h.Admin.Setting.ModelPricingHistory)
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
 		adminSettings.GET("/chatgpt-billing", h.Admin.Setting.GetChatGPTBillingSettings)

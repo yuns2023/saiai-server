@@ -179,7 +179,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	geminiMessagesCompatService := service.NewGeminiMessagesCompatService(accountRepository, groupRepository, gatewayCache, schedulerSnapshotService, geminiTokenProvider, rateLimitService, httpUpstream, antigravityGatewayService, configConfig)
 	opsSystemLogSink := service.ProvideOpsSystemLogSink(opsRepository)
 	opsService := service.NewOpsService(opsRepository, settingRepository, configConfig, accountRepository, userRepository, concurrencyService, gatewayService, openAIGatewayService, geminiMessagesCompatService, antigravityGatewayService, opsSystemLogSink)
-	settingHandler := handler.ProvideAdminSettingHandler(settingService, emailService, turnstileService, opsService, pricingService)
+	settingHandler := handler.ProvideAdminSettingHandler(settingService, emailService, turnstileService, opsService, pricingService, billingService, usageLogRepository)
 	opsHandler := admin.NewOpsHandler(opsService)
 	adminSubscriptionHandler := admin.NewSubscriptionHandler(subscriptionService)
 	usageCleanupRepository := repository.NewUsageCleanupRepository(client, db)

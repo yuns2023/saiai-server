@@ -71,9 +71,13 @@ func ProvideAdminSettingHandler(
 	turnstileService *service.TurnstileService,
 	opsService *service.OpsService,
 	pricingService *service.PricingService,
+	billingService *service.BillingService,
+	usageRepo service.UsageLogRepository,
 ) *admin.SettingHandler {
 	handler := admin.NewSettingHandler(settingService, emailService, turnstileService, opsService)
 	handler.SetPricingService(pricingService)
+	handler.SetBillingService(billingService)
+	handler.SetPricingUsageReader(usageRepo)
 	return handler
 }
 

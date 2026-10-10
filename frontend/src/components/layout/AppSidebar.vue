@@ -528,6 +528,7 @@ const adminNavItems = computed((): NavItem[] => {
       ? [{ path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon }]
       : []),
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
+    { path: '/admin/model-pricing', label: t('nav.modelPricing'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
     { path: '/admin/access-levels', label: t('nav.accessLevels'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },

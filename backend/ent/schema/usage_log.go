@@ -72,6 +72,9 @@ func (UsageLog) Fields() []ent.Field {
 		field.Int("cache_creation_1h_tokens").
 			Default(0),
 
+		// Immutable reference/effective prices captured with the usage row.
+		field.JSON("pricing_snapshot", map[string]any{}).Optional(),
+
 		// 成本字段
 		field.Float("input_cost").
 			Default(0).

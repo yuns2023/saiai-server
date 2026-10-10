@@ -1169,6 +1169,7 @@ export interface UsageLogFailoverEvent {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  pricing_snapshot?: { version: string; billed_model: string; resolved_model: string; source: string; reference_total_cost: number } | null
   // 账号计费倍率（仅管理员可见）
   account_rate_multiplier?: number | null
 

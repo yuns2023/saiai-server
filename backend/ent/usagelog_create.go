@@ -197,6 +197,12 @@ func (_c *UsageLogCreate) SetNillableCacheCreation1hTokens(v *int) *UsageLogCrea
 	return _c
 }
 
+// SetPricingSnapshot sets the "pricing_snapshot" field.
+func (_c *UsageLogCreate) SetPricingSnapshot(v map[string]interface{}) *UsageLogCreate {
+	_c.mutation.SetPricingSnapshot(v)
+	return _c
+}
+
 // SetInputCost sets the "input_cost" field.
 func (_c *UsageLogCreate) SetInputCost(v float64) *UsageLogCreate {
 	_c.mutation.SetInputCost(v)
@@ -889,6 +895,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldCacheCreation1hTokens, field.TypeInt, value)
 		_node.CacheCreation1hTokens = value
 	}
+	if value, ok := _c.mutation.PricingSnapshot(); ok {
+		_spec.SetField(usagelog.FieldPricingSnapshot, field.TypeJSON, value)
+		_node.PricingSnapshot = value
+	}
 	if value, ok := _c.mutation.InputCost(); ok {
 		_spec.SetField(usagelog.FieldInputCost, field.TypeFloat64, value)
 		_node.InputCost = value
@@ -1359,6 +1369,24 @@ func (u *UsageLogUpsert) UpdateCacheCreation1hTokens() *UsageLogUpsert {
 // AddCacheCreation1hTokens adds v to the "cache_creation_1h_tokens" field.
 func (u *UsageLogUpsert) AddCacheCreation1hTokens(v int) *UsageLogUpsert {
 	u.Add(usagelog.FieldCacheCreation1hTokens, v)
+	return u
+}
+
+// SetPricingSnapshot sets the "pricing_snapshot" field.
+func (u *UsageLogUpsert) SetPricingSnapshot(v map[string]interface{}) *UsageLogUpsert {
+	u.Set(usagelog.FieldPricingSnapshot, v)
+	return u
+}
+
+// UpdatePricingSnapshot sets the "pricing_snapshot" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdatePricingSnapshot() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldPricingSnapshot)
+	return u
+}
+
+// ClearPricingSnapshot clears the value of the "pricing_snapshot" field.
+func (u *UsageLogUpsert) ClearPricingSnapshot() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldPricingSnapshot)
 	return u
 }
 
@@ -2104,6 +2132,27 @@ func (u *UsageLogUpsertOne) AddCacheCreation1hTokens(v int) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateCacheCreation1hTokens() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheCreation1hTokens()
+	})
+}
+
+// SetPricingSnapshot sets the "pricing_snapshot" field.
+func (u *UsageLogUpsertOne) SetPricingSnapshot(v map[string]interface{}) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetPricingSnapshot(v)
+	})
+}
+
+// UpdatePricingSnapshot sets the "pricing_snapshot" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdatePricingSnapshot() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdatePricingSnapshot()
+	})
+}
+
+// ClearPricingSnapshot clears the value of the "pricing_snapshot" field.
+func (u *UsageLogUpsertOne) ClearPricingSnapshot() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearPricingSnapshot()
 	})
 }
 
@@ -3085,6 +3134,27 @@ func (u *UsageLogUpsertBulk) AddCacheCreation1hTokens(v int) *UsageLogUpsertBulk
 func (u *UsageLogUpsertBulk) UpdateCacheCreation1hTokens() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheCreation1hTokens()
+	})
+}
+
+// SetPricingSnapshot sets the "pricing_snapshot" field.
+func (u *UsageLogUpsertBulk) SetPricingSnapshot(v map[string]interface{}) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetPricingSnapshot(v)
+	})
+}
+
+// UpdatePricingSnapshot sets the "pricing_snapshot" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdatePricingSnapshot() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdatePricingSnapshot()
+	})
+}
+
+// ClearPricingSnapshot clears the value of the "pricing_snapshot" field.
+func (u *UsageLogUpsertBulk) ClearPricingSnapshot() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearPricingSnapshot()
 	})
 }
 

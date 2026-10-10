@@ -28,7 +28,7 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 )
 
-const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, session_id, model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, input_cost, output_cost, cache_creation_cost, cache_creation_5m_cost, cache_creation_1h_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, media_type, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, created_at, model_rate_multiplier, account_payg_discount_multiplier, user_payg_discount_multiplier"
+const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, session_id, model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, input_cost, output_cost, cache_creation_cost, cache_creation_5m_cost, cache_creation_1h_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, media_type, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, created_at, model_rate_multiplier, account_payg_discount_multiplier, user_payg_discount_multiplier, pricing_snapshot"
 
 const usageLogReasoningEffortInheritanceWindow = 15 * time.Minute
 
@@ -78,6 +78,7 @@ var usageLogInsertArgTypes = [...]string{
 	"numeric",
 	"numeric",
 	"numeric",
+	"jsonb",
 }
 
 // dateFormatWhitelist 将 granularity 参数映射为 PostgreSQL TO_CHAR 格式字符串，防止外部输入直接拼入 SQL
@@ -327,14 +328,15 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			created_at,
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
-			user_payg_discount_multiplier
+			user_payg_discount_multiplier,
+			pricing_snapshot
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9,
 			$10, $11, $12, $13,
 			$14, $15,
 			$16, $17, $18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -764,10 +766,11 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			created_at,
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
-			user_payg_discount_multiplier
+			user_payg_discount_multiplier,
+			pricing_snapshot
 		) AS (VALUES `)
 
-	args := make([]any, 0, len(keys)*46)
+	args := make([]any, 0, len(keys)*(len(usageLogInsertArgTypes)+1))
 	argPos := 1
 	for idx, key := range keys {
 		if idx > 0 {
@@ -840,7 +843,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				created_at,
 				model_rate_multiplier,
 				account_payg_discount_multiplier,
-				user_payg_discount_multiplier
+				user_payg_discount_multiplier,
+				pricing_snapshot
 			)
 			SELECT
 				user_id,
@@ -887,7 +891,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				created_at,
 				model_rate_multiplier,
 				account_payg_discount_multiplier,
-				user_payg_discount_multiplier
+				user_payg_discount_multiplier,
+				pricing_snapshot
 			FROM input
 			ON CONFLICT (request_id, api_key_id) DO NOTHING
 			RETURNING request_id, api_key_id, id, created_at
@@ -974,10 +979,11 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			created_at,
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
-			user_payg_discount_multiplier
+			user_payg_discount_multiplier,
+			pricing_snapshot
 		) AS (VALUES `)
 
-	args := make([]any, 0, len(preparedList)*45)
+	args := make([]any, 0, len(preparedList)*len(usageLogInsertArgTypes))
 	argPos := 1
 	for idx, prepared := range preparedList {
 		if idx > 0 {
@@ -1047,7 +1053,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			created_at,
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
-			user_payg_discount_multiplier
+			user_payg_discount_multiplier,
+			pricing_snapshot
 		)
 		SELECT
 			user_id,
@@ -1094,7 +1101,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			created_at,
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
-			user_payg_discount_multiplier
+			user_payg_discount_multiplier,
+			pricing_snapshot
 		FROM input
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`)
@@ -1149,14 +1157,15 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			created_at,
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
-			user_payg_discount_multiplier
+			user_payg_discount_multiplier,
+			pricing_snapshot
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9,
 			$10, $11, $12, $13,
 			$14, $15,
 			$16, $17, $18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1247,6 +1256,7 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			usageLogFactorOrOne(log.ModelRateMultiplier),
 			usageLogFactorOrOne(log.AccountPaygDiscountMultiplier),
 			usageLogFactorOrOne(log.UserPaygDiscountMultiplier),
+			pricingSnapshotJSON(log.PricingSnapshot),
 		},
 	}
 }
@@ -4541,6 +4551,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		modelRateMultiplier           float64
 		accountPaygDiscountMultiplier float64
 		userPaygDiscountMultiplier    float64
+		pricingSnapshot               []byte
 	)
 
 	if err := scanner.Scan(
@@ -4590,6 +4601,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		&modelRateMultiplier,
 		&accountPaygDiscountMultiplier,
 		&userPaygDiscountMultiplier,
+		&pricingSnapshot,
 	); err != nil {
 		return nil, err
 	}
@@ -4624,6 +4636,11 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		ImageCount:                    imageCount,
 		CacheTTLOverridden:            cacheTTLOverridden,
 		CreatedAt:                     createdAt,
+	}
+	if len(pricingSnapshot) > 0 {
+		if err := json.Unmarshal(pricingSnapshot, &log.PricingSnapshot); err != nil {
+			return nil, fmt.Errorf("decode pricing snapshot: %w", err)
+		}
 	}
 	// 先回填 legacy 字段，再基于 legacy + request_type 计算最终请求类型，保证历史数据兼容。
 	log.Stream = stream
@@ -4914,4 +4931,34 @@ func setToSlice(set map[int64]struct{}) []int64 {
 		out = append(out, id)
 	}
 	return out
+}
+
+func pricingSnapshotJSON(snapshot *service.PricingSnapshot) any {
+	if snapshot == nil {
+		return nil
+	}
+	body, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil
+	}
+	return string(body)
+}
+
+func (r *usageLogRepository) ListRecentPricingModels(ctx context.Context) ([]string, error) {
+	rows, err := r.sql.QueryContext(ctx, `SELECT COALESCE(pricing_snapshot->>'billed_model',model) AS billed_model
+ FROM usage_logs WHERE created_at >= NOW() - INTERVAL '24 hours'
+ GROUP BY COALESCE(pricing_snapshot->>'billed_model',model) ORDER BY MAX(created_at) DESC LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	models := []string{}
+	for rows.Next() {
+		var model string
+		if err := rows.Scan(&model); err != nil {
+			return nil, err
+		}
+		models = append(models, model)
+	}
+	return models, rows.Err()
 }

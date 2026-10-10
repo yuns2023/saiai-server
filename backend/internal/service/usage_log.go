@@ -134,6 +134,7 @@ type UsageLog struct {
 	CacheCreation5mCost float64
 	CacheCreation1hCost float64
 	CacheReadCost       float64
+	PricingSnapshot     *PricingSnapshot
 	TotalCost           float64
 	ActualCost          float64
 	RateMultiplier      float64
