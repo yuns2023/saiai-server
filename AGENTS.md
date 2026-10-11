@@ -40,6 +40,8 @@ Before changing OpenAI service-tier billing or its user/admin presentation,
 read the service-tier section in
 [docs/API_KEY_USAGE_ANALYTICS.md](docs/API_KEY_USAGE_ANALYTICS.md). Keep the
 HTTP, WebSocket and WebSocket v2 billing resolver aligned.
+Before changing price overrides, pricing snapshots or long-context fee display,
+read [docs/MODEL_PRICING_MANAGEMENT.md](docs/MODEL_PRICING_MANAGEMENT.md).
 
 ## Change discipline
 

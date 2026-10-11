@@ -120,6 +120,14 @@ User and administrator usage tables show the effective billing tier as
 not recalculated merely because this resolver changes; any backfill is a
 separate, explicitly reviewed billing operation.
 
+Administrator usage also shows an amber long-context indicator in the fee
+column. This is separate from the service-tier badge and whole-request discount.
+Use the recorded calculator decision; label inference for older records, and
+never recalculate historical fees from the current price catalogue. This
+administrator pricing detail does not expand the public Key analytics payload.
+See [MODEL_PRICING_MANAGEMENT.md](MODEL_PRICING_MANAGEMENT.md) for snapshot
+precedence, threshold units, tier exclusions and pricing overrides.
+
 ## Image request endpoints
 
 Image usage records keep the client-facing endpoint and the actual provider

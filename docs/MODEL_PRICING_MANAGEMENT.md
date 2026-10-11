@@ -88,7 +88,29 @@ charge is recalculated or backfilled. Legacy split long-context snapshots
 also retain the threshold and extra multiplier.
 
 Apply the schema migration before running code that writes/reads the new
-usage projection. This development change does not deploy or mutate production.
+usage projection. The application startup migration runner applies 098 before
+serving requests; an image-only successor at the retained 098 schema does not
+need another migration. Deployment authorization and per-site migration/rollback
+evidence remain separate operational requirements.
+
+## Maintenance and review boundaries
+
+The contract is implemented in `backend/internal/service/model_pricing.go`,
+`model_pricing_settings.go` and `billing_service.go`. Administrator API DTOs
+and usage recorders must retain the same units and snapshot. Frontend
+`src/utils/usageLongContext.ts` resolves recorded decisions before stored
+policies and, last, explicitly labelled known-model historical inference.
+An explicit recorded `applied=false` wins over every inference. Count total
+input including cache once, and apply the strict `>` threshold.
+
+Priority currently bypasses the Gateway whole-request long-context multiplier,
+in both calculation and snapshot creation. The pricing UI reflects that
+exclusion. Any proposal to match newer official Priority long-context prices
+requires a separate billing review, fixtures for every transport and a decision
+about future records; this display change does not resolve that policy question.
+The reference feed is community pricing even when an official pricing link is
+shown. Subscription procurement cost, reference amount, platform base charge
+and the discounted user charge must remain distinguishable.
 
 ## Local validation
 
