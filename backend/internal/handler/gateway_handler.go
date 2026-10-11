@@ -928,6 +928,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		fallbackGroupID = apiKey.Group.FallbackGroupIDOnInvalidRequest
 	}
 	fallbackUsed := false
+	var sessionInitialSerialDeadline time.Time
 
 	// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
 	// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
@@ -981,6 +982,61 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					} else {
 						sendMockInterceptResponse(c, reqModel, interceptType)
 					}
+					return
+				}
+			}
+
+			var sessionSerialPermit *sessionInitialSerialPermit
+			sessionSerialWaited := false
+			if h.useSessionInitialSerial(isClaudeCodeClient, sessionKey, account, parsedReq) {
+				if sessionInitialSerialDeadline.IsZero() {
+					sessionInitialSerialDeadline = time.Now().Add(h.cfg.Gateway.ClaudeSessionInitialSerial.WaitTimeout())
+				}
+				groupID := int64(0)
+				if currentAPIKey.GroupID != nil {
+					groupID = *currentAPIKey.GroupID
+				}
+				var serialErr error
+				sessionSerialPermit, serialErr = acquireSessionInitialSerial(
+					c, h.gatewayService, groupID, sessionKey, account.ID, sessionInitialSerialDeadline,
+					reqStream, &streamStarted, h.concurrencyHelper.pingInterval,
+					func() {
+						sessionSerialWaited = true
+						h.releaseSelectedSlotForSessionWait(selection)
+					}, reqLog,
+				)
+				var clientWriteErr *sessionInitialSerialClientWriteError
+				if c.Request.Context().Err() != nil || errors.As(serialErr, &clientWriteErr) {
+					sessionSerialPermit.Release()
+					if selection.Acquired && selection.ReleaseFunc != nil {
+						selection.ReleaseFunc()
+					}
+					return
+				}
+				var staleSerial *sessionInitialSerialStaleError
+				if errors.As(serialErr, &staleSerial) {
+					// An old account generation must reselect, never reopen its gate.
+					if selection.Acquired && selection.ReleaseFunc != nil {
+						selection.ReleaseFunc()
+					}
+					// The original per-request sticky prefetch may still point to
+					// the old account. Prefer the new generation's account through
+					// normal scheduling validation without confirming sticky early.
+					c.Request = c.Request.WithContext(service.WithPrefetchedStickySession(c.Request.Context(), staleSerial.accountID, groupID, h.metadataBridgeEnabled()))
+					continue
+				}
+				if serialErr != nil {
+					// This is a bounded cost optimization, not an availability gate.
+					reqLog.Warn("gateway.session_initial_serial_bypassed", zap.Int64("account_id", account.ID), zap.Error(serialErr))
+				}
+				if sessionSerialPermit != nil {
+					defer sessionSerialPermit.Release()
+				}
+			}
+			if sessionSerialWaited {
+				if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), currentAPIKey.User, currentAPIKey, currentAPIKey.Group, currentSubscription); err != nil {
+					status, code, message := billingErrorDetails(err)
+					h.handleStreamingAwareError(c, status, code, message, streamStarted)
 					return
 				}
 			}
@@ -1089,6 +1145,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			queueRelease = wrapReleaseOnDone(c.Request.Context(), queueRelease)
 			// 注入回调到 ParsedRequest：使用外层 wrapper 以便提前清理 AfterFunc
 			parsedReq.OnUpstreamAccepted = queueRelease
+			parsedReq.OnUpstreamMessageStart = sessionSerialPermit.Release
 			// ===== 用户消息串行队列 END =====
 
 			// 转发请求 - 根据账号平台分流
@@ -1100,6 +1157,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
 			h.prepareSuccessfulRequestBodyCapture(c, currentAPIKey)
+			sessionSerialPermit.MarkForwarded()
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, body, hasBoundSession)
 			} else {
@@ -1112,6 +1170,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 清理回调引用，防止 failover 重试时旧回调被错误调用
 			parsedReq.OnUpstreamAccepted = nil
+			sessionSerialPermit.Release()
+			parsedReq.OnUpstreamMessageStart = nil
 
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()

@@ -146,6 +146,13 @@ security:
 # 网关配置
 # =============================================================================
 gateway:
+  # Official Claude Code OAuth/setup-token sessions: serialize the first three
+  # forwarding attempts after initial account selection or an account switch.
+  # Release on parsed message_start (not response headers); then resume parallel
+  # forwarding. Cache errors or the total wait deadline bypass this optimization.
+  claude_session_initial_serial:
+    enabled: true
+    wait_timeout_ms: 90000
   # Optional asynchronous user-input moderation sidecar. A group must also
   # enable input moderation in the admin UI. Queue payloads are AES-GCM encrypted
   # in Redis Stream when a fixed totp.encryption_key is configured; otherwise

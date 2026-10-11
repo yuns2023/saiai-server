@@ -5964,7 +5964,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var firstTokenMs *int
 	var clientDisconnect bool
 	if reqStream {
-		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, reqModel, false)
+		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, reqModel, false, parsed.OnUpstreamMessageStart)
 		if err != nil {
 			var streamErr *upstreamStreamError
 			if errors.As(err, &streamErr) {
@@ -5989,6 +5989,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		usage, err = s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, reqModel)
 		if err != nil {
 			return nil, err
+		}
+		if parsed.OnUpstreamMessageStart != nil {
+			parsed.OnUpstreamMessageStart()
 		}
 	}
 
@@ -8268,7 +8271,7 @@ func anthropicContentBlockIndex(data string) (int, bool) {
 	return int(value), true
 }
 
-func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, mimicClaudeCode bool) (*streamingResult, error) {
+func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, mimicClaudeCode bool, onMessageStart ...func()) (*streamingResult, error) {
 	// 更新5h窗口状态
 	s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 
@@ -8295,6 +8298,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
+	var messageStartNotified bool
 	scanner := bufio.NewScanner(resp.Body)
 	// 设置更大的buffer以处理长行
 	maxLineSize := defaultMaxLineSize
@@ -8643,6 +8647,16 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 
 		if processed.data != "" {
+			if !messageStartNotified && processed.eventType == "message_start" &&
+				gjson.Get(processed.data, "type").String() == "message_start" &&
+				gjson.Get(processed.data, "message").IsObject() {
+				messageStartNotified = true
+				for _, notify := range onMessageStart {
+					if notify != nil {
+						notify()
+					}
+				}
+			}
 			if firstTokenMs == nil && processed.data != "[DONE]" {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms

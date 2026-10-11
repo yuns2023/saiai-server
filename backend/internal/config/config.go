@@ -520,6 +520,22 @@ type GatewayConfig struct {
 	// UserMessageQueue: 用户消息串行队列配置
 	// 对 role:"user" 的真实用户消息实施账号级串行化 + RPM 自适应延迟
 	UserMessageQueue UserMessageQueueConfig `mapstructure:"user_message_queue"`
+
+	// ClaudeSessionInitialSerial serializes the first three forwarding attempts
+	// after a session selects an OAuth/setup-token account or switches accounts.
+	ClaudeSessionInitialSerial ClaudeSessionInitialSerialConfig `mapstructure:"claude_session_initial_serial"`
+}
+
+type ClaudeSessionInitialSerialConfig struct {
+	Enabled       bool `mapstructure:"enabled"`
+	WaitTimeoutMs int  `mapstructure:"wait_timeout_ms"`
+}
+
+func (c ClaudeSessionInitialSerialConfig) WaitTimeout() time.Duration {
+	if c.WaitTimeoutMs <= 0 {
+		return 90 * time.Second
+	}
+	return time.Duration(c.WaitTimeoutMs) * time.Millisecond
 }
 
 // UserMessageQueueConfig 用户消息串行队列配置
@@ -1543,6 +1559,8 @@ func setDefaults() {
 	// TLS指纹伪装配置（默认关闭，需要账号级别单独启用）
 	// 用户消息串行队列默认值
 	viper.SetDefault("gateway.user_message_queue.enabled", false)
+	viper.SetDefault("gateway.claude_session_initial_serial.enabled", true)
+	viper.SetDefault("gateway.claude_session_initial_serial.wait_timeout_ms", 90000)
 	viper.SetDefault("gateway.user_message_queue.lock_ttl_ms", 120000)
 	viper.SetDefault("gateway.user_message_queue.wait_timeout_ms", 30000)
 	viper.SetDefault("gateway.user_message_queue.min_delay_ms", 200)
@@ -1574,6 +1592,9 @@ func setDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if wait := c.Gateway.ClaudeSessionInitialSerial.WaitTimeoutMs; wait < 0 || wait > 300000 {
+		return fmt.Errorf("gateway.claude_session_initial_serial.wait_timeout_ms must be between 0 and 300000")
+	}
 	jwtSecret := strings.TrimSpace(c.JWT.Secret)
 	if jwtSecret == "" {
 		return fmt.Errorf("jwt.secret is required")

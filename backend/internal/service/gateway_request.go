@@ -73,6 +73,11 @@ type ParsedRequest struct {
 	// OnUpstreamAccepted 上游接受请求后立即调用（用于提前释放串行锁）
 	// 流式请求在收到 2xx 响应头后调用，避免持锁等流完成
 	OnUpstreamAccepted func()
+
+	// OnUpstreamMessageStart releases session startup serialization only after
+	// a parsed Anthropic message_start, rather than HTTP headers or SSE pings.
+	// Non-streaming responses invoke it after successful body processing.
+	OnUpstreamMessageStart func()
 }
 
 // ParseGatewayRequest 解析网关请求体并返回结构化结果。
