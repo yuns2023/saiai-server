@@ -27,7 +27,7 @@ func TestSessionInitialSerialReleaseRequiresMessageStart(t *testing.T) {
 		done <- err
 	}()
 	go func() {
-		defer writer.Close()
+		defer func() { _ = writer.Close() }()
 		_, _ = io.WriteString(writer, "event: ping\ndata: {\"type\":\"ping\"}\n\n")
 		_, _ = io.WriteString(writer, "event: message_start\ndata: not-json\n\n")
 		_, _ = io.WriteString(writer, "event: message_start\ndata: {\"type\":\"message_start\"}\n\n")
@@ -37,8 +37,8 @@ func TestSessionInitialSerialReleaseRequiresMessageStart(t *testing.T) {
 		_, _ = io.WriteString(writer, anthropicTerminalRecoveryClosedBlock+anthropicFinalDelta(7)+"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 	}()
 	t.Cleanup(func() {
-		reader.Close()
-		writer.Close()
+		_ = reader.Close()
+		_ = writer.Close()
 	})
 	select {
 	case <-responseStarted:
