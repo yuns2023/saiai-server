@@ -88,6 +88,13 @@ credits and promotion headers from native HTTP responses. This prevents a
 selected provider account's limits or plan from being presented as the SAIAI
 user's limits. It does not invent zero utilization or unlimited quota.
 
+Codex `0.162.1` derives both percentage warnings and the model-switch prompt
+from these snapshots. The prompt is queued when a default Codex window reaches
+90% usage, workspace credits do not cover it and the reminder is enabled.
+Filtering removes this input for both UI surfaces; it does not edit the
+client's model preference or reminder settings. See the official
+[`tui/src/chatwidget/rate_limits.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/tui/src/chatwidget/rate_limits.rs).
+
 Required conversation controls such as `x-codex-turn-state`, safe unknown
 application headers, ordinary response events and usage accounting remain
 intact. Generic API-key forwarding retains its existing policy. Filtering a

@@ -98,7 +98,8 @@ func TestCodexQuotaHTTPKeepsInternalUsageAndHidesProviderLimits(t *testing.T) {
 			wire := completion
 			if mode == "sse" {
 				headers.Set("Content-Type", "text/event-stream")
-				quota := fmt.Sprintf(`{"type":"codex.rate_limits","plan_type":"pro","rate_limits":{"primary":{"used_percent":81,"window_minutes":300,"reset_at":%d},"secondary":{"used_percent":80,"window_minutes":10080,"reset_at":%d}}}`, reset.Unix(), reset.Unix())
+				// Codex 0.162.1 queues its model-switch prompt at >=90%.
+				quota := fmt.Sprintf(`{"type":"codex.rate_limits","plan_type":"pro","rate_limits":{"primary":{"used_percent":95,"window_minutes":300,"reset_at":%d},"secondary":{"used_percent":80,"window_minutes":10080,"reset_at":%d}}}`, reset.Unix(), reset.Unix())
 				wire = "event:codex.rate_limits\ndata: " + quota + "\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":" + completion + "}\n\n"
 			}
 			upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{auditOAuthPolicyResponse(200, headers, wire)}}
@@ -119,7 +120,7 @@ func TestCodexQuotaHTTPKeepsInternalUsageAndHidesProviderLimits(t *testing.T) {
 			require.Equal(t, "MOCK_CONTROL", rec.Header().Get("x-codex-future-control"))
 			used := 20.0
 			if mode == "sse" {
-				used = 81
+				used = 95
 			}
 			updates := awaitCodexQuotaUpdates(t, repo, used)
 			require.Equal(t, reset.Format(time.RFC3339), updates["codex_5h_reset_at"])
@@ -138,7 +139,8 @@ func TestCodexQuotaWSPassthroughSamplesAndFilters(t *testing.T) {
 			headers.Set("x-codex-primary-used-percent", "20")
 			headers.Set("x-codex-primary-window-minutes", "300")
 			headers.Set("x-codex-primary-reset-at", fmt.Sprint(reset.Unix()))
-			quota := []byte(fmt.Sprintf(`{"type":"codex.rate_limits","plan_type":"pro","rate_limits":{"primary":{"used_percent":81,"window_minutes":300,"reset_at":%d},"secondary":{"used_percent":80,"window_minutes":10080,"reset_at":%d}}}`, reset.Unix(), reset.Unix()))
+			// Exercise a value that triggers both the warning and model-switch UI.
+			quota := []byte(fmt.Sprintf(`{"type":"codex.rate_limits","plan_type":"pro","rate_limits":{"primary":{"used_percent":95,"window_minutes":300,"reset_at":%d},"secondary":{"used_percent":80,"window_minutes":10080,"reset_at":%d}}}`, reset.Unix(), reset.Unix()))
 			unknownQuota := []byte(`{"type":"codex.rate_limits","metered_limit_name":"model-specific","rate_limits":{"primary":{"used_percent":100,"window_minutes":300}}}`)
 			created := []byte(`{"type":"response.created","response":{"id":"resp_quota_ws","output":[]}}`)
 			completed := []byte(`{ "type":"response.completed", "response":{"id":"resp_quota_ws","future":true,"usage":{"input_tokens":2,"output_tokens":3}} }`)
@@ -238,7 +240,7 @@ func TestCodexQuotaWSPassthroughSamplesAndFilters(t *testing.T) {
 				require.Empty(t, repo.updateExtraCh)
 				return
 			}
-			used := 81.0
+			used := 95.0
 			if mode == "handshake_only" {
 				used = 20
 			}
