@@ -317,6 +317,7 @@ const applyRouteQueryFilters = () => {
   const queryStartTime = getSingleQueryValue(route.query.start_time)
   const queryEndTime = getSingleQueryValue(route.query.end_time)
   const queryUserId = getNumericQueryValue(route.query.user_id)
+  const queryAPIKeyId = getNumericQueryValue(route.query.api_key_id)
   const querySessionId = getSingleQueryValue(route.query.session_id)
 
   if (queryStartDate) {
@@ -345,6 +346,7 @@ const applyRouteQueryFilters = () => {
   filters.value = {
     ...filters.value,
     user_id: queryUserId,
+    api_key_id: queryAPIKeyId,
     moderation_flagged: getSingleQueryValue(route.query.moderation_flagged) === 'true' || undefined,
     session_id: querySessionId,
     ...activeRangeParams()

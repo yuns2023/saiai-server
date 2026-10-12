@@ -255,6 +255,13 @@
           <CacheUsageTrend class="lg:col-span-2" :trend-data="trendData" :loading="chartsLoading" />
           </div>
 
+          <APIKeySpendingRanking
+            :start-date="startDate"
+            :end-date="endDate"
+            :start-time="activeRangePreset === 'last24Hours' ? rollingStartTime : undefined"
+            :end-time="activeRangePreset === 'last24Hours' ? rollingEndTime : undefined"
+          />
+
           <!-- User Usage Trend (Full Width) -->
           <div class="card p-4">
             <h3 class="mb-4 text-sm font-semibold text-gray-900 dark:text-white">
@@ -305,6 +312,7 @@ import Select from '@/components/common/Select.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import CacheUsageTrend from '@/components/charts/CacheUsageTrend.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
+import APIKeySpendingRanking from '@/components/admin/dashboard/APIKeySpendingRanking.vue'
 
 import {
   Chart as ChartJS,

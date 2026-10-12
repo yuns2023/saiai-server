@@ -68,6 +68,21 @@ describe('UsageFilters', () => {
     expect(modelValue.total_cost_gt).toBe(3.5)
     await enabled.setValue(false)
     expect(modelValue.total_cost_gt).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('identifies active user and Key filters from a ranking deep link', async () => {
+    listGroups.mockResolvedValue({ items: [] })
+    getModelStats.mockResolvedValue({ models: [] })
+    const wrapper = mount(UsageFilters, {
+      props: { modelValue: { user_id: 42, api_key_id: 11 }, exporting: false, showActions: false },
+      global: { stubs: { Select: true } },
+    })
+    await flushPromises()
+    const inputs = wrapper.findAll('input')
+    expect(inputs[0].attributes('placeholder')).toBe('#42')
+    expect(inputs[1].attributes('placeholder')).toBe('Key #11')
+    wrapper.unmount()
   })
 
   it('keeps precise timestamps exclusive from legacy calendar dates', async () => {

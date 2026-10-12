@@ -1457,6 +1457,29 @@ export interface UserSpendingRankingResponse {
   end_date: string
 }
 
+export interface APIKeySpendingRankingItem {
+  api_key_id: number
+  key_name: string
+  user_id: number
+  email: string
+  actual_cost: number
+  requests: number
+  tokens: number
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+}
+
+export interface APIKeySpendingRankingResponse {
+  ranking: APIKeySpendingRankingItem[]
+  total_actual_cost: number
+  total_requests: number
+  total_tokens: number
+  start_date: string
+  end_date: string
+}
+
 export interface ApiKeyUsageTrendPoint {
   date: string
   api_key_id: number

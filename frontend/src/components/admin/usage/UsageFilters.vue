@@ -11,7 +11,7 @@
             v-model="userKeyword"
             type="text"
             class="input pr-8"
-            :placeholder="t('admin.usage.searchUserPlaceholder')"
+            :placeholder="filters.user_id ? `#${filters.user_id}` : t('admin.usage.searchUserPlaceholder')"
             @input="debounceUserSearch"
             @focus="showUserDropdown = true"
           />
@@ -48,7 +48,7 @@
             v-model="apiKeyKeyword"
             type="text"
             class="input pr-8"
-            :placeholder="t('admin.usage.searchApiKeyPlaceholder')"
+            :placeholder="filters.api_key_id ? `Key #${filters.api_key_id}` : t('admin.usage.searchApiKeyPlaceholder')"
             @input="debounceApiKeySearch"
             @focus="onApiKeyFocus"
           />

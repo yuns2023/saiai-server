@@ -104,6 +104,30 @@ The older batch Key-usage endpoint retains its compatibility fields. Its
 `total_actual_cost` default window is the last 30 days, and the Key-management
 UI labels it as such rather than as lifetime usage.
 
+## Administrator Key spending ranking
+
+`GET /api/v1/admin/dashboard/api-keys-ranking` is administrator-only. Without
+`user_id` it ranks global usage; a positive `user_id` selects the usage recorded
+for that user. It accepts the dashboard's half-open RFC3339 `start_time` /
+`end_time` range or inclusive `start_date` / `end_date` calendar range with
+`timezone`. Precise timestamps take precedence. `limit` defaults to 12 and is
+capped at 50.
+
+Rows are ordered by recorded user-billed `actual_cost`, then total tokens, then
+Key ID and user ID for stable ties. Each row contains Key ID/name, user ID/email,
+request count, actual cost, and the four token classes. Totals and consumption
+shares cover all Keys in the selected scope, before the ranking limit. Historical
+usage of soft-deleted Keys is retained; zero-usage Keys are omitted. Raw Key values
+are never selected or returned. Results use a 30-second cache separated by time
+range, user scope, and limit.
+
+The administrator dashboard provides a global ranking, user search and per-user
+ranking, proportional spending bars, and links into Key-filtered usage records
+that preserve the selected range. It also shows input cache read rate:
+`cache_read_tokens / (input_tokens + cache_creation_tokens + cache_read_tokens)`.
+This excludes output tokens and counts only reads as reuse. Zero reads display
+0%; no input data displays `—`. A low rate alone does not classify abuse.
+
 ## Self-service Key lookup
 
 `GET /v1/usage` is the read-only, API-Key-authenticated contract behind the

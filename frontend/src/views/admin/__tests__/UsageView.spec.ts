@@ -18,6 +18,7 @@ const { list, getStats, getSnapshotV2, getModelStats, getById, routeQuery } = vi
     getSnapshotV2: vi.fn(),
     getModelStats: vi.fn(),
     getById: vi.fn(),
+    routeQuery: {} as Record<string, string>,
   }
 })
 
@@ -212,6 +213,36 @@ describe('admin UsageView distribution metric toggles', () => {
     wrapper.findComponent({ name: 'UsageFilters' }).vm.$emit('refresh')
     await flushPromises()
     expect(list.mock.lastCall?.[0]).toMatchObject(expected)
+    wrapper.unmount()
+  })
+
+  it('applies a Key ranking deep link to logs, totals, and distributions', async () => {
+    Object.assign(routeQuery, {
+      user_id: '42', api_key_id: '11',
+      start_time: '2026-03-01T10:00:00Z', end_time: '2026-03-02T10:00:00Z'
+    })
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, Pagination: true, Select: true, DateRangePicker: true,
+        Icon: true, TokenUsageTrend: true, ModelDistributionChart: ModelDistributionChartStub,
+        GroupDistributionChart: GroupDistributionChartStub, EndpointDistributionChart: EndpointDistributionChartStub,
+      } },
+    })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const expected = {
+      user_id: 42, api_key_id: 11,
+      start_time: routeQuery.start_time, end_time: routeQuery.end_time,
+    }
+    expect(list).toHaveBeenCalledWith(expect.objectContaining(expected), expect.anything())
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining(expected))
+    expect(getModelStats).toHaveBeenCalledWith(expect.objectContaining(expected))
+    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining(expected))
+    expect(wrapper.findComponent(ModelDistributionChartStub).props('breakdownFilters')).toEqual(expect.objectContaining({
+      user_id: 42, api_key_id: 11,
+    }))
     wrapper.unmount()
   })
 
