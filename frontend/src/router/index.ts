@@ -178,6 +178,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/hosted-accounts',
+    name: 'HostedAccounts',
+    component: () => import('@/views/user/HostedAccountsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Hosted Accounts',
+      titleKey: 'hostedAccounts.title',
+      descriptionKey: 'hostedAccounts.description'
+    }
+  },
+  {
     path: '/subscriptions',
     name: 'Subscriptions',
     component: () => import('@/views/user/SubscriptionsView.vue'),
@@ -514,6 +526,7 @@ router.beforeEach((to, _from, next) => {
       '/admin/subscriptions',
       '/admin/redeem',
       '/subscriptions',
+      '/hosted-accounts',
       '/redeem'
     ]
 

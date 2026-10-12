@@ -443,6 +443,13 @@
           </div>
         </div>
 
+        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+          <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+            <input v-model="createForm.show_account_quota" type="checkbox" :disabled="!createForm.is_exclusive" />
+            {{ t('admin.groups.showAccountQuota') }}
+          </label>
+          <p class="input-hint">{{ t('admin.groups.showAccountQuotaHint') }}</p>
+        </div>
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
           <div>
@@ -1202,6 +1209,13 @@
           <Select v-model="editForm.status" :options="editStatusOptions" />
         </div>
 
+        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+          <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+            <input v-model="editForm.show_account_quota" type="checkbox" :disabled="!editForm.is_exclusive" />
+            {{ t('admin.groups.showAccountQuota') }}
+          </label>
+          <p class="input-hint">{{ t('admin.groups.showAccountQuotaHint') }}</p>
+        </div>
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
           <div>
@@ -2137,6 +2151,7 @@ const createForm = reactive({
   rate_multiplier: 1.0,
   required_level_id: null as number | null,
   is_exclusive: false,
+  show_account_quota: false,
   subscription_type: 'standard' as SubscriptionType,
   five_hour_limit_usd: null as number | null,
   daily_limit_usd: null as number | null,
@@ -2394,6 +2409,7 @@ const editForm = reactive({
   rate_multiplier: 1.0,
   required_level_id: null as number | null,
   is_exclusive: false,
+  show_account_quota: false,
   status: 'active' as 'active' | 'inactive',
   subscription_type: 'standard' as SubscriptionType,
   five_hour_limit_usd: null as number | null,
@@ -2550,6 +2566,7 @@ const closeCreateModal = () => {
   createForm.rate_multiplier = 1.0
   createForm.required_level_id = null
   createForm.is_exclusive = false
+  createForm.show_account_quota = false
   createForm.subscription_type = 'standard'
   createForm.five_hour_limit_usd = null
   createForm.daily_limit_usd = null
@@ -2609,6 +2626,7 @@ const handleCreateGroup = async () => {
     const { blocked_model_patterns_text, model_rate_multipliers_text, ...createRest } = createForm
     const requestData = {
       ...createRest,
+      show_account_quota: createForm.is_exclusive && createForm.show_account_quota,
       five_hour_limit_usd: normalizeOptionalLimit(createForm.five_hour_limit_usd as number | string | null),
       daily_limit_usd: normalizeOptionalLimit(createForm.daily_limit_usd as number | string | null),
       weekly_limit_usd: normalizeOptionalLimit(createForm.weekly_limit_usd as number | string | null),
@@ -2648,6 +2666,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.rate_multiplier = group.rate_multiplier
   editForm.required_level_id = group.required_level_id ?? null
   editForm.is_exclusive = group.is_exclusive
+  editForm.show_account_quota = group.show_account_quota || false
   editForm.status = group.status
   editForm.subscription_type = group.subscription_type || 'standard'
   editForm.five_hour_limit_usd = group.five_hour_limit_usd
@@ -2709,6 +2728,7 @@ const handleUpdateGroup = async () => {
     const { blocked_model_patterns_text, model_rate_multipliers_text, ...editRest } = editForm
     const payload = {
       ...editRest,
+      show_account_quota: editForm.is_exclusive && editForm.show_account_quota,
       five_hour_limit_usd: normalizeOptionalLimit(editForm.five_hour_limit_usd as number | string | null),
       daily_limit_usd: normalizeOptionalLimit(editForm.daily_limit_usd as number | string | null),
       weekly_limit_usd: normalizeOptionalLimit(editForm.weekly_limit_usd as number | string | null),
@@ -2765,6 +2785,14 @@ const confirmDelete = async () => {
     console.error('Error deleting group:', error)
   }
 }
+
+// A public group must never retain enabled account quota visibility.
+watch(() => createForm.is_exclusive, (exclusive) => {
+  if (!exclusive) createForm.show_account_quota = false
+})
+watch(() => editForm.is_exclusive, (exclusive) => {
+  if (!exclusive) editForm.show_account_quota = false
+})
 
 // 监听 subscription_type 变化，订阅模式时 is_exclusive 默认为 true
 watch(

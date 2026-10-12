@@ -183,6 +183,7 @@ func groupFromServiceBase(g *service.Group) Group {
 		Platform:                        g.Platform,
 		RateMultiplier:                  g.RateMultiplier,
 		IsExclusive:                     g.IsExclusive,
+		ShowAccountQuota:                g.ShowAccountQuota,
 		Status:                          g.Status,
 		RequiredLevelID:                 g.RequiredLevelID,
 		RequiredLevel:                   AccessLevelFromService(g.RequiredLevel),

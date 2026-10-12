@@ -77,15 +77,16 @@ type APIKey struct {
 }
 
 type Group struct {
-	ID              int64        `json:"id"`
-	Name            string       `json:"name"`
-	Description     string       `json:"description"`
-	Platform        string       `json:"platform"`
-	RateMultiplier  float64      `json:"rate_multiplier"`
-	IsExclusive     bool         `json:"is_exclusive"`
-	Status          string       `json:"status"`
-	RequiredLevelID *int64       `json:"required_level_id"`
-	RequiredLevel   *AccessLevel `json:"required_level,omitempty"`
+	ID               int64        `json:"id"`
+	Name             string       `json:"name"`
+	Description      string       `json:"description"`
+	Platform         string       `json:"platform"`
+	RateMultiplier   float64      `json:"rate_multiplier"`
+	IsExclusive      bool         `json:"is_exclusive"`
+	ShowAccountQuota bool         `json:"show_account_quota"`
+	Status           string       `json:"status"`
+	RequiredLevelID  *int64       `json:"required_level_id"`
+	RequiredLevel    *AccessLevel `json:"required_level,omitempty"`
 
 	SubscriptionType string   `json:"subscription_type"`
 	FiveHourLimitUSD *float64 `json:"five_hour_limit_usd"`

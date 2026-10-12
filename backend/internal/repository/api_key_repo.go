@@ -668,6 +668,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		RateMultiplier:                   g.RateMultiplier,
 		ModelRateMultipliers:             g.ModelRateMultipliers,
 		IsExclusive:                      g.IsExclusive,
+		ShowAccountQuota:                 g.ShowAccountQuota,
 		Status:                           g.Status,
 		Hydrated:                         true,
 		RequiredLevelID:                  g.RequiredLevelID,

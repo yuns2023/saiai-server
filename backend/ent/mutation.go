@@ -9265,6 +9265,7 @@ type GroupMutation struct {
 	rate_multiplier                         *float64
 	addrate_multiplier                      *float64
 	is_exclusive                            *bool
+	show_account_quota                      *bool
 	status                                  *string
 	platform                                *string
 	subscription_type                       *string
@@ -9748,6 +9749,42 @@ func (m *GroupMutation) OldIsExclusive(ctx context.Context) (v bool, err error) 
 // ResetIsExclusive resets all changes to the "is_exclusive" field.
 func (m *GroupMutation) ResetIsExclusive() {
 	m.is_exclusive = nil
+}
+
+// SetShowAccountQuota sets the "show_account_quota" field.
+func (m *GroupMutation) SetShowAccountQuota(b bool) {
+	m.show_account_quota = &b
+}
+
+// ShowAccountQuota returns the value of the "show_account_quota" field in the mutation.
+func (m *GroupMutation) ShowAccountQuota() (r bool, exists bool) {
+	v := m.show_account_quota
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldShowAccountQuota returns the old "show_account_quota" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldShowAccountQuota(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldShowAccountQuota is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldShowAccountQuota requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldShowAccountQuota: %w", err)
+	}
+	return oldValue.ShowAccountQuota, nil
+}
+
+// ResetShowAccountQuota resets all changes to the "show_account_quota" field.
+func (m *GroupMutation) ResetShowAccountQuota() {
+	m.show_account_quota = nil
 }
 
 // SetRequiredLevelID sets the "required_level_id" field.
@@ -12248,7 +12285,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 47)
+	fields := make([]string, 0, 48)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -12269,6 +12306,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.is_exclusive != nil {
 		fields = append(fields, group.FieldIsExclusive)
+	}
+	if m.show_account_quota != nil {
+		fields = append(fields, group.FieldShowAccountQuota)
 	}
 	if m.required_level != nil {
 		fields = append(fields, group.FieldRequiredLevelID)
@@ -12412,6 +12452,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.RateMultiplier()
 	case group.FieldIsExclusive:
 		return m.IsExclusive()
+	case group.FieldShowAccountQuota:
+		return m.ShowAccountQuota()
 	case group.FieldRequiredLevelID:
 		return m.RequiredLevelID()
 	case group.FieldStatus:
@@ -12515,6 +12557,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldRateMultiplier(ctx)
 	case group.FieldIsExclusive:
 		return m.OldIsExclusive(ctx)
+	case group.FieldShowAccountQuota:
+		return m.OldShowAccountQuota(ctx)
 	case group.FieldRequiredLevelID:
 		return m.OldRequiredLevelID(ctx)
 	case group.FieldStatus:
@@ -12652,6 +12696,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetIsExclusive(v)
+		return nil
+	case group.FieldShowAccountQuota:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetShowAccountQuota(v)
 		return nil
 	case group.FieldRequiredLevelID:
 		v, ok := value.(int64)
@@ -13374,6 +13425,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldIsExclusive:
 		m.ResetIsExclusive()
+		return nil
+	case group.FieldShowAccountQuota:
+		m.ResetShowAccountQuota()
 		return nil
 	case group.FieldRequiredLevelID:
 		m.ResetRequiredLevelID()

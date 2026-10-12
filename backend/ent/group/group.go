@@ -29,6 +29,8 @@ const (
 	FieldRateMultiplier = "rate_multiplier"
 	// FieldIsExclusive holds the string denoting the is_exclusive field in the database.
 	FieldIsExclusive = "is_exclusive"
+	// FieldShowAccountQuota holds the string denoting the show_account_quota field in the database.
+	FieldShowAccountQuota = "show_account_quota"
 	// FieldRequiredLevelID holds the string denoting the required_level_id field in the database.
 	FieldRequiredLevelID = "required_level_id"
 	// FieldStatus holds the string denoting the status field in the database.
@@ -200,6 +202,7 @@ var Columns = []string{
 	FieldDescription,
 	FieldRateMultiplier,
 	FieldIsExclusive,
+	FieldShowAccountQuota,
 	FieldRequiredLevelID,
 	FieldStatus,
 	FieldPlatform,
@@ -281,6 +284,8 @@ var (
 	DefaultRateMultiplier float64
 	// DefaultIsExclusive holds the default value on creation for the "is_exclusive" field.
 	DefaultIsExclusive bool
+	// DefaultShowAccountQuota holds the default value on creation for the "show_account_quota" field.
+	DefaultShowAccountQuota bool
 	// DefaultStatus holds the default value on creation for the "status" field.
 	DefaultStatus string
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
@@ -386,6 +391,11 @@ func ByRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 // ByIsExclusive orders the results by the is_exclusive field.
 func ByIsExclusive(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIsExclusive, opts...).ToFunc()
+}
+
+// ByShowAccountQuota orders the results by the show_account_quota field.
+func ByShowAccountQuota(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldShowAccountQuota, opts...).ToFunc()
 }
 
 // ByRequiredLevelID orders the results by the required_level_id field.

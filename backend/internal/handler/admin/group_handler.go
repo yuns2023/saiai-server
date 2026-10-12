@@ -87,6 +87,7 @@ type CreateGroupRequest struct {
 	Platform         string             `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity sora"`
 	RateMultiplier   float64            `json:"rate_multiplier"`
 	IsExclusive      bool               `json:"is_exclusive"`
+	ShowAccountQuota bool               `json:"show_account_quota"`
 	RequiredLevelID  *int64             `json:"required_level_id"`
 	SubscriptionType string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
 	FiveHourLimitUSD optionalLimitField `json:"five_hour_limit_usd"`
@@ -140,6 +141,7 @@ type UpdateGroupRequest struct {
 	Platform         string             `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity sora"`
 	RateMultiplier   *float64           `json:"rate_multiplier"`
 	IsExclusive      *bool              `json:"is_exclusive"`
+	ShowAccountQuota *bool              `json:"show_account_quota"`
 	RequiredLevelID  *int64             `json:"required_level_id"`
 	Status           string             `json:"status" binding:"omitempty,oneof=active inactive"`
 	SubscriptionType string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
@@ -279,6 +281,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		Platform:                         req.Platform,
 		RateMultiplier:                   req.RateMultiplier,
 		IsExclusive:                      req.IsExclusive,
+		ShowAccountQuota:                 req.ShowAccountQuota,
 		RequiredLevelID:                  req.RequiredLevelID,
 		SubscriptionType:                 req.SubscriptionType,
 		FiveHourLimitUSD:                 req.FiveHourLimitUSD.ToServiceInput(),
@@ -348,6 +351,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		Platform:                         req.Platform,
 		RateMultiplier:                   req.RateMultiplier,
 		IsExclusive:                      req.IsExclusive,
+		ShowAccountQuota:                 req.ShowAccountQuota,
 		RequiredLevelID:                  req.RequiredLevelID,
 		Status:                           req.Status,
 		SubscriptionType:                 req.SubscriptionType,

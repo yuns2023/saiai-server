@@ -134,6 +134,7 @@ type CreateGroupInput struct {
 	Platform             string
 	RateMultiplier       float64
 	ModelRateMultipliers map[string]float64
+	ShowAccountQuota     bool
 	IsExclusive          bool
 	RequiredLevelID      *int64
 	SubscriptionType     string   // standard/subscription
@@ -189,6 +190,7 @@ type UpdateGroupInput struct {
 	Platform             string
 	RateMultiplier       *float64 // 使用指针以支持设置为0
 	ModelRateMultipliers *map[string]float64
+	ShowAccountQuota     *bool
 	IsExclusive          *bool
 	RequiredLevelID      *int64
 	Status               string
@@ -1025,6 +1027,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		Platform:                         platform,
 		RateMultiplier:                   input.RateMultiplier,
 		ModelRateMultipliers:             modelRateMultipliers,
+		ShowAccountQuota:                 input.ShowAccountQuota && input.IsExclusive,
 		IsExclusive:                      input.IsExclusive,
 		RequiredLevelID:                  input.RequiredLevelID,
 		Status:                           StatusActive,
@@ -1252,6 +1255,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.IsExclusive != nil {
 		group.IsExclusive = *input.IsExclusive
+	}
+	if input.ShowAccountQuota != nil {
+		group.ShowAccountQuota = *input.ShowAccountQuota
+	}
+	if !group.IsExclusive {
+		group.ShowAccountQuota = false
 	}
 	if input.RequiredLevelID != nil {
 		if *input.RequiredLevelID > 0 {

@@ -729,3 +729,27 @@ func TestAdminService_UpdateGroup_InvalidRequestFallbackSetSuccess(t *testing.T)
 	require.NotNil(t, repo.updated)
 	require.Equal(t, fallbackID, *repo.updated.FallbackGroupIDOnInvalidRequest)
 }
+
+func TestAdminService_HostedAccountQuotaVisibility(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{Name: "Hosted", Platform: PlatformAnthropic, IsExclusive: true, ShowAccountQuota: true})
+	require.NoError(t, err)
+	require.True(t, repo.created.ShowAccountQuota)
+	repo.getByID = repo.created
+	value := false
+	_, err = svc.UpdateGroup(context.Background(), repo.created.ID, &UpdateGroupInput{ShowAccountQuota: &value})
+	require.NoError(t, err)
+	require.False(t, repo.updated.ShowAccountQuota)
+	value = true
+	_, err = svc.UpdateGroup(context.Background(), repo.created.ID, &UpdateGroupInput{ShowAccountQuota: &value})
+	require.NoError(t, err)
+	require.True(t, repo.updated.ShowAccountQuota)
+	value = false
+	_, err = svc.UpdateGroup(context.Background(), repo.created.ID, &UpdateGroupInput{IsExclusive: &value})
+	require.NoError(t, err)
+	require.False(t, repo.updated.ShowAccountQuota)
+	_, err = svc.CreateGroup(context.Background(), &CreateGroupInput{Name: "Public", Platform: PlatformAnthropic, ShowAccountQuota: true})
+	require.NoError(t, err)
+	require.False(t, repo.created.ShowAccountQuota)
+}

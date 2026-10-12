@@ -9,6 +9,41 @@ export default {
     formula: '总 Token = 非缓存输入 + 输出 + 缓存读取 + 缓存写入。',
     roundingHint: '简写数值经四舍五入，精确核对请使用以上整数。'
   },
+  hostedAccounts: {
+  "title": "托管账号",
+  "description": "查看专属分组内托管账号的额度使用情况",
+  "group": "托管分组",
+  "refresh": "刷新",
+  "notice": "这里展示账号整体的上游额度，可能包含平台外的使用；与你在平台的消费记录分别统计。刷新读取已有数据，额度会随账号使用更新。",
+  "emptyGroups": "暂无可查看的托管分组",
+  "emptyGroupsHint": "管理员为专属分组开启账号额度展示后，你可以在这里查看。",
+  "emptyAccounts": "这个分组暂无账号",
+  "noData": "暂无额度数据",
+  "updatedAt": "数据更新时间：{time}",
+  "unknownTime": "采样时间未知",
+  "stale": "数据较旧，仅供参考",
+  "resetAt": "重置时间：{time}",
+  "resetUnknown": "重置时间未知",
+  "resetElapsed": "重置时间已到，等待新数据",
+  "remaining": "预计 {hours} 小时 {minutes} 分钟后重置",
+  "loadError": "加载托管账号失败，请稍后重试",
+  "accessChanged": "分组授权或展示设置已变更，请刷新分组列表。",
+  "loading": "加载中…",
+  "windows": {
+    "five_hour": "5 小时额度",
+    "seven_day": "周额度",
+    "seven_day_sonnet": "Sonnet 周额度",
+    "seven_day_fable": "模型专项周额度"
+  },
+  "statuses": {
+    "available": "可用",
+    "paused": "已暂停",
+    "expired": "已到期",
+    "rate_limited": "额度或速率受限",
+    "temporarily_unavailable": "暂不可用",
+    "needs_attention": "需要管理员处理"
+  }
+},
   maintenance: {
     title: '系统维护中',
     defaultMessage: '系统正在升级维护，请稍候再试。'
@@ -398,6 +433,7 @@ export default {
     expand: '展开',
     logout: '退出登录',
     mySubscriptions: '我的订阅',
+    hostedAccounts: '托管账号',
     buySubscription: '购买与充值',
     docs: '文档'
   },
@@ -1817,6 +1853,8 @@ export default {
     groups: {
       title: '分组管理',
       description: '管理 API 密钥分组和费率配置',
+      showAccountQuota: '允许用户查看账号额度',
+      showAccountQuotaHint: '仅限专属分组。已授权用户可查看组内账号的额度快照和可用状态；改为公开分组会关闭展示。',
       requiredLevel: '最低用户等级',
       noRequiredLevel: '不限制等级（仅沿用原分组权限）',
       requiredLevelHint: '用户满足该等级后，仍需同时满足专属分组授权或订阅要求。',

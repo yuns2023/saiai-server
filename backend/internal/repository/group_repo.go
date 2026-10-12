@@ -76,6 +76,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetPlatform(groupIn.Platform).
 		SetRateMultiplier(groupIn.RateMultiplier).
 		SetIsExclusive(groupIn.IsExclusive).
+		SetShowAccountQuota(groupIn.ShowAccountQuota).
 		SetNillableRequiredLevelID(groupIn.RequiredLevelID).
 		SetStatus(groupIn.Status).
 		SetSubscriptionType(groupIn.SubscriptionType).
@@ -171,6 +172,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetPlatform(groupIn.Platform).
 		SetRateMultiplier(groupIn.RateMultiplier).
 		SetIsExclusive(groupIn.IsExclusive).
+		SetShowAccountQuota(groupIn.ShowAccountQuota).
 		SetStatus(groupIn.Status).
 		SetSubscriptionType(groupIn.SubscriptionType).
 		SetNillableFiveHourLimitUsd(groupIn.FiveHourLimitUSD).

@@ -9,6 +9,41 @@ export default {
     formula: 'Total Tokens = uncached input + output + cache read + cache write.',
     roundingHint: 'Compact values are rounded. Use the integers above for exact reconciliation.'
   },
+  hostedAccounts: {
+  "title": "Hosted Accounts",
+  "description": "View account quota usage in your exclusive groups",
+  "group": "Hosted group",
+  "refresh": "Refresh",
+  "notice": "These are upstream account quotas, which may include usage outside this platform. Your platform spending is tracked separately. Refresh reads existing data; quota snapshots update as accounts are used.",
+  "emptyGroups": "No hosted groups available",
+  "emptyGroupsHint": "Your administrator can enable account quota visibility for your exclusive group.",
+  "emptyAccounts": "No accounts in this group",
+  "noData": "No quota data available",
+  "updatedAt": "Data updated: {time}",
+  "unknownTime": "Sample time unknown",
+  "stale": "Older data; use as a reference",
+  "resetAt": "Resets: {time}",
+  "resetUnknown": "Reset time unknown",
+  "resetElapsed": "Reset time reached; awaiting new data",
+  "remaining": "Expected reset in {hours}h {minutes}m",
+  "loadError": "Failed to load hosted accounts. Please try again.",
+  "accessChanged": "Group access or visibility has changed. Refresh the group list.",
+  "loading": "Loading…",
+  "windows": {
+    "five_hour": "5-hour quota",
+    "seven_day": "Weekly quota",
+    "seven_day_sonnet": "Sonnet weekly quota",
+    "seven_day_fable": "Model-specific weekly quota"
+  },
+  "statuses": {
+    "available": "Available",
+    "paused": "Paused",
+    "expired": "Expired",
+    "rate_limited": "Quota or rate limited",
+    "temporarily_unavailable": "Temporarily unavailable",
+    "needs_attention": "Administrator action needed"
+  }
+},
   maintenance: {
     title: 'System Maintenance',
     defaultMessage: 'The system is being upgraded. Please try again later.'
@@ -398,6 +433,7 @@ export default {
     expand: 'Expand',
     logout: 'Logout',
     mySubscriptions: 'My Subscriptions',
+    hostedAccounts: 'Hosted Accounts',
     buySubscription: 'Purchase & recharge',
     docs: 'Docs'
   },
@@ -1763,6 +1799,8 @@ export default {
     groups: {
       title: 'Group Management',
       description: 'Manage API key groups and rate multipliers',
+      showAccountQuota: 'Allow users to view account quotas',
+      showAccountQuotaHint: 'Exclusive groups only. Authorized users can view quota snapshots and availability. Making the group public disables visibility.',
       requiredLevel: 'Minimum access level',
       noRequiredLevel: 'No level requirement (legacy access rules only)',
       requiredLevelHint: 'Users must meet this level in addition to exclusive-group or subscription requirements.',

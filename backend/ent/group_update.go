@@ -131,6 +131,20 @@ func (_u *GroupUpdate) SetNillableIsExclusive(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetShowAccountQuota sets the "show_account_quota" field.
+func (_u *GroupUpdate) SetShowAccountQuota(v bool) *GroupUpdate {
+	_u.mutation.SetShowAccountQuota(v)
+	return _u
+}
+
+// SetNillableShowAccountQuota sets the "show_account_quota" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableShowAccountQuota(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetShowAccountQuota(*v)
+	}
+	return _u
+}
+
 // SetRequiredLevelID sets the "required_level_id" field.
 func (_u *GroupUpdate) SetRequiredLevelID(v int64) *GroupUpdate {
 	_u.mutation.SetRequiredLevelID(v)
@@ -1259,6 +1273,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 	}
+	if value, ok := _u.mutation.ShowAccountQuota(); ok {
+		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)
 	}
@@ -1930,6 +1947,20 @@ func (_u *GroupUpdateOne) SetIsExclusive(v bool) *GroupUpdateOne {
 func (_u *GroupUpdateOne) SetNillableIsExclusive(v *bool) *GroupUpdateOne {
 	if v != nil {
 		_u.SetIsExclusive(*v)
+	}
+	return _u
+}
+
+// SetShowAccountQuota sets the "show_account_quota" field.
+func (_u *GroupUpdateOne) SetShowAccountQuota(v bool) *GroupUpdateOne {
+	_u.mutation.SetShowAccountQuota(v)
+	return _u
+}
+
+// SetNillableShowAccountQuota sets the "show_account_quota" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableShowAccountQuota(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetShowAccountQuota(*v)
 	}
 	return _u
 }
@@ -3091,6 +3122,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.ShowAccountQuota(); ok {
+		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)

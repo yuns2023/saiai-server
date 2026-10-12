@@ -119,6 +119,20 @@ func (_c *GroupCreate) SetNillableIsExclusive(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetShowAccountQuota sets the "show_account_quota" field.
+func (_c *GroupCreate) SetShowAccountQuota(v bool) *GroupCreate {
+	_c.mutation.SetShowAccountQuota(v)
+	return _c
+}
+
+// SetNillableShowAccountQuota sets the "show_account_quota" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableShowAccountQuota(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetShowAccountQuota(*v)
+	}
+	return _c
+}
+
 // SetRequiredLevelID sets the "required_level_id" field.
 func (_c *GroupCreate) SetRequiredLevelID(v int64) *GroupCreate {
 	_c.mutation.SetRequiredLevelID(v)
@@ -793,6 +807,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultIsExclusive
 		_c.mutation.SetIsExclusive(v)
 	}
+	if _, ok := _c.mutation.ShowAccountQuota(); !ok {
+		v := group.DefaultShowAccountQuota
+		_c.mutation.SetShowAccountQuota(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := group.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -917,6 +935,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		return &ValidationError{Name: "is_exclusive", err: errors.New(`ent: missing required field "Group.is_exclusive"`)}
+	}
+	if _, ok := _c.mutation.ShowAccountQuota(); !ok {
+		return &ValidationError{Name: "show_account_quota", err: errors.New(`ent: missing required field "Group.show_account_quota"`)}
 	}
 	if _, ok := _c.mutation.Status(); !ok {
 		return &ValidationError{Name: "status", err: errors.New(`ent: missing required field "Group.status"`)}
@@ -1077,6 +1098,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 		_node.IsExclusive = value
+	}
+	if value, ok := _c.mutation.ShowAccountQuota(); ok {
+		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)
+		_node.ShowAccountQuota = value
 	}
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)
@@ -1494,6 +1519,18 @@ func (u *GroupUpsert) SetIsExclusive(v bool) *GroupUpsert {
 // UpdateIsExclusive sets the "is_exclusive" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateIsExclusive() *GroupUpsert {
 	u.SetExcluded(group.FieldIsExclusive)
+	return u
+}
+
+// SetShowAccountQuota sets the "show_account_quota" field.
+func (u *GroupUpsert) SetShowAccountQuota(v bool) *GroupUpsert {
+	u.Set(group.FieldShowAccountQuota, v)
+	return u
+}
+
+// UpdateShowAccountQuota sets the "show_account_quota" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateShowAccountQuota() *GroupUpsert {
+	u.SetExcluded(group.FieldShowAccountQuota)
 	return u
 }
 
@@ -2340,6 +2377,20 @@ func (u *GroupUpsertOne) SetIsExclusive(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateIsExclusive() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetShowAccountQuota sets the "show_account_quota" field.
+func (u *GroupUpsertOne) SetShowAccountQuota(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetShowAccountQuota(v)
+	})
+}
+
+// UpdateShowAccountQuota sets the "show_account_quota" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateShowAccountQuota() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateShowAccountQuota()
 	})
 }
 
@@ -3468,6 +3519,20 @@ func (u *GroupUpsertBulk) SetIsExclusive(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateIsExclusive() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetShowAccountQuota sets the "show_account_quota" field.
+func (u *GroupUpsertBulk) SetShowAccountQuota(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetShowAccountQuota(v)
+	})
+}
+
+// UpdateShowAccountQuota sets the "show_account_quota" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateShowAccountQuota() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateShowAccountQuota()
 	})
 }
 

@@ -53,6 +53,8 @@ func RegisterUserRoutes(
 		{
 			groups.GET("/available", h.APIKey.GetAvailableGroups)
 			groups.GET("/rates", h.APIKey.GetUserGroupRates)
+			groups.GET("/hosted", h.HostedAccount.ListGroups)
+			groups.GET("/:id/account-quota", h.HostedAccount.ListAccounts)
 		}
 
 		// 使用记录

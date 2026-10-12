@@ -754,3 +754,31 @@ func (s *GroupRepoSuite) TestDelete_SoftDeletedGroup_lockForUpdate() {
 	s.Require().Error(err, "should fail to get soft-deleted group")
 	s.Require().ErrorIs(err, service.ErrGroupNotFound)
 }
+
+func (s *GroupRepoSuite) TestHostedQuotaVisibility() {
+	g := &service.Group{Name: "hosted-quota-visibility", Platform: service.PlatformAnthropic, RateMultiplier: 1, IsExclusive: true, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard}
+	s.Require().NoError(s.repo.Create(s.ctx, g))
+	got, err := s.repo.GetByIDLite(s.ctx, g.ID)
+	s.Require().NoError(err)
+	s.Require().False(got.ShowAccountQuota)
+	g.ShowAccountQuota = true
+	s.Require().NoError(s.repo.Update(s.ctx, g))
+	got, err = s.repo.GetByIDLite(s.ctx, g.ID)
+	s.Require().NoError(err)
+	s.Require().True(got.ShowAccountQuota)
+	groups, err := s.repo.ListActive(s.ctx)
+	s.Require().NoError(err)
+	found := false
+	for _, group := range groups {
+		if group.ID == g.ID {
+			found = true
+			s.Require().True(group.ShowAccountQuota)
+		}
+	}
+	s.Require().True(found)
+	g.ShowAccountQuota = false
+	s.Require().NoError(s.repo.Update(s.ctx, g))
+	got, err = s.repo.GetByIDLite(s.ctx, g.ID)
+	s.Require().NoError(err)
+	s.Require().False(got.ShowAccountQuota)
+}

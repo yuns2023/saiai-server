@@ -33,6 +33,8 @@ type Group struct {
 	RateMultiplier float64 `json:"rate_multiplier,omitempty"`
 	// IsExclusive holds the value of the "is_exclusive" field.
 	IsExclusive bool `json:"is_exclusive,omitempty"`
+	// 允许专属分组用户查看账号额度快照
+	ShowAccountQuota bool `json:"show_account_quota,omitempty"`
 	// 使用该分组所需的最低用户等级；为空时保留原公开/专属规则
 	RequiredLevelID *int64 `json:"required_level_id,omitempty"`
 	// Status holds the value of the "status" field.
@@ -234,7 +236,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case group.FieldModelRouting, group.FieldBlockedModelPatterns, group.FieldModelRateMultipliers, group.FieldSupportedModelScopes, group.FieldInputModerationCategories:
 			values[i] = new([]byte)
-		case group.FieldIsExclusive, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldInputModerationEnabled, group.FieldInputModerationAutoDisableUser:
+		case group.FieldIsExclusive, group.FieldShowAccountQuota, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldInputModerationEnabled, group.FieldInputModerationAutoDisableUser:
 			values[i] = new(sql.NullBool)
 		case group.FieldRateMultiplier, group.FieldFiveHourLimitUsd, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k, group.FieldSoraImagePrice360, group.FieldSoraImagePrice540, group.FieldSoraVideoPricePerRequest, group.FieldSoraVideoPricePerRequestHd:
 			values[i] = new(sql.NullFloat64)
@@ -308,6 +310,12 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field is_exclusive", values[i])
 			} else if value.Valid {
 				_m.IsExclusive = value.Bool
+			}
+		case group.FieldShowAccountQuota:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field show_account_quota", values[i])
+			} else if value.Valid {
+				_m.ShowAccountQuota = value.Bool
 			}
 		case group.FieldRequiredLevelID:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -678,6 +686,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("is_exclusive=")
 	builder.WriteString(fmt.Sprintf("%v", _m.IsExclusive))
+	builder.WriteString(", ")
+	builder.WriteString("show_account_quota=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ShowAccountQuota))
 	builder.WriteString(", ")
 	if v := _m.RequiredLevelID; v != nil {
 		builder.WriteString("required_level_id=")

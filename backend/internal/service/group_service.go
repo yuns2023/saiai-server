@@ -49,6 +49,7 @@ type CreateGroupRequest struct {
 	Name                 string             `json:"name"`
 	Description          string             `json:"description"`
 	RateMultiplier       float64            `json:"rate_multiplier"`
+	ShowAccountQuota     bool               `json:"show_account_quota"`
 	IsExclusive          bool               `json:"is_exclusive"`
 	BlockedModelPatterns []string           `json:"blocked_model_patterns"`
 	ModelRateMultipliers map[string]float64 `json:"model_rate_multipliers"`
@@ -59,6 +60,7 @@ type UpdateGroupRequest struct {
 	Name                 *string             `json:"name"`
 	Description          *string             `json:"description"`
 	RateMultiplier       *float64            `json:"rate_multiplier"`
+	ShowAccountQuota     *bool               `json:"show_account_quota"`
 	IsExclusive          *bool               `json:"is_exclusive"`
 	Status               *string             `json:"status"`
 	BlockedModelPatterns *[]string           `json:"blocked_model_patterns"`
@@ -104,6 +106,7 @@ func (s *GroupService) Create(ctx context.Context, req CreateGroupRequest) (*Gro
 		Description:          req.Description,
 		Platform:             PlatformAnthropic,
 		RateMultiplier:       req.RateMultiplier,
+		ShowAccountQuota:     req.ShowAccountQuota && req.IsExclusive,
 		IsExclusive:          req.IsExclusive,
 		Status:               StatusActive,
 		SubscriptionType:     SubscriptionTypeStandard,
@@ -175,6 +178,12 @@ func (s *GroupService) Update(ctx context.Context, id int64, req UpdateGroupRequ
 
 	if req.IsExclusive != nil {
 		group.IsExclusive = *req.IsExclusive
+	}
+	if req.ShowAccountQuota != nil {
+		group.ShowAccountQuota = *req.ShowAccountQuota
+	}
+	if !group.IsExclusive {
+		group.ShowAccountQuota = false
 	}
 
 	if req.Status != nil {

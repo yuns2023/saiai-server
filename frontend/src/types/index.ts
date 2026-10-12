@@ -402,6 +402,7 @@ export interface Group {
   platform: GroupPlatform
   rate_multiplier: number
   is_exclusive: boolean
+  show_account_quota?: boolean
   status: 'active' | 'inactive'
   required_level_id: number | null
   required_level?: AccessLevel | null
@@ -536,6 +537,7 @@ export interface CreateGroupRequest {
   platform?: GroupPlatform
   rate_multiplier?: number
   is_exclusive?: boolean
+  show_account_quota?: boolean
   required_level_id?: number | null
   subscription_type?: SubscriptionType
   five_hour_limit_usd?: number | null
@@ -583,6 +585,7 @@ export interface UpdateGroupRequest {
   platform?: GroupPlatform
   rate_multiplier?: number
   is_exclusive?: boolean
+  show_account_quota?: boolean
   required_level_id?: number | null
   status?: 'active' | 'inactive'
   subscription_type?: SubscriptionType

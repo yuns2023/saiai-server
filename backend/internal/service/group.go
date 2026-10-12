@@ -24,16 +24,17 @@ const (
 )
 
 type Group struct {
-	ID              int64
-	Name            string
-	Description     string
-	Platform        string
-	RateMultiplier  float64
-	IsExclusive     bool
-	Status          string
-	Hydrated        bool // indicates the group was loaded from a trusted repository source
-	RequiredLevelID *int64
-	RequiredLevel   *AccessLevel
+	ID               int64
+	Name             string
+	Description      string
+	Platform         string
+	RateMultiplier   float64
+	IsExclusive      bool
+	ShowAccountQuota bool
+	Status           string
+	Hydrated         bool // indicates the group was loaded from a trusted repository source
+	RequiredLevelID  *int64
+	RequiredLevel    *AccessLevel
 
 	SubscriptionType    string
 	FiveHourLimitUSD    *float64

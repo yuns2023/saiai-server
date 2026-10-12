@@ -90,6 +90,11 @@ func IsExclusive(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldIsExclusive, v))
 }
 
+// ShowAccountQuota applies equality check predicate on the "show_account_quota" field. It's identical to ShowAccountQuotaEQ.
+func ShowAccountQuota(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldShowAccountQuota, v))
+}
+
 // RequiredLevelID applies equality check predicate on the "required_level_id" field. It's identical to RequiredLevelIDEQ.
 func RequiredLevelID(v int64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldRequiredLevelID, v))
@@ -583,6 +588,16 @@ func IsExclusiveEQ(v bool) predicate.Group {
 // IsExclusiveNEQ applies the NEQ predicate on the "is_exclusive" field.
 func IsExclusiveNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldIsExclusive, v))
+}
+
+// ShowAccountQuotaEQ applies the EQ predicate on the "show_account_quota" field.
+func ShowAccountQuotaEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldShowAccountQuota, v))
+}
+
+// ShowAccountQuotaNEQ applies the NEQ predicate on the "show_account_quota" field.
+func ShowAccountQuotaNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldShowAccountQuota, v))
 }
 
 // RequiredLevelIDEQ applies the EQ predicate on the "required_level_id" field.
