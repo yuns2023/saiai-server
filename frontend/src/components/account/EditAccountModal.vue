@@ -1308,6 +1308,7 @@
                       <div class="font-medium text-gray-900 dark:text-white">Device {{ shortClaudeOAuthValue(device.device_key) }}</div>
                       <div class="text-xs text-gray-500 dark:text-gray-400">Original device: {{ shortClaudeOAuthValue(device.original_device_id) }}</div>
                       <div class="text-xs text-gray-500 dark:text-gray-400">Public device: {{ shortClaudeOAuthValue(device.public_device_id) }}</div>
+                      <ClaudeDeviceOwnerInfo :owner="device.last_owner" />
                       <div class="text-xs text-gray-500 dark:text-gray-400">UA: {{ device.last_user_agent || '—' }}</div>
                       <div class="text-xs text-gray-500 dark:text-gray-400">OS / Arch: {{ (device.last_os || '—') + ' / ' + (device.last_arch || '—') }}</div>
                       <div class="text-xs text-gray-500 dark:text-gray-400">Runtime: {{ device.last_runtime ? (device.last_runtime + ' ' + (device.last_runtime_version || '')).trim() : '—' }}</div>
@@ -1345,6 +1346,7 @@
                     <div class="text-xs text-gray-500 dark:text-gray-400">Reject count: {{ device.reject_count }}</div>
                     <div class="text-xs text-gray-500 dark:text-gray-400">First rejected: {{ formatClaudeOAuthTimestamp(device.first_rejected_at) }}</div>
                     <div class="text-xs text-gray-500 dark:text-gray-400">Last rejected: {{ formatClaudeOAuthTimestamp(device.last_rejected_at) }}</div>
+                    <ClaudeDeviceOwnerInfo :owner="device.last_owner" />
                     <div class="text-xs text-gray-500 dark:text-gray-400">UA: {{ device.last_user_agent || '—' }}</div>
                   </div>
                 </div>
@@ -1947,6 +1949,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
+import ClaudeDeviceOwnerInfo from './ClaudeDeviceOwnerInfo.vue'
 import type { ClaudeCarpoolDeviceOverview, ClaudePinnedBinding, ClaudeSharedBucket, ClaudeSingleDeviceSlot } from '@/api/admin/accounts'
 import type { Account, Proxy, AdminGroup, CheckMixedChannelRequest, CheckMixedChannelResponse } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'

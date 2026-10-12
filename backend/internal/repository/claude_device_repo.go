@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -22,7 +23,7 @@ func NewClaudeDeviceRepository(client *dbent.Client, db *sql.DB, encryptor servi
 	return &claudeDeviceRepository{client: client, db: db, encryptor: encryptor}
 }
 
-func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, groupID, apiKeyID int64, deviceHash, deviceID, mode string, baseLimit int) (*service.ClaudeDeviceRegistrationResult, error) {
+func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, groupID, apiKeyID int64, deviceHash, deviceID, mode string, baseLimit int, hints service.ClientHints) (*service.ClaudeDeviceRegistrationResult, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("claude device repository unavailable")
 	}
@@ -31,6 +32,12 @@ func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, g
 	}
 	if baseLimit <= 0 {
 		baseLimit = 1
+	}
+	// Persist only the display headers, never authenticated ownership or credentials.
+	hints.Owner = nil
+	hintsJSON, err := json.Marshal(hints)
+	if err != nil {
+		return nil, err
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -54,14 +61,14 @@ func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, g
 	}
 	existing = existingID > 0
 	if existing {
-		updates := `UPDATE claude_user_devices SET last_seen_at=NOW() WHERE id=$1`
-		args := []any{existingID}
+		updates := `UPDATE claude_user_devices SET last_seen_at=NOW(), client_hints=client_hints || $2::jsonb WHERE id=$1`
+		args := []any{existingID, string(hintsJSON)}
 		if !existingEncrypted.Valid || strings.TrimSpace(existingEncrypted.String) == "" {
 			encrypted, err := r.encryptor.Encrypt(deviceID)
 			if err != nil {
 				return nil, fmt.Errorf("encrypt Claude device ID: %w", err)
 			}
-			updates = `UPDATE claude_user_devices SET last_seen_at=NOW(), device_id_encrypted=$2 WHERE id=$1`
+			updates = `UPDATE claude_user_devices SET last_seen_at=NOW(), client_hints=client_hints || $2::jsonb, device_id_encrypted=$3 WHERE id=$1`
 			args = append(args, encrypted)
 		}
 		_, err := tx.ExecContext(ctx, updates, args...)
@@ -87,9 +94,9 @@ func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, g
 		return nil, fmt.Errorf("encrypt Claude device ID: %w", err)
 	}
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO claude_user_devices (user_id, group_id, device_hash, device_id_encrypted, first_api_key_id, first_seen_at, last_seen_at, revoked_at)
-		VALUES ($1,$2,$3,$4,$5,NOW(),NOW(),NULL)
-		ON CONFLICT (user_id,group_id,device_hash) DO UPDATE SET last_seen_at=NOW(), revoked_at=NULL, device_id_encrypted=EXCLUDED.device_id_encrypted`, userID, groupID, deviceHash, encrypted, apiKeyID)
+		INSERT INTO claude_user_devices (user_id, group_id, device_hash, device_id_encrypted, first_api_key_id, client_hints, first_seen_at, last_seen_at, revoked_at)
+		VALUES ($1,$2,$3,$4,$5,$6::jsonb,NOW(),NOW(),NULL)
+		ON CONFLICT (user_id,group_id,device_hash) DO UPDATE SET last_seen_at=NOW(), revoked_at=NULL, device_id_encrypted=EXCLUDED.device_id_encrypted, client_hints=claude_user_devices.client_hints || EXCLUDED.client_hints`, userID, groupID, deviceHash, encrypted, apiKeyID, string(hintsJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +122,7 @@ func (r *claudeDeviceRepository) AddBonusDevices(ctx context.Context, userID, gr
 }
 
 func (r *claudeDeviceRepository) ListUserDevices(ctx context.Context, userID int64, groupID *int64) ([]service.ClaudeUserDevice, error) {
-	query := `SELECT id,user_id,group_id,device_hash,device_id_encrypted,first_seen_at,last_seen_at,revoked_at FROM claude_user_devices WHERE user_id=$1`
+	query := `SELECT id,user_id,group_id,device_hash,device_id_encrypted,first_seen_at,last_seen_at,revoked_at,client_hints FROM claude_user_devices WHERE user_id=$1`
 	args := []any{userID}
 	if groupID != nil {
 		query += ` AND group_id=$2`
@@ -132,8 +139,12 @@ func (r *claudeDeviceRepository) ListUserDevices(ctx context.Context, userID int
 		var item service.ClaudeUserDevice
 		var encrypted sql.NullString
 		var revoked sql.NullTime
-		if err := rows.Scan(&item.ID, &item.UserID, &item.GroupID, &item.DeviceHash, &encrypted, &item.FirstSeenAt, &item.LastSeenAt, &revoked); err != nil {
+		var hintsJSON []byte
+		if err := rows.Scan(&item.ID, &item.UserID, &item.GroupID, &item.DeviceHash, &encrypted, &item.FirstSeenAt, &item.LastSeenAt, &revoked, &hintsJSON); err != nil {
 			return nil, err
+		}
+		if err := json.Unmarshal(hintsJSON, &item.ClientHints); err != nil {
+			return nil, fmt.Errorf("decode Claude device client hints: %w", err)
 		}
 		if encrypted.Valid && strings.TrimSpace(encrypted.String) != "" {
 			item.DeviceID, err = r.encryptor.Decrypt(encrypted.String)

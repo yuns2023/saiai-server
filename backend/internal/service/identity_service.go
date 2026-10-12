@@ -81,16 +81,39 @@ type Fingerprint struct {
 	UpdatedAt               int64 `json:",omitempty"` // Unix timestamp，用于判断是否需要续期TTL
 }
 
+// ClaudeDeviceOwner is an authenticated identity snapshot, never key material.
+// It describes the most recent request with a known API key for a device.
+type ClaudeDeviceOwner struct {
+	UserID     int64  `json:"user_id"`
+	Username   string `json:"username,omitempty"`
+	Email      string `json:"email,omitempty"`
+	APIKeyID   int64  `json:"api_key_id"`
+	APIKeyName string `json:"api_key_name,omitempty"`
+}
+
+func claudeDeviceOwnerFromAPIKey(key *APIKey) *ClaudeDeviceOwner {
+	if key == nil || key.ID <= 0 || key.UserID <= 0 {
+		return nil
+	}
+	owner := &ClaudeDeviceOwner{UserID: key.UserID, APIKeyID: key.ID, APIKeyName: key.Name}
+	if key.User != nil {
+		owner.Username = key.User.Username
+		owner.Email = key.User.Email
+	}
+	return owner
+}
+
 // ClientHints 从入站请求头抽取出来的客户端特征，用于在 device record 上做展示/审计。
 // 源头是 Anthropic SDK 的 X-Stainless-* 头（跨 Windows/macOS/Linux 都会带）和 User-Agent。
 // SDK 不带这些 header 的场景下对应字段为空。
 type ClientHints struct {
-	UserAgent      string `json:"user_agent,omitempty"`
-	OS             string `json:"os,omitempty"`              // X-Stainless-Os: Windows / MacOS / Linux / FreeBSD / ...
-	Arch           string `json:"arch,omitempty"`            // X-Stainless-Arch: x64 / arm64 / ...
-	Runtime        string `json:"runtime,omitempty"`         // X-Stainless-Runtime: node / bun / deno
-	RuntimeVersion string `json:"runtime_version,omitempty"` // X-Stainless-Runtime-Version: v24.3.0 / ...
-	SDKVersion     string `json:"sdk_version,omitempty"`     // X-Stainless-Package-Version: 0.81.0 / ...
+	Owner          *ClaudeDeviceOwner `json:"owner,omitempty"`
+	UserAgent      string             `json:"user_agent,omitempty"`
+	OS             string             `json:"os,omitempty"`              // X-Stainless-Os: Windows / MacOS / Linux / FreeBSD / ...
+	Arch           string             `json:"arch,omitempty"`            // X-Stainless-Arch: x64 / arm64 / ...
+	Runtime        string             `json:"runtime,omitempty"`         // X-Stainless-Runtime: node / bun / deno
+	RuntimeVersion string             `json:"runtime_version,omitempty"` // X-Stainless-Runtime-Version: v24.3.0 / ...
+	SDKVersion     string             `json:"sdk_version,omitempty"`     // X-Stainless-Package-Version: 0.81.0 / ...
 }
 
 // ExtractClientHints 从 HTTP header 读取 Stainless 特征 + UA。空 header 返回零值。
@@ -109,11 +132,12 @@ func ExtractClientHints(headers http.Header) ClientHints {
 }
 
 type CarpoolDeviceRecord struct {
-	DeviceKey        string `json:"device_key"`
-	OriginalDeviceID string `json:"original_device_id"`
-	CreatedAt        int64  `json:"created_at"`
-	LastSeenAt       int64  `json:"last_seen_at"`
-	LastUserAgent    string `json:"last_user_agent,omitempty"`
+	LastOwner        *ClaudeDeviceOwner `json:"last_owner,omitempty"`
+	DeviceKey        string             `json:"device_key"`
+	OriginalDeviceID string             `json:"original_device_id"`
+	CreatedAt        int64              `json:"created_at"`
+	LastSeenAt       int64              `json:"last_seen_at"`
+	LastUserAgent    string             `json:"last_user_agent,omitempty"`
 	// Last* client hints captured from the most recent request seen for this device.
 	LastOS             string `json:"last_os,omitempty"`
 	LastArch           string `json:"last_arch,omitempty"`
@@ -123,35 +147,38 @@ type CarpoolDeviceRecord struct {
 }
 
 type CarpoolOverflowRecord struct {
-	DeviceKey        string `json:"device_key"`
-	OriginalDeviceID string `json:"original_device_id"`
-	FirstRejectedAt  int64  `json:"first_rejected_at"`
-	LastRejectedAt   int64  `json:"last_rejected_at"`
-	RejectCount      int64  `json:"reject_count"`
-	LastUserAgent    string `json:"last_user_agent,omitempty"`
+	LastOwner        *ClaudeDeviceOwner `json:"last_owner,omitempty"`
+	DeviceKey        string             `json:"device_key"`
+	OriginalDeviceID string             `json:"original_device_id"`
+	FirstRejectedAt  int64              `json:"first_rejected_at"`
+	LastRejectedAt   int64              `json:"last_rejected_at"`
+	RejectCount      int64              `json:"reject_count"`
+	LastUserAgent    string             `json:"last_user_agent,omitempty"`
 }
 
 type CarpoolDeviceInfo struct {
-	DeviceKey          string `json:"device_key"`
-	OriginalDeviceID   string `json:"original_device_id"`
-	PublicDeviceID     string `json:"public_device_id"`
-	CreatedAt          int64  `json:"created_at"`
-	LastSeenAt         int64  `json:"last_seen_at"`
-	LastUserAgent      string `json:"last_user_agent,omitempty"`
-	LastOS             string `json:"last_os,omitempty"`
-	LastArch           string `json:"last_arch,omitempty"`
-	LastRuntime        string `json:"last_runtime,omitempty"`
-	LastRuntimeVersion string `json:"last_runtime_version,omitempty"`
-	LastSDKVersion     string `json:"last_sdk_version,omitempty"`
+	LastOwner          *ClaudeDeviceOwner `json:"last_owner,omitempty"`
+	DeviceKey          string             `json:"device_key"`
+	OriginalDeviceID   string             `json:"original_device_id"`
+	PublicDeviceID     string             `json:"public_device_id"`
+	CreatedAt          int64              `json:"created_at"`
+	LastSeenAt         int64              `json:"last_seen_at"`
+	LastUserAgent      string             `json:"last_user_agent,omitempty"`
+	LastOS             string             `json:"last_os,omitempty"`
+	LastArch           string             `json:"last_arch,omitempty"`
+	LastRuntime        string             `json:"last_runtime,omitempty"`
+	LastRuntimeVersion string             `json:"last_runtime_version,omitempty"`
+	LastSDKVersion     string             `json:"last_sdk_version,omitempty"`
 }
 
 type CarpoolOverflowDeviceInfo struct {
-	DeviceKey        string `json:"device_key"`
-	OriginalDeviceID string `json:"original_device_id"`
-	FirstRejectedAt  int64  `json:"first_rejected_at"`
-	LastRejectedAt   int64  `json:"last_rejected_at"`
-	RejectCount      int64  `json:"reject_count"`
-	LastUserAgent    string `json:"last_user_agent,omitempty"`
+	LastOwner        *ClaudeDeviceOwner `json:"last_owner,omitempty"`
+	DeviceKey        string             `json:"device_key"`
+	OriginalDeviceID string             `json:"original_device_id"`
+	FirstRejectedAt  int64              `json:"first_rejected_at"`
+	LastRejectedAt   int64              `json:"last_rejected_at"`
+	RejectCount      int64              `json:"reject_count"`
+	LastUserAgent    string             `json:"last_user_agent,omitempty"`
 }
 
 type CarpoolDeviceOverview struct {
@@ -720,7 +747,7 @@ func (s *IdentityService) computeOAuthPinnedDeviceID(accountID int64, slotKey, o
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func (s *IdentityService) EnsureCarpoolDeviceAllowed(ctx context.Context, account *Account, originalMetadataUserID string, headers http.Header) (*CarpoolDeviceRecord, error) {
+func (s *IdentityService) EnsureCarpoolDeviceAllowed(ctx context.Context, account *Account, originalMetadataUserID string, headers http.Header, apiKeys ...*APIKey) (*CarpoolDeviceRecord, error) {
 	if account == nil {
 		return nil, nil
 	}
@@ -735,6 +762,9 @@ func (s *IdentityService) EnsureCarpoolDeviceAllowed(ctx context.Context, accoun
 		return nil, nil
 	}
 	hints := ExtractClientHints(headers)
+	if len(apiKeys) > 0 {
+		hints.Owner = claudeDeviceOwnerFromAPIKey(apiKeys[0])
+	}
 	return s.cache.GetOrCreateCarpoolDevice(
 		ctx,
 		account.ID,
@@ -936,6 +966,7 @@ func (s *IdentityService) ListCarpoolDevices(ctx context.Context, account *Accou
 			continue
 		}
 		result.RecordedItems = append(result.RecordedItems, &CarpoolDeviceInfo{
+			LastOwner:          item.LastOwner,
 			DeviceKey:          item.DeviceKey,
 			OriginalDeviceID:   item.OriginalDeviceID,
 			PublicDeviceID:     s.computeOAuthCarpoolDeviceID(account.ID, item.OriginalDeviceID),
@@ -954,6 +985,7 @@ func (s *IdentityService) ListCarpoolDevices(ctx context.Context, account *Accou
 			continue
 		}
 		result.OverflowItems = append(result.OverflowItems, &CarpoolOverflowDeviceInfo{
+			LastOwner:        item.LastOwner,
 			DeviceKey:        item.DeviceKey,
 			OriginalDeviceID: item.OriginalDeviceID,
 			FirstRejectedAt:  item.FirstRejectedAt,

@@ -1586,6 +1586,8 @@ export default {
       total: '近30天',
       claudeDevicesSummaryHint: '当前有效设备数 / 启用设备限制分组的有效上限；已撤销设备不计入',
       claudeDeviceModal: {
+        lastUser: '最近用户',
+        lastKey: '最近 Key',
         title: 'Claude Code 设备',
         userId: '用户 ID：{id}',
         loading: '加载中...',

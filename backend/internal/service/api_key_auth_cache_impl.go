@@ -293,6 +293,7 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 	}
 	snapshot := &APIKeyAuthSnapshot{
 		APIKeyID:    apiKey.ID,
+		Name:        apiKey.Name,
 		UserID:      apiKey.UserID,
 		GroupID:     apiKey.GroupID,
 		Status:      apiKey.Status,
@@ -307,6 +308,7 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 		User: APIKeyAuthUserSnapshot{
 			ID:                          apiKey.User.ID,
 			Username:                    apiKey.User.Username,
+			Email:                       apiKey.User.Email,
 			Status:                      apiKey.User.Status,
 			Role:                        apiKey.User.Role,
 			Balance:                     apiKey.User.Balance,
@@ -372,6 +374,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 	}
 	apiKey := &APIKey{
 		ID:          snapshot.APIKeyID,
+		Name:        snapshot.Name,
 		UserID:      snapshot.UserID,
 		GroupID:     snapshot.GroupID,
 		Key:         key,
@@ -387,6 +390,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		User: &User{
 			ID:                          snapshot.User.ID,
 			Username:                    snapshot.User.Username,
+			Email:                       snapshot.User.Email,
 			Status:                      snapshot.User.Status,
 			Role:                        snapshot.User.Role,
 			Balance:                     snapshot.User.Balance,

@@ -11,6 +11,14 @@ export interface ClaudeUserDevice {
   user_id: number
   group_id: number
   device_hash: string
+  client_hints?: {
+    user_agent?: string
+    os?: string
+    arch?: string
+    runtime?: string
+    runtime_version?: string
+    sdk_version?: string
+  }
   device_id?: string
   first_seen_at: string
   last_seen_at: string

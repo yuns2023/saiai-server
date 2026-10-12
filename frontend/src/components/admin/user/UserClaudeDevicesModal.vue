@@ -49,6 +49,10 @@
                 <span class="break-all font-mono text-gray-700 dark:text-gray-200">{{ device.device_id || t('admin.users.claudeDeviceModal.unavailable') }}</span>
                 <button v-if="device.device_id" type="button" class="btn btn-secondary btn-sm shrink-0" @click="copyDeviceID(device.device_id)">{{ t('admin.users.claudeDeviceModal.copy') }}</button>
               </div>
+              <div class="break-all text-xs text-gray-500 dark:text-gray-400">UA: {{ device.client_hints?.user_agent || '—' }}</div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">OS / Arch: {{ device.client_hints?.os || '—' }} / {{ device.client_hints?.arch || '—' }}</div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">Runtime: {{ [device.client_hints?.runtime, device.client_hints?.runtime_version].filter(Boolean).join(' ') || '—' }}</div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">SDK: {{ device.client_hints?.sdk_version || '—' }}</div>
               <div class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.users.claudeDeviceModal.groupId', { id: device.group_id }) }}</div>
               <div class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.users.claudeDeviceModal.firstSeen', { date: formatDateTime(device.first_seen_at) }) }}</div>
               <div class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.users.claudeDeviceModal.lastSeen', { date: formatDateTime(device.last_seen_at) }) }}</div>

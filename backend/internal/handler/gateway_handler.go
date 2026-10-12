@@ -491,7 +491,7 @@ func (h *GatewayHandler) checkClaudeDeviceLimit(c *gin.Context, apiKey *service.
 	if h == nil || h.claudeDeviceService == nil {
 		return true
 	}
-	err := h.claudeDeviceService.CheckAndRegister(c.Request.Context(), apiKey, parsed)
+	err := h.claudeDeviceService.CheckAndRegister(c.Request.Context(), apiKey, parsed, service.ExtractClientHints(c.Request.Header))
 	if err == nil {
 		return true
 	}

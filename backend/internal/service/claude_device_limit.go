@@ -20,14 +20,15 @@ type ClaudeDeviceRegistrationResult struct {
 }
 
 type ClaudeUserDevice struct {
-	ID          int64      `json:"id"`
-	UserID      int64      `json:"user_id"`
-	GroupID     int64      `json:"group_id"`
-	DeviceHash  string     `json:"device_hash"`
-	DeviceID    string     `json:"device_id,omitempty"`
-	FirstSeenAt time.Time  `json:"first_seen_at"`
-	LastSeenAt  time.Time  `json:"last_seen_at"`
-	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
+	ClientHints ClientHints `json:"client_hints"`
+	ID          int64       `json:"id"`
+	UserID      int64       `json:"user_id"`
+	GroupID     int64       `json:"group_id"`
+	DeviceHash  string      `json:"device_hash"`
+	DeviceID    string      `json:"device_id,omitempty"`
+	FirstSeenAt time.Time   `json:"first_seen_at"`
+	LastSeenAt  time.Time   `json:"last_seen_at"`
+	RevokedAt   *time.Time  `json:"revoked_at,omitempty"`
 }
 
 // ClaudeUserDeviceSummary is the aggregate shown in the admin user list.
@@ -39,7 +40,7 @@ type ClaudeUserDeviceSummary struct {
 }
 
 type ClaudeDeviceRepository interface {
-	CheckAndRegister(ctx context.Context, userID, groupID, apiKeyID int64, deviceHash, deviceID, mode string, baseLimit int) (*ClaudeDeviceRegistrationResult, error)
+	CheckAndRegister(ctx context.Context, userID, groupID, apiKeyID int64, deviceHash, deviceID, mode string, baseLimit int, hints ClientHints) (*ClaudeDeviceRegistrationResult, error)
 	AddBonusDevices(ctx context.Context, userID, groupID int64, count int) error
 	ListUserDevices(ctx context.Context, userID int64, groupID *int64) ([]ClaudeUserDevice, error)
 	ListUserDeviceSummaries(ctx context.Context, userIDs []int64) (map[int64]ClaudeUserDeviceSummary, error)
@@ -107,7 +108,7 @@ func deviceIDLast4(deviceID string) string {
 	return string(runes[len(runes)-4:])
 }
 
-func (s *ClaudeDeviceService) CheckAndRegister(ctx context.Context, apiKey *APIKey, parsed *ParsedRequest) error {
+func (s *ClaudeDeviceService) CheckAndRegister(ctx context.Context, apiKey *APIKey, parsed *ParsedRequest, clientHints ...ClientHints) error {
 	if s == nil || s.repo == nil || apiKey == nil || apiKey.Group == nil || apiKey.GroupID == nil || apiKey.UserID <= 0 {
 		return nil
 	}
@@ -134,8 +135,12 @@ func (s *ClaudeDeviceService) CheckAndRegister(ctx context.Context, apiKey *APIK
 	}
 	deviceID := strings.TrimSpace(identity.DeviceID)
 	sum := sha256.Sum256([]byte(deviceID))
+	hints := ClientHints{}
+	if len(clientHints) > 0 {
+		hints = clientHints[0]
+	}
 	result, err := s.repo.CheckAndRegister(
-		ctx, apiKey.UserID, *apiKey.GroupID, apiKey.ID, hex.EncodeToString(sum[:]), deviceID, mode, apiKey.Group.ClaudeDeviceBaseLimit,
+		ctx, apiKey.UserID, *apiKey.GroupID, apiKey.ID, hex.EncodeToString(sum[:]), deviceID, mode, apiKey.Group.ClaudeDeviceBaseLimit, hints,
 	)
 	if err != nil {
 		fields := claudeDeviceLogFields(apiKey, *apiKey.GroupID, deviceID)

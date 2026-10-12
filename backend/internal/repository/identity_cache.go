@@ -301,6 +301,9 @@ func (c *identityCache) getOrCreateAdmissionDevice(ctx context.Context, accountI
 				record.RejectCount++
 				record.LastUserAgent = hints.UserAgent
 			}
+			if hints.Owner != nil {
+				record.LastOwner = hints.Owner
+			}
 			payload, marshalErr := json.Marshal(record)
 			if marshalErr != nil {
 				return marshalErr
@@ -336,6 +339,9 @@ func (c *identityCache) getOrCreateAdmissionDevice(ctx context.Context, accountI
 func applyCarpoolDeviceHints(record *service.CarpoolDeviceRecord, hints service.ClientHints) {
 	if record == nil {
 		return
+	}
+	if hints.Owner != nil {
+		record.LastOwner = hints.Owner
 	}
 	if hints.UserAgent != "" {
 		record.LastUserAgent = hints.UserAgent

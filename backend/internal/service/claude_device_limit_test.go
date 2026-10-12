@@ -12,11 +12,13 @@ type claudeDeviceRepoStub struct {
 	result     *ClaudeDeviceRegistrationResult
 	deviceHash string
 	deviceID   string
+	hints      ClientHints
 }
 
-func (s *claudeDeviceRepoStub) CheckAndRegister(_ context.Context, _, _, _ int64, deviceHash, deviceID, _ string, _ int) (*ClaudeDeviceRegistrationResult, error) {
+func (s *claudeDeviceRepoStub) CheckAndRegister(_ context.Context, _, _, _ int64, deviceHash, deviceID, _ string, _ int, hints ClientHints) (*ClaudeDeviceRegistrationResult, error) {
 	s.deviceHash = deviceHash
 	s.deviceID = deviceID
+	s.hints = hints
 	return s.result, nil
 }
 func (*claudeDeviceRepoStub) AddBonusDevices(context.Context, int64, int64, int) error { return nil }

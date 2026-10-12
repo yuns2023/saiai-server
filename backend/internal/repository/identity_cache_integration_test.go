@@ -3,6 +3,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -360,4 +361,60 @@ func (s *IdentityCacheSuite) TestDeleteSharedBucketState_DoesNotRemoveDeviceBind
 
 func TestIdentityCacheSuite(t *testing.T) {
 	suite.Run(t, new(IdentityCacheSuite))
+}
+
+func (s *IdentityCacheSuite) TestCarpoolDeviceOwnerUpdatesAndOverflow() {
+	t := s.T()
+	owner := &service.ClaudeDeviceOwner{UserID: 1, Username: "alice", APIKeyID: 2, APIKeyName: "laptop"}
+	hints := service.ClientHints{OS: "Windows", SDKVersion: "0.128.0", Owner: owner}
+	record, err := s.cache.GetOrCreateCarpoolDevice(s.ctx, 987, "device-a", hints, 1, 100)
+	require.NoError(t, err)
+	require.Equal(t, owner, record.LastOwner)
+	record, err = s.cache.GetOrCreateCarpoolDevice(s.ctx, 987, "device-a", service.ClientHints{}, 1, 200)
+	require.NoError(t, err)
+	require.Equal(t, owner, record.LastOwner)
+	require.Equal(t, "Windows", record.LastOS)
+	next := &service.ClaudeDeviceOwner{UserID: 3, Email: "bob@example.com", APIKeyID: 4, APIKeyName: "desktop"}
+	record, err = s.cache.GetOrCreateCarpoolDevice(s.ctx, 987, "device-a", service.ClientHints{Owner: next}, 1, 300)
+	require.NoError(t, err)
+	require.Equal(t, next, record.LastOwner)
+	require.Empty(t, record.LastOwner.Username)
+	require.Equal(t, int64(300), record.LastSeenAt)
+	_, err = s.cache.GetOrCreateCarpoolDevice(s.ctx, 987, "device-b", hints, 1, 400)
+	require.ErrorIs(t, err, service.ErrClaudeOAuthCarpoolDevicesFull)
+	overflow, err := s.cache.ListCarpoolOverflowDevices(s.ctx, 987)
+	require.NoError(t, err)
+	require.Len(t, overflow, 1)
+	require.Equal(t, owner, overflow[0].LastOwner)
+	_, err = s.cache.GetOrCreateCarpoolDevice(s.ctx, 987, "device-b", service.ClientHints{Owner: next}, 1, 500)
+	require.ErrorIs(t, err, service.ErrClaudeOAuthCarpoolDevicesFull)
+	overflow, err = s.cache.ListCarpoolOverflowDevices(s.ctx, 987)
+	require.NoError(t, err)
+	require.Equal(t, next, overflow[0].LastOwner)
+}
+
+func (s *IdentityCacheSuite) TestCarpoolDeviceOwnerServiceRoundTrip() {
+	t := s.T()
+	identity := service.NewIdentityService(s.cache, "test-instance-secret")
+	account := &service.Account{ID: 988, Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Extra: map[string]any{"claude_oauth_mode": service.ClaudeOAuthModeCarpool}}
+	metadata := service.FormatMetadataUserID("test-device", "", "11111111-2222-4333-8444-555555555555", "2.1.296")
+	key := &service.APIKey{ID: 2, UserID: 1, Name: "work laptop", Key: "test-secret-do-not-record", User: &service.User{Username: "alice", Email: "alice@example.com"}}
+	record, err := identity.EnsureCarpoolDeviceAllowed(s.ctx, account, metadata, nil, key)
+	require.NoError(t, err)
+	require.Equal(t, "work laptop", record.LastOwner.APIKeyName)
+	overview, err := identity.ListCarpoolDevices(s.ctx, account)
+	require.NoError(t, err)
+	require.Len(t, overview.RecordedItems, 1)
+	require.Equal(t, record.LastOwner, overview.RecordedItems[0].LastOwner)
+	payload, err := json.Marshal(overview)
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), key.Key)
+	// Historical data without ownership remains readable and acquires an owner.
+	legacy, err := s.cache.GetOrCreateCarpoolDevice(s.ctx, account.ID, "legacy-device", service.ClientHints{}, 5, 100)
+	require.NoError(t, err)
+	require.Nil(t, legacy.LastOwner)
+	legacyMetadata := service.FormatMetadataUserID("legacy-device", "", "11111111-2222-4333-8444-555555555555", "2.1.296")
+	legacy, err = identity.EnsureCarpoolDeviceAllowed(s.ctx, account, legacyMetadata, nil, key)
+	require.NoError(t, err)
+	require.Equal(t, record.LastOwner, legacy.LastOwner)
 }

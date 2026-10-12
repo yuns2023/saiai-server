@@ -1998,7 +1998,12 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 				requestIDFromGinContext(c), account.ID,
 			)
 		}
-		if _, err := s.identityService.EnsureCarpoolDeviceAllowed(ctx, account, originalUserID, clientHeaders); err != nil {
+		var deviceAPIKey *APIKey
+		if c != nil {
+			value, _ := c.Get("api_key")
+			deviceAPIKey, _ = value.(*APIKey)
+		}
+		if _, err := s.identityService.EnsureCarpoolDeviceAllowed(ctx, account, originalUserID, clientHeaders, deviceAPIKey); err != nil {
 			if errors.Is(err, ErrClaudeOAuthCarpoolDevicesFull) {
 				if forCountTokens {
 					return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, claudeOAuthCarpoolDevicesFullMessage, err)

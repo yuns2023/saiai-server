@@ -168,7 +168,16 @@ export async function toggleStatus(id: number, status: 'active' | 'inactive'): P
   return update(id, { status })
 }
 
+export interface ClaudeDeviceOwner {
+  user_id: number
+  username?: string
+  email?: string
+  api_key_id: number
+  api_key_name?: string
+}
+
 export interface ClaudeCarpoolDevice {
+  last_owner?: ClaudeDeviceOwner
   device_key: string
   original_device_id: string
   public_device_id: string
@@ -183,6 +192,7 @@ export interface ClaudeCarpoolDevice {
 }
 
 export interface ClaudeCarpoolOverflowDevice {
+  last_owner?: ClaudeDeviceOwner
   device_key: string
   original_device_id: string
   first_rejected_at: number

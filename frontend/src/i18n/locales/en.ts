@@ -1561,6 +1561,8 @@ export default {
       total: 'Last 30d',
       claudeDevicesSummaryHint: 'Active devices / effective limit across groups with device limits enabled; revoked devices are excluded',
       claudeDeviceModal: {
+        lastUser: 'Last user',
+        lastKey: 'Last Key',
         title: 'Claude Code devices',
         userId: 'User ID: {id}',
         loading: 'Loading...',

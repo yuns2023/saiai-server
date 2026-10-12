@@ -155,6 +155,24 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('shows the most recent user and Key on recorded and overflow carpool devices', async () => {
+    const account = { ...buildAccount(), type: 'oauth', credentials: {}, extra: { claude_oauth_mode: 'carpool' }, claude_oauth_mode: 'carpool' } as any
+    listClaudeCarpoolDevicesMock.mockResolvedValue({
+      unlimited_devices: false, recorded_limit: 5, recorded_count: 1, overflow_count: 1,
+      recorded_items: [{ device_key: 'recorded', original_device_id: 'original', public_device_id: 'public', created_at: 100, last_seen_at: 200,
+        last_owner: { user_id: 1, username: 'alice', email: 'alice@example.com', api_key_id: 2, api_key_name: 'work laptop' } }],
+      overflow_items: [{ device_key: 'overflow', original_device_id: 'other', first_rejected_at: 100, last_rejected_at: 200, reject_count: 1,
+        last_owner: { user_id: 3, email: 'bob@example.com', api_key_id: 4, api_key_name: 'home desktop' } }]
+    })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.text()).toContain('alice (#1)')
+    expect(wrapper.text()).toContain('work laptop (#2)')
+    expect(wrapper.text()).toContain('bob@example.com (#3)')
+    expect(wrapper.text()).toContain('home desktop (#4)')
+    wrapper.unmount()
+  })
+
   it('persists unlimited carpool devices and hides the bounded registry', async () => {
     const account = {
       ...buildAccount(),
