@@ -123,10 +123,27 @@ range, user scope, and limit.
 
 The administrator dashboard provides a global ranking, user search and per-user
 ranking, proportional spending bars, and links into Key-filtered usage records
-that preserve the selected range. It also shows input cache read rate:
-`cache_read_tokens / (input_tokens + cache_creation_tokens + cache_read_tokens)`.
-This excludes output tokens and counts only reads as reuse. Zero reads display
-0%; no input data displays `—`. A low rate alone does not classify abuse.
+that preserve the selected range. Each row shows the Key's cache read rate as
+defined in [Cache read analytics](#cache-read-analytics); a low read rate alone
+does not classify abuse.
+
+## Analytics validation notes
+
+- Check global and user scopes separately. Calculate spending shares against all
+  matching Keys before Top N, using the same recorded user-billed cost as usage.
+- Test the destination of a drill-down link: logs, totals and charts must consume
+  both `user_id` and `api_key_id` and retain the exact selected time range.
+- Reject stale async results after user/range changes. Cache keys must include
+  scope, limit and precise range boundaries.
+- Use local mock data without real provider traffic. Cover zero reads, writes
+  without reads, output-heavy records, absent input and zero-cost scopes.
+- In browser checks, mark the mock user's onboarding tour as already seen using
+  the storage key derived from the current tour implementation. Do not force
+  clicks through an overlay or change production onboarding to make tests pass.
+- Inspect screenshots as well as runtime errors and page overflow. Check row
+  height and readable column widths on narrow screens; horizontally scroll dense
+  tables rather than wrapping identifiers one character per line. Verify both
+  light and dark themes.
 
 ## Self-service Key lookup
 
