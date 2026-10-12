@@ -707,7 +707,38 @@ export async function batchRefresh(accountIds: number[]): Promise<BatchOperation
   return data
 }
 
+export interface CodexResetCredit {
+  id: string
+  reset_type: string
+  status: string
+  granted_at: string
+  expires_at: string | null
+  title?: string
+  description?: string
+}
+
+export interface CodexResetResult {
+  outcome: 'reset' | 'nothing_to_reset' | 'no_credit' | 'already_redeemed'
+  windows_reset: number
+  quota_synced: boolean
+}
+
+export async function listCodexResetCredits(id: number): Promise<{ available_count: number; credits: CodexResetCredit[] }> {
+  const { data } = await apiClient.get(`/admin/accounts/${id}/codex-reset-credits`)
+  return data
+}
+
+export async function consumeCodexResetCredit(id: number, creditId: string, idempotencyKey: string): Promise<CodexResetResult> {
+  const { data } = await apiClient.post<CodexResetResult>(`/admin/accounts/${id}/codex-reset-credits/consume`, {
+    credit_id: creditId,
+    idempotency_key: idempotencyKey
+  }, { timeout: 60000 })
+  return data
+}
+
 export const accountsAPI = {
+  listCodexResetCredits,
+  consumeCodexResetCredit,
   list,
   listWithEtag,
   getById,

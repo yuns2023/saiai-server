@@ -290,7 +290,8 @@
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @stats="handleViewStats" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @clear-quota-snapshot="handleClearQuotaSnapshot" @reset-quota="handleResetQuota" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @stats="handleViewStats" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @clear-quota-snapshot="handleClearQuotaSnapshot" @reset-quota="handleResetQuota" @codex-reset="handleCodexReset" />
+    <CodexResetModal :show="showCodexReset" :account="codexResetAcc" @close="showCodexReset = false" @updated="reload" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal :show="showBulkEdit" :account-ids="selIds" :selected-platforms="selPlatforms" :selected-types="selTypes" :proxies="proxies" :groups="groups" @close="showBulkEdit = false" @updated="handleBulkUpdated" />
@@ -328,6 +329,7 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import CodexResetModal from '@/components/admin/account/CodexResetModal.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
@@ -377,6 +379,8 @@ const showBulkEdit = ref(false)
 const showTempUnsched = ref(false)
 const showDeleteDialog = ref(false)
 const showClearQuotaSnapshotDialog = ref(false)
+const showCodexReset = ref(false)
+const codexResetAcc = ref<Account | null>(null)
 const showReAuth = ref(false)
 const showStats = ref(false)
 const showErrorPassthrough = ref(false)
@@ -703,6 +707,7 @@ const isAnyModalOpen = computed(() => {
     showTempUnsched.value ||
     showDeleteDialog.value ||
     showClearQuotaSnapshotDialog.value ||
+    showCodexReset.value ||
     showReAuth.value ||
     showStats.value ||
     showErrorPassthrough.value
@@ -1280,6 +1285,7 @@ const confirmClearQuotaSnapshot = async () => {
     appStore.showError(error?.message || t('admin.accounts.clearQuotaSnapshotFailed'))
   }
 }
+const handleCodexReset = (account: Account) => { codexResetAcc.value = account; showCodexReset.value = true }
 const handleResetQuota = async (a: Account) => {
   try {
     const updated = await adminAPI.accounts.resetAccountQuota(a.id)

@@ -51,6 +51,7 @@ type AccountHandler struct {
 	antigravityOAuthService *service.AntigravityOAuthService
 	rateLimitService        *service.RateLimitService
 	accountUsageService     *service.AccountUsageService
+	openAIQuotaResetService *service.OpenAIQuotaResetService
 	identityService         *service.IdentityService
 	concurrencyService      *service.ConcurrencyService
 	crsSyncService          *service.CRSSyncService
@@ -74,6 +75,7 @@ func NewAccountHandler(
 	sessionLimitCache service.SessionLimitCache,
 	rpmCache service.RPMCache,
 	tokenCacheInvalidator service.TokenCacheInvalidator,
+	openAIQuotaResetService *service.OpenAIQuotaResetService,
 ) *AccountHandler {
 	return &AccountHandler{
 		adminService:            adminService,
@@ -83,6 +85,7 @@ func NewAccountHandler(
 		antigravityOAuthService: antigravityOAuthService,
 		rateLimitService:        rateLimitService,
 		accountUsageService:     accountUsageService,
+		openAIQuotaResetService: openAIQuotaResetService,
 		identityService:         identityService,
 		concurrencyService:      concurrencyService,
 		crsSyncService:          crsSyncService,

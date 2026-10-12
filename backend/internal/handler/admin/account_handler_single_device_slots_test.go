@@ -32,7 +32,7 @@ func setupSingleDeviceSlotsRouter(adminSvc service.AdminService, identitySvc ...
 	if len(identitySvc) > 0 {
 		identity = identitySvc[0]
 	}
-	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, identity, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, identity, nil, nil, nil, nil, nil, nil)
 	router.GET("/api/v1/admin/accounts/:id/claude-single-device-slots", handler.ListClaudeSingleDeviceSlots)
 	return router
 }

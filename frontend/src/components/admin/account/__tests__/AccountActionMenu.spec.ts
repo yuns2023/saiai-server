@@ -46,6 +46,16 @@ function mountMenu(account: Account) {
 }
 
 describe('AccountActionMenu quota snapshot action', () => {
+  it('offers upstream Codex resets only for OpenAI OAuth accounts', async () => {
+    const account = makeAccount({ platform: 'openai', type: 'oauth' })
+    const wrapper = mountMenu(account)
+    const button = wrapper.findAll('button').find(item => item.text().includes('admin.accounts.codexReset.title'))!
+    expect(button).toBeTruthy()
+    await button.trigger('click')
+    expect(wrapper.emitted('codex-reset')).toEqual([[account]])
+    expect(mountMenu(makeAccount({ platform: 'openai', type: 'apikey' })).text()).not.toContain('admin.accounts.codexReset.title')
+    expect(mountMenu(makeAccount({})).text()).not.toContain('admin.accounts.codexReset.title')
+  })
   it('shows the action for Anthropic setup-token accounts and emits the account', async () => {
     const account = makeAccount({})
     const wrapper = mountMenu(account)

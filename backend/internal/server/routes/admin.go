@@ -287,6 +287,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.POST("/:id/clear-rate-limit", h.Admin.Account.ClearRateLimit)
 		accounts.POST("/:id/clear-quota-snapshot", h.Admin.Account.ClearQuotaSnapshot)
 		accounts.POST("/:id/reset-quota", h.Admin.Account.ResetQuota)
+		accounts.GET("/:id/codex-reset-credits", h.Admin.Account.ListCodexResetCredits)
+		accounts.POST("/:id/codex-reset-credits/consume", h.Admin.Account.ConsumeCodexResetCredit)
 		accounts.GET("/:id/temp-unschedulable", h.Admin.Account.GetTempUnschedulable)
 		accounts.DELETE("/:id/temp-unschedulable", h.Admin.Account.ClearTempUnschedulable)
 		accounts.POST("/:id/schedulable", h.Admin.Account.SetSchedulable)
