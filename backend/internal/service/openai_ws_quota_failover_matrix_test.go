@@ -224,14 +224,23 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 				require.NoError(testContext, readErr)
 				require.Equal(testContext, "resp_quota_a_1", gjson.GetBytes(payload, "response.id").String())
 				if scenario.quotaOnly {
-					_, payload, readErr = client.Read(ctx)
-					require.NoError(testContext, readErr)
-					require.Equal(testContext, "codex.rate_limits", gjson.GetBytes(payload, "type").String())
+					// Quota telemetry is private. Wait for its internal observation
+					// before submitting the fresh turn that should rotate accounts.
+				quotaWait:
+					for {
+						select {
+						case updates := <-repository.updateExtraCh:
+							if updates["codex_primary_used_percent"] == 100.0 {
+								break quotaWait
+							}
+						case <-ctx.Done():
+							testContext.Fatal("quota frame was not persisted")
+						}
+					}
 				}
 				require.NoError(testContext, client.Write(ctx, coderws.MessageText, secondRequest))
 			}
 			var lastPayload []byte
-			var replacementQuotaObserved bool
 			for {
 				_, payload, readErr := client.Read(ctx)
 				if scenario.noSpare {
@@ -241,10 +250,7 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 				require.NoError(testContext, readErr)
 				lastPayload = payload
 				eventType := gjson.GetBytes(payload, "type").String()
-				if eventType == "codex.rate_limits" && gjson.GetBytes(payload, "rate_limits.primary.used_percent").Float() == 2 {
-					require.Equal(testContext, accountBQuota, payload)
-					replacementQuotaObserved = true
-				}
+				require.NotEqual(testContext, "codex.rate_limits", eventType, "upstream quota must remain private")
 				if !scenario.committed && (eventType == "response.created" || eventType == "response.in_progress") {
 					require.NotEqual(testContext, "resp_quota_a_2", gjson.GetBytes(payload, "response.id").String())
 				}
@@ -262,7 +268,6 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 			} else if !scenario.noSpare {
 				require.Equal(testContext, "resp_quota_b_2", gjson.GetBytes(lastPayload, "response.id").String())
 				require.Equal(testContext, int32(1), switches.Load())
-				require.True(testContext, replacementQuotaObserved)
 			}
 			_ = client.Close(coderws.StatusNormalClosure, "done")
 			select {

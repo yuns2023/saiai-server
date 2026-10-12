@@ -78,3 +78,53 @@ func TestRelay_QuotaResponseStartBuffer(testContext *testing.T) {
 		})
 	}
 }
+
+func TestRelay_FilteredQuotaIsObservedWithoutCommittingTurn(t *testing.T) {
+	quota := []byte(`{"type":"codex.rate_limits","plan_type":"pro"}`)
+	quotaError := []byte(`{"type":"error","error":{"type":"usage_limit_reached"}}`)
+	completion := []byte(`{ "type":"response.completed", "response":{"id":"resp_private","usage":{"input_tokens":2,"output_tokens":3}} }`)
+	for _, replay := range []bool{false, true} {
+		t.Run(fmt.Sprintf("replay_%v", replay), func(t *testing.T) {
+			last := completion
+			if replay {
+				last = quotaError
+			}
+			client := newPassthroughTestFrameConn(nil, false)
+			upstream := newPassthroughTestFrameConn([]passthroughTestFrame{
+				{msgType: coderws.MessageText, payload: quota},
+				{msgType: coderws.MessageBinary, payload: quota},
+				{msgType: coderws.MessageText, payload: last},
+			}, true)
+			observations := 0
+			replayErr := errors.New("synthetic quota failover")
+			result, relayExit := Relay(context.Background(), client, upstream, []byte(`{"type":"response.create","input":[]}`), RelayOptions{
+				BeforeUpstreamFrame: func(frame RelayUpstreamFrame) error {
+					if gjson.GetBytes(frame.Payload, "type").String() == "codex.rate_limits" {
+						observations++
+					}
+					if replay && gjson.GetBytes(frame.Payload, "type").String() == "error" && !frame.WroteCurrentTurn {
+						return replayErr
+					}
+					return nil
+				},
+				FilterUpstreamFrame: func(frame RelayUpstreamFrame) bool {
+					return gjson.GetBytes(frame.Payload, "type").String() != "codex.rate_limits"
+				},
+			})
+			require.Equal(t, 2, observations)
+			require.Equal(t, int64(2), result.DroppedDownstreamFrames)
+			if replay {
+				require.NotNil(t, relayExit)
+				require.ErrorIs(t, relayExit.Err, replayErr)
+				require.False(t, relayExit.WroteDownstream)
+				require.False(t, relayExit.WroteCurrentTurn)
+				require.Empty(t, client.Writes())
+			} else {
+				require.Nil(t, relayExit)
+				require.Equal(t, 3, result.Usage.OutputTokens)
+				require.Len(t, client.Writes(), 1)
+				require.Equal(t, completion, client.Writes()[0].payload)
+			}
+		})
+	}
+}

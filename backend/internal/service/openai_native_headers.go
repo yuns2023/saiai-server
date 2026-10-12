@@ -60,6 +60,9 @@ func (s *OpenAIGatewayService) writeOpenAINativeResponseHeaders(dst, src http.He
 	}
 	for name, values := range src {
 		lower := strings.ToLower(name)
+		if isOpenAICodexQuotaHeader(lower) {
+			continue
+		}
 		switch lower {
 		case "authorization", "cookie", "set-cookie", "chatgpt-account-id", "x-api-key", "x-goog-api-key",
 			"host", "content-length", "connection", "keep-alive", "proxy-authenticate",

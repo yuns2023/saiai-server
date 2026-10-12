@@ -2,7 +2,9 @@
 
 This contract applies to admitted official Codex clients using pooled OpenAI
 OAuth accounts. It does not change OAuth login, user profiles, conversation
-files, user/project configuration, SAIAI Key quotas, or native-relay accounts.
+files, user/project configuration, or SAIAI Key quotas. Native-relay return
+paths apply the same quota display filter without treating those observations
+as local provider-account quotas.
 
 ## Signals and account selection
 
@@ -16,6 +18,12 @@ files, user/project configuration, SAIAI Key quotas, or native-relay accounts.
   and weekly snapshots. Only the default Codex limit and explicit 300-minute
   or 10080-minute windows are interpreted as account quotas. Unknown and
   model-specific limit families are not converted into account-wide limits.
+- Successful WS handshakes are sampled when the upstream connection is created,
+  including handshakes without any later quota frame. Both current Unix
+  `x-codex-*-reset-at` and legacy `*-reset-after-seconds` headers are accepted;
+  valid absolute reset timestamps take precedence. Live frames are sampled by
+  passthrough, pooled WS forwarding and prewarm paths. Native-relay accounts do
+  not inherit another Gateway's provider-account observations.
 - A known exhausted window with a valid future reset can move a portable fresh
   turn to another account before sending it on the exhausted connection.
   Missing/invalid reset data does not create a permanent disable or invent a
@@ -27,16 +35,19 @@ files, user/project configuration, SAIAI Key quotas, or native-relay accounts.
   both windows. An already reset weekly window must not hide an active
   five-hour limit; this rule is aligned for snapshots, cached account fields,
   and HTTP/WS 429 header handling.
-- After a valid live quota frame, internal turn results no longer reuse old
-  handshake quota headers to overwrite that newer observation. Other
-  handshake metadata is retained, and the wire quota frame is unchanged.
+- Internal turn results withhold handshake quota fields after sampling, so
+  completion callbacks and lease reuse cannot overwrite live observations with
+  old connection data. Other handshake metadata, including turn-state, remains
+  available. Snapshot writes retain bounded throttling; first weekly data,
+  weekly exhaustion/recovery and material reset changes bypass the throttle,
+  alongside the existing five-hour admission transitions.
 
 ## Replay boundary
 
 Quota telemetry alone is not generated turn output. Empty `response.created`
 and `response.in_progress` frames may be held briefly until the first output
 or terminal event. This option is enabled only on the official OAuth
-failover path. Normal successful frames retain their message type, bytes,
+failover path. Normal response/output frames retain their message type, bytes,
 and relative order; failed-attempt start frames are not exposed before retry.
 
 The start buffer is bounded to eight frames and 64 KiB. Unknown events,
@@ -70,11 +81,19 @@ selected account's subscription. Provider quota snapshots and plan metadata
 belong to the selected upstream connection and may be cached by an official
 client; they are not the SAIAI Key balance or aggregate pool capacity.
 
-This change observes quota frames without falsifying or removing them. A
-replacement account's own frames are forwarded normally. Display filtering,
-neutral placeholder plans, and native CLI/Desktop cache refresh require their
-own compatibility checks; passing these Gateway mocks does not certify those
-UI behaviors.
+The Gateway consumes `codex.rate_limits` events privately for OAuth accounts
+and removes provider quota events on OAuth/native-relay return paths, including
+model-specific or unsupported quota families. It withholds subscription quota,
+credits and promotion headers from native HTTP responses. This prevents a
+selected provider account's limits or plan from being presented as the SAIAI
+user's limits. It does not invent zero utilization or unlimited quota.
+
+Required conversation controls such as `x-codex-turn-state`, safe unknown
+application headers, ordinary response events and usage accounting remain
+intact. Generic API-key forwarding retains its existing policy. Filtering a
+quota event does not commit a turn or block safe account failover. Existing
+CLI/Desktop quota caches are not cleared by this server change; these local
+mocks do not certify renderer/cache behavior on every official client surface.
 
 ## Validation scope
 
@@ -85,8 +104,9 @@ text/tool output, unavailable replacements, and owned/unknown continuations.
 Relay tests additionally check byte ordering and bounded-buffer fail-closed
 behavior. No real provider/model requests are made by these tests.
 
-The observed quota frame shape is checked against official Codex
-`rust-v0.153.4` source in `codex-api/src/rate_limits.rs` and
-`codex-api/src/endpoint/responses_websocket.rs`. An actual official client or
+The quota event and absolute header shapes are checked against official Codex
+`rust-v0.162.1` source in
+[`codex-api/src/rate_limits.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/codex-api/src/rate_limits.rs)
+and `codex-api/src/endpoint/responses_websocket.rs`. An actual official client or
 Desktop renderer, live pooled OAuth traffic, native history/MCP preservation,
 and deployment acceptance are separate validation stages.

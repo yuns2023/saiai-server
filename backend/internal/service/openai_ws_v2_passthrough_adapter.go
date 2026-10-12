@@ -194,7 +194,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		replayTracker = newOpenAIWSPassthroughReplayTracker(stateStore, userID)
 	}
 	var exhaustedUntil atomic.Int64
-	var quotaFrameObserved atomic.Bool
 	logOpenAIWSV2Passthrough(
 		"relay_start account_id=%d model=%s previous_response_id=%s first_message_type=%s first_message_bytes=%d",
 		account.ID,
@@ -303,6 +302,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	defer func() {
 		_ = upstreamConn.Close()
 	}()
+	s.observeOpenAICodexQuotaHeaders(ctx, account, handshakeHeaders)
 	if account.Type == AccountTypeOAuth {
 		sessionHash := s.openAISessionHashForTurnState(c, gjson.GetBytes(firstClientMessage, "prompt_cache_key").String())
 		if state := handshakeHeaders.Get(openAIWSTurnStateHeader); state != "" && sessionHash != "" {
@@ -322,15 +322,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	upstreamFrameConn = &openAIProviderBudgetFrameConn{FrameConn: upstreamFrameConn, budgetContext: ctx}
 	turnResponseHeaders := func() http.Header {
-		responseHeaders := cloneHeader(handshakeHeaders)
-		if quotaFrameObserved.Load() {
-			for name := range responseHeaders {
-				if strings.HasPrefix(strings.ToLower(name), "x-codex-") {
-					delete(responseHeaders, name)
-				}
-			}
-		}
-		return responseHeaders
+		return openAIWSTurnResponseHeaders(account, handshakeHeaders)
 	}
 
 	completedTurns := atomic.Int32{}
@@ -348,6 +340,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			IdleTimeout:         s.openAIWSPassthroughIdleTimeout(),
 			FirstMessageType:    firstClientMessageType,
 			BufferResponseStart: replayTracker != nil,
+			FilterUpstreamFrame: func(frame openaiwsv2.RelayUpstreamFrame) bool {
+				return !hideOpenAICodexQuota(account) || !isOpenAICodexQuotaEvent(frame.Payload)
+			},
 			OnClientTurn: func(turn int, messageType coderws.MessageType, payload []byte) error {
 				if account.IsOpenAIOAuth() {
 					if err := s.validateOpenAINativeFrameTurnState(c, account, payload); err != nil {
@@ -374,18 +369,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			},
 			BeforeUpstreamFrame: func(frame openaiwsv2.RelayUpstreamFrame) error {
 				s.observeOpenAINativeMetadataTurnState(c, account, s.openAISessionHashForTurnState(c, gjson.GetBytes(firstClientMessage, "prompt_cache_key").String()), frame.Payload)
-				if frame.MessageType != coderws.MessageText {
-					return nil
-				}
 				eventType := strings.TrimSpace(gjson.GetBytes(frame.Payload, "type").String())
 				if eventType == "codex.rate_limits" && account.Type == AccountTypeOAuth && !account.IsOpenAICodexNativeRelay() {
 					if snapshot := parseOpenAIWSCodexRateLimitEvent(frame.Payload, time.Now()); snapshot != nil {
-						quotaFrameObserved.Store(true)
 						s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 						if resetAt := codexRateLimitResetAtFromSnapshot(snapshot, time.Now()); resetAt != nil && resetAt.After(time.Now()) {
 							exhaustedUntil.Store(resetAt.Unix())
 						}
 					}
+				}
+				if frame.MessageType != coderws.MessageText {
+					return nil
 				}
 				if quotaPayload := openAIWSQuotaErrorPayload(frame.Payload); len(quotaPayload) > 0 {
 					errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(quotaPayload)

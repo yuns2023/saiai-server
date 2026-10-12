@@ -103,11 +103,14 @@ type RelayOptions struct {
 	OnUsageParseFailure  func(eventType string, usageRaw string)
 	OnClientTurn         func(turn int, messageType coderws.MessageType, payload []byte) error
 	BeforeUpstreamFrame  func(frame RelayUpstreamFrame) error
-	BufferResponseStart  bool
-	TurnMetadata         func(turn int, payload []byte) RelayTurnMetadata
-	OnTurnComplete       func(turn RelayTurnResult)
-	OnTrace              func(event RelayTraceEvent)
-	Now                  func() time.Time
+	// FilterUpstreamFrame runs after observation. False keeps telemetry private
+	// without committing the current turn or interrupting the upstream relay.
+	FilterUpstreamFrame func(frame RelayUpstreamFrame) bool
+	BufferResponseStart bool
+	TurnMetadata        func(turn int, payload []byte) RelayTurnMetadata
+	OnTurnComplete      func(turn RelayTurnResult)
+	OnTrace             func(event RelayTraceEvent)
+	Now                 func() time.Time
 }
 
 type RelayTraceEvent struct {
@@ -129,6 +132,7 @@ type relayState struct {
 	turnTimingByID         map[string]*relayTurnTiming
 	turns                  *relayTurnTracker
 	beforeUpstreamFrame    func(frame RelayUpstreamFrame) error
+	filterUpstreamFrame    func(frame RelayUpstreamFrame) bool
 	bufferResponseStart    bool
 }
 
@@ -199,6 +203,7 @@ func Relay(
 	state := &relayState{
 		turns:               newRelayTurnTracker(),
 		beforeUpstreamFrame: options.BeforeUpstreamFrame,
+		filterUpstreamFrame: options.FilterUpstreamFrame,
 		bufferResponseStart: options.BufferResponseStart,
 	}
 	onTrace := options.OnTrace
@@ -561,6 +566,14 @@ func runUpstreamToClient(
 			// binary frame 直接透传，不进入 JSON 观测路径（避免无效解析开销）。
 		}
 		emitTurnComplete(onTurnComplete, state, observedEvent)
+		if state != nil && state.filterUpstreamFrame != nil && !state.filterUpstreamFrame(RelayUpstreamFrame{
+			MessageType: msgType, Payload: payload, WroteCurrentTurn: wroteCurrentTurn,
+		}) {
+			if droppedFrames != nil {
+				droppedFrames.Add(1)
+			}
+			continue
+		}
 		if dropDownstreamWrites != nil && dropDownstreamWrites.Load() {
 			if droppedFrames != nil {
 				droppedFrames.Add(1)

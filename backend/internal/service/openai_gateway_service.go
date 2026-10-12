@@ -363,9 +363,13 @@ const (
 )
 
 type codexFiveHourAdmissionObservation struct {
-	class    codexFiveHourAdmissionClass
-	resetAt  time.Time
-	hasReset bool
+	class           codexFiveHourAdmissionClass
+	resetAt         time.Time
+	hasReset        bool
+	hasWeeklyUsage  bool
+	weeklyExhausted bool
+	weeklyResetAt   time.Time
+	hasWeeklyReset  bool
 }
 
 type codexSnapshotWriteRequest struct {
@@ -498,6 +502,21 @@ func (t *accountWriteThrottle) cleanupLocked(now time.Time) {
 }
 
 func codexFiveHourAdmissionChanged(previous, current codexFiveHourAdmissionObservation) bool {
+	// A partial handshake must not throttle away the first weekly observation,
+	// or a newly exhausted/recovered weekly window needed by WS scheduling.
+	if previous.hasWeeklyUsage != current.hasWeeklyUsage || previous.weeklyExhausted != current.weeklyExhausted ||
+		previous.hasWeeklyReset != current.hasWeeklyReset {
+		return true
+	}
+	if previous.hasWeeklyReset {
+		delta := current.weeklyResetAt.Sub(previous.weeklyResetAt)
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta > time.Minute {
+			return true
+		}
+	}
 	if previous.class != current.class || previous.hasReset != current.hasReset {
 		return true
 	}
@@ -2805,6 +2824,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return s.handleErrorResponse(ctx, resp, c, account, body)
 		}
 		defer func() { _ = resp.Body.Close() }()
+		s.observeOpenAICodexQuotaHeaders(ctx, account, resp.Header)
 
 		// Handle normal response
 		var usage *OpenAIUsage
@@ -2831,13 +2851,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			)
 			if bindErr != nil {
 				logger.LegacyPrintf("service.openai_gateway", "Failed to bind OpenAI response account: %v", bindErr)
-			}
-		}
-
-		// Extract and save Codex usage snapshot from response headers (for OAuth accounts)
-		if account.Type == AccountTypeOAuth {
-			if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
-				s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 			}
 		}
 
@@ -3580,9 +3593,15 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 	}
 	processSSELine := func(line string, queueDrained bool) {
 		lastDataAt = time.Now()
+		if hideOpenAICodexQuota(account) && strings.HasPrefix(line, "event:") && strings.TrimSpace(strings.TrimPrefix(line, "event:")) == "codex.rate_limits" {
+			return
+		}
 
 		// Extract data from SSE line (supports both "data: " and "data:" formats)
 		if data, ok := extractOpenAISSEDataLine(line); ok {
+			if s.observeOpenAICodexQuotaEvent(ctx, account, []byte(data)) {
+				return
+			}
 
 			// Replace model in response if needed.
 			// Fast path: most events do not contain model field values.
@@ -3928,6 +3947,7 @@ func (s *OpenAIGatewayService) handleOAuthSSEToJSON(resp *http.Response, c *gin.
 	bodyText := string(body)
 	for _, line := range strings.Split(bodyText, "\n") {
 		if data, ok := extractOpenAISSEDataLine(line); ok {
+			s.observeOpenAICodexQuotaEvent(c.Request.Context(), account, []byte(data))
 			s.observeOpenAINativeMetadataTurnState(c, account, s.openAINativeResponseSessionHash(c), []byte(data))
 		}
 	}
@@ -4679,11 +4699,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 	snapshot := &OpenAICodexUsageSnapshot{}
 	hasData := false
+	observedAt := time.Now().UTC().Truncate(time.Second)
 
 	// Helper to parse float64 from header
 	parseFloat := func(key string) *float64 {
 		if v := headers.Get(key); v != "" {
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
+			if f, err := strconv.ParseFloat(v, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 				return &f
 			}
 		}
@@ -4700,12 +4721,30 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 		return nil
 	}
 
-	// Primary (weekly) limits
+	// Current Codex uses Unix reset-at headers; retain reset-after-seconds
+	// compatibility with older providers. A valid absolute value takes precedence.
+	parseReset := func(prefix string) *int {
+		if raw := headers.Get(prefix + "-reset-at"); raw != "" {
+			if resetAt, err := strconv.ParseInt(raw, 10, 64); err == nil && resetAt > 0 {
+				seconds := resetAt - observedAt.Unix()
+				if seconds < 0 {
+					seconds = 0
+				}
+				if seconds <= math.MaxInt64/int64(time.Second) && seconds <= int64(^uint(0)>>1) {
+					value := int(seconds)
+					return &value
+				}
+			}
+		}
+		return parseInt(prefix + "-reset-after-seconds")
+	}
+
+	// Primary limits (window duration determines five-hour versus weekly).
 	if v := parseFloat("x-codex-primary-used-percent"); v != nil {
 		snapshot.PrimaryUsedPercent = v
 		hasData = true
 	}
-	if v := parseInt("x-codex-primary-reset-after-seconds"); v != nil {
+	if v := parseReset("x-codex-primary"); v != nil {
 		snapshot.PrimaryResetAfterSeconds = v
 		hasData = true
 	}
@@ -4714,12 +4753,12 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 		hasData = true
 	}
 
-	// Secondary (5h) limits
+	// Secondary limits.
 	if v := parseFloat("x-codex-secondary-used-percent"); v != nil {
 		snapshot.SecondaryUsedPercent = v
 		hasData = true
 	}
-	if v := parseInt("x-codex-secondary-reset-after-seconds"); v != nil {
+	if v := parseReset("x-codex-secondary"); v != nil {
 		snapshot.SecondaryResetAfterSeconds = v
 		hasData = true
 	}
@@ -4738,7 +4777,7 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 		return nil
 	}
 
-	snapshot.UpdatedAt = time.Now().Format(time.RFC3339)
+	snapshot.UpdatedAt = observedAt.Format(time.RFC3339)
 	return snapshot
 }
 
@@ -4840,7 +4879,18 @@ func codexFiveHourAdmissionObservationFromSnapshot(snapshot *OpenAICodexUsageSna
 		now = time.Now()
 	}
 	normalized := snapshot.Normalize()
-	if normalized == nil || normalized.Used5hPercent == nil || normalized.Reset5hSeconds == nil {
+	if normalized == nil {
+		return observation
+	}
+	if used := normalized.Used7dPercent; used != nil && !math.IsNaN(*used) && !math.IsInf(*used, 0) && *used >= 0 && *used <= 100 {
+		observation.hasWeeklyUsage = true
+		observation.weeklyExhausted = codexUsagePercentExhausted(used)
+		if reset := normalized.Reset7dSeconds; reset != nil && *reset >= 0 && int64(*reset) <= math.MaxInt64/int64(time.Second) {
+			observation.hasWeeklyReset = true
+			observation.weeklyResetAt = codexSnapshotBaseTime(snapshot, now).Add(time.Duration(*reset) * time.Second).UTC()
+		}
+	}
+	if normalized.Used5hPercent == nil || normalized.Reset5hSeconds == nil {
 		return observation
 	}
 	usedPercent := *normalized.Used5hPercent

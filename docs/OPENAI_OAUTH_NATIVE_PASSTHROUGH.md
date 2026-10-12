@@ -85,13 +85,18 @@ Native OAuth/native-relay responses preserve safe unknown application headers
 and their values, including model/catalog/reasoning metadata and turn-state.
 Credential/Cookie, transport and proxy headers are withheld. An enabled explicit
 response-header ForceRemove policy remains authoritative.
+Selected provider-account subscription quota/credits/promotion headers and
+`codex.rate_limits` events are also withheld from OAuth/native-relay clients;
+they do not describe the SAIAI user's quota. OAuth observations are still
+collected internally before filtering. See
+[quota visibility and scheduling](OPENAI_WS_QUOTA_FAILOVER.md).
 
 Native OAuth SSE event payloads keep provider tool names; do not apply OpenCode
 tool-name correction. SSE framing/buffering and the existing nonstream SSE-to-JSON
 adapter remain distinct response transformations. The Gateway accepts the client
 WS connection before selecting/dialing the provider from its first frame, so it
 does not retroactively reproduce provider handshake response headers in that
-already-issued client 101. Frame metadata remains unchanged.
+already-issued client 101. Conversation frame metadata remains unchanged.
 The local proxy preserves safe application headers and duplicate values from
 the Gateway's 101, alongside negotiated subprotocol, and rebuilds only its own
 transport response. In the versioned official-binary proof, Codex consumes

@@ -1964,6 +1964,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		lease.Release()
 	}()
 	connID := strings.TrimSpace(lease.ConnID())
+	if !lease.Reused() {
+		s.observeOpenAICodexQuotaHeaders(ctx, account, lease.HandshakeHeaders())
+	}
 	logOpenAIWSModeDebug(
 		"connected account_id=%d account_type=%s transport=%s conn_id=%s conn_reused=%v conn_pick_ms=%d queue_wait_ms=%d has_previous_response_id=%v",
 		account.ID,
@@ -2189,6 +2192,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 
 		eventType, eventResponseID, responseField := parseOpenAIWSEventEnvelope(message)
+		if s.observeOpenAICodexQuotaEvent(ctx, account, message) {
+			continue
+		}
 		if eventType == "" {
 			continue
 		}
@@ -2419,7 +2425,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		ReasoningEffort: extractOpenAIReasoningEffort(reqBody, originalModel),
 		Stream:          reqStream,
 		OpenAIWSMode:    true,
-		ResponseHeaders: lease.HandshakeHeaders(),
+		ResponseHeaders: openAIWSTurnResponseHeaders(account, lease.HandshakeHeaders()),
 		Duration:        time.Since(startTime),
 		FirstTokenMs:    firstTokenMs,
 	}, nil
@@ -2986,6 +2992,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 			return nil, acquireErr
 		}
 		connID := strings.TrimSpace(lease.ConnID())
+		if !lease.Reused() {
+			s.observeOpenAICodexQuotaHeaders(ctx, account, lease.HandshakeHeaders())
+		}
 		if handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader)); handshakeTurnState != "" {
 			turnState = handshakeTurnState
 			if stateStore != nil && sessionHash != "" {
@@ -3101,6 +3110,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 			}
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
+			if s.observeOpenAICodexQuotaEvent(ctx, account, upstreamMessage) {
+				continue
+			}
 			if responseID == "" && eventResponseID != "" {
 				responseID = eventResponseID
 			}
@@ -3257,7 +3269,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 					ReasoningEffort: extractOpenAIReasoningEffortFromBody(payload, originalModel),
 					Stream:          reqStream,
 					OpenAIWSMode:    true,
-					ResponseHeaders: lease.HandshakeHeaders(),
+					ResponseHeaders: openAIWSTurnResponseHeaders(account, lease.HandshakeHeaders()),
 					Duration:        time.Since(turnStart),
 					FirstTokenMs:    firstTokenMs,
 				}, nil
@@ -3936,6 +3948,9 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		}
 
 		eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(message)
+		if s.observeOpenAICodexQuotaEvent(ctx, account, message) {
+			continue
+		}
 		if eventType == "" {
 			continue
 		}
