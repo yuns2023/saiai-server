@@ -220,7 +220,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			// Key 状态检查
 			switch apiKey.Status {
 			case service.StatusAPIKeyQuotaExhausted:
-				AbortWithError(c, 429, "API_KEY_QUOTA_EXHAUSTED", "API key 额度已用完")
+				abortAPIKeyQuotaExhausted(c)
 				return
 			case service.StatusAPIKeyExpired:
 				AbortWithError(c, 403, "API_KEY_EXPIRED", "API key 已过期")
@@ -233,7 +233,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				return
 			}
 			if apiKey.IsQuotaExhausted() {
-				AbortWithError(c, 429, "API_KEY_QUOTA_EXHAUSTED", "API key 额度已用完")
+				abortAPIKeyQuotaExhausted(c)
 				return
 			}
 
@@ -291,6 +291,32 @@ func abortInvalidAPIKey(c *gin.Context) {
 		return
 	}
 	AbortWithError(c, http.StatusUnauthorized, "INVALID_API_KEY", "Invalid API key")
+}
+
+// Codex treats an unrecognized HTTP 429 as RetryLimit and discards its message.
+// A spent local Key's total quota cannot recover through request retries. Use
+// HTTP 403 and the OpenAI error envelope on Responses routes, including
+// compaction and WebSocket handshakes. Keep the legacy fields for existing callers
+// and Ops attribution, and leave other protocols' responses unchanged. Codex may
+// still reconnect at the stream layer, but its final error retains this message.
+func abortAPIKeyQuotaExhausted(c *gin.Context) {
+	const code = "API_KEY_QUOTA_EXHAUSTED"
+	const message = "API key 额度已用完，请联系管理员调整额度或更换 API key。"
+	path := c.Request.URL.Path
+	if path == "/v1/responses" || strings.HasPrefix(path, "/v1/responses/") ||
+		path == "/responses" || strings.HasPrefix(path, "/responses/") {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"code":    code,
+			"message": message,
+			"error": gin.H{
+				"code":    code,
+				"type":    "permission_error",
+				"message": message,
+			},
+		})
+		return
+	}
+	AbortWithError(c, http.StatusTooManyRequests, code, "API key 额度已用完")
 }
 
 // Delivering an admitted turn must remain possible after its debit exhausts
