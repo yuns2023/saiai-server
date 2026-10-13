@@ -8,6 +8,12 @@ protocol support as separate concerns.
 - Codex clients requesting `/v1/models?client_version=...` or
   `/backend-api/codex/models` receive the selected OpenAI account's live Codex
   manifest.
+- In `local_proxy_only` groups, model discovery requires an approved official
+  Codex client identity and normal API-key authentication, but does not require
+  inbound `chatgpt-account-id` or `version`. These optional headers cannot prove
+  proxy mode for a catalog request. The selected OAuth account supplies its own
+  ChatGPT account ID on the upstream request. Responses HTTP/WS model requests
+  retain the stricter local-proxy admission rules.
 - OAuth manifests are envelope-validated and otherwise passed through.
 - Custom API-key providers may expose either a Codex manifest or a standard
   OpenAI `/v1/models` list. SAIAI performs only the minimum shape conversion

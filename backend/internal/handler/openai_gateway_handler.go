@@ -1304,16 +1304,12 @@ func enforceCodexContinuationAccountBoundary(c *gin.Context, account *service.Ac
 	return codexLocalProxyRequestMatched(c, c.GetHeader("User-Agent"), strings.ToLower(strings.TrimSpace(c.GetHeader("originator"))))
 }
 
-// codexLocalProxyModelsRequestMatched intentionally omits the `version`
-// requirement. Model discovery is a control-plane compatibility request and
-// some official surfaces do not attach the model-request version header to
-// every discovery attempt; the strict version check remains on Responses
-// model ingress.
+// Model discovery is a control-plane request. Require an approved Codex
+// client, but do not infer proxy mode from optional auth/version headers.
+// The selected upstream account supplies its own ChatGPT account ID on egress.
+// Responses model ingress retains both local-proxy shape requirements.
 func codexLocalProxyModelsRequestMatched(c *gin.Context) bool {
-	if c == nil || !pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
-		return false
-	}
-	return strings.TrimSpace(c.GetHeader("chatgpt-account-id")) != ""
+	return c != nil && pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
 }
 
 func (h *OpenAIGatewayHandler) validateCodexClientPolicyHTTP(c *gin.Context, group *service.Group) bool {
