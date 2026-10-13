@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -124,4 +125,42 @@ func (s *ApiKeyCacheSuite) TestDailyUsage() {
 
 func TestApiKeyCacheSuite(t *testing.T) {
 	suite.Run(t, new(ApiKeyCacheSuite))
+}
+
+func (s *ApiKeyCacheSuite) TestAuthCacheFenceRejectsObsoleteSnapshot() {
+	rdb := testRedis(s.T())
+	cache := &apiKeyCache{rdb: rdb}
+	ctx := context.Background()
+	key := "TEST_ONLY_HASH"
+	version, err := cache.GetAuthCacheVersion(ctx, key)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "0", version)
+	entry := &service.APIKeyAuthCacheEntry{Snapshot: &service.APIKeyAuthSnapshot{APIKeyID: 99}}
+	accepted, err := cache.SetAuthCacheIfVersion(ctx, key, entry, time.Minute, version)
+	require.NoError(s.T(), err)
+	require.True(s.T(), accepted)
+	require.NoError(s.T(), cache.DeleteAuthCache(ctx, key))
+	_, err = cache.GetAuthCache(ctx, key)
+	require.ErrorIs(s.T(), err, redis.Nil)
+	accepted, err = cache.SetAuthCacheIfVersion(ctx, key, entry, time.Minute, version)
+	require.NoError(s.T(), err)
+	require.False(s.T(), accepted, "a read started before revocation must not resurrect the Key")
+	_, err = cache.GetAuthCache(ctx, key)
+	require.ErrorIs(s.T(), err, redis.Nil)
+	version, err = cache.GetAuthCacheVersion(ctx, key)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "1", version)
+	negative := &service.APIKeyAuthCacheEntry{NotFound: true}
+	accepted, err = cache.SetAuthCacheIfVersion(ctx, key, negative, time.Minute, version)
+	require.NoError(s.T(), err)
+	require.True(s.T(), accepted)
+	stored, err := cache.GetAuthCache(ctx, key)
+	require.NoError(s.T(), err)
+	require.True(s.T(), stored.NotFound)
+	ttl, err := rdb.TTL(ctx, apiKeyAuthCacheKey(key)).Result()
+	require.NoError(s.T(), err)
+	require.Positive(s.T(), ttl)
+	versionTTL, err := rdb.TTL(ctx, apiKeyAuthVersionPrefix+key).Result()
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), time.Duration(-1), versionTTL, "fence must not disappear while a reader is delayed")
 }

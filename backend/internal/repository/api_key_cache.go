@@ -16,6 +16,7 @@ const (
 	apiKeyRateLimitKeyPrefix   = "apikey:ratelimit:"
 	apiKeyRateLimitDuration    = 24 * time.Hour
 	apiKeyAuthCachePrefix      = "apikey:auth:"
+	apiKeyAuthVersionPrefix    = "apikey:auth-version:"
 	authCacheInvalidateChannel = "auth:cache:invalidate"
 )
 
@@ -31,6 +32,8 @@ func apiKeyAuthCacheKey(key string) string {
 type apiKeyCache struct {
 	rdb *redis.Client
 }
+
+var _ service.APIKeyAuthCacheFence = (*apiKeyCache)(nil)
 
 func NewAPIKeyCache(rdb *redis.Client) service.APIKeyCache {
 	return &apiKeyCache{rdb: rdb}
@@ -91,7 +94,32 @@ func (c *apiKeyCache) SetAuthCache(ctx context.Context, key string, entry *servi
 }
 
 func (c *apiKeyCache) DeleteAuthCache(ctx context.Context, key string) error {
-	return c.rdb.Del(ctx, apiKeyAuthCacheKey(key)).Err()
+	// Advance the fence and delete atomically. Keep the small hash-keyed
+	// revision persistent so an arbitrarily delayed read cannot observe ABA
+	// after a version TTL expires and resurrect a revoked Key.
+	return c.rdb.Eval(ctx, `redis.call('INCR', KEYS[2]); return redis.call('DEL', KEYS[1])`,
+		[]string{apiKeyAuthCacheKey(key), apiKeyAuthVersionPrefix + key}).Err()
+}
+
+func (c *apiKeyCache) GetAuthCacheVersion(ctx context.Context, key string) (string, error) {
+	version, err := c.rdb.Get(ctx, apiKeyAuthVersionPrefix+key).Result()
+	if errors.Is(err, redis.Nil) {
+		return "0", nil
+	}
+	return version, err
+}
+
+func (c *apiKeyCache) SetAuthCacheIfVersion(ctx context.Context, key string, entry *service.APIKeyAuthCacheEntry, ttl time.Duration, version string) (bool, error) {
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return false, err
+	}
+	result, err := c.rdb.Eval(ctx, `
+local version = redis.call('GET', KEYS[2]) or '0'
+if version ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
+return 1`, []string{apiKeyAuthCacheKey(key), apiKeyAuthVersionPrefix + key}, version, payload, max(ttl.Milliseconds(), 1)).Int()
+	return result == 1, err
 }
 
 // PublishAuthCacheInvalidation publishes a cache invalidation message to all instances

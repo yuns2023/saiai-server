@@ -1312,13 +1312,19 @@ func codexLocalProxyModelsRequestMatched(c *gin.Context) bool {
 	return c != nil && pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
 }
 
+const codexLocalProxyIdentityIncompleteMessage = "本地代理身份信息不完整，请重新运行 SAIAI Codex 初始化并重启代理及 Codex。"
+
 func (h *OpenAIGatewayHandler) validateCodexClientPolicyHTTP(c *gin.Context, group *service.Group) bool {
 	if group == nil || codexClientPolicyMatched(c, group.CodexClientPolicy) {
 		return true
 	}
 	logCodexClientPolicyRejection(c, group)
 	if strings.EqualFold(strings.TrimSpace(group.CodexClientPolicy), "local_proxy_only") {
-		h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", "This group requires SAIAI local proxy mode")
+		message := "此分组仅允许通过 SAIAI 本地代理使用官方 Codex 客户端。"
+		if pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+			message = codexLocalProxyIdentityIncompleteMessage
+		}
+		h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", message)
 		return false
 	}
 	h.errorResponse(c, http.StatusForbidden, "official_client_required", "This group only allows approved Codex clients")
@@ -1336,6 +1342,8 @@ func logCodexClientPolicyRejection(c *gin.Context, group *service.Group) {
 		zap.Int64("group_id", group.ID),
 		zap.String("policy", group.CodexClientPolicy),
 		zap.String("reason", reason),
+		zap.Bool("missing_version", strings.TrimSpace(c.GetHeader("version")) == ""),
+		zap.Bool("missing_account_id", strings.TrimSpace(c.GetHeader("chatgpt-account-id")) == ""),
 	).Warn("openai.codex_client_policy_rejected")
 }
 
@@ -1694,7 +1702,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		logCodexClientPolicyRejection(c, apiKey.Group)
 		reason := "approved Codex client required"
 		if strings.EqualFold(strings.TrimSpace(apiKey.Group.CodexClientPolicy), "local_proxy_only") {
-			reason = "SAIAI local proxy required"
+			reason = "SAIAI local proxy with official Codex required"
+			if pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+				// WS close reasons must fit the protocol's 123-byte UTF-8 limit.
+				reason = "本地代理身份信息不完整，请重新初始化并重启代理及 Codex。"
+			}
 		}
 		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, reason)
 		return

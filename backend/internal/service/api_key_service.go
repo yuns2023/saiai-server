@@ -149,6 +149,13 @@ type APIKeyAuthCacheInvalidator interface {
 	InvalidateAuthCacheByGroupID(ctx context.Context, groupID int64)
 }
 
+// APIKeyAuthCacheFence prevents a database read started before invalidation
+// from publishing an obsolete authentication snapshot across Gateway instances.
+type APIKeyAuthCacheFence interface {
+	GetAuthCacheVersion(ctx context.Context, key string) (string, error)
+	SetAuthCacheIfVersion(ctx context.Context, key string, entry *APIKeyAuthCacheEntry, ttl time.Duration, version string) (bool, error)
+}
+
 // CreateAPIKeyRequest 创建API Key请求
 type CreateAPIKeyRequest struct {
 	Name        string   `json:"name"`
@@ -206,6 +213,7 @@ type APIKeyService struct {
 	authCacheL1           *ristretto.Cache
 	authCfg               apiKeyAuthCacheConfig
 	authGroup             singleflight.Group
+	authCacheGuards       [256]apiKeyAuthCacheGuard
 	lastUsedTouchL1       sync.Map // keyID -> nextAllowedAt(time.Time)
 	lastUsedTouchSF       singleflight.Group
 }
@@ -657,11 +665,15 @@ func (s *APIKeyService) Delete(ctx context.Context, id int64, userID int64) erro
 	if s.cache != nil {
 		_ = s.cache.DeleteCreateAttemptCount(ctx, userID)
 	}
-	s.InvalidateAuthCacheByKey(ctx, key)
-
 	if err := s.apiKeyRepo.Delete(ctx, id); err != nil {
 		return fmt.Errorf("delete api key: %w", err)
 	}
+	// Revoke after the database commit. Invalidating before it permits another
+	// request to reload the still-active Key. Finish revocation even if the
+	// deleting client disconnects after the commit.
+	invalidateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	s.InvalidateAuthCacheByKey(invalidateCtx, key)
 	s.lastUsedTouchL1.Delete(id)
 
 	return nil

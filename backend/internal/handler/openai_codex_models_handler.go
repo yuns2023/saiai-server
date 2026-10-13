@@ -32,7 +32,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	if !policyMatched {
 		logCodexClientPolicyRejection(c, apiKey.Group)
 		if strings.EqualFold(apiKey.Group.CodexClientPolicy, "local_proxy_only") {
-			h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", "This group requires SAIAI local proxy mode")
+			h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", "此分组仅允许通过 SAIAI 本地代理使用官方 Codex 客户端。")
 		} else {
 			h.errorResponse(c, http.StatusForbidden, "official_client_required", "This group only allows approved Codex clients")
 		}

@@ -7,11 +7,26 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/dgraph-io/ristretto"
 )
+
+type apiKeyAuthCacheGuard struct {
+	sync.Mutex
+	version uint64
+}
+
+func (s *APIKeyService) authCacheGuard(cacheKey string) *apiKeyAuthCacheGuard {
+	// cacheKey is a SHA-256 hex digest, never the API Key itself.
+	var bucket byte
+	for i := 0; i < len(cacheKey); i++ {
+		bucket = bucket*31 + cacheKey[i]
+	}
+	return &s.authCacheGuards[bucket]
+}
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -94,7 +109,13 @@ func (s *APIKeyService) StartAuthCacheInvalidationSubscriber(ctx context.Context
 		return
 	}
 	if err := s.cache.SubscribeAuthCacheInvalidation(ctx, func(cacheKey string) {
+		guard := s.authCacheGuard(cacheKey)
+		guard.Lock()
+		defer guard.Unlock()
+		guard.version++
+		s.authGroup.Forget(cacheKey)
 		s.authCacheL1.Del(cacheKey)
+		s.authCacheL1.Wait()
 	}); err != nil {
 		// Log but don't fail - L1 cache will still work, just without cross-instance invalidation
 		println("[Service] Warning: failed to start auth cache invalidation subscriber:", err.Error())
@@ -107,6 +128,10 @@ func (s *APIKeyService) authCacheKey(key string) string {
 }
 
 func (s *APIKeyService) getAuthCacheEntry(ctx context.Context, cacheKey string) (*APIKeyAuthCacheEntry, bool) {
+	guard := s.authCacheGuard(cacheKey)
+	guard.Lock()
+	version := guard.version
+	guard.Unlock()
 	if s.authCacheL1 != nil {
 		if val, ok := s.authCacheL1.Get(cacheKey); ok {
 			if entry, ok := val.(*APIKeyAuthCacheEntry); ok {
@@ -119,6 +144,11 @@ func (s *APIKeyService) getAuthCacheEntry(ctx context.Context, cacheKey string) 
 	}
 	entry, err := s.cache.GetAuthCache(ctx, cacheKey)
 	if err != nil {
+		return nil, false
+	}
+	guard.Lock()
+	defer guard.Unlock()
+	if guard.version != version {
 		return nil, false
 	}
 	s.setAuthCacheL1(cacheKey, entry)
@@ -149,6 +179,11 @@ func (s *APIKeyService) setAuthCacheEntry(ctx context.Context, cacheKey string, 
 }
 
 func (s *APIKeyService) deleteAuthCache(ctx context.Context, cacheKey string) {
+	guard := s.authCacheGuard(cacheKey)
+	guard.Lock()
+	defer guard.Unlock()
+	guard.version++
+	s.authGroup.Forget(cacheKey)
 	if s.authCacheL1 != nil {
 		s.authCacheL1.Del(cacheKey)
 		// Ristretto applies write-side mutations asynchronously. Wait here so
@@ -165,12 +200,63 @@ func (s *APIKeyService) deleteAuthCache(ctx context.Context, cacheKey string) {
 }
 
 func (s *APIKeyService) loadAuthCacheEntry(ctx context.Context, key, cacheKey string) (*APIKeyAuthCacheEntry, error) {
+	// Retry only an invalidated DB snapshot, never a model request. A bounded
+	// budget fails closed under continuously changing authentication state.
+	for attempt := 0; attempt < 3; attempt++ {
+		entry, err := s.loadAuthCacheEntryOnce(ctx, key, cacheKey)
+		if !errors.Is(err, errAuthCacheSnapshotInvalidated) {
+			return entry, err
+		}
+	}
+	return nil, errAuthCacheSnapshotInvalidated
+}
+
+var errAuthCacheSnapshotInvalidated = errors.New("authentication snapshot invalidated during load")
+
+func (s *APIKeyService) loadAuthCacheEntryOnce(ctx context.Context, key, cacheKey string) (*APIKeyAuthCacheEntry, error) {
+	guard := s.authCacheGuard(cacheKey)
+	guard.Lock()
+	localVersion := guard.version
+	guard.Unlock()
+	fence, fenced := s.cache.(APIKeyAuthCacheFence)
+	var cacheVersion string
+	var versionErr error
+	if fenced && s.authCfg.l2Enabled() {
+		cacheVersion, versionErr = fence.GetAuthCacheVersion(ctx, cacheKey)
+	}
+	publish := func(entry *APIKeyAuthCacheEntry, ttl time.Duration) error {
+		guard.Lock()
+		defer guard.Unlock()
+		if guard.version != localVersion {
+			return errAuthCacheSnapshotInvalidated
+		}
+		if fenced && s.authCfg.l2Enabled() {
+			// Redis outages must not turn a fresh DB result into a cached stale
+			// snapshot. Return the DB result without populating either cache.
+			if versionErr != nil {
+				return nil
+			}
+			accepted, err := fence.SetAuthCacheIfVersion(ctx, cacheKey, entry, s.authCfg.jitterTTL(ttl), cacheVersion)
+			if err != nil {
+				return nil
+			}
+			if !accepted {
+				return errAuthCacheSnapshotInvalidated
+			}
+			s.setAuthCacheL1(cacheKey, entry)
+			return nil
+		}
+		s.setAuthCacheEntry(ctx, cacheKey, entry, ttl)
+		return nil
+	}
 	apiKey, err := s.apiKeyRepo.GetByKeyForAuth(ctx, key)
 	if err != nil {
 		if errors.Is(err, ErrAPIKeyNotFound) {
 			entry := &APIKeyAuthCacheEntry{NotFound: true}
 			if s.authCfg.negativeEnabled() {
-				s.setAuthCacheEntry(ctx, cacheKey, entry, s.authCfg.negativeTTL)
+				if err := publish(entry, s.authCfg.negativeTTL); err != nil {
+					return nil, err
+				}
 			}
 			return entry, nil
 		}
@@ -182,7 +268,9 @@ func (s *APIKeyService) loadAuthCacheEntry(ctx context.Context, key, cacheKey st
 		return nil, fmt.Errorf("get api key: %w: %w", ErrAPIKeyNotFound, ErrAPIKeyAuthDataIncomplete)
 	}
 	entry := &APIKeyAuthCacheEntry{Snapshot: snapshot}
-	s.setAuthCacheEntry(ctx, cacheKey, entry, s.authCfg.l2TTL)
+	if err := publish(entry, s.authCfg.l2TTL); err != nil {
+		return nil, err
+	}
 	return entry, nil
 }
 

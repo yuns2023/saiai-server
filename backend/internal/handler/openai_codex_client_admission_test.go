@@ -235,3 +235,78 @@ func TestLogCodexClientPolicyRejectionOmitsSensitiveFields(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexMissingProxyIdentityReportsAccurateReason(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, version, accountID string
+	}{
+		{"missing version", "", "TEST_ONLY_ACCOUNT"},
+		{"missing account", "0.162.0-alpha.17.2", ""},
+		{"missing both", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var slotCalls atomic.Int32
+			cache := &concurrencyCacheMock{acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) {
+				slotCalls.Add(1)
+				return false, errors.New("TEST_ONLY_MUST_NOT_SCHEDULE")
+			}}
+			h := newOpenAIHandlerForPreviousResponseIDValidation(t, cache)
+			group := &service.Group{ID: 42, Platform: service.PlatformOpenAI, CodexClientPolicy: "local_proxy_only"}
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 99, GroupID: &group.ID, Group: group, User: &service.User{ID: 7}})
+				c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 7, Concurrency: 1})
+			})
+			router.POST("/responses", h.Responses)
+			router.GET("/responses", h.ResponsesWebSocket)
+			headers := http.Header{}
+			headers.Set("User-Agent", "Codex Desktop/0.162.0-alpha.17.2 (Windows 10.0.26200; x86_64)")
+			headers.Set("version", tc.version)
+			headers.Set("chatgpt-account-id", tc.accountID)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(`{"model":"TEST_ONLY_MODEL","input":"TEST_ONLY_INPUT"}`))
+			req.Header = headers.Clone()
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusForbidden, w.Code)
+			require.Contains(t, w.Body.String(), "saiai_local_proxy_required")
+			require.Contains(t, w.Body.String(), "本地代理身份信息不完整")
+			require.NotContains(t, w.Body.String(), "This group requires SAIAI local proxy mode")
+			server := httptest.NewServer(router)
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/responses", &coderws.DialOptions{HTTPHeader: headers})
+			require.NoError(t, err)
+			defer conn.CloseNow()
+			require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"TEST_ONLY_MODEL","input":"TEST_ONLY_INPUT"}`)))
+			_, _, err = conn.Read(ctx)
+			require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err))
+			require.Contains(t, err.Error(), "本地代理身份信息不完整")
+			require.Equal(t, int32(0), slotCalls.Load())
+		})
+	}
+}
+
+func TestCodexMissingProxyIdentityLogUsesOnlyPresenceFlags(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sink, restore := captureHandlerStructuredLog(t)
+	defer restore()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/responses", nil)
+	c.Request.Header.Set("User-Agent", "Codex Desktop/0.162.0-alpha.17.2")
+	c.Request.Header.Set("chatgpt-account-id", "TEST_ONLY_SECRET_ACCOUNT")
+	logCodexClientPolicyRejection(c, &service.Group{ID: 42, CodexClientPolicy: "local_proxy_only"})
+	require.True(t, sink.ContainsFieldValue("reason", "required_proxy_headers_missing"))
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, event := range sink.events {
+		if event.Message == "openai.codex_client_policy_rejected" {
+			require.Equal(t, true, event.Fields["missing_version"])
+			require.Equal(t, false, event.Fields["missing_account_id"])
+		}
+		for _, value := range event.Fields {
+			require.NotContains(t, fmt.Sprint(value), "TEST_ONLY_SECRET_ACCOUNT")
+		}
+	}
+}

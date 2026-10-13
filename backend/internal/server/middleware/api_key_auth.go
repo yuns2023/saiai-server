@@ -84,7 +84,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				if !errors.Is(err, service.ErrAPIKeyAuthDataIncomplete) {
 					service.MarkOpsLocalAuthRejected(c, service.OpsLocalAuthInvalidAPIKey)
 				}
-				AbortWithError(c, 401, "INVALID_API_KEY", "Invalid API key")
+				abortInvalidAPIKey(c)
 				return
 			}
 			AbortWithError(c, 500, "INTERNAL_ERROR", "Failed to validate API key")
@@ -277,6 +277,20 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		c.Next()
 	}
+}
+
+func abortInvalidAPIKey(c *gin.Context) {
+	path := c.Request.URL.Path
+	if path == "/v1/responses" || strings.HasPrefix(path, "/v1/responses/") ||
+		path == "/responses" || strings.HasPrefix(path, "/responses/") {
+		const message = "API key 无效或已删除，请更新 SAIAI Key 后重新初始化 Codex。"
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"code": "INVALID_API_KEY", "message": message,
+			"error": gin.H{"code": "INVALID_API_KEY", "type": "authentication_error", "message": message},
+		})
+		return
+	}
+	AbortWithError(c, http.StatusUnauthorized, "INVALID_API_KEY", "Invalid API key")
 }
 
 // Delivering an admitted turn must remain possible after its debit exhausts

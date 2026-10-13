@@ -274,7 +274,7 @@ func TestApiKeyService_Delete_NotFound(t *testing.T) {
 // 预期行为：
 //   - GetKeyAndOwnerID 返回正确的所有者 ID
 //   - 所有权验证通过
-//   - 缓存被清除（在删除之前）
+//   - 删除失败不撤销仍然有效的认证缓存
 //   - Delete 被调用但返回错误
 //   - 返回包含 "delete api key" 的错误信息
 func TestApiKeyService_Delete_DeleteFails(t *testing.T) {
@@ -290,5 +290,5 @@ func TestApiKeyService_Delete_DeleteFails(t *testing.T) {
 	require.ErrorContains(t, err, "delete api key")
 	require.Equal(t, []int64{3}, repo.deletedIDs)   // 验证删除操作被调用
 	require.Equal(t, []int64{3}, cache.invalidated) // 验证缓存已被清除（即使删除失败）
-	require.Equal(t, []string{svc.authCacheKey("k")}, cache.deleteAuthKeys)
+	require.Empty(t, cache.deleteAuthKeys)
 }
