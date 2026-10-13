@@ -49,27 +49,28 @@ type BillingCache interface {
 
 // ModelPricing 模型价格配置（per-token价格，与LiteLLM格式一致）
 type ModelPricing struct {
-	PriorityOverrides                  map[string]bool  `json:"priority_overrides,omitempty"`
-	Reference                          *ModelPricing    `json:"-"`
-	Snapshot                           *PricingSnapshot `json:"-"`
-	InputPricePerToken                 float64          `json:"input"`                               // 每token输入价格 (USD)
-	InputPricePerTokenPriority         float64          `json:"priority_input"`                      // priority service tier 下每token输入价格 (USD)
-	OutputPricePerToken                float64          `json:"output"`                              // 每token输出价格 (USD)
-	OutputPricePerTokenPriority        float64          `json:"priority_output"`                     // priority service tier 下每token输出价格 (USD)
-	CacheCreationPricePerToken         float64          `json:"cache_write"`                         // 缓存创建每token价格 (USD)
-	CacheCreationPricePerTokenPriority float64          `json:"priority_cache_write"`                // priority service tier 下缓存创建每token价格 (USD)
-	CacheReadPricePerToken             float64          `json:"cache_read"`                          // 缓存读取每token价格 (USD)
-	CacheReadPricePerTokenPriority     float64          `json:"priority_cache_read"`                 // priority service tier 下缓存读取每token价格 (USD)
-	CacheCreation5mPrice               float64          `json:"cache_write_5m"`                      // 5分钟缓存创建每token价格 (USD)
-	CacheCreation1hPrice               float64          `json:"cache_write_1h"`                      // 1小时缓存创建每token价格 (USD)
-	SupportsCacheBreakdown             bool             `json:"supports_cache_breakdown"`            // 是否支持详细的缓存分类
-	LongContextInputThreshold          int              `json:"long_context_threshold"`              // 超过阈值后按整次会话提升输入价格
-	LongContextInputMultiplier         float64          `json:"long_context_input_multiplier"`       // 长上下文整次会话输入倍率
-	LongContextOutputMultiplier        float64          `json:"long_context_output_multiplier"`      // 长上下文整次会话输出倍率
-	LongContextCacheCreationMultiplier float64          `json:"long_context_cache_write_multiplier"` // 长上下文整次会话缓存写入价格倍率
-	LongContextCacheReadMultiplier     float64          `json:"long_context_cache_read_multiplier"`  // 长上下文整次会话缓存读取价格倍率
-	InputImagePricePerToken            float64          `json:"image_input"`                         // 图片输入每 token 价格 (USD)
-	OutputImagePricePerToken           float64          `json:"image_output"`                        // 图片输出每 token 价格 (USD)
+	CacheCreation1hPricePerTokenPriority *float64         `json:"priority_cache_write_1h,omitempty"`
+	PriorityOverrides                    map[string]bool  `json:"priority_overrides,omitempty"`
+	Reference                            *ModelPricing    `json:"-"`
+	Snapshot                             *PricingSnapshot `json:"-"`
+	InputPricePerToken                   float64          `json:"input"`                               // 每token输入价格 (USD)
+	InputPricePerTokenPriority           float64          `json:"priority_input"`                      // priority service tier 下每token输入价格 (USD)
+	OutputPricePerToken                  float64          `json:"output"`                              // 每token输出价格 (USD)
+	OutputPricePerTokenPriority          float64          `json:"priority_output"`                     // priority service tier 下每token输出价格 (USD)
+	CacheCreationPricePerToken           float64          `json:"cache_write"`                         // 缓存创建每token价格 (USD)
+	CacheCreationPricePerTokenPriority   float64          `json:"priority_cache_write"`                // priority service tier 下缓存创建每token价格 (USD)
+	CacheReadPricePerToken               float64          `json:"cache_read"`                          // 缓存读取每token价格 (USD)
+	CacheReadPricePerTokenPriority       float64          `json:"priority_cache_read"`                 // priority service tier 下缓存读取每token价格 (USD)
+	CacheCreation5mPrice                 float64          `json:"cache_write_5m"`                      // 5分钟缓存创建每token价格 (USD)
+	CacheCreation1hPrice                 float64          `json:"cache_write_1h"`                      // 1小时缓存创建每token价格 (USD)
+	SupportsCacheBreakdown               bool             `json:"supports_cache_breakdown"`            // 是否支持详细的缓存分类
+	LongContextInputThreshold            int              `json:"long_context_threshold"`              // 超过阈值后按整次会话提升输入价格
+	LongContextInputMultiplier           float64          `json:"long_context_input_multiplier"`       // 长上下文整次会话输入倍率
+	LongContextOutputMultiplier          float64          `json:"long_context_output_multiplier"`      // 长上下文整次会话输出倍率
+	LongContextCacheCreationMultiplier   float64          `json:"long_context_cache_write_multiplier"` // 长上下文整次会话缓存写入价格倍率
+	LongContextCacheReadMultiplier       float64          `json:"long_context_cache_read_multiplier"`  // 长上下文整次会话缓存读取价格倍率
+	InputImagePricePerToken              float64          `json:"image_input"`                         // 图片输入每 token 价格 (USD)
+	OutputImagePricePerToken             float64          `json:"image_output"`                        // 图片输出每 token 价格 (USD)
 }
 
 const (
@@ -426,6 +427,9 @@ func (s *BillingService) calculateTokenCost(tokens UsageTokens, rateMultiplier f
 		if pricing.CacheCreationPricePerTokenPriority > 0 || pricing.PriorityOverrides["priority_cache_write"] {
 			cacheCreationPricePerToken = pricing.CacheCreationPricePerTokenPriority
 			cacheCreation5mPrice = pricing.CacheCreationPricePerTokenPriority
+		}
+		if pricing.CacheCreation1hPricePerTokenPriority != nil {
+			cacheCreation1hPrice = *pricing.CacheCreation1hPricePerTokenPriority
 		}
 		if pricing.CacheReadPricePerTokenPriority > 0 || pricing.PriorityOverrides["priority_cache_read"] {
 			cacheReadPricePerToken = pricing.CacheReadPricePerTokenPriority

@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"sync"
 	"testing"
@@ -213,4 +214,36 @@ func TestModelPricingSplitLongContextEvidenceIsSeparateFromWholeRequest(t *testi
 	require.Equal(t, 220000, info.TotalInputTokens)
 	require.Equal(t, 1.0, info.OutputMultiplier)
 	require.Equal(t, 1.0, info.CacheWriteMultiplier)
+}
+
+func TestModelPricingPartialPriorityOverridePreservesInheritedCachePrices(t *testing.T) {
+	for _, free := range []bool{false, true} {
+		t.Run(fmt.Sprint("free=", free), func(t *testing.T) {
+			p, b := testModelPricing(t)
+			input := 25.0
+			if free {
+				input = 0
+			}
+			tokens := UsageTokens{InputTokens: 1000000, CacheCreationTokens: 2000000, CacheCreation5mTokens: 1000000, CacheCreation1hTokens: 1000000}
+			before, err := b.CalculateCostWithServiceTier("claude-fable-5", tokens, 1, "priority")
+			require.NoError(t, err)
+			p.SetModelPricingConfig(nil, map[string]ModelPriceOverride{"claude-fable-5": {PriorityInput: &input, CacheWrite1h: priceTestNumber(7)}})
+			after, err := b.CalculateCostWithServiceTier("claude-fable-5", tokens, 1, "priority")
+			require.NoError(t, err)
+			require.InDelta(t, input, after.InputCost, 1e-12)
+			require.InDelta(t, before.CacheCreation5mCost, after.CacheCreation5mCost, 1e-12)
+			require.InDelta(t, before.CacheCreation1hCost, after.CacheCreation1hCost, 1e-12)
+			require.InDelta(t, 40, after.CacheCreation1hCost, 1e-12)
+			for tier, want := range map[string]float64{"default": 7, "flex": 3.5} {
+				cost, err := b.CalculateCostWithServiceTier("claude-fable-5", tokens, 1, tier)
+				require.NoError(t, err)
+				require.InDelta(t, want, cost.CacheCreation1hCost, 1e-12)
+			}
+			data, err := json.Marshal(after.PricingSnapshot)
+			require.NoError(t, err)
+			var saved PricingSnapshot
+			require.NoError(t, json.Unmarshal(data, &saved))
+			require.InDelta(t, 40, b.DisplayUnitPrices(saved.Effective, "priority")["cache_write_1h"], 1e-12)
+		})
+	}
 }

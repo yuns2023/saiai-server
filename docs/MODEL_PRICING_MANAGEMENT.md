@@ -26,7 +26,9 @@ Reference resolution, model-specific policies, exact-model overrides, service
 tier and long-context rules run through the shared BillingService. Priority
 prices are independent from Standard overrides; Flex retains its existing
 Standard tier multiplier. Equal/free cache-write prices still keep separate
-5m/1h token accounting.
+5m/1h token accounting. A partial Priority override preserves the inherited
+1-hour cache-write price, including when Priority originally used a whole-tier
+multiplier; the effective 1-hour Priority price is retained in usage snapshots.
 
 Effective unit prices enter TotalCost (the platform base charge). Whole-request
 factors determine ActualCost: the effective group/user-specific group rate,

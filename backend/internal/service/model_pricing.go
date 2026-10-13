@@ -237,6 +237,13 @@ func (s *BillingService) finishModelPricing(p *ModelPricing, r pricingResolution
 		effective.OutputPricePerTokenPriority = base.OutputPricePerToken * 2
 		effective.CacheReadPricePerTokenPriority = base.CacheReadPricePerToken * 2
 		effective.CacheCreationPricePerTokenPriority = base.CacheCreationPricePerToken * 2
+		// Switching from the whole-tier multiplier to explicit prices must
+		// retain the inherited 1h price, independently of Standard overrides.
+		priority1h := base.CacheCreation1hPrice * 2
+		if !base.SupportsCacheBreakdown {
+			priority1h = base.CacheCreationPricePerToken * 2
+		}
+		effective.CacheCreation1hPricePerTokenPriority = &priority1h
 	}
 	set(&effective.InputPricePerTokenPriority, r.Override.PriorityInput)
 	set(&effective.OutputPricePerTokenPriority, r.Override.PriorityOutput)
