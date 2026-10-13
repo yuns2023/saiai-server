@@ -5056,6 +5056,7 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(_ context.Context, accou
 	if len(updates) > 0 {
 		observation := codexFiveHourAdmissionObservationFromSnapshot(snapshot, now)
 		coordinator = s.getCodexSnapshotThrottle()
+		s.rateLimitService.resetCodexUsageThrottle(accountID, coordinator)
 		firstRequest, startWriter = coordinator.BeginCodexSnapshotWrite(accountID, now, observation, updates)
 	}
 	if startWriter && firstRequest != nil {
@@ -5067,7 +5068,9 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(_ context.Context, accou
 		go func() {
 			updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_ = s.accountRepo.SetRateLimited(updateCtx, accountID, reset)
+			_ = s.rateLimitService.codexUsageWrite(updateCtx, accountID, now, func() error {
+				return s.accountRepo.SetRateLimited(updateCtx, accountID, reset)
+			})
 		}()
 	}
 }
@@ -5075,9 +5078,11 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(_ context.Context, accou
 func (s *OpenAIGatewayService) persistCodexUsageSnapshots(coordinator *accountWriteThrottle, first *codexSnapshotWriteRequest) {
 	for current := first; current != nil; {
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := s.accountRepo.UpdateExtra(updateCtx, current.accountID, current.updates)
+		err := s.rateLimitService.codexUsageWrite(updateCtx, current.accountID, current.receivedAt, func() error {
+			return s.accountRepo.UpdateExtra(updateCtx, current.accountID, current.updates)
+		})
 		cancel()
-		if err != nil {
+		if err != nil && !errors.Is(err, errCodexUsageSuperseded) {
 			logger.LegacyPrintf("service.openai_gateway", "failed to persist Codex usage snapshot: account=%d error=%v", current.accountID, err)
 		}
 		if coordinator == nil {

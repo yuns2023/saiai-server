@@ -47,8 +47,14 @@ The local account rate-limit flag is cleared only when the authoritative usage
 response explicitly says `allowed: true` and `limit_reached: false`. An exhausted
 window retains a valid upstream reset time. Missing/malformed usage preserves
 local scheduling state. Error, overload, manual scheduling, temporary exclusions,
-and unrelated quota fields are not cleared by this operation. Subsequent model
-traffic can report newer usage; the reset does not reserve capacity.
+and unrelated quota fields are not cleared by this operation.
+
+Within one Gateway process, reset reconciliation waits for in-flight snapshot
+writes and rejects queued snapshot/rate-limit writes observed before its usage
+fetch. The same boundary invalidates old snapshot throttle decisions. This is
+process-local coordination; it does not serialize independent Gateway replicas.
+Subsequent model traffic can report newer usage; the reset does not reserve
+capacity.
 
 ## Evidence
 

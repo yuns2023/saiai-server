@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -235,4 +236,106 @@ func TestCodexResetRedactsFailuresAndRejectsUnknownOutcome(t *testing.T) {
 		require.Nil(t, repo.updates)
 		require.Zero(t, repo.clears)
 	}
+}
+
+type codexResetOrderedRepo struct {
+	*codexResetRepo
+	mu              sync.Mutex
+	entered, resume chan struct{}
+	latest          map[string]any
+}
+
+func (r *codexResetOrderedRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+	if updates["codex_5h_used_percent"] == float64(90) {
+		close(r.entered)
+		<-r.resume
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.latest = updates
+	return nil
+}
+func TestCodexResetDrainsOlderSnapshotWrites(t *testing.T) {
+	usageFetched := make(chan struct{})
+	svc, base := codexResetFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/consume") {
+			_, _ = w.Write([]byte(`{"code":"reset","windows_reset":2}`))
+			return
+		}
+		close(usageFetched)
+		_, _ = w.Write([]byte(resetUsageBody(true, 0)))
+	})
+	repo := &codexResetOrderedRepo{codexResetRepo: base, entered: make(chan struct{}), resume: make(chan struct{})}
+	svc.accountRepo = repo
+	limits := &RateLimitService{}
+	svc.rateLimits = limits
+	gateway := &OpenAIGatewayService{accountRepo: repo, rateLimitService: limits}
+	throttle := newAccountWriteThrottle(0)
+	old, start := throttle.BeginCodexSnapshotWrite(1, time.Now(), codexFiveHourAdmissionObservation{}, map[string]any{"codex_5h_used_percent": float64(90)})
+	require.True(t, start)
+	written := make(chan struct{})
+	go func() { gateway.persistCodexUsageSnapshots(throttle, old); close(written) }()
+	<-repo.entered
+	// This pending observation also predates the reset and may acquire the
+	// account writer either before or after reconciliation.
+	_, start = throttle.BeginCodexSnapshotWrite(1, time.Now(), codexFiveHourAdmissionObservation{}, map[string]any{"codex_5h_used_percent": float64(85)})
+	require.False(t, start)
+	resetDone := make(chan struct{})
+	var result *OpenAIResetResult
+	var resetErr error
+	go func() {
+		result, resetErr = svc.Consume(context.Background(), 1, OpenAIResetRequest{"TEST_ONLY_request", "TEST_ONLY_credit"})
+		close(resetDone)
+	}()
+	select {
+	case <-usageFetched:
+		t.Error("reset must drain the in-flight snapshot before fetching usage")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(repo.resume)
+	<-resetDone
+	<-written
+	require.NoError(t, resetErr)
+	require.True(t, result.QuotaSynced)
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Equal(t, float64(0), repo.latest["codex_5h_used_percent"])
+}
+
+func TestCodexResetRejectsQueuedOldWritesAndAllowsNewObservations(t *testing.T) {
+	svc, _ := codexResetFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/consume") {
+			_, _ = w.Write([]byte(`{"code":"reset"}`))
+			return
+		}
+		_, _ = w.Write([]byte(resetUsageBody(true, 0)))
+	})
+	svc.rateLimits = &RateLimitService{}
+	oldObservation := time.Now()
+	result, err := svc.Consume(context.Background(), 1, OpenAIResetRequest{"TEST_ONLY_request", "TEST_ONLY_credit"})
+	require.NoError(t, err)
+	require.True(t, result.QuotaSynced)
+	// Both snapshot and SetRateLimited workers use this same guard.
+	for _, kind := range []string{"snapshot", "rate_limit"} {
+		require.ErrorIs(t, svc.rateLimits.codexUsageWrite(context.Background(), 1, oldObservation, func() error { t.Errorf("stale %s write ran", kind); return nil }), errCodexUsageSuperseded)
+	}
+
+	throttle := newAccountWriteThrottle(time.Minute)
+	observation := codexFiveHourAdmissionObservation{class: codexFiveHourAdmissionBlocked}
+	old, start := throttle.BeginCodexSnapshotWrite(1, oldObservation, observation, nil)
+	require.True(t, start)
+	require.Nil(t, throttle.CompleteCodexSnapshotWrite(old, true, time.Now()))
+	svc.rateLimits.resetCodexUsageThrottle(1, throttle)
+	_, start = throttle.BeginCodexSnapshotWrite(1, time.Now(), observation, nil)
+	require.True(t, start, "a fresh exhausted observation must not inherit the pre-reset throttle")
+	writes := 0
+	require.NoError(t, svc.rateLimits.codexUsageWrite(context.Background(), 1, time.Now(), func() error { writes++; return nil }))
+	require.NoError(t, svc.rateLimits.codexUsageWrite(context.Background(), 2, oldObservation, func() error { writes++; return nil }))
+	require.Equal(t, 2, writes)
+	_, release, err := svc.rateLimits.lockCodexUsageWrite(context.Background(), 1)
+	require.NoError(t, err)
+	defer release()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, svc.rateLimits.codexUsageWrite(ctx, 1, time.Now(), func() error { t.Fatal("canceled writer ran"); return nil }), context.Canceled)
 }

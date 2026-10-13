@@ -190,6 +190,14 @@ type codexControlWindow struct {
 }
 
 func (s *OpenAIQuotaResetService) syncUsage(ctx context.Context, account *Account) error {
+	// Drain in-flight writes before fetching authoritative usage. Observations
+	// received after this boundary may legitimately describe later traffic.
+	state, release, err := s.rateLimits.lockCodexUsageWrite(ctx, account.ID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	boundary := time.Now()
 	var usage struct {
 		RateLimit *struct {
 			Allowed      *bool               `json:"allowed"`
@@ -230,6 +238,9 @@ func (s *OpenAIQuotaResetService) syncUsage(ctx context.Context, account *Accoun
 	}
 	if err := s.accountRepo.UpdateExtra(ctx, account.ID, buildCodexUsageExtraUpdates(snapshot, now)); err != nil {
 		return err
+	}
+	if state != nil {
+		state.resetAt.Store(&boundary)
 	}
 	if limit.Allowed != nil && *limit.Allowed && limit.LimitReached != nil && !*limit.LimitReached {
 		if err := s.accountRepo.ClearRateLimit(ctx, account.ID); err != nil {
