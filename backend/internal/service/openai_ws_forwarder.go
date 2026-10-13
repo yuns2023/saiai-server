@@ -230,15 +230,16 @@ type OpenAIWSIngressHooks struct {
 }
 
 type OpenAIWSUpstreamFailure struct {
-	Turn       int
-	AccountID  int64
-	Model      string
-	ResponseID string
-	EventType  string
-	Status     int
-	ErrorType  string
-	Code       string
-	Message    string
+	Turn             int
+	AccountID        int64
+	Model            string
+	ResponseID       string
+	EventType        string
+	Status           int
+	ErrorType        string
+	Code             string
+	Message          string
+	IncompleteReason string
 	// Digests and provider trace IDs are diagnostic metadata, never request bodies.
 	RequestPayloadHash string
 	UpstreamRequestID  string

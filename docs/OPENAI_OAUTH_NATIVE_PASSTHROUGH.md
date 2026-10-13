@@ -114,6 +114,16 @@ does not replace a logical 400. If the provider omits a status, monitoring uses
 does not replace an observed refusal from the current turn. A later turn
 resets that outcome, so its failure cannot inherit an earlier model/status.
 
+For `response.incomplete`, Ops also retains the bounded protocol identifier
+`incomplete_details.reason`. If the provider omits an error message, the
+monitoring message includes that identifier, for example
+`Upstream WebSocket response.incomplete (max_output_tokens)`. It does not infer
+quota exhaustion or a provider HTTP status from the reason. Missing, non-string,
+oversized, or non-identifier reasons are omitted; the rest of
+`incomplete_details` is never captured. Selected credentials echoed in the
+identifier/message are redacted before recording. This metadata change applies
+to newly recorded turns; it cannot recover reasons omitted from existing logs.
+
 These observations do not rewrite frames, synthesize response IDs or successful
 completion, retry a rejected model, or change quota-replay visibility. Only a
 successful terminal callback produces a usage record. Without a response ID,

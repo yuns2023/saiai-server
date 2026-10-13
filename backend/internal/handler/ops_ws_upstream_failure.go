@@ -91,6 +91,11 @@ func recordOpenAIWSUpstreamFailure(c *gin.Context, failure *service.OpenAIWSUpst
 		"transport_status_code": http.StatusSwitchingProtocols,
 		"websocket_turn":        failure.Turn, "websocket_event_type": failure.EventType,
 	}
+	if failure.EventType == "response.incomplete" {
+		if reason := opsWSErrorIdentifier(failure.IncompleteReason); reason != "" {
+			payload["incomplete_details"] = gin.H{"reason": reason}
+		}
+	}
 	if failure.Status >= 400 && failure.Status <= 599 {
 		payload["upstream_status_code"] = failure.Status
 	}

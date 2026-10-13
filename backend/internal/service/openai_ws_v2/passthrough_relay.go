@@ -61,10 +61,11 @@ type RelayTurnResult struct {
 // RelayFailure is observed application error metadata, never a replacement
 // frame. Status is zero when the provider did not supply a valid status.
 type RelayFailure struct {
-	Status    int
-	ErrorType string
-	Code      string
-	Message   string
+	Status           int
+	ErrorType        string
+	Code             string
+	Message          string
+	IncompleteReason string
 }
 
 // RelayTurnMetadata is request-side accounting data captured before a turn is
@@ -857,6 +858,9 @@ func parseRelayFailure(message []byte, eventType string) *RelayFailure {
 		return nil
 	}
 	failure := &RelayFailure{ErrorType: object.Get("type").String(), Code: object.Get("code").String(), Message: object.Get("message").String()}
+	if eventType == "response.incomplete" {
+		failure.IncompleteReason = parseRelayIncompleteReason(gjson.GetBytes(message, "response.incomplete_details.reason"))
+	}
 	for _, field := range []string{"status", "error.status", "response.error.status"} {
 		value := gjson.GetBytes(message, field)
 		if value.Type == gjson.Number && value.Float() == float64(value.Int()) && value.Int() >= 400 && value.Int() <= 599 {
@@ -869,8 +873,31 @@ func parseRelayFailure(message []byte, eventType string) *RelayFailure {
 	}
 	if failure.Message == "" {
 		failure.Message = "Upstream WebSocket " + eventType
+		if failure.IncompleteReason != "" {
+			failure.Message += " (" + failure.IncompleteReason + ")"
+		}
 	}
 	return failure
+}
+
+// Keep only a bounded protocol identifier, not the rest of incomplete_details
+// or arbitrary provider text. New reason identifiers remain observable.
+func parseRelayIncompleteReason(value gjson.Result) string {
+	if value.Type != gjson.String {
+		return ""
+	}
+	reason := value.String()
+	if len(reason) > 128 {
+		return ""
+	}
+	for _, char := range reason {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9', char == '_', char == '-', char == '.':
+		default:
+			return ""
+		}
+	}
+	return reason
 }
 
 // A top-level error can precede response.created. Without a response id, only

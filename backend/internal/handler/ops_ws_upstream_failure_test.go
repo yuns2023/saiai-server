@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -99,4 +100,36 @@ func TestOpsWSUnknownStatusDoesNotInventProviderStatus(t *testing.T) {
 	require.Equal(t, 502, entry.StatusCode)
 	require.Nil(t, entry.UpstreamStatusCode)
 	require.NotContains(t, entry.ErrorBody, "upstream_status_code")
+}
+
+func TestOpsWSIncompleteReasonIsSavedWithoutProviderStatusOrBody(t *testing.T) {
+	for _, reason := range []string{"max_output_tokens", "content_filter", "steered", "", "Bearer TEST_ONLY_SECRET", strings.Repeat("x", 129)} {
+		t.Run(reason, func(t *testing.T) {
+			queue := opsFailureTestQueue(t)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			c.Set(opsWSRecorderKey, &opsWSFailureRecorder{ops: service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil), turn: 8})
+			recordOpenAIWSUpstreamFailure(c, &service.OpenAIWSUpstreamFailure{
+				Turn: 8, EventType: "response.incomplete", ResponseID: "resp_incomplete",
+				IncompleteReason: reason, Message: "Upstream WebSocket response.incomplete",
+			})
+			entry := (<-queue).entry
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal([]byte(entry.ErrorBody), &payload))
+			require.Equal(t, 502, entry.StatusCode)
+			require.Nil(t, entry.UpstreamStatusCode)
+			require.NotContains(t, payload, "upstream_status_code")
+			require.Equal(t, float64(101), payload["transport_status_code"])
+			require.Equal(t, float64(8), payload["websocket_turn"])
+			require.Equal(t, "resp_incomplete", payload["response_id"])
+			if reason == "max_output_tokens" || reason == "content_filter" || reason == "steered" {
+				require.Equal(t, map[string]any{"reason": reason}, payload["incomplete_details"])
+			} else {
+				require.NotContains(t, payload, "incomplete_details")
+			}
+			require.NotContains(t, entry.ErrorBody, "TEST_ONLY_SECRET")
+			require.Nil(t, entry.RequestBodyJSON)
+			require.Equal(t, entry.ErrorBody, entry.UpstreamErrors[0].Detail)
+		})
+	}
 }
