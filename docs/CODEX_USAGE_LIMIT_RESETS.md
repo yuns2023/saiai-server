@@ -58,6 +58,9 @@ capacity.
 
 ## Evidence
 
+See [pricing and quota review notes](PRICING_AND_QUOTA_REVIEW.md) for controlled
+write-order tests, coordination limits and resource-safe validation commands.
+
 - [Official backend-client reset methods and paths](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/backend-client/src/client/rate_limit_resets.rs)
 - [Official payload and outcome regression fixtures](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/backend-client/src/client/rate_limit_resets_tests.rs)
 - [Official app-server consumption and idempotency handling](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/request_processors/account_processor/rate_limit_resets.rs)

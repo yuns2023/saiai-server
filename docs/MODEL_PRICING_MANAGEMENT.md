@@ -129,6 +129,9 @@ and the discounted user charge must remain distinguishable.
 
 ## Local validation
 
+See [pricing and quota review notes](PRICING_AND_QUOTA_REVIEW.md) for partial
+override regression checks and the related asynchronous-write review method.
+
 Targeted BillingService, Gateway/OpenAI usage, administrator-handler, DTO and
 usage-repository tests pass, including explicit zero prices, inherited aliases,
 cache splits, subscription charges, persisted snapshots, stale edits and
