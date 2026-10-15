@@ -42,6 +42,7 @@ func TestCodexModelsAdmissionWithoutAccountHeader(t *testing.T) {
 		{"VSCode", "codex_vscode/0.159.2", ""},
 		{"Desktop", "codex_chatgpt_desktop/0.153.4", "codex_chatgpt_desktop"},
 		{"Work Desktop", "codex_work_desktop/0.159.0-alpha.12.1", "codex_work_desktop"},
+		{"Chrome sidepanel", "codex-chrome-extension-sidepanel/0.159.0", "codex-chrome-extension-sidepanel"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

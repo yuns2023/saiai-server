@@ -527,6 +527,8 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testi
 		{name: "TUI 0.160 identity preserved", userAgent: "codex-tui/0.160.0 (Ubuntu 24.4.0; x86_64) xterm-256color (codex-tui; 0.160.0)", originator: "codex-tui", wantOriginator: "codex-tui"},
 		{name: "vscode originator preserved", userAgent: "codex_cli_rs/0.153.4", originator: "codex_vscode", wantOriginator: "codex_vscode"},
 		{name: "official ua without originator remains absent", userAgent: "Codex Desktop/1.2.3", wantOriginator: ""},
+		{name: "Chrome sidepanel identity preserved", userAgent: "codex-chrome-extension-sidepanel/0.159.0", originator: "codex-chrome-extension-sidepanel", wantOriginator: "codex-chrome-extension-sidepanel"},
+		{name: "Chrome sidepanel missing originator remains absent", userAgent: "codex-chrome-extension-sidepanel/0.159.0", wantOriginator: ""},
 	}
 
 	for _, tt := range tests {

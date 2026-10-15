@@ -182,3 +182,35 @@ func TestIsCodexOfficialClientByHeaders(t *testing.T) {
 		})
 	}
 }
+
+// The sidepanel is a separate surface, not a terminal client. These headers
+// are compatibility signals; they do not authenticate the caller.
+func TestCodexChromeSidepanelAdmission(t *testing.T) {
+	const ua = "codex-chrome-extension-sidepanel/0.159.0 (Windows 10.0.26200; x86_64) unknown (codex-chrome-extension-sidepanel; 1.26.901.11451)"
+	const originator = "codex-chrome-extension-sidepanel"
+	for _, tc := range []struct {
+		name, ua, originator string
+		want                 bool
+	}{
+		{"native sidepanel", ua, originator, true},
+		{"missing originator", ua, "", true},
+		{"app-server surface", "codex_cli_rs/0.159.0", originator, true},
+		{"originator alone", "", originator, false},
+		{"ordinary browser", "Mozilla/5.0", originator, false},
+		{"embedded product", "Mozilla/5.0 " + ua, originator, false},
+		{"missing version", originator + "/", originator, false},
+		{"nested product", originator + "/0.159.0/other", originator, false},
+		{"unknown product suffix", originator + "-fake/0.159.0", originator, false},
+		{"unknown originator suffix", ua, originator + "-fake", false},
+		{"versioned originator", ua, originator + "/0.159.0", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsCodexOfficialClientByHeaders(tc.ua, tc.originator); got != tc.want {
+				t.Fatalf("admitted = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if IsCodexTerminalRequest(ua) {
+		t.Fatal("sidepanel must not qualify for terminal-only groups")
+	}
+}

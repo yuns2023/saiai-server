@@ -1810,6 +1810,8 @@ func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t 
 		{name: "desktop originator preserved", userAgent: "codex_cli_rs/0.153.4", originator: "Codex Desktop", wantOriginator: "Codex Desktop"},
 		{name: "vscode originator preserved", userAgent: "codex_cli_rs/0.153.4", originator: "codex_vscode", wantOriginator: "codex_vscode"},
 		{name: "official ua without originator remains absent", userAgent: "Codex Desktop/1.2.3", wantOriginator: ""},
+		{name: "Chrome sidepanel identity preserved", userAgent: "codex-chrome-extension-sidepanel/0.159.0", originator: "codex-chrome-extension-sidepanel", wantOriginator: "codex-chrome-extension-sidepanel"},
+		{name: "Chrome sidepanel missing originator remains absent", userAgent: "codex-chrome-extension-sidepanel/0.159.0", wantOriginator: ""},
 	}
 
 	for _, tt := range tests {

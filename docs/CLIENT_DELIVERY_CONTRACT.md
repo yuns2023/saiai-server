@@ -153,7 +153,8 @@ headers. A missing UA, a non-Codex UA (including curl), an embedded Codex
 substring, or a missing product version is rejected even when `originator`
 claims Codex. A present `originator` must match the exact allowlist:
 `codex_cli_rs`, `codex-tui`, `codex_vscode`, `codex_app`, `codex_chatgpt_desktop`,
-`codex_work_desktop`, `codex_atlas`, `codex_exec`, `codex_sdk_ts`, or `Codex Desktop`
+`codex_work_desktop`, `codex-chrome-extension-sidepanel`, `codex_atlas`,
+`codex_exec`, `codex_sdk_ts`, or `Codex Desktop`
 (case-insensitive). Official UAs without `originator` remain accepted;
 app-server UAs may carry a different allowlisted surface originator.
 
@@ -170,6 +171,14 @@ exact `codex_work_desktop` originator. Recognize this native shape without
 rewriting it to a terminal identity. Responses still requires the account and
 version headers, unknown product/originator suffixes remain rejected, and the
 work Desktop UA does not qualify for `cli_only`.
+
+Browser side chat uses the separate `codex-chrome-extension-sidepanel/<version>`
+product. Accept that exact product and the `codex-chrome-extension-sidepanel`
+originator without rewriting them to a CLI identity. The sidepanel does not
+qualify for `cli_only`; ordinary browser UAs, embedded products, missing
+versions and unknown originator suffixes remain rejected. This is a header
+compatibility rule, not authentication or a claim that every browser workflow
+has been validated end to end.
 
 The same client-header admission applies to the `official_clients` and
 `cli_only` group policies, OAuth account restrictions, and native relay

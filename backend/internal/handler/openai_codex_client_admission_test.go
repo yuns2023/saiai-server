@@ -35,6 +35,10 @@ func TestOpenAICodexAdmissionRejectsBeforeScheduling(t *testing.T) {
 		{"embedded work desktop", "curl/8.0 codex_work_desktop/0.159.0-alpha.12.1", "codex_work_desktop"},
 		{"unknown work desktop originator", "codex_work_desktop/0.159.0-alpha.12.1", "codex_work_desktop_fake"},
 		{"missing work desktop version", "codex_work_desktop/", "codex_work_desktop"},
+		{"browser with sidepanel originator", "Mozilla/5.0", "codex-chrome-extension-sidepanel"},
+		{"embedded sidepanel", "Mozilla/5.0 codex-chrome-extension-sidepanel/0.159.0", "codex-chrome-extension-sidepanel"},
+		{"unknown sidepanel originator", "codex-chrome-extension-sidepanel/0.159.0", "codex-chrome-extension-sidepanel-fake"},
+		{"missing sidepanel version", "codex-chrome-extension-sidepanel/", "codex-chrome-extension-sidepanel"},
 	}
 	for _, policy := range []string{"official_clients", "cli_only", "local_proxy_only"} {
 		for _, tc := range cases {
@@ -149,11 +153,15 @@ func TestOpenAICodexTUIAdmissionReachesScheduling(t *testing.T) {
 	}
 }
 
-func TestOpenAICodexWorkDesktopAdmissionReachesScheduling(t *testing.T) {
+func TestOpenAICodexDesktopSurfaceAdmissionReachesScheduling(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, policy := range []string{"official_clients", "local_proxy_only"} {
-		for _, version := range []string{"0.155.0-alpha.9.2", "0.159.0-alpha.12.1"} {
-			t.Run(policy+"/"+version, func(t *testing.T) {
+		for _, client := range []struct{ product, version string }{
+			{"codex_work_desktop", "0.155.0-alpha.9.2"},
+			{"codex_work_desktop", "0.159.0-alpha.12.1"},
+			{"codex-chrome-extension-sidepanel", "0.159.0"},
+		} {
+			t.Run(policy+"/"+client.product+"/"+client.version, func(t *testing.T) {
 				var slotCalls atomic.Int32
 				cache := &concurrencyCacheMock{
 					acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) {
@@ -176,9 +184,9 @@ func TestOpenAICodexWorkDesktopAdmissionReachesScheduling(t *testing.T) {
 				router.POST("/v1/responses", handler.Responses)
 				router.GET("/v1/responses", handler.ResponsesWebSocket)
 				headers := http.Header{}
-				headers.Set("User-Agent", "codex_work_desktop/"+version+" (Windows 10.0.26200; x86_64) unknown (codex_work_desktop; 26.930.2377.0)")
-				headers.Set("originator", "codex_work_desktop")
-				headers.Set("version", version)
+				headers.Set("User-Agent", client.product+"/"+client.version+" (Windows 10.0.26200; x86_64)")
+				headers.Set("originator", client.product)
+				headers.Set("version", client.version)
 				headers.Set("chatgpt-account-id", "TEST_ONLY_ACCOUNT")
 				recorder := httptest.NewRecorder()
 				request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"TEST_ONLY_MODEL","stream":true,"input":"TEST_ONLY_INPUT"}`))
