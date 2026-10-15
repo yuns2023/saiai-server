@@ -112,7 +112,7 @@ func TestModelPricingAdminSaveValidationHistoryAndWriteFailure(t *testing.T) {
 	_, overrides := p.ModelPricingConfig()
 	require.Zero(t, *overrides["new-model"].CacheRead, "database failure must not change runtime prices")
 }
-func TestModelPricingAdminPreviewSubscriptionUsesCustomBaseAndNoCategoryDiscount(t *testing.T) {
+func TestModelPricingAdminPreviewSubscriptionAndBalanceUseSamePrice(t *testing.T) {
 	_, p, repo, router := modelPriceHandlerFixture(t)
 	body := map[string]any{"model": "model-base", "override": map[string]any{"cache_read": 0.25}, "tokens": map[string]any{"input_tokens": 100, "cache_read_tokens": 1000}, "group_rate": 2, "model_rate": 0.8, "user_discount": 0.5, "subscription": true}
 	w := priceHandlerRequest(router, http.MethodPost, "/preview", body)
@@ -124,7 +124,7 @@ func TestModelPricingAdminPreviewSubscriptionUsesCustomBaseAndNoCategoryDiscount
 		}
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &reply))
-	require.InDelta(t, 0.00125, reply.Data.Charged, 1e-12)
+	require.InDelta(t, 0.00125*2*0.8*0.5, reply.Data.Charged, 1e-12)
 	require.InDelta(t, 0.002, reply.Data.Cost.PricingSnapshot.ReferenceTotalCost, 1e-12)
 	_, overrides := p.ModelPricingConfig()
 	require.Empty(t, overrides)
@@ -134,6 +134,34 @@ func TestModelPricingAdminPreviewSubscriptionUsesCustomBaseAndNoCategoryDiscount
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &reply))
 	require.InDelta(t, 0.00125*2*0.8*0.5, reply.Data.Charged, 1e-12)
+}
+
+func TestModelPricingAdminPreviewFreeFactors(t *testing.T) {
+	_, _, _, router := modelPriceHandlerFixture(t)
+	for _, field := range []string{"group_rate", "model_rate", "user_discount"} {
+		for _, subscription := range []bool{true, false} {
+			body := map[string]any{
+				"model": "model-base", "tokens": map[string]any{"input_tokens": 1000},
+				"group_rate": 1, "model_rate": 2, "user_discount": 1, "subscription": subscription,
+			}
+			body[field] = 0
+			w := priceHandlerRequest(router, http.MethodPost, "/preview", body)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			var reply struct {
+				Data struct {
+					Charged float64               `json:"charged_amount"`
+					Cost    service.CostBreakdown `json:"cost"`
+				}
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &reply))
+			require.Positive(t, reply.Data.Cost.TotalCost)
+			require.Zero(t, reply.Data.Cost.ActualCost)
+			require.Zero(t, reply.Data.Charged)
+			body[field] = -1
+			w = priceHandlerRequest(router, http.MethodPost, "/preview", body)
+			require.Equal(t, http.StatusBadRequest, w.Code)
+		}
+	}
 }
 func TestModelPricingAdminListShowsActualTierAndSource(t *testing.T) {
 	_, _, _, router := modelPriceHandlerFixture(t)

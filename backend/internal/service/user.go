@@ -14,7 +14,7 @@ type User struct {
 	PasswordHash string
 	Role         string
 	Balance      float64
-	// PaygDiscountMultiplier discounts this user's balance billing across keys,
+	// PaygDiscountMultiplier discounts this user's balance and subscription billing across keys,
 	// groups, and upstream accounts. Nil in older auth cache entries means 1.
 	PaygDiscountMultiplier      *float64
 	PaygDiscountOverrideEnabled bool

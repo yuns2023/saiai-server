@@ -29,14 +29,16 @@ beforeEach(() => {
   history.mockResolvedValue([])
 })
 describe('Model pricing editor', () => {
-  it('preserves explicit free prices, inherits blank fields and keeps overall subscription factors unchanged', async () => {
+  it('preserves explicit free prices and previews subscription factors without saving simulated rates', async () => {
     const wrapper = mountView(); await flushPromises()
     expect(wrapper.text()).toContain('$10')
     await button(wrapper, 'common.edit').trigger('click')
-    expect(wrapper.get('#factor-user_discount').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#factor-group_rate').exists()).toBe(false)
+    expect(wrapper.find('#factor-user_discount').exists()).toBe(false)
+    await wrapper.get('#factor-model_rate').setValue('2')
     await wrapper.get('#price-cache_read').setValue('0')
     await button(wrapper, 'admin.modelPricing.calculate').trigger('click'); await flushPromises()
-    expect(preview).toHaveBeenCalledWith(expect.objectContaining({ override: { cache_read: 0 }, subscription: true, user_discount: 1 }))
+    expect(preview).toHaveBeenCalledWith(expect.objectContaining({ override: { cache_read: 0 }, subscription: true, group_rate: 1, model_rate: 2, user_discount: 1 }))
     expect(button(wrapper, 'common.save').attributes('disabled')).toBeUndefined()
     await button(wrapper, 'common.save').trigger('click'); await flushPromises()
     expect(update).toHaveBeenCalledWith({ model: 'model-a', alias: 'model-base', override: { cache_read: 0 }, expected_version: 'v1' })
@@ -51,6 +53,17 @@ describe('Model pricing editor', () => {
     resolve(cost); await flushPromises()
     expect(button(wrapper, 'common.save').attributes('disabled')).toBeDefined()
     expect(update).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('previews a free model in either billing mode with neutral group and user factors', async () => {
+    const wrapper = mountView(); await flushPromises(); await button(wrapper, 'common.edit').trigger('click')
+    await wrapper.get('#factor-model_rate').setValue('0')
+    await button(wrapper, 'admin.modelPricing.calculate').trigger('click'); await flushPromises()
+    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ subscription: true, group_rate: 1, model_rate: 0, user_discount: 1 }))
+    await wrapper.get('select[aria-label="admin.modelPricing.billingMode"]').setValue('false')
+    expect(button(wrapper, 'common.save').attributes('disabled')).toBeDefined()
+    await button(wrapper, 'admin.modelPricing.calculate').trigger('click'); await flushPromises()
+    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ subscription: false, group_rate: 1, model_rate: 0, user_discount: 1 }))
     wrapper.unmount()
   })
   it('reloads after a conflicting price edit without overwriting current prices', async () => {

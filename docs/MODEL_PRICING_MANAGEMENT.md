@@ -28,16 +28,20 @@ prices are independent from Standard overrides; Flex retains its existing
 Standard tier multiplier. Equal/free cache-write prices still keep separate
 5m/1h token accounting.
 
-Effective unit prices enter TotalCost (the platform base charge). Existing
-whole-request factors continue to determine ActualCost. Subscription quota
-uses TotalCost; balance billing and API-key monetary limits retain ActualCost.
-Subscription quota does not acquire a new group/model/user discount rule.
-An explicit group or user-specific group rate of zero makes ActualCost zero;
-it is not treated as an unset rate. TotalCost still records the base charge,
-and subscription quota continues to use TotalCost. This applies to text,
-long-context, image-token, per-image and video calculations. The system-default
+Effective unit prices enter TotalCost (the platform base charge). Whole-request
+factors determine ActualCost: the effective group/user-specific group rate,
+the billed-model rate, and the effective user discount. Balance billing,
+subscription window usage and API-key monetary limits all use ActualCost.
+Subscription and balance pricing share the same configuration; only the source
+of the charge differs. An explicit zero group, model or user factor makes the
+user charge zero, including subscription quota consumption, without falling
+back to wallet billing. TotalCost still records the base charge, and account
+quota continues to use TotalCost times the account rate. The system-default
 configuration helper retains its existing fallback to 1 for a non-positive
 default. Existing usage and balances are not recalculated by this change.
+Configured factors begin affecting new subscription requests when this version
+is deployed; existing non-1 group/model rates and user discounts also apply.
+No schema migration or historical quota backfill is required.
 Per-image, video and native Chat per-turn billing remain separate. The preview
 is a token-billing estimate and does not simulate account TTL overrides or
 Gemini endpoint-specific legacy long-context settings.
@@ -62,7 +66,10 @@ All routes require the existing administrator middleware and return no-store:
   requires reload/review; stale edits never overwrite newer runtime prices.
 - `POST /api/v1/admin/settings/model-pricing/preview`: calculate a detached
   candidate configuration without saving, touching the live cache, or sending
-  a provider request. Whole-request factors are explicit simulation inputs.
+  a provider request. The Web editor exposes only a model-rate simulation input, with group and
+  user factors fixed at 1 in either billing mode. It is excluded from
+  price-setting saves. The API still accepts explicit group and user factors
+  for a full billing simulation.
 - `GET /api/v1/admin/settings/model-pricing/history`: the latest 100 edits,
   including actor, timestamp, old/new aliases and old/new prices. Every edit
   also emits an audit log.

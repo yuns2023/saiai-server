@@ -156,7 +156,7 @@ func TestRecordChatGPTTurnUsageUsesSubscriptionCostContract(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, billingRepo.commands, 1)
-	require.InDelta(t, 0.04, billingRepo.commands[0].SubscriptionCost, 1e-12)
+	require.InDelta(t, 0.12, billingRepo.commands[0].SubscriptionCost, 1e-12)
 	require.Zero(t, billingRepo.commands[0].BalanceCost)
 	require.Equal(t, subscription.ID, *billingRepo.commands[0].SubscriptionID)
 	require.Len(t, usageRepo.logs, 1)

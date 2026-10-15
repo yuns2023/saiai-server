@@ -60,8 +60,8 @@
             <h3 class="font-medium">{{ t('admin.modelPricing.preview') }}</h3><p class="mt-1 text-xs text-gray-500">{{ t('admin.modelPricing.previewHint') }}</p>
             <div class="mt-3 grid gap-3 sm:grid-cols-2"><div v-for="field in standardFields" :key="field"><label class="input-label" :for="`tokens-${field}`">{{ fieldLabel(field) }} tokens</label><input :id="`tokens-${field}`" v-model.number="tokens[field]" type="number" min="0" max="1000000000" step="1" class="input" /></div></div>
             <div class="mt-3 flex flex-wrap gap-3"><select v-model="previewTier" class="input w-auto" :aria-label="t('admin.modelPricing.tier')"><option value="default">Standard</option><option value="priority">Fast / Priority</option><option value="flex">Flex</option></select><select v-model="subscription" class="input w-auto" :aria-label="t('admin.modelPricing.billingMode')"><option :value="true">{{ t('admin.modelPricing.subscription') }}</option><option :value="false">{{ t('admin.modelPricing.balance') }}</option></select></div>
-            <div class="mt-3 grid gap-3 sm:grid-cols-3"><div v-for="field in factorFields" :key="field"><label class="input-label" :for="`factor-${field}`">{{ t(`admin.modelPricing.${field}`) }}</label><input :id="`factor-${field}`" v-model.number="factors[field]" type="number" :min="field === 'group_rate' ? 0.0001 : 0" :max="field === 'user_discount' ? 1 : 100" step="0.0001" class="input" :disabled="subscription" /></div></div>
-            <p v-if="subscription" class="mt-2 text-xs text-gray-500">{{ t('admin.modelPricing.subscriptionHint') }}</p>
+            <div class="mt-3 sm:max-w-xs"><label class="input-label" for="factor-model_rate">{{ t('admin.modelPricing.model_rate') }}</label><input id="factor-model_rate" v-model.number="modelRate" type="number" min="0" max="100" step="0.0001" class="input" /></div>
+            <p class="mt-2 text-xs text-gray-500">{{ t('admin.modelPricing.subscriptionHint') }}</p>
             <button class="btn btn-secondary mt-3" :disabled="previewing || saving" @click="runPreview">{{ previewing ? t('common.loading') : t('admin.modelPricing.calculate') }}</button>
             <div v-if="currentPreview" class="mt-3 rounded-lg bg-gray-50 p-4 text-sm dark:bg-dark-900"><p class="mb-2 font-medium">{{ t('admin.modelPricing.contextMode') }}: {{ t(currentPreview.cost.pricing_snapshot.long_context?.applied ? 'usage.longContext' : 'admin.modelPricing.shortContext') }}</p><LongContextIndicator :info="currentPreview.cost.pricing_snapshot.long_context" detailed class="mb-3" /><dl class="grid gap-2 sm:grid-cols-2"><div>{{ t('admin.modelPricing.referenceCost') }}: <strong>{{ money(currentPreview.cost.pricing_snapshot.reference_total_cost) }}</strong></div><div>{{ t('admin.modelPricing.siteCost') }}: <strong>{{ money(currentPreview.cost.total_cost) }}</strong></div><div>{{ t('admin.modelPricing.charged') }}: <strong>{{ money(currentPreview.charged_amount) }}</strong></div><div>{{ t('admin.modelPricing.resolved') }}: <span class="font-mono">{{ currentPreview.cost.pricing_snapshot.resolved_model }}</span></div></dl></div>
             <p v-else class="mt-3 text-xs text-gray-500">{{ t('admin.modelPricing.reviewHint') }}</p>
@@ -90,7 +90,6 @@ import LongContextIndicator from '@/components/common/LongContextIndicator.vue'
 const { t } = useI18n()
 const appStore = useAppStore()
 const standardFields = priceFields.slice(0, 5)
-const factorFields = ['group_rate', 'model_rate', 'user_discount'] as const
 const items = ref<ModelPrice[]>([])
 const metadata = ref<PricingMetadata | null>(null)
 const search = ref('')
@@ -106,7 +105,7 @@ const selected = ref<ModelPrice | null>(null)
 const alias = ref('')
 const priceInputs = reactive<Record<string, string | number>>({})
 const tokens = reactive<Record<string, number>>({ input: 1000, output: 1000, cache_read: 1000, cache_write_5m: 1000, cache_write_1h: 1000 })
-const factors = reactive({ group_rate: 1, model_rate: 1, user_discount: 1 })
+const modelRate = ref(1)
 const subscription = ref(true)
 const previewTier = ref('default')
 const previewing = ref(false)
@@ -115,7 +114,7 @@ const result = ref<PricePreview | null>(null)
 const previewSignature = ref('')
 const showHistory = ref(false)
 const edits = ref<PriceEdit[]>([])
-const signature = computed(() => JSON.stringify([selected.value?.model, alias.value, priceInputs, tokens, factors, subscription.value, previewTier.value]))
+const signature = computed(() => JSON.stringify([selected.value?.model, alias.value, priceInputs, tokens, modelRate.value, subscription.value, previewTier.value]))
 const currentPreview = computed(() => previewSignature.value === signature.value ? result.value : null)
 const editorPolicy = computed(() => currentPreview.value?.cost.pricing_snapshot.effective ?? selected.value?.effective)
 const editorLongPrices = computed(() => currentPreview.value?.long_context_unit_prices ?? selected.value?.long_context_tiers?.[previewTier.value])
@@ -157,7 +156,7 @@ function overrides(): PriceOverride {
   return out
 }
 function previewInput(): PreviewInput {
-  return { model: selected.value!.model, alias: alias.value.trim(), override: overrides(), service_tier: previewTier.value, subscription: subscription.value, ...(subscription.value ? { group_rate: 1, model_rate: 1, user_discount: 1 } : factors),
+  return { model: selected.value!.model, alias: alias.value.trim(), override: overrides(), service_tier: previewTier.value, subscription: subscription.value, group_rate: 1, model_rate: modelRate.value, user_discount: 1,
     tokens: { input_tokens: tokens.input, output_tokens: tokens.output, cache_read_tokens: tokens.cache_read, cache_creation_5m_tokens: tokens.cache_write_5m, cache_creation_1h_tokens: tokens.cache_write_1h } }
 }
 async function runPreview() {

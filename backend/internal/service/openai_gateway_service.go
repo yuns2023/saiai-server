@@ -4594,7 +4594,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
 	}
-	modelRate, userDiscount := applyUserBillingFactors(cost, apiKey.Group, user, billingModel, isSubscriptionBilling)
+	modelRate, userDiscount := applyUserBillingFactors(cost, apiKey.Group, user, billingModel)
 
 	// Create usage log
 	durationMs := int(result.Duration.Milliseconds())

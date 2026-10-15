@@ -306,7 +306,7 @@ func (h *SettingHandler) PreviewModelPricing(c *gin.Context) {
 			return
 		}
 	}
-	if req.GroupRate <= 0 || req.UserDiscount > 1 {
+	if req.UserDiscount > 1 {
 		response.BadRequest(c, "Invalid overall multiplier")
 		return
 	}
@@ -322,15 +322,8 @@ func (h *SettingHandler) PreviewModelPricing(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	discount := req.UserDiscount
-	if req.Subscription {
-		discount = 1
-	}
-	cost.ActualCost *= req.ModelRate * discount
+	cost.ActualCost *= req.ModelRate * req.UserDiscount
 	quotaCost := cost.ActualCost
-	if req.Subscription {
-		quotaCost = cost.TotalCost
-	}
 	response.Success(c, gin.H{"cost": cost, "charged_amount": quotaCost, "subscription": req.Subscription, "unit_prices": gin.H{"reference": candidate.DisplayUnitPrices(cost.PricingSnapshot.Reference, tier), "effective": candidate.DisplayUnitPrices(cost.PricingSnapshot.Effective, tier)}, "long_context_unit_prices": gin.H{"reference": candidate.DisplayLongContextUnitPrices(cost.PricingSnapshot.Reference, tier), "effective": candidate.DisplayLongContextUnitPrices(cost.PricingSnapshot.Effective, tier)}})
 }
 

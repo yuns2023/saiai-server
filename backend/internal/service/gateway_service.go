@@ -9262,11 +9262,10 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 
 	// 1. 订阅 / 余额扣费
 	if p.IsSubscriptionBill {
-		if cost.TotalCost > 0 {
-			if err := deps.userSubRepo.IncrementUsage(billingCtx, p.Subscription.ID, cost.TotalCost); err != nil {
+		if cost.ActualCost > 0 {
+			if err := deps.userSubRepo.IncrementUsage(billingCtx, p.Subscription.ID, cost.ActualCost); err != nil {
 				slog.Error("increment subscription usage failed", "subscription_id", p.Subscription.ID, "error", err)
 			}
-			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, cost.TotalCost)
 		}
 	} else {
 		if cost.ActualCost > 0 {
@@ -9379,9 +9378,13 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.Model = billingModel
 	}
 
-	if p.IsSubscriptionBill && p.Subscription != nil && p.Cost.TotalCost > 0 {
-		cmd.SubscriptionID = &p.Subscription.ID
-		cmd.SubscriptionCost = p.Cost.TotalCost
+	if p.IsSubscriptionBill {
+		if p.Subscription != nil {
+			cmd.SubscriptionID = &p.Subscription.ID
+			if p.Cost.ActualCost > 0 {
+				cmd.SubscriptionCost = p.Cost.ActualCost
+			}
+		}
 	} else if p.Cost.ActualCost > 0 {
 		cmd.BalanceCost = p.Cost.ActualCost
 	}
@@ -9445,8 +9448,8 @@ func finalizePostUsageBilling(p *postUsageBillingParams, deps *billingDeps) {
 	}
 
 	if p.IsSubscriptionBill {
-		if p.Cost.TotalCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
-			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.TotalCost)
+		if p.Cost.ActualCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
+			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
 		}
 	} else if p.Cost.ActualCost > 0 && p.User != nil {
 		deps.billingCacheService.QueueDeductBalance(p.User.ID, p.Cost.ActualCost)
@@ -9611,7 +9614,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
 	}
-	modelRate, userDiscount := applyUserBillingFactors(cost, apiKey.Group, user, billingModel, isSubscriptionBilling)
+	modelRate, userDiscount := applyUserBillingFactors(cost, apiKey.Group, user, billingModel)
 
 	// 创建使用日志
 	durationMs := int(result.Duration.Milliseconds())
@@ -9807,7 +9810,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
 	}
-	modelRate, userDiscount := applyUserBillingFactors(cost, apiKey.Group, user, billingModel, isSubscriptionBilling)
+	modelRate, userDiscount := applyUserBillingFactors(cost, apiKey.Group, user, billingModel)
 
 	// 创建使用日志
 	durationMs := int(result.Duration.Milliseconds())
