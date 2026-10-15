@@ -1357,7 +1357,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.scheduling.openai_new_session_quota_guard_threshold_percent", 80.0)
 
 	// Pricing - 运行时远端源与镜像内 fallback 文件必须保持同源。
-	// 当前默认使用 LiteLLM 主分支价格表；仓库内 fallback 快照由 GitHub Actions 定时同步。
+	// 当前默认使用 LiteLLM 主分支价格表；GitHub Actions 定时检查 fallback 快照，更新需另行提交。
 	// 如果将来切到自建镜像/官方镜像，必须同时更新这里和 fallback 同步任务。
 	viper.SetDefault("pricing.remote_url", "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json")
 	viper.SetDefault("pricing.hash_url", "")

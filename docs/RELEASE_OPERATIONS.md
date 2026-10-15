@@ -23,6 +23,28 @@ stop `sub2api`, or require a maintenance page.
 
 ## Repository checks
 
+### Runtime pricing and bundled fallback checks
+
+Runtime pricing refreshes independently of the image's bundled fallback.
+By default the scheduler checks every 10 minutes. With no separate hash URL,
+it downloads the remote price table and compares content hashes; changed,
+valid data replaces the runtime table. The 24-hour setting controls the
+startup local-file age check, not the scheduler's refresh frequency.
+Existing data and bundled fallbacks provide recovery when loading remote
+data fails. This community reference feed is distinct from billing factors
+and configured price overrides.
+
+`Pricing Fallback Check` compares the repository's bundled JSON byte-for-byte
+with the mutable remote feed. A mismatch means that the bundled snapshot
+differs; it does not prove production's runtime pricing is stale. The workflow
+checks freshness but does not automatically commit updated snapshots.
+Inspect runtime update evidence separately before reporting a pricing outage.
+Refresh the fallback with `tools/pricing_fallback_sync.sh sync`, review its
+diff, and commit it as a separate pricing change when preparing a release.
+Required exact-commit checks still apply before production eligibility.
+
+### Code and release validation
+
 This repository is maintained by one operator, so a pull request is optional.
 An administrator may push a clean, linear commit directly to protected
 `main`. All required workflows then run for that exact SHA. A direct push is
