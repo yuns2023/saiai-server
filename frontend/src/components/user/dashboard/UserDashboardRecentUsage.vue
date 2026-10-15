@@ -27,7 +27,10 @@
               <span class="text-green-600 dark:text-green-400" :title="t('dashboard.actual')">${{ formatCost(log.actual_cost) }}</span>
               <span class="font-normal text-gray-400 dark:text-gray-500" :title="t('dashboard.standard')"> / ${{ formatCost(log.total_cost) }}</span>
             </p>
-            <p class="text-xs text-gray-500 dark:text-dark-400">{{ log.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : (log.input_tokens + log.output_tokens).toLocaleString() + ' tokens' }}</p>
+            <p v-if="log.billing_unit === 'turn'" class="text-xs text-gray-500 dark:text-dark-400">{{ t('usage.nativeChatUsageUnknown') }}</p>
+            <div v-else class="text-xs text-gray-500 dark:text-dark-400">
+              {{ t('tokens.total') }}: <TokenUsageSummary :data="log" compact :show-breakdown="false" class="inline-block" />
+            </div>
           </div>
         </div>
 
@@ -41,6 +44,7 @@
 </template>
 
 <script setup lang="ts">
+import TokenUsageSummary from '@/components/common/TokenUsageSummary.vue'
 import { useI18n } from 'vue-i18n'
 import type { RouteLocationRaw } from 'vue-router'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'

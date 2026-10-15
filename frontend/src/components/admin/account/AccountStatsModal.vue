@@ -191,9 +191,7 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{
                   t('admin.accounts.stats.tokens')
                 }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white">{{
-                  formatTokens(stats.summary.today?.tokens || 0)
-                }}</span>
+                <span class="text-sm font-semibold text-gray-900 dark:text-white"><TokenCount :value="stats.summary.today?.tokens || 0" /></span>
               </div>
             </div>
           </div>
@@ -304,17 +302,13 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{
                   t('admin.accounts.stats.totalTokens')
                 }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white">{{
-                  formatTokens(stats.summary.total_tokens)
-                }}</span>
+                <span class="text-sm font-semibold text-gray-900 dark:text-white"><TokenCount :value="stats.summary.total_tokens" /></span>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{
                   t('admin.accounts.stats.dailyAvgTokens')
                 }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white">{{
-                  formatTokens(Math.round(stats.summary.avg_daily_tokens))
-                }}</span>
+                <span class="text-sm font-semibold text-gray-900 dark:text-white"><TokenCount :value="Math.round(stats.summary.avg_daily_tokens)" /></span>
               </div>
             </div>
           </div>
@@ -376,9 +370,7 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{
                   t('admin.accounts.stats.todayTokens')
                 }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white">{{
-                  formatTokens(stats.summary.today?.tokens || 0)
-                }}</span>
+                <span class="text-sm font-semibold text-gray-900 dark:text-white"><TokenCount :value="stats.summary.today?.tokens || 0" /></span>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{
@@ -448,6 +440,7 @@
 </template>
 
 <script setup lang="ts">
+import TokenCount from '@/components/common/TokenCount.vue'
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -693,16 +686,6 @@ const formatNumber = (value: number): string => {
   return value.toLocaleString()
 }
 
-const formatTokens = (value: number): string => {
-  if (value >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(2)}B`
-  } else if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(2)}M`
-  } else if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(2)}K`
-  }
-  return value.toLocaleString()
-}
 
 const formatDuration = (ms: number): string => {
   if (ms >= 1000) {

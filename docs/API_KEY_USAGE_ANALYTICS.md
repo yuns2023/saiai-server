@@ -6,6 +6,26 @@ choose any naming convention for Key names.
 
 ## Dashboard filters
 
+All usage surfaces use the same Token presentation. Total Tokens includes
+uncached input, output, cache read and cache write; cache writes with 5-minute
+and 1-hour lifetimes are subcategories of cache write and are not added twice.
+Summary cards display all four categories, including zeros. Recent-record totals
+also include both cache categories. Native Chat turn records without measured
+Token usage continue to show an unavailable value rather than an invented zero.
+
+Compact Token values use decimal K/M/B with at most two decimal places and no
+trailing zeros. Card and table counts provide exact comma-separated integers
+on hover, keyboard focus or tap. Chart axes use the same compact formatter;
+chart tooltips use exact integers. Compact values are rounded and are not used
+to reconcile sums. The server's integer aggregates remain authoritative.
+
+User usage statistics now expose `total_cache_creation_tokens` and
+`total_cache_read_tokens` alongside the compatible `total_cache_tokens` sum.
+The public Key lookup's `usage.range` likewise exposes `cache_creation_tokens`
+and `cache_read_tokens` while retaining `cache_tokens`. These are additive
+reporting fields from existing usage records; no schema or billing change is
+required.
+
 These authenticated user endpoints accept an optional owned `api_key_id`:
 
 - `GET /api/v1/usage/dashboard/stats`

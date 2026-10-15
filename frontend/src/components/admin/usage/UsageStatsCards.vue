@@ -13,17 +13,9 @@
     <div class="card p-4 flex items-center gap-3">
       <div class="rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30 text-amber-600"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg></div>
       <div>
-        <p class="text-xs font-medium text-gray-500">{{ t('usage.totalTokens') }}</p>
-        <p class="text-xl font-bold">{{ formatTokens(stats?.total_tokens || 0) }}</p>
-        <p class="text-xs text-gray-500">
-          {{ t('usage.in') }}: {{ formatTokens(stats?.total_input_tokens || 0) }} /
-          {{ t('usage.out') }}: {{ formatTokens(stats?.total_output_tokens || 0) }}
-        </p>
-        <p class="text-xs text-gray-400">
-          {{ t('usage.cacheWrite') }}: {{ formatTokens(stats?.total_cache_creation_tokens || 0) }} /
-          {{ t('usage.cacheRead') }}: {{ formatTokens(stats?.total_cache_read_tokens || 0) }}
-          <span v-if="cacheShare > 0">· {{ t('usage.cacheShare') }} {{ cacheShare.toFixed(1) }}%</span>
-        </p>
+        <p class="text-xs font-medium text-gray-500">{{ t('tokens.total') }}</p>
+        <TokenUsageSummary :data="stats" period="total" />
+        <p v-if="cacheShare > 0" class="text-xs text-gray-400">{{ t('usage.cacheShare') }} {{ cacheShare.toFixed(1) }}%</p>
       </div>
     </div>
     <div class="card p-4 flex items-center gap-3">
@@ -55,6 +47,7 @@
 </template>
 
 <script setup lang="ts">
+import TokenUsageSummary from '@/components/common/TokenUsageSummary.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
@@ -73,10 +66,4 @@ const cacheShare = computed(() => {
 const formatDuration = (ms: number) =>
   ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`
 
-const formatTokens = (value: number) => {
-  if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B'
-  if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M'
-  if (value >= 1e3) return (value / 1e3).toFixed(2) + 'K'
-  return value.toLocaleString()
-}
 </script>

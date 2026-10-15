@@ -70,7 +70,7 @@ describe('KeyUsageView', () => {
           days_remaining: 12,
         },
         usage: {
-          range: { requests: 1, input_tokens: 10, output_tokens: 5, cache_tokens: 2, total_tokens: 17, actual_cost: 0.2, average_duration_ms: 100 },
+          range: { requests: 1, input_tokens: 10, output_tokens: 5, cache_creation_tokens: 2, cache_read_tokens: 0, cache_tokens: 2, total_tokens: 17, actual_cost: 0.2, average_duration_ms: 100 },
           rpm: 1,
           tpm: 17,
         },
@@ -166,7 +166,7 @@ describe('KeyUsageView', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('usage.nativeChatTurn')
     expect(wrapper.text()).toContain('usage.nativeChatImagesObserved')
-    expect(wrapper.findAll('td').filter(cell => cell.text() === '—')).toHaveLength(4)
+    expect(wrapper.findAll('td').filter(cell => cell.text() === '—')).toHaveLength(5)
     wrapper.unmount()
   })
 

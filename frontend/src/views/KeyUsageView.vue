@@ -280,6 +280,10 @@
             <div class="px-8 py-5 border-b border-gray-200 dark:border-dark-700">
               <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.tokenStats') }}</h3>
             </div>
+            <div class="px-6 py-4 border-b border-gray-100 dark:border-dark-800">
+              <p class="text-xs text-gray-500 dark:text-dark-400 mb-1">{{ t('tokens.total') }}</p>
+              <TokenUsageSummary :data="usageTokenRange" />
+            </div>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-px bg-gray-100 dark:bg-dark-800">
               <div
                 v-for="(cell, i) in usageStatCells"
@@ -306,11 +310,11 @@
                   <tr class="border-b border-gray-200 bg-gray-50 dark:border-dark-700 dark:bg-dark-950">
                     <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.model') }}</th>
                     <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.requests') }}</th>
-                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.inputTokens') }}</th>
-                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.outputTokens') }}</th>
-                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.cacheCreationTokens') }}</th>
-                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.cacheReadTokens') }}</th>
-                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.totalTokens') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('tokens.input') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('tokens.output') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('tokens.cacheRead') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('tokens.cacheWrite') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('tokens.total') }}</th>
                     <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.cost') }}</th>
                   </tr>
                 </thead>
@@ -322,11 +326,11 @@
                   >
                     <td class="px-4 py-3 text-sm font-medium whitespace-nowrap text-gray-900 dark:text-white">{{ m.model || '-' }}</td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(m.requests) }}</td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(m.input_tokens) }}</td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(m.output_tokens) }}</td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(m.cache_creation_tokens) }}</td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(m.cache_read_tokens) }}</td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ fmtNum(m.total_tokens) }}</td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><TokenCount :value="m.input_tokens" :label="t('tokens.input')" /></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><TokenCount :value="m.output_tokens" :label="t('tokens.output')" /></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><TokenCount :value="m.cache_read_tokens" :label="t('tokens.cacheRead')" /></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><TokenCount :value="m.cache_creation_tokens" :label="t('tokens.cacheWrite')" /></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><TokenCount :value="m.total_tokens" :label="t('tokens.total')" /></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right font-medium text-gray-900 dark:text-white">{{ usd(m.actual_cost != null ? m.actual_cost : m.cost) }}</td>
                   </tr>
                 </tbody>
@@ -349,17 +353,18 @@
                     <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.time') }}</th>
                     <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.model') }}</th>
                     <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.requestType') }}</th>
-                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.inputTokens') }}</th>
-                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.outputTokens') }}</th>
-                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.cacheTokens') }}</th>
-                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.totalTokens') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('tokens.input') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('tokens.output') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('tokens.cacheRead') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('tokens.cacheWrite') }}</th>
+                    <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('tokens.total') }}</th>
                     <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.cost') }}</th>
                     <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-400">{{ t('keyUsage.duration') }}</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-if="recentUsageRecords.length === 0">
-                    <td colspan="9" class="px-4 py-8 text-center text-sm text-gray-500 dark:text-dark-400">
+                    <td colspan="10" class="px-4 py-8 text-center text-sm text-gray-500 dark:text-dark-400">
                       {{ t('keyUsage.noRecentUsage') }}
                     </td>
                   </tr>
@@ -377,10 +382,11 @@
                         <div v-if="record.image_count > 0">{{ record.image_size === 'mixed' ? t('usage.imageSizeMixed') : record.image_size || t('usage.imageSizeUnknown') }}</div>
                       </div>
                     </td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.input_tokens) }}</span></td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.output_tokens) }}</span></td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.cache_creation_tokens + record.cache_read_tokens) }}</span></td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined">{{ record.billing_unit === 'turn' ? '—' : fmtNum(record.total_tokens) }}</span></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined"><template v-if="record.billing_unit === 'turn'">—</template><TokenCount v-else :value="record.input_tokens" :label="t('tokens.input')" /></span></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined"><template v-if="record.billing_unit === 'turn'">—</template><TokenCount v-else :value="record.output_tokens" :label="t('tokens.output')" /></span></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined"><template v-if="record.billing_unit === 'turn'">—</template><TokenCount v-else :value="record.cache_read_tokens" :label="t('tokens.cacheRead')" /></span></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined"><template v-if="record.billing_unit === 'turn'">—</template><TokenCount v-else :value="record.cache_creation_tokens" :label="t('tokens.cacheWrite')" /></span></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined"><template v-if="record.billing_unit === 'turn'">—</template><TokenCount v-else :value="record.total_tokens" :label="t('tokens.total')" /></span></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right font-medium text-gray-900 dark:text-white">{{ usd(record.actual_cost) }}<NativeChatCharges :record="record" /></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ record.duration_ms != null ? `${record.duration_ms} ms` : '-' }}</td>
                   </tr>
@@ -431,6 +437,8 @@
 </template>
 
 <script setup lang="ts">
+import TokenCount from '@/components/common/TokenCount.vue'
+import TokenUsageSummary from '@/components/common/TokenUsageSummary.vue'
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
@@ -898,6 +906,8 @@ interface StatCell {
   value: string
 }
 
+const usageTokenRange = computed(() => resultData.value?.usage?.range || resultData.value?.usage?.today || {})
+
 const usageStatCells = computed<StatCell[]>(() => {
   const usage = resultData.value?.usage
   if (!usage) return []
@@ -906,10 +916,6 @@ const usageStatCells = computed<StatCell[]>(() => {
 
   return [
     { label: t('keyUsage.rangeRequests'), value: fmtNum(range.requests) },
-    { label: t('keyUsage.rangeInputTokens'), value: fmtNum(range.input_tokens) },
-    { label: t('keyUsage.rangeOutputTokens'), value: fmtNum(range.output_tokens) },
-    { label: t('keyUsage.rangeCacheTokens'), value: fmtNum(range.cache_tokens ?? ((range.cache_creation_tokens || 0) + (range.cache_read_tokens || 0))) },
-    { label: t('keyUsage.rangeTotalTokens'), value: fmtNum(range.total_tokens) },
     { label: t('keyUsage.rangeCost'), value: usd(range.actual_cost) },
     { label: t('keyUsage.avgDuration'), value: range.average_duration_ms ? `${Math.round(range.average_duration_ms)} ms` : '-' },
     { label: t('keyUsage.rpmTpm'), value: `${usage.rpm || 0} / ${usage.tpm || 0}` },

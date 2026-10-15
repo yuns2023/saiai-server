@@ -1600,14 +1600,16 @@ func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64, sta
 	}
 	if stats, err := h.usageService.GetStatsByAPIKey(ctx, apiKeyID, startTime, endTime); err == nil && stats != nil {
 		data["range"] = gin.H{
-			"requests":            stats.TotalRequests,
-			"input_tokens":        stats.TotalInputTokens,
-			"output_tokens":       stats.TotalOutputTokens,
-			"cache_tokens":        stats.TotalCacheTokens,
-			"total_tokens":        stats.TotalTokens,
-			"cost":                stats.TotalCost,
-			"actual_cost":         stats.TotalActualCost,
-			"average_duration_ms": stats.AverageDurationMs,
+			"requests":              stats.TotalRequests,
+			"input_tokens":          stats.TotalInputTokens,
+			"output_tokens":         stats.TotalOutputTokens,
+			"cache_tokens":          stats.TotalCacheTokens,
+			"cache_creation_tokens": stats.TotalCacheCreationTokens,
+			"cache_read_tokens":     stats.TotalCacheReadTokens,
+			"total_tokens":          stats.TotalTokens,
+			"cost":                  stats.TotalCost,
+			"actual_cost":           stats.TotalActualCost,
+			"average_duration_ms":   stats.AverageDurationMs,
 		}
 	}
 	if len(data) == 0 {

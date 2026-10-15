@@ -80,7 +80,7 @@ describe('GroupDistributionChart', () => {
       raw: 1200,
       dataset: { data: [1200, 600] },
     })
-    expect(label).toBe('group-a: 1.20K (66.7%)')
+    expect(label).toBe('group-a: 1,200 (66.7%)')
   })
 
   it('uses actual_cost and reorders rows in actual cost mode', () => {

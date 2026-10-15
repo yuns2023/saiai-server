@@ -4,6 +4,7 @@
  */
 
 import { i18n, getLocale } from '@/i18n'
+import { formatTokenCount } from './usageTokens'
 
 /**
  * 格式化相对时间
@@ -242,14 +243,12 @@ export function formatCostFixed(amount: number, fractionDigits: number = 4): str
 }
 
 /**
- * 格式化 token 数量（>=1M 显示为 M，>=1K 显示为 K，保留 1 位小数）
+ * 格式化 Token 数量（K/M/B，最多两位小数，去掉末尾的 0）
  * @param tokens token 数量
  * @returns 格式化后的字符串，如 "950", "1.2K", "3.5M"
  */
 export function formatTokensK(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
-  if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`
-  return tokens.toString()
+  return formatTokenCount(tokens)
 }
 
 /**

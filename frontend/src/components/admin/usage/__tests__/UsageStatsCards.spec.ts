@@ -4,6 +4,10 @@ import { mount } from '@vue/test-utils'
 import UsageStatsCards from '../UsageStatsCards.vue'
 
 const messages: Record<string, string> = {
+  'tokens.input': 'Uncached input',
+  'tokens.output': 'Output',
+  'tokens.cacheWrite': 'Cache write',
+  'tokens.cacheRead': 'Cache read',
   'usage.totalRequests': 'Total Requests',
   'usage.totalTokens': 'Total Tokens',
   'usage.in': 'In',

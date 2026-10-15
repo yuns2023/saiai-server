@@ -19,6 +19,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatTokenCount as formatTokens, formatExactTokens } from '@/utils/usageTokens'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -61,10 +62,10 @@ const isDarkMode = computed(() => {
 const chartColors = computed(() => ({
   text: isDarkMode.value ? '#e5e7eb' : '#374151',
   grid: isDarkMode.value ? '#374151' : '#e5e7eb',
-  input: '#3b82f6',
-  output: '#10b981',
+  input: '#10b981',
+  output: '#8b5cf6',
   cacheCreation: '#f59e0b',
-  cacheRead: '#06b6d4'
+  cacheRead: '#0ea5e9'
 }))
 
 const chartData = computed(() => {
@@ -74,7 +75,7 @@ const chartData = computed(() => {
     labels: props.trendData.map((d) => d.date),
     datasets: [
       {
-        label: 'Input',
+        label: t('tokens.input'),
         data: props.trendData.map((d) => d.input_tokens),
         borderColor: chartColors.value.input,
         backgroundColor: `${chartColors.value.input}20`,
@@ -82,7 +83,7 @@ const chartData = computed(() => {
         tension: 0.3
       },
       {
-        label: 'Output',
+        label: t('tokens.output'),
         data: props.trendData.map((d) => d.output_tokens),
         borderColor: chartColors.value.output,
         backgroundColor: `${chartColors.value.output}20`,
@@ -90,18 +91,18 @@ const chartData = computed(() => {
         tension: 0.3
       },
       {
-        label: 'Cache Creation',
-        data: props.trendData.map((d) => d.cache_creation_tokens),
-        borderColor: chartColors.value.cacheCreation,
-        backgroundColor: `${chartColors.value.cacheCreation}20`,
+        label: t('tokens.cacheRead'),
+        data: props.trendData.map((d) => d.cache_read_tokens),
+        borderColor: chartColors.value.cacheRead,
+        backgroundColor: `${chartColors.value.cacheRead}20`,
         fill: true,
         tension: 0.3
       },
       {
-        label: 'Cache Read',
-        data: props.trendData.map((d) => d.cache_read_tokens),
-        borderColor: chartColors.value.cacheRead,
-        backgroundColor: `${chartColors.value.cacheRead}20`,
+        label: t('tokens.cacheWrite'),
+        data: props.trendData.map((d) => d.cache_creation_tokens),
+        borderColor: chartColors.value.cacheCreation,
+        backgroundColor: `${chartColors.value.cacheCreation}20`,
         fill: true,
         tension: 0.3
       }
@@ -132,7 +133,7 @@ const lineOptions = computed(() => ({
     tooltip: {
       callbacks: {
         label: (context: any) => {
-          return `${context.dataset.label}: ${formatTokens(context.raw)}`
+          return `${context.dataset.label}: ${formatExactTokens(context.raw)}`
         },
         footer: (tooltipItems: any) => {
           const dataIndex = tooltipItems[0]?.dataIndex
@@ -172,16 +173,6 @@ const lineOptions = computed(() => ({
   }
 }))
 
-const formatTokens = (value: number): string => {
-  if (value >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(2)}B`
-  } else if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(2)}M`
-  } else if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(2)}K`
-  }
-  return value.toLocaleString()
-}
 
 const formatCost = (value: number): string => {
   if (value >= 1000) {

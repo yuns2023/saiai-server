@@ -1,4 +1,14 @@
 export default {
+  tokens: {
+    total: '总 Token（含缓存）',
+    included: '含缓存',
+    input: '非缓存输入',
+    output: '输出',
+    cacheRead: '缓存读取',
+    cacheWrite: '缓存写入',
+    formula: '总 Token = 非缓存输入 + 输出 + 缓存读取 + 缓存写入。',
+    roundingHint: '简写数值经四舍五入，精确核对请使用以上整数。'
+  },
   maintenance: {
     title: '系统维护中',
     defaultMessage: '系统正在升级维护，请稍候再试。'

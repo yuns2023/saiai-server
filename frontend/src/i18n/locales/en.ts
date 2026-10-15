@@ -1,4 +1,14 @@
 export default {
+  tokens: {
+    total: 'Total Tokens (including cache)',
+    included: 'including cache',
+    input: 'Uncached input',
+    output: 'Output',
+    cacheRead: 'Cache read',
+    cacheWrite: 'Cache write',
+    formula: 'Total Tokens = uncached input + output + cache read + cache write.',
+    roundingHint: 'Compact values are rounded. Use the integers above for exact reconciliation.'
+  },
   maintenance: {
     title: 'System Maintenance',
     defaultMessage: 'The system is being upgraded. Please try again later.'

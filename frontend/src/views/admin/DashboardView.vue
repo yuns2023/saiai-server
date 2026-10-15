@@ -105,11 +105,9 @@
               </div>
               <div>
                 <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                  {{ t('admin.dashboard.todayTokens') }}
+                  {{ t('admin.dashboard.todayTokens') }} ({{ t('tokens.included') }})
                 </p>
-                <p class="text-xl font-bold text-gray-900 dark:text-white">
-                  {{ formatTokens(stats.today_tokens) }}
-                </p>
+                <TokenUsageSummary :data="stats" period="today" />
                 <p class="text-xs">
                   <span
                     class="text-amber-600 dark:text-amber-400"
@@ -135,11 +133,9 @@
               </div>
               <div>
                 <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                  {{ t('admin.dashboard.totalTokens') }}
+                  {{ t('admin.dashboard.totalTokens') }} ({{ t('tokens.included') }})
                 </p>
-                <p class="text-xl font-bold text-gray-900 dark:text-white">
-                  {{ formatTokens(stats.total_tokens) }}
-                </p>
+                <TokenUsageSummary :data="stats" period="total" />
                 <p class="text-xs">
                   <span
                     class="text-indigo-600 dark:text-indigo-400"
@@ -169,13 +165,13 @@
                 </p>
                 <div class="flex items-baseline gap-2">
                   <p class="text-xl font-bold text-gray-900 dark:text-white">
-                    {{ formatTokens(stats.rpm) }}
+                    {{ formatNumber(stats.rpm) }}
                   </p>
                   <span class="text-xs text-gray-500 dark:text-gray-400">RPM</span>
                 </div>
                 <div class="flex items-baseline gap-2">
                   <p class="text-sm font-semibold text-violet-600 dark:text-violet-400">
-                    {{ formatTokens(stats.tpm) }}
+                    <TokenCount :value="stats.tpm" label="TPM" />
                   </p>
                   <span class="text-xs text-gray-500 dark:text-gray-400">TPM</span>
                 </div>
@@ -283,6 +279,9 @@
 </template>
 
 <script setup lang="ts">
+import TokenCount from '@/components/common/TokenCount.vue'
+import { formatTokenCount as formatTokens, formatExactTokens } from '@/utils/usageTokens'
+import TokenUsageSummary from '@/components/common/TokenUsageSummary.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -460,7 +459,7 @@ const lineOptions = computed(() => ({
       },
       callbacks: {
         label: (context: any) => {
-          return `${context.dataset.label}: ${formatTokens(context.raw)}`
+          return `${context.dataset.label}: ${formatExactTokens(context.raw)}`
         }
       }
     }
@@ -555,17 +554,6 @@ const userTrendChartData = computed(() => {
 })
 
 // Format helpers
-const formatTokens = (value: number | undefined): string => {
-  if (value === undefined || value === null) return '0'
-  if (value >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(2)}B`
-  } else if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(2)}M`
-  } else if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(2)}K`
-  }
-  return value.toLocaleString()
-}
 
 const formatNumber = (value: number): string => {
   return value.toLocaleString()

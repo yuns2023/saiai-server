@@ -41,8 +41,8 @@
         <p class="mt-1 font-semibold text-gray-900 dark:text-white">{{ formatNumber(summary.requests) }}</p>
       </div>
       <div>
-        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.tokens') }}</p>
-        <p class="mt-1 font-semibold text-gray-900 dark:text-white">{{ formatTokens(summary.total_tokens) }}</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('tokens.total') }}</p>
+        <p class="mt-1 font-semibold text-gray-900 dark:text-white"><TokenCount :value="summary.total_tokens" /></p>
       </div>
       <div>
         <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.actualCost') }}</p>
@@ -66,7 +66,7 @@
             <th class="px-6 py-3 text-left font-medium">{{ t('dashboard.apiKey') }}</th>
             <th class="px-4 py-3 text-left font-medium">{{ t('dashboard.status') }}</th>
             <th class="px-4 py-3 text-right font-medium">{{ t('dashboard.requests') }}</th>
-            <th class="px-4 py-3 text-right font-medium">{{ t('dashboard.tokens') }}</th>
+            <th class="px-4 py-3 text-right font-medium">{{ t('tokens.total') }}</th>
             <th class="px-4 py-3 text-right font-medium">{{ t('dashboard.actualCost') }}</th>
             <th class="px-4 py-3 text-right font-medium">{{ t('dashboard.usageShare') }}</th>
             <th class="px-4 py-3 text-left font-medium">{{ t('dashboard.lastUsed') }}</th>
@@ -86,17 +86,7 @@
               {{ formatNumber(item.requests) }}
             </td>
             <td class="px-4 py-3 text-right">
-              <div class="font-medium tabular-nums text-gray-700 dark:text-gray-300">
-                {{ formatTokens(item.total_tokens) }}
-              </div>
-              <div class="text-xs tabular-nums text-gray-400">
-                {{ t('dashboard.input') }} {{ formatTokens(item.input_tokens) }} /
-                {{ t('dashboard.output') }} {{ formatTokens(item.output_tokens) }}
-              </div>
-              <div class="text-xs tabular-nums text-gray-400">
-                {{ t('dashboard.cacheWrite') }} {{ formatTokens(item.cache_creation_tokens) }} /
-                {{ t('dashboard.cacheRead') }} {{ formatTokens(item.cache_read_tokens) }}
-              </div>
+              <TokenUsageSummary :data="item" compact />
             </td>
             <td class="px-4 py-3 text-right">
               <div class="font-medium tabular-nums text-green-600 dark:text-green-400">
@@ -144,6 +134,8 @@
 </template>
 
 <script setup lang="ts">
+import TokenUsageSummary from '@/components/common/TokenUsageSummary.vue'
+import TokenCount from '@/components/common/TokenCount.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { RouteLocationRaw } from 'vue-router'
@@ -202,12 +194,6 @@ const onSortChange = (value: string | number | boolean | null) => {
 const formatNumber = (value: number) => value.toLocaleString()
 const formatCost = (value: number) => value.toFixed(4)
 const formatPercent = (value: number) => `${(value * 100).toFixed(1)}%`
-const formatTokens = (value: number) => {
-  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
-  return value.toLocaleString()
-}
 
 const statusClass = (status: string) => {
   if (status === 'active') return 'badge-success'
