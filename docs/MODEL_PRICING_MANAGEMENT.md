@@ -32,6 +32,12 @@ Effective unit prices enter TotalCost (the platform base charge). Existing
 whole-request factors continue to determine ActualCost. Subscription quota
 uses TotalCost; balance billing and API-key monetary limits retain ActualCost.
 Subscription quota does not acquire a new group/model/user discount rule.
+An explicit group or user-specific group rate of zero makes ActualCost zero;
+it is not treated as an unset rate. TotalCost still records the base charge,
+and subscription quota continues to use TotalCost. This applies to text,
+long-context, image-token, per-image and video calculations. The system-default
+configuration helper retains its existing fallback to 1 for a non-positive
+default. Existing usage and balances are not recalculated by this change.
 Per-image, video and native Chat per-turn billing remain separate. The preview
 is a token-billing estimate and does not simulate account TTL overrides or
 Gemini endpoint-specific legacy long-context settings.

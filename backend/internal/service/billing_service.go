@@ -370,7 +370,7 @@ func (s *BillingService) CalculateImageTokenCost(model string, tokens ImageUsage
 		OutputCost: float64(tokens.ImageOutputTokens) * pricing.OutputImagePricePerToken,
 	}
 	breakdown.TotalCost = breakdown.InputCost + breakdown.OutputCost
-	if rateMultiplier <= 0 {
+	if rateMultiplier < 0 {
 		rateMultiplier = 1
 	}
 	breakdown.ActualCost = breakdown.TotalCost * rateMultiplier
@@ -485,7 +485,8 @@ func (s *BillingService) calculateTokenCost(tokens UsageTokens, rateMultiplier f
 		breakdown.CacheCreationCost + breakdown.CacheReadCost
 
 	// 应用倍率计算实际费用
-	if rateMultiplier <= 0 {
+	// 显式 0 倍率表示免费；仅负数沿用无效倍率的回退行为。
+	if rateMultiplier < 0 {
 		rateMultiplier = 1.0
 	}
 	breakdown.ActualCost = breakdown.TotalCost * rateMultiplier
@@ -772,7 +773,7 @@ func (s *BillingService) CalculateImageCost(model string, imageSize string, imag
 	totalCost := unitPrice * float64(imageCount)
 
 	// 应用倍率
-	if rateMultiplier <= 0 {
+	if rateMultiplier < 0 {
 		rateMultiplier = 1.0
 	}
 	actualCost := totalCost * rateMultiplier
@@ -804,7 +805,7 @@ func (s *BillingService) CalculateSoraImageCost(imageSize string, imageCount int
 	}
 
 	totalCost := unitPrice * float64(imageCount)
-	if rateMultiplier <= 0 {
+	if rateMultiplier < 0 {
 		rateMultiplier = 1.0
 	}
 	actualCost := totalCost * rateMultiplier
@@ -831,7 +832,7 @@ func (s *BillingService) CalculateSoraVideoCost(model string, groupConfig *SoraP
 	}
 
 	totalCost := unitPrice
-	if rateMultiplier <= 0 {
+	if rateMultiplier < 0 {
 		rateMultiplier = 1.0
 	}
 	actualCost := totalCost * rateMultiplier

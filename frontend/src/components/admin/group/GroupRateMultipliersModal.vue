@@ -63,7 +63,7 @@
           <button
             type="button"
             class="btn btn-primary shrink-0"
-            :disabled="!selectedUser || !newRate"
+            :disabled="!selectedUser || !isValidRate(newRate)"
             @click="handleAddLocal"
           >
             {{ t('common.add') }}
@@ -87,7 +87,7 @@
             <button
               type="button"
               class="btn btn-primary btn-sm shrink-0 px-2.5 py-1 text-xs"
-              :disabled="!batchFactor || batchFactor <= 0"
+              :disabled="!isValidRate(batchFactor)"
               @click="applyBatchFactor"
             >
               {{ t('admin.groups.applyMultiplier') }}
@@ -170,7 +170,7 @@
                         autocomplete="off"
                         :value="entry.rate_multiplier"
                         class="hide-spinner w-20 rounded-sm border border-gray-200 bg-white px-2 py-1 text-center text-sm font-medium transition-colors focus:border-primary-500 focus:outline-hidden focus:ring-1 focus:ring-primary-500/20 dark:border-dark-500 dark:bg-dark-700 dark:focus:border-primary-500"
-                        @change="updateLocalRate(entry.user_id, ($event.target as HTMLInputElement).value)"
+                        @input="updateLocalRate(entry.user_id, ($event.target as HTMLInputElement).value)"
                       />
                     </td>
                     <td v-if="showFinalRate" class="whitespace-nowrap px-3 py-2 font-medium text-primary-600 dark:text-primary-400">
@@ -280,6 +280,10 @@ const batchFactor = ref<number | null>(null)
 
 let searchTimeout: ReturnType<typeof setTimeout>
 
+const isValidRate = (value: unknown): value is number => {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
 const platformColorClass = computed(() => {
   switch (props.group?.platform) {
     case 'anthropic': return 'text-orange-700 dark:text-orange-400'
@@ -291,12 +295,12 @@ const platformColorClass = computed(() => {
 
 // 是否显示"最终倍率"预览列
 const showFinalRate = computed(() => {
-  return batchFactor.value != null && batchFactor.value > 0 && batchFactor.value !== 1
+  return isValidRate(batchFactor.value) && batchFactor.value !== 1
 })
 
 // 计算最终倍率预览
 const computeFinalRate = (rate: number) => {
-  if (!batchFactor.value) return rate
+  if (!isValidRate(batchFactor.value)) return rate
   return parseFloat((rate * batchFactor.value).toFixed(6))
 }
 
@@ -386,7 +390,7 @@ const selectUser = (user: AdminUser) => {
 
 // 本地添加（或覆盖已有用户）
 const handleAddLocal = () => {
-  if (!selectedUser.value || !newRate.value) return
+  if (!selectedUser.value || !isValidRate(newRate.value)) return
   const user = selectedUser.value
   const idx = localEntries.value.findIndex(e => e.user_id === user.id)
   const entry: LocalEntry = {
@@ -410,8 +414,9 @@ const handleAddLocal = () => {
 
 // 本地修改倍率
 const updateLocalRate = (userId: number, value: string) => {
-  const num = parseFloat(value)
-  if (isNaN(num)) return
+  if (!value.trim()) return
+  const num = Number(value)
+  if (!isValidRate(num)) return
   const entry = localEntries.value.find(e => e.user_id === userId)
   if (entry) {
     entry.rate_multiplier = num
@@ -426,7 +431,7 @@ const removeLocal = (userId: number) => {
 
 // 批量乘数应用到本地
 const applyBatchFactor = () => {
-  if (!batchFactor.value || batchFactor.value <= 0) return
+  if (!isValidRate(batchFactor.value)) return
   for (const entry of localEntries.value) {
     entry.rate_multiplier = parseFloat((entry.rate_multiplier * batchFactor.value).toFixed(6))
   }

@@ -49,6 +49,38 @@ func newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo UsageLogReposi
 	return svc
 }
 
+func TestGatewayServiceRecordUsage_ZeroUserGroupRateDoesNotCharge(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	rate := 0.0
+	rateRepo := &userGroupRateResolverRepoStub{rate: &rate}
+	svc.userGroupRateResolver = newUserGroupRateResolver(rateRepo, nil, time.Minute, nil, "service.test")
+	groupID := int64(202)
+	// Repeat to cover both the database load and the cached explicit zero.
+	for _, requestID := range []string{"zero-rate-load", "zero-rate-cache"} {
+		err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+			Result: &ForwardResult{
+				RequestID: requestID, Model: "claude-sonnet-4", Duration: time.Second,
+				Usage: ClaudeUsage{InputTokens: 1000, OutputTokens: 500},
+			},
+			APIKey: &APIKey{ID: 501, Quota: 100, GroupID: &groupID, Group: &Group{ID: groupID, RateMultiplier: 1.5}},
+			User:   &User{ID: 601}, Account: &Account{ID: 701},
+			APIKeyService: &openAIRecordUsageAPIKeyQuotaStub{},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, billingRepo.lastCmd)
+		require.Zero(t, billingRepo.lastCmd.BalanceCost)
+		require.Zero(t, billingRepo.lastCmd.APIKeyQuotaCost)
+		require.Zero(t, billingRepo.lastCmd.APIKeyRateLimitCost)
+		require.NotNil(t, usageRepo.lastLog)
+		require.Positive(t, usageRepo.lastLog.TotalCost)
+		require.Zero(t, usageRepo.lastLog.RateMultiplier)
+		require.Zero(t, usageRepo.lastLog.ActualCost)
+	}
+	require.Equal(t, 1, rateRepo.calls)
+}
+
 type openAIRecordUsageBestEffortLogRepoStub struct {
 	UsageLogRepository
 
