@@ -2147,6 +2147,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	isCodexCLI := officialCodexClient
 	strictNativeOAuth := account.Type == AccountTypeOAuth && officialCodexClient
 	strictNativeRequest := strictNativeOAuth || nativeRelay
+	// Native Responses API-key requests have the same body-preservation contract.
+	// Keep this separate from OAuth admission and account-ownership checks.
+	preserveRequestBody := strictNativeRequest || (account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey)
 	nativeBodyDigest := sha256.Sum256(body)
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	clientTransport := GetOpenAIClientTransport(c)
@@ -2270,7 +2273,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	mappedModel := reqModel
 
 	// 规范化 reasoning.effort 参数（minimal -> none），与上游允许值对齐。
-	if !strictNativeRequest {
+	if !preserveRequestBody {
 		if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
 			if effort, ok := reasoning["effort"].(string); ok && effort == "minimal" {
 				reasoning["effort"] = "none"
@@ -2309,7 +2312,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	// Handle max_output_tokens based on platform and account type
-	if !isCodexCLI {
+	if !isCodexCLI && !preserveRequestBody {
 		if maxOutputTokens, hasMaxOutputTokens := reqBody["max_output_tokens"]; hasMaxOutputTokens {
 			switch account.Platform {
 			case PlatformOpenAI:
@@ -2362,12 +2365,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
-	// API-key HTTP fallback still drops previous_response_id as before.
-	// OAuth Codex HTTP must keep it: tool/search continuations can depend on
-	// server-side state referenced by previous_response_id. The client, rather
-	// than the Gateway, must decide how to recover a stale anchor.
+	// Native Responses continuations belong to the client, including API-key
+	// requests. Only legacy cross-provider compatibility may discard the anchor.
 	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 && !isOpenAIResponsesCompactPath(c) {
-		keepNativePrevious := strictNativeRequest
+		keepNativePrevious := preserveRequestBody
 		if _, has := reqBody["previous_response_id"]; has && !keepNativePrevious {
 			delete(reqBody, "previous_response_id")
 			bodyModified = true
@@ -2433,7 +2434,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		wsPrevResponseRecoveryTried := false
 		wsInvalidEncryptedContentRecoveryTried := false
 		recoverPrevResponseNotFound := func(attempt int) bool {
-			if wsPrevResponseRecoveryTried {
+			if preserveRequestBody || wsPrevResponseRecoveryTried {
 				return false
 			}
 			previousResponseID := openAIWSPayloadString(wsReqBody, "previous_response_id")
@@ -2465,7 +2466,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return true
 		}
 		recoverInvalidEncryptedContent := func(attempt int) bool {
-			if wsInvalidEncryptedContentRecoveryTried {
+			if preserveRequestBody || wsInvalidEncryptedContentRecoveryTried {
 				return false
 			}
 			removedReasoningItems := trimOpenAIEncryptedReasoningItems(wsReqBody)
@@ -2624,7 +2625,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	for {
 		// Every attempt must retain the client wire body, including compression.
 		// Future compatibility/recovery code must fail closed if it mutates it.
-		if strictNativeRequest && sha256.Sum256(body) != nativeBodyDigest {
+		if preserveRequestBody && sha256.Sum256(body) != nativeBodyDigest {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"type": "upstream_error", "message": "Native Codex request preservation failed"}})
 			return nil, errors.New("native Codex request body changed before upstream send")
 		}
@@ -2705,7 +2706,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			upstreamCode := extractUpstreamErrorCode(respBody)
-			if !strictNativeRequest && !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && upstreamCode == "invalid_encrypted_content" {
+			if !preserveRequestBody && !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && upstreamCode == "invalid_encrypted_content" {
 				if trimOpenAIEncryptedReasoningItems(reqBody) {
 					body, err = json.Marshal(reqBody)
 					if err != nil {

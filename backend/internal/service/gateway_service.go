@@ -5419,8 +5419,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 
-	// 强制执行 cache_control 块数量限制（最多 4 个）
-	body = enforceCacheControlLimit(body)
+	// Official OAuth/setup-token requests own their cache layout. Let the
+	// provider validate it; legacy API-key compatibility retains its rectifier.
+	if !account.IsAnthropicOAuthOrSetupToken() {
+		body = enforceCacheControlLimit(body)
+	}
 
 	// 应用模型映射：
 	// - APIKey 账号：使用账号级别的显式映射（如果配置），否则透传原始模型名
@@ -6313,17 +6316,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		return nil, err
 	}
 
-	if c != nil && c.Request != nil {
-		for key, values := range c.Request.Header {
-			lowerKey := strings.ToLower(strings.TrimSpace(key))
-			if !allowedHeaders[lowerKey] {
-				continue
-			}
-			for _, v := range values {
-				req.Header.Add(key, v)
-			}
-		}
-	}
+	copyAnthropicPassthroughRequest(req, c)
 
 	// 覆盖入站鉴权残留，并注入上游认证
 	req.Header.Del("authorization")
@@ -10244,17 +10237,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 		return nil, err
 	}
 
-	if c != nil && c.Request != nil {
-		for key, values := range c.Request.Header {
-			lowerKey := strings.ToLower(strings.TrimSpace(key))
-			if !allowedHeaders[lowerKey] {
-				continue
-			}
-			for _, v := range values {
-				req.Header.Add(key, v)
-			}
-		}
-	}
+	copyAnthropicPassthroughRequest(req, c)
 
 	req.Header.Del("authorization")
 	req.Header.Del("x-api-key")
