@@ -55,6 +55,8 @@ type UsageLog struct {
 	CacheCreation1hTokens int `json:"cache_creation_1h_tokens,omitempty"`
 	// PricingSnapshot holds the value of the "pricing_snapshot" field.
 	PricingSnapshot map[string]interface{} `json:"pricing_snapshot,omitempty"`
+	// ModerationRef holds the value of the "moderation_ref" field.
+	ModerationRef map[string]interface{} `json:"moderation_ref,omitempty"`
 	// InputCost holds the value of the "input_cost" field.
 	InputCost float64 `json:"input_cost,omitempty"`
 	// OutputCost holds the value of the "output_cost" field.
@@ -186,7 +188,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usagelog.FieldPricingSnapshot:
+		case usagelog.FieldPricingSnapshot, usagelog.FieldModerationRef:
 			values[i] = new([]byte)
 		case usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
@@ -319,6 +321,14 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value != nil && len(*value) > 0 {
 				if err := json.Unmarshal(*value, &_m.PricingSnapshot); err != nil {
 					return fmt.Errorf("unmarshal field pricing_snapshot: %w", err)
+				}
+			}
+		case usagelog.FieldModerationRef:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field moderation_ref", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.ModerationRef); err != nil {
+					return fmt.Errorf("unmarshal field moderation_ref: %w", err)
 				}
 			}
 		case usagelog.FieldInputCost:
@@ -588,6 +598,9 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("pricing_snapshot=")
 	builder.WriteString(fmt.Sprintf("%v", _m.PricingSnapshot))
+	builder.WriteString(", ")
+	builder.WriteString("moderation_ref=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ModerationRef))
 	builder.WriteString(", ")
 	builder.WriteString("input_cost=")
 	builder.WriteString(fmt.Sprintf("%v", _m.InputCost))

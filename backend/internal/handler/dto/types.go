@@ -464,7 +464,8 @@ type UsageLog struct {
 
 // AdminUsageLog 是管理员接口使用的 usage log DTO（包含管理员字段）。
 type AdminUsageLog struct {
-	ModerationEvents []service.UsageModerationEvent `json:"moderation_events,omitempty"`
+	ModerationEvents      []service.UsageModerationEvent `json:"moderation_events,omitempty"`
+	ModerationUnavailable bool                           `json:"moderation_unavailable,omitempty"`
 	UsageLog
 	PricingSnapshot *service.PricingSnapshot `json:"pricing_snapshot,omitempty"`
 

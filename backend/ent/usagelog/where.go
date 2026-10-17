@@ -900,6 +900,16 @@ func PricingSnapshotNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldPricingSnapshot))
 }
 
+// ModerationRefIsNil applies the IsNil predicate on the "moderation_ref" field.
+func ModerationRefIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldModerationRef))
+}
+
+// ModerationRefNotNil applies the NotNil predicate on the "moderation_ref" field.
+func ModerationRefNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldModerationRef))
+}
+
 // InputCostEQ applies the EQ predicate on the "input_cost" field.
 func InputCostEQ(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldInputCost, v))

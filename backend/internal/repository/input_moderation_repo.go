@@ -128,13 +128,16 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 		return nil, fmt.Errorf("insert input moderation incident: %w", err)
 	}
 
+	// Serialize decisions without upgrading the FK key-share lock acquired by
+	// the event insert. FOR UPDATE deadlocks concurrent inserts for this user.
+	// Status changes do not modify referenced keys.
 	var role, status string
 	var userUpdatedAt time.Time
 	if err := tx.QueryRowContext(ctx, `
 		SELECT role, status, updated_at
 		FROM users
 		WHERE id = $1 AND deleted_at IS NULL
-		FOR UPDATE`, event.UserID).Scan(&role, &status, &userUpdatedAt); err != nil {
+		FOR NO KEY UPDATE`, event.UserID).Scan(&role, &status, &userUpdatedAt); err != nil {
 		return nil, fmt.Errorf("lock input moderation user: %w", err)
 	}
 	finishWithoutStrike := func(action string) (*service.InputModerationTransition, error) {

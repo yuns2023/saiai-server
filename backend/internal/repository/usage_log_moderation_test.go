@@ -9,29 +9,40 @@ import (
 	"testing"
 )
 
-func TestUsageModerationLinkCapturesFinalBillingIdentity(t *testing.T) {
+func TestUsageModerationCorrelationInUsageInsert(t *testing.T) {
+	ref := &service.InputModerationUsageRef{RequestID: "local-id", Source: "openai_responses_ws", TurnNumber: 2}
+	log := &service.UsageLog{RequestID: "billing-id", ModerationRef: ref}
+	prepared := prepareUsageLogInsert(log)
+	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
+	require.JSONEq(t, `{"RequestID":"local-id","Source":"openai_responses_ws","TurnNumber":2}`, prepared.args[len(prepared.args)-1].(string))
+	require.Nil(t, moderationRefJSON(nil))
+}
+
+func TestUsageModerationEnrichmentFailureIsolated(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	repo := &usageLogRepository{sql: db}
-	groupID := int64(3)
-	mock.ExpectExec("INSERT INTO input_moderation_usage_links").WithArgs("local-id", "openai_responses_ws", 2, int64(1), int64(2), int64(3), "upstream-billing-id").WillReturnResult(sqlmock.NewResult(0, 1))
-	require.NoError(t, repo.LinkInputModerationUsage(context.Background(), &service.UsageLog{UserID: 1, APIKeyID: 2, GroupID: &groupID, RequestID: "upstream-billing-id", ModerationRef: &service.InputModerationUsageRef{RequestID: "local-id", Source: "openai_responses_ws", TurnNumber: 2}}))
+	mock.ExpectQuery("SELECT DISTINCT u.id").WillReturnError(context.DeadlineExceeded)
+	logs := []service.UsageLog{{ID: 7, ModerationEvents: []service.UsageModerationEvent{{Action: "warning"}}}}
+	repo.enrichUsageLogModeration(context.Background(), logs)
+	require.True(t, logs[0].ModerationUnavailable)
+	require.Empty(t, logs[0].ModerationEvents)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestUsageModerationHydrationScopesIdentityAndTurn(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	repo := &usageLogRepository{sql: db}
 	// Require all identity boundaries in the query, not just request_id.
 	query := `SELECT DISTINCT u.id, e.id, e.categories, e.scores, e.min_confidence,
  e.action, e.counted_as_strike, COALESCE(e.model_version,'')
- FROM usage_logs u JOIN input_moderation_usage_links l
- ON l.usage_request_id=u.request_id AND l.user_id=u.user_id AND l.api_key_id=u.api_key_id AND l.group_id=u.group_id
- JOIN input_moderation_events e ON e.request_id=l.request_id AND e.source=l.source
- AND COALESCE(e.turn_number,0)=l.turn_number AND e.user_id=l.user_id AND e.api_key_id=l.api_key_id AND e.group_id=l.group_id
+ FROM usage_logs u JOIN input_moderation_events e
+ ON e.request_id=u.moderation_ref->>'RequestID' AND e.source=u.moderation_ref->>'Source'
+ AND COALESCE(e.turn_number,0)::text=u.moderation_ref->>'TurnNumber'
+ AND e.user_id=u.user_id AND e.api_key_id=u.api_key_id AND e.group_id=u.group_id
  WHERE u.id=ANY($1) ORDER BY u.id,e.id`
 	mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs("{7,8}").WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "categories", "scores", "min_confidence", "action", "counted_as_strike", "model_version"}).AddRow(8, 20, `["PII"]`, `{"PII":0.95}`, 90, "warning", true, "jev-1.13.0"))
 	logs := []service.UsageLog{{ID: 7}, {ID: 8}}

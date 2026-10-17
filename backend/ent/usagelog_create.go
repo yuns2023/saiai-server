@@ -203,6 +203,12 @@ func (_c *UsageLogCreate) SetPricingSnapshot(v map[string]interface{}) *UsageLog
 	return _c
 }
 
+// SetModerationRef sets the "moderation_ref" field.
+func (_c *UsageLogCreate) SetModerationRef(v map[string]interface{}) *UsageLogCreate {
+	_c.mutation.SetModerationRef(v)
+	return _c
+}
+
 // SetInputCost sets the "input_cost" field.
 func (_c *UsageLogCreate) SetInputCost(v float64) *UsageLogCreate {
 	_c.mutation.SetInputCost(v)
@@ -899,6 +905,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldPricingSnapshot, field.TypeJSON, value)
 		_node.PricingSnapshot = value
 	}
+	if value, ok := _c.mutation.ModerationRef(); ok {
+		_spec.SetField(usagelog.FieldModerationRef, field.TypeJSON, value)
+		_node.ModerationRef = value
+	}
 	if value, ok := _c.mutation.InputCost(); ok {
 		_spec.SetField(usagelog.FieldInputCost, field.TypeFloat64, value)
 		_node.InputCost = value
@@ -1387,6 +1397,24 @@ func (u *UsageLogUpsert) UpdatePricingSnapshot() *UsageLogUpsert {
 // ClearPricingSnapshot clears the value of the "pricing_snapshot" field.
 func (u *UsageLogUpsert) ClearPricingSnapshot() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldPricingSnapshot)
+	return u
+}
+
+// SetModerationRef sets the "moderation_ref" field.
+func (u *UsageLogUpsert) SetModerationRef(v map[string]interface{}) *UsageLogUpsert {
+	u.Set(usagelog.FieldModerationRef, v)
+	return u
+}
+
+// UpdateModerationRef sets the "moderation_ref" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateModerationRef() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldModerationRef)
+	return u
+}
+
+// ClearModerationRef clears the value of the "moderation_ref" field.
+func (u *UsageLogUpsert) ClearModerationRef() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldModerationRef)
 	return u
 }
 
@@ -2153,6 +2181,27 @@ func (u *UsageLogUpsertOne) UpdatePricingSnapshot() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearPricingSnapshot() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearPricingSnapshot()
+	})
+}
+
+// SetModerationRef sets the "moderation_ref" field.
+func (u *UsageLogUpsertOne) SetModerationRef(v map[string]interface{}) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetModerationRef(v)
+	})
+}
+
+// UpdateModerationRef sets the "moderation_ref" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateModerationRef() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateModerationRef()
+	})
+}
+
+// ClearModerationRef clears the value of the "moderation_ref" field.
+func (u *UsageLogUpsertOne) ClearModerationRef() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearModerationRef()
 	})
 }
 
@@ -3155,6 +3204,27 @@ func (u *UsageLogUpsertBulk) UpdatePricingSnapshot() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearPricingSnapshot() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearPricingSnapshot()
+	})
+}
+
+// SetModerationRef sets the "moderation_ref" field.
+func (u *UsageLogUpsertBulk) SetModerationRef(v map[string]interface{}) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetModerationRef(v)
+	})
+}
+
+// UpdateModerationRef sets the "moderation_ref" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateModerationRef() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateModerationRef()
+	})
+}
+
+// ClearModerationRef clears the value of the "moderation_ref" field.
+func (u *UsageLogUpsertBulk) ClearModerationRef() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearModerationRef()
 	})
 }
 

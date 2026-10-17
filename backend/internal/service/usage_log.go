@@ -95,15 +95,16 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 }
 
 type UsageLog struct {
-	ModerationRef    *InputModerationUsageRef
-	ModerationEvents []UsageModerationEvent
-	ID               int64
-	UserID           int64
-	APIKeyID         int64
-	AccountID        int64
-	RequestID        string
-	SessionID        *string
-	Model            string
+	ModerationRef         *InputModerationUsageRef
+	ModerationEvents      []UsageModerationEvent
+	ModerationUnavailable bool
+	ID                    int64
+	UserID                int64
+	APIKeyID              int64
+	AccountID             int64
+	RequestID             string
+	SessionID             *string
+	Model                 string
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Nil means no mapping was applied (requested model was used as-is).
 	UpstreamModel *string

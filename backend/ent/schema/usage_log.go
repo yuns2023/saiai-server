@@ -74,6 +74,7 @@ func (UsageLog) Fields() []ent.Field {
 
 		// Immutable reference/effective prices captured with the usage row.
 		field.JSON("pricing_snapshot", map[string]any{}).Optional(),
+		field.JSON("moderation_ref", map[string]any{}).Optional(),
 
 		// 成本字段
 		field.Float("input_cost").

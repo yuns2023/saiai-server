@@ -79,6 +79,7 @@ var usageLogInsertArgTypes = [...]string{
 	"numeric",
 	"numeric",
 	"jsonb",
+	"jsonb",
 }
 
 // dateFormatWhitelist 将 granularity 参数映射为 PostgreSQL TO_CHAR 格式字符串，防止外部输入直接拼入 SQL
@@ -329,14 +330,15 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
 			user_payg_discount_multiplier,
-			pricing_snapshot
+			pricing_snapshot,
+			moderation_ref
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9,
 			$10, $11, $12, $13,
 			$14, $15,
 			$16, $17, $18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -767,7 +769,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
 			user_payg_discount_multiplier,
-			pricing_snapshot
+			pricing_snapshot,
+			moderation_ref
 		) AS (VALUES `)
 
 	args := make([]any, 0, len(keys)*(len(usageLogInsertArgTypes)+1))
@@ -844,7 +847,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				model_rate_multiplier,
 				account_payg_discount_multiplier,
 				user_payg_discount_multiplier,
-				pricing_snapshot
+				pricing_snapshot,
+				moderation_ref
 			)
 			SELECT
 				user_id,
@@ -892,7 +896,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				model_rate_multiplier,
 				account_payg_discount_multiplier,
 				user_payg_discount_multiplier,
-				pricing_snapshot
+				pricing_snapshot,
+				moderation_ref
 			FROM input
 			ON CONFLICT (request_id, api_key_id) DO NOTHING
 			RETURNING request_id, api_key_id, id, created_at
@@ -980,7 +985,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
 			user_payg_discount_multiplier,
-			pricing_snapshot
+			pricing_snapshot,
+			moderation_ref
 		) AS (VALUES `)
 
 	args := make([]any, 0, len(preparedList)*len(usageLogInsertArgTypes))
@@ -1054,7 +1060,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
 			user_payg_discount_multiplier,
-			pricing_snapshot
+			pricing_snapshot,
+			moderation_ref
 		)
 		SELECT
 			user_id,
@@ -1102,7 +1109,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
 			user_payg_discount_multiplier,
-			pricing_snapshot
+			pricing_snapshot,
+			moderation_ref
 		FROM input
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`)
@@ -1158,14 +1166,15 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			model_rate_multiplier,
 			account_payg_discount_multiplier,
 			user_payg_discount_multiplier,
-			pricing_snapshot
+			pricing_snapshot,
+			moderation_ref
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9,
 			$10, $11, $12, $13,
 			$14, $15,
 			$16, $17, $18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1257,6 +1266,7 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			usageLogFactorOrOne(log.AccountPaygDiscountMultiplier),
 			usageLogFactorOrOne(log.UserPaygDiscountMultiplier),
 			pricingSnapshotJSON(log.PricingSnapshot),
+			moderationRefJSON(log.ModerationRef),
 		},
 	}
 }
@@ -2824,9 +2834,7 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 	if err := r.hydrateUsageLogSessionAccounts(ctx, logs, filters); err != nil {
 		return nil, nil, err
 	}
-	if err := r.hydrateUsageLogModeration(ctx, logs); err != nil {
-		return nil, nil, err
-	}
+	r.enrichUsageLogModeration(ctx, logs)
 	if err := r.hydrateUsageLogFailoverEvents(ctx, logs); err != nil {
 		return nil, nil, err
 	}

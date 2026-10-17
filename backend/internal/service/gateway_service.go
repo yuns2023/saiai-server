@@ -9509,18 +9509,6 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 	usageCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
 
-	if usageLog.ModerationRef != nil {
-		if writer, ok := repo.(interface {
-			LinkInputModerationUsage(context.Context, *UsageLog) error
-		}); ok {
-			linkCtx, cancelLink := context.WithTimeout(usageCtx, time.Second)
-			err := writer.LinkInputModerationUsage(linkCtx, usageLog)
-			cancelLink()
-			if err != nil {
-				logger.LegacyPrintf(logKey, "Link moderation usage failed: %v", err)
-			}
-		}
-	}
 	if writer, ok := repo.(usageLogBestEffortWriter); ok {
 		if err := writer.CreateBestEffort(usageCtx, usageLog); err != nil {
 			logger.LegacyPrintf(logKey, "Create usage log failed: %v", err)

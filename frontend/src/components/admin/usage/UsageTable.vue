@@ -49,7 +49,8 @@
         </template>
 
         <template #cell-moderation="{ row }">
-          <div v-if="row.moderation_events?.length" class="max-w-[280px] space-y-1 text-xs">
+          <span v-if="row.moderation_unavailable" class="text-xs text-gray-400">{{ t('admin.groups.inputModeration.unavailable') }}</span>
+          <div v-else-if="row.moderation_events?.length" class="max-w-[280px] space-y-1 text-xs">
             <div v-for="(event, index) in row.moderation_events" :key="index">
               <span v-for="category in event.categories" :key="category" class="mr-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-900 dark:text-amber-200">
                 {{ category }}<span v-if="event.scores?.[category] != null" class="ml-1">{{ (event.scores[category] * 100).toFixed(1) }}%</span>

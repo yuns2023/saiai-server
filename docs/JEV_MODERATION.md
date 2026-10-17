@@ -37,22 +37,24 @@ remain the existing ones. Warnings are audit/UI actions, not email or Slack.
 The admin usage API exposes matching category scores, the decision-time threshold,
 action, and strike-count flag. The table currently renders categories, scores,
 action and whether the incident counted; the threshold remains API metadata.
-A persisted metadata link maps the local request and
-WS turn to the final usage billing ID; identity joins include user, API key, and
-group. Once the link has been persisted, either the classification or the usage
-record can arrive first. Link writes are best-effort with a one-second timeout;
-a failed write is logged but not retried or repaired, so labels can be missing.
+The local request/source/turn reference is stored atomically in the usage row,
+including batched, best-effort and retry insert paths. Classification and usage
+may arrive in either order. The join additionally requires the authenticated
+user, API key and group. Correlation metadata follows usage retention; there is
+no separate link table or orphan-link cleanup job. A failed usage write follows
+the existing usage retry behavior without making billing depend on moderation.
+An enrichment query has a one-second deadline; failure clears partial labels
+and returns the usage page with explicit unavailable metadata.
 The admin
 usage page refreshes its list every 30 seconds while visible. Absence of a hit is
 not represented as a successful safety check. Failed forwarding requests without
 a usage row can still have moderation events. Raw text is never written to the
 event or link tables. Existing encrypted queue retention behavior is unchanged.
 
-Migration 100 adds the threshold, event score metadata, and correlation table.
+Migration 100 adds the threshold, event score metadata, and usage correlation column.
 Deploy code and migration together. This development change does not switch a
 running deployment, remove a sidecar, send a provider evaluation, or change
-production credentials. Old rows have no fabricated score. Event/link retention
-and a dedicated errors/pending dashboard remain follow-up work.
+production credentials. Old rows have no fabricated score. A dedicated errors/pending dashboard remains follow-up work.
 
 ## Local validation
 
@@ -61,21 +63,18 @@ Jev mock TLS responses, strict response validation, threshold boundaries and
 policy reload, optional disable/cooldown, duplicate handling, usage identity
 correlation, and DTO mappings. Frontend typecheck, targeted ESLint, and seven
 UsageTable tests cover asynchronously arriving labels and scoreless legacy rows.
-No live provider calls, production database migration, or full CI matrix ran.
+Disposable PostgreSQL migration and integration checks cover single/batched/best-effort
+usage correlation, both arrival orders, turn isolation, duplicate inserts, concurrent
+incident deduplication, threshold escalation and reset races. Concurrent incident
+inserts exposed a foreign-key lock upgrade deadlock; the user lock now uses
+`FOR NO KEY UPDATE`, which serializes decisions without conflicting with the
+event foreign-key check. No live provider calls or production database migration ran.
 
 ## Follow-up before production consideration
 
-- Add durable retry/reconciliation for failed correlation writes. Test both arrival
-  orders, concurrent duplicate incidents, reset races and migration 100 on a
-  disposable PostgreSQL database; existing SQL mocks do not establish these.
-- Isolate moderation enrichment failures from usage-list availability, with an
-  explicit unavailable/pending state rather than a false safe result. Currently
-  a hydration query error propagates through `ListWithFilters`.
 - Audit existing group policies during release preparation: migration preserves
   old action modes and hit limits. New defaults do not convert existing groups
   from first-hit cooldown/second-hit disable to the new three-hit policy.
-- Define event/link retention and orphan cleanup; the link table currently has no
-  independent creation timestamp or scheduled cleanup.
 - Complete independently reviewed evaluation before claiming safety effectiveness.
   The 80-case calibration aggregate has zero false positives/negatives, but PII
   and crime each miss one category label, while crime and unethical acts each

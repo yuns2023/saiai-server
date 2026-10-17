@@ -2035,8 +2035,9 @@ export default {
       },
       inputModeration: {
  usageColumn: '输入检测',
- noHit: '暂无命中结果',
- asyncHint: '异步检测；无记录不代表已通过检测',
+ noHit: '暂无审核结果',
+ unavailable: '审核信息暂不可用',
+        asyncHint: '异步检测；无记录不代表已通过检测',
  actions: { warning: '告警', cooldown: '临时冷却', auto_disabled: '已停用', audit: '仅记录', duplicate_ignored: '重复未计次', category_not_selected: '分类未选中', ignored_admin: '管理员豁免', already_inactive: '用户已停用', stale_user_state: '状态已重置' },
  counted: '已计次',
 

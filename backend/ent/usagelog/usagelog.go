@@ -46,6 +46,8 @@ const (
 	FieldCacheCreation1hTokens = "cache_creation_1h_tokens"
 	// FieldPricingSnapshot holds the string denoting the pricing_snapshot field in the database.
 	FieldPricingSnapshot = "pricing_snapshot"
+	// FieldModerationRef holds the string denoting the moderation_ref field in the database.
+	FieldModerationRef = "moderation_ref"
 	// FieldInputCost holds the string denoting the input_cost field in the database.
 	FieldInputCost = "input_cost"
 	// FieldOutputCost holds the string denoting the output_cost field in the database.
@@ -162,6 +164,7 @@ var Columns = []string{
 	FieldCacheCreation5mTokens,
 	FieldCacheCreation1hTokens,
 	FieldPricingSnapshot,
+	FieldModerationRef,
 	FieldInputCost,
 	FieldOutputCost,
 	FieldCacheCreationCost,

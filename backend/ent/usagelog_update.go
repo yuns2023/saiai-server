@@ -320,6 +320,18 @@ func (_u *UsageLogUpdate) ClearPricingSnapshot() *UsageLogUpdate {
 	return _u
 }
 
+// SetModerationRef sets the "moderation_ref" field.
+func (_u *UsageLogUpdate) SetModerationRef(v map[string]interface{}) *UsageLogUpdate {
+	_u.mutation.SetModerationRef(v)
+	return _u
+}
+
+// ClearModerationRef clears the value of the "moderation_ref" field.
+func (_u *UsageLogUpdate) ClearModerationRef() *UsageLogUpdate {
+	_u.mutation.ClearModerationRef()
+	return _u
+}
+
 // SetInputCost sets the "input_cost" field.
 func (_u *UsageLogUpdate) SetInputCost(v float64) *UsageLogUpdate {
 	_u.mutation.ResetInputCost()
@@ -1016,6 +1028,12 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.PricingSnapshotCleared() {
 		_spec.ClearField(usagelog.FieldPricingSnapshot, field.TypeJSON)
 	}
+	if value, ok := _u.mutation.ModerationRef(); ok {
+		_spec.SetField(usagelog.FieldModerationRef, field.TypeJSON, value)
+	}
+	if _u.mutation.ModerationRefCleared() {
+		_spec.ClearField(usagelog.FieldModerationRef, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.InputCost(); ok {
 		_spec.SetField(usagelog.FieldInputCost, field.TypeFloat64, value)
 	}
@@ -1607,6 +1625,18 @@ func (_u *UsageLogUpdateOne) SetPricingSnapshot(v map[string]interface{}) *Usage
 // ClearPricingSnapshot clears the value of the "pricing_snapshot" field.
 func (_u *UsageLogUpdateOne) ClearPricingSnapshot() *UsageLogUpdateOne {
 	_u.mutation.ClearPricingSnapshot()
+	return _u
+}
+
+// SetModerationRef sets the "moderation_ref" field.
+func (_u *UsageLogUpdateOne) SetModerationRef(v map[string]interface{}) *UsageLogUpdateOne {
+	_u.mutation.SetModerationRef(v)
+	return _u
+}
+
+// ClearModerationRef clears the value of the "moderation_ref" field.
+func (_u *UsageLogUpdateOne) ClearModerationRef() *UsageLogUpdateOne {
+	_u.mutation.ClearModerationRef()
 	return _u
 }
 
@@ -2335,6 +2365,12 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.PricingSnapshotCleared() {
 		_spec.ClearField(usagelog.FieldPricingSnapshot, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.ModerationRef(); ok {
+		_spec.SetField(usagelog.FieldModerationRef, field.TypeJSON, value)
+	}
+	if _u.mutation.ModerationRefCleared() {
+		_spec.ClearField(usagelog.FieldModerationRef, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.InputCost(); ok {
 		_spec.SetField(usagelog.FieldInputCost, field.TypeFloat64, value)

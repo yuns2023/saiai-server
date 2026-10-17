@@ -1950,8 +1950,9 @@ export default {
       },
       inputModeration: {
  usageColumn: 'Input moderation',
- noHit: 'No hit recorded',
- asyncHint: 'Asynchronous detection; absence of records does not mean the input was cleared',
+ noHit: 'No moderation result recorded',
+ unavailable: 'Moderation information unavailable',
+        asyncHint: 'Asynchronous detection; absence of records does not mean the input was cleared',
  actions: { warning: 'Warning', cooldown: 'Cooldown', auto_disabled: 'Disabled', audit: 'Audit only', duplicate_ignored: 'Duplicate ignored', category_not_selected: 'Category not selected', ignored_admin: 'Admin exempt', already_inactive: 'Already inactive', stale_user_state: 'State reset' },
  counted: 'Counted',
 

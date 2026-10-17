@@ -12343,7 +12343,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 48)
+	fields := make([]string, 0, 49)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26470,6 +26470,7 @@ type UsageLogMutation struct {
 	cache_creation_1h_tokens            *int
 	addcache_creation_1h_tokens         *int
 	pricing_snapshot                    *map[string]interface{}
+	moderation_ref                      *map[string]interface{}
 	input_cost                          *float64
 	addinput_cost                       *float64
 	output_cost                         *float64
@@ -27384,6 +27385,55 @@ func (m *UsageLogMutation) PricingSnapshotCleared() bool {
 func (m *UsageLogMutation) ResetPricingSnapshot() {
 	m.pricing_snapshot = nil
 	delete(m.clearedFields, usagelog.FieldPricingSnapshot)
+}
+
+// SetModerationRef sets the "moderation_ref" field.
+func (m *UsageLogMutation) SetModerationRef(value map[string]interface{}) {
+	m.moderation_ref = &value
+}
+
+// ModerationRef returns the value of the "moderation_ref" field in the mutation.
+func (m *UsageLogMutation) ModerationRef() (r map[string]interface{}, exists bool) {
+	v := m.moderation_ref
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldModerationRef returns the old "moderation_ref" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldModerationRef(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldModerationRef is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldModerationRef requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldModerationRef: %w", err)
+	}
+	return oldValue.ModerationRef, nil
+}
+
+// ClearModerationRef clears the value of the "moderation_ref" field.
+func (m *UsageLogMutation) ClearModerationRef() {
+	m.moderation_ref = nil
+	m.clearedFields[usagelog.FieldModerationRef] = struct{}{}
+}
+
+// ModerationRefCleared returns if the "moderation_ref" field was cleared in this mutation.
+func (m *UsageLogMutation) ModerationRefCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldModerationRef]
+	return ok
+}
+
+// ResetModerationRef resets all changes to the "moderation_ref" field.
+func (m *UsageLogMutation) ResetModerationRef() {
+	m.moderation_ref = nil
+	delete(m.clearedFields, usagelog.FieldModerationRef)
 }
 
 // SetInputCost sets the "input_cost" field.
@@ -28853,7 +28903,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 40)
+	fields := make([]string, 0, 41)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -28901,6 +28951,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.pricing_snapshot != nil {
 		fields = append(fields, usagelog.FieldPricingSnapshot)
+	}
+	if m.moderation_ref != nil {
+		fields = append(fields, usagelog.FieldModerationRef)
 	}
 	if m.input_cost != nil {
 		fields = append(fields, usagelog.FieldInputCost)
@@ -29014,6 +29067,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.CacheCreation1hTokens()
 	case usagelog.FieldPricingSnapshot:
 		return m.PricingSnapshot()
+	case usagelog.FieldModerationRef:
+		return m.ModerationRef()
 	case usagelog.FieldInputCost:
 		return m.InputCost()
 	case usagelog.FieldOutputCost:
@@ -29103,6 +29158,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldCacheCreation1hTokens(ctx)
 	case usagelog.FieldPricingSnapshot:
 		return m.OldPricingSnapshot(ctx)
+	case usagelog.FieldModerationRef:
+		return m.OldModerationRef(ctx)
 	case usagelog.FieldInputCost:
 		return m.OldInputCost(ctx)
 	case usagelog.FieldOutputCost:
@@ -29271,6 +29328,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPricingSnapshot(v)
+		return nil
+	case usagelog.FieldModerationRef:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetModerationRef(v)
 		return nil
 	case usagelog.FieldInputCost:
 		v, ok := value.(float64)
@@ -29764,6 +29828,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldPricingSnapshot) {
 		fields = append(fields, usagelog.FieldPricingSnapshot)
 	}
+	if m.FieldCleared(usagelog.FieldModerationRef) {
+		fields = append(fields, usagelog.FieldModerationRef)
+	}
 	if m.FieldCleared(usagelog.FieldAccountRateMultiplier) {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
 	}
@@ -29813,6 +29880,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldPricingSnapshot:
 		m.ClearPricingSnapshot()
+		return nil
+	case usagelog.FieldModerationRef:
+		m.ClearModerationRef()
 		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		m.ClearAccountRateMultiplier()
@@ -29890,6 +29960,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldPricingSnapshot:
 		m.ResetPricingSnapshot()
+		return nil
+	case usagelog.FieldModerationRef:
+		m.ResetModerationRef()
 		return nil
 	case usagelog.FieldInputCost:
 		m.ResetInputCost()

@@ -694,6 +694,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		SessionAccounts:       SessionAccountSummariesFromService(l.SessionAccounts),
 		FailoverEvents:        FailoverEventsFromService(l.FailoverEvents),
 		ModerationEvents:      l.ModerationEvents,
+		ModerationUnavailable: l.ModerationUnavailable,
 	}
 }
 

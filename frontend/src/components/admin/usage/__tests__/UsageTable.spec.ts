@@ -88,6 +88,18 @@ describe('admin UsageTable tooltip', () => {
     wrapper.unmount()
   })
 
+  it('distinguishes unavailable moderation from an empty result and hides stale labels', () => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_UNAVAILABLE', moderation_unavailable: true,
+        moderation_events: [{ categories: ['PII'], scores: { PII: .95 }, action: 'warning' }] }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-moderation" :row="data[0]" /></div>' } } }
+    })
+    expect(wrapper.text()).toContain('admin.groups.inputModeration.unavailable')
+    expect(wrapper.text()).not.toContain('admin.groups.inputModeration.noHit')
+    expect(wrapper.text()).not.toContain('PII')
+    wrapper.unmount()
+  })
+
   it('shows native Chat turns and unknown consumption instead of zero tokens', () => {
     const wrapper = mount(UsageTable, {
       props: { data: [{ request_id: 'TEST_ONLY_CHAT', model: 'gpt-6-pro', billing_unit: 'turn', chat_tier: 'pro',

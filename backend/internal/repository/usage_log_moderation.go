@@ -5,19 +5,31 @@ import (
 	"encoding/json"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
+	"log/slog"
+	"time"
 )
 
-// The link can arrive before either the usage row or the classifier event.
-// Joining on authenticated identity AND turn prevents request-ID cross-talk.
-func (r *usageLogRepository) LinkInputModerationUsage(ctx context.Context, log *service.UsageLog) error {
-	ref := log.ModerationRef
-	if ref == nil || log.GroupID == nil {
+// Correlation is part of the usage INSERT, including batch/retry paths.
+// It stores no request text and expires with the usage row.
+func moderationRefJSON(ref *service.InputModerationUsageRef) any {
+	if ref == nil {
 		return nil
 	}
-	_, err := r.sql.ExecContext(ctx, `INSERT INTO input_moderation_usage_links
- (request_id, source, turn_number, user_id, api_key_id, group_id, usage_request_id)
- VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, ref.RequestID, ref.Source, ref.TurnNumber, log.UserID, log.APIKeyID, *log.GroupID, log.RequestID)
-	return err
+	data, _ := json.Marshal(ref)
+	return string(data)
+}
+
+// Optional audit metadata must never make billing history unavailable.
+func (r *usageLogRepository) enrichUsageLogModeration(ctx context.Context, logs []service.UsageLog) {
+	lookupCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := r.hydrateUsageLogModeration(lookupCtx, logs); err != nil {
+		slog.Warn("usage_moderation_enrichment_failed")
+		for i := range logs {
+			logs[i].ModerationEvents = nil
+			logs[i].ModerationUnavailable = true
+		}
+	}
 }
 
 func (r *usageLogRepository) hydrateUsageLogModeration(ctx context.Context, logs []service.UsageLog) error {
@@ -32,10 +44,10 @@ func (r *usageLogRepository) hydrateUsageLogModeration(ctx context.Context, logs
 	}
 	rows, err := r.sql.QueryContext(ctx, `SELECT DISTINCT u.id, e.id, e.categories, e.scores, e.min_confidence,
  e.action, e.counted_as_strike, COALESCE(e.model_version,'')
- FROM usage_logs u JOIN input_moderation_usage_links l
- ON l.usage_request_id=u.request_id AND l.user_id=u.user_id AND l.api_key_id=u.api_key_id AND l.group_id=u.group_id
- JOIN input_moderation_events e ON e.request_id=l.request_id AND e.source=l.source
- AND COALESCE(e.turn_number,0)=l.turn_number AND e.user_id=l.user_id AND e.api_key_id=l.api_key_id AND e.group_id=l.group_id
+ FROM usage_logs u JOIN input_moderation_events e
+ ON e.request_id=u.moderation_ref->>'RequestID' AND e.source=u.moderation_ref->>'Source'
+ AND COALESCE(e.turn_number,0)::text=u.moderation_ref->>'TurnNumber'
+ AND e.user_id=u.user_id AND e.api_key_id=u.api_key_id AND e.group_id=u.group_id
  WHERE u.id=ANY($1) ORDER BY u.id,e.id`, pq.Array(ids))
 	if err != nil {
 		return err
