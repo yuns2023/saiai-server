@@ -850,6 +850,27 @@ func (_u *GroupUpdate) AddInputModerationStrikeWindowHours(v int) *GroupUpdate {
 	return _u
 }
 
+// SetInputModerationMinConfidence sets the "input_moderation_min_confidence" field.
+func (_u *GroupUpdate) SetInputModerationMinConfidence(v int) *GroupUpdate {
+	_u.mutation.ResetInputModerationMinConfidence()
+	_u.mutation.SetInputModerationMinConfidence(v)
+	return _u
+}
+
+// SetNillableInputModerationMinConfidence sets the "input_moderation_min_confidence" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableInputModerationMinConfidence(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetInputModerationMinConfidence(*v)
+	}
+	return _u
+}
+
+// AddInputModerationMinConfidence adds value to the "input_moderation_min_confidence" field.
+func (_u *GroupUpdate) AddInputModerationMinConfidence(v int) *GroupUpdate {
+	_u.mutation.AddInputModerationMinConfidence(v)
+	return _u
+}
+
 // SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
 func (_u *GroupUpdate) SetInputModerationDedupeMinutes(v int) *GroupUpdate {
 	_u.mutation.ResetInputModerationDedupeMinutes()
@@ -1494,6 +1515,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedInputModerationStrikeWindowHours(); ok {
 		_spec.AddField(group.FieldInputModerationStrikeWindowHours, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.InputModerationMinConfidence(); ok {
+		_spec.SetField(group.FieldInputModerationMinConfidence, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedInputModerationMinConfidence(); ok {
+		_spec.AddField(group.FieldInputModerationMinConfidence, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.InputModerationDedupeMinutes(); ok {
 		_spec.SetField(group.FieldInputModerationDedupeMinutes, field.TypeInt, value)
@@ -2670,6 +2697,27 @@ func (_u *GroupUpdateOne) AddInputModerationStrikeWindowHours(v int) *GroupUpdat
 	return _u
 }
 
+// SetInputModerationMinConfidence sets the "input_moderation_min_confidence" field.
+func (_u *GroupUpdateOne) SetInputModerationMinConfidence(v int) *GroupUpdateOne {
+	_u.mutation.ResetInputModerationMinConfidence()
+	_u.mutation.SetInputModerationMinConfidence(v)
+	return _u
+}
+
+// SetNillableInputModerationMinConfidence sets the "input_moderation_min_confidence" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableInputModerationMinConfidence(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetInputModerationMinConfidence(*v)
+	}
+	return _u
+}
+
+// AddInputModerationMinConfidence adds value to the "input_moderation_min_confidence" field.
+func (_u *GroupUpdateOne) AddInputModerationMinConfidence(v int) *GroupUpdateOne {
+	_u.mutation.AddInputModerationMinConfidence(v)
+	return _u
+}
+
 // SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
 func (_u *GroupUpdateOne) SetInputModerationDedupeMinutes(v int) *GroupUpdateOne {
 	_u.mutation.ResetInputModerationDedupeMinutes()
@@ -3344,6 +3392,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedInputModerationStrikeWindowHours(); ok {
 		_spec.AddField(group.FieldInputModerationStrikeWindowHours, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.InputModerationMinConfidence(); ok {
+		_spec.SetField(group.FieldInputModerationMinConfidence, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedInputModerationMinConfidence(); ok {
+		_spec.AddField(group.FieldInputModerationMinConfidence, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.InputModerationDedupeMinutes(); ok {
 		_spec.SetField(group.FieldInputModerationDedupeMinutes, field.TypeInt, value)

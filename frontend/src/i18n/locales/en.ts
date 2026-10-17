@@ -1949,6 +1949,13 @@ export default {
         environmentModeRemove: 'Remove'
       },
       inputModeration: {
+ usageColumn: 'Input moderation',
+ noHit: 'No hit recorded',
+ asyncHint: 'Asynchronous detection; absence of records does not mean the input was cleared',
+ actions: { warning: 'Warning', cooldown: 'Cooldown', auto_disabled: 'Disabled', audit: 'Audit only', duplicate_ignored: 'Duplicate ignored', category_not_selected: 'Category not selected', ignored_admin: 'Admin exempt', already_inactive: 'Already inactive', stale_user_state: 'State reset' },
+ counted: 'Counted',
+
+ minConfidence: 'Minimum score (%)', warnThenCooldown: 'Warn, then temporarily cool down', warnThenDisable: 'Warn, then disable user',
         title: 'Asynchronous Input Moderation',
         enabled: 'Moderate the latest real user input',
         hint: 'Requests do not wait for moderation. Only the latest user text is sent to the internal classifier; system prompts, tool results, and credentials are excluded.',
@@ -1960,7 +1967,7 @@ export default {
         cooldownThenDisable: 'Cooldown first, permanently disable after repeated hits',
         immediateDisable: 'Permanently disable on the first hit',
         cooldownMinutes: 'Cooldown minutes',
-        disableAfterHits: 'Hits before permanent disable',
+        disableAfterHits: 'Hits before enforcement',
         strikeWindowHours: 'Strike window (hours)',
         dedupeMinutes: 'Same-content dedupe (minutes)'
       },

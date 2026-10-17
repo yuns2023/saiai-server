@@ -883,7 +883,7 @@ func TestOpenAIGatewayHandlerSubmitInputModerationExtractsNativeResponsesText(t 
 	}
 	client := &openAIInputModerationClientStub{texts: make(chan string, 1)}
 	cfg := &config.Config{}
-	cfg.Gateway.InputModeration.Endpoint = "http://moderation.test/v1/classify"
+	cfg.Gateway.InputModeration.APIKey = "synthetic-test-key"
 	cfg.Gateway.InputModeration.WorkerCount = 1
 	cfg.Gateway.InputModeration.QueueSize = 4
 	cfg.Gateway.InputModeration.RequestTimeoutSeconds = 1

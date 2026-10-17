@@ -188,13 +188,14 @@ func (Group) Fields() []ent.Field {
 			Comment("可触发自动禁用的 Unsafe 分类；空数组表示任意 Unsafe 分类"),
 		field.String("input_moderation_action_mode").
 			MaxLen(32).
-			Default("cooldown_then_disable"),
+			Default("warn_then_cooldown"),
 		field.Int("input_moderation_cooldown_minutes").
 			Default(30),
 		field.Int("input_moderation_disable_after_hits").
-			Default(2),
+			Default(3),
 		field.Int("input_moderation_strike_window_hours").
 			Default(24),
+		field.Int("input_moderation_min_confidence").Default(90),
 		field.Int("input_moderation_dedupe_minutes").
 			Default(5),
 		field.String("codex_client_policy").MaxLen(32).Default("off"),

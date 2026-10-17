@@ -9323,6 +9323,8 @@ type GroupMutation struct {
 	addinput_moderation_disable_after_hits  *int
 	input_moderation_strike_window_hours    *int
 	addinput_moderation_strike_window_hours *int
+	input_moderation_min_confidence         *int
+	addinput_moderation_min_confidence      *int
 	input_moderation_dedupe_minutes         *int
 	addinput_moderation_dedupe_minutes      *int
 	codex_client_policy                     *string
@@ -11716,6 +11718,62 @@ func (m *GroupMutation) ResetInputModerationStrikeWindowHours() {
 	m.addinput_moderation_strike_window_hours = nil
 }
 
+// SetInputModerationMinConfidence sets the "input_moderation_min_confidence" field.
+func (m *GroupMutation) SetInputModerationMinConfidence(i int) {
+	m.input_moderation_min_confidence = &i
+	m.addinput_moderation_min_confidence = nil
+}
+
+// InputModerationMinConfidence returns the value of the "input_moderation_min_confidence" field in the mutation.
+func (m *GroupMutation) InputModerationMinConfidence() (r int, exists bool) {
+	v := m.input_moderation_min_confidence
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInputModerationMinConfidence returns the old "input_moderation_min_confidence" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldInputModerationMinConfidence(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInputModerationMinConfidence is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInputModerationMinConfidence requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInputModerationMinConfidence: %w", err)
+	}
+	return oldValue.InputModerationMinConfidence, nil
+}
+
+// AddInputModerationMinConfidence adds i to the "input_moderation_min_confidence" field.
+func (m *GroupMutation) AddInputModerationMinConfidence(i int) {
+	if m.addinput_moderation_min_confidence != nil {
+		*m.addinput_moderation_min_confidence += i
+	} else {
+		m.addinput_moderation_min_confidence = &i
+	}
+}
+
+// AddedInputModerationMinConfidence returns the value that was added to the "input_moderation_min_confidence" field in this mutation.
+func (m *GroupMutation) AddedInputModerationMinConfidence() (r int, exists bool) {
+	v := m.addinput_moderation_min_confidence
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetInputModerationMinConfidence resets all changes to the "input_moderation_min_confidence" field.
+func (m *GroupMutation) ResetInputModerationMinConfidence() {
+	m.input_moderation_min_confidence = nil
+	m.addinput_moderation_min_confidence = nil
+}
+
 // SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
 func (m *GroupMutation) SetInputModerationDedupeMinutes(i int) {
 	m.input_moderation_dedupe_minutes = &i
@@ -12418,6 +12476,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.input_moderation_strike_window_hours != nil {
 		fields = append(fields, group.FieldInputModerationStrikeWindowHours)
 	}
+	if m.input_moderation_min_confidence != nil {
+		fields = append(fields, group.FieldInputModerationMinConfidence)
+	}
 	if m.input_moderation_dedupe_minutes != nil {
 		fields = append(fields, group.FieldInputModerationDedupeMinutes)
 	}
@@ -12526,6 +12587,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.InputModerationDisableAfterHits()
 	case group.FieldInputModerationStrikeWindowHours:
 		return m.InputModerationStrikeWindowHours()
+	case group.FieldInputModerationMinConfidence:
+		return m.InputModerationMinConfidence()
 	case group.FieldInputModerationDedupeMinutes:
 		return m.InputModerationDedupeMinutes()
 	case group.FieldCodexClientPolicy:
@@ -12631,6 +12694,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldInputModerationDisableAfterHits(ctx)
 	case group.FieldInputModerationStrikeWindowHours:
 		return m.OldInputModerationStrikeWindowHours(ctx)
+	case group.FieldInputModerationMinConfidence:
+		return m.OldInputModerationMinConfidence(ctx)
 	case group.FieldInputModerationDedupeMinutes:
 		return m.OldInputModerationDedupeMinutes(ctx)
 	case group.FieldCodexClientPolicy:
@@ -12956,6 +13021,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetInputModerationStrikeWindowHours(v)
 		return nil
+	case group.FieldInputModerationMinConfidence:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInputModerationMinConfidence(v)
+		return nil
 	case group.FieldInputModerationDedupeMinutes:
 		v, ok := value.(int)
 		if !ok {
@@ -13052,6 +13124,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addinput_moderation_strike_window_hours != nil {
 		fields = append(fields, group.FieldInputModerationStrikeWindowHours)
 	}
+	if m.addinput_moderation_min_confidence != nil {
+		fields = append(fields, group.FieldInputModerationMinConfidence)
+	}
 	if m.addinput_moderation_dedupe_minutes != nil {
 		fields = append(fields, group.FieldInputModerationDedupeMinutes)
 	}
@@ -13106,6 +13181,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedInputModerationDisableAfterHits()
 	case group.FieldInputModerationStrikeWindowHours:
 		return m.AddedInputModerationStrikeWindowHours()
+	case group.FieldInputModerationMinConfidence:
+		return m.AddedInputModerationMinConfidence()
 	case group.FieldInputModerationDedupeMinutes:
 		return m.AddedInputModerationDedupeMinutes()
 	case group.FieldClaudeDeviceBaseLimit:
@@ -13258,6 +13335,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddInputModerationStrikeWindowHours(v)
+		return nil
+	case group.FieldInputModerationMinConfidence:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddInputModerationMinConfidence(v)
 		return nil
 	case group.FieldInputModerationDedupeMinutes:
 		v, ok := value.(int)
@@ -13536,6 +13620,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldInputModerationStrikeWindowHours:
 		m.ResetInputModerationStrikeWindowHours()
+		return nil
+	case group.FieldInputModerationMinConfidence:
+		m.ResetInputModerationMinConfidence()
 		return nil
 	case group.FieldInputModerationDedupeMinutes:
 		m.ResetInputModerationDedupeMinutes()

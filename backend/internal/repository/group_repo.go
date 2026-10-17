@@ -47,16 +47,19 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		groupIn.InputModerationCategories = []string{"Jailbreak", "PII", "Non-violent Illegal Acts", "Unethical Acts"}
 	}
 	if strings.TrimSpace(groupIn.InputModerationActionMode) == "" {
-		groupIn.InputModerationActionMode = service.InputModerationActionModeCooldownThenDisable
+		groupIn.InputModerationActionMode = service.InputModerationActionModeWarnThenCooldown
 	}
 	if groupIn.InputModerationCooldownMinutes <= 0 {
 		groupIn.InputModerationCooldownMinutes = 30
 	}
 	if groupIn.InputModerationDisableAfterHits <= 0 {
-		groupIn.InputModerationDisableAfterHits = 2
+		groupIn.InputModerationDisableAfterHits = 3
 	}
 	if groupIn.InputModerationStrikeWindowHours <= 0 {
 		groupIn.InputModerationStrikeWindowHours = 24
+	}
+	if groupIn.InputModerationMinConfidence < 1 || groupIn.InputModerationMinConfidence > 100 {
+		groupIn.InputModerationMinConfidence = 90
 	}
 	if groupIn.InputModerationDedupeMinutes <= 0 {
 		groupIn.InputModerationDedupeMinutes = 5
@@ -107,6 +110,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetInputModerationDisableAfterHits(groupIn.InputModerationDisableAfterHits).
 		SetInputModerationStrikeWindowHours(groupIn.InputModerationStrikeWindowHours).
 		SetInputModerationDedupeMinutes(groupIn.InputModerationDedupeMinutes).
+		SetInputModerationMinConfidence(groupIn.InputModerationMinConfidence).
 		SetCodexClientPolicy(groupIn.CodexClientPolicy).
 		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
 		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)
@@ -200,6 +204,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetInputModerationDisableAfterHits(groupIn.InputModerationDisableAfterHits).
 		SetInputModerationStrikeWindowHours(groupIn.InputModerationStrikeWindowHours).
 		SetInputModerationDedupeMinutes(groupIn.InputModerationDedupeMinutes).
+		SetInputModerationMinConfidence(groupIn.InputModerationMinConfidence).
 		SetCodexClientPolicy(groupIn.CodexClientPolicy).
 		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
 		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)

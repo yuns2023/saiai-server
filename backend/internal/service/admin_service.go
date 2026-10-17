@@ -177,6 +177,7 @@ type CreateGroupInput struct {
 	InputModerationDisableAfterHits  int
 	InputModerationStrikeWindowHours int
 	InputModerationDedupeMinutes     int
+	InputModerationMinConfidence     int
 	CodexClientPolicy                string
 	ClaudeDeviceLimitMode            string
 	ClaudeDeviceBaseLimit            int
@@ -234,6 +235,7 @@ type UpdateGroupInput struct {
 	InputModerationDisableAfterHits  *int
 	InputModerationStrikeWindowHours *int
 	InputModerationDedupeMinutes     *int
+	InputModerationMinConfidence     *int
 	CodexClientPolicy                *string
 	ClaudeDeviceLimitMode            *string
 	ClaudeDeviceBaseLimit            *int
@@ -1060,9 +1062,10 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		InputModerationCategories:        normalizeInputModerationCategories(input.InputModerationCategories),
 		InputModerationActionMode:        normalizeInputModerationActionMode(input.InputModerationActionMode),
 		InputModerationCooldownMinutes:   normalizePositiveInt(input.InputModerationCooldownMinutes, 30, 1, 1440),
-		InputModerationDisableAfterHits:  normalizePositiveInt(input.InputModerationDisableAfterHits, 2, 1, 20),
+		InputModerationDisableAfterHits:  normalizePositiveInt(input.InputModerationDisableAfterHits, 3, 1, 20),
 		InputModerationStrikeWindowHours: normalizePositiveInt(input.InputModerationStrikeWindowHours, 24, 1, 720),
 		InputModerationDedupeMinutes:     normalizePositiveInt(input.InputModerationDedupeMinutes, 5, 1, 1440),
+		InputModerationMinConfidence:     normalizePositiveInt(input.InputModerationMinConfidence, 90, 1, 100),
 		CodexClientPolicy:                normalizeCodexClientPolicy(input.CodexClientPolicy),
 		ClaudeDeviceLimitMode:            normalizeClaudeDeviceLimitMode(input.ClaudeDeviceLimitMode),
 		ClaudeDeviceBaseLimit:            normalizePositiveInt(input.ClaudeDeviceBaseLimit, 1, 1, 100),
@@ -1120,10 +1123,16 @@ func normalizeInputModerationCategories(categories []string) []string {
 }
 
 func normalizeInputModerationActionMode(mode string) string {
-	if strings.EqualFold(strings.TrimSpace(mode), InputModerationActionModeImmediateDisable) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case InputModerationActionModeImmediateDisable:
 		return InputModerationActionModeImmediateDisable
+	case InputModerationActionModeCooldownThenDisable:
+		return InputModerationActionModeCooldownThenDisable
+	case InputModerationActionModeWarnThenDisable:
+		return InputModerationActionModeWarnThenDisable
+	default:
+		return InputModerationActionModeWarnThenCooldown
 	}
-	return InputModerationActionModeCooldownThenDisable
 }
 
 func normalizePositiveInt(value, fallback, minValue, maxValue int) int {
@@ -1404,10 +1413,13 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.InputModerationCooldownMinutes = normalizePositiveInt(*input.InputModerationCooldownMinutes, 30, 1, 1440)
 	}
 	if input.InputModerationDisableAfterHits != nil {
-		group.InputModerationDisableAfterHits = normalizePositiveInt(*input.InputModerationDisableAfterHits, 2, 1, 20)
+		group.InputModerationDisableAfterHits = normalizePositiveInt(*input.InputModerationDisableAfterHits, 3, 1, 20)
 	}
 	if input.InputModerationStrikeWindowHours != nil {
 		group.InputModerationStrikeWindowHours = normalizePositiveInt(*input.InputModerationStrikeWindowHours, 24, 1, 720)
+	}
+	if input.InputModerationMinConfidence != nil {
+		group.InputModerationMinConfidence = normalizePositiveInt(*input.InputModerationMinConfidence, 90, 1, 100)
 	}
 	if input.InputModerationDedupeMinutes != nil {
 		group.InputModerationDedupeMinutes = normalizePositiveInt(*input.InputModerationDedupeMinutes, 5, 1, 1440)

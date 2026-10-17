@@ -69,6 +69,25 @@ describe('admin UsageTable tooltip', () => {
     } as DOMRect)
   })
 
+  it('shows asynchronous hit scores without inventing scores for legacy records', async () => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_MODERATION' }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-moderation" :row="data[0]" /></div>' } } }
+    })
+    expect(wrapper.text()).toContain('admin.groups.inputModeration.noHit')
+    await wrapper.setProps({ data: [{ request_id: 'TEST_ONLY_MODERATION', moderation_events: [
+      { categories: ['PII'], scores: { PII: .95 }, action: 'warning', counted_as_strike: true },
+      { categories: ['Jailbreak'], scores: null, action: 'audit', counted_as_strike: false }
+    ] }] })
+    expect(wrapper.text()).toContain('PII')
+    expect(wrapper.text()).toContain('95.0%')
+    expect(wrapper.text()).toContain('admin.groups.inputModeration.actions.warning')
+    expect(wrapper.text()).toContain('Jailbreak')
+    expect(wrapper.text()).not.toContain('100.0%')
+    expect(wrapper.text()).not.toContain('admin.groups.inputModeration.noHit')
+    wrapper.unmount()
+  })
+
   it('shows native Chat turns and unknown consumption instead of zero tokens', () => {
     const wrapper = mount(UsageTable, {
       props: { data: [{ request_id: 'TEST_ONLY_CHAT', model: 'gpt-6-pro', billing_unit: 'turn', chat_tier: 'pro',

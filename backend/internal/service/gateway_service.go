@@ -9204,6 +9204,7 @@ func (s *GatewayService) getUserGroupRateMultiplier(ctx context.Context, userID,
 
 // RecordUsageInput 记录使用量的输入参数
 type RecordUsageInput struct {
+	ModerationRef      *InputModerationUsageRef
 	Result             *ForwardResult
 	APIKey             *APIKey
 	User               *User
@@ -9508,6 +9509,18 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 	usageCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
 
+	if usageLog.ModerationRef != nil {
+		if writer, ok := repo.(interface {
+			LinkInputModerationUsage(context.Context, *UsageLog) error
+		}); ok {
+			linkCtx, cancelLink := context.WithTimeout(usageCtx, time.Second)
+			err := writer.LinkInputModerationUsage(linkCtx, usageLog)
+			cancelLink()
+			if err != nil {
+				logger.LegacyPrintf(logKey, "Link moderation usage failed: %v", err)
+			}
+		}
+	}
 	if writer, ok := repo.(usageLogBestEffortWriter); ok {
 		if err := writer.CreateBestEffort(usageCtx, usageLog); err != nil {
 			logger.LegacyPrintf(logKey, "Create usage log failed: %v", err)
@@ -9631,6 +9644,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	accountRateMultiplier := account.BillingRateMultiplier()
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
 	usageLog := &UsageLog{
+		ModerationRef:              input.ModerationRef,
 		UserID:                     user.ID,
 		APIKeyID:                   apiKey.ID,
 		AccountID:                  account.ID,
@@ -9722,6 +9736,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 
 // RecordUsageLongContextInput 记录使用量的输入参数（支持长上下文双倍计费）
 type RecordUsageLongContextInput struct {
+	ModerationRef         *InputModerationUsageRef
 	Result                *ForwardResult
 	APIKey                *APIKey
 	User                  *User
@@ -9823,6 +9838,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 	accountRateMultiplier := account.BillingRateMultiplier()
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
 	usageLog := &UsageLog{
+		ModerationRef:              input.ModerationRef,
 		UserID:                     user.ID,
 		APIKeyID:                   apiKey.ID,
 		AccountID:                  account.ID,

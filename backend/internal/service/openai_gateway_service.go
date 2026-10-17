@@ -4311,6 +4311,7 @@ func (s *OpenAIGatewayService) replaceModelInResponseBody(body []byte, fromModel
 
 // OpenAIRecordUsageInput input for recording usage
 type OpenAIRecordUsageInput struct {
+	ModerationRef      *InputModerationUsageRef
 	Result             *OpenAIForwardResult
 	APIKey             *APIKey
 	User               *User
@@ -4602,6 +4603,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	accountRateMultiplier := account.BillingRateMultiplier()
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
 	usageLog := &UsageLog{
+		ModerationRef:              input.ModerationRef,
 		UserID:                     user.ID,
 		APIKeyID:                   apiKey.ID,
 		AccountID:                  account.ID,

@@ -48,6 +48,18 @@
           <span v-else class="font-medium text-gray-900 dark:text-white">{{ row.model }}</span>
         </template>
 
+        <template #cell-moderation="{ row }">
+          <div v-if="row.moderation_events?.length" class="max-w-[280px] space-y-1 text-xs">
+            <div v-for="(event, index) in row.moderation_events" :key="index">
+              <span v-for="category in event.categories" :key="category" class="mr-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                {{ category }}<span v-if="event.scores?.[category] != null" class="ml-1">{{ (event.scores[category] * 100).toFixed(1) }}%</span>
+              </span>
+              <div class="text-gray-500">{{ t('admin.groups.inputModeration.actions.' + event.action) }}<template v-if="event.counted_as_strike"> · {{ t('admin.groups.inputModeration.counted') }}</template></div>
+            </div>
+          </div>
+          <span v-else class="text-xs text-gray-400" :title="t('admin.groups.inputModeration.asyncHint')">{{ t('admin.groups.inputModeration.noHit') }}</span>
+        </template>
+
         <template #cell-reasoning_effort="{ row }">
           <span
             class="text-sm text-gray-900 dark:text-white"

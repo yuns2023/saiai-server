@@ -554,6 +554,10 @@ func init() {
 	groupDescInputModerationStrikeWindowHours := groupFields[40].Descriptor()
 	// group.DefaultInputModerationStrikeWindowHours holds the default value on creation for the input_moderation_strike_window_hours field.
 	group.DefaultInputModerationStrikeWindowHours = groupDescInputModerationStrikeWindowHours.Default.(int)
+	// groupDescInputModerationMinConfidence is the schema descriptor for input_moderation_min_confidence field.
+	groupDescInputModerationMinConfidence := groupFields[40].Descriptor()
+	// group.DefaultInputModerationMinConfidence holds the default value on creation for the input_moderation_min_confidence field.
+	group.DefaultInputModerationMinConfidence = groupDescInputModerationMinConfidence.Default.(int)
 	// groupDescInputModerationDedupeMinutes is the schema descriptor for input_moderation_dedupe_minutes field.
 	groupDescInputModerationDedupeMinutes := groupFields[41].Descriptor()
 	// group.DefaultInputModerationDedupeMinutes holds the default value on creation for the input_moderation_dedupe_minutes field.

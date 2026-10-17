@@ -709,14 +709,25 @@ type GatewayUsageRecordConfig struct {
 }
 
 // GatewayInputModerationConfig 异步用户输入审核配置。
-// Endpoint 为空时全局关闭；分组开关仍默认关闭，需两者同时启用才会提交任务。
+// Jev requires an API key; an empty endpoint uses the official pinned API.
+// Legacy Qwen requires an explicit engine and endpoint. Group opt-in is still required.
 type GatewayInputModerationConfig struct {
+	Engine                string `mapstructure:"engine"`
+	APIKey                string `mapstructure:"api_key"`
 	Endpoint              string `mapstructure:"endpoint"`
 	WorkerCount           int    `mapstructure:"worker_count"`
 	QueueSize             int    `mapstructure:"queue_size"`
 	RequestTimeoutSeconds int    `mapstructure:"request_timeout_seconds"`
 	MaxInputChars         int    `mapstructure:"max_input_chars"`
 	MaxJobAgeHours        int    `mapstructure:"max_job_age_hours"`
+}
+
+// Configured reports whether the selected, single moderation engine can run.
+func (c GatewayInputModerationConfig) Configured() bool {
+	if c.Engine == "qwen" {
+		return strings.TrimSpace(c.Endpoint) != ""
+	}
+	return (c.Engine == "" || c.Engine == "jev") && strings.TrimSpace(c.APIKey) != ""
 }
 
 // SoraModelFiltersConfig Sora 模型过滤配置
@@ -1537,6 +1548,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.models_list_cache_ttl_seconds", 15)
 	viper.SetDefault("gateway.openai_unpriced_model_max_successes", 100)
 	viper.SetDefault("gateway.openai_unpriced_model_window_seconds", 3600)
+	viper.SetDefault("gateway.input_moderation.engine", "jev")
+	viper.SetDefault("gateway.input_moderation.api_key", "")
 	viper.SetDefault("gateway.input_moderation.endpoint", "")
 	viper.SetDefault("gateway.input_moderation.worker_count", 2)
 	viper.SetDefault("gateway.input_moderation.queue_size", 256)
@@ -2130,6 +2143,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.UsageRecord.TaskTimeoutSeconds <= 0 {
 		return fmt.Errorf("gateway.usage_record.task_timeout_seconds must be positive")
+	}
+	if engine := c.Gateway.InputModeration.Engine; engine != "" && engine != "jev" && engine != "qwen" {
+		return fmt.Errorf("gateway.input_moderation.engine must be jev or qwen")
 	}
 	if c.Gateway.InputModeration.WorkerCount <= 0 {
 		return fmt.Errorf("gateway.input_moderation.worker_count must be positive")

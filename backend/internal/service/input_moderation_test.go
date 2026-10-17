@@ -151,6 +151,7 @@ func newInputModerationServiceForTest(
 	invalidator APIKeyAuthCacheInvalidator,
 ) *InputModerationService {
 	cfg := &config.Config{}
+	cfg.Gateway.InputModeration.Engine = "qwen"
 	cfg.Gateway.InputModeration.Endpoint = "http://sidecar.test/v1/classify"
 	cfg.Gateway.InputModeration.WorkerCount = 1
 	cfg.Gateway.InputModeration.QueueSize = 4
@@ -296,6 +297,7 @@ func TestInputModerationProcessFirstIncidentSetsCooldown(t *testing.T) {
 	}}
 	cache := &inputModerationStateCacheStub{}
 	cfg := &config.Config{}
+	cfg.Gateway.InputModeration.Engine = "qwen"
 	cfg.Gateway.InputModeration.Endpoint = "http://sidecar.test/v1/classify"
 	cfg.Gateway.InputModeration.WorkerCount = 1
 	cfg.Gateway.InputModeration.QueueSize = 4
@@ -318,6 +320,7 @@ func TestInputModerationSubmitUsesEncryptedDurableQueue(t *testing.T) {
 	queue := &inputModerationQueueStub{enqueued: make(chan string, 1)}
 	cfg := &config.Config{}
 	cfg.Totp.EncryptionKeyConfigured = true
+	cfg.Gateway.InputModeration.Engine = "qwen"
 	cfg.Gateway.InputModeration.Endpoint = "http://sidecar.test/v1/classify"
 	cfg.Gateway.InputModeration.WorkerCount = 1
 	cfg.Gateway.InputModeration.QueueSize = 4
@@ -496,3 +499,38 @@ func TestGetActiveCooldownCachesNegativeState(t *testing.T) {
 }
 
 func ptrInt64(value int64) *int64 { return &value }
+
+func TestInputModerationConfidenceAndRefreshedPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		scores                map[string]float64
+		threshold             int
+		wantEvent, wantStrike bool
+	}{
+		{"below threshold", map[string]float64{"Jailbreak": .899}, 90, false, false},
+		{"inclusive threshold", map[string]float64{"Jailbreak": .9}, 90, true, true},
+		{"no invented Qwen confidence", nil, 90, true, false},
+		{"refreshed threshold", map[string]float64{"Jailbreak": .9}, 95, false, false},
+		{"unselected high score", map[string]float64{"PII": .99, "Jailbreak": .1}, 90, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := &Group{ID: 3, InputModerationEnabled: true, InputModerationAutoDisableUser: true, InputModerationMinConfidence: 50}
+			after := *before
+			after.InputModerationMinConfidence = tc.threshold
+			after.InputModerationCategories = []string{"Jailbreak"}
+			groups := &inputModerationGroupRepoStub{groups: []*Group{before, &after}}
+			events := &inputModerationEventRepoStub{transition: &InputModerationTransition{Action: InputModerationActionWarning, StrikeCount: 1}}
+			client := &inputModerationClientStub{result: &InputModerationClassification{Safety: "unsafe", Categories: []string{"Jailbreak"}, Scores: tc.scores}}
+			svc := newInputModerationServiceForTest(client, events, groups, nil, nil)
+			defer svc.Stop()
+			require.NoError(t, svc.process(InputModerationTask{UserID: 1, APIKeyID: 2, GroupID: 3, Text: "synthetic input"}))
+			if !tc.wantEvent {
+				require.Empty(t, events.events)
+				return
+			}
+			require.Len(t, events.events, 1)
+			require.Equal(t, tc.wantStrike, events.events[0].CountedAsStrike)
+			require.Equal(t, tc.threshold, events.events[0].MinConfidence)
+		})
+	}
+}

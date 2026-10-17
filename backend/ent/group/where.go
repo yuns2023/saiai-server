@@ -250,6 +250,11 @@ func InputModerationStrikeWindowHours(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldInputModerationStrikeWindowHours, v))
 }
 
+// InputModerationMinConfidence applies equality check predicate on the "input_moderation_min_confidence" field. It's identical to InputModerationMinConfidenceEQ.
+func InputModerationMinConfidence(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationMinConfidence, v))
+}
+
 // InputModerationDedupeMinutes applies equality check predicate on the "input_moderation_dedupe_minutes" field. It's identical to InputModerationDedupeMinutesEQ.
 func InputModerationDedupeMinutes(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldInputModerationDedupeMinutes, v))
@@ -1858,6 +1863,46 @@ func InputModerationStrikeWindowHoursLT(v int) predicate.Group {
 // InputModerationStrikeWindowHoursLTE applies the LTE predicate on the "input_moderation_strike_window_hours" field.
 func InputModerationStrikeWindowHoursLTE(v int) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldInputModerationStrikeWindowHours, v))
+}
+
+// InputModerationMinConfidenceEQ applies the EQ predicate on the "input_moderation_min_confidence" field.
+func InputModerationMinConfidenceEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldInputModerationMinConfidence, v))
+}
+
+// InputModerationMinConfidenceNEQ applies the NEQ predicate on the "input_moderation_min_confidence" field.
+func InputModerationMinConfidenceNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldInputModerationMinConfidence, v))
+}
+
+// InputModerationMinConfidenceIn applies the In predicate on the "input_moderation_min_confidence" field.
+func InputModerationMinConfidenceIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldInputModerationMinConfidence, vs...))
+}
+
+// InputModerationMinConfidenceNotIn applies the NotIn predicate on the "input_moderation_min_confidence" field.
+func InputModerationMinConfidenceNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldInputModerationMinConfidence, vs...))
+}
+
+// InputModerationMinConfidenceGT applies the GT predicate on the "input_moderation_min_confidence" field.
+func InputModerationMinConfidenceGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldInputModerationMinConfidence, v))
+}
+
+// InputModerationMinConfidenceGTE applies the GTE predicate on the "input_moderation_min_confidence" field.
+func InputModerationMinConfidenceGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldInputModerationMinConfidence, v))
+}
+
+// InputModerationMinConfidenceLT applies the LT predicate on the "input_moderation_min_confidence" field.
+func InputModerationMinConfidenceLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldInputModerationMinConfidence, v))
+}
+
+// InputModerationMinConfidenceLTE applies the LTE predicate on the "input_moderation_min_confidence" field.
+func InputModerationMinConfidenceLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldInputModerationMinConfidence, v))
 }
 
 // InputModerationDedupeMinutesEQ applies the EQ predicate on the "input_moderation_dedupe_minutes" field.

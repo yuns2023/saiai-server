@@ -103,6 +103,8 @@ const (
 	FieldInputModerationDisableAfterHits = "input_moderation_disable_after_hits"
 	// FieldInputModerationStrikeWindowHours holds the string denoting the input_moderation_strike_window_hours field in the database.
 	FieldInputModerationStrikeWindowHours = "input_moderation_strike_window_hours"
+	// FieldInputModerationMinConfidence holds the string denoting the input_moderation_min_confidence field in the database.
+	FieldInputModerationMinConfidence = "input_moderation_min_confidence"
 	// FieldInputModerationDedupeMinutes holds the string denoting the input_moderation_dedupe_minutes field in the database.
 	FieldInputModerationDedupeMinutes = "input_moderation_dedupe_minutes"
 	// FieldCodexClientPolicy holds the string denoting the codex_client_policy field in the database.
@@ -239,6 +241,7 @@ var Columns = []string{
 	FieldInputModerationCooldownMinutes,
 	FieldInputModerationDisableAfterHits,
 	FieldInputModerationStrikeWindowHours,
+	FieldInputModerationMinConfidence,
 	FieldInputModerationDedupeMinutes,
 	FieldCodexClientPolicy,
 	FieldClaudeDeviceLimitMode,
@@ -336,6 +339,8 @@ var (
 	DefaultInputModerationDisableAfterHits int
 	// DefaultInputModerationStrikeWindowHours holds the default value on creation for the "input_moderation_strike_window_hours" field.
 	DefaultInputModerationStrikeWindowHours int
+	// DefaultInputModerationMinConfidence holds the default value on creation for the "input_moderation_min_confidence" field.
+	DefaultInputModerationMinConfidence int
 	// DefaultInputModerationDedupeMinutes holds the default value on creation for the "input_moderation_dedupe_minutes" field.
 	DefaultInputModerationDedupeMinutes int
 	// DefaultCodexClientPolicy holds the default value on creation for the "codex_client_policy" field.
@@ -551,6 +556,11 @@ func ByInputModerationDisableAfterHits(opts ...sql.OrderTermOption) OrderOption 
 // ByInputModerationStrikeWindowHours orders the results by the input_moderation_strike_window_hours field.
 func ByInputModerationStrikeWindowHours(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldInputModerationStrikeWindowHours, opts...).ToFunc()
+}
+
+// ByInputModerationMinConfidence orders the results by the input_moderation_min_confidence field.
+func ByInputModerationMinConfidence(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInputModerationMinConfidence, opts...).ToFunc()
 }
 
 // ByInputModerationDedupeMinutes orders the results by the input_moderation_dedupe_minutes field.

@@ -122,11 +122,12 @@ type CreateGroupRequest struct {
 	InputModerationEnabled           bool     `json:"input_moderation_enabled"`
 	InputModerationAutoDisableUser   bool     `json:"input_moderation_auto_disable_user"`
 	InputModerationCategories        []string `json:"input_moderation_categories"`
-	InputModerationActionMode        string   `json:"input_moderation_action_mode" binding:"omitempty,oneof=cooldown_then_disable immediate_disable"`
+	InputModerationActionMode        string   `json:"input_moderation_action_mode" binding:"omitempty,oneof=cooldown_then_disable immediate_disable warn_then_cooldown warn_then_disable"`
 	InputModerationCooldownMinutes   int      `json:"input_moderation_cooldown_minutes"`
 	InputModerationDisableAfterHits  int      `json:"input_moderation_disable_after_hits"`
 	InputModerationStrikeWindowHours int      `json:"input_moderation_strike_window_hours"`
 	InputModerationDedupeMinutes     int      `json:"input_moderation_dedupe_minutes"`
+	InputModerationMinConfidence     int      `json:"input_moderation_min_confidence"`
 	CodexClientPolicy                string   `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only local_proxy_only"`
 	ClaudeDeviceLimitMode            string   `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
 	ClaudeDeviceBaseLimit            int      `json:"claude_device_base_limit"`
@@ -177,11 +178,12 @@ type UpdateGroupRequest struct {
 	InputModerationEnabled           *bool     `json:"input_moderation_enabled"`
 	InputModerationAutoDisableUser   *bool     `json:"input_moderation_auto_disable_user"`
 	InputModerationCategories        *[]string `json:"input_moderation_categories"`
-	InputModerationActionMode        *string   `json:"input_moderation_action_mode" binding:"omitempty,oneof=cooldown_then_disable immediate_disable"`
+	InputModerationActionMode        *string   `json:"input_moderation_action_mode" binding:"omitempty,oneof=cooldown_then_disable immediate_disable warn_then_cooldown warn_then_disable"`
 	InputModerationCooldownMinutes   *int      `json:"input_moderation_cooldown_minutes"`
 	InputModerationDisableAfterHits  *int      `json:"input_moderation_disable_after_hits"`
 	InputModerationStrikeWindowHours *int      `json:"input_moderation_strike_window_hours"`
 	InputModerationDedupeMinutes     *int      `json:"input_moderation_dedupe_minutes"`
+	InputModerationMinConfidence     *int      `json:"input_moderation_min_confidence"`
 	CodexClientPolicy                *string   `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only local_proxy_only"`
 	ClaudeDeviceLimitMode            *string   `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
 	ClaudeDeviceBaseLimit            *int      `json:"claude_device_base_limit"`
@@ -317,6 +319,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		InputModerationDisableAfterHits:  req.InputModerationDisableAfterHits,
 		InputModerationStrikeWindowHours: req.InputModerationStrikeWindowHours,
 		InputModerationDedupeMinutes:     req.InputModerationDedupeMinutes,
+		InputModerationMinConfidence:     req.InputModerationMinConfidence,
 		CodexClientPolicy:                req.CodexClientPolicy,
 		ClaudeDeviceLimitMode:            req.ClaudeDeviceLimitMode,
 		ClaudeDeviceBaseLimit:            req.ClaudeDeviceBaseLimit,
@@ -388,6 +391,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		InputModerationDisableAfterHits:  req.InputModerationDisableAfterHits,
 		InputModerationStrikeWindowHours: req.InputModerationStrikeWindowHours,
 		InputModerationDedupeMinutes:     req.InputModerationDedupeMinutes,
+		InputModerationMinConfidence:     req.InputModerationMinConfidence,
 		CodexClientPolicy:                req.CodexClientPolicy,
 		ClaudeDeviceLimitMode:            req.ClaudeDeviceLimitMode,
 		ClaudeDeviceBaseLimit:            req.ClaudeDeviceBaseLimit,

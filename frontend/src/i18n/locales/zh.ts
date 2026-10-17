@@ -2034,6 +2034,13 @@ export default {
         environmentModeRemove: '删除'
       },
       inputModeration: {
+ usageColumn: '输入检测',
+ noHit: '暂无命中结果',
+ asyncHint: '异步检测；无记录不代表已通过检测',
+ actions: { warning: '告警', cooldown: '临时冷却', auto_disabled: '已停用', audit: '仅记录', duplicate_ignored: '重复未计次', category_not_selected: '分类未选中', ignored_admin: '管理员豁免', already_inactive: '用户已停用', stale_user_state: '状态已重置' },
+ counted: '已计次',
+
+ minConfidence: '最低命中分数（%）', warnThenCooldown: '累计命中后告警并临时冷却', warnThenDisable: '累计命中后停用用户',
         title: '异步用户输入审核',
         enabled: '审核最新真实用户输入',
         hint: '请求不会等待审核结果；仅把最新用户文本提交给内部分类服务，不包含系统提示、工具结果或凭证。',
@@ -2045,7 +2052,7 @@ export default {
         cooldownThenDisable: '首次冷却，累计命中后永久禁用',
         immediateDisable: '首次命中立即永久禁用',
         cooldownMinutes: '冷却分钟数',
-        disableAfterHits: '永久禁用命中次数',
+        disableAfterHits: '触发处理的累计命中次数',
         strikeWindowHours: '累计窗口（小时）',
         dedupeMinutes: '相同内容去重（分钟）'
       },

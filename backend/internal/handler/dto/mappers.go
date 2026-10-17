@@ -151,6 +151,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		InputModerationDisableAfterHits:  g.InputModerationDisableAfterHits,
 		InputModerationStrikeWindowHours: g.InputModerationStrikeWindowHours,
 		InputModerationDedupeMinutes:     g.InputModerationDedupeMinutes,
+		InputModerationMinConfidence:     g.InputModerationMinConfidence,
 		CodexClientPolicy:                g.CodexClientPolicy,
 		ClaudeDeviceLimitMode:            g.ClaudeDeviceLimitMode,
 		ClaudeDeviceBaseLimit:            g.ClaudeDeviceBaseLimit,
@@ -692,6 +693,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		SessionAccountCount:   l.SessionAccountCount,
 		SessionAccounts:       SessionAccountSummariesFromService(l.SessionAccounts),
 		FailoverEvents:        FailoverEventsFromService(l.FailoverEvents),
+		ModerationEvents:      l.ModerationEvents,
 	}
 }
 

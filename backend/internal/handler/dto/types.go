@@ -145,6 +145,7 @@ type AdminGroup struct {
 	InputModerationDisableAfterHits  int      `json:"input_moderation_disable_after_hits"`
 	InputModerationStrikeWindowHours int      `json:"input_moderation_strike_window_hours"`
 	InputModerationDedupeMinutes     int      `json:"input_moderation_dedupe_minutes"`
+	InputModerationMinConfidence     int      `json:"input_moderation_min_confidence"`
 	CodexClientPolicy                string   `json:"codex_client_policy"`
 	ClaudeDeviceLimitMode            string   `json:"claude_device_limit_mode"`
 	ClaudeDeviceBaseLimit            int      `json:"claude_device_base_limit"`
@@ -463,6 +464,7 @@ type UsageLog struct {
 
 // AdminUsageLog 是管理员接口使用的 usage log DTO（包含管理员字段）。
 type AdminUsageLog struct {
+	ModerationEvents []service.UsageModerationEvent `json:"moderation_events,omitempty"`
 	UsageLog
 	PricingSnapshot *service.PricingSnapshot `json:"pricing_snapshot,omitempty"`
 

@@ -28,6 +28,7 @@ func TestInputModerationHTTPClientClassify(t *testing.T) {
 	defer server.Close()
 
 	cfg := &config.Config{}
+	cfg.Gateway.InputModeration.Engine = "qwen"
 	cfg.Gateway.InputModeration.Endpoint = server.URL
 	cfg.Gateway.InputModeration.RequestTimeoutSeconds = 1
 	client := NewInputModerationClient(cfg)
@@ -41,6 +42,7 @@ func TestInputModerationHTTPClientClassify(t *testing.T) {
 
 func TestInputModerationHTTPClientRejectsInvalidEndpoint(t *testing.T) {
 	cfg := &config.Config{}
+	cfg.Gateway.InputModeration.Engine = "qwen"
 	cfg.Gateway.InputModeration.Endpoint = "file:///tmp/moderation"
 	client := NewInputModerationClient(cfg)
 
@@ -69,7 +71,7 @@ func TestInsertInputModerationEventPersistsSourceAndTurn(t *testing.T) {
 			"policy-v1",
 			service.InputModerationSourceOpenAIResponsesWS,
 			2,
-			createdAt,
+			createdAt, "null", 0,
 		).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -96,6 +98,7 @@ func TestInsertInputModerationEventPersistsSourceAndTurn(t *testing.T) {
 
 func TestApplyInputModerationIncidentCooldownThenDisable(t *testing.T) {
 	tests := []struct {
+		hits         int
 		name         string
 		priorStrikes int
 		windowStart  any
@@ -105,6 +108,9 @@ func TestApplyInputModerationIncidentCooldownThenDisable(t *testing.T) {
 		wantCooldown bool
 		actionMode   string
 	}{
+		{name: "first high confidence incident warns", hits: 3, wantAction: service.InputModerationActionWarning, wantStrikes: 1, actionMode: service.InputModerationActionModeWarnThenCooldown},
+		{name: "third incident cools down without disabling", hits: 3, priorStrikes: 2, windowStart: time.Unix(900, 0).UTC(), wantAction: service.InputModerationActionCooldown, wantStrikes: 3, wantCooldown: true, actionMode: service.InputModerationActionModeWarnThenCooldown},
+		{name: "third incident optionally disables", hits: 3, priorStrikes: 2, windowStart: time.Unix(900, 0).UTC(), wantAction: service.InputModerationActionAutoDisabled, wantStrikes: 3, wantDisabled: true, actionMode: service.InputModerationActionModeWarnThenDisable},
 		{name: "first incident cools down", priorStrikes: 0, wantAction: service.InputModerationActionCooldown, wantStrikes: 1, wantCooldown: true, actionMode: service.InputModerationActionModeCooldownThenDisable},
 		{name: "second incident disables", priorStrikes: 1, windowStart: time.Unix(900, 0).UTC(), wantAction: service.InputModerationActionAutoDisabled, wantStrikes: 2, wantDisabled: true, actionMode: service.InputModerationActionModeCooldownThenDisable},
 		{name: "expired strike window resets", priorStrikes: 1, windowStart: time.Unix(1000, 0).UTC().Add(-25 * time.Hour), wantAction: service.InputModerationActionCooldown, wantStrikes: 1, wantCooldown: true, actionMode: service.InputModerationActionModeCooldownThenDisable},
@@ -142,6 +148,9 @@ func TestApplyInputModerationIncidentCooldownThenDisable(t *testing.T) {
 				WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectCommit()
 
+			if tt.hits == 0 {
+				tt.hits = 2
+			}
 			repo := NewInputModerationRepository(db)
 			transition, err := repo.ApplyInputModerationIncident(context.Background(), &service.InputModerationEvent{
 				JobID: "00000000-0000-4000-8000-000000000001", UserID: 1, APIKeyID: 2, GroupID: 3,
@@ -150,7 +159,7 @@ func TestApplyInputModerationIncidentCooldownThenDisable(t *testing.T) {
 				Source: service.InputModerationSourceOpenAIResponsesHTTP, EnqueuedAt: now.Add(-time.Second), CreatedAt: now,
 			}, service.InputModerationEscalationPolicy{
 				ActionMode: tt.actionMode,
-				Cooldown:   30 * time.Minute, DisableAfterHits: 2,
+				Cooldown:   30 * time.Minute, DisableAfterHits: tt.hits,
 				StrikeWindow: 24 * time.Hour, DedupeWindow: 5 * time.Minute,
 			})
 

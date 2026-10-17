@@ -439,11 +439,12 @@ export interface AdminGroup extends Group {
 	input_moderation_enabled: boolean
 	input_moderation_auto_disable_user: boolean
 	input_moderation_categories: string[]
-	input_moderation_action_mode: 'cooldown_then_disable' | 'immediate_disable'
+	input_moderation_action_mode: 'warn_then_cooldown' | 'warn_then_disable' | 'cooldown_then_disable' | 'immediate_disable'
 	input_moderation_cooldown_minutes: number
 	input_moderation_disable_after_hits: number
 	input_moderation_strike_window_hours: number
 	input_moderation_dedupe_minutes: number
+	input_moderation_min_confidence: number
 	codex_client_policy: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	claude_device_limit_mode: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit: number
@@ -558,11 +559,12 @@ export interface CreateGroupRequest {
 	input_moderation_enabled?: boolean
 	input_moderation_auto_disable_user?: boolean
 	input_moderation_categories?: string[]
-	input_moderation_action_mode?: 'cooldown_then_disable' | 'immediate_disable'
+	input_moderation_action_mode?: 'warn_then_cooldown' | 'warn_then_disable' | 'cooldown_then_disable' | 'immediate_disable'
 	input_moderation_cooldown_minutes?: number
 	input_moderation_disable_after_hits?: number
 	input_moderation_strike_window_hours?: number
 	input_moderation_dedupe_minutes?: number
+	input_moderation_min_confidence?: number
 	codex_client_policy?: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit?: number
@@ -607,11 +609,12 @@ export interface UpdateGroupRequest {
 	input_moderation_enabled?: boolean
 	input_moderation_auto_disable_user?: boolean
 	input_moderation_categories?: string[]
-	input_moderation_action_mode?: 'cooldown_then_disable' | 'immediate_disable'
+	input_moderation_action_mode?: 'warn_then_cooldown' | 'warn_then_disable' | 'cooldown_then_disable' | 'immediate_disable'
 	input_moderation_cooldown_minutes?: number
 	input_moderation_disable_after_hits?: number
 	input_moderation_strike_window_hours?: number
 	input_moderation_dedupe_minutes?: number
+	input_moderation_min_confidence?: number
 	codex_client_policy?: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit?: number
@@ -1204,6 +1207,7 @@ export interface UsagePricingSnapshot {
 }
 
 export interface AdminUsageLog extends UsageLog {
+ moderation_events?: Array<{ categories: string[]; scores: Record<string, number> | null; min_confidence: number | null; action: string; counted_as_strike: boolean; model_version: string }>
   pricing_snapshot?: UsagePricingSnapshot | null
   // 账号计费倍率（仅管理员可见）
   account_rate_multiplier?: number | null

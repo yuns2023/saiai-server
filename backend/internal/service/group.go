@@ -101,6 +101,7 @@ type Group struct {
 	InputModerationDisableAfterHits  int
 	InputModerationStrikeWindowHours int
 	InputModerationDedupeMinutes     int
+	InputModerationMinConfidence     int
 	CodexClientPolicy                string
 	ClaudeDeviceLimitMode            string
 	ClaudeDeviceBaseLimit            int

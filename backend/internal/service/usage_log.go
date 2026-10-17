@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 )
 
 const (
@@ -92,13 +95,15 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 }
 
 type UsageLog struct {
-	ID        int64
-	UserID    int64
-	APIKeyID  int64
-	AccountID int64
-	RequestID string
-	SessionID *string
-	Model     string
+	ModerationRef    *InputModerationUsageRef
+	ModerationEvents []UsageModerationEvent
+	ID               int64
+	UserID           int64
+	APIKeyID         int64
+	AccountID        int64
+	RequestID        string
+	SessionID        *string
+	Model            string
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Nil means no mapping was applied (requested model was used as-is).
 	UpstreamModel *string
@@ -274,4 +279,31 @@ func (u *UsageLog) SyncRequestTypeAndLegacyFields() {
 	requestType := u.EffectiveRequestType()
 	u.RequestType = requestType
 	u.Stream, u.OpenAIWSMode = ApplyLegacyRequestFields(requestType, u.Stream, u.OpenAIWSMode)
+}
+
+// InputModerationUsageRef correlates a local request/WS turn to the final billing ID.
+// It is captured before request context is detached; it never contains prompt text.
+type InputModerationUsageRef struct {
+	RequestID, Source string
+	TurnNumber        int
+}
+
+func CaptureInputModerationUsageRef(ctx context.Context, key *APIKey, source string, turn int) *InputModerationUsageRef {
+	if ctx == nil || key == nil || key.Group == nil || !key.Group.InputModerationEnabled {
+		return nil
+	}
+	id, _ := ctx.Value(ctxkey.RequestID).(string)
+	if strings.TrimSpace(id) == "" {
+		return nil
+	}
+	return &InputModerationUsageRef{RequestID: truncateModerationText(strings.TrimSpace(id), 128), Source: source, TurnNumber: turn}
+}
+
+type UsageModerationEvent struct {
+	Categories      []string           `json:"categories"`
+	Scores          map[string]float64 `json:"scores"`
+	MinConfidence   *int               `json:"min_confidence"`
+	Action          string             `json:"action"`
+	CountedAsStrike bool               `json:"counted_as_strike"`
+	ModelVersion    string             `json:"model_version"`
 }

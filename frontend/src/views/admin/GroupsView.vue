@@ -768,14 +768,17 @@
               </button>
             </div>
             <div v-if="createForm.input_moderation_auto_disable_user" class="space-y-3">
+ <div><label class="input-label">{{ t('admin.groups.inputModeration.minConfidence') }}</label><input v-model.number="createForm.input_moderation_min_confidence" type="number" min="1" max="100" class="input w-full" /></div>
               <div>
                 <label class="input-label">{{ t('admin.groups.inputModeration.actionMode') }}</label>
                 <select v-model="createForm.input_moderation_action_mode" class="input w-full">
-                  <option value="cooldown_then_disable">{{ t('admin.groups.inputModeration.cooldownThenDisable') }}</option>
+                  <option value="warn_then_cooldown">{{ t('admin.groups.inputModeration.warnThenCooldown') }}</option>
+ <option value="warn_then_disable">{{ t('admin.groups.inputModeration.warnThenDisable') }}</option>
+ <option value="cooldown_then_disable">{{ t('admin.groups.inputModeration.cooldownThenDisable') }}</option>
                   <option value="immediate_disable">{{ t('admin.groups.inputModeration.immediateDisable') }}</option>
                 </select>
               </div>
-              <div v-if="createForm.input_moderation_action_mode === 'cooldown_then_disable'" class="grid gap-3 sm:grid-cols-3">
+              <div v-if="createForm.input_moderation_action_mode !== 'immediate_disable'" class="grid gap-3 sm:grid-cols-3">
                 <div>
                   <label class="input-label">{{ t('admin.groups.inputModeration.cooldownMinutes') }}</label>
                   <input v-model.number="createForm.input_moderation_cooldown_minutes" type="number" min="1" max="1440" class="input w-full" />
@@ -1538,14 +1541,17 @@
               </button>
             </div>
             <div v-if="editForm.input_moderation_auto_disable_user" class="space-y-3">
+ <div><label class="input-label">{{ t('admin.groups.inputModeration.minConfidence') }}</label><input v-model.number="editForm.input_moderation_min_confidence" type="number" min="1" max="100" class="input w-full" /></div>
               <div>
                 <label class="input-label">{{ t('admin.groups.inputModeration.actionMode') }}</label>
                 <select v-model="editForm.input_moderation_action_mode" class="input w-full">
-                  <option value="cooldown_then_disable">{{ t('admin.groups.inputModeration.cooldownThenDisable') }}</option>
+                  <option value="warn_then_cooldown">{{ t('admin.groups.inputModeration.warnThenCooldown') }}</option>
+ <option value="warn_then_disable">{{ t('admin.groups.inputModeration.warnThenDisable') }}</option>
+ <option value="cooldown_then_disable">{{ t('admin.groups.inputModeration.cooldownThenDisable') }}</option>
                   <option value="immediate_disable">{{ t('admin.groups.inputModeration.immediateDisable') }}</option>
                 </select>
               </div>
-              <div v-if="editForm.input_moderation_action_mode === 'cooldown_then_disable'" class="grid gap-3 sm:grid-cols-3">
+              <div v-if="editForm.input_moderation_action_mode !== 'immediate_disable'" class="grid gap-3 sm:grid-cols-3">
                 <div>
                   <label class="input-label">{{ t('admin.groups.inputModeration.cooldownMinutes') }}</label>
                   <input v-model.number="editForm.input_moderation_cooldown_minutes" type="number" min="1" max="1440" class="input w-full" />
@@ -2173,9 +2179,10 @@ const createForm = reactive({
   input_moderation_enabled: false,
   input_moderation_auto_disable_user: false,
   input_moderation_categories: ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts'] as string[],
-  input_moderation_action_mode: 'cooldown_then_disable' as 'cooldown_then_disable' | 'immediate_disable',
+  input_moderation_action_mode: 'warn_then_cooldown' as 'warn_then_cooldown' | 'warn_then_disable' | 'cooldown_then_disable' | 'immediate_disable',
   input_moderation_cooldown_minutes: 30,
-  input_moderation_disable_after_hits: 2,
+  input_moderation_disable_after_hits: 3,
+ input_moderation_min_confidence: 90,
   input_moderation_strike_window_hours: 24,
   input_moderation_dedupe_minutes: 5,
   codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
@@ -2432,9 +2439,10 @@ const editForm = reactive({
   input_moderation_enabled: false,
   input_moderation_auto_disable_user: false,
   input_moderation_categories: ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts'] as string[],
-  input_moderation_action_mode: 'cooldown_then_disable' as 'cooldown_then_disable' | 'immediate_disable',
+  input_moderation_action_mode: 'warn_then_cooldown' as 'warn_then_cooldown' | 'warn_then_disable' | 'cooldown_then_disable' | 'immediate_disable',
   input_moderation_cooldown_minutes: 30,
-  input_moderation_disable_after_hits: 2,
+  input_moderation_disable_after_hits: 3,
+ input_moderation_min_confidence: 90,
   input_moderation_strike_window_hours: 24,
   input_moderation_dedupe_minutes: 5,
   codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
@@ -2586,9 +2594,10 @@ const closeCreateModal = () => {
   createForm.input_moderation_enabled = false
   createForm.input_moderation_auto_disable_user = false
   createForm.input_moderation_categories = ['Jailbreak', 'PII', 'Non-violent Illegal Acts', 'Unethical Acts']
-  createForm.input_moderation_action_mode = 'cooldown_then_disable'
+  createForm.input_moderation_action_mode = 'warn_then_cooldown'
   createForm.input_moderation_cooldown_minutes = 30
-  createForm.input_moderation_disable_after_hits = 2
+  createForm.input_moderation_disable_after_hits = 3
+ createForm.input_moderation_min_confidence = 90
   createForm.input_moderation_strike_window_hours = 24
   createForm.input_moderation_dedupe_minutes = 5
   createForm.codex_client_policy = 'off'
@@ -2687,9 +2696,10 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.input_moderation_enabled = group.input_moderation_enabled || false
   editForm.input_moderation_auto_disable_user = group.input_moderation_auto_disable_user || false
   editForm.input_moderation_categories = [...(group.input_moderation_categories || [])]
-  editForm.input_moderation_action_mode = group.input_moderation_action_mode || 'cooldown_then_disable'
+  editForm.input_moderation_action_mode = group.input_moderation_action_mode || 'warn_then_cooldown'
   editForm.input_moderation_cooldown_minutes = group.input_moderation_cooldown_minutes || 30
-  editForm.input_moderation_disable_after_hits = group.input_moderation_disable_after_hits || 2
+  editForm.input_moderation_disable_after_hits = group.input_moderation_disable_after_hits || 3
+ editForm.input_moderation_min_confidence = group.input_moderation_min_confidence ?? 90
   editForm.input_moderation_strike_window_hours = group.input_moderation_strike_window_hours || 24
   editForm.input_moderation_dedupe_minutes = group.input_moderation_dedupe_minutes || 5
   editForm.codex_client_policy = group.codex_client_policy || 'off'

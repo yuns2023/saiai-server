@@ -889,10 +889,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
 			}
 			h.captureSuccessfulRequestBody(c, body, result, apiKey, account, usageSessionID, inboundEndpoint, upstreamEndpoint, requestPayloadHash)
+			moderationRef := service.CaptureInputModerationUsageRef(c.Request.Context(), apiKey, service.InputModerationSourceAnthropicMessages, 0)
 
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			h.submitUsageRecordTask(func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
+					ModerationRef:      moderationRef,
 					Result:             result,
 					APIKey:             apiKey,
 					User:               apiKey.User,
@@ -1295,10 +1297,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
 			}
 			h.captureSuccessfulRequestBody(c, body, result, currentAPIKey, account, usageSessionID, inboundEndpoint, upstreamEndpoint, requestPayloadHash)
+			moderationRef := service.CaptureInputModerationUsageRef(c.Request.Context(), currentAPIKey, service.InputModerationSourceAnthropicMessages, 0)
 
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			h.submitUsageRecordTask(func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
+					ModerationRef:      moderationRef,
 					Result:             result,
 					APIKey:             currentAPIKey,
 					User:               currentAPIKey.User,

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,7 @@ const (
 	InputModerationSafetyUnsafe        = "unsafe"
 
 	InputModerationActionAudit               = "audit"
+	InputModerationActionWarning             = "warning"
 	InputModerationActionAutoDisabled        = "auto_disabled"
 	InputModerationActionAlreadyInactive     = "already_inactive"
 	InputModerationActionCategoryNotSelected = "category_not_selected"
@@ -31,6 +33,8 @@ const (
 	InputModerationActionCooldown            = "cooldown"
 	InputModerationActionDuplicateIgnored    = "duplicate_ignored"
 
+	InputModerationActionModeWarnThenCooldown    = "warn_then_cooldown"
+	InputModerationActionModeWarnThenDisable     = "warn_then_disable"
 	InputModerationActionModeCooldownThenDisable = "cooldown_then_disable"
 	InputModerationActionModeImmediateDisable    = "immediate_disable"
 
@@ -41,6 +45,7 @@ const (
 
 // InputModerationClassification is the sidecar's normalized output.
 type InputModerationClassification struct {
+	Scores       map[string]float64
 	Safety       string
 	Categories   []string
 	ModelVersion string
@@ -54,6 +59,8 @@ type InputModerationClient interface {
 // InputModerationEvent is a metadata-only audit record. Raw user text must not
 // be added to this structure.
 type InputModerationEvent struct {
+	Scores          map[string]float64
+	MinConfidence   int
 	JobID           string
 	RequestID       string
 	UserID          int64
@@ -198,10 +205,10 @@ func NewInputModerationService(
 		consumer:    "input-moderation-" + uuid.NewString(),
 	}
 	durableQueueEnabled := service.taskQueue != nil && service.encryptor != nil && cfg != nil &&
-		cfg.Totp.EncryptionKeyConfigured && strings.TrimSpace(moderationCfg.Endpoint) != ""
+		cfg.Totp.EncryptionKeyConfigured && moderationCfg.Configured()
 	if durableQueueEnabled {
 		service.startQueueConsumers(workerCount)
-	} else if service.taskQueue != nil && strings.TrimSpace(moderationCfg.Endpoint) != "" {
+	} else if service.taskQueue != nil && moderationCfg.Configured() {
 		slog.Warn("input_moderation_durable_queue_disabled", "reason", "totp.encryption_key must be explicitly configured")
 		service.taskQueue = nil
 	}
@@ -210,7 +217,7 @@ func NewInputModerationService(
 
 func (s *InputModerationService) EnabledForGroup(group *Group) bool {
 	return s != nil && group != nil && group.ID > 0 && group.InputModerationEnabled &&
-		strings.TrimSpace(s.cfg.Endpoint) != ""
+		s.cfg.Configured()
 }
 
 // Submit queues a moderation task without blocking on model inference.
@@ -405,7 +412,8 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 		slog.Warn("input_moderation_invalid_safety", "group_id", task.GroupID, "safety", result.Safety)
 		return fmt.Errorf("input moderation sidecar returned invalid safety %q", result.Safety)
 	}
-	if result.Safety == InputModerationSafetySafe {
+
+	if result.Safety == InputModerationSafetySafe && len(result.Scores) == 0 {
 		return nil
 	}
 	cancelClassify()
@@ -422,6 +430,23 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 		return nil
 	}
 
+	if len(result.Scores) > 0 {
+		result.Categories = nil
+		result.Safety = InputModerationSafetySafe
+		for category, score := range result.Scores {
+			if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
+				return fmt.Errorf("invalid moderation score")
+			}
+			if score >= float64(group.InputModerationMinConfidence)/100 {
+				result.Categories = append(result.Categories, category)
+				result.Safety = InputModerationSafetyUnsafe
+			}
+		}
+	}
+	if result.Safety == InputModerationSafetySafe {
+		return nil
+	}
+
 	hash := sha256.Sum256([]byte(task.Text))
 	event := &InputModerationEvent{
 		JobID:         task.JobID,
@@ -434,6 +459,8 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 		InputHash:     hex.EncodeToString(hash[:]),
 		Safety:        result.Safety,
 		Categories:    normalizeModerationCategories(result.Categories),
+		Scores:        result.Scores,
+		MinConfidence: group.InputModerationMinConfidence,
 		Action:        InputModerationActionAudit,
 		ModelVersion:  truncateModerationText(strings.TrimSpace(result.ModelVersion), 128),
 		PolicyVersion: fmt.Sprintf("%d", group.UpdatedAt.UTC().UnixNano()),
@@ -448,7 +475,7 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 	}
 	incidentApplied := false
 	if result.Safety == InputModerationSafetyUnsafe && group.InputModerationAutoDisableUser &&
-		moderationCategoriesMatch(group.InputModerationCategories, result.Categories) && s.eventRepo != nil {
+		moderationCategoriesMatch(group.InputModerationCategories, result.Categories) && (group.InputModerationMinConfidence == 0 || len(result.Scores) > 0) && s.eventRepo != nil {
 		transition, err := s.eventRepo.ApplyInputModerationIncident(actionCtx, event, InputModerationEscalationPolicy{
 			ActionMode:       group.InputModerationActionMode,
 			Cooldown:         time.Duration(group.InputModerationCooldownMinutes) * time.Minute,
@@ -463,7 +490,7 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 		incidentApplied = true
 		if transition != nil {
 			event.Action = transition.Action
-			event.CountedAsStrike = !transition.Duplicate
+			event.CountedAsStrike = !transition.Duplicate && (transition.Action == InputModerationActionWarning || transition.Action == InputModerationActionCooldown || transition.Action == InputModerationActionAutoDisabled)
 			if transition.BlockedUntil != nil && s.stateCache != nil {
 				if err := s.stateCache.SetUserCooldown(actionCtx, event.UserID, *transition.BlockedUntil); err != nil {
 					slog.Warn("input_moderation_cooldown_cache_set_failed", "user_id", event.UserID, "username", event.Username, "device_ref", event.DeviceRef, "error", err)

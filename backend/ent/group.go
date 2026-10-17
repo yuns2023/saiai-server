@@ -107,6 +107,8 @@ type Group struct {
 	InputModerationDisableAfterHits int `json:"input_moderation_disable_after_hits,omitempty"`
 	// InputModerationStrikeWindowHours holds the value of the "input_moderation_strike_window_hours" field.
 	InputModerationStrikeWindowHours int `json:"input_moderation_strike_window_hours,omitempty"`
+	// InputModerationMinConfidence holds the value of the "input_moderation_min_confidence" field.
+	InputModerationMinConfidence int `json:"input_moderation_min_confidence,omitempty"`
 	// InputModerationDedupeMinutes holds the value of the "input_moderation_dedupe_minutes" field.
 	InputModerationDedupeMinutes int `json:"input_moderation_dedupe_minutes,omitempty"`
 	// CodexClientPolicy holds the value of the "codex_client_policy" field.
@@ -240,7 +242,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case group.FieldRateMultiplier, group.FieldFiveHourLimitUsd, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k, group.FieldSoraImagePrice360, group.FieldSoraImagePrice540, group.FieldSoraVideoPricePerRequest, group.FieldSoraVideoPricePerRequestHd:
 			values[i] = new(sql.NullFloat64)
-		case group.FieldID, group.FieldRequiredLevelID, group.FieldDefaultValidityDays, group.FieldSoraStorageQuotaBytes, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldInputModerationCooldownMinutes, group.FieldInputModerationDisableAfterHits, group.FieldInputModerationStrikeWindowHours, group.FieldInputModerationDedupeMinutes, group.FieldClaudeDeviceBaseLimit:
+		case group.FieldID, group.FieldRequiredLevelID, group.FieldDefaultValidityDays, group.FieldSoraStorageQuotaBytes, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldInputModerationCooldownMinutes, group.FieldInputModerationDisableAfterHits, group.FieldInputModerationStrikeWindowHours, group.FieldInputModerationMinConfidence, group.FieldInputModerationDedupeMinutes, group.FieldClaudeDeviceBaseLimit:
 			values[i] = new(sql.NullInt64)
 		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldInputModerationActionMode, group.FieldCodexClientPolicy, group.FieldClaudeDeviceLimitMode:
 			values[i] = new(sql.NullString)
@@ -557,6 +559,12 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.InputModerationStrikeWindowHours = int(value.Int64)
 			}
+		case group.FieldInputModerationMinConfidence:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field input_moderation_min_confidence", values[i])
+			} else if value.Valid {
+				_m.InputModerationMinConfidence = int(value.Int64)
+			}
 		case group.FieldInputModerationDedupeMinutes:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field input_moderation_dedupe_minutes", values[i])
@@ -825,6 +833,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("input_moderation_strike_window_hours=")
 	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationStrikeWindowHours))
+	builder.WriteString(", ")
+	builder.WriteString("input_moderation_min_confidence=")
+	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationMinConfidence))
 	builder.WriteString(", ")
 	builder.WriteString("input_moderation_dedupe_minutes=")
 	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationDedupeMinutes))

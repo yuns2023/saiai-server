@@ -597,6 +597,20 @@ func (_c *GroupCreate) SetNillableInputModerationStrikeWindowHours(v *int) *Grou
 	return _c
 }
 
+// SetInputModerationMinConfidence sets the "input_moderation_min_confidence" field.
+func (_c *GroupCreate) SetInputModerationMinConfidence(v int) *GroupCreate {
+	_c.mutation.SetInputModerationMinConfidence(v)
+	return _c
+}
+
+// SetNillableInputModerationMinConfidence sets the "input_moderation_min_confidence" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableInputModerationMinConfidence(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetInputModerationMinConfidence(*v)
+	}
+	return _c
+}
+
 // SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
 func (_c *GroupCreate) SetInputModerationDedupeMinutes(v int) *GroupCreate {
 	_c.mutation.SetInputModerationDedupeMinutes(v)
@@ -895,6 +909,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultInputModerationStrikeWindowHours
 		_c.mutation.SetInputModerationStrikeWindowHours(v)
 	}
+	if _, ok := _c.mutation.InputModerationMinConfidence(); !ok {
+		v := group.DefaultInputModerationMinConfidence
+		_c.mutation.SetInputModerationMinConfidence(v)
+	}
 	if _, ok := _c.mutation.InputModerationDedupeMinutes(); !ok {
 		v := group.DefaultInputModerationDedupeMinutes
 		_c.mutation.SetInputModerationDedupeMinutes(v)
@@ -1021,6 +1039,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.InputModerationStrikeWindowHours(); !ok {
 		return &ValidationError{Name: "input_moderation_strike_window_hours", err: errors.New(`ent: missing required field "Group.input_moderation_strike_window_hours"`)}
+	}
+	if _, ok := _c.mutation.InputModerationMinConfidence(); !ok {
+		return &ValidationError{Name: "input_moderation_min_confidence", err: errors.New(`ent: missing required field "Group.input_moderation_min_confidence"`)}
 	}
 	if _, ok := _c.mutation.InputModerationDedupeMinutes(); !ok {
 		return &ValidationError{Name: "input_moderation_dedupe_minutes", err: errors.New(`ent: missing required field "Group.input_moderation_dedupe_minutes"`)}
@@ -1242,6 +1263,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.InputModerationStrikeWindowHours(); ok {
 		_spec.SetField(group.FieldInputModerationStrikeWindowHours, field.TypeInt, value)
 		_node.InputModerationStrikeWindowHours = value
+	}
+	if value, ok := _c.mutation.InputModerationMinConfidence(); ok {
+		_spec.SetField(group.FieldInputModerationMinConfidence, field.TypeInt, value)
+		_node.InputModerationMinConfidence = value
 	}
 	if value, ok := _c.mutation.InputModerationDedupeMinutes(); ok {
 		_spec.SetField(group.FieldInputModerationDedupeMinutes, field.TypeInt, value)
@@ -2167,6 +2192,24 @@ func (u *GroupUpsert) UpdateInputModerationStrikeWindowHours() *GroupUpsert {
 // AddInputModerationStrikeWindowHours adds v to the "input_moderation_strike_window_hours" field.
 func (u *GroupUpsert) AddInputModerationStrikeWindowHours(v int) *GroupUpsert {
 	u.Add(group.FieldInputModerationStrikeWindowHours, v)
+	return u
+}
+
+// SetInputModerationMinConfidence sets the "input_moderation_min_confidence" field.
+func (u *GroupUpsert) SetInputModerationMinConfidence(v int) *GroupUpsert {
+	u.Set(group.FieldInputModerationMinConfidence, v)
+	return u
+}
+
+// UpdateInputModerationMinConfidence sets the "input_moderation_min_confidence" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateInputModerationMinConfidence() *GroupUpsert {
+	u.SetExcluded(group.FieldInputModerationMinConfidence)
+	return u
+}
+
+// AddInputModerationMinConfidence adds v to the "input_moderation_min_confidence" field.
+func (u *GroupUpsert) AddInputModerationMinConfidence(v int) *GroupUpsert {
+	u.Add(group.FieldInputModerationMinConfidence, v)
 	return u
 }
 
@@ -3133,6 +3176,27 @@ func (u *GroupUpsertOne) AddInputModerationStrikeWindowHours(v int) *GroupUpsert
 func (u *GroupUpsertOne) UpdateInputModerationStrikeWindowHours() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateInputModerationStrikeWindowHours()
+	})
+}
+
+// SetInputModerationMinConfidence sets the "input_moderation_min_confidence" field.
+func (u *GroupUpsertOne) SetInputModerationMinConfidence(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationMinConfidence(v)
+	})
+}
+
+// AddInputModerationMinConfidence adds v to the "input_moderation_min_confidence" field.
+func (u *GroupUpsertOne) AddInputModerationMinConfidence(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddInputModerationMinConfidence(v)
+	})
+}
+
+// UpdateInputModerationMinConfidence sets the "input_moderation_min_confidence" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateInputModerationMinConfidence() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationMinConfidence()
 	})
 }
 
@@ -4275,6 +4339,27 @@ func (u *GroupUpsertBulk) AddInputModerationStrikeWindowHours(v int) *GroupUpser
 func (u *GroupUpsertBulk) UpdateInputModerationStrikeWindowHours() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateInputModerationStrikeWindowHours()
+	})
+}
+
+// SetInputModerationMinConfidence sets the "input_moderation_min_confidence" field.
+func (u *GroupUpsertBulk) SetInputModerationMinConfidence(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationMinConfidence(v)
+	})
+}
+
+// AddInputModerationMinConfidence adds v to the "input_moderation_min_confidence" field.
+func (u *GroupUpsertBulk) AddInputModerationMinConfidence(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddInputModerationMinConfidence(v)
+	})
+}
+
+// UpdateInputModerationMinConfidence sets the "input_moderation_min_confidence" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateInputModerationMinConfidence() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationMinConfidence()
 	})
 }
 

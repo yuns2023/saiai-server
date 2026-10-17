@@ -153,12 +153,17 @@ gateway:
   claude_session_initial_serial:
     enabled: true
     wait_timeout_ms: 90000
-  # Optional asynchronous user-input moderation sidecar. A group must also
+  # Optional asynchronous Jev user-input moderation. A group must also
   # enable input moderation in the admin UI. Queue payloads are AES-GCM encrypted
   # in Redis Stream when a fixed totp.encryption_key is configured; otherwise
   # the service explicitly falls back to its bounded in-memory queue.
   input_moderation:
-    endpoint: "" # e.g. http://risk-classifier:8081/v1/classify
+    # Jev is the default and never falls back to another detector.
+    engine: "jev"
+    # Inject GATEWAY_INPUT_MODERATION_API_KEY through the deployment secret store.
+    # Empty endpoint uses https://api.typesafe.ai/v1/systemone (jev-1.13.0).
+    api_key: ""
+    endpoint: "" # Official Jev endpoint by default; clear any old sidecar override.
     worker_count: 2
     queue_size: 256
     request_timeout_seconds: 15

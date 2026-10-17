@@ -35,11 +35,15 @@ func (r *inputModerationRepository) InsertInputModerationEvent(ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("marshal categories: %w", err)
 	}
+	scores, err := json.Marshal(event.Scores)
+	if err != nil {
+		return fmt.Errorf("marshal scores: %w", err)
+	}
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO input_moderation_events (
 			job_id, request_id, user_id, api_key_id, group_id, input_hash,
-			safety, categories, action, model_version, policy_version, source, turn_number, created_at
-		) VALUES ($1::uuid, NULLIF($2, ''), $3, $4, $5, $6, $7, $8::jsonb, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, 0), $14)
+			safety, categories, action, model_version, policy_version, source, turn_number, created_at, scores, min_confidence
+		) VALUES ($1::uuid, NULLIF($2, ''), $3, $4, $5, $6, $7, $8::jsonb, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, 0), $14, $15::jsonb, $16)
 		ON CONFLICT (job_id) DO NOTHING`,
 		event.JobID,
 		event.RequestID,
@@ -54,7 +58,7 @@ func (r *inputModerationRepository) InsertInputModerationEvent(ctx context.Conte
 		event.PolicyVersion,
 		event.Source,
 		event.TurnNumber,
-		event.CreatedAt,
+		event.CreatedAt, string(scores), event.MinConfidence,
 	)
 	if err != nil {
 		return fmt.Errorf("insert input moderation event: %w", err)
@@ -80,19 +84,23 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 	if err != nil {
 		return nil, fmt.Errorf("marshal categories: %w", err)
 	}
+	scores, err := json.Marshal(event.Scores)
+	if err != nil {
+		return nil, fmt.Errorf("marshal scores: %w", err)
+	}
 	var eventID int64
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO input_moderation_events (
 			job_id, request_id, user_id, api_key_id, group_id, input_hash,
 			safety, categories, action, model_version, policy_version, source,
-			turn_number, counted_as_strike, created_at
+			turn_number, counted_as_strike, created_at, scores, min_confidence
 		) VALUES ($1::uuid, NULLIF($2, ''), $3, $4, $5, $6, $7, $8::jsonb,
-			'processing', NULLIF($9, ''), NULLIF($10, ''), $11, NULLIF($12, 0), false, $13)
+			'processing', NULLIF($9, ''), NULLIF($10, ''), $11, NULLIF($12, 0), false, $13, $14::jsonb, $15)
 		ON CONFLICT (job_id) DO NOTHING
 		RETURNING id`,
 		event.JobID, event.RequestID, event.UserID, event.APIKeyID, event.GroupID,
 		event.InputHash, event.Safety, string(categories), event.ModelVersion,
-		event.PolicyVersion, event.Source, event.TurnNumber, event.CreatedAt,
+		event.PolicyVersion, event.Source, event.TurnNumber, event.CreatedAt, string(scores), event.MinConfidence,
 	).Scan(&eventID)
 	if errors.Is(err, sql.ErrNoRows) {
 		var action string
@@ -174,9 +182,10 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 	if err := tx.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM input_moderation_events
-			WHERE user_id = $1 AND input_hash = $2 AND counted_as_strike = true
-			  AND created_at >= $3 AND id <> $4
-		)`, event.UserID, event.InputHash, event.CreatedAt.Add(-dedupeWindow), eventID).Scan(&duplicate); err != nil {
+			WHERE user_id = $1 AND counted_as_strike = true AND id <> $4
+ AND ((input_hash = $2 AND created_at >= $3)
+ OR ($5 <> '' AND request_id = $5 AND source = $6 AND COALESCE(turn_number,0) = $7 AND api_key_id = $8 AND group_id = $9))
+		)`, event.UserID, event.InputHash, event.CreatedAt.Add(-dedupeWindow), eventID, event.RequestID, event.Source, event.TurnNumber, event.APIKeyID, event.GroupID).Scan(&duplicate); err != nil {
 		return nil, fmt.Errorf("check input moderation incident duplicate: %w", err)
 	}
 	if duplicate {
@@ -208,9 +217,12 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 	disableAfterHits := policy.DisableAfterHits
 	if disableAfterHits <= 0 {
 		disableAfterHits = 2
+		if policy.ActionMode == service.InputModerationActionModeWarnThenCooldown || policy.ActionMode == service.InputModerationActionModeWarnThenDisable {
+			disableAfterHits = 3
+		}
 	}
 	actionMode := strings.ToLower(strings.TrimSpace(policy.ActionMode))
-	shouldDisable := actionMode == service.InputModerationActionModeImmediateDisable || strikeCount >= disableAfterHits
+	shouldDisable := actionMode == service.InputModerationActionModeImmediateDisable || (actionMode != service.InputModerationActionModeWarnThenCooldown && strikeCount >= disableAfterHits)
 	action := service.InputModerationActionCooldown
 	var nextBlockedUntil *time.Time
 	userDisabled := false
@@ -231,12 +243,21 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 		} else {
 			action = service.InputModerationActionStaleUserState
 		}
+	} else if (actionMode == service.InputModerationActionModeWarnThenCooldown || actionMode == service.InputModerationActionModeWarnThenDisable) && strikeCount < disableAfterHits {
+		action = service.InputModerationActionWarning
+		if blockedUntil.Valid && blockedUntil.Time.After(now) {
+			value := blockedUntil.Time
+			nextBlockedUntil = &value
+		}
 	} else {
 		cooldown := policy.Cooldown
 		if cooldown <= 0 {
 			cooldown = 30 * time.Minute
 		}
 		value := now.Add(cooldown)
+		if blockedUntil.Valid && blockedUntil.Time.After(value) {
+			value = blockedUntil.Time
+		}
 		nextBlockedUntil = &value
 	}
 
@@ -332,6 +353,9 @@ type inputModerationHTTPClient struct {
 }
 
 func NewInputModerationClient(cfg *config.Config) service.InputModerationClient {
+	if cfg == nil || cfg.Gateway.InputModeration.Engine != "qwen" {
+		return newJevModerationClient(cfg)
+	}
 	endpoint := ""
 	timeout := 15 * time.Second
 	if cfg != nil {

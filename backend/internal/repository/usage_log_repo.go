@@ -2824,6 +2824,9 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 	if err := r.hydrateUsageLogSessionAccounts(ctx, logs, filters); err != nil {
 		return nil, nil, err
 	}
+	if err := r.hydrateUsageLogModeration(ctx, logs); err != nil {
+		return nil, nil, err
+	}
 	if err := r.hydrateUsageLogFailoverEvents(ctx, logs); err != nil {
 		return nil, nil, err
 	}

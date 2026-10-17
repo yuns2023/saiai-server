@@ -588,6 +588,7 @@ const allColumns = computed(() => [
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
   { key: 'account', label: t('admin.usage.account'), sortable: false },
   { key: 'model', label: t('usage.model'), sortable: true },
+ { key: 'moderation', label: t('admin.groups.inputModeration.usageColumn'), sortable: false },
   { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
   { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
   { key: 'session_id', label: t('usage.sessionId'), sortable: false },
@@ -657,7 +658,9 @@ const handleColumnClickOutside = (event: MouseEvent) => {
   }
 }
 
+let moderationRefresh: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
+ moderationRefresh = setInterval(() => { if (!document.hidden && !loading.value) void loadLogs() }, 30000)
   applyRouteQueryFilters()
   loadLogs()
   loadStats()
@@ -668,7 +671,7 @@ onMounted(() => {
   loadSavedColumns()
   document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
+onUnmounted(() => { clearInterval(moderationRefresh); abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)
