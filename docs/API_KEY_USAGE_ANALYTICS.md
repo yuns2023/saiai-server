@@ -160,3 +160,18 @@ Responses path, `/backend-api/codex/responses`.
 These paths come from the forwarded request, rather than from an inferred
 OpenAI default. Query parameters and credentials are not included. This is
 usage metadata only; existing records and request/response bodies are unchanged.
+
+## Input cache read rate
+
+The administrator usage card shows **Input cache read rate**:
+`cache_read / (uncached_input + cache_creation + cache_read) × 100`.
+Cache writes count only in the denominator; output tokens do not enter the
+ratio. Calculate from unrounded totals and round only the displayed percentage
+to one decimal place. Inputs without cache reuse show 0.0%; missing statistics
+or a zero input denominator show —. This is a token-weighted input reuse metric,
+not the fraction of requests that hit a cache or the share of total tokens used
+for cache reads and writes. The total Token card still includes all four classes.
+
+Regression coverage must mount the actual usage card and distinguish cache
+writes from reads, vary output independently, cover zero/missing inputs, and
+keep the formula hint aligned with both locales.

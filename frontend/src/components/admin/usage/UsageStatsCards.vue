@@ -15,7 +15,9 @@
       <div>
         <p class="text-xs font-medium text-gray-500">{{ t('tokens.total') }}</p>
         <TokenUsageSummary :data="stats" period="total" />
-        <p v-if="cacheShare > 0" class="text-xs text-gray-400">{{ t('usage.cacheShare') }} {{ cacheShare.toFixed(1) }}%</p>
+        <p class="text-xs text-gray-400" data-testid="input-cache-read-rate" :title="t('usage.inputCacheReadRateHint')">
+          {{ t('usage.inputCacheReadRate') }} {{ inputCacheReadRate === null ? '—' : `${inputCacheReadRate.toFixed(1)}%` }}
+        </p>
       </div>
     </div>
     <div class="card p-4 flex items-center gap-3">
@@ -57,10 +59,13 @@ const props = defineProps<{ stats: AdminUsageStatsResponse | null }>()
 
 const { t } = useI18n()
 
-const cacheShare = computed(() => {
-  const total = props.stats?.total_tokens || 0
-  if (total <= 0) return 0
-  return ((props.stats?.total_cache_tokens || 0) / total) * 100
+const inputCacheReadRate = computed(() => {
+  const input = props.stats?.total_input_tokens || 0
+  const cacheWrite = props.stats?.total_cache_creation_tokens || 0
+  const cacheRead = props.stats?.total_cache_read_tokens || 0
+  const totalInput = input + cacheWrite + cacheRead
+  if (totalInput <= 0) return null
+  return (cacheRead / totalInput) * 100
 })
 
 const formatDuration = (ms: number) =>
