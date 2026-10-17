@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>模型倍率配置 · 交互草图</title>
+  <style>
+    :root{color-scheme:light;--ink:#182532;--muted:#697786;--line:#dfe7e9;--accent:#087f78;--soft:#ecf8f5;--bg:#f4f7f8}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+    main{max-width:1060px;margin:auto;padding:32px 28px 48px}h1,h2,p{margin:0}h1{font-size:27px;font-weight:650;letter-spacing:-.6px}h2{font-size:18px;font-weight:650}
+    .top{display:flex;justify-content:space-between;align-items:start;gap:20px}.eyebrow{color:var(--accent);font-size:12px;font-weight:650;letter-spacing:1px;margin-bottom:7px}
+    .sub,.hint{color:var(--muted);font-size:13px}.sub{margin-top:6px}.hint{margin-top:7px}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px}
+    .pill{display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:3px 11px;background:var(--soft);color:var(--accent);font-size:12px;font-weight:600;white-space:nowrap}
+    nav{display:flex;gap:6px;border-bottom:1px solid var(--line);margin:25px 0 22px;padding-bottom:10px}nav button{border:0;background:transparent;color:var(--muted)}nav button[aria-pressed=true]{background:var(--soft);color:var(--accent);font-weight:650}
+    .modelbar{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap}.modelname{font-weight:600;font-size:16px}.modelbar .hint{margin-top:2px}
+    .card{background:white;border:1px solid var(--line);border-radius:14px;margin-bottom:18px;box-shadow:0 3px 12px #20374403;overflow:hidden}.body{padding:24px}.heading{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+    .config{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.9fr);gap:38px;align-items:start}label{display:block;font-size:14px;font-weight:550;margin-bottom:8px}
+    input,select{font:inherit;color:var(--ink);background:white;border:1px solid #d6e0e3;border-radius:9px;min-height:44px;padding:9px 12px;width:100%}input:disabled{background:#f4f6f7;color:#8d969e}
+    input:focus,select:focus{outline:3px solid #b5e4dc;outline-offset:1px;border-color:var(--accent)}input::placeholder{color:#8a98a3}
+    button{font:inherit;font-size:14px;min-height:42px;border-radius:9px;border:1px solid #d6e0e3;padding:8px 16px;cursor:pointer;color:var(--ink);background:white}button:hover:not(:disabled){background:#f4f8f7}button:focus-visible{outline:3px solid #83cfc2;outline-offset:2px}
+    button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:600}button.primary:hover:not(:disabled){background:#056b65}button:disabled{opacity:.45;cursor:not-allowed}.textbutton{border:0;background:transparent;color:var(--accent);padding:0;min-height:28px;font-size:13px;margin-top:8px}
+    .aside{padding:16px 18px;background:#f7f9fa;border-radius:10px;font-size:13px;color:var(--muted)}.aside strong{display:block;color:var(--ink);font-size:14px;margin-bottom:5px}
+    .footer{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 24px;border-top:1px solid var(--line);background:#fcfdfd}.actions{display:flex;gap:9px}.state{font-size:13px;color:var(--muted)}.state.changed{color:#8b661d}
+    details summary{list-style:none;cursor:pointer;font-size:16px;font-weight:600;display:flex;justify-content:space-between;gap:16px}details summary::-webkit-details-marker{display:none}summary span{color:var(--muted);font-size:12px;font-weight:400}
+    .trial{display:grid;grid-template-columns:minmax(0,220px) auto;gap:12px;align-items:end;margin-top:20px;width:fit-content;max-width:100%}.result{margin-top:16px;padding:13px 16px;background:var(--soft);border-radius:9px;color:var(--accent);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.result strong{font-size:20px}.result.empty{color:var(--muted);background:#f6f8f9;font-size:13px}
+    .error{color:#b54736;font-size:12px;min-height:20px;margin-top:5px}.scope{font-size:13px;color:var(--muted);margin-bottom:16px}.rule{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,.8fr);gap:16px;align-items:start}.readonly{min-height:44px;display:flex;align-items:center;overflow-wrap:anywhere}
+    .effective{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:17px 20px;background:var(--soft);border-radius:10px;margin-top:20px}.rate{font-size:28px;line-height:1.2;color:var(--accent);font-weight:650}.effective .hint{font-size:12px}
+    .notice{min-height:25px;margin-top:16px;font-size:13px;color:var(--accent)}[hidden]{display:none!important}
+    @media(max-width:660px){main{padding:22px 16px}h1{font-size:23px}.top{display:block}.top>.pill{margin-top:12px}.body{padding:20px}.config,.rule{grid-template-columns:1fr;gap:18px}.footer{align-items:stretch;flex-direction:column;padding:16px 20px}.actions{display:flex}.actions button{flex:1}.trial{width:100%;grid-template-columns:1fr}.effective{align-items:start}.modelbar{align-items:start}summary span{white-space:nowrap}}
+  </style>
+</head>
+<body>
+<p style="padding:16px;background:#fff0d0">已取消：用户于 2026-10-17 取消此需求。本页仅为历史交互草图，不代表已实现或待发布功能。</p>
+<main>
+  <header class="top">
+    <div><div class="eyebrow">模型计费设置</div><h1>统一默认，按分组覆盖</h1><p class="sub">按量与订阅共用相同倍率规则。</p></div>
+    <span class="pill">UI 交互草图</span>
+  </header>
+  <p class="hint">草图中的保存仅演示交互，不会修改服务配置。</p>
+  <nav aria-label="配置页面">
+    <button id="global-tab" aria-pressed="true" aria-controls="global-page">模型价格 · 全局配置</button>
+    <button id="group-tab" aria-pressed="false" aria-controls="group-page">分组 · 模型覆盖</button>
+  </nav>
+
+  <section id="global-page" aria-labelledby="global-tab">
+    <div class="modelbar"><div><div class="modelname mono">claude-fable-5-1</div><p class="hint">模型价格 / 编辑模型</p></div><span class="pill" id="saved-global">全局 1× · 默认</span></div>
+    <div class="card">
+      <div class="body">
+        <div class="heading"><h2>全局模型倍率</h2><span class="pill">正式配置</span></div>
+        <div class="config">
+          <div>
+            <label for="global-rate">倍率</label><input id="global-rate" type="number" min="0" max="100" step="0.0001" placeholder="1（默认）" aria-describedby="global-hint global-error">
+            <p id="global-hint" class="hint">分组未设置模型倍率时使用；分组配置优先。</p>
+            <div id="global-error" class="error" aria-live="polite"></div>
+            <button id="reset-global" class="textbutton">恢复默认倍率</button>
+          </div>
+          <aside class="aside"><strong>应用范围</strong>按量与订阅共用，保存后用于新请求。<br>留空使用默认 1；0 表示免费。<br>模型映射和基础单价仍分别配置。</aside>
+        </div>
+      </div>
+      <div class="footer"><span id="global-state" class="state"></span><div class="actions"><button id="cancel-global">取消修改</button><button id="save-global" class="primary">保存全局配置</button></div></div>
+    </div>
+    <details class="card" open>
+      <summary class="body">费用试算 <span>可选，不影响保存</span></summary>
+      <div class="body" style="padding-top:0">
+        <p id="trial-hint" class="scope"></p>
+        <div class="trial"><div><label for="base-amount">基础计费金额（示例 / USD）</label><input id="base-amount" type="number" min="0" step="0.01" value="0.10"></div><button id="calculate">试算费用</button></div>
+        <div id="trial-result" class="result empty" aria-live="polite">可直接保存配置，也可以先试算费用。</div>
+      </div>
+    </details>
+  </section>
+
+  <section id="group-page" aria-labelledby="group-tab" hidden>
+    <div class="modelbar"><div><div class="modelname">示例订阅分组</div><p class="hint">分组设置 / 模型倍率覆盖</p></div><span id="group-global-reference" class="pill"></span></div>
+    <div class="card">
+      <div class="body">
+        <div class="heading"><h2>模型倍率覆盖</h2></div>
+        <p class="scope">优先使用分组配置；未配置时继承全局。两层倍率不叠乘。</p>
+        <div class="rule">
+          <div><label>模型</label><div class="readonly mono">claude-fable-5-1</div></div>
+          <div><label for="override-mode">使用方式</label><select id="override-mode"><option value="inherit">继承全局</option><option value="override">设置分组覆盖</option></select></div>
+          <div><label for="group-rate">覆盖倍率</label><input id="group-rate" type="number" min="0" max="100" step="0.0001" placeholder="无需填写" disabled aria-describedby="group-error"><div id="group-error" class="error" aria-live="polite"></div></div>
+        </div>
+        <div class="effective"><div><div>此模型将使用</div><p id="effective-source" class="hint"></p></div><div id="effective-rate" class="rate"></div></div>
+        <p class="hint">明确填写 1 也会覆盖全局；填写 0 表示免费。改为继承后，保存即可移除这条覆盖。</p>
+      </div>
+      <div class="footer"><span id="group-state" class="state"></span><div class="actions"><button id="cancel-group">取消修改</button><button id="save-group" class="primary">保存分组覆盖</button></div></div>
+    </div>
+    <div class="aside"><strong>前缀规则</strong>正式界面保留模型前缀规则。精确规则优先，其次是最长前缀；没有分组规则命中时，才继承全局。草图以一个精确模型展示交互。</div>
+  </section>
+  <div id="notice" class="notice" role="status"></div>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  let savedGlobal = null, savedGroup = null, previewSignature = '';
+  const effectiveGlobal = () => savedGlobal ?? 1;
+  const showRate = value => Number(value.toFixed(4)).toString() + '×';
+  function parseRate(input, optional) {
+    if (input.validity.badInput) return {valid:false,value:null};
+    const raw = input.value.trim();
+    if (!raw) return optional ? {valid:true,value:null} : {valid:false,value:null};
+    const value = Number(raw);
+    return {valid:Number.isFinite(value) && value >= 0 && value <= 100 && /^(?:\d+(?:\.\d{1,4})?|\.\d{1,4})$/.test(raw),value};
+  }
+  function groupDraft() { return $('override-mode').value === 'inherit' ? {valid:true,value:null} : parseRate($('group-rate'),false); }
+  function signature() { return JSON.stringify([$('global-rate').value,$('base-amount').value]); }
+  function status(id, dirty, valid) { $(id).textContent = !valid ? '请先修正输入' : dirty ? '有未保存的修改' : '已与保存配置一致'; $(id).classList.toggle('changed',dirty); }
+  function render() {
+    const global = parseRate($('global-rate'),true), group = groupDraft(), custom = $('override-mode').value === 'override';
+    $('save-global').disabled = !global.valid || global.value === savedGlobal;
+    $('save-group').disabled = !group.valid || group.value === savedGroup;
+    $('global-error').textContent = global.valid ? '' : '请输入 0–100，最多四位小数。';
+    $('group-error').textContent = group.valid ? '' : '请输入 0–100，最多四位小数。';
+    $('group-rate').disabled = !custom; $('group-rate').placeholder = custom ? '请输入倍率' : '无需填写';
+    status('global-state',global.value !== savedGlobal,global.valid); status('group-state',group.value !== savedGroup,group.valid);
+    $('saved-global').textContent = '全局 ' + showRate(effectiveGlobal()) + (savedGlobal === null ? ' · 默认' : ' · 已保存');
+    $('group-global-reference').textContent = '当前全局 ' + showRate(effectiveGlobal());
+    $('effective-rate').textContent = group.valid ? showRate(group.value ?? effectiveGlobal()) : '—';
+    $('effective-source').textContent = !group.valid ? '填写有效倍率后显示' : group.value === null ? (savedGlobal === null ? '来源：默认倍率' : '来源：全局配置') : '来源：分组覆盖' + (group.value === 0 ? ' · 免费' : '');
+    $('trial-hint').textContent = global.valid ? '按当前全局倍率 ' + showRate(global.value ?? 1) + ' 试算，不包含分组覆盖和用户折扣。' : '修正上方倍率后可试算。';
+    $('calculate').disabled = !global.valid;
+    if (previewSignature && previewSignature !== signature()) { $('trial-result').className = 'result empty'; $('trial-result').textContent = '输入已变化，可重新试算；仍可直接保存有效配置。'; }
+  }
+  function notify(text) { $('notice').textContent = text; }
+  for (const id of ['global-rate','group-rate','base-amount']) $(id).addEventListener('input',() => {notify('');render();});
+  $('override-mode').addEventListener('change',() => {notify('');render();});
+  $('reset-global').onclick = () => { $('global-rate').value = ''; notify('已在草稿中恢复默认倍率，保存后生效。'); render(); };
+  $('cancel-global').onclick = () => { $('global-rate').value = savedGlobal ?? ''; notify('已恢复已保存的全局配置。'); render(); };
+  $('save-global').onclick = () => { const draft=parseRate($('global-rate'),true); if(!draft.valid)return; savedGlobal=draft.value;notify('草图演示：全局倍率已保存为 '+showRate(effectiveGlobal())+'。无需先试算。');render(); };
+  $('cancel-group').onclick = () => { $('override-mode').value=savedGroup === null ? 'inherit' : 'override';$('group-rate').value=savedGroup ?? '';notify('已恢复已保存的分组配置。');render(); };
+  $('save-group').onclick = () => {const draft=groupDraft();if(!draft.valid)return;savedGroup=draft.value;notify(savedGroup === null ? '草图演示：分组覆盖已移除，此模型继承全局。' : '草图演示：分组覆盖已保存为 '+showRate(savedGroup)+'。');render();};
+  $('calculate').onclick = () => {const draft=parseRate($('global-rate'),true),base=Number($('base-amount').value);if(!draft.valid||!Number.isFinite(base)||base<0){notify('请输入有效的非负基础金额。');return;}previewSignature=signature();$('trial-result').className='result';$('trial-result').replaceChildren();const description=document.createElement('span');description.textContent='模型试算金额 · '+showRate(draft.value ?? 1);const amount=document.createElement('strong');amount.textContent='$'+(base*(draft.value ?? 1)).toFixed(4);$('trial-result').append(description,amount);};
+  function navigate(group) { $('global-page').hidden=group;$('group-page').hidden=!group;$('global-tab').setAttribute('aria-pressed',String(!group));$('group-tab').setAttribute('aria-pressed',String(group));notify('');render(); }
+  $('global-tab').onclick=()=>navigate(false);$('group-tab').onclick=()=>navigate(true);
+  // Open with an unsaved example so reviewers can see that saving requires no preview.
+  $('global-rate').value='1.55';render();
+</script>
+</body>
+</html>
