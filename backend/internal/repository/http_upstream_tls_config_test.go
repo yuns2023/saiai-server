@@ -25,7 +25,9 @@ func TestHTTPUpstreamTLSRequiresGlobalAndAccountSwitch(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			resp.Body.Close()
+			if err := resp.Body.Close(); err != nil {
+				t.Fatal(err)
+			}
 			if len(svc.clients) != 1 {
 				t.Fatal("expected exactly one transport")
 			}
@@ -66,7 +68,9 @@ func TestHTTPUpstreamTLSVersionPools(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				resp.Body.Close()
+				if err := resp.Body.Close(); err != nil {
+					t.Fatal(err)
+				}
 				if i == 0 {
 					for _, e := range svc.clients {
 						old = e
