@@ -216,7 +216,7 @@ func TestOpsLogFilters_RejectInvalidRulesWithoutWriting(test *testing.T) {
 
 func TestOpsLogFilters_AcceptRuleBoundaries(test *testing.T) {
 	rules := make([]OpsLogFilterRule, 50)
-	reasons := []string{OpsLocalAuthUserInactive, OpsLocalAuthInvalidAPIKey, OpsLocalAuthAPIKeyRequired}
+	reasons := []string{OpsLocalAuthUserInactive, OpsLocalAuthAPIKeyDisabled, OpsLocalAuthInvalidAPIKey, OpsLocalAuthAPIKeyRequired}
 	platforms := []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity}
 	groupID := int64(1)
 	for ruleIndex := range rules {
@@ -523,7 +523,7 @@ func TestOpsLogFilters_PersistFailureDoesNotChangeActiveRules(test *testing.T) {
 
 func TestOpsLocalAuth_MarkersAreServerContextOnly(test *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, reason := range []string{OpsLocalAuthUserInactive, OpsLocalAuthInvalidAPIKey, OpsLocalAuthAPIKeyRequired} {
+	for _, reason := range []string{OpsLocalAuthUserInactive, OpsLocalAuthAPIKeyDisabled, OpsLocalAuthInvalidAPIKey, OpsLocalAuthAPIKeyRequired} {
 		test.Run(reason, func(test *testing.T) {
 			requestContext, _ := gin.CreateTestContext(httptest.NewRecorder())
 			requestContext.Request = httptest.NewRequest(http.MethodGet, "/", nil)
@@ -559,6 +559,8 @@ func TestBuildOpsLogFilterProposal_LocalProvenanceAndLegacyCandidates(test *test
 	}{
 		{name: "verified inactive user", errorType: "gateway_auth_user_inactive", phase: "auth", source: "client_request", reason: OpsLocalAuthUserInactive, verified: true},
 		{name: "verified invalid key", errorType: "gateway_auth_invalid_api_key", phase: "auth", source: "client_request", reason: OpsLocalAuthInvalidAPIKey, verified: true},
+		{name: "verified disabled key", errorType: "gateway_auth_api_key_disabled", phase: "auth", source: "client_request", reason: OpsLocalAuthAPIKeyDisabled, verified: true},
+		{name: "legacy disabled code is ambiguous", body: `{"code":"API_KEY_DISABLED"}`},
 		{name: "verified missing key", errorType: "gateway_auth_api_key_required", phase: "auth", source: "client_request", reason: OpsLocalAuthAPIKeyRequired, verified: true},
 		{name: "legacy inactive user", errorType: "authentication_error", phase: "auth", source: "client_request", body: `{"code":"USER_INACTIVE"}`, reason: OpsLocalAuthUserInactive},
 		{name: "legacy invalid key", errorType: "authentication_error", phase: "auth", source: "client_request", body: `{"code":"INVALID_API_KEY"}`, reason: OpsLocalAuthInvalidAPIKey},
@@ -585,7 +587,7 @@ func TestBuildOpsLogFilterProposal_LocalProvenanceAndLegacyCandidates(test *test
 			require.Equal(test, "local_auth", proposal.Rule.Source)
 			require.Equal(test, scenario.reason, proposal.Rule.Reason)
 			require.Equal(test, PlatformAnthropic, proposal.Rule.Platform)
-			if scenario.reason == OpsLocalAuthUserInactive {
+			if scenario.reason == OpsLocalAuthUserInactive || scenario.reason == OpsLocalAuthAPIKeyDisabled {
 				require.Equal(test, &groupID, proposal.Rule.GroupID)
 			} else {
 				require.Nil(test, proposal.Rule.GroupID)
@@ -752,4 +754,22 @@ func TestBuildOpsLogFilterProposal_GlobalConfirmationAndUnsupportedDetails(test 
 		require.False(test, proposal.Verified)
 		require.False(test, proposal.RequiresGlobalConfirmation)
 	}
+}
+
+func TestOpsLogFilters_DisabledKeyScopeDoesNotBroadenInvalidKey(test *testing.T) {
+	groupID := int64(42)
+	rule := OpsLogFilterRule{ID: "disabled-key", Name: "Disabled Key", Enabled: true, Source: "local_auth", Reason: OpsLocalAuthAPIKeyDisabled, GroupID: &groupID, Platform: PlatformAnthropic, MatchMode: "all"}
+	require.NoError(test, validateOpsLogFilterRules([]OpsLogFilterRule{rule}))
+	event := OpsLogFilterEvent{Source: "local_auth", Reason: OpsLocalAuthAPIKeyDisabled, StatusCode: 401, GroupID: &groupID, Platform: PlatformAnthropic}
+	require.True(test, matchOpsLogFilter(rule, event))
+	other := int64(43)
+	event.GroupID = &other
+	require.False(test, matchOpsLogFilter(rule, event))
+	event.GroupID = &groupID
+	event.Source = "upstream"
+	require.False(test, matchOpsLogFilter(rule, event))
+	event.Source = "local_auth"
+	rule.Reason = OpsLocalAuthInvalidAPIKey
+	rule.GroupID = nil
+	require.False(test, matchOpsLogFilter(rule, event))
 }

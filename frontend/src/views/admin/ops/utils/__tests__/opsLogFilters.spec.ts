@@ -115,3 +115,9 @@ describe('Ops log filter safety', () => {
     expect(isLogFilterConflict(null)).toBe(false)
   })
 })
+
+it('preserves group scope for a known disabled Key', () => {
+  const rule = createLogFilterPreset('api_key_disabled', 'Disabled key', { group_id: 7 })
+  expect(rule).toMatchObject({ enabled: false, reason: 'api_key_disabled', group_id: 7 })
+  expect(validateLogFilterRule(rule, false)).toBeNull()
+})

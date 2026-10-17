@@ -4375,6 +4375,7 @@ export default {
         reasons: {
           user_inactive: '本站用户已禁用',
           invalid_api_key: '本站 Key 无效',
+          api_key_disabled: '本站 Key 已禁用',
           api_key_required: '本站 Key 缺失'
         },
         name: '规则名称',
@@ -4487,8 +4488,8 @@ export default {
           '启用后，客户端主动断开连接（context canceled）的错误将不会写入错误日志。',
         ignoreNoAvailableAccounts: '忽略无可用账号错误',
         ignoreNoAvailableAccountsHint: '启用后，"No available accounts" 错误将不会写入错误日志（不推荐，这通常是配置问题）。',
-        ignoreInvalidApiKeyErrors: '忽略无效 API Key 错误',
-        ignoreInvalidApiKeyErrorsHint: '仅跳过服务端明确标记为本站拒绝的 SAIAI Key 缺失或无效错误，真实的上游认证失败仍会保留。',
+        ignoreInvalidApiKeyErrors: '忽略无效或已禁用 API Key 错误',
+        ignoreInvalidApiKeyErrorsHint: '仅跳过服务端明确标记为本站拒绝的 SAIAI Key 缺失、无效或已禁用错误，真实的上游认证失败仍会保留。',
         ignoreInsufficientBalanceErrors: '忽略余额不足错误',
         ignoreInsufficientBalanceErrorsHint: '启用后，账号余额不足（Insufficient balance）的错误将不会写入错误日志。',
         requestBodyCapture: '请求 Body 采样',

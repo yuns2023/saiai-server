@@ -8,7 +8,7 @@ authentication, billing, rate-limit handling, retries, or account failover.
 
 ## Friendly defaults
 
-- Common presets cover locally rejected inactive users and invalid API keys.
+- Common presets cover locally rejected inactive users, invalid API keys, and disabled API keys.
   They remain disabled until an administrator explicitly confirms them.
   **Confirm and enable** saves a new rule immediately; it does not require a
   second Save action. Existing rule toggles and removals require Save.
@@ -23,7 +23,7 @@ authentication, billing, rate-limit handling, retries, or account failover.
 ## Source-aware matching
 
 Native and Google API-key authentication explicitly mark missing keys, invalid
-keys, and inactive users in server-owned request context. A local rule requires
+keys, disabled keys, and inactive users in server-owned request context. A local rule requires
 one of these reasons, not merely HTTP 401, a response code, or matching text.
 Missing user records and authentication database failures are not marked.
 Missing/invalid key rules cannot use a group scope: authentication has not yet
@@ -34,7 +34,7 @@ unmarked and recorded.
 
 When recording a marked rejection, the existing error-type field stores
 `gateway_auth_user_inactive`, `gateway_auth_invalid_api_key`, or
-`gateway_auth_api_key_required`, with phase `auth` and source `client_request`.
+`gateway_auth_api_key_required`, or `gateway_auth_api_key_disabled`, with phase `auth` and source `client_request`.
 This provides provenance for future drafts without a schema migration or a
 change to the wire response. Unrecognized upstream-provided types cannot create
 this provenance through the response parser.
@@ -73,7 +73,7 @@ another instance are observed through a two-second cache. Rule-store failures
 retain error recording instead of applying stale suppression. A busy filter-state
 lock also retains recording rather than blocking requests behind settings I/O.
 Rules, keywords, status-code lists, and counter state are bounded. The existing
-advanced error-filter switches retain their settings. The invalid/missing API-key switch
+advanced error-filter switches retain their settings. The invalid/missing/disabled API-key switch
 now requires a local authentication marker, including Google-shaped errors;
 upstream key failures with the same text remain recorded.
 
@@ -81,3 +81,25 @@ Validate with mocked native/Google auth, source-spoofing and upstream-401
 regressions, mixed-attempt and recovered-error cases, editor revision conflicts,
 scope confirmation, and frontend component tests. Do not use live model traffic
 or delete historical logs as a smoke test.
+
+## Disabled Keys and SLA
+
+Known Key states `inactive` (written by the public Key editor) and `disabled`
+are both local disabled-Key rejections. Their consistent, server-loaded user,
+Key and group identity is retained for Ops attribution, while authentication
+still aborts with the original 401 response. Unknown states and incomplete or
+mismatched identities stay unmarked; they cannot be hidden by this preset.
+Google expired/quota states are not reclassified as disabled keys.
+
+The new `api_key_disabled` rule supports group/platform scope and defaults to
+disabled. Existing `invalid_api_key` rules keep their exact meaning. The legacy
+**Ignore invalid or disabled API key errors** switch now also suppresses verified
+disabled-Key rejections. Neither path suppresses upstream authentication failures.
+When detail recording remains enabled, a verified disabled Key is classified as
+a client business restriction and excluded from SLA failures, just like a disabled
+user. Log retention and SLA exclusion are independent.
+
+Old `API_KEY_DISABLED` responses also covered unknown Key states, so that text
+alone cannot produce a verified disabled-Key draft. Existing records and
+preaggregated SLA buckets are not rewritten. Historical logs without identity
+cannot establish Key ownership from shared IP addresses alone.

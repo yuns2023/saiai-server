@@ -294,7 +294,7 @@ onUnmounted(() => {
       <p v-if="hasPendingRules" role="status" class="rounded-xl bg-amber-50 p-3 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300">{{ translate('admin.ops.logFilters.pendingChanges') }}</p>
       <fieldset v-if="config && !loading" :disabled="busy || conflict" class="space-y-5">
         <div class="flex flex-wrap gap-2">
-          <button v-for="reason in localAuthReasons.slice(0, 2)" :key="reason" type="button" class="btn btn-secondary" :data-testid="`preset-${reason}`" :disabled="rules.length >= 50" @click="createPreset(reason)">
+          <button v-for="reason in localAuthReasons.slice(0, 3)" :key="reason" type="button" class="btn btn-secondary" :data-testid="`preset-${reason}`" :disabled="rules.length >= 50" @click="createPreset(reason)">
             {{ translate('admin.ops.logFilters.addPreset', { name: translate(`admin.ops.logFilters.reasons.${reason}`) }) }}
           </button>
         </div>

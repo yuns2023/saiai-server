@@ -1059,7 +1059,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			entry.ErrorOwner = "client"
 			entry.Severity = "P3"
 			entry.IsRetryable = false
-			entry.IsBusinessLimited = localAuthReason == service.OpsLocalAuthUserInactive
+			entry.IsBusinessLimited = localAuthReason == service.OpsLocalAuthUserInactive || localAuthReason == service.OpsLocalAuthAPIKeyDisabled
 		}
 		applyOpsLatencyFieldsFromContext(c, entry)
 
@@ -1634,9 +1634,9 @@ func shouldSkipOpsErrorLog(ctx context.Context, ops *service.OpsService, message
 		}
 	}
 
-	// Check if invalid/missing API key errors should be ignored (user misconfiguration)
+	// Check verified local missing/invalid/disabled Key rejections only.
 	if settings.IgnoreInvalidApiKeyErrors {
-		if localAuthReason == service.OpsLocalAuthInvalidAPIKey || localAuthReason == service.OpsLocalAuthAPIKeyRequired {
+		if localAuthReason == service.OpsLocalAuthInvalidAPIKey || localAuthReason == service.OpsLocalAuthAPIKeyRequired || localAuthReason == service.OpsLocalAuthAPIKeyDisabled {
 			return true
 		}
 	}

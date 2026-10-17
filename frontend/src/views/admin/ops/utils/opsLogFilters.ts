@@ -1,6 +1,6 @@
 import type { OpsAdvancedSettings, OpsLogFilterProposal, OpsLogFilterReason, OpsLogFilterRule } from '@/api/admin/ops'
 
-export const localAuthReasons: OpsLogFilterReason[] = ['user_inactive', 'invalid_api_key', 'api_key_required']
+export const localAuthReasons: OpsLogFilterReason[] = ['user_inactive', 'invalid_api_key', 'api_key_disabled', 'api_key_required']
 
 export const logFilterPlatforms = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },

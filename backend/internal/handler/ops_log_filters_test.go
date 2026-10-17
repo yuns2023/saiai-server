@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -197,7 +198,7 @@ func TestOpsLogFilter_LegacyInvalidKeySwitchRequiresLocalAuthSource(test *testin
 		service.SettingKeyOpsAdvancedSettings: `{"ignore_invalid_api_key_errors":true}`,
 	}}
 	ops := service.NewOpsService(nil, repo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	for _, reason := range []string{service.OpsLocalAuthInvalidAPIKey, service.OpsLocalAuthAPIKeyRequired} {
+	for _, reason := range []string{service.OpsLocalAuthInvalidAPIKey, service.OpsLocalAuthAPIKeyRequired, service.OpsLocalAuthAPIKeyDisabled} {
 		require.True(test, shouldSkipOpsErrorLog(context.Background(), ops, "Invalid API key", `{"code":"INVALID_API_KEY"}`, "/v1/responses", reason))
 	}
 	require.False(test, shouldSkipOpsErrorLog(context.Background(), ops, "Invalid API key", `{"code":"INVALID_API_KEY"}`, "/v1/responses", ""))
@@ -216,4 +217,40 @@ func TestOpsLogFilter_StaleSameStatusCannotHideUnknownTerminalFailure(test *test
 		UpstreamErrors: []*service.OpsUpstreamErrorEvent{{UpstreamStatusCode: status, Message: message}},
 	}
 	require.False(test, filterOpsUpstreamLog(ctx, ops, entry))
+}
+
+func TestOpsLogFilter_DisabledKeyAttributionAndSLA(test *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		test.Run(fmt.Sprint(enabled), func(test *testing.T) {
+			prepareOpsLogFilterTestQueue(test)
+			groupID := int64(42)
+			ops := newOpsLogFilterTestService(test, []service.OpsLogFilterRule{{ID: "disabled-key", Name: "Disabled key", Enabled: enabled, Source: "local_auth", Reason: service.OpsLocalAuthAPIKeyDisabled, GroupID: &groupID, Platform: service.PlatformAnthropic, MatchMode: "all"}})
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.GET("/v1/messages", func(ctx *gin.Context) {
+				ctx.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 100, UserID: 7, User: &service.User{ID: 7}, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformAnthropic}})
+				service.MarkOpsLocalAuthRejected(ctx, service.OpsLocalAuthAPIKeyDisabled)
+				middleware2.AbortWithError(ctx, 401, "API_KEY_DISABLED", "API key is disabled")
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/messages", nil))
+			require.Equal(test, 401, recorder.Code)
+			require.JSONEq(test, `{"code":"API_KEY_DISABLED","message":"API key is disabled"}`, recorder.Body.String())
+			if enabled {
+				require.Zero(test, OpsErrorLogEnqueuedTotal())
+				return
+			}
+			require.Equal(test, int64(1), OpsErrorLogEnqueuedTotal())
+			entry := (<-opsErrorLogQueue).entry
+			require.Equal(test, "gateway_auth_api_key_disabled", entry.ErrorType)
+			require.Equal(test, "client", entry.ErrorOwner)
+			require.Equal(test, "client_request", entry.ErrorSource)
+			require.True(test, entry.IsBusinessLimited)
+			require.False(test, entry.IsRetryable)
+			require.Equal(test, int64(100), *entry.APIKeyID)
+			require.Equal(test, int64(7), *entry.UserID)
+			require.Equal(test, groupID, *entry.GroupID)
+			require.Equal(test, service.PlatformAnthropic, entry.Platform)
+		})
+	}
 }

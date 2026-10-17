@@ -97,6 +97,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		if !apiKey.IsActive() &&
 			apiKey.Status != service.StatusAPIKeyExpired &&
 			apiKey.Status != service.StatusAPIKeyQuotaExhausted {
+			markOpsDisabledAPIKey(c, apiKey)
 			AbortWithError(c, 401, "API_KEY_DISABLED", "API key is disabled")
 			return
 		}
@@ -371,4 +372,18 @@ func setGroupContext(c *gin.Context, group *service.Group) {
 	}
 	ctx := context.WithValue(c.Request.Context(), ctxkey.Group, group)
 	c.Request = c.Request.WithContext(ctx)
+}
+
+// markOpsDisabledAPIKey preserves attribution only for a known local disabled
+// state with a consistent loaded identity. It grants no access: callers abort.
+// The public Key API writes "inactive"; older/internal callers use "disabled".
+func markOpsDisabledAPIKey(c *gin.Context, apiKey *service.APIKey) {
+	if apiKey == nil || (apiKey.Status != "inactive" && apiKey.Status != service.StatusAPIKeyDisabled) ||
+		apiKey.ID <= 0 || apiKey.User == nil || apiKey.User.ID <= 0 || apiKey.User.ID != apiKey.UserID {
+		return
+	}
+	c.Set(string(ContextKeyAPIKey), apiKey)
+	c.Set(string(ContextKeyUser), AuthSubject{UserID: apiKey.User.ID, Concurrency: apiKey.User.Concurrency})
+	c.Set(string(ContextKeyUserRole), apiKey.User.Role)
+	service.MarkOpsLocalAuthRejected(c, service.OpsLocalAuthAPIKeyDisabled)
 }

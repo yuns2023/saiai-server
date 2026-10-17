@@ -21,6 +21,7 @@ import (
 const (
 	SettingKeyOpsLogFilters    = "ops_log_filters"
 	OpsLocalAuthUserInactive   = "user_inactive"
+	OpsLocalAuthAPIKeyDisabled = "api_key_disabled"
 	OpsLocalAuthInvalidAPIKey  = "invalid_api_key"
 	OpsLocalAuthAPIKeyRequired = "api_key_required"
 	opsLocalAuthReasonKey      = "ops_local_auth_reject_reason"
@@ -79,7 +80,7 @@ var opsLogFilterIDPattern = regexp.MustCompile(`^[a-zA-Z0-9-]{1,80}$`)
 
 func isOpsLocalAuthReason(reason string) bool {
 	switch reason {
-	case OpsLocalAuthUserInactive, OpsLocalAuthInvalidAPIKey, OpsLocalAuthAPIKeyRequired:
+	case OpsLocalAuthUserInactive, OpsLocalAuthAPIKeyDisabled, OpsLocalAuthInvalidAPIKey, OpsLocalAuthAPIKeyRequired:
 		return true
 	default:
 		return false
@@ -137,7 +138,7 @@ func validateOpsLogFilterRules(rules []OpsLogFilterRule) error {
 			if !isOpsLocalAuthReason(rule.Reason) {
 				return errors.New("local_auth rules require a supported rejection reason")
 			}
-			if rule.Reason != OpsLocalAuthUserInactive && rule.GroupID != nil {
+			if (rule.Reason == OpsLocalAuthInvalidAPIKey || rule.Reason == OpsLocalAuthAPIKeyRequired) && rule.GroupID != nil {
 				return errors.New("missing or invalid keys cannot be scoped to a group before authentication")
 			}
 		case "upstream":
@@ -344,7 +345,7 @@ func BuildOpsLogFilterProposal(detail *OpsErrorLogDetail) *OpsLogFilterProposal 
 			}
 		}
 		rule.Source, rule.Reason = "local_auth", reason
-		if reason != OpsLocalAuthUserInactive {
+		if reason == OpsLocalAuthInvalidAPIKey || reason == OpsLocalAuthAPIKeyRequired {
 			rule.GroupID = nil
 		}
 		rule.Name = "Local authentication: " + reason

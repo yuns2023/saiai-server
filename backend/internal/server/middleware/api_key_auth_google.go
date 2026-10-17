@@ -47,6 +47,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 		}
 
 		if !apiKey.IsActive() {
+			markOpsDisabledAPIKey(c, apiKey)
 			abortWithGoogleError(c, 401, "API key is disabled")
 			return
 		}

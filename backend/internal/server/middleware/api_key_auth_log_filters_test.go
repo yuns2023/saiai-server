@@ -123,16 +123,22 @@ func TestAPIKeyAuthLogFilters_MarksOnlyKnownLocalRejections(test *testing.T) {
 				provideKey    bool
 				repoError     error
 				inactiveUser  bool
+				keyStatus     string
 				reason        string
 				nativeCode    string
 				googleMessage string
 			}{
 				{name: "missing key", reason: service.OpsLocalAuthAPIKeyRequired, nativeCode: "API_KEY_REQUIRED", googleMessage: "API key is required"},
 				{name: "invalid key", provideKey: true, repoError: service.ErrAPIKeyNotFound, reason: service.OpsLocalAuthInvalidAPIKey, nativeCode: "INVALID_API_KEY", googleMessage: "Invalid API key"},
+				{name: "inactive key", provideKey: true, keyStatus: "inactive", reason: service.OpsLocalAuthAPIKeyDisabled, nativeCode: "API_KEY_DISABLED", googleMessage: "API key is disabled"},
+				{name: "disabled key", provideKey: true, keyStatus: service.StatusAPIKeyDisabled, reason: service.OpsLocalAuthAPIKeyDisabled, nativeCode: "API_KEY_DISABLED", googleMessage: "API key is disabled"},
 				{name: "disabled user", provideKey: true, inactiveUser: true, reason: service.OpsLocalAuthUserInactive, nativeCode: "USER_INACTIVE", googleMessage: "User account is not active"},
 			} {
 				test.Run(scenario.name, func(test *testing.T) {
 					apiKey := opsAuthFilterTestKey(transport.platform)
+					if scenario.keyStatus != "" {
+						apiKey.Status = scenario.keyStatus
+					}
 					if scenario.inactiveUser {
 						apiKey.User.Status = service.StatusDisabled
 					}
@@ -148,7 +154,7 @@ func TestAPIKeyAuthLogFilters_MarksOnlyKnownLocalRejections(test *testing.T) {
 					} else {
 						require.Zero(test, lookups)
 					}
-					if scenario.inactiveUser {
+					if scenario.inactiveUser || scenario.keyStatus != "" {
 						require.NotNil(test, observation.apiKey)
 						require.Equal(test, apiKey.ID, observation.apiKey.ID)
 						require.Equal(test, apiKey.GroupID, observation.apiKey.GroupID)
@@ -179,7 +185,7 @@ func TestAPIKeyAuthLogFilters_UnknownFailuresIgnoreSpoofedHeader(test *testing.T
 			googleMessage string
 		}{
 			{name: "repository failure", repoError: errors.New("mock database failure"), status: 500, nativeCode: "INTERNAL_ERROR", googleMessage: "Failed to validate API key"},
-			{name: "disabled key", mutate: func(apiKey *service.APIKey) { apiKey.Status = service.StatusAPIKeyDisabled }, status: 401, nativeCode: "API_KEY_DISABLED", googleMessage: "API key is disabled"},
+			{name: "disabled key with mismatched identity", mutate: func(apiKey *service.APIKey) { apiKey.Status = "inactive"; apiKey.User.ID = 999 }, status: 401, nativeCode: "API_KEY_DISABLED", googleMessage: "API key is disabled"},
 			{name: "unknown key status", mutate: func(apiKey *service.APIKey) { apiKey.Status = "unknown" }, status: 401, nativeCode: "API_KEY_DISABLED", googleMessage: "API key is disabled"},
 			{name: "unknown user status", mutate: func(apiKey *service.APIKey) { apiKey.User.Status = "unknown" }, status: 401, nativeCode: "USER_INACTIVE", googleMessage: "User account is not active"},
 			{name: "mismatched user identity", mutate: func(apiKey *service.APIKey) { apiKey.User.Status = service.StatusDisabled; apiKey.User.ID = 999 }, status: 401, nativeCode: "USER_INACTIVE", googleMessage: "User account is not active"},
@@ -244,6 +250,21 @@ func TestAPIKeyAuthLogFilters_SuccessDoesNotTrustInboundMarker(test *testing.T) 
 			require.False(test, observation.aborted)
 			require.Empty(test, observation.reason)
 			require.Equal(test, 1, touches)
+		})
+	}
+}
+
+func TestAPIKeyAuthLogFilters_GoogleOtherInactiveStatesRemainUnmarked(test *testing.T) {
+	for _, status := range []string{service.StatusAPIKeyExpired, service.StatusAPIKeyQuotaExhausted, "unknown"} {
+		test.Run(status, func(test *testing.T) {
+			apiKey := opsAuthFilterTestKey(service.PlatformGemini)
+			apiKey.Status = status
+			recorder, observation, _, touches := serveOpsAuthFilterRequest(test, true, apiKey, nil, true, "")
+			requireOpsAuthFilterEnvelope(test, recorder, true, 401, "", "API key is disabled")
+			require.Empty(test, observation.reason)
+			require.Nil(test, observation.apiKey)
+			require.False(test, observation.downstreamCalled)
+			require.Zero(test, touches)
 		})
 	}
 }

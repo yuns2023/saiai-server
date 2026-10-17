@@ -14,7 +14,7 @@ export interface OpsRequestOptions {
   signal?: AbortSignal
 }
 
-export type OpsLogFilterReason = 'user_inactive' | 'invalid_api_key' | 'api_key_required'
+export type OpsLogFilterReason = 'user_inactive' | 'invalid_api_key' | 'api_key_required' | 'api_key_disabled'
 
 export interface OpsLogFilterRule {
   id: string

@@ -77,6 +77,17 @@ describe('OpsLogFiltersDialog', () => {
     expect(wrapper.emitted('saved')).toHaveLength(1)
   })
 
+  it('offers a disabled-Key preset with explicit group-scoped confirmation', async () => {
+    const wrapper = mountDialog({ groupId: 7, platform: 'anthropic' })
+    await flushPromises()
+    await wrapper.get('[data-testid="preset-api_key_disabled"]').trigger('click')
+    expect(mockAPI.updateLogFilters).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="scope"]').element).toHaveProperty('value', 'group')
+    await wrapper.get('[data-testid="apply-rule"]').trigger('click')
+    await flushPromises()
+    expect(mockAPI.updateLogFilters.mock.calls[0][0].rules[0]).toMatchObject({ enabled: true, source: 'local_auth', reason: 'api_key_disabled', group_id: 7 })
+  })
+
   it('uses platform scope for the invalid key preset', async () => {
     const wrapper = mountDialog({ platform: 'openai' })
     await flushPromises()

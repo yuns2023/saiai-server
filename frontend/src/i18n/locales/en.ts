@@ -4214,6 +4214,7 @@ export default {
         reasons: {
           user_inactive: 'Local user disabled',
           invalid_api_key: 'Local key invalid',
+          api_key_disabled: 'Local key disabled',
           api_key_required: 'Local key missing'
         },
         name: 'Rule name',
@@ -4325,8 +4326,8 @@ export default {
         ignoreContextCanceledHint: 'When enabled, client disconnect (context canceled) errors will not be written to the error log.',
         ignoreNoAvailableAccounts: 'Ignore no available accounts errors',
         ignoreNoAvailableAccountsHint: 'When enabled, "No available accounts" errors will not be written to the error log (not recommended; usually a config issue).',
-        ignoreInvalidApiKeyErrors: 'Ignore invalid API key errors',
-        ignoreInvalidApiKeyErrorsHint: 'Only missing or invalid SAIAI Key rejections explicitly marked as local by the server are skipped. Genuine upstream authentication failures are retained.',
+        ignoreInvalidApiKeyErrors: 'Ignore invalid or disabled API key errors',
+        ignoreInvalidApiKeyErrorsHint: 'Only missing, invalid or disabled SAIAI Key rejections explicitly marked as local by the server are skipped. Genuine upstream authentication failures are retained.',
         ignoreInsufficientBalanceErrors: 'Ignore Insufficient Balance Errors',
         ignoreInsufficientBalanceErrorsHint: 'When enabled, insufficient account balance errors will not be written to the error log.',
         requestBodyCapture: 'Request Body Capture',
