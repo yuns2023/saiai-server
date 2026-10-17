@@ -20,9 +20,11 @@ Explicitly disabling the global switch selects the standard Go transport.
 The default minimum Claude Code version for a fresh installation is **2.1.257**.
 This uses the existing administrator-controlled `min_claude_code_version` gate;
 it does not introduce a second hard-coded admission check. Existing installations
-retain their stored settings. When deploying this change, set the admin minimum
-version to `2.1.257` and check that any configured maximum is at least that version.
-This source change alone does not update a running deployment's settings.
+retain their stored settings. The release does not require overwriting an
+existing administrator minimum or maximum. If an operator separately chooses
+to admit clients from the measured 2.1.257 boundary, review both limits together;
+that policy change is independent of deploying the TLS implementation. This
+source change alone does not update a running deployment's settings.
 
 Official npm publication times (UTC):
 
