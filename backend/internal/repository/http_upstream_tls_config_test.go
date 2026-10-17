@@ -16,7 +16,10 @@ func TestHTTPUpstreamTLSRequiresGlobalAndAccountSwitch(t *testing.T) {
 			cfg := &config.Config{}
 			cfg.Security.URLAllowlist.AllowPrivateHosts = true
 			cfg.Gateway.TLSFingerprint.Enabled = global
-			svc := NewHTTPUpstream(cfg).(*httpUpstreamService)
+			svc, ok := NewHTTPUpstream(cfg).(*httpUpstreamService)
+			if !ok {
+				t.Fatal("unexpected upstream implementation")
+			}
 			req, _ := http.NewRequest("GET", server.URL, nil)
 			resp, err := svc.DoWithTLS(req, "", 1, 1, account)
 			if err != nil {
@@ -46,7 +49,10 @@ func TestHTTPUpstreamTLSVersionPools(t *testing.T) {
 			cfg.Gateway.ConnectionPoolIsolation = isolation
 			cfg.Security.URLAllowlist.AllowPrivateHosts = true
 			cfg.Gateway.TLSFingerprint.Enabled = true
-			svc := NewHTTPUpstream(cfg).(*httpUpstreamService)
+			svc, ok := NewHTTPUpstream(cfg).(*httpUpstreamService)
+			if !ok {
+				t.Fatal("unexpected upstream implementation")
+			}
 			defer func() {
 				for _, e := range svc.clients {
 					e.client.CloseIdleConnections()

@@ -198,7 +198,10 @@ func TestDefaultClientHelloCompletesVerifiedHandshake(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-				server.TLS = &tls.Config{MinVersion: tc.version, MaxVersion: tc.version, CurvePreferences: []tls.CurveID{tc.group}}
+				server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, MaxVersion: tc.version, CurvePreferences: []tls.CurveID{tc.group}}
+				if tc.version == tls.VersionTLS13 {
+					server.TLS.MinVersion = tls.VersionTLS13
+				}
 				server.StartTLS()
 				defer server.Close()
 				pool := x509.NewCertPool()
@@ -213,7 +216,7 @@ func TestDefaultClientHelloCompletesVerifiedHandshake(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer resp.Body.Close()
+				defer func() { _ = resp.Body.Close() }()
 				if resp.StatusCode != http.StatusNoContent {
 					t.Fatalf("status = %d", resp.StatusCode)
 				}

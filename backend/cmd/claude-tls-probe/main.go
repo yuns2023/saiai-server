@@ -47,7 +47,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages?beta=true", strings.NewReader(`{"model":"claude-sonnet-4-6","stream":false,"messages":[{"role":"user","content":"ping"}]}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -58,7 +58,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, err = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return err

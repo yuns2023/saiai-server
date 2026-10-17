@@ -25,15 +25,20 @@ func TestHTTPSProxyVerifiedOuterAndInnerTLS(t *testing.T) {
 		}
 		upstream, err := net.Dial("tcp", targetURL.Host)
 		if err != nil {
-			http.Error(w, "mock dial", 502)
+			http.Error(w, "mock dial", http.StatusBadGateway)
 			return
 		}
-		defer upstream.Close()
-		conn, _, err := w.(http.Hijacker).Hijack()
+		defer func() { _ = upstream.Close() }()
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijacking unavailable", http.StatusInternalServerError)
+			return
+		}
+		conn, _, err := hijacker.Hijack()
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		_, _ = io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
 		go func() { _, _ = io.Copy(upstream, conn); _ = upstream.Close() }()
 		_, _ = io.Copy(conn, upstream)
@@ -49,7 +54,7 @@ func TestHTTPSProxyVerifiedOuterAndInnerTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	req, _ := http.NewRequest("GET", target.URL, nil)
 	if err := req.Write(conn); err != nil {
 		t.Fatal(err)
@@ -58,7 +63,7 @@ func TestHTTPSProxyVerifiedOuterAndInnerTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if string(body) != "ok" {
 		t.Fatal("target response missing")
@@ -74,13 +79,13 @@ func TestHTTPProxyCancellationDuringCONNECT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
 		conn, e := listener.Accept()
 		if e == nil {
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 			<-done
 		}
 	}()
