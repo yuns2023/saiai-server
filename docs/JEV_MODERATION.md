@@ -3,7 +3,9 @@
 The default engine is `jev`, pinned to `jev-1.13.0` and the bundled four-category
 v2 rules. Only the latest real user text is submitted, without site identity.
 There is no automatic detector fallback. The old `qwen` adapter requires an
-explicit engine setting and is retained for controlled rollback only.
+explicit engine setting and is retained as a legacy adapter. It is not a verified
+rollback procedure: scoreless Qwen results cannot enforce the numeric threshold.
+Removing the running Qwen service is a separate production operation.
 
 Set `GATEWAY_INPUT_MODERATION_API_KEY` using deployment secret management.
 Leave `gateway.input_moderation.endpoint` empty for the official TypeSafe URL;
@@ -32,10 +34,15 @@ identical text is also deduplicated within the configured content window.
 The strike state is user-global across groups. Admin risk reset/unblock controls
 remain the existing ones. Warnings are audit/UI actions, not email or Slack.
 
-Admin usage records expose matching category scores, the decision-time threshold,
-action, and strike-count flag. A durable metadata link maps the local request and
+The admin usage API exposes matching category scores, the decision-time threshold,
+action, and strike-count flag. The table currently renders categories, scores,
+action and whether the incident counted; the threshold remains API metadata.
+A persisted metadata link maps the local request and
 WS turn to the final usage billing ID; identity joins include user, API key, and
-group. Either the classification or the usage record can arrive first. The admin
+group. Once the link has been persisted, either the classification or the usage
+record can arrive first. Link writes are best-effort with a one-second timeout;
+a failed write is logged but not retried or repaired, so labels can be missing.
+The admin
 usage page refreshes its list every 30 seconds while visible. Absence of a hit is
 not represented as a successful safety check. Failed forwarding requests without
 a usage row can still have moderation events. Raw text is never written to the
@@ -55,3 +62,26 @@ policy reload, optional disable/cooldown, duplicate handling, usage identity
 correlation, and DTO mappings. Frontend typecheck, targeted ESLint, and seven
 UsageTable tests cover asynchronously arriving labels and scoreless legacy rows.
 No live provider calls, production database migration, or full CI matrix ran.
+
+## Follow-up before production consideration
+
+- Add durable retry/reconciliation for failed correlation writes. Test both arrival
+  orders, concurrent duplicate incidents, reset races and migration 100 on a
+  disposable PostgreSQL database; existing SQL mocks do not establish these.
+- Isolate moderation enrichment failures from usage-list availability, with an
+  explicit unavailable/pending state rather than a false safe result. Currently
+  a hydration query error propagates through `ListWithFilters`.
+- Audit existing group policies during release preparation: migration preserves
+  old action modes and hit limits. New defaults do not convert existing groups
+  from first-hit cooldown/second-hit disable to the new three-hit policy.
+- Define event/link retention and orphan cleanup; the link table currently has no
+  independent creation timestamp or scheduled cleanup.
+- Complete independently reviewed evaluation before claiming safety effectiveness.
+  The 80-case calibration aggregate has zero false positives/negatives, but PII
+  and crime each miss one category label, while crime and unethical acts each
+  produce two extra category labels. Aggregate accuracy is not category accuracy.
+  The 700-case draft has only 140 scenario families and has not been run.
+
+User authorization selected Jev as the development default; it did not establish
+holdout qualification or authorize deployment. Use `saiai-release` and private Ops
+for any future rollout. Do not rerun paid evaluations based solely on old consent.
