@@ -52,7 +52,7 @@ func (r *usageLogRepository) hydrateUsageLogModeration(ctx context.Context, logs
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var id, eventID int64
 		var categories, scores []byte

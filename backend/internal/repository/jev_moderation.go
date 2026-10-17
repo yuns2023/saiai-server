@@ -48,11 +48,11 @@ func newJevModerationClient(cfg *config.Config) *jevModerationClient {
 
 func (c *jevModerationClient) Classify(ctx context.Context, text string) (*service.InputModerationClassification, error) {
 	if c.apiKey == "" {
-		return nil, fmt.Errorf("Jev API key is not configured")
+		return nil, fmt.Errorf("jev API key is not configured")
 	}
 	endpoint, err := url.Parse(c.endpoint)
 	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
-		return nil, fmt.Errorf("Jev endpoint must be an HTTPS URL without credentials or query")
+		return nil, fmt.Errorf("jev endpoint must be an HTTPS URL without credentials or query")
 	}
 	rules := map[string]string{}
 	if err := json.Unmarshal(jevModerationRules, &rules); err != nil {
@@ -75,11 +75,11 @@ func (c *jevModerationClient) Classify(ctx context.Context, text string) (*servi
 	resp, err := c.client.Do(req)
 	// Do not expose provider bodies, URLs, or reflected request data in errors.
 	if err != nil {
-		return nil, fmt.Errorf("Jev moderation transport failed")
+		return nil, fmt.Errorf("jev moderation transport failed")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Jev moderation returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("jev moderation returned status %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, inputModerationMaxResponseBytes+1))
 	if err != nil || len(data) > inputModerationMaxResponseBytes {

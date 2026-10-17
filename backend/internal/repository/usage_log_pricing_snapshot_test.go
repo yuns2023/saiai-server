@@ -17,8 +17,8 @@ func TestUsageLogPricingSnapshotInsertPersistsImmutablePrices(t *testing.T) {
 	log := &service.UsageLog{RequestID: "price-snapshot", APIKeyID: 2, PricingSnapshot: &service.PricingSnapshot{Version: "v1", BilledModel: "alias-a", ResolvedModel: "model-base", Effective: &service.ModelPricing{CacheReadPricePerToken: 0}, Reference: &service.ModelPricing{CacheReadPricePerToken: 1e-6}}}
 	prepared := prepareUsageLogInsert(log)
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
-	require.Equal(t, "jsonb", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-1])
-	body, ok := prepared.args[len(prepared.args)-1].(string)
+	require.Equal(t, "jsonb", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-2])
+	body, ok := prepared.args[len(prepared.args)-2].(string)
 	require.True(t, ok)
 	var snapshot service.PricingSnapshot
 	require.NoError(t, json.Unmarshal([]byte(body), &snapshot))
@@ -30,7 +30,7 @@ func TestUsageLogPricingSnapshotInsertPersistsImmutablePrices(t *testing.T) {
 	require.Contains(t, query, "::jsonb")
 	require.Len(t, args, len(prepared.args))
 	require.Equal(t, 1, strings.Count(usageLogSelectColumns, "pricing_snapshot"))
-	require.Nil(t, prepareUsageLogInsert(&service.UsageLog{}).args[len(prepared.args)-1])
+	require.Nil(t, prepareUsageLogInsert(&service.UsageLog{}).args[len(prepared.args)-2])
 }
 
 func TestUsageLogPricingSnapshotScannerRestoresSavedReferenceAndEffectivePrices(t *testing.T) {
