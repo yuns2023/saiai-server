@@ -1497,6 +1497,8 @@ export default {
 
     // Users
     users: {
+      trustedUser: 'Trusted user',
+      trustedUserHint: 'May use trusted-only carpool accounts. All other permissions and limits still apply.',
       title: 'User Management',
       description: 'Manage users and their permissions',
       createUser: 'Create User',
@@ -2111,6 +2113,8 @@ export default {
 
     // Accounts
     accounts: {
+      carpoolTrustedOnly: 'Trusted users only',
+      carpoolTrustedOnlyHint: 'Only users marked trusted by an administrator may use this account. Scheduling and device limits still apply.',
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',

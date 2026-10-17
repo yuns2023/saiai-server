@@ -1103,6 +1103,7 @@ var (
 		{Name: "role", Type: field.TypeString, Size: 20, Default: "user"},
 		{Name: "balance", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
 		{Name: "payg_discount_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
+		{Name: "is_trusted", Type: field.TypeBool, Default: false},
 		{Name: "payg_discount_override_enabled", Type: field.TypeBool, Default: false},
 		{Name: "concurrency", Type: field.TypeInt, Default: 5},
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
@@ -1124,13 +1125,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "users_access_levels_auto_users",
-				Columns:    []*schema.Column{UsersColumns[19]},
+				Columns:    []*schema.Column{UsersColumns[20]},
 				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "users_access_levels_manual_users",
-				Columns:    []*schema.Column{UsersColumns[20]},
+				Columns:    []*schema.Column{UsersColumns[21]},
 				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -1139,7 +1140,7 @@ var (
 			{
 				Name:    "user_status",
 				Unique:  false,
-				Columns: []*schema.Column{UsersColumns[11]},
+				Columns: []*schema.Column{UsersColumns[12]},
 			},
 			{
 				Name:    "user_deleted_at",
@@ -1149,12 +1150,12 @@ var (
 			{
 				Name:    "user_auto_level_id",
 				Unique:  false,
-				Columns: []*schema.Column{UsersColumns[19]},
+				Columns: []*schema.Column{UsersColumns[20]},
 			},
 			{
 				Name:    "user_manual_level_id",
 				Unique:  false,
-				Columns: []*schema.Column{UsersColumns[20]},
+				Columns: []*schema.Column{UsersColumns[21]},
 			},
 		},
 	}

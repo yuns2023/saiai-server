@@ -491,3 +491,16 @@ func TestIncrementQuotaUsed_Concurrent(t *testing.T) {
 	require.Equal(t, float64(goroutines)*increment, got.QuotaUsed,
 		"并发递增后总和应为 %v，实际为 %v", float64(goroutines)*increment, got.QuotaUsed)
 }
+
+func (s *APIKeyRepoSuite) TestTrustedUserAuthProjection() {
+	user := s.mustCreateUser("trusted-auth@test.com")
+	key := &service.APIKey{UserID: user.ID, Key: "test-trusted-auth-key", Name: "Trust projection", Status: service.StatusActive}
+	s.Require().NoError(s.repo.Create(s.ctx, key))
+	for _, trusted := range []bool{true, false} {
+		s.Require().NoError(s.client.User.UpdateOneID(user.ID).SetIsTrusted(trusted).Exec(s.ctx))
+		got, err := s.repo.GetByKeyForAuth(s.ctx, key.Key)
+		s.Require().NoError(err)
+		s.Require().NotNil(got.User)
+		s.Require().Equal(trusted, got.User.IsTrusted)
+	}
+}

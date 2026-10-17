@@ -34,6 +34,8 @@ type User struct {
 	Balance float64 `json:"balance,omitempty"`
 	// PaygDiscountMultiplier holds the value of the "payg_discount_multiplier" field.
 	PaygDiscountMultiplier float64 `json:"payg_discount_multiplier,omitempty"`
+	// IsTrusted holds the value of the "is_trusted" field.
+	IsTrusted bool `json:"is_trusted,omitempty"`
 	// PaygDiscountOverrideEnabled holds the value of the "payg_discount_override_enabled" field.
 	PaygDiscountOverrideEnabled bool `json:"payg_discount_override_enabled,omitempty"`
 	// AutoLevelID holds the value of the "auto_level_id" field.
@@ -212,7 +214,7 @@ func (*User) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case user.FieldPaygDiscountOverrideEnabled, user.FieldTotpEnabled:
+		case user.FieldIsTrusted, user.FieldPaygDiscountOverrideEnabled, user.FieldTotpEnabled:
 			values[i] = new(sql.NullBool)
 		case user.FieldBalance, user.FieldPaygDiscountMultiplier:
 			values[i] = new(sql.NullFloat64)
@@ -291,6 +293,12 @@ func (_m *User) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field payg_discount_multiplier", values[i])
 			} else if value.Valid {
 				_m.PaygDiscountMultiplier = value.Float64
+			}
+		case user.FieldIsTrusted:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field is_trusted", values[i])
+			} else if value.Valid {
+				_m.IsTrusted = value.Bool
 			}
 		case user.FieldPaygDiscountOverrideEnabled:
 			if value, ok := values[i].(*sql.NullBool); !ok {
@@ -489,6 +497,9 @@ func (_m *User) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("payg_discount_multiplier=")
 	builder.WriteString(fmt.Sprintf("%v", _m.PaygDiscountMultiplier))
+	builder.WriteString(", ")
+	builder.WriteString("is_trusted=")
+	builder.WriteString(fmt.Sprintf("%v", _m.IsTrusted))
 	builder.WriteString(", ")
 	builder.WriteString("payg_discount_override_enabled=")
 	builder.WriteString(fmt.Sprintf("%v", _m.PaygDiscountOverrideEnabled))

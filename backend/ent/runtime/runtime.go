@@ -1385,40 +1385,44 @@ func init() {
 	userDescPaygDiscountMultiplier := userFields[4].Descriptor()
 	// user.DefaultPaygDiscountMultiplier holds the default value on creation for the payg_discount_multiplier field.
 	user.DefaultPaygDiscountMultiplier = userDescPaygDiscountMultiplier.Default.(float64)
+	// userDescIsTrusted is the schema descriptor for is_trusted field.
+	userDescIsTrusted := userFields[5].Descriptor()
+	// user.DefaultIsTrusted holds the default value on creation for the is_trusted field.
+	user.DefaultIsTrusted = userDescIsTrusted.Default.(bool)
 	// userDescPaygDiscountOverrideEnabled is the schema descriptor for payg_discount_override_enabled field.
-	userDescPaygDiscountOverrideEnabled := userFields[5].Descriptor()
+	userDescPaygDiscountOverrideEnabled := userFields[6].Descriptor()
 	// user.DefaultPaygDiscountOverrideEnabled holds the default value on creation for the payg_discount_override_enabled field.
 	user.DefaultPaygDiscountOverrideEnabled = userDescPaygDiscountOverrideEnabled.Default.(bool)
 	// userDescConcurrency is the schema descriptor for concurrency field.
-	userDescConcurrency := userFields[8].Descriptor()
+	userDescConcurrency := userFields[9].Descriptor()
 	// user.DefaultConcurrency holds the default value on creation for the concurrency field.
 	user.DefaultConcurrency = userDescConcurrency.Default.(int)
 	// userDescStatus is the schema descriptor for status field.
-	userDescStatus := userFields[9].Descriptor()
+	userDescStatus := userFields[10].Descriptor()
 	// user.DefaultStatus holds the default value on creation for the status field.
 	user.DefaultStatus = userDescStatus.Default.(string)
 	// user.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	user.StatusValidator = userDescStatus.Validators[0].(func(string) error)
 	// userDescUsername is the schema descriptor for username field.
-	userDescUsername := userFields[10].Descriptor()
+	userDescUsername := userFields[11].Descriptor()
 	// user.DefaultUsername holds the default value on creation for the username field.
 	user.DefaultUsername = userDescUsername.Default.(string)
 	// user.UsernameValidator is a validator for the "username" field. It is called by the builders before save.
 	user.UsernameValidator = userDescUsername.Validators[0].(func(string) error)
 	// userDescNotes is the schema descriptor for notes field.
-	userDescNotes := userFields[11].Descriptor()
+	userDescNotes := userFields[12].Descriptor()
 	// user.DefaultNotes holds the default value on creation for the notes field.
 	user.DefaultNotes = userDescNotes.Default.(string)
 	// userDescTotpEnabled is the schema descriptor for totp_enabled field.
-	userDescTotpEnabled := userFields[13].Descriptor()
+	userDescTotpEnabled := userFields[14].Descriptor()
 	// user.DefaultTotpEnabled holds the default value on creation for the totp_enabled field.
 	user.DefaultTotpEnabled = userDescTotpEnabled.Default.(bool)
 	// userDescSoraStorageQuotaBytes is the schema descriptor for sora_storage_quota_bytes field.
-	userDescSoraStorageQuotaBytes := userFields[15].Descriptor()
+	userDescSoraStorageQuotaBytes := userFields[16].Descriptor()
 	// user.DefaultSoraStorageQuotaBytes holds the default value on creation for the sora_storage_quota_bytes field.
 	user.DefaultSoraStorageQuotaBytes = userDescSoraStorageQuotaBytes.Default.(int64)
 	// userDescSoraStorageUsedBytes is the schema descriptor for sora_storage_used_bytes field.
-	userDescSoraStorageUsedBytes := userFields[16].Descriptor()
+	userDescSoraStorageUsedBytes := userFields[17].Descriptor()
 	// user.DefaultSoraStorageUsedBytes holds the default value on creation for the sora_storage_used_bytes field.
 	user.DefaultSoraStorageUsedBytes = userDescSoraStorageUsedBytes.Default.(int64)
 	userallowedgroupFields := schema.UserAllowedGroup{}.Fields()

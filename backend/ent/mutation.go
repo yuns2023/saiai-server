@@ -29988,6 +29988,7 @@ type UserMutation struct {
 	addbalance                     *float64
 	payg_discount_multiplier       *float64
 	addpayg_discount_multiplier    *float64
+	is_trusted                     *bool
 	payg_discount_override_enabled *bool
 	concurrency                    *int
 	addconcurrency                 *int
@@ -30475,6 +30476,42 @@ func (m *UserMutation) AddedPaygDiscountMultiplier() (r float64, exists bool) {
 func (m *UserMutation) ResetPaygDiscountMultiplier() {
 	m.payg_discount_multiplier = nil
 	m.addpayg_discount_multiplier = nil
+}
+
+// SetIsTrusted sets the "is_trusted" field.
+func (m *UserMutation) SetIsTrusted(b bool) {
+	m.is_trusted = &b
+}
+
+// IsTrusted returns the value of the "is_trusted" field in the mutation.
+func (m *UserMutation) IsTrusted() (r bool, exists bool) {
+	v := m.is_trusted
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldIsTrusted returns the old "is_trusted" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldIsTrusted(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldIsTrusted is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldIsTrusted requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldIsTrusted: %w", err)
+	}
+	return oldValue.IsTrusted, nil
+}
+
+// ResetIsTrusted resets all changes to the "is_trusted" field.
+func (m *UserMutation) ResetIsTrusted() {
+	m.is_trusted = nil
 }
 
 // SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
@@ -31595,7 +31632,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 20)
+	fields := make([]string, 0, 21)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -31619,6 +31656,9 @@ func (m *UserMutation) Fields() []string {
 	}
 	if m.payg_discount_multiplier != nil {
 		fields = append(fields, user.FieldPaygDiscountMultiplier)
+	}
+	if m.is_trusted != nil {
+		fields = append(fields, user.FieldIsTrusted)
 	}
 	if m.payg_discount_override_enabled != nil {
 		fields = append(fields, user.FieldPaygDiscountOverrideEnabled)
@@ -31680,6 +31720,8 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.Balance()
 	case user.FieldPaygDiscountMultiplier:
 		return m.PaygDiscountMultiplier()
+	case user.FieldIsTrusted:
+		return m.IsTrusted()
 	case user.FieldPaygDiscountOverrideEnabled:
 		return m.PaygDiscountOverrideEnabled()
 	case user.FieldAutoLevelID:
@@ -31729,6 +31771,8 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldBalance(ctx)
 	case user.FieldPaygDiscountMultiplier:
 		return m.OldPaygDiscountMultiplier(ctx)
+	case user.FieldIsTrusted:
+		return m.OldIsTrusted(ctx)
 	case user.FieldPaygDiscountOverrideEnabled:
 		return m.OldPaygDiscountOverrideEnabled(ctx)
 	case user.FieldAutoLevelID:
@@ -31817,6 +31861,13 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPaygDiscountMultiplier(v)
+		return nil
+	case user.FieldIsTrusted:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetIsTrusted(v)
 		return nil
 	case user.FieldPaygDiscountOverrideEnabled:
 		v, ok := value.(bool)
@@ -32070,6 +32121,9 @@ func (m *UserMutation) ResetField(name string) error {
 		return nil
 	case user.FieldPaygDiscountMultiplier:
 		m.ResetPaygDiscountMultiplier()
+		return nil
+	case user.FieldIsTrusted:
+		m.ResetIsTrusted()
 		return nil
 	case user.FieldPaygDiscountOverrideEnabled:
 		m.ResetPaygDiscountOverrideEnabled()

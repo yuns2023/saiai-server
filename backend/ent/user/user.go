@@ -31,6 +31,8 @@ const (
 	FieldBalance = "balance"
 	// FieldPaygDiscountMultiplier holds the string denoting the payg_discount_multiplier field in the database.
 	FieldPaygDiscountMultiplier = "payg_discount_multiplier"
+	// FieldIsTrusted holds the string denoting the is_trusted field in the database.
+	FieldIsTrusted = "is_trusted"
 	// FieldPaygDiscountOverrideEnabled holds the string denoting the payg_discount_override_enabled field in the database.
 	FieldPaygDiscountOverrideEnabled = "payg_discount_override_enabled"
 	// FieldAutoLevelID holds the string denoting the auto_level_id field in the database.
@@ -176,6 +178,7 @@ var Columns = []string{
 	FieldRole,
 	FieldBalance,
 	FieldPaygDiscountMultiplier,
+	FieldIsTrusted,
 	FieldPaygDiscountOverrideEnabled,
 	FieldAutoLevelID,
 	FieldManualLevelID,
@@ -232,6 +235,8 @@ var (
 	DefaultBalance float64
 	// DefaultPaygDiscountMultiplier holds the default value on creation for the "payg_discount_multiplier" field.
 	DefaultPaygDiscountMultiplier float64
+	// DefaultIsTrusted holds the default value on creation for the "is_trusted" field.
+	DefaultIsTrusted bool
 	// DefaultPaygDiscountOverrideEnabled holds the default value on creation for the "payg_discount_override_enabled" field.
 	DefaultPaygDiscountOverrideEnabled bool
 	// DefaultConcurrency holds the default value on creation for the "concurrency" field.
@@ -300,6 +305,11 @@ func ByBalance(opts ...sql.OrderTermOption) OrderOption {
 // ByPaygDiscountMultiplier orders the results by the payg_discount_multiplier field.
 func ByPaygDiscountMultiplier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPaygDiscountMultiplier, opts...).ToFunc()
+}
+
+// ByIsTrusted orders the results by the is_trusted field.
+func ByIsTrusted(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldIsTrusted, opts...).ToFunc()
 }
 
 // ByPaygDiscountOverrideEnabled orders the results by the payg_discount_override_enabled field.

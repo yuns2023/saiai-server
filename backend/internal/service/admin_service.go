@@ -104,6 +104,7 @@ type CreateUserInput struct {
 	Balance                     float64
 	PaygDiscountMultiplier      *float64
 	PaygDiscountOverrideEnabled bool
+	IsTrusted                   bool
 	Concurrency                 int
 	AllowedGroups               []int64
 	SoraStorageQuotaBytes       int64
@@ -117,6 +118,7 @@ type UpdateUserInput struct {
 	Balance                     *float64 // 使用指针区分"未提供"和"设置为0"
 	PaygDiscountMultiplier      *float64
 	PaygDiscountOverrideEnabled *bool
+	IsTrusted                   *bool
 	Concurrency                 *int // 使用指针区分"未提供"和"设置为0"
 	Status                      string
 	AllowedGroups               *[]int64 // 使用指针区分"未提供"和"设置为空数组"
@@ -620,6 +622,7 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		Balance:                     input.Balance,
 		PaygDiscountMultiplier:      input.PaygDiscountMultiplier,
 		PaygDiscountOverrideEnabled: input.PaygDiscountOverrideEnabled || input.PaygDiscountMultiplier != nil,
+		IsTrusted:                   input.IsTrusted,
 		Concurrency:                 input.Concurrency,
 		Status:                      StatusActive,
 		AllowedGroups:               input.AllowedGroups,
@@ -666,6 +669,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldConcurrency := user.Concurrency
 	oldStatus := user.Status
 	oldRole := user.Role
+	oldIsTrusted := user.IsTrusted
 	oldPaygDiscount := user.PaygDiscountRate()
 
 	if err := validatePaygDiscountMultiplier(input.PaygDiscountMultiplier); err != nil {
@@ -681,6 +685,9 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
+	if input.IsTrusted != nil {
+		user.IsTrusted = *input.IsTrusted
+	}
 	if input.Username != nil {
 		user.Username = *input.Username
 	}
@@ -737,7 +744,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 
 	if s.authCacheInvalidator != nil {
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.PaygDiscountRate() != oldPaygDiscount {
+		if user.IsTrusted != oldIsTrusted || user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.PaygDiscountRate() != oldPaygDiscount {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}

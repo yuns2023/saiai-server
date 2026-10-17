@@ -2151,7 +2151,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				if _, excluded := localExcluded[acc.ID]; excluded {
 					continue
 				}
-				if !s.isAccountSchedulableForSelection(acc) ||
+				if !s.isAccountSchedulableForSelection(ctx, acc) ||
 					!s.isAccountAllowedForPlatform(acc, platform, useMixed) ||
 					(requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel)) ||
 					!s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) ||
@@ -2289,7 +2289,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				continue
 			}
 			account, ok := accountByID[routingAccountID]
-			if !ok || !s.isAccountSchedulableForSelection(account) {
+			if !ok || !s.isAccountSchedulableForSelection(ctx, account) {
 				if !ok {
 					filteredMissing++
 				} else {
@@ -2342,7 +2342,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				if containsInt64(routingAccountIDs, stickyAccountID) && !isExcluded(stickyAccountID) {
 					// 粘性账号在路由列表中，优先使用
 					if stickyAccount, ok := accountByID[stickyAccountID]; ok {
-						if s.isAccountSchedulableForSelection(stickyAccount) &&
+						if s.isAccountSchedulableForSelection(ctx, stickyAccount) &&
 							s.isAccountAllowedForPlatform(stickyAccount, platform, useMixed) &&
 							(requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, stickyAccount, requestedModel)) &&
 							s.isAccountSchedulableForModelSelection(ctx, stickyAccount, requestedModel) &&
@@ -2573,7 +2573,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		// Scheduler snapshots can be temporarily stale (bucket rebuild is throttled);
 		// re-check schedulability here so recently rate-limited/overloaded accounts
 		// are not selected again before the bucket is rebuilt.
-		if !s.isAccountSchedulableForSelection(acc) {
+		if !s.isAccountSchedulableForSelection(ctx, acc) {
 			continue
 		}
 		if !s.isAccountAllowedForPlatform(acc, platform, useMixed) {
@@ -3181,8 +3181,8 @@ func (s *GatewayService) soraUnschedulableReason(account *Account) string {
 	return ""
 }
 
-func (s *GatewayService) isAccountSchedulableForSelection(account *Account) bool {
-	if account == nil {
+func (s *GatewayService) isAccountSchedulableForSelection(ctx context.Context, account *Account) bool {
+	if !accountAllowsUser(ctx, account) {
 		return false
 	}
 	if account.Platform == PlatformSora {
@@ -3192,7 +3192,7 @@ func (s *GatewayService) isAccountSchedulableForSelection(account *Account) bool
 }
 
 func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Context, account *Account, requestedModel string) bool {
-	if account == nil {
+	if !accountAllowsUser(ctx, account) {
 		return false
 	}
 	if account.Platform == PlatformSora {
@@ -3558,7 +3558,7 @@ func (s *GatewayService) resolveFreshAccountForSessionAdmission(ctx context.Cont
 		}
 		fresh = current
 	}
-	if !s.isAccountSchedulableForSelection(fresh) {
+	if !s.isAccountSchedulableForSelection(ctx, fresh) {
 		return nil
 	}
 	if !existingBinding && s.shouldRejectNewSessionForHighFiveHourUsage(fresh, time.Now()) {
@@ -4008,7 +4008,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			}
 			// Scheduler snapshots can be temporarily stale; re-check schedulability here to
 			// avoid selecting accounts that were recently rate-limited/overloaded.
-			if !s.isAccountSchedulableForSelection(acc) {
+			if !s.isAccountSchedulableForSelection(ctx, acc) {
 				continue
 			}
 			if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
@@ -4087,7 +4087,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		}
 		// Scheduler snapshots can be temporarily stale; re-check schedulability here to
 		// avoid selecting accounts that were recently rate-limited/overloaded.
-		if !s.isAccountSchedulableForSelection(acc) {
+		if !s.isAccountSchedulableForSelection(ctx, acc) {
 			continue
 		}
 		if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
@@ -4193,7 +4193,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			}
 			// Scheduler snapshots can be temporarily stale; re-check schedulability here to
 			// avoid selecting accounts that were recently rate-limited/overloaded.
-			if !s.isAccountSchedulableForSelection(acc) {
+			if !s.isAccountSchedulableForSelection(ctx, acc) {
 				continue
 			}
 			// 过滤：原生平台直接通过，antigravity 需要启用混合调度
@@ -4274,7 +4274,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		}
 		// Scheduler snapshots can be temporarily stale; re-check schedulability here to
 		// avoid selecting accounts that were recently rate-limited/overloaded.
-		if !s.isAccountSchedulableForSelection(acc) {
+		if !s.isAccountSchedulableForSelection(ctx, acc) {
 			continue
 		}
 		// 过滤：原生平台直接通过，antigravity 需要启用混合调度
@@ -4315,24 +4315,25 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 }
 
 type selectionFailureStats struct {
-	Total              int
-	Eligible           int
-	Excluded           int
-	Unschedulable      int
-	PlatformFiltered   int
-	ModelUnsupported   int
-	ModelRateLimited   int
-	QuotaLimited       int
-	WindowCostLimited  int
-	RPMLimited         int
-	FiveHourLimited    int
-	SamplePlatformIDs  []int64
-	SampleMappingIDs   []int64
-	SampleRateLimitIDs []string
-	SampleQuotaIDs     []int64
-	SampleWindowIDs    []int64
-	SampleRPMIDs       []int64
-	SampleFiveHourIDs  []int64
+	Total               int
+	Eligible            int
+	Excluded            int
+	Unschedulable       int
+	TrustedUserRequired int
+	PlatformFiltered    int
+	ModelUnsupported    int
+	ModelRateLimited    int
+	QuotaLimited        int
+	WindowCostLimited   int
+	RPMLimited          int
+	FiveHourLimited     int
+	SamplePlatformIDs   []int64
+	SampleMappingIDs    []int64
+	SampleRateLimitIDs  []string
+	SampleQuotaIDs      []int64
+	SampleWindowIDs     []int64
+	SampleRPMIDs        []int64
+	SampleFiveHourIDs   []int64
 }
 
 type selectionFailureDiagnosis struct {
@@ -4360,6 +4361,7 @@ func (s *GatewayService) logDetailedSelectionFailure(
 		zap.Int("eligible", stats.Eligible),
 		zap.Int("excluded", stats.Excluded),
 		zap.Int("unschedulable", stats.Unschedulable),
+		zap.Int("trusted_user_required", stats.TrustedUserRequired),
 		zap.Int("platform_filtered", stats.PlatformFiltered),
 		zap.Int("model_unsupported", stats.ModelUnsupported),
 		zap.Int("model_rate_limited", stats.ModelRateLimited),
@@ -4427,6 +4429,9 @@ func (s *GatewayService) collectSelectionFailureStats(
 			stats.Excluded++
 		case "unschedulable":
 			stats.Unschedulable++
+			if diagnosis.Detail == "trusted_user_required" {
+				stats.TrustedUserRequired++
+			}
 		case "platform_filtered":
 			stats.PlatformFiltered++
 			stats.SamplePlatformIDs = appendSelectionFailureSampleID(stats.SamplePlatformIDs, acc.ID)
@@ -4471,7 +4476,10 @@ func (s *GatewayService) diagnoseSelectionFailure(
 	if _, excluded := excludedIDs[acc.ID]; excluded {
 		return selectionFailureDiagnosis{Category: "excluded"}
 	}
-	if !s.isAccountSchedulableForSelection(acc) {
+	if !accountAllowsUser(ctx, acc) {
+		return selectionFailureDiagnosis{Category: "unschedulable", Detail: "trusted_user_required"}
+	}
+	if !s.isAccountSchedulableForSelection(ctx, acc) {
 		detail := "generic_unschedulable"
 		if acc.Platform == PlatformSora {
 			detail = s.soraUnschedulableReason(acc)
@@ -5338,6 +5346,9 @@ func enforceCacheControlLimit(body []byte) []byte {
 
 // Forward 转发请求到Claude API
 func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) (*ForwardResult, error) {
+	if account != nil && !accountAllowsUser(ctx, account) {
+		return nil, ErrNoAvailableAccounts
+	}
 	startTime := time.Now()
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
@@ -9898,6 +9909,10 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 // ForwardCountTokens 转发 count_tokens 请求到上游 API
 // 特点：不记录使用量、仅支持非流式响应
 func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) error {
+	if account != nil && !accountAllowsUser(ctx, account) {
+		s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "No available accounts")
+		return ErrNoAvailableAccounts
+	}
 	if parsed == nil {
 		s.countTokensError(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return fmt.Errorf("parse request: empty request")

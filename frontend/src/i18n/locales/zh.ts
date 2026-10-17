@@ -1517,6 +1517,8 @@ export default {
 
     // Users Management
     users: {
+      trustedUser: '可信用户',
+      trustedUserHint: '允许使用仅限可信用户的 carpool 账号，其他权限和限制不变。',
       title: '用户管理',
       description: '管理用户账户和权限',
       createUser: '创建用户',
@@ -2188,6 +2190,8 @@ export default {
 
     // Accounts Management
     accounts: {
+      carpoolTrustedOnly: '仅限可信用户',
+      carpoolTrustedOnlyHint: '仅允许管理员标记为可信的用户使用此账号，其他调度与设备限制不变。',
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',

@@ -561,3 +561,19 @@ func (s *UserRepoSuite) TestDeductBalance_NotFound() {
 	// DeductBalance 在用户不存在时返回 ErrUserNotFound
 	s.Require().ErrorIs(err, service.ErrUserNotFound)
 }
+
+func (s *UserRepoSuite) TestTrustedUserPersistence() {
+	user := s.mustCreateUser(&service.User{Email: "trusted@test.com", IsTrusted: true})
+	got, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().True(got.IsTrusted)
+	got.IsTrusted = false
+	s.Require().NoError(s.repo.Update(s.ctx, got))
+	got, err = s.repo.GetByEmail(s.ctx, user.Email)
+	s.Require().NoError(err)
+	s.Require().False(got.IsTrusted)
+	ordinary := s.mustCreateUser(&service.User{Email: "ordinary@test.com"})
+	got, err = s.repo.GetByID(s.ctx, ordinary.ID)
+	s.Require().NoError(err)
+	s.Require().False(got.IsTrusted)
+}

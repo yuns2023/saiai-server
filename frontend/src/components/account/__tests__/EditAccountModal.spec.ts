@@ -380,3 +380,33 @@ describe('EditAccountModal', () => {
     })
   })
 })
+
+
+describe('trusted-only carpool management', () => {
+  it.each(['oauth', 'setup-token'])('loads, disables, and enables the restriction for %s', async (type) => {
+    const account = { ...buildAccount(), type, credentials: { access_token: 'test-token' },
+      claude_oauth_mode: 'carpool', extra: { claude_oauth_mode: 'carpool', claude_oauth_carpool_trusted_only: true, unrelated_setting: 'keep' } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    listClaudeCarpoolDevicesMock.mockResolvedValue({ recorded_items: [], overflow_items: [] })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const toggle = wrapper.get('[data-testid="carpool-trusted-only"]')
+    expect((toggle.element as HTMLInputElement).checked).toBe(true)
+    for (const trusted of [false, true]) {
+      await toggle.setValue(trusted)
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+      const extra = updateAccountMock.mock.lastCall?.[1].extra
+      expect(extra.claude_oauth_carpool_trusted_only === true).toBe(trusted)
+      expect(extra.unrelated_setting).toBe('keep')
+    }
+    const shared = wrapper.findAll('button').find(button => button.text() === 'shared')!
+    await shared.trigger('click')
+    expect(wrapper.find('[data-testid="carpool-trusted-only"]').exists()).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.lastCall?.[1].extra.claude_oauth_carpool_trusted_only).toBeUndefined()
+    wrapper.unmount()
+  })
+})

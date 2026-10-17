@@ -26,6 +26,13 @@
         </div>
       </div>
       <div>
+        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+          <input v-model="form.is_trusted" data-testid="user-is-trusted" type="checkbox" class="rounded-sm" />
+          {{ t('admin.users.trustedUser') }}
+        </label>
+        <p class="input-hint">{{ t('admin.users.trustedUserHint') }}</p>
+      </div>
+      <div>
         <label class="input-label">{{ t('admin.users.username') }}</label>
         <input v-model="form.username" type="text" class="input" />
       </div>
@@ -95,11 +102,11 @@ const { t } = useI18n(); const appStore = useAppStore(); const { copyToClipboard
 
 const submitting = ref(false); const passwordCopied = ref(false)
 const accessLevels = ref<AccessLevel[]>([])
-const form = reactive({ email: '', password: '', username: '', notes: '', concurrency: 1, payg_discount_multiplier: 1, payg_discount_override_enabled: false, manual_level_id: null as number | null, customAttributes: {} as UserAttributeValuesMap })
+const form = reactive({ email: '', password: '', username: '', notes: '', concurrency: 1, payg_discount_multiplier: 1, is_trusted: false, payg_discount_override_enabled: false, manual_level_id: null as number | null, customAttributes: {} as UserAttributeValuesMap })
 
 watch(() => props.user, (u) => {
   if (u) {
-    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', concurrency: u.concurrency, payg_discount_multiplier: u.payg_discount_multiplier ?? 1, payg_discount_override_enabled: u.payg_discount_override_enabled ?? true, manual_level_id: u.manual_level?.id ?? null, customAttributes: {} })
+    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', concurrency: u.concurrency, payg_discount_multiplier: u.payg_discount_multiplier ?? 1, is_trusted: u.is_trusted ?? false, payg_discount_override_enabled: u.payg_discount_override_enabled ?? true, manual_level_id: u.manual_level?.id ?? null, customAttributes: {} })
     if (adminAPI.accessLevels) adminAPI.accessLevels.list().then((items) => { accessLevels.value = items }).catch(() => { accessLevels.value = [] })
     passwordCopied.value = false
   }
@@ -131,7 +138,7 @@ const handleUpdateUser = async () => {
   }
   submitting.value = true
   try {
-    const data: any = { email: form.email, username: form.username, notes: form.notes, concurrency: form.concurrency, payg_discount_override_enabled: form.payg_discount_override_enabled }
+    const data: any = { email: form.email, username: form.username, notes: form.notes, concurrency: form.concurrency, is_trusted: form.is_trusted, payg_discount_override_enabled: form.payg_discount_override_enabled }
     if (form.payg_discount_override_enabled) data.payg_discount_multiplier = form.payg_discount_multiplier
     if (form.password.trim()) data.password = form.password.trim()
     await adminAPI.users.update(props.user.id, data)

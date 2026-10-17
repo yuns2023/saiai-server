@@ -142,6 +142,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			Concurrency: apiKey.User.Concurrency,
 		})
 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
+		c.Request = c.Request.WithContext(service.WithTrustedUser(c.Request.Context(), apiKey.User.IsTrusted))
 		setGroupContext(c, apiKey.Group)
 		// Disabling a group must stop every API-key route for already-issued
 		// keys as well as new key bindings. In particular, do not let usage or

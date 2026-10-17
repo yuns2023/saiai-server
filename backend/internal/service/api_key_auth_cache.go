@@ -28,6 +28,7 @@ type APIKeyAuthSnapshot struct {
 
 // APIKeyAuthUserSnapshot 用户快照
 type APIKeyAuthUserSnapshot struct {
+	IsTrusted                   bool         `json:"is_trusted,omitempty"`
 	ID                          int64        `json:"id"`
 	Username                    string       `json:"username,omitempty"`
 	Status                      string       `json:"status"`

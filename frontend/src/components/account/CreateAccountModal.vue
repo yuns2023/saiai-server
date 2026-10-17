@@ -1589,6 +1589,13 @@
               </button>
             </div>
             <div v-if="claudeOAuthMode === 'shared' || claudeOAuthMode === 'carpool'" class="space-y-3">
+              <label v-if="claudeOAuthMode === 'carpool'" class="flex items-start gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600">
+                <input v-model="claudeOAuthCarpoolTrustedOnly" data-testid="carpool-trusted-only" type="checkbox" class="mt-0.5 h-4 w-4 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" />
+                <span>
+                  <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.accounts.carpoolTrustedOnly') }}</span>
+                  <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.carpoolTrustedOnlyHint') }}</span>
+                </span>
+              </label>
               <label
                 v-if="claudeOAuthMode === 'carpool'"
                 class="flex items-start gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600"
@@ -2865,6 +2872,7 @@ const cacheTTLOverrideEnabled = ref(false)
 const cacheTTLOverrideTarget = ref<string>('5m')
 const claudeOAuthMode = ref<'carpool' | 'shared' | 'pinned' | 'single_device'>('carpool')
 const claudeOAuthCarpoolDeviceLimit = ref<number>(5)
+const claudeOAuthCarpoolTrustedOnly = ref(false)
 const claudeOAuthCarpoolUnlimitedDevices = ref(false)
 const claudeOAuthCarpoolAutoExpand = ref(false)
 const claudeOAuthCarpoolAutoMaintenanceTarget = ref<number>(16)
@@ -3491,6 +3499,7 @@ const resetForm = () => {
   cacheTTLOverrideTarget.value = '5m'
   claudeOAuthMode.value = 'carpool'
   claudeOAuthCarpoolDeviceLimit.value = 5
+  claudeOAuthCarpoolTrustedOnly.value = false
   claudeOAuthCarpoolUnlimitedDevices.value = false
   claudeOAuthCarpoolAutoExpand.value = false
   claudeOAuthCarpoolAutoMaintenanceTarget.value = 16
@@ -4178,6 +4187,10 @@ const buildAnthropicOAuthExtra = (baseExtra: Record<string, unknown>) => {
   extra.claude_oauth_mode = claudeOAuthMode.value
   if (claudeOAuthFiveHourRateLimitThresholdPercent.value != null && claudeOAuthFiveHourRateLimitThresholdPercent.value > 0) {
     extra.claude_oauth_5h_rate_limit_threshold_percent = Math.min(100, Math.max(0, claudeOAuthFiveHourRateLimitThresholdPercent.value))
+  }
+  delete extra.claude_oauth_carpool_trusted_only
+  if (claudeOAuthMode.value === 'carpool' && claudeOAuthCarpoolTrustedOnly.value) {
+    extra.claude_oauth_carpool_trusted_only = true
   }
   delete extra.claude_oauth_carpool_unlimited_devices
   delete extra.claude_oauth_carpool_auto_expand_enabled

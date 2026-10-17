@@ -249,7 +249,8 @@
             </div>
           </template>
 
-          <template #cell-username="{ value }">
+          <template #cell-username="{ value, row }">
+            <span v-if="row.is_trusted" class="mr-1 rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-400">{{ t('admin.users.trustedUser') }}</span>
             <span class="text-sm text-gray-700 dark:text-gray-300">{{ value || '-' }}</span>
           </template>
 

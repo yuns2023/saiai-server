@@ -127,6 +127,20 @@ func (_c *UserCreate) SetNillablePaygDiscountMultiplier(v *float64) *UserCreate 
 	return _c
 }
 
+// SetIsTrusted sets the "is_trusted" field.
+func (_c *UserCreate) SetIsTrusted(v bool) *UserCreate {
+	_c.mutation.SetIsTrusted(v)
+	return _c
+}
+
+// SetNillableIsTrusted sets the "is_trusted" field if the given value is not nil.
+func (_c *UserCreate) SetNillableIsTrusted(v *bool) *UserCreate {
+	if v != nil {
+		_c.SetIsTrusted(*v)
+	}
+	return _c
+}
+
 // SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
 func (_c *UserCreate) SetPaygDiscountOverrideEnabled(v bool) *UserCreate {
 	_c.mutation.SetPaygDiscountOverrideEnabled(v)
@@ -503,6 +517,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultPaygDiscountMultiplier
 		_c.mutation.SetPaygDiscountMultiplier(v)
 	}
+	if _, ok := _c.mutation.IsTrusted(); !ok {
+		v := user.DefaultIsTrusted
+		_c.mutation.SetIsTrusted(v)
+	}
 	if _, ok := _c.mutation.PaygDiscountOverrideEnabled(); !ok {
 		v := user.DefaultPaygDiscountOverrideEnabled
 		_c.mutation.SetPaygDiscountOverrideEnabled(v)
@@ -575,6 +593,9 @@ func (_c *UserCreate) check() error {
 	}
 	if _, ok := _c.mutation.PaygDiscountMultiplier(); !ok {
 		return &ValidationError{Name: "payg_discount_multiplier", err: errors.New(`ent: missing required field "User.payg_discount_multiplier"`)}
+	}
+	if _, ok := _c.mutation.IsTrusted(); !ok {
+		return &ValidationError{Name: "is_trusted", err: errors.New(`ent: missing required field "User.is_trusted"`)}
 	}
 	if _, ok := _c.mutation.PaygDiscountOverrideEnabled(); !ok {
 		return &ValidationError{Name: "payg_discount_override_enabled", err: errors.New(`ent: missing required field "User.payg_discount_override_enabled"`)}
@@ -668,6 +689,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.PaygDiscountMultiplier(); ok {
 		_spec.SetField(user.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
 		_node.PaygDiscountMultiplier = value
+	}
+	if value, ok := _c.mutation.IsTrusted(); ok {
+		_spec.SetField(user.FieldIsTrusted, field.TypeBool, value)
+		_node.IsTrusted = value
 	}
 	if value, ok := _c.mutation.PaygDiscountOverrideEnabled(); ok {
 		_spec.SetField(user.FieldPaygDiscountOverrideEnabled, field.TypeBool, value)
@@ -1045,6 +1070,18 @@ func (u *UserUpsert) AddPaygDiscountMultiplier(v float64) *UserUpsert {
 	return u
 }
 
+// SetIsTrusted sets the "is_trusted" field.
+func (u *UserUpsert) SetIsTrusted(v bool) *UserUpsert {
+	u.Set(user.FieldIsTrusted, v)
+	return u
+}
+
+// UpdateIsTrusted sets the "is_trusted" field to the value that was provided on create.
+func (u *UserUpsert) UpdateIsTrusted() *UserUpsert {
+	u.SetExcluded(user.FieldIsTrusted)
+	return u
+}
+
 // SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
 func (u *UserUpsert) SetPaygDiscountOverrideEnabled(v bool) *UserUpsert {
 	u.Set(user.FieldPaygDiscountOverrideEnabled, v)
@@ -1392,6 +1429,20 @@ func (u *UserUpsertOne) AddPaygDiscountMultiplier(v float64) *UserUpsertOne {
 func (u *UserUpsertOne) UpdatePaygDiscountMultiplier() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdatePaygDiscountMultiplier()
+	})
+}
+
+// SetIsTrusted sets the "is_trusted" field.
+func (u *UserUpsertOne) SetIsTrusted(v bool) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetIsTrusted(v)
+	})
+}
+
+// UpdateIsTrusted sets the "is_trusted" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateIsTrusted() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateIsTrusted()
 	})
 }
 
@@ -1939,6 +1990,20 @@ func (u *UserUpsertBulk) AddPaygDiscountMultiplier(v float64) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdatePaygDiscountMultiplier() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdatePaygDiscountMultiplier()
+	})
+}
+
+// SetIsTrusted sets the "is_trusted" field.
+func (u *UserUpsertBulk) SetIsTrusted(v bool) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetIsTrusted(v)
+	})
+}
+
+// UpdateIsTrusted sets the "is_trusted" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateIsTrusted() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateIsTrusted()
 	})
 }
 

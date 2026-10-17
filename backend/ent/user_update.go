@@ -147,6 +147,20 @@ func (_u *UserUpdate) AddPaygDiscountMultiplier(v float64) *UserUpdate {
 	return _u
 }
 
+// SetIsTrusted sets the "is_trusted" field.
+func (_u *UserUpdate) SetIsTrusted(v bool) *UserUpdate {
+	_u.mutation.SetIsTrusted(v)
+	return _u
+}
+
+// SetNillableIsTrusted sets the "is_trusted" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableIsTrusted(v *bool) *UserUpdate {
+	if v != nil {
+		_u.SetIsTrusted(*v)
+	}
+	return _u
+}
+
 // SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
 func (_u *UserUpdate) SetPaygDiscountOverrideEnabled(v bool) *UserUpdate {
 	_u.mutation.SetPaygDiscountOverrideEnabled(v)
@@ -825,6 +839,9 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedPaygDiscountMultiplier(); ok {
 		_spec.AddField(user.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.IsTrusted(); ok {
+		_spec.SetField(user.FieldIsTrusted, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.PaygDiscountOverrideEnabled(); ok {
 		_spec.SetField(user.FieldPaygDiscountOverrideEnabled, field.TypeBool, value)
 	}
@@ -1472,6 +1489,20 @@ func (_u *UserUpdateOne) SetNillablePaygDiscountMultiplier(v *float64) *UserUpda
 // AddPaygDiscountMultiplier adds value to the "payg_discount_multiplier" field.
 func (_u *UserUpdateOne) AddPaygDiscountMultiplier(v float64) *UserUpdateOne {
 	_u.mutation.AddPaygDiscountMultiplier(v)
+	return _u
+}
+
+// SetIsTrusted sets the "is_trusted" field.
+func (_u *UserUpdateOne) SetIsTrusted(v bool) *UserUpdateOne {
+	_u.mutation.SetIsTrusted(v)
+	return _u
+}
+
+// SetNillableIsTrusted sets the "is_trusted" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableIsTrusted(v *bool) *UserUpdateOne {
+	if v != nil {
+		_u.SetIsTrusted(*v)
+	}
 	return _u
 }
 
@@ -2182,6 +2213,9 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.AddedPaygDiscountMultiplier(); ok {
 		_spec.AddField(user.FieldPaygDiscountMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.IsTrusted(); ok {
+		_spec.SetField(user.FieldIsTrusted, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.PaygDiscountOverrideEnabled(); ok {
 		_spec.SetField(user.FieldPaygDiscountOverrideEnabled, field.TypeBool, value)

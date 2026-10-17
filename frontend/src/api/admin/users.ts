@@ -87,6 +87,7 @@ export async function create(userData: {
   balance?: number
   payg_discount_multiplier?: number
   payg_discount_override_enabled?: boolean
+  is_trusted?: boolean
   concurrency?: number
   allowed_groups?: number[] | null
 }): Promise<AdminUser> {

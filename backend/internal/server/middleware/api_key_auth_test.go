@@ -892,3 +892,26 @@ func (r *stubUserSubscriptionRepo) IncrementUsage(ctx context.Context, id int64,
 func (r *stubUserSubscriptionRepo) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {
 	return 0, errors.New("not implemented")
 }
+
+func TestTrustedUserComesOnlyFromAuthenticatedKeyOwner(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, trusted := range []bool{false, true} {
+		user := &service.User{ID: 7, Status: service.StatusActive, Balance: 10, IsTrusted: trusted}
+		key := &service.APIKey{ID: 9, UserID: 7, Key: "test-trusted-user", Status: service.StatusActive, User: user}
+		repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) { return key, nil }}
+		cfg := &config.Config{RunMode: config.RunModeSimple}
+		svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+		router := gin.New()
+		router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(svc, nil, nil, cfg)))
+		router.GET("/t", func(c *gin.Context) {
+			require.Equal(t, trusted, service.IsTrustedUser(c.Request.Context()))
+			c.Status(http.StatusOK)
+		})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/t?is_trusted=true", nil)
+		req.Header.Set("x-api-key", key.Key)
+		req.Header.Set("X-Trusted-User", "true")
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+}

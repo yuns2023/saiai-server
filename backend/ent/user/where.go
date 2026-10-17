@@ -95,6 +95,11 @@ func PaygDiscountMultiplier(v float64) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldPaygDiscountMultiplier, v))
 }
 
+// IsTrusted applies equality check predicate on the "is_trusted" field. It's identical to IsTrustedEQ.
+func IsTrusted(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldIsTrusted, v))
+}
+
 // PaygDiscountOverrideEnabled applies equality check predicate on the "payg_discount_override_enabled" field. It's identical to PaygDiscountOverrideEnabledEQ.
 func PaygDiscountOverrideEnabled(v bool) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldPaygDiscountOverrideEnabled, v))
@@ -558,6 +563,16 @@ func PaygDiscountMultiplierLT(v float64) predicate.User {
 // PaygDiscountMultiplierLTE applies the LTE predicate on the "payg_discount_multiplier" field.
 func PaygDiscountMultiplierLTE(v float64) predicate.User {
 	return predicate.User(sql.FieldLTE(FieldPaygDiscountMultiplier, v))
+}
+
+// IsTrustedEQ applies the EQ predicate on the "is_trusted" field.
+func IsTrustedEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldIsTrusted, v))
+}
+
+// IsTrustedNEQ applies the NEQ predicate on the "is_trusted" field.
+func IsTrustedNEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldIsTrusted, v))
 }
 
 // PaygDiscountOverrideEnabledEQ applies the EQ predicate on the "payg_discount_override_enabled" field.

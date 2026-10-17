@@ -88,6 +88,7 @@ func (h *UserHandler) RevokeClaudeDevice(c *gin.Context) {
 
 // CreateUserRequest represents admin create user request
 type CreateUserRequest struct {
+	IsTrusted                   bool     `json:"is_trusted"`
 	Email                       string   `json:"email" binding:"required,email"`
 	Password                    string   `json:"password" binding:"required,min=6"`
 	Username                    string   `json:"username"`
@@ -103,6 +104,7 @@ type CreateUserRequest struct {
 // UpdateUserRequest represents admin update user request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateUserRequest struct {
+	IsTrusted                   *bool    `json:"is_trusted"`
 	Email                       string   `json:"email" binding:"omitempty,email"`
 	Password                    string   `json:"password" binding:"omitempty,min=6"`
 	Username                    *string  `json:"username"`
@@ -266,6 +268,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		Balance:                     req.Balance,
 		PaygDiscountMultiplier:      req.PaygDiscountMultiplier,
 		PaygDiscountOverrideEnabled: req.PaygDiscountOverrideEnabled,
+		IsTrusted:                   req.IsTrusted,
 		Concurrency:                 req.Concurrency,
 		AllowedGroups:               req.AllowedGroups,
 		SoraStorageQuotaBytes:       req.SoraStorageQuotaBytes,
@@ -302,6 +305,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		Balance:                     req.Balance,
 		PaygDiscountMultiplier:      req.PaygDiscountMultiplier,
 		PaygDiscountOverrideEnabled: req.PaygDiscountOverrideEnabled,
+		IsTrusted:                   req.IsTrusted,
 		Concurrency:                 req.Concurrency,
 		Status:                      req.Status,
 		AllowedGroups:               req.AllowedGroups,

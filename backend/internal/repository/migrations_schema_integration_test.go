@@ -49,6 +49,7 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "users", "auto_level_id", "bigint", 0, true)
 	requireColumn(t, tx, "users", "manual_level_id", "bigint", 0, true)
 	requireColumn(t, tx, "users", "payg_discount_override_enabled", "boolean", 0, false)
+	requireColumn(t, tx, "users", "is_trusted", "boolean", 0, false)
 
 	// redeem_codes: subscription fields
 	requireColumn(t, tx, "redeem_codes", "group_id", "bigint", 0, true)

@@ -22,6 +22,13 @@
         </div>
       </div>
       <div>
+        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+          <input v-model="form.is_trusted" data-testid="user-is-trusted" type="checkbox" class="rounded-sm" />
+          {{ t('admin.users.trustedUser') }}
+        </label>
+        <p class="input-hint">{{ t('admin.users.trustedUserHint') }}</p>
+      </div>
+      <div>
         <label class="input-label">{{ t('admin.users.username') }}</label>
         <input v-model="form.username" type="text" class="input" :placeholder="t('admin.users.enterUsername')" />
       </div>
@@ -77,7 +84,7 @@ import Icon from '@/components/icons/Icon.vue'
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n()
 
-const form = reactive({ email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1, payg_discount_override_enabled: false })
+const form = reactive({ email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1, is_trusted: false, payg_discount_override_enabled: false })
 
 const { loading, submit } = useForm({
   form,
@@ -90,7 +97,7 @@ const { loading, submit } = useForm({
   successMsg: t('admin.users.userCreated')
 })
 
-watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1, payg_discount_override_enabled: false }) })
+watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1, is_trusted: false, payg_discount_override_enabled: false }) })
 
 const generateRandomPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*'

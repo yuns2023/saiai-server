@@ -52,6 +52,7 @@ export interface AccessLevel {
 }
 
 export interface AdminUser extends User {
+  is_trusted: boolean
   // 管理员备注（普通用户接口不返回）
   notes: string
   // 用户全局按量折扣倍率（仅管理员接口返回）
@@ -1431,6 +1432,7 @@ export interface ApiKeyUsageTrendPoint {
 // ==================== Admin User Management ====================
 
 export interface UpdateUserRequest {
+  is_trusted?: boolean
   email?: string
   password?: string
   username?: string

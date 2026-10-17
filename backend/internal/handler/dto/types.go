@@ -27,6 +27,7 @@ type User struct {
 // 注意：普通用户接口不得返回 notes 等管理员备注信息。
 type AdminUser struct {
 	User
+	IsTrusted bool `json:"is_trusted"`
 
 	Notes                           string       `json:"notes"`
 	PaygDiscountMultiplier          float64      `json:"payg_discount_multiplier"`

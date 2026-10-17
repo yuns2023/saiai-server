@@ -50,6 +50,7 @@ func (User) Fields() []ent.Field {
 		field.Float("payg_discount_multiplier").
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
 			Default(1.0),
+		field.Bool("is_trusted").Default(false),
 		field.Bool("payg_discount_override_enabled").
 			Default(false),
 		field.Int64("auto_level_id").
