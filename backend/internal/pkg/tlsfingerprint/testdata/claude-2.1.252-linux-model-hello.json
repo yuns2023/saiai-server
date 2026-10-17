@@ -1,0 +1,111 @@
+{
+  "version": "2.1.252",
+  "artifact_sha256": "a715a45105e593fc9808d035d77781f88480b9897975a9df41837f0c591bd4b3",
+  "client_hello": {
+    "legacy_version": 771,
+    "record_bytes": 517,
+    "session_id_bytes": 32,
+    "cipher_suites": [
+      4865,
+      4866,
+      4867,
+      49195,
+      49199,
+      49196,
+      49200,
+      52393,
+      52392,
+      49161,
+      49171,
+      49162,
+      49172,
+      156,
+      157,
+      47,
+      53
+    ],
+    "compression": [
+      0
+    ],
+    "extensions": [
+      0,
+      23,
+      65281,
+      10,
+      11,
+      35,
+      16,
+      5,
+      13,
+      18,
+      51,
+      45,
+      43,
+      21
+    ],
+    "details": {
+      "sni": "api.anthropic.com",
+      "extension_23": {
+        "bytes": 0,
+        "hex": ""
+      },
+      "extension_65281": {
+        "bytes": 1,
+        "hex": "00"
+      },
+      "supported_groups": [
+        29,
+        23,
+        24
+      ],
+      "point_formats": [
+        0
+      ],
+      "extension_35": {
+        "bytes": 0,
+        "hex": ""
+      },
+      "alpn": [
+        "http/1.1"
+      ],
+      "extension_5": {
+        "bytes": 5,
+        "hex": "0100000000"
+      },
+      "signature_algorithms": [
+        1027,
+        2052,
+        1025,
+        1283,
+        2053,
+        1281,
+        2054,
+        1537,
+        513
+      ],
+      "extension_18": {
+        "bytes": 0,
+        "hex": ""
+      },
+      "key_shares": [
+        {
+          "group": 29,
+          "key_bytes": 32
+        }
+      ],
+      "psk_modes": [
+        1
+      ],
+      "supported_versions": [
+        772,
+        771
+      ],
+      "extension_21": {
+        "bytes": 231,
+        "hex": null
+      }
+    },
+    "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49161-49171-49162-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-21,29-23-24,0",
+    "ja3_md5": "d871d02cecbde59abbf8f4806134addf"
+  }
+}

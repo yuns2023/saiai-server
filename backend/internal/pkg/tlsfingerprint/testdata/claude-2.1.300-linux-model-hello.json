@@ -1,0 +1,82 @@
+{
+  "legacy_version": 771,
+  "session_id_bytes": 32,
+  "cipher_suites": [
+    4865,
+    4866,
+    4867,
+    49195,
+    49199,
+    49196,
+    49200,
+    52393,
+    52392,
+    49161,
+    49171,
+    49162,
+    49172,
+    156,
+    157,
+    47,
+    53
+  ],
+  "compression": [
+    0
+  ],
+  "extensions": [
+    0,
+    23,
+    65281,
+    10,
+    11,
+    35,
+    16,
+    5,
+    13,
+    18,
+    51,
+    45,
+    43
+  ],
+  "sni": "api.anthropic.com",
+  "supported_groups": [
+    4588,
+    29,
+    23,
+    24
+  ],
+  "point_formats": [
+    0
+  ],
+  "signature_algorithms": [
+    1027,
+    2052,
+    1025,
+    1283,
+    2053,
+    1281,
+    2054,
+    1537,
+    513
+  ],
+  "alpn": [
+    "http/1.1"
+  ],
+  "supported_versions": [
+    772,
+    771
+  ],
+  "psk_modes": [
+    1
+  ],
+  "key_shares": [
+    {
+      "group": 4588,
+      "key_bytes": 1216
+    },
+    {
+      "group": 29,
+      "key_bytes": 32
+    }
+  ]
+}

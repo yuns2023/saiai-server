@@ -2747,7 +2747,7 @@ export default {
         },
         tlsFingerprint: {
           label: 'TLS 指纹模拟',
-          hint: '模拟 Node.js/Claude Code 客户端的 TLS 指纹'
+          hint: '使用经过验证的 Claude Code 原生客户端 TLS 握手模板'
         },
         sessionIdMasking: {
           label: '会话 ID 伪装',

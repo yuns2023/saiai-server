@@ -1203,7 +1203,7 @@ func TestRewriteClaudeOAuthBillingHeader_PinnedRecomputesWithMatchedV2Seed(t *te
 
 func TestRewriteClaudeOAuthBillingHeader_SharedChoosesV2SeedFromVersion(t *testing.T) {
 	svc := &GatewayService{}
-	body := []byte(`{"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.110.000; cc_entrypoint=cli; cch=00000;"}],"messages":[{"role":"user","content":[{"type":"text","text":"ping"}]}]}`)
+	body := []byte(`{"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.110.000; cc_entrypoint=cli; cch=abcde;"}],"messages":[{"role":"user","content":[{"type":"text","text":"ping"}]}]}`)
 	out := svc.rewriteClaudeOAuthBillingHeader(body, &oauthRequestIdentity{
 		Mode:             ClaudeOAuthModeShared,
 		BillingUserAgent: "claude-cli/2.1.110 (external, cli)",
@@ -2065,7 +2065,7 @@ func TestBuildUpstreamRequest_OAuthRewritesBillingHeader(t *testing.T) {
 	gotBody, err := io.ReadAll(req.Body)
 	require.NoError(t, err)
 
-	wantBody := expectedOAuthBillingBodyForTest(t, body, oauthIdentity.Fingerprint.UserAgent)
+	wantBody := rewriteClaudeBillingHeaderPreservingCCVersionWithMode(body, 0, "")
 	require.JSONEq(t, string(wantBody), string(gotBody))
 	require.Equal(t, gjson.GetBytes(wantBody, "system.0.text").String(), gjson.GetBytes(gotBody, "system.0.text").String())
 }
@@ -2103,7 +2103,7 @@ func TestBuildCountTokensRequest_OAuthRewritesBillingHeader(t *testing.T) {
 	gotBody, err := io.ReadAll(req.Body)
 	require.NoError(t, err)
 
-	wantBody := expectedOAuthBillingBodyForTest(t, body, oauthIdentity.Fingerprint.UserAgent)
+	wantBody := rewriteClaudeBillingHeaderPreservingCCVersionWithMode(body, 0, "")
 	require.JSONEq(t, string(wantBody), string(gotBody))
 	require.Equal(t, gjson.GetBytes(wantBody, "system.0.text").String(), gjson.GetBytes(gotBody, "system.0.text").String())
 }
@@ -2154,12 +2154,12 @@ func TestBuildUpstreamRequest_OAuthUsesSlotHeadersAndKeepsDynamicHeaders(t *test
 	require.NoError(t, err)
 
 	require.Equal(t, "Bearer fake-token", req.Header.Get("authorization"))
-	require.Equal(t, "claude-cli/2.1.81 (external, cli)", req.Header.Get("user-agent"))
-	require.Equal(t, "js", req.Header.Get("x-stainless-lang"))
-	require.Equal(t, "0.74.0", req.Header.Get("x-stainless-package-version"))
+	require.Equal(t, c.GetHeader("User-Agent"), req.Header.Get("user-agent"))
+	require.Empty(t, req.Header.Get("x-stainless-lang"))
+	require.Empty(t, req.Header.Get("x-stainless-package-version"))
 	require.Equal(t, "7", req.Header.Get("x-stainless-retry-count"))
 	require.Equal(t, "777", req.Header.Get("x-stainless-timeout"))
-	require.Equal(t, "claude-code-20250219,oauth-2025-04-20,effort-2025-11-24", req.Header.Get("anthropic-beta"))
+	require.Equal(t, "oauth-2025-04-20", req.Header.Get("anthropic-beta"))
 	require.Equal(t, "cli", req.Header.Get("x-app"))
 	require.Equal(t, "true", req.Header.Get("anthropic-dangerous-direct-browser-access"))
 	require.Equal(t, "application/json", req.Header.Get("accept"))
@@ -2210,7 +2210,7 @@ func TestBuildCountTokensRequest_OAuthKeepsSlotHeadersAndAddsTokenCountingOnly(t
 	require.NoError(t, err)
 
 	require.Equal(t, "3", req.Header.Get("x-stainless-retry-count"))
-	require.Equal(t, "claude-code-20250219,oauth-2025-04-20,effort-2025-11-24,token-counting-2024-11-01", req.Header.Get("anthropic-beta"))
+	require.Equal(t, "oauth-2025-04-20,token-counting-2024-11-01", req.Header.Get("anthropic-beta"))
 	require.Equal(t, "11111111-1111-4111-8111-111111111111", req.Header.Get("x-claude-code-session-id"))
 	require.Empty(t, req.Header.Get("x-stainless-helper-method"))
 }

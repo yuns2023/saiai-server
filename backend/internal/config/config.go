@@ -726,27 +726,10 @@ type SoraModelFiltersConfig struct {
 }
 
 // TLSFingerprintConfig TLS指纹伪装配置
-// 用于模拟 Claude CLI (Node.js) 的 TLS 握手特征，避免被识别为非官方客户端
+// 内置模板匹配已验证版本的原生 Claude Code 模型请求 ClientHello。
 type TLSFingerprintConfig struct {
 	// Enabled: 是否全局启用TLS指纹功能
 	Enabled bool `mapstructure:"enabled"`
-	// Profiles: 预定义的TLS指纹配置模板
-	// key 为模板名称，如 "claude_cli_v2", "chrome_120" 等
-	Profiles map[string]TLSProfileConfig `mapstructure:"profiles"`
-}
-
-// TLSProfileConfig 单个TLS指纹模板的配置
-type TLSProfileConfig struct {
-	// Name: 模板显示名称
-	Name string `mapstructure:"name"`
-	// EnableGREASE: 是否启用GREASE扩展（Chrome使用，Node.js不使用）
-	EnableGREASE bool `mapstructure:"enable_grease"`
-	// CipherSuites: TLS加密套件列表（空则使用内置默认值）
-	CipherSuites []uint16 `mapstructure:"cipher_suites"`
-	// Curves: 椭圆曲线列表（空则使用内置默认值）
-	Curves []uint16 `mapstructure:"curves"`
-	// PointFormats: 点格式列表（空则使用内置默认值）
-	PointFormats []uint8 `mapstructure:"point_formats"`
 }
 
 // GatewaySchedulingConfig accounts scheduling configuration.
@@ -1093,6 +1076,10 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 			return nil, fmt.Errorf("read config error: %w", err)
 		}
 		// 配置文件不存在时使用默认值
+	}
+
+	if viper.IsSet("gateway.tls_fingerprint.profiles") {
+		return nil, fmt.Errorf("gateway.tls_fingerprint.profiles is no longer supported; remove it to use automatic Claude Code version selection (enabled remains supported)")
 	}
 
 	var cfg Config
@@ -1556,7 +1543,6 @@ func setDefaults() {
 	viper.SetDefault("gateway.input_moderation.request_timeout_seconds", 15)
 	viper.SetDefault("gateway.input_moderation.max_input_chars", 32768)
 	viper.SetDefault("gateway.input_moderation.max_job_age_hours", 24)
-	// TLS指纹伪装配置（默认关闭，需要账号级别单独启用）
 	// 用户消息串行队列默认值
 	viper.SetDefault("gateway.user_message_queue.enabled", false)
 	viper.SetDefault("gateway.claude_session_initial_serial.enabled", true)
@@ -1567,6 +1553,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.user_message_queue.max_delay_ms", 2000)
 	viper.SetDefault("gateway.user_message_queue.cleanup_interval_seconds", 60)
 
+	// TLS 指纹默认启用；Anthropic OAuth/setup-token 账号可显式关闭。
 	viper.SetDefault("gateway.tls_fingerprint.enabled", true)
 	viper.SetDefault("concurrency.ping_interval", 10)
 

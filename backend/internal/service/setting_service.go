@@ -902,8 +902,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpsQueryModeDefault:          "auto",
 		SettingKeyOpsMetricsIntervalSeconds:    "60",
 
-		// Claude Code version check (default: empty = disabled)
-		SettingKeyMinClaudeCodeVersion: "",
+		// Default minimum matches the verified native model-request TLS transition.
+		// Existing installations retain their administrator-configured bounds.
+		SettingKeyMinClaudeCodeVersion: "2.1.257",
 		SettingKeyMaxClaudeCodeVersion: "",
 
 		// 分组隔离（默认不允许未分组 Key 调度）

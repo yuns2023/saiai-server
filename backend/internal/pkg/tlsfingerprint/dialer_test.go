@@ -55,7 +55,7 @@ func TestDialerBasicConnection(t *testing.T) {
 
 // TestJA3Fingerprint verifies the JA3/JA4 fingerprint matches expected value.
 // This test uses tls.peet.ws to verify the fingerprint.
-// Target: Claude Code 2.1.81 (Bun 1.3.11 + BoringSSL)
+// Target: native Claude Code 2.1.300 model requests
 func TestJA3Fingerprint(t *testing.T) {
 	skipNetworkTest(t)
 
@@ -80,7 +80,7 @@ func TestJA3Fingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create request: %v", err)
 	}
-	req.Header.Set("User-Agent", "claude-cli/2.1.81")
+	req.Header.Set("User-Agent", "claude-cli/2.1.300")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -125,9 +125,9 @@ func TestJA3Fingerprint(t *testing.T) {
 		}
 	}
 
-	// Verify supported groups: X25519(29), P-256(23), P-384(24)
-	expectedGroups := "29-23-24"
-	if strings.Contains(fpResp.TLS.JA3, expectedGroups) {
+	// Verify supported groups: X25519MLKEM768(4588), X25519(29), P-256(23), P-384(24)
+	expectedGroups := "4588-29-23-24"
+	if len(ja3Parts) == 5 && ja3Parts[3] == expectedGroups {
 		t.Logf("✓ JA3 contains expected supported groups: %s", expectedGroups)
 	} else {
 		t.Errorf("✗ JA3 does not contain expected supported groups: %s", expectedGroups)
@@ -285,7 +285,7 @@ func TestAllProfiles(t *testing.T) {
 	skipNetworkTest(t)
 
 	// Define all profiles to test with their expected fingerprints
-	// These profiles are from config.yaml gateway.tls_fingerprint.profiles
+	// These are low-level dialer fixtures, not administrator configuration.
 	profiles := []TestProfileExpectation{
 		{
 			// Linux x64 Node.js v22.17.1

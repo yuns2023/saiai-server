@@ -1583,17 +1583,9 @@ func (s *GatewayService) rewriteClaudeOAuthBillingHeader(body []byte, oauthIdent
 	if len(body) == 0 || oauthIdentity == nil {
 		return body
 	}
-	if oauthIdentity.NativeBillingStyle {
-		return rewriteClaudeBillingHeaderPreservingCCVersionWithMode(body, oauthIdentity.BillingCCHSeed, oauthIdentity.BillingCCHMode)
-	}
-	userAgent := strings.TrimSpace(oauthIdentity.BillingUserAgent)
-	if userAgent == "" && oauthIdentity.Fingerprint != nil {
-		userAgent = strings.TrimSpace(oauthIdentity.Fingerprint.UserAgent)
-	}
-	if userAgent == "" {
-		return body
-	}
-	return rewriteClaudeBillingHeaderForUserAgentWithMode(body, userAgent, oauthIdentity.BillingCCHSeed, oauthIdentity.BillingCCHMode)
+	// Client version and missing/placeholder CCH are part of the official
+	// client contract, including shared and single_device modes.
+	return rewriteClaudeBillingHeaderPreservingCCVersionWithMode(body, oauthIdentity.BillingCCHSeed, oauthIdentity.BillingCCHMode)
 }
 
 func normalizeClaudeOAuthSystemBody(body []byte, opts claudeOAuthNormalizeOptions) ([]byte, bool) {
@@ -1884,8 +1876,7 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 			return body, nil, nil
 		}
 		if fp != nil {
-			billingUA = fp.UserAgent
-			if rewrittenBody, rewriteErr := s.identityService.RewriteSharedUserID(body, account, slot, fp.UserAgent, rewriteOpts); rewriteErr == nil && len(rewrittenBody) > 0 {
+			if rewrittenBody, rewriteErr := s.identityService.RewriteSharedUserID(body, account, slot, billingUA, rewriteOpts); rewriteErr == nil && len(rewrittenBody) > 0 {
 				body = rewrittenBody
 			}
 		}
@@ -1936,8 +1927,7 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 			return body, nil, nil
 		}
 		if fp != nil {
-			billingUA = fp.UserAgent
-			if rewrittenBody, rewriteErr := s.identityService.RewriteSingleDeviceUserID(body, account, fp.UserAgent, rewriteOpts); rewriteErr == nil && len(rewrittenBody) > 0 {
+			if rewrittenBody, rewriteErr := s.identityService.RewriteSingleDeviceUserID(body, account, billingUA, rewriteOpts); rewriteErr == nil && len(rewrittenBody) > 0 {
 				body = rewrittenBody
 			}
 		}
@@ -7150,7 +7140,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			(&IdentityService{}).ApplyFingerprint(req, oauthIdentity.Fingerprint)
 		}
 	}
-	restoreClaudeOAuthSingleDeviceBetaHeader(req, clientHeaders, oauthIdentity)
+	restoreClaudeOAuthRequestHeaders(req, clientHeaders, oauthIdentity)
 	if oauthIdentity != nil && len(oauthIdentity.FixedHeaders) > 0 {
 		ApplyClaudeOAuthFixedHeaders(req, oauthIdentity.FixedHeaders)
 	}
@@ -7245,19 +7235,22 @@ func copyClaudeOAuthHeaders(req *http.Request, clientHeaders http.Header) {
 	}
 }
 
-// restoreClaudeOAuthSingleDeviceBetaHeader keeps feature-scoped beta tokens
-// aligned with the current request. A single_device fingerprint can outlive a
-// Claude Code version or be learned from a request that used a different set
-// of beta features, so its cached AnthropicBeta value must not replace the
-// inbound value. Explicit fixed admin headers are applied after this helper,
-// preserving their existing precedence.
-func restoreClaudeOAuthSingleDeviceBetaHeader(req *http.Request, clientHeaders http.Header, oauthIdentity *oauthRequestIdentity) {
-	if req == nil || oauthIdentity == nil || oauthIdentity.Mode != ClaudeOAuthModeSingleDevice {
+// restoreClaudeOAuthRequestHeaders keeps per-request client version and feature
+// headers out of the long-lived device fingerprint. Explicit x-stainless admin
+// overrides are applied afterward and retain their documented precedence.
+func restoreClaudeOAuthRequestHeaders(req *http.Request, clientHeaders http.Header, oauthIdentity *oauthRequestIdentity) {
+	if req == nil || oauthIdentity == nil {
 		return
 	}
-	req.Header.Del("anthropic-beta")
-	for _, value := range clientHeaders.Values("anthropic-beta") {
-		req.Header.Add("anthropic-beta", value)
+	for _, name := range []string{
+		"User-Agent", "anthropic-beta", "X-Stainless-Package-Version",
+		"X-Stainless-Runtime", "X-Stainless-Runtime-Version", "X-Stainless-Lang",
+		"X-Stainless-Retry-Count", "X-Stainless-Timeout", "X-Stainless-Helper-Method",
+	} {
+		req.Header.Del(name)
+		for _, value := range clientHeaders.Values(name) {
+			req.Header.Add(name, value)
+		}
 	}
 }
 
@@ -10314,7 +10307,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 			(&IdentityService{}).ApplyFingerprint(req, oauthIdentity.Fingerprint)
 		}
 	}
-	restoreClaudeOAuthSingleDeviceBetaHeader(req, clientHeaders, oauthIdentity)
+	restoreClaudeOAuthRequestHeaders(req, clientHeaders, oauthIdentity)
 	if oauthIdentity != nil && len(oauthIdentity.FixedHeaders) > 0 {
 		ApplyClaudeOAuthFixedHeaders(req, oauthIdentity.FixedHeaders)
 	}

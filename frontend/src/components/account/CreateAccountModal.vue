@@ -2015,6 +2015,9 @@
             </div>
             <button
               type="button"
+              role="switch"
+              :aria-checked="tlsFingerprintEnabled"
+              :aria-label="t('admin.accounts.quotaControl.tlsFingerprint.label')"
               @click="tlsFingerprintEnabled = !tlsFingerprintEnabled"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -2856,7 +2859,7 @@ const umqModeOptions = computed(() => [
   { value: 'throttle', label: t('admin.accounts.quotaControl.rpmLimit.umqModeThrottle') },
   { value: 'serialize', label: t('admin.accounts.quotaControl.rpmLimit.umqModeSerialize') },
 ])
-const tlsFingerprintEnabled = ref(false)
+const tlsFingerprintEnabled = ref(true)
 const sessionIdMaskingEnabled = ref(false)
 const cacheTTLOverrideEnabled = ref(false)
 const cacheTTLOverrideTarget = ref<string>('5m')
@@ -3482,7 +3485,7 @@ const resetForm = () => {
   rpmStrategy.value = 'tiered'
   rpmStickyBuffer.value = null
   userMsgQueueMode.value = ''
-  tlsFingerprintEnabled.value = false
+  tlsFingerprintEnabled.value = true
   sessionIdMaskingEnabled.value = false
   cacheTTLOverrideEnabled.value = false
   cacheTTLOverrideTarget.value = '5m'

@@ -1,0 +1,106 @@
+{
+  "cipher_suites": [
+    4865,
+    4866,
+    4867,
+    49195,
+    49199,
+    49196,
+    49200,
+    52393,
+    52392,
+    49161,
+    49171,
+    49162,
+    49172,
+    156,
+    157,
+    47,
+    53
+  ],
+  "compression": [
+    0
+  ],
+  "extensions": [
+    0,
+    23,
+    65281,
+    10,
+    11,
+    35,
+    16,
+    5,
+    13,
+    18,
+    51,
+    45,
+    43
+  ],
+  "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49161-49171-49162-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43,4588-29-23-24,0",
+  "ja3_md5": "1523504b38f0fae0d881d4b6554aac1b",
+  "legacy_version": 771,
+  "record_bytes": 1504,
+  "session_id_bytes": 32,
+  "alpn": [
+    "http/1.1"
+  ],
+  "extension_18": {
+    "bytes": 0,
+    "hex": ""
+  },
+  "extension_23": {
+    "bytes": 0,
+    "hex": ""
+  },
+  "extension_35": {
+    "bytes": 0,
+    "hex": ""
+  },
+  "extension_5": {
+    "bytes": 5,
+    "hex": "0100000000"
+  },
+  "extension_65281": {
+    "bytes": 1,
+    "hex": "00"
+  },
+  "key_shares": [
+    {
+      "group": 4588,
+      "key_bytes": 1216
+    },
+    {
+      "group": 29,
+      "key_bytes": 32
+    }
+  ],
+  "point_formats": [
+    0
+  ],
+  "psk_modes": [
+    1
+  ],
+  "signature_algorithms": [
+    1027,
+    2052,
+    1025,
+    1283,
+    2053,
+    1281,
+    2054,
+    1537,
+    513
+  ],
+  "sni": "api.anthropic.com",
+  "supported_groups": [
+    4588,
+    29,
+    23,
+    24
+  ],
+  "supported_versions": [
+    772,
+    771
+  ],
+  "native_sha256": "bc1aad9982c7b59c7d889ff92595d61cf46e0a6eae074cb551d932a989bcd222"
+}

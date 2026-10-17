@@ -232,7 +232,7 @@ func TestRestoreClaudeOAuthSingleDeviceBetaHeader_RemovesCachedValueWhenInboundM
 	req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", nil)
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20,stale-cached-beta")
 
-	restoreClaudeOAuthSingleDeviceBetaHeader(req, http.Header{}, &oauthRequestIdentity{Mode: ClaudeOAuthModeSingleDevice})
+	restoreClaudeOAuthRequestHeaders(req, http.Header{}, &oauthRequestIdentity{Mode: ClaudeOAuthModeSingleDevice})
 
 	require.Empty(t, req.Header.Values("anthropic-beta"))
 }

@@ -1,10 +1,11 @@
 // Package tlsfingerprint provides TLS fingerprint simulation for HTTP clients.
-// It uses the utls library to create TLS connections that mimic Node.js/Claude Code clients.
+// It uses uTLS to reproduce the observed native Claude Code model-request ClientHello.
 package tlsfingerprint
 
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"time"
 
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/proxy"
@@ -24,6 +26,7 @@ type Profile struct {
 	Curves       []uint16
 	PointFormats []uint8
 	EnableGREASE bool
+	claude2302   bool
 }
 
 // Dialer creates TLS connections with custom fingerprints.
@@ -49,13 +52,12 @@ type SOCKS5ProxyDialer struct {
 	rootCAs  *x509.CertPool
 }
 
-// Default TLS fingerprint values captured from Claude Code 2.1.81 (Bun 1.3.11 + BoringSSL)
-// Captured using: raw TCP ClientHello parser against Bun fetch()
-//
-// Claude Code switched from Node.js to Bun around v2.x, which uses BoringSSL
-// instead of OpenSSL, producing a significantly different TLS fingerprint.
+// Default values match the Linux x86_64 native Claude Code 2.1.300
+// /v1/messages ClientHello. See testdata/claude-2.1.300-linux-model-hello.json
+// and docs/CLAUDE_TLS_FINGERPRINT.md for the versioned baseline and limits.
+// Control-plane connections from the same binary can have a different shape.
 var (
-	// defaultCipherSuites contains the 17 cipher suites from Bun 1.3.11 (BoringSSL)
+	// defaultCipherSuites contains the 17 cipher suites from the native model-request connection
 	// Order is critical for JA3 fingerprint matching
 	defaultCipherSuites = []uint16{
 		// TLS 1.3 cipher suites (BoringSSL order: AES_128 first)
@@ -88,11 +90,12 @@ var (
 		0x0035, // TLS_RSA_WITH_AES_256_CBC_SHA
 	}
 
-	// defaultCurves contains the 3 supported groups from Bun/BoringSSL
+	// defaultCurves preserves the native hybrid-first supported-group order.
 	defaultCurves = []utls.CurveID{
-		utls.X25519,    // 0x001d
-		utls.CurveP256, // 0x0017 (secp256r1)
-		utls.CurveP384, // 0x0018 (secp384r1)
+		utls.X25519MLKEM768, // 0x11ec, hybrid post-quantum key exchange
+		utls.X25519,         // 0x001d
+		utls.CurveP256,      // 0x0017 (secp256r1)
+		utls.CurveP384,      // 0x0018 (secp384r1)
 	}
 
 	// defaultPointFormats contains the single point format from Bun/BoringSSL
@@ -270,6 +273,26 @@ func (d *HTTPProxyDialer) DialTLSContext(ctx context.Context, network, addr stri
 	}
 	slog.Debug("tls_fingerprint_http_proxy_connected", "proxy_addr", proxyAddr)
 
+	// Bound CONNECT I/O as well as both TLS handshakes. Cancellation must
+	// interrupt a proxy that accepts TCP but never responds to CONNECT.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	rawConn := conn
+	stopCancel := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
+	defer stopCancel()
+	if d.proxyURL.Scheme == "https" {
+		outer := tls.Client(conn, &tls.Config{
+			ServerName: d.proxyURL.Hostname(), RootCAs: d.rootCAs,
+			MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"},
+		})
+		if err := outer.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("proxy TLS handshake: %w", err)
+		}
+		conn = outer
+	}
+
 	// Step 2: Send CONNECT request to establish tunnel
 	req := &http.Request{
 		Method: "CONNECT",
@@ -347,6 +370,7 @@ func (d *HTTPProxyDialer) DialTLSContext(ctx context.Context, network, addr stri
 	}
 
 	state := tlsConn.ConnectionState()
+	_ = conn.SetDeadline(time.Time{})
 	slog.Debug("tls_fingerprint_http_proxy_handshake_success",
 		"version", state.Version,
 		"cipher_suite", state.CipherSuite,
@@ -472,23 +496,10 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 		extensions = append(extensions, &utls.UtlsGREASEExtension{})
 	}
 
-	// Bun 1.3.11 (BoringSSL) extension order (captured from fetch()):
-	// encrypted_client_hello(0xfe0d), extended_master_secret(23),
-	// renegotiation_info(0xff01), supported_groups(10), ec_point_formats(11),
-	// session_ticket(35), alpn(16), status_request(5),
-	// signature_algorithms(13), signed_certificate_timestamp(18),
-	// key_share(51), psk_key_exchange_modes(45), supported_versions(43),
-	// padding(21)
-	//
-	// SNI (0) 必须显式添加。uTLS HelloCustom 模式下不会自动插入，
-	// 只会填充已存在的 SNIExtension 的 ServerName。
-	// BoringSSL 的顺序: SNI 在最前面，ECH GREASE 紧随其后。
-
+	// Native 2.1.300 model requests offer ALPN http/1.1, without ECH GREASE
+	// or padding. SNI must be explicit in uTLS HelloCustom mode.
 	extensions = append(extensions,
 		&utls.SNIExtension{},
-		// BoringSSL sends ECH GREASE (0xfe0d) even without real ECH keys.
-		// utls supports this via GREASEEncryptedClientHelloExtension.
-		&utls.GREASEEncryptedClientHelloExtension{},
 		&utls.ExtendedMasterSecretExtension{},
 		&utls.RenegotiationInfoExtension{Renegotiation: utls.RenegotiateOnceAsClient},
 		&utls.SupportedCurvesExtension{Curves: curves},
@@ -496,17 +507,14 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 		&utls.SessionTicketExtension{},
 		&utls.ALPNExtension{AlpnProtocols: []string{"http/1.1"}},
 		&utls.StatusRequestExtension{},
-		&utls.SignatureAlgorithmsExtension{SupportedSignatureAlgorithms: defaultSignatureAlgorithms},
+		&utls.SignatureAlgorithmsExtension{SupportedSignatureAlgorithms: signatureAlgorithmsForProfile(profile)},
 		&utls.SCTExtension{},
-		&utls.KeyShareExtension{KeyShares: []utls.KeyShare{
-			{Group: utls.X25519},
-		}},
+		&utls.KeyShareExtension{KeyShares: keySharesForCurves(curves)},
 		&utls.PSKKeyExchangeModesExtension{Modes: []uint8{utls.PskModeDHE}},
 		&utls.SupportedVersionsExtension{Versions: []uint16{
 			utls.VersionTLS13,
 			utls.VersionTLS12,
 		}},
-		&utls.UtlsPaddingExtension{GetPaddingLen: utls.BoringPaddingStyle},
 	)
 
 	if enableGREASE {
@@ -520,4 +528,22 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 		TLSVersMax:         utls.VersionTLS13,
 		TLSVersMin:         utls.VersionTLS12, // BoringSSL minimum is TLS 1.2
 	}
+}
+
+// keySharesForCurves offers the native hybrid + classical pair when supported.
+// Custom profiles must not send key shares for groups they do not advertise.
+func keySharesForCurves(curves []utls.CurveID) []utls.KeyShare {
+	var shares []utls.KeyShare
+	for _, preferred := range []utls.CurveID{utls.X25519MLKEM768, utls.X25519} {
+		for _, curve := range curves {
+			if curve == preferred {
+				shares = append(shares, utls.KeyShare{Group: curve})
+				break
+			}
+		}
+	}
+	if len(shares) == 0 && len(curves) > 0 {
+		shares = append(shares, utls.KeyShare{Group: curves[0]})
+	}
+	return shares
 }

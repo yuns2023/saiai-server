@@ -334,11 +334,11 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 //
 // TLS 指纹说明:
 //   - 当 enableTLSFingerprint=true 时，使用 utls 库模拟 Claude CLI 的 TLS 指纹
-//   - 指纹模板根据 accountID % len(profiles) 自动选择
+//   - 内置指纹根据当前请求的 Claude Code 版本自动选择
 //   - 支持直连、HTTP/HTTPS 代理、SOCKS5 代理三种场景
 func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, enableTLSFingerprint bool) (*http.Response, error) {
 	// 如果未启用 TLS 指纹，直接使用标准请求路径
-	if !enableTLSFingerprint {
+	if !enableTLSFingerprint || (s.cfg != nil && !s.cfg.Gateway.TLSFingerprint.Enabled) {
 		return s.Do(req, proxyURL, accountID, accountConcurrency)
 	}
 
@@ -359,14 +359,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 		return nil, err
 	}
 
-	// 获取 TLS 指纹 Profile
-	registry := tlsfingerprint.GlobalRegistry()
-	profile := registry.GetProfileByAccountID(accountID)
-	if profile == nil {
-		// 如果获取不到 profile，回退到普通请求
-		slog.Debug("tls_fingerprint_no_profile", "account_id", accountID, "fallback", "standard_request")
-		return s.Do(req, proxyURL, accountID, accountConcurrency)
-	}
+	profile := tlsfingerprint.ProfileForUserAgent(tlsfingerprint.DefaultProfile(), req.UserAgent())
 
 	slog.Debug("tls_fingerprint_using_profile", "account_id", accountID, "profile", profile.Name, "grease", profile.EnableGREASE)
 
@@ -423,7 +416,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 		return nil, err
 	}
 	// TLS 指纹客户端使用独立的缓存键，加 "tls:" 前缀
-	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID)
+	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID) + profile.TransportVariant()
 	poolKey := s.buildPoolKey(isolation, accountConcurrency) + ":tls"
 
 	now := time.Now()
