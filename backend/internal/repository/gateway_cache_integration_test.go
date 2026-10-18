@@ -27,6 +27,7 @@ func (s *GatewayCacheSuite) SetupTest() {
 
 func (s *GatewayCacheSuite) TestGetSessionAccountID_Missing() {
 	_, err := s.cache.GetSessionAccountID(s.ctx, 1, "nonexistent")
+	require.ErrorIs(s.T(), err, service.ErrGatewaySessionCacheMiss)
 	require.True(s.T(), errors.Is(err, redis.Nil), "expected redis.Nil for missing session")
 }
 

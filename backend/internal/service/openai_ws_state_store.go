@@ -11,8 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -266,7 +264,7 @@ func (s *defaultOpenAIWSStateStore) lookupTurnStateAccount(ctx context.Context, 
 	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
 	defer cancel()
 	owner, err := s.cache.GetSessionAccountID(cacheCtx, 0, key)
-	if err != nil && !errors.Is(err, redis.Nil) {
+	if err != nil && !errors.Is(err, ErrGatewaySessionCacheMiss) {
 		return 0, "shared_lookup_error"
 	}
 	if owner > 0 {

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -88,7 +89,12 @@ func (c *gatewayCache) IncrementUnpricedModelSuccessCount(ctx context.Context, m
 
 func (c *gatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
 	key := buildSessionKey(groupID, sessionHash)
-	return c.rdb.Get(ctx, key).Int64()
+	accountID, err := c.rdb.Get(ctx, key).Int64()
+	if errors.Is(err, redis.Nil) {
+		// Retain Redis error identity for existing repository callers.
+		return 0, errors.Join(service.ErrGatewaySessionCacheMiss, err)
+	}
+	return accountID, err
 }
 
 func (c *gatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {

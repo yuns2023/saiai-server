@@ -438,6 +438,9 @@ var deniedClaudeOAuthHeaders = map[string]bool{
 	"x-request-id":        true,
 }
 
+// ErrGatewaySessionCacheMiss distinguishes absent session ownership from a cache outage.
+var ErrGatewaySessionCacheMiss = errors.New("gateway session cache miss")
+
 // GatewayCache 定义网关服务的缓存操作接口。
 // 提供粘性会话（Sticky Session）的存储、查询、刷新和删除功能。
 //

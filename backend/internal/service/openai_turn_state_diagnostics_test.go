@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -104,7 +103,7 @@ func TestOpenAINativeTurnStateContinuousUseDoesNotRenewOwnership(t *testing.T) {
 	require.NoError(t, svc.validateOpenAINativeTurnState(ctx, account, 55, session, headers))
 }
 
-// Real Redis represents an absent key with redis.Nil; distinguish that from
+// The repository classifies absent keys independently of its backend; distinguish that from
 // an outage without exposing potentially sensitive backend error messages.
 type turnStateDiagnosticCache struct {
 	stubGatewayCache
@@ -120,7 +119,7 @@ func TestOpenAINativeTurnStateSharedMissAndOutage(t *testing.T) {
 		name, source string
 		err          error
 	}{
-		{"miss", "miss_local_fallback_miss", redis.Nil},
+		{"miss", "miss_local_fallback_miss", ErrGatewaySessionCacheMiss},
 		{"outage", "shared_lookup_error_local_fallback_miss", errors.New("MOCK_PRIVATE_BACKEND_ERROR")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

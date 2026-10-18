@@ -26,7 +26,7 @@ func (r *userRepository) CountInputRiskAlerts(ctx context.Context, ids []int64, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var id, n int64
 		if err := rows.Scan(&id, &n); err != nil {
@@ -51,7 +51,7 @@ func (r *usageLogRepository) ListInputRiskAlerts(ctx context.Context, userID int
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]service.InputRiskAlert, 0)
 	for rows.Next() {
 		var a service.InputRiskAlert
