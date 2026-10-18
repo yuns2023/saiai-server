@@ -10,7 +10,8 @@ import tempfile
 import time
 import urllib.request
 from prepare_review import MODEL, PREFIX, prepare
-from validate import FIXTURE, BOUNDARY, REGISTRY
+from validate import REGISTRY
+from profiles import load_profile
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -20,7 +21,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def validate_plan(plan):
     with tempfile.TemporaryDirectory() as folder:
-        expected = prepare(Path(folder) / 'packet')
+        expected = prepare(Path(folder) / 'packet', plan.get('profile', 'expanded-108'))
     if plan != expected:
         raise ValueError('plan differs from current frozen preparation')
 
@@ -31,8 +32,8 @@ def execute(plan, key, output, opener=None):
         raise ValueError('invalid evaluation key')
     registry = json.loads(REGISTRY.read_text())
     questions = {c['id']: {'type': 'noul', 'instructions': PREFIX + c['rule']} for c in registry}
-    rows = [json.loads(line) for p in (FIXTURE, BOUNDARY) for line in p.read_text().splitlines() if line.strip()]
-    if len(rows) != plan['proposed_requests'] or len(rows) > 108:
+    rows, _, limit = load_profile(plan['profile'])
+    if len(rows) != plan['proposed_requests'] or len(rows) > limit:
         raise ValueError('call limit mismatch')
     payloads = [json.dumps({'model': MODEL, 'state': r['text'], 'questions': questions},
                           ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode() for r in rows]
@@ -40,7 +41,7 @@ def execute(plan, key, output, opener=None):
         raise ValueError('request hash mismatch')
     # Create exclusively before any call; never overwrite an earlier run.
     with output.open('x') as f:
-        result = dict(origin='provider' if opener is None else 'mock', model=MODEL,
+        result = dict(origin='provider' if opener is None else 'mock', model=MODEL, profile=plan['profile'],
                       registry_sha256=plan['suite']['datasets'][0]['registry_sha256'],
                       fixture_sha256=[d['fixture_sha256'] for d in plan['suite']['datasets']],
                       runner_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),

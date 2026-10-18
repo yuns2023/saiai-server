@@ -100,7 +100,7 @@ unknown labels are not negatives. Translations are counted as related families.
 No independent confidence interval, acceptance claim or enforcement eligibility is
 produced from these unreviewed drafts. The reporter does not calculate billing.
 
-Current validation: 14 offline/mock tests, including an end-to-end 108-response
+Current validation: 19 offline/mock tests, including an end-to-end 108-response
 simulation, failure/redaction/no-retry behavior, altered-plan rejection, overwrite
 refusal, redirect refusal and partial-label/error reporting. These simulations
 send no network traffic and demonstrate no Jev accuracy.
@@ -113,3 +113,12 @@ draft and offline threshold sensitivity analysis of the existing results. Run
 108-call runner and not authorized for live execution. `dataset-exposure.json`
 records that the original candidate fixtures are now observed calibration data;
 their historical names do not make them eligible for independent acceptance.
+
+
+The separately prepared `language-32` profile now supports exactly 32 calls and
+language-specific reports. See [LANGUAGE32_RUN_PLAN.md](LANGUAGE32_RUN_PLAN.md)
+for the frozen scope and budget illustration. It requires its own specific
+approval; the default `expanded-108` profile is unchanged in sample content.
+Use `prepare_review.py --profile language-32` to create the new packet. Earlier
+plans are immutable historical artifacts; changed preparation hashes invalidate
+them for execution but do not prevent offline reading of prior results.

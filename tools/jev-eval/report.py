@@ -6,13 +6,15 @@ import json
 import math
 from pathlib import Path
 from prepare_review import MODEL
-from validate import FIXTURE, BOUNDARY, REGISTRY, validate_suite
+from validate import REGISTRY
+from profiles import load_profile
 
 
 def summarize(document, threshold=0.9):
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 < threshold <= 1:
         raise ValueError('invalid threshold')
-    suite = validate_suite()
+    profile = document.get("profile", "expanded-108")
+    samples, suite, _ = load_profile(profile)
     expected = [d['fixture_sha256'] for d in suite['datasets']]
     if (document.get('fixture_sha256') != expected or
             document.get('registry_sha256') != hashlib.sha256(REGISTRY.read_bytes()).hexdigest() or
@@ -20,7 +22,6 @@ def summarize(document, threshold=0.9):
         raise ValueError('dataset, rules or model mismatch')
     if document.get('origin') not in {'mock', 'provider'}:
         raise ValueError('result origin must be explicit')
-    samples = [json.loads(line) for p in (FIXTURE, BOUNDARY) for line in p.read_text().splitlines() if line.strip()]
     by_id = {r['id']: r for r in samples}
     categories = [c['id'] for c in json.loads(REGISTRY.read_text())]
     observations = {}
@@ -43,6 +44,24 @@ def summarize(document, threshold=0.9):
             if observation.get('scores'):
                 raise ValueError('failed request cannot contain usable scores')
         observations[sample_id] = observation
+    metrics = category_metrics(samples, observations, categories, threshold)
+    language_metrics = {language: category_metrics(
+        [row for row in samples if row['language'] == language], observations, categories, threshold
+    ) for language in ('zh', 'en')}
+    return dict(
+        offline_analysis=True, profile=profile, origin=document['origin'], label_basis='unreviewed authored drafts',
+        independent_acceptance=False, enforcement_eligible=False, threshold=threshold,
+        expected_samples=len(samples), supplied_results=len(observations),
+        completed_samples=len(observations) - failures, failed_samples=failures,
+        missing_samples=len(samples) - len(observations), scenario_families=suite['scenario_families'],
+        confidence_intervals=None,
+        limitation='Translations are related. No independent-family confidence interval or production accuracy claim.',
+        cost_estimate=None, cost_limitation='This report does not account for usage; missing/failed calls are not assumed free.',
+        categories=metrics, by_language=language_metrics,
+    )
+
+
+def category_metrics(samples, observations, categories, threshold):
     metrics = {}
     for category in categories:
         counts = dict(tp=0, tn=0, fp=0, fn=0, unknown_labels=0, unavailable_positive=0, unavailable_negative=0)
@@ -70,17 +89,7 @@ def summarize(document, threshold=0.9):
             completed_labeled_families=len(families),
         )
         metrics[category] = counts
-    return dict(
-        offline_analysis=True, origin=document['origin'], label_basis='unreviewed authored drafts',
-        independent_acceptance=False, enforcement_eligible=False, threshold=threshold,
-        expected_samples=len(samples), supplied_results=len(observations),
-        completed_samples=len(observations) - failures, failed_samples=failures,
-        missing_samples=len(samples) - len(observations), scenario_families=suite['scenario_families'],
-        confidence_intervals=None,
-        limitation='Translations are related. No independent-family confidence interval or production accuracy claim.',
-        cost_estimate=None, cost_limitation='This report does not account for usage; missing/failed calls are not assumed free.',
-        categories=metrics,
-    )
+    return metrics
 
 
 if __name__ == '__main__':

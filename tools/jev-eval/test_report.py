@@ -61,3 +61,13 @@ class ReportTests(unittest.TestCase):
             change(data)
             with self.assertRaises(ValueError):
                 summarize(data)
+
+    def test_language_slices_expose_translation_difference(self):
+        data = document()
+        rows = [json.loads(line) for line in FIXTURE.read_text().splitlines()[:2]]
+        for row in rows:
+            value = .95 if row['language'] == 'zh' else .55
+            data['results'].append({'sample_id': row['id'], 'status': 'ok', 'scores': scores(value)})
+        report = summarize(data)
+        self.assertEqual(report['by_language']['zh']['Jailbreak']['tp'], 1)
+        self.assertEqual(report['by_language']['en']['Jailbreak']['fn'], 1)

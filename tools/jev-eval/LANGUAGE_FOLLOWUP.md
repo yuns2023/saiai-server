@@ -35,8 +35,9 @@ misses, so it is not an independent test set. All labels remain unreviewed.
 Run `python3 tools/jev-eval/followup.py` to check pairing, labels, provenance,
 contrast groups and duplicate text/IDs/families against the prior fixtures. It
 reads no keys and sends nothing. `followup-manifest.json` freezes the draft.
-The 108-call runner deliberately does **not** consume this additional file; no
-implicit extension of its call scope or approval is possible.
+The default 108-call profile does **not** consume this additional file. The new
+explicit `language-32` profile is prepared separately; no implicit extension of
+call scope or approval is possible.
 
 ## Offline sensitivity check on the already-observed 108 results
 
@@ -63,8 +64,9 @@ precision on real traffic or unseen data.
 ## Next evidence needed
 
 A reviewer other than the sample author should reconcile intended meaning and
-translation equivalence. If another model batch is desired, first freeze a new
-32-call scope and runner support, then obtain specific approval; do not replay the
+translation equivalence. A new 32-call scope and runner support are now frozen in
+[LANGUAGE32_RUN_PLAN.md](LANGUAGE32_RUN_PLAN.md); obtain specific approval before
+execution. Do not replay the
 old 108-call authorization. Any rule/threshold tuning remains calibration work.
 A later acceptance set needs fresh independently reviewed scenario families that
 were not used to author or tune rules. Until then, newly added categories remain

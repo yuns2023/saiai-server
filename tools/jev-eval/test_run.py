@@ -73,3 +73,28 @@ class RunnerTests(unittest.TestCase):
             result = execute(plan, 'TEST_ONLY', Path(folder) / 'results.json', InvalidProvider())
             self.assertEqual(summarize(result)['failed_samples'], 108)
             self.assertTrue(all('scores' not in row for row in result['results']))
+
+    def test_language_profile_runs_exactly_32_and_cannot_mix_results(self):
+        with tempfile.TemporaryDirectory() as folder:
+            plan = prepare(Path(folder) / 'packet', 'language-32')
+            provider = MockProvider()
+            result = execute(plan, 'TEST_ONLY', Path(folder) / 'results.json', provider)
+            self.assertEqual(provider.calls, 32)
+            report = summarize(result)
+            self.assertEqual(report['expected_samples'], 32)
+            self.assertEqual(report['scenario_families'], 16)
+            self.assertFalse(report['independent_acceptance'])
+            result['profile'] = 'expanded-108'
+            with self.assertRaises(ValueError):
+                summarize(result)
+
+    def test_profile_switch_or_call_limit_edit_rejected_before_network(self):
+        for field, value in [('profile', 'expanded-108'), ('profile', 'unknown'),
+                             ('proposed_requests', 108)]:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as folder:
+                plan = prepare(Path(folder) / 'packet', 'language-32')
+                plan[field] = value
+                provider = MockProvider()
+                with self.assertRaises(ValueError):
+                    execute(plan, 'TEST_ONLY', Path(folder) / 'results.json', provider)
+                self.assertEqual(provider.calls, 0)

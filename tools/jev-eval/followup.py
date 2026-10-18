@@ -32,7 +32,7 @@ def validate_followup(path=FOLLOWUP):
         raise ValueError('missing paired translation')
     report.update(independent_acceptance=False, contrast_groups=len(contrasts),
                   prior_model_exposure='authored after observing the 108-call results',
-                  runner_supported=False, live_calls_authorized=False)
+                  runner_supported=True, live_calls_authorized=False)
     return report
 
 

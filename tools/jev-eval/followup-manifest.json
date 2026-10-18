@@ -13,6 +13,6 @@
   "independent_acceptance": false,
   "contrast_groups": 6,
   "prior_model_exposure": "authored after observing the 108-call results",
-  "runner_supported": false,
+  "runner_supported": true,
   "live_calls_authorized": false
 }

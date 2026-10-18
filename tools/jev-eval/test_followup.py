@@ -14,7 +14,7 @@ class FollowupTests(unittest.TestCase):
         self.assertEqual(report['contrast_groups'], 6)
         self.assertFalse(report['independent_acceptance'])
         self.assertFalse(report['live_calls_authorized'])
-        self.assertFalse(report['runner_supported'])
+        self.assertTrue(report['runner_supported'])
 
     def test_false_independence_leakage_and_missing_translation_rejected(self):
         rows = [json.loads(line) for line in FOLLOWUP.read_text().splitlines()]
