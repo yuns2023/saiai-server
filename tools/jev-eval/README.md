@@ -122,3 +122,9 @@ approval; the default `expanded-108` profile is unchanged in sample content.
 Use `prepare_review.py --profile language-32` to create the new packet. Earlier
 plans are immutable historical artifacts; changed preparation hashes invalidate
 them for execution but do not prevent offline reading of prior results.
+
+
+The separately approved language-32 batch has now completed once; see
+[LANGUAGE32_RESULTS_20261018.md](LANGUAGE32_RESULTS_20261018.md). Both batch approvals
+are consumed. Offline validator fields describe tool behavior, not fresh authority
+to rerun. No rule, threshold or production behavior changed after either batch.

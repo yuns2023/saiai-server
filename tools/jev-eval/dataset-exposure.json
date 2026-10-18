@@ -14,6 +14,13 @@
       "current_use": "observed_calibration_only",
       "independent_acceptance": false,
       "historical_split_names_are_not_current_eligibility": true
+    },
+    {
+      "fixture_sha256": "ac26331b372805f673ffd489e0d7014fc496283b4af2bc199891c2eb2b5cafa5",
+      "current_use": "observed_calibration_only",
+      "independent_acceptance": false,
+      "exposure_event": "language-32-v1",
+      "results_sha256": "b959acd20e3fa99f7b412bc5209867816204b97ea4c1e8c79c5daf8c8d2c235a"
     }
   ]
 }

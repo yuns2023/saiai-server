@@ -1,7 +1,8 @@
 # Proposed language-32 exploratory batch
 
-Status: prepared and mock-tested, **not executed or authorized**. The previous
-108-call approval is consumed and does not cover this batch.
+Status: subsequently approved and **completed once**. See
+[LANGUAGE32_RESULTS_20261018.md](LANGUAGE32_RESULTS_20261018.md). Both the original
+108-call approval and this separate 32-call approval are now consumed.
 
 ## Frozen scope
 
@@ -55,4 +56,5 @@ The old 108-call results remain readable with their original aggregate counts.
 
 Validation: 19 offline/mock tests passed, including exactly 32 mocked requests,
 profile/budget tampering rejection before network, language slices and original
-108-call report compatibility. No additional provider request has been made.
+108-call report compatibility. The subsequent 32-call execution is recorded in the linked results; no further
+request or rerun is authorized.
