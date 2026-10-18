@@ -727,3 +727,22 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		require.Equal(t, FailoverContinue, action)
 	})
 }
+
+func TestHandleFailoverError_FableCreditsRequiredExcludesAccount(t *testing.T) {
+	fs := NewFailoverState(3, true)
+	mock := &mockTempUnscheduler{}
+	failoverErr := &service.UpstreamFailoverError{
+		StatusCode:   429,
+		ResponseBody: []byte(`{"error":{"details":{"error_code":"credits_required","disabled_reason":"org_level_disabled","model":"claude-fable-5-1"}}}`),
+	}
+	action := fs.HandleFailoverError(context.Background(), mock, 100, service.PlatformAnthropic, failoverErr)
+	require.Equal(t, FailoverContinue, action)
+	require.Contains(t, fs.FailedAccountIDs, int64(100))
+	require.Equal(t, 1, fs.SwitchCount)
+	require.Empty(t, fs.SameAccountRetryCount)
+	require.Empty(t, mock.calls)
+	require.True(t, fs.ForceCacheBilling)
+	// No eligible replacement must terminate, without recycling the failed account.
+	require.Equal(t, FailoverExhausted, fs.HandleSelectionExhausted(context.Background()))
+	require.Contains(t, fs.FailedAccountIDs, int64(100))
+}

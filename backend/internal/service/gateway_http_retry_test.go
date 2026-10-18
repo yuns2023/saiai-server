@@ -346,3 +346,33 @@ func TestGatewayService_ExcludedStatusesNeverReplayOnSameAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestGatewayService_FableCreditsRequiredImmediatelyFailsOver(t *testing.T) {
+	c, rec, parsed := claudeCodeCacheSafeRetryContext(t)
+	body := []byte(`{"error":{"type":"rate_limit_error","message":"Usage credits are required for this model.","details":{"error_code":"credits_required","disabled_reason":"org_level_disabled","exhausted_included_allowance":false,"has_chargeable_saved_payment_method":false,"model":"claude-fable-5-1"}}}`)
+	upstream := &scriptedGatewayHTTPUpstream{results: []scriptedGatewayHTTPResult{{
+		response: func() *http.Response {
+			resp := gatewayHTTPErrorResponse(http.StatusTooManyRequests)
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+			return resp
+		},
+	}}}
+	svc := claudeCodeCacheSafeRetryService(upstream)
+	account := claudeCodeCacheSafeRetryAccount()
+	repo := &sessionWindowMockRepo{}
+	svc.rateLimitService = newRateLimitServiceForTest(repo)
+
+	result, err := svc.Forward(c.Request.Context(), c, account, parsed)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+	require.JSONEq(t, string(body), string(failoverErr.ResponseBody))
+	require.False(t, failoverErr.RetryableOnSameAccount)
+	require.Equal(t, 1, upstream.calls)
+	require.False(t, c.Writer.Written(), "handler must still be able to select another account")
+	require.Empty(t, rec.Body.String())
+	require.Empty(t, repo.rateLimitCalls)
+	require.Empty(t, repo.modelRateLimitCalls)
+	require.Empty(t, repo.sessionWindowCalls)
+}
