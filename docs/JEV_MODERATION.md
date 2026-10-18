@@ -12,7 +12,9 @@ Leave `gateway.input_moderation.endpoint` empty for the official TypeSafe URL;
 remove any previous local-sidecar endpoint override. Never put a credential in
 version control. HTTPS is required, redirects are rejected, response size is
 bounded, and model/version/score validation must succeed before enforcement.
-A missing key disables submissions. Errors do not generate strikes.
+A missing key records a failed moderation job. Errors do not generate strikes.
+Admin configuration and result states are described in [INPUT_MODERATION.md](INPUT_MODERATION.md).
+The planned category expansion and Qwen retirement are tracked in [JEV_EXPANSION_PLAN.md](JEV_EXPANSION_PLAN.md).
 
 Group moderation and automatic enforcement remain explicit opt-ins. New groups
 use a 90% score threshold, three strikes in a 24-hour fixed window starting with
@@ -35,8 +37,8 @@ The strike state is user-global across groups. Admin risk reset/unblock controls
 remain the existing ones. Warnings are audit/UI actions, not email or Slack.
 
 The admin usage API exposes matching category scores, the decision-time threshold,
-action, and strike-count flag. The table currently renders categories, scores,
-action and whether the incident counted; the threshold remains API metadata.
+action, and strike-count flag. The table renders categories, scores, action and whether the incident counted;
+new result metadata also exposes passed/skipped/failed/pending states and the evaluated threshold.
 The local request/source/turn reference is stored atomically in the usage row,
 including batched, best-effort and retry insert paths. Classification and usage
 may arrive in either order. The join additionally requires the authenticated
@@ -54,7 +56,7 @@ event or link tables. Existing encrypted queue retention behavior is unchanged.
 Migration 100 adds the threshold, event score metadata, and usage correlation column.
 Deploy code and migration together. This development change does not switch a
 running deployment, remove a sidecar, send a provider evaluation, or change
-production credentials. Old rows have no fabricated score. A dedicated errors/pending dashboard remains follow-up work.
+production credentials. Old rows have no fabricated score. Usage-row status is implemented separately by migration 103; a dedicated queue operations dashboard remains follow-up work.
 
 ## Local validation
 

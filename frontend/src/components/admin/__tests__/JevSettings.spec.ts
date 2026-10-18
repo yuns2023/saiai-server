@@ -1,0 +1,45 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import JevSettings from '../JevSettings.vue'
+const mocks = vi.hoisted(() => ({ get: vi.fn(), update: vi.fn(), success: vi.fn(), error: vi.fn() }))
+vi.mock('@/api/admin/settings', () => ({ getJevSettings: mocks.get, updateJevSettings: mocks.update }))
+vi.mock('@/stores', () => ({ useAppStore: () => ({ showSuccess: mocks.success, showError: mocks.error }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+const settings = { endpoint: 'https://moderation.example/v1', key_configured: true, can_save: true, source: 'environment', engine: 'jev' }
+describe('Jev settings', () => {
+  beforeEach(() => { vi.resetAllMocks(); mocks.get.mockResolvedValue(settings); mocks.update.mockResolvedValue({ ...settings, source: 'admin' }) })
+  it('keeps the existing key without showing it and clears entered secrets after save', async () => {
+    const wrapper = mount(JevSettings)
+    await flushPromises()
+    expect((wrapper.get('#jev-key').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.get('#jev-key').attributes('type')).toBe('password')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith({ endpoint: settings.endpoint, api_key: '', clear_key: false })
+    await wrapper.get('#jev-key').setValue('TEST_ONLY_NEW_KEY')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect((wrapper.get('#jev-key').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.html()).not.toContain('TEST_ONLY_NEW_KEY')
+  })
+  it('requires an explicit credential decision when the endpoint changes', async () => {
+    const wrapper = mount(JevSettings)
+    await flushPromises()
+    await wrapper.get('#jev-endpoint').setValue('https://new.example/v1')
+    await wrapper.get('form').trigger('submit')
+    expect(mocks.update).not.toHaveBeenCalled()
+    await wrapper.get('input[type=checkbox]').setValue(true)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith({ endpoint: 'https://new.example/v1', api_key: '', clear_key: true })
+  })
+  it('does not permit saving after a failed load', async () => {
+    mocks.get.mockRejectedValueOnce(new Error('TEST_ONLY'))
+    const wrapper = mount(JevSettings)
+    await flushPromises()
+    expect(wrapper.find('form').exists()).toBe(false)
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('form').exists()).toBe(true)
+  })
+})

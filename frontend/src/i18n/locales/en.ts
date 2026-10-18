@@ -1949,10 +1949,25 @@ export default {
         environmentModeRemove: 'Remove'
       },
       inputModeration: {
+        statuses: {
+          pending: "Review pending",
+          passed: "Passed",
+          flagged: "Risk detected",
+          skipped: "Skipped",
+          failed: "Review failed",
+        },
+        reasons: {
+          no_new_user_text: "No new user text",
+          group_disabled: "Group moderation disabled",
+          processing_failed: "Moderation processing failed",
+          queue_full: "Moderation queue full",
+          expired: "Moderation job expired",
+        },
+        resultThreshold: "Risk threshold",
  usageColumn: 'Input moderation',
- noHit: 'No moderation result recorded',
+        noHit: 'No moderation result recorded',
  unavailable: 'Moderation information unavailable',
-        asyncHint: 'Asynchronous detection; absence of records does not mean the input was cleared',
+        asyncHint: 'Historical or unmoderated requests may have no status. This does not imply a passed review.',
  actions: { warning: 'Warning', cooldown: 'Cooldown', auto_disabled: 'Disabled', audit: 'Audit only', duplicate_ignored: 'Duplicate ignored', category_not_selected: 'Category not selected', ignored_admin: 'Admin exempt', already_inactive: 'Already inactive', stale_user_state: 'State reset' },
  counted: 'Counted',
 
@@ -4491,6 +4506,25 @@ export default {
     // Settings
     settings: {
       title: 'System Settings',
+      jev: {
+        title: "Jev input moderation",
+        description: "Configure the service, then enable moderation on the required groups. Changes apply to subsequent jobs.",
+        endpoint: "Service URL",
+        key: "API key",
+        configured: "Key configured",
+        notConfigured: "No key configured",
+        keyHint: "Keys are encrypted and never returned. Leave blank to keep the key. Changing the URL requires a replacement key or explicit removal.",
+        clearKey: "Remove key (subsequent moderation will fail until reconfigured)",
+        envSource: "Using environment configuration.",
+        adminSource: "Using admin configuration.",
+        encryptionRequired: "A stable server encryption key is required to save settings.",
+        save: "Save moderation settings",
+        saved: "Moderation settings saved",
+        loadFailed: "Could not load moderation settings",
+        saveFailed: "Save failed. Check the URL, key and server configuration.",
+        retry: "Retry",
+        endpointKeyRequired: "Changing the URL requires a replacement key or explicit removal.",
+      },
       chatgptBilling: {
         instant: 'Instant',
         medium: 'Medium',

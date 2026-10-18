@@ -27,6 +27,7 @@ func (r *usageLogRepository) enrichUsageLogModeration(ctx context.Context, logs 
 		slog.Warn("usage_moderation_enrichment_failed")
 		for i := range logs {
 			logs[i].ModerationEvents = nil
+			logs[i].ModerationResult = nil
 			logs[i].ModerationUnavailable = true
 		}
 	}
@@ -72,5 +73,35 @@ func (r *usageLogRepository) hydrateUsageLogModeration(ctx context.Context, logs
 			logs[i].ModerationEvents = append(logs[i].ModerationEvents, event)
 		}
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_ = rows.Close()
+	resultRows, err := r.sql.QueryContext(ctx, `SELECT u.id,r.status,r.reason,r.scores,r.min_confidence,r.model_version,r.updated_at
+ FROM usage_logs u JOIN input_moderation_results r
+ ON r.request_id=u.moderation_ref->>'RequestID' AND r.source=u.moderation_ref->>'Source'
+ AND r.turn_number::text=u.moderation_ref->>'TurnNumber'
+ AND r.user_id=u.user_id AND r.api_key_id=u.api_key_id AND r.group_id=u.group_id
+ WHERE u.id=ANY($1)`, pq.Array(ids))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resultRows.Close() }()
+	for resultRows.Next() {
+		var id int64
+		var scores []byte
+		var v service.InputModerationResult
+		if err := resultRows.Scan(&id, &v.Status, &v.Reason, &scores, &v.MinConfidence, &v.ModelVersion, &v.UpdatedAt); err != nil {
+			return err
+		}
+		if len(scores) > 0 {
+			if err := json.Unmarshal(scores, &v.Scores); err != nil {
+				return err
+			}
+		}
+		if i, ok := positions[id]; ok {
+			logs[i].ModerationResult = &v
+		}
+	}
+	return resultRows.Err()
 }

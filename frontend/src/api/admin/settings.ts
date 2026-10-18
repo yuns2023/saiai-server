@@ -317,3 +317,19 @@ export const settingsAPI = {
 }
 
 export default settingsAPI
+
+export interface JevSettings {
+  endpoint: string
+  key_configured: boolean
+  source: 'admin' | 'environment'
+  engine: string
+  can_save: boolean
+}
+export async function getJevSettings(): Promise<JevSettings> {
+  const { data } = await apiClient.get<JevSettings>('/admin/settings/jev')
+  return data
+}
+export async function updateJevSettings(settings: { endpoint: string; api_key: string; clear_key: boolean }): Promise<JevSettings> {
+  const { data } = await apiClient.put<JevSettings>('/admin/settings/jev', settings)
+  return data
+}

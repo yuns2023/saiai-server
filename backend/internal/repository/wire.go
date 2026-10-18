@@ -108,7 +108,7 @@ var ProviderSet = wire.NewSet(
 	NewClaudeUsageFetcher,
 	NewClaudeOAuthClient,
 	NewHTTPUpstream,
-	NewInputModerationClient,
+	NewConfiguredInputModerationClient,
 	NewOpenAIOAuthClient,
 	NewGeminiOAuthClient,
 	NewGeminiCliCodeAssistClient,

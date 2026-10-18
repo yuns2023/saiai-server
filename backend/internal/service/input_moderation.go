@@ -205,10 +205,10 @@ func NewInputModerationService(
 		consumer:    "input-moderation-" + uuid.NewString(),
 	}
 	durableQueueEnabled := service.taskQueue != nil && service.encryptor != nil && cfg != nil &&
-		cfg.Totp.EncryptionKeyConfigured && moderationCfg.Configured()
+		cfg.Totp.EncryptionKeyConfigured
 	if durableQueueEnabled {
 		service.startQueueConsumers(workerCount)
-	} else if service.taskQueue != nil && moderationCfg.Configured() {
+	} else if service.taskQueue != nil {
 		slog.Warn("input_moderation_durable_queue_disabled", "reason", "totp.encryption_key must be explicitly configured")
 		service.taskQueue = nil
 	}
@@ -216,8 +216,7 @@ func NewInputModerationService(
 }
 
 func (s *InputModerationService) EnabledForGroup(group *Group) bool {
-	return s != nil && group != nil && group.ID > 0 && group.InputModerationEnabled &&
-		s.cfg.Configured()
+	return s != nil && group != nil && group.ID > 0 && group.InputModerationEnabled
 }
 
 // Submit queues a moderation task without blocking on model inference.
@@ -227,8 +226,10 @@ func (s *InputModerationService) Submit(task InputModerationTask) bool {
 	}
 	text := strings.TrimSpace(truncateModerationText(task.Text, s.cfg.MaxInputChars))
 	if text == "" {
+		_ = s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "no_new_user_text"})
 		return false
 	}
+	_ = s.recordResult(task, InputModerationResult{Status: "pending"})
 	task.Text = text
 	task.Source = normalizeInputModerationSource(task.Source)
 	if strings.TrimSpace(task.JobID) == "" {
@@ -257,6 +258,7 @@ func (s *InputModerationService) Submit(task InputModerationTask) bool {
 		_ = s.process(task)
 	})
 	if !ok {
+		_ = s.recordResult(task, InputModerationResult{Status: "failed", Reason: "queue_full"})
 		dropped := s.dropped.Add(1)
 		if dropped == 1 || dropped%100 == 0 {
 			slog.Warn("input_moderation_queue_full",
@@ -354,7 +356,13 @@ func (s *InputModerationService) handleQueueMessage(message InputModerationQueue
 	}
 }
 
-func (s *InputModerationService) process(task InputModerationTask) error {
+func (s *InputModerationService) process(task InputModerationTask) (processErr error) {
+	defer func() {
+		if processErr != nil {
+			_ = s.recordResult(task, InputModerationResult{Status: "failed", Reason: "processing_failed"})
+		}
+	}()
+
 	if s.client == nil || s.groupRepo == nil || s.userService == nil {
 		return fmt.Errorf("input moderation dependencies unavailable")
 	}
@@ -370,6 +378,7 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 		maxJobAge = 24 * time.Hour
 	}
 	if !task.EnqueuedAt.IsZero() && time.Since(task.EnqueuedAt) > maxJobAge {
+		_ = s.recordResult(task, InputModerationResult{Status: "failed", Reason: "expired"})
 		slog.Warn("input_moderation_job_expired", "job_id", task.JobID, "user_id", task.UserID, "username", task.Username, "device_ref", task.DeviceRef)
 		return nil
 	}
@@ -387,6 +396,7 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 		return err
 	}
 	if group == nil || !group.InputModerationEnabled {
+		_ = s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "group_disabled"})
 		return nil
 	}
 
@@ -413,9 +423,6 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 		return fmt.Errorf("input moderation sidecar returned invalid safety %q", result.Safety)
 	}
 
-	if result.Safety == InputModerationSafetySafe && len(result.Scores) == 0 {
-		return nil
-	}
 	cancelClassify()
 
 	actionCtx, cancelAction := context.WithTimeout(context.Background(), 5*time.Second)
@@ -427,6 +434,7 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 		return err
 	}
 	if group == nil || !group.InputModerationEnabled {
+		_ = s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "group_disabled"})
 		return nil
 	}
 
@@ -444,7 +452,7 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 		}
 	}
 	if result.Safety == InputModerationSafetySafe {
-		return nil
+		return s.recordResult(task, InputModerationResult{Status: "passed", Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion})
 	}
 
 	hash := sha256.Sum256([]byte(task.Text))
@@ -517,6 +525,9 @@ func (s *InputModerationService) process(task InputModerationTask) error {
 			)
 			return err
 		}
+	}
+	if err := s.recordResult(task, InputModerationResult{Status: "flagged", Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion}); err != nil {
+		return err
 	}
 	slog.Info("input_moderation_decision",
 		"job_id", event.JobID,

@@ -55,6 +55,17 @@ const DataTableStub = {
 }
 
 describe('admin UsageTable tooltip', () => {
+  it.each(['pending', 'passed', 'flagged', 'skipped', 'failed'] as const)('shows explicit %s moderation state', (status) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_STATUS', moderation_result: { status, scores: status === 'passed' ? { PII: .1 } : undefined, min_confidence: 90, updated_at: '2026-10-18T00:00:00Z' } }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-moderation" :row="data[0]" /></div>' } } }
+    })
+    expect(wrapper.text()).toContain('admin.groups.inputModeration.statuses.' + status)
+    expect(wrapper.text()).not.toContain('admin.groups.inputModeration.noHit')
+    if (status === 'passed') { expect(wrapper.text()).toContain('10.0%'); expect(wrapper.text()).toContain('90%') }
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       x: 0,

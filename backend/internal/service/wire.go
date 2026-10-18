@@ -420,6 +420,7 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	NewJevSettingsService,
 	// Core services
 	NewAuthService,
 	ProvideUserService,

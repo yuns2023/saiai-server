@@ -1248,9 +1248,6 @@ func (h *OpenAIGatewayHandler) submitOpenAIInputModeration(
 		return
 	}
 	text := service.ExtractLatestOpenAIUserText(body)
-	if text == "" {
-		return
-	}
 	h.inputModerationService.Submit(service.InputModerationTask{
 		RequestID:  strings.TrimSpace(requestID),
 		UserID:     apiKey.UserID,
