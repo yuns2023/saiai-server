@@ -11,8 +11,9 @@ and other protocol-specific constraints. It then applies these layers in order:
 
 1. a five-hour admission gate for a new session;
 2. the global `accounts.priority` value;
-3. current load when a load snapshot is available; and
-4. random choice among peers in the same priority/load layer.
+3. for Claude carpool, an existing admission record for the incoming device;
+4. current load when a load snapshot is available; and
+5. random choice among peers in the same priority/affinity/load layer.
 
 Seven-day usage, remaining quota, reset proximity, `last_used_at`, account type,
 and `account_groups.priority` are not soft-ranking inputs. The group-priority
@@ -30,6 +31,34 @@ Codex usage snapshots are serialized by account. Crossing the five-hour
 admission boundary is persisted immediately; while a write is active only the
 latest pending observation is retained. A failed write causes that latest
 observation to be retried, and an older arrival cannot overwrite a newer one.
+
+## Carpool device reuse preference
+
+A valid confirmed or pending session sticky remains first. When choosing a new
+account, within the same global account-priority tier, prefer bounded carpool
+accounts whose admitted-device registry already contains the incoming
+`metadata.user_id.device_id`. Among those accounts choose the lowest load and
+break ties randomly. If they cannot accept the request, try other eligible
+accounts using the same priority/load/random rules. Model-routing boundaries
+and their existing fallback policy still apply.
+
+The preference applies to normal, model-routed, and legacy selection, including
+load-cache failure and fallback wait ordering. It does not bypass account,
+model, concurrency, session, RPM, cost, or quota admission checks. In particular,
+a device record alone does not exempt a new session from the five-hour gate.
+A busy preferred account does not force a new session to wait when another
+candidate can acquire a slot; existing sticky wait behavior is preserved.
+
+Membership reads use a Redis pipeline against the admitted registry only.
+Overflow entries, another device's records, and retained records on unlimited
+accounts confer no preference. Other traffic modes get no preference. Missing
+or invalid device metadata and lookup errors retain ordinary scheduling.
+Membership is memoized only for one selection call, so later requests observe
+device removal or daily rotation. The lookup never creates records or refreshes
+`last_seen_at`; the existing atomic forwarding-time admission check still owns
+registration, full-registry rejection and failover. Existing devices may reuse
+a full registry. Concurrent admission or eviction can change a lookup result
+before that final check; the hint never reserves a device slot.
 
 ## Carpool device admission
 

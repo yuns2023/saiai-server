@@ -2085,6 +2085,7 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 
 // SelectAccountWithLoadAwareness selects account with load-awareness and wait plan.
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string) (*AccountSelectionResult, error) {
+	ctx = withCarpoolAffinity(ctx, metadataUserID)
 	var unlock func()
 	ctx, unlock = s.coordinateStickySelection(ctx, groupID, sessionHash)
 	defer unlock()
@@ -2178,9 +2179,15 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 		}
 
+		var carpoolWaitCandidate *AccountSelectionResult
+
 		for {
 			account, err := s.SelectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, localExcluded)
 			if err != nil {
+				if carpoolWaitCandidate != nil && errors.Is(err, ErrNoAvailableAccounts) {
+					s.setStickySessionAccount(ctx, groupID, sessionHash, carpoolWaitCandidate.Account.ID, stickyAccountID)
+					return carpoolWaitCandidate, nil
+				}
 				return nil, err
 			}
 
@@ -2219,8 +2226,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					}, nil
 				}
 			}
-			s.setStickySessionAccount(ctx, groupID, sessionHash, account.ID, stickyAccountID)
-			return &AccountSelectionResult{
+			waitResult := &AccountSelectionResult{
 				Account: account,
 				WaitPlan: &AccountWaitPlan{
 					AccountID:      account.ID,
@@ -2228,7 +2234,18 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					Timeout:        cfg.FallbackWaitTimeout,
 					MaxWaiting:     cfg.FallbackMaxWaiting,
 				},
-			}, nil
+			}
+			// A new session may reuse a recorded device, but must try free
+			// alternatives before waiting on a busy preferred account.
+			if account.ID != stickyAccountID && (carpoolWaitCandidate != nil || s.carpoolMembership(ctx, []*Account{account})[account.ID]) {
+				if carpoolWaitCandidate == nil {
+					carpoolWaitCandidate = waitResult
+				}
+				localExcluded[account.ID] = struct{}{}
+				continue
+			}
+			s.setStickySessionAccount(ctx, groupID, sessionHash, account.ID, stickyAccountID)
+			return waitResult, nil
 		}
 	}
 
@@ -2448,6 +2465,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					return a.loadInfo.LoadRate < b.loadInfo.LoadRate
 				})
 				shuffleWithinPriorityAndLoadGroups(routingAvailable)
+				s.prioritizeCarpoolWithLoad(ctx, routingAvailable)
 
 				// 4. 尝试获取槽位
 				for _, item := range routingAvailable {
@@ -2671,10 +2689,11 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 		}
 
-		// 分层过滤选择：账号优先级 → 负载率 → 同层随机。
+		// 分层过滤选择：账号优先级 → carpool 已登记设备 → 负载率 → 同层随机。
 		for len(available) > 0 {
 			// 1. 取优先级最小的集合
 			candidates := filterByMinPriority(available)
+			candidates = s.preferCarpoolWithLoad(ctx, candidates)
 			// 2. 取负载率最低的集合
 			candidates = filterByMinLoadRate(candidates)
 			// 3. 剩余并列候选随机选择，不读取 5h/7d 剩余额度或 LRU。
@@ -2742,6 +2761,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			return a.loadInfo.LoadRate < b.loadInfo.LoadRate
 		})
 		shuffleWithinPriorityAndLoadGroups(withLoad)
+		s.prioritizeCarpoolWithLoad(ctx, withLoad)
 		for _, item := range withLoad {
 			fallbackCandidates = append(fallbackCandidates, item.account)
 		}
@@ -2749,6 +2769,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		fallbackCandidates = append(fallbackCandidates, candidates...)
 		sortAccountsByPriorityOnly(fallbackCandidates, false)
 		shuffleWithinPriority(fallbackCandidates)
+		s.prioritizeCarpoolAccounts(ctx, fallbackCandidates)
 	}
 	for _, acc := range fallbackCandidates {
 		acc = s.resolveFreshAccountForSessionAdmission(ctx, acc, false)
@@ -2818,6 +2839,7 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 	ordered := append([]*Account(nil), candidates...)
 	sortAccountsByPriorityOnly(ordered, false)
 	shuffleWithinPriority(ordered)
+	s.prioritizeCarpoolAccounts(ctx, ordered)
 	sessionKeyForAccount := s.makeOAuthAccountSessionKeyFunc(ctx, metadataUserID, sessionHash)
 
 	for _, acc := range ordered {
@@ -3645,22 +3667,14 @@ func selectRandomAccountByMinPriority(accounts []*Account) *Account {
 }
 
 func (s *GatewayService) selectFreshRandomAccountByMinPriority(ctx context.Context, accounts []*Account) *Account {
-	work := append([]*Account(nil), accounts...)
-	for len(work) > 0 {
-		selected := selectRandomAccountByMinPriority(work)
-		if selected == nil {
-			return nil
-		}
+	ordered := append([]*Account(nil), accounts...)
+	sortAccountsByPriorityOnly(ordered, false)
+	shuffleWithinPriority(ordered)
+	s.prioritizeCarpoolAccounts(ctx, ordered)
+	for _, selected := range ordered {
 		if fresh := s.resolveFreshAccountForSessionAdmission(ctx, selected, false); fresh != nil {
 			return fresh
 		}
-		remaining := make([]*Account, 0, len(work)-1)
-		for _, account := range work {
-			if account.ID != selected.ID {
-				remaining = append(remaining, account)
-			}
-		}
-		work = remaining
 	}
 	return nil
 }

@@ -252,6 +252,7 @@ type IdentityCache interface {
 	DeleteFingerprint(ctx context.Context, accountID int64) error
 	GetSlotFingerprint(ctx context.Context, accountID int64, slot int) (*Fingerprint, error)
 	SetSlotFingerprint(ctx context.Context, accountID int64, slot int, fp *Fingerprint) error
+	GetCarpoolDeviceMembership(ctx context.Context, accountIDs []int64, originalDeviceID string) (map[int64]bool, error)
 	GetOrCreateCarpoolDevice(ctx context.Context, accountID int64, originalDeviceID string, hints ClientHints, limit int, nowUnix int64) (*CarpoolDeviceRecord, error)
 	GetOrCreateSingleDeviceAdmission(ctx context.Context, accountID int64, originalDeviceID string, hints ClientHints, limit int, nowUnix int64) (*CarpoolDeviceRecord, error)
 	RotateSingleDeviceAdmissionForDay(ctx context.Context, accountID int64, limit int, day string) (*CarpoolDailyRotationResult, error)

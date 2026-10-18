@@ -82,6 +82,16 @@ func (s *identityCacheStub) SetSlotFingerprint(_ context.Context, accountID int6
 	s.slotFingerprints[slotCacheKey(accountID, slot)] = &cp
 	return nil
 }
+func (s *identityCacheStub) GetCarpoolDeviceMembership(_ context.Context, accountIDs []int64, originalDeviceID string) (map[int64]bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make(map[int64]bool, len(accountIDs))
+	for _, id := range accountIDs {
+		result[id] = s.carpoolDevices[carpoolDeviceCacheKey(id, originalDeviceID)] != nil
+	}
+	return result, nil
+}
+
 func (s *identityCacheStub) GetOrCreateCarpoolDevice(_ context.Context, accountID int64, originalDeviceID string, hints ClientHints, limit int, nowUnix int64) (*CarpoolDeviceRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

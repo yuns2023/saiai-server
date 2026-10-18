@@ -171,6 +171,30 @@ func (c *identityCache) SetSlotFingerprint(ctx context.Context, accountID int64,
 	return c.rdb.Set(ctx, key, val, fingerprintTTL).Err()
 }
 
+// GetCarpoolDeviceMembership checks only the admitted registry, never overflow.
+// A single pipeline avoids fetching device records or one round trip per account.
+// This is a scheduling hint; GetOrCreateCarpoolDevice remains the admission authority.
+func (c *identityCache) GetCarpoolDeviceMembership(ctx context.Context, accountIDs []int64, originalDeviceID string) (map[int64]bool, error) {
+	result := make(map[int64]bool, len(accountIDs))
+	deviceID := strings.TrimSpace(originalDeviceID)
+	if deviceID == "" || len(accountIDs) == 0 {
+		return result, nil
+	}
+	field := carpoolDeviceField(deviceID)
+	pipe := c.rdb.Pipeline()
+	commands := make(map[int64]*redis.BoolCmd, len(accountIDs))
+	for _, id := range accountIDs {
+		commands[id] = pipe.HExists(ctx, carpoolRecordedKey(id), field)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, err
+	}
+	for id, command := range commands {
+		result[id] = command.Val()
+	}
+	return result, nil
+}
+
 func (c *identityCache) GetOrCreateCarpoolDevice(ctx context.Context, accountID int64, originalDeviceID string, hints service.ClientHints, limit int, nowUnix int64) (*service.CarpoolDeviceRecord, error) {
 	return c.getOrCreateAdmissionDevice(ctx, accountID, originalDeviceID, hints, limit, nowUnix, carpoolRecordedKey(accountID), carpoolOverflowKey(accountID), service.ErrClaudeOAuthCarpoolDevicesFull)
 }
