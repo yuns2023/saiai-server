@@ -61,8 +61,11 @@ subsequent jobs. An already-started detector call cannot be undone. This rule
 does not erase old events or automatically lift existing cooldowns/disables.
 User lookup failures produce a failed job, never an assumed trusted exemption.
 
-The usage list shows status and, for flagged results, only threshold-matching
-category labels. Click the status for all recorded scores, thresholds and actions.
+The usage list shows status with the highest recorded risk score for passed
+results, and only threshold-matching category labels for flagged results. Missing
+scores are not presented as zero. Category labels follow the UI language; unknown
+historical category IDs remain visible. Click the status for all recorded scores,
+thresholds and actions.
 Trusted exemptions remain skipped rather than passed. The list does not poll;
 use the refresh button to load newly completed asynchronous results. Filters
 and pagination continue to load their requested data.

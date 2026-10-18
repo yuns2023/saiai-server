@@ -1949,6 +1949,7 @@ export default {
         environmentModeRemove: 'Remove'
       },
       inputModeration: {
+        highestRisk: 'Highest risk score',
         viewDetails: 'Review details',
         policy: {
           version: "Detection rules",

@@ -38,6 +38,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
+      locale: { value: 'en' },
       t: (key: string) => messages[key] ?? key,
     }),
   }
@@ -63,7 +64,8 @@ describe('admin UsageTable tooltip', () => {
     expect(wrapper.text()).toContain('admin.groups.inputModeration.statuses.' + status)
     expect(wrapper.text()).not.toContain('admin.groups.inputModeration.noHit')
     if (status === 'passed') {
-      expect(wrapper.text()).not.toContain('10.0%')
+      expect(wrapper.get('[data-testid=highest-risk]').text()).toContain('10.0%')
+      expect(wrapper.text()).not.toContain('90%')
       await wrapper.get('button[aria-haspopup=dialog]').trigger('click')
       expect(document.body.textContent).toContain('10.0%')
       expect(document.body.textContent).toContain('90%')
@@ -79,12 +81,12 @@ describe('admin UsageTable tooltip', () => {
       } }], loading: false, columns: [] },
       global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-moderation" :row="data[0]" /></div>' } } }
     })
-    expect(wrapper.text()).toContain('PII')
-    expect(wrapper.text()).toContain('violence')
-    expect(wrapper.text()).not.toContain('sexual')
+    expect(wrapper.text()).toContain('Privacy abuse')
+    expect(wrapper.text()).toContain('Violence')
+    expect(wrapper.text()).not.toContain('Explicit sexual content')
     expect(wrapper.text()).not.toContain('95.0%')
     await wrapper.get('button[aria-haspopup=dialog]').trigger('click')
-    expect(document.body.textContent).toContain('sexual 30.0%')
+    expect(document.body.textContent).toContain('Explicit sexual content 30.0%')
     wrapper.getComponent({ name: 'BaseDialog' }).vm.$emit('close')
     await nextTick()
     expect(document.body.querySelector('[role=dialog]')).toBeNull()
@@ -115,7 +117,7 @@ describe('admin UsageTable tooltip', () => {
       { categories: ['PII'], scores: { PII: .95 }, action: 'warning', counted_as_strike: true },
       { categories: ['Jailbreak'], scores: null, action: 'audit', counted_as_strike: false }
     ] }] })
-    expect(wrapper.text()).toContain('PII')
+    expect(wrapper.text()).toContain('Privacy abuse')
     expect(wrapper.text()).not.toContain('95.0%')
     await wrapper.get('button[aria-haspopup=dialog]').trigger('click')
     expect(document.body.textContent).toContain('95.0%')
@@ -134,7 +136,7 @@ describe('admin UsageTable tooltip', () => {
     })
     expect(wrapper.text()).toContain('admin.groups.inputModeration.unavailable')
     expect(wrapper.text()).not.toContain('admin.groups.inputModeration.noHit')
-    expect(wrapper.text()).not.toContain('PII')
+    expect(wrapper.text()).not.toContain('Privacy abuse')
     wrapper.unmount()
   })
 

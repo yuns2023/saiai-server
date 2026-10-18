@@ -2034,6 +2034,7 @@ export default {
         environmentModeRemove: '删除'
       },
       inputModeration: {
+        highestRisk: '最高风险评分',
         viewDetails: '审核详情',
         policy: {
           version: "检测规则",
