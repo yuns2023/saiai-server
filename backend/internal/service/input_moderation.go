@@ -226,10 +226,10 @@ func (s *InputModerationService) Submit(task InputModerationTask) bool {
 	}
 	text := strings.TrimSpace(truncateModerationText(task.Text, s.cfg.MaxInputChars))
 	if text == "" {
-		s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "no_new_user_text"})
+		_ = s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "no_new_user_text"})
 		return false
 	}
-	s.recordResult(task, InputModerationResult{Status: "pending"})
+	_ = s.recordResult(task, InputModerationResult{Status: "pending"})
 	task.Text = text
 	task.Source = normalizeInputModerationSource(task.Source)
 	if strings.TrimSpace(task.JobID) == "" {
@@ -258,7 +258,7 @@ func (s *InputModerationService) Submit(task InputModerationTask) bool {
 		_ = s.process(task)
 	})
 	if !ok {
-		s.recordResult(task, InputModerationResult{Status: "failed", Reason: "queue_full"})
+		_ = s.recordResult(task, InputModerationResult{Status: "failed", Reason: "queue_full"})
 		dropped := s.dropped.Add(1)
 		if dropped == 1 || dropped%100 == 0 {
 			slog.Warn("input_moderation_queue_full",
@@ -359,7 +359,7 @@ func (s *InputModerationService) handleQueueMessage(message InputModerationQueue
 func (s *InputModerationService) process(task InputModerationTask) (processErr error) {
 	defer func() {
 		if processErr != nil {
-			s.recordResult(task, InputModerationResult{Status: "failed", Reason: "processing_failed"})
+			_ = s.recordResult(task, InputModerationResult{Status: "failed", Reason: "processing_failed"})
 		}
 	}()
 
@@ -378,7 +378,7 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		maxJobAge = 24 * time.Hour
 	}
 	if !task.EnqueuedAt.IsZero() && time.Since(task.EnqueuedAt) > maxJobAge {
-		s.recordResult(task, InputModerationResult{Status: "failed", Reason: "expired"})
+		_ = s.recordResult(task, InputModerationResult{Status: "failed", Reason: "expired"})
 		slog.Warn("input_moderation_job_expired", "job_id", task.JobID, "user_id", task.UserID, "username", task.Username, "device_ref", task.DeviceRef)
 		return nil
 	}
@@ -396,7 +396,7 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		return err
 	}
 	if group == nil || !group.InputModerationEnabled {
-		s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "group_disabled"})
+		_ = s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "group_disabled"})
 		return nil
 	}
 
@@ -434,7 +434,7 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		return err
 	}
 	if group == nil || !group.InputModerationEnabled {
-		s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "group_disabled"})
+		_ = s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "group_disabled"})
 		return nil
 	}
 

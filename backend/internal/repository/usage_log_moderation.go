@@ -86,7 +86,7 @@ func (r *usageLogRepository) hydrateUsageLogModeration(ctx context.Context, logs
 	if err != nil {
 		return err
 	}
-	defer resultRows.Close()
+	defer func() { _ = resultRows.Close() }()
 	for resultRows.Next() {
 		var id int64
 		var scores []byte

@@ -60,7 +60,7 @@ func (s *JevSettingsService) Resolve(ctx context.Context) (config.GatewayInputMo
 		return c, "environment", nil
 	}
 	if err != nil {
-		return c, "", fmt.Errorf("Jev settings unavailable")
+		return c, "", fmt.Errorf("jev settings unavailable")
 	}
 	var stored storedJevSettings
 	if json.Unmarshal([]byte(raw), &stored) != nil {
@@ -71,11 +71,11 @@ func (s *JevSettingsService) Resolve(ctx context.Context) (config.GatewayInputMo
 	c.APIKey = ""
 	if stored.EncryptedKey != "" {
 		if s.encryptor == nil {
-			return c, "", fmt.Errorf("Jev key decryption unavailable")
+			return c, "", fmt.Errorf("jev key decryption unavailable")
 		}
 		c.APIKey, err = s.encryptor.Decrypt(stored.EncryptedKey)
 		if err != nil {
-			return config.GatewayInputModerationConfig{}, "", fmt.Errorf("Jev key decryption failed")
+			return config.GatewayInputModerationConfig{}, "", fmt.Errorf("jev key decryption failed")
 		}
 	}
 	return c, "admin", nil
@@ -119,7 +119,7 @@ func (s *JevSettingsService) Update(ctx context.Context, u JevSettingsUpdate) er
 	if key != "" {
 		stored.EncryptedKey, err = s.encryptor.Encrypt(key)
 		if err != nil {
-			return fmt.Errorf("Jev key encryption failed")
+			return fmt.Errorf("jev key encryption failed")
 		}
 	}
 	raw, err := json.Marshal(stored)
