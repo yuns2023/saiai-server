@@ -5,11 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -235,8 +238,41 @@ func (s *defaultOpenAIWSStateStore) BindTurnStateAccountForUser(ctx context.Cont
 }
 
 func (s *defaultOpenAIWSStateStore) GetTurnStateAccountForUser(ctx context.Context, userID int64, turnState string) (int64, error) {
+	owner, _ := s.lookupTurnStateAccount(ctx, userID, turnState)
+	return owner, nil
+}
+
+// Missing and expired shared keys are indistinguishable. Only report expiry
+// when an expired local entry was actually observed; never infer a Redis TTL.
+func (s *defaultOpenAIWSStateStore) lookupTurnStateAccount(ctx context.Context, userID int64, turnState string) (int64, string) {
 	key := openAITurnStateAccountKey(userID, turnState)
-	return s.getResponseAccount(ctx, 0, key, key, key)
+	if key == "" {
+		return 0, "absent"
+	}
+	s.responseToAccountMu.RLock()
+	binding, present := s.responseToAccount[key]
+	s.responseToAccountMu.RUnlock()
+	s.maybeCleanup()
+	if present && time.Now().Before(binding.expiresAt) {
+		return binding.accountID, "local_owner"
+	}
+	source := "miss"
+	if present {
+		source = "local_expired"
+	}
+	if s.cache == nil {
+		return 0, source
+	}
+	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
+	defer cancel()
+	owner, err := s.cache.GetSessionAccountID(cacheCtx, 0, key)
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return 0, "shared_lookup_error"
+	}
+	if owner > 0 {
+		return owner, "shared_owner"
+	}
+	return 0, source
 }
 
 func (s *defaultOpenAIWSStateStore) bindResponseAccount(ctx context.Context, cacheGroupID int64, localKey, cacheKey, responseID string, accountID int64, ttl time.Duration) error {

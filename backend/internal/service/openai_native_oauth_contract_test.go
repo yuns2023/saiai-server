@@ -578,7 +578,7 @@ func TestOpenAINativeOAuth_SSEToolNamesAndMetadataRemainNative(t *testing.T) {
 	}
 	require.Equal(t, events, observed)
 	c.Request.Header.Set(openAIWSTurnStateHeader, "mock_frame_state")
-	require.NoError(t, svc.validateOpenAINativeTurnState(account, 0, svc.openAISessionHashForTurnState(c, ""), c.Request.Header))
+	require.NoError(t, svc.validateOpenAINativeTurnState(context.Background(), account, 0, svc.openAISessionHashForTurnState(c, ""), c.Request.Header))
 }
 
 func TestOpenAINativeOAuth_WSRejectsUnverifiedFrameStateBeforeDial(t *testing.T) {
@@ -636,12 +636,12 @@ func TestOpenAINativeOAuth_TurnStateOwnershipSurvivesRestartWithoutPersistingTok
 	headers := make(http.Header)
 	headers.Set(openAIWSTurnStateHeader, "MOCK_OPAQUE_STATE")
 	// A restart and a different transport/session header do not change owner.
-	require.NoError(t, second.validateOpenAINativeTurnState(account, 55, "", headers))
-	require.NoError(t, second.validateOpenAINativeTurnState(account, 55, "new_session", headers))
-	require.ErrorIs(t, second.validateOpenAINativeTurnState(account, 56, "old_session", headers), errOpenAITurnStateAccountMismatch)
+	require.NoError(t, second.validateOpenAINativeTurnState(context.Background(), account, 55, "", headers))
+	require.NoError(t, second.validateOpenAINativeTurnState(context.Background(), account, 55, "new_session", headers))
+	require.ErrorIs(t, second.validateOpenAINativeTurnState(context.Background(), account, 56, "old_session", headers), errOpenAITurnStateAccountMismatch)
 	other := *account
 	other.ID++
-	require.ErrorIs(t, second.validateOpenAINativeTurnState(&other, 55, "old_session", headers), errOpenAITurnStateAccountMismatch)
+	require.ErrorIs(t, second.validateOpenAINativeTurnState(context.Background(), &other, 55, "old_session", headers), errOpenAITurnStateAccountMismatch)
 }
 
 func TestOpenAINativeOAuth_TurnStateSelectsOwnerBeforeStaleSessionSticky(t *testing.T) {

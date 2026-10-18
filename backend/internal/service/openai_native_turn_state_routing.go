@@ -26,7 +26,7 @@ func (s *OpenAIGatewayService) SelectAccountForNativeCodexRequest(
 	if state == "" {
 		return s.SelectAccountWithSchedulerForUser(ctx, groupID, userID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport)
 	}
-	owner, err := s.getOpenAIWSStateStore().GetTurnStateAccountForUser(ctx, userID, state)
+	owner, source, err := lookupOpenAINativeTurnState(ctx, s.getOpenAIWSStateStore(), userID, state)
 	if err != nil {
 		return nil, OpenAIAccountScheduleDecision{}, err
 	}
@@ -40,18 +40,18 @@ func (s *OpenAIGatewayService) SelectAccountForNativeCodexRequest(
 			return nil, decision, lookupErr
 		}
 		if previousOwner > 0 && previousOwner != owner {
-			return nil, decision, errOpenAITurnStateAccountMismatch
+			return nil, decision, rejectOpenAINativeTurnState(ctx, userID, owner, owner, state, "response_owner_conflict", source)
 		}
 	}
 	if _, excluded := excludedIDs[owner]; excluded || !s.isOpenAIAccountCurrentlyInGroup(ctx, owner, groupID) {
-		return nil, decision, errOpenAITurnStateAccountMismatch
+		return nil, decision, rejectOpenAINativeTurnState(ctx, userID, owner, owner, state, "owner_excluded_or_outside_group", source)
 	}
 	account, err := s.getSchedulableAccount(ctx, owner)
 	if err != nil || account == nil || !account.IsOpenAIOAuth() || !account.IsSchedulable() || shouldClearStickySession(account, requestedModel) {
-		return nil, decision, errOpenAITurnStateAccountMismatch
+		return nil, decision, rejectOpenAINativeTurnState(ctx, userID, owner, owner, state, "owner_unavailable", source)
 	}
 	if !(&defaultOpenAIAccountScheduler{service: s}).isAccountTransportCompatible(account, requiredTransport) {
-		return nil, decision, errOpenAITurnStateAccountMismatch
+		return nil, decision, rejectOpenAINativeTurnState(ctx, userID, owner, owner, state, "transport_incompatible", source)
 	}
 	decision.SelectedAccountType = account.Type
 	result, acquireErr := s.tryAcquireAccountSlot(ctx, owner, account.Concurrency)
@@ -62,7 +62,7 @@ func (s *OpenAIGatewayService) SelectAccountForNativeCodexRequest(
 		return &AccountSelectionResult{Account: account, Acquired: true, ReleaseFunc: result.ReleaseFunc}, decision, nil
 	}
 	if s.concurrencyService == nil {
-		return nil, decision, errOpenAITurnStateAccountMismatch
+		return nil, decision, rejectOpenAINativeTurnState(ctx, userID, owner, owner, state, "concurrency_service_missing", source)
 	}
 	cfg := s.schedulingConfig()
 	return &AccountSelectionResult{Account: account, WaitPlan: &AccountWaitPlan{

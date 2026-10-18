@@ -244,7 +244,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		if account.Type == AccountTypeOAuth && c != nil && c.Request != nil {
 			promptCacheKey := gjson.GetBytes(firstClientMessage, "prompt_cache_key").String()
 			sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
-			if err := s.validateOpenAINativeTurnState(account, userID, sessionHash, c.Request.Header); err != nil {
+			if err := s.validateOpenAINativeTurnState(c.Request.Context(), account, userID, sessionHash, c.Request.Header); err != nil {
 				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 			}
 			if err := s.validateOpenAINativeFrameTurnState(c, account, firstClientMessage); err != nil {

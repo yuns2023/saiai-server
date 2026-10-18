@@ -2207,7 +2207,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				state, stringValue := value.(string)
 				headers := make(http.Header)
 				headers.Set(openAIWSTurnStateHeader, state)
-				if !stringValue || s.validateOpenAINativeTurnState(account, getOpenAIUserIDFromContext(c), s.openAINativeResponseSessionHash(c), headers) != nil {
+				if !stringValue {
+					_ = rejectOpenAINativeTurnState(c.Request.Context(), getOpenAIUserIDFromContext(c), account.ID, 0, "", "non_string_http_metadata", "not_checked")
+				}
+				if !stringValue || s.validateOpenAINativeTurnState(c.Request.Context(), account, getOpenAIUserIDFromContext(c), s.openAINativeResponseSessionHash(c), headers) != nil {
 					c.JSON(http.StatusConflict, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "turn_state_account_mismatch", "message": errOpenAITurnStateAccountMismatch.Error()}})
 					return nil, errOpenAITurnStateAccountMismatch
 				}
@@ -3142,7 +3145,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	if account.Type == AccountTypeOAuth {
 		if strictNativeOAuth {
 			sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
-			if err := s.validateOpenAINativeTurnState(account, getOpenAIUserIDFromContext(c), sessionHash, c.Request.Header); err != nil {
+			if err := s.validateOpenAINativeTurnState(c.Request.Context(), account, getOpenAIUserIDFromContext(c), sessionHash, c.Request.Header); err != nil {
 				return nil, err
 			}
 			// Session/conversation headers were copied verbatim above. User and

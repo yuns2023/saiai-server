@@ -48,7 +48,7 @@ func (s *OpenAIGatewayService) ForwardNativeCodexImage(
 	if accountID := account.GetChatGPTAccountID(); accountID != "" {
 		req.Header.Set("Chatgpt-Account-Id", accountID)
 	}
-	if err := s.validateOpenAINativeTurnState(account, getOpenAIUserIDFromContext(c), s.openAINativeResponseSessionHash(c), c.Request.Header); err != nil {
+	if err := s.validateOpenAINativeTurnState(c.Request.Context(), account, getOpenAIUserIDFromContext(c), s.openAINativeResponseSessionHash(c), c.Request.Header); err != nil {
 		return nil, err
 	}
 	// Image generation is not replay-safe. Preserve any supplied idempotency

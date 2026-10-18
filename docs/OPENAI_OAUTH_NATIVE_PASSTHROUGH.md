@@ -79,6 +79,26 @@ including a Redis outage with no local evidence, still requires a fresh
 conversation. Silently removing an unverifiable state would send a different
 application request. These bindings add no database migration.
 
+Turn-state rejection emits `openai.turn_state_rejected` with request correlation,
+internal user/selected-account/owner IDs, a user-scoped SHA-256 state digest,
+`turn_state_reason`, and `turn_state_cache_source`. No raw token, session identity,
+request headers/body, or cache error text is logged. Routing failures distinguish
+response-owner conflicts, unavailable/excluded owners and transport mismatch;
+validation distinguishes malformed values, wrong owners and missing evidence.
+`local_expired` means an expired local entry was observed, while `miss` cannot
+distinguish an expired shared key from a never-recorded key. A Redis miss is not
+classified as a cache outage. These fields diagnose newly observed failures;
+they cannot reconstruct the cause of older generic 409 records.
+
+Ownership TTL is bounded by the one-hour session-sticky cap and is renewed by
+observing provider-issued state, not by validating an incoming client token.
+The deterministic continuous-use regression demonstrates that an unchanged token
+can validate repeatedly and then fail after all ownership evidence expires.
+This reproduces a possible mechanism, not proof that a historical incident was
+caused by expiry. The diagnostic change preserves this existing expiry contract
+and does not silently refresh, remove or replace client state.
+
+
 ## Return path
 
 Native OAuth/native-relay responses preserve safe unknown application headers

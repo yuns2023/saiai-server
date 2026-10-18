@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 // Connection may nominate additional hop-by-hop headers. Apply this at each
@@ -100,42 +102,80 @@ func (s *OpenAIGatewayService) openAINativeResponseSessionHash(c *gin.Context) s
 	return s.openAISessionHashForTurnState(c, "")
 }
 
+// Rejections log only bounded classifications, internal IDs and a user-scoped
+// digest. Never include the supplied state, session, body or cache error text.
+func rejectOpenAINativeTurnState(ctx context.Context, userID, accountID, ownerID int64, state, reason, source string) error {
+	logger.FromContext(ctx).Warn("openai.turn_state_rejected",
+		zap.Int64("user_id", userID), zap.Int64("account_id", accountID),
+		zap.Int64("turn_state_owner_account_id", ownerID),
+		zap.String("turn_state_digest", openAITurnStateAccountKey(userID, state)),
+		zap.String("turn_state_reason", reason), zap.String("turn_state_cache_source", source))
+	return errOpenAITurnStateAccountMismatch
+}
+
+func lookupOpenAINativeTurnState(ctx context.Context, store OpenAIWSStateStore, userID int64, state string) (int64, string, error) {
+	if concrete, ok := store.(*defaultOpenAIWSStateStore); ok {
+		owner, source := concrete.lookupTurnStateAccount(ctx, userID, state)
+		return owner, source, nil
+	}
+	owner, err := store.GetTurnStateAccountForUser(ctx, userID, state)
+	return owner, "ownership_store", err
+}
+
 // An opaque token must not be guessed, replaced with a cached token, or sent
 // to another pooled account. Preserve a verified supplied token byte-for-byte;
 // fail before provider I/O when ownership cannot be established. Absence stays
 // absent. Ownership is shared through Redis; a local-only token cache is a
 // compatibility fallback for already observed in-flight state.
-func (s *OpenAIGatewayService) validateOpenAINativeTurnState(account *Account, userID int64, sessionHash string, incoming http.Header) error {
+func (s *OpenAIGatewayService) validateOpenAINativeTurnState(ctx context.Context, account *Account, userID int64, sessionHash string, incoming http.Header) error {
 	values := incoming.Values(openAIWSTurnStateHeader)
 	if len(values) == 0 {
 		return nil
 	}
-	if len(values) != 1 || values[0] == "" || account == nil || s == nil {
-		return errOpenAITurnStateAccountMismatch
+	accountID := int64(0)
+	if account != nil {
+		accountID = account.ID
+	}
+	state := ""
+	if len(values) == 1 {
+		state = values[0]
+	}
+	reject := func(reason, source string, owner int64) error {
+		return rejectOpenAINativeTurnState(ctx, userID, accountID, owner, state, reason, source)
+	}
+	if len(values) != 1 {
+		return reject("multiple_values", "not_checked", 0)
+	}
+	if state == "" {
+		return reject("empty_value", "not_checked", 0)
+	}
+	if account == nil || s == nil {
+		return reject("missing_validation_context", "not_checked", 0)
 	}
 	store := s.getOpenAIWSStateStore()
 	if store == nil {
-		return errOpenAITurnStateAccountMismatch
+		return reject("missing_store", "not_checked", 0)
 	}
-	owner, err := store.GetTurnStateAccountForUser(context.Background(), userID, values[0])
+	owner, source, err := lookupOpenAINativeTurnState(ctx, store, userID, state)
 	if err != nil {
+		_ = reject("ownership_lookup_error", source, 0)
 		return err
 	}
 	if owner > 0 {
 		if owner == account.ID {
 			return nil
 		}
-		return errOpenAITurnStateAccountMismatch
+		return reject("owner_mismatch", source, owner)
 	}
 	stored, ok := store.GetSessionTurnState(0, openAIWSUserTurnStateSessionHash(userID, account.ID, sessionHash))
-	if ok && subtle.ConstantTimeCompare([]byte(stored), []byte(values[0])) == 1 {
+	if ok && subtle.ConstantTimeCompare([]byte(stored), []byte(state)) == 1 {
 		return nil
 	}
-	stored, ok = store.GetSessionTurnState(0, openAINativeTurnStateKey(userID, account.ID, sessionHash, values[0]))
-	if ok && subtle.ConstantTimeCompare([]byte(stored), []byte(values[0])) == 1 {
+	stored, ok = store.GetSessionTurnState(0, openAINativeTurnStateKey(userID, account.ID, sessionHash, state))
+	if ok && subtle.ConstantTimeCompare([]byte(stored), []byte(state)) == 1 {
 		return nil
 	}
-	return errOpenAITurnStateAccountMismatch
+	return reject("ownership_unverified", source+"_local_fallback_miss", 0)
 }
 
 func openAINativeTurnStateKey(userID, accountID int64, sessionHash, state string) string {
@@ -167,12 +207,16 @@ func (s *OpenAIGatewayService) validateOpenAINativeFrameTurnState(c *gin.Context
 		return nil
 	}
 	if state.Type != gjson.String {
-		return errOpenAITurnStateAccountMismatch
+		var accountID int64
+		if account != nil {
+			accountID = account.ID
+		}
+		return rejectOpenAINativeTurnState(c.Request.Context(), getOpenAIUserIDFromContext(c), accountID, 0, "", "non_string_frame_metadata", "not_checked")
 	}
 	headers := make(http.Header)
 	headers.Set(openAIWSTurnStateHeader, state.String())
 	sessionHash := s.openAISessionHashForTurnState(c, gjson.GetBytes(payload, "prompt_cache_key").String())
-	return s.validateOpenAINativeTurnState(account, getOpenAIUserIDFromContext(c), sessionHash, headers)
+	return s.validateOpenAINativeTurnState(c.Request.Context(), account, getOpenAIUserIDFromContext(c), sessionHash, headers)
 }
 
 // Codex consumes the same opaque token from response.metadata event headers.
