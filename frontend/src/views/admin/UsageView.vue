@@ -658,9 +658,7 @@ const handleColumnClickOutside = (event: MouseEvent) => {
   }
 }
 
-let moderationRefresh: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
- moderationRefresh = setInterval(() => { if (!document.hidden && !loading.value) void loadLogs() }, 30000)
   applyRouteQueryFilters()
   loadLogs()
   loadStats()
@@ -671,7 +669,11 @@ onMounted(() => {
   loadSavedColumns()
   document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { clearInterval(moderationRefresh); abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
+onUnmounted(() => {
+  abortController?.abort()
+  exportAbortController?.abort()
+  document.removeEventListener('click', handleColumnClickOutside)
+})
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)

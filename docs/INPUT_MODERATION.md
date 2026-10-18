@@ -10,7 +10,8 @@ Usage history exposes `moderation_result` independently of risk events:
   scores and the evaluated threshold are retained.
 - `flagged`: at least one category meets the threshold; existing risk-event and
   enforcement rules still apply.
-- `skipped`: no new user text, or the group was disabled before processing.
+- `skipped`: no new user text, a disabled group, or an administrator-marked
+  trusted user (`trusted_user`).
 - `failed`: processing failed, the queue was full, or the job expired. Durable
   processing failures remain retryable and a later success replaces failure.
 
@@ -48,3 +49,20 @@ Clearing the key causes subsequent text moderation jobs to fail until a key is
 configured again. Group switches and enforcement settings are not changed by
 saving provider configuration. This feature does not make moderation synchronous
 or block the original model request while classification runs.
+
+## Trusted users and usage presentation
+
+Administrator-managed `is_trusted` exempts a user from input classification.
+The worker reads the current user record before calling the detector, including
+for previously queued jobs; it does not rely on an old authentication snapshot.
+It checks trust again after inference, so promotion while a request is in flight
+prevents a new risk event or penalty. Revocation resumes normal processing for
+subsequent jobs. An already-started detector call cannot be undone. This rule
+does not erase old events or automatically lift existing cooldowns/disables.
+User lookup failures produce a failed job, never an assumed trusted exemption.
+
+The usage list shows status and, for flagged results, only threshold-matching
+category labels. Click the status for all recorded scores, thresholds and actions.
+Trusted exemptions remain skipped rather than passed. The list does not poll;
+use the refresh button to load newly completed asynchronous results. Filters
+and pagination continue to load their requested data.

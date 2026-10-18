@@ -2060,6 +2060,7 @@ export default {
           no_categories: "\u672a\u9009\u62e9\u68c0\u6d4b\u7c7b\u522b",
           policy_changed: "\u5ba1\u6838\u8fc7\u7a0b\u4e2d\u68c0\u6d4b\u89c4\u5219\u5df2\u53d8\u66f4",
           no_new_user_text: "没有新的用户文本",
+          trusted_user: "可信用户免审核",
           group_disabled: "分组审核已关闭",
           processing_failed: "审核处理失败",
           queue_full: "审核队列已满",

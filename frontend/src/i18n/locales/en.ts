@@ -1975,6 +1975,7 @@ export default {
           no_categories: "No detection categories selected",
           policy_changed: "Detection rules changed during review",
           no_new_user_text: "No new user text",
+          trusted_user: "Trusted user exempt from moderation",
           group_disabled: "Group moderation disabled",
           processing_failed: "Moderation processing failed",
           queue_full: "Moderation queue full",

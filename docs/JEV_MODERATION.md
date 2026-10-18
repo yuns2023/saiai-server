@@ -37,7 +37,7 @@ The strike state is user-global across groups. Admin risk reset/unblock controls
 remain the existing ones. Warnings are audit/UI actions, not email or Slack.
 
 The admin usage API exposes matching category scores, the decision-time threshold,
-action, and strike-count flag. The table renders categories, scores, action and whether the incident counted;
+action, and strike-count flag. The table shows compact status and hit labels, with scores and actions in click-open details;
 new result metadata also exposes passed/skipped/failed/pending states and the evaluated threshold.
 The local request/source/turn reference is stored atomically in the usage row,
 including batched, best-effort and retry insert paths. Classification and usage
@@ -47,8 +47,7 @@ no separate link table or orphan-link cleanup job. A failed usage write follows
 the existing usage retry behavior without making billing depend on moderation.
 An enrichment query has a one-second deadline; failure clears partial labels
 and returns the usage page with explicit unavailable metadata.
-The admin
-usage page refreshes its list every 30 seconds while visible. Absence of a hit is
+The admin usage page refreshes on demand rather than polling. Absence of a hit is
 not represented as a successful safety check. Failed forwarding requests without
 a usage row can still have moderation events. Raw text is never written to the
 event or link tables. Existing encrypted queue retention behavior is unchanged.

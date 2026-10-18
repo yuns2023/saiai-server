@@ -150,6 +150,9 @@ func newInputModerationServiceForTest(
 	users UserRepository,
 	invalidator APIKeyAuthCacheInvalidator,
 ) *InputModerationService {
+	if users == nil {
+		users = &inputModerationUserRepoStub{user: &User{ID: 1, Status: StatusActive}}
+	}
 	cfg := &config.Config{}
 	cfg.Gateway.InputModeration.Engine = "qwen"
 	cfg.Gateway.InputModeration.Endpoint = "http://sidecar.test/v1/classify"

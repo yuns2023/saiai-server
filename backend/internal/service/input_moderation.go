@@ -401,6 +401,18 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		return nil
 	}
 
+	// Read administrator-managed trust from the repository, not a queued/auth snapshot.
+	user, err := s.userService.GetByID(classifyCtx, task.UserID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return fmt.Errorf("moderation user unavailable")
+	}
+	if user.IsTrusted {
+		return s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "trusted_user"})
+	}
+
 	submittedPolicy := EffectiveInputModerationPolicy(group)
 	if err := ValidateInputModerationPolicy(submittedPolicy); err != nil {
 		return err
@@ -453,6 +465,18 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 	if group == nil || !group.InputModerationEnabled {
 		_ = s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "group_disabled"})
 		return nil
+	}
+
+	// A user promoted while inference was in flight must not receive a new penalty.
+	user, err = s.userService.GetByID(actionCtx, task.UserID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return fmt.Errorf("moderation user unavailable")
+	}
+	if user.IsTrusted {
+		return s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "trusted_user"})
 	}
 
 	policy := EffectiveInputModerationPolicy(group)
