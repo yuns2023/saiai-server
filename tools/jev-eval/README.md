@@ -22,3 +22,15 @@ retries. No such requests are authorized or implemented by this tool. Before a
 real run, present the final reviewed dataset, exact call budget, token/price-based
 cost estimate and version hashes for approval. No monetary estimate is claimed
 from character counts, and zero model calls have been made for this draft.
+
+## Boundary candidate and review
+
+`python3 tools/jev-eval/validate.py --suite` checks the original 76 samples plus
+32 proposed boundary samples, for 108 examples / 54 bilingual scenario families.
+It rejects shared IDs, family IDs and normalized text across splits, inconsistent
+translation labels and duplicated labels. Semantic independence is not automated.
+`suite-manifest.json` records both datasets' hashes. All samples remain unreviewed;
+qualified independent holdout count and model call count remain zero.
+
+See [REVIEW.md](REVIEW.md) for the author-side review, independent annotation
+procedure and proposed execution/reporting contract. No model runner is included.
