@@ -171,11 +171,11 @@
             </button>
           </template>
           <template #cell-name="{ row, value }">
-            <div class="flex flex-col">
+            <div class="flex w-64 flex-col whitespace-normal [overflow-wrap:anywhere]">
               <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
               <span
                 v-if="row.extra?.email_address"
-                class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
+                class="text-xs text-gray-500 dark:text-gray-400"
                 :title="row.extra.email_address"
               >
                 {{ row.extra.email_address }}
@@ -216,7 +216,7 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCell :groups="row.groups" :max-display="4" />
+            <AccountGroupsCell :groups="row.groups" show-all />
           </template>
           <template #cell-usage="{ row }">
             <AccountUsageCell
@@ -933,11 +933,17 @@ const toggleableColumns = computed(() =>
   allColumns.value.filter(col => col.key !== 'select' && col.key !== 'id' && col.key !== 'name' && col.key !== 'actions')
 )
 
+const columnWidths: Record<string, string> = {
+  select: 'w-12', id: 'w-20', name: 'w-72', platform_type: 'w-44',
+  capacity: 'w-24', status: 'w-40', schedulable: 'w-20',
+  today_stats: 'min-w-40', groups: 'min-w-80', usage: 'min-w-60'
+}
+
 // Filtered columns based on visibility
 const cols = computed(() =>
   allColumns.value.filter(col =>
     col.key === 'select' || col.key === 'id' || col.key === 'name' || col.key === 'actions' || !hiddenColumns.has(col.key)
-  )
+  ).map(col => ({ ...col, class: columnWidths[col.key] || '' }))
 )
 
 const copyAccountId = async (id: number) => {

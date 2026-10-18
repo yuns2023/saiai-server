@@ -6,11 +6,12 @@
       <div class="space-y-4">
         <div class="card p-4">
           <div class="flex flex-wrap items-center gap-4">
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
-              <DateRangePicker
-                v-model:start-date="startDate"
-                v-model:end-date="endDate"
+              <DateTimeRangePicker
+                :start-time="rollingStartTime"
+                :end-time="rollingEndTime"
+                :preset="activeRangePreset"
                 @change="onDateRangeChange"
               />
               <span v-if="selectedRangeDetail" class="text-xs text-gray-500 dark:text-gray-400">
@@ -140,7 +141,8 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffort, getEffectiveReasoningEffort } from '@/utils/format'
 import { escapeCsvCell } from '@/utils/csv'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
-import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
+import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateTimeRangePicker from '@/components/common/DateTimeRangePicker.vue'
+import { localDateTime, presetTimeRange, type DateTimeRange } from '@/utils/dateTimeRange'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
@@ -218,10 +220,10 @@ const getLast24HoursRangeDates = (): { start: string; end: string } => {
     end: formatLD(end)
   }
 }
-const createRolling24HourRange = (end = new Date()): { start: string; end: string } => ({
-  start: new Date(end.getTime() - 24 * 60 * 60 * 1000).toISOString(),
-  end: end.toISOString()
-})
+const createRolling24HourRange = (end = new Date()): { start: string; end: string } => {
+  const range = presetTimeRange('last24Hours', end)
+  return { start: range.startTime, end: range.endTime }
+}
 const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
   const startTime = new Date(`${start}T00:00:00`).getTime()
   const endTime = new Date(`${end}T00:00:00`).getTime()
@@ -232,6 +234,7 @@ const defaultRange = getLast24HoursRangeDates()
 const defaultRollingRange = createRolling24HourRange()
 const startDate = ref(defaultRange.start); const endDate = ref(defaultRange.end)
 const activeRangePreset = ref<string | null>('last24Hours')
+const exactRange = ref(true)
 const rollingStartTime = ref(defaultRollingRange.start)
 const rollingEndTime = ref(defaultRollingRange.end)
 const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, session_id: undefined, request_type: undefined, billing_type: null, account_switch: undefined, start_time: rollingStartTime.value, end_time: rollingEndTime.value })
@@ -259,7 +262,7 @@ const refreshRollingRange = () => {
 }
 
 const activeRangeParams = (): Pick<AdminUsageQueryParams, 'start_date' | 'end_date' | 'start_time' | 'end_time'> => {
-  if (activeRangePreset.value === 'last24Hours') {
+  if (exactRange.value) {
     return {
       start_date: undefined,
       end_date: undefined,
@@ -276,7 +279,6 @@ const activeRangeParams = (): Pick<AdminUsageQueryParams, 'start_date' | 'end_da
 }
 
 const selectedRangeDetail = computed(() => {
-  if (activeRangePreset.value !== 'last24Hours') return ''
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const formatter = new Intl.DateTimeFormat(undefined, {
     month: '2-digit',
@@ -318,9 +320,17 @@ const applyRouteQueryFilters = () => {
   if (queryStartTime && queryEndTime) {
     rollingStartTime.value = queryStartTime
     rollingEndTime.value = queryEndTime
-    activeRangePreset.value = 'last24Hours'
+    activeRangePreset.value = null
+    exactRange.value = true
+    startDate.value = localDateTime(new Date(queryStartTime)).slice(0, 10)
+    endDate.value = localDateTime(new Date(queryEndTime)).slice(0, 10)
   } else if (queryStartDate || queryEndDate) {
     activeRangePreset.value = null
+    exactRange.value = false
+    rollingStartTime.value = new Date(`${startDate.value}T00:00:00`).toISOString()
+    const end = new Date(`${endDate.value}T00:00:00`)
+    end.setDate(end.getDate() + 1)
+    rollingEndTime.value = end.toISOString()
   }
 
   filters.value = {
@@ -332,18 +342,20 @@ const applyRouteQueryFilters = () => {
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
 }
 
-const onDateRangeChange = (range: { startDate: string; endDate: string; preset: string | null }) => {
-  startDate.value = range.startDate
-  endDate.value = range.endDate
+const onDateRangeChange = (range: DateTimeRange) => {
+  startDate.value = localDateTime(new Date(range.startTime)).slice(0, 10)
+  endDate.value = localDateTime(new Date(range.endTime)).slice(0, 10)
   activeRangePreset.value = range.preset
-  if (range.preset === 'last24Hours') {
-    refreshRollingRange()
-  }
-  filters.value = {
-    ...filters.value,
-    ...activeRangeParams()
-  }
-  granularity.value = getGranularityForRange(range.startDate, range.endDate)
+  // Preserve calendar-day cleanup for complete natural-day selections.
+  const start = new Date(range.startTime)
+  const end = new Date(range.endTime)
+  const midnight = (date: Date) => date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0
+  exactRange.value = range.preset === 'last24Hours' || !midnight(start) || !midnight(end)
+  if (!exactRange.value) endDate.value = localDateTime(new Date(end.getTime() - 1)).slice(0, 10)
+  rollingStartTime.value = range.startTime
+  rollingEndTime.value = range.endTime
+  filters.value = { ...filters.value, ...activeRangeParams() }
+  granularity.value = new Date(range.endTime).getTime() - new Date(range.startTime).getTime() <= 86400000 ? 'hour' : 'day'
   applyFilters()
 }
 
@@ -495,6 +507,7 @@ const refreshData = () => {
   loadChartData()
 }
 const resetFilters = () => {
+  exactRange.value = true
   const range = getLast24HoursRangeDates()
   startDate.value = range.start
   endDate.value = range.end

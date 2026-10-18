@@ -320,9 +320,9 @@ export async function refreshCredentials(id: number): Promise<Account> {
  * @param days - Number of days (default: 30)
  * @returns Account usage statistics with history, summary, and models
  */
-export async function getStats(id: number, days: number = 30): Promise<AccountUsageStatsResponse> {
+export async function getStats(id: number, range: number | { start_time: string; end_time: string; timezone: string } = 30): Promise<AccountUsageStatsResponse> {
   const { data } = await apiClient.get<AccountUsageStatsResponse>(`/admin/accounts/${id}/stats`, {
-    params: { days }
+    params: typeof range === 'number' ? { days: range } : range
   })
   return data
 }

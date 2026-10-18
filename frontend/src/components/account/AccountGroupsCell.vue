@@ -1,7 +1,7 @@
 <template>
-  <div v-if="groups && groups.length > 0" class="relative max-w-56">
+  <div v-if="groups && groups.length > 0" :class="showAll ? 'relative w-72 max-w-full' : 'relative max-w-56'">
     <!-- 分组容器：固定最大宽度，最多显示2行 -->
-    <div class="flex flex-wrap gap-1 max-h-14 overflow-hidden">
+    <div :class="['flex flex-wrap gap-1', !showAll && 'max-h-14 overflow-hidden']">
       <GroupBadge
         v-for="group in displayGroups"
         :key="group.id"
@@ -10,7 +10,8 @@
         :subscription-type="group.subscription_type"
         :rate-multiplier="group.rate_multiplier"
         :show-rate="false"
-        class="max-w-24"
+        :wrap-name="showAll"
+        :class="showAll ? 'max-w-full' : 'max-w-24'"
       />
       <!-- 更多数量徽章 -->
       <button
@@ -86,6 +87,7 @@ import type { Group } from '@/types'
 interface Props {
   groups: Group[] | null | undefined
   maxDisplay?: number
+  showAll?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -101,7 +103,7 @@ const showPopover = ref(false)
 // 显示的分组（最多显示 maxDisplay 个）
 const displayGroups = computed(() => {
   if (!props.groups) return []
-  if (props.groups.length <= props.maxDisplay) {
+  if (props.showAll || props.groups.length <= props.maxDisplay) {
     return props.groups
   }
   // 留一个位置给 +N 按钮
@@ -111,7 +113,7 @@ const displayGroups = computed(() => {
 // 隐藏的数量
 const hiddenCount = computed(() => {
   if (!props.groups) return 0
-  if (props.groups.length <= props.maxDisplay) return 0
+  if (props.showAll || props.groups.length <= props.maxDisplay) return 0
   return props.groups.length - (props.maxDisplay - 1)
 })
 

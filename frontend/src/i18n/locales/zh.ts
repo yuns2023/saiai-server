@@ -1078,6 +1078,12 @@ export default {
 
   // Dates
   dates: {
+    startTime: '开始时间',
+    endTime: '结束时间',
+    endExclusive: '结束时间不包含在范围内',
+    invalidTimeRange: '开始时间必须早于结束时间',
+    maxRangeDays: '时间范围不能超过 {days} 天',
+
     today: '今天',
     yesterday: '昨天',
     thisWeek: '本周',
@@ -3208,18 +3214,19 @@ export default {
       // Stats Modal
       viewStats: '查看统计',
       usageStatistics: '使用统计',
+      rangeUsage: '所选范围使用统计（日均基于实际活跃天数）',
       last30DaysUsage: '近30天使用统计（日均基于实际使用天数）',
       stats: {
-        totalCost: '30天总费用',
+        totalCost: '范围内总费用',
         accumulatedCost: '累计成本',
         standardCost: '标准计费',
-        totalRequests: '30天总请求',
+        totalRequests: '范围内总请求',
         totalCalls: '累计调用次数',
         avgDailyCost: '日均费用',
         basedOnActualDays: '基于 {days} 天实际使用',
         avgDailyRequests: '日均请求',
-        avgDailyUsage: '平均每日调用',
-        todayOverview: '今日概览',
+        avgDailyUsage: '按实际活跃天数计算',
+        todayOverview: '所选范围内的今日概览',
         cost: '费用',
         requests: '请求',
         tokens: 'Token',
@@ -3227,8 +3234,8 @@ export default {
         highestRequestDay: '最高请求日',
         date: '日期',
         accumulatedTokens: '累计 Token',
-        totalTokens: '30天总计',
-        dailyAvgTokens: '日均 Token',
+        totalTokens: '范围内总计',
+        dailyAvgTokens: '日均 Token（活跃日）',
         performance: '性能',
         avgResponseTime: '平均响应',
         daysActive: '活跃天数',
@@ -3236,7 +3243,7 @@ export default {
         todayRequests: '今日请求',
         todayTokens: '今日 Token',
         todayCost: '今日费用',
-        usageTrend: '30天费用与请求趋势',
+        usageTrend: '费用与请求趋势',
         noData: '该账号暂无使用数据'
       }
     },

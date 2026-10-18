@@ -20,7 +20,7 @@
           <div>
             <div class="font-semibold text-gray-900 dark:text-gray-100">{{ account.name }}</div>
             <div class="text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.last30DaysUsage') }}
+              {{ t('admin.accounts.rangeUsage') }}
             </div>
           </div>
         </div>
@@ -34,6 +34,11 @@
         >
           {{ account.status }}
         </span>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <DateTimeRangePicker :start-time="range.startTime" :end-time="range.endTime" :preset="range.preset" :max-days="90" @change="changeRange" />
+        <span class="text-xs text-gray-500">{{ rangeLabel }} · {{ statsTimezone }}</span>
       </div>
 
       <!-- Loading State -->
@@ -286,7 +291,7 @@
         </div>
 
         <!-- Row 3: Token Stats -->
-        <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <!-- Accumulated Tokens -->
           <div class="card p-4">
             <div class="mb-3 flex items-center gap-2">
@@ -343,45 +348,7 @@
             </div>
           </div>
 
-          <!-- Recent Activity -->
-          <div class="card p-4">
-            <div class="mb-3 flex items-center gap-2">
-              <div class="rounded-lg bg-lime-100 p-1.5 dark:bg-lime-900/30">
-                <Icon
-                  name="clipboard"
-                  size="sm"
-                  class="text-lime-600 dark:text-lime-400"
-                />
-              </div>
-              <span class="text-sm font-semibold text-gray-900 dark:text-white">{{
-                t('admin.accounts.stats.recentActivity')
-              }}</span>
-            </div>
-            <div class="space-y-2">
-              <div class="flex items-center justify-between">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{
-                  t('admin.accounts.stats.todayRequests')
-                }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white">{{
-                  formatNumber(stats.summary.today?.requests || 0)
-                }}</span>
-              </div>
-              <div class="flex items-center justify-between">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{
-                  t('admin.accounts.stats.todayTokens')
-                }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white"><TokenCount :value="stats.summary.today?.tokens || 0" /></span>
-              </div>
-              <div class="flex items-center justify-between">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{
-                  t('admin.accounts.stats.todayCost')
-                }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white"
-                  >${{ formatCost(stats.summary.today?.cost || 0) }}</span
-                >
-              </div>
-            </div>
-          </div>
+
         </div>
 
         <!-- Usage Trend Chart -->
@@ -461,6 +428,8 @@ import ModelDistributionChart from '@/components/charts/ModelDistributionChart.v
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { adminAPI } from '@/api/admin'
+import DateTimeRangePicker from '@/components/common/DateTimeRangePicker.vue'
+import { presetTimeRange, type DateTimeRange } from '@/utils/dateTimeRange'
 import type { Account, AccountUsageStatsResponse } from '@/types'
 
 ChartJS.register(
@@ -487,6 +456,14 @@ const emit = defineEmits<{
 
 const loading = ref(false)
 const stats = ref<AccountUsageStatsResponse | null>(null)
+const range = ref(presetTimeRange('30days'))
+const statsTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+const rangeLabel = computed(() => {
+  const fmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+  return `${fmt.format(new Date(range.value.startTime))} – ${fmt.format(new Date(range.value.endTime))}`
+})
+const changeRange = (value: DateTimeRange) => { range.value = value; void loadStats() }
+let requestSeq = 0
 
 // Dark mode detection
 const isDarkMode = computed(() => {
@@ -637,11 +614,13 @@ const lineChartOptions = computed(() => ({
 
 // Load stats when modal opens
 watch(
-  () => props.show,
-  async (newVal) => {
-    if (newVal && props.account) {
+  () => [props.show, props.account?.id] as const,
+  async ([show]) => {
+    if (show && props.account) {
+      range.value = presetTimeRange('30days')
       await loadStats()
     } else {
+      requestSeq++
       stats.value = null
     }
   }
@@ -650,14 +629,16 @@ watch(
 const loadStats = async () => {
   if (!props.account) return
 
+  const seq = ++requestSeq
   loading.value = true
   try {
-    stats.value = await adminAPI.accounts.getStats(props.account.id, 30)
+    const result = await adminAPI.accounts.getStats(props.account.id, { start_time: range.value.startTime, end_time: range.value.endTime, timezone: statsTimezone })
+    if (seq === requestSeq) stats.value = result
   } catch (error) {
     console.error('Failed to load account stats:', error)
-    stats.value = null
+    if (seq === requestSeq) stats.value = null
   } finally {
-    loading.value = false
+    if (seq === requestSeq) loading.value = false
   }
 }
 

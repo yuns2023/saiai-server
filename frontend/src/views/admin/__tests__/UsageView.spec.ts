@@ -167,7 +167,7 @@ describe('admin UsageView distribution metric toggles', () => {
           UserBalanceHistoryModal: true,
           Pagination: true,
           Select: true,
-          DateRangePicker: true,
+          DateTimeRangePicker: true,
           Icon: true,
           TokenUsageTrend: true,
           ModelDistributionChart: ModelDistributionChartStub,
@@ -225,7 +225,7 @@ describe('admin UsageView distribution metric toggles', () => {
           UserBalanceHistoryModal: true,
           Pagination: true,
           Select: true,
-          DateRangePicker: true,
+          DateTimeRangePicker: true,
           Icon: true,
           TokenUsageTrend: true,
           ModelDistributionChart: ModelDistributionChartStub,
@@ -251,4 +251,46 @@ describe('admin UsageView distribution metric toggles', () => {
       }))
     }
   })
+  it('sends a custom minute range consistently to logs, totals, models and trends', async () => {
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: true,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateTimeRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+        },
+      },
+    })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const range = { startTime: '2026-10-17T10:30:00Z', endTime: '2026-10-17T11:45:00Z', preset: null }
+    wrapper.findComponent({ name: 'DateTimeRangePicker' }).vm.$emit('change', range)
+    await flushPromises()
+    const expected = expect.objectContaining({ start_time: range.startTime, end_time: range.endTime, start_date: undefined, end_date: undefined })
+    expect(list.mock.calls.at(-1)![0]).toEqual(expected)
+    expect(getStats).toHaveBeenLastCalledWith(expected)
+    expect(getModelStats).toHaveBeenLastCalledWith(expected)
+    expect(getSnapshotV2).toHaveBeenLastCalledWith(expected)
+    expect(getSnapshotV2.mock.calls.at(-1)![0].granularity).toBe('hour')
+    wrapper.findComponent({ name: 'DateTimeRangePicker' }).vm.$emit('change', {
+      startTime: new Date(2026, 9, 17).toISOString(), endTime: new Date(2026, 9, 18).toISOString(), preset: 'yesterday'
+    })
+    await flushPromises()
+    expect(list.mock.calls.at(-1)![0]).toEqual(expect.objectContaining({
+      start_date: '2026-10-17', end_date: '2026-10-17', start_time: undefined, end_time: undefined
+    }))
+    wrapper.unmount()
+  })
+
 })

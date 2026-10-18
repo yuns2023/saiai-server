@@ -8,7 +8,7 @@
     <!-- Platform logo -->
     <PlatformIcon v-if="platform" :platform="platform" size="sm" />
     <!-- Group name -->
-    <span class="truncate">{{ name }}</span>
+    <span :class="wrapName ? 'whitespace-normal break-words [overflow-wrap:anywhere]' : 'truncate'">{{ name }}</span>
     <!-- Right side label -->
     <span v-if="showLabel" :class="labelClass">
       <template v-if="hasCustomRate">
@@ -30,6 +30,7 @@ import type { SubscriptionType, GroupPlatform } from '@/types'
 import PlatformIcon from './PlatformIcon.vue'
 
 interface Props {
+  wrapName?: boolean
   name: string
   platform?: GroupPlatform
   subscriptionType?: SubscriptionType

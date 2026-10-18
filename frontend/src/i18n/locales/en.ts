@@ -1075,6 +1075,12 @@ export default {
 
   // Dates
   dates: {
+    startTime: 'Start time',
+    endTime: 'End time',
+    endExclusive: 'End time is exclusive',
+    invalidTimeRange: 'Start time must be before end time',
+    maxRangeDays: 'Range cannot exceed {days} days',
+
     today: 'Today',
     yesterday: 'Yesterday',
     thisWeek: 'This Week',
@@ -3082,18 +3088,19 @@ export default {
       // Stats Modal
       viewStats: 'View Stats',
       usageStatistics: 'Usage Statistics',
+      rangeUsage: 'Selected range statistics (daily averages use active days)',
       last30DaysUsage: 'Last 30 days usage statistics (based on actual usage days)',
       stats: {
-        totalCost: '30-Day Total Cost',
+        totalCost: 'Range Total Cost',
         accumulatedCost: 'Accumulated cost',
         standardCost: 'Standard',
-        totalRequests: '30-Day Total Requests',
+        totalRequests: 'Range Total Requests',
         totalCalls: 'Total API calls',
         avgDailyCost: 'Daily Avg Cost',
         basedOnActualDays: 'Based on {days} actual usage days',
         avgDailyRequests: 'Daily Avg Requests',
         avgDailyUsage: 'Average daily usage',
-        todayOverview: 'Today Overview',
+        todayOverview: 'Today within selected range',
         cost: 'Cost',
         requests: 'Requests',
         tokens: 'Tokens',
@@ -3101,7 +3108,7 @@ export default {
         highestRequestDay: 'Highest Request Day',
         date: 'Date',
         accumulatedTokens: 'Accumulated Tokens',
-        totalTokens: '30-Day Total',
+        totalTokens: 'Range Total',
         dailyAvgTokens: 'Daily Average',
         performance: 'Performance',
         avgResponseTime: 'Avg Response',
@@ -3110,7 +3117,7 @@ export default {
         todayRequests: 'Today Requests',
         todayTokens: 'Today Tokens',
         todayCost: 'Today Cost',
-        usageTrend: '30-Day Cost & Request Trend',
+        usageTrend: 'Cost & Request Trend',
         noData: 'No usage data available for this account'
       },
       usageWindow: {

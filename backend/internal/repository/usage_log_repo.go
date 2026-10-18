@@ -3762,14 +3762,12 @@ func (r *usageLogRepository) GetUpstreamEndpointStatsWithFilters(ctx context.Con
 
 // GetAccountUsageStats returns comprehensive usage statistics for an account over a time range
 func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID int64, startTime, endTime time.Time) (resp *AccountUsageStatsResponse, err error) {
-	daysCount := int(endTime.Sub(startTime).Hours()/24) + 1
-	if daysCount <= 0 {
-		daysCount = 30
-	}
+	// Count calendar days touched by [start, end), including partial days.
+	daysCount := accountStatsCalendarDays(startTime, endTime)
 
 	query := `
 		SELECT
-			TO_CHAR(created_at, 'YYYY-MM-DD') as date,
+			TO_CHAR(created_at AT TIME ZONE $4, 'YYYY-MM-DD') as date,
 			COUNT(*) as requests,
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
@@ -3781,7 +3779,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		ORDER BY date ASC
 	`
 
-	rows, err := r.sql.QueryContext(ctx, query, accountID, startTime, endTime)
+	rows, err := r.sql.QueryContext(ctx, query, accountID, startTime, endTime, startTime.Location().String())
 	if err != nil {
 		return nil, err
 	}
@@ -3841,9 +3839,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 	}
 
 	actualDaysUsed := len(history)
-	if actualDaysUsed == 0 {
-		actualDaysUsed = 1
-	}
+	divisor := max(actualDaysUsed, 1)
 
 	avgQuery := "SELECT COALESCE(AVG(duration_ms), 0) as avg_duration_ms FROM usage_logs WHERE account_id = $1 AND created_at >= $2 AND created_at < $3"
 	var avgDuration float64
@@ -3859,14 +3855,14 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		TotalStandardCost: totalStandardCost,
 		TotalRequests:     totalRequests,
 		TotalTokens:       totalTokens,
-		AvgDailyCost:      totalAccountCost / float64(actualDaysUsed),
-		AvgDailyUserCost:  totalUserCost / float64(actualDaysUsed),
-		AvgDailyRequests:  float64(totalRequests) / float64(actualDaysUsed),
-		AvgDailyTokens:    float64(totalTokens) / float64(actualDaysUsed),
+		AvgDailyCost:      totalAccountCost / float64(divisor),
+		AvgDailyUserCost:  totalUserCost / float64(divisor),
+		AvgDailyRequests:  float64(totalRequests) / float64(divisor),
+		AvgDailyTokens:    float64(totalTokens) / float64(divisor),
 		AvgDurationMs:     avgDuration,
 	}
 
-	todayStr := timezone.Now().Format("2006-01-02")
+	todayStr := time.Now().In(startTime.Location()).Format("2006-01-02")
 	for i := range history {
 		if history[i].Date == todayStr {
 			summary.Today = &struct {
@@ -4992,4 +4988,19 @@ func (r *usageLogRepository) ListRecentPricingModels(ctx context.Context) ([]str
 		models = append(models, model)
 	}
 	return models, rows.Err()
+}
+
+// accountStatsCalendarDays respects DST and the exclusive upper bound.
+func accountStatsCalendarDays(start, end time.Time) int {
+	if !start.Before(end) {
+		return 0
+	}
+	loc := start.Location()
+	day := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, loc)
+	days := 0
+	for day.Before(end) {
+		days++
+		day = day.AddDate(0, 0, 1)
+	}
+	return days
 }
