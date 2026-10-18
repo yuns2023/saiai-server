@@ -17,11 +17,12 @@ freezing a candidate. Keep calibration and holdout families disjoint; the earlie
 The manifest identifies the exact rules and fixture bytes; changes require a new
 manifest and invalidate comparisons to prior frozen candidates.
 
-A future single pass over this draft would require 76 requests with zero automatic
-retries. No such requests are authorized or implemented by this tool. Before a
-real run, present the final reviewed dataset, exact call budget, token/price-based
-cost estimate and version hashes for approval. No monetary estimate is claimed
-from character counts, and zero model calls have been made for this draft.
+The original 76-example draft requires 76 requests for a single pass; the combined
+suite requires 108. The preparation tool itself sends none. Before any new real
+run, present the exact dataset, call budget, token/price-based cost estimate and
+version hashes for approval. No monetary estimate is claimed
+from character counts, and no calls are made by the preparation tool. A later explicitly authorized
+108-call exploratory run is recorded in [RESULTS_20261018.md](RESULTS_20261018.md).
 
 ## Boundary candidate and review
 
@@ -30,7 +31,8 @@ from character counts, and zero model calls have been made for this draft.
 It rejects shared IDs, family IDs and normalized text across splits, inconsistent
 translation labels and duplicated labels. Semantic independence is not automated.
 `suite-manifest.json` records both datasets' hashes. All samples remain unreviewed;
-qualified independent holdout count and model call count remain zero.
+qualified independent holdout count remains zero. The validator itself makes zero
+model calls; that field is not a historical count of separately authorized runs.
 
 See [REVIEW.md](REVIEW.md) for the author-side review, independent annotation
 procedure and proposed execution/reporting contract. No model runner is included.

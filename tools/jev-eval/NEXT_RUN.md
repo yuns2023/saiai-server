@@ -1,4 +1,4 @@
-# Proposed expanded Jev evaluation — not authorized
+# Expanded Jev evaluation — one approved run completed
 
 ## Concrete scope
 
@@ -16,9 +16,12 @@
 
 The blind annotation packet generator and offline validation are implemented.
 An explicit-opt-in network runner and offline result reporter are implemented.
-Fourteen offline/mock tests pass. No live request has been made.
+Fourteen offline/mock tests passed before execution. One specifically approved
+108-call batch has now completed; see [results](RESULTS_20261018.md). Its approval
+is consumed and cannot be reused.
 Price/byte illustration and its limitations are documented in README.md.
-Actual tokenizer-based cost and an enforced monetary cap remain unconfirmed.
+The completed run returned full input-token usage and a usage-based cost estimate.
+There is still no enforced monetary cap; see the results for accounting limits.
 
 A coordinator must obtain reviewer annotations, document author independence,
 reconcile disagreements and inspect semantic family overlap before calling any
@@ -31,8 +34,8 @@ validates model/scores and writes only redacted failures. It records reported in
 tokens when available and otherwise marks usage incomplete. It does not enforce
 a monetary cap; an absent usage field is never treated as zero cost. Present the
 final dataset/runner hashes and the available budget controls for specific user
-authorization. The current broad request to continue preparation is not approval
-for paid calls. Previously consumed model-call approvals are not reusable.
+authorization. Any further run needs new specific authorization. Previously consumed
+model-call approvals are not reusable.
 
 Report per-category and protected-context results, unknown labels, request
 failures, coverage, latency and reported usage. Flag incomplete usage/cost instead
