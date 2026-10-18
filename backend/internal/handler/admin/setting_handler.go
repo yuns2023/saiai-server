@@ -86,6 +86,7 @@ func generateMenuItemID() (string, error) {
 
 // SettingHandler 系统设置处理器
 type SettingHandler struct {
+	jevSettings         *service.JevSettingsService
 	pricingUsageReader  service.ModelPricingUsageReader
 	pricingRecentMu     sync.Mutex
 	pricingRecentAt     time.Time

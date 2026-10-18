@@ -1208,6 +1208,7 @@ export interface UsagePricingSnapshot {
 
 export interface AdminUsageLog extends UsageLog {
  moderation_unavailable?: boolean
+ moderation_result?: { status: 'pending' | 'passed' | 'flagged' | 'skipped' | 'failed'; reason?: string; scores?: Record<string, number>; min_confidence: number; model_version?: string; updated_at: string }
  moderation_events?: Array<{ categories: string[]; scores: Record<string, number> | null; min_confidence: number | null; action: string; counted_as_strike: boolean; model_version: string }>
   pricing_snapshot?: UsagePricingSnapshot | null
   // 账号计费倍率（仅管理员可见）

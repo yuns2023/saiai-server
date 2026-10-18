@@ -73,11 +73,13 @@ func ProvideAdminSettingHandler(
 	pricingService *service.PricingService,
 	billingService *service.BillingService,
 	usageRepo service.UsageLogRepository,
+	jevSettings *service.JevSettingsService,
 ) *admin.SettingHandler {
 	handler := admin.NewSettingHandler(settingService, emailService, turnstileService, opsService)
 	handler.SetPricingService(pricingService)
 	handler.SetBillingService(billingService)
 	handler.SetPricingUsageReader(usageRepo)
+	handler.SetJevSettingsService(jevSettings)
 	return handler
 }
 

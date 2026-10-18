@@ -97,6 +97,7 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 type UsageLog struct {
 	ModerationRef         *InputModerationUsageRef
 	ModerationEvents      []UsageModerationEvent
+	ModerationResult      *InputModerationResult
 	ModerationUnavailable bool
 	ID                    int64
 	UserID                int64

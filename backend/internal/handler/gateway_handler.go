@@ -466,9 +466,6 @@ func (h *GatewayHandler) submitInputModeration(c *gin.Context, apiKey *service.A
 		return
 	}
 	text := service.ExtractLatestRealUserText(parsed)
-	if text == "" {
-		return
-	}
 	requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
 	deviceRef := ""
 	if parsed != nil {

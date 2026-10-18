@@ -2034,10 +2034,25 @@ export default {
         environmentModeRemove: '删除'
       },
       inputModeration: {
+        statuses: {
+          pending: "审核中",
+          passed: "审核通过",
+          flagged: "命中风险",
+          skipped: "无需审核",
+          failed: "审核失败",
+        },
+        reasons: {
+          no_new_user_text: "没有新的用户文本",
+          group_disabled: "分组审核已关闭",
+          processing_failed: "审核处理失败",
+          queue_full: "审核队列已满",
+          expired: "审核任务已过期",
+        },
+        resultThreshold: "\u98ce\u9669\u9608\u503c",
  usageColumn: '输入检测',
- noHit: '暂无审核结果',
+        noHit: '未记录审核状态',
  unavailable: '审核信息暂不可用',
-        asyncHint: '异步检测；无记录不代表已通过检测',
+        asyncHint: '旧记录或未启用审核的请求可能没有状态，不能据此判断审核是否通过。',
  actions: { warning: '告警', cooldown: '临时冷却', auto_disabled: '已停用', audit: '仅记录', duplicate_ignored: '重复未计次', category_not_selected: '分类未选中', ignored_admin: '管理员豁免', already_inactive: '用户已停用', stale_user_state: '状态已重置' },
  counted: '已计次',
 
@@ -4653,6 +4668,25 @@ export default {
     // Settings
     settings: {
       title: '系统设置',
+      jev: {
+        title: "Jev 输入审核",
+        description: "配置审核服务后，在需要审核的分组中开启输入审核。保存后对后续审核任务生效。",
+        endpoint: "服务 URL",
+        key: "API Key",
+        configured: "已配置 Key",
+        notConfigured: "尚未配置 Key",
+        keyHint: "Key 加密保存且不会回显。留空保留原 Key；更改 URL 时须重新填写 Key 或明确清除。",
+        clearKey: "清除 Key（后续审核将失败，直到重新配置）",
+        envSource: "当前使用环境配置。",
+        adminSource: "当前使用后台配置。",
+        encryptionRequired: "服务端尚未配置固定加密密钥，暂时无法保存。",
+        save: "保存审核配置",
+        saved: "审核配置已保存",
+        loadFailed: "无法加载审核配置",
+        saveFailed: "保存失败，请检查 URL、Key 和服务端配置",
+        retry: "重试",
+        endpointKeyRequired: "更改 URL 时，请重新填写 Key 或勾选清除 Key",
+      },
       chatgptBilling: {
         instant: '即时',
         medium: '中',
