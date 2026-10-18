@@ -1961,6 +1961,15 @@ export default {
         environmentModeRemove: 'Remove'
       },
       inputModeration: {
+        alertCount: 'Input risk alerts (30 days)',
+        onlyAlerts: 'Only input risk alerts',
+        alertHistory: 'Input risk alert history',
+        alertScope: 'Uses detection completion time and includes alerts without billed usage. This history filters by user and time only; usage records below retain all filters.',
+        detectionTime: 'Detection time',
+        alertIdentity: 'User / request / turn',
+        loadAlertsFailed: 'Failed to load risk alerts',
+        noAlerts: 'No input risk alerts in this range',
+
         highestRisk: 'Highest risk score',
         viewDetails: 'Review details',
         policy: {

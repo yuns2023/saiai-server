@@ -80,6 +80,7 @@ export interface CreateUsageCleanupTaskRequest {
 }
 
 export interface AdminUsageQueryParams extends UsageQueryParams {
+  moderation_flagged?: boolean
   user_id?: number
   exact_total?: boolean
   account_switch?: boolean
@@ -119,6 +120,7 @@ export async function getStats(params: {
   stream?: boolean
   billing_type?: number | null
   account_switch?: boolean
+  moderation_flagged?: boolean
   period?: string
   start_date?: string
   end_date?: string

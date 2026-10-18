@@ -26,7 +26,7 @@
             </div>
           </div>
         </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div v-if="!filters.moderation_flagged" class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <ModelDistributionChart
             v-model:source="modelDistributionSource"
             v-model:metric="modelDistributionMetric"
@@ -54,7 +54,7 @@
             :breakdown-filters="breakdownFilters"
           />
         </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div v-if="!filters.moderation_flagged" class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <EndpointDistributionChart
             v-model:source="endpointDistributionSource"
             v-model:metric="endpointDistributionMetric"
@@ -111,6 +111,10 @@
           </div>
         </template>
       </UsageFilters>
+      <InputRiskAlerts v-if="filters.moderation_flagged" :user-id="filters.user_id"
+        :start-time="filters.start_time || new Date(startDate + 'T00:00:00').toISOString()"
+        :end-time="filters.end_time || new Date(new Date(endDate + 'T00:00:00').getTime() + 86400000).toISOString()"
+        :refresh-key="riskRefreshKey" />
       <UsageTable :data="usageLogs" :loading="loading" :columns="visibleColumns" @userClick="handleUserClick" @sessionClick="handleSessionClick" />
       <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
     </div>
@@ -134,6 +138,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import InputRiskAlerts from '@/components/admin/usage/InputRiskAlerts.vue'
+const riskRefreshKey = ref(0)
 import { useI18n } from 'vue-i18n'
 import { saveAs } from 'file-saver'
 import { useRoute } from 'vue-router'
@@ -338,6 +344,7 @@ const applyRouteQueryFilters = () => {
   filters.value = {
     ...filters.value,
     user_id: queryUserId,
+    moderation_flagged: getSingleQueryValue(route.query.moderation_flagged) === 'true' || undefined,
     session_id: querySessionId,
     ...activeRangeParams()
   }
@@ -403,6 +410,7 @@ const resetModelStatsCache = () => {
 }
 
 const loadModelStats = async (source: ModelDistributionSource, force = false) => {
+  if (filters.value.moderation_flagged) return
   if (!force && loadedModelSources[source]) {
     return
   }
@@ -458,6 +466,7 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
 }
 
 const loadChartData = async () => {
+  if (filters.value.moderation_flagged) return
   const seq = ++chartReqSeq
   chartsLoading.value = true
   try {
@@ -498,6 +507,7 @@ const applyFilters = () => {
   loadChartData()
 }
 const refreshData = () => {
+  riskRefreshKey.value++
   if (activeRangePreset.value === 'last24Hours') {
     refreshRollingRange()
     filters.value = { ...filters.value, ...activeRangeParams() }

@@ -2046,6 +2046,15 @@ export default {
         environmentModeRemove: '删除'
       },
       inputModeration: {
+        alertCount: '输入风险告警（近30天）',
+        onlyAlerts: '仅看输入风险告警',
+        alertHistory: '输入风险告警明细',
+        alertScope: '按检测完成时间统计，包含无计费使用记录的告警。此明细仅按用户和时间筛选；下方使用记录保留全部筛选条件。',
+        detectionTime: '检测时间',
+        alertIdentity: '用户 / 请求 / 轮次',
+        loadAlertsFailed: '告警明细加载失败',
+        noAlerts: '当前范围没有输入风险告警',
+
         highestRisk: '最高风险评分',
         viewDetails: '审核详情',
         policy: {

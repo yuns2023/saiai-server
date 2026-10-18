@@ -2820,6 +2820,9 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 		args = append(args, *filters.EndTime)
 	}
 	conditions, args = appendAccountSwitchWhereCondition(conditions, args, "usage_logs", filters)
+	if filters.ModerationFlagged {
+		conditions = append(conditions, flaggedUsagePredicate)
+	}
 
 	whereClause := buildWhere(conditions)
 	var (
@@ -3527,6 +3530,9 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		args = append(args, *filters.EndTime)
 	}
 	conditions, args = appendAccountSwitchWhereCondition(conditions, args, "usage_logs", filters)
+	if filters.ModerationFlagged {
+		conditions = append(conditions, flaggedUsagePredicate)
+	}
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -3568,6 +3574,15 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		stats.TotalAccountCost = &totalAccountCost
 	}
 	stats.TotalTokens = stats.TotalInputTokens + stats.TotalOutputTokens + stats.TotalCacheTokens
+
+	// These distributions do not accept the moderation predicate. Do not return
+	// unfiltered endpoint totals alongside a filtered usage summary.
+	if filters.ModerationFlagged {
+		stats.Endpoints = []EndpointStat{}
+		stats.UpstreamEndpoints = []EndpointStat{}
+		stats.EndpointPaths = []EndpointStat{}
+		return stats, nil
+	}
 
 	start := time.Unix(0, 0).UTC()
 	if filters.StartTime != nil {

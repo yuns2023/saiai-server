@@ -281,3 +281,43 @@ func TestAdminUsageRejectsIncompletePreciseTimeRange(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, rec.Code, path)
 	}
 }
+
+func TestAdminUsageRiskFilter(t *testing.T) {
+	for _, path := range []string{"/admin/usage", "/admin/usage/stats"} {
+		for _, value := range []string{"true", "false", "invalid"} {
+			repo := &adminUsageRepoCapture{}
+			router := newAdminUsageRequestTypeTestRouter(repo)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path+"?user_id=42&moderation_flagged="+value, nil))
+			if value == "invalid" {
+				require.Equal(t, http.StatusBadRequest, rec.Code)
+				continue
+			}
+			require.Equal(t, http.StatusOK, rec.Code)
+			filters := repo.listFilters
+			if path == "/admin/usage/stats" {
+				filters = repo.statsFilters
+			}
+			require.Equal(t, value == "true", filters.ModerationFlagged)
+			require.Equal(t, int64(42), filters.UserID)
+		}
+	}
+}
+
+func TestAdminRiskHistoryRejectsInvalidWindowAndUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewUsageHandler(nil, nil, nil, nil)
+	router := gin.New()
+	router.GET("/alerts", handler.InputRiskAlerts)
+	for _, query := range []string{
+		"", "start_time=bad&end_time=bad",
+		"user_id=-1&start_time=2026-09-18T00:00:00Z&end_time=2026-10-18T00:00:00Z",
+		"user_id=bad&start_time=2026-09-18T00:00:00Z&end_time=2026-10-18T00:00:00Z",
+		"start_time=2026-10-18T00:00:00Z&end_time=2026-10-18T00:00:00Z",
+		"start_time=2026-10-18T00:00:00Z&end_time=2026-09-18T00:00:00Z",
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/alerts?"+query, nil))
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+	}
+}

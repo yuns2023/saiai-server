@@ -7,6 +7,8 @@ import (
 )
 
 type User struct {
+	InputRiskAlerts *InputRiskAlertSummary
+
 	ID           int64
 	Email        string
 	Username     string

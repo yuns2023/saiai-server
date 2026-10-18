@@ -25,6 +25,24 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('UsageFilters', () => {
+  it('preserves user and time when toggling alerts and hides unsupported cleanup', async () => {
+    listGroups.mockResolvedValue({ items: [] })
+    getModelStats.mockResolvedValue({ models: [] })
+    const modelValue: Record<string, unknown> = { user_id: 42, model: 'test-model' }
+    const wrapper = mount(UsageFilters, {
+      props: { modelValue, exporting: false, startDate: '2026-09-18', endDate: '2026-10-18' },
+      global: { stubs: { Select: true } }
+    })
+    await flushPromises()
+    await wrapper.get('input[aria-label="admin.groups.inputModeration.onlyAlerts"]').setValue(true)
+    expect(modelValue).toMatchObject({ moderation_flagged: true, user_id: 42, model: 'test-model', start_date: '2026-09-18', end_date: '2026-10-18' })
+    expect(wrapper.text()).not.toContain('admin.usage.cleanup.button')
+    expect(wrapper.emitted('change')).toBeTruthy()
+    await wrapper.setProps({ showSessionDiagnostics: false })
+    expect(wrapper.find('input[aria-label="admin.groups.inputModeration.onlyAlerts"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('uses a configurable $2 default for high-cost request records', async () => {
     listGroups.mockResolvedValue({ items: [] })
     getModelStats.mockResolvedValue({ models: [] })

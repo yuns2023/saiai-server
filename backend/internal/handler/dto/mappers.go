@@ -62,6 +62,7 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 	return &AdminUser{
 		User:                            *base,
 		IsTrusted:                       u.IsTrusted,
+		InputRiskAlerts:                 u.InputRiskAlerts,
 		Notes:                           u.Notes,
 		PaygDiscountMultiplier:          u.PaygDiscountRate(),
 		EffectivePaygDiscountMultiplier: u.PaygDiscountRate(),

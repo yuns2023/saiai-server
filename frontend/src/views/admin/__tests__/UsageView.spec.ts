@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 
-const { list, getStats, getSnapshotV2, getModelStats, getById } = vi.hoisted(() => {
+const { list, getStats, getSnapshotV2, getModelStats, getById, routeQuery } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -11,6 +11,7 @@ const { list, getStats, getSnapshotV2, getModelStats, getById } = vi.hoisted(() 
   })
 
   return {
+    routeQuery: {} as Record<string, string>,
     list: vi.fn(),
     getStats: vi.fn(),
     getSnapshotV2: vi.fn(),
@@ -75,7 +76,7 @@ vi.mock('vue-i18n', async () => {
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({
-    query: {}
+    query: routeQuery
   })
 }))
 
@@ -114,6 +115,7 @@ const EndpointDistributionChartStub = {
 
 describe('admin UsageView distribution metric toggles', () => {
   beforeEach(() => {
+    Object.keys(routeQuery).forEach(key => delete routeQuery[key])
     vi.useFakeTimers()
     list.mockReset()
     getStats.mockReset()
@@ -152,6 +154,27 @@ describe('admin UsageView distribution metric toggles', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('keeps the exact user alert window and filter when refreshing', async () => {
+    Object.assign(routeQuery, { user_id: '42', moderation_flagged: 'true', start_time: '2026-09-18T12:00:00Z', end_time: '2026-10-18T12:00:00Z' })
+    const wrapper = mount(UsageView, { global: { stubs: {
+      AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: true, UsageTable: true,
+      InputRiskAlerts: true, UsageExportProgress: true, UsageCleanupDialog: true,
+      UserBalanceHistoryModal: true, Pagination: true, Select: true, DateRangePicker: true, Icon: true,
+      ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true, TokenUsageTrend: true
+    } } })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const expected = { user_id: 42, moderation_flagged: true, start_time: routeQuery.start_time, end_time: routeQuery.end_time }
+    expect(list.mock.lastCall?.[0]).toMatchObject(expected)
+    expect(getStats.mock.lastCall?.[0]).toMatchObject(expected)
+    expect(getSnapshotV2).not.toHaveBeenCalled()
+    expect(getModelStats).not.toHaveBeenCalled()
+    wrapper.findComponent({ name: 'UsageFilters' }).vm.$emit('refresh')
+    await flushPromises()
+    expect(list.mock.lastCall?.[0]).toMatchObject(expected)
+    wrapper.unmount()
   })
 
   it('keeps model and group metric toggles independent without refetching chart data', async () => {

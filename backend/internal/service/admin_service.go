@@ -560,6 +560,7 @@ func (s *adminServiceImpl) ListUsers(ctx context.Context, page, pageSize int, fi
 	if err != nil {
 		return nil, 0, err
 	}
+	s.enrichInputRiskAlerts(ctx, users)
 	// 批量加载用户专属分组倍率
 	if s.userGroupRateRepo != nil && len(users) > 0 {
 		if batchRepo, ok := s.userGroupRateRepo.(userGroupRateBatchReader); ok {

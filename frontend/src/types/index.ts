@@ -52,6 +52,7 @@ export interface AccessLevel {
 }
 
 export interface AdminUser extends User {
+  input_risk_alerts?: { count: number; start_time: string; end_time: string } | null
   is_trusted: boolean
   // 管理员备注（普通用户接口不返回）
   notes: string

@@ -267,6 +267,13 @@
             </div>
           </template>
 
+          <template #cell-input_risk_alerts="{ row }">
+            <RouterLink v-if="row.input_risk_alerts" class="text-amber-700 underline dark:text-amber-300"
+              :to="{ path: '/admin/usage', query: { user_id: row.id, moderation_flagged: 'true', start_time: row.input_risk_alerts.start_time, end_time: row.input_risk_alerts.end_time } }">
+              {{ row.input_risk_alerts.count }}
+            </RouterLink>
+            <span v-else :title="t('admin.groups.inputModeration.unavailable')">—</span>
+          </template>
           <!-- Dynamic attribute columns -->
           <template
             v-for="def in attributeDefinitions.filter(d => d.enabled)"
@@ -636,6 +643,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
@@ -730,6 +738,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'usage', label: t('admin.users.columns.usage'), sortable: false },
   { key: 'concurrency', label: t('admin.users.columns.concurrency'), sortable: true },
   { key: 'claude_devices', label: t('admin.users.columns.claudeDevices'), sortable: false },
+  { key: 'input_risk_alerts', label: t('admin.groups.inputModeration.alertCount'), sortable: false },
   { key: 'status', label: t('admin.users.columns.status'), sortable: true },
   { key: 'created_at', label: t('admin.users.columns.created'), sortable: true },
   { key: 'actions', label: t('admin.users.columns.actions'), sortable: false }

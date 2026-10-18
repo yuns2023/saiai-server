@@ -146,6 +146,11 @@ func (h *UsageHandler) List(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	moderationFlagged, moderationErr := parseOptionalBoolQuery(c, "moderation_flagged")
+	if moderationErr != nil {
+		response.BadRequest(c, moderationErr.Error())
+		return
+	}
 	accountSwitch, err := parseOptionalBoolQuery(c, "account_switch")
 	if err != nil {
 		response.BadRequest(c, err.Error())
@@ -217,20 +222,21 @@ func (h *UsageHandler) List(c *gin.Context) {
 
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize}
 	filters := usagestats.UsageLogFilters{
-		UserID:        userID,
-		APIKeyID:      apiKeyID,
-		AccountID:     accountID,
-		GroupID:       groupID,
-		Model:         model,
-		SessionID:     sessionID,
-		RequestType:   requestType,
-		Stream:        stream,
-		BillingType:   billingType,
-		TotalCostGT:   totalCostGT,
-		StartTime:     startTime,
-		EndTime:       endTime,
-		AccountSwitch: accountSwitch,
-		ExactTotal:    exactTotal,
+		UserID:            userID,
+		APIKeyID:          apiKeyID,
+		AccountID:         accountID,
+		GroupID:           groupID,
+		Model:             model,
+		SessionID:         sessionID,
+		RequestType:       requestType,
+		Stream:            stream,
+		BillingType:       billingType,
+		TotalCostGT:       totalCostGT,
+		StartTime:         startTime,
+		EndTime:           endTime,
+		AccountSwitch:     accountSwitch,
+		ModerationFlagged: moderationFlagged,
+		ExactTotal:        exactTotal,
 	}
 
 	records, result, err := h.usageService.ListWithFilters(c.Request.Context(), params, filters)
@@ -291,6 +297,11 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 	sessionID, err := normalizeSessionIDFilter(c.Query("session_id"))
 	if err != nil {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	moderationFlagged, moderationErr := parseOptionalBoolQuery(c, "moderation_flagged")
+	if moderationErr != nil {
+		response.BadRequest(c, moderationErr.Error())
 		return
 	}
 	accountSwitch, err := parseOptionalBoolQuery(c, "account_switch")
@@ -376,18 +387,19 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 
 	// Build filters and call GetStatsWithFilters
 	filters := usagestats.UsageLogFilters{
-		UserID:        userID,
-		APIKeyID:      apiKeyID,
-		AccountID:     accountID,
-		GroupID:       groupID,
-		Model:         model,
-		SessionID:     sessionID,
-		RequestType:   requestType,
-		Stream:        stream,
-		BillingType:   billingType,
-		StartTime:     &startTime,
-		EndTime:       &endTime,
-		AccountSwitch: accountSwitch,
+		UserID:            userID,
+		APIKeyID:          apiKeyID,
+		AccountID:         accountID,
+		GroupID:           groupID,
+		Model:             model,
+		SessionID:         sessionID,
+		RequestType:       requestType,
+		Stream:            stream,
+		BillingType:       billingType,
+		StartTime:         &startTime,
+		EndTime:           &endTime,
+		AccountSwitch:     accountSwitch,
+		ModerationFlagged: moderationFlagged,
 	}
 
 	stats, err := h.usageService.GetStatsWithFilters(c.Request.Context(), filters)
@@ -656,4 +668,34 @@ func (h *UsageHandler) CancelCleanupTask(c *gin.Context) {
 	}
 	logger.LegacyPrintf("handler.admin.usage", "[UsageCleanup] 清理任务已取消: task=%d operator=%d", taskID, subject.UserID)
 	response.Success(c, gin.H{"id": taskID, "status": service.UsageCleanupStatusCanceled})
+}
+
+// InputRiskAlerts includes detections without a successful billed request.
+func (h *UsageHandler) InputRiskAlerts(c *gin.Context) {
+	page, size := response.ParsePagination(c)
+	var userID int64
+	if raw := c.Query("user_id"); raw != "" {
+		var err error
+		userID, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || userID <= 0 {
+			response.BadRequest(c, "Invalid user_id")
+			return
+		}
+	}
+	start, err := time.Parse(time.RFC3339Nano, c.Query("start_time"))
+	if err != nil {
+		response.BadRequest(c, "Invalid start_time")
+		return
+	}
+	end, err := time.Parse(time.RFC3339Nano, c.Query("end_time"))
+	if err != nil || !end.After(start) {
+		response.BadRequest(c, "Invalid end_time")
+		return
+	}
+	records, total, err := h.usageService.ListInputRiskAlerts(c.Request.Context(), userID, start, end, page, size)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, records, total, page, size)
 }

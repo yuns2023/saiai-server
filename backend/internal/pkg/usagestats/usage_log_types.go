@@ -230,18 +230,19 @@ type UserDashboardStats struct {
 
 // UsageLogFilters represents filters for usage log queries
 type UsageLogFilters struct {
-	UserID      int64
-	APIKeyID    int64
-	AccountID   int64
-	GroupID     int64
-	Model       string
-	SessionID   string
-	RequestType *int16
-	Stream      *bool
-	BillingType *int8
-	TotalCostGT *float64 // Filter individual requests by original cost, before discounts.
-	StartTime   *time.Time
-	EndTime     *time.Time
+	ModerationFlagged bool
+	UserID            int64
+	APIKeyID          int64
+	AccountID         int64
+	GroupID           int64
+	Model             string
+	SessionID         string
+	RequestType       *int16
+	Stream            *bool
+	BillingType       *int8
+	TotalCostGT       *float64 // Filter individual requests by original cost, before discounts.
+	StartTime         *time.Time
+	EndTime           *time.Time
 	// AccountSwitch restricts results to sessions that used more than one account
 	// within the selected time window, grouped by api_key_id + group_id + session_id.
 	AccountSwitch bool

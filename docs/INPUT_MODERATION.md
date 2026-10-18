@@ -69,3 +69,42 @@ thresholds and actions.
 Trusted exemptions remain skipped rather than passed. The list does not poll;
 use the refresh button to load newly completed asynchronous results. Filters
 and pagination continue to load their requested data.
+
+## Administrator risk counts and filtering
+
+User management shows **Input risk alerts (30 days)**. This is the number of
+persisted `flagged` detection results in the rolling 30-day window, measured by
+completion time (`updated_at`, inclusive start/exclusive end). Each unique
+request/source/turn/user/key/group identity counts once, regardless of the number
+of matching categories or enforcement strikes. WebSocket turns are separate
+inputs. Retried writes cannot multiply terminal results. Historical results use
+their saved decisions; changing today's policy does not reclassify them.
+Unknown/failed/pending/skipped detections are not alerts. An unavailable counter
+is shown as unknown, not zero. Deleting a user/key/group cascades its existing
+moderation metadata; these counts are not an immutable compliance archive.
+
+Clicking the count opens usage history with the same user and exact window and
+**Only input risk alerts** enabled. The usage list, pagination, CSV export and
+usage summary use the full moderation identity to filter matching billed rows.
+All existing list filters remain active. Charts without moderation filtering
+and the broad usage-cleanup action are hidden while the alert filter is active.
+
+An additional paginated input-alert history includes detections without a billed
+usage row (for example a failed upstream request), with saved scores, thresholds
+and any recorded enforcement action. It filters by user and detection completion
+time only, as stated in the UI; usage rows below still filter by request time and
+all selected usage criteria. Thus the two lists may have different totals.
+Detection is asynchronous, so refresh to see newly completed results. A flagged
+result alone does not mean the original request was blocked.
+
+Admin-only API additions:
+
+- User list `input_risk_alerts`: `{count,start_time,end_time}` or null if unavailable.
+- Usage list/stats `moderation_flagged=true` (strict boolean query).
+- `GET /api/v1/admin/usage/input-risk-alerts`: optional positive `user_id`, required
+  RFC3339 `start_time`/`end_time`, and standard `page`/`page_size` pagination.
+  Returns only correlation and detection metadata, never input text.
+
+Migration 105 adds partial indexes for flagged-result counts/history. It changes
+no moderation, penalty, billing or provider-request behavior. This feature does
+not automatically suspend users based on the displayed count.

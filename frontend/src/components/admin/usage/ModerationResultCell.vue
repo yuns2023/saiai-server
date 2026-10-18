@@ -5,7 +5,7 @@ import { moderationCategoryLabel } from '@/utils/moderationLabels'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { AdminUsageLog } from '@/types'
 
-const props = defineProps<{ row: AdminUsageLog }>()
+const props = defineProps<{ row: Pick<AdminUsageLog, 'moderation_result' | 'moderation_events' | 'moderation_unavailable'> }>()
 const { t, locale } = useI18n()
 const categoryLabel = (category: string) => moderationCategoryLabel(category, locale.value)
 const open = ref(false)

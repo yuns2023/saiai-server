@@ -188,6 +188,10 @@
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.usage.highCostScope') }}</p>
         </div>
 
+        <label v-if="showSessionDiagnostics" class="flex h-10 cursor-pointer items-center gap-2 text-sm">
+          <input v-model="filters.moderation_flagged" :aria-label="t('admin.groups.inputModeration.onlyAlerts')" type="checkbox" @change="emitChange" />
+          {{ t('admin.groups.inputModeration.onlyAlerts') }}
+        </label>
         <!-- Session account-switch filter -->
         <div v-if="showSessionDiagnostics" class="w-full sm:w-auto sm:min-w-[190px]">
           <label class="input-label">{{ t('admin.usage.sessionDiagnostics') }}</label>
@@ -213,7 +217,7 @@
           {{ t('common.reset') }}
         </button>
         <slot name="after-reset" />
-        <button type="button" @click="$emit('cleanup')" class="btn btn-danger">
+        <button v-if="!filters.moderation_flagged" type="button" @click="$emit('cleanup')" class="btn btn-danger">
           {{ t('admin.usage.cleanup.button') }}
         </button>
         <button type="button" @click="$emit('export')" :disabled="exporting" class="btn btn-primary">
