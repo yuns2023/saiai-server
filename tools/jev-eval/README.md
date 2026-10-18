@@ -34,3 +34,39 @@ qualified independent holdout count and model call count remain zero.
 
 See [REVIEW.md](REVIEW.md) for the author-side review, independent annotation
 procedure and proposed execution/reporting contract. No model runner is included.
+
+## Prepare a blind review packet
+
+Run `python3 tools/jev-eval/prepare_review.py --output /path/to/new-directory`.
+The command refuses an existing output directory and performs no network I/O.
+Send `annotations.csv` and `category-definitions.json` to a reviewer other than
+the author; keep `coordinator-map.json` with the coordinator. The CSV uses opaque
+sample IDs and omits the author's proposed labels, rationales and split names.
+Do not send the source fixture files as part of blind annotation. The public
+repository already exposes those fixtures, so document whether the reviewer saw
+them; this packet alone cannot establish blinding or reviewer independence.
+
+For each category, enter `positive`, `negative`, or `unknown`, a rationale and
+reviewer identity. Do not automatically copy author labels or interpret blank
+cells as negative. Review translations as related examples. Returned annotations
+need reconciliation and semantic family review before creating a qualified
+holdout; the tool does not mark any row reviewed or promote any category.
+
+The packet contains 108 samples x 19 categories = 2,052 annotation cells. The
+request plan proposes all 19 questions on each of 108 serial calls, no automatic
+retries, 15-second request timeout, fixed `jev-1.13.0`. It records payload hashes
+and tool/dataset/registry hashes, without sending anything or reading credentials.
+
+As checked on 2026-10-18, the [official model page](https://docs.typesafe.ai/models)
+lists Jev 1.13 at USD 0.042 per million input tokens, with output free. The complete
+compact request bodies total 903,652 UTF-8 bytes, including repeated questions.
+**Only as an illustration**, assuming one input token per serialized byte gives
+USD 0.03795338. This is not actual tokenization, a provider quote, a spending cap,
+or approval. Python JSON bytes are a reproducible sizing format, not a claim that
+the Go runtime emits byte-identical JSON. The current tool has no network runner
+and cannot enforce a monetary cap. Confirm actual accounting and provider-side
+budget enforcement before promising a hard cap; failed calls may incur charges.
+
+The price check does not authorize a model upgrade: `jev-1.13.0` stays fixed even
+if a newer preview exists. This draft may support a separately approved exploratory
+run; it cannot establish independent acceptance or unlock automatic penalties.
