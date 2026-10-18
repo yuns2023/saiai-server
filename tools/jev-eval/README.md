@@ -104,3 +104,12 @@ Current validation: 14 offline/mock tests, including an end-to-end 108-response
 simulation, failure/redaction/no-retry behavior, altered-plan rejection, overwrite
 refusal, redirect refusal and partial-label/error reporting. These simulations
 send no network traffic and demonstrate no Jev accuracy.
+
+## Follow-up after the first real run
+
+[LANGUAGE_FOLLOWUP.md](LANGUAGE_FOLLOWUP.md) records a 32-example language calibration
+draft and offline threshold sensitivity analysis of the existing results. Run
+`python3 tools/jev-eval/followup.py` to validate it. It is separate from the frozen
+108-call runner and not authorized for live execution. `dataset-exposure.json`
+records that the original candidate fixtures are now observed calibration data;
+their historical names do not make them eligible for independent acceptance.
