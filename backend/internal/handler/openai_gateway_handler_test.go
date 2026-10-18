@@ -842,6 +842,14 @@ func (s *openAIInputModerationClientStub) Classify(_ context.Context, text strin
 	return &service.InputModerationClassification{Safety: service.InputModerationSafetySafe}, nil
 }
 
+type openAIInputModerationUserRepoStub struct {
+	service.UserRepository
+}
+
+func (s *openAIInputModerationUserRepoStub) GetByID(_ context.Context, id int64) (*service.User, error) {
+	return &service.User{ID: id, Status: service.StatusActive}, nil
+}
+
 type openAIInputModerationGroupRepoStub struct {
 	service.GroupRepository
 	group *service.Group
@@ -895,7 +903,7 @@ func TestOpenAIGatewayHandlerSubmitInputModerationExtractsNativeResponsesText(t 
 		nil,
 		nil,
 		&openAIInputModerationGroupRepoStub{group: group},
-		service.NewUserService(nil, nil, nil),
+		service.NewUserService(&openAIInputModerationUserRepoStub{}, nil, nil),
 		cfg,
 	)
 	defer moderation.Stop()
