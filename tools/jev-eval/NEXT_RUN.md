@@ -15,7 +15,8 @@
 ## Status and prerequisites
 
 The blind annotation packet generator and offline validation are implemented.
-A network runner is not implemented in this work. Six offline tests pass.
+An explicit-opt-in network runner and offline result reporter are implemented.
+Fourteen offline/mock tests pass. No live request has been made.
 Price/byte illustration and its limitations are documented in README.md.
 Actual tokenizer-based cost and an enforced monetary cap remain unconfirmed.
 
@@ -25,8 +26,10 @@ set an independent holdout. Alternatively, an explicitly approved exploratory
 run can use these drafts, retaining their unreviewed status and reporting only
 provisional agreement with authored labels. Neither route authorizes penalties.
 
-Before a live run, implement and mock-test exact call limits, no redirects/retries,
-strict model/score validation, redacted errors and usage reporting. Present the
+The runner enforces the frozen 108-call limit, refuses redirects and retries,
+validates model/scores and writes only redacted failures. It records reported input
+tokens when available and otherwise marks usage incomplete. It does not enforce
+a monetary cap; an absent usage field is never treated as zero cost. Present the
 final dataset/runner hashes and the available budget controls for specific user
 authorization. The current broad request to continue preparation is not approval
 for paid calls. Previously consumed model-call approvals are not reusable.

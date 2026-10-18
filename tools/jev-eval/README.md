@@ -70,3 +70,35 @@ budget enforcement before promising a hard cap; failed calls may incur charges.
 The price check does not authorize a model upgrade: `jev-1.13.0` stays fixed even
 if a newer preview exists. This draft may support a separately approved exploratory
 run; it cannot establish independent acceptance or unlock automatic penalties.
+
+## Execute only after specific authorization
+
+`run.py --plan /path/to/packet/request-plan.json` defaults to offline validation:
+no credential read and no network request. Add `--execute --output /new/results.json`
+only after obtaining specific authorization for the frozen 108-call exploratory
+scope. The CLI then reads `JEV_EVAL_API_KEY` from the process environment; never
+put the key in arguments, output files or version control.
+
+The runner compares the entire plan with current preparation, checks each request
+hash, uses the fixed HTTPS endpoint/model, serial 15-second calls and no retries or
+redirects. An existing results file is rejected before any request. Each attempted
+slot is persisted before sending; there is no resume/replay mode. A crash requires
+reconciliation and separately authorized follow-up, not a fresh automatic rerun.
+Failed calls consume the 108-call budget. The runner enforces a call count, **not a
+monetary cap**. Reported input token usage is retained when available; missing usage
+is explicitly incomplete. No provider bodies, inputs, keys or exception strings
+are written to results. Mock transports are labeled `mock`, never `provider`.
+
+`report.py --results /path/to/results.json --threshold 0.9` validates fixture/rule
+hashes, pinned model, unique sample IDs and all 19 finite scores before reporting.
+Only explicitly labeled category/sample pairs enter TP/TN/FP/FN. Failed/missing
+samples have separate counters and reduce positive detection coverage. Precision,
+recall and false-positive rate on completed requests are explicitly conditional;
+unknown labels are not negatives. Translations are counted as related families.
+No independent confidence interval, acceptance claim or enforcement eligibility is
+produced from these unreviewed drafts. The reporter does not calculate billing.
+
+Current validation: 14 offline/mock tests, including an end-to-end 108-response
+simulation, failure/redaction/no-retry behavior, altered-plan rejection, overwrite
+refusal, redirect refusal and partial-label/error reporting. These simulations
+send no network traffic and demonstrate no Jev accuracy.
