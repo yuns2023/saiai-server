@@ -80,3 +80,9 @@ lock against a concurrent admin edit at the exact enforcement instant; result
 retention needs an operational policy; old application versions do not understand
 explicit group policies and are not safe blind rollback targets. Deployment must
 resolve these operational constraints in its own reviewed plan.
+
+## Subsequent authorized exploratory run
+
+The planned single pass was later explicitly approved and completed. See
+[RESULTS_20261018.md](RESULTS_20261018.md). This consumes that approval and exposes
+the candidate set to model results; it is not an independent unseen holdout.
