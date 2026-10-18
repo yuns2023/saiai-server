@@ -47,6 +47,9 @@ func newJevModerationClient(cfg *config.Config) *jevModerationClient {
 }
 
 func (c *jevModerationClient) Classify(ctx context.Context, text string) (*service.InputModerationClassification, error) {
+	return c.ClassifyWithPolicy(ctx, text, nil)
+}
+func (c *jevModerationClient) ClassifyWithPolicy(ctx context.Context, text string, policy *service.InputModerationPolicy) (*service.InputModerationClassification, error) {
 	if c.apiKey == "" {
 		return nil, fmt.Errorf("jev API key is not configured")
 	}
@@ -54,9 +57,12 @@ func (c *jevModerationClient) Classify(ctx context.Context, text string) (*servi
 	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
 		return nil, fmt.Errorf("jev endpoint must be an HTTPS URL without credentials or query")
 	}
-	rules := map[string]string{}
-	if err := json.Unmarshal(jevModerationRules, &rules); err != nil {
-		return nil, fmt.Errorf("invalid bundled Jev rules")
+	rules, err := service.JevRulesForPolicy(policy)
+	if err != nil {
+		return nil, err
+	}
+	if len(rules) == 0 {
+		return nil, fmt.Errorf("no moderation categories selected")
 	}
 	questions := map[string]any{}
 	for category, rule := range rules {

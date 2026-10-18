@@ -137,18 +137,19 @@ type AccessLevel struct {
 type AdminGroup struct {
 	Group
 
-	InputModerationEnabled           bool     `json:"input_moderation_enabled"`
-	InputModerationAutoDisableUser   bool     `json:"input_moderation_auto_disable_user"`
-	InputModerationCategories        []string `json:"input_moderation_categories"`
-	InputModerationActionMode        string   `json:"input_moderation_action_mode"`
-	InputModerationCooldownMinutes   int      `json:"input_moderation_cooldown_minutes"`
-	InputModerationDisableAfterHits  int      `json:"input_moderation_disable_after_hits"`
-	InputModerationStrikeWindowHours int      `json:"input_moderation_strike_window_hours"`
-	InputModerationDedupeMinutes     int      `json:"input_moderation_dedupe_minutes"`
-	InputModerationMinConfidence     int      `json:"input_moderation_min_confidence"`
-	CodexClientPolicy                string   `json:"codex_client_policy"`
-	ClaudeDeviceLimitMode            string   `json:"claude_device_limit_mode"`
-	ClaudeDeviceBaseLimit            int      `json:"claude_device_base_limit"`
+	InputModerationEnabled           bool                           `json:"input_moderation_enabled"`
+	InputModerationAutoDisableUser   bool                           `json:"input_moderation_auto_disable_user"`
+	InputModerationCategories        []string                       `json:"input_moderation_categories"`
+	InputModerationActionMode        string                         `json:"input_moderation_action_mode"`
+	InputModerationCooldownMinutes   int                            `json:"input_moderation_cooldown_minutes"`
+	InputModerationDisableAfterHits  int                            `json:"input_moderation_disable_after_hits"`
+	InputModerationStrikeWindowHours int                            `json:"input_moderation_strike_window_hours"`
+	InputModerationDedupeMinutes     int                            `json:"input_moderation_dedupe_minutes"`
+	InputModerationPolicy            *service.InputModerationPolicy `json:"input_moderation_policy,omitempty"`
+	InputModerationMinConfidence     int                            `json:"input_moderation_min_confidence"`
+	CodexClientPolicy                string                         `json:"codex_client_policy"`
+	ClaudeDeviceLimitMode            string                         `json:"claude_device_limit_mode"`
+	ClaudeDeviceBaseLimit            int                            `json:"claude_device_base_limit"`
 
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64 `json:"model_routing"`

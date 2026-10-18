@@ -2034,6 +2034,20 @@ export default {
         environmentModeRemove: '删除'
       },
       inputModeration: {
+        policy: {
+          version: "检测规则",
+          legacy: "现有四分类",
+          expanded: "扩展分类（新增类别仅记录）",
+          hint: "切换为扩展版后才会检测新增类别。分类阈值是模型分数，不是已验证的违规概率。",
+          unsupported: "旧配置中以下选项不在 Jev 四分类检测范围；未修改时保留旧值：",
+          category: "分类",
+          audit: "检测",
+          enforce: "参与处罚",
+          threshold: "阈值 %",
+          auditOnly: "未完成独立评测，仅记录",
+          enforcementHint: "只有同时开启分组自动处理、勾选参与处罚并命中阈值时，才会计入处罚；处罚选择为空表示不处罚。",
+          loadFailed: "无法加载分类定义，原策略保持不变。",
+        },
         statuses: {
           pending: "审核中",
           passed: "审核通过",
@@ -2042,6 +2056,8 @@ export default {
           failed: "审核失败",
         },
         reasons: {
+          no_categories: "\u672a\u9009\u62e9\u68c0\u6d4b\u7c7b\u522b",
+          policy_changed: "\u5ba1\u6838\u8fc7\u7a0b\u4e2d\u68c0\u6d4b\u89c4\u5219\u5df2\u53d8\u66f4",
           no_new_user_text: "没有新的用户文本",
           group_disabled: "分组审核已关闭",
           processing_failed: "审核处理失败",
@@ -4440,6 +4456,8 @@ export default {
         localAuth: '本站认证拒绝',
         upstream: '上游错误（高级）',
         reasons: {
+          no_categories: "\u672a\u9009\u62e9\u68c0\u6d4b\u7c7b\u522b",
+          policy_changed: "\u5ba1\u6838\u8fc7\u7a0b\u4e2d\u68c0\u6d4b\u89c4\u5219\u5df2\u53d8\u66f4",
           user_inactive: '本站用户已禁用',
           invalid_api_key: '本站 Key 无效',
           api_key_disabled: '本站 Key 已禁用',

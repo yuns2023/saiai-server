@@ -42,8 +42,8 @@ func (r *inputModerationRepository) InsertInputModerationEvent(ctx context.Conte
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO input_moderation_events (
 			job_id, request_id, user_id, api_key_id, group_id, input_hash,
-			safety, categories, action, model_version, policy_version, source, turn_number, created_at, scores, min_confidence
-		) VALUES ($1::uuid, NULLIF($2, ''), $3, $4, $5, $6, $7, $8::jsonb, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, 0), $14, $15::jsonb, $16)
+			safety, categories, action, model_version, policy_version, source, turn_number, created_at, scores, min_confidence, decision_snapshot
+		) VALUES ($1::uuid, NULLIF($2, ''), $3, $4, $5, $6, $7, $8::jsonb, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, 0), $14, $15::jsonb, $16, $17::jsonb)
 		ON CONFLICT (job_id) DO NOTHING`,
 		event.JobID,
 		event.RequestID,
@@ -58,7 +58,7 @@ func (r *inputModerationRepository) InsertInputModerationEvent(ctx context.Conte
 		event.PolicyVersion,
 		event.Source,
 		event.TurnNumber,
-		event.CreatedAt, string(scores), event.MinConfidence,
+		event.CreatedAt, string(scores), event.MinConfidence, moderationDecisionJSON(event.DecisionSnapshot),
 	)
 	if err != nil {
 		return fmt.Errorf("insert input moderation event: %w", err)
@@ -93,14 +93,14 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 		INSERT INTO input_moderation_events (
 			job_id, request_id, user_id, api_key_id, group_id, input_hash,
 			safety, categories, action, model_version, policy_version, source,
-			turn_number, counted_as_strike, created_at, scores, min_confidence
+			turn_number, counted_as_strike, created_at, scores, min_confidence, decision_snapshot
 		) VALUES ($1::uuid, NULLIF($2, ''), $3, $4, $5, $6, $7, $8::jsonb,
-			'processing', NULLIF($9, ''), NULLIF($10, ''), $11, NULLIF($12, 0), false, $13, $14::jsonb, $15)
+			'processing', NULLIF($9, ''), NULLIF($10, ''), $11, NULLIF($12, 0), false, $13, $14::jsonb, $15, $16::jsonb)
 		ON CONFLICT (job_id) DO NOTHING
 		RETURNING id`,
 		event.JobID, event.RequestID, event.UserID, event.APIKeyID, event.GroupID,
 		event.InputHash, event.Safety, string(categories), event.ModelVersion,
-		event.PolicyVersion, event.Source, event.TurnNumber, event.CreatedAt, string(scores), event.MinConfidence,
+		event.PolicyVersion, event.Source, event.TurnNumber, event.CreatedAt, string(scores), event.MinConfidence, moderationDecisionJSON(event.DecisionSnapshot),
 	).Scan(&eventID)
 	if errors.Is(err, sql.ErrNoRows) {
 		var action string

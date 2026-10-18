@@ -10,12 +10,13 @@ import (
 
 // Moderation results are separate from risk events and never count as strikes.
 type InputModerationResult struct {
-	Status        string             `json:"status"`
-	Reason        string             `json:"reason,omitempty"`
-	Scores        map[string]float64 `json:"scores,omitempty"`
-	MinConfidence int                `json:"min_confidence"`
-	ModelVersion  string             `json:"model_version,omitempty"`
-	UpdatedAt     time.Time          `json:"updated_at"`
+	DecisionSnapshot *ModerationDecisionSnapshot `json:"decision_snapshot,omitempty"`
+	Status           string                      `json:"status"`
+	Reason           string                      `json:"reason,omitempty"`
+	Scores           map[string]float64          `json:"scores,omitempty"`
+	MinConfidence    int                         `json:"min_confidence"`
+	ModelVersion     string                      `json:"model_version,omitempty"`
+	UpdatedAt        time.Time                   `json:"updated_at"`
 }
 type InputModerationResultRepository interface {
 	SaveInputModerationResult(context.Context, InputModerationTask, InputModerationResult) error

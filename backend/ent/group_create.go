@@ -19,6 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // GroupCreate is the builder for creating a Group entity.
@@ -608,6 +609,12 @@ func (_c *GroupCreate) SetNillableInputModerationMinConfidence(v *int) *GroupCre
 	if v != nil {
 		_c.SetInputModerationMinConfidence(*v)
 	}
+	return _c
+}
+
+// SetInputModerationPolicy sets the "input_moderation_policy" field.
+func (_c *GroupCreate) SetInputModerationPolicy(v *domain.InputModerationPolicy) *GroupCreate {
+	_c.mutation.SetInputModerationPolicy(v)
 	return _c
 }
 
@@ -1267,6 +1274,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.InputModerationMinConfidence(); ok {
 		_spec.SetField(group.FieldInputModerationMinConfidence, field.TypeInt, value)
 		_node.InputModerationMinConfidence = value
+	}
+	if value, ok := _c.mutation.InputModerationPolicy(); ok {
+		_spec.SetField(group.FieldInputModerationPolicy, field.TypeJSON, value)
+		_node.InputModerationPolicy = value
 	}
 	if value, ok := _c.mutation.InputModerationDedupeMinutes(); ok {
 		_spec.SetField(group.FieldInputModerationDedupeMinutes, field.TypeInt, value)
@@ -2210,6 +2221,24 @@ func (u *GroupUpsert) UpdateInputModerationMinConfidence() *GroupUpsert {
 // AddInputModerationMinConfidence adds v to the "input_moderation_min_confidence" field.
 func (u *GroupUpsert) AddInputModerationMinConfidence(v int) *GroupUpsert {
 	u.Add(group.FieldInputModerationMinConfidence, v)
+	return u
+}
+
+// SetInputModerationPolicy sets the "input_moderation_policy" field.
+func (u *GroupUpsert) SetInputModerationPolicy(v *domain.InputModerationPolicy) *GroupUpsert {
+	u.Set(group.FieldInputModerationPolicy, v)
+	return u
+}
+
+// UpdateInputModerationPolicy sets the "input_moderation_policy" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateInputModerationPolicy() *GroupUpsert {
+	u.SetExcluded(group.FieldInputModerationPolicy)
+	return u
+}
+
+// ClearInputModerationPolicy clears the value of the "input_moderation_policy" field.
+func (u *GroupUpsert) ClearInputModerationPolicy() *GroupUpsert {
+	u.SetNull(group.FieldInputModerationPolicy)
 	return u
 }
 
@@ -3197,6 +3226,27 @@ func (u *GroupUpsertOne) AddInputModerationMinConfidence(v int) *GroupUpsertOne 
 func (u *GroupUpsertOne) UpdateInputModerationMinConfidence() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateInputModerationMinConfidence()
+	})
+}
+
+// SetInputModerationPolicy sets the "input_moderation_policy" field.
+func (u *GroupUpsertOne) SetInputModerationPolicy(v *domain.InputModerationPolicy) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationPolicy(v)
+	})
+}
+
+// UpdateInputModerationPolicy sets the "input_moderation_policy" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateInputModerationPolicy() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationPolicy()
+	})
+}
+
+// ClearInputModerationPolicy clears the value of the "input_moderation_policy" field.
+func (u *GroupUpsertOne) ClearInputModerationPolicy() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearInputModerationPolicy()
 	})
 }
 
@@ -4360,6 +4410,27 @@ func (u *GroupUpsertBulk) AddInputModerationMinConfidence(v int) *GroupUpsertBul
 func (u *GroupUpsertBulk) UpdateInputModerationMinConfidence() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateInputModerationMinConfidence()
+	})
+}
+
+// SetInputModerationPolicy sets the "input_moderation_policy" field.
+func (u *GroupUpsertBulk) SetInputModerationPolicy(v *domain.InputModerationPolicy) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetInputModerationPolicy(v)
+	})
+}
+
+// UpdateInputModerationPolicy sets the "input_moderation_policy" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateInputModerationPolicy() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateInputModerationPolicy()
+	})
+}
+
+// ClearInputModerationPolicy clears the value of the "input_moderation_policy" field.
+func (u *GroupUpsertBulk) ClearInputModerationPolicy() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearInputModerationPolicy()
 	})
 }
 

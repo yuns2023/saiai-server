@@ -797,24 +797,7 @@
                 <input v-model.number="createForm.input_moderation_dedupe_minutes" type="number" min="1" max="1440" class="input w-full" />
               </div>
             </div>
-            <div v-if="createForm.input_moderation_auto_disable_user">
-              <label class="input-label">{{ t('admin.groups.inputModeration.categories') }}</label>
-              <div class="grid gap-2 sm:grid-cols-2">
-                <label
-                  v-for="category in inputModerationCategoryOptions"
-                  :key="`create-moderation-${category}`"
-                  class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="createForm.input_moderation_categories.includes(category)"
-                    @change="toggleInputModerationCategory(createForm.input_moderation_categories, category)"
-                  />
-                  <span>{{ category }}</span>
-                </label>
-              </div>
-              <p class="input-hint mt-1">{{ t('admin.groups.inputModeration.categoriesHint') }}</p>
-            </div>
+            <ModerationPolicyEditor v-model="createForm.input_moderation_policy" :legacy-categories="createForm.input_moderation_categories" :min-confidence="createForm.input_moderation_min_confidence" />
           </div>
         </div>
 
@@ -1570,24 +1553,7 @@
                 <input v-model.number="editForm.input_moderation_dedupe_minutes" type="number" min="1" max="1440" class="input w-full" />
               </div>
             </div>
-            <div v-if="editForm.input_moderation_auto_disable_user">
-              <label class="input-label">{{ t('admin.groups.inputModeration.categories') }}</label>
-              <div class="grid gap-2 sm:grid-cols-2">
-                <label
-                  v-for="category in inputModerationCategoryOptions"
-                  :key="`edit-moderation-${category}`"
-                  class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="editForm.input_moderation_categories.includes(category)"
-                    @change="toggleInputModerationCategory(editForm.input_moderation_categories, category)"
-                  />
-                  <span>{{ category }}</span>
-                </label>
-              </div>
-              <p class="input-hint mt-1">{{ t('admin.groups.inputModeration.categoriesHint') }}</p>
-            </div>
+            <ModerationPolicyEditor v-model="editForm.input_moderation_policy" :legacy-categories="editForm.input_moderation_categories" :min-confidence="editForm.input_moderation_min_confidence" />
           </div>
         </div>
 
@@ -1924,7 +1890,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { adminAPI } from '@/api/admin'
-import type { AccessLevel, AdminGroup, ClaudeEnvironmentMode, GroupPlatform, SubscriptionType } from '@/types'
+import type { InputModerationPolicy, AccessLevel, AdminGroup, ClaudeEnvironmentMode, GroupPlatform, SubscriptionType } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -1937,6 +1903,7 @@ import Select from '@/components/common/Select.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import GroupRateMultipliersModal from '@/components/admin/group/GroupRateMultipliersModal.vue'
+import ModerationPolicyEditor from '@/components/admin/group/ModerationPolicyEditor.vue'
 import GroupCapacityBadge from '@/components/common/GroupCapacityBadge.vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
@@ -2129,26 +2096,7 @@ const showRateMultipliersModal = ref(false)
 const rateMultipliersGroup = ref<AdminGroup | null>(null)
 const sortableGroups = ref<AdminGroup[]>([])
 
-const inputModerationCategoryOptions = [
-  'Jailbreak',
-  'PII',
-  'Non-violent Illegal Acts',
-  'Unethical Acts',
-  'Violent',
-  'Sexual Content or Sexual Acts',
-  'Suicide & Self-Harm',
-  'Politically Sensitive Topics',
-  'Copyright Violation'
-]
 
-const toggleInputModerationCategory = (selected: string[], category: string) => {
-  const index = selected.indexOf(category)
-  if (index >= 0) {
-    selected.splice(index, 1)
-    return
-  }
-  selected.push(category)
-}
 
 const createForm = reactive({
   name: '',
@@ -2183,6 +2131,7 @@ const createForm = reactive({
   input_moderation_cooldown_minutes: 30,
   input_moderation_disable_after_hits: 3,
  input_moderation_min_confidence: 90,
+ input_moderation_policy: null as InputModerationPolicy | null,
   input_moderation_strike_window_hours: 24,
   input_moderation_dedupe_minutes: 5,
   codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
@@ -2443,6 +2392,7 @@ const editForm = reactive({
   input_moderation_cooldown_minutes: 30,
   input_moderation_disable_after_hits: 3,
  input_moderation_min_confidence: 90,
+ input_moderation_policy: null as InputModerationPolicy | null,
   input_moderation_strike_window_hours: 24,
   input_moderation_dedupe_minutes: 5,
   codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
@@ -2598,6 +2548,7 @@ const closeCreateModal = () => {
   createForm.input_moderation_cooldown_minutes = 30
   createForm.input_moderation_disable_after_hits = 3
  createForm.input_moderation_min_confidence = 90
+ createForm.input_moderation_policy = null
   createForm.input_moderation_strike_window_hours = 24
   createForm.input_moderation_dedupe_minutes = 5
   createForm.codex_client_policy = 'off'
@@ -2700,6 +2651,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.input_moderation_cooldown_minutes = group.input_moderation_cooldown_minutes || 30
   editForm.input_moderation_disable_after_hits = group.input_moderation_disable_after_hits || 3
  editForm.input_moderation_min_confidence = group.input_moderation_min_confidence ?? 90
+ editForm.input_moderation_policy = group.input_moderation_policy ? JSON.parse(JSON.stringify(group.input_moderation_policy)) : null
   editForm.input_moderation_strike_window_hours = group.input_moderation_strike_window_hours || 24
   editForm.input_moderation_dedupe_minutes = group.input_moderation_dedupe_minutes || 5
   editForm.codex_client_policy = group.codex_client_policy || 'off'

@@ -1949,6 +1949,20 @@ export default {
         environmentModeRemove: 'Remove'
       },
       inputModeration: {
+        policy: {
+          version: "Detection rules",
+          legacy: "Existing four categories",
+          expanded: "Expanded categories (new categories audit only)",
+          hint: "New categories are evaluated only after opting into expanded rules. Scores are not validated probabilities of misconduct.",
+          unsupported: "These legacy options are not detected by the Jev four-category rules; unchanged values are preserved:",
+          category: "Category",
+          audit: "Detect",
+          enforce: "Enforce",
+          threshold: "Threshold %",
+          auditOnly: "Not independently evaluated; audit only",
+          enforcementHint: "Enforcement requires group automatic action, a selected enforcement category and a threshold hit. Empty enforcement selection means no penalties.",
+          loadFailed: "Could not load categories. Existing policy is preserved.",
+        },
         statuses: {
           pending: "Review pending",
           passed: "Passed",
@@ -1957,6 +1971,8 @@ export default {
           failed: "Review failed",
         },
         reasons: {
+          no_categories: "No detection categories selected",
+          policy_changed: "Detection rules changed during review",
           no_new_user_text: "No new user text",
           group_disabled: "Group moderation disabled",
           processing_failed: "Moderation processing failed",
@@ -4279,6 +4295,8 @@ export default {
         localAuth: 'Local authentication rejection',
         upstream: 'Upstream error (advanced)',
         reasons: {
+          no_categories: "No detection categories selected",
+          policy_changed: "Detection rules changed during review",
           user_inactive: 'Local user disabled',
           invalid_api_key: 'Local key invalid',
           api_key_disabled: 'Local key disabled',

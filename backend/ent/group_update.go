@@ -21,6 +21,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // GroupUpdate is the builder for updating Group entities.
@@ -871,6 +872,18 @@ func (_u *GroupUpdate) AddInputModerationMinConfidence(v int) *GroupUpdate {
 	return _u
 }
 
+// SetInputModerationPolicy sets the "input_moderation_policy" field.
+func (_u *GroupUpdate) SetInputModerationPolicy(v *domain.InputModerationPolicy) *GroupUpdate {
+	_u.mutation.SetInputModerationPolicy(v)
+	return _u
+}
+
+// ClearInputModerationPolicy clears the value of the "input_moderation_policy" field.
+func (_u *GroupUpdate) ClearInputModerationPolicy() *GroupUpdate {
+	_u.mutation.ClearInputModerationPolicy()
+	return _u
+}
+
 // SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
 func (_u *GroupUpdate) SetInputModerationDedupeMinutes(v int) *GroupUpdate {
 	_u.mutation.ResetInputModerationDedupeMinutes()
@@ -1521,6 +1534,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedInputModerationMinConfidence(); ok {
 		_spec.AddField(group.FieldInputModerationMinConfidence, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.InputModerationPolicy(); ok {
+		_spec.SetField(group.FieldInputModerationPolicy, field.TypeJSON, value)
+	}
+	if _u.mutation.InputModerationPolicyCleared() {
+		_spec.ClearField(group.FieldInputModerationPolicy, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.InputModerationDedupeMinutes(); ok {
 		_spec.SetField(group.FieldInputModerationDedupeMinutes, field.TypeInt, value)
@@ -2718,6 +2737,18 @@ func (_u *GroupUpdateOne) AddInputModerationMinConfidence(v int) *GroupUpdateOne
 	return _u
 }
 
+// SetInputModerationPolicy sets the "input_moderation_policy" field.
+func (_u *GroupUpdateOne) SetInputModerationPolicy(v *domain.InputModerationPolicy) *GroupUpdateOne {
+	_u.mutation.SetInputModerationPolicy(v)
+	return _u
+}
+
+// ClearInputModerationPolicy clears the value of the "input_moderation_policy" field.
+func (_u *GroupUpdateOne) ClearInputModerationPolicy() *GroupUpdateOne {
+	_u.mutation.ClearInputModerationPolicy()
+	return _u
+}
+
 // SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
 func (_u *GroupUpdateOne) SetInputModerationDedupeMinutes(v int) *GroupUpdateOne {
 	_u.mutation.ResetInputModerationDedupeMinutes()
@@ -3398,6 +3429,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedInputModerationMinConfidence(); ok {
 		_spec.AddField(group.FieldInputModerationMinConfidence, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.InputModerationPolicy(); ok {
+		_spec.SetField(group.FieldInputModerationPolicy, field.TypeJSON, value)
+	}
+	if _u.mutation.InputModerationPolicyCleared() {
+		_spec.ClearField(group.FieldInputModerationPolicy, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.InputModerationDedupeMinutes(); ok {
 		_spec.SetField(group.FieldInputModerationDedupeMinutes, field.TypeInt, value)

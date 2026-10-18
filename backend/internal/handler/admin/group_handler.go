@@ -118,19 +118,20 @@ type CreateGroupRequest struct {
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes []string `json:"supported_model_scopes"`
 	// Sora 存储配额
-	SoraStorageQuotaBytes            int64    `json:"sora_storage_quota_bytes"`
-	InputModerationEnabled           bool     `json:"input_moderation_enabled"`
-	InputModerationAutoDisableUser   bool     `json:"input_moderation_auto_disable_user"`
-	InputModerationCategories        []string `json:"input_moderation_categories"`
-	InputModerationActionMode        string   `json:"input_moderation_action_mode" binding:"omitempty,oneof=cooldown_then_disable immediate_disable warn_then_cooldown warn_then_disable"`
-	InputModerationCooldownMinutes   int      `json:"input_moderation_cooldown_minutes"`
-	InputModerationDisableAfterHits  int      `json:"input_moderation_disable_after_hits"`
-	InputModerationStrikeWindowHours int      `json:"input_moderation_strike_window_hours"`
-	InputModerationDedupeMinutes     int      `json:"input_moderation_dedupe_minutes"`
-	InputModerationMinConfidence     int      `json:"input_moderation_min_confidence"`
-	CodexClientPolicy                string   `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only local_proxy_only"`
-	ClaudeDeviceLimitMode            string   `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
-	ClaudeDeviceBaseLimit            int      `json:"claude_device_base_limit"`
+	SoraStorageQuotaBytes            int64                          `json:"sora_storage_quota_bytes"`
+	InputModerationEnabled           bool                           `json:"input_moderation_enabled"`
+	InputModerationAutoDisableUser   bool                           `json:"input_moderation_auto_disable_user"`
+	InputModerationCategories        []string                       `json:"input_moderation_categories"`
+	InputModerationActionMode        string                         `json:"input_moderation_action_mode" binding:"omitempty,oneof=cooldown_then_disable immediate_disable warn_then_cooldown warn_then_disable"`
+	InputModerationCooldownMinutes   int                            `json:"input_moderation_cooldown_minutes"`
+	InputModerationDisableAfterHits  int                            `json:"input_moderation_disable_after_hits"`
+	InputModerationStrikeWindowHours int                            `json:"input_moderation_strike_window_hours"`
+	InputModerationDedupeMinutes     int                            `json:"input_moderation_dedupe_minutes"`
+	InputModerationPolicy            *service.InputModerationPolicy `json:"input_moderation_policy,omitempty"`
+	InputModerationMinConfidence     int                            `json:"input_moderation_min_confidence"`
+	CodexClientPolicy                string                         `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only local_proxy_only"`
+	ClaudeDeviceLimitMode            string                         `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
+	ClaudeDeviceBaseLimit            int                            `json:"claude_device_base_limit"`
 	// 从指定分组复制账号（创建后自动绑定）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }
@@ -174,19 +175,20 @@ type UpdateGroupRequest struct {
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes *[]string `json:"supported_model_scopes"`
 	// Sora 存储配额
-	SoraStorageQuotaBytes            *int64    `json:"sora_storage_quota_bytes"`
-	InputModerationEnabled           *bool     `json:"input_moderation_enabled"`
-	InputModerationAutoDisableUser   *bool     `json:"input_moderation_auto_disable_user"`
-	InputModerationCategories        *[]string `json:"input_moderation_categories"`
-	InputModerationActionMode        *string   `json:"input_moderation_action_mode" binding:"omitempty,oneof=cooldown_then_disable immediate_disable warn_then_cooldown warn_then_disable"`
-	InputModerationCooldownMinutes   *int      `json:"input_moderation_cooldown_minutes"`
-	InputModerationDisableAfterHits  *int      `json:"input_moderation_disable_after_hits"`
-	InputModerationStrikeWindowHours *int      `json:"input_moderation_strike_window_hours"`
-	InputModerationDedupeMinutes     *int      `json:"input_moderation_dedupe_minutes"`
-	InputModerationMinConfidence     *int      `json:"input_moderation_min_confidence"`
-	CodexClientPolicy                *string   `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only local_proxy_only"`
-	ClaudeDeviceLimitMode            *string   `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
-	ClaudeDeviceBaseLimit            *int      `json:"claude_device_base_limit"`
+	SoraStorageQuotaBytes            *int64                         `json:"sora_storage_quota_bytes"`
+	InputModerationEnabled           *bool                          `json:"input_moderation_enabled"`
+	InputModerationAutoDisableUser   *bool                          `json:"input_moderation_auto_disable_user"`
+	InputModerationCategories        *[]string                      `json:"input_moderation_categories"`
+	InputModerationActionMode        *string                        `json:"input_moderation_action_mode" binding:"omitempty,oneof=cooldown_then_disable immediate_disable warn_then_cooldown warn_then_disable"`
+	InputModerationCooldownMinutes   *int                           `json:"input_moderation_cooldown_minutes"`
+	InputModerationDisableAfterHits  *int                           `json:"input_moderation_disable_after_hits"`
+	InputModerationStrikeWindowHours *int                           `json:"input_moderation_strike_window_hours"`
+	InputModerationDedupeMinutes     *int                           `json:"input_moderation_dedupe_minutes"`
+	InputModerationPolicy            *service.InputModerationPolicy `json:"input_moderation_policy,omitempty"`
+	InputModerationMinConfidence     *int                           `json:"input_moderation_min_confidence"`
+	CodexClientPolicy                *string                        `json:"codex_client_policy" binding:"omitempty,oneof=off official_clients cli_only local_proxy_only"`
+	ClaudeDeviceLimitMode            *string                        `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
+	ClaudeDeviceBaseLimit            *int                           `json:"claude_device_base_limit"`
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }
@@ -319,6 +321,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		InputModerationDisableAfterHits:  req.InputModerationDisableAfterHits,
 		InputModerationStrikeWindowHours: req.InputModerationStrikeWindowHours,
 		InputModerationDedupeMinutes:     req.InputModerationDedupeMinutes,
+		InputModerationPolicy:            req.InputModerationPolicy,
 		InputModerationMinConfidence:     req.InputModerationMinConfidence,
 		CodexClientPolicy:                req.CodexClientPolicy,
 		ClaudeDeviceLimitMode:            req.ClaudeDeviceLimitMode,
@@ -391,6 +394,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		InputModerationDisableAfterHits:  req.InputModerationDisableAfterHits,
 		InputModerationStrikeWindowHours: req.InputModerationStrikeWindowHours,
 		InputModerationDedupeMinutes:     req.InputModerationDedupeMinutes,
+		InputModerationPolicy:            req.InputModerationPolicy,
 		InputModerationMinConfidence:     req.InputModerationMinConfidence,
 		CodexClientPolicy:                req.CodexClientPolicy,
 		ClaudeDeviceLimitMode:            req.ClaudeDeviceLimitMode,

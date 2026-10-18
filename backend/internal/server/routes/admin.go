@@ -400,6 +400,7 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		adminSettings.GET("/model-pricing/history", h.Admin.Setting.ModelPricingHistory)
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
+		adminSettings.GET("/jev/categories", h.Admin.Setting.GetJevCategories)
 		adminSettings.GET("/jev", h.Admin.Setting.GetJevSettings)
 		adminSettings.PUT("/jev", h.Admin.Setting.UpdateJevSettings)
 		adminSettings.GET("/chatgpt-billing", h.Admin.Setting.GetChatGPTBillingSettings)

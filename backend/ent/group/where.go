@@ -1905,6 +1905,16 @@ func InputModerationMinConfidenceLTE(v int) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldInputModerationMinConfidence, v))
 }
 
+// InputModerationPolicyIsNil applies the IsNil predicate on the "input_moderation_policy" field.
+func InputModerationPolicyIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldInputModerationPolicy))
+}
+
+// InputModerationPolicyNotNil applies the NotNil predicate on the "input_moderation_policy" field.
+func InputModerationPolicyNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldInputModerationPolicy))
+}
+
 // InputModerationDedupeMinutesEQ applies the EQ predicate on the "input_moderation_dedupe_minutes" field.
 func InputModerationDedupeMinutesEQ(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldInputModerationDedupeMinutes, v))

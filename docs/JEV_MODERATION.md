@@ -86,3 +86,5 @@ event foreign-key check. No live provider calls or production database migration
 User authorization selected Jev as the development default; it did not establish
 holdout qualification or authorize deployment. Use `saiai-release` and private Ops
 for any future rollout. Do not rerun paid evaluations based solely on old consent.
+
+Explicit opt-in category expansion is described in [JEV_EXPANDED_POLICY.md](JEV_EXPANDED_POLICY.md); NULL group policy continues to use the four-category rules described above.

@@ -177,6 +177,7 @@ type CreateGroupInput struct {
 	InputModerationDisableAfterHits  int
 	InputModerationStrikeWindowHours int
 	InputModerationDedupeMinutes     int
+	InputModerationPolicy            *InputModerationPolicy
 	InputModerationMinConfidence     int
 	CodexClientPolicy                string
 	ClaudeDeviceLimitMode            string
@@ -235,6 +236,7 @@ type UpdateGroupInput struct {
 	InputModerationDisableAfterHits  *int
 	InputModerationStrikeWindowHours *int
 	InputModerationDedupeMinutes     *int
+	InputModerationPolicy            *InputModerationPolicy
 	InputModerationMinConfidence     *int
 	CodexClientPolicy                *string
 	ClaudeDeviceLimitMode            *string
@@ -922,6 +924,14 @@ func (s *adminServiceImpl) GetGroup(ctx context.Context, id int64) (*Group, erro
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
+	if input.InputModerationPolicy == nil {
+		if err := ValidateLegacyModerationCategories(input.InputModerationCategories); err != nil {
+			return nil, infraerrors.BadRequest("INVALID_MODERATION_CATEGORIES", err.Error())
+		}
+	}
+	if err := ValidateInputModerationPolicy(input.InputModerationPolicy); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_MODERATION_POLICY", err.Error())
+	}
 	if input.RequiredLevelID != nil {
 		if *input.RequiredLevelID <= 0 {
 			input.RequiredLevelID = nil
@@ -1065,6 +1075,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		InputModerationDisableAfterHits:  normalizePositiveInt(input.InputModerationDisableAfterHits, 3, 1, 20),
 		InputModerationStrikeWindowHours: normalizePositiveInt(input.InputModerationStrikeWindowHours, 24, 1, 720),
 		InputModerationDedupeMinutes:     normalizePositiveInt(input.InputModerationDedupeMinutes, 5, 1, 1440),
+		InputModerationPolicy:            input.InputModerationPolicy,
 		InputModerationMinConfidence:     normalizePositiveInt(input.InputModerationMinConfidence, 90, 1, 100),
 		CodexClientPolicy:                normalizeCodexClientPolicy(input.CodexClientPolicy),
 		ClaudeDeviceLimitMode:            normalizeClaudeDeviceLimitMode(input.ClaudeDeviceLimitMode),
@@ -1404,6 +1415,11 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.InputModerationAutoDisableUser = *input.InputModerationAutoDisableUser
 	}
 	if input.InputModerationCategories != nil {
+		if input.InputModerationPolicy == nil && group.InputModerationPolicy == nil && !sameLegacyModerationCategories(group.InputModerationCategories, *input.InputModerationCategories) {
+			if err := ValidateLegacyModerationCategories(*input.InputModerationCategories); err != nil {
+				return nil, infraerrors.BadRequest("INVALID_MODERATION_CATEGORIES", err.Error())
+			}
+		}
 		group.InputModerationCategories = normalizeInputModerationCategories(*input.InputModerationCategories)
 	}
 	if input.InputModerationActionMode != nil {
@@ -1417,6 +1433,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.InputModerationStrikeWindowHours != nil {
 		group.InputModerationStrikeWindowHours = normalizePositiveInt(*input.InputModerationStrikeWindowHours, 24, 1, 720)
+	}
+	if input.InputModerationPolicy != nil {
+		if err := ValidateInputModerationPolicy(input.InputModerationPolicy); err != nil {
+			return nil, infraerrors.BadRequest("INVALID_MODERATION_POLICY", err.Error())
+		}
+		group.InputModerationPolicy = input.InputModerationPolicy
 	}
 	if input.InputModerationMinConfidence != nil {
 		group.InputModerationMinConfidence = normalizePositiveInt(*input.InputModerationMinConfidence, 90, 1, 100)

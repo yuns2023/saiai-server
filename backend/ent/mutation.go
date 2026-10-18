@@ -9325,6 +9325,7 @@ type GroupMutation struct {
 	addinput_moderation_strike_window_hours *int
 	input_moderation_min_confidence         *int
 	addinput_moderation_min_confidence      *int
+	input_moderation_policy                 **domain.InputModerationPolicy
 	input_moderation_dedupe_minutes         *int
 	addinput_moderation_dedupe_minutes      *int
 	codex_client_policy                     *string
@@ -11774,6 +11775,55 @@ func (m *GroupMutation) ResetInputModerationMinConfidence() {
 	m.addinput_moderation_min_confidence = nil
 }
 
+// SetInputModerationPolicy sets the "input_moderation_policy" field.
+func (m *GroupMutation) SetInputModerationPolicy(dmp *domain.InputModerationPolicy) {
+	m.input_moderation_policy = &dmp
+}
+
+// InputModerationPolicy returns the value of the "input_moderation_policy" field in the mutation.
+func (m *GroupMutation) InputModerationPolicy() (r *domain.InputModerationPolicy, exists bool) {
+	v := m.input_moderation_policy
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInputModerationPolicy returns the old "input_moderation_policy" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldInputModerationPolicy(ctx context.Context) (v *domain.InputModerationPolicy, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInputModerationPolicy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInputModerationPolicy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInputModerationPolicy: %w", err)
+	}
+	return oldValue.InputModerationPolicy, nil
+}
+
+// ClearInputModerationPolicy clears the value of the "input_moderation_policy" field.
+func (m *GroupMutation) ClearInputModerationPolicy() {
+	m.input_moderation_policy = nil
+	m.clearedFields[group.FieldInputModerationPolicy] = struct{}{}
+}
+
+// InputModerationPolicyCleared returns if the "input_moderation_policy" field was cleared in this mutation.
+func (m *GroupMutation) InputModerationPolicyCleared() bool {
+	_, ok := m.clearedFields[group.FieldInputModerationPolicy]
+	return ok
+}
+
+// ResetInputModerationPolicy resets all changes to the "input_moderation_policy" field.
+func (m *GroupMutation) ResetInputModerationPolicy() {
+	m.input_moderation_policy = nil
+	delete(m.clearedFields, group.FieldInputModerationPolicy)
+}
+
 // SetInputModerationDedupeMinutes sets the "input_moderation_dedupe_minutes" field.
 func (m *GroupMutation) SetInputModerationDedupeMinutes(i int) {
 	m.input_moderation_dedupe_minutes = &i
@@ -12343,7 +12393,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 49)
+	fields := make([]string, 0, 50)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -12479,6 +12529,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.input_moderation_min_confidence != nil {
 		fields = append(fields, group.FieldInputModerationMinConfidence)
 	}
+	if m.input_moderation_policy != nil {
+		fields = append(fields, group.FieldInputModerationPolicy)
+	}
 	if m.input_moderation_dedupe_minutes != nil {
 		fields = append(fields, group.FieldInputModerationDedupeMinutes)
 	}
@@ -12589,6 +12642,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.InputModerationStrikeWindowHours()
 	case group.FieldInputModerationMinConfidence:
 		return m.InputModerationMinConfidence()
+	case group.FieldInputModerationPolicy:
+		return m.InputModerationPolicy()
 	case group.FieldInputModerationDedupeMinutes:
 		return m.InputModerationDedupeMinutes()
 	case group.FieldCodexClientPolicy:
@@ -12696,6 +12751,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldInputModerationStrikeWindowHours(ctx)
 	case group.FieldInputModerationMinConfidence:
 		return m.OldInputModerationMinConfidence(ctx)
+	case group.FieldInputModerationPolicy:
+		return m.OldInputModerationPolicy(ctx)
 	case group.FieldInputModerationDedupeMinutes:
 		return m.OldInputModerationDedupeMinutes(ctx)
 	case group.FieldCodexClientPolicy:
@@ -13027,6 +13084,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetInputModerationMinConfidence(v)
+		return nil
+	case group.FieldInputModerationPolicy:
+		v, ok := value.(*domain.InputModerationPolicy)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInputModerationPolicy(v)
 		return nil
 	case group.FieldInputModerationDedupeMinutes:
 		v, ok := value.(int)
@@ -13416,6 +13480,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	if m.FieldCleared(group.FieldModelRouting) {
 		fields = append(fields, group.FieldModelRouting)
 	}
+	if m.FieldCleared(group.FieldInputModerationPolicy) {
+		fields = append(fields, group.FieldInputModerationPolicy)
+	}
 	return fields
 }
 
@@ -13480,6 +13547,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldModelRouting:
 		m.ClearModelRouting()
+		return nil
+	case group.FieldInputModerationPolicy:
+		m.ClearInputModerationPolicy()
 		return nil
 	}
 	return fmt.Errorf("unknown Group nullable field %s", name)
@@ -13623,6 +13693,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldInputModerationMinConfidence:
 		m.ResetInputModerationMinConfidence()
+		return nil
+	case group.FieldInputModerationPolicy:
+		m.ResetInputModerationPolicy()
 		return nil
 	case group.FieldInputModerationDedupeMinutes:
 		m.ResetInputModerationDedupeMinutes()

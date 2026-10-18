@@ -451,6 +451,7 @@ var (
 		{Name: "input_moderation_disable_after_hits", Type: field.TypeInt, Default: 3},
 		{Name: "input_moderation_strike_window_hours", Type: field.TypeInt, Default: 24},
 		{Name: "input_moderation_min_confidence", Type: field.TypeInt, Default: 90},
+		{Name: "input_moderation_policy", Type: field.TypeJSON, Nullable: true},
 		{Name: "input_moderation_dedupe_minutes", Type: field.TypeInt, Default: 5},
 		{Name: "codex_client_policy", Type: field.TypeString, Size: 32, Default: "off"},
 		{Name: "claude_device_limit_mode", Type: field.TypeString, Size: 16, Default: "off"},
@@ -465,7 +466,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "groups_access_levels_required_groups",
-				Columns:    []*schema.Column{GroupsColumns[49]},
+				Columns:    []*schema.Column{GroupsColumns[50]},
 				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -504,7 +505,7 @@ var (
 			{
 				Name:    "group_required_level_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[49]},
+				Columns: []*schema.Column{GroupsColumns[50]},
 			},
 		},
 	}

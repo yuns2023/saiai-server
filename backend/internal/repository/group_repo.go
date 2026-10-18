@@ -111,6 +111,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetInputModerationStrikeWindowHours(groupIn.InputModerationStrikeWindowHours).
 		SetInputModerationDedupeMinutes(groupIn.InputModerationDedupeMinutes).
 		SetInputModerationMinConfidence(groupIn.InputModerationMinConfidence).
+		SetInputModerationPolicy(groupIn.InputModerationPolicy).
 		SetCodexClientPolicy(groupIn.CodexClientPolicy).
 		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
 		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)
@@ -205,6 +206,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetInputModerationStrikeWindowHours(groupIn.InputModerationStrikeWindowHours).
 		SetInputModerationDedupeMinutes(groupIn.InputModerationDedupeMinutes).
 		SetInputModerationMinConfidence(groupIn.InputModerationMinConfidence).
+		SetInputModerationPolicy(groupIn.InputModerationPolicy).
 		SetCodexClientPolicy(groupIn.CodexClientPolicy).
 		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
 		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)

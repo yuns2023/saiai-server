@@ -59,26 +59,27 @@ type InputModerationClient interface {
 // InputModerationEvent is a metadata-only audit record. Raw user text must not
 // be added to this structure.
 type InputModerationEvent struct {
-	Scores          map[string]float64
-	MinConfidence   int
-	JobID           string
-	RequestID       string
-	UserID          int64
-	Username        string
-	DeviceRef       string
-	APIKeyID        int64
-	GroupID         int64
-	InputHash       string
-	Safety          string
-	Categories      []string
-	Action          string
-	ModelVersion    string
-	PolicyVersion   string
-	Source          string
-	TurnNumber      int
-	CountedAsStrike bool
-	EnqueuedAt      time.Time
-	CreatedAt       time.Time
+	DecisionSnapshot *ModerationDecisionSnapshot
+	Scores           map[string]float64
+	MinConfidence    int
+	JobID            string
+	RequestID        string
+	UserID           int64
+	Username         string
+	DeviceRef        string
+	APIKeyID         int64
+	GroupID          int64
+	InputHash        string
+	Safety           string
+	Categories       []string
+	Action           string
+	ModelVersion     string
+	PolicyVersion    string
+	Source           string
+	TurnNumber       int
+	CountedAsStrike  bool
+	EnqueuedAt       time.Time
+	CreatedAt        time.Time
 }
 
 type InputModerationEventRepository interface {
@@ -400,7 +401,23 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		return nil
 	}
 
-	result, err := s.client.Classify(classifyCtx, task.Text)
+	submittedPolicy := EffectiveInputModerationPolicy(group)
+	if err := ValidateInputModerationPolicy(submittedPolicy); err != nil {
+		return err
+	}
+	if len(submittedPolicy.AuditCategories) == 0 {
+		return s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "no_categories", DecisionSnapshot: moderationDecisionSnapshot(group)})
+	}
+	var result *InputModerationClassification
+	if group.InputModerationPolicy != nil {
+		policyClient, ok := s.client.(InputModerationPolicyClient)
+		if !ok {
+			return fmt.Errorf("moderation client does not support versioned policies")
+		}
+		result, err = policyClient.ClassifyWithPolicy(classifyCtx, task.Text, submittedPolicy)
+	} else {
+		result, err = s.client.Classify(classifyCtx, task.Text)
+	}
 	if err != nil {
 		slog.Warn("input_moderation_classify_failed",
 			"user_id", task.UserID,
@@ -438,6 +455,20 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		return nil
 	}
 
+	policy := EffectiveInputModerationPolicy(group)
+	if err := ValidateInputModerationPolicy(policy); err != nil {
+		return err
+	}
+	if !sameModerationDetection(submittedPolicy, policy) {
+		return s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "policy_changed"})
+	}
+	if group.InputModerationPolicy != nil {
+		for _, id := range policy.AuditCategories {
+			if _, ok := result.Scores[id]; !ok {
+				return fmt.Errorf("incomplete moderation scores")
+			}
+		}
+	}
 	if len(result.Scores) > 0 {
 		result.Categories = nil
 		result.Safety = InputModerationSafetySafe
@@ -445,45 +476,53 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 			if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
 				return fmt.Errorf("invalid moderation score")
 			}
-			if score >= float64(group.InputModerationMinConfidence)/100 {
+			if group.InputModerationPolicy != nil && !moderationPolicyMatches(policy.AuditCategories, []string{category}) {
+				delete(result.Scores, category)
+				continue
+			}
+			if score >= float64(moderationPolicyThreshold(policy, category, group.InputModerationMinConfidence))/100 {
 				result.Categories = append(result.Categories, category)
 				result.Safety = InputModerationSafetyUnsafe
 			}
 		}
 	}
 	if result.Safety == InputModerationSafetySafe {
-		return s.recordResult(task, InputModerationResult{Status: "passed", Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion})
+		return s.recordResult(task, InputModerationResult{Status: "passed", DecisionSnapshot: moderationDecisionSnapshot(group), Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion})
 	}
 
 	hash := sha256.Sum256([]byte(task.Text))
 	event := &InputModerationEvent{
-		JobID:         task.JobID,
-		RequestID:     truncateModerationText(strings.TrimSpace(task.RequestID), 128),
-		UserID:        task.UserID,
-		Username:      task.Username,
-		DeviceRef:     task.DeviceRef,
-		APIKeyID:      task.APIKeyID,
-		GroupID:       task.GroupID,
-		InputHash:     hex.EncodeToString(hash[:]),
-		Safety:        result.Safety,
-		Categories:    normalizeModerationCategories(result.Categories),
-		Scores:        result.Scores,
-		MinConfidence: group.InputModerationMinConfidence,
-		Action:        InputModerationActionAudit,
-		ModelVersion:  truncateModerationText(strings.TrimSpace(result.ModelVersion), 128),
-		PolicyVersion: fmt.Sprintf("%d", group.UpdatedAt.UTC().UnixNano()),
-		Source:        task.Source,
-		TurnNumber:    task.TurnNumber,
-		EnqueuedAt:    task.EnqueuedAt,
-		CreatedAt:     time.Now().UTC(),
+		DecisionSnapshot: moderationDecisionSnapshot(group),
+		JobID:            task.JobID,
+		RequestID:        truncateModerationText(strings.TrimSpace(task.RequestID), 128),
+		UserID:           task.UserID,
+		Username:         task.Username,
+		DeviceRef:        task.DeviceRef,
+		APIKeyID:         task.APIKeyID,
+		GroupID:          task.GroupID,
+		InputHash:        hex.EncodeToString(hash[:]),
+		Safety:           result.Safety,
+		Categories:       normalizeModerationCategories(result.Categories),
+		Scores:           result.Scores,
+		MinConfidence:    group.InputModerationMinConfidence,
+		Action:           InputModerationActionAudit,
+		ModelVersion:     truncateModerationText(strings.TrimSpace(result.ModelVersion), 128),
+		PolicyVersion:    fmt.Sprintf("%s:%d", policy.RulesVersion, group.UpdatedAt.UTC().UnixNano()),
+		Source:           task.Source,
+		TurnNumber:       task.TurnNumber,
+		EnqueuedAt:       task.EnqueuedAt,
+		CreatedAt:        time.Now().UTC(),
 	}
-	if result.Safety == InputModerationSafetyUnsafe && group.InputModerationAutoDisableUser &&
-		!moderationCategoriesMatch(group.InputModerationCategories, result.Categories) {
+	enforcementMatch := moderationCategoriesMatch(group.InputModerationCategories, result.Categories)
+	if group.InputModerationPolicy != nil {
+		enforcementMatch = moderationPolicyMatches(policy.EnforcementCategories, result.Categories)
+	}
+	if result.Safety == InputModerationSafetyUnsafe && group.InputModerationAutoDisableUser && !enforcementMatch {
 		event.Action = InputModerationActionCategoryNotSelected
 	}
 	incidentApplied := false
 	if result.Safety == InputModerationSafetyUnsafe && group.InputModerationAutoDisableUser &&
-		moderationCategoriesMatch(group.InputModerationCategories, result.Categories) && (group.InputModerationMinConfidence == 0 || len(result.Scores) > 0) && s.eventRepo != nil {
+		enforcementMatch && (group.InputModerationMinConfidence == 0 || len(result.Scores) > 0) && s.eventRepo != nil {
 		transition, err := s.eventRepo.ApplyInputModerationIncident(actionCtx, event, InputModerationEscalationPolicy{
 			ActionMode:       group.InputModerationActionMode,
 			Cooldown:         time.Duration(group.InputModerationCooldownMinutes) * time.Minute,
@@ -526,7 +565,7 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 			return err
 		}
 	}
-	if err := s.recordResult(task, InputModerationResult{Status: "flagged", Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion}); err != nil {
+	if err := s.recordResult(task, InputModerationResult{Status: "flagged", DecisionSnapshot: moderationDecisionSnapshot(group), Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion}); err != nil {
 		return err
 	}
 	slog.Info("input_moderation_decision",
