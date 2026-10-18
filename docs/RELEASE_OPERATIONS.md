@@ -71,7 +71,7 @@ GOMAXPROCS=2 go test -p 1 -tags embed ./internal/web \
 
 cd ../frontend
 pnpm exec vitest run src/components/keys/__tests__/UseKeyModal.spec.ts \
-  --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+  --maxWorkers=1 --no-file-parallelism
 ```
 
 The public client repository separately validates Rust tests and strict

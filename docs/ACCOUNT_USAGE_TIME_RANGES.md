@@ -20,8 +20,9 @@ Account statistics default to the last 30 calendar days through the current
 minute. Totals, peaks, distribution charts and performance follow the selected
 range. The today overview is explicitly the intersection of today and that
 range. Daily averages divide by days with usage; empty ranges report zero active
-days and zero averages. The active-day denominator counts calendar days touched
-by the half-open range, respecting timezone/DST boundaries.
+days and zero averages. `ActualDaysUsed` is the number of daily buckets with
+usage and supplies the average denominator. `Days` separately counts calendar
+days touched by the half-open range, respecting timezone/DST boundaries.
 
 Account management displays all groups and their full names, wrapping long
 labels and expanding row height. Compact group badges remain available to other
