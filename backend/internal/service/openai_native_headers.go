@@ -189,16 +189,16 @@ func (s *OpenAIGatewayService) bindOpenAINativeTurnState(account *Account, userI
 	store := s.getOpenAIWSStateStore()
 	// Persist only a user-scoped digest and owner. Keep the bounded local
 	// entries even if Redis is temporarily unavailable.
-	if err := store.BindTurnStateAccountForUser(context.Background(), userID, state, account.ID, s.openAIWSSessionStickyTTL()); err != nil {
+	if err := store.BindTurnStateAccountForUser(context.Background(), userID, state, account.ID, openAINativeTurnStateOwnershipTTL); err != nil {
 		logOpenAIWSV2Passthrough("turn_state_owner_bind_failed account_id=%d", account.ID)
 	}
 	if sessionHash == "" {
 		return
 	}
-	store.BindSessionTurnState(0, openAIWSUserTurnStateSessionHash(userID, account.ID, sessionHash), state, s.openAIWSSessionStickyTTL())
+	store.BindSessionTurnState(0, openAIWSUserTurnStateSessionHash(userID, account.ID, sessionHash), state, openAINativeTurnStateOwnershipTTL)
 	// Concurrent turns can legitimately have different tokens. Ownership is a
 	// set of observed tokens, rather than only the last value for the session.
-	store.BindSessionTurnState(0, openAINativeTurnStateKey(userID, account.ID, sessionHash, state), state, s.openAIWSSessionStickyTTL())
+	store.BindSessionTurnState(0, openAINativeTurnStateKey(userID, account.ID, sessionHash, state), state, openAINativeTurnStateOwnershipTTL)
 }
 
 func (s *OpenAIGatewayService) validateOpenAINativeFrameTurnState(c *gin.Context, account *Account, payload []byte) error {

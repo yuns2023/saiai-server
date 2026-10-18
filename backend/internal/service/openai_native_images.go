@@ -79,6 +79,9 @@ func (s *OpenAIGatewayService) ForwardNativeCodexImage(
 		// a possibly accepted image job on this or another pooled account.
 		return nil, fmt.Errorf("native Codex image upstream returned status %d", resp.StatusCode)
 	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 && !gjson.GetBytes(responseBody, "error").Exists() && len(gjson.GetBytes(responseBody, "data").Array()) > 0 {
+		s.renewOpenAINativeTurnStateAfterSuccess(ctx, account, getOpenAIUserIDFromContext(c), openAINativeTurnStateKeys(getOpenAIUserIDFromContext(c), c.Request.Header, nil))
+	}
 	usage := parseOpenAIImageUsage(responseBody)
 	requestID := resp.Header.Get("X-Request-Id")
 	if requestID == "" {

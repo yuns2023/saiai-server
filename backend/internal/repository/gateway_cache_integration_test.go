@@ -5,6 +5,7 @@ package repository
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -174,4 +175,79 @@ func (s *GatewayCacheSuite) TestChatGPTTurnContextAtomicSnapshotAndScope() {
 	require.NoError(s.T(), err)
 	require.Nil(s.T(), copy)
 	require.Error(s.T(), firstCache.BindChatGPTResume(s.ctx, alias, scope.TurnKey(changed.Identity)))
+}
+
+func (s *GatewayCacheSuite) TestRefreshSessionTTLForAccount() {
+	cache := s.cache.(*gatewayCache)
+	for _, tc := range []struct {
+		name              string
+		owner             int64
+		ttl               time.Duration
+		exists, wantRenew bool
+	}{
+		{"same_owner", 17, time.Minute, true, true},
+		{"wrong_owner", 18, time.Minute, true, false},
+		{"missing", 17, 0, false, false},
+		{"persistent", 17, 0, true, false},
+	} {
+		s.Run(tc.name, func() {
+			key := "turn-renew-" + tc.name
+			if tc.exists {
+				require.NoError(s.T(), cache.SetSessionAccountID(s.ctx, 0, key, tc.owner, tc.ttl))
+			}
+			remaining, err := cache.RefreshSessionTTLForAccount(s.ctx, 0, key, 17, time.Hour, time.Minute)
+			require.NoError(s.T(), err)
+			if tc.wantRenew {
+				require.Equal(s.T(), time.Hour, remaining)
+				// A second success within a minute must not reset the deadline again.
+				require.NoError(s.T(), s.rdb.PExpire(s.ctx, buildSessionKey(0, key), time.Hour-30*time.Second).Err())
+				remaining, err = cache.RefreshSessionTTLForAccount(s.ctx, 0, key, 17, time.Hour, time.Minute)
+				require.NoError(s.T(), err)
+				require.LessOrEqual(s.T(), remaining, time.Hour-30*time.Second)
+				require.Greater(s.T(), remaining, 59*time.Minute)
+			} else {
+				require.Zero(s.T(), remaining)
+			}
+			if tc.exists {
+				owner, err := cache.GetSessionAccountID(s.ctx, 0, key)
+				require.NoError(s.T(), err)
+				require.Equal(s.T(), tc.owner, owner)
+			} else {
+				require.Zero(s.T(), s.rdb.Exists(s.ctx, buildSessionKey(0, key)).Val())
+			}
+		})
+	}
+	// Expire while a request is in flight; successful completion must not SET it.
+	require.NoError(s.T(), cache.SetSessionAccountID(s.ctx, 0, "late", 17, time.Minute))
+	require.NoError(s.T(), s.rdb.PExpire(s.ctx, buildSessionKey(0, "late"), -time.Second).Err())
+	remaining, err := cache.RefreshSessionTTLForAccount(s.ctx, 0, "late", 17, time.Hour, time.Minute)
+	require.NoError(s.T(), err)
+	require.Zero(s.T(), remaining)
+	require.Zero(s.T(), s.rdb.Exists(s.ctx, buildSessionKey(0, "late")).Val())
+	// Concurrent stale completions cannot overwrite the current account.
+	require.NoError(s.T(), cache.SetSessionAccountID(s.ctx, 0, "concurrent", 18, time.Minute))
+	var wg sync.WaitGroup
+	outcomes := make(chan time.Duration, 16)
+	errs := make(chan error, 16)
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ttl, err := cache.RefreshSessionTTLForAccount(s.ctx, 0, "concurrent", 17, time.Hour, time.Minute)
+			outcomes <- ttl
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(outcomes)
+	close(errs)
+	for err := range errs {
+		require.NoError(s.T(), err)
+	}
+	for ttl := range outcomes {
+		require.Zero(s.T(), ttl)
+	}
+	owner, err := cache.GetSessionAccountID(s.ctx, 0, "concurrent")
+	require.NoError(s.T(), err)
+	require.EqualValues(s.T(), 18, owner)
 }

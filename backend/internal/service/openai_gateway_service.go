@@ -2849,6 +2849,19 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			responseID = openAIResponseIDForAccountBinding(c)
 		}
+		if strictNativeOAuth && responseID != "" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			keys := openAINativeTurnStateKeys(getOpenAIUserIDFromContext(c), c.Request.Header, nil)
+			// Read decoded metadata even when the preserved wire body is zstd.
+			if metadata, ok := reqBody["client_metadata"].(map[string]any); ok {
+				if state, ok := metadata[openAIWSTurnStateHeader].(string); ok && state != "" {
+					key := openAITurnStateAccountKey(getOpenAIUserIDFromContext(c), state)
+					if len(keys) == 0 || keys[0] != key {
+						keys = append(keys, key)
+					}
+				}
+			}
+			s.renewOpenAINativeTurnStateAfterSuccess(ctx, account, getOpenAIUserIDFromContext(c), keys)
+		}
 		if responseID != "" {
 			bindErr := s.getOpenAIWSStateStore().BindResponseAccountForUser(
 				ctx, getOpenAIUserIDFromContext(c), responseID, account.ID, s.openAIWSResponseStickyTTL(),

@@ -127,3 +127,24 @@ func (c *gatewayCache) DeletePendingSessionAccountID(ctx context.Context, groupI
 	key := buildPendingSessionKey(groupID, sessionHash)
 	return c.rdb.Del(ctx, key).Err()
 }
+
+// RefreshSessionTTLForAccount never creates or reassigns a binding. Comparing
+// ownership and extending expiry in one Redis operation prevents a stale
+// completion from renewing a different pooled account's state.
+var refreshSessionTTLForAccountScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+local remaining = redis.call('PTTL', KEYS[1])
+if remaining <= 0 then return 0 end
+local ttl = tonumber(ARGV[2])
+local interval = tonumber(ARGV[3])
+if remaining <= ttl - interval then
+ redis.call('PEXPIRE', KEYS[1], ttl)
+ return ttl
+end
+return remaining
+`)
+
+func (c *gatewayCache) RefreshSessionTTLForAccount(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl, interval time.Duration) (time.Duration, error) {
+	remaining, err := refreshSessionTTLForAccountScript.Run(ctx, c.rdb, []string{buildSessionKey(groupID, sessionHash)}, accountID, ttl.Milliseconds(), interval.Milliseconds()).Int64()
+	return time.Duration(remaining) * time.Millisecond, err
+}

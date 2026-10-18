@@ -90,14 +90,33 @@ distinguish an expired shared key from a never-recorded key. A Redis miss is not
 classified as a cache outage. These fields diagnose newly observed failures;
 they cannot reconstruct the cause of older generic 409 records.
 
-Ownership TTL is bounded by the one-hour session-sticky cap and is renewed by
-observing provider-issued state, not by validating an incoming client token.
-The deterministic continuous-use regression demonstrates that an unchanged token
-can validate repeatedly and then fail after all ownership evidence expires.
-This reproduces a possible mechanism, not proof that a historical incident was
-caused by expiry. The diagnostic change preserves this existing expiry contract
-and does not silently refresh, remove or replace client state.
+Turn-state ownership has its own one-hour sliding TTL, independent of scheduler
+session-stickiness configuration. Provider observations establish ownership;
+otherwise only successfully completed upstream use renews an existing binding.
+Validation alone, errors, incomplete responses and abandoned turns do not renew.
+HTTP requires a successfully processed response with a successful response-ID
+anchor. Native image requests require a 2xx response with actual image output.
+WS handshake state applies to the connection; frame state is renewed only by
+that frame's correlated successful turn. Pending WS renewal receipts contain
+only digests and are bounded to 64 outstanding turns; overflow skips renewal
+without changing relay admission or frames.
 
+Redis atomically compares the account and extends only an existing expiring key,
+with TTL writes throttled to once per minute. Local owner deadlines follow the
+remaining shared TTL; a shared-cache error never extends only the local copy.
+No raw state is written to Redis. Compatibility token caches need not be extended
+because the shared/local digest ownership remains the validation authority.
+Missing, expired, persistent or reassigned keys are not recreated by a late
+completion, even if that request was admitted before expiry. Such a long-request
+or idle-gap boundary still requires a newly observed provider state or a fresh
+conversation. `openai.turn_state_renewal_skipped` records only bounded outcomes,
+internal IDs and the digest when renewal cannot be performed.
+
+The deterministic regression preserves proof that admission alone cannot renew,
+and verifies successful sliding renewal, failure isolation, concurrent completion,
+shared-cache behavior and expired/foreign-owner rejection. This fixes an active
+state expiry mechanism; it does not establish the cause of historical generic
+409 records or relax user/account ownership validation. No migration is required.
 
 ## Return path
 

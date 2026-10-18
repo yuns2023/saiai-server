@@ -325,6 +325,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return openAIWSTurnResponseHeaders(account, handshakeHeaders)
 	}
 
+	var turnStateMu sync.Mutex
+	turnStateKeys := make(map[int][]string)
 	completedTurns := atomic.Int32{}
 	var relayClient openaiwsv2.FrameConn = &openAIWSClientFrameConn{conn: clientConn}
 	if resumableClient != nil {
@@ -358,6 +360,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					if err := hooks.OnClientTurn(turn, payload); err != nil {
 						return err
 					}
+				}
+				if account.IsOpenAIOAuth() {
+					// Handshake state remains bound to this upstream connection;
+					// frame metadata belongs only to its own correlated turn.
+					keys := openAINativeTurnStateKeys(userID, c.Request.Header, payload)
+					turnStateMu.Lock()
+					// A pathological number of unfinished turns cannot grow
+					// renewal bookkeeping without bound. Relay policy is unchanged.
+					if len(turnStateKeys) < 64 && len(keys) > 0 {
+						turnStateKeys[turn] = keys
+					}
+					turnStateMu.Unlock()
 				}
 				replayTracker.RegisterTurn(turn, messageType, payload)
 				if exhaustedUntil.Load() > time.Now().Unix() {
@@ -429,6 +443,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				)
 			},
 			OnTurnComplete: func(turn openaiwsv2.RelayTurnResult) {
+				turnStateMu.Lock()
+				keys := turnStateKeys[turn.Turn]
+				delete(turnStateKeys, turn.Turn)
+				turnStateMu.Unlock()
+				if turn.Failure == nil && (turn.TerminalEventType == "response.completed" || turn.TerminalEventType == "response.done") {
+					s.renewOpenAINativeTurnStateAfterSuccess(ctx, account, userID, keys)
+				}
 				if turn.Failure != nil {
 					// Error metadata is persisted independently of the unchanged
 					// frame. Remove the selected credential even when it is opaque
