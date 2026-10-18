@@ -55,14 +55,39 @@ const DataTableStub = {
 }
 
 describe('admin UsageTable tooltip', () => {
-  it.each(['pending', 'passed', 'flagged', 'skipped', 'failed'] as const)('shows explicit %s moderation state', (status) => {
+  it.each(['pending', 'passed', 'flagged', 'skipped', 'failed'] as const)('shows explicit %s moderation state', async (status) => {
     const wrapper = mount(UsageTable, {
       props: { data: [{ request_id: 'TEST_ONLY_STATUS', moderation_result: { status, scores: status === 'passed' ? { PII: .1 } : undefined, min_confidence: 90, updated_at: '2026-10-18T00:00:00Z' } }], loading: false, columns: [] },
       global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-moderation" :row="data[0]" /></div>' } } }
     })
     expect(wrapper.text()).toContain('admin.groups.inputModeration.statuses.' + status)
     expect(wrapper.text()).not.toContain('admin.groups.inputModeration.noHit')
-    if (status === 'passed') { expect(wrapper.text()).toContain('10.0%'); expect(wrapper.text()).toContain('90%') }
+    if (status === 'passed') {
+      expect(wrapper.text()).not.toContain('10.0%')
+      await wrapper.get('button[aria-haspopup=dialog]').trigger('click')
+      expect(document.body.textContent).toContain('10.0%')
+      expect(document.body.textContent).toContain('90%')
+    }
+    wrapper.unmount()
+  })
+
+  it('only shows hit labels using recorded category thresholds and opens full details', async () => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_EXPANDED', moderation_result: {
+        status: 'flagged', scores: { PII: .95, violence: .4, sexual: .3 }, min_confidence: 90,
+        decision_snapshot: { policy: { rules_version: 'jev-expanded-v1', thresholds: { PII: 90, violence: 40, sexual: 80 } } }
+      } }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-moderation" :row="data[0]" /></div>' } } }
+    })
+    expect(wrapper.text()).toContain('PII')
+    expect(wrapper.text()).toContain('violence')
+    expect(wrapper.text()).not.toContain('sexual')
+    expect(wrapper.text()).not.toContain('95.0%')
+    await wrapper.get('button[aria-haspopup=dialog]').trigger('click')
+    expect(document.body.textContent).toContain('sexual 30.0%')
+    wrapper.getComponent({ name: 'BaseDialog' }).vm.$emit('close')
+    await nextTick()
+    expect(document.body.querySelector('[role=dialog]')).toBeNull()
     wrapper.unmount()
   })
 
@@ -91,8 +116,10 @@ describe('admin UsageTable tooltip', () => {
       { categories: ['Jailbreak'], scores: null, action: 'audit', counted_as_strike: false }
     ] }] })
     expect(wrapper.text()).toContain('PII')
-    expect(wrapper.text()).toContain('95.0%')
-    expect(wrapper.text()).toContain('admin.groups.inputModeration.actions.warning')
+    expect(wrapper.text()).not.toContain('95.0%')
+    await wrapper.get('button[aria-haspopup=dialog]').trigger('click')
+    expect(document.body.textContent).toContain('95.0%')
+    expect(document.body.textContent).toContain('admin.groups.inputModeration.actions.warning')
     expect(wrapper.text()).toContain('Jailbreak')
     expect(wrapper.text()).not.toContain('100.0%')
     expect(wrapper.text()).not.toContain('admin.groups.inputModeration.noHit')

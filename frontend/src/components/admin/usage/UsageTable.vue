@@ -49,28 +49,7 @@
         </template>
 
         <template #cell-moderation="{ row }">
-          <span v-if="row.moderation_unavailable" class="text-xs text-gray-400">{{ t('admin.groups.inputModeration.unavailable') }}</span>
-          <div v-else-if="row.moderation_result" class="max-w-[280px] space-y-1 text-xs">
-            <span>{{ t('admin.groups.inputModeration.statuses.' + row.moderation_result.status) }}</span>
-            <div v-if="row.moderation_result.reason" class="text-gray-500">{{ t('admin.groups.inputModeration.reasons.' + row.moderation_result.reason) }}</div>
-            <div v-for="(score, category) in row.moderation_result.scores" :key="category">
-              {{ category }} {{ (score * 100).toFixed(1) }}%<span v-if="row.moderation_result.decision_snapshot" class="text-gray-500"> / {{ row.moderation_result.decision_snapshot.policy.thresholds[category] }}%</span>
-            </div>
-            <div v-if="row.moderation_result.decision_snapshot" class="text-gray-500">{{ row.moderation_result.decision_snapshot.policy.rules_version }}</div>
-            <div v-if="row.moderation_result.scores && !row.moderation_result.decision_snapshot" class="text-gray-500">{{ t('admin.groups.inputModeration.resultThreshold') }} {{ row.moderation_result.min_confidence }}%</div>
-            <div v-for="(event, index) in row.moderation_events" :key="index" class="text-gray-500">
-              {{ t('admin.groups.inputModeration.actions.' + event.action) }}<template v-if="event.counted_as_strike"> · {{ t('admin.groups.inputModeration.counted') }}</template>
-            </div>
-          </div>
-          <div v-else-if="row.moderation_events?.length" class="max-w-[280px] space-y-1 text-xs">
-            <div v-for="(event, index) in row.moderation_events" :key="index">
-              <span v-for="category in event.categories" :key="category" class="mr-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-900 dark:text-amber-200">
-                {{ category }}<span v-if="event.scores?.[category] != null" class="ml-1">{{ (event.scores[category] * 100).toFixed(1) }}%</span>
-              </span>
-              <div class="text-gray-500">{{ t('admin.groups.inputModeration.actions.' + event.action) }}<template v-if="event.counted_as_strike"> · {{ t('admin.groups.inputModeration.counted') }}</template></div>
-            </div>
-          </div>
-          <span v-else class="text-xs text-gray-400" :title="t('admin.groups.inputModeration.asyncHint')">{{ t('admin.groups.inputModeration.noHit') }}</span>
+          <ModerationResultCell :row="row" />
         </template>
 
         <template #cell-reasoning_effort="{ row }">
@@ -431,6 +410,7 @@
 </template>
 
 <script setup lang="ts">
+import ModerationResultCell from './ModerationResultCell.vue'
 import TokenCount from '@/components/common/TokenCount.vue'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'

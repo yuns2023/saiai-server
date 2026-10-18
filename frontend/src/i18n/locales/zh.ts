@@ -2034,6 +2034,7 @@ export default {
         environmentModeRemove: '删除'
       },
       inputModeration: {
+        viewDetails: '审核详情',
         policy: {
           version: "检测规则",
           legacy: "现有四分类",

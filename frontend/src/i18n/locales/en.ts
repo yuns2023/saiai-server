@@ -1949,6 +1949,7 @@ export default {
         environmentModeRemove: 'Remove'
       },
       inputModeration: {
+        viewDetails: 'Review details',
         policy: {
           version: "Detection rules",
           legacy: "Existing four categories",
