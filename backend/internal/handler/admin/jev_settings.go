@@ -31,3 +31,7 @@ func (h *SettingHandler) UpdateJevSettings(c *gin.Context) {
 	}
 	h.GetJevSettings(c)
 }
+
+func (h *SettingHandler) GetJevCategories(c *gin.Context) {
+	response.Success(c, gin.H{"legacy_version": service.JevLegacyRulesVersion, "expanded_version": service.JevExpandedRulesVersion, "categories": service.JevCategoryCatalog()})
+}

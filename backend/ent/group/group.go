@@ -105,6 +105,8 @@ const (
 	FieldInputModerationStrikeWindowHours = "input_moderation_strike_window_hours"
 	// FieldInputModerationMinConfidence holds the string denoting the input_moderation_min_confidence field in the database.
 	FieldInputModerationMinConfidence = "input_moderation_min_confidence"
+	// FieldInputModerationPolicy holds the string denoting the input_moderation_policy field in the database.
+	FieldInputModerationPolicy = "input_moderation_policy"
 	// FieldInputModerationDedupeMinutes holds the string denoting the input_moderation_dedupe_minutes field in the database.
 	FieldInputModerationDedupeMinutes = "input_moderation_dedupe_minutes"
 	// FieldCodexClientPolicy holds the string denoting the codex_client_policy field in the database.
@@ -242,6 +244,7 @@ var Columns = []string{
 	FieldInputModerationDisableAfterHits,
 	FieldInputModerationStrikeWindowHours,
 	FieldInputModerationMinConfidence,
+	FieldInputModerationPolicy,
 	FieldInputModerationDedupeMinutes,
 	FieldCodexClientPolicy,
 	FieldClaudeDeviceLimitMode,

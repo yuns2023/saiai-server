@@ -333,3 +333,17 @@ export async function updateJevSettings(settings: { endpoint: string; api_key: s
   const { data } = await apiClient.put<JevSettings>('/admin/settings/jev', settings)
   return data
 }
+
+export interface JevCategory {
+ description_zh: string
+ description_en: string
+ id: string
+ label_zh: string
+ label_en: string
+ legacy: boolean
+ enforcement_allowed: boolean
+}
+export async function getJevCategories(): Promise<{ legacy_version: 'jev-v2'; expanded_version: 'jev-expanded-v1'; categories: JevCategory[] }> {
+ const { data } = await apiClient.get('/admin/settings/jev/categories')
+ return data
+}

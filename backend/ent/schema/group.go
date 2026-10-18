@@ -196,6 +196,7 @@ func (Group) Fields() []ent.Field {
 		field.Int("input_moderation_strike_window_hours").
 			Default(24),
 		field.Int("input_moderation_min_confidence").Default(90),
+		field.JSON("input_moderation_policy", &domain.InputModerationPolicy{}).Optional(),
 		field.Int("input_moderation_dedupe_minutes").
 			Default(5),
 		field.String("codex_client_policy").MaxLen(32).Default("off"),

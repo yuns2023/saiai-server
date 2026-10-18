@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"github.com/Wei-Shaw/sub2api/ent/accesslevel"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // Group is the model entity for the Group schema.
@@ -109,6 +110,8 @@ type Group struct {
 	InputModerationStrikeWindowHours int `json:"input_moderation_strike_window_hours,omitempty"`
 	// InputModerationMinConfidence holds the value of the "input_moderation_min_confidence" field.
 	InputModerationMinConfidence int `json:"input_moderation_min_confidence,omitempty"`
+	// InputModerationPolicy holds the value of the "input_moderation_policy" field.
+	InputModerationPolicy *domain.InputModerationPolicy `json:"input_moderation_policy,omitempty"`
 	// InputModerationDedupeMinutes holds the value of the "input_moderation_dedupe_minutes" field.
 	InputModerationDedupeMinutes int `json:"input_moderation_dedupe_minutes,omitempty"`
 	// CodexClientPolicy holds the value of the "codex_client_policy" field.
@@ -236,7 +239,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case group.FieldModelRouting, group.FieldBlockedModelPatterns, group.FieldModelRateMultipliers, group.FieldSupportedModelScopes, group.FieldInputModerationCategories:
+		case group.FieldModelRouting, group.FieldBlockedModelPatterns, group.FieldModelRateMultipliers, group.FieldSupportedModelScopes, group.FieldInputModerationCategories, group.FieldInputModerationPolicy:
 			values[i] = new([]byte)
 		case group.FieldIsExclusive, group.FieldShowAccountQuota, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldInputModerationEnabled, group.FieldInputModerationAutoDisableUser:
 			values[i] = new(sql.NullBool)
@@ -565,6 +568,14 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.InputModerationMinConfidence = int(value.Int64)
 			}
+		case group.FieldInputModerationPolicy:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field input_moderation_policy", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.InputModerationPolicy); err != nil {
+					return fmt.Errorf("unmarshal field input_moderation_policy: %w", err)
+				}
+			}
 		case group.FieldInputModerationDedupeMinutes:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field input_moderation_dedupe_minutes", values[i])
@@ -836,6 +847,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("input_moderation_min_confidence=")
 	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationMinConfidence))
+	builder.WriteString(", ")
+	builder.WriteString("input_moderation_policy=")
+	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationPolicy))
 	builder.WriteString(", ")
 	builder.WriteString("input_moderation_dedupe_minutes=")
 	builder.WriteString(fmt.Sprintf("%v", _m.InputModerationDedupeMinutes))

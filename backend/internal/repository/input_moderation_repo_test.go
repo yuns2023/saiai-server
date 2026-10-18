@@ -71,7 +71,7 @@ func TestInsertInputModerationEventPersistsSourceAndTurn(t *testing.T) {
 			"policy-v1",
 			service.InputModerationSourceOpenAIResponsesWS,
 			2,
-			createdAt, "null", 0,
+			createdAt, "null", 0, nil,
 		).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 

@@ -444,6 +444,7 @@ export interface AdminGroup extends Group {
 	input_moderation_disable_after_hits: number
 	input_moderation_strike_window_hours: number
 	input_moderation_dedupe_minutes: number
+ input_moderation_policy?: InputModerationPolicy | null
 	input_moderation_min_confidence: number
 	codex_client_policy: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	claude_device_limit_mode: 'off' | 'audit' | 'enforce'
@@ -564,6 +565,7 @@ export interface CreateGroupRequest {
 	input_moderation_disable_after_hits?: number
 	input_moderation_strike_window_hours?: number
 	input_moderation_dedupe_minutes?: number
+ input_moderation_policy?: InputModerationPolicy | null
 	input_moderation_min_confidence?: number
 	codex_client_policy?: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
@@ -614,6 +616,7 @@ export interface UpdateGroupRequest {
 	input_moderation_disable_after_hits?: number
 	input_moderation_strike_window_hours?: number
 	input_moderation_dedupe_minutes?: number
+ input_moderation_policy?: InputModerationPolicy | null
 	input_moderation_min_confidence?: number
 	codex_client_policy?: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
@@ -1208,7 +1211,7 @@ export interface UsagePricingSnapshot {
 
 export interface AdminUsageLog extends UsageLog {
  moderation_unavailable?: boolean
- moderation_result?: { status: 'pending' | 'passed' | 'flagged' | 'skipped' | 'failed'; reason?: string; scores?: Record<string, number>; min_confidence: number; model_version?: string; updated_at: string }
+ moderation_result?: { decision_snapshot?: ModerationDecisionSnapshot; status: 'pending' | 'passed' | 'flagged' | 'skipped' | 'failed'; reason?: string; scores?: Record<string, number>; min_confidence: number; model_version?: string; updated_at: string }
  moderation_events?: Array<{ categories: string[]; scores: Record<string, number> | null; min_confidence: number | null; action: string; counted_as_strike: boolean; model_version: string }>
   pricing_snapshot?: UsagePricingSnapshot | null
   // 账号计费倍率（仅管理员可见）
@@ -1816,4 +1819,17 @@ export interface UpdateScheduledTestPlanRequest {
   enabled?: boolean
   max_results?: number
   auto_recover?: boolean
+}
+
+export interface InputModerationPolicy {
+ rules_version: 'jev-v2' | 'jev-expanded-v1'
+ audit_categories: string[]
+ enforcement_categories: string[]
+ thresholds: Record<string, number>
+}
+export interface ModerationDecisionSnapshot {
+ policy: InputModerationPolicy
+ auto_enforce: boolean
+ action_mode: string
+ group_updated_at: string
 }

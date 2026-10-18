@@ -1,0 +1,13 @@
+{
+  "offline_only": true,
+  "model_calls": 0,
+  "categories": 19,
+  "samples": 76,
+  "scenario_families": 38,
+  "independently_reviewed_samples": 0,
+  "holdout_samples": 0,
+  "potential_single_pass_calls": 76,
+  "text_characters": 3309,
+  "registry_sha256": "b0ca7c8a54149a97a1743150ce3fe53429482d9c99da5c6bce4426545a6c954a",
+  "fixture_sha256": "ce3f9a110e233001c60207a34263c4004ee8d82fe12b2c7ea2c281af74622553"
+}

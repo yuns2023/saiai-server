@@ -28,6 +28,7 @@ func TestModerationResultsDurabilityAndIdentityIsolation(t *testing.T) {
 	result.Scores = map[string]float64{"PII": .1}
 	result.MinConfidence = 90
 	result.ModelVersion = "jev-1.13.0"
+	result.DecisionSnapshot = &service.ModerationDecisionSnapshot{Policy: &service.InputModerationPolicy{RulesVersion: service.JevExpandedRulesVersion, AuditCategories: []string{"PII"}, Thresholds: map[string]int{"PII": 90}}}
 	require.NoError(t, repo.SaveInputModerationResult(ctx, task, result))
 	result.Status = "pending"
 	result.Scores = nil
@@ -42,6 +43,7 @@ func TestModerationResultsDurabilityAndIdentityIsolation(t *testing.T) {
 			require.NotNil(t, logs[0].ModerationResult)
 			require.Equal(t, "passed", logs[0].ModerationResult.Status)
 			require.Equal(t, .1, logs[0].ModerationResult.Scores["PII"])
+			require.Equal(t, service.JevExpandedRulesVersion, logs[0].ModerationResult.DecisionSnapshot.Policy.RulesVersion)
 		} else {
 			require.Nil(t, logs[0].ModerationResult)
 		}
@@ -56,4 +58,32 @@ func TestModerationResultsDurabilityAndIdentityIsolation(t *testing.T) {
 	logs := []service.UsageLog{{ID: log.ID}}
 	require.NoError(t, usage.hydrateUsageLogModeration(ctx, logs))
 	require.Nil(t, logs[0].ModerationResult)
+}
+
+func TestJevPolicyGroupRoundTripAndLegacyPreservation(t *testing.T) {
+	ctx := context.Background()
+	_, k, g, _ := moderationReleaseFixture(t)
+	groups := NewGroupRepository(testEntClient(t), integrationDB)
+	original, err := groups.GetByIDLite(ctx, g.ID)
+	require.NoError(t, err)
+	require.Nil(t, original.InputModerationPolicy)
+	original.InputModerationPolicy = &service.InputModerationPolicy{RulesVersion: service.JevExpandedRulesVersion, AuditCategories: []string{"PII", "violence"}, EnforcementCategories: []string{}, Thresholds: map[string]int{"PII": 95}}
+	require.NoError(t, groups.Update(ctx, original))
+	loaded, err := groups.GetByIDLite(ctx, g.ID)
+	require.NoError(t, err)
+	require.Equal(t, original.InputModerationPolicy, loaded.InputModerationPolicy)
+	keys := NewAPIKeyRepository(testEntClient(t), integrationDB)
+	key, err := keys.GetByID(ctx, k.ID)
+	require.NoError(t, err)
+	require.NotNil(t, key.Group)
+	require.Equal(t, original.InputModerationPolicy, key.Group.InputModerationPolicy)
+	authKey, err := keys.GetByKeyForAuth(ctx, k.Key)
+	require.NoError(t, err)
+	require.NotNil(t, authKey.Group)
+	require.Equal(t, original.InputModerationPolicy, authKey.Group.InputModerationPolicy)
+	loaded.Name = "TEST_ONLY_RENAMED"
+	require.NoError(t, groups.Update(ctx, loaded))
+	loaded, err = groups.GetByIDLite(ctx, g.ID)
+	require.NoError(t, err)
+	require.Empty(t, loaded.InputModerationPolicy.EnforcementCategories)
 }

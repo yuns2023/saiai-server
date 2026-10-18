@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
@@ -59,4 +61,46 @@ func TestJevModerationNoCredentialNoRequest(t *testing.T) {
 	client := NewInputModerationClient(&config.Config{})
 	_, err := client.Classify(context.Background(), "synthetic input")
 	require.ErrorContains(t, err, "key is not configured")
+}
+
+func TestJevRegistryPreservesFrozenLegacyRules(t *testing.T) {
+	var frozen map[string]string
+	require.NoError(t, json.Unmarshal(jevModerationRules, &frozen))
+	current, err := service.JevRulesForPolicy(nil)
+	require.NoError(t, err)
+	require.Equal(t, frozen, current)
+}
+func TestJevExpandedRequestUsesOnlySelectedRulesAndStrictScores(t *testing.T) {
+	p := &service.InputModerationPolicy{RulesVersion: service.JevExpandedRulesVersion, AuditCategories: []string{"sexual/minors", "political/manipulation"}}
+	for _, missing := range []bool{false, true} {
+		t.Run(fmt.Sprint(missing), func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					Questions map[string]any `json:"questions"`
+				}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+				require.Len(t, request.Questions, 2)
+				require.Contains(t, request.Questions, "sexual/minors")
+				require.Contains(t, request.Questions, "political/manipulation")
+				answers := map[string]any{"sexual/minors": map[string]any{"type": "noul", "noul": .1}}
+				if !missing {
+					answers["political/manipulation"] = map[string]any{"type": "noul", "noul": .2}
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"model": "jev-1.13.0", "answers": answers})
+			}))
+			defer server.Close()
+			cfg := &config.Config{}
+			cfg.Gateway.InputModeration.APIKey = "TEST_ONLY"
+			cfg.Gateway.InputModeration.Endpoint = server.URL
+			c := newJevModerationClient(cfg)
+			c.client.Transport = server.Client().Transport
+			result, err := c.ClassifyWithPolicy(context.Background(), "TEST_ONLY", p)
+			if missing {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, result.Scores, 2)
+			}
+		})
+	}
 }

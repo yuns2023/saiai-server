@@ -151,6 +151,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		InputModerationDisableAfterHits:  g.InputModerationDisableAfterHits,
 		InputModerationStrikeWindowHours: g.InputModerationStrikeWindowHours,
 		InputModerationDedupeMinutes:     g.InputModerationDedupeMinutes,
+		InputModerationPolicy:            g.InputModerationPolicy,
 		InputModerationMinConfidence:     g.InputModerationMinConfidence,
 		CodexClientPolicy:                g.CodexClientPolicy,
 		ClaudeDeviceLimitMode:            g.ClaudeDeviceLimitMode,

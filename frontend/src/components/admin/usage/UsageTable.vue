@@ -54,9 +54,10 @@
             <span>{{ t('admin.groups.inputModeration.statuses.' + row.moderation_result.status) }}</span>
             <div v-if="row.moderation_result.reason" class="text-gray-500">{{ t('admin.groups.inputModeration.reasons.' + row.moderation_result.reason) }}</div>
             <div v-for="(score, category) in row.moderation_result.scores" :key="category">
-              {{ category }} {{ (score * 100).toFixed(1) }}%
+              {{ category }} {{ (score * 100).toFixed(1) }}%<span v-if="row.moderation_result.decision_snapshot" class="text-gray-500"> / {{ row.moderation_result.decision_snapshot.policy.thresholds[category] }}%</span>
             </div>
-            <div v-if="row.moderation_result.scores" class="text-gray-500">{{ t('admin.groups.inputModeration.resultThreshold') }} {{ row.moderation_result.min_confidence }}%</div>
+            <div v-if="row.moderation_result.decision_snapshot" class="text-gray-500">{{ row.moderation_result.decision_snapshot.policy.rules_version }}</div>
+            <div v-if="row.moderation_result.scores && !row.moderation_result.decision_snapshot" class="text-gray-500">{{ t('admin.groups.inputModeration.resultThreshold') }} {{ row.moderation_result.min_confidence }}%</div>
             <div v-for="(event, index) in row.moderation_events" :key="index" class="text-gray-500">
               {{ t('admin.groups.inputModeration.actions.' + event.action) }}<template v-if="event.counted_as_strike"> · {{ t('admin.groups.inputModeration.counted') }}</template>
             </div>
