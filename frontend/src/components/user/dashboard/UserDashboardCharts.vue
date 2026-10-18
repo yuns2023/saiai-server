@@ -10,7 +10,7 @@
         <div class="ml-auto flex items-center gap-2">
           <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('dashboard.granularity') }}:</span>
           <div class="w-28">
-            <Select :model-value="granularity" :options="[{value:'day', label:t('dashboard.day')}, {value:'hour', label:t('dashboard.hour')}]" @update:model-value="$emit('update:granularity', $event)" @change="$emit('granularityChange')" />
+            <Select :model-value="granularity" :options="[{value:'day', label:t('dashboard.day')}, {value:'hour', label:t('dashboard.hour')}, {value:'15m', label:t('tokens.quarterHour')}]" @update:model-value="$emit('update:granularity', $event)" @change="$emit('granularityChange')" />
           </div>
         </div>
       </div>
@@ -44,7 +44,7 @@
                 <tr v-for="model in models" :key="model.model" class="border-t border-gray-100 dark:border-gray-700">
                   <td class="max-w-[100px] truncate py-1.5 font-medium text-gray-900 dark:text-white" :title="model.model">{{ model.model }}</td>
                   <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">{{ formatNumber(model.requests) }}</td>
-                  <td class="py-1.5 text-right text-gray-600 dark:text-gray-400"><TokenCount :value="model.total_tokens" /></td>
+                  <td class="py-1.5 text-right text-gray-600 dark:text-gray-400"><TokenCount :value="model.total_tokens" /><div class="mt-1 text-xs text-gray-500" :title="t('tokens.cacheReadRateHelp')">{{ t('tokens.cacheReadRate') }}: {{ formatCacheReadRate(cacheReadRate(model)) }}</div></td>
                   <td class="py-1.5 text-right text-green-600 dark:text-green-400">${{ formatCost(model.actual_cost) }}</td>
                   <td class="py-1.5 text-right text-gray-400 dark:text-gray-500">${{ formatCost(model.cost) }}</td>
                 </tr>
@@ -56,11 +56,13 @@
 
       <!-- Token Usage Trend Chart -->
       <TokenUsageTrend :trend-data="trend" :loading="loading" />
+      <CacheUsageTrend class="lg:col-span-2" :trend-data="trend" :loading="loading" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { cacheReadRate, formatCacheReadRate } from '@/utils/usageTokens'
 import TokenCount from '@/components/common/TokenCount.vue'
 import { formatExactTokens } from '@/utils/usageTokens'
 import { computed } from 'vue'
@@ -69,6 +71,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'
 import { Doughnut } from 'vue-chartjs'
+import CacheUsageTrend from '@/components/charts/CacheUsageTrend.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import type { TrendDataPoint, ModelStat } from '@/types'
 import { formatCostFixed as formatCost, formatNumberLocaleString as formatNumber } from '@/utils/format'

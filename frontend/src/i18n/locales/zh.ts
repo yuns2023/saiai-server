@@ -1,5 +1,11 @@
 export default {
   tokens: {
+    cacheReadRate: '缓存读取率',
+    cacheReadRateHelp: '缓存读取 ÷（非缓存输入 + 缓存读取 + 缓存写入），不含输出；按 Token 加权，不是请求命中率。无输入或数据不完整时显示 —。',
+    cacheTrend: '缓存读取与非缓存输入趋势',
+    cacheTrendHint: '结合请求量和相同模型、业务的历史水平判断；首次请求和缓存预热也会降低读取率。仅展示已记录用量的时段，无记录不代表 0% 读取率。',
+    quarterHour: '15 分钟',
+
     total: '总 Token（含缓存）',
     included: '含缓存',
     input: '非缓存输入',

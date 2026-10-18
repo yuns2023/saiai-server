@@ -252,6 +252,7 @@
               @ranking-click="goToUserUsage"
             />
             <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
+          <CacheUsageTrend class="lg:col-span-2" :trend-data="trendData" :loading="chartsLoading" />
           </div>
 
           <!-- User Usage Trend (Full Width) -->
@@ -302,6 +303,7 @@ import Icon from '@/components/icons/Icon.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
+import CacheUsageTrend from '@/components/charts/CacheUsageTrend.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 
 import {
@@ -364,7 +366,7 @@ const getLast24HoursRangeDates = (): { start: string; end: string } => {
 }
 
 // Date range
-const granularity = ref<'day' | 'hour'>('hour')
+const granularity = ref<'day' | 'hour' | '15m'>('hour')
 const defaultRange = getLast24HoursRangeDates()
 const startDate = ref(defaultRange.start)
 const endDate = ref(defaultRange.end)
@@ -416,7 +418,7 @@ const selectedRangeDetail = computed(() => {
 // Granularity options for Select component
 const granularityOptions = computed(() => [
   { value: 'day', label: t('admin.dashboard.day') },
-  { value: 'hour', label: t('admin.dashboard.hour') }
+  { value: 'hour', label: t('admin.dashboard.hour') }, { value: '15m', label: t('tokens.quarterHour') }
 ])
 
 // Dark mode detection

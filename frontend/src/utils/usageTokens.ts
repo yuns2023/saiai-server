@@ -40,3 +40,19 @@ export function formatTokenCount(value: number | null | undefined): string {
   }
   return formatExactTokens(value)
 }
+
+/** Stored input is already exclusive of cache. Missing counters are not measured zeroes. */
+export function cacheReadRate(source?: TokenUsageSource | null, period: TokenPeriod = ''): number | null {
+  const prefix = period ? `${period}_` : ''
+  const values = ['input_tokens', 'cache_read_tokens', 'cache_creation_tokens'].map(
+    field => source?.[`${prefix}${field}` as keyof TokenUsageSource]
+  )
+  if (values.some(value => value == null || !Number.isFinite(value) || value < 0)) return null
+  const [input, read, write] = values as number[]
+  const denominator = input + read + write
+  return denominator > 0 ? read / denominator * 100 : null
+}
+
+export function formatCacheReadRate(rate: number | null): string {
+  return rate == null ? '—' : `${rate.toFixed(2)}%`
+}

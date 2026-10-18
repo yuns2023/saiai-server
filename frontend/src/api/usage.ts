@@ -42,7 +42,7 @@ export interface UserDashboardStats {
 export interface TrendParams {
   start_date?: string
   end_date?: string
-  granularity?: 'day' | 'hour'
+  granularity?: 'day' | 'hour' | '15m'
   api_key_id?: number
   timezone?: string
 }

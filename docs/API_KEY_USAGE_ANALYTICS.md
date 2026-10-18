@@ -45,6 +45,37 @@ The server verifies Key ownership before running an aggregate query. A selected
 Key filters the summary, trend, and model data. The dashboard also applies the
 same Key and date range to its recent-usage request.
 
+## Cache read analytics
+
+Admin and user summary cards, Key breakdown rows, and the public Key usage
+summary show the same cache read rate:
+
+`cache_read_tokens / (input_tokens + cache_read_tokens + cache_creation_tokens)`
+
+Stored input tokens are already exclusive of cache. Output is excluded, and
+cache write lifetime subcategories must not be added again. Rates are computed
+from full integer counts before formatting to two percentage decimals. Missing,
+invalid, or zero-denominator data shows `—`; measured input with zero reads
+shows `0.00%`. This is a token-weighted rate, not a request hit rate.
+
+Admin dashboard/usage and user dashboard charts show the rate alongside
+uncached input and request volume. The selected-period rate uses summed token
+counts, not the average of bucket percentages. Model tables also show rates.
+Admin usage filters (model, group, account, user and Key) apply to the cache
+chart; users can select only their own Keys through existing ownership checks.
+
+Trend endpoints and admin dashboard snapshot v2 additionally accept
+`granularity=15m`. Quarter-hour buckets use raw usage records, preserving the
+existing query timezone and filters; hourly and daily aggregate paths remain
+unchanged. Prefer a short selected range for quarter-hour inspection. Only
+intervals with recorded usage are shown. These charts describe recorded usage,
+not requests that failed before a usage record was persisted.
+
+This is an observation feature, with no automatic anomaly classification or
+alert threshold. Compare the same model/workload across historical ranges;
+first requests, cache warming and workload mix can change the overall rate.
+No additional model traffic, billing changes, or database migration is needed.
+
 ## Key ranking
 
 `GET /api/v1/usage/dashboard/api-key-breakdown` returns the current user's

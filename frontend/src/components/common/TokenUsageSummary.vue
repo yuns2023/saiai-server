@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TokenCount from './TokenCount.vue'
-import { formatTokenCount, tokenBreakdown, type TokenPeriod, type TokenUsageSource } from '@/utils/usageTokens'
+import { cacheReadRate, formatCacheReadRate, formatTokenCount, tokenBreakdown, type TokenPeriod, type TokenUsageSource } from '@/utils/usageTokens'
 
 const props = withDefaults(defineProps<{
   data?: TokenUsageSource | null
@@ -27,6 +27,9 @@ const counts = computed(() => tokenBreakdown(props.data, props.period))
       <p class="flex flex-wrap gap-x-2 text-xs tabular-nums">
         <span class="text-sky-600 dark:text-sky-400">{{ t('tokens.cacheRead') }}: {{ formatTokenCount(counts.cacheRead) }}</span>
         <span class="text-amber-600 dark:text-amber-400">{{ t('tokens.cacheWrite') }}: {{ formatTokenCount(counts.cacheWrite) }}</span>
+      </p>
+      <p class="text-xs tabular-nums text-gray-600 dark:text-gray-400" :title="t('tokens.cacheReadRateHelp')" data-testid="cache-read-rate">
+        {{ t('tokens.cacheReadRate') }}: {{ formatCacheReadRate(cacheReadRate(data, period)) }}
       </p>
     </template>
   </div>

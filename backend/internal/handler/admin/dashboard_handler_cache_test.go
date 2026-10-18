@@ -117,3 +117,21 @@ func TestDashboardHandler_GetUserUsageTrend_UsesCache(t *testing.T) {
 	require.Equal(t, "hit", rec2.Header().Get("X-Snapshot-Cache"))
 	require.Equal(t, int32(1), repo.usersTrendCalls.Load())
 }
+
+func TestDashboardSnapshotQuarterHourCacheIsolation(t *testing.T) {
+	t.Cleanup(resetDashboardReadCachesForTest)
+	resetDashboardReadCachesForTest()
+	gin.SetMode(gin.TestMode)
+	repo := &dashboardUsageRepoCacheProbe{}
+	handler := NewDashboardHandler(service.NewDashboardService(repo, nil, nil, nil), nil)
+	router := gin.New()
+	router.GET("/snapshot", handler.GetSnapshotV2)
+	for _, granularity := range []string{"15m", "hour", "15m"} {
+		req := httptest.NewRequest(http.MethodGet, "/snapshot?start_date=2026-03-01&end_date=2026-03-01&include_stats=false&include_model_stats=false&granularity="+granularity, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Contains(t, rec.Body.String(), `"granularity":"`+granularity+`"`)
+	}
+	require.Equal(t, int32(2), repo.trendCalls.Load())
+}

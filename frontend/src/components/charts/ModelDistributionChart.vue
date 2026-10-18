@@ -138,7 +138,7 @@
                   {{ formatNumber(model.requests) }}
                 </td>
                 <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
-                  <TokenCount :value="model.total_tokens" />
+                  <TokenCount :value="model.total_tokens" /><div class="mt-1 text-xs text-gray-500" :title="t('tokens.cacheReadRateHelp')">{{ t('tokens.cacheReadRate') }}: {{ formatCacheReadRate(cacheReadRate(model)) }}</div>
                 </td>
                 <td class="py-1.5 text-right text-gray-500 dark:text-gray-400">
                   {{ formatPercentage(getMetricShare(model)) }}
@@ -240,6 +240,7 @@
 </template>
 
 <script setup lang="ts">
+import { cacheReadRate, formatCacheReadRate } from '@/utils/usageTokens'
 import TokenCount from '@/components/common/TokenCount.vue'
 import { formatExactTokens } from '@/utils/usageTokens'
 import { computed, ref, watch } from 'vue'

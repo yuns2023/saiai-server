@@ -98,6 +98,14 @@ func safeDateFormat(granularity string) string {
 	return "YYYY-MM-DD"
 }
 
+// column is chosen internally, never from a request parameter.
+func trendDateExpression(granularity, column string) string {
+	if granularity == "15m" {
+		return fmt.Sprintf("TO_CHAR(date_trunc('hour', %s) + floor(EXTRACT(MINUTE FROM %s) / 15) * INTERVAL '15 minutes', 'YYYY-MM-DD HH24:MI')", column, column)
+	}
+	return fmt.Sprintf("TO_CHAR(%s, '%s')", column, safeDateFormat(granularity))
+}
+
 type usageLogRepository struct {
 	client *dbent.Client
 	sql    sqlExecutor
@@ -2143,7 +2151,7 @@ type APIKeyUsageTrendPoint = usagestats.APIKeyUsageTrendPoint
 
 // GetAPIKeyUsageTrend returns usage trend data grouped by API key and date
 func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []APIKeyUsageTrendPoint, err error) {
-	dateFormat := safeDateFormat(granularity)
+	dateFormat := trendDateExpression(granularity, "u.created_at")
 
 	query := fmt.Sprintf(`
 		WITH top_keys AS (
@@ -2155,7 +2163,7 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 			LIMIT $3
 		)
 		SELECT
-			TO_CHAR(u.created_at, '%s') as date,
+			%s as date,
 			u.api_key_id,
 			COALESCE(k.name, '') as key_name,
 			COUNT(*) as requests,
@@ -2198,7 +2206,7 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 
 // GetUserUsageTrend returns usage trend data grouped by user and date
 func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []UserUsageTrendPoint, err error) {
-	dateFormat := safeDateFormat(granularity)
+	dateFormat := trendDateExpression(granularity, "u.created_at")
 
 	query := fmt.Sprintf(`
 		WITH top_users AS (
@@ -2210,7 +2218,7 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 			LIMIT $3
 		)
 		SELECT
-			TO_CHAR(u.created_at, '%s') as date,
+			%s as date,
 			u.user_id,
 			COALESCE(us.email, '') as email,
 			COALESCE(us.username, '') as username,
@@ -2687,11 +2695,11 @@ func (r *usageLogRepository) GetUserAPIKeyUsageBreakdown(
 
 // GetUserUsageTrendByUserID 获取指定用户的使用趋势
 func (r *usageLogRepository) GetUserUsageTrendByUserID(ctx context.Context, userID int64, startTime, endTime time.Time, granularity string) (results []TrendDataPoint, err error) {
-	dateFormat := safeDateFormat(granularity)
+	dateFormat := trendDateExpression(granularity, "created_at")
 
 	query := fmt.Sprintf(`
 		SELECT
-			TO_CHAR(created_at, '%s') as date,
+			%s as date,
 			COUNT(*) as requests,
 			COALESCE(SUM(input_tokens), 0) as input_tokens,
 			COALESCE(SUM(output_tokens), 0) as output_tokens,
@@ -3004,11 +3012,11 @@ func (r *usageLogRepository) GetUsageTrendWithFilters(ctx context.Context, start
 		}
 	}
 
-	dateFormat := safeDateFormat(granularity)
+	dateFormat := trendDateExpression(granularity, "created_at")
 
 	query := fmt.Sprintf(`
 		SELECT
-			TO_CHAR(created_at, '%s') as date,
+			%s as date,
 			COUNT(*) as requests,
 			COALESCE(SUM(input_tokens), 0) as input_tokens,
 			COALESCE(SUM(output_tokens), 0) as output_tokens,

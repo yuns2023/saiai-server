@@ -30,6 +30,7 @@ describe('TokenUsageSummary', () => {
     expect(wrapper.text()).toContain('输出: 54')
     expect(wrapper.text()).toContain('缓存读取: 6.5K')
     expect(wrapper.text()).toContain('缓存写入: 160')
+    expect(wrapper.get('[data-testid=cache-read-rate]').text()).toContain('30.14%')
     await wrapper.get('button').trigger('click')
     await flushPromises()
     const tooltip = document.querySelector('[role="tooltip"]')!

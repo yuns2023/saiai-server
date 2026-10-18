@@ -1,5 +1,11 @@
 export default {
   tokens: {
+    cacheReadRate: 'Cache read rate',
+    cacheReadRateHelp: 'Cache read / (uncached input + cache read + cache write), excluding output. Token-weighted, not request hit rate. No input or incomplete data is shown as —.',
+    cacheTrend: 'Cache reads and uncached input trend',
+    cacheTrendHint: 'Compare with request volume and history for the same model and workload. First requests and cache warming can lower the rate. Only intervals with recorded usage are shown; missing records do not mean a 0% read rate.',
+    quarterHour: '15 minutes',
+
     total: 'Total Tokens (including cache)',
     included: 'including cache',
     input: 'Uncached input',

@@ -76,7 +76,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		return
 	}
 	granularity := strings.TrimSpace(c.DefaultQuery("granularity", "day"))
-	if granularity != "hour" {
+	if granularity != "hour" && granularity != "15m" {
 		granularity = "day"
 	}
 

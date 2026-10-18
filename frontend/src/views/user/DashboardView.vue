@@ -135,7 +135,7 @@ sixDaysAgo.setDate(sixDaysAgo.getDate() - 6)
 const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
 const startDate = ref(formatLocalDate(sixDaysAgo))
 const endDate = ref(formatLocalDate(today))
-const granularity = ref<'day' | 'hour'>('day')
+const granularity = ref<'day' | 'hour' | '15m'>('day')
 
 const selectedAPIKey = computed(() => selectedAPIKeyID.value ?? undefined)
 const usageDetailsRoute = computed<RouteLocationRaw>(() => ({

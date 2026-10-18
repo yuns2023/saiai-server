@@ -49,7 +49,7 @@ export interface TrendParams {
   end_date?: string
   start_time?: string
   end_time?: string
-  granularity?: 'day' | 'hour'
+  granularity?: 'day' | 'hour' | '15m'
   user_id?: number
   api_key_id?: number
   model?: string
