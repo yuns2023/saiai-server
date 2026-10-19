@@ -1394,7 +1394,7 @@ func (a *Account) IsClaudeOAuthCarpoolUnlimitedDevices() bool {
 }
 
 // IsClaudeOAuthCarpoolAutoExpandEnabled uses the legacy wire flag for periodic
-// free-slot maintenance. It no longer enables capacity expansion.
+// admission budgets. It no longer enables capacity expansion.
 func (a *Account) IsClaudeOAuthCarpoolAutoExpandEnabled() bool {
 	if a == nil || !a.IsAnthropicOAuthOrSetupToken() || a.GetClaudeOAuthMode() != ClaudeOAuthModeCarpool || a.IsClaudeOAuthCarpoolUnlimitedDevices() || a.Extra == nil {
 		return false

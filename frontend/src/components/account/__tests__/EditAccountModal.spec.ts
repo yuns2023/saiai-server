@@ -226,7 +226,7 @@ describe('EditAccountModal', () => {
     })
   })
 
-  it('persists periodic carpool free-slot maintenance', async () => {
+  it('persists periodic carpool admission budgets', async () => {
     const account = {
       ...buildAccount(),
       type: 'oauth',
@@ -268,7 +268,7 @@ describe('EditAccountModal', () => {
     const targetInput = wrapper.get('[data-testid="carpool-maintenance-interval"]')
     expect((targetInput.element as HTMLInputElement).value).toBe('24')
     await targetInput.setValue(6)
-    await wrapper.get('[data-testid="carpool-maintenance-free-slots"]').setValue(2)
+    await wrapper.get('[data-testid="carpool-admissions-per-cycle"]').setValue(2)
     expect(wrapper.get('[data-testid="carpool-next-maintenance"]').text()).toContain('保存后开始计时')
 
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
@@ -280,8 +280,25 @@ describe('EditAccountModal', () => {
       claude_oauth_carpool_device_limit: 20,
       claude_oauth_carpool_auto_expand_enabled: true,
       claude_oauth_carpool_maintenance_interval_hours: 6,
-      claude_oauth_carpool_maintenance_free_slots: 2
+      claude_oauth_carpool_maintenance_admissions_per_cycle: 2
     })
+  })
+
+  it('shows remaining cycle admissions and the next adjustment time when viewing devices', async () => {
+    const account = {
+      ...buildAccount(), type: 'oauth', credentials: { access_token: 'test-token' },
+      claude_oauth_mode: 'carpool', claude_oauth_carpool_device_limit: 10,
+      extra: { claude_oauth_mode: 'carpool', claude_oauth_carpool_auto_expand_enabled: true }
+    } as any
+    listClaudeCarpoolDevicesMock.mockResolvedValue({
+      unlimited_devices: false, recorded_limit: 10, recorded_count: 0, overflow_count: 0,
+      recorded_items: [], overflow_items: [], maintenance_enabled: true,
+      admissions_remaining: 2, next_maintenance_at: '2026-10-20T16:30:00Z'
+    })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="carpool-admissions-remaining"]').text()).toBe('2')
+    expect(wrapper.get('[data-testid="carpool-cycle-next-at"]').text()).toBe(new Date('2026-10-20T16:30:00Z').toLocaleString())
   })
 
   it('removes a stale account UUID from setup-token single-device accounts', async () => {

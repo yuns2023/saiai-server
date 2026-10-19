@@ -3,10 +3,31 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
 const CarpoolNextMaintenanceKey = "claude_oauth_carpool_next_maintenance_at"
+const CarpoolMaintenanceGenerationKey = "claude_oauth_carpool_maintenance_generation"
+
+type CarpoolAdmissionPolicy struct {
+	Generation string
+	Admissions int
+}
+
+// CarpoolAdmissionCache keeps admission accounting atomic with device registration.
+type CarpoolAdmissionCache interface {
+	GetOrCreateCarpoolDeviceWithPolicy(context.Context, int64, string, ClientHints, int, int64, CarpoolAdmissionPolicy) (*CarpoolDeviceRecord, error)
+	CarpoolAdmissionsRemaining(context.Context, int64, CarpoolAdmissionPolicy) (int, error)
+}
+
+func (a *Account) CarpoolAdmissionPolicy() CarpoolAdmissionPolicy {
+	generation := a.getExtraString(CarpoolMaintenanceGenerationKey)
+	if generation == "" {
+		generation = "00000000000000000000"
+	}
+	return CarpoolAdmissionPolicy{Generation: generation, Admissions: a.GetCarpoolAdmissionsPerCycle()}
+}
 
 // The legacy enable flag remains wire-compatible; expansion is no longer performed.
 func (a *Account) GetCarpoolMaintenanceIntervalHours() int {
@@ -16,8 +37,11 @@ func (a *Account) GetCarpoolMaintenanceIntervalHours() int {
 	}
 	return min(n, 720)
 }
-func (a *Account) GetCarpoolMaintenanceFreeSlots() int {
-	n := a.getExtraInt("claude_oauth_carpool_maintenance_free_slots")
+func (a *Account) GetCarpoolAdmissionsPerCycle() int {
+	n := a.getExtraInt("claude_oauth_carpool_maintenance_admissions_per_cycle")
+	if n < 1 {
+		n = a.getExtraInt("claude_oauth_carpool_maintenance_free_slots")
+	}
 	if n < 1 {
 		n = 1
 	}
@@ -34,24 +58,28 @@ func NormalizeCarpoolMaintenance(a, previous *Account, now time.Time) {
 		return
 	}
 	delete(a.Extra, CarpoolNextMaintenanceKey)
+	delete(a.Extra, CarpoolMaintenanceGenerationKey)
 	if !a.IsClaudeOAuthCarpoolAutoExpandEnabled() {
 		return
 	}
 	next := ""
+	generation := fmt.Sprintf("%020d", now.UnixNano())
 	if previous != nil && previous.IsClaudeOAuthCarpoolAutoExpandEnabled() && previous.GetCarpoolMaintenanceIntervalHours() == a.GetCarpoolMaintenanceIntervalHours() {
 		next = previous.GetCarpoolNextMaintenance()
+		generation = previous.CarpoolAdmissionPolicy().Generation
 	}
 	if _, err := time.Parse(time.RFC3339, next); err != nil {
 		next = now.UTC().Add(time.Duration(a.GetCarpoolMaintenanceIntervalHours()) * time.Hour).Format(time.RFC3339)
 	}
 	a.Extra[CarpoolNextMaintenanceKey] = next
+	a.Extra[CarpoolMaintenanceGenerationKey] = generation
 }
 
 type carpoolScheduleRepository interface {
 	AdvanceCarpoolMaintenance(context.Context, int64, string, string) error
 }
 type carpoolSlotCache interface {
-	FreeCarpoolSlots(context.Context, int64, int, int, string) (int, error)
+	ResetCarpoolAdmissionCycle(context.Context, int64, int, CarpoolAdmissionPolicy, string) (int, error)
 }
 
 func (s *CarpoolMaintenanceService) maintainCarpoolSlots(ctx context.Context, account *Account, now time.Time, stats *carpoolMaintenanceStats) error {
@@ -81,7 +109,7 @@ func (s *CarpoolMaintenanceService) maintainCarpoolSlots(ctx context.Context, ac
 	if !ok {
 		return errors.New("carpool slot cache unavailable")
 	}
-	removed, err := cache.FreeCarpoolSlots(ctx, current.ID, current.GetClaudeOAuthCarpoolDeviceLimit(), current.GetCarpoolMaintenanceFreeSlots(), expected)
+	removed, err := cache.ResetCarpoolAdmissionCycle(ctx, current.ID, current.GetClaudeOAuthCarpoolDeviceLimit(), current.CarpoolAdmissionPolicy(), expected)
 	if err != nil {
 		return err
 	}

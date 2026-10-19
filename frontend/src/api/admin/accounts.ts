@@ -202,6 +202,9 @@ export interface ClaudeCarpoolOverflowDevice {
 }
 
 export interface ClaudeCarpoolDeviceOverview {
+  maintenance_enabled?: boolean
+  next_maintenance_at?: string
+  admissions_remaining?: number
   unlimited_devices: boolean
   recorded_limit: number
   recorded_count: number

@@ -182,6 +182,10 @@ type CarpoolOverflowDeviceInfo struct {
 }
 
 type CarpoolDeviceOverview struct {
+	MaintenanceEnabled  bool   `json:"maintenance_enabled"`
+	NextMaintenanceAt   string `json:"next_maintenance_at,omitempty"`
+	AdmissionsRemaining *int   `json:"admissions_remaining,omitempty"`
+
 	UnlimitedDevices bool                         `json:"unlimited_devices"`
 	RecordedLimit    int                          `json:"recorded_limit"`
 	RecordedCount    int                          `json:"recorded_count"`
@@ -766,6 +770,13 @@ func (s *IdentityService) EnsureCarpoolDeviceAllowed(ctx context.Context, accoun
 	if len(apiKeys) > 0 {
 		hints.Owner = claudeDeviceOwnerFromAPIKey(apiKeys[0])
 	}
+	if account.IsClaudeOAuthCarpoolAutoExpandEnabled() {
+		cache, ok := s.cache.(CarpoolAdmissionCache)
+		if !ok {
+			return nil, errors.New("carpool admission budget cache unavailable")
+		}
+		return cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, account.ID, originalDeviceID, hints, account.GetClaudeOAuthCarpoolDeviceLimit(), time.Now().Unix(), account.CarpoolAdmissionPolicy())
+	}
 	return s.cache.GetOrCreateCarpoolDevice(
 		ctx,
 		account.ID,
@@ -961,6 +972,20 @@ func (s *IdentityService) ListCarpoolDevices(ctx context.Context, account *Accou
 		OverflowCount:    len(overflow),
 		RecordedItems:    make([]*CarpoolDeviceInfo, 0, len(recorded)),
 		OverflowItems:    make([]*CarpoolOverflowDeviceInfo, 0, len(overflow)),
+	}
+	if account.IsClaudeOAuthCarpoolAutoExpandEnabled() {
+		result.MaintenanceEnabled = true
+		result.NextMaintenanceAt = account.GetCarpoolNextMaintenance()
+		cache, ok := s.cache.(CarpoolAdmissionCache)
+		if !ok {
+			return nil, errors.New("carpool admission budget cache unavailable")
+		}
+		remaining, err := cache.CarpoolAdmissionsRemaining(ctx, account.ID, account.CarpoolAdmissionPolicy())
+		if err != nil {
+			return nil, err
+		}
+		remaining = min(remaining, max(0, result.RecordedLimit-result.RecordedCount))
+		result.AdmissionsRemaining = &remaining
 	}
 	for _, item := range recorded {
 		if item == nil {

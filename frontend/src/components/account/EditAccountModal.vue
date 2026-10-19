@@ -1131,19 +1131,19 @@
                     class="mt-0.5 h-4 w-4 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500"
                   />
                   <span>
-                    <span class="block text-sm font-medium text-gray-900 dark:text-white">定期腾出设备名额</span>
+                    <span class="block text-sm font-medium text-gray-900 dark:text-white">定期开放新设备名额</span>
                     <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-                      按账号独立计时，空位不足时移除最久未使用的设备，补足预留空位；设备上限不变。
+                      每个周期只允许指定数量的新设备进入，未用完的名额不累计。容量不足时先移除最久未使用的设备。
                     </span>
                   </span>
                 </label>
                 <div v-if="claudeOAuthMode === 'carpool' && claudeOAuthCarpoolAutoExpand" class="col-span-2">
                   <label class="input-label">执行间隔（小时）</label>
                   <input v-model.number="carpoolMaintenanceIntervalHours" data-testid="carpool-maintenance-interval" type="number" min="1" max="720" step="1" class="input" />
-                  <label class="input-label mt-3">预留空闲名额</label>
-                  <input v-model.number="carpoolMaintenanceFreeSlots" data-testid="carpool-maintenance-free-slots" type="number" min="1" :max="claudeOAuthCarpoolDeviceLimit" step="1" class="input" />
-                  <p class="input-hint">默认每 24 小时补足 1 个空位。首次开启或修改间隔后等待完整周期，旧设备也可重新申请空位。</p>
-                  <p class="input-hint" data-testid="carpool-next-maintenance">下次执行：{{ carpoolNextMaintenanceLabel }}</p>
+                  <label class="input-label mt-3">每周期新设备名额</label>
+                  <input v-model.number="carpoolAdmissionsPerCycle" data-testid="carpool-admissions-per-cycle" type="number" min="1" :max="claudeOAuthCarpoolDeviceLimit" step="1" class="input" />
+                  <p class="input-hint">启用时开放首轮名额，默认每 24 小时重置为 1 个。已登记设备不消耗名额，未用完的名额不累计。</p>
+                  <p class="input-hint" data-testid="carpool-next-maintenance">下次调整：{{ carpoolNextMaintenanceLabel }}</p>
                 </div>
               </div>
               <p v-else class="text-xs text-gray-500 dark:text-gray-400">
@@ -1272,7 +1272,7 @@
             <div>
               <label class="input-label mb-0">Recorded Devices</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Devices recorded for this account. Deleting one frees a carpool slot immediately.
+                删除设备会释放容量，但不会返还本轮已使用的新设备名额。
               </p>
             </div>
             <button type="button" class="btn btn-secondary btn-sm" @click="loadClaudeCarpoolDevices" :disabled="carpoolDevicesLoading">
@@ -1293,6 +1293,17 @@
               <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
                 <div class="text-xs text-gray-500 dark:text-gray-400">Overflow</div>
                 <div class="mt-1 font-medium text-gray-900 dark:text-white">{{ carpoolDevicesOverview?.overflow_count ?? 0 }}</div>
+              </div>
+            </div>
+
+            <div v-if="carpoolDevicesOverview?.maintenance_enabled" class="grid grid-cols-1 gap-3 md:grid-cols-2" data-testid="carpool-cycle-overview">
+              <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
+                <div class="text-xs text-gray-500 dark:text-gray-400">本轮剩余可准入名额</div>
+                <div class="mt-1 font-medium" data-testid="carpool-admissions-remaining">{{ carpoolDevicesOverview.admissions_remaining ?? 0 }}</div>
+              </div>
+              <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
+                <div class="text-xs text-gray-500 dark:text-gray-400">下次调整时间（本地时间）</div>
+                <div class="mt-1 font-medium" data-testid="carpool-cycle-next-at">{{ carpoolDevicesOverview.next_maintenance_at ? new Date(carpoolDevicesOverview.next_maintenance_at).toLocaleString() : '等待初始化计时' }}</div>
               </div>
             </div>
 
@@ -2103,13 +2114,13 @@ const carpoolUserIDs = ref<number[]>([])
 const claudeOAuthCarpoolUnlimitedDevices = ref(false)
 const claudeOAuthCarpoolAutoExpand = ref(false)
 const carpoolMaintenanceIntervalHours = ref<number>(24)
-const carpoolMaintenanceFreeSlots = ref<number>(1)
+const carpoolAdmissionsPerCycle = ref<number>(1)
 const carpoolNextMaintenanceLabel = computed(() => {
   const extra = props.account?.extra || {}
   if (extra.claude_oauth_carpool_auto_expand_enabled !== true || extra.claude_oauth_carpool_unlimited_devices === true || Number(extra.claude_oauth_carpool_maintenance_interval_hours || 24) !== carpoolMaintenanceIntervalHours.value) {
     return '保存后开始计时'
   }
-  const next = extra.claude_oauth_carpool_next_maintenance_at
+  const next = carpoolDevicesOverview.value?.next_maintenance_at || extra.claude_oauth_carpool_next_maintenance_at
   return typeof next === 'string' && Number.isFinite(Date.parse(next)) ? new Date(next).toLocaleString() : '等待初始化计时'
 })
 const claudeOAuthSharedBucketCount = ref<number>(5)
@@ -2709,7 +2720,7 @@ function loadQuotaControlSettings(account: Account) {
   claudeOAuthCarpoolUnlimitedDevices.value = false
   claudeOAuthCarpoolAutoExpand.value = false
   carpoolMaintenanceIntervalHours.value = 24
-  carpoolMaintenanceFreeSlots.value = 1
+  carpoolAdmissionsPerCycle.value = 1
   claudeOAuthSharedBucketCount.value = 5
   claudeOAuthFiveHourRateLimitThresholdPercent.value = 0
   claudeOAuthDisableTokenRefresh.value = true
@@ -2788,7 +2799,7 @@ function loadQuotaControlSettings(account: Account) {
   claudeOAuthCarpoolAutoExpand.value =
     account.claude_oauth_carpool_auto_expand_enabled === true || accountExtra.claude_oauth_carpool_auto_expand_enabled === true
   carpoolMaintenanceIntervalHours.value = Math.min(720, Math.max(1, Number(accountExtra.claude_oauth_carpool_maintenance_interval_hours) || 24))
-  carpoolMaintenanceFreeSlots.value = Math.min(claudeOAuthCarpoolDeviceLimit.value, Math.max(1, Number(accountExtra.claude_oauth_carpool_maintenance_free_slots) || 1))
+  carpoolAdmissionsPerCycle.value = Math.min(claudeOAuthCarpoolDeviceLimit.value, Math.max(1, Number(accountExtra.claude_oauth_carpool_maintenance_admissions_per_cycle ?? accountExtra.claude_oauth_carpool_maintenance_free_slots) || 1))
   claudeOAuthSharedBucketCount.value = Math.min(32, Math.max(1, account.claude_oauth_shared_bucket_count || 5))
   claudeOAuthFiveHourRateLimitThresholdPercent.value =
     typeof account.claude_oauth_5h_rate_limit_threshold_percent === 'number'
@@ -3460,6 +3471,7 @@ const handleSubmit = async () => {
         delete newExtra.claude_oauth_carpool_unlimited_devices
         delete newExtra.claude_oauth_carpool_auto_expand_enabled
         delete newExtra.claude_oauth_carpool_auto_maintenance_target
+        delete newExtra.claude_oauth_carpool_maintenance_free_slots
         delete newExtra.claude_oauth_disable_token_refresh
         delete newExtra.claude_oauth_token_disable_before_expiry_minutes
         delete newExtra.claude_oauth_fixed_device_id
@@ -3468,8 +3480,9 @@ const handleSubmit = async () => {
       } else if (claudeOAuthMode.value === 'carpool') {
         newExtra.claude_oauth_carpool_device_limit = Math.min(32, Math.max(1, claudeOAuthCarpoolDeviceLimit.value || 5))
         newExtra.claude_oauth_carpool_maintenance_interval_hours = Math.min(720, Math.max(1, Math.trunc(carpoolMaintenanceIntervalHours.value || 24)))
-        newExtra.claude_oauth_carpool_maintenance_free_slots = Math.min(claudeOAuthCarpoolDeviceLimit.value, Math.max(1, Math.trunc(carpoolMaintenanceFreeSlots.value || 1)))
+        newExtra.claude_oauth_carpool_maintenance_admissions_per_cycle = Math.min(claudeOAuthCarpoolDeviceLimit.value, Math.max(1, Math.trunc(carpoolAdmissionsPerCycle.value || 1)))
         delete newExtra.claude_oauth_carpool_auto_maintenance_target
+        delete newExtra.claude_oauth_carpool_maintenance_free_slots
         if (claudeOAuthCarpoolUnlimitedDevices.value) {
           newExtra.claude_oauth_carpool_unlimited_devices = true
           delete newExtra.claude_oauth_carpool_auto_expand_enabled
@@ -3523,12 +3536,14 @@ const handleSubmit = async () => {
         delete newExtra.claude_oauth_carpool_unlimited_devices
         delete newExtra.claude_oauth_carpool_auto_expand_enabled
         delete newExtra.claude_oauth_carpool_auto_maintenance_target
+        delete newExtra.claude_oauth_carpool_maintenance_free_slots
         delete newExtra.claude_oauth_shared_bucket_count
       } else {
         delete newExtra.claude_oauth_carpool_device_limit
         delete newExtra.claude_oauth_carpool_unlimited_devices
         delete newExtra.claude_oauth_carpool_auto_expand_enabled
         delete newExtra.claude_oauth_carpool_auto_maintenance_target
+        delete newExtra.claude_oauth_carpool_maintenance_free_slots
         delete newExtra.claude_oauth_shared_bucket_count
         delete newExtra.claude_oauth_disable_token_refresh
         delete newExtra.claude_oauth_token_disable_before_expiry_minutes

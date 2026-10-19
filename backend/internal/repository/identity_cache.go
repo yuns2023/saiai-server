@@ -215,7 +215,7 @@ func singleDeviceAdmissionMaintenanceKey(accountID int64) string {
 	return fmt.Sprintf("%s%d", singleDeviceAdmissionMaintenancePrefix, accountID)
 }
 
-func (c *identityCache) getOrCreateAdmissionDevice(ctx context.Context, accountID int64, originalDeviceID string, hints service.ClientHints, limit int, nowUnix int64, recordedKey, overflowKey string, fullErr error) (*service.CarpoolDeviceRecord, error) {
+func (c *identityCache) getOrCreateAdmissionDevice(ctx context.Context, accountID int64, originalDeviceID string, hints service.ClientHints, limit int, nowUnix int64, recordedKey, overflowKey string, fullErr error, policies ...service.CarpoolAdmissionPolicy) (*service.CarpoolDeviceRecord, error) {
 	trimmedDeviceID := strings.TrimSpace(originalDeviceID)
 	if trimmedDeviceID == "" {
 		return nil, nil
@@ -229,6 +229,11 @@ func (c *identityCache) getOrCreateAdmissionDevice(ctx context.Context, accountI
 		return nil, nil
 	}
 
+	budgetKey := carpoolAdmissionBudgetKey(accountID)
+	watchKeys := []string{recordedKey, overflowKey}
+	if len(policies) > 0 {
+		watchKeys = append(watchKeys, budgetKey)
+	}
 	for attempt := 0; attempt < carpoolDeviceWriteMaxRetries; attempt++ {
 		var out *service.CarpoolDeviceRecord
 		err := c.rdb.Watch(ctx, func(tx *redis.Tx) error {
@@ -262,7 +267,16 @@ func (c *identityCache) getOrCreateAdmissionDevice(ctx context.Context, accountI
 			if err != nil {
 				return err
 			}
-			if recordedCount < int64(limit) {
+			var budget *carpoolAdmissionBudget
+			budgetAllowed := true
+			if len(policies) > 0 {
+				budget, err = readCarpoolAdmissionBudget(ctx, tx, budgetKey, policies[0])
+				if err != nil {
+					return err
+				}
+				budgetAllowed = budget.Generation == policies[0].Generation && budget.Used < budget.Quota
+			}
+			if recordedCount < int64(limit) && budgetAllowed {
 				record := &service.CarpoolDeviceRecord{
 					DeviceKey:        deviceField,
 					OriginalDeviceID: trimmedDeviceID,
@@ -275,6 +289,14 @@ func (c *identityCache) getOrCreateAdmissionDevice(ctx context.Context, accountI
 					return marshalErr
 				}
 				_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+					if budget != nil {
+						budget.Used++
+						encoded, err := json.Marshal(budget)
+						if err != nil {
+							return err
+						}
+						pipe.Set(ctx, budgetKey, encoded, 0)
+					}
 					pipe.HSet(ctx, recordedKey, deviceField, payload)
 					pipe.HDel(ctx, overflowKey, deviceField)
 					return nil
@@ -343,7 +365,7 @@ func (c *identityCache) getOrCreateAdmissionDevice(ctx context.Context, accountI
 				return err
 			}
 			return fullErr
-		}, recordedKey, overflowKey)
+		}, watchKeys...)
 		if err == nil {
 			return out, nil
 		}
@@ -947,9 +969,11 @@ func oldestCarpoolOverflowFields(items map[string]string, deleteCount int) ([]st
 	return fields, nil
 }
 
-// FreeCarpoolSlots atomically replenishes free slots and records the due-time
+// ResetCarpoolAdmissionCycle atomically resets the admission budget, frees
+// capacity only when needed, and records the due-time
 // token. Retries and stale workers cannot evict again, even after new admissions.
-func (c *identityCache) FreeCarpoolSlots(ctx context.Context, accountID int64, limit, free int, due string) (int, error) {
+func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountID int64, limit int, policy service.CarpoolAdmissionPolicy, due string) (int, error) {
+	free := policy.Admissions
 	if accountID <= 0 || limit < 1 || free < 1 || free > limit {
 		return 0, errors.New("invalid carpool slot policy")
 	}
@@ -957,15 +981,15 @@ func (c *identityCache) FreeCarpoolSlots(ctx context.Context, accountID int64, l
 		return 0, err
 	}
 	recorded, overflow := carpoolRecordedKey(accountID), carpoolOverflowKey(accountID)
-	maintenance := fmt.Sprintf("claude_carpool_slots_v2:%d", accountID)
+	maintenance := carpoolAdmissionBudgetKey(accountID)
 	for attempt := 0; attempt < carpoolDeviceWriteMaxRetries; attempt++ {
 		removed := 0
 		err := c.rdb.Watch(ctx, func(tx *redis.Tx) error {
-			last, err := tx.Get(ctx, maintenance).Result()
-			if err != nil && err != redis.Nil {
+			budget, err := readCarpoolAdmissionBudget(ctx, tx, maintenance, policy)
+			if err != nil {
 				return err
 			}
-			if last >= due {
+			if budget.Generation != policy.Generation || budget.LastDue >= due {
 				return nil
 			}
 			values, err := tx.HGetAll(ctx, recorded).Result()
@@ -991,7 +1015,14 @@ func (c *identityCache) FreeCarpoolSlots(ctx context.Context, accountID int64, l
 					pipe.HDel(ctx, recorded, item.field)
 					pipe.HDel(ctx, overflow, item.field)
 				}
-				pipe.Set(ctx, maintenance, due, 0)
+				budget.LastDue = due
+				budget.Used = 0
+				budget.Quota = policy.Admissions
+				encoded, err := json.Marshal(budget)
+				if err != nil {
+					return err
+				}
+				pipe.Set(ctx, maintenance, encoded, 0)
 				return nil
 			})
 			if err == nil {
@@ -1007,4 +1038,48 @@ func (c *identityCache) FreeCarpoolSlots(ctx context.Context, accountID int64, l
 		}
 	}
 	return 0, redis.TxFailedErr
+}
+
+func carpoolAdmissionBudgetKey(accountID int64) string {
+	return fmt.Sprintf("claude_carpool_admission_budget_v1:%d", accountID)
+}
+
+type carpoolAdmissionBudget struct {
+	Generation string `json:"generation"`
+	LastDue    string `json:"last_due"`
+	Quota      int    `json:"quota"`
+	Used       int    `json:"used"`
+}
+
+func readCarpoolAdmissionBudget(ctx context.Context, reader redis.Cmdable, key string, policy service.CarpoolAdmissionPolicy) (*carpoolAdmissionBudget, error) {
+	raw, err := reader.Get(ctx, key).Result()
+	if err != nil && err != redis.Nil {
+		return nil, err
+	}
+	budget := &carpoolAdmissionBudget{}
+	if err == nil {
+		if err := json.Unmarshal([]byte(raw), budget); err != nil {
+			return nil, err
+		}
+	}
+	if budget.Generation < policy.Generation {
+		budget = &carpoolAdmissionBudget{Generation: policy.Generation, Quota: policy.Admissions}
+	}
+	return budget, nil
+}
+func (c *identityCache) GetOrCreateCarpoolDeviceWithPolicy(ctx context.Context, id int64, device string, hints service.ClientHints, limit int, now int64, policy service.CarpoolAdmissionPolicy) (*service.CarpoolDeviceRecord, error) {
+	if policy.Generation == "" || policy.Admissions < 1 {
+		return nil, errors.New("invalid carpool admission policy")
+	}
+	return c.getOrCreateAdmissionDevice(ctx, id, device, hints, limit, now, carpoolRecordedKey(id), carpoolOverflowKey(id), service.ErrClaudeOAuthCarpoolDevicesFull, policy)
+}
+func (c *identityCache) CarpoolAdmissionsRemaining(ctx context.Context, id int64, policy service.CarpoolAdmissionPolicy) (int, error) {
+	budget, err := readCarpoolAdmissionBudget(ctx, c.rdb, carpoolAdmissionBudgetKey(id), policy)
+	if err != nil {
+		return 0, err
+	}
+	if budget.Generation != policy.Generation {
+		return 0, nil
+	}
+	return max(0, budget.Quota-budget.Used), nil
 }

@@ -97,12 +97,12 @@ func TestAccountIsClaudeOAuthCarpoolAutoExpandEnabled(t *testing.T) {
 
 func TestCarpoolMaintenancePolicyBounds(t *testing.T) {
 	a := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"claude_oauth_carpool_device_limit": 10}}
-	if a.GetCarpoolMaintenanceIntervalHours() != 24 || a.GetCarpoolMaintenanceFreeSlots() != 1 {
+	if a.GetCarpoolMaintenanceIntervalHours() != 24 || a.GetCarpoolAdmissionsPerCycle() != 1 {
 		t.Fatal("unexpected defaults")
 	}
 	a.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 999
-	a.Extra["claude_oauth_carpool_maintenance_free_slots"] = 99
-	if a.GetCarpoolMaintenanceIntervalHours() != 720 || a.GetCarpoolMaintenanceFreeSlots() != 10 {
+	a.Extra["claude_oauth_carpool_maintenance_admissions_per_cycle"] = 99
+	if a.GetCarpoolMaintenanceIntervalHours() != 720 || a.GetCarpoolAdmissionsPerCycle() != 10 {
 		t.Fatal("unexpected bounds")
 	}
 }

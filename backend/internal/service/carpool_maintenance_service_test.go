@@ -157,15 +157,15 @@ func (s *carpoolMaintenanceAccountRepoStub) AdvanceCarpoolMaintenance(ctx contex
 	}
 	return s.UpdateExtra(ctx, id, map[string]any{CarpoolNextMaintenanceKey: next})
 }
-func (s *carpoolMaintenanceCacheStub) FreeCarpoolSlots(_ context.Context, id int64, limit, free int, due string) (int, error) {
+func (s *carpoolMaintenanceCacheStub) ResetCarpoolAdmissionCycle(_ context.Context, id int64, limit int, policy CarpoolAdmissionPolicy, due string) (int, error) {
 	s.calls = append(s.calls, carpoolMaintenanceRotationCall{accountID: id, limit: limit, day: due})
-	return free, nil
+	return policy.Admissions, nil
 }
 func TestCarpoolSlotsPerAccountScheduleAndMissedPeriods(t *testing.T) {
 	now := time.Date(2026, 10, 19, 10, 30, 0, 0, time.UTC)
 	a, b := newAutoCarpoolAccount(1, 10), newAutoCarpoolAccount(2, 20)
 	a.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 6
-	a.Extra["claude_oauth_carpool_maintenance_free_slots"] = 2
+	a.Extra["claude_oauth_carpool_maintenance_admissions_per_cycle"] = 2
 	b.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 12
 	repo := &carpoolMaintenanceAccountRepoStub{accounts: map[int64]*Account{1: a, 2: b}}
 	cache := &carpoolMaintenanceCacheStub{}
@@ -200,12 +200,15 @@ func TestNormalizeCarpoolSchedule(t *testing.T) {
 	require.Equal(t, "2026-10-20T10:30:00Z", a.GetCarpoolNextMaintenance())
 	previous := cloneCarpoolMaintenanceAccount(a)
 	a.Extra[CarpoolNextMaintenanceKey] = "forged"
-	a.Extra["claude_oauth_carpool_maintenance_free_slots"] = 2
+	a.Extra[CarpoolMaintenanceGenerationKey] = "forged"
+	a.Extra["claude_oauth_carpool_maintenance_admissions_per_cycle"] = 2
 	NormalizeCarpoolMaintenance(a, &previous, now.Add(time.Hour))
 	require.Equal(t, previous.GetCarpoolNextMaintenance(), a.GetCarpoolNextMaintenance())
+	require.Equal(t, previous.CarpoolAdmissionPolicy().Generation, a.CarpoolAdmissionPolicy().Generation)
 	a.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 6
 	NormalizeCarpoolMaintenance(a, &previous, now.Add(time.Hour))
 	require.Equal(t, "2026-10-19T17:30:00Z", a.GetCarpoolNextMaintenance())
+	require.Greater(t, a.CarpoolAdmissionPolicy().Generation, previous.CarpoolAdmissionPolicy().Generation)
 	previous = cloneCarpoolMaintenanceAccount(a)
 	a.Extra["claude_oauth_carpool_unlimited_devices"] = true
 	NormalizeCarpoolMaintenance(a, &previous, now)

@@ -2209,6 +2209,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// Runtime schedule values are server-owned, including in bulk requests.
 	delete(input.Extra, CarpoolNextMaintenanceKey)
+	delete(input.Extra, CarpoolMaintenanceGenerationKey)
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
 		Credentials: input.Credentials,
@@ -2263,9 +2264,10 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			maps.Copy(updated.Extra, input.Extra)
 			NormalizeCarpoolMaintenance(&updated, previous, time.Now())
 			next := updated.GetCarpoolNextMaintenance()
-			if next != previous.GetCarpoolNextMaintenance() {
+			if next != previous.GetCarpoolNextMaintenance() || updated.CarpoolAdmissionPolicy().Generation != previous.CarpoolAdmissionPolicy().Generation {
 				changes := maps.Clone(input.Extra)
 				changes[CarpoolNextMaintenanceKey] = next
+				changes[CarpoolMaintenanceGenerationKey] = updated.getExtraString(CarpoolMaintenanceGenerationKey)
 				if err := s.accountRepo.UpdateExtra(ctx, previous.ID, changes); err != nil {
 					return nil, err
 				}

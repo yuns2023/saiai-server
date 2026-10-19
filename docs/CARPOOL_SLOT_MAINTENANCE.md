@@ -1,50 +1,69 @@
-# Carpool periodic free-slot maintenance
+# Carpool periodic admission budgets
 
-Carpool has one fixed device limit. Automatic maintenance no longer increases
-that limit and no longer uses `claude_oauth_carpool_auto_maintenance_target`.
-This policy is independent of user device quotas and other OAuth modes.
+Carpool has one fixed device limit and, when periodic maintenance is enabled,
+a separate limit on new device admissions per cycle. With capacity 10, zero
+registered devices and a cycle allowance of 2, only 2 devices may register in
+that cycle. The remaining physical capacity does not permit extra admissions.
+Existing registered devices do not consume another admission when requesting.
 
 The account's `extra` fields are:
 
 - `claude_oauth_carpool_device_limit`: existing fixed capacity, 1–32.
 - `claude_oauth_carpool_auto_expand_enabled`: retained wire-compatible boolean;
-  now enables periodic free-slot maintenance, not expansion.
+  now enables periodic admission budgets, not capacity expansion.
 - `claude_oauth_carpool_maintenance_interval_hours`: integer hours, default 24,
   bounded to 1–720.
-- `claude_oauth_carpool_maintenance_free_slots`: desired free slots after a
-  maintenance pass, default 1, bounded to 1–device limit.
+- `claude_oauth_carpool_maintenance_admissions_per_cycle`: new device admissions
+  per cycle, default 1, bounded to 1–device limit. The unpublished predecessor's
+  `claude_oauth_carpool_maintenance_free_slots` is a read-only fallback.
 - `claude_oauth_carpool_next_maintenance_at`: server-owned UTC RFC3339 timestamp.
+- `claude_oauth_carpool_maintenance_generation`: server-owned configuration
+  generation used to prevent stale workers from resetting a newer budget.
 
-At each due time, atomically remove the least-recently-seen records until the
-record count is at most `limit - free_slots`. Do nothing if enough slots are
-already free. For limit 10 and free slots 2, counts 10, 9, 8 and 6 cause 2, 1,
-0 and 0 removals. Counts above a newly lowered limit are also reduced to the
-same target at the next maintenance pass. The capacity itself never changes.
-Old devices may reapply for admission; free slots are not reserved exclusively
-for previously unseen devices. Existing streams are not actively terminated.
+Enabling starts a first cycle with the configured allowance, without evicting
+existing devices immediately. At each due time, atomically reset the allowance
+to the configured number and remove the least-recently-seen records only if
+needed to make room for that many admissions. For capacity 10 and allowance 2,
+counts 10, 9, 8 and 0 cause 2, 1, 0 and 0 removals, but each new cycle permits
+at most 2 new registrations. Unused allowances never accumulate. Device
+registration and budget consumption share one Redis transaction, including
+cross-replica concurrency and repeat requests from the same device.
 
-Each account has an independent schedule. Enabling the feature or changing its
-interval starts a full interval from save time. Changes to capacity or desired
-free slots retain the schedule. Disabling maintenance, changing modes or
-turning on unlimited devices disables maintenance; re-enabling starts afresh.
-The UI shows the persisted next time in the browser's local timezone.
+Manual deletion does not refund spent admissions. An evicted device may
+reapply, consuming one admission just like another unregistered device.
+Existing streams are not actively terminated. User device quotas and other
+OAuth modes are independent. With maintenance disabled, normal fixed-capacity
+admission applies; unlimited mode bypasses the local device registry.
 
-The worker checks once per minute, so actual execution may lag the displayed
-time by about a minute plus processing time. Missed periods are skipped after
-one pass, preserving the original schedule phase. A no-op pass also advances
-the schedule. Redis atomically records the due-time token together with the
-removals, preventing repeat eviction after retries or concurrent replicas.
-PostgreSQL advances the due time conditionally, avoiding overwrite of a newer
-schedule. PostgreSQL failure after successful Redis eviction is retryable.
-Redis state must retain its existing persistence guarantees; loss of that state
-also loses the local device registry and is not a supported deduplication
-boundary.
+Each account has an independent schedule. Enabling or changing the interval
+starts a new cycle and schedules the next adjustment one full interval from
+save time. Changing the admission count takes effect on the next adjustment of an
+already-initialized budget;
+changing capacity retains the schedule and applies the existing capacity gate.
+Disabling and re-enabling starts a new generation. The server ignores submitted
+schedule/generation values. Bulk edits normalize each account independently.
 
-Existing enabled accounts without a timestamp are lazily initialized on the
-first worker pass and wait a complete interval before removal. Their actual
-capacity is preserved; absent new fields mean 24 hours and 1 free slot. The old
-target and calendar-day fields are ignored. No database schema migration is
-required. Older Gateway code still interprets the legacy enable flag as daily
+The worker checks once per minute, so adjustment may lag the displayed time by
+about a minute plus processing time. Missed periods result in only one reset,
+retaining the original schedule phase. Redis records the due-time token with
+the reset/removals, so retries cannot restore spent allowance or evict twice.
+PostgreSQL conditionally advances the due time without overwriting a newer
+schedule. Failure to advance PostgreSQL after a successful Redis transaction
+is retryable. The registry and budget depend on Redis persistence; loss of
+Redis state is not a supported deduplication boundary.
+
+The device overview API returns `maintenance_enabled`, `admissions_remaining`
+(the smaller of the remaining cycle allowance and physical space), and
+`next_maintenance_at`. The device view shows both remaining admissions and the
+next adjustment in the browser's local timezone; Refresh reloads these values.
+The edit form also shows the next adjustment or indicates that saving a new
+interval will start a new schedule.
+
+Existing enabled accounts without a schedule are initialized on the first
+worker pass and wait a full interval before the first reset/eviction. Initial
+new-device admission is already capped by the default/configured allowance.
+The actual capacity is preserved; absent new fields mean 24 hours and 1 new
+admission. The old target/calendar-day fields are ignored. No SQL schema
+migration is required. Older Gateway code interprets the enable flag as daily
 expansion/rotation, so application rollback restores that older behavior.
-
 `single_device` retains its existing midnight expansion/rotation behavior.
