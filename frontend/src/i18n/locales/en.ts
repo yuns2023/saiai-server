@@ -1607,7 +1607,9 @@ export default {
       },
       today: 'Today',
       total: 'Last 30d',
-      claudeDevicesSummaryHint: 'Active devices / effective limit across groups with device limits enabled; revoked devices are excluded',
+      claudeDevicesSummaryHint: 'Distinct active user devices / base capacity plus redeemed bonuses',
+      claudeDeviceBaseLimit: 'Claude Code base device capacity',
+      claudeDeviceBaseLimitHint: 'Default 3; shared across groups and API keys. Redeemed bonuses are added separately.',
       claudeDeviceModal: {
         lastUser: 'Last user',
         lastKey: 'Last Key',
@@ -2217,6 +2219,9 @@ export default {
 
     // Accounts
     accounts: {
+      carpoolUsersOnly: 'Specified users only',
+      carpoolUsersOnlyHint: 'Only listed users may use this account. An empty list denies everyone. When trusted-only is also enabled, both conditions must hold.',
+      carpoolUserSearchFailed: 'User search failed. Please retry.',
       carpoolTrustedOnly: 'Trusted users only',
       carpoolTrustedOnlyHint: 'Only users marked trusted by an administrator may use this account. Scheduling and device limits still apply.',
       title: 'Account Management',

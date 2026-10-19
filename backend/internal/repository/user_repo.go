@@ -63,6 +63,7 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 		SetNillablePaygDiscountMultiplier(userIn.PaygDiscountMultiplier).
 		SetPaygDiscountOverrideEnabled(userIn.PaygDiscountOverrideEnabled).
 		SetIsTrusted(userIn.IsTrusted).
+		SetClaudeDeviceBaseLimit(userIn.ClaudeDeviceBaseCapacity()).
 		SetNillableAutoLevelID(userIn.AutoLevelID).
 		SetNillableManualLevelID(userIn.ManualLevelID).
 		SetConcurrency(userIn.Concurrency).
@@ -151,6 +152,7 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		SetNillablePaygDiscountMultiplier(userIn.PaygDiscountMultiplier).
 		SetPaygDiscountOverrideEnabled(userIn.PaygDiscountOverrideEnabled).
 		SetIsTrusted(userIn.IsTrusted).
+		SetClaudeDeviceBaseLimit(userIn.ClaudeDeviceBaseCapacity()).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
 		SetSoraStorageQuotaBytes(userIn.SoraStorageQuotaBytes).
@@ -574,6 +576,7 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 	dst.ManualLevelID = src.ManualLevelID
 	dst.PaygDiscountOverrideEnabled = src.PaygDiscountOverrideEnabled
 	dst.IsTrusted = src.IsTrusted
+	dst.ClaudeDeviceBaseLimit = src.ClaudeDeviceBaseLimit
 	dst.CreatedAt = src.CreatedAt
 	dst.UpdatedAt = src.UpdatedAt
 }

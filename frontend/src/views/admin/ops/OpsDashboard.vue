@@ -128,6 +128,7 @@
 
         <OpsRequestDetailsModal
           v-model="showRequestDetails"
+          :detail-open="showErrorModal"
           :time-range="timeRange"
           :custom-start-time="customStartTime"
           :custom-end-time="customEndTime"
@@ -538,9 +539,8 @@ function onQueryModeChange(v: string | number | boolean | null) {
 
 function openError(id: number) {
   selectedErrorId.value = id
-  // Ensure only one modal visible at a time.
+  // Keep request-list state and scroll position under the detail dialog.
   showErrorDetails.value = false
-  showRequestDetails.value = false
   showErrorModal.value = true
 }
 

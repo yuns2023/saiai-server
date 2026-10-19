@@ -88,6 +88,7 @@ func (h *UserHandler) RevokeClaudeDevice(c *gin.Context) {
 
 // CreateUserRequest represents admin create user request
 type CreateUserRequest struct {
+	ClaudeDeviceBaseLimit       *int     `json:"claude_device_base_limit" binding:"omitempty,min=1,max=100"`
 	IsTrusted                   bool     `json:"is_trusted"`
 	Email                       string   `json:"email" binding:"required,email"`
 	Password                    string   `json:"password" binding:"required,min=6"`
@@ -104,6 +105,7 @@ type CreateUserRequest struct {
 // UpdateUserRequest represents admin update user request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateUserRequest struct {
+	ClaudeDeviceBaseLimit       *int     `json:"claude_device_base_limit" binding:"omitempty,min=1,max=100"`
 	IsTrusted                   *bool    `json:"is_trusted"`
 	Email                       string   `json:"email" binding:"omitempty,email"`
 	Password                    string   `json:"password" binding:"omitempty,min=6"`
@@ -269,6 +271,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		PaygDiscountMultiplier:      req.PaygDiscountMultiplier,
 		PaygDiscountOverrideEnabled: req.PaygDiscountOverrideEnabled,
 		IsTrusted:                   req.IsTrusted,
+		ClaudeDeviceBaseLimit:       req.ClaudeDeviceBaseLimit,
 		Concurrency:                 req.Concurrency,
 		AllowedGroups:               req.AllowedGroups,
 		SoraStorageQuotaBytes:       req.SoraStorageQuotaBytes,
@@ -306,6 +309,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		PaygDiscountMultiplier:      req.PaygDiscountMultiplier,
 		PaygDiscountOverrideEnabled: req.PaygDiscountOverrideEnabled,
 		IsTrusted:                   req.IsTrusted,
+		ClaudeDeviceBaseLimit:       req.ClaudeDeviceBaseLimit,
 		Concurrency:                 req.Concurrency,
 		Status:                      req.Status,
 		AllowedGroups:               req.AllowedGroups,

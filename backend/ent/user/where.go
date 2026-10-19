@@ -100,6 +100,11 @@ func IsTrusted(v bool) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldIsTrusted, v))
 }
 
+// ClaudeDeviceBaseLimit applies equality check predicate on the "claude_device_base_limit" field. It's identical to ClaudeDeviceBaseLimitEQ.
+func ClaudeDeviceBaseLimit(v int) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldClaudeDeviceBaseLimit, v))
+}
+
 // PaygDiscountOverrideEnabled applies equality check predicate on the "payg_discount_override_enabled" field. It's identical to PaygDiscountOverrideEnabledEQ.
 func PaygDiscountOverrideEnabled(v bool) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldPaygDiscountOverrideEnabled, v))
@@ -573,6 +578,46 @@ func IsTrustedEQ(v bool) predicate.User {
 // IsTrustedNEQ applies the NEQ predicate on the "is_trusted" field.
 func IsTrustedNEQ(v bool) predicate.User {
 	return predicate.User(sql.FieldNEQ(FieldIsTrusted, v))
+}
+
+// ClaudeDeviceBaseLimitEQ applies the EQ predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitEQ(v int) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldClaudeDeviceBaseLimit, v))
+}
+
+// ClaudeDeviceBaseLimitNEQ applies the NEQ predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitNEQ(v int) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldClaudeDeviceBaseLimit, v))
+}
+
+// ClaudeDeviceBaseLimitIn applies the In predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitIn(vs ...int) predicate.User {
+	return predicate.User(sql.FieldIn(FieldClaudeDeviceBaseLimit, vs...))
+}
+
+// ClaudeDeviceBaseLimitNotIn applies the NotIn predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitNotIn(vs ...int) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldClaudeDeviceBaseLimit, vs...))
+}
+
+// ClaudeDeviceBaseLimitGT applies the GT predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitGT(v int) predicate.User {
+	return predicate.User(sql.FieldGT(FieldClaudeDeviceBaseLimit, v))
+}
+
+// ClaudeDeviceBaseLimitGTE applies the GTE predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitGTE(v int) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldClaudeDeviceBaseLimit, v))
+}
+
+// ClaudeDeviceBaseLimitLT applies the LT predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitLT(v int) predicate.User {
+	return predicate.User(sql.FieldLT(FieldClaudeDeviceBaseLimit, v))
+}
+
+// ClaudeDeviceBaseLimitLTE applies the LTE predicate on the "claude_device_base_limit" field.
+func ClaudeDeviceBaseLimitLTE(v int) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldClaudeDeviceBaseLimit, v))
 }
 
 // PaygDiscountOverrideEnabledEQ applies the EQ predicate on the "payg_discount_override_enabled" field.
@@ -1093,6 +1138,29 @@ func SoraStorageUsedBytesLT(v int64) predicate.User {
 // SoraStorageUsedBytesLTE applies the LTE predicate on the "sora_storage_used_bytes" field.
 func SoraStorageUsedBytesLTE(v int64) predicate.User {
 	return predicate.User(sql.FieldLTE(FieldSoraStorageUsedBytes, v))
+}
+
+// HasCarpoolAccounts applies the HasEdge predicate on the "carpool_accounts" edge.
+func HasCarpoolAccounts() predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.M2M, true, CarpoolAccountsTable, CarpoolAccountsPrimaryKey...),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasCarpoolAccountsWith applies the HasEdge predicate on the "carpool_accounts" edge with a given conditions (other predicates).
+func HasCarpoolAccountsWith(preds ...predicate.Account) predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := newCarpoolAccountsStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

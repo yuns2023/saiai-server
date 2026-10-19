@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/accesslevel"
+	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
@@ -137,6 +138,20 @@ func (_c *UserCreate) SetIsTrusted(v bool) *UserCreate {
 func (_c *UserCreate) SetNillableIsTrusted(v *bool) *UserCreate {
 	if v != nil {
 		_c.SetIsTrusted(*v)
+	}
+	return _c
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (_c *UserCreate) SetClaudeDeviceBaseLimit(v int) *UserCreate {
+	_c.mutation.SetClaudeDeviceBaseLimit(v)
+	return _c
+}
+
+// SetNillableClaudeDeviceBaseLimit sets the "claude_device_base_limit" field if the given value is not nil.
+func (_c *UserCreate) SetNillableClaudeDeviceBaseLimit(v *int) *UserCreate {
+	if v != nil {
+		_c.SetClaudeDeviceBaseLimit(*v)
 	}
 	return _c
 }
@@ -307,6 +322,21 @@ func (_c *UserCreate) SetNillableSoraStorageUsedBytes(v *int64) *UserCreate {
 		_c.SetSoraStorageUsedBytes(*v)
 	}
 	return _c
+}
+
+// AddCarpoolAccountIDs adds the "carpool_accounts" edge to the Account entity by IDs.
+func (_c *UserCreate) AddCarpoolAccountIDs(ids ...int64) *UserCreate {
+	_c.mutation.AddCarpoolAccountIDs(ids...)
+	return _c
+}
+
+// AddCarpoolAccounts adds the "carpool_accounts" edges to the Account entity.
+func (_c *UserCreate) AddCarpoolAccounts(v ...*Account) *UserCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddCarpoolAccountIDs(ids...)
 }
 
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
@@ -521,6 +551,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultIsTrusted
 		_c.mutation.SetIsTrusted(v)
 	}
+	if _, ok := _c.mutation.ClaudeDeviceBaseLimit(); !ok {
+		v := user.DefaultClaudeDeviceBaseLimit
+		_c.mutation.SetClaudeDeviceBaseLimit(v)
+	}
 	if _, ok := _c.mutation.PaygDiscountOverrideEnabled(); !ok {
 		v := user.DefaultPaygDiscountOverrideEnabled
 		_c.mutation.SetPaygDiscountOverrideEnabled(v)
@@ -596,6 +630,14 @@ func (_c *UserCreate) check() error {
 	}
 	if _, ok := _c.mutation.IsTrusted(); !ok {
 		return &ValidationError{Name: "is_trusted", err: errors.New(`ent: missing required field "User.is_trusted"`)}
+	}
+	if _, ok := _c.mutation.ClaudeDeviceBaseLimit(); !ok {
+		return &ValidationError{Name: "claude_device_base_limit", err: errors.New(`ent: missing required field "User.claude_device_base_limit"`)}
+	}
+	if v, ok := _c.mutation.ClaudeDeviceBaseLimit(); ok {
+		if err := user.ClaudeDeviceBaseLimitValidator(v); err != nil {
+			return &ValidationError{Name: "claude_device_base_limit", err: fmt.Errorf(`ent: validator failed for field "User.claude_device_base_limit": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.PaygDiscountOverrideEnabled(); !ok {
 		return &ValidationError{Name: "payg_discount_override_enabled", err: errors.New(`ent: missing required field "User.payg_discount_override_enabled"`)}
@@ -694,6 +736,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 		_spec.SetField(user.FieldIsTrusted, field.TypeBool, value)
 		_node.IsTrusted = value
 	}
+	if value, ok := _c.mutation.ClaudeDeviceBaseLimit(); ok {
+		_spec.SetField(user.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
+		_node.ClaudeDeviceBaseLimit = value
+	}
 	if value, ok := _c.mutation.PaygDiscountOverrideEnabled(); ok {
 		_spec.SetField(user.FieldPaygDiscountOverrideEnabled, field.TypeBool, value)
 		_node.PaygDiscountOverrideEnabled = value
@@ -733,6 +779,22 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.SoraStorageUsedBytes(); ok {
 		_spec.SetField(user.FieldSoraStorageUsedBytes, field.TypeInt64, value)
 		_node.SoraStorageUsedBytes = value
+	}
+	if nodes := _c.mutation.CarpoolAccountsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: true,
+			Table:   user.CarpoolAccountsTable,
+			Columns: user.CarpoolAccountsPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1079,6 +1141,24 @@ func (u *UserUpsert) SetIsTrusted(v bool) *UserUpsert {
 // UpdateIsTrusted sets the "is_trusted" field to the value that was provided on create.
 func (u *UserUpsert) UpdateIsTrusted() *UserUpsert {
 	u.SetExcluded(user.FieldIsTrusted)
+	return u
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (u *UserUpsert) SetClaudeDeviceBaseLimit(v int) *UserUpsert {
+	u.Set(user.FieldClaudeDeviceBaseLimit, v)
+	return u
+}
+
+// UpdateClaudeDeviceBaseLimit sets the "claude_device_base_limit" field to the value that was provided on create.
+func (u *UserUpsert) UpdateClaudeDeviceBaseLimit() *UserUpsert {
+	u.SetExcluded(user.FieldClaudeDeviceBaseLimit)
+	return u
+}
+
+// AddClaudeDeviceBaseLimit adds v to the "claude_device_base_limit" field.
+func (u *UserUpsert) AddClaudeDeviceBaseLimit(v int) *UserUpsert {
+	u.Add(user.FieldClaudeDeviceBaseLimit, v)
 	return u
 }
 
@@ -1443,6 +1523,27 @@ func (u *UserUpsertOne) SetIsTrusted(v bool) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateIsTrusted() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateIsTrusted()
+	})
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (u *UserUpsertOne) SetClaudeDeviceBaseLimit(v int) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetClaudeDeviceBaseLimit(v)
+	})
+}
+
+// AddClaudeDeviceBaseLimit adds v to the "claude_device_base_limit" field.
+func (u *UserUpsertOne) AddClaudeDeviceBaseLimit(v int) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddClaudeDeviceBaseLimit(v)
+	})
+}
+
+// UpdateClaudeDeviceBaseLimit sets the "claude_device_base_limit" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateClaudeDeviceBaseLimit() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateClaudeDeviceBaseLimit()
 	})
 }
 
@@ -2004,6 +2105,27 @@ func (u *UserUpsertBulk) SetIsTrusted(v bool) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateIsTrusted() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateIsTrusted()
+	})
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (u *UserUpsertBulk) SetClaudeDeviceBaseLimit(v int) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetClaudeDeviceBaseLimit(v)
+	})
+}
+
+// AddClaudeDeviceBaseLimit adds v to the "claude_device_base_limit" field.
+func (u *UserUpsertBulk) AddClaudeDeviceBaseLimit(v int) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddClaudeDeviceBaseLimit(v)
+	})
+}
+
+// UpdateClaudeDeviceBaseLimit sets the "claude_device_base_limit" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateClaudeDeviceBaseLimit() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateClaudeDeviceBaseLimit()
 	})
 }
 

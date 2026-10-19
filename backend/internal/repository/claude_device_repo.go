@@ -31,7 +31,7 @@ func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, g
 		return nil, fmt.Errorf("claude device encryption unavailable")
 	}
 	if baseLimit <= 0 {
-		baseLimit = 1
+		baseLimit = 3
 	}
 	// Persist only the display headers, never authenticated ownership or credentials.
 	hints.Owner = nil
@@ -44,19 +44,19 @@ func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, g
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	lockKey := fmt.Sprintf("%d:%d", userID, groupID)
+	lockKey := fmt.Sprintf("claude-user:%d", userID)
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
 		return nil, err
 	}
 	var bonus int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT bonus_devices FROM user_group_claude_device_quotas WHERE user_id=$1 AND group_id=$2), 0)`, userID, groupID).Scan(&bonus); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT claude_device_base_limit, COALESCE((SELECT bonus_devices FROM user_claude_device_quotas WHERE user_id=$1), 0) FROM users WHERE id=$1 AND deleted_at IS NULL`, userID).Scan(&baseLimit, &bonus); err != nil {
 		return nil, err
 	}
 	limit := baseLimit + bonus
 	var existing bool
 	var existingID int64
 	var existingEncrypted sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT id, device_id_encrypted FROM claude_user_devices WHERE user_id=$1 AND group_id=$2 AND device_hash=$3 AND revoked_at IS NULL`, userID, groupID, deviceHash).Scan(&existingID, &existingEncrypted); err != nil && err != sql.ErrNoRows {
+	if err := tx.QueryRowContext(ctx, `SELECT id, device_id_encrypted FROM claude_user_devices WHERE user_id=$1 AND device_hash=$2 AND revoked_at IS NULL ORDER BY last_seen_at DESC LIMIT 1`, userID, deviceHash).Scan(&existingID, &existingEncrypted); err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
 	existing = existingID > 0
@@ -81,7 +81,7 @@ func (r *claudeDeviceRepository) CheckAndRegister(ctx context.Context, userID, g
 		return &service.ClaudeDeviceRegistrationResult{Allowed: true, Existing: true, EffectiveLimit: limit}, nil
 	}
 	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM claude_user_devices WHERE user_id=$1 AND group_id=$2 AND revoked_at IS NULL`, userID, groupID).Scan(&active); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(DISTINCT device_hash) FROM claude_user_devices WHERE user_id=$1 AND revoked_at IS NULL`, userID).Scan(&active); err != nil {
 		return nil, err
 	}
 	over := active >= limit
@@ -112,9 +112,8 @@ func (r *claudeDeviceRepository) AddBonusDevices(ctx context.Context, userID, gr
 	}
 	client := clientFromContext(ctx, r.client)
 	_, err := client.ExecContext(ctx, `
-		INSERT INTO user_group_claude_device_quotas (user_id, group_id, bonus_devices, created_at, updated_at)
-		VALUES ($1,$2,$3,NOW(),NOW())
-		ON CONFLICT (user_id,group_id) DO UPDATE SET bonus_devices=user_group_claude_device_quotas.bonus_devices + EXCLUDED.bonus_devices, updated_at=NOW()`, userID, groupID, count)
+ INSERT INTO user_claude_device_quotas (user_id, bonus_devices) VALUES ($1,$2)
+ ON CONFLICT (user_id) DO UPDATE SET bonus_devices=user_claude_device_quotas.bonus_devices + EXCLUDED.bonus_devices, updated_at=NOW()`, userID, count)
 	if err == nil {
 		slog.Log(ctx, slog.LevelInfo, "claude_device_bonus_added", "user_id", userID, "group_id", groupID, "bonus_devices", count)
 	}
@@ -122,13 +121,13 @@ func (r *claudeDeviceRepository) AddBonusDevices(ctx context.Context, userID, gr
 }
 
 func (r *claudeDeviceRepository) ListUserDevices(ctx context.Context, userID int64, groupID *int64) ([]service.ClaudeUserDevice, error) {
-	query := `SELECT id,user_id,group_id,device_hash,device_id_encrypted,first_seen_at,last_seen_at,revoked_at,client_hints FROM claude_user_devices WHERE user_id=$1`
+	query := `SELECT DISTINCT ON (device_hash) id,user_id,group_id,device_hash,device_id_encrypted,first_seen_at,last_seen_at,revoked_at,client_hints FROM claude_user_devices WHERE user_id=$1`
 	args := []any{userID}
 	if groupID != nil {
 		query += ` AND group_id=$2`
 		args = append(args, *groupID)
 	}
-	query += ` ORDER BY last_seen_at DESC`
+	query += ` ORDER BY device_hash, (revoked_at IS NULL) DESC, last_seen_at DESC`
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -162,51 +161,16 @@ func (r *claudeDeviceRepository) ListUserDevices(ctx context.Context, userID int
 }
 
 // ListUserDeviceSummaries returns one aggregate per user for the admin user
-// list. Device registrations and bonus quotas are group-scoped, so both
-// values are summed across the groups that have device limiting enabled.
+// list. Distinct active devices and redeemed bonuses are scoped to the user.
 func (r *claudeDeviceRepository) ListUserDeviceSummaries(ctx context.Context, userIDs []int64) (map[int64]service.ClaudeUserDeviceSummary, error) {
 	out := make(map[int64]service.ClaudeUserDeviceSummary)
 	if r == nil || r.db == nil || len(userIDs) == 0 {
 		return out, nil
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		WITH user_groups AS (
-			SELECT DISTINCT user_id, group_id
-			FROM claude_user_devices
-			WHERE user_id = ANY($1)
-			UNION
-			SELECT user_id, group_id
-			FROM user_group_claude_device_quotas
-			WHERE user_id = ANY($1)
-		), per_group AS (
-			SELECT ug.user_id,
-			       ug.group_id,
-			       COUNT(cud.id) FILTER (
-				       WHERE cud.revoked_at IS NULL
-				         AND g.claude_device_limit_mode <> 'off'
-			       )::int AS active_devices,
-			       CASE WHEN g.claude_device_limit_mode <> 'off'
-			            THEN GREATEST(g.claude_device_base_limit, 1) + COALESCE(q.bonus_devices, 0)
-			            ELSE 0
-			       END::int AS effective_limit,
-			       (g.claude_device_limit_mode <> 'off') AS has_limit
-			FROM user_groups ug
-			JOIN groups g ON g.id = ug.group_id AND g.deleted_at IS NULL
-			LEFT JOIN user_group_claude_device_quotas q
-			       ON q.user_id = ug.user_id AND q.group_id = ug.group_id
-			LEFT JOIN claude_user_devices cud
-			       ON cud.user_id = ug.user_id AND cud.group_id = ug.group_id
-			GROUP BY ug.user_id, ug.group_id,
-			         g.claude_device_limit_mode,
-			         g.claude_device_base_limit,
-			         q.bonus_devices
-		)
-		SELECT user_id,
-		       COALESCE(SUM(active_devices), 0)::int AS active_devices,
-		       COALESCE(SUM(effective_limit), 0)::int AS effective_limit,
-		       COALESCE(BOOL_OR(has_limit), false) AS has_limit
-		FROM per_group
-		GROUP BY user_id`, pq.Array(userIDs))
+        SELECT u.id, (SELECT COUNT(DISTINCT device_hash) FROM claude_user_devices d WHERE d.user_id=u.id AND d.revoked_at IS NULL)::int,
+        (u.claude_device_base_limit + COALESCE((SELECT bonus_devices FROM user_claude_device_quotas q WHERE q.user_id=u.id),0))::int, true
+        FROM users u WHERE u.id=ANY($1) AND u.deleted_at IS NULL`, pq.Array(userIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +195,7 @@ func (r *claudeDeviceRepository) ListUserDeviceSummaries(ctx context.Context, us
 }
 
 func (r *claudeDeviceRepository) RevokeUserDevice(ctx context.Context, userID, deviceID int64) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE claude_user_devices SET revoked_at=NOW() WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL`, deviceID, userID)
+	result, err := r.db.ExecContext(ctx, `UPDATE claude_user_devices SET revoked_at=NOW() WHERE user_id=$2 AND device_hash=(SELECT device_hash FROM claude_user_devices WHERE id=$1 AND user_id=$2) AND revoked_at IS NULL`, deviceID, userID)
 	if err != nil {
 		return err
 	}

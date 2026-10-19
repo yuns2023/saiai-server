@@ -36,6 +36,12 @@ describe('request details provider refusals', () => {
     expect(row.find('script').exists()).toBe(false)
     await row.findAll('button').find(button => button.text() === 'admin.ops.requestDetails.viewError')!.trigger('click')
     expect(wrapper.emitted('openErrorDetail')).toEqual([[42]])
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    const calls = mockAPI.listRequestDetails.mock.calls.length
+    await wrapper.setProps({ detailOpen: true })
+    await wrapper.setProps({ detailOpen: false })
+    expect(mockAPI.listRequestDetails.mock.calls.length).toBe(calls)
+    expect(wrapper.findAll('tbody tr')).toHaveLength(2)
     wrapper.unmount()
   })
 })

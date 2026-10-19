@@ -155,10 +155,6 @@ func (h *RedeemHandler) CreateAndRedeem(c *gin.Context) {
 			return
 		}
 	}
-	if req.Type == "claude_device" && req.GroupID == nil {
-		response.BadRequest(c, "group_id is required for Claude device type")
-		return
-	}
 
 	executeAdminIdempotentJSON(c, "admin.redeem_codes.create_and_redeem", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		existing, err := h.redeemService.GetByCode(ctx, req.Code)

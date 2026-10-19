@@ -235,12 +235,12 @@
               </p>
             </div>
             <!-- 订阅/Claude设备类型：显示分组选择 -->
-            <template v-if="generateForm.type === 'subscription' || generateForm.type === 'claude_device'">
+            <template v-if="generateForm.type === 'subscription'">
               <div>
                 <label class="input-label">{{ t('admin.redeem.selectGroup') }}</label>
                 <Select
                   v-model="generateForm.group_id"
-                  :options="generateForm.type === 'subscription' ? subscriptionGroupOptions : claudeDeviceGroupOptions"
+                  :options="subscriptionGroupOptions"
                   :placeholder="t('admin.redeem.selectGroupPlaceholder')"
                 >
                   <template #selected="{ option }">
@@ -442,19 +442,6 @@ const subscriptionGroupOptions = computed(() => {
     }))
 })
 
-const claudeDeviceGroupOptions = computed(() => {
-  return subscriptionGroups.value
-    .filter((g) => g.platform === 'anthropic' || g.platform === 'antigravity')
-    .map((g) => ({
-      value: g.id,
-      label: g.name,
-      description: g.description,
-      platform: g.platform,
-      subscriptionType: g.subscription_type,
-      rate: g.rate_multiplier
-    }))
-})
-
 const generatedCodesText = computed(() => {
   return generatedCodes.value.map((code) => code.code).join('\n')
 })
@@ -646,7 +633,7 @@ const handlePageSizeChange = (pageSize: number) => {
 
 const handleGenerateCodes = async () => {
   // 订阅类型必须选择分组
-  if ((generateForm.type === 'subscription' || generateForm.type === 'claude_device') && !generateForm.group_id) {
+  if ((generateForm.type === 'subscription') && !generateForm.group_id) {
     appStore.showError(t('admin.redeem.groupRequired'))
     return
   }
@@ -657,7 +644,7 @@ const handleGenerateCodes = async () => {
       generateForm.count,
       generateForm.type,
       generateForm.value,
-      generateForm.type === 'subscription' || generateForm.type === 'claude_device' ? generateForm.group_id : undefined,
+      generateForm.type === 'subscription' ? generateForm.group_id : undefined,
       generateForm.type === 'subscription' ? generateForm.validity_days : undefined
     )
     showGenerateDialog.value = false

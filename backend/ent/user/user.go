@@ -33,6 +33,8 @@ const (
 	FieldPaygDiscountMultiplier = "payg_discount_multiplier"
 	// FieldIsTrusted holds the string denoting the is_trusted field in the database.
 	FieldIsTrusted = "is_trusted"
+	// FieldClaudeDeviceBaseLimit holds the string denoting the claude_device_base_limit field in the database.
+	FieldClaudeDeviceBaseLimit = "claude_device_base_limit"
 	// FieldPaygDiscountOverrideEnabled holds the string denoting the payg_discount_override_enabled field in the database.
 	FieldPaygDiscountOverrideEnabled = "payg_discount_override_enabled"
 	// FieldAutoLevelID holds the string denoting the auto_level_id field in the database.
@@ -57,6 +59,8 @@ const (
 	FieldSoraStorageQuotaBytes = "sora_storage_quota_bytes"
 	// FieldSoraStorageUsedBytes holds the string denoting the sora_storage_used_bytes field in the database.
 	FieldSoraStorageUsedBytes = "sora_storage_used_bytes"
+	// EdgeCarpoolAccounts holds the string denoting the carpool_accounts edge name in mutations.
+	EdgeCarpoolAccounts = "carpool_accounts"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -83,6 +87,11 @@ const (
 	EdgeUserAllowedGroups = "user_allowed_groups"
 	// Table holds the table name of the user in the database.
 	Table = "users"
+	// CarpoolAccountsTable is the table that holds the carpool_accounts relation/edge. The primary key declared below.
+	CarpoolAccountsTable = "claude_oauth_account_users"
+	// CarpoolAccountsInverseTable is the table name for the Account entity.
+	// It exists in this package in order to avoid circular dependency with the "account" package.
+	CarpoolAccountsInverseTable = "accounts"
 	// APIKeysTable is the table that holds the api_keys relation/edge.
 	APIKeysTable = "api_keys"
 	// APIKeysInverseTable is the table name for the APIKey entity.
@@ -179,6 +188,7 @@ var Columns = []string{
 	FieldBalance,
 	FieldPaygDiscountMultiplier,
 	FieldIsTrusted,
+	FieldClaudeDeviceBaseLimit,
 	FieldPaygDiscountOverrideEnabled,
 	FieldAutoLevelID,
 	FieldManualLevelID,
@@ -194,6 +204,9 @@ var Columns = []string{
 }
 
 var (
+	// CarpoolAccountsPrimaryKey and CarpoolAccountsColumn2 are the table columns denoting the
+	// primary key for the carpool_accounts relation (M2M).
+	CarpoolAccountsPrimaryKey = []string{"account_id", "user_id"}
 	// AllowedGroupsPrimaryKey and AllowedGroupsColumn2 are the table columns denoting the
 	// primary key for the allowed_groups relation (M2M).
 	AllowedGroupsPrimaryKey = []string{"user_id", "group_id"}
@@ -237,6 +250,10 @@ var (
 	DefaultPaygDiscountMultiplier float64
 	// DefaultIsTrusted holds the default value on creation for the "is_trusted" field.
 	DefaultIsTrusted bool
+	// DefaultClaudeDeviceBaseLimit holds the default value on creation for the "claude_device_base_limit" field.
+	DefaultClaudeDeviceBaseLimit int
+	// ClaudeDeviceBaseLimitValidator is a validator for the "claude_device_base_limit" field. It is called by the builders before save.
+	ClaudeDeviceBaseLimitValidator func(int) error
 	// DefaultPaygDiscountOverrideEnabled holds the default value on creation for the "payg_discount_override_enabled" field.
 	DefaultPaygDiscountOverrideEnabled bool
 	// DefaultConcurrency holds the default value on creation for the "concurrency" field.
@@ -312,6 +329,11 @@ func ByIsTrusted(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIsTrusted, opts...).ToFunc()
 }
 
+// ByClaudeDeviceBaseLimit orders the results by the claude_device_base_limit field.
+func ByClaudeDeviceBaseLimit(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClaudeDeviceBaseLimit, opts...).ToFunc()
+}
+
 // ByPaygDiscountOverrideEnabled orders the results by the payg_discount_override_enabled field.
 func ByPaygDiscountOverrideEnabled(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPaygDiscountOverrideEnabled, opts...).ToFunc()
@@ -370,6 +392,20 @@ func BySoraStorageQuotaBytes(opts ...sql.OrderTermOption) OrderOption {
 // BySoraStorageUsedBytes orders the results by the sora_storage_used_bytes field.
 func BySoraStorageUsedBytes(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldSoraStorageUsedBytes, opts...).ToFunc()
+}
+
+// ByCarpoolAccountsCount orders the results by carpool_accounts count.
+func ByCarpoolAccountsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newCarpoolAccountsStep(), opts...)
+	}
+}
+
+// ByCarpoolAccounts orders the results by carpool_accounts terms.
+func ByCarpoolAccounts(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newCarpoolAccountsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
 }
 
 // ByAPIKeysCount orders the results by api_keys count.
@@ -524,6 +560,13 @@ func ByUserAllowedGroups(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption
 	return func(s *sql.Selector) {
 		sqlgraph.OrderByNeighborTerms(s, newUserAllowedGroupsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
+}
+func newCarpoolAccountsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(CarpoolAccountsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2M, true, CarpoolAccountsTable, CarpoolAccountsPrimaryKey...),
+	)
 }
 func newAPIKeysStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(

@@ -73,6 +73,8 @@ const (
 	FieldSessionWindowEnd = "session_window_end"
 	// FieldSessionWindowStatus holds the string denoting the session_window_status field in the database.
 	FieldSessionWindowStatus = "session_window_status"
+	// EdgeCarpoolUsers holds the string denoting the carpool_users edge name in mutations.
+	EdgeCarpoolUsers = "carpool_users"
 	// EdgeGroups holds the string denoting the groups edge name in mutations.
 	EdgeGroups = "groups"
 	// EdgeProxy holds the string denoting the proxy edge name in mutations.
@@ -83,6 +85,11 @@ const (
 	EdgeAccountGroups = "account_groups"
 	// Table holds the table name of the account in the database.
 	Table = "accounts"
+	// CarpoolUsersTable is the table that holds the carpool_users relation/edge. The primary key declared below.
+	CarpoolUsersTable = "claude_oauth_account_users"
+	// CarpoolUsersInverseTable is the table name for the User entity.
+	// It exists in this package in order to avoid circular dependency with the "user" package.
+	CarpoolUsersInverseTable = "users"
 	// GroupsTable is the table that holds the groups relation/edge. The primary key declared below.
 	GroupsTable = "account_groups"
 	// GroupsInverseTable is the table name for the Group entity.
@@ -146,6 +153,9 @@ var Columns = []string{
 }
 
 var (
+	// CarpoolUsersPrimaryKey and CarpoolUsersColumn2 are the table columns denoting the
+	// primary key for the carpool_users relation (M2M).
+	CarpoolUsersPrimaryKey = []string{"account_id", "user_id"}
 	// GroupsPrimaryKey and GroupsColumn2 are the table columns denoting the
 	// primary key for the groups relation (M2M).
 	GroupsPrimaryKey = []string{"account_id", "group_id"}
@@ -348,6 +358,20 @@ func BySessionWindowStatus(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldSessionWindowStatus, opts...).ToFunc()
 }
 
+// ByCarpoolUsersCount orders the results by carpool_users count.
+func ByCarpoolUsersCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newCarpoolUsersStep(), opts...)
+	}
+}
+
+// ByCarpoolUsers orders the results by carpool_users terms.
+func ByCarpoolUsers(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newCarpoolUsersStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
 // ByGroupsCount orders the results by groups count.
 func ByGroupsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -395,6 +419,13 @@ func ByAccountGroups(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	return func(s *sql.Selector) {
 		sqlgraph.OrderByNeighborTerms(s, newAccountGroupsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
+}
+func newCarpoolUsersStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(CarpoolUsersInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2M, false, CarpoolUsersTable, CarpoolUsersPrimaryKey...),
+	)
 }
 func newGroupsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(

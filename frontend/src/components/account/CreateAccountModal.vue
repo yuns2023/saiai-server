@@ -1589,6 +1589,13 @@
               </button>
             </div>
             <div v-if="claudeOAuthMode === 'shared' || claudeOAuthMode === 'carpool'" class="space-y-3">
+              <div v-if="claudeOAuthMode === 'carpool'" class="space-y-2">
+                <label class="flex items-center gap-2">
+                  <input v-model="carpoolUsersOnly" type="checkbox" data-testid="carpool-users-only" />
+                  {{ t('admin.accounts.carpoolUsersOnly') }}
+                </label>
+                <CarpoolUserSelector v-if="carpoolUsersOnly" v-model="carpoolUserIDs" />
+              </div>
               <label v-if="claudeOAuthMode === 'carpool'" class="flex items-start gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600">
                 <input v-model="claudeOAuthCarpoolTrustedOnly" data-testid="carpool-trusted-only" type="checkbox" class="mt-0.5 h-4 w-4 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" />
                 <span>
@@ -2657,6 +2664,7 @@ import type {
   CheckMixedChannelResponse,
   CreateAccountRequest
 } from '@/types'
+import CarpoolUserSelector from './CarpoolUserSelector.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -2873,6 +2881,8 @@ const cacheTTLOverrideTarget = ref<string>('5m')
 const claudeOAuthMode = ref<'carpool' | 'shared' | 'pinned' | 'single_device'>('carpool')
 const claudeOAuthCarpoolDeviceLimit = ref<number>(5)
 const claudeOAuthCarpoolTrustedOnly = ref(false)
+const carpoolUsersOnly = ref(false)
+const carpoolUserIDs = ref<number[]>([])
 const claudeOAuthCarpoolUnlimitedDevices = ref(false)
 const claudeOAuthCarpoolAutoExpand = ref(false)
 const claudeOAuthCarpoolAutoMaintenanceTarget = ref<number>(16)
@@ -3416,7 +3426,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
     const normalizedPayload = payload.platform === 'openai'
       ? payload
       : { ...payload, extra: buildAccountBlockedModelsExtra(payload.extra as Record<string, unknown> | undefined) }
-    await adminAPI.accounts.create(withMixedChannelConfirmFlag(normalizedPayload))
+    await adminAPI.accounts.create(withMixedChannelConfirmFlag({ ...normalizedPayload, carpool_user_ids: carpoolUserIDs.value }))
     appStore.showSuccess(t('admin.accounts.accountCreated'))
     emit('created')
     handleClose()
@@ -3500,6 +3510,8 @@ const resetForm = () => {
   claudeOAuthMode.value = 'carpool'
   claudeOAuthCarpoolDeviceLimit.value = 5
   claudeOAuthCarpoolTrustedOnly.value = false
+  carpoolUsersOnly.value = false
+  carpoolUserIDs.value = []
   claudeOAuthCarpoolUnlimitedDevices.value = false
   claudeOAuthCarpoolAutoExpand.value = false
   claudeOAuthCarpoolAutoMaintenanceTarget.value = 16
@@ -3912,6 +3924,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     }
 
     await adminAPI.accounts.create({
+          carpool_user_ids: carpoolUserIDs.value,
       name: form.name,
       notes: form.notes,
       platform: 'openai',
@@ -3992,6 +4005,7 @@ const handleOpenAIValidateRT = async (refreshTokenInput: string) => {
         const accountName = refreshTokens.length > 1 ? `${form.name} #${i + 1}` : form.name
 
         await adminAPI.accounts.create({
+          carpool_user_ids: carpoolUserIDs.value,
           name: accountName,
           notes: form.notes,
           platform: 'openai',
@@ -4188,6 +4202,7 @@ const buildAnthropicOAuthExtra = (baseExtra: Record<string, unknown>) => {
   if (claudeOAuthFiveHourRateLimitThresholdPercent.value != null && claudeOAuthFiveHourRateLimitThresholdPercent.value > 0) {
     extra.claude_oauth_5h_rate_limit_threshold_percent = Math.min(100, Math.max(0, claudeOAuthFiveHourRateLimitThresholdPercent.value))
   }
+  extra.claude_oauth_carpool_users_only = claudeOAuthMode.value === 'carpool' && carpoolUsersOnly.value
   delete extra.claude_oauth_carpool_trusted_only
   if (claudeOAuthMode.value === 'carpool' && claudeOAuthCarpoolTrustedOnly.value) {
     extra.claude_oauth_carpool_trusted_only = true
@@ -4360,6 +4375,7 @@ const handleCookieAuth = async (sessionKey: string) => {
         }
 
         await adminAPI.accounts.create({
+          carpool_user_ids: carpoolUserIDs.value,
           name: accountName,
           notes: form.notes,
           platform: form.platform,

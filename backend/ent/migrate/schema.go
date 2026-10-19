@@ -1108,6 +1108,7 @@ var (
 		{Name: "balance", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
 		{Name: "payg_discount_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
 		{Name: "is_trusted", Type: field.TypeBool, Default: false},
+		{Name: "claude_device_base_limit", Type: field.TypeInt, Default: 3},
 		{Name: "payg_discount_override_enabled", Type: field.TypeBool, Default: false},
 		{Name: "concurrency", Type: field.TypeInt, Default: 5},
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
@@ -1129,13 +1130,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "users_access_levels_auto_users",
-				Columns:    []*schema.Column{UsersColumns[20]},
+				Columns:    []*schema.Column{UsersColumns[21]},
 				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "users_access_levels_manual_users",
-				Columns:    []*schema.Column{UsersColumns[21]},
+				Columns:    []*schema.Column{UsersColumns[22]},
 				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -1144,7 +1145,7 @@ var (
 			{
 				Name:    "user_status",
 				Unique:  false,
-				Columns: []*schema.Column{UsersColumns[12]},
+				Columns: []*schema.Column{UsersColumns[13]},
 			},
 			{
 				Name:    "user_deleted_at",
@@ -1154,12 +1155,12 @@ var (
 			{
 				Name:    "user_auto_level_id",
 				Unique:  false,
-				Columns: []*schema.Column{UsersColumns[20]},
+				Columns: []*schema.Column{UsersColumns[21]},
 			},
 			{
 				Name:    "user_manual_level_id",
 				Unique:  false,
-				Columns: []*schema.Column{UsersColumns[21]},
+				Columns: []*schema.Column{UsersColumns[22]},
 			},
 		},
 	}
@@ -1373,6 +1374,31 @@ var (
 			},
 		},
 	}
+	// ClaudeOauthAccountUsersColumns holds the columns for the "claude_oauth_account_users" table.
+	ClaudeOauthAccountUsersColumns = []*schema.Column{
+		{Name: "account_id", Type: field.TypeInt},
+		{Name: "user_id", Type: field.TypeInt},
+	}
+	// ClaudeOauthAccountUsersTable holds the schema information for the "claude_oauth_account_users" table.
+	ClaudeOauthAccountUsersTable = &schema.Table{
+		Name:       "claude_oauth_account_users",
+		Columns:    ClaudeOauthAccountUsersColumns,
+		PrimaryKey: []*schema.Column{ClaudeOauthAccountUsersColumns[0], ClaudeOauthAccountUsersColumns[1]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "claude_oauth_account_users_account_id",
+				Columns:    []*schema.Column{ClaudeOauthAccountUsersColumns[0]},
+				RefColumns: []*schema.Column{AccountsColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+			{
+				Symbol:     "claude_oauth_account_users_user_id",
+				Columns:    []*schema.Column{ClaudeOauthAccountUsersColumns[1]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		APIKeysTable,
@@ -1401,6 +1427,7 @@ var (
 		UserAttributeDefinitionsTable,
 		UserAttributeValuesTable,
 		UserSubscriptionsTable,
+		ClaudeOauthAccountUsersTable,
 	}
 )
 
@@ -1509,4 +1536,6 @@ func init() {
 	UserSubscriptionsTable.Annotation = &entsql.Annotation{
 		Table: "user_subscriptions",
 	}
+	ClaudeOauthAccountUsersTable.ForeignKeys[0].RefTable = AccountsTable
+	ClaudeOauthAccountUsersTable.ForeignKeys[1].RefTable = UsersTable
 }

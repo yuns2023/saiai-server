@@ -7,6 +7,11 @@
   >
     <form v-if="user" id="edit-user-form" @submit.prevent="handleUpdateUser" class="space-y-5">
       <div>
+        <label class="input-label">{{ t('admin.users.claudeDeviceBaseLimit') }}</label>
+        <input data-testid="user-device-capacity" v-model.number="form.claude_device_base_limit" type="number" min="1" max="100" required class="input" />
+        <p class="input-hint">{{ t('admin.users.claudeDeviceBaseLimitHint') }}</p>
+      </div>
+      <div>
         <label class="input-label">{{ t('admin.users.email') }}</label>
         <input v-model="form.email" type="email" class="input" />
       </div>
@@ -102,11 +107,11 @@ const { t } = useI18n(); const appStore = useAppStore(); const { copyToClipboard
 
 const submitting = ref(false); const passwordCopied = ref(false)
 const accessLevels = ref<AccessLevel[]>([])
-const form = reactive({ email: '', password: '', username: '', notes: '', concurrency: 1, payg_discount_multiplier: 1, is_trusted: false, payg_discount_override_enabled: false, manual_level_id: null as number | null, customAttributes: {} as UserAttributeValuesMap })
+const form = reactive({ email: '', password: '', username: '', notes: '', concurrency: 1, payg_discount_multiplier: 1, is_trusted: false, claude_device_base_limit: 3, payg_discount_override_enabled: false, manual_level_id: null as number | null, customAttributes: {} as UserAttributeValuesMap })
 
 watch(() => props.user, (u) => {
   if (u) {
-    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', concurrency: u.concurrency, payg_discount_multiplier: u.payg_discount_multiplier ?? 1, is_trusted: u.is_trusted ?? false, payg_discount_override_enabled: u.payg_discount_override_enabled ?? true, manual_level_id: u.manual_level?.id ?? null, customAttributes: {} })
+    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', concurrency: u.concurrency, payg_discount_multiplier: u.payg_discount_multiplier ?? 1, is_trusted: u.is_trusted ?? false, claude_device_base_limit: u.claude_device_base_limit ?? 3, payg_discount_override_enabled: u.payg_discount_override_enabled ?? true, manual_level_id: u.manual_level?.id ?? null, customAttributes: {} })
     if (adminAPI.accessLevels) adminAPI.accessLevels.list().then((items) => { accessLevels.value = items }).catch(() => { accessLevels.value = [] })
     passwordCopied.value = false
   }
@@ -138,7 +143,7 @@ const handleUpdateUser = async () => {
   }
   submitting.value = true
   try {
-    const data: any = { email: form.email, username: form.username, notes: form.notes, concurrency: form.concurrency, is_trusted: form.is_trusted, payg_discount_override_enabled: form.payg_discount_override_enabled }
+    const data: any = { email: form.email, username: form.username, notes: form.notes, concurrency: form.concurrency, is_trusted: form.is_trusted, claude_device_base_limit: form.claude_device_base_limit, payg_discount_override_enabled: form.payg_discount_override_enabled }
     if (form.payg_discount_override_enabled) data.payg_discount_multiplier = form.payg_discount_multiplier
     if (form.password.trim()) data.password = form.password.trim()
     await adminAPI.users.update(props.user.id, data)

@@ -27,6 +27,7 @@ export interface FetchOptions {
 // ==================== User & Auth Types ====================
 
 export interface User {
+  claude_device_base_limit?: number
   id: number
   username: string
   email: string
@@ -760,6 +761,7 @@ export interface TempUnschedulableStatus {
 }
 
 export interface Account {
+  carpool_user_ids?: number[]
   id: number
   name: string
   notes?: string | null
@@ -962,6 +964,7 @@ export interface CodexUsageSnapshot {
 }
 
 export interface CreateAccountRequest {
+  carpool_user_ids?: number[]
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -980,6 +983,7 @@ export interface CreateAccountRequest {
 }
 
 export interface UpdateAccountRequest {
+  carpool_user_ids?: number[]
   name?: string
   notes?: string | null
   type?: AccountType
@@ -1445,6 +1449,7 @@ export interface ApiKeyUsageTrendPoint {
 // ==================== Admin User Management ====================
 
 export interface UpdateUserRequest {
+  claude_device_base_limit?: number
   is_trusted?: boolean
   email?: string
   password?: string

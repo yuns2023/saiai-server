@@ -32,8 +32,7 @@ type ClaudeUserDevice struct {
 }
 
 // ClaudeUserDeviceSummary is the aggregate shown in the admin user list.
-// Counts are summed across the user's Claude device-enabled groups because a
-// registration is scoped to a group.
+// Devices are deduplicated across groups and API keys.
 type ClaudeUserDeviceSummary struct {
 	ActiveDevices  int
 	EffectiveLimit *int
@@ -112,26 +111,17 @@ func (s *ClaudeDeviceService) CheckAndRegister(ctx context.Context, apiKey *APIK
 	if s == nil || s.repo == nil || apiKey == nil || apiKey.Group == nil || apiKey.GroupID == nil || apiKey.UserID <= 0 {
 		return nil
 	}
-	mode := strings.ToLower(strings.TrimSpace(apiKey.Group.ClaudeDeviceLimitMode))
-	if mode == "" || mode == "off" {
-		return nil
-	}
+	mode := "enforce"
 	metadataUserID := ""
 	if parsed != nil {
 		metadataUserID = parsed.MetadataUserID
 	}
 	identity := ParseMetadataUserID(strings.TrimSpace(metadataUserID))
 	if identity == nil || strings.TrimSpace(identity.DeviceID) == "" {
-		if mode == "audit" {
-			fields := claudeDeviceLogFields(apiKey, *apiKey.GroupID, "")
-			fields = append(fields, "mode", mode)
-			slog.Log(ctx, slog.LevelWarn, "claude_device_identity_missing_audit", fields...)
-			return nil
-		}
 		fields := claudeDeviceLogFields(apiKey, *apiKey.GroupID, "")
 		fields = append(fields, "mode", mode)
 		slog.Log(ctx, slog.LevelWarn, "claude_device_identity_missing_rejected", fields...)
-		return &ClaudeDeviceLimitError{Limit: apiKey.Group.ClaudeDeviceBaseLimit}
+		return &ClaudeDeviceLimitError{Limit: apiKey.User.ClaudeDeviceBaseCapacity()}
 	}
 	deviceID := strings.TrimSpace(identity.DeviceID)
 	sum := sha256.Sum256([]byte(deviceID))
@@ -140,7 +130,7 @@ func (s *ClaudeDeviceService) CheckAndRegister(ctx context.Context, apiKey *APIK
 		hints = clientHints[0]
 	}
 	result, err := s.repo.CheckAndRegister(
-		ctx, apiKey.UserID, *apiKey.GroupID, apiKey.ID, hex.EncodeToString(sum[:]), deviceID, mode, apiKey.Group.ClaudeDeviceBaseLimit, hints,
+		ctx, apiKey.UserID, *apiKey.GroupID, apiKey.ID, hex.EncodeToString(sum[:]), deviceID, mode, apiKey.User.ClaudeDeviceBaseCapacity(), hints,
 	)
 	if err != nil {
 		fields := claudeDeviceLogFields(apiKey, *apiKey.GroupID, deviceID)

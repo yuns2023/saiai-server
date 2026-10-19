@@ -702,18 +702,6 @@
             <option value="local_proxy_only">{{ t('admin.groups.clientLimits.localProxyOnly') }}</option>
           </select>
         </div>
-        <div v-if="['anthropic', 'antigravity'].includes(createForm.platform)" class="border-t pt-4 space-y-3">
-          <label class="input-label">{{ t('admin.groups.clientLimits.claudeDeviceMode') }}</label>
-          <select v-model="createForm.claude_device_limit_mode" class="input w-full">
-            <option value="off">{{ t('admin.groups.clientLimits.off') }}</option>
-            <option value="audit">{{ t('admin.groups.clientLimits.audit') }}</option>
-            <option value="enforce">{{ t('admin.groups.clientLimits.enforce') }}</option>
-          </select>
-          <div v-if="createForm.claude_device_limit_mode !== 'off'">
-            <label class="input-label">{{ t('admin.groups.clientLimits.baseDevices') }}</label>
-            <input v-model.number="createForm.claude_device_base_limit" type="number" min="1" max="100" class="input w-full" />
-          </div>
-        </div>
 
         <!-- 异步用户输入审核 -->
         <div class="border-t border-gray-200 pt-4 dark:border-dark-400">
@@ -1457,18 +1445,6 @@
             <option value="cli_only">{{ t('admin.groups.clientLimits.cliOnly') }}</option>
             <option value="local_proxy_only">{{ t('admin.groups.clientLimits.localProxyOnly') }}</option>
           </select>
-        </div>
-        <div v-if="['anthropic', 'antigravity'].includes(editForm.platform)" class="border-t pt-4 space-y-3">
-          <label class="input-label">{{ t('admin.groups.clientLimits.claudeDeviceMode') }}</label>
-          <select v-model="editForm.claude_device_limit_mode" class="input w-full">
-            <option value="off">{{ t('admin.groups.clientLimits.off') }}</option>
-            <option value="audit">{{ t('admin.groups.clientLimits.audit') }}</option>
-            <option value="enforce">{{ t('admin.groups.clientLimits.enforce') }}</option>
-          </select>
-          <div v-if="editForm.claude_device_limit_mode !== 'off'">
-            <label class="input-label">{{ t('admin.groups.clientLimits.baseDevices') }}</label>
-            <input v-model.number="editForm.claude_device_base_limit" type="number" min="1" max="100" class="input w-full" />
-          </div>
         </div>
 
         <!-- 异步用户输入审核 -->

@@ -29,6 +29,7 @@ type APIKeyAuthSnapshot struct {
 
 // APIKeyAuthUserSnapshot 用户快照
 type APIKeyAuthUserSnapshot struct {
+	ClaudeDeviceBaseLimit       int          `json:"claude_device_base_limit,omitempty"`
 	IsTrusted                   bool         `json:"is_trusted,omitempty"`
 	Email                       string       `json:"email,omitempty"`
 	ID                          int64        `json:"id"`

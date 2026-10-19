@@ -202,6 +202,7 @@ func (Account) Fields() []ent.Field {
 // Edges 定义账户实体的关联关系。
 func (Account) Edges() []ent.Edge {
 	return []ent.Edge{
+		edge.To("carpool_users", User.Type).StorageKey(edge.Table("claude_oauth_account_users"), edge.Columns("account_id", "user_id")),
 		// groups: 账户所属的分组（多对多关系）
 		// 通过 account_groups 中间表实现
 		// 一个账户可以属于多个分组，一个分组可以包含多个账户

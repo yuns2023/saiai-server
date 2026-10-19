@@ -51,6 +51,7 @@ func (User) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
 			Default(1.0),
 		field.Bool("is_trusted").Default(false),
+		field.Int("claude_device_base_limit").Default(3).Min(1).Max(100),
 		field.Bool("payg_discount_override_enabled").
 			Default(false),
 		field.Int64("auto_level_id").
@@ -95,6 +96,7 @@ func (User) Fields() []ent.Field {
 
 func (User) Edges() []ent.Edge {
 	return []ent.Edge{
+		edge.From("carpool_accounts", Account.Type).Ref("carpool_users"),
 		edge.To("api_keys", APIKey.Type),
 		edge.To("redeem_codes", RedeemCode.Type),
 		edge.To("subscriptions", UserSubscription.Type),

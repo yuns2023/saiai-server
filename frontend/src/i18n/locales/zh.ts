@@ -1632,7 +1632,9 @@ export default {
       },
       today: '今日',
       total: '近30天',
-      claudeDevicesSummaryHint: '当前有效设备数 / 启用设备限制分组的有效上限；已撤销设备不计入',
+      claudeDevicesSummaryHint: '用户有效设备数 / 基础额度加兑换奖励；同一设备跨分组只计一次',
+      claudeDeviceBaseLimit: 'Claude Code 基础设备额度',
+      claudeDeviceBaseLimitHint: '默认 3 个；跨分组、跨 API Key 共用。兑换奖励另外累加。',
       claudeDeviceModal: {
         lastUser: '最近用户',
         lastKey: '最近 Key',
@@ -2294,6 +2296,9 @@ export default {
 
     // Accounts Management
     accounts: {
+      carpoolUsersOnly: '仅指定用户',
+      carpoolUsersOnlyHint: '开启后仅列表中的用户可用；列表为空时全部拒绝。同时开启“仅可信用户”时，必须同时满足两个条件。',
+      carpoolUserSearchFailed: '用户搜索失败，请重试',
       carpoolTrustedOnly: '仅限可信用户',
       carpoolTrustedOnlyHint: '仅允许管理员标记为可信的用户使用此账号，其他调度与设备限制不变。',
       title: '账号管理',

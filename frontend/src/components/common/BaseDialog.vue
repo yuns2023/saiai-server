@@ -41,6 +41,10 @@
   </Teleport>
 </template>
 
+<script lang="ts">
+const openDialogs = new Set<symbol>()
+</script>
+
 <script setup lang="ts">
 import { computed, watch, onMounted, onUnmounted, ref, nextTick } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -52,8 +56,9 @@ const dialogId = `modal-title-${++dialogIdCounter}`
 // 焦点管理
 const dialogRef = ref<HTMLElement | null>(null)
 let previousActiveElement: HTMLElement | null = null
+const scrollLockID = Symbol()
 
-type DialogWidth = 'narrow' | 'normal' | 'wide' | 'extra-wide' | 'full'
+type DialogWidth = 'narrow' | 'normal' | 'wide' | 'extra-wide' | 'full' | 'viewport'
 
 interface Props {
   show: boolean
@@ -87,6 +92,7 @@ const widthClasses = computed(() => {
   // wide=multi-section forms or rich content, extra-wide=analytics/tables,
   // full=full-screen or very dense layouts.
   const widths: Record<DialogWidth, string> = {
+    viewport: 'w-full max-w-none',
     narrow: 'max-w-md',
     normal: 'max-w-lg',
     wide: 'w-full sm:max-w-2xl md:max-w-3xl lg:max-w-4xl',
@@ -116,6 +122,7 @@ watch(
       // 保存当前焦点元素
       previousActiveElement = document.activeElement as HTMLElement
       // 使用CSS类而不是直接操作style,更易于管理多个对话框
+      openDialogs.add(scrollLockID)
       document.body.classList.add('modal-open')
 
       // 等待DOM更新后设置焦点到对话框
@@ -127,7 +134,8 @@ watch(
         firstFocusable?.focus()
       }
     } else {
-      document.body.classList.remove('modal-open')
+      openDialogs.delete(scrollLockID)
+      if (openDialogs.size === 0) document.body.classList.remove('modal-open')
       // 恢复之前的焦点
       if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
         previousActiveElement.focus()
@@ -145,6 +153,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscape)
   // 确保组件卸载时移除滚动锁定
-  document.body.classList.remove('modal-open')
+  openDialogs.delete(scrollLockID)
+  if (openDialogs.size === 0) document.body.classList.remove('modal-open')
 })
 </script>

@@ -7,6 +7,11 @@
   >
     <form id="create-user-form" @submit.prevent="submit" class="space-y-5">
       <div>
+        <label class="input-label">{{ t('admin.users.claudeDeviceBaseLimit') }}</label>
+        <input v-model.number="form.claude_device_base_limit" type="number" min="1" max="100" required class="input" />
+        <p class="input-hint">{{ t('admin.users.claudeDeviceBaseLimitHint') }}</p>
+      </div>
+      <div>
         <label class="input-label">{{ t('admin.users.email') }}</label>
         <input v-model="form.email" type="email" required class="input" :placeholder="t('admin.users.enterEmail')" />
       </div>
@@ -84,7 +89,7 @@ import Icon from '@/components/icons/Icon.vue'
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n()
 
-const form = reactive({ email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1, is_trusted: false, payg_discount_override_enabled: false })
+const form = reactive({ email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1, is_trusted: false, claude_device_base_limit: 3, payg_discount_override_enabled: false })
 
 const { loading, submit } = useForm({
   form,
@@ -97,7 +102,7 @@ const { loading, submit } = useForm({
   successMsg: t('admin.users.userCreated')
 })
 
-watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1, is_trusted: false, payg_discount_override_enabled: false }) })
+watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', balance: 0, concurrency: 1, payg_discount_multiplier: 1, is_trusted: false, claude_device_base_limit: 3, payg_discount_override_enabled: false }) })
 
 const generateRandomPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*'

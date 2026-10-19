@@ -96,6 +96,8 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 		SetSchedulable(account.Schedulable).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
 
+	builder.AddCarpoolUserIDs(account.CarpoolUserIDs...)
+
 	if account.RateMultiplier != nil {
 		builder.SetRateMultiplier(*account.RateMultiplier)
 	}
@@ -205,6 +207,10 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 		accountIDs = append(accountIDs, acc.ID)
 	}
 
+	carpoolUsers, err := r.loadCarpoolUsers(ctx, accountIDs)
+	if err != nil {
+		return nil, err
+	}
 	groupsByAccount, groupIDsByAccount, accountGroupsByAccount, err := r.loadAccountGroups(ctx, accountIDs)
 	if err != nil {
 		return nil, err
@@ -216,6 +222,7 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 		if out == nil {
 			continue
 		}
+		out.CarpoolUserIDs = carpoolUsers[entAcc.ID]
 
 		// Prefer the preloaded proxy edge when available.
 		if entAcc.Edges.Proxy != nil {
@@ -335,6 +342,8 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(account.Schedulable).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
+
+	builder.ClearCarpoolUsers().AddCarpoolUserIDs(account.CarpoolUserIDs...)
 
 	if account.RateMultiplier != nil {
 		builder.SetRateMultiplier(*account.RateMultiplier)
@@ -1512,6 +1521,10 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	if err != nil {
 		return nil, err
 	}
+	carpoolUsers, err := r.loadCarpoolUsers(ctx, accountIDs)
+	if err != nil {
+		return nil, err
+	}
 	groupsByAccount, groupIDsByAccount, accountGroupsByAccount, err := r.loadAccountGroups(ctx, accountIDs)
 	if err != nil {
 		return nil, err
@@ -1523,6 +1536,7 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 		if out == nil {
 			continue
 		}
+		out.CarpoolUserIDs = carpoolUsers[acc.ID]
 		if acc.ProxyID != nil {
 			if proxy, ok := proxyMap[*acc.ProxyID]; ok {
 				out.Proxy = proxy
@@ -1979,4 +1993,18 @@ func (r *accountRepository) ResetQuotaUsed(ctx context.Context, id int64) error 
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue quota reset failed: account=%d err=%v", id, err)
 	}
 	return nil
+}
+
+func (r *accountRepository) loadCarpoolUsers(ctx context.Context, ids []int64) (map[int64][]int64, error) {
+	out := make(map[int64][]int64)
+	accounts, err := r.client.Account.Query().Where(dbaccount.IDIn(ids...)).Select(dbaccount.FieldID).WithCarpoolUsers(func(q *dbent.UserQuery) { q.Select("id") }).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range accounts {
+		for _, u := range a.Edges.CarpoolUsers {
+			out[a.ID] = append(out[a.ID], u.ID)
+		}
+	}
+	return out, nil
 }

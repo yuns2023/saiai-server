@@ -3,6 +3,11 @@ package service
 import "context"
 
 type trustedUserContextKey struct{}
+type accountUserIDContextKey struct{}
+
+func WithAccountUserID(ctx context.Context, id int64) context.Context {
+	return context.WithValue(ctx, accountUserIDContextKey{}, id)
+}
 
 // WithTrustedUser carries the authenticated SAIAI Key owner's administrator-managed
 // trust flag. Never populate this value from provider metadata or request headers.
@@ -27,5 +32,24 @@ func (a *Account) IsTrustedUserOnly() bool {
 }
 
 func accountAllowsUser(ctx context.Context, account *Account) bool {
-	return account != nil && (!account.IsTrustedUserOnly() || IsTrustedUser(ctx))
+	if account == nil || (account.IsTrustedUserOnly() && !IsTrustedUser(ctx)) {
+		return false
+	}
+	if !account.IsAnthropicOAuthOrSetupToken() || account.GetClaudeOAuthMode() != ClaudeOAuthModeCarpool {
+		return true
+	}
+	enabled, _ := account.Extra["claude_oauth_carpool_users_only"].(bool)
+	if !enabled {
+		return true
+	}
+	id, _ := ctx.Value(accountUserIDContextKey{}).(int64)
+	if id <= 0 {
+		return false
+	}
+	for _, allowed := range account.CarpoolUserIDs {
+		if id == allowed {
+			return true
+		}
+	}
+	return false
 }

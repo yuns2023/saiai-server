@@ -3250,6 +3250,9 @@ type AccountMutation struct {
 	session_window_end          *time.Time
 	session_window_status       *string
 	clearedFields               map[string]struct{}
+	carpool_users               map[int64]struct{}
+	removedcarpool_users        map[int64]struct{}
+	clearedcarpool_users        bool
 	groups                      map[int64]struct{}
 	removedgroups               map[int64]struct{}
 	clearedgroups               bool
@@ -4701,6 +4704,60 @@ func (m *AccountMutation) ResetSessionWindowStatus() {
 	delete(m.clearedFields, account.FieldSessionWindowStatus)
 }
 
+// AddCarpoolUserIDs adds the "carpool_users" edge to the User entity by ids.
+func (m *AccountMutation) AddCarpoolUserIDs(ids ...int64) {
+	if m.carpool_users == nil {
+		m.carpool_users = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.carpool_users[ids[i]] = struct{}{}
+	}
+}
+
+// ClearCarpoolUsers clears the "carpool_users" edge to the User entity.
+func (m *AccountMutation) ClearCarpoolUsers() {
+	m.clearedcarpool_users = true
+}
+
+// CarpoolUsersCleared reports if the "carpool_users" edge to the User entity was cleared.
+func (m *AccountMutation) CarpoolUsersCleared() bool {
+	return m.clearedcarpool_users
+}
+
+// RemoveCarpoolUserIDs removes the "carpool_users" edge to the User entity by IDs.
+func (m *AccountMutation) RemoveCarpoolUserIDs(ids ...int64) {
+	if m.removedcarpool_users == nil {
+		m.removedcarpool_users = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.carpool_users, ids[i])
+		m.removedcarpool_users[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedCarpoolUsers returns the removed IDs of the "carpool_users" edge to the User entity.
+func (m *AccountMutation) RemovedCarpoolUsersIDs() (ids []int64) {
+	for id := range m.removedcarpool_users {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// CarpoolUsersIDs returns the "carpool_users" edge IDs in the mutation.
+func (m *AccountMutation) CarpoolUsersIDs() (ids []int64) {
+	for id := range m.carpool_users {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetCarpoolUsers resets all changes to the "carpool_users" edge.
+func (m *AccountMutation) ResetCarpoolUsers() {
+	m.carpool_users = nil
+	m.clearedcarpool_users = false
+	m.removedcarpool_users = nil
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by ids.
 func (m *AccountMutation) AddGroupIDs(ids ...int64) {
 	if m.groups == nil {
@@ -5601,7 +5658,10 @@ func (m *AccountMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *AccountMutation) AddedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
+	if m.carpool_users != nil {
+		edges = append(edges, account.EdgeCarpoolUsers)
+	}
 	if m.groups != nil {
 		edges = append(edges, account.EdgeGroups)
 	}
@@ -5618,6 +5678,12 @@ func (m *AccountMutation) AddedEdges() []string {
 // name in this mutation.
 func (m *AccountMutation) AddedIDs(name string) []ent.Value {
 	switch name {
+	case account.EdgeCarpoolUsers:
+		ids := make([]ent.Value, 0, len(m.carpool_users))
+		for id := range m.carpool_users {
+			ids = append(ids, id)
+		}
+		return ids
 	case account.EdgeGroups:
 		ids := make([]ent.Value, 0, len(m.groups))
 		for id := range m.groups {
@@ -5640,7 +5706,10 @@ func (m *AccountMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *AccountMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
+	if m.removedcarpool_users != nil {
+		edges = append(edges, account.EdgeCarpoolUsers)
+	}
 	if m.removedgroups != nil {
 		edges = append(edges, account.EdgeGroups)
 	}
@@ -5654,6 +5723,12 @@ func (m *AccountMutation) RemovedEdges() []string {
 // the given name in this mutation.
 func (m *AccountMutation) RemovedIDs(name string) []ent.Value {
 	switch name {
+	case account.EdgeCarpoolUsers:
+		ids := make([]ent.Value, 0, len(m.removedcarpool_users))
+		for id := range m.removedcarpool_users {
+			ids = append(ids, id)
+		}
+		return ids
 	case account.EdgeGroups:
 		ids := make([]ent.Value, 0, len(m.removedgroups))
 		for id := range m.removedgroups {
@@ -5672,7 +5747,10 @@ func (m *AccountMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *AccountMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
+	if m.clearedcarpool_users {
+		edges = append(edges, account.EdgeCarpoolUsers)
+	}
 	if m.clearedgroups {
 		edges = append(edges, account.EdgeGroups)
 	}
@@ -5689,6 +5767,8 @@ func (m *AccountMutation) ClearedEdges() []string {
 // was cleared in this mutation.
 func (m *AccountMutation) EdgeCleared(name string) bool {
 	switch name {
+	case account.EdgeCarpoolUsers:
+		return m.clearedcarpool_users
 	case account.EdgeGroups:
 		return m.clearedgroups
 	case account.EdgeProxy:
@@ -5714,6 +5794,9 @@ func (m *AccountMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *AccountMutation) ResetEdge(name string) error {
 	switch name {
+	case account.EdgeCarpoolUsers:
+		m.ResetCarpoolUsers()
+		return nil
 	case account.EdgeGroups:
 		m.ResetGroups()
 		return nil
@@ -30276,6 +30359,8 @@ type UserMutation struct {
 	payg_discount_multiplier       *float64
 	addpayg_discount_multiplier    *float64
 	is_trusted                     *bool
+	claude_device_base_limit       *int
+	addclaude_device_base_limit    *int
 	payg_discount_override_enabled *bool
 	concurrency                    *int
 	addconcurrency                 *int
@@ -30290,6 +30375,9 @@ type UserMutation struct {
 	sora_storage_used_bytes        *int64
 	addsora_storage_used_bytes     *int64
 	clearedFields                  map[string]struct{}
+	carpool_accounts               map[int64]struct{}
+	removedcarpool_accounts        map[int64]struct{}
+	clearedcarpool_accounts        bool
 	api_keys                       map[int64]struct{}
 	removedapi_keys                map[int64]struct{}
 	clearedapi_keys                bool
@@ -30799,6 +30887,62 @@ func (m *UserMutation) OldIsTrusted(ctx context.Context) (v bool, err error) {
 // ResetIsTrusted resets all changes to the "is_trusted" field.
 func (m *UserMutation) ResetIsTrusted() {
 	m.is_trusted = nil
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (m *UserMutation) SetClaudeDeviceBaseLimit(i int) {
+	m.claude_device_base_limit = &i
+	m.addclaude_device_base_limit = nil
+}
+
+// ClaudeDeviceBaseLimit returns the value of the "claude_device_base_limit" field in the mutation.
+func (m *UserMutation) ClaudeDeviceBaseLimit() (r int, exists bool) {
+	v := m.claude_device_base_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClaudeDeviceBaseLimit returns the old "claude_device_base_limit" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldClaudeDeviceBaseLimit(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClaudeDeviceBaseLimit is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClaudeDeviceBaseLimit requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClaudeDeviceBaseLimit: %w", err)
+	}
+	return oldValue.ClaudeDeviceBaseLimit, nil
+}
+
+// AddClaudeDeviceBaseLimit adds i to the "claude_device_base_limit" field.
+func (m *UserMutation) AddClaudeDeviceBaseLimit(i int) {
+	if m.addclaude_device_base_limit != nil {
+		*m.addclaude_device_base_limit += i
+	} else {
+		m.addclaude_device_base_limit = &i
+	}
+}
+
+// AddedClaudeDeviceBaseLimit returns the value that was added to the "claude_device_base_limit" field in this mutation.
+func (m *UserMutation) AddedClaudeDeviceBaseLimit() (r int, exists bool) {
+	v := m.addclaude_device_base_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetClaudeDeviceBaseLimit resets all changes to the "claude_device_base_limit" field.
+func (m *UserMutation) ResetClaudeDeviceBaseLimit() {
+	m.claude_device_base_limit = nil
+	m.addclaude_device_base_limit = nil
 }
 
 // SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
@@ -31343,6 +31487,60 @@ func (m *UserMutation) AddedSoraStorageUsedBytes() (r int64, exists bool) {
 func (m *UserMutation) ResetSoraStorageUsedBytes() {
 	m.sora_storage_used_bytes = nil
 	m.addsora_storage_used_bytes = nil
+}
+
+// AddCarpoolAccountIDs adds the "carpool_accounts" edge to the Account entity by ids.
+func (m *UserMutation) AddCarpoolAccountIDs(ids ...int64) {
+	if m.carpool_accounts == nil {
+		m.carpool_accounts = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.carpool_accounts[ids[i]] = struct{}{}
+	}
+}
+
+// ClearCarpoolAccounts clears the "carpool_accounts" edge to the Account entity.
+func (m *UserMutation) ClearCarpoolAccounts() {
+	m.clearedcarpool_accounts = true
+}
+
+// CarpoolAccountsCleared reports if the "carpool_accounts" edge to the Account entity was cleared.
+func (m *UserMutation) CarpoolAccountsCleared() bool {
+	return m.clearedcarpool_accounts
+}
+
+// RemoveCarpoolAccountIDs removes the "carpool_accounts" edge to the Account entity by IDs.
+func (m *UserMutation) RemoveCarpoolAccountIDs(ids ...int64) {
+	if m.removedcarpool_accounts == nil {
+		m.removedcarpool_accounts = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.carpool_accounts, ids[i])
+		m.removedcarpool_accounts[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedCarpoolAccounts returns the removed IDs of the "carpool_accounts" edge to the Account entity.
+func (m *UserMutation) RemovedCarpoolAccountsIDs() (ids []int64) {
+	for id := range m.removedcarpool_accounts {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// CarpoolAccountsIDs returns the "carpool_accounts" edge IDs in the mutation.
+func (m *UserMutation) CarpoolAccountsIDs() (ids []int64) {
+	for id := range m.carpool_accounts {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetCarpoolAccounts resets all changes to the "carpool_accounts" edge.
+func (m *UserMutation) ResetCarpoolAccounts() {
+	m.carpool_accounts = nil
+	m.clearedcarpool_accounts = false
+	m.removedcarpool_accounts = nil
 }
 
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
@@ -31919,7 +32117,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 21)
+	fields := make([]string, 0, 22)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -31946,6 +32144,9 @@ func (m *UserMutation) Fields() []string {
 	}
 	if m.is_trusted != nil {
 		fields = append(fields, user.FieldIsTrusted)
+	}
+	if m.claude_device_base_limit != nil {
+		fields = append(fields, user.FieldClaudeDeviceBaseLimit)
 	}
 	if m.payg_discount_override_enabled != nil {
 		fields = append(fields, user.FieldPaygDiscountOverrideEnabled)
@@ -32009,6 +32210,8 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.PaygDiscountMultiplier()
 	case user.FieldIsTrusted:
 		return m.IsTrusted()
+	case user.FieldClaudeDeviceBaseLimit:
+		return m.ClaudeDeviceBaseLimit()
 	case user.FieldPaygDiscountOverrideEnabled:
 		return m.PaygDiscountOverrideEnabled()
 	case user.FieldAutoLevelID:
@@ -32060,6 +32263,8 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldPaygDiscountMultiplier(ctx)
 	case user.FieldIsTrusted:
 		return m.OldIsTrusted(ctx)
+	case user.FieldClaudeDeviceBaseLimit:
+		return m.OldClaudeDeviceBaseLimit(ctx)
 	case user.FieldPaygDiscountOverrideEnabled:
 		return m.OldPaygDiscountOverrideEnabled(ctx)
 	case user.FieldAutoLevelID:
@@ -32155,6 +32360,13 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetIsTrusted(v)
+		return nil
+	case user.FieldClaudeDeviceBaseLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClaudeDeviceBaseLimit(v)
 		return nil
 	case user.FieldPaygDiscountOverrideEnabled:
 		v, ok := value.(bool)
@@ -32254,6 +32466,9 @@ func (m *UserMutation) AddedFields() []string {
 	if m.addpayg_discount_multiplier != nil {
 		fields = append(fields, user.FieldPaygDiscountMultiplier)
 	}
+	if m.addclaude_device_base_limit != nil {
+		fields = append(fields, user.FieldClaudeDeviceBaseLimit)
+	}
 	if m.addconcurrency != nil {
 		fields = append(fields, user.FieldConcurrency)
 	}
@@ -32275,6 +32490,8 @@ func (m *UserMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedBalance()
 	case user.FieldPaygDiscountMultiplier:
 		return m.AddedPaygDiscountMultiplier()
+	case user.FieldClaudeDeviceBaseLimit:
+		return m.AddedClaudeDeviceBaseLimit()
 	case user.FieldConcurrency:
 		return m.AddedConcurrency()
 	case user.FieldSoraStorageQuotaBytes:
@@ -32303,6 +32520,13 @@ func (m *UserMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddPaygDiscountMultiplier(v)
+		return nil
+	case user.FieldClaudeDeviceBaseLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddClaudeDeviceBaseLimit(v)
 		return nil
 	case user.FieldConcurrency:
 		v, ok := value.(int)
@@ -32412,6 +32636,9 @@ func (m *UserMutation) ResetField(name string) error {
 	case user.FieldIsTrusted:
 		m.ResetIsTrusted()
 		return nil
+	case user.FieldClaudeDeviceBaseLimit:
+		m.ResetClaudeDeviceBaseLimit()
+		return nil
 	case user.FieldPaygDiscountOverrideEnabled:
 		m.ResetPaygDiscountOverrideEnabled()
 		return nil
@@ -32454,7 +32681,10 @@ func (m *UserMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *UserMutation) AddedEdges() []string {
-	edges := make([]string, 0, 11)
+	edges := make([]string, 0, 12)
+	if m.carpool_accounts != nil {
+		edges = append(edges, user.EdgeCarpoolAccounts)
+	}
 	if m.api_keys != nil {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -32495,6 +32725,12 @@ func (m *UserMutation) AddedEdges() []string {
 // name in this mutation.
 func (m *UserMutation) AddedIDs(name string) []ent.Value {
 	switch name {
+	case user.EdgeCarpoolAccounts:
+		ids := make([]ent.Value, 0, len(m.carpool_accounts))
+		for id := range m.carpool_accounts {
+			ids = append(ids, id)
+		}
+		return ids
 	case user.EdgeAPIKeys:
 		ids := make([]ent.Value, 0, len(m.api_keys))
 		for id := range m.api_keys {
@@ -32563,7 +32799,10 @@ func (m *UserMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *UserMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 11)
+	edges := make([]string, 0, 12)
+	if m.removedcarpool_accounts != nil {
+		edges = append(edges, user.EdgeCarpoolAccounts)
+	}
 	if m.removedapi_keys != nil {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -32598,6 +32837,12 @@ func (m *UserMutation) RemovedEdges() []string {
 // the given name in this mutation.
 func (m *UserMutation) RemovedIDs(name string) []ent.Value {
 	switch name {
+	case user.EdgeCarpoolAccounts:
+		ids := make([]ent.Value, 0, len(m.removedcarpool_accounts))
+		for id := range m.removedcarpool_accounts {
+			ids = append(ids, id)
+		}
+		return ids
 	case user.EdgeAPIKeys:
 		ids := make([]ent.Value, 0, len(m.removedapi_keys))
 		for id := range m.removedapi_keys {
@@ -32658,7 +32903,10 @@ func (m *UserMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *UserMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 11)
+	edges := make([]string, 0, 12)
+	if m.clearedcarpool_accounts {
+		edges = append(edges, user.EdgeCarpoolAccounts)
+	}
 	if m.clearedapi_keys {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -32699,6 +32947,8 @@ func (m *UserMutation) ClearedEdges() []string {
 // was cleared in this mutation.
 func (m *UserMutation) EdgeCleared(name string) bool {
 	switch name {
+	case user.EdgeCarpoolAccounts:
+		return m.clearedcarpool_accounts
 	case user.EdgeAPIKeys:
 		return m.clearedapi_keys
 	case user.EdgeRedeemCodes:
@@ -32743,6 +32993,9 @@ func (m *UserMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *UserMutation) ResetEdge(name string) error {
 	switch name {
+	case user.EdgeCarpoolAccounts:
+		m.ResetCarpoolAccounts()
+		return nil
 	case user.EdgeAPIKeys:
 		m.ResetAPIKeys()
 		return nil

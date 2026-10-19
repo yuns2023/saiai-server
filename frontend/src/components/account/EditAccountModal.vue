@@ -1067,6 +1067,13 @@
               </button>
             </div>
             <div v-if="claudeOAuthMode === 'shared' || claudeOAuthMode === 'carpool'" class="space-y-3">
+              <div v-if="claudeOAuthMode === 'carpool'" class="space-y-2">
+                <label class="flex items-center gap-2">
+                  <input v-model="carpoolUsersOnly" type="checkbox" data-testid="carpool-users-only" />
+                  {{ t('admin.accounts.carpoolUsersOnly') }}
+                </label>
+                <CarpoolUserSelector v-if="carpoolUsersOnly" v-model="carpoolUserIDs" />
+              </div>
               <label v-if="claudeOAuthMode === 'carpool'" class="flex items-start gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600">
                 <input v-model="claudeOAuthCarpoolTrustedOnly" data-testid="carpool-trusted-only" type="checkbox" class="mt-0.5 h-4 w-4 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" />
                 <span>
@@ -1952,6 +1959,7 @@ import { adminAPI } from '@/api/admin'
 import ClaudeDeviceOwnerInfo from './ClaudeDeviceOwnerInfo.vue'
 import type { ClaudeCarpoolDeviceOverview, ClaudePinnedBinding, ClaudeSharedBucket, ClaudeSingleDeviceSlot } from '@/api/admin/accounts'
 import type { Account, Proxy, AdminGroup, CheckMixedChannelRequest, CheckMixedChannelResponse } from '@/types'
+import CarpoolUserSelector from './CarpoolUserSelector.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -2093,6 +2101,8 @@ const cacheTTLOverrideTarget = ref<string>('5m')
 const claudeOAuthMode = ref<'carpool' | 'shared' | 'pinned' | 'single_device'>('carpool')
 const claudeOAuthCarpoolDeviceLimit = ref<number>(5)
 const claudeOAuthCarpoolTrustedOnly = ref(false)
+const carpoolUsersOnly = ref(false)
+const carpoolUserIDs = ref<number[]>([])
 const claudeOAuthCarpoolUnlimitedDevices = ref(false)
 const claudeOAuthCarpoolAutoExpand = ref(false)
 const claudeOAuthCarpoolAutoMaintenanceTarget = ref<number>(16)
@@ -2688,6 +2698,8 @@ function loadQuotaControlSettings(account: Account) {
   claudeOAuthMode.value = 'carpool'
   claudeOAuthCarpoolDeviceLimit.value = 5
   claudeOAuthCarpoolTrustedOnly.value = false
+  carpoolUsersOnly.value = false
+  carpoolUserIDs.value = []
   claudeOAuthCarpoolUnlimitedDevices.value = false
   claudeOAuthCarpoolAutoExpand.value = false
   claudeOAuthCarpoolAutoMaintenanceTarget.value = 16
@@ -2762,6 +2774,8 @@ function loadQuotaControlSettings(account: Account) {
   const accountExtra = (account.extra as Record<string, unknown>) || {}
   claudeOAuthCarpoolDeviceLimit.value = Math.min(32, Math.max(1, account.claude_oauth_carpool_device_limit || 5))
   claudeOAuthCarpoolTrustedOnly.value = accountExtra.claude_oauth_carpool_trusted_only === true
+  carpoolUsersOnly.value = accountExtra.claude_oauth_carpool_users_only === true
+  carpoolUserIDs.value = [...(account.carpool_user_ids || [])]
   claudeOAuthCarpoolUnlimitedDevices.value =
     account.claude_oauth_carpool_unlimited_devices === true || accountExtra.claude_oauth_carpool_unlimited_devices === true
   claudeOAuthCarpoolAutoExpand.value =
@@ -3430,6 +3444,8 @@ const handleSubmit = async () => {
       } else {
         delete newExtra.claude_oauth_5h_rate_limit_threshold_percent
       }
+      newExtra.claude_oauth_carpool_users_only = claudeOAuthMode.value === 'carpool' && carpoolUsersOnly.value
+      updatePayload.carpool_user_ids = carpoolUserIDs.value
       delete newExtra.claude_oauth_carpool_trusted_only
       if (claudeOAuthMode.value === 'carpool' && claudeOAuthCarpoolTrustedOnly.value) {
         newExtra.claude_oauth_carpool_trusted_only = true

@@ -62,6 +62,7 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 	return &AdminUser{
 		User:                            *base,
 		IsTrusted:                       u.IsTrusted,
+		ClaudeDeviceBaseLimit:           u.ClaudeDeviceBaseCapacity(),
 		InputRiskAlerts:                 u.InputRiskAlerts,
 		Notes:                           u.Notes,
 		PaygDiscountMultiplier:          u.PaygDiscountRate(),
@@ -239,6 +240,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		Type:                    a.Type,
 		Credentials:             a.Credentials,
 		Extra:                   a.Extra,
+		CarpoolUserIDs:          a.CarpoolUserIDs,
 		ProxyID:                 a.ProxyID,
 		Concurrency:             a.Concurrency,
 		LoadFactor:              a.LoadFactor,

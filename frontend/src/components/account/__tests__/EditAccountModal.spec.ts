@@ -403,12 +403,13 @@ describe('EditAccountModal', () => {
 describe('trusted-only carpool management', () => {
   it.each(['oauth', 'setup-token'])('loads, disables, and enables the restriction for %s', async (type) => {
     const account = { ...buildAccount(), type, credentials: { access_token: 'test-token' },
-      claude_oauth_mode: 'carpool', extra: { claude_oauth_mode: 'carpool', claude_oauth_carpool_trusted_only: true, unrelated_setting: 'keep' } }
+      carpool_user_ids: [7], claude_oauth_mode: 'carpool', extra: { claude_oauth_mode: 'carpool', claude_oauth_carpool_trusted_only: true, unrelated_setting: 'keep' } }
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     listClaudeCarpoolDevicesMock.mockResolvedValue({ recorded_items: [], overflow_items: [] })
     const wrapper = mountModal(account)
     await flushPromises()
+    await wrapper.get('[data-testid="carpool-users-only"]').setValue(true)
     const toggle = wrapper.get('[data-testid="carpool-trusted-only"]')
     expect((toggle.element as HTMLInputElement).checked).toBe(true)
     for (const trusted of [false, true]) {
@@ -418,6 +419,8 @@ describe('trusted-only carpool management', () => {
       const extra = updateAccountMock.mock.lastCall?.[1].extra
       expect(extra.claude_oauth_carpool_trusted_only === true).toBe(trusted)
       expect(extra.unrelated_setting).toBe('keep')
+      expect(extra.claude_oauth_carpool_users_only).toBe(true)
+      expect(updateAccountMock.mock.lastCall?.[1].carpool_user_ids).toEqual([7])
     }
     const shared = wrapper.findAll('button').find(button => button.text() === 'shared')!
     await shared.trigger('click')

@@ -9,14 +9,15 @@ import (
 type User struct {
 	InputRiskAlerts *InputRiskAlertSummary
 
-	ID           int64
-	Email        string
-	Username     string
-	Notes        string
-	IsTrusted    bool
-	PasswordHash string
-	Role         string
-	Balance      float64
+	ID                    int64
+	Email                 string
+	Username              string
+	Notes                 string
+	ClaudeDeviceBaseLimit int
+	IsTrusted             bool
+	PasswordHash          string
+	Role                  string
+	Balance               float64
 	// PaygDiscountMultiplier discounts this user's balance and subscription billing across keys,
 	// groups, and upstream accounts. Nil in older auth cache entries means 1.
 	PaygDiscountMultiplier      *float64
@@ -134,4 +135,12 @@ func (u *User) SetPassword(password string) error {
 
 func (u *User) CheckPassword(password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) == nil
+}
+
+// ClaudeDeviceBaseCapacity includes a safe default for older auth snapshots.
+func (u *User) ClaudeDeviceBaseCapacity() int {
+	if u == nil || u.ClaudeDeviceBaseLimit < 1 {
+		return 3
+	}
+	return u.ClaudeDeviceBaseLimit
 }

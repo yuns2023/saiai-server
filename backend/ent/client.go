@@ -889,6 +889,22 @@ func (c *AccountClient) GetX(ctx context.Context, id int64) *Account {
 	return obj
 }
 
+// QueryCarpoolUsers queries the carpool_users edge of a Account.
+func (c *AccountClient) QueryCarpoolUsers(_m *Account) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(account.Table, account.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2M, false, account.CarpoolUsersTable, account.CarpoolUsersPrimaryKey...),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryGroups queries the groups edge of a Account.
 func (c *AccountClient) QueryGroups(_m *Account) *GroupQuery {
 	query := (&GroupClient{config: c.config}).Query()
@@ -3835,6 +3851,22 @@ func (c *UserClient) GetX(ctx context.Context, id int64) *User {
 		panic(err)
 	}
 	return obj
+}
+
+// QueryCarpoolAccounts queries the carpool_accounts edge of a User.
+func (c *UserClient) QueryCarpoolAccounts(_m *User) *AccountQuery {
+	query := (&AccountClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(account.Table, account.FieldID),
+			sqlgraph.Edge(sqlgraph.M2M, true, user.CarpoolAccountsTable, user.CarpoolAccountsPrimaryKey...),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
 }
 
 // QueryAPIKeys queries the api_keys edge of a User.

@@ -95,25 +95,25 @@ not automatically increase an administrator-configured limit beyond 16.
 
 ## User-scoped Claude Code device limits
 
-The group fields `claude_device_limit_mode` and `claude_device_base_limit`
-limit a SAIAI user within that group. They are independent of the
-account-scoped carpool registry above. Admission is keyed by `(user_id,
-group_id, device_hash)` and redeem codes add bonus capacity in the
-`user_group_claude_device_quotas` table.
+Claude Code device capacity belongs to the SAIAI user. `users.claude_device_base_limit`
+defaults to 3 and administrators may set it to 1..100 in user management.
+Every API key and group owned by the same user shares this capacity. An active
+device hash is counted once across groups; revoking it revokes all historical
+group registrations. Existing active devices remain usable after lowering capacity,
+but new devices are rejected until capacity is available. Generic API traffic is
+not subject to Claude Code device admission. The official token-counting metadata
+exception is preserved.
 
-The registry keeps the hash for admission and stores the original
-`metadata.user_id.device_id` encrypted with the configured TOTP AES-256-GCM
-key for administrator-only device management. Existing rows created before
-the encryption column was added have no recoverable original ID until the
-device connects again. The production key must be stable across restarts;
-an auto-generated development key cannot decrypt previously stored IDs.
+Migration 106 retains historical registrations and sums redeemed group bonuses
+into `user_claude_device_quotas`. New device redemption codes need no group and add
+to user-wide bonus capacity. Legacy group device fields are retained for decoding
+but no longer determine admission. Old and new Gateway versions must not run
+concurrently while changing this admission contract; rollback needs an explicit
+plan for bonuses redeemed after migration rather than a database restore.
 
-The admin user list exposes `claude_device_count` and `claude_device_limit` as
-an aggregate for the current page. The count includes only active registrations
-and the limit includes base plus redeemed bonus capacity across groups with
-device limiting enabled; revoked registrations are excluded. A missing limit
-means that no device-limited group is represented for that user. Device IDs
-remain available only in the administrator device-detail view.
+The user list displays distinct active devices / base plus bonus capacity,
+including 0 / 3 for a new user. Encrypted device IDs remain administrator-only;
+normal logs contain only a one-way reference and the last four characters.
 
 Device-related structured logs use `user_id`, an optional username snapshot,
 `device_ref`, and the last four characters of the device ID. `device_ref` is a
@@ -264,3 +264,14 @@ final response boundary across JSON, SSE, raw `400`, and configurable
 error-passthrough paths. An identity match alone redacts the client response;
 account isolation still requires the narrower account-state classification so
 an unrelated error cannot disable an otherwise healthy account.
+
+## Carpool user access
+
+`claude_oauth_carpool_trusted_only` and `claude_oauth_carpool_users_only` are
+independent account switches for Anthropic OAuth/setup-token carpool. Enabled
+conditions are combined with AND. An enabled empty user list denies everyone.
+Membership is stored in `claude_oauth_account_users` with user/account foreign keys,
+and exposed to administrators as `carpool_user_ids`. The authenticated SAIAI Key
+owner supplies the user ID, never client metadata. Selection, sticky reuse and
+forwarding apply the same predicate. Existing group permissions, request-shape
+validation, device capacity and upstream limits continue to apply.

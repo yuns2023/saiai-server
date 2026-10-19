@@ -28,6 +28,7 @@ func TestValidateClaudeDeviceRedeemCode(t *testing.T) {
 		repoErr error
 		wantErr string
 	}{
+		{name: "user-wide code without group", code: &RedeemCode{Type: RedeemTypeClaudeDevice, Value: 3}},
 		{
 			name:  "anthropic group",
 			code:  &RedeemCode{Type: RedeemTypeClaudeDevice, Value: 2, GroupID: &groupID},
@@ -39,10 +40,9 @@ func TestValidateClaudeDeviceRedeemCode(t *testing.T) {
 			group: &Group{ID: groupID, Platform: PlatformAntigravity},
 		},
 		{
-			name:    "OpenAI group",
-			code:    &RedeemCode{Type: RedeemTypeClaudeDevice, Value: 1, GroupID: &groupID},
-			group:   &Group{ID: groupID, Platform: PlatformOpenAI},
-			wantErr: "require an Anthropic or Antigravity group",
+			name:  "OpenAI group",
+			code:  &RedeemCode{Type: RedeemTypeClaudeDevice, Value: 1, GroupID: &groupID},
+			group: &Group{ID: groupID, Platform: PlatformOpenAI},
 		},
 		{
 			name:    "fractional quota",
@@ -54,7 +54,6 @@ func TestValidateClaudeDeviceRedeemCode(t *testing.T) {
 			name:    "group lookup failure",
 			code:    &RedeemCode{Type: RedeemTypeClaudeDevice, Value: 1, GroupID: &groupID},
 			repoErr: errors.New("database unavailable"),
-			wantErr: "database unavailable",
 		},
 	}
 

@@ -363,7 +363,7 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 		if s.claudeDeviceRepo == nil {
 			return nil, fmt.Errorf("claude device quota service unavailable")
 		}
-		if err := s.claudeDeviceRepo.AddBonusDevices(txCtx, userID, *redeemCode.GroupID, int(redeemCode.Value)); err != nil {
+		if err := s.claudeDeviceRepo.AddBonusDevices(txCtx, userID, 0, int(redeemCode.Value)); err != nil {
 			return nil, fmt.Errorf("add Claude device quota: %w", err)
 		}
 
@@ -389,18 +389,8 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 }
 
 func (s *RedeemService) validateClaudeDeviceRedeemCode(ctx context.Context, code *RedeemCode) error {
-	if code == nil || code.GroupID == nil || code.Value <= 0 || code.Value != float64(int(code.Value)) {
-		return errors.New("claude device redeem code requires group_id and a positive integer value")
-	}
-	if s.groupRepo == nil {
-		return errors.New("claude device redeem code group validation is unavailable")
-	}
-	group, err := s.groupRepo.GetByID(ctx, *code.GroupID)
-	if err != nil {
-		return fmt.Errorf("get Claude device redeem code group: %w", err)
-	}
-	if group.Platform != PlatformAnthropic && group.Platform != PlatformAntigravity {
-		return errors.New("claude device redeem codes require an Anthropic or Antigravity group")
+	if code == nil || code.Value <= 0 || code.Value != float64(int(code.Value)) {
+		return errors.New("claude device redeem code requires a positive integer value")
 	}
 	return nil
 }

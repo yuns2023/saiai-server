@@ -485,7 +485,10 @@ func (h *GatewayHandler) submitInputModeration(c *gin.Context, apiKey *service.A
 }
 
 func (h *GatewayHandler) checkClaudeDeviceLimit(c *gin.Context, apiKey *service.APIKey, parsed *service.ParsedRequest, streamStarted bool) bool {
-	if h == nil || h.claudeDeviceService == nil {
+	if h == nil || h.claudeDeviceService == nil || !service.IsClaudeCodeClient(c.Request.Context()) {
+		return true
+	}
+	if strings.HasSuffix(c.Request.URL.Path, "/count_tokens") && (parsed == nil || strings.TrimSpace(parsed.MetadataUserID) == "") {
 		return true
 	}
 	err := h.claudeDeviceService.CheckAndRegister(c.Request.Context(), apiKey, parsed, service.ExtractClientHints(c.Request.Header))

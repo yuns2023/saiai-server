@@ -28,7 +28,8 @@ type User struct {
 type AdminUser struct {
 	InputRiskAlerts *service.InputRiskAlertSummary `json:"input_risk_alerts"`
 	User
-	IsTrusted bool `json:"is_trusted"`
+	IsTrusted             bool `json:"is_trusted"`
+	ClaudeDeviceBaseLimit int  `json:"claude_device_base_limit"`
 
 	Notes                           string       `json:"notes"`
 	PaygDiscountMultiplier          float64      `json:"payg_discount_multiplier"`
@@ -174,6 +175,7 @@ type AdminGroup struct {
 }
 
 type Account struct {
+	CarpoolUserIDs         []int64        `json:"carpool_user_ids"`
 	ID                     int64          `json:"id"`
 	Name                   string         `json:"name"`
 	Notes                  *string        `json:"notes"`

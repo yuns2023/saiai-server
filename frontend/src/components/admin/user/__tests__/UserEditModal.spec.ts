@@ -89,13 +89,16 @@ describe('trusted user management', () => {
   it('grants and revokes trust explicitly', async () => {
     updateUserMock.mockReset().mockResolvedValue({})
     const wrapper = mountModal()
+    const capacity = wrapper.get('[data-testid="user-device-capacity"]')
+    expect((capacity.element as HTMLInputElement).value).toBe("3")
+    await capacity.setValue(5)
     const toggle = wrapper.get('[data-testid="user-is-trusted"]')
     expect((toggle.element as HTMLInputElement).checked).toBe(false)
     for (const trusted of [true, false]) {
       await toggle.setValue(trusted)
       await wrapper.get('form#edit-user-form').trigger('submit.prevent')
       await flushPromises()
-      expect(updateUserMock).toHaveBeenLastCalledWith(7, expect.objectContaining({ is_trusted: trusted }))
+      expect(updateUserMock).toHaveBeenLastCalledWith(7, expect.objectContaining({ is_trusted: trusted, claude_device_base_limit: 5 }))
     }
     wrapper.unmount()
   })

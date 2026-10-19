@@ -97,6 +97,7 @@ type AdminService interface {
 
 // CreateUserInput represents input for creating a new user via admin operations.
 type CreateUserInput struct {
+	ClaudeDeviceBaseLimit       *int
 	Email                       string
 	Password                    string
 	Username                    string
@@ -111,6 +112,7 @@ type CreateUserInput struct {
 }
 
 type UpdateUserInput struct {
+	ClaudeDeviceBaseLimit       *int
 	Email                       string
 	Password                    string
 	Username                    *string
@@ -246,6 +248,7 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
+	CarpoolUserIDs         *[]int64
 	Name                   string
 	Notes                  *string
 	Platform               string
@@ -269,6 +272,7 @@ type CreateAccountInput struct {
 }
 
 type UpdateAccountInput struct {
+	CarpoolUserIDs         *[]int64
 	Name                   string
 	Notes                  *string
 	Type                   string // Account type: oauth, setup-token, apikey
@@ -635,6 +639,12 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		AllowedGroups:               input.AllowedGroups,
 		SoraStorageQuotaBytes:       input.SoraStorageQuotaBytes,
 	}
+	if input.ClaudeDeviceBaseLimit != nil {
+		if *input.ClaudeDeviceBaseLimit < 1 || *input.ClaudeDeviceBaseLimit > 100 {
+			return nil, fmt.Errorf("Claude device base limit must be between 1 and 100")
+		}
+		user.ClaudeDeviceBaseLimit = *input.ClaudeDeviceBaseLimit
+	}
 	if err := user.SetPassword(input.Password); err != nil {
 		return nil, err
 	}
@@ -692,6 +702,12 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
+	if input.ClaudeDeviceBaseLimit != nil {
+		if *input.ClaudeDeviceBaseLimit < 1 || *input.ClaudeDeviceBaseLimit > 100 {
+			return nil, fmt.Errorf("Claude device base limit must be between 1 and 100")
+		}
+		user.ClaudeDeviceBaseLimit = *input.ClaudeDeviceBaseLimit
+	}
 	if input.IsTrusted != nil {
 		user.IsTrusted = *input.IsTrusted
 	}
@@ -1851,6 +1867,10 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		return nil, err
 	}
 	// 预计算固定时间重置的下次重置时间
+	if input.CarpoolUserIDs != nil {
+		account.CarpoolUserIDs = *input.CarpoolUserIDs
+	}
+
 	if account.Extra != nil {
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
 			return nil, err
@@ -1921,6 +1941,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if len(input.Credentials) > 0 {
 		account.Credentials = input.Credentials
 	}
+	if input.CarpoolUserIDs != nil {
+		account.CarpoolUserIDs = *input.CarpoolUserIDs
+	}
+
 	// Extra 使用 map：需要区分“未提供(nil)”与“显式清空({})”。
 	// 关闭配额限制时前端会删除 quota_* 键并提交 extra:{}，此时也必须落库。
 	if input.Extra != nil {

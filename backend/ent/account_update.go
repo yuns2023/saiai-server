@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/user"
 )
 
 // AccountUpdate is the builder for updating Account entities.
@@ -524,6 +525,21 @@ func (_u *AccountUpdate) ClearSessionWindowStatus() *AccountUpdate {
 	return _u
 }
 
+// AddCarpoolUserIDs adds the "carpool_users" edge to the User entity by IDs.
+func (_u *AccountUpdate) AddCarpoolUserIDs(ids ...int64) *AccountUpdate {
+	_u.mutation.AddCarpoolUserIDs(ids...)
+	return _u
+}
+
+// AddCarpoolUsers adds the "carpool_users" edges to the User entity.
+func (_u *AccountUpdate) AddCarpoolUsers(v ...*User) *AccountUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddCarpoolUserIDs(ids...)
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_u *AccountUpdate) AddGroupIDs(ids ...int64) *AccountUpdate {
 	_u.mutation.AddGroupIDs(ids...)
@@ -562,6 +578,27 @@ func (_u *AccountUpdate) AddUsageLogs(v ...*UsageLog) *AccountUpdate {
 // Mutation returns the AccountMutation object of the builder.
 func (_u *AccountUpdate) Mutation() *AccountMutation {
 	return _u.mutation
+}
+
+// ClearCarpoolUsers clears all "carpool_users" edges to the User entity.
+func (_u *AccountUpdate) ClearCarpoolUsers() *AccountUpdate {
+	_u.mutation.ClearCarpoolUsers()
+	return _u
+}
+
+// RemoveCarpoolUserIDs removes the "carpool_users" edge to User entities by IDs.
+func (_u *AccountUpdate) RemoveCarpoolUserIDs(ids ...int64) *AccountUpdate {
+	_u.mutation.RemoveCarpoolUserIDs(ids...)
+	return _u
+}
+
+// RemoveCarpoolUsers removes "carpool_users" edges to User entities.
+func (_u *AccountUpdate) RemoveCarpoolUsers(v ...*User) *AccountUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveCarpoolUserIDs(ids...)
 }
 
 // ClearGroups clears all "groups" edges to the Group entity.
@@ -833,6 +870,51 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.SessionWindowStatusCleared() {
 		_spec.ClearField(account.FieldSessionWindowStatus, field.TypeString)
+	}
+	if _u.mutation.CarpoolUsersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolUsersTable,
+			Columns: account.CarpoolUsersPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedCarpoolUsersIDs(); len(nodes) > 0 && !_u.mutation.CarpoolUsersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolUsersTable,
+			Columns: account.CarpoolUsersPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.CarpoolUsersIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolUsersTable,
+			Columns: account.CarpoolUsersPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.GroupsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1478,6 +1560,21 @@ func (_u *AccountUpdateOne) ClearSessionWindowStatus() *AccountUpdateOne {
 	return _u
 }
 
+// AddCarpoolUserIDs adds the "carpool_users" edge to the User entity by IDs.
+func (_u *AccountUpdateOne) AddCarpoolUserIDs(ids ...int64) *AccountUpdateOne {
+	_u.mutation.AddCarpoolUserIDs(ids...)
+	return _u
+}
+
+// AddCarpoolUsers adds the "carpool_users" edges to the User entity.
+func (_u *AccountUpdateOne) AddCarpoolUsers(v ...*User) *AccountUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddCarpoolUserIDs(ids...)
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_u *AccountUpdateOne) AddGroupIDs(ids ...int64) *AccountUpdateOne {
 	_u.mutation.AddGroupIDs(ids...)
@@ -1516,6 +1613,27 @@ func (_u *AccountUpdateOne) AddUsageLogs(v ...*UsageLog) *AccountUpdateOne {
 // Mutation returns the AccountMutation object of the builder.
 func (_u *AccountUpdateOne) Mutation() *AccountMutation {
 	return _u.mutation
+}
+
+// ClearCarpoolUsers clears all "carpool_users" edges to the User entity.
+func (_u *AccountUpdateOne) ClearCarpoolUsers() *AccountUpdateOne {
+	_u.mutation.ClearCarpoolUsers()
+	return _u
+}
+
+// RemoveCarpoolUserIDs removes the "carpool_users" edge to User entities by IDs.
+func (_u *AccountUpdateOne) RemoveCarpoolUserIDs(ids ...int64) *AccountUpdateOne {
+	_u.mutation.RemoveCarpoolUserIDs(ids...)
+	return _u
+}
+
+// RemoveCarpoolUsers removes "carpool_users" edges to User entities.
+func (_u *AccountUpdateOne) RemoveCarpoolUsers(v ...*User) *AccountUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveCarpoolUserIDs(ids...)
 }
 
 // ClearGroups clears all "groups" edges to the Group entity.
@@ -1817,6 +1935,51 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if _u.mutation.SessionWindowStatusCleared() {
 		_spec.ClearField(account.FieldSessionWindowStatus, field.TypeString)
+	}
+	if _u.mutation.CarpoolUsersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolUsersTable,
+			Columns: account.CarpoolUsersPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedCarpoolUsersIDs(); len(nodes) > 0 && !_u.mutation.CarpoolUsersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolUsersTable,
+			Columns: account.CarpoolUsersPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.CarpoolUsersIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolUsersTable,
+			Columns: account.CarpoolUsersPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.GroupsCleared() {
 		edge := &sqlgraph.EdgeSpec{

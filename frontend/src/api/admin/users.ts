@@ -90,6 +90,7 @@ export async function getById(id: number): Promise<AdminUser> {
  * @returns Created user
  */
 export async function create(userData: {
+  claude_device_base_limit?: number
   email: string
   password: string
   balance?: number

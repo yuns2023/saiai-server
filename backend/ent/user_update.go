@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/accesslevel"
+	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
@@ -158,6 +159,27 @@ func (_u *UserUpdate) SetNillableIsTrusted(v *bool) *UserUpdate {
 	if v != nil {
 		_u.SetIsTrusted(*v)
 	}
+	return _u
+}
+
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (_u *UserUpdate) SetClaudeDeviceBaseLimit(v int) *UserUpdate {
+	_u.mutation.ResetClaudeDeviceBaseLimit()
+	_u.mutation.SetClaudeDeviceBaseLimit(v)
+	return _u
+}
+
+// SetNillableClaudeDeviceBaseLimit sets the "claude_device_base_limit" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableClaudeDeviceBaseLimit(v *int) *UserUpdate {
+	if v != nil {
+		_u.SetClaudeDeviceBaseLimit(*v)
+	}
+	return _u
+}
+
+// AddClaudeDeviceBaseLimit adds value to the "claude_device_base_limit" field.
+func (_u *UserUpdate) AddClaudeDeviceBaseLimit(v int) *UserUpdate {
+	_u.mutation.AddClaudeDeviceBaseLimit(v)
 	return _u
 }
 
@@ -374,6 +396,21 @@ func (_u *UserUpdate) AddSoraStorageUsedBytes(v int64) *UserUpdate {
 	return _u
 }
 
+// AddCarpoolAccountIDs adds the "carpool_accounts" edge to the Account entity by IDs.
+func (_u *UserUpdate) AddCarpoolAccountIDs(ids ...int64) *UserUpdate {
+	_u.mutation.AddCarpoolAccountIDs(ids...)
+	return _u
+}
+
+// AddCarpoolAccounts adds the "carpool_accounts" edges to the Account entity.
+func (_u *UserUpdate) AddCarpoolAccounts(v ...*Account) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddCarpoolAccountIDs(ids...)
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *UserUpdate) AddAPIKeyIDs(ids ...int64) *UserUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -522,6 +559,27 @@ func (_u *UserUpdate) SetManualLevel(v *AccessLevel) *UserUpdate {
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdate) Mutation() *UserMutation {
 	return _u.mutation
+}
+
+// ClearCarpoolAccounts clears all "carpool_accounts" edges to the Account entity.
+func (_u *UserUpdate) ClearCarpoolAccounts() *UserUpdate {
+	_u.mutation.ClearCarpoolAccounts()
+	return _u
+}
+
+// RemoveCarpoolAccountIDs removes the "carpool_accounts" edge to Account entities by IDs.
+func (_u *UserUpdate) RemoveCarpoolAccountIDs(ids ...int64) *UserUpdate {
+	_u.mutation.RemoveCarpoolAccountIDs(ids...)
+	return _u
+}
+
+// RemoveCarpoolAccounts removes "carpool_accounts" edges to Account entities.
+func (_u *UserUpdate) RemoveCarpoolAccounts(v ...*Account) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveCarpoolAccountIDs(ids...)
 }
 
 // ClearAPIKeys clears all "api_keys" edges to the APIKey entity.
@@ -784,6 +842,11 @@ func (_u *UserUpdate) check() error {
 			return &ValidationError{Name: "role", err: fmt.Errorf(`ent: validator failed for field "User.role": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ClaudeDeviceBaseLimit(); ok {
+		if err := user.ClaudeDeviceBaseLimitValidator(v); err != nil {
+			return &ValidationError{Name: "claude_device_base_limit", err: fmt.Errorf(`ent: validator failed for field "User.claude_device_base_limit": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := user.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "User.status": %w`, err)}
@@ -842,6 +905,12 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.IsTrusted(); ok {
 		_spec.SetField(user.FieldIsTrusted, field.TypeBool, value)
 	}
+	if value, ok := _u.mutation.ClaudeDeviceBaseLimit(); ok {
+		_spec.SetField(user.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedClaudeDeviceBaseLimit(); ok {
+		_spec.AddField(user.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
+	}
 	if value, ok := _u.mutation.PaygDiscountOverrideEnabled(); ok {
 		_spec.SetField(user.FieldPaygDiscountOverrideEnabled, field.TypeBool, value)
 	}
@@ -886,6 +955,51 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedSoraStorageUsedBytes(); ok {
 		_spec.AddField(user.FieldSoraStorageUsedBytes, field.TypeInt64, value)
+	}
+	if _u.mutation.CarpoolAccountsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: true,
+			Table:   user.CarpoolAccountsTable,
+			Columns: user.CarpoolAccountsPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedCarpoolAccountsIDs(); len(nodes) > 0 && !_u.mutation.CarpoolAccountsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: true,
+			Table:   user.CarpoolAccountsTable,
+			Columns: user.CarpoolAccountsPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.CarpoolAccountsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: true,
+			Table:   user.CarpoolAccountsTable,
+			Columns: user.CarpoolAccountsPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1506,6 +1620,27 @@ func (_u *UserUpdateOne) SetNillableIsTrusted(v *bool) *UserUpdateOne {
 	return _u
 }
 
+// SetClaudeDeviceBaseLimit sets the "claude_device_base_limit" field.
+func (_u *UserUpdateOne) SetClaudeDeviceBaseLimit(v int) *UserUpdateOne {
+	_u.mutation.ResetClaudeDeviceBaseLimit()
+	_u.mutation.SetClaudeDeviceBaseLimit(v)
+	return _u
+}
+
+// SetNillableClaudeDeviceBaseLimit sets the "claude_device_base_limit" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableClaudeDeviceBaseLimit(v *int) *UserUpdateOne {
+	if v != nil {
+		_u.SetClaudeDeviceBaseLimit(*v)
+	}
+	return _u
+}
+
+// AddClaudeDeviceBaseLimit adds value to the "claude_device_base_limit" field.
+func (_u *UserUpdateOne) AddClaudeDeviceBaseLimit(v int) *UserUpdateOne {
+	_u.mutation.AddClaudeDeviceBaseLimit(v)
+	return _u
+}
+
 // SetPaygDiscountOverrideEnabled sets the "payg_discount_override_enabled" field.
 func (_u *UserUpdateOne) SetPaygDiscountOverrideEnabled(v bool) *UserUpdateOne {
 	_u.mutation.SetPaygDiscountOverrideEnabled(v)
@@ -1719,6 +1854,21 @@ func (_u *UserUpdateOne) AddSoraStorageUsedBytes(v int64) *UserUpdateOne {
 	return _u
 }
 
+// AddCarpoolAccountIDs adds the "carpool_accounts" edge to the Account entity by IDs.
+func (_u *UserUpdateOne) AddCarpoolAccountIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.AddCarpoolAccountIDs(ids...)
+	return _u
+}
+
+// AddCarpoolAccounts adds the "carpool_accounts" edges to the Account entity.
+func (_u *UserUpdateOne) AddCarpoolAccounts(v ...*Account) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddCarpoolAccountIDs(ids...)
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *UserUpdateOne) AddAPIKeyIDs(ids ...int64) *UserUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1867,6 +2017,27 @@ func (_u *UserUpdateOne) SetManualLevel(v *AccessLevel) *UserUpdateOne {
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdateOne) Mutation() *UserMutation {
 	return _u.mutation
+}
+
+// ClearCarpoolAccounts clears all "carpool_accounts" edges to the Account entity.
+func (_u *UserUpdateOne) ClearCarpoolAccounts() *UserUpdateOne {
+	_u.mutation.ClearCarpoolAccounts()
+	return _u
+}
+
+// RemoveCarpoolAccountIDs removes the "carpool_accounts" edge to Account entities by IDs.
+func (_u *UserUpdateOne) RemoveCarpoolAccountIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.RemoveCarpoolAccountIDs(ids...)
+	return _u
+}
+
+// RemoveCarpoolAccounts removes "carpool_accounts" edges to Account entities.
+func (_u *UserUpdateOne) RemoveCarpoolAccounts(v ...*Account) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveCarpoolAccountIDs(ids...)
 }
 
 // ClearAPIKeys clears all "api_keys" edges to the APIKey entity.
@@ -2142,6 +2313,11 @@ func (_u *UserUpdateOne) check() error {
 			return &ValidationError{Name: "role", err: fmt.Errorf(`ent: validator failed for field "User.role": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ClaudeDeviceBaseLimit(); ok {
+		if err := user.ClaudeDeviceBaseLimitValidator(v); err != nil {
+			return &ValidationError{Name: "claude_device_base_limit", err: fmt.Errorf(`ent: validator failed for field "User.claude_device_base_limit": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := user.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "User.status": %w`, err)}
@@ -2217,6 +2393,12 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	if value, ok := _u.mutation.IsTrusted(); ok {
 		_spec.SetField(user.FieldIsTrusted, field.TypeBool, value)
 	}
+	if value, ok := _u.mutation.ClaudeDeviceBaseLimit(); ok {
+		_spec.SetField(user.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedClaudeDeviceBaseLimit(); ok {
+		_spec.AddField(user.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
+	}
 	if value, ok := _u.mutation.PaygDiscountOverrideEnabled(); ok {
 		_spec.SetField(user.FieldPaygDiscountOverrideEnabled, field.TypeBool, value)
 	}
@@ -2261,6 +2443,51 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.AddedSoraStorageUsedBytes(); ok {
 		_spec.AddField(user.FieldSoraStorageUsedBytes, field.TypeInt64, value)
+	}
+	if _u.mutation.CarpoolAccountsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: true,
+			Table:   user.CarpoolAccountsTable,
+			Columns: user.CarpoolAccountsPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedCarpoolAccountsIDs(); len(nodes) > 0 && !_u.mutation.CarpoolAccountsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: true,
+			Table:   user.CarpoolAccountsTable,
+			Columns: user.CarpoolAccountsPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.CarpoolAccountsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: true,
+			Table:   user.CarpoolAccountsTable,
+			Columns: user.CarpoolAccountsPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
