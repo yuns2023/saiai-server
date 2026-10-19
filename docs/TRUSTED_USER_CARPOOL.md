@@ -6,17 +6,30 @@ Administrators can mark a user as trusted (`is_trusted`, default `false`). An
 Anthropic OAuth or setup-token account in `carpool` mode can opt into
 `extra.claude_oauth_carpool_trusted_only: true` (default absent/off).
 
-| User | Ordinary carpool | Trusted-only carpool |
+The independent `extra.claude_oauth_carpool_users_only` switch restricts the
+account to the administrator-selected `carpool_user_ids`. Both switches default
+to off. Enabled conditions combine with AND:
+
+| Trusted-only | Specified-users-only | Additional eligibility requirement |
 | --- | --- | --- |
-| Ordinary | Existing eligibility rules | Excluded |
-| Trusted | Existing eligibility rules | Existing eligibility rules |
+| Off | Off | None |
+| On | Off | Trusted user |
+| Off | On | User belongs to the selected list |
+| On | On | Trusted user AND membership in the selected list |
+
+An enabled empty list denies everyone. Membership comes from the authenticated
+SAIAI Key owner, never request metadata. Migration `107_carpool_account_users.sql`
+adds the cascading account/user relation; selection, sticky reuse and final
+forwarding use the same predicate. See [account scheduling](GATEWAY_ACCOUNT_SCHEDULING.md#carpool-user-access).
 
 Trust is an account eligibility condition, not a new OAuth traffic mode, user
-role, priority, subscription tier, or exemption from checks. It does not change
+role, priority, or subscription tier. Carpool eligibility does not change
 group membership, quotas, device admission/rotation, session limits, request
 rewriting, billing, or success-only sticky behavior. It applies to bounded and
 unlimited-device carpool alike. Other account modes ignore this setting; the
-account editor removes it when changing away from carpool.
+account editor removes it when changing away from carpool. The separate input
+moderation trusted-user bypass is documented in [input moderation](INPUT_MODERATION.md);
+it does not bypass these carpool restrictions.
 
 Only administrator user create/update APIs accept the flag. User profile APIs
 do not expose or allow editing it. The authenticated SAIAI Key owner's database
@@ -31,7 +44,8 @@ identity or an old snapshot without the flag means untrusted.
    the user list manage/display trust.
 2. The auth repository projection and L1/L2 snapshots include the flag. Changing
    it invokes existing per-user invalidation for all of the user's keys.
-3. Carpool create/edit exposes a localized **Trusted users only** checkbox.
+3. Carpool create/edit exposes independent trusted-only and specified-users-only
+   checkboxes, with user selection for the latter.
    Account edits reuse the existing scheduler snapshot refresh and outbox.
 4. Both legacy and load-aware selection apply the condition to model routing,
    ordinary candidates, confirmed/pending/prefetched sticky, retry exclusions,
@@ -69,7 +83,7 @@ account restrictions off until all serving instances enforce them. An older
 binary ignores the account restriction, so rolling back to one removes this
 protection even though the additive database column can remain.
 
-## Local verification
+## Historical trusted-only verification (migration 099)
 
 - Targeted Go unit tests passed for trust eligibility (128 scheduling scenarios),
   existing selection/sticky behavior, middleware, user/admin boundaries, auth
@@ -80,4 +94,7 @@ protection even though the additive database column can remain.
   account creation for both OAuth and setup-token.
 - `pnpm run typecheck` passed. `pnpm run lint:check` passed with six pre-existing
   unused-variable warnings in unchanged files. `git diff --check` passed.
-- Full Go/CI matrices and a production deployment were not run.
+- Those original local checks did not establish full CI or deployment. Current
+  delivery status comes from private Ops observations, not this historical list.
+  The combined access predicate has subsequent unit/UI and PostgreSQL relation
+  integration coverage; release acceptance binds the exact candidate SHA.

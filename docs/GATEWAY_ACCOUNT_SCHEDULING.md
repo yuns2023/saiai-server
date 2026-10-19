@@ -97,6 +97,9 @@ not automatically increase an administrator-configured limit beyond 16.
 
 Claude Code device capacity belongs to the SAIAI user. `users.claude_device_base_limit`
 defaults to 3 and administrators may set it to 1..100 in user management.
+This user capacity is separate from `claude_oauth_carpool_device_limit`, which
+limits the devices admitted to one upstream carpool account and remains an
+account-level setting. Changing user capacity does not enlarge an account pool.
 Every API key and group owned by the same user shares this capacity. An active
 device hash is counted once across groups; revoking it revokes all historical
 group registrations. Existing active devices remain usable after lowering capacity,
