@@ -226,7 +226,7 @@ describe('EditAccountModal', () => {
     })
   })
 
-  it('persists daily carpool automatic expansion and rotation', async () => {
+  it('persists periodic carpool free-slot maintenance', async () => {
     const account = {
       ...buildAccount(),
       type: 'oauth',
@@ -263,11 +263,13 @@ describe('EditAccountModal', () => {
 
     const autoExpandToggle = wrapper.get('[data-testid="carpool-auto-expand"]')
     expect((autoExpandToggle.element as HTMLInputElement).checked).toBe(false)
-    expect(wrapper.find('[data-testid="carpool-auto-maintenance-target"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="carpool-maintenance-interval"]').exists()).toBe(false)
     await autoExpandToggle.setValue(true)
-    const targetInput = wrapper.get('[data-testid="carpool-auto-maintenance-target"]')
+    const targetInput = wrapper.get('[data-testid="carpool-maintenance-interval"]')
     expect((targetInput.element as HTMLInputElement).value).toBe('24')
-    await targetInput.setValue(18)
+    await targetInput.setValue(6)
+    await wrapper.get('[data-testid="carpool-maintenance-free-slots"]').setValue(2)
+    expect(wrapper.get('[data-testid="carpool-next-maintenance"]').text()).toContain('保存后开始计时')
 
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()
@@ -277,7 +279,8 @@ describe('EditAccountModal', () => {
       claude_oauth_mode: 'carpool',
       claude_oauth_carpool_device_limit: 20,
       claude_oauth_carpool_auto_expand_enabled: true,
-      claude_oauth_carpool_auto_maintenance_target: 18
+      claude_oauth_carpool_maintenance_interval_hours: 6,
+      claude_oauth_carpool_maintenance_free_slots: 2
     })
   })
 

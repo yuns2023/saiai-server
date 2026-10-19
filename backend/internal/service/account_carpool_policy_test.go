@@ -95,30 +95,15 @@ func TestAccountIsClaudeOAuthCarpoolAutoExpandEnabled(t *testing.T) {
 	}
 }
 
-func TestAccountGetClaudeOAuthCarpoolAutoMaintenanceTarget(t *testing.T) {
-	account := &Account{
-		Platform: PlatformAnthropic,
-		Type:     AccountTypeOAuth,
-		Extra:    map[string]any{"claude_oauth_mode": ClaudeOAuthModeCarpool},
+func TestCarpoolMaintenancePolicyBounds(t *testing.T) {
+	a := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"claude_oauth_carpool_device_limit": 10}}
+	if a.GetCarpoolMaintenanceIntervalHours() != 24 || a.GetCarpoolMaintenanceFreeSlots() != 1 {
+		t.Fatal("unexpected defaults")
 	}
-
-	if got := account.GetClaudeOAuthCarpoolAutoMaintenanceTarget(); got != DefaultClaudeOAuthCarpoolAutoMaintenanceTarget {
-		t.Fatalf("default target = %d, want %d", got, DefaultClaudeOAuthCarpoolAutoMaintenanceTarget)
-	}
-
-	account.Extra["claude_oauth_carpool_auto_maintenance_target"] = 24
-	if got := account.GetClaudeOAuthCarpoolAutoMaintenanceTarget(); got != 24 {
-		t.Fatalf("configured target = %d, want 24", got)
-	}
-
-	account.Extra["claude_oauth_carpool_auto_maintenance_target"] = 99
-	if got := account.GetClaudeOAuthCarpoolAutoMaintenanceTarget(); got != maxClaudeOAuthCarpoolDeviceLimit {
-		t.Fatalf("clamped target = %d, want %d", got, maxClaudeOAuthCarpoolDeviceLimit)
-	}
-
-	account.Extra["claude_oauth_carpool_auto_maintenance_target"] = 0
-	if got := account.GetClaudeOAuthCarpoolAutoMaintenanceTarget(); got != DefaultClaudeOAuthCarpoolAutoMaintenanceTarget {
-		t.Fatalf("invalid target fallback = %d, want %d", got, DefaultClaudeOAuthCarpoolAutoMaintenanceTarget)
+	a.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 999
+	a.Extra["claude_oauth_carpool_maintenance_free_slots"] = 99
+	if a.GetCarpoolMaintenanceIntervalHours() != 720 || a.GetCarpoolMaintenanceFreeSlots() != 10 {
+		t.Fatal("unexpected bounds")
 	}
 }
 

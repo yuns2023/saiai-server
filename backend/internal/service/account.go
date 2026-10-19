@@ -1198,7 +1198,7 @@ const (
 	ClaudeOAuthModePinned                             = "pinned"
 	ClaudeOAuthModeSingleDevice                       = "single_device"
 	DefaultClaudeOAuthCarpoolDeviceLimit              = 5
-	DefaultClaudeOAuthCarpoolAutoMaintenanceTarget    = 16
+	DefaultClaudeOAuthSingleDeviceAdmissionTarget     = 16
 	DefaultClaudeOAuthSharedBucketCount               = 5
 	DefaultClaudeOAuthTokenDisableBeforeExpiryMinutes = 3
 	maxClaudeOAuthSharedBucketCount                   = 32
@@ -1393,40 +1393,14 @@ func (a *Account) IsClaudeOAuthCarpoolUnlimitedDevices() bool {
 	return ok && enabled
 }
 
-// IsClaudeOAuthCarpoolAutoExpandEnabled reports whether daily carpool
-// expansion/rotation is enabled for this bounded carpool account.
+// IsClaudeOAuthCarpoolAutoExpandEnabled uses the legacy wire flag for periodic
+// free-slot maintenance. It no longer enables capacity expansion.
 func (a *Account) IsClaudeOAuthCarpoolAutoExpandEnabled() bool {
 	if a == nil || !a.IsAnthropicOAuthOrSetupToken() || a.GetClaudeOAuthMode() != ClaudeOAuthModeCarpool || a.IsClaudeOAuthCarpoolUnlimitedDevices() || a.Extra == nil {
 		return false
 	}
 	enabled, ok := a.Extra["claude_oauth_carpool_auto_expand_enabled"].(bool)
 	return ok && enabled
-}
-
-// GetClaudeOAuthCarpoolAutoMaintenanceTarget returns the per-account limit at
-// which daily expansion stops and full-registry rotation begins. Missing or
-// malformed values retain the historical default of 16.
-func (a *Account) GetClaudeOAuthCarpoolAutoMaintenanceTarget() int {
-	if a == nil || !a.IsAnthropicOAuthOrSetupToken() {
-		return 0
-	}
-	target := a.getExtraInt("claude_oauth_carpool_auto_maintenance_target")
-	if target <= 0 {
-		target = DefaultClaudeOAuthCarpoolAutoMaintenanceTarget
-	}
-	if target > maxClaudeOAuthCarpoolDeviceLimit {
-		return maxClaudeOAuthCarpoolDeviceLimit
-	}
-	return target
-}
-
-// GetClaudeOAuthCarpoolLastMaintenanceDay returns the configured-timezone
-// calendar day last handled by the daily carpool maintenance worker.
-func (a *Account) GetClaudeOAuthCarpoolLastMaintenanceDay() string {
-	if a == nil {
-		return ""
-	}
-	return strings.TrimSpace(a.getExtraString("claude_oauth_carpool_last_maintenance_day"))
 }
 
 // GetClaudeOAuthSharedBucketCount returns the configured shared bucket count for Anthropic OAuth accounts.
@@ -1510,7 +1484,7 @@ func (a *Account) GetClaudeOAuthSingleDeviceAdmissionTarget() int {
 	}
 	target := a.getExtraInt("claude_oauth_single_device_admission_target")
 	if target <= 0 {
-		target = DefaultClaudeOAuthCarpoolAutoMaintenanceTarget
+		target = DefaultClaudeOAuthSingleDeviceAdmissionTarget
 	}
 	return min(target, maxClaudeOAuthCarpoolDeviceLimit)
 }

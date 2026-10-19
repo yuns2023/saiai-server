@@ -14,21 +14,14 @@ import (
 )
 
 const (
-	carpoolMaintenanceSchedule   = "0 0 * * *"
+	carpoolMaintenanceSchedule   = "* * * * *"
 	carpoolMaintenanceDayLayout  = "2006-01-02"
 	carpoolMaintenanceRunTimeout = 15 * time.Minute
-
-	carpoolDeviceLimitKey     = "claude_oauth_carpool_device_limit"
-	carpoolLastMaintenanceKey = "claude_oauth_carpool_last_maintenance_day"
 )
 
 var carpoolMaintenanceCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
-// CarpoolMaintenanceService expands bounded carpool capacity up to each
-// account's maintenance target and, once the configured limit is exactly that
-// target, frees one LRU device whenever the registry is full. A limit above
-// the target is administrator-controlled and is never changed or rotated by
-// this maintenance job.
+// CarpoolMaintenanceService checks per-account carpool schedules and retains daily single-device maintenance.
 type CarpoolMaintenanceService struct {
 	accountRepo AccountRepository
 	cache       IdentityCache
@@ -126,6 +119,9 @@ func (s *CarpoolMaintenanceService) runOnce(ctx context.Context, now time.Time) 
 	for i := range accounts {
 		account := &accounts[i]
 		if account.IsClaudeOAuthSingleDeviceAdmissionAutoExpandEnabled() {
+			if local := now.In(s.location()); local.Hour() != 0 || local.Minute() != 0 {
+				continue
+			}
 			stats.Eligible++
 			if err := s.maintainSingleDeviceAdmission(ctx, account, day, &stats); err != nil {
 				stats.Failed++
@@ -137,82 +133,10 @@ func (s *CarpoolMaintenanceService) runOnce(ctx context.Context, now time.Time) 
 			continue
 		}
 		stats.Eligible++
-		if account.GetClaudeOAuthCarpoolLastMaintenanceDay() == day {
-			stats.AlreadyProcessed++
-			continue
-		}
-
-		// Refresh immediately before mutation so an administrator's latest mode,
-		// switch, unlimited flag, and limit win over the daily snapshot.
-		current, getErr := s.accountRepo.GetByID(ctx, account.ID)
-		if getErr != nil {
+		if err := s.maintainCarpoolSlots(ctx, account, now, &stats); err != nil {
 			stats.Failed++
-			runErr = errors.Join(runErr, fmt.Errorf("account %d refresh: %w", account.ID, getErr))
-			continue
+			runErr = errors.Join(runErr, fmt.Errorf("account %d carpool slots: %w", account.ID, err))
 		}
-		if !current.IsClaudeOAuthCarpoolAutoExpandEnabled() {
-			continue
-		}
-		if current.GetClaudeOAuthCarpoolLastMaintenanceDay() == day {
-			stats.AlreadyProcessed++
-			continue
-		}
-
-		limit := current.GetClaudeOAuthCarpoolDeviceLimit()
-		target := current.GetClaudeOAuthCarpoolAutoMaintenanceTarget()
-		if limit < target {
-			nextLimit := min(limit+1, target)
-			if updateErr := s.accountRepo.UpdateExtra(ctx, current.ID, map[string]any{
-				carpoolDeviceLimitKey:     nextLimit,
-				carpoolLastMaintenanceKey: day,
-			}); updateErr != nil {
-				stats.Failed++
-				runErr = errors.Join(runErr, fmt.Errorf("account %d expand: %w", current.ID, updateErr))
-				continue
-			}
-			stats.Expanded++
-			continue
-		}
-		if limit > target {
-			// Administrators who explicitly allow more than the automatic target
-			// own that capacity and device lifecycle. Do not evict or change it.
-			if updateErr := s.accountRepo.UpdateExtra(ctx, current.ID, map[string]any{carpoolLastMaintenanceKey: day}); updateErr != nil {
-				stats.Failed++
-				runErr = errors.Join(runErr, fmt.Errorf("account %d record maintenance day: %w", current.ID, updateErr))
-				continue
-			}
-			stats.FreeCapacity++
-			continue
-		}
-
-		rotation, rotateErr := s.cache.RotateCarpoolDeviceForDay(ctx, current.ID, limit, day)
-		if rotateErr != nil {
-			stats.Failed++
-			runErr = errors.Join(runErr, fmt.Errorf("account %d rotate: %w", current.ID, rotateErr))
-			continue
-		}
-		if updateErr := s.accountRepo.UpdateExtra(ctx, current.ID, map[string]any{carpoolLastMaintenanceKey: day}); updateErr != nil {
-			stats.Failed++
-			runErr = errors.Join(runErr, fmt.Errorf("account %d record maintenance day: %w", current.ID, updateErr))
-			continue
-		}
-		if rotation == nil || !rotation.Applied {
-			stats.AlreadyProcessed++
-			continue
-		}
-		if rotation.Evicted == nil {
-			stats.FreeCapacity++
-			continue
-		}
-		stats.Rotated++
-		logger.LegacyPrintf(
-			"service.carpool_maintenance",
-			"[CarpoolMaintenance] evicted LRU device account_id=%d device_key=%s last_seen_at=%d limit=%d",
-			current.ID,
-			rotation.Evicted.DeviceKey,
-			rotation.Evicted.LastSeenAt,
-			limit,
-		)
 	}
 
 	return stats, runErr

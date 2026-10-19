@@ -100,7 +100,7 @@ func TestSingleDeviceAdmissionMaintenanceExpandsThenRotates(t *testing.T) {
 	require.Empty(t, cache.singleDeviceCalls)
 	stats, err = svc.runOnce(context.Background(), dayOne.Add(time.Hour))
 	require.NoError(t, err)
-	require.Equal(t, 1, stats.AlreadyProcessed)
+	require.Zero(t, stats.Eligible)
 	stats, err = svc.runOnce(context.Background(), dayOne.Add(24*time.Hour))
 	require.NoError(t, err)
 	require.Equal(t, 1, stats.Rotated)
@@ -135,95 +135,6 @@ func newAutoCarpoolAccount(id int64, limit int) *Account {
 	}
 }
 
-func TestCarpoolMaintenanceRunOnceExpandsToSixteenOnlyOncePerDay(t *testing.T) {
-	account := newAutoCarpoolAccount(1, 15)
-	repo := &carpoolMaintenanceAccountRepoStub{accounts: map[int64]*Account{1: account}}
-	cache := &carpoolMaintenanceCacheStub{}
-	svc := NewCarpoolMaintenanceService(repo, cache, &config.Config{Timezone: "Asia/Shanghai"})
-	now := time.Date(2026, time.September, 19, 16, 30, 0, 0, time.UTC)
-
-	stats, err := svc.runOnce(context.Background(), now)
-	require.NoError(t, err)
-	require.Equal(t, 1, stats.Expanded)
-	require.Equal(t, 16, account.GetClaudeOAuthCarpoolDeviceLimit())
-	require.Equal(t, "2026-09-20", account.GetClaudeOAuthCarpoolLastMaintenanceDay())
-	require.Empty(t, cache.calls)
-
-	stats, err = svc.runOnce(context.Background(), now.Add(time.Hour))
-	require.NoError(t, err)
-	require.Equal(t, 1, stats.AlreadyProcessed)
-	require.Equal(t, 1, len(repo.updates))
-}
-
-func TestCarpoolMaintenanceRunOnceUsesPerAccountTarget(t *testing.T) {
-	expanding := newAutoCarpoolAccount(6, 16)
-	expanding.Extra["claude_oauth_carpool_auto_maintenance_target"] = 20
-	rotating := newAutoCarpoolAccount(7, 20)
-	rotating.Extra["claude_oauth_carpool_auto_maintenance_target"] = 20
-	repo := &carpoolMaintenanceAccountRepoStub{accounts: map[int64]*Account{
-		6: expanding,
-		7: rotating,
-	}}
-	cache := &carpoolMaintenanceCacheStub{results: map[int64]*CarpoolDailyRotationResult{
-		7: {
-			Applied:       true,
-			RecordedCount: 20,
-			Evicted: &CarpoolDeviceRecord{
-				DeviceKey:  "oldest-device",
-				LastSeenAt: 10,
-			},
-		},
-	}}
-	svc := NewCarpoolMaintenanceService(repo, cache, &config.Config{Timezone: "UTC"})
-
-	stats, err := svc.runOnce(context.Background(), time.Date(2026, time.September, 19, 0, 0, 0, 0, time.UTC))
-	require.NoError(t, err)
-	require.Equal(t, 1, stats.Expanded)
-	require.Equal(t, 1, stats.Rotated)
-	require.Equal(t, 17, expanding.GetClaudeOAuthCarpoolDeviceLimit())
-	require.Equal(t, []carpoolMaintenanceRotationCall{{accountID: 7, limit: 20, day: "2026-09-19"}}, cache.calls)
-}
-
-func TestCarpoolMaintenanceRunOnceLeavesAdminLimitAboveTargetAlone(t *testing.T) {
-	account := newAutoCarpoolAccount(2, 20)
-	repo := &carpoolMaintenanceAccountRepoStub{accounts: map[int64]*Account{2: account}}
-	cache := &carpoolMaintenanceCacheStub{results: map[int64]*CarpoolDailyRotationResult{
-		2: {
-			Applied:       true,
-			RecordedCount: 20,
-			Evicted: &CarpoolDeviceRecord{
-				DeviceKey:  "device-hash",
-				LastSeenAt: 10,
-			},
-		},
-	}}
-	svc := NewCarpoolMaintenanceService(repo, cache, &config.Config{Timezone: "UTC"})
-
-	stats, err := svc.runOnce(context.Background(), time.Date(2026, time.September, 19, 0, 0, 0, 0, time.UTC))
-	require.NoError(t, err)
-	require.Equal(t, 1, stats.FreeCapacity)
-	require.Zero(t, stats.Rotated)
-	require.Equal(t, 20, account.GetClaudeOAuthCarpoolDeviceLimit())
-	require.Equal(t, "2026-09-19", account.GetClaudeOAuthCarpoolLastMaintenanceDay())
-	require.Empty(t, cache.calls)
-	require.NotContains(t, repo.updates[0].values, carpoolDeviceLimitKey)
-}
-
-func TestCarpoolMaintenanceRunOnceLeavesExistingFreeCapacityAlone(t *testing.T) {
-	account := newAutoCarpoolAccount(3, 16)
-	repo := &carpoolMaintenanceAccountRepoStub{accounts: map[int64]*Account{3: account}}
-	cache := &carpoolMaintenanceCacheStub{results: map[int64]*CarpoolDailyRotationResult{
-		3: {Applied: true, RecordedCount: 12},
-	}}
-	svc := NewCarpoolMaintenanceService(repo, cache, &config.Config{Timezone: "UTC"})
-
-	stats, err := svc.runOnce(context.Background(), time.Date(2026, time.September, 19, 0, 0, 0, 0, time.UTC))
-	require.NoError(t, err)
-	require.Equal(t, 1, stats.FreeCapacity)
-	require.Zero(t, stats.Rotated)
-	require.Equal(t, 16, account.GetClaudeOAuthCarpoolDeviceLimit())
-}
-
 func TestCarpoolMaintenanceRunOnceSkipsDisabledAndUnlimitedAccounts(t *testing.T) {
 	disabled := newAutoCarpoolAccount(4, 5)
 	disabled.Extra["claude_oauth_carpool_auto_expand_enabled"] = false
@@ -238,4 +149,65 @@ func TestCarpoolMaintenanceRunOnceSkipsDisabledAndUnlimitedAccounts(t *testing.T
 	require.Zero(t, stats.Eligible)
 	require.Empty(t, repo.updates)
 	require.Empty(t, cache.calls)
+}
+
+func (s *carpoolMaintenanceAccountRepoStub) AdvanceCarpoolMaintenance(ctx context.Context, id int64, expected, next string) error {
+	if s.accounts[id].GetCarpoolNextMaintenance() != expected {
+		return nil
+	}
+	return s.UpdateExtra(ctx, id, map[string]any{CarpoolNextMaintenanceKey: next})
+}
+func (s *carpoolMaintenanceCacheStub) FreeCarpoolSlots(_ context.Context, id int64, limit, free int, due string) (int, error) {
+	s.calls = append(s.calls, carpoolMaintenanceRotationCall{accountID: id, limit: limit, day: due})
+	return free, nil
+}
+func TestCarpoolSlotsPerAccountScheduleAndMissedPeriods(t *testing.T) {
+	now := time.Date(2026, 10, 19, 10, 30, 0, 0, time.UTC)
+	a, b := newAutoCarpoolAccount(1, 10), newAutoCarpoolAccount(2, 20)
+	a.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 6
+	a.Extra["claude_oauth_carpool_maintenance_free_slots"] = 2
+	b.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 12
+	repo := &carpoolMaintenanceAccountRepoStub{accounts: map[int64]*Account{1: a, 2: b}}
+	cache := &carpoolMaintenanceCacheStub{}
+	svc := NewCarpoolMaintenanceService(repo, cache, nil)
+	_, err := svc.runOnce(context.Background(), now)
+	require.NoError(t, err)
+	require.Empty(t, cache.calls)
+	require.Equal(t, "2026-10-19T16:30:00Z", a.GetCarpoolNextMaintenance())
+	_, err = svc.runOnce(context.Background(), now.Add(6*time.Hour-time.Second))
+	require.NoError(t, err)
+	require.Empty(t, cache.calls)
+	_, err = svc.runOnce(context.Background(), now.Add(6*time.Hour))
+	require.NoError(t, err)
+	require.Len(t, cache.calls, 1)
+	require.Equal(t, int64(1), cache.calls[0].accountID)
+	// Recreate the worker after several missed periods: one pass, no catch-up loop.
+	svc = NewCarpoolMaintenanceService(repo, cache, nil)
+	_, err = svc.runOnce(context.Background(), now.Add(49*time.Hour))
+	require.NoError(t, err)
+	require.Len(t, cache.calls, 3)
+	_, err = svc.runOnce(context.Background(), now.Add(49*time.Hour))
+	require.NoError(t, err)
+	require.Len(t, cache.calls, 3)
+	require.Equal(t, 10, a.GetClaudeOAuthCarpoolDeviceLimit())
+	require.Equal(t, 20, b.GetClaudeOAuthCarpoolDeviceLimit())
+}
+func TestNormalizeCarpoolSchedule(t *testing.T) {
+	now := time.Date(2026, 10, 19, 10, 30, 0, 0, time.UTC)
+	a := newAutoCarpoolAccount(1, 10)
+	a.Extra[CarpoolNextMaintenanceKey] = "2000-01-01T00:00:00Z"
+	NormalizeCarpoolMaintenance(a, nil, now)
+	require.Equal(t, "2026-10-20T10:30:00Z", a.GetCarpoolNextMaintenance())
+	previous := cloneCarpoolMaintenanceAccount(a)
+	a.Extra[CarpoolNextMaintenanceKey] = "forged"
+	a.Extra["claude_oauth_carpool_maintenance_free_slots"] = 2
+	NormalizeCarpoolMaintenance(a, &previous, now.Add(time.Hour))
+	require.Equal(t, previous.GetCarpoolNextMaintenance(), a.GetCarpoolNextMaintenance())
+	a.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 6
+	NormalizeCarpoolMaintenance(a, &previous, now.Add(time.Hour))
+	require.Equal(t, "2026-10-19T17:30:00Z", a.GetCarpoolNextMaintenance())
+	previous = cloneCarpoolMaintenanceAccount(a)
+	a.Extra["claude_oauth_carpool_unlimited_devices"] = true
+	NormalizeCarpoolMaintenance(a, &previous, now)
+	require.Empty(t, a.GetCarpoolNextMaintenance())
 }

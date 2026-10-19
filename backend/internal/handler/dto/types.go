@@ -246,7 +246,6 @@ type Account struct {
 	ClaudeOAuthCarpoolDeviceLimit              *int     `json:"claude_oauth_carpool_device_limit,omitempty"`
 	ClaudeOAuthCarpoolUnlimitedDevices         *bool    `json:"claude_oauth_carpool_unlimited_devices,omitempty"`
 	ClaudeOAuthCarpoolAutoExpand               *bool    `json:"claude_oauth_carpool_auto_expand_enabled,omitempty"`
-	ClaudeOAuthCarpoolAutoMaintenanceTarget    *int     `json:"claude_oauth_carpool_auto_maintenance_target,omitempty"`
 	ClaudeOAuthSharedBucketCount               *int     `json:"claude_oauth_shared_bucket_count,omitempty"`
 	ClaudeOAuth5hRateLimitPercent              *float64 `json:"claude_oauth_5h_rate_limit_threshold_percent,omitempty"`
 	ClaudeOAuthFixedDeviceID                   *string  `json:"claude_oauth_fixed_device_id,omitempty"`

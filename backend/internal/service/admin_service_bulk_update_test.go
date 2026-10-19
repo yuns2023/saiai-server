@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -214,4 +215,33 @@ func TestAdminService_CheckClaudeOAuthModeConsistency_AllowsMixedModes(t *testin
 		"account_uuid":      "11111111-2222-4333-8444-555555555555",
 	}, []int64{10})
 	require.NoError(t, err)
+}
+
+type carpoolBulkScheduleRepo struct {
+	accountRepoStubForBulkUpdate
+	changes map[int64]map[string]any
+}
+
+func (s *carpoolBulkScheduleRepo) UpdateExtra(_ context.Context, id int64, extra map[string]any) error {
+	s.changes[id] = extra
+	return nil
+}
+func TestAdminService_BulkUpdateAccountsCarpoolSchedules(t *testing.T) {
+	a, b := newAutoCarpoolAccount(1, 10), newAutoCarpoolAccount(2, 10)
+	a.Extra["claude_oauth_carpool_auto_expand_enabled"] = false
+	b.Extra["claude_oauth_carpool_auto_expand_enabled"] = false
+	a.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 6
+	b.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 12
+	repo := &carpoolBulkScheduleRepo{accountRepoStubForBulkUpdate: accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{a, b}}, changes: map[int64]map[string]any{}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	input := &BulkUpdateAccountsInput{AccountIDs: []int64{1, 2}, Extra: map[string]any{"claude_oauth_carpool_auto_expand_enabled": true, CarpoolNextMaintenanceKey: "forged"}}
+	result, err := svc.BulkUpdateAccounts(context.Background(), input)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Success)
+	require.NotContains(t, input.Extra, CarpoolNextMaintenanceKey)
+	first, err := time.Parse(time.RFC3339, repo.changes[1][CarpoolNextMaintenanceKey].(string))
+	require.NoError(t, err)
+	second, err := time.Parse(time.RFC3339, repo.changes[2][CarpoolNextMaintenanceKey].(string))
+	require.NoError(t, err)
+	require.InDelta(t, float64(6*time.Hour), float64(second.Sub(first)), float64(time.Second))
 }

@@ -946,3 +946,65 @@ func oldestCarpoolOverflowFields(items map[string]string, deleteCount int) ([]st
 	}
 	return fields, nil
 }
+
+// FreeCarpoolSlots atomically replenishes free slots and records the due-time
+// token. Retries and stale workers cannot evict again, even after new admissions.
+func (c *identityCache) FreeCarpoolSlots(ctx context.Context, accountID int64, limit, free int, due string) (int, error) {
+	if accountID <= 0 || limit < 1 || free < 1 || free > limit {
+		return 0, errors.New("invalid carpool slot policy")
+	}
+	if _, err := time.Parse(time.RFC3339, due); err != nil {
+		return 0, err
+	}
+	recorded, overflow := carpoolRecordedKey(accountID), carpoolOverflowKey(accountID)
+	maintenance := fmt.Sprintf("claude_carpool_slots_v2:%d", accountID)
+	for attempt := 0; attempt < carpoolDeviceWriteMaxRetries; attempt++ {
+		removed := 0
+		err := c.rdb.Watch(ctx, func(tx *redis.Tx) error {
+			last, err := tx.Get(ctx, maintenance).Result()
+			if err != nil && err != redis.Nil {
+				return err
+			}
+			if last >= due {
+				return nil
+			}
+			values, err := tx.HGetAll(ctx, recorded).Result()
+			if err != nil {
+				return err
+			}
+			count := max(0, len(values)-(limit-free))
+			type entry struct {
+				field  string
+				record service.CarpoolDeviceRecord
+			}
+			entries := make([]entry, 0, len(values))
+			for field, raw := range values {
+				var record service.CarpoolDeviceRecord
+				if err := json.Unmarshal([]byte(raw), &record); err != nil {
+					return err
+				}
+				entries = append(entries, entry{field, record})
+			}
+			sort.Slice(entries, func(i, j int) bool { return carpoolDeviceRecordOlder(&entries[i].record, &entries[j].record) })
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				for _, item := range entries[:count] {
+					pipe.HDel(ctx, recorded, item.field)
+					pipe.HDel(ctx, overflow, item.field)
+				}
+				pipe.Set(ctx, maintenance, due, 0)
+				return nil
+			})
+			if err == nil {
+				removed = count
+			}
+			return err
+		}, recorded, overflow, maintenance)
+		if err == nil {
+			return removed, nil
+		}
+		if !errors.Is(err, redis.TxFailedErr) {
+			return 0, err
+		}
+	}
+	return 0, redis.TxFailedErr
+}

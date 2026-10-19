@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -1902,6 +1903,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		}
 		account.LoadFactor = input.LoadFactor
 	}
+	NormalizeCarpoolMaintenance(account, nil, time.Now())
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
@@ -1924,6 +1926,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if IsRetiredPlatform(account.Platform) {
 		return nil, ErrPlatformRetired
 	}
+	previousCarpool := *account
+	previousCarpool.Extra = maps.Clone(account.Extra)
 	wasOveragesEnabled := account.IsOveragesEnabled()
 	if err := NormalizeAccountBlockedModelPatternsExtra(input.Extra); err != nil {
 		return nil, err
@@ -2067,6 +2071,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	NormalizeCarpoolMaintenance(account, &previousCarpool, time.Now())
 	if err := s.accountRepo.Update(ctx, account); err != nil {
 		return nil, err
 	}
@@ -2202,6 +2207,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		return nil, err
 	}
 
+	// Runtime schedule values are server-owned, including in bulk requests.
+	delete(input.Extra, CarpoolNextMaintenanceKey)
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
 		Credentials: input.Credentials,
@@ -2241,6 +2248,30 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		repoUpdates.Schedulable = input.Schedulable
 	}
 
+	// Policies may have different intervals. Normalize each merged policy
+	// independently instead of assigning one shared next-run timestamp.
+	if len(input.Extra) > 0 {
+		for _, previous := range accountsForPinnedDefaults {
+			if previous == nil {
+				continue
+			}
+			updated := *previous
+			updated.Extra = maps.Clone(previous.Extra)
+			if updated.Extra == nil {
+				updated.Extra = map[string]any{}
+			}
+			maps.Copy(updated.Extra, input.Extra)
+			NormalizeCarpoolMaintenance(&updated, previous, time.Now())
+			next := updated.GetCarpoolNextMaintenance()
+			if next != previous.GetCarpoolNextMaintenance() {
+				changes := maps.Clone(input.Extra)
+				changes[CarpoolNextMaintenanceKey] = next
+				if err := s.accountRepo.UpdateExtra(ctx, previous.ID, changes); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	// Run bulk update for column/jsonb fields first.
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err

@@ -2008,3 +2008,15 @@ func (r *accountRepository) loadCarpoolUsers(ctx context.Context, ids []int64) (
 	}
 	return out, nil
 }
+
+// AdvanceCarpoolMaintenance does not overwrite a concurrently edited schedule.
+func (r *accountRepository) AdvanceCarpoolMaintenance(ctx context.Context, id int64, expected, next string) error {
+	payload, err := json.Marshal(map[string]any{service.CarpoolNextMaintenanceKey: next})
+	if err != nil {
+		return err
+	}
+	_, err = clientFromContext(ctx, r.client).ExecContext(ctx,
+		`UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) || $1::jsonb
+   WHERE id = $2 AND deleted_at IS NULL AND COALESCE(extra->>'claude_oauth_carpool_next_maintenance_at', '') = $3`, string(payload), id, expected)
+	return err
+}
