@@ -54,6 +54,9 @@ type UsageStats struct {
 	TotalTokens              int64   `json:"total_tokens"`
 	TotalCost                float64 `json:"total_cost"`
 	TotalActualCost          float64 `json:"total_actual_cost"`
+	TotalBalanceCost         float64 `json:"total_balance_cost"`
+	TotalSubscriptionCost    float64 `json:"total_subscription_cost"`
+	TotalUnclassifiedCost    float64 `json:"total_unclassified_cost"`
 	AverageDurationMs        float64 `json:"average_duration_ms"`
 }
 
@@ -219,6 +222,9 @@ func (s *UsageService) GetStatsByUser(ctx context.Context, userID int64, startTi
 		TotalTokens:              stats.TotalTokens,
 		TotalCost:                stats.TotalCost,
 		TotalActualCost:          stats.TotalActualCost,
+		TotalBalanceCost:         stats.TotalBalanceCost,
+		TotalSubscriptionCost:    stats.TotalSubscriptionCost,
+		TotalUnclassifiedCost:    stats.TotalUnclassifiedCost,
 		AverageDurationMs:        stats.AverageDurationMs,
 	}, nil
 }
@@ -240,6 +246,9 @@ func (s *UsageService) GetStatsByAPIKey(ctx context.Context, apiKeyID int64, sta
 		TotalTokens:              stats.TotalTokens,
 		TotalCost:                stats.TotalCost,
 		TotalActualCost:          stats.TotalActualCost,
+		TotalBalanceCost:         stats.TotalBalanceCost,
+		TotalSubscriptionCost:    stats.TotalSubscriptionCost,
+		TotalUnclassifiedCost:    stats.TotalUnclassifiedCost,
 		AverageDurationMs:        stats.AverageDurationMs,
 	}, nil
 }
@@ -261,6 +270,9 @@ func (s *UsageService) GetStatsByAccount(ctx context.Context, accountID int64, s
 		TotalTokens:              stats.TotalTokens,
 		TotalCost:                stats.TotalCost,
 		TotalActualCost:          stats.TotalActualCost,
+		TotalBalanceCost:         stats.TotalBalanceCost,
+		TotalSubscriptionCost:    stats.TotalSubscriptionCost,
+		TotalUnclassifiedCost:    stats.TotalUnclassifiedCost,
 		AverageDurationMs:        stats.AverageDurationMs,
 	}, nil
 }
@@ -282,6 +294,9 @@ func (s *UsageService) GetStatsByModel(ctx context.Context, modelName string, st
 		TotalTokens:              stats.TotalTokens,
 		TotalCost:                stats.TotalCost,
 		TotalActualCost:          stats.TotalActualCost,
+		TotalBalanceCost:         stats.TotalBalanceCost,
+		TotalSubscriptionCost:    stats.TotalSubscriptionCost,
+		TotalUnclassifiedCost:    stats.TotalUnclassifiedCost,
 		AverageDurationMs:        stats.AverageDurationMs,
 	}, nil
 }

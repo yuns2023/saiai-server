@@ -215,3 +215,23 @@ for cache reads and writes. The total Token card still includes all four classes
 Regression coverage must mount the actual usage card and distinguish cache
 writes from reads, vary output independently, cover zero/missing inputs, and
 keep the formula hint aligned with both locales.
+
+### Usage billing source breakdown
+
+Usage statistics expose `total_balance_cost`, `total_subscription_cost`, and
+`total_unclassified_cost` alongside the unchanged `total_actual_cost` sum.
+These buckets aggregate persisted `usage_logs.billing_type` values 0, 1, and
+unknown values respectively, using the same filters and time boundaries in one
+query. A deleted subscription relation does not reclassify its historical usage.
+No database migration or billing calculation change is required.
+
+The usage pages show balance charges separately from subscription quota usage.
+Subscription usage is not the subscription purchase price, cash revenue, or the
+remaining quota in a reset window. Configured base cost uses recorded usage cost;
+it is not a payment total. Charts retaining the combined metric explicitly say
+that it includes subscription quota. CSV exports include the billing source.
+Missing breakdown fields render as unavailable, not zero, for older API servers.
+
+Before rollout, read-only validation should check historical billing type values
+and type/relation inconsistencies. Old rows defaulted to type 0 cannot be reliably
+reclassified from a missing subscription ID; do not automatically rewrite them.

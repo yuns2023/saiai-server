@@ -18,6 +18,9 @@ export interface AdminUsageStatsResponse {
   total_cache_tokens: number
   total_tokens: number
   total_cost: number
+  total_balance_cost?: number
+  total_subscription_cost?: number
+  total_unclassified_cost?: number
   total_actual_cost: number
   total_account_cost?: number
   average_duration_ms: number

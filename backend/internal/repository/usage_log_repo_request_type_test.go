@@ -330,12 +330,16 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) 
 			"total_cache_tokens",
 			"total_cost",
 			"total_actual_cost",
+			"total_balance_cost", "total_subscription_cost", "total_unclassified_cost",
 			"total_account_cost",
 			"avg_duration_ms",
-		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 1.2, 20.0))
+		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 0.3, 0.6, 0.1, 1.2, 20.0))
 
 	stats, err := repo.GetStatsWithFilters(context.Background(), filters)
 	require.NoError(t, err)
+	require.Equal(t, 0.3, stats.TotalBalanceCost)
+	require.Equal(t, 0.6, stats.TotalSubscriptionCost)
+	require.Equal(t, 0.1, stats.TotalUnclassifiedCost)
 	require.Equal(t, int64(1), stats.TotalRequests)
 	require.Equal(t, int64(1), stats.TotalCacheCreationTokens)
 	require.Equal(t, int64(3), stats.TotalCacheReadTokens)
@@ -362,12 +366,16 @@ func TestUsageLogRepositoryGetStatsWithFiltersSessionID(t *testing.T) {
 			"total_cache_tokens",
 			"total_cost",
 			"total_actual_cost",
+			"total_balance_cost", "total_subscription_cost", "total_unclassified_cost",
 			"total_account_cost",
 			"avg_duration_ms",
-		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 1.2, 20.0))
+		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 0.3, 0.6, 0.1, 1.2, 20.0))
 
 	stats, err := repo.GetStatsWithFilters(context.Background(), filters)
 	require.NoError(t, err)
+	require.Equal(t, 0.3, stats.TotalBalanceCost)
+	require.Equal(t, 0.6, stats.TotalSubscriptionCost)
+	require.Equal(t, 0.1, stats.TotalUnclassifiedCost)
 	require.Equal(t, int64(1), stats.TotalRequests)
 	require.Equal(t, int64(1), stats.TotalCacheCreationTokens)
 	require.Equal(t, int64(3), stats.TotalCacheReadTokens)
@@ -669,4 +677,28 @@ func TestUsageTrendQuarterHourPreservesFilters(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 	require.False(t, shouldUsePreaggregatedTrend("15m", 0, 0, 0, 0, "", nil, nil, nil, ""))
 	require.Equal(t, "TO_CHAR(created_at, 'YYYY-MM-DD')", trendDateExpression("'; DROP TABLE users; --", "created_at"))
+}
+
+// Classification uses the persisted type, not the nullable subscription relation.
+func TestUsageStatsBillingBreakdownFilters(t *testing.T) {
+	for _, billingType := range []int8{0, 1, 2} {
+		t.Run(fmt.Sprint(billingType), func(t *testing.T) {
+			db, mock := newSQLMock(t)
+			repo := &usageLogRepository{sql: db}
+			start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+			end := start.Add(time.Hour)
+			query := `(?s)SUM\(actual_cost\) FILTER \(WHERE billing_type = 0\).*SUM\(actual_cost\) FILTER \(WHERE billing_type = 1\).*SUM\(actual_cost\) FILTER \(WHERE billing_type IS NULL OR billing_type NOT IN \(0, 1\)\).*FROM usage_logs\s+WHERE user_id = \$1 AND api_key_id = \$2 AND billing_type = \$3 AND created_at >= \$4 AND created_at < \$5`
+			buckets := []float64{0, 0, 0}
+			buckets[billingType] = 2
+			mock.ExpectQuery(query).WithArgs(int64(7), int64(8), int16(billingType), start, end).
+				WillReturnRows(sqlmock.NewRows([]string{"requests", "input", "output", "write", "read", "cache", "base", "total", "balance", "subscription", "unclassified", "account", "duration"}).AddRow(1, 0, 0, 0, 0, 0, 3, 2, buckets[0], buckets[1], buckets[2], 3, 10))
+			stats, err := repo.GetStatsWithFilters(context.Background(), usagestats.UsageLogFilters{UserID: 7, APIKeyID: 8, BillingType: &billingType, StartTime: &start, EndTime: &end})
+			require.NoError(t, err)
+			require.Equal(t, buckets[0], stats.TotalBalanceCost)
+			require.Equal(t, buckets[1], stats.TotalSubscriptionCost)
+			require.Equal(t, buckets[2], stats.TotalUnclassifiedCost)
+			require.Equal(t, stats.TotalActualCost, stats.TotalBalanceCost+stats.TotalSubscriptionCost+stats.TotalUnclassifiedCost)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }

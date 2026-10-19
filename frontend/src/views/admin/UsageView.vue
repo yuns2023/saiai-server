@@ -137,6 +137,7 @@
 </template>
 
 <script setup lang="ts">
+import { usageBillingLabel } from '@/utils/usageBilling'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import InputRiskAlerts from '@/components/admin/usage/InputRiskAlerts.vue'
 const riskRefreshKey = ref(0)
@@ -562,7 +563,7 @@ const exportToCsv = async () => {
       t('admin.usage.cacheReadTokens'), t('admin.usage.cacheCreationTokens'),
       t('admin.usage.inputCost'), t('admin.usage.outputCost'),
       t('admin.usage.cacheReadCost'), t('admin.usage.cacheCreationCost'),
-      t('usage.rate'), t('usage.groupModelMultiplier'), t('usage.paygUserDiscount'), t('usage.legacyPaygAccountDiscount'), t('usage.accountMultiplier'), t('usage.original'), t('usage.userBilled'), t('usage.accountBilled'),
+      t('usage.rate'), t('usage.groupModelMultiplier'), t('usage.paygUserDiscount'), t('usage.legacyPaygAccountDiscount'), t('usage.accountMultiplier'), t('usage.original'), t('usage.billingSource'), t('usage.userBilled'), t('usage.accountBilled'),
       t('usage.firstToken'), t('usage.duration'),
       t('admin.usage.requestId'), t('usage.userAgent'), t('admin.usage.ipAddress')
     ]
@@ -580,7 +581,7 @@ const exportToCsv = async () => {
         log.input_cost?.toFixed(6) || '0.000000', log.output_cost?.toFixed(6) || '0.000000',
         log.cache_read_cost?.toFixed(6) || '0.000000', log.cache_creation_cost?.toFixed(6) || '0.000000',
         log.rate_multiplier?.toFixed(2) || '1.00', (log.model_rate_multiplier ?? 1).toFixed(4), (log.user_payg_discount_multiplier ?? 1).toFixed(4), (log.account_payg_discount_multiplier ?? 1).toFixed(4), (log.account_rate_multiplier ?? 1).toFixed(2),
-        log.total_cost?.toFixed(6) || '0.000000', log.actual_cost?.toFixed(6) || '0.000000',
+        log.total_cost?.toFixed(6) || '0.000000', t(usageBillingLabel(log.billing_type)), log.actual_cost?.toFixed(6) || '0.000000',
         (log.total_cost * (log.account_rate_multiplier ?? 1)).toFixed(6), log.first_token_ms ?? '', log.duration_ms,
         log.request_id || '', log.user_agent || '', log.ip_address || ''
       ])

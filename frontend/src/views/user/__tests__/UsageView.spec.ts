@@ -123,6 +123,8 @@ describe('user UsageView tooltip', () => {
         {
           request_id: 'req-user-1',
           actual_cost: 0.092883,
+        billing_type: 1,
+        subscription_id: null,
           total_cost: 0.092883,
           rate_multiplier: 1,
           model_rate_multiplier: 0.8,
@@ -183,6 +185,8 @@ describe('user UsageView tooltip', () => {
     setupState.tooltipData = {
       request_id: 'req-user-1',
       actual_cost: 0.092883,
+        billing_type: 1,
+        subscription_id: null,
       total_cost: 0.092883,
       rate_multiplier: 1,
       model_rate_multiplier: 0.8,
@@ -211,7 +215,7 @@ describe('user UsageView tooltip', () => {
     expect(text).toContain('Payg discount')
     expect(text).toContain('0.8000x')
     expect(text).toContain('0.7500x')
-    expect(text).toContain('Billed')
+    expect(text).toContain('usage.subscriptionUsage')
     expect(text).toContain('$0.092883')
     expect(text).toContain('$5.0000 / 1M tokens')
     expect(text).toContain('$30.0000 / 1M tokens')
@@ -224,6 +228,8 @@ describe('user UsageView tooltip', () => {
       {
         request_id: 'req-user-export',
         actual_cost: 0.092883,
+        billing_type: 1,
+        subscription_id: null,
         total_cost: 0.092883,
         rate_multiplier: 1,
         service_tier: 'priority',
@@ -292,6 +298,18 @@ describe('user UsageView tooltip', () => {
     await setupState.exportToCSV()
 
     expect(exportedBlob).not.toBeNull()
+    const csv = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = reject
+      reader.readAsText(exportedBlob!)
+    })
+    const [header, row] = csv.split('\n').map(line => line.split(','))
+    const sourceIndex = header.findIndex(cell => cell.includes('usage.billingSource'))
+    expect(sourceIndex).toBeGreaterThan(-1)
+    expect(row[sourceIndex]).toContain('usage.subscriptionUsage')
+    expect(row[sourceIndex + 1]).toContain('0.09288300')
+    expect(row.length).toBe(header.length)
     expect(clickSpy).toHaveBeenCalled()
     expect(showSuccess).toHaveBeenCalled()
 

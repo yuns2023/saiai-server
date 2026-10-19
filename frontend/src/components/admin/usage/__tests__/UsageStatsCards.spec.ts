@@ -17,7 +17,8 @@ const messages: Record<string, string> = {
   'usage.cacheRead': 'Cache read',
   'usage.inputCacheReadRate': 'Input cache read rate',
   'usage.inputCacheReadRateHint': 'Cache read ÷ (uncached input + cache write + cache read), excluding output tokens.',
-  'usage.userBilled': 'User billed',
+  'usage.balanceCharge': 'Balance charged',
+  'usage.subscriptionUsage': 'Subscription quota used',
   'usage.standardCost': 'Configured base',
   'usage.accountBilled': 'Account billed',
   'usage.avgDuration': 'Average duration',
@@ -47,6 +48,8 @@ describe('UsageStatsCards', () => {
           total_tokens: 200,
           total_cost: 10,
           total_actual_cost: 6,
+          total_balance_cost: 2,
+          total_subscription_cost: 4,
           total_account_cost: 8,
           average_duration_ms: 1250,
         },
@@ -60,8 +63,10 @@ describe('UsageStatsCards', () => {
     expect(wrapper.text()).toContain('Cache read: 25')
     expect(wrapper.text()).toContain('Input cache read rate 16.7%')
     expect(wrapper.get('[data-testid="input-cache-read-rate"]').attributes('title')).toBe(messages['usage.inputCacheReadRateHint'])
-    expect(wrapper.text()).toContain('User billed $6.0000')
-    expect(wrapper.text()).toContain('Configured base: $10.0000')
+    expect(wrapper.text()).toContain('Balance charged$2.0000')
+    expect(wrapper.text()).toContain('Subscription quota used$4.0000')
+    expect(wrapper.text()).not.toContain('$6.0000')
+    expect(wrapper.text()).toContain('Configured base:$10.0000')
     expect(wrapper.text()).toContain('Account billed: $8.0000')
   })
 

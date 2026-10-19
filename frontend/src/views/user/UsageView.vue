@@ -45,17 +45,8 @@
               <Icon name="dollar" size="md" class="text-green-600 dark:text-green-400" />
             </div>
             <div class="min-w-0 flex-1">
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                {{ t('usage.totalCost') }}
-              </p>
-              <p class="text-xl font-bold text-green-600 dark:text-green-400">
-                ${{ (usageStats?.total_actual_cost || 0).toFixed(4) }}
-              </p>
-              <p class="text-xs text-gray-500 dark:text-gray-400">
-                {{ t('usage.actualCost') }} /
-                <span class="line-through">${{ (usageStats?.total_cost || 0).toFixed(4) }}</span>
-                {{ t('usage.standardCost') }}
-              </p>
+              <UsageBillingSummary :stats="usageStats" />
+              <p class="text-xs text-gray-400" :title="t('usage.baseCostHint')">{{ t('usage.standardCost') }}: ${{ (usageStats?.total_cost || 0).toFixed(4) }}</p>
             </div>
           </div>
         </div>
@@ -274,7 +265,7 @@
           <template #cell-cost="{ row }">
             <div class="flex items-center gap-1.5 text-sm">
               <span class="font-medium text-green-600 dark:text-green-400">
-                ${{ row.actual_cost.toFixed(6) }}
+                {{ t(usageBillingLabel(row.billing_type)) }} ${{ row.actual_cost.toFixed(6) }}
               </span>
               <span v-if="row.model_rate_multiplier != null && row.model_rate_multiplier !== 1" class="rounded-sm bg-indigo-100 px-1 text-[10px] text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300" :title="t('usage.groupModelMultiplier')">{{ row.model_rate_multiplier }}x</span>
               <span v-if="row.user_payg_discount_multiplier != null && row.user_payg_discount_multiplier !== 1" class="rounded-sm bg-emerald-100 px-1 text-[10px] text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" :title="t('usage.paygUserDiscount')">{{ row.user_payg_discount_multiplier }}x</span>
@@ -520,7 +511,7 @@
             <span class="font-medium text-white">${{ tooltipData?.total_cost.toFixed(6) }}</span>
           </div>
           <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
-            <span class="text-gray-400">{{ t('usage.billed') }}</span>
+            <span class="text-gray-400">{{ t(usageBillingLabel(tooltipData?.billing_type)) }}</span>
             <span class="font-semibold text-green-400"
               >${{ tooltipData?.actual_cost.toFixed(6) }}</span
             >
@@ -536,6 +527,8 @@
 </template>
 
 <script setup lang="ts">
+import UsageBillingSummary from '@/components/common/UsageBillingSummary.vue'
+import { usageBillingLabel } from '@/utils/usageBilling'
 import TokenUsageSummary from '@/components/common/TokenUsageSummary.vue'
 import TokenCount from '@/components/common/TokenCount.vue'
 import { ref, computed, reactive, onMounted } from 'vue'
@@ -862,7 +855,8 @@ const exportToCSV = async () => {
       t('usage.groupModelMultiplier'),
       t('usage.paygUserDiscount'),
       t('usage.legacyPaygAccountDiscount'),
-      'Billed Cost',
+      t('usage.billingSource'),
+      t('usage.userBilled'),
       'Original Cost',
       'First Token (ms)',
       'Duration (ms)'
@@ -884,6 +878,7 @@ const exportToCSV = async () => {
         log.model_rate_multiplier ?? 1,
         log.user_payg_discount_multiplier ?? 1,
         log.account_payg_discount_multiplier ?? 1,
+        t(usageBillingLabel(log.billing_type)),
         log.actual_cost.toFixed(8),
         log.total_cost.toFixed(8),
         log.first_token_ms ?? '',

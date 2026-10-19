@@ -25,12 +25,9 @@
         <Icon name="dollar" size="md" />
       </div>
       <div class="min-w-0 flex-1">
-        <p class="text-xs font-medium text-gray-500">{{ t('usage.userBilled') }}</p>
-        <p class="text-xl font-bold text-green-600">
-          ${{ (stats?.total_actual_cost || 0).toFixed(4) }}
-        </p>
+        <UsageBillingSummary :stats="stats" />
         <p class="text-xs text-gray-400">
-          {{ t('usage.standardCost') }}:
+          <span :title="t('usage.baseCostHint')">{{ t('usage.standardCost') }}:</span>
           <span>${{ (stats?.total_cost || 0).toFixed(4) }}</span>
           <template v-if="stats?.total_account_cost != null">
             · {{ t('usage.accountBilled') }}:
@@ -49,6 +46,7 @@
 </template>
 
 <script setup lang="ts">
+import UsageBillingSummary from '@/components/common/UsageBillingSummary.vue'
 import TokenUsageSummary from '@/components/common/TokenUsageSummary.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'

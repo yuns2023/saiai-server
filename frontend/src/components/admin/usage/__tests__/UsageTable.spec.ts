@@ -167,6 +167,7 @@ describe('admin UsageTable tooltip', () => {
     const row = {
       request_id: 'req-admin-1',
       actual_cost: 0.092883,
+      billing_type: 0,
       total_cost: 0.092883,
       account_rate_multiplier: 1,
       rate_multiplier: 1,
@@ -219,7 +220,7 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('Payg discount')
     expect(text).toContain('0.8000x')
     expect(text).toContain('0.7500x')
-    expect(text).toContain('User billed')
+    expect(text).toContain('usage.balanceCharge')
     expect(text).toContain('Account billed')
     expect(text).toContain('$0.092883')
     expect(text).toContain('$5.0000 / 1M tokens')

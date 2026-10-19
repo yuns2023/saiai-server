@@ -1352,6 +1352,9 @@ export interface UsageStatsResponse {
   total_cache_read_tokens: number
   total_tokens: number
   total_cost: number // 标准计费
+  total_balance_cost?: number
+  total_subscription_cost?: number
+  total_unclassified_cost?: number
   total_actual_cost: number // 实际扣除
   average_duration_ms: number
   models?: Record<string, number>
