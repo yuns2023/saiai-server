@@ -641,7 +641,7 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 	}
 	if input.ClaudeDeviceBaseLimit != nil {
 		if *input.ClaudeDeviceBaseLimit < 1 || *input.ClaudeDeviceBaseLimit > 100 {
-			return nil, fmt.Errorf("Claude device base limit must be between 1 and 100")
+			return nil, fmt.Errorf("claude device base limit must be between 1 and 100")
 		}
 		user.ClaudeDeviceBaseLimit = *input.ClaudeDeviceBaseLimit
 	}
@@ -704,7 +704,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 
 	if input.ClaudeDeviceBaseLimit != nil {
 		if *input.ClaudeDeviceBaseLimit < 1 || *input.ClaudeDeviceBaseLimit > 100 {
-			return nil, fmt.Errorf("Claude device base limit must be between 1 and 100")
+			return nil, fmt.Errorf("claude device base limit must be between 1 and 100")
 		}
 		user.ClaudeDeviceBaseLimit = *input.ClaudeDeviceBaseLimit
 	}
