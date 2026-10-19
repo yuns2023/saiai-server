@@ -7,11 +7,6 @@
   >
     <form v-if="user" id="edit-user-form" @submit.prevent="handleUpdateUser" class="space-y-5">
       <div>
-        <label class="input-label">{{ t('admin.users.claudeDeviceBaseLimit') }}</label>
-        <input data-testid="user-device-capacity" v-model.number="form.claude_device_base_limit" type="number" min="1" max="100" required class="input" />
-        <p class="input-hint">{{ t('admin.users.claudeDeviceBaseLimitHint') }}</p>
-      </div>
-      <div>
         <label class="input-label">{{ t('admin.users.email') }}</label>
         <input v-model="form.email" type="email" class="input" />
       </div>
@@ -48,6 +43,11 @@
       <div>
         <label class="input-label">{{ t('admin.users.columns.concurrency') }}</label>
         <input v-model.number="form.concurrency" type="number" class="input" />
+      </div>
+      <div>
+        <label class="input-label">{{ t('admin.users.claudeDeviceBaseLimit') }}</label>
+        <input data-testid="user-device-capacity" v-model.number="form.claude_device_base_limit" type="number" min="1" max="100" required class="input" />
+        <p class="input-hint">{{ t('admin.users.claudeDeviceBaseLimitHint') }}</p>
       </div>
       <div>
         <label class="input-label">{{ t('admin.users.accessLevel') }}</label>

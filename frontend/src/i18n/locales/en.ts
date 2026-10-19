@@ -2220,7 +2220,8 @@ export default {
     // Accounts
     accounts: {
       carpoolUsersOnly: 'Specified users only',
-      carpoolUsersOnlyHint: 'Only listed users may use this account. An empty list denies everyone. When trusted-only is also enabled, both conditions must hold.',
+      carpoolUsersOnlyHint: 'Applies to users across all their API keys. Only listed users may use this account; an empty list denies everyone. When trusted-only is also enabled, both conditions must hold.',
+      carpoolSelectedUser: 'User #{id}',
       carpoolUserSearchFailed: 'User search failed. Please retry.',
       carpoolTrustedOnly: 'Trusted users only',
       carpoolTrustedOnlyHint: 'Only users marked trusted by an administrator may use this account. Scheduling and device limits still apply.',

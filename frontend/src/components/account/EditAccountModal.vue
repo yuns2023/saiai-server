@@ -1067,12 +1067,15 @@
               </button>
             </div>
             <div v-if="claudeOAuthMode === 'shared' || claudeOAuthMode === 'carpool'" class="space-y-3">
-              <div v-if="claudeOAuthMode === 'carpool'" class="space-y-2">
-                <label class="flex items-center gap-2">
-                  <input v-model="carpoolUsersOnly" type="checkbox" data-testid="carpool-users-only" />
-                  {{ t('admin.accounts.carpoolUsersOnly') }}
+              <div v-if="claudeOAuthMode === 'carpool'" class="rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600">
+                <label class="flex items-start gap-3">
+                  <input v-model="carpoolUsersOnly" data-testid="carpool-users-only" type="checkbox" class="mt-0.5 h-4 w-4 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" />
+                  <span>
+                    <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.accounts.carpoolUsersOnly') }}</span>
+                    <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.carpoolUsersOnlyHint') }}</span>
+                  </span>
                 </label>
-                <CarpoolUserSelector v-if="carpoolUsersOnly" v-model="carpoolUserIDs" />
+                <CarpoolUserSelector v-if="carpoolUsersOnly" v-model="carpoolUserIDs" class="mt-3 pl-7" />
               </div>
               <label v-if="claudeOAuthMode === 'carpool'" class="flex items-start gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600">
                 <input v-model="claudeOAuthCarpoolTrustedOnly" data-testid="carpool-trusted-only" type="checkbox" class="mt-0.5 h-4 w-4 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" />

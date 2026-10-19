@@ -2296,8 +2296,9 @@ export default {
 
     // Accounts Management
     accounts: {
-      carpoolUsersOnly: '仅指定用户',
-      carpoolUsersOnlyHint: '开启后仅列表中的用户可用；列表为空时全部拒绝。同时开启“仅可信用户”时，必须同时满足两个条件。',
+      carpoolUsersOnly: '仅限指定用户',
+      carpoolUsersOnlyHint: '按用户限制，该用户的所有 API Key 共用此规则。开启后仅名单内用户可用，空名单全部拒绝；同时开启“仅限可信用户”时须同时满足两个条件。',
+      carpoolSelectedUser: '用户 #{id}',
       carpoolUserSearchFailed: '用户搜索失败，请重试',
       carpoolTrustedOnly: '仅限可信用户',
       carpoolTrustedOnlyHint: '仅允许管理员标记为可信的用户使用此账号，其他调度与设备限制不变。',
