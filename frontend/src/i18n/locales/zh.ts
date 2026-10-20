@@ -2086,10 +2086,13 @@ export default {
           skipped: "无需审核",
           failed: "审核失败",
         },
+        chunkedPassed: "分段审核通过",
         reasons: {
           no_categories: "\u672a\u9009\u62e9\u68c0\u6d4b\u7c7b\u522b",
           policy_changed: "\u5ba1\u6838\u8fc7\u7a0b\u4e2d\u68c0\u6d4b\u89c4\u5219\u5df2\u53d8\u66f4",
           no_new_user_text: "没有新的用户文本",
+          input_too_large: "内容超过审核处理上限，未完成检测",
+          chunked_input: "已分段覆盖提交文本；跨段上下文仅覆盖相邻重叠部分，不代表全文联合判断",
           trusted_user: "可信用户免审核",
           group_disabled: "分组审核已关闭",
           processing_failed: "审核处理失败",

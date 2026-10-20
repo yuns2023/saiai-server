@@ -2001,10 +2001,13 @@ export default {
           skipped: "Skipped",
           failed: "Review failed",
         },
+        chunkedPassed: "Chunk checks passed",
         reasons: {
           no_categories: "No detection categories selected",
           policy_changed: "Detection rules changed during review",
           no_new_user_text: "No new user text",
+          input_too_large: "Input exceeds the moderation budget; detection incomplete",
+          chunked_input: "Submitted text was covered in chunks; cross-chunk context is limited to adjacent overlap, not full-document joint assessment",
           trusted_user: "Trusted user exempt from moderation",
           group_disabled: "Group moderation disabled",
           processing_failed: "Moderation processing failed",

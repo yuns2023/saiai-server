@@ -8,10 +8,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-type configuredModerationClient struct{ settings *service.JevSettingsService }
+type configuredModerationClient struct {
+	settings *service.JevSettingsService
+	cache    *moderationContentCache
+}
 
 func NewConfiguredInputModerationClient(settings *service.JevSettingsService) service.InputModerationClient {
-	return &configuredModerationClient{settings: settings}
+	return &configuredModerationClient{settings: settings, cache: newModerationContentCache()}
 }
 func (c *configuredModerationClient) Classify(ctx context.Context, text string) (*service.InputModerationClassification, error) {
 	settings, _, err := c.settings.Resolve(ctx)
@@ -20,7 +23,9 @@ func (c *configuredModerationClient) Classify(ctx context.Context, text string) 
 	}
 	cfg := &config.Config{}
 	cfg.Gateway.InputModeration = settings
-	return NewInputModerationClient(cfg).Classify(ctx, text)
+	return c.cache.classify(ctx, settings, text, nil, func() (*service.InputModerationClassification, error) {
+		return NewInputModerationClient(cfg).Classify(ctx, text)
+	})
 }
 
 func (c *configuredModerationClient) ClassifyWithPolicy(ctx context.Context, text string, policy *service.InputModerationPolicy) (*service.InputModerationClassification, error) {
@@ -33,5 +38,7 @@ func (c *configuredModerationClient) ClassifyWithPolicy(ctx context.Context, tex
 	}
 	cfg := &config.Config{}
 	cfg.Gateway.InputModeration = settings
-	return newJevModerationClient(cfg).ClassifyWithPolicy(ctx, text, policy)
+	return c.cache.classify(ctx, settings, text, policy, func() (*service.InputModerationClassification, error) {
+		return newJevModerationClient(cfg).ClassifyWithPolicy(ctx, text, policy)
+	})
 }

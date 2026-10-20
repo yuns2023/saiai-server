@@ -71,6 +71,12 @@ jobs:
       - name: Unit tests
         working-directory: backend
         run: make test-unit
+      - name: Moderation cache race tests
+        working-directory: backend
+        env:
+          CGO_ENABLED: '1'
+          GOMAXPROCS: '2'
+        run: go test -race -tags=unit -p 1 ./internal/service ./internal/repository -run 'TestModeration' -parallel=2 -count=1 -timeout=180s
       - name: WebSocket quota failover race tests
         working-directory: backend
         env:

@@ -1,7 +1,8 @@
 # Jev input moderation
 
 The default engine is `jev`, pinned to `jev-1.13.0` and the bundled four-category
-v2 rules. Only the latest real user text is submitted, without site identity.
+v2 rules. The latest user text and transmitted project instructions are submitted, without
+site identity; see INPUT_MODERATION.md for coverage, chunking and cache limits.
 There is no automatic detector fallback. The old `qwen` adapter requires an
 explicit engine setting and is retained as a legacy adapter. It is not a verified
 rollback procedure: scoreless Qwen results cannot enforce the numeric threshold.
