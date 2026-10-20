@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -136,19 +137,20 @@ type InputModerationTaskQueue interface {
 }
 
 // InputModerationTask contains the authenticated identity held by the Gateway.
-// Only Text is sent to the classifier sidecar.
+// Only text and instruction content are sent to the classifier sidecar.
 type InputModerationTask struct {
-	JobID      string    `json:"job_id"`
-	RequestID  string    `json:"request_id"`
-	UserID     int64     `json:"user_id"`
-	Username   string    `json:"username,omitempty"`
-	DeviceRef  string    `json:"device_ref,omitempty"`
-	APIKeyID   int64     `json:"api_key_id"`
-	GroupID    int64     `json:"group_id"`
-	Text       string    `json:"text"`
-	EnqueuedAt time.Time `json:"enqueued_at"`
-	Source     string    `json:"source"`
-	TurnNumber int       `json:"turn_number"`
+	JobID        string    `json:"job_id"`
+	RequestID    string    `json:"request_id"`
+	UserID       int64     `json:"user_id"`
+	Username     string    `json:"username,omitempty"`
+	DeviceRef    string    `json:"device_ref,omitempty"`
+	APIKeyID     int64     `json:"api_key_id"`
+	GroupID      int64     `json:"group_id"`
+	Text         string    `json:"text"`
+	Instructions []string  `json:"instructions,omitempty"`
+	EnqueuedAt   time.Time `json:"enqueued_at"`
+	Source       string    `json:"source"`
+	TurnNumber   int       `json:"turn_number"`
 }
 
 // InputModerationService uses an encrypted Redis Stream when a stable key is
@@ -225,8 +227,12 @@ func (s *InputModerationService) Submit(task InputModerationTask) bool {
 	if s == nil || s.pool == nil || s.pool.Stopped() || task.UserID <= 0 || task.APIKeyID <= 0 || task.GroupID <= 0 {
 		return false
 	}
-	text := strings.TrimSpace(truncateModerationText(task.Text, s.cfg.MaxInputChars))
-	if text == "" {
+	text := strings.TrimSpace(task.Text)
+	if _, _, err := moderationTaskChunks(task, s.cfg.MaxInputChars); err != nil {
+		_ = s.recordResult(task, InputModerationResult{Status: "failed", Reason: "input_too_large"})
+		return false
+	}
+	if text == "" && len(task.Instructions) == 0 {
 		_ = s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "no_new_user_text"})
 		return false
 	}
@@ -420,15 +426,13 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 	if len(submittedPolicy.AuditCategories) == 0 {
 		return s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "no_categories", DecisionSnapshot: moderationDecisionSnapshot(group)})
 	}
-	var result *InputModerationClassification
-	if group.InputModerationPolicy != nil {
-		policyClient, ok := s.client.(InputModerationPolicyClient)
-		if !ok {
-			return fmt.Errorf("moderation client does not support versioned policies")
-		}
-		result, err = policyClient.ClassifyWithPolicy(classifyCtx, task.Text, submittedPolicy)
-	} else {
-		result, err = s.client.Classify(classifyCtx, task.Text)
+	result, chunked, err := s.classifyInput(classifyCtx, task, group)
+	if errors.Is(err, errModerationTooLarge) {
+		return s.recordResult(task, InputModerationResult{Status: "failed", Reason: "input_too_large"})
+	}
+	coverageReason := ""
+	if chunked {
+		coverageReason = "chunked_input"
 	}
 	if err != nil {
 		slog.Warn("input_moderation_classify_failed",
@@ -511,10 +515,17 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		}
 	}
 	if result.Safety == InputModerationSafetySafe {
-		return s.recordResult(task, InputModerationResult{Status: "passed", DecisionSnapshot: moderationDecisionSnapshot(group), Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion})
+		return s.recordResult(task, InputModerationResult{Status: "passed", Reason: coverageReason, DecisionSnapshot: moderationDecisionSnapshot(group), Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion})
 	}
 
-	hash := sha256.Sum256([]byte(task.Text))
+	hashInput := []byte(task.Text)
+	if len(task.Instructions) > 0 {
+		hashInput, _ = json.Marshal(struct {
+			Text         string
+			Instructions []string
+		}{task.Text, task.Instructions})
+	}
+	hash := sha256.Sum256(hashInput)
 	event := &InputModerationEvent{
 		DecisionSnapshot: moderationDecisionSnapshot(group),
 		JobID:            task.JobID,
@@ -589,7 +600,7 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 			return err
 		}
 	}
-	if err := s.recordResult(task, InputModerationResult{Status: "flagged", DecisionSnapshot: moderationDecisionSnapshot(group), Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion}); err != nil {
+	if err := s.recordResult(task, InputModerationResult{Status: "flagged", Reason: coverageReason, DecisionSnapshot: moderationDecisionSnapshot(group), Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion}); err != nil {
 		return err
 	}
 	slog.Info("input_moderation_decision",

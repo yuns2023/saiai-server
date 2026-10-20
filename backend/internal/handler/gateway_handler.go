@@ -465,7 +465,7 @@ func (h *GatewayHandler) submitInputModeration(c *gin.Context, apiKey *service.A
 		!h.inputModerationService.EnabledForGroup(apiKey.Group) {
 		return
 	}
-	text := service.ExtractLatestRealUserText(parsed)
+	text, instructions := service.ExtractAnthropicModerationInput(parsed)
 	requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
 	deviceRef := ""
 	if parsed != nil {
@@ -474,13 +474,14 @@ func (h *GatewayHandler) submitInputModeration(c *gin.Context, apiKey *service.A
 		}
 	}
 	h.inputModerationService.Submit(service.InputModerationTask{
-		RequestID: strings.TrimSpace(requestID),
-		UserID:    apiKey.UserID,
-		Username:  strings.TrimSpace(apiKey.User.Username),
-		DeviceRef: deviceRef,
-		APIKeyID:  apiKey.ID,
-		GroupID:   *apiKey.GroupID,
-		Text:      text,
+		RequestID:    strings.TrimSpace(requestID),
+		UserID:       apiKey.UserID,
+		Username:     strings.TrimSpace(apiKey.User.Username),
+		DeviceRef:    deviceRef,
+		APIKeyID:     apiKey.ID,
+		GroupID:      *apiKey.GroupID,
+		Text:         text,
+		Instructions: instructions,
 	})
 }
 

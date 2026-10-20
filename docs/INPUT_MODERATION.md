@@ -1,7 +1,7 @@
 # Input moderation results and Jev settings
 
-Group moderation remains opt-in. Only the newest real user text is classified;
-requests containing only tool results do not reclassify earlier conversation text.
+Group moderation remains opt-in. The newest real user text and transmitted project instructions are classified.
+See the coverage and content-cache contract below.
 
 Usage history exposes `moderation_result` independently of risk events:
 
@@ -108,3 +108,53 @@ Admin-only API additions:
 Migration 105 adds partial indexes for flagged-result counts/history. It changes
 no moderation, penalty, billing or provider-request behavior. This feature does
 not automatically suspend users based on the displayed count.
+
+## Project instructions, long inputs and content cache
+
+Anthropic extraction includes system text, system/developer messages, historical
+user messages identifying CLAUDE.md, AGENTS.md or user_instructions, and structured
+Read/read_file results correlated to those filenames. Recognized project
+instruction envelopes in the latest user message are separated for stable reuse;
+malformed or unrecognized envelopes remain in the assessed user text. Responses HTTP and WebSocket
+extraction includes top-level instructions, system/developer input messages and
+historical user instruction messages with those markers. Ordinary assistant
+history, unrelated tool output and images remain excluded. The Gateway cannot
+inspect local files or recover instructions absent from the current request
+(including server-held previous_response_id context). Arbitrary shell file reads
+are not reliably identified. A filename is never a trust or exemption signal.
+
+Stable instruction text is classified separately and also joined with the new
+user text for context assessment. A safe cached document cannot exempt a new
+question. Content changes invalidate reuse. Small combined inputs use one joint
+assessment; long inputs use overlapping Unicode-character chunks (default
+32,768 characters, up to 512 characters overlap). Each category retains the maximum
+score across all required checks, then applies the current group threshold once.
+Cross-chunk semantics are limited to the overlap, not full-document equivalence.
+Passed chunked results therefore display **Chunk checks passed**, with details
+explaining that limitation. No text is silently truncated. The maximum is 16
+unique checks per job, including standalone instruction checks; larger inputs
+record failed/input_too_large without a detector call. Timeouts or any incomplete
+check fail the job rather than representing partial work as passed. All checks
+share the existing job timeout and execute serially. Moderation stays asynchronous.
+
+Jev scores have a bounded process-local cache: 24-hour TTL, 4,096 entries with
+least-recently-used eviction, and coalescing of concurrent identical checks.
+Replicas do not share entries and restart clears them. Cache keys use a random
+process HMAC over user/group scope, exact detector text, endpoint and credential,
+model version, rule version, and the actual selected category rules. Prompts and
+credentials are not retained in entries or logged. Existing encrypted queue
+storage now also carries instruction text. Only validated successful scores are
+cached; failures and missing categories are never cached. Settings are resolved
+before every lookup, so configuration/key changes and resolution failures cannot
+reuse stale configuration. Legacy Qwen results are not cached.
+
+Thresholds and penalties are deliberately not cached: current policy and trust
+are still checked before/after classification, and current thresholds are applied
+to raw scores. A cache hit still produces a request-specific result and follows
+existing incident deduplication. Safe results never create strikes. This feature
+adds no database migration and no model-name exemptions.
+
+Deployment must account for queued tasks containing the new instructions field:
+older workers ignore it. Do not mix old/new consumers when claiming this coverage;
+a rollback does not retain the expanded coverage contract. Extraction/cache tests
+are structural validation, not a real-provider accuracy evaluation.

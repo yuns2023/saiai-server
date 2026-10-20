@@ -1247,15 +1247,16 @@ func (h *OpenAIGatewayHandler) submitOpenAIInputModeration(
 		!h.inputModerationService.EnabledForGroup(apiKey.Group) {
 		return
 	}
-	text := service.ExtractLatestOpenAIUserText(body)
+	text, instructions := service.ExtractOpenAIModerationInput(body)
 	h.inputModerationService.Submit(service.InputModerationTask{
-		RequestID:  strings.TrimSpace(requestID),
-		UserID:     apiKey.UserID,
-		APIKeyID:   apiKey.ID,
-		GroupID:    *apiKey.GroupID,
-		Text:       text,
-		Source:     source,
-		TurnNumber: turnNumber,
+		RequestID:    strings.TrimSpace(requestID),
+		UserID:       apiKey.UserID,
+		APIKeyID:     apiKey.ID,
+		GroupID:      *apiKey.GroupID,
+		Text:         text,
+		Instructions: instructions,
+		Source:       source,
+		TurnNumber:   turnNumber,
 	})
 }
 

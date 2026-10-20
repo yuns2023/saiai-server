@@ -6,12 +6,14 @@ import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 import type { AdminUsageLog } from '@/types'
 
-function render(scores?: Record<string, number>, status = 'passed') {
+function render(scores?: Record<string, number>, status = 'passed', reason?: string) {
   // The test runner uses the runtime-only i18n build: provide compiled messages.
   function messages(source: typeof zh | typeof en) {
     const moderation = source.admin.groups.inputModeration
     return { admin: { groups: { inputModeration: {
       highestRisk: () => moderation.highestRisk,
+      chunkedPassed: () => moderation.chunkedPassed,
+      reasons: { chunked_input: () => moderation.reasons.chunked_input, input_too_large: () => moderation.reasons.input_too_large },
       viewDetails: () => moderation.viewDetails,
       resultThreshold: () => moderation.resultThreshold,
       statuses: { passed: () => moderation.statuses.passed, flagged: () => moderation.statuses.flagged }
@@ -19,7 +21,7 @@ function render(scores?: Record<string, number>, status = 'passed') {
   }
   const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh: messages(zh), en: messages(en) } })
   const wrapper = mount(ModerationResultCell, {
-    props: { row: { moderation_result: { status, scores, min_confidence: 90 } } as AdminUsageLog },
+    props: { row: { moderation_result: { status, reason, scores, min_confidence: 90 } } as AdminUsageLog },
     global: { plugins: [i18n], stubs: { BaseDialog: { props: ['show'], template: '<section v-if="show"><slot /></section>' } } }
   })
   return { wrapper, i18n }
@@ -61,4 +63,16 @@ describe('moderation summary and localized details', () => {
     expect(wrapper.find('[data-testid=highest-risk]').exists()).toBe(false)
     wrapper.unmount()
   })
+})
+
+it('distinguishes chunk coverage from whole-context approval in both languages', async () => {
+ const { wrapper, i18n } = render({ PII: .1 }, 'passed', 'chunked_input')
+ expect(wrapper.text()).toContain('分段审核通过')
+ await wrapper.get('button').trigger('click')
+ expect(wrapper.text()).toContain('不代表全文联合判断')
+ i18n.global.locale.value = 'en'
+ await wrapper.vm.$nextTick()
+ expect(wrapper.text()).toContain('Chunk checks passed')
+ expect(wrapper.text()).toContain('not full-document joint assessment')
+ wrapper.unmount()
 })
