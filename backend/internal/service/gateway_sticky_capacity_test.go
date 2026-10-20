@@ -161,3 +161,26 @@ func TestClaudeStickyLegacySelectionUsesOwnerWithoutPendingBinding(t *testing.T)
 	require.NotNil(t, result.WaitPlan)
 	require.Equal(t, 3, result.WaitPlan.MaxWaiting)
 }
+
+func TestClaudeStickyOAuthCapacityAcrossModes(t *testing.T) {
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
+		for _, mode := range []string{ClaudeOAuthModeCarpool, ClaudeOAuthModeShared, ClaudeOAuthModeSingleDevice} {
+			for _, batch := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/batch=%v", accountType, mode, batch), func(t *testing.T) {
+					svc, _, _, group := capacityTestService(t, batch, false)
+					repo := svc.accountRepo.(*mockAccountRepoForPlatform)
+					for i := range repo.accounts {
+						repo.accounts[i].Type = accountType
+						repo.accounts[i].Extra = map[string]any{"claude_oauth_mode": mode}
+					}
+					ctx := WithClaudeOAuthGroupMode(SetClaudeCodeClient(context.Background(), true), *group, mode)
+					result, err := svc.SelectAccountWithLoadAwareness(ctx, group, "session", "claude-test", nil, "")
+					require.NoError(t, err)
+					require.Equal(t, int64(1), result.Account.ID)
+					require.NotNil(t, result.WaitPlan)
+					require.Equal(t, 3, result.WaitPlan.MaxWaiting)
+				})
+			}
+		}
+	}
+}
