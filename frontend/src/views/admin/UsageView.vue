@@ -352,7 +352,7 @@ const applyRouteQueryFilters = () => {
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
 }
 
-const onDateRangeChange = (range: DateTimeRange) => {
+const setDateRange = (range: DateTimeRange) => {
   startDate.value = localDateTime(new Date(range.startTime)).slice(0, 10)
   endDate.value = localDateTime(new Date(range.endTime)).slice(0, 10)
   activeRangePreset.value = range.preset
@@ -365,6 +365,9 @@ const onDateRangeChange = (range: DateTimeRange) => {
   rollingStartTime.value = range.startTime
   rollingEndTime.value = range.endTime
   filters.value = { ...filters.value, ...activeRangeParams() }
+}
+const onDateRangeChange = (range: DateTimeRange) => {
+  setDateRange(range)
   granularity.value = new Date(range.endTime).getTime() - new Date(range.startTime).getTime() <= 86400000 ? 'hour' : 'day'
   applyFilters()
 }
@@ -509,9 +512,9 @@ const applyFilters = () => {
 }
 const refreshData = () => {
   riskRefreshKey.value++
-  if (activeRangePreset.value === 'last24Hours') {
-    refreshRollingRange()
-    filters.value = { ...filters.value, ...activeRangeParams() }
+  // Re-evaluate presets ending at "now"; historical and custom windows stay fixed.
+  if (activeRangePreset.value && ['today', 'last24Hours', '7days', '14days', '30days', 'thisMonth'].includes(activeRangePreset.value)) {
+    setDateRange(presetTimeRange(activeRangePreset.value))
   }
   resetModelStatsCache()
   loadLogs()

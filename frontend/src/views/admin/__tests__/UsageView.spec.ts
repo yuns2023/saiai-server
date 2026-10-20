@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
+import { presetTimeRange } from '@/utils/dateTimeRange'
 
 const { list, getStats, getSnapshotV2, getModelStats, getById, routeQuery } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
@@ -155,6 +156,43 @@ describe('admin UsageView distribution metric toggles', () => {
   afterEach(() => {
     vi.useRealTimers()
   })
+
+  it.each(['today', 'last24Hours', '7days', '14days', '30days', 'thisMonth', 'yesterday', 'lastMonth', null])(
+    'refreshes %s with the correct window across midnight and month boundaries',
+    async (preset) => {
+      vi.setSystemTime(new Date(2026, 9, 31, 23, 50))
+      const wrapper = mount(UsageView, { global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: true, UsageTable: true,
+        InputRiskAlerts: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, Pagination: true, Select: true, DateTimeRangePicker: true,
+        Icon: true, ModelDistributionChart: true, GroupDistributionChart: true,
+        EndpointDistributionChart: true, TokenUsageTrend: true, CacheUsageTrend: true,
+      } } })
+      await flushPromises()
+      const range = preset === null
+        ? { startTime: new Date(2026, 9, 31, 10).toISOString(), endTime: new Date(2026, 9, 31, 11).toISOString(), preset }
+        : presetTimeRange(preset)
+      wrapper.findComponent({ name: 'DateTimeRangePicker' }).vm.$emit('change', range)
+      await flushPromises()
+      const before = { ...list.mock.lastCall![0] }
+      const moving = preset !== null && !['yesterday', 'lastMonth'].includes(preset)
+      vi.setSystemTime(new Date(2026, 10, 1, 0, 10))
+      wrapper.findComponent({ name: 'UsageFilters' }).vm.$emit('refresh')
+      await flushPromises()
+      const updated = moving ? presetTimeRange(preset!) : null
+      const expected = updated
+        ? { start_time: updated.startTime, end_time: updated.endTime, start_date: undefined, end_date: undefined }
+        : { start_time: before.start_time, end_time: before.end_time, start_date: before.start_date, end_date: before.end_date }
+      for (const request of [list, getStats, getModelStats, getSnapshotV2]) {
+        expect(request.mock.lastCall![0]).toMatchObject(expected)
+      }
+      if (updated) {
+        expect(wrapper.findComponent({ name: 'DateTimeRangePicker' }).props()).toMatchObject(updated)
+        expect(new Date(expected.end_time!).getTime()).toBeGreaterThan(new Date(range.endTime).getTime())
+      }
+      wrapper.unmount()
+    },
+  )
 
   it('keeps the exact user alert window and filter when refreshing', async () => {
     Object.assign(routeQuery, { user_id: '42', moderation_flagged: 'true', start_time: '2026-09-18T12:00:00Z', end_time: '2026-10-18T12:00:00Z' })
