@@ -99,3 +99,9 @@ func TestModerationOversizeRecordsFailureWithoutInference(t *testing.T) {
 	require.Equal(t, "failed", repo.results[0].Status)
 	require.Equal(t, "input_too_large", repo.results[0].Reason)
 }
+
+func TestModerationStableSystemBlocks(t *testing.T) {
+	parsed := &ParsedRequest{System: []any{map[string]any{"type": "text", "text": "variable request metadata"}, map[string]any{"type": "text", "text": "stable project instructions"}}}
+	_, parts := ExtractAnthropicModerationInput(parsed)
+	require.Equal(t, []string{"variable request metadata", "stable project instructions"}, parts)
+}

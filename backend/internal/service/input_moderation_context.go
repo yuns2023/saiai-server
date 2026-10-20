@@ -166,7 +166,7 @@ func ExtractAnthropicModerationInput(parsed *ParsedRequest) (string, []string) {
 		return "", nil
 	}
 	var parts []string
-	parts = appendUniqueModerationText(parts, moderationTextContent(parsed.System))
+	parts = appendModerationInstructionBlocks(parts, parsed.System)
 	for i, raw := range parsed.Messages {
 		message, ok := raw.(map[string]any)
 		if !ok {
@@ -188,7 +188,7 @@ func ExtractOpenAIModerationInput(body []byte) (string, []string) {
 		return "", nil
 	}
 	var parts []string
-	parts = appendUniqueModerationText(parts, moderationTextContent(request["instructions"]))
+	parts = appendModerationInstructionBlocks(parts, request["instructions"])
 	if input, ok := request["input"].([]any); ok {
 		for i, raw := range input {
 			item, ok := raw.(map[string]any)
@@ -281,4 +281,16 @@ func separateProjectInstructions(text string, parts []string) (string, []string)
 		return "\n"
 	})
 	return strings.TrimSpace(remaining), parts
+}
+
+// Keep stable blocks independent of changing neighboring protocol text so a
+// change to one block does not invalidate every project's standalone scores.
+func appendModerationInstructionBlocks(parts []string, content any) []string {
+	if blocks, ok := content.([]any); ok {
+		for _, block := range blocks {
+			parts = appendUniqueModerationText(parts, moderationTextContent([]any{block}))
+		}
+		return parts
+	}
+	return appendUniqueModerationText(parts, moderationTextContent(content))
 }
