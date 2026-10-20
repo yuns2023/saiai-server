@@ -105,3 +105,13 @@ func TestModerationStableSystemBlocks(t *testing.T) {
 	_, parts := ExtractAnthropicModerationInput(parsed)
 	require.Equal(t, []string{"variable request metadata", "stable project instructions"}, parts)
 }
+
+func TestModerationProjectReminderAlongsideToolResult(t *testing.T) {
+	parsed := &ParsedRequest{Messages: []any{map[string]any{"role": "user", "content": []any{
+		map[string]any{"type": "text", "text": "<system-reminder>CLAUDE.md: project instructions</system-reminder>"},
+		map[string]any{"type": "tool_result", "tool_use_id": "unrelated", "content": "ordinary output"},
+	}}}}
+	text, parts := ExtractAnthropicModerationInput(parsed)
+	require.Empty(t, text)
+	require.Equal(t, []string{"<system-reminder>CLAUDE.md: project instructions</system-reminder>"}, parts)
+}

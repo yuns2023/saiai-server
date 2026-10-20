@@ -174,7 +174,7 @@ func ExtractAnthropicModerationInput(parsed *ParsedRequest) (string, []string) {
 		}
 		role, _ := message["role"].(string)
 		text := moderationTextContent(message["content"])
-		if role == "system" || role == "developer" || (role == "user" && projectInstructionText(text) && i < len(parsed.Messages)-1) {
+		if role == "system" || role == "developer" || (role == "user" && projectInstructionText(text) && (i < len(parsed.Messages)-1 || !IsRealUserMessage(parsed))) {
 			parts = appendUniqueModerationText(parts, text)
 		}
 	}
