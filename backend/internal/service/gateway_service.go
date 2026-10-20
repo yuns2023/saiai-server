@@ -568,6 +568,11 @@ func (s *GatewayService) getPendingStickySessionAccountID(ctx context.Context, g
 }
 
 func (s *GatewayService) getStickySessionAccountIDForSelection(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
+	if stickyOwnershipSelection(ctx) {
+		if owner := prefetchedStickyAccountIDFromContext(ctx, groupID); owner > 0 {
+			return owner, nil
+		}
+	}
 	accountID, _, err := s.getStickySessionAccountIDWithSource(ctx, groupID, sessionHash)
 	return accountID, err
 }
@@ -627,10 +632,11 @@ type AccountWaitPlan struct {
 }
 
 type AccountSelectionResult struct {
-	Account     *Account
-	Acquired    bool
-	ReleaseFunc func()
-	WaitPlan    *AccountWaitPlan // nil means no wait allowed
+	Account         *Account
+	Acquired        bool
+	ReleaseFunc     func()
+	WaitPlan        *AccountWaitPlan // nil means no wait allowed
+	StickyOwnership string           // Redis generation reserved by this selection
 }
 
 // ClaudeUsage 表示Claude API返回的usage信息
@@ -1141,6 +1147,14 @@ func (s *GatewayService) BindStickySessionForAccount(ctx context.Context, groupI
 	if sessionHash == "" || account == nil || account.ID <= 0 || s.cache == nil {
 		return nil
 	}
+	if token := stickyOwnershipFromContext(ctx); token != "" {
+		cache, ok := s.cache.(stickyOwnershipCache)
+		if !ok {
+			return errors.New("sticky ownership cache unavailable")
+		}
+		_, err := cache.ConfirmStickyOwnership(ctx, derefGroupID(groupID), sessionHash, token, account.ID, s.stickySessionTTLForAccount(ctx, account))
+		return err
+	}
 	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, account.ID, s.stickySessionTTLForAccount(ctx, account))
 }
 
@@ -1152,6 +1166,12 @@ func (s *GatewayService) ClearStickySession(ctx context.Context, groupID *int64,
 }
 
 func (s *GatewayService) ClearStickySessionForAccount(ctx context.Context, groupID *int64, sessionHash string, account *Account) error {
+	// A side request failure must not erase the session owner. Exclusion and
+	// account health drive an atomic migration on the next selection.
+	if stickyOwnershipFromContext(ctx) != "" {
+		return nil
+	}
+
 	if sessionHash == "" || account == nil || account.ID <= 0 || s.cache == nil {
 		return nil
 	}
@@ -1186,6 +1206,9 @@ func (s *GatewayService) refreshStickySessionTTLForAccount(ctx context.Context, 
 }
 
 func (s *GatewayService) setStickySessionAccount(ctx context.Context, groupID *int64, sessionHash string, accountID, previousAccountID int64) {
+	if stickyOwnershipSelection(ctx) {
+		return
+	}
 	if sessionHash == "" || accountID <= 0 || s.cache == nil {
 		return
 	}
@@ -2087,7 +2110,7 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 }
 
 // SelectAccountWithLoadAwareness selects account with load-awareness and wait plan.
-func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string) (*AccountSelectionResult, error) {
+func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string) (*AccountSelectionResult, error) {
 	ctx = withCarpoolAffinity(ctx, metadataUserID)
 	var unlock func()
 	ctx, unlock = s.coordinateStickySelection(ctx, groupID, sessionHash)
@@ -2217,7 +2240,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 			if stickyAccountID > 0 && stickyAccountID == account.ID && s.concurrencyService != nil {
 				waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, account.ID)
-				if waitingCount < cfg.StickySessionMaxWaiting {
+				if s.accountUsesSuccessOnlyStickyForAccount(ctx, account) || waitingCount < cfg.StickySessionMaxWaiting {
 					return &AccountSelectionResult{
 						Account: account,
 						WaitPlan: &AccountWaitPlan{
@@ -2395,7 +2418,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							}
 
 							waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, stickyAccountID)
-							if waitingCount < cfg.StickySessionMaxWaiting {
+							if s.accountUsesSuccessOnlyStickyForAccount(ctx, stickyAccount) || waitingCount < cfg.StickySessionMaxWaiting {
 								// 会话数量限制检查（等待计划也需要占用会话配额）
 								if !s.checkAndRegisterSession(ctx, stickyAccount, sessionKeyForAccount(stickyAccount)) {
 									// 会话限制已满，继续到负载感知选择
@@ -2412,10 +2435,12 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 									}, nil
 								}
 							}
-							// 粘性账号槽位满且等待队列已满，继续使用负载感知选择
+							// Non-Claude traffic retains soft affinity when the waiting queue is full.
 						}
 					} else {
-						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+						if !stickyOwnershipSelection(ctx) {
+							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+						}
 					}
 				}
 			}
@@ -2538,7 +2563,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				// Check if the account needs sticky session cleanup
 				clearSticky := shouldClearStickySession(account, requestedModel)
 				if clearSticky {
-					_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+					if !stickyOwnershipSelection(ctx) {
+						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+					}
 				}
 				if !clearSticky && s.isAccountInGroup(account, groupID) &&
 					s.isAccountAllowedForPlatform(account, platform, useMixed) &&
@@ -2565,7 +2592,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					}
 
 					waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
-					if waitingCount < cfg.StickySessionMaxWaiting {
+					if s.accountUsesSuccessOnlyStickyForAccount(ctx, account) || waitingCount < cfg.StickySessionMaxWaiting {
 						// 会话数量限制检查（等待计划也需要占用会话配额）
 						// Session count limit check (wait plan also requires session quota)
 						if !s.checkAndRegisterSession(ctx, account, sessionKeyForAccount(account)) {
@@ -3982,7 +4009,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 					if err == nil {
 						clearSticky := shouldClearStickySession(account, requestedModel)
 						if clearSticky {
-							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+							if !stickyOwnershipSelection(ctx) {
+								_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+							}
 						}
 						if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 							if s.debugModelRoutingEnabled() {
@@ -4072,7 +4101,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 				if err == nil {
 					clearSticky := shouldClearStickySession(account, requestedModel)
 					if clearSticky {
-						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+						if !stickyOwnershipSelection(ctx) {
+							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+						}
 					}
 					if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 						s.refreshStickySessionTTLForAccount(ctx, groupID, sessionHash, account)
@@ -4169,7 +4200,9 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 					if err == nil {
 						clearSticky := shouldClearStickySession(account, requestedModel)
 						if clearSticky {
-							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+							if !stickyOwnershipSelection(ctx) {
+								_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+							}
 						}
 						if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 							if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {
@@ -4261,7 +4294,9 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 				if err == nil {
 					clearSticky := shouldClearStickySession(account, requestedModel)
 					if clearSticky {
-						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+						if !stickyOwnershipSelection(ctx) {
+							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+						}
 					}
 					if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 						if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {

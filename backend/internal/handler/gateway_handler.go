@@ -969,6 +969,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 			}
+			c.Request = c.Request.WithContext(service.WithStickyOwnership(c.Request.Context(), selection.StickyOwnership))
+			defer h.gatewayService.KeepStickyOwnership(c.Request.Context(), currentAPIKey.GroupID, sessionKey, selection.StickyOwnership)()
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 			service.SetOpsClaudeOAuthSelectionAttribution(c, account, oauthSelectionSource(account.ID, sessionBoundAccountID, stickyBindingSource, len(fs.FailedAccountIDs) > 0 || fallbackUsed), "messages")
@@ -1146,6 +1148,21 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 用 wrapReleaseOnDone 确保 context 取消时自动释放（仅 serialize 模式有 queueRelease）
 			queueRelease = wrapReleaseOnDone(c.Request.Context(), queueRelease)
+			// Waiting may span a migration. Never start another upstream request
+			// with a stale reservation; already dispatched requests can finish.
+			ownershipCurrent, ownershipErr := h.gatewayService.StickyOwnershipCurrent(c.Request.Context(), currentAPIKey.GroupID, sessionKey, selection.StickyOwnership)
+			if ownershipErr != nil || !ownershipCurrent {
+				if queueRelease != nil {
+					queueRelease()
+				}
+				if accountReleaseFunc != nil {
+					accountReleaseFunc()
+				}
+				sessionSerialPermit.Release()
+				reqLog.Warn("gateway.session_ownership_changed_before_forward", zap.Int64("account_id", account.ID), zap.Error(ownershipErr))
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Session account changed while waiting, please retry", streamStarted)
+				return
+			}
 			// 注入回调到 ParsedRequest：使用外层 wrapper 以便提前清理 AfterFunc
 			parsedReq.OnUpstreamAccepted = queueRelease
 			parsedReq.OnUpstreamMessageStart = sessionSerialPermit.Release

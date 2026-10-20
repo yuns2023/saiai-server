@@ -91,7 +91,7 @@ jobs:
         env:
           CGO_ENABLED: '1'
           GOMAXPROCS: '2'
-        run: go test -race -tags=unit -p 1 ./internal/handler ./internal/service -run 'Test(SessionInitialSerial|UseSessionInitialSerial|ClaudeOAuthSticky|ClaudeOAuthPendingSticky)' -parallel=2 -count=1 -timeout=180s
+        run: go test -race -tags=unit -p 1 ./internal/handler ./internal/service -run 'Test(SessionInitialSerial|UseSessionInitialSerial|ClaudeSticky|ClaudeOAuthSticky|ClaudeOAuthPendingSticky)' -parallel=2 -count=1 -timeout=180s
       - name: Integration tests
         working-directory: backend
         run: make test-integration
