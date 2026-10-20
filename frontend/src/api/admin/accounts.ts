@@ -204,6 +204,7 @@ export interface ClaudeCarpoolOverflowDevice {
 export interface ClaudeCarpoolDeviceOverview {
   maintenance_enabled?: boolean
   next_maintenance_at?: string
+  /** -1 means no cycle budget; the fixed device limit still applies. */
   admissions_remaining?: number
   unlimited_devices: boolean
   recorded_limit: number

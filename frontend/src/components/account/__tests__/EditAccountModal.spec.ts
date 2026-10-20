@@ -284,6 +284,30 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('defaults cycle admissions to zero and saves unlimited without converting it to one', async () => {
+    updateAccountMock.mockReset()
+    const account = {
+      ...buildAccount(), type: 'oauth', credentials: { access_token: 'test-token' },
+      extra: { claude_oauth_mode: 'carpool', claude_oauth_carpool_auto_expand_enabled: true }
+    } as any
+    updateAccountMock.mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    listClaudeCarpoolDevicesMock.mockResolvedValue({
+      unlimited_devices: false, recorded_limit: 9, recorded_count: 8, overflow_count: 0,
+      recorded_items: [], overflow_items: [], maintenance_enabled: true, admissions_remaining: -1
+    })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const input = wrapper.get('[data-testid="carpool-admissions-per-cycle"]')
+    expect((input.element as HTMLInputElement).value).toBe('0')
+    expect(input.attributes('min')).toBe('0')
+    expect(wrapper.get('[data-testid="carpool-admissions-remaining"]').text()).toContain('不限')
+    await input.setValue(0)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra.claude_oauth_carpool_maintenance_admissions_per_cycle).toBe(0)
+  })
+
   it('shows remaining cycle admissions and the next adjustment time when viewing devices', async () => {
     const account = {
       ...buildAccount(), type: 'oauth', credentials: { access_token: 'test-token' },

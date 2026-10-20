@@ -974,7 +974,7 @@ func oldestCarpoolOverflowFields(items map[string]string, deleteCount int) ([]st
 // token. Retries and stale workers cannot evict again, even after new admissions.
 func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountID int64, limit int, policy service.CarpoolAdmissionPolicy, due string) (int, error) {
 	free := policy.Admissions
-	if accountID <= 0 || limit < 1 || free < 1 || free > limit {
+	if accountID <= 0 || limit < 1 || free < 0 || free > limit {
 		return 0, errors.New("invalid carpool slot policy")
 	}
 	if _, err := time.Parse(time.RFC3339, due); err != nil {
@@ -996,7 +996,10 @@ func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountI
 			if err != nil {
 				return err
 			}
-			count := max(0, len(values)-(limit-free))
+			count := 0
+			if free > 0 {
+				count = max(0, len(values)-(limit-free))
+			}
 			type entry struct {
 				field  string
 				record service.CarpoolDeviceRecord
@@ -1064,16 +1067,26 @@ func readCarpoolAdmissionBudget(ctx context.Context, reader redis.Cmdable, key s
 	}
 	if budget.Generation < policy.Generation {
 		budget = &carpoolAdmissionBudget{Generation: policy.Generation, Quota: policy.Admissions}
+	} else if budget.Generation == policy.Generation {
+		// Apply edits immediately while retaining this cycle's usage and due token.
+		budget.Quota = policy.Admissions
 	}
 	return budget, nil
 }
 func (c *identityCache) GetOrCreateCarpoolDeviceWithPolicy(ctx context.Context, id int64, device string, hints service.ClientHints, limit int, now int64, policy service.CarpoolAdmissionPolicy) (*service.CarpoolDeviceRecord, error) {
-	if policy.Generation == "" || policy.Admissions < 1 {
+	if policy.Generation == "" || policy.Admissions < 0 {
 		return nil, errors.New("invalid carpool admission policy")
+	}
+	// Zero removes only the cycle budget; the fixed device capacity still applies.
+	if policy.Admissions == 0 {
+		return c.GetOrCreateCarpoolDevice(ctx, id, device, hints, limit, now)
 	}
 	return c.getOrCreateAdmissionDevice(ctx, id, device, hints, limit, now, carpoolRecordedKey(id), carpoolOverflowKey(id), service.ErrClaudeOAuthCarpoolDevicesFull, policy)
 }
 func (c *identityCache) CarpoolAdmissionsRemaining(ctx context.Context, id int64, policy service.CarpoolAdmissionPolicy) (int, error) {
+	if policy.Admissions == 0 {
+		return -1, nil // Unlimited cycle admissions, independently of fixed capacity.
+	}
 	budget, err := readCarpoolAdmissionBudget(ctx, c.rdb, carpoolAdmissionBudgetKey(id), policy)
 	if err != nil {
 		return 0, err

@@ -1655,7 +1655,7 @@
                   <span>
                     <span class="block text-sm font-medium text-gray-900 dark:text-white">定期开放新设备名额</span>
                     <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-                      每个周期只允许指定数量的新设备进入，未用完的名额不累计。容量不足时先移除最久未使用的设备。
+                      名额大于 0 时，每周期限制新设备接纳数量，并在周期调整时按需移除最久未使用的设备。0 表示不限制周期接纳数量，也不自动腾位。
                     </span>
                   </span>
                 </label>
@@ -1663,8 +1663,8 @@
                   <label class="input-label">执行间隔（小时）</label>
                   <input v-model.number="carpoolMaintenanceIntervalHours" data-testid="carpool-maintenance-interval" type="number" min="1" max="720" step="1" class="input" />
                   <label class="input-label mt-3">每周期新设备名额</label>
-                  <input v-model.number="carpoolAdmissionsPerCycle" data-testid="carpool-admissions-per-cycle" type="number" min="1" :max="claudeOAuthCarpoolDeviceLimit" step="1" class="input" />
-                  <p class="input-hint">启用时开放首轮名额，默认每 24 小时重置为 1 个。已登记设备不消耗名额，未用完的名额不累计。</p>
+                  <input v-model.number="carpoolAdmissionsPerCycle" data-testid="carpool-admissions-per-cycle" type="number" min="0" :max="claudeOAuthCarpoolDeviceLimit" step="1" class="input" />
+                  <p class="input-hint">默认 0，表示不限周期接纳数量，仍受设备总上限约束。大于 0 时启用首轮名额，并按执行间隔重置；已登记设备不消耗名额，未用完的名额不累计。修改名额保存后立即生效，保留本轮已用数量和重置时间。</p>
                 </div>
               </div>
               <p v-else class="text-xs text-gray-500 dark:text-gray-400">
@@ -2882,7 +2882,7 @@ const carpoolUserIDs = ref<number[]>([])
 const claudeOAuthCarpoolUnlimitedDevices = ref(false)
 const claudeOAuthCarpoolAutoExpand = ref(false)
 const carpoolMaintenanceIntervalHours = ref<number>(24)
-const carpoolAdmissionsPerCycle = ref<number>(1)
+const carpoolAdmissionsPerCycle = ref<number>(0)
 const claudeOAuthSharedBucketCount = ref<number>(5)
 const claudeOAuthFiveHourRateLimitThresholdPercent = ref<number>(0)
 const claudeOAuthDisableTokenRefresh = ref(true)
@@ -3512,7 +3512,7 @@ const resetForm = () => {
   claudeOAuthCarpoolUnlimitedDevices.value = false
   claudeOAuthCarpoolAutoExpand.value = false
   carpoolMaintenanceIntervalHours.value = 24
-  carpoolAdmissionsPerCycle.value = 1
+  carpoolAdmissionsPerCycle.value = 0
   claudeOAuthSharedBucketCount.value = 5
   claudeOAuthFiveHourRateLimitThresholdPercent.value = 0
   claudeOAuthDisableTokenRefresh.value = true
@@ -4216,7 +4216,7 @@ const buildAnthropicOAuthExtra = (baseExtra: Record<string, unknown>) => {
   } else if (claudeOAuthMode.value === 'carpool') {
     extra.claude_oauth_carpool_device_limit = Math.min(32, Math.max(1, claudeOAuthCarpoolDeviceLimit.value || 5))
     extra.claude_oauth_carpool_maintenance_interval_hours = Math.min(720, Math.max(1, Math.trunc(carpoolMaintenanceIntervalHours.value || 24)))
-    extra.claude_oauth_carpool_maintenance_admissions_per_cycle = Math.min(claudeOAuthCarpoolDeviceLimit.value, Math.max(1, Math.trunc(carpoolAdmissionsPerCycle.value || 1)))
+    extra.claude_oauth_carpool_maintenance_admissions_per_cycle = Math.min(claudeOAuthCarpoolDeviceLimit.value, Math.max(0, Math.trunc(carpoolAdmissionsPerCycle.value || 0)))
     delete extra.claude_oauth_carpool_auto_maintenance_target
     delete extra.claude_oauth_carpool_maintenance_free_slots
     if (claudeOAuthCarpoolUnlimitedDevices.value) {

@@ -97,7 +97,7 @@ func TestAccountIsClaudeOAuthCarpoolAutoExpandEnabled(t *testing.T) {
 
 func TestCarpoolMaintenancePolicyBounds(t *testing.T) {
 	a := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"claude_oauth_carpool_device_limit": 10}}
-	if a.GetCarpoolMaintenanceIntervalHours() != 24 || a.GetCarpoolAdmissionsPerCycle() != 1 {
+	if a.GetCarpoolMaintenanceIntervalHours() != 24 || a.GetCarpoolAdmissionsPerCycle() != 0 {
 		t.Fatal("unexpected defaults")
 	}
 	a.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 999
@@ -134,5 +134,20 @@ func TestSingleDeviceAdmissionAndFixedHeaderDefaults(t *testing.T) {
 	account.Extra["claude_oauth_single_device_admission_enabled"] = false
 	if account.IsClaudeOAuthSingleDeviceAdmissionAutoExpandEnabled() {
 		t.Fatal("disabled admission must disable daily maintenance")
+	}
+}
+
+func TestCarpoolAdmissionsExplicitZeroOverridesLegacy(t *testing.T) {
+	a := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"claude_oauth_carpool_device_limit": 9, "claude_oauth_carpool_maintenance_free_slots": 2}}
+	if a.GetCarpoolAdmissionsPerCycle() != 2 {
+		t.Fatal("legacy finite allowance must be preserved")
+	}
+	a.Extra["claude_oauth_carpool_maintenance_admissions_per_cycle"] = 0
+	if a.GetCarpoolAdmissionsPerCycle() != 0 {
+		t.Fatal("explicit zero must disable the cycle budget")
+	}
+	a.Extra["claude_oauth_carpool_maintenance_admissions_per_cycle"] = 1
+	if a.GetCarpoolAdmissionsPerCycle() != 1 {
+		t.Fatal("explicit finite allowance must be preserved")
 	}
 }

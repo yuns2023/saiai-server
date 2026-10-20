@@ -34,6 +34,8 @@ describe('new trusted-only carpool account', () => {
     const toggle = wrapper.get('[data-testid="carpool-trusted-only"]')
     expect((toggle.element as HTMLInputElement).checked).toBe(false)
     await toggle.setValue(true)
+    await wrapper.get('[data-testid="carpool-auto-expand"]').setValue(true)
+    expect((wrapper.get('[data-testid="carpool-admissions-per-cycle"]').element as HTMLInputElement).value).toBe('0')
     await wrapper.get('[data-tour="account-form-name"]').setValue('Trusted account')
     await wrapper.get('#create-account-form').trigger('submit.prevent')
     await flushPromises()
@@ -44,7 +46,7 @@ describe('new trusted-only carpool account', () => {
     } }))
     await flushPromises()
     expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
-      type: kind, extra: expect.objectContaining({ claude_oauth_carpool_trusted_only: true })
+      type: kind, extra: expect.objectContaining({ claude_oauth_carpool_trusted_only: true, claude_oauth_carpool_maintenance_admissions_per_cycle: 0 })
     }))
     await wrapper.setProps({ show: false })
     await wrapper.setProps({ show: true })

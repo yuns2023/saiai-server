@@ -246,3 +246,91 @@ func TestCarpoolFullCycleRedis(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrClaudeOAuthCarpoolDevicesFull)
 	require.Equal(t, int64(10), rdb.HLen(ctx, carpoolRecordedKey(id)).Val())
 }
+
+func TestCarpoolUnlimitedCycleRedis(t *testing.T) {
+	socket := os.Getenv("SAIAI_TEST_CARPOOL_REDIS_SOCKET")
+	if socket == "" {
+		t.Skip("task-owned Redis Unix socket not supplied")
+	}
+	rdb := redis.NewClient(&redis.Options{Network: "unix", Addr: socket})
+	t.Cleanup(func() { _ = rdb.Close() })
+	ctx := context.Background()
+	cache := &identityCache{rdb: rdb}
+	id := time.Now().UnixNano()
+	t.Cleanup(func() {
+		_ = rdb.Del(ctx, carpoolRecordedKey(id), carpoolOverflowKey(id), carpoolAdmissionBudgetKey(id)).Err()
+	})
+	finite := service.CarpoolAdmissionPolicy{Generation: "00000000000000000001", Admissions: 1}
+	_, err := cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "first", service.ClientHints{}, 2, 1, finite)
+	require.NoError(t, err)
+	_, err = cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "second", service.ClientHints{}, 2, 2, finite)
+	require.ErrorIs(t, err, service.ErrClaudeOAuthCarpoolDevicesFull)
+	unlimited := finite
+	unlimited.Admissions = 0
+	// A spent finite budget must not block an explicit switch to unlimited.
+	_, err = cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "second", service.ClientHints{}, 2, 3, unlimited)
+	require.NoError(t, err)
+	_, err = cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "third", service.ClientHints{}, 2, 4, unlimited)
+	require.ErrorIs(t, err, service.ErrClaudeOAuthCarpoolDevicesFull)
+	remaining, err := cache.CarpoolAdmissionsRemaining(ctx, id, unlimited)
+	require.NoError(t, err)
+	require.Equal(t, -1, remaining)
+	identity := service.NewIdentityService(cache, "TEST_ONLY_SECRET")
+	account := &service.Account{ID: id, Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Extra: map[string]any{
+		"claude_oauth_mode": "carpool", "claude_oauth_carpool_device_limit": 2,
+		"claude_oauth_carpool_auto_expand_enabled":              true,
+		"claude_oauth_carpool_maintenance_admissions_per_cycle": 0,
+	}}
+	overview, err := identity.ListCarpoolDevices(ctx, account)
+	require.NoError(t, err)
+	require.Equal(t, 2, overview.RecordedCount)
+	require.Equal(t, -1, *overview.AdmissionsRemaining, "overview must distinguish unlimited cycle budget from full capacity")
+	removed, err := cache.ResetCarpoolAdmissionCycle(ctx, id, 2, unlimited, "2026-10-21T00:00:00Z")
+	require.NoError(t, err)
+	require.Zero(t, removed)
+	require.EqualValues(t, 2, rdb.HLen(ctx, carpoolRecordedKey(id)).Val())
+	require.NoError(t, cache.DeleteCarpoolDevice(ctx, id, carpoolDeviceField("second")))
+	_, err = cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "third", service.ClientHints{}, 2, 5, unlimited)
+	require.NoError(t, err)
+}
+
+func TestCarpoolCycleAllowanceEditRedis(t *testing.T) {
+	socket := os.Getenv("SAIAI_TEST_CARPOOL_REDIS_SOCKET")
+	if socket == "" {
+		t.Skip("task-owned Redis Unix socket not supplied")
+	}
+	rdb := redis.NewClient(&redis.Options{Network: "unix", Addr: socket})
+	t.Cleanup(func() { _ = rdb.Close() })
+	ctx := context.Background()
+	cache := &identityCache{rdb: rdb}
+	id := time.Now().UnixNano()
+	t.Cleanup(func() {
+		_ = rdb.Del(ctx, carpoolRecordedKey(id), carpoolOverflowKey(id), carpoolAdmissionBudgetKey(id)).Err()
+	})
+	policy := service.CarpoolAdmissionPolicy{Generation: "00000000000000000001", Admissions: 1}
+	due := "2026-10-21T00:00:00Z"
+	_, err := cache.ResetCarpoolAdmissionCycle(ctx, id, 9, policy, due)
+	require.NoError(t, err)
+	_, err = cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "first", service.ClientHints{}, 9, 1, policy)
+	require.NoError(t, err)
+	policy.Admissions = 3
+	remaining, err := cache.CarpoolAdmissionsRemaining(ctx, id, policy)
+	require.NoError(t, err)
+	require.Equal(t, 2, remaining, "increase applies immediately without refunding spent admissions")
+	_, err = cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "second", service.ClientHints{}, 9, 2, policy)
+	require.NoError(t, err)
+	policy.Admissions = 1
+	remaining, err = cache.CarpoolAdmissionsRemaining(ctx, id, policy)
+	require.NoError(t, err)
+	require.Zero(t, remaining)
+	_, err = cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "third", service.ClientHints{}, 9, 3, policy)
+	require.ErrorIs(t, err, service.ErrClaudeOAuthCarpoolDevicesFull)
+	_, err = cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "first", service.ClientHints{}, 9, 4, policy)
+	require.NoError(t, err, "decreasing allowance must not reject existing devices")
+	policy.Admissions = 3
+	_, err = cache.ResetCarpoolAdmissionCycle(ctx, id, 9, policy, due)
+	require.NoError(t, err)
+	remaining, err = cache.CarpoolAdmissionsRemaining(ctx, id, policy)
+	require.NoError(t, err)
+	require.Equal(t, 1, remaining, "an edit must not reset the existing cycle token")
+}

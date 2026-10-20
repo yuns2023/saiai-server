@@ -39,12 +39,10 @@ func (a *Account) GetCarpoolMaintenanceIntervalHours() int {
 }
 func (a *Account) GetCarpoolAdmissionsPerCycle() int {
 	n := a.getExtraInt("claude_oauth_carpool_maintenance_admissions_per_cycle")
-	if n < 1 {
+	if _, configured := a.Extra["claude_oauth_carpool_maintenance_admissions_per_cycle"]; !configured {
 		n = a.getExtraInt("claude_oauth_carpool_maintenance_free_slots")
 	}
-	if n < 1 {
-		n = 1
-	}
+	n = max(0, n)
 	return min(n, a.GetClaudeOAuthCarpoolDeviceLimit())
 }
 func (a *Account) GetCarpoolNextMaintenance() string {

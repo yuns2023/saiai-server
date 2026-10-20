@@ -14,14 +14,16 @@ The account's `extra` fields are:
 - `claude_oauth_carpool_maintenance_interval_hours`: integer hours, default 24,
   bounded to 1–720.
 - `claude_oauth_carpool_maintenance_admissions_per_cycle`: new device admissions
-  per cycle, default 1, bounded to 1–device limit. The unpublished predecessor's
-  `claude_oauth_carpool_maintenance_free_slots` is a read-only fallback.
+  per cycle, default 0, bounded to 0–device limit. Zero means unlimited cycle
+  admissions while retaining the fixed device capacity. The legacy
+  `claude_oauth_carpool_maintenance_free_slots` is a read-only fallback only when
+  the new field is absent; explicit zero overrides it.
 - `claude_oauth_carpool_next_maintenance_at`: server-owned UTC RFC3339 timestamp.
 - `claude_oauth_carpool_maintenance_generation`: server-owned configuration
   generation used to prevent stale workers from resetting a newer budget.
 
-Enabling starts a first cycle with the configured allowance, without evicting
-existing devices immediately. At each due time, atomically reset the allowance
+With a positive allowance, enabling starts a first cycle with the configured
+allowance, without evicting existing devices immediately. At each due time, atomically reset the allowance
 to the configured number and remove the least-recently-seen records only if
 needed to make room for that many admissions. For capacity 10 and allowance 2,
 counts 10, 9, 8 and 0 cause 2, 1, 0 and 0 removals, but each new cycle permits
@@ -37,9 +39,13 @@ admission applies; unlimited mode bypasses the local device registry.
 
 Each account has an independent schedule. Enabling or changing the interval
 starts a new cycle and schedules the next adjustment one full interval from
-save time. Changing the admission count takes effect on the next adjustment of an
-already-initialized budget;
-changing capacity retains the schedule and applies the existing capacity gate.
+save time. Switching to zero bypasses any spent cycle budget immediately, and
+periodic adjustments do not evict devices to reserve capacity. Changing a
+positive admission count applies immediately, retaining consumed admissions
+and the reset time. Decreasing below consumed admissions leaves zero
+remaining and does not evict or reject already registered devices. Switching
+back from zero uses the retained budget usage (unlimited admissions do not spend
+that budget). Changing capacity retains the schedule and applies the existing capacity gate.
 Disabling and re-enabling starts a new generation. The server ignores submitted
 schedule/generation values. Bulk edits normalize each account independently.
 
@@ -53,17 +59,17 @@ is retryable. The registry and budget depend on Redis persistence; loss of
 Redis state is not a supported deduplication boundary.
 
 The device overview API returns `maintenance_enabled`, `admissions_remaining`
-(the smaller of the remaining cycle allowance and physical space), and
+(-1 for unlimited cycle admissions; otherwise the smaller of the remaining
+cycle allowance and physical space), and
 `next_maintenance_at`. The device view shows both remaining admissions and the
 next adjustment in the browser's local timezone; Refresh reloads these values.
 The edit form also shows the next adjustment or indicates that saving a new
 interval will start a new schedule.
 
 Existing enabled accounts without a schedule are initialized on the first
-worker pass and wait a full interval before the first reset/eviction. Initial
-new-device admission is already capped by the default/configured allowance.
-The actual capacity is preserved; absent new fields mean 24 hours and 1 new
-admission. The old target/calendar-day fields are ignored. No SQL schema
-migration is required. Older Gateway code interprets the enable flag as daily
-expansion/rotation, so application rollback restores that older behavior.
+worker pass and wait a full interval before the first reset/eviction. The actual capacity is preserved; absent allowance fields mean 24 hours and
+unlimited cycle admissions. Existing explicitly positive or legacy allowances
+retain their limits. The old target/calendar-day fields are ignored. No SQL schema
+migration is required. A rollback to the previous budget implementation interprets zero as a fallback
+allowance (normally 1), so unlimited-cycle behavior requires this Gateway version.
 `single_device` retains its existing midnight expansion/rotation behavior.

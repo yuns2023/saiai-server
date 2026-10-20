@@ -984,7 +984,9 @@ func (s *IdentityService) ListCarpoolDevices(ctx context.Context, account *Accou
 		if err != nil {
 			return nil, err
 		}
-		remaining = min(remaining, max(0, result.RecordedLimit-result.RecordedCount))
+		if remaining >= 0 {
+			remaining = min(remaining, max(0, result.RecordedLimit-result.RecordedCount))
+		}
 		result.AdmissionsRemaining = &remaining
 	}
 	for _, item := range recorded {
