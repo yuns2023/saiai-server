@@ -348,6 +348,7 @@ func TestAPIContracts(t *testing.T) {
 						OutputTokens: 15,
 						TotalCost:    0.25,
 						ActualCost:   0.25,
+						BillingType:  1,
 						DurationMs:   ptr(300),
 						CreatedAt:    deps.now,
 					},
@@ -369,6 +370,9 @@ func TestAPIContracts(t *testing.T) {
 					"total_tokens": 53,
 					"total_cost": 0.75,
 					"total_actual_cost": 0.75,
+					"total_balance_cost": 0.5,
+					"total_subscription_cost": 0.25,
+					"total_unclassified_cost": 0,
 					"average_duration_ms": 200
 				}
 			}`,
@@ -1716,6 +1720,7 @@ func (r *stubUsageLogRepo) GetUserStatsAggregated(ctx context.Context, userID in
 	var totalCacheReadTokens int64
 	var totalCost float64
 	var totalActualCost float64
+	var balanceCost, subscriptionCost, unclassifiedCost float64
 	var totalDuration int64
 	var durationCount int64
 
@@ -1728,6 +1733,14 @@ func (r *stubUsageLogRepo) GetUserStatsAggregated(ctx context.Context, userID in
 		totalCacheReadTokens += int64(log.CacheReadTokens)
 		totalCost += log.TotalCost
 		totalActualCost += log.ActualCost
+		switch log.BillingType {
+		case 0:
+			balanceCost += log.ActualCost
+		case 1:
+			subscriptionCost += log.ActualCost
+		default:
+			unclassifiedCost += log.ActualCost
+		}
 		if log.DurationMs != nil {
 			totalDuration += int64(*log.DurationMs)
 			durationCount++
@@ -1749,6 +1762,9 @@ func (r *stubUsageLogRepo) GetUserStatsAggregated(ctx context.Context, userID in
 		TotalTokens:              totalInputTokens + totalOutputTokens + totalCacheTokens,
 		TotalCost:                totalCost,
 		TotalActualCost:          totalActualCost,
+		TotalBalanceCost:         balanceCost,
+		TotalSubscriptionCost:    subscriptionCost,
+		TotalUnclassifiedCost:    unclassifiedCost,
 		AverageDurationMs:        avgDuration,
 	}, nil
 }
