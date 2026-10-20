@@ -1277,6 +1277,11 @@ func (s *GatewayService) clearPendingStickySessionForAccount(ctx context.Context
 }
 
 func (s *GatewayService) clearClaudeOAuthCarpoolStickySessionIfBound(ctx context.Context, account *Account, parsed *ParsedRequest) {
+	// Generation-aware failover replaces ownership atomically during selection.
+	// A delayed admission failure must not delete a newer confirmation.
+	if stickyOwnershipFromContext(ctx) != "" {
+		return
+	}
 	if s == nil || s.cache == nil || account == nil || account.ID <= 0 || parsed == nil {
 		return
 	}

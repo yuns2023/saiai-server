@@ -184,3 +184,12 @@ func TestClaudeStickyOAuthCapacityAcrossModes(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeStickyCarpoolAdmissionFailurePreservesConfirmation(t *testing.T) {
+	cache := &oauthStickyGatewayCacheStub{binding: 1}
+	svc := &GatewayService{cache: cache}
+	ctx := WithStickyOwnership(WithClaudeOAuthGroupMode(context.Background(), 20, ClaudeOAuthModeCarpool), "1:generation")
+	svc.clearClaudeOAuthCarpoolStickySessionIfBound(ctx, &Account{ID: 1}, &ParsedRequest{MetadataUserID: `{"device_id":"device","session_id":"session","account_uuid":"account"}`})
+	require.Zero(t, cache.deleteCalls)
+	require.Equal(t, int64(1), cache.binding)
+}
