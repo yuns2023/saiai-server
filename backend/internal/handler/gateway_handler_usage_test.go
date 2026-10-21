@@ -304,3 +304,26 @@ func TestUsageAPIKeyStatusUsesRuntimeExpiry(t *testing.T) {
 func ptrTime(value time.Time) *time.Time {
 	return &value
 }
+
+func TestGatewayUsageHostedExemptionDoesNotExposeWallet(t *testing.T) {
+	for _, quota := range []float64{0, 200} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/usage", nil)
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 2, Status: service.StatusAPIKeyActive, Quota: quota,
+			User:  &service.User{ID: 1, Balance: 999},
+			Group: &service.Group{Platform: service.PlatformOpenAI, SubscriptionType: service.SubscriptionTypeStandard, IsExclusive: true, HostedUsageEnabled: true}})
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 1})
+		(&GatewayHandler{}).Usage(c)
+		require.Equal(t, http.StatusOK, recorder.Code)
+		var response map[string]any
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+		require.Equal(t, "standard_reference", response["usage_basis"])
+		require.NotContains(t, response, "balance")
+		billing := response["billing"].(map[string]any)
+		require.Equal(t, true, billing["available"])
+		require.Equal(t, true, billing["charge_exempt"])
+		require.Equal(t, false, billing["balance_visible"])
+		require.NotContains(t, billing, "balance")
+	}
+}

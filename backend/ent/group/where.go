@@ -90,6 +90,11 @@ func IsExclusive(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldIsExclusive, v))
 }
 
+// HostedUsageEnabled applies equality check predicate on the "hosted_usage_enabled" field. It's identical to HostedUsageEnabledEQ.
+func HostedUsageEnabled(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldHostedUsageEnabled, v))
+}
+
 // ShowAccountQuota applies equality check predicate on the "show_account_quota" field. It's identical to ShowAccountQuotaEQ.
 func ShowAccountQuota(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldShowAccountQuota, v))
@@ -593,6 +598,16 @@ func IsExclusiveEQ(v bool) predicate.Group {
 // IsExclusiveNEQ applies the NEQ predicate on the "is_exclusive" field.
 func IsExclusiveNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldIsExclusive, v))
+}
+
+// HostedUsageEnabledEQ applies the EQ predicate on the "hosted_usage_enabled" field.
+func HostedUsageEnabledEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldHostedUsageEnabled, v))
+}
+
+// HostedUsageEnabledNEQ applies the NEQ predicate on the "hosted_usage_enabled" field.
+func HostedUsageEnabledNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldHostedUsageEnabled, v))
 }
 
 // ShowAccountQuotaEQ applies the EQ predicate on the "show_account_quota" field.

@@ -50,6 +50,7 @@ type CreateGroupRequest struct {
 	Description          string             `json:"description"`
 	RateMultiplier       float64            `json:"rate_multiplier"`
 	ShowAccountQuota     bool               `json:"show_account_quota"`
+	HostedUsageEnabled   bool               `json:"hosted_usage_enabled"`
 	IsExclusive          bool               `json:"is_exclusive"`
 	BlockedModelPatterns []string           `json:"blocked_model_patterns"`
 	ModelRateMultipliers map[string]float64 `json:"model_rate_multipliers"`
@@ -61,6 +62,7 @@ type UpdateGroupRequest struct {
 	Description          *string             `json:"description"`
 	RateMultiplier       *float64            `json:"rate_multiplier"`
 	ShowAccountQuota     *bool               `json:"show_account_quota"`
+	HostedUsageEnabled   *bool               `json:"hosted_usage_enabled"`
 	IsExclusive          *bool               `json:"is_exclusive"`
 	Status               *string             `json:"status"`
 	BlockedModelPatterns *[]string           `json:"blocked_model_patterns"`
@@ -107,6 +109,7 @@ func (s *GroupService) Create(ctx context.Context, req CreateGroupRequest) (*Gro
 		Platform:             PlatformAnthropic,
 		RateMultiplier:       req.RateMultiplier,
 		ShowAccountQuota:     req.ShowAccountQuota && req.IsExclusive,
+		HostedUsageEnabled:   req.HostedUsageEnabled,
 		IsExclusive:          req.IsExclusive,
 		Status:               StatusActive,
 		SubscriptionType:     SubscriptionTypeStandard,
@@ -114,6 +117,9 @@ func (s *GroupService) Create(ctx context.Context, req CreateGroupRequest) (*Gro
 		ModelRateMultipliers: modelRates,
 	}
 
+	if err := group.ValidateHostedUsage(); err != nil {
+		return nil, err
+	}
 	if err := s.groupRepo.Create(ctx, group); err != nil {
 		return nil, fmt.Errorf("create group: %w", err)
 	}
@@ -179,6 +185,9 @@ func (s *GroupService) Update(ctx context.Context, id int64, req UpdateGroupRequ
 	if req.IsExclusive != nil {
 		group.IsExclusive = *req.IsExclusive
 	}
+	if req.HostedUsageEnabled != nil {
+		group.HostedUsageEnabled = *req.HostedUsageEnabled
+	}
 	if req.ShowAccountQuota != nil {
 		group.ShowAccountQuota = *req.ShowAccountQuota
 	}
@@ -204,6 +213,9 @@ func (s *GroupService) Update(ctx context.Context, id int64, req UpdateGroupRequ
 		group.ModelRateMultipliers = modelRates
 	}
 
+	if err := group.ValidateHostedUsage(); err != nil {
+		return nil, err
+	}
 	if err := s.groupRepo.Update(ctx, group); err != nil {
 		return nil, fmt.Errorf("update group: %w", err)
 	}

@@ -138,6 +138,7 @@ type CreateGroupInput struct {
 	RateMultiplier       float64
 	ModelRateMultipliers map[string]float64
 	ShowAccountQuota     bool
+	HostedUsageEnabled   bool
 	IsExclusive          bool
 	RequiredLevelID      *int64
 	SubscriptionType     string   // standard/subscription
@@ -196,6 +197,7 @@ type UpdateGroupInput struct {
 	RateMultiplier       *float64 // 使用指针以支持设置为0
 	ModelRateMultipliers *map[string]float64
 	ShowAccountQuota     *bool
+	HostedUsageEnabled   *bool
 	IsExclusive          *bool
 	RequiredLevelID      *int64
 	Status               string
@@ -1058,6 +1060,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		RateMultiplier:                   input.RateMultiplier,
 		ModelRateMultipliers:             modelRateMultipliers,
 		ShowAccountQuota:                 input.ShowAccountQuota && input.IsExclusive,
+		HostedUsageEnabled:               input.HostedUsageEnabled,
 		IsExclusive:                      input.IsExclusive,
 		RequiredLevelID:                  input.RequiredLevelID,
 		Status:                           StatusActive,
@@ -1098,6 +1101,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		CodexClientPolicy:                normalizeCodexClientPolicy(input.CodexClientPolicy),
 		ClaudeDeviceLimitMode:            normalizeClaudeDeviceLimitMode(input.ClaudeDeviceLimitMode),
 		ClaudeDeviceBaseLimit:            normalizePositiveInt(input.ClaudeDeviceBaseLimit, 1, 1, 100),
+	}
+	if err := group.ValidateHostedUsage(); err != nil {
+		return nil, err
 	}
 	if err := s.groupRepo.Create(ctx, group); err != nil {
 		return nil, err
@@ -1294,6 +1300,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.IsExclusive != nil {
 		group.IsExclusive = *input.IsExclusive
 	}
+	if input.HostedUsageEnabled != nil {
+		group.HostedUsageEnabled = *input.HostedUsageEnabled
+	}
 	if input.ShowAccountQuota != nil {
 		group.ShowAccountQuota = *input.ShowAccountQuota
 	}
@@ -1474,6 +1483,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.ClaudeDeviceBaseLimit = normalizePositiveInt(*input.ClaudeDeviceBaseLimit, 1, 1, 100)
 	}
 
+	if err := group.ValidateHostedUsage(); err != nil {
+		return nil, err
+	}
 	if err := s.groupRepo.Update(ctx, group); err != nil {
 		return nil, err
 	}

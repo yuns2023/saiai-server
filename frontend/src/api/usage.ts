@@ -299,6 +299,8 @@ export async function getDashboardAPIKeyBreakdown(
 }
 
 export interface BatchApiKeyUsageStats {
+  today_usage_cost?: number
+  total_usage_cost?: number
   api_key_id: number
   today_actual_cost: number
   total_actual_cost: number

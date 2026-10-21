@@ -1547,6 +1547,18 @@ func (h *GatewayHandler) Usage(c *gin.Context) {
 
 	// Best-effort: all usage data is scoped to the authenticated API Key.
 	usageData := h.buildUsageData(ctx, apiKey.ID, startTime, endTime)
+	if apiKey.Group.UsesHostedUsage() && h.usageService != nil && usageData != nil {
+		if totals, err := h.usageService.GetBatchAPIKeyUsageStats(ctx, []int64{apiKey.ID}, startTime, endTime); err == nil {
+			if stats := totals[apiKey.ID]; stats != nil {
+				if summary, ok := usageData["range"].(gin.H); ok {
+					summary["usage_cost"] = stats.TotalUsageCost
+				}
+				if summary, ok := usageData["today"].(gin.H); ok {
+					summary["usage_cost"] = stats.TodayUsageCost
+				}
+			}
+		}
+	}
 
 	// Best-effort: 获取模型统计
 	var modelStats any
@@ -1641,6 +1653,7 @@ func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64, sta
 }
 
 type publicKeyUsageRecord struct {
+	MeteredCost            *float64  `json:"metered_cost,omitempty"`
 	BillingUnit            string    `json:"billing_unit,omitempty"`
 	TokenUsageSource       string    `json:"token_usage_source,omitempty"`
 	NativeChatTurnCostUSD  *float64  `json:"native_chat_turn_cost_usd,omitempty"`
@@ -1680,6 +1693,7 @@ func publicKeyUsageRecords(logs []service.UsageLog) []publicKeyUsageRecord {
 			CacheReadTokens:     log.CacheReadTokens,
 			TotalTokens:         log.TotalTokens(),
 			ActualCost:          log.ActualCost,
+			MeteredCost:         log.MeteredCost,
 			DurationMs:          log.DurationMs,
 			RequestType:         log.EffectiveRequestType().String(),
 			ImageCount:          log.ImageCount,
@@ -1905,6 +1919,16 @@ func (h *GatewayHandler) attachUsageBillingDetails(
 		if keepTopLevelRemainingForBilling {
 			resp["remaining"] = details["remaining"]
 		}
+		return nil
+	}
+
+	if apiKey.Group.UsesHostedUsage() {
+		// Keep the legacy mode while explicitly describing the exemption. A
+		// hosted Key never exposes an unrelated platform wallet amount.
+		resp["billing_mode"] = "balance"
+		resp["planName"] = "自有账号托管"
+		resp["usage_basis"] = "standard_reference"
+		resp["billing"] = gin.H{"type": "wallet", "available": true, "balance_visible": false, "charge_exempt": true}
 		return nil
 	}
 

@@ -143,6 +143,31 @@ describe('KeyUsageView', () => {
     wrapper.unmount()
   })
 
+  it('shows hosted reference usage separately from the zero charge and hides the wallet', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        mode: 'unrestricted', billing_mode: 'balance', isValid: true, status: 'active',
+        billing: { type: 'wallet', available: true, balance_visible: false, charge_exempt: true },
+        balance: 9195.54,
+        usage: { range: { requests: 1, actual_cost: 0, usage_cost: 12.34 } },
+        recent_usage: { records: [{ created_at: '2026-10-21T10:00:00Z', model: 'gpt-5', actual_cost: 0, metered_cost: .75 }] },
+      }),
+    } as Response)
+    const wrapper = mount(KeyUsageView, {
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, LocaleSwitcher: true, Icon: true } },
+    })
+    await wrapper.get('input[type="password"]').setValue('TEST_ONLY_HOSTED')
+    await wrapper.get('input[type="password"]').trigger('keydown.enter')
+    await flushPromises()
+    expect(wrapper.text()).toContain('hostedUsage.badge')
+    expect(wrapper.text()).toContain('hostedUsage.reference')
+    expect(wrapper.text()).toContain('$12.34')
+    expect(wrapper.text()).toContain('$0.75')
+    expect(wrapper.text()).not.toContain('9195.54')
+    wrapper.unmount()
+  })
+
   it('shows native Chat image generation as one turn without invented token consumption', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,

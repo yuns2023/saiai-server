@@ -132,6 +132,20 @@ func (_u *GroupUpdate) SetNillableIsExclusive(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetHostedUsageEnabled sets the "hosted_usage_enabled" field.
+func (_u *GroupUpdate) SetHostedUsageEnabled(v bool) *GroupUpdate {
+	_u.mutation.SetHostedUsageEnabled(v)
+	return _u
+}
+
+// SetNillableHostedUsageEnabled sets the "hosted_usage_enabled" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableHostedUsageEnabled(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetHostedUsageEnabled(*v)
+	}
+	return _u
+}
+
 // SetShowAccountQuota sets the "show_account_quota" field.
 func (_u *GroupUpdate) SetShowAccountQuota(v bool) *GroupUpdate {
 	_u.mutation.SetShowAccountQuota(v)
@@ -1307,6 +1321,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 	}
+	if value, ok := _u.mutation.HostedUsageEnabled(); ok {
+		_spec.SetField(group.FieldHostedUsageEnabled, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.ShowAccountQuota(); ok {
 		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)
 	}
@@ -1993,6 +2010,20 @@ func (_u *GroupUpdateOne) SetIsExclusive(v bool) *GroupUpdateOne {
 func (_u *GroupUpdateOne) SetNillableIsExclusive(v *bool) *GroupUpdateOne {
 	if v != nil {
 		_u.SetIsExclusive(*v)
+	}
+	return _u
+}
+
+// SetHostedUsageEnabled sets the "hosted_usage_enabled" field.
+func (_u *GroupUpdateOne) SetHostedUsageEnabled(v bool) *GroupUpdateOne {
+	_u.mutation.SetHostedUsageEnabled(v)
+	return _u
+}
+
+// SetNillableHostedUsageEnabled sets the "hosted_usage_enabled" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableHostedUsageEnabled(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetHostedUsageEnabled(*v)
 	}
 	return _u
 }
@@ -3201,6 +3232,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.HostedUsageEnabled(); ok {
+		_spec.SetField(group.FieldHostedUsageEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.ShowAccountQuota(); ok {
 		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)

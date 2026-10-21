@@ -9348,6 +9348,7 @@ type GroupMutation struct {
 	rate_multiplier                         *float64
 	addrate_multiplier                      *float64
 	is_exclusive                            *bool
+	hosted_usage_enabled                    *bool
 	show_account_quota                      *bool
 	status                                  *string
 	platform                                *string
@@ -9835,6 +9836,42 @@ func (m *GroupMutation) OldIsExclusive(ctx context.Context) (v bool, err error) 
 // ResetIsExclusive resets all changes to the "is_exclusive" field.
 func (m *GroupMutation) ResetIsExclusive() {
 	m.is_exclusive = nil
+}
+
+// SetHostedUsageEnabled sets the "hosted_usage_enabled" field.
+func (m *GroupMutation) SetHostedUsageEnabled(b bool) {
+	m.hosted_usage_enabled = &b
+}
+
+// HostedUsageEnabled returns the value of the "hosted_usage_enabled" field in the mutation.
+func (m *GroupMutation) HostedUsageEnabled() (r bool, exists bool) {
+	v := m.hosted_usage_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldHostedUsageEnabled returns the old "hosted_usage_enabled" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldHostedUsageEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldHostedUsageEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldHostedUsageEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldHostedUsageEnabled: %w", err)
+	}
+	return oldValue.HostedUsageEnabled, nil
+}
+
+// ResetHostedUsageEnabled resets all changes to the "hosted_usage_enabled" field.
+func (m *GroupMutation) ResetHostedUsageEnabled() {
+	m.hosted_usage_enabled = nil
 }
 
 // SetShowAccountQuota sets the "show_account_quota" field.
@@ -12476,7 +12513,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 50)
+	fields := make([]string, 0, 51)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -12497,6 +12534,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.is_exclusive != nil {
 		fields = append(fields, group.FieldIsExclusive)
+	}
+	if m.hosted_usage_enabled != nil {
+		fields = append(fields, group.FieldHostedUsageEnabled)
 	}
 	if m.show_account_quota != nil {
 		fields = append(fields, group.FieldShowAccountQuota)
@@ -12649,6 +12689,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.RateMultiplier()
 	case group.FieldIsExclusive:
 		return m.IsExclusive()
+	case group.FieldHostedUsageEnabled:
+		return m.HostedUsageEnabled()
 	case group.FieldShowAccountQuota:
 		return m.ShowAccountQuota()
 	case group.FieldRequiredLevelID:
@@ -12758,6 +12800,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldRateMultiplier(ctx)
 	case group.FieldIsExclusive:
 		return m.OldIsExclusive(ctx)
+	case group.FieldHostedUsageEnabled:
+		return m.OldHostedUsageEnabled(ctx)
 	case group.FieldShowAccountQuota:
 		return m.OldShowAccountQuota(ctx)
 	case group.FieldRequiredLevelID:
@@ -12901,6 +12945,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetIsExclusive(v)
+		return nil
+	case group.FieldHostedUsageEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetHostedUsageEnabled(v)
 		return nil
 	case group.FieldShowAccountQuota:
 		v, ok := value.(bool)
@@ -13662,6 +13713,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldIsExclusive:
 		m.ResetIsExclusive()
+		return nil
+	case group.FieldHostedUsageEnabled:
+		m.ResetHostedUsageEnabled()
 		return nil
 	case group.FieldShowAccountQuota:
 		m.ResetShowAccountQuota()
@@ -26641,6 +26695,8 @@ type UsageLogMutation struct {
 	addcache_read_cost                  *float64
 	total_cost                          *float64
 	addtotal_cost                       *float64
+	metered_cost                        *float64
+	addmetered_cost                     *float64
 	actual_cost                         *float64
 	addactual_cost                      *float64
 	rate_multiplier                     *float64
@@ -27984,6 +28040,76 @@ func (m *UsageLogMutation) ResetTotalCost() {
 	m.addtotal_cost = nil
 }
 
+// SetMeteredCost sets the "metered_cost" field.
+func (m *UsageLogMutation) SetMeteredCost(f float64) {
+	m.metered_cost = &f
+	m.addmetered_cost = nil
+}
+
+// MeteredCost returns the value of the "metered_cost" field in the mutation.
+func (m *UsageLogMutation) MeteredCost() (r float64, exists bool) {
+	v := m.metered_cost
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMeteredCost returns the old "metered_cost" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldMeteredCost(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMeteredCost is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMeteredCost requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMeteredCost: %w", err)
+	}
+	return oldValue.MeteredCost, nil
+}
+
+// AddMeteredCost adds f to the "metered_cost" field.
+func (m *UsageLogMutation) AddMeteredCost(f float64) {
+	if m.addmetered_cost != nil {
+		*m.addmetered_cost += f
+	} else {
+		m.addmetered_cost = &f
+	}
+}
+
+// AddedMeteredCost returns the value that was added to the "metered_cost" field in this mutation.
+func (m *UsageLogMutation) AddedMeteredCost() (r float64, exists bool) {
+	v := m.addmetered_cost
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearMeteredCost clears the value of the "metered_cost" field.
+func (m *UsageLogMutation) ClearMeteredCost() {
+	m.metered_cost = nil
+	m.addmetered_cost = nil
+	m.clearedFields[usagelog.FieldMeteredCost] = struct{}{}
+}
+
+// MeteredCostCleared returns if the "metered_cost" field was cleared in this mutation.
+func (m *UsageLogMutation) MeteredCostCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldMeteredCost]
+	return ok
+}
+
+// ResetMeteredCost resets all changes to the "metered_cost" field.
+func (m *UsageLogMutation) ResetMeteredCost() {
+	m.metered_cost = nil
+	m.addmetered_cost = nil
+	delete(m.clearedFields, usagelog.FieldMeteredCost)
+}
+
 // SetActualCost sets the "actual_cost" field.
 func (m *UsageLogMutation) SetActualCost(f float64) {
 	m.actual_cost = &f
@@ -29059,7 +29185,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 41)
+	fields := make([]string, 0, 42)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -29131,6 +29257,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.total_cost != nil {
 		fields = append(fields, usagelog.FieldTotalCost)
+	}
+	if m.metered_cost != nil {
+		fields = append(fields, usagelog.FieldMeteredCost)
 	}
 	if m.actual_cost != nil {
 		fields = append(fields, usagelog.FieldActualCost)
@@ -29239,6 +29368,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.CacheReadCost()
 	case usagelog.FieldTotalCost:
 		return m.TotalCost()
+	case usagelog.FieldMeteredCost:
+		return m.MeteredCost()
 	case usagelog.FieldActualCost:
 		return m.ActualCost()
 	case usagelog.FieldRateMultiplier:
@@ -29330,6 +29461,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldCacheReadCost(ctx)
 	case usagelog.FieldTotalCost:
 		return m.OldTotalCost(ctx)
+	case usagelog.FieldMeteredCost:
+		return m.OldMeteredCost(ctx)
 	case usagelog.FieldActualCost:
 		return m.OldActualCost(ctx)
 	case usagelog.FieldRateMultiplier:
@@ -29541,6 +29674,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetTotalCost(v)
 		return nil
+	case usagelog.FieldMeteredCost:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMeteredCost(v)
+		return nil
 	case usagelog.FieldActualCost:
 		v, ok := value.(float64)
 		if !ok {
@@ -29707,6 +29847,9 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addtotal_cost != nil {
 		fields = append(fields, usagelog.FieldTotalCost)
 	}
+	if m.addmetered_cost != nil {
+		fields = append(fields, usagelog.FieldMeteredCost)
+	}
 	if m.addactual_cost != nil {
 		fields = append(fields, usagelog.FieldActualCost)
 	}
@@ -29771,6 +29914,8 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedCacheReadCost()
 	case usagelog.FieldTotalCost:
 		return m.AddedTotalCost()
+	case usagelog.FieldMeteredCost:
+		return m.AddedMeteredCost()
 	case usagelog.FieldActualCost:
 		return m.AddedActualCost()
 	case usagelog.FieldRateMultiplier:
@@ -29891,6 +30036,13 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddTotalCost(v)
 		return nil
+	case usagelog.FieldMeteredCost:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMeteredCost(v)
+		return nil
 	case usagelog.FieldActualCost:
 		v, ok := value.(float64)
 		if !ok {
@@ -29987,6 +30139,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldModerationRef) {
 		fields = append(fields, usagelog.FieldModerationRef)
 	}
+	if m.FieldCleared(usagelog.FieldMeteredCost) {
+		fields = append(fields, usagelog.FieldMeteredCost)
+	}
 	if m.FieldCleared(usagelog.FieldAccountRateMultiplier) {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
 	}
@@ -30039,6 +30194,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldModerationRef:
 		m.ClearModerationRef()
+		return nil
+	case usagelog.FieldMeteredCost:
+		m.ClearMeteredCost()
 		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		m.ClearAccountRateMultiplier()
@@ -30140,6 +30298,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldTotalCost:
 		m.ResetTotalCost()
+		return nil
+	case usagelog.FieldMeteredCost:
+		m.ResetMeteredCost()
 		return nil
 	case usagelog.FieldActualCost:
 		m.ResetActualCost()

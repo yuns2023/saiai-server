@@ -15,7 +15,7 @@ func TestUsageModerationCorrelationInUsageInsert(t *testing.T) {
 	log := &service.UsageLog{RequestID: "billing-id", ModerationRef: ref}
 	prepared := prepareUsageLogInsert(log)
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
-	body, ok := prepared.args[len(prepared.args)-1].(string)
+	body, ok := prepared.args[len(prepared.args)-2].(string)
 	require.True(t, ok)
 	require.JSONEq(t, `{"RequestID":"local-id","Source":"openai_responses_ws","TurnNumber":2}`, body)
 	require.Nil(t, moderationRefJSON(nil))

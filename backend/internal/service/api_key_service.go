@@ -570,6 +570,16 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 			return nil, ErrGroupNotAllowed
 		}
 
+		if apiKey.GroupID != nil && *apiKey.GroupID != group.ID &&
+			apiKey.Group.UsesHostedUsage() != group.UsesHostedUsage() {
+			data, err := s.apiKeyRepo.GetRateLimitData(ctx, apiKey.ID)
+			if err != nil {
+				return nil, fmt.Errorf("check metering basis change: %w", err)
+			}
+			if apiKey.QuotaUsed > 0 || data != nil && (data.EffectiveUsage5h() > 0 || data.EffectiveUsage1d() > 0 || data.EffectiveUsage7d() > 0) {
+				return nil, infraerrors.BadRequest("KEY_METERING_BASIS_CHANGE", "Reset Key quota and window usage before switching between hosted and billed groups")
+			}
+		}
 		apiKey.GroupID = req.GroupID
 	}
 

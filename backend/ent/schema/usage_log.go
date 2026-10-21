@@ -98,6 +98,7 @@ func (UsageLog) Fields() []ent.Field {
 		field.Float("total_cost").
 			Default(0).
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
+		field.Float("metered_cost").Optional().Nillable().SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}),
 		field.Float("actual_cost").
 			Default(0).
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),

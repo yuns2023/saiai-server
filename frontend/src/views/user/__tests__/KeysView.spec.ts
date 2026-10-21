@@ -124,6 +124,34 @@ describe('user KeysView setup guidance', () => {
     vi.restoreAllMocks()
   })
 
+  it('keeps missing hosted reference data unavailable and ordinary charges unchanged', async () => {
+    const group = { ...groups[1], rate_multiplier: 0, hosted_usage_enabled: true }
+    mocks.list.mockResolvedValue({ items: [makeKey({ group, group_id: group.id })], total: 1, page: 1, page_size: 20, pages: 1 })
+    mocks.getUsage.mockResolvedValue({ stats: { 10: { api_key_id: 10, today_actual_cost: 0, total_actual_cost: 0 } } })
+    let wrapper = await mountView()
+    expect(wrapper.text()).toContain('—')
+    expect(wrapper.text()).not.toContain('$0.0000')
+    wrapper.unmount()
+    mocks.list.mockResolvedValue({ items: [makeKey()], total: 1, page: 1, page_size: 20, pages: 1 })
+    mocks.getUsage.mockResolvedValue({ stats: { 10: { api_key_id: 10, today_actual_cost: 2, total_actual_cost: 3, today_usage_cost: 10, total_usage_cost: 40 } } })
+    wrapper = await mountView()
+    expect(wrapper.text()).toContain('$2.0000')
+    expect(wrapper.text()).not.toContain('$10.0000')
+  })
+
+  it('shows reference usage and limits for hosted Keys without presenting a wallet charge', async () => {
+    const group = { ...groups[1], rate_multiplier: 0, hosted_usage_enabled: true }
+    mocks.list.mockResolvedValue({ items: [makeKey({ group_id: group.id, group, rate_limit_5h: 200, usage_5h: 10 })], total: 1, pages: 1 })
+    mocks.getUsage.mockResolvedValue({ stats: { 10: { today_actual_cost: 0, total_actual_cost: 0, today_usage_cost: 10, total_usage_cost: 40 } } })
+    const wrapper = await mountView()
+    expect(wrapper.text()).toContain('hostedUsage.badge')
+    expect(wrapper.text()).toContain('hostedUsage.reference')
+    expect(wrapper.text()).toContain('hostedUsage.windowLimit')
+    expect(wrapper.text()).toContain('$10.0000')
+    expect(wrapper.text()).toContain('$40.0000')
+    expect(wrapper.text()).toContain('$10.00/$200.00')
+  })
+
   it('removes the raw-key column and makes Use Key primary', async () => {
     const wrapper = await mountView()
     expect(wrapper.findAll('th').map((header) => header.text())).not.toContain('keys.apiKey')

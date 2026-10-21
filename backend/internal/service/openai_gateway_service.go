@@ -4428,16 +4428,19 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 			resolver = newUserGroupRateResolver(nil, nil, resolveUserGroupRateCacheTTL(s.cfg), nil, "service.openai_gateway")
 		}
 		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
-		if multiplier <= 0 {
+		if multiplier <= 0 && !apiKey.Group.UsesHostedUsage() {
 			multiplier = 1.0
 		}
+	}
+	if apiKey.Group.UsesHostedUsage() {
+		multiplier = 0
 	}
 	if math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
 		return errors.New("record ChatGPT turn usage: finite rate multiplier is required")
 	}
 	totalCost := input.BasePriceUSD + input.ImageCostUSD
 	actualCost := totalCost * multiplier
-	if !IsValidOpenAIChatGPTTurnPrice(actualCost) {
+	if !IsValidOpenAIChatGPTTurnPrice(actualCost) && !apiKey.Group.UsesHostedUsage() {
 		return errors.New("record ChatGPT turn usage: effective fixed price is invalid")
 	}
 
@@ -4454,6 +4457,7 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 	}
 	durationMs := int(input.Duration.Milliseconds())
 	accountRateMultiplier := account.BillingRateMultiplier()
+	meteredCost := applyHostedUsage(apiKey.Group, cost, &accountRateMultiplier)
 	requestID := resolveUsageBillingRequestID(ctx, input.RequestID)
 	requestedModel := strings.TrimSpace(input.RequestedModel)
 	if requestedModel == "" {
@@ -4477,6 +4481,7 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		PricingSnapshot:       cost.PricingSnapshot,
 		TotalCost:             cost.TotalCost,
 		ActualCost:            cost.ActualCost,
+		MeteredCost:           meteredCost,
 		RateMultiplier:        multiplier,
 		AccountRateMultiplier: &accountRateMultiplier,
 		BillingType:           billingType,
@@ -4533,7 +4538,8 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		BillingModel:          OpenAIChatGPTTurnBillingModel,
 		RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
 		IsSubscriptionBill:    isSubscriptionBilling,
-		AccountRateMultiplier: accountRateMultiplier,
+		AccountRateMultiplier: account.BillingRateMultiplier(),
+		MeteredCost:           meteredCost,
 		APIKeyService:         input.APIKeyService,
 	}, s.billingDeps(), s.usageBillingRepo)
 	if err != nil {
@@ -4584,6 +4590,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
 	}
 
+	if apiKey.Group.UsesHostedUsage() {
+		multiplier = 0
+	}
 	billingModel := result.Model
 	if resolvedModel := resolveOpenAIBillingModel(result); resolvedModel != "" {
 		billingModel = resolvedModel
@@ -4630,6 +4639,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// Create usage log
 	durationMs := int(result.Duration.Milliseconds())
 	accountRateMultiplier := account.BillingRateMultiplier()
+	meteredCost := applyHostedUsage(apiKey.Group, cost, &accountRateMultiplier)
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
 	usageLog := &UsageLog{
 		ModerationRef:              input.ModerationRef,
@@ -4657,6 +4667,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		PricingSnapshot:            cost.PricingSnapshot,
 		TotalCost:                  cost.TotalCost,
 		ActualCost:                 cost.ActualCost,
+		MeteredCost:                meteredCost,
 		RateMultiplier:             multiplier,
 		ModelRateMultiplier:        &modelRate,
 		UserPaygDiscountMultiplier: &userDiscount,
@@ -4711,7 +4722,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		BillingModel:          billingModel,
 		RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
 		IsSubscriptionBill:    isSubscriptionBilling,
-		AccountRateMultiplier: accountRateMultiplier,
+		AccountRateMultiplier: account.BillingRateMultiplier(),
+		MeteredCost:           meteredCost,
 		APIKeyService:         input.APIKeyService,
 	}, s.billingDeps(), s.usageBillingRepo)
 

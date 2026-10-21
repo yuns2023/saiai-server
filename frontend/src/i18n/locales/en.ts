@@ -1,4 +1,13 @@
 export default {
+  hostedUsage: {
+    adminLabel: 'Independent hosted-account metering',
+    adminHint: 'Requires a zero-rate exclusive standard OpenAI group. Authorized users are not charged; Key limits use standard reference usage. Hosted requests do not add platform account cost. Existing counters are neither reset nor backfilled.',
+    badge: 'Hosted · no platform charge',
+    reference: 'Reference usage',
+    hint: 'Uses the model price recorded for each request without charging the wallet. Separate from upstream quota percentages. Earlier records retain their original basis.',
+    windowLimit: 'Window usage limit'
+  },
+
   tokens: {
     cacheReadRate: 'Cache read rate',
     cacheReadRateHelp: 'Cache read / (uncached input + cache read + cache write), excluding output. Token-weighted, not request hit rate. No input or incomplete data is shown as —.',

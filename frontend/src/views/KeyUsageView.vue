@@ -387,7 +387,7 @@
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined"><template v-if="record.billing_unit === 'turn'">—</template><TokenCount v-else :value="record.cache_read_tokens" :label="t('tokens.cacheRead')" /></span></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined"><template v-if="record.billing_unit === 'turn'">—</template><TokenCount v-else :value="record.cache_creation_tokens" :label="t('tokens.cacheWrite')" /></span></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200"><span :title="record.billing_unit === 'turn' ? t('usage.nativeChatUsageUnknown') : undefined"><template v-if="record.billing_unit === 'turn'">—</template><TokenCount v-else :value="record.total_tokens" :label="t('tokens.total')" /></span></td>
-                    <td class="px-4 py-3 text-sm tabular-nums text-right font-medium text-gray-900 dark:text-white">{{ usd(record.actual_cost) }}<NativeChatCharges :record="record" /></td>
+                    <td class="px-4 py-3 text-sm tabular-nums text-right font-medium text-gray-900 dark:text-white">{{ usd(record.actual_cost) }}<span v-if="record.metered_cost != null" class="block text-xs text-gray-500" :title="t('hostedUsage.hint')">{{ t('hostedUsage.reference') }} {{ usd(record.metered_cost) }}</span><NativeChatCharges :record="record" /></td>
                     <td class="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-dark-200">{{ record.duration_ms != null ? `${record.duration_ms} ms` : '-' }}</td>
                   </tr>
                 </tbody>
@@ -504,6 +504,7 @@ interface SubscriptionUsage {
 }
 
 interface UsageTotals {
+  usage_cost?: number
   requests?: number
   input_tokens?: number
   output_tokens?: number
@@ -521,6 +522,7 @@ interface ModelUsageStat extends UsageTotals {
 }
 
 interface BillingInfo {
+  charge_exempt?: boolean
   type: 'wallet' | 'subscription'
   available?: boolean
   balance_visible?: boolean
@@ -530,6 +532,7 @@ interface BillingInfo {
 }
 
 interface RecentUsageRecord {
+  metered_cost?: number | null
   billing_unit?: 'turn'
   native_chat_turn_cost_usd?: number
   native_chat_image_cost_usd?: number
@@ -831,7 +834,7 @@ const detailRows = computed<DetailRow[]>(() => {
   rows.push({
     iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-500', iconSvg: ICON_CHECK,
     label: t('keyUsage.billingSource'),
-    value: data.billing_mode === 'subscription'
+    value: data.billing?.charge_exempt ? t('hostedUsage.badge') : data.billing_mode === 'subscription'
       ? (data.billing?.plan_name || data.planName || t('keyUsage.subscriptionPlan'))
       : t('keyUsage.payAsYouGo'),
     valueClass: '',
@@ -916,7 +919,7 @@ const usageStatCells = computed<StatCell[]>(() => {
 
   return [
     { label: t('keyUsage.rangeRequests'), value: fmtNum(range.requests) },
-    { label: t('keyUsage.rangeCost'), value: usd(range.actual_cost) },
+    { label: resultData.value?.billing?.charge_exempt ? t('hostedUsage.reference') : t('keyUsage.rangeCost'), value: resultData.value?.billing?.charge_exempt ? (range.usage_cost == null ? '—' : usd(range.usage_cost)) : usd(range.actual_cost) },
     { label: t('keyUsage.avgDuration'), value: range.average_duration_ms ? `${Math.round(range.average_duration_ms)} ms` : '-' },
     { label: t('keyUsage.rpmTpm'), value: `${usage.rpm || 0} / ${usage.tpm || 0}` },
   ]

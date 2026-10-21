@@ -1,4 +1,13 @@
 export default {
+  hostedUsage: {
+    adminLabel: '托管账号独立计量',
+    adminHint: '仅限零倍率的 OpenAI 专属普通分组。所有获授权用户免扣平台余额，Key 按标准折算用量执行限额；托管请求不计平台账号成本。不会清空或追补已有计数。',
+    badge: '托管 · 免平台扣费',
+    reference: '折算用量',
+    hint: '按每次请求记录的模型价格折算，不扣平台余额；与上游账号额度百分比分别统计。启用前记录保持原有口径。',
+    windowLimit: '周期用量限额'
+  },
+
   tokens: {
     cacheReadRate: '缓存读取率',
     cacheReadRateHelp: '缓存读取 ÷（非缓存输入 + 缓存读取 + 缓存写入），不含输出；按 Token 加权，不是请求命中率。无输入或数据不完整时显示 —。',

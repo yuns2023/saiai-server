@@ -62,6 +62,8 @@ const (
 	FieldCacheReadCost = "cache_read_cost"
 	// FieldTotalCost holds the string denoting the total_cost field in the database.
 	FieldTotalCost = "total_cost"
+	// FieldMeteredCost holds the string denoting the metered_cost field in the database.
+	FieldMeteredCost = "metered_cost"
 	// FieldActualCost holds the string denoting the actual_cost field in the database.
 	FieldActualCost = "actual_cost"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
@@ -172,6 +174,7 @@ var Columns = []string{
 	FieldCacheCreation1hCost,
 	FieldCacheReadCost,
 	FieldTotalCost,
+	FieldMeteredCost,
 	FieldActualCost,
 	FieldRateMultiplier,
 	FieldModelRateMultiplier,
@@ -382,6 +385,11 @@ func ByCacheReadCost(opts ...sql.OrderTermOption) OrderOption {
 // ByTotalCost orders the results by the total_cost field.
 func ByTotalCost(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldTotalCost, opts...).ToFunc()
+}
+
+// ByMeteredCost orders the results by the metered_cost field.
+func ByMeteredCost(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMeteredCost, opts...).ToFunc()
 }
 
 // ByActualCost orders the results by the actual_cost field.

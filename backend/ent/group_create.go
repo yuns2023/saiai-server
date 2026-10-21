@@ -120,6 +120,20 @@ func (_c *GroupCreate) SetNillableIsExclusive(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetHostedUsageEnabled sets the "hosted_usage_enabled" field.
+func (_c *GroupCreate) SetHostedUsageEnabled(v bool) *GroupCreate {
+	_c.mutation.SetHostedUsageEnabled(v)
+	return _c
+}
+
+// SetNillableHostedUsageEnabled sets the "hosted_usage_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableHostedUsageEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetHostedUsageEnabled(*v)
+	}
+	return _c
+}
+
 // SetShowAccountQuota sets the "show_account_quota" field.
 func (_c *GroupCreate) SetShowAccountQuota(v bool) *GroupCreate {
 	_c.mutation.SetShowAccountQuota(v)
@@ -828,6 +842,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultIsExclusive
 		_c.mutation.SetIsExclusive(v)
 	}
+	if _, ok := _c.mutation.HostedUsageEnabled(); !ok {
+		v := group.DefaultHostedUsageEnabled
+		_c.mutation.SetHostedUsageEnabled(v)
+	}
 	if _, ok := _c.mutation.ShowAccountQuota(); !ok {
 		v := group.DefaultShowAccountQuota
 		_c.mutation.SetShowAccountQuota(v)
@@ -960,6 +978,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		return &ValidationError{Name: "is_exclusive", err: errors.New(`ent: missing required field "Group.is_exclusive"`)}
+	}
+	if _, ok := _c.mutation.HostedUsageEnabled(); !ok {
+		return &ValidationError{Name: "hosted_usage_enabled", err: errors.New(`ent: missing required field "Group.hosted_usage_enabled"`)}
 	}
 	if _, ok := _c.mutation.ShowAccountQuota(); !ok {
 		return &ValidationError{Name: "show_account_quota", err: errors.New(`ent: missing required field "Group.show_account_quota"`)}
@@ -1126,6 +1147,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 		_node.IsExclusive = value
+	}
+	if value, ok := _c.mutation.HostedUsageEnabled(); ok {
+		_spec.SetField(group.FieldHostedUsageEnabled, field.TypeBool, value)
+		_node.HostedUsageEnabled = value
 	}
 	if value, ok := _c.mutation.ShowAccountQuota(); ok {
 		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)
@@ -1555,6 +1580,18 @@ func (u *GroupUpsert) SetIsExclusive(v bool) *GroupUpsert {
 // UpdateIsExclusive sets the "is_exclusive" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateIsExclusive() *GroupUpsert {
 	u.SetExcluded(group.FieldIsExclusive)
+	return u
+}
+
+// SetHostedUsageEnabled sets the "hosted_usage_enabled" field.
+func (u *GroupUpsert) SetHostedUsageEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldHostedUsageEnabled, v)
+	return u
+}
+
+// UpdateHostedUsageEnabled sets the "hosted_usage_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateHostedUsageEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldHostedUsageEnabled)
 	return u
 }
 
@@ -2449,6 +2486,20 @@ func (u *GroupUpsertOne) SetIsExclusive(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateIsExclusive() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetHostedUsageEnabled sets the "hosted_usage_enabled" field.
+func (u *GroupUpsertOne) SetHostedUsageEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetHostedUsageEnabled(v)
+	})
+}
+
+// UpdateHostedUsageEnabled sets the "hosted_usage_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateHostedUsageEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateHostedUsageEnabled()
 	})
 }
 
@@ -3633,6 +3684,20 @@ func (u *GroupUpsertBulk) SetIsExclusive(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateIsExclusive() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetHostedUsageEnabled sets the "hosted_usage_enabled" field.
+func (u *GroupUpsertBulk) SetHostedUsageEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetHostedUsageEnabled(v)
+	})
+}
+
+// UpdateHostedUsageEnabled sets the "hosted_usage_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateHostedUsageEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateHostedUsageEnabled()
 	})
 }
 

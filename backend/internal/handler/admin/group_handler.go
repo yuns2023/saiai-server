@@ -82,18 +82,19 @@ func NewGroupHandler(adminService service.AdminService, dashboardService *servic
 
 // CreateGroupRequest represents create group request
 type CreateGroupRequest struct {
-	Name             string             `json:"name" binding:"required"`
-	Description      string             `json:"description"`
-	Platform         string             `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity sora"`
-	RateMultiplier   float64            `json:"rate_multiplier"`
-	IsExclusive      bool               `json:"is_exclusive"`
-	ShowAccountQuota bool               `json:"show_account_quota"`
-	RequiredLevelID  *int64             `json:"required_level_id"`
-	SubscriptionType string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
-	FiveHourLimitUSD optionalLimitField `json:"five_hour_limit_usd"`
-	DailyLimitUSD    optionalLimitField `json:"daily_limit_usd"`
-	WeeklyLimitUSD   optionalLimitField `json:"weekly_limit_usd"`
-	MonthlyLimitUSD  optionalLimitField `json:"monthly_limit_usd"`
+	Name               string             `json:"name" binding:"required"`
+	Description        string             `json:"description"`
+	Platform           string             `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity sora"`
+	RateMultiplier     float64            `json:"rate_multiplier"`
+	IsExclusive        bool               `json:"is_exclusive"`
+	ShowAccountQuota   bool               `json:"show_account_quota"`
+	HostedUsageEnabled bool               `json:"hosted_usage_enabled"`
+	RequiredLevelID    *int64             `json:"required_level_id"`
+	SubscriptionType   string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
+	FiveHourLimitUSD   optionalLimitField `json:"five_hour_limit_usd"`
+	DailyLimitUSD      optionalLimitField `json:"daily_limit_usd"`
+	WeeklyLimitUSD     optionalLimitField `json:"weekly_limit_usd"`
+	MonthlyLimitUSD    optionalLimitField `json:"monthly_limit_usd"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
 	ImagePrice1K                    *float64 `json:"image_price_1k"`
 	ImagePrice2K                    *float64 `json:"image_price_2k"`
@@ -138,19 +139,20 @@ type CreateGroupRequest struct {
 
 // UpdateGroupRequest represents update group request
 type UpdateGroupRequest struct {
-	Name             string             `json:"name"`
-	Description      string             `json:"description"`
-	Platform         string             `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity sora"`
-	RateMultiplier   *float64           `json:"rate_multiplier"`
-	IsExclusive      *bool              `json:"is_exclusive"`
-	ShowAccountQuota *bool              `json:"show_account_quota"`
-	RequiredLevelID  *int64             `json:"required_level_id"`
-	Status           string             `json:"status" binding:"omitempty,oneof=active inactive"`
-	SubscriptionType string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
-	FiveHourLimitUSD optionalLimitField `json:"five_hour_limit_usd"`
-	DailyLimitUSD    optionalLimitField `json:"daily_limit_usd"`
-	WeeklyLimitUSD   optionalLimitField `json:"weekly_limit_usd"`
-	MonthlyLimitUSD  optionalLimitField `json:"monthly_limit_usd"`
+	Name               string             `json:"name"`
+	Description        string             `json:"description"`
+	Platform           string             `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity sora"`
+	RateMultiplier     *float64           `json:"rate_multiplier"`
+	IsExclusive        *bool              `json:"is_exclusive"`
+	ShowAccountQuota   *bool              `json:"show_account_quota"`
+	HostedUsageEnabled *bool              `json:"hosted_usage_enabled"`
+	RequiredLevelID    *int64             `json:"required_level_id"`
+	Status             string             `json:"status" binding:"omitempty,oneof=active inactive"`
+	SubscriptionType   string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
+	FiveHourLimitUSD   optionalLimitField `json:"five_hour_limit_usd"`
+	DailyLimitUSD      optionalLimitField `json:"daily_limit_usd"`
+	WeeklyLimitUSD     optionalLimitField `json:"weekly_limit_usd"`
+	MonthlyLimitUSD    optionalLimitField `json:"monthly_limit_usd"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
 	ImagePrice1K                    *float64 `json:"image_price_1k"`
 	ImagePrice2K                    *float64 `json:"image_price_2k"`
@@ -286,6 +288,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		RateMultiplier:                   req.RateMultiplier,
 		IsExclusive:                      req.IsExclusive,
 		ShowAccountQuota:                 req.ShowAccountQuota,
+		HostedUsageEnabled:               req.HostedUsageEnabled,
 		RequiredLevelID:                  req.RequiredLevelID,
 		SubscriptionType:                 req.SubscriptionType,
 		FiveHourLimitUSD:                 req.FiveHourLimitUSD.ToServiceInput(),
@@ -358,6 +361,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		RateMultiplier:                   req.RateMultiplier,
 		IsExclusive:                      req.IsExclusive,
 		ShowAccountQuota:                 req.ShowAccountQuota,
+		HostedUsageEnabled:               req.HostedUsageEnabled,
 		RequiredLevelID:                  req.RequiredLevelID,
 		Status:                           req.Status,
 		SubscriptionType:                 req.SubscriptionType,

@@ -47,6 +47,7 @@ func (Group) Fields() []ent.Field {
 			Default(1.0),
 		field.Bool("is_exclusive").
 			Default(false),
+		field.Bool("hosted_usage_enabled").Default(false),
 		field.Bool("show_account_quota").
 			Default(false).
 			Comment("允许专属分组用户查看账号额度快照"),

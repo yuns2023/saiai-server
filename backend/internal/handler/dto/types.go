@@ -79,16 +79,17 @@ type APIKey struct {
 }
 
 type Group struct {
-	ID               int64        `json:"id"`
-	Name             string       `json:"name"`
-	Description      string       `json:"description"`
-	Platform         string       `json:"platform"`
-	RateMultiplier   float64      `json:"rate_multiplier"`
-	IsExclusive      bool         `json:"is_exclusive"`
-	ShowAccountQuota bool         `json:"show_account_quota"`
-	Status           string       `json:"status"`
-	RequiredLevelID  *int64       `json:"required_level_id"`
-	RequiredLevel    *AccessLevel `json:"required_level,omitempty"`
+	ID                 int64        `json:"id"`
+	Name               string       `json:"name"`
+	Description        string       `json:"description"`
+	Platform           string       `json:"platform"`
+	RateMultiplier     float64      `json:"rate_multiplier"`
+	IsExclusive        bool         `json:"is_exclusive"`
+	ShowAccountQuota   bool         `json:"show_account_quota"`
+	HostedUsageEnabled bool         `json:"hosted_usage_enabled"`
+	Status             string       `json:"status"`
+	RequiredLevelID    *int64       `json:"required_level_id"`
+	RequiredLevel      *AccessLevel `json:"required_level,omitempty"`
 
 	SubscriptionType string   `json:"subscription_type"`
 	FiveHourLimitUSD *float64 `json:"five_hour_limit_usd"`
@@ -434,6 +435,7 @@ type UsageLog struct {
 	CacheReadCost                 float64  `json:"cache_read_cost"`
 	TotalCost                     float64  `json:"total_cost"`
 	ActualCost                    float64  `json:"actual_cost"`
+	MeteredCost                   *float64 `json:"metered_cost,omitempty"`
 	RateMultiplier                float64  `json:"rate_multiplier"`
 	ModelRateMultiplier           *float64 `json:"model_rate_multiplier,omitempty"`
 	AccountPaygDiscountMultiplier *float64 `json:"account_payg_discount_multiplier,omitempty"`

@@ -177,6 +177,40 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 	})
 }
 
+func TestHostedUsageOnlyExemptsWalletEligibility(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name   string
+		change func(*service.APIKey)
+		status int
+	}{
+		{"empty wallet", func(*service.APIKey) {}, http.StatusOK},
+		{"quota exhausted", func(k *service.APIKey) { k.Quota, k.QuotaUsed = 1, 1 }, http.StatusForbidden},
+		{"expired", func(k *service.APIKey) { past := time.Now().Add(-time.Hour); k.ExpiresAt = &past }, http.StatusForbidden},
+		{"inactive group", func(k *service.APIKey) { k.Group.Status = "inactive" }, http.StatusForbidden},
+		{"ordinary zero multiplier", func(k *service.APIKey) { k.Group.HostedUsageEnabled = false }, http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &service.Group{ID: 42, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true,
+				IsExclusive: true, SubscriptionType: service.SubscriptionTypeStandard, HostedUsageEnabled: true}
+			key := &service.APIKey{ID: 9, UserID: 7, Key: "TEST_ONLY_HOSTED", Status: service.StatusActive,
+				User: &service.User{ID: 7, Status: service.StatusActive, AllowedGroups: []int64{g.ID}}, GroupID: &g.ID, Group: g}
+			tc.change(key)
+			repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) { return key, nil }}
+			cfg := &config.Config{RunMode: config.RunModeStandard}
+			keyService := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+			router := gin.New()
+			router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(keyService, nil, nil, cfg)))
+			router.GET("/v1/responses", func(c *gin.Context) { c.Status(http.StatusOK) })
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			req.Header.Set("x-api-key", key.Key)
+			router.ServeHTTP(w, req)
+			require.Equal(t, tc.status, w.Code, w.Body.String())
+		})
+	}
+}
+
 func TestInactiveGroupStopsExistingKeyRequests(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 42, Platform: service.PlatformAnthropic, Status: "inactive", Hydrated: true}

@@ -479,6 +479,33 @@ func (_u *UsageLogUpdate) AddTotalCost(v float64) *UsageLogUpdate {
 	return _u
 }
 
+// SetMeteredCost sets the "metered_cost" field.
+func (_u *UsageLogUpdate) SetMeteredCost(v float64) *UsageLogUpdate {
+	_u.mutation.ResetMeteredCost()
+	_u.mutation.SetMeteredCost(v)
+	return _u
+}
+
+// SetNillableMeteredCost sets the "metered_cost" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableMeteredCost(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetMeteredCost(*v)
+	}
+	return _u
+}
+
+// AddMeteredCost adds value to the "metered_cost" field.
+func (_u *UsageLogUpdate) AddMeteredCost(v float64) *UsageLogUpdate {
+	_u.mutation.AddMeteredCost(v)
+	return _u
+}
+
+// ClearMeteredCost clears the value of the "metered_cost" field.
+func (_u *UsageLogUpdate) ClearMeteredCost() *UsageLogUpdate {
+	_u.mutation.ClearMeteredCost()
+	return _u
+}
+
 // SetActualCost sets the "actual_cost" field.
 func (_u *UsageLogUpdate) SetActualCost(v float64) *UsageLogUpdate {
 	_u.mutation.ResetActualCost()
@@ -1075,6 +1102,15 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedTotalCost(); ok {
 		_spec.AddField(usagelog.FieldTotalCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.MeteredCost(); ok {
+		_spec.SetField(usagelog.FieldMeteredCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedMeteredCost(); ok {
+		_spec.AddField(usagelog.FieldMeteredCost, field.TypeFloat64, value)
+	}
+	if _u.mutation.MeteredCostCleared() {
+		_spec.ClearField(usagelog.FieldMeteredCost, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.ActualCost(); ok {
 		_spec.SetField(usagelog.FieldActualCost, field.TypeFloat64, value)
@@ -1787,6 +1823,33 @@ func (_u *UsageLogUpdateOne) AddTotalCost(v float64) *UsageLogUpdateOne {
 	return _u
 }
 
+// SetMeteredCost sets the "metered_cost" field.
+func (_u *UsageLogUpdateOne) SetMeteredCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetMeteredCost()
+	_u.mutation.SetMeteredCost(v)
+	return _u
+}
+
+// SetNillableMeteredCost sets the "metered_cost" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableMeteredCost(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetMeteredCost(*v)
+	}
+	return _u
+}
+
+// AddMeteredCost adds value to the "metered_cost" field.
+func (_u *UsageLogUpdateOne) AddMeteredCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddMeteredCost(v)
+	return _u
+}
+
+// ClearMeteredCost clears the value of the "metered_cost" field.
+func (_u *UsageLogUpdateOne) ClearMeteredCost() *UsageLogUpdateOne {
+	_u.mutation.ClearMeteredCost()
+	return _u
+}
+
 // SetActualCost sets the "actual_cost" field.
 func (_u *UsageLogUpdateOne) SetActualCost(v float64) *UsageLogUpdateOne {
 	_u.mutation.ResetActualCost()
@@ -2413,6 +2476,15 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.AddedTotalCost(); ok {
 		_spec.AddField(usagelog.FieldTotalCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.MeteredCost(); ok {
+		_spec.SetField(usagelog.FieldMeteredCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedMeteredCost(); ok {
+		_spec.AddField(usagelog.FieldMeteredCost, field.TypeFloat64, value)
+	}
+	if _u.mutation.MeteredCostCleared() {
+		_spec.ClearField(usagelog.FieldMeteredCost, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.ActualCost(); ok {
 		_spec.SetField(usagelog.FieldActualCost, field.TypeFloat64, value)

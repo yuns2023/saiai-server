@@ -29,6 +29,8 @@ const (
 	FieldRateMultiplier = "rate_multiplier"
 	// FieldIsExclusive holds the string denoting the is_exclusive field in the database.
 	FieldIsExclusive = "is_exclusive"
+	// FieldHostedUsageEnabled holds the string denoting the hosted_usage_enabled field in the database.
+	FieldHostedUsageEnabled = "hosted_usage_enabled"
 	// FieldShowAccountQuota holds the string denoting the show_account_quota field in the database.
 	FieldShowAccountQuota = "show_account_quota"
 	// FieldRequiredLevelID holds the string denoting the required_level_id field in the database.
@@ -206,6 +208,7 @@ var Columns = []string{
 	FieldDescription,
 	FieldRateMultiplier,
 	FieldIsExclusive,
+	FieldHostedUsageEnabled,
 	FieldShowAccountQuota,
 	FieldRequiredLevelID,
 	FieldStatus,
@@ -290,6 +293,8 @@ var (
 	DefaultRateMultiplier float64
 	// DefaultIsExclusive holds the default value on creation for the "is_exclusive" field.
 	DefaultIsExclusive bool
+	// DefaultHostedUsageEnabled holds the default value on creation for the "hosted_usage_enabled" field.
+	DefaultHostedUsageEnabled bool
 	// DefaultShowAccountQuota holds the default value on creation for the "show_account_quota" field.
 	DefaultShowAccountQuota bool
 	// DefaultStatus holds the default value on creation for the "status" field.
@@ -399,6 +404,11 @@ func ByRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 // ByIsExclusive orders the results by the is_exclusive field.
 func ByIsExclusive(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIsExclusive, opts...).ToFunc()
+}
+
+// ByHostedUsageEnabled orders the results by the hosted_usage_enabled field.
+func ByHostedUsageEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldHostedUsageEnabled, opts...).ToFunc()
 }
 
 // ByShowAccountQuota orders the results by the show_account_quota field.

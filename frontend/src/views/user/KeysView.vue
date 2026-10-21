@@ -101,11 +101,12 @@
                   :platform="row.group.platform"
                   :subscription-type="row.group.subscription_type"
                   :rate-multiplier="row.group.rate_multiplier"
-                  :user-rate-multiplier="userGroupRates[row.group.id]"
+                  :user-rate-multiplier="row.group.hosted_usage_enabled ? 0 : userGroupRates[row.group.id]"
                 />
                 <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
                   t('keys.noGroup')
                 }}</span>
+                <span v-if="row.group?.hosted_usage_enabled" class="text-xs text-emerald-600" :title="t('hostedUsage.hint')">{{ t('hostedUsage.badge') }}</span>
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
                 <svg
                   class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
@@ -125,17 +126,18 @@
           </template>
 
           <template #cell-usage="{ row }">
-            <div class="text-sm">
+            <div class="text-sm" :title="row.group?.hosted_usage_enabled ? t('hostedUsage.hint') : undefined">
+              <div v-if="row.group?.hosted_usage_enabled" class="text-xs text-emerald-600">{{ t('hostedUsage.reference') }}</div>
               <div class="flex items-center gap-1.5">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('keys.today') }}:</span>
                 <span class="font-medium text-gray-900 dark:text-white">
-                  ${{ (usageStats[row.id]?.today_actual_cost ?? 0).toFixed(4) }}
+                  {{ formatKeyUsage(row, 'today') }}
                 </span>
               </div>
               <div class="mt-0.5 flex items-center gap-1.5">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('keys.total') }}:</span>
                 <span class="font-medium text-gray-900 dark:text-white">
-                  ${{ (usageStats[row.id]?.total_actual_cost ?? 0).toFixed(4) }}
+                  {{ formatKeyUsage(row, 'total') }}
                 </span>
               </div>
               <!-- Quota progress (if quota is set) -->
@@ -168,6 +170,7 @@
 
           <template #cell-rate_limit="{ row }">
             <div v-if="row.rate_limit_5h > 0 || row.rate_limit_1d > 0 || row.rate_limit_7d > 0" class="space-y-1.5 min-w-[140px]">
+              <div v-if="row.group?.hosted_usage_enabled" class="text-xs text-gray-500" :title="t('hostedUsage.hint')">{{ t('hostedUsage.windowLimit') }}</div>
               <!-- 5h window -->
               <div v-if="row.rate_limit_5h > 0">
                 <div class="flex items-center justify-between text-xs">
@@ -1058,6 +1061,14 @@ let resetTimer: ReturnType<typeof setInterval> | null = null
 const usageStats = ref<Record<string, BatchApiKeyUsageStats>>({})
 const userGroupRates = ref<Record<number, number>>({})
 
+const formatKeyUsage = (key: ApiKey, period: 'today' | 'total'): string => {
+  const stats = usageStats.value[key.id]
+  const amount = key.group?.hosted_usage_enabled
+    ? stats?.[`${period}_usage_cost`]
+    : (stats?.[`${period}_actual_cost`] ?? 0)
+  return amount == null ? '—' : `$${amount.toFixed(4)}`
+}
+
 const pagination = ref({
   page: 1,
   page_size: getPersistedPageSize(),
@@ -1184,7 +1195,7 @@ const groupOptions = computed(() =>
     label: group.name,
     description: group.description,
     rate: group.rate_multiplier,
-    userRate: userGroupRates.value[group.id] ?? null,
+    userRate: group.hosted_usage_enabled ? 0 : userGroupRates.value[group.id] ?? null,
     subscriptionType: group.subscription_type,
     platform: group.platform
   }))

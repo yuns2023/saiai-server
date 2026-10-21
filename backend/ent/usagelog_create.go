@@ -307,6 +307,20 @@ func (_c *UsageLogCreate) SetNillableTotalCost(v *float64) *UsageLogCreate {
 	return _c
 }
 
+// SetMeteredCost sets the "metered_cost" field.
+func (_c *UsageLogCreate) SetMeteredCost(v float64) *UsageLogCreate {
+	_c.mutation.SetMeteredCost(v)
+	return _c
+}
+
+// SetNillableMeteredCost sets the "metered_cost" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableMeteredCost(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetMeteredCost(*v)
+	}
+	return _c
+}
+
 // SetActualCost sets the "actual_cost" field.
 func (_c *UsageLogCreate) SetActualCost(v float64) *UsageLogCreate {
 	_c.mutation.SetActualCost(v)
@@ -937,6 +951,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldTotalCost, field.TypeFloat64, value)
 		_node.TotalCost = value
 	}
+	if value, ok := _c.mutation.MeteredCost(); ok {
+		_spec.SetField(usagelog.FieldMeteredCost, field.TypeFloat64, value)
+		_node.MeteredCost = &value
+	}
 	if value, ok := _c.mutation.ActualCost(); ok {
 		_spec.SetField(usagelog.FieldActualCost, field.TypeFloat64, value)
 		_node.ActualCost = value
@@ -1541,6 +1559,30 @@ func (u *UsageLogUpsert) UpdateTotalCost() *UsageLogUpsert {
 // AddTotalCost adds v to the "total_cost" field.
 func (u *UsageLogUpsert) AddTotalCost(v float64) *UsageLogUpsert {
 	u.Add(usagelog.FieldTotalCost, v)
+	return u
+}
+
+// SetMeteredCost sets the "metered_cost" field.
+func (u *UsageLogUpsert) SetMeteredCost(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldMeteredCost, v)
+	return u
+}
+
+// UpdateMeteredCost sets the "metered_cost" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateMeteredCost() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldMeteredCost)
+	return u
+}
+
+// AddMeteredCost adds v to the "metered_cost" field.
+func (u *UsageLogUpsert) AddMeteredCost(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldMeteredCost, v)
+	return u
+}
+
+// ClearMeteredCost clears the value of the "metered_cost" field.
+func (u *UsageLogUpsert) ClearMeteredCost() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldMeteredCost)
 	return u
 }
 
@@ -2349,6 +2391,34 @@ func (u *UsageLogUpsertOne) AddTotalCost(v float64) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateTotalCost() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateTotalCost()
+	})
+}
+
+// SetMeteredCost sets the "metered_cost" field.
+func (u *UsageLogUpsertOne) SetMeteredCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetMeteredCost(v)
+	})
+}
+
+// AddMeteredCost adds v to the "metered_cost" field.
+func (u *UsageLogUpsertOne) AddMeteredCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddMeteredCost(v)
+	})
+}
+
+// UpdateMeteredCost sets the "metered_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateMeteredCost() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateMeteredCost()
+	})
+}
+
+// ClearMeteredCost clears the value of the "metered_cost" field.
+func (u *UsageLogUpsertOne) ClearMeteredCost() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearMeteredCost()
 	})
 }
 
@@ -3372,6 +3442,34 @@ func (u *UsageLogUpsertBulk) AddTotalCost(v float64) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateTotalCost() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateTotalCost()
+	})
+}
+
+// SetMeteredCost sets the "metered_cost" field.
+func (u *UsageLogUpsertBulk) SetMeteredCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetMeteredCost(v)
+	})
+}
+
+// AddMeteredCost adds v to the "metered_cost" field.
+func (u *UsageLogUpsertBulk) AddMeteredCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddMeteredCost(v)
+	})
+}
+
+// UpdateMeteredCost sets the "metered_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateMeteredCost() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateMeteredCost()
+	})
+}
+
+// ClearMeteredCost clears the value of the "metered_cost" field.
+func (u *UsageLogUpsertBulk) ClearMeteredCost() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearMeteredCost()
 	})
 }
 

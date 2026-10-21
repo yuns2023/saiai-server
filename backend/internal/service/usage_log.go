@@ -143,6 +143,7 @@ type UsageLog struct {
 	CacheReadCost       float64
 	PricingSnapshot     *PricingSnapshot
 	TotalCost           float64
+	MeteredCost         *float64
 	ActualCost          float64
 	RateMultiplier      float64
 	ModelRateMultiplier *float64

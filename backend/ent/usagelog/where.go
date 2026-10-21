@@ -165,6 +165,11 @@ func TotalCost(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldTotalCost, v))
 }
 
+// MeteredCost applies equality check predicate on the "metered_cost" field. It's identical to MeteredCostEQ.
+func MeteredCost(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldMeteredCost, v))
+}
+
 // ActualCost applies equality check predicate on the "actual_cost" field. It's identical to ActualCostEQ.
 func ActualCost(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldActualCost, v))
@@ -1188,6 +1193,56 @@ func TotalCostLT(v float64) predicate.UsageLog {
 // TotalCostLTE applies the LTE predicate on the "total_cost" field.
 func TotalCostLTE(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldTotalCost, v))
+}
+
+// MeteredCostEQ applies the EQ predicate on the "metered_cost" field.
+func MeteredCostEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldMeteredCost, v))
+}
+
+// MeteredCostNEQ applies the NEQ predicate on the "metered_cost" field.
+func MeteredCostNEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldMeteredCost, v))
+}
+
+// MeteredCostIn applies the In predicate on the "metered_cost" field.
+func MeteredCostIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldMeteredCost, vs...))
+}
+
+// MeteredCostNotIn applies the NotIn predicate on the "metered_cost" field.
+func MeteredCostNotIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldMeteredCost, vs...))
+}
+
+// MeteredCostGT applies the GT predicate on the "metered_cost" field.
+func MeteredCostGT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldMeteredCost, v))
+}
+
+// MeteredCostGTE applies the GTE predicate on the "metered_cost" field.
+func MeteredCostGTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldMeteredCost, v))
+}
+
+// MeteredCostLT applies the LT predicate on the "metered_cost" field.
+func MeteredCostLT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldMeteredCost, v))
+}
+
+// MeteredCostLTE applies the LTE predicate on the "metered_cost" field.
+func MeteredCostLTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldMeteredCost, v))
+}
+
+// MeteredCostIsNil applies the IsNil predicate on the "metered_cost" field.
+func MeteredCostIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldMeteredCost))
+}
+
+// MeteredCostNotNil applies the NotNil predicate on the "metered_cost" field.
+func MeteredCostNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldMeteredCost))
 }
 
 // ActualCostEQ applies the EQ predicate on the "actual_cost" field.

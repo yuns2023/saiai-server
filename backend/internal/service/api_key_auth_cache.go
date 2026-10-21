@@ -50,6 +50,8 @@ type APIKeyAuthGroupSnapshot struct {
 	Platform                        string             `json:"platform"`
 	Status                          string             `json:"status"`
 	SubscriptionType                string             `json:"subscription_type"`
+	HostedUsageEnabled              bool               `json:"hosted_usage_enabled,omitempty"`
+	IsExclusive                     bool               `json:"is_exclusive,omitempty"`
 	RateMultiplier                  float64            `json:"rate_multiplier"`
 	RequiredLevel                   *AccessLevel       `json:"required_level,omitempty"`
 	ModelRateMultipliers            map[string]float64 `json:"model_rate_multipliers,omitempty"`

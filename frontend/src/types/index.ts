@@ -404,6 +404,7 @@ export interface Group {
   platform: GroupPlatform
   rate_multiplier: number
   is_exclusive: boolean
+  hosted_usage_enabled?: boolean
   show_account_quota?: boolean
   status: 'active' | 'inactive'
   required_level_id: number | null
@@ -541,6 +542,7 @@ export interface CreateGroupRequest {
   platform?: GroupPlatform
   rate_multiplier?: number
   is_exclusive?: boolean
+  hosted_usage_enabled?: boolean
   show_account_quota?: boolean
   required_level_id?: number | null
   subscription_type?: SubscriptionType
@@ -591,6 +593,7 @@ export interface UpdateGroupRequest {
   platform?: GroupPlatform
   rate_multiplier?: number
   is_exclusive?: boolean
+  hosted_usage_enabled?: boolean
   show_account_quota?: boolean
   required_level_id?: number | null
   status?: 'active' | 'inactive'
@@ -1099,6 +1102,7 @@ export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invit
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2'
 
 export interface UsageLog {
+  metered_cost?: number | null
   billing_unit?: 'turn'
   native_chat_turn_cost_usd?: number
   native_chat_image_cost_usd?: number

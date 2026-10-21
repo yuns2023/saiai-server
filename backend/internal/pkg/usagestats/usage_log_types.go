@@ -280,6 +280,8 @@ type BatchUserUsageStats struct {
 
 // BatchAPIKeyUsageStats represents usage stats for a single API key
 type BatchAPIKeyUsageStats struct {
+	TodayUsageCost  float64 `json:"today_usage_cost"`
+	TotalUsageCost  float64 `json:"total_usage_cost"`
 	APIKeyID        int64   `json:"api_key_id"`
 	TodayActualCost float64 `json:"today_actual_cost"`
 	TotalActualCost float64 `json:"total_actual_cost"`

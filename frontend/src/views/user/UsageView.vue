@@ -267,6 +267,7 @@
               <span class="font-medium text-green-600 dark:text-green-400">
                 {{ t(usageBillingLabel(row.billing_type)) }} ${{ row.actual_cost.toFixed(6) }}
               </span>
+              <span v-if="row.metered_cost != null" class="text-xs text-gray-500" :title="t('hostedUsage.hint')">{{ t('hostedUsage.reference') }} ${{ row.metered_cost.toFixed(6) }}</span>
               <span v-if="row.model_rate_multiplier != null && row.model_rate_multiplier !== 1" class="rounded-sm bg-indigo-100 px-1 text-[10px] text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300" :title="t('usage.groupModelMultiplier')">{{ row.model_rate_multiplier }}x</span>
               <span v-if="row.user_payg_discount_multiplier != null && row.user_payg_discount_multiplier !== 1" class="rounded-sm bg-emerald-100 px-1 text-[10px] text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" :title="t('usage.paygUserDiscount')">{{ row.user_payg_discount_multiplier }}x</span>
               <span v-if="row.account_payg_discount_multiplier != null && row.account_payg_discount_multiplier !== 1" class="rounded-sm bg-amber-100 px-1 text-[10px] text-amber-700 dark:bg-amber-500/20 dark:text-amber-300" :title="t('usage.legacyPaygAccountDiscount')">{{ row.account_payg_discount_multiplier }}x</span>
@@ -858,6 +859,7 @@ const exportToCSV = async () => {
       t('usage.billingSource'),
       t('usage.userBilled'),
       'Original Cost',
+      t('hostedUsage.reference'),
       'First Token (ms)',
       'Duration (ms)'
     ]
@@ -881,6 +883,7 @@ const exportToCSV = async () => {
         t(usageBillingLabel(log.billing_type)),
         log.actual_cost.toFixed(8),
         log.total_cost.toFixed(8),
+        log.metered_cost?.toFixed(8) ?? '',
         log.first_token_ms ?? '',
         log.duration_ms
       ].map(escapeCsvCell)

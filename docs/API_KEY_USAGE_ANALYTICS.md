@@ -232,6 +232,48 @@ it is not a payment total. Charts retaining the combined metric explicitly say
 that it includes subscription quota. CSV exports include the billing source.
 Missing breakdown fields render as unavailable, not zero, for older API servers.
 
+## Hosted OpenAI reference usage
+
+`hosted_usage_enabled` is an administrator opt-in for exclusive, standard OpenAI
+groups with a zero **group default** rate. A zero user-specific override or
+`show_account_quota` alone does not enable it. All users granted access to the
+enabled group are exempt from platform wallet charges, including users with
+an older nonzero rate override. Existing group authorization still applies.
+
+| Persisted amount | Hosted request behavior |
+| --- | --- |
+| `total_cost` | Existing model-price reference, including the applicable service tier or native Chat fixed-turn price |
+| `metered_cost` | Snapshot of that reference, used for Key total and 5h/day/week limits |
+| `actual_cost` | Zero platform charge |
+| `account_rate_multiplier` | Zero reporting snapshot, excluding the request from configured platform account cost |
+
+HTTP, streaming, WebSocket and native Chat accounting use the same settlement
+transaction and request deduplication. Account objects and their global
+multipliers are unchanged: paid groups sharing an account retain normal
+accounting, and configured upstream account budgets retain their normal basis.
+Hosted mode bypasses only wallet eligibility; Key quota, window limits, expiry,
+IP, user status and group checks still apply. Existing post-request limit
+enforcement remains subject to in-flight request overshoot.
+
+Nullable `metered_cost` preserves historical records. Batch Key analytics adds
+`today_usage_cost` and `total_usage_cost` by summing
+`COALESCE(metered_cost, actual_cost)`, without changing existing actual-charge
+fields or joining current group settings. User Key pages label these amounts
+as reference usage. Usage records and CSV exports show reference usage beside
+the actual charge. Public `/v1/usage` exposes the same per-Key reference through
+`usage.range.usage_cost` and `usage.today.usage_cost` for an enabled hosted Key;
+`billing.charge_exempt=true` hides unrelated wallet balances while retaining the
+legacy billing mode. Upstream account quota percentages remain separate and
+may include other groups or off-platform traffic.
+
+Migration 110 defaults every group to disabled and does not backfill usage,
+reset windows or alter balances. Enabling/disabling the group preserves prior
+counters; earlier zero-charge requests are not retrospectively metered. A Key
+with outstanding quota/window usage cannot switch between hosted and billed
+groups until the user explicitly resets those counters. Missing model pricing
+retains the existing unpriced-request policy; reference usage is not a substitute
+for an upstream hard quota or concurrency limit.
+
 Before rollout, read-only validation should check historical billing type values
 and type/relation inconsistencies. Old rows defaulted to type 0 cannot be reliably
 reclassified from a missing subscription ID; do not automatically rewrite them.
