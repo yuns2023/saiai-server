@@ -55,7 +55,7 @@ func observeOpenAIStreamFailure(c *gin.Context, account *Account, resp *http.Res
 		}
 	}
 	// No provider message or arbitrary extra fields are captured: they may echo
-	// prompt content or credentials. The original event still goes to the client.
+	// prompt content or credentials.
 	message := "Upstream Responses stream returned an error"
 	detail := map[string]any{
 		"error":                 map[string]string{"code": code, "type": errType, "message": message},

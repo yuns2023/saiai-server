@@ -105,12 +105,13 @@ type RelayOptions struct {
 	BeforeUpstreamFrame  func(frame RelayUpstreamFrame) error
 	// FilterUpstreamFrame runs after observation. False keeps telemetry private
 	// without committing the current turn or interrupting the upstream relay.
-	FilterUpstreamFrame func(frame RelayUpstreamFrame) bool
-	BufferResponseStart bool
-	TurnMetadata        func(turn int, payload []byte) RelayTurnMetadata
-	OnTurnComplete      func(turn RelayTurnResult)
-	OnTrace             func(event RelayTraceEvent)
-	Now                 func() time.Time
+	FilterUpstreamFrame    func(frame RelayUpstreamFrame) bool
+	TransformUpstreamFrame func(payload []byte) []byte
+	BufferResponseStart    bool
+	TurnMetadata           func(turn int, payload []byte) RelayTurnMetadata
+	OnTurnComplete         func(turn RelayTurnResult)
+	OnTrace                func(event RelayTraceEvent)
+	Now                    func() time.Time
 }
 
 type RelayTraceEvent struct {
@@ -133,6 +134,7 @@ type relayState struct {
 	turns                  *relayTurnTracker
 	beforeUpstreamFrame    func(frame RelayUpstreamFrame) error
 	filterUpstreamFrame    func(frame RelayUpstreamFrame) bool
+	transformUpstreamFrame func(payload []byte) []byte
 	bufferResponseStart    bool
 }
 
@@ -201,10 +203,11 @@ func Relay(
 	}
 	startAt := nowFn()
 	state := &relayState{
-		turns:               newRelayTurnTracker(),
-		beforeUpstreamFrame: options.BeforeUpstreamFrame,
-		filterUpstreamFrame: options.FilterUpstreamFrame,
-		bufferResponseStart: options.BufferResponseStart,
+		turns:                  newRelayTurnTracker(),
+		beforeUpstreamFrame:    options.BeforeUpstreamFrame,
+		filterUpstreamFrame:    options.FilterUpstreamFrame,
+		transformUpstreamFrame: options.TransformUpstreamFrame,
+		bufferResponseStart:    options.BufferResponseStart,
 	}
 	onTrace := options.OnTrace
 
@@ -503,6 +506,9 @@ func runUpstreamToClient(
 	bufferedBytes := 0
 	bufferResponseStart := state != nil && state.bufferResponseStart
 	forwardFrame := func(messageType coderws.MessageType, payload []byte) error {
+		if state != nil && state.transformUpstreamFrame != nil {
+			payload = state.transformUpstreamFrame(payload)
+		}
 		if err := writeClient(messageType, payload); err != nil {
 			return err
 		}

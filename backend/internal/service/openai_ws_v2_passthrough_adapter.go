@@ -345,6 +345,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			FilterUpstreamFrame: func(frame openaiwsv2.RelayUpstreamFrame) bool {
 				return !hideOpenAICodexQuota(account) || !isOpenAICodexQuotaEvent(frame.Payload)
 			},
+			TransformUpstreamFrame: func(payload []byte) []byte {
+				return normalizeOpenAICodexCapacityError(account, payload)
+			},
 			OnClientTurn: func(turn int, messageType coderws.MessageType, payload []byte) error {
 				if account.IsOpenAIOAuth() {
 					if err := s.validateOpenAINativeFrameTurnState(c, account, payload); err != nil {
@@ -451,7 +454,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					s.renewOpenAINativeTurnStateAfterSuccess(ctx, account, userID, keys)
 				}
 				if turn.Failure != nil {
-					// Error metadata is persisted independently of the unchanged
+					// Error metadata is persisted from the original provider
 					// frame. Remove the selected credential even when it is opaque
 					// and would not match the general log redactor's patterns.
 					redactCredential := func(value string) string {

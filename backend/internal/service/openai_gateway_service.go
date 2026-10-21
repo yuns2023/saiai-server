@@ -3267,6 +3267,9 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		"upstream_error",
 		"Upstream request failed",
 	); matched {
+		if normalized := normalizeOpenAICodexCapacityError(account, body); !bytes.Equal(normalized, body) {
+			status, errType, errMsg = http.StatusServiceUnavailable, "server_error", codexUpstreamCapacityMessage
+		}
 		c.JSON(status, gin.H{
 			"error": gin.H{
 				"type":    errType,
@@ -3335,8 +3338,10 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 
 	if account.IsOpenAIOAuth() && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusPaymentRequired && resp.StatusCode != http.StatusForbidden {
 		s.writeOpenAINativeResponseHeaders(c.Writer.Header(), resp.Header)
-		c.Status(resp.StatusCode)
-		_, _ = c.Writer.Write(body)
+		if !writeOpenAICodexCapacityError(c, account, body) {
+			c.Status(resp.StatusCode)
+			_, _ = c.Writer.Write(body)
+		}
 		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
 	}
 
@@ -3433,8 +3438,8 @@ type openaiStreamingResult struct {
 	responseID   string
 }
 
-// handleNativeRelayErrorResponse returns the upstream response without local
-// retry, failover, status remapping, or account-state mutation. Each relay hop
+// handleNativeRelayErrorResponse returns upstream failures without local
+// retry, failover, or account-state mutation. Each relay hop
 // gets one attempt, preventing retry multiplication across a relay chain.
 func (s *OpenAIGatewayService) handleNativeRelayErrorResponse(
 	resp *http.Response,
@@ -3454,8 +3459,10 @@ func (s *OpenAIGatewayService) handleNativeRelayErrorResponse(
 		Message:            upstreamMsg,
 	})
 	s.writeOpenAIResponseHeaders(c.Writer.Header(), resp.Header, account)
-	c.Status(resp.StatusCode)
-	_, _ = c.Writer.Write(body)
+	if !writeOpenAICodexCapacityError(c, account, body) {
+		c.Status(resp.StatusCode)
+		_, _ = c.Writer.Write(body)
+	}
 	if upstreamMsg == "" {
 		return nil, fmt.Errorf("native relay upstream error: %d", resp.StatusCode)
 	}
@@ -3635,6 +3642,12 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				}
 			}
 			s.observeOpenAINativeMetadataTurnState(c, account, s.openAINativeResponseSessionHash(c), dataBytes)
+			if normalized := normalizeOpenAICodexCapacityError(account, dataBytes); !bytes.Equal(normalized, dataBytes) {
+				line = "data: " + string(normalized)
+				if needModelReplace {
+					line = s.replaceModelInSSELine(line, mappedModel, originalModel)
+				}
+			}
 			eventResponseID := strings.TrimSpace(gjson.GetBytes(dataBytes, "response.id").String())
 			if responseID == "" {
 				responseID = eventResponseID
@@ -3950,7 +3963,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
-	c.Data(resp.StatusCode, contentType, body)
+	c.Data(resp.StatusCode, contentType, normalizeOpenAICodexCapacityError(account, body))
 
 	return usage, nil
 }
@@ -4007,7 +4020,7 @@ func (s *OpenAIGatewayService) handleOAuthSSEToJSON(resp *http.Response, c *gin.
 			contentType = "text/event-stream"
 		}
 	}
-	c.Data(resp.StatusCode, contentType, body)
+	c.Data(resp.StatusCode, contentType, normalizeOpenAICodexCapacityError(account, body))
 
 	return usage, nil
 }

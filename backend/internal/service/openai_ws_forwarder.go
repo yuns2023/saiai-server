@@ -2120,6 +2120,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if clientDisconnected {
 			return
 		}
+		message = normalizeOpenAICodexCapacityError(account, message)
 		frame := make([]byte, 0, len(message)+8)
 		frame = append(frame, "data: "...)
 		frame = append(frame, message...)
@@ -2378,7 +2379,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			responseID = strings.TrimSpace(gjson.GetBytes(finalResponse, "id").String())
 		}
 
-		c.Data(http.StatusOK, "application/json", finalResponse)
+		c.Data(http.StatusOK, "application/json", normalizeOpenAICodexCapacityError(account, finalResponse))
 	} else {
 		flushStreamWriter(true)
 	}
@@ -3021,6 +3022,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 	}
 
 	writeClientMessage := func(message []byte) error {
+		message = normalizeOpenAICodexCapacityError(account, message)
 		writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
 		defer cancel()
 		return clientConn.Write(writeCtx, coderws.MessageText, message)
