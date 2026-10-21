@@ -270,7 +270,9 @@ Migration 110 defaults every group to disabled and does not backfill usage,
 reset windows or alter balances. Enabling/disabling the group preserves prior
 counters; earlier zero-charge requests are not retrospectively metered. A Key
 with outstanding quota/window usage cannot switch between hosted and billed
-groups until the user explicitly resets those counters. Missing model pricing
+groups until the user explicitly resets those counters. This also applies to
+administrator rebinding/unbinding. Bulk group replacement across these bases
+requires individual Key transitions instead. Missing model pricing
 retains the existing unpriced-request policy; reference usage is not a substitute
 for an upstream hard quota or concurrency limit.
 

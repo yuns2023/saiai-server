@@ -1,6 +1,11 @@
 package service
 
-import infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+import (
+	"context"
+	"fmt"
+
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+)
 
 // Hosted metering is an explicit, zero-charge policy for an exclusive OpenAI
 // group. A zero user/group multiplier alone never enables this policy.
@@ -39,4 +44,18 @@ func apiKeyUsageCost(p *postUsageBillingParams) float64 {
 		return *p.MeteredCost
 	}
 	return p.Cost.ActualCost
+}
+
+func validateAPIKeyMeteringBasisChange(ctx context.Context, repo APIKeyRepository, key *APIKey, target *Group) error {
+	if key.Group.UsesHostedUsage() == target.UsesHostedUsage() {
+		return nil
+	}
+	data, err := repo.GetRateLimitData(ctx, key.ID)
+	if err != nil {
+		return fmt.Errorf("check metering basis change: %w", err)
+	}
+	if key.QuotaUsed > 0 || data != nil && (data.EffectiveUsage5h() > 0 || data.EffectiveUsage1d() > 0 || data.EffectiveUsage7d() > 0) {
+		return infraerrors.BadRequest("KEY_METERING_BASIS_CHANGE", "Reset Key quota and window usage before switching between hosted and billed groups")
+	}
+	return nil
 }

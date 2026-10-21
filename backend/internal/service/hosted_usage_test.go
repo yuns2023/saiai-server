@@ -195,6 +195,48 @@ func TestHostedUsageGroupSwitchDoesNotReinterpretOutstandingCounters(t *testing.
 	}
 }
 
+func TestHostedUsageAdminRebindingAndUnbindingKeepMeteringGuard(t *testing.T) {
+	for _, targetID := range []int64{0, 4} {
+		t.Run(fmt.Sprintf("target=%d", targetID), func(t *testing.T) {
+			g := hostedUsageGroup()
+			repo := &hostedKeyRepo{key: &APIKey{ID: 2, GroupID: &g.ID, Group: g, QuotaUsed: 1}}
+			svc := &adminServiceImpl{apiKeyRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: &Group{ID: 4, Status: StatusActive}}}
+			_, err := svc.AdminUpdateAPIKeyGroupID(context.Background(), 2, &targetID)
+			require.ErrorContains(t, err, "Reset Key quota")
+			require.False(t, repo.updated)
+		})
+	}
+	g := hostedUsageGroup()
+	g.Status = StatusActive
+	repo := &hostedKeyRepo{key: &APIKey{ID: 2, QuotaUsed: 1}}
+	svc := &adminServiceImpl{apiKeyRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: g}}
+	_, err := svc.AdminUpdateAPIKeyGroupID(context.Background(), 2, &g.ID)
+	require.ErrorContains(t, err, "Reset Key quota", "an unbound Key is also a billed-to-hosted transition")
+	require.False(t, repo.updated)
+}
+
+type hostedGroupRepo struct {
+	GroupRepository
+	groups map[int64]*Group
+}
+
+func (r *hostedGroupRepo) GetByID(_ context.Context, id int64) (*Group, error) {
+	return r.groups[id], nil
+}
+func (r *hostedGroupRepo) GetByIDLite(_ context.Context, id int64) (*Group, error) {
+	return r.groups[id], nil
+}
+
+func TestHostedUsageBulkReplacementRequiresIndividualTransitions(t *testing.T) {
+	hosted, paid := hostedUsageGroup(), &Group{ID: 4, IsExclusive: true, Status: StatusActive}
+	hosted.Status = StatusActive
+	svc := &adminServiceImpl{groupRepo: &hostedGroupRepo{groups: map[int64]*Group{hosted.ID: hosted, paid.ID: paid}}}
+	for _, pair := range [][2]int64{{hosted.ID, paid.ID}, {paid.ID, hosted.ID}} {
+		_, err := svc.ReplaceUserGroup(context.Background(), 1, pair[0], pair[1])
+		require.ErrorContains(t, err, "Switch Keys individually", "reject before any entitlement or transaction mutation")
+	}
+}
+
 func TestHostedUsageAdminPolicyPersistsAndRejectsPartialPaidChange(t *testing.T) {
 	repo := &groupRepoStubForAdmin{}
 	svc := &adminServiceImpl{groupRepo: repo}
