@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
@@ -246,6 +247,8 @@ func TestCodexMissingProxyIdentityReportsAccurateReason(t *testing.T) {
 		{"missing both", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			queue := opsFailureTestQueue(t)
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			var slotCalls atomic.Int32
 			cache := &concurrencyCacheMock{acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) {
 				slotCalls.Add(1)
@@ -254,7 +257,8 @@ func TestCodexMissingProxyIdentityReportsAccurateReason(t *testing.T) {
 			h := newOpenAIHandlerForPreviousResponseIDValidation(t, cache)
 			group := &service.Group{ID: 42, Platform: service.PlatformOpenAI, CodexClientPolicy: "local_proxy_only"}
 			router := gin.New()
-			router.Use(func(c *gin.Context) {
+			router.Use(OpsErrorLoggerMiddleware(ops), func(c *gin.Context) {
+				c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.RequestID, "TEST_ONLY_GATEWAY_REQUEST_ID"))
 				c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 99, GroupID: &group.ID, Group: group, User: &service.User{ID: 7}})
 				c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 7, Concurrency: 1})
 			})
@@ -272,6 +276,24 @@ func TestCodexMissingProxyIdentityReportsAccurateReason(t *testing.T) {
 			require.Contains(t, w.Body.String(), "saiai_local_proxy_required")
 			require.Contains(t, w.Body.String(), "本地代理身份信息不完整")
 			require.NotContains(t, w.Body.String(), "This group requires SAIAI local proxy mode")
+			assertSnapshot := func(job opsErrorLogJob, transport string, status int) {
+				require.Equal(t, "TEST_ONLY_GATEWAY_REQUEST_ID", job.entry.RequestID)
+				require.NotNil(t, job.entry.Diagnostics)
+				require.Equal(t, transport, job.entry.Diagnostics.Transport)
+				require.Equal(t, status, job.entry.Diagnostics.TransportStatusCode)
+				checks := job.entry.Diagnostics.Checks
+				require.Len(t, checks, 4)
+				require.Equal(t, "version", checks[2].Field)
+				require.Equal(t, tc.version != "", checks[2].Passed)
+				require.Equal(t, "chatgpt-account-id", checks[3].Field)
+				require.Equal(t, tc.accountID != "", checks[3].Passed)
+			}
+			select {
+			case job := <-queue:
+				assertSnapshot(job, "http", 403)
+			default:
+				t.Fatal("HTTP rejection diagnostics were not queued")
+			}
 			server := httptest.NewServer(router)
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -284,6 +306,12 @@ func TestCodexMissingProxyIdentityReportsAccurateReason(t *testing.T) {
 			require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err))
 			require.Contains(t, err.Error(), "本地代理身份信息不完整")
 			require.Equal(t, int32(0), slotCalls.Load())
+			select {
+			case job := <-queue:
+				assertSnapshot(job, "websocket", 101)
+			case <-ctx.Done():
+				t.Fatal("WS rejection diagnostics were not queued")
+			}
 		})
 	}
 }

@@ -948,6 +948,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			if filterOpsUpstreamLog(c, ops, entry) {
 				return
 			}
+			attachOpsErrorDiagnostics(c, entry)
 			entry.RequestHeadersJSON = extractOpsRequestHeadersForLog(c, ops)
 			attachOpsRequestBodyToEntry(c, entry, ops)
 			recordOpsRequestCaptureForError(c, ops, entry)
@@ -1148,6 +1149,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		if filterOpsUpstreamLog(c, ops, entry) {
 			return
 		}
+		attachOpsErrorDiagnostics(c, entry)
 		entry.RequestHeadersJSON = extractOpsRequestHeadersForLog(c, ops)
 		attachOpsRequestBodyToEntry(c, entry, ops)
 		recordOpsRequestCaptureForError(c, ops, entry)

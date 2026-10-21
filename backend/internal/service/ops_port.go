@@ -67,6 +67,9 @@ type OpsRepository interface {
 }
 
 type OpsInsertErrorLogInput struct {
+	Diagnostics     *OpsErrorDiagnostics
+	DiagnosticsJSON *string // sanitized JSON, set by OpsService
+
 	RequestID       string
 	ClientRequestID string
 

@@ -326,6 +326,7 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 		}
 	}
 
+	marshalOpsErrorDiagnostics(entry)
 	if err := sanitizeOpsUpstreamErrors(entry); err != nil {
 		return nil, false, err
 	}
