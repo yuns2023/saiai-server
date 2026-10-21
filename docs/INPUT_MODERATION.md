@@ -131,9 +131,17 @@ assessment; long inputs use overlapping Unicode-character chunks (default
 score across all required checks, then applies the current group threshold once.
 Cross-chunk semantics are limited to the overlap, not full-document equivalence.
 Passed chunked results therefore display **Chunk checks passed**, with details
-explaining that limitation. No text is silently truncated. The maximum is 16
-unique checks per job, including standalone instruction checks; larger inputs
-record failed/input_too_large without a detector call. Timeouts or any incomplete
+explaining that limitation. No text is silently truncated. Total joined text is
+bounded to 16 overlapping chunks, and a plan contains at most 64 unique checks
+including standalone instruction checks. These bounds apply before enqueueing,
+regardless of cache contents. Character overflow records `failed/input_too_large`;
+plan overflow records `failed/plan_too_large`, without a detector call.
+The separate per-attempt budget permits 16 actual detector calls. Cache hits,
+including coalesced successful checks, do not spend this budget. Thus previously
+checked instructions can support a plan with more than 16 checks. A cold or
+invalidated cache may exhaust the call budget after partial work; this records
+`failed/detector_budget_exceeded`, never a passed result or enforcement event.
+Timeouts record `failed/timeout`. Any incomplete
 check fail the job rather than representing partial work as passed. All checks
 share the existing job timeout and execute serially. Moderation stays asynchronous.
 
@@ -152,9 +160,39 @@ Thresholds and penalties are deliberately not cached: current policy and trust
 are still checked before/after classification, and current thresholds are applied
 to raw scores. A cache hit still produces a request-specific result and follows
 existing incident deduplication. Safe results never create strikes. This feature
-adds no database migration and no model-name exemptions.
+adds no model-name exemptions.
 
 Deployment must account for queued tasks containing the new instructions field:
 older workers ignore it. Do not mix old/new consumers when claiming this coverage;
 a rollback does not retain the expanded coverage contract. Extraction/cache tests
 are structural validation, not a real-provider accuracy evaluation.
+
+## Moderation diagnostics and operational metrics
+
+Migration 108 adds nullable `input_moderation_results.diagnostics`. It must be
+applied before this version; older rows remain unknown rather than showing
+invented counts. This is additive, with no Ent schema changes. Rollback keeps
+the column and does not require a database restore.
+
+Administrator usage details retain numeric metadata for successful, skipped and
+failed jobs: new user characters, instruction characters/block count, planned
+and completed checks, cache hits, detector calls, effective character/check/call
+limits, processing milliseconds and queue wait milliseconds. `limit` identifies
+`input_chars`, `planned_checks`, or `detector_calls` when applicable. Diagnostic
+data and structured `input_moderation_result` logs contain no input text,
+instruction bodies, detector responses, credentials or content fingerprints.
+Request/source/turn correlation in logs does not require full-body capture.
+Diagnostic persistence follows the existing terminal-result overwrite guard;
+late pending/failure writes cannot replace a passed/flagged result.
+
+Admin-only `GET /api/v1/admin/settings/jev` also exposes `runtime_metrics`.
+The Gateway settings card displays outcomes by status/reason, completed checks,
+cache hits, detector calls, cumulative processing time and queue wait, with a
+manual refresh that preserves unsaved configuration. There is no polling or
+detector probe. These counters measure local processing attempts including
+retries, not unique requests, persisted outcomes or risk alerts. Pending enqueue
+writes are excluded. They reset on process restart and are not shared across
+replicas; aggregate structured logs externally for fleet/time-window analysis.
+Do not claim historical failure percentages or site-wide latency percentiles
+from this process-local snapshot. A failed detection is an operational failure,
+not a user violation and never an additional strike.

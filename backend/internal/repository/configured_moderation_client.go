@@ -13,6 +13,8 @@ type configuredModerationClient struct {
 	cache    *moderationContentCache
 }
 
+func (*configuredModerationClient) UsesInputModerationCallBudget() {}
+
 func NewConfiguredInputModerationClient(settings *service.JevSettingsService) service.InputModerationClient {
 	return &configuredModerationClient{settings: settings, cache: newModerationContentCache()}
 }

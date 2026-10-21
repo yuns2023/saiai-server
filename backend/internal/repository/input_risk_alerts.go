@@ -42,7 +42,7 @@ func (r *usageLogRepository) ListInputRiskAlerts(ctx context.Context, userID int
 	if err := scanSingleRow(ctx, r.sql, `SELECT COUNT(*)`+where, []any{userID, start, end}, &total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := r.sql.QueryContext(ctx, `SELECT request_id,source,turn_number,user_id,api_key_id,group_id,status,reason,scores,min_confidence,model_version,updated_at,decision_snapshot,
+	rows, err := r.sql.QueryContext(ctx, `SELECT request_id,source,turn_number,user_id,api_key_id,group_id,status,reason,scores,min_confidence,model_version,updated_at,decision_snapshot,diagnostics,
  (SELECT COALESCE(jsonb_agg(jsonb_build_object('categories',e.categories,'scores',e.scores,
  'min_confidence',e.min_confidence,'action',e.action,'counted_as_strike',e.counted_as_strike,
  'model_version',COALESCE(e.model_version,'')) ORDER BY e.id),'[]'::jsonb)
@@ -56,8 +56,8 @@ func (r *usageLogRepository) ListInputRiskAlerts(ctx context.Context, userID int
 	for rows.Next() {
 		var a service.InputRiskAlert
 		v := &service.InputModerationResult{}
-		var scores, snapshot, events []byte
-		if err := rows.Scan(&a.RequestID, &a.Source, &a.TurnNumber, &a.UserID, &a.APIKeyID, &a.GroupID, &v.Status, &v.Reason, &scores, &v.MinConfidence, &v.ModelVersion, &v.UpdatedAt, &snapshot, &events); err != nil {
+		var scores, snapshot, diagnostics, events []byte
+		if err := rows.Scan(&a.RequestID, &a.Source, &a.TurnNumber, &a.UserID, &a.APIKeyID, &a.GroupID, &v.Status, &v.Reason, &scores, &v.MinConfidence, &v.ModelVersion, &v.UpdatedAt, &snapshot, &diagnostics, &events); err != nil {
 			return nil, 0, err
 		}
 		if len(scores) > 0 {
@@ -67,6 +67,11 @@ func (r *usageLogRepository) ListInputRiskAlerts(ctx context.Context, userID int
 		}
 		if len(snapshot) > 0 {
 			if err := json.Unmarshal(snapshot, &v.DecisionSnapshot); err != nil {
+				return nil, 0, err
+			}
+		}
+		if len(diagnostics) > 0 {
+			if err := json.Unmarshal(diagnostics, &v.Diagnostics); err != nil {
 				return nil, 0, err
 			}
 		}

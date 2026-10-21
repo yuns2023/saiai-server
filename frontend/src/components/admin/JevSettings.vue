@@ -28,6 +28,17 @@
         </fieldset>
         <p v-if="!settings?.can_save" role="alert">{{ t('admin.settings.jev.encryptionRequired') }}</p>
       </form>
+      <section v-if="settings?.runtime_metrics" data-testid="moderation-metrics" class="space-y-2 border-t pt-4 text-sm">
+        <h3 class="font-medium">{{ t('admin.settings.jev.metricsTitle') }}</h3>
+        <p class="text-xs text-gray-500">{{ t('admin.settings.jev.metricsHint') }} {{ settings.runtime_metrics.since }}</p>
+        <p>{{ t('admin.settings.jev.metricsChecks') }}: {{ settings.runtime_metrics.completed_checks }} · {{ t('admin.settings.jev.metricsCacheHits') }}: {{ settings.runtime_metrics.cache_hits }} · {{ t('admin.settings.jev.metricsCalls') }}: {{ settings.runtime_metrics.detector_calls }}</p>
+        <p>{{ t('admin.settings.jev.metricsDuration') }}: {{ settings.runtime_metrics.duration_ms }} ms · {{ t('admin.settings.jev.metricsQueueWait') }}: {{ settings.runtime_metrics.queue_wait_ms }} ms</p>
+        <div v-for="(count, outcome) in settings.runtime_metrics.results" :key="outcome">
+          {{ outcome }}: {{ count }}
+        </div>
+        <button type="button" class="btn btn-secondary" :disabled="metricsLoading" @click="refreshMetrics">{{ t('common.refresh') }}</button>
+        <p v-if="metricsFailed" role="alert">{{ t('admin.settings.jev.metricsFailed') }}</p>
+      </section>
     </div>
   </section>
 </template>
@@ -45,6 +56,17 @@ const settings = ref<JevSettings>()
 const endpoint = ref('')
 const key = ref('')
 const clearKey = ref(false)
+const metricsLoading = ref(false)
+const metricsFailed = ref(false)
+async function refreshMetrics() {
+  if (metricsLoading.value) return
+  metricsLoading.value = true
+  metricsFailed.value = false
+  try {
+    const value = await getJevSettings()
+    if (settings.value) settings.value.runtime_metrics = value.runtime_metrics
+  } catch { metricsFailed.value = true } finally { metricsLoading.value = false }
+}
 function apply(value: JevSettings) {
   settings.value = value
   endpoint.value = value.endpoint

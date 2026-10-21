@@ -13,8 +13,10 @@ import (
 )
 
 const moderationMaxChunks = 16
+const moderationMaxPlannedChecks = 64
 
 var errModerationTooLarge = errors.New("moderation input exceeds coverage budget")
+var errModerationPlanTooLarge = errors.New("moderation check plan exceeds coverage budget")
 
 // Scope contains authenticated identity only; it is never sent to the detector.
 type ModerationCacheScope struct{ UserID, GroupID int64 }
@@ -52,14 +54,28 @@ func moderationChunks(text string, size int) ([]string, error) {
 }
 
 func (s *InputModerationService) classifyInput(ctx context.Context, task InputModerationTask, group *Group) (*InputModerationClassification, bool, error) {
+	if task.Diagnostics == nil {
+		task.Diagnostics = newModerationDiagnostics(task, s.cfg.MaxInputChars)
+	}
 	chunks, chunked, err := moderationTaskChunks(task, s.cfg.MaxInputChars)
 	if err != nil {
+		task.Diagnostics.Limit = "input_chars"
+		if errors.Is(err, errModerationPlanTooLarge) {
+			task.Diagnostics.Limit = "planned_checks"
+		}
 		return nil, false, err
 	}
+	task.Diagnostics.PlannedChecks = len(chunks)
+	ctx = WithInputModerationDiagnostics(ctx, task.Diagnostics)
 	ctx = WithInputModerationCacheScope(ctx, task.UserID, task.GroupID)
 	var combined *InputModerationClassification
 	for _, text := range chunks {
 		var result *InputModerationClassification
+		if _, budgeted := s.client.(InputModerationBudgetClient); !budgeted {
+			if err := ReserveInputModerationCall(ctx); err != nil {
+				return nil, false, err
+			}
+		}
 		if group.InputModerationPolicy != nil {
 			client, ok := s.client.(InputModerationPolicyClient)
 			if !ok {
@@ -91,6 +107,7 @@ func (s *InputModerationService) classifyInput(ctx context.Context, task InputMo
 				}
 			}
 		}
+		task.Diagnostics.CompletedChecks++
 		if combined == nil {
 			combined = cloneModerationClassification(result)
 			continue
@@ -222,10 +239,13 @@ func moderationTaskChunks(task InputModerationTask, size int) ([]string, bool, e
 		}
 		for _, text := range stable {
 			chunks = appendUniqueModerationText(chunks, text)
+			if task.Diagnostics != nil {
+				task.Diagnostics.PlannedChecks = len(chunks)
+			}
+			if len(chunks) > moderationMaxPlannedChecks {
+				return nil, false, errModerationPlanTooLarge
+			}
 		}
-	}
-	if len(chunks) > moderationMaxChunks {
-		return nil, false, errModerationTooLarge
 	}
 	return chunks, chunked, nil
 }

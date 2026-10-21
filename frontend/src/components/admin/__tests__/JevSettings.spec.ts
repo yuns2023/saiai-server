@@ -8,6 +8,26 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 const settings = { endpoint: 'https://moderation.example/v1', key_configured: true, can_save: true, source: 'environment', engine: 'jev' }
 describe('Jev settings', () => {
   beforeEach(() => { vi.resetAllMocks(); mocks.get.mockResolvedValue(settings); mocks.update.mockResolvedValue({ ...settings, source: 'admin' }) })
+  it('refreshes process metrics without overwriting unsaved configuration', async () => {
+    const runtime_metrics = { since: '2026-01-01T00:00:00Z', results: { 'failed/detector_budget_exceeded': 2 }, completed_checks: 16, cache_hits: 3, detector_calls: 13, duration_ms: 50, queue_wait_ms: 10 }
+    mocks.get.mockResolvedValue({ ...settings, runtime_metrics })
+    const wrapper = mount(JevSettings)
+    await flushPromises()
+    expect(wrapper.get('[data-testid=moderation-metrics]').text()).toContain('failed/detector_budget_exceeded: 2')
+    await wrapper.get('#jev-endpoint').setValue('https://unsaved.example/v1')
+    await wrapper.get('#jev-key').setValue('TEST_ONLY_UNSAVED')
+    mocks.get.mockResolvedValue({ ...settings, runtime_metrics: { ...runtime_metrics, detector_calls: 14 } })
+    await wrapper.get('[data-testid=moderation-metrics] button').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('#jev-endpoint').element as HTMLInputElement).value).toBe('https://unsaved.example/v1')
+    expect((wrapper.get('#jev-key').element as HTMLInputElement).value).toBe('TEST_ONLY_UNSAVED')
+    mocks.get.mockRejectedValueOnce(new Error('TEST_ONLY_FAILURE'))
+    await wrapper.get('[data-testid=moderation-metrics] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid=moderation-metrics] [role=alert]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid=moderation-metrics]').text()).toContain('14')
+    wrapper.unmount()
+  })
   it('keeps the existing key without showing it and clears entered secrets after save', async () => {
     const wrapper = mount(JevSettings)
     await flushPromises()

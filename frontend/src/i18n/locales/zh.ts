@@ -2087,11 +2087,21 @@ export default {
           failed: "审核失败",
         },
         chunkedPassed: "分段审核通过",
+        diagnostics: {
+          input_chars: '新增用户文本字符数', instruction_chars: '项目及系统指令字符数', instruction_blocks: '指令块数',
+          planned_checks: '计划检测项', completed_checks: '已完成检测项', cache_hits: '缓存命中项', detector_calls: '实际检测调用次数',
+          chunk_size: '单块字符上限', max_input_chars: '总输入字符上限', max_detector_calls: '单任务调用上限',
+          max_planned_checks: '单任务检测项上限', duration_ms: '处理耗时（毫秒）', queue_wait_ms: '排队时长（毫秒）', limit: '触发的上限'
+        },
+        limits: { input_chars: '输入总量', detector_calls: '新增检测调用预算', planned_checks: '检测计划规模' },
         reasons: {
           no_categories: "\u672a\u9009\u62e9\u68c0\u6d4b\u7c7b\u522b",
           policy_changed: "\u5ba1\u6838\u8fc7\u7a0b\u4e2d\u68c0\u6d4b\u89c4\u5219\u5df2\u53d8\u66f4",
           no_new_user_text: "没有新的用户文本",
           input_too_large: "内容超过审核处理上限，未完成检测",
+          detector_budget_exceeded: '新增检测调用超过单任务预算，未完成检测；已完成部分不代表审核通过',
+          plan_too_large: '检测计划项数超过处理上限，未完成检测',
+          timeout: '审核处理超时，未完成检测',
           chunked_input: "已分段覆盖提交文本；跨段上下文仅覆盖相邻重叠部分，不代表全文联合判断",
           trusted_user: "可信用户免审核",
           group_disabled: "分组审核已关闭",
@@ -4727,6 +4737,10 @@ export default {
     settings: {
       title: '系统设置',
       jev: {
+        metricsTitle: '审核运行指标',
+        metricsHint: '当前进程自此时间起累计；重启清零，多副本不合并。结果按处理尝试计数，包含重试，不是独立请求数。',
+        metricsChecks: '已完成检测项', metricsCacheHits: '缓存命中项', metricsCalls: '实际检测调用次数',
+        metricsDuration: '累计处理耗时', metricsQueueWait: '累计排队时长', metricsFailed: '指标刷新失败，保留上次结果',
         title: "Jev 输入审核",
         description: "配置审核服务后，在需要审核的分组中开启输入审核。保存后对后续审核任务生效。",
         endpoint: "服务 URL",

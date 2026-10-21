@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -15,6 +16,28 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+func TestModerationCacheChargesOnlyRealCalls(t *testing.T) {
+	cache, scope, settings, call, calls := cacheFixture()
+	_, err := cache.classify(scope, settings, "cached", nil, call)
+	require.NoError(t, err)
+	diagnostics := &service.InputModerationDiagnostics{MaxDetectorCalls: 16}
+	ctx := service.WithInputModerationDiagnostics(scope, diagnostics)
+	for check := 0; check < 16; check++ {
+		_, err = cache.classify(ctx, settings, fmt.Sprintf("uncached %d", check), nil, call)
+		require.NoError(t, err)
+	}
+	_, err = cache.classify(ctx, settings, "cached", nil, call)
+	require.NoError(t, err)
+	require.Equal(t, 1, diagnostics.CacheHits)
+	_, err = cache.classify(ctx, settings, "over budget", nil, call)
+	require.ErrorIs(t, err, service.ErrInputModerationCallBudget)
+	require.Equal(t, int32(17), calls.Load())
+	require.Empty(t, cache.flights)
+	_, err = cache.classify(scope, settings, "over budget", nil, call)
+	require.NoError(t, err)
+	require.Equal(t, int32(18), calls.Load())
+}
 
 func cacheFixture() (*moderationContentCache, context.Context, config.GatewayInputModerationConfig, func() (*service.InputModerationClassification, error), *atomic.Int32) {
 	c := newModerationContentCache()

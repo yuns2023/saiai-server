@@ -49,6 +49,12 @@ const categories = computed(() => {
     <div v-else-if="row.moderation_result" class="space-y-2 text-sm">
       <span>{{ t('admin.groups.inputModeration.statuses.' + row.moderation_result.status) }}</span>
       <div v-if="row.moderation_result.reason" class="text-gray-500">{{ t('admin.groups.inputModeration.reasons.' + row.moderation_result.reason) }}</div>
+      <dl v-if="row.moderation_result.diagnostics" data-testid="moderation-diagnostics" class="grid grid-cols-2 gap-2 border-t pt-2">
+        <template v-for="(value, name) in row.moderation_result.diagnostics" :key="name">
+          <dt>{{ t('admin.groups.inputModeration.diagnostics.' + name) }}</dt>
+          <dd>{{ name === 'limit' ? t('admin.groups.inputModeration.limits.' + value) : value }}</dd>
+        </template>
+      </dl>
       <div v-for="(score, category) in row.moderation_result.scores" :key="category">
         {{ categoryLabel(category) }} {{ (score * 100).toFixed(1) }}%<span v-if="row.moderation_result.decision_snapshot" class="text-gray-500"> / {{ row.moderation_result.decision_snapshot.policy.thresholds[category] }}%</span>
       </div>

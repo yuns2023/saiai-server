@@ -2002,11 +2002,21 @@ export default {
           failed: "Review failed",
         },
         chunkedPassed: "Chunk checks passed",
+        diagnostics: {
+          input_chars: 'New user text characters', instruction_chars: 'Project and system instruction characters', instruction_blocks: 'Instruction blocks',
+          planned_checks: 'Planned checks', completed_checks: 'Completed checks', cache_hits: 'Cached checks', detector_calls: 'Detector calls',
+          chunk_size: 'Characters per chunk', max_input_chars: 'Input character limit', max_detector_calls: 'Calls allowed per job',
+          max_planned_checks: 'Checks allowed per job', duration_ms: 'Processing time (ms)', queue_wait_ms: 'Queue wait (ms)', limit: 'Exceeded limit'
+        },
+        limits: { input_chars: 'Total input size', detector_calls: 'New detector call budget', planned_checks: 'Check plan size' },
         reasons: {
           no_categories: "No detection categories selected",
           policy_changed: "Detection rules changed during review",
           no_new_user_text: "No new user text",
           input_too_large: "Input exceeds the moderation budget; detection incomplete",
+          detector_budget_exceeded: 'New detector calls exceed the job budget; detection incomplete. Completed checks do not imply approval',
+          plan_too_large: 'Check plan exceeds the processing limit; detection incomplete',
+          timeout: 'Moderation timed out; detection incomplete',
           chunked_input: "Submitted text was covered in chunks; cross-chunk context is limited to adjacent overlap, not full-document joint assessment",
           trusted_user: "Trusted user exempt from moderation",
           group_disabled: "Group moderation disabled",
@@ -4565,6 +4575,10 @@ export default {
     settings: {
       title: 'System Settings',
       jev: {
+        metricsTitle: 'Moderation runtime metrics',
+        metricsHint: 'Local to this process since the displayed time; reset on restart, not aggregated across replicas. Outcomes count processing attempts including retries, not unique requests.',
+        metricsChecks: 'Completed checks', metricsCacheHits: 'Cached checks', metricsCalls: 'Detector calls',
+        metricsDuration: 'Cumulative processing time', metricsQueueWait: 'Cumulative queue wait', metricsFailed: 'Metrics refresh failed; last observations retained',
         title: "Jev input moderation",
         description: "Configure the service, then enable moderation on the required groups. Changes apply to subsequent jobs.",
         endpoint: "Service URL",

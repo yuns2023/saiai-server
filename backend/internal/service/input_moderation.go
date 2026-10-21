@@ -139,18 +139,19 @@ type InputModerationTaskQueue interface {
 // InputModerationTask contains the authenticated identity held by the Gateway.
 // Only text and instruction content are sent to the classifier sidecar.
 type InputModerationTask struct {
-	JobID        string    `json:"job_id"`
-	RequestID    string    `json:"request_id"`
-	UserID       int64     `json:"user_id"`
-	Username     string    `json:"username,omitempty"`
-	DeviceRef    string    `json:"device_ref,omitempty"`
-	APIKeyID     int64     `json:"api_key_id"`
-	GroupID      int64     `json:"group_id"`
-	Text         string    `json:"text"`
-	Instructions []string  `json:"instructions,omitempty"`
-	EnqueuedAt   time.Time `json:"enqueued_at"`
-	Source       string    `json:"source"`
-	TurnNumber   int       `json:"turn_number"`
+	Diagnostics  *InputModerationDiagnostics `json:"-"`
+	JobID        string                      `json:"job_id"`
+	RequestID    string                      `json:"request_id"`
+	UserID       int64                       `json:"user_id"`
+	Username     string                      `json:"username,omitempty"`
+	DeviceRef    string                      `json:"device_ref,omitempty"`
+	APIKeyID     int64                       `json:"api_key_id"`
+	GroupID      int64                       `json:"group_id"`
+	Text         string                      `json:"text"`
+	Instructions []string                    `json:"instructions,omitempty"`
+	EnqueuedAt   time.Time                   `json:"enqueued_at"`
+	Source       string                      `json:"source"`
+	TurnNumber   int                         `json:"turn_number"`
 }
 
 // InputModerationService uses an encrypted Redis Stream when a stable key is
@@ -228,8 +229,15 @@ func (s *InputModerationService) Submit(task InputModerationTask) bool {
 		return false
 	}
 	text := strings.TrimSpace(task.Text)
+	task.Diagnostics = newModerationDiagnostics(task, s.cfg.MaxInputChars)
 	if _, _, err := moderationTaskChunks(task, s.cfg.MaxInputChars); err != nil {
-		_ = s.recordResult(task, InputModerationResult{Status: "failed", Reason: "input_too_large"})
+		task.Diagnostics.Limit = "input_chars"
+		reason := "input_too_large"
+		if errors.Is(err, errModerationPlanTooLarge) {
+			task.Diagnostics.Limit = "planned_checks"
+			reason = "plan_too_large"
+		}
+		_ = s.recordResult(task, InputModerationResult{Status: "failed", Reason: reason})
 		return false
 	}
 	if text == "" && len(task.Instructions) == 0 {
@@ -364,10 +372,17 @@ func (s *InputModerationService) handleQueueMessage(message InputModerationQueue
 }
 
 func (s *InputModerationService) process(task InputModerationTask) (processErr error) {
+	task.Diagnostics = newModerationDiagnostics(task, s.cfg.MaxInputChars)
+	task.Diagnostics.processing = true
 	defer func() {
 		if processErr != nil {
-			_ = s.recordResult(task, InputModerationResult{Status: "failed", Reason: "processing_failed"})
+			reason := "processing_failed"
+			if errors.Is(processErr, context.DeadlineExceeded) {
+				reason = "timeout"
+			}
+			_ = s.recordResult(task, InputModerationResult{Status: "failed", Reason: reason})
 		}
+		observeModerationAttempt(task)
 	}()
 
 	if s.client == nil || s.groupRepo == nil || s.userService == nil {
@@ -427,8 +442,17 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		return s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "no_categories", DecisionSnapshot: moderationDecisionSnapshot(group)})
 	}
 	result, chunked, err := s.classifyInput(classifyCtx, task, group)
+	if err != nil && classifyCtx.Err() != nil {
+		err = classifyCtx.Err()
+	}
 	if errors.Is(err, errModerationTooLarge) {
 		return s.recordResult(task, InputModerationResult{Status: "failed", Reason: "input_too_large"})
+	}
+	if errors.Is(err, errModerationPlanTooLarge) {
+		return s.recordResult(task, InputModerationResult{Status: "failed", Reason: "plan_too_large"})
+	}
+	if errors.Is(err, ErrInputModerationCallBudget) {
+		return s.recordResult(task, InputModerationResult{Status: "failed", Reason: "detector_budget_exceeded"})
 	}
 	coverageReason := ""
 	if chunked {

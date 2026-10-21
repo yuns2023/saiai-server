@@ -62,6 +62,9 @@ func validCachedScores(r *service.InputModerationClassification, rules map[strin
 func (c *moderationContentCache) classify(ctx context.Context, settings config.GatewayInputModerationConfig, text string, policy *service.InputModerationPolicy, call func() (*service.InputModerationClassification, error)) (*service.InputModerationClassification, error) {
 	scope, ok := service.InputModerationCacheScope(ctx)
 	if !ok || settings.Engine != "jev" || settings.APIKey == "" {
+		if err := service.ReserveInputModerationCall(ctx); err != nil {
+			return nil, err
+		}
 		return call()
 	}
 	rules, err := service.JevRulesForPolicy(policy)
@@ -93,6 +96,7 @@ func (c *moderationContentCache) classify(ctx context.Context, settings config.G
 			c.entries[key] = entry
 			result := copyModerationScores(entry.result)
 			c.mu.Unlock()
+			service.ObserveInputModerationCacheHit(ctx)
 			return result, nil
 		}
 		delete(c.entries, key)
@@ -108,7 +112,11 @@ func (c *moderationContentCache) classify(ctx context.Context, settings config.G
 		done := make(chan struct{})
 		c.flights[key] = done
 		c.mu.Unlock()
-		result, callErr := call()
+		var result *service.InputModerationClassification
+		callErr := service.ReserveInputModerationCall(ctx)
+		if callErr == nil {
+			result, callErr = call()
+		}
 		c.mu.Lock()
 		if callErr == nil && validCachedScores(result, rules) {
 			now = c.now()

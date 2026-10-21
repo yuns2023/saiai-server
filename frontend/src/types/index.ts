@@ -1215,7 +1215,7 @@ export interface UsagePricingSnapshot {
 
 export interface AdminUsageLog extends UsageLog {
  moderation_unavailable?: boolean
- moderation_result?: { decision_snapshot?: ModerationDecisionSnapshot; status: 'pending' | 'passed' | 'flagged' | 'skipped' | 'failed'; reason?: string; scores?: Record<string, number>; min_confidence: number; model_version?: string; updated_at: string }
+ moderation_result?: { diagnostics?: ModerationDiagnostics; decision_snapshot?: ModerationDecisionSnapshot; status: 'pending' | 'passed' | 'flagged' | 'skipped' | 'failed'; reason?: string; scores?: Record<string, number>; min_confidence: number; model_version?: string; updated_at: string }
  moderation_events?: Array<{ categories: string[]; scores: Record<string, number> | null; min_confidence: number | null; action: string; counted_as_strike: boolean; model_version: string }>
   pricing_snapshot?: UsagePricingSnapshot | null
   // 账号计费倍率（仅管理员可见）
@@ -1835,6 +1835,23 @@ export interface InputModerationPolicy {
  enforcement_categories: string[]
  thresholds: Record<string, number>
 }
+export interface ModerationDiagnostics {
+  input_chars: number
+  instruction_chars: number
+  instruction_blocks: number
+  planned_checks: number
+  completed_checks: number
+  cache_hits: number
+  detector_calls: number
+  chunk_size: number
+  max_input_chars: number
+  max_detector_calls: number
+  max_planned_checks: number
+  duration_ms: number
+  queue_wait_ms: number
+  limit?: string
+}
+
 export interface ModerationDecisionSnapshot {
  policy: InputModerationPolicy
  auto_enforce: boolean

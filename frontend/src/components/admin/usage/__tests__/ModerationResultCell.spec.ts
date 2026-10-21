@@ -4,30 +4,48 @@ import { createI18n } from 'vue-i18n'
 import ModerationResultCell from '../ModerationResultCell.vue'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
-import type { AdminUsageLog } from '@/types'
+import type { AdminUsageLog, ModerationDiagnostics } from '@/types'
 
-function render(scores?: Record<string, number>, status = 'passed', reason?: string) {
+function render(scores?: Record<string, number>, status = 'passed', reason?: string, diagnostics?: ModerationDiagnostics) {
   // The test runner uses the runtime-only i18n build: provide compiled messages.
   function messages(source: typeof zh | typeof en) {
     const moderation = source.admin.groups.inputModeration
     return { admin: { groups: { inputModeration: {
       highestRisk: () => moderation.highestRisk,
       chunkedPassed: () => moderation.chunkedPassed,
-      reasons: { chunked_input: () => moderation.reasons.chunked_input, input_too_large: () => moderation.reasons.input_too_large },
+      reasons: { chunked_input: () => moderation.reasons.chunked_input, input_too_large: () => moderation.reasons.input_too_large, detector_budget_exceeded: () => moderation.reasons.detector_budget_exceeded },
+      diagnostics: Object.fromEntries(Object.entries(moderation.diagnostics).map(([name, value]) => [name, () => value])),
+      limits: Object.fromEntries(Object.entries(moderation.limits).map(([name, value]) => [name, () => value])),
       viewDetails: () => moderation.viewDetails,
       resultThreshold: () => moderation.resultThreshold,
-      statuses: { passed: () => moderation.statuses.passed, flagged: () => moderation.statuses.flagged }
+      statuses: { passed: () => moderation.statuses.passed, flagged: () => moderation.statuses.flagged, failed: () => moderation.statuses.failed }
     } } } }
   }
   const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh: messages(zh), en: messages(en) } })
   const wrapper = mount(ModerationResultCell, {
-    props: { row: { moderation_result: { status, reason, scores, min_confidence: 90 } } as AdminUsageLog },
+    props: { row: { moderation_result: { status, reason, scores, diagnostics, min_confidence: 90 } } as AdminUsageLog },
     global: { plugins: [i18n], stubs: { BaseDialog: { props: ['show'], template: '<section v-if="show"><slot /></section>' } } }
   })
   return { wrapper, i18n }
 }
 
 describe('moderation summary and localized details', () => {
+  it('explains the failed coverage budget with numeric diagnostics, without claiming approval', async () => {
+    const { wrapper, i18n } = render(undefined, 'failed', 'detector_budget_exceeded', {
+      input_chars: 20, instruction_chars: 800, instruction_blocks: 17, planned_checks: 18, completed_checks: 16,
+      cache_hits: 0, detector_calls: 16, chunk_size: 32768, max_input_chars: 516608, max_detector_calls: 16, max_planned_checks: 64,
+      duration_ms: 100, queue_wait_ms: 10, limit: 'detector_calls'
+    })
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.text()).toContain('新增检测调用超过单任务预算')
+    expect(wrapper.get('[data-testid=moderation-diagnostics]').text()).toContain('新增用户文本字符数')
+    expect(wrapper.get('[data-testid=moderation-diagnostics]').text()).toContain('新增检测调用预算')
+    expect(wrapper.find('[data-testid=highest-risk]').exists()).toBe(false)
+    i18n.global.locale.value = 'en'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('New detector call budget')
+    wrapper.unmount()
+  })
   it('shows only the maximum score until opened, then translates categories and supports locale changes', async () => {
     const { wrapper, i18n } = render({ Jailbreak: .23, 'copyright/unauthorized': .03, 'self-harm/intent': .05, TEST_UNKNOWN: .02 })
     expect(wrapper.get('[data-testid=highest-risk]').text()).toBe('· 最高风险评分 23.0%')

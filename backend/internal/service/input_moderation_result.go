@@ -10,6 +10,7 @@ import (
 
 // Moderation results are separate from risk events and never count as strikes.
 type InputModerationResult struct {
+	Diagnostics      *InputModerationDiagnostics `json:"diagnostics,omitempty"`
 	DecisionSnapshot *ModerationDecisionSnapshot `json:"decision_snapshot,omitempty"`
 	Status           string                      `json:"status"`
 	Reason           string                      `json:"reason,omitempty"`
@@ -23,6 +24,24 @@ type InputModerationResultRepository interface {
 }
 
 func (s *InputModerationService) recordResult(task InputModerationTask, result InputModerationResult) error {
+	if task.Diagnostics != nil {
+		diagnostics := *task.Diagnostics
+		diagnostics.DurationMS = time.Since(diagnostics.started).Milliseconds()
+		if diagnostics.DurationMS < 0 {
+			diagnostics.DurationMS = 0
+		}
+		task.Diagnostics.DurationMS = diagnostics.DurationMS
+		task.Diagnostics.status = result.Status
+		task.Diagnostics.reason = result.Reason
+		result.Diagnostics = &diagnostics
+	}
+	if task.Diagnostics == nil || !task.Diagnostics.processing {
+		inputModerationMetrics.observe(result)
+	}
+	if result.Status != "pending" {
+		slog.Info("input_moderation_result", "request_id", task.RequestID, "source", normalizeInputModerationSource(task.Source),
+			"turn", task.TurnNumber, "status", result.Status, "reason", result.Reason, "diagnostics", result.Diagnostics)
+	}
 	repo, ok := s.eventRepo.(InputModerationResultRepository)
 	if !ok || strings.TrimSpace(task.RequestID) == "" {
 		return nil

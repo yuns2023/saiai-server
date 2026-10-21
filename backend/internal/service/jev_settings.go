@@ -16,11 +16,12 @@ const JevDefaultEndpoint = "https://api.typesafe.ai/v1/systemone"
 const jevSettingsKey = "input_moderation_jev_config"
 
 type JevSettings struct {
-	Endpoint      string `json:"endpoint"`
-	KeyConfigured bool   `json:"key_configured"`
-	Source        string `json:"source"`
-	Engine        string `json:"engine"`
-	CanSave       bool   `json:"can_save"`
+	RuntimeMetrics ModerationRuntimeMetrics `json:"runtime_metrics"`
+	Endpoint       string                   `json:"endpoint"`
+	KeyConfigured  bool                     `json:"key_configured"`
+	Source         string                   `json:"source"`
+	Engine         string                   `json:"engine"`
+	CanSave        bool                     `json:"can_save"`
 }
 type JevSettingsUpdate struct {
 	Endpoint string `json:"endpoint"`
@@ -85,7 +86,7 @@ func (s *JevSettingsService) Get(ctx context.Context) (*JevSettings, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &JevSettings{Endpoint: c.Endpoint, KeyConfigured: strings.TrimSpace(c.APIKey) != "", Source: source, Engine: c.Engine, CanSave: s.cfg != nil && s.cfg.Totp.EncryptionKeyConfigured && s.encryptor != nil}, nil
+	return &JevSettings{RuntimeMetrics: InputModerationMetricsSnapshot(), Endpoint: c.Endpoint, KeyConfigured: strings.TrimSpace(c.APIKey) != "", Source: source, Engine: c.Engine, CanSave: s.cfg != nil && s.cfg.Totp.EncryptionKeyConfigured && s.encryptor != nil}, nil
 }
 func (s *JevSettingsService) Update(ctx context.Context, u JevSettingsUpdate) error {
 	s.mu.Lock()

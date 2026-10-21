@@ -77,7 +77,7 @@ func (r *usageLogRepository) hydrateUsageLogModeration(ctx context.Context, logs
 		return err
 	}
 	_ = rows.Close()
-	resultRows, err := r.sql.QueryContext(ctx, `SELECT u.id,r.status,r.reason,r.scores,r.min_confidence,r.model_version,r.updated_at,r.decision_snapshot
+	resultRows, err := r.sql.QueryContext(ctx, `SELECT u.id,r.status,r.reason,r.scores,r.min_confidence,r.model_version,r.updated_at,r.decision_snapshot,r.diagnostics
  FROM usage_logs u JOIN input_moderation_results r
  ON r.request_id=u.moderation_ref->>'RequestID' AND r.source=u.moderation_ref->>'Source'
  AND r.turn_number::text=u.moderation_ref->>'TurnNumber'
@@ -89,9 +89,9 @@ func (r *usageLogRepository) hydrateUsageLogModeration(ctx context.Context, logs
 	defer func() { _ = resultRows.Close() }()
 	for resultRows.Next() {
 		var id int64
-		var scores, snapshot []byte
+		var scores, snapshot, diagnostics []byte
 		var v service.InputModerationResult
-		if err := resultRows.Scan(&id, &v.Status, &v.Reason, &scores, &v.MinConfidence, &v.ModelVersion, &v.UpdatedAt, &snapshot); err != nil {
+		if err := resultRows.Scan(&id, &v.Status, &v.Reason, &scores, &v.MinConfidence, &v.ModelVersion, &v.UpdatedAt, &snapshot, &diagnostics); err != nil {
 			return err
 		}
 		if len(scores) > 0 {
@@ -105,6 +105,11 @@ func (r *usageLogRepository) hydrateUsageLogModeration(ctx context.Context, logs
 			}
 		}
 		if i, ok := positions[id]; ok {
+			if len(diagnostics) > 0 {
+				if err := json.Unmarshal(diagnostics, &v.Diagnostics); err != nil {
+					return err
+				}
+			}
 			logs[i].ModerationResult = &v
 		}
 	}

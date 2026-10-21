@@ -319,6 +319,15 @@ export const settingsAPI = {
 export default settingsAPI
 
 export interface JevSettings {
+  runtime_metrics?: {
+    since: string
+    results: Record<string, number>
+    completed_checks: number
+    cache_hits: number
+    detector_calls: number
+    duration_ms: number
+    queue_wait_ms: number
+  }
   endpoint: string
   key_configured: boolean
   source: 'admin' | 'environment'
