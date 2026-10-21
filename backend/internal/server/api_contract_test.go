@@ -92,6 +92,14 @@ func TestAPIContracts(t *testing.T) {
 					"usage_5h": 0,
 					"usage_1d": 0,
 					"usage_7d": 0,
+					"smart_switch": {
+						"enabled": false,
+						"group_ids": [],
+						"payg_confirmed": false,
+						"payg_budget_usd": null,
+						"version": 0
+					},
+					"smart_switch_payg_used": 0,
 					"window_5h_start": null,
 					"window_1d_start": null,
 					"window_7d_start": null,
@@ -141,6 +149,14 @@ func TestAPIContracts(t *testing.T) {
 							"usage_5h": 0,
 							"usage_1d": 0,
 							"usage_7d": 0,
+							"smart_switch": {
+								"enabled": false,
+								"group_ids": [],
+								"payg_confirmed": false,
+								"payg_budget_usd": null,
+								"version": 0
+							},
+							"smart_switch_payg_used": 0,
 							"window_5h_start": null,
 							"window_1d_start": null,
 							"window_7d_start": null,

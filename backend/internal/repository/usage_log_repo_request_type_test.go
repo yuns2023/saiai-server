@@ -88,6 +88,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			nil, // historical pricing snapshot
 			nil, // no moderation correlation
 			nil, // historical metering snapshot
+			nil, // no smart switch trace
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -168,6 +169,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			nil, // historical pricing snapshot
 			nil, // no moderation correlation
 			nil, // historical metering snapshot
+			nil, // no smart switch trace
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
