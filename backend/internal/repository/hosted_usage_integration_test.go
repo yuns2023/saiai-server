@@ -11,12 +11,25 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestHostedUsagePersistsReferenceAndDeduplicatesKeyLimits(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
+	var keyIDs []int64
+	// Settlement commits independently so concurrent duplicate requests use
+	// real transactions. Remove only this test's usage before global dashboard
+	// assertions run; synchronous log writes prevent delayed fixture inserts.
+	t.Cleanup(func() {
+		for _, id := range keyIDs {
+			_, err := integrationDB.ExecContext(context.Background(), "DELETE FROM usage_logs WHERE api_key_id=$1", id)
+			assert.NoError(t, err)
+			_, err = integrationDB.ExecContext(context.Background(), "DELETE FROM usage_billing_dedup WHERE api_key_id=$1", id)
+			assert.NoError(t, err)
+		}
+	})
 	g := &service.Group{Name: "hosted-" + uuid.NewString(), Platform: service.PlatformOpenAI,
 		IsExclusive: true, HostedUsageEnabled: true, SubscriptionType: service.SubscriptionTypeStandard, Status: service.StatusActive}
 	groups := NewGroupRepository(client, integrationDB)
@@ -26,6 +39,7 @@ func TestHostedUsagePersistsReferenceAndDeduplicatesKeyLimits(t *testing.T) {
 	require.True(t, loaded.UsesHostedUsage())
 	user := mustCreateUser(t, client, &service.User{Email: "hosted-" + uuid.NewString() + "@example.invalid", PasswordHash: "TEST_ONLY", Balance: 0})
 	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "TEST_ONLY_" + uuid.NewString(), Name: "hosted", Quota: .08})
+	keyIDs = append(keyIDs, key.ID)
 	_, err = integrationDB.ExecContext(ctx, "UPDATE api_keys SET rate_limit_5h=.08, group_id=$1 WHERE id=$2", g.ID, key.ID)
 	require.NoError(t, err)
 	key.GroupID = &g.ID
@@ -38,7 +52,8 @@ func TestHostedUsagePersistsReferenceAndDeduplicatesKeyLimits(t *testing.T) {
 	require.True(t, authKey.Group.UsesHostedUsage(), "the compact auth query must carry the complete policy")
 	cache := service.NewBillingCacheService(nil, nil, nil, keys, &config.Config{})
 	t.Cleanup(cache.Stop)
-	logs := NewUsageLogRepository(client, integrationDB)
+	logs := newUsageLogRepositoryWithSQL(client, integrationDB)
+	logs.db = nil
 	svc := service.NewOpenAIGatewayService(nil, logs, NewUsageBillingRepository(client, integrationDB), nil, nil, nil, nil, &config.Config{}, nil, nil, nil, nil, cache, nil, &service.DeferredService{}, nil)
 	input := &service.OpenAIChatGPTTurnUsageInput{RequestID: "TEST_ONLY_" + uuid.NewString(), BasePriceUSD: .05,
 		APIKey: key, User: user, Account: account, APIKeyService: nativeChatQuotaUpdater{}}
@@ -86,6 +101,7 @@ func TestHostedUsagePersistsReferenceAndDeduplicatesKeyLimits(t *testing.T) {
 	require.NoError(t, groups.Create(ctx, paidGroup))
 	paidUser := mustCreateUser(t, client, &service.User{Email: "paid-" + uuid.NewString() + "@example.invalid", PasswordHash: "TEST_ONLY", Balance: 1})
 	paidKey := mustCreateApiKey(t, client, &service.APIKey{UserID: paidUser.ID, Key: "TEST_ONLY_" + uuid.NewString(), Name: "paid"})
+	keyIDs = append(keyIDs, paidKey.ID)
 	paidKey.GroupID, paidKey.Group = &paidGroup.ID, paidGroup
 	paid := *input
 	paid.RequestID, paid.User, paid.APIKey = "TEST_ONLY_"+uuid.NewString(), paidUser, paidKey
