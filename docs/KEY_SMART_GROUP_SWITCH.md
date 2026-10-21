@@ -2,6 +2,21 @@
 
 状态：开发中的候选实现，尚未合并或发布。目标为订阅优先、按量兜底、恢复后自动回归。
 
+## 会话恢复入口
+
+- 草稿 PR：https://github.com/yuns2023/saiai-server/pull/75
+- 分支：`feat/key-smart-group-switch`；代码候选：`e46e48e67818516aca91bda16a0f339b7a3de25d`。
+- 先读取本文件的未完成清单，不得按功能已完成处理，也不要合并或部署该草稿。
+- 该代码候选的 CI run `39596852366`：frontend、golangci-lint、release-config 成功，
+  后端 `test` 在 Unit tests 阶段失败；客户端契约和安全检查也已成功。
+- 下次首先修复完整 CI 暴露的测试契约不一致并重新验证：
+  `TestUsageModerationCorrelationInUsageInsert`（新增 trace 列改变尾部参数位置）、
+  `TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields` 和
+  `TestUsageLogRepositoryCreate_PersistsServiceTier`（SQL mock 参数需核对新列），
+  `TestAPIContracts` 的 Key 创建/分页列表（新增策略与累计用量字段的响应基准）。
+  失败日志：https://github.com/yuns2023/saiai-server/actions/runs/39596852366
+- 上述是已定位的失败位置，尚未修复；针对性本地测试通过不能替代完整 CI。
+
 ## 当前实现与交付边界
 
 已实现策略存储、版本冲突保护、鉴权缓存升级、Key 创建/编辑配置、排序、按量确认、
