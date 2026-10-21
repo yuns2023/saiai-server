@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -11,6 +13,50 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type opsFailedUploadReader struct{}
+
+func (opsFailedUploadReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+func (opsFailedUploadReader) Close() error             { return nil }
+
+func TestOpsDiagnosticsIngressHostOnFailedUpload(t *testing.T) {
+	prepareOpsLogFilterTestQueue(t)
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	r := gin.New()
+	r.POST("/v1/messages", OpsErrorLoggerMiddleware(ops), func(c *gin.Context) {
+		_, err := io.ReadAll(c.Request.Body)
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "Failed to read request body"}})
+	})
+	req := httptest.NewRequest(http.MethodPost, "https://gateway.example.test/v1/messages", opsFailedUploadReader{})
+	req.Header.Set("X-Forwarded-Host", "Edge.Example.Test:443")
+	req.Header.Set("Authorization", "Bearer TEST_ONLY_SECRET")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.EqualValues(t, 1, OpsErrorLogEnqueuedTotal())
+	entry := (<-opsErrorLogQueue).entry
+	require.Empty(t, entry.Model)
+	require.Nil(t, entry.AccountID)
+	require.Nil(t, entry.RequestBodyJSON)
+	require.Empty(t, entry.Diagnostics.Checks)
+	require.Equal(t, "gateway.example.test", entry.Diagnostics.RequestHost)
+	require.Equal(t, "edge.example.test", entry.Diagnostics.ForwardedHost)
+	encoded, err := json.Marshal(entry.Diagnostics)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "TEST_ONLY_SECRET")
+}
+
+func TestOpsDiagnosticsRejectsAmbiguousForwardedHosts(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "https://gateway.example.test/v1/models", nil)
+	c.Request.Header.Add("X-Forwarded-Host", "first.example.test")
+	c.Request.Header.Add("X-Forwarded-Host", "second.example.test")
+	entry := &service.OpsInsertErrorLogInput{}
+	attachOpsErrorDiagnostics(c, entry)
+	require.Empty(t, entry.Diagnostics.ForwardedHost)
+	require.Equal(t, "gateway.example.test", entry.Diagnostics.RequestHost)
+}
 
 func TestOpsDiagnosticsPassedPolicyAndControlPlane(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

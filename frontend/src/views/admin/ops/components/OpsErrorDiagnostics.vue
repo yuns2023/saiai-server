@@ -49,6 +49,8 @@ const facts = computed(() => {
   const entries: [string, unknown][] = [
     [label('phase'), d.phase], [label('source'), d.error_source], [label('owner'), d.error_owner],
     ['request_id', d.request_id], ['client_request_id', d.client_request_id],
+    [label('forwardedHost'), d.diagnostics?.schema_version === 1 ? d.diagnostics.forwarded_host : undefined],
+    [label('requestHost'), d.diagnostics?.schema_version === 1 ? d.diagnostics.request_host : undefined],
     [label('transport'), d.diagnostics?.transport],
     ['status_code', d.status_code],
     ['error.type', errorField('type')], ['error.code', errorField('code')], ['error.param', errorField('param')],

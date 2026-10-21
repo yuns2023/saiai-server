@@ -83,6 +83,13 @@
           <div class="mt-1 break-all font-mono text-xs text-gray-900 dark:text-gray-100">{{ detail.request_path }}</div>
         </div>
 
+        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900" :title="t('admin.ops.errorDetail.diagnostics.forwardedHostHint')">
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.diagnostics.forwardedHost') }}</div>
+          <div class="mt-1 break-all font-mono text-sm font-medium text-gray-900 dark:text-white" data-testid="error-ingress-host">
+            {{ detail.diagnostics?.schema_version === 1 && detail.diagnostics.forwarded_host || t('admin.ops.errorDetail.diagnostics.notCaptured') }}
+          </div>
+        </div>
+
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.status') }}</div>
           <div class="mt-1">

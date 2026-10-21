@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,5 +41,39 @@ func TestOpsErrorDiagnosticsPersistenceAllowlist(t *testing.T) {
 func TestOpsErrorDiagnosticVersions(t *testing.T) {
 	for _, version := range []string{"0.163.0", "0.163.0-alpha.10.2", "1.2.3-rc.1"} {
 		require.Equal(t, version, NormalizeOpsErrorDiagnostics(&OpsErrorDiagnostics{SchemaVersion: 1, ClientVersion: version}).ClientVersion)
+	}
+}
+
+func TestOpsErrorDiagnosticHosts(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"Edge.Example.Test.:443", "edge.example.test"},
+		{"gateway.example.test", "gateway.example.test"},
+		{"localhost:8080", "localhost"},
+		{"192.0.2.10:443", "192.0.2.10"},
+		{"[2001:db8::1]:443", "2001:db8::1"},
+		{"[2001:db8::1]", "2001:db8::1"},
+		{"2001:db8::1", "2001:db8::1"},
+		{"edge.example.test, other.example.test", ""},
+		{"https://edge.example.test/path?api_key=TEST_ONLY_SECRET", ""},
+		{"TEST_ONLY_SECRET@edge.example.test", ""},
+		{"edge.example.test\r\nAuthorization: TEST_ONLY_SECRET", ""},
+		{"edge.example.test:70000", ""},
+		{"edge.example.test:+443", ""},
+		{"edge.example.test:", ""},
+		{"edge..test", ""},
+		{"-edge.test", ""},
+		{"[2001:db8::1%TEST_ONLY_SECRET]", ""},
+		{strings.Repeat("a", 64) + ".test", ""},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			entry := &OpsInsertErrorLogInput{Diagnostics: &OpsErrorDiagnostics{
+				SchemaVersion: 1, RequestHost: tc.raw, ForwardedHost: tc.raw,
+			}}
+			marshalOpsErrorDiagnostics(entry)
+			require.Equal(t, tc.want, entry.Diagnostics.RequestHost)
+			require.Equal(t, tc.want, entry.Diagnostics.ForwardedHost)
+			require.Equal(t, entry.Diagnostics, NormalizeOpsErrorDiagnostics(entry.Diagnostics), "persistence/read normalization must be idempotent")
+			require.NotContains(t, *entry.DiagnosticsJSON, "TEST_ONLY_SECRET")
+		})
 	}
 }

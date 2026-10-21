@@ -16,6 +16,7 @@ func TestOpsErrorDiagnosticsRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	repo := NewOpsRepository(integrationDB)
 	diagnostics := &service.OpsErrorDiagnostics{SchemaVersion: 1, Transport: "websocket", TransportStatusCode: 101,
+		RequestHost: "gateway.example.test", ForwardedHost: "edge.example.test",
 		Checks: []service.OpsDiagnosticCheck{{Field: "chatgpt-account-id", Expected: "non_empty", Actual: "missing", Passed: false}}}
 	data, err := json.Marshal(diagnostics)
 	require.NoError(t, err)

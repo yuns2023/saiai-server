@@ -59,6 +59,14 @@ func attachOpsErrorDiagnostics(c *gin.Context, entry *service.OpsInsertErrorLogI
 	if c.Writer != nil {
 		d.TransportStatusCode = c.Writer.Status()
 	}
+	// Available even when reading the request body failed before model parsing.
+	// Keep the observed Host separate from the proxy-reported public entrypoint.
+	if c.Request != nil {
+		d.RequestHost = c.Request.Host
+		if hosts := c.Request.Header.Values("X-Forwarded-Host"); len(hosts) == 1 {
+			d.ForwardedHost = hosts[0]
+		}
+	}
 	entry.Diagnostics = service.NormalizeOpsErrorDiagnostics(d)
 	// Compatible response paths intentionally omit the gateway's request ID.
 	// Preserve the internal correlation key without changing client headers.

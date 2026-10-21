@@ -28,3 +28,19 @@ invented missing-field diagnoses; their response remains the source of detail.
 
 Internal gateway request IDs come from request context even on compatibility
 paths that omit the response `X-Request-Id`. Upstream correlation stays separate.
+
+Error snapshots also record `request_host` (the Host received by the Gateway)
+and `forwarded_host` (the single proxy-reported `X-Forwarded-Host`). They are
+collected without reading the body, so failed uploads retain this context.
+The detail summary shows the ingress domain; the context table keeps both
+values separate. Older snapshots without the domain show "Not captured".
+No new migration beyond 109 is needed for these optional schema-1 fields.
+
+Domains are observational evidence, never authorization or redirect inputs.
+Normalization permits only bounded DNS names and IP addresses, removes ports,
+and rejects URLs, credentials, paths, queries and ambiguous header lists.
+Proxy deployments must overwrite untrusted forwarded hosts at the outer edge
+and preserve the original value through subsequent trusted hops. A rewritten
+Host alone cannot identify the public ingress, and existing records cannot be
+backfilled from the request path. This feature does not change proxy settings
+or enable full-header/body capture.

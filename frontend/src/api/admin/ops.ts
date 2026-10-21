@@ -1046,6 +1046,8 @@ export interface OpsErrorDiagnostics {
   transport_status_code: number
   client_policy?: string
   client_version?: string
+  request_host?: string
+  forwarded_host?: string
   checks?: { field: string; expected: string; actual: string; passed: boolean }[]
 }
 

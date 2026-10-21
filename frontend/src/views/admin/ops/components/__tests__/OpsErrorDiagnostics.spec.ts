@@ -15,6 +15,16 @@ function render(overrides: Partial<OpsErrorDetail> = {}) {
 }
 
 describe('Ops error diagnostic tables', () => {
+  it('keeps the proxy-reported ingress separate from the rewritten Gateway host', () => {
+    const wrapper = render({ diagnostics: {
+      schema_version: 1, transport: 'http', transport_status_code: 400,
+      request_host: 'gateway.example.test', forwarded_host: 'edge.example.test'
+    } })
+    expect(wrapper.text()).toContain('线路域名（代理报告）edge.example.test')
+    expect(wrapper.text()).toContain('Gateway 接收域名gateway.example.test')
+    expect(wrapper.text()).toContain('此记录未采集字段校验结果')
+  })
+
   it('shows the specific missing identity field and successful checks', () => {
     const wrapper = render({ diagnostics: {
       schema_version: 1, transport: 'websocket', transport_status_code: 101,
