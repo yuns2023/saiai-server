@@ -41,6 +41,11 @@ func TestOpsWSProviderFailureIsLoggedOnceBeforeDisconnect(t *testing.T) {
 	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	r := gin.New()
 	r.GET("/v1/responses", OpsErrorLoggerMiddleware(ops), func(c *gin.Context) {
+		c.Request.Header.Set("Upgrade", "websocket")
+		c.Request.Header.Set("User-Agent", "codex-tui/0.163.0")
+		c.Request.Header.Set("version", "0.163.0")
+		c.Request.Header.Set("chatgpt-account-id", "TEST_ONLY_IDENTITY")
+		require.True(t, codexClientPolicyMatched(c, "local_proxy_only"))
 		setOpsRequestContext(c, "first-model", true, nil)
 		c.Status(http.StatusSwitchingProtocols)
 		c.Writer.WriteHeaderNow()
@@ -57,6 +62,13 @@ func TestOpsWSProviderFailureIsLoggedOnceBeforeDisconnect(t *testing.T) {
 	require.Equal(t, 400, entry.StatusCode)
 	require.Equal(t, 400, *entry.UpstreamStatusCode)
 	require.Equal(t, "requested-luna", entry.Model)
+	require.NotNil(t, entry.Diagnostics)
+	require.Equal(t, "websocket", entry.Diagnostics.Transport)
+	require.Equal(t, 101, entry.Diagnostics.TransportStatusCode)
+	require.Len(t, entry.Diagnostics.Checks, 4)
+	for _, check := range entry.Diagnostics.Checks {
+		require.True(t, check.Passed)
+	}
 	require.Equal(t, int64(19), *entry.AccountID)
 	require.Equal(t, "provider", entry.ErrorOwner)
 	require.Equal(t, "upstream_ws", entry.ErrorSource)

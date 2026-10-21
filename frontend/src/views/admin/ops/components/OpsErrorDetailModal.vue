@@ -100,6 +100,8 @@
         </div>
       </div>
 
+      <OpsErrorDiagnostics :detail="detail" />
+
       <!-- Response content (client request -> error_body; upstream -> upstream_error_detail/message) -->
       <div class="rounded-xl bg-gray-50 p-6 dark:bg-dark-900">
         <h3 class="text-sm font-black uppercase tracking-wider text-gray-900 dark:text-white">{{ t('admin.ops.errorDetail.responseBody') }}</h3>
@@ -243,6 +245,7 @@
 </template>
 
 <script setup lang="ts">
+import OpsErrorDiagnostics from './OpsErrorDiagnostics.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'

@@ -1270,6 +1270,7 @@ func codexClientPolicyMatched(c *gin.Context, policy string) bool {
 		userAgent = c.GetHeader("User-Agent")
 		originator = strings.ToLower(strings.TrimSpace(c.GetHeader("originator")))
 	}
+	captureCodexPolicyDiagnostics(c, policy)
 	switch policy {
 	case "official_clients":
 		return pkgopenai.IsCodexOfficialClientByHeaders(userAgent, originator)

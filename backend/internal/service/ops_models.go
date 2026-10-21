@@ -66,6 +66,8 @@ type OpsErrorLog struct {
 }
 
 type OpsErrorLogDetail struct {
+	Diagnostics *OpsErrorDiagnostics `json:"diagnostics,omitempty"`
+
 	OpsErrorLog
 
 	ErrorBody string `json:"error_body"`

@@ -55,9 +55,10 @@ INSERT INTO ops_error_logs (
   request_headers,
   is_retryable,
   retry_count,
+  diagnostics,
   created_at
 ) VALUES (
-  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38
+  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39
 )`
 
 const insertOpsRequestCaptureSQL = `
@@ -234,6 +235,7 @@ func opsInsertErrorLogArgs(input *service.OpsInsertErrorLogInput) []any {
 		opsNullString(input.RequestHeadersJSON),
 		input.IsRetryable,
 		input.RetryCount,
+		opsNullString(input.DiagnosticsJSON),
 		input.CreatedAt,
 	}
 }
@@ -522,7 +524,8 @@ SELECT
   COALESCE(e.request_body::text, ''),
   e.request_body_truncated,
   e.request_body_bytes,
-  COALESCE(e.request_headers::text, '')
+  COALESCE(e.request_headers::text, ''),
+  COALESCE(e.diagnostics::text, '')
 FROM ops_error_logs e
 LEFT JOIN users u ON e.user_id = u.id
 LEFT JOIN accounts a ON e.account_id = a.id
@@ -548,6 +551,7 @@ LIMIT 1`
 	var responseLatency sql.NullInt64
 	var ttft sql.NullInt64
 	var requestBodyBytes sql.NullInt64
+	var diagnosticsJSON string
 
 	err := r.db.QueryRowContext(ctx, q, id).Scan(
 		&out.ID,
@@ -596,11 +600,16 @@ LIMIT 1`
 		&out.RequestBodyTruncated,
 		&requestBodyBytes,
 		&out.RequestHeaders,
+		&diagnosticsJSON,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	var diagnostics service.OpsErrorDiagnostics
+	if json.Unmarshal([]byte(diagnosticsJSON), &diagnostics) == nil {
+		out.Diagnostics = service.NormalizeOpsErrorDiagnostics(&diagnostics)
+	}
 	out.StatusCode = int(statusCode.Int64)
 	if resolvedAt.Valid {
 		t := resolvedAt.Time

@@ -149,6 +149,7 @@ func recordOpenAIWSUpstreamFailure(c *gin.Context, failure *service.OpenAIWSUpst
 	}}) {
 		return
 	}
+	attachOpsErrorDiagnostics(c, entry)
 	entry.RequestHeadersJSON = extractOpsRequestHeadersForLog(c, recorder.ops)
 	enqueueOpsErrorLog(recorder.ops, entry)
 }

@@ -1040,7 +1040,17 @@ export interface OpsErrorLog {
   stream?: boolean
 }
 
+export interface OpsErrorDiagnostics {
+  schema_version: number
+  transport: string
+  transport_status_code: number
+  client_policy?: string
+  client_version?: string
+  checks?: { field: string; expected: string; actual: string; passed: boolean }[]
+}
+
 export interface OpsErrorDetail extends OpsErrorLog {
+  diagnostics?: OpsErrorDiagnostics | null
   error_body: string
   user_agent: string
 
