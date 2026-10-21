@@ -44,6 +44,9 @@ func (APIKey) Fields() []ent.Field {
 		field.Int64("group_id").
 			Optional().
 			Nillable(),
+		field.JSON("smart_switch", &domain.KeySmartSwitchPolicy{}).Optional(),
+		field.Int64("smart_switch_version").Default(0),
+		field.Float("smart_switch_payg_used").SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).Default(0),
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),

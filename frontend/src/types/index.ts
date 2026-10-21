@@ -478,7 +478,17 @@ export interface AdminGroup extends Group {
   sort_order: number
 }
 
+export interface KeySmartSwitchPolicy {
+  payg_budget_usd?: number | null
+  enabled: boolean
+  group_ids: number[]
+  payg_confirmed: boolean
+  version: number
+}
+
 export interface ApiKey {
+  smart_switch_payg_used?: number
+  smart_switch?: KeySmartSwitchPolicy
   id: number
   user_id: number
   key: string
@@ -509,6 +519,7 @@ export interface ApiKey {
 }
 
 export interface CreateApiKeyRequest {
+  smart_switch?: KeySmartSwitchPolicy
   name: string
   group_id?: number | null
   custom_key?: string // Optional custom API Key
@@ -522,6 +533,7 @@ export interface CreateApiKeyRequest {
 }
 
 export interface UpdateApiKeyRequest {
+  smart_switch?: KeySmartSwitchPolicy
   name?: string
   group_id?: number | null
   status?: 'active' | 'inactive'
@@ -1102,6 +1114,7 @@ export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invit
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2'
 
 export interface UsageLog {
+  smart_switch?: { original_group_id: number; policy_version: number; reason: string }
   metered_cost?: number | null
   billing_unit?: 'turn'
   native_chat_turn_cost_usd?: number

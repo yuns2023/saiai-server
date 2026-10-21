@@ -652,6 +652,35 @@ export default {
 
   // API Keys
   keys: {
+    smartSwitch: {
+      "budget": "按量兜底累计预算（美元）",
+      "budgetHint": "已用 ${used}。留空不限，0 禁止按量。仅限制新请求，已开始的并发请求结算可能超过预算；关闭再开启不会清零。",
+      "actualGroup": "实际分组",
+      "preferred": "使用优先分组",
+      "reasons": {
+        "group_unavailable": "分组无可用账号",
+        "group_missing": "分组已删除",
+        "group_inactive": "分组已停用",
+        "incompatible_group": "分组不兼容",
+        "access_revoked": "分组权限不可用",
+        "model_unavailable": "分组不支持模型",
+        "subscription_unavailable": "订阅不可用",
+        "subscription_limit_or_expiry": "订阅触限或到期",
+        "payg_budget_exhausted": "按量兜底预算已用完",
+        "insufficient_balance": "余额不足"
+      },
+      "title": "智能分组切换",
+      "hint": "从上到下优先使用可用分组。订阅恢复后，新请求自动优先使用订阅。",
+      "unsupported": "当前仅支持 Claude / OpenAI 的非托管额度分组。",
+      "subscription": "订阅",
+      "payg": "按量",
+      "unavailable": "当前不可用",
+      "up": "提高优先级",
+      "down": "降低优先级",
+      "remove": "移除分组",
+      "consent": "我同意自动使用勾选的按量分组，并按实际分组价格及个人优惠扣除余额。",
+      "scope": "当前支持独立的 Messages / Responses HTTP 请求；不切换已开始的请求、WebSocket 或依赖 previous_response_id 的续接。Key 总额度仍然生效。"
+    },
     title: 'API 密钥',
     description: '管理您的 API 密钥和访问令牌',
     searchPlaceholder: '搜索名称或Key...',

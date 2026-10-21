@@ -46,7 +46,9 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		SetNillableExpiresAt(key.ExpiresAt).
 		SetRateLimit5h(key.RateLimit5h).
 		SetRateLimit1d(key.RateLimit1d).
-		SetRateLimit7d(key.RateLimit7d)
+		SetRateLimit7d(key.RateLimit7d).
+		SetSmartSwitch(key.SmartSwitch).
+		SetSmartSwitchVersion(key.SmartSwitchVersion)
 
 	if len(key.IPWhitelist) > 0 {
 		builder.SetIPWhitelist(key.IPWhitelist)
@@ -130,6 +132,8 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			apikey.FieldRateLimit5h,
 			apikey.FieldRateLimit1d,
 			apikey.FieldRateLimit7d,
+			apikey.FieldSmartSwitch,
+			apikey.FieldSmartSwitchVersion,
 		).
 		WithUser(func(q *dbent.UserQuery) {
 			q.Select(
@@ -216,8 +220,12 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 	// 同时显式设置 updated_at，避免二次查询带来的并发可见性问题。
 	client := clientFromContext(ctx, r.client)
 	now := time.Now()
+	policy := key.SmartSwitch.Clone()
+	if policy != nil {
+		policy.Version = key.SmartSwitchVersion + 1
+	}
 	builder := client.APIKey.Update().
-		Where(apikey.IDEQ(key.ID), apikey.DeletedAtIsNil()).
+		Where(apikey.IDEQ(key.ID), apikey.DeletedAtIsNil(), apikey.SmartSwitchVersionEQ(key.SmartSwitchVersion)).
 		SetName(key.Name).
 		SetStatus(key.Status).
 		SetQuota(key.Quota).
@@ -228,7 +236,9 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 		SetUsage5h(key.Usage5h).
 		SetUsage1d(key.Usage1d).
 		SetUsage7d(key.Usage7d).
-		SetUpdatedAt(now)
+		SetUpdatedAt(now).
+		SetSmartSwitch(policy).
+		AddSmartSwitchVersion(1)
 	if key.GroupID != nil {
 		builder.SetGroupID(*key.GroupID)
 	} else {
@@ -276,12 +286,14 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 		return err
 	}
 	if affected == 0 {
-		// 更新影响行数为 0，说明记录不存在或已被软删除。
-		return service.ErrAPIKeyNotFound
+		// A stale settings revision must not overwrite another editor.
+		return service.ErrSmartSwitchConflict
 	}
 
 	// 使用同一时间戳回填，避免并发删除导致二次查询失败。
 	key.UpdatedAt = now
+	key.SmartSwitchVersion++
+	key.SmartSwitch = policy
 	return nil
 }
 
@@ -595,29 +607,32 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 		return nil
 	}
 	out := &service.APIKey{
-		ID:            m.ID,
-		UserID:        m.UserID,
-		Key:           m.Key,
-		Name:          m.Name,
-		Status:        m.Status,
-		IPWhitelist:   m.IPWhitelist,
-		IPBlacklist:   m.IPBlacklist,
-		LastUsedAt:    m.LastUsedAt,
-		CreatedAt:     m.CreatedAt,
-		UpdatedAt:     m.UpdatedAt,
-		GroupID:       m.GroupID,
-		Quota:         m.Quota,
-		QuotaUsed:     m.QuotaUsed,
-		ExpiresAt:     m.ExpiresAt,
-		RateLimit5h:   m.RateLimit5h,
-		RateLimit1d:   m.RateLimit1d,
-		RateLimit7d:   m.RateLimit7d,
-		Usage5h:       m.Usage5h,
-		Usage1d:       m.Usage1d,
-		Usage7d:       m.Usage7d,
-		Window5hStart: m.Window5hStart,
-		Window1dStart: m.Window1dStart,
-		Window7dStart: m.Window7dStart,
+		ID:                  m.ID,
+		UserID:              m.UserID,
+		Key:                 m.Key,
+		Name:                m.Name,
+		Status:              m.Status,
+		IPWhitelist:         m.IPWhitelist,
+		IPBlacklist:         m.IPBlacklist,
+		LastUsedAt:          m.LastUsedAt,
+		CreatedAt:           m.CreatedAt,
+		UpdatedAt:           m.UpdatedAt,
+		GroupID:             m.GroupID,
+		Quota:               m.Quota,
+		QuotaUsed:           m.QuotaUsed,
+		ExpiresAt:           m.ExpiresAt,
+		RateLimit5h:         m.RateLimit5h,
+		RateLimit1d:         m.RateLimit1d,
+		RateLimit7d:         m.RateLimit7d,
+		SmartSwitch:         m.SmartSwitch.Clone(),
+		SmartSwitchVersion:  m.SmartSwitchVersion,
+		SmartSwitchPaygUsed: m.SmartSwitchPaygUsed,
+		Usage5h:             m.Usage5h,
+		Usage1d:             m.Usage1d,
+		Usage7d:             m.Usage7d,
+		Window5hStart:       m.Window5hStart,
+		Window1dStart:       m.Window1dStart,
+		Window7dStart:       m.Window7dStart,
 	}
 	if m.Edges.User != nil {
 		out.User = userEntityToService(m.Edges.User)

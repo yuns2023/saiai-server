@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 )
 
@@ -95,6 +96,7 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 }
 
 type UsageLog struct {
+	SmartSwitch           *domain.KeySmartSwitchTrace
 	ModerationRef         *InputModerationUsageRef
 	ModerationEvents      []UsageModerationEvent
 	ModerationResult      *InputModerationResult

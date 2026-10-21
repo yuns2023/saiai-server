@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // APIKeyCreate is the builder for creating a APIKey entity.
@@ -95,6 +96,40 @@ func (_c *APIKeyCreate) SetGroupID(v int64) *APIKeyCreate {
 func (_c *APIKeyCreate) SetNillableGroupID(v *int64) *APIKeyCreate {
 	if v != nil {
 		_c.SetGroupID(*v)
+	}
+	return _c
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (_c *APIKeyCreate) SetSmartSwitch(v *domain.KeySmartSwitchPolicy) *APIKeyCreate {
+	_c.mutation.SetSmartSwitch(v)
+	return _c
+}
+
+// SetSmartSwitchVersion sets the "smart_switch_version" field.
+func (_c *APIKeyCreate) SetSmartSwitchVersion(v int64) *APIKeyCreate {
+	_c.mutation.SetSmartSwitchVersion(v)
+	return _c
+}
+
+// SetNillableSmartSwitchVersion sets the "smart_switch_version" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableSmartSwitchVersion(v *int64) *APIKeyCreate {
+	if v != nil {
+		_c.SetSmartSwitchVersion(*v)
+	}
+	return _c
+}
+
+// SetSmartSwitchPaygUsed sets the "smart_switch_payg_used" field.
+func (_c *APIKeyCreate) SetSmartSwitchPaygUsed(v float64) *APIKeyCreate {
+	_c.mutation.SetSmartSwitchPaygUsed(v)
+	return _c
+}
+
+// SetNillableSmartSwitchPaygUsed sets the "smart_switch_payg_used" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableSmartSwitchPaygUsed(v *float64) *APIKeyCreate {
+	if v != nil {
+		_c.SetSmartSwitchPaygUsed(*v)
 	}
 	return _c
 }
@@ -383,6 +418,14 @@ func (_c *APIKeyCreate) defaults() error {
 		v := apikey.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.SmartSwitchVersion(); !ok {
+		v := apikey.DefaultSmartSwitchVersion
+		_c.mutation.SetSmartSwitchVersion(v)
+	}
+	if _, ok := _c.mutation.SmartSwitchPaygUsed(); !ok {
+		v := apikey.DefaultSmartSwitchPaygUsed
+		_c.mutation.SetSmartSwitchPaygUsed(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := apikey.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -448,6 +491,12 @@ func (_c *APIKeyCreate) check() error {
 		if err := apikey.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "APIKey.name": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.SmartSwitchVersion(); !ok {
+		return &ValidationError{Name: "smart_switch_version", err: errors.New(`ent: missing required field "APIKey.smart_switch_version"`)}
+	}
+	if _, ok := _c.mutation.SmartSwitchPaygUsed(); !ok {
+		return &ValidationError{Name: "smart_switch_payg_used", err: errors.New(`ent: missing required field "APIKey.smart_switch_payg_used"`)}
 	}
 	if _, ok := _c.mutation.Status(); !ok {
 		return &ValidationError{Name: "status", err: errors.New(`ent: missing required field "APIKey.status"`)}
@@ -530,6 +579,18 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
 		_node.Name = value
+	}
+	if value, ok := _c.mutation.SmartSwitch(); ok {
+		_spec.SetField(apikey.FieldSmartSwitch, field.TypeJSON, value)
+		_node.SmartSwitch = value
+	}
+	if value, ok := _c.mutation.SmartSwitchVersion(); ok {
+		_spec.SetField(apikey.FieldSmartSwitchVersion, field.TypeInt64, value)
+		_node.SmartSwitchVersion = value
+	}
+	if value, ok := _c.mutation.SmartSwitchPaygUsed(); ok {
+		_spec.SetField(apikey.FieldSmartSwitchPaygUsed, field.TypeFloat64, value)
+		_node.SmartSwitchPaygUsed = value
 	}
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
@@ -778,6 +839,60 @@ func (u *APIKeyUpsert) UpdateGroupID() *APIKeyUpsert {
 // ClearGroupID clears the value of the "group_id" field.
 func (u *APIKeyUpsert) ClearGroupID() *APIKeyUpsert {
 	u.SetNull(apikey.FieldGroupID)
+	return u
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (u *APIKeyUpsert) SetSmartSwitch(v *domain.KeySmartSwitchPolicy) *APIKeyUpsert {
+	u.Set(apikey.FieldSmartSwitch, v)
+	return u
+}
+
+// UpdateSmartSwitch sets the "smart_switch" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateSmartSwitch() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldSmartSwitch)
+	return u
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (u *APIKeyUpsert) ClearSmartSwitch() *APIKeyUpsert {
+	u.SetNull(apikey.FieldSmartSwitch)
+	return u
+}
+
+// SetSmartSwitchVersion sets the "smart_switch_version" field.
+func (u *APIKeyUpsert) SetSmartSwitchVersion(v int64) *APIKeyUpsert {
+	u.Set(apikey.FieldSmartSwitchVersion, v)
+	return u
+}
+
+// UpdateSmartSwitchVersion sets the "smart_switch_version" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateSmartSwitchVersion() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldSmartSwitchVersion)
+	return u
+}
+
+// AddSmartSwitchVersion adds v to the "smart_switch_version" field.
+func (u *APIKeyUpsert) AddSmartSwitchVersion(v int64) *APIKeyUpsert {
+	u.Add(apikey.FieldSmartSwitchVersion, v)
+	return u
+}
+
+// SetSmartSwitchPaygUsed sets the "smart_switch_payg_used" field.
+func (u *APIKeyUpsert) SetSmartSwitchPaygUsed(v float64) *APIKeyUpsert {
+	u.Set(apikey.FieldSmartSwitchPaygUsed, v)
+	return u
+}
+
+// UpdateSmartSwitchPaygUsed sets the "smart_switch_payg_used" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateSmartSwitchPaygUsed() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldSmartSwitchPaygUsed)
+	return u
+}
+
+// AddSmartSwitchPaygUsed adds v to the "smart_switch_payg_used" field.
+func (u *APIKeyUpsert) AddSmartSwitchPaygUsed(v float64) *APIKeyUpsert {
+	u.Add(apikey.FieldSmartSwitchPaygUsed, v)
 	return u
 }
 
@@ -1203,6 +1318,69 @@ func (u *APIKeyUpsertOne) UpdateGroupID() *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) ClearGroupID() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearGroupID()
+	})
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (u *APIKeyUpsertOne) SetSmartSwitch(v *domain.KeySmartSwitchPolicy) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetSmartSwitch(v)
+	})
+}
+
+// UpdateSmartSwitch sets the "smart_switch" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateSmartSwitch() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateSmartSwitch()
+	})
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (u *APIKeyUpsertOne) ClearSmartSwitch() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearSmartSwitch()
+	})
+}
+
+// SetSmartSwitchVersion sets the "smart_switch_version" field.
+func (u *APIKeyUpsertOne) SetSmartSwitchVersion(v int64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetSmartSwitchVersion(v)
+	})
+}
+
+// AddSmartSwitchVersion adds v to the "smart_switch_version" field.
+func (u *APIKeyUpsertOne) AddSmartSwitchVersion(v int64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddSmartSwitchVersion(v)
+	})
+}
+
+// UpdateSmartSwitchVersion sets the "smart_switch_version" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateSmartSwitchVersion() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateSmartSwitchVersion()
+	})
+}
+
+// SetSmartSwitchPaygUsed sets the "smart_switch_payg_used" field.
+func (u *APIKeyUpsertOne) SetSmartSwitchPaygUsed(v float64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetSmartSwitchPaygUsed(v)
+	})
+}
+
+// AddSmartSwitchPaygUsed adds v to the "smart_switch_payg_used" field.
+func (u *APIKeyUpsertOne) AddSmartSwitchPaygUsed(v float64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddSmartSwitchPaygUsed(v)
+	})
+}
+
+// UpdateSmartSwitchPaygUsed sets the "smart_switch_payg_used" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateSmartSwitchPaygUsed() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateSmartSwitchPaygUsed()
 	})
 }
 
@@ -1841,6 +2019,69 @@ func (u *APIKeyUpsertBulk) UpdateGroupID() *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) ClearGroupID() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearGroupID()
+	})
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (u *APIKeyUpsertBulk) SetSmartSwitch(v *domain.KeySmartSwitchPolicy) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetSmartSwitch(v)
+	})
+}
+
+// UpdateSmartSwitch sets the "smart_switch" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateSmartSwitch() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateSmartSwitch()
+	})
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (u *APIKeyUpsertBulk) ClearSmartSwitch() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearSmartSwitch()
+	})
+}
+
+// SetSmartSwitchVersion sets the "smart_switch_version" field.
+func (u *APIKeyUpsertBulk) SetSmartSwitchVersion(v int64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetSmartSwitchVersion(v)
+	})
+}
+
+// AddSmartSwitchVersion adds v to the "smart_switch_version" field.
+func (u *APIKeyUpsertBulk) AddSmartSwitchVersion(v int64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddSmartSwitchVersion(v)
+	})
+}
+
+// UpdateSmartSwitchVersion sets the "smart_switch_version" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateSmartSwitchVersion() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateSmartSwitchVersion()
+	})
+}
+
+// SetSmartSwitchPaygUsed sets the "smart_switch_payg_used" field.
+func (u *APIKeyUpsertBulk) SetSmartSwitchPaygUsed(v float64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetSmartSwitchPaygUsed(v)
+	})
+}
+
+// AddSmartSwitchPaygUsed adds v to the "smart_switch_payg_used" field.
+func (u *APIKeyUpsertBulk) AddSmartSwitchPaygUsed(v float64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddSmartSwitchPaygUsed(v)
+	})
+}
+
+// UpdateSmartSwitchPaygUsed sets the "smart_switch_payg_used" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateSmartSwitchPaygUsed() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateSmartSwitchPaygUsed()
 	})
 }
 

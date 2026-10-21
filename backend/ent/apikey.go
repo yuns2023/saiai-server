@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // APIKey is the model entity for the APIKey schema.
@@ -34,6 +35,12 @@ type APIKey struct {
 	Name string `json:"name,omitempty"`
 	// GroupID holds the value of the "group_id" field.
 	GroupID *int64 `json:"group_id,omitempty"`
+	// SmartSwitch holds the value of the "smart_switch" field.
+	SmartSwitch *domain.KeySmartSwitchPolicy `json:"smart_switch,omitempty"`
+	// SmartSwitchVersion holds the value of the "smart_switch_version" field.
+	SmartSwitchVersion int64 `json:"smart_switch_version,omitempty"`
+	// SmartSwitchPaygUsed holds the value of the "smart_switch_payg_used" field.
+	SmartSwitchPaygUsed float64 `json:"smart_switch_payg_used,omitempty"`
 	// Status holds the value of the "status" field.
 	Status string `json:"status,omitempty"`
 	// Last usage time of this API key
@@ -121,11 +128,11 @@ func (*APIKey) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case apikey.FieldIPWhitelist, apikey.FieldIPBlacklist:
+		case apikey.FieldSmartSwitch, apikey.FieldIPWhitelist, apikey.FieldIPBlacklist:
 			values[i] = new([]byte)
-		case apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
+		case apikey.FieldSmartSwitchPaygUsed, apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
 			values[i] = new(sql.NullFloat64)
-		case apikey.FieldID, apikey.FieldUserID, apikey.FieldGroupID:
+		case apikey.FieldID, apikey.FieldUserID, apikey.FieldGroupID, apikey.FieldSmartSwitchVersion:
 			values[i] = new(sql.NullInt64)
 		case apikey.FieldKey, apikey.FieldName, apikey.FieldStatus:
 			values[i] = new(sql.NullString)
@@ -195,6 +202,26 @@ func (_m *APIKey) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.GroupID = new(int64)
 				*_m.GroupID = value.Int64
+			}
+		case apikey.FieldSmartSwitch:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field smart_switch", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.SmartSwitch); err != nil {
+					return fmt.Errorf("unmarshal field smart_switch: %w", err)
+				}
+			}
+		case apikey.FieldSmartSwitchVersion:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field smart_switch_version", values[i])
+			} else if value.Valid {
+				_m.SmartSwitchVersion = value.Int64
+			}
+		case apikey.FieldSmartSwitchPaygUsed:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field smart_switch_payg_used", values[i])
+			} else if value.Valid {
+				_m.SmartSwitchPaygUsed = value.Float64
 			}
 		case apikey.FieldStatus:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -376,6 +403,15 @@ func (_m *APIKey) String() string {
 		builder.WriteString("group_id=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
+	builder.WriteString(", ")
+	builder.WriteString("smart_switch=")
+	builder.WriteString(fmt.Sprintf("%v", _m.SmartSwitch))
+	builder.WriteString(", ")
+	builder.WriteString("smart_switch_version=")
+	builder.WriteString(fmt.Sprintf("%v", _m.SmartSwitchVersion))
+	builder.WriteString(", ")
+	builder.WriteString("smart_switch_payg_used=")
+	builder.WriteString(fmt.Sprintf("%v", _m.SmartSwitchPaygUsed))
 	builder.WriteString(", ")
 	builder.WriteString("status=")
 	builder.WriteString(_m.Status)

@@ -82,51 +82,56 @@ const (
 // APIKeyMutation represents an operation that mutates the APIKey nodes in the graph.
 type APIKeyMutation struct {
 	config
-	op                 Op
-	typ                string
-	id                 *int64
-	created_at         *time.Time
-	updated_at         *time.Time
-	deleted_at         *time.Time
-	key                *string
-	name               *string
-	status             *string
-	last_used_at       *time.Time
-	ip_whitelist       *[]string
-	appendip_whitelist []string
-	ip_blacklist       *[]string
-	appendip_blacklist []string
-	quota              *float64
-	addquota           *float64
-	quota_used         *float64
-	addquota_used      *float64
-	expires_at         *time.Time
-	rate_limit_5h      *float64
-	addrate_limit_5h   *float64
-	rate_limit_1d      *float64
-	addrate_limit_1d   *float64
-	rate_limit_7d      *float64
-	addrate_limit_7d   *float64
-	usage_5h           *float64
-	addusage_5h        *float64
-	usage_1d           *float64
-	addusage_1d        *float64
-	usage_7d           *float64
-	addusage_7d        *float64
-	window_5h_start    *time.Time
-	window_1d_start    *time.Time
-	window_7d_start    *time.Time
-	clearedFields      map[string]struct{}
-	user               *int64
-	cleareduser        bool
-	group              *int64
-	clearedgroup       bool
-	usage_logs         map[int64]struct{}
-	removedusage_logs  map[int64]struct{}
-	clearedusage_logs  bool
-	done               bool
-	oldValue           func(context.Context) (*APIKey, error)
-	predicates         []predicate.APIKey
+	op                        Op
+	typ                       string
+	id                        *int64
+	created_at                *time.Time
+	updated_at                *time.Time
+	deleted_at                *time.Time
+	key                       *string
+	name                      *string
+	smart_switch              **domain.KeySmartSwitchPolicy
+	smart_switch_version      *int64
+	addsmart_switch_version   *int64
+	smart_switch_payg_used    *float64
+	addsmart_switch_payg_used *float64
+	status                    *string
+	last_used_at              *time.Time
+	ip_whitelist              *[]string
+	appendip_whitelist        []string
+	ip_blacklist              *[]string
+	appendip_blacklist        []string
+	quota                     *float64
+	addquota                  *float64
+	quota_used                *float64
+	addquota_used             *float64
+	expires_at                *time.Time
+	rate_limit_5h             *float64
+	addrate_limit_5h          *float64
+	rate_limit_1d             *float64
+	addrate_limit_1d          *float64
+	rate_limit_7d             *float64
+	addrate_limit_7d          *float64
+	usage_5h                  *float64
+	addusage_5h               *float64
+	usage_1d                  *float64
+	addusage_1d               *float64
+	usage_7d                  *float64
+	addusage_7d               *float64
+	window_5h_start           *time.Time
+	window_1d_start           *time.Time
+	window_7d_start           *time.Time
+	clearedFields             map[string]struct{}
+	user                      *int64
+	cleareduser               bool
+	group                     *int64
+	clearedgroup              bool
+	usage_logs                map[int64]struct{}
+	removedusage_logs         map[int64]struct{}
+	clearedusage_logs         bool
+	done                      bool
+	oldValue                  func(context.Context) (*APIKey, error)
+	predicates                []predicate.APIKey
 }
 
 var _ ent.Mutation = (*APIKeyMutation)(nil)
@@ -503,6 +508,167 @@ func (m *APIKeyMutation) GroupIDCleared() bool {
 func (m *APIKeyMutation) ResetGroupID() {
 	m.group = nil
 	delete(m.clearedFields, apikey.FieldGroupID)
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (m *APIKeyMutation) SetSmartSwitch(dssp *domain.KeySmartSwitchPolicy) {
+	m.smart_switch = &dssp
+}
+
+// SmartSwitch returns the value of the "smart_switch" field in the mutation.
+func (m *APIKeyMutation) SmartSwitch() (r *domain.KeySmartSwitchPolicy, exists bool) {
+	v := m.smart_switch
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSmartSwitch returns the old "smart_switch" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldSmartSwitch(ctx context.Context) (v *domain.KeySmartSwitchPolicy, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSmartSwitch is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSmartSwitch requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSmartSwitch: %w", err)
+	}
+	return oldValue.SmartSwitch, nil
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (m *APIKeyMutation) ClearSmartSwitch() {
+	m.smart_switch = nil
+	m.clearedFields[apikey.FieldSmartSwitch] = struct{}{}
+}
+
+// SmartSwitchCleared returns if the "smart_switch" field was cleared in this mutation.
+func (m *APIKeyMutation) SmartSwitchCleared() bool {
+	_, ok := m.clearedFields[apikey.FieldSmartSwitch]
+	return ok
+}
+
+// ResetSmartSwitch resets all changes to the "smart_switch" field.
+func (m *APIKeyMutation) ResetSmartSwitch() {
+	m.smart_switch = nil
+	delete(m.clearedFields, apikey.FieldSmartSwitch)
+}
+
+// SetSmartSwitchVersion sets the "smart_switch_version" field.
+func (m *APIKeyMutation) SetSmartSwitchVersion(i int64) {
+	m.smart_switch_version = &i
+	m.addsmart_switch_version = nil
+}
+
+// SmartSwitchVersion returns the value of the "smart_switch_version" field in the mutation.
+func (m *APIKeyMutation) SmartSwitchVersion() (r int64, exists bool) {
+	v := m.smart_switch_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSmartSwitchVersion returns the old "smart_switch_version" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldSmartSwitchVersion(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSmartSwitchVersion is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSmartSwitchVersion requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSmartSwitchVersion: %w", err)
+	}
+	return oldValue.SmartSwitchVersion, nil
+}
+
+// AddSmartSwitchVersion adds i to the "smart_switch_version" field.
+func (m *APIKeyMutation) AddSmartSwitchVersion(i int64) {
+	if m.addsmart_switch_version != nil {
+		*m.addsmart_switch_version += i
+	} else {
+		m.addsmart_switch_version = &i
+	}
+}
+
+// AddedSmartSwitchVersion returns the value that was added to the "smart_switch_version" field in this mutation.
+func (m *APIKeyMutation) AddedSmartSwitchVersion() (r int64, exists bool) {
+	v := m.addsmart_switch_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetSmartSwitchVersion resets all changes to the "smart_switch_version" field.
+func (m *APIKeyMutation) ResetSmartSwitchVersion() {
+	m.smart_switch_version = nil
+	m.addsmart_switch_version = nil
+}
+
+// SetSmartSwitchPaygUsed sets the "smart_switch_payg_used" field.
+func (m *APIKeyMutation) SetSmartSwitchPaygUsed(f float64) {
+	m.smart_switch_payg_used = &f
+	m.addsmart_switch_payg_used = nil
+}
+
+// SmartSwitchPaygUsed returns the value of the "smart_switch_payg_used" field in the mutation.
+func (m *APIKeyMutation) SmartSwitchPaygUsed() (r float64, exists bool) {
+	v := m.smart_switch_payg_used
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSmartSwitchPaygUsed returns the old "smart_switch_payg_used" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldSmartSwitchPaygUsed(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSmartSwitchPaygUsed is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSmartSwitchPaygUsed requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSmartSwitchPaygUsed: %w", err)
+	}
+	return oldValue.SmartSwitchPaygUsed, nil
+}
+
+// AddSmartSwitchPaygUsed adds f to the "smart_switch_payg_used" field.
+func (m *APIKeyMutation) AddSmartSwitchPaygUsed(f float64) {
+	if m.addsmart_switch_payg_used != nil {
+		*m.addsmart_switch_payg_used += f
+	} else {
+		m.addsmart_switch_payg_used = &f
+	}
+}
+
+// AddedSmartSwitchPaygUsed returns the value that was added to the "smart_switch_payg_used" field in this mutation.
+func (m *APIKeyMutation) AddedSmartSwitchPaygUsed() (r float64, exists bool) {
+	v := m.addsmart_switch_payg_used
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetSmartSwitchPaygUsed resets all changes to the "smart_switch_payg_used" field.
+func (m *APIKeyMutation) ResetSmartSwitchPaygUsed() {
+	m.smart_switch_payg_used = nil
+	m.addsmart_switch_payg_used = nil
 }
 
 // SetStatus sets the "status" field.
@@ -1506,7 +1672,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 23)
+	fields := make([]string, 0, 26)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1527,6 +1693,15 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.group != nil {
 		fields = append(fields, apikey.FieldGroupID)
+	}
+	if m.smart_switch != nil {
+		fields = append(fields, apikey.FieldSmartSwitch)
+	}
+	if m.smart_switch_version != nil {
+		fields = append(fields, apikey.FieldSmartSwitchVersion)
+	}
+	if m.smart_switch_payg_used != nil {
+		fields = append(fields, apikey.FieldSmartSwitchPaygUsed)
 	}
 	if m.status != nil {
 		fields = append(fields, apikey.FieldStatus)
@@ -1598,6 +1773,12 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.Name()
 	case apikey.FieldGroupID:
 		return m.GroupID()
+	case apikey.FieldSmartSwitch:
+		return m.SmartSwitch()
+	case apikey.FieldSmartSwitchVersion:
+		return m.SmartSwitchVersion()
+	case apikey.FieldSmartSwitchPaygUsed:
+		return m.SmartSwitchPaygUsed()
 	case apikey.FieldStatus:
 		return m.Status()
 	case apikey.FieldLastUsedAt:
@@ -1653,6 +1834,12 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldName(ctx)
 	case apikey.FieldGroupID:
 		return m.OldGroupID(ctx)
+	case apikey.FieldSmartSwitch:
+		return m.OldSmartSwitch(ctx)
+	case apikey.FieldSmartSwitchVersion:
+		return m.OldSmartSwitchVersion(ctx)
+	case apikey.FieldSmartSwitchPaygUsed:
+		return m.OldSmartSwitchPaygUsed(ctx)
 	case apikey.FieldStatus:
 		return m.OldStatus(ctx)
 	case apikey.FieldLastUsedAt:
@@ -1742,6 +1929,27 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetGroupID(v)
+		return nil
+	case apikey.FieldSmartSwitch:
+		v, ok := value.(*domain.KeySmartSwitchPolicy)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSmartSwitch(v)
+		return nil
+	case apikey.FieldSmartSwitchVersion:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSmartSwitchVersion(v)
+		return nil
+	case apikey.FieldSmartSwitchPaygUsed:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSmartSwitchPaygUsed(v)
 		return nil
 	case apikey.FieldStatus:
 		v, ok := value.(string)
@@ -1863,6 +2071,12 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 // this mutation.
 func (m *APIKeyMutation) AddedFields() []string {
 	var fields []string
+	if m.addsmart_switch_version != nil {
+		fields = append(fields, apikey.FieldSmartSwitchVersion)
+	}
+	if m.addsmart_switch_payg_used != nil {
+		fields = append(fields, apikey.FieldSmartSwitchPaygUsed)
+	}
 	if m.addquota != nil {
 		fields = append(fields, apikey.FieldQuota)
 	}
@@ -1895,6 +2109,10 @@ func (m *APIKeyMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *APIKeyMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case apikey.FieldSmartSwitchVersion:
+		return m.AddedSmartSwitchVersion()
+	case apikey.FieldSmartSwitchPaygUsed:
+		return m.AddedSmartSwitchPaygUsed()
 	case apikey.FieldQuota:
 		return m.AddedQuota()
 	case apikey.FieldQuotaUsed:
@@ -1920,6 +2138,20 @@ func (m *APIKeyMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *APIKeyMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case apikey.FieldSmartSwitchVersion:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSmartSwitchVersion(v)
+		return nil
+	case apikey.FieldSmartSwitchPaygUsed:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSmartSwitchPaygUsed(v)
+		return nil
 	case apikey.FieldQuota:
 		v, ok := value.(float64)
 		if !ok {
@@ -1990,6 +2222,9 @@ func (m *APIKeyMutation) ClearedFields() []string {
 	if m.FieldCleared(apikey.FieldGroupID) {
 		fields = append(fields, apikey.FieldGroupID)
 	}
+	if m.FieldCleared(apikey.FieldSmartSwitch) {
+		fields = append(fields, apikey.FieldSmartSwitch)
+	}
 	if m.FieldCleared(apikey.FieldLastUsedAt) {
 		fields = append(fields, apikey.FieldLastUsedAt)
 	}
@@ -2030,6 +2265,9 @@ func (m *APIKeyMutation) ClearField(name string) error {
 		return nil
 	case apikey.FieldGroupID:
 		m.ClearGroupID()
+		return nil
+	case apikey.FieldSmartSwitch:
+		m.ClearSmartSwitch()
 		return nil
 	case apikey.FieldLastUsedAt:
 		m.ClearLastUsedAt()
@@ -2080,6 +2318,15 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldGroupID:
 		m.ResetGroupID()
+		return nil
+	case apikey.FieldSmartSwitch:
+		m.ResetSmartSwitch()
+		return nil
+	case apikey.FieldSmartSwitchVersion:
+		m.ResetSmartSwitchVersion()
+		return nil
+	case apikey.FieldSmartSwitchPaygUsed:
+		m.ResetSmartSwitchPaygUsed()
 		return nil
 	case apikey.FieldStatus:
 		m.ResetStatus()
@@ -26663,6 +26910,7 @@ type UsageLogMutation struct {
 	op                                  Op
 	typ                                 string
 	id                                  *int64
+	smart_switch                        **domain.KeySmartSwitchTrace
 	request_id                          *string
 	session_id                          *string
 	model                               *string
@@ -26836,6 +27084,55 @@ func (m *UsageLogMutation) IDs(ctx context.Context) ([]int64, error) {
 	default:
 		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
 	}
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (m *UsageLogMutation) SetSmartSwitch(dsst *domain.KeySmartSwitchTrace) {
+	m.smart_switch = &dsst
+}
+
+// SmartSwitch returns the value of the "smart_switch" field in the mutation.
+func (m *UsageLogMutation) SmartSwitch() (r *domain.KeySmartSwitchTrace, exists bool) {
+	v := m.smart_switch
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSmartSwitch returns the old "smart_switch" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldSmartSwitch(ctx context.Context) (v *domain.KeySmartSwitchTrace, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSmartSwitch is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSmartSwitch requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSmartSwitch: %w", err)
+	}
+	return oldValue.SmartSwitch, nil
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (m *UsageLogMutation) ClearSmartSwitch() {
+	m.smart_switch = nil
+	m.clearedFields[usagelog.FieldSmartSwitch] = struct{}{}
+}
+
+// SmartSwitchCleared returns if the "smart_switch" field was cleared in this mutation.
+func (m *UsageLogMutation) SmartSwitchCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldSmartSwitch]
+	return ok
+}
+
+// ResetSmartSwitch resets all changes to the "smart_switch" field.
+func (m *UsageLogMutation) ResetSmartSwitch() {
+	m.smart_switch = nil
+	delete(m.clearedFields, usagelog.FieldSmartSwitch)
 }
 
 // SetUserID sets the "user_id" field.
@@ -29185,7 +29482,10 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 42)
+	fields := make([]string, 0, 43)
+	if m.smart_switch != nil {
+		fields = append(fields, usagelog.FieldSmartSwitch)
+	}
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -29320,6 +29620,8 @@ func (m *UsageLogMutation) Fields() []string {
 // schema.
 func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 	switch name {
+	case usagelog.FieldSmartSwitch:
+		return m.SmartSwitch()
 	case usagelog.FieldUserID:
 		return m.UserID()
 	case usagelog.FieldAPIKeyID:
@@ -29413,6 +29715,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 // database failed.
 func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
 	switch name {
+	case usagelog.FieldSmartSwitch:
+		return m.OldSmartSwitch(ctx)
 	case usagelog.FieldUserID:
 		return m.OldUserID(ctx)
 	case usagelog.FieldAPIKeyID:
@@ -29506,6 +29810,13 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 // type.
 func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 	switch name {
+	case usagelog.FieldSmartSwitch:
+		v, ok := value.(*domain.KeySmartSwitchTrace)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSmartSwitch(v)
+		return nil
 	case usagelog.FieldUserID:
 		v, ok := value.(int64)
 		if !ok {
@@ -30121,6 +30432,9 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 // mutation.
 func (m *UsageLogMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(usagelog.FieldSmartSwitch) {
+		fields = append(fields, usagelog.FieldSmartSwitch)
+	}
 	if m.FieldCleared(usagelog.FieldSessionID) {
 		fields = append(fields, usagelog.FieldSessionID)
 	}
@@ -30177,6 +30491,9 @@ func (m *UsageLogMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *UsageLogMutation) ClearField(name string) error {
 	switch name {
+	case usagelog.FieldSmartSwitch:
+		m.ClearSmartSwitch()
+		return nil
 	case usagelog.FieldSessionID:
 		m.ClearSessionID()
 		return nil
@@ -30227,6 +30544,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 // It returns an error if the field is not defined in the schema.
 func (m *UsageLogMutation) ResetField(name string) error {
 	switch name {
+	case usagelog.FieldSmartSwitch:
+		m.ResetSmartSwitch()
+		return nil
 	case usagelog.FieldUserID:
 		m.ResetUserID()
 		return nil

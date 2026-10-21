@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // UsageLogCreate is the builder for creating a UsageLog entity.
@@ -25,6 +26,12 @@ type UsageLogCreate struct {
 	mutation *UsageLogMutation
 	hooks    []Hook
 	conflict []sql.ConflictOption
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (_c *UsageLogCreate) SetSmartSwitch(v *domain.KeySmartSwitchTrace) *UsageLogCreate {
+	_c.mutation.SetSmartSwitch(v)
+	return _c
 }
 
 // SetUserID sets the "user_id" field.
@@ -875,6 +882,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec = sqlgraph.NewCreateSpec(usagelog.Table, sqlgraph.NewFieldSpec(usagelog.FieldID, field.TypeInt64))
 	)
 	_spec.OnConflict = _c.conflict
+	if value, ok := _c.mutation.SmartSwitch(); ok {
+		_spec.SetField(usagelog.FieldSmartSwitch, field.TypeJSON, value)
+		_node.SmartSwitch = value
+	}
 	if value, ok := _c.mutation.RequestID(); ok {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)
 		_node.RequestID = value
@@ -1115,7 +1126,7 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 // of the `INSERT` statement. For example:
 //
 //	client.UsageLog.Create().
-//		SetUserID(v).
+//		SetSmartSwitch(v).
 //		OnConflict(
 //			// Update the row with the new values
 //			// the was proposed for insertion.
@@ -1124,7 +1135,7 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 //		// Override some of the fields with custom
 //		// update values.
 //		Update(func(u *ent.UsageLogUpsert) {
-//			SetUserID(v+v).
+//			SetSmartSwitch(v+v).
 //		}).
 //		Exec(ctx)
 func (_c *UsageLogCreate) OnConflict(opts ...sql.ConflictOption) *UsageLogUpsertOne {
@@ -1159,6 +1170,24 @@ type (
 		*sql.UpdateSet
 	}
 )
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (u *UsageLogUpsert) SetSmartSwitch(v *domain.KeySmartSwitchTrace) *UsageLogUpsert {
+	u.Set(usagelog.FieldSmartSwitch, v)
+	return u
+}
+
+// UpdateSmartSwitch sets the "smart_switch" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateSmartSwitch() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldSmartSwitch)
+	return u
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (u *UsageLogUpsert) ClearSmartSwitch() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldSmartSwitch)
+	return u
+}
 
 // SetUserID sets the "user_id" field.
 func (u *UsageLogUpsert) SetUserID(v int64) *UsageLogUpsert {
@@ -1923,6 +1952,27 @@ func (u *UsageLogUpsertOne) Update(set func(*UsageLogUpsert)) *UsageLogUpsertOne
 		set(&UsageLogUpsert{UpdateSet: update})
 	}))
 	return u
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (u *UsageLogUpsertOne) SetSmartSwitch(v *domain.KeySmartSwitchTrace) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetSmartSwitch(v)
+	})
+}
+
+// UpdateSmartSwitch sets the "smart_switch" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateSmartSwitch() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateSmartSwitch()
+	})
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (u *UsageLogUpsertOne) ClearSmartSwitch() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearSmartSwitch()
+	})
 }
 
 // SetUserID sets the "user_id" field.
@@ -2900,7 +2950,7 @@ func (_c *UsageLogCreateBulk) ExecX(ctx context.Context) {
 //		// Override some of the fields with custom
 //		// update values.
 //		Update(func(u *ent.UsageLogUpsert) {
-//			SetUserID(v+v).
+//			SetSmartSwitch(v+v).
 //		}).
 //		Exec(ctx)
 func (_c *UsageLogCreateBulk) OnConflict(opts ...sql.ConflictOption) *UsageLogUpsertBulk {
@@ -2974,6 +3024,27 @@ func (u *UsageLogUpsertBulk) Update(set func(*UsageLogUpsert)) *UsageLogUpsertBu
 		set(&UsageLogUpsert{UpdateSet: update})
 	}))
 	return u
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (u *UsageLogUpsertBulk) SetSmartSwitch(v *domain.KeySmartSwitchTrace) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetSmartSwitch(v)
+	})
+}
+
+// UpdateSmartSwitch sets the "smart_switch" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateSmartSwitch() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateSmartSwitch()
+	})
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (u *UsageLogUpsertBulk) ClearSmartSwitch() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearSmartSwitch()
+	})
 }
 
 // SetUserID sets the "user_id" field.

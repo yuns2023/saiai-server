@@ -656,7 +656,31 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	isSubscriptionMode := group != nil && group.IsSubscriptionType() && subscription != nil
 
 	if isSubscriptionMode {
-		if err := s.checkSubscriptionEligibility(ctx, user.ID, group, subscription); err != nil {
+		// A recovered priority group must not be rejected by an older cached
+		// daily/weekly window after request-local routing selected fresh state.
+		if apiKey != nil && apiKey.SmartSwitchOriginalGroupID != nil {
+			fresh, err := s.subRepo.GetActiveByUserIDAndGroupID(ctx, user.ID, group.ID)
+			if err != nil {
+				return err
+			}
+			owned := *fresh
+			_, err = (&SubscriptionService{}).ValidateAndCheckLimits(&owned, group)
+			if err != nil {
+				return err
+			}
+			if group.HasFiveHourLimit() && owned.FiveHourUsageUSD >= *group.FiveHourLimitUSD {
+				return ErrFiveHourLimitExceeded
+			}
+			if group.HasDailyLimit() && owned.DailyUsageUSD >= *group.DailyLimitUSD {
+				return ErrDailyLimitExceeded
+			}
+			if group.HasWeeklyLimit() && owned.WeeklyUsageUSD >= *group.WeeklyLimitUSD {
+				return ErrWeeklyLimitExceeded
+			}
+			if group.HasMonthlyLimit() && owned.MonthlyUsageUSD >= *group.MonthlyLimitUSD {
+				return ErrMonthlyLimitExceeded
+			}
+		} else if err := s.checkSubscriptionEligibility(ctx, user.ID, group, subscription); err != nil {
 			return err
 		}
 	} else if !group.UsesHostedUsage() {

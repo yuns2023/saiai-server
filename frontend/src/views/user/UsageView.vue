@@ -155,6 +155,12 @@
             </span>
           </template>
 
+          <template #cell-routing="{ row }">
+            <span>{{ row.group?.name ?? row.group_id ?? '—' }}</span>
+            <div v-if="row.smart_switch" class="text-xs text-gray-500">
+              {{ row.smart_switch.reason ? row.smart_switch.reason.split(',').map((reason: string) => t('keys.smartSwitch.reasons.' + reason)).join(' / ') : t('keys.smartSwitch.preferred') }}
+            </div>
+          </template>
           <template #cell-endpoint="{ row }">
             <span class="text-sm text-gray-600 dark:text-gray-300 block max-w-[320px] whitespace-normal break-all">
               {{ formatUsageEndpoints(row) }}
@@ -585,6 +591,7 @@ const usageStats = ref<UsageStatsResponse | null>(null)
 
 const columns = computed<Column[]>(() => [
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
+  { key: 'routing', label: t('keys.smartSwitch.actualGroup'), sortable: false },
   { key: 'model', label: t('usage.model'), sortable: true },
   { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
   { key: 'endpoint', label: t('usage.endpoint'), sortable: false },

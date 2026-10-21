@@ -255,6 +255,16 @@ func CreatedAt(v time.Time) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldCreatedAt, v))
 }
 
+// SmartSwitchIsNil applies the IsNil predicate on the "smart_switch" field.
+func SmartSwitchIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldSmartSwitch))
+}
+
+// SmartSwitchNotNil applies the NotNil predicate on the "smart_switch" field.
+func SmartSwitchNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldSmartSwitch))
+}
+
 // UserIDEQ applies the EQ predicate on the "user_id" field.
 func UserIDEQ(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldUserID, v))

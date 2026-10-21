@@ -652,6 +652,35 @@ export default {
 
   // API Keys
   keys: {
+    smartSwitch: {
+      "budget": "Cumulative pay-as-you-go budget (USD)",
+      "budgetHint": "Used: ${used}. Empty means unlimited; 0 blocks paid requests. This is an admission threshold: in-flight requests can exceed it. Toggling does not reset usage.",
+      "actualGroup": "Actual group",
+      "preferred": "Preferred group",
+      "reasons": {
+        "group_unavailable": "No available accounts",
+        "group_missing": "Group removed",
+        "group_inactive": "Group inactive",
+        "incompatible_group": "Incompatible group",
+        "access_revoked": "Group access unavailable",
+        "model_unavailable": "Model unavailable",
+        "subscription_unavailable": "Subscription unavailable",
+        "subscription_limit_or_expiry": "Subscription limited or expired",
+        "payg_budget_exhausted": "Pay-as-you-go budget exhausted",
+        "insufficient_balance": "Insufficient balance"
+      },
+      "title": "Smart group switching",
+      "hint": "Use eligible groups from top to bottom. New requests return to the preferred subscription when it recovers.",
+      "unsupported": "Available for Claude / OpenAI groups without hosted usage.",
+      "subscription": "Subscription",
+      "payg": "Pay as you go",
+      "unavailable": "Currently unavailable",
+      "up": "Move up",
+      "down": "Move down",
+      "remove": "Remove group",
+      "consent": "I authorize automatic balance charges for selected pay-as-you-go groups, at their prices and my applicable discount.",
+      "scope": "Supports independent Messages / Responses HTTP requests. Active requests, WebSockets and previous_response_id continuations do not switch. The Key total quota still applies."
+    },
     title: 'API Keys',
     description: 'Manage your API keys and access tokens',
     searchPlaceholder: 'Search name or key...',

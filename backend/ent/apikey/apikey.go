@@ -29,6 +29,12 @@ const (
 	FieldName = "name"
 	// FieldGroupID holds the string denoting the group_id field in the database.
 	FieldGroupID = "group_id"
+	// FieldSmartSwitch holds the string denoting the smart_switch field in the database.
+	FieldSmartSwitch = "smart_switch"
+	// FieldSmartSwitchVersion holds the string denoting the smart_switch_version field in the database.
+	FieldSmartSwitchVersion = "smart_switch_version"
+	// FieldSmartSwitchPaygUsed holds the string denoting the smart_switch_payg_used field in the database.
+	FieldSmartSwitchPaygUsed = "smart_switch_payg_used"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
 	// FieldLastUsedAt holds the string denoting the last_used_at field in the database.
@@ -102,6 +108,9 @@ var Columns = []string{
 	FieldKey,
 	FieldName,
 	FieldGroupID,
+	FieldSmartSwitch,
+	FieldSmartSwitchVersion,
+	FieldSmartSwitchPaygUsed,
 	FieldStatus,
 	FieldLastUsedAt,
 	FieldIPWhitelist,
@@ -148,6 +157,10 @@ var (
 	KeyValidator func(string) error
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
+	// DefaultSmartSwitchVersion holds the default value on creation for the "smart_switch_version" field.
+	DefaultSmartSwitchVersion int64
+	// DefaultSmartSwitchPaygUsed holds the default value on creation for the "smart_switch_payg_used" field.
+	DefaultSmartSwitchPaygUsed float64
 	// DefaultStatus holds the default value on creation for the "status" field.
 	DefaultStatus string
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
@@ -211,6 +224,16 @@ func ByName(opts ...sql.OrderTermOption) OrderOption {
 // ByGroupID orders the results by the group_id field.
 func ByGroupID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldGroupID, opts...).ToFunc()
+}
+
+// BySmartSwitchVersion orders the results by the smart_switch_version field.
+func BySmartSwitchVersion(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSmartSwitchVersion, opts...).ToFunc()
+}
+
+// BySmartSwitchPaygUsed orders the results by the smart_switch_payg_used field.
+func BySmartSwitchPaygUsed(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSmartSwitchPaygUsed, opts...).ToFunc()
 }
 
 // ByStatus orders the results by the status field.

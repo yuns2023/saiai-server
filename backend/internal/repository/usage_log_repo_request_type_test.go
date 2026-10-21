@@ -539,6 +539,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			1.0,               // user payg discount
 			[]byte(nil),       // historical pricing snapshot
 			sql.NullFloat64{}, // historical metering snapshot
+			[]byte(nil),       // smart switching trace
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -587,6 +588,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			1.0,               // user payg discount
 			[]byte(nil),       // historical pricing snapshot
 			sql.NullFloat64{}, // historical metering snapshot
+			[]byte(nil),       // smart switching trace
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -635,6 +637,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			1.0,               // user payg discount
 			[]byte(nil),       // historical pricing snapshot
 			sql.NullFloat64{}, // historical metering snapshot
+			[]byte(nil),       // smart switching trace
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -646,7 +649,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 func TestPrepareUsageLogInsertBillingFactorDefaultsAndFreeRate(t *testing.T) {
 	log := &service.UsageLog{RequestID: "billing-factors", RateMultiplier: 1}
 	prepared := prepareUsageLogInsert(log)
-	require.Len(t, prepared.args, 48)
+	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 	require.Equal(t, 1.0, prepared.args[42])
 	require.Equal(t, 1.0, prepared.args[43])
 	require.Equal(t, 1.0, prepared.args[44])

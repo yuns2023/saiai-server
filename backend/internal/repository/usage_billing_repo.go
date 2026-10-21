@@ -120,6 +120,11 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		result.UserAccessLevelChanged = levelChanged
 	}
 
+	if cmd.SmartSwitchPaygCost > 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE api_keys SET smart_switch_payg_used = smart_switch_payg_used + $1 WHERE id = $2`, cmd.SmartSwitchPaygCost, cmd.APIKeyID); err != nil {
+			return err
+		}
+	}
 	if cmd.APIKeyQuotaCost > 0 {
 		exhausted, err := incrementUsageBillingAPIKeyQuota(ctx, tx, cmd.APIKeyID, cmd.APIKeyQuotaCost)
 		if err != nil {

@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // APIKeyUpdate is the builder for updating APIKey entities.
@@ -117,6 +118,60 @@ func (_u *APIKeyUpdate) SetNillableGroupID(v *int64) *APIKeyUpdate {
 // ClearGroupID clears the value of the "group_id" field.
 func (_u *APIKeyUpdate) ClearGroupID() *APIKeyUpdate {
 	_u.mutation.ClearGroupID()
+	return _u
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (_u *APIKeyUpdate) SetSmartSwitch(v *domain.KeySmartSwitchPolicy) *APIKeyUpdate {
+	_u.mutation.SetSmartSwitch(v)
+	return _u
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (_u *APIKeyUpdate) ClearSmartSwitch() *APIKeyUpdate {
+	_u.mutation.ClearSmartSwitch()
+	return _u
+}
+
+// SetSmartSwitchVersion sets the "smart_switch_version" field.
+func (_u *APIKeyUpdate) SetSmartSwitchVersion(v int64) *APIKeyUpdate {
+	_u.mutation.ResetSmartSwitchVersion()
+	_u.mutation.SetSmartSwitchVersion(v)
+	return _u
+}
+
+// SetNillableSmartSwitchVersion sets the "smart_switch_version" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableSmartSwitchVersion(v *int64) *APIKeyUpdate {
+	if v != nil {
+		_u.SetSmartSwitchVersion(*v)
+	}
+	return _u
+}
+
+// AddSmartSwitchVersion adds value to the "smart_switch_version" field.
+func (_u *APIKeyUpdate) AddSmartSwitchVersion(v int64) *APIKeyUpdate {
+	_u.mutation.AddSmartSwitchVersion(v)
+	return _u
+}
+
+// SetSmartSwitchPaygUsed sets the "smart_switch_payg_used" field.
+func (_u *APIKeyUpdate) SetSmartSwitchPaygUsed(v float64) *APIKeyUpdate {
+	_u.mutation.ResetSmartSwitchPaygUsed()
+	_u.mutation.SetSmartSwitchPaygUsed(v)
+	return _u
+}
+
+// SetNillableSmartSwitchPaygUsed sets the "smart_switch_payg_used" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableSmartSwitchPaygUsed(v *float64) *APIKeyUpdate {
+	if v != nil {
+		_u.SetSmartSwitchPaygUsed(*v)
+	}
+	return _u
+}
+
+// AddSmartSwitchPaygUsed adds value to the "smart_switch_payg_used" field.
+func (_u *APIKeyUpdate) AddSmartSwitchPaygUsed(v float64) *APIKeyUpdate {
+	_u.mutation.AddSmartSwitchPaygUsed(v)
 	return _u
 }
 
@@ -593,6 +648,24 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.SmartSwitch(); ok {
+		_spec.SetField(apikey.FieldSmartSwitch, field.TypeJSON, value)
+	}
+	if _u.mutation.SmartSwitchCleared() {
+		_spec.ClearField(apikey.FieldSmartSwitch, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.SmartSwitchVersion(); ok {
+		_spec.SetField(apikey.FieldSmartSwitchVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSmartSwitchVersion(); ok {
+		_spec.AddField(apikey.FieldSmartSwitchVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.SmartSwitchPaygUsed(); ok {
+		_spec.SetField(apikey.FieldSmartSwitchPaygUsed, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedSmartSwitchPaygUsed(); ok {
+		_spec.AddField(apikey.FieldSmartSwitchPaygUsed, field.TypeFloat64, value)
+	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
 	}
@@ -904,6 +977,60 @@ func (_u *APIKeyUpdateOne) SetNillableGroupID(v *int64) *APIKeyUpdateOne {
 // ClearGroupID clears the value of the "group_id" field.
 func (_u *APIKeyUpdateOne) ClearGroupID() *APIKeyUpdateOne {
 	_u.mutation.ClearGroupID()
+	return _u
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (_u *APIKeyUpdateOne) SetSmartSwitch(v *domain.KeySmartSwitchPolicy) *APIKeyUpdateOne {
+	_u.mutation.SetSmartSwitch(v)
+	return _u
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (_u *APIKeyUpdateOne) ClearSmartSwitch() *APIKeyUpdateOne {
+	_u.mutation.ClearSmartSwitch()
+	return _u
+}
+
+// SetSmartSwitchVersion sets the "smart_switch_version" field.
+func (_u *APIKeyUpdateOne) SetSmartSwitchVersion(v int64) *APIKeyUpdateOne {
+	_u.mutation.ResetSmartSwitchVersion()
+	_u.mutation.SetSmartSwitchVersion(v)
+	return _u
+}
+
+// SetNillableSmartSwitchVersion sets the "smart_switch_version" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableSmartSwitchVersion(v *int64) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetSmartSwitchVersion(*v)
+	}
+	return _u
+}
+
+// AddSmartSwitchVersion adds value to the "smart_switch_version" field.
+func (_u *APIKeyUpdateOne) AddSmartSwitchVersion(v int64) *APIKeyUpdateOne {
+	_u.mutation.AddSmartSwitchVersion(v)
+	return _u
+}
+
+// SetSmartSwitchPaygUsed sets the "smart_switch_payg_used" field.
+func (_u *APIKeyUpdateOne) SetSmartSwitchPaygUsed(v float64) *APIKeyUpdateOne {
+	_u.mutation.ResetSmartSwitchPaygUsed()
+	_u.mutation.SetSmartSwitchPaygUsed(v)
+	return _u
+}
+
+// SetNillableSmartSwitchPaygUsed sets the "smart_switch_payg_used" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableSmartSwitchPaygUsed(v *float64) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetSmartSwitchPaygUsed(*v)
+	}
+	return _u
+}
+
+// AddSmartSwitchPaygUsed adds value to the "smart_switch_payg_used" field.
+func (_u *APIKeyUpdateOne) AddSmartSwitchPaygUsed(v float64) *APIKeyUpdateOne {
+	_u.mutation.AddSmartSwitchPaygUsed(v)
 	return _u
 }
 
@@ -1409,6 +1536,24 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SmartSwitch(); ok {
+		_spec.SetField(apikey.FieldSmartSwitch, field.TypeJSON, value)
+	}
+	if _u.mutation.SmartSwitchCleared() {
+		_spec.ClearField(apikey.FieldSmartSwitch, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.SmartSwitchVersion(); ok {
+		_spec.SetField(apikey.FieldSmartSwitchVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSmartSwitchVersion(); ok {
+		_spec.AddField(apikey.FieldSmartSwitchVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.SmartSwitchPaygUsed(); ok {
+		_spec.SetField(apikey.FieldSmartSwitchPaygUsed, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedSmartSwitchPaygUsed(); ok {
+		_spec.AddField(apikey.FieldSmartSwitchPaygUsed, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)

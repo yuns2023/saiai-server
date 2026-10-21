@@ -144,15 +144,16 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		})
 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
 		c.Request = c.Request.WithContext(service.WithAccountUserID(service.WithTrustedUser(c.Request.Context(), apiKey.User.IsTrusted), apiKey.UserID))
+		smartSwitch := smartSwitchRequest(c, apiKey) && cfg.RunMode != config.RunModeSimple
 		setGroupContext(c, apiKey.Group)
 		// Disabling a group must stop every API-key route for already-issued
 		// keys as well as new key bindings. In particular, do not let usage or
 		// bootstrap metadata remain available for a disabled group.
-		if apiKey.GroupID != nil && (apiKey.Group == nil || !apiKey.Group.IsActive()) {
+		if !smartSwitch && apiKey.GroupID != nil && (apiKey.Group == nil || !apiKey.Group.IsActive()) {
 			AbortWithError(c, 403, "GROUP_INACTIVE", "API key group is not active")
 			return
 		}
-		if apiKey.Group != nil && !apiKey.User.MeetsRequiredLevel(apiKey.Group.RequiredLevel) {
+		if !smartSwitch && apiKey.Group != nil && !apiKey.User.MeetsRequiredLevel(apiKey.Group.RequiredLevel) {
 			AbortWithError(c, 403, "USER_LEVEL_REQUIRED", "Your current access level does not permit this group")
 			return
 		}
@@ -195,15 +196,22 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			return
 		}
 
+		if smartSwitch {
+			selected, ok := applySmartSwitch(c, apiKey, apiKeyService, subscriptionService, cfg)
+			if !ok {
+				return
+			}
+			apiKey = selected
+		}
 		var subscription *service.UserSubscription
 		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 
 		if isSubscriptionType && subscriptionService != nil {
-			sub, subErr := subscriptionService.GetActiveSubscription(
-				c.Request.Context(),
-				apiKey.User.ID,
-				apiKey.Group.ID,
-			)
+			sub, _ := GetSubscriptionFromContext(c)
+			var subErr error
+			if sub == nil {
+				sub, subErr = subscriptionService.GetActiveSubscription(c.Request.Context(), apiKey.User.ID, apiKey.Group.ID)
+			}
 			if subErr != nil {
 				if !skipBilling {
 					AbortWithError(c, 403, "SUBSCRIPTION_NOT_FOUND", "No active subscription found for this group")

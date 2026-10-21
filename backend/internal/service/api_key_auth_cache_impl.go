@@ -281,7 +281,7 @@ func (s *APIKeyService) applyAuthCacheEntry(key string, entry *APIKeyAuthCacheEn
 	if entry.NotFound {
 		return nil, true, ErrAPIKeyNotFound
 	}
-	if entry.Snapshot == nil {
+	if entry.Snapshot == nil || entry.Snapshot.SchemaVersion != 1 {
 		return nil, false, nil
 	}
 	return s.snapshotToAPIKey(key, entry.Snapshot), true, nil
@@ -292,19 +292,22 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 		return nil
 	}
 	snapshot := &APIKeyAuthSnapshot{
-		APIKeyID:    apiKey.ID,
-		Name:        apiKey.Name,
-		UserID:      apiKey.UserID,
-		GroupID:     apiKey.GroupID,
-		Status:      apiKey.Status,
-		IPWhitelist: apiKey.IPWhitelist,
-		IPBlacklist: apiKey.IPBlacklist,
-		Quota:       apiKey.Quota,
-		QuotaUsed:   apiKey.QuotaUsed,
-		ExpiresAt:   apiKey.ExpiresAt,
-		RateLimit5h: apiKey.RateLimit5h,
-		RateLimit1d: apiKey.RateLimit1d,
-		RateLimit7d: apiKey.RateLimit7d,
+		SchemaVersion:      1,
+		APIKeyID:           apiKey.ID,
+		Name:               apiKey.Name,
+		UserID:             apiKey.UserID,
+		GroupID:            apiKey.GroupID,
+		Status:             apiKey.Status,
+		IPWhitelist:        apiKey.IPWhitelist,
+		IPBlacklist:        apiKey.IPBlacklist,
+		Quota:              apiKey.Quota,
+		QuotaUsed:          apiKey.QuotaUsed,
+		ExpiresAt:          apiKey.ExpiresAt,
+		RateLimit5h:        apiKey.RateLimit5h,
+		RateLimit1d:        apiKey.RateLimit1d,
+		RateLimit7d:        apiKey.RateLimit7d,
+		SmartSwitch:        apiKey.SmartSwitch.Clone(),
+		SmartSwitchVersion: apiKey.SmartSwitchVersion,
 		User: APIKeyAuthUserSnapshot{
 			ID:                          apiKey.User.ID,
 			Username:                    apiKey.User.Username,
@@ -378,20 +381,22 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		return nil
 	}
 	apiKey := &APIKey{
-		ID:          snapshot.APIKeyID,
-		Name:        snapshot.Name,
-		UserID:      snapshot.UserID,
-		GroupID:     snapshot.GroupID,
-		Key:         key,
-		Status:      snapshot.Status,
-		IPWhitelist: snapshot.IPWhitelist,
-		IPBlacklist: snapshot.IPBlacklist,
-		Quota:       snapshot.Quota,
-		QuotaUsed:   snapshot.QuotaUsed,
-		ExpiresAt:   snapshot.ExpiresAt,
-		RateLimit5h: snapshot.RateLimit5h,
-		RateLimit1d: snapshot.RateLimit1d,
-		RateLimit7d: snapshot.RateLimit7d,
+		ID:                 snapshot.APIKeyID,
+		Name:               snapshot.Name,
+		UserID:             snapshot.UserID,
+		GroupID:            snapshot.GroupID,
+		Key:                key,
+		Status:             snapshot.Status,
+		IPWhitelist:        snapshot.IPWhitelist,
+		IPBlacklist:        snapshot.IPBlacklist,
+		Quota:              snapshot.Quota,
+		QuotaUsed:          snapshot.QuotaUsed,
+		ExpiresAt:          snapshot.ExpiresAt,
+		RateLimit5h:        snapshot.RateLimit5h,
+		RateLimit1d:        snapshot.RateLimit1d,
+		RateLimit7d:        snapshot.RateLimit7d,
+		SmartSwitch:        snapshot.SmartSwitch.Clone(),
+		SmartSwitchVersion: snapshot.SmartSwitchVersion,
 		User: &User{
 			ID:                          snapshot.User.ID,
 			Username:                    snapshot.User.Username,

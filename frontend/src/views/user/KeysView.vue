@@ -422,6 +422,8 @@
           </Select>
         </div>
 
+        <KeySmartSwitchEditor v-model="formData.smart_switch" :groups="groups" :group-id="formData.group_id" :used="selectedKey?.smart_switch_payg_used" />
+
         <!-- Custom Key Section (only for create) -->
         <div v-if="!showEditModal" class="space-y-3">
           <div class="flex items-center justify-between">
@@ -1010,6 +1012,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import Icon from '@/components/icons/Icon.vue'
 	import UseKeyModal from '@/components/keys/UseKeyModal.vue'
 import KeyAdvancedDialog from '@/components/keys/KeyAdvancedDialog.vue'
+import KeySmartSwitchEditor from '@/components/keys/KeySmartSwitchEditor.vue'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
 	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform } from '@/types'
@@ -1116,6 +1119,7 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance 
 }
 
 const formData = ref({
+  smart_switch: { enabled: false, group_ids: [] as number[], payg_confirmed: false, version: 0 },
   name: '',
   group_id: null as number | null,
   status: 'active' as 'active' | 'inactive',
@@ -1326,6 +1330,7 @@ const editKey = (key: ApiKey) => {
   const hasIPRestriction = (key.ip_whitelist?.length > 0) || (key.ip_blacklist?.length > 0)
   const hasExpiration = !!key.expires_at
   formData.value = {
+    smart_switch: key.smart_switch ? { ...key.smart_switch, group_ids: [...key.smart_switch.group_ids] } : { enabled: false, group_ids: [], payg_confirmed: false, version: 0 },
     name: key.name,
     group_id: key.group_id,
     status: key.status === 'quota_exhausted' || key.status === 'expired' ? 'inactive' : key.status,
@@ -1478,6 +1483,7 @@ const handleSubmit = async () => {
     let createdKey: ApiKey | null = null
     if (showEditModal.value && selectedKey.value) {
       await keysAPI.update(selectedKey.value.id, {
+        smart_switch: formData.value.smart_switch,
         name: formData.value.name,
         group_id: formData.value.group_id,
         status: formData.value.status,
@@ -1500,7 +1506,8 @@ const handleSubmit = async () => {
         ipBlacklist,
         quota,
         expiresInDays,
-        rateLimitData
+        rateLimitData,
+        formData.value.smart_switch
       )
       appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded
@@ -1545,6 +1552,7 @@ const closeModals = () => {
   showEditModal.value = false
   selectedKey.value = null
   formData.value = {
+    smart_switch: { enabled: false, group_ids: [] as number[], payg_confirmed: false, version: 0 },
     name: '',
     group_id: null,
     status: 'active',

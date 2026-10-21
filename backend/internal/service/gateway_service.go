@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claudebilling"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -3005,7 +3006,7 @@ func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64
 			return group, &currentID, nil
 		}
 
-		if group.FallbackGroupID == nil {
+		if group.FallbackGroupID == nil || smartSwitchContext(ctx) {
 			return nil, nil, ErrClaudeCodeOnly
 		}
 		currentID = *group.FallbackGroupID
@@ -9420,6 +9421,9 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		RequestPayloadHash: strings.TrimSpace(p.RequestPayloadHash),
 	}
 	if usageLog != nil {
+		if p.APIKey.SmartSwitchOriginalGroupID != nil {
+			usageLog.SmartSwitch = &domain.KeySmartSwitchTrace{OriginalGroupID: *p.APIKey.SmartSwitchOriginalGroupID, PolicyVersion: p.APIKey.SmartSwitchVersion, Reason: p.APIKey.SmartSwitchReason}
+		}
 		cmd.Model = usageLog.Model
 		cmd.BillingType = usageLog.BillingType
 		cmd.InputTokens = usageLog.InputTokens
@@ -9465,6 +9469,9 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.AccountQuotaCost = p.Cost.TotalCost * p.AccountRateMultiplier
 	}
 
+	if p.APIKey.SmartSwitchOriginalGroupID != nil && cmd.BalanceCost > 0 {
+		cmd.SmartSwitchPaygCost = cmd.BalanceCost
+	}
 	cmd.Normalize()
 	return cmd
 }

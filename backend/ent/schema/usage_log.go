@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // UsageLog 定义使用日志实体的 schema。
@@ -31,6 +32,7 @@ func (UsageLog) Annotations() []schema.Annotation {
 // Fields 定义使用日志实体的所有字段。
 func (UsageLog) Fields() []ent.Field {
 	return []ent.Field{
+		field.JSON("smart_switch", &domain.KeySmartSwitchTrace{}).Optional(),
 		// 关联字段
 		field.Int64("user_id"),
 		field.Int64("api_key_id"),

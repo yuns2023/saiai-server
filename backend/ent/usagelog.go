@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // UsageLog is the model entity for the UsageLog schema.
@@ -23,6 +24,8 @@ type UsageLog struct {
 	config `json:"-"`
 	// ID of the ent.
 	ID int64 `json:"id,omitempty"`
+	// SmartSwitch holds the value of the "smart_switch" field.
+	SmartSwitch *domain.KeySmartSwitchTrace `json:"smart_switch,omitempty"`
 	// UserID holds the value of the "user_id" field.
 	UserID int64 `json:"user_id,omitempty"`
 	// APIKeyID holds the value of the "api_key_id" field.
@@ -190,7 +193,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usagelog.FieldPricingSnapshot, usagelog.FieldModerationRef:
+		case usagelog.FieldSmartSwitch, usagelog.FieldPricingSnapshot, usagelog.FieldModerationRef:
 			values[i] = new([]byte)
 		case usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
@@ -223,6 +226,14 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field id", value)
 			}
 			_m.ID = int64(value.Int64)
+		case usagelog.FieldSmartSwitch:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field smart_switch", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.SmartSwitch); err != nil {
+					return fmt.Errorf("unmarshal field smart_switch: %w", err)
+				}
+			}
 		case usagelog.FieldUserID:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field user_id", values[i])
@@ -552,6 +563,9 @@ func (_m *UsageLog) String() string {
 	var builder strings.Builder
 	builder.WriteString("UsageLog(")
 	builder.WriteString(fmt.Sprintf("id=%v, ", _m.ID))
+	builder.WriteString("smart_switch=")
+	builder.WriteString(fmt.Sprintf("%v", _m.SmartSwitch))
+	builder.WriteString(", ")
 	builder.WriteString("user_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.UserID))
 	builder.WriteString(", ")

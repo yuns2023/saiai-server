@@ -90,6 +90,16 @@ func GroupID(v int64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldGroupID, v))
 }
 
+// SmartSwitchVersion applies equality check predicate on the "smart_switch_version" field. It's identical to SmartSwitchVersionEQ.
+func SmartSwitchVersion(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldSmartSwitchVersion, v))
+}
+
+// SmartSwitchPaygUsed applies equality check predicate on the "smart_switch_payg_used" field. It's identical to SmartSwitchPaygUsedEQ.
+func SmartSwitchPaygUsed(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldSmartSwitchPaygUsed, v))
+}
+
 // Status applies equality check predicate on the "status" field. It's identical to StatusEQ.
 func Status(v string) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldStatus, v))
@@ -468,6 +478,96 @@ func GroupIDIsNil() predicate.APIKey {
 // GroupIDNotNil applies the NotNil predicate on the "group_id" field.
 func GroupIDNotNil() predicate.APIKey {
 	return predicate.APIKey(sql.FieldNotNull(FieldGroupID))
+}
+
+// SmartSwitchIsNil applies the IsNil predicate on the "smart_switch" field.
+func SmartSwitchIsNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldIsNull(FieldSmartSwitch))
+}
+
+// SmartSwitchNotNil applies the NotNil predicate on the "smart_switch" field.
+func SmartSwitchNotNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotNull(FieldSmartSwitch))
+}
+
+// SmartSwitchVersionEQ applies the EQ predicate on the "smart_switch_version" field.
+func SmartSwitchVersionEQ(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldSmartSwitchVersion, v))
+}
+
+// SmartSwitchVersionNEQ applies the NEQ predicate on the "smart_switch_version" field.
+func SmartSwitchVersionNEQ(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldSmartSwitchVersion, v))
+}
+
+// SmartSwitchVersionIn applies the In predicate on the "smart_switch_version" field.
+func SmartSwitchVersionIn(vs ...int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldSmartSwitchVersion, vs...))
+}
+
+// SmartSwitchVersionNotIn applies the NotIn predicate on the "smart_switch_version" field.
+func SmartSwitchVersionNotIn(vs ...int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldSmartSwitchVersion, vs...))
+}
+
+// SmartSwitchVersionGT applies the GT predicate on the "smart_switch_version" field.
+func SmartSwitchVersionGT(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldSmartSwitchVersion, v))
+}
+
+// SmartSwitchVersionGTE applies the GTE predicate on the "smart_switch_version" field.
+func SmartSwitchVersionGTE(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldSmartSwitchVersion, v))
+}
+
+// SmartSwitchVersionLT applies the LT predicate on the "smart_switch_version" field.
+func SmartSwitchVersionLT(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldSmartSwitchVersion, v))
+}
+
+// SmartSwitchVersionLTE applies the LTE predicate on the "smart_switch_version" field.
+func SmartSwitchVersionLTE(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldSmartSwitchVersion, v))
+}
+
+// SmartSwitchPaygUsedEQ applies the EQ predicate on the "smart_switch_payg_used" field.
+func SmartSwitchPaygUsedEQ(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldSmartSwitchPaygUsed, v))
+}
+
+// SmartSwitchPaygUsedNEQ applies the NEQ predicate on the "smart_switch_payg_used" field.
+func SmartSwitchPaygUsedNEQ(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldSmartSwitchPaygUsed, v))
+}
+
+// SmartSwitchPaygUsedIn applies the In predicate on the "smart_switch_payg_used" field.
+func SmartSwitchPaygUsedIn(vs ...float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldSmartSwitchPaygUsed, vs...))
+}
+
+// SmartSwitchPaygUsedNotIn applies the NotIn predicate on the "smart_switch_payg_used" field.
+func SmartSwitchPaygUsedNotIn(vs ...float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldSmartSwitchPaygUsed, vs...))
+}
+
+// SmartSwitchPaygUsedGT applies the GT predicate on the "smart_switch_payg_used" field.
+func SmartSwitchPaygUsedGT(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldSmartSwitchPaygUsed, v))
+}
+
+// SmartSwitchPaygUsedGTE applies the GTE predicate on the "smart_switch_payg_used" field.
+func SmartSwitchPaygUsedGTE(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldSmartSwitchPaygUsed, v))
+}
+
+// SmartSwitchPaygUsedLT applies the LT predicate on the "smart_switch_payg_used" field.
+func SmartSwitchPaygUsedLT(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldSmartSwitchPaygUsed, v))
+}
+
+// SmartSwitchPaygUsedLTE applies the LTE predicate on the "smart_switch_payg_used" field.
+func SmartSwitchPaygUsedLTE(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldSmartSwitchPaygUsed, v))
 }
 
 // StatusEQ applies the EQ predicate on the "status" field.

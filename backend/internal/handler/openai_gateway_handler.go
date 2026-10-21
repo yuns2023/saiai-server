@@ -952,6 +952,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// Generate session hash (header first; fallback to prompt_cache_key)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
 
+	smartSwitchExcluded := make(map[int64]bool)
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
 	failedAccountIDs := make(map[int64]struct{})
@@ -973,6 +974,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			sessionHashBody,
 		)
 		if err != nil {
+			if len(failedAccountIDs) == 0 && errors.Is(err, service.ErrNoAvailableAccounts) && advanceSmartSwitch(c, &apiKey, &subscription, smartSwitchExcluded, h.billingCacheService) {
+				if !h.validateCodexClientPolicyHTTP(c, apiKey.Group) {
+					return
+				}
+				continue
+			}
 			reqLog.Warn("openai.account_select_failed",
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),

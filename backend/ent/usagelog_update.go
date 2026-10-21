@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // UsageLogUpdate is the builder for updating UsageLog entities.
@@ -29,6 +30,18 @@ type UsageLogUpdate struct {
 // Where appends a list predicates to the UsageLogUpdate builder.
 func (_u *UsageLogUpdate) Where(ps ...predicate.UsageLog) *UsageLogUpdate {
 	_u.mutation.Where(ps...)
+	return _u
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (_u *UsageLogUpdate) SetSmartSwitch(v *domain.KeySmartSwitchTrace) *UsageLogUpdate {
+	_u.mutation.SetSmartSwitch(v)
+	return _u
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (_u *UsageLogUpdate) ClearSmartSwitch() *UsageLogUpdate {
+	_u.mutation.ClearSmartSwitch()
 	return _u
 }
 
@@ -995,6 +1008,12 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			}
 		}
 	}
+	if value, ok := _u.mutation.SmartSwitch(); ok {
+		_spec.SetField(usagelog.FieldSmartSwitch, field.TypeJSON, value)
+	}
+	if _u.mutation.SmartSwitchCleared() {
+		_spec.ClearField(usagelog.FieldSmartSwitch, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.RequestID(); ok {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)
 	}
@@ -1374,6 +1393,18 @@ type UsageLogUpdateOne struct {
 	fields   []string
 	hooks    []Hook
 	mutation *UsageLogMutation
+}
+
+// SetSmartSwitch sets the "smart_switch" field.
+func (_u *UsageLogUpdateOne) SetSmartSwitch(v *domain.KeySmartSwitchTrace) *UsageLogUpdateOne {
+	_u.mutation.SetSmartSwitch(v)
+	return _u
+}
+
+// ClearSmartSwitch clears the value of the "smart_switch" field.
+func (_u *UsageLogUpdateOne) ClearSmartSwitch() *UsageLogUpdateOne {
+	_u.mutation.ClearSmartSwitch()
+	return _u
 }
 
 // SetUserID sets the "user_id" field.
@@ -2368,6 +2399,12 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 				ps[i](selector)
 			}
 		}
+	}
+	if value, ok := _u.mutation.SmartSwitch(); ok {
+		_spec.SetField(usagelog.FieldSmartSwitch, field.TypeJSON, value)
+	}
+	if _u.mutation.SmartSwitchCleared() {
+		_spec.ClearField(usagelog.FieldSmartSwitch, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.RequestID(); ok {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)

@@ -924,6 +924,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		}
 	}
 
+	smartSwitchExcluded := make(map[int64]bool)
 	currentAPIKey := apiKey
 	currentSubscription := subscription
 	var fallbackGroupID *int64
@@ -948,6 +949,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 选择支持该模型的账号
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID)
 			if err != nil {
+				if len(fs.FailedAccountIDs) == 0 && errors.Is(err, service.ErrNoAvailableAccounts) && advanceSmartSwitch(c, &currentAPIKey, &currentSubscription, smartSwitchExcluded, h.billingCacheService) {
+					if shapeErr := h.gatewayService.ValidateClaudeOAuthRequestShapeForGroup(c.Request.Context(), c, currentAPIKey.GroupID, platform, parsedReq, body, false); shapeErr != nil {
+						h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", shapeErr.Error(), streamStarted)
+						return
+					}
+					continue
+				}
 				if len(fs.FailedAccountIDs) == 0 {
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 					return

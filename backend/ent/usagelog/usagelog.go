@@ -14,6 +14,8 @@ const (
 	Label = "usage_log"
 	// FieldID holds the string denoting the id field in the database.
 	FieldID = "id"
+	// FieldSmartSwitch holds the string denoting the smart_switch field in the database.
+	FieldSmartSwitch = "smart_switch"
 	// FieldUserID holds the string denoting the user_id field in the database.
 	FieldUserID = "user_id"
 	// FieldAPIKeyID holds the string denoting the api_key_id field in the database.
@@ -150,6 +152,7 @@ const (
 // Columns holds all SQL columns for usagelog fields.
 var Columns = []string{
 	FieldID,
+	FieldSmartSwitch,
 	FieldUserID,
 	FieldAPIKeyID,
 	FieldAccountID,

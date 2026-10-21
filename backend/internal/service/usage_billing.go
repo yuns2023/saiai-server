@@ -34,6 +34,7 @@ type UsageBillingCommand struct {
 	ImageCount          int
 	MediaType           string
 
+	SmartSwitchPaygCost float64
 	BalanceCost         float64
 	SubscriptionCost    float64
 	APIKeyQuotaCost     float64
@@ -80,6 +81,9 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 	)
 	if payloadHash := strings.TrimSpace(c.RequestPayloadHash); payloadHash != "" {
 		raw += "|" + payloadHash
+	}
+	if c.SmartSwitchPaygCost > 0 {
+		raw += fmt.Sprintf("|smart-payg:%0.10f", c.SmartSwitchPaygCost)
 	}
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])

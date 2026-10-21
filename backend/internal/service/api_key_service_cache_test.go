@@ -189,10 +189,11 @@ func TestAPIKeyService_GetByKey_UsesL2Cache(t *testing.T) {
 	discount := 0.8
 	cacheEntry := &APIKeyAuthCacheEntry{
 		Snapshot: &APIKeyAuthSnapshot{
-			APIKeyID: 1,
-			UserID:   2,
-			GroupID:  &groupID,
-			Status:   StatusActive,
+			SchemaVersion: 1,
+			APIKeyID:      1,
+			UserID:        2,
+			GroupID:       &groupID,
+			Status:        StatusActive,
 			User: APIKeyAuthUserSnapshot{
 				ID:                     2,
 				Status:                 StatusActive,
