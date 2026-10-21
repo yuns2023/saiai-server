@@ -269,7 +269,7 @@ describe('EditAccountModal', () => {
     expect((targetInput.element as HTMLInputElement).value).toBe('24')
     await targetInput.setValue(6)
     await wrapper.get('[data-testid="carpool-admissions-per-cycle"]').setValue(2)
-    expect(wrapper.get('[data-testid="carpool-next-maintenance"]').text()).toContain('保存后开始计时')
+    expect(wrapper.get('[data-testid="carpool-next-maintenance"]').text()).toContain('保存后约一分钟内进行首轮调整')
 
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()

@@ -197,7 +197,8 @@ func TestNormalizeCarpoolSchedule(t *testing.T) {
 	a := newAutoCarpoolAccount(1, 10)
 	a.Extra[CarpoolNextMaintenanceKey] = "2000-01-01T00:00:00Z"
 	NormalizeCarpoolMaintenance(a, nil, now)
-	require.Equal(t, "2026-10-20T10:30:00Z", a.GetCarpoolNextMaintenance())
+	require.Equal(t, "2026-10-19T10:30:00Z", a.GetCarpoolNextMaintenance())
+	require.Equal(t, a.GetCarpoolNextMaintenance(), a.CarpoolAdmissionPolicy().InitialDue)
 	previous := cloneCarpoolMaintenanceAccount(a)
 	a.Extra[CarpoolNextMaintenanceKey] = "forged"
 	a.Extra[CarpoolMaintenanceGenerationKey] = "forged"
@@ -213,4 +214,26 @@ func TestNormalizeCarpoolSchedule(t *testing.T) {
 	a.Extra["claude_oauth_carpool_unlimited_devices"] = true
 	NormalizeCarpoolMaintenance(a, &previous, now)
 	require.Empty(t, a.GetCarpoolNextMaintenance())
+}
+
+func TestCarpoolEnableReservesFirstCycleOnNextWorkerPass(t *testing.T) {
+	now := time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC)
+	a := newAutoCarpoolAccount(1, 12)
+	a.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 6
+	a.Extra["claude_oauth_carpool_maintenance_admissions_per_cycle"] = 1
+	NormalizeCarpoolMaintenance(a, nil, now)
+	repo := &carpoolMaintenanceAccountRepoStub{accounts: map[int64]*Account{1: a}}
+	cache := &carpoolMaintenanceCacheStub{}
+	svc := NewCarpoolMaintenanceService(repo, cache, nil)
+	_, err := svc.runOnce(context.Background(), now.Add(time.Minute))
+	require.NoError(t, err)
+	require.Len(t, cache.calls, 1)
+	require.Equal(t, "2026-10-21T16:00:00Z", a.GetCarpoolNextMaintenance())
+	previous := cloneCarpoolMaintenanceAccount(a)
+	a.Extra[CarpoolInitialMaintenanceKey] = "forged"
+	NormalizeCarpoolMaintenance(a, &previous, now.Add(2*time.Minute))
+	require.Equal(t, previous.CarpoolAdmissionPolicy().InitialDue, a.CarpoolAdmissionPolicy().InitialDue)
+	_, err = svc.runOnce(context.Background(), now.Add(2*time.Minute))
+	require.NoError(t, err)
+	require.Len(t, cache.calls, 1)
 }

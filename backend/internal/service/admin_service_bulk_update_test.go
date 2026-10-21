@@ -234,7 +234,7 @@ func TestAdminService_BulkUpdateAccountsCarpoolSchedules(t *testing.T) {
 	b.Extra["claude_oauth_carpool_maintenance_interval_hours"] = 12
 	repo := &carpoolBulkScheduleRepo{accountRepoStubForBulkUpdate: accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{a, b}}, changes: map[int64]map[string]any{}}
 	svc := &adminServiceImpl{accountRepo: repo}
-	input := &BulkUpdateAccountsInput{AccountIDs: []int64{1, 2}, Extra: map[string]any{"claude_oauth_carpool_auto_expand_enabled": true, CarpoolNextMaintenanceKey: "forged"}}
+	input := &BulkUpdateAccountsInput{AccountIDs: []int64{1, 2}, Extra: map[string]any{"claude_oauth_carpool_auto_expand_enabled": true, CarpoolNextMaintenanceKey: "forged", CarpoolInitialMaintenanceKey: "forged"}}
 	result, err := svc.BulkUpdateAccounts(context.Background(), input)
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Success)
@@ -243,5 +243,10 @@ func TestAdminService_BulkUpdateAccountsCarpoolSchedules(t *testing.T) {
 	require.NoError(t, err)
 	second, err := time.Parse(time.RFC3339, repo.changes[2][CarpoolNextMaintenanceKey].(string))
 	require.NoError(t, err)
-	require.InDelta(t, float64(6*time.Hour), float64(second.Sub(first)), float64(time.Second))
+	require.WithinDuration(t, time.Now(), first, 2*time.Second)
+	require.WithinDuration(t, first, second, time.Second)
+	require.NotContains(t, input.Extra, CarpoolInitialMaintenanceKey)
+	for _, id := range []int64{1, 2} {
+		require.Equal(t, repo.changes[id][CarpoolNextMaintenanceKey], repo.changes[id][CarpoolInitialMaintenanceKey])
+	}
 }

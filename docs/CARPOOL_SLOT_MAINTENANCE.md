@@ -19,11 +19,14 @@ The account's `extra` fields are:
   `claude_oauth_carpool_maintenance_free_slots` is a read-only fallback only when
   the new field is absent; explicit zero overrides it.
 - `claude_oauth_carpool_next_maintenance_at`: server-owned UTC RFC3339 timestamp.
+- `claude_oauth_carpool_initial_maintenance_at`: server-owned first reservation
+  timestamp; the first pass preserves admissions already consumed in that cycle.
 - `claude_oauth_carpool_maintenance_generation`: server-owned configuration
   generation used to prevent stale workers from resetting a newer budget.
 
 With a positive allowance, enabling starts a first cycle with the configured
-allowance, without evicting existing devices immediately. At each due time, atomically reset the allowance
+allowance and schedules first-cycle capacity reservation for the next worker pass
+(typically within a minute). Admissions consumed before that pass are retained. At each due time, atomically reset the allowance
 to the configured number and remove the least-recently-seen records only if
 needed to make room for that many admissions. For capacity 10 and allowance 2,
 counts 10, 9, 8 and 0 cause 2, 1, 0 and 0 removals, but each new cycle permits
@@ -31,15 +34,20 @@ at most 2 new registrations. Unused allowances never accumulate. Device
 registration and budget consumption share one Redis transaction, including
 cross-replica concurrency and repeat requests from the same device.
 
+Each pass removes at most the configured allowance, even if a capacity reduction
+has left more registered devices than the limit. Existing free slots reduce the
+number of removals.
+
 Manual deletion does not refund spent admissions. An evicted device may
 reapply, consuming one admission just like another unregistered device.
 Existing streams are not actively terminated. User device quotas and other
 OAuth modes are independent. With maintenance disabled, normal fixed-capacity
 admission applies; unlimited mode bypasses the local device registry.
 
-Each account has an independent schedule. Enabling or changing the interval
-starts a new cycle and schedules the next adjustment one full interval from
-save time. Switching to zero bypasses any spent cycle budget immediately, and
+Each account has an independent schedule. Enabling starts a new cycle with an immediately due first reservation; subsequent
+adjustments follow the configured interval from save time. Changing the interval
+while already enabled starts a new cycle with the next adjustment one full
+interval from save time. Switching to zero bypasses any spent cycle budget immediately, and
 periodic adjustments do not evict devices to reserve capacity. Changing a
 positive admission count applies immediately, retaining consumed admissions
 and the reset time. Decreasing below consumed admissions leaves zero
@@ -47,7 +55,7 @@ remaining and does not evict or reject already registered devices. Switching
 back from zero uses the retained budget usage (unlimited admissions do not spend
 that budget). Changing capacity retains the schedule and applies the existing capacity gate.
 Disabling and re-enabling starts a new generation. The server ignores submitted
-schedule/generation values. Bulk edits normalize each account independently.
+schedule/generation/initial-reservation values. Bulk edits normalize each account independently.
 
 The worker checks once per minute, so adjustment may lag the displayed time by
 about a minute plus processing time. Missed periods result in only one reset,

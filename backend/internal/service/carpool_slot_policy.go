@@ -8,11 +8,13 @@ import (
 )
 
 const CarpoolNextMaintenanceKey = "claude_oauth_carpool_next_maintenance_at"
+const CarpoolInitialMaintenanceKey = "claude_oauth_carpool_initial_maintenance_at"
 const CarpoolMaintenanceGenerationKey = "claude_oauth_carpool_maintenance_generation"
 
 type CarpoolAdmissionPolicy struct {
 	Generation string
 	Admissions int
+	InitialDue string
 }
 
 // CarpoolAdmissionCache keeps admission accounting atomic with device registration.
@@ -26,7 +28,7 @@ func (a *Account) CarpoolAdmissionPolicy() CarpoolAdmissionPolicy {
 	if generation == "" {
 		generation = "00000000000000000000"
 	}
-	return CarpoolAdmissionPolicy{Generation: generation, Admissions: a.GetCarpoolAdmissionsPerCycle()}
+	return CarpoolAdmissionPolicy{Generation: generation, Admissions: a.GetCarpoolAdmissionsPerCycle(), InitialDue: a.getExtraString(CarpoolInitialMaintenanceKey)}
 }
 
 // The legacy enable flag remains wire-compatible; expansion is no longer performed.
@@ -50,25 +52,34 @@ func (a *Account) GetCarpoolNextMaintenance() string {
 }
 
 // NormalizeCarpoolMaintenance protects the server-owned schedule from submitted
-// extras. Enabling or changing the interval starts a full new interval.
+// extras. Enabling reserves first-cycle capacity on the next worker pass.
+// Changing the interval retains the full-interval scheduling behavior.
 func NormalizeCarpoolMaintenance(a, previous *Account, now time.Time) {
 	if a.Extra == nil {
 		return
 	}
 	delete(a.Extra, CarpoolNextMaintenanceKey)
 	delete(a.Extra, CarpoolMaintenanceGenerationKey)
+	delete(a.Extra, CarpoolInitialMaintenanceKey)
 	if !a.IsClaudeOAuthCarpoolAutoExpandEnabled() {
 		return
 	}
 	next := ""
+	initialDue := ""
 	generation := fmt.Sprintf("%020d", now.UnixNano())
 	if previous != nil && previous.IsClaudeOAuthCarpoolAutoExpandEnabled() && previous.GetCarpoolMaintenanceIntervalHours() == a.GetCarpoolMaintenanceIntervalHours() {
 		next = previous.GetCarpoolNextMaintenance()
+		initialDue = previous.getExtraString(CarpoolInitialMaintenanceKey)
 		generation = previous.CarpoolAdmissionPolicy().Generation
+	}
+	if previous == nil || !previous.IsClaudeOAuthCarpoolAutoExpandEnabled() {
+		next = now.UTC().Format(time.RFC3339)
+		initialDue = next
 	}
 	if _, err := time.Parse(time.RFC3339, next); err != nil {
 		next = now.UTC().Add(time.Duration(a.GetCarpoolMaintenanceIntervalHours()) * time.Hour).Format(time.RFC3339)
 	}
+	a.Extra[CarpoolInitialMaintenanceKey] = initialDue
 	a.Extra[CarpoolNextMaintenanceKey] = next
 	a.Extra[CarpoolMaintenanceGenerationKey] = generation
 }

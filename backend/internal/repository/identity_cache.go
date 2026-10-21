@@ -996,9 +996,16 @@ func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountI
 			if err != nil {
 				return err
 			}
+			// First-cycle reservation must not refund admissions made between
+			// saving the configuration and the worker's first pass.
+			used := 0
+			if due == policy.InitialDue {
+				used = budget.Used
+			}
+			remaining := max(0, free-used)
 			count := 0
-			if free > 0 {
-				count = max(0, len(values)-(limit-free))
+			if remaining > 0 {
+				count = min(remaining, max(0, len(values)-(limit-remaining)))
 			}
 			type entry struct {
 				field  string
@@ -1019,7 +1026,7 @@ func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountI
 					pipe.HDel(ctx, overflow, item.field)
 				}
 				budget.LastDue = due
-				budget.Used = 0
+				budget.Used = used
 				budget.Quota = policy.Admissions
 				encoded, err := json.Marshal(budget)
 				if err != nil {
