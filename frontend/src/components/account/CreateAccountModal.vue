@@ -1664,7 +1664,7 @@
                   <input v-model.number="carpoolMaintenanceIntervalHours" data-testid="carpool-maintenance-interval" type="number" min="1" max="720" step="1" class="input" />
                   <label class="input-label mt-3">每周期新设备名额</label>
                   <input v-model.number="carpoolAdmissionsPerCycle" data-testid="carpool-admissions-per-cycle" type="number" min="0" :max="claudeOAuthCarpoolDeviceLimit" step="1" class="input" />
-                  <p class="input-hint">默认 0，表示不限周期接纳数量，仍受设备总上限约束。大于 0 时启用首轮名额，并按执行间隔重置；已登记设备不消耗名额，未用完的名额不累计。修改名额保存后立即生效，保留本轮已用数量和重置时间。</p>
+                  <p class="input-hint">默认 0，表示不限周期接纳数量，仍受设备总上限约束。大于 0 时，首次启用后约一分钟内按需释放首轮设备位，此后按执行间隔调整；每轮最多移除配置数量的最久未使用设备，已有空位足够时不移除。已登记设备不消耗名额，未用完的名额不累计。修改名额保存后立即生效，保留本轮已用数量和重置时间。</p>
                 </div>
               </div>
               <p v-else class="text-xs text-gray-500 dark:text-gray-400">

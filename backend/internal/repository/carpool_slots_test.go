@@ -59,9 +59,9 @@ func TestCarpoolFreeSlotsRedis(t *testing.T) {
 			for count := range counts {
 				removed += count
 			}
-			require.Equal(t, max(0, n-8), removed)
-			require.Equal(t, int64(min(n, 8)), rdb.HLen(ctx, recorded).Val())
-			for i := 0; i < max(0, n-8); i++ {
+			require.Equal(t, min(2, max(0, n-8)), removed)
+			require.Equal(t, int64(n-min(2, max(0, n-8))), rdb.HLen(ctx, recorded).Val())
+			for i := 0; i < min(2, max(0, n-8)); i++ {
 				require.False(t, rdb.HExists(ctx, recorded, fmt.Sprint(i)).Val())
 			}
 			// A new admission after maintenance must survive retries of this period.
@@ -333,4 +333,61 @@ func TestCarpoolCycleAllowanceEditRedis(t *testing.T) {
 	remaining, err = cache.CarpoolAdmissionsRemaining(ctx, id, policy)
 	require.NoError(t, err)
 	require.Equal(t, 1, remaining, "an edit must not reset the existing cycle token")
+}
+
+func TestCarpoolInitialReservationRedis(t *testing.T) {
+	socket := os.Getenv("SAIAI_TEST_CARPOOL_REDIS_SOCKET")
+	if socket == "" {
+		t.Skip("task-owned Redis Unix socket not supplied")
+	}
+	rdb := redis.NewClient(&redis.Options{Network: "unix", Addr: socket})
+	t.Cleanup(func() { _ = rdb.Close() })
+	ctx := context.Background()
+	cache := &identityCache{rdb: rdb}
+	for _, n := range []int{11, 12, 14} {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			id := time.Now().UnixNano()
+			t.Cleanup(func() {
+				_ = rdb.Del(ctx, carpoolRecordedKey(id), carpoolOverflowKey(id), carpoolAdmissionBudgetKey(id)).Err()
+			})
+			for i := 0; i < n; i++ {
+				raw, err := json.Marshal(service.CarpoolDeviceRecord{DeviceKey: fmt.Sprint(i), LastSeenAt: int64(i + 1)})
+				require.NoError(t, err)
+				require.NoError(t, rdb.HSet(ctx, carpoolRecordedKey(id), fmt.Sprint(i), raw).Err())
+			}
+			due := "2026-10-21T10:00:00Z"
+			policy := service.CarpoolAdmissionPolicy{Generation: "00000000000000000001", Admissions: 1, InitialDue: due}
+			if n == 11 {
+				// A request can consume the first allowance before the worker runs.
+				_, err := cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "early", service.ClientHints{}, 12, 100, policy)
+				require.NoError(t, err)
+			}
+			removed, err := cache.ResetCarpoolAdmissionCycle(ctx, id, 12, policy, due)
+			require.NoError(t, err)
+			if n == 11 {
+				require.Zero(t, removed)
+				remaining, err := cache.CarpoolAdmissionsRemaining(ctx, id, policy)
+				require.NoError(t, err)
+				require.Zero(t, remaining)
+			} else {
+				require.Equal(t, 1, removed)
+				require.False(t, rdb.HExists(ctx, carpoolRecordedKey(id), "0").Val())
+			}
+			if n == 12 {
+				_, err = cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "new", service.ClientHints{}, 12, 100, policy)
+				require.NoError(t, err)
+				require.Equal(t, int64(12), rdb.HLen(ctx, carpoolRecordedKey(id)).Val())
+			}
+			removed, err = cache.ResetCarpoolAdmissionCycle(ctx, id, 12, policy, due)
+			require.NoError(t, err)
+			require.Zero(t, removed)
+			// The next scheduled cycle resets usage normally.
+			removed, err = cache.ResetCarpoolAdmissionCycle(ctx, id, 12, policy, "2026-10-21T16:00:00Z")
+			require.NoError(t, err)
+			require.Equal(t, 1, removed)
+			remaining, err := cache.CarpoolAdmissionsRemaining(ctx, id, policy)
+			require.NoError(t, err)
+			require.Equal(t, 1, remaining)
+		})
+	}
 }
