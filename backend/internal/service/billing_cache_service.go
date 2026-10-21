@@ -640,6 +640,25 @@ func (s *BillingCacheService) QueueUpdateAPIKeyRateLimitUsage(apiKeyID int64, co
 // 统一检查方法
 // ============================================
 
+// checkSmartSwitchSubscription validates fresh state for request-local routing,
+// so a recovered priority group is not rejected by an older cached window. The
+// fresh row must be the subscription this request will charge: a replacement
+// since selection fails closed rather than validating one row and billing another.
+func (s *BillingCacheService) checkSmartSwitchSubscription(ctx context.Context, userID int64, group *Group, subscription *UserSubscription) error {
+	fresh, err := s.subRepo.GetActiveByUserIDAndGroupID(ctx, userID, group.ID)
+	if err != nil {
+		return err
+	}
+	if fresh.ID != subscription.ID {
+		return ErrSubscriptionNotFound
+	}
+	owned := *fresh
+	if _, err := (&SubscriptionService{}).ValidateAndCheckLimits(&owned, group); err != nil {
+		return err
+	}
+	return owned.ExhaustedLimitError(group)
+}
+
 // CheckBillingEligibility 检查用户是否有资格发起请求
 // 余额模式：检查缓存余额 > 0
 // 订阅模式：检查缓存用量未超过限额（Group限额从参数传入）
@@ -656,29 +675,9 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	isSubscriptionMode := group != nil && group.IsSubscriptionType() && subscription != nil
 
 	if isSubscriptionMode {
-		// A recovered priority group must not be rejected by an older cached
-		// daily/weekly window after request-local routing selected fresh state.
 		if apiKey != nil && apiKey.SmartSwitchOriginalGroupID != nil {
-			fresh, err := s.subRepo.GetActiveByUserIDAndGroupID(ctx, user.ID, group.ID)
-			if err != nil {
+			if err := s.checkSmartSwitchSubscription(ctx, user.ID, group, subscription); err != nil {
 				return err
-			}
-			owned := *fresh
-			_, err = (&SubscriptionService{}).ValidateAndCheckLimits(&owned, group)
-			if err != nil {
-				return err
-			}
-			if group.HasFiveHourLimit() && owned.FiveHourUsageUSD >= *group.FiveHourLimitUSD {
-				return ErrFiveHourLimitExceeded
-			}
-			if group.HasDailyLimit() && owned.DailyUsageUSD >= *group.DailyLimitUSD {
-				return ErrDailyLimitExceeded
-			}
-			if group.HasWeeklyLimit() && owned.WeeklyUsageUSD >= *group.WeeklyLimitUSD {
-				return ErrWeeklyLimitExceeded
-			}
-			if group.HasMonthlyLimit() && owned.MonthlyUsageUSD >= *group.MonthlyLimitUSD {
-				return ErrMonthlyLimitExceeded
 			}
 		} else if err := s.checkSubscriptionEligibility(ctx, user.ID, group, subscription); err != nil {
 			return err

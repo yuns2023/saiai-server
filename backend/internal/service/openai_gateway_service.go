@@ -1480,9 +1480,9 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 
 	if selected == nil {
 		if requestedModel != "" {
-			return nil, fmt.Errorf("no available OpenAI accounts supporting model: %s", requestedModel)
+			return nil, fmt.Errorf("%w supporting model: %s", errNoAvailableOpenAIAccounts, requestedModel)
 		}
-		return nil, errors.New("no available OpenAI accounts")
+		return nil, errNoAvailableOpenAIAccounts
 	}
 
 	// 4. 设置粘性会话绑定
@@ -4524,6 +4524,9 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		return nil
 	}
 
+	// Attribute before copying: the persisted log, not only the billing copy,
+	// must show which smart-switching group served the request.
+	usageLog.SmartSwitch = smartSwitchTrace(apiKey)
 	// The sealed cost carries the tariff. Descriptive delivery counts must not
 	// independently change the stable debit fingerprint.
 	billingLog := *usageLog

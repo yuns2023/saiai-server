@@ -180,3 +180,14 @@ func TestSmartSwitchBillingRecheckRecognizesRecoveredDailyWindow(t *testing.T) {
 	subs.sub.DailyWindowStart = &now
 	require.ErrorIs(t, billing.CheckBillingEligibility(context.Background(), key.User, key, key.Group, subs.sub), ErrDailyLimitExceeded)
 }
+
+func TestSmartSwitchBillingRecheckRejectsReplacedSubscription(t *testing.T) {
+	_, key, subs := smartFixture()
+	original := *key.GroupID
+	key.SmartSwitchOriginalGroupID = &original
+	selected := *subs.sub
+	subs.sub.ID = selected.ID + 1 // deleted and re-subscribed after selection
+	billing := NewBillingCacheService(nil, nil, subs, nil, &config.Config{RunMode: config.RunModeStandard})
+	t.Cleanup(billing.Stop)
+	require.ErrorIs(t, billing.CheckBillingEligibility(context.Background(), key.User, key, key.Group, &selected), ErrSubscriptionNotFound)
+}

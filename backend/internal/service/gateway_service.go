@@ -383,6 +383,15 @@ var (
 // ErrNoAvailableAccounts 表示没有可用的账号
 var ErrNoAvailableAccounts = errors.New("no available accounts")
 
+// errNoAvailableOpenAIAccounts keeps the established OpenAI message while
+// matching ErrNoAvailableAccounts, so callers can classify an empty pool.
+var errNoAvailableOpenAIAccounts error = noAvailableAccountsError("no available OpenAI accounts")
+
+type noAvailableAccountsError string
+
+func (e noAvailableAccountsError) Error() string      { return string(e) }
+func (noAvailableAccountsError) Is(target error) bool { return target == ErrNoAvailableAccounts }
+
 // ErrClaudeCodeOnly 表示分组仅允许 Claude Code 客户端访问
 var ErrClaudeCodeOnly = errors.New("this group only allows Claude Code clients")
 var ErrClaudeOAuthMetadataRequired = errors.New("claude oauth requests require valid metadata.user_id")
@@ -9407,6 +9416,15 @@ func resolveUsageBillingPayloadFingerprint(ctx context.Context, requestPayloadHa
 	return ""
 }
 
+// smartSwitchTrace returns the request-local routing attribution for a key
+// selected by smart switching, or nil for ordinary single-group keys.
+func smartSwitchTrace(key *APIKey) *domain.KeySmartSwitchTrace {
+	if key == nil || key.SmartSwitchOriginalGroupID == nil {
+		return nil
+	}
+	return &domain.KeySmartSwitchTrace{OriginalGroupID: *key.SmartSwitchOriginalGroupID, PolicyVersion: key.SmartSwitchVersion, Reason: key.SmartSwitchReason}
+}
+
 func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsageBillingParams) *UsageBillingCommand {
 	if p == nil || p.Cost == nil || p.APIKey == nil || p.User == nil || p.Account == nil {
 		return nil
@@ -9421,8 +9439,8 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		RequestPayloadHash: strings.TrimSpace(p.RequestPayloadHash),
 	}
 	if usageLog != nil {
-		if p.APIKey.SmartSwitchOriginalGroupID != nil {
-			usageLog.SmartSwitch = &domain.KeySmartSwitchTrace{OriginalGroupID: *p.APIKey.SmartSwitchOriginalGroupID, PolicyVersion: p.APIKey.SmartSwitchVersion, Reason: p.APIKey.SmartSwitchReason}
+		if trace := smartSwitchTrace(p.APIKey); trace != nil {
+			usageLog.SmartSwitch = trace
 		}
 		cmd.Model = usageLog.Model
 		cmd.BillingType = usageLog.BillingType

@@ -4,18 +4,22 @@
 
 ## 会话恢复入口
 
-- 草稿 PR：https://github.com/yuns2023/saiai-server/pull/75
-- 分支：`feat/key-smart-group-switch`；代码候选：`e46e48e67818516aca91bda16a0f339b7a3de25d`。
-- 先读取本文件的未完成清单，不得按功能已完成处理，也不要合并或部署该草稿。
-- 该代码候选的 CI run `39596852366`：frontend、golangci-lint、release-config 成功，
-  后端 `test` 在 Unit tests 阶段失败；客户端契约和安全检查也已成功。
-- 下次首先修复完整 CI 暴露的测试契约不一致并重新验证：
-  `TestUsageModerationCorrelationInUsageInsert`（新增 trace 列改变尾部参数位置）、
-  `TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields` 和
-  `TestUsageLogRepositoryCreate_PersistsServiceTier`（SQL mock 参数需核对新列），
-  `TestAPIContracts` 的 Key 创建/分页列表（新增策略与累计用量字段的响应基准）。
-  失败日志：https://github.com/yuns2023/saiai-server/actions/runs/39596852366
-- 上述是已定位的失败位置，尚未修复；针对性本地测试通过不能替代完整 CI。
+- 草稿 PR：https://github.com/yuns2023/saiai-server/pull/75，分支 `feat/key-smart-group-switch`。
+- 2026-10-22 用户选定**保守版本**：只做请求发出前的跨组选择；`previous_response_id`
+  明确拒绝、WebSocket 保持原分组；上游拒绝后的跨组重试、并发触限统一、跨实例半开
+  恢复延后，不在本版本内。
+- 本版本尚未进入任何发布批次。合并前须完整 CI 通过，并经用户在测试站验收
+  （迁移 111 需要单独审核的测试站迁移流程）；不得随已准备的 107→110 生产批次发布。
+- 2026-10-22 已完成：
+  - 修复 CI 暴露的测试契约不一致（usage 插入参数、Key API 响应基准）。
+  - 修复 OpenAI 空账号池错误不匹配 `ErrNoAvailableAccounts`，导致 Responses 路径
+    转发前跨组兜底从不触发的缺陷。
+  - 计费复核要求最新订阅与本次扣费订阅为同一行，订阅被替换时失败关闭。
+  - ChatGPT 按轮计费路径的持久化用量日志补齐智能切换归因。
+  - 新增路由级验收 `backend/internal/server/routes/smartswitchroutes`：真实鉴权中间件、
+    handler、gateway service 与 HTTP 传输对接本地上游 mock，覆盖订阅优先、触限转按量、
+    窗口恢复回归、按量预算耗尽不发上游、组内无账号转发前切组、上游已发出后不切组、
+    关闭策略保持 main 行为、续接请求拒绝。
 
 ## 当前实现与交付边界
 

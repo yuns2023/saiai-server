@@ -208,10 +208,7 @@ func (s *APIKeyService) SelectSmartSwitchGroup(ctx context.Context, key *APIKey,
 				}
 				return nil, validateErr
 			}
-			if group.HasFiveHourLimit() && sub.FiveHourUsageUSD >= *group.FiveHourLimitUSD ||
-				group.HasDailyLimit() && sub.DailyUsageUSD >= *group.DailyLimitUSD ||
-				group.HasWeeklyLimit() && sub.WeeklyUsageUSD >= *group.WeeklyLimitUSD ||
-				group.HasMonthlyLimit() && sub.MonthlyUsageUSD >= *group.MonthlyLimitUSD {
+			if sub.ExhaustedLimitError(group) != nil {
 				skipped = append(skipped, "subscription_limit_or_expiry")
 				continue
 			}
