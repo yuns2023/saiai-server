@@ -14,7 +14,7 @@ func advanceSmartSwitch(c *gin.Context, current **service.APIKey, subscription *
 	if c.Writer.Written() || c.Request.Context().Err() != nil || current == nil || *current == nil {
 		return false
 	}
-	raw, ok := c.Get("smart_switch_next")
+	raw, _ := c.Get("smart_switch_next")
 	next, ok := raw.(middleware.SmartSwitchNext)
 	if !ok || next == nil {
 		return false
