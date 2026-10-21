@@ -28,9 +28,14 @@ func TestHostedUsagePersistsReferenceAndDeduplicatesKeyLimits(t *testing.T) {
 	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "TEST_ONLY_" + uuid.NewString(), Name: "hosted", Quota: .08})
 	_, err = integrationDB.ExecContext(ctx, "UPDATE api_keys SET rate_limit_5h=.08, group_id=$1 WHERE id=$2", g.ID, key.ID)
 	require.NoError(t, err)
-	key.GroupID, key.Group, key.RateLimit5h = &g.ID, loaded, .08
+	key.GroupID = &g.ID
+	key.Group = loaded
+	key.RateLimit5h = .08
 	account := mustCreateAccount(t, client, &service.Account{Name: "hosted-" + uuid.NewString(), Type: service.AccountTypeOAuth, Platform: service.PlatformOpenAI})
 	keys := NewAPIKeyRepository(client, integrationDB)
+	authKey, err := keys.GetByKeyForAuth(ctx, key.Key)
+	require.NoError(t, err)
+	require.True(t, authKey.Group.UsesHostedUsage(), "the compact auth query must carry the complete policy")
 	cache := service.NewBillingCacheService(nil, nil, nil, keys, &config.Config{})
 	t.Cleanup(cache.Stop)
 	logs := NewUsageLogRepository(client, integrationDB)

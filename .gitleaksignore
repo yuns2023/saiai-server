@@ -1,2 +1,3 @@
 534493b537e8c0af8966b3d9757343c5cbdfe66f:backend/internal/service/claude_oauth_single_device_test.go:generic-api-key:149
 534493b537e8c0af8966b3d9757343c5cbdfe66f:backend/internal/service/claude_oauth_single_device_test.go:generic-api-key:178
+742bbea42c0e49414411f16dedc68d83fedb82ec:backend/internal/repository/hosted_usage_integration_test.go:generic-api-key:31
