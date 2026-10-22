@@ -25,13 +25,29 @@ TTL behavior are unchanged. No cache-category discount is introduced.
 Reference resolution, model-specific policies, exact-model overrides, service
 tier and long-context rules run through the shared BillingService. Priority
 prices are independent from Standard overrides; Flex retains its existing
-Standard tier multiplier. Equal/free cache-write prices still keep separate
+Standard tier multiplier.
+
+OpenAI publishes no Priority/Fast tier for some models and serves such
+requests at Standard. For the feed entries listed in
+`pricing_reference_corrections.go` (see the pricing README), Priority bills
+exactly like Standard, including the Standard long-context rule, instead of
+the generic x2 multiplier; the reference amount does the same. Flex is
+unchanged. An administrator Priority override for the billed model is still
+honoured as intentional operator pricing: overridden categories use the
+override and every unedited Priority category inherits the Standard reference
+price (not x2), with the usual Priority long-context exclusion. The pricing
+list and preview show these effective prices, `effective`/`reference` carry
+`no_priority_tier`, and usage snapshots record
+`priority_billed_as_standard` when Priority was billed at Standard. Aliases
+follow the resolved feed entry: an alias priced from a listed model bills
+Priority at Standard; a listed model aliased to another entry uses that
+entry's Priority prices. Equal/free cache-write prices still keep separate
 5m/1h token accounting. A partial Priority override preserves the inherited
 1-hour cache-write price, including when Priority originally used a whole-tier
 multiplier; the effective 1-hour Priority price is retained in usage snapshots.
 Once a Priority field is overridden on a multiplier model, every unedited
-Priority category is the reference price times two, including an inherited
-zero. A Standard cache-write override never sets the Priority 1-hour price:
+Priority category is the reference price times two (times one for models
+without an official Priority/Fast tier), including an inherited zero. A Standard cache-write override never sets the Priority 1-hour price:
 it stays what Priority charges without that override (the native or overridden
 Priority cache-write price for models without a separate 1-hour price;
 otherwise the reference 1-hour price, doubled for multiplier models). Known behaviour, deliberately unchanged: for native

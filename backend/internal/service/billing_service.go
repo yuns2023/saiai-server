@@ -75,6 +75,10 @@ type ModelPricing struct {
 	// PrioritySynthesized marks Priority prices derived from a multiplier
 	// model's reference prices; they are complete prices, including zero.
 	PrioritySynthesized bool `json:"priority_synthesized,omitempty"`
+	// NoPriorityTier marks models for which OpenAI publishes no Priority/Fast
+	// tier: Priority requests bill at Standard unless an administrator set a
+	// Priority price override.
+	NoPriorityTier bool `json:"no_priority_tier,omitempty"`
 }
 
 const (
@@ -96,6 +100,17 @@ func usePriorityServiceTierPricing(serviceTier string, pricing *ModelPricing) bo
 	}
 	return len(pricing.PriorityOverrides) > 0 || pricing.InputPricePerTokenPriority > 0 || pricing.OutputPricePerTokenPriority > 0 ||
 		pricing.CacheCreationPricePerTokenPriority > 0 || pricing.CacheReadPricePerTokenPriority > 0
+}
+
+// billingServiceTier returns the tier whose prices apply. Priority on a model
+// without an official Priority/Fast tier is processed (and billed) at Standard,
+// unless an administrator explicitly priced Priority for it.
+func billingServiceTier(serviceTier string, pricing *ModelPricing) string {
+	tier := normalizeBillingServiceTier(serviceTier)
+	if tier == "priority" && pricing != nil && pricing.NoPriorityTier && len(pricing.PriorityOverrides) == 0 {
+		return "default"
+	}
+	return tier
 }
 
 func serviceTierCostMultiplier(serviceTier string) float64 {
@@ -319,6 +334,7 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 				CacheCreation5mPrice:               price5m,
 				CacheCreation1hPrice:               price1h,
 				SupportsCacheBreakdown:             enableBreakdown,
+				NoPriorityTier:                     litellmPricing.NoPriorityTier,
 				LongContextInputThreshold:          litellmPricing.LongContextInputTokenThreshold,
 				LongContextInputMultiplier:         litellmPricing.LongContextInputCostMultiplier,
 				LongContextOutputMultiplier:        litellmPricing.LongContextOutputCostMultiplier,
@@ -399,8 +415,10 @@ func (s *BillingService) calculateCostAndSnapshot(model string, tokens UsageToke
 		effective.Snapshot = nil
 		snapshot.Effective = &effective
 		snapshot.ServiceTier = normalizeBillingServiceTier(serviceTier)
+		billedTier := billingServiceTier(serviceTier, pricing)
+		snapshot.PriorityBilledAsStandard = snapshot.ServiceTier == "priority" && billedTier != "priority"
 		snapshot.LongContext = &LongContextPricing{
-			Applied: s.shouldApplySessionLongContextPricing(tokens, pricing) && snapshot.ServiceTier != "priority",
+			Applied: s.shouldApplySessionLongContextPricing(tokens, pricing) && billedTier != "priority",
 			Mode:    "whole_request", Threshold: pricing.LongContextInputThreshold,
 			TotalInputTokens: tokens.InputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens,
 			InputMultiplier:  pricing.LongContextInputMultiplier, OutputMultiplier: pricing.LongContextOutputMultiplier,
@@ -419,6 +437,7 @@ func (s *BillingService) calculateTokenCost(tokens UsageTokens, rateMultiplier f
 	cacheCreation5mPrice := pricing.CacheCreation5mPrice
 	cacheCreation1hPrice := pricing.CacheCreation1hPrice
 	cacheReadPricePerToken := pricing.CacheReadPricePerToken
+	serviceTier = billingServiceTier(serviceTier, pricing)
 	tierMultiplier := 1.0
 	longContextPricing := s.shouldApplySessionLongContextPricing(tokens, pricing) && normalizeBillingServiceTier(serviceTier) != "priority"
 	if usePriorityServiceTierPricing(serviceTier, pricing) || (normalizeBillingServiceTier(serviceTier) == "priority" && pricing.Snapshot != nil && pricing.Reference != nil && usePriorityServiceTierPricing(serviceTier, pricing.Reference)) {

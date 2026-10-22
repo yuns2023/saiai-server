@@ -55,11 +55,21 @@ live in `backend/internal/service/pricing_reference_corrections.go` and run
 when any snapshot (remote or bundled) is parsed. Administrator aliases and
 price overrides still apply on top.
 
-- `gpt-5-nano` (and dated snapshots): the feed lists a 2.5 USD/M Priority
-  input price (copied from `gpt-5`), but OpenAI publishes no Priority tier for
-  it. The Priority fields are dropped, so a Priority-tagged request uses the
-  generic whole-tier multiplier (x2 Standard) like other models without native
-  Priority prices.
+- OpenAI models without a Priority/Fast tier: OpenAI's pricing page
+  (checked 2026-10-22; Priority was renamed Fast on 2026-07-30) lists these
+  in a Standard table but not in the matching Fast table:
+  `gpt-5.5-pro`, `gpt-5.4-nano`, `gpt-5.4-pro`, `gpt-5.2-pro`, `gpt-5-nano`,
+  `gpt-5-pro`, `o1`, `o1-pro`, `o3-pro`, `o3-mini`, `gpt-4-turbo-2024-04-09`,
+  `gpt-4-0613`, `gpt-3.5-turbo`, `gpt-3.5-turbo-0125` (main text-token table),
+  and `chat-latest`, `gpt-5-search-api` (specialized models table). Exact
+  names and dated snapshots (`-YYYY-MM-DD`/`-YYYYMMDD`) match;
+  provider-prefixed entries (`azure/...`) are not affected. Their feed
+  Priority fields are dropped (the feed copied `gpt-5`'s 2.5 USD/M Priority
+  input onto `gpt-5-nano`), and the entry is marked so that a Priority request
+  bills at Standard instead of the generic x2 multiplier. Flex is unchanged.
+  Administrator Priority overrides still apply; see
+  `docs/MODEL_PRICING_MANAGEMENT.md`. The cyber models table has no Fast view
+  at all, so its models are not listed here.
 
 `TestBundledPricing_PriorityMatchesOfficialFastPrices` pins the official
 OpenAI Priority (Fast) prices of the listed models, both in the raw bundled

@@ -195,6 +195,10 @@ type PricingSnapshot struct {
 	ReferenceTotalCost         float64             `json:"reference_total_cost"`
 	LongContextThreshold       int                 `json:"long_context_threshold,omitempty"`
 	LongContextExtraMultiplier float64             `json:"long_context_extra_multiplier,omitempty"`
+
+	// PriorityBilledAsStandard records that a Priority request was billed at
+	// Standard because the model has no official Priority/Fast tier.
+	PriorityBilledAsStandard bool `json:"priority_billed_as_standard,omitempty"`
 }
 
 // LongContextPricing records the rule selected by the calculator, rather than
@@ -233,15 +237,21 @@ func (s *BillingService) finishModelPricing(p *ModelPricing, r pricingResolution
 		}
 	}
 	nativePriority := usePriorityServiceTierPricing("priority", &base)
+	// What Priority charges without an override: the whole-tier x2, or
+	// Standard for models without an official Priority/Fast tier.
+	priorityMultiplier := serviceTierCostMultiplier("priority")
+	if base.NoPriorityTier {
+		priorityMultiplier = 1
+	}
 	if len(effective.PriorityOverrides) > 0 && !nativePriority {
 		// Switching from the whole-tier multiplier to explicit prices derives
 		// every unedited Priority category from the reference price, never from
 		// a Standard override. These are complete prices, including zero.
 		effective.PrioritySynthesized = true
-		effective.InputPricePerTokenPriority = base.InputPricePerToken * 2
-		effective.OutputPricePerTokenPriority = base.OutputPricePerToken * 2
-		effective.CacheReadPricePerTokenPriority = base.CacheReadPricePerToken * 2
-		effective.CacheCreationPricePerTokenPriority = base.CacheCreationPricePerToken * 2
+		effective.InputPricePerTokenPriority = base.InputPricePerToken * priorityMultiplier
+		effective.OutputPricePerTokenPriority = base.OutputPricePerToken * priorityMultiplier
+		effective.CacheReadPricePerTokenPriority = base.CacheReadPricePerToken * priorityMultiplier
+		effective.CacheCreationPricePerTokenPriority = base.CacheCreationPricePerToken * priorityMultiplier
 	}
 	set(&effective.InputPricePerTokenPriority, r.Override.PriorityInput)
 	set(&effective.OutputPricePerTokenPriority, r.Override.PriorityOutput)
@@ -256,7 +266,7 @@ func (s *BillingService) finishModelPricing(p *ModelPricing, r pricingResolution
 		var priority1h float64
 		switch {
 		case base.SupportsCacheBreakdown && effective.PrioritySynthesized:
-			priority1h = base.CacheCreation1hPrice * 2
+			priority1h = base.CacheCreation1hPrice * priorityMultiplier
 		case base.SupportsCacheBreakdown:
 			priority1h = base.CacheCreation1hPrice
 		case effective.PrioritySynthesized || effective.CacheCreationPricePerTokenPriority > 0 || effective.PriorityOverrides["priority_cache_write"]:
@@ -339,7 +349,7 @@ func (s *BillingService) DisplayUnitPrices(p *ModelPricing, tier string) map[str
 // DisplayLongContextUnitPrices follows the same tier selection and whole-request
 // rule as actual billing. Unsupported tiers have no separate long-context price.
 func (s *BillingService) DisplayLongContextUnitPrices(p *ModelPricing, tier string) map[string]float64 {
-	if p == nil || !s.shouldApplySessionLongContextPricing(UsageTokens{InputTokens: p.LongContextInputThreshold + 1}, p) || normalizeBillingServiceTier(tier) == "priority" {
+	if p == nil || !s.shouldApplySessionLongContextPricing(UsageTokens{InputTokens: p.LongContextInputThreshold + 1}, p) || billingServiceTier(tier, p) == "priority" {
 		return nil
 	}
 	return s.displayContextUnitPrices(p, tier, true)

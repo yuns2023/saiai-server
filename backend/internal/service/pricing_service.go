@@ -53,6 +53,8 @@ type LiteLLMModelPricing struct {
 	OutputCostPerImage                     float64 `json:"output_cost_per_image"` // 图片生成模型每张图片价格
 	InputCostPerImageToken                 float64 `json:"input_cost_per_image_token"`
 	OutputCostPerImageToken                float64 `json:"output_cost_per_image_token"`
+	// NoPriorityTier is set by applyReferencePricingCorrections, never by the feed.
+	NoPriorityTier bool `json:"-"`
 }
 
 // PricingRemoteClient 远程价格数据获取接口

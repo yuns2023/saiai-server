@@ -212,6 +212,13 @@ the effective billing tier is the more expensive one:
 - a response may raise the effective tier above the request tier; and
 - an absent or unknown value does not invent a tier.
 
+For OpenAI models without an official Priority/Fast tier (see
+[MODEL_PRICING_MANAGEMENT.md](MODEL_PRICING_MANAGEMENT.md)), BillingService
+prices an effective `priority` tier at Standard prices unless an administrator
+has a Priority price override for the billed model. The usage record keeps
+`priority` as its tier; its pricing snapshot sets
+`priority_billed_as_standard`.
+
 Apply the same resolver to HTTP, WebSocket, and WebSocket v2 usage recording.
 Store the effective tier with the usage record while returning the original
 upstream response unchanged.

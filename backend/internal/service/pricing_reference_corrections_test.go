@@ -37,6 +37,9 @@ func TestParsePricingData_RemovesPriorityForModelsWithoutOfficialPriorityTier(t 
 		require.InDelta(t, 5e-8, p.InputCostPerToken, 1e-15, model)
 		require.InDelta(t, 4e-7, p.OutputCostPerToken, 1e-15, model)
 	}
+	for model, want := range map[string]bool{"gpt-5-nano": true, "gpt-5-nano-2025-08-07": true, "gpt-5-nano-20250807": true, "azure/gpt-5-nano": false, "gpt-5-nano-search": false, "gpt-5-mini": false} {
+		require.Equal(t, want, data[model].NoPriorityTier, model)
+	}
 	require.InDelta(t, 4.5e-7, data["gpt-5-mini"].InputCostPerTokenPriority, 1e-15)
 	// Only bare OpenAI names and their dated snapshots are corrected.
 	require.InDelta(t, 1e-7, data["azure/gpt-5-nano"].InputCostPerTokenPriority, 1e-15)
@@ -100,31 +103,168 @@ func TestBundledPricing_PriorityMatchesOfficialFastPrices(t *testing.T) {
 	}
 }
 
-func TestBundledPricing_GPT5NanoPriorityUsesStandardTierMultiplier(t *testing.T) {
-	svc := bundledPricingBilling(t)
-	tokens := UsageTokens{InputTokens: 100_000, CacheReadTokens: 100_000, OutputTokens: 100_000}
+// Models in the official Standard tables without a Fast (formerly Priority)
+// row, https://developers.openai.com/api/docs/pricing as of 2026-10-22.
+var officialOpenAIModelsWithoutFastTier = []string{
+	"gpt-5.5-pro", "gpt-5.4-nano", "gpt-5.4-pro", "gpt-5.2-pro", "gpt-5-nano", "gpt-5-pro",
+	"o1", "o1-pro", "o3-pro", "o3-mini", "gpt-4-turbo-2024-04-09", "gpt-4-0613",
+	"gpt-3.5-turbo", "gpt-3.5-turbo-0125", "chat-latest", "gpt-5-search-api",
+}
 
-	for _, model := range []string{"gpt-5-nano", "gpt-5-nano-2025-08-07"} {
+func TestOpenAIModelsWithoutPriorityTier_MatchesOfficialList(t *testing.T) {
+	require.Len(t, openAIModelsWithoutPriorityTier, len(officialOpenAIModelsWithoutFastTier))
+	for _, model := range officialOpenAIModelsWithoutFastTier {
+		require.Contains(t, openAIModelsWithoutPriorityTier, model)
+	}
+	// Exact names and dated snapshots only; 4-digit suffixes are not dates.
+	require.True(t, openAIModelHasNoPriorityTier(" O1-2024-12-17 "))
+	require.True(t, openAIModelHasNoPriorityTier("gpt-4-turbo-2024-04-09"))
+	require.False(t, openAIModelHasNoPriorityTier("gpt-4-turbo"))
+	require.False(t, openAIModelHasNoPriorityTier("gpt-4-0314"))
+	require.False(t, openAIModelHasNoPriorityTier("azure/gpt-5-nano"))
+	require.False(t, openAIModelHasNoPriorityTier("gpt-5.4-mini"))
+}
+
+func noFastTierBundledModels(t *testing.T, svc *BillingService) []string {
+	t.Helper()
+	var models []string
+	for name, p := range svc.pricingService.pricingData {
+		if p.NoPriorityTier {
+			require.Equal(t, "openai", p.LiteLLMProvider, name)
+			models = append(models, name)
+		}
+	}
+	for _, model := range officialOpenAIModelsWithoutFastTier {
+		require.Contains(t, models, model, "bundled feed entry missing")
+	}
+	for _, dated := range []string{"gpt-5-nano-2025-08-07", "gpt-5.4-nano-2026-03-17", "gpt-5.4-pro-2026-03-05", "gpt-5.5-pro-2026-04-23", "o1-2024-12-17", "o3-mini-2025-01-31"} {
+		require.Contains(t, models, dated)
+	}
+	return models
+}
+
+func TestBundledPricing_NoFastTierModelsBillPriorityAtStandard(t *testing.T) {
+	svc := bundledPricingBilling(t)
+	tokens := UsageTokens{InputTokens: 100_000, OutputTokens: 100_000, CacheReadTokens: 100_000, CacheCreationTokens: 10_000}
+	for _, model := range noFastTierBundledModels(t, svc) {
 		pricing, err := svc.GetModelPricing(model)
 		require.NoError(t, err, model)
+		require.True(t, pricing.NoPriorityTier, model)
 		require.Zero(t, pricing.InputPricePerTokenPriority, model)
-		require.Zero(t, pricing.OutputPricePerTokenPriority, model)
-		require.Zero(t, pricing.CacheReadPricePerTokenPriority, model)
 
 		standard, err := svc.CalculateCostWithServiceTier(model, tokens, 1, "")
 		require.NoError(t, err, model)
-		// Standard 0.05 / 0.005 / 0.40 USD per million tokens.
-		require.InDelta(t, 0.005, standard.InputCost, 1e-12, model)
-		require.InDelta(t, 0.0005, standard.CacheReadCost, 1e-12, model)
-		require.InDelta(t, 0.04, standard.OutputCost, 1e-12, model)
+		require.Positive(t, standard.TotalCost, model)
+		for _, tier := range []string{"priority", " Priority "} {
+			priority, err := svc.CalculateCostWithServiceTier(model, tokens, 1, tier)
+			require.NoError(t, err, model)
+			require.InDelta(t, standard.InputCost, priority.InputCost, 1e-12, model)
+			require.InDelta(t, standard.OutputCost, priority.OutputCost, 1e-12, model)
+			require.InDelta(t, standard.CacheReadCost, priority.CacheReadCost, 1e-12, model)
+			require.InDelta(t, standard.CacheCreationCost, priority.CacheCreationCost, 1e-12, model)
+			require.InDelta(t, standard.TotalCost, priority.TotalCost, 1e-12, model)
+			require.Equal(t, "priority", priority.PricingSnapshot.ServiceTier, model)
+			require.True(t, priority.PricingSnapshot.PriorityBilledAsStandard, model)
+			require.InDelta(t, standard.TotalCost, priority.PricingSnapshot.ReferenceTotalCost, 1e-12, model)
+		}
+		require.False(t, standard.PricingSnapshot.PriorityBilledAsStandard, model)
 
+		// Flex keeps the whole-tier x0.5 multiplier.
+		flex, err := svc.CalculateCostWithServiceTier(model, tokens, 1, "flex")
+		require.NoError(t, err, model)
+		require.InDelta(t, standard.TotalCost*0.5, flex.TotalCost, 1e-12, model)
+		require.False(t, flex.PricingSnapshot.PriorityBilledAsStandard, model)
+
+		// The administrator pricing page shows the same effective Priority prices.
+		require.Equal(t, svc.DisplayUnitPrices(pricing, "default"), svc.DisplayUnitPrices(pricing, "priority"), model)
+		require.Equal(t, svc.DisplayUnitPrices(pricing.Reference, "default"), svc.DisplayUnitPrices(pricing.Reference, "priority"), model)
+	}
+}
+
+// Priority billed at Standard follows the Standard long-context rule as well;
+// otherwise a Priority request would be cheaper than the same Standard request.
+func TestBundledPricing_NoFastTierPriorityKeepsStandardLongContext(t *testing.T) {
+	svc := bundledPricingBilling(t)
+	tokens := UsageTokens{InputTokens: 300_000, OutputTokens: 1_000}
+	for _, model := range []string{"gpt-5.4-pro", "gpt-5.5-pro-2026-04-23"} {
+		standard, err := svc.CalculateCostWithServiceTier(model, tokens, 1, "")
+		require.NoError(t, err, model)
+		require.True(t, standard.PricingSnapshot.LongContext.Applied, model)
 		priority, err := svc.CalculateCostWithServiceTier(model, tokens, 1, "priority")
 		require.NoError(t, err, model)
-		// No native Priority price: the generic x2 Priority tier multiplier
-		// applies instead of the feed's 2.5 USD/M (50x) input price.
-		require.InDelta(t, 2*standard.InputCost, priority.InputCost, 1e-12, model)
-		require.InDelta(t, 2*standard.CacheReadCost, priority.CacheReadCost, 1e-12, model)
-		require.InDelta(t, 2*standard.OutputCost, priority.OutputCost, 1e-12, model)
-		require.InDelta(t, 2*standard.TotalCost, priority.TotalCost, 1e-12, model)
+		require.True(t, priority.PricingSnapshot.LongContext.Applied, model)
+		require.InDelta(t, standard.TotalCost, priority.TotalCost, 1e-12, model)
+
+		pricing, err := svc.GetModelPricing(model)
+		require.NoError(t, err, model)
+		require.NotNil(t, svc.DisplayLongContextUnitPrices(pricing, "priority"), model)
+		require.Equal(t, svc.DisplayLongContextUnitPrices(pricing, "default"), svc.DisplayLongContextUnitPrices(pricing, "priority"), model)
 	}
+}
+
+func TestBundledPricing_PriorityUnchangedForModelsWithFastTierOrPrefix(t *testing.T) {
+	svc := bundledPricingBilling(t)
+	tokens := UsageTokens{InputTokens: 100_000, OutputTokens: 100_000}
+	cases := []struct {
+		model string
+		ratio float64 // Priority total / Standard total
+	}{
+		{"gpt-5", 2},            // native official Fast prices (2x)
+		{"gpt-5.4-mini", 2},     // native official Fast prices (2x)
+		{"gpt-5.5", 2.5},        // GPT-5.5 policy-derived 2.5x Fast prices
+		{"gpt-5.6-cyber", 2},    // no Priority price, not listed: generic x2
+		{"azure/gpt-5-nano", 2}, // provider-prefixed entry: generic x2
+		{"azure/o3-mini", 2},
+	}
+	for _, tc := range cases {
+		pricing, err := svc.GetModelPricing(tc.model)
+		require.NoError(t, err, tc.model)
+		require.False(t, pricing.NoPriorityTier, tc.model)
+		standard, err := svc.CalculateCostWithServiceTier(tc.model, tokens, 1, "")
+		require.NoError(t, err, tc.model)
+		priority, err := svc.CalculateCostWithServiceTier(tc.model, tokens, 1, "priority")
+		require.NoError(t, err, tc.model)
+		require.InDelta(t, tc.ratio*standard.TotalCost, priority.TotalCost, 1e-9, tc.model)
+		require.False(t, priority.PricingSnapshot.PriorityBilledAsStandard, tc.model)
+	}
+}
+
+// An administrator Priority override on a model without a Fast tier is
+// intentional operator pricing and still applies; unedited Priority
+// categories inherit Standard (not x2) prices.
+func TestBundledPricing_NoFastTierHonoursAdminPriorityOverride(t *testing.T) {
+	svc := bundledPricingBilling(t)
+	svc.pricingService.setModelPricingConfig(nil, map[string]ModelPriceOverride{
+		"gpt-5.4-nano": {PriorityInput: priceTestNumber(1)},
+		"gpt-5-nano":   {PriorityInput: priceTestNumber(0.1), PriorityOutput: priceTestNumber(0.8), PriorityCacheRead: priceTestNumber(0.01)},
+	})
+	tokens := UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadTokens: 1_000_000}
+
+	// gpt-5.4-nano Standard: 0.20 input / 1.25 output / 0.02 cached USD per 1M.
+	priority, err := svc.CalculateCostWithServiceTier("gpt-5.4-nano", tokens, 1, "priority")
+	require.NoError(t, err)
+	require.InDelta(t, 1.0, priority.InputCost, 1e-9)
+	require.InDelta(t, 1.25, priority.OutputCost, 1e-9)
+	require.InDelta(t, 0.02, priority.CacheReadCost, 1e-9)
+	require.False(t, priority.PricingSnapshot.PriorityBilledAsStandard)
+	require.Equal(t, "priority", priority.PricingSnapshot.ServiceTier)
+
+	priority, err = svc.CalculateCostWithServiceTier("gpt-5-nano-2025-08-07", tokens, 1, "priority")
+	require.NoError(t, err)
+	// Overrides are keyed by the billed model; the dated name has none.
+	require.True(t, priority.PricingSnapshot.PriorityBilledAsStandard)
+	priority, err = svc.CalculateCostWithServiceTier("gpt-5-nano", tokens, 1, "priority")
+	require.NoError(t, err)
+	require.InDelta(t, 0.1, priority.InputCost, 1e-9)
+	require.InDelta(t, 0.8, priority.OutputCost, 1e-9)
+	require.InDelta(t, 0.01, priority.CacheReadCost, 1e-9)
+	require.False(t, priority.PricingSnapshot.PriorityBilledAsStandard)
+
+	// Standard and Flex are unaffected by the Priority override.
+	standard, err := svc.CalculateCostWithServiceTier("gpt-5-nano", tokens, 1, "")
+	require.NoError(t, err)
+	require.InDelta(t, 0.05+0.4+0.005, standard.TotalCost, 1e-9)
+	flex, err := svc.CalculateCostWithServiceTier("gpt-5-nano", tokens, 1, "flex")
+	require.NoError(t, err)
+	require.InDelta(t, standard.TotalCost*0.5, flex.TotalCost, 1e-9)
 }
