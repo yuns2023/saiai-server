@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
@@ -267,4 +268,50 @@ func TestBundledPricing_NoFastTierHonoursAdminPriorityOverride(t *testing.T) {
 	flex, err := svc.CalculateCostWithServiceTier("gpt-5-nano", tokens, 1, "flex")
 	require.NoError(t, err)
 	require.InDelta(t, standard.TotalCost*0.5, flex.TotalCost, 1e-9)
+}
+
+// Aliases follow the resolved feed entry, and an explicit zero Priority
+// override is honoured as free Priority pricing.
+func TestBundledPricing_NoFastTierAliasesAndZeroOverride(t *testing.T) {
+	svc := bundledPricingBilling(t)
+	svc.pricingService.setModelPricingConfig(map[string]string{
+		"my-nano":    "gpt-5-nano", // priced from a model without a Fast tier
+		"gpt-5-pro":  "gpt-5",      // listed model priced from a Fast-tier model
+		"free-o3pro": "o3-pro",
+	}, map[string]ModelPriceOverride{
+		"free-o3pro": {PriorityInput: priceTestNumber(0), PriorityOutput: priceTestNumber(0)},
+	})
+	tokens := UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000}
+
+	standard, err := svc.CalculateCostWithServiceTier("my-nano", tokens, 1, "")
+	require.NoError(t, err)
+	priority, err := svc.CalculateCostWithServiceTier("my-nano", tokens, 1, "priority")
+	require.NoError(t, err)
+	require.InDelta(t, standard.TotalCost, priority.TotalCost, 1e-12)
+	require.True(t, priority.PricingSnapshot.PriorityBilledAsStandard)
+
+	// gpt-5 Fast: 2.5 input / 20 output USD per 1M.
+	priority, err = svc.CalculateCostWithServiceTier("gpt-5-pro", tokens, 1, "priority")
+	require.NoError(t, err)
+	require.InDelta(t, 22.5, priority.TotalCost, 1e-9)
+	require.False(t, priority.PricingSnapshot.PriorityBilledAsStandard)
+
+	priority, err = svc.CalculateCostWithServiceTier("free-o3pro", tokens, 1, "priority")
+	require.NoError(t, err)
+	require.Zero(t, priority.TotalCost)
+	require.False(t, priority.PricingSnapshot.PriorityBilledAsStandard)
+}
+
+func TestPricingSnapshot_PriorityBilledAsStandardJSON(t *testing.T) {
+	svc := bundledPricingBilling(t)
+	cost, err := svc.CalculateCostWithServiceTier("o3-mini-2025-01-31", UsageTokens{InputTokens: 10}, 1, "priority")
+	require.NoError(t, err)
+	raw, err := json.Marshal(cost.PricingSnapshot)
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	require.Equal(t, "priority", decoded["service_tier"])
+	require.Equal(t, true, decoded["priority_billed_as_standard"])
+	require.Equal(t, true, decoded["effective"].(map[string]any)["no_priority_tier"])
+	require.Equal(t, true, decoded["reference"].(map[string]any)["no_priority_tier"])
 }

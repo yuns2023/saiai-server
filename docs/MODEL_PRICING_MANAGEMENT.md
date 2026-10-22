@@ -144,8 +144,9 @@ An explicit recorded `applied=false` wins over every inference. Count total
 input including cache once, and apply the strict `>` threshold.
 
 Priority currently bypasses the Gateway whole-request long-context multiplier,
-in both calculation and snapshot creation. The pricing UI reflects that
-exclusion. Any proposal to match newer official Priority long-context prices
+in both calculation and snapshot creation, except where Priority is billed as
+Standard for a model without an official Priority/Fast tier (no administrator
+Priority override). The pricing UI reflects that exclusion. Any proposal to match newer official Priority long-context prices
 requires a separate billing review, fixtures for every transport and a decision
 about future records; this display change does not resolve that policy question.
 The reference feed is community pricing even when an official pricing link is
