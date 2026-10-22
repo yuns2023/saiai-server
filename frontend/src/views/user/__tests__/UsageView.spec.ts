@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 import UsageView from '../UsageView.vue'
+import UsageCostCell from '@/components/common/UsageCostCell.vue'
 
 const { query, getStatsByDateRange, list, showError, showWarning, showSuccess, showInfo } = vi.hoisted(() => ({
   query: vi.fn(),
@@ -421,5 +422,57 @@ describe('user UsageView density layout', () => {
     await remounted.get('[data-testid="usage-stats-toggle"]').trigger('click')
     expect(remounted.find('[data-testid="usage-stats-cards"]').exists()).toBe(true)
     expect(localStorage.getItem('user-usage-stats-collapsed')).toBe('false')
+  })
+
+  it('lets only the row that owns the shared cost panel close it', async () => {
+    query.mockResolvedValue({ items: [{ request_id: 'req-A', actual_cost: 0.111111, total_cost: 0.111111, billing_type: 0, rate_multiplier: 1, input_cost: 0, output_cost: 0, cache_creation_cost: 0, cache_read_cost: 0, input_tokens: 1, output_tokens: 1, cache_creation_tokens: 0, cache_read_tokens: 0, image_count: 0, duration_ms: 1, created_at: '2026-10-23T00:00:00Z', model: 'gpt-6-astra' }, { request_id: 'req-B', actual_cost: 0.222222, total_cost: 0.222222, billing_type: 0, rate_multiplier: 1, input_cost: 0, output_cost: 0, cache_creation_cost: 0, cache_read_cost: 0, input_tokens: 1, output_tokens: 1, cache_creation_tokens: 0, cache_read_tokens: 0, image_count: 0, duration_ms: 1, created_at: '2026-10-23T00:00:00Z', model: 'gpt-6-astra' }], total: 2, pages: 1 })
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          TablePageLayout: TablePageLayoutPropsStub,
+          DataTable: {
+  props: ['data'],
+  template: '<div><div v-for="row in data" :key="row.request_id" :data-row="row.request_id"><slot name="cell-cost" :row="row" /></div></div>',
+},
+          Pagination: true,
+          EmptyState: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    const state = () => (wrapper.vm as any).$.setupState
+    const detailFor = (id: string) => wrapper.get(`[data-row="${id}"] [data-testid="usage-cost-detail"]`)
+
+    // pin row A
+    await detailFor('req-A').trigger('click')
+    expect(state().tooltipVisible).toBe(true)
+    expect(state().tooltipData.request_id).toBe('req-A')
+
+    // a stray close from a row that does not own the panel is ignored
+    wrapper.findAllComponents(UsageCostCell)[1].vm.$emit('hide-detail')
+    await nextTick()
+    expect(state().tooltipVisible).toBe(true)
+    expect(state().tooltipData.request_id).toBe('req-A')
+
+    // hovering B takes the shared panel over; leaving B closes it
+    await detailFor('req-B').trigger('mouseenter')
+    expect(state().tooltipData.request_id).toBe('req-B')
+    await detailFor('req-B').trigger('mouseleave')
+    expect(state().tooltipVisible).toBe(false)
+
+    // A gave up ownership, so hovering it again re-opens the panel for A
+    await detailFor('req-A').trigger('mouseenter')
+    expect(state().tooltipVisible).toBe(true)
+    expect(state().tooltipData.request_id).toBe('req-A')
+    await detailFor('req-A').trigger('mouseleave')
+    expect(state().tooltipVisible).toBe(false)
+    wrapper.unmount()
   })
 })

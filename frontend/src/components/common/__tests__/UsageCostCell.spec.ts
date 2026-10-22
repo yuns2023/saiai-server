@@ -127,6 +127,32 @@ describe('UsageCostCell', () => {
     expect(wrapper.emitted('hide-detail')).toHaveLength(1)
   })
 
+  it.each(['resize', 'orientationchange'])('closes a tapped-open breakdown on %s and removes its listeners', async (type) => {
+    const removeSpy = vi.spyOn(window, 'removeEventListener')
+    const wrapper = render({})
+    const detail = wrapper.get('[data-testid="usage-cost-detail"]')
+    await detail.trigger('click')
+    window.dispatchEvent(new Event(type))
+    await wrapper.vm.$nextTick()
+    expect(detail.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.emitted('hide-detail')).toHaveLength(1)
+    const removed = removeSpy.mock.calls.map(([name]) => name)
+    expect(removed).toEqual(expect.arrayContaining(['scroll', 'resize', 'orientationchange']))
+    removeSpy.mockRestore()
+  })
+
+  it('drops its state silently when another row takes the panel, then can re-claim it', async () => {
+    const wrapper = render({})
+    const detail = wrapper.get('[data-testid="usage-cost-detail"]')
+    await detail.trigger('click')
+    await wrapper.setProps({ detailActive: false })
+    expect(detail.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.emitted('hide-detail')).toBeUndefined()
+    await wrapper.setProps({ detailActive: true })
+    await detail.trigger('mouseenter')
+    expect(wrapper.emitted('show-detail')).toHaveLength(2)
+  })
+
   it('hides the parent breakdown when the row unmounts while open', async () => {
     const wrapper = render({})
     await wrapper.get('[data-testid="usage-cost-detail"]').trigger('click')

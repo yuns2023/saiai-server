@@ -259,7 +259,12 @@
           </template>
 
           <template #cell-cost="{ row }">
-            <UsageCostCell :row="row" @show-detail="showTooltip($event, row)" @hide-detail="hideTooltip">
+            <UsageCostCell
+              :row="row"
+              :detail-active="isCostDetailOwner(row)"
+              @show-detail="showCostDetail($event, row)"
+              @hide-detail="hideCostDetail(row)"
+            >
               <NativeChatCharges :record="row" />
             </UsageCostCell>
           </template>
@@ -501,7 +506,7 @@ import UsageBillingSummary from '@/components/common/UsageBillingSummary.vue'
 import { usageBillingLabel } from '@/utils/usageBilling'
 import TokenUsageSummary from '@/components/common/TokenUsageSummary.vue'
 import TokenCount from '@/components/common/TokenCount.vue'
-import { ref, computed, reactive, onMounted, nextTick, useTemplateRef } from 'vue'
+import { ref, computed, reactive, onMounted, nextTick, useTemplateRef, toRaw } from 'vue'
 import { placeSidePanel } from '@/utils/sidePanelPlacement'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -920,6 +925,21 @@ const showTooltip = (event: Event, row: UsageLog) => {
 const hideTooltip = () => {
   tooltipVisible.value = false
   tooltipData.value = null
+}
+
+// One shared breakdown panel: the row that last opened it owns it, and close
+// events from any other row are ignored.
+const costDetailOwner = ref<unknown>(null)
+const costRowKey = (row: UsageLog): unknown => row.id ?? row.request_id ?? toRaw(row)
+const isCostDetailOwner = (row: UsageLog) => costDetailOwner.value === costRowKey(row)
+const showCostDetail = (event: Event, row: UsageLog) => {
+  costDetailOwner.value = costRowKey(row)
+  showTooltip(event, row)
+}
+const hideCostDetail = (row: UsageLog) => {
+  if (!isCostDetailOwner(row)) return
+  costDetailOwner.value = null
+  hideTooltip()
 }
 
 // Token tooltip functions

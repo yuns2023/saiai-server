@@ -113,7 +113,13 @@ const props = withDefaults(defineProps<{
   accountCost?: number | null
   /** Show the hosted-usage reference amount (metered_cost) when present. */
   showReference?: boolean
-}>(), { accountCost: null, showReference: true })
+  /**
+   * Whether the parent's single shared breakdown panel currently belongs to this row.
+   * When ownership moves to another row, this cell drops its hover/focus/pin state
+   * silently so that hovering it again re-claims the panel.
+   */
+  detailActive?: boolean
+}>(), { accountCost: null, showReference: true, detailActive: true })
 
 const emit = defineEmits<{
   (e: 'show-detail', event: Event): void
@@ -129,7 +135,7 @@ const tier = computed(() => (isNativeChatUsage(props.row) ? null : usageServiceT
 const tierLabel = computed(() => `${t('usage.serviceTier')}: ${getUsageServiceTierLabel(formatUsageServiceTier(props.row.service_tier), t)}`)
 
 // Cost breakdown panel (owned by the parent): hover, focus and tap are tracked
-// separately; tap toggles, and an outside tap, Escape, scroll or unmount closes it.
+// separately; tap toggles, and an outside tap, Escape, scroll, resize or unmount closes it.
 type DetailSource = 'hover' | 'focus' | 'pin'
 const detailSources = ref(new Set<DetailSource>())
 const detailOpen = computed(() => detailSources.value.size > 0)
@@ -164,8 +170,17 @@ const setGlobalListeners = (active: boolean) => {
   document[method]('pointerdown', onOutsidePointer, true)
   document[method]('keydown', onKeydown, true)
   window[method]('scroll', closeDetail, true)
+  // A fixed panel would detach from its row (or overflow) after a resize/rotation.
+  window[method]('resize', closeDetail)
+  window[method]('orientationchange', closeDetail)
 }
 watch(detailOpen, setGlobalListeners)
+watch(
+  () => props.detailActive,
+  (active) => {
+    if (!active && detailOpen.value) detailSources.value = new Set()
+  },
+)
 onBeforeUnmount(() => {
   setGlobalListeners(false)
   if (detailOpen.value) emit('hide-detail')
