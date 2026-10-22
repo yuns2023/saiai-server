@@ -993,7 +993,7 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 				"no_reset_count", count,
 				"escalated_after", openAINoReset429EscalatedAfter,
 			)
-			_, err := s.writeCodexUsageFromRequest(ctx, account.ID, codexUsageWrite429Limit, observedAt, func(writeCtx context.Context) error {
+			_, err := s.writeCodexUsageFromRequest(ctx, account.ID, observedAt, func(writeCtx context.Context) error {
 				return s.accountRepo.SetRateLimited(writeCtx, account.ID, observedAt.Add(s.openAINoReset429CooldownAt(account.ID, observedAt)))
 			})
 			if err != nil && !errors.Is(err, errCodexUsageSuperseded) {
@@ -1406,7 +1406,7 @@ func (s *RateLimitService) persistOpenAICodex429(ctx context.Context, account *A
 	if len(updates) == 0 && resetAt == nil {
 		return nil
 	}
-	_, err := s.writeCodexUsageFromRequest(ctx, account.ID, codexUsageWrite429, observedAt, func(writeCtx context.Context) error {
+	_, err := s.writeCodexUsageFromRequest(ctx, account.ID, observedAt, func(writeCtx context.Context) error {
 		if len(updates) > 0 {
 			if err := s.accountRepo.UpdateExtra(writeCtx, account.ID, updates); err != nil {
 				slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)
@@ -1430,7 +1430,7 @@ func (s *RateLimitService) setRateLimitedFromObservation(ctx context.Context, ac
 	if account.Platform != PlatformOpenAI {
 		return s.accountRepo.SetRateLimited(ctx, account.ID, resetAt)
 	}
-	_, err := s.writeCodexUsageFromRequest(ctx, account.ID, codexUsageWrite429Limit, observedAt, func(writeCtx context.Context) error {
+	_, err := s.writeCodexUsageFromRequest(ctx, account.ID, observedAt, func(writeCtx context.Context) error {
 		return s.accountRepo.SetRateLimited(writeCtx, account.ID, resetAt)
 	})
 	if errors.Is(err, errCodexUsageSuperseded) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +46,17 @@ func (r *codexFenceRepo) SetRateLimited(_ context.Context, _ int64, resetAt time
 
 func (r *codexFenceRepo) ListWithFilters(_ context.Context, params pagination.PaginationParams, _, _, _, _ string, _ int64) ([]Account, *pagination.PaginationResult, error) {
 	return r.accounts, &pagination.PaginationResult{Total: int64(len(r.accounts)), Page: params.Page, PageSize: params.PageSize}, nil
+}
+
+func (r *codexFenceRepo) wroteLimit(want time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, got := range r.limits {
+		if got.Equal(want) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *codexFenceRepo) counts() (int, int) {
@@ -368,48 +378,6 @@ func TestCodexUsageExtraKeepsSubSecondObservationTime(t *testing.T) {
 	require.Contains(t, buildCodexUsageExtraUpdates(snapshot, time.Now())["codex_usage_updated_at"], ".")
 }
 
-func TestCodexBusyLockObservationsAreCoalesced(t *testing.T) {
-	repo := newCodexFenceRepo()
-	limits := &RateLimitService{accountRepo: repo}
-	_, release, err := limits.lockCodexUsageWrite(context.Background(), 13)
-	require.NoError(t, err)
-
-	before := runtime.NumGoroutine()
-	base := time.Now()
-	var wg sync.WaitGroup
-	for i := 0; i < 200; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			resetAt := base.Add(time.Duration(i+1) * time.Minute)
-			queued, err := limits.writeCodexUsageFromRequest(context.Background(), 13, codexUsageWrite429Limit, base.Add(time.Duration(i)*time.Millisecond), func(ctx context.Context) error {
-				return repo.SetRateLimited(ctx, 13, resetAt)
-			})
-			require.NoError(t, err)
-			require.True(t, queued)
-		}(i)
-	}
-	wg.Wait()
-	require.LessOrEqual(t, runtime.NumGoroutine()-before, 5, "one background worker per account, not one per observation")
-	limits.codexUsageWrites.queueMu.Lock()
-	require.Len(t, limits.codexUsageWrites.queues, 1)
-	require.LessOrEqual(t, len(limits.codexUsageWrites.queues[13].pending), 1, "one pending slot per kind")
-	limits.codexUsageWrites.queueMu.Unlock()
-
-	// At most the write the worker already took plus the latest pending one.
-	release()
-	limits.codexUsageWrites.pending.Wait()
-	_, writes := repo.counts()
-	require.GreaterOrEqual(t, writes, 1)
-	require.LessOrEqual(t, writes, 2)
-	repo.mu.Lock()
-	require.True(t, repo.limits[len(repo.limits)-1].Equal(base.Add(200*time.Minute)), "the final write uses the latest observation")
-	repo.mu.Unlock()
-	limits.codexUsageWrites.queueMu.Lock()
-	require.Empty(t, limits.codexUsageWrites.queues)
-	limits.codexUsageWrites.queueMu.Unlock()
-}
-
 func TestCodexStaleNoReset429DoesNotEscalateAfterReset(t *testing.T) {
 	repo := newCodexFenceRepo()
 	limits := &RateLimitService{accountRepo: repo}
@@ -493,9 +461,9 @@ func TestCodexWSHandshake429UsesHeaderReceiptTime(t *testing.T) {
 	require.Equal(t, 1, writes)
 }
 
-// Every current generic 429 counts toward escalation even when the writes are
-// coalesced behind a busy fence.
-func TestCodexNoReset429CountsCoalescedObservations(t *testing.T) {
+// Every current generic 429 counts toward escalation even when its write
+// waits behind a busy fence.
+func TestCodexNoReset429CountsQueuedObservations(t *testing.T) {
 	repo := newCodexFenceRepo()
 	limits := &RateLimitService{accountRepo: repo}
 	account := &Account{ID: 16, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
@@ -509,33 +477,7 @@ func TestCodexNoReset429CountsCoalescedObservations(t *testing.T) {
 	}
 	release()
 	limits.codexUsageWrites.pending.Wait()
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-	require.NotEmpty(t, repo.limits)
-	require.True(t, repo.limits[len(repo.limits)-1].Equal(last.Add(openAINoReset429EscalatedFor)), "the fifth 429 escalates")
-}
-
-// A request observation never lands ahead of an older queued one.
-func TestCodexRequestWriteStaysBehindQueuedObservations(t *testing.T) {
-	repo := newCodexFenceRepo()
-	limits := &RateLimitService{accountRepo: repo}
-	_, release, err := limits.lockCodexUsageWrite(context.Background(), 17)
-	require.NoError(t, err)
-	older, newer := time.Now(), time.Now().Add(time.Millisecond)
-	write := func(resetAt time.Time) func(context.Context) error {
-		return func(ctx context.Context) error { return repo.SetRateLimited(ctx, 17, resetAt) }
-	}
-	queued, err := limits.writeCodexUsageFromRequest(context.Background(), 17, codexUsageWrite429Limit, older, write(older))
-	require.NoError(t, err)
-	require.True(t, queued)
-	release()
-	// The fence is free, but the older observation is still queued.
-	_, err = limits.writeCodexUsageFromRequest(context.Background(), 17, codexUsageWrite429Limit, newer, write(newer))
-	require.NoError(t, err)
-	limits.codexUsageWrites.pending.Wait()
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-	require.True(t, repo.limits[len(repo.limits)-1].Equal(newer))
+	require.True(t, repo.wroteLimit(last.Add(openAINoReset429EscalatedFor)), "the fifth 429 escalates")
 }
 
 // A generic 429 received during a reset's usage fetch, after earlier 429s,
@@ -572,8 +514,8 @@ func TestCodexNoReset429BackoffIsRedecidedAfterResetClear(t *testing.T) {
 }
 
 // Five current 429s during a reset's fetch still escalate after the reset
-// drops the earlier ones, even though their writes were coalesced.
-func TestCodexNoReset429KeepsCoalescedPostBoundaryCounts(t *testing.T) {
+// drops the earlier ones.
+func TestCodexNoReset429KeepsQueuedPostBoundaryCounts(t *testing.T) {
 	repo := newCodexFenceRepo()
 	limits := &RateLimitService{accountRepo: repo}
 	account := &Account{ID: 19, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
@@ -594,9 +536,7 @@ func TestCodexNoReset429KeepsCoalescedPostBoundaryCounts(t *testing.T) {
 	limits.clearOpenAINoReset429Through(account.ID, boundary)
 	release()
 	limits.codexUsageWrites.pending.Wait()
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-	require.True(t, repo.limits[len(repo.limits)-1].Equal(last.Add(openAINoReset429EscalatedFor)))
+	require.True(t, repo.wroteLimit(last.Add(openAINoReset429EscalatedFor)))
 }
 
 // Delayed older 429s never evict newer ones from the escalation window.
@@ -611,4 +551,31 @@ func TestCodexNoReset429RecentKeepsNewestObservations(t *testing.T) {
 	}
 	limits.clearOpenAINoReset429Through(20, base.Add(50*time.Millisecond))
 	require.Equal(t, openAINoReset429EscalatedFor, limits.openAINoReset429CooldownAt(20, base.Add(104*time.Millisecond)))
+}
+
+// An ordinary usage snapshot received before a reset but processed after it
+// is rejected: both the snapshot write and its rate limit use the receipt time.
+func TestCodexSnapshotUsesReceiptTime(t *testing.T) {
+	repo := newCodexFenceRepo()
+	limits := &RateLimitService{accountRepo: repo}
+	gateway := &OpenAIGatewayService{accountRepo: repo, rateLimitService: limits}
+	receivedAt := time.Now()
+	time.Sleep(time.Millisecond)
+	holdCodexFenceForReset(t, limits, 21)()
+
+	ctx := withCodexObservedAt(context.Background(), receivedAt)
+	gateway.UpdateCodexUsageSnapshotFromHeaders(ctx, 21, exhaustedCodex429Headers())
+	used, minutes, seconds := 100.0, 10080, 3600
+	gateway.updateCodexUsageSnapshot(context.Background(), 21, &OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent: &used, PrimaryWindowMinutes: &minutes, PrimaryResetAfterSeconds: &seconds,
+		UpdatedAt: receivedAt.UTC().Format(time.RFC3339), ObservedAt: receivedAt,
+	})
+	repo.requireNoWrite(t, limits)
+
+	// The same headers received after the reset are written.
+	gateway.UpdateCodexUsageSnapshotFromHeaders(withCodexObservedAt(context.Background(), time.Now()), 21, exhaustedCodex429Headers())
+	limits.codexUsageWrites.pending.Wait()
+	extras, rateLimits := repo.counts()
+	require.Equal(t, 1, extras)
+	require.Equal(t, 1, rateLimits)
 }

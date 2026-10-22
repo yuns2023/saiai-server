@@ -740,7 +740,7 @@ func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, o
 		return
 	}
 
-	s.rateLimits.writeCodexUsageInBackground(accountID, codexUsageWriteProbe, observedAt, func(ctx context.Context) error {
+	s.rateLimits.writeCodexUsageInBackground(accountID, observedAt, func(ctx context.Context) error {
 		if len(updates) > 0 {
 			_ = s.accountRepo.UpdateExtra(ctx, accountID, updates)
 		}

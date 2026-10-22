@@ -54,17 +54,26 @@ writes and rejects queued snapshot/rate-limit writes observed before its usage
 fetch. The same boundary invalidates old snapshot throttle decisions. This
 covers response-header snapshots, 429 handling, usage-page probes, account
 tests and rate limits derived from a stored snapshot; a stored snapshot older
-than the reset no longer marks the account limited. Request paths never wait
-for a reconciliation: when the account is busy, their write is queued with the
-observation time at which it was received. HTTP and WebSocket handshake 429s
-use the time their response headers arrived. Queued writes are coalesced per
-account (one background worker, the newest pending observation per kind), and
-the generic-429 backoff counter only counts observations that pass the reset
+than the reset no longer marks the account limited.
+
+Every write is judged by when its observation was received, not when it is
+processed: HTTP responses and WebSocket handshakes use the time their headers
+arrived. Request paths never wait for a reconciliation; when the account is
+busy, the write moves to its own goroutine, which waits at most 30 seconds. The
+generic-429 backoff counter only counts observations that pass the reset
 boundary; a reset drops 429s observed before its boundary, and the backoff is
-decided again when it is written. `codex_usage_updated_at` is stored with sub-second precision; a
-legacy whole-second value is read as the start of its second, so a stored
-snapshot from the reset's own second is ignored until the next observation. This is process-local
-coordination; it does not serialize independent Gateway replicas.
+decided again when it is written. `codex_usage_updated_at` is stored with
+sub-second precision; a legacy whole-second value is read as the start of its
+second, so a stored snapshot from the reset's own second is ignored until the
+next observation. This is process-local coordination; it does not serialize
+independent Gateway replicas.
+
+Known limitation: the fence rejects observations older than a reset, but it
+does not order observations among themselves. Concurrent background writes
+can land out of order, so an older observation (for example a short generic
+429 backoff) can overwrite a newer one (such as a longer backoff) until the
+next observation arrives.
+
 Subsequent model traffic can report newer usage; the reset does not reserve
 capacity.
 

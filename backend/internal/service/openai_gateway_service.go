@@ -5069,7 +5069,7 @@ func syncOpenAICodexRateLimitFromExtra(rateLimits *RateLimitService, repo Accoun
 		return resetAt
 	}
 	accountID, reset := account.ID, *resetAt
-	rateLimits.writeCodexUsageInBackground(accountID, codexUsageWriteExtraLimit, observedAt, func(ctx context.Context) error {
+	rateLimits.writeCodexUsageInBackground(accountID, observedAt, func(ctx context.Context) error {
 		return repo.SetRateLimited(ctx, accountID, reset)
 	}, func(err error) {
 		logger.LegacyPrintf("service.openai_gateway", "failed to persist Codex rate limit from usage snapshot: account=%d error=%v", accountID, err)
@@ -5092,6 +5092,12 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(_ context.Context, accou
 	if len(updates) == 0 && resetAt == nil {
 		return
 	}
+	// The reset fence compares when the snapshot was received, not when it
+	// is processed or written.
+	observedAt := now
+	if !snapshot.ObservedAt.IsZero() {
+		observedAt = snapshot.ObservedAt
+	}
 	var (
 		coordinator  *accountWriteThrottle
 		firstRequest *codexSnapshotWriteRequest
@@ -5101,15 +5107,15 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(_ context.Context, accou
 		observation := codexFiveHourAdmissionObservationFromSnapshot(snapshot, now)
 		coordinator = s.getCodexSnapshotThrottle()
 		s.rateLimitService.resetCodexUsageThrottle(accountID, coordinator)
-		firstRequest, startWriter = coordinator.BeginCodexSnapshotWrite(accountID, now, observation, updates)
+		firstRequest, startWriter = coordinator.BeginCodexSnapshotWrite(accountID, observedAt, observation, updates)
 	}
 	if startWriter && firstRequest != nil {
-		go s.persistCodexUsageSnapshots(coordinator, firstRequest)
+		s.rateLimitService.goCodexUsageWorker(func() { s.persistCodexUsageSnapshots(coordinator, firstRequest) })
 	}
 
 	if resetAt != nil {
 		reset := *resetAt
-		s.rateLimitService.writeCodexUsageInBackground(accountID, codexUsageWriteSnapLimit, now, func(ctx context.Context) error {
+		s.rateLimitService.writeCodexUsageInBackground(accountID, observedAt, func(ctx context.Context) error {
 			return s.accountRepo.SetRateLimited(ctx, accountID, reset)
 		}, nil)
 	}
@@ -5135,6 +5141,9 @@ func (s *OpenAIGatewayService) UpdateCodexUsageSnapshotFromHeaders(ctx context.C
 		return
 	}
 	if snapshot := ParseCodexRateLimitHeaders(headers); snapshot != nil {
+		if receivedAt, ok := codexObservedAtFromContext(ctx); ok {
+			snapshot.ObservedAt = receivedAt
+		}
 		s.updateCodexUsageSnapshot(ctx, accountID, snapshot)
 	}
 }

@@ -86,8 +86,8 @@ func (s *AccountTestService) SetRateLimitService(rateLimits *RateLimitService) {
 
 // writeCodexUsage persists a test response's Codex observation through the
 // reset fence without waiting behind a reconciliation.
-func (s *AccountTestService) writeCodexUsage(ctx context.Context, accountID int64, kind string, observedAt time.Time, write func(context.Context) error) {
-	if _, err := s.rateLimits.writeCodexUsageFromRequest(ctx, accountID, kind, observedAt, write); err != nil && !errors.Is(err, errCodexUsageSuperseded) {
+func (s *AccountTestService) writeCodexUsage(ctx context.Context, accountID int64, observedAt time.Time, write func(context.Context) error) {
+	if _, err := s.rateLimits.writeCodexUsageFromRequest(ctx, accountID, observedAt, write); err != nil && !errors.Is(err, errCodexUsageSuperseded) {
 		slog.Warn("account_test_codex_usage_persist_failed", "account_id", accountID, "error", err)
 	}
 }
@@ -579,7 +579,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			}
 		}
 		if len(updates) > 0 || resetAt != nil {
-			s.writeCodexUsage(ctx, account.ID, codexUsageWriteAccountTest, observedAt, func(writeCtx context.Context) error {
+			s.writeCodexUsage(ctx, account.ID, observedAt, func(writeCtx context.Context) error {
 				if len(updates) > 0 {
 					_ = s.accountRepo.UpdateExtra(writeCtx, account.ID, updates)
 				}
@@ -595,7 +595,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		body, _ := io.ReadAll(resp.Body)
 		if isOAuth && s.accountRepo != nil {
 			if resetAt := (&RateLimitService{}).calculateOpenAI429ResetTime(resp.Header); resetAt != nil {
-				s.writeCodexUsage(ctx, account.ID, codexUsageWriteTestLimit, observedAt, func(writeCtx context.Context) error {
+				s.writeCodexUsage(ctx, account.ID, observedAt, func(writeCtx context.Context) error {
 					return s.accountRepo.SetRateLimited(writeCtx, account.ID, *resetAt)
 				})
 				account.RateLimitResetAt = resetAt
