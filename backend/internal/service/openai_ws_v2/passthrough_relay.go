@@ -1370,7 +1370,8 @@ func minDuration(a, b time.Duration) time.Duration {
 }
 
 // waitRelayDrainExit waits for the upstream drain to end. Client-side exits
-// (the client reader failing after a write failure) do not end the drain.
+// (the client reader failing after a write failure) do not end the drain, nor
+// does a write failure after which the upstream reader keeps draining.
 func waitRelayDrainExit(exitCh <-chan relayExitSignal, timeout time.Duration) (relayExitSignal, bool) {
 	if timeout <= 0 {
 		timeout = 200 * time.Millisecond
@@ -1380,7 +1381,8 @@ func waitRelayDrainExit(exitCh <-chan relayExitSignal, timeout time.Duration) (r
 	for {
 		select {
 		case sig := <-exitCh:
-			if sig.stage == "read_client" || sig.stage == relayStageClientTurnRejected {
+			if sig.stage == "read_client" || sig.stage == relayStageClientTurnRejected ||
+				(sig.stage == "write_client" && sig.drainOutstanding) {
 				continue
 			}
 			return sig, true

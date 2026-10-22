@@ -875,3 +875,18 @@ func (c *errorOnWriteFrameConn) WriteFrame(_ context.Context, _ coderws.MessageT
 func (c *errorOnWriteFrameConn) Close() error {
 	return nil
 }
+
+func TestWaitRelayDrainExit_IgnoresDrainingWriteFailure(t *testing.T) {
+	exitCh := make(chan relayExitSignal, 4)
+	exitCh <- relayExitSignal{stage: "write_client", drainOutstanding: true}
+	exitCh <- relayExitSignal{stage: "read_client"}
+	exitCh <- relayExitSignal{stage: "read_upstream"}
+	sig, ok := waitRelayDrainExit(exitCh, time.Second)
+	require.True(t, ok)
+	require.Equal(t, "read_upstream", sig.stage)
+
+	exitCh <- relayExitSignal{stage: "write_client"}
+	sig, ok = waitRelayDrainExit(exitCh, time.Second)
+	require.True(t, ok)
+	require.Equal(t, "write_client", sig.stage, "a write failure without draining still ends the wait")
+}
