@@ -859,6 +859,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	// gjson reads the first duplicate while encoding/json and upstreams may use
+	// the last; reject ambiguous routing/billing keys before reading any.
+	if key := service.OpenAIRequestDuplicateKey(body); key != "" {
+		reqLog.Warn("openai.request_validation_failed", zap.String("reason", "duplicate_key"), zap.String("key", key))
+		h.writeError(c, openAIDuplicateKeyEnvelope(key), false)
+		return
+	}
 	if bodyWasEncoded {
 		var parsedBody map[string]any
 		if err := json.Unmarshal(body, &parsedBody); err != nil {
@@ -1694,6 +1701,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "invalid JSON payload")
 		return
 	}
+	if key := service.OpenAIRequestDuplicateKey(firstMessage); key != "" {
+		reqLog.Warn("openai.request_validation_failed", zap.String("reason", "duplicate_key"), zap.String("key", key), zap.Int("turn", 1))
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, service.OpenAIDuplicateKeyMessage(key))
+		return
+	}
 	originalFirstMessage := append([]byte(nil), firstMessage...)
 
 	reqModel := strings.TrimSpace(gjson.GetBytes(firstMessage, "model").String())
@@ -1909,8 +1921,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 			// Validate the frame actually sent upstream as well as the policy
 			// payload; they differ only after a continuation migration.
-			if err := openAIWSTurnServiceTierError(policyPayload, rawPayload); err != nil {
-				reqLog.Warn("openai.request_validation_failed", zap.String("reason", "unsupported_service_tier"), zap.Int("turn", turn))
+			if err := openAIWSTurnPayloadError(policyPayload, rawPayload); err != nil {
+				reqLog.Warn("openai.request_validation_failed", zap.String("reason", "ambiguous_or_unbillable_payload"), zap.Int("turn", turn))
 				return err
 			}
 			if err := h.revalidateOpenAIWSTurn(ctx, apiKey, turn); err != nil {
@@ -2098,17 +2110,28 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
 }
 
-// openAIWSTurnServiceTierError rejects a WebSocket response.create whose
-// service_tier cannot be billed. Like other per-turn validation failures it
-// closes the client connection with a policy violation before the frame is
-// written upstream.
-func openAIWSTurnServiceTierError(payloads ...[]byte) error {
+// openAIWSTurnPayloadError rejects a WebSocket response.create that has
+// ambiguous duplicate keys or a service_tier that cannot be billed. Like other
+// per-turn validation failures it closes the client connection with a policy
+// violation before the frame is written upstream.
+func openAIWSTurnPayloadError(payloads ...[]byte) error {
 	for _, payload := range payloads {
-		if !service.IsOpenAIRequestServiceTierSupported(payload) {
-			return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, service.OpenAIUnsupportedServiceTierMessage, nil)
+		if err := service.OpenAIWSPayloadRejection(payload); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// openAIDuplicateKeyEnvelope is the HTTP 400 for an ambiguous request body.
+func openAIDuplicateKeyEnvelope(key string) gatewayErrorEnvelope {
+	return gatewayErrorEnvelope{
+		Status:  http.StatusBadRequest,
+		Type:    "invalid_request_error",
+		Code:    "duplicate_key",
+		Param:   key,
+		Message: service.OpenAIDuplicateKeyMessage(key),
+	}
 }
 
 func (h *OpenAIGatewayHandler) revalidateOpenAIWSTurn(ctx context.Context, apiKey *service.APIKey, turn int) error {

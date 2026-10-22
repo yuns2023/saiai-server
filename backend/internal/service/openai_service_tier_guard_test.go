@@ -59,6 +59,29 @@ func TestIsOpenAIRequestServiceTierSupported(t *testing.T) {
 	require.LessOrEqual(t, len(OpenAIUnsupportedServiceTierMessage), 123, "must fit a WebSocket close reason")
 }
 
+func TestOpenAIRequestDuplicateKey(t *testing.T) {
+	cases := map[string]string{
+		`{"model":"gpt-5.4","input":"hi"}`:                                     "",
+		`{"model":"gpt-5.4","input":"a","input":"b","metadata":{"model":"x"}}`: "",
+		`{"type":"response.cancel","type":"response.create"}`:                  "type",
+		`{"model":"gpt-5.4","model":"gpt-6-astra"}`:                            "model",
+		`{"model":"gpt-5.4","stream":false,"stream":true}`:                     "stream",
+		`{"previous_response_id":"resp_a","previous_response_id":"resp_b"}`:    "previous_response_id",
+		`{"service_tier":"default","service_tier":"priority"}`:                 "service_tier",
+		`{"response":{"model":"a"},"response":{"model":"b"}}`:                  "response",
+		`{"type":"response.create","response":{"model":"a","model":"b"}}`:      "response.model",
+		`{"m\u006fdel":"gpt-5.4","model":"gpt-6-astra"}`:                       "model",
+		`[1,2]`:    "",
+		`not json`: "",
+		``:         "",
+	}
+	for body, want := range cases {
+		require.Equal(t, want, OpenAIRequestDuplicateKey([]byte(body)), body)
+	}
+	require.LessOrEqual(t, len(OpenAIDuplicateKeyMessage("previous_response_id")), 123)
+	require.LessOrEqual(t, len(OpenAIDuplicateKeyMessage("response.service_tier")), 123)
+}
+
 func TestNormalizeOpenAIReportedServiceTier_UnknownBillsAsPriority(t *testing.T) {
 	known := map[string]*string{
 		"default":    openAIStringPtrForTest("default"),
@@ -189,25 +212,36 @@ func TestOpenAIWSIngress_RejectsUnsupportedServiceTierOnLaterTurnWithoutUpstream
 	// gjson reads the first "type", so the relay would not see a turn; an
 	// upstream that keeps the last key would still create a response.
 	const ambiguousTypeTurn = `{"type":"response.cancel","type":"response.create","model":"gpt-5.4","service_tier":"ultrafast"}`
+	// A billable tier does not make an ambiguous "type" acceptable: the relay
+	// would forward it as a control frame without registering a turn.
+	const ambiguousTypeDefaultTier = `{"type":"response.cancel","model":"gpt-5.4","service_tier":"default","type":"response.create"}`
+	// v1 reads the first "type" (response.create) and sjson rewrites only the
+	// first "model"; the upstream may keep the last of either.
+	const ambiguousV1Turn = `{"type":"response.create","model":"gpt-5.4","model":"gpt-6-astra","previous_response_id":"resp_tier_turn_1"}`
+	tierReason := OpenAIUnsupportedServiceTierMessage
 	cases := []struct {
 		name          string
 		mode          string
 		secondPayload string
 		hookValidates bool
+		reason        string
 	}{
-		{name: "ctx_pool_hook", mode: "ctx_pool", secondPayload: ultrafastTurn, hookValidates: true},
-		{name: "passthrough_hook", mode: "passthrough", secondPayload: ultrafastTurn, hookValidates: true},
-		{name: "passthrough_frame_guard", mode: "passthrough", secondPayload: ultrafastTurn},
-		{name: "passthrough_non_turn_frame", mode: "passthrough", secondPayload: ambiguousTypeTurn},
+		{name: "ctx_pool_hook", mode: "ctx_pool", secondPayload: ultrafastTurn, hookValidates: true, reason: tierReason},
+		{name: "ctx_pool_duplicate_model", mode: "ctx_pool", secondPayload: ambiguousV1Turn, hookValidates: true, reason: OpenAIDuplicateKeyMessage("model")},
+		{name: "ctx_pool_duplicate_type", mode: "ctx_pool", secondPayload: `{"type":"response.create","model":"gpt-5.4","type":"response.cancel"}`, hookValidates: true, reason: OpenAIDuplicateKeyMessage("type")},
+		{name: "passthrough_hook", mode: "passthrough", secondPayload: ultrafastTurn, hookValidates: true, reason: tierReason},
+		{name: "passthrough_frame_guard", mode: "passthrough", secondPayload: ultrafastTurn, reason: tierReason},
+		{name: "passthrough_non_turn_frame", mode: "passthrough", secondPayload: ambiguousTypeTurn, reason: OpenAIDuplicateKeyMessage("type")},
+		{name: "passthrough_duplicate_type_billable_tier", mode: "passthrough", secondPayload: ambiguousTypeDefaultTier, reason: OpenAIDuplicateKeyMessage("type")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			runOpenAIWSServiceTierRejectionScenario(t, tc.mode, tc.secondPayload, tc.hookValidates)
+			runOpenAIWSServiceTierRejectionScenario(t, tc.mode, tc.secondPayload, tc.hookValidates, tc.reason)
 		})
 	}
 }
 
-func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload string, hookValidates bool) {
+func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload string, hookValidates bool, reason string) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -267,8 +301,8 @@ func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload s
 	resultCh := make(chan *OpenAIForwardResult, 2)
 	hooks := &OpenAIWSIngressHooks{
 		OnClientTurn: func(_ int, payload []byte) error {
-			if hookValidates && !IsOpenAIRequestServiceTierSupported(payload) {
-				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, OpenAIUnsupportedServiceTierMessage, nil)
+			if hookValidates {
+				return OpenAIWSPayloadRejection(payload)
 			}
 			return nil
 		},
@@ -340,7 +374,7 @@ func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload s
 		var closeErr *OpenAIWSClientCloseError
 		require.True(t, errors.As(serverErr, &closeErr), "unexpected error: %v", serverErr)
 		require.Equal(t, coderws.StatusPolicyViolation, closeErr.StatusCode())
-		require.Equal(t, OpenAIUnsupportedServiceTierMessage, closeErr.Reason())
+		require.Equal(t, reason, closeErr.Reason())
 	case <-time.After(5 * time.Second):
 		t.Fatal("rejected turn did not end the session")
 	}

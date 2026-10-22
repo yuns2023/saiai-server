@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -96,18 +97,94 @@ func isOpenAIRequestServiceTierValueSupported(value gjson.Result) bool {
 
 // openAIServiceTierGuardFrameConn validates every client frame of a v2
 // passthrough session before the relay can forward it. The relay only invokes
-// per-turn hooks for frames it classifies as response.create, so frames it
-// does not classify as a turn are checked here.
+// per-turn hooks for frames it classifies as response.create (by the first
+// "type" key), so ambiguous or non-turn frames are checked here.
 type openAIServiceTierGuardFrameConn struct {
 	openaiwsv2.FrameConn
 }
 
 func (c *openAIServiceTierGuardFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
 	msgType, payload, err := c.FrameConn.ReadFrame(ctx)
-	if err == nil && !IsOpenAIRequestServiceTierSupported(payload) {
-		return msgType, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, OpenAIUnsupportedServiceTierMessage, nil)
+	if err == nil {
+		if rejection := OpenAIWSPayloadRejection(payload); rejection != nil {
+			return msgType, nil, rejection
+		}
 	}
 	return msgType, payload, err
+}
+
+// openAIAmbiguousRequestKeys are request fields the Gateway reads for
+// routing, turn accounting or billing. Duplicates are ambiguous: gjson (used
+// by the handlers, the v1 WS parser and the v2 relay) returns the FIRST
+// occurrence, sjson rewrites only the first, while encoding/json (used for the
+// HTTP request map) and many upstream parsers keep the LAST. A frame such as
+// {"type":"response.cancel","type":"response.create",...} could otherwise be
+// relayed as a non-billable control frame yet executed as a new response.
+var openAIAmbiguousRequestKeys = []string{"type", "model", "service_tier", "previous_response_id", "response", "stream"}
+
+// OpenAIRequestDuplicateKey returns the first billing/routing key that occurs
+// more than once in the top-level object, or in a top-level "response"
+// object, of an OpenAI Responses request body or WebSocket frame. It returns
+// "" when the payload is unambiguous or is not a JSON object.
+func OpenAIRequestDuplicateKey(body []byte) string {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return ""
+	}
+	root := gjson.ParseBytes(body)
+	if !root.IsObject() {
+		return ""
+	}
+	duplicate := openAIObjectDuplicateKey(root)
+	if duplicate != "" {
+		return duplicate
+	}
+	root.ForEach(func(key, value gjson.Result) bool {
+		if key.String() == "response" && value.IsObject() {
+			if nested := openAIObjectDuplicateKey(value); nested != "" {
+				duplicate = "response." + nested
+			}
+		}
+		return duplicate == ""
+	})
+	return duplicate
+}
+
+func openAIObjectDuplicateKey(object gjson.Result) string {
+	seen := make(map[string]struct{}, len(openAIAmbiguousRequestKeys))
+	duplicate := ""
+	object.ForEach(func(key, _ gjson.Result) bool {
+		name := key.String()
+		for _, watched := range openAIAmbiguousRequestKeys {
+			if name != watched {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				duplicate = name
+				return false
+			}
+			seen[name] = struct{}{}
+		}
+		return true
+	})
+	return duplicate
+}
+
+// OpenAIDuplicateKeyMessage is the client-facing rejection for an ambiguous
+// payload. It fits the 123-byte WebSocket close-reason limit.
+func OpenAIDuplicateKeyMessage(key string) string {
+	return fmt.Sprintf("Ambiguous request: duplicate %q key.", key)
+}
+
+// OpenAIWSPayloadRejection returns the policy-violation close error for a
+// WebSocket payload that is ambiguous or carries an unbillable service_tier.
+func OpenAIWSPayloadRejection(payload []byte) error {
+	if key := OpenAIRequestDuplicateKey(payload); key != "" {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, OpenAIDuplicateKeyMessage(key), nil)
+	}
+	if !IsOpenAIRequestServiceTierSupported(payload) {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, OpenAIUnsupportedServiceTierMessage, nil)
+	}
+	return nil
 }
 
 // unrecognizedOpenAIReportedServiceTier returns the trimmed raw value when an

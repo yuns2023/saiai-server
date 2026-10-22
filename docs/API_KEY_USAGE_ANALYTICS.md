@@ -224,10 +224,20 @@ contacted: HTTP Responses (including `/responses/compact`) returns `400` with
 a WebSocket `response.create` (first or later turn, v1 or v2 passthrough) is
 rejected like other per-turn validation failures, by closing the client
 connection with policy violation (1008) before that frame is sent upstream.
-A duplicated `service_tier` key is rejected because parsers disagree on which
-value wins, and a nested `response.service_tier` is checked too. In v2
-passthrough sessions every client frame is checked, not only frames the
-relay classifies as `response.create`.
+A nested `response.service_tier` is checked too. In v2 passthrough sessions
+every client frame is checked, not only frames the relay classifies as
+`response.create`.
+
+Duplicate keys are rejected the same way (HTTP `400` with
+`code: duplicate_key` and `param` naming the key; WebSocket close 1008) for
+`type`, `model`, `service_tier`, `previous_response_id`, `response` and
+`stream`, at the top level and inside a top-level `response` object. The
+Gateway reads these with gjson, which returns the first occurrence (sjson
+also rewrites only the first), whereas `encoding/json` (the HTTP request map)
+and many upstream parsers keep the last. Without the rejection a v2 frame such
+as `{"type":"response.cancel","type":"response.create",...}` would be relayed
+as a control frame without a billable turn while the upstream could execute
+it as a new response.
 
 If an upstream nevertheless reports a tier the resolver does not know, the
 turn is billed as `priority`, the most expensive tier with configured prices,

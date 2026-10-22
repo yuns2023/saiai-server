@@ -74,6 +74,45 @@ func TestOpenAIResponses_RejectsUnbillableServiceTier(t *testing.T) {
 	require.Zero(t, reached.Load())
 }
 
+func TestOpenAIResponses_RejectsAmbiguousDuplicateKeys(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cases := map[string]string{
+		`{"model":"gpt-5.4","type":"response.cancel","type":"response.create","input":"hi"}`:  "type",
+		`{"model":"gpt-5.4","model":"gpt-6-astra","input":"hi"}`:                              "model",
+		`{"model":"gpt-5.4","stream":false,"stream":true,"input":"hi"}`:                       "stream",
+		`{"model":"gpt-5.4","previous_response_id":"resp_a","previous_response_id":"resp_b"}`: "previous_response_id",
+		`{"model":"gpt-5.4","service_tier":"default","service_tier":"priority"}`:              "service_tier",
+	}
+	for body, key := range cases {
+		h, reached := newOpenAIServiceTierTestHandler(t)
+		w := serveOpenAIResponsesForServiceTierTest(h, "/openai/v1/responses", body)
+		require.Equal(t, http.StatusBadRequest, w.Code, body)
+		require.Zero(t, reached.Load(), body)
+		var parsed struct {
+			Error map[string]any `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &parsed))
+		require.Equal(t, "invalid_request_error", parsed.Error["type"], body)
+		require.Equal(t, "duplicate_key", parsed.Error["code"], body)
+		require.Equal(t, key, parsed.Error["param"], body)
+		require.Equal(t, service.OpenAIDuplicateKeyMessage(key), parsed.Error["message"], body)
+	}
+}
+
+func TestOpenAIResponsesWebSocket_RejectsAmbiguousFirstMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for body, key := range map[string]string{
+		`{"type":"response.create","model":"gpt-5.4","type":"response.cancel"}`: "type",
+		`{"type":"response.create","model":"gpt-5.4","model":"gpt-6-astra"}`:    "model",
+	} {
+		h, reached := newOpenAIServiceTierTestHandler(t)
+		closeErr := dialOpenAIWSForServiceTierTest(t, h, body)
+		require.Equal(t, coderws.StatusPolicyViolation, closeErr.Code, body)
+		require.Equal(t, service.OpenAIDuplicateKeyMessage(key), closeErr.Reason, body)
+		require.Zero(t, reached.Load(), body)
+	}
+}
+
 func TestOpenAIResponses_AllowsBillableServiceTiers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	bodies := []string{
@@ -136,14 +175,19 @@ func TestOpenAIResponsesWebSocket_AllowsBillableServiceTierOnFirstMessage(t *tes
 	}
 }
 
-func TestOpenAIWSTurnServiceTierError(t *testing.T) {
+func TestOpenAIWSTurnPayloadError(t *testing.T) {
 	allowed := []byte(`{"type":"response.create","model":"gpt-5.4","service_tier":"priority"}`)
 	rejected := []byte(`{"type":"response.create","model":"gpt-5.4","service_tier":"ultrafast"}`)
 
-	require.NoError(t, openAIWSTurnServiceTierError(allowed, allowed))
-	require.NoError(t, openAIWSTurnServiceTierError([]byte(`{"type":"response.create","model":"gpt-5.4"}`)))
+	require.NoError(t, openAIWSTurnPayloadError(allowed, allowed))
+	require.NoError(t, openAIWSTurnPayloadError([]byte(`{"type":"response.create","model":"gpt-5.4"}`)))
+	ambiguous := []byte(`{"type":"response.create","model":"gpt-5.4","type":"response.cancel"}`)
+	var ambiguousErr *service.OpenAIWSClientCloseError
+	require.ErrorAs(t, openAIWSTurnPayloadError(allowed, ambiguous), &ambiguousErr)
+	require.Equal(t, coderws.StatusPolicyViolation, ambiguousErr.StatusCode())
+	require.Equal(t, service.OpenAIDuplicateKeyMessage("type"), ambiguousErr.Reason())
 	for _, payloads := range [][][]byte{{rejected, allowed}, {allowed, rejected}} {
-		err := openAIWSTurnServiceTierError(payloads...)
+		err := openAIWSTurnPayloadError(payloads...)
 		var closeErr *service.OpenAIWSClientCloseError
 		require.ErrorAs(t, err, &closeErr)
 		require.Equal(t, coderws.StatusPolicyViolation, closeErr.StatusCode())
