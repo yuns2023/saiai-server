@@ -210,7 +210,28 @@ the effective billing tier is the more expensive one:
 - an explicit `priority` request remains `priority` even if the downstream
   response reports `default`;
 - a response may raise the effective tier above the request tier; and
-- an absent or unknown value does not invent a tier.
+- an absent value, or a request/response value of `auto`, does not invent a
+  tier.
+
+The request `service_tier` is forwarded unchanged, so the Gateway only admits
+values it can bill. Accepted request values (case- and space-insensitive) are
+`auto`, `default`, `flex`, `priority`, and `fast` (the SAIAI alias of
+`priority`); an absent, `null`, or empty value is also accepted. Any other
+value, including a non-string or a premium tier such as `ultrafast` or
+`scale`, is rejected before an account is selected or an upstream is
+contacted: HTTP Responses (including `/responses/compact`) returns `400` with
+`type: invalid_request_error`, `param: service_tier`, `code: invalid_value`;
+a WebSocket `response.create` (first or later turn, v1 or v2 passthrough) is
+rejected like other per-turn validation failures, by closing the client
+connection with policy violation (1008) before that frame is sent upstream.
+Duplicate top-level keys and a nested `response.service_tier` are checked too.
+
+If an upstream nevertheless reports a tier the resolver does not know, the
+turn is billed as `priority`, the most expensive tier with configured prices,
+and a warning with the reported value, account, model and upstream request ID
+is logged. Under-billing an unknown premium tier is unbounded; billing it as
+`priority` is a bounded, visible over-charge. Reported `default`, `flex`,
+`priority`/`fast`, `auto` and absent values bill exactly as before.
 
 For OpenAI models without an official Priority/Fast tier (see
 [MODEL_PRICING_MANAGEMENT.md](MODEL_PRICING_MANAGEMENT.md)), BillingService

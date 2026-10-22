@@ -505,6 +505,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					Duration:        turn.Duration,
 					FirstTokenMs:    turn.FirstTokenMs,
 				}
+				turnResult.Usage.UnrecognizedReportedServiceTier = unrecognizedOpenAIReportedServiceTier(turn.Usage.ServiceTier)
 				logOpenAIWSV2Passthrough(
 					"relay_turn_completed account_id=%d turn=%d request_id=%s terminal_event=%s duration_ms=%d first_token_ms=%d input_tokens=%d output_tokens=%d cache_read_tokens=%d",
 					account.ID,
@@ -568,6 +569,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		Duration:        relayResult.Duration,
 		FirstTokenMs:    relayResult.FirstTokenMs,
 	}
+	result.Usage.UnrecognizedReportedServiceTier = unrecognizedOpenAIReportedServiceTier(relayResult.Usage.ServiceTier)
 
 	turnCount := int(completedTurns.Load())
 	if relayExit == nil {

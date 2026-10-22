@@ -439,6 +439,7 @@ func parseOpenAIWSResponseUsageFromCompletedEvent(message []byte, usage *OpenAIU
 	usage.CacheCreationInputTokens = int(values[2].Int())
 	usage.CacheReadInputTokens = int(values[3].Int())
 	usage.ReportedServiceTier = extractOpenAIReportedServiceTierFromBody(message)
+	usage.UnrecognizedReportedServiceTier = unrecognizedOpenAIReportedServiceTierFromBody(message)
 }
 
 func parseOpenAIWSErrorEventFields(message []byte) (code string, errType string, errMessage string) {
@@ -4113,6 +4114,7 @@ func populateOpenAIUsageFromResponseJSON(body []byte, usage *OpenAIUsage) {
 	usage.CacheCreationInputTokens = int(values[2].Int())
 	usage.CacheReadInputTokens = int(values[3].Int())
 	usage.ReportedServiceTier = extractOpenAIReportedServiceTierFromBody(body)
+	usage.UnrecognizedReportedServiceTier = unrecognizedOpenAIReportedServiceTierFromBody(body)
 }
 
 func getOpenAIGroupIDFromContext(c *gin.Context) int64 {

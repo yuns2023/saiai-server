@@ -277,6 +277,10 @@ type OpenAIUsage struct {
 	CacheCreationInputTokens int     `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int     `json:"cache_read_input_tokens,omitempty"`
 	ReportedServiceTier      *string `json:"-"`
+
+	// UnrecognizedReportedServiceTier keeps the raw upstream-reported tier when
+	// it is not one the billing resolver knows; see openai_service_tier_guard.go.
+	UnrecognizedReportedServiceTier string `json:"-"`
 }
 
 // OpenAIForwardResult represents the result of forwarding
@@ -3901,6 +3905,7 @@ func (s *OpenAIGatewayService) parseSSEUsageBytes(data []byte, usage *OpenAIUsag
 	usage.CacheCreationInputTokens = int(gjson.GetBytes(data, "response.usage.input_tokens_details.cache_write_tokens").Int())
 	usage.CacheReadInputTokens = int(gjson.GetBytes(data, "response.usage.input_tokens_details.cached_tokens").Int())
 	usage.ReportedServiceTier = extractOpenAIReportedServiceTierFromBody(data)
+	usage.UnrecognizedReportedServiceTier = unrecognizedOpenAIReportedServiceTierFromBody(data)
 }
 
 func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
@@ -3914,13 +3919,15 @@ func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
 		"usage.input_tokens_details.cache_write_tokens",
 		"usage.input_tokens_details.cached_tokens",
 	)
-	return OpenAIUsage{
+	usage := OpenAIUsage{
 		InputTokens:              int(values[0].Int()),
 		OutputTokens:             int(values[1].Int()),
 		CacheCreationInputTokens: int(values[2].Int()),
 		CacheReadInputTokens:     int(values[3].Int()),
 		ReportedServiceTier:      extractOpenAIReportedServiceTierFromBody(body),
-	}, true
+	}
+	usage.UnrecognizedReportedServiceTier = unrecognizedOpenAIReportedServiceTierFromBody(body)
+	return usage, true
 }
 
 func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*OpenAIUsage, error) {
@@ -4610,6 +4617,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result.ServiceTier != nil {
 		serviceTier = strings.TrimSpace(*result.ServiceTier)
 	}
+	logUnrecognizedOpenAIReportedServiceTier(ctx, result, account, billingModel, serviceTier)
 	pricingMissing := false
 	var cost *CostBreakdown
 	var err error
@@ -5267,8 +5275,13 @@ func normalizeOpenAIReportedServiceTier(raw string) *string {
 	switch value {
 	case "default", "priority", "flex":
 		return &value
-	default:
+	case "", "auto":
 		return nil
+	default:
+		// An unknown reported tier may be more expensive than any tier the
+		// Gateway can price; bill it at the highest known tier.
+		billedAs := openAIUnrecognizedReportedServiceTierBilledAs
+		return &billedAs
 	}
 }
 

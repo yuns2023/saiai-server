@@ -890,6 +890,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "invalid stream field type")
 		return
 	}
+	if !service.IsOpenAIRequestServiceTierSupported(body) {
+		reqLog.Warn("openai.request_validation_failed", zap.String("reason", "unsupported_service_tier"))
+		h.writeError(c, errEnvelopeUnsupportedServiceTier, false)
+		return
+	}
 	reqStream := streamResult.Bool()
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String())
@@ -1725,6 +1730,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "previous_response_id must be a response.id (resp_*), not a message id")
 		return
 	}
+	if !service.IsOpenAIRequestServiceTierSupported(firstMessage) {
+		reqLog.Warn("openai.request_validation_failed", zap.String("reason", "unsupported_service_tier"), zap.Int("turn", 1))
+		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, service.OpenAIUnsupportedServiceTierMessage)
+		return
+	}
 	reqLog = reqLog.With(
 		zap.Bool("ws_ingress", true),
 		zap.String("model", reqModel),
@@ -1896,6 +1906,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			c.Set(opsModelKey, turnModel)
 			if apiKey.Group != nil && apiKey.Group.IsModelBlocked(turnModel) {
 				return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("model %s is not allowed for this group", turnModel), nil)
+			}
+			// Validate the frame actually sent upstream as well as the policy
+			// payload; they differ only after a continuation migration.
+			if err := openAIWSTurnServiceTierError(policyPayload, rawPayload); err != nil {
+				reqLog.Warn("openai.request_validation_failed", zap.String("reason", "unsupported_service_tier"), zap.Int("turn", turn))
+				return err
 			}
 			if err := h.revalidateOpenAIWSTurn(ctx, apiKey, turn); err != nil {
 				return err
@@ -2080,6 +2096,19 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
+}
+
+// openAIWSTurnServiceTierError rejects a WebSocket response.create whose
+// service_tier cannot be billed. Like other per-turn validation failures it
+// closes the client connection with a policy violation before the frame is
+// written upstream.
+func openAIWSTurnServiceTierError(payloads ...[]byte) error {
+	for _, payload := range payloads {
+		if !service.IsOpenAIRequestServiceTierSupported(payload) {
+			return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, service.OpenAIUnsupportedServiceTierMessage, nil)
+		}
+	}
+	return nil
 }
 
 func (h *OpenAIGatewayHandler) revalidateOpenAIWSTurn(ctx context.Context, apiKey *service.APIKey, turn int) error {
@@ -2348,6 +2377,8 @@ type gatewayErrorEnvelope struct {
 	Code       string
 	Message    string
 	RetryAfter int
+	// Param names the offending request parameter (OpenAI "param"); JSON only.
+	Param string
 }
 
 // upstreamUnreachableRetryAfterSeconds is the Retry-After hint emitted with
@@ -2377,6 +2408,16 @@ var (
 		Type:    "gateway_error",
 		Code:    "gateway_dependencies_missing",
 		Message: "Service temporarily unavailable",
+	}
+
+	// errEnvelopeUnsupportedServiceTier: the request asks for a service tier
+	// the Gateway cannot bill, so it must not reach an upstream.
+	errEnvelopeUnsupportedServiceTier = gatewayErrorEnvelope{
+		Status:  http.StatusBadRequest,
+		Type:    "invalid_request_error",
+		Code:    "invalid_value",
+		Param:   service.OpenAIServiceTierParam,
+		Message: service.OpenAIUnsupportedServiceTierMessage,
 	}
 
 	// errEnvelopeUpstreamUnreachable: outbound request failed without ever
@@ -2428,6 +2469,9 @@ func (h *OpenAIGatewayHandler) writeError(c *gin.Context, e gatewayErrorEnvelope
 	}
 	if e.Code != "" {
 		body["code"] = e.Code
+	}
+	if e.Param != "" {
+		body["param"] = e.Param
 	}
 	c.JSON(e.Status, gin.H{"error": body})
 }
