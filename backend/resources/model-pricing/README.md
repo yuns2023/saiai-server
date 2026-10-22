@@ -48,6 +48,25 @@ The repository also includes a read-only `Pricing Fallback Check` GitHub
 Actions workflow. It reports drift; maintainers run the sync command locally
 and submit the updated snapshot through a reviewed pull request.
 
+## Reference Corrections
+Do not hand-edit the synced JSON: `sync` overwrites it and runtime refreshes
+replace it with `pricing.remote_url` data. Corrections for clear feed errors
+live in `backend/internal/service/pricing_reference_corrections.go` and run
+when any snapshot (remote or bundled) is parsed. Administrator aliases and
+price overrides still apply on top.
+
+- `gpt-5-nano` (and dated snapshots): the feed lists a 2.5 USD/M Priority
+  input price (copied from `gpt-5`), but OpenAI publishes no Priority tier for
+  it. The Priority fields are dropped, so a Priority-tagged request uses the
+  generic whole-tier multiplier (x2 Standard) like other models without native
+  Priority prices.
+
+`TestBundledPricing_PriorityMatchesOfficialFastPrices` pins the official
+OpenAI Priority (Fast) prices of the listed models, both in the raw bundled
+entries and in billing. A sync that changes them fails that test and needs
+review against the official pricing page. Runtime remote refreshes are not
+checked by this test; they still pass through the corrections above.
+
 ## Official Pricing Note
 For OpenAI, this repository currently does not consume an official machine-readable
 pricing JSON feed. If you later introduce an official or self-maintained canonical

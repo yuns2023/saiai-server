@@ -452,6 +452,7 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			pricing.LongContextCacheReadCostMultiplier = *entry.LongContextCacheReadCostMultiplier
 		}
 
+		applyReferencePricingCorrections(modelName, pricing)
 		pricing.deriveAbove272kPolicy()
 
 		result[modelName] = pricing
