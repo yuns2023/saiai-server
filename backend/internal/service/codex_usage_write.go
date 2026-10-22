@@ -14,7 +14,7 @@ type codexUsageWriteCoordinator struct {
 	accounts sync.Map
 }
 
-var errCodexUsageSuperseded = errors.New("Codex usage observation predates reset")
+var errCodexUsageSuperseded = errors.New("codex usage observation predates reset")
 
 type codexUsageWriteState struct {
 	lock    chan struct{}
@@ -26,7 +26,10 @@ func (s *RateLimitService) lockCodexUsageWrite(ctx context.Context, id int64) (*
 		return nil, func() {}, nil
 	}
 	value, _ := s.codexUsageWrites.accounts.LoadOrStore(id, &codexUsageWriteState{lock: make(chan struct{}, 1)})
-	state := value.(*codexUsageWriteState)
+	state, ok := value.(*codexUsageWriteState)
+	if !ok {
+		return nil, func() {}, nil
+	}
 	select {
 	case state.lock <- struct{}{}:
 		return state, func() { <-state.lock }, nil
@@ -59,7 +62,11 @@ func (s *RateLimitService) resetCodexUsageThrottle(id int64, throttle *accountWr
 	if !ok {
 		return
 	}
-	boundary := value.(*codexUsageWriteState).resetAt.Load()
+	state, ok := value.(*codexUsageWriteState)
+	if !ok {
+		return
+	}
+	boundary := state.resetAt.Load()
 	if boundary == nil {
 		return
 	}
