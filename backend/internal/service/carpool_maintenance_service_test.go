@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -236,4 +237,17 @@ func TestCarpoolEnableReservesFirstCycleOnNextWorkerPass(t *testing.T) {
 	_, err = svc.runOnce(context.Background(), now.Add(2*time.Minute))
 	require.NoError(t, err)
 	require.Len(t, cache.calls, 1)
+}
+
+func TestCarpoolMaintenanceResultLogLevel(t *testing.T) {
+	sink, restore := captureStructuredLog(t)
+	defer restore()
+
+	logCarpoolMaintenanceResult(carpoolMaintenanceStats{Eligible: 2}, nil)
+	logCarpoolMaintenanceResult(carpoolMaintenanceStats{Failed: 2}, errors.Join(errors.New("account 1: boom"), errors.New("account 2: boom")))
+
+	require.True(t, sink.ContainsMessageAtLevel("[CarpoolMaintenance] complete: eligible=2 expanded=0 rotated=0 already_processed=0 free_capacity=0 failed=0", "info"))
+	require.False(t, sink.ContainsMessageAtLevel("[CarpoolMaintenance] complete:", "error"))
+	require.True(t, sink.ContainsMessageAtLevel("[CarpoolMaintenance] completed with errors: eligible=0 expanded=0 rotated=0 already_processed=0 free_capacity=0 failed=2 err=account 1: boom account 2: boom", "error"))
+	require.True(t, sink.ContainsFieldValue("component", "service.carpool_maintenance"))
 }

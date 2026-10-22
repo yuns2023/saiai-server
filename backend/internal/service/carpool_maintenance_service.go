@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/robfig/cron/v3"
+	"go.uber.org/zap"
 )
 
 const (
@@ -96,11 +97,19 @@ func (s *CarpoolMaintenanceService) runScheduled() {
 	defer cancel()
 
 	stats, err := s.runOnce(ctx, time.Now())
+	logCarpoolMaintenanceResult(stats, err)
+}
+
+// logCarpoolMaintenanceResult sets the level explicitly: LegacyPrintf would
+// infer ERROR from the "failed=" counter in every successful summary.
+func logCarpoolMaintenanceResult(stats carpoolMaintenanceStats, err error) {
+	l := logger.With(zap.String("component", "service.carpool_maintenance")).WithOptions(zap.AddCallerSkip(1))
 	if err != nil {
-		logger.LegacyPrintf("service.carpool_maintenance", "[CarpoolMaintenance] completed with errors: %s err=%v", stats, err)
+		// errors.Join separates per-account errors with newlines; keep one line.
+		l.Error(fmt.Sprintf("[CarpoolMaintenance] completed with errors: %s err=%s", stats, strings.Join(strings.Fields(err.Error()), " ")))
 		return
 	}
-	logger.LegacyPrintf("service.carpool_maintenance", "[CarpoolMaintenance] complete: %s", stats)
+	l.Info(fmt.Sprintf("[CarpoolMaintenance] complete: %s", stats))
 }
 
 func (s *CarpoolMaintenanceService) runOnce(ctx context.Context, now time.Time) (carpoolMaintenanceStats, error) {
