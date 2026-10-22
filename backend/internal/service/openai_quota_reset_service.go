@@ -214,7 +214,7 @@ func (s *OpenAIQuotaResetService) syncUsage(ctx context.Context, account *Accoun
 		return resetError(http.StatusBadGateway, "CODEX_USAGE_MISSING", "Codex usage windows are unavailable")
 	}
 	now := time.Now().UTC()
-	snapshot := &OpenAICodexUsageSnapshot{UpdatedAt: now.Format(time.RFC3339)}
+	snapshot := &OpenAICodexUsageSnapshot{UpdatedAt: now.Format(time.RFC3339), ObservedAt: now}
 	windows := []*codexControlWindow{limit.Primary, limit.Secondary}
 	seen := map[int]bool{}
 	var exhaustedUntil time.Time
@@ -247,7 +247,7 @@ func (s *OpenAIQuotaResetService) syncUsage(ctx context.Context, account *Accoun
 			return err
 		}
 		if s.rateLimits != nil {
-			s.rateLimits.clearOpenAINoReset429(account.ID)
+			s.rateLimits.clearOpenAINoReset429Through(account.ID, boundary)
 		}
 	} else if !exhaustedUntil.IsZero() {
 		if err := s.accountRepo.SetRateLimited(ctx, account.ID, exhaustedUntil); err != nil {

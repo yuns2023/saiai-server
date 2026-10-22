@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,7 +37,12 @@ type RateLimitService struct {
 type openAINoReset429State struct {
 	windowStart time.Time
 	count       int
+	// recent keeps the latest observation times in the window, so a Codex
+	// reset can drop only the 429s observed before its boundary.
+	recent []time.Time
 }
+
+const openAINoReset429RecentLimit = 4 * openAINoReset429EscalatedAfter
 
 // SuccessfulTestRecoveryResult 表示测试成功后恢复了哪些运行时状态。
 type SuccessfulTestRecoveryResult struct {
@@ -93,7 +99,11 @@ func NewRateLimitService(accountRepo AccountRepository, usageRepo UsageLogReposi
 func (s *RateLimitService) recordOpenAINoReset429(accountID int64, now time.Time) (time.Duration, int) {
 	s.openAINoReset429Mu.Lock()
 	defer s.openAINoReset429Mu.Unlock()
+	return s.recordOpenAINoReset429Locked(accountID, now)
+}
 
+// recordOpenAINoReset429Locked requires openAINoReset429Mu.
+func (s *RateLimitService) recordOpenAINoReset429Locked(accountID int64, now time.Time) (time.Duration, int) {
 	if s.openAINoReset429 == nil {
 		s.openAINoReset429 = make(map[int64]openAINoReset429State)
 	}
@@ -102,6 +112,14 @@ func (s *RateLimitService) recordOpenAINoReset429(accountID int64, now time.Time
 		state = openAINoReset429State{windowStart: now}
 	}
 	state.count++
+	// Keep the newest observations by observation time; a delayed older 429
+	// must not evict newer ones.
+	recent := append(append([]time.Time(nil), state.recent...), now)
+	sort.Slice(recent, func(i, j int) bool { return recent[i].Before(recent[j]) })
+	if len(recent) > openAINoReset429RecentLimit {
+		recent = recent[len(recent)-openAINoReset429RecentLimit:]
+	}
+	state.recent = recent
 	s.openAINoReset429[accountID] = state
 
 	if state.count >= openAINoReset429EscalatedAfter {
@@ -110,12 +128,68 @@ func (s *RateLimitService) recordOpenAINoReset429(accountID int64, now time.Time
 	return openAINoReset429Cooldown, state.count
 }
 
+// recordCurrentOpenAINoReset429 counts a generic 429 only if it was observed
+// after the account's last Codex reset. The check and increment share the
+// counter lock, and a reset stores its boundary before dropping earlier 429s,
+// so a stale 429 is either rejected here or dropped by that reset.
+func (s *RateLimitService) recordCurrentOpenAINoReset429(accountID int64, observedAt time.Time) (cooldown time.Duration, count int, current bool) {
+	s.openAINoReset429Mu.Lock()
+	defer s.openAINoReset429Mu.Unlock()
+	if s.codexUsageObservationSuperseded(accountID, observedAt) {
+		return 0, 0, false
+	}
+	cooldown, count = s.recordOpenAINoReset429Locked(accountID, observedAt)
+	return cooldown, count, true
+}
+
+// openAINoReset429CooldownAt decides the backoff when it is written: the 429
+// escalates if enough counted 429s up to it remain in the window. A reset
+// that dropped earlier 429s after this one was counted therefore shortens it,
+// while every current 429 still counts even if its write was coalesced.
+func (s *RateLimitService) openAINoReset429CooldownAt(accountID int64, observedAt time.Time) time.Duration {
+	s.openAINoReset429Mu.Lock()
+	defer s.openAINoReset429Mu.Unlock()
+	state := s.openAINoReset429[accountID]
+	hits := 0
+	for _, at := range state.recent {
+		if !at.After(observedAt) && observedAt.Sub(at) < openAINoReset429CountWindow {
+			hits++
+		}
+	}
+	if hits >= openAINoReset429EscalatedAfter {
+		return openAINoReset429EscalatedFor
+	}
+	return openAINoReset429Cooldown
+}
+
 func (s *RateLimitService) clearOpenAINoReset429(accountID int64) {
 	s.openAINoReset429Mu.Lock()
 	defer s.openAINoReset429Mu.Unlock()
 	if s.openAINoReset429 != nil {
 		delete(s.openAINoReset429, accountID)
 	}
+}
+
+// clearOpenAINoReset429Through drops 429s observed at or before a Codex reset
+// boundary and keeps those observed after it.
+func (s *RateLimitService) clearOpenAINoReset429Through(accountID int64, boundary time.Time) {
+	s.openAINoReset429Mu.Lock()
+	defer s.openAINoReset429Mu.Unlock()
+	state, ok := s.openAINoReset429[accountID]
+	if !ok {
+		return
+	}
+	var kept []time.Time
+	for _, at := range state.recent {
+		if at.After(boundary) {
+			kept = append(kept, at)
+		}
+	}
+	if len(kept) == 0 {
+		delete(s.openAINoReset429, accountID)
+		return
+	}
+	s.openAINoReset429[accountID] = openAINoReset429State{windowStart: kept[0], count: len(kept), recent: kept}
 }
 
 // SetTimeoutCounterCache 设置超时计数器缓存（可选依赖）
@@ -906,16 +980,23 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 		// OpenAI may return a generic 429 without any reset metadata. Treat an
 		// isolated hit as a short backoff, and escalate only a sustained burst.
 		if account.Platform == PlatformOpenAI {
-			now := time.Now()
-			cooldown, count := s.recordOpenAINoReset429(account.ID, now)
-			resetAt := now.Add(cooldown)
+			// Every current 429 counts, even if its write is later coalesced;
+			// a stale pre-reset 429 never counts, so it cannot escalate the
+			// first post-reset backoff.
+			cooldown, count, current := s.recordCurrentOpenAINoReset429(account.ID, observedAt)
+			if !current {
+				return
+			}
 			slog.Warn("openai_rate_limit_no_reset_time",
 				"account_id", account.ID,
 				"cooldown", cooldown.String(),
 				"no_reset_count", count,
 				"escalated_after", openAINoReset429EscalatedAfter,
 			)
-			if err := s.setRateLimitedFromObservation(ctx, account, observedAt, resetAt); err != nil {
+			_, err := s.writeCodexUsageFromRequest(ctx, account.ID, codexUsageWrite429Limit, observedAt, func(writeCtx context.Context) error {
+				return s.accountRepo.SetRateLimited(writeCtx, account.ID, observedAt.Add(s.openAINoReset429CooldownAt(account.ID, observedAt)))
+			})
+			if err != nil && !errors.Is(err, errCodexUsageSuperseded) {
 				slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 			}
 			return
@@ -1318,12 +1399,14 @@ func (s *RateLimitService) persistOpenAICodex429(ctx context.Context, account *A
 	}
 	var updates map[string]any
 	if snapshot := ParseCodexRateLimitHeaders(headers); snapshot != nil {
+		// Store the receipt time, not the (later) parse time.
+		snapshot.ObservedAt = observedAt
 		updates = buildCodexUsageExtraUpdates(snapshot, observedAt)
 	}
 	if len(updates) == 0 && resetAt == nil {
 		return nil
 	}
-	_, err := s.writeCodexUsageFromRequest(ctx, account.ID, observedAt, func(writeCtx context.Context) error {
+	_, err := s.writeCodexUsageFromRequest(ctx, account.ID, codexUsageWrite429, observedAt, func(writeCtx context.Context) error {
 		if len(updates) > 0 {
 			if err := s.accountRepo.UpdateExtra(writeCtx, account.ID, updates); err != nil {
 				slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)
@@ -1347,7 +1430,7 @@ func (s *RateLimitService) setRateLimitedFromObservation(ctx context.Context, ac
 	if account.Platform != PlatformOpenAI {
 		return s.accountRepo.SetRateLimited(ctx, account.ID, resetAt)
 	}
-	_, err := s.writeCodexUsageFromRequest(ctx, account.ID, observedAt, func(writeCtx context.Context) error {
+	_, err := s.writeCodexUsageFromRequest(ctx, account.ID, codexUsageWrite429Limit, observedAt, func(writeCtx context.Context) error {
 		return s.accountRepo.SetRateLimited(writeCtx, account.ID, resetAt)
 	})
 	if errors.Is(err, errCodexUsageSuperseded) {

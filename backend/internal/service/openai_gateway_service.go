@@ -179,6 +179,9 @@ type OpenAICodexUsageSnapshot struct {
 	SecondaryWindowMinutes      *int     `json:"secondary_window_minutes,omitempty"`
 	PrimaryOverSecondaryPercent *float64 `json:"primary_over_secondary_percent,omitempty"`
 	UpdatedAt                   string   `json:"updated_at,omitempty"`
+	// ObservedAt is the precise receipt time. UpdatedAt stays whole-second
+	// because the relative reset offsets are computed from it.
+	ObservedAt time.Time `json:"-"`
 }
 
 // NormalizedCodexLimits contains normalized 5h/7d rate limit data
@@ -4749,7 +4752,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 	snapshot := &OpenAICodexUsageSnapshot{}
 	hasData := false
-	observedAt := time.Now().UTC().Truncate(time.Second)
+	receivedAt := time.Now().UTC()
+	observedAt := receivedAt.Truncate(time.Second)
 
 	// Helper to parse float64 from header
 	parseFloat := func(key string) *float64 {
@@ -4828,6 +4832,7 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 	}
 
 	snapshot.UpdatedAt = observedAt.Format(time.RFC3339)
+	snapshot.ObservedAt = receivedAt
 	return snapshot
 }
 
@@ -4887,7 +4892,12 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 	if snapshot.PrimaryOverSecondaryPercent != nil {
 		updates["codex_primary_over_secondary_percent"] = *snapshot.PrimaryOverSecondaryPercent
 	}
-	updates["codex_usage_updated_at"] = baseTime.Format(time.RFC3339)
+	// Sub-second precision lets the reset fence order same-second observations.
+	observedAt := baseTime
+	if !snapshot.ObservedAt.IsZero() {
+		observedAt = snapshot.ObservedAt
+	}
+	updates["codex_usage_updated_at"] = observedAt.UTC().Format(time.RFC3339Nano)
 
 	// 归一化到 5h/7d 规范字段
 	if normalized := snapshot.Normalize(); normalized != nil {
@@ -5028,15 +5038,18 @@ func applyOpenAICodexRateLimitFromExtra(account *Account, now time.Time) (*time.
 }
 
 // codexExtraObservedAt is when the stored Codex usage snapshot was observed.
-// The stored value has one-second precision, so it is treated as the end of
-// that second; a snapshot without a time predates any reset boundary.
+// Current writers store sub-second precision. A legacy whole-second value is
+// read as the start of its second, so a pre-reset snapshot from the reset's
+// second never passes the fence; a genuinely newer snapshot from that second
+// is ignored until the next observation. A snapshot without a time predates
+// any reset boundary.
 func codexExtraObservedAt(extra map[string]any) time.Time {
 	raw, _ := extra["codex_usage_updated_at"].(string)
-	observedAt, err := time.Parse(time.RFC3339, raw)
+	observedAt, err := time.Parse(time.RFC3339Nano, raw)
 	if err != nil {
 		return time.Time{}
 	}
-	return observedAt.Truncate(time.Second).Add(time.Second - time.Nanosecond)
+	return observedAt
 }
 
 // syncOpenAICodexRateLimitFromExtra applies an exhausted stored snapshot to
@@ -5056,7 +5069,7 @@ func syncOpenAICodexRateLimitFromExtra(rateLimits *RateLimitService, repo Accoun
 		return resetAt
 	}
 	accountID, reset := account.ID, *resetAt
-	rateLimits.writeCodexUsageInBackground(accountID, observedAt, func(ctx context.Context) error {
+	rateLimits.writeCodexUsageInBackground(accountID, codexUsageWriteExtraLimit, observedAt, func(ctx context.Context) error {
 		return repo.SetRateLimited(ctx, accountID, reset)
 	}, func(err error) {
 		logger.LegacyPrintf("service.openai_gateway", "failed to persist Codex rate limit from usage snapshot: account=%d error=%v", accountID, err)
@@ -5096,11 +5109,9 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(_ context.Context, accou
 
 	if resetAt != nil {
 		reset := *resetAt
-		go func() {
-			_ = s.rateLimitService.writeCodexUsageDetached(accountID, now, func(ctx context.Context) error {
-				return s.accountRepo.SetRateLimited(ctx, accountID, reset)
-			})
-		}()
+		s.rateLimitService.writeCodexUsageInBackground(accountID, codexUsageWriteSnapLimit, now, func(ctx context.Context) error {
+			return s.accountRepo.SetRateLimited(ctx, accountID, reset)
+		}, nil)
 	}
 }
 

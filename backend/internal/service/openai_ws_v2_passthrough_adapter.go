@@ -278,7 +278,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		)
 		if statusCode == http.StatusTooManyRequests && !account.IsOpenAICodexNativeRelay() {
 			if s.rateLimitService != nil {
-				s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, handshakeHeaders, nil)
+				s.rateLimitService.HandleUpstreamError(withOpenAIWSHandshakeObservedAt(ctx, err), account, statusCode, handshakeHeaders, nil)
 			}
 			if replayTracker != nil {
 				if hooks.BeforeTurn != nil {

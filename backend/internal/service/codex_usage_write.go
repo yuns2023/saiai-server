@@ -20,8 +20,36 @@ import (
 type codexUsageWriteCoordinator struct {
 	mu       sync.Mutex
 	accounts map[int64]*codexUsageWriteState
-	pending  sync.WaitGroup // background writes, so tests can await completion
+	pending  sync.WaitGroup // background workers, so tests can await completion
+
+	// Background writes are coalesced per account: one worker per account and
+	// one pending write per kind, holding the latest observation.
+	queueMu sync.Mutex
+	queues  map[int64]*codexUsageWriteQueue
 }
+
+type codexUsageWriteQueue struct {
+	pending map[string]codexUsageQueuedWrite
+	latest  map[string]time.Time // newest accepted observation per kind, pending or in flight
+}
+
+type codexUsageQueuedWrite struct {
+	observedAt time.Time
+	write      func(context.Context) error
+	onError    func(error)
+}
+
+// Kinds of coalesced background writes. A newer observation of one kind
+// replaces an older pending one, because it writes the same fields.
+const (
+	codexUsageWrite429         = "openai_429"
+	codexUsageWrite429Limit    = "openai_429_rate_limit"
+	codexUsageWriteSnapLimit   = "snapshot_rate_limit"
+	codexUsageWriteExtraLimit  = "stored_snapshot_rate_limit"
+	codexUsageWriteProbe       = "usage_probe"
+	codexUsageWriteAccountTest = "account_test"
+	codexUsageWriteTestLimit   = "account_test_rate_limit"
+)
 
 var errCodexUsageSuperseded = errors.New("codex usage observation predates reset")
 
@@ -177,34 +205,115 @@ func (s *RateLimitService) writeCodexUsageDetached(accountID int64, observedAt t
 	})
 }
 
-// writeCodexUsageInBackground runs writeCodexUsageDetached on a goroutine.
+// writeCodexUsageInBackground queues writeCodexUsageDetached. Each account has
+// at most one background worker and one pending write per kind; an older
+// observation than the pending one, or one predating a reset, is dropped.
 // A superseded observation is not an error.
-func (s *RateLimitService) writeCodexUsageInBackground(accountID int64, observedAt time.Time, write func(context.Context) error, onError func(error)) {
-	if s != nil {
-		s.codexUsageWrites.pending.Add(1)
+func (s *RateLimitService) writeCodexUsageInBackground(accountID int64, kind string, observedAt time.Time, write func(context.Context) error, onError func(error)) {
+	if s == nil {
+		go func() {
+			if err := s.writeCodexUsageDetached(accountID, observedAt, write); err != nil && !errors.Is(err, errCodexUsageSuperseded) && onError != nil {
+				onError(err)
+			}
+		}()
+		return
 	}
-	go func() {
-		if s != nil {
-			defer s.codexUsageWrites.pending.Done()
+	if s.codexUsageObservationSuperseded(accountID, observedAt) {
+		return
+	}
+	c := &s.codexUsageWrites
+	c.queueMu.Lock()
+	defer c.queueMu.Unlock()
+	s.enqueueCodexUsageWriteLocked(accountID, kind, observedAt, write, onError)
+}
+
+// enqueueCodexUsageWriteLocked requires codexUsageWrites.queueMu.
+func (s *RateLimitService) enqueueCodexUsageWriteLocked(accountID int64, kind string, observedAt time.Time, write func(context.Context) error, onError func(error)) {
+	c := &s.codexUsageWrites
+	if c.queues == nil {
+		c.queues = make(map[int64]*codexUsageWriteQueue)
+	}
+	queue := c.queues[accountID]
+	start := queue == nil
+	if start {
+		queue = &codexUsageWriteQueue{pending: make(map[string]codexUsageQueuedWrite), latest: make(map[string]time.Time)}
+		c.queues[accountID] = queue
+	}
+	// Writes of one kind stay in observation order, so an older observation
+	// never overwrites a newer one that is pending or being written.
+	if latest, ok := queue.latest[kind]; ok && !observedAt.After(latest) {
+		return
+	}
+	queue.latest[kind] = observedAt
+	queue.pending[kind] = codexUsageQueuedWrite{observedAt: observedAt, write: write, onError: onError}
+	if start {
+		c.pending.Add(1)
+		go s.runCodexUsageWriteQueue(accountID, queue)
+	}
+}
+
+// runCodexUsageWriteQueue writes pending observations oldest first and exits
+// when the account's queue is empty.
+func (s *RateLimitService) runCodexUsageWriteQueue(accountID int64, queue *codexUsageWriteQueue) {
+	c := &s.codexUsageWrites
+	defer c.pending.Done()
+	for {
+		c.queueMu.Lock()
+		kind := ""
+		for k, item := range queue.pending {
+			if kind == "" || item.observedAt.Before(queue.pending[kind].observedAt) {
+				kind = k
+			}
 		}
-		if err := s.writeCodexUsageDetached(accountID, observedAt, write); err != nil && !errors.Is(err, errCodexUsageSuperseded) && onError != nil {
-			onError(err)
+		if kind == "" {
+			delete(c.queues, accountID)
+			c.queueMu.Unlock()
+			return
 		}
-	}()
+		item := queue.pending[kind]
+		delete(queue.pending, kind)
+		c.queueMu.Unlock()
+		if err := s.writeCodexUsageDetached(accountID, item.observedAt, item.write); err != nil && !errors.Is(err, errCodexUsageSuperseded) && item.onError != nil {
+			item.onError(err)
+		}
+	}
 }
 
 // writeCodexUsageFromRequest persists an observation from a request path
 // without waiting: a reset reconciliation holds the fence across its upstream
 // usage fetch. A free fence is written immediately with the write budget;
 // otherwise the write is queued in the background and queued is true.
-func (s *RateLimitService) writeCodexUsageFromRequest(ctx context.Context, accountID int64, observedAt time.Time, write func(context.Context) error) (queued bool, err error) {
-	state, release, ok := s.tryLockCodexUsageWrite(accountID)
+func (s *RateLimitService) writeCodexUsageFromRequest(ctx context.Context, accountID int64, kind string, observedAt time.Time, write func(context.Context) error) (queued bool, err error) {
+	// While background writes are queued, keep later observations behind them
+	// so an older queued observation never lands after a newer one.
+	if s == nil {
+		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), codexUsageWriteBudget)
+		defer cancel()
+		return false, write(writeCtx)
+	}
+	if s.codexUsageObservationSuperseded(accountID, observedAt) {
+		return false, errCodexUsageSuperseded
+	}
+	// Checking for a queue and taking the fence happen under queueMu, so a
+	// request never writes ahead of an older observation already queued.
+	c := &s.codexUsageWrites
+	c.queueMu.Lock()
+	var (
+		state   *codexUsageWriteState
+		release func()
+		ok      bool
+	)
+	if c.queues[accountID] == nil {
+		state, release, ok = s.tryLockCodexUsageWrite(accountID)
+	}
 	if !ok {
-		s.writeCodexUsageInBackground(accountID, observedAt, write, func(err error) {
+		s.enqueueCodexUsageWriteLocked(accountID, kind, observedAt, write, func(err error) {
 			slog.Warn("codex_usage_queued_write_failed", "account_id", accountID, "error", err)
 		})
+		c.queueMu.Unlock()
 		return true, nil
 	}
+	c.queueMu.Unlock()
 	defer release()
 	if codexUsageSuperseded(state, observedAt) {
 		return false, errCodexUsageSuperseded

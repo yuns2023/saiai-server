@@ -113,6 +113,12 @@ func (d *coderOpenAIWSClientDialer) Dial(
 		nativeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		opts.HTTPClient = &nativeClient
 	}
+	// coder/websocket reads part of a failed handshake's body before Dial
+	// returns, so record when the response headers arrived.
+	timing := &openAIWSHandshakeTimingTransport{base: opts.HTTPClient.Transport}
+	timedClient := *opts.HTTPClient
+	timedClient.Transport = timing
+	opts.HTTPClient = &timedClient
 	conn, resp, err := coderws.Dial(ctx, targetURL, opts)
 	if err != nil {
 		status := 0
@@ -120,6 +126,9 @@ func (d *coderOpenAIWSClientDialer) Dial(
 		if resp != nil {
 			status = resp.StatusCode
 			respHeaders = cloneHeader(resp.Header)
+		}
+		if receivedAt, ok := timing.receivedAt(); ok {
+			err = &openAIWSHandshakeResponseError{err: err, receivedAt: receivedAt}
 		}
 		if d.trace != nil {
 			d.trace.write(map[string]any{
@@ -355,4 +364,56 @@ func (c *coderOpenAIWSClientConn) Close() error {
 	_ = c.conn.Close(coderws.StatusNormalClosure, "")
 	_ = c.conn.CloseNow()
 	return nil
+}
+
+// openAIWSHandshakeTimingTransport records when a handshake response's headers
+// arrived: RoundTrip returns once the headers have been read.
+type openAIWSHandshakeTimingTransport struct {
+	base http.RoundTripper
+	at   atomic.Int64
+}
+
+func (t *openAIWSHandshakeTimingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	resp, err := base.RoundTrip(req)
+	if resp != nil {
+		t.at.Store(time.Now().UnixNano())
+		if hook := openAIWSHandshakeHeadersHook; hook != nil {
+			hook()
+		}
+	}
+	return resp, err
+}
+
+// openAIWSHandshakeHeadersHook lets tests order events after header receipt.
+var openAIWSHandshakeHeadersHook func()
+
+func (t *openAIWSHandshakeTimingTransport) receivedAt() (time.Time, bool) {
+	if nanos := t.at.Load(); nanos != 0 {
+		return time.Unix(0, nanos), true
+	}
+	return time.Time{}, false
+}
+
+// openAIWSHandshakeResponseError carries a failed handshake's header receipt
+// time; it is transparent to error matching and messages.
+type openAIWSHandshakeResponseError struct {
+	err        error
+	receivedAt time.Time
+}
+
+func (e *openAIWSHandshakeResponseError) Error() string { return e.err.Error() }
+func (e *openAIWSHandshakeResponseError) Unwrap() error { return e.err }
+
+// withOpenAIWSHandshakeObservedAt makes 429 handling for a failed handshake
+// use the time its response headers arrived.
+func withOpenAIWSHandshakeObservedAt(ctx context.Context, err error) context.Context {
+	var handshakeErr *openAIWSHandshakeResponseError
+	if errors.As(err, &handshakeErr) && handshakeErr != nil {
+		return withCodexObservedAt(ctx, handshakeErr.receivedAt)
+	}
+	return ctx
 }

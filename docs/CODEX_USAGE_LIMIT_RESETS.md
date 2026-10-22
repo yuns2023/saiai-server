@@ -56,7 +56,14 @@ covers response-header snapshots, 429 handling, usage-page probes, account
 tests and rate limits derived from a stored snapshot; a stored snapshot older
 than the reset no longer marks the account limited. Request paths never wait
 for a reconciliation: when the account is busy, their write is queued with the
-observation time at which it was received. This is process-local
+observation time at which it was received. HTTP and WebSocket handshake 429s
+use the time their response headers arrived. Queued writes are coalesced per
+account (one background worker, the newest pending observation per kind), and
+the generic-429 backoff counter only counts observations that pass the reset
+boundary; a reset drops 429s observed before its boundary, and the backoff is
+decided again when it is written. `codex_usage_updated_at` is stored with sub-second precision; a
+legacy whole-second value is read as the start of its second, so a stored
+snapshot from the reset's own second is ignored until the next observation. This is process-local
 coordination; it does not serialize independent Gateway replicas.
 Subsequent model traffic can report newer usage; the reset does not reserve
 capacity.

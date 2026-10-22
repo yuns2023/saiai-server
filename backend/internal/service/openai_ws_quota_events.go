@@ -29,8 +29,11 @@ func parseOpenAIWSCodexRateLimitEvent(payload []byte, observedAt time.Time) *Ope
 	if limitName != "" && !strings.EqualFold(limitName, "codex") {
 		return nil
 	}
-	observedAt = observedAt.UTC().Truncate(time.Second)
-	snapshot := &OpenAICodexUsageSnapshot{UpdatedAt: observedAt.Format(time.RFC3339)}
+	// Keep the receipt time's sub-second part for the reset fence; window
+	// offsets are still computed in whole seconds.
+	receivedAt := observedAt.UTC()
+	observedAt = receivedAt.Truncate(time.Second)
+	snapshot := &OpenAICodexUsageSnapshot{UpdatedAt: observedAt.Format(time.RFC3339), ObservedAt: receivedAt}
 	snapshot.PrimaryUsedPercent, snapshot.PrimaryWindowMinutes, snapshot.PrimaryResetAfterSeconds = openAIWSQuotaWindowValues(event.RateLimits.Primary, observedAt)
 	snapshot.SecondaryUsedPercent, snapshot.SecondaryWindowMinutes, snapshot.SecondaryResetAfterSeconds = openAIWSQuotaWindowValues(event.RateLimits.Secondary, observedAt)
 	if snapshot.PrimaryUsedPercent == nil && snapshot.SecondaryUsedPercent == nil {

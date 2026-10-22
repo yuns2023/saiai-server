@@ -34,9 +34,10 @@ Priority category is the reference price times two, including an inherited
 zero. A Standard cache-write override never sets the Priority 1-hour price:
 it stays what Priority charges without that override (the native or overridden
 Priority cache-write price for models without a separate 1-hour price;
-otherwise the reference 1-hour price, doubled for multiplier models). For native Priority models, a category without a
-published Priority price still uses the Standard price, including a Standard
-override.
+otherwise the reference 1-hour price, doubled for multiplier models). Known behaviour, deliberately unchanged: for native
+Priority models, a category without a published Priority price still uses the
+Standard price, including a Standard override. Usage snapshots written before
+`priority_synthesized` existed keep their original display and recalculation.
 
 Effective unit prices enter TotalCost (the platform base charge). Whole-request
 factors determine ActualCost: the effective group/user-specific group rate,

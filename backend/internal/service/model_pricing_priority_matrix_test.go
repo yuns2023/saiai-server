@@ -207,3 +207,27 @@ func TestModelPricingPriorityIgnoresStandardOverridesWhenExplicit(t *testing.T) 
 	require.NoError(t, err)
 	require.InDelta(t, 3, standard.CacheCreation1hCost, 1e-9)
 }
+
+// A snapshot persisted before priority_synthesized existed keeps the
+// calculator decision it was billed with: the legacy fallback of a zero
+// synthesized Priority price to the Standard override. Fixture: mult-zero with
+// Priority input 30 and Standard cache read 3 / 5m 6 / 1h 9 (USD per million),
+// billed at 30 / 100 / 3 / 6 / 0 for Priority.
+func TestModelPricingLegacySnapshotWithoutPrioritySynthesizedRecomputesUnchanged(t *testing.T) {
+	const legacy = `{"version":"v","override":{"priority_input":30,"cache_read":3,"cache_write_5m":6,"cache_write_1h":9},"billed_model":"mult-zero","resolved_model":"mult-zero","source":"remote","service_tier":"priority",
+"effective":{"priority_cache_write_1h":0,"priority_overrides":{"priority_input":true},"input":0.00001,"priority_input":0.00003,"output":0.00005,"priority_output":0.0001,"cache_write":0.000006,"priority_cache_write":0,"cache_read":0.000003,"priority_cache_read":0,"cache_write_5m":0.000006,"cache_write_1h":0.000009,"supports_cache_breakdown":true,"long_context_threshold":0,"long_context_input_multiplier":0,"long_context_output_multiplier":0,"long_context_cache_write_multiplier":0,"long_context_cache_read_multiplier":0,"image_input":0,"image_output":0},
+"reference_total_cost":120}`
+	var saved PricingSnapshot
+	require.NoError(t, json.Unmarshal([]byte(legacy), &saved))
+	require.False(t, saved.Effective.PrioritySynthesized)
+	b := NewBillingService(&config.Config{}, nil)
+	display := b.DisplayUnitPrices(saved.Effective, "priority")
+	for key, want := range map[string]float64{"input": 30, "output": 100, "cache_read": 3, "cache_write_5m": 6, "cache_write_1h": 0} {
+		require.InDelta(t, want, display[key], 1e-9, key)
+	}
+	tokens := UsageTokens{InputTokens: 1e6, OutputTokens: 1e6, CacheReadTokens: 1e6, CacheCreationTokens: 2e6, CacheCreation5mTokens: 1e6, CacheCreation1hTokens: 1e6}
+	cost := b.calculateTokenCost(tokens, 1, "priority", saved.Effective)
+	require.InDelta(t, 139, cost.TotalCost, 1e-9)
+	standard := b.DisplayUnitPrices(saved.Effective, "default")
+	require.InDelta(t, 3, standard["cache_read"], 1e-9)
+}
