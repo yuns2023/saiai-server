@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef, nextTick } from 'vue'
+import { computed, ref, useTemplateRef, nextTick, onBeforeUnmount } from 'vue'
 
 defineProps<{
   content?: string
@@ -7,7 +7,9 @@ defineProps<{
 
 const hovered = ref(false)
 const focused = ref(false)
-const show = computed(() => hovered.value || focused.value)
+// Tap/click pins the tooltip open (touch devices have no hover and iOS does not focus on tap).
+const pinned = ref(false)
+const show = computed(() => hovered.value || focused.value || pinned.value)
 const triggerRef = useTemplateRef<HTMLElement>('trigger')
 const tooltipRef = useTemplateRef<HTMLElement>('tooltip')
 const placement = ref<'top' | 'bottom'>('top')
@@ -40,10 +42,37 @@ function onFocusOut() {
   focused.value = false
 }
 
-function onEscape() {
+function closeAll() {
   hovered.value = false
   focused.value = false
+  setPinned(false)
 }
+
+function onEscape() {
+  closeAll()
+}
+
+function onOutsidePointer(event: Event) {
+  if (triggerRef.value?.contains(event.target as Node)) return
+  closeAll()
+}
+
+function setPinned(value: boolean) {
+  pinned.value = value
+  if (value) document.addEventListener('pointerdown', onOutsidePointer, true)
+  else document.removeEventListener('pointerdown', onOutsidePointer, true)
+}
+
+function onClick() {
+  if (pinned.value) {
+    closeAll()
+    return
+  }
+  setPinned(true)
+  nextTick(updatePosition)
+}
+
+onBeforeUnmount(() => setPinned(false))
 
 function updatePosition() {
   const el = triggerRef.value
@@ -74,6 +103,7 @@ function updatePosition() {
     @focusin="onFocusIn"
     @focusout="onFocusOut"
     @keydown.esc="onEscape"
+    @click="onClick"
   >
     <!-- Trigger Icon -->
     <slot name="trigger">

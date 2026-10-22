@@ -58,4 +58,20 @@ describe('HelpTooltip', () => {
     await wrapper.trigger('keydown', { key: 'Escape' })
     expect(tooltip.style.display).toBe('none')
   })
+
+  it('pins open on tap/click and closes on a second tap or an outside tap', async () => {
+    const { wrapper, tooltip } = await open(500)
+    await wrapper.trigger('mouseleave')
+    await wrapper.trigger('click')
+    await flushPromises()
+    expect(tooltip.style.display).not.toBe('none')
+    await wrapper.trigger('click')
+    expect(tooltip.style.display).toBe('none')
+
+    await wrapper.trigger('click')
+    expect(tooltip.style.display).not.toBe('none')
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    await flushPromises()
+    expect(tooltip.style.display).toBe('none')
+  })
 })

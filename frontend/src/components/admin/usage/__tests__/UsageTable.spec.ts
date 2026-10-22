@@ -207,7 +207,7 @@ describe('admin UsageTable tooltip', () => {
 
     expect(wrapper.text()).toContain('Fast')
 
-    await wrapper.find('.group.relative').trigger('mouseenter')
+    await wrapper.get('[data-testid="usage-cost-detail"]').trigger('mouseenter')
     await nextTick()
 
     const text = wrapper.text()
@@ -257,7 +257,7 @@ describe('admin UsageTable tooltip', () => {
     expect(badge.text()).toContain('>272K')
     expect(badge.text()).toContain('usage.longContextInferred')
     expect(wrapper.text()).toContain('$0.294182')
-    await wrapper.find('.group.relative').trigger('mouseenter'); await nextTick()
+    await wrapper.get('[data-testid="usage-cost-detail"]').trigger('mouseenter'); await nextTick()
     expect(wrapper.text()).toContain('usage.longContextWholeRequest')
     expect(wrapper.text()).toContain('usage.longContextInferredHint')
     wrapper.unmount()

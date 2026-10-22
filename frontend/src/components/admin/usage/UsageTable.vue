@@ -165,36 +165,21 @@
           </div>
         </template>
 
+        <template #header-cost="{ column }">
+          <UsageCostLegend :label="column.label" show-account-cost />
+        </template>
+
         <template #cell-cost="{ row }">
-          <div class="text-sm">
-            <div class="flex items-center gap-1.5">
-              <span class="font-medium text-green-600 dark:text-green-400">{{ t(usageBillingLabel(row.billing_type)) }} ${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
-              <span v-if="row.model_rate_multiplier != null && row.model_rate_multiplier !== 1" class="rounded-sm bg-indigo-100 px-1 text-[10px] text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300" :title="t('usage.groupModelMultiplier')">{{ row.model_rate_multiplier }}x</span>
-              <span v-if="row.user_payg_discount_multiplier != null && row.user_payg_discount_multiplier !== 1" class="rounded-sm bg-emerald-100 px-1 text-[10px] text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" :title="t('usage.paygUserDiscount')">{{ row.user_payg_discount_multiplier }}x</span>
-              <span v-if="row.account_payg_discount_multiplier != null && row.account_payg_discount_multiplier !== 1" class="rounded-sm bg-amber-100 px-1 text-[10px] text-amber-700 dark:bg-amber-500/20 dark:text-amber-300" :title="t('usage.legacyPaygAccountDiscount')">{{ row.account_payg_discount_multiplier }}x</span>
-              <span v-if="!isNativeChatUsage(row)"
-                class="inline-flex items-center rounded-sm px-1.5 py-0.5 text-[10px] font-semibold leading-tight ring-1 ring-inset"
-                :class="getServiceTierBadgeClass(row.service_tier)"
-              >
-                {{ getUsageServiceTierLabel(row.service_tier, t) }}
-              </span>
-              <!-- Cost Detail Tooltip -->
-              <div
-                class="group relative"
-                @mouseenter="showTooltip($event, row)"
-                @mouseleave="hideTooltip"
-              >
-                <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
-                  <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
-                </div>
-              </div>
-            </div>
+          <UsageCostCell
+            :row="row"
+            :account-cost="row.account_rate_multiplier != null ? row.total_cost * row.account_rate_multiplier : null"
+            :show-reference="false"
+            @show-detail="showTooltip($event, row)"
+            @hide-detail="hideTooltip"
+          >
             <LongContextIndicator :info="usageLongContext(row)" class="mt-1" />
             <NativeChatCharges :record="row" />
-            <div v-if="row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-gray-400">
-              A ${{ (row.total_cost * row.account_rate_multiplier).toFixed(6) }}
-            </div>
-          </div>
+          </UsageCostCell>
         </template>
 
         <template #cell-first_token="{ row }">
@@ -421,7 +406,9 @@ import { usageLongContext } from '@/utils/usageLongContext'
 import LongContextIndicator from '@/components/common/LongContextIndicator.vue'
 import { isNativeChatUsage } from '@/utils/nativeChatUsage'
 import NativeChatCharges from '@/components/common/NativeChatCharges.vue'
-import { formatUsageServiceTier, getUsageServiceTierLabel } from '@/utils/usageServiceTier'
+import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
+import UsageCostCell from '@/components/common/UsageCostCell.vue'
+import UsageCostLegend from '@/components/common/UsageCostLegend.vue'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -458,12 +445,6 @@ const getRequestTypeBadgeClass = (row: AdminUsageLog): string => {
   return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
 }
 
-const getServiceTierBadgeClass = (serviceTier?: string | null): string => {
-  const tier = formatUsageServiceTier(serviceTier)
-  if (tier === 'priority') return 'bg-cyan-100 text-cyan-700 ring-cyan-200 dark:bg-cyan-500/20 dark:text-cyan-300 dark:ring-cyan-500/30'
-  if (tier === 'flex') return 'bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30'
-  return 'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:ring-gray-600'
-}
 
 
 const formatUserAgent = (ua: string): string => {
@@ -512,7 +493,7 @@ const focusSession = (row: AdminUsageLog) => {
 }
 
 // Cost tooltip functions
-const showTooltip = (event: MouseEvent, row: AdminUsageLog) => {
+const showTooltip = (event: Event, row: AdminUsageLog) => {
   const target = event.currentTarget as HTMLElement
   const rect = target.getBoundingClientRect()
   tooltipData.value = row
