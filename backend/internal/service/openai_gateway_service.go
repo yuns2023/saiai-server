@@ -1936,7 +1936,7 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	if err != nil || account == nil {
 		return account, err
 	}
-	syncOpenAICodexRateLimitFromExtra(ctx, s.accountRepo, account, time.Now())
+	syncOpenAICodexRateLimitFromExtra(s.rateLimitService, s.accountRepo, account, time.Now())
 	return account, nil
 }
 
@@ -2653,6 +2653,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		upstreamStart := time.Now()
 		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
+		// Error handling reads the body first; Codex usage observations from
+		// this response must keep the time its headers arrived.
+		ctx = withCodexObservedAt(ctx, time.Now())
 		if err != nil {
 			if WriteOpenAIProviderAttemptBudgetError(c, err) {
 				return nil, err
@@ -5024,12 +5027,40 @@ func applyOpenAICodexRateLimitFromExtra(account *Account, now time.Time) (*time.
 	return resetAt, true
 }
 
-func syncOpenAICodexRateLimitFromExtra(ctx context.Context, repo AccountRepository, account *Account, now time.Time) *time.Time {
+// codexExtraObservedAt is when the stored Codex usage snapshot was observed.
+// The stored value has one-second precision, so it is treated as the end of
+// that second; a snapshot without a time predates any reset boundary.
+func codexExtraObservedAt(extra map[string]any) time.Time {
+	raw, _ := extra["codex_usage_updated_at"].(string)
+	observedAt, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return observedAt.Truncate(time.Second).Add(time.Second - time.Nanosecond)
+}
+
+// syncOpenAICodexRateLimitFromExtra applies an exhausted stored snapshot to
+// the account and persists it in the background through the reset fence. A
+// snapshot observed before a reset reconciliation is ignored, including for
+// this caller's in-memory scheduling decision.
+func syncOpenAICodexRateLimitFromExtra(rateLimits *RateLimitService, repo AccountRepository, account *Account, now time.Time) *time.Time {
+	if account == nil || !account.IsOpenAI() {
+		return nil
+	}
+	observedAt := codexExtraObservedAt(account.Extra)
+	if rateLimits.codexUsageObservationSuperseded(account.ID, observedAt) {
+		return nil
+	}
 	resetAt, changed := applyOpenAICodexRateLimitFromExtra(account, now)
-	if !changed || resetAt == nil || repo == nil || account == nil || account.ID <= 0 {
+	if !changed || resetAt == nil || repo == nil || account.ID <= 0 {
 		return resetAt
 	}
-	_ = repo.SetRateLimited(ctx, account.ID, *resetAt)
+	accountID, reset := account.ID, *resetAt
+	rateLimits.writeCodexUsageInBackground(accountID, observedAt, func(ctx context.Context) error {
+		return repo.SetRateLimited(ctx, accountID, reset)
+	}, func(err error) {
+		logger.LegacyPrintf("service.openai_gateway", "failed to persist Codex rate limit from usage snapshot: account=%d error=%v", accountID, err)
+	})
 	return resetAt
 }
 
@@ -5066,32 +5097,16 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(_ context.Context, accou
 	if resetAt != nil {
 		reset := *resetAt
 		go func() {
-			_ = s.writeCodexUsage(accountID, now, func(ctx context.Context) error {
+			_ = s.rateLimitService.writeCodexUsageDetached(accountID, now, func(ctx context.Context) error {
 				return s.accountRepo.SetRateLimited(ctx, accountID, reset)
 			})
 		}()
 	}
 }
 
-// codexUsageLockWait outlasts a reset reconciliation's 25s operation budget,
-// so a newer observation waits for the reset instead of being dropped.
-const codexUsageLockWait = 30 * time.Second
-
-// writeCodexUsage gives the database write its own budget; waiting behind a
-// reset must not consume it.
-func (s *OpenAIGatewayService) writeCodexUsage(accountID int64, observedAt time.Time, write func(context.Context) error) error {
-	waitCtx, cancelWait := context.WithTimeout(context.Background(), codexUsageLockWait)
-	defer cancelWait()
-	return s.rateLimitService.codexUsageWrite(waitCtx, accountID, observedAt, func() error {
-		writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return write(writeCtx)
-	})
-}
-
 func (s *OpenAIGatewayService) persistCodexUsageSnapshots(coordinator *accountWriteThrottle, first *codexSnapshotWriteRequest) {
 	for current := first; current != nil; {
-		err := s.writeCodexUsage(current.accountID, current.receivedAt, func(ctx context.Context) error {
+		err := s.rateLimitService.writeCodexUsageDetached(current.accountID, current.receivedAt, func(ctx context.Context) error {
 			return s.accountRepo.UpdateExtra(ctx, current.accountID, current.updates)
 		})
 		if err != nil && !errors.Is(err, errCodexUsageSuperseded) {

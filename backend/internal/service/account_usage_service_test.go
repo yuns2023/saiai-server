@@ -127,7 +127,7 @@ func TestAccountUsageService_PersistOpenAICodexProbeSnapshotSetsRateLimit(t *tes
 	svc := &AccountUsageService{accountRepo: repo}
 	resetAt := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
 
-	svc.persistOpenAICodexProbeSnapshot(321, map[string]any{
+	svc.persistOpenAICodexProbeSnapshot(321, time.Now(), map[string]any{
 		"codex_7d_used_percent": 100.0,
 		"codex_7d_reset_at":     resetAt.Format(time.RFC3339),
 	}, &resetAt)

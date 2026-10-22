@@ -509,6 +509,7 @@ type adminServiceImpl struct {
 	inputRiskRepo        InputModerationEventRepository
 	inputRiskCache       InputModerationStateCache
 	accessLevelRepo      AccessLevelRepository
+	rateLimits           *RateLimitService
 }
 
 type userGroupRateBatchReader interface {
@@ -1806,7 +1807,7 @@ func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int,
 	}
 	now := time.Now()
 	for i := range accounts {
-		syncOpenAICodexRateLimitFromExtra(ctx, s.accountRepo, &accounts[i], now)
+		syncOpenAICodexRateLimitFromExtra(s.rateLimits, s.accountRepo, &accounts[i], now)
 	}
 	return accounts, result.Total, nil
 }

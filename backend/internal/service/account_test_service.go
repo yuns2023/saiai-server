@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -72,6 +73,23 @@ type AccountTestService struct {
 	soraTestGuardMu           sync.Mutex
 	soraTestLastRun           map[int64]time.Time
 	soraTestCooldown          time.Duration
+	rateLimits                *RateLimitService
+}
+
+// SetRateLimitService shares the Codex usage write fence with reset
+// reconciliation.
+func (s *AccountTestService) SetRateLimitService(rateLimits *RateLimitService) {
+	if s != nil {
+		s.rateLimits = rateLimits
+	}
+}
+
+// writeCodexUsage persists a test response's Codex observation through the
+// reset fence without waiting behind a reconciliation.
+func (s *AccountTestService) writeCodexUsage(ctx context.Context, accountID int64, observedAt time.Time, write func(context.Context) error) {
+	if _, err := s.rateLimits.writeCodexUsageFromRequest(ctx, accountID, observedAt, write); err != nil && !errors.Is(err, errCodexUsageSuperseded) {
+		slog.Warn("account_test_codex_usage_persist_failed", "account_id", accountID, "error", err)
+	}
 }
 
 const defaultSoraTestCooldown = 10 * time.Second
@@ -546,17 +564,30 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
 	defer func() { _ = resp.Body.Close() }()
+	observedAt := time.Now()
 
 	if isOAuth && s.accountRepo != nil {
-		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
-			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
+		var updates map[string]any
+		if extracted, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(extracted) > 0 {
+			updates = extracted
 			mergeAccountExtra(account, updates)
 		}
+		var resetAt *time.Time
 		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
-			if resetAt := codexRateLimitResetAtFromSnapshot(snapshot, time.Now()); resetAt != nil {
-				_ = s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt)
+			if resetAt = codexRateLimitResetAtFromSnapshot(snapshot, time.Now()); resetAt != nil {
 				account.RateLimitResetAt = resetAt
 			}
+		}
+		if len(updates) > 0 || resetAt != nil {
+			s.writeCodexUsage(ctx, account.ID, observedAt, func(writeCtx context.Context) error {
+				if len(updates) > 0 {
+					_ = s.accountRepo.UpdateExtra(writeCtx, account.ID, updates)
+				}
+				if resetAt != nil {
+					_ = s.accountRepo.SetRateLimited(writeCtx, account.ID, *resetAt)
+				}
+				return nil
+			})
 		}
 	}
 
@@ -564,7 +595,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		body, _ := io.ReadAll(resp.Body)
 		if isOAuth && s.accountRepo != nil {
 			if resetAt := (&RateLimitService{}).calculateOpenAI429ResetTime(resp.Header); resetAt != nil {
-				_ = s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt)
+				s.writeCodexUsage(ctx, account.ID, observedAt, func(writeCtx context.Context) error {
+					return s.accountRepo.SetRateLimited(writeCtx, account.ID, *resetAt)
+				})
 				account.RateLimitResetAt = resetAt
 			}
 		}

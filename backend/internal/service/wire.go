@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/google/wire"
@@ -250,6 +251,71 @@ func ProvideRateLimitService(
 	return svc
 }
 
+// The providers below share RateLimitService's Codex usage write fence with
+// every writer of Codex usage observations.
+
+// ProvideAdminService creates AdminService with the Codex usage write fence.
+func ProvideAdminService(
+	userRepo UserRepository,
+	groupRepo GroupRepository,
+	accountRepo AccountRepository,
+	proxyRepo ProxyRepository,
+	apiKeyRepo APIKeyRepository,
+	redeemCodeRepo RedeemCodeRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	billingCacheService *BillingCacheService,
+	proxyProber ProxyExitInfoProber,
+	proxyLatencyCache ProxyLatencyCache,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	entClient *dbent.Client,
+	settingService *SettingService,
+	defaultSubAssigner DefaultSubscriptionAssigner,
+	userSubRepo UserSubscriptionRepository,
+	privacyClientFactory PrivacyClientFactory,
+	inputRiskRepo InputModerationEventRepository,
+	inputRiskCache InputModerationStateCache,
+	accessLevelRepo AccessLevelRepository,
+	rateLimits *RateLimitService,
+) AdminService {
+	svc := NewAdminService(userRepo, groupRepo, accountRepo, proxyRepo, apiKeyRepo, redeemCodeRepo, userGroupRateRepo,
+		billingCacheService, proxyProber, proxyLatencyCache, authCacheInvalidator, entClient, settingService,
+		defaultSubAssigner, userSubRepo, privacyClientFactory, inputRiskRepo, inputRiskCache, accessLevelRepo)
+	if impl, ok := svc.(*adminServiceImpl); ok {
+		impl.rateLimits = rateLimits
+	}
+	return svc
+}
+
+// ProvideAccountUsageService creates AccountUsageService with the Codex usage write fence.
+func ProvideAccountUsageService(
+	accountRepo AccountRepository,
+	usageLogRepo UsageLogRepository,
+	usageFetcher ClaudeUsageFetcher,
+	geminiQuotaService *GeminiQuotaService,
+	antigravityQuotaFetcher *AntigravityQuotaFetcher,
+	cache *UsageCache,
+	identityCache IdentityCache,
+	rateLimits *RateLimitService,
+) *AccountUsageService {
+	svc := NewAccountUsageService(accountRepo, usageLogRepo, usageFetcher, geminiQuotaService, antigravityQuotaFetcher, cache, identityCache)
+	svc.SetRateLimitService(rateLimits)
+	return svc
+}
+
+// ProvideAccountTestService creates AccountTestService with the Codex usage write fence.
+func ProvideAccountTestService(
+	accountRepo AccountRepository,
+	geminiTokenProvider *GeminiTokenProvider,
+	antigravityGatewayService *AntigravityGatewayService,
+	httpUpstream HTTPUpstream,
+	cfg *config.Config,
+	rateLimits *RateLimitService,
+) *AccountTestService {
+	svc := NewAccountTestService(accountRepo, geminiTokenProvider, antigravityGatewayService, httpUpstream, cfg)
+	svc.SetRateLimitService(rateLimits)
+	return svc
+}
+
 // ProvideOpsMetricsCollector creates and starts OpsMetricsCollector.
 func ProvideOpsMetricsCollector(
 	opsRepo OpsRepository,
@@ -438,7 +504,7 @@ var ProviderSet = wire.NewSet(
 	NewBillingService,
 	NewBillingCacheService,
 	NewAnnouncementService,
-	NewAdminService,
+	ProvideAdminService,
 	NewGatewayService,
 	NewInputModerationService,
 	NewClaudeDeviceService,
@@ -458,10 +524,10 @@ var ProviderSet = wire.NewSet(
 	ProvideOpenAITokenProvider,
 	ProvideClaudeTokenProvider,
 	ProvideRateLimitService,
-	NewAccountUsageService,
+	ProvideAccountUsageService,
 	NewOpenAIQuotaResetService,
 	NewHostedAccountService,
-	NewAccountTestService,
+	ProvideAccountTestService,
 	ProvideSettingService,
 	NewDataManagementService,
 	ProvideBackupService,

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -786,11 +787,13 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 }
 
 func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Account, headers http.Header, responseBody []byte, requestedModel string) {
+	// OpenAI writes from this observation go through the Codex reset fence.
+	observedAt := codexObservedAt(ctx)
 	// 1. OpenAI 平台：优先尝试解析 x-codex-* 响应头（用于 rate_limit_exceeded）
 	if account.Platform == PlatformOpenAI {
-		s.persistOpenAICodexSnapshot(ctx, account, headers)
-		if resetAt := s.calculateOpenAI429ResetTime(headers); resetAt != nil {
-			if err := s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt); err != nil {
+		resetAt := s.calculateOpenAI429ResetTime(headers)
+		if err := s.persistOpenAICodex429(ctx, account, headers, observedAt, resetAt); resetAt != nil {
+			if err != nil {
 				slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 				return
 			}
@@ -835,7 +838,7 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 			}
 		}
 
-		if err := s.accountRepo.SetRateLimited(ctx, account.ID, result.resetAt); err != nil {
+		if err := s.setRateLimitedFromObservation(ctx, account, observedAt, result.resetAt); err != nil {
 			slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 			return
 		}
@@ -867,7 +870,7 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 			// 尝试解析 OpenAI 的 usage_limit_reached 错误
 			if resetAt := parseOpenAIRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
-				if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetTime); err != nil {
+				if err := s.setRateLimitedFromObservation(ctx, account, observedAt, resetTime); err != nil {
 					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 					return
 				}
@@ -878,7 +881,7 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 			// 尝试解析 Gemini 格式（用于其他平台）
 			if resetAt := ParseGeminiRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
-				if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetTime); err != nil {
+				if err := s.setRateLimitedFromObservation(ctx, account, observedAt, resetTime); err != nil {
 					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 					return
 				}
@@ -912,7 +915,7 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 				"no_reset_count", count,
 				"escalated_after", openAINoReset429EscalatedAfter,
 			)
-			if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+			if err := s.setRateLimitedFromObservation(ctx, account, observedAt, resetAt); err != nil {
 				slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 			}
 			return
@@ -921,7 +924,7 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 		// 其他平台：没有重置时间，使用默认5分钟
 		resetAt := time.Now().Add(5 * time.Minute)
 		slog.Warn("rate_limit_no_reset_time", "account_id", account.ID, "platform", account.Platform, "using_default", "5m")
-		if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+		if err := s.setRateLimitedFromObservation(ctx, account, observedAt, resetAt); err != nil {
 			slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 		}
 		return
@@ -932,7 +935,7 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 	if err != nil {
 		slog.Warn("rate_limit_reset_parse_failed", "reset_timestamp", resetTimestamp, "error", err)
 		resetAt := time.Now().Add(5 * time.Minute)
-		if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+		if err := s.setRateLimitedFromObservation(ctx, account, observedAt, resetAt); err != nil {
 			slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 		}
 		return
@@ -941,7 +944,7 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 	resetAt := time.Unix(ts, 0)
 
 	// 标记限流状态
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+	if err := s.setRateLimitedFromObservation(ctx, account, observedAt, resetAt); err != nil {
 		slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 		return
 	}
@@ -1306,21 +1309,51 @@ func pickSooner(a, b *time.Time) *time.Time {
 	}
 }
 
-func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, account *Account, headers http.Header) {
-	if s == nil || s.accountRepo == nil || account == nil || headers == nil {
-		return
+// persistOpenAICodex429 writes a 429's Codex usage snapshot and, when known,
+// its reset time as one fenced observation. The returned error is from the
+// rate-limit write; a queued write reports nil.
+func (s *RateLimitService) persistOpenAICodex429(ctx context.Context, account *Account, headers http.Header, observedAt time.Time, resetAt *time.Time) error {
+	if s == nil || s.accountRepo == nil || account == nil {
+		return nil
 	}
-	snapshot := ParseCodexRateLimitHeaders(headers)
-	if snapshot == nil {
-		return
+	var updates map[string]any
+	if snapshot := ParseCodexRateLimitHeaders(headers); snapshot != nil {
+		updates = buildCodexUsageExtraUpdates(snapshot, observedAt)
 	}
-	updates := buildCodexUsageExtraUpdates(snapshot, time.Now())
-	if len(updates) == 0 {
-		return
+	if len(updates) == 0 && resetAt == nil {
+		return nil
 	}
-	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
-		slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)
+	_, err := s.writeCodexUsageFromRequest(ctx, account.ID, observedAt, func(writeCtx context.Context) error {
+		if len(updates) > 0 {
+			if err := s.accountRepo.UpdateExtra(writeCtx, account.ID, updates); err != nil {
+				slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)
+			}
+		}
+		if resetAt == nil {
+			return nil
+		}
+		return s.accountRepo.SetRateLimited(writeCtx, account.ID, *resetAt)
+	})
+	if errors.Is(err, errCodexUsageSuperseded) {
+		return nil
 	}
+	return err
+}
+
+// setRateLimitedFromObservation marks an upstream 429. OpenAI accounts can be
+// reset by an administrator, so their writes go through the Codex reset fence
+// without waiting on the request path.
+func (s *RateLimitService) setRateLimitedFromObservation(ctx context.Context, account *Account, observedAt time.Time, resetAt time.Time) error {
+	if account.Platform != PlatformOpenAI {
+		return s.accountRepo.SetRateLimited(ctx, account.ID, resetAt)
+	}
+	_, err := s.writeCodexUsageFromRequest(ctx, account.ID, observedAt, func(writeCtx context.Context) error {
+		return s.accountRepo.SetRateLimited(writeCtx, account.ID, resetAt)
+	})
+	if errors.Is(err, errCodexUsageSuperseded) {
+		return nil
+	}
+	return err
 }
 
 // parseOpenAIRateLimitResetTime 解析 OpenAI 格式的 429 响应，返回重置时间的 Unix 时间戳

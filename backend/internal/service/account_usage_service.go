@@ -281,6 +281,15 @@ type AccountUsageService struct {
 	antigravityQuotaFetcher *AntigravityQuotaFetcher
 	cache                   *UsageCache
 	identityCache           IdentityCache
+	rateLimits              *RateLimitService
+}
+
+// SetRateLimitService shares the Codex usage write fence with reset
+// reconciliation.
+func (s *AccountUsageService) SetRateLimitService(rateLimits *RateLimitService) {
+	if s != nil {
+		s.rateLimits = rateLimits
+	}
 }
 
 // NewAccountUsageService 创建AccountUsageService实例
@@ -558,7 +567,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	if account == nil {
 		return usage, nil
 	}
-	syncOpenAICodexRateLimitFromExtra(ctx, s.accountRepo, account, now)
+	syncOpenAICodexRateLimitFromExtra(s.rateLimits, s.accountRepo, account, now)
 
 	if progress := buildCodexUsageProgressFromExtra(account.Extra, "5h", now); progress != nil {
 		usage.FiveHour = progress
@@ -708,19 +717,22 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		return nil, nil, fmt.Errorf("openai codex probe request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	observedAt := time.Now()
 
 	updates, resetAt, err := extractOpenAICodexProbeSnapshot(resp)
 	if err != nil {
 		return nil, nil, err
 	}
 	if len(updates) > 0 || resetAt != nil {
-		s.persistOpenAICodexProbeSnapshot(account.ID, updates, resetAt)
+		s.persistOpenAICodexProbeSnapshot(account.ID, observedAt, updates, resetAt)
 		return updates, resetAt, nil
 	}
 	return nil, nil, nil
 }
 
-func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, updates map[string]any, resetAt *time.Time) {
+// persistOpenAICodexProbeSnapshot writes the probe result in the background
+// through the reset fence; observedAt is when the probe response arrived.
+func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, observedAt time.Time, updates map[string]any, resetAt *time.Time) {
 	if s == nil || s.accountRepo == nil || accountID <= 0 {
 		return
 	}
@@ -728,16 +740,17 @@ func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, u
 		return
 	}
 
-	go func() {
-		updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer updateCancel()
+	s.rateLimits.writeCodexUsageInBackground(accountID, observedAt, func(ctx context.Context) error {
 		if len(updates) > 0 {
-			_ = s.accountRepo.UpdateExtra(updateCtx, accountID, updates)
+			_ = s.accountRepo.UpdateExtra(ctx, accountID, updates)
 		}
 		if resetAt != nil {
-			_ = s.accountRepo.SetRateLimited(updateCtx, accountID, *resetAt)
+			_ = s.accountRepo.SetRateLimited(ctx, accountID, *resetAt)
 		}
-	}()
+		return nil
+	}, func(err error) {
+		slog.Warn("openai_codex_probe_snapshot_persist_failed", "account_id", accountID, "error", err)
+	})
 }
 
 func extractOpenAICodexProbeSnapshot(resp *http.Response) (map[string]any, *time.Time, error) {

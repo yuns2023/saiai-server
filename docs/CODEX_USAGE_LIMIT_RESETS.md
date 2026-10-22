@@ -51,8 +51,13 @@ and unrelated quota fields are not cleared by this operation.
 
 Within one Gateway process, reset reconciliation waits for in-flight snapshot
 writes and rejects queued snapshot/rate-limit writes observed before its usage
-fetch. The same boundary invalidates old snapshot throttle decisions. This is
-process-local coordination; it does not serialize independent Gateway replicas.
+fetch. The same boundary invalidates old snapshot throttle decisions. This
+covers response-header snapshots, 429 handling, usage-page probes, account
+tests and rate limits derived from a stored snapshot; a stored snapshot older
+than the reset no longer marks the account limited. Request paths never wait
+for a reconciliation: when the account is busy, their write is queued with the
+observation time at which it was received. This is process-local
+coordination; it does not serialize independent Gateway replicas.
 Subsequent model traffic can report newer usage; the reset does not reserve
 capacity.
 

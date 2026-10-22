@@ -232,23 +232,40 @@ func (s *BillingService) finishModelPricing(p *ModelPricing, r pricingResolution
 			effective.PriorityOverrides[name] = true
 		}
 	}
-	if len(effective.PriorityOverrides) > 0 && !usePriorityServiceTierPricing("priority", &base) {
+	nativePriority := usePriorityServiceTierPricing("priority", &base)
+	if len(effective.PriorityOverrides) > 0 && !nativePriority {
+		// Switching from the whole-tier multiplier to explicit prices derives
+		// every unedited Priority category from the reference price, never from
+		// a Standard override. These are complete prices, including zero.
+		effective.PrioritySynthesized = true
 		effective.InputPricePerTokenPriority = base.InputPricePerToken * 2
 		effective.OutputPricePerTokenPriority = base.OutputPricePerToken * 2
 		effective.CacheReadPricePerTokenPriority = base.CacheReadPricePerToken * 2
 		effective.CacheCreationPricePerTokenPriority = base.CacheCreationPricePerToken * 2
-		// Switching from the whole-tier multiplier to explicit prices must
-		// retain the inherited 1h price, independently of Standard overrides.
-		priority1h := base.CacheCreation1hPrice * 2
-		if !base.SupportsCacheBreakdown {
-			priority1h = base.CacheCreationPricePerToken * 2
-		}
-		effective.CacheCreation1hPricePerTokenPriority = &priority1h
 	}
 	set(&effective.InputPricePerTokenPriority, r.Override.PriorityInput)
 	set(&effective.OutputPricePerTokenPriority, r.Override.PriorityOutput)
 	set(&effective.CacheReadPricePerTokenPriority, r.Override.PriorityCacheRead)
 	set(&effective.CacheCreationPricePerTokenPriority, r.Override.PriorityCacheWrite)
+	// The Priority 1h price is what Priority would charge without Standard
+	// overrides. Without a 5m/1h split the reference charges 1h tokens at its
+	// single (Priority) cache-write price. Native Priority models carry no 1h
+	// Priority price, so their 1h price is never multiplied here; the
+	// unoverridden calculation charges the base 1h price.
+	if effective.PrioritySynthesized || (nativePriority && (r.Override.CacheWrite5m != nil || r.Override.CacheWrite1h != nil)) {
+		var priority1h float64
+		switch {
+		case base.SupportsCacheBreakdown && effective.PrioritySynthesized:
+			priority1h = base.CacheCreation1hPrice * 2
+		case base.SupportsCacheBreakdown:
+			priority1h = base.CacheCreation1hPrice
+		case effective.PrioritySynthesized || effective.CacheCreationPricePerTokenPriority > 0 || effective.PriorityOverrides["priority_cache_write"]:
+			priority1h = effective.CacheCreationPricePerTokenPriority
+		default:
+			priority1h = base.CacheCreationPricePerToken
+		}
+		effective.CacheCreation1hPricePerTokenPriority = &priority1h
+	}
 	if r.Override.CacheWrite5m != nil || r.Override.CacheWrite1h != nil {
 		if !base.SupportsCacheBreakdown {
 			effective.CacheCreation5mPrice = base.CacheCreationPricePerToken

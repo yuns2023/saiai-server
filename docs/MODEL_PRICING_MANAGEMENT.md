@@ -29,6 +29,14 @@ Standard tier multiplier. Equal/free cache-write prices still keep separate
 5m/1h token accounting. A partial Priority override preserves the inherited
 1-hour cache-write price, including when Priority originally used a whole-tier
 multiplier; the effective 1-hour Priority price is retained in usage snapshots.
+Once a Priority field is overridden on a multiplier model, every unedited
+Priority category is the reference price times two, including an inherited
+zero. A Standard cache-write override never sets the Priority 1-hour price:
+it stays what Priority charges without that override (the native or overridden
+Priority cache-write price for models without a separate 1-hour price;
+otherwise the reference 1-hour price, doubled for multiplier models). For native Priority models, a category without a
+published Priority price still uses the Standard price, including a Standard
+override.
 
 Effective unit prices enter TotalCost (the platform base charge). Whole-request
 factors determine ActualCost: the effective group/user-specific group rate,

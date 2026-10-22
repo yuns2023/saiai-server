@@ -71,6 +71,10 @@ type ModelPricing struct {
 	LongContextCacheReadMultiplier       float64          `json:"long_context_cache_read_multiplier"`  // 长上下文整次会话缓存读取价格倍率
 	InputImagePricePerToken              float64          `json:"image_input"`                         // 图片输入每 token 价格 (USD)
 	OutputImagePricePerToken             float64          `json:"image_output"`                        // 图片输出每 token 价格 (USD)
+
+	// PrioritySynthesized marks Priority prices derived from a multiplier
+	// model's reference prices; they are complete prices, including zero.
+	PrioritySynthesized bool `json:"priority_synthesized,omitempty"`
 }
 
 const (
@@ -418,20 +422,25 @@ func (s *BillingService) calculateTokenCost(tokens UsageTokens, rateMultiplier f
 	tierMultiplier := 1.0
 	longContextPricing := s.shouldApplySessionLongContextPricing(tokens, pricing) && normalizeBillingServiceTier(serviceTier) != "priority"
 	if usePriorityServiceTierPricing(serviceTier, pricing) || (normalizeBillingServiceTier(serviceTier) == "priority" && pricing.Snapshot != nil && pricing.Reference != nil && usePriorityServiceTierPricing(serviceTier, pricing.Reference)) {
-		if pricing.InputPricePerTokenPriority > 0 || pricing.PriorityOverrides["priority_input"] {
+		// A zero native price means "not published" and keeps the Standard
+		// price; synthesized and administrator prices are complete.
+		explicit := func(price float64, field string) bool {
+			return price > 0 || pricing.PrioritySynthesized || pricing.PriorityOverrides[field]
+		}
+		if explicit(pricing.InputPricePerTokenPriority, "priority_input") {
 			inputPricePerToken = pricing.InputPricePerTokenPriority
 		}
-		if pricing.OutputPricePerTokenPriority > 0 || pricing.PriorityOverrides["priority_output"] {
+		if explicit(pricing.OutputPricePerTokenPriority, "priority_output") {
 			outputPricePerToken = pricing.OutputPricePerTokenPriority
 		}
-		if pricing.CacheCreationPricePerTokenPriority > 0 || pricing.PriorityOverrides["priority_cache_write"] {
+		if explicit(pricing.CacheCreationPricePerTokenPriority, "priority_cache_write") {
 			cacheCreationPricePerToken = pricing.CacheCreationPricePerTokenPriority
 			cacheCreation5mPrice = pricing.CacheCreationPricePerTokenPriority
 		}
 		if pricing.CacheCreation1hPricePerTokenPriority != nil {
 			cacheCreation1hPrice = *pricing.CacheCreation1hPricePerTokenPriority
 		}
-		if pricing.CacheReadPricePerTokenPriority > 0 || pricing.PriorityOverrides["priority_cache_read"] {
+		if explicit(pricing.CacheReadPricePerTokenPriority, "priority_cache_read") {
 			cacheReadPricePerToken = pricing.CacheReadPricePerTokenPriority
 		}
 	} else {
