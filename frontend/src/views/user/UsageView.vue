@@ -390,6 +390,7 @@
   <Teleport to="body">
     <div
       v-if="tooltipVisible"
+      ref="costTooltipPanel"
       class="fixed z-9999 pointer-events-none -translate-y-1/2"
       :style="{
         left: tooltipPosition.x + 'px',
@@ -487,7 +488,7 @@
           </div>
         </div>
         <!-- Tooltip Arrow (left side) -->
-        <div
+        <div v-if="tooltipAttached"
           class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"
         ></div>
       </div>
@@ -500,7 +501,8 @@ import UsageBillingSummary from '@/components/common/UsageBillingSummary.vue'
 import { usageBillingLabel } from '@/utils/usageBilling'
 import TokenUsageSummary from '@/components/common/TokenUsageSummary.vue'
 import TokenCount from '@/components/common/TokenCount.vue'
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted, nextTick, useTemplateRef } from 'vue'
+import { placeSidePanel } from '@/utils/sidePanelPlacement'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
@@ -535,6 +537,8 @@ let abortController: AbortController | null = null
 
 // Tooltip state
 const tooltipVisible = ref(false)
+const tooltipAttached = ref(true)
+const costTooltipPanel = useTemplateRef<HTMLElement>('costTooltipPanel')
 const tooltipPosition = ref({ x: 0, y: 0 })
 const tooltipData = ref<UsageLog | null>(null)
 
@@ -899,12 +903,18 @@ const exportToCSV = async () => {
 const showTooltip = (event: Event, row: UsageLog) => {
   const target = event.currentTarget as HTMLElement
   const rect = target.getBoundingClientRect()
-
   tooltipData.value = row
-  // Position to the right of the icon, vertically centered
-  tooltipPosition.value.x = rect.right + 8
-  tooltipPosition.value.y = rect.top + rect.height / 2
+  // Right of the icon, vertically centred; then kept inside the viewport once measured.
+  tooltipPosition.value = { x: rect.right + 8, y: rect.top + rect.height / 2 }
+  tooltipAttached.value = true
   tooltipVisible.value = true
+  nextTick(() => {
+    const panel = costTooltipPanel.value
+    if (!panel || !tooltipVisible.value) return
+    const placed = placeSidePanel(rect, { width: panel.offsetWidth, height: panel.offsetHeight })
+    tooltipPosition.value = { x: placed.x, y: placed.y }
+    tooltipAttached.value = placed.attached
+  })
 }
 
 const hideTooltip = () => {

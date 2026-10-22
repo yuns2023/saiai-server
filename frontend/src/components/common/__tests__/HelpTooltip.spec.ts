@@ -74,4 +74,36 @@ describe('HelpTooltip', () => {
     await flushPromises()
     expect(tooltip.style.display).toBe('none')
   })
+
+  it('closes a pinned tooltip on Escape anywhere, on scroll, but not when tapping inside it', async () => {
+    const { wrapper, tooltip } = await open(500)
+    await wrapper.trigger('click')
+    tooltip.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    await flushPromises()
+    expect(tooltip.style.display).not.toBe('none')
+
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(tooltip.style.display).toBe('none')
+
+    await wrapper.trigger('click')
+    window.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    expect(tooltip.style.display).toBe('none')
+  })
+
+  it('describes a focusable custom trigger and mounts lazily when asked', async () => {
+    const wrapper = mount(HelpTooltip, {
+      props: { lazy: true },
+      slots: { trigger: '<button type="button">i</button>', default: 'Lazy body' },
+      attachTo: document.body,
+    })
+    const describedBy = wrapper.get('button').attributes('aria-describedby')
+    expect(describedBy).toMatch(/^help-tooltip-/)
+    expect(document.getElementById(describedBy!)).toBeNull()
+    await wrapper.get('button').trigger('focusin')
+    await flushPromises()
+    expect(document.getElementById(describedBy!)?.textContent).toContain('Lazy body')
+    wrapper.unmount()
+  })
 })

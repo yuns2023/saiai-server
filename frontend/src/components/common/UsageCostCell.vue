@@ -2,7 +2,7 @@
   <div class="text-sm" data-testid="usage-cost-cell">
     <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 md:flex-nowrap md:whitespace-nowrap">
       <!-- Billing source: icon + colour, full label in tooltip / accessible name -->
-      <HelpTooltip class="!ml-0">
+      <HelpTooltip lazy class="!ml-0">
         <template #trigger>
           <button
             type="button"
@@ -24,7 +24,7 @@
       <span v-if="row.account_payg_discount_multiplier != null && row.account_payg_discount_multiplier !== 1" class="rounded-sm bg-amber-100 px-1 text-[10px] text-amber-700 dark:bg-amber-500/20 dark:text-amber-300" :title="t('usage.legacyPaygAccountDiscount')">{{ row.account_payg_discount_multiplier }}x</span>
 
       <!-- Service tier: hidden for Standard/default, small icon otherwise -->
-      <HelpTooltip v-if="tier" class="!ml-0">
+      <HelpTooltip v-if="tier" lazy class="!ml-0">
         <template #trigger>
           <button
             type="button"
@@ -40,7 +40,7 @@
       </HelpTooltip>
 
       <!-- Secondary reference amounts: compact grey, explained in a tooltip -->
-      <HelpTooltip v-if="showReference && row.metered_cost != null" class="!ml-0">
+      <HelpTooltip v-if="showReference && row.metered_cost != null" lazy class="!ml-0">
         <template #trigger>
           <button
             type="button"
@@ -53,7 +53,7 @@
         </template>
         <span class="font-semibold">{{ t('hostedUsage.reference') }}</span>: {{ t('hostedUsage.hint') }}
       </HelpTooltip>
-      <HelpTooltip v-if="accountCost != null" class="!ml-0">
+      <HelpTooltip v-if="accountCost != null" lazy class="!ml-0">
         <template #trigger>
           <button
             type="button"
@@ -69,16 +69,17 @@
 
       <!-- Cost breakdown (rendered by the parent view) -->
       <button
+        ref="detailButton"
         type="button"
         class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-500 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:bg-gray-700 dark:text-gray-500 dark:hover:bg-blue-900/50 dark:hover:text-blue-400"
         :aria-label="t('usage.costDetails')"
         :aria-expanded="detailOpen"
         data-testid="usage-cost-detail"
-        @mouseenter="showDetail"
-        @mouseleave="hideDetail"
-        @focus="showDetail"
-        @blur="hideDetail"
-        @click="toggleDetail"
+        @mouseenter="detailOn('hover', $event)"
+        @mouseleave="detailOff('hover')"
+        @focus="detailOn('focus', $event)"
+        @blur="detailOff('focus')"
+        @click="onDetailClick"
       >
         <Icon name="infoCircle" size="xs" />
       </button>
@@ -88,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, useTemplateRef, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import HelpTooltip from './HelpTooltip.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -127,17 +128,48 @@ const billingLabel = computed(() => t(usageBillingLabel(props.row.billing_type))
 const tier = computed(() => (isNativeChatUsage(props.row) ? null : usageServiceTierVisual(props.row.service_tier)))
 const tierLabel = computed(() => `${t('usage.serviceTier')}: ${getUsageServiceTierLabel(formatUsageServiceTier(props.row.service_tier), t)}`)
 
-const detailOpen = ref(false)
-const showDetail = (event: Event) => {
-  detailOpen.value = true
-  emit('show-detail', event)
+// Cost breakdown panel (owned by the parent): hover, focus and tap are tracked
+// separately; tap toggles, and an outside tap, Escape, scroll or unmount closes it.
+type DetailSource = 'hover' | 'focus' | 'pin'
+const detailSources = ref(new Set<DetailSource>())
+const detailOpen = computed(() => detailSources.value.size > 0)
+const detailButton = useTemplateRef<HTMLButtonElement>('detailButton')
+
+const setDetail = (next: Set<DetailSource>, event?: Event) => {
+  const wasOpen = detailOpen.value
+  detailSources.value = next
+  if (detailOpen.value && !wasOpen && event) emit('show-detail', event)
+  if (!detailOpen.value && wasOpen) emit('hide-detail')
 }
-const hideDetail = () => {
-  detailOpen.value = false
-  emit('hide-detail')
+const detailOn = (source: DetailSource, event: Event) => setDetail(new Set(detailSources.value).add(source), event)
+const detailOff = (source: DetailSource) => {
+  const next = new Set(detailSources.value)
+  next.delete(source)
+  setDetail(next)
 }
-// Tap (touch) has no hover: a click opens the breakdown; blur/mouseleave close it.
-const toggleDetail = (event: Event) => showDetail(event)
+const closeDetail = () => setDetail(new Set())
+const onDetailClick = (event: Event) => {
+  if (detailSources.value.has('pin')) closeDetail()
+  else detailOn('pin', event)
+}
+
+const onOutsidePointer = (event: Event) => {
+  if (!detailButton.value?.contains(event.target as Node)) closeDetail()
+}
+const onKeydown = (event: Event) => {
+  if ((event as KeyboardEvent).key === 'Escape') closeDetail()
+}
+const setGlobalListeners = (active: boolean) => {
+  const method = active ? 'addEventListener' : 'removeEventListener'
+  document[method]('pointerdown', onOutsidePointer, true)
+  document[method]('keydown', onKeydown, true)
+  window[method]('scroll', closeDetail, true)
+}
+watch(detailOpen, setGlobalListeners)
+onBeforeUnmount(() => {
+  setGlobalListeners(false)
+  if (detailOpen.value) emit('hide-detail')
+})
 </script>
 
 <style scoped>

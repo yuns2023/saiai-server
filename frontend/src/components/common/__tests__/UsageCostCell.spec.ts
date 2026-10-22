@@ -21,14 +21,18 @@ const messages: Record<string, string> = {
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => messages[key] ?? key }) }))
 
 const base = { actual_cost: 0.071854, total_cost: 0.071854, billing_type: 0, service_tier: null }
-const render = (row: Record<string, unknown>, props: Record<string, unknown> = {}) =>
-  mount(UsageCostCell, { props: { row: { ...base, ...row }, ...props }, attachTo: document.body })
+const mounted: { unmount: () => void }[] = []
+const render = (row: Record<string, unknown>, props: Record<string, unknown> = {}) => {
+  const wrapper = mount(UsageCostCell, { props: { row: { ...base, ...row }, ...props }, attachTo: document.body })
+  mounted.push(wrapper)
+  return wrapper
+}
 
 // Visible cell text, excluding the teleported tooltip bodies.
 const cellText = (wrapper: ReturnType<typeof render>) => wrapper.get('[data-testid="usage-cost-cell"]').text()
 
 describe('UsageCostCell', () => {
-  afterEach(() => { document.body.innerHTML = '' })
+  afterEach(() => { mounted.splice(0).forEach((wrapper) => { try { wrapper.unmount() } catch { /* already unmounted */ } }) })
 
   it.each([
     [0, 'balance', '按量余额扣费'],
@@ -92,6 +96,42 @@ describe('UsageCostCell', () => {
     expect(wrapper.emitted('show-detail')).toHaveLength(3)
     expect(wrapper.emitted('hide-detail')).toHaveLength(2)
     expect(detail.attributes('aria-expanded')).toBe('true')
+  })
+
+  it('keeps the breakdown open while focused and closes it on a second tap', async () => {
+    const wrapper = render({})
+    const detail = wrapper.get('[data-testid="usage-cost-detail"]')
+    // touch sequence: emulated mouseenter -> focus -> click
+    await detail.trigger('mouseenter')
+    await detail.trigger('focus')
+    await detail.trigger('click')
+    await detail.trigger('mouseleave')
+    expect(detail.attributes('aria-expanded')).toBe('true')
+    await detail.trigger('click')
+    expect(detail.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.emitted('show-detail')).toHaveLength(1)
+    expect(wrapper.emitted('hide-detail')).toHaveLength(1)
+  })
+
+  it.each([
+    ['an outside tap', () => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))],
+    ['Escape', () => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))],
+    ['scroll', () => window.dispatchEvent(new Event('scroll'))],
+  ])('closes a tapped-open breakdown on %s', async (_name, act) => {
+    const wrapper = render({})
+    const detail = wrapper.get('[data-testid="usage-cost-detail"]')
+    await detail.trigger('click')
+    act()
+    await wrapper.vm.$nextTick()
+    expect(detail.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.emitted('hide-detail')).toHaveLength(1)
+  })
+
+  it('hides the parent breakdown when the row unmounts while open', async () => {
+    const wrapper = render({})
+    await wrapper.get('[data-testid="usage-cost-detail"]').trigger('click')
+    wrapper.unmount()
+    expect(wrapper.emitted('hide-detail')).toHaveLength(1)
   })
 })
 

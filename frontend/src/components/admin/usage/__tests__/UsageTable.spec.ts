@@ -205,7 +205,7 @@ describe('admin UsageTable tooltip', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('Fast')
+    expect(wrapper.get('[data-testid="usage-cost-tier-icon"]').attributes('aria-label')).toContain('Fast')
 
     await wrapper.get('[data-testid="usage-cost-detail"]').trigger('mouseenter')
     await nextTick()

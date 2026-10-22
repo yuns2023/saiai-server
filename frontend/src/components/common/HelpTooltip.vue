@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef, nextTick, onBeforeUnmount } from 'vue'
+import { computed, ref, useId, useTemplateRef, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 
-defineProps<{
+const props = withDefaults(defineProps<{
   content?: string
-}>()
+  /**
+   * Only mount the tooltip body while it is open. Use for many per-row tooltips
+   * whose trigger already carries the full text as its accessible name.
+   */
+  lazy?: boolean
+}>(), { lazy: false })
 
+const tooltipId = `help-tooltip-${useId()}`
 const hovered = ref(false)
 const focused = ref(false)
 // Tap/click pins the tooltip open (touch devices have no hover and iOS does not focus on tap).
@@ -20,7 +26,7 @@ const GAP = 8
 const HALF_WIDTH = 128 // w-64
 const VIEWPORT_MARGIN = 8
 
-// Hover and keyboard focus are tracked separately so one cannot hide the other.
+// Hover, keyboard focus and tap are tracked separately so one cannot hide the other.
 function open(source: typeof hovered) {
   source.value = true
   nextTick(updatePosition)
@@ -45,22 +51,7 @@ function onFocusOut() {
 function closeAll() {
   hovered.value = false
   focused.value = false
-  setPinned(false)
-}
-
-function onEscape() {
-  closeAll()
-}
-
-function onOutsidePointer(event: Event) {
-  if (triggerRef.value?.contains(event.target as Node)) return
-  closeAll()
-}
-
-function setPinned(value: boolean) {
-  pinned.value = value
-  if (value) document.addEventListener('pointerdown', onOutsidePointer, true)
-  else document.removeEventListener('pointerdown', onOutsidePointer, true)
+  pinned.value = false
 }
 
 function onClick() {
@@ -68,11 +59,43 @@ function onClick() {
     closeAll()
     return
   }
-  setPinned(true)
-  nextTick(updatePosition)
+  open(pinned)
 }
 
-onBeforeUnmount(() => setPinned(false))
+function onOutsidePointer(event: Event) {
+  const target = event.target as Node
+  if (triggerRef.value?.contains(target) || tooltipRef.value?.contains(target)) return
+  closeAll()
+}
+
+function onKeydown(event: Event) {
+  if ((event as KeyboardEvent).key !== 'Escape') return
+  // Close this layer first (e.g. before an enclosing dialog reacts).
+  event.stopPropagation()
+  closeAll()
+}
+
+// A fixed-position tooltip would drift away from its trigger on scroll/resize.
+function onViewportChange() {
+  closeAll()
+}
+
+function setGlobalListeners(active: boolean) {
+  const method = active ? 'addEventListener' : 'removeEventListener'
+  document[method]('pointerdown', onOutsidePointer, true)
+  document[method]('keydown', onKeydown, true)
+  window[method]('scroll', onViewportChange, true)
+  window[method]('resize', onViewportChange)
+}
+
+watch(show, (visible) => setGlobalListeners(visible))
+onBeforeUnmount(() => setGlobalListeners(false))
+
+// Describe the focusable trigger by the tooltip body (WAI-ARIA tooltip pattern).
+onMounted(() => {
+  const focusable = triggerRef.value?.querySelector<HTMLElement>('button, a[href], input, [tabindex]')
+  if (focusable && !focusable.hasAttribute('aria-describedby')) focusable.setAttribute('aria-describedby', tooltipId)
+})
 
 function updatePosition() {
   const el = triggerRef.value
@@ -92,6 +115,8 @@ function updatePosition() {
     left: `${clamped}px`,
   }
 }
+
+const rendered = computed(() => !props.lazy || show.value)
 </script>
 
 <template>
@@ -102,7 +127,6 @@ function updatePosition() {
     @mouseleave="onLeave"
     @focusin="onFocusIn"
     @focusout="onFocusOut"
-    @keydown.esc="onEscape"
     @click="onClick"
   >
     <!-- Trigger Icon -->
@@ -125,7 +149,9 @@ function updatePosition() {
     <!-- Teleport to body to escape modal overflow clipping -->
     <Teleport to="body">
       <div
+        v-if="rendered"
         v-show="show"
+        :id="tooltipId"
         ref="tooltip"
         role="tooltip"
         class="fixed z-99999 w-64 -translate-x-1/2 rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 dark:bg-gray-800"
