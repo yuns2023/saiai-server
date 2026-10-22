@@ -29,12 +29,13 @@ func (h *DashboardHandler) GetAPIKeySpendingRanking(c *gin.Context) {
 		}
 	}
 	limit := parseRankingLimit(c.DefaultQuery("limit", "12"))
+	// Keep the zone offset: start_date/end_date in the cached payload derive from it.
 	keyRaw, _ := json.Marshal(struct {
 		Start  string `json:"start"`
 		End    string `json:"end"`
 		UserID int64  `json:"user_id"`
 		Limit  int    `json:"limit"`
-	}{startTime.UTC().Format(time.RFC3339Nano), endTime.UTC().Format(time.RFC3339Nano), userID, limit})
+	}{startTime.Format(time.RFC3339Nano), endTime.Format(time.RFC3339Nano), userID, limit})
 
 	cached, hit, err := dashboardAPIKeysRankingCache.GetOrLoad(string(keyRaw), func() (any, error) {
 		ranking, err := h.dashboardService.GetAPIKeySpendingRanking(c.Request.Context(), startTime, endTime, userID, limit)
