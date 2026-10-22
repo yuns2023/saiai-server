@@ -390,14 +390,15 @@ describe('user UsageView density layout', () => {
 
     expect(wrapper.get('[data-testid="layout"]').attributes('data-dense')).toBe('true')
     const tokenCell = wrapper.get('[data-testid="usage-token-cell"]')
-    expect(tokenCell.classes()).toContain('whitespace-nowrap')
+    expect(tokenCell.classes()).toContain('md:whitespace-nowrap')
     const text = tokenCell.text()
     expect(text).toContain('1.2K')
     expect(text).toContain('80')
     expect(text).toContain('55.9K')
     expect(text).toContain('2.05K')
     const ua = wrapper.find('[title^="codex_cli_rs/0.140.0"]')
-    expect(ua.classes()).toContain('truncate')
+    expect(ua.classes()).toContain('md:truncate')
+    expect(ua.classes()).toContain('break-all')
   })
 
   it('collapses the stat cards and remembers the choice', async () => {

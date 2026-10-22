@@ -64,7 +64,7 @@
         <div class="usage-filter-bar card px-4 py-2.5" data-testid="usage-filter-bar">
           <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
             <!-- API Key Filter -->
-            <div class="flex items-center gap-2">
+            <div class="flex w-full flex-col items-start gap-1 sm:w-auto sm:flex-row sm:items-center sm:gap-2">
               <span class="whitespace-nowrap text-sm font-medium text-gray-600 dark:text-gray-300">{{ t('usage.apiKeyFilter') }}</span>
               <div class="w-44">
                 <Select
@@ -78,7 +78,7 @@
             </div>
 
             <!-- Date Range Filter -->
-            <div class="flex items-center gap-2">
+            <div class="flex w-full flex-col items-start gap-1 sm:w-auto sm:flex-row sm:items-center sm:gap-2">
               <span class="whitespace-nowrap text-sm font-medium text-gray-600 dark:text-gray-300">{{ t('usage.timeRange') }}</span>
               <DateRangePicker
                 v-model:start-date="startDate"
@@ -216,7 +216,7 @@
               <span class="text-gray-400">({{ row.image_size || t('usage.imageSizeUnknown') }})</span>
             </div>
             <!-- Token 请求：单行展示 输入/输出/缓存读/缓存写 -->
-            <div v-else class="flex items-center gap-2 whitespace-nowrap text-sm" data-testid="usage-token-cell">
+            <div v-else class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm md:flex-nowrap md:whitespace-nowrap" data-testid="usage-token-cell">
               <span class="inline-flex items-center gap-0.5">
                 <Icon name="arrowDown" size="xs" class="text-emerald-500" />
                 <span class="font-medium text-gray-900 dark:text-white"><TokenCount :value="row.input_tokens" :label="t('tokens.input')" /></span>
@@ -312,7 +312,7 @@
           </template>
 
           <template #cell-user_agent="{ row }">
-            <span v-if="row.user_agent" class="block max-w-[360px] truncate text-sm text-gray-600 dark:text-gray-400" :title="row.user_agent">{{ formatUserAgent(row.user_agent) }}</span>
+            <span v-if="row.user_agent" class="block max-w-[360px] whitespace-normal break-all text-sm text-gray-600 dark:text-gray-400 md:truncate md:break-normal" :title="row.user_agent">{{ formatUserAgent(row.user_agent) }}</span>
             <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
           </template>
 

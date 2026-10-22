@@ -48,4 +48,14 @@ describe('HelpTooltip', () => {
     await wrapper.trigger('focusout')
     expect(tooltip.style.display).toBe('none')
   })
+
+  it('stays open while focused even after the pointer leaves, and closes on Escape', async () => {
+    const { wrapper, tooltip } = await open(500)
+    await wrapper.trigger('focusin')
+    await wrapper.trigger('mouseleave')
+    await flushPromises()
+    expect(tooltip.style.display).not.toBe('none')
+    await wrapper.trigger('keydown', { key: 'Escape' })
+    expect(tooltip.style.display).toBe('none')
+  })
 })

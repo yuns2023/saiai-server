@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, useTemplateRef, nextTick } from 'vue'
+import { computed, ref, useTemplateRef, nextTick } from 'vue'
 
 defineProps<{
   content?: string
 }>()
 
-const show = ref(false)
+const hovered = ref(false)
+const focused = ref(false)
+const show = computed(() => hovered.value || focused.value)
 const triggerRef = useTemplateRef<HTMLElement>('trigger')
 const tooltipRef = useTemplateRef<HTMLElement>('tooltip')
 const placement = ref<'top' | 'bottom'>('top')
@@ -16,13 +18,31 @@ const GAP = 8
 const HALF_WIDTH = 128 // w-64
 const VIEWPORT_MARGIN = 8
 
-function onEnter() {
-  show.value = true
+// Hover and keyboard focus are tracked separately so one cannot hide the other.
+function open(source: typeof hovered) {
+  source.value = true
   nextTick(updatePosition)
 }
 
+function onEnter() {
+  open(hovered)
+}
+
 function onLeave() {
-  show.value = false
+  hovered.value = false
+}
+
+function onFocusIn() {
+  open(focused)
+}
+
+function onFocusOut() {
+  focused.value = false
+}
+
+function onEscape() {
+  hovered.value = false
+  focused.value = false
 }
 
 function updatePosition() {
@@ -51,8 +71,9 @@ function updatePosition() {
     class="group relative ml-1 inline-flex items-center align-middle"
     @mouseenter="onEnter"
     @mouseleave="onLeave"
-    @focusin="onEnter"
-    @focusout="onLeave"
+    @focusin="onFocusIn"
+    @focusout="onFocusOut"
+    @keydown.esc="onEscape"
   >
     <!-- Trigger Icon -->
     <slot name="trigger">
