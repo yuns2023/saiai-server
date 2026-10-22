@@ -40,6 +40,10 @@ func (r smartGroupRepo) GetByID(_ context.Context, id int64) (*Group, error) {
 	return g, nil
 }
 
+func (r smartGroupRepo) GetByIDLite(ctx context.Context, id int64) (*Group, error) {
+	return r.GetByID(ctx, id)
+}
+
 type smartSubRepo struct {
 	UserSubscriptionRepository
 	sub *UserSubscription

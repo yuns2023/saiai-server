@@ -1478,12 +1478,17 @@ const handleSubmit = async () => {
     rate_limit_7d: formData.value.rate_limit_7d && formData.value.rate_limit_7d > 0 ? formData.value.rate_limit_7d : 0,
   } : { rate_limit_5h: 0, rate_limit_1d: 0, rate_limit_7d: 0 }
 
+  // Omit an untouched, never-enabled policy so ordinary saves keep the Key's
+  // stored policy (NULL) instead of materializing a disabled one.
+  const editingPolicy = showEditModal.value && selectedKey.value?.smart_switch
+  const smartSwitch = editingPolicy || formData.value.smart_switch.enabled ? formData.value.smart_switch : undefined
+
   submitting.value = true
   try {
     let createdKey: ApiKey | null = null
     if (showEditModal.value && selectedKey.value) {
       await keysAPI.update(selectedKey.value.id, {
-        smart_switch: formData.value.smart_switch,
+        smart_switch: smartSwitch,
         name: formData.value.name,
         group_id: formData.value.group_id,
         status: formData.value.status,
@@ -1507,7 +1512,7 @@ const handleSubmit = async () => {
         quota,
         expiresInDays,
         rateLimitData,
-        formData.value.smart_switch
+        smartSwitch
       )
       appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded

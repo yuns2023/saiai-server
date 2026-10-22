@@ -20,8 +20,10 @@ func smartSwitchRequest(c *gin.Context, key *service.APIKey) bool {
 	if key.SmartSwitch == nil || !key.SmartSwitch.Enabled || c.Request.Method != http.MethodPost {
 		return false
 	}
+	// Responses subpaths such as /responses/compact share the Responses handler
+	// and billing, so they must not fall back to the Key's bound group.
 	path := c.Request.URL.Path
-	return strings.HasSuffix(path, "/messages") || strings.HasSuffix(path, "/responses")
+	return strings.HasSuffix(path, "/messages") || strings.HasSuffix(path, "/responses") || strings.Contains(path, "/responses/")
 }
 
 func applySmartSwitch(c *gin.Context, key *service.APIKey, keys *service.APIKeyService, subscriptions *service.SubscriptionService, cfg *config.Config) (*service.APIKey, bool) {

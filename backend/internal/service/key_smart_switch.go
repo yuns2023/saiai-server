@@ -139,7 +139,8 @@ func (s *APIKeyService) SelectSmartSwitchGroup(ctx context.Context, key *APIKey,
 	if key.SmartSwitchOriginalGroupID != nil {
 		baseID = key.SmartSwitchOriginalGroupID
 	}
-	base, err := s.groupRepo.GetByID(ctx, *baseID)
+	// Per-request selection does not use account counts; skip their queries.
+	base, err := s.groupRepo.GetByIDLite(ctx, *baseID)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +161,7 @@ func (s *APIKeyService) SelectSmartSwitchGroup(ctx context.Context, key *APIKey,
 			skipped = append(skipped, "group_unavailable")
 			continue
 		}
-		group, err := s.groupRepo.GetByID(ctx, id)
+		group, err := s.groupRepo.GetByIDLite(ctx, id)
 		if errors.Is(err, ErrGroupNotFound) {
 			skipped = append(skipped, "group_missing")
 			continue

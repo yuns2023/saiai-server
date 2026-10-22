@@ -53,3 +53,25 @@ func TestSmartSwitchAdvanceUpdatesEffectiveSubscription(t *testing.T) {
 	require.True(t, ok)
 	require.Same(t, key, actual)
 }
+
+func TestSmartSwitchRebindReplacesPreviousGroupClaudeState(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+	first, second := int64(1), int64(2)
+	c.Request = c.Request.WithContext(service.WithClaudeOAuthGroupMode(c.Request.Context(), first, service.ClaudeOAuthModePinned))
+	h := &GatewayHandler{gatewayService: &service.GatewayService{}}
+	key := &service.APIKey{GroupID: &second, Group: &service.Group{ID: second}}
+	parsed := &service.ParsedRequest{MetadataUserID: "TEST_ONLY_USER", Model: "TEST_ONLY_MODEL"}
+
+	sessionKey, boundAccountID, source, ok := h.rebindSmartSwitchGroupState(c, key, service.PlatformAnthropic, parsed, false)
+	require.True(t, ok)
+	require.Zero(t, boundAccountID)
+	require.Empty(t, source)
+	expected, _, err := h.gatewayService.GenerateStickySessionHashForRequest(context.Background(), &second, service.PlatformAnthropic, parsed)
+	require.NoError(t, err)
+	require.Equal(t, expected, sessionKey)
+	// The pinned mode resolved for the first group no longer owns the context.
+	mode, err := h.gatewayService.ResolveClaudeOAuthGroupMode(c.Request.Context(), &first, service.PlatformAnthropic)
+	require.NoError(t, err)
+	require.Empty(t, mode)
+}

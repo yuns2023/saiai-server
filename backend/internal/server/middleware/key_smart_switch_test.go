@@ -47,6 +47,10 @@ func (r smartAuthGroupRepo) GetByID(_ context.Context, id int64) (*service.Group
 	return r.groups[id], nil
 }
 
+func (r smartAuthGroupRepo) GetByIDLite(ctx context.Context, id int64) (*service.Group, error) {
+	return r.GetByID(ctx, id)
+}
+
 func TestSmartSwitchAuthUsesActualBillingContextAndPreservesWireBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, compressed := range []bool{false, true} {

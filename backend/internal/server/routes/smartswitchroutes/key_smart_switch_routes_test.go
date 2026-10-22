@@ -183,6 +183,10 @@ func (r smartRoutesGroupRepo) GetByID(_ context.Context, id int64) (*service.Gro
 	return &copied, nil
 }
 
+func (r smartRoutesGroupRepo) GetByIDLite(ctx context.Context, id int64) (*service.Group, error) {
+	return r.GetByID(ctx, id)
+}
+
 type smartRoutesSubRepo struct {
 	service.UserSubscriptionRepository
 	lab *smartRoutesLab
@@ -336,7 +340,12 @@ func newSmartRoutesGateway(t *testing.T, lab *smartRoutesLab) *httptest.Server {
 
 func smartRoutesPost(t *testing.T, gateway *httptest.Server, body string) (int, string) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodPost, gateway.URL+"/v1/responses", bytes.NewReader([]byte(body)))
+	return smartRoutesPostPath(t, gateway, "/v1/responses", body)
+}
+
+func smartRoutesPostPath(t *testing.T, gateway *httptest.Server, path, body string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, gateway.URL+path, bytes.NewReader([]byte(body)))
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+smartTestKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -480,6 +489,21 @@ func TestSmartSwitchResponsesRoutes(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, status, resp)
 		require.Contains(t, resp, "daily usage limit exceeded")
 		require.Zero(t, lab.calls("TEST_ONLY_UPSTREAM_SUB")+lab.calls("TEST_ONLY_UPSTREAM_PAYG"))
+	})
+
+	// Compact shares the Responses handler and billing; it must follow the
+	// policy instead of the Key's bound group.
+	t.Run("responses_subpath_follows_policy", func(t *testing.T) {
+		lab.resetObservations()
+		setDailyUsage(5, time.Now())
+		status, resp := smartRoutesPostPath(t, gateway, "/v1/responses/compact", body)
+		require.Equal(t, http.StatusOK, status, resp)
+		require.Zero(t, lab.calls("TEST_ONLY_UPSTREAM_SUB"))
+		require.Equal(t, 1, lab.calls("TEST_ONLY_UPSTREAM_PAYG"))
+		status, resp = smartRoutesPostPath(t, gateway, "/v1/responses/compact", `{"model":"gpt-5.5","input":"hi","previous_response_id":"resp_prev"}`)
+		require.Equal(t, http.StatusBadRequest, status, resp)
+		require.Contains(t, resp, "SMART_SWITCH_CONTINUATION_UNSUPPORTED")
+		require.Equal(t, 1, lab.calls("TEST_ONLY_UPSTREAM_PAYG"))
 	})
 
 	t.Run("stateful_continuation_is_rejected_before_routing", func(t *testing.T) {

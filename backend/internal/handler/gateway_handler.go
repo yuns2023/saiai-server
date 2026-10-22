@@ -505,6 +505,31 @@ func (h *GatewayHandler) checkClaudeDeviceLimit(c *gin.Context, apiKey *service.
 	return false
 }
 
+// rebindSmartSwitchGroupState rebuilds the group-bound request state after a
+// pre-upstream smart switch. Device capacity, the sticky session hash and the
+// Claude OAuth group context all belong to a group; reusing the previous
+// group's state would write pinned bindings under the group without accounts.
+// It writes the error response and returns false when the request must stop.
+func (h *GatewayHandler) rebindSmartSwitchGroupState(c *gin.Context, key *service.APIKey, platform string, parsed *service.ParsedRequest, streamStarted bool) (string, int64, string, bool) {
+	if !h.checkClaudeDeviceLimit(c, key, parsed, streamStarted) {
+		return "", 0, "", false
+	}
+	sessionKey, mode, err := h.gatewayService.GenerateStickySessionHashForRequest(c.Request.Context(), key.GroupID, platform, parsed)
+	if err != nil {
+		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
+		return "", 0, "", false
+	}
+	if key.GroupID != nil && platform == service.PlatformAnthropic {
+		c.Request = c.Request.WithContext(service.WithClaudeOAuthGroupMode(c.Request.Context(), *key.GroupID, mode))
+	}
+	var boundAccountID int64
+	var source string
+	if sessionKey != "" {
+		boundAccountID, source, _ = h.gatewayService.GetCachedSessionAccountIDWithSource(c.Request.Context(), key.GroupID, sessionKey)
+	}
+	return sessionKey, boundAccountID, source, true
+}
+
 // Messages handles Claude API compatible messages endpoint
 // POST /v1/messages
 func (h *GatewayHandler) Messages(c *gin.Context) {
@@ -954,6 +979,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", shapeErr.Error(), streamStarted)
 						return
 					}
+					var rebound bool
+					sessionKey, sessionBoundAccountID, stickyBindingSource, rebound = h.rebindSmartSwitchGroupState(c, currentAPIKey, platform, parsedReq, streamStarted)
+					if !rebound {
+						return
+					}
+					hasBoundSession = sessionKey != "" && sessionBoundAccountID > 0
+					fs = NewFailoverState(h.maxAccountSwitches, hasBoundSession)
 					continue
 				}
 				if len(fs.FailedAccountIDs) == 0 {
