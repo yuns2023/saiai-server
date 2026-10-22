@@ -234,14 +234,21 @@ and then the client is closed with 1008. v1 reads the next client frame only
 after the current turn has completed and been billed (each upstream read is
 bounded by `gateway.openai_ws.read_timeout_seconds`).
 
-The v2 drain is the same after a client disconnect. While forwarded turns are
+The v2 drain is the same after a client disconnect, and after a failed write
+to the client (the usual way a vanished client surfaces): the relay switches to
+discard mode instead of ending the upstream read. While forwarded turns are
 outstanding the relay keeps reading the upstream, discarding output, until
 every turn has reported terminal usage, bounded by
 `gateway.openai_ws.read_timeout_seconds` (default 15 minutes) for the whole
 drain and by the same value as the idle watchdog. Only when no turn is
-outstanding does the short 1.2-second drain apply. The user and account
-concurrency slots stay held until the drain ends; this is intentional, because
-the upstream account is still generating for that user. If the cap or an
+outstanding does the short 1.2-second drain apply. Pipelined v2 turns of one
+session share a single user/account concurrency slot pair, which is held until
+the last outstanding turn has finished (including turns finished by the
+drain); this is intentional, because the upstream account is still generating
+for that user. Slots expire in Redis `gateway.concurrency_slot_ttl_minutes`
+after acquisition and are not renewed while held (the cache exposes no renewal
+to holders); a turn and its drain that outlive the TTL lose the reservation
+early, which can over-admit concurrency but does not affect billing. If the cap or an
 upstream failure ends the drain first, the relay reports the unfinished
 response IDs and an error is logged; their usage is unknown because the relay
 learns usage only from terminal events.
@@ -322,8 +329,12 @@ the reported usage. In both cases a warning with account, model, resolved
 pricing model and upstream request ID is logged. SSE per-image usage on
 image-bearing `*.completed` events is summed and the floor applies per image
 missing output usage. An event that carries usage without a single image is
-treated as an aggregate covering every image and replaces the per-image sum,
-so it is not double counted. The OAuth Images compatibility adapter applies
+treated as an aggregate covering every image: it replaces only the fields it
+reports (input-only aggregate usage keeps the per-image output), so nothing is
+double counted. Images listed in an aggregate `data` array beyond the
+per-image completed events are floored unless an aggregate output covers
+them. Other non-standard shapes (conflicting or partial aggregates) are not
+modelled; the last aggregate wins. The OAuth Images compatibility adapter applies
 the same floor to its returned images.
 
 ## Input cache read rate

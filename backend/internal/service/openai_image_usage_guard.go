@@ -144,14 +144,20 @@ func addOpenAIImageUsage(total *openAIImageUsage, add openAIImageUsage) {
 //     its own usage. Per-image usages are summed; completed images without
 //     output usage are counted as missing.
 //   - aggregate: an event carrying usage but no single image (for example a
-//     final summary event, or an event with a "data" array). The last
-//     aggregate usage covers every image and replaces the per-image sum, so
-//     a stream reporting both is not double counted.
+//     final summary event, or an event with a "data" array). It covers every
+//     image, so it replaces only the fields it reports: input-only aggregate
+//     usage keeps the per-image output usage, and an aggregate with output
+//     usage covers all images.
+//
+// When an aggregate "data" array lists more images than per-image completed
+// events, the uncovered images count as missing output unless an aggregate
+// output covers them. A reported zero is treated as absent. Other shapes of
+// non-standard upstreams (several conflicting aggregates, partial aggregates
+// that cover only some images) are not modelled: the last aggregate wins.
 func parseOpenAIImageSSEUsage(body []byte) openAIImageResponseUsage {
 	parsed := openAIImageResponseUsage{sse: true}
 	var perImage openAIImageUsage
 	var aggregate openAIImageUsage
-	hasAggregate := false
 	completedImages := 0
 	completedWithoutOutput := 0
 	dataImages := 0
@@ -161,8 +167,7 @@ func parseOpenAIImageSSEUsage(body []byte) openAIImageResponseUsage {
 		}
 		event := gjson.ParseBytes(payload)
 		hasUsage := event.Get("usage").IsObject()
-		eventDataImages := countOpenAIImageDataEntries(event.Get("data"))
-		if eventDataImages > 0 {
+		if eventDataImages := countOpenAIImageDataEntries(event.Get("data")); eventDataImages > 0 {
 			dataImages = eventDataImages
 		}
 		isImageEvent := strings.HasSuffix(event.Get("type").String(), ".completed") && openAIImageEntryHasData(event)
@@ -179,24 +184,21 @@ func parseOpenAIImageSSEUsage(body []byte) openAIImageResponseUsage {
 			}
 		case hasUsage:
 			aggregate = parseOpenAIImageUsage(payload)
-			hasAggregate = true
 		}
 	})
 	parsed.images = completedImages
-	if parsed.images == 0 {
+	if dataImages > parsed.images {
 		parsed.images = dataImages
 	}
-	switch {
-	case hasAggregate:
-		parsed.usage = aggregate
-		if aggregate.ImageOutputTokens == 0 {
-			parsed.imagesWithoutOutputUsage = parsed.images
-		}
-	case completedImages > 0:
-		parsed.usage = perImage
-		parsed.imagesWithoutOutputUsage = completedWithoutOutput
-	default:
-		parsed.imagesWithoutOutputUsage = parsed.images
+	parsed.usage = perImage
+	if aggregate.totalInputTokens() > 0 {
+		parsed.usage.TextInputTokens = aggregate.TextInputTokens
+		parsed.usage.ImageInputTokens = aggregate.ImageInputTokens
 	}
+	if aggregate.ImageOutputTokens > 0 {
+		parsed.usage.ImageOutputTokens = aggregate.ImageOutputTokens
+		return parsed
+	}
+	parsed.imagesWithoutOutputUsage = completedWithoutOutput + (parsed.images - completedImages)
 	return parsed
 }

@@ -162,6 +162,9 @@ type relayExitSignal struct {
 	graceful         bool
 	wroteDownstream  bool
 	wroteCurrentTurn bool
+	// drainOutstanding marks a client write failure after which the upstream
+	// reader keeps running in discard mode to collect outstanding usage.
+	drainOutstanding bool
 }
 
 type observedUpstreamEvent struct {
@@ -310,7 +313,9 @@ func Relay(
 	})
 	markActivity()
 
-	exitCh := make(chan relayExitSignal, 3)
+	// The client reader and the watchdog send at most once; the upstream
+	// reader may send twice (a client write failure, then the drain result).
+	exitCh := make(chan relayExitSignal, 4)
 	dropDownstreamWrites := atomic.Bool{}
 	go runClientToUpstream(relayCtx, clientConn, writeUpstream, markActivity, clientToUpstreamFrames, clientTurns, state, options.OnClientTurn, options.TurnMetadata, onTrace, exitCh)
 	go runUpstreamToClient(
@@ -357,10 +362,15 @@ func Relay(
 	}
 	if firstExit.stage == "read_client" && firstExit.graceful {
 		dropDownstreamWrites.Store(true)
-		secondExit, hasSecondExit = waitRelayExit(exitCh, drainWindow())
+		secondExit, hasSecondExit = waitRelayDrainExit(exitCh, drainWindow())
 	} else if firstExit.stage == relayStageClientTurnRejected && state.turns.hasOutstanding() {
 		dropDownstreamWrites.Store(true)
-		secondExit, hasSecondExit = waitRelayExit(exitCh, drainWindow())
+		secondExit, hasSecondExit = waitRelayDrainExit(exitCh, drainWindow())
+	} else if firstExit.stage == "write_client" && firstExit.drainOutstanding {
+		// A failed client write usually means the client is gone; the
+		// upstream reader is already discarding output, so bill the
+		// outstanding turns the same way as after a disconnect.
+		secondExit, hasSecondExit = waitRelayDrainExit(exitCh, drainWindow())
 	} else {
 		relayCancel()
 		_ = upstreamConn.Close()
@@ -695,13 +705,24 @@ func runUpstreamToClient(
 				WroteDownstream: wroteDownstream,
 				Error:           writeErr.Error(),
 			})
+			drainOutstanding := state != nil && state.turns.hasOutstanding() && dropDownstreamWrites != nil
+			if drainOutstanding {
+				// Switch to discard mode before signalling so no later frame
+				// is written to the broken client.
+				dropDownstreamWrites.Store(true)
+			}
 			exitCh <- relayExitSignal{
 				stage:            "write_client",
 				err:              writeErr,
 				wroteDownstream:  wroteDownstream,
 				wroteCurrentTurn: wroteCurrentTurn,
+				drainOutstanding: drainOutstanding,
 			}
-			return
+			if !drainOutstanding {
+				return
+			}
+			markActivity()
+			continue
 		}
 		if observedEvent.terminal && state != nil {
 			state.terminalFrameForwarded.Store(true)
@@ -1346,6 +1367,27 @@ func minDuration(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
+}
+
+// waitRelayDrainExit waits for the upstream drain to end. Client-side exits
+// (the client reader failing after a write failure) do not end the drain.
+func waitRelayDrainExit(exitCh <-chan relayExitSignal, timeout time.Duration) (relayExitSignal, bool) {
+	if timeout <= 0 {
+		timeout = 200 * time.Millisecond
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		select {
+		case sig := <-exitCh:
+			if sig.stage == "read_client" || sig.stage == relayStageClientTurnRejected {
+				continue
+			}
+			return sig, true
+		case <-deadline.C:
+			return relayExitSignal{}, false
+		}
+	}
 }
 
 func waitRelayExit(exitCh <-chan relayExitSignal, timeout time.Duration) (relayExitSignal, bool) {

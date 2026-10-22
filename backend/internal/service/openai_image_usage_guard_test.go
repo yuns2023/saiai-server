@@ -80,6 +80,12 @@ func TestResolveOpenAIImageResponseUsage_SSEPerImageAndAggregate(t *testing.T) {
 		{name: "aggregate_without_output_floors_every_image",
 			body:   "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"A\"}\n\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"B\"}\n\ndata: {\"type\":\"response.done\",\"usage\":{\"input_tokens\":10}}\n\n",
 			images: 2, input: 10, output: 2 * floor},
+		{name: "input_only_aggregate_keeps_per_image_output",
+			body:   "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"A\",\"usage\":{\"input_tokens\":5,\"output_tokens\":100}}\n\ndata: {\"type\":\"response.done\",\"usage\":{\"input_tokens\":12}}\n\n",
+			images: 1, input: 12, output: 100},
+		{name: "aggregate_data_array_with_uncovered_images_floors_them",
+			body:   "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"A\",\"usage\":{\"input_tokens\":5,\"output_tokens\":100}}\n\ndata: {\"type\":\"response.done\",\"data\":[{\"b64_json\":\"A\"},{\"b64_json\":\"B\"},{\"b64_json\":\"C\"}]}\n\n",
+			images: 3, input: 5, output: 100 + 2*floor},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -115,3 +115,72 @@ func TestRelay_RejectedFrameDrainsLongOutstandingTurn(t *testing.T) {
 		t.Fatal("outstanding turn was not reported for billing")
 	}
 }
+
+// writeFailingClientConn fails every write (a client that is gone without a
+// clean close) while its reader blocks until the relay ends.
+type writeFailingClientConn struct{}
+
+func (writeFailingClientConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	<-ctx.Done()
+	return coderws.MessageText, nil, ctx.Err()
+}
+
+func (writeFailingClientConn) WriteFrame(context.Context, coderws.MessageType, []byte) error {
+	return errors.New("write: broken pipe")
+}
+
+func (writeFailingClientConn) Close() error { return nil }
+
+// scriptedUpstreamConn returns frames with a per-frame delay.
+type scriptedUpstreamConn struct {
+	*passthroughTestFrameConn
+	delays []time.Duration
+	reads  int
+}
+
+func (c *scriptedUpstreamConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	if c.reads < len(c.delays) && c.delays[c.reads] > 0 {
+		timer := time.NewTimer(c.delays[c.reads])
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return coderws.MessageText, nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	c.reads++
+	return c.passthroughTestFrameConn.ReadFrame(ctx)
+}
+
+// A client write failure mid-turn switches the relay to discard mode; the
+// turn is still drained and billed even when it finishes long afterwards.
+func TestRelay_ClientWriteFailureDrainsOutstandingTurn(t *testing.T) {
+	t.Parallel()
+	upstreamConn := &scriptedUpstreamConn{
+		passthroughTestFrameConn: newPassthroughTestFrameConn([]passthroughTestFrame{
+			{msgType: coderws.MessageText, payload: []byte(`{"type":"response.output_text.delta","response_id":"resp_wf","delta":"x"}`)},
+			{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_wf","usage":{"input_tokens":4,"output_tokens":777}}}`)},
+		}, false),
+		delays: []time.Duration{0, 1500 * time.Millisecond},
+	}
+	completed := make(chan RelayTurnResult, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, relayExit := Relay(ctx, writeFailingClientConn{}, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5.4"}`), RelayOptions{
+		UpstreamDrainTimeout:        200 * time.Millisecond,
+		OutstandingTurnDrainTimeout: 3 * time.Second,
+		OnTurnComplete:              func(turn RelayTurnResult) { completed <- turn },
+	})
+	require.NotNil(t, relayExit)
+	require.Equal(t, "write_client", relayExit.Stage)
+	require.Equal(t, 777, result.Usage.OutputTokens)
+	require.Empty(t, result.UnbilledResponseIDs)
+	select {
+	case turn := <-completed:
+		require.Equal(t, "resp_wf", turn.RequestID)
+		require.Equal(t, 777, turn.Usage.OutputTokens)
+	default:
+		t.Fatal("turn was not billed after the client write failure")
+	}
+}
