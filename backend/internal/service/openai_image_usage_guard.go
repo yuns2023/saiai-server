@@ -20,9 +20,10 @@ const openAIImageMissingUsageOutputTokensPerImage = 6240
 
 // resolveOpenAIImageResponseUsage extracts usage and the image count from a
 // successful direct Image API response. It accepts the expected JSON body and
-// an SSE body (event payloads carrying usage, "*.completed" events counted as
-// images). When images were returned but no usage could be parsed it fails
-// closed with a conservative output-token charge instead of billing zero.
+// an SSE body (usage from the last event carrying it; completed events that
+// carry image data count as images). Only entries that actually carry image
+// data (b64_json or url) are counted, so a 2xx response without images is
+// never charged by the fallback.
 func resolveOpenAIImageResponseUsage(ctx context.Context, account *Account, model, requestID, contentType string, body []byte) (openAIImageUsage, int) {
 	var usage openAIImageUsage
 	imageCount := 0
@@ -31,10 +32,18 @@ func resolveOpenAIImageResponseUsage(ctx context.Context, account *Account, mode
 		usage, imageCount = parseOpenAIImageSSEUsage(body)
 	} else {
 		usage = parseOpenAIImageUsage(body)
-		imageCount = len(gjson.GetBytes(body, "data").Array())
+		imageCount = countOpenAIImageDataEntries(gjson.GetBytes(body, "data"))
 	}
-	if usage.totalInputTokens() > 0 || usage.ImageOutputTokens > 0 || imageCount == 0 {
-		return usage, imageCount
+	usage = applyOpenAIImageMissingUsageFallback(ctx, account, model, requestID, usage, imageCount, sse)
+	return usage, imageCount
+}
+
+// applyOpenAIImageMissingUsageFallback fails closed when images were returned
+// but no image output usage was reported: input usage alone does not cover
+// the output charge, so the output tokens are filled in conservatively.
+func applyOpenAIImageMissingUsageFallback(ctx context.Context, account *Account, model, requestID string, usage openAIImageUsage, imageCount int, sse bool) openAIImageUsage {
+	if imageCount <= 0 || usage.ImageOutputTokens > 0 {
+		return usage
 	}
 	usage.ImageOutputTokens = imageCount * openAIImageMissingUsageOutputTokensPerImage
 	fields := []zap.Field{
@@ -42,13 +51,14 @@ func resolveOpenAIImageResponseUsage(ctx context.Context, account *Account, mode
 		zap.String("upstream_request_id", requestID),
 		zap.Bool("sse_response", sse),
 		zap.Int("image_count", imageCount),
+		zap.Int("reported_input_tokens", usage.totalInputTokens()),
 		zap.Int("fallback_output_tokens", usage.ImageOutputTokens),
 	}
 	if account != nil {
 		fields = append(fields, zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 	}
-	logger.FromContext(ctx).Warn("openai image response has no usage; billing conservative fallback", fields...)
-	return usage, imageCount
+	logger.FromContext(ctx).Warn("openai image response has no output usage; billing conservative fallback", fields...)
+	return usage
 }
 
 // isOpenAIImageSSEResponse decides by the body first: a valid JSON document is
@@ -64,31 +74,42 @@ func isOpenAIImageSSEResponse(contentType string, body []byte) bool {
 	return bytes.HasPrefix(trimmed, []byte("event:")) || bytes.HasPrefix(trimmed, []byte("data:"))
 }
 
-// parseOpenAIImageSSEUsage uses the last event that carries usage, and counts
-// completed-image events (or a final "data" array) as returned images.
+func openAIImageEntryHasData(entry gjson.Result) bool {
+	return strings.TrimSpace(entry.Get("b64_json").String()) != "" || strings.TrimSpace(entry.Get("url").String()) != ""
+}
+
+func countOpenAIImageDataEntries(data gjson.Result) int {
+	count := 0
+	for _, entry := range data.Array() {
+		if openAIImageEntryHasData(entry) {
+			count++
+		}
+	}
+	return count
+}
+
+// parseOpenAIImageSSEUsage joins multi-line data fields per event, uses the
+// last event that carries usage, and counts image-bearing completed events
+// (or a final image "data" array) as returned images.
 func parseOpenAIImageSSEUsage(body []byte) (openAIImageUsage, int) {
 	var usage openAIImageUsage
 	completed := 0
 	dataImages := 0
-	for _, line := range bytes.Split(body, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
+	forEachOpenAIImageSSEPayload(body, func(payload []byte) {
+		if !gjson.ValidBytes(payload) {
+			return
 		}
-		payload := bytes.TrimSpace(line[len("data:"):])
-		if len(payload) == 0 || !gjson.ValidBytes(payload) {
-			continue
-		}
-		if gjson.GetBytes(payload, "usage").IsObject() {
+		event := gjson.ParseBytes(payload)
+		if event.Get("usage").IsObject() {
 			usage = parseOpenAIImageUsage(payload)
 		}
-		if strings.HasSuffix(gjson.GetBytes(payload, "type").String(), ".completed") {
+		if strings.HasSuffix(event.Get("type").String(), ".completed") && openAIImageEntryHasData(event) {
 			completed++
 		}
-		if images := len(gjson.GetBytes(payload, "data").Array()); images > 0 {
+		if images := countOpenAIImageDataEntries(event.Get("data")); images > 0 {
 			dataImages = images
 		}
-	}
+	})
 	if completed > 0 {
 		return usage, completed
 	}

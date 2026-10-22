@@ -312,6 +312,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImageOAuth(
 	if actualSize == "" {
 		actualSize = imageSize
 	}
+	parsedResponse.Usage = applyOpenAIImageMissingUsageFallback(ctx, account, model, resp.Header.Get("x-request-id"), parsedResponse.Usage, len(parsedResponse.Results), true)
 	return &OpenAIForwardResult{
 		UpstreamEndpoint:  upstreamReq.URL.Path,
 		RequestID:         resp.Header.Get("x-request-id"),

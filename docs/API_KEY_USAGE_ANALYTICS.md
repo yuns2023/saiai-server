@@ -229,9 +229,9 @@ WebSocket message before account selection; afterwards the v1 ingress parser
 and the v2 relay check every client frame once (v2 includes frames the relay
 does not classify as `response.create`). When the v2 relay rejects a frame
 while an earlier turn is still running upstream, the rejected frame is not
-forwarded, the in-flight turn is drained for its terminal usage (bounded by the
-same drain timeout used after a client disconnect) and billed, and then the
-client is closed with 1008. v1 reads the next client frame only after the
+forwarded, every in-flight turn is drained for its terminal usage (bounded by
+the same drain timeout used after a client disconnect) and billed, and then
+the client is closed with 1008. v1 reads the next client frame only after the
 current turn has completed and been billed.
 
 Duplicate keys are rejected the same way (HTTP `400` with
@@ -298,12 +298,15 @@ upstream stream while the Gateway expects JSON. `service_tier` is accepted only
 when absent, `null`, empty, `auto` or `default`.
 
 A successful direct or native image response is parsed as JSON when it is
-valid JSON, otherwise as SSE (usage from the last event carrying `usage`;
-`*.completed` events count as images). If images were returned but no usage
-could be parsed, the request is not billed as zero: each image is charged
+valid JSON, otherwise as SSE (multi-line `data:` fields joined; usage from the
+last event carrying `usage`; `*.completed` events count as images only when
+they carry `b64_json` or `url`). Only entries with image data are counted. If
+images were returned but no image output usage could be parsed (including
+input-only usage), the output is not billed as zero: each image is charged
 6,240 output image tokens (the largest documented `gpt-image-1` output, high
 quality 1024x1536), and a warning with account, model and upstream request ID
-is logged for review.
+is logged for review. The OAuth Images compatibility adapter applies the same
+fallback to its returned images.
 
 ## Input cache read rate
 

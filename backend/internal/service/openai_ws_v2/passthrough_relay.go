@@ -615,7 +615,9 @@ func runUpstreamToClient(
 				PayloadBytes:    len(payload),
 				WroteDownstream: wroteDownstream,
 			})
-			if observedEvent.terminal {
+			// Keep draining until every forwarded turn has its terminal
+			// usage (bounded by the caller's drain timeout).
+			if observedEvent.terminal && (state == nil || !state.turns.hasOutstanding()) {
 				exitCh <- relayExitSignal{
 					stage:            "drain_terminal",
 					graceful:         true,

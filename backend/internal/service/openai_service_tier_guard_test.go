@@ -257,6 +257,104 @@ func TestOpenAIWSPassthrough_RejectedFrameMidStreamStillBillsInFlightTurn(t *tes
 	}
 }
 
+// Two pipelined turns are in flight when a frame is rejected: draining must
+// continue until both terminal events have been billed, not stop at the first.
+func TestOpenAIWSPassthrough_RejectedFrameDrainsAllInFlightTurns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeCtxPool
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	upstreamConn := &openAIWSCaptureConn{
+		readDelays: []time.Duration{300 * time.Millisecond, 100 * time.Millisecond, 100 * time.Millisecond, 100 * time.Millisecond},
+		events: [][]byte{
+			[]byte(`{"type":"response.created","response":{"id":"resp_pipe_a"}}`),
+			[]byte(`{"type":"response.created","response":{"id":"resp_pipe_b"}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_pipe_a","model":"gpt-5.4","usage":{"input_tokens":10,"output_tokens":20}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_pipe_b","model":"gpt-5.4","usage":{"input_tokens":30,"output_tokens":40}}}`),
+		},
+	}
+	svc := &OpenAIGatewayService{
+		cfg:                       cfg,
+		httpUpstream:              &httpUpstreamRecorder{},
+		cache:                     &stubGatewayCache{},
+		openaiWSResolver:          NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:             NewCodexToolCorrector(),
+		openaiWSPassthroughDialer: &openAIWSCaptureDialer{conn: upstreamConn},
+	}
+	account := &Account{
+		ID: 4602, Name: "openai-ws-pipelined", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Status: StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Extra:       map[string]any{"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough},
+	}
+	resultCh := make(chan *OpenAIForwardResult, 4)
+	hooks := &OpenAIWSIngressHooks{AfterTurn: func(_ int, result *OpenAIForwardResult, turnErr error) {
+		if turnErr == nil && result != nil {
+			resultCh <- result
+		}
+	}}
+	serverErrCh := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		ginCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ginCtx.Request = r.Clone(r.Context())
+		msgType, firstMessage, readErr := conn.Read(r.Context())
+		if readErr != nil {
+			serverErrCh <- readErr
+			return
+		}
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", msgType, firstMessage, hooks)
+	}))
+	defer wsServer.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+	for _, payload := range []string{
+		`{"type":"response.create","model":"gpt-5.4"}`,
+		`{"type":"response.create","model":"gpt-5.4"}`,
+		`{"type":"response.cancel","type":"response.create","model":"gpt-5.4"}`,
+	} {
+		writeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(payload)))
+		cancel()
+	}
+
+	select {
+	case serverErr := <-serverErrCh:
+		var closeErr *OpenAIWSClientCloseError
+		require.True(t, errors.As(serverErr, &closeErr), "unexpected error: %v", serverErr)
+		require.Equal(t, OpenAIDuplicateKeyMessage("type"), closeErr.Reason())
+	case <-time.After(5 * time.Second):
+		t.Fatal("rejected frame did not end the session")
+	}
+	close(resultCh)
+	billed := map[string]int{}
+	for result := range resultCh {
+		billed[result.RequestID] = result.Usage.OutputTokens
+	}
+	require.Equal(t, map[string]int{"resp_pipe_a": 20, "resp_pipe_b": 40}, billed, "every in-flight turn must be billed")
+	upstreamConn.mu.Lock()
+	defer upstreamConn.mu.Unlock()
+	require.Len(t, upstreamConn.rawWrites, 2, "the rejected frame must not be written upstream")
+}
+
 func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload, reason string, midStream bool) {
 	gin.SetMode(gin.TestMode)
 
