@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
+	coderws "github.com/coder/websocket"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
@@ -39,10 +41,11 @@ const openAIServiceTierLogMaxLen = 64
 
 // IsOpenAIRequestServiceTierSupported reports whether every service_tier in
 // an OpenAI Responses request body (HTTP body or WebSocket response.create
-// payload) can be billed. Absent, null and empty values are allowed. Every
-// top-level occurrence is checked because JSON parsers disagree on which
-// duplicate key wins, and a nested response.service_tier is checked as well
-// so a wrapped WebSocket payload cannot carry an unbillable tier upstream.
+// payload) can be billed. Absent, null and empty values are allowed. A
+// duplicated service_tier key is rejected because JSON parsers disagree on
+// which duplicate wins, so local billing and the upstream could read different
+// tiers. A nested response.service_tier is checked as well so a wrapped
+// WebSocket payload cannot carry an unbillable tier upstream.
 func IsOpenAIRequestServiceTierSupported(body []byte) bool {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		// Malformed payloads are rejected by the existing JSON validation.
@@ -52,21 +55,27 @@ func IsOpenAIRequestServiceTierSupported(body []byte) bool {
 	if !root.IsObject() {
 		return true
 	}
-	supported := true
+	supported := openAIServiceTierObjectSupported(root)
 	root.ForEach(func(key, value gjson.Result) bool {
-		switch key.String() {
-		case "service_tier":
-			supported = isOpenAIRequestServiceTierValueSupported(value)
-		case "response":
-			if value.IsObject() {
-				value.ForEach(func(nestedKey, nestedValue gjson.Result) bool {
-					if nestedKey.String() == "service_tier" {
-						supported = isOpenAIRequestServiceTierValueSupported(nestedValue)
-					}
-					return supported
-				})
-			}
+		if supported && key.String() == "response" && value.IsObject() {
+			supported = openAIServiceTierObjectSupported(value)
 		}
+		return supported
+	})
+	return supported
+}
+
+// openAIServiceTierObjectSupported checks every service_tier key of one JSON
+// object and rejects duplicates.
+func openAIServiceTierObjectSupported(object gjson.Result) bool {
+	supported := true
+	occurrences := 0
+	object.ForEach(func(key, value gjson.Result) bool {
+		if key.String() != "service_tier" {
+			return true
+		}
+		occurrences++
+		supported = occurrences == 1 && isOpenAIRequestServiceTierValueSupported(value)
 		return supported
 	})
 	return supported
@@ -83,6 +92,22 @@ func isOpenAIRequestServiceTierValueSupported(value gjson.Result) bool {
 		}
 	}
 	return false
+}
+
+// openAIServiceTierGuardFrameConn validates every client frame of a v2
+// passthrough session before the relay can forward it. The relay only invokes
+// per-turn hooks for frames it classifies as response.create, so frames it
+// does not classify as a turn are checked here.
+type openAIServiceTierGuardFrameConn struct {
+	openaiwsv2.FrameConn
+}
+
+func (c *openAIServiceTierGuardFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	msgType, payload, err := c.FrameConn.ReadFrame(ctx)
+	if err == nil && !IsOpenAIRequestServiceTierSupported(payload) {
+		return msgType, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, OpenAIUnsupportedServiceTierMessage, nil)
+	}
+	return msgType, payload, err
 }
 
 // unrecognizedOpenAIReportedServiceTier returns the trimmed raw value when an

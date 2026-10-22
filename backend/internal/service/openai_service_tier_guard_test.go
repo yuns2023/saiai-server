@@ -47,6 +47,8 @@ func TestIsOpenAIRequestServiceTierSupported(t *testing.T) {
 		// Parsers disagree on which duplicate wins; every occurrence must be billable.
 		`{"model":"gpt-5.4","service_tier":"default","service_tier":"ultrafast"}`,
 		`{"model":"gpt-5.4","service_tier":"ultrafast","service_tier":"default"}`,
+		`{"model":"gpt-5.4","service_tier":"default","service_tier":"priority"}`,
+		`{"type":"response.create","response":{"service_tier":"flex","service_tier":"priority"}}`,
 		`{"model":"gpt-5.4","service\u005ftier":"ultrafast"}`,
 		`{"type":"response.create","response":{"model":"gpt-5.4","service_tier":"ultrafast"}}`,
 	}
@@ -183,14 +185,29 @@ func TestOpenAIGatewayServiceRecordUsage_KnownReportedTierDoesNotLog(t *testing.
 // written upstream on both the v1 ingress session and the v2 passthrough
 // relay, and that an unknown reported tier is billed at priority there.
 func TestOpenAIWSIngress_RejectsUnsupportedServiceTierOnLaterTurnWithoutUpstreamWrite(t *testing.T) {
-	for _, mode := range []string{"ctx_pool", "passthrough"} {
-		t.Run(mode, func(t *testing.T) {
-			runOpenAIWSServiceTierRejectionScenario(t, mode)
+	const ultrafastTurn = `{"type":"response.create","model":"gpt-5.4","stream":false,"service_tier":"ultrafast","previous_response_id":"resp_tier_turn_1"}`
+	// gjson reads the first "type", so the relay would not see a turn; an
+	// upstream that keeps the last key would still create a response.
+	const ambiguousTypeTurn = `{"type":"response.cancel","type":"response.create","model":"gpt-5.4","service_tier":"ultrafast"}`
+	cases := []struct {
+		name          string
+		mode          string
+		secondPayload string
+		hookValidates bool
+	}{
+		{name: "ctx_pool_hook", mode: "ctx_pool", secondPayload: ultrafastTurn, hookValidates: true},
+		{name: "passthrough_hook", mode: "passthrough", secondPayload: ultrafastTurn, hookValidates: true},
+		{name: "passthrough_frame_guard", mode: "passthrough", secondPayload: ultrafastTurn},
+		{name: "passthrough_non_turn_frame", mode: "passthrough", secondPayload: ambiguousTypeTurn},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runOpenAIWSServiceTierRejectionScenario(t, tc.mode, tc.secondPayload, tc.hookValidates)
 		})
 	}
 }
 
-func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode string) {
+func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload string, hookValidates bool) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -250,7 +267,7 @@ func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode string) {
 	resultCh := make(chan *OpenAIForwardResult, 2)
 	hooks := &OpenAIWSIngressHooks{
 		OnClientTurn: func(_ int, payload []byte) error {
-			if !IsOpenAIRequestServiceTierSupported(payload) {
+			if hookValidates && !IsOpenAIRequestServiceTierSupported(payload) {
 				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, OpenAIUnsupportedServiceTierMessage, nil)
 			}
 			return nil
@@ -316,7 +333,7 @@ func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode string) {
 		t.Fatal("turn 1 result not delivered")
 	}
 
-	write(`{"type":"response.create","model":"gpt-5.4","stream":false,"service_tier":"ultrafast","previous_response_id":"resp_tier_turn_1"}`)
+	write(secondPayload)
 
 	select {
 	case serverErr := <-serverErrCh:

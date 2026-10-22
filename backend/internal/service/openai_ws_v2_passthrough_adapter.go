@@ -332,6 +332,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if resumableClient != nil {
 		relayClient = resumableClient
 	}
+	relayClient = &openAIServiceTierGuardFrameConn{FrameConn: relayClient}
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
 		ClientConn:         relayClient,

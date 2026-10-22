@@ -224,7 +224,10 @@ contacted: HTTP Responses (including `/responses/compact`) returns `400` with
 a WebSocket `response.create` (first or later turn, v1 or v2 passthrough) is
 rejected like other per-turn validation failures, by closing the client
 connection with policy violation (1008) before that frame is sent upstream.
-Duplicate top-level keys and a nested `response.service_tier` are checked too.
+A duplicated `service_tier` key is rejected because parsers disagree on which
+value wins, and a nested `response.service_tier` is checked too. In v2
+passthrough sessions every client frame is checked, not only frames the
+relay classifies as `response.create`.
 
 If an upstream nevertheless reports a tier the resolver does not know, the
 turn is billed as `priority`, the most expensive tier with configured prices,
