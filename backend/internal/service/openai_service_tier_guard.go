@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
@@ -40,46 +39,81 @@ const openAIUnrecognizedReportedServiceTierBilledAs = "priority"
 
 const openAIServiceTierLogMaxLen = 64
 
-// IsOpenAIRequestServiceTierSupported reports whether every service_tier in
-// an OpenAI Responses request body (HTTP body or WebSocket response.create
-// payload) can be billed. Absent, null and empty values are allowed. A
-// duplicated service_tier key is rejected because JSON parsers disagree on
-// which duplicate wins, so local billing and the upstream could read different
-// tiers. A nested response.service_tier is checked as well so a wrapped
-// WebSocket payload cannot carry an unbillable tier upstream.
-func IsOpenAIRequestServiceTierSupported(body []byte) bool {
-	if len(body) == 0 || !gjson.ValidBytes(body) {
-		// Malformed payloads are rejected by the existing JSON validation.
-		return true
-	}
-	root := gjson.ParseBytes(body)
-	if !root.IsObject() {
-		return true
-	}
-	supported := openAIServiceTierObjectSupported(root)
-	root.ForEach(func(key, value gjson.Result) bool {
-		if supported && key.String() == "response" && value.IsObject() {
-			supported = openAIServiceTierObjectSupported(value)
-		}
-		return supported
-	})
-	return supported
+// openAIAmbiguousRequestKeys are request fields the Gateway reads for
+// routing, turn accounting or billing. Duplicates are ambiguous: gjson (used
+// by the handlers, the v1 WS parser and the v2 relay) returns the FIRST
+// occurrence, sjson rewrites only the first, while encoding/json (used for the
+// HTTP request map) and many upstream parsers keep the LAST. A frame such as
+// {"type":"response.cancel","type":"response.create",...} could otherwise be
+// relayed as a non-billable control frame yet executed as a new response.
+var openAIAmbiguousRequestKeys = [...]string{"type", "model", "service_tier", "previous_response_id", "response", "stream"}
+
+// OpenAIRequestPayloadCheck is the result of a single scan of an OpenAI
+// Responses request body or WebSocket frame.
+type OpenAIRequestPayloadCheck struct {
+	// DuplicateKey is the first duplicated routing/billing key, prefixed with
+	// "response." when it is inside a top-level response object.
+	DuplicateKey string
+	// UnsupportedServiceTier is set when any service_tier (top level or in a
+	// top-level response object) is not billable, or is duplicated.
+	UnsupportedServiceTier bool
 }
 
-// openAIServiceTierObjectSupported checks every service_tier key of one JSON
-// object and rejects duplicates.
-func openAIServiceTierObjectSupported(object gjson.Result) bool {
-	supported := true
-	occurrences := 0
+// CheckOpenAIRequestPayload scans the top-level object, and a top-level
+// "response" object, once. Absent, null and empty service_tier values are
+// billable. Malformed or non-object payloads report no issue; the existing
+// JSON validation of each path rejects them.
+func CheckOpenAIRequestPayload(body []byte) OpenAIRequestPayloadCheck {
+	var check OpenAIRequestPayloadCheck
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return check
+	}
+	root := gjson.ParseBytes(body)
+	if root.IsObject() {
+		scanOpenAIRequestObject(root, "", &check)
+	}
+	return check
+}
+
+func scanOpenAIRequestObject(object gjson.Result, prefix string, check *OpenAIRequestPayloadCheck) {
+	var seen [len(openAIAmbiguousRequestKeys)]bool
 	object.ForEach(func(key, value gjson.Result) bool {
-		if key.String() != "service_tier" {
-			return true
+		name := key.String()
+		duplicate := false
+		for index, watched := range openAIAmbiguousRequestKeys {
+			if name == watched {
+				duplicate = seen[index]
+				seen[index] = true
+				break
+			}
 		}
-		occurrences++
-		supported = occurrences == 1 && isOpenAIRequestServiceTierValueSupported(value)
-		return supported
+		if duplicate && check.DuplicateKey == "" {
+			check.DuplicateKey = prefix + name
+		}
+		switch name {
+		case "service_tier":
+			if duplicate || !isOpenAIRequestServiceTierValueSupported(value) {
+				check.UnsupportedServiceTier = true
+			}
+		case "response":
+			if prefix == "" && value.IsObject() {
+				scanOpenAIRequestObject(value, "response.", check)
+			}
+		}
+		return true
 	})
-	return supported
+}
+
+// IsOpenAIRequestServiceTierSupported reports whether every service_tier in
+// the payload can be billed and none is duplicated.
+func IsOpenAIRequestServiceTierSupported(body []byte) bool {
+	return !CheckOpenAIRequestPayload(body).UnsupportedServiceTier
+}
+
+// OpenAIRequestDuplicateKey returns the first duplicated routing/billing key,
+// or "" when the payload is unambiguous.
+func OpenAIRequestDuplicateKey(body []byte) string {
+	return CheckOpenAIRequestPayload(body).DuplicateKey
 }
 
 func isOpenAIRequestServiceTierValueSupported(value gjson.Result) bool {
@@ -95,96 +129,33 @@ func isOpenAIRequestServiceTierValueSupported(value gjson.Result) bool {
 	return false
 }
 
-// openAIServiceTierGuardFrameConn validates every client frame of a v2
-// passthrough session before the relay can forward it. The relay only invokes
-// per-turn hooks for frames it classifies as response.create (by the first
-// "type" key), so ambiguous or non-turn frames are checked here.
-type openAIServiceTierGuardFrameConn struct {
-	openaiwsv2.FrameConn
-}
-
-func (c *openAIServiceTierGuardFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
-	msgType, payload, err := c.FrameConn.ReadFrame(ctx)
-	if err == nil {
-		if rejection := OpenAIWSPayloadRejection(payload); rejection != nil {
-			return msgType, nil, rejection
-		}
-	}
-	return msgType, payload, err
-}
-
-// openAIAmbiguousRequestKeys are request fields the Gateway reads for
-// routing, turn accounting or billing. Duplicates are ambiguous: gjson (used
-// by the handlers, the v1 WS parser and the v2 relay) returns the FIRST
-// occurrence, sjson rewrites only the first, while encoding/json (used for the
-// HTTP request map) and many upstream parsers keep the LAST. A frame such as
-// {"type":"response.cancel","type":"response.create",...} could otherwise be
-// relayed as a non-billable control frame yet executed as a new response.
-var openAIAmbiguousRequestKeys = []string{"type", "model", "service_tier", "previous_response_id", "response", "stream"}
-
-// OpenAIRequestDuplicateKey returns the first billing/routing key that occurs
-// more than once in the top-level object, or in a top-level "response"
-// object, of an OpenAI Responses request body or WebSocket frame. It returns
-// "" when the payload is unambiguous or is not a JSON object.
-func OpenAIRequestDuplicateKey(body []byte) string {
-	if len(body) == 0 || !gjson.ValidBytes(body) {
-		return ""
-	}
-	root := gjson.ParseBytes(body)
-	if !root.IsObject() {
-		return ""
-	}
-	duplicate := openAIObjectDuplicateKey(root)
-	if duplicate != "" {
-		return duplicate
-	}
-	root.ForEach(func(key, value gjson.Result) bool {
-		if key.String() == "response" && value.IsObject() {
-			if nested := openAIObjectDuplicateKey(value); nested != "" {
-				duplicate = "response." + nested
-			}
-		}
-		return duplicate == ""
-	})
-	return duplicate
-}
-
-func openAIObjectDuplicateKey(object gjson.Result) string {
-	seen := make(map[string]struct{}, len(openAIAmbiguousRequestKeys))
-	duplicate := ""
-	object.ForEach(func(key, _ gjson.Result) bool {
-		name := key.String()
-		for _, watched := range openAIAmbiguousRequestKeys {
-			if name != watched {
-				continue
-			}
-			if _, ok := seen[name]; ok {
-				duplicate = name
-				return false
-			}
-			seen[name] = struct{}{}
-		}
-		return true
-	})
-	return duplicate
-}
-
 // OpenAIDuplicateKeyMessage is the client-facing rejection for an ambiguous
 // payload. It fits the 123-byte WebSocket close-reason limit.
 func OpenAIDuplicateKeyMessage(key string) string {
 	return fmt.Sprintf("Ambiguous request: duplicate %q key.", key)
 }
 
-// OpenAIWSPayloadRejection returns the policy-violation close error for a
-// WebSocket payload that is ambiguous or carries an unbillable service_tier.
-func OpenAIWSPayloadRejection(payload []byte) error {
-	if key := OpenAIRequestDuplicateKey(payload); key != "" {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, OpenAIDuplicateKeyMessage(key), nil)
+// WSRejection returns the policy-violation close error for the payload, or nil.
+func (check OpenAIRequestPayloadCheck) WSRejection() error {
+	if check.DuplicateKey != "" {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, OpenAIDuplicateKeyMessage(check.DuplicateKey), nil)
 	}
-	if !IsOpenAIRequestServiceTierSupported(payload) {
+	if check.UnsupportedServiceTier {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, OpenAIUnsupportedServiceTierMessage, nil)
 	}
 	return nil
+}
+
+// OpenAIWSPayloadRejection returns the policy-violation close error for a
+// WebSocket payload that is ambiguous or carries an unbillable service_tier.
+// The v1 ingress parser and the v2 relay call it once for every client frame
+// before the frame can be written upstream.
+func OpenAIWSPayloadRejection(payload []byte) error {
+	return CheckOpenAIRequestPayload(payload).WSRejection()
+}
+
+func validateOpenAIWSV2ClientFrame(_ coderws.MessageType, payload []byte) error {
+	return OpenAIWSPayloadRejection(payload)
 }
 
 // unrecognizedOpenAIReportedServiceTier returns the trimmed raw value when an

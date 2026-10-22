@@ -203,45 +203,61 @@ func TestOpenAIGatewayServiceRecordUsage_KnownReportedTierDoesNotLog(t *testing.
 	require.False(t, logSink.ContainsMessage("unrecognized service tier"))
 }
 
-// The handler validates every WebSocket turn through OnClientTurn. These
-// tests prove that a rejection on a later turn stops the frame before it is
-// written upstream on both the v1 ingress session and the v2 passthrough
-// relay, and that an unknown reported tier is billed at priority there.
+// The v1 ingress parser and the v2 relay validate every client frame. These
+// tests prove that a rejected later frame is never written upstream, that the
+// client is closed with 1008 and that an unknown reported tier is billed at
+// priority. No hook validates here: the service enforces it on its own.
 func TestOpenAIWSIngress_RejectsUnsupportedServiceTierOnLaterTurnWithoutUpstreamWrite(t *testing.T) {
 	const ultrafastTurn = `{"type":"response.create","model":"gpt-5.4","stream":false,"service_tier":"ultrafast","previous_response_id":"resp_tier_turn_1"}`
 	// gjson reads the first "type", so the relay would not see a turn; an
 	// upstream that keeps the last key would still create a response.
 	const ambiguousTypeTurn = `{"type":"response.cancel","type":"response.create","model":"gpt-5.4","service_tier":"ultrafast"}`
-	// A billable tier does not make an ambiguous "type" acceptable: the relay
-	// would forward it as a control frame without registering a turn.
+	// A billable tier does not make an ambiguous "type" acceptable.
 	const ambiguousTypeDefaultTier = `{"type":"response.cancel","model":"gpt-5.4","service_tier":"default","type":"response.create"}`
-	// v1 reads the first "type" (response.create) and sjson rewrites only the
-	// first "model"; the upstream may keep the last of either.
-	const ambiguousV1Turn = `{"type":"response.create","model":"gpt-5.4","model":"gpt-6-astra","previous_response_id":"resp_tier_turn_1"}`
+	// v1 reads the first "model" and sjson rewrites only the first.
+	const ambiguousModelTurn = `{"type":"response.create","model":"gpt-5.4","model":"gpt-6-astra","previous_response_id":"resp_tier_turn_1"}`
 	tierReason := OpenAIUnsupportedServiceTierMessage
 	cases := []struct {
 		name          string
 		mode          string
 		secondPayload string
-		hookValidates bool
 		reason        string
 	}{
-		{name: "ctx_pool_hook", mode: "ctx_pool", secondPayload: ultrafastTurn, hookValidates: true, reason: tierReason},
-		{name: "ctx_pool_duplicate_model", mode: "ctx_pool", secondPayload: ambiguousV1Turn, hookValidates: true, reason: OpenAIDuplicateKeyMessage("model")},
-		{name: "ctx_pool_duplicate_type", mode: "ctx_pool", secondPayload: `{"type":"response.create","model":"gpt-5.4","type":"response.cancel"}`, hookValidates: true, reason: OpenAIDuplicateKeyMessage("type")},
-		{name: "passthrough_hook", mode: "passthrough", secondPayload: ultrafastTurn, hookValidates: true, reason: tierReason},
-		{name: "passthrough_frame_guard", mode: "passthrough", secondPayload: ultrafastTurn, reason: tierReason},
+		{name: "ctx_pool_unbillable_tier", mode: "ctx_pool", secondPayload: ultrafastTurn, reason: tierReason},
+		{name: "ctx_pool_duplicate_model", mode: "ctx_pool", secondPayload: ambiguousModelTurn, reason: OpenAIDuplicateKeyMessage("model")},
+		{name: "ctx_pool_duplicate_type", mode: "ctx_pool", secondPayload: `{"type":"response.create","model":"gpt-5.4","type":"response.cancel"}`, reason: OpenAIDuplicateKeyMessage("type")},
+		{name: "passthrough_unbillable_tier", mode: "passthrough", secondPayload: ultrafastTurn, reason: tierReason},
+		{name: "passthrough_duplicate_model", mode: "passthrough", secondPayload: ambiguousModelTurn, reason: OpenAIDuplicateKeyMessage("model")},
 		{name: "passthrough_non_turn_frame", mode: "passthrough", secondPayload: ambiguousTypeTurn, reason: OpenAIDuplicateKeyMessage("type")},
 		{name: "passthrough_duplicate_type_billable_tier", mode: "passthrough", secondPayload: ambiguousTypeDefaultTier, reason: OpenAIDuplicateKeyMessage("type")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			runOpenAIWSServiceTierRejectionScenario(t, tc.mode, tc.secondPayload, tc.hookValidates, tc.reason)
+			runOpenAIWSServiceTierRejectionScenario(t, tc.mode, tc.secondPayload, tc.reason, false)
 		})
 	}
 }
 
-func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload string, hookValidates bool, reason string) {
+// A rejected frame sent while the previous turn is still streaming must not
+// cancel that turn's billing: the relay drains it to the terminal usage event.
+// v1 reads the next client frame only after the current turn has completed
+// and been billed, so the scenario is specific to the v2 relay.
+func TestOpenAIWSPassthrough_RejectedFrameMidStreamStillBillsInFlightTurn(t *testing.T) {
+	for name, payload := range map[string]string{
+		"duplicate_type":  `{"type":"response.cancel","type":"response.create","model":"gpt-5.4"}`,
+		"unbillable_tier": `{"type":"response.create","model":"gpt-5.4","service_tier":"ultrafast"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			reason := OpenAIUnsupportedServiceTierMessage
+			if name == "duplicate_type" {
+				reason = OpenAIDuplicateKeyMessage("type")
+			}
+			runOpenAIWSServiceTierRejectionScenario(t, "passthrough", payload, reason, true)
+		})
+	}
+}
+
+func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload, reason string, midStream bool) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -259,13 +275,22 @@ func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload s
 	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
 
+	turnOneCompleted := []byte(`{"type":"response.completed","response":{"id":"resp_tier_turn_1","model":"gpt-5.4","service_tier":"ultrafast","usage":{"input_tokens":120,"output_tokens":3400}}}`)
 	upstreamConn := &openAIWSCaptureConn{
 		// Keep the passthrough relay's upstream reader busy after turn 1.
 		readDelays: []time.Duration{0, 5 * time.Second},
 		events: [][]byte{
-			[]byte(`{"type":"response.completed","response":{"id":"resp_tier_turn_1","model":"gpt-5.4","service_tier":"ultrafast","usage":{"input_tokens":2,"output_tokens":3}}}`),
+			turnOneCompleted,
 			[]byte(`{"type":"response.completed","response":{"id":"resp_tier_turn_2","model":"gpt-5.4","service_tier":"default","usage":{"input_tokens":2,"output_tokens":3}}}`),
 		},
+	}
+	if midStream {
+		// Turn 1 streams a delta, then completes after the bad frame was sent.
+		upstreamConn.readDelays = []time.Duration{0, 300 * time.Millisecond}
+		upstreamConn.events = [][]byte{
+			[]byte(`{"type":"response.output_text.delta","response_id":"resp_tier_turn_1","delta":"partial"}`),
+			turnOneCompleted,
+		}
 	}
 	captureDialer := &openAIWSCaptureDialer{conn: upstreamConn}
 	svc := &OpenAIGatewayService{
@@ -300,12 +325,6 @@ func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload s
 
 	resultCh := make(chan *OpenAIForwardResult, 2)
 	hooks := &OpenAIWSIngressHooks{
-		OnClientTurn: func(_ int, payload []byte) error {
-			if hookValidates {
-				return OpenAIWSPayloadRejection(payload)
-			}
-			return nil
-		},
 		AfterTurn: func(_ int, result *OpenAIForwardResult, turnErr error) {
 			if turnErr == nil && result != nil {
 				resultCh <- result
@@ -356,18 +375,25 @@ func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload s
 	_, event, readErr := clientConn.Read(readCtx)
 	cancelRead()
 	require.NoError(t, readErr)
-	require.Equal(t, "resp_tier_turn_1", gjson.GetBytes(event, "response.id").String())
+	if midStream {
+		require.Equal(t, "response.output_text.delta", gjson.GetBytes(event, "type").String())
+	} else {
+		require.Equal(t, "resp_tier_turn_1", gjson.GetBytes(event, "response.id").String())
+	}
+
+	write(secondPayload)
 
 	select {
 	case result := <-resultCh:
+		require.Equal(t, "resp_tier_turn_1", result.RequestID)
+		require.Equal(t, 120, result.Usage.InputTokens, "turn 1 must be billed with its full usage")
+		require.Equal(t, 3400, result.Usage.OutputTokens)
 		require.NotNil(t, result.ServiceTier)
 		require.Equal(t, "priority", *result.ServiceTier, "unknown reported tier must bill as priority")
 		require.Equal(t, "ultrafast", result.Usage.UnrecognizedReportedServiceTier)
 	case <-time.After(3 * time.Second):
 		t.Fatal("turn 1 result not delivered")
 	}
-
-	write(secondPayload)
 
 	select {
 	case serverErr := <-serverErrCh:
@@ -376,12 +402,12 @@ func runOpenAIWSServiceTierRejectionScenario(t *testing.T, mode, secondPayload s
 		require.Equal(t, coderws.StatusPolicyViolation, closeErr.StatusCode())
 		require.Equal(t, reason, closeErr.Reason())
 	case <-time.After(5 * time.Second):
-		t.Fatal("rejected turn did not end the session")
+		t.Fatal("rejected frame did not end the session")
 	}
 
 	upstreamConn.mu.Lock()
 	defer upstreamConn.mu.Unlock()
-	require.Len(t, upstreamConn.writes, 1, "the rejected turn must not be written upstream")
+	require.Len(t, upstreamConn.writes, 1, "the rejected frame must not be written upstream")
 	require.Equal(t, "auto", upstreamConn.writes[0]["service_tier"], "allowed tiers are forwarded unchanged")
 	if mode == "passthrough" {
 		require.Len(t, upstreamConn.rawWrites, 1, "v2 passthrough relays raw frames")

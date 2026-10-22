@@ -218,6 +218,9 @@ func parseOpenAIImageRequest(endpoint, contentType string, body []byte) (model s
 		if mediaType != "application/json" || !gjson.ValidBytes(body) {
 			return "", "", fmt.Errorf("image generations requires a valid application/json body")
 		}
+		if err := validateOpenAIImageJSONFields(body); err != nil {
+			return "", "", err
+		}
 		modelValue := gjson.GetBytes(body, "model")
 		if modelValue.Type != gjson.String || strings.TrimSpace(modelValue.String()) == "" {
 			return "", "", fmt.Errorf("model is required")
@@ -236,6 +239,7 @@ func parseOpenAIImageRequest(endpoint, contentType string, body []byte) (model s
 		return "", "", fmt.Errorf("image edits requires multipart/form-data")
 	}
 	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	seenFields := make(map[string]struct{})
 	for {
 		part, nextErr := reader.NextPart()
 		if nextErr == io.EOF {
@@ -245,6 +249,23 @@ func parseOpenAIImageRequest(endpoint, contentType string, body []byte) (model s
 			return "", "", fmt.Errorf("invalid multipart body")
 		}
 		name := part.FormName()
+		if name != "image" && name != "image[]" {
+			// Every other field is scalar; a repeated part is ambiguous
+			// because multipart parsers disagree on which value wins.
+			if _, repeated := seenFields[name]; repeated {
+				_ = part.Close()
+				return "", "", fmt.Errorf("duplicate %q field", name)
+			}
+			seenFields[name] = struct{}{}
+		}
+		if name == "service_tier" {
+			value, readErr := io.ReadAll(io.LimitReader(part, 1025))
+			_ = part.Close()
+			if readErr != nil || len(value) > 1024 || !isOpenAIImageServiceTierSupported(string(value)) {
+				return "", "", errOpenAIImageUnsupportedServiceTier
+			}
+			continue
+		}
 		if name == "model" || name == "size" || name == "stream" {
 			value, readErr := io.ReadAll(io.LimitReader(part, 1025))
 			if readErr != nil || len(value) > 1024 {
@@ -269,4 +290,40 @@ func parseOpenAIImageRequest(endpoint, contentType string, body []byte) (model s
 		return "", "", fmt.Errorf("model is required")
 	}
 	return model, imageSize, nil
+}
+
+// The Image API is billed by image tokens with no service-tier pricing, so
+// only tiers that bill as Standard are accepted.
+var errOpenAIImageUnsupportedServiceTier = fmt.Errorf("unsupported service_tier for the Image API; supported values: auto, default")
+
+func isOpenAIImageServiceTierSupported(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "auto", "default":
+		return true
+	}
+	return false
+}
+
+// validateOpenAIImageJSONFields rejects duplicate top-level keys and
+// unbillable service tiers. The handler reads fields with gjson (first
+// duplicate) while the API-key path forwards the original bytes, whose
+// upstream parser may use the last duplicate, e.g. "stream":false,"stream":true
+// would make the upstream stream while the Gateway expects a JSON body.
+func validateOpenAIImageJSONFields(body []byte) error {
+	seen := make(map[string]struct{})
+	var err error
+	gjson.ParseBytes(body).ForEach(func(key, value gjson.Result) bool {
+		name := key.String()
+		if _, repeated := seen[name]; repeated {
+			err = fmt.Errorf("duplicate %q key", name)
+			return false
+		}
+		seen[name] = struct{}{}
+		if name == "service_tier" && value.Type != gjson.Null && (value.Type != gjson.String || !isOpenAIImageServiceTierSupported(value.String())) {
+			err = errOpenAIImageUnsupportedServiceTier
+			return false
+		}
+		return true
+	})
+	return err
 }

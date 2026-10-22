@@ -2762,6 +2762,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 		if !gjson.ValidBytes(trimmed) {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
 		}
+		if rejection := OpenAIWSPayloadRejection(trimmed); rejection != nil {
+			return openAIWSClientPayload{}, rejection
+		}
 
 		values := gjson.GetManyBytes(trimmed, "type", "model", "prompt_cache_key", "previous_response_id")
 		eventType := strings.TrimSpace(values[0].String())

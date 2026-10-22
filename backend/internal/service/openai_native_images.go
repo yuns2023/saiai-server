@@ -82,16 +82,16 @@ func (s *OpenAIGatewayService) ForwardNativeCodexImage(
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 && !gjson.GetBytes(responseBody, "error").Exists() && len(gjson.GetBytes(responseBody, "data").Array()) > 0 {
 		s.renewOpenAINativeTurnStateAfterSuccess(ctx, account, getOpenAIUserIDFromContext(c), openAINativeTurnStateKeys(getOpenAIUserIDFromContext(c), c.Request.Header, nil))
 	}
-	usage := parseOpenAIImageUsage(responseBody)
 	requestID := resp.Header.Get("X-Request-Id")
 	if requestID == "" {
 		requestID = resp.Header.Get("X-Codex-Imagegen-Request-Id")
 	}
+	usage, imageCount := resolveOpenAIImageResponseUsage(ctx, account, model, requestID, contentType, responseBody)
 	return &OpenAIForwardResult{
 		UpstreamEndpoint: req.URL.Path,
 		RequestID:        requestID, Usage: OpenAIUsage{InputTokens: usage.totalInputTokens(), OutputTokens: usage.ImageOutputTokens},
 		Model: model, BillingModel: model, UpstreamModel: model, ResponseHeaders: resp.Header.Clone(), Duration: time.Since(started),
 		TextInputTokens: usage.TextInputTokens, ImageInputTokens: usage.ImageInputTokens, ImageOutputTokens: usage.ImageOutputTokens,
-		ImageCount: len(gjson.GetBytes(responseBody, "data").Array()), ImageSize: imageSize, MediaType: "image",
+		ImageCount: imageCount, ImageSize: imageSize, MediaType: "image",
 	}, nil
 }

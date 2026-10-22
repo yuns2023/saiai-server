@@ -332,7 +332,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if resumableClient != nil {
 		relayClient = resumableClient
 	}
-	relayClient = &openAIServiceTierGuardFrameConn{FrameConn: relayClient}
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
 		ClientConn:         relayClient,
@@ -343,6 +342,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			IdleTimeout:         s.openAIWSPassthroughIdleTimeout(),
 			FirstMessageType:    firstClientMessageType,
 			BufferResponseStart: replayTracker != nil,
+			ValidateClientFrame: validateOpenAIWSV2ClientFrame,
 			FilterUpstreamFrame: func(frame openaiwsv2.RelayUpstreamFrame) bool {
 				return !hideOpenAICodexQuota(account) || !isOpenAICodexQuotaEvent(frame.Payload)
 			},

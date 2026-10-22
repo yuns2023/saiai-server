@@ -174,23 +174,3 @@ func TestOpenAIResponsesWebSocket_AllowsBillableServiceTierOnFirstMessage(t *tes
 		require.Equal(t, int32(1), reached.Load(), tier)
 	}
 }
-
-func TestOpenAIWSTurnPayloadError(t *testing.T) {
-	allowed := []byte(`{"type":"response.create","model":"gpt-5.4","service_tier":"priority"}`)
-	rejected := []byte(`{"type":"response.create","model":"gpt-5.4","service_tier":"ultrafast"}`)
-
-	require.NoError(t, openAIWSTurnPayloadError(allowed, allowed))
-	require.NoError(t, openAIWSTurnPayloadError([]byte(`{"type":"response.create","model":"gpt-5.4"}`)))
-	ambiguous := []byte(`{"type":"response.create","model":"gpt-5.4","type":"response.cancel"}`)
-	var ambiguousErr *service.OpenAIWSClientCloseError
-	require.ErrorAs(t, openAIWSTurnPayloadError(allowed, ambiguous), &ambiguousErr)
-	require.Equal(t, coderws.StatusPolicyViolation, ambiguousErr.StatusCode())
-	require.Equal(t, service.OpenAIDuplicateKeyMessage("type"), ambiguousErr.Reason())
-	for _, payloads := range [][][]byte{{rejected, allowed}, {allowed, rejected}} {
-		err := openAIWSTurnPayloadError(payloads...)
-		var closeErr *service.OpenAIWSClientCloseError
-		require.ErrorAs(t, err, &closeErr)
-		require.Equal(t, coderws.StatusPolicyViolation, closeErr.StatusCode())
-		require.Equal(t, service.OpenAIUnsupportedServiceTierMessage, closeErr.Reason())
-	}
-}

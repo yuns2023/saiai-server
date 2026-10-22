@@ -224,9 +224,15 @@ contacted: HTTP Responses (including `/responses/compact`) returns `400` with
 a WebSocket `response.create` (first or later turn, v1 or v2 passthrough) is
 rejected like other per-turn validation failures, by closing the client
 connection with policy violation (1008) before that frame is sent upstream.
-A nested `response.service_tier` is checked too. In v2 passthrough sessions
-every client frame is checked, not only frames the relay classifies as
-`response.create`.
+A nested `response.service_tier` is checked too. The handler checks the first
+WebSocket message before account selection; afterwards the v1 ingress parser
+and the v2 relay check every client frame once (v2 includes frames the relay
+does not classify as `response.create`). When the v2 relay rejects a frame
+while an earlier turn is still running upstream, the rejected frame is not
+forwarded, the in-flight turn is drained for its terminal usage (bounded by the
+same drain timeout used after a client disconnect) and billed, and then the
+client is closed with 1008. v1 reads the next client frame only after the
+current turn has completed and been billed.
 
 Duplicate keys are rejected the same way (HTTP `400` with
 `code: duplicate_key` and `param` naming the key; WebSocket close 1008) for
@@ -282,6 +288,22 @@ Responses path, `/backend-api/codex/responses`.
 These paths come from the forwarded request, rather than from an inferred
 OpenAI default. Query parameters and credentials are not included. This is
 usage metadata only; existing records and request/response bodies are unchanged.
+
+The direct Image API is billed by image tokens without service-tier pricing.
+JSON generation bodies with any duplicate top-level key, and multipart edit
+bodies with a repeated field other than `image`/`image[]`, are rejected with
+`400`: the Gateway reads the first value while the API-key path forwards the
+original bytes, so for example `"stream":false,"stream":true` could make the
+upstream stream while the Gateway expects JSON. `service_tier` is accepted only
+when absent, `null`, empty, `auto` or `default`.
+
+A successful direct or native image response is parsed as JSON when it is
+valid JSON, otherwise as SSE (usage from the last event carrying `usage`;
+`*.completed` events count as images). If images were returned but no usage
+could be parsed, the request is not billed as zero: each image is charged
+6,240 output image tokens (the largest documented `gpt-image-1` output, high
+quality 1024x1536), and a warning with account, model and upstream request ID
+is logged for review.
 
 ## Input cache read rate
 

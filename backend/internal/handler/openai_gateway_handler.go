@@ -861,7 +861,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 	// gjson reads the first duplicate while encoding/json and upstreams may use
 	// the last; reject ambiguous routing/billing keys before reading any.
-	if key := service.OpenAIRequestDuplicateKey(body); key != "" {
+	payloadCheck := service.CheckOpenAIRequestPayload(body)
+	if key := payloadCheck.DuplicateKey; key != "" {
 		reqLog.Warn("openai.request_validation_failed", zap.String("reason", "duplicate_key"), zap.String("key", key))
 		h.writeError(c, openAIDuplicateKeyEnvelope(key), false)
 		return
@@ -897,7 +898,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "invalid stream field type")
 		return
 	}
-	if !service.IsOpenAIRequestServiceTierSupported(body) {
+	if payloadCheck.UnsupportedServiceTier {
 		reqLog.Warn("openai.request_validation_failed", zap.String("reason", "unsupported_service_tier"))
 		h.writeError(c, errEnvelopeUnsupportedServiceTier, false)
 		return
@@ -1701,9 +1702,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "invalid JSON payload")
 		return
 	}
-	if key := service.OpenAIRequestDuplicateKey(firstMessage); key != "" {
-		reqLog.Warn("openai.request_validation_failed", zap.String("reason", "duplicate_key"), zap.String("key", key), zap.Int("turn", 1))
-		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, service.OpenAIDuplicateKeyMessage(key))
+	// The v1 parser and the v2 relay validate every later frame; check the
+	// first one here so a rejected session never selects an account.
+	if rejection := service.OpenAIWSPayloadRejection(firstMessage); rejection != nil {
+		var closeErr *service.OpenAIWSClientCloseError
+		_ = errors.As(rejection, &closeErr)
+		reqLog.Warn("openai.request_validation_failed", zap.String("reason", closeErr.Reason()), zap.Int("turn", 1))
+		closeOpenAIClientWSWithOps(c, wsConn, closeErr.StatusCode(), closeErr.Reason())
 		return
 	}
 	originalFirstMessage := append([]byte(nil), firstMessage...)
@@ -1740,11 +1745,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	previousResponseIDKind := service.ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	if previousResponseID != "" && previousResponseIDKind == service.OpenAIPreviousResponseIDKindMessageID {
 		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "previous_response_id must be a response.id (resp_*), not a message id")
-		return
-	}
-	if !service.IsOpenAIRequestServiceTierSupported(firstMessage) {
-		reqLog.Warn("openai.request_validation_failed", zap.String("reason", "unsupported_service_tier"), zap.Int("turn", 1))
-		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, service.OpenAIUnsupportedServiceTierMessage)
 		return
 	}
 	reqLog = reqLog.With(
@@ -1918,12 +1918,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			c.Set(opsModelKey, turnModel)
 			if apiKey.Group != nil && apiKey.Group.IsModelBlocked(turnModel) {
 				return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("model %s is not allowed for this group", turnModel), nil)
-			}
-			// Validate the frame actually sent upstream as well as the policy
-			// payload; they differ only after a continuation migration.
-			if err := openAIWSTurnPayloadError(policyPayload, rawPayload); err != nil {
-				reqLog.Warn("openai.request_validation_failed", zap.String("reason", "ambiguous_or_unbillable_payload"), zap.Int("turn", turn))
-				return err
 			}
 			if err := h.revalidateOpenAIWSTurn(ctx, apiKey, turn); err != nil {
 				return err
@@ -2108,19 +2102,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
-}
-
-// openAIWSTurnPayloadError rejects a WebSocket response.create that has
-// ambiguous duplicate keys or a service_tier that cannot be billed. Like other
-// per-turn validation failures it closes the client connection with a policy
-// violation before the frame is written upstream.
-func openAIWSTurnPayloadError(payloads ...[]byte) error {
-	for _, payload := range payloads {
-		if err := service.OpenAIWSPayloadRejection(payload); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // openAIDuplicateKeyEnvelope is the HTTP 400 for an ambiguous request body.

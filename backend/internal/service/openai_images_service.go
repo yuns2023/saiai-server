@@ -149,7 +149,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImageAPIKey(
 		return nil, fmt.Errorf("OpenAI Image API upstream returned status %d", resp.StatusCode)
 	}
 
-	usage := parseOpenAIImageUsage(responseBody)
+	usage, imageCount := resolveOpenAIImageResponseUsage(ctx, account, model, resp.Header.Get("x-request-id"), contentType, responseBody)
 	return &OpenAIForwardResult{
 		UpstreamEndpoint:  req.URL.Path,
 		RequestID:         resp.Header.Get("x-request-id"),
@@ -162,7 +162,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImageAPIKey(
 		TextInputTokens:   usage.TextInputTokens,
 		ImageInputTokens:  usage.ImageInputTokens,
 		ImageOutputTokens: usage.ImageOutputTokens,
-		ImageCount:        len(gjson.GetBytes(responseBody, "data").Array()),
+		ImageCount:        imageCount,
 		ImageSize:         imageSize,
 		MediaType:         "image",
 	}, nil

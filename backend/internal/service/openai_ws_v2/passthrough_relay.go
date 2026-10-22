@@ -102,7 +102,12 @@ type RelayOptions struct {
 	FirstMessageType     coderws.MessageType
 	OnUsageParseFailure  func(eventType string, usageRaw string)
 	OnClientTurn         func(turn int, messageType coderws.MessageType, payload []byte) error
-	BeforeUpstreamFrame  func(frame RelayUpstreamFrame) error
+	// ValidateClientFrame runs on every client frame, including control
+	// frames that do not start a turn, before it can be written upstream. A
+	// rejection ends the relay like a rejected turn: the frame is dropped and
+	// an in-flight turn is drained for usage before the relay returns.
+	ValidateClientFrame func(messageType coderws.MessageType, payload []byte) error
+	BeforeUpstreamFrame func(frame RelayUpstreamFrame) error
 	// FilterUpstreamFrame runs after observation. False keeps telemetry private
 	// without committing the current turn or interrupting the upstream relay.
 	FilterUpstreamFrame    func(frame RelayUpstreamFrame) bool
@@ -133,6 +138,7 @@ type relayState struct {
 	turnTimingByID         map[string]*relayTurnTiming
 	turns                  *relayTurnTracker
 	beforeUpstreamFrame    func(frame RelayUpstreamFrame) error
+	validateClientFrame    func(messageType coderws.MessageType, payload []byte) error
 	filterUpstreamFrame    func(frame RelayUpstreamFrame) bool
 	transformUpstreamFrame func(payload []byte) []byte
 	bufferResponseStart    bool
@@ -205,6 +211,7 @@ func Relay(
 	state := &relayState{
 		turns:                  newRelayTurnTracker(),
 		beforeUpstreamFrame:    options.BeforeUpstreamFrame,
+		validateClientFrame:    options.ValidateClientFrame,
 		filterUpstreamFrame:    options.FilterUpstreamFrame,
 		transformUpstreamFrame: options.TransformUpstreamFrame,
 		bufferResponseStart:    options.BufferResponseStart,
@@ -241,12 +248,18 @@ func Relay(
 	})
 	clientTurns := &atomic.Int32{}
 	firstTurnRegistered := false
+	if state.validateClientFrame != nil {
+		if err := state.validateClientFrame(firstMessageType, firstClientMessage); err != nil {
+			result.Duration = nowFn().Sub(startAt)
+			return result, &RelayExit{Stage: relayStageClientTurnRejected, Err: err}
+		}
+	}
 	if isRelayClientTurn(firstClientMessage) {
 		turn := int(clientTurns.Add(1))
 		if options.OnClientTurn != nil {
 			if err := options.OnClientTurn(turn, firstMessageType, firstClientMessage); err != nil {
 				result.Duration = nowFn().Sub(startAt)
-				return result, &RelayExit{Stage: "client_turn_rejected", Err: err}
+				return result, &RelayExit{Stage: relayStageClientTurnRejected, Err: err}
 			}
 		}
 		metadata := relayTurnMetadata(turn, firstClientMessage, options.TurnMetadata)
@@ -312,7 +325,12 @@ func Relay(
 	hasSecondExit := false
 
 	// 客户端断开后尽力继续读取上游短窗口，捕获延迟 usage/terminal 事件用于计费。
+	// A rejected client frame is never forwarded, but a turn that is already
+	// running upstream must still be billed, so it is drained the same way.
 	if firstExit.stage == "read_client" && firstExit.graceful {
+		dropDownstreamWrites.Store(true)
+		secondExit, hasSecondExit = waitRelayExit(exitCh, drainTimeout)
+	} else if firstExit.stage == relayStageClientTurnRejected && state.turns.hasOutstanding() {
 		dropDownstreamWrites.Store(true)
 		secondExit, hasSecondExit = waitRelayExit(exitCh, drainTimeout)
 	} else {
@@ -445,6 +463,12 @@ func runClientToUpstream(
 			return
 		}
 		markActivity()
+		if state != nil && state.validateClientFrame != nil {
+			if err := state.validateClientFrame(msgType, payload); err != nil {
+				exitCh <- relayExitSignal{stage: relayStageClientTurnRejected, err: err}
+				return
+			}
+		}
 		turn := 0
 		turnRegistered := false
 		if isRelayClientTurn(payload) {
@@ -454,7 +478,7 @@ func runClientToUpstream(
 			}
 			if onClientTurn != nil {
 				if err := onClientTurn(turn, msgType, payload); err != nil {
-					exitCh <- relayExitSignal{stage: "client_turn_rejected", err: err}
+					exitCh <- relayExitSignal{stage: relayStageClientTurnRejected, err: err}
 					return
 				}
 			}
@@ -1032,6 +1056,10 @@ func (t *relayTurnTracker) lastCompletedMetadata() (RelayTurnMetadata, bool) {
 	defer t.mu.Unlock()
 	return t.lastCompleted, t.hasLastCompleted
 }
+
+// relayStageClientTurnRejected marks a client frame rejected before it was
+// written upstream (frame validation or a turn hook).
+const relayStageClientTurnRejected = "client_turn_rejected"
 
 func isRelayClientTurn(payload []byte) bool {
 	// Control frames such as response.cancel are relayed unchanged but do not
