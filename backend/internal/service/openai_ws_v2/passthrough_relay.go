@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +43,11 @@ type RelayResult struct {
 	ClientToUpstreamFrames  int64
 	UpstreamToClientFrames  int64
 	DroppedDownstreamFrames int64
+	// UnbilledResponseIDs and UnbilledPendingTurns describe forwarded turns
+	// whose terminal usage never arrived before the relay ended (drain cap,
+	// idle timeout or upstream failure). Their usage is unknown.
+	UnbilledResponseIDs  []string
+	UnbilledPendingTurns int
 }
 
 type RelayTurnResult struct {
@@ -99,9 +105,15 @@ type RelayOptions struct {
 	WriteTimeout         time.Duration
 	IdleTimeout          time.Duration
 	UpstreamDrainTimeout time.Duration
-	FirstMessageType     coderws.MessageType
-	OnUsageParseFailure  func(eventType string, usageRaw string)
-	OnClientTurn         func(turn int, messageType coderws.MessageType, payload []byte) error
+	// OutstandingTurnDrainTimeout caps how long the relay keeps reading the
+	// upstream after the client is gone (disconnect or rejected frame) while
+	// forwarded turns are still waiting for their terminal usage. Output is
+	// discarded; usage is billed. UpstreamDrainTimeout still applies when no
+	// turn is outstanding. Zero means openAIRelayOutstandingTurnDrainDefault.
+	OutstandingTurnDrainTimeout time.Duration
+	FirstMessageType            coderws.MessageType
+	OnUsageParseFailure         func(eventType string, usageRaw string)
+	OnClientTurn                func(turn int, messageType coderws.MessageType, payload []byte) error
 	// ValidateClientFrame runs on every client frame, including control
 	// frames that do not start a turn, before it can be written upstream. A
 	// rejection ends the relay like a rejected turn: the frame is dropped and
@@ -202,6 +214,13 @@ func Relay(
 	drainTimeout := options.UpstreamDrainTimeout
 	if drainTimeout <= 0 {
 		drainTimeout = 1200 * time.Millisecond
+	}
+	outstandingDrainTimeout := options.OutstandingTurnDrainTimeout
+	if outstandingDrainTimeout <= 0 {
+		outstandingDrainTimeout = openAIRelayOutstandingTurnDrainDefault
+	}
+	if outstandingDrainTimeout < drainTimeout {
+		outstandingDrainTimeout = drainTimeout
 	}
 	firstMessageType := options.FirstMessageType
 	if firstMessageType != coderws.MessageBinary {
@@ -327,12 +346,21 @@ func Relay(
 	// 客户端断开后尽力继续读取上游短窗口，捕获延迟 usage/terminal 事件用于计费。
 	// A rejected client frame is never forwarded, but a turn that is already
 	// running upstream must still be billed, so it is drained the same way.
+	// While forwarded turns are outstanding the drain lasts until all their
+	// terminal events arrive (bounded by outstandingDrainTimeout and the idle
+	// watchdog); otherwise only the short drainTimeout window is used.
+	drainWindow := func() time.Duration {
+		if state.turns.hasOutstanding() {
+			return outstandingDrainTimeout
+		}
+		return drainTimeout
+	}
 	if firstExit.stage == "read_client" && firstExit.graceful {
 		dropDownstreamWrites.Store(true)
-		secondExit, hasSecondExit = waitRelayExit(exitCh, drainTimeout)
+		secondExit, hasSecondExit = waitRelayExit(exitCh, drainWindow())
 	} else if firstExit.stage == relayStageClientTurnRejected && state.turns.hasOutstanding() {
 		dropDownstreamWrites.Store(true)
-		secondExit, hasSecondExit = waitRelayExit(exitCh, drainTimeout)
+		secondExit, hasSecondExit = waitRelayExit(exitCh, drainWindow())
 	} else {
 		relayCancel()
 		_ = upstreamConn.Close()
@@ -349,10 +377,18 @@ func Relay(
 		})
 	}
 
+	if dropDownstreamWrites.Load() && !hasSecondExit && state.turns.hasOutstanding() {
+		emitRelayTrace(onTrace, RelayTraceEvent{
+			Stage:     "drain_timeout",
+			Direction: "upstream_to_client",
+			Error:     "outstanding turns did not finish before the drain cap",
+		})
+	}
 	relayCancel()
 	_ = upstreamConn.Close()
 
 	enrichResult(&result, state, nowFn().Sub(startAt))
+	result.UnbilledResponseIDs, result.UnbilledPendingTurns = state.turns.outstanding()
 	result.ClientToUpstreamFrames = clientToUpstreamFrames.Load()
 	result.UpstreamToClientFrames = upstreamToClientFrames.Load()
 	result.DroppedDownstreamFrames = droppedDownstreamFrames.Load()
@@ -985,6 +1021,22 @@ func (t *relayTurnTracker) register(metadata RelayTurnMetadata) {
 	t.mu.Unlock()
 }
 
+// outstanding returns the bound response IDs and the number of turns still
+// waiting for a response ID that have not completed.
+func (t *relayTurnTracker) outstanding() ([]string, int) {
+	if t == nil {
+		return nil, 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	ids := make([]string, 0, len(t.byResponseID))
+	for responseID := range t.byResponseID {
+		ids = append(ids, responseID)
+	}
+	sort.Strings(ids)
+	return ids, len(t.pending)
+}
+
 func (t *relayTurnTracker) hasOutstanding() bool {
 	if t == nil {
 		return false
@@ -1058,6 +1110,10 @@ func (t *relayTurnTracker) lastCompletedMetadata() (RelayTurnMetadata, bool) {
 	defer t.mu.Unlock()
 	return t.lastCompleted, t.hasLastCompleted
 }
+
+// openAIRelayOutstandingTurnDrainDefault bounds the post-disconnect drain of
+// outstanding turns when the caller does not configure one.
+const openAIRelayOutstandingTurnDrainDefault = 10 * time.Minute
 
 // relayStageClientTurnRejected marks a client frame rejected before it was
 // written upstream (frame validation or a turn hook).

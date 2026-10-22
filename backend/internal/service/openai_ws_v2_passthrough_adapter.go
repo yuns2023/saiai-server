@@ -338,11 +338,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		UpstreamConn:       upstreamFrameConn,
 		FirstClientMessage: firstClientMessage,
 		Options: openaiwsv2.RelayOptions{
-			WriteTimeout:        s.openAIWSWriteTimeout(),
-			IdleTimeout:         s.openAIWSPassthroughIdleTimeout(),
-			FirstMessageType:    firstClientMessageType,
-			BufferResponseStart: replayTracker != nil,
-			ValidateClientFrame: validateOpenAIWSV2ClientFrame,
+			WriteTimeout: s.openAIWSWriteTimeout(),
+			IdleTimeout:  s.openAIWSPassthroughIdleTimeout(),
+			// After a client disconnect or rejected frame, keep reading until
+			// every forwarded turn reports usage, bounded by the WS read timeout
+			// (gateway.openai_ws.read_timeout_seconds, default 15m).
+			OutstandingTurnDrainTimeout: s.openAIWSReadTimeout(),
+			FirstMessageType:            firstClientMessageType,
+			BufferResponseStart:         replayTracker != nil,
+			ValidateClientFrame:         validateOpenAIWSV2ClientFrame,
 			FilterUpstreamFrame: func(frame openaiwsv2.RelayUpstreamFrame) bool {
 				return !hideOpenAICodexQuota(account) || !isOpenAICodexQuotaEvent(frame.Payload)
 			},
@@ -548,6 +552,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		},
 	})
 
+	logOpenAIWSV2UnbilledTurns(ctx, account, relayResult)
 	result := &OpenAIForwardResult{
 		RequestID: relayResult.RequestID,
 		Usage: OpenAIUsage{

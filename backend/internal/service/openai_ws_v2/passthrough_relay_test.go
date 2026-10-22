@@ -347,9 +347,12 @@ func TestRelay_ClientDisconnect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	result, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{})
+	// The outstanding turn never completes; cap its drain below the test
+	// deadline so the relay ends on the disconnect, not on ctx expiry.
+	result, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{OutstandingTurnDrainTimeout: 300 * time.Millisecond})
 	require.NotNil(t, relayExit, "客户端 EOF 应返回可观测的中断状态")
 	require.Equal(t, "client_disconnected", relayExit.Stage)
+	require.Equal(t, 1, result.UnbilledPendingTurns)
 	require.Equal(t, "gpt-4o", result.RequestModel)
 }
 

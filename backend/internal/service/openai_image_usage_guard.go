@@ -11,54 +11,98 @@ import (
 )
 
 // openAIImageMissingUsageOutputTokensPerImage is the conservative output-token
-// charge per returned image when a successful Image API response carries no
-// usage. It is the largest documented gpt-image-1 output-token count (high
-// quality, 1024x1536 or 1536x1024). Billing nothing would let a malformed or
-// unexpected upstream response (for example SSE when JSON was expected) serve
-// images for free; the fallback is logged so operators can review it.
+// charge per returned image when a successful response for an official
+// gpt-image model carries no image output usage. It is the largest documented
+// gpt-image-1 output-token count (high quality, 1024x1536 or 1536x1024).
+// Billing nothing would let a malformed or unexpected upstream response (for
+// example SSE when JSON was expected) serve images for free.
 const openAIImageMissingUsageOutputTokensPerImage = 6240
 
-// resolveOpenAIImageResponseUsage extracts usage and the image count from a
-// successful direct Image API response. It accepts the expected JSON body and
-// an SSE body (usage from the last event carrying it; completed events that
-// carry image data count as images). Only entries that actually carry image
-// data (b64_json or url) are counted, so a 2xx response without images is
-// never charged by the fallback.
-func resolveOpenAIImageResponseUsage(ctx context.Context, account *Account, model, requestID, contentType string, body []byte) (openAIImageUsage, int) {
-	var usage openAIImageUsage
-	imageCount := 0
-	sse := isOpenAIImageSSEResponse(contentType, body)
-	if sse {
-		usage, imageCount = parseOpenAIImageSSEUsage(body)
-	} else {
-		usage = parseOpenAIImageUsage(body)
-		imageCount = countOpenAIImageDataEntries(gjson.GetBytes(body, "data"))
-	}
-	usage = applyOpenAIImageMissingUsageFallback(ctx, account, model, requestID, usage, imageCount, sse)
-	return usage, imageCount
+// openAIImageResponseUsage is the usage extracted from one image response.
+type openAIImageResponseUsage struct {
+	usage openAIImageUsage
+	// images counts entries/events that actually carry image data.
+	images int
+	// imagesWithoutOutputUsage counts returned images not covered by any
+	// reported image output usage.
+	imagesWithoutOutputUsage int
+	sse                      bool
 }
 
-// applyOpenAIImageMissingUsageFallback fails closed when images were returned
-// but no image output usage was reported: input usage alone does not cover
-// the output charge, so the output tokens are filled in conservatively.
-func applyOpenAIImageMissingUsageFallback(ctx context.Context, account *Account, model, requestID string, usage openAIImageUsage, imageCount int, sse bool) openAIImageUsage {
-	if imageCount <= 0 || usage.ImageOutputTokens > 0 {
+// resolveOpenAIImageResponseUsage extracts usage and the image count from a
+// successful direct or native Image API response and fails closed for missing
+// image output usage; see applyOpenAIImageMissingUsageFloor.
+func (s *OpenAIGatewayService) resolveOpenAIImageResponseUsage(ctx context.Context, account *Account, model, requestID, contentType string, body []byte) (openAIImageUsage, int) {
+	var parsed openAIImageResponseUsage
+	if isOpenAIImageSSEResponse(contentType, body) {
+		parsed = parseOpenAIImageSSEUsage(body)
+	} else {
+		parsed.usage = parseOpenAIImageUsage(body)
+		parsed.images = countOpenAIImageDataEntries(gjson.GetBytes(body, "data"))
+		if parsed.usage.ImageOutputTokens == 0 {
+			parsed.imagesWithoutOutputUsage = parsed.images
+		}
+	}
+	return s.applyOpenAIImageMissingUsageFloor(ctx, account, model, requestID, parsed), parsed.images
+}
+
+// applyOpenAIImageMissingUsageFloor charges openAIImageMissingUsageOutputTokensPerImage
+// for each returned image without output usage, but only when the billed
+// model resolves to the official token-priced gpt-image family. Other models
+// (custom or aliased compatible models) keep the previous behaviour of
+// billing only the reported usage; a warning is always logged so a missing
+// output charge is never silent.
+func (s *OpenAIGatewayService) applyOpenAIImageMissingUsageFloor(ctx context.Context, account *Account, model, requestID string, parsed openAIImageResponseUsage) openAIImageUsage {
+	usage := parsed.usage
+	if parsed.imagesWithoutOutputUsage <= 0 {
 		return usage
 	}
-	usage.ImageOutputTokens = imageCount * openAIImageMissingUsageOutputTokensPerImage
+	resolvedModel, floorApplies := s.openAIImageUsageFloorModel(model)
+	fallbackTokens := 0
+	if floorApplies {
+		fallbackTokens = parsed.imagesWithoutOutputUsage * openAIImageMissingUsageOutputTokensPerImage
+		usage.ImageOutputTokens += fallbackTokens
+	}
 	fields := []zap.Field{
 		zap.String("model", unpricedModelLogValue(model)),
+		zap.String("resolved_pricing_model", unpricedModelLogValue(resolvedModel)),
 		zap.String("upstream_request_id", requestID),
-		zap.Bool("sse_response", sse),
-		zap.Int("image_count", imageCount),
-		zap.Int("reported_input_tokens", usage.totalInputTokens()),
-		zap.Int("fallback_output_tokens", usage.ImageOutputTokens),
+		zap.Bool("sse_response", parsed.sse),
+		zap.Int("image_count", parsed.images),
+		zap.Int("images_without_output_usage", parsed.imagesWithoutOutputUsage),
+		zap.Int("reported_output_tokens", parsed.usage.ImageOutputTokens),
+		zap.Int("fallback_output_tokens", fallbackTokens),
 	}
 	if account != nil {
 		fields = append(fields, zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 	}
-	logger.FromContext(ctx).Warn("openai image response has no output usage; billing conservative fallback", fields...)
+	message := "openai image response missing output usage; billing conservative gpt-image floor"
+	if !floorApplies {
+		message = "openai image response missing output usage; model is not an official gpt-image price, output not billed"
+	}
+	logger.FromContext(ctx).Warn(message, fields...)
 	return usage
+}
+
+// openAIImageUsageFloorModel returns the model whose prices bill the request
+// and whether it is the official token-priced gpt-image family.
+func (s *OpenAIGatewayService) openAIImageUsageFloorModel(model string) (string, bool) {
+	resolved := strings.ToLower(strings.TrimSpace(model))
+	if s == nil || s.billingService == nil {
+		return resolved, false
+	}
+	pricing, err := s.billingService.GetModelPricing(model)
+	if err != nil || pricing == nil {
+		return resolved, false
+	}
+	if pricing.Snapshot != nil && strings.TrimSpace(pricing.Snapshot.ResolvedModel) != "" {
+		resolved = strings.ToLower(strings.TrimSpace(pricing.Snapshot.ResolvedModel))
+	}
+	if index := strings.LastIndex(resolved, "/"); index >= 0 {
+		resolved = resolved[index+1:]
+	}
+	tokenPriced := pricing.InputImagePricePerToken > 0 && pricing.OutputImagePricePerToken > 0
+	return resolved, tokenPriced && strings.HasPrefix(resolved, "gpt-image-")
 }
 
 // isOpenAIImageSSEResponse decides by the body first: a valid JSON document is
@@ -88,30 +132,71 @@ func countOpenAIImageDataEntries(data gjson.Result) int {
 	return count
 }
 
-// parseOpenAIImageSSEUsage joins multi-line data fields per event, uses the
-// last event that carries usage, and counts image-bearing completed events
-// (or a final image "data" array) as returned images.
-func parseOpenAIImageSSEUsage(body []byte) (openAIImageUsage, int) {
-	var usage openAIImageUsage
-	completed := 0
+func addOpenAIImageUsage(total *openAIImageUsage, add openAIImageUsage) {
+	total.TextInputTokens += add.TextInputTokens
+	total.ImageInputTokens += add.ImageInputTokens
+	total.ImageOutputTokens += add.ImageOutputTokens
+}
+
+// parseOpenAIImageSSEUsage joins multi-line data fields per event and
+// distinguishes two usage shapes:
+//   - per-image: a "*.completed" event carrying image data (b64_json/url) and
+//     its own usage. Per-image usages are summed; completed images without
+//     output usage are counted as missing.
+//   - aggregate: an event carrying usage but no single image (for example a
+//     final summary event, or an event with a "data" array). The last
+//     aggregate usage covers every image and replaces the per-image sum, so
+//     a stream reporting both is not double counted.
+func parseOpenAIImageSSEUsage(body []byte) openAIImageResponseUsage {
+	parsed := openAIImageResponseUsage{sse: true}
+	var perImage openAIImageUsage
+	var aggregate openAIImageUsage
+	hasAggregate := false
+	completedImages := 0
+	completedWithoutOutput := 0
 	dataImages := 0
 	forEachOpenAIImageSSEPayload(body, func(payload []byte) {
 		if !gjson.ValidBytes(payload) {
 			return
 		}
 		event := gjson.ParseBytes(payload)
-		if event.Get("usage").IsObject() {
-			usage = parseOpenAIImageUsage(payload)
+		hasUsage := event.Get("usage").IsObject()
+		eventDataImages := countOpenAIImageDataEntries(event.Get("data"))
+		if eventDataImages > 0 {
+			dataImages = eventDataImages
 		}
-		if strings.HasSuffix(event.Get("type").String(), ".completed") && openAIImageEntryHasData(event) {
-			completed++
-		}
-		if images := countOpenAIImageDataEntries(event.Get("data")); images > 0 {
-			dataImages = images
+		isImageEvent := strings.HasSuffix(event.Get("type").String(), ".completed") && openAIImageEntryHasData(event)
+		switch {
+		case isImageEvent:
+			completedImages++
+			var eventUsage openAIImageUsage
+			if hasUsage {
+				eventUsage = parseOpenAIImageUsage(payload)
+				addOpenAIImageUsage(&perImage, eventUsage)
+			}
+			if eventUsage.ImageOutputTokens == 0 {
+				completedWithoutOutput++
+			}
+		case hasUsage:
+			aggregate = parseOpenAIImageUsage(payload)
+			hasAggregate = true
 		}
 	})
-	if completed > 0 {
-		return usage, completed
+	parsed.images = completedImages
+	if parsed.images == 0 {
+		parsed.images = dataImages
 	}
-	return usage, dataImages
+	switch {
+	case hasAggregate:
+		parsed.usage = aggregate
+		if aggregate.ImageOutputTokens == 0 {
+			parsed.imagesWithoutOutputUsage = parsed.images
+		}
+	case completedImages > 0:
+		parsed.usage = perImage
+		parsed.imagesWithoutOutputUsage = completedWithoutOutput
+	default:
+		parsed.imagesWithoutOutputUsage = parsed.images
+	}
+	return parsed
 }

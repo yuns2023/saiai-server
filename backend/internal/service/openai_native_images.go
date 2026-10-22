@@ -86,7 +86,7 @@ func (s *OpenAIGatewayService) ForwardNativeCodexImage(
 	if requestID == "" {
 		requestID = resp.Header.Get("X-Codex-Imagegen-Request-Id")
 	}
-	usage, imageCount := resolveOpenAIImageResponseUsage(ctx, account, model, requestID, contentType, responseBody)
+	usage, imageCount := s.resolveOpenAIImageResponseUsage(ctx, account, model, requestID, contentType, responseBody)
 	return &OpenAIForwardResult{
 		UpstreamEndpoint: req.URL.Path,
 		RequestID:        requestID, Usage: OpenAIUsage{InputTokens: usage.totalInputTokens(), OutputTokens: usage.ImageOutputTokens},

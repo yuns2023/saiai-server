@@ -229,10 +229,22 @@ WebSocket message before account selection; afterwards the v1 ingress parser
 and the v2 relay check every client frame once (v2 includes frames the relay
 does not classify as `response.create`). When the v2 relay rejects a frame
 while an earlier turn is still running upstream, the rejected frame is not
-forwarded, every in-flight turn is drained for its terminal usage (bounded by
-the same drain timeout used after a client disconnect) and billed, and then
-the client is closed with 1008. v1 reads the next client frame only after the
-current turn has completed and been billed.
+forwarded, every in-flight turn is drained for its terminal usage and billed,
+and then the client is closed with 1008. v1 reads the next client frame only
+after the current turn has completed and been billed (each upstream read is
+bounded by `gateway.openai_ws.read_timeout_seconds`).
+
+The v2 drain is the same after a client disconnect. While forwarded turns are
+outstanding the relay keeps reading the upstream, discarding output, until
+every turn has reported terminal usage, bounded by
+`gateway.openai_ws.read_timeout_seconds` (default 15 minutes) for the whole
+drain and by the same value as the idle watchdog. Only when no turn is
+outstanding does the short 1.2-second drain apply. The user and account
+concurrency slots stay held until the drain ends; this is intentional, because
+the upstream account is still generating for that user. If the cap or an
+upstream failure ends the drain first, the relay reports the unfinished
+response IDs and an error is logged; their usage is unknown because the relay
+learns usage only from terminal events.
 
 Duplicate keys are rejected the same way (HTTP `400` with
 `code: duplicate_key` and `param` naming the key; WebSocket close 1008) for
@@ -301,12 +313,18 @@ A successful direct or native image response is parsed as JSON when it is
 valid JSON, otherwise as SSE (multi-line `data:` fields joined; usage from the
 last event carrying `usage`; `*.completed` events count as images only when
 they carry `b64_json` or `url`). Only entries with image data are counted. If
-images were returned but no image output usage could be parsed (including
-input-only usage), the output is not billed as zero: each image is charged
-6,240 output image tokens (the largest documented `gpt-image-1` output, high
-quality 1024x1536), and a warning with account, model and upstream request ID
-is logged for review. The OAuth Images compatibility adapter applies the same
-fallback to its returned images.
+images were returned without image output usage (including input-only usage)
+and the billed model resolves to the official token-priced `gpt-image-*`
+family, each such image is charged 6,240 output image tokens (the largest
+documented `gpt-image-1` output, high quality 1024x1536). Other models,
+including compatible models with their own token prices, keep billing only
+the reported usage. In both cases a warning with account, model, resolved
+pricing model and upstream request ID is logged. SSE per-image usage on
+image-bearing `*.completed` events is summed and the floor applies per image
+missing output usage. An event that carries usage without a single image is
+treated as an aggregate covering every image and replaces the per-image sum,
+so it is not double counted. The OAuth Images compatibility adapter applies
+the same floor to its returned images.
 
 ## Input cache read rate
 

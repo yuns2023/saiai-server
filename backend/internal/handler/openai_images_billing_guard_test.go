@@ -112,6 +112,9 @@ func TestOpenAIImagesRejectsDuplicateStreamBeforeUpstream(t *testing.T) {
 	require.Empty(t, usageRepo.logs)
 }
 
+// End-to-end parsing of unexpected SSE and missing usage. This harness has no
+// image token pricing, so the gpt-image floor does not apply here (it is
+// covered with real pricing in the service tests); missing output stays 0.
 func TestOpenAIImagesBillsUnexpectedSSEAndMissingUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cases := []struct {
@@ -128,13 +131,13 @@ func TestOpenAIImagesBillsUnexpectedSSEAndMissingUsage(t *testing.T) {
 			name:         "sse_without_usage",
 			responseBody: "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"TEST_ONLY\"}\n\n",
 			contentType:  "text/event-stream",
-			images:       1, outputTokens: 6240,
+			images:       1, outputTokens: 0,
 		},
 		{
 			name:         "json_without_usage",
 			responseBody: `{"data":[{"b64_json":"A"},{"b64_json":"B"}]}`,
 			contentType:  "application/json",
-			images:       2, outputTokens: 2 * 6240,
+			images:       2, outputTokens: 0,
 		},
 		{
 			name:         "json_with_usage_mislabelled_as_sse",

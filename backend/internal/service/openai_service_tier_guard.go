@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
@@ -195,4 +196,22 @@ func logUnrecognizedOpenAIReportedServiceTier(ctx context.Context, result *OpenA
 		fields = append(fields, zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 	}
 	logger.FromContext(ctx).Warn("openai upstream reported an unrecognized service tier; billing it as priority", fields...)
+}
+
+// logOpenAIWSV2UnbilledTurns reports forwarded turns whose terminal usage
+// never arrived. The relay only learns usage from terminal events, so no
+// partial usage is known for them; operators can reconcile by response ID.
+func logOpenAIWSV2UnbilledTurns(ctx context.Context, account *Account, relayResult openaiwsv2.RelayResult) {
+	if len(relayResult.UnbilledResponseIDs) == 0 && relayResult.UnbilledPendingTurns == 0 {
+		return
+	}
+	fields := []zap.Field{
+		zap.Strings("response_ids", relayResult.UnbilledResponseIDs),
+		zap.Int("turns_without_response_id", relayResult.UnbilledPendingTurns),
+		zap.String("last_request_id", relayResult.RequestID),
+	}
+	if account != nil {
+		fields = append(fields, zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
+	}
+	logger.FromContext(ctx).Error("openai ws v2 relay ended before forwarded turns reported usage; usage unknown", fields...)
 }
