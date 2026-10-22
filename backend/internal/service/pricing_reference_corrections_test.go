@@ -312,6 +312,9 @@ func TestPricingSnapshot_PriorityBilledAsStandardJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &decoded))
 	require.Equal(t, "priority", decoded["service_tier"])
 	require.Equal(t, true, decoded["priority_billed_as_standard"])
-	require.Equal(t, true, decoded["effective"].(map[string]any)["no_priority_tier"])
-	require.Equal(t, true, decoded["reference"].(map[string]any)["no_priority_tier"])
+	for _, key := range []string{"effective", "reference"} {
+		prices, ok := decoded[key].(map[string]any)
+		require.True(t, ok, key)
+		require.Equal(t, true, prices["no_priority_tier"], key)
+	}
 }
