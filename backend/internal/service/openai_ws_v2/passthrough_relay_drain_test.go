@@ -80,13 +80,11 @@ func TestRelay_RejectedFrameDrainsLongOutstandingTurn(t *testing.T) {
 		msgType: coderws.MessageText,
 		payload: []byte(`{"type":"response.create","type":"response.cancel"}`),
 	}}, false)
-	upstreamConn := &delayedReadFrameConn{
-		base: newPassthroughTestFrameConn([]passthroughTestFrame{{
-			msgType: coderws.MessageText,
-			payload: []byte(`{"type":"response.completed","response":{"id":"resp_slow","usage":{"input_tokens":3,"output_tokens":500}}}`),
-		}}, false),
-		firstDelay: 1500 * time.Millisecond,
-	}
+	upstreamBase := newPassthroughTestFrameConn([]passthroughTestFrame{{
+		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.completed","response":{"id":"resp_slow","usage":{"input_tokens":3,"output_tokens":500}}}`),
+	}}, false)
+	upstreamConn := &delayedReadFrameConn{base: upstreamBase, firstDelay: 1500 * time.Millisecond}
 	rejection := errors.New("rejected")
 	completed := make(chan RelayTurnResult, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -109,7 +107,7 @@ func TestRelay_RejectedFrameDrainsLongOutstandingTurn(t *testing.T) {
 	require.Equal(t, relayStageClientTurnRejected, relayExit.Stage)
 	require.ErrorIs(t, relayExit.Err, rejection)
 	require.Equal(t, 500, result.Usage.OutputTokens)
-	require.Len(t, upstreamConn.base.(*passthroughTestFrameConn).Writes(), 1, "the rejected frame must not be forwarded")
+	require.Len(t, upstreamBase.Writes(), 1, "the rejected frame must not be forwarded")
 	select {
 	case turn := <-completed:
 		require.Equal(t, 500, turn.Usage.OutputTokens)
