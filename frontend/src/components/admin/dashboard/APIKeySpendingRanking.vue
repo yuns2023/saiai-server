@@ -69,7 +69,7 @@
         {{ t('admin.dashboard.keyRankingScopeTotal') }}:
         <span class="font-medium tabular-nums text-gray-900 dark:text-white">${{ formatCost(ranking.total_actual_cost) }}</span>
         · {{ ranking.total_requests.toLocaleString() }} {{ t('admin.dashboard.requests') }}
-        · {{ formatTokens(ranking.total_tokens) }} Token
+        · {{ formatTokenCount(ranking.total_tokens) }} Token
       </p>
       <div class="overflow-x-auto">
         <table class="w-full min-w-[800px] text-sm">
@@ -113,9 +113,9 @@
               </td>
               <td class="py-3 pr-3 text-right tabular-nums">{{ costShare(item).toFixed(1) }}%</td>
               <td class="py-3 pr-3 text-right tabular-nums">{{ item.requests.toLocaleString() }}</td>
-              <td class="py-3 pr-3 text-right tabular-nums">{{ formatTokens(item.tokens) }}</td>
+              <td class="py-3 pr-3 text-right tabular-nums">{{ formatTokenCount(item.tokens) }}</td>
               <td class="py-3 pr-3 text-right tabular-nums" :title="tokenBreakdown(item)">
-                {{ cacheReadRate(item) }}
+                {{ formatCacheReadRate(cacheReadRate(item)) }}
               </td>
               <td class="py-3 text-right">
                 <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" @click="goToUsage(item)">
@@ -140,6 +140,7 @@ import { getAPIKeySpendingRanking } from '@/api/admin/dashboard'
 import { searchUsers as findUsers, type SimpleUser } from '@/api/admin/usage'
 import type { APIKeySpendingRankingItem, APIKeySpendingRankingResponse } from '@/types'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import { cacheReadRate, formatCacheReadRate, formatTokenCount } from '@/utils/usageTokens'
 
 const props = defineProps<{
   startDate?: string
@@ -233,21 +234,10 @@ const costShare = (item: APIKeySpendingRankingItem) => {
   return total > 0 ? Math.min(100, Math.max(0, item.actual_cost / total * 100)) : 0
 }
 
-const cacheReadRate = (item: APIKeySpendingRankingItem) => {
-  const totalInput = item.input_tokens + item.cache_creation_tokens + item.cache_read_tokens
-  return totalInput > 0 ? `${(item.cache_read_tokens / totalInput * 100).toFixed(1)}%` : '—'
-}
-
 const tokenBreakdown = (item: APIKeySpendingRankingItem) =>
   `${t('usage.in')}: ${item.input_tokens.toLocaleString()} / ${t('usage.cacheWrite')}: ${item.cache_creation_tokens.toLocaleString()} / ${t('usage.cacheRead')}: ${item.cache_read_tokens.toLocaleString()}`
 
 const formatCost = (value: number) => value.toFixed(4)
-const formatTokens = (value: number) => {
-  if (value >= 1e9) return `${(value / 1e9).toFixed(2)}B`
-  if (value >= 1e6) return `${(value / 1e6).toFixed(2)}M`
-  if (value >= 1e3) return `${(value / 1e3).toFixed(2)}K`
-  return value.toLocaleString()
-}
 
 watch(
   () => [props.startDate, props.endDate, props.startTime, props.endTime, selectedUser.value?.id],

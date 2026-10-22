@@ -18,7 +18,6 @@ const { list, getStats, getSnapshotV2, getModelStats, getById, routeQuery } = vi
     getSnapshotV2: vi.fn(),
     getModelStats: vi.fn(),
     getById: vi.fn(),
-    routeQuery: {} as Record<string, string>,
   }
 })
 
@@ -224,8 +223,8 @@ describe('admin UsageView distribution metric toggles', () => {
     const wrapper = mount(UsageView, {
       global: { stubs: {
         AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
-        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
-        UserBalanceHistoryModal: true, Pagination: true, Select: true, DateRangePicker: true,
+        UsageTable: true, InputRiskAlerts: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, Pagination: true, Select: true, DateTimeRangePicker: true,
         Icon: true, TokenUsageTrend: true, ModelDistributionChart: ModelDistributionChartStub,
         GroupDistributionChart: GroupDistributionChartStub, EndpointDistributionChart: EndpointDistributionChartStub,
       } },
