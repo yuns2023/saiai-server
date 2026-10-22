@@ -1325,6 +1325,8 @@ const handlePageSizeChange = (pageSize: number) => {
   loadApiKeys()
 }
 
+const loadedSmartSwitch = ref('')
+
 const editKey = (key: ApiKey) => {
   selectedKey.value = key
   const hasIPRestriction = (key.ip_whitelist?.length > 0) || (key.ip_blacklist?.length > 0)
@@ -1349,6 +1351,7 @@ const editKey = (key: ApiKey) => {
     expiration_preset: 'custom',
     expiration_date: key.expires_at ? formatDateTimeLocal(key.expires_at) : ''
   }
+  loadedSmartSwitch.value = JSON.stringify(formData.value.smart_switch)
   showEditModal.value = true
 }
 
@@ -1478,10 +1481,13 @@ const handleSubmit = async () => {
     rate_limit_7d: formData.value.rate_limit_7d && formData.value.rate_limit_7d > 0 ? formData.value.rate_limit_7d : 0,
   } : { rate_limit_5h: 0, rate_limit_1d: 0, rate_limit_7d: 0 }
 
-  // Omit an untouched, never-enabled policy so ordinary saves keep the Key's
-  // stored policy (NULL) instead of materializing a disabled one.
-  const editingPolicy = showEditModal.value && selectedKey.value?.smart_switch
-  const smartSwitch = editingPolicy || formData.value.smart_switch.enabled ? formData.value.smart_switch : undefined
+  // Submit the policy only when the user changed it (edit) or enabled it
+  // (create). The API returns a disabled placeholder for Keys without a stored
+  // policy, so an ordinary save must omit it to keep the stored policy as is.
+  const editing = showEditModal.value && !!selectedKey.value
+  const smartSwitch = (editing ? JSON.stringify(formData.value.smart_switch) !== loadedSmartSwitch.value : formData.value.smart_switch.enabled)
+    ? formData.value.smart_switch
+    : undefined
 
   submitting.value = true
   try {

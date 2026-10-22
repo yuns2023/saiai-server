@@ -215,6 +215,24 @@ describe('user KeysView setup guidance', () => {
     expect(wrapper.find('pre').exists()).toBe(false)
   })
 
+  it('omits an untouched smart switching placeholder on ordinary saves', async () => {
+    // The API returns a disabled placeholder for Keys without a stored policy.
+    mocks.list.mockResolvedValue({ items: [makeKey({ smart_switch: { enabled: false, group_ids: [], payg_confirmed: false, version: 0 } })], total: 1, page: 1, page_size: 10, pages: 1 })
+    const wrapper = await mountView()
+    await buttonWithText(wrapper, 'common.edit').trigger('click')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(10, expect.objectContaining({ smart_switch: undefined }))
+  })
+
+  it('omits a disabled smart switching policy when creating a key', async () => {
+    const wrapper = await mountView()
+    await fillCreateForm(wrapper)
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.create.mock.calls[0][8]).toBeUndefined()
+  })
+
   it('keeps raw reveal and copy behind More actions', async () => {
     const wrapper = await mountView()
     await buttonWithText(wrapper, 'keys.moreActions').trigger('click')
