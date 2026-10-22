@@ -5066,22 +5066,34 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(_ context.Context, accou
 	if resetAt != nil {
 		reset := *resetAt
 		go func() {
-			updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = s.rateLimitService.codexUsageWrite(updateCtx, accountID, now, func() error {
-				return s.accountRepo.SetRateLimited(updateCtx, accountID, reset)
+			_ = s.writeCodexUsage(accountID, now, func(ctx context.Context) error {
+				return s.accountRepo.SetRateLimited(ctx, accountID, reset)
 			})
 		}()
 	}
 }
 
+// codexUsageLockWait outlasts a reset reconciliation's 25s operation budget,
+// so a newer observation waits for the reset instead of being dropped.
+const codexUsageLockWait = 30 * time.Second
+
+// writeCodexUsage gives the database write its own budget; waiting behind a
+// reset must not consume it.
+func (s *OpenAIGatewayService) writeCodexUsage(accountID int64, observedAt time.Time, write func(context.Context) error) error {
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), codexUsageLockWait)
+	defer cancelWait()
+	return s.rateLimitService.codexUsageWrite(waitCtx, accountID, observedAt, func() error {
+		writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return write(writeCtx)
+	})
+}
+
 func (s *OpenAIGatewayService) persistCodexUsageSnapshots(coordinator *accountWriteThrottle, first *codexSnapshotWriteRequest) {
 	for current := first; current != nil; {
-		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := s.rateLimitService.codexUsageWrite(updateCtx, current.accountID, current.receivedAt, func() error {
-			return s.accountRepo.UpdateExtra(updateCtx, current.accountID, current.updates)
+		err := s.writeCodexUsage(current.accountID, current.receivedAt, func(ctx context.Context) error {
+			return s.accountRepo.UpdateExtra(ctx, current.accountID, current.updates)
 		})
-		cancel()
 		if err != nil && !errors.Is(err, errCodexUsageSuperseded) {
 			logger.LegacyPrintf("service.openai_gateway", "failed to persist Codex usage snapshot: account=%d error=%v", current.accountID, err)
 		}
