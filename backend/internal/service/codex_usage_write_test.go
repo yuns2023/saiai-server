@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -25,7 +26,7 @@ type codexFenceRepo struct {
 }
 
 func newCodexFenceRepo(accounts ...Account) *codexFenceRepo {
-	return &codexFenceRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: accounts}, written: make(chan struct{}, 16)}
+	return &codexFenceRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: accounts}, written: make(chan struct{}, 1024)}
 }
 
 func (r *codexFenceRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
@@ -550,7 +551,9 @@ func TestCodexNoReset429RecentKeepsNewestObservations(t *testing.T) {
 		limits.recordOpenAINoReset429(20, base.Add(time.Duration(i)*time.Microsecond))
 	}
 	limits.clearOpenAINoReset429Through(20, base.Add(50*time.Millisecond))
-	require.Equal(t, openAINoReset429EscalatedFor, limits.openAINoReset429CooldownAt(20, base.Add(104*time.Millisecond)))
+	// A reset happened after these were counted (generation 0): recompute.
+	require.Equal(t, openAINoReset429EscalatedFor, limits.confirmOpenAINoReset429Cooldown(20, base.Add(104*time.Millisecond), 0, openAINoReset429Cooldown))
+	require.Equal(t, openAINoReset429Cooldown, limits.confirmOpenAINoReset429Cooldown(20, base.Add(103*time.Millisecond), 0, openAINoReset429EscalatedFor))
 }
 
 // An ordinary usage snapshot received before a reset but processed after it
@@ -578,4 +581,45 @@ func TestCodexSnapshotUsesReceiptTime(t *testing.T) {
 	extras, rateLimits := repo.counts()
 	require.Equal(t, 1, extras)
 	require.Equal(t, 1, rateLimits)
+}
+
+// 25 current 429s queue behind a busy fence. Each keeps the backoff decided
+// when it was counted: the first four short, the fifth onward escalated.
+func TestCodexNoReset429KeepsObservationTimeDecisions(t *testing.T) {
+	for _, reset := range []bool{false, true} {
+		t.Run(fmt.Sprint("reset=", reset), func(t *testing.T) {
+			repo := newCodexFenceRepo()
+			limits := &RateLimitService{accountRepo: repo}
+			account := &Account{ID: 22, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			generic := []byte(`{"error":{"type":"rate_limit_exceeded"}}`)
+			if reset {
+				// Earlier 429s that the reset drops.
+				for i := 0; i < 3; i++ {
+					limits.HandleUpstreamError(withCodexObservedAt(context.Background(), time.Now()), account, http.StatusTooManyRequests, http.Header{}, generic)
+				}
+			}
+			state, release, err := limits.lockCodexUsageWrite(context.Background(), account.ID)
+			require.NoError(t, err)
+			boundary := time.Now()
+			observed := make([]time.Time, 25)
+			for i := range observed {
+				time.Sleep(10 * time.Microsecond)
+				observed[i] = time.Now()
+				limits.HandleUpstreamError(withCodexObservedAt(context.Background(), observed[i]), account, http.StatusTooManyRequests, http.Header{}, generic)
+			}
+			if reset {
+				state.resetAt.Store(&boundary)
+				limits.clearOpenAINoReset429Through(account.ID, boundary)
+			}
+			release()
+			limits.codexUsageWrites.pending.Wait()
+			for i, at := range observed {
+				want := openAINoReset429Cooldown
+				if i+1 >= openAINoReset429EscalatedAfter {
+					want = openAINoReset429EscalatedFor
+				}
+				require.True(t, repo.wroteLimit(at.Add(want)), "429 #%d", i+1)
+			}
+		})
+	}
 }

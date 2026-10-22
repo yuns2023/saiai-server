@@ -61,8 +61,9 @@ processed: HTTP responses and WebSocket handshakes use the time their headers
 arrived. Request paths never wait for a reconciliation; when the account is
 busy, the write moves to its own goroutine, which waits at most 30 seconds. The
 generic-429 backoff counter only counts observations that pass the reset
-boundary; a reset drops 429s observed before its boundary, and the backoff is
-decided again when it is written. `codex_usage_updated_at` is stored with
+boundary; a reset drops 429s observed before its boundary. Each 429's backoff is
+decided when it is counted and recomputed at write time only if a reset dropped
+counted 429s in between. `codex_usage_updated_at` is stored with
 sub-second precision; a legacy whole-second value is read as the start of its
 second, so a stored snapshot from the reset's own second is ignored until the
 next observation. This is process-local coordination; it does not serialize
