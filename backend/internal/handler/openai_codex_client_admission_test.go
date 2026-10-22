@@ -27,18 +27,18 @@ func TestOpenAICodexAdmissionRejectsBeforeScheduling(t *testing.T) {
 		{"curl with official originator", "curl/7.76.1", "codex_cli_rs"},
 		{"missing UA", "", "codex_cli_rs"},
 		{"embedded product", "curl/7.76.1 codex_cli_rs/0.159.2", "codex_cli_rs"},
-		{"unknown originator", "codex_cli_rs/0.159.2", "codex_fake"},
+		{"non-Codex originator", "codex_cli_rs/0.159.2", "cherry_studio"},
 		{"missing product version", "codex_cli_rs/", "codex_cli_rs"},
 		{"embedded TUI product", "curl/8.0 codex-tui/0.160.0", "codex-tui"},
-		{"unknown TUI originator", "codex-tui/0.160.0", "codex-tui-fake"},
+		{"versioned TUI originator", "codex-tui/0.160.0", "codex-tui/0.160.0"},
 		{"missing TUI version", "codex-tui/", "codex-tui"},
 		{"curl with work desktop originator", "curl/8.0", "codex_work_desktop"},
 		{"embedded work desktop", "curl/8.0 codex_work_desktop/0.159.0-alpha.12.1", "codex_work_desktop"},
-		{"unknown work desktop originator", "codex_work_desktop/0.159.0-alpha.12.1", "codex_work_desktop_fake"},
+		{"embedded work desktop originator", "codex_work_desktop/0.159.0-alpha.12.1", "my_client codex_work_desktop"},
 		{"missing work desktop version", "codex_work_desktop/", "codex_work_desktop"},
 		{"browser with sidepanel originator", "Mozilla/5.0", "codex-chrome-extension-sidepanel"},
 		{"embedded sidepanel", "Mozilla/5.0 codex-chrome-extension-sidepanel/0.159.0", "codex-chrome-extension-sidepanel"},
-		{"unknown sidepanel originator", "codex-chrome-extension-sidepanel/0.159.0", "codex-chrome-extension-sidepanel-fake"},
+		{"versioned sidepanel originator", "codex-chrome-extension-sidepanel/0.159.0", "codex-chrome-extension-sidepanel/0.159.0"},
 		{"missing sidepanel version", "codex-chrome-extension-sidepanel/", "codex-chrome-extension-sidepanel"},
 	}
 	for _, policy := range []string{"official_clients", "cli_only", "local_proxy_only"} {
@@ -161,6 +161,7 @@ func TestOpenAICodexDesktopSurfaceAdmissionReachesScheduling(t *testing.T) {
 			{"codex_work_desktop", "0.155.0-alpha.9.2"},
 			{"codex_work_desktop", "0.159.0-alpha.12.1"},
 			{"codex-chrome-extension-sidepanel", "0.159.0"},
+			{"codex-browser-use", "0.163.0-alpha.10.2"},
 		} {
 			t.Run(policy+"/"+client.product+"/"+client.version, func(t *testing.T) {
 				var slotCalls atomic.Int32

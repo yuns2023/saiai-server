@@ -151,34 +151,32 @@ Responses model ingress requires a recognized Codex product/version at the start
 `User-Agent`, together with non-empty `chatgpt-account-id` and `version`
 headers. A missing UA, a non-Codex UA (including curl), an embedded Codex
 substring, or a missing product version is rejected even when `originator`
-claims Codex. A present `originator` must match the exact allowlist:
-`codex_cli_rs`, `codex-tui`, `codex_vscode`, `codex_app`, `codex_chatgpt_desktop`,
-`codex_work_desktop`, `codex-chrome-extension-sidepanel`, `codex_atlas`,
-`codex_exec`, `codex_sdk_ts`, or `Codex Desktop`
-(case-insensitive). Official UAs without `originator` remain accepted;
-app-server UAs may carry a different allowlisted surface originator.
+claims Codex.
 
-The official interactive terminal in Codex 0.154.0 and 0.160.0 uses the
-`codex-tui/<version>` User-Agent and `codex-tui` originator through its
-app-server. Model discovery may initially pair that UA with `codex_cli_rs`.
-Both native shapes are recognized without rewriting client identity or
-relaxing the version/account requirements on Responses. Terminal admission
-includes this exact product; embedded products and unknown suffixes remain
-rejected.
+Recognition matches the Codex client product family rather than an enumerated
+list, so new official surfaces are admitted without a Server change. A
+recognized product name is `codex` followed by one or more segments, each a
+space, `_` or `-` separator and lowercase ASCII letters or digits (compared
+case-insensitively). Examples: `codex_cli_rs`, `codex-tui`, `codex_vscode`,
+`codex_work_desktop`, `codex-chrome-extension-sidepanel`, `codex-browser-use`
+and `Codex Desktop`. The UA must start with such a product followed by
+`/<version>`; a present `originator` must be such a product name without a
+version. Official UAs without `originator` remain accepted, and app-server UAs
+may carry a different surface originator. Bare `codex`, names without a
+separator (`codexfoo`), names with other punctuation, embedded products,
+versioned originators and missing versions remain rejected.
 
-The Windows Desktop work surface uses `codex_work_desktop/<version>` and the
-exact `codex_work_desktop` originator. Recognize this native shape without
-rewriting it to a terminal identity. Responses still requires the account and
-version headers, unknown product/originator suffixes remain rejected, and the
-work Desktop UA does not qualify for `cli_only`.
+These headers are caller-controlled compatibility signals, not authentication;
+an enumerated product allowlist would not make them harder to forge and only
+rejected each new official surface (for example the Windows `codex-browser-use`
+surface) until the list was updated. Recognition never rewrites client identity
+and does not relax the account/version requirements on Responses.
 
-Browser side chat uses the separate `codex-chrome-extension-sidepanel/<version>`
-product. Accept that exact product and the `codex-chrome-extension-sidepanel`
-originator without rewriting them to a CLI identity. The sidepanel does not
-qualify for `cli_only`; ordinary browser UAs, embedded products, missing
-versions and unknown originator suffixes remain rejected. This is a header
-compatibility rule, not authentication or a claim that every browser workflow
-has been validated end to end.
+`cli_only` keeps the exact terminal subset: `codex_cli_rs`, `codex-tui` and
+`codex_exec`. VSCode, Desktop, sidepanel, browser-use and other surfaces do not
+qualify for it. The official interactive terminal in Codex 0.154.0 and 0.160.0
+uses the `codex-tui/<version>` User-Agent and `codex-tui` originator through its
+app-server; model discovery may initially pair that UA with `codex_cli_rs`.
 
 The same client-header admission applies to the `official_clients` and
 `cli_only` group policies, OAuth account restrictions, and native relay

@@ -14,7 +14,7 @@ func TestOpenAIGatewayService_Forward_RejectsUnapprovedCodexHeadersBeforeUpstrea
 		{"curl with official originator", "curl/7.76.1", "codex_cli_rs"},
 		{"missing UA", "", "codex_cli_rs"},
 		{"embedded product", "curl/7.76.1 codex_cli_rs/0.159.2", "codex_cli_rs"},
-		{"unknown originator", "codex_cli_rs/0.159.2", "codex_fake"},
+		{"non-Codex originator", "codex_cli_rs/0.159.2", "cherry_studio"},
 	}
 	accounts := []Account{
 		{Platform: PlatformOpenAI, Type: AccountTypeOAuth},

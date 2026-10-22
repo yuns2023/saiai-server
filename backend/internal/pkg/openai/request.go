@@ -1,6 +1,9 @@
 package openai
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // CodexCLIUserAgentPrefixes matches Codex CLI User-Agent patterns
 // Examples: "codex_vscode/1.0.0", "codex_cli_rs/0.1.2"
@@ -19,37 +22,14 @@ var CodexTerminalUserAgentPrefixes = []string{
 	"codex_exec/",
 }
 
-// CodexOfficialClientUserAgentPrefixes lists the product tokens accepted by
-// Codex ingress. A product must start the User-Agent and have a version.
-var CodexOfficialClientUserAgentPrefixes = []string{
-	"codex_cli_rs/",
-	"codex-tui/",
-	"codex_vscode/",
-	"codex_app/",
-	"codex_chatgpt_desktop/",
-	"codex_work_desktop/",
-	"codex-chrome-extension-sidepanel/",
-	"codex_atlas/",
-	"codex_exec/",
-	"codex_sdk_ts/",
-	"codex desktop/",
-}
-
-// CodexOfficialClientOriginators is an exact allowlist. An originator is a
-// compatibility signal, not proof of client identity, and cannot replace a UA.
-var CodexOfficialClientOriginators = []string{
-	"codex_cli_rs",
-	"codex-tui",
-	"codex_vscode",
-	"codex_app",
-	"codex_chatgpt_desktop",
-	"codex_work_desktop",
-	"codex-chrome-extension-sidepanel",
-	"codex_atlas",
-	"codex_exec",
-	"codex_sdk_ts",
-	"codex desktop",
-}
+// codexClientProductPattern matches the Codex client family product names
+// used as the User-Agent product token and as the originator header, such as
+// "codex_cli_rs", "codex-tui", "codex-browser-use" and "codex desktop". New
+// official surfaces keep this naming scheme, so admission matches the family
+// rather than an enumerated list that rejects each new surface until updated.
+// These caller-controlled fields are compatibility signals; an allowlist of
+// product names would not make them harder to forge.
+var codexClientProductPattern = regexp.MustCompile(`^codex(?:[ _-][a-z0-9]+)+$`)
 
 // IsCodexCLIRequest retains the historical substring check for compatibility
 // header rewriting. Admission must use IsCodexOfficialClientByHeaders instead.
@@ -78,26 +58,22 @@ func IsCodexOfficialClientRequest(userAgent string) bool {
 	if ua == "" {
 		return false
 	}
-	return matchCodexUserAgentPrefixes(ua, CodexOfficialClientUserAgentPrefixes)
+	product, _, found := strings.Cut(ua, "/")
+	if !found || !codexClientProductPattern.MatchString(product) {
+		return false
+	}
+	return matchCodexUserAgentPrefixes(ua, []string{product + "/"})
 }
 
 // IsCodexOfficialClientOriginator checks if originator indicates a Codex 官方客户端请求。
 func IsCodexOfficialClientOriginator(originator string) bool {
-	v := normalizeCodexClientHeader(originator)
-	if v == "" {
-		return false
-	}
-	for _, allowed := range CodexOfficialClientOriginators {
-		if v == allowed {
-			return true
-		}
-	}
-	return false
+	return codexClientProductPattern.MatchString(normalizeCodexClientHeader(originator))
 }
 
 // IsCodexOfficialClientByHeaders checks whether the request headers indicate an
 // official Codex client family request. Missing or non-Codex UAs fail closed,
-// even when originator claims Codex. A present originator must be allowlisted.
+// even when originator claims Codex. A present originator must name a Codex
+// client product.
 // These caller-controlled fields do not provide cryptographic attestation.
 func IsCodexOfficialClientByHeaders(userAgent, originator string) bool {
 	return IsCodexOfficialClientRequest(userAgent) &&

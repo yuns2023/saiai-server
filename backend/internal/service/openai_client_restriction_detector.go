@@ -9,11 +9,11 @@ import (
 const (
 	// CodexClientRestrictionReasonDisabled 表示账号未开启 codex_cli_only。
 	CodexClientRestrictionReasonDisabled = "codex_cli_only_disabled"
-	// CodexClientRestrictionReasonMatchedUA 表示请求命中官方客户端 UA 白名单。
+	// CodexClientRestrictionReasonMatchedUA 表示请求 UA 属于 Codex 官方客户端产品族。
 	CodexClientRestrictionReasonMatchedUA = "official_client_user_agent_matched"
-	// CodexClientRestrictionReasonNotMatchedOriginator 表示已有 originator 不在精确白名单中。
+	// CodexClientRestrictionReasonNotMatchedOriginator 表示已有 originator 不是 Codex 客户端产品名。
 	CodexClientRestrictionReasonNotMatchedOriginator = "official_client_originator_not_matched"
-	// CodexClientRestrictionReasonNotMatchedUA 表示请求未命中官方客户端 UA 白名单。
+	// CodexClientRestrictionReasonNotMatchedUA 表示请求 UA 不属于 Codex 官方客户端产品族。
 	CodexClientRestrictionReasonNotMatchedUA = "official_client_user_agent_not_matched"
 )
 

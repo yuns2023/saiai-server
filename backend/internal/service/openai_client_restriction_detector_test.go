@@ -102,10 +102,10 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 		require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
 	})
 
-	t.Run("开启后官方 UA 与未知 originator 拒绝", func(t *testing.T) {
+	t.Run("开启后官方 UA 与非 Codex originator 拒绝", func(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(nil)
 		account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"codex_cli_only": true}}
-		result := detector.Detect(newCodexDetectorTestContext("codex_cli_rs/0.159.2", "codex_fake"), account)
+		result := detector.Detect(newCodexDetectorTestContext("codex_cli_rs/0.159.2", "cherry_studio"), account)
 		require.True(t, result.Enabled)
 		require.False(t, result.Matched)
 		require.Equal(t, CodexClientRestrictionReasonNotMatchedOriginator, result.Reason)
