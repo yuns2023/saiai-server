@@ -351,7 +351,9 @@ func TestCodexUsageExtraKeepsSubSecondObservationTime(t *testing.T) {
 	require.Equal(t, "2026-10-22T12:00:00.123456789Z", updates["codex_usage_updated_at"])
 	require.True(t, codexExtraObservedAt(updates).Equal(observedAt))
 	// Existing readers accept the fractional form.
-	parsed, err := parseTime(updates["codex_usage_updated_at"].(string))
+	stored, ok := updates["codex_usage_updated_at"].(string)
+	require.True(t, ok)
+	parsed, err := parseTime(stored)
 	require.NoError(t, err)
 	require.True(t, parsed.Equal(observedAt))
 	at, ok := extraTime(updates, "codex_usage_updated_at")
@@ -449,7 +451,9 @@ func TestCodexWSHandshake429UsesHeaderReceiptTime(t *testing.T) {
 			w.Header()[k] = v
 		}
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.(http.Flusher).Flush()
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
 		close(headersSent)
 		<-releaseBody
 		_, _ = w.Write([]byte(`{"error":{"type":"rate_limit_exceeded"}}`))
