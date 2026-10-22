@@ -318,3 +318,107 @@ describe('user UsageView tooltip', () => {
     clickSpy.mockRestore()
   })
 })
+
+describe('user UsageView density layout', () => {
+  const TablePageLayoutPropsStub = {
+    props: { dense: Boolean },
+    template: '<div data-testid="layout" :data-dense="String(dense)"><slot name="actions" /><slot name="filters" /><slot name="table" /></div>',
+  }
+  const mountView = () =>
+    mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          TablePageLayout: TablePageLayoutPropsStub,
+          Pagination: true,
+          EmptyState: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+  beforeEach(() => {
+    localStorage.clear()
+    query.mockReset()
+    getStatsByDateRange.mockReset()
+    list.mockReset()
+    ;(globalThis as any).ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    query.mockResolvedValue({
+      items: [
+        {
+          request_id: 'req-dense-1',
+          actual_cost: 0.01,
+          billing_type: 0,
+          total_cost: 0.01,
+          rate_multiplier: 1,
+          input_cost: 0,
+          output_cost: 0,
+          cache_creation_cost: 0,
+          cache_read_cost: 0,
+          input_tokens: 1200,
+          output_tokens: 80,
+          cache_creation_tokens: 2048,
+          cache_read_tokens: 55900,
+          cache_creation_5m_tokens: 2048,
+          cache_creation_1h_tokens: 0,
+          image_count: 0,
+          image_size: null,
+          first_token_ms: 900,
+          duration_ms: 4200,
+          created_at: '2026-10-23T00:00:00Z',
+          model: 'gpt-6-astra',
+          user_agent: 'codex_cli_rs/0.140.0 (Ubuntu 24.4.0; x86_64) xterm-256color',
+        },
+      ],
+      total: 1,
+      pages: 1,
+    })
+    getStatsByDateRange.mockResolvedValue({ total_requests: 1, total_cost: 0.1, total_balance_cost: 0.1, total_subscription_cost: 0 })
+    list.mockResolvedValue({ items: [] })
+  })
+
+  it('uses the dense table layout and renders token counts on a single line', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="layout"]').attributes('data-dense')).toBe('true')
+    const tokenCell = wrapper.get('[data-testid="usage-token-cell"]')
+    expect(tokenCell.classes()).toContain('whitespace-nowrap')
+    const text = tokenCell.text()
+    expect(text).toContain('1.2K')
+    expect(text).toContain('80')
+    expect(text).toContain('55.9K')
+    expect(text).toContain('2.05K')
+    const ua = wrapper.find('[title^="codex_cli_rs/0.140.0"]')
+    expect(ua.classes()).toContain('truncate')
+  })
+
+  it('collapses the stat cards and remembers the choice', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="usage-stats-cards"]').exists()).toBe(true)
+    const toggle = wrapper.get('[data-testid="usage-stats-toggle"]')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    await toggle.trigger('click')
+
+    expect(wrapper.find('[data-testid="usage-stats-cards"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="usage-stats-toggle"]').attributes('aria-expanded')).toBe('false')
+    expect(localStorage.getItem('user-usage-stats-collapsed')).toBe('true')
+    wrapper.unmount()
+
+    const remounted = mountView()
+    await flushPromises()
+    expect(remounted.find('[data-testid="usage-stats-cards"]').exists()).toBe(false)
+    await remounted.get('[data-testid="usage-stats-toggle"]').trigger('click')
+    expect(remounted.find('[data-testid="usage-stats-cards"]').exists()).toBe(true)
+    expect(localStorage.getItem('user-usage-stats-collapsed')).toBe('false')
+  })
+})

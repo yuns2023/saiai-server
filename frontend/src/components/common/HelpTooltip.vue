@@ -7,7 +7,14 @@ defineProps<{
 
 const show = ref(false)
 const triggerRef = useTemplateRef<HTMLElement>('trigger')
+const tooltipRef = useTemplateRef<HTMLElement>('tooltip')
+const placement = ref<'top' | 'bottom'>('top')
 const tooltipStyle = ref({ top: '0px', left: '0px' })
+const arrowOffset = ref(0)
+
+const GAP = 8
+const HALF_WIDTH = 128 // w-64
+const VIEWPORT_MARGIN = 8
 
 function onEnter() {
   show.value = true
@@ -21,10 +28,19 @@ function onLeave() {
 function updatePosition() {
   const el = triggerRef.value
   if (!el) return
+  // The tooltip is position: fixed, so viewport coordinates are used directly.
   const rect = el.getBoundingClientRect()
+  const height = tooltipRef.value?.offsetHeight ?? 0
+  // Prefer above; flip below when it would be clipped by the top of the viewport.
+  placement.value = rect.top - GAP - height < VIEWPORT_MARGIN ? 'bottom' : 'top'
+  const center = rect.left + rect.width / 2
+  const minCenter = HALF_WIDTH + VIEWPORT_MARGIN
+  const maxCenter = Math.max(minCenter, window.innerWidth - HALF_WIDTH - VIEWPORT_MARGIN)
+  const clamped = Math.min(Math.max(center, minCenter), maxCenter)
+  arrowOffset.value = center - clamped
   tooltipStyle.value = {
-    top: `${rect.top + window.scrollY}px`,
-    left: `${rect.left + rect.width / 2 + window.scrollX}px`,
+    top: placement.value === 'top' ? `${rect.top - GAP}px` : `${rect.bottom + GAP}px`,
+    left: `${clamped}px`,
   }
 }
 </script>
@@ -35,6 +51,8 @@ function updatePosition() {
     class="group relative ml-1 inline-flex items-center align-middle"
     @mouseenter="onEnter"
     @mouseleave="onLeave"
+    @focusin="onEnter"
+    @focusout="onLeave"
   >
     <!-- Trigger Icon -->
     <slot name="trigger">
@@ -57,11 +75,18 @@ function updatePosition() {
     <Teleport to="body">
       <div
         v-show="show"
-        class="fixed z-99999 w-64 -translate-x-1/2 -translate-y-full rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 dark:bg-gray-800"
-        :style="{ top: `calc(${tooltipStyle.top} - 8px)`, left: tooltipStyle.left }"
+        ref="tooltip"
+        role="tooltip"
+        class="fixed z-99999 w-64 -translate-x-1/2 rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 dark:bg-gray-800"
+        :class="placement === 'top' ? '-translate-y-full' : ''"
+        :style="tooltipStyle"
       >
         <slot>{{ content }}</slot>
-        <div class="absolute -bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 bg-gray-900 dark:bg-gray-800"></div>
+        <div
+          class="absolute h-2 w-2 -translate-x-1/2 rotate-45 bg-gray-900 dark:bg-gray-800"
+          :class="placement === 'top' ? '-bottom-1' : '-top-1'"
+          :style="{ left: `calc(50% + ${arrowOffset}px)` }"
+        ></div>
       </div>
     </Teleport>
   </div>

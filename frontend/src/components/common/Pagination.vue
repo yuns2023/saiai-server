@@ -1,6 +1,7 @@
 <template>
   <div
-    class="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 dark:border-dark-700 dark:bg-dark-800 sm:px-6"
+    class="flex items-center justify-between border-t border-gray-200 bg-white px-4 dark:border-dark-700 dark:bg-dark-800 sm:px-6"
+    :class="[dense ? 'pagination-dense py-2' : 'py-3']"
   >
     <div class="flex flex-1 items-center justify-between sm:hidden">
       <!-- Mobile pagination -->
@@ -76,7 +77,7 @@
         <button
           @click="goToPage(page - 1)"
           :disabled="page === 1"
-          class="relative inline-flex items-center rounded-l-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
+          class="relative inline-flex items-center rounded-l-md border border-gray-300 bg-white px-2 pagination-btn text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
           :aria-label="t('pagination.previous')"
         >
           <Icon name="chevronLeft" size="md" />
@@ -89,7 +90,7 @@
           @click="typeof pageNum === 'number' && goToPage(pageNum)"
           :disabled="typeof pageNum !== 'number'"
           :class="[
-            'relative inline-flex items-center border px-4 py-2 text-sm font-medium',
+            'pagination-btn relative inline-flex items-center border px-4 text-sm font-medium',
             pageNum === page
               ? 'z-10 border-primary-500 bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
               : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600',
@@ -107,7 +108,7 @@
         <button
           @click="goToPage(page + 1)"
           :disabled="page === totalPages"
-          class="relative inline-flex items-center rounded-r-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
+          class="relative inline-flex items-center rounded-r-md border border-gray-300 bg-white px-2 pagination-btn text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
           :aria-label="t('pagination.next')"
         >
           <Icon name="chevronRight" size="md" />
@@ -133,6 +134,8 @@ interface Props {
   pageSizeOptions?: number[]
   showPageSizeSelector?: boolean
   showJump?: boolean
+  /** Tighter vertical padding for dense table pages. */
+  dense?: boolean
 }
 
 interface Emits {
@@ -143,7 +146,8 @@ interface Emits {
 const props = withDefaults(defineProps<Props>(), {
   pageSizeOptions: () => [10, 20, 50, 100],
   showPageSizeSelector: true,
-  showJump: false
+  showJump: false,
+  dense: false
 })
 
 const emit = defineEmits<Emits>()
@@ -237,5 +241,17 @@ const submitJump = () => {
 
 .page-size-select :deep(.select-trigger) {
   @apply px-3 py-1.5 text-sm;
+}
+
+.pagination-btn {
+  @apply py-2;
+}
+
+.pagination-dense .pagination-btn {
+  @apply py-1.5;
+}
+
+.pagination-dense .page-size-select :deep(.select-trigger) {
+  @apply py-1;
 }
 </style>

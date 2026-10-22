@@ -7,7 +7,7 @@
       :disabled="disabled"
       :aria-expanded="isOpen"
       :aria-haspopup="true"
-      aria-label="Select option"
+      :aria-label="ariaLabel || 'Select option'"
       :class="[
         'select-trigger',
         isOpen && 'select-trigger-open',
@@ -135,6 +135,8 @@ interface Props {
   labelKey?: string
   creatable?: boolean
   creatablePrefix?: string
+  /** Accessible name for the trigger (e.g. when the visible label is not a <label>). */
+  ariaLabel?: string
 }
 
 interface Emits {

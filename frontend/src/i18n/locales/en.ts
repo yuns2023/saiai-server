@@ -912,6 +912,8 @@ export default {
     avgDuration: 'Avg Duration',
     inSelectedRange: 'in selected range',
     perRequest: 'per request',
+    collapseStats: 'Hide stats',
+    expandStats: 'Show stats',
     apiKeyFilter: 'API Key',
     allApiKeys: 'All API Keys',
     timeRange: 'Time Range',

@@ -1,19 +1,18 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #actions>
-        <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <TablePageLayout dense>
+      <template v-if="!statsCollapsed" #actions>
+        <div class="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="usage-stats-cards">
           <!-- Total Requests -->
-          <div class="card p-4">
-          <div class="flex items-center gap-3">
-            <div class="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30">
-              <Icon name="document" size="md" class="text-blue-600 dark:text-blue-400" />
+          <div class="card flex items-start gap-3 px-4 py-2.5">
+            <div class="shrink-0 rounded-lg bg-blue-100 p-1.5 dark:bg-blue-900/30">
+              <Icon name="document" size="sm" class="text-blue-600 dark:text-blue-400" />
             </div>
-            <div>
+            <div class="min-w-0 space-y-0.5">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
                 {{ t('usage.totalRequests') }}
               </p>
-              <p class="text-xl font-bold text-gray-900 dark:text-white">
+              <p class="text-lg font-bold leading-tight tabular-nums text-gray-900 dark:text-white">
                 {{ usageStats?.total_requests?.toLocaleString() || '0' }}
               </p>
               <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -21,93 +20,96 @@
               </p>
             </div>
           </div>
-        </div>
 
-        <!-- Total Tokens -->
-        <div class="card p-4">
-          <div class="flex items-center gap-3">
-            <div class="rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30">
-              <Icon name="cube" size="md" class="text-amber-600 dark:text-amber-400" />
+          <!-- Total Tokens -->
+          <div class="card flex items-start gap-3 px-4 py-2.5">
+            <div class="shrink-0 rounded-lg bg-amber-100 p-1.5 dark:bg-amber-900/30">
+              <Icon name="cube" size="sm" class="text-amber-600 dark:text-amber-400" />
             </div>
-            <div>
+            <div class="min-w-0 space-y-0.5">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
                 {{ t('tokens.total') }}
               </p>
-              <TokenUsageSummary :data="usageStats" period="total" />
+              <TokenUsageSummary :data="usageStats" period="total" dense />
             </div>
           </div>
-        </div>
 
-        <!-- Total Cost -->
-        <div class="card p-4">
-          <div class="flex items-center gap-3">
-            <div class="rounded-lg bg-green-100 p-2 dark:bg-green-900/30">
-              <Icon name="dollar" size="md" class="text-green-600 dark:text-green-400" />
+          <!-- Total Cost -->
+          <div class="card flex items-start gap-3 px-4 py-2.5">
+            <div class="shrink-0 rounded-lg bg-green-100 p-1.5 dark:bg-green-900/30">
+              <Icon name="dollar" size="sm" class="text-green-600 dark:text-green-400" />
             </div>
-            <div class="min-w-0 flex-1">
-              <UsageBillingSummary :stats="usageStats" />
-              <p class="text-xs text-gray-400" :title="t('usage.baseCostHint')">{{ t('usage.standardCost') }}: ${{ (usageStats?.total_cost || 0).toFixed(4) }}</p>
-            </div>
+            <UsageBillingSummary class="flex-1" :stats="usageStats" :base-cost="usageStats?.total_cost ?? null" />
           </div>
-        </div>
 
-        <!-- Average Duration -->
-        <div class="card p-4">
-          <div class="flex items-center gap-3">
-            <div class="rounded-lg bg-purple-100 p-2 dark:bg-purple-900/30">
-              <Icon name="clock" size="md" class="text-purple-600 dark:text-purple-400" />
+          <!-- Average Duration -->
+          <div class="card flex items-start gap-3 px-4 py-2.5">
+            <div class="shrink-0 rounded-lg bg-purple-100 p-1.5 dark:bg-purple-900/30">
+              <Icon name="clock" size="sm" class="text-purple-600 dark:text-purple-400" />
             </div>
-            <div>
+            <div class="min-w-0 space-y-0.5">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
                 {{ t('usage.avgDuration') }}
               </p>
-              <p class="text-xl font-bold text-gray-900 dark:text-white">
+              <p class="text-lg font-bold leading-tight tabular-nums text-gray-900 dark:text-white">
                 {{ formatDuration(usageStats?.average_duration_ms || 0) }}
               </p>
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.perRequest') }}</p>
             </div>
           </div>
         </div>
-        </div>
       </template>
 
       <template #filters>
-        <div class="card">
-          <div class="px-6 py-4">
-          <div class="flex flex-wrap items-end gap-4">
+        <div class="usage-filter-bar card px-4 py-2.5" data-testid="usage-filter-bar">
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
             <!-- API Key Filter -->
-            <div class="min-w-[180px]">
-              <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
-              <Select
-                v-model="filters.api_key_id"
-                :options="apiKeyOptions"
-                :placeholder="t('usage.allApiKeys')"
-                @change="applyFilters"
-              />
+            <div class="flex items-center gap-2">
+              <span class="whitespace-nowrap text-sm font-medium text-gray-600 dark:text-gray-300">{{ t('usage.apiKeyFilter') }}</span>
+              <div class="w-44">
+                <Select
+                  v-model="filters.api_key_id"
+                  :options="apiKeyOptions"
+                  :placeholder="t('usage.allApiKeys')"
+                  :aria-label="t('usage.apiKeyFilter')"
+                  @change="applyFilters"
+                />
+              </div>
             </div>
 
             <!-- Date Range Filter -->
-            <div>
-              <label class="input-label">{{ t('usage.timeRange') }}</label>
+            <div class="flex items-center gap-2">
+              <span class="whitespace-nowrap text-sm font-medium text-gray-600 dark:text-gray-300">{{ t('usage.timeRange') }}</span>
               <DateRangePicker
                 v-model:start-date="startDate"
                 v-model:end-date="endDate"
+                :aria-label="t('usage.timeRange')"
                 @change="onDateRangeChange"
               />
             </div>
 
             <!-- Actions -->
-            <div class="ml-auto flex items-center gap-3">
-              <button @click="applyFilters" :disabled="loading" class="btn btn-secondary">
+            <div class="ml-auto flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                :aria-expanded="!statsCollapsed"
+                data-testid="usage-stats-toggle"
+                @click="toggleStatsCollapsed"
+              >
+                <Icon :name="statsCollapsed ? 'chevronDown' : 'chevronUp'" size="xs" />
+                {{ statsCollapsed ? t('usage.expandStats') : t('usage.collapseStats') }}
+              </button>
+              <button type="button" @click="applyFilters" :disabled="loading" class="btn btn-secondary btn-sm">
                 {{ t('common.refresh') }}
               </button>
-              <button @click="resetFilters" class="btn btn-secondary">
+              <button type="button" @click="resetFilters" class="btn btn-secondary btn-sm">
                 {{ t('common.reset') }}
               </button>
-              <button @click="exportToCSV" :disabled="exporting" class="btn btn-primary">
+              <button type="button" @click="exportToCSV" :disabled="exporting" class="btn btn-primary btn-sm">
                 <svg
                   v-if="exporting"
-                  class="-ml-1 mr-2 h-4 w-4 animate-spin"
+                  class="h-3.5 w-3.5 animate-spin"
                   fill="none"
                   viewBox="0 0 24 24"
                 >
@@ -129,7 +131,6 @@
               </button>
             </div>
           </div>
-        </div>
         </div>
       </template>
 
@@ -214,41 +215,26 @@
               <span class="font-medium text-gray-900 dark:text-white">{{ row.image_count }}{{ $t('usage.imageUnit') }}</span>
               <span class="text-gray-400">({{ row.image_size || t('usage.imageSizeUnknown') }})</span>
             </div>
-            <!-- Token 请求 -->
-            <div v-else class="flex items-center gap-1.5">
-              <div class="space-y-1.5 text-sm">
-                <!-- Input / Output Tokens -->
-                <div class="flex items-center gap-2">
-                  <!-- Input -->
-                  <div class="inline-flex items-center gap-1">
-                    <Icon name="arrowDown" size="sm" class="text-emerald-500" />
-                    <span class="font-medium text-gray-900 dark:text-white"><TokenCount :value="row.input_tokens" :label="t('tokens.input')" /></span>
-                  </div>
-                  <!-- Output -->
-                  <div class="inline-flex items-center gap-1">
-                    <Icon name="arrowUp" size="sm" class="text-violet-500" />
-                    <span class="font-medium text-gray-900 dark:text-white"><TokenCount :value="row.output_tokens" :label="t('tokens.output')" /></span>
-                  </div>
-                </div>
-                <!-- Cache Tokens (Read + Write) -->
-                <div
-                  v-if="row.cache_read_tokens > 0 || row.cache_creation_tokens > 0"
-                  class="flex items-center gap-2"
-                >
-                  <!-- Cache Read -->
-                  <div v-if="row.cache_read_tokens > 0" class="inline-flex items-center gap-1">
-                    <Icon name="inbox" size="sm" class="text-sky-500" />
-                    <span class="font-medium text-sky-600 dark:text-sky-400"><TokenCount :value="row.cache_read_tokens" :label="t('tokens.cacheRead')" /></span>
-                  </div>
-                  <!-- Cache Write -->
-                  <div v-if="row.cache_creation_tokens > 0" class="inline-flex items-center gap-1">
-                    <Icon name="edit" size="sm" class="text-amber-500" />
-                    <span class="font-medium text-amber-600 dark:text-amber-400"><TokenCount :value="row.cache_creation_tokens" :label="t('tokens.cacheWrite')" /></span>
-                    <span v-if="row.cache_creation_1h_tokens > 0" class="inline-flex items-center rounded-sm px-1 py-px text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/30">1h</span>
-                    <span v-if="row.cache_ttl_overridden" :title="t('usage.cacheTtlOverriddenHint')" class="inline-flex items-center rounded-sm px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">R</span>
-                  </div>
-                </div>
-              </div>
+            <!-- Token 请求：单行展示 输入/输出/缓存读/缓存写 -->
+            <div v-else class="flex items-center gap-2 whitespace-nowrap text-sm" data-testid="usage-token-cell">
+              <span class="inline-flex items-center gap-0.5">
+                <Icon name="arrowDown" size="xs" class="text-emerald-500" />
+                <span class="font-medium text-gray-900 dark:text-white"><TokenCount :value="row.input_tokens" :label="t('tokens.input')" /></span>
+              </span>
+              <span class="inline-flex items-center gap-0.5">
+                <Icon name="arrowUp" size="xs" class="text-violet-500" />
+                <span class="font-medium text-gray-900 dark:text-white"><TokenCount :value="row.output_tokens" :label="t('tokens.output')" /></span>
+              </span>
+              <span v-if="row.cache_read_tokens > 0" class="inline-flex items-center gap-0.5">
+                <Icon name="inbox" size="xs" class="text-sky-500" />
+                <span class="font-medium text-sky-600 dark:text-sky-400"><TokenCount :value="row.cache_read_tokens" :label="t('tokens.cacheRead')" /></span>
+              </span>
+              <span v-if="row.cache_creation_tokens > 0" class="inline-flex items-center gap-0.5">
+                <Icon name="edit" size="xs" class="text-amber-500" />
+                <span class="font-medium text-amber-600 dark:text-amber-400"><TokenCount :value="row.cache_creation_tokens" :label="t('tokens.cacheWrite')" /></span>
+                <span v-if="row.cache_creation_1h_tokens > 0" class="inline-flex items-center rounded-sm px-1 py-px text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/30">1h</span>
+                <span v-if="row.cache_ttl_overridden" :title="t('usage.cacheTtlOverriddenHint')" class="inline-flex items-center rounded-sm px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">R</span>
+              </span>
               <!-- Token Detail Tooltip -->
               <div
                 class="group relative"
@@ -326,7 +312,7 @@
           </template>
 
           <template #cell-user_agent="{ row }">
-            <span v-if="row.user_agent" class="text-sm text-gray-600 dark:text-gray-400 block max-w-[320px] whitespace-normal break-all" :title="row.user_agent">{{ formatUserAgent(row.user_agent) }}</span>
+            <span v-if="row.user_agent" class="block max-w-[360px] truncate text-sm text-gray-600 dark:text-gray-400" :title="row.user_agent">{{ formatUserAgent(row.user_agent) }}</span>
             <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
           </template>
 
@@ -339,6 +325,7 @@
       <template #pagination>
         <Pagination
           v-if="pagination.total > 0"
+          dense
           :page="pagination.page"
           :total="pagination.total"
           :page-size="pagination.page_size"
@@ -588,6 +575,25 @@ const tokenTooltipData = ref<UsageLog | null>(null)
 
 // Usage stats from API
 const usageStats = ref<UsageStatsResponse | null>(null)
+
+// Collapsible stat cards (persisted) so short viewports can give the table more rows
+const STATS_COLLAPSED_STORAGE_KEY = 'user-usage-stats-collapsed'
+const readStatsCollapsed = (): boolean => {
+  try {
+    return localStorage.getItem(STATS_COLLAPSED_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+const statsCollapsed = ref(readStatsCollapsed())
+const toggleStatsCollapsed = () => {
+  statsCollapsed.value = !statsCollapsed.value
+  try {
+    localStorage.setItem(STATS_COLLAPSED_STORAGE_KEY, String(statsCollapsed.value))
+  } catch {
+    // ignore storage failures (private mode / quota)
+  }
+}
 
 const columns = computed<Column[]>(() => [
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
@@ -957,3 +963,13 @@ onMounted(() => {
   loadUsageStats()
 })
 </script>
+
+<style scoped>
+@reference "../../style.css";
+
+/* Compact filter controls: single row on desktop */
+.usage-filter-bar :deep(.select-trigger),
+.usage-filter-bar :deep(.date-picker-trigger) {
+  @apply py-1.5;
+}
+</style>

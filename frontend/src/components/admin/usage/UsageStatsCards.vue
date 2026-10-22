@@ -25,15 +25,14 @@
         <Icon name="dollar" size="md" />
       </div>
       <div class="min-w-0 flex-1">
-        <UsageBillingSummary :stats="stats" />
-        <p class="text-xs text-gray-400">
-          <span :title="t('usage.baseCostHint')">{{ t('usage.standardCost') }}:</span>
-          <span>${{ (stats?.total_cost || 0).toFixed(4) }}</span>
-          <template v-if="stats?.total_account_cost != null">
-            · {{ t('usage.accountBilled') }}:
-            <span>${{ (stats?.total_account_cost || 0).toFixed(4) }}</span>
+        <UsageBillingSummary :stats="stats" :base-cost="stats?.total_cost ?? null">
+          <template v-if="stats?.total_account_cost != null" #extra>
+            <span>
+              {{ t('usage.accountBilled') }}
+              <span class="font-medium text-gray-700 dark:text-gray-300">${{ stats.total_account_cost.toFixed(4) }}</span>
+            </span>
           </template>
-        </p>
+        </UsageBillingSummary>
       </div>
     </div>
     <div class="card p-4 flex items-center gap-3">

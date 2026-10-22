@@ -1,5 +1,9 @@
 <template>
-  <div class="table-page-layout" :class="{ 'mobile-mode': isMobile }">
+  <div
+    class="table-page-layout"
+    :class="{ 'mobile-mode': isMobile, 'table-page-layout--dense': dense }"
+    data-testid="table-page-layout"
+  >
     <!-- 固定区域：操作按钮 -->
     <div v-if="$slots.actions" class="layout-section-fixed">
       <slot name="actions" />
@@ -27,6 +31,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 
+withDefaults(
+  defineProps<{
+    /** Compact gaps and table cell padding for data-heavy pages. */
+    dense?: boolean
+  }>(),
+  { dense: false }
+)
+
 const isMobile = ref(false)
 
 const checkMobile = () => {
@@ -46,10 +58,20 @@ onUnmounted(() => {
 <style scoped>
 @reference "../../style.css";
 
-/* 桌面端：Flexbox 布局 */
+/*
+ * 桌面端：Flexbox 布局
+ * 页面至少占满视口；表格区域占据剩余高度并在内部滚动（表头 sticky）。
+ * 固定区域（统计/筛选/分页）过高时表格不再被压扁：表格区域保底
+ * --table-page-min-height，页面整体自然滚动。
+ */
 .table-page-layout {
   @apply flex flex-col gap-6;
-  height: calc(100vh - 64px - 4rem); /* 减去 header + lg:p-8 的上下padding */
+  --table-page-min-height: max(360px, 50vh);
+  min-height: calc(100vh - 64px - 4rem); /* 减去 header + lg:p-8 的上下padding */
+}
+
+.table-page-layout--dense {
+  @apply gap-3;
 }
 
 .layout-section-fixed {
@@ -57,12 +79,16 @@ onUnmounted(() => {
 }
 
 .layout-section-scrollable {
-  @apply flex-1 min-h-0 flex flex-col;
+  @apply flex flex-col;
+  /* 0px（而非 0%）基准：列方向容器高度不定时，表格行数不会撑高本区域 */
+  flex: 1 1 0px;
+  min-height: var(--table-page-min-height);
 }
 
 /* 表格滚动容器 - 增强版表体滚动方案 */
 .table-scroll-container {
-  @apply flex flex-col overflow-hidden h-full bg-white dark:bg-dark-800 rounded-2xl border border-gray-200 dark:border-dark-700 shadow-sm;
+  @apply flex flex-col overflow-hidden min-h-0 bg-white dark:bg-dark-800 rounded-2xl border border-gray-200 dark:border-dark-700 shadow-sm;
+  flex: 1 1 0px;
 }
 
 .table-scroll-container :deep(.table-wrapper) {
@@ -93,9 +119,23 @@ onUnmounted(() => {
   @apply px-5 py-4 text-sm text-gray-700 dark:text-gray-300 border-b border-gray-100 dark:border-dark-800;
 }
 
+/* 紧凑密度：减少单元格内边距，单屏显示更多行 */
+.table-page-layout--dense .table-scroll-container :deep(th) {
+  @apply px-3 py-2.5 text-xs;
+}
+
+.table-page-layout--dense .table-scroll-container :deep(td) {
+  @apply px-3 py-2;
+}
+
 /* 移动端：恢复正常滚动 */
+.table-page-layout.mobile-mode {
+  min-height: 0;
+}
+
 .table-page-layout.mobile-mode .table-scroll-container {
   @apply h-auto overflow-visible border-none shadow-none bg-transparent;
+  flex: none;
 }
 
 .table-page-layout.mobile-mode .layout-section-scrollable {

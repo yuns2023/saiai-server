@@ -915,6 +915,8 @@ export default {
     avgDuration: '平均耗时',
     inSelectedRange: '所选范围内',
     perRequest: '每次请求',
+    collapseStats: '收起统计',
+    expandStats: '展开统计',
     apiKeyFilter: 'API 密钥',
     allApiKeys: '全部密钥',
     timeRange: '时间范围',

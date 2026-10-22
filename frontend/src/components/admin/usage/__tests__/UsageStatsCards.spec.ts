@@ -63,11 +63,12 @@ describe('UsageStatsCards', () => {
     expect(wrapper.text()).toContain('Cache read: 25')
     expect(wrapper.text()).toContain('Input cache read rate 16.7%')
     expect(wrapper.get('[data-testid="input-cache-read-rate"]').attributes('title')).toBe(messages['usage.inputCacheReadRateHint'])
-    expect(wrapper.text()).toContain('Balance charged$2.0000')
-    expect(wrapper.text()).toContain('Subscription quota used$4.0000')
-    expect(wrapper.text()).not.toContain('$6.0000')
-    expect(wrapper.text()).toContain('Configured base:$10.0000')
-    expect(wrapper.text()).toContain('Account billed: $8.0000')
+    const compact = wrapper.text().replace(/\s+/g, '')
+    expect(compact).toContain('Balancecharged$2.0000')
+    expect(compact).toContain('Subscriptionquotaused$4.0000')
+    expect(compact).not.toContain('$6.0000')
+    expect(compact).toContain('Configuredbase$10.0000')
+    expect(compact).toContain('Accountbilled$8.0000')
   })
 
   it.each([

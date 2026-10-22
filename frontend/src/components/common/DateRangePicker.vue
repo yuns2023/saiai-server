@@ -3,6 +3,8 @@
     <button
       type="button"
       @click="toggle"
+      :aria-label="ariaLabel ? `${ariaLabel}: ${displayValue}` : undefined"
+      :aria-expanded="isOpen"
       :class="['date-picker-trigger', isOpen && 'date-picker-trigger-open']"
     >
       <span class="date-picker-icon">
@@ -89,6 +91,8 @@ interface DatePreset {
 interface Props {
   startDate: string
   endDate: string
+  /** Accessible name prefix for the trigger; the selected range is appended. */
+  ariaLabel?: string
 }
 
 interface Emits {
