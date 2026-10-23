@@ -386,6 +386,7 @@ func TestCodexWSUsesFreshSeedAndKeysPerConnection(t *testing.T) {
 	orders := map[string]bool{}
 	sessionIDs := map[string]bool{}
 	hybridKeys := map[string]bool{}
+	mlkemKeys := map[string]bool{}
 	x25519Keys := map[string]bool{}
 	for i := 0; i < 8; i++ {
 		_, h := captureCodexHello(t, CodexWSTransportPolicy(), nil, "chatgpt.com")
@@ -393,14 +394,15 @@ func TestCodexWSUsesFreshSeedAndKeysPerConnection(t *testing.T) {
 		sessionIDs[string(h.SessionID)] = true
 		_, keys := h.keyShares(t)
 		hybridKeys[string(keys[0x11ec])] = true
+		mlkemKeys[string(keys[0x11ec][:1184])] = true // ML-KEM-768 encapsulation key component
 		x25519Keys[string(keys[0x001d])] = true
 		if _, ok := seedForOrder(h.extIDs()); !ok {
 			t.Fatalf("order %v is not a rustls order", h.extIDs())
 		}
 	}
-	if len(orders) < 2 || len(sessionIDs) != 8 || len(hybridKeys) != 8 || len(x25519Keys) != 8 {
-		t.Fatalf("expected per-connection randomness, got %d orders / %d session ids / %d hybrid keys / %d x25519 keys",
-			len(orders), len(sessionIDs), len(hybridKeys), len(x25519Keys))
+	if len(orders) < 2 || len(sessionIDs) != 8 || len(hybridKeys) != 8 || len(mlkemKeys) != 8 || len(x25519Keys) != 8 {
+		t.Fatalf("expected per-connection randomness, got %d orders / %d session ids / %d hybrid / %d ML-KEM / %d x25519 keys",
+			len(orders), len(sessionIDs), len(hybridKeys), len(mlkemKeys), len(x25519Keys))
 	}
 }
 

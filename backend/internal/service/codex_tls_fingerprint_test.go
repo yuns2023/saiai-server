@@ -515,9 +515,52 @@ func TestOpenAIWSPolicyRequiresCapableDialer(t *testing.T) {
 	require.ErrorIs(t, err, ErrTransportPolicyUnsupported)
 }
 
-func TestCurrentCodexWSTransportPolicyFallsBackToSnapshot(t *testing.T) {
-	svc := &OpenAIGatewayService{cfg: codexTLSConfig(true), accountRepo: &accountFlagRepo{}}
-	require.Equal(t, tlsfingerprint.CodexWSTransportPolicy(),
-		svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(43, map[string]any{"enable_tls_fingerprint": true})))
-	require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(43, nil)).Enabled())
+// countingFlagRepo counts lookups and can fail them.
+type countingFlagRepo struct {
+	accountFlagRepo
+	lookups atomic.Int32
+	fail    bool
+}
+
+func (r *countingFlagRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	r.lookups.Add(1)
+	if r.fail {
+		return nil, errors.New("transient cache/DB failure")
+	}
+	return r.accountFlagRepo.GetByID(ctx, id)
+}
+
+func TestCurrentCodexWSTransportPolicyLookupAndFallback(t *testing.T) {
+	on := map[string]any{"enable_tls_fingerprint": true}
+	codexWS := tlsfingerprint.CodexWSTransportPolicy()
+	t.Run("current_state_wins_over_snapshot", func(t *testing.T) {
+		repo := &countingFlagRepo{accountFlagRepo: accountFlagRepo{account: codexOAuthAccount(44, on)}}
+		svc := &OpenAIGatewayService{cfg: codexTLSConfig(true), accountRepo: repo}
+		require.Equal(t, codexWS, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(44, nil)))
+		repo.setFlag(false)
+		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(44, on)).Enabled())
+	})
+	// Documented: on lookup failure the session's snapshot decides, so the
+	// toggle may lag for that dial — in both directions.
+	t.Run("lookup_failure_uses_stale_snapshot_toggled_off", func(t *testing.T) {
+		repo := &countingFlagRepo{accountFlagRepo: accountFlagRepo{account: codexOAuthAccount(45, nil)}, fail: true}
+		svc := &OpenAIGatewayService{cfg: codexTLSConfig(true), accountRepo: repo}
+		require.Equal(t, codexWS, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(45, on)))
+		require.Equal(t, int32(1), repo.lookups.Load())
+	})
+	t.Run("lookup_failure_uses_stale_snapshot_toggled_on", func(t *testing.T) {
+		repo := &countingFlagRepo{accountFlagRepo: accountFlagRepo{account: codexOAuthAccount(46, on)}, fail: true}
+		svc := &OpenAIGatewayService{cfg: codexTLSConfig(true), accountRepo: repo}
+		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(46, nil)).Enabled())
+		require.Equal(t, int32(1), repo.lookups.Load())
+	})
+	t.Run("global_off_or_ineligible_makes_no_lookup", func(t *testing.T) {
+		repo := &countingFlagRepo{accountFlagRepo: accountFlagRepo{account: codexOAuthAccount(47, on)}}
+		svc := &OpenAIGatewayService{cfg: codexTLSConfig(false), accountRepo: repo}
+		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(47, on)).Enabled())
+		svc.cfg = codexTLSConfig(true)
+		apiKey := &Account{ID: 47, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: on}
+		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), apiKey).Enabled())
+		require.Zero(t, repo.lookups.Load())
+	})
 }

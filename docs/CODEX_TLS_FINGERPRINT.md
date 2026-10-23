@@ -96,8 +96,7 @@ shared transport):
   These clients are excluded from the proxy-client cache metrics
   (`TransportReuseRatio` still means standard proxy-client cache hit ratio).
 - WebSocket pool: the policy is resolved from the account's **current** state
-  (scheduler snapshot cache, then repository; the caller's snapshot if the
-  lookup fails) at **every new upstream dial** — pool acquire, prewarm, new
+  (scheduler snapshot cache, then repository) at **every new upstream dial** — pool acquire, prewarm, new
   dials from long-lived inbound sessions and v2 passthrough. It is not
   snapshotted in the session's acquire request. Existing upstream connections
   are reused normally whatever policy they were dialed with: there is no
@@ -117,6 +116,15 @@ cleanup once it is older than the fixed 60-minute max connection age
 a failed health ping, or the upstream closing it. A connection that is leased
 or pinned by a store-disabled continuation is not aged out while held, so a
 long continuation keeps its original transport until the session ends.
+
+Lookup failure: if reading the current account state fails (cache and
+repository fallback both unavailable), that dial uses the value from the
+session's account snapshot, so the toggle may lag for that dial (in either
+direction); a rate-limited WARN `codex_tls_policy_lookup_failed_using_snapshot`
+is logged. Failing the dial instead would break new WebSocket dials of every
+Codex account during a transient cache/DB problem. No lookup is made when the
+global switch is off or for accounts that can never use the policy
+(non-OAuth, native relay).
 
 ## Baseline details
 
