@@ -1428,8 +1428,10 @@ const confirmDelete = (key: ApiKey) => {
 }
 
 const handleSubmit = async () => {
-  // Validate group_id is required
-  if (formData.value.group_id === null) {
+  // Validate group_id is required. Deleting a group clears the Key's binding but
+  // keeps its smart switching policy, so still allow saving that policy as off.
+  const disablingSmartSwitch = showEditModal.value && !!selectedKey.value?.smart_switch?.enabled && !formData.value.smart_switch.enabled
+  if (formData.value.group_id === null && !(disablingSmartSwitch && selectedKey.value?.group_id == null)) {
     appStore.showError(t('keys.groupRequired'))
     return
   }

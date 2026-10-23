@@ -183,3 +183,17 @@ func TestParseBoolQueryWithDefault(t *testing.T) {
 		})
 	}
 }
+
+func TestSnapshotCache_SetSweepsExpiredEntries(t *testing.T) {
+	c := newSnapshotCache(20 * time.Millisecond)
+	c.Set("stale1", "v")
+	c.Set("stale2", "v")
+	time.Sleep(30 * time.Millisecond)
+
+	c.Set("fresh", "v")
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	require.Len(t, c.items, 1, "expired entries that are never read again must be evicted on write")
+	_, ok := c.items["fresh"]
+	require.True(t, ok)
+}

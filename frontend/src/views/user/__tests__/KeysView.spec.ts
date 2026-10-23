@@ -225,6 +225,20 @@ describe('user KeysView setup guidance', () => {
     expect(mocks.update).toHaveBeenCalledWith(10, expect.objectContaining({ smart_switch: undefined }))
   })
 
+  it('turns smart switching off for a Key whose group was deleted', async () => {
+    // Group deletion clears group_id but keeps the stored policy.
+    const policy = { enabled: true, group_ids: [1], payg_confirmed: true, version: 2 }
+    mocks.list.mockResolvedValue({ items: [makeKey({ group_id: null, group: undefined, smart_switch: policy })], total: 1, page: 1, page_size: 10, pages: 1 })
+    const wrapper = await mountView()
+    await buttonWithText(wrapper, 'common.edit').trigger('click')
+    const toggle = wrapper.find('fieldset label input[type="checkbox"]')
+    expect((toggle.element as HTMLInputElement).disabled).toBe(false)
+    await toggle.setValue(false)
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(10, expect.objectContaining({ group_id: null, smart_switch: { ...policy, enabled: false } }))
+  })
+
   it('omits a disabled smart switching policy when creating a key', async () => {
     const wrapper = await mountView()
     await fillCreateForm(wrapper)

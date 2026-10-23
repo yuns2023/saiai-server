@@ -45,4 +45,14 @@ describe('KeySmartSwitchEditor', () => {
     expect(wrapper.findAll('li')).toHaveLength(2)
     expect(wrapper.text()).toContain('keys.smartSwitch.unavailable')
   })
+
+  it('lets users turn the policy off when the original group is unavailable', async () => {
+    const wrapper = mount(KeySmartSwitchEditor, { props: { modelValue: policy, groups: [groups[1]], groupId: 1 } })
+    const toggle = wrapper.find('label input[type="checkbox"]')
+    expect((toggle.element as HTMLInputElement).disabled).toBe(false)
+    await toggle.setValue(false)
+    expect(wrapper.emitted('update:modelValue')?.[0]?.[0]).toEqual({ ...policy, enabled: false })
+    await wrapper.setProps({ modelValue: { ...policy, enabled: false } })
+    expect((wrapper.find('label input[type="checkbox"]').element as HTMLInputElement).disabled).toBe(true)
+  })
 })
