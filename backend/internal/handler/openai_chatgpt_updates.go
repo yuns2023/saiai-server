@@ -710,7 +710,7 @@ func (h *OpenAIGatewayHandler) runChatGPTUpdatesAccount(ctx context.Context, c *
 	}()
 	account, err := h.gatewayService.GetChatGPTBoundAccount(ctx, key.GroupID, accountID)
 	if err != nil {
-		logger.L().Warn("openai.chatgpt_updates_provider_failed", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", accountID), zap.String("stage", "account_eligibility"))
+		logger.L().Warn("openai.chatgpt_updates_provider_failed", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", accountID), zap.String("stage", "account_eligibility"), zap.Error(err))
 		return
 	}
 	connectCtx, stop := context.WithTimeout(ctx, 15*time.Second)

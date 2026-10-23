@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -340,11 +341,22 @@ func TestOpsErrorLoggerRecordsBoundAccountReason(t *testing.T) {
 type chatGPTBoundUpdatesCache struct {
 	service.ChatGPTTurnCache
 	service.ChatGPTUploadCache
-	accounts []int64
+	accounts   []int64
+	releaseErr error
 }
 
-func (c *chatGPTBoundUpdatesCache) ListChatGPTUpdateAccounts(context.Context, string) ([]int64, error) {
+func (c *chatGPTBoundUpdatesCache) ListChatGPTUpdateAccounts(ctx context.Context, key string) ([]int64, error) {
+	if c.accounts == nil {
+		return c.ChatGPTTurnCache.ListChatGPTUpdateAccounts(ctx, key)
+	}
 	return c.accounts, nil
+}
+
+func (c *chatGPTBoundUpdatesCache) ReleaseChatGPTUploadOwner(ctx context.Context, key string, owner int64) error {
+	if c.releaseErr != nil {
+		return c.releaseErr
+	}
+	return c.ChatGPTUploadCache.ReleaseChatGPTUploadOwner(ctx, key, owner)
 }
 
 func TestChatGPTDeviceRegistrationSkipsPermanentlyUnavailableConversationAffinity(t *testing.T) {
@@ -369,4 +381,131 @@ func TestChatGPTDeviceRegistrationSkipsPermanentlyUnavailableConversationAffinit
 	require.NoError(t, err)
 	require.EqualValues(t, 245, owner)
 
+}
+
+func (f *chatGPTBoundFixture) addHealthy245() {
+	healthy := f.accounts.accounts[0]
+	healthy.Schedulable, healthy.Status, healthy.RateLimitResetAt = true, service.StatusActive, nil
+	healthy.ID, healthy.Credentials = 245, map[string]any{"access_token": "TEST_ONLY_OAUTH_245", "chatgpt_account_id": "TEST_ONLY_ACCOUNT_245"}
+	f.accounts.accounts = append(f.accounts.accounts, healthy)
+}
+
+func (f *chatGPTBoundFixture) failingReleases() *chatGPTBoundUpdatesCache {
+	memory := f.cache.ChatGPTTurnCache
+	wrapped := &chatGPTBoundUpdatesCache{ChatGPTTurnCache: memory, ChatGPTUploadCache: memory.(service.ChatGPTUploadCache), releaseErr: errors.New("TEST_ONLY_REDIS_DOWN")}
+	f.cache.ChatGPTTurnCache = wrapped
+	return wrapped
+}
+
+// A normal registration seeds both the 5-minute device affinity and the
+// proof ownership. After the owner is disabled, the client must recover on
+// another account: first the proof is rejected (409 + clear), then the next
+// registration skips the stale affinity instead of failing with a second 409.
+func TestChatGPTReRegistrationAfterPermanentOwnerLandsOnAvailableAccount(t *testing.T) {
+	f := newChatGPTBoundFixture(t)
+	const registration = `{"device_token":"TEST_ONLY_APPLE_TOKEN","bundle_id":"com.openai.codex"}`
+	w, _ := f.run("POST", "/chatgpt/backend-api/devicecheck", registration, "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, []string{"TEST_ONLY_ACCOUNT"}, f.providerAccounts)
+	sessionKey := f.scope.UploadSessionKey(chatGPTBoundDeviceID)
+	proofKey := f.scope.DeviceCookieKey(chatGPTBoundDeviceID, "TEST_ONLY_NEW_PROOF")
+	for _, key := range []string{sessionKey, proofKey} {
+		owner, err := f.cache.GetChatGPTUploadOwner(context.Background(), key)
+		require.NoError(t, err)
+		require.EqualValues(t, 248, owner)
+	}
+
+	f.setOwner(func(a *service.Account) { a.Schedulable = false })
+	f.addHealthy245()
+	f.providerAccounts = nil
+	w, _ = f.run("GET", "/chatgpt/backend-api/models", "", "_devicecheck=TEST_ONLY_NEW_PROOF")
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	require.Equal(t, []string{clearChatGPTDeviceCookieHeader}, w.Header().Values("Set-Cookie"))
+
+	w, c := f.run("POST", "/chatgpt/backend-api/devicecheck", registration, "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Empty(t, chatGPTBoundOpsDetail(c))
+	require.Equal(t, []string{"TEST_ONLY_ACCOUNT_245"}, f.providerAccounts)
+	for _, key := range []string{sessionKey, proofKey} {
+		owner, err := f.cache.GetChatGPTUploadOwner(context.Background(), key)
+		require.NoError(t, err)
+		require.EqualValues(t, 245, owner)
+	}
+}
+
+func TestChatGPTBoundReleaseFailuresAreStoreErrors(t *testing.T) {
+	t.Run("device proof", func(t *testing.T) {
+		f := newChatGPTBoundFixture(t)
+		f.setOwner(func(a *service.Account) { a.Schedulable = false })
+		f.failingReleases()
+		w, c := f.run("GET", "/chatgpt/backend-api/models", "", chatGPTBoundCookie)
+		require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+		_, _, message := chatGPTBoundErrorBody(t, w)
+		require.Equal(t, chatGPTBoundStoreEnvelope.Message, message)
+		require.Empty(t, w.Header().Values("Set-Cookie"), "the cookie stays while its ownership key survives")
+		require.EqualValues(t, 248, f.binding())
+		require.Contains(t, chatGPTBoundOpsDetail(c), "device proof release failed: native Chat device ownership is unavailable: TEST_ONLY_REDIS_DOWN")
+	})
+	t.Run("short affinity", func(t *testing.T) {
+		f := newChatGPTBoundFixture(t)
+		_, err := f.cache.ClaimChatGPTUploadOwner(context.Background(), f.scope.UploadSessionKey(chatGPTBoundDeviceID), 248, service.ChatGPTUploadSessionTTL)
+		require.NoError(t, err)
+		f.setOwner(func(a *service.Account) { a.Status = service.StatusDisabled })
+		f.addHealthy245()
+		f.failingReleases()
+		w, c := f.run("POST", "/chatgpt/backend-api/devicecheck", `{"device_token":"TEST_ONLY_APPLE_TOKEN","bundle_id":"com.openai.codex"}`, "")
+		require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+		require.Empty(t, f.calls)
+		require.Contains(t, chatGPTBoundOpsDetail(c), "affinity release failed: TEST_ONLY_REDIS_DOWN")
+	})
+}
+
+// Once an SSE response is committed (e.g. by user-slot wait pings), the
+// classification is delivered as an SSE error event: no Retry-After and no
+// cookie clearing are possible. The proof ownership is still released, so
+// the client's next HTTP request gets the 409 + cookie clear.
+func TestChatGPTBoundAccountAfterStreamStartedIsTwoPhase(t *testing.T) {
+	f := newChatGPTBoundFixture(t)
+	f.setOwner(func(a *service.Account) { a.Schedulable = false })
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/chatgpt/backend-api/f/conversation", nil)
+	c.Request.Header.Set("OAI-DID", chatGPTBoundDeviceID)
+	c.Request.Header.Set("Cookie", chatGPTBoundCookie)
+	owner, ok := f.h.chatGPTDeviceCookieOwner(c, f.scope)
+	require.True(t, ok)
+	require.EqualValues(t, 248, owner)
+	c.Header("Content-Type", "text/event-stream")
+	c.Status(http.StatusOK)
+	c.Writer.WriteHeaderNow()
+	gid := f.gid
+	_, err := f.h.gatewayService.GetChatGPTBoundAccount(context.Background(), &gid, owner)
+	f.h.writeChatGPTBoundAccountUnavailable(c, err, chatGPTBoundDevice, f.scope, true, chatGPTNoOAuthAccountEnvelope)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), "event: error")
+	require.Contains(t, w.Body.String(), `"device_registration_required"`)
+	require.Empty(t, w.Header().Values("Set-Cookie"))
+	require.Empty(t, w.Header().Get("Retry-After"))
+	require.Zero(t, f.binding(), "the stale proof ownership is released during the stream")
+
+	w2, _ := f.run("GET", "/chatgpt/backend-api/models", "", chatGPTBoundCookie)
+	require.Equal(t, http.StatusConflict, w2.Code, w2.Body.String())
+	errType, _, _ := chatGPTBoundErrorBody(t, w2)
+	require.Equal(t, "device_registration_required", errType)
+	require.Equal(t, []string{clearChatGPTDeviceCookieHeader}, w2.Header().Values("Set-Cookie"))
+
+	// A temporary cooldown during a committed stream keeps the binding.
+	f2 := newChatGPTBoundFixture(t)
+	reset := time.Now().Add(time.Hour)
+	f2.setOwner(func(a *service.Account) { a.RateLimitResetAt = &reset })
+	w3 := httptest.NewRecorder()
+	c3, _ := gin.CreateTestContext(w3)
+	c3.Request = httptest.NewRequest("POST", "/chatgpt/backend-api/f/conversation", nil)
+	c3.Status(http.StatusOK)
+	c3.Writer.WriteHeaderNow()
+	_, err = f2.h.gatewayService.GetChatGPTBoundAccount(context.Background(), &gid, 248)
+	f2.h.writeChatGPTBoundAccountUnavailable(c3, err, chatGPTBoundConversation, f2.scope, true, chatGPTNoOAuthAccountEnvelope)
+	require.Contains(t, w3.Body.String(), `"rate_limit_error"`)
+	require.Empty(t, w3.Header().Get("Retry-After"))
+	require.EqualValues(t, 248, f2.binding())
 }

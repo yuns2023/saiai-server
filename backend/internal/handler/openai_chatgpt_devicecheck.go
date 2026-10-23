@@ -68,6 +68,11 @@ func (h *OpenAIGatewayHandler) ChatGPTDeviceCheck(c *gin.Context) {
 		return
 	}
 	owner, err := cache.GetChatGPTUploadOwner(c.Request.Context(), scope.UploadSessionKey(device))
+	if err == nil {
+		if owner, ok = h.chatGPTSkipStaleAffinity(c, key.GroupID, cache, scope.UploadSessionKey(device), owner); !ok {
+			return
+		}
+	}
 	if err == nil && cookieOwner != 0 {
 		if owner != 0 && owner != cookieOwner {
 			h.errorResponse(c, 409, "integrity_context_unavailable", "Chat device and upload accounts differ")
@@ -111,11 +116,6 @@ func (h *OpenAIGatewayHandler) ChatGPTDeviceCheck(c *gin.Context) {
 		bound := chatGPTBoundIntegrity
 		if cookieOwner != 0 && cookieOwner == owner {
 			bound = chatGPTBoundDevice
-		}
-		if unavailable, typed := service.AsChatGPTBoundAccountUnavailable(err); typed && unavailable.Kind == service.ChatGPTBoundAccountPermanent {
-			// The short device affinity must not route re-registration back
-			// to the stale owner.
-			_ = cache.ReleaseChatGPTUploadOwner(c.Request.Context(), scope.UploadSessionKey(device), owner)
 		}
 		h.writeChatGPTBoundAccountUnavailable(c, err, bound, scope, false, gatewayErrorEnvelope{Status: 503, Type: "service_unavailable", Message: "Chat integrity account is unavailable"})
 		return

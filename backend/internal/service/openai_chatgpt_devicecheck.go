@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -184,7 +185,7 @@ func (s *OpenAIGatewayService) ReleaseChatGPTDeviceCookie(c *gin.Context, scope 
 		return true, ErrChatGPTDeviceCookieStore
 	}
 	if err := cache.ReleaseChatGPTUploadOwner(c.Request.Context(), scope.DeviceCookieKey(device, proof.value), owner); err != nil {
-		return true, ErrChatGPTDeviceCookieStore
+		return true, fmt.Errorf("%w: %v", ErrChatGPTDeviceCookieStore, err)
 	}
 	return true, nil
 }

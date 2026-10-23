@@ -37,6 +37,12 @@ const (
 	chatGPTBoundIntegrity
 	chatGPTBoundUpload
 	// Read-only delivery of history that exists only on the owner account.
+	// Deliberate exception: these keep 404 (the existing "ownership
+	// unavailable" read semantics) rather than 409.
+	//
+	// Upload, history and asset paths do not validate the device cookie, so
+	// their permanent branch cannot release or clear it; the next control or
+	// model request that validates the proof does.
 	chatGPTBoundConversationRead
 	chatGPTBoundAsset
 )
@@ -156,7 +162,12 @@ func (h *OpenAIGatewayHandler) writeChatGPTBoundAccountUnavailable(
 	case service.ChatGPTBoundAccountPermanent:
 		released, releaseErr := h.gatewayService.ReleaseChatGPTDeviceCookie(c, scope, unavailable.AccountID)
 		if releaseErr != nil {
-			log = log.With(zap.Error(releaseErr))
+			// Keep the cookie: clearing it while the stale ownership key
+			// survives would not let the client recover any faster.
+			c.Set(opsGatewayErrorDetailKey, unavailable.Error()+"; bound context "+bound.String()+"; device proof release failed: "+releaseErr.Error())
+			log.Warn("openai.chatgpt_bound_account_unavailable", zap.Error(releaseErr), zap.Bool("device_proof_released", false))
+			h.writeError(c, chatGPTBoundStoreEnvelope, streamStarted)
+			return
 		}
 		log.Warn("openai.chatgpt_bound_account_unavailable", zap.Bool("device_proof_released", released))
 		if (released || bound == chatGPTBoundDevice) && !streamStarted {
@@ -166,11 +177,7 @@ func (h *OpenAIGatewayHandler) writeChatGPTBoundAccountUnavailable(
 		h.writeError(c, gatewayErrorEnvelope{Status: status, Type: errType, Message: message}, streamStarted)
 	default:
 		log.Warn("openai.chatgpt_bound_account_unavailable")
-		h.writeError(c, gatewayErrorEnvelope{
-			Status:  http.StatusServiceUnavailable,
-			Type:    "service_unavailable",
-			Message: "Bound ChatGPT account state is temporarily unavailable; retry later",
-		}, streamStarted)
+		h.writeError(c, chatGPTBoundStoreEnvelope, streamStarted)
 	}
 }
 
@@ -191,4 +198,36 @@ func (h *OpenAIGatewayHandler) chatGPTAffinityOwnerUsable(c *gin.Context, groupI
 	_, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), groupID, accountID)
 	unavailable, typed := service.AsChatGPTBoundAccountUnavailable(err)
 	return !typed || unavailable.Kind != service.ChatGPTBoundAccountPermanent
+}
+
+var chatGPTBoundStoreEnvelope = gatewayErrorEnvelope{
+	Status:  http.StatusServiceUnavailable,
+	Type:    "service_unavailable",
+	Message: "Bound ChatGPT account state is temporarily unavailable; retry later",
+}
+
+// chatGPTSkipStaleAffinity drops the short device affinity (UploadSessionKey)
+// when its owner is permanently unavailable, so re-registration after a 409
+// lands on an available account. The key is compare-and-deleted; a failed
+// delete is a store failure (503) and is answered here (ok=false).
+func (h *OpenAIGatewayHandler) chatGPTSkipStaleAffinity(c *gin.Context, groupID *int64, cache service.ChatGPTUploadCache, key string, owner int64) (int64, bool) {
+	if owner == 0 {
+		return 0, true
+	}
+	_, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), groupID, owner)
+	unavailable, typed := service.AsChatGPTBoundAccountUnavailable(err)
+	if !typed || unavailable.Kind != service.ChatGPTBoundAccountPermanent {
+		return owner, true
+	}
+	log := requestLogger(c, "handler.openai_gateway.chatgpt_bound_account",
+		zap.Int64("account_id", owner), zap.String("reason", unavailable.Reason), zap.String("bound_context", "affinity"))
+	if releaseErr := cache.ReleaseChatGPTUploadOwner(c.Request.Context(), key, owner); releaseErr != nil {
+		setOpsSelectedAccount(c, owner, service.PlatformOpenAI)
+		c.Set(opsGatewayErrorDetailKey, unavailable.Error()+"; bound context affinity; affinity release failed: "+releaseErr.Error())
+		log.Warn("openai.chatgpt_stale_affinity_release_failed", zap.Error(releaseErr))
+		h.writeError(c, chatGPTBoundStoreEnvelope, false)
+		return 0, false
+	}
+	log.Info("openai.chatgpt_stale_affinity_released")
+	return 0, true
 }
