@@ -251,7 +251,7 @@ func newCodexWSServer(t *testing.T) (*httptest.Server, *wsHelloRecorder, *atomic
 			}
 		}
 	}))
-	server.TLS = &tls.Config{GetConfigForClient: func(h *tls.ClientHelloInfo) (*tls.Config, error) {
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, GetConfigForClient: func(h *tls.ClientHelloInfo) (*tls.Config, error) {
 		rec.mu.Lock()
 		rec.hellos = append(rec.hellos, h)
 		rec.mu.Unlock()
@@ -281,7 +281,13 @@ func newConnectProxyForTest(t *testing.T) (*httptest.Server, *atomic.Int32) {
 			http.Error(w, "dial", http.StatusBadGateway)
 			return
 		}
-		conn, _, err := w.(http.Hijacker).Hijack()
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			_ = upstream.Close()
+			http.Error(w, "hijacking unavailable", http.StatusInternalServerError)
+			return
+		}
+		conn, _, err := hijacker.Hijack()
 		if err != nil {
 			_ = upstream.Close()
 			return
@@ -303,7 +309,8 @@ func TestOpenAIWSPolicyDialerUpgradesWithRustlsHelloAndRelaysFrames(t *testing.T
 	wsURL := "wss://" + server.Listener.Addr().String() + "/backend-api/codex/responses"
 	for _, proxyURL := range []string{"", proxy.URL} {
 		t.Run("proxy="+proxyURL, func(t *testing.T) {
-			dialer := newDefaultOpenAIWSClientDialer().(*coderOpenAIWSClientDialer)
+			dialer, ok := newDefaultOpenAIWSClientDialer().(*coderOpenAIWSClientDialer)
+			require.True(t, ok)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			conn, status, _, err := dialOpenAIWS(ctx, dialer, wsURL, http.Header{"User-Agent": []string{"codex_cli_rs/0.163.0"}}, proxyURL, tlsfingerprint.CodexWSTransportPolicy())
@@ -334,14 +341,16 @@ func TestOpenAIWSPolicyDialerUpgradesWithRustlsHelloAndRelaysFrames(t *testing.T
 		})
 	}
 	require.Equal(t, int32(1), connects.Load(), "proxied dial must tunnel through CONNECT")
-	dialer := newDefaultOpenAIWSClientDialer().(*coderOpenAIWSClientDialer)
+	dialer, ok := newDefaultOpenAIWSClientDialer().(*coderOpenAIWSClientDialer)
+	require.True(t, ok)
 	require.Zero(t, dialer.SnapshotTransportMetrics().ProxyClientCacheMisses, "policy clients do not skew proxy-client metrics")
 }
 
 func TestOpenAIWSPolicyDialerKeepsRedirectAnd429Semantics(t *testing.T) {
 	server, _, upgrades := newCodexWSServer(t)
 	base := "wss://" + server.Listener.Addr().String()
-	dialer := newDefaultOpenAIWSClientDialer().(*coderOpenAIWSClientDialer)
+	dialer, ok := newDefaultOpenAIWSClientDialer().(*coderOpenAIWSClientDialer)
+	require.True(t, ok)
 	policy := tlsfingerprint.CodexWSTransportPolicy()
 
 	ctx, cancel := context.WithTimeout(WithNativeCodexRedirectPolicy(context.Background()), 5*time.Second)

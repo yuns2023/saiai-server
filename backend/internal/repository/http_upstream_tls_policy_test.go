@@ -35,7 +35,7 @@ func newPolicyTLSServer(t *testing.T, handler http.Handler) (*httptest.Server, f
 	var mu sync.Mutex
 	var hellos []observedHello
 	server := httptest.NewUnstartedServer(handler)
-	server.TLS = &tls.Config{GetConfigForClient: func(h *tls.ClientHelloInfo) (*tls.Config, error) {
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, GetConfigForClient: func(h *tls.ClientHelloInfo) (*tls.Config, error) {
 		mu.Lock()
 		hellos = append(hellos, observedHello{extensions: append([]uint16(nil), h.Extensions...), alpn: append([]string(nil), h.SupportedProtos...)})
 		mu.Unlock()
@@ -61,6 +61,20 @@ func policyTestConfig(reserve int) *config.Config {
 	return cfg
 }
 
+func newPolicyTestUpstream(t *testing.T, cfg *config.Config) *httpUpstreamService {
+	t.Helper()
+	svc, ok := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	require.True(t, ok)
+	return svc
+}
+
+func policyTestTransport(t *testing.T, entry *upstreamClientEntry) *http.Transport {
+	t.Helper()
+	transport, ok := entry.client.Transport.(*http.Transport)
+	require.True(t, ok)
+	return transport
+}
+
 func closeAllClients(svc *httpUpstreamService) {
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
@@ -73,8 +87,7 @@ func TestDoWithTransportPolicySendsPinnedCodexHelloOverHTTP1(t *testing.T) {
 	server, hellos := newPolicyTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, r.Proto)
 	}))
-	svc, ok := NewHTTPUpstream(policyTestConfig(2)).(*httpUpstreamService)
-	require.True(t, ok)
+	svc := newPolicyTestUpstream(t, policyTestConfig(2))
 	defer closeAllClients(svc)
 
 	req, err := http.NewRequest(http.MethodGet, server.URL+"/backend-api/codex/models", nil)
@@ -93,7 +106,7 @@ func TestDoWithTransportPolicySendsPinnedCodexHelloOverHTTP1(t *testing.T) {
 	require.Len(t, svc.clients, 1)
 	for key, entry := range svc.clients {
 		require.True(t, strings.HasPrefix(key, "tlspolicy:codex/"+tlsfingerprint.BaselineCodex0163LinuxHTTPOpenSSL+"/http|"), key)
-		transport := entry.client.Transport.(*http.Transport)
+		transport := policyTestTransport(t, entry)
 		require.Nil(t, transport.Proxy, "policy transports tunnel inside the dialer")
 		require.NotNil(t, transport.TLSNextProto)
 		require.Empty(t, transport.TLSNextProto, "HTTP/2 must be disabled")
@@ -116,7 +129,7 @@ func TestDoWithTransportPolicyRespectsGlobalSwitchAndZeroPolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := policyTestConfig(2)
 			cfg.Gateway.TLSFingerprint.Enabled = tc.global
-			svc := NewHTTPUpstream(cfg).(*httpUpstreamService)
+			svc := newPolicyTestUpstream(t, cfg)
 			defer closeAllClients(svc)
 			req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
 			resp, err := svc.DoWithTransportPolicy(req, "", 1, 1, tc.policy)
@@ -133,7 +146,7 @@ func TestDoWithTransportPolicyFailsLoudlyInsteadOfFallingBack(t *testing.T) {
 	var hits atomic.Int32
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
 	defer plain.Close()
-	svc := NewHTTPUpstream(policyTestConfig(2)).(*httpUpstreamService)
+	svc := newPolicyTestUpstream(t, policyTestConfig(2))
 	defer closeAllClients(svc)
 
 	// Unknown baseline / role mismatch.
@@ -161,7 +174,7 @@ func TestDoWithTransportPolicyKeepsNativeCodexNoRedirectPolicy(t *testing.T) {
 		w.Header().Set("Location", "/target")
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	}))
-	svc := NewHTTPUpstream(policyTestConfig(2)).(*httpUpstreamService)
+	svc := newPolicyTestUpstream(t, policyTestConfig(2))
 	defer closeAllClients(svc)
 	policy := tlsfingerprint.CodexHTTPTransportPolicy()
 
@@ -193,19 +206,21 @@ func TestDoWithTransportPolicyAuxReserveLetsControlRequestPassOpenSSE(t *testing
 		if r.URL.Path == "/slow" {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
-			w.(http.Flusher).Flush()
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
 			slowStarted <- struct{}{}
 			<-release
 			return
 		}
 		_, _ = io.WriteString(w, "ok")
 	}))
-	svc := NewHTTPUpstream(policyTestConfig(1)).(*httpUpstreamService)
+	svc := newPolicyTestUpstream(t, policyTestConfig(1))
 	defer closeAllClients(svc)
 	policy := tlsfingerprint.CodexHTTPTransportPolicy()
 	entry, err := svc.getClientEntryWithPolicy("", 3, 1, policy, false, false)
 	require.NoError(t, err)
-	require.Equal(t, 2, entry.client.Transport.(*http.Transport).MaxConnsPerHost)
+	require.Equal(t, 2, policyTestTransport(t, entry).MaxConnsPerHost)
 
 	// Account concurrency 1: the SSE stream saturates the model slot. (With
 	// reserve 0 this test times out: the reserve is what lets control pass.)
@@ -235,7 +250,7 @@ func TestDoWithTransportPolicyAuxReserveLetsControlRequestPassOpenSSE(t *testing
 
 func TestTransportPolicyAndClaudeFingerprintUseSeparatePools(t *testing.T) {
 	server, _ := newPolicyTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-	svc := NewHTTPUpstream(policyTestConfig(2)).(*httpUpstreamService)
+	svc := newPolicyTestUpstream(t, policyTestConfig(2))
 	defer closeAllClients(svc)
 	for _, policy := range []tlsfingerprint.TransportPolicy{{}, tlsfingerprint.CodexHTTPTransportPolicy(), {}} {
 		req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
@@ -265,5 +280,5 @@ func TestTransportPolicyAndClaudeFingerprintUseSeparatePools(t *testing.T) {
 	policyEntry, err := svc.getClientEntryWithPolicy("", 5, 1, tlsfingerprint.CodexHTTPTransportPolicy(), false, false)
 	require.NoError(t, err)
 	require.NotSame(t, claude, policyEntry)
-	require.Equal(t, 1, claude.client.Transport.(*http.Transport).MaxConnsPerHost, "Claude pool size unchanged")
+	require.Equal(t, 1, policyTestTransport(t, claude).MaxConnsPerHost, "Claude pool size unchanged")
 }

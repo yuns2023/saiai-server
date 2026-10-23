@@ -34,7 +34,10 @@ func TestCodexCaptureHarnessHTTP(t *testing.T) {
 	policyTransportRootCAs = func() *x509.CertPool { return pool }
 	defer func() { policyTransportRootCAs = previous }()
 
-	svc := NewHTTPUpstream(policyTestConfig(2)).(*httpUpstreamService)
+	svc, ok := NewHTTPUpstream(policyTestConfig(2)).(*httpUpstreamService)
+	if !ok {
+		t.Fatal("unexpected upstream implementation")
+	}
 	defer closeAllClients(svc)
 	for i := int64(0); i < 3; i++ {
 		for _, target := range []struct{ method, url, body string }{

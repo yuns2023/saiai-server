@@ -41,7 +41,7 @@ type teeConn struct {
 func (c *teeConn) Read(p []byte) (int, error) {
 	n, err := c.Conn.Read(p)
 	c.mu.Lock()
-	c.buf.Write(p[:n])
+	_, _ = c.buf.Write(p[:n])
 	c.mu.Unlock()
 	return n, err
 }
@@ -171,7 +171,8 @@ func TestCodexPoliciesCompleteVerifiedHandshakes(t *testing.T) {
 		{"tls13_x25519", &tls.Config{MinVersion: tls.VersionTLS13, CurvePreferences: []tls.CurveID{tls.X25519}}, "HTTP/1.1 X25519 TLS 1.3", false},
 		{"tls13_hrr_p256", &tls.Config{MinVersion: tls.VersionTLS13, CurvePreferences: []tls.CurveID{tls.CurveP256}}, "HTTP/1.1 CurveP256 TLS 1.3", true},
 		{"tls13_hrr_p384", &tls.Config{MinVersion: tls.VersionTLS13, CurvePreferences: []tls.CurveID{tls.CurveP384}}, "HTTP/1.1 CurveP384 TLS 1.3", true},
-		{"tls12_ecdhe", &tls.Config{MaxVersion: tls.VersionTLS12, CurvePreferences: []tls.CurveID{tls.X25519}}, "HTTP/1.1 X25519 TLS 1.2", false},
+		// #nosec G402 -- local fixture: TLS 1.2 is the behavior under test.
+		{"tls12_ecdhe", &tls.Config{MinVersion: tls.VersionTLS12, MaxVersion: tls.VersionTLS12, CurvePreferences: []tls.CurveID{tls.X25519}}, "HTTP/1.1 X25519 TLS 1.2", false}, //nolint:gosec // local TLS 1.2 fixture under test
 		{"alpn_offered_by_server_ignored", &tls.Config{MinVersion: tls.VersionTLS13, NextProtos: []string{"h2", "http/1.1"}}, "HTTP/1.1 X25519MLKEM768 TLS 1.3", false},
 	}
 	for _, p := range codexPolicies {
@@ -214,7 +215,7 @@ func TestCodexPoliciesCompleteVerifiedHandshakes(t *testing.T) {
 }
 
 func TestCodexPolicyRejectsUntrustedCertificate(t *testing.T) {
-	server, _ := newCurveServer(t, &tls.Config{})
+	server, _ := newCurveServer(t, &tls.Config{MinVersion: tls.VersionTLS12})
 	for _, p := range codexPolicies {
 		d := directDialer(t, p, server.Listener.Addr().String(), x509.NewCertPool())
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -340,7 +341,12 @@ func connectProxy(t *testing.T, target string, useTLS bool, hang bool) *httptest
 			http.Error(w, "auth", http.StatusProxyAuthRequired)
 			return
 		}
-		conn, _, err := w.(http.Hijacker).Hijack()
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijacking unavailable", http.StatusInternalServerError)
+			return
+		}
+		conn, _, err := hijacker.Hijack()
 		if err != nil {
 			return
 		}
