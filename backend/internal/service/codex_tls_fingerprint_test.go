@@ -382,157 +382,142 @@ func (d *policyFakeDialer) dialed() []tlsfingerprint.TransportPolicy {
 	return append([]tlsfingerprint.TransportPolicy(nil), d.policies...)
 }
 
-func newPolicyTestPool(t *testing.T, dialer openAIWSClientDialer) *openAIWSConnPool {
+// accountFlagRepo serves the CURRENT account state to the policy resolver.
+type accountFlagRepo struct {
+	AccountRepository
+	mu      sync.Mutex
+	account *Account
+}
+
+func (r *accountFlagRepo) GetByID(_ context.Context, id int64) (*Account, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.account == nil || r.account.ID != id {
+		return nil, errors.New("not found")
+	}
+	copied := *r.account
+	return &copied, nil
+}
+
+func (r *accountFlagRepo) setFlag(enabled bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.account.Extra = map[string]any{"enable_tls_fingerprint": enabled}
+}
+
+// newResolvingPoolForTest wires the production resolver
+// (currentCodexWSTransportPolicy) to a repo whose account flag can be toggled.
+func newResolvingPoolForTest(t *testing.T, minIdle int) (*openAIWSConnPool, *policyFakeDialer, *accountFlagRepo, *Account) {
 	t.Helper()
-	cfg := &config.Config{}
-	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
-	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
-	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 2
+	cfg := codexTLSConfig(true)
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 4
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = minIdle
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 4
+	cfg.Gateway.OpenAIWS.PoolTargetUtilization = 0.8
 	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 1
+	snapshot := codexOAuthAccount(41, nil) // the session's stale snapshot: flag absent
+	repo := &accountFlagRepo{account: codexOAuthAccount(41, nil)}
+	svc := &OpenAIGatewayService{cfg: cfg, accountRepo: repo}
+	dialer := &policyFakeDialer{}
 	pool := newOpenAIWSConnPool(cfg)
 	pool.setClientDialerForTest(dialer)
+	pool.transportPolicyFor = svc.currentCodexWSTransportPolicy
 	t.Cleanup(pool.Close)
-	return pool
+	return pool, dialer, repo, snapshot
 }
 
-func TestOpenAIWSPoolNeverHandsOutConnectionsFromAnotherTransportPolicy(t *testing.T) {
-	dialer := &policyFakeDialer{}
-	pool := newPolicyTestPool(t, dialer)
-	account := codexOAuthAccount(31, nil)
-	codex := tlsfingerprint.CodexWSTransportPolicy()
-	req := openAIWSAcquireRequest{Account: account, WSURL: "wss://chatgpt.com/backend-api/codex/responses", TransportPolicy: codex}
+func TestOpenAIWSToggleAppliesToNewDialsWhileExistingConnsStayReusable(t *testing.T) {
+	pool, dialer, repo, snapshot := newResolvingPoolForTest(t, 0)
+	req := openAIWSAcquireRequest{Account: snapshot, WSURL: "wss://chatgpt.com/backend-api/codex/responses"}
 
-	lease, err := pool.Acquire(context.Background(), req)
+	first, err := pool.Acquire(context.Background(), req)
 	require.NoError(t, err)
-	codexConnID := lease.conn.id
-	require.Equal(t, codex.Key(), lease.conn.transportKey)
-	lease.Release()
+	stdConnID := first.conn.id
+	first.Release()
+	require.Equal(t, []tlsfingerprint.TransportPolicy{{}}, dialer.dialed())
 
-	// Toggle off: a standard-TLS request must not reuse the Codex connection,
-	// even when it names it as preferred.
-	req.TransportPolicy = tlsfingerprint.TransportPolicy{}
-	req.PreferredConnID = codexConnID
-	lease, err = pool.Acquire(context.Background(), req)
+	// Toggle on in the CURRENT account state; the session keeps its old
+	// *Account snapshot (flag absent).
+	repo.setFlag(true)
+
+	// The existing idle standard-TLS connection is still reused normally.
+	reused, err := pool.Acquire(context.Background(), req)
 	require.NoError(t, err)
-	require.NotEqual(t, codexConnID, lease.conn.id)
-	require.Equal(t, "", lease.conn.transportKey)
-	stdConnID := lease.conn.id
-	lease.Release()
-	require.Equal(t, []tlsfingerprint.TransportPolicy{codex, {}}, dialer.dialed())
+	require.Equal(t, stdConnID, reused.conn.id)
+	require.Len(t, dialer.dialed(), 1, "no eviction or re-dial on toggle")
 
-	// The idle Codex connection drains on the next cleanup.
-	ap, _ := pool.getAccountPool(account.ID)
+	// While it is leased, the next acquire needs a NEW upstream dial, which
+	// uses the newly enabled Codex policy.
+	second, err := pool.Acquire(context.Background(), req)
+	require.NoError(t, err)
+	require.NotEqual(t, stdConnID, second.conn.id)
+	require.Equal(t, []tlsfingerprint.TransportPolicy{{}, tlsfingerprint.CodexWSTransportPolicy()}, dialer.dialed())
+	second.Release()
+	reused.Release()
+
+	// Toggle off again: both connections stay pooled and reusable, new dials
+	// go back to standard TLS.
+	repo.setFlag(false)
+	ap, _ := pool.getAccountPool(snapshot.ID)
 	ap.mu.Lock()
-	evicted := pool.cleanupAccountLocked(ap, time.Now(), 2)
-	_, codexStillPooled := ap.conns[codexConnID]
-	_, stdStillPooled := ap.conns[stdConnID]
+	evicted := pool.cleanupAccountLocked(ap, time.Now(), 4)
+	conns := len(ap.conns)
 	ap.mu.Unlock()
-	closeOpenAIWSConns(evicted)
-	require.False(t, codexStillPooled)
-	require.True(t, stdStillPooled)
+	require.Empty(t, evicted)
+	require.Equal(t, 2, conns)
+	forced := req
+	forced.ForceNewConn = true
+	third, err := pool.Acquire(context.Background(), forced)
+	require.NoError(t, err)
+	third.Release()
+	require.Equal(t, tlsfingerprint.TransportPolicy{}, dialer.dialed()[2])
 }
 
-func TestOpenAIWSPoolLetsForcedContinuationDrainOnOldTransport(t *testing.T) {
-	dialer := &policyFakeDialer{}
-	pool := newPolicyTestPool(t, dialer)
-	account := codexOAuthAccount(32, nil)
-	codex := tlsfingerprint.CodexWSTransportPolicy()
-	req := openAIWSAcquireRequest{Account: account, WSURL: "wss://chatgpt.com/backend-api/codex/responses", TransportPolicy: codex}
+func TestOpenAIWSContinuationUnaffectedByToggle(t *testing.T) {
+	pool, dialer, repo, snapshot := newResolvingPoolForTest(t, 0)
+	req := openAIWSAcquireRequest{Account: snapshot, WSURL: "wss://chatgpt.com/backend-api/codex/responses"}
 	lease, err := pool.Acquire(context.Background(), req)
 	require.NoError(t, err)
 	boundID := lease.conn.id
 	lease.Release()
-	require.True(t, pool.PinConn(account.ID, boundID))
 
-	// After the toggle a continuation bound to the old connection keeps it
-	// (no migration), and the pinned connection survives cleanup.
-	req.TransportPolicy = tlsfingerprint.TransportPolicy{}
+	repo.setFlag(true)
 	req.PreferredConnID = boundID
 	req.ForcePreferredConn = true
 	lease, err = pool.Acquire(context.Background(), req)
 	require.NoError(t, err)
-	require.Equal(t, boundID, lease.conn.id)
+	require.Equal(t, boundID, lease.conn.id, "continuation keeps its connection")
 	lease.Release()
-	ap, _ := pool.getAccountPool(account.ID)
-	ap.mu.Lock()
-	evicted := pool.cleanupAccountLocked(ap, time.Now(), 2)
-	_, pooled := ap.conns[boundID]
-	ap.mu.Unlock()
-	closeOpenAIWSConns(evicted)
-	require.True(t, pooled)
-	pool.UnpinConn(account.ID, boundID)
 	require.Len(t, dialer.dialed(), 1)
 }
 
-func TestOpenAIWSPoolFreesMismatchedIdleSlotAtCapacity(t *testing.T) {
-	dialer := &policyFakeDialer{}
-	pool := newPolicyTestPool(t, dialer)
-	account := codexOAuthAccount(33, nil)
-	codex := tlsfingerprint.CodexWSTransportPolicy()
-	base := openAIWSAcquireRequest{Account: account, WSURL: "wss://chatgpt.com/backend-api/codex/responses"}
-	// Fill both slots with standard-TLS connections.
-	l1, err := pool.Acquire(context.Background(), base)
-	require.NoError(t, err)
-	l2, err := pool.Acquire(context.Background(), base)
-	require.NoError(t, err)
-	l1.Release()
-	l2.Release()
-	// Avoid the periodic cleanup so the at-capacity path is exercised.
-	ap, _ := pool.getAccountPool(account.ID)
-	ap.mu.Lock()
-	ap.lastCleanupAt = time.Now()
-	ap.mu.Unlock()
-
-	req := base
-	req.TransportPolicy = codex
-	lease, err := pool.Acquire(context.Background(), req)
-	require.NoError(t, err)
-	require.Equal(t, codex.Key(), lease.conn.transportKey)
-	lease.Release()
-}
-
-func TestOpenAIWSPrewarmAndUnsupportedDialersHonorPolicy(t *testing.T) {
-	// Prewarm reuses the last acquire request, including its policy.
-	cfg := &config.Config{}
-	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 4
-	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 3
-	cfg.Gateway.OpenAIWS.PoolTargetUtilization = 0.8
-	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 1
-	dialer := &policyFakeDialer{}
-	pool := newOpenAIWSConnPool(cfg)
-	pool.setClientDialerForTest(dialer)
-	defer pool.Close()
-	codex := tlsfingerprint.CodexWSTransportPolicy()
-	lease, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{Account: codexOAuthAccount(34, nil), WSURL: "wss://chatgpt.com/backend-api/codex/responses", TransportPolicy: codex})
+func TestOpenAIWSPrewarmResolvesCurrentPolicy(t *testing.T) {
+	pool, dialer, repo, snapshot := newResolvingPoolForTest(t, 3)
+	repo.setFlag(true)
+	lease, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{Account: snapshot, WSURL: "wss://chatgpt.com/backend-api/codex/responses"})
 	require.NoError(t, err)
 	lease.Release()
 	require.Eventually(t, func() bool { return len(dialer.dialed()) >= 3 }, 3*time.Second, 10*time.Millisecond)
 	for _, p := range dialer.dialed() {
-		require.Equal(t, codex, p)
+		require.Equal(t, tlsfingerprint.CodexWSTransportPolicy(), p, "prewarm dials resolve the current account state")
 	}
+}
 
-	// A dialer that cannot honor a policy fails the acquire.
-	plainPool := newPolicyTestPool(t, &openAIWSFakeDialer{})
-	_, err = plainPool.Acquire(context.Background(), openAIWSAcquireRequest{Account: codexOAuthAccount(35, nil), WSURL: "wss://chatgpt.com/backend-api/codex/responses", TransportPolicy: codex})
+func TestOpenAIWSPolicyRequiresCapableDialer(t *testing.T) {
+	cfg := codexTLSConfig(true)
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSFakeDialer{})
+	pool.transportPolicyFor = func(context.Context, *Account) tlsfingerprint.TransportPolicy {
+		return tlsfingerprint.CodexWSTransportPolicy()
+	}
+	defer pool.Close()
+	_, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{Account: codexOAuthAccount(42, nil), WSURL: "wss://chatgpt.com/backend-api/codex/responses"})
 	require.ErrorIs(t, err, ErrTransportPolicyUnsupported)
 }
 
-func TestOpenAIWSPoolReportsCapacityWhileOtherPolicyDrains(t *testing.T) {
-	dialer := &policyFakeDialer{}
-	pool := newPolicyTestPool(t, dialer)
-	account := codexOAuthAccount(36, nil)
-	base := openAIWSAcquireRequest{Account: account, WSURL: "wss://chatgpt.com/backend-api/codex/responses"}
-	l1, err := pool.Acquire(context.Background(), base)
-	require.NoError(t, err)
-	l2, err := pool.Acquire(context.Background(), base)
-	require.NoError(t, err)
-	defer l1.Release()
-	defer l2.Release()
-	// Both slots are leased standard-TLS connections; a Codex-policy request
-	// may neither reuse them nor evict them.
-	req := base
-	req.TransportPolicy = tlsfingerprint.CodexWSTransportPolicy()
-	_, err = pool.Acquire(context.Background(), req)
-	require.ErrorIs(t, err, errOpenAIWSConnQueueFull)
-	require.Len(t, dialer.dialed(), 2)
+func TestCurrentCodexWSTransportPolicyFallsBackToSnapshot(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: codexTLSConfig(true), accountRepo: &accountFlagRepo{}}
+	require.Equal(t, tlsfingerprint.CodexWSTransportPolicy(),
+		svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(43, map[string]any{"enable_tls_fingerprint": true})))
+	require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(43, nil)).Enabled())
 }

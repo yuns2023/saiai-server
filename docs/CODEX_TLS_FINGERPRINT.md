@@ -27,8 +27,8 @@ but is a separate, explicit transport identity. Claude behavior is unchanged.
   `false`. The account DTO exposes `enable_tls_fingerprint=true` for opted-in
   OpenAI OAuth accounts (previously the field was only mapped for Anthropic,
   which made the edit modal show "off" and overwrite).
-- Toggling takes effect for new connections: HTTP uses a separate client pool
-  per policy; WebSocket connections are tagged with their policy (see below).
+- Toggling takes effect for newly dialed upstream connections; existing ones
+  drain naturally (see "Toggle semantics" below).
 
 ## Where the policy applies
 
@@ -95,18 +95,28 @@ shared transport):
   policy, 429 header-receipt timing, read limit and tracing are unchanged.
   These clients are excluded from the proxy-client cache metrics
   (`TransportReuseRatio` still means standard proxy-client cache hit ratio).
-- WebSocket pool: every upgraded connection records `transportKey`
-  (policy key, `""` = standard). Acquire only hands out connections whose key
-  matches the request (preferred, least-busy, scan and queue-wait paths);
-  at capacity an idle mismatched connection is evicted to make room; cleanup
-  drains idle, unpinned, waiter-free mismatched connections. Forced-preferred
-  (continuation-bound) acquisitions keep their existing connection after a
-  toggle and pinned connections are not drained — they are never migrated to
-  the new transport mid-chain. Prewarm reuses the last acquire request,
-  including its policy. If, right after a toggle, every slot is still held by
-  leased or pinned connections of the previous policy, a new acquire fails
-  fast with the pool's "queue full" error (client sees try-again-later) instead
-  of waiting for capacity; it succeeds once those connections drain.
+- WebSocket pool: the policy is resolved from the account's **current** state
+  (scheduler snapshot cache, then repository; the caller's snapshot if the
+  lookup fails) at **every new upstream dial** — pool acquire, prewarm, new
+  dials from long-lived inbound sessions and v2 passthrough. It is not
+  snapshotted in the session's acquire request. Existing upstream connections
+  are reused normally whatever policy they were dialed with: there is no
+  toggle-time eviction, filtering or queueing change, and continuation-bound
+  connections are untouched.
+
+### Toggle semantics
+
+A toggle (account flag or global switch) applies to **newly dialed** upstream
+connections only. HTTP: the policy is part of the client cache key, so the
+next request uses the other pool; idle connections of the old pool close after
+`idle_conn_timeout_seconds` (default 90 s) or when the client is evicted
+(`client_idle_ttl_seconds`, default 15 min). WebSocket: existing connections
+drain naturally — an idle or released connection is closed by the pool's
+cleanup once it is older than the fixed 60-minute max connection age
+(`openAIWSConnMaxAge`), or earlier by idle trimming (`max_idle_per_account`),
+a failed health ping, or the upstream closing it. A connection that is leased
+or pinned by a store-disabled continuation is not aged out while held, so a
+long continuation keeps its original transport until the session ends.
 
 ## Baseline details
 
@@ -177,8 +187,10 @@ against the raw captures (WS with the capture's seed for an exact order match).
    ed448/brainpool/DSA/SHA-224 signature schemes, x448/ffdhe groups, DHE and
    CBC/ETM suites, but cannot use them. A server that selects one fails the
    handshake loudly (tested: HRR to x448/ffdhe2048, TLS 1.2 DHE suite); there
-   is no fallback. `chatgpt.com` (TLS 1.3, X25519MLKEM768) never selects them.
-   HRR to P-256/P-384 works.
+   is no fallback or downgrade. This is a compatibility limitation: it is not
+   known locally which algorithms the production endpoint might ever select;
+   the local captures only show TLS 1.3 with X25519MLKEM768. HRR to P-256/P-384
+   works.
 2. **HRR cookie position.** On a HelloRetryRequest with a cookie, uTLS inserts
    the `cookie` extension at a random position; rustls places it by the same
    seeded hash. The rest of the retried hello keeps the original order

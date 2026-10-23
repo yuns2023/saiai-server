@@ -15,10 +15,9 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	coderws "github.com/coder/websocket"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 )
 
 const (
@@ -73,11 +72,6 @@ type openAIWSAcquireRequest struct {
 	ForceNewConn bool
 	// ForcePreferredConn: 强制本次只使用 PreferredConnID，禁止漂移到其它连接。
 	ForcePreferredConn bool
-	// TransportPolicy is the explicit TLS identity new connections are dialed
-	// with. Pooled connections are only handed out to requests with the same
-	// policy key; a forced-preferred (continuation-bound) connection keeps
-	// draining on its original transport after a toggle.
-	TransportPolicy tlsfingerprint.TransportPolicy
 }
 
 type openAIWSConnLease struct {
@@ -242,9 +236,6 @@ type openAIWSConn struct {
 	ws openAIWSClientConn
 
 	handshakeHeaders http.Header
-	// transportKey is the TransportPolicy key the connection was upgraded
-	// with ("" = standard Go TLS). Immutable after dial.
-	transportKey string
 
 	leaseCh   chan struct{}
 	closedCh  chan struct{}
@@ -617,6 +608,12 @@ type openAIWSConnPool struct {
 	cfg *config.Config
 	// 通过接口解耦底层 WS 客户端实现，默认使用 coder/websocket。
 	clientDialer openAIWSClientDialer
+	// transportPolicyFor resolves the TLS transport policy from the account's
+	// CURRENT state at every new upstream dial (acquire, prewarm, long-lived
+	// sessions). Existing connections are reused regardless of the policy they
+	// were dialed with and drain through the normal lifetime/idle rules, so a
+	// toggle only affects newly dialed connections. nil = standard TLS.
+	transportPolicyFor func(ctx context.Context, account *Account) tlsfingerprint.TransportPolicy
 
 	accounts sync.Map // key: int64(accountID), value: *openAIWSAccountPool
 	seq      atomic.Uint64
@@ -865,7 +862,6 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 		ap.lastCleanupAt = now
 	}
 	pickStartedAt := time.Now()
-	transportKey := req.TransportPolicy.Key()
 	allowReuse := !req.ForceNewConn
 	preferredConnID := stringsTrim(req.PreferredConnID)
 	forcePreferredConn := allowReuse && req.ForcePreferredConn
@@ -960,7 +956,7 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 		}
 
 		if preferredConnID != "" {
-			if conn, ok := ap.conns[preferredConnID]; ok && conn.transportKey == transportKey && conn.tryAcquire() {
+			if conn, ok := ap.conns[preferredConnID]; ok && conn.tryAcquire() {
 				connPick := time.Since(pickStartedAt)
 				p.recordConnPickDuration(connPick)
 				ap.mu.Unlock()
@@ -982,7 +978,7 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 			}
 		}
 
-		best := p.pickLeastBusyConnLocked(ap, "", transportKey)
+		best := p.pickLeastBusyConnLocked(ap, "")
 		if best != nil && best.tryAcquire() {
 			connPick := time.Since(pickStartedAt)
 			p.recordConnPickDuration(connPick)
@@ -1004,7 +1000,7 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 			return lease, nil
 		}
 		for _, conn := range ap.conns {
-			if conn == nil || conn == best || conn.transportKey != transportKey {
+			if conn == nil || conn == best {
 				continue
 			}
 			if conn.tryAcquire() {
@@ -1032,15 +1028,6 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 
 	if req.ForceNewConn && len(ap.conns)+ap.creating >= effectiveMaxConns {
 		if idle := p.pickOldestIdleConnLocked(ap); idle != nil {
-			delete(ap.conns, idle.id)
-			evicted = append(evicted, idle)
-			p.metrics.scaleDownTotal.Add(1)
-		}
-	}
-	// Idle connections from a previous transport policy can never serve this
-	// request; free their slot instead of queueing behind them.
-	if len(ap.conns)+ap.creating >= effectiveMaxConns {
-		if idle := p.pickOldestIdleMismatchedConnLocked(ap, transportKey); idle != nil {
 			delete(ap.conns, idle.id)
 			evicted = append(evicted, idle)
 			p.metrics.scaleDownTotal.Add(1)
@@ -1090,25 +1077,12 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 		return nil, errOpenAIWSConnQueueFull
 	}
 
-	target := p.pickLeastBusyConnLocked(ap, req.PreferredConnID, transportKey)
+	target := p.pickLeastBusyConnLocked(ap, req.PreferredConnID)
 	connPick := time.Since(pickStartedAt)
 	p.recordConnPickDuration(connPick)
 	if target == nil {
-		// Every slot is held by connections of another transport policy that
-		// are still leased or pinned (draining after a toggle): report
-		// capacity exhaustion rather than a closed connection.
-		drainingOtherPolicy := false
-		for _, conn := range ap.conns {
-			if conn != nil && conn.transportKey != transportKey {
-				drainingOtherPolicy = true
-				break
-			}
-		}
 		ap.mu.Unlock()
 		closeOpenAIWSConns(evicted)
-		if drainingOtherPolicy {
-			return nil, errOpenAIWSConnQueueFull
-		}
 		return nil, errOpenAIWSConnClosed
 	}
 	if int(target.waiters.Load()) >= p.queueLimitPerConn() {
@@ -1176,24 +1150,6 @@ func (p *openAIWSConnPool) pickOldestIdleConnLocked(ap *openAIWSAccountPool) *op
 	return oldest
 }
 
-// pickOldestIdleMismatchedConnLocked finds an idle, unpinned connection that
-// was dialed with a different transport policy than transportKey.
-func (p *openAIWSConnPool) pickOldestIdleMismatchedConnLocked(ap *openAIWSAccountPool, transportKey string) *openAIWSConn {
-	if ap == nil {
-		return nil
-	}
-	var oldest *openAIWSConn
-	for _, conn := range ap.conns {
-		if conn == nil || conn.transportKey == transportKey || conn.isLeased() || conn.waiters.Load() > 0 || p.isConnPinnedLocked(ap, conn.id) {
-			continue
-		}
-		if oldest == nil || conn.lastUsedAt().Before(oldest.lastUsedAt()) {
-			oldest = conn
-		}
-	}
-	return oldest
-}
-
 func (p *openAIWSConnPool) getOrCreateAccountPool(accountID int64) *openAIWSAccountPool {
 	if p == nil || accountID <= 0 {
 		return nil
@@ -1243,12 +1199,6 @@ func (p *openAIWSConnPool) cleanupAccountLocked(ap *openAIWSAccountPool, now tim
 		return nil
 	}
 	maxAge := p.maxConnAge()
-	// Connections from a previous transport policy drain: once idle (not
-	// leased, no waiters, not pinned by a continuation) they are closed.
-	wantTransportKey := ""
-	if ap.lastAcquire != nil {
-		wantTransportKey = ap.lastAcquire.TransportPolicy.Key()
-	}
 
 	evicted := make([]*openAIWSConn, 0)
 	for id, conn := range ap.conns {
@@ -1270,12 +1220,6 @@ func (p *openAIWSConnPool) cleanupAccountLocked(ap *openAIWSAccountPool, now tim
 		default:
 		}
 		if p.isConnPinnedLocked(ap, id) {
-			continue
-		}
-		if conn.transportKey != wantTransportKey && !conn.isLeased() && conn.waiters.Load() == 0 {
-			delete(ap.conns, id)
-			evicted = append(evicted, conn)
-			p.metrics.scaleDownTotal.Add(1)
 			continue
 		}
 		if maxAge > 0 && !conn.isLeased() && conn.age(now) > maxAge {
@@ -1333,13 +1277,13 @@ func (p *openAIWSConnPool) cleanupAccountLocked(ap *openAIWSAccountPool, now tim
 	return evicted
 }
 
-func (p *openAIWSConnPool) pickLeastBusyConnLocked(ap *openAIWSAccountPool, preferredConnID string, transportKey string) *openAIWSConn {
+func (p *openAIWSConnPool) pickLeastBusyConnLocked(ap *openAIWSAccountPool, preferredConnID string) *openAIWSConn {
 	if ap == nil || len(ap.conns) == 0 {
 		return nil
 	}
 	preferredConnID = stringsTrim(preferredConnID)
 	if preferredConnID != "" {
-		if conn, ok := ap.conns[preferredConnID]; ok && conn != nil && conn.transportKey == transportKey {
+		if conn, ok := ap.conns[preferredConnID]; ok {
 			return conn
 		}
 	}
@@ -1347,7 +1291,7 @@ func (p *openAIWSConnPool) pickLeastBusyConnLocked(ap *openAIWSAccountPool, pref
 	var bestWaiters int32
 	var bestLastUsed time.Time
 	for _, conn := range ap.conns {
-		if conn == nil || conn.transportKey != transportKey {
+		if conn == nil {
 			continue
 		}
 		waiters := conn.waiters.Load()
@@ -1602,7 +1546,14 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	if p == nil || p.clientDialer == nil {
 		return nil, errors.New("openai ws client dialer is nil")
 	}
-	conn, status, handshakeHeaders, err := dialOpenAIWS(ctx, p.clientDialer, req.WSURL, req.Headers, req.ProxyURL, req.TransportPolicy)
+	var policy tlsfingerprint.TransportPolicy
+	if p.transportPolicyFor != nil {
+		policy = p.transportPolicyFor(ctx, req.Account)
+	}
+	if policy.Enabled() {
+		logOpenAIWSModeDebug("pool_dial_tls_policy account_id=%d policy=%s", req.Account.ID, policy.Key())
+	}
+	conn, status, handshakeHeaders, err := dialOpenAIWS(ctx, p.clientDialer, req.WSURL, req.Headers, req.ProxyURL, policy)
 	if err != nil {
 		return nil, &openAIWSDialError{
 			StatusCode:      status,
@@ -1618,9 +1569,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 		}
 	}
 	id := p.nextConnID(req.Account.ID)
-	wsConn := newOpenAIWSConn(id, req.Account.ID, conn, handshakeHeaders)
-	wsConn.transportKey = req.TransportPolicy.Key()
-	return wsConn, nil
+	return newOpenAIWSConn(id, req.Account.ID, conn, handshakeHeaders), nil
 }
 
 func (p *openAIWSConnPool) nextConnID(accountID int64) string {

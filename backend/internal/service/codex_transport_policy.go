@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -47,4 +48,29 @@ func (t codexControlTransport) do(req *http.Request, proxyURL string, account *A
 		return nil, ErrTransportPolicyUnsupported
 	}
 	return doWithTransportPolicy(t.upstream, req, proxyURL, account.ID, account.Concurrency, policy)
+}
+
+// currentCodexWSTransportPolicy resolves the WS policy from the account's
+// current state (scheduler snapshot cache, then repository) so a toggle
+// reaches new upstream dials of long-lived inbound sessions and prewarm, whose
+// *Account may be a snapshot taken when the session started. If the lookup
+// fails, the caller's snapshot decides.
+func (s *OpenAIGatewayService) currentCodexWSTransportPolicy(ctx context.Context, account *Account) tlsfingerprint.TransportPolicy {
+	if s == nil || account == nil {
+		return tlsfingerprint.TransportPolicy{}
+	}
+	current := account
+	var (
+		fresh *Account
+		err   error
+	)
+	if s.schedulerSnapshot != nil {
+		fresh, err = s.schedulerSnapshot.GetAccount(ctx, account.ID)
+	} else if s.accountRepo != nil {
+		fresh, err = s.accountRepo.GetByID(ctx, account.ID)
+	}
+	if err == nil && fresh != nil && fresh.ID == account.ID {
+		current = fresh
+	}
+	return codexTransportPolicyFor(s.cfg, current, tlsfingerprint.RoleWS)
 }

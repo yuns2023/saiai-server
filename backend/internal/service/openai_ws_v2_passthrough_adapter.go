@@ -13,7 +13,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -272,7 +271,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// Native relay accounts never get a policy (codexTransportPolicyFor
 	// returns the zero policy for them).
 	upstreamConn, statusCode, handshakeHeaders, err := dialOpenAIWS(dialCtx, dialer, wsURL, headers, proxyURL,
-		codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleWS))
+		s.currentCodexWSTransportPolicy(dialCtx, account))
 	if err != nil {
 		logOpenAIWSV2Passthrough(
 			"relay_dial_failed account_id=%d status_code=%d err=%s",
