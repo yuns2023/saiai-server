@@ -87,7 +87,7 @@ func TestClaudeQuotaResponsePaths(t *testing.T) {
 				_, err := svc.handleStreamingResponse(context.Background(), resp, c, a, time.Now(), "model", "model", false)
 				require.NoError(t, err)
 			} else {
-				_, err := svc.handleNonStreamingResponse(context.Background(), resp, c, a, "model", "model")
+				_, _, err := svc.handleNonStreamingResponse(context.Background(), resp, c, a, "model", "model")
 				require.NoError(t, err)
 			}
 			require.Equal(t, "0.42", rec.Result().Header.Get("anthropic-ratelimit-unified-5h-utilization"))

@@ -268,6 +268,11 @@
               <span class="text-gray-400">{{ t('admin.usage.cacheReadTokens') }}</span>
               <span class="font-medium text-white">{{ tokenTooltipData.cache_read_tokens.toLocaleString() }}</span>
             </div>
+            <div v-if="tokenTooltipData" class="flex items-center justify-between gap-4" data-testid="usage-stop-reason">
+              <span class="text-gray-400">{{ t('admin.usage.stopReason') }}</span>
+              <span v-if="tokenTooltipData.stop_reason" class="font-mono font-medium text-white">{{ tokenTooltipData.stop_reason }}</span>
+              <span v-else class="text-gray-500">{{ t('admin.usage.stopReasonNotRecorded') }}</span>
+            </div>
           </div>
           <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
             <span class="text-gray-400">{{ t('tokens.total') }}</span>

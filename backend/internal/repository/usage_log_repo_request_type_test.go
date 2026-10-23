@@ -89,6 +89,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			nil, // no moderation correlation
 			nil, // historical metering snapshot
 			nil, // no smart switch trace
+			nil, // no upstream stop_reason
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -170,6 +171,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			nil, // no moderation correlation
 			nil, // historical metering snapshot
 			nil, // no smart switch trace
+			nil, // no upstream stop_reason
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
@@ -542,6 +544,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			[]byte(nil),       // historical pricing snapshot
 			sql.NullFloat64{}, // historical metering snapshot
 			[]byte(nil),       // smart switching trace
+			sql.NullString{},  // stop_reason
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -591,6 +594,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			[]byte(nil),       // historical pricing snapshot
 			sql.NullFloat64{}, // historical metering snapshot
 			[]byte(nil),       // smart switching trace
+			sql.NullString{},  // stop_reason
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -640,10 +644,13 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			[]byte(nil),       // historical pricing snapshot
 			sql.NullFloat64{}, // historical metering snapshot
 			[]byte(nil),       // smart switching trace
+			sql.NullString{Valid: true, String: "refusal"}, // stop_reason
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
 		require.Equal(t, "priority", *log.ServiceTier)
+		require.NotNil(t, log.StopReason)
+		require.Equal(t, "refusal", *log.StopReason)
 	})
 
 }

@@ -111,6 +111,9 @@ type UsageLog struct {
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Nil means no mapping was applied (requested model was used as-is).
 	UpstreamModel *string
+	// StopReason is the sanitized Anthropic-native upstream stop_reason.
+	// Nil means not reported, not applicable (non-Anthropic platforms) or invalid.
+	StopReason *string
 	// ServiceTier records the OpenAI service tier used for billing, e.g. "priority" / "flex".
 	ServiceTier *string
 	// ReasoningEffort is the request's reasoning effort level.

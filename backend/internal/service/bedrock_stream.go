@@ -45,6 +45,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 	}
 
 	usage := &ClaudeUsage{}
+	var upstreamObs anthropicUpstreamObservation
 	var firstTokenMs *int
 	clientDisconnected := false
 
@@ -111,16 +112,16 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 				if !clientDisconnected {
 					flusher.Flush()
 				}
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: clientDisconnected}, nil
 			}
 			if ev.err != nil {
 				if clientDisconnected {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: true}, nil
 				}
 				if errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: true}, nil
 				}
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("bedrock stream read error: %w", ev.err)
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs}, fmt.Errorf("bedrock stream read error: %w", ev.err)
 			}
 
 			// payload 是 JSON，提取 chunk.bytes（base64 编码的 Claude SSE 事件数据）
@@ -139,7 +140,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 			sseData = transformBedrockInvocationMetrics(sseData)
 
 			// 解析 SSE 事件数据提取 usage
-			s.parseSSEUsagePassthrough(string(sseData), usage)
+			s.parseSSEUsagePassthroughObserved(string(sseData), usage, &upstreamObs)
 
 			// 确定 SSE event type
 			eventType := gjson.GetBytes(sseData, "type").String()
@@ -166,13 +167,13 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 				continue
 			}
 			if clientDisconnected {
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: true}, nil
 			}
 			logger.LegacyPrintf("service.gateway", "[Bedrock] Stream data interval timeout: account=%d model=%s interval=%s", account.ID, model, streamInterval)
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, model)
 			}
-			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
+			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs}, fmt.Errorf("stream data interval timeout")
 		}
 	}
 }

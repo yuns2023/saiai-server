@@ -485,6 +485,9 @@ type AdminUsageLog struct {
 	// IPAddress 用户请求 IP（仅管理员可见）
 	IPAddress *string `json:"ip_address,omitempty"`
 
+	// StopReason 上游 Anthropic 原生 stop_reason（仅管理员可见；null 表示未记录/不适用）
+	StopReason *string `json:"stop_reason"`
+
 	// Account 最小账号信息（避免泄露敏感字段）
 	Account *AccountSummary `json:"account,omitempty"`
 
