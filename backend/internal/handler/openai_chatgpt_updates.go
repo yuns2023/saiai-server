@@ -133,7 +133,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversationRead(c *gin.Context) {
 	}
 	account, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), key.GroupID, owner.AccountID)
 	if err != nil {
-		h.errorResponse(c, 503, "service_unavailable", "Chat conversation account is unavailable")
+		h.writeChatGPTBoundAccountUnavailable(c, err, chatGPTBoundConversationRead, scope, false, gatewayErrorEnvelope{Status: 503, Type: "service_unavailable", Message: "Chat conversation account is unavailable"})
 		return
 	}
 	setOpsSelectedAccount(c, account.ID, service.PlatformOpenAI)
@@ -311,7 +311,7 @@ func (h *OpenAIGatewayHandler) chatGPTScopedAssetDownload(c *gin.Context) {
 	}
 	account, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), key.GroupID, owner)
 	if err != nil {
-		h.errorResponse(c, 503, "service_unavailable", "Chat asset account is unavailable")
+		h.writeChatGPTBoundAccountUnavailable(c, err, chatGPTBoundAsset, scope, false, gatewayErrorEnvelope{Status: 503, Type: "service_unavailable", Message: "Chat asset account is unavailable"})
 		return
 	}
 	setOpsSelectedAccount(c, account.ID, service.PlatformOpenAI)

@@ -22,7 +22,7 @@ func (h *OpenAIGatewayHandler) chatGPTDeviceCookieOwner(c *gin.Context, scope se
 		// Removing an unusable local proof lets the official cookie manager
 		// perform its real registration on the next client request. No retry,
 		// challenge or success is manufactured by the Gateway.
-		c.Header("Set-Cookie", "_devicecheck=; Domain=.chatgpt.com; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax")
+		c.Header("Set-Cookie", clearChatGPTDeviceCookieHeader)
 		h.errorResponse(c, 409, "device_registration_required", "Chat device registration expired or belongs to another context; register this device again")
 		return 0, false
 	}
@@ -85,7 +85,7 @@ func (h *OpenAIGatewayHandler) ChatGPTDeviceCheck(c *gin.Context) {
 			h.errorResponse(c, 503, "integrity_context_unavailable", "Chat integrity ownership is unavailable")
 			return
 		}
-		if len(accounts) == 1 {
+		if len(accounts) == 1 && h.chatGPTAffinityOwnerUsable(c, key.GroupID, accounts[0]) {
 			owner = accounts[0]
 		} else {
 			selection, _, selectErr := h.gatewayService.SelectChatGPTOAuthAccount(c.Request.Context(), key.GroupID, h.gatewayService.GenerateSessionHash(c, nil), "")
@@ -108,7 +108,16 @@ func (h *OpenAIGatewayHandler) ChatGPTDeviceCheck(c *gin.Context) {
 	}
 	account, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), key.GroupID, owner)
 	if err != nil {
-		h.errorResponse(c, 503, "service_unavailable", "Chat integrity account is unavailable")
+		bound := chatGPTBoundIntegrity
+		if cookieOwner != 0 && cookieOwner == owner {
+			bound = chatGPTBoundDevice
+		}
+		if unavailable, typed := service.AsChatGPTBoundAccountUnavailable(err); typed && unavailable.Kind == service.ChatGPTBoundAccountPermanent {
+			// The short device affinity must not route re-registration back
+			// to the stale owner.
+			_ = cache.ReleaseChatGPTUploadOwner(c.Request.Context(), scope.UploadSessionKey(device), owner)
+		}
+		h.writeChatGPTBoundAccountUnavailable(c, err, bound, scope, false, gatewayErrorEnvelope{Status: 503, Type: "service_unavailable", Message: "Chat integrity account is unavailable"})
 		return
 	}
 	setOpsSelectedAccount(c, owner, service.PlatformOpenAI)

@@ -220,25 +220,45 @@ func (s *OpenAIGatewayService) SelectChatGPTBoundAccount(ctx context.Context, gr
 }
 
 // Read-only delivery checks account eligibility without holding a model slot.
+// When the owner cannot serve the group, the error is a
+// *ChatGPTBoundAccountUnavailableError so callers can tell a temporary
+// cooldown (keep the binding, retry later) from a stale binding.
 func (s *OpenAIGatewayService) GetChatGPTBoundAccount(ctx context.Context, groupID *int64, ownerID int64) (*Account, error) {
 	if s == nil || s.accountRepo == nil || groupID == nil || ownerID <= 0 {
 		return nil, ErrNoAvailableAccounts
 	}
 	accounts, err := s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, PlatformOpenAI)
 	if err != nil {
-		return nil, err
+		return nil, &ChatGPTBoundAccountUnavailableError{AccountID: ownerID, Kind: ChatGPTBoundAccountStore, Reason: ChatGPTBoundReasonStoreError, Err: err}
 	}
+	listed := false
 	for _, candidate := range accounts {
-		if candidate.ID != ownerID {
-			continue
+		if candidate.ID == ownerID {
+			listed = true
+			break
 		}
-		account, err := s.accountRepo.GetByID(ctx, ownerID)
-		if err != nil || account == nil || account.ID != ownerID || !account.IsOpenAIOAuth() || !account.IsSchedulable() {
-			return nil, ErrNoAvailableAccounts
-		}
-		return account, nil
 	}
-	return nil, ErrNoAvailableAccounts
+	account, err := s.accountRepo.GetByID(ctx, ownerID)
+	if err != nil {
+		if errors.Is(err, ErrAccountNotFound) {
+			return nil, &ChatGPTBoundAccountUnavailableError{AccountID: ownerID, Kind: ChatGPTBoundAccountPermanent, Reason: ChatGPTBoundReasonNotFound}
+		}
+		return nil, &ChatGPTBoundAccountUnavailableError{AccountID: ownerID, Kind: ChatGPTBoundAccountStore, Reason: ChatGPTBoundReasonStoreError, Err: err}
+	}
+	if account == nil || account.ID != ownerID {
+		return nil, &ChatGPTBoundAccountUnavailableError{AccountID: ownerID, Kind: ChatGPTBoundAccountPermanent, Reason: ChatGPTBoundReasonNotFound}
+	}
+	now := time.Now()
+	if unavailable := ClassifyChatGPTBoundAccount(account, *groupID, now); unavailable != nil {
+		unavailable.AccountID = ownerID
+		return nil, unavailable
+	}
+	if !listed || !account.IsSchedulable() {
+		// The row looks eligible but the group query excluded it: a cooldown
+		// ended between the reads or the clocks disagree. Retry shortly.
+		return nil, &ChatGPTBoundAccountUnavailableError{AccountID: ownerID, Kind: ChatGPTBoundAccountTemporary, Reason: ChatGPTBoundReasonScheduleRace, RetryAt: now.Add(chatGPTBoundScheduleRaceRetry)}
+	}
+	return account, nil
 }
 
 type chatGPTMemoryEntry struct {

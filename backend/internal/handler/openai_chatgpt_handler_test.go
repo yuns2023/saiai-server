@@ -23,6 +23,8 @@ type chatGPTAccountRepo struct {
 	service.AccountRepository
 	account  service.Account
 	accounts []service.Account
+	// getByIDNotFound makes a missing account look deleted (ErrAccountNotFound).
+	getByIDNotFound bool
 }
 
 func (r *chatGPTAccountRepo) ListSchedulableByGroupIDAndPlatform(context.Context, int64, string) ([]service.Account, error) {
@@ -45,6 +47,9 @@ func (r *chatGPTAccountRepo) GetByID(_ context.Context, id int64) (*service.Acco
 			if account.ID == id {
 				return &account, nil
 			}
+		}
+		if r.getByIDNotFound {
+			return nil, service.ErrAccountNotFound
 		}
 		return nil, errors.New("account not found")
 	}

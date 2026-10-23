@@ -131,8 +131,12 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	var turnScope service.ChatGPTTurnScope
 	resumeConversationID := ""
 	var conversationOwnerID int64
+	// boundContext names what ties the request to conversationOwnerID/turn;
+	// it picks the response when that owner is unavailable.
+	boundContext := chatGPTBoundDevice
+	var cookieScope service.ChatGPTTurnScope
 	if subject, present := middleware2.GetAuthSubjectFromContext(c); present {
-		cookieScope := service.ChatGPTTurnScope{UserID: subject.UserID, APIKeyID: apiKey.ID, GroupID: apiKey.Group.ID}
+		cookieScope = service.ChatGPTTurnScope{UserID: subject.UserID, APIKeyID: apiKey.ID, GroupID: apiKey.Group.ID}
 		var valid bool
 		conversationOwnerID, valid = h.chatGPTDeviceCookieOwner(c, cookieScope)
 		if !valid {
@@ -304,6 +308,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 					return
 				}
 				conversationOwnerID = owner.AccountID
+				boundContext = chatGPTBoundConversation
 			}
 			fileIDs, attachmentErr := service.ChatGPTRequestUploadFileIDs(body)
 			if attachmentErr != nil {
@@ -317,6 +322,9 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			}
 			if attachmentOwner != 0 {
 				conversationOwnerID = attachmentOwner
+				if boundContext == chatGPTBoundDevice {
+					boundContext = chatGPTBoundAttachment
+				}
 			}
 		}
 	}
@@ -341,6 +349,9 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				return
 			}
 			conversationOwnerID = owner
+			if boundContext == chatGPTBoundDevice {
+				boundContext = chatGPTBoundIntegrity
+			}
 		}
 	}
 	sessionHash := service.ResolveChatGPTConversationSessionHash(body)
@@ -353,12 +364,24 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		h.handleStreamingAwareError(c, http.StatusConflict, "integrity_context_unavailable", "Chat device and turn accounts differ", streamStarted)
 		return
 	}
+	bound := turn != nil || conversationOwnerID > 0
 	if turn != nil {
+		// A replayed turn or resume stays on the account that started it.
+		if isResumeRequest {
+			boundContext = chatGPTBoundResume
+		} else {
+			boundContext = chatGPTBoundConversation
+		}
 		selection, selectErr = h.gatewayService.SelectChatGPTBoundAccount(forwardCtx, apiKey.GroupID, turn.AccountID)
 	} else if conversationOwnerID > 0 {
 		selection, selectErr = h.gatewayService.SelectChatGPTBoundAccount(forwardCtx, apiKey.GroupID, conversationOwnerID)
 	} else {
 		selection, _, selectErr = h.gatewayService.SelectChatGPTOAuthAccount(forwardCtx, apiKey.GroupID, sessionHash, model)
+	}
+	if bound && (selectErr != nil || selection == nil || selection.Account == nil) {
+		releaseChatGPTControlSelection(selection)
+		h.writeChatGPTBoundAccountUnavailable(c, selectErr, boundContext, cookieScope, streamStarted, chatGPTNoOAuthAccountEnvelope)
+		return
 	}
 	if selectErr != nil || selection == nil || selection.Account == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
@@ -388,7 +411,9 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			releaseChatGPTControlSelection(selection)
 			selection, selectErr = h.gatewayService.SelectChatGPTBoundAccount(forwardCtx, apiKey.GroupID, turn.AccountID)
 			if selectErr != nil || selection == nil {
-				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "service_unavailable", "ChatGPT turn account is unavailable", streamStarted)
+				h.writeChatGPTBoundAccountUnavailable(c, selectErr, chatGPTBoundConversation, cookieScope, streamStarted, gatewayErrorEnvelope{
+					Status: http.StatusServiceUnavailable, Type: "service_unavailable", Message: "ChatGPT turn account is unavailable",
+				})
 				return
 			}
 		}
@@ -707,9 +732,11 @@ func (h *OpenAIGatewayHandler) chatGPTControlGET(c *gin.Context, sessionHash, fa
 		sessionHash = h.gatewayService.GenerateSessionHash(c, nil)
 	}
 	var owner int64
+	var cookieScope service.ChatGPTTurnScope
 	if subject, present := middleware2.GetAuthSubjectFromContext(c); present {
 		var valid bool
-		owner, valid = h.chatGPTDeviceCookieOwner(c, service.ChatGPTTurnScope{UserID: subject.UserID, APIKeyID: apiKey.ID, GroupID: apiKey.Group.ID})
+		cookieScope = service.ChatGPTTurnScope{UserID: subject.UserID, APIKeyID: apiKey.ID, GroupID: apiKey.Group.ID}
+		owner, valid = h.chatGPTDeviceCookieOwner(c, cookieScope)
 		if !valid {
 			return
 		}
@@ -720,6 +747,11 @@ func (h *OpenAIGatewayHandler) chatGPTControlGET(c *gin.Context, sessionHash, fa
 		selection, selectErr = h.gatewayService.SelectChatGPTBoundAccount(c.Request.Context(), apiKey.GroupID, owner)
 	} else {
 		selection, _, selectErr = h.gatewayService.SelectChatGPTOAuthAccount(c.Request.Context(), apiKey.GroupID, sessionHash, "")
+	}
+	if owner != 0 && (selectErr != nil || selection == nil || selection.Account == nil) {
+		releaseChatGPTControlSelection(selection)
+		h.writeChatGPTBoundAccountUnavailable(c, selectErr, chatGPTBoundDevice, cookieScope, false, chatGPTNoOAuthAccountEnvelope)
+		return
 	}
 	if selectErr != nil || selection == nil || selection.Account == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
