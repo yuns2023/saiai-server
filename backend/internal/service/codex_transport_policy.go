@@ -15,17 +15,17 @@ import (
 // a request made on behalf of the official Codex client. It returns the zero
 // policy (standard Go TLS) unless the global gateway.tls_fingerprint.enabled
 // switch is on AND the OpenAI OAuth account explicitly opted in. The role is
-// chosen by the caller from the request purpose; it is never inferred from
-// the client's User-Agent.
-func codexTransportPolicyFor(cfg *config.Config, account *Account, role tlsfingerprint.Role) tlsfingerprint.TransportPolicy {
+// chosen by the caller from the request purpose. outboundUserAgent must be
+// the User-Agent this request/dial sends upstream (after custom-UA and
+// default-UA rewriting): its version and platform pick the baseline, so the
+// TLS identity agrees with the client the upstream is told it is talking to.
+func codexTransportPolicyFor(cfg *config.Config, account *Account, role tlsfingerprint.Role, outboundUserAgent string) tlsfingerprint.TransportPolicy {
 	if cfg == nil || !cfg.Gateway.TLSFingerprint.Enabled || !account.IsCodexTLSFingerprintEnabled() {
 		return tlsfingerprint.TransportPolicy{}
 	}
 	switch role {
-	case tlsfingerprint.RoleHTTP:
-		return tlsfingerprint.CodexHTTPTransportPolicy()
-	case tlsfingerprint.RoleWS:
-		return tlsfingerprint.CodexWSTransportPolicy()
+	case tlsfingerprint.RoleHTTP, tlsfingerprint.RoleWS:
+		return tlsfingerprint.CodexTransportPolicyFor(role, outboundUserAgent)
 	default:
 		return tlsfingerprint.TransportPolicy{}
 	}
@@ -39,9 +39,10 @@ type codexControlTransport struct {
 	upstream HTTPUpstream
 }
 
-// policyFor returns the Codex HTTP policy for account (zero when disabled).
-func (t codexControlTransport) policyFor(account *Account) tlsfingerprint.TransportPolicy {
-	return codexTransportPolicyFor(t.cfg, account, tlsfingerprint.RoleHTTP)
+// policyFor returns the Codex HTTP policy for account and the fully built
+// outbound req (zero when disabled).
+func (t codexControlTransport) policyFor(account *Account, req *http.Request) tlsfingerprint.TransportPolicy {
+	return codexTransportPolicyFor(t.cfg, account, tlsfingerprint.RoleHTTP, req.Header.Get("User-Agent"))
 }
 
 // do sends req with policy through the account's upstream pool. A requested
@@ -59,7 +60,7 @@ const codexPolicyLookupWarnInterval = time.Minute
 var codexPolicyLookupLastWarn atomic.Int64
 
 // currentCodexWSTransportPolicy resolves the WS policy from the account's
-// current state (scheduler snapshot cache, then repository) so a toggle
+// current state and the upgrade request's outbound User-Agent (scheduler snapshot cache, then repository) so a toggle
 // reaches new upstream dials of long-lived inbound sessions and prewarm, whose
 // *Account may be a snapshot taken when the session started.
 //
@@ -67,7 +68,7 @@ var codexPolicyLookupLastWarn atomic.Int64
 // latency: failing would break new dials of every Codex account during a
 // transient cache/DB problem) and a rate-limited WARN is logged. No lookup is
 // made when the global switch is off or the account can never use a policy.
-func (s *OpenAIGatewayService) currentCodexWSTransportPolicy(ctx context.Context, account *Account) tlsfingerprint.TransportPolicy {
+func (s *OpenAIGatewayService) currentCodexWSTransportPolicy(ctx context.Context, account *Account, outboundUserAgent string) tlsfingerprint.TransportPolicy {
 	if s == nil || account == nil || s.cfg == nil || !s.cfg.Gateway.TLSFingerprint.Enabled ||
 		!account.IsOpenAIOAuth() || account.IsOpenAICodexNativeRelay() {
 		return tlsfingerprint.TransportPolicy{}
@@ -82,7 +83,7 @@ func (s *OpenAIGatewayService) currentCodexWSTransportPolicy(ctx context.Context
 	case s.accountRepo != nil:
 		fresh, err = s.accountRepo.GetByID(ctx, account.ID)
 	default:
-		return codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleWS)
+		return codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleWS, outboundUserAgent)
 	}
 	current := account
 	if err == nil && fresh != nil && fresh.ID == account.ID {
@@ -97,5 +98,5 @@ func (s *OpenAIGatewayService) currentCodexWSTransportPolicy(ctx context.Context
 				"lookup_error", err != nil)
 		}
 	}
-	return codexTransportPolicyFor(s.cfg, current, tlsfingerprint.RoleWS)
+	return codexTransportPolicyFor(s.cfg, current, tlsfingerprint.RoleWS, outboundUserAgent)
 }

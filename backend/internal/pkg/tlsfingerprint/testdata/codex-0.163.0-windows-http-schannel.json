@@ -1,0 +1,77 @@
+{
+ "baseline": "codex-0.163.0-windows-http-schannel",
+ "ja4": "t12d180700_4b22cbed5bed_2dae41c691ec",
+ "clienthello_total_bytes_seen": [
+  167
+ ],
+ "samples": 578,
+ "extension_orders_seen": {
+  "0,10,11,13,35,23,65281": 578
+ },
+ "cipher_suites": [
+  {
+   "id": "0xc02c"
+  },
+  {
+   "id": "0xc02b"
+  },
+  {
+   "id": "0xc030"
+  },
+  {
+   "id": "0xc02f"
+  },
+  {
+   "id": "0xc024"
+  },
+  {
+   "id": "0xc023"
+  },
+  {
+   "id": "0xc028"
+  },
+  {
+   "id": "0xc027"
+  },
+  {
+   "id": "0xc00a"
+  },
+  {
+   "id": "0xc009"
+  },
+  {
+   "id": "0xc014"
+  },
+  {
+   "id": "0xc013"
+  },
+  {
+   "id": "0x009d"
+  },
+  {
+   "id": "0x009c"
+  },
+  {
+   "id": "0x003d"
+  },
+  {
+   "id": "0x003c"
+  },
+  {
+   "id": "0x0035"
+  },
+  {
+   "id": "0x002f"
+  }
+ ],
+ "captures": [
+  "win-0.137.0",
+  "win-0.163.0",
+  "win-0.164.0",
+  "win-msix-26.1013-0.163.0-alpha.10.2",
+  "win-msix-26.1016-0.163.0-alpha.11.1",
+  "win-programs-openai-codex-0.163.0"
+ ],
+ "fixture_source": "capr/win/win-0.163.0/default-1/conn002.bin",
+ "note": "Generated from the loopback capture harness; every sample of this baseline was byte-identical except random, session id, key material and the rustls seeded extension order."
+}

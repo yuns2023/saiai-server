@@ -1,14 +1,26 @@
 # Codex (ChatGPT OAuth) TLS fingerprint
 
 OpenAI OAuth accounts can opt in to reproducing the **initial, non-resumed
-ClientHello** of the official `codex-cli 0.163.0` Linux x86_64 build. The
-official client uses two different TLS stacks, so there are two pinned
-baselines, selected by connection role — never by the request User-Agent:
+ClientHello** of the official `codex-cli` build that the gateway presents
+itself as. The official client uses two TLS stacks — rustls for the model
+WebSocket and reqwest `native-tls` (the OS stack) for HTTP/SSE and the control
+plane — and both changed over releases. The baseline is therefore selected by
+**connection role** (explicit, chosen by the caller) plus the **version and
+platform of the outbound User-Agent** (the UA the gateway actually sends
+upstream on that request/dial), like the Claude Code version profiles:
 
-| Baseline | Role | Official stack | Used for |
+| Baseline | Role | Serves | Official stack |
 | --- | --- | --- | --- |
-| `codex-0.163.0-linux-ws-rustls` | `ws` | rustls 0.23.45 (aws-lc-rs) | Responses WebSocket model connection |
-| `codex-0.163.0-linux-http-openssl` | `http` | reqwest native-tls, vendored OpenSSL 3 (`openssl-src 300.6.1+3.6.3`) | HTTP/SSE model requests and all control-plane HTTPS |
+| `codex-0.140.0-ws-rustls-ring` | `ws` | 0.116.0 – 0.140.x, all platforms (and any older UA) | rustls 0.23, *ring* provider |
+| `codex-0.155.1-ws-rustls-awslc-pq` | `ws` | 0.141.0 – 0.155.x, all platforms | rustls 0.23.36, aws-lc-rs, X25519MLKEM768 |
+| `codex-0.163.0-linux-ws-rustls` | `ws` | ≥ 0.156.0, all platforms; unparsable UA | rustls 0.23.45, aws-lc-rs 1.18 (+ ML-DSA schemes) |
+| `codex-0.142.1-linux-http-openssl35` | `http` | Linux < 0.142.2 | native-tls, vendored OpenSSL 3.5 (`openssl-src 300.5.x`) |
+| `codex-0.163.0-linux-http-openssl` | `http` | Linux ≥ 0.142.2; unparsable UA | native-tls, vendored OpenSSL 3.6 (`openssl-src 300.6.1+3.6.3`) |
+| `codex-0.163.0-macos-http-securetransport` | `http` | macOS, all versions | native-tls → Security.framework (Secure Transport), TLS 1.2 only |
+| `codex-0.163.0-windows-http-schannel` | `http` | Windows, all versions | native-tls → SChannel, TLS 1.2 only |
+
+(The WS baseline `codex-0.163.0-linux-ws-rustls` keeps its original name for
+pool-key continuity; macOS and Windows send the byte-identical hello.)
 
 This mirrors the Claude feature ([CLAUDE_TLS_FINGERPRINT.md](CLAUDE_TLS_FINGERPRINT.md))
 but is a separate, explicit transport identity. Claude behavior is unchanged.
@@ -56,11 +68,53 @@ shared transport):
 - OAuth token refresh to `auth.openai.com`, `openai_privacy_service.go`: they
   use dedicated clients outside the account upstream pool. Follow-up candidate.
 
+## Baseline selection (version × platform)
+
+`codexTransportPolicyFor(cfg, account, role, outboundUserAgent)` →
+`tlsfingerprint.CodexTransportPolicyFor(role, outboundUserAgent)`:
+
+1. Parse the UA with
+   `^([^/]+)/(\d+)\.(\d+)\.(\d+)(?:-\S+)? \(([^;)]*); ([^)]+)\)` — the
+   codex-rs `get_codex_user_agent()` shape
+   `<originator>/<version> (<os> <os version>; <arch>) <terminal> ...`.
+   A prerelease (`0.163.0-alpha.10.2`) selects as its base version.
+2. Platform: OS field starting with `Mac OS` (or `macOS`) → macOS; `Windows`
+   → Windows; anything else (Linux distributions, other Unixes) → Linux.
+3. Pick the rule for (role, platform) with the greatest lower bound ≤ the
+   version (table above). A WebSocket dial for a version below every WS rule
+   (pre-0.116, which never dialed the WebSocket by default) uses the oldest WS
+   baseline (`ring`).
+4. **Unparsable UA** (no `(os; arch)` part, non-Codex, or the gateway's own
+   bare `codex_cli_rs/0.104.0` synthetic UA, `Go-http-client/1.1` when no UA
+   is set) → the newest Linux baselines, i.e. exactly the pre-matrix
+   behaviour (`CodexHTTPTransportPolicy()` / `CodexWSTransportPolicy()`).
+
+The UA used is the outbound one, after the gateway's own rewriting (account
+custom UA, default Codex UA for non-Codex clients, native pass-through):
+
+| Request | Outbound UA read from |
+| --- | --- |
+| `Forward` HTTP/SSE | the built upstream request (`upstreamReq.Header`) |
+| Native Codex images | the built upstream request |
+| Models manifest | the outbound `headers` |
+| Admin account test | the built request (no UA set → `Go-http-client/1.1` → newest Linux) |
+| Usage probe, quota reset (`codexControlTransport.policyFor(account, req)`) | the built request (synthetic UA or cached client fingerprint UA) |
+| WebSocket pool acquire / prewarm / v2 passthrough | the upgrade request headers (`openAIWSAcquireRequest.Headers`, passthrough `headers`) |
+
+The policy carries only `{Family, Baseline, Role}`; the raw UA is never part
+of a policy, cache key or pool key. Transport/client cache keys use
+`policy.Key()` (`codex/<baseline>/<role>`), so clients of different versions
+or platforms on one account get separate HTTP pools and WS clients. The
+WebSocket **connection** pool is per account and, as before, reuses an idle
+upstream connection for a later session regardless of the policy it was
+dialed with (the same already applies to the upgrade headers, including the
+UA, of a reused connection); only new dials follow the current UA.
+
 ## Transport design
 
 - `tlsfingerprint.TransportPolicy{Family, Baseline, Role}` is an explicit,
-  immutable value chosen by the caller from the request purpose
-  (`codexTransportPolicyFor(cfg, account, role)`). The zero value means
+  immutable value chosen by the caller from the request purpose and the
+  outbound UA (see above). The zero value means
   standard Go TLS. Unknown baselines or family/role mismatches fail; a
   non-zero policy against an upstream/dialer that cannot honor it returns
   `ErrTransportPolicyUnsupported`. **There is no silent fallback to standard
@@ -72,7 +126,9 @@ shared transport):
   (handshake timeout or context deadline, whichever is earlier) covers CONNECT
   plus TLS; context cancellation closes the socket; deadlines are cleared after
   the handshake. Target certificates are always verified (system roots plus
-  `SAIAI_EXTRA_CA_*`). IP-literal targets omit SNI, as both official stacks do.
+  `SAIAI_EXTRA_CA_*`). IP-literal targets omit SNI, as rustls and OpenSSL do
+  (unverified for the macOS/Windows stacks; the upstream is always
+  `chatgpt.com`, so this does not arise in practice).
 - Each connection gets a fresh `ClientHelloSpec` (uTLS `ApplyPreset` mutates
   extension and key-share objects), a fresh rustls order seed and fresh keys.
   No session cache: no tickets/PSK are ever offered.
@@ -128,10 +184,33 @@ global switch is off or for accounts that can never use the policy
 
 ## Baseline details
 
-Both baselines: record version `0x0301`, legacy version `0x0303`, 32-byte
-session id, null compression only, no GREASE, no ALPN, no padding, no ECH,
-no PSK, `supported_versions` = TLS 1.3, TLS 1.2, `psk_key_exchange_modes` =
-psk_dhe_ke, `key_share` = X25519MLKEM768 (1216 bytes) + X25519 (32 bytes).
+All baselines: null compression only, no GREASE, no ALPN (HTTP/1.1), no
+padding, no ECH, no PSK. The rustls and OpenSSL baselines: record version
+`0x0301`, legacy version `0x0303`, 32-byte session id, `supported_versions` =
+TLS 1.3, TLS 1.2, `psk_key_exchange_modes` = psk_dhe_ke, `key_share` =
+X25519MLKEM768 (1216 bytes) + X25519 (32 bytes) except the ring baseline
+(X25519 only). The macOS and Windows HTTP baselines are TLS 1.2-only (below).
+
+### `codex-0.140.0-ws-rustls-ring` (238-byte ClientHello)
+
+- Same cipher suites (`1302 1301 1303 c02c c02b cca9 c030 c02f cca8 00ff`),
+  extension set and seeded order as the 0.163.0 WS baseline.
+- `supported_groups(001d 0017 0018)`, `key_share` = X25519 only (32 bytes),
+  `signature_algorithms(0503 0403 0807 0806 0805 0804 0601 0501 0401)` — 9
+  schemes, no `0603`, no ML-DSA.
+- JA4 `t13d101000_61a7ad8aa9b6_3fcd1a44f3e3`; JA3n `f81ecb4047f8a1cd5bad262f3c97a040`.
+- 35 samples / 35 distinct orders (0.116.0, 0.117.0, 0.125.0, 0.136.0–0.140.0
+  Linux; 0.137.0 Windows, default CA), every order reproduced by the rustls
+  seed rule.
+
+### `codex-0.155.1-ws-rustls-awslc-pq` (1462-byte ClientHello)
+
+- `supported_groups(11ec 001d 0017 0018)`, X25519MLKEM768 + X25519 shares with
+  the X25519 key reused from the hybrid share (as captured),
+  `signature_algorithms(0503 0403 0603 0807 0806 0805 0804 0601 0501 0401)` —
+  10 schemes, no ML-DSA.
+- JA4 `t13d101000_61a7ad8aa9b6_f9531d972513`; JA3n `54294ea073f85fb8975a09107e5dd489`.
+- 30 samples / 30 distinct orders (0.141.0, 0.142.0–0.142.2, 0.147.0, 0.155.1).
 
 ### `codex-0.163.0-linux-ws-rustls` (1468-byte ClientHello for `chatgpt.com`)
 
@@ -153,6 +232,16 @@ psk_dhe_ke, `key_share` = X25519MLKEM768 (1216 bytes) + X25519 (32 bytes).
   server selecting plain X25519 completes the handshake.
 - JA4 `t13d101000_61a7ad8aa9b6_0d308c48d2a3`; JA3n (sorted) `54294ea073f85fb8975a09107e5dd489`.
 
+### `codex-0.142.1-linux-http-openssl35` (1544-byte ClientHello)
+
+Identical to `codex-0.163.0-linux-http-openssl` (below) except
+`ec_point_formats` = `00 01 02` (uncompressed, ansiX962_compressed_prime,
+ansiX962_compressed_char2) — OpenSSL 3.5 behaviour, hence two more bytes.
+JA4 is the same (`t13d301100_1d37bd780c83_8e6e362c5eac`, it does not hash
+point formats); JA3n `f6f8926ab64b2b0635c54840de2c82f9` vs
+`97da657c26297bdaa441f1f09c61a2ca`. 582 samples from 0.80.0 – 0.142.1, one
+structure.
+
 ### `codex-0.163.0-linux-http-openssl` (1542-byte ClientHello for `chatgpt.com`)
 
 - Cipher suites (30), OpenSSL order: `1302 1303 1301 c02c c030 009f cca9 cca8
@@ -165,9 +254,54 @@ psk_dhe_ke, `key_share` = X25519MLKEM768 (1216 bytes) + X25519 (32 bytes).
 - Independent X25519 key (OpenSSL does not share it), as captured.
 - JA4 `t13d301100_1d37bd780c83_8e6e362c5eac`; JA3 `0b85eb0d4981e69064e40753e4f0ac5f`.
 
-Fixtures: `backend/internal/pkg/tlsfingerprint/testdata/codex-0.163.0-*.{json,clienthello.bin}`.
+### `codex-0.163.0-macos-http-securetransport` (171-byte ClientHello)
+
+- TLS 1.2 only: record version `0x0301`, legacy version `0x0303`, **empty**
+  session id, no `supported_versions`, no `key_share`, no
+  `psk_key_exchange_modes`, no session ticket.
+- Cipher suites (22): `00ff c02c c02b c024 c023 c00a c009 c008 c030 c02f c028
+  c027 c014 c013 c012 009d 009c 003d 003c 0035 002f 000a` (renegotiation SCSV
+  first, 3DES suites included, no `ff01` extension).
+- Fixed extension order: `server_name, supported_groups(0017 0018 0019),
+  ec_point_formats(00), signature_algorithms(0401 0201 0501 0601 0403 0203
+  0503 0603), status_request(ocsp), signed_certificate_timestamp(18, empty),
+  extended_master_secret`.
+- JA4 `t12d220700_0d4ca5d4ec72_3304d8368043`; JA3n `03511c5f4b9f0d162909cf75a37e0a28`.
+- 324 samples (0.163.0, 0.164.0 npm; Codex Desktop bundled CLI
+  0.163.0-alpha.11.1), one structure.
+
+### `codex-0.163.0-windows-http-schannel` (167-byte ClientHello)
+
+- TLS 1.2 only: record version **`0x0303`** (Go writes `0x0301` for the
+  first record; the dialer rewrites the ClientHello record header, which is
+  not part of the handshake transcript, and refuses to send if the first
+  write is not a ClientHello record), legacy version `0x0303`, empty session
+  id, no `supported_versions` / `key_share` / PSK modes.
+- Cipher suites (18): `c02c c02b c030 c02f c024 c023 c028 c027 c00a c009 c014
+  c013 009d 009c 003d 003c 0035 002f` (no SCSV).
+- Fixed extension order: `server_name, supported_groups(001d 0017 0018),
+  ec_point_formats(00), signature_algorithms(0804 0805 0806 0401 0501 0201
+  0403 0503 0203 0202 0601 0603), session_ticket(empty),
+  extended_master_secret, renegotiation_info(00)`.
+- JA4 `t12d180700_4b22cbed5bed_2dae41c691ec`; JA3n `27822e2c6c370528f63663bedad4142a`.
+- 578 samples (0.137.0, 0.163.0, 0.164.0 npm; `%LOCALAPPDATA%\Programs\OpenAI\Codex`
+  0.163.0; MSIX Desktop 0.163.0-alpha.10.2 and alpha.11.1), one structure.
+
+Both TLS 1.2-only baselines set the uTLS version range to 1.2–1.2, so a
+TLS 1.3-capable server's downgrade sentinel is accepted (as the native
+stacks do) and a TLS 1.3-only server fails the dial. Tested handshakes:
+ECDHE-ECDSA and ECDHE-RSA with AES-128/256-GCM against TLS 1.2-only Go
+servers, and TLS 1.3-capable Go servers. Advertised-but-unimplemented
+selections (3DES `c008`, CBC-SHA384 `c024`, DHE) fail loudly with no second
+ClientHello.
+
+Fixtures: `backend/internal/pkg/tlsfingerprint/testdata/codex-*.{json,clienthello.bin}`
+(the five new fixtures are one representative raw hello per baseline plus all
+captured rustls orders, generated from `/workspace/tmp/codex-tls/{capv,capr}`).
 Tests compare every wire byte except random, session id and key material
-against the raw captures (WS with the capture's seed for an exact order match).
+against the raw captures (WS with the capture's seed for an exact order match),
+reproduce every captured rustls order per generation, and complete local
+handshakes for every baseline.
 
 ## Provenance
 
@@ -187,7 +321,53 @@ against the raw captures (WS with the capture's seed for an exact order match).
 - Server side (Go `crypto/tls` front): all negotiated TLS 1.3,
   X25519MLKEM768, no ALPN, not resumed.
 - **Not targets:** the custom-CA variants (`CODEX_CA_CERTIFICATE` set switches
-  reqwest to rustls with `h2,http/1.1` ALPN); macOS and Windows builds.
+  reqwest to rustls with `h2,http/1.1` ALPN).
+
+### Version matrix captures and boundaries
+
+Official npm `@openai/codex` builds (Linux musl x86_64) 0.80.0 – 0.164.0 were
+captured with the same loopback harness, default CA (`capv/`, sanitized
+summaries in `out/SUMMARY.tsv`, `out/<platform>-<version>-<role>.json`;
+binaries and npm publish times in `out/ARTIFACTS.tsv`). macOS (`capr/mac`) and
+Windows (`capr/win`) were captured on real hosts. Each boundary lies between
+two **adjacent stable releases**, both captured:
+
+| Boundary | Last old / first new (npm publish, UTC) | What changed | Evidence |
+| --- | --- | --- | --- |
+| WS appears | 0.115.0 (2026-03-16) / 0.116.0 (2026-03-19) | default config starts dialing the Responses WebSocket | 0.115.0 and older: no WS connection in any run |
+| WS ring → aws-lc-rs PQ | 0.140.0 (2026-06-15) / 0.141.0 (2026-06-18) | rustls crypto provider for the WS client (no Cargo.lock version change: rustls 0.23.36, aws-lc-rs 1.16.2 were already locked) | captures |
+| WS + ML-DSA | 0.155.1 (2026-09-18) / 0.156.0 (2026-09-22) | Cargo.lock rustls 0.23.36 → 0.23.45, aws-lc-rs 1.16.2 → 1.18.1 | captures + lock |
+| Linux HTTP OpenSSL 3.5 → 3.6 | 0.142.1 (2026-06-25 00:38) / 0.142.2 (2026-06-25 07:34) | Cargo.lock `openssl-src` 300.5.5+3.5.5 → 300.6.1+3.6.3 | captures + lock |
+
+Prereleases select as their base version (`0.156.0-alpha.N` → the ≥ 0.156.0
+baselines). An alpha cut before a boundary bump would get the newer
+baseline; none was captured.
+
+### Coverage limits
+
+- **macOS / Windows native TLS is OS-version dependent.** The macOS hello was
+  captured on macOS 15.3.1 (arm64) only, the Windows hello on Windows 11
+  build 26200 (x86_64) only. Other OS releases (older Windows 10 builds,
+  macOS 13/14/26) may send different suites/extensions; they get these
+  baselines anyway. The native stacks rejected the local CA (they ignore
+  `SSL_CERT_DIR`), so the hello was observed on every `chatgpt.com`
+  native-tls connection but no HTTP request was decrypted; macOS was only
+  captured for 0.163.x/0.164.0 and Windows for 0.137.0 and 0.163.x/0.164.0
+  (identical); other Codex versions on these OSes are assumed identical
+  (native-tls has used Security.framework / SChannel throughout).
+- **macOS/Windows WebSocket at 0.16x** was captured with
+  `CODEX_CA_CERTIFICATE` set (the only way to get the client to trust the
+  local CA). This is equivalent to the default: the WS client is rustls in
+  both CA modes (shown on Linux, where custom-CA and default-CA WS hellos are
+  byte-identical, and on Windows 0.137.0, whose default-CA and custom-CA WS
+  hellos are identical too); the CA setting only changes certificate
+  verification. All mac/win WS hellos are byte-identical to the Linux ones.
+- **Codex Desktop (Electron) own traffic** — e.g. `Codex Desktop/26.x
+  (Mac OS ...; arm64)` from the Chromium network stack — is a different TLS
+  stack and is not covered. Those requests go through ChatGPT/Desktop paths
+  that never get a Codex policy (standard TLS). Only the Desktop-bundled
+  `codex` CLI (`Codex Desktop/0.16x...` UAs, whose hellos match the CLI) is
+  covered.
 
 ## Residual differences (known, accepted for v1)
 
@@ -208,9 +388,12 @@ against the raw captures (WS with the capture's seed for an exact order match).
    did not resume in any capture.)
 4. **Post-handshake behavior** (record sizes, CCS timing, alerts, HTTP/1.1
    header order) is Go's, not rustls/OpenSSL's. Headers are a separate concern.
-5. **Platforms/environments**: only Linux, default-CA. Custom-CA, macOS and
-   Windows shapes are out of scope.
+5. **Platforms/environments**: Linux (all versions from 0.80.0), macOS 15.3.1
+   and Windows build 26200 native stacks, default CA. Custom-CA shapes are out
+   of scope; see "Coverage limits".
 6. Requests listed as "not covered" above still use standard Go TLS.
+7. **UA/TLS consistency only as good as the UA.** A client whose UA does not
+   parse gets the newest Linux baselines, even if it is really Windows/macOS.
 
 ## Reproducing the evidence
 
@@ -234,6 +417,8 @@ orders; the front negotiated TLS 1.3 / X25519MLKEM768 / no ALPN / not resumed.
 
 A new codex release may change either stack. Re-run the capture harness
 against the new binary, add new pinned baselines (new names; never edit a
-pinned one), add fixtures and tests, and switch `CodexHTTPTransportPolicy` /
-`CodexWSTransportPolicy` to the new revision. The policy key includes the
-baseline, so pools and WebSocket connections roll over automatically.
+pinned one), add fixtures and tests, add a rule to `codexBaselineRules`
+(`codex_selection.go`) with the first affected version as lower bound and,
+if it is the newest, switch `CodexHTTPTransportPolicy` /
+`CodexWSTransportPolicy` (the unparsable-UA default). The policy key includes
+the baseline, so pools and WebSocket connections roll over automatically.

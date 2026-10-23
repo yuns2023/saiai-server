@@ -1,0 +1,84 @@
+{
+ "baseline": "codex-0.163.0-macos-http-securetransport",
+ "ja4": "t12d220700_0d4ca5d4ec72_3304d8368043",
+ "clienthello_total_bytes_seen": [
+  171
+ ],
+ "samples": 324,
+ "extension_orders_seen": {},
+ "cipher_suites": [
+  {
+   "id": "0x00ff"
+  },
+  {
+   "id": "0xc02c"
+  },
+  {
+   "id": "0xc02b"
+  },
+  {
+   "id": "0xc024"
+  },
+  {
+   "id": "0xc023"
+  },
+  {
+   "id": "0xc00a"
+  },
+  {
+   "id": "0xc009"
+  },
+  {
+   "id": "0xc008"
+  },
+  {
+   "id": "0xc030"
+  },
+  {
+   "id": "0xc02f"
+  },
+  {
+   "id": "0xc028"
+  },
+  {
+   "id": "0xc027"
+  },
+  {
+   "id": "0xc014"
+  },
+  {
+   "id": "0xc013"
+  },
+  {
+   "id": "0xc012"
+  },
+  {
+   "id": "0x009d"
+  },
+  {
+   "id": "0x009c"
+  },
+  {
+   "id": "0x003d"
+  },
+  {
+   "id": "0x003c"
+  },
+  {
+   "id": "0x0035"
+  },
+  {
+   "id": "0x002f"
+  },
+  {
+   "id": "0x000a"
+  }
+ ],
+ "captures": [
+  "mac-0.163.0",
+  "mac-0.164.0",
+  "mac-desktop-0.163.0-alpha.11.1"
+ ],
+ "fixture_source": "capr/mac/mac-0.163.0/default-1/conn006.bin",
+ "note": "Generated from the loopback capture harness; every sample of this baseline was byte-identical except random, session id, key material."
+}

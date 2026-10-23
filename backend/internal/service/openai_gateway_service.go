@@ -2658,10 +2658,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 
 		// Send request. Codex /responses for an opted-in OAuth account uses
-		// the pinned Codex HTTP (OpenSSL) TLS identity.
+		// the Codex HTTP TLS identity matching the outbound User-Agent.
 		upstreamStart := time.Now()
 		resp, err := s.doOpenAIUpstreamWithPolicy(upstreamReq, proxyURL, account.ID, account.Concurrency,
-			codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleHTTP))
+			codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleHTTP, upstreamReq.Header.Get("User-Agent")))
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		// Error handling reads the body first; Codex usage observations from
 		// this response must keep the time its headers arrived.

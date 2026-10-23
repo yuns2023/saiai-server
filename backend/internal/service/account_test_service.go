@@ -563,7 +563,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	// OpenAI accounts never use the Claude TLS profile. An opted-in OAuth
 	// account tests with the same Codex HTTP identity as its traffic.
 	var resp *http.Response
-	if policy := codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleHTTP); policy.Enabled() {
+	if policy := codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleHTTP, req.Header.Get("User-Agent")); policy.Enabled() {
 		resp, err = doWithTransportPolicy(s.httpUpstream, req, proxyURL, account.ID, account.Concurrency, policy)
 	} else {
 		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, false)

@@ -100,7 +100,7 @@ func (s *OpenAIQuotaResetService) request(ctx context.Context, account *Account,
 		req.Header.Set("Content-Type", "application/json")
 	}
 	var resp *http.Response
-	if policy := s.codexTransport.policyFor(account); policy.Enabled() {
+	if policy := s.codexTransport.policyFor(account, req); policy.Enabled() {
 		// Same no-redirect semantics as the legacy client; the 10s budget
 		// moves to the request context because the pool has no client timeout.
 		reqCtx, cancel := context.WithTimeout(WithNativeCodexRedirectPolicy(req.Context()), 10*time.Second)

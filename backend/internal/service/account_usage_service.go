@@ -715,7 +715,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		proxyURL = account.Proxy.URL()
 	}
 	var resp *http.Response
-	if policy := s.codexTransport.policyFor(account); policy.Enabled() {
+	if policy := s.codexTransport.policyFor(account, req); policy.Enabled() {
 		resp, err = s.codexTransport.do(req, proxyURL, account, policy)
 	} else {
 		client, clientErr := httppool.GetClient(httppool.Options{

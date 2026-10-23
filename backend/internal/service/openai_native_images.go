@@ -63,7 +63,7 @@ func (s *OpenAIGatewayService) ForwardNativeCodexImage(
 	// Official Codex sends image_gen through the same reqwest/OpenSSL client
 	// as its other HTTP calls, so the Codex HTTP identity applies here too.
 	resp, err := s.doOpenAIUpstreamWithPolicy(req, proxyURL, account.ID, account.Concurrency,
-		codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleHTTP))
+		codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleHTTP, req.Header.Get("User-Agent")))
 	if err != nil {
 		return nil, fmt.Errorf("native Codex image request failed: %w", err)
 	}

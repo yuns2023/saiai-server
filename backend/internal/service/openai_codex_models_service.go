@@ -267,7 +267,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifest(ctx context.Context, acc
 		useAPIKeyUpstream:     useAPIKeyUpstream,
 		nativeRelay:           nativeRelay,
 		preserveClientHeaders: preserveHeaders,
-		transportPolicy:       codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleHTTP),
+		transportPolicy:       codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleHTTP, headers.Get("User-Agent")),
 	}
 	if nativeRelay {
 		return s.fetchCodexModelsManifestUpstream(ctx, request, ifNoneMatch)

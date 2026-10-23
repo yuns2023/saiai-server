@@ -271,7 +271,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// Native relay accounts never get a policy (codexTransportPolicyFor
 	// returns the zero policy for them).
 	upstreamConn, statusCode, handshakeHeaders, err := dialOpenAIWS(dialCtx, dialer, wsURL, headers, proxyURL,
-		s.currentCodexWSTransportPolicy(dialCtx, account))
+		s.currentCodexWSTransportPolicy(dialCtx, account, headers.Get("User-Agent")))
 	if err != nil {
 		logOpenAIWSV2Passthrough(
 			"relay_dial_failed account_id=%d status_code=%d err=%s",

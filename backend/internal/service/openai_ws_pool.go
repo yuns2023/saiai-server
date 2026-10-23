@@ -613,7 +613,7 @@ type openAIWSConnPool struct {
 	// sessions). Existing connections are reused regardless of the policy they
 	// were dialed with and drain through the normal lifetime/idle rules, so a
 	// toggle only affects newly dialed connections. nil = standard TLS.
-	transportPolicyFor func(ctx context.Context, account *Account) tlsfingerprint.TransportPolicy
+	transportPolicyFor func(ctx context.Context, account *Account, outboundUserAgent string) tlsfingerprint.TransportPolicy
 
 	accounts sync.Map // key: int64(accountID), value: *openAIWSAccountPool
 	seq      atomic.Uint64
@@ -1548,7 +1548,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	}
 	var policy tlsfingerprint.TransportPolicy
 	if p.transportPolicyFor != nil {
-		policy = p.transportPolicyFor(ctx, req.Account)
+		policy = p.transportPolicyFor(ctx, req.Account, req.Headers.Get("User-Agent"))
 	}
 	if policy.Enabled() {
 		logOpenAIWSModeDebug("pool_dial_tls_policy account_id=%d policy=%s", req.Account.ID, policy.Key())
