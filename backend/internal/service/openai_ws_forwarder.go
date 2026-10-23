@@ -17,6 +17,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -1918,6 +1919,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		Headers:         wsHeaders,
 		PreferredConnID: preferredConnID,
 		ForceNewConn:    forceNewConn,
+		TransportPolicy: codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleWS),
 		ProxyURL: func() string {
 			if account.ProxyID != nil && account.Proxy != nil {
 				return account.Proxy.URL()
@@ -2879,9 +2881,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
 	wsHeaders, _ := s.buildOpenAIWSHeaders(c, account, token, wsDecision, isCodexCLI, turnState, strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)), firstPayload.promptCacheKey)
 	baseAcquireReq := openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
+		Account:         account,
+		WSURL:           wsURL,
+		Headers:         wsHeaders,
+		TransportPolicy: codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleWS),
 		ProxyURL: func() string {
 			if account.ProxyID != nil && account.Proxy != nil {
 				return account.Proxy.URL()

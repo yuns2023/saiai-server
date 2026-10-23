@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/util/soraerror"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
@@ -559,7 +560,14 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, account.IsTLSFingerprintEnabled())
+	// OpenAI accounts never use the Claude TLS profile. An opted-in OAuth
+	// account tests with the same Codex HTTP identity as its traffic.
+	var resp *http.Response
+	if policy := codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleHTTP); policy.Enabled() {
+		resp, err = doWithTransportPolicy(s.httpUpstream, req, proxyURL, account.ID, account.Concurrency, policy)
+	} else {
+		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, false)
+	}
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}

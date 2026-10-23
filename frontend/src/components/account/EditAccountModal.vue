@@ -968,6 +968,40 @@
         </div>
       </div>
 
+      <!-- OpenAI OAuth Codex TLS 指纹（仅显式开启） -->
+      <div
+        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTLSFingerprint') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexTLSFingerprintDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="codexTLSFingerprintEnabled"
+            :aria-label="t('admin.accounts.openai.codexTLSFingerprint')"
+            data-testid="codex-tls-fingerprint-toggle"
+            @click="codexTLSFingerprintEnabled = !codexTLSFingerprintEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              codexTLSFingerprintEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out',
+                codexTLSFingerprintEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <div>
         <div class="flex items-center justify-between">
           <div>
@@ -2172,6 +2206,8 @@ const isOpenAINativeRelay = computed(
     openaiUpstreamProtocol.value === OPENAI_UPSTREAM_PROTOCOL_CODEX_NATIVE_RELAY_V1
 )
 const codexCLIOnlyEnabled = ref(false)
+// OpenAI OAuth Codex TLS fingerprint: on only when explicitly enabled.
+const codexTLSFingerprintEnabled = ref(false)
 const anthropicPassthroughEnabled = ref(false)
 const editQuotaLimit = ref<number | null>(null)
 const editQuotaDailyLimit = ref<number | null>(null)
@@ -2333,6 +2369,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
   openaiUpstreamProtocol.value = OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT
   codexCLIOnlyEnabled.value = false
+  codexTLSFingerprintEnabled.value = false
   anthropicPassthroughEnabled.value = false
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'apikey')) {
     if (newAccount.type === 'apikey') {
@@ -2352,6 +2389,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     })
     if (newAccount.type === 'oauth') {
       codexCLIOnlyEnabled.value = extra?.codex_cli_only === true
+      codexTLSFingerprintEnabled.value = newAccount.enable_tls_fingerprint === true
     }
   }
   if (newAccount.platform === 'anthropic' && newAccount.type === 'apikey') {
@@ -3575,6 +3613,7 @@ const handleSubmit = async () => {
       const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
+      const hadCodexTLSFingerprintEnabled = currentExtra.enable_tls_fingerprint === true
       if (props.account.type === 'oauth') {
         newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
         newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -3598,6 +3637,14 @@ const handleSubmit = async () => {
           newExtra.codex_cli_only = false
         } else {
           delete newExtra.codex_cli_only
+        }
+        if (codexTLSFingerprintEnabled.value) {
+          newExtra.enable_tls_fingerprint = true
+        } else if (hadCodexTLSFingerprintEnabled) {
+          // 显式写 false，确保旧的开启值被清除
+          newExtra.enable_tls_fingerprint = false
+        } else {
+          delete newExtra.enable_tls_fingerprint
         }
       }
 

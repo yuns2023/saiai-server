@@ -2833,6 +2833,9 @@ export default {
         apiKeyResponsesWebsocketsV2Desc:
           '仅对 OpenAI API Key 生效。开启后该账号才允许使用 OpenAI WebSocket Mode 协议。',
         codexCLIOnly: '仅允许 Codex 官方客户端',
+        codexTLSFingerprint: 'Codex TLS 指纹模拟',
+        codexTLSFingerprintDesc:
+          '仅对 OpenAI OAuth 生效，默认关闭。开启后 Codex 模型（HTTP/WebSocket）与控制面请求使用已验证的 codex-cli 0.163.0 Linux 原生 TLS 握手（同时受全局 TLS 指纹开关控制）。',
         codexCLIOnlyDesc: '仅对 OpenAI OAuth 生效。开启后仅允许 Codex 官方客户端家族访问；关闭后完全绕过并保持原逻辑。',
       },
       anthropic: {

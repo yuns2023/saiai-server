@@ -2234,6 +2234,40 @@
         </div>
       </div>
 
+      <!-- OpenAI OAuth Codex TLS 指纹（默认关闭，与 Anthropic 默认开启的开关相互独立） -->
+      <div
+        v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTLSFingerprint') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexTLSFingerprintDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="codexTLSFingerprintEnabled"
+            :aria-label="t('admin.accounts.openai.codexTLSFingerprint')"
+            data-testid="codex-tls-fingerprint-toggle"
+            @click="codexTLSFingerprintEnabled = !codexTLSFingerprintEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              codexTLSFingerprintEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out',
+                codexTLSFingerprintEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <div
         v-if="form.platform !== 'openai'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -2825,6 +2859,9 @@ const isOpenAINativeRelay = computed(
     openaiUpstreamProtocol.value === OPENAI_UPSTREAM_PROTOCOL_CODEX_NATIVE_RELAY_V1
 )
 const codexCLIOnlyEnabled = ref(false)
+// Per-platform default: OpenAI OAuth Codex TLS fingerprint is opt-in (off),
+// independent of the Anthropic toggle (tlsFingerprintEnabled, default on).
+const codexTLSFingerprintEnabled = ref(false)
 const anthropicPassthroughEnabled = ref(false)
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
 
@@ -3116,6 +3153,7 @@ watch(
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
       openaiUpstreamProtocol.value = OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT
       codexCLIOnlyEnabled.value = false
+      codexTLSFingerprintEnabled.value = false
     }
     if (newPlatform !== 'anthropic') {
       anthropicPassthroughEnabled.value = false
@@ -3133,6 +3171,7 @@ watch(
   ([category, platform]) => {
     if (platform === 'openai' && category !== 'oauth-based') {
       codexCLIOnlyEnabled.value = false
+      codexTLSFingerprintEnabled.value = false
     }
     if (platform !== 'anthropic' || category !== 'apikey') {
       anthropicPassthroughEnabled.value = false
@@ -3487,6 +3526,7 @@ const resetForm = () => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
   openaiUpstreamProtocol.value = OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT
   codexCLIOnlyEnabled.value = false
+  codexTLSFingerprintEnabled.value = false
   anthropicPassthroughEnabled.value = false
   // Reset quota control state
   windowCostEnabled.value = false
@@ -3572,6 +3612,12 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     extra.codex_cli_only = true
   } else {
     delete extra.codex_cli_only
+  }
+
+  if (accountCategory.value === 'oauth-based' && codexTLSFingerprintEnabled.value) {
+    extra.enable_tls_fingerprint = true
+  } else {
+    delete extra.enable_tls_fingerprint
   }
 
   return Object.keys(extra).length > 0 ? extra : undefined

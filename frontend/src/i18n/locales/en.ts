@@ -2690,6 +2690,9 @@ export default {
         codexCLIOnly: 'Codex official clients only',
         codexCLIOnlyDesc:
           'Only applies to OpenAI OAuth. When enabled, only Codex official client families are allowed; when disabled, the gateway bypasses this restriction and keeps existing behavior.',
+        codexTLSFingerprint: 'Codex TLS fingerprint simulation',
+        codexTLSFingerprintDesc:
+          'OpenAI OAuth only, off by default. When on, Codex model (HTTP/WebSocket) and control-plane requests use the verified codex-cli 0.163.0 Linux native TLS handshake (also gated by the global TLS fingerprint switch).',
       },
       anthropic: {
         apiKeyPassthrough: 'Auto passthrough (auth only)',

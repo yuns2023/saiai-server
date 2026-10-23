@@ -294,11 +294,6 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		if mode := a.GetUserMsgQueueMode(); mode != "" {
 			out.UserMsgQueueMode = &mode
 		}
-		// TLS指纹伪装开关
-		if a.IsTLSFingerprintEnabled() {
-			enabled := true
-			out.EnableTLSFingerprint = &enabled
-		}
 		// 会话ID伪装开关
 		if a.IsSessionIDMaskingEnabled() {
 			enabled := true
@@ -346,6 +341,12 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 				out.ClaudeOAuthFixedHeadersText = &fixedHeadersText
 			}
 		}
+	}
+	// TLS 指纹伪装开关：Anthropic OAuth/SetupToken 默认开启（显式 false 关闭）；
+	// OpenAI OAuth 仅在显式 true 时开启（Codex 指纹）。其它类型账号不暴露该字段。
+	if a.IsTLSFingerprintEnabled() || a.IsCodexTLSFingerprintEnabled() {
+		enabled := true
+		out.EnableTLSFingerprint = &enabled
 	}
 
 	// 提取账号配额限制（apikey / bedrock 类型有效）

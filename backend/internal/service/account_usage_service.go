@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	httppool "github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	openaipkg "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -282,6 +283,15 @@ type AccountUsageService struct {
 	cache                   *UsageCache
 	identityCache           IdentityCache
 	rateLimits              *RateLimitService
+	codexTransport          codexControlTransport
+}
+
+// SetCodexTransport enables the opt-in Codex TLS identity for the background
+// Codex usage probe (a /backend-api/codex/responses request).
+func (s *AccountUsageService) SetCodexTransport(cfg *config.Config, upstream HTTPUpstream) {
+	if s != nil {
+		s.codexTransport = codexControlTransport{cfg: cfg, upstream: upstream}
+	}
 }
 
 // SetRateLimitService shares the Codex usage write fence with reset
@@ -704,15 +714,20 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	client, err := httppool.GetClient(httppool.Options{
-		ProxyURL:              proxyURL,
-		Timeout:               15 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("build openai probe client: %w", err)
+	var resp *http.Response
+	if policy := s.codexTransport.policyFor(account); policy.Enabled() {
+		resp, err = s.codexTransport.do(req, proxyURL, account, policy)
+	} else {
+		client, clientErr := httppool.GetClient(httppool.Options{
+			ProxyURL:              proxyURL,
+			Timeout:               15 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+		})
+		if clientErr != nil {
+			return nil, nil, fmt.Errorf("build openai probe client: %w", clientErr)
+		}
+		resp, err = client.Do(req)
 	}
-	resp, err := client.Do(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("openai codex probe request failed: %w", err)
 	}

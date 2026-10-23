@@ -3,6 +3,9 @@ package repository
 import (
 	"compress/flate"
 	"compress/gzip"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -285,7 +288,23 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 		return nil, err
 	}
 
-	// 执行请求
+	return s.executeOnEntry(entry, req, outboundTrace, "standard", accountID, accountConcurrency, proxyURL)
+}
+
+// executeOnEntry is the single request execution path for every transport
+// kind (standard, Claude TLS fingerprint, explicit transport policy). It keeps
+// the native-Codex no-redirect policy, in-flight accounting and response
+// tracking identical across them, so a fingerprinted transport can never
+// issue an implicit second application request.
+func (s *httpUpstreamService) executeOnEntry(
+	entry *upstreamClientEntry,
+	req *http.Request,
+	outboundTrace *httptrace.OutboundTrace,
+	transportKind string,
+	accountID int64,
+	accountConcurrency int,
+	proxyURL string,
+) (*http.Response, error) {
 	req, connectionObservation := s.withConnectionObservation(req)
 	client := entry.client
 	if service.NativeCodexRejectsRedirects(req.Context()) {
@@ -296,7 +315,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 		client = &nativeClient
 	}
 	resp, err := client.Do(req)
-	s.recordTransportOutcome(connectionObservation, resp, err, "standard", accountID, accountConcurrency, strings.TrimSpace(proxyURL) != "")
+	s.recordTransportOutcome(connectionObservation, resp, err, transportKind, accountID, accountConcurrency, strings.TrimSpace(proxyURL) != "")
 	if err != nil {
 		// 请求失败，立即减少计数
 		atomic.AddInt64(&entry.inFlight, -1)
@@ -370,36 +389,35 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 		return nil, err
 	}
 
-	// 执行请求
-	req, connectionObservation := s.withConnectionObservation(req)
-	resp, err := entry.client.Do(req)
-	s.recordTransportOutcome(connectionObservation, resp, err, "tls_fingerprint", accountID, accountConcurrency, strings.TrimSpace(proxyURL) != "")
+	resp, err := s.executeOnEntry(entry, req, outboundTrace, "tls_fingerprint", accountID, accountConcurrency, proxyURL)
 	if err != nil {
-		// 请求失败，立即减少计数
-		atomic.AddInt64(&entry.inFlight, -1)
-		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 		slog.Debug("tls_fingerprint_request_failed", "account_id", accountID, "error", err)
 		return nil, err
 	}
+	slog.Debug("tls_fingerprint_request_success", "account_id", accountID, "status", resp.StatusCode)
+	return resp, nil
+}
 
-	if err := decodeUpstreamResponse(resp); err != nil {
-		_ = resp.Body.Close()
-		atomic.AddInt64(&entry.inFlight, -1)
-		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
-		slog.Debug("tls_fingerprint_decode_response_failed", "account_id", accountID, "error", err)
+// DoWithTransportPolicy executes req on a transport whose TLS handshake follows
+// an explicit, pinned policy (e.g. Codex HTTP/OpenSSL). A zero policy or the
+// global gateway.tls_fingerprint.enabled=false switch uses the standard path.
+// An invalid policy fails the request; it is never downgraded silently.
+func (s *httpUpstreamService) DoWithTransportPolicy(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, policy tlsfingerprint.TransportPolicy) (*http.Response, error) {
+	if !policy.Enabled() || (s.cfg != nil && !s.cfg.Gateway.TLSFingerprint.Enabled) {
+		return s.Do(req, proxyURL, accountID, accountConcurrency)
+	}
+	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
-
-	slog.Debug("tls_fingerprint_request_success", "account_id", accountID, "status", resp.StatusCode)
-
-	// 包装响应体，在关闭时自动减少计数并更新时间戳
-	resp.Body = wrapTrackedBody(resp.Body, func() {
-		atomic.AddInt64(&entry.inFlight, -1)
-		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
-	})
-	resp = outboundTrace.WrapResponse(resp)
-
-	return resp, nil
+	outboundTrace, req := httptrace.StartOutbound(httptrace.Default(), req)
+	if err := s.validateRequestHost(req); err != nil {
+		return nil, err
+	}
+	entry, err := s.getClientEntryWithPolicy(proxyURL, accountID, accountConcurrency, policy, true, true)
+	if err != nil {
+		return nil, err
+	}
+	return s.executeOnEntry(entry, req, outboundTrace, "tls_policy", accountID, accountConcurrency, proxyURL)
 }
 
 // acquireClientWithTLS 获取或创建带 TLS 指纹的客户端
@@ -418,7 +436,46 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	// TLS 指纹客户端使用独立的缓存键，加 "tls:" 前缀
 	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID) + profile.TransportVariant()
 	poolKey := s.buildPoolKey(isolation, accountConcurrency) + ":tls"
+	return s.getFingerprintClientEntry(cacheKey, poolKey, isolation, proxyKey, accountID, markInFlight, enforceLimit, func() (*http.Transport, error) {
+		// Claude 指纹池保持原大小（不含辅助连接余量）。
+		settings := s.resolvePoolSettings(isolation, accountConcurrency, false)
+		transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
+		if err != nil {
+			return nil, fmt.Errorf("build TLS fingerprint transport: %w", err)
+		}
+		return transport, nil
+	})
+}
 
+// getClientEntryWithPolicy returns the pooled client for an explicit transport
+// policy. The policy key is part of both the cache and pool keys, so clients
+// (and their pooled connections) for different baselines never mix. HTTP/1.1
+// pools get the bounded auxiliary reserve: long SSE streams occupy one
+// connection each and control requests must not queue behind them.
+func (s *httpUpstreamService) getClientEntryWithPolicy(proxyURL string, accountID int64, accountConcurrency int, policy tlsfingerprint.TransportPolicy, markInFlight bool, enforceLimit bool) (*upstreamClientEntry, error) {
+	isolation := s.getIsolationMode()
+	proxyKey, parsedProxy, err := normalizeProxyURL(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	cacheKey := "tlspolicy:" + policy.Key() + "|" + buildCacheKey(isolation, proxyKey, accountID)
+	poolKey := s.buildPoolKey(isolation, accountConcurrency) + fmt.Sprintf(":tlspolicy:%s:reserve:%d", policy.Key(), s.accountAuxConnectionReserve())
+	return s.getFingerprintClientEntry(cacheKey, poolKey, isolation, proxyKey, accountID, markInFlight, enforceLimit, func() (*http.Transport, error) {
+		settings := s.resolvePoolSettings(isolation, accountConcurrency, true)
+		transport, err := buildUpstreamTransportWithPolicy(settings, parsedProxy, policy)
+		if err != nil {
+			return nil, fmt.Errorf("build TLS policy transport: %w", err)
+		}
+		return transport, nil
+	})
+}
+
+func (s *httpUpstreamService) getFingerprintClientEntry(
+	cacheKey, poolKey, isolation, proxyKey string,
+	accountID int64,
+	markInFlight, enforceLimit bool,
+	build func() (*http.Transport, error),
+) (*upstreamClientEntry, error) {
 	now := time.Now()
 	nowUnix := now.UnixNano()
 
@@ -468,11 +525,10 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 
 	// 创建带 TLS 指纹的 Transport
 	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "cache_key", cacheKey, "proxy", proxyKey)
-	settings := s.resolvePoolSettings(isolation, accountConcurrency, false)
-	transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
+	transport, err := build()
 	if err != nil {
 		s.mu.Unlock()
-		return nil, fmt.Errorf("build TLS fingerprint transport: %w", err)
+		return nil, err
 	}
 
 	client := &http.Client{Transport: transport}
@@ -803,14 +859,16 @@ func (s *httpUpstreamService) clientIdleTTL() time.Duration {
 //
 // 说明:
 //   - 账户隔离模式下，基础连接池大小与账户并发数对应
-//   - 标准 Transport 额外加入有界辅助连接余量；TLS 指纹池保持原大小
-func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcurrency int, standardTransport bool) poolSettings {
+//   - withAuxReserve=true 时额外加入有界辅助连接余量（标准 Transport 与
+//     HTTP/1.1-only 的显式 TLS policy Transport）；Claude TLS 指纹池保持原大小。
+//     余量与是否启用 TLS 指纹无关，只取决于调用方的连接池语义。
+func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcurrency int, withAuxReserve bool) poolSettings {
 	settings := defaultPoolSettings(s.cfg)
 	// 账户隔离模式下，根据账户并发数调整连接池大小。标准 Transport
 	// 保留少量控制请求余量，避免 HTTP/1.1 长流占满全部连接。
 	if (isolation == config.ConnectionPoolIsolationAccount || isolation == config.ConnectionPoolIsolationAccountProxy) && accountConcurrency > 0 {
 		poolSize := accountConcurrency
-		if standardTransport {
+		if withAuxReserve {
 			reserve := s.accountAuxConnectionReserve()
 			maxInt := int(^uint(0) >> 1)
 			if reserve > 0 && poolSize <= maxInt-reserve {
@@ -1062,6 +1120,40 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 	}
 
 	return transport, nil
+}
+
+var errPolicyTransportPlainHTTP = errors.New("TLS policy transport refuses plain-HTTP connections")
+
+// policyTransportRootCAs is the trust store for policy transports: system
+// roots plus SAIAI extra CAs (nil = system roots). Tests replace it.
+var policyTransportRootCAs = func() *x509.CertPool {
+	pool, _ := extracerts.RootCAs()
+	return pool
+}
+
+// buildUpstreamTransportWithPolicy builds an HTTP/1.1-only transport whose
+// TLS connections are dialed by tlsfingerprint.PolicyDialer, including the
+// proxy tunnel (Transport.Proxy stays nil so Go never bypasses the dialer).
+// Plain-HTTP dials fail instead of silently skipping the proxy/fingerprint.
+func buildUpstreamTransportWithPolicy(settings poolSettings, proxyURL *url.URL, policy tlsfingerprint.TransportPolicy) (*http.Transport, error) {
+	dialer, err := tlsfingerprint.NewPolicyDialer(policy, tlsfingerprint.PolicyDialerOptions{ProxyURL: proxyURL, RootCAs: policyTransportRootCAs()})
+	if err != nil {
+		return nil, err
+	}
+	return &http.Transport{
+		MaxIdleConns:          settings.maxIdleConns,
+		MaxIdleConnsPerHost:   settings.maxIdleConnsPerHost,
+		MaxConnsPerHost:       settings.maxConnsPerHost,
+		IdleConnTimeout:       settings.idleConnTimeout,
+		ResponseHeaderTimeout: settings.responseHeaderTimeout,
+		DialTLSContext:        dialer.DialTLSContext,
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errPolicyTransportPlainHTTP
+		},
+		ForceAttemptHTTP2: false,
+		// A non-nil empty map disables HTTP/2 regardless of ALPN.
+		TLSNextProto: map[string]func(string, *tls.Conn) http.RoundTripper{},
+	}, nil
 }
 
 // trackedBody 带跟踪功能的响应体包装器

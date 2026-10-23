@@ -44,8 +44,12 @@ The reserve is validated in the range 0 through 64.
 
 ## Explicit exclusions
 
-- TLS fingerprint/uTLS transports keep their existing HTTP/1.1 behavior and
-  do not receive the auxiliary connection reserve.
+- Claude TLS fingerprint/uTLS transports keep their existing HTTP/1.1 behavior
+  and do not receive the auxiliary connection reserve.
+- Explicit TLS *policy* transports (Codex HTTP, see
+  [CODEX_TLS_FINGERPRINT.md](CODEX_TLS_FINGERPRINT.md)) are HTTP/1.1-only and
+  DO receive the bounded auxiliary reserve: the reserve depends on the pool's
+  HTTP/1.1 semantics, not on whether a fingerprint is enabled.
 - OpenAI Responses WebSocket uses its own dialer, pool, waiters, ping, and
   acquire-timeout contracts.
 - `ResponseHeaderTimeout` ends when response headers arrive. SSE body-idle and
@@ -78,7 +82,8 @@ Local TLS fixtures must prove all of the following before release:
 - the rollback switch disables H2;
 - account/proxy isolation and idle/in-flight eviction behavior remain intact;
   and
-- TLS fingerprint pool sizing is unchanged.
+- Claude TLS fingerprint pool sizing is unchanged; Codex TLS policy pools keep
+  control-request headroom beside open SSE streams.
 
 Production attribution still requires timing each hop. A delay before Gateway
 ingress is not an outbound-pool delay; a delay after `GotConn` and request write

@@ -1,0 +1,301 @@
+{
+ "shape_id": "02_custom+default_model_websocket",
+ "tls_stack_inferred": "rustls-0.23 (aws-lc-rs)",
+ "codex_ca_env_mode": [
+  "custom",
+  "default"
+ ],
+ "used_for": {
+  "model_websocket": 12
+ },
+ "runs": [
+  "custom-http-1",
+  "custom-http-2",
+  "custom-http-3",
+  "custom-ws-1",
+  "custom-ws-2",
+  "custom-ws-3",
+  "default-http-1",
+  "default-http-2",
+  "default-http-3",
+  "default-ws-1",
+  "default-ws-2",
+  "default-ws-3"
+ ],
+ "samples": 12,
+ "clienthello_total_bytes_seen": [
+  1468
+ ],
+ "records": [
+  {
+   "content_type": 22,
+   "record_version": "0x0301",
+   "length": 1463
+  }
+ ],
+ "legacy_version": "0x0303",
+ "legacy_session_id_len": 32,
+ "cipher_suites": [
+  {
+   "id": "0x1302",
+   "name": "TLS_AES_256_GCM_SHA384"
+  },
+  {
+   "id": "0x1301",
+   "name": "TLS_AES_128_GCM_SHA256"
+  },
+  {
+   "id": "0x1303",
+   "name": "TLS_CHACHA20_POLY1305_SHA256"
+  },
+  {
+   "id": "0xc02c",
+   "name": "ECDHE_ECDSA_AES_256_GCM_SHA384"
+  },
+  {
+   "id": "0xc02b",
+   "name": "ECDHE_ECDSA_AES_128_GCM_SHA256"
+  },
+  {
+   "id": "0xcca9",
+   "name": "ECDHE_ECDSA_CHACHA20_POLY1305"
+  },
+  {
+   "id": "0xc030",
+   "name": "ECDHE_RSA_AES_256_GCM_SHA384"
+  },
+  {
+   "id": "0xc02f",
+   "name": "ECDHE_RSA_AES_128_GCM_SHA256"
+  },
+  {
+   "id": "0xcca8",
+   "name": "ECDHE_RSA_CHACHA20_POLY1305"
+  },
+  {
+   "id": "0x00ff",
+   "name": "TLS_EMPTY_RENEGOTIATION_INFO_SCSV"
+  }
+ ],
+ "compression_methods": [
+  0
+ ],
+ "extensions_example_order": [
+  {
+   "id": 13,
+   "hex": "0x000d",
+   "name": "signature_algorithms",
+   "len": 28,
+   "algs": [
+    {
+     "id": "0x0503",
+     "name": "ecdsa_secp384r1_sha384"
+    },
+    {
+     "id": "0x0403",
+     "name": "ecdsa_secp256r1_sha256"
+    },
+    {
+     "id": "0x0603",
+     "name": "ecdsa_secp521r1_sha512"
+    },
+    {
+     "id": "0x0807",
+     "name": "ed25519"
+    },
+    {
+     "id": "0x0806",
+     "name": "rsa_pss_rsae_sha512"
+    },
+    {
+     "id": "0x0805",
+     "name": "rsa_pss_rsae_sha384"
+    },
+    {
+     "id": "0x0804",
+     "name": "rsa_pss_rsae_sha256"
+    },
+    {
+     "id": "0x0601",
+     "name": "rsa_pkcs1_sha512"
+    },
+    {
+     "id": "0x0501",
+     "name": "rsa_pkcs1_sha384"
+    },
+    {
+     "id": "0x0401",
+     "name": "rsa_pkcs1_sha256"
+    },
+    {
+     "id": "0x0904",
+     "name": "mldsa44"
+    },
+    {
+     "id": "0x0905",
+     "name": "mldsa65"
+    },
+    {
+     "id": "0x0906",
+     "name": "mldsa87"
+    }
+   ]
+  },
+  {
+   "id": 43,
+   "hex": "0x002b",
+   "name": "supported_versions",
+   "len": 5,
+   "versions": [
+    "TLS1.3",
+    "TLS1.2"
+   ]
+  },
+  {
+   "id": 35,
+   "hex": "0x0023",
+   "name": "session_ticket",
+   "len": 0
+  },
+  {
+   "id": 11,
+   "hex": "0x000b",
+   "name": "ec_point_formats",
+   "len": 2,
+   "formats": [
+    0
+   ]
+  },
+  {
+   "id": 5,
+   "hex": "0x0005",
+   "name": "status_request",
+   "len": 5,
+   "status_type": 1
+  },
+  {
+   "id": 0,
+   "hex": "0x0000",
+   "name": "server_name",
+   "len": 16,
+   "sni": "chatgpt.com"
+  },
+  {
+   "id": 51,
+   "hex": "0x0033",
+   "name": "key_share",
+   "len": 1258,
+   "key_shares": [
+    {
+     "group": "0x11ec",
+     "name": "X25519MLKEM768",
+     "key_len": 1216
+    },
+    {
+     "group": "0x001d",
+     "name": "x25519",
+     "key_len": 32
+    }
+   ]
+  },
+  {
+   "id": 23,
+   "hex": "0x0017",
+   "name": "extended_master_secret",
+   "len": 0
+  },
+  {
+   "id": 10,
+   "hex": "0x000a",
+   "name": "supported_groups",
+   "len": 10,
+   "groups": [
+    {
+     "id": "0x11ec",
+     "name": "X25519MLKEM768"
+    },
+    {
+     "id": "0x001d",
+     "name": "x25519"
+    },
+    {
+     "id": "0x0017",
+     "name": "secp256r1"
+    },
+    {
+     "id": "0x0018",
+     "name": "secp384r1"
+    }
+   ]
+  },
+  {
+   "id": 45,
+   "hex": "0x002d",
+   "name": "psk_key_exchange_modes",
+   "len": 2,
+   "modes": [
+    1
+   ]
+  }
+ ],
+ "extension_orders_seen": {
+  "13,43,35,11,5,0,51,23,10,45": 1,
+  "13,5,23,43,0,51,45,35,11,10": 1,
+  "11,0,45,51,13,43,23,5,35,10": 1,
+  "0,35,13,45,11,43,5,51,10,23": 1,
+  "11,13,10,23,43,5,45,35,0,51": 1,
+  "11,35,43,51,5,13,45,10,0,23": 1,
+  "11,23,45,35,10,43,5,0,51,13": 1,
+  "10,0,51,13,43,23,11,35,5,45": 1,
+  "11,0,45,35,13,51,5,23,43,10": 1,
+  "45,23,13,5,11,51,10,0,43,35": 1,
+  "10,43,51,0,35,23,11,45,5,13": 1,
+  "10,5,51,43,23,11,45,0,35,13": 1
+ },
+ "extension_order_randomized": true,
+ "grease": false,
+ "ja3_example": "771,4866-4865-4867-49196-49195-52393-49200-49199-52392-255,13-43-35-11-5-0-51-23-10-45,4588-29-23-24,0",
+ "ja3_md5_seen": [
+  "107eb9c9343d8a3ad25a8e653203f574",
+  "1ad95796ec1c2187d2cb3e28cd5b5217",
+  "1d5751c729e0b4a319da2f8baa471462",
+  "5643de916dc79b8b0d272d9577c07850",
+  "5a990d988aeac2e8c48c2fc6aea2ef7f",
+  "65740acfac82e544a7130d93f164dba4",
+  "7c7dbb225e5b8dee569749d9789a794f",
+  "8250f15de1573cf6f1d31eb357b53e68",
+  "a82d5c4acdf5e9072459ef507c73c888",
+  "c185840866057d54cf21d06ea05322bf",
+  "ec4a0b079176337b66119b743e288a1f",
+  "f8e1a733df30bba1069e811db7504b63"
+ ],
+ "ja3n_md5_sorted_exts": "54294ea073f85fb8975a09107e5dd489",
+ "ja4": "t13d101000_61a7ad8aa9b6_0d308c48d2a3",
+ "ja4_r": "t13d101000_00ff,1301,1302,1303,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0017,0023,002b,002d,0033_0503,0403,0603,0807,0806,0805,0804,0601,0501,0401,0904,0905,0906",
+ "server_negotiated_with_go_mock": {
+  "alpn=- curve=X25519MLKEM768 resumed=False": 12
+ },
+ "model_request_header_names": {
+  "model_websocket": [
+   "authorization",
+   "chatgpt-account-id",
+   "connection",
+   "host",
+   "openai-beta",
+   "originator",
+   "sec-websocket-extensions",
+   "sec-websocket-key",
+   "sec-websocket-version",
+   "session-id",
+   "thread-id",
+   "upgrade",
+   "user-agent",
+   "version",
+   "x-client-request-id",
+   "x-codex-beta-features",
+   "x-codex-routing-hint",
+   "x-codex-turn-metadata",
+   "x-codex-window-id"
+  ]
+ }
+}

@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/cespare/xxhash/v2"
@@ -2656,9 +2657,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			proxyURL = account.Proxy.URL()
 		}
 
-		// Send request
+		// Send request. Codex /responses for an opted-in OAuth account uses
+		// the pinned Codex HTTP (OpenSSL) TLS identity.
 		upstreamStart := time.Now()
-		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err := s.doOpenAIUpstreamWithPolicy(upstreamReq, proxyURL, account.ID, account.Concurrency,
+			codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleHTTP))
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		// Error handling reads the body first; Codex usage observations from
 		// this response must keep the time its headers arrived.
