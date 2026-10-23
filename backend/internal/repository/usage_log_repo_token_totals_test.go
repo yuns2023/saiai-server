@@ -56,17 +56,19 @@ func TestUserScopedUsageAggregatesIncludeHostedMeteredCost(t *testing.T) {
 		t.Run(scope, func(t *testing.T) {
 			db, mock := newSQLMock(t)
 			repo := &usageLogRepository{sql: db}
-			mock.ExpectQuery(`SUM\(metered_cost\) as total_metered_cost\s+FROM usage_logs`).
+			ctx, start, end := context.Background(), time.Now().Add(-time.Hour), time.Now()
+			scopeColumn := map[string]string{"user": "user_id", "api_key": "api_key_id"}[scope]
+			mock.ExpectQuery(`SUM\(metered_cost\) as total_metered_cost\s+FROM usage_logs\s+WHERE `+scopeColumn+` = \$1 AND created_at >= \$2 AND created_at < \$3`).
+				WithArgs(int64(42), start, end).
 				WillReturnRows(sqlmock.NewRows([]string{
 					"requests", "input", "output", "cache_write", "cache_read", "cache", "cost", "actual_cost", "balance_cost", "subscription_cost", "unclassified_cost", "duration", "metered_cost",
 				}).AddRow(3, 100, 10, 0, 0, 0, 1.5, 0.25, 0.25, 0, 0, 50, 1.25))
 			var stats *usagestats.UsageStats
 			var err error
-			ctx, start, end := context.Background(), time.Now().Add(-time.Hour), time.Now()
 			if scope == "user" {
-				stats, err = repo.GetUserStatsAggregated(ctx, 1, start, end)
+				stats, err = repo.GetUserStatsAggregated(ctx, 42, start, end)
 			} else {
-				stats, err = repo.GetAPIKeyStatsAggregated(ctx, 1, start, end)
+				stats, err = repo.GetAPIKeyStatsAggregated(ctx, 42, start, end)
 			}
 			require.NoError(t, err)
 			require.NotNil(t, stats.TotalMeteredCost)

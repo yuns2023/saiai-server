@@ -281,6 +281,28 @@ describe('user UsageView tooltip', () => {
     expect(wrapper.find('[data-testid="tooltip-hosted-usage"]').exists()).toBe(false)
   })
 
+  it('keeps a zero hosted total visible because hosted rows exist', async () => {
+    query.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStatsByDateRange.mockResolvedValue({ total_requests: 1, total_tokens: 100, total_cost: 0, total_metered_cost: 0 })
+    list.mockResolvedValue({ items: [] })
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          TablePageLayout: TablePageLayoutStub,
+          Pagination: true,
+          EmptyState: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="usage-hosted-total"]').text().replace(/\s+/g, '')).toBe('hostedUsage.total$0.0000')
+  })
+
   it('hides the hosted total when the filtered stats have no hosted rows', async () => {
     query.mockResolvedValue({ items: [], total: 0, pages: 0 })
     getStatsByDateRange.mockResolvedValue({ total_requests: 1, total_tokens: 100, total_cost: 0.5 })

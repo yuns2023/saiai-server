@@ -41,7 +41,7 @@
             </div>
             <UsageBillingSummary class="flex-1" :stats="usageStats" :base-cost="usageStats?.total_cost ?? null">
               <template #extra>
-                <span v-if="usageStats?.total_metered_cost" :title="t('hostedUsage.hint')" data-testid="usage-hosted-total">
+                <span v-if="usageStats?.total_metered_cost != null" :title="t('hostedUsage.hint')" data-testid="usage-hosted-total">
                   {{ t('hostedUsage.total') }}
                   <span class="font-medium text-gray-700 dark:text-gray-300">${{ usageStats.total_metered_cost.toFixed(4) }}</span>
                 </span>
