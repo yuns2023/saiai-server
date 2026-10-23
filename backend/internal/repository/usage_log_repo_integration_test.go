@@ -288,6 +288,86 @@ func TestUsageLogRepositoryCreateBestEffort_BatchPathDuplicateRequestID(t *testi
 	}, 3*time.Second, 20*time.Millisecond)
 }
 
+func TestUsageLogRepositoryStopReasonRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("usage-stop-reason-%d@example.com", time.Now().UnixNano())})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-usage-stop-reason-" + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-stop-reason-" + uuid.NewString()})
+	newLog := func(stopReason *string) *service.UsageLog {
+		return &service.UsageLog{
+			UserID:              user.ID,
+			APIKeyID:            apiKey.ID,
+			AccountID:           account.ID,
+			RequestID:           uuid.NewString(),
+			Model:               "claude-sonnet-5",
+			InputTokens:         3,
+			CacheCreationTokens: 200000,
+			TotalCost:           0.5,
+			ActualCost:          0.5,
+			StopReason:          stopReason,
+			CreatedAt:           time.Now().UTC(),
+		}
+	}
+
+	refusal := "refusal"
+	// Batched create path.
+	withReason := newLog(&refusal)
+	inserted, err := repo.Create(ctx, withReason)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	got, err := repo.GetByID(ctx, withReason.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.StopReason)
+	require.Equal(t, "refusal", *got.StopReason)
+
+	// Duplicate request keeps the original row (idempotency unchanged).
+	endTurn := "end_turn"
+	dup := newLog(&endTurn)
+	dup.RequestID = withReason.RequestID
+	inserted, err = repo.Create(ctx, dup)
+	require.NoError(t, err)
+	require.False(t, inserted)
+	got, err = repo.GetByID(ctx, withReason.ID)
+	require.NoError(t, err)
+	require.Equal(t, "refusal", *got.StopReason)
+
+	// NULL stays NULL.
+	withoutReason := newLog(nil)
+	_, err = repo.Create(ctx, withoutReason)
+	require.NoError(t, err)
+	got, err = repo.GetByID(ctx, withoutReason.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.StopReason)
+
+	// Direct single-insert path.
+	single := newLog(&endTurn)
+	inserted, err = repo.createSingle(ctx, integrationDB, single)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	got, err = repo.GetByID(ctx, single.ID)
+	require.NoError(t, err)
+	require.Equal(t, "end_turn", *got.StopReason)
+
+	// Fallback single insert (no RETURNING) and best-effort batch path.
+	fallback := newLog(&refusal)
+	require.NoError(t, execUsageLogInsertNoResult(ctx, integrationDB, prepareUsageLogInsert(fallback)))
+	var stored *string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT stop_reason FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", fallback.RequestID, apiKey.ID).Scan(&stored))
+	require.NotNil(t, stored)
+	require.Equal(t, "refusal", *stored)
+
+	bestEffort := newLog(&refusal)
+	require.NoError(t, repo.CreateBestEffort(ctx, bestEffort))
+	require.Eventually(t, func() bool {
+		var value *string
+		err := integrationDB.QueryRowContext(ctx, "SELECT stop_reason FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", bestEffort.RequestID, apiKey.ID).Scan(&value)
+		return err == nil && value != nil && *value == "refusal"
+	}, 3*time.Second, 20*time.Millisecond)
+}
+
 func TestUsageLogRepositoryCreateBestEffort_QueueFullReturnsDropped(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)

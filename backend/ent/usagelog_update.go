@@ -155,6 +155,26 @@ func (_u *UsageLogUpdate) ClearUpstreamModel() *UsageLogUpdate {
 	return _u
 }
 
+// SetStopReason sets the "stop_reason" field.
+func (_u *UsageLogUpdate) SetStopReason(v string) *UsageLogUpdate {
+	_u.mutation.SetStopReason(v)
+	return _u
+}
+
+// SetNillableStopReason sets the "stop_reason" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableStopReason(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetStopReason(*v)
+	}
+	return _u
+}
+
+// ClearStopReason clears the value of the "stop_reason" field.
+func (_u *UsageLogUpdate) ClearStopReason() *UsageLogUpdate {
+	_u.mutation.ClearStopReason()
+	return _u
+}
+
 // SetGroupID sets the "group_id" field.
 func (_u *UsageLogUpdate) SetGroupID(v int64) *UsageLogUpdate {
 	_u.mutation.SetGroupID(v)
@@ -964,6 +984,11 @@ func (_u *UsageLogUpdate) check() error {
 			return &ValidationError{Name: "upstream_model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_model": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.StopReason(); ok {
+		if err := usagelog.StopReasonValidator(v); err != nil {
+			return &ValidationError{Name: "stop_reason", err: fmt.Errorf(`ent: validator failed for field "UsageLog.stop_reason": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.UserAgent(); ok {
 		if err := usagelog.UserAgentValidator(v); err != nil {
 			return &ValidationError{Name: "user_agent", err: fmt.Errorf(`ent: validator failed for field "UsageLog.user_agent": %w`, err)}
@@ -1031,6 +1056,12 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.UpstreamModelCleared() {
 		_spec.ClearField(usagelog.FieldUpstreamModel, field.TypeString)
+	}
+	if value, ok := _u.mutation.StopReason(); ok {
+		_spec.SetField(usagelog.FieldStopReason, field.TypeString, value)
+	}
+	if _u.mutation.StopReasonCleared() {
+		_spec.ClearField(usagelog.FieldStopReason, field.TypeString)
 	}
 	if value, ok := _u.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)
@@ -1514,6 +1545,26 @@ func (_u *UsageLogUpdateOne) SetNillableUpstreamModel(v *string) *UsageLogUpdate
 // ClearUpstreamModel clears the value of the "upstream_model" field.
 func (_u *UsageLogUpdateOne) ClearUpstreamModel() *UsageLogUpdateOne {
 	_u.mutation.ClearUpstreamModel()
+	return _u
+}
+
+// SetStopReason sets the "stop_reason" field.
+func (_u *UsageLogUpdateOne) SetStopReason(v string) *UsageLogUpdateOne {
+	_u.mutation.SetStopReason(v)
+	return _u
+}
+
+// SetNillableStopReason sets the "stop_reason" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableStopReason(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetStopReason(*v)
+	}
+	return _u
+}
+
+// ClearStopReason clears the value of the "stop_reason" field.
+func (_u *UsageLogUpdateOne) ClearStopReason() *UsageLogUpdateOne {
+	_u.mutation.ClearStopReason()
 	return _u
 }
 
@@ -2339,6 +2390,11 @@ func (_u *UsageLogUpdateOne) check() error {
 			return &ValidationError{Name: "upstream_model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_model": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.StopReason(); ok {
+		if err := usagelog.StopReasonValidator(v); err != nil {
+			return &ValidationError{Name: "stop_reason", err: fmt.Errorf(`ent: validator failed for field "UsageLog.stop_reason": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.UserAgent(); ok {
 		if err := usagelog.UserAgentValidator(v); err != nil {
 			return &ValidationError{Name: "user_agent", err: fmt.Errorf(`ent: validator failed for field "UsageLog.user_agent": %w`, err)}
@@ -2423,6 +2479,12 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.UpstreamModelCleared() {
 		_spec.ClearField(usagelog.FieldUpstreamModel, field.TypeString)
+	}
+	if value, ok := _u.mutation.StopReason(); ok {
+		_spec.SetField(usagelog.FieldStopReason, field.TypeString, value)
+	}
+	if _u.mutation.StopReasonCleared() {
+		_spec.ClearField(usagelog.FieldStopReason, field.TypeString)
 	}
 	if value, ok := _u.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)

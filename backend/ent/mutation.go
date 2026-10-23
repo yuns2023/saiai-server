@@ -26915,6 +26915,7 @@ type UsageLogMutation struct {
 	session_id                          *string
 	model                               *string
 	upstream_model                      *string
+	stop_reason                         *string
 	input_tokens                        *int
 	addinput_tokens                     *int
 	output_tokens                       *int
@@ -27411,6 +27412,55 @@ func (m *UsageLogMutation) UpstreamModelCleared() bool {
 func (m *UsageLogMutation) ResetUpstreamModel() {
 	m.upstream_model = nil
 	delete(m.clearedFields, usagelog.FieldUpstreamModel)
+}
+
+// SetStopReason sets the "stop_reason" field.
+func (m *UsageLogMutation) SetStopReason(s string) {
+	m.stop_reason = &s
+}
+
+// StopReason returns the value of the "stop_reason" field in the mutation.
+func (m *UsageLogMutation) StopReason() (r string, exists bool) {
+	v := m.stop_reason
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStopReason returns the old "stop_reason" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldStopReason(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStopReason is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStopReason requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStopReason: %w", err)
+	}
+	return oldValue.StopReason, nil
+}
+
+// ClearStopReason clears the value of the "stop_reason" field.
+func (m *UsageLogMutation) ClearStopReason() {
+	m.stop_reason = nil
+	m.clearedFields[usagelog.FieldStopReason] = struct{}{}
+}
+
+// StopReasonCleared returns if the "stop_reason" field was cleared in this mutation.
+func (m *UsageLogMutation) StopReasonCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldStopReason]
+	return ok
+}
+
+// ResetStopReason resets all changes to the "stop_reason" field.
+func (m *UsageLogMutation) ResetStopReason() {
+	m.stop_reason = nil
+	delete(m.clearedFields, usagelog.FieldStopReason)
 }
 
 // SetGroupID sets the "group_id" field.
@@ -29482,7 +29532,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 43)
+	fields := make([]string, 0, 44)
 	if m.smart_switch != nil {
 		fields = append(fields, usagelog.FieldSmartSwitch)
 	}
@@ -29506,6 +29556,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.upstream_model != nil {
 		fields = append(fields, usagelog.FieldUpstreamModel)
+	}
+	if m.stop_reason != nil {
+		fields = append(fields, usagelog.FieldStopReason)
 	}
 	if m.group != nil {
 		fields = append(fields, usagelog.FieldGroupID)
@@ -29636,6 +29689,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.Model()
 	case usagelog.FieldUpstreamModel:
 		return m.UpstreamModel()
+	case usagelog.FieldStopReason:
+		return m.StopReason()
 	case usagelog.FieldGroupID:
 		return m.GroupID()
 	case usagelog.FieldSubscriptionID:
@@ -29731,6 +29786,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldModel(ctx)
 	case usagelog.FieldUpstreamModel:
 		return m.OldUpstreamModel(ctx)
+	case usagelog.FieldStopReason:
+		return m.OldStopReason(ctx)
 	case usagelog.FieldGroupID:
 		return m.OldGroupID(ctx)
 	case usagelog.FieldSubscriptionID:
@@ -29865,6 +29922,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetUpstreamModel(v)
+		return nil
+	case usagelog.FieldStopReason:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStopReason(v)
 		return nil
 	case usagelog.FieldGroupID:
 		v, ok := value.(int64)
@@ -30441,6 +30505,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldUpstreamModel) {
 		fields = append(fields, usagelog.FieldUpstreamModel)
 	}
+	if m.FieldCleared(usagelog.FieldStopReason) {
+		fields = append(fields, usagelog.FieldStopReason)
+	}
 	if m.FieldCleared(usagelog.FieldGroupID) {
 		fields = append(fields, usagelog.FieldGroupID)
 	}
@@ -30499,6 +30566,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldUpstreamModel:
 		m.ClearUpstreamModel()
+		return nil
+	case usagelog.FieldStopReason:
+		m.ClearStopReason()
 		return nil
 	case usagelog.FieldGroupID:
 		m.ClearGroupID()
@@ -30567,6 +30637,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldUpstreamModel:
 		m.ResetUpstreamModel()
+		return nil
+	case usagelog.FieldStopReason:
+		m.ResetStopReason()
 		return nil
 	case usagelog.FieldGroupID:
 		m.ResetGroupID()

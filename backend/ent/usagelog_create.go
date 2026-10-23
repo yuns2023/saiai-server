@@ -92,6 +92,20 @@ func (_c *UsageLogCreate) SetNillableUpstreamModel(v *string) *UsageLogCreate {
 	return _c
 }
 
+// SetStopReason sets the "stop_reason" field.
+func (_c *UsageLogCreate) SetStopReason(v string) *UsageLogCreate {
+	_c.mutation.SetStopReason(v)
+	return _c
+}
+
+// SetNillableStopReason sets the "stop_reason" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableStopReason(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetStopReason(*v)
+	}
+	return _c
+}
+
 // SetGroupID sets the "group_id" field.
 func (_c *UsageLogCreate) SetGroupID(v int64) *UsageLogCreate {
 	_c.mutation.SetGroupID(v)
@@ -757,6 +771,11 @@ func (_c *UsageLogCreate) check() error {
 			return &ValidationError{Name: "upstream_model", err: fmt.Errorf(`ent: validator failed for field "UsageLog.upstream_model": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.StopReason(); ok {
+		if err := usagelog.StopReasonValidator(v); err != nil {
+			return &ValidationError{Name: "stop_reason", err: fmt.Errorf(`ent: validator failed for field "UsageLog.stop_reason": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.InputTokens(); !ok {
 		return &ValidationError{Name: "input_tokens", err: errors.New(`ent: missing required field "UsageLog.input_tokens"`)}
 	}
@@ -901,6 +920,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.UpstreamModel(); ok {
 		_spec.SetField(usagelog.FieldUpstreamModel, field.TypeString, value)
 		_node.UpstreamModel = &value
+	}
+	if value, ok := _c.mutation.StopReason(); ok {
+		_spec.SetField(usagelog.FieldStopReason, field.TypeString, value)
+		_node.StopReason = &value
 	}
 	if value, ok := _c.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)
@@ -1282,6 +1305,24 @@ func (u *UsageLogUpsert) UpdateUpstreamModel() *UsageLogUpsert {
 // ClearUpstreamModel clears the value of the "upstream_model" field.
 func (u *UsageLogUpsert) ClearUpstreamModel() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldUpstreamModel)
+	return u
+}
+
+// SetStopReason sets the "stop_reason" field.
+func (u *UsageLogUpsert) SetStopReason(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldStopReason, v)
+	return u
+}
+
+// UpdateStopReason sets the "stop_reason" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateStopReason() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldStopReason)
+	return u
+}
+
+// ClearStopReason clears the value of the "stop_reason" field.
+func (u *UsageLogUpsert) ClearStopReason() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldStopReason)
 	return u
 }
 
@@ -2084,6 +2125,27 @@ func (u *UsageLogUpsertOne) UpdateUpstreamModel() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearUpstreamModel() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearUpstreamModel()
+	})
+}
+
+// SetStopReason sets the "stop_reason" field.
+func (u *UsageLogUpsertOne) SetStopReason(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetStopReason(v)
+	})
+}
+
+// UpdateStopReason sets the "stop_reason" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateStopReason() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateStopReason()
+	})
+}
+
+// ClearStopReason clears the value of the "stop_reason" field.
+func (u *UsageLogUpsertOne) ClearStopReason() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearStopReason()
 	})
 }
 
@@ -3156,6 +3218,27 @@ func (u *UsageLogUpsertBulk) UpdateUpstreamModel() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearUpstreamModel() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearUpstreamModel()
+	})
+}
+
+// SetStopReason sets the "stop_reason" field.
+func (u *UsageLogUpsertBulk) SetStopReason(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetStopReason(v)
+	})
+}
+
+// UpdateStopReason sets the "stop_reason" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateStopReason() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateStopReason()
+	})
+}
+
+// ClearStopReason clears the value of the "stop_reason" field.
+func (u *UsageLogUpsertBulk) ClearStopReason() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearStopReason()
 	})
 }
 

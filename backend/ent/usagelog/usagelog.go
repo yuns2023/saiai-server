@@ -30,6 +30,8 @@ const (
 	FieldModel = "model"
 	// FieldUpstreamModel holds the string denoting the upstream_model field in the database.
 	FieldUpstreamModel = "upstream_model"
+	// FieldStopReason holds the string denoting the stop_reason field in the database.
+	FieldStopReason = "stop_reason"
 	// FieldGroupID holds the string denoting the group_id field in the database.
 	FieldGroupID = "group_id"
 	// FieldSubscriptionID holds the string denoting the subscription_id field in the database.
@@ -160,6 +162,7 @@ var Columns = []string{
 	FieldSessionID,
 	FieldModel,
 	FieldUpstreamModel,
+	FieldStopReason,
 	FieldGroupID,
 	FieldSubscriptionID,
 	FieldInputTokens,
@@ -216,6 +219,8 @@ var (
 	ModelValidator func(string) error
 	// UpstreamModelValidator is a validator for the "upstream_model" field. It is called by the builders before save.
 	UpstreamModelValidator func(string) error
+	// StopReasonValidator is a validator for the "stop_reason" field. It is called by the builders before save.
+	StopReasonValidator func(string) error
 	// DefaultInputTokens holds the default value on creation for the "input_tokens" field.
 	DefaultInputTokens int
 	// DefaultOutputTokens holds the default value on creation for the "output_tokens" field.
@@ -313,6 +318,11 @@ func ByModel(opts ...sql.OrderTermOption) OrderOption {
 // ByUpstreamModel orders the results by the upstream_model field.
 func ByUpstreamModel(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldUpstreamModel, opts...).ToFunc()
+}
+
+// ByStopReason orders the results by the stop_reason field.
+func ByStopReason(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldStopReason, opts...).ToFunc()
 }
 
 // ByGroupID orders the results by the group_id field.

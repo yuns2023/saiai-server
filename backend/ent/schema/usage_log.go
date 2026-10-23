@@ -53,6 +53,13 @@ func (UsageLog) Fields() []ent.Field {
 			MaxLen(100).
 			Optional().
 			Nillable(),
+		// StopReason stores the sanitized Anthropic-native stop_reason observed
+		// from the final successful upstream response. NULL means not reported,
+		// not applicable (non-Anthropic platforms) or rejected by sanitization.
+		field.String("stop_reason").
+			MaxLen(32).
+			Optional().
+			Nillable(),
 		field.Int64("group_id").
 			Optional().
 			Nillable(),

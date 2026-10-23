@@ -302,4 +302,22 @@ describe('admin UsageTable tooltip', () => {
     expect(state().tooltipVisible).toBe(false)
     wrapper.unmount()
   })
+
+  it.each([
+    ['refusal', 'refusal'],
+    [null, 'admin.usage.stopReasonNotRecorded'],
+  ] as const)('shows upstream stop_reason %s in the token tooltip', async (stopReason, expected) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_STOP_REASON', model: 'claude-sonnet-5', input_tokens: 3, output_tokens: 0,
+        cache_creation_tokens: 200000, cache_read_tokens: 0, image_count: 0, stop_reason: stopReason }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-tokens" :row="data[0]" /></div>' } } },
+      attachTo: document.body,
+    })
+    await wrapper.get('.group.relative').trigger('mouseenter')
+    await nextTick()
+    const row = document.body.querySelector('[data-testid=usage-stop-reason]')
+    expect(row?.textContent).toContain('admin.usage.stopReason')
+    expect(row?.textContent).toContain(expected)
+    wrapper.unmount()
+  })
 })

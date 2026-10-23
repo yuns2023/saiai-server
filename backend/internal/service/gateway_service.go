@@ -672,6 +672,16 @@ type ForwardResult struct {
 	ClientDisconnect bool // 客户端是否在流式传输过程中断开
 	ReasoningEffort  *string
 
+	// StopReason is the sanitized Anthropic-native upstream stop_reason of the
+	// final successful attempt (nil = not observed / not applicable). Evidence
+	// only; never used for retry, recovery or billing decisions.
+	StopReason *string
+	// UpstreamLastOutputTokens is the last valid (non-negative integer) raw
+	// output_tokens reported by upstream for this attempt (nil = none). For
+	// streams it is the last message_delta value, not proof of terminal
+	// completeness. Diagnostic only; billing keeps using Usage.
+	UpstreamLastOutputTokens *int64
+
 	// 图片生成计费字段（图片生成模型使用）
 	ImageCount int    // 生成的图片数量
 	ImageSize  string // 图片尺寸 "1K", "2K", "4K"
@@ -6039,6 +6049,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
+	var upstreamObs anthropicUpstreamObservation
 	if reqStream {
 		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, reqModel, false, parsed.OnUpstreamMessageStart)
 		if err != nil {
@@ -6061,8 +6072,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		usage = streamResult.usage
 		firstTokenMs = streamResult.firstTokenMs
 		clientDisconnect = streamResult.clientDisconnect
+		upstreamObs = streamResult.upstream
 	} else {
-		usage, err = s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, reqModel)
+		usage, upstreamObs, err = s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, reqModel)
 		if err != nil {
 			return nil, err
 		}
@@ -6071,7 +6083,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 
-	return &ForwardResult{
+	result := &ForwardResult{
 		RequestID:        canonicalClaudeRequestID(resp.Header),
 		Usage:            *usage,
 		Model:            originalModel, // 使用原始模型用于计费和日志
@@ -6081,7 +6093,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     firstTokenMs,
 		ClientDisconnect: clientDisconnect,
-	}, nil
+	}
+	upstreamObs.applyTo(result)
+	return result, nil
 }
 
 type anthropicPassthroughForwardInput struct {
@@ -6336,6 +6350,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
+	var upstreamObs anthropicUpstreamObservation
 	if input.RequestStream {
 		streamResult, err := s.handleStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account, input.StartTime, input.RequestModel)
 		if err != nil {
@@ -6344,8 +6359,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		usage = streamResult.usage
 		firstTokenMs = streamResult.firstTokenMs
 		clientDisconnect = streamResult.clientDisconnect
+		upstreamObs = streamResult.upstream
 	} else {
-		usage, err = s.handleNonStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account)
+		usage, upstreamObs, err = s.handleNonStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account)
 		if err != nil {
 			return nil, err
 		}
@@ -6354,7 +6370,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		usage = &ClaudeUsage{}
 	}
 
-	return &ForwardResult{
+	result := &ForwardResult{
 		RequestID:        canonicalClaudeRequestID(resp.Header),
 		Usage:            *usage,
 		Model:            input.OriginalModel,
@@ -6364,7 +6380,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		Duration:         time.Since(input.StartTime),
 		FirstTokenMs:     firstTokenMs,
 		ClientDisconnect: clientDisconnect,
-	}, nil
+	}
+	upstreamObs.applyTo(result)
+	return result, nil
 }
 
 func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
@@ -6447,6 +6465,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 	}
 
 	usage := &ClaudeUsage{}
+	var upstreamObs anthropicUpstreamObservation
 	var firstTokenMs *int
 	clientDisconnected := false
 	sawTerminalEvent := false
@@ -6513,25 +6532,25 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 					flusher.Flush()
 				}
 				if !sawTerminalEvent {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
 				}
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: clientDisconnected}, nil
 			}
 			if ev.err != nil {
 				if sawTerminalEvent {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: clientDisconnected}, nil
 				}
 				if clientDisconnected {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after disconnect: %w", ev.err)
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after disconnect: %w", ev.err)
 				}
 				if errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete: %w", ev.err)
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete: %w", ev.err)
 				}
 				if errors.Is(ev.err, bufio.ErrTooLong) {
 					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] SSE line too long: account=%d max_size=%d error=%v", account.ID, maxLineSize, ev.err)
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, ev.err
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs}, ev.err
 				}
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream read error: %w", ev.err)
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs}, fmt.Errorf("stream read error: %w", ev.err)
 			}
 
 			line := ev.line
@@ -6544,7 +6563,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 					ms := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &ms
 				}
-				s.parseSSEUsagePassthrough(data, usage)
+				s.parseSSEUsagePassthroughObserved(data, usage, &upstreamObs)
 			} else {
 				trimmed := strings.TrimSpace(line)
 				if strings.HasPrefix(trimmed, "event:") && anthropicStreamEventIsTerminal(strings.TrimSpace(strings.TrimPrefix(trimmed, "event:")), "") {
@@ -6571,13 +6590,13 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 				continue
 			}
 			if clientDisconnected {
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after timeout")
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after timeout")
 			}
 			logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Stream data interval timeout: account=%d model=%s interval=%s", account.ID, model, streamInterval)
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, model)
 			}
-			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
+			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs}, fmt.Errorf("stream data interval timeout")
 		}
 	}
 }
@@ -6597,11 +6616,19 @@ func extractAnthropicSSEDataLine(line string) (string, bool) {
 }
 
 func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
+	s.parseSSEUsagePassthroughObserved(data, usage, nil)
+}
+
+// parseSSEUsagePassthroughObserved parses usage like parseSSEUsagePassthrough
+// and, when upstreamObs is non-nil, also records the observed upstream
+// stop_reason / explicit output_tokens from message_delta events.
+func (s *GatewayService) parseSSEUsagePassthroughObserved(data string, usage *ClaudeUsage, upstreamObs *anthropicUpstreamObservation) {
 	if usage == nil || data == "" || data == "[DONE]" {
 		return
 	}
 
 	parsed := gjson.Parse(data)
+	upstreamObs.observeStreamEvent(parsed)
 	switch parsed.Get("type").String() {
 	case "message_start":
 		msgUsage := parsed.Get("message.usage")
@@ -6718,7 +6745,7 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	resp *http.Response,
 	c *gin.Context,
 	account *Account,
-) (*ClaudeUsage, error) {
+) (*ClaudeUsage, anthropicUpstreamObservation, error) {
 	if s.rateLimitService != nil {
 		s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 	}
@@ -6736,11 +6763,12 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 				},
 			})
 		}
-		return nil, err
+		return nil, anthropicUpstreamObservation{}, err
 	}
 	SetOpsUpstreamForwardResponseSnapshot(c, resp.StatusCode, resp.Header, body)
 
 	usage := parseClaudeUsageFromResponseBody(body)
+	upstreamObs := observeAnthropicNonStreamBody(body)
 
 	writeAnthropicPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	s.writeClaudeQuotaHeaders(ctx, c, account, resp.Header)
@@ -6749,7 +6777,7 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 		contentType = "application/json"
 	}
 	c.Data(resp.StatusCode, contentType, body)
-	return usage, nil
+	return usage, upstreamObs, nil
 }
 
 func writeAnthropicPassthroughResponseHeaders(dst http.Header, src http.Header, filter *responseheaders.CompiledHeaderFilter) {
@@ -6858,6 +6886,7 @@ func (s *GatewayService) forwardBedrock(
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
+	var upstreamObs anthropicUpstreamObservation
 	if reqStream {
 		streamResult, err := s.handleBedrockStreamingResponse(ctx, resp, c, account, startTime, reqModel)
 		if err != nil {
@@ -6866,8 +6895,9 @@ func (s *GatewayService) forwardBedrock(
 		usage = streamResult.usage
 		firstTokenMs = streamResult.firstTokenMs
 		clientDisconnect = streamResult.clientDisconnect
+		upstreamObs = streamResult.upstream
 	} else {
-		usage, err = s.handleBedrockNonStreamingResponse(ctx, resp, c, account)
+		usage, upstreamObs, err = s.handleBedrockNonStreamingResponse(ctx, resp, c, account)
 		if err != nil {
 			return nil, err
 		}
@@ -6876,7 +6906,7 @@ func (s *GatewayService) forwardBedrock(
 		usage = &ClaudeUsage{}
 	}
 
-	return &ForwardResult{
+	result := &ForwardResult{
 		RequestID:        resp.Header.Get("x-amzn-requestid"),
 		Usage:            *usage,
 		Model:            reqModel,
@@ -6886,7 +6916,9 @@ func (s *GatewayService) forwardBedrock(
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     firstTokenMs,
 		ClientDisconnect: clientDisconnect,
-	}, nil
+	}
+	upstreamObs.applyTo(result)
+	return result, nil
 }
 
 // executeBedrockUpstream 执行 Bedrock 上游请求（含重试逻辑）
@@ -7133,7 +7165,7 @@ func (s *GatewayService) handleBedrockNonStreamingResponse(
 	resp *http.Response,
 	c *gin.Context,
 	account *Account,
-) (*ClaudeUsage, error) {
+) (*ClaudeUsage, anthropicUpstreamObservation, error) {
 	maxBytes := resolveUpstreamResponseReadLimit(s.cfg)
 	body, err := readUpstreamResponseBodyLimited(resp.Body, maxBytes)
 	if err != nil {
@@ -7147,8 +7179,12 @@ func (s *GatewayService) handleBedrockNonStreamingResponse(
 				},
 			})
 		}
-		return nil, err
+		return nil, anthropicUpstreamObservation{}, err
 	}
+
+	// Diagnostic observation must read the raw Bedrock body: the metrics
+	// conversion below coerces non-integer values into integers.
+	upstreamObs := observeBedrockNonStreamBody(body)
 
 	// 转换 Bedrock 特有的 amazon-bedrock-invocationMetrics 为标准 Anthropic usage 格式
 	// 并移除该字段避免透传给客户端
@@ -7161,7 +7197,7 @@ func (s *GatewayService) handleBedrockNonStreamingResponse(
 		c.Header("x-request-id", v)
 	}
 	c.Data(resp.StatusCode, "application/json", body)
-	return usage, nil
+	return usage, upstreamObs, nil
 }
 
 func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, oauthIdentity *oauthRequestIdentity) (*http.Request, error) {
@@ -8290,6 +8326,7 @@ type streamingResult struct {
 	usage            *ClaudeUsage
 	firstTokenMs     *int
 	clientDisconnect bool // 客户端是否在流式传输过程中断开
+	upstream         anthropicUpstreamObservation
 }
 
 type processedAnthropicSSEEvent struct {
@@ -8369,6 +8406,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	}
 
 	usage := &ClaudeUsage{}
+	// upstreamObs is evidence only (stop_reason / explicit output_tokens); it
+	// is independent from the terminal-grace recovery stop_reason tracking.
+	var upstreamObs anthropicUpstreamObservation
 	var firstTokenMs *int
 	var messageStartNotified bool
 	scanner := bufio.NewScanner(resp.Body)
@@ -8676,7 +8716,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	}
 
 	streamResult := func() *streamingResult {
-		return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}
+		return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: clientDisconnected}
 	}
 	writeSyntheticTerminal := func() {
 		if clientDisconnected {
@@ -8735,6 +8775,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 			if processed.usagePatch != nil {
 				mergeSSEUsagePatch(usage, processed.usagePatch)
+			}
+			if processed.eventType == "message_delta" {
+				upstreamObs.observeStreamData(processed.data)
 			}
 		}
 		for _, block := range processed.blocks {
@@ -8908,7 +8951,7 @@ streamLoop:
 				continue
 			}
 			if clientDisconnected {
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after timeout")
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after timeout")
 			}
 			logger.LegacyPrintf("service.gateway", "Stream data interval timeout: account=%d model=%s interval=%s", account.ID, originalModel, streamInterval)
 			// 处理流超时，可能标记账户为临时不可调度或错误状态
@@ -8916,7 +8959,7 @@ streamLoop:
 				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 			}
 			sendErrorEvent("stream_timeout")
-			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
+			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, upstream: upstreamObs}, fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:
 			if clientDisconnected {
@@ -9157,7 +9200,7 @@ func rewriteCacheCreationJSON(usageObj map[string]any, target string) bool {
 	return true
 }
 
-func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*ClaudeUsage, error) {
+func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*ClaudeUsage, anthropicUpstreamObservation, error) {
 	// 更新5h窗口状态
 	s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 
@@ -9174,7 +9217,7 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 				},
 			})
 		}
-		return nil, err
+		return nil, anthropicUpstreamObservation{}, err
 	}
 	SetOpsUpstreamForwardResponseSnapshot(c, resp.StatusCode, resp.Header, body)
 
@@ -9183,8 +9226,10 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		Usage ClaudeUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("parse response: %w", err)
+		return nil, anthropicUpstreamObservation{}, fmt.Errorf("parse response: %w", err)
 	}
+	// Observe the raw upstream body before any gateway rewrites.
+	upstreamObs := observeAnthropicNonStreamBody(body)
 
 	// 解析嵌套的 cache_creation 对象中的 5m/1h 明细
 	cc5m := gjson.GetBytes(body, "usage.cache_creation.ephemeral_5m_input_tokens")
@@ -9240,7 +9285,7 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 	// 写入响应
 	c.Data(resp.StatusCode, contentType, body)
 
-	return &response.Usage, nil
+	return &response.Usage, upstreamObs, nil
 }
 
 // replaceModelInResponseBody 替换响应体中的model字段
@@ -9728,6 +9773,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		SessionID:                  input.SessionID,
 		Model:                      result.Model,
 		UpstreamModel:              optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
+		StopReason:                 result.StopReason,
 		ReasoningEffort:            result.ReasoningEffort,
 		InboundEndpoint:            optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:           optionalTrimmedStringPtr(input.UpstreamEndpoint),
@@ -9922,6 +9968,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 		SessionID:                  input.SessionID,
 		Model:                      result.Model,
 		UpstreamModel:              optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
+		StopReason:                 result.StopReason,
 		ReasoningEffort:            result.ReasoningEffort,
 		InboundEndpoint:            optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:           optionalTrimmedStringPtr(input.UpstreamEndpoint),

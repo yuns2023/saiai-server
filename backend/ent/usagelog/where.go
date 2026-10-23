@@ -90,6 +90,11 @@ func UpstreamModel(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldUpstreamModel, v))
 }
 
+// StopReason applies equality check predicate on the "stop_reason" field. It's identical to StopReasonEQ.
+func StopReason(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldStopReason, v))
+}
+
 // GroupID applies equality check predicate on the "group_id" field. It's identical to GroupIDEQ.
 func GroupID(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldGroupID, v))
@@ -603,6 +608,81 @@ func UpstreamModelEqualFold(v string) predicate.UsageLog {
 // UpstreamModelContainsFold applies the ContainsFold predicate on the "upstream_model" field.
 func UpstreamModelContainsFold(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldContainsFold(FieldUpstreamModel, v))
+}
+
+// StopReasonEQ applies the EQ predicate on the "stop_reason" field.
+func StopReasonEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldStopReason, v))
+}
+
+// StopReasonNEQ applies the NEQ predicate on the "stop_reason" field.
+func StopReasonNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldStopReason, v))
+}
+
+// StopReasonIn applies the In predicate on the "stop_reason" field.
+func StopReasonIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldStopReason, vs...))
+}
+
+// StopReasonNotIn applies the NotIn predicate on the "stop_reason" field.
+func StopReasonNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldStopReason, vs...))
+}
+
+// StopReasonGT applies the GT predicate on the "stop_reason" field.
+func StopReasonGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldStopReason, v))
+}
+
+// StopReasonGTE applies the GTE predicate on the "stop_reason" field.
+func StopReasonGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldStopReason, v))
+}
+
+// StopReasonLT applies the LT predicate on the "stop_reason" field.
+func StopReasonLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldStopReason, v))
+}
+
+// StopReasonLTE applies the LTE predicate on the "stop_reason" field.
+func StopReasonLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldStopReason, v))
+}
+
+// StopReasonContains applies the Contains predicate on the "stop_reason" field.
+func StopReasonContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldStopReason, v))
+}
+
+// StopReasonHasPrefix applies the HasPrefix predicate on the "stop_reason" field.
+func StopReasonHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldStopReason, v))
+}
+
+// StopReasonHasSuffix applies the HasSuffix predicate on the "stop_reason" field.
+func StopReasonHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldStopReason, v))
+}
+
+// StopReasonIsNil applies the IsNil predicate on the "stop_reason" field.
+func StopReasonIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldStopReason))
+}
+
+// StopReasonNotNil applies the NotNil predicate on the "stop_reason" field.
+func StopReasonNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldStopReason))
+}
+
+// StopReasonEqualFold applies the EqualFold predicate on the "stop_reason" field.
+func StopReasonEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldStopReason, v))
+}
+
+// StopReasonContainsFold applies the ContainsFold predicate on the "stop_reason" field.
+func StopReasonContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldStopReason, v))
 }
 
 // GroupIDEQ applies the EQ predicate on the "group_id" field.

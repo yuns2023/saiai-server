@@ -1,11 +1,13 @@
 package dto
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestUsageLogFromServiceNativeChatReportsUnknownTokenUsage(t *testing.T) {
@@ -201,4 +203,24 @@ func TestUsageLogFromServiceAdmin_IncludesFailoverEvents(t *testing.T) {
 
 func f64Ptr(value float64) *float64 {
 	return &value
+}
+
+func TestUsageLogStopReasonIsAdminOnly(t *testing.T) {
+	refusal := "refusal"
+	log := &service.UsageLog{RequestID: "req-stop", Model: "claude-sonnet-5", StopReason: &refusal}
+
+	adminJSON, err := json.Marshal(UsageLogFromServiceAdmin(log))
+	require.NoError(t, err)
+	require.Equal(t, "refusal", gjson.GetBytes(adminJSON, "stop_reason").String())
+
+	userJSON, err := json.Marshal(UsageLogFromService(log))
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(userJSON, "stop_reason").Exists())
+
+	// NULL is serialized explicitly for admins so the UI can show "not recorded".
+	nullJSON, err := json.Marshal(UsageLogFromServiceAdmin(&service.UsageLog{RequestID: "req-null"}))
+	require.NoError(t, err)
+	stopReason := gjson.GetBytes(nullJSON, "stop_reason")
+	require.True(t, stopReason.Exists())
+	require.Equal(t, gjson.Null, stopReason.Type)
 }

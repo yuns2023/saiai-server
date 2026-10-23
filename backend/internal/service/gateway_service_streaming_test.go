@@ -167,7 +167,7 @@ func TestGatewayService_NonStreamingMapsAnthropicRequestIDHeader(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"usage":{"input_tokens":3,"output_tokens":5}}`)),
 	}
 
-	usage, err := svc.handleNonStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, "model", "model")
+	usage, _, err := svc.handleNonStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, "model", "model")
 	require.NoError(t, err)
 	require.Equal(t, 3, usage.InputTokens)
 	require.Equal(t, 5, usage.OutputTokens)
