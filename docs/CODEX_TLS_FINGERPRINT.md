@@ -66,7 +66,8 @@ shared transport):
   `ErrTransportPolicyUnsupported`. **There is no silent fallback to standard
   TLS** and no re-dial with a different stack after a handshake failure.
 - `tlsfingerprint.PolicyDialer` performs direct, HTTP CONNECT, HTTPS CONNECT
-  (verified outer TLS) and SOCKS5/SOCKS5H (context-aware) tunnelling itself;
+  (verified outer TLS) and SOCKS5/SOCKS5H (context-aware, negotiation bounded
+  by connect+handshake timeout) tunnelling itself;
   `http.Transport.Proxy` stays nil so Go never bypasses it. One deadline
   (handshake timeout or context deadline, whichever is earlier) covers CONNECT
   plus TLS; context cancellation closes the socket; deadlines are cleared after
@@ -102,7 +103,10 @@ shared transport):
   (continuation-bound) acquisitions keep their existing connection after a
   toggle and pinned connections are not drained — they are never migrated to
   the new transport mid-chain. Prewarm reuses the last acquire request,
-  including its policy.
+  including its policy. If, right after a toggle, every slot is still held by
+  leased or pinned connections of the previous policy, a new acquire fails
+  fast with the pool's "queue full" error (client sees try-again-later) instead
+  of waiting for capacity; it succeeds once those connections drain.
 
 ## Baseline details
 

@@ -512,12 +512,18 @@ func TestCodexPolicyProxyCancellation(t *testing.T) {
 			}
 		})
 	}
-	// The handshake timeout also bounds a silent HTTP proxy without ctx deadline.
-	u, _ := url.Parse("http://user:pass@" + strings.TrimPrefix(httpHang.URL, "http://"))
-	d, _ := NewPolicyDialer(CodexHTTPTransportPolicy(), PolicyDialerOptions{ProxyURL: u, HandshakeTimeout: 150 * time.Millisecond})
-	start := time.Now()
-	if _, err := d.DialTLSContext(context.Background(), "tcp", "example.com:443"); err == nil || time.Since(start) > 3*time.Second {
-		t.Fatalf("handshake timeout not enforced: %v after %s", err, time.Since(start))
+	// Timeouts also bound silent HTTP and SOCKS5 proxies when the context has
+	// no deadline (http.Transport dials with a non-cancelable context).
+	for name, raw := range map[string]string{
+		"http":   "http://user:pass@" + strings.TrimPrefix(httpHang.URL, "http://"),
+		"socks5": "socks5h://" + socksHang,
+	} {
+		u, _ := url.Parse(raw)
+		d, _ := NewPolicyDialer(CodexHTTPTransportPolicy(), PolicyDialerOptions{ProxyURL: u, ConnectTimeout: 100 * time.Millisecond, HandshakeTimeout: 150 * time.Millisecond})
+		start := time.Now()
+		if _, err := d.DialTLSContext(context.Background(), "tcp", "example.com:443"); err == nil || time.Since(start) > 3*time.Second {
+			t.Fatalf("%s: timeout not enforced: %v after %s", name, err, time.Since(start))
+		}
 	}
 }
 

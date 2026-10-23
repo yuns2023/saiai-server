@@ -516,3 +516,23 @@ func TestOpenAIWSPrewarmAndUnsupportedDialersHonorPolicy(t *testing.T) {
 	_, err = plainPool.Acquire(context.Background(), openAIWSAcquireRequest{Account: codexOAuthAccount(35, nil), WSURL: "wss://chatgpt.com/backend-api/codex/responses", TransportPolicy: codex})
 	require.ErrorIs(t, err, ErrTransportPolicyUnsupported)
 }
+
+func TestOpenAIWSPoolReportsCapacityWhileOtherPolicyDrains(t *testing.T) {
+	dialer := &policyFakeDialer{}
+	pool := newPolicyTestPool(t, dialer)
+	account := codexOAuthAccount(36, nil)
+	base := openAIWSAcquireRequest{Account: account, WSURL: "wss://chatgpt.com/backend-api/codex/responses"}
+	l1, err := pool.Acquire(context.Background(), base)
+	require.NoError(t, err)
+	l2, err := pool.Acquire(context.Background(), base)
+	require.NoError(t, err)
+	defer l1.Release()
+	defer l2.Release()
+	// Both slots are leased standard-TLS connections; a Codex-policy request
+	// may neither reuse them nor evict them.
+	req := base
+	req.TransportPolicy = tlsfingerprint.CodexWSTransportPolicy()
+	_, err = pool.Acquire(context.Background(), req)
+	require.ErrorIs(t, err, errOpenAIWSConnQueueFull)
+	require.Len(t, dialer.dialed(), 2)
+}

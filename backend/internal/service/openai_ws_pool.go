@@ -1094,8 +1094,21 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 	connPick := time.Since(pickStartedAt)
 	p.recordConnPickDuration(connPick)
 	if target == nil {
+		// Every slot is held by connections of another transport policy that
+		// are still leased or pinned (draining after a toggle): report
+		// capacity exhaustion rather than a closed connection.
+		drainingOtherPolicy := false
+		for _, conn := range ap.conns {
+			if conn != nil && conn.transportKey != transportKey {
+				drainingOtherPolicy = true
+				break
+			}
+		}
 		ap.mu.Unlock()
 		closeOpenAIWSConns(evicted)
+		if drainingOtherPolicy {
+			return nil, errOpenAIWSConnQueueFull
+		}
 		return nil, errOpenAIWSConnClosed
 	}
 	if int(target.waiters.Load()) >= p.queueLimitPerConn() {

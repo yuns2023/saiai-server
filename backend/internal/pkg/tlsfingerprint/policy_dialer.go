@@ -181,7 +181,11 @@ func (d *PolicyDialer) dialTCP(ctx context.Context, addr string) (net.Conn, erro
 		if !ok {
 			return nil, errors.New("tlsfingerprint: socks5 dialer is not context-aware")
 		}
-		conn, err := cd.DialContext(ctx, "tcp", addr)
+		// SOCKS negotiation runs before the handshake deadline is armed, and
+		// http.Transport dials with a non-cancelable context: bound it here.
+		socksCtx, cancel := context.WithTimeout(ctx, d.opts.ConnectTimeout+d.opts.HandshakeTimeout)
+		defer cancel()
+		conn, err := cd.DialContext(socksCtx, "tcp", addr)
 		if err != nil {
 			return nil, fmt.Errorf("tlsfingerprint: socks5 connect: %w", err)
 		}
