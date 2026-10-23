@@ -165,7 +165,8 @@ func (r *chatGPTBoundEmptyListRepo) ListSchedulableByGroupIDAndPlatform(context.
 }
 
 func TestChatGPTMemoryUploadReleaseIsCompareAndDelete(t *testing.T) {
-	cache := NewChatGPTMemoryTurnCache().(ChatGPTUploadCache)
+	cache, ok := NewChatGPTMemoryTurnCache().(ChatGPTUploadCache)
+	require.True(t, ok)
 	scope := ChatGPTTurnScope{UserID: 1, APIKeyID: 2, GroupID: 3}
 	key := scope.DeviceCookieKey("TEST_ONLY_DEVICE", "TEST_ONLY_PROOF")
 	_, err := cache.ClaimChatGPTUploadOwner(context.Background(), key, 17, time.Hour)

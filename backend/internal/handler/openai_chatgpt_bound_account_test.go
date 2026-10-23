@@ -367,7 +367,9 @@ func TestChatGPTDeviceRegistrationSkipsPermanentlyUnavailableConversationAffinit
 	f.accounts.accounts = append(f.accounts.accounts, healthy)
 	memory := f.cache.ChatGPTTurnCache
 	// The only live conversation of this scope is on the stale account 248.
-	f.cache.ChatGPTTurnCache = &chatGPTBoundUpdatesCache{ChatGPTTurnCache: memory, ChatGPTUploadCache: memory.(service.ChatGPTUploadCache), accounts: []int64{248}}
+	uploads, ok := memory.(service.ChatGPTUploadCache)
+	require.True(t, ok)
+	f.cache.ChatGPTTurnCache = &chatGPTBoundUpdatesCache{ChatGPTTurnCache: memory, ChatGPTUploadCache: uploads, accounts: []int64{248}}
 
 	w, _ := f.run("GET", "/chatgpt/backend-api/models", "", chatGPTBoundCookie)
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
@@ -392,7 +394,9 @@ func (f *chatGPTBoundFixture) addHealthy245() {
 
 func (f *chatGPTBoundFixture) failingReleases() *chatGPTBoundUpdatesCache {
 	memory := f.cache.ChatGPTTurnCache
-	wrapped := &chatGPTBoundUpdatesCache{ChatGPTTurnCache: memory, ChatGPTUploadCache: memory.(service.ChatGPTUploadCache), releaseErr: errors.New("TEST_ONLY_REDIS_DOWN")}
+	uploads, ok := memory.(service.ChatGPTUploadCache)
+	require.True(f.t, ok)
+	wrapped := &chatGPTBoundUpdatesCache{ChatGPTTurnCache: memory, ChatGPTUploadCache: uploads, releaseErr: errors.New("TEST_ONLY_REDIS_DOWN")}
 	f.cache.ChatGPTTurnCache = wrapped
 	return wrapped
 }
