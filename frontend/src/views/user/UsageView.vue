@@ -39,7 +39,14 @@
             <div class="shrink-0 rounded-lg bg-green-100 p-1.5 dark:bg-green-900/30">
               <Icon name="dollar" size="sm" class="text-green-600 dark:text-green-400" />
             </div>
-            <UsageBillingSummary class="flex-1" :stats="usageStats" :base-cost="usageStats?.total_cost ?? null" />
+            <UsageBillingSummary class="flex-1" :stats="usageStats" :base-cost="usageStats?.total_cost ?? null">
+              <template #extra>
+                <span v-if="usageStats?.total_metered_cost" :title="t('hostedUsage.hint')" data-testid="usage-hosted-total">
+                  {{ t('hostedUsage.total') }}
+                  <span class="font-medium text-gray-700 dark:text-gray-300">${{ usageStats.total_metered_cost.toFixed(4) }}</span>
+                </span>
+              </template>
+            </UsageBillingSummary>
           </div>
 
           <!-- Average Duration -->
@@ -466,7 +473,7 @@
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.rate') }}</span>
             <span class="font-semibold text-blue-400"
-              >{{ (tooltipData?.rate_multiplier || 1).toFixed(2) }}x</span
+              >{{ (tooltipData?.rate_multiplier ?? 1).toFixed(2) }}x</span
             >
           </div>
           <div class="flex items-center justify-between gap-6">
@@ -490,6 +497,10 @@
             <span class="font-semibold text-green-400"
               >${{ tooltipData?.actual_cost.toFixed(6) }}</span
             >
+          </div>
+          <div v-if="tooltipData?.metered_cost != null" class="flex items-center justify-between gap-6" data-testid="tooltip-hosted-usage">
+            <span class="text-gray-400">{{ t('hostedUsage.total') }}</span>
+            <span class="font-medium text-gray-300">${{ tooltipData.metered_cost.toFixed(6) }}</span>
           </div>
         </div>
         <!-- Tooltip Arrow (left side) -->

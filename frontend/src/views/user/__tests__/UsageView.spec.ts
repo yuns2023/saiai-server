@@ -224,6 +224,85 @@ describe('user UsageView tooltip', () => {
     expect(text).toContain('$0.2500 / 1M tokens')
   })
 
+  it('shows a zero group rate and the hosted usage line for hosted rows', async () => {
+    query.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStatsByDateRange.mockResolvedValue({ total_requests: 1, total_tokens: 100, total_cost: 0.5, total_metered_cost: 0.5 })
+    list.mockResolvedValue({ items: [] })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          TablePageLayout: TablePageLayoutStub,
+          Pagination: true,
+          EmptyState: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="usage-hosted-total"]').text().replace(/\s+/g, '')).toBe('hostedUsage.total$0.5000')
+
+    const setupState = (wrapper.vm as any).$?.setupState
+    setupState.tooltipData = {
+      request_id: 'req-hosted-1',
+      actual_cost: 0,
+      billing_type: 0,
+      total_cost: 0.123456,
+      metered_cost: 0.123456,
+      rate_multiplier: 0,
+      model_rate_multiplier: 1,
+      user_payg_discount_multiplier: 1,
+      input_cost: 0.123456,
+      output_cost: 0,
+      cache_creation_cost: 0,
+      cache_creation_5m_cost: 0,
+      cache_creation_1h_cost: 0,
+      cache_read_cost: 0,
+      input_tokens: 1000,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+    }
+    setupState.tooltipVisible = true
+    await nextTick()
+
+    const text = wrapper.text()
+    expect(text).toContain('0.00x')
+    expect(text).not.toContain('Rate1.00x')
+    expect(wrapper.get('[data-testid="tooltip-hosted-usage"]').text().replace(/\s+/g, '')).toBe('hostedUsage.total$0.123456')
+
+    setupState.tooltipData = { ...setupState.tooltipData, metered_cost: null, rate_multiplier: 1 }
+    await nextTick()
+    expect(wrapper.find('[data-testid="tooltip-hosted-usage"]').exists()).toBe(false)
+  })
+
+  it('hides the hosted total when the filtered stats have no hosted rows', async () => {
+    query.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStatsByDateRange.mockResolvedValue({ total_requests: 1, total_tokens: 100, total_cost: 0.5 })
+    list.mockResolvedValue({ items: [] })
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          TablePageLayout: TablePageLayoutStub,
+          Pagination: true,
+          EmptyState: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-hosted-total"]').exists()).toBe(false)
+  })
+
   it('exports csv with input and output unit price columns', async () => {
     const exportedLogs = [
       {

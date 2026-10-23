@@ -265,6 +265,7 @@ type UsageStats struct {
 	TotalSubscriptionCost    float64        `json:"total_subscription_cost"`
 	TotalUnclassifiedCost    float64        `json:"total_unclassified_cost"`
 	TotalAccountCost         *float64       `json:"total_account_cost,omitempty"`
+	TotalMeteredCost         *float64       `json:"total_metered_cost,omitempty"` // hosted SUM(metered_cost); user/API-key scopes only, nil without hosted rows
 	AverageDurationMs        float64        `json:"average_duration_ms"`
 	Endpoints                []EndpointStat `json:"endpoints,omitempty"`
 	UpstreamEndpoints        []EndpointStat `json:"upstream_endpoints,omitempty"`

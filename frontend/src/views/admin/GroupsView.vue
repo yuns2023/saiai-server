@@ -377,7 +377,7 @@
             v-model.number="createForm.rate_multiplier"
             type="number"
             step="0.001"
-            min="0.001"
+            min="0"
             required
             class="input"
             data-tour="group-form-multiplier"
@@ -448,11 +448,19 @@
             <input
               v-model="createForm.hosted_usage_enabled"
               type="checkbox"
-              :disabled="!createForm.hosted_usage_enabled && (!createForm.is_exclusive || createForm.subscription_type !== 'standard' || Number(createForm.rate_multiplier) !== 0)"
+              :disabled="!createForm.hosted_usage_enabled && !isHostedUsageEligible(createForm)"
+              data-testid="hosted-usage-checkbox"
             />
             <span>{{ t('hostedUsage.adminLabel') }}</span>
           </label>
           <p class="input-hint">{{ t('hostedUsage.adminHint') }}</p>
+          <p
+            v-if="!createForm.hosted_usage_enabled && !isHostedUsageEligible(createForm)"
+            class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+            data-testid="hosted-usage-blocked-reason"
+          >
+            {{ t('hostedUsage.adminBlockedReason') }}
+          </p>
         </div>
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1125,7 +1133,7 @@
             v-model.number="editForm.rate_multiplier"
             type="number"
             step="0.001"
-            min="0.001"
+            min="0"
             required
             class="input"
             data-tour="group-form-multiplier"
@@ -1199,11 +1207,19 @@
             <input
               v-model="editForm.hosted_usage_enabled"
               type="checkbox"
-              :disabled="!editForm.hosted_usage_enabled && (!editForm.is_exclusive || editForm.subscription_type !== 'standard' || Number(editForm.rate_multiplier) !== 0)"
+              :disabled="!editForm.hosted_usage_enabled && !isHostedUsageEligible(editForm)"
+              data-testid="hosted-usage-checkbox"
             />
             <span>{{ t('hostedUsage.adminLabel') }}</span>
           </label>
           <p class="input-hint">{{ t('hostedUsage.adminHint') }}</p>
+          <p
+            v-if="!editForm.hosted_usage_enabled && !isHostedUsageEligible(editForm)"
+            class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+            data-testid="hosted-usage-blocked-reason"
+          >
+            {{ t('hostedUsage.adminBlockedReason') }}
+          </p>
         </div>
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1905,6 +1921,7 @@ import ModerationPolicyEditor from '@/components/admin/group/ModerationPolicyEdi
 import GroupCapacityBadge from '@/components/common/GroupCapacityBadge.vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
+import { isHostedUsageEligible } from '@/utils/hostedUsage'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 

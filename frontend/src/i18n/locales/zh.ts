@@ -2,9 +2,11 @@ export default {
   hostedUsage: {
     adminLabel: '托管账号独立计量',
     adminHint: '仅限零倍率的 OpenAI 专属普通分组。所有获授权用户免扣平台余额，Key 按标准折算用量执行限额；托管请求不计平台账号成本。不会清空或追补已有计数。',
+    adminBlockedReason: '需先将费率倍数设为 0，且为专属普通分组。',
     badge: '托管 · 免平台扣费',
     reference: '折算用量',
     hint: '按每次请求记录的模型价格折算，不扣平台余额；与上游账号额度百分比分别统计。启用前记录保持原有口径。',
+    total: '托管用量',
     windowLimit: '周期用量限额'
   },
 

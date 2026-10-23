@@ -65,3 +65,40 @@ func TestUserUsageStatsIncludesCacheBreakdown(t *testing.T) {
 	require.Equal(t, int64(21620), stats.TotalTokens)
 	require.Equal(t, stats.TotalTokens, stats.TotalInputTokens+stats.TotalOutputTokens+stats.TotalCacheReadTokens+stats.TotalCacheCreationTokens)
 }
+
+type usageHostedTotalsRepoStub struct {
+	usageTokenTotalsRepoStub
+	metered *float64
+}
+
+func (s usageHostedTotalsRepoStub) GetUserStatsAggregated(context.Context, int64, time.Time, time.Time) (*usagestats.UsageStats, error) {
+	return &usagestats.UsageStats{TotalRequests: 1, TotalCost: 1.25, TotalMeteredCost: s.metered}, nil
+}
+
+func TestUserUsageStatsExposesHostedMeteredTotalOnlyWhenPresent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	metered := 1.25
+	for name, value := range map[string]*float64{"hosted": &metered, "none": nil} {
+		t.Run(name, func(t *testing.T) {
+			svc := service.NewUsageService(usageHostedTotalsRepoStub{metered: value}, nil, nil, nil)
+			h := NewUsageHandler(svc, nil)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/usage/stats?period=week", nil)
+			c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 7})
+			h.Stats(c)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var response struct {
+				Data map[string]any `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			got, ok := response.Data["total_metered_cost"]
+			if value == nil {
+				require.False(t, ok, "total_metered_cost must be omitted without hosted rows")
+				return
+			}
+			require.True(t, ok)
+			require.InDelta(t, 1.25, got, 1e-9)
+		})
+	}
+}
