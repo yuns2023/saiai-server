@@ -1,0 +1,438 @@
+{
+ "shape_id": "04_default_model_http_sse",
+ "tls_stack_inferred": "OpenSSL-3.x (native-tls, vendored)",
+ "codex_ca_env_mode": [
+  "default"
+ ],
+ "used_for": {
+  "control:GET /backend-api/codex/models": 24,
+  "control:GET /backend-api/wham/accounts/check": 6,
+  "control:GET /backend-api/ps/plugins/suggested/codex": 30,
+  "control:GET /backend-api/ps/plugins/installed": 9,
+  "control:GET /backend-api/ps/plugins/list": 5,
+  "no_request": 9,
+  "control:POST /backend-api/codex/analytics-events/events": 12,
+  "control:GET /backend-api/wham/settings/user": 6,
+  "model_http_sse": 3,
+  "control:POST /backend-api/ps/mcp": 6,
+  "other_host:ab.chatgpt.com:443": 6,
+  "control:GET /backend-api/plugins/featured": 1
+ },
+ "runs": [
+  "default-http-1",
+  "default-http-2",
+  "default-http-3",
+  "default-ws-1",
+  "default-ws-2",
+  "default-ws-3"
+ ],
+ "samples": 117,
+ "clienthello_total_bytes_seen": [
+  1542,
+  1545
+ ],
+ "records": [
+  {
+   "content_type": 22,
+   "record_version": "0x0301",
+   "length": 1537
+  }
+ ],
+ "legacy_version": "0x0303",
+ "legacy_session_id_len": 32,
+ "cipher_suites": [
+  {
+   "id": "0x1302",
+   "name": "TLS_AES_256_GCM_SHA384"
+  },
+  {
+   "id": "0x1303",
+   "name": "TLS_CHACHA20_POLY1305_SHA256"
+  },
+  {
+   "id": "0x1301",
+   "name": "TLS_AES_128_GCM_SHA256"
+  },
+  {
+   "id": "0xc02c",
+   "name": "ECDHE_ECDSA_AES_256_GCM_SHA384"
+  },
+  {
+   "id": "0xc030",
+   "name": "ECDHE_RSA_AES_256_GCM_SHA384"
+  },
+  {
+   "id": "0x009f",
+   "name": "DHE_RSA_AES_256_GCM_SHA384"
+  },
+  {
+   "id": "0xcca9",
+   "name": "ECDHE_ECDSA_CHACHA20_POLY1305"
+  },
+  {
+   "id": "0xcca8",
+   "name": "ECDHE_RSA_CHACHA20_POLY1305"
+  },
+  {
+   "id": "0xccaa",
+   "name": "DHE_RSA_CHACHA20_POLY1305"
+  },
+  {
+   "id": "0xc02b",
+   "name": "ECDHE_ECDSA_AES_128_GCM_SHA256"
+  },
+  {
+   "id": "0xc02f",
+   "name": "ECDHE_RSA_AES_128_GCM_SHA256"
+  },
+  {
+   "id": "0x009e",
+   "name": "DHE_RSA_AES_128_GCM_SHA256"
+  },
+  {
+   "id": "0xc024",
+   "name": "ECDHE_ECDSA_AES_256_CBC_SHA384"
+  },
+  {
+   "id": "0xc028",
+   "name": "ECDHE_RSA_AES_256_CBC_SHA384"
+  },
+  {
+   "id": "0x006b",
+   "name": "DHE_RSA_AES_256_CBC_SHA256"
+  },
+  {
+   "id": "0xc023",
+   "name": "ECDHE_ECDSA_AES_128_CBC_SHA256"
+  },
+  {
+   "id": "0xc027",
+   "name": "ECDHE_RSA_AES_128_CBC_SHA256"
+  },
+  {
+   "id": "0x0067",
+   "name": "DHE_RSA_AES_128_CBC_SHA256"
+  },
+  {
+   "id": "0xc00a",
+   "name": "ECDHE_ECDSA_AES_256_CBC_SHA"
+  },
+  {
+   "id": "0xc014",
+   "name": "ECDHE_RSA_AES_256_CBC_SHA"
+  },
+  {
+   "id": "0x0039",
+   "name": "DHE_RSA_AES_256_CBC_SHA"
+  },
+  {
+   "id": "0xc009",
+   "name": "ECDHE_ECDSA_AES_128_CBC_SHA"
+  },
+  {
+   "id": "0xc013",
+   "name": "ECDHE_RSA_AES_128_CBC_SHA"
+  },
+  {
+   "id": "0x0033",
+   "name": "DHE_RSA_AES_128_CBC_SHA"
+  },
+  {
+   "id": "0x009d",
+   "name": "RSA_AES_256_GCM_SHA384"
+  },
+  {
+   "id": "0x009c",
+   "name": "RSA_AES_128_GCM_SHA256"
+  },
+  {
+   "id": "0x003d",
+   "name": "RSA_AES_256_CBC_SHA256"
+  },
+  {
+   "id": "0x003c",
+   "name": "RSA_AES_128_CBC_SHA256"
+  },
+  {
+   "id": "0x0035",
+   "name": "RSA_AES_256_CBC_SHA"
+  },
+  {
+   "id": "0x002f",
+   "name": "RSA_AES_128_CBC_SHA"
+  }
+ ],
+ "compression_methods": [
+  0
+ ],
+ "extensions_example_order": [
+  {
+   "id": 65281,
+   "hex": "0xff01",
+   "name": "renegotiation_info",
+   "len": 1,
+   "renegotiated_connection_len": 0
+  },
+  {
+   "id": 0,
+   "hex": "0x0000",
+   "name": "server_name",
+   "len": 16,
+   "sni": "chatgpt.com"
+  },
+  {
+   "id": 11,
+   "hex": "0x000b",
+   "name": "ec_point_formats",
+   "len": 2,
+   "formats": [
+    0
+   ]
+  },
+  {
+   "id": 10,
+   "hex": "0x000a",
+   "name": "supported_groups",
+   "len": 18,
+   "groups": [
+    {
+     "id": "0x11ec",
+     "name": "X25519MLKEM768"
+    },
+    {
+     "id": "0x001d",
+     "name": "x25519"
+    },
+    {
+     "id": "0x0017",
+     "name": "secp256r1"
+    },
+    {
+     "id": "0x001e",
+     "name": "x448"
+    },
+    {
+     "id": "0x0018",
+     "name": "secp384r1"
+    },
+    {
+     "id": "0x0019",
+     "name": "secp521r1"
+    },
+    {
+     "id": "0x0100",
+     "name": "ffdhe2048"
+    },
+    {
+     "id": "0x0101",
+     "name": "ffdhe3072"
+    }
+   ]
+  },
+  {
+   "id": 35,
+   "hex": "0x0023",
+   "name": "session_ticket",
+   "len": 0
+  },
+  {
+   "id": 22,
+   "hex": "0x0016",
+   "name": "encrypt_then_mac",
+   "len": 0
+  },
+  {
+   "id": 23,
+   "hex": "0x0017",
+   "name": "extended_master_secret",
+   "len": 0
+  },
+  {
+   "id": 13,
+   "hex": "0x000d",
+   "name": "signature_algorithms",
+   "len": 54,
+   "algs": [
+    {
+     "id": "0x0905",
+     "name": "mldsa65"
+    },
+    {
+     "id": "0x0906",
+     "name": "mldsa87"
+    },
+    {
+     "id": "0x0904",
+     "name": "mldsa44"
+    },
+    {
+     "id": "0x0403",
+     "name": "ecdsa_secp256r1_sha256"
+    },
+    {
+     "id": "0x0503",
+     "name": "ecdsa_secp384r1_sha384"
+    },
+    {
+     "id": "0x0603",
+     "name": "ecdsa_secp521r1_sha512"
+    },
+    {
+     "id": "0x0807",
+     "name": "ed25519"
+    },
+    {
+     "id": "0x0808",
+     "name": "ed448"
+    },
+    {
+     "id": "0x081a",
+     "name": "ecdsa_brainpoolP256r1tls13_sha256"
+    },
+    {
+     "id": "0x081b",
+     "name": "ecdsa_brainpoolP384r1tls13_sha384"
+    },
+    {
+     "id": "0x081c",
+     "name": "ecdsa_brainpoolP512r1tls13_sha512"
+    },
+    {
+     "id": "0x0809",
+     "name": "rsa_pss_pss_sha256"
+    },
+    {
+     "id": "0x080a",
+     "name": "rsa_pss_pss_sha384"
+    },
+    {
+     "id": "0x080b",
+     "name": "rsa_pss_pss_sha512"
+    },
+    {
+     "id": "0x0804",
+     "name": "rsa_pss_rsae_sha256"
+    },
+    {
+     "id": "0x0805",
+     "name": "rsa_pss_rsae_sha384"
+    },
+    {
+     "id": "0x0806",
+     "name": "rsa_pss_rsae_sha512"
+    },
+    {
+     "id": "0x0401",
+     "name": "rsa_pkcs1_sha256"
+    },
+    {
+     "id": "0x0501",
+     "name": "rsa_pkcs1_sha384"
+    },
+    {
+     "id": "0x0601",
+     "name": "rsa_pkcs1_sha512"
+    },
+    {
+     "id": "0x0303",
+     "name": "sha224_ecdsa"
+    },
+    {
+     "id": "0x0301",
+     "name": "sha224_rsa"
+    },
+    {
+     "id": "0x0302",
+     "name": "sha224_dsa"
+    },
+    {
+     "id": "0x0402",
+     "name": "dsa_sha256"
+    },
+    {
+     "id": "0x0502",
+     "name": "dsa_sha384"
+    },
+    {
+     "id": "0x0602",
+     "name": "dsa_sha512"
+    }
+   ]
+  },
+  {
+   "id": 43,
+   "hex": "0x002b",
+   "name": "supported_versions",
+   "len": 5,
+   "versions": [
+    "TLS1.3",
+    "TLS1.2"
+   ]
+  },
+  {
+   "id": 45,
+   "hex": "0x002d",
+   "name": "psk_key_exchange_modes",
+   "len": 2,
+   "modes": [
+    1
+   ]
+  },
+  {
+   "id": 51,
+   "hex": "0x0033",
+   "name": "key_share",
+   "len": 1258,
+   "key_shares": [
+    {
+     "group": "0x11ec",
+     "name": "X25519MLKEM768",
+     "key_len": 1216
+    },
+    {
+     "group": "0x001d",
+     "name": "x25519",
+     "key_len": 32
+    }
+   ]
+  }
+ ],
+ "extension_orders_seen": {
+  "65281,0,11,10,35,22,23,13,43,45,51": 117
+ },
+ "extension_order_randomized": false,
+ "grease": false,
+ "ja3_example": "771,4866-4867-4865-49196-49200-159-52393-52392-52394-49195-49199-158-49188-49192-107-49187-49191-103-49162-49172-57-49161-49171-51-157-156-61-60-53-47,65281-0-11-10-35-22-23-13-43-45-51,4588-29-23-30-24-25-256-257,0",
+ "ja3_md5_seen": [
+  "0b85eb0d4981e69064e40753e4f0ac5f"
+ ],
+ "ja3n_md5_sorted_exts": "97da657c26297bdaa441f1f09c61a2ca",
+ "ja4": "t13d301100_1d37bd780c83_8e6e362c5eac",
+ "ja4_r": "t13d301100_002f,0033,0035,0039,003c,003d,0067,006b,009c,009d,009e,009f,1301,1302,1303,c009,c00a,c013,c014,c023,c024,c027,c028,c02b,c02c,c02f,c030,cca8,cca9,ccaa_000a,000b,000d,0016,0017,0023,002b,002d,0033,ff01_0905,0906,0904,0403,0503,0603,0807,0808,081a,081b,081c,0809,080a,080b,0804,0805,0806,0401,0501,0601,0303,0301,0302,0402,0502,0602",
+ "server_negotiated_with_go_mock": {
+  "alpn=- curve=X25519MLKEM768 resumed=False": 111,
+  "alpn=- curve=None resumed=None": 6
+ },
+ "model_request_header_names": {
+  "model_http_sse": [
+   "accept",
+   "authorization",
+   "chatgpt-account-id",
+   "content-encoding",
+   "content-length",
+   "content-type",
+   "host",
+   "originator",
+   "session-id",
+   "thread-id",
+   "user-agent",
+   "version",
+   "x-client-request-id",
+   "x-codex-beta-features",
+   "x-codex-routing-hint",
+   "x-codex-turn-metadata",
+   "x-codex-window-id",
+   "x-openai-internal-codex-responses-lite"
+  ]
+ }
+}

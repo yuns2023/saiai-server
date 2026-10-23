@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -124,6 +125,14 @@ func WriteOpenAIProviderAttemptBudgetError(c *gin.Context, err error) bool {
 }
 
 func (s *OpenAIGatewayService) doOpenAIUpstream(req *http.Request, proxyURL string, accountID int64, concurrency int) (*http.Response, error) {
+	return s.doOpenAIUpstreamWithPolicy(req, proxyURL, accountID, concurrency, tlsfingerprint.TransportPolicy{})
+}
+
+// doOpenAIUpstreamWithPolicy is doOpenAIUpstream with an explicit TLS
+// transport policy. Callers choose the policy per request purpose (Codex
+// /responses vs. ChatGPT conversation/images); the attempt budget, no-redirect
+// and no-replay semantics are identical for every policy.
+func (s *OpenAIGatewayService) doOpenAIUpstreamWithPolicy(req *http.Request, proxyURL string, accountID int64, concurrency int, policy tlsfingerprint.TransportPolicy) (*http.Response, error) {
 	if err := reserveOpenAIProviderAttempt(req.Context()); err != nil {
 		return nil, err
 	}
@@ -134,7 +143,7 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(req *http.Request, proxyURL stri
 		req = req.WithContext(WithNativeCodexRedirectPolicy(req.Context()))
 		req.GetBody = nil
 	}
-	return s.httpUpstream.Do(req, proxyURL, accountID, concurrency)
+	return doWithTransportPolicy(s.httpUpstream, req, proxyURL, accountID, concurrency, policy)
 }
 
 // Passthrough frames remain opaque: every outgoing application frame spends

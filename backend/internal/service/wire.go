@@ -296,9 +296,27 @@ func ProvideAccountUsageService(
 	cache *UsageCache,
 	identityCache IdentityCache,
 	rateLimits *RateLimitService,
+	cfg *config.Config,
+	httpUpstream HTTPUpstream,
 ) *AccountUsageService {
 	svc := NewAccountUsageService(accountRepo, usageLogRepo, usageFetcher, geminiQuotaService, antigravityQuotaFetcher, cache, identityCache)
 	svc.SetRateLimitService(rateLimits)
+	svc.SetCodexTransport(cfg, httpUpstream)
+	return svc
+}
+
+// ProvideOpenAIQuotaResetService wires the opt-in Codex TLS identity into the
+// /wham quota reset control requests.
+func ProvideOpenAIQuotaResetService(
+	accounts AccountRepository,
+	proxies ProxyRepository,
+	tokens *OpenAITokenProvider,
+	rateLimits *RateLimitService,
+	cfg *config.Config,
+	httpUpstream HTTPUpstream,
+) *OpenAIQuotaResetService {
+	svc := NewOpenAIQuotaResetService(accounts, proxies, tokens, rateLimits)
+	svc.SetCodexTransport(cfg, httpUpstream)
 	return svc
 }
 
@@ -525,7 +543,7 @@ var ProviderSet = wire.NewSet(
 	ProvideClaudeTokenProvider,
 	ProvideRateLimitService,
 	ProvideAccountUsageService,
-	NewOpenAIQuotaResetService,
+	ProvideOpenAIQuotaResetService,
 	NewHostedAccountService,
 	ProvideAccountTestService,
 	ProvideSettingService,

@@ -14,6 +14,9 @@ switch (default true) and the account switch. Profiles are selected automaticall
 from the current outbound Claude Code User-Agent, independently of account ID.
 Configuration changes require a process restart.
 Explicitly disabling the global switch selects the standard Go transport.
+OpenAI OAuth accounts use a separate, opt-in Codex fingerprint (default off);
+see [CODEX_TLS_FINGERPRINT.md](CODEX_TLS_FINGERPRINT.md). OpenAI accounts never
+receive the Claude profile.
 
 ## Minimum supported version and measured transition
 

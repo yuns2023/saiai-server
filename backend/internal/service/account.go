@@ -1524,6 +1524,18 @@ func (a *Account) IsTLSFingerprintEnabled() bool {
 	return true
 }
 
+// IsCodexTLSFingerprintEnabled reports whether this OpenAI OAuth account opted
+// in to Codex TLS fingerprint simulation. Unlike Anthropic accounts the
+// default is OFF: only an explicit extra.enable_tls_fingerprint=true enables
+// it. API-key and Codex native-relay accounts never use it.
+func (a *Account) IsCodexTLSFingerprintEnabled() bool {
+	if a == nil || !a.IsOpenAIOAuth() || a.IsOpenAICodexNativeRelay() || a.Extra == nil {
+		return false
+	}
+	enabled, ok := a.Extra["enable_tls_fingerprint"].(bool)
+	return ok && enabled
+}
+
 // GetUserMsgQueueMode 获取用户消息队列模式
 // "serialize" = 串行队列, "throttle" = 软性限速, "" = 未设置（使用全局配置）
 func (a *Account) GetUserMsgQueueMode() string {

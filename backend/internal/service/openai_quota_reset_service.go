@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 )
@@ -22,6 +23,15 @@ type OpenAIQuotaResetService struct {
 	tokens      *OpenAITokenProvider
 	rateLimits  *RateLimitService
 	baseURL     string
+	// codexTransport applies the opt-in Codex TLS identity to /wham calls.
+	codexTransport codexControlTransport
+}
+
+// SetCodexTransport enables the opt-in Codex TLS identity for /wham requests.
+func (s *OpenAIQuotaResetService) SetCodexTransport(cfg *config.Config, upstream HTTPUpstream) {
+	if s != nil {
+		s.codexTransport = codexControlTransport{cfg: cfg, upstream: upstream}
+	}
 }
 
 func NewOpenAIQuotaResetService(accounts AccountRepository, proxies ProxyRepository, tokens *OpenAITokenProvider, rateLimits *RateLimitService) *OpenAIQuotaResetService {
@@ -89,13 +99,22 @@ func (s *OpenAIQuotaResetService) request(ctx context.Context, account *Account,
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	pooled, err := httpclient.GetClient(httpclient.Options{ProxyURL: proxyURL, Timeout: 10 * time.Second, ResponseHeaderTimeout: 10 * time.Second})
-	if err != nil {
-		return resetError(http.StatusBadGateway, "CODEX_RESET_PROXY", "Unable to connect through the account proxy")
+	var resp *http.Response
+	if policy := s.codexTransport.policyFor(account); policy.Enabled() {
+		// Same no-redirect semantics as the legacy client; the 10s budget
+		// moves to the request context because the pool has no client timeout.
+		reqCtx, cancel := context.WithTimeout(WithNativeCodexRedirectPolicy(req.Context()), 10*time.Second)
+		defer cancel()
+		resp, err = s.codexTransport.do(req.WithContext(reqCtx), proxyURL, account, policy)
+	} else {
+		pooled, clientErr := httpclient.GetClient(httpclient.Options{ProxyURL: proxyURL, Timeout: 10 * time.Second, ResponseHeaderTimeout: 10 * time.Second})
+		if clientErr != nil {
+			return resetError(http.StatusBadGateway, "CODEX_RESET_PROXY", "Unable to connect through the account proxy")
+		}
+		client := *pooled
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		resp, err = client.Do(req)
 	}
-	client := *pooled
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	resp, err := client.Do(req)
 	if err != nil {
 		return resetError(http.StatusBadGateway, "CODEX_RESET_UNCERTAIN", "Codex control request failed; retry a reset with the same request ID")
 	}

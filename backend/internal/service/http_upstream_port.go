@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 )
 
 type nativeCodexRedirectPolicyKey struct{}
@@ -69,6 +72,31 @@ type HTTPUpstream interface {
 	//   - 调用方必须关闭 resp.Body，否则会导致连接泄漏
 	//   - TLS 指纹客户端与普通客户端使用不同的缓存键，互不影响
 	DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, enableTLSFingerprint bool) (*http.Response, error)
+}
+
+// HTTPUpstreamWithTransportPolicy is implemented by the production upstream.
+// The policy is an explicit transport identity (family + pinned baseline +
+// role); it is never inferred from request headers such as User-Agent.
+type HTTPUpstreamWithTransportPolicy interface {
+	DoWithTransportPolicy(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, policy tlsfingerprint.TransportPolicy) (*http.Response, error)
+}
+
+// ErrTransportPolicyUnsupported is returned when a TLS policy is requested
+// from an upstream that cannot honor it. Requests are never sent with a
+// different TLS stack than the one requested.
+var ErrTransportPolicyUnsupported = errors.New("upstream does not support TLS transport policies")
+
+// doWithTransportPolicy sends req with the standard transport for a zero
+// policy and with the policy transport otherwise.
+func doWithTransportPolicy(upstream HTTPUpstream, req *http.Request, proxyURL string, accountID int64, accountConcurrency int, policy tlsfingerprint.TransportPolicy) (*http.Response, error) {
+	if !policy.Enabled() {
+		return upstream.Do(req, proxyURL, accountID, accountConcurrency)
+	}
+	policyUpstream, ok := upstream.(HTTPUpstreamWithTransportPolicy)
+	if !ok {
+		return nil, ErrTransportPolicyUnsupported
+	}
+	return policyUpstream.DoWithTransportPolicy(req, proxyURL, accountID, accountConcurrency, policy)
 }
 
 // HTTPUpstreamTransportMetricsSnapshot exposes content-free connection-pool

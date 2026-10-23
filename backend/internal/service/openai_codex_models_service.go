@@ -18,6 +18,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -77,6 +78,9 @@ type codexModelsManifestRequest struct {
 	useAPIKeyUpstream     bool
 	nativeRelay           bool
 	preserveClientHeaders bool
+	// transportPolicy is the explicit TLS identity for the OAuth branch
+	// (zero = standard Go TLS through the shared httpclient pool).
+	transportPolicy tlsfingerprint.TransportPolicy
 }
 
 type codexModelsManifestCacheEntry struct {
@@ -263,6 +267,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifest(ctx context.Context, acc
 		useAPIKeyUpstream:     useAPIKeyUpstream,
 		nativeRelay:           nativeRelay,
 		preserveClientHeaders: preserveHeaders,
+		transportPolicy:       codexTransportPolicyFor(s.cfg, account, tlsfingerprint.RoleHTTP),
 	}
 	if nativeRelay {
 		return s.fetchCodexModelsManifestUpstream(ctx, request, ifNoneMatch)
@@ -338,6 +343,13 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_UPSTREAM_NOT_CONFIGURED", "Codex models upstream HTTP client is not configured")
 		}
 		resp, err = s.httpUpstream.Do(req, request.proxyURL, request.accountID, request.accountConcurrency)
+	} else if request.transportPolicy.Enabled() {
+		// Opted-in OAuth account: the Codex control-plane request uses the
+		// pinned Codex HTTP identity through the account's upstream pool.
+		if s.httpUpstream == nil {
+			return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_UPSTREAM_NOT_CONFIGURED", "Codex models upstream HTTP client is not configured")
+		}
+		resp, err = doWithTransportPolicy(s.httpUpstream, req, request.proxyURL, request.accountID, request.accountConcurrency, request.transportPolicy)
 	} else {
 		client, clientErr := httpclient.GetClient(httpclient.Options{
 			ProxyURL:              request.proxyURL,

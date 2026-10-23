@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	coderws "github.com/coder/websocket"
 	"golang.org/x/sync/errgroup"
 )
@@ -607,6 +608,12 @@ type openAIWSConnPool struct {
 	cfg *config.Config
 	// 通过接口解耦底层 WS 客户端实现，默认使用 coder/websocket。
 	clientDialer openAIWSClientDialer
+	// transportPolicyFor resolves the TLS transport policy from the account's
+	// CURRENT state at every new upstream dial (acquire, prewarm, long-lived
+	// sessions). Existing connections are reused regardless of the policy they
+	// were dialed with and drain through the normal lifetime/idle rules, so a
+	// toggle only affects newly dialed connections. nil = standard TLS.
+	transportPolicyFor func(ctx context.Context, account *Account) tlsfingerprint.TransportPolicy
 
 	accounts sync.Map // key: int64(accountID), value: *openAIWSAccountPool
 	seq      atomic.Uint64
@@ -1539,7 +1546,14 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	if p == nil || p.clientDialer == nil {
 		return nil, errors.New("openai ws client dialer is nil")
 	}
-	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, req.Headers, req.ProxyURL)
+	var policy tlsfingerprint.TransportPolicy
+	if p.transportPolicyFor != nil {
+		policy = p.transportPolicyFor(ctx, req.Account)
+	}
+	if policy.Enabled() {
+		logOpenAIWSModeDebug("pool_dial_tls_policy account_id=%d policy=%s", req.Account.ID, policy.Key())
+	}
+	conn, status, handshakeHeaders, err := dialOpenAIWS(ctx, p.clientDialer, req.WSURL, req.Headers, req.ProxyURL, policy)
 	if err != nil {
 		return nil, &openAIWSDialError{
 			StatusCode:      status,

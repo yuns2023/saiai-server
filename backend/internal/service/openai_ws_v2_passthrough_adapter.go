@@ -268,7 +268,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if account.IsOpenAIOAuth() || account.IsOpenAICodexNativeRelay() {
 		dialCtx = WithNativeCodexRedirectPolicy(dialCtx)
 	}
-	upstreamConn, statusCode, handshakeHeaders, err := dialer.Dial(dialCtx, wsURL, headers, proxyURL)
+	// Native relay accounts never get a policy (codexTransportPolicyFor
+	// returns the zero policy for them).
+	upstreamConn, statusCode, handshakeHeaders, err := dialOpenAIWS(dialCtx, dialer, wsURL, headers, proxyURL,
+		s.currentCodexWSTransportPolicy(dialCtx, account))
 	if err != nil {
 		logOpenAIWSV2Passthrough(
 			"relay_dial_failed account_id=%d status_code=%d err=%s",

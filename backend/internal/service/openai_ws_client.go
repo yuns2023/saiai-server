@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,6 +15,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/extracerts"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -45,14 +50,35 @@ type openAIWSClientDialer interface {
 	Dial(ctx context.Context, wsURL string, headers http.Header, proxyURL string) (openAIWSClientConn, int, http.Header, error)
 }
 
+// openAIWSPolicyDialer dials with an explicit TLS transport policy. The pool,
+// prewarm and v2 passthrough all go through dialOpenAIWS so the policy is
+// passed explicitly and never inferred from the client's headers.
+type openAIWSPolicyDialer interface {
+	DialWithPolicy(ctx context.Context, wsURL string, headers http.Header, proxyURL string, policy tlsfingerprint.TransportPolicy) (openAIWSClientConn, int, http.Header, error)
+}
+
+// dialOpenAIWS uses d.Dial for the zero policy. A non-zero policy requires a
+// policy-capable dialer; otherwise the dial fails (no std-TLS fallback).
+func dialOpenAIWS(ctx context.Context, d openAIWSClientDialer, wsURL string, headers http.Header, proxyURL string, policy tlsfingerprint.TransportPolicy) (openAIWSClientConn, int, http.Header, error) {
+	if !policy.Enabled() {
+		return d.Dial(ctx, wsURL, headers, proxyURL)
+	}
+	pd, ok := d.(openAIWSPolicyDialer)
+	if !ok {
+		return nil, 0, nil, ErrTransportPolicyUnsupported
+	}
+	return pd.DialWithPolicy(ctx, wsURL, headers, proxyURL, policy)
+}
+
 type openAIWSTransportMetricsDialer interface {
 	SnapshotTransportMetrics() OpenAIWSTransportMetricsSnapshot
 }
 
 func newDefaultOpenAIWSClientDialer() openAIWSClientDialer {
 	return &coderOpenAIWSClientDialer{
-		proxyClients: make(map[string]*openAIWSProxyClientEntry),
-		trace:        newOpenAIWSTraceFromEnv(),
+		proxyClients:  make(map[string]*openAIWSProxyClientEntry),
+		policyClients: make(map[string]*openAIWSProxyClientEntry),
+		trace:         newOpenAIWSTraceFromEnv(),
 	}
 }
 
@@ -61,7 +87,11 @@ type coderOpenAIWSClientDialer struct {
 	proxyClients map[string]*openAIWSProxyClientEntry
 	proxyHits    atomic.Int64
 	proxyMisses  atomic.Int64
-	trace        *openAIWSTrace
+	// policyClients caches TLS-policy clients by policy key + proxy. They are
+	// deliberately excluded from the proxy-client metrics above, which keep
+	// meaning "standard proxy client cache hit ratio".
+	policyClients map[string]*openAIWSProxyClientEntry
+	trace         *openAIWSTrace
 }
 
 type openAIWSProxyClientEntry struct {
@@ -74,6 +104,18 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	wsURL string,
 	headers http.Header,
 	proxyURL string,
+) (openAIWSClientConn, int, http.Header, error) {
+	return d.DialWithPolicy(ctx, wsURL, headers, proxyURL, tlsfingerprint.TransportPolicy{})
+}
+
+// DialWithPolicy dials like Dial; a non-zero policy replaces Go TLS (and Go's
+// proxy handling) with tlsfingerprint.PolicyDialer for the upgrade request.
+func (d *coderOpenAIWSClientDialer) DialWithPolicy(
+	ctx context.Context,
+	wsURL string,
+	headers http.Header,
+	proxyURL string,
+	policy tlsfingerprint.TransportPolicy,
 ) (openAIWSClientConn, int, http.Header, error) {
 	targetURL := strings.TrimSpace(wsURL)
 	if targetURL == "" {
@@ -93,7 +135,13 @@ func (d *coderOpenAIWSClientDialer) Dial(
 		HTTPHeader:      cloneHeader(headers),
 		CompressionMode: coderws.CompressionContextTakeover,
 	}
-	if proxy := strings.TrimSpace(proxyURL); proxy != "" {
+	if policy.Enabled() {
+		policyClient, err := d.policyHTTPClient(proxyURL, policy)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		opts.HTTPClient = policyClient
+	} else if proxy := strings.TrimSpace(proxyURL); proxy != "" {
 		proxyClient, err := d.proxyHTTPClient(proxy)
 		if err != nil {
 			return nil, 0, nil, err
@@ -204,8 +252,76 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 	return client, nil
 }
 
+var errOpenAIWSPolicyPlainConnection = errors.New("openai ws TLS policy transport refuses plain connections")
+
+// openAIWSPolicyRootCAs is the trust store for policy WS dials: system roots
+// plus SAIAI extra CAs (nil = system roots). Tests replace it.
+var openAIWSPolicyRootCAs = func() *x509.CertPool {
+	pool, _ := extracerts.RootCAs()
+	return pool
+}
+
+// policyHTTPClient returns a cached client whose transport dials TLS through
+// the policy dialer (direct, HTTP/HTTPS CONNECT or SOCKS5 inside the dialer,
+// Transport.Proxy=nil). HTTP/2 is disabled; the upgraded connection's 101
+// body remains the raw io.ReadWriteCloser that coder/websocket requires.
+func (d *coderOpenAIWSClientDialer) policyHTTPClient(proxy string, policy tlsfingerprint.TransportPolicy) (*http.Client, error) {
+	if d == nil {
+		return nil, errors.New("openai ws dialer is nil")
+	}
+	normalizedProxy, parsedProxyURL, err := proxyurl.Parse(proxy)
+	if err != nil {
+		return nil, err
+	}
+	key := policy.Key() + "|" + normalizedProxy
+	now := time.Now().UnixNano()
+
+	d.proxyMu.Lock()
+	defer d.proxyMu.Unlock()
+	if d.policyClients == nil {
+		d.policyClients = make(map[string]*openAIWSProxyClientEntry)
+	}
+	if entry, ok := d.policyClients[key]; ok && entry != nil && entry.client != nil {
+		entry.lastUsedUnixNano = now
+		return entry.client, nil
+	}
+	cleanupOpenAIWSClientCacheLocked(d.policyClients, now)
+	dialer, err := tlsfingerprint.NewPolicyDialer(policy, tlsfingerprint.PolicyDialerOptions{
+		ProxyURL:         parsedProxyURL,
+		RootCAs:          openAIWSPolicyRootCAs(),
+		HandshakeTimeout: 10 * time.Second,
+	})
+	if err != nil {
+		return nil, err
+	}
+	transport := &http.Transport{
+		// One TLS connection per upgrade, like the official client. A failed
+		// (non-101) handshake closes its connection instead of leaving it idle
+		// for a later upgrade of a different account. Go does not add
+		// "Connection: close" to protocol-switch requests.
+		DisableKeepAlives: true,
+		DialTLSContext:    dialer.DialTLSContext,
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errOpenAIWSPolicyPlainConnection
+		},
+		ForceAttemptHTTP2: false,
+		TLSNextProto:      map[string]func(string, *tls.Conn) http.RoundTripper{},
+	}
+	client := &http.Client{Transport: transport}
+	d.policyClients[key] = &openAIWSProxyClientEntry{client: client, lastUsedUnixNano: now}
+	ensureOpenAIWSClientCacheCapacityLocked(d.policyClients)
+	return client, nil
+}
+
 func (d *coderOpenAIWSClientDialer) cleanupProxyClientsLocked(nowUnixNano int64) {
-	if d == nil || len(d.proxyClients) == 0 {
+	if d == nil {
+		return
+	}
+	cleanupOpenAIWSClientCacheLocked(d.proxyClients, nowUnixNano)
+}
+
+func cleanupOpenAIWSClientCacheLocked(clients map[string]*openAIWSProxyClientEntry, nowUnixNano int64) {
+	if len(clients) == 0 {
 		return
 	}
 	idleTTL := openAIWSProxyClientCacheIdleTTL
@@ -213,15 +329,15 @@ func (d *coderOpenAIWSClientDialer) cleanupProxyClientsLocked(nowUnixNano int64)
 		return
 	}
 	now := time.Unix(0, nowUnixNano)
-	for key, entry := range d.proxyClients {
+	for key, entry := range clients {
 		if entry == nil || entry.client == nil {
-			delete(d.proxyClients, key)
+			delete(clients, key)
 			continue
 		}
 		lastUsed := time.Unix(0, entry.lastUsedUnixNano)
 		if now.Sub(lastUsed) > idleTTL {
 			closeOpenAIWSProxyClient(entry.client)
-			delete(d.proxyClients, key)
+			delete(clients, key)
 		}
 	}
 }
@@ -230,15 +346,19 @@ func (d *coderOpenAIWSClientDialer) ensureProxyClientCapacityLocked() {
 	if d == nil {
 		return
 	}
+	ensureOpenAIWSClientCacheCapacityLocked(d.proxyClients)
+}
+
+func ensureOpenAIWSClientCacheCapacityLocked(clients map[string]*openAIWSProxyClientEntry) {
 	maxEntries := openAIWSProxyClientCacheMaxEntries
 	if maxEntries <= 0 {
 		return
 	}
-	for len(d.proxyClients) > maxEntries {
+	for len(clients) > maxEntries {
 		var oldestKey string
 		var oldestLastUsed int64
 		hasOldest := false
-		for key, entry := range d.proxyClients {
+		for key, entry := range clients {
 			lastUsed := int64(0)
 			if entry != nil {
 				lastUsed = entry.lastUsedUnixNano
@@ -252,10 +372,10 @@ func (d *coderOpenAIWSClientDialer) ensureProxyClientCapacityLocked() {
 		if !hasOldest {
 			return
 		}
-		if entry := d.proxyClients[oldestKey]; entry != nil {
+		if entry := clients[oldestKey]; entry != nil {
 			closeOpenAIWSProxyClient(entry.client)
 		}
-		delete(d.proxyClients, oldestKey)
+		delete(clients, oldestKey)
 	}
 }
 
