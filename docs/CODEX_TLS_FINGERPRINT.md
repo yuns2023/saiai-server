@@ -103,8 +103,10 @@ custom UA, default Codex UA for non-Codex clients, native pass-through):
 
 The policy carries only `{Family, Baseline, Role}`; the raw UA is never part
 of a policy, cache key or pool key. Transport/client cache keys use
-`policy.Key()` (`codex/<baseline>/<role>`), so clients of different versions
-or platforms on one account get separate HTTP pools and WS clients. The
+`policy.Key()` (`codex/<baseline>/<role>`), so requests that select
+different **baselines** get separate HTTP pools and WS clients; versions and
+platforms that map to the same baseline (e.g. Windows 0.137 and Windows 0.163
+HTTP, or every ≥ 0.156 WS client) share one pool. The
 WebSocket **connection** pool is per account and, as before, reuses an idle
 upstream connection for a later session regardless of the policy it was
 dialed with (the same already applies to the upgrade headers, including the
@@ -421,4 +423,8 @@ pinned one), add fixtures and tests, add a rule to `codexBaselineRules`
 (`codex_selection.go`) with the first affected version as lower bound and,
 if it is the newest, switch `CodexHTTPTransportPolicy` /
 `CodexWSTransportPolicy` (the unparsable-UA default). The policy key includes
-the baseline, so pools and WebSocket connections roll over automatically.
+the baseline, so HTTP pools and WebSocket clients roll over automatically for
+**new dials**. Already-upgraded WebSocket connections keep the baseline (and
+upgrade UA) they were dialed with for their whole lifetime and are still
+reused by the per-account pool until they age out or close (see "Toggle
+semantics").

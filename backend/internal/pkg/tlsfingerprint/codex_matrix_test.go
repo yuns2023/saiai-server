@@ -9,13 +9,16 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/binary"
+	"errors"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -307,17 +310,21 @@ func TestCodexTLS12OnlyBaselinesFailLoudly(t *testing.T) {
 				t.Fatalf("client sent %d handshake records, want exactly the one hello", n)
 			}
 		})
-		for name, suite := range map[string]uint16{
-			"ecdhe_ecdsa_3des":       0xc008, // advertised by Secure Transport, not implemented
-			"ecdhe_ecdsa_cbc_sha384": 0xc024, // advertised, not implemented
-			"tls13_suite_in_tls12":   0x1301,
-			"unadvertised_dhe_suite": 0x009f,
+		for _, tc := range []struct {
+			name  string
+			suite uint16
+			want  string // the specific client-side rejection
+		}{
+			{"ecdhe_ecdsa_3des", 0xc008, "server chose an unconfigured cipher suite"},       // advertised by Secure Transport, not implemented
+			{"ecdhe_ecdsa_cbc_sha384", 0xc024, "server chose an unconfigured cipher suite"}, // advertised, not implemented
+			{"tls13_suite_in_tls12", 0x1301, "server chose an unconfigured cipher suite"},
+			{"unadvertised_dhe_suite", 0x009f, "server chose an unconfigured cipher suite"},
 		} {
-			t.Run(b+"/"+name, func(t *testing.T) {
-				addr, rest := scriptedServer(t, func(sid []byte) []byte {
-					return serverHelloRecord(make([]byte, 32), sid, suite, nil)
+			t.Run(b+"/"+tc.name, func(t *testing.T) {
+				srv := newCountingScriptedServer(t, func(sid []byte) []byte {
+					return serverHelloRecord(make([]byte, 32), sid, tc.suite, nil)
 				})
-				d := directDialer(t, p, addr, x509.NewCertPool())
+				d := directDialer(t, p, srv.addr, x509.NewCertPool())
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				conn, err := d.DialTLSContext(ctx, "tcp", "example.com:443")
@@ -325,15 +332,137 @@ func TestCodexTLS12OnlyBaselinesFailLoudly(t *testing.T) {
 					_ = conn.Close()
 					t.Fatal("unsupported selection must fail the dial")
 				}
-				after := <-rest
+				// Only the specific rejection counts: a timeout or EOF would
+				// mean the client never evaluated the ServerHello.
+				msg := err.Error()
+				if !strings.Contains(msg, tc.want) || errors.Is(err, context.DeadlineExceeded) ||
+					errors.Is(err, io.EOF) || strings.Contains(msg, "timeout") {
+					t.Fatalf("dial error %q, want rejection %q", msg, tc.want)
+				}
+				after := srv.rest()
+				if len(after) < 7 || after[0] != 21 || after[5] != 2 {
+					t.Fatalf("client must send a fatal alert, got %x", after)
+				}
 				for len(after) >= 5 {
 					if after[0] == 22 {
 						t.Fatalf("client sent another handshake record after failure: %x", after[:5])
 					}
 					after = after[5+int(binary.BigEndian.Uint16(after[3:5])):]
 				}
+				time.Sleep(50 * time.Millisecond)
+				if n := srv.accepts.Load(); n != 1 {
+					t.Fatalf("server saw %d connections, want 1 (no redial)", n)
+				}
 			})
 		}
+	}
+}
+
+// countingScriptedServer is scriptedServer that keeps accepting and counts
+// connections, so a silent redial would be visible.
+type countingScriptedServer struct {
+	addr    string
+	accepts atomic.Int32
+	first   chan []byte
+}
+
+func (s *countingScriptedServer) rest() []byte {
+	select {
+	case b := <-s.first:
+		return b
+	case <-time.After(5 * time.Second):
+		return nil
+	}
+}
+
+func newCountingScriptedServer(t *testing.T, reply func(sessionID []byte) []byte) *countingScriptedServer {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	s := &countingScriptedServer{addr: ln.Addr().String(), first: make(chan []byte, 1)}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			n := s.accepts.Add(1)
+			go func(c net.Conn, n int32) {
+				defer func() { _ = c.Close() }()
+				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+				hdr := make([]byte, 5)
+				if _, err := io.ReadFull(c, hdr); err != nil {
+					return
+				}
+				body := make([]byte, binary.BigEndian.Uint16(hdr[3:]))
+				if _, err := io.ReadFull(c, body); err != nil {
+					return
+				}
+				var sid []byte
+				if len(body) > 38 {
+					l := int(body[38])
+					sid = append([]byte(nil), body[39:39+l]...)
+				}
+				_, _ = c.Write(reply(sid))
+				after, _ := io.ReadAll(c)
+				if n == 1 {
+					s.first <- after
+				}
+			}(c, n)
+		}
+	}()
+	return s
+}
+
+// helloRecordVersionConn rewrites exactly the first write and passes every
+// later write through untouched; a first write that is not a ClientHello
+// record is refused without sending anything.
+func TestHelloRecordVersionConnBoundaries(t *testing.T) {
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = server.Close() }()
+	got := make(chan []byte, 2)
+	go func() {
+		for i := 0; i < 2; i++ {
+			buf := make([]byte, 64)
+			n, err := server.Read(buf)
+			if err != nil {
+				return
+			}
+			got <- buf[:n]
+		}
+	}()
+	w := &helloRecordVersionConn{Conn: client, version: 0x0303}
+	first := []byte{22, 3, 1, 0, 1, 1}
+	if n, err := w.Write(first); err != nil || n != len(first) {
+		t.Fatalf("first write: %d %v", n, err)
+	}
+	if b := <-got; !bytes.Equal(b, []byte{22, 3, 3, 0, 1, 1}) {
+		t.Fatalf("first record %x", b)
+	}
+	if !bytes.Equal(first, []byte{22, 3, 1, 0, 1, 1}) {
+		t.Fatal("caller buffer mutated")
+	}
+	second := []byte{22, 3, 1, 0, 1, 2} // later records are never touched
+	if _, err := w.Write(second); err != nil {
+		t.Fatal(err)
+	}
+	if b := <-got; !bytes.Equal(b, second) {
+		t.Fatalf("second record %x", b)
+	}
+
+	for _, bad := range [][]byte{{23, 3, 1, 0, 1, 0}, {22, 3, 3, 0, 1, 0}, {22, 3}} {
+		c, s := net.Pipe()
+		w := &helloRecordVersionConn{Conn: c, version: 0x0303}
+		_ = c.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+		if n, err := w.Write(bad); err == nil || n != 0 {
+			t.Fatalf("first write %x must be refused, got %d %v", bad, n, err)
+		}
+		_ = c.Close()
+		_ = s.Close()
 	}
 }
 
