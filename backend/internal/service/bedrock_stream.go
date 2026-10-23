@@ -135,12 +135,16 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 				firstTokenMs = &ms
 			}
 
+			// Diagnostic observation reads the raw chunk before the metrics
+			// conversion, which coerces non-integer values into integers.
+			upstreamObs.observeBedrockStreamChunk(sseData)
+
 			// 转换 Bedrock 特有的 amazon-bedrock-invocationMetrics 为标准 Anthropic usage 格式
 			// 同时移除该字段避免透传给客户端
 			sseData = transformBedrockInvocationMetrics(sseData)
 
 			// 解析 SSE 事件数据提取 usage
-			s.parseSSEUsagePassthroughObserved(string(sseData), usage, &upstreamObs)
+			s.parseSSEUsagePassthrough(string(sseData), usage)
 
 			// 确定 SSE event type
 			eventType := gjson.GetBytes(sseData, "type").String()

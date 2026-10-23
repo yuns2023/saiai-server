@@ -98,7 +98,7 @@ func TestNonStreamingResponse_RecordsRefusalStopReasonWithZeroOutput(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, ClaudeUsage{InputTokens: 3, OutputTokens: 0, CacheCreationInputTokens: 200000}, *usage)
 	require.Equal(t, "refusal", stopReasonValue(obs.stopReason))
-	require.Equal(t, "0", outputTokensValue(obs.finalOutputTokens))
+	require.Equal(t, "0", outputTokensValue(obs.lastOutputTokens))
 	require.JSONEq(t, zeroOutputRefusalBody, rec.Body.String(), "observation must not alter the forwarded body")
 }
 
@@ -121,7 +121,7 @@ func TestNonStreamingResponse_BadStopReasonNeverBreaksForwarding(t *testing.T) {
 	c, _ := newStopReasonTestContext(t)
 	_, obs, err := svc.handleNonStreamingResponse(context.Background(), jsonResponse(`{"stop_reason":"end_turn","usage":{"input_tokens":3}}`), c, &Account{ID: 1}, "m", "m")
 	require.NoError(t, err)
-	require.Nil(t, obs.finalOutputTokens)
+	require.Nil(t, obs.lastOutputTokens)
 	require.Equal(t, "end_turn", stopReasonValue(obs.stopReason))
 }
 
@@ -134,7 +134,7 @@ func TestAnthropicAPIKeyPassthroughNonStreaming_RecordsStopReason(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, 200000, usage.CacheCreationInputTokens)
 	require.Equal(t, "refusal", stopReasonValue(obs.stopReason))
-	require.Equal(t, "0", outputTokensValue(obs.finalOutputTokens))
+	require.Equal(t, "0", outputTokensValue(obs.lastOutputTokens))
 	require.Equal(t, zeroOutputRefusalBody, rec.Body.String())
 }
 
@@ -148,7 +148,7 @@ func TestBedrockNonStreaming_RecordsStopReason(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 9, usage.OutputTokens)
 	require.Equal(t, "max_tokens", stopReasonValue(obs.stopReason))
-	require.Equal(t, "9", outputTokensValue(obs.finalOutputTokens))
+	require.Equal(t, "9", outputTokensValue(obs.lastOutputTokens))
 }
 
 func anthropicDeltaWithReason(reason string, outputTokens string) string {
@@ -173,7 +173,7 @@ func TestStreamingResponse_RecordsStopReasonOnNormalTerminal(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "end_turn", stopReasonValue(result.upstream.stopReason))
-	require.Equal(t, "7", outputTokensValue(result.upstream.finalOutputTokens))
+	require.Equal(t, "7", outputTokensValue(result.upstream.lastOutputTokens))
 	require.Equal(t, 7, result.usage.OutputTokens)
 }
 
@@ -189,7 +189,7 @@ func TestStreamingResponse_RecordsStopReasonOnGraceRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: message_stop"), "recovery behavior unchanged")
 	require.Equal(t, "end_turn", stopReasonValue(result.upstream.stopReason))
-	require.Equal(t, "0", outputTokensValue(result.upstream.finalOutputTokens))
+	require.Equal(t, "0", outputTokensValue(result.upstream.lastOutputTokens))
 }
 
 func TestStreamingResponse_KeepsStopReasonAfterClientDisconnectDrain(t *testing.T) {
@@ -244,7 +244,7 @@ func TestPassthroughStreaming_RecordsStopReasonAndIgnoresMessageStartOutput(t *t
 	result, err := svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "m")
 	require.NoError(t, err)
 	require.Equal(t, "refusal", stopReasonValue(result.upstream.stopReason))
-	require.Nil(t, result.upstream.finalOutputTokens)
+	require.Nil(t, result.upstream.lastOutputTokens)
 
 	// Explicit final output_tokens=0 is reported.
 	c, _ = newStopReasonTestContext(t)
@@ -259,7 +259,7 @@ func TestPassthroughStreaming_RecordsStopReasonAndIgnoresMessageStartOutput(t *t
 	resp = &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream))}
 	result, err = svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "m")
 	require.NoError(t, err)
-	require.Equal(t, "0", outputTokensValue(result.upstream.finalOutputTokens))
+	require.Equal(t, "0", outputTokensValue(result.upstream.lastOutputTokens))
 	require.Equal(t, 0, result.usage.OutputTokens)
 }
 
@@ -305,7 +305,7 @@ func TestBedrockStreaming_RecordsStopReason(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "stop_sequence", stopReasonValue(result.upstream.stopReason))
-	require.Equal(t, "6", outputTokensValue(result.upstream.finalOutputTokens))
+	require.Equal(t, "6", outputTokensValue(result.upstream.lastOutputTokens))
 	require.Equal(t, 6, result.usage.OutputTokens)
 }
 
@@ -347,7 +347,7 @@ func TestAnthropicPassthroughForward_DoesNotLeakStopReasonAcrossAttempts(t *test
 	result, err = svc.Forward(context.Background(), c2, account2, &ParsedRequest{Body: body, Model: "claude-sonnet-5"})
 	require.NoError(t, err)
 	require.Nil(t, result.StopReason)
-	require.Equal(t, "4", outputTokensValue(result.UpstreamFinalOutputTokens))
+	require.Equal(t, "4", outputTokensValue(result.UpstreamLastOutputTokens))
 
 	// A successful refusal attempt propagates to ForwardResult.
 	c3, _ := newStopReasonTestContext(t)
@@ -363,12 +363,12 @@ func TestLogZeroOutputUsage(t *testing.T) {
 	account := &Account{ID: 77, Platform: PlatformAnthropic}
 	base := func() *ForwardResult {
 		return &ForwardResult{
-			RequestID:                 "req_upstream_1",
-			Model:                     "claude-sonnet-5",
-			UpstreamModel:             "claude-sonnet-5-20261001",
-			Usage:                     ClaudeUsage{InputTokens: 3, CacheCreationInputTokens: 200000},
-			StopReason:                &refusal,
-			UpstreamFinalOutputTokens: observedInt64(0),
+			RequestID:                "req_upstream_1",
+			Model:                    "claude-sonnet-5",
+			UpstreamModel:            "claude-sonnet-5-20261001",
+			Usage:                    ClaudeUsage{InputTokens: 3, CacheCreationInputTokens: 200000},
+			StopReason:               &refusal,
+			UpstreamLastOutputTokens: observedInt64(0),
 		}
 	}
 
@@ -400,12 +400,12 @@ func TestLogZeroOutputUsage(t *testing.T) {
 	require.Equal(t, false, fields["client_disconnect"])
 
 	missing := base()
-	missing.UpstreamFinalOutputTokens = nil
+	missing.UpstreamLastOutputTokens = nil
 	require.Zero(t, capture(missing).Len(), "missing output_tokens is not an explicit zero")
 
 	positive := base()
 	positive.Usage.OutputTokens = 1
-	positive.UpstreamFinalOutputTokens = observedInt64(1)
+	positive.UpstreamLastOutputTokens = observedInt64(1)
 	require.Zero(t, capture(positive).Len())
 
 	empty := base()
@@ -422,7 +422,7 @@ func TestLogZeroOutputUsage(t *testing.T) {
 	require.Zero(t, capture(nil).Len())
 
 	negative := base()
-	negative.UpstreamFinalOutputTokens = observedInt64(-1)
+	negative.UpstreamLastOutputTokens = observedInt64(-1)
 	require.Zero(t, capture(negative).Len(), "only an explicit 0 counts")
 
 	// Final raw value wins even if the merged billing usage kept an earlier
@@ -441,7 +441,7 @@ func TestNumericOutputTokensRejectsNonIntegers(t *testing.T) {
 	require.Equal(t, "0", outputTokensValue(numericOutputTokens(gjson.Get(`{"v":0}`, "v"))))
 	require.Equal(t, "12", outputTokensValue(numericOutputTokens(gjson.Get(`{"v":12}`, "v"))))
 	obs := observeAnthropicNonStreamBody([]byte(`{"stop_reason":"refusal","usage":{"input_tokens":3,"output_tokens":0.5}}`))
-	require.Nil(t, obs.finalOutputTokens)
+	require.Nil(t, obs.lastOutputTokens)
 }
 
 func TestPassthroughStreaming_FinalOutputTokensUsesLastDeltaNotMergedUsage(t *testing.T) {
@@ -461,6 +461,59 @@ func TestPassthroughStreaming_FinalOutputTokensUsesLastDeltaNotMergedUsage(t *te
 	result, err := svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "m")
 	require.NoError(t, err)
 	require.Equal(t, 7, result.usage.OutputTokens, "billing merge unchanged")
-	require.Equal(t, "0", outputTokensValue(result.upstream.finalOutputTokens))
+	require.Equal(t, "0", outputTokensValue(result.upstream.lastOutputTokens))
 	require.Equal(t, "refusal", stopReasonValue(result.upstream.stopReason))
+}
+
+func TestBedrockObservationReadsRawMetricsStrictly(t *testing.T) {
+	cases := []struct {
+		name    string
+		metrics string
+		want    string
+	}{
+		{"metrics_missing", ``, "<nil>"},
+		{"output_null", `,"amazon-bedrock-invocationMetrics":{"inputTokenCount":3,"outputTokenCount":null}`, "<nil>"},
+		{"output_string", `,"amazon-bedrock-invocationMetrics":{"inputTokenCount":3,"outputTokenCount":"0"}`, "<nil>"},
+		{"output_fraction", `,"amazon-bedrock-invocationMetrics":{"inputTokenCount":3,"outputTokenCount":0.5}`, "<nil>"},
+		{"output_negative", `,"amazon-bedrock-invocationMetrics":{"inputTokenCount":3,"outputTokenCount":-1}`, "<nil>"},
+		{"output_zero", `,"amazon-bedrock-invocationMetrics":{"inputTokenCount":3,"outputTokenCount":0}`, "0"},
+		{"output_positive", `,"amazon-bedrock-invocationMetrics":{"inputTokenCount":3,"outputTokenCount":8}`, "8"},
+	}
+	for _, tc := range cases {
+		t.Run("nonstream_"+tc.name, func(t *testing.T) {
+			svc := &GatewayService{cfg: &config.Config{}}
+			c, rec := newStopReasonTestContext(t)
+			body := `{"type":"message","stop_reason":"refusal"` + tc.metrics + `}`
+			usage, obs, err := svc.handleBedrockNonStreamingResponse(context.Background(), jsonResponse(body), c, &Account{ID: 1})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, outputTokensValue(obs.lastOutputTokens))
+			require.Equal(t, "refusal", stopReasonValue(obs.stopReason))
+			// Existing conversion for the client response and billing is unchanged.
+			require.Equal(t, gjson.Get(string(transformBedrockInvocationMetrics([]byte(body))), "usage.output_tokens").Int(), int64(usage.OutputTokens))
+			require.NotContains(t, rec.Body.String(), "amazon-bedrock-invocationMetrics")
+		})
+		t.Run("stream_"+tc.name, func(t *testing.T) {
+			svc := &GatewayService{cfg: &config.Config{}}
+			c, _ := newStopReasonTestContext(t)
+			var stream bytes.Buffer
+			for _, event := range []string{
+				`{"type":"message_start","message":{"usage":{"input_tokens":3,"output_tokens":1}}}`,
+				`{"type":"message_delta","delta":{"stop_reason":"refusal"}` + tc.metrics + `}`,
+				`{"type":"message_stop"}`,
+			} {
+				_, _ = stream.Write(buildBedrockChunkFrame(t, event))
+			}
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(&stream)}
+			result, err := svc.handleBedrockStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "m")
+			require.NoError(t, err)
+			require.Equal(t, tc.want, outputTokensValue(result.upstream.lastOutputTokens))
+			require.Equal(t, "refusal", stopReasonValue(result.upstream.stopReason))
+		})
+	}
+
+	// Standard usage takes precedence over metrics, same as the converter.
+	obs := observeBedrockNonStreamBody([]byte(`{"usage":{"input_tokens":3,"output_tokens":4},"amazon-bedrock-invocationMetrics":{"outputTokenCount":0}}`))
+	require.Equal(t, "4", outputTokensValue(obs.lastOutputTokens))
+	obs = observeBedrockNonStreamBody([]byte(`{"usage":{"input_tokens":3,"output_tokens":0.5}}`))
+	require.Nil(t, obs.lastOutputTokens)
 }

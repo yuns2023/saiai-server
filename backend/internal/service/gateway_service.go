@@ -676,10 +676,11 @@ type ForwardResult struct {
 	// final successful attempt (nil = not observed / not applicable). Evidence
 	// only; never used for retry, recovery or billing decisions.
 	StopReason *string
-	// UpstreamFinalOutputTokens is the raw output_tokens of the final upstream
-	// usage (nil = not reported). Distinguishes an explicit 0 from a missing
-	// field; diagnostic only, billing keeps using Usage.
-	UpstreamFinalOutputTokens *int64
+	// UpstreamLastOutputTokens is the last valid (non-negative integer) raw
+	// output_tokens reported by upstream for this attempt (nil = none). For
+	// streams it is the last message_delta value, not proof of terminal
+	// completeness. Diagnostic only; billing keeps using Usage.
+	UpstreamLastOutputTokens *int64
 
 	// 图片生成计费字段（图片生成模型使用）
 	ImageCount int    // 生成的图片数量
@@ -7181,12 +7182,15 @@ func (s *GatewayService) handleBedrockNonStreamingResponse(
 		return nil, anthropicUpstreamObservation{}, err
 	}
 
+	// Diagnostic observation must read the raw Bedrock body: the metrics
+	// conversion below coerces non-integer values into integers.
+	upstreamObs := observeBedrockNonStreamBody(body)
+
 	// 转换 Bedrock 特有的 amazon-bedrock-invocationMetrics 为标准 Anthropic usage 格式
 	// 并移除该字段避免透传给客户端
 	body = transformBedrockInvocationMetrics(body)
 
 	usage := parseClaudeUsageFromResponseBody(body)
-	upstreamObs := observeAnthropicNonStreamBody(body)
 
 	c.Header("Content-Type", "application/json")
 	if v := resp.Header.Get("x-amzn-requestid"); v != "" {

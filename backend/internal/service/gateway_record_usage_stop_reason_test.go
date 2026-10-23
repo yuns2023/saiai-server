@@ -18,9 +18,9 @@ func TestGatewayServiceRecordUsage_StopReasonPersistedWithoutChangingBilling(t *
 		err := svc.RecordUsage(context.Background(), &RecordUsageInput{
 			Result: &ForwardResult{
 				RequestID: "stop-reason-billing", Model: "claude-sonnet-4", Duration: time.Second,
-				Usage:                     ClaudeUsage{InputTokens: 3, OutputTokens: 0, CacheCreationInputTokens: 200000},
-				StopReason:                stopReason,
-				UpstreamFinalOutputTokens: finalOutput,
+				Usage:                    ClaudeUsage{InputTokens: 3, OutputTokens: 0, CacheCreationInputTokens: 200000},
+				StopReason:               stopReason,
+				UpstreamLastOutputTokens: finalOutput,
 			},
 			APIKey:            &APIKey{ID: 501, Quota: 100},
 			User:              &User{ID: 601},

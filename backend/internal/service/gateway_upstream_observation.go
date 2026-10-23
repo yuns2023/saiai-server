@@ -27,12 +27,13 @@ type anthropicUpstreamObservation struct {
 	// stopReason is the sanitized upstream stop_reason; nil when missing,
 	// null, non-string or rejected by sanitization.
 	stopReason *string
-	// finalOutputTokens is the raw output_tokens of the final upstream usage
-	// (non-stream body usage, or the last message_delta usage that carried a
-	// numeric output_tokens). nil means the field was never reported. It is
-	// kept separate from the merged billing usage, which ignores non-positive
-	// stream deltas.
-	finalOutputTokens *int64
+	// lastOutputTokens is the raw output_tokens as last reported by upstream:
+	// the non-stream body usage, or for streams the LAST VALID numeric
+	// output_tokens seen on a message_delta. It is not proof that the stream
+	// completed (terminal completeness is decided elsewhere). nil means no
+	// valid value was observed. Kept separate from the merged billing usage,
+	// which ignores non-positive stream deltas.
+	lastOutputTokens *int64
 }
 
 // numericOutputTokens accepts only whole, non-negative JSON numbers; anything
@@ -69,8 +70,8 @@ func observeAnthropicNonStreamBody(body []byte) anthropicUpstreamObservation {
 	}
 	parsed := gjson.ParseBytes(body)
 	return anthropicUpstreamObservation{
-		stopReason:        sanitizeUpstreamStopReason(parsed.Get("stop_reason")),
-		finalOutputTokens: numericOutputTokens(parsed.Get("usage.output_tokens")),
+		stopReason:       sanitizeUpstreamStopReason(parsed.Get("stop_reason")),
+		lastOutputTokens: numericOutputTokens(parsed.Get("usage.output_tokens")),
 	}
 }
 
@@ -86,7 +87,54 @@ func (o *anthropicUpstreamObservation) observeStreamEvent(parsed gjson.Result) {
 		o.stopReason = reason
 	}
 	if v := numericOutputTokens(parsed.Get("usage.output_tokens")); v != nil {
-		o.finalOutputTokens = v
+		o.lastOutputTokens = v
+	}
+}
+
+// bedrockRawOutputTokens mirrors transformBedrockInvocationMetrics' source
+// selection (a standard "usage" object wins, otherwise
+// amazon-bedrock-invocationMetrics.outputTokenCount) but reads the RAW value
+// with the strict diagnostic rule. The converter coerces fractions/strings to
+// integers, so observing after conversion could fabricate an explicit 0.
+func bedrockRawOutputTokens(event gjson.Result) *int64 {
+	if event.Get("usage").Exists() {
+		return numericOutputTokens(event.Get("usage.output_tokens"))
+	}
+	if metrics := event.Get("amazon-bedrock-invocationMetrics"); metrics.IsObject() {
+		return numericOutputTokens(metrics.Get("outputTokenCount"))
+	}
+	return nil
+}
+
+// observeBedrockNonStreamBody observes a Bedrock InvokeModel body BEFORE
+// transformBedrockInvocationMetrics rewrites it.
+func observeBedrockNonStreamBody(raw []byte) anthropicUpstreamObservation {
+	if len(raw) == 0 || !gjson.ValidBytes(raw) {
+		return anthropicUpstreamObservation{}
+	}
+	parsed := gjson.ParseBytes(raw)
+	return anthropicUpstreamObservation{
+		stopReason:       sanitizeUpstreamStopReason(parsed.Get("stop_reason")),
+		lastOutputTokens: bedrockRawOutputTokens(parsed),
+	}
+}
+
+// observeBedrockStreamChunk observes a decoded Bedrock chunk (Anthropic SSE
+// event JSON) BEFORE transformBedrockInvocationMetrics rewrites it. Like the
+// direct path, only message_delta events are considered.
+func (o *anthropicUpstreamObservation) observeBedrockStreamChunk(raw []byte) {
+	if o == nil || len(raw) == 0 {
+		return
+	}
+	parsed := gjson.ParseBytes(raw)
+	if parsed.Get("type").String() != "message_delta" {
+		return
+	}
+	if reason := sanitizeUpstreamStopReason(parsed.Get("delta.stop_reason")); reason != nil {
+		o.stopReason = reason
+	}
+	if v := bedrockRawOutputTokens(parsed); v != nil {
+		o.lastOutputTokens = v
 	}
 }
 
@@ -103,14 +151,14 @@ func (o *anthropicUpstreamObservation) applyTo(result *ForwardResult) {
 		return
 	}
 	result.StopReason = o.stopReason
-	result.UpstreamFinalOutputTokens = o.finalOutputTokens
+	result.UpstreamLastOutputTokens = o.lastOutputTokens
 }
 
 // isZeroOutputUsage reports whether the upstream explicitly said it generated
 // zero output tokens while still consuming prompt/cache tokens. It must be
 // evaluated on the upstream usage before billing conversions in RecordUsage.
 func isZeroOutputUsage(result *ForwardResult) bool {
-	if result == nil || result.UpstreamFinalOutputTokens == nil || *result.UpstreamFinalOutputTokens != 0 {
+	if result == nil || result.UpstreamLastOutputTokens == nil || *result.UpstreamLastOutputTokens != 0 {
 		return false
 	}
 	return result.Usage.InputTokens+result.Usage.CacheCreationInputTokens+result.Usage.CacheReadInputTokens > 0
@@ -134,9 +182,13 @@ func LogZeroOutputUsage(ctx context.Context, account *Account, result *ForwardRe
 		upstreamModel = result.Model
 	}
 	// The request-scoped logger already carries request_id / client_request_id
-	// (RequestLogger middleware). For these Anthropic paths the async usage
-	// worker resolves usage_logs.request_id from upstream_request_id, so that
-	// field is the join key to the persisted row.
+	// (RequestLogger middleware). Correlation with the usage row is by
+	// upstream_request_id: the async usage worker runs on a detached context
+	// and resolves usage_logs.request_id from the upstream request id, which
+	// Anthropic/Bedrock responses normally carry. Known gap: if upstream sends
+	// no request id the worker stores a "generated:..." id that cannot be
+	// joined from this log. Billing idempotency resolution is intentionally
+	// left unchanged.
 	logger.FromContext(ctx).Warn("gateway.zero_output_usage",
 		zap.String("component", "service.gateway"),
 		zap.String("platform", account.Platform),
@@ -146,7 +198,7 @@ func LogZeroOutputUsage(ctx context.Context, account *Account, result *ForwardRe
 		zap.String("upstream_request_id", result.RequestID),
 		zap.String("stop_reason", stopReason),
 		zap.Bool("stream", result.Stream),
-		zap.Int64("output_tokens", *result.UpstreamFinalOutputTokens),
+		zap.Int64("output_tokens", *result.UpstreamLastOutputTokens),
 		zap.Int("input_tokens", result.Usage.InputTokens),
 		zap.Int("cache_creation_tokens", result.Usage.CacheCreationInputTokens),
 		zap.Int("cache_read_tokens", result.Usage.CacheReadInputTokens),
