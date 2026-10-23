@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -161,4 +162,30 @@ func ChatGPTDeviceCookieTTL(cookie *http.Cookie, now time.Time) (time.Duration, 
 		return 0, ErrChatGPTDeviceCookie
 	}
 	return ttl, nil
+}
+
+// ReleaseChatGPTDeviceCookie removes this request's verified device-proof
+// ownership when it points at owner, which can no longer serve the group.
+// It reports whether the request carried a proof bound to owner; the caller
+// then clears the client cookie so the next request registers again. The
+// delete is compare-and-delete: a proof re-bound elsewhere is left intact.
+func (s *OpenAIGatewayService) ReleaseChatGPTDeviceCookie(c *gin.Context, scope ChatGPTTurnScope, owner int64) (bool, error) {
+	stored, _ := c.Get(chatGPTDeviceCookieContextKey)
+	proof, ok := stored.(chatGPTVerifiedDeviceCookie)
+	if !ok || proof.value == "" || owner <= 0 || proof.owner != owner {
+		return false, nil
+	}
+	c.Set(chatGPTDeviceCookieContextKey, chatGPTVerifiedDeviceCookie{})
+	device, err := ChatGPTDeviceID(c.Request.Header)
+	if err != nil || device == "" {
+		return true, ErrChatGPTDeviceCookie
+	}
+	cache, err := s.ChatGPTUploadCache()
+	if err != nil {
+		return true, ErrChatGPTDeviceCookieStore
+	}
+	if err := cache.ReleaseChatGPTUploadOwner(c.Request.Context(), scope.DeviceCookieKey(device, proof.value), owner); err != nil {
+		return true, fmt.Errorf("%w: %v", ErrChatGPTDeviceCookieStore, err)
+	}
+	return true, nil
 }

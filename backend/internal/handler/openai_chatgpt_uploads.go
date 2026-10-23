@@ -101,7 +101,7 @@ func (h *OpenAIGatewayHandler) ChatGPTUpload(c *gin.Context) {
 	}
 	account, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), key.GroupID, owner)
 	if err != nil {
-		h.errorResponse(c, 503, "service_unavailable", "Chat upload account is unavailable")
+		h.writeChatGPTBoundAccountUnavailable(c, err, chatGPTBoundUpload, scope, false, gatewayErrorEnvelope{Status: 503, Type: "service_unavailable", Message: "Chat upload account is unavailable"})
 		return
 	}
 	setOpsSelectedAccount(c, owner, service.PlatformOpenAI)

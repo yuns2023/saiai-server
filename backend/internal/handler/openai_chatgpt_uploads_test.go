@@ -27,6 +27,9 @@ func (c *chatGPTSharedTurnCache) ClaimChatGPTUploadOwner(ctx context.Context, ke
 func (c *chatGPTSharedTurnCache) BindChatGPTUploadOwner(ctx context.Context, keys []string, owner int64, ttl time.Duration) error {
 	return c.uploadCache().BindChatGPTUploadOwner(ctx, keys, owner, ttl)
 }
+func (c *chatGPTSharedTurnCache) ReleaseChatGPTUploadOwner(ctx context.Context, key string, owner int64) error {
+	return c.uploadCache().ReleaseChatGPTUploadOwner(ctx, key, owner)
+}
 func (c *chatGPTSharedTurnCache) uploadCache() service.ChatGPTUploadCache {
 	cache, ok := c.ChatGPTTurnCache.(service.ChatGPTUploadCache)
 	if !ok {

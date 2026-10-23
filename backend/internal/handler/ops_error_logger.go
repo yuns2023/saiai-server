@@ -1053,6 +1053,11 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		if localFailure {
 			entry.ErrorSource = "gateway"
 		}
+		if v, ok := c.Get(opsGatewayErrorDetailKey); ok {
+			if detail, ok := v.(string); ok && strings.TrimSpace(detail) != "" {
+				entry.ErrorMessage = strings.TrimSpace(entry.ErrorMessage + " [" + strings.TrimSpace(detail) + "]")
+			}
+		}
 		if localAuthReason != "" && status == http.StatusUnauthorized {
 			entry.ErrorType = service.OpsLocalAuthErrorType(localAuthReason)
 			entry.ErrorPhase = "auth"
@@ -1457,7 +1462,7 @@ func classifyOpsPhase(errType, message, code string) string {
 	// Standardized phases: request|auth|routing|upstream|network|internal
 	// Map billing/concurrency/response => request; scheduling => routing.
 	switch strings.TrimSpace(code) {
-	case "no_available_account", "account_concurrency":
+	case "no_available_account", "account_concurrency", "bound_account_unavailable":
 		return "routing"
 	case "user_concurrency":
 		return "request"

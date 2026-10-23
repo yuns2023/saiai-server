@@ -24,6 +24,9 @@ type ChatGPTUploadCache interface {
 	GetChatGPTUploadOwner(context.Context, string) (int64, error)
 	ClaimChatGPTUploadOwner(context.Context, string, int64, time.Duration) (int64, error)
 	BindChatGPTUploadOwner(context.Context, []string, int64, time.Duration) error
+	// ReleaseChatGPTUploadOwner deletes key only while it still maps to owner,
+	// so a concurrent re-registration to another account is never removed.
+	ReleaseChatGPTUploadOwner(context.Context, string, int64) error
 }
 
 func (s *OpenAIGatewayService) ChatGPTUploadCache() (ChatGPTUploadCache, error) {
@@ -186,6 +189,14 @@ func (s *chatGPTMemoryTurnCache) ClaimChatGPTUploadOwner(_ context.Context, key 
 	}
 	s.uploads[key] = chatGPTMemoryUpload{accountID, time.Now().Add(ttl)}
 	return accountID, nil
+}
+func (s *chatGPTMemoryTurnCache) ReleaseChatGPTUploadOwner(_ context.Context, key string, accountID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if prior, ok := s.uploads[key]; ok && prior.accountID == accountID {
+		delete(s.uploads, key)
+	}
+	return nil
 }
 func (s *chatGPTMemoryTurnCache) BindChatGPTUploadOwner(_ context.Context, keys []string, accountID int64, ttl time.Duration) error {
 	s.mu.Lock()

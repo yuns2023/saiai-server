@@ -93,6 +93,14 @@ func TestNativeChatRedisDeviceProofLifetimeKeepsOriginalOwner(t *testing.T) {
 	require.Error(t, err, "ordinary upload leases must retain the one-hour limit")
 	_, err = cache.ClaimChatGPTUploadOwner(ctx, key, 17, 31*24*time.Hour)
 	require.Error(t, err)
+	require.NoError(t, cache.ReleaseChatGPTUploadOwner(ctx, key, 19))
+	owner, err = cache.GetChatGPTUploadOwner(ctx, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 17, owner, "release must not delete another account's proof")
+	require.NoError(t, cache.ReleaseChatGPTUploadOwner(ctx, key, 17))
+	owner, err = cache.GetChatGPTUploadOwner(ctx, key)
+	require.NoError(t, err)
+	require.Zero(t, owner)
 }
 
 func TestNativeChatImageBillingRedisSealsConcurrentReplaysAndRetainsTTL(t *testing.T) {

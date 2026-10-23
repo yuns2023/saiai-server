@@ -11,6 +11,7 @@ import (
 )
 
 var chatGPTClaimUpload = redis.NewScript("redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2], 'NX'); return redis.call('GET', KEYS[1])")
+var chatGPTReleaseUpload = redis.NewScript("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0")
 var chatGPTBindUpload = redis.NewScript(`
 for _, key in ipairs(KEYS) do
   local old = redis.call('GET', key)
@@ -62,4 +63,10 @@ func (c *gatewayCache) BindChatGPTUploadOwner(ctx context.Context, keys []string
 		return errors.New("native Chat upload ownership conflict")
 	}
 	return nil
+}
+func (c *gatewayCache) ReleaseChatGPTUploadOwner(ctx context.Context, key string, owner int64) error {
+	if owner <= 0 {
+		return errors.New("invalid native Chat upload release")
+	}
+	return chatGPTReleaseUpload.Run(ctx, c.rdb, []string{key}, strconv.FormatInt(owner, 10)).Err()
 }

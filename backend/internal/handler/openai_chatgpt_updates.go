@@ -133,7 +133,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversationRead(c *gin.Context) {
 	}
 	account, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), key.GroupID, owner.AccountID)
 	if err != nil {
-		h.errorResponse(c, 503, "service_unavailable", "Chat conversation account is unavailable")
+		h.writeChatGPTBoundAccountUnavailable(c, err, chatGPTBoundConversationRead, scope, false, gatewayErrorEnvelope{Status: 503, Type: "service_unavailable", Message: "Chat conversation account is unavailable"})
 		return
 	}
 	setOpsSelectedAccount(c, account.ID, service.PlatformOpenAI)
@@ -311,7 +311,7 @@ func (h *OpenAIGatewayHandler) chatGPTScopedAssetDownload(c *gin.Context) {
 	}
 	account, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), key.GroupID, owner)
 	if err != nil {
-		h.errorResponse(c, 503, "service_unavailable", "Chat asset account is unavailable")
+		h.writeChatGPTBoundAccountUnavailable(c, err, chatGPTBoundAsset, scope, false, gatewayErrorEnvelope{Status: 503, Type: "service_unavailable", Message: "Chat asset account is unavailable"})
 		return
 	}
 	setOpsSelectedAccount(c, account.ID, service.PlatformOpenAI)
@@ -710,7 +710,7 @@ func (h *OpenAIGatewayHandler) runChatGPTUpdatesAccount(ctx context.Context, c *
 	}()
 	account, err := h.gatewayService.GetChatGPTBoundAccount(ctx, key.GroupID, accountID)
 	if err != nil {
-		logger.L().Warn("openai.chatgpt_updates_provider_failed", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", accountID), zap.String("stage", "account_eligibility"))
+		logger.L().Warn("openai.chatgpt_updates_provider_failed", zap.Int64("api_key_id", key.ID), zap.Int64("account_id", accountID), zap.String("stage", "account_eligibility"), zap.Error(err))
 		return
 	}
 	connectCtx, stop := context.WithTimeout(ctx, 15*time.Second)
