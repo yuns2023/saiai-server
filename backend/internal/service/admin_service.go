@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -944,7 +945,19 @@ func (s *adminServiceImpl) GetGroup(ctx context.Context, id int64) (*Group, erro
 	return s.groupRepo.GetByID(ctx, id)
 }
 
+// validateGroupRateMultiplier rejects negative or non-finite group rates. Zero is
+// allowed (free groups and hosted-usage groups require it).
+func validateGroupRateMultiplier(rate float64) error {
+	if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
+		return infraerrors.BadRequest("INVALID_RATE_MULTIPLIER", "rate_multiplier must be a finite number >= 0")
+	}
+	return nil
+}
+
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
+	if err := validateGroupRateMultiplier(input.RateMultiplier); err != nil {
+		return nil, err
+	}
 	if input.InputModerationPolicy == nil {
 		if err := ValidateLegacyModerationCategories(input.InputModerationCategories); err != nil {
 			return nil, infraerrors.BadRequest("INVALID_MODERATION_CATEGORIES", err.Error())
@@ -1296,6 +1309,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.Platform = input.Platform
 	}
 	if input.RateMultiplier != nil {
+		if err := validateGroupRateMultiplier(*input.RateMultiplier); err != nil {
+			return nil, err
+		}
 		group.RateMultiplier = *input.RateMultiplier
 	}
 	if input.IsExclusive != nil {

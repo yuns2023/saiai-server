@@ -1720,12 +1720,14 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 			COALESCE(SUM(actual_cost) FILTER (WHERE billing_type = 0), 0) as total_balance_cost,
 			COALESCE(SUM(actual_cost) FILTER (WHERE billing_type = 1), 0) as total_subscription_cost,
 			COALESCE(SUM(actual_cost) FILTER (WHERE billing_type IS NULL OR billing_type NOT IN (0, 1)), 0) as total_unclassified_cost,
-			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
+			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms,
+			SUM(metered_cost) as total_metered_cost
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 	`
 
 	var stats usagestats.UsageStats
+	var meteredCost sql.NullFloat64
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -1743,8 +1745,12 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 		&stats.TotalSubscriptionCost,
 		&stats.TotalUnclassifiedCost,
 		&stats.AverageDurationMs,
+		&meteredCost,
 	); err != nil {
 		return nil, err
+	}
+	if meteredCost.Valid {
+		stats.TotalMeteredCost = &meteredCost.Float64
 	}
 	stats.TotalTokens = stats.TotalInputTokens + stats.TotalOutputTokens + stats.TotalCacheTokens
 	return &stats, nil
@@ -1765,12 +1771,14 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 			COALESCE(SUM(actual_cost) FILTER (WHERE billing_type = 0), 0) as total_balance_cost,
 			COALESCE(SUM(actual_cost) FILTER (WHERE billing_type = 1), 0) as total_subscription_cost,
 			COALESCE(SUM(actual_cost) FILTER (WHERE billing_type IS NULL OR billing_type NOT IN (0, 1)), 0) as total_unclassified_cost,
-			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
+			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms,
+			SUM(metered_cost) as total_metered_cost
 		FROM usage_logs
 		WHERE api_key_id = $1 AND created_at >= $2 AND created_at < $3
 	`
 
 	var stats usagestats.UsageStats
+	var meteredCost sql.NullFloat64
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -1788,8 +1796,12 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 		&stats.TotalSubscriptionCost,
 		&stats.TotalUnclassifiedCost,
 		&stats.AverageDurationMs,
+		&meteredCost,
 	); err != nil {
 		return nil, err
+	}
+	if meteredCost.Valid {
+		stats.TotalMeteredCost = &meteredCost.Float64
 	}
 	stats.TotalTokens = stats.TotalInputTokens + stats.TotalOutputTokens + stats.TotalCacheTokens
 	return &stats, nil

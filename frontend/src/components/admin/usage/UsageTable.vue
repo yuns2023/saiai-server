@@ -351,7 +351,7 @@
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.rate') }}</span>
-            <span class="font-semibold text-blue-400">{{ (tooltipData?.rate_multiplier || 1).toFixed(2) }}x</span>
+            <span class="font-semibold text-blue-400">{{ (tooltipData?.rate_multiplier ?? 1).toFixed(2) }}x</span>
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.groupModelMultiplier') }}</span>
@@ -382,6 +382,10 @@
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t(usageBillingLabel(tooltipData?.billing_type)) }}</span>
             <span class="font-semibold text-green-400">${{ tooltipData?.actual_cost?.toFixed(6) || '0.000000' }}</span>
+          </div>
+          <div v-if="tooltipData?.metered_cost != null" class="flex items-center justify-between gap-6" data-testid="tooltip-hosted-usage">
+            <span class="text-gray-400">{{ t('hostedUsage.total') }}</span>
+            <span class="font-medium text-gray-300">${{ tooltipData.metered_cost.toFixed(6) }}</span>
           </div>
           <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
             <span class="text-gray-400">{{ t('usage.accountBilled') }}</span>

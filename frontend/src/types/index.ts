@@ -1373,6 +1373,7 @@ export interface UsageStatsResponse {
   total_subscription_cost?: number
   total_unclassified_cost?: number
   total_actual_cost: number // 实际扣除
+  total_metered_cost?: number | null // 托管折算用量（仅用户自身统计，含托管记录时返回）
   average_duration_ms: number
   models?: Record<string, number>
 }
