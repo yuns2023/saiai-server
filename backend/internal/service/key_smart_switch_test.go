@@ -195,3 +195,37 @@ func TestSmartSwitchBillingRecheckRejectsReplacedSubscription(t *testing.T) {
 	t.Cleanup(billing.Stop)
 	require.ErrorIs(t, billing.CheckBillingEligibility(context.Background(), key.User, key, key.Group, &selected), ErrSubscriptionNotFound)
 }
+
+type smartUpdateKeyRepo struct {
+	smartKeyRepo
+	saved *APIKey
+}
+
+func (r *smartUpdateKeyRepo) Update(_ context.Context, key *APIKey) error {
+	r.saved = key
+	return nil
+}
+
+func TestSmartSwitchCanBeDisabledWhenOriginalGroupIsUnavailable(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		svc, key, _ := smartFixture()
+		key.SmartSwitchVersion = 2
+		if deleted {
+			// Group deletion clears the binding but keeps the policy.
+			key.GroupID = nil
+			delete(svc.groupRepo.(smartGroupRepo).groups, 1)
+		} else {
+			svc.groupRepo.(smartGroupRepo).groups[1].Status = StatusDisabled
+		}
+		repo := &smartUpdateKeyRepo{smartKeyRepo: smartKeyRepo{key: key}}
+		svc.apiKeyRepo = repo
+		policy := key.SmartSwitch.Clone()
+		policy.Enabled = false
+		policy.Version = 2
+		_, err := svc.Update(context.Background(), key.ID, key.UserID, UpdateAPIKeyRequest{GroupID: key.GroupID, SmartSwitch: policy})
+		require.NoError(t, err)
+		require.NotNil(t, repo.saved)
+		require.False(t, repo.saved.SmartSwitch.Enabled)
+		require.Equal(t, int64(3), repo.saved.SmartSwitch.Version)
+	}
+}

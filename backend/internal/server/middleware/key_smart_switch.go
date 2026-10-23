@@ -26,6 +26,19 @@ func smartSwitchRequest(c *gin.Context, key *service.APIKey) bool {
 	return strings.HasSuffix(path, "/messages") || strings.HasSuffix(path, "/responses") || strings.Contains(path, "/responses/")
 }
 
+// smartSwitchDecodedBodyLimit mirrors the OpenAI handler's decoded request-body
+// cap (server.max_request_body_size, then gateway.max_body_size), so a
+// compressed body is not rejected only because smart switching is enabled.
+func smartSwitchDecodedBodyLimit(cfg *config.Config) int64 {
+	if cfg.Server.MaxRequestBodySize > 0 {
+		return cfg.Server.MaxRequestBodySize
+	}
+	if cfg.Gateway.MaxBodySize > 0 {
+		return cfg.Gateway.MaxBodySize
+	}
+	return 256 << 20
+}
+
 func applySmartSwitch(c *gin.Context, key *service.APIKey, keys *service.APIKeyService, subscriptions *service.SubscriptionService, cfg *config.Config) (*service.APIKey, bool) {
 	if key.IsExpired() || key.Status == service.StatusAPIKeyExpired {
 		AbortWithError(c, 403, "API_KEY_EXPIRED", "API key has expired")
@@ -52,14 +65,15 @@ func applySmartSwitch(c *gin.Context, key *service.APIKey, keys *service.APIKeyS
 	// Inspect a bounded decoded copy while preserving the original wire body.
 	encoding := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Encoding")))
 	if encoding == "zstd" {
-		reader, decodeErr := zstd.NewReader(bytes.NewReader(body), zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(uint64(limit)))
+		decodedLimit := smartSwitchDecodedBodyLimit(cfg)
+		reader, decodeErr := zstd.NewReader(bytes.NewReader(body), zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(uint64(decodedLimit)))
 		if decodeErr != nil {
 			AbortWithError(c, 400, "INVALID_REQUEST", "Invalid compressed body")
 			return nil, false
 		}
-		body, decodeErr = io.ReadAll(io.LimitReader(reader, limit+1))
+		body, decodeErr = io.ReadAll(io.LimitReader(reader, decodedLimit+1))
 		reader.Close()
-		if decodeErr != nil || int64(len(body)) > limit {
+		if decodeErr != nil || int64(len(body)) > decodedLimit {
 			AbortWithError(c, 400, "INVALID_REQUEST", "Invalid or oversized compressed body")
 			return nil, false
 		}

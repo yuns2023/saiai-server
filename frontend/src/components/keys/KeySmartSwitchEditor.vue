@@ -1,7 +1,7 @@
 <template>
   <fieldset class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
     <label class="flex items-center gap-2 font-medium">
-      <input type="checkbox" :checked="modelValue.enabled" :disabled="!supported" @change="setEnabled" />
+      <input type="checkbox" :checked="modelValue.enabled" :disabled="!supported && !modelValue.enabled" @change="setEnabled" />
       {{ t('keys.smartSwitch.title') }}
     </label>
     <p class="input-hint">{{ t('keys.smartSwitch.hint') }}</p>

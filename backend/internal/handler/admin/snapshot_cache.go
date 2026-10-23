@@ -18,10 +18,11 @@ type snapshotCacheEntry struct {
 }
 
 type snapshotCache struct {
-	mu    sync.RWMutex
-	ttl   time.Duration
-	items map[string]snapshotCacheEntry
-	sf    singleflight.Group
+	mu        sync.RWMutex
+	ttl       time.Duration
+	items     map[string]snapshotCacheEntry
+	lastSweep time.Time
+	sf        singleflight.Group
 }
 
 type snapshotCacheLoadResult struct {
@@ -64,15 +65,26 @@ func (c *snapshotCache) Set(key string, payload any) snapshotCacheEntry {
 	if c == nil {
 		return snapshotCacheEntry{}
 	}
+	now := time.Now()
 	entry := snapshotCacheEntry{
 		ETag:      buildETagFromAny(payload),
 		Payload:   payload,
-		ExpiresAt: time.Now().Add(c.ttl),
+		ExpiresAt: now.Add(c.ttl),
 	}
 	if key == "" {
 		return entry
 	}
 	c.mu.Lock()
+	// Get only evicts the key it reads, so sweep on write at most once per TTL;
+	// otherwise keys that are never requested again accumulate forever.
+	if now.Sub(c.lastSweep) >= c.ttl {
+		for k, existing := range c.items {
+			if now.After(existing.ExpiresAt) {
+				delete(c.items, k)
+			}
+		}
+		c.lastSweep = now
+	}
 	c.items[key] = entry
 	c.mu.Unlock()
 	return entry

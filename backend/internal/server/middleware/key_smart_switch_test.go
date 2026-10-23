@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,5 +112,28 @@ func TestSmartSwitchRejectsUnsafeBodyBeforeSelection(t *testing.T) {
 		_, ok := applySmartSwitch(c, &service.APIKey{}, nil, nil, &config.Config{})
 		require.False(t, ok)
 		require.True(t, c.IsAborted())
+	}
+}
+
+func TestSmartSwitchDecodedBodyLimitMatchesRequestBodyLimit(t *testing.T) {
+	encoder, err := zstd.NewWriter(nil)
+	require.NoError(t, err)
+	// Decodes past gateway.max_body_size but stays within server.max_request_body_size.
+	wire := encoder.EncodeAll([]byte(`{"pad":"`+strings.Repeat("x", 4096)+`"}`), nil)
+	encoder.Close()
+	for _, tc := range []struct {
+		serverLimit int64
+		want        string
+	}{{1 << 20, "model is required"}, {2048, "oversized compressed body"}} {
+		cfg := &config.Config{}
+		cfg.Gateway.MaxBodySize = 1024
+		cfg.Server.MaxRequestBodySize = tc.serverLimit
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(wire))
+		c.Request.Header.Set("Content-Encoding", "zstd")
+		_, ok := applySmartSwitch(c, &service.APIKey{}, nil, nil, cfg)
+		require.False(t, ok)
+		require.Contains(t, recorder.Body.String(), tc.want)
 	}
 }
