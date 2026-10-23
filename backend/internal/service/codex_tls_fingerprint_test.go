@@ -61,7 +61,7 @@ func TestCodexTLSFingerprintAccountFlagIsOptInForOpenAIOAuthOnly(t *testing.T) {
 			}
 			for _, global := range []bool{false, true} {
 				for _, role := range []tlsfingerprint.Role{tlsfingerprint.RoleHTTP, tlsfingerprint.RoleWS} {
-					policy := codexTransportPolicyFor(codexTLSConfig(global), tc.account, role)
+					policy := codexTransportPolicyFor(codexTLSConfig(global), tc.account, role, "")
 					require.Equal(t, global && tc.codex, policy.Enabled())
 					if policy.Enabled() {
 						require.Equal(t, role, policy.Role)
@@ -69,7 +69,7 @@ func TestCodexTLSFingerprintAccountFlagIsOptInForOpenAIOAuthOnly(t *testing.T) {
 					}
 				}
 			}
-			require.False(t, codexTransportPolicyFor(nil, tc.account, tlsfingerprint.RoleHTTP).Enabled())
+			require.False(t, codexTransportPolicyFor(nil, tc.account, tlsfingerprint.RoleHTTP, "").Enabled())
 		})
 	}
 }
@@ -516,7 +516,7 @@ func TestOpenAIWSPolicyRequiresCapableDialer(t *testing.T) {
 	cfg := codexTLSConfig(true)
 	pool := newOpenAIWSConnPool(cfg)
 	pool.setClientDialerForTest(&openAIWSFakeDialer{})
-	pool.transportPolicyFor = func(context.Context, *Account) tlsfingerprint.TransportPolicy {
+	pool.transportPolicyFor = func(context.Context, *Account, string) tlsfingerprint.TransportPolicy {
 		return tlsfingerprint.CodexWSTransportPolicy()
 	}
 	defer pool.Close()
@@ -545,31 +545,31 @@ func TestCurrentCodexWSTransportPolicyLookupAndFallback(t *testing.T) {
 	t.Run("current_state_wins_over_snapshot", func(t *testing.T) {
 		repo := &countingFlagRepo{accountFlagRepo: accountFlagRepo{account: codexOAuthAccount(44, on)}}
 		svc := &OpenAIGatewayService{cfg: codexTLSConfig(true), accountRepo: repo}
-		require.Equal(t, codexWS, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(44, nil)))
+		require.Equal(t, codexWS, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(44, nil), ""))
 		repo.setFlag(false)
-		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(44, on)).Enabled())
+		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(44, on), "").Enabled())
 	})
 	// Documented: on lookup failure the session's snapshot decides, so the
 	// toggle may lag for that dial — in both directions.
 	t.Run("lookup_failure_uses_stale_snapshot_toggled_off", func(t *testing.T) {
 		repo := &countingFlagRepo{accountFlagRepo: accountFlagRepo{account: codexOAuthAccount(45, nil)}, fail: true}
 		svc := &OpenAIGatewayService{cfg: codexTLSConfig(true), accountRepo: repo}
-		require.Equal(t, codexWS, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(45, on)))
+		require.Equal(t, codexWS, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(45, on), ""))
 		require.Equal(t, int32(1), repo.lookups.Load())
 	})
 	t.Run("lookup_failure_uses_stale_snapshot_toggled_on", func(t *testing.T) {
 		repo := &countingFlagRepo{accountFlagRepo: accountFlagRepo{account: codexOAuthAccount(46, on)}, fail: true}
 		svc := &OpenAIGatewayService{cfg: codexTLSConfig(true), accountRepo: repo}
-		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(46, nil)).Enabled())
+		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(46, nil), "").Enabled())
 		require.Equal(t, int32(1), repo.lookups.Load())
 	})
 	t.Run("global_off_or_ineligible_makes_no_lookup", func(t *testing.T) {
 		repo := &countingFlagRepo{accountFlagRepo: accountFlagRepo{account: codexOAuthAccount(47, on)}}
 		svc := &OpenAIGatewayService{cfg: codexTLSConfig(false), accountRepo: repo}
-		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(47, on)).Enabled())
+		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), codexOAuthAccount(47, on), "").Enabled())
 		svc.cfg = codexTLSConfig(true)
 		apiKey := &Account{ID: 47, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: on}
-		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), apiKey).Enabled())
+		require.False(t, svc.currentCodexWSTransportPolicy(context.Background(), apiKey, "").Enabled())
 		require.Zero(t, repo.lookups.Load())
 	})
 }

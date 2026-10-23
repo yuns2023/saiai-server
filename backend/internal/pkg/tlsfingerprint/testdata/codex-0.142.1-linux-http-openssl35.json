@@ -1,0 +1,126 @@
+{
+ "baseline": "codex-0.142.1-linux-http-openssl35",
+ "ja4": "t13d301100_1d37bd780c83_8e6e362c5eac",
+ "clienthello_total_bytes_seen": [
+  1544
+ ],
+ "samples": 582,
+ "extension_orders_seen": {},
+ "cipher_suites": [
+  {
+   "id": "0x1302"
+  },
+  {
+   "id": "0x1303"
+  },
+  {
+   "id": "0x1301"
+  },
+  {
+   "id": "0xc02c"
+  },
+  {
+   "id": "0xc030"
+  },
+  {
+   "id": "0x009f"
+  },
+  {
+   "id": "0xcca9"
+  },
+  {
+   "id": "0xcca8"
+  },
+  {
+   "id": "0xccaa"
+  },
+  {
+   "id": "0xc02b"
+  },
+  {
+   "id": "0xc02f"
+  },
+  {
+   "id": "0x009e"
+  },
+  {
+   "id": "0xc024"
+  },
+  {
+   "id": "0xc028"
+  },
+  {
+   "id": "0x006b"
+  },
+  {
+   "id": "0xc023"
+  },
+  {
+   "id": "0xc027"
+  },
+  {
+   "id": "0x0067"
+  },
+  {
+   "id": "0xc00a"
+  },
+  {
+   "id": "0xc014"
+  },
+  {
+   "id": "0x0039"
+  },
+  {
+   "id": "0xc009"
+  },
+  {
+   "id": "0xc013"
+  },
+  {
+   "id": "0x0033"
+  },
+  {
+   "id": "0x009d"
+  },
+  {
+   "id": "0x009c"
+  },
+  {
+   "id": "0x003d"
+  },
+  {
+   "id": "0x003c"
+  },
+  {
+   "id": "0x0035"
+  },
+  {
+   "id": "0x002f"
+  }
+ ],
+ "captures": [
+  "linux-0.105.0",
+  "linux-0.106.0",
+  "linux-0.107.0",
+  "linux-0.110.0",
+  "linux-0.113.0",
+  "linux-0.115.0",
+  "linux-0.116.0",
+  "linux-0.117.0",
+  "linux-0.125.0",
+  "linux-0.136.0",
+  "linux-0.137.0",
+  "linux-0.138.0",
+  "linux-0.139.0",
+  "linux-0.140.0",
+  "linux-0.141.0",
+  "linux-0.142.0",
+  "linux-0.142.1",
+  "linux-0.80.0",
+  "linux-0.90.0",
+  "linux-0.95.0",
+  "linux-0.99.0"
+ ],
+ "fixture_source": "capv/linux-0.142.1/http-1/conn001.bin",
+ "note": "Generated from the loopback capture harness; every sample of this baseline was byte-identical except random, session id, key material."
+}

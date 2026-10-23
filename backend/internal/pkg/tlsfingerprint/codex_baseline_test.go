@@ -127,6 +127,9 @@ func u16s(b []byte) []uint16 {
 // ja4 follows the FoxIO JA4 definition (same as the capture parser).
 func ja4(h rawHello) string {
 	top := "00"
+	if h.LegacyVersion == 0x0303 { // no supported_versions: TLS 1.2 hello
+		top = "12"
+	}
 	if sv := h.ext(43); len(sv) >= 3 {
 		switch binary.BigEndian.Uint16(sv[1:]) {
 		case 0x0304:
