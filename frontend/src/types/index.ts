@@ -1883,6 +1883,9 @@ export interface ModerationDiagnostics {
   input_chars: number
   instruction_chars: number
   instruction_blocks: number
+  // Absent on results recorded before instruction bundling.
+  instruction_bundles?: number
+  joint_skipped?: boolean
   planned_checks: number
   completed_checks: number
   cache_hits: number

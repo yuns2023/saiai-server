@@ -36,7 +36,7 @@ const categories = computed(() => {
     :aria-label="t('admin.groups.inputModeration.viewDetails')" aria-haspopup="dialog" :aria-expanded="open" @click.stop="open = true">
     <span class="block underline decoration-dotted underline-offset-4"
       :class="status === 'passed' ? 'text-emerald-600 dark:text-emerald-400' : status === 'flagged' ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500'">
-      {{ status === 'passed' && row.moderation_result?.reason === 'chunked_input' ? t('admin.groups.inputModeration.chunkedPassed') : t('admin.groups.inputModeration.statuses.' + status) }}
+      {{ status === 'passed' && ['chunked_input', 'joint_context_skipped'].includes(row.moderation_result?.reason ?? '') ? t('admin.groups.inputModeration.chunkedPassed') : t('admin.groups.inputModeration.statuses.' + status) }}
       <span v-if="highestRisk !== null" data-testid="highest-risk"> · {{ t('admin.groups.inputModeration.highestRisk') }} {{ (highestRisk * 100).toFixed(1) }}%</span>
     </span>
     <span v-if="categories.length" class="flex flex-wrap gap-1">

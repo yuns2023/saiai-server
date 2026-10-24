@@ -13,7 +13,7 @@ function render(scores?: Record<string, number>, status = 'passed', reason?: str
     return { admin: { groups: { inputModeration: {
       highestRisk: () => moderation.highestRisk,
       chunkedPassed: () => moderation.chunkedPassed,
-      reasons: { chunked_input: () => moderation.reasons.chunked_input, input_too_large: () => moderation.reasons.input_too_large, detector_budget_exceeded: () => moderation.reasons.detector_budget_exceeded },
+      reasons: { chunked_input: () => moderation.reasons.chunked_input, joint_context_skipped: () => moderation.reasons.joint_context_skipped, input_too_large: () => moderation.reasons.input_too_large, detector_budget_exceeded: () => moderation.reasons.detector_budget_exceeded },
       diagnostics: Object.fromEntries(Object.entries(moderation.diagnostics).map(([name, value]) => [name, () => value])),
       limits: Object.fromEntries(Object.entries(moderation.limits).map(([name, value]) => [name, () => value])),
       viewDetails: () => moderation.viewDetails,
@@ -30,6 +30,21 @@ function render(scores?: Record<string, number>, status = 'passed', reason?: str
 }
 
 describe('moderation summary and localized details', () => {
+  it('discloses a skipped joint check on a passed result in both locales', async () => {
+    const { wrapper, i18n } = render({ PII: 0.1 }, 'passed', 'joint_context_skipped', {
+      input_chars: 400000, instruction_chars: 130000, instruction_blocks: 136, instruction_bundles: 17, joint_skipped: true,
+      planned_checks: 31, completed_checks: 31, cache_hits: 17, detector_calls: 14, chunk_size: 32768, max_input_chars: 516608,
+      max_detector_calls: 16, max_planned_checks: 64, duration_ms: 100, queue_wait_ms: 10
+    })
+    expect(wrapper.text()).toContain('分段审核通过')
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.text()).toContain('已分别检测新文本和指令')
+    expect(wrapper.text()).toContain('指令合并检测包数')
+    i18n.global.locale.value = 'en'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('checked separately, not jointly')
+  })
+
   it('explains the failed coverage budget with numeric diagnostics, without claiming approval', async () => {
     const { wrapper, i18n } = render(undefined, 'failed', 'detector_budget_exceeded', {
       input_chars: 20, instruction_chars: 800, instruction_blocks: 17, planned_checks: 18, completed_checks: 16,

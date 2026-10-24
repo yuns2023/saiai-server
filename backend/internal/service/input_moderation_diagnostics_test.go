@@ -38,9 +38,12 @@ func TestModerationBudgetFailureRetainsCoverageDiagnostics(t *testing.T) {
 	svc := newInputModerationServiceForTest(nil, repo, groups, nil, nil)
 	svc.client = client
 	defer svc.Stop()
+	svc.cfg.MaxInputChars = 64
 	task := InputModerationTask{RequestID: "budget", UserID: 1, APIKeyID: 2, GroupID: 3, Text: "question", EnqueuedAt: time.Now().Add(-time.Second)}
+	// Blocks of a full chunk each stay standalone, so 17 of them plus the
+	// question exceed the 16-call budget; together they skip the joint check.
 	for block := 0; block < 17; block++ {
-		task.Instructions = append(task.Instructions, fmt.Sprintf("project rules %d", block))
+		task.Instructions = append(task.Instructions, fmt.Sprintf("%02d", block)+strings.Repeat("r", 62))
 	}
 	require.NoError(t, svc.process(task))
 	require.Len(t, repo.results, 1)
@@ -69,9 +72,9 @@ func TestModerationLimitsRemainBoundedBeforeDetector(t *testing.T) {
 			defer svc.Stop()
 			svc.cfg.MaxInputChars = 16
 			if scenario.name == "plan" {
-				svc.cfg.MaxInputChars = 32768
+				// Full-chunk blocks cannot be bundled: 65 unique checks exceed the cap.
 				for block := 0; block < 65; block++ {
-					scenario.instructions = append(scenario.instructions, fmt.Sprint(block))
+					scenario.instructions = append(scenario.instructions, fmt.Sprintf("%02d", block)+strings.Repeat("p", 14))
 				}
 			}
 			require.False(t, svc.Submit(InputModerationTask{RequestID: "oversize", UserID: 1, APIKeyID: 2, GroupID: 3, Text: scenario.text, Instructions: scenario.instructions}))
@@ -104,27 +107,32 @@ func TestModerationWarmInstructionsAllowMoreThanSixteenChecks(t *testing.T) {
 	client := &cachedModerationBudgetStub{checks: map[string]bool{}}
 	svc := &InputModerationService{client: client}
 	task := InputModerationTask{UserID: 1, GroupID: 2, Text: "new question"}
-	for block := 0; block < 20; block++ {
-		text := fmt.Sprintf("stable rules %d", block)
-		task.Instructions = append(task.Instructions, text)
-		client.checks[text] = true
+	for block := 0; block < 40; block++ {
+		task.Instructions = append(task.Instructions, fmt.Sprintf("stable rules %d", block)+strings.Repeat(" detail", 2000))
+	}
+	bundles := moderationInstructionBundles(task.Instructions, 32768)
+	require.Greater(t, len(bundles), 16)
+	for _, bundle := range bundles {
+		client.checks[bundle] = true
 	}
 	task.Diagnostics = newModerationDiagnostics(task, 32768)
-	_, _, err := svc.classifyInput(context.Background(), task, &Group{})
+	_, coverage, err := svc.classifyInput(context.Background(), task, &Group{})
 	require.NoError(t, err)
-	require.Equal(t, 21, task.Diagnostics.CompletedChecks)
-	require.Equal(t, 20, task.Diagnostics.CacheHits)
+	require.Equal(t, moderationCoverageJointSkipped, coverage)
+	require.Equal(t, len(bundles)+1, task.Diagnostics.CompletedChecks)
+	require.Equal(t, len(bundles), task.Diagnostics.CacheHits)
 	require.Equal(t, 1, task.Diagnostics.DetectorCalls)
 	task.Text = "different question"
 	task.Diagnostics = newModerationDiagnostics(task, 32768)
 	_, _, err = svc.classifyInput(context.Background(), task, &Group{})
 	require.NoError(t, err)
 	require.Equal(t, 1, task.Diagnostics.DetectorCalls)
+	// An edited block invalidates only the bundle(s) around it.
 	task.Instructions[0] = "changed instructions"
 	task.Diagnostics = newModerationDiagnostics(task, 32768)
 	_, _, err = svc.classifyInput(context.Background(), task, &Group{})
 	require.NoError(t, err)
-	require.Equal(t, 2, task.Diagnostics.DetectorCalls)
+	require.LessOrEqual(t, task.Diagnostics.DetectorCalls, 3)
 }
 
 func TestModerationTimeoutIsNotInputTooLarge(t *testing.T) {

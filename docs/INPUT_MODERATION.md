@@ -123,8 +123,18 @@ inspect local files or recover instructions absent from the current request
 (including server-held previous_response_id context). Arbitrary shell file reads
 are not reliably identified. A filename is never a trust or exemption signal.
 
-Stable instruction text is classified separately and also joined with the new
-user text for context assessment. A safe cached document cannot exempt a new
+Stable instruction text is classified on its own and also joined with the new
+user text for context assessment. Standalone instruction checks use bundles:
+instruction blocks are packed in order into bundles of at most one chunk, and a
+bundle closes after a block whose content hash selects a boundary (probability
+proportional to block size, about one per quarter chunk). Claude Code sends
+100+ small blocks per turn, so a turn needs a few bundle checks instead of one
+check per block. An edit usually invalidates only nearby bundles' cached
+scores: packing realigns at the next unchanged hash boundary, though a long run
+without hash boundaries (closed by the size limit) can shift further. Blocks of
+a full chunk or more stay standalone and are chunked like any text; a single
+block beyond the 16-chunk bound fails the job as `input_too_large`. Requests
+without new user text (tool-result turns) check only the bundles. A safe cached document cannot exempt a new
 question. Content changes invalidate reuse. Small combined inputs use one joint
 assessment; long inputs use overlapping Unicode-character chunks (default
 32,768 characters, up to 512 characters overlap). Each category retains the maximum
@@ -132,10 +142,16 @@ score across all required checks, then applies the current group threshold once.
 Cross-chunk semantics are limited to the overlap, not full-document equivalence.
 Passed chunked results therefore display **Chunk checks passed**, with details
 explaining that limitation. No text is silently truncated. Total joined text is
-bounded to 16 overlapping chunks, and a plan contains at most 64 unique checks
-including standalone instruction checks. These bounds apply before enqueueing,
-regardless of cache contents. Character overflow records `failed/input_too_large`;
-plan overflow records `failed/plan_too_large`, without a detector call.
+bounded to 16 overlapping chunks. When the instructions and the new text
+together exceed that bound, the joint check is skipped instead of failing the
+job: the new text is chunked alone (it must itself fit the bound) and the
+instruction bundles are checked as usual. The result reason is
+`joint_context_skipped` and the diagnostics carry `joint_skipped=true`; such
+results do not represent a joint judgement of instructions and question. A plan
+contains at most 64 unique checks including the instruction bundle checks.
+These bounds apply before enqueueing, regardless of cache contents. Overflow of
+the new text alone records `failed/input_too_large`; plan overflow records
+`failed/plan_too_large`, without a detector call.
 The separate per-attempt budget permits 16 actual detector calls. Cache hits,
 including coalesced successful checks, do not spend this budget. Thus previously
 checked instructions can support a plan with more than 16 checks. A cold or

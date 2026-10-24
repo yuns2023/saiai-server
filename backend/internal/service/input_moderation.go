@@ -441,7 +441,7 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 	if len(submittedPolicy.AuditCategories) == 0 {
 		return s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "no_categories", DecisionSnapshot: moderationDecisionSnapshot(group)})
 	}
-	result, chunked, err := s.classifyInput(classifyCtx, task, group)
+	result, coverageReason, err := s.classifyInput(classifyCtx, task, group)
 	if err != nil && classifyCtx.Err() != nil {
 		err = classifyCtx.Err()
 	}
@@ -453,10 +453,6 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 	}
 	if errors.Is(err, ErrInputModerationCallBudget) {
 		return s.recordResult(task, InputModerationResult{Status: "failed", Reason: "detector_budget_exceeded"})
-	}
-	coverageReason := ""
-	if chunked {
-		coverageReason = "chunked_input"
 	}
 	if err != nil {
 		slog.Warn("input_moderation_classify_failed",

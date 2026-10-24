@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestModerationContextExtraction(t *testing.T) {
@@ -48,9 +50,9 @@ func TestModerationChunksCoverTailAndUnicode(t *testing.T) {
 	require.ErrorIs(t, err, errModerationTooLarge)
 }
 func TestModerationStableAndJointPlans(t *testing.T) {
-	chunks, chunked, err := moderationTaskChunks(InputModerationTask{Text: "question", Instructions: []string{"stable rules"}}, 32768)
+	chunks, coverage, err := moderationTaskChunks(InputModerationTask{Text: "question", Instructions: []string{"stable rules"}}, 32768)
 	require.NoError(t, err)
-	require.False(t, chunked)
+	require.Empty(t, coverage)
 	require.Equal(t, []string{"stable rules\n\nquestion", "stable rules"}, chunks)
 }
 
@@ -68,9 +70,9 @@ func TestModerationChunkTailRaisesRisk(t *testing.T) {
 	client := &chunkModerationStub{}
 	svc := &InputModerationService{client: client}
 	svc.cfg.MaxInputChars = 16
-	result, chunked, err := svc.classifyInput(context.Background(), InputModerationTask{UserID: 1, GroupID: 2, Text: strings.Repeat("x", 20) + "DANGER"}, &Group{})
+	result, coverage, err := svc.classifyInput(context.Background(), InputModerationTask{UserID: 1, GroupID: 2, Text: strings.Repeat("x", 20) + "DANGER"}, &Group{})
 	require.NoError(t, err)
-	require.True(t, chunked)
+	require.Equal(t, moderationCoverageChunked, coverage)
 	require.Equal(t, .95, result.Scores["PII"])
 	require.Greater(t, len(client.texts), 1)
 }
@@ -114,4 +116,161 @@ func TestModerationProjectReminderAlongsideToolResult(t *testing.T) {
 	text, parts := ExtractAnthropicModerationInput(parsed)
 	require.Empty(t, text)
 	require.Equal(t, []string{"<system-reminder>CLAUDE.md: project instructions</system-reminder>"}, parts)
+}
+
+func TestModerationInstructionBundlesPackSmallBlocksStably(t *testing.T) {
+	var blocks []string
+	for block := 0; block < 136; block++ {
+		blocks = append(blocks, fmt.Sprintf("<system-reminder>project rule %d: %s</system-reminder>", block, strings.Repeat("keep it tidy ", 30)))
+	}
+	bundles := moderationInstructionBundles(blocks, 32768)
+	require.Less(t, len(bundles), 40)
+	joined := strings.Join(bundles, "\n\n")
+	require.Equal(t, strings.Join(blocks, "\n\n"), joined) // order and content preserved
+	for _, bundle := range bundles {
+		require.LessOrEqual(t, utf8.RuneCountInString(bundle), 32768)
+	}
+	// Editing one block changes its bundle and at most one neighbour.
+	edited := append([]string(nil), blocks...)
+	edited[70] = "edited rule"
+	after := moderationInstructionBundles(edited, 32768)
+	unchanged := map[string]bool{}
+	for _, bundle := range after {
+		unchanged[bundle] = true
+	}
+	changed := 0
+	for _, bundle := range bundles {
+		if !unchanged[bundle] {
+			changed++
+		}
+	}
+	require.LessOrEqual(t, changed, 2)
+	// Oversized blocks stay standalone; empty blocks vanish.
+	big := strings.Repeat("b", 40000)
+	require.Equal(t, []string{"a", big, "c"}, moderationInstructionBundles([]string{"a", big, " ", "c"}, 32768)[0:3:3][:3])
+}
+
+func TestModerationManySmallInstructionsNoLongerExceedPlan(t *testing.T) {
+	task := InputModerationTask{Text: "new question"}
+	for block := 0; block < 136; block++ {
+		task.Instructions = append(task.Instructions, fmt.Sprintf("rule %d %s", block, strings.Repeat("x", 450)))
+	}
+	task.Diagnostics = newModerationDiagnostics(task, 32768)
+	chunks, coverage, err := moderationTaskChunks(task, 32768)
+	require.NoError(t, err)
+	require.Equal(t, moderationCoverageChunked, coverage)
+	require.Less(t, len(chunks), 16)
+	require.Equal(t, len(chunks), task.Diagnostics.PlannedChecks)
+	require.Positive(t, task.Diagnostics.InstructionBundles)
+	require.False(t, task.Diagnostics.JointSkipped)
+}
+
+func TestModerationOversizedJointChecksNewTextAlone(t *testing.T) {
+	task := InputModerationTask{Text: "question DANGER"}
+	for block := 0; block < 40; block++ {
+		task.Instructions = append(task.Instructions, fmt.Sprintf("rule %d %s", block, strings.Repeat("y", 15000)))
+	}
+	task.Diagnostics = newModerationDiagnostics(task, 32768)
+	chunks, coverage, err := moderationTaskChunks(task, 32768)
+	require.NoError(t, err)
+	require.Equal(t, moderationCoverageJointSkipped, coverage)
+	require.Equal(t, "question DANGER", chunks[0])
+	require.True(t, task.Diagnostics.JointSkipped)
+	// Without new text the plan holds exactly the instruction bundles.
+	task.Text = ""
+	chunks, coverage, err = moderationTaskChunks(task, 32768)
+	require.NoError(t, err)
+	require.Empty(t, coverage)
+	require.Equal(t, moderationInstructionBundles(task.Instructions, 32768), chunks)
+	// New text that is itself too large still fails.
+	task.Text = strings.Repeat("z", 600000)
+	_, _, err = moderationTaskChunks(task, 32768)
+	require.ErrorIs(t, err, errModerationTooLarge)
+}
+
+func TestModerationJointSkippedIsRecordedAsCoverageReason(t *testing.T) {
+	repo := &moderationResultRepoStub{}
+	groups := &inputModerationGroupRepoStub{groups: []*Group{{ID: 3, InputModerationEnabled: true}}}
+	svc := newInputModerationServiceForTest(nil, repo, groups, nil, nil)
+	client := &cachedModerationBudgetStub{checks: map[string]bool{}}
+	svc.client = client
+	svc.cfg.MaxInputChars = 32768
+	defer svc.Stop()
+	task := InputModerationTask{RequestID: "joint", UserID: 1, APIKeyID: 2, GroupID: 3, Text: "question"}
+	for block := 0; block < 40; block++ {
+		task.Instructions = append(task.Instructions, fmt.Sprintf("rule %d %s", block, strings.Repeat("y", 15000)))
+	}
+	// Warm instruction bundles from earlier turns are cache hits.
+	for _, bundle := range moderationInstructionBundles(task.Instructions, 32768) {
+		client.checks[bundle] = true
+	}
+	require.NoError(t, svc.process(task))
+	require.Len(t, repo.results, 1)
+	// Coverage is disclosed whatever the verdict (this bare group flags any score).
+	require.Equal(t, moderationCoverageJointSkipped, repo.results[0].Reason)
+	require.Equal(t, 1, repo.results[0].Diagnostics.DetectorCalls)
+}
+
+func TestModerationInstructionOnlyRequestsCheckBundlesAlone(t *testing.T) {
+	task := InputModerationTask{Instructions: []string{"rules one", "rules two"}}
+	task.Diagnostics = newModerationDiagnostics(task, 32768)
+	chunks, coverage, err := moderationTaskChunks(task, 32768)
+	require.NoError(t, err)
+	require.Empty(t, coverage)
+	require.Equal(t, moderationInstructionBundles(task.Instructions, 32768), chunks)
+	require.Equal(t, len(chunks), task.Diagnostics.PlannedChecks)
+	// Text-only plans also report their planned checks.
+	task = InputModerationTask{Text: "question"}
+	task.Diagnostics = newModerationDiagnostics(task, 32768)
+	chunks, _, err = moderationTaskChunks(task, 32768)
+	require.NoError(t, err)
+	require.Equal(t, []string{"question"}, chunks)
+	require.Equal(t, 1, task.Diagnostics.PlannedChecks)
+}
+
+func TestModerationBundleEditRealignsAtNextHashBoundary(t *testing.T) {
+	var blocks []string
+	for block := 0; block < 400; block++ {
+		blocks = append(blocks, fmt.Sprintf("rule %03d %s", block, strings.Repeat("w", 450)))
+	}
+	before := moderationInstructionBundles(blocks, 32768)
+	for _, edit := range []func([]string) []string{
+		func(b []string) []string { b[200] = "short"; return b },
+		func(b []string) []string { return append(b[:200:200], b[201:]...) },
+		func(b []string) []string {
+			return append(b[:200:200], append([]string{"inserted rule"}, b[200:]...)...)
+		},
+	} {
+		after := moderationInstructionBundles(edit(append([]string(nil), blocks...)), 32768)
+		// Bundles before the edit and after the next unchanged hash boundary
+		// are reused; nothing is lost or reordered.
+		require.Equal(t, before[0], after[0])
+		require.Equal(t, before[len(before)-1], after[len(after)-1])
+		kept := map[string]bool{}
+		for _, bundle := range after {
+			kept[bundle] = true
+		}
+		reused := 0
+		for _, bundle := range before {
+			if kept[bundle] {
+				reused++
+			}
+		}
+		require.GreaterOrEqual(t, reused, len(before)-4)
+	}
+}
+
+func TestModerationSubmitQueuesJointSkippedPlans(t *testing.T) {
+	repo := &moderationResultRepoStub{}
+	svc := newInputModerationServiceForTest(nil, repo, nil, nil, nil)
+	svc.cfg.MaxInputChars = 32768
+	task := InputModerationTask{RequestID: "submit-joint", UserID: 1, APIKeyID: 2, GroupID: 3, Text: "question"}
+	for block := 0; block < 40; block++ {
+		task.Instructions = append(task.Instructions, fmt.Sprintf("rule %d %s", block, strings.Repeat("y", 15000)))
+	}
+	require.True(t, svc.Submit(task))
+	svc.Stop() // drain the worker before reading the recorded results
+	require.Equal(t, "pending", repo.results[0].Status)
+	require.True(t, repo.results[0].Diagnostics.JointSkipped)
+	require.Positive(t, repo.results[0].Diagnostics.PlannedChecks)
 }
