@@ -215,10 +215,8 @@ func (r *usageLogRepository) getPerformanceStats(ctx context.Context, userID int
 	if userID > 0 {
 		query += " AND user_id = $2"
 		args = append(args, userID)
-	} else {
-		// 平台级 RPM/TPM（管理仪表盘）不含托管用量。
-		query += " AND metered_cost IS NULL"
 	}
+	// RPM/TPM measure gateway load, so hosted traffic stays included.
 
 	var requestCount int64
 	var tokenCount int64
