@@ -80,16 +80,16 @@ func insertModerationEvidenceAccess(ctx context.Context, db sqlExecutor, access 
 	return nil
 }
 
-// RecordInputModerationEvidenceAccess commits the access row and returns its
-// database time, used to re-check expiry before anything is decrypted.
+// RecordInputModerationEvidenceAccess commits the access row, then returns
+// the database time read after that commit; expiry is re-checked against it
+// before anything is decrypted.
 func (r *inputModerationRepository) RecordInputModerationEvidenceAccess(ctx context.Context, access service.InputModerationEvidenceAccess) (time.Time, error) {
+	if err := insertModerationEvidenceAccess(ctx, r.db, access); err != nil {
+		return time.Time{}, err
+	}
 	var at time.Time
-	if err := r.db.QueryRowContext(ctx, `
-		INSERT INTO input_moderation_evidence_access (event_id, admin_user_id, auth_method, action, reason)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING clock_timestamp()`,
-		access.EventID, access.AdminUserID, access.AuthMethod, access.Action, access.Reason).Scan(&at); err != nil {
-		return time.Time{}, fmt.Errorf("record input moderation evidence access: %w", err)
+	if err := r.db.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
+		return time.Time{}, fmt.Errorf("read input moderation evidence access time: %w", err)
 	}
 	return at, nil
 }

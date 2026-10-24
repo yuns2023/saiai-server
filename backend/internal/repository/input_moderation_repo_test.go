@@ -138,6 +138,7 @@ func TestApplyInputModerationIncidentCooldownThenDisable(t *testing.T) {
 			mock.ExpectQuery("SELECT strike_count, strike_window_started_at, blocked_until, last_incident_at, reset_at").
 				WithArgs(int64(1)).
 				WillReturnRows(sqlmock.NewRows([]string{"strike_count", "strike_window_started_at", "blocked_until", "last_incident_at", "reset_at"}).AddRow(tt.priorStrikes, tt.windowStart, nil, nil, nil))
+			mock.ExpectQuery("SELECT clock_timestamp").WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(now))
 			mock.ExpectQuery("SELECT EXISTS").
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 			if tt.wantDisabled {
@@ -187,6 +188,7 @@ func TestApplyInputModerationIncidentDeduplicatesSameContent(t *testing.T) {
 	mock.ExpectQuery("SELECT role, status, updated_at").WillReturnRows(sqlmock.NewRows([]string{"role", "status", "updated_at", "deleted"}).AddRow(service.RoleUser, service.StatusActive, now.Add(-time.Minute), false))
 	mock.ExpectExec("INSERT INTO user_input_risk_states").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("SELECT strike_count, strike_window_started_at, blocked_until, last_incident_at, reset_at").WillReturnRows(sqlmock.NewRows([]string{"strike_count", "strike_window_started_at", "blocked_until", "last_incident_at", "reset_at"}).AddRow(1, now.Add(-time.Hour), now.Add(29*time.Minute), now.Add(-time.Minute), nil))
+	mock.ExpectQuery("SELECT clock_timestamp").WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(now))
 	mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectExec("UPDATE input_moderation_events SET action").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()

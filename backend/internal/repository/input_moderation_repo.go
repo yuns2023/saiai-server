@@ -236,20 +236,22 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 		return finishWithoutStrike(service.InputModerationActionStaleUserState)
 	}
 
+	// One database timestamp, read after the risk-state lock is held, drives
+	// window start, rollover, the dedupe window and strike_counted_at. It is
+	// clock_timestamp(), not NOW() (transaction start): a transaction that
+	// began earlier but got the lock later still gets a later time, so strikes
+	// counted in a window are never dated before its start. Window membership
+	// uses strike_counted_at, not created_at; events counted before the column
+	// existed fall back to created_at.
+	var now time.Time
+	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return nil, fmt.Errorf("read input moderation lock time: %w", err)
+	}
 	// Roll the strike window over first so both duplicate checks only see
-	// strikes counted in the current window (after the last reset). Window
-	// membership uses the time a strike was counted, not created_at: a job
-	// created earlier may commit after a later one opened the window.
-	// strike_counted_at is clock_timestamp() taken under the user lock (not the
-	// transaction start), so it is after the commit of any strike that opened
-	// the window. Events counted before the column existed use created_at.
+	// strikes counted in the current window (after the last reset).
 	strikeWindow := policy.StrikeWindow
 	if strikeWindow <= 0 {
 		strikeWindow = 24 * time.Hour
-	}
-	now := event.CreatedAt
-	if now.IsZero() {
-		now = time.Now().UTC()
 	}
 	if !windowStart.Valid || !now.Before(windowStart.Time.Add(strikeWindow)) {
 		strikeCount = 0
@@ -268,7 +270,7 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
  AND ((input_hash = $2 AND created_at >= $3)
  OR ($5 <> '' AND request_id = $5 AND source = $6 AND COALESCE(turn_number,0) = $7 AND api_key_id = $8 AND group_id = $9)
  OR ($11 <> '' AND incident_fingerprint = $11 AND strike_counted_at IS NOT NULL))
-		)`, event.UserID, event.InputHash, event.CreatedAt.Add(-dedupeWindow), eventID, event.RequestID, event.Source, event.TurnNumber, event.APIKeyID, event.GroupID,
+		)`, event.UserID, event.InputHash, now.Add(-dedupeWindow), eventID, event.RequestID, event.Source, event.TurnNumber, event.APIKeyID, event.GroupID,
 		windowStart.Time, event.IncidentFingerprint).Scan(&duplicate); err != nil {
 		return nil, fmt.Errorf("check input moderation incident duplicate: %w", err)
 	}
@@ -346,8 +348,8 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 		return nil, fmt.Errorf("update user input risk state: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE input_moderation_events SET action = $2, counted_as_strike = true, strike_counted_at = clock_timestamp() WHERE id = $1`,
-		eventID, action); err != nil {
+		UPDATE input_moderation_events SET action = $2, counted_as_strike = true, strike_counted_at = $3 WHERE id = $1`,
+		eventID, action, now); err != nil {
 		return nil, fmt.Errorf("finalize input moderation incident: %w", err)
 	}
 	if err := writeInputModerationOutcomeTx(ctx, tx, eventID, event); err != nil {

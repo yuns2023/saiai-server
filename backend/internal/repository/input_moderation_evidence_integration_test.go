@@ -347,3 +347,74 @@ func TestModerationHeldListToleratesDeletedUserAndGroup(t *testing.T) {
 	}
 	require.True(t, found)
 }
+
+// tx1 (A) begins first but acquires the risk-state lock second, after tx2 (B)
+// opened the strike window. A's strike must still date inside that window.
+func TestModerationFingerprintDedupWhenEarlierTxLocksLater(t *testing.T) {
+	ctx := context.Background()
+	u, k, g, _ := moderationReleaseFixture(t)
+	repo := NewInputModerationRepository(integrationDB)
+	policy := service.InputModerationEscalationPolicy{ActionMode: service.InputModerationActionModeWarnThenCooldown,
+		DisableAfterHits: 5, StrikeWindow: 24 * time.Hour, Cooldown: 30 * time.Minute, DedupeWindow: time.Minute}
+	bundleA := "e000000000000000000000000000000000000000000000000000000000000000"
+	_, err := integrationDB.ExecContext(ctx, `INSERT INTO user_input_risk_states (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, u.ID)
+	require.NoError(t, err)
+
+	// B holds the risk-state lock.
+	blocker, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = blocker.Rollback() }()
+	_, err = blocker.ExecContext(ctx, `SELECT 1 FROM user_input_risk_states WHERE user_id = $1 FOR UPDATE`, u.ID)
+	require.NoError(t, err)
+
+	// A begins its transaction now and waits for the lock.
+	makeEvent := func() *service.InputModerationEvent {
+		event := evidenceTestEvent(u, k, g, uuid.NewString())
+		event.Evidence, event.Result = nil, nil
+		event.IncidentFingerprint = bundleA
+		return event
+	}
+	type outcome struct {
+		transition *service.InputModerationTransition
+		err        error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		transition, err := repo.ApplyInputModerationIncident(ctx, makeEvent(), policy)
+		done <- outcome{transition, err}
+	}()
+	time.Sleep(500 * time.Millisecond)
+
+	// B opens the window at its lock time and counts a strike, then commits.
+	_, err = blocker.ExecContext(ctx, `UPDATE user_input_risk_states SET strike_count = 1, strike_window_started_at = clock_timestamp() WHERE user_id = $1`, u.ID)
+	require.NoError(t, err)
+	_, err = blocker.ExecContext(ctx, `INSERT INTO input_moderation_events (job_id, user_id, api_key_id, group_id, input_hash, safety, action, source, counted_as_strike, strike_counted_at, created_at)
+		VALUES ($1::uuid, $2, $3, $4, 'TEST_ONLY_B', 'unsafe', 'warning', 'anthropic_messages', true, clock_timestamp(), clock_timestamp())`, uuid.NewString(), u.ID, k.ID, g.ID)
+	require.NoError(t, err)
+	require.NoError(t, blocker.Commit())
+
+	first := <-done
+	require.NoError(t, first.err)
+	require.False(t, first.transition.Duplicate)
+	require.Equal(t, 2, first.transition.StrikeCount)
+	// The repeated bundle sees A's strike.
+	repeat, err := repo.ApplyInputModerationIncident(ctx, makeEvent(), policy)
+	require.NoError(t, err)
+	require.True(t, repeat.Duplicate)
+	require.Equal(t, 2, repeat.StrikeCount)
+}
+
+func TestModerationEvidenceAccessTimeIsReadAfterCommit(t *testing.T) {
+	ctx := context.Background()
+	repo := &inputModerationRepository{db: integrationDB}
+	eventID := time.Now().UnixNano()
+	at, err := repo.RecordInputModerationEvidenceAccess(ctx, service.InputModerationEvidenceAccess{EventID: eventID, AdminUserID: 1, AuthMethod: "jwt", Action: "view"})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), `DELETE FROM input_moderation_evidence_access WHERE event_id = $1`, eventID)
+	})
+	var committedAt time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT created_at FROM input_moderation_evidence_access WHERE event_id = $1`, eventID).Scan(&committedAt))
+	// The returned time comes from a statement after the committed insert.
+	require.True(t, at.After(committedAt), "access time %s must follow the committed row %s", at, committedAt)
+}

@@ -300,10 +300,11 @@ of the crossing instruction checks) only when:
 
 Under the user lock the strike window is rolled over (or restarted after a
 reset) first; then the existing duplicate checks and the fingerprint check only
-consider strikes counted in the current window. Window membership uses
-`strike_counted_at` (database time when the strike was counted), so a job that
-was created earlier but committed after the window opened is still seen. (The window start itself is application time; application and database
-clocks are assumed to be NTP-synchronized.)
+consider strikes counted in the current window. One database
+`clock_timestamp()`, read after the risk-state lock is held, drives window
+start, rollover, the dedupe window and `strike_counted_at`; window membership
+uses `strike_counted_at`. A job that was created or began its transaction
+earlier but got the lock later is therefore still inside the window.
 The optional text-alone check runs before the final group/user/policy re-read,
 so switching moderation off, trusting the user or changing detection during it
 still skips the job. A matching earlier strike makes
