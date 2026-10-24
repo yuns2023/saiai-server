@@ -176,14 +176,12 @@ func TestModerationOversizedJointChecksNewTextAlone(t *testing.T) {
 	require.Equal(t, moderationCoverageJointSkipped, coverage)
 	require.Equal(t, "question DANGER", chunks[0])
 	require.True(t, task.Diagnostics.JointSkipped)
-	// Without new text the plan holds only the instruction bundles.
+	// Without new text the plan holds exactly the instruction bundles.
 	task.Text = ""
 	chunks, coverage, err = moderationTaskChunks(task, 32768)
 	require.NoError(t, err)
-	require.Equal(t, moderationCoverageJointSkipped, coverage)
-	for _, chunk := range chunks {
-		require.NotEmpty(t, chunk)
-	}
+	require.Empty(t, coverage)
+	require.Equal(t, moderationInstructionBundles(task.Instructions, 32768), chunks)
 	// New text that is itself too large still fails.
 	task.Text = strings.Repeat("z", 600000)
 	_, _, err = moderationTaskChunks(task, 32768)
@@ -211,4 +209,66 @@ func TestModerationJointSkippedIsRecordedAsCoverageReason(t *testing.T) {
 	// Coverage is disclosed whatever the verdict (this bare group flags any score).
 	require.Equal(t, moderationCoverageJointSkipped, repo.results[0].Reason)
 	require.Equal(t, 1, repo.results[0].Diagnostics.DetectorCalls)
+}
+
+func TestModerationInstructionOnlyRequestsCheckBundlesAlone(t *testing.T) {
+	task := InputModerationTask{Instructions: []string{"rules one", "rules two"}}
+	task.Diagnostics = newModerationDiagnostics(task, 32768)
+	chunks, coverage, err := moderationTaskChunks(task, 32768)
+	require.NoError(t, err)
+	require.Empty(t, coverage)
+	require.Equal(t, moderationInstructionBundles(task.Instructions, 32768), chunks)
+	require.Equal(t, len(chunks), task.Diagnostics.PlannedChecks)
+	// Text-only plans also report their planned checks.
+	task = InputModerationTask{Text: "question"}
+	task.Diagnostics = newModerationDiagnostics(task, 32768)
+	chunks, _, err = moderationTaskChunks(task, 32768)
+	require.NoError(t, err)
+	require.Equal(t, []string{"question"}, chunks)
+	require.Equal(t, 1, task.Diagnostics.PlannedChecks)
+}
+
+func TestModerationBundleEditRealignsAtNextHashBoundary(t *testing.T) {
+	var blocks []string
+	for block := 0; block < 400; block++ {
+		blocks = append(blocks, fmt.Sprintf("rule %03d %s", block, strings.Repeat("w", 450)))
+	}
+	before := moderationInstructionBundles(blocks, 32768)
+	for _, edit := range []func([]string) []string{
+		func(b []string) []string { b[200] = "short"; return b },
+		func(b []string) []string { return append(b[:200:200], b[201:]...) },
+		func(b []string) []string { return append(b[:200:200], append([]string{"inserted rule"}, b[200:]...)...) },
+	} {
+		after := moderationInstructionBundles(edit(append([]string(nil), blocks...)), 32768)
+		// Bundles before the edit and after the next unchanged hash boundary
+		// are reused; nothing is lost or reordered.
+		require.Equal(t, before[0], after[0])
+		require.Equal(t, before[len(before)-1], after[len(after)-1])
+		kept := map[string]bool{}
+		for _, bundle := range after {
+			kept[bundle] = true
+		}
+		reused := 0
+		for _, bundle := range before {
+			if kept[bundle] {
+				reused++
+			}
+		}
+		require.GreaterOrEqual(t, reused, len(before)-4)
+	}
+}
+
+func TestModerationSubmitQueuesJointSkippedPlans(t *testing.T) {
+	repo := &moderationResultRepoStub{}
+	svc := newInputModerationServiceForTest(nil, repo, nil, nil, nil)
+	svc.cfg.MaxInputChars = 32768
+	defer svc.Stop()
+	task := InputModerationTask{RequestID: "submit-joint", UserID: 1, APIKeyID: 2, GroupID: 3, Text: "question"}
+	for block := 0; block < 40; block++ {
+		task.Instructions = append(task.Instructions, fmt.Sprintf("rule %d %s", block, strings.Repeat("y", 15000)))
+	}
+	require.True(t, svc.Submit(task))
+	require.Equal(t, "pending", repo.results[0].Status)
+	require.True(t, repo.results[0].Diagnostics.JointSkipped)
+	require.Positive(t, repo.results[0].Diagnostics.PlannedChecks)
 }

@@ -129,8 +129,12 @@ instruction blocks are packed in order into bundles of at most one chunk, and a
 bundle closes after a block whose content hash selects a boundary (probability
 proportional to block size, about one per quarter chunk). Claude Code sends
 100+ small blocks per turn, so a turn needs a few bundle checks instead of one
-check per block, and an edit to one block invalidates only its own bundle's
-cached scores. Blocks of a full chunk or more stay standalone. A safe cached document cannot exempt a new
+check per block. An edit usually invalidates only nearby bundles' cached
+scores: packing realigns at the next unchanged hash boundary, though a long run
+without hash boundaries (closed by the size limit) can shift further. Blocks of
+a full chunk or more stay standalone and are chunked like any text; a single
+block beyond the 16-chunk bound fails the job as `input_too_large`. Requests
+without new user text (tool-result turns) check only the bundles. A safe cached document cannot exempt a new
 question. Content changes invalidate reuse. Small combined inputs use one joint
 assessment; long inputs use overlapping Unicode-character chunks (default
 32,768 characters, up to 512 characters overlap). Each category retains the maximum

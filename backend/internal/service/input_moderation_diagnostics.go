@@ -14,11 +14,12 @@ type InputModerationDiagnostics struct {
 	InputChars        int `json:"input_chars"`
 	InstructionChars  int `json:"instruction_chars"`
 	InstructionBlocks int `json:"instruction_blocks"`
-	// Bundles the instruction blocks were packed into; each is one stable check.
-	InstructionBundles int `json:"instruction_bundles"`
+	// Bundles the instruction blocks were packed into (oversized blocks are
+	// standalone and may need several chunk checks). Absent on older results.
+	InstructionBundles int `json:"instruction_bundles,omitempty"`
 	// The new text was checked without the instructions because together they
 	// exceeded the coverage budget.
-	JointSkipped     bool   `json:"joint_skipped"`
+	JointSkipped     bool   `json:"joint_skipped,omitempty"`
 	PlannedChecks    int    `json:"planned_checks"`
 	CompletedChecks  int    `json:"completed_checks"`
 	CacheHits        int    `json:"cache_hits"`

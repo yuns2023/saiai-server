@@ -235,10 +235,10 @@ const (
 // many small blocks (Claude Code sends 100+ per turn) needs only a few checks.
 // A bundle closes after a block whose content hash selects a boundary, with a
 // probability proportional to the block's size (about one boundary per quarter
-// chunk). Boundaries therefore depend on each block's own content, so an edit
-// to one block changes only its bundle and the cached scores of the other
-// bundles stay valid. The size limit also closes a bundle, which is rare at
-// this boundary rate.
+// chunk). Boundaries depend on each block's own content, so an edit usually
+// invalidates only nearby bundles: packing realigns at the next unchanged hash
+// boundary. A run without hash boundaries is closed by the size limit, and an
+// edit inside such a run can shift every bundle up to the next hash boundary.
 func moderationInstructionBundles(instructions []string, size int) []string {
 	if size <= 0 {
 		size = 32768
@@ -284,15 +284,20 @@ func moderationInstructionBundles(instructions []string, size int) []string {
 
 // The plan checks the new text jointly with the instructions, then each
 // instruction bundle on its own (stable across turns, hence usually cached).
-// When the joint text is too large to cover, the new text is checked alone
-// instead of failing the job; the result discloses that joint context was
-// skipped. The planned-check cap applies to the unique checks of this plan.
+// Without new text the bundles alone cover the instructions. When the joint
+// text is too large to cover, the new text is checked alone instead of failing
+// the job; the result discloses that joint context was skipped. The
+// planned-check cap applies to the unique checks of this plan.
 func moderationTaskChunks(task InputModerationTask, size int) ([]string, string, error) {
 	text := strings.TrimSpace(task.Text)
 	parts := append([]string(nil), task.Instructions...)
 	parts = appendUniqueModerationText(parts, text)
 	coverage := moderationCoverageFull
-	chunks, err := moderationChunks(strings.Join(parts, "\n\n"), size)
+	var chunks []string
+	var err error
+	if text != "" || len(task.Instructions) == 0 {
+		chunks, err = moderationChunks(strings.Join(parts, "\n\n"), size)
+	}
 	if errors.Is(err, errModerationTooLarge) && len(task.Instructions) > 0 {
 		coverage = moderationCoverageJointSkipped
 		chunks, err = nil, nil
@@ -327,6 +332,9 @@ func moderationTaskChunks(task InputModerationTask, size int) ([]string, string,
 				return nil, "", errModerationPlanTooLarge
 			}
 		}
+	}
+	if task.Diagnostics != nil {
+		task.Diagnostics.PlannedChecks = len(chunks)
 	}
 	return chunks, coverage, nil
 }
