@@ -1713,3 +1713,198 @@ func (s *UsageLogRepoSuite) TestListWithFilters_CombinedFilters() {
 	s.Require().Len(logs, 2)
 	s.Require().Equal(int64(2), page.Total)
 }
+
+// --- Hosted usage (metered_cost IS NOT NULL) on the admin dashboard ---
+
+func (s *UsageLogRepoSuite) createHostedAwareLog(user *service.User, apiKey *service.APIKey, account *service.Account, input, output int, cost float64, metered *float64, createdAt time.Time) {
+	d := 100
+	actual := cost
+	if metered != nil {
+		actual = 0
+	}
+	_, err := s.repo.Create(s.ctx, &service.UsageLog{
+		UserID:      user.ID,
+		APIKeyID:    apiKey.ID,
+		AccountID:   account.ID,
+		RequestID:   uuid.New().String(),
+		Model:       "gpt-5",
+		InputTokens: input, OutputTokens: output,
+		TotalCost:   cost,
+		ActualCost:  actual,
+		MeteredCost: metered,
+		DurationMs:  &d,
+		CreatedAt:   createdAt,
+	})
+	s.Require().NoError(err)
+}
+
+func (s *UsageLogRepoSuite) TestDashboardHosted_BucketsStayInclusiveAndPlatformReadSubtracts() {
+	now := time.Now().UTC().Truncate(time.Second)
+	dayStart := truncateToDayUTC(now).Add(-24 * time.Hour) // yesterday: fully in the past
+	dayEnd := dayStart.Add(24 * time.Hour)
+	hour1 := dayStart.Add(2 * time.Hour)
+	hour2 := dayStart.Add(3 * time.Hour)
+
+	platformUser := mustCreateUser(s.T(), s.client, &service.User{Email: "agg-platform@test.com"})
+	hostedUser := mustCreateUser(s.T(), s.client, &service.User{Email: "agg-hosted@test.com"})
+	platformKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: platformUser.ID, Key: "sk-agg-platform", Name: "p"})
+	hostedKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: hostedUser.ID, Key: "sk-agg-hosted", Name: "h"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-agg-hosted"})
+	metered := 2.0
+
+	s.createHostedAwareLog(platformUser, platformKey, account, 10, 20, 1.0, nil, hour1.Add(5*time.Minute))
+	s.createHostedAwareLog(hostedUser, hostedKey, account, 100, 200, 2.0, &metered, hour1.Add(10*time.Minute))
+	s.createHostedAwareLog(hostedUser, hostedKey, account, 100, 200, 2.0, &metered, hour2.Add(10*time.Minute))
+
+	aggRepo := newDashboardAggregationRepositoryWithSQL(s.tx)
+	s.Require().NoError(aggRepo.AggregateRange(s.ctx, dayStart, dayEnd))
+	s.Require().NoError(aggRepo.UpdateAggregationWatermark(s.ctx, now))
+
+	// Aggregate tables keep their origin/main meaning: hosted-inclusive.
+	var requests, activeUsers int64
+	s.Require().NoError(scanSingleRow(s.ctx, s.tx, `SELECT total_requests, active_users FROM usage_dashboard_daily WHERE bucket_date = $1::date`, []any{dayStart}, &requests, &activeUsers))
+	s.Require().Equal(int64(3), requests)
+	s.Require().Equal(int64(2), activeUsers)
+
+	// Admin usage page: buckets as-is, no double counting.
+	for _, g := range []string{"day", "hour"} {
+		trend, err := s.repo.GetUsageTrendWithFilters(s.ctx, dayStart, dayEnd, g, 0, 0, 0, 0, "", nil, nil, nil, "")
+		s.Require().NoError(err)
+		var req, tok int64
+		for _, p := range trend {
+			req += p.Requests
+			tok += p.TotalTokens
+		}
+		s.Require().Equal(int64(3), req, g)
+		s.Require().Equal(int64(630), tok, g)
+	}
+
+	// Admin dashboard: platform trend equals the hosted-excluded raw sums, per bucket.
+	for _, g := range []string{"day", "hour"} {
+		platform, err := s.repo.GetPlatformUsageTrend(s.ctx, dayStart, dayEnd, g)
+		s.Require().NoError(err)
+		want, err := s.repo.queryUsageTrendFromLogs(s.ctx, dayStart, dayEnd, g, 0, 0, 0, 0, "", nil, nil, nil, "", hostedScopeExclude)
+		s.Require().NoError(err)
+		wantByDate := map[string]TrendDataPoint{}
+		for _, p := range want {
+			wantByDate[p.Date] = p
+		}
+		var req int64
+		for _, p := range platform {
+			req += p.Requests
+			w := wantByDate[p.Date]
+			s.Require().Equal(w.Requests, p.Requests, "%s %s", g, p.Date)
+			s.Require().Equal(w.TotalTokens, p.TotalTokens, "%s %s", g, p.Date)
+			s.Require().InDelta(w.Cost, p.Cost, 1e-9)
+			s.Require().InDelta(w.ActualCost, p.ActualCost, 1e-9)
+		}
+		s.Require().Equal(int64(1), req, g)
+	}
+
+	models, err := s.repo.GetPlatformModelStats(s.ctx, dayStart, dayEnd)
+	s.Require().NoError(err)
+	s.Require().Len(models, 1)
+	s.Require().Equal(int64(1), models[0].Requests)
+
+	ranking, err := s.repo.GetUserSpendingRanking(s.ctx, dayStart, dayEnd, 12)
+	s.Require().NoError(err)
+	s.Require().Len(ranking.Ranking, 1)
+	s.Require().Equal(platformUser.ID, ranking.Ranking[0].UserID)
+	s.Require().Equal(int64(1), ranking.TotalRequests)
+
+	usersTrend, err := s.repo.GetUserUsageTrend(s.ctx, dayStart, dayEnd, "day", 12)
+	s.Require().NoError(err)
+	for _, p := range usersTrend {
+		s.Require().NotEqual(hostedUser.ID, p.UserID)
+	}
+}
+
+func (s *UsageLogRepoSuite) TestDashboardHosted_UnaggregatedHostedRowsAreNotSubtracted() {
+	now := time.Now().UTC().Truncate(time.Second)
+	dayStart := truncateToDayUTC(now).Add(-24 * time.Hour)
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "agg-wm@test.com"})
+	key := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-agg-wm", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-agg-wm"})
+	metered := 1.0
+
+	s.createHostedAwareLog(user, key, account, 10, 10, 1.0, nil, dayStart.Add(time.Hour))
+	aggRepo := newDashboardAggregationRepositoryWithSQL(s.tx)
+	s.Require().NoError(aggRepo.AggregateRange(s.ctx, dayStart, dayStart.Add(24*time.Hour)))
+	watermark := dayStart.Add(2 * time.Hour)
+	s.Require().NoError(aggRepo.UpdateAggregationWatermark(s.ctx, watermark))
+	// Hosted row after the watermark: not in any bucket yet, must not be subtracted.
+	s.createHostedAwareLog(user, key, account, 50, 50, 1.0, &metered, dayStart.Add(90*time.Minute).Add(time.Hour))
+
+	platform, err := s.repo.GetPlatformUsageTrend(s.ctx, dayStart, dayStart.Add(24*time.Hour), "day")
+	s.Require().NoError(err)
+	s.Require().Len(platform, 1)
+	s.Require().Equal(int64(1), platform[0].Requests)
+	s.Require().Equal(int64(20), platform[0].TotalTokens)
+}
+
+func (s *UsageLogRepoSuite) TestDashboardStatsWithRange_ExcludesHostedAndReportsHostedLine() {
+	now := time.Now().UTC()
+	todayStart := truncateToDayUTC(now)
+	rangeStart := todayStart.Add(-24 * time.Hour)
+
+	platformUser := mustCreateUser(s.T(), s.client, &service.User{Email: "range-platform@test.com"})
+	hostedUser := mustCreateUser(s.T(), s.client, &service.User{Email: "range-hosted@test.com"})
+	platformKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: platformUser.ID, Key: "sk-range-platform", Name: "p"})
+	hostedKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: hostedUser.ID, Key: "sk-range-hosted", Name: "h"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-range-hosted"})
+	m1, m2 := 3.0, 0.0 // a zero metered cost is still hosted
+
+	s.createHostedAwareLog(platformUser, platformKey, account, 10, 20, 1.0, nil, now.Add(-time.Minute))
+	s.createHostedAwareLog(hostedUser, hostedKey, account, 100, 200, 3.0, &m1, now.Add(-time.Minute))
+	s.createHostedAwareLog(hostedUser, hostedKey, account, 1, 2, 0.5, &m2, rangeStart.Add(time.Hour))
+
+	stats, err := s.repo.GetDashboardStatsWithRange(s.ctx, rangeStart, now.Add(time.Second))
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), stats.TotalRequests)
+	s.Require().Equal(int64(30), stats.TotalTokens)
+	s.Require().Equal(1.0, stats.TotalCost)
+	s.Require().Equal(int64(1), stats.TodayRequests)
+	s.Require().Equal(1.0, stats.TodayCost)
+	s.Require().InEpsilon(100.0, stats.AverageDurationMs, 0.0001)
+
+	s.Require().Equal(int64(2), stats.HostedTotalRequests)
+	s.Require().Equal(int64(303), stats.HostedTotalTokens)
+	s.Require().Equal(3.0, stats.HostedTotalMeteredCost)
+	s.Require().Equal(int64(1), stats.HostedTodayRequests)
+	s.Require().Equal(int64(300), stats.HostedTodayTokens)
+	s.Require().Equal(3.0, stats.HostedTodayMeteredCost)
+	// Active users still include hosted users.
+	s.Require().Equal(int64(2), stats.ActiveUsers)
+}
+
+func (s *UsageLogRepoSuite) TestDashboardStats_AggregatedPathReportsHostedLine() {
+	now := time.Now().UTC()
+	todayStart := timezone.Today()
+	baseStats, err := newUsageLogRepositoryWithSQL(s.client, s.tx).GetDashboardStats(s.ctx)
+	s.Require().NoError(err)
+
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "agg-path-hosted@test.com"})
+	key := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-agg-path-hosted", Name: "h"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-agg-path-hosted"})
+	m1, m2 := 1.25, 0.75
+	s.createHostedAwareLog(user, key, account, 10, 20, 1.25, &m1, testMaxTime(todayStart.Add(time.Minute), now.Add(-2*time.Minute)))
+	s.createHostedAwareLog(user, key, account, 1, 1, 0.75, &m2, todayStart.Add(-2*time.Hour))
+	s.createHostedAwareLog(user, key, account, 5, 5, 0.5, nil, now.Add(-time.Minute))
+
+	aggRepo := newDashboardAggregationRepositoryWithSQL(s.tx)
+	s.Require().NoError(aggRepo.AggregateRange(s.ctx, todayStart.Add(-3*time.Hour), now.Add(time.Minute)))
+	s.Require().NoError(aggRepo.UpdateAggregationWatermark(s.ctx, now.Add(time.Minute)))
+
+	stats, err := newUsageLogRepositoryWithSQL(s.client, s.tx).GetDashboardStats(s.ctx)
+	s.Require().NoError(err)
+	s.Require().Equal(baseStats.TotalRequests+1, stats.TotalRequests, "platform total excludes hosted")
+	s.Require().Equal(baseStats.TotalTokens+10, stats.TotalTokens)
+	s.Require().Equal(baseStats.TodayRequests+1, stats.TodayRequests, "today excludes hosted")
+	s.Require().Equal(baseStats.TodayTokens+10, stats.TodayTokens)
+	s.Require().InDelta(baseStats.TotalCost+0.5, stats.TotalCost, 1e-9)
+	s.Require().Equal(baseStats.HostedTotalRequests+2, stats.HostedTotalRequests)
+	s.Require().Equal(baseStats.HostedTotalTokens+32, stats.HostedTotalTokens)
+	s.Require().InDelta(baseStats.HostedTotalMeteredCost+2.0, stats.HostedTotalMeteredCost, 1e-9)
+	s.Require().Equal(baseStats.HostedTodayRequests+1, stats.HostedTodayRequests)
+	s.Require().InDelta(baseStats.HostedTodayMeteredCost+1.25, stats.HostedTodayMeteredCost, 1e-9)
+}

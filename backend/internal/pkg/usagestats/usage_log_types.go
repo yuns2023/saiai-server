@@ -3,6 +3,13 @@ package usagestats
 
 import "time"
 
+// HostedUsageMeteringEpoch bounds every query that looks for hosted usage rows
+// (usage_logs.metered_cost IS NOT NULL). The metered_cost column was added by
+// migration 110 (first shipped 2026-10-21), so no earlier row can be hosted.
+// Keeping the bound lets hosted lookups use the created_at index instead of
+// scanning the full usage_logs history.
+var HostedUsageMeteringEpoch = time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+
 const (
 	ModelSourceRequested = "requested"
 	ModelSourceUpstream  = "upstream"
@@ -75,6 +82,16 @@ type DashboardStats struct {
 	// 性能指标
 	Rpm int64 `json:"rpm"` // 近5分钟平均每分钟请求数
 	Tpm int64 `json:"tpm"` // 近5分钟平均每分钟Token数
+
+	// 托管用量（metered_cost IS NOT NULL）。管理仪表盘的平台请求/Token/费用/平均耗时不含托管行
+	// （预聚合桶本身含托管，读取时减去）；RPM/TPM 表示网关负载，包含托管流量；活跃用户数也包含托管用户。
+	// 托管“累计”仅覆盖原始 usage_logs 保留期内的数据。
+	HostedTotalRequests    int64   `json:"hosted_total_requests"`
+	HostedTotalTokens      int64   `json:"hosted_total_tokens"`
+	HostedTotalMeteredCost float64 `json:"hosted_total_metered_cost"`
+	HostedTodayRequests    int64   `json:"hosted_today_requests"`
+	HostedTodayTokens      int64   `json:"hosted_today_tokens"`
+	HostedTodayMeteredCost float64 `json:"hosted_today_metered_cost"`
 }
 
 // TrendDataPoint represents a single point in trend data
@@ -183,6 +200,9 @@ type UserBreakdownDimension struct {
 	RequestType  *int16
 	Stream       *bool
 	BillingType  *int8
+	// ExcludeHosted drops hosted rows (metered_cost IS NOT NULL); set by the
+	// admin dashboard so drill-downs match its hosted-free platform totals.
+	ExcludeHosted bool
 }
 
 // APIKeyUsageTrendPoint represents API key usage trend data point

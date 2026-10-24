@@ -1160,6 +1160,10 @@ export default {
     // Dashboard
     dashboard: {
       title: 'Admin Dashboard',
+      hostedUsage: 'Hosted usage',
+      hostedUsageTooltip: 'Usage from hosted (metered, zero-charge) groups, excluded from the platform requests, tokens and costs above; RPM/TPM (gateway load) and active users still include hosted traffic. "Total" covers hosted usage within the raw usage-log retention window; platform totals for days older than that window can no longer be separated and still include hosted usage.',
+      hostedToday: 'Today',
+      hostedMeteredCost: 'Metered cost (reference price, not charged)',
       description: 'System overview and real-time statistics',
       apiKeys: 'API Keys',
       accounts: 'Accounts',

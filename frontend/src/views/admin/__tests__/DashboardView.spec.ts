@@ -144,4 +144,61 @@ describe('admin DashboardView', () => {
     }))
     wrapper.unmount()
   })
+
+  const mountDashboard = () => mount(DashboardView, {
+    global: {
+      stubs: {
+        AppLayout: { template: '<div><slot /></div>' },
+        LoadingSpinner: true,
+        Icon: true,
+        DateRangePicker: true,
+        Select: true,
+        ModelDistributionChart: true,
+        TokenUsageTrend: true,
+        APIKeySpendingRanking: true,
+        TokenCount: { props: ['value'], template: '<span>{{ value }}</span>' },
+        Line: true
+      }
+    }
+  })
+
+  it('requests the hosted-free platform view and matching model drill-down', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    expect(getSnapshotV2.mock.calls[0][0]).toEqual(expect.objectContaining({ exclude_hosted: true }))
+    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).props('breakdownFilters')).toEqual({ exclude_hosted: true })
+    expect(wrapper.find('[data-testid="hosted-usage"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows hosted usage as a separate line', async () => {
+    getSnapshotV2.mockResolvedValue({
+      stats: {
+        ...createDashboardStats(),
+        total_requests: 10,
+        hosted_total_requests: 1234,
+        hosted_total_tokens: 56789,
+        hosted_total_metered_cost: 12.5,
+        hosted_today_requests: 7,
+        hosted_today_tokens: 890,
+        hosted_today_metered_cost: 0.25
+      },
+      trend: [],
+      models: []
+    })
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const line = wrapper.find('[data-testid="hosted-usage"]')
+    expect(line.exists()).toBe(true)
+    expect(line.text()).toContain('admin.dashboard.hostedUsage')
+    expect(line.find('[title="admin.dashboard.hostedUsageTooltip"]').exists()).toBe(true)
+    expect(line.text()).toContain('1,234')
+    expect(line.text()).toContain('56789')
+    expect(line.text()).toContain('890')
+    expect(line.text()).toContain('$12.50')
+    expect(line.text()).toContain('$0.250')
+    wrapper.unmount()
+  })
 })

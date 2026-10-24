@@ -200,6 +200,48 @@
           </div>
         </div>
 
+        <!-- Hosted usage: excluded from the platform totals above -->
+        <div v-if="hasHostedUsage" class="card p-4" data-testid="hosted-usage">
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="rounded-lg bg-sky-100 p-2 dark:bg-sky-900/30">
+              <Icon name="cloud" size="md" class="text-sky-600 dark:text-sky-400" :stroke-width="2" />
+            </div>
+            <p
+              class="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400"
+              :title="t('admin.dashboard.hostedUsageTooltip')"
+            >
+              {{ t('admin.dashboard.hostedUsage') }}
+              <Icon name="infoCircle" size="sm" class="text-gray-400" />
+            </p>
+            <div class="flex flex-1 flex-wrap gap-x-8 gap-y-2">
+              <div>
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.hostedToday') }}</p>
+                <p class="text-sm font-semibold text-gray-900 dark:text-white">
+                  {{ formatNumber(stats.hosted_today_requests ?? 0) }} {{ t('admin.dashboard.requests') }}
+                  <span class="text-gray-400 dark:text-gray-500">·</span>
+                  <TokenCount :value="stats.hosted_today_tokens ?? 0" /> {{ t('admin.dashboard.tokens') }}
+                  <span class="text-gray-400 dark:text-gray-500">·</span>
+                  <span class="text-sky-600 dark:text-sky-400" :title="t('admin.dashboard.hostedMeteredCost')"
+                    >${{ formatCost(stats.hosted_today_metered_cost ?? 0) }}</span
+                  >
+                </p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('common.total') }}</p>
+                <p class="text-sm font-semibold text-gray-900 dark:text-white">
+                  {{ formatNumber(stats.hosted_total_requests ?? 0) }} {{ t('admin.dashboard.requests') }}
+                  <span class="text-gray-400 dark:text-gray-500">·</span>
+                  <TokenCount :value="stats.hosted_total_tokens ?? 0" /> {{ t('admin.dashboard.tokens') }}
+                  <span class="text-gray-400 dark:text-gray-500">·</span>
+                  <span class="text-sky-600 dark:text-sky-400" :title="t('admin.dashboard.hostedMeteredCost')"
+                    >${{ formatCost(stats.hosted_total_metered_cost ?? 0) }}</span
+                  >
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Charts Section -->
         <div class="space-y-6">
           <!-- Date Range Filter -->
@@ -249,6 +291,7 @@
               :end-date="endDate"
               :start-time="activeRangePreset === 'last24Hours' ? rollingStartTime : undefined"
               :end-time="activeRangePreset === 'last24Hours' ? rollingEndTime : undefined"
+              :breakdown-filters="platformBreakdownFilters"
               @ranking-click="goToUserUsage"
             />
             <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
@@ -351,6 +394,12 @@ const trendData = ref<TrendDataPoint[]>([])
 const modelStats = ref<ModelStat[]>([])
 const userTrend = ref<UserUsageTrendPoint[]>([])
 const rankingItems = ref<UserSpendingRankingItem[]>([])
+// Platform totals/charts exclude hosted usage; the model drill-down must match.
+const platformBreakdownFilters = { exclude_hosted: true } as const
+const hasHostedUsage = computed(() => {
+  const s = stats.value
+  return !!s && ((s.hosted_total_requests ?? 0) > 0 || (s.hosted_today_requests ?? 0) > 0)
+})
 const rankingTotalActualCost = ref(0)
 const rankingTotalRequests = ref(0)
 const rankingTotalTokens = ref(0)
@@ -640,7 +689,8 @@ const loadDashboardSnapshot = async (includeStats: boolean) => {
       include_trend: true,
       include_model_stats: true,
       include_group_stats: false,
-      include_users_trend: false
+      include_users_trend: false,
+      exclude_hosted: true
     })
     if (currentSeq !== chartLoadSeq) return
     if (includeStats && response.stats) {

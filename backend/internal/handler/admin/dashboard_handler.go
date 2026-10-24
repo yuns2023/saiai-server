@@ -155,6 +155,14 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		"rpm": stats.Rpm,
 		"tpm": stats.Tpm,
 
+		// 托管用量（不计入上方平台统计）
+		"hosted_total_requests":     stats.HostedTotalRequests,
+		"hosted_total_tokens":       stats.HostedTotalTokens,
+		"hosted_total_metered_cost": stats.HostedTotalMeteredCost,
+		"hosted_today_requests":     stats.HostedTodayRequests,
+		"hosted_today_tokens":       stats.HostedTodayTokens,
+		"hosted_today_metered_cost": stats.HostedTodayMeteredCost,
+
 		// 预聚合新鲜度
 		"hourly_active_users": stats.HourlyActiveUsers,
 		"stats_updated_at":    stats.StatsUpdatedAt,
@@ -756,6 +764,7 @@ func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
 	dim.ModelType = rawModelSource
 	dim.Endpoint = c.Query("endpoint")
 	dim.EndpointType = c.DefaultQuery("endpoint_type", "inbound")
+	dim.ExcludeHosted = parseBoolQueryWithDefault(c.Query("exclude_hosted"), false)
 
 	limit := 50
 	if v := c.Query("limit"); v != "" {
