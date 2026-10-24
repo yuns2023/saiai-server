@@ -30,6 +30,9 @@ type dashboardTrendCacheKey struct {
 	RequestType *int16 `json:"request_type"`
 	Stream      *bool  `json:"stream"`
 	BillingType *int8  `json:"billing_type"`
+	// ExcludeHosted marks the admin-dashboard platform view so it never shares
+	// cache entries with the hosted-inclusive admin usage page.
+	ExcludeHosted bool `json:"exclude_hosted,omitempty"`
 }
 
 type dashboardModelGroupCacheKey struct {
@@ -44,6 +47,8 @@ type dashboardModelGroupCacheKey struct {
 	RequestType *int16 `json:"request_type"`
 	Stream      *bool  `json:"stream"`
 	BillingType *int8  `json:"billing_type"`
+	// ExcludeHosted: see dashboardTrendCacheKey.
+	ExcludeHosted bool `json:"exclude_hosted,omitempty"`
 }
 
 type dashboardEntityTrendCacheKey struct {
@@ -208,4 +213,38 @@ func (h *DashboardHandler) getUserUsageTrendCached(ctx context.Context, startTim
 	}
 	trend, err := snapshotPayloadAs[[]usagestats.UserUsageTrendPoint](entry.Payload)
 	return trend, hit, err
+}
+
+func (h *DashboardHandler) getPlatformUsageTrendCached(ctx context.Context, startTime, endTime time.Time, granularity string) ([]usagestats.TrendDataPoint, bool, error) {
+	key := mustMarshalDashboardCacheKey(dashboardTrendCacheKey{
+		StartTime:     startTime.UTC().Format(time.RFC3339),
+		EndTime:       endTime.UTC().Format(time.RFC3339),
+		Granularity:   granularity,
+		ExcludeHosted: true,
+	})
+	entry, hit, err := dashboardTrendCache.GetOrLoad(key, func() (any, error) {
+		return h.dashboardService.GetPlatformUsageTrend(ctx, startTime, endTime, granularity)
+	})
+	if err != nil {
+		return nil, hit, err
+	}
+	trend, err := snapshotPayloadAs[[]usagestats.TrendDataPoint](entry.Payload)
+	return trend, hit, err
+}
+
+func (h *DashboardHandler) getPlatformModelStatsCached(ctx context.Context, startTime, endTime time.Time) ([]usagestats.ModelStat, bool, error) {
+	key := mustMarshalDashboardCacheKey(dashboardModelGroupCacheKey{
+		StartTime:     startTime.UTC().Format(time.RFC3339),
+		EndTime:       endTime.UTC().Format(time.RFC3339),
+		ModelSource:   usagestats.ModelSourceRequested,
+		ExcludeHosted: true,
+	})
+	entry, hit, err := dashboardModelStatsCache.GetOrLoad(key, func() (any, error) {
+		return h.dashboardService.GetPlatformModelStats(ctx, startTime, endTime)
+	})
+	if err != nil {
+		return nil, hit, err
+	}
+	stats, err := snapshotPayloadAs[[]usagestats.ModelStat](entry.Payload)
+	return stats, hit, err
 }

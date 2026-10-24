@@ -67,6 +67,7 @@ type dashboardSnapshotV2CacheKey struct {
 	IncludeGroups     bool   `json:"include_groups"`
 	IncludeUsersTrend bool   `json:"include_users_trend"`
 	UsersTrendLimit   int    `json:"users_trend_limit"`
+	ExcludeHosted     bool   `json:"exclude_hosted,omitempty"`
 }
 
 func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
@@ -97,6 +98,13 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	// exclude_hosted selects the admin dashboard's platform view (hosted rows
+	// excluded). It only exists for the unfiltered platform trend/models.
+	excludeHosted := parseBoolQueryWithDefault(c.Query("exclude_hosted"), false)
+	if excludeHosted && (filters.hasAny() || includeGroups) {
+		response.BadRequest(c, "exclude_hosted cannot be combined with filters or group stats")
+		return
+	}
 
 	keyRaw, _ := json.Marshal(dashboardSnapshotV2CacheKey{
 		StartTime:         startTime.UTC().Format(time.RFC3339),
@@ -117,6 +125,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		IncludeGroups:     includeGroups,
 		IncludeUsersTrend: includeUsersTrend,
 		UsersTrendLimit:   usersTrendLimit,
+		ExcludeHosted:     excludeHosted,
 	})
 	cacheKey := string(keyRaw)
 
@@ -133,6 +142,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 			includeGroups,
 			includeUsersTrend,
 			usersTrendLimit,
+			excludeHosted,
 		)
 	})
 	if err != nil {
@@ -158,6 +168,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 	filters *dashboardSnapshotV2Filters,
 	includeStats, includeTrend, includeModels, includeGroups, includeUsersTrend bool,
 	usersTrendLimit int,
+	excludeHosted bool,
 ) (*dashboardSnapshotV2Response, error) {
 	resp := &dashboardSnapshotV2Response{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
@@ -177,7 +188,13 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 		}
 	}
 
-	if includeTrend {
+	if includeTrend && excludeHosted {
+		trend, _, err := h.getPlatformUsageTrendCached(ctx, startTime, endTime, granularity)
+		if err != nil {
+			return nil, errors.New("failed to get usage trend")
+		}
+		resp.Trend = trend
+	} else if includeTrend {
 		trend, _, err := h.getUsageTrendCached(
 			ctx,
 			startTime,
@@ -199,7 +216,13 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 		resp.Trend = trend
 	}
 
-	if includeModels {
+	if includeModels && excludeHosted {
+		models, _, err := h.getPlatformModelStatsCached(ctx, startTime, endTime)
+		if err != nil {
+			return nil, errors.New("failed to get model statistics")
+		}
+		resp.Models = models
+	} else if includeModels {
 		models, _, err := h.getModelStatsCached(
 			ctx,
 			startTime,
@@ -316,4 +339,9 @@ func parseDashboardSnapshotV2Filters(c *gin.Context) (*dashboardSnapshotV2Filter
 	}
 
 	return filters, nil
+}
+
+func (f *dashboardSnapshotV2Filters) hasAny() bool {
+	return f != nil && (f.UserID > 0 || f.APIKeyID > 0 || f.AccountID > 0 || f.GroupID > 0 ||
+		f.Model != "" || f.SessionID != "" || f.RequestType != nil || f.Stream != nil || f.BillingType != nil)
 }

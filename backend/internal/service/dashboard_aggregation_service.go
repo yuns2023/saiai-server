@@ -46,6 +46,7 @@ type DashboardAggregationService struct {
 	cfg                  config.DashboardAggregationConfig
 	running              int32
 	lastRetentionCleanup atomic.Value // time.Time
+	markers              dashboardAggregationMarkerStore
 }
 
 // NewDashboardAggregationService 创建聚合服务。
@@ -76,9 +77,7 @@ func (s *DashboardAggregationService) Start() {
 		interval = time.Minute
 	}
 
-	if s.cfg.RecomputeDays > 0 {
-		go s.recomputeRecentDays()
-	}
+	go s.runStartupRecompute()
 
 	s.timingWheel.ScheduleRecurring("dashboard:aggregation", interval, func() {
 		s.runScheduledAggregation()

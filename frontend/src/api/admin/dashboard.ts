@@ -140,6 +140,8 @@ export interface DashboardSnapshotV2Params extends TrendParams {
   include_group_stats?: boolean
   include_users_trend?: boolean
   users_trend_limit?: number
+  /** Admin dashboard platform view: trend/models exclude hosted usage rows. */
+  exclude_hosted?: boolean
 }
 
 export interface DashboardSnapshotV2Stats extends DashboardStats {
@@ -187,6 +189,8 @@ export interface UserBreakdownParams {
   endpoint?: string
   endpoint_type?: 'inbound' | 'upstream' | 'path'
   limit?: number
+  /** Exclude hosted usage rows (admin dashboard drill-down). */
+  exclude_hosted?: boolean
 }
 
 export interface UserBreakdownResponse {

@@ -13,6 +13,8 @@ var _ service.APIKeySpendingRankingRepository = (*usageLogRepository)(nil)
 
 // GetAPIKeySpendingRanking includes historical usage of soft-deleted Keys.
 // A zero userID selects global usage; a positive ID filters by the recorded user.
+// Hosted rows (metered_cost IS NOT NULL) are excluded: this admin-dashboard
+// ranking reports platform spend, which hosted usage never contributes to.
 func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, startTime, endTime time.Time, userID int64, limit int) (result *usagestats.APIKeySpendingRankingResponse, err error) {
 	if userID < 0 {
 		return nil, fmt.Errorf("user ID must not be negative")
@@ -41,6 +43,7 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) AS tokens
 			FROM usage_logs u
 			WHERE u.created_at >= $1 AND u.created_at < $2%s
+				AND u.metered_cost IS NULL
 			GROUP BY u.api_key_id, u.user_id
 		), ranked AS (
 			SELECT *,

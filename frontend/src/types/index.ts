@@ -1360,6 +1360,14 @@ export interface DashboardStats {
   // 性能指标
   rpm: number // 近5分钟平均每分钟请求数
   tpm: number // 近5分钟平均每分钟Token数
+
+  // 托管用量（metered_cost 非空）。上方平台请求/Token/费用/RPM/TPM 均不含托管行。
+  hosted_total_requests?: number
+  hosted_total_tokens?: number
+  hosted_total_metered_cost?: number
+  hosted_today_requests?: number
+  hosted_today_tokens?: number
+  hosted_today_metered_cost?: number
 }
 
 export interface UsageStatsResponse {

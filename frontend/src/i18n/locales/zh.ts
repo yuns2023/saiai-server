@@ -1163,6 +1163,10 @@ export default {
     // Dashboard
     dashboard: {
       title: '管理控制台',
+      hostedUsage: '托管用量',
+      hostedUsageTooltip: '托管分组（按参考价计量、不扣费）的用量，不计入上方平台的请求数、Token、费用及 RPM/TPM；活跃用户数仍包含托管用户。',
+      hostedToday: '今日',
+      hostedMeteredCost: '计量金额（参考价，不扣费）',
       description: '系统概览与统计数据',
       apiKeys: 'API 密钥',
       totalApiKeys: 'API 密钥总数',

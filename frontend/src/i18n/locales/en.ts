@@ -1160,6 +1160,10 @@ export default {
     // Dashboard
     dashboard: {
       title: 'Admin Dashboard',
+      hostedUsage: 'Hosted usage',
+      hostedUsageTooltip: 'Usage from hosted (metered, zero-charge) groups. It is excluded from the platform requests, tokens, costs and RPM/TPM above; active user counts still include hosted users.',
+      hostedToday: 'Today',
+      hostedMeteredCost: 'Metered cost (reference price, not charged)',
       description: 'System overview and real-time statistics',
       apiKeys: 'API Keys',
       accounts: 'Accounts',

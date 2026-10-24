@@ -39,11 +39,12 @@ func TestGetAPIKeySpendingRankingScopeAndTotals(t *testing.T) {
 			end := start.Add(24 * time.Hour)
 			// Enforce a half-open range, user filtering before grouping, and global
 			// window totals before LIMIT. Joins retain historical/unnamed Keys.
+			// Hosted rows (metered_cost IS NOT NULL) never count as platform spend.
 			query := `(?s)WITH key_spend AS .*WHERE u.created_at >= \$1 AND u.created_at < \$2`
 			if tc.userID > 0 {
 				query += ` AND u.user_id = \$3`
 			}
-			query += `\s+GROUP BY u.api_key_id, u.user_id.*SUM\(actual_cost\) OVER \(\).*ORDER BY actual_cost DESC, tokens DESC, api_key_id ASC, user_id ASC\s+LIMIT \$`
+			query += `\s+AND u.metered_cost IS NULL\s+GROUP BY u.api_key_id, u.user_id.*SUM\(actual_cost\) OVER \(\).*ORDER BY actual_cost DESC, tokens DESC, api_key_id ASC, user_id ASC\s+LIMIT \$`
 			if tc.userID > 0 {
 				query += `4`
 			} else {
