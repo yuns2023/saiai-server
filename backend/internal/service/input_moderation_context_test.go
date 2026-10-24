@@ -237,7 +237,9 @@ func TestModerationBundleEditRealignsAtNextHashBoundary(t *testing.T) {
 	for _, edit := range []func([]string) []string{
 		func(b []string) []string { b[200] = "short"; return b },
 		func(b []string) []string { return append(b[:200:200], b[201:]...) },
-		func(b []string) []string { return append(b[:200:200], append([]string{"inserted rule"}, b[200:]...)...) },
+		func(b []string) []string {
+			return append(b[:200:200], append([]string{"inserted rule"}, b[200:]...)...)
+		},
 	} {
 		after := moderationInstructionBundles(edit(append([]string(nil), blocks...)), 32768)
 		// Bundles before the edit and after the next unchanged hash boundary
@@ -262,12 +264,12 @@ func TestModerationSubmitQueuesJointSkippedPlans(t *testing.T) {
 	repo := &moderationResultRepoStub{}
 	svc := newInputModerationServiceForTest(nil, repo, nil, nil, nil)
 	svc.cfg.MaxInputChars = 32768
-	defer svc.Stop()
 	task := InputModerationTask{RequestID: "submit-joint", UserID: 1, APIKeyID: 2, GroupID: 3, Text: "question"}
 	for block := 0; block < 40; block++ {
 		task.Instructions = append(task.Instructions, fmt.Sprintf("rule %d %s", block, strings.Repeat("y", 15000)))
 	}
 	require.True(t, svc.Submit(task))
+	svc.Stop() // drain the worker before reading the recorded results
 	require.Equal(t, "pending", repo.results[0].Status)
 	require.True(t, repo.results[0].Diagnostics.JointSkipped)
 	require.Positive(t, repo.results[0].Diagnostics.PlannedChecks)
