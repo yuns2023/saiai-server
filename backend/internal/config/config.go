@@ -720,6 +720,12 @@ type GatewayInputModerationConfig struct {
 	RequestTimeoutSeconds int    `mapstructure:"request_timeout_seconds"`
 	MaxInputChars         int    `mapstructure:"max_input_chars"`
 	MaxJobAgeHours        int    `mapstructure:"max_job_age_hours"`
+	// EvidenceRetentionDays keeps encrypted evidence of flagged checks; 0
+	// disables capture (cleanup of existing evidence still runs).
+	EvidenceRetentionDays int `mapstructure:"evidence_retention_days"`
+	// EvidencePreviousKeys are former totp.encryption_key values (64 hex
+	// chars) used only to decrypt evidence written before a key rotation.
+	EvidencePreviousKeys []string `mapstructure:"evidence_previous_keys"`
 }
 
 // Configured reports whether the selected, single moderation engine can run.
@@ -1556,6 +1562,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.input_moderation.request_timeout_seconds", 15)
 	viper.SetDefault("gateway.input_moderation.max_input_chars", 32768)
 	viper.SetDefault("gateway.input_moderation.max_job_age_hours", 24)
+	viper.SetDefault("gateway.input_moderation.evidence_retention_days", 90)
+	viper.SetDefault("gateway.input_moderation.evidence_previous_keys", []string{})
 	// 用户消息串行队列默认值
 	viper.SetDefault("gateway.user_message_queue.enabled", false)
 	viper.SetDefault("gateway.claude_session_initial_serial.enabled", true)
@@ -2161,6 +2169,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.InputModeration.MaxJobAgeHours <= 0 {
 		return fmt.Errorf("gateway.input_moderation.max_job_age_hours must be positive")
+	}
+	if days := c.Gateway.InputModeration.EvidenceRetentionDays; days < 0 || days > 3650 {
+		return fmt.Errorf("gateway.input_moderation.evidence_retention_days must be between 0 and 3650")
+	}
+	for _, key := range c.Gateway.InputModeration.EvidencePreviousKeys {
+		if decoded, err := hex.DecodeString(strings.TrimSpace(key)); err != nil || len(decoded) != 32 {
+			return fmt.Errorf("gateway.input_moderation.evidence_previous_keys entries must be 64 hex chars")
+		}
 	}
 	switch strings.ToLower(strings.TrimSpace(c.Gateway.UsageRecord.OverflowPolicy)) {
 	case UsageRecordOverflowPolicyDrop, UsageRecordOverflowPolicySample, UsageRecordOverflowPolicySync:

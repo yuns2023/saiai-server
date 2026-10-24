@@ -6,7 +6,7 @@ import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 import type { AdminUsageLog, ModerationDiagnostics } from '@/types'
 
-function render(scores?: Record<string, number>, status = 'passed', reason?: string, diagnostics?: ModerationDiagnostics) {
+function render(scores?: Record<string, number>, status = 'passed', reason?: string, diagnostics?: ModerationDiagnostics, events?: AdminUsageLog['moderation_events']) {
   // The test runner uses the runtime-only i18n build: provide compiled messages.
   function messages(source: typeof zh | typeof en) {
     const moderation = source.admin.groups.inputModeration
@@ -16,6 +16,8 @@ function render(scores?: Record<string, number>, status = 'passed', reason?: str
       reasons: { chunked_input: () => moderation.reasons.chunked_input, joint_context_skipped: () => moderation.reasons.joint_context_skipped, input_too_large: () => moderation.reasons.input_too_large, detector_budget_exceeded: () => moderation.reasons.detector_budget_exceeded },
       diagnostics: Object.fromEntries(Object.entries(moderation.diagnostics).map(([name, value]) => [name, () => value])),
       limits: Object.fromEntries(Object.entries(moderation.limits).map(([name, value]) => [name, () => value])),
+      evidence: { statuses: Object.fromEntries(Object.entries(moderation.evidence.statuses).map(([name, value]) => [name, () => value])), view: () => moderation.evidence.view },
+      actions: { warning: () => 'warning' },
       viewDetails: () => moderation.viewDetails,
       resultThreshold: () => moderation.resultThreshold,
       statuses: { passed: () => moderation.statuses.passed, flagged: () => moderation.statuses.flagged, failed: () => moderation.statuses.failed }
@@ -23,7 +25,7 @@ function render(scores?: Record<string, number>, status = 'passed', reason?: str
   }
   const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh: messages(zh), en: messages(en) } })
   const wrapper = mount(ModerationResultCell, {
-    props: { row: { moderation_result: { status, reason, scores, diagnostics, min_confidence: 90 } } as AdminUsageLog },
+    props: { row: { moderation_result: { status, reason, scores, diagnostics, min_confidence: 90 }, moderation_events: events } as AdminUsageLog },
     global: { plugins: [i18n], stubs: { BaseDialog: { props: ['show'], template: '<section v-if="show"><slot /></section>' } } }
   })
   return { wrapper, i18n }
@@ -107,5 +109,19 @@ it('distinguishes chunk coverage from whole-context approval in both languages',
  await wrapper.vm.$nextTick()
  expect(wrapper.text()).toContain('Chunk checks passed')
  expect(wrapper.text()).toContain('not full-document joint assessment')
+ wrapper.unmount()
+})
+
+it('shows evidence status and offers the viewer only for events with stored evidence', async () => {
+ const diagnostics = { input_chars: 4, instruction_chars: 0, instruction_blocks: 0, planned_checks: 1, completed_checks: 1, cache_hits: 0, detector_calls: 1,
+   chunk_size: 32768, max_input_chars: 516608, max_detector_calls: 16, max_planned_checks: 64, duration_ms: 1, queue_wait_ms: 1,
+   evidence_status: 'stored', evidence_count: 1, evidence_omitted_categories: ['PII'] }
+ const event = { categories: ['PII'], scores: { PII: .99 }, min_confidence: 90, action: 'warning', counted_as_strike: true, model_version: 'x' }
+ const { wrapper } = render({ PII: .99 }, 'flagged', undefined, diagnostics, [{ ...event, event_id: 5, evidence_count: 1, evidence_status: 'stored' }, { ...event, event_id: 6, evidence_count: 0, evidence_status: 'expired' }])
+ await wrapper.get('button').trigger('click')
+ expect(wrapper.get('[data-testid=moderation-diagnostics]').text()).toContain('已加密保存')
+ expect(wrapper.get('[data-testid=moderation-diagnostics]').text()).toContain('隐私滥用')
+ expect(wrapper.text()).toContain('已过期删除')
+ expect(wrapper.findAll('[data-testid=moderation-evidence]')).toHaveLength(1)
  wrapper.unmount()
 })

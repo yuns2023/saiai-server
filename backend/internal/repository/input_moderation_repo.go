@@ -27,41 +27,112 @@ func NewInputModerationRepository(db *sql.DB) service.InputModerationEventReposi
 	return &inputModerationRepository{db: db}
 }
 
+// InsertInputModerationEvent writes an audit-only event together with its
+// evidence and flagged result in one transaction. A duplicate job writes
+// nothing and leaves the committed rows untouched.
 func (r *inputModerationRepository) InsertInputModerationEvent(ctx context.Context, event *service.InputModerationEvent) error {
 	if r == nil || r.db == nil || event == nil {
 		return fmt.Errorf("input moderation event repository is unavailable")
 	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin input moderation event: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	eventID, inserted, err := insertInputModerationEventTx(ctx, tx, event, event.Action, false)
+	if err != nil {
+		return fmt.Errorf("insert input moderation event: %w", err)
+	}
+	if !inserted {
+		return tx.Commit()
+	}
+	if len(event.Evidence) > 0 {
+		// Serialize with user soft delete, which removes evidence in its own
+		// transaction; FOR NO KEY UPDATE keeps the FK key-share lock compatible.
+		var deleted bool
+		err := tx.QueryRowContext(ctx, `SELECT deleted_at IS NOT NULL FROM users WHERE id = $1 FOR NO KEY UPDATE`, event.UserID).Scan(&deleted)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("lock input moderation user: %w", err)
+		}
+		if err != nil || deleted {
+			skipModerationEvidenceForDeletedUser(event)
+		}
+	}
+	if err := writeInputModerationOutcomeTx(ctx, tx, eventID, event); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit input moderation event: %w", err)
+	}
+	return nil
+}
+
+func skipModerationEvidenceForDeletedUser(event *service.InputModerationEvent) {
+	event.Evidence = nil
+	if event.Result != nil && event.Result.Diagnostics != nil {
+		event.Result.Diagnostics.EvidenceStatus = service.ModerationEvidenceUserDeleted
+		event.Result.Diagnostics.EvidenceCount = 0
+	}
+}
+
+// insertInputModerationEventTx returns inserted=false for an existing job_id.
+func insertInputModerationEventTx(ctx context.Context, tx *sql.Tx, event *service.InputModerationEvent, action string, counted bool) (int64, bool, error) {
 	categories, err := json.Marshal(event.Categories)
 	if err != nil {
-		return fmt.Errorf("marshal categories: %w", err)
+		return 0, false, fmt.Errorf("marshal categories: %w", err)
 	}
 	scores, err := json.Marshal(event.Scores)
 	if err != nil {
-		return fmt.Errorf("marshal scores: %w", err)
+		return 0, false, fmt.Errorf("marshal scores: %w", err)
 	}
-	_, err = r.db.ExecContext(ctx, `
+	var eventID int64
+	err = tx.QueryRowContext(ctx, `
 		INSERT INTO input_moderation_events (
 			job_id, request_id, user_id, api_key_id, group_id, input_hash,
-			safety, categories, action, model_version, policy_version, source, turn_number, created_at, scores, min_confidence, decision_snapshot
-		) VALUES ($1::uuid, NULLIF($2, ''), $3, $4, $5, $6, $7, $8::jsonb, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, 0), $14, $15::jsonb, $16, $17::jsonb)
-		ON CONFLICT (job_id) DO NOTHING`,
-		event.JobID,
-		event.RequestID,
-		event.UserID,
-		event.APIKeyID,
-		event.GroupID,
-		event.InputHash,
-		event.Safety,
-		string(categories),
-		event.Action,
-		event.ModelVersion,
-		event.PolicyVersion,
-		event.Source,
-		event.TurnNumber,
-		event.CreatedAt, string(scores), event.MinConfidence, moderationDecisionJSON(event.DecisionSnapshot),
-	)
+			safety, categories, action, model_version, policy_version, source,
+			turn_number, counted_as_strike, created_at, scores, min_confidence, decision_snapshot, incident_fingerprint
+		) VALUES ($1::uuid, NULLIF($2, ''), $3, $4, $5, $6, $7, $8::jsonb,
+			$9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, 0), $14, $15, $16::jsonb, $17, $18::jsonb, NULLIF($19, ''))
+		ON CONFLICT (job_id) DO NOTHING
+		RETURNING id`,
+		event.JobID, event.RequestID, event.UserID, event.APIKeyID, event.GroupID,
+		event.InputHash, event.Safety, string(categories), action, event.ModelVersion,
+		event.PolicyVersion, event.Source, event.TurnNumber, counted, event.CreatedAt, string(scores), event.MinConfidence,
+		moderationDecisionJSON(event.DecisionSnapshot), event.IncidentFingerprint,
+	).Scan(&eventID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
 	if err != nil {
-		return fmt.Errorf("insert input moderation event: %w", err)
+		return 0, false, err
+	}
+	return eventID, true, nil
+}
+
+// writeInputModerationOutcomeTx writes the evidence and flagged result that
+// belong to a newly inserted event. Callers hold the user row lock.
+func writeInputModerationOutcomeTx(ctx context.Context, tx *sql.Tx, eventID int64, event *service.InputModerationEvent) error {
+	for _, evidence := range event.Evidence {
+		kinds, err := json.Marshal(evidence.Kinds)
+		if err != nil {
+			return fmt.Errorf("marshal evidence kinds: %w", err)
+		}
+		aad, err := json.Marshal(evidence.AAD)
+		if err != nil {
+			return fmt.Errorf("marshal evidence context: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO input_moderation_evidence (event_id, check_index, kinds, aad, char_count, key_id, ciphertext, expires_at)
+			VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8)
+			ON CONFLICT (event_id, check_index) DO NOTHING`,
+			eventID, evidence.CheckIndex, string(kinds), string(aad), evidence.CharCount, evidence.KeyID, evidence.Ciphertext, evidence.ExpiresAt); err != nil {
+			return fmt.Errorf("insert input moderation evidence: %w", err)
+		}
+	}
+	if event.Result != nil && event.ResultTask != nil && strings.TrimSpace(event.ResultTask.RequestID) != "" {
+		if err := saveInputModerationResult(ctx, tx, *event.ResultTask, *event.Result); err != nil {
+			return fmt.Errorf("save input moderation result: %w", err)
+		}
 	}
 	return nil
 }
@@ -80,29 +151,8 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	categories, err := json.Marshal(event.Categories)
-	if err != nil {
-		return nil, fmt.Errorf("marshal categories: %w", err)
-	}
-	scores, err := json.Marshal(event.Scores)
-	if err != nil {
-		return nil, fmt.Errorf("marshal scores: %w", err)
-	}
-	var eventID int64
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO input_moderation_events (
-			job_id, request_id, user_id, api_key_id, group_id, input_hash,
-			safety, categories, action, model_version, policy_version, source,
-			turn_number, counted_as_strike, created_at, scores, min_confidence, decision_snapshot
-		) VALUES ($1::uuid, NULLIF($2, ''), $3, $4, $5, $6, $7, $8::jsonb,
-			'processing', NULLIF($9, ''), NULLIF($10, ''), $11, NULLIF($12, 0), false, $13, $14::jsonb, $15, $16::jsonb)
-		ON CONFLICT (job_id) DO NOTHING
-		RETURNING id`,
-		event.JobID, event.RequestID, event.UserID, event.APIKeyID, event.GroupID,
-		event.InputHash, event.Safety, string(categories), event.ModelVersion,
-		event.PolicyVersion, event.Source, event.TurnNumber, event.CreatedAt, string(scores), event.MinConfidence, moderationDecisionJSON(event.DecisionSnapshot),
-	).Scan(&eventID)
-	if errors.Is(err, sql.ErrNoRows) {
+	eventID, inserted, err := insertInputModerationEventTx(ctx, tx, event, "processing", false)
+	if err == nil && !inserted {
 		var action string
 		if err := tx.QueryRowContext(ctx, `SELECT action FROM input_moderation_events WHERE job_id = $1::uuid`, event.JobID).Scan(&action); err != nil {
 			return nil, fmt.Errorf("load idempotent input moderation result: %w", err)
@@ -133,17 +183,26 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 	// Status changes do not modify referenced keys.
 	var role, status string
 	var userUpdatedAt time.Time
+	var userDeleted bool
 	if err := tx.QueryRowContext(ctx, `
-		SELECT role, status, updated_at
+		SELECT role, status, updated_at, deleted_at IS NOT NULL
 		FROM users
-		WHERE id = $1 AND deleted_at IS NULL
-		FOR NO KEY UPDATE`, event.UserID).Scan(&role, &status, &userUpdatedAt); err != nil {
+		WHERE id = $1
+		FOR NO KEY UPDATE`, event.UserID).Scan(&role, &status, &userUpdatedAt, &userDeleted); err != nil {
 		return nil, fmt.Errorf("lock input moderation user: %w", err)
+	}
+	// A user soft-deleted while the job was in flight gets no evidence and no
+	// strike; the event and result are still recorded.
+	if userDeleted {
+		skipModerationEvidenceForDeletedUser(event)
 	}
 	finishWithoutStrike := func(action string) (*service.InputModerationTransition, error) {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE input_moderation_events SET action = $2, counted_as_strike = false WHERE id = $1`,
 			eventID, action); err != nil {
+			return nil, err
+		}
+		if err := writeInputModerationOutcomeTx(ctx, tx, eventID, event); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -154,7 +213,7 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 	if role == service.RoleAdmin {
 		return finishWithoutStrike(service.InputModerationActionIgnoredAdmin)
 	}
-	if status != service.StatusActive {
+	if status != service.StatusActive || userDeleted {
 		return finishWithoutStrike(service.InputModerationActionAlreadyInactive)
 	}
 
@@ -177,6 +236,20 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 		return finishWithoutStrike(service.InputModerationActionStaleUserState)
 	}
 
+	// Roll the strike window over first so both duplicate checks only see
+	// strikes counted in the current window (after the last reset).
+	strikeWindow := policy.StrikeWindow
+	if strikeWindow <= 0 {
+		strikeWindow = 24 * time.Hour
+	}
+	now := event.CreatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if !windowStart.Valid || !now.Before(windowStart.Time.Add(strikeWindow)) {
+		strikeCount = 0
+		windowStart = sql.NullTime{Time: now, Valid: true}
+	}
 	dedupeWindow := policy.DedupeWindow
 	if dedupeWindow <= 0 {
 		dedupeWindow = 5 * time.Minute
@@ -185,10 +258,12 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 	if err := tx.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM input_moderation_events
-			WHERE user_id = $1 AND counted_as_strike = true AND id <> $4
+			WHERE user_id = $1 AND counted_as_strike = true AND id <> $4 AND created_at >= $10
  AND ((input_hash = $2 AND created_at >= $3)
- OR ($5 <> '' AND request_id = $5 AND source = $6 AND COALESCE(turn_number,0) = $7 AND api_key_id = $8 AND group_id = $9))
-		)`, event.UserID, event.InputHash, event.CreatedAt.Add(-dedupeWindow), eventID, event.RequestID, event.Source, event.TurnNumber, event.APIKeyID, event.GroupID).Scan(&duplicate); err != nil {
+ OR ($5 <> '' AND request_id = $5 AND source = $6 AND COALESCE(turn_number,0) = $7 AND api_key_id = $8 AND group_id = $9)
+ OR ($11 <> '' AND incident_fingerprint = $11))
+		)`, event.UserID, event.InputHash, event.CreatedAt.Add(-dedupeWindow), eventID, event.RequestID, event.Source, event.TurnNumber, event.APIKeyID, event.GroupID,
+		windowStart.Time, event.IncidentFingerprint).Scan(&duplicate); err != nil {
 		return nil, fmt.Errorf("check input moderation incident duplicate: %w", err)
 	}
 	if duplicate {
@@ -204,18 +279,6 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 		return transition, err
 	}
 
-	strikeWindow := policy.StrikeWindow
-	if strikeWindow <= 0 {
-		strikeWindow = 24 * time.Hour
-	}
-	now := event.CreatedAt
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
-	if !windowStart.Valid || !now.Before(windowStart.Time.Add(strikeWindow)) {
-		strikeCount = 0
-		windowStart = sql.NullTime{Time: now, Valid: true}
-	}
 	strikeCount++
 	disableAfterHits := policy.DisableAfterHits
 	if disableAfterHits <= 0 {
@@ -280,6 +343,9 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 		UPDATE input_moderation_events SET action = $2, counted_as_strike = true WHERE id = $1`,
 		eventID, action); err != nil {
 		return nil, fmt.Errorf("finalize input moderation incident: %w", err)
+	}
+	if err := writeInputModerationOutcomeTx(ctx, tx, eventID, event); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit input moderation transition: %w", err)

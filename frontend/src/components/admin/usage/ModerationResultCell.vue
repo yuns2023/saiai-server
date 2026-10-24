@@ -3,12 +3,19 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { moderationCategoryLabel } from '@/utils/moderationLabels'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ModerationEvidenceViewer from './ModerationEvidenceViewer.vue'
 import type { AdminUsageLog } from '@/types'
 
 const props = defineProps<{ row: Pick<AdminUsageLog, 'moderation_result' | 'moderation_events' | 'moderation_unavailable'> }>()
 const { t, locale } = useI18n()
 const categoryLabel = (category: string) => moderationCategoryLabel(category, locale.value)
 const open = ref(false)
+function diagnosticValue(name: string, value: unknown) {
+  if (name === 'limit') return t('admin.groups.inputModeration.limits.' + value)
+  if (name === 'evidence_status') return t('admin.groups.inputModeration.evidence.statuses.' + value)
+  if (Array.isArray(value)) return value.map(item => categoryLabel(String(item))).join(', ')
+  return value
+}
 const status = computed(() => props.row.moderation_result?.status ?? 'flagged')
 const highestRisk = computed(() => {
   if (status.value !== 'passed') return null
@@ -52,7 +59,7 @@ const categories = computed(() => {
       <dl v-if="row.moderation_result.diagnostics" data-testid="moderation-diagnostics" class="grid grid-cols-2 gap-2 border-t pt-2">
         <template v-for="(value, name) in row.moderation_result.diagnostics" :key="name">
           <dt>{{ t('admin.groups.inputModeration.diagnostics.' + name) }}</dt>
-          <dd>{{ name === 'limit' ? t('admin.groups.inputModeration.limits.' + value) : value }}</dd>
+          <dd>{{ diagnosticValue(name, value) }}</dd>
         </template>
       </dl>
       <div v-for="(score, category) in row.moderation_result.scores" :key="category">
@@ -60,8 +67,9 @@ const categories = computed(() => {
       </div>
       <div v-if="row.moderation_result.decision_snapshot" class="text-gray-500">{{ row.moderation_result.decision_snapshot.policy.rules_version }}</div>
       <div v-if="row.moderation_result.scores && !row.moderation_result.decision_snapshot" class="text-gray-500">{{ t('admin.groups.inputModeration.resultThreshold') }} {{ row.moderation_result.min_confidence }}%</div>
-      <div v-for="(event, index) in row.moderation_events" :key="index" class="text-gray-500">
-        {{ t('admin.groups.inputModeration.actions.' + event.action) }}<template v-if="event.counted_as_strike"> · {{ t('admin.groups.inputModeration.counted') }}</template>
+      <div v-for="(event, index) in row.moderation_events" :key="index" class="space-y-1 text-gray-500">
+        <div>{{ t('admin.groups.inputModeration.actions.' + event.action) }}<template v-if="event.counted_as_strike"> · {{ t('admin.groups.inputModeration.counted') }}</template><template v-if="event.evidence_status"> · {{ t('admin.groups.inputModeration.evidence.statuses.' + event.evidence_status) }}</template></div>
+        <ModerationEvidenceViewer v-if="event.event_id && event.evidence_count" :event-id="event.event_id" />
       </div>
     </div>
     <div v-else-if="row.moderation_events?.length" class="space-y-2 text-sm">

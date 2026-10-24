@@ -19,6 +19,22 @@ func (r *moderationResultRepoStub) SaveInputModerationResult(_ context.Context, 
 	r.tasks = append(r.tasks, t)
 	return nil
 }
+
+// Flagged results are written in the event transaction.
+func (r *moderationResultRepoStub) recordEventResult(event *InputModerationEvent) {
+	if event.Result != nil && event.ResultTask != nil {
+		r.results = append(r.results, *event.Result)
+		r.tasks = append(r.tasks, *event.ResultTask)
+	}
+}
+func (r *moderationResultRepoStub) InsertInputModerationEvent(ctx context.Context, event *InputModerationEvent) error {
+	r.recordEventResult(event)
+	return r.inputModerationEventRepoStub.InsertInputModerationEvent(ctx, event)
+}
+func (r *moderationResultRepoStub) ApplyInputModerationIncident(ctx context.Context, event *InputModerationEvent, policy InputModerationEscalationPolicy) (*InputModerationTransition, error) {
+	r.recordEventResult(event)
+	return r.inputModerationEventRepoStub.ApplyInputModerationIncident(ctx, event, policy)
+}
 func TestInputModerationResultsSeparatePassesFromRiskEvents(t *testing.T) {
 	for _, tc := range []struct {
 		name, status string

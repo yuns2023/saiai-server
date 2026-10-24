@@ -161,6 +161,14 @@ func ProvidePaymentExpiryService(db *sql.DB, paymentService *PaymentService) *Pa
 	return svc
 }
 
+// ProvideModerationEvidenceCleanupService creates and starts the hourly
+// evidence retention worker. It does not depend on ops feature flags.
+func ProvideModerationEvidenceCleanupService(db *sql.DB, repo InputModerationEvidenceRepository) *ModerationEvidenceCleanupService {
+	svc := NewModerationEvidenceCleanupService(db, repo, time.Hour)
+	svc.Start()
+	return svc
+}
+
 // ProvideTimingWheelService creates and starts TimingWheelService
 func ProvideTimingWheelService() (*TimingWheelService, error) {
 	svc, err := NewTimingWheelService()
@@ -588,4 +596,6 @@ var ProviderSet = wire.NewSet(
 	NewPaymentConfigService,
 	NewPaymentService,
 	ProvidePaymentExpiryService,
+	ProvideModerationEvidenceCleanupService,
+	NewInputModerationEvidenceService,
 )

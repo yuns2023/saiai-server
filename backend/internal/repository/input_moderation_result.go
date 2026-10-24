@@ -8,6 +8,11 @@ import (
 )
 
 func (r *inputModerationRepository) SaveInputModerationResult(ctx context.Context, t service.InputModerationTask, v service.InputModerationResult) error {
+	return saveInputModerationResult(ctx, r.db, t, v)
+}
+
+// saveInputModerationResult never downgrades a final (passed/flagged) result.
+func saveInputModerationResult(ctx context.Context, db sqlExecutor, t service.InputModerationTask, v service.InputModerationResult) error {
 	scores, err := json.Marshal(v.Scores)
 	if err != nil {
 		return err
@@ -16,7 +21,7 @@ func (r *inputModerationRepository) SaveInputModerationResult(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, `INSERT INTO input_moderation_results
+	_, err = db.ExecContext(ctx, `INSERT INTO input_moderation_results
  (request_id,source,turn_number,user_id,api_key_id,group_id,status,reason,scores,min_confidence,model_version,updated_at,decision_snapshot,diagnostics)
  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13::jsonb,$14::jsonb)
  ON CONFLICT (request_id,source,turn_number,user_id,api_key_id,group_id) DO UPDATE SET

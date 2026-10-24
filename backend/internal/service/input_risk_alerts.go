@@ -62,3 +62,19 @@ func (s *UsageService) ListInputRiskAlerts(ctx context.Context, userID int64, st
 	}
 	return repo.ListInputRiskAlerts(ctx, userID, start, end, page, size)
 }
+
+// ModerationEventEvidenceStatus reports an event's evidence for the risk
+// alert list. Viewable rows win; otherwise the recorded capture status, with
+// "expired" for stored evidence that is gone.
+func ModerationEventEvidenceStatus(diagnostics *InputModerationDiagnostics, viewable int) string {
+	if viewable > 0 {
+		return ModerationEvidenceStored
+	}
+	if diagnostics == nil {
+		return ""
+	}
+	if diagnostics.EvidenceStatus == ModerationEvidenceStored {
+		return "expired"
+	}
+	return diagnostics.EvidenceStatus
+}

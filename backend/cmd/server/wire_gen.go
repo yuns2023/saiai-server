@@ -189,6 +189,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	usageCleanupRepository := repository.NewUsageCleanupRepository(client, db)
 	usageCleanupService := service.ProvideUsageCleanupService(usageCleanupRepository, timingWheelService, dashboardAggregationService, configConfig)
 	adminUsageHandler := admin.NewUsageHandler(usageService, apiKeyService, adminService, usageCleanupService)
+	inputModerationEvidenceRepository := repository.NewInputModerationEvidenceRepository(db)
+	inputModerationEvidenceService := service.NewInputModerationEvidenceService(inputModerationEvidenceRepository, configConfig)
+	moderationEvidenceHandler := admin.NewModerationEvidenceHandler(inputModerationEvidenceService)
 	userAttributeDefinitionRepository := repository.NewUserAttributeDefinitionRepository(client)
 	userAttributeValueRepository := repository.NewUserAttributeValueRepository(client)
 	userAttributeService := service.NewUserAttributeService(userAttributeDefinitionRepository, userAttributeValueRepository)
@@ -201,7 +204,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	paymentConfigService := service.NewPaymentConfigService(client, settingRepository, secretEncryptor)
 	paymentService := service.NewPaymentService(client, userRepository, redeemService, paymentConfigService)
 	paymentHandler := admin.NewPaymentHandler(paymentService, paymentConfigService)
-	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accessLevelHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, adminAPIKeyHandler, paymentHandler)
+	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accessLevelHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, adminSubscriptionHandler, adminUsageHandler, moderationEvidenceHandler, userAttributeHandler, errorPassthroughHandler, adminAPIKeyHandler, paymentHandler)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	inputModerationClient := repository.NewConfiguredInputModerationClient(jevSettingsService)
 	inputModerationTaskQueue := repository.NewInputModerationTaskQueue(redisClient)
@@ -233,7 +236,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	accountExpiryService := service.ProvideAccountExpiryService(accountRepository)
 	subscriptionExpiryService := service.ProvideSubscriptionExpiryService(userSubscriptionRepository)
 	paymentExpiryService := service.ProvidePaymentExpiryService(db, paymentService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, carpoolMaintenanceService, accountExpiryService, subscriptionExpiryService, paymentExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, inputModerationService, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, openAIGatewayService, backupService)
+	moderationEvidenceCleanupService := service.ProvideModerationEvidenceCleanupService(db, inputModerationEvidenceRepository)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, carpoolMaintenanceService, accountExpiryService, subscriptionExpiryService, paymentExpiryService, moderationEvidenceCleanupService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, inputModerationService, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, openAIGatewayService, backupService)
 	application := &Application{
 		Server:  httpServer,
 		Cleanup: v,
@@ -267,6 +271,7 @@ func provideCleanup(
 	accountExpiry *service.AccountExpiryService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	paymentExpiry *service.PaymentExpiryService,
+	moderationEvidenceCleanup *service.ModerationEvidenceCleanupService,
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
 	pricing *service.PricingService,
@@ -365,6 +370,10 @@ func provideCleanup(
 			}},
 			{"PaymentExpiryService", func() error {
 				paymentExpiry.Stop()
+				return nil
+			}},
+			{"ModerationEvidenceCleanupService", func() error {
+				moderationEvidenceCleanup.Stop()
 				return nil
 			}},
 			{"SubscriptionService", func() error {

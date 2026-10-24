@@ -24,31 +24,13 @@ type InputModerationResultRepository interface {
 }
 
 func (s *InputModerationService) recordResult(task InputModerationTask, result InputModerationResult) error {
-	if task.Diagnostics != nil {
-		diagnostics := *task.Diagnostics
-		diagnostics.DurationMS = time.Since(diagnostics.started).Milliseconds()
-		if diagnostics.DurationMS < 0 {
-			diagnostics.DurationMS = 0
-		}
-		task.Diagnostics.DurationMS = diagnostics.DurationMS
-		task.Diagnostics.status = result.Status
-		task.Diagnostics.reason = result.Reason
-		result.Diagnostics = &diagnostics
-	}
-	if task.Diagnostics == nil || !task.Diagnostics.processing {
-		inputModerationMetrics.observe(result)
-	}
-	if result.Status != "pending" {
-		slog.Info("input_moderation_result", "request_id", task.RequestID, "source", normalizeInputModerationSource(task.Source),
-			"turn", task.TurnNumber, "status", result.Status, "reason", result.Reason, "diagnostics", result.Diagnostics)
-	}
+	result = s.finalizeResult(task, result)
+	s.reportResult(task, result)
 	repo, ok := s.eventRepo.(InputModerationResultRepository)
 	if !ok || strings.TrimSpace(task.RequestID) == "" {
 		return nil
 	}
-	task.RequestID = truncateModerationText(strings.TrimSpace(task.RequestID), 128)
-	task.Source = normalizeInputModerationSource(task.Source)
-	result.UpdatedAt = time.Now()
+	task = normalizeModerationResultTask(task)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := repo.SaveInputModerationResult(ctx, task, result); err != nil {
@@ -56,4 +38,39 @@ func (s *InputModerationService) recordResult(task InputModerationTask, result I
 		return fmt.Errorf("moderation result storage unavailable")
 	}
 	return nil
+}
+
+// finalizeResult snapshots the job diagnostics into the result.
+func (s *InputModerationService) finalizeResult(task InputModerationTask, result InputModerationResult) InputModerationResult {
+	if task.Diagnostics != nil {
+		diagnostics := *task.Diagnostics
+		diagnostics.DurationMS = time.Since(diagnostics.started).Milliseconds()
+		if diagnostics.DurationMS < 0 {
+			diagnostics.DurationMS = 0
+		}
+		diagnostics.EvidenceOmittedCategories = append([]string(nil), task.Diagnostics.EvidenceOmittedCategories...)
+		task.Diagnostics.DurationMS = diagnostics.DurationMS
+		task.Diagnostics.status = result.Status
+		task.Diagnostics.reason = result.Reason
+		result.Diagnostics = &diagnostics
+	}
+	result.UpdatedAt = time.Now()
+	return result
+}
+
+// reportResult emits metrics and the metadata-only result log line.
+func (s *InputModerationService) reportResult(task InputModerationTask, result InputModerationResult) {
+	if task.Diagnostics == nil || !task.Diagnostics.processing {
+		inputModerationMetrics.observe(result)
+	}
+	if result.Status != "pending" {
+		slog.Info("input_moderation_result", "request_id", task.RequestID, "source", normalizeInputModerationSource(task.Source),
+			"turn", task.TurnNumber, "status", result.Status, "reason", result.Reason, "diagnostics", result.Diagnostics)
+	}
+}
+
+func normalizeModerationResultTask(task InputModerationTask) InputModerationTask {
+	task.RequestID = truncateModerationText(strings.TrimSpace(task.RequestID), 128)
+	task.Source = normalizeInputModerationSource(task.Source)
+	return task
 }

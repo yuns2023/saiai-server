@@ -314,4 +314,8 @@ type UsageModerationEvent struct {
 	Action          string             `json:"action"`
 	CountedAsStrike bool               `json:"counted_as_strike"`
 	ModelVersion    string             `json:"model_version"`
+	// Set only by the risk alert list: viewable evidence rows of this event.
+	EventID        int64  `json:"event_id,omitempty"`
+	EvidenceCount  int    `json:"evidence_count,omitempty"`
+	EvidenceStatus string `json:"evidence_status,omitempty"`
 }
