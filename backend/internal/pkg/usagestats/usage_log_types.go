@@ -83,8 +83,9 @@ type DashboardStats struct {
 	Rpm int64 `json:"rpm"` // 近5分钟平均每分钟请求数
 	Tpm int64 `json:"tpm"` // 近5分钟平均每分钟Token数
 
-	// 托管用量（metered_cost IS NOT NULL）。以上平台请求/Token/费用/RPM/TPM 均不含托管行，
-	// 托管行单独在此汇总；活跃用户数仍包含托管用户。
+	// 托管用量（metered_cost IS NOT NULL）。管理仪表盘的平台请求/Token/费用/平均耗时不含托管行
+	// （预聚合桶本身含托管，读取时减去）；RPM/TPM 表示网关负载，包含托管流量；活跃用户数也包含托管用户。
+	// 托管“累计”仅覆盖原始 usage_logs 保留期内的数据。
 	HostedTotalRequests    int64   `json:"hosted_total_requests"`
 	HostedTotalTokens      int64   `json:"hosted_total_tokens"`
 	HostedTotalMeteredCost float64 `json:"hosted_total_metered_cost"`

@@ -318,26 +318,20 @@ func (r *dashboardAggregationRepository) insertDailyActiveUsers(ctx context.Cont
 	return err
 }
 
-// upsertHourlyAggregates writes platform totals per hour bucket. Hosted rows
-// (metered_cost IS NOT NULL) are excluded from requests/tokens/costs/duration
-// and reported separately by the dashboard, while active_users still counts
-// every user. Buckets are grouped over all rows (with FILTERed metrics) so an
-// hour holding only hosted traffic still overwrites stale totals with zeros;
-// hours without any raw rows (e.g. purged by retention) are left untouched.
 func (r *dashboardAggregationRepository) upsertHourlyAggregates(ctx context.Context, start, end time.Time) error {
 	tzName := timezone.Name()
 	query := `
 		WITH hourly AS (
 			SELECT
 				date_trunc('hour', created_at AT TIME ZONE $3) AT TIME ZONE $3 AS bucket_start,
-				COUNT(*) FILTER (WHERE metered_cost IS NULL) AS total_requests,
-				COALESCE(SUM(input_tokens) FILTER (WHERE metered_cost IS NULL), 0) AS input_tokens,
-				COALESCE(SUM(output_tokens) FILTER (WHERE metered_cost IS NULL), 0) AS output_tokens,
-				COALESCE(SUM(cache_creation_tokens) FILTER (WHERE metered_cost IS NULL), 0) AS cache_creation_tokens,
-				COALESCE(SUM(cache_read_tokens) FILTER (WHERE metered_cost IS NULL), 0) AS cache_read_tokens,
-				COALESCE(SUM(total_cost) FILTER (WHERE metered_cost IS NULL), 0) AS total_cost,
-				COALESCE(SUM(actual_cost) FILTER (WHERE metered_cost IS NULL), 0) AS actual_cost,
-				COALESCE(SUM(COALESCE(duration_ms, 0)) FILTER (WHERE metered_cost IS NULL), 0) AS total_duration_ms
+				COUNT(*) AS total_requests,
+				COALESCE(SUM(input_tokens), 0) AS input_tokens,
+				COALESCE(SUM(output_tokens), 0) AS output_tokens,
+				COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+				COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+				COALESCE(SUM(total_cost), 0) AS total_cost,
+				COALESCE(SUM(actual_cost), 0) AS actual_cost,
+				COALESCE(SUM(COALESCE(duration_ms, 0)), 0) AS total_duration_ms
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
 			GROUP BY 1

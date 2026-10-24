@@ -1738,9 +1738,10 @@ func (s *UsageLogRepoSuite) createHostedAwareLog(user *service.User, apiKey *ser
 	s.Require().NoError(err)
 }
 
-func (s *UsageLogRepoSuite) TestDashboardAggregation_ExcludesHostedRowsAndOverwritesStaleBuckets() {
+func (s *UsageLogRepoSuite) TestDashboardHosted_BucketsStayInclusiveAndPlatformReadSubtracts() {
 	now := time.Now().UTC().Truncate(time.Second)
 	dayStart := truncateToDayUTC(now).Add(-24 * time.Hour) // yesterday: fully in the past
+	dayEnd := dayStart.Add(24 * time.Hour)
 	hour1 := dayStart.Add(2 * time.Hour)
 	hour2 := dayStart.Add(3 * time.Hour)
 
@@ -1755,72 +1756,90 @@ func (s *UsageLogRepoSuite) TestDashboardAggregation_ExcludesHostedRowsAndOverwr
 	s.createHostedAwareLog(hostedUser, hostedKey, account, 100, 200, 2.0, &metered, hour1.Add(10*time.Minute))
 	s.createHostedAwareLog(hostedUser, hostedKey, account, 100, 200, 2.0, &metered, hour2.Add(10*time.Minute))
 
-	// Simulate a bucket written by the previous (hosted-inclusive) aggregation.
-	_, err := s.tx.ExecContext(s.ctx, `
-		INSERT INTO usage_dashboard_hourly (bucket_start, total_requests, input_tokens, output_tokens, total_cost, actual_cost, total_duration_ms, active_users)
-		VALUES ($1, 1, 100, 200, 2, 0, 100, 1)`, hour2)
-	s.Require().NoError(err)
-
 	aggRepo := newDashboardAggregationRepositoryWithSQL(s.tx)
-	s.Require().NoError(aggRepo.AggregateRange(s.ctx, dayStart, dayStart.Add(24*time.Hour)))
+	s.Require().NoError(aggRepo.AggregateRange(s.ctx, dayStart, dayEnd))
+	s.Require().NoError(aggRepo.UpdateAggregationWatermark(s.ctx, now))
 
-	var requests, input, output, durationMs, activeUsers int64
-	var totalCost, actualCost float64
-	fetch := func(query string, arg any) {
-		s.Require().NoError(scanSingleRow(s.ctx, s.tx, query, []any{arg},
-			&requests, &input, &output, &totalCost, &actualCost, &durationMs, &activeUsers))
+	// Aggregate tables keep their origin/main meaning: hosted-inclusive.
+	var requests, activeUsers int64
+	s.Require().NoError(scanSingleRow(s.ctx, s.tx, `SELECT total_requests, active_users FROM usage_dashboard_daily WHERE bucket_date = $1::date`, []any{dayStart}, &requests, &activeUsers))
+	s.Require().Equal(int64(3), requests)
+	s.Require().Equal(int64(2), activeUsers)
+
+	// Admin usage page: buckets as-is, no double counting.
+	for _, g := range []string{"day", "hour"} {
+		trend, err := s.repo.GetUsageTrendWithFilters(s.ctx, dayStart, dayEnd, g, 0, 0, 0, 0, "", nil, nil, nil, "")
+		s.Require().NoError(err)
+		var req, tok int64
+		for _, p := range trend {
+			req += p.Requests
+			tok += p.TotalTokens
+		}
+		s.Require().Equal(int64(3), req, g)
+		s.Require().Equal(int64(630), tok, g)
 	}
-	const hourlyQ = `SELECT total_requests, input_tokens, output_tokens, total_cost, actual_cost, total_duration_ms, active_users FROM usage_dashboard_hourly WHERE bucket_start = $1`
-	fetch(hourlyQ, hour1)
-	s.Require().Equal([]int64{1, 10, 20, 100, 2}, []int64{requests, input, output, durationMs, activeUsers}, "hour1: platform totals only, both users active")
-	s.Require().Equal(1.0, totalCost)
-	s.Require().Equal(1.0, actualCost)
 
-	fetch(hourlyQ, hour2)
-	s.Require().Equal([]int64{0, 0, 0, 0, 1}, []int64{requests, input, output, durationMs, activeUsers}, "hosted-only hour is zeroed, user still active")
-	s.Require().Equal(0.0, totalCost)
-
-	fetch(`SELECT total_requests, input_tokens, output_tokens, total_cost, actual_cost, total_duration_ms, active_users FROM usage_dashboard_daily WHERE bucket_date = $1::date`, dayStart)
-	s.Require().Equal([]int64{1, 10, 20, 100, 2}, []int64{requests, input, output, durationMs, activeUsers})
-	s.Require().Equal(1.0, totalCost)
-
-	// Admin usage page (hosted-inclusive) trend adds hosted rows back.
-	trend, err := s.repo.GetUsageTrendWithFilters(s.ctx, dayStart, dayStart.Add(24*time.Hour), "day", 0, 0, 0, 0, "", nil, nil, nil, "")
-	s.Require().NoError(err)
-	s.Require().Len(trend, 1)
-	s.Require().Equal(int64(3), trend[0].Requests)
-	s.Require().Equal(int64(630), trend[0].TotalTokens)
-
-	// Admin dashboard (platform) trend and model distribution exclude hosted.
-	platformTrend, err := s.repo.GetPlatformUsageTrend(s.ctx, dayStart, dayStart.Add(24*time.Hour), "day")
-	s.Require().NoError(err)
-	s.Require().Len(platformTrend, 1)
-	s.Require().Equal(int64(1), platformTrend[0].Requests)
-
-	hourlyAll, err := s.repo.GetUsageTrendWithFilters(s.ctx, dayStart, dayStart.Add(24*time.Hour), "hour", 0, 0, 0, 0, "", nil, nil, nil, "")
-	s.Require().NoError(err)
-	var hourlyRequests int64
-	for _, p := range hourlyAll {
-		hourlyRequests += p.Requests
+	// Admin dashboard: platform trend equals the hosted-excluded raw sums, per bucket.
+	for _, g := range []string{"day", "hour"} {
+		platform, err := s.repo.GetPlatformUsageTrend(s.ctx, dayStart, dayEnd, g)
+		s.Require().NoError(err)
+		want, err := s.repo.queryUsageTrendFromLogs(s.ctx, dayStart, dayEnd, g, 0, 0, 0, 0, "", nil, nil, nil, "", hostedScopeExclude)
+		s.Require().NoError(err)
+		wantByDate := map[string]TrendDataPoint{}
+		for _, p := range want {
+			wantByDate[p.Date] = p
+		}
+		var req int64
+		for _, p := range platform {
+			req += p.Requests
+			w := wantByDate[p.Date]
+			s.Require().Equal(w.Requests, p.Requests, "%s %s", g, p.Date)
+			s.Require().Equal(w.TotalTokens, p.TotalTokens, "%s %s", g, p.Date)
+			s.Require().InDelta(w.Cost, p.Cost, 1e-9)
+			s.Require().InDelta(w.ActualCost, p.ActualCost, 1e-9)
+		}
+		s.Require().Equal(int64(1), req, g)
 	}
-	s.Require().Equal(int64(3), hourlyRequests)
 
-	models, err := s.repo.GetPlatformModelStats(s.ctx, dayStart, dayStart.Add(24*time.Hour))
+	models, err := s.repo.GetPlatformModelStats(s.ctx, dayStart, dayEnd)
 	s.Require().NoError(err)
 	s.Require().Len(models, 1)
 	s.Require().Equal(int64(1), models[0].Requests)
 
-	ranking, err := s.repo.GetUserSpendingRanking(s.ctx, dayStart, dayStart.Add(24*time.Hour), 12)
+	ranking, err := s.repo.GetUserSpendingRanking(s.ctx, dayStart, dayEnd, 12)
 	s.Require().NoError(err)
 	s.Require().Len(ranking.Ranking, 1)
 	s.Require().Equal(platformUser.ID, ranking.Ranking[0].UserID)
 	s.Require().Equal(int64(1), ranking.TotalRequests)
 
-	usersTrend, err := s.repo.GetUserUsageTrend(s.ctx, dayStart, dayStart.Add(24*time.Hour), "day", 12)
+	usersTrend, err := s.repo.GetUserUsageTrend(s.ctx, dayStart, dayEnd, "day", 12)
 	s.Require().NoError(err)
 	for _, p := range usersTrend {
 		s.Require().NotEqual(hostedUser.ID, p.UserID)
 	}
+}
+
+func (s *UsageLogRepoSuite) TestDashboardHosted_UnaggregatedHostedRowsAreNotSubtracted() {
+	now := time.Now().UTC().Truncate(time.Second)
+	dayStart := truncateToDayUTC(now).Add(-24 * time.Hour)
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "agg-wm@test.com"})
+	key := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-agg-wm", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-agg-wm"})
+	metered := 1.0
+
+	s.createHostedAwareLog(user, key, account, 10, 10, 1.0, nil, dayStart.Add(time.Hour))
+	aggRepo := newDashboardAggregationRepositoryWithSQL(s.tx)
+	s.Require().NoError(aggRepo.AggregateRange(s.ctx, dayStart, dayStart.Add(24*time.Hour)))
+	watermark := dayStart.Add(2 * time.Hour)
+	s.Require().NoError(aggRepo.UpdateAggregationWatermark(s.ctx, watermark))
+	// Hosted row after the watermark: not in any bucket yet, must not be subtracted.
+	s.createHostedAwareLog(user, key, account, 50, 50, 1.0, &metered, dayStart.Add(90*time.Minute).Add(time.Hour))
+
+	platform, err := s.repo.GetPlatformUsageTrend(s.ctx, dayStart, dayStart.Add(24*time.Hour), "day")
+	s.Require().NoError(err)
+	s.Require().Len(platform, 1)
+	s.Require().Equal(int64(1), platform[0].Requests)
+	s.Require().Equal(int64(20), platform[0].TotalTokens)
 }
 
 func (s *UsageLogRepoSuite) TestDashboardStatsWithRange_ExcludesHostedAndReportsHostedLine() {
@@ -1874,11 +1893,15 @@ func (s *UsageLogRepoSuite) TestDashboardStats_AggregatedPathReportsHostedLine()
 
 	aggRepo := newDashboardAggregationRepositoryWithSQL(s.tx)
 	s.Require().NoError(aggRepo.AggregateRange(s.ctx, todayStart.Add(-3*time.Hour), now.Add(time.Minute)))
+	s.Require().NoError(aggRepo.UpdateAggregationWatermark(s.ctx, now.Add(time.Minute)))
 
 	stats, err := newUsageLogRepositoryWithSQL(s.client, s.tx).GetDashboardStats(s.ctx)
 	s.Require().NoError(err)
 	s.Require().Equal(baseStats.TotalRequests+1, stats.TotalRequests, "platform total excludes hosted")
 	s.Require().Equal(baseStats.TotalTokens+10, stats.TotalTokens)
+	s.Require().Equal(baseStats.TodayRequests+1, stats.TodayRequests, "today excludes hosted")
+	s.Require().Equal(baseStats.TodayTokens+10, stats.TodayTokens)
+	s.Require().InDelta(baseStats.TotalCost+0.5, stats.TotalCost, 1e-9)
 	s.Require().Equal(baseStats.HostedTotalRequests+2, stats.HostedTotalRequests)
 	s.Require().Equal(baseStats.HostedTotalTokens+32, stats.HostedTotalTokens)
 	s.Require().InDelta(baseStats.HostedTotalMeteredCost+2.0, stats.HostedTotalMeteredCost, 1e-9)

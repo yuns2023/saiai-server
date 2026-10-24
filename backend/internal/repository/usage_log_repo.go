@@ -1433,16 +1433,24 @@ func (r *usageLogRepository) GetDashboardStats(ctx context.Context) (*DashboardS
 	if err := r.fillDashboardEntityStats(ctx, stats, todayStart, now); err != nil {
 		return nil, err
 	}
-	if err := r.fillDashboardUsageStatsAggregated(ctx, stats, todayStart, now); err != nil {
+	// The pre-aggregated buckets are hosted-inclusive; the admin dashboard
+	// shows platform figures, so hosted rows are subtracted on read. The
+	// watermark is read before the buckets on purpose.
+	watermark, err := r.dashboardAggregationWatermark(ctx)
+	if err != nil {
 		return nil, err
 	}
-	if err := r.fillDashboardHostedStatsAggregated(ctx, stats, todayStart); err != nil {
+	totalDurationMs, err := r.fillDashboardUsageStatsAggregated(ctx, stats, todayStart, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.applyDashboardHostedStatsAggregated(ctx, stats, todayStart, watermark, totalDurationMs); err != nil {
 		return nil, err
 	}
 
-	rpm, tpm, err := r.getPerformanceStats(ctx, 0)
-	if err != nil {
-		return nil, err
+	rpm, tpm, perfErr := r.getPerformanceStats(ctx, 0)
+	if perfErr != nil {
+		return nil, perfErr
 	}
 	stats.Rpm = rpm
 	stats.Tpm = tpm
@@ -1542,7 +1550,10 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 	return nil
 }
 
-func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Context, stats *DashboardStats, todayUTC, now time.Time) error {
+// fillDashboardUsageStatsAggregated reads the hosted-inclusive bucket totals
+// and returns the total duration so the caller can derive the average after
+// subtracting hosted rows.
+func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Context, stats *DashboardStats, todayUTC, now time.Time) (int64, error) {
 	totalStatsQuery := `
 		SELECT
 			COALESCE(SUM(total_requests), 0) as total_requests,
@@ -1570,11 +1581,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 		&stats.TotalActualCost,
 		&totalDurationMs,
 	); err != nil {
-		return err
-	}
-	stats.TotalTokens = stats.TotalInputTokens + stats.TotalOutputTokens + stats.TotalCacheCreationTokens + stats.TotalCacheReadTokens
-	if stats.TotalRequests > 0 {
-		stats.AverageDurationMs = float64(totalDurationMs) / float64(stats.TotalRequests)
+		return 0, err
 	}
 
 	todayStatsQuery := `
@@ -1605,10 +1612,9 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 		&stats.ActiveUsers,
 	); err != nil {
 		if err != sql.ErrNoRows {
-			return err
+			return 0, err
 		}
 	}
-	stats.TodayTokens = stats.TodayInputTokens + stats.TodayOutputTokens + stats.TodayCacheCreationTokens + stats.TodayCacheReadTokens
 
 	hourlyActiveQuery := `
 		SELECT active_users
@@ -1618,11 +1624,11 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 	hourStart := now.In(timezone.Location()).Truncate(time.Hour)
 	if err := scanSingleRow(ctx, r.sql, hourlyActiveQuery, []any{hourStart}, &stats.HourlyActiveUsers); err != nil {
 		if err != sql.ErrNoRows {
-			return err
+			return 0, err
 		}
 	}
 
-	return nil
+	return totalDurationMs, nil
 }
 
 // fillDashboardUsageStatsFromUsageLogs computes platform totals (hosted rows
@@ -3108,19 +3114,14 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 }
 
 // GetUsageTrendWithFilters returns usage trend data with optional filters
-// GetUsageTrendWithFilters returns the trend of ALL usage rows (hosted
-// included), as used by the admin usage page. The pre-aggregated buckets only
-// hold platform (non-hosted) totals, so hosted rows of the same buckets are
-// added back from usage_logs.
+// GetUsageTrendWithFilters returns the trend of all usage rows (hosted
+// included); unfiltered day/hour ranges read the hosted-inclusive
+// pre-aggregated buckets as-is.
 func (r *usageLogRepository) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8, sessionID string) (results []TrendDataPoint, err error) {
 	if shouldUsePreaggregatedTrend(granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType, sessionID) {
 		aggregated, aggregatedErr := r.getUsageTrendFromAggregates(ctx, startTime, endTime, granularity)
 		if aggregatedErr == nil && len(aggregated) > 0 {
-			hosted, hostedErr := r.getHostedTrendForAggregateBuckets(ctx, startTime, endTime, granularity)
-			if hostedErr != nil {
-				return nil, hostedErr
-			}
-			return mergeTrendPoints(aggregated, hosted), nil
+			return aggregated, nil
 		}
 	}
 	return r.queryUsageTrendFromLogs(ctx, startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType, sessionID, hostedScopeAll)
