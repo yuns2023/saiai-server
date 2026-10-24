@@ -490,6 +490,7 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		return fmt.Errorf("input moderation sidecar returned invalid safety %q", result.Safety)
 	}
 
+	textAloneScores := s.moderationTextAloneScores(task, group, submittedPolicy, result, checks)
 	cancelClassify()
 
 	actionCtx, cancelAction := context.WithTimeout(context.Background(), 5*time.Second)
@@ -599,11 +600,7 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		enforcementMatch && (group.InputModerationMinConfidence == 0 || len(result.Scores) > 0) && s.eventRepo != nil
 	if applyIncident {
 		event.IncidentFingerprint = moderationIncidentFingerprint(s.evidenceSealer, task, policy.RulesVersion, checks, crossings, flagged, rule,
-			func() (bool, bool) { return s.moderationTextAloneCrosses(task, group, rule) })
-		// The optional text-alone check may have used the action budget.
-		cancelAction()
-		actionCtx, cancelAction = context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancelAction()
+			func() (bool, bool) { return moderationTextAloneCrosses(textAloneScores, rule) })
 	}
 	flaggedResult := s.finalizeResult(task, InputModerationResult{Status: "flagged", Reason: coverageReason, DecisionSnapshot: moderationDecisionSnapshot(group), Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion})
 	if strings.TrimSpace(task.RequestID) != "" {

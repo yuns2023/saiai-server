@@ -329,9 +329,55 @@ func moderationIncidentFingerprint(sealer moderationEvidenceSealer, task InputMo
 	return sealer.MAC(moderationFingerprintInput{RulesVersion: rulesVersion, Categories: enforced, ContentMACs: macs})
 }
 
-// moderationTextAloneCrosses classifies the new text without instructions.
-// It shares the job's detector budget and cache scope.
-func (s *InputModerationService) moderationTextAloneCrosses(task InputModerationTask, group *Group, rule moderationDecisionRule) (bool, bool) {
+// moderationTextAloneNeeded reports whether a fingerprint would depend on an
+// extra text-alone check: every flagged enforcement category is explained by
+// an instruction check, there is new text, and the plan has no text check.
+func moderationTextAloneNeeded(task InputModerationTask, checks []moderationCheckResult, crossings [][]string, flagged []string, rule moderationDecisionRule) bool {
+	if strings.TrimSpace(task.Text) == "" {
+		return false
+	}
+	enforced := 0
+	for _, category := range flagged {
+		if !rule.enforced(category) {
+			continue
+		}
+		enforced++
+		explained := false
+		for i, check := range checks {
+			if check.Check.HasKind(moderationCheckInstructions) && containsModerationCategory(crossings[i], category) {
+				explained = true
+			}
+		}
+		if !explained {
+			return false
+		}
+	}
+	for _, check := range checks {
+		if check.Check.HasKind(moderationCheckText) {
+			return false
+		}
+	}
+	return enforced > 0
+}
+
+// moderationTextAloneScores runs the optional text-alone check under the
+// submitted policy, before the final group/user/policy re-read, so a change
+// made while it runs is still caught by that re-read. It returns nil when the
+// check is not needed or could not complete; the incident then counts.
+func (s *InputModerationService) moderationTextAloneScores(task InputModerationTask, group *Group, policy *InputModerationPolicy, combined *InputModerationClassification, checks []moderationCheckResult) map[string]float64 {
+	if s.evidenceSealer == nil || !group.InputModerationAutoDisableUser || combined == nil || len(combined.Scores) == 0 {
+		return nil
+	}
+	rule := moderationDecisionRule{group: group, policy: policy}
+	var flagged []string
+	for category, score := range combined.Scores {
+		if rule.crosses(category, score) {
+			flagged = append(flagged, category)
+		}
+	}
+	if !moderationTextAloneNeeded(task, checks, moderationCheckCrossings(checks, rule), flagged, rule) {
+		return nil
+	}
 	timeout := time.Duration(s.cfg.RequestTimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 15 * time.Second
@@ -344,10 +390,19 @@ func (s *InputModerationService) moderationTextAloneCrosses(task InputModeration
 	result, err := s.classifyModerationText(ctx, strings.TrimSpace(task.Text), group)
 	if err != nil {
 		slog.Warn("input_moderation_text_alone_check_failed", "job_id", task.JobID, "user_id", task.UserID, "group_id", task.GroupID, "error", err)
-		return false, false
+		return nil
 	}
 	task.Diagnostics.CompletedChecks++
-	for category, score := range result.Scores {
+	return result.Scores
+}
+
+// moderationTextAloneCrosses evaluates precomputed text-alone scores with the
+// final rule; ok is false when no scores are available.
+func moderationTextAloneCrosses(scores map[string]float64, rule moderationDecisionRule) (crosses bool, ok bool) {
+	if scores == nil {
+		return false, false
+	}
+	for category, score := range scores {
 		if rule.enforced(category) && rule.crosses(category, score) {
 			return true, true
 		}

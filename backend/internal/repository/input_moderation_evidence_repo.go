@@ -11,11 +11,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-// Viewable evidence: unexpired, or held past its expiry. Cleanup deletes the
-// complement and re-checks it on the locked row, so a committed hold wins.
+// Viewable evidence: unexpired, or held past its expiry. Cleanup deletes
+// unheld evidence that expired or whose user is gone (soft or hard deleted),
+// re-checking on the locked row so a committed hold wins.
 const (
-	moderationEvidenceViewable = `(expires_at > NOW() OR hold_until > NOW())`
-	moderationEvidenceExpired  = `expires_at < NOW() AND (hold_until IS NULL OR hold_until < NOW())`
+	moderationEvidenceViewable  = `(expires_at > NOW() OR hold_until > NOW())`
+	moderationEvidenceUserGone  = `NOT EXISTS (SELECT 1 FROM input_moderation_events e JOIN users u ON u.id = e.user_id WHERE e.id = v.event_id AND u.deleted_at IS NULL)`
+	moderationEvidencePurgeable = `(v.hold_until IS NULL OR v.hold_until < NOW()) AND (v.expires_at < NOW() OR ` + moderationEvidenceUserGone + `)`
 )
 
 func NewInputModerationEvidenceRepository(db *sql.DB) service.InputModerationEvidenceRepository {
@@ -78,11 +80,21 @@ func insertModerationEvidenceAccess(ctx context.Context, db sqlExecutor, access 
 	return nil
 }
 
-func (r *inputModerationRepository) RecordInputModerationEvidenceAccess(ctx context.Context, access service.InputModerationEvidenceAccess) error {
-	return insertModerationEvidenceAccess(ctx, r.db, access)
+// RecordInputModerationEvidenceAccess commits the access row and returns its
+// database time, used to re-check expiry before anything is decrypted.
+func (r *inputModerationRepository) RecordInputModerationEvidenceAccess(ctx context.Context, access service.InputModerationEvidenceAccess) (time.Time, error) {
+	var at time.Time
+	if err := r.db.QueryRowContext(ctx, `
+		INSERT INTO input_moderation_evidence_access (event_id, admin_user_id, auth_method, action, reason)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING clock_timestamp()`,
+		access.EventID, access.AdminUserID, access.AuthMethod, access.Action, access.Reason).Scan(&at); err != nil {
+		return time.Time{}, fmt.Errorf("record input moderation evidence access: %w", err)
+	}
+	return at, nil
 }
 
-func (r *inputModerationRepository) updateModerationEvidenceHold(ctx context.Context, access service.InputModerationEvidenceAccess, query string, args ...any) (int64, error) {
+func (r *inputModerationRepository) updateModerationEvidenceHold(ctx context.Context, access service.InputModerationEvidenceAccess, after string, query string, args ...any) (int64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -96,6 +108,11 @@ func (r *inputModerationRepository) updateModerationEvidenceHold(ctx context.Con
 	if err != nil || updated == 0 {
 		return 0, err
 	}
+	if after != "" {
+		if _, err := tx.ExecContext(ctx, after, access.EventID); err != nil {
+			return 0, fmt.Errorf("update input moderation evidence hold: %w", err)
+		}
+	}
 	if err := insertModerationEvidenceAccess(ctx, tx, access); err != nil {
 		return 0, err
 	}
@@ -106,14 +123,17 @@ func (r *inputModerationRepository) updateModerationEvidenceHold(ctx context.Con
 }
 
 func (r *inputModerationRepository) HoldInputModerationEvidence(ctx context.Context, access service.InputModerationEvidenceAccess, until time.Time) (int64, error) {
-	return r.updateModerationEvidenceHold(ctx, access, `
+	return r.updateModerationEvidenceHold(ctx, access, "", `
 		UPDATE input_moderation_evidence SET hold_until = $2, hold_reason = $3, hold_by = $4
 		WHERE event_id = $1 AND `+moderationEvidenceViewable,
 		access.EventID, until, access.Reason, access.AdminUserID)
 }
 
 func (r *inputModerationRepository) ReleaseInputModerationEvidence(ctx context.Context, access service.InputModerationEvidenceAccess) (int64, error) {
+	// Released evidence of a deleted user goes immediately, as it would have at
+	// deletion time without the hold.
 	return r.updateModerationEvidenceHold(ctx, access, `
+		DELETE FROM input_moderation_evidence v WHERE v.event_id = $1 AND `+moderationEvidenceUserGone, `
 		UPDATE input_moderation_evidence SET hold_until = NULL, hold_reason = NULL, hold_by = NULL
 		WHERE event_id = $1 AND hold_until IS NOT NULL`, access.EventID)
 }
@@ -153,23 +173,23 @@ func (r *inputModerationRepository) ListHeldInputModerationEvidence(ctx context.
 	return out, total, rows.Err()
 }
 
-func (r *inputModerationRepository) PurgeExpiredInputModerationEvidence(ctx context.Context, limit int) (int64, error) {
-	result, err := r.db.ExecContext(ctx, `
-		DELETE FROM input_moderation_evidence
-		WHERE id IN (
-			SELECT id FROM input_moderation_evidence
-			WHERE `+moderationEvidenceExpired+`
-			ORDER BY id LIMIT $1
-			FOR UPDATE SKIP LOCKED)
-		AND `+moderationEvidenceExpired, limit)
+func (r *inputModerationRepository) PurgeExpiredInputModerationEvidence(ctx context.Context, db service.SQLExecer, limit int) (int64, error) {
+	result, err := db.ExecContext(ctx, `
+		DELETE FROM input_moderation_evidence v
+		WHERE v.id IN (
+			SELECT v.id FROM input_moderation_evidence v
+			WHERE `+moderationEvidencePurgeable+`
+			ORDER BY v.id LIMIT $1
+			FOR UPDATE OF v SKIP LOCKED)
+		AND `+moderationEvidencePurgeable, limit)
 	if err != nil {
 		return 0, fmt.Errorf("purge input moderation evidence: %w", err)
 	}
 	return result.RowsAffected()
 }
 
-func (r *inputModerationRepository) PurgeInputModerationEvidenceAccess(ctx context.Context, before time.Time, limit int) (int64, error) {
-	result, err := r.db.ExecContext(ctx, `
+func (r *inputModerationRepository) PurgeInputModerationEvidenceAccess(ctx context.Context, db service.SQLExecer, before time.Time, limit int) (int64, error) {
+	result, err := db.ExecContext(ctx, `
 		DELETE FROM input_moderation_evidence_access
 		WHERE id IN (SELECT id FROM input_moderation_evidence_access WHERE created_at < $1 ORDER BY id LIMIT $2)`, before, limit)
 	if err != nil {

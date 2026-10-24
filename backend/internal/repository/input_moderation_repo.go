@@ -237,7 +237,12 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 	}
 
 	// Roll the strike window over first so both duplicate checks only see
-	// strikes counted in the current window (after the last reset).
+	// strikes counted in the current window (after the last reset). Window
+	// membership uses the time a strike was counted, not created_at: a job
+	// created earlier may commit after a later one opened the window.
+	// strike_counted_at is clock_timestamp() taken under the user lock (not the
+	// transaction start), so it is after the commit of any strike that opened
+	// the window. Events counted before the column existed use created_at.
 	strikeWindow := policy.StrikeWindow
 	if strikeWindow <= 0 {
 		strikeWindow = 24 * time.Hour
@@ -258,10 +263,11 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 	if err := tx.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM input_moderation_events
-			WHERE user_id = $1 AND counted_as_strike = true AND id <> $4 AND created_at >= $10
+			WHERE user_id = $1 AND counted_as_strike = true AND id <> $4
+ AND COALESCE(strike_counted_at, created_at) >= $10
  AND ((input_hash = $2 AND created_at >= $3)
  OR ($5 <> '' AND request_id = $5 AND source = $6 AND COALESCE(turn_number,0) = $7 AND api_key_id = $8 AND group_id = $9)
- OR ($11 <> '' AND incident_fingerprint = $11))
+ OR ($11 <> '' AND incident_fingerprint = $11 AND strike_counted_at IS NOT NULL))
 		)`, event.UserID, event.InputHash, event.CreatedAt.Add(-dedupeWindow), eventID, event.RequestID, event.Source, event.TurnNumber, event.APIKeyID, event.GroupID,
 		windowStart.Time, event.IncidentFingerprint).Scan(&duplicate); err != nil {
 		return nil, fmt.Errorf("check input moderation incident duplicate: %w", err)
@@ -340,7 +346,7 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 		return nil, fmt.Errorf("update user input risk state: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE input_moderation_events SET action = $2, counted_as_strike = true WHERE id = $1`,
+		UPDATE input_moderation_events SET action = $2, counted_as_strike = true, strike_counted_at = clock_timestamp() WHERE id = $1`,
 		eventID, action); err != nil {
 		return nil, fmt.Errorf("finalize input moderation incident: %w", err)
 	}

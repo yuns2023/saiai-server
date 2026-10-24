@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"reflect"
@@ -63,9 +64,10 @@ type InputModerationEvidenceAccess struct {
 // HeldInputModerationEvidence is event-level metadata only, so held evidence
 // stays reachable even when its result row is gone.
 type HeldInputModerationEvidence struct {
-	EventID        int64     `json:"event_id"`
-	UserID         int64     `json:"user_id"`
-	GroupID        int64     `json:"group_id"`
+	EventID int64 `json:"event_id"`
+	// Null once the user or group row is hard-deleted (ON DELETE SET NULL).
+	UserID         *int64    `json:"user_id"`
+	GroupID        *int64    `json:"group_id"`
 	Categories     []string  `json:"categories"`
 	Action         string    `json:"action"`
 	EventCreatedAt time.Time `json:"event_created_at"`
@@ -79,14 +81,22 @@ type HeldInputModerationEvidence struct {
 type InputModerationEvidenceRepository interface {
 	// LoadInputModerationEvidence returns nil when no row is viewable.
 	LoadInputModerationEvidence(ctx context.Context, eventID int64) (*InputModerationEvidenceRecord, error)
-	RecordInputModerationEvidenceAccess(ctx context.Context, access InputModerationEvidenceAccess) error
+	// RecordInputModerationEvidenceAccess commits the access row and returns
+	// its database time.
+	RecordInputModerationEvidenceAccess(ctx context.Context, access InputModerationEvidenceAccess) (time.Time, error)
 	// Hold/Release update the viewable rows and write the access row in one
 	// transaction; they return the number of updated rows.
 	HoldInputModerationEvidence(ctx context.Context, access InputModerationEvidenceAccess, until time.Time) (int64, error)
 	ReleaseInputModerationEvidence(ctx context.Context, access InputModerationEvidenceAccess) (int64, error)
 	ListHeldInputModerationEvidence(ctx context.Context, page, size int) ([]HeldInputModerationEvidence, int64, error)
-	PurgeExpiredInputModerationEvidence(ctx context.Context, limit int) (int64, error)
-	PurgeInputModerationEvidenceAccess(ctx context.Context, before time.Time, limit int) (int64, error)
+	// Purge statements run on db, the connection holding the cleanup lock.
+	PurgeExpiredInputModerationEvidence(ctx context.Context, db SQLExecer, limit int) (int64, error)
+	PurgeInputModerationEvidenceAccess(ctx context.Context, db SQLExecer, before time.Time, limit int) (int64, error)
+}
+
+// SQLExecer is satisfied by *sql.DB, *sql.Conn and *sql.Tx.
+type SQLExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
 type InputModerationEvidenceCheck struct {
@@ -149,11 +159,23 @@ func (s *InputModerationEvidenceService) View(ctx context.Context, eventID int64
 	if s.crypto == nil {
 		return nil, ErrModerationEvidenceUnavailable
 	}
-	if err := s.repo.RecordInputModerationEvidenceAccess(ctx, InputModerationEvidenceAccess{
+	accessedAt, err := s.repo.RecordInputModerationEvidenceAccess(ctx, InputModerationEvidenceAccess{
 		EventID: eventID, AdminUserID: actor.UserID, AuthMethod: actor.AuthMethod, Action: ModerationEvidenceActionView,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
+	// Rows that expired while the audit committed are not returned.
+	rows := record.Rows[:0:0]
+	for _, row := range record.Rows {
+		if row.ExpiresAt.After(accessedAt) || (row.HoldUntil != nil && row.HoldUntil.After(accessedAt)) {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) == 0 {
+		return nil, ErrModerationEvidenceNotFound
+	}
+	record.Rows = rows
 	view := &InputModerationEvidenceView{EventID: eventID}
 	for _, row := range record.Rows {
 		// The AAD binds the ciphertext to this event and position; a row moved

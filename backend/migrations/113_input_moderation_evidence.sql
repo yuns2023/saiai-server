@@ -50,7 +50,11 @@ CREATE INDEX IF NOT EXISTS idx_input_moderation_evidence_access_created
     ON input_moderation_evidence_access(created_at);
 
 ALTER TABLE input_moderation_events ADD COLUMN IF NOT EXISTS incident_fingerprint CHAR(64) NULL;
+-- Database time at which the event was counted as a strike (under the user's
+-- risk-state lock). Strike-window membership uses it instead of created_at,
+-- which can be older than the window start when jobs commit out of order.
+ALTER TABLE input_moderation_events ADD COLUMN IF NOT EXISTS strike_counted_at TIMESTAMPTZ NULL;
 
 CREATE INDEX IF NOT EXISTS idx_input_moderation_events_user_fingerprint
-    ON input_moderation_events(user_id, incident_fingerprint, created_at)
-    WHERE incident_fingerprint IS NOT NULL;
+    ON input_moderation_events(user_id, incident_fingerprint, strike_counted_at)
+    WHERE incident_fingerprint IS NOT NULL AND strike_counted_at IS NOT NULL;

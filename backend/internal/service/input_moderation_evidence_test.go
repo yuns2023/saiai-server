@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -280,22 +282,72 @@ func TestModerationIncidentFingerprint(t *testing.T) {
 	})
 	t.Run("exhausted budget for the text-alone check counts the strike", func(t *testing.T) {
 		client := &markerScoreClient{markers: map[string]map[string]float64{"BUNDLE": {"PII": 0.99}}}
-		svc, repo := newEvidenceTestService(t, client, evidenceTestGroup(true, "PII"))
+		svc, _ := newEvidenceTestService(t, client, evidenceTestGroup(true, "PII"))
 		task := InputModerationTask{RequestID: "r", UserID: 1, APIKeyID: 2, GroupID: 3, Text: "turn", Instructions: []string{bundle}}
 		task.Diagnostics = newModerationDiagnostics(task, 32768)
-		task.Diagnostics.MaxDetectorCalls = 2
+		task.Diagnostics.DetectorCalls = task.Diagnostics.MaxDetectorCalls
 		group := evidenceTestGroup(true, "PII")
 		checks := []moderationCheckResult{
 			{Check: moderationCheck{Index: 0, Text: "x", Sources: []InputModerationCheckSource{{Kind: moderationCheckInstructions, Bundle: 1}}}, Result: &InputModerationClassification{Scores: map[string]float64{"PII": 0.99}}},
 		}
 		rule := moderationDecisionRule{group: group, policy: group.InputModerationPolicy}
-		task.Diagnostics.DetectorCalls = 2
-		fingerprint := moderationIncidentFingerprint(svc.evidenceSealer, task, JevExpandedRulesVersion, checks, moderationCheckCrossings(checks, rule), []string{"PII"}, rule,
-			func() (bool, bool) { return svc.moderationTextAloneCrosses(task, group, rule) })
-		require.Empty(t, fingerprint)
+		scores := svc.moderationTextAloneScores(task, group, group.InputModerationPolicy, &InputModerationClassification{Scores: map[string]float64{"PII": 0.99}}, checks)
+		require.Nil(t, scores)
 		require.Equal(t, "detector_calls", task.Diagnostics.Limit)
-		require.Empty(t, repo.events)
+		fingerprint := moderationIncidentFingerprint(svc.evidenceSealer, task, JevExpandedRulesVersion, checks, moderationCheckCrossings(checks, rule), []string{"PII"}, rule,
+			func() (bool, bool) { return moderationTextAloneCrosses(scores, rule) })
+		require.Empty(t, fingerprint)
 	})
+}
+
+// hookScoreClient runs onText when the given text is classified.
+type hookScoreClient struct {
+	markerScoreClient
+	text   string
+	onText func()
+}
+
+func (c *hookScoreClient) ClassifyWithPolicy(ctx context.Context, text string, p *InputModerationPolicy) (*InputModerationClassification, error) {
+	if text == c.text && c.onText != nil {
+		c.onText()
+	}
+	return c.markerScoreClient.ClassifyWithPolicy(ctx, text, p)
+}
+
+func TestModerationTextAloneCheckPrecedesFinalReread(t *testing.T) {
+	bundle := "BUNDLE rules " + strings.Repeat("r", 100)
+	for _, tc := range []struct {
+		name   string
+		change func(*inputModerationGroupRepoStub, *inputModerationUserRepoStub)
+		reason string
+	}{
+		{"moderation disabled during the check", func(g *inputModerationGroupRepoStub, _ *inputModerationUserRepoStub) {
+			disabled := *g.groups[0]
+			disabled.InputModerationEnabled = false
+			g.groups = append(g.groups, &disabled)
+		}, "group_disabled"},
+		{"user trusted during the check", func(_ *inputModerationGroupRepoStub, u *inputModerationUserRepoStub) { u.user.IsTrusted = true }, "trusted_user"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			groups := &inputModerationGroupRepoStub{groups: []*Group{evidenceTestGroup(true, "PII")}}
+			users := &inputModerationUserRepoStub{user: &User{ID: 1, Status: StatusActive}}
+			client := &hookScoreClient{markerScoreClient: markerScoreClient{markers: map[string]map[string]float64{"BUNDLE": {"PII": 0.99}}}, text: "turn"}
+			client.onText = func() { tc.change(groups, users) }
+			repo := &moderationResultRepoStub{}
+			svc := newInputModerationServiceForTest(client, repo, groups, users, nil)
+			svc.cfg.MaxInputChars = 32768
+			svc.cfg.EvidenceRetentionDays = 90
+			crypto, err := newModerationEvidenceCrypto(evidenceTestRoot, nil)
+			require.NoError(t, err)
+			svc.evidenceSealer = crypto
+			defer svc.Stop()
+			require.NoError(t, svc.process(InputModerationTask{RequestID: "r", UserID: 1, APIKeyID: 2, GroupID: 3, Text: "turn", Instructions: []string{bundle}}))
+			require.Contains(t, client.texts, "turn", "the text-alone check ran")
+			require.Empty(t, repo.events, "no event, evidence or strike under the old policy")
+			require.Equal(t, "skipped", repo.results[len(repo.results)-1].Status)
+			require.Equal(t, tc.reason, repo.results[len(repo.results)-1].Reason)
+		})
+	}
 }
 
 // evidenceRepoStub records the call order of the admin evidence flow.
@@ -304,14 +356,18 @@ type evidenceRepoStub struct {
 	accessErr error
 	accesses  []InputModerationEvidenceAccess
 	holds     int64
+	accessAt  time.Time
 }
 
 func (r *evidenceRepoStub) LoadInputModerationEvidence(context.Context, int64) (*InputModerationEvidenceRecord, error) {
 	return r.record, nil
 }
-func (r *evidenceRepoStub) RecordInputModerationEvidenceAccess(_ context.Context, access InputModerationEvidenceAccess) error {
+func (r *evidenceRepoStub) RecordInputModerationEvidenceAccess(_ context.Context, access InputModerationEvidenceAccess) (time.Time, error) {
 	r.accesses = append(r.accesses, access)
-	return r.accessErr
+	if r.accessAt.IsZero() {
+		return time.Now(), r.accessErr
+	}
+	return r.accessAt, r.accessErr
 }
 func (r *evidenceRepoStub) HoldInputModerationEvidence(_ context.Context, access InputModerationEvidenceAccess, _ time.Time) (int64, error) {
 	r.accesses = append(r.accesses, access)
@@ -324,10 +380,10 @@ func (r *evidenceRepoStub) ReleaseInputModerationEvidence(_ context.Context, acc
 func (r *evidenceRepoStub) ListHeldInputModerationEvidence(context.Context, int, int) ([]HeldInputModerationEvidence, int64, error) {
 	return nil, 0, nil
 }
-func (r *evidenceRepoStub) PurgeExpiredInputModerationEvidence(context.Context, int) (int64, error) {
+func (r *evidenceRepoStub) PurgeExpiredInputModerationEvidence(context.Context, SQLExecer, int) (int64, error) {
 	return 0, nil
 }
-func (r *evidenceRepoStub) PurgeInputModerationEvidenceAccess(context.Context, time.Time, int) (int64, error) {
+func (r *evidenceRepoStub) PurgeInputModerationEvidenceAccess(context.Context, SQLExecer, time.Time, int) (int64, error) {
 	return 0, nil
 }
 
@@ -379,6 +435,12 @@ func TestModerationEvidenceViewAuditsBeforeDecrypt(t *testing.T) {
 	require.ErrorIs(t, err, ErrModerationEvidenceNotFound)
 	require.Empty(t, repo.accesses)
 
+	// Evidence that expired while the audit row committed is not returned.
+	repo = &evidenceRepoStub{record: sealedEvidenceRecord(t, "job-1"), accessAt: time.Now().Add(2 * time.Hour)}
+	_, err = newEvidenceAdminService(repo).View(context.Background(), 5, jwt)
+	require.ErrorIs(t, err, ErrModerationEvidenceNotFound)
+	require.Len(t, repo.accesses, 1)
+
 	// A row moved to another event (different job) is rejected.
 	record := sealedEvidenceRecord(t, "job-1")
 	record.JobID = "job-2"
@@ -400,4 +462,45 @@ func TestModerationEvidenceHoldValidation(t *testing.T) {
 	require.NoError(t, err)
 	repo.holds = 0
 	require.ErrorIs(t, svc.Release(context.Background(), 5, jwt, ""), ErrModerationEvidenceNotFound)
+}
+
+// connCheckingEvidenceRepo fails unless cleanup runs on the lock connection.
+type connCheckingEvidenceRepo struct {
+	evidenceRepoStub
+	calls int
+}
+
+func (r *connCheckingEvidenceRepo) PurgeExpiredInputModerationEvidence(ctx context.Context, db SQLExecer, _ int) (int64, error) {
+	r.calls++
+	if _, ok := db.(*sql.Conn); !ok {
+		return 0, errors.New("cleanup must use the lock connection")
+	}
+	_, err := db.ExecContext(ctx, "DELETE evidence")
+	return 0, err
+}
+func (r *connCheckingEvidenceRepo) PurgeInputModerationEvidenceAccess(ctx context.Context, db SQLExecer, _ time.Time, _ int) (int64, error) {
+	r.calls++
+	_, err := db.ExecContext(ctx, "DELETE access")
+	return 0, err
+}
+
+func TestModerationEvidenceCleanupUsesLockConnectionWithOnePooledConn(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+	mock.ExpectQuery("SELECT pg_try_advisory_lock").WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
+	mock.ExpectExec("DELETE evidence").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE access").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("SELECT pg_advisory_unlock").WillReturnResult(sqlmock.NewResult(0, 0))
+	repo := &connCheckingEvidenceRepo{}
+	done := make(chan struct{})
+	go func() { NewModerationEvidenceCleanupService(db, repo, time.Hour).runOnce(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup blocked waiting for a second connection")
+	}
+	require.Equal(t, 2, repo.calls)
+	require.NoError(t, mock.ExpectationsWereMet())
 }

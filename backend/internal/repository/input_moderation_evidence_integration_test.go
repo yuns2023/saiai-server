@@ -135,13 +135,13 @@ func TestModerationEvidenceHoldCleanupAndExpiry(t *testing.T) {
 		if item.EventID == heldID {
 			found = true
 			require.Equal(t, "TEST_ONLY case", item.HoldReason)
-			require.Equal(t, u.ID, item.UserID)
+			require.Equal(t, u.ID, *item.UserID)
 		}
 	}
 	require.True(t, found)
 
 	// Cleanup deletes the expired row and keeps the held one.
-	_, err = repo.PurgeExpiredInputModerationEvidence(ctx, 1000)
+	_, err = repo.PurgeExpiredInputModerationEvidence(ctx, integrationDB, 1000)
 	require.NoError(t, err)
 	require.Equal(t, 1, evidenceRowCount(t, u.ID))
 
@@ -150,7 +150,7 @@ func TestModerationEvidenceHoldCleanupAndExpiry(t *testing.T) {
 	n, err = repo.ReleaseInputModerationEvidence(ctx, release)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), n)
-	_, err = repo.PurgeExpiredInputModerationEvidence(ctx, 1000)
+	_, err = repo.PurgeExpiredInputModerationEvidence(ctx, integrationDB, 1000)
 	require.NoError(t, err)
 	require.Zero(t, evidenceRowCount(t, u.ID))
 
@@ -169,7 +169,7 @@ func TestModerationEvidenceHoldCleanupAndExpiry(t *testing.T) {
 	// Old access rows are purged by age.
 	_, err = integrationDB.ExecContext(ctx, `UPDATE input_moderation_evidence_access SET created_at = NOW() - INTERVAL '800 days' WHERE event_id = $1`, heldID)
 	require.NoError(t, err)
-	purged, err := repo.PurgeInputModerationEvidenceAccess(ctx, time.Now().Add(-730*24*time.Hour), 1000)
+	purged, err := repo.PurgeInputModerationEvidenceAccess(ctx, integrationDB, time.Now().Add(-730*24*time.Hour), 1000)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), purged)
 }
@@ -256,4 +256,94 @@ func TestInputRiskAlertsExposeEvidencePerEvent(t *testing.T) {
 	require.Equal(t, eventIDForJob(t, event.JobID), alerts[0].Events[0].EventID)
 	require.Equal(t, 1, alerts[0].Events[0].EvidenceCount)
 	require.Equal(t, service.ModerationEvidenceStored, alerts[0].Events[0].EvidenceStatus)
+}
+
+func TestModerationFingerprintDedupSurvivesOutOfOrderCommits(t *testing.T) {
+	ctx := context.Background()
+	u, k, g, _ := moderationReleaseFixture(t)
+	repo := NewInputModerationRepository(integrationDB)
+	policy := service.InputModerationEscalationPolicy{ActionMode: service.InputModerationActionModeWarnThenCooldown,
+		DisableAfterHits: 5, StrikeWindow: 24 * time.Hour, Cooldown: 30 * time.Minute, DedupeWindow: time.Minute}
+	apply := func(fingerprint string, createdAt time.Time) *service.InputModerationTransition {
+		t.Helper()
+		event := evidenceTestEvent(u, k, g, uuid.NewString())
+		event.Evidence, event.Result = nil, nil
+		event.IncidentFingerprint = fingerprint
+		event.CreatedAt, event.EnqueuedAt = createdAt, createdAt
+		transition, err := repo.ApplyInputModerationIncident(ctx, event, policy)
+		require.NoError(t, err)
+		return transition
+	}
+	bundleA := "c000000000000000000000000000000000000000000000000000000000000000"
+	bundleB := "d000000000000000000000000000000000000000000000000000000000000000"
+	now := time.Now().UTC()
+	// B opens the window; A was created earlier but commits later and counts.
+	require.Equal(t, 1, apply(bundleB, now).StrikeCount)
+	require.Equal(t, 2, apply(bundleA, now.Add(-time.Minute)).StrikeCount)
+	// A repeated bundle A must see that strike although its created_at is
+	// before the window start.
+	repeat := apply(bundleA, now.Add(time.Second))
+	require.True(t, repeat.Duplicate)
+	require.Equal(t, 2, repeat.StrikeCount)
+}
+
+func TestModerationEvidenceOfDeletedUserIsNotKeptAfterRelease(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	u, k, g, _ := moderationReleaseFixture(t)
+	repo := &inputModerationRepository{db: integrationDB}
+	released := evidenceTestEvent(u, k, g, uuid.NewString())
+	lapsed := evidenceTestEvent(u, k, g, uuid.NewString())
+	require.NoError(t, repo.InsertInputModerationEvent(ctx, released))
+	require.NoError(t, repo.InsertInputModerationEvent(ctx, lapsed))
+	releasedID, lapsedID := eventIDForJob(t, released.JobID), eventIDForJob(t, lapsed.JobID)
+	for _, id := range []int64{releasedID, lapsedID} {
+		_, err := repo.HoldInputModerationEvidence(ctx, service.InputModerationEvidenceAccess{EventID: id, AdminUserID: 1, AuthMethod: "jwt", Action: "hold", Reason: "TEST_ONLY"}, time.Now().Add(time.Hour))
+		require.NoError(t, err)
+	}
+	require.NoError(t, newUserRepositoryWithSQL(client, integrationDB).Delete(ctx, u.ID))
+	require.Equal(t, 2, evidenceRowCount(t, u.ID))
+
+	// Release deletes the deleted user's evidence in the same transaction.
+	n, err := repo.ReleaseInputModerationEvidence(ctx, service.InputModerationEvidenceAccess{EventID: releasedID, AdminUserID: 1, AuthMethod: "jwt", Action: "release"})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n)
+	record, err := repo.LoadInputModerationEvidence(ctx, releasedID)
+	require.NoError(t, err)
+	require.Nil(t, record)
+
+	// A lapsed hold is cleaned up before the original expiry.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE input_moderation_evidence SET hold_until = NOW() - INTERVAL '1 minute' WHERE event_id = $1`, lapsedID)
+	require.NoError(t, err)
+	_, err = repo.PurgeExpiredInputModerationEvidence(ctx, integrationDB, 1000)
+	require.NoError(t, err)
+	require.Zero(t, evidenceRowCount(t, u.ID))
+}
+
+func TestModerationHeldListToleratesDeletedUserAndGroup(t *testing.T) {
+	ctx := context.Background()
+	u, k, g, _ := moderationReleaseFixture(t)
+	repo := &inputModerationRepository{db: integrationDB}
+	event := evidenceTestEvent(u, k, g, uuid.NewString())
+	require.NoError(t, repo.InsertInputModerationEvent(ctx, event))
+	eventID := eventIDForJob(t, event.JobID)
+	_, err := repo.HoldInputModerationEvidence(ctx, service.InputModerationEvidenceAccess{EventID: eventID, AdminUserID: 1, AuthMethod: "jwt", Action: "hold", Reason: "TEST_ONLY"}, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	// Hard deletes set the event's user/group to NULL.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE input_moderation_events SET user_id = NULL, group_id = NULL WHERE id = $1`, eventID)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), `DELETE FROM input_moderation_events WHERE id = $1`, eventID)
+	})
+	items, _, err := repo.ListHeldInputModerationEvidence(ctx, 1, 100)
+	require.NoError(t, err)
+	found := false
+	for _, item := range items {
+		if item.EventID == eventID {
+			found = true
+			require.Nil(t, item.UserID)
+			require.Nil(t, item.GroupID)
+		}
+	}
+	require.True(t, found)
 }

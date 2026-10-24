@@ -63,20 +63,32 @@ func (s *ModerationEvidenceCleanupService) Stop() {
 func (s *ModerationEvidenceCleanupService) runOnce() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	release, ok := tryAcquireDBAdvisoryLock(ctx, s.db, moderationEvidenceCleanupLockID)
-	if !ok {
+	// The lock and every cleanup statement share one connection, so a pass
+	// never waits for a second pooled connection (max_open_conns may be 1).
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		slog.Warn("input_moderation_evidence_cleanup_conn_failed", "error", err)
 		return
 	}
-	defer release()
+	defer func() { _ = conn.Close() }()
+	var locked bool
+	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", moderationEvidenceCleanupLockID).Scan(&locked); err != nil || !locked {
+		return
+	}
+	defer func() {
+		unlockCtx, unlockCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer unlockCancel()
+		_, _ = conn.ExecContext(unlockCtx, "SELECT pg_advisory_unlock($1)", moderationEvidenceCleanupLockID)
+	}()
 	evidence, err := s.purge(ctx, func() (int64, error) {
-		return s.repo.PurgeExpiredInputModerationEvidence(ctx, moderationEvidenceCleanupBatch)
+		return s.repo.PurgeExpiredInputModerationEvidence(ctx, conn, moderationEvidenceCleanupBatch)
 	})
 	if err != nil {
 		slog.Warn("input_moderation_evidence_cleanup_failed", "error", err)
 	}
 	before := time.Now().UTC().Add(-moderationEvidenceAccessRetention)
 	access, err := s.purge(ctx, func() (int64, error) {
-		return s.repo.PurgeInputModerationEvidenceAccess(ctx, before, moderationEvidenceCleanupBatch)
+		return s.repo.PurgeInputModerationEvidenceAccess(ctx, conn, before, moderationEvidenceCleanupBatch)
 	})
 	if err != nil {
 		slog.Warn("input_moderation_evidence_access_cleanup_failed", "error", err)

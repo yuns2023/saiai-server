@@ -216,8 +216,8 @@ not a user violation and never an additional strike.
 ## Encrypted moderation evidence (schema 113)
 
 Migration 113 adds `input_moderation_evidence`, `input_moderation_evidence_access`
-and the nullable `input_moderation_events.incident_fingerprint` with a partial
-index. It is an ordinary transactional migration (both tables are new and the
+and the nullable `input_moderation_events.incident_fingerprint` and
+`strike_counted_at` with a partial index. It is an ordinary transactional migration (both tables are new and the
 events table is small); apply it through the reviewed migration runbook before
 this version.
 
@@ -270,9 +270,12 @@ view is recorded.
 
 **Retention.** `gateway.input_moderation.evidence_retention_days` (default 90;
 0 disables capture). An hourly cleanup, independent of ops settings and guarded
-by a PostgreSQL advisory lock, deletes expired rows that are not held (the
-locked row is re-checked, so a committed hold wins) and access rows older than
-730 days. Soft-deleting a user deletes their unheld evidence in the same
+by a PostgreSQL advisory lock (lock and statements share one connection),
+deletes unheld rows that expired or whose user is deleted (the locked row is
+re-checked, so a committed hold wins) and access rows older than 730 days.
+Releasing a hold on a deleted user's evidence deletes it in the same
+transaction. Evidence that expires while the view's audit row commits is not
+returned. Soft-deleting a user deletes their unheld evidence in the same
 transaction; evidence writers lock the user row and skip evidence for a deleted
 user (an in-flight incident for a deleted user is recorded as `already_inactive`
 without a strike). `SAIAI_HTTP_TRACE` never records response bodies of the
@@ -297,7 +300,13 @@ of the crossing instruction checks) only when:
 
 Under the user lock the strike window is rolled over (or restarted after a
 reset) first; then the existing duplicate checks and the fingerprint check only
-consider strikes counted in the current window. A matching earlier strike makes
+consider strikes counted in the current window. Window membership uses
+`strike_counted_at` (database time when the strike was counted), so a job that
+was created earlier but committed after the window opened is still seen. (The window start itself is application time; application and database
+clocks are assumed to be NTP-synchronized.)
+The optional text-alone check runs before the final group/user/policy re-read,
+so switching moderation off, trusting the user or changing detection during it
+still skips the job. A matching earlier strike makes
 the incident `duplicate_ignored`. A new enforcement category (A → A+B) changes
 the fingerprint and counts. Strike logic never reads the evidence table, so
 evidence retention settings do not change strikes. Without an explicitly
