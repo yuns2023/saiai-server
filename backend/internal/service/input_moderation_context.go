@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,17 +55,17 @@ func moderationChunks(text string, size int) ([]string, error) {
 	return chunks, nil
 }
 
-func (s *InputModerationService) classifyInput(ctx context.Context, task InputModerationTask, group *Group) (*InputModerationClassification, bool, error) {
+func (s *InputModerationService) classifyInput(ctx context.Context, task InputModerationTask, group *Group) (*InputModerationClassification, string, error) {
 	if task.Diagnostics == nil {
 		task.Diagnostics = newModerationDiagnostics(task, s.cfg.MaxInputChars)
 	}
-	chunks, chunked, err := moderationTaskChunks(task, s.cfg.MaxInputChars)
+	chunks, coverage, err := moderationTaskChunks(task, s.cfg.MaxInputChars)
 	if err != nil {
 		task.Diagnostics.Limit = "input_chars"
 		if errors.Is(err, errModerationPlanTooLarge) {
 			task.Diagnostics.Limit = "planned_checks"
 		}
-		return nil, false, err
+		return nil, "", err
 	}
 	task.Diagnostics.PlannedChecks = len(chunks)
 	ctx = WithInputModerationDiagnostics(ctx, task.Diagnostics)
@@ -73,37 +75,37 @@ func (s *InputModerationService) classifyInput(ctx context.Context, task InputMo
 		var result *InputModerationClassification
 		if _, budgeted := s.client.(InputModerationBudgetClient); !budgeted {
 			if err := ReserveInputModerationCall(ctx); err != nil {
-				return nil, false, err
+				return nil, "", err
 			}
 		}
 		if group.InputModerationPolicy != nil {
 			client, ok := s.client.(InputModerationPolicyClient)
 			if !ok {
-				return nil, false, fmt.Errorf("moderation client does not support versioned policies")
+				return nil, "", fmt.Errorf("moderation client does not support versioned policies")
 			}
 			result, err = client.ClassifyWithPolicy(ctx, text, group.InputModerationPolicy)
 		} else {
 			result, err = s.client.Classify(ctx, text)
 		}
 		if err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		if result == nil {
-			return nil, false, fmt.Errorf("empty moderation result")
+			return nil, "", fmt.Errorf("empty moderation result")
 		}
 		result.Safety = strings.ToLower(strings.TrimSpace(result.Safety))
 		if result.Safety != InputModerationSafetySafe && result.Safety != InputModerationSafetyUnsafe && result.Safety != InputModerationSafetyControversial {
-			return nil, false, fmt.Errorf("invalid moderation safety")
+			return nil, "", fmt.Errorf("invalid moderation safety")
 		}
 		for _, score := range result.Scores {
 			if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
-				return nil, false, fmt.Errorf("invalid moderation score")
+				return nil, "", fmt.Errorf("invalid moderation score")
 			}
 		}
 		if group.InputModerationPolicy != nil {
 			for _, category := range group.InputModerationPolicy.AuditCategories {
 				if _, ok := result.Scores[category]; !ok {
-					return nil, false, fmt.Errorf("incomplete moderation scores")
+					return nil, "", fmt.Errorf("incomplete moderation scores")
 				}
 			}
 		}
@@ -113,7 +115,7 @@ func (s *InputModerationService) classifyInput(ctx context.Context, task InputMo
 			continue
 		}
 		if result.ModelVersion != combined.ModelVersion {
-			return nil, false, fmt.Errorf("moderation model changed during chunk processing")
+			return nil, "", fmt.Errorf("moderation model changed during chunk processing")
 		}
 		for category, score := range result.Scores {
 			if previous, exists := combined.Scores[category]; !exists || score > previous {
@@ -125,7 +127,7 @@ func (s *InputModerationService) classifyInput(ctx context.Context, task InputMo
 			combined.Safety = result.Safety
 		}
 	}
-	return combined, chunked, nil
+	return combined, coverage, nil
 }
 
 func cloneModerationClassification(r *InputModerationClassification) *InputModerationClassification {
@@ -222,20 +224,99 @@ func ExtractOpenAIModerationInput(body []byte) (string, []string) {
 	return separateProjectInstructions(ExtractLatestOpenAIUserText(body), parts)
 }
 
-// Stable instructions are cached independently; new questions also require
-// joint assessment. Chunked results explicitly disclose limited cross-chunk context.
-func moderationTaskChunks(task InputModerationTask, size int) ([]string, bool, error) {
-	parts := append([]string(nil), task.Instructions...)
-	parts = appendUniqueModerationText(parts, strings.TrimSpace(task.Text))
-	chunks, err := moderationChunks(strings.Join(parts, "\n\n"), size)
-	if err != nil {
-		return nil, false, err
+// Coverage of a planned moderation job, recorded as the result reason.
+const (
+	moderationCoverageFull         = ""
+	moderationCoverageChunked      = "chunked_input"
+	moderationCoverageJointSkipped = "joint_context_skipped"
+)
+
+// Instructions are packed into bundles of at most one chunk so a request with
+// many small blocks (Claude Code sends 100+ per turn) needs only a few checks.
+// A bundle closes after a block whose content hash selects a boundary, with a
+// probability proportional to the block's size (about one boundary per quarter
+// chunk). Boundaries therefore depend on each block's own content, so an edit
+// to one block changes only its bundle and the cached scores of the other
+// bundles stay valid. The size limit also closes a bundle, which is rare at
+// this boundary rate.
+func moderationInstructionBundles(instructions []string, size int) []string {
+	if size <= 0 {
+		size = 32768
 	}
-	chunked := len(chunks) > 1
-	for _, instruction := range task.Instructions {
-		stable, err := moderationChunks(instruction, size)
+	target := uint64(max(1, size/4))
+	var bundles []string
+	var current []string
+	currentRunes := 0
+	flush := func() {
+		if len(current) > 0 {
+			bundles = appendUniqueModerationText(bundles, strings.Join(current, "\n\n"))
+			current, currentRunes = nil, 0
+		}
+	}
+	for _, instruction := range instructions {
+		instruction = strings.TrimSpace(instruction)
+		if instruction == "" {
+			continue
+		}
+		runes := utf8.RuneCountInString(instruction)
+		if runes >= size {
+			// Oversized blocks stay standalone and are chunked like any text.
+			flush()
+			bundles = appendUniqueModerationText(bundles, instruction)
+			continue
+		}
+		if len(current) > 0 && currentRunes+2+runes > size {
+			flush()
+		}
+		if len(current) > 0 {
+			currentRunes += 2
+		}
+		current = append(current, instruction)
+		currentRunes += runes
+		sum := sha256.Sum256([]byte(instruction))
+		if binary.BigEndian.Uint64(sum[:8])%target < uint64(runes) {
+			flush()
+		}
+	}
+	flush()
+	return bundles
+}
+
+// The plan checks the new text jointly with the instructions, then each
+// instruction bundle on its own (stable across turns, hence usually cached).
+// When the joint text is too large to cover, the new text is checked alone
+// instead of failing the job; the result discloses that joint context was
+// skipped. The planned-check cap applies to the unique checks of this plan.
+func moderationTaskChunks(task InputModerationTask, size int) ([]string, string, error) {
+	text := strings.TrimSpace(task.Text)
+	parts := append([]string(nil), task.Instructions...)
+	parts = appendUniqueModerationText(parts, text)
+	coverage := moderationCoverageFull
+	chunks, err := moderationChunks(strings.Join(parts, "\n\n"), size)
+	if errors.Is(err, errModerationTooLarge) && len(task.Instructions) > 0 {
+		coverage = moderationCoverageJointSkipped
+		chunks, err = nil, nil
+		if text != "" {
+			chunks, err = moderationChunks(text, size)
+		}
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	if coverage == moderationCoverageFull && len(chunks) > 1 {
+		coverage = moderationCoverageChunked
+	}
+	if task.Diagnostics != nil {
+		task.Diagnostics.JointSkipped = coverage == moderationCoverageJointSkipped
+	}
+	bundles := moderationInstructionBundles(task.Instructions, size)
+	if task.Diagnostics != nil {
+		task.Diagnostics.InstructionBundles = len(bundles)
+	}
+	for _, bundle := range bundles {
+		stable, err := moderationChunks(bundle, size)
 		if err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		for _, text := range stable {
 			chunks = appendUniqueModerationText(chunks, text)
@@ -243,11 +324,11 @@ func moderationTaskChunks(task InputModerationTask, size int) ([]string, bool, e
 				task.Diagnostics.PlannedChecks = len(chunks)
 			}
 			if len(chunks) > moderationMaxPlannedChecks {
-				return nil, false, errModerationPlanTooLarge
+				return nil, "", errModerationPlanTooLarge
 			}
 		}
 	}
-	return chunks, chunked, nil
+	return chunks, coverage, nil
 }
 
 // Only structured file-read calls identify file output reliably. Arbitrary shell

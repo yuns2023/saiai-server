@@ -2142,7 +2142,7 @@ export default {
         },
         chunkedPassed: "分段审核通过",
         diagnostics: {
-          input_chars: '新增用户文本字符数', instruction_chars: '项目及系统指令字符数', instruction_blocks: '指令块数',
+          input_chars: '新增用户文本字符数', instruction_chars: '项目及系统指令字符数', instruction_blocks: '指令块数', instruction_bundles: '指令合并检测包数', joint_skipped: '已跳过指令与文本联合检测',
           planned_checks: '计划检测项', completed_checks: '已完成检测项', cache_hits: '缓存命中项', detector_calls: '实际检测调用次数',
           chunk_size: '单块字符上限', max_input_chars: '总输入字符上限', max_detector_calls: '单任务调用上限',
           max_planned_checks: '单任务检测项上限', duration_ms: '处理耗时（毫秒）', queue_wait_ms: '排队时长（毫秒）', limit: '触发的上限'
@@ -2157,6 +2157,7 @@ export default {
           plan_too_large: '检测计划项数超过处理上限，未完成检测',
           timeout: '审核处理超时，未完成检测',
           chunked_input: "已分段覆盖提交文本；跨段上下文仅覆盖相邻重叠部分，不代表全文联合判断",
+          joint_context_skipped: "指令与新文本合计超过联合检测上限，已分别检测新文本和指令；不代表二者联合判断",
           trusted_user: "可信用户免审核",
           group_disabled: "分组审核已关闭",
           processing_failed: "审核处理失败",

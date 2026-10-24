@@ -11,24 +11,29 @@ import (
 var ErrInputModerationCallBudget = errors.New("moderation detector call budget exhausted")
 
 type InputModerationDiagnostics struct {
-	InputChars        int    `json:"input_chars"`
-	InstructionChars  int    `json:"instruction_chars"`
-	InstructionBlocks int    `json:"instruction_blocks"`
-	PlannedChecks     int    `json:"planned_checks"`
-	CompletedChecks   int    `json:"completed_checks"`
-	CacheHits         int    `json:"cache_hits"`
-	DetectorCalls     int    `json:"detector_calls"`
-	ChunkSize         int    `json:"chunk_size"`
-	MaxInputChars     int    `json:"max_input_chars"`
-	MaxDetectorCalls  int    `json:"max_detector_calls"`
-	MaxPlannedChecks  int    `json:"max_planned_checks"`
-	DurationMS        int64  `json:"duration_ms"`
-	QueueWaitMS       int64  `json:"queue_wait_ms"`
-	Limit             string `json:"limit,omitempty"`
-	started           time.Time
-	processing        bool
-	status            string
-	reason            string
+	InputChars        int `json:"input_chars"`
+	InstructionChars  int `json:"instruction_chars"`
+	InstructionBlocks int `json:"instruction_blocks"`
+	// Bundles the instruction blocks were packed into; each is one stable check.
+	InstructionBundles int `json:"instruction_bundles"`
+	// The new text was checked without the instructions because together they
+	// exceeded the coverage budget.
+	JointSkipped     bool   `json:"joint_skipped"`
+	PlannedChecks    int    `json:"planned_checks"`
+	CompletedChecks  int    `json:"completed_checks"`
+	CacheHits        int    `json:"cache_hits"`
+	DetectorCalls    int    `json:"detector_calls"`
+	ChunkSize        int    `json:"chunk_size"`
+	MaxInputChars    int    `json:"max_input_chars"`
+	MaxDetectorCalls int    `json:"max_detector_calls"`
+	MaxPlannedChecks int    `json:"max_planned_checks"`
+	DurationMS       int64  `json:"duration_ms"`
+	QueueWaitMS      int64  `json:"queue_wait_ms"`
+	Limit            string `json:"limit,omitempty"`
+	started          time.Time
+	processing       bool
+	status           string
+	reason           string
 }
 
 type moderationDiagnosticsKey struct{}

@@ -2057,7 +2057,7 @@ export default {
         },
         chunkedPassed: "Chunk checks passed",
         diagnostics: {
-          input_chars: 'New user text characters', instruction_chars: 'Project and system instruction characters', instruction_blocks: 'Instruction blocks',
+          input_chars: 'New user text characters', instruction_chars: 'Project and system instruction characters', instruction_blocks: 'Instruction blocks', instruction_bundles: 'Instruction check bundles', joint_skipped: 'Joint instruction and text check skipped',
           planned_checks: 'Planned checks', completed_checks: 'Completed checks', cache_hits: 'Cached checks', detector_calls: 'Detector calls',
           chunk_size: 'Characters per chunk', max_input_chars: 'Input character limit', max_detector_calls: 'Calls allowed per job',
           max_planned_checks: 'Checks allowed per job', duration_ms: 'Processing time (ms)', queue_wait_ms: 'Queue wait (ms)', limit: 'Exceeded limit'
@@ -2072,6 +2072,7 @@ export default {
           plan_too_large: 'Check plan exceeds the processing limit; detection incomplete',
           timeout: 'Moderation timed out; detection incomplete',
           chunked_input: "Submitted text was covered in chunks; cross-chunk context is limited to adjacent overlap, not full-document joint assessment",
+          joint_context_skipped: "Instructions and new text together exceeded the joint check limit; the new text and the instructions were checked separately, not jointly",
           trusted_user: "Trusted user exempt from moderation",
           group_disabled: "Group moderation disabled",
           processing_failed: "Moderation processing failed",
