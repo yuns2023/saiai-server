@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -81,6 +82,14 @@ type InputModerationEvent struct {
 	CountedAsStrike  bool
 	EnqueuedAt       time.Time
 	CreatedAt        time.Time
+	// IncidentFingerprint (HMAC hex) dedups strikes for repeated instruction
+	// bundles; empty when the incident is not explained by bundles alone.
+	IncidentFingerprint string
+	// Written in the same transaction as the event; a duplicate job writes
+	// none of them. Evidence holds ciphertext only.
+	Evidence   []InputModerationEvidence
+	Result     *InputModerationResult
+	ResultTask *InputModerationTask
 }
 
 type InputModerationEventRepository interface {
@@ -158,20 +167,22 @@ type InputModerationTask struct {
 // configured and otherwise falls back to a bounded in-memory queue. Request
 // handlers never wait for classification.
 type InputModerationService struct {
-	client      InputModerationClient
-	eventRepo   InputModerationEventRepository
-	stateCache  InputModerationStateCache
-	taskQueue   InputModerationTaskQueue
-	encryptor   SecretEncryptor
-	groupRepo   GroupRepository
-	userService *UserService
-	cfg         config.GatewayInputModerationConfig
-	pool        pond.Pool
-	stopOnce    sync.Once
-	dropped     atomic.Uint64
-	consumer    string
-	queueCancel context.CancelFunc
-	queueWG     sync.WaitGroup
+	client     InputModerationClient
+	eventRepo  InputModerationEventRepository
+	stateCache InputModerationStateCache
+	taskQueue  InputModerationTaskQueue
+	encryptor  SecretEncryptor
+	// nil unless totp.encryption_key is explicitly configured.
+	evidenceSealer moderationEvidenceSealer
+	groupRepo      GroupRepository
+	userService    *UserService
+	cfg            config.GatewayInputModerationConfig
+	pool           pond.Pool
+	stopOnce       sync.Once
+	dropped        atomic.Uint64
+	consumer       string
+	queueCancel    context.CancelFunc
+	queueWG        sync.WaitGroup
 }
 
 func NewInputModerationService(
@@ -207,6 +218,9 @@ func NewInputModerationService(
 		cfg:         moderationCfg,
 		pool:        pond.NewPool(workerCount, pond.WithQueueSize(queueSize)),
 		consumer:    "input-moderation-" + uuid.NewString(),
+	}
+	if crypto := moderationEvidenceCryptoFromConfig(cfg); crypto != nil {
+		service.evidenceSealer = crypto
 	}
 	durableQueueEnabled := service.taskQueue != nil && service.encryptor != nil && cfg != nil &&
 		cfg.Totp.EncryptionKeyConfigured
@@ -441,7 +455,7 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 	if len(submittedPolicy.AuditCategories) == 0 {
 		return s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "no_categories", DecisionSnapshot: moderationDecisionSnapshot(group)})
 	}
-	result, coverageReason, err := s.classifyInput(classifyCtx, task, group)
+	result, checks, coverageReason, err := s.classifyInput(classifyCtx, task, group)
 	if err != nil && classifyCtx.Err() != nil {
 		err = classifyCtx.Err()
 	}
@@ -476,6 +490,7 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		return fmt.Errorf("input moderation sidecar returned invalid safety %q", result.Safety)
 	}
 
+	textAloneScores := s.moderationTextAloneScores(task, group, submittedPolicy, result, checks)
 	cancelClassify()
 
 	actionCtx, cancelAction := context.WithTimeout(context.Background(), 5*time.Second)
@@ -517,18 +532,20 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 			}
 		}
 	}
-	if len(result.Scores) > 0 {
+	rule := moderationDecisionRule{group: group, policy: policy}
+	scored := len(result.Scores) > 0
+	if scored {
 		result.Categories = nil
 		result.Safety = InputModerationSafetySafe
 		for category, score := range result.Scores {
 			if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
 				return fmt.Errorf("invalid moderation score")
 			}
-			if group.InputModerationPolicy != nil && !moderationPolicyMatches(policy.AuditCategories, []string{category}) {
+			if !rule.audited(category) {
 				delete(result.Scores, category)
 				continue
 			}
-			if score >= float64(moderationPolicyThreshold(policy, category, group.InputModerationMinConfidence))/100 {
+			if rule.crosses(category, score) {
 				result.Categories = append(result.Categories, category)
 				result.Safety = InputModerationSafetyUnsafe
 			}
@@ -575,9 +592,24 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 	if result.Safety == InputModerationSafetyUnsafe && group.InputModerationAutoDisableUser && !enforcementMatch {
 		event.Action = InputModerationActionCategoryNotSelected
 	}
+	flagged := normalizeModerationCategories(result.Categories)
+	sort.Strings(flagged)
+	crossings := moderationCheckCrossings(checks, rule)
+	event.Evidence = s.captureModerationEvidence(task, checks, crossings, flagged, rule, scored)
+	applyIncident := result.Safety == InputModerationSafetyUnsafe && group.InputModerationAutoDisableUser &&
+		enforcementMatch && (group.InputModerationMinConfidence == 0 || len(result.Scores) > 0) && s.eventRepo != nil
+	if applyIncident {
+		event.IncidentFingerprint = moderationIncidentFingerprint(s.evidenceSealer, task, policy.RulesVersion, checks, crossings, flagged, rule,
+			func() (bool, bool) { return moderationTextAloneCrosses(textAloneScores, rule) })
+	}
+	flaggedResult := s.finalizeResult(task, InputModerationResult{Status: "flagged", Reason: coverageReason, DecisionSnapshot: moderationDecisionSnapshot(group), Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion})
+	if strings.TrimSpace(task.RequestID) != "" {
+		resultTask := normalizeModerationResultTask(task)
+		resultTask.Diagnostics = nil
+		event.Result, event.ResultTask = &flaggedResult, &resultTask
+	}
 	incidentApplied := false
-	if result.Safety == InputModerationSafetyUnsafe && group.InputModerationAutoDisableUser &&
-		enforcementMatch && (group.InputModerationMinConfidence == 0 || len(result.Scores) > 0) && s.eventRepo != nil {
+	if applyIncident {
 		transition, err := s.eventRepo.ApplyInputModerationIncident(actionCtx, event, InputModerationEscalationPolicy{
 			ActionMode:       group.InputModerationActionMode,
 			Cooldown:         time.Duration(group.InputModerationCooldownMinutes) * time.Minute,
@@ -620,9 +652,7 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 			return err
 		}
 	}
-	if err := s.recordResult(task, InputModerationResult{Status: "flagged", Reason: coverageReason, DecisionSnapshot: moderationDecisionSnapshot(group), Scores: result.Scores, MinConfidence: group.InputModerationMinConfidence, ModelVersion: result.ModelVersion}); err != nil {
-		return err
-	}
+	s.reportResult(task, flaggedResult)
 	slog.Info("input_moderation_decision",
 		"job_id", event.JobID,
 		"user_id", event.UserID,

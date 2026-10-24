@@ -116,7 +116,7 @@ func TestModerationWarmInstructionsAllowMoreThanSixteenChecks(t *testing.T) {
 		client.checks[bundle] = true
 	}
 	task.Diagnostics = newModerationDiagnostics(task, 32768)
-	_, coverage, err := svc.classifyInput(context.Background(), task, &Group{})
+	_, _, coverage, err := svc.classifyInput(context.Background(), task, &Group{})
 	require.NoError(t, err)
 	require.Equal(t, moderationCoverageJointSkipped, coverage)
 	require.Equal(t, len(bundles)+1, task.Diagnostics.CompletedChecks)
@@ -124,13 +124,13 @@ func TestModerationWarmInstructionsAllowMoreThanSixteenChecks(t *testing.T) {
 	require.Equal(t, 1, task.Diagnostics.DetectorCalls)
 	task.Text = "different question"
 	task.Diagnostics = newModerationDiagnostics(task, 32768)
-	_, _, err = svc.classifyInput(context.Background(), task, &Group{})
+	_, _, _, err = svc.classifyInput(context.Background(), task, &Group{})
 	require.NoError(t, err)
 	require.Equal(t, 1, task.Diagnostics.DetectorCalls)
 	// An edited block invalidates only the bundle(s) around it.
 	task.Instructions[0] = "changed instructions"
 	task.Diagnostics = newModerationDiagnostics(task, 32768)
-	_, _, err = svc.classifyInput(context.Background(), task, &Group{})
+	_, _, _, err = svc.classifyInput(context.Background(), task, &Group{})
 	require.NoError(t, err)
 	require.LessOrEqual(t, task.Diagnostics.DetectorCalls, 3)
 }

@@ -206,6 +206,43 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
   return data
 }
 
+export interface ModerationEvidenceCheck {
+  check_index: number
+  kinds: Array<'joint' | 'text' | 'instructions'>
+  sources: Array<{ kind: 'joint' | 'text' | 'instructions'; bundle?: number; start: number; end: number }>
+  char_count: number
+  text: string
+  scores: Record<string, number>
+  categories: string[]
+}
+
+export interface ModerationEvidence {
+  event_id: number
+  checks: ModerationEvidenceCheck[]
+  truncated: boolean
+  omitted_categories?: string[]
+  expires_at: string
+  hold_until: string | null
+}
+
+/** Each call is recorded server-side; only personal admin logins may read evidence. */
+export async function getModerationEvidence(eventId: number): Promise<ModerationEvidence> {
+  const { data } = await apiClient.get<ModerationEvidence>(`/admin/usage/input-moderation-events/${eventId}/evidence`)
+  return data
+}
+
+export async function holdModerationEvidence(eventId: number, days: number, reason: string): Promise<{ event_id: number; hold_until: string }> {
+  const { data } = await apiClient.post<{ event_id: number; hold_until: string }>(
+    `/admin/usage/input-moderation-events/${eventId}/evidence/hold`, { days, reason })
+  return data
+}
+
+export async function releaseModerationEvidence(eventId: number, reason = ''): Promise<{ event_id: number }> {
+  const { data } = await apiClient.post<{ event_id: number }>(
+    `/admin/usage/input-moderation-events/${eventId}/evidence/release`, { reason })
+  return data
+}
+
 export const adminUsageAPI = {
   list,
   getStats,
@@ -213,7 +250,10 @@ export const adminUsageAPI = {
   searchApiKeys,
   listCleanupTasks,
   createCleanupTask,
-  cancelCleanupTask
+  cancelCleanupTask,
+  getModerationEvidence,
+  holdModerationEvidence,
+  releaseModerationEvidence
 }
 
 export default adminUsageAPI

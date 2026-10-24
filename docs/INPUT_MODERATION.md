@@ -212,3 +212,107 @@ replicas; aggregate structured logs externally for fleet/time-window analysis.
 Do not claim historical failure percentages or site-wide latency percentiles
 from this process-local snapshot. A failed detection is an operational failure,
 not a user violation and never an additional strike.
+
+## Encrypted moderation evidence (schema 113)
+
+Migration 113 adds `input_moderation_evidence`, `input_moderation_evidence_access`
+and the nullable `input_moderation_events.incident_fingerprint` and
+`strike_counted_at` with a partial index. It is an ordinary transactional migration (both tables are new and the
+events table is small); apply it through the reviewed migration runbook before
+this version.
+
+**What is kept.** When a scored (Jev) job is flagged, the checks whose *own*
+score met the final threshold (same audited categories, thresholds and `>=` as
+the decision) are encrypted and stored with the event. Each check records its
+kinds: `text` (new user text alone), `instructions` (an instruction bundle) or
+`joint` (instructions and new text checked together — a check type, not a claim
+about which part triggered), plus bundle number and character range. At most 4
+checks are kept: first the best check for each enforcement category, then for
+the other flagged categories, then further crossing checks by margin. Anything
+left out sets `evidence_truncated`, `evidence_omitted_categories` and
+`evidence_omitted_checks` in the result diagnostics. A check is the configured
+chunk (default 32,768 characters). Legacy Qwen results have no per-check scores
+and keep no evidence.
+
+This table is the only persisted store of moderated text, besides the existing
+encrypted task queue. Diagnostics and logs never contain text.
+
+**Capture is best effort.** The flagged result's diagnostics carry
+`evidence_status`: `stored`, `no_key` (`totp.encryption_key` not explicitly
+configured), `encrypt_failed`, `unsupported` (no per-check scores),
+`selection_error` (a flagged category had no crossing check; nothing else is
+substituted), `disabled` (`evidence_retention_days: 0`) or `user_deleted`.
+The event, the evidence and the flagged result row (and any strike transition)
+commit in one transaction on both write paths; a redelivered job writes nothing.
+Missing evidence is never backfilled.
+
+**Encryption.** Keys are derived with HKDF-SHA256 from `totp.encryption_key`
+(`saiai/moderation-evidence/enc/v1` and `.../mac/v1`); the TOTP/queue encryptor
+format is unchanged. AES-256-GCM authenticates the text together with its scores
+and categories; the additional data (job, user, group, check index, kinds) is
+stored immutably per row and must match the event on decrypt. Each row records a
+`key_id`. When rotating `totp.encryption_key`, list former keys in
+`gateway.input_moderation.evidence_previous_keys` (decrypt only) until their
+evidence has expired.
+
+**Access.** `GET /api/v1/admin/usage/input-moderation-events/:id/evidence`
+accepts only a personal administrator JWT; the shared admin API key gets 403.
+The access row (admin, method, time) is committed before anything is decrypted,
+so text is never returned without an audit record; responses are `no-store`.
+Expired, unheld evidence is not returned. `POST .../evidence/hold`
+(`days` 1–365, `reason` required) and `POST .../evidence/release` update the rows
+and write an access row in one transaction. `GET
+/api/v1/admin/usage/input-moderation-evidence?held=1` lists held evidence with
+event metadata only, so it stays reachable when result rows are gone. The risk
+alert list exposes `event_id`, `evidence_count` and `evidence_status` per event;
+the details dialog offers **View original text** after a confirmation that the
+view is recorded.
+
+**Retention.** `gateway.input_moderation.evidence_retention_days` (default 90;
+0 disables capture). An hourly cleanup, independent of ops settings and guarded
+by a PostgreSQL advisory lock (lock and statements share one connection),
+deletes unheld rows that expired or whose user is deleted (the locked row is
+re-checked, so a committed hold wins) and access rows older than 730 days.
+Releasing a hold on a deleted user's evidence deletes it in the same
+transaction. Evidence that expires while the view's audit row commits is not
+returned. Soft-deleting a user deletes their unheld evidence in the same
+transaction; evidence writers lock the user row and skip evidence for a deleted
+user (an in-flight incident for a deleted user is recorded as `already_inactive`
+without a strike). `SAIAI_HTTP_TRACE` never records response bodies of the
+evidence endpoints. Rolling back to the previous binary keeps schema 113; the old binary
+ignores the new tables and column, and evidence cleanup pauses until roll-forward.
+
+## Repeated instruction bundles and strikes
+
+Projects resend the same instruction bundles every turn. When an enforcement
+category is crossed only by a stable bundle, each turn used to count a new
+strike. Now an incident gets a fingerprint (HMAC with the evidence MAC key over
+the rules version, the flagged enforcement categories and per-user content MACs
+of the crossing instruction checks) only when:
+
+1. every flagged enforcement category is crossed by an instruction-bundle check,
+   and
+2. the new user text alone crosses no enforcement category. If the plan has no
+   text-only check, one extra text-alone check runs, only for incidents that
+   would count toward auto-enforcement with non-empty new text. It uses the
+   content cache and the job's detector budget; if it cannot complete, the
+   incident has no fingerprint and counts.
+
+Under the user lock the strike window is rolled over (or restarted after a
+reset) first; then the existing duplicate checks and the fingerprint check only
+consider strikes counted in the current window. One database
+`clock_timestamp()`, read after the risk-state lock is held, drives window
+start, rollover, the dedupe window and `strike_counted_at`; window membership
+uses `strike_counted_at`. A job that was created or began its transaction
+earlier but got the lock later is therefore still inside the window.
+The optional text-alone check runs before the final group/user/policy re-read,
+so switching moderation off, trusting the user or changing detection during it
+still skips the job. A matching earlier strike makes
+the incident `duplicate_ignored`. A new enforcement category (A → A+B) changes
+the fingerprint and counts. Strike logic never reads the evidence table, so
+evidence retention settings do not change strikes. Without an explicitly
+configured key there is no fingerprint. Rotating the key changes the MACs, so a
+repeated bundle may count once more after rotation.
+
+Keep `auto_disable_user` off until every instance runs this release: older
+instances neither write nor honour fingerprints.

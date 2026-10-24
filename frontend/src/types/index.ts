@@ -1233,7 +1233,7 @@ export interface UsagePricingSnapshot {
 export interface AdminUsageLog extends UsageLog {
  moderation_unavailable?: boolean
  moderation_result?: { diagnostics?: ModerationDiagnostics; decision_snapshot?: ModerationDecisionSnapshot; status: 'pending' | 'passed' | 'flagged' | 'skipped' | 'failed'; reason?: string; scores?: Record<string, number>; min_confidence: number; model_version?: string; updated_at: string }
- moderation_events?: Array<{ categories: string[]; scores: Record<string, number> | null; min_confidence: number | null; action: string; counted_as_strike: boolean; model_version: string }>
+ moderation_events?: Array<{ categories: string[]; scores: Record<string, number> | null; min_confidence: number | null; action: string; counted_as_strike: boolean; model_version: string; event_id?: number; evidence_count?: number; evidence_status?: string }>
   pricing_snapshot?: UsagePricingSnapshot | null
   // 账号计费倍率（仅管理员可见）
   account_rate_multiplier?: number | null
@@ -1906,6 +1906,12 @@ export interface ModerationDiagnostics {
   duration_ms: number
   queue_wait_ms: number
   limit?: string
+  // Evidence capture outcome of flagged results (absent on older results).
+  evidence_status?: string
+  evidence_count?: number
+  evidence_truncated?: boolean
+  evidence_omitted_categories?: string[]
+  evidence_omitted_checks?: number
 }
 
 export interface ModerationDecisionSnapshot {

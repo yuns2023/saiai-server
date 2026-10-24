@@ -50,10 +50,13 @@ func TestModerationChunksCoverTailAndUnicode(t *testing.T) {
 	require.ErrorIs(t, err, errModerationTooLarge)
 }
 func TestModerationStableAndJointPlans(t *testing.T) {
-	chunks, coverage, err := moderationTaskChunks(InputModerationTask{Text: "question", Instructions: []string{"stable rules"}}, 32768)
+	checks, coverage, err := moderationTaskChunks(InputModerationTask{Text: "question", Instructions: []string{"stable rules"}}, 32768)
 	require.NoError(t, err)
 	require.Empty(t, coverage)
-	require.Equal(t, []string{"stable rules\n\nquestion", "stable rules"}, chunks)
+	require.Equal(t, []string{"stable rules\n\nquestion", "stable rules"}, moderationCheckTexts(checks))
+	require.Equal(t, []string{moderationCheckJoint}, checks[0].Kinds())
+	require.Equal(t, []string{moderationCheckInstructions}, checks[1].Kinds())
+	require.Equal(t, []InputModerationCheckSource{{Kind: moderationCheckInstructions, Bundle: 1, Start: 0, End: 12}}, checks[1].Sources)
 }
 
 type chunkModerationStub struct{ texts []string }
@@ -70,7 +73,7 @@ func TestModerationChunkTailRaisesRisk(t *testing.T) {
 	client := &chunkModerationStub{}
 	svc := &InputModerationService{client: client}
 	svc.cfg.MaxInputChars = 16
-	result, coverage, err := svc.classifyInput(context.Background(), InputModerationTask{UserID: 1, GroupID: 2, Text: strings.Repeat("x", 20) + "DANGER"}, &Group{})
+	result, _, coverage, err := svc.classifyInput(context.Background(), InputModerationTask{UserID: 1, GroupID: 2, Text: strings.Repeat("x", 20) + "DANGER"}, &Group{})
 	require.NoError(t, err)
 	require.Equal(t, moderationCoverageChunked, coverage)
 	require.Equal(t, .95, result.Scores["PII"])
@@ -156,7 +159,8 @@ func TestModerationManySmallInstructionsNoLongerExceedPlan(t *testing.T) {
 		task.Instructions = append(task.Instructions, fmt.Sprintf("rule %d %s", block, strings.Repeat("x", 450)))
 	}
 	task.Diagnostics = newModerationDiagnostics(task, 32768)
-	chunks, coverage, err := moderationTaskChunks(task, 32768)
+	checks, coverage, err := moderationTaskChunks(task, 32768)
+	chunks := moderationCheckTexts(checks)
 	require.NoError(t, err)
 	require.Equal(t, moderationCoverageChunked, coverage)
 	require.Less(t, len(chunks), 16)
@@ -171,14 +175,16 @@ func TestModerationOversizedJointChecksNewTextAlone(t *testing.T) {
 		task.Instructions = append(task.Instructions, fmt.Sprintf("rule %d %s", block, strings.Repeat("y", 15000)))
 	}
 	task.Diagnostics = newModerationDiagnostics(task, 32768)
-	chunks, coverage, err := moderationTaskChunks(task, 32768)
+	checks, coverage, err := moderationTaskChunks(task, 32768)
+	chunks := moderationCheckTexts(checks)
 	require.NoError(t, err)
 	require.Equal(t, moderationCoverageJointSkipped, coverage)
 	require.Equal(t, "question DANGER", chunks[0])
 	require.True(t, task.Diagnostics.JointSkipped)
 	// Without new text the plan holds exactly the instruction bundles.
 	task.Text = ""
-	chunks, coverage, err = moderationTaskChunks(task, 32768)
+	checks, coverage, err = moderationTaskChunks(task, 32768)
+	chunks = moderationCheckTexts(checks)
 	require.NoError(t, err)
 	require.Empty(t, coverage)
 	require.Equal(t, moderationInstructionBundles(task.Instructions, 32768), chunks)
@@ -214,7 +220,8 @@ func TestModerationJointSkippedIsRecordedAsCoverageReason(t *testing.T) {
 func TestModerationInstructionOnlyRequestsCheckBundlesAlone(t *testing.T) {
 	task := InputModerationTask{Instructions: []string{"rules one", "rules two"}}
 	task.Diagnostics = newModerationDiagnostics(task, 32768)
-	chunks, coverage, err := moderationTaskChunks(task, 32768)
+	checks, coverage, err := moderationTaskChunks(task, 32768)
+	chunks := moderationCheckTexts(checks)
 	require.NoError(t, err)
 	require.Empty(t, coverage)
 	require.Equal(t, moderationInstructionBundles(task.Instructions, 32768), chunks)
@@ -222,7 +229,8 @@ func TestModerationInstructionOnlyRequestsCheckBundlesAlone(t *testing.T) {
 	// Text-only plans also report their planned checks.
 	task = InputModerationTask{Text: "question"}
 	task.Diagnostics = newModerationDiagnostics(task, 32768)
-	chunks, _, err = moderationTaskChunks(task, 32768)
+	checks, _, err = moderationTaskChunks(task, 32768)
+	chunks = moderationCheckTexts(checks)
 	require.NoError(t, err)
 	require.Equal(t, []string{"question"}, chunks)
 	require.Equal(t, 1, task.Diagnostics.PlannedChecks)
@@ -273,4 +281,29 @@ func TestModerationSubmitQueuesJointSkippedPlans(t *testing.T) {
 	require.Equal(t, "pending", repo.results[0].Status)
 	require.True(t, repo.results[0].Diagnostics.JointSkipped)
 	require.Positive(t, repo.results[0].Diagnostics.PlannedChecks)
+}
+
+func moderationCheckTexts(checks []moderationCheck) []string {
+	texts := make([]string, 0, len(checks))
+	for _, check := range checks {
+		texts = append(texts, check.Text)
+	}
+	return texts
+}
+
+func TestModerationPlanMergesDuplicateKinds(t *testing.T) {
+	// Instructions-only plan whose bundle equals a standalone block: one check.
+	task := InputModerationTask{Text: "", Instructions: []string{"same rules"}}
+	checks, _, err := moderationTaskChunks(task, 32768)
+	require.NoError(t, err)
+	require.Len(t, checks, 1)
+	// The no-instruction case is a text check.
+	checks, _, err = moderationTaskChunks(InputModerationTask{Text: "question"}, 32768)
+	require.NoError(t, err)
+	require.Equal(t, []string{moderationCheckText}, checks[0].Kinds())
+	// A joint chunk identical to a bundle chunk is one detector call with both kinds.
+	merged := appendModerationCheck([]moderationCheck{{Index: 0, Text: "x", Sources: []InputModerationCheckSource{{Kind: moderationCheckJoint, End: 1}}}}, "x",
+		InputModerationCheckSource{Kind: moderationCheckInstructions, Bundle: 1, End: 1})
+	require.Len(t, merged, 1)
+	require.Equal(t, []string{moderationCheckJoint, moderationCheckInstructions}, merged[0].Kinds())
 }

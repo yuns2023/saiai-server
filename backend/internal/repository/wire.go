@@ -68,6 +68,7 @@ var ProviderSet = wire.NewSet(
 	NewUserGroupRateRepository,
 	NewErrorPassthroughRepository,
 	NewInputModerationRepository,
+	NewInputModerationEvidenceRepository,
 	NewInputModerationStateCache,
 	NewInputModerationTaskQueue,
 	NewClaudeDeviceRepository,

@@ -56,7 +56,8 @@ func TestInsertInputModerationEventPersistsSourceAndTurn(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	createdAt := time.Unix(200, 0).UTC()
-	mock.ExpectExec("INSERT INTO input_moderation_events").
+	mock.ExpectBegin()
+	mock.ExpectQuery("INSERT INTO input_moderation_events").
 		WithArgs(
 			"00000000-0000-4000-8000-000000000001",
 			"req-1",
@@ -71,9 +72,11 @@ func TestInsertInputModerationEventPersistsSourceAndTurn(t *testing.T) {
 			"policy-v1",
 			service.InputModerationSourceOpenAIResponsesWS,
 			2,
-			createdAt, "null", 0, nil,
+			false,
+			createdAt, "null", 0, nil, "",
 		).
-		WillReturnResult(sqlmock.NewResult(0, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+	mock.ExpectCommit()
 
 	repo := NewInputModerationRepository(db)
 	err = repo.InsertInputModerationEvent(context.Background(), &service.InputModerationEvent{
@@ -128,13 +131,14 @@ func TestApplyInputModerationIncidentCooldownThenDisable(t *testing.T) {
 				WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(11))
 			mock.ExpectQuery("SELECT role, status, updated_at").
 				WithArgs(int64(1)).
-				WillReturnRows(sqlmock.NewRows([]string{"role", "status", "updated_at"}).AddRow(service.RoleUser, service.StatusActive, now.Add(-time.Minute)))
+				WillReturnRows(sqlmock.NewRows([]string{"role", "status", "updated_at", "deleted"}).AddRow(service.RoleUser, service.StatusActive, now.Add(-time.Minute), false))
 			mock.ExpectExec("INSERT INTO user_input_risk_states").
 				WithArgs(int64(1)).
 				WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectQuery("SELECT strike_count, strike_window_started_at, blocked_until, last_incident_at, reset_at").
 				WithArgs(int64(1)).
 				WillReturnRows(sqlmock.NewRows([]string{"strike_count", "strike_window_started_at", "blocked_until", "last_incident_at", "reset_at"}).AddRow(tt.priorStrikes, tt.windowStart, nil, nil, nil))
+			mock.ExpectQuery("SELECT clock_timestamp").WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(now))
 			mock.ExpectQuery("SELECT EXISTS").
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 			if tt.wantDisabled {
@@ -181,9 +185,10 @@ func TestApplyInputModerationIncidentDeduplicatesSameContent(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("INSERT INTO input_moderation_events").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(12))
-	mock.ExpectQuery("SELECT role, status, updated_at").WillReturnRows(sqlmock.NewRows([]string{"role", "status", "updated_at"}).AddRow(service.RoleUser, service.StatusActive, now.Add(-time.Minute)))
+	mock.ExpectQuery("SELECT role, status, updated_at").WillReturnRows(sqlmock.NewRows([]string{"role", "status", "updated_at", "deleted"}).AddRow(service.RoleUser, service.StatusActive, now.Add(-time.Minute), false))
 	mock.ExpectExec("INSERT INTO user_input_risk_states").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("SELECT strike_count, strike_window_started_at, blocked_until, last_incident_at, reset_at").WillReturnRows(sqlmock.NewRows([]string{"strike_count", "strike_window_started_at", "blocked_until", "last_incident_at", "reset_at"}).AddRow(1, now.Add(-time.Hour), now.Add(29*time.Minute), now.Add(-time.Minute), nil))
+	mock.ExpectQuery("SELECT clock_timestamp").WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(now))
 	mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectExec("UPDATE input_moderation_events SET action").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -237,7 +242,7 @@ func TestApplyInputModerationIncidentIgnoresJobQueuedBeforeManualReset(t *testin
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("INSERT INTO input_moderation_events").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(13))
-	mock.ExpectQuery("SELECT role, status, updated_at").WillReturnRows(sqlmock.NewRows([]string{"role", "status", "updated_at"}).AddRow(service.RoleUser, service.StatusActive, resetAt))
+	mock.ExpectQuery("SELECT role, status, updated_at").WillReturnRows(sqlmock.NewRows([]string{"role", "status", "updated_at", "deleted"}).AddRow(service.RoleUser, service.StatusActive, resetAt, false))
 	mock.ExpectExec("INSERT INTO user_input_risk_states").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("SELECT strike_count, strike_window_started_at, blocked_until, last_incident_at, reset_at").WillReturnRows(sqlmock.NewRows([]string{"strike_count", "strike_window_started_at", "blocked_until", "last_incident_at", "reset_at"}).AddRow(0, nil, nil, nil, resetAt))
 	mock.ExpectExec("UPDATE input_moderation_events SET action").WillReturnResult(sqlmock.NewResult(0, 1))

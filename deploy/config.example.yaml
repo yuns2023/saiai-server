@@ -169,6 +169,13 @@ gateway:
     request_timeout_seconds: 15
     max_input_chars: 32768
     max_job_age_hours: 24
+    # Encrypted evidence of flagged checks (needs an explicit totp.encryption_key).
+    # 0 disables capture; expired evidence is still cleaned up.
+    # 已标记检查的加密原文保留天数（需显式配置 totp.encryption_key），0 表示不采集。
+    evidence_retention_days: 90
+    # Former totp.encryption_key values, used only to decrypt older evidence.
+    # 轮换密钥后保留旧密钥，仅用于解密旧证据。
+    evidence_previous_keys: []
   # Timeout for waiting upstream response headers (seconds)
   # 等待上游响应头超时时间（秒）
   response_header_timeout: 600

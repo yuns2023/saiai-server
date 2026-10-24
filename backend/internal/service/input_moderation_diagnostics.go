@@ -31,10 +31,17 @@ type InputModerationDiagnostics struct {
 	DurationMS       int64  `json:"duration_ms"`
 	QueueWaitMS      int64  `json:"queue_wait_ms"`
 	Limit            string `json:"limit,omitempty"`
-	started          time.Time
-	processing       bool
-	status           string
-	reason           string
+	// Evidence capture outcome of a flagged result (see ModerationEvidence*).
+	// Truncated means categories or further crossing checks were not kept.
+	EvidenceStatus            string   `json:"evidence_status,omitempty"`
+	EvidenceCount             int      `json:"evidence_count,omitempty"`
+	EvidenceTruncated         bool     `json:"evidence_truncated,omitempty"`
+	EvidenceOmittedCategories []string `json:"evidence_omitted_categories,omitempty"`
+	EvidenceOmittedChecks     int      `json:"evidence_omitted_checks,omitempty"`
+	started                   time.Time
+	processing                bool
+	status                    string
+	reason                    string
 }
 
 type moderationDiagnosticsKey struct{}

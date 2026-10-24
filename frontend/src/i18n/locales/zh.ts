@@ -2149,7 +2149,37 @@ export default {
           input_chars: '新增用户文本字符数', instruction_chars: '项目及系统指令字符数', instruction_blocks: '指令块数', instruction_bundles: '指令合并检测包数', joint_skipped: '已跳过指令与文本联合检测',
           planned_checks: '计划检测项', completed_checks: '已完成检测项', cache_hits: '缓存命中项', detector_calls: '实际检测调用次数',
           chunk_size: '单块字符上限', max_input_chars: '总输入字符上限', max_detector_calls: '单任务调用上限',
-          max_planned_checks: '单任务检测项上限', duration_ms: '处理耗时（毫秒）', queue_wait_ms: '排队时长（毫秒）', limit: '触发的上限'
+          max_planned_checks: '单任务检测项上限', duration_ms: '处理耗时（毫秒）', queue_wait_ms: '排队时长（毫秒）', limit: '触发的上限',
+          evidence_status: '原文证据', evidence_count: '保留的检测项数', evidence_truncated: '证据已截断',
+          evidence_omitted_categories: '未保留证据的类别', evidence_omitted_checks: '未保留的其他超阈值检测项'
+        },
+        evidence: {
+          statuses: {
+            stored: '已加密保存', no_key: '未保存：未显式配置加密密钥', encrypt_failed: '未保存：加密失败',
+            unsupported: '未保存：检测器不提供逐项评分', selection_error: '未保存：没有检测项超过阈值',
+            disabled: '未保存：已关闭证据保留', user_deleted: '未保存：用户已删除', expired: '已过期删除'
+          },
+          view: '查看原文',
+          confirmTitle: '查看审核原文',
+          confirmBody: '查看会被记录（管理员账号与时间）。仅保留超过阈值的检测项。',
+          confirm: '确认查看并记录',
+          cancel: '取消',
+          loading: '正在加载原文…',
+          loadFailed: '原文加载失败',
+          kinds: { text: '用户正文', instructions: '指令包', joint: '联合检查（指令+正文）' },
+          jointHint: '联合检查同时覆盖指令和新文本，不表示是哪一部分触发。',
+          bundle: '指令包 #{n}',
+          range: '第 {start}–{end} 字符',
+          chars: '{n} 字符',
+          truncated: '证据已截断：未保留全部超阈值检测项。',
+          omitted: '未保留证据的类别',
+          expiresAt: '保留至',
+          holdUntil: '保全至',
+          holdDays: '保全天数（1–365）',
+          holdReason: '保全原因',
+          hold: '保全',
+          release: '解除保全',
+          holdFailed: '保全状态修改失败'
         },
         limits: { input_chars: '输入总量', detector_calls: '新增检测调用预算', planned_checks: '检测计划规模' },
         reasons: {

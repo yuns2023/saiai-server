@@ -45,7 +45,8 @@ func (r *usageLogRepository) ListInputRiskAlerts(ctx context.Context, userID int
 	rows, err := r.sql.QueryContext(ctx, `SELECT request_id,source,turn_number,user_id,api_key_id,group_id,status,reason,scores,min_confidence,model_version,updated_at,decision_snapshot,diagnostics,
  (SELECT COALESCE(jsonb_agg(jsonb_build_object('categories',e.categories,'scores',e.scores,
  'min_confidence',e.min_confidence,'action',e.action,'counted_as_strike',e.counted_as_strike,
- 'model_version',COALESCE(e.model_version,'')) ORDER BY e.id),'[]'::jsonb)
+ 'model_version',COALESCE(e.model_version,''),'event_id',e.id,
+ 'evidence_count',(SELECT COUNT(*) FROM input_moderation_evidence v WHERE v.event_id=e.id AND (v.expires_at > NOW() OR v.hold_until > NOW()))) ORDER BY e.id),'[]'::jsonb)
  FROM input_moderation_events e WHERE e.request_id=r.request_id AND e.source=r.source
  AND COALESCE(e.turn_number,0)=r.turn_number AND e.user_id=r.user_id AND e.api_key_id=r.api_key_id AND e.group_id=r.group_id)`+where+` ORDER BY updated_at DESC,request_id,source,turn_number,user_id,api_key_id,group_id LIMIT $4 OFFSET $5`, userID, start, end, size, (page-1)*size)
 	if err != nil {
@@ -77,6 +78,9 @@ func (r *usageLogRepository) ListInputRiskAlerts(ctx context.Context, userID int
 		}
 		if err := json.Unmarshal(events, &a.Events); err != nil {
 			return nil, 0, err
+		}
+		for i := range a.Events {
+			a.Events[i].EvidenceStatus = service.ModerationEventEvidenceStatus(v.Diagnostics, a.Events[i].EvidenceCount)
 		}
 		a.Result = v
 		out = append(out, a)

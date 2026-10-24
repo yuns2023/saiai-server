@@ -176,13 +176,35 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 	return nil
 }
 
+// Delete soft-deletes the user and, in the same transaction, removes their
+// moderation evidence that is not under an active hold. Evidence writers lock
+// the user row, so they either finish first or see the deletion.
 func (r *userRepository) Delete(ctx context.Context, id int64) error {
-	affected, err := r.client.User.Delete().Where(dbuser.IDEQ(id)).Exec(ctx)
+	txClient := clientFromContext(ctx, r.client)
+	var tx *dbent.Tx
+	if dbent.TxFromContext(ctx) == nil {
+		var err error
+		tx, err = txClient.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
+		}
+		if err == nil {
+			defer func() { _ = tx.Rollback() }()
+			txClient = tx.Client()
+		}
+	}
+	affected, err := txClient.User.Delete().Where(dbuser.IDEQ(id)).Exec(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
 	if affected == 0 {
 		return service.ErrUserNotFound
+	}
+	if err := deleteUserModerationEvidence(ctx, txClient, id); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
 	}
 	return nil
 }

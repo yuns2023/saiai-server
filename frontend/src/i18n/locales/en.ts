@@ -2064,7 +2064,37 @@ export default {
           input_chars: 'New user text characters', instruction_chars: 'Project and system instruction characters', instruction_blocks: 'Instruction blocks', instruction_bundles: 'Instruction check bundles', joint_skipped: 'Joint instruction and text check skipped',
           planned_checks: 'Planned checks', completed_checks: 'Completed checks', cache_hits: 'Cached checks', detector_calls: 'Detector calls',
           chunk_size: 'Characters per chunk', max_input_chars: 'Input character limit', max_detector_calls: 'Calls allowed per job',
-          max_planned_checks: 'Checks allowed per job', duration_ms: 'Processing time (ms)', queue_wait_ms: 'Queue wait (ms)', limit: 'Exceeded limit'
+          max_planned_checks: 'Checks allowed per job', duration_ms: 'Processing time (ms)', queue_wait_ms: 'Queue wait (ms)', limit: 'Exceeded limit',
+          evidence_status: 'Evidence', evidence_count: 'Evidence checks kept', evidence_truncated: 'Evidence truncated',
+          evidence_omitted_categories: 'Categories without kept evidence', evidence_omitted_checks: 'Other crossing checks not kept'
+        },
+        evidence: {
+          statuses: {
+            stored: 'Stored (encrypted)', no_key: 'Not captured: no explicit encryption key', encrypt_failed: 'Not captured: encryption failed',
+            unsupported: 'Not captured: detector has no per-check scores', selection_error: 'Not captured: no check crossed the threshold',
+            disabled: 'Not captured: retention disabled', user_deleted: 'Not captured: user deleted', expired: 'Expired and deleted'
+          },
+          view: 'View original text',
+          confirmTitle: 'View moderated text',
+          confirmBody: 'Viewing is recorded with your administrator account and time. Only the checks that crossed the threshold were kept.',
+          confirm: 'View and record',
+          cancel: 'Cancel',
+          loading: 'Loading evidence…',
+          loadFailed: 'Evidence could not be loaded',
+          kinds: { text: 'User text', instructions: 'Instruction bundle', joint: 'Joint check (instructions + text)' },
+          jointHint: 'A joint check covers instructions and new text together; it does not say which part triggered.',
+          bundle: 'Bundle #{n}',
+          range: 'Characters {start}–{end}',
+          chars: '{n} characters',
+          truncated: 'Evidence was truncated: not every crossing check was kept.',
+          omitted: 'Categories without kept evidence',
+          expiresAt: 'Kept until',
+          holdUntil: 'Held until',
+          holdDays: 'Hold days (1–365)',
+          holdReason: 'Hold reason',
+          hold: 'Hold',
+          release: 'Release hold',
+          holdFailed: 'Hold could not be changed'
         },
         limits: { input_chars: 'Total input size', detector_calls: 'New detector call budget', planned_checks: 'Check plan size' },
         reasons: {

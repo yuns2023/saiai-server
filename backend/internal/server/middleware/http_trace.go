@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httptrace"
@@ -49,6 +50,7 @@ func HTTPTrace() gin.HandlerFunc {
 			tracer:         tracer,
 			traceID:        traceID,
 			start:          start,
+			omitBody:       traceOmitsResponseBody(c.Request.URL.Path),
 		}
 		c.Writer = tw
 		c.Next()
@@ -65,6 +67,13 @@ type traceResponseWriter struct {
 	finished     bool
 	totalBytes   int64
 	chunks       int
+	omitBody     bool
+}
+
+// Decrypted moderation evidence must stay out of trace files, which are not
+// covered by evidence retention, holds or user deletion.
+func traceOmitsResponseBody(path string) bool {
+	return strings.Contains(path, "/input-moderation-events/")
 }
 
 func (w *traceResponseWriter) WriteHeader(code int) {
@@ -94,10 +103,11 @@ func (w *traceResponseWriter) Write(data []byte) (int, error) {
 		index := w.chunks
 		w.chunks++
 		w.totalBytes += int64(n)
-		w.tracer.WritePhase(w.traceID, "inbound_response_chunk", map[string]any{
-			"index":    index,
-			"body_b64": base64.StdEncoding.EncodeToString(data[:n]),
-		})
+		fields := map[string]any{"index": index, "body_b64": base64.StdEncoding.EncodeToString(data[:n])}
+		if w.omitBody {
+			fields = map[string]any{"index": index, "body_omitted": n}
+		}
+		w.tracer.WritePhase(w.traceID, "inbound_response_chunk", fields)
 	}
 	return n, err
 }
