@@ -222,7 +222,12 @@ func (e *OpenAIWSClientCloseError) Reason() string {
 
 // OpenAIWSIngressHooks 定义入站 WS 每个 turn 的生命周期回调。
 type OpenAIWSIngressHooks struct {
-	OnClientTurn       func(turn int, rawPayload []byte) error
+	OnClientTurn func(turn int, rawPayload []byte) error
+	// BeforeUpstreamSend sees the exact payload of each turn right before the
+	// shared-pool ingress path writes it upstream (that path may rebuild a
+	// turn with replayed history). Native passthrough relays client frames
+	// unchanged and does not call it. An error ends the session.
+	BeforeUpstreamSend func(turn int, payload []byte) error
 	BeforeTurn         func(turn int) error
 	AfterTurn          func(turn int, result *OpenAIForwardResult, turnErr error)
 	OnUpstreamError    func(failure *OpenAIWSUpstreamFailure)
@@ -2543,6 +2548,12 @@ func remapOpenAIWSIngressHooksForFailover(hooks *OpenAIWSIngressHooks, turnOffse
 			}
 			return hooks.BeforeTurn(logicalTurn(turn))
 		},
+		BeforeUpstreamSend: func(turn int, payload []byte) error {
+			if hooks.BeforeUpstreamSend == nil {
+				return nil
+			}
+			return hooks.BeforeUpstreamSend(logicalTurn(turn), payload)
+		},
 		OnClientTurn: func(turn int, rawPayload []byte) error {
 			if turn == 1 || hooks.OnClientTurn == nil {
 				// The failed turn was already validated and moderated before its
@@ -3721,6 +3732,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 			)
 		}
 
+		if hooks != nil && hooks.BeforeUpstreamSend != nil {
+			if err := hooks.BeforeUpstreamSend(turn, currentPayload); err != nil {
+				if hooks.AfterTurn != nil {
+					hooks.AfterTurn(turn, nil, err)
+				}
+				return err
+			}
+		}
 		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel)
 		if relayErr != nil {
 			lastTurnClean = false

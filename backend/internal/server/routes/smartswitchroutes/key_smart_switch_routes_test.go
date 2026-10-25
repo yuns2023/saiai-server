@@ -302,9 +302,12 @@ func (smartRoutesConcurrency) GetAccountsLoadBatch(_ context.Context, accounts [
 	return result, nil
 }
 
-func newSmartRoutesGateway(t *testing.T, lab *smartRoutesLab) *httptest.Server {
+func newSmartRoutesGateway(t *testing.T, lab *smartRoutesLab, configure ...func(*config.Config)) *httptest.Server {
 	t.Helper()
 	cfg := &config.Config{RunMode: config.RunModeStandard}
+	for _, apply := range configure {
+		apply(cfg)
+	}
 	cfg.Default.RateMultiplier = 1
 	cfg.Gateway.MaxBodySize = 1 << 20
 	cfg.Security.URLAllowlist.AllowPrivateHosts = true

@@ -165,7 +165,7 @@ func TestCodexTimezoneGuardWSSwitchOffIsUnchanged(t *testing.T) {
 
 // Later turns, rebuilt continuation payloads and failover replays all go
 // through checkCodexTimezoneGuardWS while the relay owns the connection; the
-// session then ends through closeCodexTimezoneGuardWSFromError.
+// session then ends through closeOpenAIWSRejectedSession.
 func TestCodexTimezoneGuardWSLaterTurnFrameAndClose(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 7, CodexCNTimezoneGuard: true}
@@ -192,7 +192,7 @@ func TestCodexTimezoneGuardWSLaterTurnFrameAndClose(t *testing.T) {
 		checkErr := checkCodexTimezoneGuardWS(ctx, c, conn, group, 1, 3, []byte(tzGuardTaggedFrame))
 		// The relay wraps hook errors; the marker must survive wrapping.
 		wrapped := fmt.Errorf("relay: %w", checkErr)
-		closed := closeCodexTimezoneGuardWSFromError(c, conn, wrapped)
+		closed := closeOpenAIWSRejectedSession(c, conn, wrapped)
 		raw, _ := c.Get(opsLocalFailureKey)
 		failure, _ := raw.(opsLocalFailure)
 		results <- result{checkErr: checkErr, closed: closed, opsFailure: failure}
@@ -215,7 +215,7 @@ func TestCodexTimezoneGuardWSLaterTurnFrameAndClose(t *testing.T) {
 	require.Equal(t, int(coderws.StatusPolicyViolation), got.opsFailure.wsCloseCode)
 
 	// Ordinary errors are not treated as guard rejections.
-	require.False(t, closeCodexTimezoneGuardWSFromError(nil, nil, errors.New("other")))
+	require.False(t, closeOpenAIWSRejectedSession(nil, nil, errors.New("other")))
 }
 
 func TestCodexTimezoneGuardWSRebuiltPayloadIsScanned(t *testing.T) {
@@ -236,15 +236,15 @@ func TestCodexTimezoneGuardWSRebuiltPayloadIsScanned(t *testing.T) {
 }
 
 func TestRevalidateOpenAIWSTurnKeyReadsCurrentGroupSwitch(t *testing.T) {
+	groupID := int64(9)
 	repo := &openAIWSRevalidationAPIKeyRepoStub{apiKey: &service.APIKey{
-		ID: 3, Key: "sk-test", Status: service.StatusAPIKeyActive,
+		ID: 3, Key: "sk-test", Status: service.StatusAPIKeyActive, GroupID: &groupID,
 		User:  &service.User{ID: 2, Status: service.StatusActive},
 		Group: &service.Group{ID: 9, CodexCNTimezoneGuard: false},
 	}}
 	h := &OpenAIGatewayHandler{
 		apiKeyService: service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, &config.Config{}),
 	}
-	groupID := int64(9)
 	connectTime := &service.APIKey{Key: "sk-test", GroupID: &groupID, Group: &service.Group{ID: 9}}
 
 	key, err := h.revalidateOpenAIWSTurnKey(context.Background(), connectTime, 1)
@@ -255,13 +255,14 @@ func TestRevalidateOpenAIWSTurnKeyReadsCurrentGroupSwitch(t *testing.T) {
 	key, err = h.revalidateOpenAIWSTurnKey(context.Background(), connectTime, 2)
 	require.NoError(t, err)
 	require.True(t, key.Group.CodexCNTimezoneGuard, "later turns read the group's current switch")
-	require.True(t, h.openAIWSCurrentGroup(context.Background(), connectTime).CodexCNTimezoneGuard)
-	require.True(t, openAIWSSessionGroup(connectTime, key).CodexCNTimezoneGuard)
+	require.True(t, sameOpenAIWSGroup(connectTime, key))
 
-	// A key rebound to another group mid-session keeps being checked against
-	// the group whose accounts still serve the connection.
-	connectTime.Group = &service.Group{ID: 9, CodexCNTimezoneGuard: true}
-	repo.apiKey.Group = &service.Group{ID: 10, CodexCNTimezoneGuard: false}
-	require.True(t, h.openAIWSCurrentGroup(context.Background(), connectTime).CodexCNTimezoneGuard)
-	require.Nil(t, openAIWSSessionGroup(nil, key))
+	// A key rebound to another group is detected (the session must reconnect).
+	other := int64(10)
+	repo.apiKey.GroupID = &other
+	key, err = h.revalidateOpenAIWSTurnKey(context.Background(), connectTime, 3)
+	require.NoError(t, err)
+	require.False(t, sameOpenAIWSGroup(connectTime, key))
+	require.False(t, sameOpenAIWSGroup(nil, key))
+	require.True(t, sameOpenAIWSGroup(&service.APIKey{}, &service.APIKey{}))
 }

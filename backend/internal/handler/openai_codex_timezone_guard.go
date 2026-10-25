@@ -126,70 +126,104 @@ func (h *OpenAIGatewayHandler) validateCodexTimezoneGuardHTTP(c *gin.Context, gr
 	return false
 }
 
-// codexTimezoneGuardWSError marks a WebSocket session ended by the guard. The
-// error frame has already been sent; the handler only closes with 1008.
-type codexTimezoneGuardWSError struct {
+// openAIWSSessionRejection marks a WebSocket session ended by a gateway
+// content/identity check (not an account failure). The Codex-visible error
+// frame has already been attempted; the handler records ops and closes 1008.
+type openAIWSSessionRejection struct {
+	status  int
+	errType string
+	code    string
 	message string
+	reason  string
 }
 
-func (e *codexTimezoneGuardWSError) Error() string {
-	return "codex timezone guard rejected the turn"
+func (e *openAIWSSessionRejection) Error() string {
+	return "openai websocket session rejected: " + e.code
 }
 
-func codexTimezoneGuardWSErrorFrame(message string) []byte {
+func (e *openAIWSSessionRejection) frame() []byte {
 	frame, _ := json.Marshal(map[string]any{
 		"type":   "error",
-		"status": http.StatusForbidden,
+		"status": e.status,
 		"error": map[string]any{
-			"type":    codexTimezoneGuardErrType,
-			"code":    codexTimezoneGuardCode,
-			"message": message,
+			"type":    e.errType,
+			"code":    e.code,
+			"message": e.message,
 		},
 	})
 	return frame
 }
 
-// checkCodexTimezoneGuardWS scans one WebSocket payload. On rejection it
-// writes the Codex-visible error frame immediately (coder/websocket
+// rejectOpenAIWSSession writes the error frame immediately (coder/websocket
 // serializes whole-message writes, so it cannot interleave with a relayed
 // frame) and returns an error that ends the session with close code 1008.
+// Delivery is best effort; a failed write is logged without the payload.
 // The relay keeps draining usage of turns that were already forwarded.
+func rejectOpenAIWSSession(ctx context.Context, c *gin.Context, conn *coderws.Conn, rejection *openAIWSSessionRejection) error {
+	if conn != nil {
+		writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := conn.Write(writeCtx, coderws.MessageText, rejection.frame())
+		cancel()
+		if err != nil {
+			requestLogger(c, "handler.openai_gateway.ws_session_rejection",
+				zap.String("code", rejection.code),
+				zap.Error(err),
+			).Warn("openai.websocket_rejection_frame_write_failed")
+		}
+	}
+	return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, rejection.reason, rejection)
+}
+
+func codexTimezoneGuardRejection(message string) *openAIWSSessionRejection {
+	return &openAIWSSessionRejection{
+		status:  http.StatusForbidden,
+		errType: codexTimezoneGuardErrType,
+		code:    codexTimezoneGuardCode,
+		message: message,
+		reason:  codexTimezoneGuardWSReason,
+	}
+}
+
+// openAIWSGroupChangedRejection ends a session whose key was rebound to
+// another group after the connection opened: the session's accounts and
+// settings belong to the old group, so the client must reconnect.
+func openAIWSGroupChangedRejection() *openAIWSSessionRejection {
+	return &openAIWSSessionRejection{
+		status:  http.StatusConflict,
+		errType: "invalid_request_error",
+		code:    "api_key_group_changed",
+		message: "API Key 分组已变更，请重新连接。",
+		reason:  "api key group changed",
+	}
+}
+
+// checkCodexTimezoneGuardWS scans one WebSocket payload and rejects the
+// session when the guard matches.
 func checkCodexTimezoneGuardWS(ctx context.Context, c *gin.Context, conn *coderws.Conn, group *service.Group, userID int64, turn int, payload []byte) error {
 	zone, found := codexTimezoneGuardZone(group, payload)
 	if !found {
 		return nil
 	}
 	logCodexTimezoneGuardRejection(c, group, userID, zone, "ws", turn)
-	message := codexTimezoneGuardMessage(c.GetHeader("User-Agent"))
-	if conn != nil {
-		writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		_ = conn.Write(writeCtx, coderws.MessageText, codexTimezoneGuardWSErrorFrame(message))
-		cancel()
-	}
-	return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, codexTimezoneGuardWSReason, &codexTimezoneGuardWSError{message: message})
+	return rejectOpenAIWSSession(ctx, c, conn, codexTimezoneGuardRejection(codexTimezoneGuardMessage(c.GetHeader("User-Agent"))))
 }
 
-// closeCodexTimezoneGuardWS records the 403 + code for ops and closes 1008.
-func closeCodexTimezoneGuardWS(c *gin.Context, conn *coderws.Conn, guardErr *codexTimezoneGuardWSError) {
-	if !opsWSHasCurrentUpstreamFailure(c) {
+// closeOpenAIWSRejectedSession records the status + code for ops and closes
+// 1008 when err carries a session rejection; it reports whether it did.
+func closeOpenAIWSRejectedSession(c *gin.Context, conn *coderws.Conn, err error) bool {
+	var rejection *openAIWSSessionRejection
+	if !errors.As(err, &rejection) {
+		return false
+	}
+	if c != nil && !opsWSHasCurrentUpstreamFailure(c) {
 		setOpsLocalFailure(c, opsLocalFailure{
-			status:      http.StatusForbidden,
-			errType:     codexTimezoneGuardErrType,
-			code:        codexTimezoneGuardCode,
-			message:     guardErr.message,
+			status:      rejection.status,
+			errType:     rejection.errType,
+			code:        rejection.code,
+			message:     rejection.message,
 			wsCloseCode: int(coderws.StatusPolicyViolation),
 		})
 	}
-	closeOpenAIClientWS(conn, coderws.StatusPolicyViolation, codexTimezoneGuardWSReason)
-}
-
-// closeCodexTimezoneGuardWSFromError closes the session when err carries a
-// guard rejection and reports whether it did.
-func closeCodexTimezoneGuardWSFromError(c *gin.Context, conn *coderws.Conn, err error) bool {
-	var guardErr *codexTimezoneGuardWSError
-	if !errors.As(err, &guardErr) {
-		return false
-	}
-	closeCodexTimezoneGuardWS(c, conn, guardErr)
+	closeOpenAIClientWS(conn, coderws.StatusPolicyViolation, rejection.reason)
 	return true
 }

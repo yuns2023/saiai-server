@@ -78,10 +78,18 @@ The scan is read-only; forwarded bytes are unchanged.
 - WebSocket: the first frame (and a continuation payload rebuilt with replayed
   history) is checked before account selection; each later `response.create`
   is checked against the group's current setting, read through the auth cache;
-  an in-connection failover replay is checked again before it is resent. A
-  rejection sends `{"type":"error","status":403,"error":{"type":"permission_error","code":"codex_timezone_reinit_required","message":"..."}}`
-  and then closes with 1008 `codex timezone reinit required`. Turns already
+  an in-connection failover replay is checked again before it is resent; on
+  the API-key account pool path, the exact payload of every turn (which may be
+  rebuilt with replayed history) is checked right before it is written
+  upstream. A rejection sends `{"type":"error","status":403,"error":{"type":"permission_error","code":"codex_timezone_reinit_required","message":"..."}}`
+  and then closes with 1008 `codex timezone reinit required`. Both are best
+  effort: a failed frame write is logged (WARN, no payload). Turns already
   forwarded keep draining for usage.
+- If the Key is rebound to another group while a WebSocket session is open,
+  the next turn ends the session with the same frame/close mechanism
+  (`status` 409, `error.code` `api_key_group_changed`, message
+  `API Key 分组已变更，请重新连接。`, close reason `api key group changed`);
+  the client reconnects under the new group.
 - The message tells users on a recognised Codex backend older than 0.163
   (`codex-tui`, `codex_exec`, `codex_vscode`, `codex_cli_rs`, `Codex Desktop`
   User-Agent) to upgrade; every other client gets the generic text asking for
@@ -94,16 +102,13 @@ Limitations:
 - Native `/codex/images` and ChatGPT conversation routes are not covered. A
   user message that literally contains such a tag is also rejected (accepted
   false positive).
-- The API-key account WebSocket pool path can re-send earlier turns of the same
-  connection when it rebuilds a full request; only frames received from the
-  client are scanned, so a turn forwarded while the switch was still off can be
-  replayed on that connection. OAuth accounts use byte-identical passthrough
-  and never rebuild history.
-- If a Key is rebound to another group mid-connection, the session keeps
-  using the connect-time group's setting (its accounts still serve it).
-- On the official-Codex OAuth relay the error frame is always delivered; the
-  following 1008 close is best effort because stopping the relay's client
-  reader may close the socket first.
+- JSON object keys are scanned as well as values.
+- A large JSON string that contains an escape and the word `timezone` is
+  decoded into a transient buffer up to its own size (strings without escapes
+  are searched in place).
+- On the official-Codex OAuth relay both the error frame and the following
+  1008 close are best effort; stopping the relay's client reader may close the
+  socket before the close frame is sent.
 
 ## Regression evidence
 

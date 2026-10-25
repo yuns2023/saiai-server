@@ -125,3 +125,130 @@ func TestOpenAIWSNativeRelayLaterClientTurnRejection(t *testing.T) {
 	upstream.mu.Unlock()
 	require.Equal(t, 1, writes, "the rejected frame is never forwarded upstream")
 }
+
+func TestOpenAIWSPoolRebuiltPayloadGoesThroughBeforeUpstreamSend(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	captureConn := &openAIWSCaptureConn{
+		events: [][]byte{
+			[]byte(`{"type":"response.completed","response":{"id":"resp_preflight_rewrite_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_preflight_rewrite_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+		},
+	}
+	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(captureDialer)
+
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
+	}
+
+	account := &Account{
+		ID:          140,
+		Name:        "openai-ingress-prev-preflight-rewrite",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "sk-test",
+		},
+		Extra: map[string]any{
+			"responses_websockets_v2_enabled": true,
+		},
+	}
+
+	type sent struct {
+		turn    int
+		payload string
+	}
+	sentCh := make(chan sent, 4)
+	hooks := &OpenAIWSIngressHooks{
+		OnClientTurn: func(turn int, payload []byte) error {
+			if strings.Contains(string(payload), "TEST_ONLY_TAG") && turn > 1 {
+				return errors.New("client frame check should not see the replayed tag")
+			}
+			return nil
+		},
+		// Simulates a switch turned on after turn 1 was forwarded.
+		BeforeUpstreamSend: func(turn int, payload []byte) error {
+			sentCh <- sent{turn: turn, payload: string(payload)}
+			if turn > 1 && strings.Contains(string(payload), "TEST_ONLY_TAG") {
+				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "TEST_ONLY_REASON", clientTurnRejectionMarker{})
+			}
+			return nil
+		},
+	}
+	serverErrCh := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		ginCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ginCtx.Request = r.Clone(r.Context())
+		ginCtx.Request.Header.Set("User-Agent", "unit-test-agent/1.0")
+		msgType, firstMessage, readErr := conn.Read(r.Context())
+		if readErr != nil {
+			serverErrCh <- readErr
+			return
+		}
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", msgType, firstMessage, hooks)
+	}))
+	defer wsServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	clientConn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	require.NoError(t, clientConn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"store":false,"input":[{"type":"input_text","text":"TEST_ONLY_TAG hello"}]}`)))
+	_, firstTurn, err := clientConn.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "resp_preflight_rewrite_1", gjson.GetBytes(firstTurn, "response.id").String())
+
+	// A clean incremental frame that the pool path rebuilds into a full
+	// create replaying turn 1's input.
+	require.NoError(t, clientConn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"store":false,"previous_response_id":"resp_stale_external","input":[{"type":"input_text","text":"world"}]}`)))
+
+	select {
+	case serverErr := <-serverErrCh:
+		var marker clientTurnRejectionMarker
+		require.ErrorAs(t, serverErr, &marker)
+	case <-ctx.Done():
+		t.Fatal("session did not end after the rebuilt payload was rejected")
+	}
+	first, second := <-sentCh, <-sentCh
+	require.Equal(t, 1, first.turn)
+	require.Equal(t, 2, second.turn)
+	require.Equal(t, 2, len(gjson.Get(second.payload, "input").Array()), "the hook sees the rebuilt full input")
+	require.Contains(t, second.payload, "TEST_ONLY_TAG")
+	captureConn.mu.Lock()
+	writes := len(captureConn.writes)
+	captureConn.mu.Unlock()
+	require.Equal(t, 1, writes, "the rejected rebuilt payload is never written upstream")
+}

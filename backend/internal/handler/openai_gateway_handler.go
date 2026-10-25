@@ -1780,7 +1780,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	if err := checkCodexTimezoneGuardWS(ctx, c, wsConn, apiKey.Group, subject.UserID, 1, firstMessage); err != nil {
-		closeCodexTimezoneGuardWSFromError(c, wsConn, err)
+		closeOpenAIWSRejectedSession(c, wsConn, err)
 		return
 	}
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(firstMessage, "previous_response_id").String())
@@ -1893,7 +1893,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if selection.ReleaseFunc != nil {
 					selection.ReleaseFunc()
 				}
-				closeCodexTimezoneGuardWSFromError(c, wsConn, err)
+				closeOpenAIWSRejectedSession(c, wsConn, err)
 				return
 			}
 			firstMessage = migratedPayload
@@ -1950,7 +1950,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		zap.Int("candidate_count", scheduleDecision.CandidateCount),
 	)
 
+	// The session group's latest settings, refreshed by each later turn.
+	var sessionGroup atomic.Pointer[service.Group]
+	sessionGroup.Store(apiKey.Group)
 	hooks := &service.OpenAIWSIngressHooks{
+		// The API-key pool path may rebuild a turn with replayed history; scan
+		// the payload it actually sends. Native passthrough never calls this.
+		BeforeUpstreamSend: func(turn int, payload []byte) error {
+			return checkCodexTimezoneGuardWS(ctx, c, wsConn, sessionGroup.Load(), subject.UserID, turn, payload)
+		},
 		OnClientTurn: func(turn int, rawPayload []byte) error {
 			opsWSStartTurn(c, turn)
 			policyPayload := rawPayload
@@ -1967,9 +1975,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return err
 			}
 			// Turn 1 (the possibly rebuilt first frame) was scanned before
-			// account selection. Later turns read the group's current switch.
+			// account selection. Later turns read the group's current switch;
+			// a key rebound to another group must reconnect.
 			if turn > 1 {
-				if err := checkCodexTimezoneGuardWS(ctx, c, wsConn, openAIWSSessionGroup(apiKey, currentKey), subject.UserID, turn, rawPayload); err != nil {
+				if !sameOpenAIWSGroup(apiKey, currentKey) {
+					reqLog.Info("openai.websocket_api_key_group_changed", zap.Int("turn", turn))
+					return rejectOpenAIWSSession(ctx, c, wsConn, openAIWSGroupChangedRejection())
+				}
+				sessionGroup.Store(currentKey.Group)
+				if err := checkCodexTimezoneGuardWS(ctx, c, wsConn, currentKey.Group, subject.UserID, turn, rawPayload); err != nil {
 					return err
 				}
 			}
@@ -2067,7 +2081,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			failoverPayload := failure.ReplayPayload()
 			// Replays are byte-identical to an already scanned client frame;
 			// re-check against the current switch before resending.
-			if err := checkCodexTimezoneGuardWS(ctx, c, wsConn, h.openAIWSCurrentGroup(ctx, apiKey), subject.UserID, failure.Turn(), failoverPayload); err != nil {
+			if err := checkCodexTimezoneGuardWS(ctx, c, wsConn, sessionGroup.Load(), subject.UserID, failure.Turn(), failoverPayload); err != nil {
 				releaseTurnSlots()
 				return nil, err
 			}
@@ -2138,7 +2152,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 
 	if err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, msgType, firstMessage, hooks); err != nil {
-		if closeCodexTimezoneGuardWSFromError(c, wsConn, err) {
+		if closeOpenAIWSRejectedSession(c, wsConn, err) {
 			// A client-content rejection is not an account failure.
 			reqLog.Info("openai.websocket_codex_timezone_guard_closed", zap.Int64("account_id", account.ID))
 			return
@@ -2208,32 +2222,16 @@ func (h *OpenAIGatewayHandler) revalidateOpenAIWSTurnKey(ctx context.Context, ap
 	return freshAPIKey, nil
 }
 
-// openAIWSCurrentGroup reads the session group's current settings through the
-// auth cache, falling back to the connect-time group if the lookup fails.
-func (h *OpenAIGatewayHandler) openAIWSCurrentGroup(ctx context.Context, apiKey *service.APIKey) *service.Group {
-	if apiKey == nil {
-		return nil
+// sameOpenAIWSGroup reports whether the freshly loaded key is still bound to
+// the group the session was opened with.
+func sameOpenAIWSGroup(connectTime, fresh *service.APIKey) bool {
+	if connectTime == nil || fresh == nil {
+		return false
 	}
-	if h != nil && h.apiKeyService != nil && strings.TrimSpace(apiKey.Key) != "" {
-		if fresh, err := h.apiKeyService.GetByKey(ctx, apiKey.Key); err == nil {
-			return openAIWSSessionGroup(apiKey, fresh)
-		}
+	if connectTime.GroupID == nil || fresh.GroupID == nil {
+		return connectTime.GroupID == nil && fresh.GroupID == nil
 	}
-	return apiKey.Group
-}
-
-// openAIWSSessionGroup returns the current settings of the group the session
-// is actually served by. If the key was rebound to another group after the
-// connection opened, the session still runs on the original group's accounts,
-// so the connect-time group is used instead of the new binding.
-func openAIWSSessionGroup(connectTime, fresh *service.APIKey) *service.Group {
-	if connectTime == nil {
-		return nil
-	}
-	if fresh != nil && fresh.Group != nil && connectTime.GroupID != nil && fresh.Group.ID == *connectTime.GroupID {
-		return fresh.Group
-	}
-	return connectTime.Group
+	return *connectTime.GroupID == *fresh.GroupID
 }
 
 func (h *OpenAIGatewayHandler) recoverResponsesPanic(c *gin.Context, streamStarted *bool) {
