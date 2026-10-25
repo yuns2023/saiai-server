@@ -281,7 +281,7 @@ func (s *APIKeyService) applyAuthCacheEntry(key string, entry *APIKeyAuthCacheEn
 	if entry.NotFound {
 		return nil, true, ErrAPIKeyNotFound
 	}
-	if entry.Snapshot == nil || entry.Snapshot.SchemaVersion != 1 {
+	if entry.Snapshot == nil || entry.Snapshot.SchemaVersion != apiKeyAuthSnapshotSchemaVersion {
 		return nil, false, nil
 	}
 	return s.snapshotToAPIKey(key, entry.Snapshot), true, nil
@@ -292,7 +292,7 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 		return nil
 	}
 	snapshot := &APIKeyAuthSnapshot{
-		SchemaVersion:      1,
+		SchemaVersion:      apiKeyAuthSnapshotSchemaVersion,
 		APIKeyID:           apiKey.ID,
 		Name:               apiKey.Name,
 		UserID:             apiKey.UserID,
@@ -369,6 +369,7 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 			InputModerationPolicy:            apiKey.Group.InputModerationPolicy,
 			InputModerationMinConfidence:     apiKey.Group.InputModerationMinConfidence,
 			CodexClientPolicy:                apiKey.Group.CodexClientPolicy,
+			CodexCNTimezoneGuard:             apiKey.Group.CodexCNTimezoneGuard,
 			ClaudeDeviceLimitMode:            apiKey.Group.ClaudeDeviceLimitMode,
 			ClaudeDeviceBaseLimit:            apiKey.Group.ClaudeDeviceBaseLimit,
 		}
@@ -459,6 +460,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			InputModerationPolicy:            snapshot.Group.InputModerationPolicy,
 			InputModerationMinConfidence:     snapshot.Group.InputModerationMinConfidence,
 			CodexClientPolicy:                snapshot.Group.CodexClientPolicy,
+			CodexCNTimezoneGuard:             snapshot.Group.CodexCNTimezoneGuard,
 			ClaudeDeviceLimitMode:            snapshot.Group.ClaudeDeviceLimitMode,
 			ClaudeDeviceBaseLimit:            snapshot.Group.ClaudeDeviceBaseLimit,
 		}

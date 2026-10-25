@@ -114,6 +114,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetInputModerationMinConfidence(groupIn.InputModerationMinConfidence).
 		SetInputModerationPolicy(groupIn.InputModerationPolicy).
 		SetCodexClientPolicy(groupIn.CodexClientPolicy).
+		SetCodexCnTimezoneGuard(groupIn.CodexCNTimezoneGuard).
 		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
 		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)
 
@@ -210,6 +211,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetInputModerationMinConfidence(groupIn.InputModerationMinConfidence).
 		SetInputModerationPolicy(groupIn.InputModerationPolicy).
 		SetCodexClientPolicy(groupIn.CodexClientPolicy).
+		SetCodexCnTimezoneGuard(groupIn.CodexCNTimezoneGuard).
 		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
 		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)
 	if groupIn.RequiredLevelID != nil {

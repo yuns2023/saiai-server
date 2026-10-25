@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -189,7 +190,7 @@ func TestAPIKeyService_GetByKey_UsesL2Cache(t *testing.T) {
 	discount := 0.8
 	cacheEntry := &APIKeyAuthCacheEntry{
 		Snapshot: &APIKeyAuthSnapshot{
-			SchemaVersion: 1,
+			SchemaVersion: apiKeyAuthSnapshotSchemaVersion,
 			APIKeyID:      1,
 			UserID:        2,
 			GroupID:       &groupID,
@@ -263,6 +264,34 @@ func TestAPIKeyService_SnapshotFromAPIKeyPreservesModelRates(t *testing.T) {
 	snapshot := svc.snapshotFromAPIKey(key)
 	require.NotNil(t, snapshot.Group)
 	require.Equal(t, 0.8, snapshot.Group.ModelRateMultipliers["claude-fable-5-1"])
+}
+
+func TestAPIKeyService_SnapshotRoundTripsCodexTimezoneGuard(t *testing.T) {
+	svc := &APIKeyService{}
+	groupID := int64(13)
+	key := &APIKey{
+		ID: 1, UserID: 2, User: &User{ID: 2}, GroupID: &groupID,
+		Group: &Group{ID: groupID, Status: StatusActive, Platform: PlatformOpenAI, CodexCNTimezoneGuard: true},
+	}
+	snapshot := svc.snapshotFromAPIKey(key)
+	require.Equal(t, apiKeyAuthSnapshotSchemaVersion, snapshot.SchemaVersion)
+	encoded, err := json.Marshal(&APIKeyAuthCacheEntry{Snapshot: snapshot})
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"codex_cn_timezone_guard":true`)
+	var decoded APIKeyAuthCacheEntry
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	restored, ok, err := svc.applyAuthCacheEntry("k", &decoded)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.True(t, restored.Group.CodexCNTimezoneGuard)
+
+	// Snapshots from binaries that predate the field are not trusted: they
+	// would decode the guard as false even for a group that enabled it.
+	decoded.Snapshot.SchemaVersion = 1
+	restored, ok, err = svc.applyAuthCacheEntry("k", &decoded)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Nil(t, restored)
 }
 
 func TestAPIKeyService_GetByKey_NegativeCache(t *testing.T) {

@@ -720,6 +720,18 @@
             <option value="cli_only">{{ t('admin.groups.clientLimits.cliOnly') }}</option>
             <option value="local_proxy_only">{{ t('admin.groups.clientLimits.localProxyOnly') }}</option>
           </select>
+          <label class="mt-3 flex items-start gap-2">
+            <input
+              v-model="createForm.codex_cn_timezone_guard"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              data-testid="createForm-codex-cn-timezone-guard"
+            />
+            <span>
+              <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.groups.clientLimits.codexCnTimezoneGuard') }}</span>
+              <span class="input-hint mt-1 block">{{ t('admin.groups.clientLimits.codexCnTimezoneGuardHint') }}</span>
+            </span>
+          </label>
         </div>
 
         <!-- 异步用户输入审核 -->
@@ -1483,6 +1495,18 @@
             <option value="cli_only">{{ t('admin.groups.clientLimits.cliOnly') }}</option>
             <option value="local_proxy_only">{{ t('admin.groups.clientLimits.localProxyOnly') }}</option>
           </select>
+          <label class="mt-3 flex items-start gap-2">
+            <input
+              v-model="editForm.codex_cn_timezone_guard"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              data-testid="editForm-codex-cn-timezone-guard"
+            />
+            <span>
+              <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.groups.clientLimits.codexCnTimezoneGuard') }}</span>
+              <span class="input-hint mt-1 block">{{ t('admin.groups.clientLimits.codexCnTimezoneGuardHint') }}</span>
+            </span>
+          </label>
         </div>
 
         <!-- 异步用户输入审核 -->
@@ -2151,6 +2175,7 @@ const createForm = reactive({
   input_moderation_strike_window_hours: 24,
   input_moderation_dedupe_minutes: 5,
   codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
+  codex_cn_timezone_guard: false,
   claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
   claude_device_base_limit: 1,
   // 模型路由开关
@@ -2413,6 +2438,7 @@ const editForm = reactive({
   input_moderation_strike_window_hours: 24,
   input_moderation_dedupe_minutes: 5,
   codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
+  codex_cn_timezone_guard: false,
   claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
   claude_device_base_limit: 1,
   // 模型路由开关
@@ -2570,6 +2596,7 @@ const closeCreateModal = () => {
   createForm.input_moderation_strike_window_hours = 24
   createForm.input_moderation_dedupe_minutes = 5
   createForm.codex_client_policy = 'off'
+  createForm.codex_cn_timezone_guard = false
   createForm.claude_device_limit_mode = 'off'
   createForm.claude_device_base_limit = 1
   createForm.copy_accounts_from_group_ids = []
@@ -2675,6 +2702,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.input_moderation_strike_window_hours = group.input_moderation_strike_window_hours || 24
   editForm.input_moderation_dedupe_minutes = group.input_moderation_dedupe_minutes || 5
   editForm.codex_client_policy = group.codex_client_policy || 'off'
+  editForm.codex_cn_timezone_guard = group.codex_cn_timezone_guard || false
   editForm.claude_device_limit_mode = group.claude_device_limit_mode || 'off'
   editForm.claude_device_base_limit = group.claude_device_base_limit || 1
   editForm.model_routing_enabled = group.model_routing_enabled || false
@@ -2799,7 +2827,10 @@ watch(
     if (newVal !== 'anthropic') {
       createForm.fallback_group_id_on_invalid_request = null
     }
-    if (newVal !== 'openai') createForm.codex_client_policy = 'off'
+    if (newVal !== 'openai') {
+      createForm.codex_client_policy = 'off'
+      createForm.codex_cn_timezone_guard = false
+    }
     if (!['anthropic', 'antigravity'].includes(newVal)) createForm.claude_device_limit_mode = 'off'
   }
 )
@@ -2815,7 +2846,10 @@ watch(
     if (newVal !== 'anthropic') {
       editForm.fallback_group_id_on_invalid_request = null
     }
-    if (newVal !== 'openai') editForm.codex_client_policy = 'off'
+    if (newVal !== 'openai') {
+      editForm.codex_client_policy = 'off'
+      editForm.codex_cn_timezone_guard = false
+    }
     if (!['anthropic', 'antigravity'].includes(newVal)) editForm.claude_device_limit_mode = 'off'
   }
 )

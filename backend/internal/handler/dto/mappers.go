@@ -158,6 +158,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		InputModerationPolicy:            g.InputModerationPolicy,
 		InputModerationMinConfidence:     g.InputModerationMinConfidence,
 		CodexClientPolicy:                g.CodexClientPolicy,
+		CodexCNTimezoneGuard:             g.CodexCNTimezoneGuard,
 		ClaudeDeviceLimitMode:            g.ClaudeDeviceLimitMode,
 		ClaudeDeviceBaseLimit:            g.ClaudeDeviceBaseLimit,
 		ModelRouting:                     g.ModelRouting,

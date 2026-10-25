@@ -105,6 +105,7 @@ type Group struct {
 	InputModerationPolicy            *InputModerationPolicy
 	InputModerationMinConfidence     int
 	CodexClientPolicy                string
+	CodexCNTimezoneGuard             bool
 	ClaudeDeviceLimitMode            string
 	ClaudeDeviceBaseLimit            int
 

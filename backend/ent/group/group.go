@@ -113,6 +113,8 @@ const (
 	FieldInputModerationDedupeMinutes = "input_moderation_dedupe_minutes"
 	// FieldCodexClientPolicy holds the string denoting the codex_client_policy field in the database.
 	FieldCodexClientPolicy = "codex_client_policy"
+	// FieldCodexCnTimezoneGuard holds the string denoting the codex_cn_timezone_guard field in the database.
+	FieldCodexCnTimezoneGuard = "codex_cn_timezone_guard"
 	// FieldClaudeDeviceLimitMode holds the string denoting the claude_device_limit_mode field in the database.
 	FieldClaudeDeviceLimitMode = "claude_device_limit_mode"
 	// FieldClaudeDeviceBaseLimit holds the string denoting the claude_device_base_limit field in the database.
@@ -250,6 +252,7 @@ var Columns = []string{
 	FieldInputModerationPolicy,
 	FieldInputModerationDedupeMinutes,
 	FieldCodexClientPolicy,
+	FieldCodexCnTimezoneGuard,
 	FieldClaudeDeviceLimitMode,
 	FieldClaudeDeviceBaseLimit,
 }
@@ -355,6 +358,8 @@ var (
 	DefaultCodexClientPolicy string
 	// CodexClientPolicyValidator is a validator for the "codex_client_policy" field. It is called by the builders before save.
 	CodexClientPolicyValidator func(string) error
+	// DefaultCodexCnTimezoneGuard holds the default value on creation for the "codex_cn_timezone_guard" field.
+	DefaultCodexCnTimezoneGuard bool
 	// DefaultClaudeDeviceLimitMode holds the default value on creation for the "claude_device_limit_mode" field.
 	DefaultClaudeDeviceLimitMode string
 	// ClaudeDeviceLimitModeValidator is a validator for the "claude_device_limit_mode" field. It is called by the builders before save.
@@ -584,6 +589,11 @@ func ByInputModerationDedupeMinutes(opts ...sql.OrderTermOption) OrderOption {
 // ByCodexClientPolicy orders the results by the codex_client_policy field.
 func ByCodexClientPolicy(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCodexClientPolicy, opts...).ToFunc()
+}
+
+// ByCodexCnTimezoneGuard orders the results by the codex_cn_timezone_guard field.
+func ByCodexCnTimezoneGuard(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCodexCnTimezoneGuard, opts...).ToFunc()
 }
 
 // ByClaudeDeviceLimitMode orders the results by the claude_device_limit_mode field.

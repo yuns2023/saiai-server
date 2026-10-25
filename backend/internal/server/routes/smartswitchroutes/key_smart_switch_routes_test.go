@@ -302,9 +302,12 @@ func (smartRoutesConcurrency) GetAccountsLoadBatch(_ context.Context, accounts [
 	return result, nil
 }
 
-func newSmartRoutesGateway(t *testing.T, lab *smartRoutesLab) *httptest.Server {
+func newSmartRoutesGateway(t *testing.T, lab *smartRoutesLab, configure ...func(*config.Config)) *httptest.Server {
 	t.Helper()
 	cfg := &config.Config{RunMode: config.RunModeStandard}
+	for _, apply := range configure {
+		apply(cfg)
+	}
 	cfg.Default.RateMultiplier = 1
 	cfg.Gateway.MaxBodySize = 1 << 20
 	cfg.Security.URLAllowlist.AllowPrivateHosts = true
@@ -504,6 +507,55 @@ func TestSmartSwitchResponsesRoutes(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, status, resp)
 		require.Contains(t, resp, "SMART_SWITCH_CONTINUATION_UNSUPPORTED")
 		require.Equal(t, 1, lab.calls("TEST_ONLY_UPSTREAM_PAYG"))
+	})
+
+	// The Codex timezone guard is evaluated for the group actually serving
+	// the request, including a group reached by advancing the policy.
+	const tzBody = `{"model":"gpt-5.5","stream":false,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <timezone>Asia/Shanghai</timezone>\n</environment_context>"}]}]}`
+	setGuard := func(t *testing.T, groupID int64) {
+		lab.mu.Lock()
+		lab.groups[groupID].CodexCNTimezoneGuard = true
+		lab.mu.Unlock()
+		t.Cleanup(func() { lab.mu.Lock(); lab.groups[groupID].CodexCNTimezoneGuard = false; lab.mu.Unlock() })
+	}
+
+	t.Run("timezone_guard_off_forwards_unchanged", func(t *testing.T) {
+		lab.resetObservations()
+		setDailyUsage(0, time.Now())
+		status, resp := smartRoutesPost(t, gateway, tzBody)
+		require.Equal(t, http.StatusOK, status, resp)
+		require.Equal(t, 1, lab.calls("TEST_ONLY_UPSTREAM_SUB"))
+	})
+
+	t.Run("timezone_guard_rejects_on_selected_group", func(t *testing.T) {
+		lab.resetObservations()
+		setDailyUsage(0, time.Now())
+		setGuard(t, smartSubscriptionGroup)
+		status, resp := smartRoutesPost(t, gateway, tzBody)
+		require.Equal(t, http.StatusForbidden, status, resp)
+		require.Contains(t, resp, "codex_timezone_reinit_required")
+		require.Zero(t, lab.calls("TEST_ONLY_UPSTREAM_SUB")+lab.calls("TEST_ONLY_UPSTREAM_PAYG"))
+		// A body without the tag is unaffected by the enabled guard.
+		status, resp = smartRoutesPost(t, gateway, body)
+		require.Equal(t, http.StatusOK, status, resp)
+	})
+
+	t.Run("timezone_guard_rejects_after_smart_switch_advance", func(t *testing.T) {
+		lab.resetObservations()
+		setDailyUsage(0, time.Now())
+		setGuard(t, smartPaygGroup)
+		lab.mu.Lock()
+		saved := lab.accounts[smartSubscriptionGroup]
+		lab.accounts[smartSubscriptionGroup] = nil
+		lab.mu.Unlock()
+		t.Cleanup(func() { lab.mu.Lock(); lab.accounts[smartSubscriptionGroup] = saved; lab.mu.Unlock() })
+		status, resp := smartRoutesPost(t, gateway, tzBody)
+		require.Equal(t, http.StatusForbidden, status, resp)
+		require.Contains(t, resp, "codex_timezone_reinit_required")
+		require.Zero(t, lab.calls("TEST_ONLY_UPSTREAM_SUB")+lab.calls("TEST_ONLY_UPSTREAM_PAYG"))
+		usage, billing := lab.observed()
+		require.Empty(t, usage)
+		require.Empty(t, billing)
 	})
 
 	t.Run("stateful_continuation_is_rejected_before_routing", func(t *testing.T) {

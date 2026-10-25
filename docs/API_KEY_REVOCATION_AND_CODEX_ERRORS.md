@@ -58,6 +58,60 @@ the optional account/version headers.
 Policy rejection logs include `missing_version` and `missing_account_id` as
 booleans. They contain no raw account ID, authorization value, cookies, or body.
 
+## Codex China-region timezone guard
+
+Groups have an opt-in boolean `codex_cn_timezone_guard` (default off; migration
+114). When it is on, Responses HTTP (`/v1/responses`, `/responses` and their
+subpaths such as `/responses/compact`) and Responses WebSocket requests are
+rejected when any decoded JSON string of the request (history included) contains
+`<timezone>ZONE</timezone>` with a trimmed, case-sensitive ZONE in
+`Asia/Shanghai`, `Asia/Urumqi`, `Asia/Chongqing`, `Asia/Chungking`,
+`Asia/Harbin`, `Asia/Kashgar`, `PRC`, `Asia/Hong_Kong`, `Hongkong`,
+`Asia/Macau` or `Asia/Macao`. JSON-escaped forms (`\u003c`, `\/`) match too.
+The scan is read-only; forwarded bytes are unchanged.
+
+- HTTP: 403 with `error.type` `permission_error` and `error.code`
+  `codex_timezone_reinit_required`, before account selection. The group that
+  actually serves the request is checked, including a group reached by smart
+  switching; a rejection never advances smart switching and is not an account
+  failure.
+- WebSocket: the first frame (and a continuation payload rebuilt with replayed
+  history) is checked before account selection; each later `response.create`
+  is checked against the group's current setting, read through the auth cache;
+  an in-connection quota failover replay re-reads the Key (auth cache) and is
+  checked against the current group setting, and the group-change check below,
+  before it is resent; on
+  the API-key account pool path, the exact payload of every turn (which may be
+  rebuilt with replayed history) is checked right before it is written
+  upstream. A rejection sends `{"type":"error","status":403,"error":{"type":"permission_error","code":"codex_timezone_reinit_required","message":"..."}}`
+  and then closes with 1008 `codex timezone reinit required`. Both are best
+  effort: a failed frame write is logged (WARN, no payload). Turns already
+  forwarded keep draining for usage.
+- If the Key is rebound to another group while a WebSocket session is open,
+  the next turn (or failover replay) ends the session with the same frame/close mechanism
+  (`status` 409, `error.code` `api_key_group_changed`, message
+  `API Key 分组已变更，请重新连接。`, close reason `api key group changed`);
+  the client reconnects under the new group.
+- The message tells users on a recognised Codex backend older than 0.163
+  (`codex-tui`, `codex_exec`, `codex_vscode`, `codex_cli_rs`, `Codex Desktop`
+  User-Agent) to upgrade; every other client gets the generic text asking for
+  `saiai cli` re-initialization, a Codex restart and a new session.
+- Logs record `openai.codex_timezone_guard_rejected` with group, user, zone,
+  UA product/version, transport and turn — never the body.
+
+Limitations:
+
+- Native `/codex/images` and ChatGPT conversation routes are not covered. A
+  user message that literally contains such a tag is also rejected (accepted
+  false positive).
+- JSON object keys are scanned as well as values.
+- A large JSON string that contains an escape and the word `timezone` is
+  decoded into a transient buffer up to its own size (strings without escapes
+  are searched in place).
+- On the official-Codex OAuth relay both the error frame and the following
+  1008 close are best effort; stopping the relay's client reader may close the
+  socket before the close frame is sent.
+
 ## Regression evidence
 
 Service tests cover refill during deletion, late database snapshots on one or

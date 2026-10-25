@@ -2144,6 +2144,8 @@ export default {
         officialClients: 'Official Codex clients only',
         cliOnly: 'Codex CLI only',
         localProxyOnly: 'SAIAI local proxy only',
+        codexCnTimezoneGuard: 'Reject Codex requests carrying a China-region timezone',
+        codexCnTimezoneGuardHint: 'When enabled, Codex Responses requests whose content or history contains a mainland China / Hong Kong / Macau timezone (<timezone>) are rejected (HTTP 403 / WebSocket 1008) and users are told to upgrade Codex, rerun saiai cli init and start a new session. Enable only after users have updated their client.',
         audit: 'Audit only',
         enforce: 'Enforce',
         baseDevices: 'Base device count'

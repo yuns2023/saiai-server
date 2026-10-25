@@ -52,7 +52,7 @@ When enabled, these requests use the pinned Codex identity for their role:
 | Native Codex images `/backend-api/codex/images/*` (official-client-only path) | `ForwardNativeCodexImage` | http |
 | Codex models manifest `/backend-api/codex/models` (OAuth branch) | `fetchCodexModelsManifestUpstream` | http |
 | Admin account test (OpenAI OAuth `/codex/responses`) | `AccountTestService.testOpenAIAccountConnection` | http |
-| Background Codex usage probe (`/codex/responses`) | `AccountUsageService.probeOpenAICodexSnapshot` | http |
+| Background Codex usage refresh (`GET /backend-api/wham/usage`) | `AccountUsageService.fetchCodexUsageViaWham` | http |
 | Codex quota reset control plane (`/backend-api/wham/*`) | `OpenAIQuotaResetService.request` | http |
 | Responses WebSocket: pool acquire, prewarm, ingress session, v2 passthrough | `openAIWSConnPool`, `openai_ws_forwarder.go`, `openai_ws_v2_passthrough_adapter.go` | ws |
 
@@ -98,7 +98,7 @@ custom UA, default Codex UA for non-Codex clients, native pass-through):
 | Native Codex images | the built upstream request |
 | Models manifest | the outbound `headers` |
 | Admin account test | the built request (no UA set → `Go-http-client/1.1` → newest Linux) |
-| Usage probe, quota reset (`codexControlTransport.policyFor(account, req)`) | the built request (synthetic UA or cached client fingerprint UA) |
+| Usage refresh, quota reset (`codexControlTransport.policyFor(account, req)`) | the built request (synthetic `codex_cli_rs` UA) |
 | WebSocket pool acquire / prewarm / v2 passthrough | the upgrade request headers (`openAIWSAcquireRequest.Headers`, passthrough `headers`) |
 
 The policy carries only `{Family, Baseline, Role}`; the raw UA is never part

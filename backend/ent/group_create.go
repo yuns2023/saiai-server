@@ -660,6 +660,20 @@ func (_c *GroupCreate) SetNillableCodexClientPolicy(v *string) *GroupCreate {
 	return _c
 }
 
+// SetCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field.
+func (_c *GroupCreate) SetCodexCnTimezoneGuard(v bool) *GroupCreate {
+	_c.mutation.SetCodexCnTimezoneGuard(v)
+	return _c
+}
+
+// SetNillableCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableCodexCnTimezoneGuard(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetCodexCnTimezoneGuard(*v)
+	}
+	return _c
+}
+
 // SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
 func (_c *GroupCreate) SetClaudeDeviceLimitMode(v string) *GroupCreate {
 	_c.mutation.SetClaudeDeviceLimitMode(v)
@@ -946,6 +960,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultCodexClientPolicy
 		_c.mutation.SetCodexClientPolicy(v)
 	}
+	if _, ok := _c.mutation.CodexCnTimezoneGuard(); !ok {
+		v := group.DefaultCodexCnTimezoneGuard
+		_c.mutation.SetCodexCnTimezoneGuard(v)
+	}
 	if _, ok := _c.mutation.ClaudeDeviceLimitMode(); !ok {
 		v := group.DefaultClaudeDeviceLimitMode
 		_c.mutation.SetClaudeDeviceLimitMode(v)
@@ -1081,6 +1099,9 @@ func (_c *GroupCreate) check() error {
 		if err := group.CodexClientPolicyValidator(v); err != nil {
 			return &ValidationError{Name: "codex_client_policy", err: fmt.Errorf(`ent: validator failed for field "Group.codex_client_policy": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.CodexCnTimezoneGuard(); !ok {
+		return &ValidationError{Name: "codex_cn_timezone_guard", err: errors.New(`ent: missing required field "Group.codex_cn_timezone_guard"`)}
 	}
 	if _, ok := _c.mutation.ClaudeDeviceLimitMode(); !ok {
 		return &ValidationError{Name: "claude_device_limit_mode", err: errors.New(`ent: missing required field "Group.claude_device_limit_mode"`)}
@@ -1311,6 +1332,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.CodexClientPolicy(); ok {
 		_spec.SetField(group.FieldCodexClientPolicy, field.TypeString, value)
 		_node.CodexClientPolicy = value
+	}
+	if value, ok := _c.mutation.CodexCnTimezoneGuard(); ok {
+		_spec.SetField(group.FieldCodexCnTimezoneGuard, field.TypeBool, value)
+		_node.CodexCnTimezoneGuard = value
 	}
 	if value, ok := _c.mutation.ClaudeDeviceLimitMode(); ok {
 		_spec.SetField(group.FieldClaudeDeviceLimitMode, field.TypeString, value)
@@ -2306,6 +2331,18 @@ func (u *GroupUpsert) SetCodexClientPolicy(v string) *GroupUpsert {
 // UpdateCodexClientPolicy sets the "codex_client_policy" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateCodexClientPolicy() *GroupUpsert {
 	u.SetExcluded(group.FieldCodexClientPolicy)
+	return u
+}
+
+// SetCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field.
+func (u *GroupUpsert) SetCodexCnTimezoneGuard(v bool) *GroupUpsert {
+	u.Set(group.FieldCodexCnTimezoneGuard, v)
+	return u
+}
+
+// UpdateCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateCodexCnTimezoneGuard() *GroupUpsert {
+	u.SetExcluded(group.FieldCodexCnTimezoneGuard)
 	return u
 }
 
@@ -3333,6 +3370,20 @@ func (u *GroupUpsertOne) SetCodexClientPolicy(v string) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateCodexClientPolicy() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateCodexClientPolicy()
+	})
+}
+
+// SetCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field.
+func (u *GroupUpsertOne) SetCodexCnTimezoneGuard(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetCodexCnTimezoneGuard(v)
+	})
+}
+
+// UpdateCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateCodexCnTimezoneGuard() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateCodexCnTimezoneGuard()
 	})
 }
 
@@ -4531,6 +4582,20 @@ func (u *GroupUpsertBulk) SetCodexClientPolicy(v string) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateCodexClientPolicy() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateCodexClientPolicy()
+	})
+}
+
+// SetCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field.
+func (u *GroupUpsertBulk) SetCodexCnTimezoneGuard(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetCodexCnTimezoneGuard(v)
+	})
+}
+
+// UpdateCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateCodexCnTimezoneGuard() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateCodexCnTimezoneGuard()
 	})
 }
 
