@@ -78,7 +78,9 @@ The scan is read-only; forwarded bytes are unchanged.
 - WebSocket: the first frame (and a continuation payload rebuilt with replayed
   history) is checked before account selection; each later `response.create`
   is checked against the group's current setting, read through the auth cache;
-  an in-connection failover replay is checked again before it is resent; on
+  an in-connection quota failover replay re-reads the Key (auth cache) and is
+  checked against the current group setting, and the group-change check below,
+  before it is resent; on
   the API-key account pool path, the exact payload of every turn (which may be
   rebuilt with replayed history) is checked right before it is written
   upstream. A rejection sends `{"type":"error","status":403,"error":{"type":"permission_error","code":"codex_timezone_reinit_required","message":"..."}}`
@@ -86,7 +88,7 @@ The scan is read-only; forwarded bytes are unchanged.
   effort: a failed frame write is logged (WARN, no payload). Turns already
   forwarded keep draining for usage.
 - If the Key is rebound to another group while a WebSocket session is open,
-  the next turn ends the session with the same frame/close mechanism
+  the next turn (or failover replay) ends the session with the same frame/close mechanism
   (`status` 409, `error.code` `api_key_group_changed`, message
   `API Key 分组已变更，请重新连接。`, close reason `api key group changed`);
   the client reconnects under the new group.
