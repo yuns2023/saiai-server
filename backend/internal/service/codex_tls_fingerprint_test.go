@@ -422,7 +422,10 @@ func newResolvingPoolForTest(t *testing.T, minIdle int) (*openAIWSConnPool, *pol
 	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 4
 	cfg.Gateway.OpenAIWS.MinIdlePerAccount = minIdle
 	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 4
-	cfg.Gateway.OpenAIWS.PoolTargetUtilization = 0.8
+	// Utilization 1 keeps the pool at exactly the leased demand, so no async
+	// scale-up dial (with whatever policy is current) races the dial-order
+	// assertions below.
+	cfg.Gateway.OpenAIWS.PoolTargetUtilization = 1
 	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 1
 	snapshot := codexOAuthAccount(41, nil) // the session's stale snapshot: flag absent
 	repo := &accountFlagRepo{account: codexOAuthAccount(41, nil)}
