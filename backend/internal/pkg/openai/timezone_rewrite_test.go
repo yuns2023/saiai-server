@@ -14,18 +14,12 @@ const rewriteToday = "2026-10-24"
 // serdeBody renders a Responses body the way Codex (serde_json) does: no HTML
 // escaping, `\n` for newlines.
 func serdeBody(texts ...string) []byte {
-	var b strings.Builder
-	b.WriteString(`{"model":"gpt-5.1","input":[`)
-	for i, text := range texts {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(`{"type":"message","role":"user","content":[{"type":"input_text","text":"`)
-		b.WriteString(strings.ReplaceAll(text, "\n", `\n`))
-		b.WriteString(`"}]}`)
+	items := make([]string, 0, len(texts))
+	for _, text := range texts {
+		items = append(items, `{"type":"message","role":"user","content":[{"type":"input_text","text":"`+
+			strings.ReplaceAll(text, "\n", `\n`)+`"}]}`)
 	}
-	b.WriteString(`],"stream":true}`)
-	return []byte(b.String())
+	return []byte(`{"model":"gpt-5.1","input":[` + strings.Join(items, ",") + `],"stream":true}`)
 }
 
 func envBlock(date, zone string) string {
