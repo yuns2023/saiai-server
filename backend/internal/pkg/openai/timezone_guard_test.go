@@ -122,6 +122,10 @@ func TestFindChinaTimezoneLongWhitespaceAndManyOpenTags(t *testing.T) {
 	if _, found := FindChinaTimezone(responsesBody(t, padded)); !found {
 		t.Fatal("whitespace around the zone must not hide it")
 	}
+	nbsp := "<timezone>\u00a0Asia/Shanghai\u3000</timezone>"
+	if _, found := FindChinaTimezone(responsesBody(t, nbsp)); !found {
+		t.Fatal("Unicode whitespace around the zone must be trimmed")
+	}
 	// Many opening tags in front of one distant closing tag stay linear.
 	many := strings.Repeat("<timezone>x ", 200000) + strings.Repeat("y", 1<<20) + "</timezone>"
 	body := responsesBody(t, many)

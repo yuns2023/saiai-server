@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bytes"
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -102,8 +103,8 @@ func jsonStringEnd(body []byte, start int) (int, bool) {
 
 // findChinaTimezoneTag checks every `<timezone>` occurrence in text; a
 // non-matching, overlong or unterminated tag does not stop the search. Any
-// amount of surrounding whitespace is allowed. Each opening tag pairs with the
-// first closing tag after it; that closing tag and the whitespace before it
+// amount of surrounding Unicode whitespace is trimmed (as bytes.TrimSpace).
+// Each opening tag pairs with the first closing tag after it; that closing tag and the whitespace before it
 // are located once and shared by all opening tags in front of it, so the scan
 // stays linear however many opening tags precede a distant closing tag.
 func findChinaTimezoneTag(text []byte) (string, bool) {
@@ -122,13 +123,21 @@ func findChinaTimezoneTag(text []byte) (string, bool) {
 			}
 			closeAt = start + next
 			valueEnd = closeAt
-			for valueEnd > start && isJSONTrimSpace(text[valueEnd-1]) {
-				valueEnd--
+			for valueEnd > start {
+				r, size := utf8.DecodeLastRune(text[start:valueEnd])
+				if !unicode.IsSpace(r) {
+					break
+				}
+				valueEnd -= size
 			}
 		}
 		valueStart := start
-		for valueStart < valueEnd && isJSONTrimSpace(text[valueStart]) {
-			valueStart++
+		for valueStart < valueEnd {
+			r, size := utf8.DecodeRune(text[valueStart:valueEnd])
+			if !unicode.IsSpace(r) {
+				break
+			}
+			valueStart += size
 		}
 		if valueEnd-valueStart > timezoneMaxValueBytes || valueEnd <= valueStart {
 			continue
@@ -137,15 +146,6 @@ func findChinaTimezoneTag(text []byte) (string, bool) {
 			return string(text[valueStart:valueEnd]), true
 		}
 	}
-}
-
-// isJSONTrimSpace matches the ASCII whitespace bytes.TrimSpace removes.
-func isJSONTrimSpace(b byte) bool {
-	switch b {
-	case ' ', '\t', '\n', '\r', '\v', '\f':
-		return true
-	}
-	return false
 }
 
 // appendUnescapedJSONString decodes the content of a valid JSON string. An
