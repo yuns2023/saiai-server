@@ -187,3 +187,26 @@ func TestCodexVersionGateSkipsSettingsForNonCodexClients(t *testing.T) {
 	require.NotNil(t, h.codexVersionGateRejection(c, "http"))
 	require.Equal(t, int32(1), reads.Load())
 }
+
+// A rejected version still gets the error frame when the first frame is not
+// valid JSON; nothing is scheduled.
+func TestCodexVersionGateWSRejectsBeforeFrameValidation(t *testing.T) {
+	router, slotCalls := newCodexVersionGateRouter(t, service.CodexVersionGate{Enabled: true, Min: "0.164.0"})
+	server := httptest.NewServer(router)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	headers := http.Header{}
+	headers.Set("User-Agent", "codex_cli_rs/0.160.0")
+	headers.Set("version", "0.160.0")
+	conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", &coderws.DialOptions{HTTPHeader: headers})
+	require.NoError(t, err)
+	defer func() { _ = conn.CloseNow() }()
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`not json`)))
+	_, frame, err := conn.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, codexVersionUnsupportedCode, gjson.GetBytes(frame, "error.code").String())
+	_, _, err = conn.Read(ctx)
+	require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err))
+	require.Zero(t, slotCalls.Load())
+}

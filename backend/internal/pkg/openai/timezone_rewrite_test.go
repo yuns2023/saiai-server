@@ -618,3 +618,35 @@ func TestRewriteCodexEnvironmentTimeBlockLimitIsIdempotent(t *testing.T) {
 		t.Fatal("not idempotent at the limit")
 	}
 }
+
+// Boundaries of the streaming (escaped) path: the recent-byte ring wraps,
+// trailing whitespace exceeds the buffer, form feed / vertical tab count as
+// whitespace, and both paths agree.
+func TestRewriteCodexEnvironmentTimeBlockShapeBoundaries(t *testing.T) {
+	block := `<environment_context>\n  <timezone>Asia/Shanghai</timezone>\n</environment_context>`
+	rewritten := `<environment_context>\n  <timezone>America/Los_Angeles</timezone>\n</environment_context>`
+	longWS := strings.Repeat(`\n`, codexEnvironmentBlockMaxBytes+100)
+	cases := map[string]struct{ in, want string }{
+		"ring wraps":                 {`<environment_context>` + strings.Repeat("y", 200) + `<timezone>PRC</timezone>\n</environment_context>`, `<environment_context>` + strings.Repeat("y", 200) + `<timezone>America/Los_Angeles</timezone>\n</environment_context>`},
+		"long trailing whitespace":   {block + longWS, rewritten + longWS},
+		"form feed and vertical tab": {`\f\u000b` + block + `\f`, `\f\u000b` + rewritten + `\f`},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			body := []byte(`{"input":"` + tc.in + `"}`)
+			out, stats := mustRewrite(t, body)
+			if string(out) != `{"input":"`+tc.want+`"}` || stats.Timezones != 1 {
+				t.Fatalf("stats=%+v got %.200s", stats, out)
+			}
+			again, againStats := mustRewrite(t, out)
+			if againStats.Changed() || !bytes.Equal(again, out) {
+				t.Fatal("not idempotent")
+			}
+		})
+	}
+	// Overflowed content that does not end with the close tag is user content.
+	huge := []byte(`{"input":"<environment_context>\n` + strings.Repeat("z", codexEnvironmentBlockMaxBytes+10) + `"}`)
+	if out, stats, err := RewriteCodexEnvironmentTime(huge, rewriteNow); err != nil || stats.Changed() || !bytes.Equal(out, huge) {
+		t.Fatalf("err=%v stats=%+v", err, stats)
+	}
+}

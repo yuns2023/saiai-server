@@ -1778,6 +1778,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	msgType, firstMessage, err := wsConn.Read(readCtx)
 	cancel()
+	if versionRejection != nil {
+		// Before any validation, account selection or upstream connection;
+		// best effort even if the first frame could not be read.
+		closeOpenAIWSRejectedSession(c, wsConn, rejectOpenAIWSSession(ctx, c, wsConn, codexVersionGateWSRejection(versionRejection)))
+		return
+	}
 	if err != nil {
 		closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
 		reqLog.Warn("openai.websocket_read_first_message_failed",
@@ -1788,11 +1794,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			zap.Duration("read_timeout", 30*time.Second),
 		)
 		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "missing first response.create message")
-		return
-	}
-	if versionRejection != nil {
-		// Before any validation, account selection or upstream connection.
-		closeOpenAIWSRejectedSession(c, wsConn, rejectOpenAIWSSession(ctx, c, wsConn, codexVersionGateWSRejection(versionRejection)))
 		return
 	}
 	if msgType != coderws.MessageText && msgType != coderws.MessageBinary {

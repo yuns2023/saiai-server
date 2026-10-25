@@ -93,7 +93,7 @@ exactly `<environment_context>`BODY`</environment_context>` (BODY XML-escapes
 values; verified in codex-rs 0.163 `ContextualUserFragment::render` and in
 0.163/0.164 monitor captures, including WebSocket frames). A JSON string
 **value** (any depth, any role; object keys are ignored) is an environment
-block only if its decoded text, trimmed of ASCII whitespace, starts with
+block only if its decoded text, trimmed of ASCII whitespace (SP, HT, LF, CR, FF, VT), starts with
 `<environment_context>` and ends with `</environment_context>`. Any other
 string — e.g. a user prompt that mentions the tag mid-sentence, closed or not —
 is user content: never rewritten and never rejected. Inside a block string each
@@ -228,7 +228,7 @@ admitted and unknown versions are still rejected.
 
 - Checked for Responses HTTP (all subpaths, including `/responses/compact`)
   before account selection / stream start (HTTP 400). WebSocket connections
-  are upgraded and, after the first client frame is read, receive
+  are upgraded and, once the first client frame has been read (or failed to be read), receive
   `{"type":"error","status":400,"error":{"type":"invalid_request_error","code":"codex_version_unsupported","message":"..."}}`
   and close 1008 `codex version unsupported`, before any account selection
   or upstream connection. A non-101 handshake response would be turned into

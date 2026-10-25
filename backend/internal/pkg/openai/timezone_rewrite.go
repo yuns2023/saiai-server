@@ -376,18 +376,18 @@ func (rw *codexEnvironmentRewriter) stringValue(body []byte, start, end int, esc
 // to decode an escaped string.
 const codexEnvironmentBlockMaxBytes = 64 << 10
 
-func isJSONASCIISpace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+func isASCIISpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == '\v'
 }
 
 // rewriteText handles an unescaped string in place; rawBase is the body
 // offset of the string content.
 func (rw *codexEnvironmentRewriter) rewriteText(text []byte, rawBase int) error {
 	first, last := 0, len(text)
-	for first < last && isJSONASCIISpace(text[first]) {
+	for first < last && isASCIISpace(text[first]) {
 		first++
 	}
-	for last > first && isJSONASCIISpace(text[last-1]) {
+	for last > first && isASCIISpace(text[last-1]) {
 		last--
 	}
 	trimmed := text[first:last]
@@ -442,7 +442,7 @@ func (rw *codexEnvironmentRewriter) rewriteEscapedText(raw []byte, rawBase int) 
 		for _, b := range decoded {
 			if matched < len(environmentContextOpenTag) {
 				switch {
-				case matched == 0 && isJSONASCIISpace(b):
+				case matched == 0 && isASCIISpace(b):
 				case b == environmentContextOpenTag[matched]:
 					matched++
 				default:
@@ -456,7 +456,7 @@ func (rw *codexEnvironmentRewriter) rewriteEscapedText(raw []byte, rawBase int) 
 			}
 			recent[recentLen] = b
 			recentLen++
-			space := isJSONASCIISpace(b)
+			space := isASCIISpace(b)
 			if !space {
 				endsWithClose = bytes.HasSuffix(recent[:recentLen], environmentContextCloseTag)
 			}
