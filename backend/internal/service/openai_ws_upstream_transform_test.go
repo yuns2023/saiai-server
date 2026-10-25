@@ -262,7 +262,15 @@ func TestOpenAIWSTransformUpstreamPayloadPoolPathRebuiltTurn(t *testing.T) {
 		Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"},
 		Extra: map[string]any{"responses_websockets_v2_enabled": true}}
 	recorder := &openAIWSTransformRecorder{}
-	hooks := &OpenAIWSIngressHooks{TransformUpstreamPayload: recorder.transform}
+	resultHashes := make(chan string, 4)
+	hooks := &OpenAIWSIngressHooks{
+		TransformUpstreamPayload: recorder.transform,
+		AfterTurn: func(_ int, result *OpenAIForwardResult, turnErr error) {
+			if turnErr == nil && result != nil {
+				resultHashes <- result.RequestPayloadHash
+			}
+		},
+	}
 	serverErrCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, nil)
@@ -315,6 +323,10 @@ func TestOpenAIWSTransformUpstreamPayloadPoolPathRebuiltTurn(t *testing.T) {
 	}
 	turns, inputs := recorder.seen()
 	require.Equal(t, []int{1, 2}, turns)
+	for _, input := range inputs {
+		sent := bytes.ReplaceAll(input, []byte("TEST_ONLY_RAW"), []byte("TEST_ONLY_SENT"))
+		require.Equal(t, HashUsageRequestPayload(sent), <-resultHashes, "usage hash describes the sent bytes")
+	}
 	require.Len(t, gjson.GetBytes(inputs[1], "input").Array(), 2, "turn 2 was rebuilt with turn 1's input")
 	require.Contains(t, string(inputs[1]), "TEST_ONLY_RAW", "the retained turn stays original")
 }

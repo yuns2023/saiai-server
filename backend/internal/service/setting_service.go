@@ -1551,8 +1551,20 @@ func (s *SettingService) GetCodexVersionGate(ctx context.Context) CodexVersionGa
 		return cached.gate
 	}
 	result, _, _ := codexVersionGateSF.Do("codex_version_gate", func() (any, error) {
-		if latest, ok := codexVersionGateCache.Load().(*cachedCodexVersionGate); ok && time.Now().UnixNano() < latest.expiresAt {
+		previous := codexVersionGateCache.Load()
+		if latest, ok := previous.(*cachedCodexVersionGate); ok && time.Now().UnixNano() < latest.expiresAt {
 			return latest.gate, nil
+		}
+		// publish never replaces a value stored while this refresh was
+		// reading (an admin save): the saved value wins.
+		publish := func(next *cachedCodexVersionGate) CodexVersionGate {
+			if codexVersionGateCache.CompareAndSwap(previous, next) {
+				return next.gate
+			}
+			if latest, ok := codexVersionGateCache.Load().(*cachedCodexVersionGate); ok {
+				return latest.gate
+			}
+			return next.gate
 		}
 		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), versionBoundsDBTimeout)
 		defer cancel()
@@ -1563,26 +1575,24 @@ func (s *SettingService) GetCodexVersionGate(ctx context.Context) CodexVersionGa
 		})
 		if err != nil {
 			next := &cachedCodexVersionGate{expiresAt: time.Now().Add(versionBoundsErrorTTL).UnixNano()}
-			if latest, ok := codexVersionGateCache.Load().(*cachedCodexVersionGate); ok && latest.loaded {
+			if latest, ok := previous.(*cachedCodexVersionGate); ok && latest.loaded {
 				next.gate, next.loaded = latest.gate, true
 				slog.Warn("failed to refresh codex version gate setting, keeping last known value", "error", err)
 			} else {
 				slog.Error("failed to load codex version gate setting, gate disabled until it can be read", "error", err)
 			}
-			codexVersionGateCache.Store(next)
-			return next.gate, nil
+			return publish(next), nil
 		}
 		gate := CodexVersionGate{
 			Enabled: values[SettingKeyCodexVersionGateEnabled] == "true",
 			Min:     strings.TrimSpace(values[SettingKeyCodexMinVersion]),
 			Max:     strings.TrimSpace(values[SettingKeyCodexMaxVersion]),
 		}
-		codexVersionGateCache.Store(&cachedCodexVersionGate{
+		return publish(&cachedCodexVersionGate{
 			gate:      gate,
 			expiresAt: time.Now().Add(versionBoundsCacheTTL).UnixNano(),
 			loaded:    true,
-		})
-		return gate, nil
+		}), nil
 	})
 	gate, _ := result.(CodexVersionGate)
 	return gate

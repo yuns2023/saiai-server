@@ -989,6 +989,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				}
 				wireBody = encoded
 			}
+		}
+		// The parse cache (set for encoded bodies and by the
+		// function_call_output check) must describe the body that is sent.
+		if _, cached := c.Get(service.OpenAIParsedRequestBodyKey); cached || bodyWasEncoded {
 			var parsedBody map[string]any
 			if err := json.Unmarshal(sendBody, &parsedBody); err != nil {
 				h.rejectCodexTimezoneHTTP(c, apiKey.Group, subject.UserID, codexTimezoneRejectMalformed, "", streamStarted)

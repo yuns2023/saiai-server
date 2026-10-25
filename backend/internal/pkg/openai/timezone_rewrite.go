@@ -93,6 +93,11 @@ func RewriteCodexEnvironmentTime(body []byte, today string) ([]byte, CodexEnviro
 	if len(rw.edits) == 0 {
 		return body, rw.stats, nil
 	}
+	for i, edit := range rw.edits {
+		if edit.start > edit.end || (i > 0 && edit.start < rw.edits[i-1].end) {
+			return body, CodexEnvironmentRewriteStats{}, ErrCodexEnvironmentMalformed
+		}
+	}
 	return rw.apply(body), rw.stats, nil
 }
 
@@ -206,6 +211,9 @@ func (rw *codexEnvironmentRewriter) rewriteText(text []byte, offs []int, rawBase
 			return ErrCodexEnvironmentMalformed
 		}
 		rw.stats.Blocks++
+		if err := validateCodexEnvironmentTags(block); err != nil {
+			return err
+		}
 		zones, err := codexEnvironmentTagValues(block, timezoneOpenTag, timezoneCloseTag)
 		if err != nil {
 			return err
@@ -283,11 +291,87 @@ func codexEnvironmentTagValues(block, openTag, closeTag []byte) ([][2]int, error
 			return nil, ErrCodexEnvironmentMalformed
 		}
 		valueEnd := valueStart + valueLen
-		if bytes.Contains(block[valueStart:valueEnd], openTag) {
+		// A value never contains markup; '<' means a nested or crossing tag.
+		if bytes.IndexByte(block[valueStart:valueEnd], '<') >= 0 {
 			return nil, ErrCodexEnvironmentMalformed
 		}
 		spans = append(spans, [2]int{valueStart, valueEnd})
 		pos = valueEnd + len(closeTag)
+	}
+}
+
+var (
+	timezoneTagPrefix         = []byte("<timezone")
+	timezoneClosePrefix       = []byte("</timezone")
+	currentDateTagPrefix      = []byte("<current_date")
+	currentDateClosePrefix    = []byte("</current_date")
+	codexEnvironmentTagChecks = []struct {
+		prefix, exact []byte
+		selfClosing   bool
+	}{
+		{timezoneTagPrefix, timezoneOpenTag, true},
+		{timezoneClosePrefix, timezoneCloseTag, false},
+		{currentDateTagPrefix, currentDateOpenTag, true},
+		{currentDateClosePrefix, currentDateCloseTag, false},
+	}
+)
+
+// validateCodexEnvironmentTags requires every `<timezone…`/`<current_date…`
+// (and closing) occurrence in block to be an exact tag, or for opening tags a
+// value-less self-closing tag such as `<current_date status="unavailable" />`.
+// Anything else (`<timezone >`, a truncated `<current_date`) is malformed.
+func validateCodexEnvironmentTags(block []byte) error {
+	for _, check := range codexEnvironmentTagChecks {
+		for pos := 0; ; {
+			at := bytes.Index(block[pos:], check.prefix)
+			if at < 0 {
+				break
+			}
+			at += pos
+			rest := block[at:]
+			switch {
+			case bytes.HasPrefix(rest, check.exact):
+				pos = at + len(check.exact)
+			case check.selfClosing && len(rest) > len(check.prefix) && rest[len(check.prefix)] == ' ':
+				size, ok := selfClosingTagSize(rest, len(check.prefix))
+				if !ok {
+					return ErrCodexEnvironmentMalformed
+				}
+				pos = at + size
+			default:
+				return ErrCodexEnvironmentMalformed
+			}
+		}
+	}
+	return nil
+}
+
+// selfClosingTagSize parses ` name="value"`… `/>` (spaces allowed before
+// "/>") starting at tag[i] and returns the tag's total length.
+func selfClosingTagSize(tag []byte, i int) (int, bool) {
+	for {
+		start := i
+		for i < len(tag) && tag[i] == ' ' {
+			i++
+		}
+		if i+1 < len(tag) && tag[i] == '/' && tag[i+1] == '>' {
+			return i + 2, true
+		}
+		if i == start {
+			return 0, false // attributes must be space separated
+		}
+		nameStart := i
+		for i < len(tag) && (tag[i] == '_' || tag[i] == '-' || (tag[i] >= 'a' && tag[i] <= 'z') || (tag[i] >= 'A' && tag[i] <= 'Z')) {
+			i++
+		}
+		if i == nameStart || i+1 >= len(tag) || tag[i] != '=' || tag[i+1] != '"' {
+			return 0, false
+		}
+		end := bytes.IndexByte(tag[i+2:], '"')
+		if end < 0 || bytes.ContainsAny(tag[i+2:i+2+end], "<>") {
+			return 0, false
+		}
+		i += 2 + end + 1
 	}
 }
 

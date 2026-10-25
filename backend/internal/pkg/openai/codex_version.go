@@ -93,17 +93,18 @@ func (v CodexSemver) Compare(other CodexSemver) int {
 }
 
 func compareSemverIdentifier(a, b string) int {
-	an, aNumeric := parseSemverNumber(a)
-	bn, bNumeric := parseSemverNumber(b)
+	aNumeric, bNumeric := isSemverDigits(a), isSemverDigits(b)
 	switch {
 	case aNumeric && bNumeric:
-		if an == bn {
-			return 0
+		// Arbitrary size without overflow: no leading zeros, so the longer
+		// number is larger and equal lengths compare lexically.
+		if len(a) != len(b) {
+			if len(a) < len(b) {
+				return -1
+			}
+			return 1
 		}
-		if an < bn {
-			return -1
-		}
-		return 1
+		return strings.Compare(a, b)
 	case aNumeric:
 		return -1
 	case bNumeric:
@@ -123,6 +124,18 @@ func parseSemverNumber(value string) (uint64, bool) {
 	}
 	n, err := strconv.ParseUint(value, 10, 64)
 	return n, err == nil
+}
+
+func isSemverDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func validSemverIdentifiers(value string, prerelease bool) bool {

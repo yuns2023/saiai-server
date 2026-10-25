@@ -45,6 +45,18 @@ func TestCodexSemverCompare(t *testing.T) {
 			}
 		}
 	}
+	huge, ok := ParseCodexSemver("1.2.3-18446744073709551616")
+	require := func(cond bool, msg string) {
+		t.Helper()
+		if !cond {
+			t.Fatal(msg)
+		}
+	}
+	alpha, _ := ParseCodexSemver("1.2.3-alpha")
+	small, _ := ParseCodexSemver("1.2.3-9")
+	require(ok, "huge numeric prerelease parses")
+	require(huge.Compare(alpha) < 0, "numeric prerelease sorts before alphanumeric regardless of size")
+	require(small.Compare(huge) < 0, "numeric identifiers compare by value")
 	a, _ := ParseCodexSemver("1.0.0+a")
 	b, _ := ParseCodexSemver("1.0.0+b")
 	if a.Compare(b) != 0 {

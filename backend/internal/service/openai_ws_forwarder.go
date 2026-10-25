@@ -3304,11 +3304,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 						extractOpenAIServiceTierFromBody(payload),
 					),
 					ReasoningEffort: extractOpenAIReasoningEffortFromBody(payload, originalModel),
-					Stream:          reqStream,
-					OpenAIWSMode:    true,
-					ResponseHeaders: openAIWSTurnResponseHeaders(account, lease.HandshakeHeaders()),
-					Duration:        time.Since(turnStart),
-					FirstTokenMs:    firstTokenMs,
+					// The bytes actually written upstream for this turn.
+					RequestPayloadHash: HashUsageRequestPayload(payload),
+					Stream:             reqStream,
+					OpenAIWSMode:       true,
+					ResponseHeaders:    openAIWSTurnResponseHeaders(account, lease.HandshakeHeaders()),
+					Duration:           time.Since(turnStart),
+					FirstTokenMs:       firstTokenMs,
 				}, nil
 			}
 		}

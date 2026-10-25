@@ -245,6 +245,14 @@ func TestRewriteCodexEnvironmentTimeMalformedFailsClosed(t *testing.T) {
 		"invalid json":           []byte(`{"input":"<environment_context></environment_context>"`),
 		"invalid json escape":    []byte(`{"input":"<environment_context>\u12"}`),
 		"unterminated string":    []byte(`{"input":"<environment_context>`),
+		"timezone wraps date":    serdeBody("<environment_context><timezone><current_date>x</current_date></timezone></environment_context>"),
+		"date wraps target zone": serdeBody("<environment_context><current_date><timezone>America/Los_Angeles</timezone></current_date></environment_context>"),
+		"crossing tags":          serdeBody("<environment_context><timezone>PRC<current_date></timezone>2026-10-25</current_date></environment_context>"),
+		"truncated date tag":     serdeBody("<environment_context><timezone>Asia/Shanghai</timezone><current_date</environment_context>"),
+		"spaced timezone tag":    serdeBody("<environment_context><timezone >Asia/Shanghai</timezone ></environment_context>"),
+		"attribute timezone tag": serdeBody(`<environment_context><timezone a=\"1\">PRC</timezone></environment_context>`),
+		"unclosed attribute":     serdeBody(`<environment_context><timezone status=\"Asia/Shanghai /></environment_context>`),
+		"bare attribute":         serdeBody(`<environment_context><timezone unavailable /></environment_context>`),
 		"escaped unclosed block": serdeBody(`\u003cenvironment_context\u003e<timezone>PRC</timezone>`),
 	}
 	for name, body := range cases {
@@ -320,5 +328,14 @@ func TestCodexRewriteDate(t *testing.T) {
 		if err != nil || got != want {
 			t.Fatalf("%s: got %q err=%v want %q", in, got, err, want)
 		}
+	}
+}
+
+func TestRewriteCodexEnvironmentTimeSelfClosingTags(t *testing.T) {
+	text := `<environment_context><timezone status=\"unavailable\" /><current_date status=\"unavailable\"/></environment_context>`
+	body := serdeBody(text)
+	out, stats := mustRewrite(t, body)
+	if stats.Changed() || stats.Blocks != 1 || !bytes.Equal(out, body) {
+		t.Fatalf("stats = %+v", stats)
 	}
 }

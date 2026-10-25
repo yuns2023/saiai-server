@@ -99,15 +99,20 @@ func TestCodexVersionGateHTTP(t *testing.T) {
 }
 
 func TestCodexVersionGateDisabledOrUnbounded(t *testing.T) {
-	for _, gate := range []service.CodexVersionGate{
-		{Enabled: false, Min: "9.0.0"},
-		{Enabled: true},
-	} {
-		router, slotCalls := newCodexVersionGateRouter(t, gate)
-		rec := postCodexVersionGate(router, "/v1/responses", "codex_cli_rs/0.100.0", "")
-		require.NotEqual(t, codexVersionUnsupportedCode, gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
-		require.Equal(t, int32(1), slotCalls.Load())
-	}
+	router, slotCalls := newCodexVersionGateRouter(t, service.CodexVersionGate{Enabled: false, Min: "9.0.0"})
+	rec := postCodexVersionGate(router, "/v1/responses", "codex_cli_rs/0.100.0", "")
+	require.NotEqual(t, codexVersionUnsupportedCode, gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
+	require.Equal(t, int32(1), slotCalls.Load())
+
+	// Enabled without bounds: any known version passes, unknown is rejected.
+	router, slotCalls = newCodexVersionGateRouter(t, service.CodexVersionGate{Enabled: true})
+	rec = postCodexVersionGate(router, "/v1/responses", "codex_cli_rs/0.100.0", "0.100.0")
+	require.NotEqual(t, codexVersionUnsupportedCode, gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
+	rec = postCodexVersionGate(router, "/v1/responses", "codex_cli_rs/0.100.0", "")
+	require.Equal(t, codexVersionUnsupportedCode, gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
+	require.Contains(t, gjson.GetBytes(rec.Body.Bytes(), "error.message").String(), "[不限, 不限]")
+	require.Contains(t, gjson.GetBytes(rec.Body.Bytes(), "error.message").String(), "@openai/codex@latest")
+	require.Equal(t, int32(1), slotCalls.Load())
 }
 
 func TestCodexVersionGateMessage(t *testing.T) {

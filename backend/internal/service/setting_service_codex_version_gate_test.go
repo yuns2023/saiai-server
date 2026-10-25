@@ -98,3 +98,31 @@ func TestSettingService_UpdateSettings_PublishesCodexVersionGate(t *testing.T) {
 	// The new value is published at once, without a repository read.
 	require.Equal(t, CodexVersionGate{Enabled: true, Min: "0.164.0", Max: "0.170.0-rc.1"}, svc.GetCodexVersionGate(context.Background()))
 }
+
+type codexGateBlockingRepo struct {
+	settingUpdateRepoStub
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *codexGateBlockingRepo) GetMultiple(_ context.Context, _ []string) (map[string]string, error) {
+	close(s.started)
+	<-s.release
+	return map[string]string{SettingKeyCodexVersionGateEnabled: "false"}, nil
+}
+
+// A refresh that read the old value before an admin save must not overwrite
+// the saved value when it finishes.
+func TestGetCodexVersionGateRefreshDoesNotOverwriteSave(t *testing.T) {
+	resetCodexVersionGateCache(t)
+	repo := &codexGateBlockingRepo{started: make(chan struct{}), release: make(chan struct{})}
+	svc := NewSettingService(repo, &config.Config{})
+	done := make(chan CodexVersionGate, 1)
+	go func() { done <- svc.GetCodexVersionGate(context.Background()) }()
+	<-repo.started
+	require.NoError(t, svc.UpdateSettings(context.Background(), &SystemSettings{CodexVersionGateEnabled: true, CodexMinVersion: "0.164.0"}))
+	close(repo.release)
+	saved := CodexVersionGate{Enabled: true, Min: "0.164.0"}
+	require.Equal(t, saved, <-done)
+	require.Equal(t, saved, svc.GetCodexVersionGate(context.Background()))
+}

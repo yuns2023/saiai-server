@@ -19,7 +19,7 @@ import (
 // Non-Codex clients are unaffected. The engine version must be stated
 // identically by the `version` header and the User-Agent; anything else is
 // unknown and rejected while the gate is on (this includes custom provider
-// header overrides of `version`). With both bounds empty the gate is a no-op.
+// header overrides of `version`), even with both bounds empty.
 const codexVersionUnsupportedCode = "codex_version_unsupported"
 
 type codexVersionGateReader interface {
@@ -33,7 +33,7 @@ func (h *OpenAIGatewayHandler) codexVersionGateRejection(c *gin.Context, transpo
 		return nil
 	}
 	gate := h.codexVersionGate.GetCodexVersionGate(c.Request.Context())
-	if !gate.Enabled || (gate.Min == "" && gate.Max == "") {
+	if !gate.Enabled {
 		return nil
 	}
 	product, version, isCodex, known := pkgopenai.CodexEngineVersion(c.GetHeader("User-Agent"), c.GetHeader("originator"), c.GetHeader("version"))
@@ -48,6 +48,9 @@ func (h *OpenAIGatewayHandler) codexVersionGateRejection(c *gin.Context, transpo
 		target = gate.Min
 		if target == "" {
 			target = gate.Max
+		}
+		if target == "" {
+			target = "latest"
 		}
 	case minOK && version.Compare(minVersion) < 0:
 		shown, target = version.String(), gate.Min

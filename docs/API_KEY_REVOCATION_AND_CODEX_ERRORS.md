@@ -102,7 +102,10 @@ the request is rejected rather than falling back to UTC.
 The edit is a raw JSON span replacement: strings are decoded once with a
 decoded→raw offset map, only the bytes of the replaced values change and the
 replacement is plain ASCII; escapes, key order and whitespace elsewhere stay
-byte-identical, and rewriting twice gives the same bytes. A body without
+byte-identical, and rewriting twice gives the same bytes. Inside a block every
+`<timezone…`/`<current_date…` tag must be an exact tag, or a value-less
+self-closing tag with quoted attributes (`<current_date status="unavailable" />`);
+tag values may not contain markup. A body without
 `environment_context` and without a `\u` escape is not parsed. An unclosed or
 nested block, an unpaired or nested `<timezone>`/`<current_date>` tag inside a
 block, or invalid JSON fails closed: the request is rejected (same 400 /
@@ -128,7 +131,11 @@ reinit message) and the original bytes are never forwarded.
   replays — under the session's current group (re-read per turn as for the
   reject mode). Retained frames (replay tracker, continuation state) stay as
   the client sent them because every send applies the same deterministic
-  rewrite; the relay's per-turn request payload hash describes the sent bytes.
+  rewrite; the relay's and the pool path's per-turn request payload hash
+  describe the sent bytes. The pool path's strict-state (which decides whether
+  a turn keeps `previous_response_id` by comparing non-input fields of
+  consecutive client frames) deliberately compares the client frames on both
+  sides; the sent bytes are still rewritten.
   The reject-mode checkpoints still run and, in rewrite mode, only reject a
   payload that cannot be rewritten (the first frame is checked before account
   selection).
@@ -194,7 +201,8 @@ version must be stated identically by the `version` header and the
 User-Agent main version (`product/VERSION …`) and parse as SemVer (a
 prerelease sorts before its release); anything else is "unknown" and rejected
 while the gate is on — this includes custom provider configurations that
-override the `version` header. With both bounds empty the gate does nothing.
+override the `version` header. With both bounds empty every known version is
+admitted and unknown versions are still rejected.
 
 - Checked for Responses HTTP (all subpaths, including `/responses/compact`)
   before account selection / stream start, and for the Responses WebSocket
