@@ -468,3 +468,35 @@ func TestCodexTimezoneRewriteLeakSafetyNet(t *testing.T) {
 	requireTZGuardErrorFrame(t, frame, codexTimezoneGuardMessageOld)
 	require.Zero(t, f.slotCalls.Load(), "rejected before scheduling")
 }
+
+// The send-time WS rewrite rejects too, and a block that is rewritten does
+// not shield a CN zone left in another string of the same payload.
+func TestRewriteCodexTimezoneWSLeakSafetyNet(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
+	mixed := []byte(`{"type":"response.create","input":[{"type":"message","content":[{"type":"input_text","text":"<environment_context><timezone>Asia/Shanghai</timezone></environment_context>"},{"type":"input_text","text":"pasted <timezone>Asia/Macau</timezone>"}]}]}`)
+	_, _, reason, zone := rewriteCodexTimezonePayload(group, mixed, time.Now())
+	require.Equal(t, codexTimezoneRejectAfterRewrite, reason)
+	require.Equal(t, "Asia/Macau", zone)
+
+	results := make(chan error, 1)
+	router := gin.New()
+	router.GET("/v1/responses", func(c *gin.Context) {
+		conn, err := coderws.Accept(c.Writer, c.Request, nil)
+		if err != nil {
+			results <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		out, rewriteErr := rewriteCodexTimezoneWS(c.Request.Context(), c, conn, group, 1, 2, mixed, &codexTimezoneTurnDates{})
+		require.Nil(t, out)
+		results <- rewriteErr
+	})
+	conn, ctx := dialTZGuardWS(t, router)
+	_, frame, err := conn.Read(ctx)
+	require.NoError(t, err)
+	requireTZGuardErrorFrame(t, frame, codexTimezoneGuardMessageOld)
+	var closeErr *service.OpenAIWSClientCloseError
+	require.ErrorAs(t, <-results, &closeErr)
+	require.Equal(t, coderws.StatusPolicyViolation, closeErr.StatusCode())
+}

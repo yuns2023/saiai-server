@@ -21,11 +21,12 @@ import (
 // Responses HTTP and WebSocket requests. With codex_timezone_action "reject"
 // it rejects JSON string content carrying a China mainland / Hong Kong /
 // Macau `<timezone>` environment tag and never modifies forwarded bytes. With
-// "rewrite" it never rejects for the zone; instead every
-// `<environment_context>` block is sent upstream with the timezone set to
-// America/Los_Angeles and the date to the server's current LA date (see
+// "rewrite" every string that is a Codex `<environment_context>` block is
+// sent upstream with the timezone set to America/Los_Angeles and the date to
+// the item's (or the server's current) LA date (see
 // pkgopenai.RewriteCodexEnvironmentTime); a block that cannot be rewritten
-// safely is rejected like the reject mode (fail closed).
+// safely, or a CN zone still present in the bytes to be sent (leak safety
+// net), is rejected like the reject mode (fail closed).
 // Rejections are HTTP 400 invalid_request_error (Codex does not retry 400;
 // it retries 403). Out of scope: native /codex/images and ChatGPT
 // conversation routes.
@@ -108,8 +109,9 @@ const (
 )
 
 // codexTimezoneGuardZone returns why payload must be rejected under group's
-// guard: a China-region zone in reject mode, or an environment_context that
-// cannot be rewritten safely in rewrite mode. zone is set for the former.
+// guard: a China-region zone in reject mode; in rewrite mode an
+// environment_context block that cannot be rewritten safely or a CN zone left
+// after the rewrite. zone is set when a CN zone matched.
 func codexTimezoneGuardZone(group *service.Group, payload []byte) (reason, zone string, rejected bool) {
 	switch group.CodexTimezoneGuardAction() {
 	case service.CodexTimezoneActionReject:

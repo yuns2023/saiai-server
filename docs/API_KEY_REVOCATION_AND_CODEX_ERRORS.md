@@ -102,7 +102,9 @@ like reject mode: a CN/HK/Macau `<timezone>` value still present anywhere
 (e.g. an environment block in a shape the rewrite does not recognise, or a
 user who pastes such a tag) is rejected like reject mode (400
 `codex_timezone_reinit_required`, log reason `cn_timezone_after_rewrite`).
-Merely mentioning `<environment_context>` still passes. Inside a block string each
+Merely mentioning `<environment_context>` still passes. The safety-net scan
+has the reject-mode scanner's cost (one more pass; a candidate escaped string
+is decoded into a reusable buffer of its size). Inside a block string each
 `<timezone>` value other than `America/Los_Angeles` becomes
 `America/Los_Angeles` and each `<current_date>` value becomes a Los Angeles
 date: the date of the enclosing input item's
