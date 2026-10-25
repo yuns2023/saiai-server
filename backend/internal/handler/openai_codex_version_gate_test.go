@@ -127,9 +127,10 @@ func TestCodexVersionGateMessage(t *testing.T) {
 		codexVersionGateMessage("0.171.0", "", "0.170.0", "0.170.0"))
 }
 
-// The WebSocket gate answers the upgrade request itself with a plain HTTP
-// 400, so Codex never retries it as a stream failure.
-func TestCodexVersionGateWSRejectsBeforeUpgrade(t *testing.T) {
+// The WebSocket gate upgrades, then sends the 400 as an error frame and
+// closes 1008 (a local proxy would turn a non-101 handshake into a retryable
+// 502). Nothing is scheduled.
+func TestCodexVersionGateWSRejectsAfterUpgradeWithErrorFrame(t *testing.T) {
 	router, slotCalls := newCodexVersionGateRouter(t, service.CodexVersionGate{Enabled: true, Min: "0.164.0"})
 	server := httptest.NewServer(router)
 	defer server.Close()
@@ -138,18 +139,33 @@ func TestCodexVersionGateWSRejectsBeforeUpgrade(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("User-Agent", "codex_cli_rs/0.160.0 (Mac OS 15.5.0; arm64)")
 	headers.Set("version", "0.160.0")
-	_, resp, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", &coderws.DialOptions{HTTPHeader: headers})
-	require.Error(t, err)
-	require.NotNil(t, resp)
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	require.Zero(t, slotCalls.Load())
+	conn, resp, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", &coderws.DialOptions{HTTPHeader: headers})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+	defer func() { _ = conn.CloseNow() }()
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"TEST_ONLY_MODEL","input":[]}`)))
+	msgType, frame, err := conn.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, coderws.MessageText, msgType)
+	require.Equal(t, "error", gjson.GetBytes(frame, "type").String(), string(frame))
+	require.Equal(t, int64(http.StatusBadRequest), gjson.GetBytes(frame, "status").Int())
+	require.Equal(t, "invalid_request_error", gjson.GetBytes(frame, "error.type").String())
+	require.Equal(t, codexVersionUnsupportedCode, gjson.GetBytes(frame, "error.code").String())
+	require.Contains(t, gjson.GetBytes(frame, "error.message").String(), "npm i -g @openai/codex@0.164.0")
+	_, _, err = conn.Read(ctx)
+	require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err))
+	require.Zero(t, slotCalls.Load(), "no account selection or upstream connection")
 
-	// An admitted version upgrades normally.
+	// An admitted version proceeds to scheduling.
 	headers.Set("User-Agent", "codex_cli_rs/0.164.0 (Mac OS 15.5.0; arm64)")
 	headers.Set("version", "0.164.0")
-	conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", &coderws.DialOptions{HTTPHeader: headers})
+	conn2, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", &coderws.DialOptions{HTTPHeader: headers})
 	require.NoError(t, err)
-	_ = conn.CloseNow()
+	defer func() { _ = conn2.CloseNow() }()
+	require.NoError(t, conn2.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"TEST_ONLY_MODEL","input":[]}`)))
+	_, _, err = conn2.Read(ctx)
+	require.Error(t, err)
+	require.Equal(t, int32(1), slotCalls.Load())
 }
 
 // Non-Codex clients never read the gate settings.

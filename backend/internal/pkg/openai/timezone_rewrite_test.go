@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -62,9 +63,9 @@ func decodedTexts(t *testing.T, body []byte) []string {
 }
 
 func TestRewriteCodexEnvironmentTimeSerdeBody(t *testing.T) {
-	body := serdeBody("hello " + envBlock("2026-10-25", "Asia/Shanghai") + " bye")
+	body := serdeBody(envBlock("2026-10-25", "Asia/Shanghai"))
 	out, stats := mustRewrite(t, body)
-	want := serdeBody("hello " + envBlock(rewriteToday, CodexRewriteTimezone) + " bye")
+	want := serdeBody(envBlock(rewriteToday, CodexRewriteTimezone))
 	if !bytes.Equal(out, want) {
 		t.Fatalf("got  %s\nwant %s", out, want)
 	}
@@ -102,7 +103,8 @@ func TestRewriteCodexEnvironmentTimeEscapeForms(t *testing.T) {
 		"escaped slash":    `<environment_context><timezone>Asia\/Shanghai<\/timezone><\/environment_context>`,
 		"escaped word":     `<environment\u005fcontext><timezone>Asia/Shanghai</timezone></\u0065nvironment_context>`,
 		"escaped value":    `<environment_context><timezone>\u0041sia/Shangha\u0069</timezone></environment_context>`,
-		"unicode before":   `caf\u00e9 \ud83d\ude00 \u2028 \"q\" <environment_context><timezone>Asia/Shanghai</timezone></environment_context> \u00e9`,
+		"unicode inside":   `<environment_context><cwd>caf\u00e9 \ud83d\ude00 \u2028 \"q\"</cwd><timezone>Asia/Shanghai</timezone></environment_context>`,
+		"surrounding ws":   `\n \t<environment_context><timezone>Asia/Shanghai</timezone></environment_context>\r\n`,
 		"whitespace value": `<environment_context><timezone>\n  Asia/Shanghai \t</timezone></environment_context>`,
 	}
 	for name, raw := range cases {
@@ -163,14 +165,14 @@ func TestRewriteCodexEnvironmentTimeIgnoresKeysAndOutsideTags(t *testing.T) {
 		t.Fatal("unchanged body must be returned as-is")
 	}
 
-	// A block in one string does not reach tags in another string or after it.
-	body = serdeBody(block+" <timezone>Asia/Shanghai</timezone>", "<timezone>Asia/Urumqi</timezone>")
+	// A block string does not reach tags in another string.
+	body = serdeBody(block, "<timezone>Asia/Urumqi</timezone>")
 	out, stats = mustRewrite(t, body)
 	if stats.Timezones != 1 || stats.Dates != 1 {
 		t.Fatalf("stats = %+v", stats)
 	}
 	texts := decodedTexts(t, out)
-	if texts[0] != envBlock(rewriteToday, CodexRewriteTimezone)+" <timezone>Asia/Shanghai</timezone>" || texts[1] != "<timezone>Asia/Urumqi</timezone>" {
+	if texts[0] != envBlock(rewriteToday, CodexRewriteTimezone) || texts[1] != "<timezone>Asia/Urumqi</timezone>" {
 		t.Fatalf("decoded = %q", texts)
 	}
 }
@@ -209,9 +211,9 @@ func TestRewriteCodexEnvironmentTimeMultipleBlocksAndRoles(t *testing.T) {
 	second := envBlock("2026-10-21", "Asia/Macau")
 	body, _ := json.Marshal(map[string]any{
 		"model":        "gpt-5.1",
-		"instructions": "sys " + first,
+		"instructions": first,
 		"input": []any{
-			map[string]any{"type": "message", "role": "developer", "content": []any{map[string]any{"type": "input_text", "text": first + "\n" + second}}},
+			map[string]any{"type": "message", "role": "developer", "content": []any{map[string]any{"type": "input_text", "text": first}, map[string]any{"type": "input_text", "text": second}}},
 			map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": second}}},
 			map[string]any{"type": "function_call_output", "output": map[string]any{"nested": []any{[]any{first}}}},
 		},
@@ -235,7 +237,8 @@ func TestRewriteCodexEnvironmentTimeMultipleBlocksAndRoles(t *testing.T) {
 
 func TestRewriteCodexEnvironmentTimeMalformedFailsClosed(t *testing.T) {
 	cases := map[string][]byte{
-		"unclosed block":         serdeBody("<environment_context><timezone>Asia/Shanghai</timezone>"),
+		"two blocks in one text": serdeBody(envBlock("2026-10-20", "PRC") + "\n" + envBlock("2026-10-21", "PRC")),
+		"inner close then text":  serdeBody("<environment_context><timezone>PRC</timezone></environment_context> hi </environment_context>"),
 		"nested block":           serdeBody("<environment_context><environment_context></environment_context></environment_context>"),
 		"unclosed timezone":      serdeBody("<environment_context><timezone>Asia/Shanghai</environment_context>"),
 		"stray timezone close":   serdeBody("<environment_context>Asia/Shanghai</timezone></environment_context>"),
@@ -252,7 +255,7 @@ func TestRewriteCodexEnvironmentTimeMalformedFailsClosed(t *testing.T) {
 		"attribute timezone tag": serdeBody(`<environment_context><timezone a=\"1\">PRC</timezone></environment_context>`),
 		"unclosed attribute":     serdeBody(`<environment_context><timezone status=\"Asia/Shanghai /></environment_context>`),
 		"bare attribute":         serdeBody(`<environment_context><timezone unavailable /></environment_context>`),
-		"escaped unclosed block": serdeBody(`\u003cenvironment_context\u003e<timezone>PRC</timezone>`),
+		"escaped nested block":   serdeBody(`\u003cenvironment_context\u003e\u003cenvironment_context>\n</environment_context>`),
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -487,7 +490,7 @@ func TestRewriteCodexEnvironmentTimeCreateTimeScope(t *testing.T) {
 }
 
 func TestRewriteCodexEnvironmentTimeMalformedMetadataStringFailsClosed(t *testing.T) {
-	body := []byte(`{"input":[{"internal_chat_message_metadata_passthrough":{"note":"<environment_context><current_date>x"},"content":"hi environment_context"}]}`)
+	body := []byte(`{"input":[{"internal_chat_message_metadata_passthrough":{"note":"<environment_context><current_date>x</environment_context>"},"content":"hi"}]}`)
 	if _, _, err := RewriteCodexEnvironmentTime(body, rewriteNow); !errors.Is(err, ErrCodexEnvironmentMalformed) {
 		t.Fatalf("err = %v", err)
 	}
@@ -497,26 +500,91 @@ func TestRewriteCodexEnvironmentTimeMalformedMetadataStringFailsClosed(t *testin
 // materialized: extra memory is bounded by the block size, not the string.
 func TestRewriteCodexEnvironmentTimeHugeEscapedStringMemory(t *testing.T) {
 	block := strings.ReplaceAll(envBlock("2026-10-01", "Asia/Shanghai"), "\n", `\n`)
-	block = strings.ReplaceAll(block, "<", `\u003c`)                                                  // escaped tags too
-	filler := strings.Repeat(`log line with environment_context \"quoted\" and \u001b[0m\n`, 600_000) // ~33 MiB
-	body := []byte(`{"input":[{"type":"function_call_output","output":"` + filler + block + filler + block + `"}]}`)
+	block = strings.ReplaceAll(block, "<", `\u003c`)                                                    // escaped tags too
+	filler := strings.Repeat(`log line with <environment_context> \"quoted\" and \u001b[0m\n`, 600_000) // ~33 MiB
+	body := []byte(`{"input":[{"type":"function_call_output","output":"` + filler + block + filler + `"},` +
+		`{"type":"message","content":[{"type":"input_text","text":"` + block + `"},{"type":"input_text","text":"` + block + `"}]}]}`)
 
-	var before, after runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&before)
-	out, stats, err := RewriteCodexEnvironmentTime(body, rewriteNow)
-	runtime.ReadMemStats(&after)
+	measure := func(fn func()) int64 {
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		fn()
+		runtime.ReadMemStats(&after)
+		return int64(after.TotalAlloc - before.TotalAlloc)
+	}
+	var out []byte
+	var stats CodexEnvironmentRewriteStats
+	var err error
+	allocated := measure(func() { out, stats, err = RewriteCodexEnvironmentTime(body, rewriteNow) })
 	if err != nil || stats.Blocks != 2 || stats.Timezones != 2 || stats.Dates != 2 {
 		t.Fatalf("err=%v stats=%+v", err, stats)
 	}
 	// The only O(len) allocation is the rewritten output itself.
-	if extra := int64(after.TotalAlloc-before.TotalAlloc) - int64(cap(out)); extra > 4<<20 {
+	if extra := allocated - int64(cap(out)); extra > 4<<20 {
 		t.Fatalf("extra allocation %d bytes for a %d byte body", extra, len(body))
 	}
-	want := bytes.ReplaceAll(body, []byte("Asia/Shanghai"), []byte(CodexRewriteTimezone))
-	want = bytes.ReplaceAll(want, []byte("2026-10-01"), []byte(rewriteToday))
-	if !bytes.Equal(out, want) {
-		t.Fatal("output differs from the expected span replacement")
+	// The huge user string (mentioning the tag mid-text) is untouched; the
+	// two block strings are rewritten.
+	if !bytes.HasPrefix(out, body[:len(`{"input":[{"type":"function_call_output","output":"`)+2*len(filler)+len(block)]) {
+		t.Fatal("user content changed")
+	}
+	if bytes.Count(out, []byte(CodexRewriteTimezone)) != 2 {
+		t.Fatalf("rewritten blocks = %d", bytes.Count(out, []byte(CodexRewriteTimezone)))
+	}
+
+	// A huge string that is shaped like a block fails closed, also bounded.
+	huge := []byte(`{"input":"\u003cenvironment_context>` + filler + `</environment_context>"}`)
+	allocated = measure(func() { _, _, err = RewriteCodexEnvironmentTime(huge, rewriteNow) })
+	if !errors.Is(err, ErrCodexEnvironmentMalformed) || allocated > 4<<20 {
+		t.Fatalf("err=%v allocated=%d", err, allocated)
+	}
+}
+
+// User text that merely mentions the tag is user content: never edited and
+// never rejected, whether the tag is closed or not.
+func TestRewriteCodexEnvironmentTimeUserTextMentioningTag(t *testing.T) {
+	for _, text := range []string{
+		"please explain what <environment_context> means",
+		"see <environment_context><timezone>Asia/Shanghai</timezone></environment_context> above",
+		"<environment_context> is unclosed here",
+		"<environment_context><timezone>Asia/Shanghai</timezone>",
+		"the block ends with </environment_context>",
+		"x <environment_context><timezone>PRC</timezone></environment_context>",
+	} {
+		for _, body := range [][]byte{serdeBody(text), responsesBody(t, text)} {
+			out, stats, err := RewriteCodexEnvironmentTime(body, rewriteNow)
+			if err != nil || stats.Changed() || !bytes.Equal(out, body) {
+				t.Fatalf("%q: err=%v stats=%+v", text, err, stats)
+			}
+		}
+	}
+}
+
+// Real Codex 0.164.0 environment strings (monitor captures) and the
+// multi-environment / subagents renderings from codex-rs tests.
+func TestRewriteCodexEnvironmentTimeRealCodexStrings(t *testing.T) {
+	captured := "<environment_context>\n  <cwd>/tmp/lab/work</cwd>\n  <shell>sh</shell>\n  <current_date>2026-10-25</current_date>\n  <timezone>Asia/Shanghai</timezone>\n  <filesystem><workspace_roots><root>/tmp/lab/work</root></workspace_roots><permission_profile type=\"managed\"><file_system type=\"restricted\"><entry access=\"read\"><special>:root</special></entry></file_system></permission_profile></filesystem>\n</environment_context>"
+	multi := "<environment_context>\n  <environments>\n    <environment id=\"local\" primary=\"true\">\n      <cwd>/repo/local</cwd>\n      <shell>bash</shell>\n    </environment>\n    <environment id=\"remote\" primary=\"false\">\n      <cwd>/repo/remote</cwd>\n      <shell>bash</shell>\n    </environment>\n  </environments>\n  <current_date>2026-02-26</current_date>\n  <timezone>Asia/Shanghai</timezone>\n</environment_context>"
+	subagents := "<environment_context>\n  <cwd>/repo</cwd>\n  <shell>bash</shell>\n  <current_date>2026-02-26</current_date>\n  <timezone>Asia/Shanghai</timezone>\n  <subagents>\n    - agent-1: atlas\n    - agent-2\n  </subagents>\n</environment_context>"
+	noTime := "<environment_context>\n  <cwd>/tmp/lab/work</cwd>\n  <shell>sh</shell>\n</environment_context>"
+	for name, text := range map[string]string{"captured": captured, "multi": multi, "subagents": subagents} {
+		for _, body := range [][]byte{serdeBody(strings.ReplaceAll(text, `"`, `\"`)), responsesBody(t, text)} {
+			out, stats := mustRewrite(t, body)
+			if stats.Blocks != 1 || stats.Timezones != 1 || stats.Dates != 1 {
+				t.Fatalf("%s: stats = %+v", name, stats)
+			}
+			got := decodedTexts(t, out)[0]
+			want := strings.Replace(text, "Asia/Shanghai", CodexRewriteTimezone, 1)
+			want = regexp.MustCompile(`<current_date>[0-9-]+</current_date>`).ReplaceAllString(want, "<current_date>"+rewriteToday+"</current_date>")
+			if got != want {
+				t.Fatalf("%s:\ngot  %q\nwant %q", name, got, want)
+			}
+		}
+	}
+	out, stats := mustRewrite(t, serdeBody(noTime))
+	if stats.Blocks != 1 || stats.Changed() || !bytes.Equal(out, serdeBody(noTime)) {
+		t.Fatalf("time-less block: stats = %+v", stats)
 	}
 }
 

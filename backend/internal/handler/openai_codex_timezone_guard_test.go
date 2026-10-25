@@ -241,7 +241,7 @@ func TestCodexTimezoneGuardWSRebuiltPayloadIsScanned(t *testing.T) {
 	rewrite := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
 	_, _, found = codexTimezoneGuardZone(rewrite, rebuilt)
 	require.False(t, found)
-	reason, _, found = codexTimezoneGuardZone(rewrite, []byte(`{"input":"<environment_context><timezone>PRC</timezone>"}`))
+	reason, _, found = codexTimezoneGuardZone(rewrite, []byte(`{"input":"<environment_context><timezone>PRC</environment_context>"}`))
 	require.True(t, found)
 	require.Equal(t, codexTimezoneRejectMalformed, reason)
 }
@@ -285,7 +285,7 @@ func newTZRewriteFixture(t *testing.T) *tzGuardFixture {
 	return f
 }
 
-const tzGuardMalformedBody = `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <timezone>Asia/Shanghai</timezone>"}]}]}`
+const tzGuardMalformedBody = `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <timezone>Asia/Shanghai\n</environment_context>"}]}]}`
 
 func TestCodexTimezoneRewriteHTTPNeverRejectsZoneButFailsClosed(t *testing.T) {
 	f := newTZRewriteFixture(t)
@@ -376,7 +376,7 @@ func TestCodexTimezoneRewriteWSFirstFrame(t *testing.T) {
 	require.Equal(t, int32(1), f.slotCalls.Load())
 
 	conn, ctx = dialTZGuardWS(t, f.router)
-	malformed := `{"type":"response.create","model":"TEST_ONLY_MODEL","input":"<environment_context><timezone>PRC</timezone>"}`
+	malformed := `{"type":"response.create","model":"TEST_ONLY_MODEL","input":"<environment_context><timezone>PRC</environment_context>"}`
 	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(malformed)))
 	_, frame, err := conn.Read(ctx)
 	require.NoError(t, err)
@@ -401,4 +401,26 @@ func TestRewriteCodexTimezoneWS(t *testing.T) {
 	out, err := rewriteCodexTimezoneWS(context.Background(), c, nil, group, 1, 2, tagged, dates)
 	require.NoError(t, err)
 	require.Equal(t, `{"type":"response.create","input":"<environment_context><timezone>America/Los_Angeles</timezone></environment_context>"}`, string(out))
+}
+
+// Acceptance false positive: a user prompt that mentions the tag (closed or
+// not, mid-sentence) is user content in rewrite mode: forwarded, not rejected.
+func TestCodexTimezoneRewriteUserTextMentioningTagIsNotRejected(t *testing.T) {
+	f := newTZRewriteFixture(t)
+	for i, text := range []string{
+		`what does <environment_context> mean?`,
+		`see <environment_context><timezone>Asia/Shanghai</timezone></environment_context> above`,
+	} {
+		body := `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`
+		rec := f.post("/v1/responses", body)
+		require.NotContains(t, rec.Body.String(), codexTimezoneGuardCode)
+		require.Equal(t, int32(i+1), f.slotCalls.Load(), "proceeds to scheduling")
+
+		conn, ctx := dialTZGuardWS(t, f.router)
+		frame := `{"type":"response.create","model":"TEST_ONLY_MODEL","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`
+		require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(frame)))
+		_, _, err := conn.Read(ctx)
+		require.Equal(t, coderws.StatusInternalError, coderws.CloseStatus(err), "WS proceeds to scheduling, no rejection frame")
+		f.slotCalls.Add(-1)
+	}
 }

@@ -88,8 +88,15 @@ The scan is read-only; forwarded bytes are unchanged.
 
 ### Rewrite
 
-Inside every `<environment_context>`…`</environment_context>` block found in
-a JSON string **value** (any depth, any role; object keys are ignored) each
+Codex renders each environment context as its own content item whose text is
+exactly `<environment_context>`BODY`</environment_context>` (BODY XML-escapes
+values; verified in codex-rs 0.163 `ContextualUserFragment::render` and in
+0.163/0.164 monitor captures, including WebSocket frames). A JSON string
+**value** (any depth, any role; object keys are ignored) is an environment
+block only if its decoded text, trimmed of ASCII whitespace, starts with
+`<environment_context>` and ends with `</environment_context>`. Any other
+string — e.g. a user prompt that mentions the tag mid-sentence, closed or not —
+is user content: never rewritten and never rejected. Inside a block string each
 `<timezone>` value other than `America/Los_Angeles` becomes
 `America/Los_Angeles` and each `<current_date>` value becomes a Los Angeles
 date: the date of the enclosing input item's
@@ -119,8 +126,8 @@ string length. Inside a block every
 `<timezone…`/`<current_date…` tag must be an exact tag, or a value-less
 self-closing tag with quoted attributes (`<current_date status="unavailable" />`);
 tag values may not contain markup. A body without
-`environment_context` and without a `\u` escape is not parsed. An unclosed or
-nested block, an unpaired or nested `<timezone>`/`<current_date>` tag inside a
+`environment_context` and without a `\u` escape is not parsed. A block string
+containing a second open or close tag (nested or multiple blocks), an unpaired or nested `<timezone>`/`<current_date>` tag inside a
 block, or invalid JSON fails closed: the request is rejected (same 400 /
 reinit message) and the original bytes are never forwarded.
 
@@ -194,8 +201,9 @@ Limitations:
 
 - Native `/codex/images` and ChatGPT conversation routes are not covered. In
   reject mode a user message that literally contains such a tag is also
-  rejected (accepted false positive); rewrite mode only touches
-  `<environment_context>` blocks, so a pasted block is rewritten too.
+  rejected (accepted false positive); rewrite mode only touches strings that
+  are entirely one `<environment_context>` block, so only a pasted message
+  consisting of exactly such a block is rewritten (or, if malformed, rejected).
 - Reject mode scans JSON object keys as well as values.
 - A large JSON string that contains an escape and the word `timezone` (reject)
   or `environment_context` (rewrite) is decoded into a transient buffer up to
@@ -219,9 +227,14 @@ override the `version` header. With both bounds empty every known version is
 admitted and unknown versions are still rejected.
 
 - Checked for Responses HTTP (all subpaths, including `/responses/compact`)
-  before account selection / stream start, and for the Responses WebSocket
-  upgrade before Accept (plain HTTP 400). WebSocket sessions are not
-  re-checked: the version is fixed per connection.
+  before account selection / stream start (HTTP 400). WebSocket connections
+  are upgraded and, after the first client frame is read, receive
+  `{"type":"error","status":400,"error":{"type":"invalid_request_error","code":"codex_version_unsupported","message":"..."}}`
+  and close 1008 `codex version unsupported`, before any account selection
+  or upstream connection. A non-101 handshake response would be turned into
+  a retryable 502 by the SAIAI client local proxy (Codex then retries the
+  WebSocket and falls back to HTTPS); the error frame passes through it.
+  WebSocket sessions are not re-checked: the version is fixed per connection.
 - Rejection: 400 `invalid_request_error`, `error.code`
   `codex_version_unsupported`, a short message (Codex prints the whole body):
   `当前 Codex 引擎版本 X 不在允许范围 [min, max]。请安装 Y：npm i -g @openai/codex@Y；若使用后台进程再执行 codex app-server daemon update --from-cli -y，然后重启 Codex。Desktop/VS Code 请等待管理员放行。`

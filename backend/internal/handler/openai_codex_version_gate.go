@@ -14,8 +14,10 @@ import (
 // codex_min_version / codex_max_version) admits official Codex clients only
 // when their engine version is inside the configured range. It applies to
 // Responses HTTP (all subpaths, including /responses/compact) before account
-// selection and to the Responses WebSocket upgrade before Accept; WebSocket
-// sessions are not re-checked because the version is fixed per connection.
+// selection (HTTP 400) and to Responses WebSocket connections, where the 400
+// is sent after the upgrade as an error frame followed by close 1008, before
+// any account selection or upstream connection; WebSocket sessions are not
+// re-checked because the version is fixed per connection.
 // Non-Codex clients are unaffected. The engine version must be stated
 // identically by the `version` header and the User-Agent; anything else is
 // unknown and rejected while the gate is on (this includes custom provider
@@ -100,4 +102,16 @@ func (h *OpenAIGatewayHandler) validateCodexVersionGateHTTP(c *gin.Context) bool
 	}
 	h.writeError(c, *envelope, false)
 	return false
+}
+
+// codexVersionGateWSRejection carries the HTTP rejection as a WebSocket error
+// frame (`{"type":"error","status":400,...}`) and close 1008.
+func codexVersionGateWSRejection(envelope *gatewayErrorEnvelope) *openAIWSSessionRejection {
+	return &openAIWSSessionRejection{
+		status:  envelope.Status,
+		errType: envelope.Type,
+		code:    envelope.Code,
+		message: envelope.Message,
+		reason:  "codex version unsupported",
+	}
 }
