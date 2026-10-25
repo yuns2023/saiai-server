@@ -1745,12 +1745,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	if !h.ensureResponsesDependencies(c, reqLog) {
 		return
 	}
-	// The version is fixed per connection: check it once, before the
-	// upgrade, so Codex receives a plain non-retryable HTTP 400.
-	if envelope := h.codexVersionGateRejection(c, "ws"); envelope != nil {
-		h.writeError(c, *envelope, false)
-		return
-	}
+	// The version is fixed per connection: check it once. The rejection is
+	// delivered after the upgrade as an error frame + close 1008 (like the
+	// timezone guard): a local proxy may turn a non-101 handshake into a
+	// retryable 502, while the error frame reaches Codex unchanged.
+	versionRejection := h.codexVersionGateRejection(c, "ws")
 	reqLog.Info("openai.websocket_ingress_started")
 	clientIP := ip.GetClientIP(c)
 	userAgent := strings.TrimSpace(c.GetHeader("User-Agent"))
@@ -1779,6 +1778,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	msgType, firstMessage, err := wsConn.Read(readCtx)
 	cancel()
+	if versionRejection != nil {
+		// Before any validation, account selection or upstream connection;
+		// best effort even if the first frame could not be read.
+		closeOpenAIWSRejectedSession(c, wsConn, rejectOpenAIWSSession(ctx, c, wsConn, codexVersionGateWSRejection(versionRejection)))
+		return
+	}
 	if err != nil {
 		closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
 		reqLog.Warn("openai.websocket_read_first_message_failed",

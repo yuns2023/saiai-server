@@ -241,7 +241,7 @@ func TestCodexTimezoneGuardWSRebuiltPayloadIsScanned(t *testing.T) {
 	rewrite := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
 	_, _, found = codexTimezoneGuardZone(rewrite, rebuilt)
 	require.False(t, found)
-	reason, _, found = codexTimezoneGuardZone(rewrite, []byte(`{"input":"<environment_context><timezone>PRC</timezone>"}`))
+	reason, _, found = codexTimezoneGuardZone(rewrite, []byte(`{"input":"<environment_context><timezone>PRC</environment_context>"}`))
 	require.True(t, found)
 	require.Equal(t, codexTimezoneRejectMalformed, reason)
 }
@@ -285,7 +285,7 @@ func newTZRewriteFixture(t *testing.T) *tzGuardFixture {
 	return f
 }
 
-const tzGuardMalformedBody = `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <timezone>Asia/Shanghai</timezone>"}]}]}`
+const tzGuardMalformedBody = `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <timezone>Asia/Shanghai\n</environment_context>"}]}]}`
 
 func TestCodexTimezoneRewriteHTTPNeverRejectsZoneButFailsClosed(t *testing.T) {
 	f := newTZRewriteFixture(t)
@@ -370,13 +370,14 @@ func TestCodexTimezoneDatesAreFrozen(t *testing.T) {
 func TestCodexTimezoneRewriteWSFirstFrame(t *testing.T) {
 	f := newTZRewriteFixture(t)
 	conn, ctx := dialTZGuardWS(t, f.router)
-	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(tzGuardTaggedFrame)))
+	blockFrame := `{"type":"response.create","model":"TEST_ONLY_MODEL","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context><timezone>Asia/Hong_Kong</timezone></environment_context>"}]}]}`
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(blockFrame)))
 	_, _, err := conn.Read(ctx)
 	require.Equal(t, coderws.StatusInternalError, coderws.CloseStatus(err), "rewrite mode: proceeds to scheduling")
 	require.Equal(t, int32(1), f.slotCalls.Load())
 
 	conn, ctx = dialTZGuardWS(t, f.router)
-	malformed := `{"type":"response.create","model":"TEST_ONLY_MODEL","input":"<environment_context><timezone>PRC</timezone>"}`
+	malformed := `{"type":"response.create","model":"TEST_ONLY_MODEL","input":"<environment_context><timezone>PRC</environment_context>"}`
 	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(malformed)))
 	_, frame, err := conn.Read(ctx)
 	require.NoError(t, err)
@@ -401,4 +402,101 @@ func TestRewriteCodexTimezoneWS(t *testing.T) {
 	out, err := rewriteCodexTimezoneWS(context.Background(), c, nil, group, 1, 2, tagged, dates)
 	require.NoError(t, err)
 	require.Equal(t, `{"type":"response.create","input":"<environment_context><timezone>America/Los_Angeles</timezone></environment_context>"}`, string(out))
+}
+
+// Acceptance false positive: a user prompt that mentions the tag (closed or
+// not, mid-sentence) is user content in rewrite mode: forwarded, not rejected.
+func TestCodexTimezoneRewriteUserTextMentioningTagIsNotRejected(t *testing.T) {
+	f := newTZRewriteFixture(t)
+	for i, text := range []string{
+		`what does <environment_context> mean?`,
+		`see <environment_context><timezone>Europe/Berlin</timezone></environment_context> above`,
+	} {
+		body := `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`
+		rec := f.post("/v1/responses", body)
+		require.NotContains(t, rec.Body.String(), codexTimezoneGuardCode)
+		require.Equal(t, int32(i+1), f.slotCalls.Load(), "proceeds to scheduling")
+
+		conn, ctx := dialTZGuardWS(t, f.router)
+		frame := `{"type":"response.create","model":"TEST_ONLY_MODEL","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`
+		require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(frame)))
+		_, _, err := conn.Read(ctx)
+		require.Equal(t, coderws.StatusInternalError, coderws.CloseStatus(err), "WS proceeds to scheduling, no rejection frame")
+		f.slotCalls.Add(-1)
+	}
+}
+
+// Leak safety net: after rewriting, the bytes to send are scanned like reject
+// mode. A CN zone the rewrite did not handle (unrecognised block shape or a
+// pasted tag) is rejected; plain mentions of the tag still pass.
+func TestCodexTimezoneRewriteLeakSafetyNet(t *testing.T) {
+	group := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
+	leaking := []string{
+		// Unrecognised shape: extra text in the same string as the block.
+		`note: <environment_context><timezone>Asia/Shanghai</timezone></environment_context>`,
+		`<timezone>Asia/Hong_Kong</timezone>`,
+	}
+	for _, text := range leaking {
+		body := []byte(`{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`)
+		_, _, reason, zone := rewriteCodexTimezonePayload(group, body, time.Now())
+		require.Equal(t, codexTimezoneRejectAfterRewrite, reason, text)
+		require.NotEmpty(t, zone)
+		reason, _, found := codexTimezoneGuardZone(group, body)
+		require.True(t, found, "checkpoints reject it too")
+		require.Equal(t, codexTimezoneRejectAfterRewrite, reason)
+	}
+	for _, text := range []string{
+		`what does <environment_context> mean?`,
+		`<environment_context><timezone>Asia/Shanghai</timezone></environment_context>`, // a real block: rewritten
+		`see <environment_context><timezone>America/New_York</timezone></environment_context>`,
+	} {
+		body := []byte(`{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`)
+		_, _, reason, _ := rewriteCodexTimezonePayload(group, body, time.Now())
+		require.Empty(t, reason, text)
+	}
+
+	// End to end over HTTP and WS.
+	f := newTZRewriteFixture(t)
+	leak := `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"x <environment_context><timezone>Asia/Shanghai</timezone></environment_context>"}]}]}`
+	rec := f.post("/v1/responses", leak)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, codexTimezoneGuardCode, gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
+	conn, ctx := dialTZGuardWS(t, f.router)
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"TEST_ONLY_MODEL","input":"x <timezone>PRC</timezone>"}`)))
+	_, frame, err := conn.Read(ctx)
+	require.NoError(t, err)
+	requireTZGuardErrorFrame(t, frame, codexTimezoneGuardMessageOld)
+	require.Zero(t, f.slotCalls.Load(), "rejected before scheduling")
+}
+
+// The send-time WS rewrite rejects too, and a block that is rewritten does
+// not shield a CN zone left in another string of the same payload.
+func TestRewriteCodexTimezoneWSLeakSafetyNet(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
+	mixed := []byte(`{"type":"response.create","input":[{"type":"message","content":[{"type":"input_text","text":"<environment_context><timezone>Asia/Shanghai</timezone></environment_context>"},{"type":"input_text","text":"pasted <timezone>Asia/Macau</timezone>"}]}]}`)
+	_, _, reason, zone := rewriteCodexTimezonePayload(group, mixed, time.Now())
+	require.Equal(t, codexTimezoneRejectAfterRewrite, reason)
+	require.Equal(t, "Asia/Macau", zone)
+
+	results := make(chan error, 1)
+	router := gin.New()
+	router.GET("/v1/responses", func(c *gin.Context) {
+		conn, err := coderws.Accept(c.Writer, c.Request, nil)
+		if err != nil {
+			results <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		out, rewriteErr := rewriteCodexTimezoneWS(c.Request.Context(), c, conn, group, 1, 2, mixed, &codexTimezoneTurnDates{})
+		require.Nil(t, out)
+		results <- rewriteErr
+	})
+	conn, ctx := dialTZGuardWS(t, router)
+	_, frame, err := conn.Read(ctx)
+	require.NoError(t, err)
+	requireTZGuardErrorFrame(t, frame, codexTimezoneGuardMessageOld)
+	var closeErr *service.OpenAIWSClientCloseError
+	require.ErrorAs(t, <-results, &closeErr)
+	require.Equal(t, coderws.StatusPolicyViolation, closeErr.StatusCode())
 }

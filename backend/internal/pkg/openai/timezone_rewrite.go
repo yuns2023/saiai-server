@@ -348,8 +348,15 @@ func (rw *codexEnvironmentRewriter) itemDate(body []byte, item int) []byte {
 	return date
 }
 
-// stringValue rewrites the blocks of one string value whose raw content is
-// body[start:end].
+// stringValue rewrites the environment block of one string value whose raw
+// content is body[start:end]. Codex renders each environment context as a
+// dedicated content item whose text is exactly
+// `<environment_context>`BODY`</environment_context>` (BODY XML-escapes
+// values, so it never contains either tag). Only a string whose decoded
+// content, trimmed of ASCII whitespace, starts with the open tag and ends
+// with the close tag is an environment block; any other string (for example
+// user text that mentions the tag) is user content: never edited and never
+// rejected. A matching string whose inner content is malformed fails closed.
 func (rw *codexEnvironmentRewriter) stringValue(body []byte, start, end int, escaped bool) error {
 	raw := body[start:end]
 	if !escaped {
@@ -365,41 +372,51 @@ func (rw *codexEnvironmentRewriter) stringValue(body []byte, start, end int, esc
 }
 
 // codexEnvironmentBlockMaxBytes bounds one decoded block (Codex renders well
-// under 4 KiB); a larger or unterminated block is malformed. It also bounds
-// the memory used to decode an escaped string.
+// under 4 KiB); a larger block is malformed. It also bounds the memory used
+// to decode an escaped string.
 const codexEnvironmentBlockMaxBytes = 64 << 10
 
-// rewriteText records edits for the blocks of an unescaped string, searched
-// in place; rawBase is the body offset of the string content.
+func isASCIISpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == '\v'
+}
+
+// rewriteText handles an unescaped string in place; rawBase is the body
+// offset of the string content.
 func (rw *codexEnvironmentRewriter) rewriteText(text []byte, rawBase int) error {
-	for pos := 0; ; {
-		open := bytes.Index(text[pos:], environmentContextOpenTag)
-		if open < 0 {
-			return nil
-		}
-		blockStart := pos + open + len(environmentContextOpenTag)
-		closeAt := bytes.Index(text[blockStart:], environmentContextCloseTag)
-		if closeAt < 0 || closeAt > codexEnvironmentBlockMaxBytes {
-			return ErrCodexEnvironmentMalformed
-		}
-		blockEnd := blockStart + closeAt
-		base := rawBase + blockStart
-		if err := rw.rewriteBlock(text[blockStart:blockEnd], func(i int) int { return base + i }); err != nil {
-			return err
-		}
-		pos = blockEnd + len(environmentContextCloseTag)
+	first, last := 0, len(text)
+	for first < last && isASCIISpace(text[first]) {
+		first++
 	}
+	for last > first && isASCIISpace(text[last-1]) {
+		last--
+	}
+	trimmed := text[first:last]
+	if len(trimmed) < len(environmentContextOpenTag)+len(environmentContextCloseTag) ||
+		!bytes.HasPrefix(trimmed, environmentContextOpenTag) || !bytes.HasSuffix(trimmed, environmentContextCloseTag) {
+		return nil
+	}
+	blockStart := first + len(environmentContextOpenTag)
+	block := text[blockStart : last-len(environmentContextCloseTag)]
+	base := rawBase + blockStart
+	return rw.rewriteBlock(block, func(i int) int { return base + i })
 }
 
 // rewriteEscapedText decodes an escaped string unit by unit without
-// materializing it: outside blocks only the open-tag match state is kept,
-// and only block content (bounded by codexEnvironmentBlockMaxBytes) is
-// buffered with the raw offset of each decoded byte. Extra memory is
-// O(block size), independent of the string length.
+// materializing it. Leading whitespace is skipped and the open tag must
+// follow, otherwise the string is user content and decoding stops. After the
+// open tag, content is buffered with the raw offset of each decoded byte up
+// to the block limit (beyond it only a 0/1 overflow flag is kept), and the
+// last bytes are tracked to learn whether the trimmed string ends with the
+// close tag. Extra memory is O(block limit), independent of the string length.
 func (rw *codexEnvironmentRewriter) rewriteEscapedText(raw []byte, rawBase int) error {
 	var unit [8]byte
-	matched := 0 // bytes of environmentContextOpenTag matched outside a block
-	inBlock := false
+	const bufferLimit = codexEnvironmentBlockMaxBytes + 64
+	matched := 0      // bytes of the open tag matched so far
+	contentLen := 0   // buffered bytes up to the last non-whitespace byte
+	overflow := false // content (not just trailing whitespace) beyond the buffer
+	endsWithClose := false
+	var recent [64]byte // last decoded bytes after the open tag
+	recentLen := 0
 	rw.buf, rw.offs = rw.buf[:0], rw.offs[:0]
 	for i := 0; i < len(raw); {
 		unitStart := i
@@ -423,48 +440,56 @@ func (rw *codexEnvironmentRewriter) rewriteEscapedText(raw []byte, rawBase int) 
 			i = end
 		}
 		for _, b := range decoded {
-			if !inBlock {
-				switch b {
-				case environmentContextOpenTag[matched]:
+			if matched < len(environmentContextOpenTag) {
+				switch {
+				case matched == 0 && isASCIISpace(b):
+				case b == environmentContextOpenTag[matched]:
 					matched++
-				case '<':
-					matched = 1
 				default:
-					matched = 0
+					return nil // user content
 				}
-				if matched == len(environmentContextOpenTag) {
-					inBlock, matched = true, 0
-					rw.buf, rw.offs = rw.buf[:0], rw.offs[:0]
+				continue
+			}
+			if recentLen == len(recent) {
+				copy(recent[:], recent[len(recent)-len(environmentContextCloseTag):])
+				recentLen = len(environmentContextCloseTag)
+			}
+			recent[recentLen] = b
+			recentLen++
+			space := isASCIISpace(b)
+			if !space {
+				endsWithClose = bytes.HasSuffix(recent[:recentLen], environmentContextCloseTag)
+			}
+			if len(rw.buf) >= bufferLimit {
+				if !space {
+					overflow = true
 				}
 				continue
 			}
 			rw.buf = append(rw.buf, b)
 			rw.offs = append(rw.offs, rawBase+unitStart)
-			if b == '>' && bytes.HasSuffix(rw.buf, environmentContextCloseTag) {
-				blockLen := len(rw.buf) - len(environmentContextCloseTag)
-				offs := rw.offs
-				if err := rw.rewriteBlock(rw.buf[:blockLen], func(i int) int { return offs[i] }); err != nil {
-					return err
-				}
-				inBlock = false
-				continue
-			}
-			if len(rw.buf) > codexEnvironmentBlockMaxBytes+len(environmentContextCloseTag) {
-				return ErrCodexEnvironmentMalformed
+			if !space {
+				contentLen = len(rw.buf)
 			}
 		}
 	}
-	if inBlock {
+	if matched < len(environmentContextOpenTag) || !endsWithClose {
+		return nil // user content
+	}
+	if overflow || contentLen < len(environmentContextCloseTag) {
 		return ErrCodexEnvironmentMalformed
 	}
-	return nil
+	blockLen := contentLen - len(environmentContextCloseTag)
+	offs := rw.offs
+	return rw.rewriteBlock(rw.buf[:blockLen], func(i int) int { return offs[i] })
 }
 
 // rewriteBlock validates one decoded block and records its edits. rawOffset
 // maps a block index (up to len(block)) to the body offset of the unit that
 // produced it.
 func (rw *codexEnvironmentRewriter) rewriteBlock(block []byte, rawOffset func(int) int) error {
-	if len(block) > codexEnvironmentBlockMaxBytes || bytes.Contains(block, environmentContextOpenTag) {
+	if len(block) > codexEnvironmentBlockMaxBytes || bytes.Contains(block, environmentContextOpenTag) ||
+		bytes.Contains(block, environmentContextCloseTag) {
 		return ErrCodexEnvironmentMalformed
 	}
 	if !rw.noEdit {
