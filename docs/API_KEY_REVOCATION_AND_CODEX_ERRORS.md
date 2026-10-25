@@ -96,12 +96,14 @@ date: the date of the enclosing input item's
 `internal_chat_message_metadata_passthrough.create_time` (Codex 0.164+, HTTP
 and WebSocket; a JSON number of epoch seconds, usually fractional) when it is
 within [2020-01-01, frozen now + 24h], otherwise the server's frozen current
-date. The item is the nearest enclosing JSON object carrying that key, whether
-it appears before or after `content`; a non-object metadata value, a missing,
-non-numeric or out-of-range `create_time` (e.g. milliseconds) falls back to the
-frozen date, and a duplicated metadata key fails closed. `create_time` itself
-is never modified, so history blocks keep the day their item was created. `<current_date status="unavailable" />` and every
-tag outside a block are untouched (and never cause a rejection). The clock is
+date. The item is the element of the top-level `input` array that contains
+the block, and the key must be the item's own (before or after `content`;
+same-name keys nested elsewhere are ignored); blocks outside input items, a
+non-object metadata value, or a missing, non-numeric or out-of-range
+`create_time` (e.g. milliseconds) use the frozen date, and a duplicated
+metadata key fails closed. Strings inside the metadata, `create_time`
+included, are never modified, so history blocks keep the day their item was
+created (malformed blocks in metadata strings still fail closed). `<current_date status="unavailable" />` and every tag outside a block are untouched (and never cause a rejection). The clock is
 frozen once per HTTP request and once per WebSocket client turn; smart-switch
 re-application, retries and failover replays of that request/turn reuse it.
 The zone comes from the system or the embedded tzdata; if it cannot be loaded

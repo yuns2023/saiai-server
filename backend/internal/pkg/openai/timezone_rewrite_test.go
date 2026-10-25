@@ -443,3 +443,51 @@ func TestRewriteCodexEnvironmentTimeMultipleItemsAndWSFrame(t *testing.T) {
 		t.Fatal("create_time changed")
 	}
 }
+
+func TestRewriteCodexEnvironmentTimeCreateTimeScope(t *testing.T) {
+	block := strings.ReplaceAll(envBlock("2026-10-01", "Asia/Shanghai"), "\n", `\n`)
+	itemTime := epochSeconds(time.Date(2026, 10, 20, 18, 0, 0, 0, time.UTC)) // 2026-10-20 LA
+	otherTime := epochSeconds(time.Date(2026, 10, 10, 18, 0, 0, 0, time.UTC))
+	cases := map[string]struct{ body, date string }{
+		// A same-name key nested in content does not override the item's.
+		"nested_same_key": {`{"input":[{"content":[{"internal_chat_message_metadata_passthrough":{"create_time":` + otherTime + `},"text":"` + block + `"}],"internal_chat_message_metadata_passthrough":{"create_time":` + itemTime + `}}]}`, "2026-10-20"},
+		// An item without metadata does not borrow from the root object.
+		"no_borrow_from_root": {`{"internal_chat_message_metadata_passthrough":{"create_time":` + itemTime + `},"input":[{"content":"` + block + `"}]}`, rewriteToday},
+		// A non-input array is not an item list.
+		"outside_input": {`{"other":[{"internal_chat_message_metadata_passthrough":{"create_time":` + itemTime + `},"content":"` + block + `"}]}`, rewriteToday},
+		// An escaped metadata key is still recognised.
+		"escaped_key": {`{"input":[{"content":"` + block + `","internal\u005fchat_message_metadata_passthrough":{"create_time":` + itemTime + `}}]}`, "2026-10-20"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			out, _ := mustRewrite(t, []byte(tc.body))
+			if !bytes.Contains(out, []byte("<current_date>"+tc.date+"</current_date>")) {
+				t.Fatalf("got %s", out)
+			}
+		})
+	}
+
+	// Strings inside the metadata (create_time included) are never edited.
+	body := []byte(`{"input":[{"internal_chat_message_metadata_passthrough":{"create_time":"` + block + `","x":["` + block + `"]},"content":"` + block + `"}]}`)
+	out, stats := mustRewrite(t, body)
+	if stats.Dates != 1 || bytes.Count(out, []byte("Asia/Shanghai")) != 2 {
+		t.Fatalf("stats=%+v got %s", stats, out)
+	}
+
+	// The upper bound keeps fractional seconds: frozen now has .9s and the
+	// item is 24h+0.5s later, which is inside now+24h.
+	now := time.Date(2026, 10, 24, 20, 0, 0, 900_000_000, time.UTC)
+	createTime := fmt.Sprintf("%d.5", now.Add(24*time.Hour).Unix())
+	body = codexItemsBody("", codexItem(envBlock("2026-10-01", "Asia/Shanghai"), createTime, true))
+	out, _, err := RewriteCodexEnvironmentTime(body, now)
+	if err != nil || !bytes.Contains(out, []byte("<current_date>2026-10-25</current_date>")) {
+		t.Fatalf("err=%v got %s", err, out)
+	}
+}
+
+func TestRewriteCodexEnvironmentTimeMalformedMetadataStringFailsClosed(t *testing.T) {
+	body := []byte(`{"input":[{"internal_chat_message_metadata_passthrough":{"note":"<environment_context><current_date>x"},"content":"hi environment_context"}]}`)
+	if _, _, err := RewriteCodexEnvironmentTime(body, rewriteNow); !errors.Is(err, ErrCodexEnvironmentMalformed) {
+		t.Fatalf("err = %v", err)
+	}
+}
