@@ -270,6 +270,11 @@ func CodexClientPolicy(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCodexClientPolicy, v))
 }
 
+// CodexCnTimezoneGuard applies equality check predicate on the "codex_cn_timezone_guard" field. It's identical to CodexCnTimezoneGuardEQ.
+func CodexCnTimezoneGuard(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldCodexCnTimezoneGuard, v))
+}
+
 // ClaudeDeviceLimitMode applies equality check predicate on the "claude_device_limit_mode" field. It's identical to ClaudeDeviceLimitModeEQ.
 func ClaudeDeviceLimitMode(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldClaudeDeviceLimitMode, v))
@@ -2033,6 +2038,16 @@ func CodexClientPolicyEqualFold(v string) predicate.Group {
 // CodexClientPolicyContainsFold applies the ContainsFold predicate on the "codex_client_policy" field.
 func CodexClientPolicyContainsFold(v string) predicate.Group {
 	return predicate.Group(sql.FieldContainsFold(FieldCodexClientPolicy, v))
+}
+
+// CodexCnTimezoneGuardEQ applies the EQ predicate on the "codex_cn_timezone_guard" field.
+func CodexCnTimezoneGuardEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldCodexCnTimezoneGuard, v))
+}
+
+// CodexCnTimezoneGuardNEQ applies the NEQ predicate on the "codex_cn_timezone_guard" field.
+func CodexCnTimezoneGuardNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldCodexCnTimezoneGuard, v))
 }
 
 // ClaudeDeviceLimitModeEQ applies the EQ predicate on the "claude_device_limit_mode" field.

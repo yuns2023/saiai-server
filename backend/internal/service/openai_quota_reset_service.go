@@ -208,31 +208,24 @@ type codexControlWindow struct {
 	ResetAt       *int64   `json:"reset_at"`
 }
 
-func (s *OpenAIQuotaResetService) syncUsage(ctx context.Context, account *Account) error {
-	// Drain in-flight writes before fetching authoritative usage. Observations
-	// received after this boundary may legitimately describe later traffic.
-	state, release, err := s.rateLimits.lockCodexUsageWrite(ctx, account.ID)
-	if err != nil {
-		return err
-	}
-	defer release()
-	boundary := time.Now()
-	var usage struct {
-		RateLimit *struct {
-			Allowed      *bool               `json:"allowed"`
-			LimitReached *bool               `json:"limit_reached"`
-			Primary      *codexControlWindow `json:"primary_window"`
-			Secondary    *codexControlWindow `json:"secondary_window"`
-		} `json:"rate_limit"`
-	}
-	if err := s.request(ctx, account, http.MethodGet, "/usage", nil, &usage); err != nil {
-		return err
+// codexWhamUsage is the subset of GET /wham/usage the gateway consumes.
+type codexWhamUsage struct {
+	RateLimit *struct {
+		Allowed      *bool               `json:"allowed"`
+		LimitReached *bool               `json:"limit_reached"`
+		Primary      *codexControlWindow `json:"primary_window"`
+		Secondary    *codexControlWindow `json:"secondary_window"`
+	} `json:"rate_limit"`
+}
+
+// codexWhamUsageSnapshot validates both /wham/usage windows and converts
+// them into the usage snapshot shape shared with response headers. It also
+// returns the latest reset time of an exhausted window (zero if none).
+func codexWhamUsageSnapshot(usage *codexWhamUsage, now time.Time) (*OpenAICodexUsageSnapshot, time.Time, error) {
+	if usage == nil || usage.RateLimit == nil {
+		return nil, time.Time{}, resetError(http.StatusBadGateway, "CODEX_USAGE_MISSING", "Codex usage windows are unavailable")
 	}
 	limit := usage.RateLimit
-	if limit == nil {
-		return resetError(http.StatusBadGateway, "CODEX_USAGE_MISSING", "Codex usage windows are unavailable")
-	}
-	now := time.Now().UTC()
 	snapshot := &OpenAICodexUsageSnapshot{UpdatedAt: now.Format(time.RFC3339), ObservedAt: now}
 	windows := []*codexControlWindow{limit.Primary, limit.Secondary}
 	seen := map[int]bool{}
@@ -241,7 +234,7 @@ func (s *OpenAIQuotaResetService) syncUsage(ctx context.Context, account *Accoun
 		if window == nil || window.UsedPercent == nil || window.WindowSeconds == nil || window.ResetAt == nil ||
 			math.IsNaN(*window.UsedPercent) || math.IsInf(*window.UsedPercent, 0) || *window.UsedPercent < 0 || *window.UsedPercent > 100 ||
 			(*window.WindowSeconds != 18000 && *window.WindowSeconds != 604800) || seen[*window.WindowSeconds] || *window.ResetAt <= now.Unix() || *window.ResetAt > now.Add(366*24*time.Hour).Unix() {
-			return resetError(http.StatusBadGateway, "CODEX_USAGE_MISSING", "Codex returned incomplete usage windows")
+			return nil, time.Time{}, resetError(http.StatusBadGateway, "CODEX_USAGE_MISSING", "Codex returned incomplete usage windows")
 		}
 		seen[*window.WindowSeconds] = true
 		minutes := *window.WindowSeconds / 60
@@ -255,6 +248,28 @@ func (s *OpenAIQuotaResetService) syncUsage(ctx context.Context, account *Accoun
 			exhaustedUntil = time.Unix(*window.ResetAt, 0)
 		}
 	}
+	return snapshot, exhaustedUntil, nil
+}
+
+func (s *OpenAIQuotaResetService) syncUsage(ctx context.Context, account *Account) error {
+	// Drain in-flight writes before fetching authoritative usage. Observations
+	// received after this boundary may legitimately describe later traffic.
+	state, release, err := s.rateLimits.lockCodexUsageWrite(ctx, account.ID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	boundary := time.Now()
+	var usage codexWhamUsage
+	if err := s.request(ctx, account, http.MethodGet, "/usage", nil, &usage); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	snapshot, exhaustedUntil, err := codexWhamUsageSnapshot(&usage, now)
+	if err != nil {
+		return err
+	}
+	limit := usage.RateLimit
 	if err := s.accountRepo.UpdateExtra(ctx, account.ID, buildCodexUsageExtraUpdates(snapshot, now)); err != nil {
 		return err
 	}

@@ -933,6 +933,20 @@ func (_u *GroupUpdate) SetNillableCodexClientPolicy(v *string) *GroupUpdate {
 	return _u
 }
 
+// SetCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field.
+func (_u *GroupUpdate) SetCodexCnTimezoneGuard(v bool) *GroupUpdate {
+	_u.mutation.SetCodexCnTimezoneGuard(v)
+	return _u
+}
+
+// SetNillableCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableCodexCnTimezoneGuard(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetCodexCnTimezoneGuard(*v)
+	}
+	return _u
+}
+
 // SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
 func (_u *GroupUpdate) SetClaudeDeviceLimitMode(v string) *GroupUpdate {
 	_u.mutation.SetClaudeDeviceLimitMode(v)
@@ -1566,6 +1580,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.CodexClientPolicy(); ok {
 		_spec.SetField(group.FieldCodexClientPolicy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CodexCnTimezoneGuard(); ok {
+		_spec.SetField(group.FieldCodexCnTimezoneGuard, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.ClaudeDeviceLimitMode(); ok {
 		_spec.SetField(group.FieldClaudeDeviceLimitMode, field.TypeString, value)
@@ -2815,6 +2832,20 @@ func (_u *GroupUpdateOne) SetNillableCodexClientPolicy(v *string) *GroupUpdateOn
 	return _u
 }
 
+// SetCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field.
+func (_u *GroupUpdateOne) SetCodexCnTimezoneGuard(v bool) *GroupUpdateOne {
+	_u.mutation.SetCodexCnTimezoneGuard(v)
+	return _u
+}
+
+// SetNillableCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableCodexCnTimezoneGuard(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetCodexCnTimezoneGuard(*v)
+	}
+	return _u
+}
+
 // SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
 func (_u *GroupUpdateOne) SetClaudeDeviceLimitMode(v string) *GroupUpdateOne {
 	_u.mutation.SetClaudeDeviceLimitMode(v)
@@ -3478,6 +3509,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.CodexClientPolicy(); ok {
 		_spec.SetField(group.FieldCodexClientPolicy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CodexCnTimezoneGuard(); ok {
+		_spec.SetField(group.FieldCodexCnTimezoneGuard, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.ClaudeDeviceLimitMode(); ok {
 		_spec.SetField(group.FieldClaudeDeviceLimitMode, field.TypeString, value)

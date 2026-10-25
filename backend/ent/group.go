@@ -118,6 +118,8 @@ type Group struct {
 	InputModerationDedupeMinutes int `json:"input_moderation_dedupe_minutes,omitempty"`
 	// CodexClientPolicy holds the value of the "codex_client_policy" field.
 	CodexClientPolicy string `json:"codex_client_policy,omitempty"`
+	// CodexCnTimezoneGuard holds the value of the "codex_cn_timezone_guard" field.
+	CodexCnTimezoneGuard bool `json:"codex_cn_timezone_guard,omitempty"`
 	// ClaudeDeviceLimitMode holds the value of the "claude_device_limit_mode" field.
 	ClaudeDeviceLimitMode string `json:"claude_device_limit_mode,omitempty"`
 	// ClaudeDeviceBaseLimit holds the value of the "claude_device_base_limit" field.
@@ -243,7 +245,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case group.FieldModelRouting, group.FieldBlockedModelPatterns, group.FieldModelRateMultipliers, group.FieldSupportedModelScopes, group.FieldInputModerationCategories, group.FieldInputModerationPolicy:
 			values[i] = new([]byte)
-		case group.FieldIsExclusive, group.FieldHostedUsageEnabled, group.FieldShowAccountQuota, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldInputModerationEnabled, group.FieldInputModerationAutoDisableUser:
+		case group.FieldIsExclusive, group.FieldHostedUsageEnabled, group.FieldShowAccountQuota, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldInputModerationEnabled, group.FieldInputModerationAutoDisableUser, group.FieldCodexCnTimezoneGuard:
 			values[i] = new(sql.NullBool)
 		case group.FieldRateMultiplier, group.FieldFiveHourLimitUsd, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k, group.FieldSoraImagePrice360, group.FieldSoraImagePrice540, group.FieldSoraVideoPricePerRequest, group.FieldSoraVideoPricePerRequestHd:
 			values[i] = new(sql.NullFloat64)
@@ -596,6 +598,12 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.CodexClientPolicy = value.String
 			}
+		case group.FieldCodexCnTimezoneGuard:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field codex_cn_timezone_guard", values[i])
+			} else if value.Valid {
+				_m.CodexCnTimezoneGuard = value.Bool
+			}
 		case group.FieldClaudeDeviceLimitMode:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field claude_device_limit_mode", values[i])
@@ -867,6 +875,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("codex_client_policy=")
 	builder.WriteString(_m.CodexClientPolicy)
+	builder.WriteString(", ")
+	builder.WriteString("codex_cn_timezone_guard=")
+	builder.WriteString(fmt.Sprintf("%v", _m.CodexCnTimezoneGuard))
 	builder.WriteString(", ")
 	builder.WriteString("claude_device_limit_mode=")
 	builder.WriteString(_m.ClaudeDeviceLimitMode)

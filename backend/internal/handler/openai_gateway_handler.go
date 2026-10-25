@@ -958,6 +958,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if !h.validateCodexClientPolicyHTTP(c, apiKey.Group) {
 		return
 	}
+	if !h.validateCodexTimezoneGuardHTTP(c, apiKey.Group, subject.UserID, body) {
+		return
+	}
 
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
 	if !h.validateFunctionCallOutputRequest(c, body, reqLog) {
@@ -1021,6 +1024,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if err != nil {
 			if len(failedAccountIDs) == 0 && errors.Is(err, service.ErrNoAvailableAccounts) && advanceSmartSwitch(c, &apiKey, &subscription, smartSwitchExcluded, h.billingCacheService) {
 				if !h.validateCodexClientPolicyHTTP(c, apiKey.Group) {
+					return
+				}
+				if !h.validateCodexTimezoneGuardHTTP(c, apiKey.Group, subject.UserID, body) {
 					return
 				}
 				continue
@@ -1773,6 +1779,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, reason)
 		return
 	}
+	if err := checkCodexTimezoneGuardWS(ctx, c, wsConn, apiKey.Group, subject.UserID, 1, firstMessage); err != nil {
+		closeCodexTimezoneGuardWSFromError(c, wsConn, err)
+		return
+	}
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(firstMessage, "previous_response_id").String())
 	previousResponseIDKind := service.ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	if previousResponseID != "" && previousResponseIDKind == service.OpenAIPreviousResponseIDKindMessageID {
@@ -1877,6 +1887,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "conversation cannot continue on a different upstream account; replay context is unavailable")
 				return
 			}
+			// The rebuilt payload carries replayed history the client did not
+			// send in this frame; it is what goes upstream, so scan it too.
+			if err := checkCodexTimezoneGuardWS(ctx, c, wsConn, apiKey.Group, subject.UserID, 1, migratedPayload); err != nil {
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				closeCodexTimezoneGuardWSFromError(c, wsConn, err)
+				return
+			}
 			firstMessage = migratedPayload
 			preflightContinuationMigrated = true
 			h.gatewayService.RecordOpenAIAccountSwitch()
@@ -1943,8 +1962,16 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			if apiKey.Group != nil && apiKey.Group.IsModelBlocked(turnModel) {
 				return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("model %s is not allowed for this group", turnModel), nil)
 			}
-			if err := h.revalidateOpenAIWSTurn(ctx, apiKey, turn); err != nil {
+			currentKey, err := h.revalidateOpenAIWSTurnKey(ctx, apiKey, turn)
+			if err != nil {
 				return err
+			}
+			// Turn 1 (the possibly rebuilt first frame) was scanned before
+			// account selection. Later turns read the group's current switch.
+			if turn > 1 {
+				if err := checkCodexTimezoneGuardWS(ctx, c, wsConn, currentKey.Group, subject.UserID, turn, rawPayload); err != nil {
+					return err
+				}
 			}
 			requestID, _ := ctx.Value(ctxkey.RequestID).(string)
 			h.submitOpenAIInputModeration(apiKey, requestID, policyPayload, service.InputModerationSourceOpenAIResponsesWS, turn)
@@ -2038,6 +2065,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			slots.setUser(wrapReleaseOnDone(ctx, userReleaseFunc))
 
 			failoverPayload := failure.ReplayPayload()
+			// Replays are byte-identical to an already scanned client frame;
+			// re-check against the current switch before resending.
+			if err := checkCodexTimezoneGuardWS(ctx, c, wsConn, h.openAIWSCurrentGroup(ctx, apiKey), subject.UserID, failure.Turn(), failoverPayload); err != nil {
+				releaseTurnSlots()
+				return nil, err
+			}
 			failoverModel := strings.TrimSpace(gjson.GetBytes(failoverPayload, "model").String())
 			nextSelection, nextDecision, selectErr := h.gatewayService.SelectAccountWithSchedulerForUser(
 				ctx,
@@ -2105,6 +2138,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 
 	if err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, msgType, firstMessage, hooks); err != nil {
+		if closeCodexTimezoneGuardWSFromError(c, wsConn, err) {
+			// A client-content rejection is not an account failure.
+			reqLog.Info("openai.websocket_codex_timezone_guard_closed", zap.Int64("account_id", account.ID))
+			return
+		}
 		h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 		closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
 		reqLog.Warn("openai.websocket_proxy_failed",
@@ -2136,29 +2174,52 @@ func openAIDuplicateKeyEnvelope(key string) gatewayErrorEnvelope {
 }
 
 func (h *OpenAIGatewayHandler) revalidateOpenAIWSTurn(ctx context.Context, apiKey *service.APIKey, turn int) error {
+	_, err := h.revalidateOpenAIWSTurnKey(ctx, apiKey, turn)
+	return err
+}
+
+// revalidateOpenAIWSTurnKey returns the key state that governs turn: the
+// connect-time key for turn 1, the freshly loaded (auth-cached) key after.
+// WebSocket sessions are never smart-switched, so the key's own group is the
+// session's effective group.
+func (h *OpenAIGatewayHandler) revalidateOpenAIWSTurnKey(ctx context.Context, apiKey *service.APIKey, turn int) (*service.APIKey, error) {
 	if turn <= 1 {
-		return nil
+		return apiKey, nil
 	}
 	if h == nil || h.apiKeyService == nil || apiKey == nil || strings.TrimSpace(apiKey.Key) == "" {
-		return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to revalidate user account", nil)
+		return nil, service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to revalidate user account", nil)
 	}
 	freshAPIKey, err := h.apiKeyService.GetByKey(ctx, apiKey.Key)
 	if err != nil {
-		return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to revalidate user account", err)
+		return nil, service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to revalidate user account", err)
 	}
 	if freshAPIKey == nil || !freshAPIKey.IsActive() || freshAPIKey.User == nil || !freshAPIKey.User.IsActive() {
-		return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "user account is not active", nil)
+		return nil, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "user account is not active", nil)
 	}
 	if h.inputModerationService != nil && !freshAPIKey.User.IsAdmin() {
 		blockedUntil, err := h.inputModerationService.GetActiveCooldown(ctx, freshAPIKey.User.ID)
 		if err != nil {
-			return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to revalidate user risk state", err)
+			return nil, service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to revalidate user risk state", err)
 		}
 		if blockedUntil != nil {
-			return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "user access is temporarily suspended", nil)
+			return nil, service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "user access is temporarily suspended", nil)
 		}
 	}
-	return nil
+	return freshAPIKey, nil
+}
+
+// openAIWSCurrentGroup reads the session group's current settings through the
+// auth cache, falling back to the connect-time group if the lookup fails.
+func (h *OpenAIGatewayHandler) openAIWSCurrentGroup(ctx context.Context, apiKey *service.APIKey) *service.Group {
+	if apiKey == nil {
+		return nil
+	}
+	if h != nil && h.apiKeyService != nil && strings.TrimSpace(apiKey.Key) != "" {
+		if fresh, err := h.apiKeyService.GetByKey(ctx, apiKey.Key); err == nil && fresh != nil && fresh.Group != nil {
+			return fresh.Group
+		}
+	}
+	return apiKey.Group
 }
 
 func (h *OpenAIGatewayHandler) recoverResponsesPanic(c *gin.Context, streamStarted *bool) {

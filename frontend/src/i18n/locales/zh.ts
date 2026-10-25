@@ -2229,6 +2229,8 @@ export default {
         officialClients: '仅官方 Codex 客户端',
         cliOnly: '仅 Codex CLI',
         localProxyOnly: '仅允许 SAIAI 本地代理',
+        codexCnTimezoneGuard: '拒绝携带中国地区时区的 Codex 请求',
+        codexCnTimezoneGuardHint: '开启后，请求内容或历史中含中国大陆/香港/澳门时区（<timezone>）的 Codex Responses 请求将被拒绝（HTTP 403 / WebSocket 1008），并提示用户升级 Codex、重新运行 saiai cli 初始化后新开会话。请在用户更新客户端后再开启。',
         audit: '仅审计',
         enforce: '强制限制',
         baseDevices: '基础设备数量'

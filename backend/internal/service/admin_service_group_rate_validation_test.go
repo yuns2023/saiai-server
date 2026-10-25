@@ -64,3 +64,24 @@ func TestAdminService_UpdateGroup_AllowsZeroRateMultiplier(t *testing.T) {
 	require.NotNil(t, repo.updated)
 	require.Zero(t, repo.updated.RateMultiplier)
 }
+
+func TestAdminService_CodexTimezoneGuardCreateAndUpdate(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name: "g", Platform: PlatformOpenAI, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1, CodexCNTimezoneGuard: true,
+	})
+	require.NoError(t, err)
+	require.True(t, repo.created.CodexCNTimezoneGuard)
+
+	repo = &groupRepoStubForAdmin{getByID: &Group{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, RateMultiplier: 1, CodexCNTimezoneGuard: true}}
+	svc = &adminServiceImpl{groupRepo: repo}
+	// Omitted field keeps the current value.
+	_, err = svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{})
+	require.NoError(t, err)
+	require.True(t, repo.updated.CodexCNTimezoneGuard)
+	off := false
+	_, err = svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{CodexCNTimezoneGuard: &off})
+	require.NoError(t, err)
+	require.False(t, repo.updated.CodexCNTimezoneGuard)
+}

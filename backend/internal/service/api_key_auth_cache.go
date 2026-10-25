@@ -6,6 +6,12 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
+// apiKeyAuthSnapshotSchemaVersion is bumped whenever a field that gates
+// request handling is added, so snapshots written by older binaries (which
+// lack the field and would decode it as its zero value) are not trusted.
+// v2: groups.codex_cn_timezone_guard.
+const apiKeyAuthSnapshotSchemaVersion = 2
+
 // APIKeyAuthSnapshot API Key 认证缓存快照（仅包含认证所需字段）
 type APIKeyAuthSnapshot struct {
 	SchemaVersion      int                          `json:"schema_version"`
@@ -102,6 +108,7 @@ type APIKeyAuthGroupSnapshot struct {
 	InputModerationPolicy            *InputModerationPolicy `json:"input_moderation_policy,omitempty"`
 	InputModerationMinConfidence     int                    `json:"input_moderation_min_confidence"`
 	CodexClientPolicy                string                 `json:"codex_client_policy"`
+	CodexCNTimezoneGuard             bool                   `json:"codex_cn_timezone_guard"`
 	ClaudeDeviceLimitMode            string                 `json:"claude_device_limit_mode"`
 	ClaudeDeviceBaseLimit            int                    `json:"claude_device_base_limit"`
 }

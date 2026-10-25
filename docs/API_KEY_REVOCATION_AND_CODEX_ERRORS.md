@@ -58,6 +58,41 @@ the optional account/version headers.
 Policy rejection logs include `missing_version` and `missing_account_id` as
 booleans. They contain no raw account ID, authorization value, cookies, or body.
 
+## Codex China-region timezone guard
+
+Groups have an opt-in boolean `codex_cn_timezone_guard` (default off; migration
+114). When it is on, Responses HTTP (`/v1/responses`, `/responses` and their
+subpaths such as `/responses/compact`) and Responses WebSocket requests are
+rejected when any decoded JSON string of the request (history included) contains
+`<timezone>ZONE</timezone>` with a trimmed, case-sensitive ZONE in
+`Asia/Shanghai`, `Asia/Urumqi`, `Asia/Chongqing`, `Asia/Chungking`,
+`Asia/Harbin`, `Asia/Kashgar`, `PRC`, `Asia/Hong_Kong`, `Hongkong`,
+`Asia/Macau` or `Asia/Macao`. JSON-escaped forms (`\u003c`, `\/`) match too.
+The scan is read-only; forwarded bytes are unchanged.
+
+- HTTP: 403 with `error.type` `permission_error` and `error.code`
+  `codex_timezone_reinit_required`, before account selection. The group that
+  actually serves the request is checked, including a group reached by smart
+  switching; a rejection never advances smart switching and is not an account
+  failure.
+- WebSocket: the first frame (and a continuation payload rebuilt with replayed
+  history) is checked before account selection; each later `response.create`
+  is checked against the group's current setting, read through the auth cache;
+  an in-connection failover replay is checked again before it is resent. A
+  rejection sends `{"type":"error","status":403,"error":{"type":"permission_error","code":"codex_timezone_reinit_required","message":"..."}}`
+  and then closes with 1008 `codex timezone reinit required`. Turns already
+  forwarded keep draining for usage.
+- The message tells users on a recognised Codex backend older than 0.163
+  (`codex-tui`, `codex_exec`, `codex_vscode`, `codex_cli_rs`, `Codex Desktop`
+  User-Agent) to upgrade; every other client gets the generic text asking for
+  `saiai cli` re-initialization, a Codex restart and a new session.
+- Logs record `openai.codex_timezone_guard_rejected` with group, user, zone,
+  UA product/version, transport and turn — never the body.
+
+Native `/codex/images` and ChatGPT conversation routes are not covered. A user
+message that literally contains such a tag is also rejected (accepted false
+positive).
+
 ## Regression evidence
 
 Service tests cover refill during deletion, late database snapshots on one or

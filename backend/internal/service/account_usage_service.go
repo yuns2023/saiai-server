@@ -1,10 +1,10 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"math/rand/v2"
@@ -14,8 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	httppool "github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
-	openaipkg "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
@@ -111,6 +110,8 @@ const (
 	windowStatsCacheTTL     = 1 * time.Minute
 	openAIProbeCacheTTL     = 10 * time.Minute
 	openAICodexProbeVersion = "0.104.0"
+	// codexWhamUsageURL is Codex's control-plane usage endpoint.
+	codexWhamUsageURL = "https://chatgpt.com/backend-api/wham/usage"
 )
 
 // UsageCache 封装账户使用量相关的缓存
@@ -284,10 +285,12 @@ type AccountUsageService struct {
 	identityCache           IdentityCache
 	rateLimits              *RateLimitService
 	codexTransport          codexControlTransport
+	// whamUsageURL overrides codexWhamUsageURL in tests.
+	whamUsageURL string
 }
 
-// SetCodexTransport enables the opt-in Codex TLS identity for the background
-// Codex usage probe (a /backend-api/codex/responses request).
+// SetCodexTransport enables the opt-in Codex TLS identity for the Codex usage
+// refresh (a GET /backend-api/wham/usage control-plane request).
 func (s *AccountUsageService) SetCodexTransport(cfg *config.Config, upstream HTTPUpstream) {
 	if s != nil {
 		s.codexTransport = codexControlTransport{cfg: cfg, upstream: upstream}
@@ -587,7 +590,8 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	}
 
 	if shouldRefreshOpenAICodexSnapshot(account, usage, now) && s.shouldProbeOpenAICodexSnapshot(account.ID, now) {
-		if updates, resetAt, err := s.probeOpenAICodexSnapshot(ctx, account); err == nil && (len(updates) > 0 || resetAt != nil) {
+		if updates, resetAt, observedAt, err := s.fetchCodexUsageViaWham(ctx, account); err == nil && (len(updates) > 0 || resetAt != nil) {
+			s.persistOpenAICodexProbeSnapshot(account.ID, observedAt, updates, resetAt)
 			mergeAccountExtra(account, updates)
 			if resetAt != nil {
 				account.RateLimitResetAt = resetAt
@@ -672,43 +676,38 @@ func (s *AccountUsageService) shouldProbeOpenAICodexSnapshot(accountID int64, no
 	return true
 }
 
-func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, account *Account) (map[string]any, *time.Time, error) {
-	if account == nil || !account.IsOAuth() {
-		return nil, nil, nil
+// fetchCodexUsageViaWham reads the account's Codex usage windows from the
+// control-plane GET /wham/usage (never a model request) and converts them into
+// the same (extra updates, resetAt) shape that response headers produce. It
+// performs no write; observedAt is when the response arrived. Accounts that are
+// not OpenAI OAuth with a ChatGPT account ID are skipped.
+func (s *AccountUsageService) fetchCodexUsageViaWham(ctx context.Context, account *Account) (map[string]any, *time.Time, time.Time, error) {
+	if account == nil || !account.IsOpenAIOAuth() {
+		return nil, nil, time.Time{}, nil
+	}
+	chatgptAccountID := strings.TrimSpace(account.GetChatGPTAccountID())
+	if chatgptAccountID == "" {
+		return nil, nil, time.Time{}, nil
 	}
 	accessToken := account.GetOpenAIAccessToken()
 	if accessToken == "" {
-		return nil, nil, fmt.Errorf("no access token available")
-	}
-	modelID := openaipkg.DefaultTestModel
-	payload := createOpenAITestPayload(modelID, true)
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return nil, nil, fmt.Errorf("marshal openai probe payload: %w", err)
+		return nil, nil, time.Time{}, fmt.Errorf("no access token available")
 	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, chatgptCodexURL, bytes.NewReader(payloadBytes))
+	usageURL := s.whamUsageURL
+	if usageURL == "" {
+		usageURL = codexWhamUsageURL
+	}
+	req, err := http.NewRequestWithContext(WithNativeCodexRedirectPolicy(reqCtx), http.MethodGet, usageURL, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create openai probe request: %w", err)
+		return nil, nil, time.Time{}, fmt.Errorf("create codex usage request: %w", err)
 	}
-	req.Host = "chatgpt.com"
-	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("OpenAI-Beta", "responses=experimental")
-	req.Header.Set("Originator", "codex_cli_rs")
-	req.Header.Set("Version", openAICodexProbeVersion)
+	req.Header.Set("ChatGPT-Account-Id", chatgptAccountID)
+	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", codexCLIUserAgent)
-	if s.identityCache != nil {
-		if fp, fpErr := s.identityCache.GetFingerprint(reqCtx, account.ID); fpErr == nil && fp != nil && strings.TrimSpace(fp.UserAgent) != "" {
-			req.Header.Set("User-Agent", strings.TrimSpace(fp.UserAgent))
-		}
-	}
-	if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
-		req.Header.Set("chatgpt-account-id", chatgptAccountID)
-	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -718,31 +717,36 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if policy := s.codexTransport.policyFor(account, req); policy.Enabled() {
 		resp, err = s.codexTransport.do(req, proxyURL, account, policy)
 	} else {
-		client, clientErr := httppool.GetClient(httppool.Options{
-			ProxyURL:              proxyURL,
-			Timeout:               15 * time.Second,
-			ResponseHeaderTimeout: 10 * time.Second,
-		})
+		pooled, clientErr := httpclient.GetClient(httpclient.Options{ProxyURL: proxyURL, Timeout: 15 * time.Second, ResponseHeaderTimeout: 10 * time.Second})
 		if clientErr != nil {
-			return nil, nil, fmt.Errorf("build openai probe client: %w", clientErr)
+			return nil, nil, time.Time{}, fmt.Errorf("build codex usage client: %w", clientErr)
 		}
+		client := *pooled
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		resp, err = client.Do(req)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("openai codex probe request failed: %w", err)
+		return nil, nil, time.Time{}, fmt.Errorf("codex usage request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	observedAt := time.Now()
-
-	updates, resetAt, err := extractOpenAICodexProbeSnapshot(resp)
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil, time.Time{}, fmt.Errorf("codex usage returned status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024+1))
+	if err != nil || len(data) > 1024*1024 {
+		return nil, nil, time.Time{}, fmt.Errorf("read codex usage response failed")
+	}
+	var usage codexWhamUsage
+	if err := json.Unmarshal(data, &usage); err != nil {
+		return nil, nil, time.Time{}, fmt.Errorf("decode codex usage response: %w", err)
+	}
+	now := observedAt.UTC()
+	snapshot, _, err := codexWhamUsageSnapshot(&usage, now)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, time.Time{}, err
 	}
-	if len(updates) > 0 || resetAt != nil {
-		s.persistOpenAICodexProbeSnapshot(account.ID, observedAt, updates, resetAt)
-		return updates, resetAt, nil
-	}
-	return nil, nil, nil
+	return buildCodexUsageExtraUpdates(snapshot, now), codexRateLimitResetAtFromSnapshot(snapshot, now), observedAt, nil
 }
 
 // persistOpenAICodexProbeSnapshot writes the probe result in the background
