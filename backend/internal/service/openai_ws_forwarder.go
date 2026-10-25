@@ -3304,13 +3304,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 						extractOpenAIServiceTierFromBody(payload),
 					),
 					ReasoningEffort: extractOpenAIReasoningEffortFromBody(payload, originalModel),
-					// The bytes actually written upstream for this turn.
-					RequestPayloadHash: HashUsageRequestPayload(payload),
-					Stream:             reqStream,
-					OpenAIWSMode:       true,
-					ResponseHeaders:    openAIWSTurnResponseHeaders(account, lease.HandshakeHeaders()),
-					Duration:           time.Since(turnStart),
-					FirstTokenMs:       firstTokenMs,
+					Stream:          reqStream,
+					OpenAIWSMode:    true,
+					ResponseHeaders: openAIWSTurnResponseHeaders(account, lease.HandshakeHeaders()),
+					Duration:        time.Since(turnStart),
+					FirstTokenMs:    firstTokenMs,
 				}, nil
 			}
 		}
@@ -3764,6 +3762,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 		// currentPayload stays as built from client frames (it is retained
 		// for replay/strict-state); only the sent bytes are transformed.
 		sendPayload, sendPayloadBytes := currentPayload, currentPayloadBytes
+		rewritten := false
 		if hooks != nil && hooks.TransformUpstreamPayload != nil {
 			transformed, err := hooks.TransformUpstreamPayload(turn, currentPayload)
 			if err != nil {
@@ -3772,9 +3771,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 				}
 				return err
 			}
+			rewritten = !bytes.Equal(transformed, currentPayload)
 			sendPayload, sendPayloadBytes = transformed, len(transformed)
 		}
 		result, relayErr := sendAndRelay(turn, sessionLease, sendPayload, sendPayloadBytes, currentOriginalModel)
+		if relayErr == nil && result != nil && rewritten {
+			// Only a rewritten turn reports its sent bytes; otherwise the
+			// usage hash keeps the base behaviour.
+			result.RequestPayloadHash = HashUsageRequestPayload(sendPayload)
+		}
 		if relayErr != nil {
 			lastTurnClean = false
 			if recoverIngressPrevResponseNotFound(relayErr, turn, connID) {

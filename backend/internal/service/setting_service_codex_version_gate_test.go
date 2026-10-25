@@ -5,6 +5,8 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,13 +16,31 @@ import (
 
 type codexGateRepoStub struct {
 	SettingRepository
+	mu     sync.Mutex
 	values map[string]string
 	err    error
-	calls  int
+	block  chan struct{} // when set, reads wait for it or the context
+	calls  atomic.Int32
 }
 
-func (s *codexGateRepoStub) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
-	s.calls++
+func (s *codexGateRepoStub) setErr(err error) { s.mu.Lock(); s.err = err; s.mu.Unlock() }
+func (s *codexGateRepoStub) setValues(values map[string]string) {
+	s.mu.Lock()
+	s.values = values
+	s.mu.Unlock()
+}
+
+func (s *codexGateRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	s.calls.Add(1)
+	if s.block != nil {
+		select {
+		case <-s.block:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -35,19 +55,29 @@ func (s *codexGateRepoStub) GetMultiple(_ context.Context, keys []string) (map[s
 
 func resetCodexVersionGateCache(t *testing.T) {
 	t.Helper()
-	codexVersionGateCache.Store(&cachedCodexVersionGate{})
-	codexVersionGateSF.Forget("codex_version_gate")
-	t.Cleanup(func() {
-		codexVersionGateCache.Store(&cachedCodexVersionGate{})
+	reset := func() {
+		codexVersionGateCache.Store(nil)
 		codexVersionGateSF.Forget("codex_version_gate")
+	}
+	reset()
+	t.Cleanup(func() {
+		require.Eventually(t, func() bool { return !codexVersionGateRefreshing.Load() }, 5*time.Second, time.Millisecond)
+		reset()
 	})
 }
 
 func expireCodexVersionGateCache() {
-	cached, _ := codexVersionGateCache.Load().(*cachedCodexVersionGate)
-	next := *cached
+	next := *codexVersionGateCache.Load()
 	next.expiresAt = time.Now().Add(-time.Second).UnixNano()
 	codexVersionGateCache.Store(&next)
+}
+
+func waitCodexVersionGateRefresh(t *testing.T) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		cached := codexVersionGateCache.Load()
+		return !codexVersionGateRefreshing.Load() && cached != nil && time.Now().UnixNano() < cached.expiresAt
+	}, 5*time.Second, time.Millisecond)
 }
 
 func TestGetCodexVersionGateCachesAndKeepsLastKnownGood(t *testing.T) {
@@ -61,13 +91,15 @@ func TestGetCodexVersionGateCachesAndKeepsLastKnownGood(t *testing.T) {
 	want := CodexVersionGate{Enabled: true, Min: "0.164.0", Max: "0.170.0"}
 	require.Equal(t, want, svc.GetCodexVersionGate(context.Background()))
 	require.Equal(t, want, svc.GetCodexVersionGate(context.Background()))
-	require.Equal(t, 1, repo.calls, "served from the cache")
+	require.Equal(t, int32(1), repo.calls.Load(), "served from the cache")
 
-	// A failed refresh keeps the last known good value.
-	repo.err = errors.New("TEST_ONLY_DB_DOWN")
+	// A failed background refresh keeps the last known good value.
+	repo.setErr(errors.New("TEST_ONLY_DB_DOWN"))
 	expireCodexVersionGateCache()
+	require.Equal(t, want, svc.GetCodexVersionGate(context.Background()), "stale value served")
+	waitCodexVersionGateRefresh(t)
+	require.Equal(t, int32(2), repo.calls.Load())
 	require.Equal(t, want, svc.GetCodexVersionGate(context.Background()))
-	require.Equal(t, 2, repo.calls)
 }
 
 func TestGetCodexVersionGateFailsOpenWithoutKnownValue(t *testing.T) {
@@ -76,13 +108,39 @@ func TestGetCodexVersionGateFailsOpenWithoutKnownValue(t *testing.T) {
 	svc := NewSettingService(repo, nil)
 	require.Equal(t, CodexVersionGate{}, svc.GetCodexVersionGate(context.Background()))
 
-	// The fail-open placeholder is not a known value: a later success is used
-	// and becomes the last known good value.
-	repo.err = nil
-	repo.values = map[string]string{SettingKeyCodexVersionGateEnabled: "true", SettingKeyCodexMinVersion: "0.164.0"}
+	// The fail-open placeholder is not a known value: the next (background)
+	// success is used and becomes the last known good value.
+	repo.setErr(nil)
+	repo.setValues(map[string]string{SettingKeyCodexVersionGateEnabled: "true", SettingKeyCodexMinVersion: "0.164.0"})
 	expireCodexVersionGateCache()
+	_ = svc.GetCodexVersionGate(context.Background())
+	waitCodexVersionGateRefresh(t)
 	require.Equal(t, CodexVersionGate{Enabled: true, Min: "0.164.0"}, svc.GetCodexVersionGate(context.Background()))
 	require.Equal(t, CodexVersionGate{}, (*SettingService)(nil).GetCodexVersionGate(context.Background()))
+}
+
+// A slow store never blocks a request once a value is cached, and the first
+// load is bounded.
+func TestGetCodexVersionGateDoesNotBlockOnSlowStore(t *testing.T) {
+	resetCodexVersionGateCache(t)
+	saved := codexVersionGateFirstLoadTimeout
+	codexVersionGateFirstLoadTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { codexVersionGateFirstLoadTimeout = saved })
+	repo := &codexGateRepoStub{block: make(chan struct{})}
+	svc := NewSettingService(repo, nil)
+
+	start := time.Now()
+	require.Equal(t, CodexVersionGate{}, svc.GetCodexVersionGate(context.Background()), "first load fails open")
+	require.Less(t, time.Since(start), time.Second)
+
+	expireCodexVersionGateCache()
+	start = time.Now()
+	for i := 0; i < 5; i++ {
+		require.Equal(t, CodexVersionGate{}, svc.GetCodexVersionGate(context.Background()))
+	}
+	require.Less(t, time.Since(start), 20*time.Millisecond, "refresh runs in the background")
+	require.Eventually(t, func() bool { return repo.calls.Load() == 2 }, time.Second, time.Millisecond, "one background refresh")
+	close(repo.block)
 }
 
 func TestSettingService_UpdateSettings_PublishesCodexVersionGate(t *testing.T) {

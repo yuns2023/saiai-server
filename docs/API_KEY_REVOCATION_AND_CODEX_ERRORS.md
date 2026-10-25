@@ -112,7 +112,10 @@ the request is rejected rather than falling back to UTC.
 The edit is a raw JSON span replacement: strings are decoded once with a
 decoded→raw offset map, only the bytes of the replaced values change and the
 replacement is plain ASCII; escapes, key order and whitespace elsewhere stay
-byte-identical, and rewriting twice gives the same bytes. Inside a block every
+byte-identical, and rewriting twice gives the same bytes. Escaped strings
+are decoded as a stream; only block content (at most 64 KiB per block, larger
+blocks fail closed) is buffered, so extra memory does not grow with the
+string length. Inside a block every
 `<timezone…`/`<current_date…` tag must be an exact tag, or a value-less
 self-closing tag with quoted attributes (`<current_date status="unavailable" />`);
 tag values may not contain markup. A body without
@@ -141,8 +144,9 @@ reinit message) and the original bytes are never forwarded.
   replays — under the session's current group (re-read per turn as for the
   reject mode). Retained frames (replay tracker, continuation state) stay as
   the client sent them because every send applies the same deterministic
-  rewrite; the relay's and the pool path's per-turn request payload hash
-  describe the sent bytes. The pool path's strict-state (which decides whether
+  rewrite; the relay's per-turn request payload hash describes the sent
+  bytes, and the pool path reports the sent bytes' hash only for a turn that
+  was actually rewritten (otherwise its usage hash is unchanged). The pool path's strict-state (which decides whether
   a turn keeps `previous_response_id` by comparing non-input fields of
   consecutive client frames) deliberately compares the client frames on both
   sides; the sent bytes are still rewritten.
@@ -222,9 +226,13 @@ admitted and unknown versions are still rejected.
   `codex_version_unsupported`, a short message (Codex prints the whole body):
   `当前 Codex 引擎版本 X 不在允许范围 [min, max]。请安装 Y：npm i -g @openai/codex@Y；若使用后台进程再执行 codex app-server daemon update --from-cli -y，然后重启 Codex。Desktop/VS Code 请等待管理员放行。`
   where Y is the minimum when below it and the maximum when above it.
-- Settings are cached (60 s) and published as one value; an update is applied
-  at once to new requests and connections. A read failure keeps the last known
-  good value; with none the gate fails open and logs an ERROR.
+- The client is identified from headers first; other clients never read the
+  settings. Settings are cached (60 s) and published as one value; an update
+  is applied at once to new requests and connections. An expired value is
+  served while one background refresh runs, so a slow settings store never
+  blocks requests; only the first read in a process blocks (at most 1 s). A
+  read failure keeps the last known good value; with none the gate fails
+  open and logs an ERROR.
 - Logs record `openai.codex_version_gate_rejected` (WARN: product, version,
   min, max, transport).
 

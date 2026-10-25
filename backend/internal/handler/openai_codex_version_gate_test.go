@@ -18,9 +18,15 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-type codexVersionGateStub struct{ gate service.CodexVersionGate }
+type codexVersionGateStub struct {
+	gate  service.CodexVersionGate
+	reads *atomic.Int32
+}
 
 func (s codexVersionGateStub) GetCodexVersionGate(context.Context) service.CodexVersionGate {
+	if s.reads != nil {
+		s.reads.Add(1)
+	}
 	return s.gate
 }
 
@@ -144,4 +150,24 @@ func TestCodexVersionGateWSRejectsBeforeUpgrade(t *testing.T) {
 	conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", &coderws.DialOptions{HTTPHeader: headers})
 	require.NoError(t, err)
 	_ = conn.CloseNow()
+}
+
+// Non-Codex clients never read the gate settings.
+func TestCodexVersionGateSkipsSettingsForNonCodexClients(t *testing.T) {
+	reads := &atomic.Int32{}
+	h := &OpenAIGatewayHandler{codexVersionGate: codexVersionGateStub{gate: service.CodexVersionGate{Enabled: true, Min: "9.0.0"}, reads: reads}}
+	gin.SetMode(gin.TestMode)
+	for _, ua := range []string{"curl/8.0", "", "OpenAI/Python 1.0"} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		c.Request.Header.Set("User-Agent", ua)
+		require.Nil(t, h.codexVersionGateRejection(c, "http"))
+	}
+	require.Zero(t, reads.Load())
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.164.0")
+	c.Request.Header.Set("version", "0.164.0")
+	require.NotNil(t, h.codexVersionGateRejection(c, "http"))
+	require.Equal(t, int32(1), reads.Load())
 }

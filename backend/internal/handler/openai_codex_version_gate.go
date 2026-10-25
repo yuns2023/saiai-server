@@ -32,12 +32,14 @@ func (h *OpenAIGatewayHandler) codexVersionGateRejection(c *gin.Context, transpo
 	if h == nil || h.codexVersionGate == nil || c == nil || c.Request == nil {
 		return nil
 	}
-	gate := h.codexVersionGate.GetCodexVersionGate(c.Request.Context())
-	if !gate.Enabled {
-		return nil
-	}
+	// Identify the client first (header parsing only): other clients never
+	// touch the settings cache.
 	product, version, isCodex, known := pkgopenai.CodexEngineVersion(c.GetHeader("User-Agent"), c.GetHeader("originator"), c.GetHeader("version"))
 	if !isCodex {
+		return nil
+	}
+	gate := h.codexVersionGate.GetCodexVersionGate(c.Request.Context())
+	if !gate.Enabled {
 		return nil
 	}
 	minVersion, minOK := pkgopenai.ParseCodexSemver(gate.Min)

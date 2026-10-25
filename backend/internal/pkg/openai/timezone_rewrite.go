@@ -352,38 +352,26 @@ func (rw *codexEnvironmentRewriter) itemDate(body []byte, item int) []byte {
 // body[start:end].
 func (rw *codexEnvironmentRewriter) stringValue(body []byte, start, end int, escaped bool) error {
 	raw := body[start:end]
-	hasWord := bytes.Contains(raw, environmentContextWord)
 	if !escaped {
-		if !hasWord {
+		if !bytes.Contains(raw, environmentContextWord) {
 			return nil
 		}
-		return rw.rewriteText(raw, nil, start)
+		return rw.rewriteText(raw, start)
 	}
-	if !hasWord {
-		if !bytes.Contains(raw, jsonUnicodeEsc) {
-			return nil
-		}
-		// A \u escape can hide the word; check the decoded text first so
-		// plain strings never pay for the offset map.
-		rw.buf = appendUnescapedJSONString(rw.buf[:0], raw)
-		if !bytes.Contains(rw.buf, environmentContextWord) {
-			return nil
-		}
+	if !bytes.Contains(raw, environmentContextWord) && !bytes.Contains(raw, jsonUnicodeEsc) {
+		return nil
 	}
-	rw.buf, rw.offs = appendUnescapedJSONStringWithOffsets(rw.buf[:0], rw.offs[:0], raw)
-	return rw.rewriteText(rw.buf, rw.offs, start)
+	return rw.rewriteEscapedText(raw, start)
 }
 
-// rewriteText records edits for the blocks in decoded text. offs maps a
-// decoded index to its raw offset (nil means identity); rawBase is the body
-// offset of the raw string content.
-func (rw *codexEnvironmentRewriter) rewriteText(text []byte, offs []int, rawBase int) error {
-	rawOffset := func(decoded int) int {
-		if offs == nil {
-			return rawBase + decoded
-		}
-		return rawBase + offs[decoded]
-	}
+// codexEnvironmentBlockMaxBytes bounds one decoded block (Codex renders well
+// under 4 KiB); a larger or unterminated block is malformed. It also bounds
+// the memory used to decode an escaped string.
+const codexEnvironmentBlockMaxBytes = 64 << 10
+
+// rewriteText records edits for the blocks of an unescaped string, searched
+// in place; rawBase is the body offset of the string content.
+func (rw *codexEnvironmentRewriter) rewriteText(text []byte, rawBase int) error {
 	for pos := 0; ; {
 		open := bytes.Index(text[pos:], environmentContextOpenTag)
 		if open < 0 {
@@ -391,54 +379,129 @@ func (rw *codexEnvironmentRewriter) rewriteText(text []byte, offs []int, rawBase
 		}
 		blockStart := pos + open + len(environmentContextOpenTag)
 		closeAt := bytes.Index(text[blockStart:], environmentContextCloseTag)
-		if closeAt < 0 {
+		if closeAt < 0 || closeAt > codexEnvironmentBlockMaxBytes {
 			return ErrCodexEnvironmentMalformed
 		}
 		blockEnd := blockStart + closeAt
-		block := text[blockStart:blockEnd]
-		if bytes.Contains(block, environmentContextOpenTag) {
-			return ErrCodexEnvironmentMalformed
-		}
-		if !rw.noEdit {
-			rw.stats.Blocks++
-		}
-		if err := validateCodexEnvironmentTags(block); err != nil {
+		base := rawBase + blockStart
+		if err := rw.rewriteBlock(text[blockStart:blockEnd], func(i int) int { return base + i }); err != nil {
 			return err
-		}
-		zones, err := codexEnvironmentTagValues(block, timezoneOpenTag, timezoneCloseTag)
-		if err != nil {
-			return err
-		}
-		dates, err := codexEnvironmentTagValues(block, currentDateOpenTag, currentDateCloseTag)
-		if err != nil {
-			return err
-		}
-		// Tags never overlap (each value is closed before the next opening
-		// tag), but zone and date spans interleave; keep edits sorted.
-		item := rw.enclosingItem()
-		if rw.noEdit {
-			pos = blockEnd + len(environmentContextCloseTag)
-			continue
-		}
-		for _, span := range mergeCodexEnvironmentSpans(zones, dates) {
-			value := block[span.start:span.end]
-			edit := codexEnvironmentEdit{
-				start: rawOffset(blockStart + span.start),
-				end:   rawOffset(blockStart + span.end),
-			}
-			if span.zone {
-				if bytes.Equal(value, rw.zone) {
-					continue
-				}
-				rw.stats.Timezones++
-				edit.replacement = rw.zone
-			} else {
-				edit.date, edit.value, edit.item = true, append([]byte(nil), value...), item
-			}
-			rw.edits = append(rw.edits, edit)
 		}
 		pos = blockEnd + len(environmentContextCloseTag)
 	}
+}
+
+// rewriteEscapedText decodes an escaped string unit by unit without
+// materializing it: outside blocks only the open-tag match state is kept,
+// and only block content (bounded by codexEnvironmentBlockMaxBytes) is
+// buffered with the raw offset of each decoded byte. Extra memory is
+// O(block size), independent of the string length.
+func (rw *codexEnvironmentRewriter) rewriteEscapedText(raw []byte, rawBase int) error {
+	var unit [8]byte
+	matched := 0 // bytes of environmentContextOpenTag matched outside a block
+	inBlock := false
+	rw.buf, rw.offs = rw.buf[:0], rw.offs[:0]
+	for i := 0; i < len(raw); {
+		unitStart := i
+		decoded := unit[:0]
+		if raw[i] != '\\' || i+1 >= len(raw) {
+			decoded = append(decoded, raw[i])
+			i++
+		} else {
+			end := i + 2
+			if raw[i+1] == 'u' {
+				if r, ok := parseJSONHex4(raw, end); ok {
+					end += 4
+					if isHighSurrogate(r) && end+1 < len(raw) && raw[end] == '\\' && raw[end+1] == 'u' {
+						if r2, ok := parseJSONHex4(raw, end+2); ok && isLowSurrogate(r2) {
+							end += 6
+						}
+					}
+				}
+			}
+			decoded = appendUnescapedJSONString(decoded, raw[i:end])
+			i = end
+		}
+		for _, b := range decoded {
+			if !inBlock {
+				switch b {
+				case environmentContextOpenTag[matched]:
+					matched++
+				case '<':
+					matched = 1
+				default:
+					matched = 0
+				}
+				if matched == len(environmentContextOpenTag) {
+					inBlock, matched = true, 0
+					rw.buf, rw.offs = rw.buf[:0], rw.offs[:0]
+				}
+				continue
+			}
+			rw.buf = append(rw.buf, b)
+			rw.offs = append(rw.offs, rawBase+unitStart)
+			if b == '>' && bytes.HasSuffix(rw.buf, environmentContextCloseTag) {
+				blockLen := len(rw.buf) - len(environmentContextCloseTag)
+				offs := rw.offs
+				if err := rw.rewriteBlock(rw.buf[:blockLen], func(i int) int { return offs[i] }); err != nil {
+					return err
+				}
+				inBlock = false
+				continue
+			}
+			if len(rw.buf) > codexEnvironmentBlockMaxBytes+len(environmentContextCloseTag) {
+				return ErrCodexEnvironmentMalformed
+			}
+		}
+	}
+	if inBlock {
+		return ErrCodexEnvironmentMalformed
+	}
+	return nil
+}
+
+// rewriteBlock validates one decoded block and records its edits. rawOffset
+// maps a block index (up to len(block)) to the body offset of the unit that
+// produced it.
+func (rw *codexEnvironmentRewriter) rewriteBlock(block []byte, rawOffset func(int) int) error {
+	if bytes.Contains(block, environmentContextOpenTag) {
+		return ErrCodexEnvironmentMalformed
+	}
+	if !rw.noEdit {
+		rw.stats.Blocks++
+	}
+	if err := validateCodexEnvironmentTags(block); err != nil {
+		return err
+	}
+	zones, err := codexEnvironmentTagValues(block, timezoneOpenTag, timezoneCloseTag)
+	if err != nil {
+		return err
+	}
+	dates, err := codexEnvironmentTagValues(block, currentDateOpenTag, currentDateCloseTag)
+	if err != nil {
+		return err
+	}
+	if rw.noEdit {
+		return nil
+	}
+	item := rw.enclosingItem()
+	// Tags never overlap (each value is closed before the next opening tag),
+	// but zone and date spans interleave; keep edits sorted.
+	for _, span := range mergeCodexEnvironmentSpans(zones, dates) {
+		value := block[span.start:span.end]
+		edit := codexEnvironmentEdit{start: rawOffset(span.start), end: rawOffset(span.end)}
+		if span.zone {
+			if bytes.Equal(value, rw.zone) {
+				continue
+			}
+			rw.stats.Timezones++
+			edit.replacement = rw.zone
+		} else {
+			edit.date, edit.value, edit.item = true, append([]byte(nil), value...), item
+		}
+		rw.edits = append(rw.edits, edit)
+	}
+	return nil
 }
 
 type codexEnvironmentSpan struct {
@@ -582,39 +645,6 @@ func (rw *codexEnvironmentRewriter) apply(body []byte) []byte {
 		last = edit.end
 	}
 	return append(out, body[last:]...)
-}
-
-// appendUnescapedJSONStringWithOffsets decodes like appendUnescapedJSONString
-// and appends to offs, for every decoded byte, the raw offset of the literal
-// byte or escape sequence that produced it, followed by len(raw).
-func appendUnescapedJSONStringWithOffsets(dst []byte, offs []int, raw []byte) ([]byte, []int) {
-	for i := 0; i < len(raw); {
-		unit := i
-		if raw[i] != '\\' || i+1 >= len(raw) {
-			dst = append(dst, raw[i])
-			offs = append(offs, unit)
-			i++
-			continue
-		}
-		end := i + 2
-		if raw[i+1] == 'u' {
-			if r, ok := parseJSONHex4(raw, end); ok {
-				end += 4
-				if isHighSurrogate(r) && end+1 < len(raw) && raw[end] == '\\' && raw[end+1] == 'u' {
-					if r2, ok := parseJSONHex4(raw, end+2); ok && isLowSurrogate(r2) {
-						end += 6
-					}
-				}
-			}
-		}
-		before := len(dst)
-		dst = appendUnescapedJSONString(dst, raw[i:end])
-		for range len(dst) - before {
-			offs = append(offs, unit)
-		}
-		i = end
-	}
-	return dst, append(offs, len(raw))
 }
 
 func isHighSurrogate(r rune) bool { return r >= 0xD800 && r < 0xDC00 }

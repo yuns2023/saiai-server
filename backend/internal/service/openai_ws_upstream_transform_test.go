@@ -330,3 +330,74 @@ func TestOpenAIWSTransformUpstreamPayloadPoolPathRebuiltTurn(t *testing.T) {
 	require.Len(t, gjson.GetBytes(inputs[1], "input").Array(), 2, "turn 2 was rebuilt with turn 1's input")
 	require.Contains(t, string(inputs[1]), "TEST_ONLY_RAW", "the retained turn stays original")
 }
+
+// Without a rewrite the pool path keeps the base usage hash behaviour (no
+// per-turn hash from the service; the handler falls back as before).
+func TestOpenAIWSTransformUpstreamPayloadPoolPathUnchangedKeepsBaseHash(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+	captureConn := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(`{"type":"response.completed","response":{"id":"resp_tf_pool_same","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+	}}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{}, cache: &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool}
+	account := &Account{ID: 887, Name: "openai-ws-transform-pool-same", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"},
+		Extra: map[string]any{"responses_websockets_v2_enabled": true}}
+	hashes := make(chan string, 2)
+	hooks := &OpenAIWSIngressHooks{
+		TransformUpstreamPayload: func(_ int, payload []byte) ([]byte, error) { return payload, nil },
+		AfterTurn: func(_ int, result *OpenAIForwardResult, turnErr error) {
+			if turnErr == nil && result != nil {
+				hashes <- result.RequestPayloadHash
+			}
+		},
+	}
+	done := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			done <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		ginCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ginCtx.Request = r.Clone(r.Context())
+		ginCtx.Request.Header.Set("User-Agent", "unit-test-agent/1.0")
+		msgType, firstMessage, readErr := conn.Read(r.Context())
+		if readErr != nil {
+			done <- readErr
+			return
+		}
+		done <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", msgType, firstMessage, hooks)
+	}))
+	defer wsServer.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	clientConn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+	require.NoError(t, clientConn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"store":false,"input":[{"type":"input_text","text":"hello"}]}`)))
+	_, _, err = clientConn.Read(ctx)
+	require.NoError(t, err)
+	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("session did not end")
+	}
+	require.Empty(t, <-hashes)
+}

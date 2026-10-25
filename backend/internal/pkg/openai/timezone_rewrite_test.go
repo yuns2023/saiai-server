@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -489,5 +490,41 @@ func TestRewriteCodexEnvironmentTimeMalformedMetadataStringFailsClosed(t *testin
 	body := []byte(`{"input":[{"internal_chat_message_metadata_passthrough":{"note":"<environment_context><current_date>x"},"content":"hi environment_context"}]}`)
 	if _, _, err := RewriteCodexEnvironmentTime(body, rewriteNow); !errors.Is(err, ErrCodexEnvironmentMalformed) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A huge escaped string containing environment_context must not be
+// materialized: extra memory is bounded by the block size, not the string.
+func TestRewriteCodexEnvironmentTimeHugeEscapedStringMemory(t *testing.T) {
+	block := strings.ReplaceAll(envBlock("2026-10-01", "Asia/Shanghai"), "\n", `\n`)
+	block = strings.ReplaceAll(block, "<", `\u003c`)                                                  // escaped tags too
+	filler := strings.Repeat(`log line with environment_context \"quoted\" and \u001b[0m\n`, 600_000) // ~33 MiB
+	body := []byte(`{"input":[{"type":"function_call_output","output":"` + filler + block + filler + block + `"}]}`)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	out, stats, err := RewriteCodexEnvironmentTime(body, rewriteNow)
+	runtime.ReadMemStats(&after)
+	if err != nil || stats.Blocks != 2 || stats.Timezones != 2 || stats.Dates != 2 {
+		t.Fatalf("err=%v stats=%+v", err, stats)
+	}
+	// The only O(len) allocation is the rewritten output itself.
+	if extra := int64(after.TotalAlloc-before.TotalAlloc) - int64(cap(out)); extra > 4<<20 {
+		t.Fatalf("extra allocation %d bytes for a %d byte body", extra, len(body))
+	}
+	want := bytes.ReplaceAll(body, []byte("Asia/Shanghai"), []byte(CodexRewriteTimezone))
+	want = bytes.ReplaceAll(want, []byte("2026-10-01"), []byte(rewriteToday))
+	if !bytes.Equal(out, want) {
+		t.Fatal("output differs from the expected span replacement")
+	}
+}
+
+func TestRewriteCodexEnvironmentTimeOversizedBlockFailsClosed(t *testing.T) {
+	text := "<environment_context>" + strings.Repeat("x", codexEnvironmentBlockMaxBytes+1) + "</environment_context>"
+	for _, body := range [][]byte{serdeBody(text), serdeBody(text + `é`)} {
+		if _, _, err := RewriteCodexEnvironmentTime(body, rewriteNow); !errors.Is(err, ErrCodexEnvironmentMalformed) {
+			t.Fatalf("err = %v", err)
+		}
 	}
 }
