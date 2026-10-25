@@ -370,7 +370,8 @@ func TestCodexTimezoneDatesAreFrozen(t *testing.T) {
 func TestCodexTimezoneRewriteWSFirstFrame(t *testing.T) {
 	f := newTZRewriteFixture(t)
 	conn, ctx := dialTZGuardWS(t, f.router)
-	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(tzGuardTaggedFrame)))
+	blockFrame := `{"type":"response.create","model":"TEST_ONLY_MODEL","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context><timezone>Asia/Hong_Kong</timezone></environment_context>"}]}]}`
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(blockFrame)))
 	_, _, err := conn.Read(ctx)
 	require.Equal(t, coderws.StatusInternalError, coderws.CloseStatus(err), "rewrite mode: proceeds to scheduling")
 	require.Equal(t, int32(1), f.slotCalls.Load())
@@ -409,7 +410,7 @@ func TestCodexTimezoneRewriteUserTextMentioningTagIsNotRejected(t *testing.T) {
 	f := newTZRewriteFixture(t)
 	for i, text := range []string{
 		`what does <environment_context> mean?`,
-		`see <environment_context><timezone>Asia/Shanghai</timezone></environment_context> above`,
+		`see <environment_context><timezone>Europe/Berlin</timezone></environment_context> above`,
 	} {
 		body := `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`
 		rec := f.post("/v1/responses", body)
@@ -423,4 +424,47 @@ func TestCodexTimezoneRewriteUserTextMentioningTagIsNotRejected(t *testing.T) {
 		require.Equal(t, coderws.StatusInternalError, coderws.CloseStatus(err), "WS proceeds to scheduling, no rejection frame")
 		f.slotCalls.Add(-1)
 	}
+}
+
+// Leak safety net: after rewriting, the bytes to send are scanned like reject
+// mode. A CN zone the rewrite did not handle (unrecognised block shape or a
+// pasted tag) is rejected; plain mentions of the tag still pass.
+func TestCodexTimezoneRewriteLeakSafetyNet(t *testing.T) {
+	group := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
+	leaking := []string{
+		// Unrecognised shape: extra text in the same string as the block.
+		`note: <environment_context><timezone>Asia/Shanghai</timezone></environment_context>`,
+		`<timezone>Asia/Hong_Kong</timezone>`,
+	}
+	for _, text := range leaking {
+		body := []byte(`{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`)
+		_, _, reason, zone := rewriteCodexTimezonePayload(group, body, time.Now())
+		require.Equal(t, codexTimezoneRejectAfterRewrite, reason, text)
+		require.NotEmpty(t, zone)
+		reason, _, found := codexTimezoneGuardZone(group, body)
+		require.True(t, found, "checkpoints reject it too")
+		require.Equal(t, codexTimezoneRejectAfterRewrite, reason)
+	}
+	for _, text := range []string{
+		`what does <environment_context> mean?`,
+		`<environment_context><timezone>Asia/Shanghai</timezone></environment_context>`, // a real block: rewritten
+		`see <environment_context><timezone>America/New_York</timezone></environment_context>`,
+	} {
+		body := []byte(`{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`)
+		_, _, reason, _ := rewriteCodexTimezonePayload(group, body, time.Now())
+		require.Empty(t, reason, text)
+	}
+
+	// End to end over HTTP and WS.
+	f := newTZRewriteFixture(t)
+	leak := `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"x <environment_context><timezone>Asia/Shanghai</timezone></environment_context>"}]}]}`
+	rec := f.post("/v1/responses", leak)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, codexTimezoneGuardCode, gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
+	conn, ctx := dialTZGuardWS(t, f.router)
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"TEST_ONLY_MODEL","input":"x <timezone>PRC</timezone>"}`)))
+	_, frame, err := conn.Read(ctx)
+	require.NoError(t, err)
+	requireTZGuardErrorFrame(t, frame, codexTimezoneGuardMessageOld)
+	require.Zero(t, f.slotCalls.Load(), "rejected before scheduling")
 }

@@ -101,6 +101,10 @@ const (
 	codexTimezoneRejectMalformed = "malformed_environment_context"
 	codexTimezoneRejectNoClock   = "rewrite_date_unavailable"
 	codexTimezoneRejectEncode    = "rewrite_encode_failed"
+	// A CN zone is still present in the bytes that would be sent after the
+	// rewrite (e.g. an environment block in a shape the rewrite does not
+	// recognise, or a pasted tag): fail closed like reject mode.
+	codexTimezoneRejectAfterRewrite = "cn_timezone_after_rewrite"
 )
 
 // codexTimezoneGuardZone returns why payload must be rejected under group's
@@ -113,8 +117,8 @@ func codexTimezoneGuardZone(group *service.Group, payload []byte) (reason, zone 
 			return codexTimezoneRejectZone, zone, true
 		}
 	case service.CodexTimezoneActionRewrite:
-		if _, _, err := pkgopenai.RewriteCodexEnvironmentTime(payload, codexTimezoneValidationNow); err != nil {
-			return codexTimezoneRewriteRejectReason(err), "", true
+		if _, _, reason, zone := rewriteCodexTimezonePayload(group, payload, codexTimezoneValidationNow); reason != "" {
+			return reason, zone, true
 		}
 	}
 	return "", "", false
@@ -178,15 +182,20 @@ func codexTimezoneRewriteRejectReason(err error) string {
 // frozen clock now. It returns payload unchanged unless group's guard is on
 // with action rewrite. reason is set when the payload must be rejected
 // instead (fail closed).
-func rewriteCodexTimezonePayload(group *service.Group, payload []byte, now time.Time) (out []byte, stats pkgopenai.CodexEnvironmentRewriteStats, reason string) {
+// The rewritten bytes are then scanned like reject mode (leak safety net):
+// a remaining CN zone rejects with reason codexTimezoneRejectAfterRewrite.
+func rewriteCodexTimezonePayload(group *service.Group, payload []byte, now time.Time) (out []byte, stats pkgopenai.CodexEnvironmentRewriteStats, reason, zone string) {
 	if group.CodexTimezoneGuardAction() != service.CodexTimezoneActionRewrite {
-		return payload, stats, ""
+		return payload, stats, "", ""
 	}
 	out, stats, err := pkgopenai.RewriteCodexEnvironmentTime(payload, now)
 	if err != nil {
-		return payload, stats, codexTimezoneRewriteRejectReason(err)
+		return payload, stats, codexTimezoneRewriteRejectReason(err), ""
 	}
-	return out, stats, ""
+	if zone, found := pkgopenai.FindChinaTimezone(out); found {
+		return payload, stats, codexTimezoneRejectAfterRewrite, zone
+	}
+	return out, stats, "", ""
 }
 
 // logCodexTimezoneRewrite never logs the request body.
@@ -237,7 +246,7 @@ func (h *OpenAIGatewayHandler) applyCodexTimezoneGuardHTTP(c *gin.Context, group
 	body := original
 	if group.CodexTimezoneGuardAction() == service.CodexTimezoneActionRewrite {
 		var stats pkgopenai.CodexEnvironmentRewriteStats
-		body, stats, reason = rewriteCodexTimezonePayload(group, original, date.get())
+		body, stats, reason, zone = rewriteCodexTimezonePayload(group, original, date.get())
 		rejected = reason != ""
 		if !rejected && stats.Changed() {
 			logCodexTimezoneRewrite(c, group, userID, "http", 0, stats)
@@ -358,9 +367,9 @@ func rewriteCodexTimezoneWS(ctx context.Context, c *gin.Context, conn *coderws.C
 	if group.CodexTimezoneGuardAction() != service.CodexTimezoneActionRewrite {
 		return payload, nil
 	}
-	out, stats, reason := rewriteCodexTimezonePayload(group, payload, dates.get(turn))
+	out, stats, reason, zone := rewriteCodexTimezonePayload(group, payload, dates.get(turn))
 	if reason != "" {
-		return nil, rejectCodexTimezoneWS(ctx, c, conn, group, userID, reason, "", turn)
+		return nil, rejectCodexTimezoneWS(ctx, c, conn, group, userID, reason, zone, turn)
 	}
 	if stats.Changed() {
 		logCodexTimezoneRewrite(c, group, userID, "ws", turn, stats)

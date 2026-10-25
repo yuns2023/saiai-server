@@ -96,7 +96,13 @@ values; verified in codex-rs 0.163 `ContextualUserFragment::render` and in
 block only if its decoded text, trimmed of ASCII whitespace (SP, HT, LF, CR, FF, VT), starts with
 `<environment_context>` and ends with `</environment_context>`. Any other
 string — e.g. a user prompt that mentions the tag mid-sentence, closed or not —
-is user content: never rewritten and never rejected. Inside a block string each
+is user content: never rewritten and not rejected by the block rules. As a
+leak safety net, the bytes that will actually be sent are then scanned exactly
+like reject mode: a CN/HK/Macau `<timezone>` value still present anywhere
+(e.g. an environment block in a shape the rewrite does not recognise, or a
+user who pastes such a tag) is rejected like reject mode (400
+`codex_timezone_reinit_required`, log reason `cn_timezone_after_rewrite`).
+Merely mentioning `<environment_context>` still passes. Inside a block string each
 `<timezone>` value other than `America/Los_Angeles` becomes
 `America/Los_Angeles` and each `<current_date>` value becomes a Los Angeles
 date: the date of the enclosing input item's
@@ -201,9 +207,9 @@ Limitations:
 
 - Native `/codex/images` and ChatGPT conversation routes are not covered. In
   reject mode a user message that literally contains such a tag is also
-  rejected (accepted false positive); rewrite mode only touches strings that
-  are entirely one `<environment_context>` block, so only a pasted message
-  consisting of exactly such a block is rewritten (or, if malformed, rejected).
+  rejected (accepted false positive); rewrite mode only rewrites strings that
+  are entirely one `<environment_context>` block, and its leak safety net
+  rejects any CN `<timezone>` value left elsewhere, as reject mode would.
 - Reject mode scans JSON object keys as well as values.
 - A large JSON string that contains an escape and the word `timezone` (reject)
   or `environment_context` (rewrite) is decoded into a transient buffer up to
