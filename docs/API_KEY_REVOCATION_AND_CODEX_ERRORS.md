@@ -91,9 +91,17 @@ The scan is read-only; forwarded bytes are unchanged.
 Inside every `<environment_context>`…`</environment_context>` block found in
 a JSON string **value** (any depth, any role; object keys are ignored) each
 `<timezone>` value other than `America/Los_Angeles` becomes
-`America/Los_Angeles` and each `<current_date>` value becomes the server's
-current date in Los Angeles. `<current_date status="unavailable" />` and every
-tag outside a block are untouched (and never cause a rejection). The date is
+`America/Los_Angeles` and each `<current_date>` value becomes a Los Angeles
+date: the date of the enclosing input item's
+`internal_chat_message_metadata_passthrough.create_time` (Codex 0.164+, HTTP
+and WebSocket; a JSON number of epoch seconds, usually fractional) when it is
+within [2020-01-01, frozen now + 24h], otherwise the server's frozen current
+date. The item is the nearest enclosing JSON object carrying that key, whether
+it appears before or after `content`; a non-object metadata value, a missing,
+non-numeric or out-of-range `create_time` (e.g. milliseconds) falls back to the
+frozen date, and a duplicated metadata key fails closed. `create_time` itself
+is never modified, so history blocks keep the day their item was created. `<current_date status="unavailable" />` and every
+tag outside a block are untouched (and never cause a rejection). The clock is
 frozen once per HTTP request and once per WebSocket client turn; smart-switch
 re-application, retries and failover replays of that request/turn reuse it.
 The zone comes from the system or the embedded tzdata; if it cannot be loaded

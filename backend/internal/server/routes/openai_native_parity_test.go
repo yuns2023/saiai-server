@@ -253,11 +253,9 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 				body = encoder.EncodeAll(plain, nil)
 				encoder.Close()
 			}
-			before, err := pkgopenai.CodexRewriteDate(time.Now())
-			require.NoError(t, err)
+			before := time.Now()
 			resp, data := request("POST", "/v1/responses", body, compressed, true)
-			after, err := pkgopenai.CodexRewriteDate(time.Now())
-			require.NoError(t, err)
+			after := time.Now()
 			require.Equal(t, 200, resp.StatusCode, string(data))
 			seen := lab.providerRecords()
 			require.Len(t, seen, 1)

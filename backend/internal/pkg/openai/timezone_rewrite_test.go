@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
 
 const rewriteToday = "2026-10-24"
+
+// rewriteNow is 2026-10-24 13:00 in Los Angeles.
+var rewriteNow = time.Date(2026, 10, 24, 20, 0, 0, 0, time.UTC)
 
 // serdeBody renders a Responses body the way Codex (serde_json) does: no HTML
 // escaping, `\n` for newlines.
@@ -28,7 +32,7 @@ func envBlock(date, zone string) string {
 
 func mustRewrite(t *testing.T, body []byte) ([]byte, CodexEnvironmentRewriteStats) {
 	t.Helper()
-	out, stats, err := RewriteCodexEnvironmentTime(body, rewriteToday)
+	out, stats, err := RewriteCodexEnvironmentTime(body, rewriteNow)
 	if err != nil {
 		t.Fatalf("rewrite: %v", err)
 	}
@@ -251,7 +255,7 @@ func TestRewriteCodexEnvironmentTimeMalformedFailsClosed(t *testing.T) {
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			out, stats, err := RewriteCodexEnvironmentTime(body, rewriteToday)
+			out, stats, err := RewriteCodexEnvironmentTime(body, rewriteNow)
 			if !errors.Is(err, ErrCodexEnvironmentMalformed) {
 				t.Fatalf("err = %v", err)
 			}
@@ -279,7 +283,7 @@ func TestRewriteCodexEnvironmentTimeNoDoubleDecoding(t *testing.T) {
 func TestRewriteCodexEnvironmentTimeFastPathAllocs(t *testing.T) {
 	body := serdeBody("plain text without context", strings.Repeat("x", 4096))
 	allocs := testing.AllocsPerRun(50, func() {
-		out, _, err := RewriteCodexEnvironmentTime(body, rewriteToday)
+		out, _, err := RewriteCodexEnvironmentTime(body, rewriteNow)
 		if err != nil || &out[0] != &body[0] {
 			t.Fatal("fast path changed body")
 		}
@@ -331,5 +335,111 @@ func TestRewriteCodexEnvironmentTimeSelfClosingTags(t *testing.T) {
 	out, stats := mustRewrite(t, body)
 	if stats.Changed() || stats.Blocks != 1 || !bytes.Equal(out, body) {
 		t.Fatalf("stats = %+v", stats)
+	}
+}
+
+// codexItem renders a Codex 0.164 input item with item metadata placed
+// before or after content; createTime is the raw JSON value ("" omits it).
+func codexItem(text, createTime string, metadataFirst bool) string {
+	content := `"content":[{"type":"input_text","text":"` + strings.ReplaceAll(text, "\n", `\n`) + `"}]`
+	meta := `"internal_chat_message_metadata_passthrough":{"content_item_kinds":["environments.environment_context"],"content_item_metadata":[{"provenance":{"hook":false,"type":"harness"}}]`
+	if createTime != "" {
+		meta += `,"create_time":` + createTime
+	}
+	meta += `,"turn_id":"01a173e5-f37b-7662-9aa0-63aba7fbbb18"}`
+	if metadataFirst {
+		return `{"type":"message","role":"developer",` + meta + `,` + content + `}`
+	}
+	return `{"type":"message","role":"developer",` + content + `,` + meta + `}`
+}
+
+func codexItemsBody(prefix string, items ...string) []byte {
+	return []byte(`{` + prefix + `"model":"gpt-5.5","input":[` + strings.Join(items, ",") + `]}`)
+}
+
+func epochSeconds(t time.Time) string {
+	return fmt.Sprintf("%d.5886154", t.Unix())
+}
+
+func TestRewriteCodexEnvironmentTimeUsesItemCreateTime(t *testing.T) {
+	block := envBlock("2026-10-01", "Asia/Shanghai")
+	// 2026-10-23 23:30 in Los Angeles is already 2026-10-24 in UTC/Shanghai.
+	yesterdayLA := time.Date(2026, 10, 24, 6, 30, 0, 0, time.UTC)
+	for _, metadataFirst := range []bool{true, false} {
+		createTime := epochSeconds(yesterdayLA)
+		body := codexItemsBody("", codexItem(block, createTime, metadataFirst))
+		out, stats := mustRewrite(t, body)
+		want := codexItemsBody("", codexItem(envBlock("2026-10-23", CodexRewriteTimezone), createTime, metadataFirst))
+		if !bytes.Equal(out, want) || stats.Dates != 1 || stats.Timezones != 1 {
+			t.Fatalf("metadataFirst=%v stats=%+v\ngot  %s\nwant %s", metadataFirst, stats, out, want)
+		}
+		again, againStats := mustRewrite(t, out)
+		if againStats.Changed() || !bytes.Equal(again, out) {
+			t.Fatal("not idempotent")
+		}
+	}
+}
+
+func TestRewriteCodexEnvironmentTimeCreateTimeFallbacks(t *testing.T) {
+	block := envBlock("2026-10-01", "Asia/Shanghai")
+	for name, createTime := range map[string]string{
+		"absent":         "",
+		"string":         `"1792945812.5"`,
+		"null":           "null",
+		"object":         `{"seconds":1792945812}`,
+		"before_2020":    "1500000000",
+		"after_now_1day": epochSeconds(rewriteNow.Add(25 * time.Hour)),
+		"milliseconds":   fmt.Sprint(rewriteNow.UnixMilli()),
+		"negative":       "-1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := codexItemsBody("", codexItem(block, createTime, false))
+			out, _ := mustRewrite(t, body)
+			want := codexItemsBody("", codexItem(envBlock(rewriteToday, CodexRewriteTimezone), createTime, false))
+			if !bytes.Equal(out, want) {
+				t.Fatalf("got  %s\nwant %s", out, want)
+			}
+		})
+	}
+	// Within now+24h is accepted.
+	soon := rewriteNow.Add(20 * time.Hour) // 2026-10-25 09:00 in LA
+	body := codexItemsBody("", codexItem(block, epochSeconds(soon), true))
+	out, _ := mustRewrite(t, body)
+	if !bytes.Contains(out, []byte("<current_date>2026-10-25</current_date>")) {
+		t.Fatalf("got %s", out)
+	}
+	// Metadata that is not an object, and duplicate metadata keys.
+	body = []byte(`{"input":[{"internal_chat_message_metadata_passthrough":7,"content":"` + strings.ReplaceAll(block, "\n", `\n`) + `"}]}`)
+	if out, _ = mustRewrite(t, body); !bytes.Contains(out, []byte("<current_date>"+rewriteToday)) {
+		t.Fatalf("got %s", out)
+	}
+	body = []byte(`{"input":[{"internal_chat_message_metadata_passthrough":{},"internal_chat_message_metadata_passthrough":{},"content":"x"}],"environment_context":1}`)
+	if _, _, err := RewriteCodexEnvironmentTime(body, rewriteNow); !errors.Is(err, ErrCodexEnvironmentMalformed) {
+		t.Fatalf("duplicate metadata key: err = %v", err)
+	}
+}
+
+func TestRewriteCodexEnvironmentTimeMultipleItemsAndWSFrame(t *testing.T) {
+	first := time.Date(2026, 10, 20, 18, 0, 0, 0, time.UTC)  // 2026-10-20 LA
+	second := time.Date(2026, 10, 22, 18, 0, 0, 0, time.UTC) // 2026-10-22 LA
+	items := []string{
+		codexItem(envBlock("2026-10-21", "Asia/Shanghai"), epochSeconds(first), true),
+		codexItem(envBlock("2026-10-23", "Asia/Shanghai"), epochSeconds(second), false),
+		codexItem(envBlock("2026-10-23", "Asia/Shanghai"), "", false),
+	}
+	// A WebSocket response.create frame carries the same items.
+	body := codexItemsBody(`"type":"response.create",`, items...)
+	out, stats := mustRewrite(t, body)
+	want := codexItemsBody(`"type":"response.create",`,
+		codexItem(envBlock("2026-10-20", CodexRewriteTimezone), epochSeconds(first), true),
+		codexItem(envBlock("2026-10-22", CodexRewriteTimezone), epochSeconds(second), false),
+		codexItem(envBlock(rewriteToday, CodexRewriteTimezone), "", false),
+	)
+	if !bytes.Equal(out, want) || stats.Dates != 3 || stats.Timezones != 3 {
+		t.Fatalf("stats=%+v\ngot  %s\nwant %s", stats, out, want)
+	}
+	// create_time bytes themselves are untouched.
+	if !bytes.Contains(out, []byte(`"create_time":`+epochSeconds(first))) {
+		t.Fatal("create_time changed")
 	}
 }

@@ -19,6 +19,18 @@ const CodexRewriteTimezone = "America/Los_Angeles"
 // than forward the original bytes.
 var ErrCodexEnvironmentMalformed = errors.New("codex environment_context is malformed")
 
+// ErrCodexRewriteClock reports that the rewrite zone could not be loaded.
+// Callers must fail closed; there is no UTC fallback.
+var ErrCodexRewriteClock = errors.New("codex rewrite timezone unavailable")
+
+// codexItemMetadataKey is the per-input-item metadata Codex 0.164+ sends
+// (HTTP and WebSocket); its create_time is the item's creation time in epoch
+// seconds (a JSON number, usually fractional).
+const codexItemMetadataKey = "internal_chat_message_metadata_passthrough"
+
+// codexCreateTimeFloor is the earliest create_time accepted as sane.
+var codexCreateTimeFloor = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+
 var (
 	environmentContextWord     = []byte("environment_context")
 	environmentContextOpenTag  = []byte("<environment_context>")
@@ -48,21 +60,36 @@ func (s CodexEnvironmentRewriteStats) Changed() bool {
 // zone comes from the system or the embedded tzdata; a load failure is
 // returned (callers fail closed) instead of falling back to UTC.
 func CodexRewriteDate(now time.Time) (string, error) {
+	loc, err := codexRewriteZone()
+	if err != nil {
+		return "", err
+	}
+	return now.In(loc).Format("2006-01-02"), nil
+}
+
+func codexRewriteZone() (*time.Location, error) {
 	codexRewriteLocationOnce.Do(func() {
 		codexRewriteLocation, codexRewriteLocationErr = time.LoadLocation(CodexRewriteTimezone)
 	})
 	if codexRewriteLocationErr != nil {
-		return "", codexRewriteLocationErr
+		return nil, errors.Join(ErrCodexRewriteClock, codexRewriteLocationErr)
 	}
-	return now.In(codexRewriteLocation).Format("2006-01-02"), nil
+	return codexRewriteLocation, nil
 }
 
 // RewriteCodexEnvironmentTime replaces, inside every
 // `<environment_context>`…`</environment_context>` block found in a JSON
 // string value (object keys are ignored), each `<timezone>` value that is not
 // CodexRewriteTimezone with CodexRewriteTimezone and each `<current_date>`
-// value with today. Tags outside blocks and `<current_date status=… />` style
-// tags are untouched.
+// value with a Los Angeles date. Tags outside blocks and
+// `<current_date status=… />` style tags are untouched.
+//
+// The date of a block is the CodexRewriteTimezone date of the enclosing input
+// item's `internal_chat_message_metadata_passthrough.create_time` (the
+// nearest enclosing object carrying that key, before or after the content)
+// when it is a JSON number of epoch seconds within [2020-01-01, now+24h];
+// otherwise it is now's date. now is the caller's frozen per-request/turn
+// clock. create_time itself is never modified.
 //
 // The edit is a raw span replacement: every byte outside the replaced value
 // spans is identical to body (escapes, key order and whitespace included),
@@ -73,9 +100,10 @@ func CodexRewriteDate(now time.Time) (string, error) {
 // a `\u` escape returns immediately.
 //
 // An invalid JSON body, an unclosed or nested block, or an unpaired/nested
-// tag inside a block returns ErrCodexEnvironmentMalformed. The function is
-// idempotent for a fixed today.
-func RewriteCodexEnvironmentTime(body []byte, today string) ([]byte, CodexEnvironmentRewriteStats, error) {
+// tag inside a block returns ErrCodexEnvironmentMalformed; a zone load
+// failure returns ErrCodexRewriteClock. The function holds no state and is
+// idempotent for a fixed now.
+func RewriteCodexEnvironmentTime(body []byte, now time.Time) ([]byte, CodexEnvironmentRewriteStats, error) {
 	var stats CodexEnvironmentRewriteStats
 	if !bytes.Contains(body, environmentContextWord) && !bytes.Contains(body, jsonUnicodeEsc) {
 		return body, stats, nil
@@ -83,13 +111,20 @@ func RewriteCodexEnvironmentTime(body []byte, today string) ([]byte, CodexEnviro
 	if !gjson.ValidBytes(body) {
 		return body, stats, ErrCodexEnvironmentMalformed
 	}
+	loc, err := codexRewriteZone()
+	if err != nil {
+		return body, stats, err
+	}
 	rw := codexEnvironmentRewriter{
 		zone:  []byte(CodexRewriteTimezone),
-		today: []byte(today),
+		today: []byte(now.In(loc).Format("2006-01-02")),
+		now:   now,
+		loc:   loc,
 	}
 	if err := rw.scan(body); err != nil {
 		return body, CodexEnvironmentRewriteStats{}, err
 	}
+	rw.resolveDates(body)
 	if len(rw.edits) == 0 {
 		return body, rw.stats, nil
 	}
@@ -104,57 +139,178 @@ func RewriteCodexEnvironmentTime(body []byte, today string) ([]byte, CodexEnviro
 type codexEnvironmentEdit struct {
 	start, end  int
 	replacement []byte
+	// Date edits are resolved after the scan, because item metadata may
+	// follow the content: value is the current value and items the body
+	// offsets of the enclosing objects (innermost last).
+	date  bool
+	value []byte
+	items []int
+}
+
+type codexJSONFrame struct {
+	object   bool
+	start    int
+	metaNext bool   // the next value is this object's metadata value
+	isMeta   bool   // this frame is a metadata value
+	hasMeta  bool   // this object has the metadata key
+	metaSpan [2]int // body span of an object metadata value; -1 otherwise
 }
 
 type codexEnvironmentRewriter struct {
-	zone  []byte
-	today []byte
-	edits []codexEnvironmentEdit
-	stats CodexEnvironmentRewriteStats
-	buf   []byte
-	offs  []int
+	zone   []byte
+	today  []byte
+	now    time.Time
+	loc    *time.Location
+	edits  []codexEnvironmentEdit
+	stats  CodexEnvironmentRewriteStats
+	buf    []byte
+	offs   []int
+	frames []codexJSONFrame
+	metas  map[int][2]int // object start → metadata span
 }
 
 // scan walks the JSON tokens of a valid body, tracking whether each string
-// is an object key, and rewrites string values.
+// is an object key and which objects carry item metadata, and records edits
+// for string values.
 func (rw *codexEnvironmentRewriter) scan(body []byte) error {
-	stack := make([]byte, 0, 16)
+	rw.frames = make([]codexJSONFrame, 0, 16)
 	expectKey := false
+	top := func() *codexJSONFrame {
+		if len(rw.frames) == 0 {
+			return nil
+		}
+		return &rw.frames[len(rw.frames)-1]
+	}
+	// takeMeta consumes a pending metadata value marker.
+	takeMeta := func() bool {
+		if frame := top(); frame != nil && frame.metaNext {
+			frame.metaNext = false
+			return true
+		}
+		return false
+	}
 	for i := 0; i < len(body); {
-		switch body[i] {
+		switch c := body[i]; c {
 		case '"':
 			start := i + 1
 			end, escaped := jsonStringEnd(body, start)
 			if end < 0 {
 				return ErrCodexEnvironmentMalformed
 			}
-			isKey := expectKey && len(stack) > 0 && stack[len(stack)-1] == '{'
+			frame := top()
+			isKey := expectKey && frame != nil && frame.object
 			expectKey = false
-			if !isKey {
+			if isKey {
+				if codexJSONStringEquals(body[start:end], escaped, codexItemMetadataKey) {
+					if frame.hasMeta {
+						return ErrCodexEnvironmentMalformed // duplicate key: ambiguous
+					}
+					frame.hasMeta, frame.metaNext, frame.metaSpan = true, true, [2]int{-1, -1}
+				}
+			} else {
+				takeMeta()
 				if err := rw.stringValue(body, start, end, escaped); err != nil {
 					return err
 				}
 			}
 			i = end + 1
 			continue
-		case '{':
-			stack = append(stack, '{')
-			expectKey = true
-		case '[':
-			stack = append(stack, '[')
-			expectKey = false
+		case '{', '[':
+			isMeta := takeMeta() && c == '{'
+			rw.frames = append(rw.frames, codexJSONFrame{object: c == '{', start: i, isMeta: isMeta})
+			expectKey = c == '{'
 		case '}', ']':
-			if len(stack) == 0 {
+			frame := top()
+			if frame == nil || frame.object != (c == '}') {
 				return ErrCodexEnvironmentMalformed
 			}
-			stack = stack[:len(stack)-1]
+			closed := *frame
+			rw.frames = rw.frames[:len(rw.frames)-1]
+			if parent := top(); closed.isMeta && parent != nil {
+				parent.metaSpan = [2]int{closed.start, i + 1}
+			}
+			if closed.hasMeta {
+				if rw.metas == nil {
+					rw.metas = make(map[int][2]int)
+				}
+				rw.metas[closed.start] = closed.metaSpan
+			}
 			expectKey = false
 		case ',':
-			expectKey = len(stack) > 0 && stack[len(stack)-1] == '{'
+			frame := top()
+			expectKey = frame != nil && frame.object
 		case ':':
 			expectKey = false
+		case ' ', '\t', '\n', '\r':
+		default:
+			takeMeta() // a scalar metadata value carries no create_time
 		}
 		i++
+	}
+	return nil
+}
+
+// codexJSONStringEquals compares raw JSON string content with an ASCII name.
+func codexJSONStringEquals(raw []byte, escaped bool, name string) bool {
+	if !escaped {
+		return string(raw) == name
+	}
+	return string(appendUnescapedJSONString(nil, raw)) == name
+}
+
+// enclosingObjects returns the body offsets of the open objects.
+func (rw *codexEnvironmentRewriter) enclosingObjects() []int {
+	starts := make([]int, 0, len(rw.frames))
+	for _, frame := range rw.frames {
+		if frame.object {
+			starts = append(starts, frame.start)
+		}
+	}
+	return starts
+}
+
+// resolveDates sets each date edit's replacement from its item create_time
+// or now, and drops edits whose value already matches.
+func (rw *codexEnvironmentRewriter) resolveDates(body []byte) {
+	kept := rw.edits[:0]
+	for _, edit := range rw.edits {
+		if edit.date {
+			edit.replacement = rw.today
+			if date := rw.itemDate(body, edit.items); date != nil {
+				edit.replacement = date
+			}
+			if bytes.Equal(edit.value, edit.replacement) {
+				continue
+			}
+			rw.stats.Dates++
+		}
+		kept = append(kept, edit)
+	}
+	rw.edits = kept
+}
+
+// itemDate returns the LA date of the nearest enclosing object's metadata
+// create_time, or nil when that object has none or it is not sane.
+func (rw *codexEnvironmentRewriter) itemDate(body []byte, items []int) []byte {
+	for i := len(items) - 1; i >= 0; i-- {
+		span, ok := rw.metas[items[i]]
+		if !ok {
+			continue
+		}
+		if span[0] < 0 {
+			return nil
+		}
+		createTime := gjson.GetBytes(body[span[0]:span[1]], "create_time")
+		if createTime.Type != gjson.Number {
+			return nil
+		}
+		seconds := createTime.Float()
+		if seconds < float64(codexCreateTimeFloor.Unix()) || seconds > float64(rw.now.Add(24*time.Hour).Unix()) {
+			return nil
+		}
+		whole := int64(seconds)
+		created := time.Unix(whole, int64((seconds-float64(whole))*1e9))
+		return []byte(created.In(rw.loc).Format("2006-01-02"))
 	}
 	return nil
 }
@@ -224,25 +380,26 @@ func (rw *codexEnvironmentRewriter) rewriteText(text []byte, offs []int, rawBase
 		}
 		// Tags never overlap (each value is closed before the next opening
 		// tag), but zone and date spans interleave; keep edits sorted.
+		var items []int
 		for _, span := range mergeCodexEnvironmentSpans(zones, dates) {
 			value := block[span.start:span.end]
-			replacement := rw.today
-			if span.zone {
-				replacement = rw.zone
-			}
-			if bytes.Equal(value, replacement) {
-				continue
+			edit := codexEnvironmentEdit{
+				start: rawOffset(blockStart + span.start),
+				end:   rawOffset(blockStart + span.end),
 			}
 			if span.zone {
+				if bytes.Equal(value, rw.zone) {
+					continue
+				}
 				rw.stats.Timezones++
+				edit.replacement = rw.zone
 			} else {
-				rw.stats.Dates++
+				if items == nil {
+					items = rw.enclosingObjects()
+				}
+				edit.date, edit.value, edit.items = true, append([]byte(nil), value...), items
 			}
-			rw.edits = append(rw.edits, codexEnvironmentEdit{
-				start:       rawOffset(blockStart + span.start),
-				end:         rawOffset(blockStart + span.end),
-				replacement: replacement,
-			})
+			rw.edits = append(rw.edits, edit)
 		}
 		pos = blockEnd + len(environmentContextCloseTag)
 	}

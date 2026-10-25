@@ -91,9 +91,9 @@ func codexTimezoneGuardMessage(userAgent string) string {
 // codexTimezoneNow is the server clock for the rewrite date (tests stub it).
 var codexTimezoneNow = time.Now
 
-// codexTimezoneValidationDate is a placeholder for checks that only need to
-// know whether a payload can be rewritten; the output is discarded.
-const codexTimezoneValidationDate = "1970-01-01"
+// codexTimezoneValidationNow is a placeholder clock for checks that only
+// need to know whether a payload can be rewritten; the output is discarded.
+var codexTimezoneValidationNow = time.Unix(0, 0)
 
 // Rejection reasons logged by the guard.
 const (
@@ -113,79 +113,78 @@ func codexTimezoneGuardZone(group *service.Group, payload []byte) (reason, zone 
 			return codexTimezoneRejectZone, zone, true
 		}
 	case service.CodexTimezoneActionRewrite:
-		if _, _, err := pkgopenai.RewriteCodexEnvironmentTime(payload, codexTimezoneValidationDate); err != nil {
-			return codexTimezoneRejectMalformed, "", true
+		if _, _, err := pkgopenai.RewriteCodexEnvironmentTime(payload, codexTimezoneValidationNow); err != nil {
+			return codexTimezoneRewriteRejectReason(err), "", true
 		}
 	}
 	return "", "", false
 }
 
-// codexTimezoneFrozenDate computes the rewrite date once per HTTP request
+// codexTimezoneFrozenDate freezes the rewrite clock once per HTTP request
 // (R2): every check, smart-switch re-application and retry of the request
-// sends the same date. Not safe for concurrent use.
+// uses the same instant, hence the same date. Not safe for concurrent use.
 type codexTimezoneFrozenDate struct {
-	date string
-	err  error
+	now  time.Time
 	done bool
 }
 
-func (d *codexTimezoneFrozenDate) get() (string, error) {
+func (d *codexTimezoneFrozenDate) get() time.Time {
 	if !d.done {
-		d.date, d.err = pkgopenai.CodexRewriteDate(codexTimezoneNow())
-		d.done = true
+		d.now, d.done = codexTimezoneNow(), true
 	}
-	return d.date, d.err
+	return d.now
 }
 
-// codexTimezoneTurnDates freezes one rewrite date per WebSocket client turn;
+// codexTimezoneTurnDates freezes one rewrite clock per WebSocket client turn;
 // retries and failover replays of a turn reuse it. Frames that are not a
-// turn (turn <= 0) use the current date. Old turns are pruned.
+// turn (turn <= 0) use the current time. Old turns are pruned.
 type codexTimezoneTurnDates struct {
 	mu    sync.Mutex
-	dates map[int]string
+	dates map[int]time.Time
 }
 
 const codexTimezoneTurnDatesKept = 64
 
-func (d *codexTimezoneTurnDates) get(turn int) (string, error) {
+func (d *codexTimezoneTurnDates) get(turn int) time.Time {
 	if turn <= 0 {
-		return pkgopenai.CodexRewriteDate(codexTimezoneNow())
+		return codexTimezoneNow()
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if date, ok := d.dates[turn]; ok {
-		return date, nil
+	if now, ok := d.dates[turn]; ok {
+		return now
 	}
-	date, err := pkgopenai.CodexRewriteDate(codexTimezoneNow())
-	if err != nil {
-		return "", err
-	}
+	now := codexTimezoneNow()
 	if d.dates == nil {
-		d.dates = make(map[int]string)
+		d.dates = make(map[int]time.Time)
 	}
-	d.dates[turn] = date
+	d.dates[turn] = now
 	for old := range d.dates {
 		if old <= turn-codexTimezoneTurnDatesKept {
 			delete(d.dates, old)
 		}
 	}
-	return date, nil
+	return now
 }
 
-// rewriteCodexTimezonePayload applies the rewrite action to payload. It
-// returns payload unchanged unless group's guard is on with action rewrite.
-// reason is set when the payload must be rejected instead (fail closed).
-func rewriteCodexTimezonePayload(group *service.Group, payload []byte, date func() (string, error)) (out []byte, stats pkgopenai.CodexEnvironmentRewriteStats, reason string) {
+func codexTimezoneRewriteRejectReason(err error) string {
+	if errors.Is(err, pkgopenai.ErrCodexRewriteClock) {
+		return codexTimezoneRejectNoClock
+	}
+	return codexTimezoneRejectMalformed
+}
+
+// rewriteCodexTimezonePayload applies the rewrite action to payload with the
+// frozen clock now. It returns payload unchanged unless group's guard is on
+// with action rewrite. reason is set when the payload must be rejected
+// instead (fail closed).
+func rewriteCodexTimezonePayload(group *service.Group, payload []byte, now time.Time) (out []byte, stats pkgopenai.CodexEnvironmentRewriteStats, reason string) {
 	if group.CodexTimezoneGuardAction() != service.CodexTimezoneActionRewrite {
 		return payload, stats, ""
 	}
-	today, err := date()
+	out, stats, err := pkgopenai.RewriteCodexEnvironmentTime(payload, now)
 	if err != nil {
-		return payload, stats, codexTimezoneRejectNoClock
-	}
-	out, stats, err = pkgopenai.RewriteCodexEnvironmentTime(payload, today)
-	if err != nil {
-		return payload, stats, codexTimezoneRejectMalformed
+		return payload, stats, codexTimezoneRewriteRejectReason(err)
 	}
 	return out, stats, ""
 }
@@ -238,7 +237,7 @@ func (h *OpenAIGatewayHandler) applyCodexTimezoneGuardHTTP(c *gin.Context, group
 	body := original
 	if group.CodexTimezoneGuardAction() == service.CodexTimezoneActionRewrite {
 		var stats pkgopenai.CodexEnvironmentRewriteStats
-		body, stats, reason = rewriteCodexTimezonePayload(group, original, date.get)
+		body, stats, reason = rewriteCodexTimezonePayload(group, original, date.get())
 		rejected = reason != ""
 		if !rejected && stats.Changed() {
 			logCodexTimezoneRewrite(c, group, userID, "http", 0, stats)
@@ -356,7 +355,10 @@ func rejectCodexTimezoneWS(ctx context.Context, c *gin.Context, conn *coderws.Co
 // failover replays), so retained frames may stay original. group is the
 // session's current group; dates freezes one date per turn.
 func rewriteCodexTimezoneWS(ctx context.Context, c *gin.Context, conn *coderws.Conn, group *service.Group, userID int64, turn int, payload []byte, dates *codexTimezoneTurnDates) ([]byte, error) {
-	out, stats, reason := rewriteCodexTimezonePayload(group, payload, func() (string, error) { return dates.get(turn) })
+	if group.CodexTimezoneGuardAction() != service.CodexTimezoneActionRewrite {
+		return payload, nil
+	}
+	out, stats, reason := rewriteCodexTimezonePayload(group, payload, dates.get(turn))
 	if reason != "" {
 		return nil, rejectCodexTimezoneWS(ctx, c, conn, group, userID, reason, "", turn)
 	}

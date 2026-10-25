@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	pkgopenai "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
@@ -342,25 +343,26 @@ func TestCodexTimezoneDatesAreFrozen(t *testing.T) {
 	now := time.Date(2026, 10, 25, 6, 59, 0, 0, time.UTC) // 2026-10-24 in LA
 	codexTimezoneNow = func() time.Time { return now }
 
+	laDate := func(at time.Time) string {
+		date, err := pkgopenai.CodexRewriteDate(at)
+		require.NoError(t, err)
+		return date
+	}
 	httpDate := &codexTimezoneFrozenDate{}
-	first, err := httpDate.get()
-	require.NoError(t, err)
-	require.Equal(t, "2026-10-24", first)
+	first := httpDate.get()
+	require.Equal(t, "2026-10-24", laDate(first))
 	now = now.Add(2 * time.Minute) // 2026-10-25 in LA
-	again, _ := httpDate.get()
-	require.Equal(t, first, again, "one date per HTTP request")
+	require.Equal(t, first, httpDate.get(), "one clock per HTTP request")
 
 	dates := &codexTimezoneTurnDates{}
 	now = time.Date(2026, 10, 25, 6, 59, 0, 0, time.UTC)
-	turn1, _ := dates.get(1)
+	turn1 := dates.get(1)
 	now = now.Add(2 * time.Minute)
-	turn1Replay, _ := dates.get(1)
-	turn2, _ := dates.get(2)
-	require.Equal(t, "2026-10-24", turn1)
-	require.Equal(t, turn1, turn1Replay, "retries and replays of a turn reuse its date")
-	require.Equal(t, "2026-10-25", turn2)
+	require.Equal(t, turn1, dates.get(1), "retries and replays of a turn reuse its clock")
+	require.Equal(t, "2026-10-24", laDate(turn1))
+	require.Equal(t, "2026-10-25", laDate(dates.get(2)))
 	for turn := 3; turn < 3+2*codexTimezoneTurnDatesKept; turn++ {
-		_, _ = dates.get(turn)
+		_ = dates.get(turn)
 	}
 	require.LessOrEqual(t, len(dates.dates), codexTimezoneTurnDatesKept)
 }
