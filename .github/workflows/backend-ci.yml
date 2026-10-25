@@ -51,9 +51,31 @@ jobs:
         working-directory: frontend
         run: pnpm run build
 
-  test:
+  # Backend suites run as parallel matrix legs; the required "test" check is
+  # the aggregate below, so branch protection and release gates are unchanged.
+  backend-tests:
+    name: backend-tests (${{ matrix.suite }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: unit
+            run: make test-unit
+          - suite: moderation-race
+            run: >-
+              CGO_ENABLED=1 GOMAXPROCS=2
+              go test -race -tags=unit -p 1 ./internal/service ./internal/repository -run 'TestModeration' -parallel=2 -count=1 -timeout=180s
+          - suite: ws-race
+            run: >-
+              export CGO_ENABLED=1 GOMAXPROCS=2 &&
+              go test -race -tags=unit -p 1 ./internal/service/openai_ws_v2 -parallel=2 -count=1 -timeout=180s &&
+              go test -race -tags=unit -p 1 ./internal/service -run 'Test(OpenAIWS|OpenAICodexNativeRelay|OpenAIGatewayService_.*WS|OpenAIGatewayService_ProxyResponsesWebSocket|OpenAIGatewayService_UpdateCodexUsageSnapshot|OpenAIGatewayService_GetSchedulableAccount_ExhaustedCodex|ParseOpenAIWSCodexRateLimitEvent|PrepareOpenAIWSContinuation|BuildOpenAIWSFailover|CalculateOpenAI429ResetTime|ParseOpenAIRateLimit)' -parallel=2 -count=1 -timeout=300s &&
+              go test -race -tags=unit -p 1 ./internal/handler -run 'Test(OpenAIResponsesWebSocket|OpenAIGatewayHandler.*WSTurn)' -parallel=2 -count=1 -timeout=180s &&
+              go test -race -tags=unit -p 1 ./internal/handler ./internal/service -run 'Test(SessionInitialSerial|UseSessionInitialSerial|ClaudeSticky|ClaudeOAuthSticky|ClaudeOAuthPendingSticky)' -parallel=2 -count=1 -timeout=180s
+          - suite: integration
+            run: make test-integration
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -68,33 +90,20 @@ jobs:
           cache: true
       - name: Verify Go version
         run: go version | grep -q 'go1.26.10'
-      - name: Unit tests
+      - name: Run ${{ matrix.suite }}
         working-directory: backend
-        run: make test-unit
-      - name: Moderation cache race tests
-        working-directory: backend
+        run: ${{ matrix.run }}
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: backend-tests
+    if: always()
+    steps:
+      - name: All backend suites passed
         env:
-          CGO_ENABLED: '1'
-          GOMAXPROCS: '2'
-        run: go test -race -tags=unit -p 1 ./internal/service ./internal/repository -run 'TestModeration' -parallel=2 -count=1 -timeout=180s
-      - name: WebSocket quota failover race tests
-        working-directory: backend
-        env:
-          CGO_ENABLED: '1'
-          GOMAXPROCS: '2'
-        run: |
-          go test -race -tags=unit -p 1 ./internal/service/openai_ws_v2 -parallel=2 -count=1 -timeout=180s
-          go test -race -tags=unit -p 1 ./internal/service -run 'Test(OpenAIWS|OpenAICodexNativeRelay|OpenAIGatewayService_.*WS|OpenAIGatewayService_ProxyResponsesWebSocket|OpenAIGatewayService_UpdateCodexUsageSnapshot|OpenAIGatewayService_GetSchedulableAccount_ExhaustedCodex|ParseOpenAIWSCodexRateLimitEvent|PrepareOpenAIWSContinuation|BuildOpenAIWSFailover|CalculateOpenAI429ResetTime|ParseOpenAIRateLimit)' -parallel=2 -count=1 -timeout=300s
-          go test -race -tags=unit -p 1 ./internal/handler -run 'Test(OpenAIResponsesWebSocket|OpenAIGatewayHandler.*WSTurn)' -parallel=2 -count=1 -timeout=180s
-      - name: Claude session startup race tests
-        working-directory: backend
-        env:
-          CGO_ENABLED: '1'
-          GOMAXPROCS: '2'
-        run: go test -race -tags=unit -p 1 ./internal/handler ./internal/service -run 'Test(SessionInitialSerial|UseSessionInitialSerial|ClaudeSticky|ClaudeOAuthSticky|ClaudeOAuthPendingSticky)' -parallel=2 -count=1 -timeout=180s
-      - name: Integration tests
-        working-directory: backend
-        run: make test-integration
+          RESULT: ${{ needs.backend-tests.result }}
+        run: test "$RESULT" = success
 
   golangci-lint:
     runs-on: ubuntu-latest
