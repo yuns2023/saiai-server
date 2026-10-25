@@ -138,7 +138,8 @@ func TestGetCodexVersionGateDoesNotBlockOnSlowStore(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		require.Equal(t, CodexVersionGate{}, svc.GetCodexVersionGate(context.Background()))
 	}
-	require.Less(t, time.Since(start), 20*time.Millisecond, "refresh runs in the background")
+	// A blocking refresh would hold each call for the 5 s store timeout.
+	require.Less(t, time.Since(start), time.Second, "refresh runs in the background")
 	require.Eventually(t, func() bool { return repo.calls.Load() == 2 }, time.Second, time.Millisecond, "one background refresh")
 	close(repo.block)
 }

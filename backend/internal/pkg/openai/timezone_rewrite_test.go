@@ -522,9 +522,31 @@ func TestRewriteCodexEnvironmentTimeHugeEscapedStringMemory(t *testing.T) {
 
 func TestRewriteCodexEnvironmentTimeOversizedBlockFailsClosed(t *testing.T) {
 	text := "<environment_context>" + strings.Repeat("x", codexEnvironmentBlockMaxBytes+1) + "</environment_context>"
-	for _, body := range [][]byte{serdeBody(text), serdeBody(text + `é`)} {
+	escaped := "<environment_context>" + strings.Repeat("x", codexEnvironmentBlockMaxBytes) + "\n</environment_context>" // 64 KiB + 1, escaped path
+	for _, body := range [][]byte{serdeBody(text), serdeBody(escaped)} {
 		if _, _, err := RewriteCodexEnvironmentTime(body, rewriteNow); !errors.Is(err, ErrCodexEnvironmentMalformed) {
 			t.Fatalf("err = %v", err)
 		}
+	}
+}
+
+// A block at the limit is rejected if its rewrite would exceed the limit, so
+// every accepted rewrite is accepted again (idempotence).
+func TestRewriteCodexEnvironmentTimeBlockLimitIsIdempotent(t *testing.T) {
+	tags := "<timezone>PRC</timezone><current_date>1</current_date>"
+	pad := strings.Repeat("x", codexEnvironmentBlockMaxBytes-len(tags))
+	body := serdeBody("<environment_context>" + pad + tags + "</environment_context>")
+	if _, _, err := RewriteCodexEnvironmentTime(body, rewriteNow); !errors.Is(err, ErrCodexEnvironmentMalformed) {
+		t.Fatalf("growing past the limit: err = %v", err)
+	}
+	grow := len(CodexRewriteTimezone) - len("PRC") + len(rewriteToday) - len("1")
+	body = serdeBody("<environment_context>" + pad[grow:] + tags + "</environment_context>")
+	out, stats := mustRewrite(t, body)
+	if stats.Timezones != 1 || stats.Dates != 1 {
+		t.Fatalf("stats = %+v", stats)
+	}
+	again, againStats := mustRewrite(t, out)
+	if againStats.Changed() || !bytes.Equal(again, out) {
+		t.Fatal("not idempotent at the limit")
 	}
 }

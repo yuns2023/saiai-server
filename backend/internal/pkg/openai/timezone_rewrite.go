@@ -464,7 +464,7 @@ func (rw *codexEnvironmentRewriter) rewriteEscapedText(raw []byte, rawBase int) 
 // maps a block index (up to len(block)) to the body offset of the unit that
 // produced it.
 func (rw *codexEnvironmentRewriter) rewriteBlock(block []byte, rawOffset func(int) int) error {
-	if bytes.Contains(block, environmentContextOpenTag) {
+	if len(block) > codexEnvironmentBlockMaxBytes || bytes.Contains(block, environmentContextOpenTag) {
 		return ErrCodexEnvironmentMalformed
 	}
 	if !rw.noEdit {
@@ -480,6 +480,20 @@ func (rw *codexEnvironmentRewriter) rewriteBlock(block []byte, rawOffset func(in
 	dates, err := codexEnvironmentTagValues(block, currentDateOpenTag, currentDateCloseTag)
 	if err != nil {
 		return err
+	}
+	// The rewritten block must stay within the limit too, so a rewrite is
+	// accepted again on the next pass (idempotence).
+	rewrittenLen := len(block)
+	for _, span := range zones {
+		if !bytes.Equal(block[span[0]:span[1]], rw.zone) {
+			rewrittenLen += len(rw.zone) - (span[1] - span[0])
+		}
+	}
+	for _, span := range dates {
+		rewrittenLen += len("2006-01-02") - (span[1] - span[0])
+	}
+	if rewrittenLen > codexEnvironmentBlockMaxBytes {
+		return ErrCodexEnvironmentMalformed
 	}
 	if rw.noEdit {
 		return nil
