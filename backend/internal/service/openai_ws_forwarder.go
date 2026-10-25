@@ -228,6 +228,15 @@ type OpenAIWSIngressHooks struct {
 	// turn with replayed history). Native passthrough relays client frames
 	// unchanged and does not call it. An error ends the session.
 	BeforeUpstreamSend func(turn int, payload []byte) error
+	// TransformUpstreamPayload returns the bytes actually written upstream
+	// for a client frame. Every path calls it at its final send point (native
+	// passthrough first frame, later frames and early-429 replays; the pool
+	// path's possibly rebuilt turn, including retries; failover replays), so
+	// retained frames stay as the client sent them. turn is the logical turn
+	// (0 for a non-turn frame before the first turn). An error ends the
+	// session; the frame is not sent.
+	TransformUpstreamPayload func(turn int, payload []byte) ([]byte, error)
+
 	BeforeTurn         func(turn int) error
 	AfterTurn          func(turn int, result *OpenAIForwardResult, turnErr error)
 	OnUpstreamError    func(failure *OpenAIWSUpstreamFailure)
@@ -2554,6 +2563,16 @@ func remapOpenAIWSIngressHooksForFailover(hooks *OpenAIWSIngressHooks, turnOffse
 			}
 			return hooks.BeforeUpstreamSend(logicalTurn(turn), payload)
 		},
+		TransformUpstreamPayload: func(turn int, payload []byte) ([]byte, error) {
+			if hooks.TransformUpstreamPayload == nil {
+				return payload, nil
+			}
+			if turn <= 0 {
+				// A non-turn frame belongs to the latest logical turn.
+				return hooks.TransformUpstreamPayload(turnOffset, payload)
+			}
+			return hooks.TransformUpstreamPayload(logicalTurn(turn), payload)
+		},
 		OnClientTurn: func(turn int, rawPayload []byte) error {
 			if turn == 1 || hooks.OnClientTurn == nil {
 				// The failed turn was already validated and moderated before its
@@ -3740,7 +3759,20 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 				return err
 			}
 		}
-		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel)
+		// currentPayload stays as built from client frames (it is retained
+		// for replay/strict-state); only the sent bytes are transformed.
+		sendPayload, sendPayloadBytes := currentPayload, currentPayloadBytes
+		if hooks != nil && hooks.TransformUpstreamPayload != nil {
+			transformed, err := hooks.TransformUpstreamPayload(turn, currentPayload)
+			if err != nil {
+				if hooks.AfterTurn != nil {
+					hooks.AfterTurn(turn, nil, err)
+				}
+				return err
+			}
+			sendPayload, sendPayloadBytes = transformed, len(transformed)
+		}
+		result, relayErr := sendAndRelay(turn, sessionLease, sendPayload, sendPayloadBytes, currentOriginalModel)
 		if relayErr != nil {
 			lastTurnClean = false
 			if recoverIngressPrevResponseNotFound(relayErr, turn, connID) {

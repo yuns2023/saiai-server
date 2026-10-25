@@ -275,6 +275,11 @@ func CodexCnTimezoneGuard(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCodexCnTimezoneGuard, v))
 }
 
+// CodexTimezoneAction applies equality check predicate on the "codex_timezone_action" field. It's identical to CodexTimezoneActionEQ.
+func CodexTimezoneAction(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldCodexTimezoneAction, v))
+}
+
 // ClaudeDeviceLimitMode applies equality check predicate on the "claude_device_limit_mode" field. It's identical to ClaudeDeviceLimitModeEQ.
 func ClaudeDeviceLimitMode(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldClaudeDeviceLimitMode, v))
@@ -2048,6 +2053,71 @@ func CodexCnTimezoneGuardEQ(v bool) predicate.Group {
 // CodexCnTimezoneGuardNEQ applies the NEQ predicate on the "codex_cn_timezone_guard" field.
 func CodexCnTimezoneGuardNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldCodexCnTimezoneGuard, v))
+}
+
+// CodexTimezoneActionEQ applies the EQ predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldCodexTimezoneAction, v))
+}
+
+// CodexTimezoneActionNEQ applies the NEQ predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldCodexTimezoneAction, v))
+}
+
+// CodexTimezoneActionIn applies the In predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldCodexTimezoneAction, vs...))
+}
+
+// CodexTimezoneActionNotIn applies the NotIn predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldCodexTimezoneAction, vs...))
+}
+
+// CodexTimezoneActionGT applies the GT predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldCodexTimezoneAction, v))
+}
+
+// CodexTimezoneActionGTE applies the GTE predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldCodexTimezoneAction, v))
+}
+
+// CodexTimezoneActionLT applies the LT predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldCodexTimezoneAction, v))
+}
+
+// CodexTimezoneActionLTE applies the LTE predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldCodexTimezoneAction, v))
+}
+
+// CodexTimezoneActionContains applies the Contains predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldCodexTimezoneAction, v))
+}
+
+// CodexTimezoneActionHasPrefix applies the HasPrefix predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldCodexTimezoneAction, v))
+}
+
+// CodexTimezoneActionHasSuffix applies the HasSuffix predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldCodexTimezoneAction, v))
+}
+
+// CodexTimezoneActionEqualFold applies the EqualFold predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldCodexTimezoneAction, v))
+}
+
+// CodexTimezoneActionContainsFold applies the ContainsFold predicate on the "codex_timezone_action" field.
+func CodexTimezoneActionContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldCodexTimezoneAction, v))
 }
 
 // ClaudeDeviceLimitModeEQ applies the EQ predicate on the "claude_device_limit_mode" field.

@@ -71,6 +71,11 @@ type SystemSettings struct {
 	MinClaudeCodeVersion string
 	MaxClaudeCodeVersion string
 
+	// Codex engine version gate (official Codex clients only)
+	CodexVersionGateEnabled bool
+	CodexMinVersion         string
+	CodexMaxVersion         string
+
 	// 分组隔离：允许未分组 Key 调度（默认 false → 403）
 	AllowUngroupedKeyScheduling bool
 

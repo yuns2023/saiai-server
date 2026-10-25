@@ -85,3 +85,37 @@ func TestAdminService_CodexTimezoneGuardCreateAndUpdate(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, repo.updated.CodexCNTimezoneGuard)
 }
+
+func TestAdminService_CodexTimezoneActionCreateAndUpdate(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name: "g", Platform: PlatformOpenAI, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1,
+		CodexCNTimezoneGuard: true, CodexTimezoneAction: " Rewrite ",
+	})
+	require.NoError(t, err)
+	require.Equal(t, CodexTimezoneActionRewrite, repo.created.CodexTimezoneAction)
+	_, err = svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name: "g2", Platform: PlatformOpenAI, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, CodexTimezoneActionReject, repo.created.CodexTimezoneAction, "default keeps rejecting")
+
+	repo = &groupRepoStubForAdmin{getByID: &Group{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, RateMultiplier: 1, CodexTimezoneAction: CodexTimezoneActionRewrite}}
+	svc = &adminServiceImpl{groupRepo: repo}
+	_, err = svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{})
+	require.NoError(t, err)
+	require.Equal(t, CodexTimezoneActionRewrite, repo.updated.CodexTimezoneAction, "omitted field keeps the current value")
+	reject := "reject"
+	_, err = svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{CodexTimezoneAction: &reject})
+	require.NoError(t, err)
+	require.Equal(t, CodexTimezoneActionReject, repo.updated.CodexTimezoneAction)
+}
+
+func TestGroupCodexTimezoneGuardAction(t *testing.T) {
+	require.Empty(t, (*Group)(nil).CodexTimezoneGuardAction())
+	require.Empty(t, (&Group{CodexTimezoneAction: CodexTimezoneActionRewrite}).CodexTimezoneGuardAction(), "guard off")
+	require.Equal(t, CodexTimezoneActionReject, (&Group{CodexCNTimezoneGuard: true}).CodexTimezoneGuardAction())
+	require.Equal(t, CodexTimezoneActionReject, (&Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: "bogus"}).CodexTimezoneGuardAction())
+	require.Equal(t, CodexTimezoneActionRewrite, (&Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: "rewrite"}).CodexTimezoneGuardAction())
+}

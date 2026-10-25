@@ -459,6 +459,7 @@ var (
 		{Name: "input_moderation_dedupe_minutes", Type: field.TypeInt, Default: 5},
 		{Name: "codex_client_policy", Type: field.TypeString, Size: 32, Default: "off"},
 		{Name: "codex_cn_timezone_guard", Type: field.TypeBool, Default: false},
+		{Name: "codex_timezone_action", Type: field.TypeString, Size: 16, Default: "reject"},
 		{Name: "claude_device_limit_mode", Type: field.TypeString, Size: 16, Default: "off"},
 		{Name: "claude_device_base_limit", Type: field.TypeInt, Default: 1},
 		{Name: "required_level_id", Type: field.TypeInt64, Nullable: true},
@@ -471,7 +472,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "groups_access_levels_required_groups",
-				Columns:    []*schema.Column{GroupsColumns[52]},
+				Columns:    []*schema.Column{GroupsColumns[53]},
 				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -510,7 +511,7 @@ var (
 			{
 				Name:    "group_required_level_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[52]},
+				Columns: []*schema.Column{GroupsColumns[53]},
 			},
 		},
 	}

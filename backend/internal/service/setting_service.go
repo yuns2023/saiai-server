@@ -148,6 +148,26 @@ const versionBoundsErrorTTL = 5 * time.Second
 // versionBoundsDBTimeout singleflight 内 DB 查询超时，独立于请求 context
 const versionBoundsDBTimeout = 5 * time.Second
 
+// CodexVersionGate is the global Codex engine version range. Empty bounds are
+// unbounded. It is published as one value so enabled/min/max never mix
+// across updates.
+type CodexVersionGate struct {
+	Enabled bool
+	Min     string
+	Max     string
+}
+
+type cachedCodexVersionGate struct {
+	gate      CodexVersionGate
+	expiresAt int64 // unix nano
+	loaded    bool  // false: fail-open placeholder after a read error with no last known good value
+}
+
+var (
+	codexVersionGateCache atomic.Value // *cachedCodexVersionGate
+	codexVersionGateSF    singleflight.Group
+)
+
 // cachedBackendMode Backend Mode cache (in-process, 60s TTL)
 type cachedBackendMode struct {
 	value     bool
@@ -618,6 +638,11 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyMinClaudeCodeVersion] = settings.MinClaudeCodeVersion
 	updates[SettingKeyMaxClaudeCodeVersion] = settings.MaxClaudeCodeVersion
 
+	// Codex version gate
+	updates[SettingKeyCodexVersionGateEnabled] = strconv.FormatBool(settings.CodexVersionGateEnabled)
+	updates[SettingKeyCodexMinVersion] = strings.TrimSpace(settings.CodexMinVersion)
+	updates[SettingKeyCodexMaxVersion] = strings.TrimSpace(settings.CodexMaxVersion)
+
 	// 分组隔离
 	updates[SettingKeyAllowUngroupedKeyScheduling] = strconv.FormatBool(settings.AllowUngroupedKeyScheduling)
 
@@ -641,6 +666,16 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 			min:       settings.MinClaudeCodeVersion,
 			max:       settings.MaxClaudeCodeVersion,
 			expiresAt: time.Now().Add(versionBoundsCacheTTL).UnixNano(),
+		})
+		codexVersionGateSF.Forget("codex_version_gate")
+		codexVersionGateCache.Store(&cachedCodexVersionGate{
+			gate: CodexVersionGate{
+				Enabled: settings.CodexVersionGateEnabled,
+				Min:     strings.TrimSpace(settings.CodexMinVersion),
+				Max:     strings.TrimSpace(settings.CodexMaxVersion),
+			},
+			expiresAt: time.Now().Add(versionBoundsCacheTTL).UnixNano(),
+			loaded:    true,
 		})
 		backendModeSF.Forget("backend_mode")
 		backendModeCache.Store(&cachedBackendMode{
@@ -907,6 +942,11 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyMinClaudeCodeVersion: "2.1.257",
 		SettingKeyMaxClaudeCodeVersion: "",
 
+		// Codex version gate is off until an administrator enables it.
+		SettingKeyCodexVersionGateEnabled: "false",
+		SettingKeyCodexMinVersion:         "",
+		SettingKeyCodexMaxVersion:         "",
+
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling: "false",
 		SettingKeyAPIEndpoints:                "[]",
@@ -1049,6 +1089,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// Claude Code version check
 	result.MinClaudeCodeVersion = settings[SettingKeyMinClaudeCodeVersion]
 	result.MaxClaudeCodeVersion = settings[SettingKeyMaxClaudeCodeVersion]
+
+	// Codex version gate
+	result.CodexVersionGateEnabled = settings[SettingKeyCodexVersionGateEnabled] == "true"
+	result.CodexMinVersion = settings[SettingKeyCodexMinVersion]
+	result.CodexMaxVersion = settings[SettingKeyCodexMaxVersion]
 
 	// 分组隔离
 	result.AllowUngroupedKeyScheduling = settings[SettingKeyAllowUngroupedKeyScheduling] == "true"
@@ -1490,6 +1535,57 @@ func (s *SettingService) GetClaudeCodeVersionBounds(ctx context.Context) (min, m
 		return "", ""
 	}
 	return b.min, b.max
+}
+
+// GetCodexVersionGate returns the Codex engine version gate from a 60s
+// process cache (singleflight on refresh). A read error keeps serving the
+// last known good value; with none it fails open (gate off) and logs an
+// error, retrying after a short TTL. Changes apply to new requests and
+// WebSocket connections only.
+func (s *SettingService) GetCodexVersionGate(ctx context.Context) CodexVersionGate {
+	if s == nil || s.settingRepo == nil {
+		return CodexVersionGate{}
+	}
+	cached, _ := codexVersionGateCache.Load().(*cachedCodexVersionGate)
+	if cached != nil && time.Now().UnixNano() < cached.expiresAt {
+		return cached.gate
+	}
+	result, _, _ := codexVersionGateSF.Do("codex_version_gate", func() (any, error) {
+		if latest, ok := codexVersionGateCache.Load().(*cachedCodexVersionGate); ok && time.Now().UnixNano() < latest.expiresAt {
+			return latest.gate, nil
+		}
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), versionBoundsDBTimeout)
+		defer cancel()
+		values, err := s.settingRepo.GetMultiple(dbCtx, []string{
+			SettingKeyCodexVersionGateEnabled,
+			SettingKeyCodexMinVersion,
+			SettingKeyCodexMaxVersion,
+		})
+		if err != nil {
+			next := &cachedCodexVersionGate{expiresAt: time.Now().Add(versionBoundsErrorTTL).UnixNano()}
+			if latest, ok := codexVersionGateCache.Load().(*cachedCodexVersionGate); ok && latest.loaded {
+				next.gate, next.loaded = latest.gate, true
+				slog.Warn("failed to refresh codex version gate setting, keeping last known value", "error", err)
+			} else {
+				slog.Error("failed to load codex version gate setting, gate disabled until it can be read", "error", err)
+			}
+			codexVersionGateCache.Store(next)
+			return next.gate, nil
+		}
+		gate := CodexVersionGate{
+			Enabled: values[SettingKeyCodexVersionGateEnabled] == "true",
+			Min:     strings.TrimSpace(values[SettingKeyCodexMinVersion]),
+			Max:     strings.TrimSpace(values[SettingKeyCodexMaxVersion]),
+		}
+		codexVersionGateCache.Store(&cachedCodexVersionGate{
+			gate:      gate,
+			expiresAt: time.Now().Add(versionBoundsCacheTTL).UnixNano(),
+			loaded:    true,
+		})
+		return gate, nil
+	})
+	gate, _ := result.(CodexVersionGate)
+	return gate
 }
 
 // GetRectifierSettings 获取请求整流器配置

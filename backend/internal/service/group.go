@@ -106,6 +106,7 @@ type Group struct {
 	InputModerationMinConfidence     int
 	CodexClientPolicy                string
 	CodexCNTimezoneGuard             bool
+	CodexTimezoneAction              string
 	ClaudeDeviceLimitMode            string
 	ClaudeDeviceBaseLimit            int
 
@@ -457,4 +458,29 @@ func matchModelPattern(pattern, model string) bool {
 	}
 
 	return false
+}
+
+// Codex timezone guard actions (groups.codex_timezone_action). They apply only
+// while CodexCNTimezoneGuard is enabled.
+const (
+	CodexTimezoneActionReject  = "reject"
+	CodexTimezoneActionRewrite = "rewrite"
+)
+
+// NormalizeCodexTimezoneAction returns rewrite for "rewrite" (any case or
+// surrounding space) and reject for everything else, including empty.
+func NormalizeCodexTimezoneAction(action string) string {
+	if strings.EqualFold(strings.TrimSpace(action), CodexTimezoneActionRewrite) {
+		return CodexTimezoneActionRewrite
+	}
+	return CodexTimezoneActionReject
+}
+
+// CodexTimezoneGuardAction returns the effective guard behavior: "" when the
+// guard is off, otherwise reject or rewrite.
+func (g *Group) CodexTimezoneGuardAction() string {
+	if g == nil || !g.CodexCNTimezoneGuard {
+		return ""
+	}
+	return NormalizeCodexTimezoneAction(g.CodexTimezoneAction)
 }

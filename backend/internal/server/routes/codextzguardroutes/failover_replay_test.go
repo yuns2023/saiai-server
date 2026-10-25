@@ -69,6 +69,7 @@ type tzLab struct {
 	releaseA    chan struct{}
 	dialsB      atomic.Int32
 	framesB     atomic.Int32
+	frames      map[string][][]byte // provider-received frames by token
 }
 
 func (l *tzLab) setGuard(groupID int64, on bool) {
@@ -96,10 +97,16 @@ func (l *tzLab) provider(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = conn.CloseNow() }()
 	for {
-		_, _, err := conn.Read(r.Context())
+		_, frame, err := conn.Read(r.Context())
 		if err != nil {
 			return
 		}
+		l.mu.Lock()
+		if l.frames == nil {
+			l.frames = map[string][][]byte{}
+		}
+		l.frames[auth] = append(l.frames[auth], frame)
+		l.mu.Unlock()
 		if auth == tzTokenB {
 			l.framesB.Add(1)
 			_ = conn.Write(r.Context(), coderws.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_b","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`))
@@ -408,4 +415,52 @@ func TestOpenAIWSQuotaFailoverReplayControl(t *testing.T) {
 	lab, frame, _ := runTZFailover(t, func(*tzLab) {}, false)
 	require.Equal(t, "response.completed", gjson.GetBytes(frame, "type").String(), string(frame))
 	require.Equal(t, int32(1), lab.framesB.Load())
+}
+
+// Rewrite mode end to end on the native OAuth relay: the first frame sent to
+// account A, its quota failover replay on account B and a later turn on B
+// all carry the rewritten zone; the client's frames are never rejected.
+func TestCodexTimezoneRewriteWSFirstFrameFailoverReplayAndLaterTurn(t *testing.T) {
+	lab, gateway := newTZLab(t)
+	lab.mu.Lock()
+	lab.groups[tzGroupA].CodexCNTimezoneGuard = true
+	lab.groups[tzGroupA].CodexTimezoneAction = service.CodexTimezoneActionRewrite
+	lab.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+tzKey)
+	headers.Set("User-Agent", tzCodexUA)
+	headers.Set("originator", "codex_cli_rs")
+	conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(gateway.URL, "http")+"/v1/responses", &coderws.DialOptions{HTTPHeader: headers})
+	require.NoError(t, err)
+	defer func() { _ = conn.CloseNow() }()
+
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(tzTaggedTurn)))
+	select {
+	case <-lab.firstFrameA:
+	case <-ctx.Done():
+		t.Fatal("account A never received the first turn")
+	}
+	close(lab.releaseA)
+	_, frame, err := conn.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "response.completed", gjson.GetBytes(frame, "type").String(), string(frame))
+
+	laterTurn := strings.Replace(tzTaggedTurn, "Asia/Shanghai", "Asia/Hong_Kong", 1)
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(laterTurn)))
+	_, frame, err = conn.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "response.completed", gjson.GetBytes(frame, "type").String(), string(frame))
+
+	rewritten := strings.Replace(tzTaggedTurn, "Asia/Shanghai", "America/Los_Angeles", 1)
+	lab.mu.Lock()
+	framesA := append([][]byte(nil), lab.frames[tzTokenA]...)
+	framesB := append([][]byte(nil), lab.frames[tzTokenB]...)
+	lab.mu.Unlock()
+	require.Len(t, framesA, 1)
+	require.Equal(t, rewritten, string(framesA[0]), "first frame")
+	require.Len(t, framesB, 2)
+	require.Equal(t, rewritten, string(framesB[0]), "failover replay")
+	require.Equal(t, rewritten, string(framesB[1]), "later turn")
 }

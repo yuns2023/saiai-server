@@ -9661,6 +9661,7 @@ type GroupMutation struct {
 	addinput_moderation_dedupe_minutes      *int
 	codex_client_policy                     *string
 	codex_cn_timezone_guard                 *bool
+	codex_timezone_action                   *string
 	claude_device_limit_mode                *string
 	claude_device_base_limit                *int
 	addclaude_device_base_limit             *int
@@ -12320,6 +12321,42 @@ func (m *GroupMutation) ResetCodexCnTimezoneGuard() {
 	m.codex_cn_timezone_guard = nil
 }
 
+// SetCodexTimezoneAction sets the "codex_timezone_action" field.
+func (m *GroupMutation) SetCodexTimezoneAction(s string) {
+	m.codex_timezone_action = &s
+}
+
+// CodexTimezoneAction returns the value of the "codex_timezone_action" field in the mutation.
+func (m *GroupMutation) CodexTimezoneAction() (r string, exists bool) {
+	v := m.codex_timezone_action
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCodexTimezoneAction returns the old "codex_timezone_action" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldCodexTimezoneAction(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCodexTimezoneAction is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCodexTimezoneAction requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCodexTimezoneAction: %w", err)
+	}
+	return oldValue.CodexTimezoneAction, nil
+}
+
+// ResetCodexTimezoneAction resets all changes to the "codex_timezone_action" field.
+func (m *GroupMutation) ResetCodexTimezoneAction() {
+	m.codex_timezone_action = nil
+}
+
 // SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
 func (m *GroupMutation) SetClaudeDeviceLimitMode(s string) {
 	m.claude_device_limit_mode = &s
@@ -12797,7 +12834,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 52)
+	fields := make([]string, 0, 53)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -12948,6 +12985,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.codex_cn_timezone_guard != nil {
 		fields = append(fields, group.FieldCodexCnTimezoneGuard)
 	}
+	if m.codex_timezone_action != nil {
+		fields = append(fields, group.FieldCodexTimezoneAction)
+	}
 	if m.claude_device_limit_mode != nil {
 		fields = append(fields, group.FieldClaudeDeviceLimitMode)
 	}
@@ -13062,6 +13102,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.CodexClientPolicy()
 	case group.FieldCodexCnTimezoneGuard:
 		return m.CodexCnTimezoneGuard()
+	case group.FieldCodexTimezoneAction:
+		return m.CodexTimezoneAction()
 	case group.FieldClaudeDeviceLimitMode:
 		return m.ClaudeDeviceLimitMode()
 	case group.FieldClaudeDeviceBaseLimit:
@@ -13175,6 +13217,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldCodexClientPolicy(ctx)
 	case group.FieldCodexCnTimezoneGuard:
 		return m.OldCodexCnTimezoneGuard(ctx)
+	case group.FieldCodexTimezoneAction:
+		return m.OldCodexTimezoneAction(ctx)
 	case group.FieldClaudeDeviceLimitMode:
 		return m.OldClaudeDeviceLimitMode(ctx)
 	case group.FieldClaudeDeviceBaseLimit:
@@ -13537,6 +13581,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetCodexCnTimezoneGuard(v)
+		return nil
+	case group.FieldCodexTimezoneAction:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCodexTimezoneAction(v)
 		return nil
 	case group.FieldClaudeDeviceLimitMode:
 		v, ok := value.(string)
@@ -14140,6 +14191,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldCodexCnTimezoneGuard:
 		m.ResetCodexCnTimezoneGuard()
+		return nil
+	case group.FieldCodexTimezoneAction:
+		m.ResetCodexTimezoneAction()
 		return nil
 	case group.FieldClaudeDeviceLimitMode:
 		m.ResetClaudeDeviceLimitMode()

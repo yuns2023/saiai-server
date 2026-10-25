@@ -451,6 +451,7 @@ export interface AdminGroup extends Group {
 	input_moderation_min_confidence: number
 	codex_client_policy: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	codex_cn_timezone_guard?: boolean
+	codex_timezone_action?: 'reject' | 'rewrite'
 	claude_device_limit_mode: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit: number
 
@@ -586,6 +587,7 @@ export interface CreateGroupRequest {
 	input_moderation_min_confidence?: number
 	codex_client_policy?: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	codex_cn_timezone_guard?: boolean
+	codex_timezone_action?: 'reject' | 'rewrite'
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit?: number
   claude_environment_mode?: ClaudeEnvironmentMode
@@ -639,6 +641,7 @@ export interface UpdateGroupRequest {
 	input_moderation_min_confidence?: number
 	codex_client_policy?: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	codex_cn_timezone_guard?: boolean
+	codex_timezone_action?: 'reject' | 'rewrite'
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit?: number
   claude_environment_mode?: ClaudeEnvironmentMode

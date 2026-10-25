@@ -16,6 +16,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	pkgopenai "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -188,6 +189,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		OpsMetricsIntervalSeconds:            settings.OpsMetricsIntervalSeconds,
 		MinClaudeCodeVersion:                 settings.MinClaudeCodeVersion,
 		MaxClaudeCodeVersion:                 settings.MaxClaudeCodeVersion,
+		CodexVersionGateEnabled:              settings.CodexVersionGateEnabled,
+		CodexMinVersion:                      settings.CodexMinVersion,
+		CodexMaxVersion:                      settings.CodexMaxVersion,
 		AllowUngroupedKeyScheduling:          settings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                   settings.BackendModeEnabled,
 		MaintenanceModeEnabled:               settings.MaintenanceModeEnabled,
@@ -267,6 +271,11 @@ type UpdateSettingsRequest struct {
 
 	MinClaudeCodeVersion string `json:"min_claude_code_version"`
 	MaxClaudeCodeVersion string `json:"max_claude_code_version"`
+
+	// Codex version gate; omitted fields keep their current values.
+	CodexVersionGateEnabled *bool   `json:"codex_version_gate_enabled"`
+	CodexMinVersion         *string `json:"codex_min_version"`
+	CodexMaxVersion         *string `json:"codex_max_version"`
 
 	// 分组隔离
 	AllowUngroupedKeyScheduling bool `json:"allow_ungrouped_key_scheduling"`
@@ -539,6 +548,22 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			return
 		}
 	}
+	codexGateEnabled := previousSettings.CodexVersionGateEnabled
+	if req.CodexVersionGateEnabled != nil {
+		codexGateEnabled = *req.CodexVersionGateEnabled
+	}
+	codexMinVersion := previousSettings.CodexMinVersion
+	if req.CodexMinVersion != nil {
+		codexMinVersion = strings.TrimSpace(*req.CodexMinVersion)
+	}
+	codexMaxVersion := previousSettings.CodexMaxVersion
+	if req.CodexMaxVersion != nil {
+		codexMaxVersion = strings.TrimSpace(*req.CodexMaxVersion)
+	}
+	if msg := validateCodexVersionGateSettings(codexMinVersion, codexMaxVersion); msg != "" {
+		response.Error(c, http.StatusBadRequest, msg)
+		return
+	}
 	if req.MaintenanceMessage != nil && utf8.RuneCountInString(strings.TrimSpace(*req.MaintenanceMessage)) > 1000 {
 		response.Error(c, http.StatusBadRequest, "maintenance_message must be at most 1000 characters")
 		return
@@ -607,6 +632,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		IdentityPatchPrompt:         req.IdentityPatchPrompt,
 		MinClaudeCodeVersion:        req.MinClaudeCodeVersion,
 		MaxClaudeCodeVersion:        req.MaxClaudeCodeVersion,
+		CodexVersionGateEnabled:     codexGateEnabled,
+		CodexMinVersion:             codexMinVersion,
+		CodexMaxVersion:             codexMaxVersion,
 		AllowUngroupedKeyScheduling: req.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:          req.BackendModeEnabled,
 		MaintenanceModeEnabled:      maintenanceEnabled,
@@ -727,6 +755,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpsMetricsIntervalSeconds:            updatedSettings.OpsMetricsIntervalSeconds,
 		MinClaudeCodeVersion:                 updatedSettings.MinClaudeCodeVersion,
 		MaxClaudeCodeVersion:                 updatedSettings.MaxClaudeCodeVersion,
+		CodexVersionGateEnabled:              updatedSettings.CodexVersionGateEnabled,
+		CodexMinVersion:                      updatedSettings.CodexMinVersion,
+		CodexMaxVersion:                      updatedSettings.CodexMaxVersion,
 		AllowUngroupedKeyScheduling:          updatedSettings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                   updatedSettings.BackendModeEnabled,
 	})
@@ -891,6 +922,15 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.MaxClaudeCodeVersion != after.MaxClaudeCodeVersion {
 		changed = append(changed, "max_claude_code_version")
+	}
+	if before.CodexVersionGateEnabled != after.CodexVersionGateEnabled {
+		changed = append(changed, "codex_version_gate_enabled")
+	}
+	if before.CodexMinVersion != after.CodexMinVersion {
+		changed = append(changed, "codex_min_version")
+	}
+	if before.CodexMaxVersion != after.CodexMaxVersion {
+		changed = append(changed, "codex_max_version")
 	}
 	if before.AllowUngroupedKeyScheduling != after.AllowUngroupedKeyScheduling {
 		changed = append(changed, "allow_ungrouped_key_scheduling")
@@ -1264,4 +1304,26 @@ func (h *SettingHandler) UpdateStreamTimeoutSettings(c *gin.Context) {
 		ThresholdCount:         updatedSettings.ThresholdCount,
 		ThresholdWindowMinutes: updatedSettings.ThresholdWindowMinutes,
 	})
+}
+
+// validateCodexVersionGateSettings returns an error message when a Codex
+// version bound is not SemVer (prerelease allowed, e.g. 0.165.0-alpha.1) or
+// min > max. Empty bounds are unbounded.
+func validateCodexVersionGateSettings(minVersion, maxVersion string) string {
+	var minParsed, maxParsed pkgopenai.CodexSemver
+	var ok bool
+	if minVersion != "" {
+		if minParsed, ok = pkgopenai.ParseCodexSemver(minVersion); !ok {
+			return "codex_min_version must be empty or a valid semver (e.g. 0.164.0)"
+		}
+	}
+	if maxVersion != "" {
+		if maxParsed, ok = pkgopenai.ParseCodexSemver(maxVersion); !ok {
+			return "codex_max_version must be empty or a valid semver (e.g. 0.170.0)"
+		}
+	}
+	if minVersion != "" && maxVersion != "" && maxParsed.Compare(minParsed) < 0 {
+		return "codex_max_version must be greater than or equal to codex_min_version"
+	}
+	return ""
 }

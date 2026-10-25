@@ -50,6 +50,7 @@ type smartRoutesLab struct {
 
 	upstreamStatus map[string]int // by upstream API key; default 200
 	upstreamCalls  map[string]int
+	upstreamBodies map[string][]byte // last request body by upstream API key
 	usage          []service.UsageLog
 	billing        []service.UsageBillingCommand
 }
@@ -104,11 +105,15 @@ func (l *smartRoutesLab) snapshot() *service.APIKey {
 func (l *smartRoutesLab) upstream(w http.ResponseWriter, r *http.Request) {
 	auth := r.Header.Get("Authorization")
 	upstreamKey := auth[len("Bearer "):]
+	requestBody, _ := io.ReadAll(r.Body)
 	l.mu.Lock()
 	l.upstreamCalls[upstreamKey]++
+	if l.upstreamBodies == nil {
+		l.upstreamBodies = map[string][]byte{}
+	}
+	l.upstreamBodies[upstreamKey] = requestBody
 	status := l.upstreamStatus[upstreamKey]
 	l.mu.Unlock()
-	_, _ = io.Copy(io.Discard, r.Body)
 	if status != 0 && status != http.StatusOK {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -124,6 +129,7 @@ func (l *smartRoutesLab) resetObservations() {
 	defer l.mu.Unlock()
 	l.upstreamCalls = map[string]int{}
 	l.upstreamStatus = map[string]int{}
+	l.upstreamBodies = map[string][]byte{}
 	l.usage, l.billing = nil, nil
 }
 
@@ -532,7 +538,7 @@ func TestSmartSwitchResponsesRoutes(t *testing.T) {
 		setDailyUsage(0, time.Now())
 		setGuard(t, smartSubscriptionGroup)
 		status, resp := smartRoutesPost(t, gateway, tzBody)
-		require.Equal(t, http.StatusForbidden, status, resp)
+		require.Equal(t, http.StatusBadRequest, status, resp)
 		require.Contains(t, resp, "codex_timezone_reinit_required")
 		require.Zero(t, lab.calls("TEST_ONLY_UPSTREAM_SUB")+lab.calls("TEST_ONLY_UPSTREAM_PAYG"))
 		// A body without the tag is unaffected by the enabled guard.
@@ -550,12 +556,71 @@ func TestSmartSwitchResponsesRoutes(t *testing.T) {
 		lab.mu.Unlock()
 		t.Cleanup(func() { lab.mu.Lock(); lab.accounts[smartSubscriptionGroup] = saved; lab.mu.Unlock() })
 		status, resp := smartRoutesPost(t, gateway, tzBody)
-		require.Equal(t, http.StatusForbidden, status, resp)
+		require.Equal(t, http.StatusBadRequest, status, resp)
 		require.Contains(t, resp, "codex_timezone_reinit_required")
 		require.Zero(t, lab.calls("TEST_ONLY_UPSTREAM_SUB")+lab.calls("TEST_ONLY_UPSTREAM_PAYG"))
 		usage, billing := lab.observed()
 		require.Empty(t, usage)
 		require.Empty(t, billing)
+	})
+
+	// Rewrite mode is re-applied from the client's original body for the
+	// group actually serving the request.
+	setAction := func(t *testing.T, groupID int64, guard bool, action string) {
+		lab.mu.Lock()
+		lab.groups[groupID].CodexCNTimezoneGuard, lab.groups[groupID].CodexTimezoneAction = guard, action
+		lab.mu.Unlock()
+		t.Cleanup(func() {
+			lab.mu.Lock()
+			lab.groups[groupID].CodexCNTimezoneGuard, lab.groups[groupID].CodexTimezoneAction = false, ""
+			lab.mu.Unlock()
+		})
+	}
+	withoutSubscriptionAccounts := func(t *testing.T) {
+		lab.mu.Lock()
+		saved := lab.accounts[smartSubscriptionGroup]
+		lab.accounts[smartSubscriptionGroup] = nil
+		lab.mu.Unlock()
+		t.Cleanup(func() { lab.mu.Lock(); lab.accounts[smartSubscriptionGroup] = saved; lab.mu.Unlock() })
+	}
+	upstreamBody := func(key string) string {
+		lab.mu.Lock()
+		defer lab.mu.Unlock()
+		return string(lab.upstreamBodies[key])
+	}
+
+	t.Run("timezone_rewrite_on_selected_group", func(t *testing.T) {
+		lab.resetObservations()
+		setDailyUsage(0, time.Now())
+		setAction(t, smartSubscriptionGroup, true, service.CodexTimezoneActionRewrite)
+		status, resp := smartRoutesPost(t, gateway, tzBody)
+		require.Equal(t, http.StatusOK, status, resp)
+		sent := upstreamBody("TEST_ONLY_UPSTREAM_SUB")
+		require.Contains(t, sent, `<timezone>America/Los_Angeles</timezone>`)
+		require.NotContains(t, sent, "Asia/Shanghai")
+	})
+
+	t.Run("timezone_rewrite_then_reject_after_smart_switch_advance", func(t *testing.T) {
+		lab.resetObservations()
+		setDailyUsage(0, time.Now())
+		setAction(t, smartSubscriptionGroup, true, service.CodexTimezoneActionRewrite)
+		setAction(t, smartPaygGroup, true, service.CodexTimezoneActionReject)
+		withoutSubscriptionAccounts(t)
+		status, resp := smartRoutesPost(t, gateway, tzBody)
+		require.Equal(t, http.StatusBadRequest, status, resp)
+		require.Contains(t, resp, "codex_timezone_reinit_required")
+		require.Zero(t, lab.calls("TEST_ONLY_UPSTREAM_SUB")+lab.calls("TEST_ONLY_UPSTREAM_PAYG"))
+	})
+
+	t.Run("timezone_rewrite_then_guard_off_sends_original", func(t *testing.T) {
+		lab.resetObservations()
+		setDailyUsage(0, time.Now())
+		setAction(t, smartSubscriptionGroup, true, service.CodexTimezoneActionRewrite)
+		withoutSubscriptionAccounts(t)
+		status, resp := smartRoutesPost(t, gateway, tzBody)
+		require.Equal(t, http.StatusOK, status, resp)
+		require.Equal(t, 1, lab.calls("TEST_ONLY_UPSTREAM_PAYG"))
+		require.Contains(t, upstreamBody("TEST_ONLY_UPSTREAM_PAYG"), "Asia/Shanghai", "the advanced group's guard is off: original content")
 	})
 
 	t.Run("stateful_continuation_is_rejected_before_routing", func(t *testing.T) {

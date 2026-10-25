@@ -90,9 +90,9 @@ func TestCodexTimezoneGuardHTTPRejectsBeforeScheduling(t *testing.T) {
 	f := newTZGuardFixture(t, true)
 	for _, path := range []string{"/v1/responses", "/v1/responses/compact"} {
 		rec := f.post(path, tzGuardTaggedBody)
-		require.Equal(t, http.StatusForbidden, rec.Code, path)
+		require.Equal(t, http.StatusBadRequest, rec.Code, path)
 		body := rec.Body.Bytes()
-		require.Equal(t, "permission_error", gjson.GetBytes(body, "error.type").String())
+		require.Equal(t, "invalid_request_error", gjson.GetBytes(body, "error.type").String())
 		require.Equal(t, codexTimezoneGuardCode, gjson.GetBytes(body, "error.code").String())
 		require.Equal(t, codexTimezoneGuardMessageGeneric, gjson.GetBytes(body, "error.message").String())
 	}
@@ -129,8 +129,8 @@ func dialTZGuardWS(t *testing.T, router *gin.Engine) (*coderws.Conn, context.Con
 func requireTZGuardErrorFrame(t *testing.T, frame []byte, message string) {
 	t.Helper()
 	require.Equal(t, "error", gjson.GetBytes(frame, "type").String(), string(frame))
-	require.Equal(t, int64(http.StatusForbidden), gjson.GetBytes(frame, "status").Int())
-	require.Equal(t, "permission_error", gjson.GetBytes(frame, "error.type").String())
+	require.Equal(t, int64(http.StatusBadRequest), gjson.GetBytes(frame, "status").Int())
+	require.Equal(t, "invalid_request_error", gjson.GetBytes(frame, "error.type").String())
 	require.Equal(t, codexTimezoneGuardCode, gjson.GetBytes(frame, "error.code").String())
 	require.Equal(t, message, gjson.GetBytes(frame, "error.message").String())
 }
@@ -210,7 +210,7 @@ func TestCodexTimezoneGuardWSLaterTurnFrameAndClose(t *testing.T) {
 	require.ErrorAs(t, got.checkErr, &closeErr)
 	require.Equal(t, coderws.StatusPolicyViolation, closeErr.StatusCode())
 	require.True(t, got.closed)
-	require.Equal(t, http.StatusForbidden, got.opsFailure.status)
+	require.Equal(t, http.StatusBadRequest, got.opsFailure.status)
 	require.Equal(t, codexTimezoneGuardCode, got.opsFailure.code)
 	require.Equal(t, int(coderws.StatusPolicyViolation), got.opsFailure.wsCloseCode)
 
@@ -224,15 +224,25 @@ func TestCodexTimezoneGuardWSRebuiltPayloadIsScanned(t *testing.T) {
 	// carries no tag, so only scanning the rebuilt payload catches it.
 	original := []byte(`{"type":"response.create","previous_response_id":"resp_1","input":[{"type":"message","role":"user","content":"next"}]}`)
 	rebuilt := []byte(`{"type":"response.create","input":[{"type":"message","role":"user","content":"<environment_context><timezone>Asia/Macau</timezone></environment_context>"},{"type":"message","role":"user","content":"next"}]}`)
-	_, found := codexTimezoneGuardZone(group, original)
+	_, _, found := codexTimezoneGuardZone(group, original)
 	require.False(t, found)
-	zone, found := codexTimezoneGuardZone(group, rebuilt)
+	reason, zone, found := codexTimezoneGuardZone(group, rebuilt)
 	require.True(t, found)
+	require.Equal(t, codexTimezoneRejectZone, reason)
 	require.Equal(t, "Asia/Macau", zone)
-	_, found = codexTimezoneGuardZone(&service.Group{}, rebuilt)
+	_, _, found = codexTimezoneGuardZone(&service.Group{}, rebuilt)
 	require.False(t, found, "switch off")
-	_, found = codexTimezoneGuardZone(nil, rebuilt)
+	_, _, found = codexTimezoneGuardZone(nil, rebuilt)
 	require.False(t, found)
+
+	// Rewrite mode never rejects for the zone, only for a block that cannot
+	// be rewritten safely.
+	rewrite := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
+	_, _, found = codexTimezoneGuardZone(rewrite, rebuilt)
+	require.False(t, found)
+	reason, _, found = codexTimezoneGuardZone(rewrite, []byte(`{"input":"<environment_context><timezone>PRC</timezone>"}`))
+	require.True(t, found)
+	require.Equal(t, codexTimezoneRejectMalformed, reason)
 }
 
 func TestRevalidateOpenAIWSTurnKeyReadsCurrentGroupSwitch(t *testing.T) {
@@ -265,4 +275,128 @@ func TestRevalidateOpenAIWSTurnKeyReadsCurrentGroupSwitch(t *testing.T) {
 	require.False(t, sameOpenAIWSGroup(connectTime, key))
 	require.False(t, sameOpenAIWSGroup(nil, key))
 	require.True(t, sameOpenAIWSGroup(&service.APIKey{}, &service.APIKey{}))
+}
+
+func newTZRewriteFixture(t *testing.T) *tzGuardFixture {
+	t.Helper()
+	f := newTZGuardFixture(t, true)
+	f.group.CodexTimezoneAction = service.CodexTimezoneActionRewrite
+	return f
+}
+
+const tzGuardMalformedBody = `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <timezone>Asia/Shanghai</timezone>"}]}]}`
+
+func TestCodexTimezoneRewriteHTTPNeverRejectsZoneButFailsClosed(t *testing.T) {
+	f := newTZRewriteFixture(t)
+	rec := f.post("/v1/responses", tzGuardTaggedBody)
+	require.Equal(t, int32(1), f.slotCalls.Load(), "rewrite mode: the tagged request proceeds")
+	require.NotContains(t, rec.Body.String(), codexTimezoneGuardCode)
+
+	for _, path := range []string{"/v1/responses", "/v1/responses/compact"} {
+		rec = f.post(path, tzGuardMalformedBody)
+		require.Equal(t, http.StatusBadRequest, rec.Code, path)
+		require.Equal(t, codexTimezoneGuardCode, gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
+	}
+	require.Equal(t, int32(1), f.slotCalls.Load(), "a malformed block never reaches scheduling")
+}
+
+// After user-slot wait heartbeats started the SSE stream, a rejection (e.g.
+// after a smart switch) is delivered as an SSE error event, not a status.
+func TestCodexTimezoneGuardHTTPRejectionAfterStreamStart(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Writer.WriteHeader(http.StatusOK)
+	c.Writer.WriteHeaderNow()
+	h := &OpenAIGatewayHandler{}
+	group := &service.Group{ID: 3, CodexCNTimezoneGuard: true}
+	body, ok := h.applyCodexTimezoneGuardHTTP(c, group, 1, []byte(tzGuardTaggedBody), &codexTimezoneFrozenDate{}, true)
+	require.False(t, ok)
+	require.Nil(t, body)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "event: error")
+	require.Contains(t, rec.Body.String(), codexTimezoneGuardCode)
+}
+
+func TestCodexTimezoneGuardHTTPAppliesFromOriginal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	h := &OpenAIGatewayHandler{}
+	original := []byte(tzGuardTaggedBody)
+	date := &codexTimezoneFrozenDate{}
+	rewrite := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
+	sent, ok := h.applyCodexTimezoneGuardHTTP(c, rewrite, 1, original, date, false)
+	require.True(t, ok)
+	require.Contains(t, string(sent), "<timezone>America/Los_Angeles</timezone>")
+	require.Equal(t, tzGuardTaggedBody, string(original), "the original stays immutable")
+	sent, ok = h.applyCodexTimezoneGuardHTTP(c, &service.Group{}, 1, original, date, false)
+	require.True(t, ok)
+	require.True(t, sameOpenAIBodyBytes(sent, original), "guard off sends the original")
+}
+
+func TestCodexTimezoneDatesAreFrozen(t *testing.T) {
+	saved := codexTimezoneNow
+	t.Cleanup(func() { codexTimezoneNow = saved })
+	now := time.Date(2026, 10, 25, 6, 59, 0, 0, time.UTC) // 2026-10-24 in LA
+	codexTimezoneNow = func() time.Time { return now }
+
+	httpDate := &codexTimezoneFrozenDate{}
+	first, err := httpDate.get()
+	require.NoError(t, err)
+	require.Equal(t, "2026-10-24", first)
+	now = now.Add(2 * time.Minute) // 2026-10-25 in LA
+	again, _ := httpDate.get()
+	require.Equal(t, first, again, "one date per HTTP request")
+
+	dates := &codexTimezoneTurnDates{}
+	now = time.Date(2026, 10, 25, 6, 59, 0, 0, time.UTC)
+	turn1, _ := dates.get(1)
+	now = now.Add(2 * time.Minute)
+	turn1Replay, _ := dates.get(1)
+	turn2, _ := dates.get(2)
+	require.Equal(t, "2026-10-24", turn1)
+	require.Equal(t, turn1, turn1Replay, "retries and replays of a turn reuse its date")
+	require.Equal(t, "2026-10-25", turn2)
+	for turn := 3; turn < 3+2*codexTimezoneTurnDatesKept; turn++ {
+		_, _ = dates.get(turn)
+	}
+	require.LessOrEqual(t, len(dates.dates), codexTimezoneTurnDatesKept)
+}
+
+func TestCodexTimezoneRewriteWSFirstFrame(t *testing.T) {
+	f := newTZRewriteFixture(t)
+	conn, ctx := dialTZGuardWS(t, f.router)
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(tzGuardTaggedFrame)))
+	_, _, err := conn.Read(ctx)
+	require.Equal(t, coderws.StatusInternalError, coderws.CloseStatus(err), "rewrite mode: proceeds to scheduling")
+	require.Equal(t, int32(1), f.slotCalls.Load())
+
+	conn, ctx = dialTZGuardWS(t, f.router)
+	malformed := `{"type":"response.create","model":"TEST_ONLY_MODEL","input":"<environment_context><timezone>PRC</timezone>"}`
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(malformed)))
+	_, frame, err := conn.Read(ctx)
+	require.NoError(t, err)
+	requireTZGuardErrorFrame(t, frame, codexTimezoneGuardMessageOld)
+	require.Equal(t, int32(1), f.slotCalls.Load(), "a malformed first frame is rejected before scheduling")
+}
+
+func TestRewriteCodexTimezoneWS(t *testing.T) {
+	dates := &codexTimezoneTurnDates{}
+	payload := []byte(tzGuardTaggedFrame)
+	// Reject mode and guard off never modify sent bytes.
+	for _, group := range []*service.Group{nil, {}, {CodexCNTimezoneGuard: true}} {
+		out, err := rewriteCodexTimezoneWS(context.Background(), nil, nil, group, 1, 1, payload, dates)
+		require.NoError(t, err)
+		require.True(t, sameOpenAIBodyBytes(out, payload))
+	}
+	group := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
+	tagged := []byte(`{"type":"response.create","input":"<environment_context><timezone>Asia/Hong_Kong</timezone></environment_context>"}`)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	out, err := rewriteCodexTimezoneWS(context.Background(), c, nil, group, 1, 2, tagged, dates)
+	require.NoError(t, err)
+	require.Equal(t, `{"type":"response.create","input":"<environment_context><timezone>America/Los_Angeles</timezone></environment_context>"}`, string(out))
 }

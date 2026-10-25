@@ -155,6 +155,7 @@ type AdminGroup struct {
 	InputModerationMinConfidence     int                            `json:"input_moderation_min_confidence"`
 	CodexClientPolicy                string                         `json:"codex_client_policy"`
 	CodexCNTimezoneGuard             bool                           `json:"codex_cn_timezone_guard"`
+	CodexTimezoneAction              string                         `json:"codex_timezone_action"`
 	ClaudeDeviceLimitMode            string                         `json:"claude_device_limit_mode"`
 	ClaudeDeviceBaseLimit            int                            `json:"claude_device_base_limit"`
 

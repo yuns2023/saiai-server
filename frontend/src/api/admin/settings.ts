@@ -90,6 +90,11 @@ export interface SystemSettings {
   min_claude_code_version: string
   max_claude_code_version: string
 
+  // Codex engine version gate (official Codex clients only)
+  codex_version_gate_enabled: boolean
+  codex_min_version: string
+  codex_max_version: string
+
   // 分组隔离
   allow_ungrouped_key_scheduling: boolean
   maintenance_mode_enabled: boolean
@@ -148,6 +153,9 @@ export interface UpdateSettingsRequest {
   ops_metrics_interval_seconds?: number
   min_claude_code_version?: string
   max_claude_code_version?: string
+  codex_version_gate_enabled?: boolean
+  codex_min_version?: string
+  codex_max_version?: string
   allow_ungrouped_key_scheduling?: boolean
   maintenance_mode_enabled?: boolean
   maintenance_message?: string

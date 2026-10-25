@@ -251,6 +251,19 @@ const (
 	// SettingKeyMaxClaudeCodeVersion 最高 Claude Code 版本号限制 (semver, 如 "3.0.0"，空值=不检查)
 	SettingKeyMaxClaudeCodeVersion = "max_claude_code_version"
 
+	// =========================
+	// Codex Version Gate
+	// =========================
+
+	// SettingKeyCodexVersionGateEnabled 是否启用官方 Codex 引擎版本范围检查（默认 false）
+	SettingKeyCodexVersionGateEnabled = "codex_version_gate_enabled"
+
+	// SettingKeyCodexMinVersion 最低 Codex 引擎版本 (SemVer，空值=不限)
+	SettingKeyCodexMinVersion = "codex_min_version"
+
+	// SettingKeyCodexMaxVersion 最高 Codex 引擎版本 (SemVer，空值=不限)
+	SettingKeyCodexMaxVersion = "codex_max_version"
+
 	// SettingKeyAllowUngroupedKeyScheduling 允许未分组 API Key 调度（默认 false：未分组 Key 返回 403）
 	SettingKeyAllowUngroupedKeyScheduling = "allow_ungrouped_key_scheduling"
 
