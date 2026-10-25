@@ -802,6 +802,59 @@
           </div>
         </div>
 
+        <!-- Codex Version Gate -->
+        <div class="card">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.codexVersion.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.codexVersion.description') }}
+            </p>
+          </div>
+          <div class="space-y-4 p-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="font-medium text-gray-900 dark:text-white">{{
+                  t('admin.settings.codexVersion.enabled')
+                }}</label>
+                <p class="text-sm text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.codexVersion.enabledHint') }}
+                </p>
+              </div>
+              <Toggle v-model="form.codex_version_gate_enabled" />
+            </div>
+            <div>
+              <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t('admin.settings.codexVersion.minVersion') }}
+              </label>
+              <input
+                v-model="form.codex_min_version"
+                type="text"
+                class="input max-w-xs font-mono text-sm"
+                :placeholder="t('admin.settings.codexVersion.minVersionPlaceholder')"
+              />
+              <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.codexVersion.minVersionHint') }}
+              </p>
+            </div>
+            <div>
+              <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t('admin.settings.codexVersion.maxVersion') }}
+              </label>
+              <input
+                v-model="form.codex_max_version"
+                type="text"
+                class="input max-w-xs font-mono text-sm"
+                :placeholder="t('admin.settings.codexVersion.maxVersionPlaceholder')"
+              />
+              <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.codexVersion.maxVersionHint') }}
+              </p>
+            </div>
+          </div>
+        </div>
+
         <!-- Gateway Scheduling Settings -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -1590,6 +1643,10 @@ const form = reactive<SettingsForm>({
   // Claude Code version check
   min_claude_code_version: '',
   max_claude_code_version: '',
+  // Codex version gate
+  codex_version_gate_enabled: false,
+  codex_min_version: '',
+  codex_max_version: '',
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
   maintenance_mode_enabled: false,
@@ -1904,6 +1961,9 @@ async function saveSettings() {
       identity_patch_prompt: form.identity_patch_prompt,
       min_claude_code_version: form.min_claude_code_version,
       max_claude_code_version: form.max_claude_code_version,
+      codex_version_gate_enabled: form.codex_version_gate_enabled,
+      codex_min_version: form.codex_min_version,
+      codex_max_version: form.codex_max_version,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
       maintenance_mode_enabled: form.maintenance_mode_enabled,
       maintenance_message: form.maintenance_message

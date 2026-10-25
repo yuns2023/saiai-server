@@ -41,6 +41,7 @@ type chatGPTBillingSettingsReader interface {
 type OpenAIGatewayHandler struct {
 	gatewayService            *service.OpenAIGatewayService
 	chatGPTBillingSettings    chatGPTBillingSettingsReader
+	codexVersionGate          codexVersionGateReader
 	billingCacheService       *service.BillingCacheService
 	apiKeyService             *service.APIKeyService
 	usageRecordWorkerPool     *service.UsageRecordWorkerPool
@@ -88,6 +89,7 @@ func NewOpenAIGatewayHandler(
 	}
 	if settingService != nil {
 		h.chatGPTBillingSettings = settingService
+		h.codexVersionGate = settingService
 	}
 	return h
 }
@@ -958,7 +960,51 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if !h.validateCodexClientPolicyHTTP(c, apiKey.Group) {
 		return
 	}
-	if !h.validateCodexTimezoneGuardHTTP(c, apiKey.Group, subject.UserID, body) {
+	if !h.validateCodexVersionGateHTTP(c) {
+		return
+	}
+	// The timezone guard is a function of the client's decoded body and the
+	// effective group; it is re-applied from the original after every smart
+	// switch. In rewrite mode the forwarded body (and its zstd wire form, the
+	// parse cache, ops context and usage payload hash) is the rewritten one;
+	// the session hash only reads headers/prompt_cache_key.
+	timezoneOriginalBody, timezoneOriginalWire := body, wireBody
+	timezoneDate := &codexTimezoneFrozenDate{}
+	applyTimezoneGuard := func(streamStarted bool) bool {
+		sendBody, ok := h.applyCodexTimezoneGuardHTTP(c, apiKey.Group, subject.UserID, timezoneOriginalBody, timezoneDate, streamStarted)
+		if !ok {
+			return false
+		}
+		if sameOpenAIBodyBytes(sendBody, body) {
+			return true
+		}
+		if bodyWasEncoded {
+			if sameOpenAIBodyBytes(sendBody, timezoneOriginalBody) {
+				wireBody = timezoneOriginalWire
+			} else {
+				encoded, err := pkgopenai.EncodeCodexRequestZstd(sendBody)
+				if err != nil {
+					h.rejectCodexTimezoneHTTP(c, apiKey.Group, subject.UserID, codexTimezoneRejectEncode, "", streamStarted)
+					return false
+				}
+				wireBody = encoded
+			}
+		}
+		// The parse cache (set for encoded bodies and by the
+		// function_call_output check) must describe the body that is sent.
+		if _, cached := c.Get(service.OpenAIParsedRequestBodyKey); cached || bodyWasEncoded {
+			var parsedBody map[string]any
+			if err := json.Unmarshal(sendBody, &parsedBody); err != nil {
+				h.rejectCodexTimezoneHTTP(c, apiKey.Group, subject.UserID, codexTimezoneRejectMalformed, "", streamStarted)
+				return false
+			}
+			c.Set(service.OpenAIParsedRequestBodyKey, parsedBody)
+		}
+		body = sendBody
+		setOpsRequestContext(c, reqModel, reqStream, body)
+		return true
+	}
+	if !applyTimezoneGuard(false) {
 		return
 	}
 
@@ -1026,7 +1072,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				if !h.validateCodexClientPolicyHTTP(c, apiKey.Group) {
 					return
 				}
-				if !h.validateCodexTimezoneGuardHTTP(c, apiKey.Group, subject.UserID, body) {
+				// User-slot wait heartbeats may already have started the
+				// SSE stream; a rejection is then delivered as an error event.
+				if !applyTimezoneGuard(streamStarted) {
 					return
 				}
 				continue
@@ -1241,6 +1289,11 @@ func (h *OpenAIGatewayHandler) writeOpenAISelectionError(c *gin.Context, err err
 		envelope.RetryAfter = max(1, int(math.Ceil(quotaGuardErr.RetryAfter.Seconds())))
 	}
 	h.writeError(c, envelope, streamStarted)
+}
+
+// sameOpenAIBodyBytes reports whether a and b are the same slice.
+func sameOpenAIBodyBytes(a, b []byte) bool {
+	return len(a) == len(b) && (len(a) == 0 || &a[0] == &b[0])
 }
 
 func shouldPreserveOpenAIEncodedWireBody(c *gin.Context, account *service.Account) bool {
@@ -1692,6 +1745,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	if !h.ensureResponsesDependencies(c, reqLog) {
 		return
 	}
+	// The version is fixed per connection: check it once, before the
+	// upgrade, so Codex receives a plain non-retryable HTTP 400.
+	if envelope := h.codexVersionGateRejection(c, "ws"); envelope != nil {
+		h.writeError(c, *envelope, false)
+		return
+	}
 	reqLog.Info("openai.websocket_ingress_started")
 	clientIP := ip.GetClientIP(c)
 	userAgent := strings.TrimSpace(c.GetHeader("User-Agent"))
@@ -1953,11 +2012,17 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// The session group's latest settings, refreshed by each later turn.
 	var sessionGroup atomic.Pointer[service.Group]
 	sessionGroup.Store(apiKey.Group)
+	timezoneDates := &codexTimezoneTurnDates{}
 	hooks := &service.OpenAIWSIngressHooks{
 		// The API-key pool path may rebuild a turn with replayed history; scan
 		// the payload it actually sends. Native passthrough never calls this.
 		BeforeUpstreamSend: func(turn int, payload []byte) error {
 			return checkCodexTimezoneGuardWS(ctx, c, wsConn, sessionGroup.Load(), subject.UserID, turn, payload)
+		},
+		// Rewrite mode: every frame is rewritten where it is written upstream,
+		// under the session's current group and one frozen date per turn.
+		TransformUpstreamPayload: func(turn int, payload []byte) ([]byte, error) {
+			return rewriteCodexTimezoneWS(ctx, c, wsConn, sessionGroup.Load(), subject.UserID, turn, payload, timezoneDates)
 		},
 		OnClientTurn: func(turn int, rawPayload []byte) error {
 			opsWSStartTurn(c, turn)

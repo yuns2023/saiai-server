@@ -584,14 +584,20 @@ func init() {
 	groupDescCodexCnTimezoneGuard := groupFields[46].Descriptor()
 	// group.DefaultCodexCnTimezoneGuard holds the default value on creation for the codex_cn_timezone_guard field.
 	group.DefaultCodexCnTimezoneGuard = groupDescCodexCnTimezoneGuard.Default.(bool)
+	// groupDescCodexTimezoneAction is the schema descriptor for codex_timezone_action field.
+	groupDescCodexTimezoneAction := groupFields[47].Descriptor()
+	// group.DefaultCodexTimezoneAction holds the default value on creation for the codex_timezone_action field.
+	group.DefaultCodexTimezoneAction = groupDescCodexTimezoneAction.Default.(string)
+	// group.CodexTimezoneActionValidator is a validator for the "codex_timezone_action" field. It is called by the builders before save.
+	group.CodexTimezoneActionValidator = groupDescCodexTimezoneAction.Validators[0].(func(string) error)
 	// groupDescClaudeDeviceLimitMode is the schema descriptor for claude_device_limit_mode field.
-	groupDescClaudeDeviceLimitMode := groupFields[47].Descriptor()
+	groupDescClaudeDeviceLimitMode := groupFields[48].Descriptor()
 	// group.DefaultClaudeDeviceLimitMode holds the default value on creation for the claude_device_limit_mode field.
 	group.DefaultClaudeDeviceLimitMode = groupDescClaudeDeviceLimitMode.Default.(string)
 	// group.ClaudeDeviceLimitModeValidator is a validator for the "claude_device_limit_mode" field. It is called by the builders before save.
 	group.ClaudeDeviceLimitModeValidator = groupDescClaudeDeviceLimitMode.Validators[0].(func(string) error)
 	// groupDescClaudeDeviceBaseLimit is the schema descriptor for claude_device_base_limit field.
-	groupDescClaudeDeviceBaseLimit := groupFields[48].Descriptor()
+	groupDescClaudeDeviceBaseLimit := groupFields[49].Descriptor()
 	// group.DefaultClaudeDeviceBaseLimit holds the default value on creation for the claude_device_base_limit field.
 	group.DefaultClaudeDeviceBaseLimit = groupDescClaudeDeviceBaseLimit.Default.(int)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()

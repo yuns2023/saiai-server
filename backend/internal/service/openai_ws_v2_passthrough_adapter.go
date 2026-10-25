@@ -350,6 +350,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			FirstMessageType:            firstClientMessageType,
 			BufferResponseStart:         replayTracker != nil,
 			ValidateClientFrame:         validateOpenAIWSV2ClientFrame,
+			// The final upstream send point for passthrough: the first frame
+			// (including an early-429 replay, which becomes the next attempt's
+			// first frame) and every later frame.
+			TransformClientFrame: func(turn int, _ coderws.MessageType, payload []byte) ([]byte, error) {
+				if hooks == nil || hooks.TransformUpstreamPayload == nil {
+					return payload, nil
+				}
+				return hooks.TransformUpstreamPayload(turn, payload)
+			},
 			FilterUpstreamFrame: func(frame openaiwsv2.RelayUpstreamFrame) bool {
 				return !hideOpenAICodexQuota(account) || !isOpenAICodexQuotaEvent(frame.Payload)
 			},

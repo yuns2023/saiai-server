@@ -119,7 +119,13 @@ type RelayOptions struct {
 	// rejection ends the relay like a rejected turn: the frame is dropped and
 	// an in-flight turn is drained for usage before the relay returns.
 	ValidateClientFrame func(messageType coderws.MessageType, payload []byte) error
-	BeforeUpstreamFrame func(frame RelayUpstreamFrame) error
+	// TransformClientFrame returns the bytes written upstream for a client
+	// frame (first frame included) after OnClientTurn accepted it; turn is the
+	// frame's turn, or the latest turn (0 before any) for a non-turn frame.
+	// Turn metadata (e.g. the request payload hash) describes the returned
+	// bytes. An error ends the relay like a rejected client turn.
+	TransformClientFrame func(turn int, messageType coderws.MessageType, payload []byte) ([]byte, error)
+	BeforeUpstreamFrame  func(frame RelayUpstreamFrame) error
 	// FilterUpstreamFrame runs after observation. False keeps telemetry private
 	// without committing the current turn or interrupting the upstream relay.
 	FilterUpstreamFrame    func(frame RelayUpstreamFrame) bool
@@ -151,6 +157,7 @@ type relayState struct {
 	turns                  *relayTurnTracker
 	beforeUpstreamFrame    func(frame RelayUpstreamFrame) error
 	validateClientFrame    func(messageType coderws.MessageType, payload []byte) error
+	transformClientFrame   func(turn int, messageType coderws.MessageType, payload []byte) ([]byte, error)
 	filterUpstreamFrame    func(frame RelayUpstreamFrame) bool
 	transformUpstreamFrame func(payload []byte) []byte
 	bufferResponseStart    bool
@@ -234,6 +241,7 @@ func Relay(
 		turns:                  newRelayTurnTracker(),
 		beforeUpstreamFrame:    options.BeforeUpstreamFrame,
 		validateClientFrame:    options.ValidateClientFrame,
+		transformClientFrame:   options.TransformClientFrame,
 		filterUpstreamFrame:    options.FilterUpstreamFrame,
 		transformUpstreamFrame: options.TransformUpstreamFrame,
 		bufferResponseStart:    options.BufferResponseStart,
@@ -284,10 +292,23 @@ func Relay(
 				return result, &RelayExit{Stage: relayStageClientTurnRejected, Err: err}
 			}
 		}
+		transformed, err := state.transformClientPayload(turn, firstMessageType, firstClientMessage)
+		if err != nil {
+			result.Duration = nowFn().Sub(startAt)
+			return result, &RelayExit{Stage: relayStageClientTurnRejected, Err: err}
+		}
+		firstClientMessage = transformed
 		metadata := relayTurnMetadata(turn, firstClientMessage, options.TurnMetadata)
 		state.turns.register(metadata)
 		applyRelayTurnMetadataToResult(&result, metadata)
 		firstTurnRegistered = true
+	} else {
+		transformed, err := state.transformClientPayload(0, firstMessageType, firstClientMessage)
+		if err != nil {
+			result.Duration = nowFn().Sub(startAt)
+			return result, &RelayExit{Stage: relayStageClientTurnRejected, Err: err}
+		}
+		firstClientMessage = transformed
 	}
 
 	if err := writeUpstream(firstMessageType, firstClientMessage); err != nil {
@@ -517,8 +538,9 @@ func runClientToUpstream(
 		}
 		turn := 0
 		turnRegistered := false
-		if isRelayClientTurn(payload) {
-			turn := 1
+		clientTurn := isRelayClientTurn(payload)
+		if clientTurn {
+			turn = 1
 			if clientTurns != nil {
 				turn = int(clientTurns.Add(1))
 			}
@@ -528,6 +550,16 @@ func runClientToUpstream(
 					return
 				}
 			}
+		} else if clientTurns != nil {
+			turn = int(clientTurns.Load())
+		}
+		transformed, err := state.transformClientPayload(turn, msgType, payload)
+		if err != nil {
+			exitCh <- relayExitSignal{stage: relayStageClientTurnRejected, err: err}
+			return
+		}
+		payload = transformed
+		if clientTurn {
 			if state != nil && state.turns != nil {
 				state.turns.register(relayTurnMetadata(turn, payload, turnMetadata))
 				turnRegistered = true
@@ -1139,6 +1171,14 @@ const openAIRelayOutstandingTurnDrainDefault = 10 * time.Minute
 // relayStageClientTurnRejected marks a client frame rejected before it was
 // written upstream (frame validation or a turn hook).
 const relayStageClientTurnRejected = "client_turn_rejected"
+
+// transformClientPayload applies the TransformClientFrame option.
+func (s *relayState) transformClientPayload(turn int, messageType coderws.MessageType, payload []byte) ([]byte, error) {
+	if s == nil || s.transformClientFrame == nil {
+		return payload, nil
+	}
+	return s.transformClientFrame(turn, messageType, payload)
+}
 
 func isRelayClientTurn(payload []byte) bool {
 	// Control frames such as response.cancel are relayed unchanged but do not

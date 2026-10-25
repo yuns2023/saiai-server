@@ -67,6 +67,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 	if strings.TrimSpace(groupIn.CodexClientPolicy) == "" {
 		groupIn.CodexClientPolicy = "off"
 	}
+	groupIn.CodexTimezoneAction = service.NormalizeCodexTimezoneAction(groupIn.CodexTimezoneAction)
 	if strings.TrimSpace(groupIn.ClaudeDeviceLimitMode) == "" {
 		groupIn.ClaudeDeviceLimitMode = "off"
 	}
@@ -115,6 +116,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetInputModerationPolicy(groupIn.InputModerationPolicy).
 		SetCodexClientPolicy(groupIn.CodexClientPolicy).
 		SetCodexCnTimezoneGuard(groupIn.CodexCNTimezoneGuard).
+		SetCodexTimezoneAction(groupIn.CodexTimezoneAction).
 		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
 		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)
 
@@ -212,6 +214,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetInputModerationPolicy(groupIn.InputModerationPolicy).
 		SetCodexClientPolicy(groupIn.CodexClientPolicy).
 		SetCodexCnTimezoneGuard(groupIn.CodexCNTimezoneGuard).
+		SetCodexTimezoneAction(service.NormalizeCodexTimezoneAction(groupIn.CodexTimezoneAction)).
 		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
 		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)
 	if groupIn.RequiredLevelID != nil {

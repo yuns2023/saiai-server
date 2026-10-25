@@ -120,6 +120,8 @@ type Group struct {
 	CodexClientPolicy string `json:"codex_client_policy,omitempty"`
 	// CodexCnTimezoneGuard holds the value of the "codex_cn_timezone_guard" field.
 	CodexCnTimezoneGuard bool `json:"codex_cn_timezone_guard,omitempty"`
+	// CodexTimezoneAction holds the value of the "codex_timezone_action" field.
+	CodexTimezoneAction string `json:"codex_timezone_action,omitempty"`
 	// ClaudeDeviceLimitMode holds the value of the "claude_device_limit_mode" field.
 	ClaudeDeviceLimitMode string `json:"claude_device_limit_mode,omitempty"`
 	// ClaudeDeviceBaseLimit holds the value of the "claude_device_base_limit" field.
@@ -251,7 +253,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case group.FieldID, group.FieldRequiredLevelID, group.FieldDefaultValidityDays, group.FieldSoraStorageQuotaBytes, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldInputModerationCooldownMinutes, group.FieldInputModerationDisableAfterHits, group.FieldInputModerationStrikeWindowHours, group.FieldInputModerationMinConfidence, group.FieldInputModerationDedupeMinutes, group.FieldClaudeDeviceBaseLimit:
 			values[i] = new(sql.NullInt64)
-		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldInputModerationActionMode, group.FieldCodexClientPolicy, group.FieldClaudeDeviceLimitMode:
+		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldInputModerationActionMode, group.FieldCodexClientPolicy, group.FieldCodexTimezoneAction, group.FieldClaudeDeviceLimitMode:
 			values[i] = new(sql.NullString)
 		case group.FieldCreatedAt, group.FieldUpdatedAt, group.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -604,6 +606,12 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.CodexCnTimezoneGuard = value.Bool
 			}
+		case group.FieldCodexTimezoneAction:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field codex_timezone_action", values[i])
+			} else if value.Valid {
+				_m.CodexTimezoneAction = value.String
+			}
 		case group.FieldClaudeDeviceLimitMode:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field claude_device_limit_mode", values[i])
@@ -878,6 +886,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("codex_cn_timezone_guard=")
 	builder.WriteString(fmt.Sprintf("%v", _m.CodexCnTimezoneGuard))
+	builder.WriteString(", ")
+	builder.WriteString("codex_timezone_action=")
+	builder.WriteString(_m.CodexTimezoneAction)
 	builder.WriteString(", ")
 	builder.WriteString("claude_device_limit_mode=")
 	builder.WriteString(_m.ClaudeDeviceLimitMode)

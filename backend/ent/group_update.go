@@ -947,6 +947,20 @@ func (_u *GroupUpdate) SetNillableCodexCnTimezoneGuard(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetCodexTimezoneAction sets the "codex_timezone_action" field.
+func (_u *GroupUpdate) SetCodexTimezoneAction(v string) *GroupUpdate {
+	_u.mutation.SetCodexTimezoneAction(v)
+	return _u
+}
+
+// SetNillableCodexTimezoneAction sets the "codex_timezone_action" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableCodexTimezoneAction(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetCodexTimezoneAction(*v)
+	}
+	return _u
+}
+
 // SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
 func (_u *GroupUpdate) SetClaudeDeviceLimitMode(v string) *GroupUpdate {
 	_u.mutation.SetClaudeDeviceLimitMode(v)
@@ -1288,6 +1302,11 @@ func (_u *GroupUpdate) check() error {
 			return &ValidationError{Name: "codex_client_policy", err: fmt.Errorf(`ent: validator failed for field "Group.codex_client_policy": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.CodexTimezoneAction(); ok {
+		if err := group.CodexTimezoneActionValidator(v); err != nil {
+			return &ValidationError{Name: "codex_timezone_action", err: fmt.Errorf(`ent: validator failed for field "Group.codex_timezone_action": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.ClaudeDeviceLimitMode(); ok {
 		if err := group.ClaudeDeviceLimitModeValidator(v); err != nil {
 			return &ValidationError{Name: "claude_device_limit_mode", err: fmt.Errorf(`ent: validator failed for field "Group.claude_device_limit_mode": %w`, err)}
@@ -1583,6 +1602,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.CodexCnTimezoneGuard(); ok {
 		_spec.SetField(group.FieldCodexCnTimezoneGuard, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.CodexTimezoneAction(); ok {
+		_spec.SetField(group.FieldCodexTimezoneAction, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.ClaudeDeviceLimitMode(); ok {
 		_spec.SetField(group.FieldClaudeDeviceLimitMode, field.TypeString, value)
@@ -2846,6 +2868,20 @@ func (_u *GroupUpdateOne) SetNillableCodexCnTimezoneGuard(v *bool) *GroupUpdateO
 	return _u
 }
 
+// SetCodexTimezoneAction sets the "codex_timezone_action" field.
+func (_u *GroupUpdateOne) SetCodexTimezoneAction(v string) *GroupUpdateOne {
+	_u.mutation.SetCodexTimezoneAction(v)
+	return _u
+}
+
+// SetNillableCodexTimezoneAction sets the "codex_timezone_action" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableCodexTimezoneAction(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetCodexTimezoneAction(*v)
+	}
+	return _u
+}
+
 // SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
 func (_u *GroupUpdateOne) SetClaudeDeviceLimitMode(v string) *GroupUpdateOne {
 	_u.mutation.SetClaudeDeviceLimitMode(v)
@@ -3200,6 +3236,11 @@ func (_u *GroupUpdateOne) check() error {
 			return &ValidationError{Name: "codex_client_policy", err: fmt.Errorf(`ent: validator failed for field "Group.codex_client_policy": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.CodexTimezoneAction(); ok {
+		if err := group.CodexTimezoneActionValidator(v); err != nil {
+			return &ValidationError{Name: "codex_timezone_action", err: fmt.Errorf(`ent: validator failed for field "Group.codex_timezone_action": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.ClaudeDeviceLimitMode(); ok {
 		if err := group.ClaudeDeviceLimitModeValidator(v); err != nil {
 			return &ValidationError{Name: "claude_device_limit_mode", err: fmt.Errorf(`ent: validator failed for field "Group.claude_device_limit_mode": %w`, err)}
@@ -3512,6 +3553,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.CodexCnTimezoneGuard(); ok {
 		_spec.SetField(group.FieldCodexCnTimezoneGuard, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.CodexTimezoneAction(); ok {
+		_spec.SetField(group.FieldCodexTimezoneAction, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.ClaudeDeviceLimitMode(); ok {
 		_spec.SetField(group.FieldClaudeDeviceLimitMode, field.TypeString, value)

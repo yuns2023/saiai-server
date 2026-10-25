@@ -2144,8 +2144,13 @@ export default {
         officialClients: 'Official Codex clients only',
         cliOnly: 'Codex CLI only',
         localProxyOnly: 'SAIAI local proxy only',
-        codexCnTimezoneGuard: 'Reject Codex requests carrying a China-region timezone',
-        codexCnTimezoneGuardHint: 'When enabled, Codex Responses requests whose content or history contains a mainland China / Hong Kong / Macau timezone (<timezone>) are rejected (HTTP 403 / WebSocket 1008) and users are told to upgrade Codex, rerun saiai cli init and start a new session. Enable only after users have updated their client.',
+        codexCnTimezoneGuard: 'Codex China-region timezone guard',
+        codexCnTimezoneGuardHint: 'When enabled, Codex Responses requests (HTTP and WebSocket) are handled by the action below when their environment context reports a timezone.',
+        codexTimezoneAction: 'Timezone guard action',
+        codexTimezoneActionReject: 'Reject',
+        codexTimezoneActionRewrite: 'Rewrite to America/Los_Angeles',
+        codexTimezoneActionRejectHint: 'Requests whose content or history contains a mainland China / Hong Kong / Macau timezone (<timezone>) are rejected with HTTP 400 (WebSocket: error frame, then close 1008; Codex does not retry) and users are told to upgrade Codex, rerun saiai cli init and start a new session. Enable only after users have updated their client.',
+        codexTimezoneActionRewriteHint: 'Never rejects for the timezone: inside every Codex environment_context block the timezone is sent upstream as America/Los_Angeles and the date as the current Los Angeles date. Text outside those blocks is untouched; a block that cannot be rewritten safely is rejected with HTTP 400.',
         audit: 'Audit only',
         enforce: 'Enforce',
         baseDevices: 'Base device count'
@@ -4842,6 +4847,19 @@ export default {
         maxVersionPlaceholder: 'e.g. 2.5.0',
         maxVersionHint:
           'Reject Claude Code clients above this version (semver format). Leave empty to allow any version.'
+      },
+      codexVersion: {
+        title: 'Codex Version Range',
+        description: 'Admit official Codex clients only when their engine version is inside this range',
+        enabled: 'Enable Codex version check',
+        enabledHint:
+          'Applies to official Codex clients on Responses HTTP and WebSocket only (other clients are unaffected). The version is read from the version header and must match the User-Agent; otherwise the request is rejected with HTTP 400 codex_version_unsupported. Changes apply to new requests and connections.',
+        minVersion: 'Minimum Codex version',
+        minVersionPlaceholder: 'e.g. 0.164.0',
+        minVersionHint: 'Reject older engines (SemVer; a prerelease is older than its release). Leave empty for no minimum.',
+        maxVersion: 'Maximum Codex version',
+        maxVersionPlaceholder: 'e.g. 0.170.0',
+        maxVersionHint: 'Reject newer engines (SemVer). Leave empty for no maximum.'
       },
       scheduling: {
         title: 'Gateway Scheduling Settings',

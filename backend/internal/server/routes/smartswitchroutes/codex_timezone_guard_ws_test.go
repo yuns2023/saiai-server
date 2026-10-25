@@ -109,7 +109,7 @@ func TestCodexTimezoneGuardWSLaterTurnUsesCurrentSwitch(t *testing.T) {
 	tagged := `{"type":"response.create","model":"gpt-5.5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"<timezone>Asia/Shanghai</timezone>"}]}]}`
 	frame := wsTurn(t, ctx, conn, tagged)
 	require.Equal(t, "error", gjson.GetBytes(frame, "type").String(), string(frame))
-	require.Equal(t, int64(403), gjson.GetBytes(frame, "status").Int())
+	require.Equal(t, int64(400), gjson.GetBytes(frame, "status").Int())
 	require.Equal(t, "codex_timezone_reinit_required", gjson.GetBytes(frame, "error.code").String())
 	_, _, err := conn.Read(ctx)
 	require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err))

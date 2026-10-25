@@ -202,8 +202,11 @@ func (Group) Fields() []ent.Field {
 			Default(5),
 		field.String("codex_client_policy").MaxLen(32).Default("off"),
 		// Rejects Codex Responses requests carrying a China-region
-		// <timezone> environment tag (HTTP 403 / WS 1008). Off by default.
+		// <timezone> environment tag (HTTP 400 / WS 1008). Off by default.
 		field.Bool("codex_cn_timezone_guard").Default(false),
+		// What the guard does with a matching request: "reject" (HTTP 400 /
+		// WS error frame) or "rewrite" (timezone/date replaced upstream).
+		field.String("codex_timezone_action").MaxLen(16).Default("reject"),
 		field.String("claude_device_limit_mode").MaxLen(16).Default("off"),
 		field.Int("claude_device_base_limit").Default(1),
 	}

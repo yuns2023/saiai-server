@@ -36,6 +36,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	pkgopenai "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -237,6 +238,48 @@ func TestNativeCodexGatewayRoutes(t *testing.T) {
 			})
 		}
 	}
+	// Rewrite mode: the provider receives the rewritten body; a zstd request
+	// keeps a Codex-shaped zstd frame on the preserved OAuth wire.
+	for _, compressed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("timezone_rewrite_zstd_%t", compressed), func(t *testing.T) {
+			lab.reset()
+			key.Group.CodexCNTimezoneGuard, key.Group.CodexTimezoneAction = true, service.CodexTimezoneActionRewrite
+			defer func() { key.Group.CodexCNTimezoneGuard, key.Group.CodexTimezoneAction = false, "" }()
+			plain := []byte(`{ "model":"gpt-5.5","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <current_date>2026-10-25</current_date>\n  <timezone>Asia/Shanghai</timezone>\n</environment_context>"}]}] }`)
+			body := plain
+			if compressed {
+				encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+				require.NoError(t, err)
+				body = encoder.EncodeAll(plain, nil)
+				encoder.Close()
+			}
+			before := time.Now()
+			resp, data := request("POST", "/v1/responses", body, compressed, true)
+			after := time.Now()
+			require.Equal(t, 200, resp.StatusCode, string(data))
+			seen := lab.providerRecords()
+			require.Len(t, seen, 1)
+			lab.mu.Lock()
+			wire := lab.providerBodies[0]
+			lab.mu.Unlock()
+			decoded := wire
+			if compressed {
+				require.Equal(t, "zstd", seen[0]["headers"].(http.Header).Get("Content-Encoding"))
+				require.Equal(t, []byte{0x28, 0xB5, 0x2F, 0xFD, 0x00, 0x58}, wire[:6])
+				decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+				require.NoError(t, err)
+				decoded, err = decoder.DecodeAll(wire, nil)
+				decoder.Close()
+				require.NoError(t, err)
+			}
+			wantBefore, _, err := pkgopenai.RewriteCodexEnvironmentTime(plain, before)
+			require.NoError(t, err)
+			wantAfter, _, err := pkgopenai.RewriteCodexEnvironmentTime(plain, after)
+			require.NoError(t, err)
+			require.True(t, bytes.Equal(decoded, wantBefore) || bytes.Equal(decoded, wantAfter), string(decoded))
+			require.Contains(t, string(decoded), "<timezone>America/Los_Angeles</timezone>")
+		})
+	}
 	t.Run("unverified_state_rejects_before_egress", func(t *testing.T) {
 		lab.reset()
 		resp, body := request("POST", "/v1/responses", []byte(`{"model":"gpt-5.5","client_metadata":{"x-codex-turn-state":"MOCK_UNKNOWN"}}`), false, true)
@@ -413,6 +456,7 @@ type nativeRoutesLab struct {
 	authChecks, balanceChecks                   int
 	connections                                 []net.Conn
 	imagegen                                    bool
+	providerBodies                              [][]byte // raw provider HTTP bodies
 	sequence, tunnels, blocked                  atomic.Int64
 }
 
@@ -428,6 +472,7 @@ func (l *nativeRoutesLab) reset() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.records, l.response, l.usageRecords, l.billingApplications = nil, 0, 0, 0
+	l.providerBodies = nil
 	l.imagegen = false
 	l.authChecks, l.balanceChecks = 0, 0
 }
@@ -473,6 +518,9 @@ func (l *nativeRoutesLab) record(stage, kind string, r *http.Request, body []byt
 	}
 	l.mu.Lock()
 	l.records = append(l.records, record)
+	if stage == "provider" && kind == "http" {
+		l.providerBodies = append(l.providerBodies, append([]byte(nil), body...))
+	}
 	l.mu.Unlock()
 }
 func (l *nativeRoutesLab) provider(w http.ResponseWriter, r *http.Request) {

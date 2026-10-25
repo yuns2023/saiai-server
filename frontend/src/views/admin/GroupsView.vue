@@ -732,6 +732,22 @@
               <span class="input-hint mt-1 block">{{ t('admin.groups.clientLimits.codexCnTimezoneGuardHint') }}</span>
             </span>
           </label>
+          <div v-if="createForm.codex_cn_timezone_guard" class="mt-3 pl-6">
+            <label class="input-label">{{ t('admin.groups.clientLimits.codexTimezoneAction') }}</label>
+            <select
+              v-model="createForm.codex_timezone_action"
+              class="input w-full"
+              data-testid="createForm-codex-timezone-action"
+            >
+              <option value="reject">{{ t('admin.groups.clientLimits.codexTimezoneActionReject') }}</option>
+              <option value="rewrite">{{ t('admin.groups.clientLimits.codexTimezoneActionRewrite') }}</option>
+            </select>
+            <p class="input-hint mt-1">
+              {{ createForm.codex_timezone_action === 'rewrite'
+                ? t('admin.groups.clientLimits.codexTimezoneActionRewriteHint')
+                : t('admin.groups.clientLimits.codexTimezoneActionRejectHint') }}
+            </p>
+          </div>
         </div>
 
         <!-- 异步用户输入审核 -->
@@ -1507,6 +1523,22 @@
               <span class="input-hint mt-1 block">{{ t('admin.groups.clientLimits.codexCnTimezoneGuardHint') }}</span>
             </span>
           </label>
+          <div v-if="editForm.codex_cn_timezone_guard" class="mt-3 pl-6">
+            <label class="input-label">{{ t('admin.groups.clientLimits.codexTimezoneAction') }}</label>
+            <select
+              v-model="editForm.codex_timezone_action"
+              class="input w-full"
+              data-testid="editForm-codex-timezone-action"
+            >
+              <option value="reject">{{ t('admin.groups.clientLimits.codexTimezoneActionReject') }}</option>
+              <option value="rewrite">{{ t('admin.groups.clientLimits.codexTimezoneActionRewrite') }}</option>
+            </select>
+            <p class="input-hint mt-1">
+              {{ editForm.codex_timezone_action === 'rewrite'
+                ? t('admin.groups.clientLimits.codexTimezoneActionRewriteHint')
+                : t('admin.groups.clientLimits.codexTimezoneActionRejectHint') }}
+            </p>
+          </div>
         </div>
 
         <!-- 异步用户输入审核 -->
@@ -2176,6 +2208,7 @@ const createForm = reactive({
   input_moderation_dedupe_minutes: 5,
   codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
   codex_cn_timezone_guard: false,
+  codex_timezone_action: 'reject' as 'reject' | 'rewrite',
   claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
   claude_device_base_limit: 1,
   // 模型路由开关
@@ -2439,6 +2472,7 @@ const editForm = reactive({
   input_moderation_dedupe_minutes: 5,
   codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
   codex_cn_timezone_guard: false,
+  codex_timezone_action: 'reject' as 'reject' | 'rewrite',
   claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
   claude_device_base_limit: 1,
   // 模型路由开关
@@ -2597,6 +2631,7 @@ const closeCreateModal = () => {
   createForm.input_moderation_dedupe_minutes = 5
   createForm.codex_client_policy = 'off'
   createForm.codex_cn_timezone_guard = false
+  createForm.codex_timezone_action = 'reject'
   createForm.claude_device_limit_mode = 'off'
   createForm.claude_device_base_limit = 1
   createForm.copy_accounts_from_group_ids = []
@@ -2703,6 +2738,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.input_moderation_dedupe_minutes = group.input_moderation_dedupe_minutes || 5
   editForm.codex_client_policy = group.codex_client_policy || 'off'
   editForm.codex_cn_timezone_guard = group.codex_cn_timezone_guard || false
+  editForm.codex_timezone_action = group.codex_timezone_action === 'rewrite' ? 'rewrite' : 'reject'
   editForm.claude_device_limit_mode = group.claude_device_limit_mode || 'off'
   editForm.claude_device_base_limit = group.claude_device_base_limit || 1
   editForm.model_routing_enabled = group.model_routing_enabled || false

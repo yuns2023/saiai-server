@@ -674,6 +674,20 @@ func (_c *GroupCreate) SetNillableCodexCnTimezoneGuard(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetCodexTimezoneAction sets the "codex_timezone_action" field.
+func (_c *GroupCreate) SetCodexTimezoneAction(v string) *GroupCreate {
+	_c.mutation.SetCodexTimezoneAction(v)
+	return _c
+}
+
+// SetNillableCodexTimezoneAction sets the "codex_timezone_action" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableCodexTimezoneAction(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetCodexTimezoneAction(*v)
+	}
+	return _c
+}
+
 // SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
 func (_c *GroupCreate) SetClaudeDeviceLimitMode(v string) *GroupCreate {
 	_c.mutation.SetClaudeDeviceLimitMode(v)
@@ -964,6 +978,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultCodexCnTimezoneGuard
 		_c.mutation.SetCodexCnTimezoneGuard(v)
 	}
+	if _, ok := _c.mutation.CodexTimezoneAction(); !ok {
+		v := group.DefaultCodexTimezoneAction
+		_c.mutation.SetCodexTimezoneAction(v)
+	}
 	if _, ok := _c.mutation.ClaudeDeviceLimitMode(); !ok {
 		v := group.DefaultClaudeDeviceLimitMode
 		_c.mutation.SetClaudeDeviceLimitMode(v)
@@ -1102,6 +1120,14 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.CodexCnTimezoneGuard(); !ok {
 		return &ValidationError{Name: "codex_cn_timezone_guard", err: errors.New(`ent: missing required field "Group.codex_cn_timezone_guard"`)}
+	}
+	if _, ok := _c.mutation.CodexTimezoneAction(); !ok {
+		return &ValidationError{Name: "codex_timezone_action", err: errors.New(`ent: missing required field "Group.codex_timezone_action"`)}
+	}
+	if v, ok := _c.mutation.CodexTimezoneAction(); ok {
+		if err := group.CodexTimezoneActionValidator(v); err != nil {
+			return &ValidationError{Name: "codex_timezone_action", err: fmt.Errorf(`ent: validator failed for field "Group.codex_timezone_action": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.ClaudeDeviceLimitMode(); !ok {
 		return &ValidationError{Name: "claude_device_limit_mode", err: errors.New(`ent: missing required field "Group.claude_device_limit_mode"`)}
@@ -1336,6 +1362,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.CodexCnTimezoneGuard(); ok {
 		_spec.SetField(group.FieldCodexCnTimezoneGuard, field.TypeBool, value)
 		_node.CodexCnTimezoneGuard = value
+	}
+	if value, ok := _c.mutation.CodexTimezoneAction(); ok {
+		_spec.SetField(group.FieldCodexTimezoneAction, field.TypeString, value)
+		_node.CodexTimezoneAction = value
 	}
 	if value, ok := _c.mutation.ClaudeDeviceLimitMode(); ok {
 		_spec.SetField(group.FieldClaudeDeviceLimitMode, field.TypeString, value)
@@ -2343,6 +2373,18 @@ func (u *GroupUpsert) SetCodexCnTimezoneGuard(v bool) *GroupUpsert {
 // UpdateCodexCnTimezoneGuard sets the "codex_cn_timezone_guard" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateCodexCnTimezoneGuard() *GroupUpsert {
 	u.SetExcluded(group.FieldCodexCnTimezoneGuard)
+	return u
+}
+
+// SetCodexTimezoneAction sets the "codex_timezone_action" field.
+func (u *GroupUpsert) SetCodexTimezoneAction(v string) *GroupUpsert {
+	u.Set(group.FieldCodexTimezoneAction, v)
+	return u
+}
+
+// UpdateCodexTimezoneAction sets the "codex_timezone_action" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateCodexTimezoneAction() *GroupUpsert {
+	u.SetExcluded(group.FieldCodexTimezoneAction)
 	return u
 }
 
@@ -3384,6 +3426,20 @@ func (u *GroupUpsertOne) SetCodexCnTimezoneGuard(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateCodexCnTimezoneGuard() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateCodexCnTimezoneGuard()
+	})
+}
+
+// SetCodexTimezoneAction sets the "codex_timezone_action" field.
+func (u *GroupUpsertOne) SetCodexTimezoneAction(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetCodexTimezoneAction(v)
+	})
+}
+
+// UpdateCodexTimezoneAction sets the "codex_timezone_action" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateCodexTimezoneAction() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateCodexTimezoneAction()
 	})
 }
 
@@ -4596,6 +4652,20 @@ func (u *GroupUpsertBulk) SetCodexCnTimezoneGuard(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateCodexCnTimezoneGuard() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateCodexCnTimezoneGuard()
+	})
+}
+
+// SetCodexTimezoneAction sets the "codex_timezone_action" field.
+func (u *GroupUpsertBulk) SetCodexTimezoneAction(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetCodexTimezoneAction(v)
+	})
+}
+
+// UpdateCodexTimezoneAction sets the "codex_timezone_action" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateCodexTimezoneAction() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateCodexTimezoneAction()
 	})
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	pkgopenai "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -16,14 +17,21 @@ import (
 	"go.uber.org/zap"
 )
 
-// The Codex CN-timezone guard (groups.codex_cn_timezone_guard) rejects
-// Responses HTTP and WebSocket requests whose JSON string content carries a
-// China mainland / Hong Kong / Macau `<timezone>` environment tag. It only
-// reads the decoded request body; forwarded bytes are never modified.
-// Out of scope: native /codex/images and ChatGPT conversation routes.
+// The Codex CN-timezone guard (groups.codex_cn_timezone_guard) applies to
+// Responses HTTP and WebSocket requests. With codex_timezone_action "reject"
+// it rejects JSON string content carrying a China mainland / Hong Kong /
+// Macau `<timezone>` environment tag and never modifies forwarded bytes. With
+// "rewrite" it never rejects for the zone; instead every
+// `<environment_context>` block is sent upstream with the timezone set to
+// America/Los_Angeles and the date to the server's current LA date (see
+// pkgopenai.RewriteCodexEnvironmentTime); a block that cannot be rewritten
+// safely is rejected like the reject mode (fail closed).
+// Rejections are HTTP 400 invalid_request_error (Codex does not retry 400;
+// it retries 403). Out of scope: native /codex/images and ChatGPT
+// conversation routes.
 const (
 	codexTimezoneGuardCode     = "codex_timezone_reinit_required"
-	codexTimezoneGuardErrType  = "permission_error"
+	codexTimezoneGuardErrType  = "invalid_request_error"
 	codexTimezoneGuardWSReason = "codex timezone reinit required"
 
 	codexTimezoneGuardMessageGeneric = "请求内容或历史中包含中国地区时区信息。请重新运行 saiai cli 初始化（会关闭 Codex 的时区上报），重启 Codex 并新开会话后再使用。"
@@ -80,20 +88,129 @@ func codexTimezoneGuardMessage(userAgent string) string {
 	return codexTimezoneGuardMessageGeneric
 }
 
-// codexTimezoneGuardZone returns the offending zone when group enables the
-// guard and payload carries a China-region timezone tag.
-func codexTimezoneGuardZone(group *service.Group, payload []byte) (string, bool) {
-	if group == nil || !group.CodexCNTimezoneGuard {
-		return "", false
+// codexTimezoneNow is the server clock for the rewrite date (tests stub it).
+var codexTimezoneNow = time.Now
+
+// codexTimezoneValidationNow is a placeholder clock for checks that only
+// need to know whether a payload can be rewritten; the output is discarded.
+var codexTimezoneValidationNow = time.Unix(0, 0)
+
+// Rejection reasons logged by the guard.
+const (
+	codexTimezoneRejectZone      = "cn_timezone"
+	codexTimezoneRejectMalformed = "malformed_environment_context"
+	codexTimezoneRejectNoClock   = "rewrite_date_unavailable"
+	codexTimezoneRejectEncode    = "rewrite_encode_failed"
+)
+
+// codexTimezoneGuardZone returns why payload must be rejected under group's
+// guard: a China-region zone in reject mode, or an environment_context that
+// cannot be rewritten safely in rewrite mode. zone is set for the former.
+func codexTimezoneGuardZone(group *service.Group, payload []byte) (reason, zone string, rejected bool) {
+	switch group.CodexTimezoneGuardAction() {
+	case service.CodexTimezoneActionReject:
+		if zone, found := pkgopenai.FindChinaTimezone(payload); found {
+			return codexTimezoneRejectZone, zone, true
+		}
+	case service.CodexTimezoneActionRewrite:
+		if _, _, err := pkgopenai.RewriteCodexEnvironmentTime(payload, codexTimezoneValidationNow); err != nil {
+			return codexTimezoneRewriteRejectReason(err), "", true
+		}
 	}
-	return pkgopenai.FindChinaTimezone(payload)
+	return "", "", false
+}
+
+// codexTimezoneFrozenDate freezes the rewrite clock once per HTTP request
+// (R2): every check, smart-switch re-application and retry of the request
+// uses the same instant, hence the same date. Not safe for concurrent use.
+type codexTimezoneFrozenDate struct {
+	now  time.Time
+	done bool
+}
+
+func (d *codexTimezoneFrozenDate) get() time.Time {
+	if !d.done {
+		d.now, d.done = codexTimezoneNow(), true
+	}
+	return d.now
+}
+
+// codexTimezoneTurnDates freezes one rewrite clock per WebSocket client turn;
+// retries and failover replays of a turn reuse it. Frames that are not a
+// turn (turn <= 0) use the current time. Old turns are pruned.
+type codexTimezoneTurnDates struct {
+	mu    sync.Mutex
+	dates map[int]time.Time
+}
+
+const codexTimezoneTurnDatesKept = 64
+
+func (d *codexTimezoneTurnDates) get(turn int) time.Time {
+	if turn <= 0 {
+		return codexTimezoneNow()
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if now, ok := d.dates[turn]; ok {
+		return now
+	}
+	now := codexTimezoneNow()
+	if d.dates == nil {
+		d.dates = make(map[int]time.Time)
+	}
+	d.dates[turn] = now
+	for old := range d.dates {
+		if old <= turn-codexTimezoneTurnDatesKept {
+			delete(d.dates, old)
+		}
+	}
+	return now
+}
+
+func codexTimezoneRewriteRejectReason(err error) string {
+	if errors.Is(err, pkgopenai.ErrCodexRewriteClock) {
+		return codexTimezoneRejectNoClock
+	}
+	return codexTimezoneRejectMalformed
+}
+
+// rewriteCodexTimezonePayload applies the rewrite action to payload with the
+// frozen clock now. It returns payload unchanged unless group's guard is on
+// with action rewrite. reason is set when the payload must be rejected
+// instead (fail closed).
+func rewriteCodexTimezonePayload(group *service.Group, payload []byte, now time.Time) (out []byte, stats pkgopenai.CodexEnvironmentRewriteStats, reason string) {
+	if group.CodexTimezoneGuardAction() != service.CodexTimezoneActionRewrite {
+		return payload, stats, ""
+	}
+	out, stats, err := pkgopenai.RewriteCodexEnvironmentTime(payload, now)
+	if err != nil {
+		return payload, stats, codexTimezoneRewriteRejectReason(err)
+	}
+	return out, stats, ""
+}
+
+// logCodexTimezoneRewrite never logs the request body.
+func logCodexTimezoneRewrite(c *gin.Context, group *service.Group, userID int64, transport string, turn int, stats pkgopenai.CodexEnvironmentRewriteStats) {
+	fields := []zap.Field{
+		zap.Int64("user_id", userID),
+		zap.String("transport", transport),
+		zap.Int("turn", turn),
+		zap.Int("blocks", stats.Blocks),
+		zap.Int("timezones_rewritten", stats.Timezones),
+		zap.Int("dates_rewritten", stats.Dates),
+	}
+	if group != nil {
+		fields = append(fields, zap.Int64("group_id", group.ID))
+	}
+	requestLogger(c, "handler.openai_gateway.codex_timezone_guard", fields...).Info("openai.codex_timezone_rewritten")
 }
 
 // logCodexTimezoneGuardRejection never logs the request body.
-func logCodexTimezoneGuardRejection(c *gin.Context, group *service.Group, userID int64, zone, transport string, turn int) {
+func logCodexTimezoneGuardRejection(c *gin.Context, group *service.Group, userID int64, reason, zone, transport string, turn int) {
 	product, version, _ := codexTimezoneGuardClient(c.GetHeader("User-Agent"))
 	fields := []zap.Field{
 		zap.Int64("user_id", userID),
+		zap.String("reason", reason),
 		zap.String("zone", zone),
 		zap.String("ua_product", product),
 		zap.String("transport", transport),
@@ -108,22 +225,41 @@ func logCodexTimezoneGuardRejection(c *gin.Context, group *service.Group, userID
 	requestLogger(c, "handler.openai_gateway.codex_timezone_guard", fields...).Warn("openai.codex_timezone_guard_rejected")
 }
 
-// validateCodexTimezoneGuardHTTP writes a 403 and returns false when the
-// guard rejects body. A rejection ends the request; it is not an account
+// applyCodexTimezoneGuardHTTP returns the decoded body to send for group:
+// original itself, or a rewritten copy in rewrite mode. It is always applied
+// to the original decoded body, so a smart switch from a rewrite group to a
+// reject or guard-off group re-evaluates the client's bytes. On rejection it
+// writes a 400 (an SSE error event when the stream has already started) and
+// returns ok=false. A rejection ends the request; it is not an account
 // failure and never advances smart switching.
-func (h *OpenAIGatewayHandler) validateCodexTimezoneGuardHTTP(c *gin.Context, group *service.Group, userID int64, body []byte) bool {
-	zone, found := codexTimezoneGuardZone(group, body)
-	if !found {
-		return true
+func (h *OpenAIGatewayHandler) applyCodexTimezoneGuardHTTP(c *gin.Context, group *service.Group, userID int64, original []byte, date *codexTimezoneFrozenDate, streamStarted bool) ([]byte, bool) {
+	reason, zone, rejected := "", "", false
+	body := original
+	if group.CodexTimezoneGuardAction() == service.CodexTimezoneActionRewrite {
+		var stats pkgopenai.CodexEnvironmentRewriteStats
+		body, stats, reason = rewriteCodexTimezonePayload(group, original, date.get())
+		rejected = reason != ""
+		if !rejected && stats.Changed() {
+			logCodexTimezoneRewrite(c, group, userID, "http", 0, stats)
+		}
+	} else {
+		reason, zone, rejected = codexTimezoneGuardZone(group, original)
 	}
-	logCodexTimezoneGuardRejection(c, group, userID, zone, "http", 0)
+	if !rejected {
+		return body, true
+	}
+	h.rejectCodexTimezoneHTTP(c, group, userID, reason, zone, streamStarted)
+	return nil, false
+}
+
+func (h *OpenAIGatewayHandler) rejectCodexTimezoneHTTP(c *gin.Context, group *service.Group, userID int64, reason, zone string, streamStarted bool) {
+	logCodexTimezoneGuardRejection(c, group, userID, reason, zone, "http", 0)
 	h.writeError(c, gatewayErrorEnvelope{
-		Status:  http.StatusForbidden,
+		Status:  http.StatusBadRequest,
 		Type:    codexTimezoneGuardErrType,
 		Code:    codexTimezoneGuardCode,
 		Message: codexTimezoneGuardMessage(c.GetHeader("User-Agent")),
-	}, false)
-	return false
+	}, streamStarted)
 }
 
 // openAIWSSessionRejection marks a WebSocket session ended by a gateway
@@ -176,7 +312,7 @@ func rejectOpenAIWSSession(ctx context.Context, c *gin.Context, conn *coderws.Co
 
 func codexTimezoneGuardRejection(message string) *openAIWSSessionRejection {
 	return &openAIWSSessionRejection{
-		status:  http.StatusForbidden,
+		status:  http.StatusBadRequest,
 		errType: codexTimezoneGuardErrType,
 		code:    codexTimezoneGuardCode,
 		message: message,
@@ -197,15 +333,39 @@ func openAIWSGroupChangedRejection() *openAIWSSessionRejection {
 	}
 }
 
-// checkCodexTimezoneGuardWS scans one WebSocket payload and rejects the
-// session when the guard matches.
+// checkCodexTimezoneGuardWS checks one WebSocket payload at a checkpoint
+// and rejects the session when the guard matches (reject mode) or the payload
+// cannot be rewritten (rewrite mode). It never modifies payload; rewriting
+// happens where frames are written upstream (rewriteCodexTimezoneWS).
 func checkCodexTimezoneGuardWS(ctx context.Context, c *gin.Context, conn *coderws.Conn, group *service.Group, userID int64, turn int, payload []byte) error {
-	zone, found := codexTimezoneGuardZone(group, payload)
-	if !found {
+	reason, zone, rejected := codexTimezoneGuardZone(group, payload)
+	if !rejected {
 		return nil
 	}
-	logCodexTimezoneGuardRejection(c, group, userID, zone, "ws", turn)
+	return rejectCodexTimezoneWS(ctx, c, conn, group, userID, reason, zone, turn)
+}
+
+func rejectCodexTimezoneWS(ctx context.Context, c *gin.Context, conn *coderws.Conn, group *service.Group, userID int64, reason, zone string, turn int) error {
+	logCodexTimezoneGuardRejection(c, group, userID, reason, zone, "ws", turn)
 	return rejectOpenAIWSSession(ctx, c, conn, codexTimezoneGuardRejection(codexTimezoneGuardMessage(c.GetHeader("User-Agent"))))
+}
+
+// rewriteCodexTimezoneWS is applied to every client frame right before it is
+// written upstream (first frame, later turns, pool-path rebuilt turns and
+// failover replays), so retained frames may stay original. group is the
+// session's current group; dates freezes one date per turn.
+func rewriteCodexTimezoneWS(ctx context.Context, c *gin.Context, conn *coderws.Conn, group *service.Group, userID int64, turn int, payload []byte, dates *codexTimezoneTurnDates) ([]byte, error) {
+	if group.CodexTimezoneGuardAction() != service.CodexTimezoneActionRewrite {
+		return payload, nil
+	}
+	out, stats, reason := rewriteCodexTimezonePayload(group, payload, dates.get(turn))
+	if reason != "" {
+		return nil, rejectCodexTimezoneWS(ctx, c, conn, group, userID, reason, "", turn)
+	}
+	if stats.Changed() {
+		logCodexTimezoneRewrite(c, group, userID, "ws", turn, stats)
+	}
+	return out, nil
 }
 
 // closeOpenAIWSRejectedSession records the status + code for ops and closes

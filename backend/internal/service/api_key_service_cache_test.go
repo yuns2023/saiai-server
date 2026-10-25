@@ -271,27 +271,31 @@ func TestAPIKeyService_SnapshotRoundTripsCodexTimezoneGuard(t *testing.T) {
 	groupID := int64(13)
 	key := &APIKey{
 		ID: 1, UserID: 2, User: &User{ID: 2}, GroupID: &groupID,
-		Group: &Group{ID: groupID, Status: StatusActive, Platform: PlatformOpenAI, CodexCNTimezoneGuard: true},
+		Group: &Group{ID: groupID, Status: StatusActive, Platform: PlatformOpenAI, CodexCNTimezoneGuard: true, CodexTimezoneAction: CodexTimezoneActionRewrite},
 	}
 	snapshot := svc.snapshotFromAPIKey(key)
 	require.Equal(t, apiKeyAuthSnapshotSchemaVersion, snapshot.SchemaVersion)
 	encoded, err := json.Marshal(&APIKeyAuthCacheEntry{Snapshot: snapshot})
 	require.NoError(t, err)
 	require.Contains(t, string(encoded), `"codex_cn_timezone_guard":true`)
+	require.Contains(t, string(encoded), `"codex_timezone_action":"rewrite"`)
 	var decoded APIKeyAuthCacheEntry
 	require.NoError(t, json.Unmarshal(encoded, &decoded))
 	restored, ok, err := svc.applyAuthCacheEntry("k", &decoded)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.True(t, restored.Group.CodexCNTimezoneGuard)
+	require.Equal(t, CodexTimezoneActionRewrite, restored.Group.CodexTimezoneAction)
 
-	// Snapshots from binaries that predate the field are not trusted: they
-	// would decode the guard as false even for a group that enabled it.
-	decoded.Snapshot.SchemaVersion = 1
-	restored, ok, err = svc.applyAuthCacheEntry("k", &decoded)
-	require.NoError(t, err)
-	require.False(t, ok)
-	require.Nil(t, restored)
+	// Snapshots from binaries that predate a field are not trusted: they
+	// would decode the guard as false (v1) or the action as reject (v2).
+	for _, version := range []int{1, 2} {
+		decoded.Snapshot.SchemaVersion = version
+		restored, ok, err = svc.applyAuthCacheEntry("k", &decoded)
+		require.NoError(t, err)
+		require.False(t, ok)
+		require.Nil(t, restored)
+	}
 }
 
 func TestAPIKeyService_GetByKey_NegativeCache(t *testing.T) {

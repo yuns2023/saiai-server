@@ -2229,8 +2229,13 @@ export default {
         officialClients: '仅官方 Codex 客户端',
         cliOnly: '仅 Codex CLI',
         localProxyOnly: '仅允许 SAIAI 本地代理',
-        codexCnTimezoneGuard: '拒绝携带中国地区时区的 Codex 请求',
-        codexCnTimezoneGuardHint: '开启后，请求内容或历史中含中国大陆/香港/澳门时区（<timezone>）的 Codex Responses 请求将被拒绝（HTTP 403 / WebSocket 1008），并提示用户升级 Codex、重新运行 saiai cli 初始化后新开会话。请在用户更新客户端后再开启。',
+        codexCnTimezoneGuard: 'Codex 中国地区时区防护',
+        codexCnTimezoneGuardHint: '开启后，Codex Responses 请求（HTTP 与 WebSocket）的环境上下文上报时区时，按下方动作处理。',
+        codexTimezoneAction: '时区防护动作',
+        codexTimezoneActionReject: '拒绝',
+        codexTimezoneActionRewrite: '改写为 America/Los_Angeles',
+        codexTimezoneActionRejectHint: '请求内容或历史中含中国大陆/香港/澳门时区（<timezone>）时返回 HTTP 400（WebSocket：错误帧后关闭 1008；Codex 不会重试），并提示用户升级 Codex、重新运行 saiai cli 初始化后新开会话。请在用户更新客户端后再开启。',
+        codexTimezoneActionRewriteHint: '不再因时区拒绝：每个 Codex environment_context 块内的时区改写为 America/Los_Angeles、日期改写为洛杉矶当前日期后再发往上游；块外文本不改动；无法安全改写的块返回 HTTP 400。',
         audit: '仅审计',
         enforce: '强制限制',
         baseDevices: '基础设备数量'
@@ -5001,6 +5006,18 @@ export default {
         maxVersion: '最高版本号',
         maxVersionPlaceholder: '例如 2.5.0',
         maxVersionHint: '拒绝高于此版本的 Claude Code 客户端请求（semver 格式）。留空则不限制最高版本。'
+      },
+      codexVersion: {
+        title: 'Codex 版本范围',
+        description: '仅允许引擎版本在此范围内的官方 Codex 客户端访问',
+        enabled: '启用 Codex 版本检查',
+        enabledHint: '仅作用于官方 Codex 客户端的 Responses HTTP 与 WebSocket 请求（其他客户端不受影响）。版本取自 version 请求头且须与 User-Agent 一致，否则返回 HTTP 400 codex_version_unsupported。修改只影响新请求与新连接。',
+        minVersion: 'Codex 最低版本',
+        minVersionPlaceholder: '例如 0.164.0',
+        minVersionHint: '拒绝低于此版本的引擎（SemVer；预发布版低于对应正式版）。留空则不限制最低版本。',
+        maxVersion: 'Codex 最高版本',
+        maxVersionPlaceholder: '例如 0.170.0',
+        maxVersionHint: '拒绝高于此版本的引擎（SemVer）。留空则不限制最高版本。'
       },
       scheduling: {
         title: '网关调度设置',

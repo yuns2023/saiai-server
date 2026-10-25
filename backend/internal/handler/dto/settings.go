@@ -83,6 +83,10 @@ type SystemSettings struct {
 	MinClaudeCodeVersion string `json:"min_claude_code_version"`
 	MaxClaudeCodeVersion string `json:"max_claude_code_version"`
 
+	CodexVersionGateEnabled bool   `json:"codex_version_gate_enabled"`
+	CodexMinVersion         string `json:"codex_min_version"`
+	CodexMaxVersion         string `json:"codex_max_version"`
+
 	// 分组隔离
 	AllowUngroupedKeyScheduling bool `json:"allow_ungrouped_key_scheduling"`
 
