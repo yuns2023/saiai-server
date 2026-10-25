@@ -1969,7 +1969,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			// Turn 1 (the possibly rebuilt first frame) was scanned before
 			// account selection. Later turns read the group's current switch.
 			if turn > 1 {
-				if err := checkCodexTimezoneGuardWS(ctx, c, wsConn, currentKey.Group, subject.UserID, turn, rawPayload); err != nil {
+				if err := checkCodexTimezoneGuardWS(ctx, c, wsConn, openAIWSSessionGroup(apiKey, currentKey), subject.UserID, turn, rawPayload); err != nil {
 					return err
 				}
 			}
@@ -2215,11 +2215,25 @@ func (h *OpenAIGatewayHandler) openAIWSCurrentGroup(ctx context.Context, apiKey 
 		return nil
 	}
 	if h != nil && h.apiKeyService != nil && strings.TrimSpace(apiKey.Key) != "" {
-		if fresh, err := h.apiKeyService.GetByKey(ctx, apiKey.Key); err == nil && fresh != nil && fresh.Group != nil {
-			return fresh.Group
+		if fresh, err := h.apiKeyService.GetByKey(ctx, apiKey.Key); err == nil {
+			return openAIWSSessionGroup(apiKey, fresh)
 		}
 	}
 	return apiKey.Group
+}
+
+// openAIWSSessionGroup returns the current settings of the group the session
+// is actually served by. If the key was rebound to another group after the
+// connection opened, the session still runs on the original group's accounts,
+// so the connect-time group is used instead of the new binding.
+func openAIWSSessionGroup(connectTime, fresh *service.APIKey) *service.Group {
+	if connectTime == nil {
+		return nil
+	}
+	if fresh != nil && fresh.Group != nil && connectTime.GroupID != nil && fresh.Group.ID == *connectTime.GroupID {
+		return fresh.Group
+	}
+	return connectTime.Group
 }
 
 func (h *OpenAIGatewayHandler) recoverResponsesPanic(c *gin.Context, streamStarted *bool) {

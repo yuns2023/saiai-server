@@ -218,10 +218,13 @@ type codexWhamUsage struct {
 	} `json:"rate_limit"`
 }
 
-// codexWhamUsageSnapshot validates both /wham/usage windows and converts
-// them into the usage snapshot shape shared with response headers. It also
-// returns the latest reset time of an exhausted window (zero if none).
-func codexWhamUsageSnapshot(usage *codexWhamUsage, now time.Time) (*OpenAICodexUsageSnapshot, time.Time, error) {
+// codexWhamUsageSnapshot validates the /wham/usage windows and converts them
+// into the usage snapshot shape shared with response headers. It also returns
+// the latest reset time of an exhausted window (zero if none). Reset
+// reconciliation requires both windows; the background usage refresh accepts
+// a missing (null) window, like partial Codex rate-limit headers, as long as
+// at least one valid window is present.
+func codexWhamUsageSnapshot(usage *codexWhamUsage, now time.Time, requireBoth bool) (*OpenAICodexUsageSnapshot, time.Time, error) {
 	if usage == nil || usage.RateLimit == nil {
 		return nil, time.Time{}, resetError(http.StatusBadGateway, "CODEX_USAGE_MISSING", "Codex usage windows are unavailable")
 	}
@@ -230,7 +233,12 @@ func codexWhamUsageSnapshot(usage *codexWhamUsage, now time.Time) (*OpenAICodexU
 	windows := []*codexControlWindow{limit.Primary, limit.Secondary}
 	seen := map[int]bool{}
 	var exhaustedUntil time.Time
+	present := 0
 	for i, window := range windows {
+		if window == nil && !requireBoth {
+			continue
+		}
+		present++
 		if window == nil || window.UsedPercent == nil || window.WindowSeconds == nil || window.ResetAt == nil ||
 			math.IsNaN(*window.UsedPercent) || math.IsInf(*window.UsedPercent, 0) || *window.UsedPercent < 0 || *window.UsedPercent > 100 ||
 			(*window.WindowSeconds != 18000 && *window.WindowSeconds != 604800) || seen[*window.WindowSeconds] || *window.ResetAt <= now.Unix() || *window.ResetAt > now.Add(366*24*time.Hour).Unix() {
@@ -247,6 +255,9 @@ func codexWhamUsageSnapshot(usage *codexWhamUsage, now time.Time) (*OpenAICodexU
 		if *window.UsedPercent >= 100 && time.Unix(*window.ResetAt, 0).After(exhaustedUntil) {
 			exhaustedUntil = time.Unix(*window.ResetAt, 0)
 		}
+	}
+	if present == 0 {
+		return nil, time.Time{}, resetError(http.StatusBadGateway, "CODEX_USAGE_MISSING", "Codex usage windows are unavailable")
 	}
 	return snapshot, exhaustedUntil, nil
 }
@@ -265,7 +276,7 @@ func (s *OpenAIQuotaResetService) syncUsage(ctx context.Context, account *Accoun
 		return err
 	}
 	now := time.Now().UTC()
-	snapshot, exhaustedUntil, err := codexWhamUsageSnapshot(&usage, now)
+	snapshot, exhaustedUntil, err := codexWhamUsageSnapshot(&usage, now, true)
 	if err != nil {
 		return err
 	}

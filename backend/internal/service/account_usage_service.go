@@ -742,7 +742,7 @@ func (s *AccountUsageService) fetchCodexUsageViaWham(ctx context.Context, accoun
 		return nil, nil, time.Time{}, fmt.Errorf("decode codex usage response: %w", err)
 	}
 	now := observedAt.UTC()
-	snapshot, _, err := codexWhamUsageSnapshot(&usage, now)
+	snapshot, _, err := codexWhamUsageSnapshot(&usage, now, false)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}

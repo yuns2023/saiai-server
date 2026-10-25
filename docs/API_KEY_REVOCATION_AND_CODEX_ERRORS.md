@@ -89,9 +89,21 @@ The scan is read-only; forwarded bytes are unchanged.
 - Logs record `openai.codex_timezone_guard_rejected` with group, user, zone,
   UA product/version, transport and turn — never the body.
 
-Native `/codex/images` and ChatGPT conversation routes are not covered. A user
-message that literally contains such a tag is also rejected (accepted false
-positive).
+Limitations:
+
+- Native `/codex/images` and ChatGPT conversation routes are not covered. A
+  user message that literally contains such a tag is also rejected (accepted
+  false positive).
+- The API-key account WebSocket pool path can re-send earlier turns of the same
+  connection when it rebuilds a full request; only frames received from the
+  client are scanned, so a turn forwarded while the switch was still off can be
+  replayed on that connection. OAuth accounts use byte-identical passthrough
+  and never rebuild history.
+- If a Key is rebound to another group mid-connection, the session keeps
+  using the connect-time group's setting (its accounts still serve it).
+- On the official-Codex OAuth relay the error frame is always delivered; the
+  following 1008 close is best effort because stopping the relay's client
+  reader may close the socket first.
 
 ## Regression evidence
 

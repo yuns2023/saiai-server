@@ -244,7 +244,8 @@ func TestRevalidateOpenAIWSTurnKeyReadsCurrentGroupSwitch(t *testing.T) {
 	h := &OpenAIGatewayHandler{
 		apiKeyService: service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, &config.Config{}),
 	}
-	connectTime := &service.APIKey{Key: "sk-test", Group: &service.Group{ID: 9}}
+	groupID := int64(9)
+	connectTime := &service.APIKey{Key: "sk-test", GroupID: &groupID, Group: &service.Group{ID: 9}}
 
 	key, err := h.revalidateOpenAIWSTurnKey(context.Background(), connectTime, 1)
 	require.NoError(t, err)
@@ -255,4 +256,12 @@ func TestRevalidateOpenAIWSTurnKeyReadsCurrentGroupSwitch(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, key.Group.CodexCNTimezoneGuard, "later turns read the group's current switch")
 	require.True(t, h.openAIWSCurrentGroup(context.Background(), connectTime).CodexCNTimezoneGuard)
+	require.True(t, openAIWSSessionGroup(connectTime, key).CodexCNTimezoneGuard)
+
+	// A key rebound to another group mid-session keeps being checked against
+	// the group whose accounts still serve the connection.
+	connectTime.Group = &service.Group{ID: 9, CodexCNTimezoneGuard: true}
+	repo.apiKey.Group = &service.Group{ID: 10, CodexCNTimezoneGuard: false}
+	require.True(t, h.openAIWSCurrentGroup(context.Background(), connectTime).CodexCNTimezoneGuard)
+	require.Nil(t, openAIWSSessionGroup(nil, key))
 }

@@ -33,10 +33,6 @@ var (
 const (
 	// timezoneMaxValueBytes bounds the trimmed tag value.
 	timezoneMaxValueBytes = 64
-	// timezoneMaxRawValueBytes bounds how far past an opening tag the closing
-	// tag is searched for, so many unterminated tags cannot make the scan
-	// quadratic. It leaves room for whitespace around a 64-byte value.
-	timezoneMaxRawValueBytes = 128
 )
 
 // FindChinaTimezone reports whether any JSON string in body (keys included)
@@ -105,28 +101,51 @@ func jsonStringEnd(body []byte, start int) (int, bool) {
 }
 
 // findChinaTimezoneTag checks every `<timezone>` occurrence in text; a
-// non-matching, overlong or unterminated tag does not stop the search.
+// non-matching, overlong or unterminated tag does not stop the search. Any
+// amount of surrounding whitespace is allowed. Each opening tag pairs with the
+// first closing tag after it; that closing tag and the whitespace before it
+// are located once and shared by all opening tags in front of it, so the scan
+// stays linear however many opening tags precede a distant closing tag.
 func findChinaTimezoneTag(text []byte) (string, bool) {
-	for {
-		open := bytes.Index(text, timezoneOpenTag)
+	closeAt, valueEnd := -1, -1
+	for pos := 0; ; {
+		open := bytes.Index(text[pos:], timezoneOpenTag)
 		if open < 0 {
 			return "", false
 		}
-		rest := text[open+len(timezoneOpenTag):]
-		window := rest
-		if limit := timezoneMaxRawValueBytes + len(timezoneCloseTag); len(window) > limit {
-			window = window[:limit]
-		}
-		if closeAt := bytes.Index(window, timezoneCloseTag); closeAt >= 0 {
-			value := bytes.TrimSpace(rest[:closeAt])
-			if len(value) <= timezoneMaxValueBytes {
-				if _, ok := chinaTimezones[string(value)]; ok {
-					return string(value), true
-				}
+		start := pos + open + len(timezoneOpenTag)
+		pos = start
+		if closeAt < start {
+			next := bytes.Index(text[start:], timezoneCloseTag)
+			if next < 0 {
+				return "", false
+			}
+			closeAt = start + next
+			valueEnd = closeAt
+			for valueEnd > start && isJSONTrimSpace(text[valueEnd-1]) {
+				valueEnd--
 			}
 		}
-		text = rest
+		valueStart := start
+		for valueStart < valueEnd && isJSONTrimSpace(text[valueStart]) {
+			valueStart++
+		}
+		if valueEnd-valueStart > timezoneMaxValueBytes || valueEnd <= valueStart {
+			continue
+		}
+		if _, ok := chinaTimezones[string(text[valueStart:valueEnd])]; ok {
+			return string(text[valueStart:valueEnd]), true
+		}
 	}
+}
+
+// isJSONTrimSpace matches the ASCII whitespace bytes.TrimSpace removes.
+func isJSONTrimSpace(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r', '\v', '\f':
+		return true
+	}
+	return false
 }
 
 // appendUnescapedJSONString decodes the content of a valid JSON string. An

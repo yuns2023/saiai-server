@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -130,6 +131,23 @@ func TestFetchCodexUsageViaWhamSkipsAndRejects(t *testing.T) {
 	recorder.status, recorder.body = http.StatusUnauthorized, `{"detail":"TEST_ONLY"}`
 	recorder.mu.Unlock()
 	_, _, _, err = svc.fetchCodexUsageViaWham(context.Background(), whamOAuthAccount())
+	require.Error(t, err)
+}
+
+func TestFetchCodexUsageViaWhamAcceptsSingleWindow(t *testing.T) {
+	body := fmt.Sprintf(`{"rate_limit":{"allowed":true,"limit_reached":false,"primary_window":null,"secondary_window":{"used_percent":30,"limit_window_seconds":604800,"reset_at":%d}}}`, time.Now().Add(48*time.Hour).Unix())
+	svc, _, _ := whamUsageFixture(t, body)
+	updates, resetAt, _, err := svc.fetchCodexUsageViaWham(context.Background(), whamOAuthAccount())
+	require.NoError(t, err)
+	require.Nil(t, resetAt)
+	require.Equal(t, 30.0, updates["codex_7d_used_percent"])
+	_, has5h := updates["codex_5h_used_percent"]
+	require.False(t, has5h)
+
+	// Reset reconciliation still requires both windows.
+	var usage codexWhamUsage
+	require.NoError(t, json.Unmarshal([]byte(body), &usage))
+	_, _, err = codexWhamUsageSnapshot(&usage, time.Now().UTC(), true)
 	require.Error(t, err)
 }
 

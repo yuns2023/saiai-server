@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func codexEnvironmentContext(zone string) string {
@@ -113,6 +114,23 @@ func TestFindChinaTimezoneMultipleAndBrokenTags(t *testing.T) {
 		if got, found := FindChinaTimezone(responsesBody(t, text)); found {
 			t.Fatalf("%s: must not match, got %q", name, got)
 		}
+	}
+}
+
+func TestFindChinaTimezoneLongWhitespaceAndManyOpenTags(t *testing.T) {
+	padded := "<timezone>" + strings.Repeat(" ", 4096) + "Asia/Shanghai" + strings.Repeat("\n", 4096) + "</timezone>"
+	if _, found := FindChinaTimezone(responsesBody(t, padded)); !found {
+		t.Fatal("whitespace around the zone must not hide it")
+	}
+	// Many opening tags in front of one distant closing tag stay linear.
+	many := strings.Repeat("<timezone>x ", 200000) + strings.Repeat("y", 1<<20) + "</timezone>"
+	body := responsesBody(t, many)
+	start := time.Now()
+	if _, found := FindChinaTimezone(body); found {
+		t.Fatal("unexpected match")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("scan took %v", elapsed)
 	}
 }
 
