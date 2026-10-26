@@ -203,19 +203,32 @@ reinit message) and the original bytes are never forwarded.
   User-Agent) to upgrade; every other client gets the generic text asking for
   `saiai cli` re-initialization, a Codex restart and a new session.
 - Logs record `openai.codex_timezone_guard_rejected` with group, user, reason,
-  zone, UA product/version, transport and turn — never the body.
+  zone, UA product/version, transport and turn — never the body. When the
+  offending string is known (a CN zone match, or a malformed whole-string
+  block) location-only `loc_*` fields are added: JSON path with array indices
+  (e.g. `input[37].output`; keys that are not plain identifiers render as `?`),
+  the enclosing `input` item's `type`/`role`, decoded string length, offset of
+  the `<timezone>` tag, `<environment_context>` open/close counts and offsets,
+  and up to 12 nearby tag names (`/?[a-z_]{1,40}` only). No text or tag
+  values are logged.
 
 Limitations:
 
 - Native `/codex/images` and ChatGPT conversation routes are not covered. In
   reject mode a user message that literally contains such a tag is also
-  rejected (accepted false positive); rewrite mode only rewrites strings that
-  are entirely one `<environment_context>` block, and its leak safety net
-  rejects any CN `<timezone>` value left elsewhere, as reject mode would.
+  rejected (accepted false positive). Rewrite mode rewrites strings that are
+  entirely one `<environment_context>` block (fail closed when malformed) and
+  every well-formed block embedded in a larger string such as tool output or
+  pasted text (a malformed embedded mention is left untouched, never
+  rejected by itself); its leak safety net rejects any CN `<timezone>` value
+  left elsewhere (outside a block, or in a malformed embedded block), as
+  reject mode would.
 - Reject mode scans JSON object keys as well as values.
-- A large JSON string that contains an escape and the word `timezone` (reject)
-  or `environment_context` (rewrite) is decoded into a transient buffer up to
-  its own size (rewrite also keeps an offset map for it).
+- A large JSON string that contains an escape and the word `timezone` (reject
+  and the rewrite leak net) is decoded into a transient buffer up to its own
+  size. The rewrite itself streams escaped strings and buffers at most one
+  block (64 KiB plus its offset map); only a rejection decodes the offending
+  string again to compute the location fields.
 - On the official-Codex OAuth relay both the error frame and the following
   1008 close are best effort; stopping the relay's client reader may close the
   socket before the close frame is sent.

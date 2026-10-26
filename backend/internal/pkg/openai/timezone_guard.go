@@ -47,19 +47,27 @@ const (
 // strings that contain an escape and could hold the tag are decoded, into one
 // reused buffer.
 func FindChinaTimezone(body []byte) (string, bool) {
+	zone, _, _, found := findChinaTimezone(body)
+	return zone, found
+}
+
+// findChinaTimezone is FindChinaTimezone that also returns the body offset of
+// the matching string's content and the decoded offset of its `<timezone>`
+// tag.
+func findChinaTimezone(body []byte) (zone string, stringStart, tagOffset int, found bool) {
 	if !bytes.Contains(body, timezoneWord) && !bytes.Contains(body, jsonUnicodeEsc) {
-		return "", false
+		return "", 0, 0, false
 	}
 	var buf []byte
 	for i := 0; i < len(body); {
 		start := bytes.IndexByte(body[i:], '"')
 		if start < 0 {
-			return "", false
+			return "", 0, 0, false
 		}
 		start += i + 1
 		end, escaped := jsonStringEnd(body, start)
 		if end < 0 {
-			return "", false
+			return "", 0, 0, false
 		}
 		raw := body[start:end]
 		i = end + 1
@@ -71,11 +79,11 @@ func FindChinaTimezone(body []byte) (string, bool) {
 			buf = appendUnescapedJSONString(buf[:0], raw)
 			text = buf
 		}
-		if zone, ok := findChinaTimezoneTag(text); ok {
-			return zone, true
+		if zone, at, ok := findChinaTimezoneTag(text); ok {
+			return zone, start, at, true
 		}
 	}
-	return "", false
+	return "", 0, 0, false
 }
 
 // jsonStringEnd returns the index of the closing quote of the JSON string
@@ -106,20 +114,22 @@ func jsonStringEnd(body []byte, start int) (int, bool) {
 // amount of surrounding Unicode whitespace is trimmed (as bytes.TrimSpace).
 // Each opening tag pairs with the first closing tag after it; that closing tag and the whitespace before it
 // are located once and shared by all opening tags in front of it, so the scan
-// stays linear however many opening tags precede a distant closing tag.
-func findChinaTimezoneTag(text []byte) (string, bool) {
+// stays linear however many opening tags precede a distant closing tag. at
+// is the offset of the matching opening tag.
+func findChinaTimezoneTag(text []byte) (zone string, at int, found bool) {
 	closeAt, valueEnd := -1, -1
 	for pos := 0; ; {
 		open := bytes.Index(text[pos:], timezoneOpenTag)
 		if open < 0 {
-			return "", false
+			return "", 0, false
 		}
-		start := pos + open + len(timezoneOpenTag)
+		at = pos + open
+		start := at + len(timezoneOpenTag)
 		pos = start
 		if closeAt < start {
 			next := bytes.Index(text[start:], timezoneCloseTag)
 			if next < 0 {
-				return "", false
+				return "", 0, false
 			}
 			closeAt = start + next
 			valueEnd = closeAt
@@ -143,7 +153,7 @@ func findChinaTimezoneTag(text []byte) (string, bool) {
 			continue
 		}
 		if _, ok := chinaTimezones[string(text[valueStart:valueEnd])]; ok {
-			return string(text[valueStart:valueEnd]), true
+			return string(text[valueStart:valueEnd]), at, true
 		}
 	}
 }
