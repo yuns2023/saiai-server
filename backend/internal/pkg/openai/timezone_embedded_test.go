@@ -48,25 +48,28 @@ func TestRewriteCodexEnvironmentTimeEmbeddedBlocks(t *testing.T) {
 		"leading close mention": func(b func(string, string) string) tc {
 			return tc{"grep: </environment_context> hit\n" + b("2026-10-25", "PRC"), "grep: </environment_context> hit\n" + b(rewriteToday, CodexRewriteTimezone), 1, 0}
 		},
-		// A nested pair is ambiguous: the inner block stays untouched.
+		// A nested pair is ambiguous as a block (skipped), but its CN zone
+		// and the string's dates are still rewritten as loose tags.
 		"nested pair": func(b func(string, string) string) tc {
-			in := "x <environment_context>" + b("2026-10-25", "PRC") + "</environment_context>"
-			return tc{in, in, 0, 1}
+			return tc{"x <environment_context>" + b("2026-10-25", "PRC") + "</environment_context>",
+				"x <environment_context>" + b(rewriteToday, CodexRewriteTimezone) + "</environment_context>", 0, 1}
 		},
 		"nested pair with text": func(b func(string, string) string) tc {
-			in := "x <environment_context> a " + b("2026-10-25", "PRC") + " b </environment_context> c"
-			return tc{in, in, 0, 1}
+			return tc{"x <environment_context> a " + b("2026-10-25", "PRC") + " b </environment_context> c",
+				"x <environment_context> a " + b(rewriteToday, CodexRewriteTimezone) + " b </environment_context> c", 0, 1}
 		},
 		"deeply nested": func(b func(string, string) string) tc {
-			in := "x <environment_context><environment_context>" + b("2026-10-25", "PRC") + "</environment_context></environment_context>"
-			return tc{in, in, 0, 2}
+			return tc{"x <environment_context><environment_context>" + b("2026-10-25", "PRC") + "</environment_context></environment_context>",
+				"x <environment_context><environment_context>" + b(rewriteToday, CodexRewriteTimezone) + "</environment_context></environment_context>", 0, 2}
 		},
-		// Only the ambiguous region is left: independent blocks before and
-		// after a nested pair are still rewritten.
+		// Independent blocks around a nested pair are rewritten as blocks,
+		// the nested one as loose tags.
 		"good block then nested pair": func(b func(string, string) string) tc {
-			nested := " <environment_context>" + b("2026-10-25", "PRC") + "</environment_context> "
-			return tc{"x " + b("2026-10-25", "Asia/Macau") + nested + b("2026-10-25", "Asia/Urumqi"),
-				"x " + b(rewriteToday, CodexRewriteTimezone) + nested + b(rewriteToday, CodexRewriteTimezone), 2, 1}
+			nested := func(date, zone string) string {
+				return " <environment_context>" + b(date, zone) + "</environment_context> "
+			}
+			return tc{"x " + b("2026-10-25", "Asia/Macau") + nested("2026-10-25", "PRC") + b("2026-10-25", "Asia/Urumqi"),
+				"x " + b(rewriteToday, CodexRewriteTimezone) + nested(rewriteToday, CodexRewriteTimezone) + b(rewriteToday, CodexRewriteTimezone), 2, 1}
 		},
 		"good CN block then CN-free nested segment": func(b func(string, string) string) tc {
 			rest := "\ny <environment_context><environment_context></environment_context></environment_context>"
@@ -80,9 +83,13 @@ func TestRewriteCodexEnvironmentTimeEmbeddedBlocks(t *testing.T) {
 			bad := "<environment_context><timezone>PRC</environment_context>"
 			return tc{"x " + bad + " y " + b("2026-10-25", "Asia/Urumqi"), "x " + bad + " y " + b(rewriteToday, CodexRewriteTimezone), 1, 1}
 		},
+		// A malformed block is skipped; its well-formed CN zone tag is a
+		// loose tag (the truncated date tag is not).
 		"malformed only": func(b func(string, string) string) tc {
-			bad := "x <environment_context><timezone>Asia/Shanghai</timezone><current_date</environment_context>"
-			return tc{bad, bad, 0, 1}
+			bad := func(zone string) string {
+				return "x <environment_context><timezone>" + zone + "</timezone><current_date</environment_context>"
+			}
+			return tc{bad("Asia/Shanghai"), bad(CodexRewriteTimezone), 0, 1}
 		},
 		"target already": func(b func(string, string) string) tc {
 			return tc{"x " + b(rewriteToday, CodexRewriteTimezone), "x " + b(rewriteToday, CodexRewriteTimezone), 1, 0}
@@ -211,21 +218,21 @@ func mustMarshal(t *testing.T, v any) []byte {
 	return body
 }
 
-// A `<timezone>` tag outside any block is never edited, even in a string
-// whose embedded block is rewritten; the leak net keeps seeing it.
-func TestRewriteCodexEnvironmentTimeEmbeddedLeavesOutsideTags(t *testing.T) {
+// A CN `<timezone>` tag outside any block, in a string whose embedded block
+// is rewritten, is rewritten as a loose tag; nothing is left for the leak net.
+func TestRewriteCodexEnvironmentTimeEmbeddedAndOutsideTags(t *testing.T) {
 	text := "x " + compactBlock("2026-10-25", "Asia/Shanghai") + " then <timezone>Asia/Shanghai</timezone>"
 	for _, body := range [][]byte{serdeBody(text), responsesBody(t, text)} {
 		out, stats := mustRewrite(t, body)
-		if stats.Embedded != 1 || stats.Timezones != 1 {
+		if stats.Embedded != 1 || stats.Timezones != 2 || stats.LooseTimezones != 1 || stats.Dates != 1 {
 			t.Fatalf("stats = %+v", stats)
 		}
 		got := decodedTexts(t, out)[0]
-		if got != "x "+compactBlock(rewriteToday, CodexRewriteTimezone)+" then <timezone>Asia/Shanghai</timezone>" {
+		if got != "x "+compactBlock(rewriteToday, CodexRewriteTimezone)+" then <timezone>"+CodexRewriteTimezone+"</timezone>" {
 			t.Fatalf("decoded = %q", got)
 		}
-		if zone, found := FindChinaTimezone(out); !found || zone != "Asia/Shanghai" {
-			t.Fatal("the outside tag must still be caught")
+		if _, found := FindChinaTimezone(out); found {
+			t.Fatal("no CN zone may remain")
 		}
 	}
 }
@@ -247,8 +254,8 @@ func TestRewriteCodexEnvironmentTimeEmbeddedItemDateAndMetadata(t *testing.T) {
 }
 
 // Size limits for embedded blocks: over the limit (or growing past it) the
-// block is skipped, never rejected; at the limit it is rewritten and stays
-// idempotent.
+// block is skipped, never rejected (its CN zone is still rewritten as a loose
+// tag; "1" is not a date); at the limit it is rewritten and stays idempotent.
 func TestRewriteCodexEnvironmentTimeEmbeddedSizeLimits(t *testing.T) {
 	tags := "<timezone>PRC</timezone><current_date>1</current_date>"
 	grow := len(CodexRewriteTimezone) - len("PRC") + len(rewriteToday) - len("1")
@@ -265,7 +272,9 @@ func TestRewriteCodexEnvironmentTimeEmbeddedSizeLimits(t *testing.T) {
 		for _, text := range []string{over, huge} {
 			body := render(text)
 			out, stats, err := RewriteCodexEnvironmentTime(body, rewriteNow)
-			if err != nil || stats.Changed() || stats.EmbeddedSkipped != 1 || !bytes.Equal(out, body) {
+			want := render(strings.Replace(text, "<timezone>PRC<", "<timezone>"+CodexRewriteTimezone+"<", 1))
+			if err != nil || stats.Timezones != 1 || stats.LooseTimezones != 1 || stats.Dates != 0 ||
+				stats.Embedded != 0 || stats.EmbeddedSkipped != 1 || !bytes.Equal(out, want) {
 				t.Fatalf("escape=%v len=%d: err=%v stats=%+v", escape, len(text), err, stats)
 			}
 		}

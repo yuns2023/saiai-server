@@ -110,13 +110,31 @@ rewritten like a whole-string block (also when the second JSON level keeps
 then use `\"` quotes); malformed or oversized embedded blocks and nested
 regions are left untouched and are never rejected by the block rules
 themselves. Only the ambiguous region is skipped; other blocks in the same
-string are still rewritten. As a leak safety net, the bytes that will
+string are still rewritten.
+
+**Loose tags.** Codex clients also send the client zone outside
+`<environment_context>`: Codex Desktop's Electron front end adds a developer
+message `<codex_apps_client_time_context><timezone>ZONE</timezone>` +
+`<current_date>DATE</current_date>` + an instruction sentence to every turn,
+from the OS timezone, with no setting to turn it off (`config.toml`
+`include_environment_context_time` does not reach it). So in every string
+value that is not a whole-string block, each `<timezone>` value the leak net
+below would flag (same pairing, trimming and zone set) is rewritten to
+`America/Los_Angeles` too, wherever it is (Desktop context, malformed or
+nested blocks, pasted text), unless a block edit already covers it. When a
+string gets such a zone edit, each `<current_date>` value in that same string
+that is exactly `YYYY-MM-DD` becomes the Los Angeles date as below (a
+same-string heuristic: other strings' dates are untouched). Other zones
+outside blocks are untouched. Logs count these as `loose_timezones`.
+
+As a leak safety net, the bytes that will
 actually be sent are then scanned exactly like reject mode: a CN/HK/Macau
-`<timezone>` value still present anywhere (outside any block, in a malformed
-or nested embedded block, or a pasted tag) is rejected like reject mode (400
+`<timezone>` value still present anywhere is rejected like reject mode (400
 `codex_timezone_reinit_required`, log reason `cn_timezone_after_rewrite`).
+After loose-tag rewriting that is only possible where the rewrite never
+edits: a JSON object key or an item metadata string.
 Merely mentioning `<environment_context>` still passes. Item metadata strings
-are never edited (embedded blocks there are left to the safety net). The safety-net scan
+are never edited. The safety-net scan
 has the reject-mode scanner's cost (one more pass; a candidate escaped string
 is decoded into a reusable buffer of its size). Inside a block string each
 `<timezone>` value other than `America/Los_Angeles` becomes
@@ -184,7 +202,7 @@ reinit message) and the original bytes are never forwarded.
   payload that cannot be rewritten (the first frame is checked before account
   selection).
 - Logs record `openai.codex_timezone_rewritten` (INFO: group, user, transport,
-  turn, block / timezone / date counts) — never the body.
+  turn, block / timezone / date / loose-timezone counts) — never the body.
 
 ### Rejection responses
 
@@ -235,11 +253,14 @@ Limitations:
   rejected (accepted false positive). Rewrite mode rewrites strings that are
   entirely one `<environment_context>` block (fail closed when malformed) and
   every well-formed block embedded in a larger string such as tool output or
-  pasted text (a malformed embedded mention or a nested pair is left
-  untouched, never rejected by itself; other blocks in the same string are
-  still rewritten); its leak safety net rejects any CN `<timezone>` value
-  left elsewhere (outside a block, or in a malformed or nested embedded
-  block), as reject mode would.
+  pasted text (a malformed embedded mention or a nested pair is not a block,
+  never rejected by itself; other blocks in the same string are still
+  rewritten), plus any CN `<timezone>` tag elsewhere in a string value (loose
+  tags); its leak safety net rejects a CN `<timezone>` value left in a key or
+  item metadata, as reject mode would.
+- In reject mode Codex Desktop is rejected on every turn (its client time
+  context cannot be disabled); the rejection message says so instead of
+  asking for a Codex upgrade.
 - Reject mode scans JSON object keys as well as values.
 - A large JSON string that contains an escape and the word `timezone` (reject
   and the rewrite leak net) is decoded into a transient buffer up to its own

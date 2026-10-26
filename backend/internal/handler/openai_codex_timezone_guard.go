@@ -24,8 +24,9 @@ import (
 // "rewrite" every Codex `<environment_context>` block (a whole string, or a
 // well-formed block embedded in a larger string such as tool output) is sent
 // upstream with the timezone set to America/Los_Angeles and the date to the
-// item's (or the server's current) LA date (see
-// pkgopenai.RewriteCodexEnvironmentTime); a whole-string block that cannot be
+// item's (or the server's current) LA date, and so is any other CN
+// `<timezone>` tag with the dates of its string, e.g. Codex Desktop's client
+// time context (see pkgopenai.RewriteCodexEnvironmentTime); a whole-string block that cannot be
 // rewritten safely, or a CN zone still present in the bytes to be sent (leak
 // safety net), is rejected like the reject mode (fail closed). Rejections log
 // where the offending string is (path, offsets, tag names; never content).
@@ -39,6 +40,7 @@ const (
 
 	codexTimezoneGuardMessageGeneric = "请求内容或历史中包含中国地区时区信息。请重新运行 saiai cli 初始化（会关闭 Codex 的时区上报），重启 Codex 并新开会话后再使用。"
 	codexTimezoneGuardMessageOld     = "当前 Codex 版本过旧，会上报本机时区。请将 Codex 升级到 0.163 或以上，重新运行 saiai cli 初始化，重启 Codex 并新开会话后再使用。"
+	codexTimezoneGuardMessageDesktop = "Codex 桌面版会在每轮对话中附带本机系统时区，无法通过配置关闭，当前分组不允许。请改用 Codex CLI 或 VS Code 插件，或联系管理员。"
 )
 
 // codexTimezoneGuardMinVersion is the first Codex release that supports
@@ -74,10 +76,14 @@ func codexTimezoneGuardClient(userAgent string) (product string, version [3]int,
 	return name, client.Version, true
 }
 
-// codexTimezoneGuardMessage selects the old-version text only for a
-// recognised Codex backend version below 0.163; everything else gets the
-// generic text.
+// codexTimezoneGuardMessage selects the Desktop text for Codex Desktop (its
+// Electron front end adds the OS timezone to every turn, whatever the Codex
+// version or config.toml say), the old-version text for any other recognised
+// Codex backend version below 0.163, and the generic text otherwise.
 func codexTimezoneGuardMessage(userAgent string) string {
+	if name, _, found := strings.Cut(userAgent, "/"); found && strings.EqualFold(strings.TrimSpace(name), "codex desktop") {
+		return codexTimezoneGuardMessageDesktop
+	}
 	if _, version, ok := codexTimezoneGuardClient(userAgent); ok {
 		for i := range version {
 			if version[i] != codexTimezoneGuardMinVersion[i] {
@@ -234,6 +240,7 @@ func logCodexTimezoneRewrite(c *gin.Context, group *service.Group, userID int64,
 		zap.Int("dates_rewritten", stats.Dates),
 		zap.Int("embedded_blocks", stats.Embedded),
 		zap.Int("embedded_skipped", stats.EmbeddedSkipped),
+		zap.Int("loose_timezones", stats.LooseTimezones),
 	}
 	if group != nil {
 		fields = append(fields, zap.Int64("group_id", group.ID))

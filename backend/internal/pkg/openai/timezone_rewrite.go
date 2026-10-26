@@ -54,6 +54,9 @@ type CodexEnvironmentRewriteStats struct {
 	// because they are not well formed (the leak net still sees them).
 	Embedded        int
 	EmbeddedSkipped int
+	// LooseTimezones counts the Timezones replaced outside environment
+	// blocks (see rewriteLooseTags), e.g. Codex Desktop's client time context.
+	LooseTimezones int
 }
 
 // Changed reports whether the rewrite modified any byte.
@@ -86,8 +89,10 @@ func codexRewriteZone() (*time.Location, error) {
 // `<environment_context>`…`</environment_context>` block found in a JSON
 // string value (object keys are ignored), each `<timezone>` value that is not
 // CodexRewriteTimezone with CodexRewriteTimezone and each `<current_date>`
-// value with a Los Angeles date. Tags outside blocks and
-// `<current_date status=… />` style tags are untouched.
+// value with a Los Angeles date. Outside blocks, China mainland / Hong Kong /
+// Macau `<timezone>` values (as the leak net matches them) are replaced too,
+// with the `<current_date>` values of the same string (see rewriteLooseTags);
+// other zones and `<current_date status=… />` style tags are untouched.
 //
 // The date of a block is the CodexRewriteTimezone date of the enclosing
 // `input` item's `internal_chat_message_metadata_passthrough.create_time`
@@ -102,8 +107,8 @@ func codexRewriteZone() (*time.Location, error) {
 // and the replacement text is plain ASCII. Strings are decoded once with a
 // decoded→raw offset map, so `<`, `\/` and any other escape are handled
 // without double-decoding. body is never modified; when nothing changes the
-// same slice is returned. A body without "environment_context" and without
-// a `\u` escape returns immediately.
+// same slice is returned. A body without "environment_context", "timezone"
+// and a `\u` escape returns immediately.
 //
 // Two string shapes are recognised. A string whose content, trimmed of ASCII
 // whitespace, is exactly one block (how Codex sends it) fails closed when the
@@ -119,7 +124,7 @@ func codexRewriteZone() (*time.Location, error) {
 // is idempotent for a fixed now.
 func RewriteCodexEnvironmentTime(body []byte, now time.Time) ([]byte, CodexEnvironmentRewriteStats, error) {
 	var stats CodexEnvironmentRewriteStats
-	if !bytes.Contains(body, environmentContextWord) && !bytes.Contains(body, jsonUnicodeEsc) {
+	if !bytes.Contains(body, environmentContextWord) && !bytes.Contains(body, timezoneWord) && !bytes.Contains(body, jsonUnicodeEsc) {
 		return body, stats, nil
 	}
 	if !gjson.ValidBytes(body) {
@@ -369,13 +374,16 @@ func (rw *codexEnvironmentRewriter) itemDate(body []byte, item int) []byte {
 // trimmed of ASCII whitespace, starts with the open tag and ends with the
 // close tag is such a block and fails closed when malformed. Any other string
 // is content (user text, tool output): its well-formed embedded blocks are
-// rewritten too (see rewriteEmbeddedText), anything else in it is never
-// edited and never rejected. Metadata strings (noEdit) are only validated.
+// rewritten too (see rewriteEmbeddedText), then CN zones in loose tags (see
+// rewriteLooseTags); anything else in it is never edited and never rejected.
+// Metadata strings (noEdit) are only validated.
 func (rw *codexEnvironmentRewriter) stringValue(body []byte, start, end int, escaped bool) error {
 	raw := body[start:end]
-	if !bytes.Contains(raw, environmentContextWord) && (!escaped || !bytes.Contains(raw, jsonUnicodeEsc)) {
+	if !bytes.Contains(raw, environmentContextWord) && !bytes.Contains(raw, timezoneWord) &&
+		(!escaped || !bytes.Contains(raw, jsonUnicodeEsc)) {
 		return nil
 	}
+	base := len(rw.edits)
 	var whole bool
 	var err error
 	if escaped {
@@ -391,6 +399,7 @@ func (rw *codexEnvironmentRewriter) stringValue(body []byte, start, end int, esc
 	} else {
 		rw.rewriteEmbeddedText(raw, start)
 	}
+	rw.rewriteLooseTags(raw, start, escaped, base)
 	return nil
 }
 
