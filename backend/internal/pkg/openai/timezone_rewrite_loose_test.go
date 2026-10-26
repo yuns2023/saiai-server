@@ -123,7 +123,7 @@ func TestRewriteCodexLooseTagsMatchLeakNet(t *testing.T) {
 	for i := 0; i < 20000; i++ {
 		var text strings.Builder
 		for n := rng.Intn(14); n >= 0; n-- {
-			text.WriteString(parts[rng.Intn(len(parts))])
+			_, _ = text.WriteString(parts[rng.Intn(len(parts))])
 		}
 		for _, body := range [][]byte{responsesBody(t, text.String()), serdeBody(strings.ReplaceAll(strings.ReplaceAll(text.String(), `\`, `\\`), `"`, `\"`))} {
 			out, _, err := RewriteCodexEnvironmentTime(body, rewriteNow)
