@@ -18,7 +18,8 @@ as local provider-account quotas.
   Codex headers and the error body provide no reset, honor a valid future
   `Retry-After` deadline before using the generic 20-second backoff. Accept
   integer delay-seconds and HTTP-date; relative delays start when the response
-  headers arrive. Invalid, zero, past-date, or overflowing values retain the
+  headers arrive, and the wait is capped at the 5-minute escalated backoff
+  (a later 429 re-arms it). Invalid, zero, past-date, or overflowing values retain the
   existing fallback and escalation policy. Log the parsed wait and deadline,
   or only header presence on fallback, never arbitrary raw header values.
   This scheduling change does not classify capacity errors as exhausted

@@ -20,6 +20,13 @@ func TestOpenAIRetryAfterParsing(t *testing.T) {
 			require.Equal(t, now.Add(205*time.Second), *got)
 		})
 	}
+	for _, value := range []string{"86400", now.Add(365 * 24 * time.Hour).Format(http.TimeFormat)} {
+		t.Run("capped_"+value, func(t *testing.T) {
+			got := parseOpenAIRetryAfter(value, now)
+			require.NotNil(t, got)
+			require.Equal(t, now.Add(openAINoReset429EscalatedFor), *got)
+		})
+	}
 	for _, value := range []string{"", "0", "-1", "+205", "1.5", "NaN", "205, 206", "9223372036854775807", "99999999999999999999", now.Add(-time.Second).Format(http.TimeFormat)} {
 		t.Run("invalid_"+value, func(t *testing.T) {
 			require.Nil(t, parseOpenAIRetryAfter(value, now))
