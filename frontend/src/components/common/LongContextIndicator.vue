@@ -1,7 +1,7 @@
 <template>
   <div v-if="info?.applied" :class="detailed ? 'max-w-sm space-y-1.5 whitespace-normal' : ''" data-testid="long-context-indicator">
     <span class="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-semibold leading-tight text-amber-800 bg-amber-100 ring-1 ring-inset ring-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/40" :title="description">
-      {{ t('usage.longContext') }} &gt;{{ thresholdLabel }}<template v-if="info.inferred"> · {{ t('usage.longContextInferred') }}</template>
+      {{ t('usage.longContextSurcharge') }} &gt;{{ thresholdLabel }}<template v-if="info.inferred"> · {{ t('usage.longContextInferred') }}</template>
     </span>
     <template v-if="detailed">
       <p>{{ t('usage.longContextTrigger', { total: info.total_input_tokens.toLocaleString(), threshold: info.threshold.toLocaleString() }) }}</p>

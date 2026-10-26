@@ -28,12 +28,13 @@
         <template #trigger>
           <button
             type="button"
-            :class="['usage-cost-icon', tier.class]"
+            :class="['usage-cost-icon', tier.class, tier.kind === 'priority' ? '!w-auto gap-1 px-1' : '']"
             :aria-label="tierLabel"
             data-testid="usage-cost-tier-icon"
             :data-tier="tier.kind"
           >
             <Icon :name="tier.icon" size="xs" />
+            <span v-if="tier.kind === 'priority'" class="whitespace-nowrap text-[10px]">Priority / Fast</span>
           </button>
         </template>
         {{ tierLabel }}

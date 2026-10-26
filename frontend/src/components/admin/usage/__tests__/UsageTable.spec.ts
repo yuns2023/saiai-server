@@ -57,6 +57,24 @@ const DataTableStub = {
 }
 
 describe('admin UsageTable tooltip', () => {
+  it.each([
+    { input_tokens: 317880, cache_read_tokens: 0 },
+    { input_tokens: 257960, cache_read_tokens: 45310 },
+    { input_tokens: 1058, cache_read_tokens: 341248 },
+  ])('separates large context from Priority pricing: %o', tokens => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_CONTEXT', model: 'gpt-6.1-sol', ...tokens,
+        output_tokens: 405, cache_creation_tokens: 0, service_tier: 'priority', actual_cost: .639806,
+        pricing_snapshot: { long_context: { applied: false, threshold: 272000 } } }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><section data-testid="tokens"><slot name="cell-tokens" :row="data[0]" /></section><section data-testid="cost"><slot name="cell-cost" :row="data[0]" /></section></div>' }, Icon: true } }
+    })
+    expect(wrapper.get('[data-testid="tokens"] [data-testid="input-context-indicator"]').text()).toContain('>272K')
+    expect(wrapper.get('[data-testid="cost"]').text()).toContain('Priority / Fast')
+    expect(wrapper.find('[data-testid="long-context-indicator"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('$0.639806')
+    wrapper.unmount()
+  })
+
   it.each(['pending', 'passed', 'flagged', 'skipped', 'failed'] as const)('shows explicit %s moderation state', async (status) => {
     const wrapper = mount(UsageTable, {
       props: { data: [{ request_id: 'TEST_ONLY_STATUS', moderation_result: { status, scores: status === 'passed' ? { PII: .1 } : undefined, min_confidence: 90, updated_at: '2026-10-18T00:00:00Z' } }], loading: false, columns: [] },

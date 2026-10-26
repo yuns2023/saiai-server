@@ -164,3 +164,16 @@ cache splits, subscription charges, persisted snapshots, stale edits and
 nonblocking billing reads during persistence. The related frontend suites cover the editor, usage badges, strict threshold
 boundaries, recorded evidence, historical inference and tier exclusions. Frontend type checks/build and the embedded Server build also pass.
 No provider/model traffic or production changes are part of these checks.
+
+### Usage context size versus pricing
+
+The administrator Token column independently marks input context above 272,000
+with `Input context >272K`. It adds uncached input, cache reads and cache writes
+once, excludes output, and applies regardless of service tier or whether a
+pricing snapshot records a surcharge. This fixed size marker does not claim
+that the model has a 272K pricing threshold. Images and native Chat are excluded.
+The fee badge is explicitly labelled `Long-context surcharge` and still follows
+stored billing evidence (or the existing labelled historical inference).
+Priority/Fast has a visible text label beside its service-tier icon; the actual
+billed policy remains in the fee details and snapshot. Historical charges and
+billing logic are unchanged.
