@@ -156,23 +156,26 @@ func commonSuffix(a, b []byte) int {
 func TestRewriteCodexEnvironmentTimeIgnoresKeysAndOutsideTags(t *testing.T) {
 	block := envBlock("2026-10-25", "Asia/Shanghai")
 	key, _ := json.Marshal(block)
+	// Keys are never edited; loose CN tags in values are (with the dates of
+	// the same string).
 	body := []byte(`{` + string(key) + `:"<timezone>Asia/Shanghai</timezone> <current_date>2026-10-25</current_date>","list":["<timezone>PRC</timezone>"]}`)
 	out, stats := mustRewrite(t, body)
-	if stats.Changed() || stats.Blocks != 0 {
+	if stats.Blocks != 0 || stats.Timezones != 2 || stats.LooseTimezones != 2 || stats.Dates != 1 {
 		t.Fatalf("stats = %+v", stats)
 	}
-	if &out[0] != &body[0] {
-		t.Fatal("unchanged body must be returned as-is")
+	want := `{` + string(key) + `:"<timezone>` + CodexRewriteTimezone + `</timezone> <current_date>` + rewriteToday + `</current_date>","list":["<timezone>` + CodexRewriteTimezone + `</timezone>"]}`
+	if string(out) != want {
+		t.Fatalf("got  %s\nwant %s", out, want)
 	}
 
-	// A block string does not reach tags in another string.
+	// A block string and a loose tag in another string are both rewritten.
 	body = serdeBody(block, "<timezone>Asia/Urumqi</timezone>")
 	out, stats = mustRewrite(t, body)
-	if stats.Timezones != 1 || stats.Dates != 1 {
+	if stats.Timezones != 2 || stats.LooseTimezones != 1 || stats.Dates != 1 {
 		t.Fatalf("stats = %+v", stats)
 	}
 	texts := decodedTexts(t, out)
-	if texts[0] != envBlock(rewriteToday, CodexRewriteTimezone) || texts[1] != "<timezone>Asia/Urumqi</timezone>" {
+	if texts[0] != envBlock(rewriteToday, CodexRewriteTimezone) || texts[1] != "<timezone>"+CodexRewriteTimezone+"</timezone>" {
 		t.Fatalf("decoded = %q", texts)
 	}
 }
@@ -272,10 +275,12 @@ func TestRewriteCodexEnvironmentTimeMalformedFailsClosed(t *testing.T) {
 
 func TestRewriteCodexEnvironmentTimeNoDoubleDecoding(t *testing.T) {
 	// `\\u003c` is a literal backslash followed by "u003c", not "<".
+	// The tag itself is a loose tag; the escaped backslashes stay.
 	body := []byte(`{"input":"\\u003cenvironment_context\\u003e<timezone>PRC</timezone>\\u003c/environment_context\\u003e"}`)
 	out, stats := mustRewrite(t, body)
-	if stats.Blocks != 0 || &out[0] != &body[0] {
-		t.Fatalf("stats = %+v", stats)
+	if stats.Blocks != 0 || stats.LooseTimezones != 1 ||
+		string(out) != `{"input":"\\u003cenvironment_context\\u003e<timezone>`+CodexRewriteTimezone+`</timezone>\\u003c/environment_context\\u003e"}` {
+		t.Fatalf("stats = %+v out = %s", stats, out)
 	}
 	// Mentioning the word in prose is not a block.
 	body = serdeBody("please explain environment_context handling")
@@ -552,15 +557,26 @@ func TestRewriteCodexEnvironmentTimeUserTextMentioningTag(t *testing.T) {
 	for _, text := range []string{
 		"please explain what <environment_context> means",
 		"<environment_context> is unclosed here",
-		"<environment_context><timezone>Asia/Shanghai</timezone>",
 		"the block ends with </environment_context>",
 		"x <environment_context><timezone>PRC</environment_context>",
-		"x </environment_context><timezone>PRC</timezone><environment_context>",
 	} {
 		for _, body := range [][]byte{serdeBody(text), responsesBody(t, text)} {
 			out, stats, err := RewriteCodexEnvironmentTime(body, rewriteNow)
 			if err != nil || stats.Changed() || !bytes.Equal(out, body) {
 				t.Fatalf("%q: err=%v stats=%+v", text, err, stats)
+			}
+		}
+	}
+	// Not blocks, never rejected, but their CN zone tags are loose tags.
+	for _, text := range []string{
+		"<environment_context><timezone>Asia/Shanghai</timezone>",
+		"x </environment_context><timezone>PRC</timezone><environment_context>",
+	} {
+		for _, render := range []func(string) []byte{func(s string) []byte { return serdeBody(s) }, func(s string) []byte { return responsesBody(t, s) }} {
+			out, stats, err := RewriteCodexEnvironmentTime(render(text), rewriteNow)
+			want := render(regexp.MustCompile(`<timezone>[^<]*</timezone>`).ReplaceAllString(text, "<timezone>"+CodexRewriteTimezone+"</timezone>"))
+			if err != nil || stats.LooseTimezones != 1 || stats.Blocks != 0 || !bytes.Equal(out, want) {
+				t.Fatalf("%q: err=%v stats=%+v out=%s", text, err, stats, out)
 			}
 		}
 	}

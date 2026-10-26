@@ -33,12 +33,14 @@ func TestCodexTimezoneGuardMessageSelection(t *testing.T) {
 		"codex-tui/0.150.0 (Windows 10.0.26200; x86_64) unknown (codex-tui; 0.150.0)":  codexTimezoneGuardMessageOld,
 		"codex_exec/0.147.0 (Ubuntu 24.4.0; x86_64) unknown":                           codexTimezoneGuardMessageOld,
 		"codex_vscode/0.156.0 (Mac OS 15.5.0; arm64) vscode/1.100":                     codexTimezoneGuardMessageOld,
-		"Codex Desktop/0.159.0-alpha.12.1 (Mac OS 15.5.0; arm64) Apple_Terminal/455.1": codexTimezoneGuardMessageOld,
-		tzGuardTUIUserAgent: codexTimezoneGuardMessageGeneric,
-		"codex_cli_rs/0.163.0-alpha.1 (Mac OS 15.5.0; arm64) Apple_Terminal/455.1": codexTimezoneGuardMessageGeneric,
-		"codex_cli_rs/1.0.0 (Mac OS 15.5.0; arm64) Apple_Terminal/455.1":           codexTimezoneGuardMessageGeneric,
-		"codex_cli_rs/0.104.0":                                codexTimezoneGuardMessageGeneric,
-		"codex_work_desktop/0.150.0 (Mac OS 15.5.0; arm64) x": codexTimezoneGuardMessageGeneric,
+		"Codex Desktop/0.159.0-alpha.12.1 (Mac OS 15.5.0; arm64) Apple_Terminal/455.1": codexTimezoneGuardMessageDesktop,
+		"Codex Desktop/0.164.0 (Windows 10.0.26200; x86_64) unknown":                   codexTimezoneGuardMessageDesktop,
+		"codex desktop/unparsable":                                                     codexTimezoneGuardMessageDesktop,
+		tzGuardTUIUserAgent:                                                            codexTimezoneGuardMessageGeneric,
+		"codex_cli_rs/0.163.0-alpha.1 (Mac OS 15.5.0; arm64) Apple_Terminal/455.1":     codexTimezoneGuardMessageGeneric,
+		"codex_cli_rs/1.0.0 (Mac OS 15.5.0; arm64) Apple_Terminal/455.1":               codexTimezoneGuardMessageGeneric,
+		"codex_cli_rs/0.104.0":                                                         codexTimezoneGuardMessageGeneric,
+		"codex_work_desktop/0.150.0 (Mac OS 15.5.0; arm64) x":                          codexTimezoneGuardMessageGeneric,
 		"curl/8.0": codexTimezoneGuardMessageGeneric,
 		"":         codexTimezoneGuardMessageGeneric,
 	}
@@ -430,35 +432,34 @@ func TestCodexTimezoneRewriteUserTextMentioningTagIsNotRejected(t *testing.T) {
 }
 
 // Leak safety net: after rewriting, the bytes to send are scanned like reject
-// mode. A CN zone the rewrite did not handle (a malformed embedded block or a
-// pasted tag outside any block) is rejected; plain mentions of the tag and
-// well-formed embedded blocks pass. (Before embedded blocks were rewritten,
-// `note: <block>` was in the leaking list.)
+// mode. A CN zone the rewrite never edits (a JSON key, item metadata) is
+// rejected. CN tags in string values pass: in blocks, and as loose tags
+// (malformed or nested blocks, pasted tags, Codex Desktop's client time
+// context), which earlier versions left for the leak net.
 func TestCodexTimezoneRewriteLeakSafetyNet(t *testing.T) {
 	group := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
-	leaking := []string{
-		// Malformed embedded block (truncated tag): left untouched.
-		`note: <environment_context><timezone>Asia/Shanghai</timezone><current_date</environment_context>`,
-		`<timezone>Asia/Hong_Kong</timezone>`,
-		// A properly nested pair: ambiguous, left untouched.
-		`x <environment_context><environment_context><timezone>PRC</timezone></environment_context></environment_context>`,
-		`x\n<environment_context><environment_context><timezone>PRC</timezone></environment_context></environment_context>`,
-		// A tag outside the block next to a rewritten block.
-		`x <environment_context><timezone>PRC</timezone></environment_context> <timezone>Asia/Urumqi</timezone>`,
+	leaking := map[string]string{
+		`{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi","<timezone>PRC</timezone>":1}]}]}`:                              "input[0].content[0]",
+		`{"model":"m","input":[{"type":"message","role":"user","content":"hi","internal_chat_message_metadata_passthrough":{"x":"<timezone>Asia/Hong_Kong</timezone>"}}]}`: "input[0].internal_chat_message_metadata_passthrough.?",
 	}
-	for _, text := range leaking {
-		body := []byte(`{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`)
-		_, _, rejection := rewriteCodexTimezonePayload(group, body, time.Now())
-		require.NotNil(t, rejection, text)
-		require.Equal(t, codexTimezoneRejectAfterRewrite, rejection.reason, text)
+	for body, path := range leaking {
+		_, _, rejection := rewriteCodexTimezonePayload(group, []byte(body), time.Now())
+		require.NotNil(t, rejection, body)
+		require.Equal(t, codexTimezoneRejectAfterRewrite, rejection.reason, body)
 		require.NotEmpty(t, rejection.zone)
 		require.True(t, rejection.located)
-		require.Equal(t, "input[0].content[0].text", rejection.location.Path)
-		rejection = codexTimezoneGuardZone(group, body)
+		require.Equal(t, path, rejection.location.Path)
+		rejection = codexTimezoneGuardZone(group, []byte(body))
 		require.NotNil(t, rejection, "checkpoints reject it too")
 		require.Equal(t, codexTimezoneRejectAfterRewrite, rejection.reason)
 	}
 	for _, text := range []string{
+		`note: <environment_context><timezone>Asia/Shanghai</timezone><current_date</environment_context>`,
+		`<timezone>Asia/Hong_Kong</timezone>`,
+		`x <environment_context><environment_context><timezone>PRC</timezone></environment_context></environment_context>`,
+		`x\n<environment_context><environment_context><timezone>PRC</timezone></environment_context></environment_context>`,
+		`x <environment_context><timezone>PRC</timezone></environment_context> <timezone>Asia/Urumqi</timezone>`,
+		`<codex_apps_client_time_context><timezone>Asia/Shanghai</timezone>\n<current_date>2026-10-27</current_date>\nUse this client time context.</codex_apps_client_time_context>`,
 		`what does <environment_context> mean?`,
 		`<environment_context><timezone>Asia/Shanghai</timezone></environment_context>`, // a real block: rewritten
 		`see <environment_context><timezone>America/New_York</timezone></environment_context>`,
@@ -473,17 +474,18 @@ func TestCodexTimezoneRewriteLeakSafetyNet(t *testing.T) {
 		body := []byte(`{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`)
 		out, _, rejection := rewriteCodexTimezonePayload(group, body, time.Now())
 		require.Nil(t, rejection, text)
-		require.NotContains(t, string(out), "Asia/Shanghai")
+		_, found := pkgopenai.FindChinaTimezone(out)
+		require.False(t, found, text)
 	}
 
 	// End to end over HTTP and WS.
 	f := newTZRewriteFixture(t)
-	leak := `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"x <environment_context><timezone>Asia/Shanghai</timezone><current_date</environment_context>"}]}]}`
+	leak := `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"x","<timezone>Asia/Shanghai</timezone>":1}]}]}`
 	rec := f.post("/v1/responses", leak)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, codexTimezoneGuardCode, gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
 	conn, ctx := dialTZGuardWS(t, f.router)
-	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"TEST_ONLY_MODEL","input":"x <timezone>PRC</timezone>"}`)))
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"TEST_ONLY_MODEL","input":"x","<timezone>PRC</timezone>":1}`)))
 	_, frame, err := conn.Read(ctx)
 	require.NoError(t, err)
 	requireTZGuardErrorFrame(t, frame, codexTimezoneGuardMessageOld)
@@ -491,16 +493,17 @@ func TestCodexTimezoneRewriteLeakSafetyNet(t *testing.T) {
 }
 
 // The send-time WS rewrite rejects too, and a block that is rewritten does
-// not shield a CN zone left in another string of the same payload.
+// not shield a CN zone left where the rewrite never edits (a key).
 func TestRewriteCodexTimezoneWSLeakSafetyNet(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
-	mixed := []byte(`{"type":"response.create","input":[{"type":"message","content":[{"type":"input_text","text":"<environment_context><timezone>Asia/Shanghai</timezone></environment_context>"},{"type":"input_text","text":"pasted <timezone>Asia/Macau</timezone>"}]}]}`)
+	mixed := []byte(`{"type":"response.create","input":[{"type":"message","content":[{"type":"input_text","text":"<environment_context><timezone>Asia/Shanghai</timezone></environment_context>"},{"type":"input_text","text":"pasted","<timezone>Asia/Macau</timezone>":1}]}]}`)
 	_, _, rejection := rewriteCodexTimezonePayload(group, mixed, time.Now())
 	require.NotNil(t, rejection)
 	require.Equal(t, codexTimezoneRejectAfterRewrite, rejection.reason)
 	require.Equal(t, "Asia/Macau", rejection.zone)
-	require.Equal(t, "input[0].content[1].text", rejection.location.Path)
+	require.Equal(t, "input[0].content[1]", rejection.location.Path)
+	require.True(t, rejection.location.InKey)
 
 	results := make(chan error, 1)
 	router := gin.New()

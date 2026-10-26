@@ -142,19 +142,36 @@ func TestCodexTimezoneRewriteEmbeddedHistoryPasses(t *testing.T) {
 	require.Len(t, out, len(frame)+3*(len("America/Los_Angeles")-len("Asia/Shanghai")))
 }
 
-// A bare CN tag outside any block is still rejected; the rejection log says
-// where it is (path, item type/role, offsets, nearby tag names) and carries
-// no content.
+// A bare CN tag outside any block is rewritten as a loose tag. One the
+// rewrite never edits (item metadata) is still rejected; the rejection log
+// says where it is (path, item type/role, offsets, nearby tag names) and
+// carries no content.
 func TestCodexTimezoneRewriteBareTagRejectedWithLocation(t *testing.T) {
 	bare := "SECRET_TEXT run date: <timezone>Asia/Shanghai</timezone> <cwd>"
-	body := tzEmbeddedHistory(t, false, nil)
-	var root map[string]any
-	require.NoError(t, json.Unmarshal(body, &root))
-	input, ok := root["input"].([]any)
+	withItem := func(item map[string]any) []byte {
+		var root map[string]any
+		require.NoError(t, json.Unmarshal(tzEmbeddedHistory(t, false, nil), &root))
+		input, ok := root["input"].([]any)
+		require.True(t, ok)
+		root["input"] = append(input, item)
+		body, err := json.Marshal(root)
+		require.NoError(t, err)
+		return body
+	}
+	rewrite := &service.Group{ID: 48, CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
+	h := &OpenAIGatewayHandler{}
+
+	loose := withItem(map[string]any{"type": "function_call_output", "call_id": "c3", "output": bare})
+	c, logs := tzObservedContext(t, http.MethodPost)
+	sent, ok := h.applyCodexTimezoneGuardHTTP(c, rewrite, 1, loose, &codexTimezoneFrozenDate{}, false)
 	require.True(t, ok)
-	root["input"] = append(input, map[string]any{"type": "function_call_output", "call_id": "c3", "output": bare})
-	body, err := json.Marshal(root)
-	require.NoError(t, err)
+	require.Equal(t, strings.Replace(bare, "Asia/Shanghai", "America/Los_Angeles", 1), gjson.GetBytes(sent, "input.5.output").String())
+	entries := logs.FilterMessage("openai.codex_timezone_rewritten").All()
+	require.Len(t, entries, 1)
+	require.EqualValues(t, 1, entries[0].ContextMap()["loose_timezones"])
+
+	body := withItem(map[string]any{"type": "function_call_output", "call_id": "c3", "output": "ok",
+		"internal_chat_message_metadata_passthrough": map[string]any{"note": bare}})
 
 	requireLocated := func(t *testing.T, entry observer.LoggedEntry, reason, transport string) {
 		t.Helper()
@@ -162,7 +179,7 @@ func TestCodexTimezoneRewriteBareTagRejectedWithLocation(t *testing.T) {
 		require.Equal(t, reason, fields["reason"])
 		require.Equal(t, transport, fields["transport"])
 		require.Equal(t, "Asia/Shanghai", fields["zone"])
-		require.Equal(t, "input[5].output", fields["loc_path"])
+		require.Equal(t, "input[5].internal_chat_message_metadata_passthrough.?", fields["loc_path"])
 		require.Equal(t, "function_call_output", fields["loc_item_type"])
 		require.Equal(t, "", fields["loc_item_role"])
 		require.EqualValues(t, len(bare), fields["loc_string_bytes"])
@@ -179,13 +196,11 @@ func TestCodexTimezoneRewriteBareTagRejectedWithLocation(t *testing.T) {
 		}
 	}
 
-	rewrite := &service.Group{ID: 48, CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
-	c, logs := tzObservedContext(t, http.MethodPost)
-	h := &OpenAIGatewayHandler{}
-	sent, ok := h.applyCodexTimezoneGuardHTTP(c, rewrite, 1, body, &codexTimezoneFrozenDate{}, false)
+	c, logs = tzObservedContext(t, http.MethodPost)
+	sent, ok = h.applyCodexTimezoneGuardHTTP(c, rewrite, 1, body, &codexTimezoneFrozenDate{}, false)
 	require.False(t, ok)
 	require.Nil(t, sent)
-	entries := logs.FilterMessage("openai.codex_timezone_guard_rejected").All()
+	entries = logs.FilterMessage("openai.codex_timezone_guard_rejected").All()
 	require.Len(t, entries, 1)
 	requireLocated(t, entries[0], codexTimezoneRejectAfterRewrite, "http")
 
