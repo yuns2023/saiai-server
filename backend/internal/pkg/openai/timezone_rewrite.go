@@ -513,37 +513,67 @@ func (rw *codexEnvironmentRewriter) rewriteEscapedText(raw []byte, rawBase int) 
 
 // Embedded blocks. In a string that is not a whole-string block, the
 // environment_context tags are read in order: a close tag pairs with the
-// open tag right before it, and earlier open tags without a close are
-// mentions. A string with a stray close tag (one not directly preceded by an
-// open tag, e.g. the outer close of a nested pair, or a mention after a block)
-// is ambiguous: nothing in it is rewritten. Otherwise each block that passes
-// the block rules is rewritten; one that does not (malformed tags, over the
-// size limit) is left untouched. Neither case is an error; the leak net still
-// sees any zone left.
+// open tag right before it (a block); an open tag followed by another open
+// tag is dropped (a mention, unless a later close turns out to close it). A
+// close tag not directly preceded by an open tag is stray: when an open tag
+// was dropped earlier, the stray close closes the most recent one, so the
+// blocks accepted since that open sit inside a nested pair and are undone
+// (left untouched for the leak net); otherwise it is a plain mention and is
+// ignored. Only that region is affected: complete, un-nested blocks elsewhere
+// in the same string are still rewritten. Each block must pass the block
+// rules; one that does not (malformed tags, over the size limit) is left
+// untouched. None of this is an error.
 
-// embeddedScan snapshots the rewriter state at the start of one string so an
-// ambiguous string can be rolled back.
-type embeddedScan struct {
-	edits int
-	stats CodexEnvironmentRewriteStats
+// embeddedNesting tracks the dropped open tags of one string as runs of
+// snapshots: dropped opens with no edit recorded between them share one run,
+// so the number of runs is at most the number of recorded edits plus one
+// (never more than the body's edits), not the number of mentions or of
+// value-less blocks. A merged run keeps its oldest stats, so after an undo
+// the Blocks/Embedded diagnostics may undercount blocks without edits; edits
+// and Timezones (every zone change is an edit) are always exact.
+type embeddedNesting struct {
+	runs []embeddedNestRun
 }
 
-func (rw *codexEnvironmentRewriter) beginEmbedded() embeddedScan {
-	return embeddedScan{edits: len(rw.edits), stats: rw.stats}
+type embeddedNestRun struct {
+	edits, blocks, timezones, embedded int
+	count                              int
 }
 
-// rollbackEmbedded drops every edit of the string and counts each of its
-// candidates seen so far (at least one) as skipped.
-func (rw *codexEnvironmentRewriter) rollbackEmbedded(scan embeddedScan) {
-	skipped := max(rw.stats.Embedded-scan.stats.Embedded+rw.stats.EmbeddedSkipped-scan.stats.EmbeddedSkipped, 1)
-	rw.edits = rw.edits[:scan.edits]
-	rw.stats = scan.stats
-	rw.stats.EmbeddedSkipped += skipped
+// dropOpen records an open tag that a later open tag superseded.
+func (n *embeddedNesting) dropOpen(rw *codexEnvironmentRewriter) {
+	if last := len(n.runs) - 1; last >= 0 && n.runs[last].edits == len(rw.edits) {
+		n.runs[last].count++
+		return
+	}
+	n.runs = append(n.runs, embeddedNestRun{
+		edits: len(rw.edits), blocks: rw.stats.Blocks, timezones: rw.stats.Timezones, embedded: rw.stats.Embedded, count: 1,
+	})
+}
+
+// strayClose pairs a stray close tag with the most recent dropped open tag
+// and undoes the blocks accepted since it (counted as skipped).
+func (n *embeddedNesting) strayClose(rw *codexEnvironmentRewriter) {
+	last := len(n.runs) - 1
+	if last < 0 {
+		return // a plain close-tag mention
+	}
+	run := n.runs[last]
+	if run.count--; run.count == 0 {
+		n.runs = n.runs[:last]
+	} else {
+		n.runs[last].count = run.count
+	}
+	rw.stats.EmbeddedSkipped += max(rw.stats.Embedded-run.embedded, 1)
+	rw.edits = rw.edits[:run.edits]
+	rw.stats.Blocks, rw.stats.Timezones, rw.stats.Embedded = run.blocks, run.timezones, run.embedded
+	// Runs above this one were already popped; every remaining run's
+	// snapshot is at or before this one, so their edit counts stay valid.
 }
 
 // rewriteEmbeddedText scans an unescaped string in place.
 func (rw *codexEnvironmentRewriter) rewriteEmbeddedText(text []byte, rawBase int) {
-	scan := rw.beginEmbedded()
+	var nesting embeddedNesting
 	nextOpen, nextClose := -2, -2 // cached positions (-1: none, -2: unknown)
 	find := func(cached *int, tag []byte, pos int) int {
 		if *cached == -2 || (*cached >= 0 && *cached < pos) {
@@ -562,18 +592,21 @@ func (rw *codexEnvironmentRewriter) rewriteEmbeddedText(text []byte, rawBase int
 			return
 		}
 		if open := find(&nextOpen, environmentContextOpenTag, pos); open >= 0 && open < closeAt {
+			if blockStart >= 0 {
+				nesting.dropOpen(rw)
+			}
 			blockStart = open + len(environmentContextOpenTag)
 			pos = blockStart
 			continue
 		}
+		pos = closeAt + len(environmentContextCloseTag)
 		if blockStart < 0 {
-			rw.rollbackEmbedded(scan) // stray close: ambiguous structure
-			return
+			nesting.strayClose(rw)
+			continue
 		}
 		base := rawBase + blockStart
 		rw.embeddedBlock(text[blockStart:closeAt], func(i int) int { return base + i })
 		blockStart = -1
-		pos = closeAt + len(environmentContextCloseTag)
 	}
 }
 
@@ -586,7 +619,7 @@ func (rw *codexEnvironmentRewriter) rewriteEmbeddedText(text []byte, rawBase int
 // string is or however many candidates it holds; time is linear in the
 // string.
 func (rw *codexEnvironmentRewriter) rewriteEmbeddedEscapedText(raw []byte, rawBase int) {
-	scan := rw.beginEmbedded()
+	var nesting embeddedNesting
 	var unit [8]byte
 	const bufferLimit = codexEnvironmentBlockMaxBytes + len("</environment_context>")
 	openMatched, closeMatched := 0, 0
@@ -627,15 +660,18 @@ func (rw *codexEnvironmentRewriter) rewriteEmbeddedEscapedText(raw []byte, rawBa
 			}
 			switch {
 			case openMatched == len(environmentContextOpenTag):
-				// A (new) candidate starts; an earlier one was a mention.
+				// A (new) candidate starts; an earlier one is dropped.
+				if inBlock {
+					nesting.dropOpen(rw)
+				}
 				openMatched, closeMatched = 0, 0
 				inBlock, overflow = true, false
 				rw.buf, rw.offs = rw.buf[:0], rw.offs[:0]
 			case closeMatched == len(environmentContextCloseTag):
 				openMatched, closeMatched = 0, 0
 				if !inBlock {
-					rw.rollbackEmbedded(scan) // stray close: ambiguous structure
-					return
+					nesting.strayClose(rw)
+					continue
 				}
 				inBlock = false
 				if overflow {

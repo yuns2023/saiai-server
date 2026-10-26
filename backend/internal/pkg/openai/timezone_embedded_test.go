@@ -41,12 +41,14 @@ func TestRewriteCodexEnvironmentTimeEmbeddedBlocks(t *testing.T) {
 		"mention before block": func(b func(string, string) string) tc {
 			return tc{"what is <environment_context>? " + b("2026-10-25", "PRC"), "what is <environment_context>? " + b(rewriteToday, CodexRewriteTimezone), 1, 0}
 		},
-		// A stray close tag makes the string ambiguous (it may close an
-		// outer pair): nothing in it is rewritten; the leak net decides.
+		// A close tag with no dropped open before it is a plain mention.
 		"stray close after block": func(b func(string, string) string) tc {
-			in := "x " + b("2026-10-25", "PRC") + " </environment_context>"
-			return tc{in, in, 0, 1}
+			return tc{"x " + b("2026-10-25", "PRC") + " </environment_context>", "x " + b(rewriteToday, CodexRewriteTimezone) + " </environment_context>", 1, 0}
 		},
+		"leading close mention": func(b func(string, string) string) tc {
+			return tc{"grep: </environment_context> hit\n" + b("2026-10-25", "PRC"), "grep: </environment_context> hit\n" + b(rewriteToday, CodexRewriteTimezone), 1, 0}
+		},
+		// A nested pair is ambiguous: the inner block stays untouched.
 		"nested pair": func(b func(string, string) string) tc {
 			in := "x <environment_context>" + b("2026-10-25", "PRC") + "</environment_context>"
 			return tc{in, in, 0, 1}
@@ -55,9 +57,20 @@ func TestRewriteCodexEnvironmentTimeEmbeddedBlocks(t *testing.T) {
 			in := "x <environment_context> a " + b("2026-10-25", "PRC") + " b </environment_context> c"
 			return tc{in, in, 0, 1}
 		},
-		"good block then nested pair": func(b func(string, string) string) tc {
-			in := "x " + b("2026-10-25", "Asia/Macau") + " <environment_context>" + b("2026-10-25", "PRC") + "</environment_context>"
+		"deeply nested": func(b func(string, string) string) tc {
+			in := "x <environment_context><environment_context>" + b("2026-10-25", "PRC") + "</environment_context></environment_context>"
 			return tc{in, in, 0, 2}
+		},
+		// Only the ambiguous region is left: independent blocks before and
+		// after a nested pair are still rewritten.
+		"good block then nested pair": func(b func(string, string) string) tc {
+			nested := " <environment_context>" + b("2026-10-25", "PRC") + "</environment_context> "
+			return tc{"x " + b("2026-10-25", "Asia/Macau") + nested + b("2026-10-25", "Asia/Urumqi"),
+				"x " + b(rewriteToday, CodexRewriteTimezone) + nested + b(rewriteToday, CodexRewriteTimezone), 2, 1}
+		},
+		"good CN block then CN-free nested segment": func(b func(string, string) string) tc {
+			rest := "\ny <environment_context><environment_context></environment_context></environment_context>"
+			return tc{"x " + b("2026-10-25", "PRC") + rest, "x " + b(rewriteToday, CodexRewriteTimezone) + rest, 1, 1}
 		},
 		"mention, block, mention": func(b func(string, string) string) tc {
 			return tc{"<environment_context> a " + b("2026-10-25", "PRC") + " <environment_context> z",
@@ -329,6 +342,36 @@ func BenchmarkRewriteCodexEnvironmentTimeEmbedded5MB(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if _, _, err := RewriteCodexEnvironmentTime(body, rewriteNow); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+// Alternating dropped opens and value-less blocks must not grow the nesting
+// state with the string: runs are bounded by recorded edits.
+func TestRewriteCodexEnvironmentTimeEmbeddedNestingBounded(t *testing.T) {
+	const n = 60_000
+	unit := "<environment_context><environment_context></environment_context>"
+	tail := strings.Repeat("</environment_context>", n)
+	block := compactBlock("2026-10-25", "PRC")
+	for _, escape := range []bool{false, true} {
+		text := "x " + strings.Repeat(unit, n) + tail + " " + block
+		if escape {
+			text = "x\\n" + text[2:]
+		}
+		body := []byte(`{"input":"` + text + `"}`)
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		out, stats, err := RewriteCodexEnvironmentTime(body, rewriteNow)
+		runtime.ReadMemStats(&after)
+		if err != nil || stats.Timezones != 1 || stats.Dates != 1 {
+			t.Fatalf("escape=%v err=%v stats=%+v", escape, err, stats)
+		}
+		if extra := int64(after.TotalAlloc-before.TotalAlloc) - int64(cap(out)); extra > 1<<20 {
+			t.Fatalf("escape=%v: extra allocation %d bytes for a %d byte body", escape, extra, len(body))
+		}
+		if !bytes.HasSuffix(out, []byte(compactBlock(rewriteToday, CodexRewriteTimezone)+`"}`)) {
+			t.Fatal("trailing block not rewritten")
 		}
 	}
 }

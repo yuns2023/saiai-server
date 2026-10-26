@@ -442,6 +442,7 @@ func TestCodexTimezoneRewriteLeakSafetyNet(t *testing.T) {
 		`<timezone>Asia/Hong_Kong</timezone>`,
 		// A properly nested pair: ambiguous, left untouched.
 		`x <environment_context><environment_context><timezone>PRC</timezone></environment_context></environment_context>`,
+		`x\n<environment_context><environment_context><timezone>PRC</timezone></environment_context></environment_context>`,
 		// A tag outside the block next to a rewritten block.
 		`x <environment_context><timezone>PRC</timezone></environment_context> <timezone>Asia/Urumqi</timezone>`,
 	}
@@ -462,6 +463,12 @@ func TestCodexTimezoneRewriteLeakSafetyNet(t *testing.T) {
 		`<environment_context><timezone>Asia/Shanghai</timezone></environment_context>`, // a real block: rewritten
 		`see <environment_context><timezone>America/New_York</timezone></environment_context>`,
 		`note: <environment_context><timezone>Asia/Shanghai</timezone></environment_context>`, // embedded: rewritten
+		// CN only in an independent good block; the nested segment is CN-free.
+		`x <environment_context><timezone>PRC</timezone></environment_context>\ny <environment_context><environment_context></environment_context></environment_context>`,
+		`x <environment_context><timezone>PRC</timezone></environment_context> y <environment_context><environment_context></environment_context></environment_context>`,
+		// A lone leading close-tag mention does not stop the scan.
+		`grep: </environment_context>\n<environment_context><timezone>Asia/Shanghai</timezone></environment_context>`,
+		`grep: </environment_context> <environment_context><timezone>Asia/Shanghai</timezone></environment_context>`,
 	} {
 		body := []byte(`{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`)
 		out, _, rejection := rewriteCodexTimezonePayload(group, body, time.Now())
