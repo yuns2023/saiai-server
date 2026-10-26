@@ -92,17 +92,31 @@ Codex renders each environment context as its own content item whose text is
 exactly `<environment_context>`BODY`</environment_context>` (BODY XML-escapes
 values; verified in codex-rs 0.163 `ContextualUserFragment::render` and in
 0.163/0.164 monitor captures, including WebSocket frames). A JSON string
-**value** (any depth, any role; object keys are ignored) is an environment
-block only if its decoded text, trimmed of ASCII whitespace (SP, HT, LF, CR, FF, VT), starts with
-`<environment_context>` and ends with `</environment_context>`. Any other
-string — e.g. a user prompt that mentions the tag mid-sentence, closed or not —
-is user content: never rewritten and not rejected by the block rules. As a
-leak safety net, the bytes that will actually be sent are then scanned exactly
-like reject mode: a CN/HK/Macau `<timezone>` value still present anywhere
-(e.g. an environment block in a shape the rewrite does not recognise, or a
-user who pastes such a tag) is rejected like reject mode (400
+**value** (any depth, any role; object keys are ignored) is a whole-string
+environment block if its decoded text, trimmed of ASCII whitespace (SP, HT,
+LF, CR, FF, VT), starts with `<environment_context>` and ends with
+`</environment_context>`; such a block is rewritten, and fails closed when
+malformed. Any other string (tool output such as a Codex rollout line read by
+a tool, grep/log output, pasted text, a user prompt that mentions the tag) is
+content: its **embedded** blocks are found by reading the
+`<environment_context>`/`</environment_context>` tags in order. A close tag
+pairs with the open tag right before it; an open tag followed by another open
+tag is a mention; a close tag not directly preceded by an open tag either
+closes the most recent such earlier open (a nested pair: the blocks inside it
+are left untouched) or, with none, is a plain mention and is ignored. Every
+complete, un-nested embedded block that passes the block rules below is
+rewritten like a whole-string block (also when the second JSON level keeps
+`\n`/`\"` escapes, e.g. a rollout line, whose self-closing attributes may
+then use `\"` quotes); malformed or oversized embedded blocks and nested
+regions are left untouched and are never rejected by the block rules
+themselves. Only the ambiguous region is skipped; other blocks in the same
+string are still rewritten. As a leak safety net, the bytes that will
+actually be sent are then scanned exactly like reject mode: a CN/HK/Macau
+`<timezone>` value still present anywhere (outside any block, in a malformed
+or nested embedded block, or a pasted tag) is rejected like reject mode (400
 `codex_timezone_reinit_required`, log reason `cn_timezone_after_rewrite`).
-Merely mentioning `<environment_context>` still passes. The safety-net scan
+Merely mentioning `<environment_context>` still passes. Item metadata strings
+are never edited (embedded blocks there are left to the safety net). The safety-net scan
 has the reject-mode scanner's cost (one more pass; a candidate escaped string
 is decoded into a reusable buffer of its size). Inside a block string each
 `<timezone>` value other than `America/Los_Angeles` becomes
@@ -129,8 +143,9 @@ decoded→raw offset map, only the bytes of the replaced values change and the
 replacement is plain ASCII; escapes, key order and whitespace elsewhere stay
 byte-identical, and rewriting twice gives the same bytes. Escaped strings
 are decoded as a stream; only block content (at most 64 KiB per block, larger
-blocks fail closed) is buffered, so extra memory does not grow with the
-string length. Inside a block every
+whole-string blocks fail closed, larger embedded ones are skipped) is buffered, so extra memory does not grow with the
+string length; beyond that buffer the rewrite only keeps its edit list (and,
+for nested-region tracking, at most one snapshot per recorded edit). Inside a block every
 `<timezone…`/`<current_date…` tag must be an exact tag, or a value-less
 self-closing tag with quoted attributes (`<current_date status="unavailable" />`);
 tag values may not contain markup. A body without
@@ -203,19 +218,34 @@ reinit message) and the original bytes are never forwarded.
   User-Agent) to upgrade; every other client gets the generic text asking for
   `saiai cli` re-initialization, a Codex restart and a new session.
 - Logs record `openai.codex_timezone_guard_rejected` with group, user, reason,
-  zone, UA product/version, transport and turn — never the body.
+  zone, UA product/version, transport and turn — never the body. When the
+  offending string is known (a CN zone match, or a malformed whole-string
+  block) location-only `loc_*` fields are added: JSON path with array indices
+  (e.g. `input[37].output`), the enclosing `input` item's `type`/`role`,
+  decoded string length, offset of the `<timezone>` tag,
+  `<environment_context>` open/close counts and offsets, and up to 12 nearby
+  tag names. Keys, type/role and tag names come from fixed allowlists of
+  Responses/Codex structural names; anything else is logged as `?`. No text
+  or tag values are logged.
 
 Limitations:
 
 - Native `/codex/images` and ChatGPT conversation routes are not covered. In
   reject mode a user message that literally contains such a tag is also
-  rejected (accepted false positive); rewrite mode only rewrites strings that
-  are entirely one `<environment_context>` block, and its leak safety net
-  rejects any CN `<timezone>` value left elsewhere, as reject mode would.
+  rejected (accepted false positive). Rewrite mode rewrites strings that are
+  entirely one `<environment_context>` block (fail closed when malformed) and
+  every well-formed block embedded in a larger string such as tool output or
+  pasted text (a malformed embedded mention or a nested pair is left
+  untouched, never rejected by itself; other blocks in the same string are
+  still rewritten); its leak safety net rejects any CN `<timezone>` value
+  left elsewhere (outside a block, or in a malformed or nested embedded
+  block), as reject mode would.
 - Reject mode scans JSON object keys as well as values.
-- A large JSON string that contains an escape and the word `timezone` (reject)
-  or `environment_context` (rewrite) is decoded into a transient buffer up to
-  its own size (rewrite also keeps an offset map for it).
+- A large JSON string that contains an escape and the word `timezone` (reject
+  and the rewrite leak net) is decoded into a transient buffer up to its own
+  size. The rewrite itself streams escaped strings and buffers at most one
+  block (64 KiB plus its offset map); only a rejection decodes the offending
+  string again to compute the location fields.
 - On the official-Codex OAuth relay both the error frame and the following
   1008 close are best effort; stopping the relay's client reader may close the
   socket before the close frame is sent.

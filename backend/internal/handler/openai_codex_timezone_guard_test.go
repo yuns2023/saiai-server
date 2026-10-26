@@ -225,25 +225,28 @@ func TestCodexTimezoneGuardWSRebuiltPayloadIsScanned(t *testing.T) {
 	// carries no tag, so only scanning the rebuilt payload catches it.
 	original := []byte(`{"type":"response.create","previous_response_id":"resp_1","input":[{"type":"message","role":"user","content":"next"}]}`)
 	rebuilt := []byte(`{"type":"response.create","input":[{"type":"message","role":"user","content":"<environment_context><timezone>Asia/Macau</timezone></environment_context>"},{"type":"message","role":"user","content":"next"}]}`)
-	_, _, found := codexTimezoneGuardZone(group, original)
-	require.False(t, found)
-	reason, zone, found := codexTimezoneGuardZone(group, rebuilt)
-	require.True(t, found)
-	require.Equal(t, codexTimezoneRejectZone, reason)
-	require.Equal(t, "Asia/Macau", zone)
-	_, _, found = codexTimezoneGuardZone(&service.Group{}, rebuilt)
-	require.False(t, found, "switch off")
-	_, _, found = codexTimezoneGuardZone(nil, rebuilt)
-	require.False(t, found)
+	require.Nil(t, codexTimezoneGuardZone(group, original))
+	rejection := codexTimezoneGuardZone(group, rebuilt)
+	require.NotNil(t, rejection)
+	require.Equal(t, codexTimezoneRejectZone, rejection.reason)
+	require.Equal(t, "Asia/Macau", rejection.zone)
+	require.True(t, rejection.located)
+	require.Equal(t, "input[0].content", rejection.location.Path)
+	require.Equal(t, "message", rejection.location.ItemType)
+	require.Equal(t, "user", rejection.location.ItemRole)
+	require.Nil(t, codexTimezoneGuardZone(&service.Group{}, rebuilt), "switch off")
+	require.Nil(t, codexTimezoneGuardZone(nil, rebuilt))
 
 	// Rewrite mode never rejects for the zone, only for a block that cannot
 	// be rewritten safely.
 	rewrite := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
-	_, _, found = codexTimezoneGuardZone(rewrite, rebuilt)
-	require.False(t, found)
-	reason, _, found = codexTimezoneGuardZone(rewrite, []byte(`{"input":"<environment_context><timezone>PRC</environment_context>"}`))
-	require.True(t, found)
-	require.Equal(t, codexTimezoneRejectMalformed, reason)
+	require.Nil(t, codexTimezoneGuardZone(rewrite, rebuilt))
+	rejection = codexTimezoneGuardZone(rewrite, []byte(`{"input":"<environment_context><timezone>PRC</environment_context>"}`))
+	require.NotNil(t, rejection)
+	require.Equal(t, codexTimezoneRejectMalformed, rejection.reason)
+	require.True(t, rejection.located)
+	require.Equal(t, "input", rejection.location.Path)
+	require.True(t, rejection.location.StartsWithEnvOpen)
 }
 
 func TestRevalidateOpenAIWSTurnKeyReadsCurrentGroupSwitch(t *testing.T) {
@@ -427,37 +430,55 @@ func TestCodexTimezoneRewriteUserTextMentioningTagIsNotRejected(t *testing.T) {
 }
 
 // Leak safety net: after rewriting, the bytes to send are scanned like reject
-// mode. A CN zone the rewrite did not handle (unrecognised block shape or a
-// pasted tag) is rejected; plain mentions of the tag still pass.
+// mode. A CN zone the rewrite did not handle (a malformed embedded block or a
+// pasted tag outside any block) is rejected; plain mentions of the tag and
+// well-formed embedded blocks pass. (Before embedded blocks were rewritten,
+// `note: <block>` was in the leaking list.)
 func TestCodexTimezoneRewriteLeakSafetyNet(t *testing.T) {
 	group := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
 	leaking := []string{
-		// Unrecognised shape: extra text in the same string as the block.
-		`note: <environment_context><timezone>Asia/Shanghai</timezone></environment_context>`,
+		// Malformed embedded block (truncated tag): left untouched.
+		`note: <environment_context><timezone>Asia/Shanghai</timezone><current_date</environment_context>`,
 		`<timezone>Asia/Hong_Kong</timezone>`,
+		// A properly nested pair: ambiguous, left untouched.
+		`x <environment_context><environment_context><timezone>PRC</timezone></environment_context></environment_context>`,
+		`x\n<environment_context><environment_context><timezone>PRC</timezone></environment_context></environment_context>`,
+		// A tag outside the block next to a rewritten block.
+		`x <environment_context><timezone>PRC</timezone></environment_context> <timezone>Asia/Urumqi</timezone>`,
 	}
 	for _, text := range leaking {
 		body := []byte(`{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`)
-		_, _, reason, zone := rewriteCodexTimezonePayload(group, body, time.Now())
-		require.Equal(t, codexTimezoneRejectAfterRewrite, reason, text)
-		require.NotEmpty(t, zone)
-		reason, _, found := codexTimezoneGuardZone(group, body)
-		require.True(t, found, "checkpoints reject it too")
-		require.Equal(t, codexTimezoneRejectAfterRewrite, reason)
+		_, _, rejection := rewriteCodexTimezonePayload(group, body, time.Now())
+		require.NotNil(t, rejection, text)
+		require.Equal(t, codexTimezoneRejectAfterRewrite, rejection.reason, text)
+		require.NotEmpty(t, rejection.zone)
+		require.True(t, rejection.located)
+		require.Equal(t, "input[0].content[0].text", rejection.location.Path)
+		rejection = codexTimezoneGuardZone(group, body)
+		require.NotNil(t, rejection, "checkpoints reject it too")
+		require.Equal(t, codexTimezoneRejectAfterRewrite, rejection.reason)
 	}
 	for _, text := range []string{
 		`what does <environment_context> mean?`,
 		`<environment_context><timezone>Asia/Shanghai</timezone></environment_context>`, // a real block: rewritten
 		`see <environment_context><timezone>America/New_York</timezone></environment_context>`,
+		`note: <environment_context><timezone>Asia/Shanghai</timezone></environment_context>`, // embedded: rewritten
+		// CN only in an independent good block; the nested segment is CN-free.
+		`x <environment_context><timezone>PRC</timezone></environment_context>\ny <environment_context><environment_context></environment_context></environment_context>`,
+		`x <environment_context><timezone>PRC</timezone></environment_context> y <environment_context><environment_context></environment_context></environment_context>`,
+		// A lone leading close-tag mention does not stop the scan.
+		`grep: </environment_context>\n<environment_context><timezone>Asia/Shanghai</timezone></environment_context>`,
+		`grep: </environment_context> <environment_context><timezone>Asia/Shanghai</timezone></environment_context>`,
 	} {
 		body := []byte(`{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}]}`)
-		_, _, reason, _ := rewriteCodexTimezonePayload(group, body, time.Now())
-		require.Empty(t, reason, text)
+		out, _, rejection := rewriteCodexTimezonePayload(group, body, time.Now())
+		require.Nil(t, rejection, text)
+		require.NotContains(t, string(out), "Asia/Shanghai")
 	}
 
 	// End to end over HTTP and WS.
 	f := newTZRewriteFixture(t)
-	leak := `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"x <environment_context><timezone>Asia/Shanghai</timezone></environment_context>"}]}]}`
+	leak := `{"model":"TEST_ONLY_MODEL","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"x <environment_context><timezone>Asia/Shanghai</timezone><current_date</environment_context>"}]}]}`
 	rec := f.post("/v1/responses", leak)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, codexTimezoneGuardCode, gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
@@ -475,9 +496,11 @@ func TestRewriteCodexTimezoneWSLeakSafetyNet(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{CodexCNTimezoneGuard: true, CodexTimezoneAction: service.CodexTimezoneActionRewrite}
 	mixed := []byte(`{"type":"response.create","input":[{"type":"message","content":[{"type":"input_text","text":"<environment_context><timezone>Asia/Shanghai</timezone></environment_context>"},{"type":"input_text","text":"pasted <timezone>Asia/Macau</timezone>"}]}]}`)
-	_, _, reason, zone := rewriteCodexTimezonePayload(group, mixed, time.Now())
-	require.Equal(t, codexTimezoneRejectAfterRewrite, reason)
-	require.Equal(t, "Asia/Macau", zone)
+	_, _, rejection := rewriteCodexTimezonePayload(group, mixed, time.Now())
+	require.NotNil(t, rejection)
+	require.Equal(t, codexTimezoneRejectAfterRewrite, rejection.reason)
+	require.Equal(t, "Asia/Macau", rejection.zone)
+	require.Equal(t, "input[0].content[1].text", rejection.location.Path)
 
 	results := make(chan error, 1)
 	router := gin.New()

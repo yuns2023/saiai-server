@@ -984,7 +984,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			} else {
 				encoded, err := pkgopenai.EncodeCodexRequestZstd(sendBody)
 				if err != nil {
-					h.rejectCodexTimezoneHTTP(c, apiKey.Group, subject.UserID, codexTimezoneRejectEncode, "", streamStarted)
+					h.rejectCodexTimezoneHTTP(c, apiKey.Group, subject.UserID, &codexTimezoneRejection{reason: codexTimezoneRejectEncode}, streamStarted)
 					return false
 				}
 				wireBody = encoded
@@ -995,7 +995,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if _, cached := c.Get(service.OpenAIParsedRequestBodyKey); cached || bodyWasEncoded {
 			var parsedBody map[string]any
 			if err := json.Unmarshal(sendBody, &parsedBody); err != nil {
-				h.rejectCodexTimezoneHTTP(c, apiKey.Group, subject.UserID, codexTimezoneRejectMalformed, "", streamStarted)
+				h.rejectCodexTimezoneHTTP(c, apiKey.Group, subject.UserID, &codexTimezoneRejection{reason: codexTimezoneRejectMalformed}, streamStarted)
 				return false
 			}
 			c.Set(service.OpenAIParsedRequestBodyKey, parsedBody)

@@ -517,19 +517,22 @@ func TestRewriteCodexEnvironmentTimeHugeEscapedStringMemory(t *testing.T) {
 	var stats CodexEnvironmentRewriteStats
 	var err error
 	allocated := measure(func() { out, stats, err = RewriteCodexEnvironmentTime(body, rewriteNow) })
-	if err != nil || stats.Blocks != 2 || stats.Timezones != 2 || stats.Dates != 2 {
+	// The block embedded in the huge string is rewritten too (it used to be
+	// skipped; the leak net then rejected the request), the unclosed
+	// mentions around it are not.
+	if err != nil || stats.Blocks != 3 || stats.Embedded != 1 || stats.Timezones != 3 || stats.Dates != 3 {
 		t.Fatalf("err=%v stats=%+v", err, stats)
 	}
 	// The only O(len) allocation is the rewritten output itself.
 	if extra := allocated - int64(cap(out)); extra > 4<<20 {
 		t.Fatalf("extra allocation %d bytes for a %d byte body", extra, len(body))
 	}
-	// The huge user string (mentioning the tag mid-text) is untouched; the
-	// two block strings are rewritten.
-	if !bytes.HasPrefix(out, body[:len(`{"input":[{"type":"function_call_output","output":"`)+2*len(filler)+len(block)]) {
-		t.Fatal("user content changed")
+	head := len(`{"input":[{"type":"function_call_output","output":"`) + len(filler)
+	grow := len(CodexRewriteTimezone) - len("Asia/Shanghai")
+	if !bytes.Equal(out[:head], body[:head]) || !bytes.Equal(out[head+len(block)+grow:head+len(block)+grow+len(filler)], body[head+len(block):head+len(block)+len(filler)]) {
+		t.Fatal("user content around the embedded block changed")
 	}
-	if bytes.Count(out, []byte(CodexRewriteTimezone)) != 2 {
+	if bytes.Count(out, []byte(CodexRewriteTimezone)) != 3 {
 		t.Fatalf("rewritten blocks = %d", bytes.Count(out, []byte(CodexRewriteTimezone)))
 	}
 
@@ -542,15 +545,17 @@ func TestRewriteCodexEnvironmentTimeHugeEscapedStringMemory(t *testing.T) {
 }
 
 // User text that merely mentions the tag is user content: never edited and
-// never rejected, whether the tag is closed or not.
+// never rejected, whether the tag is closed or not. (A well-formed block
+// embedded in user text is rewritten since the embedded-block change; see
+// TestRewriteCodexEnvironmentTimeEmbeddedBlocks.)
 func TestRewriteCodexEnvironmentTimeUserTextMentioningTag(t *testing.T) {
 	for _, text := range []string{
 		"please explain what <environment_context> means",
-		"see <environment_context><timezone>Asia/Shanghai</timezone></environment_context> above",
 		"<environment_context> is unclosed here",
 		"<environment_context><timezone>Asia/Shanghai</timezone>",
 		"the block ends with </environment_context>",
-		"x <environment_context><timezone>PRC</timezone></environment_context>",
+		"x <environment_context><timezone>PRC</environment_context>",
+		"x </environment_context><timezone>PRC</timezone><environment_context>",
 	} {
 		for _, body := range [][]byte{serdeBody(text), responsesBody(t, text)} {
 			out, stats, err := RewriteCodexEnvironmentTime(body, rewriteNow)
