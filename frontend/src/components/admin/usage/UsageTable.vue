@@ -139,6 +139,7 @@
                   <span class="font-medium text-gray-900 dark:text-white"><TokenCount :value="row.output_tokens" :label="t('tokens.output')" /></span>
                 </div>
               </div>
+              <InputContextIndicator :row="row" />
               <div v-if="row.cache_read_tokens > 0 || row.cache_creation_tokens > 0" class="flex items-center gap-2">
                 <div v-if="row.cache_read_tokens > 0" class="inline-flex items-center gap-1">
                   <svg class="h-3.5 w-3.5 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
@@ -415,6 +416,7 @@ import { useI18n } from 'vue-i18n'
 import { formatDateTime, formatReasoningEffort, getEffectiveReasoningEffort } from '@/utils/format'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { usageLongContext } from '@/utils/usageLongContext'
+import InputContextIndicator from '@/components/common/InputContextIndicator.vue'
 import LongContextIndicator from '@/components/common/LongContextIndicator.vue'
 import { isNativeChatUsage } from '@/utils/nativeChatUsage'
 import NativeChatCharges from '@/components/common/NativeChatCharges.vue'

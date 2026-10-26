@@ -32,3 +32,11 @@ export function usageLongContext(row?: Record | null): LongContextPricing | null
   return { applied: true, inferred: true, mode: 'whole_request', threshold: 272000, total_input_tokens: total,
     input_multiplier: 2, output_multiplier: 1.5, cache_read_multiplier: 2, cache_write_multiplier: 2 }
 }
+
+// A size observation, independent of the model's historical price policy.
+// Do not use this to infer a surcharge or to reprice stored usage.
+export function usageInputContext(row?: Record | null): number | null {
+  if (!row || isNativeChatUsage(row) || (row.image_count || 0) > 0 || /\/images\/(generations|edits)$/.test(row.inbound_endpoint || '')) return null
+  const total = (row.input_tokens || 0) + (row.cache_read_tokens || 0) + (row.cache_creation_tokens || 0)
+  return total > 272000 ? total : null
+}

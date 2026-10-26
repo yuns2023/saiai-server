@@ -57,7 +57,8 @@ describe('UsageCostCell', () => {
     const wrapper = render({ service_tier: tier })
     const icon = wrapper.get('[data-testid="usage-cost-tier-icon"]')
     expect(icon.attributes('aria-label')).toBe(`计费档位: ${label}`)
-    expect(cellText(wrapper)).not.toContain(label)
+    if (tier === 'priority' || tier === 'fast') expect(cellText(wrapper)).toContain('Priority / Fast')
+    else expect(cellText(wrapper)).not.toContain(label)
   })
 
   it('keeps multiplier chips visible', () => {
