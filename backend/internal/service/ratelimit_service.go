@@ -991,6 +991,17 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 				slog.Info("account_rate_limited", "account_id", account.ID, "platform", account.Platform, "reset_at", resetTime, "reset_in", time.Until(resetTime).Truncate(time.Second))
 				return
 			}
+			// Capacity/turn limits can carry only the standard Retry-After
+			// header, without a Codex quota reset or usage_limit_reached body.
+			if resetAt := parseOpenAIRetryAfter(headers.Get("Retry-After"), observedAt); resetAt != nil {
+				if err := s.setRateLimitedFromObservation(ctx, account, observedAt, *resetAt); err != nil {
+					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
+					return
+				}
+				slog.Info("openai_429_retry_after", "account_id", account.ID,
+					"reset_at", *resetAt, "retry_after_seconds", resetAt.Sub(observedAt).Seconds())
+				return
+			}
 		case PlatformGemini, PlatformAntigravity:
 			// 尝试解析 Gemini 格式（用于其他平台）
 			if resetAt := ParseGeminiRateLimitResetTime(responseBody); resetAt != nil {
@@ -1029,6 +1040,7 @@ func (s *RateLimitService) handle429ForModel(ctx context.Context, account *Accou
 			}
 			slog.Warn("openai_rate_limit_no_reset_time",
 				"account_id", account.ID,
+				"retry_after_present", strings.TrimSpace(headers.Get("Retry-After")) != "",
 				"cooldown", cooldown.String(),
 				"no_reset_count", count,
 				"escalated_after", openAINoReset429EscalatedAfter,
