@@ -129,6 +129,11 @@ func TestCodex429DuringResetIsQueuedAndRejected(t *testing.T) {
 		"no reset metadata": func(s *RateLimitService) {
 			s.handle429(context.Background(), openAI, http.Header{}, []byte(`{"error":{"type":"rate_limit_exceeded"}}`))
 		},
+		"retry-after header": func(s *RateLimitService) {
+			headers := http.Header{}
+			headers.Set("Retry-After", "205")
+			s.handle429(context.Background(), openAI, headers, nil)
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := newCodexFenceRepo()

@@ -14,6 +14,15 @@ as local provider-account quotas.
 - Quota errors are recognized in top-level `error` events and nested
   `response.failed` / failed `response.done` envelopes. Their reset timestamp
   and provider-supplied Codex quota headers are used for local scheduling.
+- For an OpenAI HTTP 429 (including a WebSocket handshake rejection), when
+  Codex headers and the error body provide no reset, honor a valid future
+  `Retry-After` deadline before using the generic 20-second backoff. Accept
+  integer delay-seconds and HTTP-date; relative delays start when the response
+  headers arrive. Invalid, zero, past-date, or overflowing values retain the
+  existing fallback and escalation policy. Log the parsed wait and deadline,
+  or only header presence on fallback, never arbitrary raw header values.
+  This scheduling change does not classify capacity errors as exhausted
+  subscription quota or authorize replay of an account-bound turn.
 - Official `codex.rate_limits` frames update the account's observed five-hour
   and weekly snapshots. Only the default Codex limit and explicit 300-minute
   or 10080-minute windows are interpreted as account quotas. Unknown and
