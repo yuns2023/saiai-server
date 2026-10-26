@@ -440,6 +440,8 @@ func TestCodexTimezoneRewriteLeakSafetyNet(t *testing.T) {
 		// Malformed embedded block (truncated tag): left untouched.
 		`note: <environment_context><timezone>Asia/Shanghai</timezone><current_date</environment_context>`,
 		`<timezone>Asia/Hong_Kong</timezone>`,
+		// A properly nested pair: ambiguous, left untouched.
+		`x <environment_context><environment_context><timezone>PRC</timezone></environment_context></environment_context>`,
 		// A tag outside the block next to a rewritten block.
 		`x <environment_context><timezone>PRC</timezone></environment_context> <timezone>Asia/Urumqi</timezone>`,
 	}

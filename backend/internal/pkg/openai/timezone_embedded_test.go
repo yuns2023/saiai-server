@@ -41,8 +41,27 @@ func TestRewriteCodexEnvironmentTimeEmbeddedBlocks(t *testing.T) {
 		"mention before block": func(b func(string, string) string) tc {
 			return tc{"what is <environment_context>? " + b("2026-10-25", "PRC"), "what is <environment_context>? " + b(rewriteToday, CodexRewriteTimezone), 1, 0}
 		},
+		// A stray close tag makes the string ambiguous (it may close an
+		// outer pair): nothing in it is rewritten; the leak net decides.
 		"stray close after block": func(b func(string, string) string) tc {
-			return tc{"x " + b("2026-10-25", "PRC") + " </environment_context>", "x " + b(rewriteToday, CodexRewriteTimezone) + " </environment_context>", 1, 0}
+			in := "x " + b("2026-10-25", "PRC") + " </environment_context>"
+			return tc{in, in, 0, 1}
+		},
+		"nested pair": func(b func(string, string) string) tc {
+			in := "x <environment_context>" + b("2026-10-25", "PRC") + "</environment_context>"
+			return tc{in, in, 0, 1}
+		},
+		"nested pair with text": func(b func(string, string) string) tc {
+			in := "x <environment_context> a " + b("2026-10-25", "PRC") + " b </environment_context> c"
+			return tc{in, in, 0, 1}
+		},
+		"good block then nested pair": func(b func(string, string) string) tc {
+			in := "x " + b("2026-10-25", "Asia/Macau") + " <environment_context>" + b("2026-10-25", "PRC") + "</environment_context>"
+			return tc{in, in, 0, 2}
+		},
+		"mention, block, mention": func(b func(string, string) string) tc {
+			return tc{"<environment_context> a " + b("2026-10-25", "PRC") + " <environment_context> z",
+				"<environment_context> a " + b(rewriteToday, CodexRewriteTimezone) + " <environment_context> z", 1, 0}
 		},
 		"malformed then good": func(b func(string, string) string) tc {
 			bad := "<environment_context><timezone>PRC</environment_context>"
@@ -253,7 +272,7 @@ func TestRewriteCodexEnvironmentTimeEmbeddedSizeLimits(t *testing.T) {
 func TestRewriteCodexEnvironmentTimeEmbeddedHugeStringBounded(t *testing.T) {
 	block := strings.ReplaceAll(envBlock("2026-10-01", "Asia/Shanghai"), "\n", `\n`)
 	filler := strings.Repeat(`\u001b[0m line \"q\" <environment_context> mention\n`, 200_000) // ~10 MiB
-	output := `<environment_context>` + filler + block + filler + block + `</environment_context>`
+	output := `<environment_context>` + filler + block + filler + block + ` <environment_context>`
 	body := []byte(`{"input":[{"type":"function_call_output","output":"x ` + output + `"}]}`)
 	var before, after runtime.MemStats
 	runtime.GC()
@@ -277,16 +296,23 @@ func TestRewriteCodexEnvironmentTimeEmbeddedHugeStringBounded(t *testing.T) {
 }
 
 // A whole-string block keeps failing closed when malformed; the embedded
-// rule only applies to other strings.
+// rules (including `\"` attribute quotes) only apply to other strings.
 func TestRewriteCodexEnvironmentTimeWholeBlockStillFailsClosed(t *testing.T) {
 	for _, text := range []string{
 		"<environment_context><timezone>PRC</environment_context>",
 		"  " + envBlock("2026-10-20", "PRC") + " text " + envBlock("2026-10-21", "PRC") + "\n",
+		// Decoded text holds literal backslashes before the quotes.
+		`<environment_context><current_date status=\\\"unavailable\\\" /><timezone>PRC</timezone></environment_context>`,
 	} {
 		body := serdeBody(text)
 		if _, _, err := RewriteCodexEnvironmentTime(body, rewriteNow); !errors.Is(err, ErrCodexEnvironmentMalformed) {
 			t.Fatalf("%q: err = %v", text, err)
 		}
+	}
+	// The same `\"` quotes in an embedded block are accepted.
+	embedded := serdeBody(`x <environment_context><current_date status=\\\"unavailable\\\" /><timezone>PRC</timezone></environment_context>`)
+	if _, stats := mustRewrite(t, embedded); stats.Embedded != 1 || stats.Timezones != 1 {
+		t.Fatalf("stats = %+v", stats)
 	}
 }
 

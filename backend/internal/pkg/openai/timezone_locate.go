@@ -13,14 +13,15 @@ import (
 // is safe to log.
 type CodexTimezoneLocation struct {
 	// Path is the JSON path of the string, e.g. `input[3].content[0].text`
-	// ("$" for a root string). Keys that are not `[A-Za-z0-9_]{1,64}` are
-	// rendered as "?"; the path is cut at codexLocationMaxPath bytes.
+	// ("$" for a root string). Keys outside codexLocationKeys are rendered as
+	// "?"; the path is cut at codexLocationMaxPath bytes.
 	Path string
 	// InKey reports that the string is an object key (Path then ends at the
 	// object holding it).
 	InKey bool
 	// ItemType and ItemRole are the `type` / `role` of the enclosing
-	// top-level `input` item, when present and `[a-z_]{1,40}` ("?" otherwise).
+	// top-level `input` item when present: a value from codexLocationItemTypes
+	// / codexLocationRoles, "?" for any other value.
 	ItemType, ItemRole string
 	// StringBytes is the decoded length of the string.
 	StringBytes int
@@ -38,11 +39,61 @@ type CodexTimezoneLocation struct {
 	// is that of the first close tag after the timezone tag (after
 	// EnvOpenOffset when TagOffset is -1). -1 when absent.
 	EnvOpenOffset, EnvCloseOffset int
-	// NearbyTags lists up to codexLocationMaxTags distinct tag names
-	// (`/?[a-z_]{1,40}`, in order of appearance) found within
+	// NearbyTags lists up to codexLocationMaxTags distinct tag names (in
+	// order of appearance, `/` prefix for closing tags) found within
 	// ±codexLocationTagWindow bytes of the timezone tag (of EnvOpenOffset when
-	// TagOffset is -1).
+	// TagOffset is -1). Only names in codexLocationTags are kept; any other
+	// tag-shaped name is reported once as "?".
 	NearbyTags []string
+}
+
+// Allowlists for logged identifiers. Everything logged is either a number,
+// a fixed structural name from these sets, or "?": user-chosen JSON keys,
+// enum-looking values and tag names never reach the log.
+var (
+	// codexLocationKeys are Responses request / Codex structural keys.
+	codexLocationKeys = codexLocationSet(
+		"model", "instructions", "input", "content", "type", "role", "text", "output", "arguments",
+		"name", "call_id", "id", "status", "summary", "encrypted_content", "tools", "tool_choice",
+		"parallel_tool_calls", "reasoning", "effort", "store", "stream", "include", "prompt_cache_key",
+		"format", "metadata", "client_metadata", "previous_response_id", "service_tier",
+		"internal_chat_message_metadata_passthrough", "content_item_kinds", "content_item_metadata",
+		"provenance", "turn_id", "create_time", "action", "command", "image_url", "detail", "file_id",
+		"filename", "file_data", "description", "parameters", "properties", "strict", "schema",
+		"query", "queries", "sources", "result", "phase", "execution", "working_directory", "env",
+		"timeout_ms", "user", "end_turn",
+	)
+	// codexLocationItemTypes are Responses / Codex input item and content types.
+	codexLocationItemTypes = codexLocationSet(
+		"message", "agent_message", "reasoning", "local_shell_call", "local_shell_call_output",
+		"function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output",
+		"tool_search_call", "tool_search_output", "web_search_call", "image_generation_call",
+		"compaction", "compaction_summary", "context_compaction", "compaction_trigger",
+		"configuration_update", "additional_tools", "item_reference", "file_search_call",
+		"computer_call", "computer_call_output", "mcp_call", "mcp_list_tools",
+		"mcp_approval_request", "mcp_approval_response",
+	)
+	codexLocationRoles = codexLocationSet("user", "assistant", "system", "developer", "tool")
+	// codexLocationTags are the tag names Codex (0.163/0.164) renders in
+	// environment_context and its other contextual fragments.
+	codexLocationTags = codexLocationSet(
+		"environment_context", "cwd", "shell", "shell_version", "current_date", "timezone",
+		"filesystem", "workspace_roots", "root", "permission_profile", "file_system", "entry",
+		"special", "path", "glob", "network", "allowed", "denied", "environments", "environment",
+		"subagents", "approval_policy", "sandbox_mode", "network_access", "writable_roots",
+		"writable_root", "user_instructions", "permissions", "apps_instructions",
+		"collaboration_mode", "skills_instructions", "plugins_instructions",
+		"environments_instructions", "multi_agent_mode", "realtime_conversation", "turn_aborted",
+		"user_shell_command", "subagent_notification", "model_switch", "hook_prompt",
+	)
+)
+
+func codexLocationSet(names ...string) map[string]struct{} {
+	set := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		set[name] = struct{}{}
+	}
+	return set
 }
 
 const (
@@ -82,8 +133,8 @@ func describeCodexJSONString(body []byte, start, tagOffset int) (CodexTimezoneLo
 	loc.Path, loc.InKey = path, inKey
 	if item >= 0 {
 		prefix := "input." + strconv.Itoa(item) + "."
-		loc.ItemType = codexLocationName(gjson.GetBytes(body, prefix+"type"))
-		loc.ItemRole = codexLocationName(gjson.GetBytes(body, prefix+"role"))
+		loc.ItemType = codexLocationName(gjson.GetBytes(body, prefix+"type"), codexLocationItemTypes)
+		loc.ItemRole = codexLocationName(gjson.GetBytes(body, prefix+"role"), codexLocationRoles)
 	}
 	end, escaped := jsonStringEnd(body, start)
 	if end < 0 {
@@ -126,8 +177,8 @@ func indexFrom(text, sep []byte, from int) int {
 }
 
 // codexNearbyTagNames returns the distinct tag names within the window
-// around anchor; only names matching `/?[a-z_]{1,40}` followed by '>', ' '
-// or '/' are kept.
+// around anchor: `/?[a-z_]{1,40}` followed by '>', ' ' or '/'. Names outside
+// codexLocationTags become "?".
 func codexNearbyTagNames(text []byte, anchor int) []string {
 	lo, hi := max(anchor-codexLocationTagWindow, 0), min(anchor+codexLocationTagWindow, len(text))
 	var names []string
@@ -150,6 +201,9 @@ func codexNearbyTagNames(text []byte, anchor int) []string {
 			continue
 		}
 		name := string(text[nameStart:i])
+		if _, known := codexLocationTags[string(text[letters:i])]; !known {
+			name = "?"
+		}
 		seen := false
 		for _, have := range names {
 			if have == name {
@@ -164,32 +218,16 @@ func codexNearbyTagNames(text []byte, anchor int) []string {
 	return names
 }
 
-// codexLocationName returns a schema enum value (`[a-z_]{1,40}`) as is, "?"
-// for any other present value and "" when absent.
-func codexLocationName(value gjson.Result) string {
+// codexLocationName returns an allowlisted value as is, "?" for any other
+// present value and "" when absent.
+func codexLocationName(value gjson.Result, allowed map[string]struct{}) string {
 	if !value.Exists() {
 		return ""
 	}
-	if value.Type == gjson.String && isCodexLocationIdent(value.Str, 40, false) {
+	if _, ok := allowed[value.Str]; ok && value.Type == gjson.String {
 		return value.Str
 	}
 	return "?"
-}
-
-func isCodexLocationIdent(s string, maxLen int, allowUpperDigits bool) bool {
-	if len(s) == 0 || len(s) > maxLen {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '_' || (c >= 'a' && c <= 'z'):
-		case allowUpperDigits && ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')):
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 type codexPathFrame struct {
@@ -284,7 +322,7 @@ func renderCodexJSONPath(frames []codexPathFrame, inKey bool) string {
 		if frame.keyEsc {
 			key = appendUnescapedJSONString(nil, key)
 		}
-		if isCodexLocationIdent(string(key), 64, true) {
+		if _, ok := codexLocationKeys[string(key)]; ok {
 			b = append(b, key...)
 		} else {
 			b = append(b, '?')

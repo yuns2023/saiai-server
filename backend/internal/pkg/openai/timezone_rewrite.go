@@ -511,53 +511,92 @@ func (rw *codexEnvironmentRewriter) rewriteEscapedText(raw []byte, rawBase int) 
 	return true, rw.rewriteBlock(rw.buf[:blockLen], func(i int) int { return offs[i] })
 }
 
-// Embedded blocks. In a string that is not a whole-string block, a block is
-// the text between an open tag and the first close tag after it, taking the
-// last open tag before that close tag (earlier unclosed open tags are
-// mentions). Each block that passes the whole-string block rules is
-// rewritten; one that does not (malformed tags, over the size limit) is left
-// untouched without an error. Close tags without an open tag are ignored.
+// Embedded blocks. In a string that is not a whole-string block, the
+// environment_context tags are read in order: a close tag pairs with the
+// open tag right before it, and earlier open tags without a close are
+// mentions. A string with a stray close tag (one not directly preceded by an
+// open tag, e.g. the outer close of a nested pair, or a mention after a block)
+// is ambiguous: nothing in it is rewritten. Otherwise each block that passes
+// the block rules is rewritten; one that does not (malformed tags, over the
+// size limit) is left untouched. Neither case is an error; the leak net still
+// sees any zone left.
+
+// embeddedScan snapshots the rewriter state at the start of one string so an
+// ambiguous string can be rolled back.
+type embeddedScan struct {
+	edits int
+	stats CodexEnvironmentRewriteStats
+}
+
+func (rw *codexEnvironmentRewriter) beginEmbedded() embeddedScan {
+	return embeddedScan{edits: len(rw.edits), stats: rw.stats}
+}
+
+// rollbackEmbedded drops every edit of the string and counts each of its
+// candidates seen so far (at least one) as skipped.
+func (rw *codexEnvironmentRewriter) rollbackEmbedded(scan embeddedScan) {
+	skipped := max(rw.stats.Embedded-scan.stats.Embedded+rw.stats.EmbeddedSkipped-scan.stats.EmbeddedSkipped, 1)
+	rw.edits = rw.edits[:scan.edits]
+	rw.stats = scan.stats
+	rw.stats.EmbeddedSkipped += skipped
+}
 
 // rewriteEmbeddedText scans an unescaped string in place.
 func (rw *codexEnvironmentRewriter) rewriteEmbeddedText(text []byte, rawBase int) {
-	for pos := 0; ; {
-		open := bytes.Index(text[pos:], environmentContextOpenTag)
-		if open < 0 {
-			return
+	scan := rw.beginEmbedded()
+	nextOpen, nextClose := -2, -2 // cached positions (-1: none, -2: unknown)
+	find := func(cached *int, tag []byte, pos int) int {
+		if *cached == -2 || (*cached >= 0 && *cached < pos) {
+			if at := bytes.Index(text[pos:], tag); at >= 0 {
+				*cached = pos + at
+			} else {
+				*cached = -1
+			}
 		}
-		blockStart := pos + open + len(environmentContextOpenTag)
-		closeAt := bytes.Index(text[blockStart:], environmentContextCloseTag)
+		return *cached
+	}
+	blockStart := -1 // content start of the open candidate
+	for pos := 0; ; {
+		closeAt := find(&nextClose, environmentContextCloseTag, pos)
 		if closeAt < 0 {
 			return
 		}
-		closeAt += blockStart
-		if last := bytes.LastIndex(text[blockStart:closeAt], environmentContextOpenTag); last >= 0 {
-			blockStart += last + len(environmentContextOpenTag)
+		if open := find(&nextOpen, environmentContextOpenTag, pos); open >= 0 && open < closeAt {
+			blockStart = open + len(environmentContextOpenTag)
+			pos = blockStart
+			continue
+		}
+		if blockStart < 0 {
+			rw.rollbackEmbedded(scan) // stray close: ambiguous structure
+			return
 		}
 		base := rawBase + blockStart
 		rw.embeddedBlock(text[blockStart:closeAt], func(i int) int { return base + i })
+		blockStart = -1
 		pos = closeAt + len(environmentContextCloseTag)
 	}
 }
 
 // rewriteEmbeddedEscapedText scans an escaped string unit by unit without
-// materializing it. Outside a candidate block it only skips to the next '<'
-// or `\u` escape and matches the open tag; inside one it buffers the decoded bytes
-// and their raw offsets up to the block limit plus the close tag, and beyond
-// that only the tag matchers run (the candidate is then skipped). Extra
-// memory is O(block limit) (rw.buf/rw.offs, reused) however long the string
-// is or however many candidates it holds; time is linear in the string.
+// materializing it. Between tags it only skips to the next '<' or `\u`
+// escape and runs the tag matchers; inside a candidate it buffers the decoded
+// bytes and their raw offsets up to the block limit plus the close tag, and
+// beyond that only the tag matchers run (the candidate is then skipped).
+// Extra memory is O(block limit) (rw.buf/rw.offs, reused) however long the
+// string is or however many candidates it holds; time is linear in the
+// string.
 func (rw *codexEnvironmentRewriter) rewriteEmbeddedEscapedText(raw []byte, rawBase int) {
+	scan := rw.beginEmbedded()
 	var unit [8]byte
 	const bufferLimit = codexEnvironmentBlockMaxBytes + len("</environment_context>")
 	openMatched, closeMatched := 0, 0
 	inBlock, overflow := false, false
 	rw.buf, rw.offs = rw.buf[:0], rw.offs[:0]
 	for i := 0; i < len(raw); {
-		if !inBlock && openMatched == 0 {
-			// Only '<' or a `\u` escape can start the open tag. Other units
-			// are skipped whole (a plain byte, or a two-byte escape), which
-			// keeps unit alignment.
+		if openMatched == 0 && closeMatched == 0 && !inBlock {
+			// Only '<' or a `\u` escape can start a tag. Other units are
+			// skipped whole (a plain byte, or a two-byte escape), which keeps
+			// unit alignment.
 			for i < len(raw) && raw[i] != '<' {
 				if raw[i] == '\\' && i+1 < len(raw) {
 					if raw[i+1] == 'u' {
@@ -577,15 +616,13 @@ func (rw *codexEnvironmentRewriter) rewriteEmbeddedEscapedText(raw []byte, rawBa
 		decoded, i = decodeJSONUnit(unit[:0], raw, i)
 		for _, b := range decoded {
 			openMatched = advanceTagMatch(environmentContextOpenTag, openMatched, b)
-			if inBlock {
-				closeMatched = advanceTagMatch(environmentContextCloseTag, closeMatched, b)
-				if !overflow {
-					if len(rw.buf) < bufferLimit {
-						rw.buf = append(rw.buf, b)
-						rw.offs = append(rw.offs, rawBase+unitStart)
-					} else {
-						overflow = true
-					}
+			closeMatched = advanceTagMatch(environmentContextCloseTag, closeMatched, b)
+			if inBlock && !overflow {
+				if len(rw.buf) < bufferLimit {
+					rw.buf = append(rw.buf, b)
+					rw.offs = append(rw.offs, rawBase+unitStart)
+				} else {
+					overflow = true
 				}
 			}
 			switch {
@@ -594,8 +631,13 @@ func (rw *codexEnvironmentRewriter) rewriteEmbeddedEscapedText(raw []byte, rawBa
 				openMatched, closeMatched = 0, 0
 				inBlock, overflow = true, false
 				rw.buf, rw.offs = rw.buf[:0], rw.offs[:0]
-			case inBlock && closeMatched == len(environmentContextCloseTag):
-				closeMatched, inBlock = 0, false
+			case closeMatched == len(environmentContextCloseTag):
+				openMatched, closeMatched = 0, 0
+				if !inBlock {
+					rw.rollbackEmbedded(scan) // stray close: ambiguous structure
+					return
+				}
+				inBlock = false
 				if overflow {
 					rw.stats.EmbeddedSkipped++
 					continue
@@ -623,7 +665,7 @@ func advanceTagMatch(tag []byte, matched int, b byte) int {
 // embeddedBlock rewrites one embedded block, or leaves it untouched when it
 // does not pass the block rules.
 func (rw *codexEnvironmentRewriter) embeddedBlock(block []byte, rawOffset func(int) int) {
-	zones, dates, err := rw.checkBlock(block)
+	zones, dates, err := rw.checkBlock(block, true)
 	if err != nil {
 		rw.stats.EmbeddedSkipped++
 		return
@@ -637,7 +679,7 @@ func (rw *codexEnvironmentRewriter) embeddedBlock(block []byte, rawOffset func(i
 // edits. rawOffset maps a block index (up to len(block)) to the body offset
 // of the unit that produced it.
 func (rw *codexEnvironmentRewriter) rewriteBlock(block []byte, rawOffset func(int) int) error {
-	zones, dates, err := rw.checkBlock(block)
+	zones, dates, err := rw.checkBlock(block, false)
 	if err != nil {
 		return err
 	}
@@ -650,13 +692,13 @@ func (rw *codexEnvironmentRewriter) rewriteBlock(block []byte, rawOffset func(in
 }
 
 // checkBlock validates a decoded block and returns its timezone and date
-// value spans.
-func (rw *codexEnvironmentRewriter) checkBlock(block []byte) (zones, dates [][2]int, err error) {
+// value spans. embedded allows `\"` attribute quotes (see selfClosingTagSize).
+func (rw *codexEnvironmentRewriter) checkBlock(block []byte, embedded bool) (zones, dates [][2]int, err error) {
 	if len(block) > codexEnvironmentBlockMaxBytes || bytes.Contains(block, environmentContextOpenTag) ||
 		bytes.Contains(block, environmentContextCloseTag) {
 		return nil, nil, ErrCodexEnvironmentMalformed
 	}
-	if err := validateCodexEnvironmentTags(block); err != nil {
+	if err := validateCodexEnvironmentTags(block, embedded); err != nil {
 		return nil, nil, err
 	}
 	zones, err = codexEnvironmentTagValues(block, timezoneOpenTag, timezoneCloseTag)
@@ -777,7 +819,7 @@ var (
 // (and closing) occurrence in block to be an exact tag, or for opening tags a
 // value-less self-closing tag such as `<current_date status="unavailable" />`.
 // Anything else (`<timezone >`, a truncated `<current_date`) is malformed.
-func validateCodexEnvironmentTags(block []byte) error {
+func validateCodexEnvironmentTags(block []byte, escapedQuotes bool) error {
 	for _, check := range codexEnvironmentTagChecks {
 		for pos := 0; ; {
 			at := bytes.Index(block[pos:], check.prefix)
@@ -790,7 +832,7 @@ func validateCodexEnvironmentTags(block []byte) error {
 			case bytes.HasPrefix(rest, check.exact):
 				pos = at + len(check.exact)
 			case check.selfClosing && len(rest) > len(check.prefix) && rest[len(check.prefix)] == ' ':
-				size, ok := selfClosingTagSize(rest, len(check.prefix))
+				size, ok := selfClosingTagSize(rest, len(check.prefix), escapedQuotes)
 				if !ok {
 					return ErrCodexEnvironmentMalformed
 				}
@@ -804,11 +846,12 @@ func validateCodexEnvironmentTags(block []byte) error {
 }
 
 // selfClosingTagSize parses ` name="value"`… `/>` (spaces allowed before
-// "/>") starting at tag[i] and returns the tag's total length. The quotes may
-// also be `\"` pairs: a block embedded in JSON text that is itself inside a
-// JSON string (e.g. a Codex rollout line read by a tool) keeps one level of
-// escaping after the body is decoded.
-func selfClosingTagSize(tag []byte, i int) (int, bool) {
+// "/>") starting at tag[i] and returns the tag's total length. With
+// escapedQuotes (embedded blocks only) the quotes may also be `\"` pairs: a
+// block embedded in JSON text that is itself inside a JSON string (e.g. a
+// Codex rollout line read by a tool) keeps one level of escaping after the
+// body is decoded. Whole-string blocks never accept them.
+func selfClosingTagSize(tag []byte, i int, escapedQuotes bool) (int, bool) {
 	for {
 		start := i
 		for i < len(tag) && tag[i] == ' ' {
@@ -828,7 +871,7 @@ func selfClosingTagSize(tag []byte, i int) (int, bool) {
 			return 0, false
 		}
 		quote := `"`
-		if tag[i+1] == '\\' {
+		if escapedQuotes && tag[i+1] == '\\' {
 			quote = `\"`
 		}
 		if !bytes.HasPrefix(tag[i+1:], []byte(quote)) {

@@ -62,8 +62,8 @@ func TestLocateChinaTimezonePaths(t *testing.T) {
 				EnvOpenOffset: -1, EnvCloseOffset: -1, NearbyTags: []string{"timezone", "/timezone"}},
 		},
 		"escaped and nested": {
-			`{"instructions":"x","tools":[[1,{"d":"<timezone>Asia/Macau</timezone>"}]]}`,
-			CodexTimezoneLocation{Path: "tools[0][1].d", StringBytes: 31, TagOffset: 0, EnvOpenOffset: -1, EnvCloseOffset: -1, NearbyTags: []string{"timezone", "/timezone"}},
+			`{"instructions":"x","tools":[[1,{"description":"<timezone>Asia/Macau</timezone>"}]]}`,
+			CodexTimezoneLocation{Path: "tools[0][1].description", StringBytes: 31, TagOffset: 0, EnvOpenOffset: -1, EnvCloseOffset: -1, NearbyTags: []string{"timezone", "/timezone"}},
 		},
 		"root string": {
 			`"<timezone>PRC</timezone>"`,
@@ -106,5 +106,28 @@ func TestLocateCodexJSONStringForMalformedBlock(t *testing.T) {
 	_, _, err = RewriteCodexEnvironmentTime([]byte(`{"input":`), rewriteNow)
 	if _, ok := CodexEnvironmentMalformedOffset(err); ok {
 		t.Fatal("invalid JSON has no string offset")
+	}
+}
+
+// Identifiers chosen by users or tools (JSON keys, enum-looking values, tag
+// names) are never logged verbatim: only allowlisted structural names pass.
+func TestLocateChinaTimezoneRedactsUnknownIdentifiers(t *testing.T) {
+	output := "<private_customer_alpha> <cwd>/x</cwd> <timezone>Asia/Shanghai</timezone> </private_customer_alpha> <acme_secret_project/> <shell>"
+	body := mustMarshal(t, map[string]any{"input": []any{
+		map[string]any{"type": "private_customer_alpha", "role": "acme_secret_project", "private_customer_alpha": map[string]any{"acme_secret_project": []any{output}}},
+	}})
+	_, loc, found := LocateChinaTimezone(body)
+	if !found {
+		t.Fatal("not found")
+	}
+	want := CodexTimezoneLocation{
+		Path: "input[0].?.?[0]", ItemType: "?", ItemRole: "?", StringBytes: len(output), TagOffset: strings.Index(output, "<timezone>"),
+		EnvOpenOffset: -1, EnvCloseOffset: -1, NearbyTags: []string{"?", "cwd", "/cwd", "timezone", "/timezone", "shell"},
+	}
+	if !reflect.DeepEqual(loc, want) {
+		t.Fatalf("got  %+v\nwant %+v", loc, want)
+	}
+	if text := locationText(loc); strings.Contains(text, "private") || strings.Contains(text, "acme") {
+		t.Fatalf("location leaks identifiers: %s", text)
 	}
 }

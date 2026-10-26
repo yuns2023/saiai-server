@@ -206,11 +206,12 @@ reinit message) and the original bytes are never forwarded.
   zone, UA product/version, transport and turn — never the body. When the
   offending string is known (a CN zone match, or a malformed whole-string
   block) location-only `loc_*` fields are added: JSON path with array indices
-  (e.g. `input[37].output`; keys that are not plain identifiers render as `?`),
-  the enclosing `input` item's `type`/`role`, decoded string length, offset of
-  the `<timezone>` tag, `<environment_context>` open/close counts and offsets,
-  and up to 12 nearby tag names (`/?[a-z_]{1,40}` only). No text or tag
-  values are logged.
+  (e.g. `input[37].output`), the enclosing `input` item's `type`/`role`,
+  decoded string length, offset of the `<timezone>` tag,
+  `<environment_context>` open/close counts and offsets, and up to 12 nearby
+  tag names. Keys, type/role and tag names come from fixed allowlists of
+  Responses/Codex structural names; anything else is logged as `?`. No text
+  or tag values are logged.
 
 Limitations:
 
@@ -220,7 +221,8 @@ Limitations:
   entirely one `<environment_context>` block (fail closed when malformed) and
   every well-formed block embedded in a larger string such as tool output or
   pasted text (a malformed embedded mention is left untouched, never
-  rejected by itself); its leak safety net rejects any CN `<timezone>` value
+  rejected by itself; a string with a stray close tag, e.g. a nested pair, is
+  ambiguous and nothing in it is rewritten); its leak safety net rejects any CN `<timezone>` value
   left elsewhere (outside a block, or in a malformed embedded block), as
   reject mode would.
 - Reject mode scans JSON object keys as well as values.

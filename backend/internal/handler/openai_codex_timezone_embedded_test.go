@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -57,19 +58,26 @@ func tzEmbeddedHistory(t *testing.T, serde bool, extra map[string]any) []byte {
 	return body
 }
 
-// requireTZEmbeddedRewritten checks the model-visible text of every block.
-func requireTZEmbeddedRewritten(t *testing.T, sent []byte) {
+// requireTZEmbeddedRewritten checks the model-visible text of every block:
+// LA zone and exactly wantDate (the LA date of the frozen clock).
+func requireTZEmbeddedRewritten(t *testing.T, sent []byte, wantDate string) {
 	t.Helper()
 	require.True(t, gjson.ValidBytes(sent))
 	require.NotContains(t, gjson.GetBytes(sent, "input").Raw, "Asia")
-	require.Contains(t, gjson.GetBytes(sent, "input.0.content.0.text").String(), "<timezone>America/Los_Angeles</timezone>")
+	want := strings.NewReplacer("Asia/Shanghai", "America/Los_Angeles", "2026-10-26", wantDate).Replace(tzEmbeddedCNBlock)
+	require.Equal(t, want, gjson.GetBytes(sent, "input.0.content.0.text").String())
 	rollout := gjson.GetBytes(sent, "input.3.output").String()
 	line := strings.Split(rollout, "\n")[2]
-	inner := gjson.Get(line, "payload.content.0.text").String()
-	require.Contains(t, inner, "<timezone>America/Los_Angeles</timezone>", "rollout line rewritten")
-	require.NotContains(t, inner, "2026-10-26")
-	require.Contains(t, gjson.GetBytes(sent, "input.4.output").String(), "<timezone>America/Los_Angeles</timezone> </environment_context> (end)")
+	require.Equal(t, want, gjson.Get(line, "payload.content.0.text").String(), "rollout line rewritten")
+	require.Equal(t, "log.txt:12: "+strings.ReplaceAll(want, "\n", " ")+" (end)", gjson.GetBytes(sent, "input.4.output").String())
 	require.Equal(t, `{"cmd":"tail -1 rollout.jsonl"}`, gjson.GetBytes(sent, "input.2.arguments").String())
+}
+
+func freezeTZNow(t *testing.T, now time.Time) {
+	t.Helper()
+	saved := codexTimezoneNow
+	t.Cleanup(func() { codexTimezoneNow = saved })
+	codexTimezoneNow = func() time.Time { return now }
 }
 
 func tzObservedContext(t *testing.T, method string) (*gin.Context, *observer.ObservedLogs) {
@@ -88,6 +96,8 @@ func tzObservedContext(t *testing.T, method string) (*gin.Context, *observer.Obs
 // Those requests now pass over HTTP and WS, and the bytes sent upstream carry
 // Los Angeles everywhere.
 func TestCodexTimezoneRewriteEmbeddedHistoryPasses(t *testing.T) {
+	// 2026-10-26 05:00 UTC is 2026-10-25 22:00 in Los Angeles.
+	freezeTZNow(t, time.Date(2026, 10, 26, 5, 0, 0, 0, time.UTC))
 	f := newTZRewriteFixture(t)
 	for _, serde := range []bool{false, true} {
 		rec := f.post("/v1/responses", string(tzEmbeddedHistory(t, serde, nil)))
@@ -109,7 +119,10 @@ func TestCodexTimezoneRewriteEmbeddedHistoryPasses(t *testing.T) {
 		original := tzEmbeddedHistory(t, serde, nil)
 		sent, ok := h.applyCodexTimezoneGuardHTTP(c, f.group, 1, original, &codexTimezoneFrozenDate{}, false)
 		require.True(t, ok)
-		requireTZEmbeddedRewritten(t, sent)
+		requireTZEmbeddedRewritten(t, sent, "2026-10-25")
+		again, ok := h.applyCodexTimezoneGuardHTTP(c, f.group, 1, sent, &codexTimezoneFrozenDate{}, false)
+		require.True(t, ok)
+		require.Equal(t, string(sent), string(again), "idempotent")
 	}
 	rewritten := logs.FilterMessage("openai.codex_timezone_rewritten").All()
 	require.Len(t, rewritten, 2)
@@ -119,7 +132,14 @@ func TestCodexTimezoneRewriteEmbeddedHistoryPasses(t *testing.T) {
 	wsc, _ := tzObservedContext(t, http.MethodGet)
 	out, err := rewriteCodexTimezoneWS(context.Background(), wsc, nil, f.group, 1, 4, frame, &codexTimezoneTurnDates{})
 	require.NoError(t, err)
-	requireTZEmbeddedRewritten(t, out)
+	requireTZEmbeddedRewritten(t, out, "2026-10-25")
+
+	// When the LA date already matches, only the zone changes.
+	freezeTZNow(t, time.Date(2026, 10, 26, 20, 0, 0, 0, time.UTC)) // 13:00 LA
+	out, err = rewriteCodexTimezoneWS(context.Background(), wsc, nil, f.group, 1, 5, frame, &codexTimezoneTurnDates{})
+	require.NoError(t, err)
+	requireTZEmbeddedRewritten(t, out, "2026-10-26")
+	require.Len(t, out, len(frame)+3*(len("America/Los_Angeles")-len("Asia/Shanghai")))
 }
 
 // A bare CN tag outside any block is still rejected; the rejection log says
