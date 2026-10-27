@@ -83,8 +83,11 @@ A request is rejected when any decoded JSON string of the request (history
 included) contains `<timezone>ZONE</timezone>` with a trimmed, case-sensitive
 ZONE in `Asia/Shanghai`, `Asia/Urumqi`, `Asia/Chongqing`, `Asia/Chungking`,
 `Asia/Harbin`, `Asia/Kashgar`, `PRC`, `Asia/Hong_Kong`, `Hongkong`,
-`Asia/Macau` or `Asia/Macao`. JSON-escaped forms (`\u003c`, `\/`) match too.
-The scan is read-only; forwarded bytes are unchanged.
+`Asia/Macau` or `Asia/Macao`, or the Codex Desktop timezone sentence
+`The user's timezone is ZONE` (fixed, case-sensitive anchor; ZONE is the
+longest run of IANA name characters `[A-Za-z0-9/_+-]` right after it, at most
+64 bytes) with ZONE in that set. JSON-escaped forms (`\u003c`, `\/`,
+`\u0027`) match too. The scan is read-only; forwarded bytes are unchanged.
 
 ### Rewrite
 
@@ -127,9 +130,19 @@ that is exactly `YYYY-MM-DD` becomes the Los Angeles date as below (a
 same-string heuristic: other strings' dates are untouched). Other zones
 outside blocks are untouched. Logs count these as `loose_timezones`.
 
+**Timezone sentence.** Codex Desktop (26.1021+) appends `The user's timezone
+is ZONE; use it for dates, times, and recurring schedules unless specified
+otherwise.` (OS zone) to the collaboration-mode developer instructions of aeon
+threads; app-server sends it as a `<collaboration_mode>` developer message in
+every request of the thread. It has no tag. In the same strings as loose
+tags, a CN/HK/Macau ZONE after the anchor (the reject rule above) becomes
+`America/Los_Angeles`; every other byte is kept and no date is edited (the
+sentence carries none; the deadline sentence after it is UTC). Logs count
+these as `sentence_timezones`.
+
 As a leak safety net, the bytes that will
 actually be sent are then scanned exactly like reject mode: a CN/HK/Macau
-`<timezone>` value still present anywhere is rejected like reject mode (400
+`<timezone>` value or timezone sentence still present anywhere is rejected like reject mode (400
 `codex_timezone_reinit_required`, log reason `cn_timezone_after_rewrite`).
 After loose-tag rewriting that is only possible where the rewrite never
 edits: a JSON object key or an item metadata string.
@@ -202,7 +215,8 @@ reinit message) and the original bytes are never forwarded.
   payload that cannot be rewritten (the first frame is checked before account
   selection).
 - Logs record `openai.codex_timezone_rewritten` (INFO: group, user, transport,
-  turn, block / timezone / date / loose-timezone counts) — never the body.
+  turn, block / timezone / date / loose-timezone / sentence-timezone counts)
+  — never the body.
 
 ### Rejection responses
 
