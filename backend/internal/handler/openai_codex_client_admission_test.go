@@ -65,7 +65,6 @@ func TestOpenAICodexAdmissionRejectsBeforeScheduling(t *testing.T) {
 				})
 				router.POST("/v1/responses", h.Responses)
 				router.GET("/v1/responses", h.ResponsesWebSocket)
-				router.GET("/v1/models", h.CodexModels)
 				headers := http.Header{}
 				headers.Set("User-Agent", tc.ua)
 				headers.Set("originator", tc.originator)
@@ -77,12 +76,6 @@ func TestOpenAICodexAdmissionRejectsBeforeScheduling(t *testing.T) {
 				req.Header = headers.Clone()
 				router.ServeHTTP(rec, req)
 				require.Equal(t, http.StatusForbidden, rec.Code)
-
-				modelsRec := httptest.NewRecorder()
-				modelsReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-				modelsReq.Header = headers.Clone()
-				router.ServeHTTP(modelsRec, modelsReq)
-				require.Equal(t, http.StatusForbidden, modelsRec.Code)
 
 				server := httptest.NewServer(router)
 				defer server.Close()

@@ -2,19 +2,19 @@ package handler
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	pkgopenai "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 // CodexModels serves the live Codex model manifest. Model discovery is kept
 // separate from request admission: the selected upstream account remains the
-// authority for what it advertises, while unknown model IDs can still be sent
-// to /v1/responses and decided by that upstream.
+// authority for what it advertises (minus the group's blocked models), while
+// unknown model IDs can still be sent to /v1/responses and decided there.
 func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey.Group == nil {
@@ -25,18 +25,24 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex models manifest is only available for OpenAI groups")
 		return
 	}
-	policyMatched := codexClientPolicyMatched(c, apiKey.Group.CodexClientPolicy)
-	if strings.EqualFold(apiKey.Group.CodexClientPolicy, "local_proxy_only") {
-		policyMatched = codexLocalProxyModelsRequestMatched(c)
-	}
-	if !policyMatched {
-		logCodexClientPolicyRejection(c, apiKey.Group)
-		if strings.EqualFold(apiKey.Group.CodexClientPolicy, "local_proxy_only") {
-			h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", "此分组仅允许通过 SAIAI 本地代理使用官方 Codex 客户端。")
-		} else {
-			h.errorResponse(c, http.StatusForbidden, "official_client_required", "This group only allows approved Codex clients")
+	// Discovery is open to every valid key of the group: it is read-only and
+	// unbilled, and model turns keep their own client policy. Non-official
+	// clients are fetched with the gateway's Codex identity instead of theirs.
+	headers := c.Request.Header
+	ifNoneMatch := c.GetHeader("If-None-Match")
+	filterBlocked := len(apiKey.Group.BlockedModelPatterns) > 0
+	if official := pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")); !official || filterBlocked {
+		headers = headers.Clone()
+		if !official {
+			service.ApplyCodexModelsDiscoveryIdentity(headers, c.Query("client_version"))
 		}
-		return
+		if filterBlocked {
+			// A filtered catalog must not be revalidated against the upstream
+			// validator, otherwise a blacklist change would keep a stale list.
+			headers.Del("If-None-Match")
+			headers.Del("If-Modified-Since")
+			ifNoneMatch = ""
+		}
 	}
 
 	maxSwitches := h.maxAccountSwitches
@@ -59,7 +65,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			return
 		}
 
-		manifest, err := h.gatewayService.FetchNativeCodexModelsManifest(c.Request.Context(), account, c.Request.URL.RawQuery, c.GetHeader("If-None-Match"), c.Request.Header)
+		manifest, err := h.gatewayService.FetchNativeCodexModelsManifest(c.Request.Context(), account, c.Request.URL.RawQuery, ifNoneMatch, headers)
 		if err != nil {
 			if c.Request.Context().Err() != nil {
 				return
@@ -73,8 +79,26 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			return
 		}
 
+		body := manifest.Body
+		if filterBlocked {
+			if manifest.NotModified {
+				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Codex models manifest returned 304 to an unconditional request")
+				return
+			}
+			if body, err = service.FilterCodexModelsManifest(body, apiKey.Group.IsModelBlocked); err != nil {
+				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Codex models manifest has an invalid models array")
+				return
+			}
+		}
 		if account.IsOpenAIOAuth() || account.IsOpenAICodexNativeRelay() {
 			h.gatewayService.WriteNativeCodexResponseHeaders(c.Writer.Header(), manifest.Headers)
+		}
+		if filterBlocked {
+			c.Writer.Header().Del("ETag")
+			c.Writer.Header().Del("Last-Modified")
+			c.Header("Cache-Control", "private, no-store")
+			c.Data(http.StatusOK, "application/json", body)
+			return
 		}
 		if manifest.ETag != "" && !account.IsOpenAIOAuth() && !account.IsOpenAICodexNativeRelay() {
 			c.Header("ETag", manifest.ETag)
@@ -83,7 +107,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			c.Status(http.StatusNotModified)
 			return
 		}
-		c.Data(http.StatusOK, "application/json", manifest.Body)
+		c.Data(http.StatusOK, "application/json", body)
 		return
 	}
 }

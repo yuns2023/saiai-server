@@ -1416,14 +1416,6 @@ func enforceCodexContinuationAccountBoundary(c *gin.Context, account *service.Ac
 	return codexLocalProxyRequestMatched(c, c.GetHeader("User-Agent"), strings.ToLower(strings.TrimSpace(c.GetHeader("originator"))))
 }
 
-// Model discovery is a control-plane request. Require an approved Codex
-// client, but do not infer proxy mode from optional auth/version headers.
-// The selected upstream account supplies its own ChatGPT account ID on egress.
-// Responses model ingress retains both local-proxy shape requirements.
-func codexLocalProxyModelsRequestMatched(c *gin.Context) bool {
-	return c != nil && pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
-}
-
 const codexLocalProxyIdentityIncompleteMessage = "本地代理身份信息不完整，请重新运行 SAIAI Codex 初始化并重启代理及 Codex。"
 
 func (h *OpenAIGatewayHandler) validateCodexClientPolicyHTTP(c *gin.Context, group *service.Group) bool {

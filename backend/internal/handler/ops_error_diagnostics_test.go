@@ -90,7 +90,6 @@ func TestOpsDiagnosticsPassedPolicyAndControlPlane(t *testing.T) {
 	models, _ := gin.CreateTestContext(httptest.NewRecorder())
 	models.Request = httptest.NewRequest("GET", "/v1/models", nil)
 	models.Request.Header.Set("User-Agent", "codex-tui/0.163.0")
-	require.True(t, codexLocalProxyModelsRequestMatched(models))
 	attachOpsErrorDiagnostics(models, entry)
 	require.Empty(t, entry.Diagnostics.Checks, "model discovery must not claim identity checks were evaluated")
 }

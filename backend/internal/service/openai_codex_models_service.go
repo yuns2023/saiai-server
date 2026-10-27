@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -510,6 +511,63 @@ func convertOpenAIModelListToCodexManifest(body []byte) []byte {
 		return body
 	}
 	return converted
+}
+
+var codexModelsDiscoveryVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$`)
+
+// ApplyCodexModelsDiscoveryIdentity replaces the client identity of a model
+// discovery request from a non-official Codex client (for example an
+// app-server control client with its own clientInfo name). Discovery is open
+// to every valid key, but an unrecognized originator must never reach the
+// upstream account. Other headers, including relay metadata, are kept.
+func ApplyCodexModelsDiscoveryIdentity(headers http.Header, clientVersion string) {
+	userAgent := codexCLIUserAgent
+	if version := strings.TrimSpace(clientVersion); codexModelsDiscoveryVersionPattern.MatchString(version) {
+		userAgent = "codex_cli_rs/" + version
+	}
+	headers.Set("User-Agent", userAgent)
+	headers.Set("Originator", "codex_cli_rs")
+}
+
+// FilterCodexModelsManifest removes catalog entries whose slug is blocked.
+// The original bytes are returned when nothing is removed; otherwise only the
+// models array is rewritten and every other field is preserved.
+func FilterCodexModelsManifest(body []byte, blocked func(string) bool) ([]byte, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(envelope["models"], &entries); err != nil || entries == nil {
+		return nil, errors.New("top-level models field is not an array")
+	}
+	kept := make([]json.RawMessage, 0, len(entries))
+	for _, entry := range entries {
+		// Read the exact "slug" key; struct decoding would also accept "Slug".
+		var model map[string]json.RawMessage
+		if err := json.Unmarshal(entry, &model); err != nil || model == nil {
+			return nil, errors.New("models entry is not an object")
+		}
+		if rawSlug, ok := model["slug"]; ok {
+			var slug string
+			if err := json.Unmarshal(rawSlug, &slug); err != nil {
+				return nil, errors.New("models entry slug is not a string")
+			}
+			if blocked(slug) {
+				continue
+			}
+		}
+		kept = append(kept, entry)
+	}
+	if len(kept) == len(entries) {
+		return body, nil
+	}
+	models, err := json.Marshal(kept)
+	if err != nil {
+		return nil, err
+	}
+	envelope["models"] = models
+	return json.Marshal(envelope)
 }
 
 func validateCodexModelsManifestEnvelope(body []byte) error {
