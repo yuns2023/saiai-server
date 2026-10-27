@@ -74,21 +74,31 @@ const revokingId = ref<number | null>(null)
 
 const formatOptional = (value: string | null | undefined) => (value ? formatDateTime(value) : t('admin.users.clientProof.modal.never'))
 
-watch(() => [props.show, props.user?.id], ([show]) => {
-  if (show && props.user) load()
-}, { immediate: true })
+// Only the latest request for the current user may update the list.
+let loadSeq = 0
 
 const load = async () => {
   if (!props.user) return
+  const userID = props.user.id
+  const seq = ++loadSeq
   loading.value = true
   try {
-    devices.value = await adminAPI.users.getClientDevices(props.user.id)
+    const result = await adminAPI.users.getClientDevices(userID)
+    if (seq === loadSeq) devices.value = result
   } catch (error: any) {
-    appStore.showError(error?.response?.data?.detail || error?.message || t('admin.users.clientProof.modal.loadFailed'))
+    if (seq === loadSeq) appStore.showError(error?.response?.data?.detail || error?.message || t('admin.users.clientProof.modal.loadFailed'))
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
+
+watch(() => [props.show, props.user?.id], ([show], previous) => {
+  if (!previous || previous[1] !== props.user?.id) {
+    loadSeq++
+    devices.value = []
+  }
+  if (show && props.user) load()
+}, { immediate: true })
 
 const revoke = async (device: ClientDevice) => {
   if (!props.user || !window.confirm(t('admin.users.clientProof.modal.revokeConfirm', { id: device.device_id }))) return

@@ -109,19 +109,25 @@ change the wire format.
   authentication looks keys up verbatim (no OAuth-style mapping), so on the
   Claude path this is Claude Code's own Bearer value forwarded by the local
   proxy. `x-api-key` / `x-goog-api-key` are never the hash input: without a
-  Bearer token a request carrying no proof is `missing`, and a proof sent with
-  only `x-api-key` is `invalid`.
+  Bearer token a request carrying no proof is `missing`, and any proof sent
+  without a Bearer token is `invalid` (including one signed over `sha256("")`).
 - Verification order: missing → parse (`invalid`) → device lookup (`unverified`
   on DB error/timeout; `unknown_device` when absent or owned by another user) →
   signature (`invalid`) → revoked → freshness (`stale`) → nonce `SET NX EX 900`
   (`replay`; `unverified` on Redis error/timeout) → `valid`. Only otherwise-valid
-  proofs consume a nonce. More than one proof header is `invalid`.
-- Policy: computed only when the authenticated key's group has `observe`
-  (or the reserved `enforce`, treated the same in v1); usage rows store the
-  status only when the final (post smart-switch) key's group collects
-  attestation, otherwise NULL. Requests are never rejected.
+  proofs consume a nonce. More than one proof header is `invalid`. The nonce
+  store uses a dedicated Redis client with `ContextTimeoutEnabled`, so the
+  200 ms deadline bounds socket I/O (the shared client waits for its
+  `ReadTimeout`). If the verifier is not configured, observe groups record
+  `unverified`.
+- Policy: computed when the authenticated key's group has `observe` (or the
+  reserved `enforce`, treated the same in v1), or when the key has smart
+  switching enabled (a later switch may land in an observe group); usage rows
+  store the status only when the final (post smart-switch) key's group
+  collects attestation, otherwise NULL. Requests are never rejected.
 - Caching: device lookups are cached in-process for 60 s (absent devices for
-  10 s); revoking through the admin API drops the local entry immediately.
+  10 s); revoking through the admin API drops the local entry immediately, and a
+  lookup that raced a local revoke does not repopulate the cache.
   `last_seen_at`/`last_ip` and `last_claude_at`/`last_codex_at` (by group
   platform: OpenAI → Codex, Anthropic → Claude) are updated only for `valid`
   proofs, at most once per (device, field) per 5 minutes per instance, off the

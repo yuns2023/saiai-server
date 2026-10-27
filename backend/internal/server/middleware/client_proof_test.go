@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/clientproof"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -125,12 +126,36 @@ func TestClientProofMiddlewarePolicyOffCollectsNothing(t *testing.T) {
 	}
 }
 
-func TestClientProofMiddlewareNilVerifierOnlyStrips(t *testing.T) {
+func TestClientProofMiddlewareNilVerifierIsUnverifiedUnderObserve(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	req.Header.Set(clientproof.HeaderName, "v1.proof")
 	seen := runClientProof(t, nil, observeKey(service.ClientAttestationPolicyObserve, service.PlatformOpenAI), req)
+	require.Equal(t, int16(clientproof.StatusUnverified), *seen.status)
+	require.Empty(t, seen.proofHeader)
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	req.Header.Set(clientproof.HeaderName, "v1.proof")
+	seen = runClientProof(t, nil, observeKey(service.ClientAttestationPolicyOff, service.PlatformOpenAI), req)
 	require.Nil(t, seen.status)
 	require.Empty(t, seen.proofHeader)
+}
+
+// A smart-switch key bound to an off group may be switched into an observe
+// group later; the status is computed up front and gated at usage time.
+func TestClientProofMiddlewareComputesForSmartSwitchKeys(t *testing.T) {
+	verifier := &recordingProofVerifier{status: clientproof.StatusMissing}
+	key := observeKey(service.ClientAttestationPolicyOff, service.PlatformOpenAI)
+	key.SmartSwitch = &domain.KeySmartSwitchPolicy{Enabled: true}
+	seen := runClientProof(t, verifier, key, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	require.Equal(t, int16(clientproof.StatusMissing), *seen.status)
+	require.Len(t, verifier.calls, 1)
+	require.Nil(t, service.ClientAttestationForUsage(seen.status, key), "still NULL if the final group is off")
+
+	key.SmartSwitch.Enabled = false
+	verifier.calls = nil
+	seen = runClientProof(t, verifier, key, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	require.Nil(t, seen.status)
+	require.Empty(t, verifier.calls)
 }
 
 func TestGetClientAttestationIgnoresUnknownValues(t *testing.T) {

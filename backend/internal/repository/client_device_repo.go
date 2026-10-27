@@ -235,8 +235,21 @@ type clientProofNonceStore struct {
 }
 
 // NewClientProofNonceStore stores seen proof nonces in Redis (SET NX EX).
+// The shared client does not honor context deadlines on socket I/O
+// (ContextTimeoutEnabled is off, so reads wait for ReadTimeout). The proof
+// check sits on the request path with a short deadline, so it uses its own
+// small client that does honor them.
 func NewClientProofNonceStore(rdb *redis.Client) service.ClientProofNonceStore {
-	return &clientProofNonceStore{rdb: rdb}
+	if rdb == nil {
+		return &clientProofNonceStore{}
+	}
+	opts := *rdb.Options()
+	opts.ContextTimeoutEnabled = true
+	if opts.PoolSize <= 0 || opts.PoolSize > 16 {
+		opts.PoolSize = 16
+	}
+	opts.MinIdleConns = 0
+	return &clientProofNonceStore{rdb: redis.NewClient(&opts)}
 }
 
 func (s *clientProofNonceStore) Claim(ctx context.Context, deviceID, nonce string, ttl time.Duration) (bool, error) {

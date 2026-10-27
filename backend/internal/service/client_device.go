@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/clientproof"
@@ -178,8 +179,11 @@ type ClientDeviceService struct {
 	repo    ClientDeviceRepository
 	nonces  ClientProofNonceStore
 	devices *gocache.Cache
-	touches *gocache.Cache
-	now     func() time.Time
+	// revocations is bumped on every local revoke; a lookup that started
+	// before a revoke must not repopulate the cache with the stale row.
+	revocations atomic.Uint64
+	touches     *gocache.Cache
+	now         func() time.Time
 	// touchAsync runs throttled last_* updates off the request path.
 	touchAsync func(func())
 }
@@ -256,6 +260,7 @@ func (s *ClientDeviceService) RevokeUserDevice(ctx context.Context, userID, id, 
 	if err != nil {
 		return err
 	}
+	s.revocations.Add(1)
 	s.devices.Delete(deviceID)
 	slog.Log(ctx, slog.LevelInfo, "client_device_revoked", "user_id", userID, "client_device_id", id, "revoked_by", revokedBy)
 	return nil
@@ -314,6 +319,11 @@ func (s *ClientDeviceService) VerifyProof(ctx context.Context, req ClientProofRe
 	if err != nil {
 		return clientproof.StatusInvalid
 	}
+	// The proof binds the Authorization Bearer value; without one (e.g.
+	// x-api-key only) no proof can be valid, including one over sha256("").
+	if req.APIKey == "" {
+		return clientproof.StatusInvalid
+	}
 	if s == nil || s.repo == nil {
 		return clientproof.StatusUnverified
 	}
@@ -360,6 +370,7 @@ func (s *ClientDeviceService) lookupDevice(ctx context.Context, deviceID string)
 			return entry, nil
 		}
 	}
+	generation := s.revocations.Load()
 	lookupCtx, cancel := context.WithTimeout(ctx, clientDeviceLookupTimeout)
 	defer cancel()
 	device, err := s.repo.GetByDeviceID(lookupCtx, deviceID)
@@ -367,14 +378,15 @@ func (s *ClientDeviceService) lookupDevice(ctx context.Context, deviceID string)
 		return cachedClientDevice{}, err
 	}
 	entry := cachedClientDevice{device: device}
+	ttl := clientDeviceCacheTTL
 	if device == nil {
-		s.devices.Set(deviceID, entry, clientDeviceNegativeCacheTTL)
-		return entry, nil
-	}
-	if key, keyErr := clientproof.ParsePublicKey(device.PublicKey); keyErr == nil {
+		ttl = clientDeviceNegativeCacheTTL
+	} else if key, keyErr := clientproof.ParsePublicKey(device.PublicKey); keyErr == nil {
 		entry.key = key
 	}
-	s.devices.Set(deviceID, entry, clientDeviceCacheTTL)
+	if s.revocations.Load() == generation {
+		s.devices.Set(deviceID, entry, ttl)
+	}
 	return entry, nil
 }
 

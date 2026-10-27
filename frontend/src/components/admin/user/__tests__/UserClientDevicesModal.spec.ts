@@ -49,4 +49,22 @@ describe('UserClientDevicesModal', () => {
     expect(wrapper.find('[data-testid="client-devices-empty"]').exists()).toBe(true)
     wrapper.unmount()
   })
+
+  it('drops the previous user\'s devices and late responses when switching users', async () => {
+    let resolveA: (v: object[]) => void = () => {}
+    listDevices.mockReset()
+    listDevices.mockImplementationOnce(() => new Promise((resolve) => { resolveA = resolve }))
+    listDevices.mockResolvedValueOnce([{ ...device, id: 9, user_id: 2, device_id: 'cd_CCCCCCCCCCCCCCCCCCCCCC' }])
+    const wrapper = mount(UserClientDevicesModal, {
+      props: { show: true, user: { id: 1, email: 'a@example.com' } as any },
+      global: { stubs: { BaseDialog: dialog } }
+    })
+    await wrapper.setProps({ user: { id: 2, email: 'b@example.com' } as any })
+    await flushPromises()
+    resolveA([device])
+    await flushPromises()
+    expect(wrapper.text()).toContain('cd_CCCCCCCCCCCCCCCCCCCCCC')
+    expect(wrapper.text()).not.toContain('cd_AAAAAAAAAAAAAAAAAAAAAA')
+    wrapper.unmount()
+  })
 })

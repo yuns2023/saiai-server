@@ -25,6 +25,7 @@ type clientDeviceRepoFake struct {
 	touches   []ClientDeviceTouch
 	enrollOut ClientDeviceEnrollOutcome
 	enrollIn  []ClientDeviceEnrollInput
+	onLookup  func()
 }
 
 func (f *clientDeviceRepoFake) Enroll(_ context.Context, in ClientDeviceEnrollInput, _ int) (*ClientDevice, ClientDeviceEnrollOutcome, error) {
@@ -38,6 +39,11 @@ func (f *clientDeviceRepoFake) Enroll(_ context.Context, in ClientDeviceEnrollIn
 }
 
 func (f *clientDeviceRepoFake) GetByDeviceID(_ context.Context, id string) (*ClientDevice, error) {
+	if f.onLookup != nil {
+		hook := f.onLookup
+		f.onLookup = nil
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lookups++
@@ -355,4 +361,37 @@ func TestGatewayServiceRecordUsage_ClientAttestationPersistedOnlyForObserveGroup
 	observed := record(ClientAttestationPolicyObserve).ClientAttestation
 	require.NotNil(t, observed)
 	require.Equal(t, int16(clientproof.StatusValid), *observed)
+}
+
+func TestClientProofWithoutBearerIsInvalid(t *testing.T) {
+	f := newProofFixture(t)
+	nonce, err := clientproof.NewNonce()
+	require.NoError(t, err)
+	// A real device signing over sha256("") must not pass when no Bearer was sent.
+	header, err := clientproof.Sign(f.priv, f.device.DeviceID, "POST", "/v1/responses?x=1", f.now.Unix(), nonce, "")
+	require.NoError(t, err)
+	req := f.request(header)
+	req.APIKey = ""
+	require.Equal(t, clientproof.StatusInvalid, f.svc.VerifyProof(context.Background(), req))
+	require.Empty(t, f.nonces.seen)
+}
+
+func TestClientProofRevokeDuringLookupDoesNotRepopulateCache(t *testing.T) {
+	ctx := context.Background()
+	f := newProofFixture(t)
+	// The lookup reads the active row, then a revoke lands before the cache
+	// write (simulated by revoking from inside the repository call).
+	f.repo.onLookup = func() {
+		copied := *f.device
+		f.repo.mu.Lock()
+		f.repo.devices[f.device.DeviceID] = &copied
+		f.repo.mu.Unlock()
+		f.svc.revocations.Add(1)
+	}
+	require.Equal(t, clientproof.StatusValid, f.svc.VerifyProof(ctx, f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))))
+	_, cached := f.svc.devices.Get(f.device.DeviceID)
+	require.False(t, cached, "a lookup that raced a revoke is not cached")
+
+	require.NoError(t, f.svc.RevokeUserDevice(ctx, 7, f.device.ID, 1))
+	require.Equal(t, clientproof.StatusRevoked, f.svc.VerifyProof(ctx, f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))))
 }

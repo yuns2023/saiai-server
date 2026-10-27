@@ -23,9 +23,11 @@ const contextKeyClientAttestation = "client_attestation_status"
 //
 //   - The header is always removed from the inbound request, so no upstream
 //     path can copy it (each upstream header filter also denies it).
-//   - The status is computed only when the authenticated key's group has
-//     client_attestation_policy observe (or reserved enforce); otherwise the
-//     context carries no status and usage rows store NULL.
+//   - The status is computed when the authenticated key's group has
+//     client_attestation_policy observe (or reserved enforce), or when the key
+//     has smart switching enabled (a later switch may land in an observe
+//     group). Usage rows persist it only if the final group collects
+//     attestation; otherwise they store NULL.
 //
 // The signed target is c.Request.RequestURI, the raw request-line target set
 // by net/http. No gateway middleware rewrites it (InboundEndpointMiddleware
@@ -36,14 +38,17 @@ func ClientProof(verifier ClientProofVerifier) gin.HandlerFunc {
 		c.Request.Header.Del(clientproof.HeaderName)
 
 		apiKey, ok := GetAPIKeyFromContext(c)
-		if !ok || apiKey == nil || verifier == nil || !apiKey.Group.CollectsClientAttestation() {
+		if !ok || apiKey == nil || !clientProofMayBeRecorded(apiKey) {
 			c.Next()
 			return
 		}
 		var status clientproof.Status
-		if len(values) > 1 {
+		switch {
+		case verifier == nil:
+			status = clientproof.StatusUnverified
+		case len(values) > 1:
 			status = clientproof.StatusInvalid
-		} else {
+		default:
 			header := ""
 			if len(values) == 1 {
 				header = values[0]
@@ -61,6 +66,13 @@ func ClientProof(verifier ClientProofVerifier) gin.HandlerFunc {
 		SetClientAttestation(c, status)
 		c.Next()
 	}
+}
+
+func clientProofMayBeRecorded(apiKey *service.APIKey) bool {
+	if apiKey.Group.CollectsClientAttestation() {
+		return true
+	}
+	return apiKey.SmartSwitch != nil && apiKey.SmartSwitch.Enabled
 }
 
 func clientProofTarget(c *gin.Context) string {
