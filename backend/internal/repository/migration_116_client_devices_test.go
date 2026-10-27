@@ -30,4 +30,9 @@ func TestMigration116ClientDevicesIsIdempotentAndMetadataOnly(t *testing.T) {
 	require.False(t, strings.HasSuffix(name, "_notx.sql"))
 	require.NotContains(t, strings.ToUpper(sql), "CONCURRENTLY")
 	require.Equal(t, "off", group.DefaultClientAttestationPolicy)
+	// The usage_logs ACCESS EXCLUSIVE lock is taken by the final statement.
+	statements := strings.Split(strings.TrimSpace(sql), ";")
+	last := strings.TrimSpace(statements[len(statements)-2])
+	require.True(t, strings.HasSuffix(last, "ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS client_attestation SMALLINT"), last)
+	require.Equal(t, 1, strings.Count(sql, "ALTER TABLE usage_logs"))
 }

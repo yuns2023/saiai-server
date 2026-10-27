@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -126,8 +127,9 @@ func TestClientDeviceEnrollRevokedKey(t *testing.T) {
 func TestClientDeviceEnrollLimit(t *testing.T) {
 	repo := &enrollRepoFake{}
 	router := newEnrollRouter(repo, 7)
+	// Seed directly: enrolling 50 over HTTP would hit the per-user rate limit.
 	for i := 0; i < service.ClientDeviceLimit; i++ {
-		require.Equal(t, http.StatusOK, postEnroll(router, enrollBody(newEnrollPublicKey(t))).Code)
+		repo.devices = append(repo.devices, &service.ClientDevice{ID: int64(i + 1), UserID: 7, PublicKeySHA256: fmt.Sprintf("%064x", i)})
 	}
 	w := postEnroll(router, enrollBody(newEnrollPublicKey(t)))
 	require.Equal(t, http.StatusTooManyRequests, w.Code)
@@ -159,4 +161,16 @@ func TestClientDeviceEnrollValidation(t *testing.T) {
 	}
 	ok := `{"public_key":"` + key + `","client_version":"` + strings.Repeat("v", 64) + `","os":"` + strings.Repeat("o", 32) + `","arch":"` + strings.Repeat("a", 32) + `"}`
 	require.Equal(t, http.StatusOK, postEnroll(router, ok).Code, "limits are inclusive")
+}
+
+func TestClientDeviceEnrollRateLimitedIs503WithRetryAfter(t *testing.T) {
+	router := newEnrollRouter(&enrollRepoFake{}, 7)
+	key := newEnrollPublicKey(t)
+	for i := 0; i < 10; i++ {
+		require.Equal(t, http.StatusOK, postEnroll(router, enrollBody(key)).Code)
+	}
+	w := postEnroll(router, enrollBody(key))
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Equal(t, "60", w.Header().Get("Retry-After"))
+	require.JSONEq(t, `{"code":"client_device_busy"}`, w.Body.String())
 }

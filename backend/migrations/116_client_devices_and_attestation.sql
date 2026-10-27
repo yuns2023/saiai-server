@@ -6,7 +6,7 @@
 --    collected. No default, no backfill, no index: adding the column is a
 --    metadata-only change, but it briefly takes an ACCESS EXCLUSIVE lock, so
 --    lock_timeout makes the migration fail fast instead of queueing behind
---    long-running usage_logs queries. The admin 7-day aggregate uses the
+--    long-running usage_logs queries. It is the last statement (see below). The admin 7-day aggregate uses the
 --    existing idx_usage_logs_user_created (user_id, created_at).
 -- 3. groups.client_attestation_policy: 'off' (default) | 'observe' |
 --    'enforce'. 'enforce' is reserved; the v1 admin API accepts off/observe.
@@ -38,8 +38,6 @@ CREATE INDEX IF NOT EXISTS idx_client_devices_user_active
     ON client_devices(user_id)
     WHERE revoked_at IS NULL;
 
-ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS client_attestation SMALLINT;
-
 ALTER TABLE groups ADD COLUMN IF NOT EXISTS client_attestation_policy VARCHAR(16) NOT NULL DEFAULT 'off';
 
 DO $$
@@ -53,3 +51,8 @@ BEGIN
             CHECK (client_attestation_policy IN ('off', 'observe', 'enforce'));
     END IF;
 END $$;
+
+-- Last statement on purpose: the brief ACCESS EXCLUSIVE lock on usage_logs is
+-- taken only after the groups/client_devices work, and is held for the shortest
+-- possible time before COMMIT (lock_timeout above still applies).
+ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS client_attestation SMALLINT;

@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/clientproof"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -84,19 +83,17 @@ func TestClientProofMiddlewareObserveRecordsStatusAndStripsHeader(t *testing.T) 
 	require.Equal(t, "/v1/messages?beta=true&q=%2Fa%20b", call.Target, "raw request-line target, escapes preserved")
 	require.Equal(t, "sk-presented", call.APIKey, "the presented bearer key, trimmed like API-key auth")
 	require.Equal(t, int64(7), call.UserID)
-	require.Equal(t, service.PlatformAnthropic, call.Platform)
+	require.Equal(t, service.ClientSurfaceClaude, call.Surface, "surface by route")
 	require.Equal(t, "198.51.100.7", call.ClientIP)
-	require.False(t, call.SkipTouch)
 }
 
-func TestClientProofMiddlewareMissingHeaderStillVerifies(t *testing.T) {
-	verifier := &recordingProofVerifier{status: clientproof.StatusMissing}
+func TestClientProofMiddlewareMissingHeaderDoesNoIO(t *testing.T) {
+	verifier := &recordingProofVerifier{status: clientproof.StatusValid}
 	req := httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	req.Header.Set("x-api-key", "sk-x")
-	seen := runClientProof(t, verifier, observeKey(service.ClientAttestationPolicyObserve, service.PlatformOpenAI), req)
+	seen := runClientProof(t, verifier, observeKey(service.ClientAttestationPolicyOff, service.PlatformOpenAI), req)
 	require.Equal(t, int16(clientproof.StatusMissing), *seen.status)
-	require.Equal(t, "", verifier.calls[0].Header)
-	require.Equal(t, "", verifier.calls[0].APIKey, "x-api-key is never the signed key")
+	require.Empty(t, verifier.calls, "no header → no verifier call")
 }
 
 func TestClientProofMiddlewareDuplicateHeadersAreInvalid(t *testing.T) {
@@ -110,61 +107,46 @@ func TestClientProofMiddlewareDuplicateHeadersAreInvalid(t *testing.T) {
 	require.Empty(t, seen.proofHeader)
 }
 
-func TestClientProofMiddlewarePolicyOffCollectsNothing(t *testing.T) {
+// A present header is verified whatever the initial group's policy (smart
+// switch or fallbacks may move the request to an observe group); usage rows
+// keep it only when the final group collects attestation.
+func TestClientProofMiddlewareVerifiesRegardlessOfInitialPolicy(t *testing.T) {
 	for _, key := range []*service.APIKey{
 		observeKey(service.ClientAttestationPolicyOff, service.PlatformOpenAI),
 		observeKey("", service.PlatformOpenAI),
-		{ID: 3, UserID: 7},
-		nil,
+		{ID: 3, UserID: 7}, // no group: must not panic
 	} {
 		verifier := &recordingProofVerifier{status: clientproof.StatusValid}
-		req := httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
 		req.Header.Set(clientproof.HeaderName, "v1.proof")
 		seen := runClientProof(t, verifier, key, req)
-		require.Nil(t, seen.status, "off → NULL in usage_logs")
-		require.Empty(t, verifier.calls)
+		require.Equal(t, int16(clientproof.StatusValid), *seen.status)
+		require.Len(t, verifier.calls, 1)
+		require.Equal(t, service.ClientSurfaceCodex, verifier.calls[0].Surface)
 		require.Empty(t, seen.proofHeader, "the header is stripped regardless of policy")
+		require.Nil(t, service.ClientAttestationForUsage(seen.status, key), "final group off → NULL")
+		observe := *key
+		observe.Group = &service.Group{ClientAttestationPolicy: service.ClientAttestationPolicyObserve}
+		require.NotNil(t, service.ClientAttestationForUsage(seen.status, &observe), "final group observe → stored")
 	}
+
+	// Without an authenticated key nothing is recorded, but the header is still stripped.
+	req := httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	req.Header.Set(clientproof.HeaderName, "v1.proof")
+	seen := runClientProof(t, &recordingProofVerifier{}, nil, req)
+	require.Nil(t, seen.status)
+	require.Empty(t, seen.proofHeader)
 }
 
-func TestClientProofMiddlewareNilVerifierIsUnverifiedUnderObserve(t *testing.T) {
+func TestClientProofMiddlewareNilVerifier(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	req.Header.Set(clientproof.HeaderName, "v1.proof")
 	seen := runClientProof(t, nil, observeKey(service.ClientAttestationPolicyObserve, service.PlatformOpenAI), req)
 	require.Equal(t, int16(clientproof.StatusUnverified), *seen.status)
 	require.Empty(t, seen.proofHeader)
 
-	req = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
-	req.Header.Set(clientproof.HeaderName, "v1.proof")
-	seen = runClientProof(t, nil, observeKey(service.ClientAttestationPolicyOff, service.PlatformOpenAI), req)
-	require.Nil(t, seen.status)
-	require.Empty(t, seen.proofHeader)
-}
-
-// A smart-switch key bound to an off group may be switched into an observe
-// group later; the status is computed up front and gated at usage time.
-func TestClientProofMiddlewareComputesForSmartSwitchKeys(t *testing.T) {
-	verifier := &recordingProofVerifier{status: clientproof.StatusMissing}
-	key := observeKey(service.ClientAttestationPolicyOff, service.PlatformOpenAI)
-	key.SmartSwitch = &domain.KeySmartSwitchPolicy{Enabled: true}
-	seen := runClientProof(t, verifier, key, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	seen = runClientProof(t, nil, observeKey(service.ClientAttestationPolicyObserve, service.PlatformOpenAI), httptest.NewRequest(http.MethodGet, "/v1/responses", nil))
 	require.Equal(t, int16(clientproof.StatusMissing), *seen.status)
-	require.Len(t, verifier.calls, 1)
-	require.Nil(t, service.ClientAttestationForUsage(seen.status, key), "still NULL if the final group is off")
-
-	require.True(t, verifier.calls[0].SkipTouch, "off group: no device activity side effects")
-
-	noGroup := &service.APIKey{ID: 3, UserID: 7, SmartSwitch: &domain.KeySmartSwitchPolicy{Enabled: true}}
-	verifier.calls = nil
-	seen = runClientProof(t, verifier, noGroup, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
-	require.Equal(t, int16(clientproof.StatusMissing), *seen.status, "nil group does not panic")
-	require.Equal(t, "", verifier.calls[0].Platform)
-
-	key.SmartSwitch.Enabled = false
-	verifier.calls = nil
-	seen = runClientProof(t, verifier, key, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
-	require.Nil(t, seen.status)
-	require.Empty(t, verifier.calls)
 }
 
 func TestGetClientAttestationIgnoresUnknownValues(t *testing.T) {

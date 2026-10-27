@@ -85,7 +85,8 @@ change the wire format.
   `client_devices`, nullable `usage_logs.client_attestation SMALLINT` (no
   default, no backfill, no index) and `groups.client_attestation_policy`
   (`off` default; CHECK allows `off|observe|enforce`; the admin API accepts only
-  `off|observe`). The 7-day admin aggregate uses the existing
+  `off|observe`). The `usage_logs` column is added by the last statement so
+  its brief ACCESS EXCLUSIVE lock is taken after the other DDL. The 7-day admin aggregate uses the existing
   `idx_usage_logs_user_created (user_id, created_at)`.
 - Enrollment responses are the flat JSON bodies of §2 (not the admin
   `{code,message,data}` envelope). Validation failures return
@@ -112,28 +113,47 @@ change the wire format.
   Bearer token a request carrying no proof is `missing`, and any proof sent
   without a Bearer token is `invalid` (including one signed over `sha256("")`).
 - Verification order: missing → parse (`invalid`) → device lookup (`unverified`
-  on DB error/timeout; `unknown_device` when absent or owned by another user) →
-  signature (`invalid`) → revoked → freshness (`stale`) → nonce `SET NX EX 900`
+  on DB error/timeout or when the lookup concurrency cap is reached;
+  `unknown_device` when absent or owned by another user) → signature
+  (`invalid`) → revoked → freshness (`stale`) → nonce `SET NX EX 900`
   (`replay`; `unverified` on Redis error/timeout) → `valid`. Only otherwise-valid
-  proofs consume a nonce. More than one proof header is `invalid`. The shared
-  Redis client ignores context deadlines on socket I/O, so the nonce store
-  waits for the command only until the 200 ms deadline; at most 64 commands run
-  in the background (more fail fast as `unverified`), each bounded by a 2 s
-  pool/retry timeout plus the client `ReadTimeout`. If the verifier is not configured, observe groups record
-  `unverified`.
-- Policy: computed when the authenticated key's group has `observe` (or the
-  reserved `enforce`, treated the same in v1), or when the key has smart
-  switching enabled (a later switch may land in an observe group; such a
-  precompute in an off group never updates device `last_*`); usage rows
-  store the status only when the final (post smart-switch) key's group
-  collects attestation, otherwise NULL. Requests are never rejected.
+  proofs consume a nonce. More than one proof header is `invalid`; a present
+  header with no verifier configured is `unverified`.
+- Latency budget (synchronous, request path): device lookup ≤ 150 ms (only on a
+  cache miss) + nonce claim ≤ 100 ms, so the worst-case added latency is about
+  **250 ms**; signature verification is CPU-only (well under 1 ms) and device
+  activity updates are asynchronous. A cached device adds at most the 100 ms
+  nonce budget. Requests without the header add no I/O.
+- Concurrency caps (all non-blocking): at most 16 uncached device lookups
+  (beyond → `unverified` without I/O); at most 64 nonce commands in flight
+  (beyond → `unverified`). The shared Redis client ignores context deadlines on
+  socket I/O, so the caller stops waiting at its deadline while the command
+  finishes in the background, bounded by a 2 s pool/retry timeout plus the
+  client `ReadTimeout`. At most 8 device activity updates run at once (beyond →
+  the update is dropped and retried by a later valid request).
+- Policy: a present proof header is verified whatever the authenticated
+  group's policy, because smart switching or fallbacks can move the request to
+  an observe group later; a request without the header is `missing` with no
+  I/O. Usage rows store the status only when the final (post smart-switch /
+  fallback) group's policy is `observe` (or the reserved `enforce`, treated the
+  same in v1), otherwise NULL. Requests are never rejected.
 - Caching: device lookups are cached in-process for 60 s (absent devices for
-  10 s); revoking through the admin API drops the local entry immediately, and a
-  lookup that raced a local revoke does not repopulate the cache.
-  `last_seen_at`/`last_ip` and `last_claude_at`/`last_codex_at` (by group
-  platform: OpenAI → Codex, Anthropic → Claude) are updated only for `valid`
-  proofs, at most once per (device, field) per 5 minutes per instance, off the
-  request path.
+  10 s) in a cache capped at 10 000 entries (expired entries are swept first,
+  then arbitrary ones evicted). Revoking through the admin API drops the local
+  entry immediately, and a lookup that raced a local revoke does not
+  repopulate the cache.
+- Device activity: every `valid` proof, regardless of group policy, updates
+  `last_seen_at`/`last_ip` and, chosen by route, `last_claude_at`
+  (`/v1/messages`, `/v1/messages/count_tokens`) or `last_codex_at`
+  (`/v1/responses*`, `/responses*`, `/backend-api/codex/*`,
+  `/chatgpt/backend-api/*`); other routes update `last_seen_at`/`last_ip` only.
+  Each (device, field) is updated at most once per 5 minutes per instance,
+  off the request path.
+- Enrollment protection: at most 4 enrollments run at once per process (taken
+  before any DB connection), at most 10 per user per minute, and the whole
+  transaction has a 3 s timeout. Busy or rate-limited enrollments get
+  `503 {"code":"client_device_busy"}` with `Retry-After: 60`; the client retries
+  on 5xx with backoff.
 - Header stripping: the middleware deletes `X-Saiai-Client-Proof` from the
   inbound request on every gateway route regardless of policy, and the OpenAI
   header denylist (HTTP, WebSocket, native relay, images, Chat updates) also

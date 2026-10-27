@@ -155,7 +155,7 @@ func (f *proofFixture) header(t *testing.T, target string, ts int64) string {
 }
 
 func (f *proofFixture) request(header string) ClientProofRequest {
-	return ClientProofRequest{Header: header, Method: "POST", Target: "/v1/responses?x=1", APIKey: proofTestAPIKey, UserID: 7, Platform: PlatformOpenAI, ClientIP: "203.0.113.5"}
+	return ClientProofRequest{Header: header, Method: "POST", Target: "/v1/responses?x=1", APIKey: proofTestAPIKey, UserID: 7, Surface: ClientSurfaceCodex, ClientIP: "203.0.113.5"}
 }
 
 func TestClientProofVerifyStatuses(t *testing.T) {
@@ -272,7 +272,7 @@ func TestClientProofTouchIsThrottledPerField(t *testing.T) {
 	require.Equal(t, []ClientDeviceTouch{{IP: "203.0.113.5", Seen: true, Codex: true}}, f.repo.touches)
 
 	claude := f.request(f.header(t, "/v1/messages", f.now.Unix()))
-	claude.Target, claude.Platform = "/v1/messages", PlatformAnthropic
+	claude.Target, claude.Surface = "/v1/messages", ClientSurfaceClaude
 	require.Equal(t, clientproof.StatusValid, f.svc.VerifyProof(ctx, claude))
 	require.Equal(t, ClientDeviceTouch{IP: "203.0.113.5", Claude: true}, f.repo.touches[1], "only the not-yet-touched field is updated")
 
@@ -386,22 +386,140 @@ func TestClientProofRevokeDuringLookupDoesNotRepopulateCache(t *testing.T) {
 		f.repo.mu.Lock()
 		f.repo.devices[f.device.DeviceID] = &copied
 		f.repo.mu.Unlock()
-		f.svc.cacheMu.Lock()
-		f.svc.revocations++
-		f.svc.cacheMu.Unlock()
+		f.svc.devices.revoke("unrelated")
 	}
 	require.Equal(t, clientproof.StatusValid, f.svc.VerifyProof(ctx, f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))))
-	_, cached := f.svc.devices.Get(f.device.DeviceID)
+	_, cached := f.svc.devices.get(f.device.DeviceID)
 	require.False(t, cached, "a lookup that raced a revoke is not cached")
 
 	require.NoError(t, f.svc.RevokeUserDevice(ctx, 7, f.device.ID, 1))
 	require.Equal(t, clientproof.StatusRevoked, f.svc.VerifyProof(ctx, f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))))
 }
 
-func TestClientProofSkipTouch(t *testing.T) {
+func TestClientSurfaceForPath(t *testing.T) {
+	for path, want := range map[string]string{
+		"/v1/messages":                        ClientSurfaceClaude,
+		"/v1/messages/count_tokens":           ClientSurfaceClaude,
+		"/v1/responses":                       ClientSurfaceCodex,
+		"/v1/responses/compact":               ClientSurfaceCodex,
+		"/responses":                          ClientSurfaceCodex,
+		"/responses/compact":                  ClientSurfaceCodex,
+		"/backend-api/codex/models":           ClientSurfaceCodex,
+		"/chatgpt/backend-api/f/conversation": ClientSurfaceCodex,
+		"/v1/models":                          "",
+		"/v1/usage":                           "",
+		"/v1/images/generations":              "",
+		"/v1beta/models/x:generateContent":    "",
+		"/v1/responsesx":                      "",
+	} {
+		require.Equal(t, want, ClientSurfaceForPath(path), path)
+	}
+}
+
+func TestClientDeviceCacheIsBounded(t *testing.T) {
+	cache := newClientDeviceCache(100)
+	for i := 0; i < 1000; i++ {
+		cache.setIfCurrent(time.Unix(int64(i), 0).String(), cachedClientDevice{}, time.Minute, cache.generation())
+		require.LessOrEqual(t, cache.len(), 100)
+	}
+	cache = newClientDeviceCache(100)
+	for i := 0; i < 100; i++ {
+		cache.setIfCurrent(time.Unix(int64(i), 0).String(), cachedClientDevice{}, time.Minute, cache.generation())
+	}
+	require.Equal(t, 100, cache.len())
+	now := time.Now()
+	cache.now = func() time.Time { return now.Add(2 * time.Minute) }
+	cache.setIfCurrent("fresh", cachedClientDevice{}, time.Minute, cache.generation())
+	require.Equal(t, 1, cache.len(), "expired entries are swept first")
+	_, ok := cache.get("fresh")
+	require.True(t, ok)
+}
+
+func TestClientProofLookupConcurrencyCapIsUnverifiedWithoutIO(t *testing.T) {
 	f := newProofFixture(t)
-	req := f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))
-	req.SkipTouch = true
-	require.Equal(t, clientproof.StatusValid, f.svc.VerifyProof(context.Background(), req))
-	require.Empty(t, f.repo.touches)
+	for i := 0; i < cap(f.svc.lookupSlots); i++ {
+		f.svc.lookupSlots <- struct{}{}
+	}
+	require.Equal(t, clientproof.StatusUnverified, f.svc.VerifyProof(context.Background(), f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))))
+	require.Zero(t, f.repo.lookups)
+	// Cached devices are still served while lookups are saturated.
+	<-f.svc.lookupSlots
+	require.Equal(t, clientproof.StatusValid, f.svc.VerifyProof(context.Background(), f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))))
+	f.svc.lookupSlots <- struct{}{}
+	require.Equal(t, clientproof.StatusValid, f.svc.VerifyProof(context.Background(), f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))))
+	require.Equal(t, 1, f.repo.lookups)
+}
+
+func TestClientProofTouchCapDropsUpdateAndReleasesThrottle(t *testing.T) {
+	f := newProofFixture(t)
+	for i := 0; i < cap(f.svc.touchSlots); i++ {
+		f.svc.touchSlots <- struct{}{}
+	}
+	require.Equal(t, clientproof.StatusValid, f.svc.VerifyProof(context.Background(), f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))))
+	require.Empty(t, f.repo.touches, "dropped when all touch slots are busy")
+	<-f.svc.touchSlots
+	require.Equal(t, clientproof.StatusValid, f.svc.VerifyProof(context.Background(), f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))))
+	require.Len(t, f.repo.touches, 1, "throttle was released, so the next valid request updates")
+	require.Len(t, f.svc.touchSlots, cap(f.svc.touchSlots)-1, "slot released after the update")
+}
+
+type enrollDeadlineRepo struct {
+	clientDeviceRepoFake
+	deadline time.Duration
+	block    chan struct{}
+}
+
+func (r *enrollDeadlineRepo) Enroll(ctx context.Context, in ClientDeviceEnrollInput, limit int) (*ClientDevice, ClientDeviceEnrollOutcome, error) {
+	if dl, ok := ctx.Deadline(); ok {
+		r.deadline = time.Until(dl)
+	}
+	if r.block != nil {
+		<-r.block
+	}
+	return r.clientDeviceRepoFake.Enroll(ctx, in, limit)
+}
+
+func TestClientDeviceEnrollProtections(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	raw, err := priv.PublicKey.Bytes()
+	require.NoError(t, err)
+	key := base64.RawURLEncoding.EncodeToString(raw)
+	ctx := context.Background()
+
+	repo := &enrollDeadlineRepo{}
+	svc := NewClientDeviceService(repo, nil)
+	_, err = svc.Enroll(ctx, 7, 3, key, "", "", "")
+	require.NoError(t, err)
+	require.Greater(t, repo.deadline, 2*time.Second)
+	require.LessOrEqual(t, repo.deadline, 3*time.Second, "3 s timeout on the whole transaction")
+
+	// Per-user rate limit: 10 per minute, other users unaffected, resets after the window.
+	for i := 1; i < clientDeviceEnrollPerUser; i++ {
+		_, err = svc.Enroll(ctx, 7, 3, key, "", "", "")
+		require.NoError(t, err)
+	}
+	_, err = svc.Enroll(ctx, 7, 3, key, "", "", "")
+	require.ErrorIs(t, err, ErrClientDeviceBusy)
+	_, err = svc.Enroll(ctx, 8, 3, key, "", "", "")
+	require.NoError(t, err)
+	later := time.Now().Add(clientDeviceEnrollPeriod + time.Second)
+	svc.now = func() time.Time { return later }
+	_, err = svc.Enroll(ctx, 7, 3, key, "", "", "")
+	require.NoError(t, err)
+
+	// Concurrency cap is taken before the repository (DB) is reached.
+	for i := 0; i < cap(svc.enrollSlots); i++ {
+		svc.enrollSlots <- struct{}{}
+	}
+	calls := len(repo.enrollIn)
+	_, err = svc.Enroll(ctx, 9, 3, key, "", "", "")
+	require.ErrorIs(t, err, ErrClientDeviceBusy)
+	require.Len(t, repo.enrollIn, calls, "busy enrollments never reach the repository")
+}
+
+func (c *clientDeviceCache) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.entries)
 }

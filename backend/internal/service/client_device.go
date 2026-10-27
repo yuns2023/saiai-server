@@ -33,20 +33,64 @@ const (
 
 	clientDeviceCacheTTL         = 60 * time.Second
 	clientDeviceNegativeCacheTTL = 10 * time.Second
+	clientDeviceCacheMaxEntries  = 10000
 	clientDeviceTouchInterval    = 5 * time.Minute
-	clientDeviceLookupTimeout    = 300 * time.Millisecond
-	clientProofNonceTimeout      = 200 * time.Millisecond
 	clientDeviceTouchTimeout     = 2 * time.Second
 	clientAttestationWindow      = 7 * 24 * time.Hour
 	codexDeviceActiveWindow      = 30 * 24 * time.Hour
 	clientDeviceSummaryTimeout   = 2 * time.Second
+
+	// Request-path budgets: worst-case added latency is the device lookup
+	// plus the nonce claim (150 ms + 100 ms); everything else is CPU-only or
+	// asynchronous. See docs/CLIENT_PROOF_V1.md.
+	clientDeviceLookupTimeout = 150 * time.Millisecond
+	clientProofNonceTimeout   = 100 * time.Millisecond
+	// Concurrency caps (non-blocking; when full the work is skipped).
+	clientDeviceLookupConcurrency = 16 // full → unverified without I/O
+	clientDeviceTouchConcurrency  = 8  // full → the last_* update is dropped
+
+	// Enrollment protection: process-wide concurrency taken before any DB
+	// connection, a per-user fixed-window rate limit and a whole-transaction
+	// timeout. Busy/rate-limited → 503 + Retry-After (clients retry on 5xx).
+	clientDeviceEnrollConcurrency = 4
+	clientDeviceEnrollPerUser     = 10
+	clientDeviceEnrollPeriod      = time.Minute
+	clientDeviceEnrollTimeout     = 3 * time.Second
+	// ClientDeviceEnrollRetryAfter is the Retry-After (seconds) sent with 503.
+	ClientDeviceEnrollRetryAfter = 60
 )
+
+// Client surfaces for last_claude_at / last_codex_at, chosen by route.
+const (
+	ClientSurfaceClaude = "claude"
+	ClientSurfaceCodex  = "codex"
+)
+
+// ClientSurfaceForPath maps a gateway request path to the device activity
+// field it updates: Claude Messages → claude; Responses, Codex backend and
+// native ChatGPT → codex; anything else updates last_seen only.
+func ClientSurfaceForPath(path string) string {
+	switch {
+	case path == "/v1/messages" || path == "/v1/messages/count_tokens":
+		return ClientSurfaceClaude
+	case path == "/v1/responses" || strings.HasPrefix(path, "/v1/responses/"),
+		path == "/responses" || strings.HasPrefix(path, "/responses/"),
+		strings.HasPrefix(path, "/backend-api/codex/"),
+		strings.HasPrefix(path, "/chatgpt/backend-api/"):
+		return ClientSurfaceCodex
+	default:
+		return ""
+	}
+}
 
 var (
 	ErrClientDeviceRevoked  = infraerrors.Forbidden("client_device_revoked", "client device key was revoked")
 	ErrClientDeviceLimit    = infraerrors.TooManyRequests("client_device_limit", "client device limit reached")
 	ErrClientDeviceNotFound = infraerrors.NotFound("client_device_not_found", "client device not found")
 	ErrClientDeviceInvalid  = infraerrors.BadRequest("client_device_invalid", "invalid client device enrollment")
+	// ErrClientDeviceBusy covers both the enrollment concurrency cap and the
+	// per-user rate limit; the handler answers 503 with Retry-After.
+	ErrClientDeviceBusy = infraerrors.ServiceUnavailable("client_device_busy", "client device enrollment busy")
 )
 
 // NormalizeClientAttestationPolicy maps stored values; unknown → off.
@@ -165,11 +209,9 @@ type ClientProofRequest struct {
 	Target   string
 	APIKey   string
 	UserID   int64
-	Platform string
 	ClientIP string
-	// SkipTouch disables last_* updates (status computed for a group that
-	// does not itself collect attestation).
-	SkipTouch bool
+	// Surface selects last_claude_at / last_codex_at (ClientSurfaceForPath).
+	Surface string
 }
 
 type cachedClientDevice struct {
@@ -181,27 +223,69 @@ type cachedClientDevice struct {
 type ClientDeviceService struct {
 	repo    ClientDeviceRepository
 	nonces  ClientProofNonceStore
-	devices *gocache.Cache
-	// revocations is bumped on every local revoke; a lookup that started
-	// before a revoke must not repopulate the cache with the stale row.
-	// cacheMu makes "compare generation + Set" and "bump + Delete" atomic.
-	cacheMu     sync.Mutex
-	revocations uint64
-	touches     *gocache.Cache
-	now         func() time.Time
+	devices *clientDeviceCache
+	touches *gocache.Cache
+	now     func() time.Time
 	// touchAsync runs throttled last_* updates off the request path.
 	touchAsync func(func())
+
+	lookupSlots chan struct{}
+	touchSlots  chan struct{}
+	enrollSlots chan struct{}
+
+	enrollMu     sync.Mutex
+	enrollWindow map[int64]clientDeviceEnrollCounter
+}
+
+type clientDeviceEnrollCounter struct {
+	start time.Time
+	count int
 }
 
 func NewClientDeviceService(repo ClientDeviceRepository, nonces ClientProofNonceStore) *ClientDeviceService {
 	return &ClientDeviceService{
-		repo:       repo,
-		nonces:     nonces,
-		devices:    gocache.New(clientDeviceCacheTTL, 2*clientDeviceCacheTTL),
-		touches:    gocache.New(clientDeviceTouchInterval, 2*clientDeviceTouchInterval),
-		now:        time.Now,
-		touchAsync: func(fn func()) { go fn() },
+		repo:         repo,
+		nonces:       nonces,
+		devices:      newClientDeviceCache(clientDeviceCacheMaxEntries),
+		touches:      gocache.New(clientDeviceTouchInterval, 2*clientDeviceTouchInterval),
+		now:          time.Now,
+		touchAsync:   func(fn func()) { go fn() },
+		lookupSlots:  make(chan struct{}, clientDeviceLookupConcurrency),
+		touchSlots:   make(chan struct{}, clientDeviceTouchConcurrency),
+		enrollSlots:  make(chan struct{}, clientDeviceEnrollConcurrency),
+		enrollWindow: make(map[int64]clientDeviceEnrollCounter),
 	}
+}
+
+func tryAcquire(slots chan struct{}) bool {
+	select {
+	case slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// allowEnroll applies the per-user fixed-window enrollment rate limit.
+func (s *ClientDeviceService) allowEnroll(userID int64) bool {
+	s.enrollMu.Lock()
+	defer s.enrollMu.Unlock()
+	now := s.now()
+	for id, w := range s.enrollWindow {
+		if now.Sub(w.start) >= clientDeviceEnrollPeriod {
+			delete(s.enrollWindow, id)
+		}
+	}
+	w := s.enrollWindow[userID]
+	if w.count == 0 {
+		w.start = now
+	}
+	if w.count >= clientDeviceEnrollPerUser {
+		return false
+	}
+	w.count++
+	s.enrollWindow[userID] = w
+	return true
 }
 
 // Enroll registers (or returns) the device for a public key.
@@ -217,6 +301,16 @@ func (s *ClientDeviceService) Enroll(ctx context.Context, userID, apiKeyID int64
 	if err != nil {
 		return nil, err
 	}
+	if !s.allowEnroll(userID) {
+		return nil, ErrClientDeviceBusy
+	}
+	// Taken before the repository acquires a DB connection.
+	if !tryAcquire(s.enrollSlots) {
+		return nil, ErrClientDeviceBusy
+	}
+	defer func() { <-s.enrollSlots }()
+	ctx, cancel := context.WithTimeout(ctx, clientDeviceEnrollTimeout)
+	defer cancel()
 	device, outcome, err := s.repo.Enroll(ctx, ClientDeviceEnrollInput{
 		UserID:          userID,
 		APIKeyID:        apiKeyID,
@@ -243,7 +337,7 @@ func (s *ClientDeviceService) Enroll(ctx context.Context, userID, apiKeyID int64
 		slog.Log(ctx, slog.LevelInfo, "client_device_enrolled", "user_id", userID, "client_device_id", device.ID)
 	}
 	// A previous negative lookup for this id must not hide the new device.
-	s.devices.Delete(device.DeviceID)
+	s.devices.delete(device.DeviceID)
 	return device, nil
 }
 
@@ -265,10 +359,7 @@ func (s *ClientDeviceService) RevokeUserDevice(ctx context.Context, userID, id, 
 	if err != nil {
 		return err
 	}
-	s.cacheMu.Lock()
-	s.revocations++
-	s.devices.Delete(deviceID)
-	s.cacheMu.Unlock()
+	s.devices.revoke(deviceID)
 	slog.Log(ctx, slog.LevelInfo, "client_device_revoked", "user_id", userID, "client_device_id", id, "revoked_by", revokedBy)
 	return nil
 }
@@ -367,21 +458,21 @@ func (s *ClientDeviceService) VerifyProof(ctx context.Context, req ClientProofRe
 	if !fresh {
 		return clientproof.StatusReplay
 	}
-	if !req.SkipTouch {
-		s.touch(entry.device, req.Platform, req.ClientIP)
-	}
+	s.touch(entry.device, req.Surface, req.ClientIP)
 	return clientproof.StatusValid
 }
 
+var errClientDeviceLookupBusy = errors.New("client device lookup busy")
+
 func (s *ClientDeviceService) lookupDevice(ctx context.Context, deviceID string) (cachedClientDevice, error) {
-	if cached, ok := s.devices.Get(deviceID); ok {
-		if entry, ok := cached.(cachedClientDevice); ok {
-			return entry, nil
-		}
+	if entry, ok := s.devices.get(deviceID); ok {
+		return entry, nil
 	}
-	s.cacheMu.Lock()
-	generation := s.revocations
-	s.cacheMu.Unlock()
+	if !tryAcquire(s.lookupSlots) {
+		return cachedClientDevice{}, errClientDeviceLookupBusy
+	}
+	defer func() { <-s.lookupSlots }()
+	generation := s.devices.generation()
 	lookupCtx, cancel := context.WithTimeout(ctx, clientDeviceLookupTimeout)
 	defer cancel()
 	device, err := s.repo.GetByDeviceID(lookupCtx, deviceID)
@@ -395,17 +486,14 @@ func (s *ClientDeviceService) lookupDevice(ctx context.Context, deviceID string)
 	} else if key, keyErr := clientproof.ParsePublicKey(device.PublicKey); keyErr == nil {
 		entry.key = key
 	}
-	s.cacheMu.Lock()
-	if s.revocations == generation {
-		s.devices.Set(deviceID, entry, ttl)
-	}
-	s.cacheMu.Unlock()
+	s.devices.setIfCurrent(deviceID, entry, ttl, generation)
 	return entry, nil
 }
 
 // touch updates last_* at most once per (device, field) per interval. The
-// update runs off the request path with its own short timeout.
-func (s *ClientDeviceService) touch(device *ClientDevice, platform, clientIP string) {
+// update runs off the request path with its own short timeout; at most
+// clientDeviceTouchConcurrency run at once, otherwise the update is dropped.
+func (s *ClientDeviceService) touch(device *ClientDevice, surface, clientIP string) {
 	if device == nil {
 		return
 	}
@@ -414,18 +502,28 @@ func (s *ClientDeviceService) touch(device *ClientDevice, platform, clientIP str
 		return s.touches.Add(field+":"+id, struct{}{}, clientDeviceTouchInterval) == nil
 	}
 	touch := ClientDeviceTouch{IP: clientIP, Seen: due("seen")}
-	switch platform {
-	case PlatformOpenAI:
-		touch.Codex = due("codex")
-	case PlatformAnthropic, PlatformAntigravity:
-		touch.Claude = due("claude")
+	switch surface {
+	case ClientSurfaceCodex:
+		touch.Codex = due(ClientSurfaceCodex)
+	case ClientSurfaceClaude:
+		touch.Claude = due(ClientSurfaceClaude)
 	}
 	if !touch.Seen && !touch.Claude && !touch.Codex {
+		return
+	}
+	if !tryAcquire(s.touchSlots) {
+		// Dropped: release the throttle so a later valid request retries.
+		for field, set := range map[string]bool{"seen": touch.Seen, ClientSurfaceCodex: touch.Codex, ClientSurfaceClaude: touch.Claude} {
+			if set {
+				s.touches.Delete(field + ":" + id)
+			}
+		}
 		return
 	}
 	repo := s.repo
 	deviceRowID := device.ID
 	s.touchAsync(func() {
+		defer func() { <-s.touchSlots }()
 		ctx, cancel := context.WithTimeout(context.Background(), clientDeviceTouchTimeout)
 		defer cancel()
 		if err := repo.Touch(ctx, deviceRowID, touch); err != nil {

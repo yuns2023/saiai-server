@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -23,6 +24,7 @@ const (
 	clientDeviceEnrollCodeInternal = "internal_error"
 	clientDeviceEnrollCodeRevoked  = "client_device_revoked"
 	clientDeviceEnrollCodeLimit    = "client_device_limit"
+	clientDeviceEnrollCodeBusy     = "client_device_busy"
 	clientDeviceEnrollCodeAuth     = "unauthorized"
 )
 
@@ -89,6 +91,10 @@ func (h *ClientHandler) EnrollDevice(c *gin.Context) {
 		c.JSON(http.StatusForbidden, clientDeviceEnrollError{Code: clientDeviceEnrollCodeRevoked})
 	case errors.Is(err, service.ErrClientDeviceLimit):
 		c.JSON(http.StatusTooManyRequests, clientDeviceEnrollError{Code: clientDeviceEnrollCodeLimit})
+	case errors.Is(err, service.ErrClientDeviceBusy):
+		// Concurrency cap or per-user rate limit: the client backs off on 5xx.
+		c.Header("Retry-After", strconv.Itoa(service.ClientDeviceEnrollRetryAfter))
+		c.JSON(http.StatusServiceUnavailable, clientDeviceEnrollError{Code: clientDeviceEnrollCodeBusy})
 	default:
 		slog.Error("client_device_enroll_failed", "user_id", userID, "error", err)
 		c.JSON(http.StatusInternalServerError, clientDeviceEnrollError{Code: clientDeviceEnrollCodeInternal})

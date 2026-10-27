@@ -23,11 +23,11 @@ const contextKeyClientAttestation = "client_attestation_status"
 //
 //   - The header is always removed from the inbound request, so no upstream
 //     path can copy it (each upstream header filter also denies it).
-//   - The status is computed when the authenticated key's group has
-//     client_attestation_policy observe (or reserved enforce), or when the key
-//     has smart switching enabled (a later switch may land in an observe
-//     group). Usage rows persist it only if the final group collects
-//     attestation; otherwise they store NULL.
+//   - A present header is always verified, whatever the authenticated
+//     group's policy (smart switching or fallbacks may move the request to
+//     an observe group later). A request without the header does no I/O and
+//     is "missing". Usage rows persist the status only when the final group
+//     collects attestation (ClientAttestationForUsage), else NULL.
 //
 // The signed target is c.Request.RequestURI, the raw request-line target set
 // by net/http. No gateway middleware rewrites it (InboundEndpointMiddleware
@@ -38,48 +38,32 @@ func ClientProof(verifier ClientProofVerifier) gin.HandlerFunc {
 		c.Request.Header.Del(clientproof.HeaderName)
 
 		apiKey, ok := GetAPIKeyFromContext(c)
-		if !ok || apiKey == nil || !clientProofMayBeRecorded(apiKey) {
+		if !ok || apiKey == nil {
 			c.Next()
 			return
 		}
 		var status clientproof.Status
 		switch {
-		case verifier == nil:
-			status = clientproof.StatusUnverified
+		case len(values) == 0:
+			status = clientproof.StatusMissing
 		case len(values) > 1:
 			status = clientproof.StatusInvalid
+		case verifier == nil:
+			status = clientproof.StatusUnverified
 		default:
-			header := ""
-			if len(values) == 1 {
-				header = values[0]
-			}
-			platform := ""
-			if apiKey.Group != nil {
-				platform = apiKey.Group.Platform
-			}
 			status = verifier.VerifyProof(c.Request.Context(), service.ClientProofRequest{
-				Header:   header,
+				Header:   values[0],
 				Method:   c.Request.Method,
 				Target:   clientProofTarget(c),
 				APIKey:   bearerToken(c),
 				UserID:   apiKey.UserID,
-				Platform: platform,
 				ClientIP: ip.GetTrustedClientIP(c),
-				// Device activity is tracked only for groups that collect;
-				// a smart-switch precompute in an off group has no side effects.
-				SkipTouch: !apiKey.Group.CollectsClientAttestation(),
+				Surface:  service.ClientSurfaceForPath(c.Request.URL.Path),
 			})
 		}
 		SetClientAttestation(c, status)
 		c.Next()
 	}
-}
-
-func clientProofMayBeRecorded(apiKey *service.APIKey) bool {
-	if apiKey.Group.CollectsClientAttestation() {
-		return true
-	}
-	return apiKey.SmartSwitch != nil && apiKey.SmartSwitch.Enabled
 }
 
 func clientProofTarget(c *gin.Context) string {
