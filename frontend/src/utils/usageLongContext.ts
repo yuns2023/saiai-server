@@ -27,16 +27,42 @@ export function usageLongContext(row?: Record | null): LongContextPricing | null
   }
   // Pre-snapshot rows have no provable historical price policy. Restrict the
   // advisory to known models and label it as inference; never reprice them.
-  const model = (row.model || '').toLowerCase().trim().split('/').pop()?.replace(/-\d{4}-\d{2}-\d{2}$/, '')
-  if (snapshot || !model || !/^(gpt-5\.(4|5)(-pro)?|gpt-5\.6(-sol|-terra|-luna)?|gpt-6(-astra|-sol|-luna)|gpt-6\.1-sol)$/.test(model) || total <= 272000) return null
+  if (snapshot || !isKnownLongContextModel(row.model) || total <= 272000) return null
   return { applied: true, inferred: true, mode: 'whole_request', threshold: 272000, total_input_tokens: total,
     input_multiplier: 2, output_multiplier: 1.5, cache_read_multiplier: 2, cache_write_multiplier: 2 }
 }
 
-// A size observation, independent of the model's historical price policy.
-// Do not use this to infer a surcharge or to reprice stored usage.
-export function usageInputContext(row?: Record | null): number | null {
+function isKnownLongContextModel(model?: string | null): boolean {
+  const name = (model || '').toLowerCase().trim().split('/').pop()?.replace(/-\d{4}-\d{2}-\d{2}$/, '')
+  return !!name && /^(gpt-5\.(4|5)(-pro)?|gpt-5\.6(-sol|-terra|-luna)?|gpt-6(-astra|-sol|-luna)|gpt-6\.1-sol)$/.test(name)
+}
+
+// The threshold of the model's long-context price tier, in the same order of
+// evidence as usageLongContext. A tier needs a positive threshold and at least
+// one multiplier above 1; an explicit zero threshold means no tier.
+function longContextTierThreshold(row: Record): number {
+  const snapshot = row.pricing_snapshot
+  const tier = (threshold?: number, ...multipliers: Array<number | undefined>) =>
+    (threshold || 0) > 0 && Math.max(...multipliers.map(m => m || 1)) > 1 ? threshold as number : 0
+  if (snapshot?.long_context) {
+    const lc = snapshot.long_context
+    return tier(lc.threshold, lc.input_multiplier, lc.output_multiplier, lc.cache_read_multiplier, lc.cache_write_multiplier)
+  }
+  if (snapshot?.long_context_extra_multiplier && snapshot.long_context_threshold) return tier(snapshot.long_context_threshold, snapshot.long_context_extra_multiplier)
+  if (snapshot) {
+    const policy = snapshot.effective
+    return tier(policy?.long_context_threshold, policy?.long_context_input_multiplier, policy?.long_context_output_multiplier,
+      policy?.long_context_cache_read_multiplier, policy?.long_context_cache_write_multiplier)
+  }
+  return isKnownLongContextModel(row.model) ? 272000 : 0
+}
+
+// A size observation against the model's own long-context price tier, shown
+// even when no surcharge applied (for example Priority). Models without such a
+// tier (Claude, older GPT) get no marker. Do not use this to reprice usage.
+export function usageInputContext(row?: Record | null): { total: number, threshold: number } | null {
   if (!row || isNativeChatUsage(row) || (row.image_count || 0) > 0 || /\/images\/(generations|edits)$/.test(row.inbound_endpoint || '')) return null
+  const threshold = longContextTierThreshold(row)
   const total = (row.input_tokens || 0) + (row.cache_read_tokens || 0) + (row.cache_creation_tokens || 0)
-  return total > 272000 ? total : null
+  return threshold > 0 && total > threshold ? { total, threshold } : null
 }

@@ -65,7 +65,7 @@ describe('admin UsageTable tooltip', () => {
     const wrapper = mount(UsageTable, {
       props: { data: [{ request_id: 'TEST_ONLY_CONTEXT', model: 'gpt-6.1-sol', ...tokens,
         output_tokens: 405, cache_creation_tokens: 0, service_tier: 'priority', actual_cost: .639806,
-        pricing_snapshot: { long_context: { applied: false, threshold: 272000 } } }], loading: false, columns: [] },
+        pricing_snapshot: { long_context: { applied: false, threshold: 272000, input_multiplier: 2, output_multiplier: 1.5, cache_read_multiplier: 2, cache_write_multiplier: 2 } } }], loading: false, columns: [] },
       global: { stubs: { DataTable: { props: ['data'], template: '<div><section data-testid="tokens"><slot name="cell-tokens" :row="data[0]" /></section><section data-testid="cost"><slot name="cell-cost" :row="data[0]" /></section></div>' }, Icon: true } }
     })
     expect(wrapper.get('[data-testid="tokens"] [data-testid="input-context-indicator"]').text()).toContain('>272K')
