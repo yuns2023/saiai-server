@@ -117,8 +117,9 @@ change the wire format.
   (`replay`; `unverified` on Redis error/timeout) → `valid`. Only otherwise-valid
   proofs consume a nonce. More than one proof header is `invalid`. The shared
   Redis client ignores context deadlines on socket I/O, so the nonce store
-  waits for the command only until the 200 ms deadline (the command itself
-  stays bounded by the client `ReadTimeout`). If the verifier is not configured, observe groups record
+  waits for the command only until the 200 ms deadline; at most 64 commands run
+  in the background (more fail fast as `unverified`), each bounded by a 2 s
+  pool/retry timeout plus the client `ReadTimeout`. If the verifier is not configured, observe groups record
   `unverified`.
 - Policy: computed when the authenticated key's group has `observe` (or the
   reserved `enforce`, treated the same in v1), or when the key has smart

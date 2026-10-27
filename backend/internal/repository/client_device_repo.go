@@ -228,25 +228,44 @@ func (r *clientDeviceRepository) CountClientAttestations(ctx context.Context, us
 	return out, rows.Err()
 }
 
-const clientProofNonceKeyPrefix = "client_proof:nonce:"
+const (
+	clientProofNonceKeyPrefix = "client_proof:nonce:"
+	// clientProofNonceMaxInFlight caps background SET NX commands so a stalled
+	// Redis cannot accumulate goroutines or starve the shared pool.
+	clientProofNonceMaxInFlight = 64
+	// clientProofNonceCommandTimeout bounds pool waits and retries of a
+	// command after the caller has stopped waiting.
+	clientProofNonceCommandTimeout = 2 * time.Second
+)
+
+var errClientProofNonceBusy = errors.New("client proof nonce store busy")
 
 type clientProofNonceStore struct {
-	rdb *redis.Client
+	rdb      *redis.Client
+	inFlight chan struct{}
 }
 
 // NewClientProofNonceStore stores seen proof nonces in Redis (SET NX EX).
 func NewClientProofNonceStore(rdb *redis.Client) service.ClientProofNonceStore {
-	return &clientProofNonceStore{rdb: rdb}
+	return &clientProofNonceStore{rdb: rdb, inFlight: make(chan struct{}, clientProofNonceMaxInFlight)}
 }
 
 // Claim honors the caller's deadline even though the shared client keeps
 // ContextTimeoutEnabled off (socket reads then wait for ReadTimeout): the
-// command runs in a goroutine bounded by that ReadTimeout and the caller
-// stops waiting at its own deadline. A late reply is discarded; the nonce
-// may then already be stored, which only turns a later reuse into replay.
+// command runs in a goroutine and the caller stops waiting at its own
+// deadline. At most clientProofNonceMaxInFlight commands run at once (more
+// fail fast → unverified); each is bounded by clientProofNonceCommandTimeout
+// for pool waits/retries plus the client's socket ReadTimeout. A late reply
+// is discarded; the nonce may then already be stored, which only turns a
+// later reuse into replay.
 func (s *clientProofNonceStore) Claim(ctx context.Context, deviceID, nonce string, ttl time.Duration) (bool, error) {
 	if s == nil || s.rdb == nil {
 		return false, errors.New("client proof nonce store unavailable")
+	}
+	select {
+	case s.inFlight <- struct{}{}:
+	default:
+		return false, errClientProofNonceBusy
 	}
 	type result struct {
 		fresh bool
@@ -254,7 +273,10 @@ func (s *clientProofNonceStore) Claim(ctx context.Context, deviceID, nonce strin
 	}
 	done := make(chan result, 1)
 	go func() {
-		fresh, err := s.rdb.SetNX(context.WithoutCancel(ctx), clientProofNonceKeyPrefix+deviceID+":"+nonce, 1, ttl).Result()
+		defer func() { <-s.inFlight }()
+		cmdCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clientProofNonceCommandTimeout)
+		defer cancel()
+		fresh, err := s.rdb.SetNX(cmdCtx, clientProofNonceKeyPrefix+deviceID+":"+nonce, 1, ttl).Result()
 		done <- result{fresh: fresh, err: err}
 	}()
 	select {

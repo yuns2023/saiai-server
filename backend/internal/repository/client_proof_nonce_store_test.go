@@ -39,4 +39,20 @@ func TestClientProofNonceStoreHonorsContextDeadline(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Less(t, time.Since(started), time.Second)
+
+	// While commands are stalled, at most clientProofNonceMaxInFlight run in
+	// the background; further claims fail fast instead of piling up.
+	impl := store.(*clientProofNonceStore)
+	for i := 0; i < clientProofNonceMaxInFlight+5; i++ {
+		short, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		_, _ = store.Claim(short, "cd_x", "n", time.Minute)
+		cancel()
+	}
+	require.LessOrEqual(t, len(impl.inFlight), clientProofNonceMaxInFlight)
+	busyCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	started = time.Now()
+	_, err = store.Claim(busyCtx, "cd_x", "n", time.Minute)
+	require.ErrorIs(t, err, errClientProofNonceBusy)
+	require.Less(t, time.Since(started), 50*time.Millisecond)
 }
