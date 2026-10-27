@@ -15,7 +15,7 @@ func TestClientHandlerBootstrap(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
-	handler := NewClientHandler(BuildInfo{Version: "1.2.3-test"})
+	handler := NewClientHandler(BuildInfo{Version: "1.2.3-test"}, nil)
 	router.GET("/bootstrap", withBootstrapAPIKey(openAIKey()), handler.Bootstrap)
 
 	recorder := httptest.NewRecorder()
@@ -44,7 +44,7 @@ func TestClientHandlerBootstrapKeepsEmptyGatewayVersionInContract(t *testing.T) 
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
-	handler := NewClientHandler(BuildInfo{})
+	handler := NewClientHandler(BuildInfo{}, nil)
 	router.GET("/bootstrap", withBootstrapAPIKey(openAIKey()), handler.Bootstrap)
 
 	recorder := httptest.NewRecorder()

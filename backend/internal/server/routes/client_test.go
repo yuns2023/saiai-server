@@ -25,7 +25,7 @@ func TestClientBootstrapRouteRequiresAPIKeyAuth(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	RegisterClientRoutes(
 		v1,
-		&handler.Handlers{Client: handler.NewClientHandler(handler.BuildInfo{Version: "test-version"})},
+		&handler.Handlers{Client: handler.NewClientHandler(handler.BuildInfo{Version: "test-version"}, nil)},
 		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
 			authCalls++
 			if c.GetHeader("Authorization") != "Bearer valid-key" {
@@ -100,7 +100,7 @@ func TestClientBootstrapRouteWithRealAPIKeyAuthNeedsNoGatewayServices(t *testing
 	router := gin.New()
 	RegisterClientRoutes(
 		router.Group("/api/v1"),
-		&handler.Handlers{Client: handler.NewClientHandler(handler.BuildInfo{Version: "integration-test"})},
+		&handler.Handlers{Client: handler.NewClientHandler(handler.BuildInfo{Version: "integration-test"}, nil)},
 		servermiddleware.NewAPIKeyAuthMiddleware(apiKeyService, nil, nil, cfg),
 	)
 

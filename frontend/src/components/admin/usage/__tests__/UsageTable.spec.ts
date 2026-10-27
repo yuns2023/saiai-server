@@ -338,4 +338,24 @@ describe('admin UsageTable tooltip', () => {
     expect(row?.textContent).toContain(expected)
     wrapper.unmount()
   })
+
+  it.each([
+    [null, null],
+    [1, null],
+    [2, 'admin.users.clientProof.status.missing'],
+    [6, 'admin.users.clientProof.status.unknown_device'],
+    [8, 'admin.users.clientProof.status.unverified'],
+  ] as const)('client attestation %s shows badge %s', (code, expected) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_ATTESTATION', user_id: 7, client_attestation: code }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-user" :row="data[0]" /></div>' } } },
+    })
+    const badge = wrapper.find('[data-testid="usage-client-attestation-badge"]')
+    if (expected === null) {
+      expect(badge.exists()).toBe(false)
+    } else {
+      expect(badge.text()).toBe(expected)
+    }
+    wrapper.unmount()
+  })
 })

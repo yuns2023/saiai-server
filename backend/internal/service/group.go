@@ -107,6 +107,7 @@ type Group struct {
 	CodexClientPolicy                string
 	CodexCNTimezoneGuard             bool
 	CodexTimezoneAction              string
+	ClientAttestationPolicy          string
 	ClaudeDeviceLimitMode            string
 	ClaudeDeviceBaseLimit            int
 

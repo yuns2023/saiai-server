@@ -45,3 +45,7 @@ condition = "AND"
 regexTarget = "line"
 paths = ['''^docs/ADMIN_PAYMENT_INTEGRATION_API\.md$''']
 regexes = ['''(?:s2p_cm[0-9]+|pay-cm[0-9]+-success|sub2apipay order: cm[0-9]+)''']
+
+[[allowlists]]
+description = "Published client proof v1 test vector: deterministic test-only P-256 key and fake API key"
+paths = ['''^backend/internal/pkg/clientproof/testdata/client-proof-v1-vector\.json$''']

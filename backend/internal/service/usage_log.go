@@ -114,6 +114,9 @@ type UsageLog struct {
 	// StopReason is the sanitized Anthropic-native upstream stop_reason.
 	// Nil means not reported, not applicable (non-Anthropic platforms) or invalid.
 	StopReason *string
+	// ClientAttestation is the SAIAI client proof status (clientproof.Status).
+	// Nil means not collected: the final group's policy is off.
+	ClientAttestation *int16
 	// ServiceTier records the OpenAI service tier used for billing, e.g. "priority" / "flex".
 	ServiceTier *string
 	// ReasoningEffort is the request's reasoning effort level.

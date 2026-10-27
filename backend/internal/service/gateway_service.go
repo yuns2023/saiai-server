@@ -9334,6 +9334,7 @@ type RecordUsageInput struct {
 	RequestPayloadHash string             // 请求体语义哈希，用于降低 request_id 误复用时的静默误去重风险
 	ForceCacheBilling  bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
 	APIKeyService      APIKeyQuotaUpdater // 可选：用于更新API Key配额
+	ClientAttestation  *int16             // SAIAI 客户端校验状态（请求级）；最终分组策略为 off 时不落库
 }
 
 // APIKeyQuotaUpdater defines the interface for updating API Key quota and rate limit usage
@@ -9774,6 +9775,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		Model:                      result.Model,
 		UpstreamModel:              optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
 		StopReason:                 result.StopReason,
+		ClientAttestation:          ClientAttestationForUsage(input.ClientAttestation, apiKey),
 		ReasoningEffort:            result.ReasoningEffort,
 		InboundEndpoint:            optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:           optionalTrimmedStringPtr(input.UpstreamEndpoint),
@@ -9874,6 +9876,7 @@ type RecordUsageLongContextInput struct {
 	LongContextMultiplier float64            // 超出阈值部分的倍率（如 2.0）
 	ForceCacheBilling     bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
 	APIKeyService         APIKeyQuotaUpdater // API Key 配额服务（可选）
+	ClientAttestation     *int16             // SAIAI 客户端校验状态（请求级）
 }
 
 // RecordUsageWithLongContext 记录使用量并扣费，支持长上下文双倍计费（用于 Gemini）
@@ -9969,6 +9972,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 		Model:                      result.Model,
 		UpstreamModel:              optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
 		StopReason:                 result.StopReason,
+		ClientAttestation:          ClientAttestationForUsage(input.ClientAttestation, apiKey),
 		ReasoningEffort:            result.ReasoningEffort,
 		InboundEndpoint:            optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:           optionalTrimmedStringPtr(input.UpstreamEndpoint),

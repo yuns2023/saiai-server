@@ -95,6 +95,11 @@ func StopReason(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldStopReason, v))
 }
 
+// ClientAttestation applies equality check predicate on the "client_attestation" field. It's identical to ClientAttestationEQ.
+func ClientAttestation(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldClientAttestation, v))
+}
+
 // GroupID applies equality check predicate on the "group_id" field. It's identical to GroupIDEQ.
 func GroupID(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldGroupID, v))
@@ -683,6 +688,56 @@ func StopReasonEqualFold(v string) predicate.UsageLog {
 // StopReasonContainsFold applies the ContainsFold predicate on the "stop_reason" field.
 func StopReasonContainsFold(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldContainsFold(FieldStopReason, v))
+}
+
+// ClientAttestationEQ applies the EQ predicate on the "client_attestation" field.
+func ClientAttestationEQ(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldClientAttestation, v))
+}
+
+// ClientAttestationNEQ applies the NEQ predicate on the "client_attestation" field.
+func ClientAttestationNEQ(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldClientAttestation, v))
+}
+
+// ClientAttestationIn applies the In predicate on the "client_attestation" field.
+func ClientAttestationIn(vs ...int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldClientAttestation, vs...))
+}
+
+// ClientAttestationNotIn applies the NotIn predicate on the "client_attestation" field.
+func ClientAttestationNotIn(vs ...int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldClientAttestation, vs...))
+}
+
+// ClientAttestationGT applies the GT predicate on the "client_attestation" field.
+func ClientAttestationGT(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldClientAttestation, v))
+}
+
+// ClientAttestationGTE applies the GTE predicate on the "client_attestation" field.
+func ClientAttestationGTE(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldClientAttestation, v))
+}
+
+// ClientAttestationLT applies the LT predicate on the "client_attestation" field.
+func ClientAttestationLT(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldClientAttestation, v))
+}
+
+// ClientAttestationLTE applies the LTE predicate on the "client_attestation" field.
+func ClientAttestationLTE(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldClientAttestation, v))
+}
+
+// ClientAttestationIsNil applies the IsNil predicate on the "client_attestation" field.
+func ClientAttestationIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldClientAttestation))
+}
+
+// ClientAttestationNotNil applies the NotNil predicate on the "client_attestation" field.
+func ClientAttestationNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldClientAttestation))
 }
 
 // GroupIDEQ applies the EQ predicate on the "group_id" field.

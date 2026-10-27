@@ -117,6 +117,8 @@ const (
 	FieldCodexCnTimezoneGuard = "codex_cn_timezone_guard"
 	// FieldCodexTimezoneAction holds the string denoting the codex_timezone_action field in the database.
 	FieldCodexTimezoneAction = "codex_timezone_action"
+	// FieldClientAttestationPolicy holds the string denoting the client_attestation_policy field in the database.
+	FieldClientAttestationPolicy = "client_attestation_policy"
 	// FieldClaudeDeviceLimitMode holds the string denoting the claude_device_limit_mode field in the database.
 	FieldClaudeDeviceLimitMode = "claude_device_limit_mode"
 	// FieldClaudeDeviceBaseLimit holds the string denoting the claude_device_base_limit field in the database.
@@ -256,6 +258,7 @@ var Columns = []string{
 	FieldCodexClientPolicy,
 	FieldCodexCnTimezoneGuard,
 	FieldCodexTimezoneAction,
+	FieldClientAttestationPolicy,
 	FieldClaudeDeviceLimitMode,
 	FieldClaudeDeviceBaseLimit,
 }
@@ -367,6 +370,10 @@ var (
 	DefaultCodexTimezoneAction string
 	// CodexTimezoneActionValidator is a validator for the "codex_timezone_action" field. It is called by the builders before save.
 	CodexTimezoneActionValidator func(string) error
+	// DefaultClientAttestationPolicy holds the default value on creation for the "client_attestation_policy" field.
+	DefaultClientAttestationPolicy string
+	// ClientAttestationPolicyValidator is a validator for the "client_attestation_policy" field. It is called by the builders before save.
+	ClientAttestationPolicyValidator func(string) error
 	// DefaultClaudeDeviceLimitMode holds the default value on creation for the "claude_device_limit_mode" field.
 	DefaultClaudeDeviceLimitMode string
 	// ClaudeDeviceLimitModeValidator is a validator for the "claude_device_limit_mode" field. It is called by the builders before save.
@@ -606,6 +613,11 @@ func ByCodexCnTimezoneGuard(opts ...sql.OrderTermOption) OrderOption {
 // ByCodexTimezoneAction orders the results by the codex_timezone_action field.
 func ByCodexTimezoneAction(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCodexTimezoneAction, opts...).ToFunc()
+}
+
+// ByClientAttestationPolicy orders the results by the client_attestation_policy field.
+func ByClientAttestationPolicy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClientAttestationPolicy, opts...).ToFunc()
 }
 
 // ByClaudeDeviceLimitMode orders the results by the claude_device_limit_mode field.

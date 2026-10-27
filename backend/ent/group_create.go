@@ -688,6 +688,20 @@ func (_c *GroupCreate) SetNillableCodexTimezoneAction(v *string) *GroupCreate {
 	return _c
 }
 
+// SetClientAttestationPolicy sets the "client_attestation_policy" field.
+func (_c *GroupCreate) SetClientAttestationPolicy(v string) *GroupCreate {
+	_c.mutation.SetClientAttestationPolicy(v)
+	return _c
+}
+
+// SetNillableClientAttestationPolicy sets the "client_attestation_policy" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableClientAttestationPolicy(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetClientAttestationPolicy(*v)
+	}
+	return _c
+}
+
 // SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
 func (_c *GroupCreate) SetClaudeDeviceLimitMode(v string) *GroupCreate {
 	_c.mutation.SetClaudeDeviceLimitMode(v)
@@ -982,6 +996,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultCodexTimezoneAction
 		_c.mutation.SetCodexTimezoneAction(v)
 	}
+	if _, ok := _c.mutation.ClientAttestationPolicy(); !ok {
+		v := group.DefaultClientAttestationPolicy
+		_c.mutation.SetClientAttestationPolicy(v)
+	}
 	if _, ok := _c.mutation.ClaudeDeviceLimitMode(); !ok {
 		v := group.DefaultClaudeDeviceLimitMode
 		_c.mutation.SetClaudeDeviceLimitMode(v)
@@ -1127,6 +1145,14 @@ func (_c *GroupCreate) check() error {
 	if v, ok := _c.mutation.CodexTimezoneAction(); ok {
 		if err := group.CodexTimezoneActionValidator(v); err != nil {
 			return &ValidationError{Name: "codex_timezone_action", err: fmt.Errorf(`ent: validator failed for field "Group.codex_timezone_action": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.ClientAttestationPolicy(); !ok {
+		return &ValidationError{Name: "client_attestation_policy", err: errors.New(`ent: missing required field "Group.client_attestation_policy"`)}
+	}
+	if v, ok := _c.mutation.ClientAttestationPolicy(); ok {
+		if err := group.ClientAttestationPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "client_attestation_policy", err: fmt.Errorf(`ent: validator failed for field "Group.client_attestation_policy": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.ClaudeDeviceLimitMode(); !ok {
@@ -1366,6 +1392,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.CodexTimezoneAction(); ok {
 		_spec.SetField(group.FieldCodexTimezoneAction, field.TypeString, value)
 		_node.CodexTimezoneAction = value
+	}
+	if value, ok := _c.mutation.ClientAttestationPolicy(); ok {
+		_spec.SetField(group.FieldClientAttestationPolicy, field.TypeString, value)
+		_node.ClientAttestationPolicy = value
 	}
 	if value, ok := _c.mutation.ClaudeDeviceLimitMode(); ok {
 		_spec.SetField(group.FieldClaudeDeviceLimitMode, field.TypeString, value)
@@ -2385,6 +2415,18 @@ func (u *GroupUpsert) SetCodexTimezoneAction(v string) *GroupUpsert {
 // UpdateCodexTimezoneAction sets the "codex_timezone_action" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateCodexTimezoneAction() *GroupUpsert {
 	u.SetExcluded(group.FieldCodexTimezoneAction)
+	return u
+}
+
+// SetClientAttestationPolicy sets the "client_attestation_policy" field.
+func (u *GroupUpsert) SetClientAttestationPolicy(v string) *GroupUpsert {
+	u.Set(group.FieldClientAttestationPolicy, v)
+	return u
+}
+
+// UpdateClientAttestationPolicy sets the "client_attestation_policy" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateClientAttestationPolicy() *GroupUpsert {
+	u.SetExcluded(group.FieldClientAttestationPolicy)
 	return u
 }
 
@@ -3440,6 +3482,20 @@ func (u *GroupUpsertOne) SetCodexTimezoneAction(v string) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateCodexTimezoneAction() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateCodexTimezoneAction()
+	})
+}
+
+// SetClientAttestationPolicy sets the "client_attestation_policy" field.
+func (u *GroupUpsertOne) SetClientAttestationPolicy(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClientAttestationPolicy(v)
+	})
+}
+
+// UpdateClientAttestationPolicy sets the "client_attestation_policy" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateClientAttestationPolicy() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClientAttestationPolicy()
 	})
 }
 
@@ -4666,6 +4722,20 @@ func (u *GroupUpsertBulk) SetCodexTimezoneAction(v string) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateCodexTimezoneAction() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateCodexTimezoneAction()
+	})
+}
+
+// SetClientAttestationPolicy sets the "client_attestation_policy" field.
+func (u *GroupUpsertBulk) SetClientAttestationPolicy(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClientAttestationPolicy(v)
+	})
+}
+
+// UpdateClientAttestationPolicy sets the "client_attestation_policy" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateClientAttestationPolicy() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClientAttestationPolicy()
 	})
 }
 

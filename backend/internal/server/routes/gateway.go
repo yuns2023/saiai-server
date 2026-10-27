@@ -27,6 +27,9 @@ func RegisterGatewayRoutes(
 	clientRequestID := middleware.ClientRequestID()
 	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
 	endpointNorm := handler.InboundEndpointMiddleware()
+	// SAIAI client proof (observe only): must follow API-key auth on every
+	// authenticated gateway route; it also strips the proof header.
+	clientProof := middleware.ClientProof(h.Client.ProofVerifier())
 
 	// 未分组 Key 拦截中间件（按协议格式区分错误响应）
 	requireGroupAnthropic := middleware.RequireGroupAssignment(settingService, middleware.AnthropicErrorWriter)
@@ -39,6 +42,7 @@ func RegisterGatewayRoutes(
 	gateway.Use(opsErrorLogger)
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
+	gateway.Use(clientProof)
 	gateway.Use(rejectRetiredGroupPlatform)
 	gateway.Use(requireGroupAnthropic)
 	{
@@ -100,6 +104,7 @@ func RegisterGatewayRoutes(
 	gemini.Use(opsErrorLogger)
 	gemini.Use(endpointNorm)
 	gemini.Use(middleware.APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
+	gemini.Use(clientProof)
 	gemini.Use(rejectRetiredGroupPlatform)
 	gemini.Use(requireGroupGoogle)
 	{
@@ -110,10 +115,10 @@ func RegisterGatewayRoutes(
 	}
 
 	// OpenAI Responses API（不带v1前缀的别名）
-	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.Responses)
-	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.Responses)
-	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.ResponsesWebSocket)
-	r.GET("/backend-api/codex/models", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.CodexModels)
+	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), clientProof, rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.Responses)
+	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), clientProof, rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.Responses)
+	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), clientProof, rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.ResponsesWebSocket)
+	r.GET("/backend-api/codex/models", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), clientProof, rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.CodexModels)
 	// Experimental native ChatGPT Chat protocol. This route is disabled by
 	// default in the handler and is enabled only in isolated staging.
 	chatgpt := r.Group("/chatgpt/backend-api")
@@ -121,6 +126,7 @@ func RegisterGatewayRoutes(
 	chatgpt.Use(clientRequestID)
 	chatgpt.Use(opsErrorLogger)
 	chatgpt.Use(gin.HandlerFunc(apiKeyAuth))
+	chatgpt.Use(clientProof)
 	chatgpt.Use(rejectRetiredGroupPlatform)
 	chatgpt.Use(requireGroupAnthropic)
 	{
@@ -144,7 +150,7 @@ func RegisterGatewayRoutes(
 		chatgpt.GET("/estuary/content", h.OpenAIGateway.ChatGPTEstuaryContent)
 	}
 	r.POST("/chatgpt/api/estuary/upload_content_bytes", bodyLimit, clientRequestID, opsErrorLogger,
-		gin.HandlerFunc(apiKeyAuth), rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.ChatGPTUpload)
+		gin.HandlerFunc(apiKeyAuth), clientProof, rejectRetiredGroupPlatform, requireGroupAnthropic, h.OpenAIGateway.ChatGPTUpload)
 }
 
 func rejectRetiredGroupPlatform(c *gin.Context) {

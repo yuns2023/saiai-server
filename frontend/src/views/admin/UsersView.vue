@@ -463,6 +463,29 @@
             <span v-else class="text-sm text-gray-400" :title="t('admin.users.claudeDevicesSummaryHint')">-</span>
           </template>
 
+          <template #cell-codex_devices="{ row }">
+            <button
+              type="button"
+              class="text-sm font-medium text-primary-600 underline decoration-dashed underline-offset-2 hover:text-primary-700 dark:text-primary-400"
+              :title="t('admin.users.clientProof.codexDevicesHint')"
+              data-testid="codex-devices-button"
+              @click="clientDevicesUser = row"
+            >
+              {{ row.codex_device_count ?? '-' }}
+            </button>
+          </template>
+
+          <template #header-client_attestation="{ column }">
+            <span class="cursor-help border-b border-dotted border-gray-400" :title="t('admin.users.clientProof.attestationHint')">{{ column.label }}</span>
+          </template>
+          <template #header-codex_devices="{ column }">
+            <span class="cursor-help border-b border-dotted border-gray-400" :title="t('admin.users.clientProof.codexDevicesHint')">{{ column.label }}</span>
+          </template>
+
+          <template #cell-client_attestation="{ row }">
+            <ClientAttestationSummaryCell :counts="row.client_attestation_7d" />
+          </template>
+
           <template #cell-status="{ value }">
             <div class="flex items-center gap-1.5">
               <span
@@ -634,6 +657,7 @@
     <UserEditModal :show="showEditModal" :user="editingUser" @close="closeEditModal" @success="loadUsers" />
     <UserApiKeysModal :show="showApiKeysModal" :user="viewingUser" @close="closeApiKeysModal" />
     <UserClaudeDevicesModal :show="showClaudeDevicesModal" :user="claudeDevicesUser" @close="closeClaudeDevicesModal" />
+    <UserClientDevicesModal :show="clientDevicesUser !== null" :user="clientDevicesUser" @close="clientDevicesUser = null" @changed="loadUsers" />
     <UserAllowedGroupsModal :show="showAllowedGroupsModal" :user="allowedGroupsUser" @close="closeAllowedGroupsModal" @success="loadUsers" />
     <UserBalanceModal :show="showBalanceModal" :user="balanceUser" :operation="balanceOperation" @close="closeBalanceModal" @success="loadUsers" />
     <UserBalanceHistoryModal :show="showBalanceHistoryModal" :user="balanceHistoryUser" @close="closeBalanceHistoryModal" @deposit="handleDepositFromHistory" @withdraw="handleWithdrawFromHistory" />
@@ -671,6 +695,8 @@ import UserCreateModal from '@/components/admin/user/UserCreateModal.vue'
 import UserEditModal from '@/components/admin/user/UserEditModal.vue'
 import UserApiKeysModal from '@/components/admin/user/UserApiKeysModal.vue'
 import UserClaudeDevicesModal from '@/components/admin/user/UserClaudeDevicesModal.vue'
+import UserClientDevicesModal from '@/components/admin/user/UserClientDevicesModal.vue'
+import ClientAttestationSummaryCell from '@/components/admin/user/ClientAttestationSummaryCell.vue'
 import UserAllowedGroupsModal from '@/components/admin/user/UserAllowedGroupsModal.vue'
 import UserBalanceModal from '@/components/admin/user/UserBalanceModal.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
@@ -741,6 +767,8 @@ const allColumns = computed<Column[]>(() => [
   { key: 'usage', label: t('admin.users.columns.usage'), sortable: false },
   { key: 'concurrency', label: t('admin.users.columns.concurrency'), sortable: true },
   { key: 'claude_devices', label: t('admin.users.columns.claudeDevices'), sortable: false },
+  { key: 'codex_devices', label: t('admin.users.columns.codexDevices'), sortable: false },
+  { key: 'client_attestation', label: t('admin.users.columns.clientAttestation'), sortable: false },
   { key: 'input_risk_alerts', label: t('admin.groups.inputModeration.alertCount'), sortable: false },
   { key: 'status', label: t('admin.users.columns.status'), sortable: true },
   { key: 'created_at', label: t('admin.users.columns.created'), sortable: true },
@@ -971,6 +999,7 @@ const editingUser = ref<AdminUser | null>(null)
 const deletingUser = ref<AdminUser | null>(null)
 const viewingUser = ref<AdminUser | null>(null)
 const claudeDevicesUser = ref<AdminUser | null>(null)
+const clientDevicesUser = ref<AdminUser | null>(null)
 let abortController: AbortController | null = null
 let secondaryDataSeq = 0
 

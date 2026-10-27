@@ -507,8 +507,10 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+		clientAttestation := middleware.GetClientAttestation(c)
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsageWithLongContext(ctx, &service.RecordUsageLongContextInput{
+				ClientAttestation:     clientAttestation,
 				Result:                result,
 				APIKey:                apiKey,
 				User:                  apiKey.User,

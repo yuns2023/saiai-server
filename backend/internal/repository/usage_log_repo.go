@@ -29,7 +29,7 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 )
 
-const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, session_id, model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, input_cost, output_cost, cache_creation_cost, cache_creation_5m_cost, cache_creation_1h_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, media_type, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, created_at, model_rate_multiplier, account_payg_discount_multiplier, user_payg_discount_multiplier, pricing_snapshot, metered_cost, smart_switch, stop_reason"
+const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, session_id, model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, input_cost, output_cost, cache_creation_cost, cache_creation_5m_cost, cache_creation_1h_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, media_type, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, created_at, model_rate_multiplier, account_payg_discount_multiplier, user_payg_discount_multiplier, pricing_snapshot, metered_cost, smart_switch, stop_reason, client_attestation"
 
 const usageLogReasoningEffortInheritanceWindow = 15 * time.Minute
 
@@ -84,6 +84,7 @@ var usageLogInsertArgTypes = [...]string{
 	"numeric",
 	"jsonb",
 	"text",
+	"smallint",
 }
 
 // dateFormatWhitelist 将 granularity 参数映射为 PostgreSQL TO_CHAR 格式字符串，防止外部输入直接拼入 SQL
@@ -349,14 +350,15 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			moderation_ref,
 			metered_cost,
 			smart_switch,
-			stop_reason
+			stop_reason,
+			client_attestation
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9,
 			$10, $11, $12, $13,
 			$14, $15,
 			$16, $17, $18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -791,7 +793,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			moderation_ref,
 			metered_cost,
 			smart_switch,
-			stop_reason
+			stop_reason,
+			client_attestation
 		) AS (VALUES `)
 
 	args := make([]any, 0, len(keys)*(len(usageLogInsertArgTypes)+1))
@@ -872,7 +875,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				moderation_ref,
 				metered_cost,
 				smart_switch,
-				stop_reason
+				stop_reason,
+				client_attestation
 			)
 			SELECT
 				user_id,
@@ -924,7 +928,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				moderation_ref,
 				metered_cost,
 				smart_switch,
-				stop_reason
+				stop_reason,
+				client_attestation
 			FROM input
 			ON CONFLICT (request_id, api_key_id) DO NOTHING
 			RETURNING request_id, api_key_id, id, created_at
@@ -1016,7 +1021,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			moderation_ref,
 			metered_cost,
 			smart_switch,
-			stop_reason
+			stop_reason,
+			client_attestation
 		) AS (VALUES `)
 
 	args := make([]any, 0, len(preparedList)*len(usageLogInsertArgTypes))
@@ -1094,7 +1100,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			moderation_ref,
 			metered_cost,
 			smart_switch,
-			stop_reason
+			stop_reason,
+			client_attestation
 		)
 		SELECT
 			user_id,
@@ -1146,7 +1153,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			moderation_ref,
 			metered_cost,
 			smart_switch,
-			stop_reason
+			stop_reason,
+			client_attestation
 		FROM input
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`)
@@ -1206,14 +1214,15 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			moderation_ref,
 			metered_cost,
 			smart_switch,
-			stop_reason
+			stop_reason,
+			client_attestation
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9,
 			$10, $11, $12, $13,
 			$14, $15,
 			$16, $17, $18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1310,6 +1319,7 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			log.MeteredCost,
 			smartSwitchTraceJSON(log.SmartSwitch),
 			stopReason,
+			nullInt16(log.ClientAttestation),
 		},
 	}
 }
@@ -4735,6 +4745,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		meteredCost                   sql.NullFloat64
 		smartSwitch                   []byte
 		stopReason                    sql.NullString
+		clientAttestation             sql.NullInt16
 	)
 
 	if err := scanner.Scan(
@@ -4788,6 +4799,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		&meteredCost,
 		&smartSwitch,
 		&stopReason,
+		&clientAttestation,
 	); err != nil {
 		return nil, err
 	}
@@ -4891,6 +4903,10 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 	}
 	if stopReason.Valid {
 		log.StopReason = &stopReason.String
+	}
+	if clientAttestation.Valid {
+		value := clientAttestation.Int16
+		log.ClientAttestation = &value
 	}
 
 	return log, nil
@@ -5179,4 +5195,11 @@ func smartSwitchTraceJSON(trace *domain.KeySmartSwitchTrace) any {
 	}
 	data, _ := json.Marshal(trace)
 	return string(data)
+}
+
+func nullInt16(v *int16) sql.NullInt16 {
+	if v == nil {
+		return sql.NullInt16{}
+	}
+	return sql.NullInt16{Int16: *v, Valid: true}
 }

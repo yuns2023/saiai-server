@@ -11,6 +11,9 @@ export interface SelectOption {
 }
 
 export type ClaudeEnvironmentMode = 'off' | 'rewrite' | 'remove'
+// SAIAI client proof v1 (docs/CLIENT_PROOF_V1.md). 'enforce' is reserved and not selectable.
+export type ClientAttestationPolicy = 'off' | 'observe' | 'enforce'
+export type ClientAttestationStatus = 'valid' | 'missing' | 'invalid' | 'stale' | 'replay' | 'unknown_device' | 'revoked' | 'unverified'
 
 export interface BasePaginationResponse<T> {
   items: T[]
@@ -70,6 +73,10 @@ export interface AdminUser extends User {
   // Claude Code 当前有效设备数与有效上限（跨启用设备限制的分组汇总）
   claude_device_count?: number
   claude_device_limit?: number | null
+  // SAIAI 客户端设备：30 天内有 Codex 流量的未吊销设备数；null 表示暂不可用
+  codex_device_count?: number | null
+  // 7 天内计费请求的客户端校验状态计数（仅 observe 分组采集）；null 表示暂不可用
+  client_attestation_7d?: Partial<Record<ClientAttestationStatus, number>> | null
   // Sora 存储配额（字节）
   sora_storage_quota_bytes: number
   sora_storage_used_bytes: number
@@ -452,6 +459,7 @@ export interface AdminGroup extends Group {
 	codex_client_policy: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	codex_cn_timezone_guard?: boolean
 	codex_timezone_action?: 'reject' | 'rewrite'
+	client_attestation_policy?: ClientAttestationPolicy
 	claude_device_limit_mode: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit: number
 
@@ -588,6 +596,7 @@ export interface CreateGroupRequest {
 	codex_client_policy?: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	codex_cn_timezone_guard?: boolean
 	codex_timezone_action?: 'reject' | 'rewrite'
+	client_attestation_policy?: ClientAttestationPolicy
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit?: number
   claude_environment_mode?: ClaudeEnvironmentMode
@@ -642,6 +651,7 @@ export interface UpdateGroupRequest {
 	codex_client_policy?: 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only'
 	codex_cn_timezone_guard?: boolean
 	codex_timezone_action?: 'reject' | 'rewrite'
+	client_attestation_policy?: ClientAttestationPolicy
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit?: number
   claude_environment_mode?: ClaudeEnvironmentMode
@@ -1249,6 +1259,9 @@ export interface AdminUsageLog extends UsageLog {
 
   // 上游 Anthropic 原生 stop_reason（仅管理员可见；null 表示未记录/不适用）
   stop_reason?: string | null
+
+  // SAIAI 客户端校验状态码（1 通过 … 8 未校验；null 表示未采集；仅管理员可见）
+  client_attestation?: number | null
 
   // 最小账号信息（仅管理员接口返回）
   account?: UsageLogAccountSummary

@@ -199,6 +199,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldCodexClientPolicy,
 				group.FieldCodexCnTimezoneGuard,
 				group.FieldCodexTimezoneAction,
+				group.FieldClientAttestationPolicy,
 				group.FieldClaudeDeviceLimitMode,
 				group.FieldClaudeDeviceBaseLimit,
 			)
@@ -737,6 +738,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		CodexClientPolicy:                g.CodexClientPolicy,
 		CodexCNTimezoneGuard:             g.CodexCnTimezoneGuard,
 		CodexTimezoneAction:              g.CodexTimezoneAction,
+		ClientAttestationPolicy:          g.ClientAttestationPolicy,
 		ClaudeDeviceLimitMode:            g.ClaudeDeviceLimitMode,
 		ClaudeDeviceBaseLimit:            g.ClaudeDeviceBaseLimit,
 		CreatedAt:                        g.CreatedAt,

@@ -192,9 +192,11 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string, nativeCod
 		if result.UpstreamEndpoint != "" {
 			upstreamEndpoint = result.UpstreamEndpoint
 		}
+		clientAttestation := middleware2.GetClientAttestation(c)
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result: result, APIKey: apiKey, User: apiKey.User, Account: account, Subscription: subscription,
+				ClientAttestation: clientAttestation,
+				Result:            result, APIKey: apiKey, User: apiKey.User, Account: account, Subscription: subscription,
 				InboundEndpoint: inboundEndpoint, UpstreamEndpoint: upstreamEndpoint,
 				UserAgent: userAgent, IPAddress: clientIP, RequestPayloadHash: payloadHash, APIKeyService: h.apiKeyService,
 			}); err != nil {

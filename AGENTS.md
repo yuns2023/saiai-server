@@ -36,6 +36,11 @@ Preserve these invariants:
 - the local-proxy contract cutover keeps the reviewed previous Gateway image
   and global-config client bundle as one rollback pair.
 
+Before changing `/api/v1/client/devices/enroll`, the `X-Saiai-Client-Proof`
+verifier or `usage_logs.client_attestation`, read
+[docs/CLIENT_PROOF_V1.md](docs/CLIENT_PROOF_V1.md) and keep the test vector
+passing.
+
 Before changing OpenAI service-tier billing or its user/admin presentation,
 read the service-tier section in
 [docs/API_KEY_USAGE_ANALYTICS.md](docs/API_KEY_USAGE_ANALYTICS.md). Keep the

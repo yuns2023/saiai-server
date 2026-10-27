@@ -230,6 +230,8 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		users.POST("/:id/replace-group", h.Admin.User.ReplaceGroup)
 		users.GET("/:id/claude-devices", h.Admin.User.ListClaudeDevices)
 		users.DELETE("/:id/claude-devices/:device_id", h.Admin.User.RevokeClaudeDevice)
+		users.GET("/:id/client-devices", h.Admin.User.ListClientDevices)
+		users.DELETE("/:id/client-devices/:device_id", h.Admin.User.RevokeClientDevice)
 
 		// User attribute values
 		users.GET("/:id/attributes", h.Admin.UserAttribute.GetUserAttributes)

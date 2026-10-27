@@ -156,6 +156,7 @@ type AdminGroup struct {
 	CodexClientPolicy                string                         `json:"codex_client_policy"`
 	CodexCNTimezoneGuard             bool                           `json:"codex_cn_timezone_guard"`
 	CodexTimezoneAction              string                         `json:"codex_timezone_action"`
+	ClientAttestationPolicy          string                         `json:"client_attestation_policy"`
 	ClaudeDeviceLimitMode            string                         `json:"claude_device_limit_mode"`
 	ClaudeDeviceBaseLimit            int                            `json:"claude_device_base_limit"`
 
@@ -489,6 +490,9 @@ type AdminUsageLog struct {
 
 	// StopReason 上游 Anthropic 原生 stop_reason（仅管理员可见；null 表示未记录/不适用）
 	StopReason *string `json:"stop_reason"`
+
+	// ClientAttestation SAIAI 客户端校验状态（1 通过 … 8 未校验；null 表示未采集；仅管理员可见）
+	ClientAttestation *int16 `json:"client_attestation"`
 
 	// Account 最小账号信息（避免泄露敏感字段）
 	Account *AccountSummary `json:"account,omitempty"`

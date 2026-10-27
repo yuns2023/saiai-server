@@ -225,6 +225,7 @@ func (h *OpenAIGatewayHandler) observeChatGPTSnapshot(ctx context.Context, c *gi
 			ObservedModel: summary.ObservedModel, APIKey: key, User: key.User, Account: account, Subscription: subscription,
 			InboundEndpoint: "/chatgpt/backend-api/f/conversation", UpstreamEndpoint: "/backend-api/f/conversation",
 			UserAgent: c.GetHeader("User-Agent"), IPAddress: ip.GetClientIP(c),
+			ClientAttestation: middleware.GetClientAttestation(c),
 		})
 	}
 	if err != nil && !errors.Is(err, service.ErrChatGPTTurnPending) {

@@ -280,6 +280,11 @@ func CodexTimezoneAction(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCodexTimezoneAction, v))
 }
 
+// ClientAttestationPolicy applies equality check predicate on the "client_attestation_policy" field. It's identical to ClientAttestationPolicyEQ.
+func ClientAttestationPolicy(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldClientAttestationPolicy, v))
+}
+
 // ClaudeDeviceLimitMode applies equality check predicate on the "claude_device_limit_mode" field. It's identical to ClaudeDeviceLimitModeEQ.
 func ClaudeDeviceLimitMode(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldClaudeDeviceLimitMode, v))
@@ -2118,6 +2123,71 @@ func CodexTimezoneActionEqualFold(v string) predicate.Group {
 // CodexTimezoneActionContainsFold applies the ContainsFold predicate on the "codex_timezone_action" field.
 func CodexTimezoneActionContainsFold(v string) predicate.Group {
 	return predicate.Group(sql.FieldContainsFold(FieldCodexTimezoneAction, v))
+}
+
+// ClientAttestationPolicyEQ applies the EQ predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldClientAttestationPolicy, v))
+}
+
+// ClientAttestationPolicyNEQ applies the NEQ predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldClientAttestationPolicy, v))
+}
+
+// ClientAttestationPolicyIn applies the In predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldClientAttestationPolicy, vs...))
+}
+
+// ClientAttestationPolicyNotIn applies the NotIn predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldClientAttestationPolicy, vs...))
+}
+
+// ClientAttestationPolicyGT applies the GT predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldClientAttestationPolicy, v))
+}
+
+// ClientAttestationPolicyGTE applies the GTE predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldClientAttestationPolicy, v))
+}
+
+// ClientAttestationPolicyLT applies the LT predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldClientAttestationPolicy, v))
+}
+
+// ClientAttestationPolicyLTE applies the LTE predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldClientAttestationPolicy, v))
+}
+
+// ClientAttestationPolicyContains applies the Contains predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldClientAttestationPolicy, v))
+}
+
+// ClientAttestationPolicyHasPrefix applies the HasPrefix predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldClientAttestationPolicy, v))
+}
+
+// ClientAttestationPolicyHasSuffix applies the HasSuffix predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldClientAttestationPolicy, v))
+}
+
+// ClientAttestationPolicyEqualFold applies the EqualFold predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldClientAttestationPolicy, v))
+}
+
+// ClientAttestationPolicyContainsFold applies the ContainsFold predicate on the "client_attestation_policy" field.
+func ClientAttestationPolicyContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldClientAttestationPolicy, v))
 }
 
 // ClaudeDeviceLimitModeEQ applies the EQ predicate on the "claude_device_limit_mode" field.

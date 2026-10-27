@@ -25,6 +25,25 @@ export interface ClaudeUserDevice {
   revoked_at?: string | null
 }
 
+/** SAIAI client proof device (local proxy key) enrolled by a user. */
+export interface ClientDevice {
+  id: number
+  device_id: string
+  user_id: number
+  first_api_key_id: number | null
+  public_key_sha256: string
+  client_version: string
+  os: string
+  arch: string
+  created_at: string
+  last_seen_at: string | null
+  last_ip: string
+  last_claude_at: string | null
+  last_codex_at: string | null
+  revoked_at: string | null
+  revoked_by: number | null
+}
+
 /**
  * List all users with pagination
  * @param page - Page number (default: 1)
@@ -215,6 +234,18 @@ export async function revokeClaudeDevice(id: number, deviceId: number): Promise<
   return data
 }
 
+/** Get SAIAI client devices enrolled by a user. */
+export async function getClientDevices(id: number): Promise<ClientDevice[]> {
+  const { data } = await apiClient.get<ClientDevice[]>(`/admin/users/${id}/client-devices`)
+  return data || []
+}
+
+/** Revoke one SAIAI client device. */
+export async function revokeClientDevice(id: number, deviceId: number): Promise<{ message: string }> {
+  const { data } = await apiClient.delete<{ message: string }>(`/admin/users/${id}/client-devices/${deviceId}`)
+  return data
+}
+
 /**
  * Balance history item returned from the API
  */
@@ -294,6 +325,8 @@ export const usersAPI = {
   getUserUsageStats,
   getClaudeDevices,
   revokeClaudeDevice,
+  getClientDevices,
+  revokeClientDevice,
   getUserBalanceHistory,
   replaceGroup
 }

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/clientproof"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
@@ -105,6 +106,8 @@ var openaiDeniedRequestHeaders = map[string]struct{}{
 	"x-forwarded-proto":   {},
 	"x-real-ip":           {},
 	strings.ToLower(openAINativeRelayChainHeader): {},
+	// SAIAI client proof is Gateway-only; never forward it upstream.
+	strings.ToLower(clientproof.HeaderName): {},
 }
 
 func openAINativeRelayChainContains(chain, instanceID string) bool {
@@ -4371,6 +4374,9 @@ type OpenAIRecordUsageInput struct {
 	IPAddress          string // 请求的客户端 IP 地址
 	RequestPayloadHash string
 	APIKeyService      APIKeyQuotaUpdater
+	// ClientAttestation is the request-level SAIAI client proof status. It is
+	// persisted only when the final key's group collects attestation.
+	ClientAttestation *int16
 }
 
 const OpenAIChatGPTTurnBillingModel = "chatgpt-native-turn"
@@ -4398,6 +4404,7 @@ type OpenAIChatGPTTurnUsageInput struct {
 	RequestPayloadHash  string
 	Duration            time.Duration
 	APIKeyService       APIKeyQuotaUpdater
+	ClientAttestation   *int16
 }
 
 // IsValidOpenAIChatGPTTurnPrice reports whether a configured fixed price is
@@ -4490,8 +4497,11 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		UpstreamModel:   optionalNonEqualStringPtr(input.ObservedModel, requestedModel),
 		ReasoningEffort: optionalTrimmedStringPtr(input.ThinkingEffort),
 		GroupID:         apiKey.GroupID,
-		InputTokens:     0,
-		OutputTokens:    0,
+		// Native Chat settles asynchronously; the status is from the request
+		// that triggered settlement.
+		ClientAttestation: ClientAttestationForUsage(input.ClientAttestation, apiKey),
+		InputTokens:       0,
+		OutputTokens:      0,
 		// Native Chat uses these existing cost components for the text turn
 		// and generated output assets, independently of unknown token counts.
 		InputCost:             cost.InputCost,
@@ -4674,6 +4684,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		UpstreamModel:              optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
 		ServiceTier:                result.ServiceTier,
 		ReasoningEffort:            result.ReasoningEffort,
+		ClientAttestation:          ClientAttestationForUsage(input.ClientAttestation, apiKey),
 		InboundEndpoint:            optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:           optionalTrimmedStringPtr(input.UpstreamEndpoint),
 		InputTokens:                actualInputTokens,

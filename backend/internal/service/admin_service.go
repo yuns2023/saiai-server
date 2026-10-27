@@ -187,6 +187,7 @@ type CreateGroupInput struct {
 	CodexClientPolicy                string
 	CodexCNTimezoneGuard             bool
 	CodexTimezoneAction              string
+	ClientAttestationPolicy          string
 	ClaudeDeviceLimitMode            string
 	ClaudeDeviceBaseLimit            int
 	// 从指定分组复制账号（创建分组后在同一事务内绑定）
@@ -249,6 +250,7 @@ type UpdateGroupInput struct {
 	CodexClientPolicy                *string
 	CodexCNTimezoneGuard             *bool
 	CodexTimezoneAction              *string
+	ClientAttestationPolicy          *string
 	ClaudeDeviceLimitMode            *string
 	ClaudeDeviceBaseLimit            *int
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
@@ -1119,6 +1121,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		CodexClientPolicy:                normalizeCodexClientPolicy(input.CodexClientPolicy),
 		CodexCNTimezoneGuard:             input.CodexCNTimezoneGuard,
 		CodexTimezoneAction:              NormalizeCodexTimezoneAction(input.CodexTimezoneAction),
+		ClientAttestationPolicy:          NormalizeClientAttestationPolicy(input.ClientAttestationPolicy),
 		ClaudeDeviceLimitMode:            normalizeClaudeDeviceLimitMode(input.ClaudeDeviceLimitMode),
 		ClaudeDeviceBaseLimit:            normalizePositiveInt(input.ClaudeDeviceBaseLimit, 1, 1, 100),
 	}
@@ -1504,6 +1507,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.CodexTimezoneAction != nil {
 		group.CodexTimezoneAction = NormalizeCodexTimezoneAction(*input.CodexTimezoneAction)
+	}
+	if input.ClientAttestationPolicy != nil {
+		group.ClientAttestationPolicy = NormalizeClientAttestationPolicy(*input.ClientAttestationPolicy)
 	}
 	if input.ClaudeDeviceLimitMode != nil {
 		group.ClaudeDeviceLimitMode = normalizeClaudeDeviceLimitMode(*input.ClaudeDeviceLimitMode)

@@ -368,6 +368,56 @@ func TestUsageLogRepositoryStopReasonRoundTrip(t *testing.T) {
 	}, 3*time.Second, 20*time.Millisecond)
 }
 
+func TestUsageLogRepositoryClientAttestationRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("usage-client-attestation-%d@example.com", time.Now().UnixNano())})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-usage-client-attestation-" + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-client-attestation-" + uuid.NewString()})
+	newLog := func(status *int16) *service.UsageLog {
+		return &service.UsageLog{UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID, RequestID: uuid.NewString(),
+			Model: "gpt-5.4", InputTokens: 3, TotalCost: 0.1, ActualCost: 0.1, ClientAttestation: status, CreatedAt: time.Now().UTC()}
+	}
+	stored := func(log *service.UsageLog) *int16 {
+		var value *int16
+		require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT client_attestation FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", log.RequestID, apiKey.ID).Scan(&value))
+		return value
+	}
+	valid, replay := int16(1), int16(5)
+
+	batched := newLog(&valid)
+	_, err := repo.Create(ctx, batched)
+	require.NoError(t, err)
+	got, err := repo.GetByID(ctx, batched.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.ClientAttestation)
+	require.Equal(t, valid, *got.ClientAttestation)
+
+	null := newLog(nil)
+	_, err = repo.Create(ctx, null)
+	require.NoError(t, err)
+	require.Nil(t, stored(null))
+
+	single := newLog(&replay)
+	_, err = repo.createSingle(ctx, integrationDB, single)
+	require.NoError(t, err)
+	require.Equal(t, replay, *stored(single))
+
+	fallback := newLog(&replay)
+	require.NoError(t, execUsageLogInsertNoResult(ctx, integrationDB, prepareUsageLogInsert(fallback)))
+	require.Equal(t, replay, *stored(fallback))
+
+	bestEffort := newLog(&valid)
+	require.NoError(t, repo.CreateBestEffort(ctx, bestEffort))
+	require.Eventually(t, func() bool {
+		var value *int16
+		err := integrationDB.QueryRowContext(ctx, "SELECT client_attestation FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", bestEffort.RequestID, apiKey.ID).Scan(&value)
+		return err == nil && value != nil && *value == valid
+	}, 3*time.Second, 20*time.Millisecond)
+}
+
 func TestUsageLogRepositoryCreateBestEffort_QueueFullReturnsDropped(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)

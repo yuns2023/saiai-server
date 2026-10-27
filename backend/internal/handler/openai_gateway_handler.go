@@ -650,6 +650,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 						Subscription: subscription, InboundEndpoint: c.Request.URL.Path,
 						UpstreamEndpoint: strings.TrimPrefix(c.Request.URL.Path, "/chatgpt"),
 						UserAgent:        c.GetHeader("User-Agent"), IPAddress: ip.GetClientIP(c),
+						ClientAttestation: middleware2.GetClientAttestation(c),
 					}); err != nil && !errors.Is(err, service.ErrChatGPTTurnPending) {
 						logger.L().Error("openai.chatgpt_seal_billing_failed", zap.Error(err))
 						return
@@ -1230,9 +1231,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 
 		moderationRef := service.CaptureInputModerationUsageRef(c.Request.Context(), apiKey, service.InputModerationSourceOpenAIResponsesHTTP, 1)
+		clientAttestation := middleware2.GetClientAttestation(c)
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
+				ClientAttestation:  clientAttestation,
 				ModerationRef:      moderationRef,
 				Result:             result,
 				APIKey:             apiKey,
@@ -2086,8 +2089,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				requestPayloadHash = service.HashUsageRequestPayload(originalFirstMessage)
 			}
 			moderationRef := service.CaptureInputModerationUsageRef(ctx, apiKey, service.InputModerationSourceOpenAIResponsesWS, turn)
+			// WS: the handshake proof covers every turn of the connection.
+			clientAttestation := middleware2.GetClientAttestation(c)
 			h.submitUsageRecordTask(func(taskCtx context.Context) {
 				if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
+					ClientAttestation:  clientAttestation,
 					ModerationRef:      moderationRef,
 					Result:             result,
 					APIKey:             apiKey,
