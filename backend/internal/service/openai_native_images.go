@@ -79,6 +79,7 @@ func (s *OpenAIGatewayService) ForwardNativeCodexImage(
 	}
 	c.Data(resp.StatusCode, contentType, responseBody)
 	if resp.StatusCode >= http.StatusBadRequest {
+		markOpsUpstreamBodyRelayed(c, resp.StatusCode)
 		// Return the provider's actual error once. Do not automatically repeat
 		// a possibly accepted image job on this or another pooled account.
 		return nil, fmt.Errorf("native Codex image upstream returned status %d", resp.StatusCode)

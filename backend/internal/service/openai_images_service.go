@@ -146,6 +146,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImageAPIKey(
 	}
 	c.Data(resp.StatusCode, contentType, responseBody)
 	if resp.StatusCode >= http.StatusBadRequest {
+		markOpsUpstreamBodyRelayed(c, resp.StatusCode)
 		return nil, fmt.Errorf("OpenAI Image API upstream returned status %d", resp.StatusCode)
 	}
 
@@ -278,6 +279,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImageOAuth(
 			contentType = "application/json"
 		}
 		c.Data(resp.StatusCode, contentType, responseBody)
+		markOpsUpstreamBodyRelayed(c, resp.StatusCode)
 		return nil, fmt.Errorf("OpenAI OAuth image upstream returned status %d", resp.StatusCode)
 	}
 
