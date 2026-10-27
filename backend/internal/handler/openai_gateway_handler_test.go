@@ -172,18 +172,17 @@ func TestEnforceCodexContinuationAccountBoundary(t *testing.T) {
 	require.False(t, enforceCodexContinuationAccountBoundary(c, &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}))
 }
 
-func TestCodexLocalProxyModelsRequestMatchedAllowsDiscoveryWithoutProxyHeaders(t *testing.T) {
+func TestCodexDesktopDiscoveryShapeIsNotLocalProxyIngress(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models?client_version=0.153.4", nil)
 	c.Request.Header.Set("User-Agent", "codex_chatgpt_desktop/0.153.4")
 	c.Request.Header.Set("originator", "codex_chatgpt_desktop")
 
-	assert.True(t, codexLocalProxyModelsRequestMatched(c))
 	assert.False(t, codexLocalProxyRequestMatched(c, c.GetHeader("User-Agent"), c.GetHeader("originator")))
 }
 
-func TestCodexTUIModelsAndContinuationAccountBoundary(t *testing.T) {
+func TestCodexTUIContinuationAccountBoundary(t *testing.T) {
 	for _, version := range []string{"0.154.0", "0.160.0"} {
 		t.Run(version, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -193,12 +192,10 @@ func TestCodexTUIModelsAndContinuationAccountBoundary(t *testing.T) {
 			context.Request.Header.Set("originator", "codex-tui")
 			context.Request.Header.Set("chatgpt-account-id", "TEST_ONLY_ACCOUNT")
 			account := &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}
-			require.True(t, codexLocalProxyModelsRequestMatched(context))
 			require.False(t, enforceCodexContinuationAccountBoundary(context, account))
 			context.Request.Header.Set("version", version)
 			require.True(t, enforceCodexContinuationAccountBoundary(context, account))
 			context.Request.Header.Del("chatgpt-account-id")
-			require.True(t, codexLocalProxyModelsRequestMatched(context))
 			require.False(t, enforceCodexContinuationAccountBoundary(context, account))
 		})
 	}

@@ -144,8 +144,8 @@ to claim bootstrap compatibility.
 OpenAI groups may set `codex_client_policy=local_proxy_only` to reject the
 legacy `base_url`/API-key route while allowing the current SAIAI local-proxy
 OAuth shape. The request gate applies only to Codex model ingress
-(`/v1/responses`, Responses WebSocket and the Codex models manifest); ChatGPT
-Desktop/VSCode control-plane sidecars are not subject to it.
+(`/v1/responses` and Responses WebSocket); the Codex models manifest and
+ChatGPT Desktop/VSCode control-plane sidecars are not subject to it.
 
 Responses model ingress requires a recognized Codex product/version at the start of the
 `User-Agent`, together with non-empty `chatgpt-account-id` and `version`
@@ -182,10 +182,20 @@ The same client-header admission applies to the `official_clients` and
 `cli_only` group policies, OAuth account restrictions, and native relay
 accounts, across HTTP and WebSocket. `cli_only` additionally requires the
 terminal/exec UA; an originator cannot convert a VSCode UA into a terminal UA.
-The models catalog is a control-plane request: under `local_proxy_only`, it
-requires valid client headers but allows both `version` and
-`chatgpt-account-id` to be absent. The selected account supplies its own
-account ID on egress. This exception does not relax Responses model ingress.
+The Codex models catalog is a read-only, unbilled control-plane request and is
+not gated by any group client policy: every valid key of an OpenAI group gets
+the selected account's official manifest (for example the SAIAI daemon check,
+whose app-server UA carries its own `saiai_daemon_check` originator). A request
+whose headers are not a recognized Codex client is fetched with the gateway's
+identity (`codex_cli_rs/<client_version>` UA and originator) so that an
+unrecognized originator never reaches the upstream account; other headers,
+the raw query and relay metadata are preserved. When the group has blocked
+model patterns, matching `slug` entries are removed from the manifest on every
+request. Client validators (`If-None-Match`, `If-Modified-Since`) are not
+forwarded, and the response is sent without `ETag`/`Last-Modified` and with
+`Cache-Control: private, no-store`, so a client cannot keep a list filtered by
+an older blacklist. The gateway's internal cache for API-key upstreams holds
+the unfiltered catalog and is unaffected.
 Group policy rejection logs contain only correlation,
 policy and reason fields, without raw headers, account IDs or request bodies.
 

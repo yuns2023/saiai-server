@@ -80,3 +80,83 @@ func TestCodexModelsAdmissionWithoutAccountHeader(t *testing.T) {
 		})
 	}
 }
+
+func newCodexModelsAdmissionHandler(t *testing.T, manifest string, header http.Header) (*OpenAIGatewayHandler, *[]*http.Request) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	client, err := httpclient.GetClient(httpclient.Options{Timeout: 15 * time.Second, ResponseHeaderTimeout: 10 * time.Second})
+	require.NoError(t, err)
+	original := client.Transport
+	t.Cleanup(func() { client.Transport = original })
+	var outgoing []*http.Request
+	client.Transport = codexModelsAdmissionTransport(func(r *http.Request) (*http.Response, error) {
+		outgoing = append(outgoing, r.Clone(r.Context()))
+		h := header.Clone()
+		h.Set("Content-Type", "application/json")
+		return &http.Response{StatusCode: http.StatusOK, Header: h, Body: io.NopCloser(strings.NewReader(manifest))}, nil
+	})
+	account := service.Account{ID: 19, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "TEST_ONLY_UPSTREAM_TOKEN", "chatgpt_account_id": "TEST_ONLY_UPSTREAM_ACCOUNT"}}
+	cfg := &config.Config{}
+	svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, nil,
+		cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	return NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil), &outgoing
+}
+
+func serveCodexModels(h *OpenAIGatewayHandler, group *service.Group, header http.Header) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models?client_version=0.164.0&future=a%2Fb", nil)
+	c.Request.Header = header
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 3, GroupID: &group.ID, Group: group})
+	h.CodexModels(c)
+	return rec
+}
+
+// Model discovery is not gated by client policy. The SAIAI daemon check reaches
+// it through the official app-server with its own clientInfo name; that name
+// must not be forwarded to the upstream account.
+func TestCodexModelsDiscoveryOpenToNonOfficialClients(t *testing.T) {
+	const manifest = `{"models":[{"slug":"TEST_ONLY_MODEL"}]}`
+	for _, policy := range []string{"local_proxy_only", "official_clients", "cli_only", "unknown_policy"} {
+		t.Run(policy, func(t *testing.T) {
+			h, outgoing := newCodexModelsAdmissionHandler(t, manifest, http.Header{})
+			header := http.Header{
+				"User-Agent":            {"saiai_daemon_check/0.164.0 (Debian 13.0.0; x86_64) xterm-256color (saiai_daemon_check; 1.1.53)"},
+				"Originator":            {"saiai_daemon_check"},
+				"X-Test-Only-Extension": {"kept"},
+			}
+			rec := serveCodexModels(h, &service.Group{ID: 9, Platform: service.PlatformOpenAI, CodexClientPolicy: policy}, header)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Equal(t, manifest, rec.Body.String())
+			require.Len(t, *outgoing, 1)
+			out := (*outgoing)[0]
+			require.Equal(t, "codex_cli_rs/0.164.0", out.Header.Get("User-Agent"))
+			require.Equal(t, "codex_cli_rs", out.Header.Get("Originator"))
+			require.Equal(t, "kept", out.Header.Get("X-Test-Only-Extension"))
+			require.Equal(t, "client_version=0.164.0&future=a%2Fb", out.URL.RawQuery)
+			require.Equal(t, "saiai_daemon_check", header.Get("Originator"), "ingress headers must not be patched")
+		})
+	}
+}
+
+func TestCodexModelsDiscoveryFiltersGroupBlockedModels(t *testing.T) {
+	const manifest = `{"etag_hint":1,"models":[{"slug":"test-only-allowed","future":true},{"slug":"test-only-blocked"}]}`
+	h, outgoing := newCodexModelsAdmissionHandler(t, manifest, http.Header{"Etag": {`"TEST_ONLY_UPSTREAM"`}, "Cache-Control": {"max-age=300"}})
+	header := http.Header{
+		"User-Agent":    {"codex-tui/0.164.0"},
+		"Originator":    {"codex-tui"},
+		"If-None-Match": {`"TEST_ONLY_UPSTREAM"`},
+	}
+	group := &service.Group{ID: 9, Platform: service.PlatformOpenAI, CodexClientPolicy: "local_proxy_only",
+		BlockedModelPatterns: []string{"test-only-blocked"}}
+	rec := serveCodexModels(h, group, header)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.JSONEq(t, `{"etag_hint":1,"models":[{"slug":"test-only-allowed","future":true}]}`, rec.Body.String())
+	require.Empty(t, rec.Header().Get("ETag"))
+	require.Equal(t, "private, no-store", rec.Header().Get("Cache-Control"))
+	require.Len(t, *outgoing, 1)
+	require.Empty(t, (*outgoing)[0].Header.Get("If-None-Match"))
+	require.Equal(t, "codex-tui/0.164.0", (*outgoing)[0].Header.Get("User-Agent"))
+}
