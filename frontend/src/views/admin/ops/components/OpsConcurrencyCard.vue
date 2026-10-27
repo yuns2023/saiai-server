@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { opsAPI, type OpsAccountAvailabilityStatsResponse, type OpsConcurrencyStatsResponse, type OpsUserConcurrencyStatsResponse } from '@/api/admin/ops'
@@ -414,12 +415,14 @@ watch(
           <!-- 用户信息和并发 -->
           <div class="mb-1.5 flex items-center justify-between gap-2">
             <div class="flex min-w-0 flex-1 items-center gap-1.5">
-              <span class="truncate text-[11px] font-bold text-gray-900 dark:text-white" :title="row.username || row.user_email">
-                {{ row.username || row.user_email }}
-              </span>
-              <span v-if="row.username" class="shrink-0 truncate text-[10px] text-gray-400 dark:text-gray-500" :title="row.user_email">
-                {{ row.user_email }}
-              </span>
+              <UserIdentityTooltip :user-id="row.user_id" :username="row.username">
+                <span class="truncate text-[11px] font-bold text-gray-900 dark:text-white">
+                  {{ row.username || row.user_email }}
+                </span>
+                <span v-if="row.username" class="ml-1.5 shrink-0 truncate text-[10px] text-gray-400 dark:text-gray-500">
+                  {{ row.user_email }}
+                </span>
+              </UserIdentityTooltip>
             </div>
             <div class="flex shrink-0 items-center gap-2 text-[10px]">
               <span class="font-mono font-bold text-gray-900 dark:text-white"> {{ row.current_in_use }}/{{ row.max_capacity }} </span>

@@ -8,7 +8,9 @@ const props = withDefaults(defineProps<{
    * whose trigger already carries the full text as its accessible name.
    */
   lazy?: boolean
-}>(), { lazy: false })
+  /** Tap/click pins the tooltip open. Disable when the trigger itself acts on click (e.g. opens a dialog). */
+  pinOnClick?: boolean
+}>(), { lazy: false, pinOnClick: true })
 
 const tooltipId = `help-tooltip-${useId()}`
 const hovered = ref(false)
@@ -55,6 +57,10 @@ function closeAll() {
 }
 
 function onClick() {
+  if (!props.pinOnClick) {
+    closeAll()
+    return
+  }
   if (pinned.value) {
     closeAll()
     return
@@ -88,8 +94,27 @@ function setGlobalListeners(active: boolean) {
   window[method]('resize', onViewportChange)
 }
 
-watch(show, (visible) => setGlobalListeners(visible))
-onBeforeUnmount(() => setGlobalListeners(false))
+// Content can change while open (e.g. loaded asynchronously); keep it placed inside the viewport.
+let resizeObserver: ResizeObserver | null = null
+function observeSize(active: boolean) {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  if (!active || typeof ResizeObserver === 'undefined') return
+  nextTick(() => {
+    if (resizeObserver || !tooltipRef.value || !show.value) return
+    resizeObserver = new ResizeObserver(() => updatePosition())
+    resizeObserver.observe(tooltipRef.value)
+  })
+}
+
+watch(show, (visible) => {
+  setGlobalListeners(visible)
+  observeSize(visible)
+})
+onBeforeUnmount(() => {
+  setGlobalListeners(false)
+  observeSize(false)
+})
 
 // Describe the focusable trigger by the tooltip body (WAI-ARIA tooltip pattern).
 onMounted(() => {
@@ -120,7 +145,7 @@ const rendered = computed(() => !props.lazy || show.value)
 </script>
 
 <template>
-  <div
+  <span
     ref="trigger"
     class="group relative ml-1 inline-flex items-center align-middle"
     @mouseenter="onEnter"
@@ -166,5 +191,5 @@ const rendered = computed(() => !props.lazy || show.value)
         ></div>
       </div>
     </Teleport>
-  </div>
+  </span>
 </template>

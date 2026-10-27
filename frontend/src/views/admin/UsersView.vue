@@ -236,7 +236,7 @@
       <!-- Users Table -->
       <template #table>
         <DataTable :columns="columns" :data="users" :loading="loading" :actions-count="7">
-          <template #cell-email="{ value }">
+          <template #cell-email="{ value, row }">
             <div class="flex items-center gap-2">
               <div
                 class="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
@@ -245,7 +245,9 @@
                   {{ value.charAt(0).toUpperCase() }}
                 </span>
               </div>
-              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <UserIdentityTooltip :user-id="row.id" :username="row.username" :notes="row.notes">
+                <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              </UserIdentityTooltip>
             </div>
           </template>
 
@@ -641,6 +643,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'

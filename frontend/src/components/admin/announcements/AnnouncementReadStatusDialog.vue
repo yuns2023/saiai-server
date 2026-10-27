@@ -22,8 +22,8 @@
       </div>
 
       <DataTable :columns="columns" :data="items" :loading="loading">
-        <template #cell-email="{ value }">
-          <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+        <template #cell-email="{ value, row }">
+          <UserIdentityTooltip :user-id="row.user_id"><span class="font-medium text-gray-900 dark:text-white">{{ value }}</span></UserIdentityTooltip>
         </template>
 
         <template #cell-balance="{ value }">
@@ -62,6 +62,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

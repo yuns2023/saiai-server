@@ -124,7 +124,7 @@
             <thead class="text-xs uppercase text-gray-500"><tr><th class="py-2">订单</th><th>用户</th><th>类型</th><th>金额</th><th>方式</th><th>状态</th><th>时间</th><th></th></tr></thead>
             <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
               <tr v-for="order in orders" :key="order.id">
-                <td class="py-3">#{{ order.id }}</td><td>{{ order.user_email || order.user_id }}</td><td>{{ order.order_type === 'subscription' ? '订阅' : '按量' }}</td><td>{{ formatMoney(order.amount, order.order_type === 'balance' ? 'USD' : order.currency) }} / {{ formatMoney(order.pay_amount, order.currency) }}</td>
+                <td class="py-3">#{{ order.id }}</td><td><UserIdentityTooltip :user-id="order.user_id"><span>{{ order.user_email || order.user_id }}</span></UserIdentityTooltip></td><td>{{ order.order_type === 'subscription' ? '订阅' : '按量' }}</td><td>{{ formatMoney(order.amount, order.order_type === 'balance' ? 'USD' : order.currency) }} / {{ formatMoney(order.pay_amount, order.currency) }}</td>
                 <td>{{ order.payment_type }}</td><td><span>{{ order.status }}</span><p v-if="order.refund_error" class="mt-1 max-w-xs text-xs text-amber-600">{{ order.refund_error }}</p></td><td>{{ formatDate(order.created_at || order.expires_at) }}</td>
                 <td><div class="flex flex-wrap gap-2"><button v-if="['PAID', 'FAILED', 'RECHARGING'].includes(order.status)" class="btn btn-secondary btn-sm" type="button" @click="retryOrder(order)">重试入账</button><button v-if="['COMPLETED', 'REFUND_FAILED'].includes(order.status)" class="btn btn-danger btn-sm" type="button" @click="openRefund(order)">退款</button><button v-if="['REFUNDING', 'REFUND_PENDING'].includes(order.status)" class="btn btn-secondary btn-sm" type="button" @click="openResolution(order, 'refunded')">确认已退</button><button v-if="['REFUNDING', 'REFUND_PENDING'].includes(order.status)" class="btn btn-secondary btn-sm" type="button" @click="openResolution(order, 'not_refunded')">确认未退</button></div></td>
               </tr>
@@ -155,6 +155,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useAppStore } from '@/stores'

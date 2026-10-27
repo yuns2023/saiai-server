@@ -118,9 +118,11 @@
           </template>
 
           <template #cell-used_by="{ value, row }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">
-              {{ row.user?.email || (value ? t('admin.redeem.userPrefix', { id: value }) : '-') }}
-            </span>
+            <UserIdentityTooltip :user-id="value || null">
+              <span class="text-sm text-gray-500 dark:text-dark-400">
+                {{ row.user?.email || (value ? t('admin.redeem.userPrefix', { id: value }) : '-') }}
+              </span>
+            </UserIdentityTooltip>
           </template>
 
           <template #cell-used_at="{ value }">
@@ -391,6 +393,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

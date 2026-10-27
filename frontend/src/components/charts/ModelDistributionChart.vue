@@ -208,12 +208,14 @@
                   <span class="shrink-0 text-[11px] font-semibold text-gray-500 dark:text-gray-400">
                     {{ item.isOther ? 'Σ' : `#${index + 1}` }}
                   </span>
-                  <span
-                    class="block max-w-[140px] truncate font-medium text-gray-900 dark:text-white"
-                    :title="getRankingRowLabel(item)"
-                  >
-                    {{ getRankingRowLabel(item) }}
-                  </span>
+                  <UserIdentityTooltip :user-id="item.isOther ? null : item.user_id">
+                    <span
+                      class="block max-w-[140px] truncate font-medium text-gray-900 dark:text-white"
+                      :title="item.isOther ? getRankingRowLabel(item) : undefined"
+                    >
+                      {{ getRankingRowLabel(item) }}
+                    </span>
+                  </UserIdentityTooltip>
                 </div>
               </td>
               <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
@@ -240,6 +242,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { cacheReadRate, formatCacheReadRate } from '@/utils/usageTokens'
 import TokenCount from '@/components/common/TokenCount.vue'
 import { formatExactTokens } from '@/utils/usageTokens'
