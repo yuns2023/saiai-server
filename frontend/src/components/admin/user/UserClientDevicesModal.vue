@@ -3,7 +3,7 @@
     <div v-if="user" class="space-y-4">
       <div class="flex items-center justify-between gap-3 rounded-xl bg-gray-50 p-4 dark:bg-dark-700">
         <div>
-          <p class="font-medium text-gray-900 dark:text-white">{{ user.email }}</p>
+          <p class="font-medium text-gray-900 dark:text-white"><UserIdentityTooltip :user-id="user.id" :username="user.username" :notes="user.notes">{{ user.email }}</UserIdentityTooltip></p>
           <p class="text-sm text-gray-500 dark:text-dark-400">{{ t('admin.users.clientProof.modal.userId', { id: user.id }) }}</p>
         </div>
         <button type="button" class="btn btn-secondary btn-sm" :disabled="loading" @click="load">
@@ -55,6 +55,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
