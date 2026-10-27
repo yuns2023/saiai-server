@@ -3354,6 +3354,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		if !writeOpenAICodexCapacityError(c, account, body) {
 			c.Status(resp.StatusCode)
 			_, _ = c.Writer.Write(body)
+			markOpsUpstreamBodyRelayed(c, resp.StatusCode)
 		}
 		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
 	}
@@ -3475,6 +3476,7 @@ func (s *OpenAIGatewayService) handleNativeRelayErrorResponse(
 	if !writeOpenAICodexCapacityError(c, account, body) {
 		c.Status(resp.StatusCode)
 		_, _ = c.Writer.Write(body)
+		markOpsUpstreamBodyRelayed(c, resp.StatusCode)
 	}
 	if upstreamMsg == "" {
 		return nil, fmt.Errorf("native relay upstream error: %d", resp.StatusCode)

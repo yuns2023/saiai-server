@@ -16,10 +16,12 @@ import (
 // Gin context keys used by Ops error logger for capturing upstream error details.
 // These keys are set by gateway services and consumed by handler/ops_error_logger.go.
 const (
-	OpsUpstreamStatusCodeKey     = "ops_upstream_status_code"
-	OpsUpstreamErrorMessageKey   = "ops_upstream_error_message"
-	OpsUpstreamErrorDetailKey    = "ops_upstream_error_detail"
-	OpsUpstreamErrorsKey         = "ops_upstream_errors"
+	OpsUpstreamStatusCodeKey   = "ops_upstream_status_code"
+	OpsUpstreamErrorMessageKey = "ops_upstream_error_message"
+	OpsUpstreamErrorDetailKey  = "ops_upstream_error_detail"
+	OpsUpstreamErrorsKey       = "ops_upstream_errors"
+	// Status of an upstream error body written to the client byte-for-byte.
+	OpsUpstreamBodyRelayedKey    = "ops_upstream_body_relayed"
 	OpsOAuthAttributionKey       = "ops_oauth_attribution"
 	opsClaudeOAuthAuditComponent = "audit.claude_oauth_attribution"
 
@@ -456,6 +458,12 @@ func SetOpsLatencyMs(c *gin.Context, key string, value int64) {
 // original upstream status code before mapping it to a client-facing code.
 func SetOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage, upstreamDetail string) {
 	setOpsUpstreamError(c, upstreamStatusCode, upstreamMessage, upstreamDetail)
+}
+
+func markOpsUpstreamBodyRelayed(c *gin.Context, statusCode int) {
+	if c != nil {
+		c.Set(OpsUpstreamBodyRelayedKey, statusCode)
+	}
 }
 
 func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage, upstreamDetail string) {

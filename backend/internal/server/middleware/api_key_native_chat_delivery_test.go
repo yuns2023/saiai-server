@@ -20,6 +20,7 @@ func TestNativeChatDeliveryDoesNotRequireNewCreditOrAdmitGeneration(t *testing.T
 		want                              int
 	}{
 		{"owned snapshot", "GET", "/chatgpt/backend-api/conversation/:conversation_id", "/chatgpt/backend-api/conversation/TEST_ONLY", service.StatusAPIKeyQuotaExhausted, true, 200},
+		{"local history search", "GET", "/chatgpt/backend-api/conversations/search", "/chatgpt/backend-api/conversations/search?query=TEST_ONLY", service.StatusAPIKeyQuotaExhausted, true, 200},
 		{"asset", "GET", "/chatgpt/backend-api/files/download/:file_id", "/chatgpt/backend-api/files/download/file_TEST_ONLY", service.StatusAPIKeyQuotaExhausted, true, 200},
 		{"subscription", "GET", "/chatgpt/backend-api/celsius/ws/user", "/chatgpt/backend-api/celsius/ws/user", service.StatusActive, true, 200},
 		{"delivery leg", "POST", "/chatgpt/backend-api/f/conversation/*subpath", "/chatgpt/backend-api/f/conversation/resume", service.StatusActive, true, 200},

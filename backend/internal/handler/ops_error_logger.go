@@ -1149,7 +1149,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		}
 		applyOpsNativeChatUpstreamClassification(entry)
 		if !localFailure {
-			applyOpsRelayedUpstreamClassification(entry)
+			applyOpsRelayedUpstreamClassification(entry, c.GetInt(service.OpsUpstreamBodyRelayedKey))
 		}
 
 		// Persist only a minimal, whitelisted set of request headers to improve retry fidelity.
@@ -1188,15 +1188,12 @@ func applyOpsNativeChatUpstreamClassification(entry *service.OpsInsertErrorLogIn
 }
 
 // Some provider rejections are not OpenAI error objects (for example a
-// FastAPI {"detail":"..."} body). When the client received exactly the
-// recorded upstream body, classify it like the equivalent typed rejection
-// instead of as a gateway-internal failure.
-func applyOpsRelayedUpstreamClassification(entry *service.OpsInsertErrorLogInput) {
+// FastAPI {"detail":"..."} body). When the gateway wrote the upstream error
+// body to the client unchanged, classify it like the equivalent typed
+// rejection instead of as a gateway-internal failure.
+func applyOpsRelayedUpstreamClassification(entry *service.OpsInsertErrorLogInput, relayedStatus int) {
 	if entry == nil || entry.ErrorPhase != "internal" || entry.ErrorType != "api_error" ||
-		entry.UpstreamStatusCode == nil || *entry.UpstreamStatusCode < 400 ||
-		*entry.UpstreamStatusCode != entry.StatusCode || entry.UpstreamErrorDetail == nil ||
-		strings.TrimSpace(*entry.UpstreamErrorDetail) == "" ||
-		strings.TrimSpace(*entry.UpstreamErrorDetail) != strings.TrimSpace(entry.ErrorBody) {
+		relayedStatus < 400 || relayedStatus != entry.StatusCode {
 		return
 	}
 	switch entry.StatusCode {

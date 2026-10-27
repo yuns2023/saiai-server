@@ -16,8 +16,7 @@ func TestOpsErrorLoggerClassifiesRelayedDetailRejections(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, wantType, wantPhase, wantOwner, wantSeverity, wantMessage string
 		status                                                                int
-		upstreamBody                                                          string
-		wantRetryable                                                         bool
+		local, wantRetryable                                                  bool
 	}{
 		{name: "client_shape_400", status: 400, body: `{"detail":"Input must be a list"}`,
 			wantType: "invalid_request_error", wantPhase: "request", wantOwner: "client", wantSeverity: "P3",
@@ -26,19 +25,18 @@ func TestOpsErrorLoggerClassifiesRelayedDetailRejections(t *testing.T) {
 			wantType: "upstream_error", wantPhase: "upstream", wantOwner: "provider", wantSeverity: "P1",
 			wantMessage: "Service temporarily unavailable", wantRetryable: true},
 		// A gateway body that merely shares the upstream status is not a relay.
-		{name: "local_body_same_status", status: 400, body: `{"detail":"Local rejection"}`, upstreamBody: `{"detail":"Different"}`,
+		{name: "local_body_same_status", status: 400, body: `{"detail":"Local rejection"}`, local: true,
 			wantType: "api_error", wantPhase: "internal", wantOwner: "platform", wantSeverity: "P2",
 			wantMessage: "Local rejection"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			upstreamBody := tc.upstreamBody
-			if upstreamBody == "" {
-				upstreamBody = tc.body
-			}
 			r := gin.New()
 			r.POST("/v1/responses", OpsErrorLoggerMiddleware(ops), func(c *gin.Context) {
 				setOpsRequestContext(c, "mock-codex-model", true, []byte(`{"model":"mock-codex-model"}`))
-				service.SetOpsUpstreamError(c, tc.status, "mock upstream message", upstreamBody)
+				service.SetOpsUpstreamError(c, tc.status, "mock upstream message", tc.body)
+				if !tc.local {
+					c.Set(service.OpsUpstreamBodyRelayedKey, tc.status)
+				}
 				c.Data(tc.status, "application/json", []byte(tc.body))
 			})
 			w := httptest.NewRecorder()
@@ -53,7 +51,7 @@ func TestOpsErrorLoggerClassifiesRelayedDetailRejections(t *testing.T) {
 				require.Equal(t, tc.wantSeverity, job.entry.Severity)
 				require.Equal(t, tc.wantRetryable, job.entry.IsRetryable)
 				require.Equal(t, tc.wantMessage, job.entry.ErrorMessage)
-				if tc.upstreamBody == "" {
+				if !tc.local {
 					require.Equal(t, "upstream_http", job.entry.ErrorSource)
 				} else {
 					require.Equal(t, "gateway", job.entry.ErrorSource)
@@ -67,16 +65,25 @@ func TestOpsErrorLoggerClassifiesRelayedDetailRejections(t *testing.T) {
 }
 
 func TestApplyOpsRelayedUpstreamClassificationKeepsOtherEntries(t *testing.T) {
-	status, other := 400, 502
-	body := `{"detail":"Input must be a list"}`
-	for _, entry := range []*service.OpsInsertErrorLogInput{
-		{StatusCode: 400, ErrorPhase: "internal", ErrorType: "api_error", ErrorBody: body},
-		{StatusCode: 400, ErrorPhase: "internal", ErrorType: "api_error", ErrorBody: body, UpstreamStatusCode: &other, UpstreamErrorDetail: &body},
-		{StatusCode: 400, ErrorPhase: "routing", ErrorType: "api_error", ErrorBody: body, UpstreamStatusCode: &status, UpstreamErrorDetail: &body},
+	for _, tc := range []struct {
+		entry         service.OpsInsertErrorLogInput
+		relayedStatus int
+	}{
+		{service.OpsInsertErrorLogInput{StatusCode: 400, ErrorPhase: "internal", ErrorType: "api_error"}, 0},
+		{service.OpsInsertErrorLogInput{StatusCode: 502, ErrorPhase: "internal", ErrorType: "api_error"}, 400},
+		{service.OpsInsertErrorLogInput{StatusCode: 400, ErrorPhase: "routing", ErrorType: "api_error"}, 400},
+		{service.OpsInsertErrorLogInput{StatusCode: 400, ErrorPhase: "request", ErrorType: "invalid_request_error"}, 400},
 	} {
-		before := *entry
-		applyOpsRelayedUpstreamClassification(entry)
-		require.Equal(t, before, *entry)
+		entry := tc.entry
+		applyOpsRelayedUpstreamClassification(&entry, tc.relayedStatus)
+		require.Equal(t, tc.entry, entry)
+	}
+	for status, want := range map[int]string{404: "invalid_request_error", 409: "invalid_request_error", 413: "invalid_request_error",
+		422: "invalid_request_error", 401: "upstream_error", 403: "upstream_error", 429: "upstream_error"} {
+		entry := service.OpsInsertErrorLogInput{StatusCode: status, ErrorPhase: "internal", ErrorType: "api_error"}
+		applyOpsRelayedUpstreamClassification(&entry, status)
+		require.Equal(t, want, entry.ErrorType, status)
+		require.Equal(t, "upstream_http", entry.ErrorSource)
 	}
 }
 

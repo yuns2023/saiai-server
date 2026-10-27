@@ -344,6 +344,7 @@ func isNativeChatDeliveryLookup(c *gin.Context, cfg *config.Config) bool {
 	switch c.FullPath() {
 	case "/chatgpt/backend-api/celsius/ws/user", "/chatgpt/backend-api/saiai/chat-updates",
 		"/chatgpt/backend-api/conversation/:conversation_id", "/chatgpt/backend-api/conversations/:conversation_id",
+		"/chatgpt/backend-api/conversations/search",
 		"/chatgpt/backend-api/conversations/:conversation_id/messages", "/chatgpt/backend-api/files/download/:file_id",
 		"/chatgpt/backend-api/estuary/content":
 		return true
