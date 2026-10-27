@@ -148,6 +148,15 @@ An actual selected upstream credential echoed in an error is redacted. Existing
 explicit error rules, account-health side effects and pooled 401/402/403 auth
 status mapping remain separate administrative boundaries.
 
+Some provider rejections are not OpenAI error objects, for example
+`{"detail":"Input must be a list"}`. When the Gateway writes an upstream error
+body to the client unchanged (OAuth and native-relay Responses, Images), it
+records that status for Ops. Ops then classifies an otherwise untyped error
+like the equivalent typed rejection: 400/404/409/413/422 become a client
+`invalid_request_error` (P3), and other statuses become a provider
+`upstream_error`. Capacity rewrites and Gateway-built bodies are not marked
+and keep the local classification.
+
 WebSocket passthrough observes top-level `error` and failed/incomplete/cancelled
 response events independently of successful completion. A correlated refusal
 is queued once per turn in Ops while the connection remains open, with the

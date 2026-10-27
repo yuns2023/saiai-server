@@ -69,6 +69,11 @@ A still-live legacy turn lazily establishes the new lease. Already-expired
 legacy context cannot be recovered by guessing an account: start a new
 conversation. The same isolation and current account/group checks apply after
 accounting expiry. History and downloads cannot create a successful usage row.
+Conversation history search (`GET /backend-api/conversations/search`) is never
+forwarded: shared OAuth accounts hold other users' conversations. The Gateway
+answers it locally with `{"items":[],"cursor":null}`, matching the Client's
+local empty conversation list, and it is exempt from balance checks like the
+other read-only delivery lookups.
 
 The provider's account-wide subscription URL remains in server memory. It is
 never returned to Desktop or passed through the Responses trace logger. Only
