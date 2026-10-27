@@ -872,7 +872,7 @@ export default {
   usage: {
     longContextSurcharge: '长上下文加价',
     inputContext: '输入上下文',
-    inputContextHint: '输入总量 {total} tokens（普通输入 + 缓存读取 + 缓存写入，不含输出）。272K = 272,000 tokens；此标记仅表示输入大小，是否加价以费用明细为准。',
+    inputContextHint: '输入总量 {total} tokens（普通输入 + 缓存读取 + 缓存写入，不含输出）。仅对有长上下文价格档（超过 {threshold} tokens）的模型显示；此标记仅表示输入大小，是否加价以费用明细为准。',
     longContext: '长上下文',
     longContextInferred: '历史推断',
     longContextTrigger: '本次输入总量 {total} tokens，超过阈值 {threshold} tokens（含缓存）。',

@@ -167,11 +167,15 @@ No provider/model traffic or production changes are part of these checks.
 
 ### Usage context size versus pricing
 
-The administrator Token column independently marks input context above 272,000
-with `Input context >272K`. It adds uncached input, cache reads and cache writes
-once, excludes output, and applies regardless of service tier or whether a
-pricing snapshot records a surcharge. This fixed size marker does not claim
-that the model has a 272K pricing threshold. Images and native Chat are excluded.
+The administrator Token column independently marks input context above the
+model's own long-context threshold, for example `Input context >272K`. It adds
+uncached input, cache reads and cache writes once, excludes output, and applies
+regardless of service tier or whether a surcharge was applied. Only models with
+a long-context price tier get the marker: the threshold comes from the stored
+pricing snapshot (calculator evidence, then the stored policy), and rows without
+a snapshot fall back to the known GPT long-context models at 272K. Models
+without a tier, such as Claude, never show it. Images and native Chat are
+excluded.
 The fee badge is explicitly labelled `Long-context surcharge` and still follows
 stored billing evidence (or the existing labelled historical inference).
 Priority/Fast has a visible text label beside its service-tier icon; the actual

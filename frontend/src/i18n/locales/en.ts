@@ -869,7 +869,7 @@ export default {
   usage: {
     longContextSurcharge: 'Long-context surcharge',
     inputContext: 'Input context',
-    inputContextHint: 'Total input: {total} tokens (uncached input + cache reads + cache writes, excluding output). 272K = 272,000 tokens. This indicates size only; see cost details for pricing.',
+    inputContextHint: 'Total input: {total} tokens (uncached input + cache reads + cache writes, excluding output). Shown only for models with a long-context price tier above {threshold} tokens. This indicates size only; see cost details for pricing.',
     longContext: 'Long context',
     longContextInferred: 'Inferred',
     longContextTrigger: 'Input {total} tokens exceeds the {threshold}-token threshold (including cache).',
