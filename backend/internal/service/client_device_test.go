@@ -406,6 +406,8 @@ func TestClientSurfaceForPath(t *testing.T) {
 		"/responses/compact":                  ClientSurfaceCodex,
 		"/backend-api/codex/models":           ClientSurfaceCodex,
 		"/chatgpt/backend-api/f/conversation": ClientSurfaceCodex,
+		"/v1/codex/images/generations":        ClientSurfaceCodex,
+		"/v1/codex/images/edits":              ClientSurfaceCodex,
 		"/v1/models":                          "",
 		"/v1/usage":                           "",
 		"/v1/images/generations":              "",

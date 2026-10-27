@@ -67,8 +67,8 @@ const (
 )
 
 // ClientSurfaceForPath maps a gateway request path to the device activity
-// field it updates: Claude Messages → claude; Responses, Codex backend and
-// native ChatGPT → codex; anything else updates last_seen only.
+// field it updates: Claude Messages → claude; Responses, Codex backend, Codex
+// images and native ChatGPT → codex; anything else updates last_seen only.
 func ClientSurfaceForPath(path string) string {
 	switch {
 	case path == "/v1/messages" || path == "/v1/messages/count_tokens":
@@ -76,6 +76,7 @@ func ClientSurfaceForPath(path string) string {
 	case path == "/v1/responses" || strings.HasPrefix(path, "/v1/responses/"),
 		path == "/responses" || strings.HasPrefix(path, "/responses/"),
 		strings.HasPrefix(path, "/backend-api/codex/"),
+		strings.HasPrefix(path, "/v1/codex/"),
 		strings.HasPrefix(path, "/chatgpt/backend-api/"):
 		return ClientSurfaceCodex
 	default:
