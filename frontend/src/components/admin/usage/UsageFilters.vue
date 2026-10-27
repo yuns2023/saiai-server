@@ -35,7 +35,7 @@
               @click="selectUser(u)"
               class="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700"
             >
-              <span>{{ u.email }}</span>
+              <UserIdentityTooltip :user-id="u.id" :pin-on-click="false"><span>{{ u.email }}</span></UserIdentityTooltip>
               <span class="ml-2 text-xs text-gray-400">#{{ u.id }}</span>
             </button>
           </div>
@@ -229,6 +229,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref, onMounted, onUnmounted, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'

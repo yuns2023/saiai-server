@@ -6,7 +6,8 @@
           {{ t('admin.dashboard.keySpendingRankingTitle') }} · Top {{ rankingLimit }}
         </h3>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          {{ selectedUser ? selectedUser.email || `#${selectedUser.id}` : t('admin.dashboard.keyRankingGlobal') }}
+          <UserIdentityTooltip v-if="selectedUser" :user-id="selectedUser.id"><span>{{ selectedUser.email || `#${selectedUser.id}` }}</span></UserIdentityTooltip>
+          <template v-else>{{ t('admin.dashboard.keyRankingGlobal') }}</template>
           · {{ t('admin.dashboard.keyRankingBasis') }}
         </p>
       </div>
@@ -45,7 +46,7 @@
                   class="w-full break-all px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-700"
                   @click="selectUser(user)"
                 >
-                  {{ user.email }} <span class="text-gray-400">#{{ user.id }}</span>
+                  <UserIdentityTooltip :user-id="user.id" :pin-on-click="false"><span>{{ user.email }}</span></UserIdentityTooltip> <span class="text-gray-400">#{{ user.id }}</span>
                 </button>
               </li>
             </ul>
@@ -101,9 +102,11 @@
                 </div>
               </td>
               <td class="min-w-48 py-3 pr-3">
-                <button type="button" class="break-all text-left text-gray-600 hover:underline dark:text-gray-300" :title="t('admin.dashboard.keyRankingFilterUser')" @click="selectUser({ id: item.user_id, email: item.email })">
-                  {{ item.email || `#${item.user_id}` }}
-                </button>
+                <UserIdentityTooltip :user-id="item.user_id" :hint="t('admin.dashboard.keyRankingFilterUser')" :pin-on-click="false">
+                  <button type="button" class="break-all text-left text-gray-600 hover:underline dark:text-gray-300" @click="selectUser({ id: item.user_id, email: item.email })">
+                    {{ item.email || `#${item.user_id}` }}
+                  </button>
+                </UserIdentityTooltip>
               </td>
               <td class="min-w-24 py-3 pr-3 text-right tabular-nums text-green-600 dark:text-green-400">
                 ${{ formatCost(item.actual_cost) }}
@@ -132,6 +135,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'

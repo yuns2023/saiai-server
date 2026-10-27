@@ -330,7 +330,9 @@
             </div>
             <div>
               <p class="text-sm font-medium text-gray-900 dark:text-white">
-                {{ usage.user?.email || t('admin.promo.userPrefix', { id: usage.user_id }) }}
+                <UserIdentityTooltip :user-id="usage.user_id">
+                  <span>{{ usage.user?.email || t('admin.promo.userPrefix', { id: usage.user_id }) }}</span>
+                </UserIdentityTooltip>
               </p>
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ formatDateTime(usage.used_at) }}
@@ -379,6 +381,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

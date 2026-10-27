@@ -12,7 +12,7 @@
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2">
-              <p class="truncate font-medium text-gray-900 dark:text-white">{{ user.email }}</p>
+              <p class="flex min-w-0 font-medium text-gray-900 dark:text-white"><UserIdentityTooltip :user-id="user.id" :username="user.username" :notes="user.notes"><span class="truncate">{{ user.email }}</span></UserIdentityTooltip></p>
               <span
                 v-if="user.username"
                 class="flex-shrink-0 rounded-sm bg-primary-50 px-1.5 py-0.5 text-xs text-primary-600 dark:bg-primary-900/20 dark:text-primary-400"
@@ -169,6 +169,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI, type BalanceHistoryItem } from '@/api/admin'

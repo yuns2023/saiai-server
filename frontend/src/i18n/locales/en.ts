@@ -1796,6 +1796,13 @@ export default {
       // Balance History
       balanceHistory: 'Recharge History',
       balanceHistoryTip: 'Click to open recharge history',
+      identityTooltip: {
+        username: 'Username',
+        notes: 'Notes',
+        empty: 'Not set',
+        loading: 'Loading…',
+        loadFailed: 'Failed to load user info',
+      },
       balanceHistoryTitle: 'User Recharge & Concurrency History',
       noBalanceHistory: 'No records found for this user',
       allTypes: 'All Types',

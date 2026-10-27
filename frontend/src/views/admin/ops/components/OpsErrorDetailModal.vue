@@ -37,7 +37,9 @@
             {{ t('admin.ops.errorDetail.user') }}
           </div>
           <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-            {{ detail.user_email || (detail.user_id != null ? String(detail.user_id) : '—') }}
+            <UserIdentityTooltip :user-id="detail.user_id">
+              <span>{{ detail.user_email || (detail.user_id != null ? String(detail.user_id) : '—') }}</span>
+            </UserIdentityTooltip>
           </div>
         </div>
 
@@ -252,6 +254,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import OpsErrorDiagnostics from './OpsErrorDiagnostics.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'

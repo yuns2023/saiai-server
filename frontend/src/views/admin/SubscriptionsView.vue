@@ -58,7 +58,7 @@
                   @click="selectFilterUser(user)"
                   class="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
                 >
-                  <span class="font-medium text-gray-900 dark:text-white">{{ user.email }}</span>
+                  <UserIdentityTooltip :user-id="user.id" :pin-on-click="false"><span class="font-medium text-gray-900 dark:text-white">{{ user.email }}</span></UserIdentityTooltip>
                   <span class="ml-2 text-gray-500 dark:text-gray-400">#{{ user.id }}</span>
                 </button>
               </div>
@@ -188,12 +188,14 @@
                   }}
                 </span>
               </div>
-              <span class="font-medium text-gray-900 dark:text-white">
-                {{ userColumnMode === 'email'
-                  ? (row.user?.email || t('admin.redeem.userPrefix', { id: row.user_id }))
-                  : (row.user?.username || '-')
-                }}
-              </span>
+              <UserIdentityTooltip :user-id="row.user_id">
+                <span class="font-medium text-gray-900 dark:text-white">
+                  {{ userColumnMode === 'email'
+                    ? (row.user?.email || t('admin.redeem.userPrefix', { id: row.user_id }))
+                    : (row.user?.username || '-')
+                  }}
+                </span>
+              </UserIdentityTooltip>
             </div>
           </template>
 
@@ -522,7 +524,7 @@
                 @click="selectUser(user)"
                 class="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
               >
-                <span class="font-medium text-gray-900 dark:text-white">{{ user.email }}</span>
+                <UserIdentityTooltip :user-id="user.id" :pin-on-click="false"><span class="font-medium text-gray-900 dark:text-white">{{ user.email }}</span></UserIdentityTooltip>
                 <span class="ml-2 text-gray-500 dark:text-gray-400">#{{ user.id }}</span>
               </button>
             </div>
@@ -617,9 +619,9 @@
         <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700">
           <p class="text-sm text-gray-600 dark:text-gray-400">
             {{ t('admin.subscriptions.adjustingFor') }}
-            <span class="font-medium text-gray-900 dark:text-white">{{
-              extendingSubscription.user?.email
-            }}</span>
+            <UserIdentityTooltip :user-id="extendingSubscription.user_id">
+              <span class="font-medium text-gray-900 dark:text-white">{{ extendingSubscription.user?.email }}</span>
+            </UserIdentityTooltip>
           </p>
           <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
             {{ t('admin.subscriptions.currentExpiration') }}:
@@ -774,6 +776,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

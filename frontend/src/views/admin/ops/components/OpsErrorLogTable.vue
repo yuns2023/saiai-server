@@ -112,11 +112,11 @@
                   <span v-else class="text-xs text-gray-400">-</span>
                 </template>
                 <template v-else>
-                  <el-tooltip v-if="log.user_id" :content="t('admin.ops.errorLog.userId') + ' ' + log.user_id" placement="top" :show-after="500">
+                  <UserIdentityTooltip v-if="log.user_id" :user-id="log.user_id" :pin-on-click="false">
                     <span class="max-w-[100px] truncate text-xs font-medium text-gray-900 dark:text-gray-200">
                       {{ log.user_email || '-' }}
                     </span>
-                  </el-tooltip>
+                  </UserIdentityTooltip>
                   <span v-else class="text-xs text-gray-400">-</span>
                 </template>
               </td>
@@ -180,6 +180,7 @@
 </template>
 
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { useI18n } from 'vue-i18n'
 import Pagination from '@/components/common/Pagination.vue'
 import type { OpsErrorLog } from '@/api/admin/ops'

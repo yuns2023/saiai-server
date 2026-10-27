@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
@@ -33,7 +34,7 @@ function toggle(id: number) {
     </div>
     <label v-for="user in users" :key="user.id" class="flex items-center gap-2 text-sm">
       <input type="checkbox" class="h-4 w-4 shrink-0 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" :checked="modelValue.includes(user.id)" @change="toggle(user.id)" />
-      {{ user.email }} (#{{ user.id }})
+      <UserIdentityTooltip :user-id="user.id" :username="user.username" :notes="user.notes" :pin-on-click="false"><span>{{ user.email }}</span></UserIdentityTooltip> (#{{ user.id }})
     </label>
   </div>
 </template>

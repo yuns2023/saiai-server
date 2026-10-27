@@ -1854,6 +1854,13 @@ export default {
       // 余额变动记录
       balanceHistory: '充值记录',
       balanceHistoryTip: '点击查看充值记录',
+      identityTooltip: {
+        username: '用户名',
+        notes: '备注',
+        empty: '未填写',
+        loading: '加载中…',
+        loadFailed: '用户信息加载失败',
+      },
       balanceHistoryTitle: '用户充值和并发变动记录',
       noBalanceHistory: '暂无变动记录',
       allTypes: '全部类型',
