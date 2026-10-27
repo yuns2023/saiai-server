@@ -20,13 +20,15 @@ import (
 // The Codex CN-timezone guard (groups.codex_cn_timezone_guard) applies to
 // Responses HTTP and WebSocket requests. With codex_timezone_action "reject"
 // it rejects JSON string content carrying a China mainland / Hong Kong /
-// Macau `<timezone>` environment tag and never modifies forwarded bytes. With
+// Macau `<timezone>` environment tag (or Codex Desktop timezone sentence
+// `The user's timezone is ZONE;…`) and never modifies forwarded bytes. With
 // "rewrite" every Codex `<environment_context>` block (a whole string, or a
 // well-formed block embedded in a larger string such as tool output) is sent
 // upstream with the timezone set to America/Los_Angeles and the date to the
 // item's (or the server's current) LA date, and so is any other CN
 // `<timezone>` tag with the dates of its string, e.g. Codex Desktop's client
-// time context (see pkgopenai.RewriteCodexEnvironmentTime); a whole-string block that cannot be
+// time context, and the CN zone of a Codex Desktop timezone sentence (see
+// pkgopenai.RewriteCodexEnvironmentTime); a whole-string block that cannot be
 // rewritten safely, or a CN zone still present in the bytes to be sent (leak
 // safety net), is rejected like the reject mode (fail closed). Rejections log
 // where the offending string is (path, offsets, tag names; never content).
@@ -241,6 +243,7 @@ func logCodexTimezoneRewrite(c *gin.Context, group *service.Group, userID int64,
 		zap.Int("embedded_blocks", stats.Embedded),
 		zap.Int("embedded_skipped", stats.EmbeddedSkipped),
 		zap.Int("loose_timezones", stats.LooseTimezones),
+		zap.Int("sentence_timezones", stats.SentenceTimezones),
 	}
 	if group != nil {
 		fields = append(fields, zap.Int64("group_id", group.ID))
