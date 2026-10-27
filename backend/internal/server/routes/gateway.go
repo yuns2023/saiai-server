@@ -130,6 +130,7 @@ func RegisterGatewayRoutes(
 		chatgpt.GET("/celsius/ws/user", h.OpenAIGateway.ChatGPTUpdatesBootstrap)
 		chatgpt.GET("/saiai/chat-updates", h.OpenAIGateway.ChatGPTUpdatesWebSocket)
 		chatgpt.GET("/conversation/:conversation_id", h.OpenAIGateway.ChatGPTConversationRead)
+		chatgpt.GET("/conversations/search", h.OpenAIGateway.ChatGPTConversationSearch)
 		chatgpt.GET("/conversations/:conversation_id", h.OpenAIGateway.ChatGPTConversationRead)
 		chatgpt.GET("/conversations/:conversation_id/messages", h.OpenAIGateway.ChatGPTConversationRead)
 		chatgpt.POST("/f/conversation", h.OpenAIGateway.ChatGPTConversation)

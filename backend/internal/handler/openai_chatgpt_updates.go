@@ -110,6 +110,13 @@ func safeChatGPTConversationID(id string) bool {
 	return true
 }
 
+// Shared OAuth accounts hold other users' conversations, so history search is
+// never forwarded. Match the Client's local empty conversation list instead.
+func (h *OpenAIGatewayHandler) ChatGPTConversationSearch(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"items": []any{}, "cursor": nil})
+}
+
 // Single-conversation reads are allowed only for the same user/Key/group and
 // original OAuth owner. They never select a fallback account or generate a turn.
 func (h *OpenAIGatewayHandler) ChatGPTConversationRead(c *gin.Context) {

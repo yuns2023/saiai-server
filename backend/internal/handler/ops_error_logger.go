@@ -1148,6 +1148,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			entry.ClientIP = &clientIP
 		}
 		applyOpsNativeChatUpstreamClassification(entry)
+		if !localFailure {
+			applyOpsRelayedUpstreamClassification(entry)
+		}
 
 		// Persist only a minimal, whitelisted set of request headers to improve retry fidelity.
 		// Do NOT store Authorization/Cookie/etc.
@@ -1182,6 +1185,31 @@ func applyOpsNativeChatUpstreamClassification(entry *service.OpsInsertErrorLogIn
 		entry.Severity = classifyOpsSeverity(entry.ErrorType, entry.StatusCode)
 		entry.IsRetryable = classifyOpsIsRetryable(entry.ErrorType, entry.StatusCode)
 	}
+}
+
+// Some provider rejections are not OpenAI error objects (for example a
+// FastAPI {"detail":"..."} body). When the client received exactly the
+// recorded upstream body, classify it like the equivalent typed rejection
+// instead of as a gateway-internal failure.
+func applyOpsRelayedUpstreamClassification(entry *service.OpsInsertErrorLogInput) {
+	if entry == nil || entry.ErrorPhase != "internal" || entry.ErrorType != "api_error" ||
+		entry.UpstreamStatusCode == nil || *entry.UpstreamStatusCode < 400 ||
+		*entry.UpstreamStatusCode != entry.StatusCode || entry.UpstreamErrorDetail == nil ||
+		strings.TrimSpace(*entry.UpstreamErrorDetail) == "" ||
+		strings.TrimSpace(*entry.UpstreamErrorDetail) != strings.TrimSpace(entry.ErrorBody) {
+		return
+	}
+	switch entry.StatusCode {
+	case http.StatusBadRequest, http.StatusNotFound, http.StatusConflict, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
+		entry.ErrorType = "invalid_request_error"
+	default:
+		entry.ErrorType = "upstream_error"
+	}
+	entry.ErrorPhase = classifyOpsPhase(entry.ErrorType, entry.ErrorMessage, "")
+	entry.ErrorOwner = classifyOpsErrorOwner(entry.ErrorPhase, entry.ErrorMessage)
+	entry.ErrorSource = "upstream_http"
+	entry.Severity = classifyOpsSeverity(entry.ErrorType, entry.StatusCode)
+	entry.IsRetryable = classifyOpsIsRetryable(entry.ErrorType, entry.StatusCode)
 }
 
 func filterOpsUpstreamLog(ctx *gin.Context, ops *service.OpsService, entry *service.OpsInsertErrorLogInput) bool {
@@ -1396,6 +1424,10 @@ func parseOpsErrorResponse(body []byte) parsedOpsError {
 	msg, _ := m["message"].(string)
 	if code != "" || msg != "" {
 		return parsedOpsError{ErrorType: "api_error", Message: msg, Code: code}
+	}
+	// FastAPI-style provider rejection: { detail:"..." }
+	if detail, _ := m["detail"].(string); strings.TrimSpace(detail) != "" {
+		return parsedOpsError{Message: truncateString(strings.TrimSpace(detail), 1024)}
 	}
 
 	return parsedOpsError{Message: truncateString(string(body), 1024)}
