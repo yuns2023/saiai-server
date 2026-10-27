@@ -8,6 +8,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,11 @@ type UserWithConcurrency struct {
 	CurrentConcurrency int  `json:"current_concurrency"`
 	ClaudeDeviceCount  int  `json:"claude_device_count"`
 	ClaudeDeviceLimit  *int `json:"claude_device_limit,omitempty"`
+	// CodexDeviceCount counts non-revoked SAIAI client devices with Codex
+	// traffic in the last 30 days; ClientAttestation7d counts usage rows per
+	// client proof status over 7 days. Both are null when unavailable.
+	CodexDeviceCount    *int             `json:"codex_device_count"`
+	ClientAttestation7d map[string]int64 `json:"client_attestation_7d"`
 }
 
 // UserHandler handles admin user management
@@ -26,15 +32,65 @@ type UserHandler struct {
 	adminService        service.AdminService
 	concurrencyService  *service.ConcurrencyService
 	claudeDeviceService *service.ClaudeDeviceService
+	clientDeviceService *service.ClientDeviceService
 }
 
 // NewUserHandler creates a new admin user handler
-func NewUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService, claudeDeviceService *service.ClaudeDeviceService) *UserHandler {
+func NewUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService, claudeDeviceService *service.ClaudeDeviceService, clientDeviceService *service.ClientDeviceService) *UserHandler {
 	return &UserHandler{
 		adminService:        adminService,
 		concurrencyService:  concurrencyService,
 		claudeDeviceService: claudeDeviceService,
+		clientDeviceService: clientDeviceService,
 	}
+}
+
+// ListClientDevices lists the user's SAIAI client proof devices.
+// GET /api/v1/admin/users/:id/client-devices
+func (h *UserHandler) ListClientDevices(c *gin.Context) {
+	if h == nil || h.clientDeviceService == nil {
+		response.Error(c, 503, "Client device service unavailable")
+		return
+	}
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	items, err := h.clientDeviceService.ListUserDevices(c.Request.Context(), userID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, items)
+}
+
+// RevokeClientDevice revokes one device by row id.
+// DELETE /api/v1/admin/users/:id/client-devices/:device_id
+func (h *UserHandler) RevokeClientDevice(c *gin.Context) {
+	if h == nil || h.clientDeviceService == nil {
+		response.Error(c, 503, "Client device service unavailable")
+		return
+	}
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	deviceID, err := strconv.ParseInt(c.Param("device_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid device ID")
+		return
+	}
+	var revokedBy int64
+	if subject, ok := middleware.GetAuthSubjectFromContext(c); ok {
+		revokedBy = subject.UserID
+	}
+	if err := h.clientDeviceService.RevokeUserDevice(c.Request.Context(), userID, deviceID, revokedBy); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": "Client device revoked"})
 }
 
 func (h *UserHandler) ListClaudeDevices(c *gin.Context) {
@@ -195,6 +251,14 @@ func (h *UserHandler) List(c *gin.Context) {
 			deviceSummaries = make(map[int64]service.ClaudeUserDeviceSummary)
 		}
 	}
+	var clientSummaries map[int64]service.ClientDeviceUserSummary
+	if len(users) > 0 && h.clientDeviceService != nil {
+		userIDs := make([]int64, len(users))
+		for i := range users {
+			userIDs[i] = users[i].ID
+		}
+		clientSummaries = h.clientDeviceService.ListUserSummaries(c.Request.Context(), userIDs)
+	}
 	out := make([]UserWithConcurrency, len(users))
 	for i := range users {
 		out[i] = UserWithConcurrency{
@@ -206,6 +270,10 @@ func (h *UserHandler) List(c *gin.Context) {
 		if summary, ok := deviceSummaries[users[i].ID]; ok {
 			out[i].ClaudeDeviceCount = summary.ActiveDevices
 			out[i].ClaudeDeviceLimit = summary.EffectiveLimit
+		}
+		if summary, ok := clientSummaries[users[i].ID]; ok {
+			out[i].CodexDeviceCount = summary.CodexDeviceCount
+			out[i].ClientAttestation7d = summary.ClientAttestation7d
 		}
 	}
 

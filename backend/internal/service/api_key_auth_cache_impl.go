@@ -371,6 +371,7 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 			CodexClientPolicy:                apiKey.Group.CodexClientPolicy,
 			CodexCNTimezoneGuard:             apiKey.Group.CodexCNTimezoneGuard,
 			CodexTimezoneAction:              apiKey.Group.CodexTimezoneAction,
+			ClientAttestationPolicy:          apiKey.Group.ClientAttestationPolicy,
 			ClaudeDeviceLimitMode:            apiKey.Group.ClaudeDeviceLimitMode,
 			ClaudeDeviceBaseLimit:            apiKey.Group.ClaudeDeviceBaseLimit,
 		}
@@ -463,6 +464,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			CodexClientPolicy:                snapshot.Group.CodexClientPolicy,
 			CodexCNTimezoneGuard:             snapshot.Group.CodexCNTimezoneGuard,
 			CodexTimezoneAction:              snapshot.Group.CodexTimezoneAction,
+			ClientAttestationPolicy:          snapshot.Group.ClientAttestationPolicy,
 			ClaudeDeviceLimitMode:            snapshot.Group.ClaudeDeviceLimitMode,
 			ClaudeDeviceBaseLimit:            snapshot.Group.ClaudeDeviceBaseLimit,
 		}

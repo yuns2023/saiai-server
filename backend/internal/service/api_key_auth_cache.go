@@ -11,7 +11,8 @@ import (
 // lack the field and would decode it as its zero value) are not trusted.
 // v2: groups.codex_cn_timezone_guard.
 // v3: groups.codex_timezone_action.
-const apiKeyAuthSnapshotSchemaVersion = 3
+// v4: groups.client_attestation_policy.
+const apiKeyAuthSnapshotSchemaVersion = 4
 
 // APIKeyAuthSnapshot API Key 认证缓存快照（仅包含认证所需字段）
 type APIKeyAuthSnapshot struct {
@@ -111,6 +112,7 @@ type APIKeyAuthGroupSnapshot struct {
 	CodexClientPolicy                string                 `json:"codex_client_policy"`
 	CodexCNTimezoneGuard             bool                   `json:"codex_cn_timezone_guard"`
 	CodexTimezoneAction              string                 `json:"codex_timezone_action"`
+	ClientAttestationPolicy          string                 `json:"client_attestation_policy"`
 	ClaudeDeviceLimitMode            string                 `json:"claude_device_limit_mode"`
 	ClaudeDeviceBaseLimit            int                    `json:"claude_device_base_limit"`
 }

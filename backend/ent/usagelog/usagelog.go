@@ -32,6 +32,8 @@ const (
 	FieldUpstreamModel = "upstream_model"
 	// FieldStopReason holds the string denoting the stop_reason field in the database.
 	FieldStopReason = "stop_reason"
+	// FieldClientAttestation holds the string denoting the client_attestation field in the database.
+	FieldClientAttestation = "client_attestation"
 	// FieldGroupID holds the string denoting the group_id field in the database.
 	FieldGroupID = "group_id"
 	// FieldSubscriptionID holds the string denoting the subscription_id field in the database.
@@ -163,6 +165,7 @@ var Columns = []string{
 	FieldModel,
 	FieldUpstreamModel,
 	FieldStopReason,
+	FieldClientAttestation,
 	FieldGroupID,
 	FieldSubscriptionID,
 	FieldInputTokens,
@@ -323,6 +326,11 @@ func ByUpstreamModel(opts ...sql.OrderTermOption) OrderOption {
 // ByStopReason orders the results by the stop_reason field.
 func ByStopReason(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldStopReason, opts...).ToFunc()
+}
+
+// ByClientAttestation orders the results by the client_attestation field.
+func ByClientAttestation(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClientAttestation, opts...).ToFunc()
 }
 
 // ByGroupID orders the results by the group_id field.

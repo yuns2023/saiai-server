@@ -32,10 +32,21 @@ type ClientBootstrapData struct {
 // ClientHandler exposes authenticated, non-billable client metadata.
 type ClientHandler struct {
 	gatewayVersion string
+	clientDevices  *service.ClientDeviceService
 }
 
-func NewClientHandler(buildInfo BuildInfo) *ClientHandler {
-	return &ClientHandler{gatewayVersion: buildInfo.Version}
+func NewClientHandler(buildInfo BuildInfo, clientDevices *service.ClientDeviceService) *ClientHandler {
+	return &ClientHandler{gatewayVersion: buildInfo.Version, clientDevices: clientDevices}
+}
+
+// ProofVerifier returns the client proof verifier for gateway routes, or nil
+// when client devices are not configured (the middleware then only strips
+// the proof header).
+func (h *ClientHandler) ProofVerifier() middleware.ClientProofVerifier {
+	if h == nil || h.clientDevices == nil {
+		return nil
+	}
+	return h.clientDevices
 }
 
 // Bootstrap reports gateway compatibility without forwarding a model request.

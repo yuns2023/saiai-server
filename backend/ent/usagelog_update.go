@@ -175,6 +175,33 @@ func (_u *UsageLogUpdate) ClearStopReason() *UsageLogUpdate {
 	return _u
 }
 
+// SetClientAttestation sets the "client_attestation" field.
+func (_u *UsageLogUpdate) SetClientAttestation(v int16) *UsageLogUpdate {
+	_u.mutation.ResetClientAttestation()
+	_u.mutation.SetClientAttestation(v)
+	return _u
+}
+
+// SetNillableClientAttestation sets the "client_attestation" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableClientAttestation(v *int16) *UsageLogUpdate {
+	if v != nil {
+		_u.SetClientAttestation(*v)
+	}
+	return _u
+}
+
+// AddClientAttestation adds value to the "client_attestation" field.
+func (_u *UsageLogUpdate) AddClientAttestation(v int16) *UsageLogUpdate {
+	_u.mutation.AddClientAttestation(v)
+	return _u
+}
+
+// ClearClientAttestation clears the value of the "client_attestation" field.
+func (_u *UsageLogUpdate) ClearClientAttestation() *UsageLogUpdate {
+	_u.mutation.ClearClientAttestation()
+	return _u
+}
+
 // SetGroupID sets the "group_id" field.
 func (_u *UsageLogUpdate) SetGroupID(v int64) *UsageLogUpdate {
 	_u.mutation.SetGroupID(v)
@@ -1063,6 +1090,15 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.StopReasonCleared() {
 		_spec.ClearField(usagelog.FieldStopReason, field.TypeString)
 	}
+	if value, ok := _u.mutation.ClientAttestation(); ok {
+		_spec.SetField(usagelog.FieldClientAttestation, field.TypeInt16, value)
+	}
+	if value, ok := _u.mutation.AddedClientAttestation(); ok {
+		_spec.AddField(usagelog.FieldClientAttestation, field.TypeInt16, value)
+	}
+	if _u.mutation.ClientAttestationCleared() {
+		_spec.ClearField(usagelog.FieldClientAttestation, field.TypeInt16)
+	}
 	if value, ok := _u.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)
 	}
@@ -1565,6 +1601,33 @@ func (_u *UsageLogUpdateOne) SetNillableStopReason(v *string) *UsageLogUpdateOne
 // ClearStopReason clears the value of the "stop_reason" field.
 func (_u *UsageLogUpdateOne) ClearStopReason() *UsageLogUpdateOne {
 	_u.mutation.ClearStopReason()
+	return _u
+}
+
+// SetClientAttestation sets the "client_attestation" field.
+func (_u *UsageLogUpdateOne) SetClientAttestation(v int16) *UsageLogUpdateOne {
+	_u.mutation.ResetClientAttestation()
+	_u.mutation.SetClientAttestation(v)
+	return _u
+}
+
+// SetNillableClientAttestation sets the "client_attestation" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableClientAttestation(v *int16) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetClientAttestation(*v)
+	}
+	return _u
+}
+
+// AddClientAttestation adds value to the "client_attestation" field.
+func (_u *UsageLogUpdateOne) AddClientAttestation(v int16) *UsageLogUpdateOne {
+	_u.mutation.AddClientAttestation(v)
+	return _u
+}
+
+// ClearClientAttestation clears the value of the "client_attestation" field.
+func (_u *UsageLogUpdateOne) ClearClientAttestation() *UsageLogUpdateOne {
+	_u.mutation.ClearClientAttestation()
 	return _u
 }
 
@@ -2485,6 +2548,15 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.StopReasonCleared() {
 		_spec.ClearField(usagelog.FieldStopReason, field.TypeString)
+	}
+	if value, ok := _u.mutation.ClientAttestation(); ok {
+		_spec.SetField(usagelog.FieldClientAttestation, field.TypeInt16, value)
+	}
+	if value, ok := _u.mutation.AddedClientAttestation(); ok {
+		_spec.AddField(usagelog.FieldClientAttestation, field.TypeInt16, value)
+	}
+	if _u.mutation.ClientAttestationCleared() {
+		_spec.ClearField(usagelog.FieldClientAttestation, field.TypeInt16)
 	}
 	if value, ok := _u.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)

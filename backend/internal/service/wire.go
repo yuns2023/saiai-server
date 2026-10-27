@@ -534,6 +534,7 @@ var ProviderSet = wire.NewSet(
 	NewGatewayService,
 	NewInputModerationService,
 	NewClaudeDeviceService,
+	NewClientDeviceService,
 	NewOpenAIGatewayService,
 	NewOAuthService,
 	NewOpenAIOAuthService,

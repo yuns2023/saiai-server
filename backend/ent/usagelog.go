@@ -42,6 +42,8 @@ type UsageLog struct {
 	UpstreamModel *string `json:"upstream_model,omitempty"`
 	// StopReason holds the value of the "stop_reason" field.
 	StopReason *string `json:"stop_reason,omitempty"`
+	// ClientAttestation holds the value of the "client_attestation" field.
+	ClientAttestation *int16 `json:"client_attestation,omitempty"`
 	// GroupID holds the value of the "group_id" field.
 	GroupID *int64 `json:"group_id,omitempty"`
 	// SubscriptionID holds the value of the "subscription_id" field.
@@ -201,7 +203,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheCreation5mCost, usagelog.FieldCacheCreation1hCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldMeteredCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldModelRateMultiplier, usagelog.FieldAccountPaygDiscountMultiplier, usagelog.FieldUserPaygDiscountMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount:
+		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldClientAttestation, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount:
 			values[i] = new(sql.NullInt64)
 		case usagelog.FieldRequestID, usagelog.FieldSessionID, usagelog.FieldModel, usagelog.FieldUpstreamModel, usagelog.FieldStopReason, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldMediaType:
 			values[i] = new(sql.NullString)
@@ -286,6 +288,13 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.StopReason = new(string)
 				*_m.StopReason = value.String
+			}
+		case usagelog.FieldClientAttestation:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field client_attestation", values[i])
+			} else if value.Valid {
+				_m.ClientAttestation = new(int16)
+				*_m.ClientAttestation = int16(value.Int64)
 			}
 		case usagelog.FieldGroupID:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -603,6 +612,11 @@ func (_m *UsageLog) String() string {
 	if v := _m.StopReason; v != nil {
 		builder.WriteString("stop_reason=")
 		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.ClientAttestation; v != nil {
+		builder.WriteString("client_attestation=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")
 	if v := _m.GroupID; v != nil {

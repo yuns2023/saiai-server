@@ -750,6 +750,15 @@
           </div>
         </div>
 
+        <div class="border-t pt-4">
+          <label class="input-label">{{ t('admin.groups.clientLimits.clientAttestationPolicy') }}</label>
+          <select v-model="createForm.client_attestation_policy" class="input w-full" data-testid="createForm-client-attestation-policy">
+            <option value="off">{{ t('admin.groups.clientLimits.clientAttestationPolicyOff') }}</option>
+            <option value="observe">{{ t('admin.groups.clientLimits.clientAttestationPolicyObserve') }}</option>
+          </select>
+          <p class="input-hint mt-1">{{ t('admin.groups.clientLimits.clientAttestationPolicyHint') }}</p>
+        </div>
+
         <!-- 异步用户输入审核 -->
         <div class="border-t border-gray-200 pt-4 dark:border-dark-400">
           <h4 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1541,6 +1550,15 @@
           </div>
         </div>
 
+        <div class="border-t pt-4">
+          <label class="input-label">{{ t('admin.groups.clientLimits.clientAttestationPolicy') }}</label>
+          <select v-model="editForm.client_attestation_policy" class="input w-full" data-testid="editForm-client-attestation-policy">
+            <option value="off">{{ t('admin.groups.clientLimits.clientAttestationPolicyOff') }}</option>
+            <option value="observe">{{ t('admin.groups.clientLimits.clientAttestationPolicyObserve') }}</option>
+          </select>
+          <p class="input-hint mt-1">{{ t('admin.groups.clientLimits.clientAttestationPolicyHint') }}</p>
+        </div>
+
         <!-- 异步用户输入审核 -->
         <div class="border-t border-gray-200 pt-4 dark:border-dark-400">
           <h4 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2209,6 +2227,7 @@ const createForm = reactive({
   codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
   codex_cn_timezone_guard: false,
   codex_timezone_action: 'reject' as 'reject' | 'rewrite',
+  client_attestation_policy: 'off' as 'off' | 'observe',
   claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
   claude_device_base_limit: 1,
   // 模型路由开关
@@ -2473,6 +2492,7 @@ const editForm = reactive({
   codex_client_policy: 'off' as 'off' | 'official_clients' | 'cli_only' | 'local_proxy_only',
   codex_cn_timezone_guard: false,
   codex_timezone_action: 'reject' as 'reject' | 'rewrite',
+  client_attestation_policy: 'off' as 'off' | 'observe',
   claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
   claude_device_base_limit: 1,
   // 模型路由开关
@@ -2632,6 +2652,7 @@ const closeCreateModal = () => {
   createForm.codex_client_policy = 'off'
   createForm.codex_cn_timezone_guard = false
   createForm.codex_timezone_action = 'reject'
+  createForm.client_attestation_policy = 'off'
   createForm.claude_device_limit_mode = 'off'
   createForm.claude_device_base_limit = 1
   createForm.copy_accounts_from_group_ids = []
@@ -2739,6 +2760,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.codex_client_policy = group.codex_client_policy || 'off'
   editForm.codex_cn_timezone_guard = group.codex_cn_timezone_guard || false
   editForm.codex_timezone_action = group.codex_timezone_action === 'rewrite' ? 'rewrite' : 'reject'
+  editForm.client_attestation_policy = group.client_attestation_policy === 'observe' ? 'observe' : 'off'
   editForm.claude_device_limit_mode = group.claude_device_limit_mode || 'off'
   editForm.claude_device_base_limit = group.claude_device_base_limit || 1
   editForm.model_routing_enabled = group.model_routing_enabled || false

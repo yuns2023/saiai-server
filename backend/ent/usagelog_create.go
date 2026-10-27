@@ -106,6 +106,20 @@ func (_c *UsageLogCreate) SetNillableStopReason(v *string) *UsageLogCreate {
 	return _c
 }
 
+// SetClientAttestation sets the "client_attestation" field.
+func (_c *UsageLogCreate) SetClientAttestation(v int16) *UsageLogCreate {
+	_c.mutation.SetClientAttestation(v)
+	return _c
+}
+
+// SetNillableClientAttestation sets the "client_attestation" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableClientAttestation(v *int16) *UsageLogCreate {
+	if v != nil {
+		_c.SetClientAttestation(*v)
+	}
+	return _c
+}
+
 // SetGroupID sets the "group_id" field.
 func (_c *UsageLogCreate) SetGroupID(v int64) *UsageLogCreate {
 	_c.mutation.SetGroupID(v)
@@ -925,6 +939,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldStopReason, field.TypeString, value)
 		_node.StopReason = &value
 	}
+	if value, ok := _c.mutation.ClientAttestation(); ok {
+		_spec.SetField(usagelog.FieldClientAttestation, field.TypeInt16, value)
+		_node.ClientAttestation = &value
+	}
 	if value, ok := _c.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)
 		_node.InputTokens = value
@@ -1323,6 +1341,30 @@ func (u *UsageLogUpsert) UpdateStopReason() *UsageLogUpsert {
 // ClearStopReason clears the value of the "stop_reason" field.
 func (u *UsageLogUpsert) ClearStopReason() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldStopReason)
+	return u
+}
+
+// SetClientAttestation sets the "client_attestation" field.
+func (u *UsageLogUpsert) SetClientAttestation(v int16) *UsageLogUpsert {
+	u.Set(usagelog.FieldClientAttestation, v)
+	return u
+}
+
+// UpdateClientAttestation sets the "client_attestation" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateClientAttestation() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldClientAttestation)
+	return u
+}
+
+// AddClientAttestation adds v to the "client_attestation" field.
+func (u *UsageLogUpsert) AddClientAttestation(v int16) *UsageLogUpsert {
+	u.Add(usagelog.FieldClientAttestation, v)
+	return u
+}
+
+// ClearClientAttestation clears the value of the "client_attestation" field.
+func (u *UsageLogUpsert) ClearClientAttestation() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldClientAttestation)
 	return u
 }
 
@@ -2146,6 +2188,34 @@ func (u *UsageLogUpsertOne) UpdateStopReason() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearStopReason() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearStopReason()
+	})
+}
+
+// SetClientAttestation sets the "client_attestation" field.
+func (u *UsageLogUpsertOne) SetClientAttestation(v int16) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetClientAttestation(v)
+	})
+}
+
+// AddClientAttestation adds v to the "client_attestation" field.
+func (u *UsageLogUpsertOne) AddClientAttestation(v int16) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddClientAttestation(v)
+	})
+}
+
+// UpdateClientAttestation sets the "client_attestation" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateClientAttestation() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateClientAttestation()
+	})
+}
+
+// ClearClientAttestation clears the value of the "client_attestation" field.
+func (u *UsageLogUpsertOne) ClearClientAttestation() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearClientAttestation()
 	})
 }
 
@@ -3239,6 +3309,34 @@ func (u *UsageLogUpsertBulk) UpdateStopReason() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearStopReason() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearStopReason()
+	})
+}
+
+// SetClientAttestation sets the "client_attestation" field.
+func (u *UsageLogUpsertBulk) SetClientAttestation(v int16) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetClientAttestation(v)
+	})
+}
+
+// AddClientAttestation adds v to the "client_attestation" field.
+func (u *UsageLogUpsertBulk) AddClientAttestation(v int16) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddClientAttestation(v)
+	})
+}
+
+// UpdateClientAttestation sets the "client_attestation" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateClientAttestation() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateClientAttestation()
+	})
+}
+
+// ClearClientAttestation clears the value of the "client_attestation" field.
+func (u *UsageLogUpsertBulk) ClearClientAttestation() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearClientAttestation()
 	})
 }
 

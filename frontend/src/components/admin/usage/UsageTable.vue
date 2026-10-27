@@ -14,6 +14,14 @@
             </UserIdentityTooltip>
             <span v-else class="font-medium text-gray-900 dark:text-white">-</span>
             <span class="ml-1 text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
+            <span
+              v-if="attestationBadge(row)"
+              :class="['ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium', clientAttestationBadgeClass(attestationBadge(row)!)]"
+              :title="t('admin.users.clientProof.attestationHint')"
+              data-testid="usage-client-attestation-badge"
+            >
+              {{ t(`admin.users.clientProof.status.${attestationBadge(row)}`) }}
+            </span>
           </div>
         </template>
 
@@ -409,6 +417,7 @@
 <script setup lang="ts">
 import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { usageBillingLabel } from '@/utils/usageBilling'
+import { clientAttestationBadgeClass, clientAttestationStatusFromCode } from '@/utils/clientAttestation'
 import ModerationResultCell from './ModerationResultCell.vue'
 import TokenCount from '@/components/common/TokenCount.vue'
 import { ref, nextTick, useTemplateRef, toRaw } from 'vue'
@@ -433,6 +442,12 @@ import type { AdminUsageLog } from '@/types'
 defineProps(['data', 'loading', 'columns'])
 const emit = defineEmits(['userClick', 'sessionClick'])
 const { t } = useI18n()
+
+// Badge only for collected, non-valid client checks (NULL = not collected).
+const attestationBadge = (row: AdminUsageLog) => {
+  const status = clientAttestationStatusFromCode(row.client_attestation)
+  return status && status !== 'valid' ? status : null
+}
 
 // Tooltip state - cost
 const tooltipVisible = ref(false)

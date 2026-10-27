@@ -207,6 +207,10 @@ func (Group) Fields() []ent.Field {
 		// What the guard does with a matching request: "reject" (HTTP 400 /
 		// WS error frame) or "rewrite" (timezone/date replaced upstream).
 		field.String("codex_timezone_action").MaxLen(16).Default("reject"),
+		// SAIAI client proof (docs/CLIENT_PROOF_V1.md): "off" stores NULL in
+		// usage_logs.client_attestation, "observe" records the proof status
+		// without rejecting. "enforce" is reserved and not selectable in v1.
+		field.String("client_attestation_policy").MaxLen(16).Default("off"),
 		field.String("claude_device_limit_mode").MaxLen(16).Default("off"),
 		field.Int("claude_device_base_limit").Default(1),
 	}

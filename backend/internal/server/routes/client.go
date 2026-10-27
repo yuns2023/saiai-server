@@ -22,4 +22,5 @@ func RegisterClientRoutes(
 	})
 	client.Use(gin.HandlerFunc(apiKeyAuth))
 	client.GET("/bootstrap", h.Client.Bootstrap)
+	client.POST("/devices/enroll", h.Client.EnrollDevice)
 }

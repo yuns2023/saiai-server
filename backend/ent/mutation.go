@@ -9662,6 +9662,7 @@ type GroupMutation struct {
 	codex_client_policy                     *string
 	codex_cn_timezone_guard                 *bool
 	codex_timezone_action                   *string
+	client_attestation_policy               *string
 	claude_device_limit_mode                *string
 	claude_device_base_limit                *int
 	addclaude_device_base_limit             *int
@@ -12357,6 +12358,42 @@ func (m *GroupMutation) ResetCodexTimezoneAction() {
 	m.codex_timezone_action = nil
 }
 
+// SetClientAttestationPolicy sets the "client_attestation_policy" field.
+func (m *GroupMutation) SetClientAttestationPolicy(s string) {
+	m.client_attestation_policy = &s
+}
+
+// ClientAttestationPolicy returns the value of the "client_attestation_policy" field in the mutation.
+func (m *GroupMutation) ClientAttestationPolicy() (r string, exists bool) {
+	v := m.client_attestation_policy
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientAttestationPolicy returns the old "client_attestation_policy" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldClientAttestationPolicy(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientAttestationPolicy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientAttestationPolicy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientAttestationPolicy: %w", err)
+	}
+	return oldValue.ClientAttestationPolicy, nil
+}
+
+// ResetClientAttestationPolicy resets all changes to the "client_attestation_policy" field.
+func (m *GroupMutation) ResetClientAttestationPolicy() {
+	m.client_attestation_policy = nil
+}
+
 // SetClaudeDeviceLimitMode sets the "claude_device_limit_mode" field.
 func (m *GroupMutation) SetClaudeDeviceLimitMode(s string) {
 	m.claude_device_limit_mode = &s
@@ -12834,7 +12871,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 53)
+	fields := make([]string, 0, 54)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -12988,6 +13025,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.codex_timezone_action != nil {
 		fields = append(fields, group.FieldCodexTimezoneAction)
 	}
+	if m.client_attestation_policy != nil {
+		fields = append(fields, group.FieldClientAttestationPolicy)
+	}
 	if m.claude_device_limit_mode != nil {
 		fields = append(fields, group.FieldClaudeDeviceLimitMode)
 	}
@@ -13104,6 +13144,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.CodexCnTimezoneGuard()
 	case group.FieldCodexTimezoneAction:
 		return m.CodexTimezoneAction()
+	case group.FieldClientAttestationPolicy:
+		return m.ClientAttestationPolicy()
 	case group.FieldClaudeDeviceLimitMode:
 		return m.ClaudeDeviceLimitMode()
 	case group.FieldClaudeDeviceBaseLimit:
@@ -13219,6 +13261,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldCodexCnTimezoneGuard(ctx)
 	case group.FieldCodexTimezoneAction:
 		return m.OldCodexTimezoneAction(ctx)
+	case group.FieldClientAttestationPolicy:
+		return m.OldClientAttestationPolicy(ctx)
 	case group.FieldClaudeDeviceLimitMode:
 		return m.OldClaudeDeviceLimitMode(ctx)
 	case group.FieldClaudeDeviceBaseLimit:
@@ -13588,6 +13632,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetCodexTimezoneAction(v)
+		return nil
+	case group.FieldClientAttestationPolicy:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientAttestationPolicy(v)
 		return nil
 	case group.FieldClaudeDeviceLimitMode:
 		v, ok := value.(string)
@@ -14194,6 +14245,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldCodexTimezoneAction:
 		m.ResetCodexTimezoneAction()
+		return nil
+	case group.FieldClientAttestationPolicy:
+		m.ResetClientAttestationPolicy()
 		return nil
 	case group.FieldClaudeDeviceLimitMode:
 		m.ResetClaudeDeviceLimitMode()
@@ -27024,6 +27078,8 @@ type UsageLogMutation struct {
 	model                               *string
 	upstream_model                      *string
 	stop_reason                         *string
+	client_attestation                  *int16
+	addclient_attestation               *int16
 	input_tokens                        *int
 	addinput_tokens                     *int
 	output_tokens                       *int
@@ -27569,6 +27625,76 @@ func (m *UsageLogMutation) StopReasonCleared() bool {
 func (m *UsageLogMutation) ResetStopReason() {
 	m.stop_reason = nil
 	delete(m.clearedFields, usagelog.FieldStopReason)
+}
+
+// SetClientAttestation sets the "client_attestation" field.
+func (m *UsageLogMutation) SetClientAttestation(i int16) {
+	m.client_attestation = &i
+	m.addclient_attestation = nil
+}
+
+// ClientAttestation returns the value of the "client_attestation" field in the mutation.
+func (m *UsageLogMutation) ClientAttestation() (r int16, exists bool) {
+	v := m.client_attestation
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientAttestation returns the old "client_attestation" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldClientAttestation(ctx context.Context) (v *int16, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientAttestation is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientAttestation requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientAttestation: %w", err)
+	}
+	return oldValue.ClientAttestation, nil
+}
+
+// AddClientAttestation adds i to the "client_attestation" field.
+func (m *UsageLogMutation) AddClientAttestation(i int16) {
+	if m.addclient_attestation != nil {
+		*m.addclient_attestation += i
+	} else {
+		m.addclient_attestation = &i
+	}
+}
+
+// AddedClientAttestation returns the value that was added to the "client_attestation" field in this mutation.
+func (m *UsageLogMutation) AddedClientAttestation() (r int16, exists bool) {
+	v := m.addclient_attestation
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearClientAttestation clears the value of the "client_attestation" field.
+func (m *UsageLogMutation) ClearClientAttestation() {
+	m.client_attestation = nil
+	m.addclient_attestation = nil
+	m.clearedFields[usagelog.FieldClientAttestation] = struct{}{}
+}
+
+// ClientAttestationCleared returns if the "client_attestation" field was cleared in this mutation.
+func (m *UsageLogMutation) ClientAttestationCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldClientAttestation]
+	return ok
+}
+
+// ResetClientAttestation resets all changes to the "client_attestation" field.
+func (m *UsageLogMutation) ResetClientAttestation() {
+	m.client_attestation = nil
+	m.addclient_attestation = nil
+	delete(m.clearedFields, usagelog.FieldClientAttestation)
 }
 
 // SetGroupID sets the "group_id" field.
@@ -29640,7 +29766,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 44)
+	fields := make([]string, 0, 45)
 	if m.smart_switch != nil {
 		fields = append(fields, usagelog.FieldSmartSwitch)
 	}
@@ -29667,6 +29793,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.stop_reason != nil {
 		fields = append(fields, usagelog.FieldStopReason)
+	}
+	if m.client_attestation != nil {
+		fields = append(fields, usagelog.FieldClientAttestation)
 	}
 	if m.group != nil {
 		fields = append(fields, usagelog.FieldGroupID)
@@ -29799,6 +29928,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.UpstreamModel()
 	case usagelog.FieldStopReason:
 		return m.StopReason()
+	case usagelog.FieldClientAttestation:
+		return m.ClientAttestation()
 	case usagelog.FieldGroupID:
 		return m.GroupID()
 	case usagelog.FieldSubscriptionID:
@@ -29896,6 +30027,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldUpstreamModel(ctx)
 	case usagelog.FieldStopReason:
 		return m.OldStopReason(ctx)
+	case usagelog.FieldClientAttestation:
+		return m.OldClientAttestation(ctx)
 	case usagelog.FieldGroupID:
 		return m.OldGroupID(ctx)
 	case usagelog.FieldSubscriptionID:
@@ -30037,6 +30170,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetStopReason(v)
+		return nil
+	case usagelog.FieldClientAttestation:
+		v, ok := value.(int16)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientAttestation(v)
 		return nil
 	case usagelog.FieldGroupID:
 		v, ok := value.(int64)
@@ -30291,6 +30431,9 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 // this mutation.
 func (m *UsageLogMutation) AddedFields() []string {
 	var fields []string
+	if m.addclient_attestation != nil {
+		fields = append(fields, usagelog.FieldClientAttestation)
+	}
 	if m.addinput_tokens != nil {
 		fields = append(fields, usagelog.FieldInputTokens)
 	}
@@ -30371,6 +30514,8 @@ func (m *UsageLogMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case usagelog.FieldClientAttestation:
+		return m.AddedClientAttestation()
 	case usagelog.FieldInputTokens:
 		return m.AddedInputTokens()
 	case usagelog.FieldOutputTokens:
@@ -30428,6 +30573,13 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case usagelog.FieldClientAttestation:
+		v, ok := value.(int16)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddClientAttestation(v)
+		return nil
 	case usagelog.FieldInputTokens:
 		v, ok := value.(int)
 		if !ok {
@@ -30616,6 +30768,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldStopReason) {
 		fields = append(fields, usagelog.FieldStopReason)
 	}
+	if m.FieldCleared(usagelog.FieldClientAttestation) {
+		fields = append(fields, usagelog.FieldClientAttestation)
+	}
 	if m.FieldCleared(usagelog.FieldGroupID) {
 		fields = append(fields, usagelog.FieldGroupID)
 	}
@@ -30677,6 +30832,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldStopReason:
 		m.ClearStopReason()
+		return nil
+	case usagelog.FieldClientAttestation:
+		m.ClearClientAttestation()
 		return nil
 	case usagelog.FieldGroupID:
 		m.ClearGroupID()
@@ -30748,6 +30906,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldStopReason:
 		m.ResetStopReason()
+		return nil
+	case usagelog.FieldClientAttestation:
+		m.ResetClientAttestation()
 		return nil
 	case usagelog.FieldGroupID:
 		m.ResetGroupID()

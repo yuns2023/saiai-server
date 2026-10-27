@@ -920,9 +920,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// Diagnostic only: raw upstream usage, before async billing conversions.
 			service.LogZeroOutputUsage(c.Request.Context(), account, result)
 
+			clientAttestation := middleware2.GetClientAttestation(c)
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			h.submitUsageRecordTask(func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
+					ClientAttestation:  clientAttestation,
 					ModerationRef:      moderationRef,
 					Result:             result,
 					APIKey:             apiKey,
@@ -1363,9 +1365,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// Diagnostic only: raw upstream usage, before async billing conversions.
 			service.LogZeroOutputUsage(c.Request.Context(), account, result)
 
+			clientAttestation := middleware2.GetClientAttestation(c)
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			h.submitUsageRecordTask(func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
+					ClientAttestation:  clientAttestation,
 					ModerationRef:      moderationRef,
 					Result:             result,
 					APIKey:             currentAPIKey,

@@ -60,6 +60,12 @@ func (UsageLog) Fields() []ent.Field {
 			MaxLen(32).
 			Optional().
 			Nillable(),
+		// ClientAttestation stores the SAIAI client proof status (1 valid ..
+		// 8 unverified, docs/CLIENT_PROOF_V1.md). NULL means not collected
+		// (group policy off or rows written before migration 116).
+		field.Int16("client_attestation").
+			Optional().
+			Nillable(),
 		field.Int64("group_id").
 			Optional().
 			Nillable(),
