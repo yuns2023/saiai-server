@@ -57,6 +57,9 @@ type CodexEnvironmentRewriteStats struct {
 	// LooseTimezones counts the Timezones replaced outside environment
 	// blocks (see rewriteLooseTags), e.g. Codex Desktop's client time context.
 	LooseTimezones int
+	// SentenceTimezones counts the Timezones replaced in Codex Desktop
+	// timezone sentences (see timezone_sentence.go).
+	SentenceTimezones int
 }
 
 // Changed reports whether the rewrite modified any byte.
@@ -91,8 +94,10 @@ func codexRewriteZone() (*time.Location, error) {
 // CodexRewriteTimezone with CodexRewriteTimezone and each `<current_date>`
 // value with a Los Angeles date. Outside blocks, China mainland / Hong Kong /
 // Macau `<timezone>` values (as the leak net matches them) are replaced too,
-// with the `<current_date>` values of the same string (see rewriteLooseTags);
-// other zones and `<current_date status=… />` style tags are untouched.
+// with the `<current_date>` values of the same string (see rewriteLooseTags),
+// and so are CN zones of Codex Desktop timezone sentences (`The user's
+// timezone is ZONE;…`, see timezone_sentence.go); other zones and
+// `<current_date status=… />` style tags are untouched.
 //
 // The date of a block is the CodexRewriteTimezone date of the enclosing
 // `input` item's `internal_chat_message_metadata_passthrough.create_time`

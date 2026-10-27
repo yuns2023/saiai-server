@@ -28,6 +28,9 @@ import (
 // start its closing tag; anything else means the value is not a CN zone.
 // That keeps the scan streaming: only the trimmed value (bounded) is kept,
 // surrounding whitespace of any length is skipped.
+//
+// CN zones of Codex Desktop timezone sentences (see timezone_sentence.go) in
+// the same strings are rewritten as well, without date edits.
 
 var (
 	looseTagOpen  = [2][]byte{timezoneOpenTag, currentDateOpenTag}
@@ -174,7 +177,8 @@ func scanLooseTags(raw []byte, rawBase int, escaped bool, want int, emit func(lo
 	}
 }
 
-// rewriteLooseTags records the loose-tag edits of one string value. base is
+// rewriteLooseTags records the loose-tag and timezone-sentence edits of one
+// string value. base is
 // len(rw.edits) before the string's environment block edits; those edits are
 // sorted and are never overlapped.
 func (rw *codexEnvironmentRewriter) rewriteLooseTags(raw []byte, rawBase int, escaped bool, base int) {
@@ -194,20 +198,29 @@ func (rw *codexEnvironmentRewriter) rewriteLooseTags(raw []byte, rawBase int, es
 		rw.edits = append(rw.edits, codexEnvironmentEdit{start: span.start, end: span.end, replacement: rw.zone})
 		zones++
 	})
-	if zones == 0 {
-		return
-	}
 	rw.stats.Timezones += zones
 	rw.stats.LooseTimezones += zones
-	item := rw.enclosingItem()
+	if zones > 0 {
+		item := rw.enclosingItem()
+		next = base
+		scanLooseTags(raw, rawBase, escaped, looseKindDate, func(span looseSpan) {
+			if !isLooseDate(span.value) || !free(span) {
+				return
+			}
+			rw.edits = append(rw.edits, codexEnvironmentEdit{
+				start: span.start, end: span.end, date: true, value: append([]byte(nil), span.value...), item: item,
+			})
+		})
+	}
+	// Timezone sentences carry no date: only the zone is replaced.
 	next = base
-	scanLooseTags(raw, rawBase, escaped, looseKindDate, func(span looseSpan) {
-		if !isLooseDate(span.value) || !free(span) {
+	scanTimezoneSentences(raw, rawBase, escaped, func(span looseSpan) {
+		if _, cn := chinaTimezones[string(span.value)]; !cn || !free(span) {
 			return
 		}
-		rw.edits = append(rw.edits, codexEnvironmentEdit{
-			start: span.start, end: span.end, date: true, value: append([]byte(nil), span.value...), item: item,
-		})
+		rw.edits = append(rw.edits, codexEnvironmentEdit{start: span.start, end: span.end, replacement: rw.zone})
+		rw.stats.Timezones++
+		rw.stats.SentenceTimezones++
 	})
 	added := rw.edits[base:]
 	sort.SliceStable(added, func(i, j int) bool { return added[i].start < added[j].start })

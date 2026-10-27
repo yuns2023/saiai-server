@@ -38,8 +38,10 @@ const (
 
 // FindChinaTimezone reports whether any JSON string in body (keys included)
 // contains `<timezone>ZONE</timezone>` whose trimmed ZONE is a China mainland,
-// Hong Kong or Macau zone. Strings are matched after JSON unescaping, so
-// `<timezone>` and `<\/timezone>` forms are found too.
+// Hong Kong or Macau zone, or a Codex Desktop timezone sentence
+// (`The user's timezone is ZONE;…`, see timezone_sentence.go) with such a
+// ZONE. Strings are matched after JSON unescaping, so `<timezone>` and
+// `<\/timezone>` forms are found too.
 //
 // body must be valid JSON (callers validate first); the scan is read-only and
 // never modifies body. Bodies containing neither "timezone" nor a `\u` escape
@@ -53,7 +55,7 @@ func FindChinaTimezone(body []byte) (string, bool) {
 
 // findChinaTimezone is FindChinaTimezone that also returns the body offset of
 // the matching string's content and the decoded offset of its `<timezone>`
-// tag.
+// tag (of the zone, for a sentence).
 func findChinaTimezone(body []byte) (zone string, stringStart, tagOffset int, found bool) {
 	if !bytes.Contains(body, timezoneWord) && !bytes.Contains(body, jsonUnicodeEsc) {
 		return "", 0, 0, false
@@ -80,6 +82,9 @@ func findChinaTimezone(body []byte) (zone string, stringStart, tagOffset int, fo
 			text = buf
 		}
 		if zone, at, ok := findChinaTimezoneTag(text); ok {
+			return zone, start, at, true
+		}
+		if zone, at, ok := findChinaTimezoneSentence(text); ok {
 			return zone, start, at, true
 		}
 	}

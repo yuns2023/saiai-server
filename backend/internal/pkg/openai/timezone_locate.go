@@ -25,8 +25,9 @@ type CodexTimezoneLocation struct {
 	ItemType, ItemRole string
 	// StringBytes is the decoded length of the string.
 	StringBytes int
-	// TagOffset is the decoded offset of the matching CN `<timezone>` tag, -1
-	// when the location is not a timezone match.
+	// TagOffset is the decoded offset of the matching CN `<timezone>` tag (of
+	// the zone for a timezone sentence), -1 when the location is not a
+	// timezone match.
 	TagOffset int
 	// StartsWithEnvOpen reports whether the string, trimmed of leading ASCII
 	// whitespace, starts with `<environment_context>`.
