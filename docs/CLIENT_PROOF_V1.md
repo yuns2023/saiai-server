@@ -115,14 +115,15 @@ change the wire format.
   on DB error/timeout; `unknown_device` when absent or owned by another user) →
   signature (`invalid`) → revoked → freshness (`stale`) → nonce `SET NX EX 900`
   (`replay`; `unverified` on Redis error/timeout) → `valid`. Only otherwise-valid
-  proofs consume a nonce. More than one proof header is `invalid`. The nonce
-  store uses a dedicated Redis client with `ContextTimeoutEnabled`, so the
-  200 ms deadline bounds socket I/O (the shared client waits for its
-  `ReadTimeout`). If the verifier is not configured, observe groups record
+  proofs consume a nonce. More than one proof header is `invalid`. The shared
+  Redis client ignores context deadlines on socket I/O, so the nonce store
+  waits for the command only until the 200 ms deadline (the command itself
+  stays bounded by the client `ReadTimeout`). If the verifier is not configured, observe groups record
   `unverified`.
 - Policy: computed when the authenticated key's group has `observe` (or the
   reserved `enforce`, treated the same in v1), or when the key has smart
-  switching enabled (a later switch may land in an observe group); usage rows
+  switching enabled (a later switch may land in an observe group; such a
+  precompute in an off group never updates device `last_*`); usage rows
   store the status only when the final (post smart-switch) key's group
   collects attestation, otherwise NULL. Requests are never rejected.
 - Caching: device lookups are cached in-process for 60 s (absent devices for

@@ -86,6 +86,7 @@ func TestClientProofMiddlewareObserveRecordsStatusAndStripsHeader(t *testing.T) 
 	require.Equal(t, int64(7), call.UserID)
 	require.Equal(t, service.PlatformAnthropic, call.Platform)
 	require.Equal(t, "198.51.100.7", call.ClientIP)
+	require.False(t, call.SkipTouch)
 }
 
 func TestClientProofMiddlewareMissingHeaderStillVerifies(t *testing.T) {
@@ -150,6 +151,14 @@ func TestClientProofMiddlewareComputesForSmartSwitchKeys(t *testing.T) {
 	require.Equal(t, int16(clientproof.StatusMissing), *seen.status)
 	require.Len(t, verifier.calls, 1)
 	require.Nil(t, service.ClientAttestationForUsage(seen.status, key), "still NULL if the final group is off")
+
+	require.True(t, verifier.calls[0].SkipTouch, "off group: no device activity side effects")
+
+	noGroup := &service.APIKey{ID: 3, UserID: 7, SmartSwitch: &domain.KeySmartSwitchPolicy{Enabled: true}}
+	verifier.calls = nil
+	seen = runClientProof(t, verifier, noGroup, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	require.Equal(t, int16(clientproof.StatusMissing), *seen.status, "nil group does not panic")
+	require.Equal(t, "", verifier.calls[0].Platform)
 
 	key.SmartSwitch.Enabled = false
 	verifier.calls = nil

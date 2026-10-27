@@ -386,7 +386,9 @@ func TestClientProofRevokeDuringLookupDoesNotRepopulateCache(t *testing.T) {
 		f.repo.mu.Lock()
 		f.repo.devices[f.device.DeviceID] = &copied
 		f.repo.mu.Unlock()
-		f.svc.revocations.Add(1)
+		f.svc.cacheMu.Lock()
+		f.svc.revocations++
+		f.svc.cacheMu.Unlock()
 	}
 	require.Equal(t, clientproof.StatusValid, f.svc.VerifyProof(ctx, f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))))
 	_, cached := f.svc.devices.Get(f.device.DeviceID)
@@ -394,4 +396,12 @@ func TestClientProofRevokeDuringLookupDoesNotRepopulateCache(t *testing.T) {
 
 	require.NoError(t, f.svc.RevokeUserDevice(ctx, 7, f.device.ID, 1))
 	require.Equal(t, clientproof.StatusRevoked, f.svc.VerifyProof(ctx, f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))))
+}
+
+func TestClientProofSkipTouch(t *testing.T) {
+	f := newProofFixture(t)
+	req := f.request(f.header(t, "/v1/responses?x=1", f.now.Unix()))
+	req.SkipTouch = true
+	require.Equal(t, clientproof.StatusValid, f.svc.VerifyProof(context.Background(), req))
+	require.Empty(t, f.repo.touches)
 }

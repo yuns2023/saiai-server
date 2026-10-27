@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/clientproof"
@@ -167,6 +167,9 @@ type ClientProofRequest struct {
 	UserID   int64
 	Platform string
 	ClientIP string
+	// SkipTouch disables last_* updates (status computed for a group that
+	// does not itself collect attestation).
+	SkipTouch bool
 }
 
 type cachedClientDevice struct {
@@ -181,7 +184,9 @@ type ClientDeviceService struct {
 	devices *gocache.Cache
 	// revocations is bumped on every local revoke; a lookup that started
 	// before a revoke must not repopulate the cache with the stale row.
-	revocations atomic.Uint64
+	// cacheMu makes "compare generation + Set" and "bump + Delete" atomic.
+	cacheMu     sync.Mutex
+	revocations uint64
 	touches     *gocache.Cache
 	now         func() time.Time
 	// touchAsync runs throttled last_* updates off the request path.
@@ -260,8 +265,10 @@ func (s *ClientDeviceService) RevokeUserDevice(ctx context.Context, userID, id, 
 	if err != nil {
 		return err
 	}
-	s.revocations.Add(1)
+	s.cacheMu.Lock()
+	s.revocations++
 	s.devices.Delete(deviceID)
+	s.cacheMu.Unlock()
 	slog.Log(ctx, slog.LevelInfo, "client_device_revoked", "user_id", userID, "client_device_id", id, "revoked_by", revokedBy)
 	return nil
 }
@@ -360,7 +367,9 @@ func (s *ClientDeviceService) VerifyProof(ctx context.Context, req ClientProofRe
 	if !fresh {
 		return clientproof.StatusReplay
 	}
-	s.touch(entry.device, req.Platform, req.ClientIP)
+	if !req.SkipTouch {
+		s.touch(entry.device, req.Platform, req.ClientIP)
+	}
 	return clientproof.StatusValid
 }
 
@@ -370,7 +379,9 @@ func (s *ClientDeviceService) lookupDevice(ctx context.Context, deviceID string)
 			return entry, nil
 		}
 	}
-	generation := s.revocations.Load()
+	s.cacheMu.Lock()
+	generation := s.revocations
+	s.cacheMu.Unlock()
 	lookupCtx, cancel := context.WithTimeout(ctx, clientDeviceLookupTimeout)
 	defer cancel()
 	device, err := s.repo.GetByDeviceID(lookupCtx, deviceID)
@@ -384,9 +395,11 @@ func (s *ClientDeviceService) lookupDevice(ctx context.Context, deviceID string)
 	} else if key, keyErr := clientproof.ParsePublicKey(device.PublicKey); keyErr == nil {
 		entry.key = key
 	}
-	if s.revocations.Load() == generation {
+	s.cacheMu.Lock()
+	if s.revocations == generation {
 		s.devices.Set(deviceID, entry, ttl)
 	}
+	s.cacheMu.Unlock()
 	return entry, nil
 }
 

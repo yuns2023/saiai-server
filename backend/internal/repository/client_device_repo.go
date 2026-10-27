@@ -235,26 +235,32 @@ type clientProofNonceStore struct {
 }
 
 // NewClientProofNonceStore stores seen proof nonces in Redis (SET NX EX).
-// The shared client does not honor context deadlines on socket I/O
-// (ContextTimeoutEnabled is off, so reads wait for ReadTimeout). The proof
-// check sits on the request path with a short deadline, so it uses its own
-// small client that does honor them.
 func NewClientProofNonceStore(rdb *redis.Client) service.ClientProofNonceStore {
-	if rdb == nil {
-		return &clientProofNonceStore{}
-	}
-	opts := *rdb.Options()
-	opts.ContextTimeoutEnabled = true
-	if opts.PoolSize <= 0 || opts.PoolSize > 16 {
-		opts.PoolSize = 16
-	}
-	opts.MinIdleConns = 0
-	return &clientProofNonceStore{rdb: redis.NewClient(&opts)}
+	return &clientProofNonceStore{rdb: rdb}
 }
 
+// Claim honors the caller's deadline even though the shared client keeps
+// ContextTimeoutEnabled off (socket reads then wait for ReadTimeout): the
+// command runs in a goroutine bounded by that ReadTimeout and the caller
+// stops waiting at its own deadline. A late reply is discarded; the nonce
+// may then already be stored, which only turns a later reuse into replay.
 func (s *clientProofNonceStore) Claim(ctx context.Context, deviceID, nonce string, ttl time.Duration) (bool, error) {
 	if s == nil || s.rdb == nil {
 		return false, errors.New("client proof nonce store unavailable")
 	}
-	return s.rdb.SetNX(ctx, clientProofNonceKeyPrefix+deviceID+":"+nonce, 1, ttl).Result()
+	type result struct {
+		fresh bool
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		fresh, err := s.rdb.SetNX(context.WithoutCancel(ctx), clientProofNonceKeyPrefix+deviceID+":"+nonce, 1, ttl).Result()
+		done <- result{fresh: fresh, err: err}
+	}()
+	select {
+	case r := <-done:
+		return r.fresh, r.err
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
 }

@@ -53,14 +53,21 @@ func ClientProof(verifier ClientProofVerifier) gin.HandlerFunc {
 			if len(values) == 1 {
 				header = values[0]
 			}
+			platform := ""
+			if apiKey.Group != nil {
+				platform = apiKey.Group.Platform
+			}
 			status = verifier.VerifyProof(c.Request.Context(), service.ClientProofRequest{
 				Header:   header,
 				Method:   c.Request.Method,
 				Target:   clientProofTarget(c),
 				APIKey:   bearerToken(c),
 				UserID:   apiKey.UserID,
-				Platform: apiKey.Group.Platform,
+				Platform: platform,
 				ClientIP: ip.GetTrustedClientIP(c),
+				// Device activity is tracked only for groups that collect;
+				// a smart-switch precompute in an off group has no side effects.
+				SkipTouch: !apiKey.Group.CollectsClientAttestation(),
 			})
 		}
 		SetClientAttestation(c, status)

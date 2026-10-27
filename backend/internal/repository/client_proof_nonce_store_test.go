@@ -28,7 +28,7 @@ func TestClientProofNonceStoreHonorsContextDeadline(t *testing.T) {
 			defer func() { _ = conn.Close() }()
 		}
 	}()
-	shared := redis.NewClient(&redis.Options{Addr: listener.Addr().String(), ReadTimeout: 10 * time.Second, Protocol: 2, DisableIdentity: true})
+	shared := redis.NewClient(&redis.Options{Addr: listener.Addr().String(), ReadTimeout: 10 * time.Second})
 	defer func() { _ = shared.Close() }()
 	store := NewClientProofNonceStore(shared)
 
@@ -37,6 +37,6 @@ func TestClientProofNonceStoreHonorsContextDeadline(t *testing.T) {
 	started := time.Now()
 	_, err = store.Claim(ctx, "cd_x", "n", time.Minute)
 	require.Error(t, err)
-	require.Less(t, time.Since(started), 2*time.Second)
-	require.False(t, shared.Options().ContextTimeoutEnabled, "the shared client is not modified")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(started), time.Second)
 }
