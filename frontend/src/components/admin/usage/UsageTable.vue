@@ -191,13 +191,8 @@
           </UsageCostCell>
         </template>
 
-        <template #cell-first_token="{ row }">
-          <span v-if="row.first_token_ms != null" class="text-sm text-gray-600 dark:text-gray-400">{{ formatDuration(row.first_token_ms) }}</span>
-          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
-        </template>
-
-        <template #cell-duration="{ row }">
-          <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDuration(row.duration_ms) }}</span>
+        <template #cell-latency="{ row }">
+          <UsageLatencyCell :row="row" />
         </template>
 
         <template #cell-created_at="{ value }">
@@ -431,6 +426,7 @@ import { isNativeChatUsage } from '@/utils/nativeChatUsage'
 import NativeChatCharges from '@/components/common/NativeChatCharges.vue'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import UsageCostCell from '@/components/common/UsageCostCell.vue'
+import UsageLatencyCell from '@/components/common/UsageLatencyCell.vue'
 import UsageCostLegend from '@/components/common/UsageCostLegend.vue'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import DataTable from '@/components/common/DataTable.vue'
@@ -480,12 +476,6 @@ const getRequestTypeBadgeClass = (row: AdminUsageLog): string => {
 
 const formatUserAgent = (ua: string): string => {
   return ua
-}
-
-const formatDuration = (ms: number | null | undefined): string => {
-  if (ms == null) return '-'
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(2)}s`
 }
 
 const hasSessionAccountSwitch = (row: AdminUsageLog): boolean => {

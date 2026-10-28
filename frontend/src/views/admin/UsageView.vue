@@ -609,8 +609,7 @@ const allColumns = computed(() => [
   { key: 'stream', label: t('usage.type'), sortable: false },
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
-  { key: 'first_token', label: t('usage.firstToken'), sortable: false },
-  { key: 'duration', label: t('usage.duration'), sortable: false },
+  { key: 'latency', label: t('usage.latency'), sortable: false },
   { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
   { key: 'ip_address', label: t('admin.usage.ipAddress'), sortable: false }
@@ -647,8 +646,13 @@ const loadSavedColumns = () => {
   try {
     const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
     if (saved) {
-      (JSON.parse(saved) as string[]).forEach((key) => {
-        hiddenColumns.add(key)
+      const savedKeys = JSON.parse(saved) as string[]
+      // First token + duration were merged into latency; keep it hidden if both were.
+      if (savedKeys.includes('first_token') && savedKeys.includes('duration')) {
+        hiddenColumns.add('latency')
+      }
+      savedKeys.forEach((key) => {
+        if (key !== 'first_token' && key !== 'duration') hiddenColumns.add(key)
       })
     } else {
       DEFAULT_HIDDEN_COLUMNS.forEach((key) => {
