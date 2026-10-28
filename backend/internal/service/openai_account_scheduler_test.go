@@ -1347,10 +1347,6 @@ func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *
 	require.True(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2))
 }
 
-func int64PtrForTest(v int64) *int64 {
-	return &v
-}
-
 // recordingConcurrencyCache records slot-acquisition order and can delay
 // the load read or fail an acquisition.
 type recordingConcurrencyCache struct {
