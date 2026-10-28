@@ -180,12 +180,15 @@ describe('admin UsageView distribution metric toggles', () => {
       wrapper.findComponent({ name: 'UsageFilters' }).vm.$emit('refresh')
       await flushPromises()
       const updated = moving ? presetTimeRange(preset!) : null
-      // "today" is a whole calendar day and is sent as dates.
-      const calendarDay = preset === 'today'
+      // Presets that include today are whole calendar days and are sent as dates.
+      const calendarDay = preset !== 'last24Hours'
+      const calendarStart: Record<string, string> = {
+        today: '2026-11-01', '7days': '2026-10-26', '14days': '2026-10-19', '30days': '2026-10-03', thisMonth: '2026-11-01',
+      }
       const expected = !updated
         ? { start_time: before.start_time, end_time: before.end_time, start_date: before.start_date, end_date: before.end_date }
         : calendarDay
-          ? { start_date: '2026-11-01', end_date: '2026-11-01', start_time: undefined, end_time: undefined }
+          ? { start_date: calendarStart[preset!], end_date: '2026-11-01', start_time: undefined, end_time: undefined }
           : { start_time: updated.startTime, end_time: updated.endTime, start_date: undefined, end_date: undefined }
       for (const request of [list, getStats, getModelStats, getSnapshotV2]) {
         expect(request.mock.lastCall![0]).toMatchObject(expected)
@@ -197,6 +200,31 @@ describe('admin UsageView distribution metric toggles', () => {
       wrapper.unmount()
     },
   )
+
+  it('moves the rolling 24 hours to now when a filter changes', async () => {
+    vi.setSystemTime(new Date(2026, 9, 28, 16, 19, 30))
+    const wrapper = mount(UsageView, { global: { stubs: {
+      AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: true, UsageTable: true,
+      InputRiskAlerts: true, UsageExportProgress: true, UsageCleanupDialog: true,
+      UserBalanceHistoryModal: true, Pagination: true, Select: true, DateTimeRangePicker: true,
+      Icon: true, ModelDistributionChart: true, GroupDistributionChart: true,
+      EndpointDistributionChart: true, TokenUsageTrend: true, CacheUsageTrend: true,
+    } } })
+    await flushPromises()
+    wrapper.findComponent({ name: 'DateTimeRangePicker' }).vm.$emit('change', presetTimeRange('last24Hours'))
+    await flushPromises()
+    // The current minute is inside the window.
+    expect(list.mock.lastCall![0]).toMatchObject({ end_time: new Date(2026, 9, 28, 16, 20).toISOString() })
+    vi.setSystemTime(new Date(2026, 9, 28, 16, 49, 10))
+    wrapper.findComponent({ name: 'UsageFilters' }).vm.$emit('change')
+    await flushPromises()
+    for (const request of [list, getStats, getModelStats, getSnapshotV2]) {
+      expect(request.mock.lastCall![0]).toMatchObject({
+        start_time: new Date(2026, 9, 27, 16, 50).toISOString(), end_time: new Date(2026, 9, 28, 16, 50).toISOString(),
+      })
+    }
+    wrapper.unmount()
+  })
 
   it('keeps the exact user alert window and filter when refreshing', async () => {
     Object.assign(routeQuery, { user_id: '42', moderation_flagged: 'true', start_time: '2026-09-18T12:00:00Z', end_time: '2026-10-18T12:00:00Z' })

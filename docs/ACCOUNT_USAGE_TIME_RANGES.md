@@ -2,12 +2,14 @@
 
 Admin usage records and account usage statistics share a date/time picker with
 minute precision and an explicit browser timezone. Last 24 hours is a rolling
-24-hour interval. Today is the whole calendar day, from local midnight to the
-next midnight, so it is never empty or inverted in the first minute after
-midnight and a refresh picks up new rows. Recent calendar days and this month
-end at the current minute. Yesterday and last month end at the next period's
-midnight. Custom edits retain their exact times and are not inferred back into
-a preset.
+24-hour interval ending at the next whole minute, so the current minute is
+included. Today, recent calendar days and this month are whole calendar days
+that run to the next local midnight, so they are never empty or inverted in the
+first minute after midnight and rows written after the range was picked still
+match. On admin usage records, applying filters or refreshing re-evaluates
+these presets against the clock. Yesterday and last month end at the next
+period's midnight. Custom edits retain their exact times and are not inferred
+back into a preset.
 
 Default ranges: admin usage records, the admin dashboard and the user usage
 records page open on today. On both usage records pages, reset returns to today
@@ -25,8 +27,8 @@ existing calendar-only cleanup workflow remains available.
 exceed 90 elapsed days. The existing `days` parameter remains supported (1–90,
 default 30); precise timestamps take precedence. Invalid ranges return HTTP 400.
 
-Account statistics default to the last 30 calendar days through the current
-minute. Totals, peaks, distribution charts and performance follow the selected
+Account statistics default to the last 30 calendar days through the end of
+today. Totals, peaks, distribution charts and performance follow the selected
 range. The today overview is explicitly the intersection of today and that
 range. Daily averages divide by days with usage; empty ranges report zero active
 days and zero averages. `ActualDaysUsed` is the number of daily buckets with

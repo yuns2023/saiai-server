@@ -351,6 +351,30 @@ func TestUsageHandlerCreateCleanupTaskSuccess(t *testing.T) {
 	require.True(t, created.Filters.EndTime.Equal(end))
 }
 
+func TestUsageHandlerCreateCleanupTaskEndsAtLocalMidnightAcrossDST(t *testing.T) {
+	loc, err := time.LoadLocation("America/Los_Angeles")
+	require.NoError(t, err)
+	for _, day := range []string{"2026-03-08", "2026-11-01"} {
+		repo := &cleanupRepoStub{}
+		cfg := &config.Config{UsageCleanup: config.UsageCleanupConfig{Enabled: true, MaxRangeDays: 31}}
+		router := setupCleanupRouter(service.NewUsageCleanupService(repo, nil, nil, cfg), 99)
+		body, err := json.Marshal(map[string]any{"start_date": day, "end_date": day, "timezone": "America/Los_Angeles"})
+		require.NoError(t, err)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/usage/cleanup-tasks", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusOK, recorder.Code, day)
+
+		start, err := time.ParseInLocation("2006-01-02", day, loc)
+		require.NoError(t, err)
+		repo.mu.Lock()
+		require.Len(t, repo.created, 1)
+		require.True(t, repo.created[0].Filters.EndTime.Equal(start.AddDate(0, 0, 1).Add(-time.Nanosecond)), day)
+		repo.mu.Unlock()
+	}
+}
+
 func TestUsageHandlerListCleanupTasksUnavailable(t *testing.T) {
 	router := setupCleanupRouter(nil, 0)
 

@@ -68,7 +68,8 @@ function onEscape(event: KeyboardEvent) {
 function choose(preset: string) { setDraft(presetTimeRange(preset)) }
 function apply() {
   if (error.value) return
-  emit('change', { startTime: new Date(start.value).toISOString(), endTime: new Date(end.value).toISOString(), preset: draftPreset.value })
+  // An unedited preset is re-evaluated now; local input strings lose the DST offset.
+  emit('change', draftPreset.value ? presetTimeRange(draftPreset.value) : { startTime: new Date(start.value).toISOString(), endTime: new Date(end.value).toISOString(), preset: null })
   open.value = false
 }
 onClickOutside(container, () => { open.value = false })

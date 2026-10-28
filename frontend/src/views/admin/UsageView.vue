@@ -486,7 +486,15 @@ const loadChartData = async () => {
     groupStats.value = snapshot.groups || []
   } catch (error) { console.error('Failed to load chart data:', error) } finally { if (seq === chartReqSeq) chartsLoading.value = false }
 }
+// Presets that include now follow the clock whenever data is reloaded;
+// historical and custom windows stay fixed.
+const followLiveRange = () => {
+  if (activeRangePreset.value && ['today', 'last24Hours', '7days', '14days', '30days', 'thisMonth'].includes(activeRangePreset.value)) {
+    setDateRange(presetTimeRange(activeRangePreset.value))
+  }
+}
 const applyFilters = () => {
+  followLiveRange()
   pagination.page = 1
   resetModelStatsCache()
   loadLogs()
@@ -496,10 +504,7 @@ const applyFilters = () => {
 }
 const refreshData = () => {
   riskRefreshKey.value++
-  // Re-evaluate presets ending at "now"; historical and custom windows stay fixed.
-  if (activeRangePreset.value && ['today', 'last24Hours', '7days', '14days', '30days', 'thisMonth'].includes(activeRangePreset.value)) {
-    setDateRange(presetTimeRange(activeRangePreset.value))
-  }
+  followLiveRange()
   resetModelStatsCache()
   loadLogs()
   loadStats()

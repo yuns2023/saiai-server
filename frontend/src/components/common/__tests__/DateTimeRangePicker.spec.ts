@@ -32,14 +32,17 @@ describe('DateTimeRangePicker', () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.emitted('change')).toBeUndefined()
   })
-  it('uses exact 24 hours and an exclusive midnight for yesterday', () => {
-    const now = new Date(2026, 9, 18, 18, 13)
+  it('uses exact 24 hours through the current minute and an exclusive midnight for yesterday', () => {
+    const now = new Date(2026, 9, 18, 18, 13, 45)
     const rolling = presetTimeRange('last24Hours', now)
     expect(+new Date(rolling.endTime) - +new Date(rolling.startTime)).toBe(86400000)
+    expect(rolling.endTime).toBe(new Date(2026, 9, 18, 18, 14).toISOString())
     const yesterday = presetTimeRange('yesterday', now)
     expect(new Date(yesterday.startTime).getDate()).toBe(17)
     expect(new Date(yesterday.endTime).getDate()).toBe(18)
     expect(new Date(yesterday.endTime).getHours()).toBe(0)
+    const lastMonth = presetTimeRange('lastMonth', now)
+    expect([lastMonth.startTime, lastMonth.endTime]).toEqual([new Date(2026, 8, 1).toISOString(), new Date(2026, 9, 1).toISOString()])
   })
   it('treats today as the whole calendar day, even in the first minute', () => {
     for (const now of [new Date(2026, 9, 18, 0, 0, 30), new Date(2026, 9, 31, 23, 59)]) {
@@ -50,6 +53,61 @@ describe('DateTimeRangePicker', () => {
       expect(end.getHours()).toBe(0)
       expect(end > now).toBe(true)
       expect(new Date(end.getTime() - 1).getDate()).toBe(now.getDate())
+    }
+  })
+  it.each([
+    ['7days', new Date(2026, 9, 12)], ['14days', new Date(2026, 9, 5)], ['30days', new Date(2026, 8, 19)],
+    ['thisMonth', new Date(2026, 9, 1)],
+  ])('runs %s through the end of today so new rows keep matching', (preset, start) => {
+    const range = presetTimeRange(preset, new Date(2026, 9, 18, 16, 19, 30))
+    expect(range.startTime).toBe(start.toISOString())
+    expect(range.endTime).toBe(new Date(2026, 9, 19).toISOString())
+  })
+  it('keeps the current minute and calendar days in the repeated DST hour', () => {
+    const tz = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      const now = new Date('2026-11-01T09:30:45Z') // the second 01:30, PST
+      expect(presetTimeRange('last24Hours', now).endTime).toBe('2026-11-01T09:31:00.000Z')
+      const today = presetTimeRange('today', now)
+      expect([today.startTime, today.endTime]).toEqual(['2026-11-01T07:00:00.000Z', '2026-11-02T08:00:00.000Z'])
+    } finally {
+      if (tz === undefined) delete process.env.TZ
+      else process.env.TZ = tz
+    }
+  })
+  it('applies a preset without losing the DST offset', async () => {
+    const tz = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-11-01T08:59:45Z')) // 01:59:45 PDT; the next minute is 01:00 PST
+      const wrapper = mount(DateTimeRangePicker, { props })
+      await wrapper.find('button').trigger('click')
+      await wrapper.findAll('.grid button').find((button) => button.text() === 'dates.last24Hours')!.trigger('click')
+      await wrapper.findAll('button').at(-1)!.trigger('click')
+      const range = wrapper.emitted('change')![0][0] as { startTime: string; endTime: string }
+      expect(range.endTime).toBe('2026-11-01T09:00:00.000Z')
+      expect(+new Date(range.endTime) - +new Date(range.startTime)).toBe(86400000)
+    } finally {
+      vi.useRealTimers()
+      if (tz === undefined) delete process.env.TZ
+      else process.env.TZ = tz
+    }
+  })
+  it('re-evaluates an unedited preset when it is applied', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date(2026, 9, 28, 16, 19, 30))
+      const wrapper = mount(DateTimeRangePicker, { props })
+      await wrapper.find('button').trigger('click')
+      await wrapper.findAll('.grid button').find((button) => button.text() === 'dates.last24Hours')!.trigger('click')
+      vi.setSystemTime(new Date(2026, 9, 28, 16, 25, 5))
+      await wrapper.findAll('button').at(-1)!.trigger('click')
+      expect(wrapper.emitted('change')![0]).toEqual([presetTimeRange('last24Hours', new Date(2026, 9, 28, 16, 25, 5))])
+      expect(wrapper.emitted('change')![0][0]).toMatchObject({ endTime: new Date(2026, 9, 28, 16, 26).toISOString(), preset: 'last24Hours' })
+    } finally {
+      vi.useRealTimers()
     }
   })
 })
