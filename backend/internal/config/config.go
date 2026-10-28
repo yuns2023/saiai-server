@@ -649,6 +649,9 @@ type GatewayOpenAIWSConfig struct {
 	PayloadLogSampleRate float64 `mapstructure:"payload_log_sample_rate"`
 
 	// 账号调度与粘连参数
+	// LBTopK is deprecated and no longer used: new OpenAI sessions pick the
+	// lowest load rate, uniformly random among ties, trying every candidate.
+	// It is still parsed and validated so existing configs keep loading.
 	LBTopK int `mapstructure:"lb_top_k"`
 	// StickySessionTTLSeconds: session_hash -> account_id 粘连 TTL
 	StickySessionTTLSeconds int `mapstructure:"sticky_session_ttl_seconds"`
@@ -663,10 +666,12 @@ type GatewayOpenAIWSConfig struct {
 	// StickyPreviousResponseTTLSeconds: 兼容旧键（当新键未设置时回退）
 	StickyPreviousResponseTTLSeconds int `mapstructure:"sticky_previous_response_ttl_seconds"`
 
+	// SchedulerScoreWeights is deprecated and no longer used (see LBTopK);
+	// still parsed and validated so existing configs keep loading.
 	SchedulerScoreWeights GatewayOpenAIWSSchedulerScoreWeights `mapstructure:"scheduler_score_weights"`
 }
 
-// GatewayOpenAIWSSchedulerScoreWeights 账号调度打分权重。
+// GatewayOpenAIWSSchedulerScoreWeights 账号调度打分权重（已弃用，不再参与调度）。
 type GatewayOpenAIWSSchedulerScoreWeights struct {
 	Priority  float64 `mapstructure:"priority"`
 	Load      float64 `mapstructure:"load"`
