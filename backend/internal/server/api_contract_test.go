@@ -1727,7 +1727,20 @@ func (r *stubUsageLogRepo) GetUserSpendingRanking(ctx context.Context, startTime
 }
 
 func (r *stubUsageLogRepo) GetUserStatsAggregated(ctx context.Context, userID int64, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
-	logs := r.userLogs[userID]
+	return r.GetUserStatsAggregatedWithFilters(ctx, userID, 0, 0, startTime, endTime)
+}
+
+func (r *stubUsageLogRepo) GetUserStatsAggregatedWithFilters(ctx context.Context, userID, apiKeyID, groupID int64, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
+	var logs []service.UsageLog
+	for _, log := range r.userLogs[userID] {
+		if apiKeyID > 0 && log.APIKeyID != apiKeyID {
+			continue
+		}
+		if groupID > 0 && (log.GroupID == nil || *log.GroupID != groupID) {
+			continue
+		}
+		logs = append(logs, log)
+	}
 	if len(logs) == 0 {
 		return &usagestats.UsageStats{}, nil
 	}
@@ -1818,6 +1831,10 @@ func (r *stubUsageLogRepo) GetUserDashboardStats(ctx context.Context, userID int
 }
 
 func (r *stubUsageLogRepo) GetAPIKeyDashboardStats(ctx context.Context, apiKeyID int64) (*usagestats.UserDashboardStats, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *stubUsageLogRepo) GetUserDashboardStatsWithFilters(ctx context.Context, userID, apiKeyID, groupID int64) (*usagestats.UserDashboardStats, error) {
 	return nil, errors.New("not implemented")
 }
 

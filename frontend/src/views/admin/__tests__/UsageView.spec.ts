@@ -180,15 +180,19 @@ describe('admin UsageView distribution metric toggles', () => {
       wrapper.findComponent({ name: 'UsageFilters' }).vm.$emit('refresh')
       await flushPromises()
       const updated = moving ? presetTimeRange(preset!) : null
-      const expected = updated
-        ? { start_time: updated.startTime, end_time: updated.endTime, start_date: undefined, end_date: undefined }
-        : { start_time: before.start_time, end_time: before.end_time, start_date: before.start_date, end_date: before.end_date }
+      // "today" is a whole calendar day and is sent as dates.
+      const calendarDay = preset === 'today'
+      const expected = !updated
+        ? { start_time: before.start_time, end_time: before.end_time, start_date: before.start_date, end_date: before.end_date }
+        : calendarDay
+          ? { start_date: '2026-11-01', end_date: '2026-11-01', start_time: undefined, end_time: undefined }
+          : { start_time: updated.startTime, end_time: updated.endTime, start_date: undefined, end_date: undefined }
       for (const request of [list, getStats, getModelStats, getSnapshotV2]) {
         expect(request.mock.lastCall![0]).toMatchObject(expected)
       }
       if (updated) {
         expect(wrapper.findComponent({ name: 'DateTimeRangePicker' }).props()).toMatchObject(updated)
-        expect(new Date(expected.end_time!).getTime()).toBeGreaterThan(new Date(range.endTime).getTime())
+        if (!calendarDay) expect(new Date(expected.end_time!).getTime()).toBeGreaterThan(new Date(range.endTime).getTime())
       }
       wrapper.unmount()
     },
@@ -272,15 +276,14 @@ describe('admin UsageView distribution metric toggles', () => {
 
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
     expect(getModelStats).toHaveBeenCalledTimes(1)
+    // Default window: today as a calendar day.
     const snapshotParams = getSnapshotV2.mock.calls[0][0]
-    expect(snapshotParams.start_date).toBeUndefined()
-    expect(snapshotParams.end_date).toBeUndefined()
-    expect(snapshotParams.granularity).toBe('hour')
-    expect(new Date(snapshotParams.end_time).getTime() - new Date(snapshotParams.start_time).getTime()).toBe(24 * 60 * 60 * 1000)
-    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({
-      start_time: snapshotParams.start_time,
-      end_time: snapshotParams.end_time
-    }))
+    const now = new Date()
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    expect(snapshotParams).toMatchObject({ start_date: today, end_date: today, granularity: 'hour' })
+    expect(snapshotParams.start_time).toBeUndefined()
+    expect(snapshotParams.end_time).toBeUndefined()
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ start_date: today, end_date: today }))
 
     const modelChart = wrapper.find('[data-test="model-chart"]')
     const groupChart = wrapper.find('[data-test="group-chart"]')

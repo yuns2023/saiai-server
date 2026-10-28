@@ -63,6 +63,7 @@ func RegisterUserRoutes(
 			usage.GET("", h.Usage.List)
 			usage.GET("/:id", h.Usage.GetByID)
 			usage.GET("/stats", h.Usage.Stats)
+			usage.GET("/groups", h.Usage.Groups)
 			// User dashboard endpoints
 			usage.GET("/dashboard/stats", h.Usage.DashboardStats)
 			usage.GET("/dashboard/trend", h.Usage.DashboardTrend)

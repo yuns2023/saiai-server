@@ -221,32 +221,20 @@ const formatLD = (d: Date) => {
   const day = String(d.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
-const getLast24HoursRangeDates = (): { start: string; end: string } => {
-  const end = new Date()
-  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
-  return {
-    start: formatLD(start),
-    end: formatLD(end)
-  }
-}
-const createRolling24HourRange = (end = new Date()): { start: string; end: string } => {
-  const range = presetTimeRange('last24Hours', end)
-  return { start: range.startTime, end: range.endTime }
-}
 const getGranularityForRange = (start: string, end: string): 'day' | 'hour' | '15m' => {
   const startTime = new Date(`${start}T00:00:00`).getTime()
   const endTime = new Date(`${end}T00:00:00`).getTime()
   const daysDiff = Math.ceil((endTime - startTime) / (1000 * 60 * 60 * 24))
   return daysDiff <= 1 ? 'hour' : 'day'
 }
-const defaultRange = getLast24HoursRangeDates()
-const defaultRollingRange = createRolling24HourRange()
-const startDate = ref(defaultRange.start); const endDate = ref(defaultRange.end)
-const activeRangePreset = ref<string | null>('last24Hours')
-const exactRange = ref(true)
-const rollingStartTime = ref(defaultRollingRange.start)
-const rollingEndTime = ref(defaultRollingRange.end)
-const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, session_id: undefined, request_type: undefined, billing_type: null, account_switch: undefined, start_time: rollingStartTime.value, end_time: rollingEndTime.value })
+// Default (and reset) window: today as a whole calendar day, sent as dates.
+const defaultRange = presetTimeRange('today')
+const startDate = ref(formatLD(new Date(defaultRange.startTime))); const endDate = ref(startDate.value)
+const activeRangePreset = ref<string | null>(defaultRange.preset)
+const exactRange = ref(false)
+const rollingStartTime = ref(defaultRange.startTime)
+const rollingEndTime = ref(defaultRange.endTime)
+const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, session_id: undefined, request_type: undefined, billing_type: null, account_switch: undefined, start_date: startDate.value, end_date: endDate.value })
 const breakdownFilters = computed<UserBreakdownParams>(() => {
   const requestType = filters.value.request_type
   const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
@@ -263,12 +251,6 @@ const breakdownFilters = computed<UserBreakdownParams>(() => {
   }
 })
 const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
-
-const refreshRollingRange = () => {
-  const range = createRolling24HourRange()
-  rollingStartTime.value = range.start
-  rollingEndTime.value = range.end
-}
 
 const activeRangeParams = (): Pick<AdminUsageQueryParams, 'start_date' | 'end_date' | 'start_time' | 'end_time'> => {
   if (exactRange.value) {
@@ -525,12 +507,7 @@ const refreshData = () => {
   loadChartData()
 }
 const resetFilters = () => {
-  exactRange.value = true
-  const range = getLast24HoursRangeDates()
-  startDate.value = range.start
-  endDate.value = range.end
-  activeRangePreset.value = 'last24Hours'
-  refreshRollingRange()
+  setDateRange(presetTimeRange('today'))
   filters.value = { ...activeRangeParams(), session_id: undefined, request_type: undefined, billing_type: null, account_switch: undefined, total_cost_gt: undefined }
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
   applyFilters()

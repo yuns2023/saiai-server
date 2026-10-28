@@ -57,6 +57,7 @@ func TestGetUserAPIKeyUsageBreakdownReturnsPageAndGlobalSummary(t *testing.T) {
 	result, err := repo.GetUserAPIKeyUsageBreakdown(
 		context.Background(),
 		42,
+		0,
 		startTime,
 		endTime,
 		pagination.PaginationParams{Page: 1, PageSize: 20},

@@ -63,6 +63,11 @@ func (h *UsageHandler) List(c *gin.Context) {
 		apiKeyID = id
 	}
 
+	groupID, ok := parseUsageGroupID(c)
+	if !ok {
+		return
+	}
+
 	// Parse additional filters
 	model := c.Query("model")
 
@@ -123,6 +128,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 	filters := usagestats.UsageLogFilters{
 		UserID:      subject.UserID, // Always filter by current user for security
 		APIKeyID:    apiKeyID,
+		GroupID:     groupID,
 		Model:       model,
 		RequestType: requestType,
 		Stream:      stream,
@@ -204,6 +210,10 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 
 		apiKeyID = id
 	}
+	groupID, ok := parseUsageGroupID(c)
+	if !ok {
+		return
+	}
 
 	// 获取时间范围参数
 	userTZ := c.Query("timezone") // Get user's timezone from request
@@ -245,13 +255,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		endTime = now
 	}
 
-	var stats *service.UsageStats
-	var err error
-	if apiKeyID > 0 {
-		stats, err = h.usageService.GetStatsByAPIKey(c.Request.Context(), apiKeyID, startTime, endTime)
-	} else {
-		stats, err = h.usageService.GetStatsByUser(c.Request.Context(), subject.UserID, startTime, endTime)
-	}
+	stats, err := h.usageService.GetUserUsageStats(c.Request.Context(), subject.UserID, apiKeyID, groupID, startTime, endTime)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -293,6 +297,49 @@ func parseUserTimeRange(c *gin.Context) (time.Time, time.Time) {
 	return startTime, endTime
 }
 
+// parseUsageGroupID parses the optional final-group filter. A group ID only
+// narrows the current user's own logs, so it needs no ownership check.
+func parseUsageGroupID(c *gin.Context) (int64, bool) {
+	rawID := strings.TrimSpace(c.Query("group_id"))
+	if rawID == "" {
+		return 0, true
+	}
+	groupID, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group_id")
+		return 0, false
+	}
+	return groupID, true
+}
+
+type usageGroupOption struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// Groups lists the final groups found in the current user's usage within the
+// selected range, most-used first, as filter options for the usage pages.
+// GET /api/v1/usage/groups
+func (h *UsageHandler) Groups(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	startTime, endTime := parseUserTimeRange(c)
+	groups, err := h.usageService.ListUserUsageGroups(c.Request.Context(), subject.UserID, startTime, endTime)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	out := make([]usageGroupOption, 0, len(groups))
+	for _, group := range groups {
+		out = append(out, usageGroupOption{ID: group.GroupID, Name: group.GroupName})
+	}
+	response.Success(c, out)
+}
+
 // dashboardAPIKeyFilter resolves an optional api_key_id and enforces current
 // user ownership before any aggregate query is executed.
 func (h *UsageHandler) dashboardAPIKeyFilter(c *gin.Context, userID int64) (*service.APIKey, bool) {
@@ -320,6 +367,13 @@ func (h *UsageHandler) dashboardAPIKeyFilter(c *gin.Context, userID int64) (*ser
 	return apiKey, true
 }
 
+func dashboardAPIKeyID(apiKey *service.APIKey) int64 {
+	if apiKey == nil {
+		return 0
+	}
+	return apiKey.ID
+}
+
 // DashboardStats handles getting user dashboard statistics
 // GET /api/v1/usage/dashboard/stats
 func (h *UsageHandler) DashboardStats(c *gin.Context) {
@@ -333,24 +387,31 @@ func (h *UsageHandler) DashboardStats(c *gin.Context) {
 	if !ok {
 		return
 	}
+	groupID, ok := parseUsageGroupID(c)
+	if !ok {
+		return
+	}
 
 	var stats *usagestats.UserDashboardStats
 	var err error
-	if apiKey == nil {
+	switch {
+	case groupID > 0:
+		stats, err = h.usageService.GetUserGroupDashboardStats(c.Request.Context(), subject.UserID, dashboardAPIKeyID(apiKey), groupID)
+	case apiKey == nil:
 		stats, err = h.usageService.GetUserDashboardStats(c.Request.Context(), subject.UserID)
-	} else {
+	default:
 		stats, err = h.usageService.GetAPIKeyDashboardStats(c.Request.Context(), apiKey.ID)
-		if err == nil {
-			stats.TotalAPIKeys = 1
-			stats.ActiveAPIKeys = 0
-			if apiKey.Status == service.StatusAPIKeyActive {
-				stats.ActiveAPIKeys = 1
-			}
-		}
 	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	if apiKey != nil {
+		stats.TotalAPIKeys = 1
+		stats.ActiveAPIKeys = 0
+		if apiKey.Status == service.StatusAPIKeyActive {
+			stats.ActiveAPIKeys = 1
+		}
 	}
 
 	response.Success(c, stats)
@@ -371,12 +432,19 @@ func (h *UsageHandler) DashboardTrend(c *gin.Context) {
 	if !ok {
 		return
 	}
+	groupID, ok := parseUsageGroupID(c)
+	if !ok {
+		return
+	}
 
 	var trend []usagestats.TrendDataPoint
 	var err error
-	if apiKey == nil {
+	switch {
+	case groupID > 0:
+		trend, err = h.usageService.GetUserGroupUsageTrend(c.Request.Context(), subject.UserID, dashboardAPIKeyID(apiKey), groupID, startTime, endTime, granularity)
+	case apiKey == nil:
 		trend, err = h.usageService.GetUserUsageTrendByUserID(c.Request.Context(), subject.UserID, startTime, endTime, granularity)
-	} else {
+	default:
 		trend, err = h.usageService.GetAPIKeyUsageTrend(c.Request.Context(), apiKey.ID, startTime, endTime, granularity)
 	}
 	if err != nil {
@@ -406,12 +474,19 @@ func (h *UsageHandler) DashboardModels(c *gin.Context) {
 	if !ok {
 		return
 	}
+	groupID, ok := parseUsageGroupID(c)
+	if !ok {
+		return
+	}
 
 	var stats []usagestats.ModelStat
 	var err error
-	if apiKey == nil {
+	switch {
+	case groupID > 0:
+		stats, err = h.usageService.GetUserGroupModelStats(c.Request.Context(), subject.UserID, dashboardAPIKeyID(apiKey), groupID, startTime, endTime)
+	case apiKey == nil:
 		stats, err = h.usageService.GetUserModelStats(c.Request.Context(), subject.UserID, startTime, endTime)
-	} else {
+	default:
 		stats, err = h.usageService.GetAPIKeyModelStats(c.Request.Context(), apiKey.ID, startTime, endTime)
 	}
 	if err != nil {
@@ -499,10 +574,15 @@ func (h *UsageHandler) DashboardAPIKeyBreakdown(c *gin.Context) {
 		response.BadRequest(c, "Invalid sort value")
 		return
 	}
+	groupID, ok := parseUsageGroupID(c)
+	if !ok {
+		return
+	}
 
 	result, err := h.usageService.GetUserAPIKeyUsageBreakdown(
 		c.Request.Context(),
 		subject.UserID,
+		groupID,
 		startTime,
 		endTime,
 		pagination.PaginationParams{Page: page, PageSize: pageSize},

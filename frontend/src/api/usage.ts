@@ -44,6 +44,7 @@ export interface TrendParams {
   end_date?: string
   granularity?: 'day' | 'hour' | '15m'
   api_key_id?: number
+  group_id?: number
   timezone?: string
 }
 
@@ -130,13 +131,15 @@ export async function getStats(
  * @param startDate - Start date (YYYY-MM-DD format)
  * @param endDate - End date (YYYY-MM-DD format)
  * @param apiKeyId - Optional API key ID filter
+ * @param groupId - Optional final (actual) group filter
  * @returns Usage statistics
  */
 export async function getStatsByDateRange(
   startDate: string,
   endDate: string,
   apiKeyId?: number,
-  timezone?: string
+  timezone?: string,
+  groupId?: number
 ): Promise<UsageStatsResponse> {
   const params: Record<string, unknown> = {
     start_date: startDate,
@@ -145,6 +148,9 @@ export async function getStatsByDateRange(
 
   if (apiKeyId !== undefined) {
     params.api_key_id = apiKeyId
+  }
+  if (groupId !== undefined) {
+    params.group_id = groupId
   }
   if (timezone) {
     params.timezone = timezone
@@ -161,13 +167,15 @@ export async function getStatsByDateRange(
  * @param startDate - Start date (YYYY-MM-DD format)
  * @param endDate - End date (YYYY-MM-DD format)
  * @param apiKeyId - Optional API key ID filter
+ * @param groupId - Optional final (actual) group filter
  * @returns Usage logs within date range
  */
 export async function getByDateRange(
   startDate: string,
   endDate: string,
   apiKeyId?: number,
-  timezone?: string
+  timezone?: string,
+  groupId?: number
 ): Promise<PaginatedResponse<UsageLog>> {
   const params: UsageQueryParams = {
     start_date: startDate,
@@ -178,6 +186,9 @@ export async function getByDateRange(
 
   if (apiKeyId !== undefined) {
     params.api_key_id = apiKeyId
+  }
+  if (groupId !== undefined) {
+    params.group_id = groupId
   }
   if (timezone) {
     params.timezone = timezone
@@ -199,14 +210,45 @@ export async function getById(id: number): Promise<UsageLog> {
   return data
 }
 
+export interface UsageGroupOption {
+  id: number
+  name: string
+}
+
+/**
+ * List the final (actual) groups found in the current user's usage within a
+ * date range, most-used first. Includes groups the user can no longer use.
+ */
+export async function getUsageGroups(
+  startDate: string,
+  endDate: string,
+  timezone?: string
+): Promise<UsageGroupOption[]> {
+  const params: Record<string, unknown> = { start_date: startDate, end_date: endDate }
+  if (timezone) {
+    params.timezone = timezone
+  }
+  const { data } = await apiClient.get<UsageGroupOption[]>('/usage/groups', { params })
+  return data
+}
+
 // ==================== Dashboard API ====================
 
 /**
  * Get user dashboard statistics
  * @returns Dashboard statistics for current user
  */
-export async function getDashboardStats(apiKeyId?: number): Promise<UserDashboardStats> {
-  const params = apiKeyId === undefined ? undefined : { api_key_id: apiKeyId }
+export async function getDashboardStats(
+  apiKeyId?: number,
+  groupId?: number
+): Promise<UserDashboardStats> {
+  const params =
+    apiKeyId === undefined && groupId === undefined
+      ? undefined
+      : {
+          ...(apiKeyId === undefined ? {} : { api_key_id: apiKeyId }),
+          ...(groupId === undefined ? {} : { group_id: groupId })
+        }
   const { data } = await apiClient.get<UserDashboardStats>('/usage/dashboard/stats', { params })
   return data
 }
@@ -230,6 +272,7 @@ export async function getDashboardModels(params?: {
   start_date?: string
   end_date?: string
   api_key_id?: number
+  group_id?: number
   timezone?: string
 }): Promise<ModelStatsResponse> {
   const { data } = await apiClient.get<ModelStatsResponse>('/usage/dashboard/models', { params })
@@ -281,6 +324,7 @@ export interface APIKeyUsageBreakdownResponse {
 export interface APIKeyUsageBreakdownParams {
   start_date?: string
   end_date?: string
+  group_id?: number
   timezone?: string
   page?: number
   page_size?: number
@@ -341,6 +385,7 @@ export const usageAPI = {
   getStatsByDateRange,
   getByDateRange,
   getById,
+  getUsageGroups,
   // Dashboard
   getDashboardStats,
   getDashboardTrend,

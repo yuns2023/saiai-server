@@ -22,6 +22,7 @@ type apiKeyBreakdownUsageRepoCapture struct {
 	service.UsageLogRepository
 	called    bool
 	userID    int64
+	groupID   int64
 	startTime time.Time
 	endTime   time.Time
 	params    pagination.PaginationParams
@@ -39,13 +40,14 @@ func (r *dashboardAPIKeyRepoStub) GetByID(_ context.Context, _ int64) (*service.
 
 func (r *apiKeyBreakdownUsageRepoCapture) GetUserAPIKeyUsageBreakdown(
 	_ context.Context,
-	userID int64,
+	userID, groupID int64,
 	startTime, endTime time.Time,
 	params pagination.PaginationParams,
 	sort string,
 ) (*usagestats.APIKeyUsageBreakdownResult, error) {
 	r.called = true
 	r.userID = userID
+	r.groupID = groupID
 	r.startTime = startTime
 	r.endTime = endTime
 	r.params = params

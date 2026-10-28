@@ -105,7 +105,7 @@ describe('admin DashboardView', () => {
     })
   })
 
-  it('uses last 24 hours as default dashboard range', async () => {
+  it('uses today as default dashboard range', async () => {
     const wrapper = mount(DashboardView, {
       global: {
         stubs: {
@@ -126,21 +126,18 @@ describe('admin DashboardView', () => {
 
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
     const params = getSnapshotV2.mock.calls[0][0]
-    expect(params.start_date).toBeUndefined()
-    expect(params.end_date).toBeUndefined()
-    expect(params.granularity).toBe('hour')
-    expect(new Date(params.end_time).getTime() - new Date(params.start_time).getTime()).toBe(24 * 60 * 60 * 1000)
-    expect(getUserUsageTrend).toHaveBeenCalledWith(expect.objectContaining({
-      start_time: params.start_time,
-      end_time: params.end_time
-    }))
-    expect(getUserSpendingRanking).toHaveBeenCalledWith(expect.objectContaining({
-      start_time: params.start_time,
-      end_time: params.end_time
-    }))
+    const now = new Date()
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    expect(params).toMatchObject({ start_date: today, end_date: today, granularity: 'hour' })
+    expect(params.start_time).toBeUndefined()
+    expect(params.end_time).toBeUndefined()
+    expect(getUserUsageTrend).toHaveBeenCalledWith(expect.objectContaining({ start_date: today, end_date: today }))
+    expect(getUserSpendingRanking).toHaveBeenCalledWith(expect.objectContaining({ start_date: today, end_date: today }))
     expect(wrapper.findComponent({ name: 'APIKeySpendingRanking' }).props()).toEqual(expect.objectContaining({
-      startTime: params.start_time,
-      endTime: params.end_time,
+      startDate: today,
+      endDate: today,
+      startTime: undefined,
+      endTime: undefined,
     }))
     wrapper.unmount()
   })
