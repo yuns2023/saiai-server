@@ -111,6 +111,13 @@ func recordOpenAIWSUpstreamFailure(c *gin.Context, failure *service.OpenAIWSUpst
 	if upstreamRequestID != "" {
 		payload["upstream_request_id"] = upstreamRequestID
 	}
+	if cfRay := opsWSErrorIdentifier(failure.UpstreamCFRay); cfRay != "" {
+		payload["upstream_cf_ray"] = cfRay
+	}
+	// Content-free relay observations (timings, counts, protocol labels).
+	if failure.RelayDiagnostics != nil {
+		payload["relay_diagnostics"] = failure.RelayDiagnostics
+	}
 	body, _ := json.Marshal(payload)
 	requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
 	clientRequestID, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string)

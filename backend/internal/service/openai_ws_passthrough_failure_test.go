@@ -57,7 +57,7 @@ func TestOpenAIWSPassthroughFailureMetadataAndRawFrames(t *testing.T) {
 			request := []byte(` {"type":"response.create","model":"test-luna","reasoning":{"effort":"low"},"input":[],"tools":[{"type":"image_gen"}]} `)
 			frame := []byte(tc.frame)
 			upstream := &openAIWSCaptureConn{events: [][]byte{frame}}
-			dialer := &openAIWSCaptureDialer{conn: upstream, handshake: http.Header{"X-Request-Id": []string{"TEST_ONLY_UPSTREAM_TRACE"}}}
+			dialer := &openAIWSCaptureDialer{conn: upstream, handshake: http.Header{"X-Request-Id": []string{"TEST_ONLY_UPSTREAM_TRACE"}, "Cf-Ray": []string{"8f1a2b3c4d5e6f70-SJC"}}}
 			svc := &OpenAIGatewayService{cfg: cfg, openaiWSPassthroughDialer: dialer, cache: &stubGatewayCache{}}
 			account := &Account{ID: 452, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 			done := make(chan struct{})
@@ -111,6 +111,9 @@ func TestOpenAIWSPassthroughFailureMetadataAndRawFrames(t *testing.T) {
 			require.Equal(t, int64(452), failures[0].AccountID)
 			require.Equal(t, HashUsageRequestPayload(request), failures[0].RequestPayloadHash)
 			require.Equal(t, "TEST_ONLY_UPSTREAM_TRACE", failures[0].UpstreamRequestID)
+			require.Equal(t, "8f1a2b3c4d5e6f70-SJC", failures[0].UpstreamCFRay)
+			require.NotNil(t, failures[0].RelayDiagnostics)
+			require.NotNil(t, failures[0].RelayDiagnostics.MsSinceSent)
 			require.NotContains(t, failures[0].Message, "TEST_ONLY_TOKEN")
 			require.Equal(t, tc.code, failures[0].Code)
 			require.Equal(t, tc.reason, failures[0].IncompleteReason)
@@ -126,5 +129,17 @@ func TestOpenAIWSPassthroughFailureMetadataAndRawFrames(t *testing.T) {
 			require.Equal(t, request, upstream.rawWrites[0])
 			require.Equal(t, 1, dialer.DialCount(), "do not retry or switch accounts for a generic model refusal")
 		})
+	}
+}
+
+func TestOpenAIWSCFRayAcceptsOnlyRayIdentifiers(t *testing.T) {
+	for value, want := range map[string]string{
+		"8f1a2b3c4d5e6f70-SJC":        "8f1a2b3c4d5e6f70-SJC",
+		" 8f1a2b3c4d5e6f70 ":          "8f1a2b3c4d5e6f70",
+		"":                            "",
+		"Bearer TEST_ONLY_SECRET":     "",
+		"8f1a2b3c4d5e6f70-SJC\nX-Bad": "",
+	} {
+		require.Equal(t, want, openAIWSCFRay(http.Header{"Cf-Ray": []string{value}}), value)
 	}
 }
