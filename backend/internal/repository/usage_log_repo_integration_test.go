@@ -1958,3 +1958,26 @@ func (s *UsageLogRepoSuite) TestDashboardStats_AggregatedPathReportsHostedLine()
 	s.Require().Equal(baseStats.HostedTodayRequests+1, stats.HostedTodayRequests)
 	s.Require().InDelta(baseStats.HostedTodayMeteredCost+1.25, stats.HostedTodayMeteredCost, 1e-9)
 }
+
+func (s *UsageLogRepoSuite) TestListBilledPricingModels() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "billed-models@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-billed-models", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-billed-models"})
+	now := time.Now().UTC()
+	create := func(model string, snapshot *service.PricingSnapshot, createdAt time.Time) {
+		log := &service.UsageLog{UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID, RequestID: uuid.New().String(), Model: model, PricingSnapshot: snapshot, CreatedAt: createdAt}
+		_, err := s.repo.Create(s.ctx, log)
+		s.Require().NoError(err)
+	}
+	// The billed model wins over the request model; rows without a usable
+	// snapshot (per-image billing) fall back to the request model.
+	create("requested-a", &service.PricingSnapshot{BilledModel: " GPT-6.1-Sol "}, now.Add(-time.Hour))
+	create("requested-b", &service.PricingSnapshot{BilledModel: "gpt-6.1-sol"}, now.Add(-2*time.Hour))
+	create("GPT-Image-2", nil, now.Add(-3*time.Hour))
+	create("blank-snapshot", &service.PricingSnapshot{BilledModel: "  "}, now.Add(-4*time.Hour))
+	create("too-old", nil, now.Add(-40*24*time.Hour))
+
+	models, err := s.repo.ListBilledPricingModels(s.ctx, now.Add(-30*24*time.Hour))
+	s.Require().NoError(err)
+	s.Require().ElementsMatch([]string{"gpt-6.1-sol", "gpt-image-2", "blank-snapshot"}, models)
+}

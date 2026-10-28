@@ -98,6 +98,7 @@ type SettingHandler struct {
 	opsService          *service.OpsService
 	pricingService      *service.PricingService
 	billingService      *service.BillingService
+	pricingDrift        *service.PricingDriftService
 	pricingConfigMu     sync.Mutex
 }
 

@@ -4,9 +4,15 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strconv"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -160,4 +166,56 @@ func (s *SettingRepoSuite) TestSetMultiple_UpdateToEmpty() {
 	got, err = s.repo.GetValue(s.ctx, "clearable_key")
 	s.Require().NoError(err)
 	s.Require().Equal("", got, "value should be updated to empty string")
+}
+
+func (s *SettingRepoSuite) TestUpdateSettingValue_InsertsAndUpdates() {
+	s.Require().NoError(s.repo.UpdateSettingValue(s.ctx, "counter", func(current string) (string, error) {
+		s.Require().Equal("", current)
+		return "1", nil
+	}))
+	s.Require().NoError(s.repo.UpdateSettingValue(s.ctx, "counter", func(current string) (string, error) {
+		s.Require().Equal("1", current)
+		return "2", nil
+	}))
+	got, err := s.repo.GetValue(s.ctx, "counter")
+	s.Require().NoError(err)
+	s.Require().Equal("2", got)
+
+	failed := errors.New("refuse")
+	s.Require().ErrorIs(s.repo.UpdateSettingValue(s.ctx, "counter", func(string) (string, error) { return "", failed }), failed)
+	got, err = s.repo.GetValue(s.ctx, "counter")
+	s.Require().NoError(err)
+	s.Require().Equal("2", got, "a failed update leaves the value")
+}
+
+// Concurrent read-modify-write callers on separate connections, including the
+// first insert, never lose an update.
+func TestSettingRepoUpdateSettingValue_Concurrent(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewSettingRepository(client).(*settingRepository)
+	key := fmt.Sprintf("concurrent-%d", time.Now().UnixNano())
+	t.Cleanup(func() { _ = repo.Delete(ctx, key) })
+
+	const writers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- repo.UpdateSettingValue(ctx, key, func(current string) (string, error) {
+				n, _ := strconv.Atoi(current)
+				return strconv.Itoa(n + 1), nil
+			})
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	got, err := repo.GetValue(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, strconv.Itoa(writers), got)
 }

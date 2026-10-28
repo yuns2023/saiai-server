@@ -53,6 +53,23 @@ func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient,
 	return svc, nil
 }
 
+// ProvidePricingDriftService evaluates price-feed changes for recently billed
+// models. Missing repository capabilities fail startup instead of silently
+// falling back to an unsafe read-then-write.
+func ProvidePricingDriftService(cfg *config.Config, pricing *PricingService, usageRepo UsageLogRepository, settingRepo SettingRepository) (*PricingDriftService, error) {
+	billed, ok := usageRepo.(BilledPricingModelReader)
+	if !ok {
+		return nil, errors.New("usage log repository cannot list billed pricing models")
+	}
+	store, ok := settingRepo.(pricingDriftStore)
+	if !ok {
+		return nil, errors.New("setting repository cannot update values atomically")
+	}
+	drift := NewPricingDriftService(cfg, billed, store, pricing.Done())
+	pricing.SetFeedChangeHandler(drift.Enqueue)
+	return drift, nil
+}
+
 // ProvideEmailQueueService creates EmailQueueService with default worker count
 func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 	return NewEmailQueueService(emailService, 3)
@@ -527,6 +544,7 @@ var ProviderSet = wire.NewSet(
 	NewUsageService,
 	NewDashboardService,
 	ProvidePricingService,
+	ProvidePricingDriftService,
 	NewBillingService,
 	NewBillingCacheService,
 	NewAnnouncementService,

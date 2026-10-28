@@ -5,6 +5,20 @@
         <div><h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ t('admin.modelPricing.title') }}</h1><p class="mt-1 text-sm text-gray-500">{{ t('admin.modelPricing.description') }}</p><p class="mt-1 text-xs text-gray-500">{{ t('admin.modelPricing.tokenScope') }}</p></div>
         <button class="btn btn-secondary" @click="loadHistory">{{ t('admin.modelPricing.history') }}</button>
       </div>
+      <section v-if="drift && drift.unacknowledged > 0" role="alert" data-testid="pricing-drift-banner" class="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+        <div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0 flex-1"><h2 class="font-semibold">{{ t('admin.modelPricing.drift.title', { count: drift.unacknowledged }) }}</h2><p class="mt-1 text-xs">{{ t('admin.modelPricing.drift.description') }}</p></div><button class="btn btn-secondary btn-sm" data-testid="pricing-drift-ack-all" :disabled="acknowledging || !pendingDrift.length" @click="acknowledgeDrift(pendingDrift.map(notice => notice.id))">{{ t('admin.modelPricing.drift.acknowledgeAll') }}</button></div>
+        <ul class="mt-3 divide-y divide-amber-200 dark:divide-amber-900">
+          <li v-for="notice in pendingDrift" :key="notice.id" class="flex flex-wrap items-start justify-between gap-3 py-3" :data-testid="`pricing-drift-notice-${notice.id}`">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2"><button type="button" class="font-mono font-semibold underline" data-testid="pricing-drift-model" @click="focusDriftModel(notice.model)">{{ notice.model }}</button><span v-if="notice.old_status !== notice.new_status" class="rounded px-2 text-xs" :class="driftStatusClass(notice.new_status)">{{ driftStatusLabel(notice.new_status) }}</span><span v-if="notice.occurrences > 1" class="text-xs text-amber-700 dark:text-amber-400" :title="t('admin.modelPricing.drift.occurrences')">×{{ notice.occurrences }}</span><span class="text-xs text-amber-700 dark:text-amber-400">{{ t('admin.modelPricing.drift.detectedAt') }}: {{ formatDate(notice.detected_at) }}</span></div>
+              <div v-if="notice.old_resolved_model !== notice.new_resolved_model" class="mt-1 text-xs">{{ t('admin.modelPricing.resolved') }}: <span class="font-mono">{{ notice.old_resolved_model || '—' }} → {{ notice.new_resolved_model || '—' }}</span></div>
+              <ul v-if="notice.changes?.length" class="mt-1 space-y-0.5 text-xs"><li v-for="change in notice.changes" :key="change.key">{{ driftLabel(change.key) }}: <span class="font-mono">{{ driftValue(change.key, change.old) }} → {{ driftValue(change.key, change.new) }}</span> <span class="text-amber-700 dark:text-amber-400">{{ driftUnit(change.key) }}</span></li></ul>
+            </div>
+            <button class="btn btn-secondary btn-sm" :disabled="acknowledging" @click="acknowledgeDrift([notice.id])">{{ t('admin.modelPricing.drift.acknowledge') }}</button>
+          </li>
+        </ul>
+      </section>
+      <div v-else-if="driftLoadFailed" role="alert" class="text-sm text-amber-700 dark:text-amber-400" data-testid="pricing-drift-error">{{ t('admin.modelPricing.drift.loadFailed') }} <button class="underline" @click="loadDrift">{{ t('admin.modelPricing.retry') }}</button></div>
       <div class="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100">
         <p>{{ t('admin.modelPricing.referenceHint') }}</p>
         <div class="mt-2 flex flex-wrap gap-4"><a href="https://platform.claude.com/docs/en/about-claude/pricing" target="_blank" rel="noopener noreferrer" class="underline">{{ t('admin.modelPricing.claudeOfficial') }}</a><a href="https://openai.com/api/pricing/" target="_blank" rel="noopener noreferrer" class="underline">{{ t('admin.modelPricing.openaiOfficial') }}</a></div>
@@ -81,7 +95,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
-import { priceFields, type PriceOverride, type ModelPrice, type PricingMetadata, type PriceEdit, type PricePreview, type PreviewInput } from '@/api/admin/modelPricing'
+import { priceFields, type PriceOverride, type ModelPrice, type PricingMetadata, type PriceEdit, type PricePreview, type PreviewInput, type PricingDriftList } from '@/api/admin/modelPricing'
 import { useAppStore } from '@/stores/app'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -178,5 +192,48 @@ async function loadHistory() {
   try { edits.value = (await adminAPI.modelPricing.history()).reverse(); showHistory.value = true }
   catch (error) { appStore.showError(errorMessage(error)) }
 }
-onMounted(load)
+const drift = ref<PricingDriftList | null>(null)
+const driftLoadFailed = ref(false)
+const acknowledging = ref(false)
+const pendingDrift = computed(() => (drift.value?.notices ?? []).filter(notice => !notice.acknowledged_at))
+const driftTierLabels: Record<string, string> = { default: 'Standard', priority: 'Fast / Priority', flex: 'Flex' }
+const driftStatuses = ['priced', 'fallback', 'unpriced']
+const driftStatusLabel = (status: string) => driftStatuses.includes(status) ? t(`admin.modelPricing.drift.status.${status}`) : status
+const driftStatusClass = (status: string) => status === 'unpriced' ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200' : status === 'fallback' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200' : status === 'priced' ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200' : 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-200'
+const driftImageKeys: Record<string, string> = { 'image.input': 'imageInput', 'image.output': 'imageOutput', 'image.per_image': 'perImage' }
+function driftTokenPrice(key: string) {
+  const long = key.startsWith('long.')
+  const [tierKey, field, ...rest] = (long ? key.slice(5) : key).split('.')
+  return !rest.length && driftTierLabels[tierKey] && (standardFields as readonly string[]).includes(field) ? { long, tier: driftTierLabels[tierKey], field } : null
+}
+function driftLabel(key: string) {
+  if (key === 'long.threshold') return t('admin.modelPricing.drift.keys.longThreshold')
+  if (driftImageKeys[key]) return t(`admin.modelPricing.drift.keys.${driftImageKeys[key]}`)
+  const price = driftTokenPrice(key)
+  return price ? `${price.long ? `${t('usage.longContext')} · ` : ''}${price.tier} · ${fieldLabel(price.field)}` : key
+}
+function driftUnit(key: string) {
+  if (key === 'long.threshold') return t('admin.modelPricing.drift.units.thresholdTokens')
+  if (key === 'image.per_image') return t('admin.modelPricing.drift.units.image')
+  if (key === 'image.input' || key === 'image.output') return t('admin.modelPricing.drift.units.imageTokens')
+  return driftTokenPrice(key) ? t('admin.modelPricing.drift.units.tokens') : ''
+}
+function driftValue(key: string, value: number | null) {
+  if (value == null) return '—'
+  if (key === 'long.threshold') return Math.round(value).toLocaleString()
+  return driftUnit(key) ? displayPrice(value) : String(Number(value.toPrecision(8)))
+}
+async function loadDrift() {
+  try { drift.value = await adminAPI.modelPricing.driftNotices(); driftLoadFailed.value = false }
+  catch { driftLoadFailed.value = true }
+}
+async function acknowledgeDrift(ids: string[]) {
+  if (!ids.length || acknowledging.value) return
+  acknowledging.value = true
+  try { drift.value = await adminAPI.modelPricing.acknowledgeDrift(ids) }
+  catch (error) { appStore.showError(errorMessage(error)) }
+  finally { acknowledging.value = false }
+}
+function focusDriftModel(model: string) { search.value = model; configured.value = false; page.value = 1; load() }
+onMounted(() => { load(); loadDrift() })
 </script>

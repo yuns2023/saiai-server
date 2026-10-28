@@ -100,6 +100,13 @@ All routes require the existing administrator middleware and return no-store:
 - `GET /api/v1/admin/settings/model-pricing/history`: the latest 100 edits,
   including actor, timestamp, old/new aliases and old/new prices. Every edit
   also emits an audit log.
+- `GET /api/v1/admin/settings/model-pricing/drift-notices`: price-feed change
+  notices (see below), unacknowledged first, with an `unacknowledged` count.
+- `POST /api/v1/admin/settings/model-pricing/drift-notices/acknowledge`:
+  `{"ids": [...]}` (1–500 IDs) marks those notices as seen by the calling
+  administrator. It changes no price; the first acknowledgement is kept and an
+  audit log is emitted. There is no acknowledge-all: the page sends the IDs it
+  displays.
 
 Aliases, overrides and history persist atomically in three pricing settings
 keys, preserving other settings. A successful save updates the serving
@@ -108,6 +115,41 @@ settings store. As with existing price aliases, additional Gateway processes
 must reload/restart before they use edits made in a different process.
 Automatic remote price refresh replaces reference data only and retains the
 administrator overrides.
+
+## Price-feed change notices
+
+Billing follows the remote feed, re-checked every 10 minutes, and a feed
+refresh is never blocked by price changes. When a refresh replaces the feed
+content (including the startup refresh of a stale local copy), the Gateway
+compares the old and new feed for every model billed in the last 30 days
+(`pricing_snapshot.billed_model`, or the request model for rows without a
+snapshot). Both sides use the billing calculator with the alias/override
+configuration frozen at the moment of the replacement, so administrator edits
+are never reported as feed changes, an intentional alias is never reported by
+itself, a change of its target's price is, and prices pinned by overrides
+(including the tier prices billing derives from them) do not change.
+
+Compared: Standard/Priority/Flex unit prices for input, output, cache read and
+5m/1h cache write; whole-request long-context prices per tier and the
+threshold; image-token prices when image-token billing is available; and the
+feed's default per-image price (group image size prices take precedence and are
+not compared). A notice is also raised when a model moves between priced, the
+built-in hardcoded fallback, and unpriced. The price source label and resolved
+pricing key alone never raise a notice; they are shown as explanation.
+
+Notices live in the `model_pricing_drift_notices` setting (read-modify-write
+under a row lock). The same change reported by another Gateway within 24 hours
+is not duplicated; the same change recurring later, or after the model's price
+moved in between, reopens the notice. At most 500 unacknowledged and 100
+acknowledged notices are kept. The administrator model-pricing page shows a
+banner until each notice is acknowledged; there is no email or Ops alert. Each
+new notice also logs a `[PricingDrift] WARN` line.
+
+Evaluation is best-effort and asynchronous: it runs on one worker per process,
+retries twice (1 and 5 minutes later), and is lost if the process exits before
+it finishes or if the data directory was not persisted (no previous feed to
+compare with). Changes to the bundled fallback or to pricing code ship through
+code review and are not reported here.
 
 ## Historical usage and migration
 

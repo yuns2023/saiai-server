@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -102,4 +103,54 @@ func (r *settingRepository) GetAll(ctx context.Context) (map[string]string, erro
 func (r *settingRepository) Delete(ctx context.Context, key string) error {
 	_, err := r.client.Setting.Delete().Where(setting.KeyEQ(key)).Exec(ctx)
 	return err
+}
+
+// UpdateSettingValue replaces one value under a row lock, so concurrent
+// read-modify-write callers (Gateways, administrators) never lose an update.
+// A first insert racing another one retries once with a fresh read.
+func (r *settingRepository) UpdateSettingValue(ctx context.Context, key string, update func(current string) (string, error)) error {
+	err := r.updateSettingValueOnce(ctx, key, update)
+	if isUniqueConstraintViolation(err) {
+		err = r.updateSettingValueOnce(ctx, key, update)
+	}
+	return err
+}
+
+func (r *settingRepository) updateSettingValueOnce(ctx context.Context, key string, update func(current string) (string, error)) error {
+	tx, err := r.client.Tx(ctx)
+	if errors.Is(err, ent.ErrTxStarted) {
+		// Already transactional: the row lock lasts until the caller commits.
+		return updateSettingValueLocked(ctx, r.client, key, update)
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := updateSettingValueLocked(ctx, tx.Client(), key, update); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func updateSettingValueLocked(ctx context.Context, client *ent.Client, key string, update func(current string) (string, error)) error {
+	current, err := client.Setting.Query().Where(setting.KeyEQ(key)).ForUpdate().Only(ctx)
+	if err != nil && !ent.IsNotFound(err) {
+		return err
+	}
+	value := ""
+	if current != nil {
+		value = current.Value
+	}
+	next, err := update(value)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	if current == nil {
+		return client.Setting.Create().SetKey(key).SetValue(next).SetUpdatedAt(now).Exec(ctx)
+	}
+	if next == value {
+		return nil
+	}
+	return client.Setting.UpdateOne(current).SetValue(next).SetUpdatedAt(now).Exec(ctx)
 }

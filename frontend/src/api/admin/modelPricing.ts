@@ -59,6 +59,23 @@ export interface PricePreview {
     pricing_snapshot: { long_context?: LongContextPricing; version: string; reference_total_cost: number; reference: UnitPrices; effective: UnitPrices; resolved_model: string }
   }
 }
+export interface PricingDriftChange { key: string; old: number | null; new: number | null }
+export interface PricingDriftNotice {
+  id: string
+  model: string
+  old_status: string
+  new_status: string
+  old_resolved_model: string
+  new_resolved_model: string
+  changes: PricingDriftChange[]
+  old_feed_hash: string
+  new_feed_hash: string
+  detected_at: string
+  occurrences: number
+  acknowledged_at: string | null
+  acknowledged_by: number
+}
+export interface PricingDriftList { notices: PricingDriftNotice[]; unacknowledged: number }
 export async function list(params: { search: string; configured: boolean; page: number }): Promise<PriceList> {
   const { data } = await apiClient.get<PriceList>('/admin/settings/model-pricing', { params })
   return data
@@ -75,4 +92,12 @@ export async function history(): Promise<PriceEdit[]> {
   const { data } = await apiClient.get<PriceEdit[]>('/admin/settings/model-pricing/history')
   return data
 }
-export default { list, update, preview, history }
+export async function driftNotices(): Promise<PricingDriftList> {
+  const { data } = await apiClient.get<PricingDriftList>('/admin/settings/model-pricing/drift-notices')
+  return data
+}
+export async function acknowledgeDrift(ids: string[]): Promise<PricingDriftList> {
+  const { data } = await apiClient.post<PricingDriftList>('/admin/settings/model-pricing/drift-notices/acknowledge', { ids })
+  return data
+}
+export default { list, update, preview, history, driftNotices, acknowledgeDrift }

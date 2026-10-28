@@ -401,6 +401,8 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		adminSettings.PUT("/model-pricing", h.Admin.Setting.UpdateModelPricing)
 		adminSettings.POST("/model-pricing/preview", h.Admin.Setting.PreviewModelPricing)
 		adminSettings.GET("/model-pricing/history", h.Admin.Setting.ModelPricingHistory)
+		adminSettings.GET("/model-pricing/drift-notices", h.Admin.Setting.ListPricingDriftNotices)
+		adminSettings.POST("/model-pricing/drift-notices/acknowledge", h.Admin.Setting.AcknowledgePricingDriftNotices)
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
 		adminSettings.GET("/jev/categories", h.Admin.Setting.GetJevCategories)

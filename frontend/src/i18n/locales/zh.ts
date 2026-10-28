@@ -1605,6 +1605,32 @@ export default {
       'failed': '模型价格操作失败',
       'invalidPrice': '请输入有效的非负单价',
       'saved': '模型价格已保存',
+      'drift': {
+        'title': '价格源变化提醒（{count}）',
+        'description': '远端价格源更新后，以下最近 30 天计费过的模型有效价格发生变化（已按当前别名和覆盖计算；分组单独设置的图片按张价不在比较范围内）。请核对官方价格，必要时用覆盖固定价格。',
+        'acknowledge': '已知晓',
+        'acknowledgeAll': '全部已知晓',
+        'detectedAt': '检测时间',
+        'occurrences': '同一变化被检测到的次数',
+        'loadFailed': '价格源变化提醒加载失败。',
+        'status': {
+          'priced': '恢复定价',
+          'fallback': '改用内置兜底价',
+          'unpriced': '变为无价'
+        },
+        'keys': {
+          'longThreshold': '长上下文阈值',
+          'imageInput': '图片输入',
+          'imageOutput': '图片输出',
+          'perImage': '默认按张价'
+        },
+        'units': {
+          'tokens': '／百万 token',
+          'imageTokens': '／百万图片 token',
+          'image': '／张',
+          'thresholdTokens': '输入 token'
+        }
+      },
       'fields': {
         'input': '输入',
         'output': '输出',

@@ -94,6 +94,9 @@ type LiteLLMRawEntry struct {
 
 // PricingService 动态价格服务
 type PricingService struct {
+	// syncMu serializes feed downloads (scheduled sync and ForceUpdate), so
+	// replacements and their change events happen in order.
+	syncMu         sync.Mutex
 	writerMu       sync.Mutex
 	cfg            *config.Config
 	remoteClient   PricingRemoteClient
@@ -105,6 +108,10 @@ type PricingService struct {
 	modelOverrides map[string]ModelPriceOverride
 	configHash     string
 	priceSource    string
+
+	feedChangeMu       sync.Mutex
+	feedChangeHandler  func(PricingFeedChange)
+	pendingFeedChanges []PricingFeedChange
 
 	// 停止信号
 	stopCh chan struct{}
@@ -205,33 +212,38 @@ func (s *PricingService) startUpdateScheduler() {
 }
 
 // checkAndUpdatePricing 检查并更新价格数据
+// A local copy is loaded first, so a refresh of a stale copy can be compared
+// against it; a corrupt copy is still repaired from the remote feed.
 func (s *PricingService) checkAndUpdatePricing() error {
 	pricingFile := s.getPricingFilePath()
 
-	// 检查本地文件是否存在
-	if _, err := os.Stat(pricingFile); os.IsNotExist(err) {
-		logger.LegacyPrintf("service.pricing", "%s", "[Pricing] Local pricing file not found, downloading...")
-		return s.downloadPricingData()
-	}
-
-	// 检查文件是否过期
 	info, err := os.Stat(pricingFile)
 	if err != nil {
+		if os.IsNotExist(err) {
+			logger.LegacyPrintf("service.pricing", "%s", "[Pricing] Local pricing file not found, downloading...")
+		}
 		return s.downloadPricingData()
 	}
 
+	loadErr := s.loadPricingData(pricingFile)
 	fileAge := time.Since(info.ModTime())
 	maxAge := time.Duration(s.cfg.Pricing.UpdateIntervalHours) * time.Hour
-
-	if fileAge > maxAge {
-		logger.LegacyPrintf("service.pricing", "[Pricing] Local file is %v old, updating...", fileAge.Round(time.Hour))
-		if err := s.downloadPricingData(); err != nil {
-			logger.LegacyPrintf("service.pricing", "[Pricing] Download failed, using existing file: %v", err)
-		}
+	if loadErr == nil && fileAge <= maxAge {
+		return nil
 	}
-
-	// 加载本地文件
-	return s.loadPricingData(pricingFile)
+	if loadErr != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Local file unusable, downloading: %v", loadErr)
+	} else {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Local file is %v old, updating...", fileAge.Round(time.Hour))
+	}
+	if err := s.downloadPricingData(); err != nil {
+		if loadErr != nil {
+			logger.LegacyPrintf("service.pricing", "[Pricing] Download failed: %v", err)
+			return loadErr
+		}
+		logger.LegacyPrintf("service.pricing", "[Pricing] Download failed, using existing file: %v", err)
+	}
+	return nil
 }
 
 // syncWithRemote 与远程同步（基于哈希校验）
@@ -275,7 +287,12 @@ func (s *PricingService) downloadPricingDataIfChanged(localHash string) error {
 	return s.downloadPricingDataWithLocalHash(localHash)
 }
 
+// A non-empty localHash only asks for a replacement when the remote content
+// differs from the data in memory (not the file hash the caller computed,
+// which can be stale by the time syncMu is acquired).
 func (s *PricingService) downloadPricingDataWithLocalHash(localHash string) error {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
 	remoteURL, err := s.validatePricingURL(s.cfg.Pricing.RemoteURL)
 	if err != nil {
 		return err
@@ -307,10 +324,7 @@ func (s *PricingService) downloadPricingDataWithLocalHash(localHash string) erro
 		}
 	}
 
-	if localHash != "" && strings.EqualFold(localHash, hashStr) && s.hasLoadedPricingData() {
-		s.mu.Lock()
-		s.localHash = hashStr
-		s.mu.Unlock()
+	if localHash != "" && strings.EqualFold(s.currentPricingHash(), hashStr) && s.hasLoadedPricingData() {
 		logger.LegacyPrintf("service.pricing", "%s", "[Pricing] Remote content hash matches local file, no update needed")
 		return nil
 	}
@@ -333,18 +347,38 @@ func (s *PricingService) downloadPricingDataWithLocalHash(localHash string) erro
 		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to save hash: %v", err)
 	}
 
-	// 更新内存数据
+	// 更新内存数据. The previous data and the pricing configuration are
+	// captured in the same critical section, so a change event compares both
+	// feeds under one configuration.
 	s.writerMu.Lock()
-	defer s.writerMu.Unlock()
 	s.mu.Lock()
+	change := PricingFeedChange{OldHash: s.localHash, NewHash: hashStr, ConfigHash: s.configHash, At: time.Now()}
+	oldData, oldSource := s.pricingData, s.priceSource
+	aliases := make(map[string]string, len(s.modelAliases))
+	for k, v := range s.modelAliases {
+		aliases[k] = v
+	}
+	overrides := cloneOverrides(s.modelOverrides)
 	s.pricingData = data
 	s.priceSource = "remote"
-	s.lastUpdated = time.Now()
+	s.lastUpdated = change.At
 	s.localHash = hashStr
 	s.mu.Unlock()
+	s.writerMu.Unlock()
 
 	logger.LegacyPrintf("service.pricing", "[Pricing] Downloaded %d models successfully", len(data))
+	if len(oldData) > 0 && !strings.EqualFold(change.OldHash, hashStr) {
+		change.Old = newPricingSnapshotService(s.cfg, oldData, change.OldHash, oldSource, aliases, overrides)
+		change.New = newPricingSnapshotService(s.cfg, data, hashStr, "remote", aliases, overrides)
+		s.publishFeedChange(change)
+	}
 	return nil
+}
+
+func (s *PricingService) currentPricingHash() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.localHash
 }
 
 func (s *PricingService) hasLoadedPricingData() bool {

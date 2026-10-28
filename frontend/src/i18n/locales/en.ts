@@ -1585,6 +1585,32 @@ export default {
       'failed': 'Model pricing operation failed',
       'invalidPrice': 'Enter a valid nonnegative unit price',
       'saved': 'Model pricing saved',
+      'drift': {
+        'title': 'Price feed changes ({count})',
+        'description': 'After the remote price feed updated, the effective prices of the models below (billed in the last 30 days) changed. Computed with the current aliases and overrides; per-image prices set on groups are not compared. Check the official pricing and use an override to pin a price if needed.',
+        'acknowledge': 'Acknowledge',
+        'acknowledgeAll': 'Acknowledge all',
+        'detectedAt': 'Detected',
+        'occurrences': 'Number of times this change was detected',
+        'loadFailed': 'Failed to load price feed change notices.',
+        'status': {
+          'priced': 'Priced again',
+          'fallback': 'Now on built-in fallback price',
+          'unpriced': 'No longer priced'
+        },
+        'keys': {
+          'longThreshold': 'Long-context threshold',
+          'imageInput': 'Image input',
+          'imageOutput': 'Image output',
+          'perImage': 'Default per-image price'
+        },
+        'units': {
+          'tokens': '/M tokens',
+          'imageTokens': '/M image tokens',
+          'image': '/image',
+          'thresholdTokens': 'input tokens'
+        }
+      },
       'fields': {
         'input': 'Input',
         'output': 'Output',

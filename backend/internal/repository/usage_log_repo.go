@@ -5307,6 +5307,29 @@ func (r *usageLogRepository) ListRecentPricingModels(ctx context.Context) ([]str
 	return models, rows.Err()
 }
 
+// ListBilledPricingModels returns every model name billing priced since a
+// time: the snapshot's billed model, or the request model for rows without
+// one (per-image billing). Used when the price feed changes.
+func (r *usageLogRepository) ListBilledPricingModels(ctx context.Context, since time.Time) ([]string, error) {
+	rows, err := r.sql.QueryContext(ctx, `SELECT DISTINCT LOWER(TRIM(COALESCE(NULLIF(TRIM(pricing_snapshot->>'billed_model'), ''), model)))
+ FROM usage_logs WHERE created_at >= $1`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	models := []string{}
+	for rows.Next() {
+		var model string
+		if err := rows.Scan(&model); err != nil {
+			return nil, err
+		}
+		if model != "" {
+			models = append(models, model)
+		}
+	}
+	return models, rows.Err()
+}
+
 // accountStatsCalendarDays respects DST and the exclusive upper bound.
 func accountStatsCalendarDays(start, end time.Time) int {
 	if !start.Before(end) {

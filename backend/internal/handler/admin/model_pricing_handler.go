@@ -256,6 +256,52 @@ func (h *SettingHandler) ModelPricingHistory(c *gin.Context) {
 	response.Success(c, history)
 }
 
+func (h *SettingHandler) SetPricingDriftService(s *service.PricingDriftService) { h.pricingDrift = s }
+
+func (h *SettingHandler) ListPricingDriftNotices(c *gin.Context) {
+	if h.pricingDrift == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Pricing drift notices unavailable")
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	list, err := h.pricingDrift.List(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, list)
+}
+
+type pricingDriftAckRequest struct {
+	IDs []string `json:"ids" binding:"required,min=1,max=500,dive,required,max=64"`
+}
+
+// AcknowledgePricingDriftNotices records that an administrator saw the listed
+// notices; it changes no price.
+func (h *SettingHandler) AcknowledgePricingDriftNotices(c *gin.Context) {
+	if h.pricingDrift == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Pricing drift notices unavailable")
+		return
+	}
+	var req pricingDriftAckRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid notice IDs")
+		return
+	}
+	var actorID int64
+	if subject, ok := middleware.GetAuthSubjectFromContext(c); ok {
+		actorID = subject.UserID
+	}
+	list, err := h.pricingDrift.Acknowledge(c.Request.Context(), req.IDs, actorID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	log.Printf("AUDIT: pricing drift notices acknowledged by %d: %s", actorID, strings.Join(req.IDs, ","))
+	c.Header("Cache-Control", "no-store")
+	response.Success(c, list)
+}
+
 type pricePreviewRequest struct {
 	Model        string                      `json:"model" binding:"required"`
 	Alias        *string                     `json:"alias"`
