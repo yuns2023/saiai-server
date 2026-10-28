@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -1347,4 +1349,82 @@ func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *
 
 func int64PtrForTest(v int64) *int64 {
 	return &v
+}
+
+// recordingConcurrencyCache records slot-acquisition order and can delay
+// the load read or fail an acquisition.
+type recordingConcurrencyCache struct {
+	stubConcurrencyCache
+	mu         sync.Mutex
+	attempts   []int64
+	loadDelay  time.Duration
+	acquireErr map[int64]error
+}
+
+func (c *recordingConcurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+	c.mu.Lock()
+	c.attempts = append(c.attempts, accountID)
+	c.mu.Unlock()
+	if err := c.acquireErr[accountID]; err != nil {
+		return false, err
+	}
+	return c.stubConcurrencyCache.AcquireAccountSlot(ctx, accountID, maxConcurrency, requestID)
+}
+
+func (c *recordingConcurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
+	time.Sleep(c.loadDelay)
+	return c.stubConcurrencyCache.GetAccountsLoadBatch(ctx, accounts)
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceAttemptOrder(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(17)
+	loads := map[int64]int{6001: 50, 6002: 10, 6003: 30, 6004: 40, 6005: 20, 6006: 60}
+	accounts := make([]Account, 0, len(loads))
+	loadMap := map[int64]*AccountLoadInfo{}
+	acquire := map[int64]bool{}
+	for id := int64(6001); id <= 6006; id++ {
+		accounts = append(accounts, Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1})
+		loadMap[id] = &AccountLoadInfo{AccountID: id, LoadRate: loads[id]}
+		acquire[id] = id == 6004
+	}
+	cache := &recordingConcurrencyCache{stubConcurrencyCache: stubConcurrencyCache{loadMap: loadMap, acquireResults: acquire}}
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
+		cache:              &stubGatewayCache{},
+		cfg:                &config.Config{},
+		concurrencyService: NewConcurrencyService(cache),
+	}
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+	require.NoError(t, err)
+	require.Equal(t, int64(6004), selection.Account.ID)
+	// Strictly ascending load, each account once, stop at the first success.
+	require.Equal(t, []int64{6002, 6005, 6003, 6004}, cache.attempts)
+
+	// A slot-acquisition error is returned immediately.
+	cache.attempts = nil
+	cache.acquireErr = map[int64]error{6002: errors.New("redis down")}
+	_, _, err = svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+	require.Error(t, err)
+	require.Equal(t, []int64{6002}, cache.attempts)
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_ReturnsLatency(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(18)
+	account := Account{ID: 6101, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1}
+	cache := &recordingConcurrencyCache{loadDelay: 5 * time.Millisecond}
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
+		cache:              &stubGatewayCache{},
+		cfg:                &config.Config{},
+		concurrencyService: NewConcurrencyService(cache),
+	}
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.GreaterOrEqual(t, decision.LatencyMs, int64(5))
+	snapshot := svc.SnapshotOpenAIAccountSchedulerMetrics()
+	require.Equal(t, int64(1), snapshot.SelectTotal)
+	require.Equal(t, decision.LatencyMs, snapshot.SchedulerLatencyMsTotal)
 }
