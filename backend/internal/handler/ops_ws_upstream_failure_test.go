@@ -159,7 +159,7 @@ func TestOpsWSFailureSavesRelayDiagnosticsAndCFRay(t *testing.T) {
 		Message: "Upstream WebSocket response.incomplete (interrupted)", UpstreamCFRay: "8f1a2b3c4d5e6f70-SJC",
 		RelayDiagnostics: &openaiwsv2.RelayFailureDiagnostics{
 			Attribution: "response_id", MsSinceSent: &sent, UpstreamEvents: 4,
-			ClientControl: []openaiwsv2.RelayControlFrameDiagnostics{{Type: "response.interrupt", MsAfterSent: 1400, MsBeforeFailure: 100, Target: "current", DiscardPartialItems: &discard, Forwarded: true}},
+			ClientControl: []openaiwsv2.RelayControlFrameDiagnostics{{Type: "response.interrupt", MsAfterSent: 1400, MsBeforeFailure: 100, Target: "current", DiscardPartialItems: &discard, Forwarded: &discard}},
 		},
 	})
 	entry := (<-queue).entry

@@ -3,7 +3,6 @@ package openai_ws_v2
 import (
 	"context"
 	"errors"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -36,12 +35,19 @@ type RelayFailureDiagnostics struct {
 	// FirstTokenMsAfterFirstEvent keeps the relay's existing per-turn
 	// first-token semantics (any delta/output event after the first event).
 	FirstTokenMsAfterFirstEvent *int `json:"first_token_ms_after_first_event,omitempty"`
-	// LaterClientTurns counts response.create frames received after this
-	// turn and before the failure was observed.
-	LaterClientTurns       int                            `json:"later_client_turns"`
-	ClientControl          []RelayControlFrameDiagnostics `json:"client_control,omitempty"`
-	ClientControlTruncated bool                           `json:"client_control_truncated,omitempty"`
-	ClientEnd              *RelayClientEndDiagnostics     `json:"client_end,omitempty"`
+	// LaterClientTurns counts response.create frames the gateway received
+	// after this turn and before the failure was observed (including any it
+	// then rejected); it is not a count of frames forwarded upstream.
+	LaterClientTurns int `json:"later_client_turns"`
+	// ClientInterrupts and ClientCancels count retained control frames in
+	// the turn window; ClientControl lists the most recent of them all.
+	ClientInterrupts int                            `json:"client_interrupts"`
+	ClientCancels    int                            `json:"client_cancels"`
+	ClientControl    []RelayControlFrameDiagnostics `json:"client_control,omitempty"`
+	// ClientControlTruncated means the window may hold more frames than
+	// listed or counted (output cap or ring eviction).
+	ClientControlTruncated bool                       `json:"client_control_truncated,omitempty"`
+	ClientEnd              *RelayClientEndDiagnostics `json:"client_end,omitempty"`
 	// DownstreamWriteFailedMsBefore is set when a write to the client
 	// failed before the failure was observed (the relay was draining).
 	DownstreamWriteFailedMsBefore *int64              `json:"downstream_write_failed_ms_before,omitempty"`
@@ -55,11 +61,14 @@ type RelayControlFrameDiagnostics struct {
 	Type            string `json:"type"`
 	MsAfterSent     int64  `json:"ms_after_sent"`
 	MsBeforeFailure int64  `json:"ms_before_failure"`
-	// Target is "current", "other" or "unspecified" relative to the failed
-	// response id; the id itself is not recorded.
+	// Target compares the frame's response_id with the failed response id
+	// without recording either: "current", "other", "unknown" (the failure
+	// carried no response id), "unspecified" (no response_id) or "invalid".
 	Target              string `json:"target"`
 	DiscardPartialItems *bool  `json:"discard_partial_items,omitempty"`
-	Forwarded           bool   `json:"forwarded"`
+	// Forwarded is nil when the upstream write had not returned by the time
+	// the failure was observed.
+	Forwarded *bool `json:"forwarded,omitempty"`
 }
 
 // RelayClientEndDiagnostics records that the client side of the relay had
@@ -85,15 +94,42 @@ const (
 	relayMaxReportedCount = 1 << 40
 )
 
-// Upstream event types are provider protocol identifiers. Anything else is
-// reported as "other" so a malformed frame cannot smuggle text into the log.
-var relayEventTypeLabelPattern = regexp.MustCompile(`^(response|codex|error|rate_limits)[a-z0-9_.]{0,80}$`)
+// Known upstream event types are kept as labels; anything else is reported
+// as "other" so an unexpected frame cannot carry text into the log.
+var relayKnownEventTypes = func() map[string]struct{} {
+	known := map[string]struct{}{}
+	for _, eventType := range []string{
+		"error", "codex.rate_limits",
+		"response.created", "response.in_progress", "response.queued",
+		"response.output_item.added", "response.output_item.done",
+		"response.content_part.added", "response.content_part.done",
+		"response.output_text.delta", "response.output_text.done", "response.output_text.annotation.added",
+		"response.refusal.delta", "response.refusal.done",
+		"response.function_call_arguments.delta", "response.function_call_arguments.done",
+		"response.custom_tool_call_input.delta", "response.custom_tool_call_input.done",
+		"response.reasoning_summary_part.added", "response.reasoning_summary_part.done",
+		"response.reasoning_summary_text.delta", "response.reasoning_summary_text.done",
+		"response.reasoning_text.delta", "response.reasoning_text.done",
+		"response.web_search_call.in_progress", "response.web_search_call.searching", "response.web_search_call.completed",
+		"response.image_generation_call.in_progress", "response.image_generation_call.generating",
+		"response.image_generation_call.partial_image", "response.image_generation_call.completed",
+		"response.mcp_call.in_progress", "response.mcp_call.completed", "response.mcp_call.failed",
+		"response.mcp_call_arguments.delta", "response.mcp_call_arguments.done",
+		"response.mcp_list_tools.in_progress", "response.mcp_list_tools.completed", "response.mcp_list_tools.failed",
+	} {
+		known[eventType] = struct{}{}
+	}
+	return known
+}()
 
 type relayControlEvent struct {
+	seq       int
 	kind      string
 	at        time.Time
 	target    string
 	discard   *bool
+	written   bool
+	writtenAt time.Time
 	forwarded bool
 }
 
@@ -120,24 +156,49 @@ func relayControlKind(payload []byte) string {
 	}
 }
 
-func (d *relayClientDiagnostics) recordControl(payload []byte, at time.Time, forwarded bool) {
+// recordControl stores a client application frame before it is written
+// upstream and returns its sequence number (-1 when disabled), so a failure
+// that races the write still sees the frame.
+func (d *relayClientDiagnostics) recordControl(payload []byte, at time.Time) int {
 	if d == nil {
-		return
+		return -1
 	}
-	event := relayControlEvent{kind: relayControlKind(payload), at: at, forwarded: forwarded}
+	event := relayControlEvent{kind: relayControlKind(payload), at: at, target: relayControlTargetUnspecified}
 	// The target id stays in memory only, for comparison with the failed
 	// response id.
-	if target := gjson.GetBytes(payload, "response_id"); target.Type == gjson.String && len(target.String()) <= 128 {
-		event.target = target.String()
+	if target := gjson.GetBytes(payload, "response_id"); target.Exists() {
+		event.target = relayControlTargetInvalid
+		if target.Type == gjson.String && target.String() != "" && len(target.String()) <= 128 {
+			event.target = target.String()
+		}
 	}
 	if discard := gjson.GetBytes(payload, "discard_partial_items"); discard.IsBool() {
 		value := discard.Bool()
 		event.discard = &value
 	}
 	d.mu.Lock()
+	defer d.mu.Unlock()
+	event.seq = d.recorded
 	d.ring[d.recorded%relayControlRingSize] = event
 	d.recorded++
-	d.mu.Unlock()
+	return event.seq
+}
+
+func (d *relayClientDiagnostics) markControlWritten(seq int, forwarded bool, at time.Time) {
+	if d == nil || seq < 0 {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if event := &d.ring[seq%relayControlRingSize]; event.seq == seq && seq < d.recorded {
+		event.written, event.writtenAt, event.forwarded = true, at, forwarded
+	}
+}
+
+// recordClientFrameRejected marks the relay as draining after it refused a
+// client frame.
+func (d *relayClientDiagnostics) recordClientFrameRejected(at time.Time) {
+	d.recordClientEndKind("frame_rejected", 0, at)
 }
 
 func (d *relayClientDiagnostics) recordClientEnd(err error, at time.Time) {
@@ -152,6 +213,13 @@ func (d *relayClientDiagnostics) recordClientEnd(err error, at time.Time) {
 		kind = "context_done"
 	} else if isDisconnectError(err) {
 		kind = "disconnected"
+	}
+	d.recordClientEndKind(kind, code, at)
+}
+
+func (d *relayClientDiagnostics) recordClientEndKind(kind string, code int, at time.Time) {
+	if d == nil {
+		return
 	}
 	d.mu.Lock()
 	if d.clientEndAt.IsZero() {
@@ -178,42 +246,9 @@ func (d *relayClientDiagnostics) fill(out *RelayFailureDiagnostics, sentAt, fail
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	retained := d.recorded
-	if retained > relayControlRingSize {
-		retained = relayControlRingSize
-		// Evicted frames may have belonged to this turn's window.
-		if !sentAt.IsZero() && !d.ring[d.recorded%relayControlRingSize].at.Before(sentAt) {
-			out.ClientControlTruncated = true
-		}
-	}
-	for index := d.recorded - retained; index < d.recorded; index++ {
-		event := d.ring[index%relayControlRingSize]
-		if (!sentAt.IsZero() && event.at.Before(sentAt)) || event.at.After(failureAt) {
-			continue
-		}
-		if len(out.ClientControl) >= relayControlOutputMax {
-			out.ClientControlTruncated = true
-			continue
-		}
-		target := "unspecified"
-		if event.target != "" {
-			target = "other"
-			if event.target == responseID {
-				target = "current"
-			}
-		}
-		frame := RelayControlFrameDiagnostics{
-			Type: event.kind, MsBeforeFailure: relayElapsedMs(event.at, failureAt),
-			Target: target, Forwarded: event.forwarded,
-		}
-		if !sentAt.IsZero() {
-			frame.MsAfterSent = relayElapsedMs(sentAt, event.at)
-		}
-		if event.discard != nil {
-			discard := *event.discard
-			frame.DiscardPartialItems = &discard
-		}
-		out.ClientControl = append(out.ClientControl, frame)
+	// Without a send time there is no turn window to attribute frames to.
+	if !sentAt.IsZero() {
+		d.fillControl(out, sentAt, failureAt, responseID)
 	}
 	if !d.clientEndAt.IsZero() && !d.clientEndAt.After(failureAt) {
 		out.ClientEnd = &RelayClientEndDiagnostics{
@@ -224,6 +259,67 @@ func (d *relayClientDiagnostics) fill(out *RelayFailureDiagnostics, sentAt, fail
 	if !d.downstreamFailedAt.IsZero() && !d.downstreamFailedAt.After(failureAt) {
 		before := relayElapsedMs(d.downstreamFailedAt, failureAt)
 		out.DownstreamWriteFailedMsBefore = &before
+	}
+}
+
+func (d *relayClientDiagnostics) fillControl(out *RelayFailureDiagnostics, sentAt, failureAt time.Time, responseID string) {
+	retained := d.recorded
+	if retained > relayControlRingSize {
+		retained = relayControlRingSize
+		// Evicted frames may have belonged to this turn's window.
+		if !d.ring[d.recorded%relayControlRingSize].at.Before(sentAt) {
+			out.ClientControlTruncated = true
+		}
+	}
+	window := make([]relayControlEvent, 0, retained)
+	for index := d.recorded - retained; index < d.recorded; index++ {
+		if event := d.ring[index%relayControlRingSize]; !event.at.Before(sentAt) && !event.at.After(failureAt) {
+			window = append(window, event)
+		}
+	}
+	if len(window) > relayControlOutputMax {
+		// The frames closest to the failure explain it best.
+		window = window[len(window)-relayControlOutputMax:]
+		out.ClientControlTruncated = true
+	}
+	for _, event := range window {
+		switch event.kind {
+		case "response.interrupt":
+			out.ClientInterrupts++
+		case "response.cancel":
+			out.ClientCancels++
+		}
+		frame := RelayControlFrameDiagnostics{
+			Type: event.kind, MsAfterSent: relayElapsedMs(sentAt, event.at),
+			MsBeforeFailure: relayElapsedMs(event.at, failureAt), Target: relayControlTarget(event.target, responseID),
+		}
+		if event.written && !event.writtenAt.After(failureAt) {
+			forwarded := event.forwarded
+			frame.Forwarded = &forwarded
+		}
+		if event.discard != nil {
+			discard := *event.discard
+			frame.DiscardPartialItems = &discard
+		}
+		out.ClientControl = append(out.ClientControl, frame)
+	}
+}
+
+const (
+	relayControlTargetUnspecified = "unspecified"
+	relayControlTargetInvalid     = "invalid"
+)
+
+func relayControlTarget(target, responseID string) string {
+	switch {
+	case target == relayControlTargetUnspecified || target == relayControlTargetInvalid:
+		return target
+	case responseID == "":
+		return "unknown"
+	case target == responseID:
+		return "current"
+	default:
+		return "other"
 	}
 }
 
@@ -240,7 +336,7 @@ func (t *relayTurnTiming) recordEvent(eventType string, at time.Time) {
 }
 
 func relayEventTypeLabel(eventType string) string {
-	if relayEventTypeLabelPattern.MatchString(eventType) {
+	if _, ok := relayKnownEventTypes[eventType]; ok {
 		return eventType
 	}
 	return "other"
@@ -319,10 +415,8 @@ func buildRelayFailureDiagnostics(state *relayState, observed observedUpstreamEv
 			diagnostics.MsSinceResponseCreated = &created
 		}
 	}
-	if state.clientTurns != nil && metadata.Turn > 0 {
-		if later := int(state.clientTurns.Load()) - metadata.Turn; later > 0 {
-			diagnostics.LaterClientTurns = later
-		}
+	if later := observed.clientTurns - metadata.Turn; metadata.Turn > 0 && later > 0 {
+		diagnostics.LaterClientTurns = later
 	}
 	state.clientDiagnostics.fill(diagnostics, metadata.SentAt, at, observed.responseID)
 	return diagnostics

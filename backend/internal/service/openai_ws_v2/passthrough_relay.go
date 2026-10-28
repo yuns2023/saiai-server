@@ -197,6 +197,7 @@ type observedUpstreamEvent struct {
 	timing        *relayTurnTiming
 	reportedUsage *RelayReportedUsage
 	outputItems   *int
+	clientTurns   int
 }
 
 type relayTurnTiming struct {
@@ -545,9 +546,7 @@ func runClientToUpstream(
 	for {
 		msgType, payload, err := clientConn.ReadFrame(ctx)
 		if err != nil {
-			if state != nil {
-				state.clientDiagnostics.recordClientEnd(err, state.nowTime())
-			}
+			state.clientDiag().recordClientEnd(err, state.nowTime())
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:     "read_client_failed",
 				Direction: "client_to_upstream",
@@ -561,6 +560,7 @@ func runClientToUpstream(
 		markActivity()
 		if state != nil && state.validateClientFrame != nil {
 			if err := state.validateClientFrame(msgType, payload); err != nil {
+				state.clientDiag().recordClientFrameRejected(state.nowTime())
 				exitCh <- relayExitSignal{stage: relayStageClientTurnRejected, err: err}
 				return
 			}
@@ -575,6 +575,7 @@ func runClientToUpstream(
 			}
 			if onClientTurn != nil {
 				if err := onClientTurn(turn, msgType, payload); err != nil {
+					state.clientDiag().recordClientFrameRejected(state.nowTime())
 					exitCh <- relayExitSignal{stage: relayStageClientTurnRejected, err: err}
 					return
 				}
@@ -584,6 +585,7 @@ func runClientToUpstream(
 		}
 		transformed, err := state.transformClientPayload(turn, msgType, payload)
 		if err != nil {
+			state.clientDiag().recordClientFrameRejected(state.nowTime())
 			exitCh <- relayExitSignal{stage: relayStageClientTurnRejected, err: err}
 			return
 		}
@@ -596,9 +598,13 @@ func runClientToUpstream(
 				turnRegistered = true
 			}
 		}
+		controlSeq := -1
+		if !clientTurn && msgType == coderws.MessageText {
+			controlSeq = state.clientDiag().recordControl(payload, receivedAt)
+		}
 		writeErr := writeUpstream(msgType, payload)
-		if !clientTurn && msgType == coderws.MessageText && state != nil {
-			state.clientDiagnostics.recordControl(payload, receivedAt, writeErr == nil)
+		if controlSeq >= 0 {
+			state.clientDiag().markControlWritten(controlSeq, writeErr == nil, state.nowTime())
 		}
 		if err := writeErr; err != nil {
 			if turnRegistered && state != nil && state.turns != nil {
@@ -764,9 +770,7 @@ func runUpstreamToClient(
 			writeErr = forwardFrame(msgType, payload)
 		}
 		if writeErr != nil {
-			if state != nil {
-				state.clientDiagnostics.recordDownstreamWriteFailed(nowFn())
-			}
+			state.clientDiag().recordDownstreamWriteFailed(nowFn())
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "write_client_failed",
 				Direction:       "upstream_to_client",
@@ -951,6 +955,9 @@ func observeUpstreamMessage(
 	observed.failure = parseRelayFailure(message, eventType)
 	if observed.failure != nil {
 		observed.at = now
+		if state.clientTurns != nil {
+			observed.clientTurns = int(state.clientTurns.Load())
+		}
 		observed.reportedUsage = parseRelayReportedUsage(message)
 		observed.outputItems = relayOutputItemCount(message)
 	}
@@ -1227,6 +1234,13 @@ const openAIRelayOutstandingTurnDrainDefault = 10 * time.Minute
 // relayStageClientTurnRejected marks a client frame rejected before it was
 // written upstream (frame validation or a turn hook).
 const relayStageClientTurnRejected = "client_turn_rejected"
+
+func (s *relayState) clientDiag() *relayClientDiagnostics {
+	if s == nil {
+		return nil
+	}
+	return s.clientDiagnostics
+}
 
 func (s *relayState) nowTime() time.Time {
 	if s == nil || s.now == nil {

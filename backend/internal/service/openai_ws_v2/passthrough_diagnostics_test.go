@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -64,7 +65,10 @@ func TestRelay_InterruptedTurnDiagnosticsRecordClientInterrupt(t *testing.T) {
 	control := diagnostics.ClientControl[0]
 	require.Equal(t, "response.interrupt", control.Type)
 	require.Equal(t, "current", control.Target)
-	require.True(t, control.Forwarded)
+	require.NotNil(t, control.Forwarded)
+	require.True(t, *control.Forwarded)
+	require.Equal(t, 1, diagnostics.ClientInterrupts)
+	require.Zero(t, diagnostics.ClientCancels)
 	require.NotNil(t, control.DiscardPartialItems)
 	require.True(t, *control.DiscardPartialItems)
 	require.Equal(t, int64(7), *diagnostics.ReportedUsage.OutputTokens)
@@ -80,27 +84,60 @@ func TestRelay_InterruptedTurnDiagnosticsRecordClientInterrupt(t *testing.T) {
 func TestRelayFailureDiagnostics_ControlWindowAndTruncation(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	diagnostics := &relayClientDiagnostics{}
-	diagnostics.recordControl([]byte(`{"type":"response.cancel"}`), base.Add(-time.Second), true)
-	for index := 0; index < relayControlOutputMax+2; index++ {
-		diagnostics.recordControl([]byte(fmt.Sprintf(`{"type":"TEST_ONLY_PRIVATE_CONTENT_%d","response_id":"resp_other"}`, index)), base.Add(time.Duration(index+1)*time.Millisecond), true)
+	diagnostics.recordControl([]byte(`{"type":"response.cancel"}`), base.Add(-time.Second))
+	for index := 0; index < relayControlOutputMax+1; index++ {
+		seq := diagnostics.recordControl([]byte(fmt.Sprintf(`{"type":"TEST_ONLY_PRIVATE_CONTENT_%d","response_id":"resp_other"}`, index)), base.Add(time.Duration(index+1)*time.Millisecond))
+		diagnostics.markControlWritten(seq, true, base.Add(time.Duration(index+1)*time.Millisecond))
 	}
-	diagnostics.recordControl([]byte(`{"type":"response.interrupt"}`), base.Add(time.Hour), false)
+	interrupt := diagnostics.recordControl([]byte(`{"type":"response.interrupt","response_id":"resp_current","discard_partial_items":false}`), base.Add(100*time.Millisecond))
+	diagnostics.recordControl([]byte(`{"type":"response.interrupt"}`), base.Add(time.Hour))
 	out := &RelayFailureDiagnostics{}
 	diagnostics.fill(out, base, base.Add(time.Second), "resp_current")
 	require.Len(t, out.ClientControl, relayControlOutputMax)
 	require.True(t, out.ClientControlTruncated)
-	for _, control := range out.ClientControl {
+	require.Equal(t, 1, out.ClientInterrupts, "the frame after the failure is excluded")
+	last := out.ClientControl[relayControlOutputMax-1]
+	require.Equal(t, "response.interrupt", last.Type, "the most recent frames are kept")
+	require.Equal(t, "current", last.Target)
+	require.Nil(t, last.Forwarded, "write not finished before the failure")
+	require.False(t, *last.DiscardPartialItems)
+	for _, control := range out.ClientControl[:relayControlOutputMax-1] {
 		require.Equal(t, "other", control.Type, "unknown client types are not copied")
 		require.Equal(t, "other", control.Target)
-		require.Nil(t, control.DiscardPartialItems)
+		require.True(t, *control.Forwarded)
 	}
-	require.Equal(t, int64(1), out.ClientControl[0].MsAfterSent)
+	encoded, err := json.Marshal(out)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "TEST_ONLY_PRIVATE_CONTENT")
+
+	// A write that returns after the failure stays unknown.
+	diagnostics.markControlWritten(interrupt, true, base.Add(2*time.Second))
+	out = &RelayFailureDiagnostics{}
+	diagnostics.fill(out, base, base.Add(time.Second), "resp_current")
+	require.Nil(t, out.ClientControl[relayControlOutputMax-1].Forwarded)
+	out = &RelayFailureDiagnostics{}
+	diagnostics.fill(out, base, base.Add(3*time.Second), "")
+	require.Equal(t, "unknown", out.ClientControl[relayControlOutputMax-1].Target, "a failure without response id cannot be compared")
+	require.True(t, *out.ClientControl[relayControlOutputMax-1].Forwarded)
+	out = &RelayFailureDiagnostics{}
+	diagnostics.fill(out, time.Time{}, base.Add(time.Second), "resp_current")
+	require.Empty(t, out.ClientControl, "no turn window without a send time")
+
+	targets := &relayClientDiagnostics{}
+	targets.recordControl([]byte(`{"type":"response.cancel","response_id":42}`), base)
+	targets.recordControl([]byte(`{"type":"response.cancel"}`), base)
+	out = &RelayFailureDiagnostics{}
+	targets.fill(out, base, base, "resp_current")
+	require.Equal(t, "invalid", out.ClientControl[0].Target)
+	require.Equal(t, "unspecified", out.ClientControl[1].Target)
+	require.Equal(t, 2, out.ClientCancels)
 
 	// A ring that evicted frames newer than the turn start is incomplete.
 	evicted := &relayClientDiagnostics{}
 	for index := 0; index < relayControlRingSize+1; index++ {
-		evicted.recordControl([]byte(`{"type":"response.cancel"}`), base.Add(time.Duration(index)*time.Millisecond), true)
+		evicted.recordControl([]byte(`{"type":"response.cancel"}`), base.Add(time.Duration(index)*time.Millisecond))
 	}
+	evicted.markControlWritten(0, true, base) // evicted sequence: ignored
 	out = &RelayFailureDiagnostics{}
 	evicted.fill(out, base.Add(-time.Second), base.Add(time.Second), "resp_current")
 	require.True(t, out.ClientControlTruncated)
@@ -108,6 +145,7 @@ func TestRelayFailureDiagnostics_ControlWindowAndTruncation(t *testing.T) {
 	evicted.fill(out, base.Add(10*time.Millisecond), base.Add(time.Second), "resp_current")
 	require.False(t, out.ClientControlTruncated, "evicted frames predate this turn")
 	require.Len(t, out.ClientControl, 7)
+	require.Nil(t, out.ClientControl[0].Forwarded)
 }
 
 func TestRelayFailureDiagnostics_ClientEndAndDownstreamFailure(t *testing.T) {
@@ -132,9 +170,14 @@ func TestRelayFailureDiagnostics_ClientEndAndDownstreamFailure(t *testing.T) {
 		{err: context.Canceled, kind: "context_done"},
 		{err: io.EOF, kind: "disconnected"},
 		{err: errors.New("TEST_ONLY_PRIVATE_CONTENT"), kind: "read_error"},
+		{kind: "frame_rejected"},
 	} {
 		diagnostics := &relayClientDiagnostics{}
-		diagnostics.recordClientEnd(tc.err, base)
+		if tc.err == nil {
+			diagnostics.recordClientFrameRejected(base)
+		} else {
+			diagnostics.recordClientEnd(tc.err, base)
+		}
 		out := &RelayFailureDiagnostics{}
 		diagnostics.fill(out, time.Time{}, base, "")
 		require.Equal(t, tc.kind, out.ClientEnd.Kind)
@@ -144,7 +187,9 @@ func TestRelayFailureDiagnostics_ClientEndAndDownstreamFailure(t *testing.T) {
 func TestRelayFailureDiagnostics_StateLevelAttributionAndLabels(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	now := base
-	state := &relayState{turns: newRelayTurnTracker(), startAt: base, now: func() time.Time { return now }, clientDiagnostics: &relayClientDiagnostics{}}
+	clientTurns := &atomic.Int32{}
+	clientTurns.Store(1)
+	state := &relayState{turns: newRelayTurnTracker(), startAt: base, now: func() time.Time { return now }, clientTurns: clientTurns, clientDiagnostics: &relayClientDiagnostics{}}
 	state.turns.register(RelayTurnMetadata{Turn: 1, SentAt: base})
 	var turns []RelayTurnResult
 	observe := func(raw string) {
@@ -170,20 +215,24 @@ func TestRelayFailureDiagnostics_StateLevelAttributionAndLabels(t *testing.T) {
 	require.Len(t, turns, 2)
 	require.Nil(t, turns[1].Diagnostics, "successful turns carry no failure diagnostics")
 
+	clientTurns.Store(4) // turn 3 plus one later create received before the failure
 	state.turns.register(RelayTurnMetadata{Turn: 3, SentAt: now})
 	now = now.Add(10 * time.Millisecond)
 	observe(`{"type":"response.output_text.delta","response_id":"resp_3"}`)
-	observe(`{"type":"response.Bearer TEST_ONLY_SECRET","response_id":"resp_3"}`)
+	observe(`{"type":"response.private_customer_text","response_id":"resp_3"}`)
 	now = now.Add(20 * time.Millisecond)
 	observe(`{"type":"response.incomplete","response":{"id":"resp_3","incomplete_details":{"reason":"interrupted"},"usage":{"input_tokens":1.5,"output_tokens":-1}}}`)
 	require.Len(t, turns, 3)
 	diagnostics := turns[2].Diagnostics
 	require.Equal(t, "response_id", diagnostics.Attribution)
+	require.Equal(t, 1, diagnostics.LaterClientTurns)
 	require.Equal(t, 2, diagnostics.UpstreamEvents)
 	require.Equal(t, "other", diagnostics.PreviousEventType)
 	require.Equal(t, int64(20), *diagnostics.MsSincePreviousEvent)
 	require.Equal(t, int64(20), *diagnostics.MsSinceFirstResponseEvent)
 	require.Nil(t, diagnostics.MsSinceResponseCreated, "response.created was never observed")
 	require.Nil(t, diagnostics.ReportedUsage, "non-integer or negative usage is not reported")
+	require.Equal(t, "response.output_text.delta", relayEventTypeLabel("response.output_text.delta"))
+	require.Equal(t, "other", relayEventTypeLabel("responseTEST_ONLY_PRIVATE_CONTENT"))
 	require.Equal(t, 0, *diagnostics.FirstTokenMsAfterFirstEvent)
 }
