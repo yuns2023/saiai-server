@@ -248,3 +248,143 @@ func TestRelayFailureDiagnostics_StateLevelAttributionAndLabels(t *testing.T) {
 	require.Equal(t, "other", relayEventTypeLabel("responseTEST_ONLY_PRIVATE_CONTENT"))
 	require.Equal(t, 0, *diagnostics.FirstTokenMsAfterFirstEvent)
 }
+
+func TestRelay_ClientInterruptAcceptedTurnIsBilledNotFailed(t *testing.T) {
+	client := &passthroughTestFrameConn{readCh: make(chan passthroughTestFrame, 8)}
+	upstream := &passthroughTestFrameConn{readCh: make(chan passthroughTestFrame, 8)}
+	turns := make(chan RelayTurnResult, 4)
+	done := make(chan RelayResult, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go func() {
+		result, _ := Relay(ctx, client, upstream, []byte(`{"type":"response.create","model":"MOCK_ONLY","input":[]}`), RelayOptions{
+			OnTurnComplete: func(turn RelayTurnResult) { turns <- turn },
+		})
+		done <- result
+	}()
+	text := func(raw string) passthroughTestFrame {
+		return passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(raw)}
+	}
+	require.Eventually(t, func() bool { return len(upstream.Writes()) >= 1 }, 2*time.Second, time.Millisecond)
+	upstream.readCh <- text(`{"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}`)
+	client.readCh <- text(`{"type":"response.interrupt","response_id":"resp_1","mode":"discard_partial_items"}`)
+	require.Eventually(t, func() bool { return len(upstream.Writes()) >= 2 }, 2*time.Second, time.Millisecond)
+	upstream.readCh <- text(`{"type":"response.interrupt.accepted","response_id":"resp_1","sequence_number":5}`)
+	upstream.readCh <- text(`{"type":"response.output_item.interrupted","response_id":"resp_1"}`)
+	upstream.readCh <- text(`{"type":"response.incomplete","response":{"id":"resp_1","status":"incomplete","service_tier":"default","incomplete_details":{"reason":"interrupted"},"usage":{"input_tokens":34,"output_tokens":156,"input_tokens_details":{"cached_tokens":4}}}}`)
+	// A duplicate terminal must not bill twice.
+	upstream.readCh <- text(`{"type":"response.incomplete","response":{"id":"resp_1","incomplete_details":{"reason":"interrupted"},"usage":{"input_tokens":34,"output_tokens":156}}}`)
+
+	turn := <-turns
+	require.Eventually(t, func() bool { return len(client.Writes()) >= 5 }, 2*time.Second, time.Millisecond)
+	close(client.readCh)
+	close(upstream.readCh)
+	result := <-done
+	require.Nil(t, turn.Failure)
+	require.Nil(t, turn.Diagnostics)
+	require.True(t, turn.ClientInterrupted)
+	require.Equal(t, "resp_1", turn.RequestID)
+	require.Equal(t, "response.incomplete", turn.TerminalEventType)
+	require.Equal(t, Usage{InputTokens: 34, OutputTokens: 156, CacheReadInputTokens: 4, ServiceTier: "default"}, turn.Usage)
+	require.Nil(t, turn.FirstTokenMs, "response.output_item.interrupted is not output")
+	require.Len(t, turns, 0)
+	require.Equal(t, Usage{InputTokens: 34, OutputTokens: 156, CacheReadInputTokens: 4, ServiceTier: "default"}, result.Usage)
+	require.Empty(t, result.UnbilledResponseIDs)
+}
+
+func TestRelay_InterruptedWithoutAcceptedClientInterruptStaysFailure(t *testing.T) {
+	incomplete := func(id, reason string) string {
+		return `{"type":"response.incomplete","response":{"id":"` + id + `","incomplete_details":{"reason":"` + reason + `"},"usage":{"input_tokens":5,"output_tokens":3}}}`
+	}
+	for _, tc := range []struct {
+		name   string
+		frames []string
+	}{
+		{name: "no_ack", frames: []string{incomplete("resp_1", "interrupted")}},
+		{name: "ack_failed", frames: []string{`{"type":"response.interrupt.failed","response_id":"resp_1","error":{"code":"interrupt_not_supported"}}`, incomplete("resp_1", "interrupted")}},
+		{name: "accepted_then_failed", frames: []string{`{"type":"response.interrupt.accepted","response_id":"resp_1"}`, `{"type":"response.interrupt.failed","response_id":"resp_1"}`, incomplete("resp_1", "interrupted")}},
+		{name: "other_reason", frames: []string{`{"type":"response.interrupt.accepted","response_id":"resp_1"}`, incomplete("resp_1", "max_output_tokens")}},
+		{name: "ack_for_other_response", frames: []string{`{"type":"response.interrupt.accepted","response_id":"resp_other"}`, incomplete("resp_1", "interrupted")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := &relayState{turns: newRelayTurnTracker(), clientDiagnostics: &relayClientDiagnostics{}}
+			state.turns.register(RelayTurnMetadata{Turn: 1, SentAt: time.Now()})
+			var turns []RelayTurnResult
+			observe := func(raw string) {
+				emitTurnComplete(func(turn RelayTurnResult) { turns = append(turns, turn) }, state, observeUpstreamMessage(state, []byte(raw), time.Now(), time.Now, nil))
+			}
+			observe(`{"type":"response.created","response":{"id":"resp_1"}}`)
+			for _, frame := range tc.frames {
+				observe(frame)
+			}
+			require.Len(t, turns, 1)
+			require.NotNil(t, turns[0].Failure)
+			require.False(t, turns[0].ClientInterrupted)
+			require.Equal(t, Usage{}, turns[0].Usage)
+			require.Equal(t, Usage{}, state.usage, "an unconfirmed interruption is not billed")
+			require.Empty(t, state.acceptedInterrupts)
+		})
+	}
+
+	// An acknowledgement for an unknown response neither binds a pending turn
+	// nor survives.
+	state := &relayState{turns: newRelayTurnTracker()}
+	state.turns.register(RelayTurnMetadata{Turn: 1})
+	observeUpstreamMessage(state, []byte(`{"type":"response.interrupt.accepted","response_id":"resp_unknown"}`), time.Now(), time.Now, nil)
+	require.Empty(t, state.acceptedInterrupts)
+	ids, pending := state.turns.outstanding()
+	require.Empty(t, ids)
+	require.Equal(t, 1, pending)
+}
+
+func TestRelayControl_ReadsCodexInterruptMode(t *testing.T) {
+	diagnostics := &relayClientDiagnostics{}
+	base := time.Unix(1_700_000_000, 0)
+	diagnostics.recordControl([]byte(`{"type":"response.interrupt","response_id":"resp_1","mode":"discard_partial_items"}`), base)
+	diagnostics.recordControl([]byte(`{"type":"response.interrupt","response_id":"resp_1","mode":"TEST_ONLY_PRIVATE_CONTENT"}`), base)
+	out := &RelayFailureDiagnostics{}
+	diagnostics.fill(out, base, base, "resp_1")
+	require.True(t, *out.ClientControl[0].DiscardPartialItems)
+	require.False(t, *out.ClientControl[1].DiscardPartialItems)
+	encoded, err := json.Marshal(out)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "TEST_ONLY_PRIVATE_CONTENT")
+	usage, err := json.Marshal(RelayFailureDiagnostics{FirstTokenMsAfterFirstEvent: new(int), ReportedUsage: &RelayReportedUsage{CachedTokens: new(int64), ReasoningTokens: new(int64)}})
+	require.NoError(t, err)
+	for _, key := range []string{"first_output_ms_after_first_event", "cache_read_input_tokens", "reasoning_output"} {
+		require.Contains(t, string(usage), key)
+	}
+}
+
+func TestRelay_InterruptAcknowledgementEdgeCases(t *testing.T) {
+	newState := func() (*relayState, *[]RelayTurnResult, func(string)) {
+		state := &relayState{turns: newRelayTurnTracker()}
+		state.turns.register(RelayTurnMetadata{Turn: 1})
+		turns := &[]RelayTurnResult{}
+		observe := func(raw string) {
+			emitTurnComplete(func(turn RelayTurnResult) { *turns = append(*turns, turn) }, state, observeUpstreamMessage(state, []byte(raw), time.Now(), time.Now, nil))
+		}
+		return state, turns, observe
+	}
+	interrupted := `{"type":"response.incomplete","response":{"id":"resp_1","incomplete_details":{"reason":"interrupted"},"usage":{"input_tokens":5,"output_tokens":3}}}`
+
+	// An acknowledgement before response.created is not trusted.
+	state, turns, observe := newState()
+	observe(`{"type":"response.interrupt.accepted","response_id":"resp_1"}`)
+	observe(`{"type":"response.created","response":{"id":"resp_1"}}`)
+	observe(interrupted)
+	require.Len(t, *turns, 1)
+	require.NotNil(t, (*turns)[0].Failure)
+	require.Equal(t, Usage{}, state.usage)
+
+	// A turn ended by an unattributed error cannot be billed later.
+	state, turns, observe = newState()
+	observe(`{"type":"response.created","response":{"id":"resp_1"}}`)
+	observe(`{"type":"response.interrupt.accepted","response_id":"resp_1"}`)
+	observe(`{"type":"error","error":{"type":"server_error","message":"failed"}}`)
+	require.Empty(t, state.acceptedInterrupts)
+	observe(interrupted)
+	require.Len(t, *turns, 1, "only the error is reported")
+	require.NotNil(t, (*turns)[0].Failure)
+	require.Equal(t, Usage{}, state.usage)
+}

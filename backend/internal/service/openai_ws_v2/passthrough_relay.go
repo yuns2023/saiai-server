@@ -62,6 +62,10 @@ type RelayTurnResult struct {
 	Duration           time.Duration
 	FirstTokenMs       *int
 	Failure            *RelayFailure
+	// ClientInterrupted marks a response.incomplete (interrupted) that the
+	// provider ended after acknowledging a client response.interrupt for this
+	// response. It is a billable, successful turn, not a failure.
+	ClientInterrupted bool
 	// Diagnostics is set only for failed turns.
 	Diagnostics *RelayFailureDiagnostics
 }
@@ -169,6 +173,10 @@ type relayState struct {
 	startAt           time.Time
 	clientTurns       *atomic.Int32
 	clientDiagnostics *relayClientDiagnostics
+	// acceptedInterrupts holds in-flight response ids whose client
+	// response.interrupt the provider acknowledged. Upstream reader only;
+	// entries are removed at the response's terminal event.
+	acceptedInterrupts map[string]struct{}
 }
 
 type relayExitSignal struct {
@@ -190,6 +198,8 @@ type observedUpstreamEvent struct {
 	duration   time.Duration
 	firstToken *int
 	failure    *RelayFailure
+	// clientInterrupted: see RelayTurnResult.ClientInterrupted.
+	clientInterrupted bool
 	// Failure diagnostics: observation time, the turn timing as it was
 	// before the failure event, and usage reported on the failure event.
 	at            time.Time
@@ -933,9 +943,15 @@ func observeUpstreamMessage(
 	if responseID == "" && isTerminalEvent(eventType) {
 		responseID = strings.TrimSpace(values[3].String())
 	}
-	if responseID != "" && state.turns != nil {
+	interruptAck := eventType == "response.interrupt.accepted" || eventType == "response.interrupt.failed"
+	// An acknowledgement refers to an existing response; it never binds a turn.
+	if responseID != "" && state.turns != nil && !interruptAck {
 		state.turns.bind(responseID)
 	}
+	if interruptAck {
+		state.observeInterruptAck(eventType, responseID)
+	}
+	clientInterrupted := state.isClientInterruptedTerminal(message, eventType, responseID)
 	now := nowFn()
 
 	if state.firstTokenMs == nil && isTokenEvent(eventType) {
@@ -944,13 +960,16 @@ func observeUpstreamMessage(
 			state.firstTokenMs = &ms
 		}
 	}
-	parsedUsage := parseUsageAndAccumulate(state, message, eventType, onUsageParseFailure)
+	parsedUsage := parseUsageAndAccumulate(state, message, eventType, clientInterrupted, onUsageParseFailure)
 	observed := observedUpstreamEvent{
-		eventType:  eventType,
-		responseID: responseID,
-		usage:      parsedUsage,
+		eventType:         eventType,
+		responseID:        responseID,
+		usage:             parsedUsage,
+		clientInterrupted: clientInterrupted,
 	}
-	observed.failure = parseRelayFailure(message, eventType)
+	if !clientInterrupted {
+		observed.failure = parseRelayFailure(message, eventType)
+	}
 	if observed.failure != nil {
 		observed.at = now
 		if state.clientTurns != nil {
@@ -978,6 +997,9 @@ func observeUpstreamMessage(
 		return observed
 	}
 	observed.terminal = true
+	if responseID != "" {
+		delete(state.acceptedInterrupts, responseID)
+	}
 	state.terminalEventType = eventType
 	if responseID != "" {
 		state.lastResponseID = responseID
@@ -1016,8 +1038,17 @@ func emitTurnComplete(
 			metadata, matched = state.turns.complete(responseID)
 		}
 	}
-	if onTurnComplete == nil || (observed.failure != nil && !matched) {
+	if onTurnComplete == nil || ((observed.failure != nil || observed.clientInterrupted) && !matched) {
 		return
+	}
+	if matched && attribution == "single_outstanding" && state != nil {
+		// failUnbound may have ended a bound response; forget its interrupt
+		// acknowledgement so a later terminal for it cannot be billed.
+		for responseID := range state.acceptedInterrupts {
+			if !state.turns.isBound(responseID) {
+				delete(state.acceptedInterrupts, responseID)
+			}
+		}
 	}
 	var diagnostics *RelayFailureDiagnostics
 	if observed.failure != nil {
@@ -1035,6 +1066,7 @@ func emitTurnComplete(
 		Duration:           observed.duration,
 		FirstTokenMs:       openAIWSRelayCloneIntPtr(observed.firstToken),
 		Failure:            observed.failure,
+		ClientInterrupted:  observed.clientInterrupted,
 		Diagnostics:        diagnostics,
 	})
 }
@@ -1200,6 +1232,17 @@ func (t *relayTurnTracker) bind(responseID string) (RelayTurnMetadata, bool) {
 	return metadata, true
 }
 
+// isBound reports whether responseID belongs to an outstanding bound turn.
+func (t *relayTurnTracker) isBound(responseID string) bool {
+	if t == nil || responseID == "" {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	_, ok := t.byResponseID[responseID]
+	return ok
+}
+
 func (t *relayTurnTracker) complete(responseID string) (RelayTurnMetadata, bool) {
 	if t == nil || strings.TrimSpace(responseID) == "" {
 		return RelayTurnMetadata{}, false
@@ -1232,6 +1275,41 @@ const openAIRelayOutstandingTurnDrainDefault = 10 * time.Minute
 // relayStageClientTurnRejected marks a client frame rejected before it was
 // written upstream (frame validation or a turn hook).
 const relayStageClientTurnRejected = "client_turn_rejected"
+
+// observeInterruptAck records the provider's answer to a client
+// response.interrupt. Only an outstanding bound response can be marked, which
+// bounds the map by the number of in-flight responses; a failed interrupt
+// clears any earlier acceptance.
+func (s *relayState) observeInterruptAck(eventType, responseID string) {
+	if s == nil || responseID == "" {
+		return
+	}
+	if eventType != "response.interrupt.accepted" {
+		delete(s.acceptedInterrupts, responseID)
+		return
+	}
+	if !s.turns.isBound(responseID) {
+		return
+	}
+	if s.acceptedInterrupts == nil {
+		s.acceptedInterrupts = make(map[string]struct{}, 2)
+	}
+	s.acceptedInterrupts[responseID] = struct{}{}
+}
+
+// isClientInterruptedTerminal: an incomplete (interrupted) response whose
+// client interrupt the provider accepted on this connection. Codex sends
+// response.interrupt on mailbox preemption and keeps the completed items, so
+// the turn is billed with the reported usage instead of logged as an error.
+func (s *relayState) isClientInterruptedTerminal(message []byte, eventType, responseID string) bool {
+	if s == nil || eventType != "response.incomplete" || responseID == "" {
+		return false
+	}
+	if _, ok := s.acceptedInterrupts[responseID]; !ok || !s.turns.isBound(responseID) {
+		return false
+	}
+	return gjson.GetBytes(message, "response.incomplete_details.reason").String() == "interrupted"
+}
 
 func (s *relayState) clientDiag() *relayClientDiagnostics {
 	if s == nil {
@@ -1331,9 +1409,10 @@ func parseUsageAndAccumulate(
 	state *relayState,
 	message []byte,
 	eventType string,
+	clientInterrupted bool,
 	onParseFailure func(eventType string, usageRaw string),
 ) Usage {
-	if state == nil || len(message) == 0 || !shouldParseUsage(eventType) {
+	if state == nil || len(message) == 0 || (!shouldParseUsage(eventType) && !clientInterrupted) {
 		return Usage{}
 	}
 	usageResult := gjson.GetBytes(message, "response.usage")
@@ -1456,7 +1535,8 @@ func isTokenEvent(eventType string) bool {
 		return false
 	}
 	switch eventType {
-	case "response.created", "response.in_progress", "response.output_item.added", "response.output_item.done":
+	case "response.created", "response.in_progress", "response.output_item.added", "response.output_item.done",
+		"response.output_item.interrupted":
 		return false
 	}
 	if strings.Contains(eventType, ".delta") {

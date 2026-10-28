@@ -468,8 +468,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				keys := turnStateKeys[turn.Turn]
 				delete(turnStateKeys, turn.Turn)
 				turnStateMu.Unlock()
-				if turn.Failure == nil && (turn.TerminalEventType == "response.completed" || turn.TerminalEventType == "response.done") {
+				// A client-interrupted response keeps its completed items and can be
+				// continued, so it renews and binds like a completed one.
+				settled := turn.Failure == nil && (turn.TerminalEventType == "response.completed" ||
+					turn.TerminalEventType == "response.done" || turn.ClientInterrupted)
+				if settled {
 					s.renewOpenAINativeTurnStateAfterSuccess(ctx, account, userID, keys)
+				}
+				if turn.ClientInterrupted {
+					// The replay tracker only settles completed/done; drop this turn
+					// so it can neither block nor be replayed by a later failover.
+					replayTracker.CompleteResponse(turn.RequestID)
 				}
 				if turn.Failure != nil {
 					// Error metadata is persisted from the original provider
@@ -538,8 +547,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					turnResult.Usage.OutputTokens,
 					turnResult.Usage.CacheReadInputTokens,
 				)
-				if stateStore != nil && turnResult.RequestID != "" &&
-					(turn.TerminalEventType == "response.completed" || turn.TerminalEventType == "response.done") {
+				if stateStore != nil && turnResult.RequestID != "" && settled {
 					logOpenAIWSBindResponseAccountWarn(
 						getOpenAIGroupIDFromContext(c),
 						account.ID,

@@ -143,3 +143,121 @@ func TestOpenAIWSCFRayAcceptsOnlyRayIdentifiers(t *testing.T) {
 		require.Equal(t, want, openAIWSCFRay(http.Header{"Cf-Ray": []string{value}}), value)
 	}
 }
+
+func TestOpenAIWSReplayTrackerCompleteResponseSettlesOnlyThatTurn(t *testing.T) {
+	tracker := newOpenAIWSPassthroughReplayTracker(nil, 0)
+	tracker.RegisterTurn(1, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`))
+	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.created","response":{"id":"resp_1"}}`))
+	tracker.RegisterTurn(2, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`))
+	_, ok := tracker.BuildFailoverError(7, nil)
+	require.False(t, ok, "two pending turns cannot be replayed")
+	tracker.CompleteResponse("resp_unknown")
+	tracker.CompleteResponse("")
+	_, ok = tracker.BuildFailoverError(7, nil)
+	require.False(t, ok)
+	tracker.CompleteResponse("resp_1")
+	failure, ok := tracker.BuildFailoverError(7, nil)
+	require.True(t, ok, "the remaining fresh turn is replayable again")
+	require.Equal(t, 2, failure.Turn())
+}
+
+func TestOpenAIWSPassthroughClientInterruptedTurnIsBilledAndBound(t *testing.T) {
+	for _, accepted := range []bool{true, false} {
+		t.Run(map[bool]string{true: "accepted", false: "not_accepted"}[accepted], func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Security.URLAllowlist.Enabled = false
+			cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+			cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+			cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+			request := []byte(`{"type":"response.create","model":"test-sol","input":[]}`)
+			events := [][]byte{[]byte(`{"type":"response.created","response":{"id":"resp_interrupted","status":"in_progress"}}`)}
+			if accepted {
+				events = append(events, []byte(`{"type":"response.interrupt.accepted","response_id":"resp_interrupted","sequence_number":3}`))
+			}
+			events = append(events,
+				[]byte(`{"type":"response.output_item.interrupted","response_id":"resp_interrupted"}`),
+				[]byte(`{"type":"response.incomplete","response":{"id":"resp_interrupted","status":"incomplete","incomplete_details":{"reason":"interrupted"},"usage":{"input_tokens":34,"output_tokens":156}}}`),
+			)
+			upstream := &openAIWSCaptureConn{events: events}
+			dialer := &openAIWSCaptureDialer{conn: upstream}
+			svc := &OpenAIGatewayService{cfg: cfg, openaiWSPassthroughDialer: dialer, cache: &stubGatewayCache{}}
+			account := &Account{ID: 452, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			done := make(chan struct{})
+			var results []*OpenAIForwardResult
+			var failures []*OpenAIWSUpstreamFailure
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer close(done)
+				conn, err := coderws.Accept(w, r, nil)
+				if err != nil {
+					return
+				}
+				defer func() { _ = conn.CloseNow() }()
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = r
+				ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+				defer cancel()
+				messageType, first, err := conn.Read(ctx)
+				if err != nil {
+					return
+				}
+				_ = svc.proxyResponsesWebSocketV2Passthrough(ctx, c, conn, account, "TEST_ONLY_TOKEN", messageType, first, &OpenAIWSIngressHooks{
+					AfterTurn: func(_ int, result *OpenAIForwardResult, err error) {
+						if result != nil && err == nil {
+							results = append(results, result)
+						}
+					},
+					OnUpstreamError: func(failure *OpenAIWSUpstreamFailure) { failures = append(failures, failure) },
+				}, OpenAIWSProtocolDecision{}, nil)
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+			require.NoError(t, err)
+			defer func() { _ = conn.CloseNow() }()
+			require.NoError(t, conn.Write(ctx, coderws.MessageText, request))
+			for range events {
+				_, _, err := conn.Read(ctx)
+				require.NoError(t, err)
+			}
+			_ = conn.CloseNow()
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("mock relay did not finish")
+			}
+			boundAccount, err := svc.getOpenAIWSStateStore().GetResponseAccountForUser(context.Background(), 0, "resp_interrupted")
+			require.NoError(t, err)
+			if !accepted {
+				require.Empty(t, results, "an unconfirmed interruption is not billed")
+				require.Len(t, failures, 1)
+				require.Equal(t, "interrupted", failures[0].IncompleteReason)
+				require.Zero(t, boundAccount)
+				return
+			}
+			require.Empty(t, failures, "a client interrupt is not an upstream error")
+			require.Len(t, results, 1)
+			require.Equal(t, "resp_interrupted", results[0].RequestID)
+			require.Equal(t, 34, results[0].Usage.InputTokens)
+			require.Equal(t, 156, results[0].Usage.OutputTokens)
+			require.Equal(t, int64(452), boundAccount, "a continuation of the interrupted response routes to its account")
+		})
+	}
+}
+
+func TestOpenAIWSReplayTrackerIgnoresSettledAndAcknowledgementIDs(t *testing.T) {
+	tracker := newOpenAIWSPassthroughReplayTracker(nil, 0)
+	tracker.RegisterTurn(1, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`))
+	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.created","response":{"id":"resp_a"}}`))
+	tracker.CompleteResponse("resp_a")
+	tracker.RegisterTurn(2, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`))
+	// A duplicate terminal of the settled response and an acknowledgement
+	// carrying an event id must not bind turn 2.
+	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.incomplete","response":{"id":"resp_a","incomplete_details":{"reason":"interrupted"}}}`))
+	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.interrupt.accepted","id":"evt_ack","response_id":"resp_a"}`))
+	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.created","response":{"id":"resp_b"}}`))
+	tracker.CompleteResponse("resp_b")
+	_, ok := tracker.BuildFailoverError(7, nil)
+	require.False(t, ok, "turn 2 settled under its own response id")
+	require.Empty(t, tracker.pending)
+}
