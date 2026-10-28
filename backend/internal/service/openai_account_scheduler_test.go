@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"testing"
 	"time"
@@ -497,83 +497,79 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_RequiredWSV2_NoAvailabl
 	require.Equal(t, 0, decision.CandidateCount)
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceTopKFallback(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceTriesEveryCandidateByLoad(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(11)
-	accounts := []Account{
-		{
-			ID:          3001,
-			Platform:    PlatformOpenAI,
-			Type:        AccountTypeAPIKey,
-			Status:      StatusActive,
-			Schedulable: true,
-			Concurrency: 1,
-			Priority:    0,
-		},
-		{
-			ID:          3002,
-			Platform:    PlatformOpenAI,
-			Type:        AccountTypeAPIKey,
-			Status:      StatusActive,
-			Schedulable: true,
-			Concurrency: 1,
-			Priority:    0,
-		},
-		{
-			ID:          3003,
-			Platform:    PlatformOpenAI,
-			Type:        AccountTypeAPIKey,
-			Status:      StatusActive,
-			Schedulable: true,
-			Concurrency: 1,
-			Priority:    0,
-		},
+	newAccount := func(id int64) Account {
+		return Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1}
 	}
+	accounts := make([]Account, 0, 9)
+	loadMap := map[int64]*AccountLoadInfo{}
+	acquire := map[int64]bool{}
+	for i := int64(0); i < 9; i++ {
+		id := 3001 + i
+		accounts = append(accounts, newAccount(id))
+		loadMap[id] = &AccountLoadInfo{AccountID: id, LoadRate: int(10 * i)}
+		acquire[id] = false
+	}
+	// Only the most loaded account (LoadRate 80, ninth in order) has a free
+	// slot: no top-K cut, every candidate of the tier is tried.
+	acquire[3009] = true
 
 	cfg := &config.Config{}
-	cfg.Gateway.OpenAIWS.LBTopK = 2
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 0.4
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Load = 1.0
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Queue = 1.0
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.ErrorRate = 0.2
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT = 0.1
-
-	concurrencyCache := stubConcurrencyCache{
-		loadMap: map[int64]*AccountLoadInfo{
-			3001: {AccountID: 3001, LoadRate: 95, WaitingCount: 8},
-			3002: {AccountID: 3002, LoadRate: 20, WaitingCount: 1},
-			3003: {AccountID: 3003, LoadRate: 10, WaitingCount: 0},
-		},
-		acquireResults: map[int64]bool{
-			3003: false, // top1 失败，必须回退到 top-K 的下一候选
-			3002: true,
-		},
-	}
-
+	cfg.Gateway.OpenAIWS.LBTopK = 2 // legacy setting, ignored
 	svc := &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
 		cache:              &stubGatewayCache{},
 		cfg:                cfg,
-		concurrencyService: NewConcurrencyService(concurrencyCache),
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{loadMap: loadMap, acquireResults: acquire}),
 	}
-
-	selection, decision, err := svc.SelectAccountWithScheduler(
-		ctx,
-		&groupID,
-		"",
-		"",
-		"gpt-5.1",
-		nil,
-		OpenAIUpstreamTransportAny,
-	)
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
 	require.NoError(t, err)
 	require.NotNil(t, selection)
-	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(3002), selection.Account.ID)
+	require.Equal(t, int64(3009), selection.Account.ID)
+	require.True(t, selection.Acquired)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
-	require.Equal(t, 3, decision.CandidateCount)
-	require.Equal(t, 2, decision.TopK)
+	require.Equal(t, 9, decision.TopK, "legacy TopK reports the tier's eligible candidates")
 	require.Greater(t, decision.LoadSkew, 0.0)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+
+	// The lowest load rate is always preferred when its slot is free.
+	acquire[3001] = true
+	for i := 0; i < 20; i++ {
+		selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", fmt.Sprintf("session_%d", i), "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+		require.NoError(t, err)
+		require.Equal(t, int64(3001), selection.Account.ID)
+		if selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
+	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceKeepsFullLoadRateCandidates(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(16)
+	accounts := []Account{
+		{ID: 5201, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, LoadFactor: intPtrForTest(1)},
+		{ID: 5202, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo: stubOpenAIAccountRepo{accounts: accounts},
+		cache:       &stubGatewayCache{},
+		cfg:         &config.Config{},
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{
+			// 5201's rate counts a waiting request against LoadFactor 1, but its
+			// real slot (Concurrency 3) is free; 5202 is busy.
+			loadMap:        map[int64]*AccountLoadInfo{5201: {AccountID: 5201, LoadRate: 200, WaitingCount: 1}, 5202: {AccountID: 5202, LoadRate: 30}},
+			acquireResults: map[int64]bool{5201: true, 5202: false},
+		}),
+	}
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+	require.NoError(t, err)
+	require.Equal(t, int64(5201), selection.Account.ID)
+	require.True(t, selection.Acquired)
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
@@ -1176,7 +1172,6 @@ func TestOpenAIGatewayService_OpenAIAccountSchedulerMetrics(t *testing.T) {
 	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "session_hash_metrics", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
 	require.NoError(t, err)
 	require.NotNil(t, selection)
-	svc.ReportOpenAIAccountScheduleResult(account.ID, true, intPtrForTest(120))
 	svc.RecordOpenAIAccountSwitch()
 
 	snapshot := svc.SnapshotOpenAIAccountSchedulerMetrics()
@@ -1185,130 +1180,10 @@ func TestOpenAIGatewayService_OpenAIAccountSchedulerMetrics(t *testing.T) {
 	require.GreaterOrEqual(t, snapshot.AccountSwitchTotal, int64(1))
 	require.GreaterOrEqual(t, snapshot.SchedulerLatencyMsAvg, float64(0))
 	require.GreaterOrEqual(t, snapshot.StickyHitRatio, 0.0)
-	require.GreaterOrEqual(t, snapshot.RuntimeStatsAccountCount, 1)
 }
 
 func intPtrForTest(v int) *int {
 	return &v
-}
-
-func TestOpenAIAccountRuntimeStats_ReportAndSnapshot(t *testing.T) {
-	stats := newOpenAIAccountRuntimeStats()
-	stats.report(1001, true, nil)
-	firstTTFT := 100
-	stats.report(1001, false, &firstTTFT)
-	secondTTFT := 200
-	stats.report(1001, false, &secondTTFT)
-
-	errorRate, ttft, hasTTFT := stats.snapshot(1001)
-	require.True(t, hasTTFT)
-	require.InDelta(t, 0.36, errorRate, 1e-9)
-	require.InDelta(t, 120.0, ttft, 1e-9)
-	require.Equal(t, 1, stats.size())
-}
-
-func TestOpenAIAccountRuntimeStats_ReportConcurrent(t *testing.T) {
-	stats := newOpenAIAccountRuntimeStats()
-
-	const (
-		accountCount = 4
-		workers      = 16
-		iterations   = 800
-	)
-	var wg sync.WaitGroup
-	wg.Add(workers)
-	for worker := 0; worker < workers; worker++ {
-		worker := worker
-		go func() {
-			defer wg.Done()
-			for i := 0; i < iterations; i++ {
-				accountID := int64(i%accountCount + 1)
-				success := (i+worker)%3 != 0
-				ttft := 80 + (i+worker)%40
-				stats.report(accountID, success, &ttft)
-			}
-		}()
-	}
-	wg.Wait()
-
-	require.Equal(t, accountCount, stats.size())
-	for accountID := int64(1); accountID <= accountCount; accountID++ {
-		errorRate, ttft, hasTTFT := stats.snapshot(accountID)
-		require.GreaterOrEqual(t, errorRate, 0.0)
-		require.LessOrEqual(t, errorRate, 1.0)
-		require.True(t, hasTTFT)
-		require.Greater(t, ttft, 0.0)
-	}
-}
-
-func TestSelectTopKOpenAICandidates(t *testing.T) {
-	candidates := []openAIAccountCandidateScore{
-		{
-			account:  &Account{ID: 11, Priority: 2},
-			loadInfo: &AccountLoadInfo{LoadRate: 10, WaitingCount: 1},
-			score:    10.0,
-		},
-		{
-			account:  &Account{ID: 12, Priority: 1},
-			loadInfo: &AccountLoadInfo{LoadRate: 20, WaitingCount: 1},
-			score:    9.5,
-		},
-		{
-			account:  &Account{ID: 13, Priority: 1},
-			loadInfo: &AccountLoadInfo{LoadRate: 30, WaitingCount: 0},
-			score:    10.0,
-		},
-		{
-			account:  &Account{ID: 14, Priority: 0},
-			loadInfo: &AccountLoadInfo{LoadRate: 40, WaitingCount: 0},
-			score:    8.0,
-		},
-	}
-
-	top2 := selectTopKOpenAICandidates(candidates, 2)
-	require.Len(t, top2, 2)
-	require.Equal(t, int64(13), top2[0].account.ID)
-	require.Equal(t, int64(11), top2[1].account.ID)
-
-	topAll := selectTopKOpenAICandidates(candidates, 8)
-	require.Len(t, topAll, len(candidates))
-	require.Equal(t, int64(13), topAll[0].account.ID)
-	require.Equal(t, int64(11), topAll[1].account.ID)
-	require.Equal(t, int64(12), topAll[2].account.ID)
-	require.Equal(t, int64(14), topAll[3].account.ID)
-}
-
-func TestBuildOpenAIWeightedSelectionOrder_DeterministicBySessionSeed(t *testing.T) {
-	candidates := []openAIAccountCandidateScore{
-		{
-			account:  &Account{ID: 101},
-			loadInfo: &AccountLoadInfo{LoadRate: 10, WaitingCount: 0},
-			score:    4.2,
-		},
-		{
-			account:  &Account{ID: 102},
-			loadInfo: &AccountLoadInfo{LoadRate: 30, WaitingCount: 1},
-			score:    3.5,
-		},
-		{
-			account:  &Account{ID: 103},
-			loadInfo: &AccountLoadInfo{LoadRate: 50, WaitingCount: 2},
-			score:    2.1,
-		},
-	}
-	req := OpenAIAccountScheduleRequest{
-		GroupID:        int64PtrForTest(99),
-		SessionHash:    "session_seed_fixed",
-		RequestedModel: "gpt-5.1",
-	}
-
-	first := buildOpenAIWeightedSelectionOrder(candidates, req)
-	second := buildOpenAIWeightedSelectionOrder(candidates, req)
-	require.Len(t, first, len(candidates))
-	require.Len(t, second, len(candidates))
-	for i := range first {
-		require.Equal(t, first[i].account.ID, second[i].account.ID)
-	}
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceDistributesAcrossSessions(t *testing.T) {
@@ -1366,7 +1241,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceDistributesA
 	}
 
 	selected := make(map[int64]int, len(accounts))
-	for i := 0; i < 60; i++ {
+	for i := 0; i < 300; i++ {
 		sessionHash := fmt.Sprintf("session_hash_lb_%d", i)
 		selection, decision, err := svc.SelectAccountWithScheduler(
 			ctx,
@@ -1387,84 +1262,12 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceDistributesA
 		}
 	}
 
-	// 多 session 应该能打散到多个账号，避免“恒定单账号命中”。
-	require.GreaterOrEqual(t, len(selected), 2)
-}
-
-func TestDeriveOpenAISelectionSeed_NoAffinityAddsEntropy(t *testing.T) {
-	req := OpenAIAccountScheduleRequest{
-		RequestedModel: "gpt-5.1",
+	// Equal load: uniform random choice (expected 100 each; legacy score
+	// weights in the config no longer influence it).
+	require.Len(t, selected, len(accounts))
+	for accountID, count := range selected {
+		require.Greater(t, count, 60, "account %d", accountID)
 	}
-	seed1 := deriveOpenAISelectionSeed(req)
-	time.Sleep(1 * time.Millisecond)
-	seed2 := deriveOpenAISelectionSeed(req)
-	require.NotZero(t, seed1)
-	require.NotZero(t, seed2)
-	require.NotEqual(t, seed1, seed2)
-}
-
-func TestBuildOpenAIWeightedSelectionOrder_HandlesInvalidScores(t *testing.T) {
-	candidates := []openAIAccountCandidateScore{
-		{
-			account:  &Account{ID: 901},
-			loadInfo: &AccountLoadInfo{LoadRate: 5, WaitingCount: 0},
-			score:    math.NaN(),
-		},
-		{
-			account:  &Account{ID: 902},
-			loadInfo: &AccountLoadInfo{LoadRate: 5, WaitingCount: 0},
-			score:    math.Inf(1),
-		},
-		{
-			account:  &Account{ID: 903},
-			loadInfo: &AccountLoadInfo{LoadRate: 5, WaitingCount: 0},
-			score:    -1,
-		},
-	}
-	req := OpenAIAccountScheduleRequest{
-		SessionHash: "seed_invalid_scores",
-	}
-
-	order := buildOpenAIWeightedSelectionOrder(candidates, req)
-	require.Len(t, order, len(candidates))
-	seen := map[int64]struct{}{}
-	for _, item := range order {
-		seen[item.account.ID] = struct{}{}
-	}
-	require.Len(t, seen, len(candidates))
-}
-
-func TestOpenAISelectionRNG_SeedZeroStillWorks(t *testing.T) {
-	rng := newOpenAISelectionRNG(0)
-	v1 := rng.nextUint64()
-	v2 := rng.nextUint64()
-	require.NotEqual(t, v1, v2)
-	require.GreaterOrEqual(t, rng.nextFloat64(), 0.0)
-	require.Less(t, rng.nextFloat64(), 1.0)
-}
-
-func TestOpenAIAccountCandidateHeap_PushPopAndInvalidType(t *testing.T) {
-	h := openAIAccountCandidateHeap{}
-	h.Push(openAIAccountCandidateScore{
-		account:  &Account{ID: 7001},
-		loadInfo: &AccountLoadInfo{LoadRate: 0, WaitingCount: 0},
-		score:    1.0,
-	})
-	require.Equal(t, 1, h.Len())
-	popped, ok := h.Pop().(openAIAccountCandidateScore)
-	require.True(t, ok)
-	require.Equal(t, int64(7001), popped.account.ID)
-	require.Equal(t, 0, h.Len())
-
-	require.Panics(t, func() {
-		h.Push("bad_element_type")
-	})
-}
-
-func TestClamp01_AllBranches(t *testing.T) {
-	require.Equal(t, 0.0, clamp01(-0.2))
-	require.Equal(t, 1.0, clamp01(1.3))
-	require.Equal(t, 0.5, clamp01(0.5))
 }
 
 func TestCalcLoadSkewByMoments_Branches(t *testing.T) {
@@ -1475,12 +1278,10 @@ func TestCalcLoadSkewByMoments_Branches(t *testing.T) {
 }
 
 func TestDefaultOpenAIAccountScheduler_ReportSwitchAndSnapshot(t *testing.T) {
-	schedulerAny := newDefaultOpenAIAccountScheduler(&OpenAIGatewayService{}, nil)
+	schedulerAny := newDefaultOpenAIAccountScheduler(&OpenAIGatewayService{})
 	scheduler, ok := schedulerAny.(*defaultOpenAIAccountScheduler)
 	require.True(t, ok)
 
-	ttft := 100
-	scheduler.ReportResult(1001, true, &ttft)
 	scheduler.ReportSwitch()
 	scheduler.metrics.recordSelect(OpenAIAccountScheduleDecision{
 		Layer:             openAIAccountScheduleLayerLoadBalance,
@@ -1508,39 +1309,15 @@ func TestDefaultOpenAIAccountScheduler_ReportSwitchAndSnapshot(t *testing.T) {
 
 func TestOpenAIGatewayService_SchedulerWrappersAndDefaults(t *testing.T) {
 	svc := &OpenAIGatewayService{}
-	ttft := 120
-	svc.ReportOpenAIAccountScheduleResult(10, true, &ttft)
 	svc.RecordOpenAIAccountSwitch()
 	snapshot := svc.SnapshotOpenAIAccountSchedulerMetrics()
 	require.GreaterOrEqual(t, snapshot.AccountSwitchTotal, int64(1))
-	require.Equal(t, 7, svc.openAIWSLBTopK())
 	require.Equal(t, openaiStickySessionTTL, svc.openAIWSSessionStickyTTL())
 
-	defaultWeights := svc.openAIWSSchedulerWeights()
-	require.Equal(t, 1.0, defaultWeights.Priority)
-	require.Equal(t, 1.0, defaultWeights.Load)
-	require.Equal(t, 0.7, defaultWeights.Queue)
-	require.Equal(t, 0.8, defaultWeights.ErrorRate)
-	require.Equal(t, 0.5, defaultWeights.TTFT)
-
 	cfg := &config.Config{}
-	cfg.Gateway.OpenAIWS.LBTopK = 9
 	cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 180
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 0.2
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Load = 0.3
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Queue = 0.4
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.ErrorRate = 0.5
-	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT = 0.6
 	svcWithCfg := &OpenAIGatewayService{cfg: cfg}
-
-	require.Equal(t, 9, svcWithCfg.openAIWSLBTopK())
 	require.Equal(t, 180*time.Second, svcWithCfg.openAIWSSessionStickyTTL())
-	customWeights := svcWithCfg.openAIWSSchedulerWeights()
-	require.Equal(t, 0.2, customWeights.Priority)
-	require.Equal(t, 0.3, customWeights.Load)
-	require.Equal(t, 0.4, customWeights.Queue)
-	require.Equal(t, 0.5, customWeights.ErrorRate)
-	require.Equal(t, 0.6, customWeights.TTFT)
 
 	cfgCap := &config.Config{}
 	cfgCap.Gateway.OpenAIWS.StickySessionTTLSeconds = 7200
@@ -1570,6 +1347,80 @@ func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *
 	require.True(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2))
 }
 
-func int64PtrForTest(v int64) *int64 {
-	return &v
+// recordingConcurrencyCache records slot-acquisition order and can delay
+// the load read or fail an acquisition.
+type recordingConcurrencyCache struct {
+	stubConcurrencyCache
+	mu         sync.Mutex
+	attempts   []int64
+	loadDelay  time.Duration
+	acquireErr map[int64]error
+}
+
+func (c *recordingConcurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+	c.mu.Lock()
+	c.attempts = append(c.attempts, accountID)
+	c.mu.Unlock()
+	if err := c.acquireErr[accountID]; err != nil {
+		return false, err
+	}
+	return c.stubConcurrencyCache.AcquireAccountSlot(ctx, accountID, maxConcurrency, requestID)
+}
+
+func (c *recordingConcurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
+	time.Sleep(c.loadDelay)
+	return c.stubConcurrencyCache.GetAccountsLoadBatch(ctx, accounts)
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceAttemptOrder(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(17)
+	loads := map[int64]int{6001: 50, 6002: 10, 6003: 30, 6004: 40, 6005: 20, 6006: 60}
+	accounts := make([]Account, 0, len(loads))
+	loadMap := map[int64]*AccountLoadInfo{}
+	acquire := map[int64]bool{}
+	for id := int64(6001); id <= 6006; id++ {
+		accounts = append(accounts, Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1})
+		loadMap[id] = &AccountLoadInfo{AccountID: id, LoadRate: loads[id]}
+		acquire[id] = id == 6004
+	}
+	cache := &recordingConcurrencyCache{stubConcurrencyCache: stubConcurrencyCache{loadMap: loadMap, acquireResults: acquire}}
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
+		cache:              &stubGatewayCache{},
+		cfg:                &config.Config{},
+		concurrencyService: NewConcurrencyService(cache),
+	}
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+	require.NoError(t, err)
+	require.Equal(t, int64(6004), selection.Account.ID)
+	// Strictly ascending load, each account once, stop at the first success.
+	require.Equal(t, []int64{6002, 6005, 6003, 6004}, cache.attempts)
+
+	// A slot-acquisition error is returned immediately.
+	cache.attempts = nil
+	cache.acquireErr = map[int64]error{6002: errors.New("redis down")}
+	_, _, err = svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+	require.Error(t, err)
+	require.Equal(t, []int64{6002}, cache.attempts)
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_ReturnsLatency(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(18)
+	account := Account{ID: 6101, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1}
+	cache := &recordingConcurrencyCache{loadDelay: 5 * time.Millisecond}
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
+		cache:              &stubGatewayCache{},
+		cfg:                &config.Config{},
+		concurrencyService: NewConcurrencyService(cache),
+	}
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.GreaterOrEqual(t, decision.LatencyMs, int64(5))
+	snapshot := svc.SnapshotOpenAIAccountSchedulerMetrics()
+	require.Equal(t, int64(1), snapshot.SelectTotal)
+	require.Equal(t, decision.LatencyMs, snapshot.SchedulerLatencyMsTotal)
 }

@@ -574,7 +574,6 @@ type OpenAIGatewayService struct {
 	openaiWSStateStore            OpenAIWSStateStore
 	openaiScheduler               OpenAIAccountScheduler
 	openaiWSPassthroughDialer     openAIWSClientDialer
-	openaiAccountStats            *openAIAccountRuntimeStats
 
 	openaiWSFallbackUntil    sync.Map // key: int64(accountID), value: time.Time
 	openaiWSRetryMetrics     openAIWSRetryMetrics

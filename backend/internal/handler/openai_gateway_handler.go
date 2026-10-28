@@ -1166,7 +1166,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 				// 池模式：同账号重试
 				if failoverErr.RetryableOnSameAccount {
 					retryLimit := account.GetPoolModeRetryCount()
@@ -1202,7 +1201,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				)
 				continue
 			}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 			wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
 			fields := []zap.Field{
 				zap.Int64("account_id", account.ID),
@@ -1216,13 +1214,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			reqLog.Error("openai.forward_failed", fields...)
 			return
 		}
-		if result != nil {
-			if account.Type == service.AccountTypeOAuth {
-				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)
-			}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, result.FirstTokenMs)
-		} else {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, nil)
+		if result != nil && account.Type == service.AccountTypeOAuth {
+			h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)
 		}
 
 		// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
@@ -2083,7 +2076,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			if turnAccount.Type == service.AccountTypeOAuth {
 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(ctx, turnAccount.ID, result.ResponseHeaders)
 			}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(turnAccount.ID, true, result.FirstTokenMs)
 			requestPayloadHash := strings.TrimSpace(result.RequestPayloadHash)
 			if requestPayloadHash == "" {
 				requestPayloadHash = service.HashUsageRequestPayload(originalFirstMessage)
@@ -2124,7 +2116,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return nil, service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "invalid upstream account failover state", nil)
 			}
 			excludedAccountIDs[failure.AccountID()] = struct{}{}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(failure.AccountID(), false, nil)
 			releaseTurnSlots()
 
 			userReleaseFunc, userAcquired, acquireUserErr := h.concurrencyHelper.TryAcquireUserSlot(ctx, subject.UserID, subject.Concurrency)
@@ -2216,7 +2207,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			reqLog.Info("openai.websocket_codex_timezone_guard_closed", zap.Int64("account_id", account.ID))
 			return
 		}
-		h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 		closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
 		reqLog.Warn("openai.websocket_proxy_failed",
 			zap.Int64("account_id", account.ID),
