@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -117,11 +116,9 @@ func (r *settingRepository) UpdateSettingValue(ctx context.Context, key string, 
 }
 
 func (r *settingRepository) updateSettingValueOnce(ctx context.Context, key string, update func(current string) (string, error)) error {
+	// Requires a non-transactional client (ent.ErrTxStarted otherwise): the
+	// caller relies on the value being committed when this returns.
 	tx, err := r.client.Tx(ctx)
-	if errors.Is(err, ent.ErrTxStarted) {
-		// Already transactional: the row lock lasts until the caller commits.
-		return updateSettingValueLocked(ctx, r.client, key, update)
-	}
 	if err != nil {
 		return err
 	}

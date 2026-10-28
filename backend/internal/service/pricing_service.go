@@ -325,7 +325,12 @@ func (s *PricingService) downloadPricingDataWithLocalHash(localHash string) erro
 	}
 
 	if localHash != "" && strings.EqualFold(s.currentPricingHash(), hashStr) && s.hasLoadedPricingData() {
-		logger.LegacyPrintf("service.pricing", "%s", "[Pricing] Remote content hash matches local file, no update needed")
+		// Repair a local copy whose earlier write failed, so a restart does
+		// not load older prices.
+		if fileHash, err := s.computeFileHash(s.getPricingFilePath()); err != nil || !strings.EqualFold(fileHash, hashStr) {
+			s.savePricingFiles(body, hashStr)
+		}
+		logger.LegacyPrintf("service.pricing", "%s", "[Pricing] Remote content hash matches loaded data, no update needed")
 		return nil
 	}
 
@@ -335,17 +340,7 @@ func (s *PricingService) downloadPricingDataWithLocalHash(localHash string) erro
 		return fmt.Errorf("parse pricing data: %w", err)
 	}
 
-	// 保存到本地文件
-	pricingFile := s.getPricingFilePath()
-	if err := os.WriteFile(pricingFile, body, 0644); err != nil {
-		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to save file: %v", err)
-	}
-
-	// 保存哈希
-	hashFile := s.getHashFilePath()
-	if err := os.WriteFile(hashFile, []byte(hashStr+"\n"), 0644); err != nil {
-		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to save hash: %v", err)
-	}
+	s.savePricingFiles(body, hashStr)
 
 	// 更新内存数据. The previous data and the pricing configuration are
 	// captured in the same critical section, so a change event compares both
@@ -373,6 +368,16 @@ func (s *PricingService) downloadPricingDataWithLocalHash(localHash string) erro
 		s.publishFeedChange(change)
 	}
 	return nil
+}
+
+// savePricingFiles 保存到本地文件和哈希
+func (s *PricingService) savePricingFiles(body []byte, hashStr string) {
+	if err := os.WriteFile(s.getPricingFilePath(), body, 0644); err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to save file: %v", err)
+	}
+	if err := os.WriteFile(s.getHashFilePath(), []byte(hashStr+"\n"), 0644); err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to save hash: %v", err)
+	}
 }
 
 func (s *PricingService) currentPricingHash() string {

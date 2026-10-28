@@ -259,11 +259,11 @@ func (h *SettingHandler) ModelPricingHistory(c *gin.Context) {
 func (h *SettingHandler) SetPricingDriftService(s *service.PricingDriftService) { h.pricingDrift = s }
 
 func (h *SettingHandler) ListPricingDriftNotices(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	if h.pricingDrift == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Pricing drift notices unavailable")
 		return
 	}
-	c.Header("Cache-Control", "no-store")
 	list, err := h.pricingDrift.List(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -279,6 +279,7 @@ type pricingDriftAckRequest struct {
 // AcknowledgePricingDriftNotices records that an administrator saw the listed
 // notices; it changes no price.
 func (h *SettingHandler) AcknowledgePricingDriftNotices(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	if h.pricingDrift == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Pricing drift notices unavailable")
 		return
@@ -298,7 +299,6 @@ func (h *SettingHandler) AcknowledgePricingDriftNotices(c *gin.Context) {
 		return
 	}
 	log.Printf("AUDIT: pricing drift notices acknowledged by %d: %s", actorID, strings.Join(req.IDs, ","))
-	c.Header("Cache-Control", "no-store")
 	response.Success(c, list)
 }
 

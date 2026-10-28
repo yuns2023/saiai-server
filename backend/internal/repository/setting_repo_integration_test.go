@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -168,24 +169,32 @@ func (s *SettingRepoSuite) TestSetMultiple_UpdateToEmpty() {
 	s.Require().Equal("", got, "value should be updated to empty string")
 }
 
-func (s *SettingRepoSuite) TestUpdateSettingValue_InsertsAndUpdates() {
-	s.Require().NoError(s.repo.UpdateSettingValue(s.ctx, "counter", func(current string) (string, error) {
-		s.Require().Equal("", current)
+func TestSettingRepoUpdateSettingValue_InsertsAndUpdates(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSettingRepository(testEntClient(t)).(*settingRepository)
+	key := fmt.Sprintf("update-%d", time.Now().UnixNano())
+	t.Cleanup(func() { _ = repo.Delete(ctx, key) })
+	require.NoError(t, repo.UpdateSettingValue(ctx, key, func(current string) (string, error) {
+		require.Equal(t, "", current)
 		return "1", nil
 	}))
-	s.Require().NoError(s.repo.UpdateSettingValue(s.ctx, "counter", func(current string) (string, error) {
-		s.Require().Equal("1", current)
+	require.NoError(t, repo.UpdateSettingValue(ctx, key, func(current string) (string, error) {
+		require.Equal(t, "1", current)
 		return "2", nil
 	}))
-	got, err := s.repo.GetValue(s.ctx, "counter")
-	s.Require().NoError(err)
-	s.Require().Equal("2", got)
+	got, err := repo.GetValue(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, "2", got)
 
 	failed := errors.New("refuse")
-	s.Require().ErrorIs(s.repo.UpdateSettingValue(s.ctx, "counter", func(string) (string, error) { return "", failed }), failed)
-	got, err = s.repo.GetValue(s.ctx, "counter")
-	s.Require().NoError(err)
-	s.Require().Equal("2", got, "a failed update leaves the value")
+	require.ErrorIs(t, repo.UpdateSettingValue(ctx, key, func(string) (string, error) { return "", failed }), failed)
+	got, err = repo.GetValue(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, "2", got, "a failed update leaves the value")
+
+	// A transactional client is refused rather than committing late.
+	tx := testEntTx(t)
+	require.ErrorIs(t, NewSettingRepository(tx.Client()).(*settingRepository).UpdateSettingValue(ctx, key, func(string) (string, error) { return "3", nil }), dbent.ErrTxStarted)
 }
 
 // Concurrent read-modify-write callers on separate connections, including the
@@ -199,17 +208,20 @@ func TestSettingRepoUpdateSettingValue_Concurrent(t *testing.T) {
 
 	const writers = 8
 	var wg sync.WaitGroup
+	start := make(chan struct{})
 	errs := make(chan error, writers)
 	for i := 0; i < writers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			<-start
 			errs <- repo.UpdateSettingValue(ctx, key, func(current string) (string, error) {
 				n, _ := strconv.Atoi(current)
 				return strconv.Itoa(n + 1), nil
 			})
 		}()
 	}
+	close(start)
 	wg.Wait()
 	close(errs)
 	for err := range errs {

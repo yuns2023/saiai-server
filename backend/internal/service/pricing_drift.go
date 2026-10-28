@@ -100,7 +100,10 @@ type PricingDriftChange struct {
 // PricingDriftNotice records that a feed change altered how a recently billed
 // model is priced. Acknowledging it only records that an administrator saw it.
 type PricingDriftNotice struct {
+	// ID names one occurrence; Fingerprint names the change (feed, pricing
+	// configuration, model and prices) across occurrences and Gateways.
 	ID               string               `json:"id"`
+	Fingerprint      string               `json:"fingerprint"`
 	Model            string               `json:"model"`
 	OldStatus        string               `json:"old_status"`
 	NewStatus        string               `json:"new_status"`
@@ -235,20 +238,22 @@ func (s *PricingDriftService) evaluateAndStore(batch []PricingFeedChange) error 
 	if len(found) == 0 {
 		return nil
 	}
-	var added []PricingDriftNotice
+	var added, dropped []PricingDriftNotice
 	err = s.store.UpdateSettingValue(ctx, SettingKeyPricingDriftNotices, func(current string) (string, error) {
 		existing, err := decodePricingDriftNotices(current)
 		if err != nil {
 			return "", err
 		}
 		var merged []PricingDriftNotice
-		merged, added = mergePricingDriftNotices(existing, found, s.now())
+		merged, added = mergePricingDriftNotices(existing, found)
+		merged, dropped = trimPricingDriftNotices(merged)
 		body, err := json.Marshal(merged)
 		return string(body), err
 	})
 	if err != nil {
 		return fmt.Errorf("save notices: %w", err)
 	}
+	logDroppedPricingDriftNotices(dropped)
 	for _, n := range added {
 		body, _ := json.Marshal(n.Changes)
 		logger.LegacyPrintf("service.pricing_drift", "[PricingDrift] WARN price feed %s changed billed model %s: status %s -> %s, resolved %s -> %s, changes %s", shortFeedHash(n.NewFeedHash), n.Model, n.OldStatus, n.NewStatus, n.OldResolvedModel, n.NewResolvedModel, body)
@@ -276,7 +281,7 @@ func (s *PricingDriftService) Acknowledge(ctx context.Context, ids []string, act
 	for _, id := range ids {
 		want[id] = true
 	}
-	var notices []PricingDriftNotice
+	var notices, dropped []PricingDriftNotice
 	err := s.store.UpdateSettingValue(ctx, SettingKeyPricingDriftNotices, func(current string) (string, error) {
 		var err error
 		notices, err = decodePricingDriftNotices(current)
@@ -290,13 +295,14 @@ func (s *PricingDriftService) Acknowledge(ctx context.Context, ids []string, act
 				notices[i].AcknowledgedBy = actorID
 			}
 		}
-		notices = trimPricingDriftNotices(notices)
+		notices, dropped = trimPricingDriftNotices(notices)
 		body, err := json.Marshal(notices)
 		return string(body), err
 	})
 	if err != nil {
 		return nil, err
 	}
+	logDroppedPricingDriftNotices(dropped)
 	return newPricingDriftList(notices), nil
 }
 
@@ -332,24 +338,25 @@ func sortPricingDriftNotices(notices []PricingDriftNotice) []PricingDriftNotice 
 	return out
 }
 
-// mergePricingDriftNotices adds newly found notices. A notice already stored
-// is a duplicate when it was detected within the repeat window and is still
-// the latest for its model (another Gateway saw the same feed); otherwise the
-// change happened again and the notice is reopened.
-func mergePricingDriftNotices(existing, found []PricingDriftNotice, now time.Time) (merged, added []PricingDriftNotice) {
-	now = now.UTC()
+// mergePricingDriftNotices adds newly found notices, ordered by when each
+// feed replacement happened. A change already stored is a duplicate when it
+// happened within the repeat window and is still the latest notice for its
+// model (another Gateway saw the same feed). Otherwise it happened again: an
+// unacknowledged notice is refreshed in place (same content, so acknowledging
+// it still means the administrator saw this change); after acknowledgement a
+// new occurrence gets its own ID, so a stale page cannot acknowledge it.
+func mergePricingDriftNotices(existing, found []PricingDriftNotice) (merged, added []PricingDriftNotice) {
 	merged = append([]PricingDriftNotice{}, existing...)
+	sort.SliceStable(found, func(i, j int) bool { return found[i].DetectedAt.Before(found[j].DetectedAt) })
 	for _, n := range found {
 		index := -1
 		for i := range merged {
-			if merged[i].ID == n.ID {
+			if merged[i].Fingerprint == n.Fingerprint && (index < 0 || merged[i].DetectedAt.After(merged[index].DetectedAt)) {
 				index = i
-				break
 			}
 		}
 		if index < 0 {
-			n.DetectedAt = now
-			n.Occurrences = 1
+			n.ID, n.Occurrences = n.Fingerprint, 1
 			merged = append(merged, n)
 			added = append(added, n)
 			continue
@@ -357,39 +364,53 @@ func mergePricingDriftNotices(existing, found []PricingDriftNotice, now time.Tim
 		stored := &merged[index]
 		latest := true
 		for _, other := range merged {
-			if other.Model == stored.Model && other.ID != stored.ID && other.DetectedAt.After(stored.DetectedAt) {
+			if other.Model == stored.Model && other.Fingerprint != stored.Fingerprint && other.DetectedAt.After(stored.DetectedAt) {
 				latest = false
 				break
 			}
 		}
-		if latest && now.Sub(stored.DetectedAt) < pricingDriftRepeatWindow {
+		gap := n.DetectedAt.Sub(stored.DetectedAt)
+		if latest && gap < pricingDriftRepeatWindow && gap > -pricingDriftRepeatWindow {
 			continue
 		}
-		stored.DetectedAt = now
-		stored.Occurrences++
-		stored.AcknowledgedAt = nil
-		stored.AcknowledgedBy = 0
-		added = append(added, *stored)
+		if stored.AcknowledgedAt == nil {
+			stored.DetectedAt = n.DetectedAt
+			stored.Occurrences++
+			added = append(added, *stored)
+			continue
+		}
+		n.Occurrences = stored.Occurrences + 1
+		n.ID = fmt.Sprintf("%s-%d", n.Fingerprint, n.Occurrences)
+		merged = append(merged, n)
+		added = append(added, n)
 	}
-	return trimPricingDriftNotices(merged), added
+	return merged, added
 }
 
-func trimPricingDriftNotices(notices []PricingDriftNotice) []PricingDriftNotice {
+// trimPricingDriftNotices keeps the newest 500 unacknowledged and 100
+// acknowledged notices.
+func trimPricingDriftNotices(notices []PricingDriftNotice) (kept, dropped []PricingDriftNotice) {
 	sorted := sortPricingDriftNotices(notices)
-	out := make([]PricingDriftNotice, 0, len(sorted))
+	kept = make([]PricingDriftNotice, 0, len(sorted))
 	open, acknowledged := 0, 0
 	for _, n := range sorted {
 		if n.AcknowledgedAt == nil {
 			if open++; open > pricingDriftMaxOpen {
-				logger.LegacyPrintf("service.pricing_drift", "[PricingDrift] WARN dropping unacknowledged notice %s for %s (over %d)", n.ID, n.Model, pricingDriftMaxOpen)
+				dropped = append(dropped, n)
 				continue
 			}
 		} else if acknowledged++; acknowledged > pricingDriftMaxAcknowledged {
 			continue
 		}
-		out = append(out, n)
+		kept = append(kept, n)
 	}
-	return out
+	return kept, dropped
+}
+
+func logDroppedPricingDriftNotices(dropped []PricingDriftNotice) {
+	for _, n := range dropped {
+		logger.LegacyPrintf("service.pricing_drift", "[PricingDrift] WARN dropped unacknowledged notice %s for %s (over %d)", n.ID, n.Model, pricingDriftMaxOpen)
+	}
 }
 
 // diffPricingFeeds compares how each billed model is priced before and after
@@ -399,6 +420,10 @@ func diffPricingFeeds(cfg *config.Config, change PricingFeedChange, models []str
 		return nil
 	}
 	oldBilling, newBilling := NewBillingService(cfg, change.Old), NewBillingService(cfg, change.New)
+	detectedAt := change.At.UTC()
+	if change.At.IsZero() {
+		detectedAt = time.Now().UTC()
+	}
 	seen := map[string]bool{}
 	var out []PricingDriftNotice
 	for _, model := range models {
@@ -413,8 +438,8 @@ func diffPricingFeeds(cfg *config.Config, change PricingFeedChange, models []str
 		if before.status == after.status && len(changes) == 0 {
 			continue
 		}
-		n := PricingDriftNotice{Model: model, OldStatus: before.status, NewStatus: after.status, OldResolvedModel: before.resolved, NewResolvedModel: after.resolved, Changes: changes, OldFeedHash: change.OldHash, NewFeedHash: change.NewHash}
-		n.ID = pricingDriftNoticeID(change.NewHash, change.ConfigHash, n)
+		n := PricingDriftNotice{Model: model, OldStatus: before.status, NewStatus: after.status, OldResolvedModel: before.resolved, NewResolvedModel: after.resolved, Changes: changes, OldFeedHash: change.OldHash, NewFeedHash: change.NewHash, DetectedAt: detectedAt}
+		n.Fingerprint = pricingDriftFingerprint(change.NewHash, change.ConfigHash, n)
 		out = append(out, n)
 	}
 	return out
@@ -428,12 +453,14 @@ type modelPricingBehavior struct {
 
 // describeModelPricing lists every unit price billing would use for model:
 // each service tier, the whole-session long-context tier and its threshold,
-// image tokens, and the feed's default per-image price (group image prices
-// take precedence over it and are not compared).
+// image tokens, and the default per-image price of image models (group image
+// prices take precedence over it and are not compared).
 func describeModelPricing(billing *BillingService, pricing *PricingService, model string) modelPricingBehavior {
 	b := modelPricingBehavior{status: PricingStatusUnpriced, prices: map[string]float64{}}
-	if dynamic := pricing.GetModelPricing(model); dynamic != nil && dynamic.OutputCostPerImage > 0 {
-		b.prices["image.per_image"] = dynamic.OutputCostPerImage
+	// The default per-image price (feed, else the hardcoded default) only
+	// matters for image models.
+	if dynamic := pricing.GetModelPricing(model); dynamic != nil && (dynamic.Mode == "image_generation" || dynamic.OutputCostPerImage > 0) {
+		b.prices["image.per_image"] = billing.getDefaultImagePrice(model, "1K")
 	}
 	p, err := billing.GetModelPricing(model)
 	if err != nil {
@@ -477,7 +504,7 @@ func diffModelPrices(before, after map[string]float64) []PricingDriftChange {
 	for k := range keys {
 		o, oldOK := before[k]
 		n, newOK := after[k]
-		if oldOK && newOK && math.Abs(o-n) <= 1e-9*math.Max(math.Abs(o), math.Abs(n)) {
+		if oldOK && newOK && (o == n || k != "long.threshold" && math.Abs(o-n) <= 1e-9*math.Max(math.Abs(o), math.Abs(n))) {
 			continue
 		}
 		c := PricingDriftChange{Key: k}
@@ -493,7 +520,7 @@ func diffModelPrices(before, after map[string]float64) []PricingDriftChange {
 	return changes
 }
 
-func pricingDriftNoticeID(newHash, configHash string, n PricingDriftNotice) string {
+func pricingDriftFingerprint(newHash, configHash string, n PricingDriftNotice) string {
 	body, _ := json.Marshal(struct {
 		NewHash, ConfigHash, Model, OldStatus, NewStatus string
 		Changes                                          []PricingDriftChange

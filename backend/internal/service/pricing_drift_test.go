@@ -19,12 +19,14 @@ const driftFeedA = `{
 	"gpt-6.1-sol": {"input_cost_per_token": 0.000002, "output_cost_per_token": 0.000016, "cache_read_input_token_cost": 0.0000001, "litellm_provider": "openai", "mode": "chat"},
 	"acme-1": {"input_cost_per_token": 0.000001, "output_cost_per_token": 0.000002, "mode": "chat"},
 	"acme-long": {"input_cost_per_token": 0.000001, "output_cost_per_token": 0.000002, "long_context_input_token_threshold": 200000, "long_context_input_cost_multiplier": 2, "mode": "chat"},
-	"acme-image": {"input_cost_per_token": 0.000001, "output_cost_per_token": 0.000002, "mode": "image_generation"}
+	"acme-image": {"input_cost_per_token": 0.000001, "output_cost_per_token": 0.000002, "mode": "image_generation"},
+	"claude-fable-5": {"input_cost_per_token": 0.000004, "output_cost_per_token": 0.00002, "mode": "chat"}
 }`
 
 // Feed B: the alias target gpt-6-sol halves its cache read, gpt-6.1-sol (only
 // billed through the intentional alias) changes its own entry, acme-1 is
-// removed, acme-long lowers its threshold and acme-image gains a per-image price.
+// removed, acme-long lowers its threshold, acme-image gains a per-image price
+// and claude-fable-5 leaves the feed for the built-in hardcoded fallback.
 const driftFeedB = `{
 	"gpt-6-sol": {"input_cost_per_token": 0.000002, "output_cost_per_token": 0.000016, "cache_read_input_token_cost": 0.0000001, "litellm_provider": "openai", "mode": "chat"},
 	"gpt-6.1-sol": {"input_cost_per_token": 0.000003, "output_cost_per_token": 0.000016, "cache_read_input_token_cost": 0.0000001, "litellm_provider": "openai", "mode": "chat"},
@@ -45,8 +47,10 @@ func driftChange(t *testing.T, aliases map[string]string, overrides map[string]M
 		return data
 	}
 	old := newPricingSnapshotService(cfg, parse(driftFeedA), "hash-a", "remote", aliases, overrides)
-	return PricingFeedChange{Old: old, New: newPricingSnapshotService(cfg, parse(driftFeedB), "hash-b", "remote", aliases, overrides), OldHash: "hash-a", NewHash: "hash-b", ConfigHash: old.configHash}
+	return PricingFeedChange{Old: old, New: newPricingSnapshotService(cfg, parse(driftFeedB), "hash-b", "remote", aliases, overrides), OldHash: "hash-a", NewHash: "hash-b", ConfigHash: old.configHash, At: driftChangeAt}
 }
+
+var driftChangeAt = time.Date(2026, 10, 28, 11, 50, 0, 0, time.UTC)
 
 func driftNoticeFor(notices []PricingDriftNotice, model string) *PricingDriftNotice {
 	for i := range notices {
@@ -71,7 +75,7 @@ func TestDiffPricingFeedsFollowsAliasesAndOverrides(t *testing.T) {
 		map[string]string{"gpt-6.1-sol": "gpt-6-sol", "gpt-6-sol-pinned": "gpt-6-sol"},
 		map[string]ModelPriceOverride{"gpt-6-sol-pinned": {CacheRead: priceTestNumber(0.2)}},
 	)
-	notices := diffPricingFeeds(&config.Config{}, change, []string{"GPT-6.1-sol", "gpt-6.1-sol", "gpt-6-sol-pinned", "acme-1", "acme-long", "acme-image", "acme-unchanged"})
+	notices := diffPricingFeeds(&config.Config{}, change, []string{"GPT-6.1-sol", "gpt-6.1-sol", "gpt-6-sol-pinned", "acme-1", "acme-long", "acme-image", "claude-fable-5", "acme-unchanged"})
 
 	// The intentional alias is never reported; its target's price change is,
 	// under the billed name, and its own (unused) feed entry change is not.
@@ -100,15 +104,24 @@ func TestDiffPricingFeedsFollowsAliasesAndOverrides(t *testing.T) {
 	require.Equal(t, 200000.0, *long.Changes[0].Old)
 	require.Equal(t, 128000.0, *long.Changes[0].New)
 
+	// The hardcoded default per-image price is replaced by the feed's.
 	image := driftNoticeFor(notices, "acme-image")
 	require.NotNil(t, image)
 	require.Equal(t, []string{"image.per_image"}, driftChangeKeys(image))
-	require.Nil(t, image.Changes[0].Old)
+	require.Equal(t, 0.134, *image.Changes[0].Old)
+	require.Equal(t, 0.04, *image.Changes[0].New)
+
+	fallback := driftNoticeFor(notices, "claude-fable-5")
+	require.NotNil(t, fallback)
+	require.Equal(t, PricingStatusPriced, fallback.OldStatus)
+	require.Equal(t, PricingStatusFallback, fallback.NewStatus)
 
 	require.Nil(t, driftNoticeFor(notices, "acme-unchanged"))
-	require.Len(t, notices, 4)
+	require.Len(t, notices, 5)
 	for _, n := range notices {
-		require.Len(t, n.ID, 16)
+		require.Len(t, n.Fingerprint, 16)
+		require.Empty(t, n.ID, "IDs are assigned when stored")
+		require.Equal(t, driftChangeAt, n.DetectedAt)
 		require.Equal(t, "hash-a", n.OldFeedHash)
 		require.Equal(t, "hash-b", n.NewFeedHash)
 	}
@@ -129,33 +142,57 @@ func driftChangeKeys(n *PricingDriftNotice) []string {
 }
 
 func TestMergePricingDriftNotices(t *testing.T) {
-	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
-	found := []PricingDriftNotice{{ID: "a", Model: "m"}}
-	merged, added := mergePricingDriftNotices(nil, found, now)
-	require.Len(t, merged, 1)
+	t0 := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	at := func(fp string, d time.Duration) PricingDriftNotice {
+		return PricingDriftNotice{Fingerprint: fp, Model: "m", DetectedAt: t0.Add(d)}
+	}
+	merged, added := mergePricingDriftNotices(nil, []PricingDriftNotice{at("a", 0)})
 	require.Len(t, added, 1)
+	require.Equal(t, "a", merged[0].ID)
 	require.Equal(t, 1, merged[0].Occurrences)
 
 	// Another Gateway reporting the same feed change shortly after.
-	acked := now.Add(time.Minute)
+	acked := t0.Add(time.Minute)
 	merged[0].AcknowledgedAt = &acked
-	merged2, added := mergePricingDriftNotices(merged, found, now.Add(10*time.Minute))
+	merged, added = mergePricingDriftNotices(merged, []PricingDriftNotice{at("a", 10*time.Minute)})
 	require.Empty(t, added)
-	require.NotNil(t, merged2[0].AcknowledgedAt)
+	require.Len(t, merged, 1)
 
-	// The same change after a newer notice for the model (it flipped back and
-	// forth) reopens the acknowledged notice.
-	merged3, _ := mergePricingDriftNotices(merged2, []PricingDriftNotice{{ID: "b", Model: "m"}}, now.Add(20*time.Minute))
-	merged4, added := mergePricingDriftNotices(merged3, found, now.Add(30*time.Minute))
+	// It flipped back and forth: the acknowledged change recurs as a new
+	// occurrence with its own ID, so a page showing the old one cannot
+	// acknowledge it.
+	merged, _ = mergePricingDriftNotices(merged, []PricingDriftNotice{at("b", 20*time.Minute)})
+	merged, added = mergePricingDriftNotices(merged, []PricingDriftNotice{at("a", 30*time.Minute)})
 	require.Len(t, added, 1)
-	reopened := driftNoticeByID(merged4, "a")
-	require.Nil(t, reopened.AcknowledgedAt)
-	require.Equal(t, 2, reopened.Occurrences)
-	require.Equal(t, now.Add(30*time.Minute), reopened.DetectedAt)
+	require.Equal(t, "a-2", added[0].ID)
+	require.Equal(t, 2, added[0].Occurrences)
+	require.NotNil(t, driftNoticeByID(merged, "a").AcknowledgedAt)
+	require.Nil(t, driftNoticeByID(merged, "a-2").AcknowledgedAt)
 
-	// Past the repeat window the same change is a new occurrence.
-	_, added = mergePricingDriftNotices(merged4, []PricingDriftNotice{{ID: "a", Model: "m"}}, now.Add(30*time.Minute+pricingDriftRepeatWindow))
+	// An unacknowledged change recurring later is refreshed in place.
+	merged, added = mergePricingDriftNotices(merged, []PricingDriftNotice{at("a", 30*time.Minute+pricingDriftRepeatWindow)})
 	require.Len(t, added, 1)
+	require.Len(t, merged, 3)
+	refreshed := driftNoticeByID(merged, "a-2")
+	require.Equal(t, 3, refreshed.Occurrences)
+	require.Equal(t, t0.Add(30*time.Minute+pricingDriftRepeatWindow), refreshed.DetectedAt)
+}
+
+// Feed changes evaluated in one batch keep their own order: A->B, B->A, A->B
+// leaves A->B as the newest notice for the model.
+func TestMergePricingDriftNoticesOrdersOneBatchByFeedReplacement(t *testing.T) {
+	t0 := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	merged, added := mergePricingDriftNotices(nil, []PricingDriftNotice{
+		{Fingerprint: "a", Model: "m", DetectedAt: t0.Add(20 * time.Minute)},
+		{Fingerprint: "b", Model: "m", DetectedAt: t0.Add(10 * time.Minute)},
+		{Fingerprint: "a", Model: "m", DetectedAt: t0},
+	})
+	require.Len(t, added, 3)
+	list := newPricingDriftList(merged)
+	require.Equal(t, "a", list.Notices[0].ID)
+	require.Equal(t, 2, list.Notices[0].Occurrences)
+	require.Equal(t, t0.Add(20*time.Minute), list.Notices[0].DetectedAt)
+	require.Equal(t, "b", list.Notices[1].ID)
 }
 
 func driftNoticeByID(notices []PricingDriftNotice, id string) *PricingDriftNotice {
@@ -177,7 +214,8 @@ func TestTrimPricingDriftNoticesKeepsOpenNoticesFirst(t *testing.T) {
 		at := base
 		notices = append(notices, PricingDriftNotice{ID: fmt.Sprintf("acked-%d", i), DetectedAt: base.Add(time.Duration(i) * time.Minute), AcknowledgedAt: &at})
 	}
-	out := trimPricingDriftNotices(notices)
+	out, dropped := trimPricingDriftNotices(notices)
+	require.Len(t, dropped, 5)
 	require.Len(t, out, pricingDriftMaxOpen+pricingDriftMaxAcknowledged)
 	require.Equal(t, fmt.Sprintf("open-%d", pricingDriftMaxOpen+4), out[0].ID)
 	require.Nil(t, driftNoticeByID(out, "open-0"))
@@ -251,7 +289,7 @@ func TestPricingDriftServiceStoresListsAndAcknowledges(t *testing.T) {
 	list, err = drift.List(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 2, list.Unacknowledged)
-	require.Equal(t, now, list.Notices[0].DetectedAt)
+	require.Equal(t, driftChangeAt, list.Notices[0].DetectedAt)
 
 	first := list.Notices[0].ID
 	list, err = drift.Acknowledge(context.Background(), []string{first, "unknown"}, 7)
@@ -267,7 +305,9 @@ func TestPricingDriftServiceStoresListsAndAcknowledges(t *testing.T) {
 	require.Equal(t, now.Add(-time.Hour), *list.Notices[1].AcknowledgedAt)
 
 	// The same feed change from another Gateway adds nothing.
-	drift.Enqueue(driftChange(t, map[string]string{}, map[string]ModelPriceOverride{}))
+	again := driftChange(t, map[string]string{}, map[string]ModelPriceOverride{})
+	again.At = driftChangeAt.Add(10 * time.Minute)
+	drift.Enqueue(again)
 	drift.wait()
 	list, err = drift.List(context.Background())
 	require.NoError(t, err)
@@ -315,6 +355,16 @@ func TestPricingSyncPublishesFeedChangesInOrder(t *testing.T) {
 	// The snapshots keep the configuration of the moment of the change.
 	svc.SetModelPricingConfig(map[string]string{"x": "gpt-6-sol"}, nil)
 	require.NotContains(t, c.New.modelAliases, "x")
+
+	// A local copy left behind by a failed write is repaired without
+	// replacing the loaded data or publishing a change.
+	pricingFile := filepath.Join(dir, "model_pricing.json")
+	require.NoError(t, os.WriteFile(pricingFile, []byte(driftFeedA), 0644))
+	require.NoError(t, svc.syncWithRemote())
+	require.Len(t, changes, 1)
+	repaired, err := os.ReadFile(pricingFile)
+	require.NoError(t, err)
+	require.Equal(t, driftFeedB, string(repaired))
 }
 
 func TestPricingStartupRefreshComparesWithStaleLocalCopy(t *testing.T) {

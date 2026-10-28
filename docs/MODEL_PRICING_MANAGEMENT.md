@@ -131,16 +131,19 @@ itself, a change of its target's price is, and prices pinned by overrides
 
 Compared: Standard/Priority/Flex unit prices for input, output, cache read and
 5m/1h cache write; whole-request long-context prices per tier and the
-threshold; image-token prices when image-token billing is available; and the
-feed's default per-image price (group image size prices take precedence and are
-not compared). A notice is also raised when a model moves between priced, the
+threshold; image-token prices when image-token billing is available; and, for
+image models, the default per-image price (the feed's, else the hardcoded
+default; group image size prices take precedence and are not compared). A notice is also raised when a model moves between priced, the
 built-in hardcoded fallback, and unpriced. The price source label and resolved
 pricing key alone never raise a notice; they are shown as explanation.
 
 Notices live in the `model_pricing_drift_notices` setting (read-modify-write
-under a row lock). The same change reported by another Gateway within 24 hours
-is not duplicated; the same change recurring later, or after the model's price
-moved in between, reopens the notice. At most 500 unacknowledged and 100
+under a row lock) and are ordered by when each feed replacement happened. The
+same change reported by another Gateway within 24 hours is not duplicated. The
+same change recurring later, or after the model's price moved in between,
+refreshes the notice while it is unacknowledged, and otherwise becomes a new
+occurrence with its own ID, so a page showing the earlier one cannot
+acknowledge it. At most 500 unacknowledged and 100
 acknowledged notices are kept. The administrator model-pricing page shows a
 banner until each notice is acknowledged; there is no email or Ops alert. Each
 new notice also logs a `[PricingDrift] WARN` line.
