@@ -355,3 +355,36 @@ func TestRelayControl_ReadsCodexInterruptMode(t *testing.T) {
 		require.Contains(t, string(usage), key)
 	}
 }
+
+func TestRelay_InterruptAcknowledgementEdgeCases(t *testing.T) {
+	newState := func() (*relayState, *[]RelayTurnResult, func(string)) {
+		state := &relayState{turns: newRelayTurnTracker()}
+		state.turns.register(RelayTurnMetadata{Turn: 1})
+		turns := &[]RelayTurnResult{}
+		observe := func(raw string) {
+			emitTurnComplete(func(turn RelayTurnResult) { *turns = append(*turns, turn) }, state, observeUpstreamMessage(state, []byte(raw), time.Now(), time.Now, nil))
+		}
+		return state, turns, observe
+	}
+	interrupted := `{"type":"response.incomplete","response":{"id":"resp_1","incomplete_details":{"reason":"interrupted"},"usage":{"input_tokens":5,"output_tokens":3}}}`
+
+	// An acknowledgement before response.created is not trusted.
+	state, turns, observe := newState()
+	observe(`{"type":"response.interrupt.accepted","response_id":"resp_1"}`)
+	observe(`{"type":"response.created","response":{"id":"resp_1"}}`)
+	observe(interrupted)
+	require.Len(t, *turns, 1)
+	require.NotNil(t, (*turns)[0].Failure)
+	require.Equal(t, Usage{}, state.usage)
+
+	// A turn ended by an unattributed error cannot be billed later.
+	state, turns, observe = newState()
+	observe(`{"type":"response.created","response":{"id":"resp_1"}}`)
+	observe(`{"type":"response.interrupt.accepted","response_id":"resp_1"}`)
+	observe(`{"type":"error","error":{"type":"server_error","message":"failed"}}`)
+	require.Empty(t, state.acceptedInterrupts)
+	observe(interrupted)
+	require.Len(t, *turns, 1, "only the error is reported")
+	require.NotNil(t, (*turns)[0].Failure)
+	require.Equal(t, Usage{}, state.usage)
+}

@@ -244,3 +244,20 @@ func TestOpenAIWSPassthroughClientInterruptedTurnIsBilledAndBound(t *testing.T) 
 		})
 	}
 }
+
+func TestOpenAIWSReplayTrackerIgnoresSettledAndAcknowledgementIDs(t *testing.T) {
+	tracker := newOpenAIWSPassthroughReplayTracker(nil, 0)
+	tracker.RegisterTurn(1, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`))
+	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.created","response":{"id":"resp_a"}}`))
+	tracker.CompleteResponse("resp_a")
+	tracker.RegisterTurn(2, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`))
+	// A duplicate terminal of the settled response and an acknowledgement
+	// carrying an event id must not bind turn 2.
+	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.incomplete","response":{"id":"resp_a","incomplete_details":{"reason":"interrupted"}}}`))
+	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.interrupt.accepted","id":"evt_ack","response_id":"resp_a"}`))
+	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.created","response":{"id":"resp_b"}}`))
+	tracker.CompleteResponse("resp_b")
+	_, ok := tracker.BuildFailoverError(7, nil)
+	require.False(t, ok, "turn 2 settled under its own response id")
+	require.Empty(t, tracker.pending)
+}

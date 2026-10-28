@@ -27,10 +27,16 @@ type openAIWSQuotaGateConn struct {
 	readCount       atomic.Int32
 	gateOnce        sync.Once
 	holdOpen        bool
+	// gateRead is the read that waits for the next turn (default 2).
+	gateRead int32
 }
 
 func (connection *openAIWSQuotaGateConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
-	if connection.readCount.Add(1) == 2 && connection.nextTurnWritten != nil {
+	gateRead := connection.gateRead
+	if gateRead == 0 {
+		gateRead = 2
+	}
+	if connection.readCount.Add(1) == gateRead && connection.nextTurnWritten != nil {
 		select {
 		case <-ctx.Done():
 			return coderws.MessageText, nil, ctx.Err()
@@ -94,6 +100,9 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 		bound       bool
 		noSpare     bool
 		window      int
+		// interruptedFirst ends the first turn with an accepted client
+		// interrupt (response.incomplete, reason interrupted).
+		interruptedFirst bool
 	}{
 		{name: "five_hour_limit", window: 300},
 		{name: "weekly_limit", window: 10080},
@@ -110,6 +119,7 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 		{name: "unknown_history_is_not_replayed", noHistory: true},
 		{name: "owned_continuation_is_not_rewritten", bound: true},
 		{name: "no_replacement_fails_closed", noSpare: true},
+		{name: "client_interrupted_previous_turn", interruptedFirst: true},
 	}
 	for _, scenario := range scenarios {
 		testContext.Run(scenario.name, func(testContext *testing.T) {
@@ -134,8 +144,16 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 			}
 			firstCompletion := []byte(`{"type":"response.completed","response":{"id":"resp_quota_a_1","status":"completed","output":[{"type":"reasoning","encrypted_content":"account-bound","summary":[{"type":"summary_text","text":"safe"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first answer"}]}],"usage":{"input_tokens":2,"output_tokens":3}}}`)
 			accountAConnection := &openAIWSCaptureConn{}
+			firstTurnEvents := [][]byte{firstCompletion}
+			if scenario.interruptedFirst {
+				firstTurnEvents = [][]byte{
+					[]byte(`{"type":"response.created","response":{"id":"resp_quota_a_1","status":"in_progress"}}`),
+					[]byte(`{"type":"response.interrupt.accepted","response_id":"resp_quota_a_1","sequence_number":2}`),
+					[]byte(`{"type":"response.incomplete","response":{"id":"resp_quota_a_1","status":"incomplete","incomplete_details":{"reason":"interrupted"},"usage":{"input_tokens":2,"output_tokens":3}}}`),
+				}
+			}
 			if !scenario.handshake && !scenario.noHistory {
-				accountAConnection.events = append(accountAConnection.events, firstCompletion)
+				accountAConnection.events = append(accountAConnection.events, firstTurnEvents...)
 			}
 			for _, prefix := range scenario.prefix {
 				accountAConnection.events = append(accountAConnection.events, []byte(prefix))
@@ -150,7 +168,7 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 			accountBConnection := &openAIWSCaptureConn{events: [][]byte{accountBQuota, secondCompletion}}
 			var accountAUpstream openAIWSClientConn = accountAConnection
 			if !scenario.handshake && !scenario.noHistory && !scenario.quotaOnly {
-				accountAUpstream = &openAIWSQuotaGateConn{openAIWSCaptureConn: accountAConnection, nextTurnWritten: make(chan struct{})}
+				accountAUpstream = &openAIWSQuotaGateConn{openAIWSCaptureConn: accountAConnection, nextTurnWritten: make(chan struct{}), gateRead: int32(len(firstTurnEvents) + 1)}
 			}
 			if scenario.quotaOnly {
 				accountAUpstream = &openAIWSQuotaGateConn{openAIWSCaptureConn: accountAConnection, holdOpen: true}
@@ -220,8 +238,12 @@ func TestOpenAIWSQuotaFailoverMatrix(testContext *testing.T) {
 			}
 			require.NoError(testContext, client.Write(ctx, coderws.MessageText, firstRequest))
 			if !scenario.handshake && !scenario.noHistory {
-				_, payload, readErr := client.Read(ctx)
-				require.NoError(testContext, readErr)
+				var payload []byte
+				var readErr error
+				for range firstTurnEvents {
+					_, payload, readErr = client.Read(ctx)
+					require.NoError(testContext, readErr)
+				}
 				require.Equal(testContext, "resp_quota_a_1", gjson.GetBytes(payload, "response.id").String())
 				if scenario.quotaOnly {
 					// Quota telemetry is private. Wait for its internal observation

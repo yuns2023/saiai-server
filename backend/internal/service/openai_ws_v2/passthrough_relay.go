@@ -1041,6 +1041,15 @@ func emitTurnComplete(
 	if onTurnComplete == nil || ((observed.failure != nil || observed.clientInterrupted) && !matched) {
 		return
 	}
+	if matched && attribution == "single_outstanding" && state != nil {
+		// failUnbound may have ended a bound response; forget its interrupt
+		// acknowledgement so a later terminal for it cannot be billed.
+		for responseID := range state.acceptedInterrupts {
+			if !state.turns.isBound(responseID) {
+				delete(state.acceptedInterrupts, responseID)
+			}
+		}
+	}
 	var diagnostics *RelayFailureDiagnostics
 	if observed.failure != nil {
 		diagnostics = buildRelayFailureDiagnostics(state, observed, metadata, attribution)
@@ -1296,7 +1305,7 @@ func (s *relayState) isClientInterruptedTerminal(message []byte, eventType, resp
 	if s == nil || eventType != "response.incomplete" || responseID == "" {
 		return false
 	}
-	if _, ok := s.acceptedInterrupts[responseID]; !ok {
+	if _, ok := s.acceptedInterrupts[responseID]; !ok || !s.turns.isBound(responseID) {
 		return false
 	}
 	return gjson.GetBytes(message, "response.incomplete_details.reason").String() == "interrupted"
