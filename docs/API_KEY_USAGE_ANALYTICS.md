@@ -45,6 +45,36 @@ The server verifies Key ownership before running an aggregate query. A selected
 Key filters the summary, trend, and model data. The dashboard also applies the
 same Key and date range to its recent-usage request.
 
+## Actual group filter
+
+The user usage records page and the user dashboard can filter by the final
+(actual) group of each usage record: `usage_logs.group_id` after smart switch
+or fallback, shown as the actual group column. These authenticated user
+endpoints accept an optional positive `group_id`:
+
+- `GET /api/v1/usage` and `GET /api/v1/usage/stats`;
+- `GET /api/v1/usage/dashboard/stats`, `/trend` and `/models`; and
+- `GET /api/v1/usage/dashboard/api-key-breakdown`.
+
+A missing value means all groups; zero, negative or non-numeric values return
+HTTP 400. Every query is forced to the current user's own records, so a group
+ID only narrows those records and needs no group ownership check. It combines
+with an owned `api_key_id`. In the Key ranking the group narrows usage only:
+the Key inventory, including zero-usage Keys, is unchanged. With a group
+selected, dashboard Key counts stay user-wide unless a Key is also selected,
+the summary keeps each view's existing TPM definition, and the server's today
+boundary is unchanged.
+
+`GET /api/v1/usage/groups` takes `start_date`, `end_date` and `timezone` and
+returns `[{"id", "name"}]` for the groups present in the current user's records
+in that range, most used first. It includes groups the user can no longer use
+and shows each group's current name; it never returns other users' groups or
+group configuration. The Web UI loads the options for the selected range, keeps
+a selected group that is absent from a new range (shown as `#<id>`), reads
+`?group_id=` on the usage records page, passes it from the dashboard's details
+link, and applies it to CSV exports, whose filters are frozen when the export
+starts.
+
 ## Cache read analytics
 
 Admin and user summary cards, Key breakdown rows, and the public Key usage
