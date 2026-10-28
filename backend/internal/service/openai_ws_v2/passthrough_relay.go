@@ -1412,7 +1412,7 @@ func parseUsageAndAccumulate(
 	clientInterrupted bool,
 	onParseFailure func(eventType string, usageRaw string),
 ) Usage {
-	if state == nil || len(message) == 0 || !(shouldParseUsage(eventType) || clientInterrupted) {
+	if state == nil || len(message) == 0 || (!shouldParseUsage(eventType) && !clientInterrupted) {
 		return Usage{}
 	}
 	usageResult := gjson.GetBytes(message, "response.usage")
