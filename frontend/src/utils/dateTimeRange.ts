@@ -9,7 +9,9 @@ export function localDateTime(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
-// All ranges are half-open: start inclusive, end exclusive.
+// All ranges are half-open: start inclusive, end exclusive. "today" is the
+// whole calendar day, so it is never empty right after midnight and picks up
+// new rows on refresh without moving its end.
 export function presetTimeRange(preset: string, now = new Date()): DateTimeRange {
   const end = new Date(now)
   end.setSeconds(0, 0)
@@ -18,7 +20,10 @@ export function presetTimeRange(preset: string, now = new Date()): DateTimeRange
     start.setTime(end.getTime() - 86400000)
   } else {
     start.setHours(0, 0, 0, 0)
-    if (preset === 'yesterday') {
+    if (preset === 'today') {
+      end.setTime(start.getTime())
+      end.setDate(end.getDate() + 1)
+    } else if (preset === 'yesterday') {
       end.setHours(0, 0, 0, 0)
       start.setDate(start.getDate() - 1)
     } else if (preset === 'lastMonth') {

@@ -5,9 +5,11 @@ import { nextTick } from 'vue'
 import UsageView from '../UsageView.vue'
 import UsageCostCell from '@/components/common/UsageCostCell.vue'
 
-const { query, getStatsByDateRange, list, showError, showWarning, showSuccess, showInfo } = vi.hoisted(() => ({
+const { query, getStatsByDateRange, getUsageGroups, routeQuery, list, showError, showWarning, showSuccess, showInfo } = vi.hoisted(() => ({
   query: vi.fn(),
   getStatsByDateRange: vi.fn(),
+  getUsageGroups: vi.fn(),
+  routeQuery: {} as Record<string, string>,
   list: vi.fn(),
   showError: vi.fn(),
   showWarning: vi.fn(),
@@ -57,6 +59,7 @@ vi.mock('@/api', () => ({
   usageAPI: {
     query,
     getStatsByDateRange,
+    getUsageGroups,
   },
   keysAPI: {
     list,
@@ -71,7 +74,7 @@ vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
   return {
     ...actual,
-    useRoute: () => ({ query: {} }),
+    useRoute: () => ({ query: routeQuery }),
   }
 })
 
@@ -94,6 +97,8 @@ describe('user UsageView tooltip', () => {
   beforeEach(() => {
     query.mockReset()
     getStatsByDateRange.mockReset()
+    getUsageGroups.mockReset()
+    getUsageGroups.mockResolvedValue([])
     list.mockReset()
     showError.mockReset()
     showWarning.mockReset()
@@ -446,6 +451,8 @@ describe('user UsageView density layout', () => {
     localStorage.clear()
     query.mockReset()
     getStatsByDateRange.mockReset()
+    getUsageGroups.mockReset()
+    getUsageGroups.mockResolvedValue([])
     list.mockReset()
     ;(globalThis as any).ResizeObserver = class {
       observe() {}
@@ -575,5 +582,75 @@ describe('user UsageView density layout', () => {
     await detailFor('req-A').trigger('mouseleave')
     expect(state().tooltipVisible).toBe(false)
     wrapper.unmount()
+  })
+})
+
+describe('user UsageView filters', () => {
+  beforeEach(() => {
+    query.mockReset()
+    getStatsByDateRange.mockReset()
+    getUsageGroups.mockReset()
+    list.mockReset()
+    for (const key of Object.keys(routeQuery)) delete routeQuery[key]
+    query.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStatsByDateRange.mockResolvedValue({ total_requests: 0 })
+    getUsageGroups.mockResolvedValue([])
+    list.mockResolvedValue({ items: [] })
+  })
+
+  const mountForFilters = () =>
+    mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          TablePageLayout: TablePageLayoutStub,
+          Pagination: true,
+          EmptyState: true,
+          Select: {
+            props: ['modelValue', 'options'],
+            emits: ['update:modelValue', 'change'],
+            template:
+              '<button @click="$emit(\'update:modelValue\', options[1]?.value); $emit(\'change\')">{{ options.map(o => o.label).join(\'|\') }}</button>',
+          },
+          DateRangePicker: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+  it('defaults to today and filters list, totals, and options by the actual group', async () => {
+    getUsageGroups.mockResolvedValue([{ id: 31, name: 'self-hosted' }])
+    const wrapper = mountForFilters()
+    await flushPromises()
+
+    const now = new Date()
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    expect(query).toHaveBeenLastCalledWith(
+      expect.objectContaining({ start_date: today, end_date: today, group_id: undefined }),
+      expect.anything(),
+    )
+    expect(getUsageGroups).toHaveBeenCalledWith(today, today, expect.any(String))
+
+    const groupFilter = wrapper.get('[data-testid="usage-group-filter"]')
+    expect(groupFilter.text()).toBe('usage.allGroups|self-hosted')
+    await groupFilter.trigger('click')
+    await flushPromises()
+
+    expect(query).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 31, page: 1 }), expect.anything())
+    expect(getStatsByDateRange).toHaveBeenLastCalledWith(today, today, undefined, expect.any(String), 31)
+  })
+
+  it('keeps a group from the URL selectable when the range has no rows for it', async () => {
+    Object.assign(routeQuery, { group_id: '12', start_date: '2026-10-01', end_date: '2026-10-07' })
+    const wrapper = mountForFilters()
+    await flushPromises()
+
+    expect(query).toHaveBeenLastCalledWith(
+      expect.objectContaining({ start_date: '2026-10-01', end_date: '2026-10-07', group_id: 12 }),
+      expect.anything(),
+    )
+    expect(getStatsByDateRange).toHaveBeenLastCalledWith('2026-10-01', '2026-10-07', undefined, expect.any(String), 12)
+    expect(wrapper.get('[data-testid="usage-group-filter"]').text()).toBe('usage.allGroups|#12')
   })
 })

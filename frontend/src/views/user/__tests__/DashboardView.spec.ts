@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getDashboardModels: vi.fn(),
   getDashboardAPIKeyBreakdown: vi.fn(),
   getByDateRange: vi.fn(),
+  getUsageGroups: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn()
 }))
@@ -42,7 +43,8 @@ vi.mock('@/api/usage', () => ({
     getDashboardTrend: mocks.getDashboardTrend,
     getDashboardModels: mocks.getDashboardModels,
     getDashboardAPIKeyBreakdown: mocks.getDashboardAPIKeyBreakdown,
-    getByDateRange: mocks.getByDateRange
+    getByDateRange: mocks.getByDateRange,
+    getUsageGroups: mocks.getUsageGroups
   }
 }))
 
@@ -124,13 +126,14 @@ describe('user DashboardView API Key analytics', () => {
       summary: { requests: 0, total_tokens: 0, total_cost: 0, actual_cost: 0 }
     })
     mocks.getByDateRange.mockResolvedValue({ items: [] })
+    mocks.getUsageGroups.mockResolvedValue([{ id: 11, name: 'self-hosted' }])
   })
 
   it('loads the generic Key ranking without applying a Key filter', async () => {
     mountDashboard()
     await flushPromises()
 
-    expect(mocks.getDashboardStats).toHaveBeenCalledWith(undefined)
+    expect(mocks.getDashboardStats).toHaveBeenCalledWith(undefined, undefined)
     expect(mocks.getDashboardAPIKeyBreakdown).toHaveBeenCalledWith(
       expect.objectContaining({
         page: 1,
@@ -150,7 +153,7 @@ describe('user DashboardView API Key analytics', () => {
     await wrapper.get('[data-test="key-filter"]').trigger('click')
     await flushPromises()
 
-    expect(mocks.getDashboardStats).toHaveBeenLastCalledWith(11)
+    expect(mocks.getDashboardStats).toHaveBeenLastCalledWith(11, undefined)
     expect(mocks.getDashboardTrend).toHaveBeenLastCalledWith(
       expect.objectContaining({ api_key_id: 11 })
     )
@@ -161,7 +164,81 @@ describe('user DashboardView API Key analytics', () => {
       expect.any(String),
       expect.any(String),
       11,
-      expect.any(String)
+      expect.any(String),
+      undefined
     )
+  })
+
+  it('applies the selected actual group to every widget and the details link', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+    expect(mocks.getUsageGroups).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.any(String))
+
+    await wrapper.get('[data-testid="dashboard-group-filter"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.getDashboardStats).toHaveBeenLastCalledWith(undefined, 11)
+    for (const request of [mocks.getDashboardTrend, mocks.getDashboardModels, mocks.getDashboardAPIKeyBreakdown]) {
+      expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 11 }))
+    }
+    expect(mocks.getDashboardAPIKeyBreakdown).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 }))
+    expect(mocks.getByDateRange).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      expect.any(String),
+      11
+    )
+    const recent = wrapper.findComponent({ name: 'UserDashboardRecentUsage' })
+    expect(recent.props('viewAllTo')).toMatchObject({ path: '/usage', query: { group_id: '11' } })
+  })
+  it('keeps the latest group selection when an older response arrives last', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    let resolveFirst: (value: typeof dashboardStats) => void = () => {}
+    mocks.getDashboardStats
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve }))
+      .mockResolvedValueOnce({ ...dashboardStats, today_requests: 31 })
+    const groupFilter = wrapper.findAllComponents(SelectStub)[1]
+    groupFilter.vm.$emit('update:modelValue', 12)
+    groupFilter.vm.$emit('update:modelValue', 31)
+    await flushPromises()
+    resolveFirst({ ...dashboardStats, today_requests: 12 })
+    await flushPromises()
+
+    expect(mocks.getDashboardStats).toHaveBeenLastCalledWith(undefined, 31)
+    expect(wrapper.findComponent({ name: 'UserDashboardStats' }).props('stats')).toMatchObject({ today_requests: 31 })
+  })
+
+  it('exports every Key ranking page with the filters frozen at export start', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    const page = (n: number) => ({
+      items: [], total: 101, page: n, page_size: 100, pages: 2,
+      summary: { requests: 0, total_tokens: 0, total_cost: 0, actual_cost: 0 }
+    })
+    let resolveFirstPage: (value: ReturnType<typeof page>) => void = () => {}
+    mocks.getDashboardAPIKeyBreakdown.mockReset()
+    mocks.getDashboardAPIKeyBreakdown
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirstPage = resolve }))
+      .mockResolvedValue(page(2))
+    wrapper.findComponent({ name: 'UserDashboardAPIKeyBreakdown' }).vm.$emit('export')
+    await flushPromises()
+    wrapper.findAllComponents(SelectStub)[1].vm.$emit('update:modelValue', 31)
+    resolveFirstPage(page(1))
+    await flushPromises()
+
+    const exportCalls = mocks.getDashboardAPIKeyBreakdown.mock.calls
+      .map(([params]) => params)
+      .filter((params) => params.page_size === 100)
+    expect(exportCalls).toHaveLength(2)
+    expect(exportCalls.map((params) => params.group_id)).toEqual([undefined, undefined])
+    expect(click).toHaveBeenCalledTimes(1)
+    click.mockRestore()
+    vi.unstubAllGlobals()
   })
 })

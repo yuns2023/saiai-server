@@ -17,6 +17,16 @@
                 @update:model-value="onAPIKeyFilterChange"
               />
             </div>
+            <div class="min-w-[200px]">
+              <label class="input-label">{{ t('dashboard.groupFilter') }}</label>
+              <Select
+                :model-value="selectedGroupID"
+                :options="groupOptions"
+                :searchable="true"
+                data-testid="dashboard-group-filter"
+                @update:model-value="onGroupFilterChange"
+              />
+            </div>
             <p class="text-sm text-gray-500 dark:text-gray-400">
               {{ t('dashboard.apiKeyFilterHint') }}
             </p>
@@ -80,8 +90,10 @@ import { keysAPI } from '@/api/keys'
 import {
   usageAPI,
   type APIKeyUsageBreakdownItem,
+  type APIKeyUsageBreakdownParams,
   type APIKeyUsageBreakdownSort,
   type APIKeyUsageBreakdownSummary,
+  type UsageGroupOption,
   type UserDashboardStats as UserStatsType
 } from '@/api/usage'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -111,6 +123,21 @@ const modelStats = ref<ModelStat[]>([])
 const recentUsage = ref<UsageLog[]>([])
 const selectedAPIKeyID = ref<number | null>(null)
 const apiKeyOptions = ref<Array<{ value: number | null; label: string }>>([])
+// Final groups seen in this user's usage for the chart range; a selected group
+// missing from a new range stays selectable so the filter holds.
+const selectedGroupID = ref<number | null>(null)
+const usageGroups = ref<UsageGroupOption[]>([])
+const groupOptions = computed(() => {
+  const options: Array<{ value: number | null; label: string }> = [
+    { value: null, label: t('dashboard.allGroups') },
+    ...usageGroups.value.map((group) => ({ value: group.id, label: group.name || `#${group.id}` }))
+  ]
+  const selected = selectedGroupID.value
+  if (selected && !usageGroups.value.some((group) => group.id === selected)) {
+    options.push({ value: selected, label: `#${selected}` })
+  }
+  return options
+})
 const keyBreakdownSort = ref<APIKeyUsageBreakdownSort>('actual_cost_desc')
 
 const keyBreakdownItems = ref<APIKeyUsageBreakdownItem[]>([])
@@ -138,10 +165,12 @@ const endDate = ref(formatLocalDate(today))
 const granularity = ref<'day' | 'hour' | '15m'>('day')
 
 const selectedAPIKey = computed(() => selectedAPIKeyID.value ?? undefined)
+const selectedGroup = computed(() => selectedGroupID.value ?? undefined)
 const usageDetailsRoute = computed<RouteLocationRaw>(() => ({
   path: '/usage',
   query: {
     ...(selectedAPIKeyID.value ? { api_key_id: String(selectedAPIKeyID.value) } : {}),
+    ...(selectedGroupID.value ? { group_id: String(selectedGroupID.value) } : {}),
     start_date: startDate.value,
     end_date: endDate.value
   }
@@ -175,18 +204,25 @@ const loadAPIKeyOptions = async () => {
   }
 }
 
+// Each loader applies only its latest response, so quick filter changes cannot
+// leave cards or tables showing an earlier selection.
+const requestSeq = { stats: 0, charts: 0, recent: 0, breakdown: 0, groups: 0 }
+
 const loadStats = async () => {
+  const seq = ++requestSeq.stats
   loading.value = true
   try {
-    stats.value = await usageAPI.getDashboardStats(selectedAPIKey.value)
+    const response = await usageAPI.getDashboardStats(selectedAPIKey.value, selectedGroup.value)
+    if (seq === requestSeq.stats) stats.value = response
   } catch (error) {
     console.error('Failed to load dashboard stats:', error)
   } finally {
-    loading.value = false
+    if (seq === requestSeq.stats) loading.value = false
   }
 }
 
 const loadCharts = async () => {
+  const seq = ++requestSeq.charts
   loadingCharts.value = true
   try {
     const [trend, models] = await Promise.all([
@@ -195,52 +231,60 @@ const loadCharts = async () => {
         end_date: endDate.value,
         granularity: granularity.value,
         api_key_id: selectedAPIKey.value,
+        group_id: selectedGroup.value,
         timezone: browserTimezone
       }),
       usageAPI.getDashboardModels({
         start_date: startDate.value,
         end_date: endDate.value,
         api_key_id: selectedAPIKey.value,
+        group_id: selectedGroup.value,
         timezone: browserTimezone
       })
     ])
+    if (seq !== requestSeq.charts) return
     trendData.value = trend.trend || []
     modelStats.value = models.models || []
   } catch (error) {
     console.error('Failed to load dashboard charts:', error)
   } finally {
-    loadingCharts.value = false
+    if (seq === requestSeq.charts) loadingCharts.value = false
   }
 }
 
 const loadRecent = async () => {
+  const seq = ++requestSeq.recent
   loadingUsage.value = true
   try {
     const response = await usageAPI.getByDateRange(
       startDate.value,
       endDate.value,
       selectedAPIKey.value,
-      browserTimezone
+      browserTimezone,
+      selectedGroup.value
     )
-    recentUsage.value = response.items.slice(0, 5)
+    if (seq === requestSeq.recent) recentUsage.value = response.items.slice(0, 5)
   } catch (error) {
     console.error('Failed to load recent usage:', error)
   } finally {
-    loadingUsage.value = false
+    if (seq === requestSeq.recent) loadingUsage.value = false
   }
 }
 
 const loadKeyBreakdown = async () => {
+  const seq = ++requestSeq.breakdown
   loadingKeyBreakdown.value = true
   try {
     const response = await usageAPI.getDashboardAPIKeyBreakdown({
       start_date: startDate.value,
       end_date: endDate.value,
+      group_id: selectedGroup.value,
       timezone: browserTimezone,
       page: keyBreakdownPagination.page,
       page_size: keyBreakdownPagination.pageSize,
       sort: keyBreakdownSort.value
     })
+    if (seq !== requestSeq.breakdown) return
     keyBreakdownItems.value = response.items || []
     keyBreakdownSummary.value = response.summary
     keyBreakdownPagination.total = response.total
@@ -248,13 +292,32 @@ const loadKeyBreakdown = async () => {
   } catch (error) {
     console.error('Failed to load API Key usage breakdown:', error)
   } finally {
-    loadingKeyBreakdown.value = false
+    if (seq === requestSeq.breakdown) loadingKeyBreakdown.value = false
+  }
+}
+
+const loadGroupOptions = async () => {
+  const seq = ++requestSeq.groups
+  try {
+    const groups = await usageAPI.getUsageGroups(startDate.value, endDate.value, browserTimezone)
+    if (seq === requestSeq.groups) usageGroups.value = groups
+  } catch (error) {
+    console.error('Failed to load usage group options:', error)
   }
 }
 
 const loadRangeData = () => {
   keyBreakdownPagination.page = 1
-  void Promise.all([loadCharts(), loadRecent(), loadKeyBreakdown()])
+  void Promise.all([loadCharts(), loadRecent(), loadKeyBreakdown(), loadGroupOptions()])
+}
+
+const onGroupFilterChange = (value: string | number | boolean | null) => {
+  if (typeof value === 'boolean') return
+  const parsed = value === null || value === '' ? null : Number(value)
+  if (parsed !== null && !(Number.isSafeInteger(parsed) && parsed > 0)) return
+  selectedGroupID.value = parsed
+  keyBreakdownPagination.page = 1
+  void Promise.all([loadStats(), loadCharts(), loadRecent(), loadKeyBreakdown()])
 }
 
 const selectAPIKey = (apiKeyID: number | null) => {
@@ -291,19 +354,14 @@ const changeKeyBreakdownSort = (sort: APIKeyUsageBreakdownSort) => {
   void loadKeyBreakdown()
 }
 
-const fetchAllKeyBreakdownRows = async () => {
+const fetchAllKeyBreakdownRows = async (
+  query: Omit<APIKeyUsageBreakdownParams, 'page' | 'page_size'>
+) => {
   const rows: APIKeyUsageBreakdownItem[] = []
   let page = 1
   let pages = 1
   do {
-    const response = await usageAPI.getDashboardAPIKeyBreakdown({
-      start_date: startDate.value,
-      end_date: endDate.value,
-      timezone: browserTimezone,
-      page,
-      page_size: 100,
-      sort: keyBreakdownSort.value
-    })
+    const response = await usageAPI.getDashboardAPIKeyBreakdown({ ...query, page, page_size: 100 })
     rows.push(...response.items)
     pages = response.pages
     page += 1
@@ -312,8 +370,16 @@ const fetchAllKeyBreakdownRows = async () => {
 }
 
 const exportKeyBreakdown = async () => {
+  // Freeze the query so filter changes mid-export cannot mix result sets.
+  const query = {
+    start_date: startDate.value,
+    end_date: endDate.value,
+    group_id: selectedGroup.value,
+    timezone: browserTimezone,
+    sort: keyBreakdownSort.value
+  }
   try {
-    const rows = await fetchAllKeyBreakdownRows()
+    const rows = await fetchAllKeyBreakdownRows(query)
     const headers = [
       'API Key ID',
       'API Key Name',
@@ -353,7 +419,7 @@ const exportKeyBreakdown = async () => {
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `api-key-usage_${startDate.value}_to_${endDate.value}.csv`
+    link.download = `api-key-usage_${query.start_date}_to_${query.end_date}.csv`
     link.click()
     window.URL.revokeObjectURL(url)
     appStore.showSuccess(t('dashboard.keyBreakdownExported'))
@@ -366,6 +432,7 @@ const exportKeyBreakdown = async () => {
 onMounted(() => {
   void authStore.refreshUser()
   void loadAPIKeyOptions()
+  void loadGroupOptions()
   void Promise.all([loadStats(), loadCharts(), loadRecent(), loadKeyBreakdown()])
 })
 </script>

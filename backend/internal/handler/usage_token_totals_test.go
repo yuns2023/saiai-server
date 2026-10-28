@@ -34,6 +34,10 @@ func (s usageTokenTotalsRepoStub) GetUserStatsAggregated(ctx context.Context, id
 	return s.GetAPIKeyStatsAggregated(ctx, id, start, end)
 }
 
+func (s usageTokenTotalsRepoStub) GetUserStatsAggregatedWithFilters(ctx context.Context, id, _, _ int64, start, end time.Time) (*usagestats.UsageStats, error) {
+	return s.GetAPIKeyStatsAggregated(ctx, id, start, end)
+}
+
 func TestGatewayUsageRangeIncludesCacheBreakdown(t *testing.T) {
 	svc := service.NewUsageService(usageTokenTotalsRepoStub{}, nil, nil, nil)
 	h := &GatewayHandler{usageService: svc}
@@ -71,7 +75,7 @@ type usageHostedTotalsRepoStub struct {
 	metered *float64
 }
 
-func (s usageHostedTotalsRepoStub) GetUserStatsAggregated(context.Context, int64, time.Time, time.Time) (*usagestats.UsageStats, error) {
+func (s usageHostedTotalsRepoStub) GetUserStatsAggregatedWithFilters(context.Context, int64, int64, int64, time.Time, time.Time) (*usagestats.UsageStats, error) {
 	return &usagestats.UsageStats{TotalRequests: 1, TotalCost: 1.25, TotalMeteredCost: s.metered}, nil
 }
 

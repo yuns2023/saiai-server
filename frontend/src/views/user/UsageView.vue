@@ -84,6 +84,21 @@
               </div>
             </div>
 
+            <!-- Final (actual) Group Filter -->
+            <div class="flex w-full flex-col items-start gap-1 sm:w-auto sm:flex-row sm:items-center sm:gap-2">
+              <span class="whitespace-nowrap text-sm font-medium text-gray-600 dark:text-gray-300">{{ t('usage.groupFilter') }}</span>
+              <div class="w-44">
+                <Select
+                  v-model="filters.group_id"
+                  :options="groupOptions"
+                  :placeholder="t('usage.allGroups')"
+                  :aria-label="t('usage.groupFilter')"
+                  data-testid="usage-group-filter"
+                  @change="applyFilters"
+                />
+              </div>
+            </div>
+
             <!-- Date Range Filter -->
             <div class="flex w-full flex-col items-start gap-1 sm:w-auto sm:flex-row sm:items-center sm:gap-2">
               <span class="whitespace-nowrap text-sm font-medium text-gray-600 dark:text-gray-300">{{ t('usage.timeRange') }}</span>
@@ -532,6 +547,7 @@ import Select from '@/components/common/Select.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { UsageLog, ApiKey, UsageQueryParams, UsageStatsResponse } from '@/types'
+import type { UsageGroupOption } from '@/api/usage'
 import type { Column } from '@/components/common/types'
 import { formatDateTime, formatReasoningEffort, getEffectiveReasoningEffort } from '@/utils/format'
 import { escapeCsvCell } from '@/utils/csv'
@@ -617,15 +633,28 @@ const apiKeyOptions = computed(() => {
   ]
 })
 
+// Final groups seen in this user's usage for the selected range. A selected
+// group missing from the current range stays selectable so the filter holds.
+const usageGroups = ref<UsageGroupOption[]>([])
+const groupOptions = computed(() => {
+  const options: Array<{ value: number | null; label: string }> = [
+    { value: null, label: t('usage.allGroups') },
+    ...usageGroups.value.map((group) => ({ value: group.id, label: group.name || `#${group.id}` }))
+  ]
+  const selected = filters.value.group_id
+  if (selected && !usageGroups.value.some((group) => group.id === selected)) {
+    options.push({ value: selected, label: `#${selected}` })
+  }
+  return options
+})
+
 // Helper function to format date in local timezone
 const formatLocalDate = (date: Date): string => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-// Initialize date range immediately
+// Initialize date range immediately (default: today)
 const now = new Date()
-const weekAgo = new Date(now)
-weekAgo.setDate(weekAgo.getDate() - 6)
 
 const firstQueryValue = (value: unknown): string => {
   if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : ''
@@ -635,17 +664,21 @@ const validDateQuery = (value: unknown): string | undefined => {
   const candidate = firstQueryValue(value)
   return /^\d{4}-\d{2}-\d{2}$/.test(candidate) ? candidate : undefined
 }
-const parsedAPIKeyID = Number(firstQueryValue(routeQuery.api_key_id))
-const initialAPIKeyID =
-  Number.isSafeInteger(parsedAPIKeyID) && parsedAPIKeyID > 0 ? parsedAPIKeyID : undefined
+const positiveQueryID = (value: unknown): number | undefined => {
+  const parsed = Number(firstQueryValue(value))
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+const initialAPIKeyID = positiveQueryID(routeQuery.api_key_id)
+const initialGroupID = positiveQueryID(routeQuery.group_id)
 const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
 
 // Date range state
-const startDate = ref(validDateQuery(routeQuery.start_date) || formatLocalDate(weekAgo))
+const startDate = ref(validDateQuery(routeQuery.start_date) || formatLocalDate(now))
 const endDate = ref(validDateQuery(routeQuery.end_date) || formatLocalDate(now))
 
 const filters = ref<UsageQueryParams>({
   api_key_id: initialAPIKeyID,
+  group_id: initialGroupID,
   start_date: undefined,
   end_date: undefined
 })
@@ -663,6 +696,7 @@ const onDateRangeChange = (range: {
   filters.value.start_date = range.startDate
   filters.value.end_date = range.endDate
   applyFilters()
+  loadUsageGroups()
 }
 
 const pagination = reactive({
@@ -763,18 +797,37 @@ const loadApiKeys = async () => {
   }
 }
 
+let usageStatsRequestSeq = 0
 const loadUsageStats = async () => {
+  const seq = ++usageStatsRequestSeq
   try {
     const apiKeyId = filters.value.api_key_id ? Number(filters.value.api_key_id) : undefined
+    const groupId = filters.value.group_id ? Number(filters.value.group_id) : undefined
     const stats = await usageAPI.getStatsByDateRange(
       filters.value.start_date || startDate.value,
       filters.value.end_date || endDate.value,
       apiKeyId,
-      browserTimezone
+      browserTimezone,
+      groupId
     )
-    usageStats.value = stats
+    if (seq === usageStatsRequestSeq) usageStats.value = stats
   } catch (error) {
     console.error('Failed to load usage stats:', error)
+  }
+}
+
+let usageGroupsRequestSeq = 0
+const loadUsageGroups = async () => {
+  const seq = ++usageGroupsRequestSeq
+  try {
+    const groups = await usageAPI.getUsageGroups(
+      filters.value.start_date || startDate.value,
+      filters.value.end_date || endDate.value,
+      browserTimezone
+    )
+    if (seq === usageGroupsRequestSeq) usageGroups.value = groups
+  } catch (error) {
+    console.error('Failed to load usage groups:', error)
   }
 }
 
@@ -787,20 +840,20 @@ const applyFilters = () => {
 const resetFilters = () => {
   filters.value = {
     api_key_id: undefined,
+    group_id: undefined,
     start_date: undefined,
     end_date: undefined
   }
-  // Reset date range to default (last 7 days)
-  const now = new Date()
-  const weekAgo = new Date(now)
-  weekAgo.setDate(weekAgo.getDate() - 6)
-  startDate.value = formatLocalDate(weekAgo)
-  endDate.value = formatLocalDate(now)
+  // Reset date range to default (today)
+  const today = formatLocalDate(new Date())
+  startDate.value = today
+  endDate.value = today
   filters.value.start_date = startDate.value
   filters.value.end_date = endDate.value
   pagination.page = 1
   loadUsageLogs()
   loadUsageStats()
+  loadUsageGroups()
 }
 
 const handlePageChange = (page: number) => {
@@ -823,6 +876,8 @@ const exportToCSV = async () => {
   exporting.value = true
   appStore.showInfo(t('usage.preparingExport'))
 
+  // Freeze the filters so changing them mid-export cannot mix result sets.
+  const exportFilters = { ...filters.value }
   try {
     const allLogs: UsageLog[] = []
     const pageSize = 100 // Use a larger page size for export to reduce requests
@@ -832,7 +887,7 @@ const exportToCSV = async () => {
       const params: UsageQueryParams = {
         page: page,
         page_size: pageSize,
-        ...filters.value,
+        ...exportFilters,
         timezone: browserTimezone
       }
       const response = await usageAPI.query(params)
@@ -902,7 +957,7 @@ const exportToCSV = async () => {
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `usage_${filters.value.start_date}_to_${filters.value.end_date}.csv`
+    link.download = `usage_${exportFilters.start_date}_to_${exportFilters.end_date}.csv`
     link.click()
     window.URL.revokeObjectURL(url)
 
@@ -971,6 +1026,7 @@ const hideTokenTooltip = () => {
 
 onMounted(() => {
   loadApiKeys()
+  loadUsageGroups()
   loadUsageLogs()
   loadUsageStats()
 })

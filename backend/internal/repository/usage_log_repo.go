@@ -1755,6 +1755,12 @@ func (r *usageLogRepository) ListByUserAndTimeRange(ctx context.Context, userID 
 
 // GetUserStatsAggregated returns aggregated usage statistics for a user using database-level aggregation
 func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID int64, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
+	return r.GetUserStatsAggregatedWithFilters(ctx, userID, 0, 0, startTime, endTime)
+}
+
+// GetUserStatsAggregatedWithFilters aggregates one user's usage, optionally
+// narrowed to one of the user's API keys and/or one final (actual) group.
+func (r *usageLogRepository) GetUserStatsAggregatedWithFilters(ctx context.Context, userID, apiKeyID, groupID int64, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
 	query := `
 		SELECT
 			COUNT(*) as total_requests,
@@ -1771,8 +1777,16 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms,
 			SUM(metered_cost) as total_metered_cost
 		FROM usage_logs
-		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
-	`
+		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3`
+	args := []any{userID, startTime, endTime}
+	if apiKeyID > 0 {
+		args = append(args, apiKeyID)
+		query += fmt.Sprintf(" AND api_key_id = $%d", len(args))
+	}
+	if groupID > 0 {
+		args = append(args, groupID)
+		query += fmt.Sprintf(" AND group_id = $%d", len(args))
+	}
 
 	var stats usagestats.UsageStats
 	var meteredCost sql.NullFloat64
@@ -1780,7 +1794,7 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 		ctx,
 		r.sql,
 		query,
-		[]any{userID, startTime, endTime},
+		args,
 		&stats.TotalRequests,
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
@@ -2657,6 +2671,117 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 	return stats, nil
 }
 
+// GetUserDashboardStatsWithFilters returns one user's dashboard summary
+// narrowed to an optional API key and/or final (actual) group. Key counts stay
+// user-wide; callers that select a key overwrite them with that key's state.
+func (r *usageLogRepository) GetUserDashboardStatsWithFilters(ctx context.Context, userID, apiKeyID, groupID int64) (*UserDashboardStats, error) {
+	stats := &UserDashboardStats{}
+	if err := scanSingleRow(
+		ctx,
+		r.sql,
+		"SELECT COUNT(*), COUNT(*) FILTER (WHERE status = $2) FROM api_keys WHERE user_id = $1 AND deleted_at IS NULL",
+		[]any{userID, service.StatusActive},
+		&stats.TotalAPIKeys,
+		&stats.ActiveAPIKeys,
+	); err != nil {
+		return nil, err
+	}
+
+	where := "user_id = $1"
+	args := []any{userID}
+	if apiKeyID > 0 {
+		args = append(args, apiKeyID)
+		where += fmt.Sprintf(" AND api_key_id = $%d", len(args))
+	}
+	if groupID > 0 {
+		args = append(args, groupID)
+		where += fmt.Sprintf(" AND group_id = $%d", len(args))
+	}
+	since := func(t time.Time) (string, []any) {
+		return fmt.Sprintf("%s AND created_at >= $%d", where, len(args)+1), append(append([]any{}, args...), t)
+	}
+
+	if err := scanSingleRow(
+		ctx,
+		r.sql,
+		`
+		SELECT
+			COUNT(*) as total_requests,
+			COALESCE(SUM(input_tokens), 0) as total_input_tokens,
+			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+			COALESCE(SUM(total_cost), 0) as total_cost,
+			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
+			COALESCE(AVG(duration_ms), 0) as avg_duration_ms
+		FROM usage_logs
+		WHERE `+where,
+		args,
+		&stats.TotalRequests,
+		&stats.TotalInputTokens,
+		&stats.TotalOutputTokens,
+		&stats.TotalCacheCreationTokens,
+		&stats.TotalCacheReadTokens,
+		&stats.TotalCost,
+		&stats.TotalActualCost,
+		&stats.AverageDurationMs,
+	); err != nil {
+		return nil, err
+	}
+	stats.TotalTokens = stats.TotalInputTokens + stats.TotalOutputTokens + stats.TotalCacheCreationTokens + stats.TotalCacheReadTokens
+
+	todayWhere, todayArgs := since(timezone.Today())
+	if err := scanSingleRow(
+		ctx,
+		r.sql,
+		`
+		SELECT
+			COUNT(*) as today_requests,
+			COALESCE(SUM(input_tokens), 0) as today_input_tokens,
+			COALESCE(SUM(output_tokens), 0) as today_output_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) as today_cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) as today_cache_read_tokens,
+			COALESCE(SUM(total_cost), 0) as today_cost,
+			COALESCE(SUM(actual_cost), 0) as today_actual_cost
+		FROM usage_logs
+		WHERE `+todayWhere,
+		todayArgs,
+		&stats.TodayRequests,
+		&stats.TodayInputTokens,
+		&stats.TodayOutputTokens,
+		&stats.TodayCacheCreationTokens,
+		&stats.TodayCacheReadTokens,
+		&stats.TodayCost,
+		&stats.TodayActualCost,
+	); err != nil {
+		return nil, err
+	}
+	stats.TodayTokens = stats.TodayInputTokens + stats.TodayOutputTokens + stats.TodayCacheCreationTokens + stats.TodayCacheReadTokens
+
+	// Keep each unfiltered dashboard's TPM definition: the per-key view counts
+	// cache tokens, the per-user view counts input and output only.
+	tokenExpr := "input_tokens + output_tokens"
+	if apiKeyID > 0 {
+		tokenExpr = "input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens"
+	}
+	recentWhere, recentArgs := since(time.Now().Add(-5 * time.Minute))
+	var requestCount, tokenCount int64
+	if err := scanSingleRow(
+		ctx,
+		r.sql,
+		fmt.Sprintf("SELECT COUNT(*), COALESCE(SUM(%s), 0) FROM usage_logs WHERE %s", tokenExpr, recentWhere),
+		recentArgs,
+		&requestCount,
+		&tokenCount,
+	); err != nil {
+		return nil, err
+	}
+	stats.Rpm = requestCount / 5
+	stats.Tpm = tokenCount / 5
+
+	return stats, nil
+}
+
 func apiKeyUsageBreakdownOrderBy(sortValue string) string {
 	switch sortValue {
 	case "requests_desc":
@@ -2676,13 +2801,21 @@ func apiKeyUsageBreakdownOrderBy(sortValue string) string {
 // Key inventory over an explicit range. The query never selects raw key data.
 func (r *usageLogRepository) GetUserAPIKeyUsageBreakdown(
 	ctx context.Context,
-	userID int64,
+	userID, groupID int64,
 	startTime, endTime time.Time,
 	params pagination.PaginationParams,
 	sortValue string,
 ) (*usagestats.APIKeyUsageBreakdownResult, error) {
 	result := &usagestats.APIKeyUsageBreakdownResult{
 		Items: make([]usagestats.APIKeyUsageBreakdownItem, 0),
+	}
+
+	// A group narrows usage only; the Key inventory (and zero-usage rows) stays.
+	usageWhere := "user_id = $1 AND created_at >= $2 AND created_at < $3"
+	args := []any{userID, startTime, endTime}
+	if groupID > 0 {
+		args = append(args, groupID)
+		usageWhere += fmt.Sprintf(" AND group_id = $%d", len(args))
 	}
 
 	summaryQuery := `
@@ -2694,7 +2827,7 @@ func (r *usageLogRepository) GetUserAPIKeyUsageBreakdown(
 				COALESCE(SUM(total_cost), 0) AS total_cost,
 				COALESCE(SUM(actual_cost), 0) AS actual_cost
 			FROM usage_logs
-			WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
+			WHERE ` + usageWhere + `
 			GROUP BY api_key_id
 		)
 		SELECT
@@ -2711,7 +2844,7 @@ func (r *usageLogRepository) GetUserAPIKeyUsageBreakdown(
 		ctx,
 		r.sql,
 		summaryQuery,
-		[]any{userID, startTime, endTime},
+		args,
 		&result.Total,
 		&result.Summary.Requests,
 		&result.Summary.TotalTokens,
@@ -2744,7 +2877,7 @@ func (r *usageLogRepository) GetUserAPIKeyUsageBreakdown(
 				COALESCE(SUM(total_cost), 0) AS total_cost,
 				COALESCE(SUM(actual_cost), 0) AS actual_cost
 			FROM usage_logs
-			WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
+			WHERE %s
 			GROUP BY api_key_id
 		)
 		SELECT
@@ -2764,10 +2897,10 @@ func (r *usageLogRepository) GetUserAPIKeyUsageBreakdown(
 		LEFT JOIN usage_by_key u ON u.api_key_id = k.id
 		WHERE k.user_id = $1 AND k.deleted_at IS NULL
 		ORDER BY %s
-		LIMIT $4 OFFSET $5
-	`, apiKeyUsageBreakdownOrderBy(sortValue))
+		LIMIT $%d OFFSET $%d
+	`, usageWhere, apiKeyUsageBreakdownOrderBy(sortValue), len(args)+1, len(args)+2)
 
-	rows, err := r.sql.QueryContext(ctx, itemsQuery, userID, startTime, endTime, pageSize, offset)
+	rows, err := r.sql.QueryContext(ctx, itemsQuery, append(args, pageSize, offset)...)
 	if err != nil {
 		return nil, err
 	}

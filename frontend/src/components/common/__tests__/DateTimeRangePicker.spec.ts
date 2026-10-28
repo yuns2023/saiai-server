@@ -41,4 +41,15 @@ describe('DateTimeRangePicker', () => {
     expect(new Date(yesterday.endTime).getDate()).toBe(18)
     expect(new Date(yesterday.endTime).getHours()).toBe(0)
   })
+  it('treats today as the whole calendar day, even in the first minute', () => {
+    for (const now of [new Date(2026, 9, 18, 0, 0, 30), new Date(2026, 9, 31, 23, 59)]) {
+      const today = presetTimeRange('today', now)
+      const start = new Date(today.startTime)
+      const end = new Date(today.endTime)
+      expect([start.getDate(), start.getHours(), start.getMinutes()]).toEqual([now.getDate(), 0, 0])
+      expect(end.getHours()).toBe(0)
+      expect(end > now).toBe(true)
+      expect(new Date(end.getTime() - 1).getDate()).toBe(now.getDate())
+    }
+  })
 })

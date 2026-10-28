@@ -58,7 +58,7 @@ type UsageStats struct {
 	TotalSubscriptionCost    float64  `json:"total_subscription_cost"`
 	TotalUnclassifiedCost    float64  `json:"total_unclassified_cost"`
 	AverageDurationMs        float64  `json:"average_duration_ms"`
-	TotalMeteredCost         *float64 `json:"total_metered_cost,omitempty"` // hosted SUM(metered_cost); set only by GetStatsByUser/GetStatsByAPIKey
+	TotalMeteredCost         *float64 `json:"total_metered_cost,omitempty"` // hosted SUM(metered_cost); set only by the user/API key aggregates
 }
 
 // UsageService 使用统计服务
@@ -74,7 +74,7 @@ type UsageService struct {
 type APIKeyUsageBreakdownRepository interface {
 	GetUserAPIKeyUsageBreakdown(
 		ctx context.Context,
-		userID int64,
+		userID, groupID int64,
 		startTime, endTime time.Time,
 		params pagination.PaginationParams,
 		sort string,
@@ -206,13 +206,21 @@ func (s *UsageService) ListByAccount(ctx context.Context, accountID int64, param
 	return logs, pagination, nil
 }
 
-// GetStatsByUser 获取用户的使用统计
-func (s *UsageService) GetStatsByUser(ctx context.Context, userID int64, startTime, endTime time.Time) (*UsageStats, error) {
-	stats, err := s.usageRepo.GetUserStatsAggregated(ctx, userID, startTime, endTime)
-	if err != nil {
-		return nil, fmt.Errorf("get user stats: %w", err)
+// GetUserUsageStats aggregates the user's own usage, optionally narrowed to
+// one of the user's API keys (ownership is the caller's check) and/or one
+// final group.
+func (s *UsageService) GetUserUsageStats(ctx context.Context, userID, apiKeyID, groupID int64, startTime, endTime time.Time) (*UsageStats, error) {
+	if userID <= 0 {
+		return nil, errors.New("user usage stats require a user")
 	}
+	stats, err := s.usageRepo.GetUserStatsAggregatedWithFilters(ctx, userID, apiKeyID, groupID, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("get user usage stats: %w", err)
+	}
+	return usageStatsFromAggregate(stats), nil
+}
 
+func usageStatsFromAggregate(stats *usagestats.UsageStats) *UsageStats {
 	return &UsageStats{
 		TotalRequests:            stats.TotalRequests,
 		TotalInputTokens:         stats.TotalInputTokens,
@@ -228,7 +236,7 @@ func (s *UsageService) GetStatsByUser(ctx context.Context, userID int64, startTi
 		TotalUnclassifiedCost:    stats.TotalUnclassifiedCost,
 		AverageDurationMs:        stats.AverageDurationMs,
 		TotalMeteredCost:         stats.TotalMeteredCost,
-	}, nil
+	}
 }
 
 // GetStatsByAPIKey 获取API Key的使用统计
@@ -238,22 +246,7 @@ func (s *UsageService) GetStatsByAPIKey(ctx context.Context, apiKeyID int64, sta
 		return nil, fmt.Errorf("get api key stats: %w", err)
 	}
 
-	return &UsageStats{
-		TotalRequests:            stats.TotalRequests,
-		TotalInputTokens:         stats.TotalInputTokens,
-		TotalOutputTokens:        stats.TotalOutputTokens,
-		TotalCacheTokens:         stats.TotalCacheTokens,
-		TotalCacheCreationTokens: stats.TotalCacheCreationTokens,
-		TotalCacheReadTokens:     stats.TotalCacheReadTokens,
-		TotalTokens:              stats.TotalTokens,
-		TotalCost:                stats.TotalCost,
-		TotalActualCost:          stats.TotalActualCost,
-		TotalBalanceCost:         stats.TotalBalanceCost,
-		TotalSubscriptionCost:    stats.TotalSubscriptionCost,
-		TotalUnclassifiedCost:    stats.TotalUnclassifiedCost,
-		AverageDurationMs:        stats.AverageDurationMs,
-		TotalMeteredCost:         stats.TotalMeteredCost,
-	}, nil
+	return usageStatsFromAggregate(stats), nil
 }
 
 // GetStatsByAccount 获取账号的使用统计
@@ -379,6 +372,68 @@ func (s *UsageService) GetAPIKeyModelStats(ctx context.Context, apiKeyID int64, 
 	return stats, nil
 }
 
+// errUserScopeRequired guards the generic filtered queries below: without a
+// user they would aggregate every user's logs.
+var errUserScopeRequired = errors.New("user-scoped usage query requires a user")
+
+// GetUserGroupDashboardStats returns dashboard summary stats for one of the
+// user's final groups, optionally narrowed to one of the user's API keys.
+func (s *UsageService) GetUserGroupDashboardStats(ctx context.Context, userID, apiKeyID, groupID int64) (*usagestats.UserDashboardStats, error) {
+	if userID <= 0 {
+		return nil, errUserScopeRequired
+	}
+	stats, err := s.usageRepo.GetUserDashboardStatsWithFilters(ctx, userID, apiKeyID, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("get user group dashboard stats: %w", err)
+	}
+	return stats, nil
+}
+
+// GetUserGroupUsageTrend returns the user's trend for one final group,
+// optionally narrowed to one of the user's API keys.
+func (s *UsageService) GetUserGroupUsageTrend(ctx context.Context, userID, apiKeyID, groupID int64, startTime, endTime time.Time, granularity string) ([]usagestats.TrendDataPoint, error) {
+	if userID <= 0 {
+		return nil, errUserScopeRequired
+	}
+	trend, err := s.usageRepo.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, 0, groupID, "", nil, nil, nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("get user group usage trend: %w", err)
+	}
+	return trend, nil
+}
+
+// GetUserGroupModelStats returns the user's per-model stats for one final
+// group, optionally narrowed to one of the user's API keys.
+func (s *UsageService) GetUserGroupModelStats(ctx context.Context, userID, apiKeyID, groupID int64, startTime, endTime time.Time) ([]usagestats.ModelStat, error) {
+	if userID <= 0 {
+		return nil, errUserScopeRequired
+	}
+	stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, 0, groupID, nil, nil, nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("get user group model stats: %w", err)
+	}
+	return stats, nil
+}
+
+// ListUserUsageGroups returns the final groups that appear in the user's own
+// usage logs within the range, including groups the user can no longer use.
+func (s *UsageService) ListUserUsageGroups(ctx context.Context, userID int64, startTime, endTime time.Time) ([]usagestats.GroupStat, error) {
+	if userID <= 0 {
+		return nil, errUserScopeRequired
+	}
+	stats, err := s.usageRepo.GetGroupStatsWithFilters(ctx, startTime, endTime, userID, 0, 0, 0, nil, nil, nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("list user usage groups: %w", err)
+	}
+	groups := make([]usagestats.GroupStat, 0, len(stats))
+	for _, stat := range stats {
+		if stat.GroupID > 0 {
+			groups = append(groups, stat)
+		}
+	}
+	return groups, nil
+}
+
 // GetBatchAPIKeyUsageStats returns today/total actual_cost for given api keys.
 func (s *UsageService) GetBatchAPIKeyUsageStats(ctx context.Context, apiKeyIDs []int64, startTime, endTime time.Time) (map[int64]*usagestats.BatchAPIKeyUsageStats, error) {
 	stats, err := s.usageRepo.GetBatchAPIKeyUsageStats(ctx, apiKeyIDs, startTime, endTime)
@@ -391,7 +446,7 @@ func (s *UsageService) GetBatchAPIKeyUsageStats(ctx context.Context, apiKeyIDs [
 // GetUserAPIKeyUsageBreakdown returns a server-scoped, paginated Key ranking.
 func (s *UsageService) GetUserAPIKeyUsageBreakdown(
 	ctx context.Context,
-	userID int64,
+	userID, groupID int64,
 	startTime, endTime time.Time,
 	params pagination.PaginationParams,
 	sort string,
@@ -400,7 +455,7 @@ func (s *UsageService) GetUserAPIKeyUsageBreakdown(
 	if !ok {
 		return nil, errors.New("api key usage breakdown repository is unavailable")
 	}
-	result, err := repo.GetUserAPIKeyUsageBreakdown(ctx, userID, startTime, endTime, params, sort)
+	result, err := repo.GetUserAPIKeyUsageBreakdown(ctx, userID, groupID, startTime, endTime, params, sort)
 	if err != nil {
 		return nil, fmt.Errorf("get api key usage breakdown: %w", err)
 	}
