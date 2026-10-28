@@ -34,7 +34,8 @@ type RelayFailureDiagnostics struct {
 	UpstreamEvents            int    `json:"upstream_events"`
 	// FirstTokenMsAfterFirstEvent keeps the relay's existing per-turn
 	// first-token semantics (any delta/output event after the first event).
-	FirstTokenMsAfterFirstEvent *int `json:"first_token_ms_after_first_event,omitempty"`
+	// The JSON names avoid "token" so the Ops sensitive-key redactor keeps them.
+	FirstTokenMsAfterFirstEvent *int `json:"first_output_ms_after_first_event,omitempty"`
 	// LaterClientTurns counts response.create frames the gateway received
 	// after this turn and before the failure was observed (including any it
 	// then rejected); it is not a count of frames forwarded upstream.
@@ -84,8 +85,8 @@ type RelayClientEndDiagnostics struct {
 type RelayReportedUsage struct {
 	InputTokens     *int64 `json:"input_tokens,omitempty"`
 	OutputTokens    *int64 `json:"output_tokens,omitempty"`
-	CachedTokens    *int64 `json:"cached_tokens,omitempty"`
-	ReasoningTokens *int64 `json:"reasoning_tokens,omitempty"`
+	CachedTokens    *int64 `json:"cache_read_input_tokens,omitempty"`
+	ReasoningTokens *int64 `json:"reasoning_output,omitempty"`
 }
 
 const (
@@ -99,7 +100,8 @@ const (
 var relayKnownEventTypes = func() map[string]struct{} {
 	known := map[string]struct{}{}
 	for _, eventType := range []string{
-		"error", "codex.rate_limits",
+		"error", "codex.rate_limits", "codex.response.metadata", "response.metadata", "responsesapi.websocket_timing",
+		"response.interrupt.accepted", "response.interrupt.failed", "response.output_item.interrupted",
 		"response.created", "response.in_progress", "response.queued",
 		"response.output_item.added", "response.output_item.done",
 		"response.content_part.added", "response.content_part.done",
@@ -172,8 +174,12 @@ func (d *relayClientDiagnostics) recordControl(payload []byte, at time.Time) int
 			event.target = target.String()
 		}
 	}
+	// Codex sends "mode":"discard_partial_items"; a boolean flag is also read.
 	if discard := gjson.GetBytes(payload, "discard_partial_items"); discard.IsBool() {
 		value := discard.Bool()
+		event.discard = &value
+	} else if mode := gjson.GetBytes(payload, "mode"); mode.Type == gjson.String {
+		value := mode.String() == "discard_partial_items"
 		event.discard = &value
 	}
 	d.mu.Lock()

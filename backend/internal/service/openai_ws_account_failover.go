@@ -132,6 +132,20 @@ func (t *openAIWSPassthroughReplayTracker) ObserveUpstreamFrame(payload []byte) 
 	t.removePendingLocked(entry)
 }
 
+// CompleteResponse settles the turn bound to responseID (a terminal the
+// tracker does not treat as success, such as a client-interrupted response).
+func (t *openAIWSPassthroughReplayTracker) CompleteResponse(responseID string) {
+	responseID = strings.TrimSpace(responseID)
+	if t == nil || responseID == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if entry := t.byResponse[responseID]; entry != nil {
+		t.removePendingLocked(entry)
+	}
+}
+
 func (t *openAIWSPassthroughReplayTracker) BuildFailoverError(accountID int64, cause error) (*OpenAIWSAccountFailoverError, bool) {
 	if t == nil || accountID <= 0 {
 		return nil, false

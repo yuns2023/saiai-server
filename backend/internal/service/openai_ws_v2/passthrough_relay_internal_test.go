@@ -321,13 +321,14 @@ func TestParseUsageAndEnrichCoverage(t *testing.T) {
 	t.Parallel()
 
 	state := &relayState{}
-	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":"bad"}}}`), "response.completed", nil)
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":"bad"}}}`), "response.completed", false, nil)
 	require.Equal(t, 0, state.usage.InputTokens)
 
 	parseUsageAndAccumulate(
 		state,
 		[]byte(`{"type":"response.completed","response":{"usage":{"input_tokens":9,"output_tokens":"bad","input_tokens_details":{"cached_tokens":2}}}}`),
 		"response.completed",
+		false,
 		nil,
 	)
 	require.Equal(t, 0, state.usage.InputTokens, "部分字段解析失败时不应累加 usage")
@@ -338,13 +339,14 @@ func TestParseUsageAndEnrichCoverage(t *testing.T) {
 		state,
 		[]byte(`{"type":"response.completed","response":{"usage":{"input_tokens_details":{"cached_tokens":2}}}}`),
 		"response.completed",
+		false,
 		nil,
 	)
 	require.Equal(t, 0, state.usage.InputTokens, "必填 usage 字段缺失时不应累加 usage")
 	require.Equal(t, 0, state.usage.OutputTokens)
 	require.Equal(t, 0, state.usage.CacheReadInputTokens)
 
-	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"service_tier":"default","usage":{"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cache_write_tokens":1,"cached_tokens":1}}}}`), "response.completed", nil)
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"service_tier":"default","usage":{"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cache_write_tokens":1,"cached_tokens":1}}}}`), "response.completed", false, nil)
 	require.Equal(t, 2, state.usage.InputTokens)
 	require.Equal(t, 1, state.usage.OutputTokens)
 	require.Equal(t, 1, state.usage.CacheCreationInputTokens)
@@ -355,7 +357,7 @@ func TestParseUsageAndEnrichCoverage(t *testing.T) {
 	enrichResult(result, state, 5*time.Millisecond)
 	require.Equal(t, state.usage.InputTokens, result.Usage.InputTokens)
 	require.Equal(t, 5*time.Millisecond, result.Duration)
-	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","response":{"usage":{"input_tokens":9}}}`), "response.in_progress", nil)
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","response":{"usage":{"input_tokens":9}}}`), "response.in_progress", false, nil)
 	require.Equal(t, 2, state.usage.InputTokens)
 	enrichResult(nil, state, 0)
 }
