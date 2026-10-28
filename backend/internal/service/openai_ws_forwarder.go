@@ -17,6 +17,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -257,6 +258,8 @@ type OpenAIWSUpstreamFailure struct {
 	// Digests and provider trace IDs are diagnostic metadata, never request bodies.
 	RequestPayloadHash string
 	UpstreamRequestID  string
+	UpstreamCFRay      string
+	RelayDiagnostics   *openaiwsv2.RelayFailureDiagnostics
 }
 
 func (e *OpenAIWSUpstreamFailure) Error() string { return e.Message }

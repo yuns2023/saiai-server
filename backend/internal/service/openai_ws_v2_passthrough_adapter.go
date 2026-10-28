@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -485,6 +486,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						IncompleteReason:   redactCredential(turn.Failure.IncompleteReason),
 						RequestPayloadHash: turn.RequestPayloadHash,
 						UpstreamRequestID:  redactCredential(handshakeHeaders.Get("x-request-id")),
+						UpstreamCFRay:      openAIWSCFRay(handshakeHeaders),
+						RelayDiagnostics:   turn.Diagnostics,
 					}
 					if hooks != nil && hooks.OnUpstreamError != nil {
 						hooks.OnUpstreamError(failure)
@@ -760,4 +763,16 @@ func logOpenAIWSV2Passthrough(format string, args ...any) {
 		"[OpenAI WS v2 passthrough] %s "+format,
 		append([]any{openaiWSV2PassthroughModeFields}, args...)...,
 	)
+}
+
+// openAIWSCFRayPattern matches a Cloudflare ray id with an optional colo.
+var openAIWSCFRayPattern = regexp.MustCompile(`^[0-9a-f]{16}(-[A-Z]{3})?$`)
+
+// openAIWSCFRay returns the handshake's Cloudflare ray id. It identifies the
+// upstream connection (not a single turn) when x-request-id is absent.
+func openAIWSCFRay(headers http.Header) string {
+	if ray := strings.TrimSpace(headers.Get("cf-ray")); openAIWSCFRayPattern.MatchString(ray) {
+		return ray
+	}
+	return ""
 }

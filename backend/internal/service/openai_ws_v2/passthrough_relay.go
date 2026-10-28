@@ -62,6 +62,8 @@ type RelayTurnResult struct {
 	Duration           time.Duration
 	FirstTokenMs       *int
 	Failure            *RelayFailure
+	// Diagnostics is set only for failed turns.
+	Diagnostics *RelayFailureDiagnostics
 }
 
 // RelayFailure is observed application error metadata, never a replacement
@@ -82,6 +84,8 @@ type RelayTurnMetadata struct {
 	ReasoningEffort    string
 	RequestServiceTier string
 	RequestPayloadHash string
+	// SentAt is when the relay started writing the turn upstream.
+	SentAt time.Time
 }
 
 type RelayExit struct {
@@ -161,6 +165,11 @@ type relayState struct {
 	filterUpstreamFrame    func(frame RelayUpstreamFrame) bool
 	transformUpstreamFrame func(payload []byte) []byte
 	bufferResponseStart    bool
+	// Failure diagnostics only; they never change relay behavior.
+	startAt           time.Time
+	now               func() time.Time
+	clientTurns       *atomic.Int32
+	clientDiagnostics *relayClientDiagnostics
 }
 
 type relayExitSignal struct {
@@ -182,11 +191,22 @@ type observedUpstreamEvent struct {
 	duration   time.Duration
 	firstToken *int
 	failure    *RelayFailure
+	// Failure diagnostics: observation time, the turn timing as it was
+	// before the failure event, and usage reported on the failure event.
+	at            time.Time
+	timing        *relayTurnTiming
+	reportedUsage *RelayReportedUsage
+	outputItems   *int
 }
 
 type relayTurnTiming struct {
 	startAt      time.Time
 	firstTokenMs *int
+	// Non-terminal events seen for this response (failure diagnostics).
+	createdAt     time.Time
+	lastEventAt   time.Time
+	lastEventType string
+	events        int
 }
 
 type relayTurnTracker struct {
@@ -245,6 +265,9 @@ func Relay(
 		filterUpstreamFrame:    options.FilterUpstreamFrame,
 		transformUpstreamFrame: options.TransformUpstreamFrame,
 		bufferResponseStart:    options.BufferResponseStart,
+		startAt:                startAt,
+		now:                    nowFn,
+		clientDiagnostics:      &relayClientDiagnostics{},
 	}
 	onTrace := options.OnTrace
 
@@ -277,6 +300,7 @@ func Relay(
 		MessageType:  relayMessageTypeString(firstMessageType),
 	})
 	clientTurns := &atomic.Int32{}
+	state.clientTurns = clientTurns
 	firstTurnRegistered := false
 	if state.validateClientFrame != nil {
 		if err := state.validateClientFrame(firstMessageType, firstClientMessage); err != nil {
@@ -299,6 +323,7 @@ func Relay(
 		}
 		firstClientMessage = transformed
 		metadata := relayTurnMetadata(turn, firstClientMessage, options.TurnMetadata)
+		metadata.SentAt = state.nowTime()
 		state.turns.register(metadata)
 		applyRelayTurnMetadataToResult(&result, metadata)
 		firstTurnRegistered = true
@@ -520,6 +545,9 @@ func runClientToUpstream(
 	for {
 		msgType, payload, err := clientConn.ReadFrame(ctx)
 		if err != nil {
+			if state != nil {
+				state.clientDiagnostics.recordClientEnd(err, state.nowTime())
+			}
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:     "read_client_failed",
 				Direction: "client_to_upstream",
@@ -529,6 +557,7 @@ func runClientToUpstream(
 			exitCh <- relayExitSignal{stage: "read_client", err: err, graceful: isDisconnectError(err)}
 			return
 		}
+		receivedAt := state.nowTime()
 		markActivity()
 		if state != nil && state.validateClientFrame != nil {
 			if err := state.validateClientFrame(msgType, payload); err != nil {
@@ -561,11 +590,17 @@ func runClientToUpstream(
 		payload = transformed
 		if clientTurn {
 			if state != nil && state.turns != nil {
-				state.turns.register(relayTurnMetadata(turn, payload, turnMetadata))
+				metadata := relayTurnMetadata(turn, payload, turnMetadata)
+				metadata.SentAt = state.nowTime()
+				state.turns.register(metadata)
 				turnRegistered = true
 			}
 		}
-		if err := writeUpstream(msgType, payload); err != nil {
+		writeErr := writeUpstream(msgType, payload)
+		if !clientTurn && msgType == coderws.MessageText && state != nil {
+			state.clientDiagnostics.recordControl(payload, receivedAt, writeErr == nil)
+		}
+		if err := writeErr; err != nil {
 			if turnRegistered && state != nil && state.turns != nil {
 				state.turns.cancelPending(turn)
 			}
@@ -729,6 +764,9 @@ func runUpstreamToClient(
 			writeErr = forwardFrame(msgType, payload)
 		}
 		if writeErr != nil {
+			if state != nil {
+				state.clientDiagnostics.recordDownstreamWriteFailed(nowFn())
+			}
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "write_client_failed",
 				Direction:       "upstream_to_client",
@@ -911,8 +949,19 @@ func observeUpstreamMessage(
 		usage:      parsedUsage,
 	}
 	observed.failure = parseRelayFailure(message, eventType)
+	if observed.failure != nil {
+		observed.at = now
+		observed.reportedUsage = parseRelayReportedUsage(message)
+		observed.outputItems = relayOutputItemCount(message)
+	}
 	if responseID != "" {
 		turnTiming := openAIWSRelayGetOrInitTurnTiming(state, responseID, now)
+		if turnTiming != nil && observed.failure != nil {
+			snapshot := *turnTiming
+			observed.timing = &snapshot
+		} else if turnTiming != nil && !isTerminalEvent(eventType) {
+			turnTiming.recordEvent(eventType, now)
+		}
 		if turnTiming != nil && turnTiming.firstTokenMs == nil && isTokenEvent(eventType) {
 			ms := int(now.Sub(turnTiming.startAt).Milliseconds())
 			if ms >= 0 {
@@ -953,15 +1002,21 @@ func emitTurnComplete(
 	}
 	metadata := RelayTurnMetadata{}
 	var matched bool
+	attribution := "response_id"
 	if state != nil && state.turns != nil {
 		if observed.failure != nil && responseID == "" {
 			metadata, matched = state.turns.failUnbound()
+			attribution = "single_outstanding"
 		} else {
 			metadata, matched = state.turns.complete(responseID)
 		}
 	}
 	if onTurnComplete == nil || (observed.failure != nil && !matched) {
 		return
+	}
+	var diagnostics *RelayFailureDiagnostics
+	if observed.failure != nil {
+		diagnostics = buildRelayFailureDiagnostics(state, observed, metadata, attribution)
 	}
 	onTurnComplete(RelayTurnResult{
 		Turn:               metadata.Turn,
@@ -975,6 +1030,7 @@ func emitTurnComplete(
 		Duration:           observed.duration,
 		FirstTokenMs:       openAIWSRelayCloneIntPtr(observed.firstToken),
 		Failure:            observed.failure,
+		Diagnostics:        diagnostics,
 	})
 }
 
@@ -1171,6 +1227,13 @@ const openAIRelayOutstandingTurnDrainDefault = 10 * time.Minute
 // relayStageClientTurnRejected marks a client frame rejected before it was
 // written upstream (frame validation or a turn hook).
 const relayStageClientTurnRejected = "client_turn_rejected"
+
+func (s *relayState) nowTime() time.Time {
+	if s == nil || s.now == nil {
+		return time.Now()
+	}
+	return s.now()
+}
 
 // transformClientPayload applies the TransformClientFrame option.
 func (s *relayState) transformClientPayload(turn int, messageType coderws.MessageType, payload []byte) ([]byte, error) {

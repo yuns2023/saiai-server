@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -144,4 +145,38 @@ func TestOpsWSIncompleteReasonIsSavedWithoutProviderStatusOrBody(t *testing.T) {
 			require.Equal(t, entry.ErrorBody, entry.UpstreamErrors[0].Detail)
 		})
 	}
+}
+
+func TestOpsWSFailureSavesRelayDiagnosticsAndCFRay(t *testing.T) {
+	queue := opsFailureTestQueue(t)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c.Set(opsWSRecorderKey, &opsWSFailureRecorder{ops: service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil), turn: 3})
+	sent := int64(1500)
+	discard := true
+	recordOpenAIWSUpstreamFailure(c, &service.OpenAIWSUpstreamFailure{
+		Turn: 3, EventType: "response.incomplete", ResponseID: "resp_incomplete", IncompleteReason: "interrupted",
+		Message: "Upstream WebSocket response.incomplete (interrupted)", UpstreamCFRay: "8f1a2b3c4d5e6f70-SJC",
+		RelayDiagnostics: &openaiwsv2.RelayFailureDiagnostics{
+			Attribution: "response_id", MsSinceSent: &sent, UpstreamEvents: 4,
+			ClientControl: []openaiwsv2.RelayControlFrameDiagnostics{{Type: "response.interrupt", MsAfterSent: 1400, MsBeforeFailure: 100, Target: "current", DiscardPartialItems: &discard, Forwarded: true}},
+		},
+	})
+	entry := (<-queue).entry
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(entry.ErrorBody), &payload))
+	require.Equal(t, "8f1a2b3c4d5e6f70-SJC", payload["upstream_cf_ray"])
+	diagnostics, ok := payload["relay_diagnostics"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "response_id", diagnostics["attribution"])
+	require.Equal(t, float64(1500), diagnostics["ms_since_sent"])
+	control := diagnostics["client_control"].([]any)[0].(map[string]any)
+	require.Equal(t, "response.interrupt", control["type"])
+	require.Equal(t, true, control["discard_partial_items"])
+	require.Equal(t, entry.ErrorBody, entry.UpstreamErrors[0].Detail)
+
+	recordOpenAIWSUpstreamFailure(c, &service.OpenAIWSUpstreamFailure{Turn: 3, EventType: "error", Message: "failure", UpstreamCFRay: "Bearer TEST_ONLY_SECRET"})
+	entry = (<-queue).entry
+	require.NotContains(t, entry.ErrorBody, "upstream_cf_ray")
+	require.NotContains(t, entry.ErrorBody, "relay_diagnostics")
 }
