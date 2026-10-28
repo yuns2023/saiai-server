@@ -57,6 +57,21 @@ const DataTableStub = {
 }
 
 describe('admin UsageTable tooltip', () => {
+  it('shows the hosted reference amount beside the zero charge', () => {
+    const mountRow = (row: Record<string, unknown>) => mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_HOSTED', total_cost: 0.0123, account_rate_multiplier: 0, ...row }], loading: false, columns: [] },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } }
+    })
+    const hosted = mountRow({ actual_cost: 0, metered_cost: 0.0123 })
+    expect(hosted.get('[data-testid="usage-cost-amount"]').text()).toBe('$0.000000')
+    expect(hosted.get('[data-testid="usage-cost-reference"]').text()).toBe('≈$0.012300')
+    hosted.unmount()
+
+    const billed = mountRow({ actual_cost: 0.0123, metered_cost: null })
+    expect(billed.find('[data-testid="usage-cost-reference"]').exists()).toBe(false)
+    billed.unmount()
+  })
+
   it.each([
     { input_tokens: 317880, cache_read_tokens: 0 },
     { input_tokens: 257960, cache_read_tokens: 45310 },

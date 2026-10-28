@@ -175,14 +175,13 @@
         </template>
 
         <template #header-cost="{ column }">
-          <UsageCostLegend :label="column.label" show-account-cost />
+          <UsageCostLegend :label="column.label" show-account-cost show-reference />
         </template>
 
         <template #cell-cost="{ row }">
           <UsageCostCell
             :row="row"
             :account-cost="row.account_rate_multiplier != null ? row.total_cost * row.account_rate_multiplier : null"
-            :show-reference="false"
             :detail-active="isCostDetailOwner(row)"
             @show-detail="showCostDetail($event, row)"
             @hide-detail="hideCostDetail(row)"

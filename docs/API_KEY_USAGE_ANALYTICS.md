@@ -143,13 +143,25 @@ for that user. It accepts the dashboard's half-open RFC3339 `start_time` /
 `timezone`. Precise timestamps take precedence. `limit` defaults to 12 and is
 capped at 50.
 
-Rows are ordered by recorded user-billed `actual_cost`, then total tokens, then
-Key ID and user ID for stable ties. Each row contains Key ID/name, user ID/email,
-request count, actual cost, and the four token classes. Totals and consumption
-shares cover all Keys in the selected scope, before the ranking limit. Historical
+Rows are ordered by standard `total_cost` (configured base price before
+multipliers), then user-billed `actual_cost`, total tokens, Key ID and user ID
+for stable ties. Hosted usage is included: its `actual_cost` is always zero and
+its `total_cost` is the recorded reference price, so the standard cost is the
+only basis comparable across hosted and billed groups. Each row contains Key
+ID/name, user ID/email, request count, `hosted_requests`, standard cost (`cost`),
+actual cost, and the four token classes. Totals (`total_cost`,
+`total_actual_cost`, requests, tokens) and consumption shares cover all Keys in
+the selected scope, before the ranking limit; shares use the standard cost. Historical
 usage of soft-deleted Keys is retained; zero-usage Keys are omitted. Raw Key values
 are never selected or returned. Results use a 30-second cache separated by time
 range, user scope, and limit.
+
+The dashboard user spending ranking (`users-ranking`) uses the same basis and
+fields. The dashboard Key/user usage trends pick their Top N by tokens across
+hosted and billed usage. Dashboard platform totals, trends and model
+distribution still exclude hosted rows and report them in the separate hosted
+usage card. Per-user drill-downs from distribution charts order users by
+standard cost.
 
 The administrator dashboard provides a global ranking, user search and per-user
 ranking, proportional spending bars, and links into Key-filtered usage records
@@ -160,7 +172,8 @@ does not classify abuse.
 ## Analytics validation notes
 
 - Check global and user scopes separately. Calculate spending shares against all
-  matching Keys before Top N, using the same recorded user-billed cost as usage.
+  matching Keys before Top N. Administrator rankings use standard `cost` /
+  `total_cost` (hosted usage included); include a hosted Key in test data.
 - Test the destination of a drill-down link: logs, totals and charts must consume
   both `user_id` and `api_key_id` and retain the exact selected time range.
 - Reject stale async results after user/range changes. Cache keys must include
@@ -425,8 +438,8 @@ Nullable `metered_cost` preserves historical records. Batch Key analytics adds
 `today_usage_cost` and `total_usage_cost` by summing
 `COALESCE(metered_cost, actual_cost)`, without changing existing actual-charge
 fields or joining current group settings. User Key pages label these amounts
-as reference usage. Usage records and CSV exports show reference usage beside
-the actual charge. Public `/v1/usage` exposes the same per-Key reference through
+as reference usage. User and administrator usage records and the user CSV export
+show reference usage beside the actual charge. Public `/v1/usage` exposes the same per-Key reference through
 `usage.range.usage_cost` and `usage.today.usage_cost` for an enabled hosted Key;
 `billing.charge_exempt=true` hides unrelated wallet balances while retaining the
 legacy billing mode. Upstream account quota percentages remain separate and

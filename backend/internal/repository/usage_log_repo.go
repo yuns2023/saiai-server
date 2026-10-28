@@ -2268,7 +2268,8 @@ type UserSpendingRankingResponse = usagestats.UserSpendingRankingResponse
 // APIKeyUsageTrendPoint represents API key usage trend data point
 type APIKeyUsageTrendPoint = usagestats.APIKeyUsageTrendPoint
 
-// GetAPIKeyUsageTrend returns usage trend data grouped by API key and date
+// GetAPIKeyUsageTrend returns usage trend data grouped by API key and date.
+// Top-N by tokens includes hosted rows: tokens measure load, not platform spend.
 func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []APIKeyUsageTrendPoint, err error) {
 	dateFormat := trendDateExpression(granularity, "u.created_at")
 
@@ -2277,7 +2278,6 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 			SELECT api_key_id
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
-				AND metered_cost IS NULL
 			GROUP BY api_key_id
 			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC
 			LIMIT $3
@@ -2292,7 +2292,6 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 		LEFT JOIN api_keys k ON u.api_key_id = k.id
 		WHERE u.api_key_id IN (SELECT api_key_id FROM top_keys)
 		  AND u.created_at >= $4 AND u.created_at < $5
-		  AND u.metered_cost IS NULL
 		GROUP BY date, u.api_key_id, k.name
 		ORDER BY date ASC, tokens DESC
 	`, dateFormat)
@@ -2326,7 +2325,7 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 }
 
 // GetUserUsageTrend returns usage trend data grouped by user and date.
-// Admin-dashboard only: hosted rows are excluded (both Top-N and the series).
+// Top-N by tokens includes hosted rows: tokens measure load, not platform spend.
 func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []UserUsageTrendPoint, err error) {
 	dateFormat := trendDateExpression(granularity, "u.created_at")
 
@@ -2335,7 +2334,6 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 			SELECT user_id
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
-				AND metered_cost IS NULL
 			GROUP BY user_id
 			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC
 			LIMIT $3
@@ -2353,7 +2351,6 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 		LEFT JOIN users us ON u.user_id = us.id
 		WHERE u.user_id IN (SELECT user_id FROM top_users)
 		  AND u.created_at >= $4 AND u.created_at < $5
-		  AND u.metered_cost IS NULL
 		GROUP BY date, u.user_id, us.email, us.username
 		ORDER BY date ASC, tokens DESC
 	`, dateFormat)
@@ -2387,8 +2384,8 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 }
 
 // GetUserSpendingRanking returns user spending ranking aggregated within the time range.
-// Admin-dashboard only: hosted rows are excluded so ranking totals match the
-// dashboard's platform totals.
+// Users are ranked by standard total_cost so hosted usage (actual_cost is always 0,
+// total_cost holds the reference price) ranks alongside billed usage.
 func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTime, endTime time.Time, limit int) (result *UserSpendingRankingResponse, err error) {
 	if limit <= 0 {
 		limit = 12
@@ -2399,40 +2396,47 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 			SELECT
 				u.user_id,
 				COALESCE(us.email, '') as email,
+				COALESCE(SUM(u.total_cost), 0) as cost,
 				COALESCE(SUM(u.actual_cost), 0) as actual_cost,
 				COUNT(*) as requests,
+				COUNT(*) FILTER (WHERE u.metered_cost IS NOT NULL) as hosted_requests,
 				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens
 			FROM usage_logs u
 			LEFT JOIN users us ON u.user_id = us.id
 			WHERE u.created_at >= $1 AND u.created_at < $2
-				AND u.metered_cost IS NULL
 			GROUP BY u.user_id, us.email
 		),
 		ranked AS (
 			SELECT
 				user_id,
 				email,
+				cost,
 				actual_cost,
 				requests,
+				hosted_requests,
 				tokens,
+				COALESCE(SUM(cost) OVER (), 0) as total_cost,
 				COALESCE(SUM(actual_cost) OVER (), 0) as total_actual_cost,
 				COALESCE(SUM(requests) OVER (), 0) as total_requests,
 				COALESCE(SUM(tokens) OVER (), 0) as total_tokens
 			FROM user_spend
-			ORDER BY actual_cost DESC, tokens DESC, user_id ASC
+			ORDER BY cost DESC, actual_cost DESC, tokens DESC, user_id ASC
 			LIMIT $3
 		)
 		SELECT
 			user_id,
 			email,
+			cost,
 			actual_cost,
 			requests,
+			hosted_requests,
 			tokens,
+			total_cost,
 			total_actual_cost,
 			total_requests,
 			total_tokens
 		FROM ranked
-		ORDER BY actual_cost DESC, tokens DESC, user_id ASC
+		ORDER BY cost DESC, actual_cost DESC, tokens DESC, user_id ASC
 	`
 
 	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit)
@@ -2447,12 +2451,13 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 	}()
 
 	ranking := make([]UserSpendingRankingItem, 0)
+	totalCost := 0.0
 	totalActualCost := 0.0
 	totalRequests := int64(0)
 	totalTokens := int64(0)
 	for rows.Next() {
 		var row UserSpendingRankingItem
-		if err = rows.Scan(&row.UserID, &row.Email, &row.ActualCost, &row.Requests, &row.Tokens, &totalActualCost, &totalRequests, &totalTokens); err != nil {
+		if err = rows.Scan(&row.UserID, &row.Email, &row.Cost, &row.ActualCost, &row.Requests, &row.HostedRequests, &row.Tokens, &totalCost, &totalActualCost, &totalRequests, &totalTokens); err != nil {
 			return nil, err
 		}
 		ranking = append(ranking, row)
@@ -2463,6 +2468,7 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 
 	return &UserSpendingRankingResponse{
 		Ranking:         ranking,
+		TotalCost:       totalCost,
 		TotalActualCost: totalActualCost,
 		TotalRequests:   totalRequests,
 		TotalTokens:     totalTokens,
@@ -3620,7 +3626,8 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 	if dim.ExcludeHosted {
 		query += hostedScopeExclude.clause("ul.metered_cost")
 	}
-	query += " GROUP BY ul.user_id, u.email ORDER BY actual_cost DESC"
+	// Standard cost first: hosted rows have zero actual_cost but a reference total_cost.
+	query += " GROUP BY ul.user_id, u.email ORDER BY cost DESC, actual_cost DESC, total_tokens DESC, user_id ASC"
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}

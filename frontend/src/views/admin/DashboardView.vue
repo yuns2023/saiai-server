@@ -281,6 +281,7 @@
               :model-stats="modelStats"
               :enable-ranking-view="true"
               :ranking-items="rankingItems"
+              :ranking-total-cost="rankingTotalCost"
               :ranking-total-actual-cost="rankingTotalActualCost"
               :ranking-total-requests="rankingTotalRequests"
               :ranking-total-tokens="rankingTotalTokens"
@@ -400,6 +401,7 @@ const hasHostedUsage = computed(() => {
   const s = stats.value
   return !!s && ((s.hosted_total_requests ?? 0) > 0 || (s.hosted_today_requests ?? 0) > 0)
 })
+const rankingTotalCost = ref(0)
 const rankingTotalActualCost = ref(0)
 const rankingTotalRequests = ref(0)
 const rankingTotalTokens = ref(0)
@@ -734,6 +736,7 @@ const loadUserSpendingRanking = async () => {
     })
     if (currentSeq !== rankingLoadSeq) return
     rankingItems.value = response.ranking || []
+    rankingTotalCost.value = response.total_cost || 0
     rankingTotalActualCost.value = response.total_actual_cost || 0
     rankingTotalRequests.value = response.total_requests || 0
     rankingTotalTokens.value = response.total_tokens || 0
@@ -741,6 +744,7 @@ const loadUserSpendingRanking = async () => {
     if (currentSeq !== rankingLoadSeq) return
     console.error('Error loading user spending ranking:', error)
     rankingItems.value = []
+    rankingTotalCost.value = 0
     rankingTotalActualCost.value = 0
     rankingTotalRequests.value = 0
     rankingTotalTokens.value = 0

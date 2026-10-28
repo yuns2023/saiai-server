@@ -44,6 +44,7 @@ func (h *DashboardHandler) GetAPIKeySpendingRanking(c *gin.Context) {
 		}
 		return gin.H{
 			"ranking":           ranking.Ranking,
+			"total_cost":        ranking.TotalCost,
 			"total_actual_cost": ranking.TotalActualCost,
 			"total_requests":    ranking.TotalRequests,
 			"total_tokens":      ranking.TotalTokens,

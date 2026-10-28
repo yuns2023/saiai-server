@@ -197,10 +197,12 @@ describe('ModelDistributionChart', () => {
         modelStats: [],
         enableRankingView: true,
         rankingItems: [
-          { user_id: 1, email: 'alpha@example.com', actual_cost: 12, requests: 10, tokens: 1000 },
-          { user_id: 2, email: 'beta@example.com', actual_cost: 8, requests: 6, tokens: 600 },
+          // Hosted user: zero charge, ranked by the standard (reference) cost.
+          { user_id: 1, email: 'alpha@example.com', cost: 12, actual_cost: 0, requests: 10, hosted_requests: 10, tokens: 1000 },
+          { user_id: 2, email: 'beta@example.com', cost: 8, actual_cost: 6, requests: 6, hosted_requests: 0, tokens: 600 },
         ],
-        rankingTotalActualCost: 30,
+        rankingTotalCost: 30,
+        rankingTotalActualCost: 15,
         rankingTotalRequests: 20,
         rankingTotalTokens: 2000,
       },
@@ -228,9 +230,14 @@ describe('ModelDistributionChart', () => {
 
     const rows = wrapper.findAll('tbody tr')
     expect(rows).toHaveLength(3)
+    expect(rows[0].find('[data-testid="ranking-hosted-badge"]').exists()).toBe(true)
+    expect(rows[0].text()).toContain('$12.00')
+    expect(rows[0].text()).toContain('$0.00')
+    expect(rows[1].find('[data-testid="ranking-hosted-badge"]').exists()).toBe(false)
     expect(rows[2].text()).toContain('Others')
     expect(rows[2].text()).toContain('4')
     expect(rows[2].text()).toContain('400')
     expect(rows[2].text()).toContain('$10.00')
+    expect(rows[2].text()).toContain('$9.00')
   })
 })

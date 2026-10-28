@@ -190,7 +190,8 @@
               <th class="pb-2 text-left">{{ t('admin.dashboard.spendingRankingUser') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.spendingRankingRequests') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.spendingRankingTokens') }}</th>
-              <th class="pb-2 text-right">{{ t('admin.dashboard.spendingRankingSpend') }}</th>
+              <th class="pb-2 text-right" :title="t('admin.dashboard.rankingBasisHint')">{{ t('admin.dashboard.standard') }}</th>
+              <th class="pb-2 text-right">{{ t('admin.dashboard.rankingActualShort') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -216,6 +217,12 @@
                       {{ getRankingRowLabel(item) }}
                     </span>
                   </UserIdentityTooltip>
+                  <span
+                    v-if="!item.isOther && item.hosted_requests > 0"
+                    class="shrink-0 rounded-sm bg-sky-100 px-1 text-[10px] text-sky-700 dark:bg-sky-500/20 dark:text-sky-300"
+                    :title="t('admin.dashboard.rankingHostedHint', { count: item.hosted_requests.toLocaleString() })"
+                    data-testid="ranking-hosted-badge"
+                  >{{ t('admin.dashboard.rankingHostedBadge') }}</span>
                 </div>
               </td>
               <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
@@ -223,6 +230,9 @@
               </td>
               <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
                 <TokenCount :value="item.tokens" />
+              </td>
+              <td class="py-1.5 text-right font-medium text-gray-900 dark:text-white">
+                ${{ formatCost(item.cost) }}
               </td>
               <td class="py-1.5 text-right text-green-600 dark:text-green-400">
                 ${{ formatCost(item.actual_cost) }}
@@ -271,6 +281,7 @@ const props = withDefaults(defineProps<{
   source?: ModelSource
   enableRankingView?: boolean
   rankingItems?: UserSpendingRankingItem[]
+  rankingTotalCost?: number
   rankingTotalActualCost?: number
   rankingTotalRequests?: number
   rankingTotalTokens?: number
@@ -291,6 +302,7 @@ const props = withDefaults(defineProps<{
   source: 'requested',
   enableRankingView: false,
   rankingItems: () => [],
+  rankingTotalCost: 0,
   rankingTotalActualCost: 0,
   rankingTotalRequests: 0,
   rankingTotalTokens: 0,
@@ -385,12 +397,12 @@ const rankingChartData = computed(() => {
   if (!props.rankingItems?.length) return null
 
   const labels = props.rankingItems.map((item, index) => `#${index + 1} ${getRankingUserLabel(item)}`)
-  const data = props.rankingItems.map((item) => item.actual_cost)
+  const data = props.rankingItems.map((item) => item.cost)
   const backgroundColor = chartColors.slice(0, props.rankingItems.length)
 
   if (otherRankingItem.value) {
     labels.push(t('admin.dashboard.spendingRankingOther'))
-    data.push(otherRankingItem.value.actual_cost)
+    data.push(otherRankingItem.value.cost)
     backgroundColor.push('#94a3b8')
   }
 
@@ -409,21 +421,25 @@ const rankingChartData = computed(() => {
 const otherRankingItem = computed<RankingDisplayItem | null>(() => {
   if (!props.rankingItems?.length) return null
 
+  const rankedCost = props.rankingItems.reduce((sum, item) => sum + item.cost, 0)
   const rankedActualCost = props.rankingItems.reduce((sum, item) => sum + item.actual_cost, 0)
   const rankedRequests = props.rankingItems.reduce((sum, item) => sum + item.requests, 0)
   const rankedTokens = props.rankingItems.reduce((sum, item) => sum + item.tokens, 0)
 
+  const otherCost = Math.max((props.rankingTotalCost || 0) - rankedCost, 0)
   const otherActualCost = Math.max((props.rankingTotalActualCost || 0) - rankedActualCost, 0)
   const otherRequests = Math.max((props.rankingTotalRequests || 0) - rankedRequests, 0)
   const otherTokens = Math.max((props.rankingTotalTokens || 0) - rankedTokens, 0)
 
-  if (otherActualCost <= 0.000001 && otherRequests <= 0 && otherTokens <= 0) return null
+  if (otherCost <= 0.000001 && otherActualCost <= 0.000001 && otherRequests <= 0 && otherTokens <= 0) return null
 
   return {
     user_id: 0,
     email: '',
+    cost: otherCost,
     actual_cost: otherActualCost,
     requests: otherRequests,
+    hosted_requests: 0,
     tokens: otherTokens,
     isOther: true
   }

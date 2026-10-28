@@ -68,18 +68,22 @@
     <template v-else-if="ranking && ranking.ranking.length">
       <p class="mb-3 text-xs text-gray-500 dark:text-gray-400" aria-live="polite">
         {{ t('admin.dashboard.keyRankingScopeTotal') }}:
+        {{ t('admin.dashboard.standard') }}
+        <span class="font-medium tabular-nums text-gray-900 dark:text-white">${{ formatCost(ranking.total_cost) }}</span>
+        · {{ t('admin.dashboard.rankingActualShort') }}
         <span class="font-medium tabular-nums text-gray-900 dark:text-white">${{ formatCost(ranking.total_actual_cost) }}</span>
         · {{ ranking.total_requests.toLocaleString() }} {{ t('admin.dashboard.requests') }}
         · {{ formatTokenCount(ranking.total_tokens) }} Token
       </p>
       <div class="overflow-x-auto">
-        <table class="w-full min-w-[800px] text-sm">
+        <table class="w-full min-w-[880px] text-sm">
           <thead class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
             <tr>
               <th scope="col" class="pb-2 pr-3 text-left">Key</th>
               <th scope="col" class="pb-2 pr-3 text-left">{{ t('admin.dashboard.spendingRankingUser') }}</th>
-              <th scope="col" class="pb-2 pr-3 text-right">{{ t('usage.userBilled') }}</th>
+              <th scope="col" class="pb-2 pr-3 text-right" :title="t('admin.dashboard.rankingBasisHint')">{{ t('admin.dashboard.standard') }}</th>
               <th scope="col" class="pb-2 pr-3 text-right">{{ t('admin.dashboard.metricShare') }}</th>
+              <th scope="col" class="pb-2 pr-3 text-right" :title="t('usage.userBilled')">{{ t('admin.dashboard.rankingActualShort') }}</th>
               <th scope="col" class="pb-2 pr-3 text-right">{{ t('admin.dashboard.requests') }}</th>
               <th scope="col" class="pb-2 pr-3 text-right">Token</th>
               <th scope="col" class="whitespace-nowrap pb-2 pr-3 text-right" :title="t('usage.inputCacheReadRateHint')">
@@ -97,7 +101,15 @@
                     <button type="button" class="break-all text-left font-medium text-primary-600 hover:underline dark:text-primary-400" @click="goToUsage(item)">
                       {{ item.key_name || `Key #${item.api_key_id}` }}
                     </button>
-                    <p class="text-xs text-gray-400">#{{ item.api_key_id }}</p>
+                    <p class="text-xs text-gray-400">
+                      #{{ item.api_key_id }}
+                      <span
+                        v-if="item.hosted_requests > 0"
+                        class="ml-1 rounded-sm bg-sky-100 px-1 text-[10px] text-sky-700 dark:bg-sky-500/20 dark:text-sky-300"
+                        :title="t('admin.dashboard.rankingHostedHint', { count: item.hosted_requests.toLocaleString() })"
+                        data-testid="key-ranking-hosted-badge"
+                      >{{ t('admin.dashboard.rankingHostedBadge') }}</span>
+                    </p>
                   </div>
                 </div>
               </td>
@@ -108,13 +120,14 @@
                   </button>
                 </UserIdentityTooltip>
               </td>
-              <td class="min-w-24 py-3 pr-3 text-right tabular-nums text-green-600 dark:text-green-400">
-                ${{ formatCost(item.actual_cost) }}
+              <td class="min-w-24 py-3 pr-3 text-right tabular-nums text-gray-900 dark:text-white">
+                ${{ formatCost(item.cost) }}
                 <div class="mt-1 h-1 rounded bg-gray-100 dark:bg-dark-700" aria-hidden="true">
-                  <div class="h-1 rounded bg-green-500" :style="{ width: `${costShare(item)}%` }" />
+                  <div class="h-1 rounded bg-primary-500" :style="{ width: `${costShare(item)}%` }" />
                 </div>
               </td>
               <td class="py-3 pr-3 text-right tabular-nums">{{ costShare(item).toFixed(1) }}%</td>
+              <td class="py-3 pr-3 text-right tabular-nums text-green-600 dark:text-green-400">${{ formatCost(item.actual_cost) }}</td>
               <td class="py-3 pr-3 text-right tabular-nums">{{ item.requests.toLocaleString() }}</td>
               <td class="py-3 pr-3 text-right tabular-nums">{{ formatTokenCount(item.tokens) }}</td>
               <td class="py-3 pr-3 text-right tabular-nums" :title="tokenBreakdown(item)">
@@ -234,8 +247,8 @@ const goToUsage = (item: APIKeySpendingRankingItem) => {
 }
 
 const costShare = (item: APIKeySpendingRankingItem) => {
-  const total = ranking.value?.total_actual_cost || 0
-  return total > 0 ? Math.min(100, Math.max(0, item.actual_cost / total * 100)) : 0
+  const total = ranking.value?.total_cost || 0
+  return total > 0 ? Math.min(100, Math.max(0, item.cost / total * 100)) : 0
 }
 
 const tokenBreakdown = (item: APIKeySpendingRankingItem) =>
