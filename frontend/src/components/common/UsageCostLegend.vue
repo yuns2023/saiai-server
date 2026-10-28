@@ -40,7 +40,7 @@ defineProps<{
   label: string
   /** Admin tables also show the platform account cost ("A $…"). */
   showAccountCost?: boolean
-  /** User tables show the hosted-usage reference amount ("≈$…"). */
+  /** Show the hosted-usage reference amount ("≈$…"); hosted rows bill $0. */
   showReference?: boolean
 }>()
 

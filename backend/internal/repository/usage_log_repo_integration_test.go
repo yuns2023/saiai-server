@@ -1856,17 +1856,57 @@ func (s *UsageLogRepoSuite) TestDashboardHosted_BucketsStayInclusiveAndPlatformR
 	s.Require().Len(models, 1)
 	s.Require().Equal(int64(1), models[0].Requests)
 
+	// Rankings and Top-N trends keep hosted usage, ranked by standard total_cost.
 	ranking, err := s.repo.GetUserSpendingRanking(s.ctx, dayStart, dayEnd, 12)
 	s.Require().NoError(err)
-	s.Require().Len(ranking.Ranking, 1)
-	s.Require().Equal(platformUser.ID, ranking.Ranking[0].UserID)
-	s.Require().Equal(int64(1), ranking.TotalRequests)
+	s.Require().Len(ranking.Ranking, 2)
+	s.Require().Equal(hostedUser.ID, ranking.Ranking[0].UserID)
+	s.Require().InDelta(4.0, ranking.Ranking[0].Cost, 1e-9)
+	s.Require().Zero(ranking.Ranking[0].ActualCost)
+	s.Require().Equal(int64(2), ranking.Ranking[0].HostedRequests)
+	s.Require().Equal(platformUser.ID, ranking.Ranking[1].UserID)
+	s.Require().Zero(ranking.Ranking[1].HostedRequests)
+	s.Require().InDelta(5.0, ranking.TotalCost, 1e-9)
+	s.Require().InDelta(1.0, ranking.TotalActualCost, 1e-9)
+	s.Require().Equal(int64(3), ranking.TotalRequests)
+
+	keys, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, 0, 12)
+	s.Require().NoError(err)
+	s.Require().Len(keys.Ranking, 2)
+	s.Require().Equal(hostedKey.ID, keys.Ranking[0].APIKeyID)
+	s.Require().Equal(int64(2), keys.Ranking[0].HostedRequests)
+	s.Require().InDelta(5.0, keys.TotalCost, 1e-9)
 
 	usersTrend, err := s.repo.GetUserUsageTrend(s.ctx, dayStart, dayEnd, "day", 12)
 	s.Require().NoError(err)
+	trendUsers := map[int64]bool{}
 	for _, p := range usersTrend {
-		s.Require().NotEqual(hostedUser.ID, p.UserID)
+		trendUsers[p.UserID] = true
 	}
+	s.Require().True(trendUsers[hostedUser.ID])
+	s.Require().True(trendUsers[platformUser.ID])
+
+	keysTrend, err := s.repo.GetAPIKeyUsageTrend(s.ctx, dayStart, dayEnd, "day", 1)
+	s.Require().NoError(err)
+	s.Require().NotEmpty(keysTrend)
+	var hostedKeyTokens int64
+	for _, p := range keysTrend {
+		s.Require().Equal(hostedKey.ID, p.APIKeyID) // Top 1 by tokens is the hosted Key.
+		hostedKeyTokens += p.Tokens
+	}
+	s.Require().Equal(int64(600), hostedKeyTokens)
+
+	// Usage-page drill-down (hosted kept) ranks by standard cost, so LIMIT 1
+	// keeps the zero-charge hosted user; the dashboard drill-down still excludes it.
+	top, err := s.repo.GetUserBreakdownStats(s.ctx, dayStart, dayEnd, usagestats.UserBreakdownDimension{Model: "gpt-5", ModelType: usagestats.ModelSourceRequested}, 1)
+	s.Require().NoError(err)
+	s.Require().Len(top, 1)
+	s.Require().Equal(hostedUser.ID, top[0].UserID)
+	s.Require().Zero(top[0].ActualCost)
+	platformOnly, err := s.repo.GetUserBreakdownStats(s.ctx, dayStart, dayEnd, usagestats.UserBreakdownDimension{Model: "gpt-5", ModelType: usagestats.ModelSourceRequested, ExcludeHosted: true}, 1)
+	s.Require().NoError(err)
+	s.Require().Len(platformOnly, 1)
+	s.Require().Equal(platformUser.ID, platformOnly[0].UserID)
 }
 
 func (s *UsageLogRepoSuite) TestDashboardHosted_UnaggregatedHostedRowsAreNotSubtracted() {

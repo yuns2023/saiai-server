@@ -398,12 +398,13 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
 
-	rows := sqlmock.NewRows([]string{"user_id", "email", "actual_cost", "requests", "tokens", "total_actual_cost", "total_requests", "total_tokens"}).
-		AddRow(int64(2), "beta@example.com", 12.5, int64(9), int64(900), 40.0, int64(30), int64(2600)).
-		AddRow(int64(1), "alpha@example.com", 12.5, int64(8), int64(800), 40.0, int64(30), int64(2600)).
-		AddRow(int64(3), "gamma@example.com", 4.25, int64(5), int64(300), 40.0, int64(30), int64(2600))
+	// User 3 is hosted: zero actual_cost, ranked by its standard cost.
+	rows := sqlmock.NewRows([]string{"user_id", "email", "cost", "actual_cost", "requests", "hosted_requests", "tokens", "total_cost", "total_actual_cost", "total_requests", "total_tokens"}).
+		AddRow(int64(3), "gamma@example.com", 20.0, 0.0, int64(5), int64(5), int64(300), 50.0, 25.0, int64(30), int64(2600)).
+		AddRow(int64(2), "beta@example.com", 15.0, 12.5, int64(9), int64(0), int64(900), 50.0, 25.0, int64(30), int64(2600)).
+		AddRow(int64(1), "alpha@example.com", 15.0, 12.5, int64(8), int64(0), int64(800), 50.0, 25.0, int64(30), int64(2600))
 
-	mock.ExpectQuery("WITH user_spend AS \\(").
+	mock.ExpectQuery(`(?s)WITH user_spend AS \(.*SUM\(u.total_cost\).*COUNT\(\*\) FILTER \(WHERE u.metered_cost IS NOT NULL\).*WHERE u.created_at >= \$1 AND u.created_at < \$2\s+GROUP BY.*SUM\(cost\) OVER \(\).*ORDER BY cost DESC, actual_cost DESC, tokens DESC, user_id ASC\s+LIMIT \$3`).
 		WithArgs(start, end, 12).
 		WillReturnRows(rows)
 
@@ -411,11 +412,12 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, &usagestats.UserSpendingRankingResponse{
 		Ranking: []usagestats.UserSpendingRankingItem{
-			{UserID: 2, Email: "beta@example.com", ActualCost: 12.5, Requests: 9, Tokens: 900},
-			{UserID: 1, Email: "alpha@example.com", ActualCost: 12.5, Requests: 8, Tokens: 800},
-			{UserID: 3, Email: "gamma@example.com", ActualCost: 4.25, Requests: 5, Tokens: 300},
+			{UserID: 3, Email: "gamma@example.com", Cost: 20.0, ActualCost: 0, Requests: 5, HostedRequests: 5, Tokens: 300},
+			{UserID: 2, Email: "beta@example.com", Cost: 15.0, ActualCost: 12.5, Requests: 9, Tokens: 900},
+			{UserID: 1, Email: "alpha@example.com", Cost: 15.0, ActualCost: 12.5, Requests: 8, Tokens: 800},
 		},
-		TotalActualCost: 40.0,
+		TotalCost:       50.0,
+		TotalActualCost: 25.0,
 		TotalRequests:   30,
 		TotalTokens:     2600,
 	}, got)

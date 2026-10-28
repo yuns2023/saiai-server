@@ -160,16 +160,19 @@ type UserUsageTrendPoint struct {
 
 // UserSpendingRankingItem represents a user spending ranking row.
 type UserSpendingRankingItem struct {
-	UserID     int64   `json:"user_id"`
-	Email      string  `json:"email"`
-	ActualCost float64 `json:"actual_cost"` // 实际扣除
-	Requests   int64   `json:"requests"`
-	Tokens     int64   `json:"tokens"`
+	UserID         int64   `json:"user_id"`
+	Email          string  `json:"email"`
+	Cost           float64 `json:"cost"`        // 标准计费（排序依据，托管行即参考用量）
+	ActualCost     float64 `json:"actual_cost"` // 实际扣除
+	Requests       int64   `json:"requests"`
+	HostedRequests int64   `json:"hosted_requests"` // 其中托管请求数（metered_cost IS NOT NULL）
+	Tokens         int64   `json:"tokens"`
 }
 
 // UserSpendingRankingResponse represents ranking rows plus total spend for the time range.
 type UserSpendingRankingResponse struct {
 	Ranking         []UserSpendingRankingItem `json:"ranking"`
+	TotalCost       float64                   `json:"total_cost"`
 	TotalActualCost float64                   `json:"total_actual_cost"`
 	TotalRequests   int64                     `json:"total_requests"`
 	TotalTokens     int64                     `json:"total_tokens"`

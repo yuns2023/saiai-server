@@ -1475,13 +1475,16 @@ export interface UserUsageTrendPoint {
 export interface UserSpendingRankingItem {
   user_id: number
   email: string
+  cost: number // 标准计费（排序依据；托管行即参考用量）
   actual_cost: number
   requests: number
+  hosted_requests: number
   tokens: number
 }
 
 export interface UserSpendingRankingResponse {
   ranking: UserSpendingRankingItem[]
+  total_cost: number
   total_actual_cost: number
   total_requests: number
   total_tokens: number
@@ -1494,8 +1497,10 @@ export interface APIKeySpendingRankingItem {
   key_name: string
   user_id: number
   email: string
+  cost: number // 标准计费（排序依据；托管行即参考用量）
   actual_cost: number
   requests: number
+  hosted_requests: number
   tokens: number
   input_tokens: number
   output_tokens: number
@@ -1505,6 +1510,7 @@ export interface APIKeySpendingRankingItem {
 
 export interface APIKeySpendingRankingResponse {
   ranking: APIKeySpendingRankingItem[]
+  total_cost: number
   total_actual_cost: number
   total_requests: number
   total_tokens: number

@@ -97,6 +97,7 @@ describe('admin DashboardView', () => {
     })
     getUserSpendingRanking.mockResolvedValue({
       ranking: [],
+      total_cost: 0,
       total_actual_cost: 0,
       total_requests: 0,
       total_tokens: 0,

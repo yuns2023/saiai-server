@@ -21,12 +21,12 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => ({
 const range = { startTime: '2026-03-01T10:00:00Z', endTime: '2026-03-02T10:00:00Z' }
 const makeRow = (overrides: Partial<APIKeySpendingRankingItem> = {}): APIKeySpendingRankingItem => ({
   api_key_id: 11, key_name: 'Work', user_id: 7, email: 'user@example.com',
-  actual_cost: 25, requests: 8, tokens: 1100,
+  cost: 25, actual_cost: 20, requests: 8, hosted_requests: 0, tokens: 1100,
   input_tokens: 10, output_tokens: 1000, cache_creation_tokens: 20, cache_read_tokens: 70,
   ...overrides
 })
 const makeResponse = (overrides: Partial<APIKeySpendingRankingResponse> = {}): APIKeySpendingRankingResponse => ({
-  ranking: [makeRow()], total_actual_cost: 100, total_requests: 30, total_tokens: 10000,
+  ranking: [makeRow()], total_cost: 100, total_actual_cost: 80, total_requests: 30, total_tokens: 10000,
   start_date: '2026-03-01', end_date: '2026-03-02', ...overrides
 })
 const wrappers: VueWrapper[] = []
@@ -56,6 +56,7 @@ describe('APIKeySpendingRanking', () => {
       makeRow(),
       makeRow({ api_key_id: 12, key_name: '', input_tokens: 0, cache_creation_tokens: 100, cache_read_tokens: 0 }),
       makeRow({ api_key_id: 13, input_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 }),
+      makeRow({ api_key_id: 14, actual_cost: 0, hosted_requests: 8 }),
     ] }))
     const wrapper = createWrapper()
     await flushPromises()
@@ -64,12 +65,19 @@ describe('APIKeySpendingRanking', () => {
       start_time: range.startTime, end_time: range.endTime,
       start_date: undefined, end_date: undefined, user_id: undefined, limit: 12
     })
-    expect(wrapper.text()).toContain('$100.0000')
+    expect(wrapper.text()).toContain('$100.0000') // Standard-cost scope total.
+    expect(wrapper.text()).toContain('$80.0000')
     const rows = wrapper.findAll('tbody tr')
     expect(rows[0].text()).toContain('25.0%')
     expect(rows[0].text()).toContain('70.00%')
     expect(rows[0].text()).toContain('1.1K')
+    expect(rows[0].text()).toContain('$20.0000')
     expect(rows[0].find('[aria-hidden="true"] div').attributes('style')).toContain('width: 25%')
+    expect(rows[0].find('[data-testid="key-ranking-hosted-badge"]').exists()).toBe(false)
+    // A hosted Key is billed $0 but shares by its standard cost.
+    expect(rows[3].find('[data-testid="key-ranking-hosted-badge"]').exists()).toBe(true)
+    expect(rows[3].text()).toContain('25.0%')
+    expect(rows[3].text()).toContain('$0.0000')
     expect(rows[1].text()).toContain('Key #12')
     expect(rows[1].text()).toContain('0.00%')
     expect(rows[2].text()).toContain('—')
@@ -138,7 +146,7 @@ describe('APIKeySpendingRanking', () => {
   })
 
   it('does not render invalid shares for a zero-cost scope', async () => {
-    getRanking.mockResolvedValue(makeResponse({ total_actual_cost: 0, ranking: [makeRow({ actual_cost: 0 })] }))
+    getRanking.mockResolvedValue(makeResponse({ total_cost: 0, total_actual_cost: 0, ranking: [makeRow({ cost: 0, actual_cost: 0 })] }))
     const wrapper = createWrapper()
     await flushPromises()
     expect(wrapper.find('tbody').text()).toContain('0.0%')
