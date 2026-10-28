@@ -62,6 +62,8 @@ export interface PricePreview {
 export interface PricingDriftChange { key: string; old: number | null; new: number | null }
 export interface PricingDriftNotice {
   id: string
+  fingerprint: string
+  reporter: string
   model: string
   old_status: string
   new_status: string
@@ -71,7 +73,6 @@ export interface PricingDriftNotice {
   old_feed_hash: string
   new_feed_hash: string
   detected_at: string
-  occurrences: number
   acknowledged_at: string | null
   acknowledged_by: number
 }

@@ -102,11 +102,11 @@ describe('Model pricing editor', () => {
 
 })
 const notice = (id: string, extra: Record<string, unknown> = {}) => ({
-  id, model: 'gpt-6-sol', old_status: 'priced', new_status: 'priced', old_resolved_model: 'gpt-6-sol', new_resolved_model: 'gpt-6-sol', changes: [],
-  old_feed_hash: 'a'.repeat(64), new_feed_hash: 'b'.repeat(64), detected_at: '2026-10-28T09:10:00Z', occurrences: 1, acknowledged_at: null, acknowledged_by: 0, ...extra
+  id, fingerprint: `fp-${id}`, reporter: 'east', model: 'gpt-6-sol', old_status: 'priced', new_status: 'priced', old_resolved_model: 'gpt-6-sol', new_resolved_model: 'gpt-6-sol', changes: [],
+  old_feed_hash: 'a'.repeat(64), new_feed_hash: 'b'.repeat(64), detected_at: '2026-10-28T09:10:00Z', acknowledged_at: null, acknowledged_by: 0, ...extra
 })
 const acked = (item: ReturnType<typeof notice>) => ({ ...item, acknowledged_at: '2026-10-28T10:00:00Z', acknowledged_by: 1 })
-const priceNotice = notice('n1', { occurrences: 3, changes: [
+const priceNotice = notice('n1', { changes: [
   { key: 'default.cache_read', old: 0.2, new: 0.1 }, { key: 'priority.input', old: null, new: 5 }, { key: 'long.flex.output', old: 30, new: 45 },
   { key: 'long.threshold', old: 200000, new: 272000 }, { key: 'image.per_image', old: 0.04, new: 0.05 }, { key: 'image.input', old: 5, new: null }, { key: 'mystery.key', old: 1, new: 2 }
 ] })
@@ -140,7 +140,7 @@ describe('Pricing drift notices', () => {
       'mystery.key: 1 → 2'
     ])
     const priced = wrapper.get('[data-testid=pricing-drift-notice-n1]').text()
-    expect(priced).toContain('×3')
+    expect(priced).not.toContain('×')
     expect(priced).not.toContain('admin.modelPricing.drift.status')
     expect(priced).not.toContain('admin.modelPricing.resolved')
     const status = wrapper.get('[data-testid=pricing-drift-notice-n2]')

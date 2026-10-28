@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -100,10 +101,12 @@ type PricingDriftChange struct {
 // PricingDriftNotice records that a feed change altered how a recently billed
 // model is priced. Acknowledging it only records that an administrator saw it.
 type PricingDriftNotice struct {
-	// ID names one occurrence; Fingerprint names the change (feed, pricing
-	// configuration, model and prices) across occurrences and Gateways.
+	// ID is random and never reused. Fingerprint names the change (feed,
+	// pricing configuration, model and prices) across Gateways; Reporter is the
+	// Gateway process that recorded it.
 	ID               string               `json:"id"`
 	Fingerprint      string               `json:"fingerprint"`
+	Reporter         string               `json:"reporter"`
 	Model            string               `json:"model"`
 	OldStatus        string               `json:"old_status"`
 	NewStatus        string               `json:"new_status"`
@@ -113,7 +116,6 @@ type PricingDriftNotice struct {
 	OldFeedHash      string               `json:"old_feed_hash"`
 	NewFeedHash      string               `json:"new_feed_hash"`
 	DetectedAt       time.Time            `json:"detected_at"`
-	Occurrences      int                  `json:"occurrences"`
 	AcknowledgedAt   *time.Time           `json:"acknowledged_at"`
 	AcknowledgedBy   int64                `json:"acknowledged_by"`
 }
@@ -144,6 +146,7 @@ type pricingDriftStore interface {
 // best-effort: evaluation never blocks a feed replacement, failures are
 // retried a few times, and a change is lost if the process exits first.
 type PricingDriftService struct {
+	instance    string
 	cfg         *config.Config
 	billed      BilledPricingModelReader
 	store       pricingDriftStore
@@ -158,7 +161,7 @@ type PricingDriftService struct {
 }
 
 func NewPricingDriftService(cfg *config.Config, billed BilledPricingModelReader, store pricingDriftStore, done <-chan struct{}) *PricingDriftService {
-	return &PricingDriftService{cfg: cfg, billed: billed, store: store, done: done, now: time.Now, retryDelays: []time.Duration{time.Minute, 5 * time.Minute}}
+	return &PricingDriftService{instance: randomPricingDriftID(), cfg: cfg, billed: billed, store: store, done: done, now: time.Now, retryDelays: []time.Duration{time.Minute, 5 * time.Minute}}
 }
 
 // Enqueue accepts a feed change without blocking.
@@ -245,7 +248,7 @@ func (s *PricingDriftService) evaluateAndStore(batch []PricingFeedChange) error 
 			return "", err
 		}
 		var merged []PricingDriftNotice
-		merged, added = mergePricingDriftNotices(existing, found)
+		merged, added = mergePricingDriftNotices(existing, found, s.instance)
 		merged, dropped = trimPricingDriftNotices(merged)
 		body, err := json.Marshal(merged)
 		return string(body), err
@@ -338,53 +341,41 @@ func sortPricingDriftNotices(notices []PricingDriftNotice) []PricingDriftNotice 
 	return out
 }
 
-// mergePricingDriftNotices adds newly found notices, ordered by when each
-// feed replacement happened. A change already stored is a duplicate when it
-// happened within the repeat window and is still the latest notice for its
-// model (another Gateway saw the same feed). Otherwise it happened again: an
-// unacknowledged notice is refreshed in place (same content, so acknowledging
-// it still means the administrator saw this change); after acknowledgement a
-// new occurrence gets its own ID, so a stale page cannot acknowledge it.
-func mergePricingDriftNotices(existing, found []PricingDriftNotice) (merged, added []PricingDriftNotice) {
+// mergePricingDriftNotices adds the notices this Gateway found. Each Gateway
+// process sees each feed replacement once, so a stored notice with the same
+// fingerprint is a duplicate when another Gateway recorded it within the
+// repeat window (it saw the same feed change), or when this Gateway recorded
+// it for the same replacement (a retried save). Otherwise the change happened
+// again (the feed flipped back and forth) and is a new notice with a new ID,
+// so a page showing an earlier one can never acknowledge it.
+func mergePricingDriftNotices(existing, found []PricingDriftNotice, reporter string) (merged, added []PricingDriftNotice) {
 	merged = append([]PricingDriftNotice{}, existing...)
-	sort.SliceStable(found, func(i, j int) bool { return found[i].DetectedAt.Before(found[j].DetectedAt) })
 	for _, n := range found {
-		index := -1
-		for i := range merged {
-			if merged[i].Fingerprint == n.Fingerprint && (index < 0 || merged[i].DetectedAt.After(merged[index].DetectedAt)) {
-				index = i
+		duplicate := false
+		for _, stored := range merged {
+			if stored.Fingerprint != n.Fingerprint {
+				continue
 			}
-		}
-		if index < 0 {
-			n.ID, n.Occurrences = n.Fingerprint, 1
-			merged = append(merged, n)
-			added = append(added, n)
-			continue
-		}
-		stored := &merged[index]
-		latest := true
-		for _, other := range merged {
-			if other.Model == stored.Model && other.Fingerprint != stored.Fingerprint && other.DetectedAt.After(stored.DetectedAt) {
-				latest = false
+			gap := n.DetectedAt.Sub(stored.DetectedAt)
+			if stored.Reporter == reporter && gap == 0 || stored.Reporter != reporter && gap < pricingDriftRepeatWindow && gap > -pricingDriftRepeatWindow {
+				duplicate = true
 				break
 			}
 		}
-		gap := n.DetectedAt.Sub(stored.DetectedAt)
-		if latest && gap < pricingDriftRepeatWindow && gap > -pricingDriftRepeatWindow {
+		if duplicate {
 			continue
 		}
-		if stored.AcknowledgedAt == nil {
-			stored.DetectedAt = n.DetectedAt
-			stored.Occurrences++
-			added = append(added, *stored)
-			continue
-		}
-		n.Occurrences = stored.Occurrences + 1
-		n.ID = fmt.Sprintf("%s-%d", n.Fingerprint, n.Occurrences)
+		n.ID, n.Reporter = randomPricingDriftID(), reporter
 		merged = append(merged, n)
 		added = append(added, n)
 	}
 	return merged, added
+}
+
+func randomPricingDriftID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
 }
 
 // trimPricingDriftNotices keeps the newest 500 unacknowledged and 100
@@ -432,8 +423,9 @@ func diffPricingFeeds(cfg *config.Config, change PricingFeedChange, models []str
 			continue
 		}
 		seen[model] = true
-		before := describeModelPricing(oldBilling, change.Old, model)
-		after := describeModelPricing(newBilling, change.New, model)
+		image := isImagePricingModel(change.Old, model) || isImagePricingModel(change.New, model)
+		before := describeModelPricing(oldBilling, change.Old, model, image)
+		after := describeModelPricing(newBilling, change.New, model, image)
 		changes := diffModelPrices(before.prices, after.prices)
 		if before.status == after.status && len(changes) == 0 {
 			continue
@@ -455,11 +447,11 @@ type modelPricingBehavior struct {
 // each service tier, the whole-session long-context tier and its threshold,
 // image tokens, and the default per-image price of image models (group image
 // prices take precedence over it and are not compared).
-func describeModelPricing(billing *BillingService, pricing *PricingService, model string) modelPricingBehavior {
+func describeModelPricing(billing *BillingService, pricing *PricingService, model string, image bool) modelPricingBehavior {
 	b := modelPricingBehavior{status: PricingStatusUnpriced, prices: map[string]float64{}}
 	// The default per-image price (feed, else the hardcoded default) only
-	// matters for image models.
-	if dynamic := pricing.GetModelPricing(model); dynamic != nil && (dynamic.Mode == "image_generation" || dynamic.OutputCostPerImage > 0) {
+	// matters for image models (on either side of the change).
+	if image {
 		b.prices["image.per_image"] = billing.getDefaultImagePrice(model, "1K")
 	}
 	p, err := billing.GetModelPricing(model)
@@ -490,6 +482,11 @@ func describeModelPricing(billing *BillingService, pricing *PricingService, mode
 		b.prices["image.output"] = p.OutputImagePricePerToken * 1e6
 	}
 	return b
+}
+
+func isImagePricingModel(pricing *PricingService, model string) bool {
+	dynamic := pricing.GetModelPricing(model)
+	return dynamic != nil && (dynamic.Mode == "image_generation" || dynamic.OutputCostPerImage > 0)
 }
 
 func diffModelPrices(before, after map[string]float64) []PricingDriftChange {

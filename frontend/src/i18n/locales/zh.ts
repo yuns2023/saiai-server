@@ -1611,7 +1611,6 @@ export default {
         'acknowledge': '已知晓',
         'acknowledgeAll': '全部已知晓',
         'detectedAt': '检测时间',
-        'occurrences': '同一变化被检测到的次数',
         'loadFailed': '价格源变化提醒加载失败。',
         'status': {
           'priced': '恢复定价',

@@ -1591,7 +1591,6 @@ export default {
         'acknowledge': 'Acknowledge',
         'acknowledgeAll': 'Acknowledge all',
         'detectedAt': 'Detected',
-        'occurrences': 'Number of times this change was detected',
         'loadFailed': 'Failed to load price feed change notices.',
         'status': {
           'priced': 'Priced again',
