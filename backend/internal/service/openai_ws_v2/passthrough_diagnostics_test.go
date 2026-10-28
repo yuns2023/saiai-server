@@ -201,7 +201,7 @@ func TestRelayFailureDiagnostics_StateLevelAttributionAndLabels(t *testing.T) {
 	now := base
 	clientTurns := &atomic.Int32{}
 	clientTurns.Store(1)
-	state := &relayState{turns: newRelayTurnTracker(), startAt: base, now: func() time.Time { return now }, clientTurns: clientTurns, clientDiagnostics: &relayClientDiagnostics{}}
+	state := &relayState{turns: newRelayTurnTracker(), startAt: base, clientTurns: clientTurns, clientDiagnostics: &relayClientDiagnostics{}}
 	state.turns.register(RelayTurnMetadata{Turn: 1, SentAt: base})
 	var turns []RelayTurnResult
 	observe := func(raw string) {

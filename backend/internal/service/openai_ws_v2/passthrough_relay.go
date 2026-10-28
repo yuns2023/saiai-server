@@ -167,7 +167,6 @@ type relayState struct {
 	bufferResponseStart    bool
 	// Failure diagnostics only; they never change relay behavior.
 	startAt           time.Time
-	now               func() time.Time
 	clientTurns       *atomic.Int32
 	clientDiagnostics *relayClientDiagnostics
 }
@@ -267,7 +266,6 @@ func Relay(
 		transformUpstreamFrame: options.TransformUpstreamFrame,
 		bufferResponseStart:    options.BufferResponseStart,
 		startAt:                startAt,
-		now:                    nowFn,
 		clientDiagnostics:      &relayClientDiagnostics{},
 	}
 	onTrace := options.OnTrace
@@ -770,7 +768,7 @@ func runUpstreamToClient(
 			writeErr = forwardFrame(msgType, payload)
 		}
 		if writeErr != nil {
-			state.clientDiag().recordDownstreamWriteFailed(nowFn())
+			state.clientDiag().recordDownstreamWriteFailed(state.nowTime())
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "write_client_failed",
 				Direction:       "upstream_to_client",
@@ -1242,11 +1240,11 @@ func (s *relayState) clientDiag() *relayClientDiagnostics {
 	return s.clientDiagnostics
 }
 
+// nowTime is the wall clock for failure diagnostics. It deliberately does not
+// call RelayOptions.Now: that clock is not required to be goroutine-safe and
+// diagnostics must not consume test clocks. Production uses time.Now for both.
 func (s *relayState) nowTime() time.Time {
-	if s == nil || s.now == nil {
-		return time.Now()
-	}
-	return s.now()
+	return time.Now()
 }
 
 // transformClientPayload applies the TransformClientFrame option.
