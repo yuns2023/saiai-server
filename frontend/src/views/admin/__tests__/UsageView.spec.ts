@@ -415,4 +415,32 @@ describe('admin UsageView distribution metric toggles', () => {
     wrapper.unmount()
   })
 
+
+  it.each([
+    [['first_token', 'duration'], false],
+    [['first_token'], true],
+  ])('maps saved hidden columns %j onto the merged latency column', async (saved, visible) => {
+    vi.mocked(localStorage.getItem).mockImplementation(key => (key === 'usage-hidden-columns' ? JSON.stringify(saved) : null))
+    const wrapper = mount(UsageView, { global: { stubs: {
+      AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub, UsageTable: true,
+      InputRiskAlerts: true, UsageExportProgress: true, UsageCleanupDialog: true,
+      UserBalanceHistoryModal: true, Pagination: true, Select: true, DateTimeRangePicker: true,
+      Icon: true, ModelDistributionChart: true, GroupDistributionChart: true,
+      EndpointDistributionChart: true, TokenUsageTrend: true, CacheUsageTrend: true,
+    } } })
+    await flushPromises()
+    const columns = wrapper.findComponent({ name: 'UsageTable' }).props('columns') as { key: string }[]
+    expect(columns.some(col => col.key === 'latency')).toBe(visible)
+    expect(columns.some(col => col.key === 'first_token' || col.key === 'duration')).toBe(false)
+
+    // Re-showing latency must persist without the legacy keys, or the next load hides it again.
+    await wrapper.get('button[title="admin.users.columnSettings"]').trigger('click')
+    const latencyToggle = wrapper.findAll('button').find(button => button.text() === 'usage.latency')!
+    await latencyToggle.trigger('click')
+    const persisted = JSON.parse(vi.mocked(localStorage.setItem).mock.lastCall![1]) as string[]
+    expect(persisted).not.toContain('first_token')
+    expect(persisted).not.toContain('duration')
+    expect(persisted.includes('latency')).toBe(visible)
+    vi.mocked(localStorage.getItem).mockImplementation(() => null)
+  })
 })

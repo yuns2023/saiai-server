@@ -291,20 +291,8 @@
             </UsageCostCell>
           </template>
 
-          <template #cell-first_token="{ row }">
-            <span
-              v-if="row.first_token_ms != null"
-              class="text-sm text-gray-600 dark:text-gray-400"
-            >
-              {{ formatDuration(row.first_token_ms) }}
-            </span>
-            <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
-          </template>
-
-          <template #cell-duration="{ row }">
-            <span class="text-sm text-gray-600 dark:text-gray-400">{{
-              formatDuration(row.duration_ms)
-            }}</span>
+          <template #cell-latency="{ row }">
+            <UsageLatencyCell :row="row" />
           </template>
 
           <template #cell-created_at="{ value }">
@@ -556,6 +544,7 @@ import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { isNativeChatUsage } from '@/utils/nativeChatUsage'
 import NativeChatCharges from '@/components/common/NativeChatCharges.vue'
 import UsageCostCell from '@/components/common/UsageCostCell.vue'
+import UsageLatencyCell from '@/components/common/UsageLatencyCell.vue'
 import UsageCostLegend from '@/components/common/UsageCostLegend.vue'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
@@ -612,8 +601,7 @@ const columns = computed<Column[]>(() => [
   { key: 'stream', label: t('usage.type'), sortable: false },
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
-  { key: 'first_token', label: t('usage.firstToken'), sortable: false },
-  { key: 'duration', label: t('usage.duration'), sortable: false },
+  { key: 'latency', label: t('usage.latency'), sortable: false },
   { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false }
 ])
