@@ -355,21 +355,26 @@ func sortPricingDriftNotices(notices []PricingDriftNotice) []PricingDriftNotice 
 func mergePricingDriftNotices(existing, found []PricingDriftNotice, reporter string) (merged, added []PricingDriftNotice) {
 	merged = append([]PricingDriftNotice{}, existing...)
 	for _, n := range found {
-		match, retried := -1, false
-		for i, stored := range merged {
-			if stored.Fingerprint != n.Fingerprint {
-				continue
-			}
-			if seen, ok := stored.Observed[reporter]; ok {
-				if seen.Equal(n.DetectedAt) {
-					retried = true
-					break
-				}
-				continue
-			}
-			if gap := n.DetectedAt.Sub(stored.DetectedAt); gap < pricingDriftRepeatWindow && gap > -pricingDriftRepeatWindow {
-				match = i
+		retried := false
+		for _, stored := range merged {
+			if seen, ok := stored.Observed[reporter]; ok && stored.Fingerprint == n.Fingerprint && seen.Equal(n.DetectedAt) {
+				retried = true
 				break
+			}
+		}
+		// Otherwise join the closest notice of another Gateway in the window.
+		match := -1
+		var matchGap time.Duration
+		for i, stored := range merged {
+			if _, ok := stored.Observed[reporter]; ok || stored.Fingerprint != n.Fingerprint {
+				continue
+			}
+			gap := n.DetectedAt.Sub(stored.DetectedAt)
+			if gap < 0 {
+				gap = -gap
+			}
+			if gap < pricingDriftRepeatWindow && (match < 0 || gap < matchGap) {
+				match, matchGap = i, gap
 			}
 		}
 		switch {

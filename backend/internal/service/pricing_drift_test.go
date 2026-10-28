@@ -202,6 +202,13 @@ func TestMergePricingDriftNoticesTracksMergedObservations(t *testing.T) {
 	require.Empty(t, added)
 	require.Len(t, merged, 3)
 	require.Equal(t, t0.Add(25*time.Minute), driftNoticeByID(merged, merged[2].ID).Observed["east"])
+
+	// A retried save of west's first observation is recognised even when a
+	// newer notice for the same change comes first.
+	reordered := []PricingDriftNotice{merged[2], merged[0], merged[1]}
+	reordered, added = mergePricingDriftNotices(reordered, at("a", 5*time.Minute), "west")
+	require.Empty(t, added)
+	require.Equal(t, t0.Add(20*time.Minute), reordered[0].Observed["west"])
 }
 
 // Feed changes evaluated in one batch keep their own order: A->B, B->A, A->B
