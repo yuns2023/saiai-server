@@ -123,6 +123,18 @@ func TestRelayFailureDiagnostics_ControlWindowAndTruncation(t *testing.T) {
 	diagnostics.fill(out, time.Time{}, base.Add(time.Second), "resp_current")
 	require.Empty(t, out.ClientControl, "no turn window without a send time")
 
+	// Counts cover the whole retained window, not only the listed frames.
+	early := &relayClientDiagnostics{}
+	early.recordControl([]byte(`{"type":"response.interrupt"}`), base)
+	for index := 0; index < relayControlOutputMax; index++ {
+		early.recordControl([]byte(`{"type":"session.update"}`), base.Add(time.Millisecond))
+	}
+	out = &RelayFailureDiagnostics{}
+	early.fill(out, base, base.Add(time.Second), "resp_current")
+	require.Equal(t, 1, out.ClientInterrupts)
+	require.True(t, out.ClientControlTruncated)
+	require.Len(t, out.ClientControl, relayControlOutputMax)
+
 	targets := &relayClientDiagnostics{}
 	targets.recordControl([]byte(`{"type":"response.cancel","response_id":42}`), base)
 	targets.recordControl([]byte(`{"type":"response.cancel"}`), base)

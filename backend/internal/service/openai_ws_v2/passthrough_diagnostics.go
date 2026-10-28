@@ -277,11 +277,6 @@ func (d *relayClientDiagnostics) fillControl(out *RelayFailureDiagnostics, sentA
 			window = append(window, event)
 		}
 	}
-	if len(window) > relayControlOutputMax {
-		// The frames closest to the failure explain it best.
-		window = window[len(window)-relayControlOutputMax:]
-		out.ClientControlTruncated = true
-	}
 	for _, event := range window {
 		switch event.kind {
 		case "response.interrupt":
@@ -289,6 +284,13 @@ func (d *relayClientDiagnostics) fillControl(out *RelayFailureDiagnostics, sentA
 		case "response.cancel":
 			out.ClientCancels++
 		}
+	}
+	if len(window) > relayControlOutputMax {
+		// The frames closest to the failure explain it best.
+		window = window[len(window)-relayControlOutputMax:]
+		out.ClientControlTruncated = true
+	}
+	for _, event := range window {
 		frame := RelayControlFrameDiagnostics{
 			Type: event.kind, MsAfterSent: relayElapsedMs(sentAt, event.at),
 			MsBeforeFailure: relayElapsedMs(event.at, failureAt), Target: relayControlTarget(event.target, responseID),
