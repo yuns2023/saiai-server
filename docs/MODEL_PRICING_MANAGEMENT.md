@@ -142,13 +142,14 @@ pricing key alone never raise a notice; they are shown as explanation.
 Notices live in the `model_pricing_drift_notices` setting (read-modify-write
 under a row lock) and are ordered by when each feed replacement happened. A
 notice's fingerprint covers the new feed hash, the pricing configuration, the
-model and its changes. Each Gateway process sees each replacement once, so the
-same fingerprint recorded by another Gateway within 24 hours (even reported
-late) is the same feed change and is not duplicated, and the same replacement
-saved again by the same process is ignored. The same process seeing the change
-again (the feed flipped back and forth), or another Gateway past 24 hours,
-records a new notice. IDs are random and never reused, so a page showing an
-earlier notice cannot acknowledge a newer one. At most 500 unacknowledged and 100
+model and its changes, and each notice records when each Gateway process
+observed it. A process sees each replacement once, so a notice for the same
+fingerprint that another Gateway recorded within 24 hours (even reported late)
+is the same feed change: the observation is added to it instead of a duplicate.
+A process seeing the change again after it already observed it (the feed
+flipped back and forth), or a notice older than 24 hours, records a new notice;
+a retried save of the same observation is ignored. IDs are random (128-bit), so
+a page showing an earlier notice cannot acknowledge a newer one. At most 500 unacknowledged and 100
 acknowledged notices are kept. The administrator model-pricing page shows a
 banner until each notice is acknowledged; there is no email or Ops alert. Each
 new notice also logs a `[PricingDrift] WARN` line.

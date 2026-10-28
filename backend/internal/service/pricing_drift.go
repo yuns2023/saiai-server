@@ -101,12 +101,14 @@ type PricingDriftChange struct {
 // PricingDriftNotice records that a feed change altered how a recently billed
 // model is priced. Acknowledging it only records that an administrator saw it.
 type PricingDriftNotice struct {
-	// ID is random and never reused. Fingerprint names the change (feed,
-	// pricing configuration, model and prices) across Gateways; Reporter is the
-	// Gateway process that recorded it.
+	// ID is random. Fingerprint names the change (feed, pricing
+	// configuration, model and prices) across Gateways. Reporter is the Gateway
+	// process that recorded it; Observed holds when each Gateway process saw
+	// this change, so a later recurrence is told apart from a duplicate.
 	ID               string               `json:"id"`
 	Fingerprint      string               `json:"fingerprint"`
 	Reporter         string               `json:"reporter"`
+	Observed         map[string]time.Time `json:"observed,omitempty"`
 	Model            string               `json:"model"`
 	OldStatus        string               `json:"old_status"`
 	NewStatus        string               `json:"new_status"`
@@ -341,39 +343,54 @@ func sortPricingDriftNotices(notices []PricingDriftNotice) []PricingDriftNotice 
 	return out
 }
 
-// mergePricingDriftNotices adds the notices this Gateway found. Each Gateway
-// process sees each feed replacement once, so a stored notice with the same
-// fingerprint is a duplicate when another Gateway recorded it within the
-// repeat window (it saw the same feed change), or when this Gateway recorded
-// it for the same replacement (a retried save). Otherwise the change happened
-// again (the feed flipped back and forth) and is a new notice with a new ID,
-// so a page showing an earlier one can never acknowledge it.
+// mergePricingDriftNotices adds the notices this Gateway process found. A
+// process sees each feed replacement once. A stored notice with the same
+// fingerprint that this process already observed at the same time is a
+// retried save; one it observed at another time is an earlier occurrence (the
+// feed flipped back and forth). One it has not observed, recorded by another
+// Gateway within the repeat window (even reported late), is the same feed
+// change: this process's observation is added to it. Anything else is a new
+// notice with a new ID, so a page showing an earlier notice can never
+// acknowledge it.
 func mergePricingDriftNotices(existing, found []PricingDriftNotice, reporter string) (merged, added []PricingDriftNotice) {
 	merged = append([]PricingDriftNotice{}, existing...)
 	for _, n := range found {
-		duplicate := false
-		for _, stored := range merged {
+		match, retried := -1, false
+		for i, stored := range merged {
 			if stored.Fingerprint != n.Fingerprint {
 				continue
 			}
-			gap := n.DetectedAt.Sub(stored.DetectedAt)
-			if stored.Reporter == reporter && gap == 0 || stored.Reporter != reporter && gap < pricingDriftRepeatWindow && gap > -pricingDriftRepeatWindow {
-				duplicate = true
+			if seen, ok := stored.Observed[reporter]; ok {
+				if seen.Equal(n.DetectedAt) {
+					retried = true
+					break
+				}
+				continue
+			}
+			if gap := n.DetectedAt.Sub(stored.DetectedAt); gap < pricingDriftRepeatWindow && gap > -pricingDriftRepeatWindow {
+				match = i
 				break
 			}
 		}
-		if duplicate {
-			continue
+		switch {
+		case retried:
+		case match >= 0:
+			observed := map[string]time.Time{reporter: n.DetectedAt}
+			for k, v := range merged[match].Observed {
+				observed[k] = v
+			}
+			merged[match].Observed = observed
+		default:
+			n.ID, n.Reporter, n.Observed = randomPricingDriftID(), reporter, map[string]time.Time{reporter: n.DetectedAt}
+			merged = append(merged, n)
+			added = append(added, n)
 		}
-		n.ID, n.Reporter = randomPricingDriftID(), reporter
-		merged = append(merged, n)
-		added = append(added, n)
 	}
 	return merged, added
 }
 
 func randomPricingDriftID() string {
-	var b [8]byte
+	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }

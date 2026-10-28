@@ -156,7 +156,7 @@ func TestMergePricingDriftNotices(t *testing.T) {
 	}
 	merged, added := mergePricingDriftNotices(nil, []PricingDriftNotice{at("a", 0)}, "east")
 	require.Len(t, added, 1)
-	require.Len(t, merged[0].ID, 16)
+	require.Len(t, merged[0].ID, 32)
 	require.Equal(t, "east", merged[0].Reporter)
 	first := merged[0].ID
 
@@ -166,7 +166,7 @@ func TestMergePricingDriftNotices(t *testing.T) {
 	for _, again := range []struct {
 		reporter string
 		notice   PricingDriftNotice
-	}{{"east", at("a", 0)}, {"west", at("a", 10*time.Minute)}, {"west", at("a", -10*time.Minute)}, {"west", at("b", 30*time.Minute)}} {
+	}{{"east", at("a", 0)}, {"west", at("a", 10*time.Minute)}, {"north", at("a", -10*time.Minute)}, {"south", at("b", 30*time.Minute)}} {
 		var added []PricingDriftNotice
 		merged, added = mergePricingDriftNotices(merged, []PricingDriftNotice{again.notice}, again.reporter)
 		require.Empty(t, added, again)
@@ -181,6 +181,27 @@ func TestMergePricingDriftNotices(t *testing.T) {
 	merged, added = mergePricingDriftNotices(merged, []PricingDriftNotice{at("a", 30*time.Minute+pricingDriftRepeatWindow)}, "west")
 	require.Len(t, added, 1)
 	require.Len(t, merged, 4)
+}
+
+// A Gateway whose first observation was merged into another Gateway's notice
+// still reports its own later recurrence.
+func TestMergePricingDriftNoticesTracksMergedObservations(t *testing.T) {
+	t0 := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	at := func(fp string, d time.Duration) []PricingDriftNotice {
+		return []PricingDriftNotice{{Fingerprint: fp, Model: "m", DetectedAt: t0.Add(d)}}
+	}
+	merged, _ := mergePricingDriftNotices(nil, at("a", 0), "east")
+	merged, added := mergePricingDriftNotices(merged, at("a", 5*time.Minute), "west")
+	require.Empty(t, added)
+	require.Equal(t, t0.Add(5*time.Minute), merged[0].Observed["west"])
+	merged, _ = mergePricingDriftNotices(merged, at("b", 10*time.Minute), "west")
+	merged, added = mergePricingDriftNotices(merged, at("a", 20*time.Minute), "west")
+	require.Len(t, added, 1, "west saw the change again")
+	// east seeing the same recurrence shortly after joins west's new notice.
+	merged, added = mergePricingDriftNotices(merged, at("a", 25*time.Minute), "east")
+	require.Empty(t, added)
+	require.Len(t, merged, 3)
+	require.Equal(t, t0.Add(25*time.Minute), driftNoticeByID(merged, merged[2].ID).Observed["east"])
 }
 
 // Feed changes evaluated in one batch keep their own order: A->B, B->A, A->B
