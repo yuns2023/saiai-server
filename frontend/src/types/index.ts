@@ -915,6 +915,8 @@ export interface WindowStats {
   cost: number // Account cost (account multiplier)
   standard_cost?: number
   user_cost?: number
+  hosted_requests?: number // Hosted-group requests (metered_cost set; cost/user_cost are 0)
+  hosted_cost?: number // Hosted reference usage: SUM(metered_cost)
 }
 
 export interface UsageProgress {

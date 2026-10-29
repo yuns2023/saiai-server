@@ -44,6 +44,25 @@
           formatCurrency(props.stats.user_cost)
         }}</span>
       </div>
+      <!-- Hosted reference usage: hosted rows bill 0 to both lines above -->
+      <div v-if="(props.stats.hosted_requests ?? 0) > 0" class="flex items-center gap-1">
+        <HelpTooltip lazy class="!ml-0">
+          <template #trigger>
+            <button
+              type="button"
+              class="cursor-help rounded-sm text-gray-500 underline decoration-dotted underline-offset-2 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:text-gray-400"
+              :aria-label="`${t('hostedUsage.reference')} ≈${formatCurrency(props.stats.hosted_cost ?? 0)}: ${t('hostedUsage.hint')}`"
+              data-testid="today-stats-hosted"
+            >
+              {{ t('hostedUsage.reference') }}:
+            </button>
+          </template>
+          <span class="font-semibold">{{ t('hostedUsage.reference') }}</span>: {{ t('hostedUsage.hint') }}
+        </HelpTooltip>
+        <span class="font-medium text-gray-700 dark:text-gray-300"
+          >≈{{ formatCurrency(props.stats.hosted_cost ?? 0) }}</span
+        >
+      </div>
     </div>
 
     <!-- No data -->
@@ -53,6 +72,7 @@
 
 <script setup lang="ts">
 import TokenCount from '@/components/common/TokenCount.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import { useI18n } from 'vue-i18n'
 import type { WindowStats } from '@/types'
 import { formatNumber, formatCurrency } from '@/utils/format'

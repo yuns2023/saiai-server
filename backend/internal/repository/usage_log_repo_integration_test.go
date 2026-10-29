@@ -1033,6 +1033,58 @@ func (s *UsageLogRepoSuite) TestGetAccountTodayStats() {
 	s.Require().InEpsilon(3.0, stats.UserCost, 0.0001)
 }
 
+func (s *UsageLogRepoSuite) TestGetAccountTodayStats_HostedReference() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "acctodayhosted@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-acctodayhosted", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-today-hosted"})
+
+	createdAt := timezone.Today().Add(1 * time.Hour)
+	one, zero, metered := 1.0, 0.0, 2.5
+	for _, row := range []struct {
+		total, actual float64
+		accountRate   *float64
+		metered       *float64
+	}{
+		{total: 1.0, actual: 0.5, accountRate: &one},
+		{total: 2.5, actual: 0, accountRate: &zero, metered: &metered},
+	} {
+		_, err := s.repo.Create(s.ctx, &service.UsageLog{
+			UserID:                user.ID,
+			APIKeyID:              apiKey.ID,
+			AccountID:             account.ID,
+			RequestID:             uuid.New().String(),
+			Model:                 "gpt-5",
+			InputTokens:           10,
+			OutputTokens:          10,
+			TotalCost:             row.total,
+			ActualCost:            row.actual,
+			AccountRateMultiplier: row.accountRate,
+			MeteredCost:           row.metered,
+			CreatedAt:             createdAt,
+		})
+		s.Require().NoError(err)
+	}
+
+	stats, err := s.repo.GetAccountTodayStats(s.ctx, account.ID)
+	s.Require().NoError(err, "GetAccountTodayStats")
+	s.Require().Equal(int64(2), stats.Requests)
+	// hosted rows add nothing to account or user cost
+	s.Require().InEpsilon(1.0, stats.Cost, 0.0001)
+	s.Require().InEpsilon(0.5, stats.UserCost, 0.0001)
+	s.Require().Equal(int64(1), stats.HostedRequests)
+	s.Require().InEpsilon(2.5, stats.HostedCost, 0.0001)
+
+	window, err := s.repo.GetAccountWindowStats(s.ctx, account.ID, timezone.Today())
+	s.Require().NoError(err, "GetAccountWindowStats")
+	s.Require().Equal(int64(1), window.HostedRequests)
+	s.Require().InEpsilon(2.5, window.HostedCost, 0.0001)
+
+	batch, err := s.repo.GetAccountWindowStatsBatch(s.ctx, []int64{account.ID}, timezone.Today())
+	s.Require().NoError(err, "GetAccountWindowStatsBatch")
+	s.Require().Equal(int64(1), batch[account.ID].HostedRequests)
+	s.Require().InEpsilon(2.5, batch[account.ID].HostedCost, 0.0001)
+}
+
 func (s *UsageLogRepoSuite) TestDashboardAggregationConsistency() {
 	now := time.Now().UTC().Truncate(time.Second)
 	// 使用固定的时间偏移确保 hour1 和 hour2 在同一天且都在过去

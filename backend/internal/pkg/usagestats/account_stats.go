@@ -5,10 +5,14 @@ package usagestats
 // cost: 账号口径费用（使用 total_cost * account_rate_multiplier）
 // standard_cost: 标准费用（使用 total_cost，不含倍率）
 // user_cost: 用户/API Key 口径费用（使用 actual_cost，受分组倍率影响）
+// hosted_requests/hosted_cost: 托管分组请求数与折算用量（SUM(metered_cost)）；托管行 cost/user_cost 为 0
 type AccountStats struct {
 	Requests     int64   `json:"requests"`
 	Tokens       int64   `json:"tokens"`
 	Cost         float64 `json:"cost"`
 	StandardCost float64 `json:"standard_cost"`
 	UserCost     float64 `json:"user_cost"`
+
+	HostedRequests int64   `json:"hosted_requests"`
+	HostedCost     float64 `json:"hosted_cost"`
 }

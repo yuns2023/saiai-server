@@ -142,6 +142,10 @@ type WindowStats struct {
 	Cost         float64 `json:"cost"`
 	StandardCost float64 `json:"standard_cost"`
 	UserCost     float64 `json:"user_cost"`
+
+	// 托管分组（metered_cost 非空）的请求数与折算用量；托管行的 cost/user_cost 为 0。
+	HostedRequests int64   `json:"hosted_requests"`
+	HostedCost     float64 `json:"hosted_cost"`
 }
 
 // UsageProgress 使用量进度
@@ -1055,13 +1059,7 @@ func (s *AccountUsageService) addWindowStats(ctx context.Context, account *Accou
 			return
 		}
 
-		windowStats = &WindowStats{
-			Requests:     stats.Requests,
-			Tokens:       stats.Tokens,
-			Cost:         stats.Cost,
-			StandardCost: stats.StandardCost,
-			UserCost:     stats.UserCost,
-		}
+		windowStats = windowStatsFromAccountStats(stats)
 
 		// 缓存窗口统计（1 分钟）
 		s.cache.windowStatsCache.Store(account.ID, &windowStatsCache{
@@ -1083,13 +1081,7 @@ func (s *AccountUsageService) GetTodayStats(ctx context.Context, accountID int64
 		return nil, fmt.Errorf("get today stats failed: %w", err)
 	}
 
-	return &WindowStats{
-		Requests:     stats.Requests,
-		Tokens:       stats.Tokens,
-		Cost:         stats.Cost,
-		StandardCost: stats.StandardCost,
-		UserCost:     stats.UserCost,
-	}, nil
+	return windowStatsFromAccountStats(stats), nil
 }
 
 // GetTodayStatsBatch 批量获取账号今日统计，优先走批量 SQL，失败时回退单账号查询。
@@ -1161,6 +1153,9 @@ func windowStatsFromAccountStats(stats *usagestats.AccountStats) *WindowStats {
 		Cost:         stats.Cost,
 		StandardCost: stats.StandardCost,
 		UserCost:     stats.UserCost,
+
+		HostedRequests: stats.HostedRequests,
+		HostedCost:     stats.HostedCost,
 	}
 }
 

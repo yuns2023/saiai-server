@@ -2092,7 +2092,9 @@ func (r *usageLogRepository) GetAccountTodayStats(ctx context.Context, accountID
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
 			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as cost,
 			COALESCE(SUM(total_cost), 0) as standard_cost,
-			COALESCE(SUM(actual_cost), 0) as user_cost
+			COALESCE(SUM(actual_cost), 0) as user_cost,
+			COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
+			COALESCE(SUM(metered_cost), 0) as hosted_cost
 		FROM usage_logs
 		WHERE account_id = $1 AND created_at >= $2
 	`
@@ -2108,6 +2110,8 @@ func (r *usageLogRepository) GetAccountTodayStats(ctx context.Context, accountID
 		&stats.Cost,
 		&stats.StandardCost,
 		&stats.UserCost,
+		&stats.HostedRequests,
+		&stats.HostedCost,
 	); err != nil {
 		return nil, err
 	}
@@ -2122,7 +2126,9 @@ func (r *usageLogRepository) GetAccountWindowStats(ctx context.Context, accountI
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
 			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as cost,
 			COALESCE(SUM(total_cost), 0) as standard_cost,
-			COALESCE(SUM(actual_cost), 0) as user_cost
+			COALESCE(SUM(actual_cost), 0) as user_cost,
+			COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
+			COALESCE(SUM(metered_cost), 0) as hosted_cost
 		FROM usage_logs
 		WHERE account_id = $1 AND created_at >= $2
 	`
@@ -2138,6 +2144,8 @@ func (r *usageLogRepository) GetAccountWindowStats(ctx context.Context, accountI
 		&stats.Cost,
 		&stats.StandardCost,
 		&stats.UserCost,
+		&stats.HostedRequests,
+		&stats.HostedCost,
 	); err != nil {
 		return nil, err
 	}
@@ -2159,7 +2167,9 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
 			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as cost,
 			COALESCE(SUM(total_cost), 0) as standard_cost,
-			COALESCE(SUM(actual_cost), 0) as user_cost
+			COALESCE(SUM(actual_cost), 0) as user_cost,
+			COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
+			COALESCE(SUM(metered_cost), 0) as hosted_cost
 		FROM usage_logs
 		WHERE account_id = ANY($1) AND created_at >= $2
 		GROUP BY account_id
@@ -2180,6 +2190,8 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 			&stats.Cost,
 			&stats.StandardCost,
 			&stats.UserCost,
+			&stats.HostedRequests,
+			&stats.HostedCost,
 		); err != nil {
 			return nil, err
 		}
