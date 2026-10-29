@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -87,7 +88,10 @@ func openAIWSFirstReadFailureReason(err error, timedOut bool) string {
 		return openAIWSFirstMessageTooBig
 	case timedOut:
 		return openAIWSFirstMessageTimedOut
+	// The request context is canceled when net/http notices the client's
+	// connection is gone, which can win the race against the EOF.
 	case coderws.CloseStatus(err) != -1,
+		errors.Is(err, context.Canceled),
 		errors.Is(err, io.EOF),
 		errors.Is(err, io.ErrUnexpectedEOF),
 		errors.Is(err, net.ErrClosed),

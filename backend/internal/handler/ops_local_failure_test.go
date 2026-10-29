@@ -157,7 +157,7 @@ func TestOpenAIWSFirstReadFailureReason(t *testing.T) {
 	require.Equal(t, openAIWSFirstMessageTimedOut, openAIWSFirstReadFailureReason(deadline, true))
 	// The library's own control-frame timeout or a parent deadline is not the first-message wait.
 	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(deadline, false))
-	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(fmt.Errorf("read: %w", context.Canceled), false))
+	require.Equal(t, openAIWSFirstMessageClientClosed, openAIWSFirstReadFailureReason(fmt.Errorf("failed to get reader: %w", context.Canceled), false))
 	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(errors.New("unexpected protocol error"), false))
 	require.Equal(t, openAIWSFirstMessageTooBig, openAIWSFirstReadFailureReason(fmt.Errorf("%w: read limited at 16777217 bytes", coderws.ErrMessageTooBig), false))
 	require.Equal(t, openAIWSFirstMessageTooBig, openAIWSFirstReadFailureReason(coderws.CloseError{Code: coderws.StatusMessageTooBig, Reason: "message too big"}, false))
