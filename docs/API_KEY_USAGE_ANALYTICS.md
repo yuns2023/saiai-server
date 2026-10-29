@@ -242,6 +242,13 @@ does not classify abuse.
 - In browser checks, mark the mock user's onboarding tour as already seen using
   the storage key derived from the current tour implementation. Do not force
   clicks through an overlay or change production onboarding to make tests pass.
+- For date ranges, include a zone whose local midnight is skipped by DST
+  (e.g. America/Santiago on 2026-09-06): Go normalizes that midnight into the
+  previous day, so derive boundaries from the calendar date (see
+  `startOfLocalDay`). The older `parseUserTimeRange` does not do this yet.
+- For paged exports, test rows that share one timestamp and a row inserted
+  at that instant between pages; use a keyset position, never a per-timestamp
+  offset.
 - Inspect screenshots as well as runtime errors and page overflow. Check row
   height and readable column widths on narrow screens; horizontally scroll dense
   tables rather than wrapping identifiers one character per line. Verify both
@@ -296,8 +303,11 @@ queried Key. The optional inclusive-calendar `start_date` and `end_date`
 parameters apply to all three public range views; they never carry
 credentials. `records_page` and `records_page_size` paginate recent records,
 with a maximum page size of 50. A recent record exposes only its timestamp,
-model, token classes, total tokens, actual cost, duration, and request type. It
-does not expose user, account, Key, session, request, IP, or payload identifiers.
+model, token classes, total tokens, actual cost, the hosted reference
+`metered_cost` when set, duration, request type, image count/size and media
+type, and for native Chat turns `billing_unit`, `token_usage_source` and the
+turn/image charge split. It does not expose user, account, Key, session,
+request, IP, upstream routing, or payload identifiers.
 
 ### Programmatic views
 
