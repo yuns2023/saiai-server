@@ -161,6 +161,9 @@ func TestOpenAIWSFirstReadFailureReason(t *testing.T) {
 	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(errors.New("unexpected protocol error"), false))
 	require.Equal(t, openAIWSFirstMessageTooBig, openAIWSFirstReadFailureReason(fmt.Errorf("%w: read limited at 16777217 bytes", coderws.ErrMessageTooBig), false))
 	require.Equal(t, openAIWSFirstMessageTooBig, openAIWSFirstReadFailureReason(coderws.CloseError{Code: coderws.StatusMessageTooBig, Reason: "message too big"}, false))
+	require.Equal(t, openAIWSFirstMessageTooBig, openAIWSFirstReadFailureReason(fmt.Errorf("%w: read limited at 16777217 bytes", coderws.ErrMessageTooBig), true),
+		"a deadline that expired while the 1009 close was sent is not the root cause")
+	require.Contains(t, openAIWSFirstMessageTooBig, fmt.Sprintf("%d MiB", openAIWSClientMessageReadLimit>>20))
 }
 
 func TestOpenAIWSFirstReadFailureNamesClientCloseAndTimeout(t *testing.T) {
@@ -185,21 +188,24 @@ func TestOpenAIWSFirstReadFailureNamesClientCloseAndTimeout(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		timeout time.Duration
-		client  func(*coderws.Conn)
+		client  func(*testing.T, *coderws.Conn)
 		message string
 	}{
-		{"tcp_close_without_frame", 10 * time.Second, func(conn *coderws.Conn) { _ = conn.CloseNow() }, openAIWSFirstMessageClientClosed},
-		{"close_frame", 10 * time.Second, func(conn *coderws.Conn) { _ = conn.Close(coderws.StatusGoingAway, "bye") }, openAIWSFirstMessageClientClosed},
-		{"proxy_rejects_oversized_frame", 10 * time.Second, func(conn *coderws.Conn) { _ = conn.Close(coderws.StatusMessageTooBig, "message too big") }, openAIWSFirstMessageTooBig},
-		{"over_gateway_read_limit", 10 * time.Second, func(conn *coderws.Conn) {
-			ioCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		{"tcp_close_without_frame", 10 * time.Second, func(_ *testing.T, conn *coderws.Conn) { _ = conn.CloseNow() }, openAIWSFirstMessageClientClosed},
+		{"close_frame", 10 * time.Second, func(_ *testing.T, conn *coderws.Conn) { _ = conn.Close(coderws.StatusGoingAway, "bye") }, openAIWSFirstMessageClientClosed},
+		{"proxy_rejects_oversized_frame", 10 * time.Second, func(_ *testing.T, conn *coderws.Conn) { _ = conn.Close(coderws.StatusMessageTooBig, "message too big") }, openAIWSFirstMessageTooBig},
+		{"over_gateway_read_limit", 10 * time.Second, func(_ *testing.T, conn *coderws.Conn) {
+			ioCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			// Keep reading so the Gateway's 1009 close handshake completes.
-			go func() { _, _, _ = conn.Read(ioCtx) }()
+			// The Gateway's 1009 is best effort: it closes without draining the
+			// oversized frame, so the client may see a reset instead.
+			done := make(chan struct{})
+			go func() { _, _, _ = conn.Read(ioCtx); close(done) }()
 			payload := `{"type":"response.create","input":"` + strings.Repeat("x", openAIWSClientMessageReadLimit) + `"}`
 			_ = conn.Write(ioCtx, coderws.MessageText, []byte(payload))
+			<-done
 		}, openAIWSFirstMessageTooBig},
-		{"silent_client", 200 * time.Millisecond, func(conn *coderws.Conn) {
+		{"silent_client", 200 * time.Millisecond, func(_ *testing.T, conn *coderws.Conn) {
 			readCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_, _, _ = conn.Read(readCtx)
@@ -212,7 +218,7 @@ func TestOpenAIWSFirstReadFailureNamesClientCloseAndTimeout(t *testing.T) {
 			conn, _, err := coderws.Dial(ctx, url, nil)
 			require.NoError(t, err)
 			defer func() { _ = conn.CloseNow() }()
-			tc.client(conn)
+			tc.client(t, conn)
 			select {
 			case job := <-queue:
 				require.Equal(t, tc.message, job.entry.ErrorMessage)

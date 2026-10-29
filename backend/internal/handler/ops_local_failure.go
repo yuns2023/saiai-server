@@ -80,12 +80,13 @@ const (
 // same DeadlineExceeded for its own control-frame timeout.
 func openAIWSFirstReadFailureReason(err error, timedOut bool) string {
 	switch {
-	case timedOut:
-		return openAIWSFirstMessageTimedOut
 	// Our own read limit, or a SAIAI local proxy rejecting the frame with 1009
-	// before forwarding it. Codex then retries and falls back to HTTPS.
+	// before forwarding it. Codex then retries and falls back to HTTPS. This is
+	// more specific than a deadline that expired while the close was sent.
 	case errors.Is(err, coderws.ErrMessageTooBig), coderws.CloseStatus(err) == coderws.StatusMessageTooBig:
 		return openAIWSFirstMessageTooBig
+	case timedOut:
+		return openAIWSFirstMessageTimedOut
 	case coderws.CloseStatus(err) != -1,
 		errors.Is(err, io.EOF),
 		errors.Is(err, io.ErrUnexpectedEOF),
@@ -99,14 +100,22 @@ func openAIWSFirstReadFailureReason(err error, timedOut bool) string {
 func closeOpenAIClientWSFirstReadFailure(c *gin.Context, conn *coderws.Conn, err error, timedOut bool, waited time.Duration) {
 	reason := openAIWSFirstReadFailureReason(err, timedOut)
 	failure := openAIClientWSOpsFailure(coderws.StatusPolicyViolation, reason)
-	closeStatus := coderws.StatusPolicyViolation
-	if reason == openAIWSFirstMessageTooBig {
-		closeStatus = coderws.StatusMessageTooBig
-		failure.wsCloseCode = int(closeStatus)
-	}
 	waitMS := waited.Milliseconds()
 	failure.wsFirstFrameWaitMS = &waitMS
-	recordAndCloseOpenAIClientWS(c, conn, closeStatus, failure)
+	if reason == openAIWSFirstMessageTooBig {
+		// The 1009 close is already on the wire (coder sent it on the read
+		// limit, or answered the peer's). A second Close would wait for the
+		// handshake behind the rest of an oversized frame.
+		failure.wsCloseCode = int(coderws.StatusMessageTooBig)
+		if !opsWSHasCurrentUpstreamFailure(c) {
+			setOpsLocalFailure(c, failure)
+		}
+		if conn != nil {
+			_ = conn.CloseNow()
+		}
+		return
+	}
+	recordAndCloseOpenAIClientWS(c, conn, coderws.StatusPolicyViolation, failure)
 }
 
 func openAIClientWSOpsFailure(status coderws.StatusCode, reason string) opsLocalFailure {
