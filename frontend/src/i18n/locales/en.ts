@@ -704,7 +704,7 @@ export default {
       apiDialogIntro: 'This endpoint is authenticated with your web login session (JWT) and returns the same data as shown here. The example below carries the current filters:',
       apiDialogTokenNote: 'Replace <YOUR_LOGIN_TOKEN> with your login token. A login token grants full account access; never share it or commit it to code.',
       apiDialogParamsNote: 'Optional parameters: start_date, end_date (YYYY-MM-DD, up to 90 days), timezone, group_by (model / reasoning_effort / api_key / api_key_model), sort, page (1–10000), page_size (1–1000), api_key_id, group_id, model, reasoning_effort or reasoning_effort_missing=true, request_type, billing_type (0 balance / 1 subscription).',
-      apiDialogPerKeyNote: 'Per-Key access with an API Key (GET /v1/usage) will be documented separately.'
+      apiDialogPerKeyNote: 'Scripts can also query one Key with the Key itself (header Authorization: Bearer <YOUR_API_KEY>): GET /v1/usage?view=analytics returns the same analytics (same parameters, without api_key_id); GET /v1/usage?view=records returns individual records (limit 1-500; for the next page send only view=records&cursor=<next_cursor> and optionally limit, without repeating dates or filters).'
     }
   },
 

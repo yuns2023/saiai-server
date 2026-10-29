@@ -704,7 +704,7 @@ export default {
       apiDialogIntro: '该接口使用网页登录会话（JWT）鉴权，返回与此处相同的数据。下例已带上当前筛选条件：',
       apiDialogTokenNote: '请将 <YOUR_LOGIN_TOKEN> 替换为你的登录令牌；登录令牌等同账号权限，请勿分享或写入代码仓库。',
       apiDialogParamsNote: '可选参数：start_date、end_date（YYYY-MM-DD，最长 90 天）、timezone、group_by（model / reasoning_effort / api_key / api_key_model）、sort、page（1–10000）、page_size（1–1000）、api_key_id、group_id、model、reasoning_effort 或 reasoning_effort_missing=true、request_type、billing_type（0 余额 / 1 订阅）。',
-      apiDialogPerKeyNote: '使用 API Key 按 Key 查询用量（GET /v1/usage）的方式将另行提供文档。'
+      apiDialogPerKeyNote: '脚本也可以直接用 API Key 查询该 Key 自己的用量（请求头 Authorization: Bearer <YOUR_API_KEY>）：GET /v1/usage?view=analytics 返回同样的统计（参数同上，不含 api_key_id）；GET /v1/usage?view=records 返回逐条明细（limit 1-500；翻页时只传 view=records&cursor=<next_cursor>，可选 limit，不要重复带日期和筛选）。'
     }
   },
 

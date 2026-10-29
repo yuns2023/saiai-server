@@ -189,7 +189,7 @@ without one form a separate group with `reasoning_effort_missing: true`;
 `none` is a real OpenAI effort value and is reported as such. The analytics do
 not apply the query-time inheritance that the usage records list shows as an
 inherited effort. The Key name is its current name; the raw Key value is never
-selected. Aggregates run with a 20-second deadline; a 90-day Key x model
+selected. Aggregates run with a 20-second deadline and at most three at a time per user (HTTP 429 beyond that); a 90-day Key x model
 aggregate for the heaviest production customer (about 290,000 records) took
 about 0.5 s.
 
@@ -298,6 +298,46 @@ credentials. `records_page` and `records_page_size` paginate recent records,
 with a maximum page size of 50. A recent record exposes only its timestamp,
 model, token classes, total tokens, actual cost, duration, and request type. It
 does not expose user, account, Key, session, request, IP, or payload identifiers.
+
+### Programmatic views
+
+`GET /v1/usage` also serves scripts that hold the Key. Without a `view`
+parameter the response above is unchanged. With `view` the endpoint answers
+only that view, always for the authenticated Key, and rejects unknown or
+repeated parameters (for example `api_key_id` or `records_page`) with HTTP 400
+instead of ignoring them. An empty or unknown `view` is also 400.
+
+- `view=analytics` accepts the parameters of `GET /api/v1/usage/analytics`
+  (strict dates/timezone up to 90 calendar days, `group_by`, `sort`, `page`,
+  `page_size` and the filters except `api_key_id`) and returns the same fields
+  plus `"object": "usage.analytics"`. `api_key` dimensions therefore contain
+  only this Key.
+- `view=records` returns raw records without any aggregate:
+  `object` (`usage.records`), the normalized range (`start_date`, `end_date`,
+  `timezone`, `start`, `end_exclusive`), `records`, `has_more` and
+  `next_cursor` (`null` on the last page). It accepts the range, the same
+  filters and `limit` (1-500, default 100). Records use the public whitelist
+  above plus `reasoning_effort` (the recorded value, trimmed and lower-cased,
+  `null` when none was recorded).
+
+Records are ordered newest first by creation time and an internal tiebreaker.
+To continue, send `view=records&cursor=<next_cursor>` (optionally `limit`) and
+nothing else: the cursor carries the range and filters, so a default of
+"today" cannot move to the next day between pages. Cursors are encrypted and
+authenticated with a key derived from the server's JWT secret, so they hide
+internal record IDs and cannot be altered; each cursor is valid for 24 hours
+after it was issued and only for the Key that obtained it. An empty cursor is
+rejected rather than treated as a new listing. Pages are a keyset seek, not a snapshot: rows
+committed later with an earlier timestamp can be missed by a listing that has
+already passed that point, so pull ranges that have finished (for example
+yesterday) for complete exports.
+
+Errors use the endpoint's existing `{"type": "error", "error": {...}}` shape.
+Analytics aggregates of one user run at most three at a time across the Web UI
+and all of the user's Keys; excess requests receive HTTP 429 with
+`Retry-After`. Each analytics query or records page has a 20-second deadline.
+Like the legacy response, the views skip billing enforcement, so expired or
+exhausted Keys can still read their usage; disabled Keys cannot.
 
 ## OpenAI service-tier billing
 

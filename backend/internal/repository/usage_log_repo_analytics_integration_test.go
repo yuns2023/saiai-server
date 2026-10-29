@@ -332,3 +332,66 @@ func (s *UsageLogRepoSuite) TestGetUserUsageAnalyticsTieOrderAndCombinedFilters(
 	s.Require().InDelta(0.0, res.Summary.UsageCost, 1e-9)
 	s.Require().Nil(res.Items[0].Share.UsageCost)
 }
+
+func (s *UsageLogRepoSuite) TestListUserUsageRecordsPageKeyset() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "records-" + uuid.NewString() + "@test.com"})
+	key := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-rec-" + uuid.NewString(), Name: "r"})
+	otherKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-rec2-" + uuid.NewString(), Name: "r2"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-rec-" + uuid.NewString()})
+
+	start := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
+	tie := start.Add(2 * time.Hour).Add(123456 * time.Microsecond)
+	at := []time.Time{tie, tie, tie, tie.Add(-time.Minute), tie.Add(time.Minute)}
+	for i, createdAt := range at {
+		s.createAnalyticsLog(user, account, analyticsRow{key: key, model: "m", in: i + 1, createdAt: createdAt, requestTyp: service.RequestTypeStream})
+	}
+	s.createAnalyticsLog(user, account, analyticsRow{key: otherKey, model: "m", in: 99, createdAt: tie, requestTyp: service.RequestTypeStream})
+
+	q := usagestats.UsageAnalyticsQuery{UserID: user.ID, APIKeyID: key.ID, StartTime: start, EndTime: start.Add(24 * time.Hour)}
+	all, err := s.repo.ListUserUsageRecordsPage(s.ctx, q, nil, 100)
+	s.Require().NoError(err)
+	s.Require().Len(all, 5)
+	for i := 1; i < len(all); i++ {
+		prev, cur := all[i-1], all[i]
+		s.Require().True(prev.CreatedAt.After(cur.CreatedAt) || (prev.CreatedAt.Equal(cur.CreatedAt) && prev.ID > cur.ID), "order must be created_at DESC, id DESC")
+	}
+
+	// Page by 2 across the three same-microsecond rows: no duplicates, no gaps.
+	var paged []int64
+	var after *usagestats.UsageRecordPosition
+	for {
+		page, err := s.repo.ListUserUsageRecordsPage(s.ctx, q, after, 2)
+		s.Require().NoError(err)
+		for _, l := range page {
+			paged = append(paged, l.ID)
+		}
+		if len(page) < 2 {
+			break
+		}
+		last := page[len(page)-1]
+		// Round-trip the position through microseconds like the cursor does.
+		after = &usagestats.UsageRecordPosition{CreatedAt: time.UnixMicro(last.CreatedAt.UnixMicro()), ID: last.ID}
+	}
+	var want []int64
+	for _, l := range all {
+		want = append(want, l.ID)
+	}
+	s.Require().Equal(want, paged)
+
+	// A row inserted at the tie instant after the listing started does not shift later pages.
+	first, err := s.repo.ListUserUsageRecordsPage(s.ctx, q, nil, 2)
+	s.Require().NoError(err)
+	s.createAnalyticsLog(user, account, analyticsRow{key: key, model: "m", in: 50, createdAt: tie, requestTyp: service.RequestTypeStream})
+	last := first[len(first)-1]
+	rest, err := s.repo.ListUserUsageRecordsPage(s.ctx, q, &usagestats.UsageRecordPosition{CreatedAt: time.UnixMicro(last.CreatedAt.UnixMicro()), ID: last.ID}, 100)
+	s.Require().NoError(err)
+	s.Require().Len(rest, 3)
+	for _, l := range rest {
+		for _, f := range first {
+			s.Require().NotEqual(f.ID, l.ID)
+		}
+	}
+
+	_, err = s.repo.ListUserUsageRecordsPage(s.ctx, usagestats.UsageAnalyticsQuery{StartTime: start, EndTime: start}, nil, 10)
+	s.Require().Error(err)
+}

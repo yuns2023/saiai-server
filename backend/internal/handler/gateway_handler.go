@@ -1590,6 +1590,10 @@ func (h *GatewayHandler) Usage(c *gin.Context) {
 		return
 	}
 
+	if h.usageView(c, apiKey, subject) {
+		return
+	}
+
 	ctx := c.Request.Context()
 
 	// 解析可选的日期范围参数（用于 model_stats 查询）

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
@@ -106,13 +107,10 @@ func parseUsageAnalyticsPositiveInt(c *gin.Context, name string, def, max int) (
 // parseUsageAnalyticsQuery validates every analytics parameter. Unknown
 // enumeration values are rejected, never mapped to a default.
 func parseUsageAnalyticsQuery(c *gin.Context, userID int64) (usagestats.UsageAnalyticsQuery, usageAnalyticsRange, error) {
-	q := usagestats.UsageAnalyticsQuery{UserID: userID}
-	rng, err := parseUsageAnalyticsRange(c)
+	q, rng, err := parseUsageAnalyticsFilters(c, userID)
 	if err != nil {
 		return q, rng, err
 	}
-	q.StartTime, q.EndTime = rng.Start, rng.End
-
 	q.GroupBy = strings.TrimSpace(c.DefaultQuery("group_by", usagestats.UsageAnalyticsByModel))
 	switch q.GroupBy {
 	case usagestats.UsageAnalyticsByModel, usagestats.UsageAnalyticsByReasoningEffort,
@@ -134,6 +132,19 @@ func parseUsageAnalyticsQuery(c *gin.Context, userID int64) (usagestats.UsageAna
 	if q.PageSize, err = parseUsageAnalyticsPositiveInt(c, "page_size", usageAnalyticsDefaultPageSize, usageAnalyticsMaxPageSize); err != nil {
 		return q, rng, err
 	}
+
+	return q, rng, nil
+}
+
+// parseUsageAnalyticsFilters parses the range and record filters shared by the
+// analytics aggregate and the records listing.
+func parseUsageAnalyticsFilters(c *gin.Context, userID int64) (usagestats.UsageAnalyticsQuery, usageAnalyticsRange, error) {
+	q := usagestats.UsageAnalyticsQuery{UserID: userID}
+	rng, err := parseUsageAnalyticsRange(c)
+	if err != nil {
+		return q, rng, err
+	}
+	q.StartTime, q.EndTime = rng.Start, rng.End
 
 	// A Key from another user cannot leak anything: the query is always
 	// restricted to the caller's records, so it simply matches nothing. Keys
@@ -209,15 +220,24 @@ func (h *UsageHandler) Analytics(c *gin.Context) {
 	}
 	result, err := h.usageService.GetUserUsageAnalytics(c.Request.Context(), q)
 	if err != nil {
+		if infraerrors.IsTooManyRequests(err) {
+			c.Header("Retry-After", "2")
+		}
 		response.ErrorFrom(c, err)
 		return
 	}
+	c.Header("Cache-Control", "no-store")
+	response.Success(c, usageAnalyticsResponse(q, rng, result))
+}
+
+// usageAnalyticsResponse is the analytics payload shared by the user endpoint
+// and the API-Key-authenticated GET /v1/usage?view=analytics.
+func usageAnalyticsResponse(q usagestats.UsageAnalyticsQuery, rng usageAnalyticsRange, result *usagestats.UsageAnalyticsResult) gin.H {
 	pages := int((result.Total + int64(q.PageSize) - 1) / int64(q.PageSize))
 	if pages < 1 {
 		pages = 1
 	}
-	c.Header("Cache-Control", "no-store")
-	response.Success(c, gin.H{
+	return gin.H{
 		"group_by":      q.GroupBy,
 		"sort":          q.Sort,
 		"start_date":    rng.StartDate,
@@ -231,5 +251,5 @@ func (h *UsageHandler) Analytics(c *gin.Context) {
 		"page_size":     q.PageSize,
 		"pages":         pages,
 		"summary":       result.Summary,
-	})
+	}
 }

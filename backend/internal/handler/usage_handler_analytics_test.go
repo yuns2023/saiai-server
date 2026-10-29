@@ -174,3 +174,27 @@ func TestUsageAnalyticsHandlesSkippedLocalMidnight(t *testing.T) {
 	rec = serveUsageAnalytics(t, &usageAnalyticsRepoCapture{}, "start_date=2026-06-08&end_date=2026-09-06&timezone=America%2FSantiago")
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
+
+func TestUsageAnalyticsBusySetsRetryAfter(t *testing.T) {
+	repo := &usageAnalyticsBusyRepo{}
+	gin.SetMode(gin.TestMode)
+	handler := NewUsageHandler(service.NewUsageService(repo, nil, nil, nil), nil)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 42})
+		c.Next()
+	})
+	router.GET("/usage/analytics", handler.Analytics)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/usage/analytics", nil))
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	require.Equal(t, "2", rec.Header().Get("Retry-After"))
+}
+
+type usageAnalyticsBusyRepo struct {
+	service.UsageLogRepository
+}
+
+func (r *usageAnalyticsBusyRepo) GetUserUsageAnalytics(context.Context, usagestats.UsageAnalyticsQuery) (*usagestats.UsageAnalyticsResult, error) {
+	return nil, service.ErrUsageAnalyticsBusy
+}

@@ -143,3 +143,10 @@ func usageAnalyticsRatio(part, total float64) *float64 {
 	v := part / total
 	return &v
 }
+
+// UsageRecordPosition is a keyset position in (created_at DESC, id DESC)
+// order: the last record already returned.
+type UsageRecordPosition struct {
+	CreatedAt time.Time
+	ID        int64
+}

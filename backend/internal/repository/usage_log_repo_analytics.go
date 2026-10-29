@@ -12,7 +12,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-var _ service.UsageAnalyticsRepository = (*usageLogRepository)(nil)
+var (
+	_ service.UsageAnalyticsRepository = (*usageLogRepository)(nil)
+	_ service.UsageRecordsRepository   = (*usageLogRepository)(nil)
+)
 
 // usageAnalyticsEffortExpr normalizes the recorded reasoning effort; NULL
 // means the record has none. Grouping and filtering use the same expression.
@@ -69,32 +72,7 @@ func (r *usageLogRepository) GetUserUsageAnalytics(ctx context.Context, q usages
 		return nil, errors.New("reasoning effort value and missing filter are mutually exclusive")
 	}
 
-	where := "user_id = $1 AND created_at >= $2 AND created_at < $3"
-	args := []any{q.UserID, q.StartTime, q.EndTime}
-	if q.APIKeyID > 0 {
-		args = append(args, q.APIKeyID)
-		where += fmt.Sprintf(" AND api_key_id = $%d", len(args))
-	}
-	if q.GroupID > 0 {
-		args = append(args, q.GroupID)
-		where += fmt.Sprintf(" AND group_id = $%d", len(args))
-	}
-	if q.Model != "" {
-		args = append(args, q.Model)
-		where += fmt.Sprintf(" AND model = $%d", len(args))
-	}
-	if q.BillingType != nil {
-		args = append(args, int16(*q.BillingType))
-		where += fmt.Sprintf(" AND billing_type = $%d", len(args))
-	}
-	switch {
-	case q.ReasoningEffortMissing:
-		where += " AND " + usageAnalyticsEffortExpr + " IS NULL"
-	case q.ReasoningEffort != "":
-		args = append(args, strings.ToLower(strings.TrimSpace(q.ReasoningEffort)))
-		where += fmt.Sprintf(" AND %s = $%d", usageAnalyticsEffortExpr, len(args))
-	}
-	where, args = appendRequestTypeOrStreamQueryFilter(where, args, q.RequestType, nil)
+	where, args := usageAnalyticsWhere(q)
 
 	pageSize := q.PageSize
 	if pageSize < 1 {
@@ -227,4 +205,76 @@ func (r *usageLogRepository) GetUserUsageAnalytics(ctx context.Context, q usages
 	}
 	result.Finalize()
 	return result, nil
+}
+
+// usageAnalyticsWhere builds the user-scoped filter shared by the analytics
+// aggregate and the records listing. $1 is always the user ID.
+func usageAnalyticsWhere(q usagestats.UsageAnalyticsQuery) (string, []any) {
+	where := "user_id = $1 AND created_at >= $2 AND created_at < $3"
+	args := []any{q.UserID, q.StartTime, q.EndTime}
+	if q.APIKeyID > 0 {
+		args = append(args, q.APIKeyID)
+		where += fmt.Sprintf(" AND api_key_id = $%d", len(args))
+	}
+	if q.GroupID > 0 {
+		args = append(args, q.GroupID)
+		where += fmt.Sprintf(" AND group_id = $%d", len(args))
+	}
+	if q.Model != "" {
+		args = append(args, q.Model)
+		where += fmt.Sprintf(" AND model = $%d", len(args))
+	}
+	if q.BillingType != nil {
+		args = append(args, int16(*q.BillingType))
+		where += fmt.Sprintf(" AND billing_type = $%d", len(args))
+	}
+	switch {
+	case q.ReasoningEffortMissing:
+		where += " AND " + usageAnalyticsEffortExpr + " IS NULL"
+	case q.ReasoningEffort != "":
+		args = append(args, strings.ToLower(strings.TrimSpace(q.ReasoningEffort)))
+		where += fmt.Sprintf(" AND %s = $%d", usageAnalyticsEffortExpr, len(args))
+	}
+	return appendRequestTypeOrStreamQueryFilter(where, args, q.RequestType, nil)
+}
+
+// ListUserUsageRecordsPage returns up to limit records matching q in
+// (created_at DESC, id DESC) order, strictly after the given position when
+// after is set. It never counts or offsets: each page is a keyset seek.
+func (r *usageLogRepository) ListUserUsageRecordsPage(ctx context.Context, q usagestats.UsageAnalyticsQuery, after *usagestats.UsageRecordPosition, limit int) ([]service.UsageLog, error) {
+	if q.UserID <= 0 {
+		return nil, errors.New("usage records require a user scope")
+	}
+	if q.ReasoningEffort != "" && q.ReasoningEffortMissing {
+		return nil, errors.New("reasoning effort value and missing filter are mutually exclusive")
+	}
+	if limit < 1 {
+		return nil, errors.New("usage records limit must be positive")
+	}
+	where, args := usageAnalyticsWhere(q)
+	if after != nil {
+		args = append(args, after.CreatedAt, after.ID)
+		where += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", len(args)-1, len(args))
+	}
+	args = append(args, limit)
+	query := fmt.Sprintf("SELECT %s FROM usage_logs WHERE %s ORDER BY created_at DESC, id DESC LIMIT $%d",
+		usageLogSelectColumns, where, len(args))
+
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	logs := make([]service.UsageLog, 0, limit)
+	for rows.Next() {
+		log, err := scanUsageLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, *log)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return logs, nil
 }
