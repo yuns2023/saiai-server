@@ -378,8 +378,9 @@ func TestRelay_ClientDisconnect_DrainCapturesLateUsage(t *testing.T) {
 	result, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{
 		UpstreamDrainTimeout: 400 * time.Millisecond,
 	})
-	require.NotNil(t, relayExit)
-	require.Equal(t, "client_disconnected", relayExit.Stage)
+	// The client left before its first terminal frame could be delivered, but
+	// the drain settled the turn, so the relay did not fail.
+	require.Nil(t, relayExit)
 	require.Equal(t, "resp_drain", result.RequestID)
 	require.Equal(t, "response.completed", result.TerminalEventType)
 	require.Equal(t, 6, result.Usage.InputTokens)

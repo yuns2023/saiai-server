@@ -33,8 +33,7 @@ func TestRelay_ClientDisconnectDrainsOutstandingTurnPastShortWindow(t *testing.T
 		OnTurnComplete:              func(turn RelayTurnResult) { completed <- turn },
 	})
 	require.GreaterOrEqual(t, time.Since(started), 1400*time.Millisecond)
-	require.NotNil(t, relayExit)
-	require.Equal(t, "client_disconnected", relayExit.Stage)
+	require.Nil(t, relayExit, "a fully drained and billed turn is not a relay failure")
 	require.Equal(t, 900, result.Usage.OutputTokens)
 	require.Empty(t, result.UnbilledResponseIDs)
 	require.Zero(t, result.UnbilledPendingTurns)
@@ -183,4 +182,42 @@ func TestRelay_ClientWriteFailureDrainsOutstandingTurn(t *testing.T) {
 	default:
 		t.Fatal("turn was not billed after the client write failure")
 	}
+}
+
+// upstreamCloseFrameConn returns a provider close frame after a delay.
+type upstreamCloseFrameConn struct {
+	*passthroughTestFrameConn
+	delay time.Duration
+	code  coderws.StatusCode
+}
+
+func (c *upstreamCloseFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	select {
+	case <-ctx.Done():
+		return coderws.MessageText, nil, ctx.Err()
+	case <-time.After(c.delay):
+		return coderws.MessageText, nil, coderws.CloseError{Code: c.code}
+	}
+}
+
+// The client leaves mid-turn and the provider then closes with 1012 during the
+// drain: the session ends on the provider close, not on the client leaving.
+func TestRelay_ClientDisconnectThenUpstreamCloseDuringDrain(t *testing.T) {
+	t.Parallel()
+	clientConn := newPassthroughTestFrameConn(nil, true)
+	upstreamConn := &upstreamCloseFrameConn{
+		passthroughTestFrameConn: newPassthroughTestFrameConn(nil, false),
+		delay:                    100 * time.Millisecond,
+		code:                     coderws.StatusServiceRestart,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, relayExit := Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5.4"}`), RelayOptions{
+		OutstandingTurnDrainTimeout: 2 * time.Second,
+	})
+	require.NotNil(t, relayExit)
+	require.Equal(t, "read_upstream", relayExit.Stage)
+	require.Equal(t, coderws.StatusServiceRestart, coderws.CloseStatus(relayExit.Err))
+	require.Equal(t, 1, result.UnbilledPendingTurns)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -120,6 +121,27 @@ func closeOpenAIClientWSFirstReadFailure(c *gin.Context, conn *coderws.Conn, err
 		return
 	}
 	recordAndCloseOpenAIClientWS(c, conn, coderws.StatusPolicyViolation, failure)
+}
+
+// The provider ended the session with a close frame (for example 1012 when
+// its server restarts): a provider failure, not a gateway one. A restart or
+// try-again-later reason is passed on so the client sees why; anything else
+// stays 1011.
+func openAIWSUpstreamCloseFailure(upstreamStatus coderws.StatusCode) (opsLocalFailure, bool) {
+	if upstreamStatus == -1 {
+		return opsLocalFailure{}, false
+	}
+	clientStatus := coderws.StatusInternalError
+	switch upstreamStatus {
+	case coderws.StatusServiceRestart, coderws.StatusTryAgainLater:
+		clientStatus = upstreamStatus
+	}
+	return opsLocalFailure{
+		status:      http.StatusBadGateway,
+		errType:     "upstream_error",
+		message:     fmt.Sprintf("upstream websocket closed with %d (%s)", int(upstreamStatus), upstreamStatus),
+		wsCloseCode: int(clientStatus),
+	}, true
 }
 
 func openAIClientWSOpsFailure(status coderws.StatusCode, reason string) opsLocalFailure {

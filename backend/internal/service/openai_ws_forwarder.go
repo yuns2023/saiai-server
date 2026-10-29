@@ -137,6 +137,26 @@ func wrapOpenAIWSIngressTurnError(stage string, cause error, wroteDownstream boo
 	}
 }
 
+// OpenAIWSIngressTurnStage names where a relayed session ended (for example
+// "client_disconnected" or "read_upstream"), or "" when err carries no stage.
+func OpenAIWSIngressTurnStage(err error) string {
+	var turnErr *openAIWSIngressTurnError
+	if !errors.As(err, &turnErr) || turnErr == nil {
+		return ""
+	}
+	return turnErr.stage
+}
+
+// OpenAIWSUpstreamCloseStatus returns the close code the provider sent when
+// the session ended on a close frame read from the upstream connection, or -1
+// otherwise (a client close, a local error, or a plain disconnect).
+func OpenAIWSUpstreamCloseStatus(err error) coderws.StatusCode {
+	if OpenAIWSIngressTurnStage(err) != "read_upstream" {
+		return -1
+	}
+	return coderws.CloseStatus(err)
+}
+
 func isOpenAIWSIngressTurnRetryable(err error) bool {
 	if isOpenAIProviderAttemptBudgetError(err) {
 		return false

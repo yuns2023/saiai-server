@@ -246,3 +246,39 @@ func TestOpenAIWSFirstReadFailureNamesClientCloseAndTimeout(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIWSUpstreamCloseIsLoggedAsProviderFailure(t *testing.T) {
+	_, ok := openAIWSUpstreamCloseFailure(-1)
+	require.False(t, ok, "no upstream close frame keeps the generic proxy failure")
+
+	queue := opsFailureTestQueue(t)
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	for _, tc := range []struct {
+		upstream   coderws.StatusCode
+		wantClient int
+	}{
+		{coderws.StatusServiceRestart, 1012},
+		{coderws.StatusTryAgainLater, 1013},
+		{coderws.StatusPolicyViolation, 1011},
+	} {
+		failure, ok := openAIWSUpstreamCloseFailure(tc.upstream)
+		require.True(t, ok)
+		require.Equal(t, tc.wantClient, failure.wsCloseCode)
+		r := gin.New()
+		r.GET("/v1/responses", OpsErrorLoggerMiddleware(ops), func(c *gin.Context) {
+			setOpsRequestContext(c, "mock-codex-model", true, nil)
+			setOpsSelectedAccount(c, 18, service.PlatformOpenAI)
+			c.Status(http.StatusSwitchingProtocols)
+			c.Writer.WriteHeaderNow()
+			recordAndCloseOpenAIClientWS(c, nil, coderws.StatusCode(failure.wsCloseCode), failure)
+		})
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/responses", nil))
+		job := <-queue
+		require.Equal(t, http.StatusBadGateway, job.entry.StatusCode)
+		require.Equal(t, "upstream", job.entry.ErrorPhase)
+		require.Equal(t, "provider", job.entry.ErrorOwner)
+		require.Contains(t, job.entry.ErrorMessage, fmt.Sprintf("upstream websocket closed with %d", int(tc.upstream)))
+		require.Contains(t, job.entry.ErrorBody, fmt.Sprintf(`"websocket_close_code":%d`, tc.wantClient))
+	}
+	require.Empty(t, queue)
+}
