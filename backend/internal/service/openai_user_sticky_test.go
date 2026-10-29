@@ -192,3 +192,69 @@ func TestOpenAIUserStickyRequiresAuthenticatedUser(t *testing.T) {
 	require.Empty(t, openAIUserStickyCacheKey(0, userStickyHash))
 	require.Empty(t, openAIUserStickyCacheKey(userStickyUserID, " "))
 }
+
+func highFiveHourUsage() map[string]any {
+	return map[string]any{
+		"codex_5h_used_percent": 99.0,
+		"codex_5h_reset_at":     time.Now().Add(2 * time.Hour).Format(time.RFC3339),
+	}
+}
+
+func TestOpenAIUserStickyKeepsHighUsageAccountButLoadBalancingDoesNot(t *testing.T) {
+	svc, cache, shared, preferred := newUserStickyFixture(t, userStickyOld, userStickyNew)
+	shared.Extra, shared.Priority = highFiveHourUsage(), 0
+	preferred.Priority = 10
+	svc.accountRepo = groupFilteredOpenAIAccountRepo{stubOpenAIAccountRepo{accounts: []Account{shared, preferred}}}
+
+	got, decision := selectForUser(t, svc, userStickyNew, userStickyUserID, nil)
+	require.Equal(t, preferred.ID, got.ID, "without any binding the high-usage account takes no new session")
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+
+	cache.bindings = map[string]int64{userStickyKey(userStickyUserID): shared.ID}
+	got, decision = selectForUser(t, svc, userStickyNew, userStickyUserID, nil)
+	require.Equal(t, shared.ID, got.ID, "historical affinity keeps the session on its account")
+	require.True(t, decision.StickyUserFallbackHit)
+}
+
+func TestOpenAIUserStickySkipsUnschedulableAccountWithoutDeleting(t *testing.T) {
+	svc, cache, shared, preferred := newUserStickyFixture(t, userStickyOld, userStickyNew)
+	shared.Schedulable = false
+	svc.accountRepo = groupFilteredOpenAIAccountRepo{stubOpenAIAccountRepo{accounts: []Account{shared, preferred}}}
+	cache.bindings[userStickyKey(userStickyUserID)] = shared.ID
+
+	got, decision := selectForUser(t, svc, userStickyNew, userStickyUserID, nil)
+	require.Equal(t, preferred.ID, got.ID)
+	require.False(t, decision.StickyUserFallbackHit)
+	require.Zero(t, cache.deleted[userStickyKey(userStickyUserID)])
+}
+
+func TestOpenAIGroupStickyWinsOverUserBinding(t *testing.T) {
+	svc, cache, shared, preferred := newUserStickyFixture(t, userStickyOld, userStickyNew)
+	shared.Priority, preferred.Priority = 0, 10
+	svc.accountRepo = groupFilteredOpenAIAccountRepo{stubOpenAIAccountRepo{accounts: []Account{shared, preferred}}}
+	cache.bindings[groupStickyKey(userStickyNew)] = preferred.ID
+	cache.bindings[userStickyKey(userStickyUserID)] = shared.ID
+
+	got, decision := selectForUser(t, svc, userStickyNew, userStickyUserID, nil)
+	require.Equal(t, preferred.ID, got.ID)
+	require.True(t, decision.StickySessionHit)
+	require.False(t, decision.StickyUserFallbackHit)
+	require.Equal(t, preferred.ID, cache.bindings[userStickyKey(userStickyUserID)])
+}
+
+type failingGroupWriteCache struct{ *groupedGatewayCache }
+
+func (c failingGroupWriteCache) SetSessionAccountID(ctx context.Context, groupID int64, key string, accountID int64, ttl time.Duration) error {
+	if groupID != 0 {
+		return errors.New("group write failed")
+	}
+	return c.groupedGatewayCache.SetSessionAccountID(ctx, groupID, key, accountID, ttl)
+}
+
+func TestOpenAIUserStickyWriteIsIndependentOfGroupWrite(t *testing.T) {
+	svc, cache, shared, _ := newUserStickyFixture(t, userStickyOld)
+	svc.cache = failingGroupWriteCache{cache}
+	err := svc.BindStickySessionForUser(context.Background(), ptrInt64(userStickyOld), userStickyUserID, userStickyHash, shared.ID)
+	require.ErrorContains(t, err, "group write failed")
+	require.Equal(t, shared.ID, cache.bindings[userStickyKey(userStickyUserID)])
+}

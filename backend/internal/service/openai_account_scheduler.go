@@ -233,8 +233,9 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 // trySessionStickyAccount applies the sticky eligibility checks to accountID.
 // An ineligible group binding is deleted as before; the user-scoped binding is
 // only skipped, since it may still be valid in the user's other group. Like a
-// group sticky, a user-scoped hit continues an existing session and is not
-// subject to the new-session admission checks of load balancing.
+// group sticky, a user-scoped hit is historical affinity for this session hash
+// and skips the soft new-session 5h admission of load balancing; rate limits,
+// status and every other check above still apply.
 func (s *defaultOpenAIAccountScheduler) trySessionStickyAccount(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,

@@ -1456,14 +1456,14 @@ func (s *OpenAIGatewayService) BindStickySession(ctx context.Context, groupID *i
 
 // BindStickySessionForUser binds the group session like BindStickySession and
 // also records the user-scoped preference read by Responses scheduling.
+// The two writes are independent preferences: a failed group write (for
+// example its legacy-hash copy) must not keep the user binding stale.
 func (s *OpenAIGatewayService) BindStickySessionForUser(ctx context.Context, groupID *int64, userID int64, sessionHash string, accountID int64) error {
-	if err := s.BindStickySession(ctx, groupID, sessionHash, accountID); err != nil {
-		return err
-	}
+	groupErr := s.BindStickySession(ctx, groupID, sessionHash, accountID)
 	if sessionHash == "" || accountID <= 0 {
-		return nil
+		return groupErr
 	}
-	return s.setUserStickySessionAccountID(ctx, userID, sessionHash, accountID, s.openAIWSSessionStickyTTL())
+	return errors.Join(groupErr, s.setUserStickySessionAccountID(ctx, userID, sessionHash, accountID, s.openAIWSSessionStickyTTL()))
 }
 
 // SelectAccount selects an OpenAI account with sticky session support
