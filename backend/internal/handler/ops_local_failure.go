@@ -107,9 +107,9 @@ func closeOpenAIClientWSFirstReadFailure(c *gin.Context, conn *coderws.Conn, err
 	waitMS := waited.Milliseconds()
 	failure.wsFirstFrameWaitMS = &waitMS
 	if reason == openAIWSFirstMessageTooBig {
-		// The 1009 close is already on the wire (coder sent it on the read
-		// limit, or answered the peer's). A second Close would wait for the
-		// handshake behind the rest of an oversized frame.
+		// coder already tried to send 1009 (on our read limit, or in reply to
+		// the peer's). A second Close would wait for the handshake behind the
+		// rest of an oversized frame; delivery stays best effort.
 		failure.wsCloseCode = int(coderws.StatusMessageTooBig)
 		if !opsWSHasCurrentUpstreamFailure(c) {
 			setOpsLocalFailure(c, failure)
