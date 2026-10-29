@@ -64,6 +64,14 @@
           @sort-change="changeKeyBreakdownSort"
           @export="exportKeyBreakdown"
         />
+        <UserUsageAnalytics
+          :start-date="startDate"
+          :end-date="endDate"
+          :api-key-id="selectedAPIKeyID"
+          :group-id="selectedGroupID"
+          :timezone="browserTimezone"
+          :models="analyticsModelNames"
+        />
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div class="lg:col-span-2">
             <UserDashboardRecentUsage
@@ -104,6 +112,7 @@ import UserDashboardCharts from '@/components/user/dashboard/UserDashboardCharts
 import UserDashboardRecentUsage from '@/components/user/dashboard/UserDashboardRecentUsage.vue'
 import UserDashboardQuickActions from '@/components/user/dashboard/UserDashboardQuickActions.vue'
 import UserDashboardAPIKeyBreakdown from '@/components/user/dashboard/UserDashboardAPIKeyBreakdown.vue'
+import UserUsageAnalytics from '@/components/user/dashboard/UserUsageAnalytics.vue'
 import type { UsageLog, TrendDataPoint, ModelStat } from '@/types'
 import { escapeCsvCell } from '@/utils/csv'
 
@@ -163,6 +172,9 @@ const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || unde
 const startDate = ref(formatLocalDate(sixDaysAgo))
 const endDate = ref(formatLocalDate(today))
 const granularity = ref<'day' | 'hour' | '15m'>('day')
+
+// Requested-model names from the chart breakdown seed the analytics model filter.
+const analyticsModelNames = computed(() => modelStats.value.map((model) => model.model))
 
 const selectedAPIKey = computed(() => selectedAPIKeyID.value ?? undefined)
 const selectedGroup = computed(() => selectedGroupID.value ?? undefined)

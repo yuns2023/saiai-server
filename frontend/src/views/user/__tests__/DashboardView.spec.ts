@@ -98,7 +98,8 @@ const mountDashboard = () =>
         UserDashboardCharts: true,
         UserDashboardRecentUsage: true,
         UserDashboardQuickActions: true,
-        UserDashboardAPIKeyBreakdown: true
+        UserDashboardAPIKeyBreakdown: true,
+        UserUsageAnalytics: true
       }
     }
   })

@@ -342,6 +342,120 @@ export async function getDashboardAPIKeyBreakdown(
   return data
 }
 
+export type UsageAnalyticsGroupBy = 'model' | 'reasoning_effort' | 'api_key' | 'api_key_model'
+
+export type UsageAnalyticsSort =
+  | 'actual_cost_desc'
+  | 'cost_desc'
+  | 'usage_cost_desc'
+  | 'tokens_desc'
+  | 'requests_desc'
+
+export interface UsageAnalyticsParams {
+  start_date?: string
+  end_date?: string
+  timezone?: string
+  group_by?: UsageAnalyticsGroupBy
+  sort?: UsageAnalyticsSort
+  /** 1..10000 */
+  page?: number
+  /** 1..1000 */
+  page_size?: number
+  api_key_id?: number
+  group_id?: number
+  /** Exact requested model name. */
+  model?: string
+  /** Recorded effort value; "none" is a real value, not "missing". */
+  reasoning_effort?: string
+  /** Records without a recorded effort; mutually exclusive with reasoning_effort. */
+  reasoning_effort_missing?: boolean
+  request_type?: 'sync' | 'stream' | 'ws_v2' | 'unknown'
+  billing_type?: 0 | 1
+}
+
+export interface UsageAnalyticsMetrics {
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  /** Standard cost: configured base price before multipliers. */
+  cost: number
+  /** Billed amount (balance charge or subscription quota usage). */
+  actual_cost: number
+  /** Reference usage; differs from actual_cost only for hosted groups. */
+  usage_cost: number
+}
+
+/** Fractions of a row's total tokens; null when the row has no tokens. */
+export interface UsageAnalyticsTokenMix {
+  input: number | null
+  output: number | null
+  cache_creation: number | null
+  cache_read: number | null
+}
+
+/** Fractions of the whole filtered result (all pages); null when the denominator is 0. */
+export interface UsageAnalyticsShare {
+  requests: number | null
+  tokens: number | null
+  cost: number | null
+  actual_cost: number | null
+  usage_cost: number | null
+}
+
+export interface UsageAnalyticsItem extends UsageAnalyticsMetrics {
+  model?: string
+  reasoning_effort?: string
+  reasoning_effort_missing?: boolean
+  api_key_id?: number
+  api_key_name?: string
+  api_key_deleted?: boolean
+  share: UsageAnalyticsShare
+  token_mix: UsageAnalyticsTokenMix
+}
+
+export interface UsageAnalyticsSummary extends UsageAnalyticsMetrics {
+  token_mix: UsageAnalyticsTokenMix
+}
+
+export interface UsageAnalyticsResponse {
+  group_by: UsageAnalyticsGroupBy
+  sort: UsageAnalyticsSort
+  start_date: string
+  end_date: string
+  timezone: string
+  /** RFC3339 range start (inclusive). */
+  start: string
+  /** RFC3339 range end (exclusive upper bound). */
+  end_exclusive: string
+  total: number
+  page: number
+  page_size: number
+  pages: number
+  summary: UsageAnalyticsSummary
+  items: UsageAnalyticsItem[]
+}
+
+/** Aggregate the current user's usage by model, reasoning effort, Key or Key × model. */
+export async function getUsageAnalytics(
+  params: UsageAnalyticsParams,
+  options?: { signal?: AbortSignal }
+): Promise<UsageAnalyticsResponse> {
+  const { data } = await apiClient.get<UsageAnalyticsResponse>('/usage/analytics', {
+    params,
+    signal: options?.signal
+  })
+  return data
+}
+
+/** Absolute URL of the analytics endpoint, for copyable API examples. */
+export function usageAnalyticsEndpointURL(): string {
+  const base = String(apiClient.defaults.baseURL || '').replace(/\/+$/, '')
+  return new URL(`${base}/usage/analytics`, window.location.origin).href
+}
+
 export interface BatchApiKeyUsageStats {
   today_usage_cost?: number
   total_usage_cost?: number
@@ -391,7 +505,8 @@ export const usageAPI = {
   getDashboardTrend,
   getDashboardModels,
   getDashboardAPIKeyBreakdown,
-  getDashboardApiKeysUsage
+  getDashboardApiKeysUsage,
+  getUsageAnalytics
 }
 
 export default usageAPI

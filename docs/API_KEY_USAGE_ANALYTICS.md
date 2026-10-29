@@ -134,6 +134,65 @@ The older batch Key-usage endpoint retains its compatibility fields. Its
 `total_actual_cost` default window is the last 30 days, and the Key-management
 UI labels it as such rather than as lifetime usage.
 
+## Usage analytics by dimension
+
+`GET /api/v1/usage/analytics` (user JWT) aggregates the caller's own usage
+records by one dimension and reports each group's share of the whole filtered
+result. It reads raw usage logs, so it covers the usage-log retention window
+(90 days by default).
+
+Query parameters (all optional):
+
+- `start_date`, `end_date`: inclusive `YYYY-MM-DD` dates, default today, and
+  `timezone` (IANA). Unlike the older dashboard endpoints, invalid dates or
+  timezones, `end_date` before `start_date`, and ranges over 90 calendar days
+  return HTTP 400 instead of falling back to a default range.
+- `group_by`: `model` (default, the requested model), `reasoning_effort`,
+  `api_key`, or `api_key_model`.
+- `sort`: `actual_cost_desc` (default), `cost_desc`, `usage_cost_desc`,
+  `tokens_desc`, or `requests_desc`. Ties are broken by the dimension columns,
+  so pages are stable.
+- `page` (1-10000) and `page_size` (1-1000, default 50).
+- Filters: `api_key_id`, `group_id` (actual group), `model` (exact requested
+  model), `reasoning_effort`, `reasoning_effort_missing=true`, `request_type`
+  (`sync`, `stream`, `ws_v2`, `unknown`) and `billing_type` (`0` balance, `1`
+  subscription). Unknown values return 400.
+
+Every query is restricted to the caller's records. A Key ID that is not the
+caller's therefore matches nothing rather than revealing whether it exists, and
+Keys deleted since remain selectable for their historical usage.
+
+The response has `items`, `total` (number of groups), `page`, `page_size`,
+`pages`, the normalized range (`start_date`, `end_date`, `timezone`, and the
+half-open `start` / `end_exclusive` instants) and a `summary` over all groups. Groups,
+summary and page come from one SQL statement, so shares always add up against
+the same totals; a page past the end still returns the summary.
+
+Each item carries only its dimension fields (`model`; `reasoning_effort` or
+`reasoning_effort_missing`; `api_key_id`, `api_key_name` and
+`api_key_deleted`) plus `requests`, the four token classes, `total_tokens`,
+`cost`, `actual_cost` and `usage_cost`:
+
+- `cost` is the recorded standard cost, `actual_cost` the billed amount
+  (balance charge or subscription quota usage, not necessarily cash), and
+  `usage_cost` is `COALESCE(metered_cost, actual_cost)` per record, the hosted
+  reference usage. Amounts are summed as recorded and never re-priced.
+- `share.{requests,tokens,cost,actual_cost,usage_cost}` is the item's fraction
+  of the whole filtered result, not of the page.
+- `token_mix.{input,output,cache_creation,cache_read}` is each class's fraction
+  of the item's own total tokens. The classes are disjoint; 5-minute and
+  1-hour cache writes are not added again.
+- Ratios with a zero denominator are `null`.
+
+Reasoning effort is the recorded value, trimmed and lower-cased. Records
+without one form a separate group with `reasoning_effort_missing: true`;
+`none` is a real OpenAI effort value and is reported as such. The analytics do
+not apply the query-time inheritance that the usage records list shows as an
+inherited effort. The Key name is its current name; the raw Key value is never
+selected. Aggregates run with a 20-second deadline; a 90-day Key x model
+aggregate for the heaviest production customer (about 290,000 records) took
+about 0.5 s.
+
 ## Administrator Key spending ranking
 
 `GET /api/v1/admin/dashboard/api-keys-ranking` is administrator-only. Without
