@@ -30,6 +30,32 @@
         >
         <span class="font-medium text-gray-700 dark:text-gray-300"><TokenCount :value="props.stats.tokens" /></span>
       </div>
+      <!-- Standard usage: SUM(total_cost) at recorded pricing, before group/user/account multipliers; hosted included -->
+      <div v-if="props.stats.standard_cost != null" class="flex items-center gap-1">
+        <HelpTooltip lazy class="!ml-0">
+          <template #trigger>
+            <button
+              type="button"
+              class="cursor-help rounded-sm text-gray-500 underline decoration-dotted underline-offset-2 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:text-gray-400"
+              :aria-label="`${t('admin.accounts.stats.standardUsage')} ${formatCurrency(props.stats.standard_cost)}: ${t('admin.accounts.stats.standardUsageHint')}`"
+              data-testid="today-stats-standard"
+            >
+              {{ t('admin.accounts.stats.standardUsage') }}:
+            </button>
+          </template>
+          {{ t('admin.accounts.stats.standardUsageHint') }}
+        </HelpTooltip>
+        <span class="font-medium text-gray-700 dark:text-gray-300">{{
+          formatCurrency(props.stats.standard_cost)
+        }}</span>
+      </div>
+      <div
+        v-if="(props.stats.hosted_requests ?? 0) > 0"
+        class="pl-2 text-[11px] tabular-nums text-gray-500 dark:text-gray-400"
+        data-testid="today-stats-hosted"
+      >
+        <span aria-hidden="true">└ </span>{{ t('admin.accounts.stats.hostedIncluded') }} ≈{{ formatCurrency(props.stats.hosted_cost ?? 0) }}
+      </div>
       <!-- Cost (Account) -->
       <div class="flex items-center gap-1">
         <span class="text-gray-500 dark:text-gray-400">{{ t('usage.accountBilled') }}:</span>
@@ -43,25 +69,6 @@
         <span class="font-medium text-gray-700 dark:text-gray-300">{{
           formatCurrency(props.stats.user_cost)
         }}</span>
-      </div>
-      <!-- Hosted reference usage: hosted rows bill 0 to both lines above -->
-      <div v-if="(props.stats.hosted_requests ?? 0) > 0" class="flex items-center gap-1">
-        <HelpTooltip lazy class="!ml-0">
-          <template #trigger>
-            <button
-              type="button"
-              class="cursor-help rounded-sm text-gray-500 underline decoration-dotted underline-offset-2 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:text-gray-400"
-              :aria-label="`${t('hostedUsage.reference')} ≈${formatCurrency(props.stats.hosted_cost ?? 0)}: ${t('hostedUsage.hint')}`"
-              data-testid="today-stats-hosted"
-            >
-              {{ t('hostedUsage.reference') }}:
-            </button>
-          </template>
-          <span class="font-semibold">{{ t('hostedUsage.reference') }}</span>: {{ t('hostedUsage.hint') }}
-        </HelpTooltip>
-        <span class="font-medium text-gray-700 dark:text-gray-300"
-          >≈{{ formatCurrency(props.stats.hosted_cost ?? 0) }}</span
-        >
       </div>
     </div>
 
