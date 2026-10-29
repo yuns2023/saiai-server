@@ -130,8 +130,6 @@ func TestUsageLogFromService_IncludesServiceTierForUserAndAdmin(t *testing.T) {
 	require.Equal(t, serviceTier, *userDTO.ServiceTier)
 	require.NotNil(t, userDTO.InboundEndpoint)
 	require.Equal(t, inboundEndpoint, *userDTO.InboundEndpoint)
-	require.NotNil(t, userDTO.UpstreamEndpoint)
-	require.Equal(t, upstreamEndpoint, *userDTO.UpstreamEndpoint)
 	require.NotNil(t, adminDTO.ServiceTier)
 	require.Equal(t, serviceTier, *adminDTO.ServiceTier)
 	require.NotNil(t, adminDTO.InboundEndpoint)
@@ -140,6 +138,55 @@ func TestUsageLogFromService_IncludesServiceTierForUserAndAdmin(t *testing.T) {
 	require.Equal(t, upstreamEndpoint, *adminDTO.UpstreamEndpoint)
 	require.NotNil(t, adminDTO.AccountRateMultiplier)
 	require.InDelta(t, 1.5, *adminDTO.AccountRateMultiplier, 1e-12)
+}
+
+func TestUsageLogFromService_UserDTOOmitsUpstreamRouting(t *testing.T) {
+	t.Parallel()
+
+	upstreamModel := "gpt-5.4-mapped"
+	upstreamEndpoint := "/v1/responses"
+	log := &service.UsageLog{
+		RequestID:        "req_routing",
+		AccountID:        42,
+		Model:            "gpt-5.4",
+		UpstreamModel:    &upstreamModel,
+		UpstreamEndpoint: &upstreamEndpoint,
+	}
+
+	var user map[string]any
+	userJSON, err := json.Marshal(UsageLogFromService(log))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(userJSON, &user))
+	for _, key := range []string{"account_id", "upstream_model", "upstream_endpoint", "account"} {
+		require.NotContains(t, user, key)
+	}
+
+	var admin map[string]any
+	adminJSON, err := json.Marshal(UsageLogFromServiceAdmin(log))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(adminJSON, &admin))
+	require.Equal(t, float64(42), admin["account_id"])
+	require.Equal(t, upstreamModel, admin["upstream_model"])
+	require.Equal(t, upstreamEndpoint, admin["upstream_endpoint"])
+}
+
+func TestUsageLogFromServiceAdmin_KeepsRoutingFieldOmissionRules(t *testing.T) {
+	t.Parallel()
+
+	empty := ""
+	var unmapped, emptyMapped map[string]any
+	raw, err := json.Marshal(UsageLogFromServiceAdmin(&service.UsageLog{RequestID: "req_unmapped"}))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &unmapped))
+	require.Equal(t, float64(0), unmapped["account_id"])
+	require.NotContains(t, unmapped, "upstream_model")
+	require.NotContains(t, unmapped, "upstream_endpoint")
+
+	raw, err = json.Marshal(UsageLogFromServiceAdmin(&service.UsageLog{RequestID: "req_empty", UpstreamModel: &empty, UpstreamEndpoint: &empty}))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &emptyMapped))
+	require.Equal(t, "", emptyMapped["upstream_model"])
+	require.Equal(t, "", emptyMapped["upstream_endpoint"])
 }
 
 func TestUsageLogFromServiceAdmin_IncludesSessionAccountDiagnostics(t *testing.T) {

@@ -1142,17 +1142,14 @@ export interface UsageLog {
   id: number
   user_id: number
   api_key_id: number
-  account_id: number | null
   request_id: string
   session_id?: string | null
   model: string
-  upstream_model?: string | null
   service_tier?: string | null
   reasoning_effort?: string | null
   reasoning_effort_effective?: string | null
   reasoning_effort_inherited?: boolean
   inbound_endpoint?: string | null
-  upstream_endpoint?: string | null
 
   group_id: number | null
   subscription_id: number | null
@@ -1249,6 +1246,10 @@ export interface UsagePricingSnapshot {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  // 上游路由信息（仅管理员可见）
+  account_id: number | null
+  upstream_model?: string | null
+  upstream_endpoint?: string | null
  moderation_unavailable?: boolean
  moderation_result?: { diagnostics?: ModerationDiagnostics; decision_snapshot?: ModerationDecisionSnapshot; status: 'pending' | 'passed' | 'flagged' | 'skipped' | 'failed'; reason?: string; scores?: Record<string, number>; min_confidence: number; model_version?: string; updated_at: string }
  moderation_events?: Array<{ categories: string[]; scores: Record<string, number> | null; min_confidence: number | null; action: string; counted_as_strike: boolean; model_version: string; event_id?: number; evidence_count?: number; evidence_status?: string }>

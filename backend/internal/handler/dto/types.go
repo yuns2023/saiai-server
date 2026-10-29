@@ -398,7 +398,6 @@ type UsageLog struct {
 	ID                     int64                       `json:"id"`
 	UserID                 int64                       `json:"user_id"`
 	APIKeyID               int64                       `json:"api_key_id"`
-	AccountID              int64                       `json:"account_id"`
 	RequestID              string                      `json:"request_id"`
 	SessionID              *string                     `json:"session_id,omitempty"`
 	Model                  string                      `json:"model"`
@@ -407,9 +406,6 @@ type UsageLog struct {
 	ChatTier               string                      `json:"chat_tier,omitempty"`
 	NativeChatTurnCostUSD  *float64                    `json:"native_chat_turn_cost_usd,omitempty"`
 	NativeChatImageCostUSD *float64                    `json:"native_chat_image_cost_usd,omitempty"`
-	// UpstreamModel is the actual model sent to the upstream provider after mapping.
-	// Omitted when no mapping was applied (requested model was used as-is).
-	UpstreamModel *string `json:"upstream_model,omitempty"`
 	// ServiceTier records the OpenAI service tier used for billing, e.g. "priority" / "flex".
 	ServiceTier *string `json:"service_tier,omitempty"`
 	// ReasoningEffort is the request's reasoning effort level.
@@ -420,8 +416,6 @@ type UsageLog struct {
 	ReasoningEffortInherited bool    `json:"reasoning_effort_inherited,omitempty"`
 	// InboundEndpoint is the client-facing API endpoint path, e.g. /v1/chat/completions.
 	InboundEndpoint *string `json:"inbound_endpoint,omitempty"`
-	// UpstreamEndpoint is the normalized upstream endpoint path, e.g. /v1/responses.
-	UpstreamEndpoint *string `json:"upstream_endpoint,omitempty"`
 
 	GroupID        *int64 `json:"group_id"`
 	SubscriptionID *int64 `json:"subscription_id"`
@@ -493,6 +487,13 @@ type AdminUsageLog struct {
 
 	// ClientAttestation SAIAI 客户端校验状态（1 通过 … 8 未校验；null 表示未采集；仅管理员可见）
 	ClientAttestation *int16 `json:"client_attestation"`
+
+	// AccountID / UpstreamModel / UpstreamEndpoint describe upstream routing
+	// (account, model after mapping, normalized upstream path); admin only.
+	// UpstreamModel is omitted when no mapping was applied.
+	AccountID        int64   `json:"account_id"`
+	UpstreamModel    *string `json:"upstream_model,omitempty"`
+	UpstreamEndpoint *string `json:"upstream_endpoint,omitempty"`
 
 	// Account 最小账号信息（避免泄露敏感字段）
 	Account *AccountSummary `json:"account,omitempty"`

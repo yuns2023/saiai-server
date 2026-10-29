@@ -605,7 +605,8 @@ func AccountSummaryFromService(a *service.Account) *AccountSummary {
 }
 
 func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
-	// 普通用户 DTO：严禁包含管理员字段（例如 account_rate_multiplier、ip_address、account）。
+	// 普通用户 DTO：严禁包含管理员字段（例如 account_rate_multiplier、ip_address、account、
+	// account_id、upstream_model、upstream_endpoint 等上游路由信息）。
 	requestType := l.EffectiveRequestType()
 	stream, openAIWSMode := service.ApplyLegacyRequestFields(requestType, l.Stream, l.OpenAIWSMode)
 	billingUnit, tokenUsageSource, chatTier := "", "", ""
@@ -622,7 +623,6 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		ID:                            l.ID,
 		UserID:                        l.UserID,
 		APIKeyID:                      l.APIKeyID,
-		AccountID:                     l.AccountID,
 		RequestID:                     l.RequestID,
 		SessionID:                     l.SessionID,
 		Model:                         l.Model,
@@ -631,13 +631,11 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		ChatTier:                      chatTier,
 		NativeChatTurnCostUSD:         turnCost,
 		NativeChatImageCostUSD:        imageCost,
-		UpstreamModel:                 l.UpstreamModel,
 		ServiceTier:                   l.ServiceTier,
 		ReasoningEffort:               l.ReasoningEffort,
 		ReasoningEffortEffective:      l.ReasoningEffortEffective,
 		ReasoningEffortInherited:      l.ReasoningEffortInherited,
 		InboundEndpoint:               l.InboundEndpoint,
-		UpstreamEndpoint:              l.UpstreamEndpoint,
 		GroupID:                       l.GroupID,
 		SmartSwitch:                   l.SmartSwitch,
 		SubscriptionID:                l.SubscriptionID,
@@ -697,6 +695,9 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	}
 	return &AdminUsageLog{
 		UsageLog:              usageLogFromServiceUser(l),
+		AccountID:             l.AccountID,
+		UpstreamModel:         l.UpstreamModel,
+		UpstreamEndpoint:      l.UpstreamEndpoint,
 		PricingSnapshot:       l.PricingSnapshot,
 		AccountRateMultiplier: l.AccountRateMultiplier,
 		IPAddress:             l.IPAddress,
