@@ -70,6 +70,7 @@ const (
 	openAIWSFirstMessageClientClosed = "client closed websocket before sending response.create"
 	openAIWSFirstMessageTimedOut     = "timed out waiting for first response.create message"
 	openAIWSFirstMessageMissing      = "missing first response.create message"
+	openAIWSFirstMessageTooBig       = "response.create message exceeds the 16 MiB websocket limit"
 )
 
 // The first frame never arrived. A client that drops the connection right
@@ -81,6 +82,10 @@ func openAIWSFirstReadFailureReason(err error, timedOut bool) string {
 	switch {
 	case timedOut:
 		return openAIWSFirstMessageTimedOut
+	// Our own read limit, or a SAIAI local proxy rejecting the frame with 1009
+	// before forwarding it. Codex then retries and falls back to HTTPS.
+	case errors.Is(err, coderws.ErrMessageTooBig), coderws.CloseStatus(err) == coderws.StatusMessageTooBig:
+		return openAIWSFirstMessageTooBig
 	case coderws.CloseStatus(err) != -1,
 		errors.Is(err, io.EOF),
 		errors.Is(err, io.ErrUnexpectedEOF),
@@ -92,10 +97,16 @@ func openAIWSFirstReadFailureReason(err error, timedOut bool) string {
 }
 
 func closeOpenAIClientWSFirstReadFailure(c *gin.Context, conn *coderws.Conn, err error, timedOut bool, waited time.Duration) {
-	failure := openAIClientWSOpsFailure(coderws.StatusPolicyViolation, openAIWSFirstReadFailureReason(err, timedOut))
+	reason := openAIWSFirstReadFailureReason(err, timedOut)
+	failure := openAIClientWSOpsFailure(coderws.StatusPolicyViolation, reason)
+	closeStatus := coderws.StatusPolicyViolation
+	if reason == openAIWSFirstMessageTooBig {
+		closeStatus = coderws.StatusMessageTooBig
+		failure.wsCloseCode = int(closeStatus)
+	}
 	waitMS := waited.Milliseconds()
 	failure.wsFirstFrameWaitMS = &waitMS
-	recordAndCloseOpenAIClientWS(c, conn, coderws.StatusPolicyViolation, failure)
+	recordAndCloseOpenAIClientWS(c, conn, closeStatus, failure)
 }
 
 func openAIClientWSOpsFailure(status coderws.StatusCode, reason string) opsLocalFailure {

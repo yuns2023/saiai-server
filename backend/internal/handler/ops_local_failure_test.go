@@ -158,7 +158,9 @@ func TestOpenAIWSFirstReadFailureReason(t *testing.T) {
 	// The library's own control-frame timeout or a parent deadline is not the first-message wait.
 	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(deadline, false))
 	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(fmt.Errorf("read: %w", context.Canceled), false))
-	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(errors.New("read limited at 16777217 bytes"), false))
+	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(errors.New("unexpected protocol error"), false))
+	require.Equal(t, openAIWSFirstMessageTooBig, openAIWSFirstReadFailureReason(fmt.Errorf("%w: read limited at 16777217 bytes", coderws.ErrMessageTooBig), false))
+	require.Equal(t, openAIWSFirstMessageTooBig, openAIWSFirstReadFailureReason(coderws.CloseError{Code: coderws.StatusMessageTooBig, Reason: "message too big"}, false))
 }
 
 func TestOpenAIWSFirstReadFailureNamesClientCloseAndTimeout(t *testing.T) {
@@ -188,6 +190,15 @@ func TestOpenAIWSFirstReadFailureNamesClientCloseAndTimeout(t *testing.T) {
 	}{
 		{"tcp_close_without_frame", 10 * time.Second, func(conn *coderws.Conn) { _ = conn.CloseNow() }, openAIWSFirstMessageClientClosed},
 		{"close_frame", 10 * time.Second, func(conn *coderws.Conn) { _ = conn.Close(coderws.StatusGoingAway, "bye") }, openAIWSFirstMessageClientClosed},
+		{"proxy_rejects_oversized_frame", 10 * time.Second, func(conn *coderws.Conn) { _ = conn.Close(coderws.StatusMessageTooBig, "message too big") }, openAIWSFirstMessageTooBig},
+		{"over_gateway_read_limit", 10 * time.Second, func(conn *coderws.Conn) {
+			ioCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			// Keep reading so the Gateway's 1009 close handshake completes.
+			go func() { _, _, _ = conn.Read(ioCtx) }()
+			payload := `{"type":"response.create","input":"` + strings.Repeat("x", openAIWSClientMessageReadLimit) + `"}`
+			_ = conn.Write(ioCtx, coderws.MessageText, []byte(payload))
+		}, openAIWSFirstMessageTooBig},
 		{"silent_client", 200 * time.Millisecond, func(conn *coderws.Conn) {
 			readCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -218,6 +229,11 @@ func TestOpenAIWSFirstReadFailureNamesClientCloseAndTimeout(t *testing.T) {
 				require.NotNil(t, body.WaitMS)
 				require.GreaterOrEqual(t, *body.WaitMS, int64(0))
 				require.Less(t, *body.WaitMS, (tc.timeout + 2*time.Second).Milliseconds())
+				wantClose := coderws.StatusPolicyViolation
+				if tc.message == openAIWSFirstMessageTooBig {
+					wantClose = coderws.StatusMessageTooBig
+				}
+				require.Contains(t, job.entry.ErrorBody, fmt.Sprintf(`"websocket_close_code":%d`, int(wantClose)))
 			case <-ctx.Done():
 				t.Fatal("first-frame failure missing from Ops")
 			}

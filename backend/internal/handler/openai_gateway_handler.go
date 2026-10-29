@@ -1706,6 +1706,10 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 // frame after the upgrade.
 var openAIWSFirstMessageTimeout = 30 * time.Second
 
+// openAIWSClientMessageReadLimit caps one client WebSocket message. It matches
+// the SAIAI local proxy's frame limit; openAIWSFirstMessageTooBig names it.
+const openAIWSClientMessageReadLimit = 16 * 1024 * 1024
+
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint
 // GET /openai/v1/responses (Upgrade: websocket)
 func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
@@ -1764,7 +1768,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	defer func() {
 		_ = wsConn.CloseNow()
 	}()
-	wsConn.SetReadLimit(16 * 1024 * 1024)
+	wsConn.SetReadLimit(openAIWSClientMessageReadLimit)
 
 	ctx := c.Request.Context()
 	acceptedAt := time.Now()
