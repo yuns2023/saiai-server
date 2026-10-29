@@ -1702,6 +1702,10 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	return wrapReleaseOnDone(ctx, accountReleaseFunc), true
 }
 
+// openAIWSFirstMessageTimeout bounds the wait for the first response.create
+// frame after the upgrade.
+var openAIWSFirstMessageTimeout = 30 * time.Second
+
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint
 // GET /openai/v1/responses (Upgrade: websocket)
 func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
@@ -1763,7 +1767,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	wsConn.SetReadLimit(16 * 1024 * 1024)
 
 	ctx := c.Request.Context()
-	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	acceptedAt := time.Now()
+	readCtx, cancel := context.WithTimeout(ctx, openAIWSFirstMessageTimeout)
 	msgType, firstMessage, err := wsConn.Read(readCtx)
 	cancel()
 	if versionRejection != nil {
@@ -1773,15 +1778,17 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		waited := time.Since(acceptedAt)
 		closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
 		reqLog.Warn("openai.websocket_read_first_message_failed",
 			zap.Error(err),
 			zap.String("client_ip", clientIP),
 			zap.String("close_status", closeStatus),
 			zap.String("close_reason", closeReason),
-			zap.Duration("read_timeout", 30*time.Second),
+			zap.Duration("waited", waited),
+			zap.Duration("read_timeout", openAIWSFirstMessageTimeout),
 		)
-		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "missing first response.create message")
+		closeOpenAIClientWSFirstReadFailure(c, wsConn, err, waited)
 		return
 	}
 	if msgType != coderws.MessageText && msgType != coderws.MessageBinary {

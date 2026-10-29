@@ -1,9 +1,15 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
@@ -21,6 +27,8 @@ type opsLocalFailure struct {
 	code        string
 	message     string
 	wsCloseCode int
+	// Time from the upgrade until the first frame read failed.
+	wsFirstFrameWaitMS *int64
 }
 
 func setOpsLocalFailure(c *gin.Context, failure opsLocalFailure) {
@@ -48,11 +56,48 @@ func opsFailureResponse(c *gin.Context, wireStatus int, body []byte) (int, []byt
 	if failure.wsCloseCode != 0 {
 		payload["websocket_close_code"] = failure.wsCloseCode
 	}
+	if failure.wsFirstFrameWaitMS != nil {
+		payload["websocket_first_frame_wait_ms"] = *failure.wsFirstFrameWaitMS
+	}
 	encoded, _ := json.Marshal(payload)
 	return failure.status, encoded, true
 }
 
 func closeOpenAIClientWSWithOps(c *gin.Context, conn *coderws.Conn, status coderws.StatusCode, reason string) {
+	recordAndCloseOpenAIClientWS(c, conn, status, openAIClientWSOpsFailure(status, reason))
+}
+
+const (
+	openAIWSFirstMessageClientClosed = "client closed websocket before sending response.create"
+	openAIWSFirstMessageTimedOut     = "timed out waiting for first response.create message"
+	openAIWSFirstMessageMissing      = "missing first response.create message"
+)
+
+// The first frame never arrived. A client that drops the connection right
+// after the upgrade and a silent client that hits the read timeout are
+// different incidents, so name which one ended the session.
+func openAIWSFirstReadFailureReason(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return openAIWSFirstMessageTimedOut
+	case coderws.CloseStatus(err) != -1,
+		errors.Is(err, io.EOF),
+		errors.Is(err, io.ErrUnexpectedEOF),
+		errors.Is(err, net.ErrClosed),
+		errors.Is(err, syscall.ECONNRESET):
+		return openAIWSFirstMessageClientClosed
+	}
+	return openAIWSFirstMessageMissing
+}
+
+func closeOpenAIClientWSFirstReadFailure(c *gin.Context, conn *coderws.Conn, err error, waited time.Duration) {
+	failure := openAIClientWSOpsFailure(coderws.StatusPolicyViolation, openAIWSFirstReadFailureReason(err))
+	waitMS := waited.Milliseconds()
+	failure.wsFirstFrameWaitMS = &waitMS
+	recordAndCloseOpenAIClientWS(c, conn, coderws.StatusPolicyViolation, failure)
+}
+
+func openAIClientWSOpsFailure(status coderws.StatusCode, reason string) opsLocalFailure {
 	failure := opsLocalFailure{status: http.StatusInternalServerError, errType: "api_error", message: reason, wsCloseCode: int(status)}
 	switch status {
 	case coderws.StatusPolicyViolation:
@@ -68,8 +113,12 @@ func closeOpenAIClientWSWithOps(c *gin.Context, conn *coderws.Conn, status coder
 			failure.status, failure.errType, failure.code = http.StatusTooManyRequests, "rate_limit_error", "user_concurrency"
 		}
 	}
+	return failure
+}
+
+func recordAndCloseOpenAIClientWS(c *gin.Context, conn *coderws.Conn, status coderws.StatusCode, failure opsLocalFailure) {
 	if !opsWSHasCurrentUpstreamFailure(c) {
 		setOpsLocalFailure(c, failure)
 	}
-	closeOpenAIClientWS(conn, status, reason)
+	closeOpenAIClientWS(conn, status, failure.message)
 }

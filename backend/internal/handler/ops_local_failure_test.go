@@ -2,9 +2,13 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -139,4 +143,67 @@ func TestOpenAIWSLocalBusyPreservesCloseFrameAndLogsRequestedModel(t *testing.T)
 
 func TestOpsPhaseRecognizesNativeOAuthNoAccount(t *testing.T) {
 	require.Equal(t, "routing", classifyOpsPhase(normalizeOpsErrorType("service_unavailable", ""), "No available OpenAI OAuth account", ""))
+}
+
+func TestOpenAIWSFirstReadFailureReason(t *testing.T) {
+	require.Equal(t, openAIWSFirstMessageClientClosed, openAIWSFirstReadFailureReason(fmt.Errorf("failed to get reader: failed to read frame header: %w", io.EOF)))
+	require.Equal(t, openAIWSFirstMessageClientClosed, openAIWSFirstReadFailureReason(coderws.CloseError{Code: coderws.StatusGoingAway}))
+	require.Equal(t, openAIWSFirstMessageClientClosed, openAIWSFirstReadFailureReason(fmt.Errorf("read: %w", syscall.ECONNRESET)))
+	require.Equal(t, openAIWSFirstMessageTimedOut, openAIWSFirstReadFailureReason(fmt.Errorf("failed to read frame header: %w", context.DeadlineExceeded)))
+	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(errors.New("read limited at 16777217 bytes")))
+}
+
+func TestOpenAIWSFirstReadFailureNamesClientCloseAndTimeout(t *testing.T) {
+	original := openAIWSFirstMessageTimeout
+	openAIWSFirstMessageTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { openAIWSFirstMessageTimeout = original })
+
+	queue := opsFailureTestQueue(t)
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := newOpenAIHandlerForPreviousResponseIDValidation(t, &concurrencyCacheMock{})
+	r := gin.New()
+	r.Use(OpsErrorLoggerMiddleware(ops), func(c *gin.Context) {
+		groupID := int64(2)
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 101, GroupID: &groupID, User: &service.User{ID: 1}})
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1, Concurrency: 1})
+		c.Next()
+	})
+	r.GET("/openai/v1/responses", h.ResponsesWebSocket)
+	server := httptest.NewServer(r)
+	defer server.Close()
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/openai/v1/responses"
+
+	for _, tc := range []struct {
+		name    string
+		client  func(*coderws.Conn)
+		message string
+	}{
+		{"tcp_close_without_frame", func(conn *coderws.Conn) { _ = conn.CloseNow() }, openAIWSFirstMessageClientClosed},
+		{"close_frame", func(conn *coderws.Conn) { _ = conn.Close(coderws.StatusGoingAway, "bye") }, openAIWSFirstMessageClientClosed},
+		{"silent_client", func(conn *coderws.Conn) {
+			readCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_, _, _ = conn.Read(readCtx)
+		}, openAIWSFirstMessageTimedOut},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			conn, _, err := coderws.Dial(ctx, url, nil)
+			require.NoError(t, err)
+			defer func() { _ = conn.CloseNow() }()
+			tc.client(conn)
+			select {
+			case job := <-queue:
+				require.Equal(t, tc.message, job.entry.ErrorMessage)
+				require.Equal(t, http.StatusBadRequest, job.entry.StatusCode)
+				require.Equal(t, "request", job.entry.ErrorPhase)
+				require.Equal(t, "client", job.entry.ErrorOwner)
+				require.Contains(t, job.entry.ErrorBody, `"transport_status_code":101`)
+				require.Contains(t, job.entry.ErrorBody, `"websocket_first_frame_wait_ms":`)
+			case <-ctx.Done():
+				t.Fatal("first-frame failure missing from Ops")
+			}
+		})
+	}
 }
