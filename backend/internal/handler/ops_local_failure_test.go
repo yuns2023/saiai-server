@@ -2,11 +2,14 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"syscall"
 	"testing"
@@ -146,16 +149,20 @@ func TestOpsPhaseRecognizesNativeOAuthNoAccount(t *testing.T) {
 }
 
 func TestOpenAIWSFirstReadFailureReason(t *testing.T) {
-	require.Equal(t, openAIWSFirstMessageClientClosed, openAIWSFirstReadFailureReason(fmt.Errorf("failed to get reader: failed to read frame header: %w", io.EOF)))
-	require.Equal(t, openAIWSFirstMessageClientClosed, openAIWSFirstReadFailureReason(coderws.CloseError{Code: coderws.StatusGoingAway}))
-	require.Equal(t, openAIWSFirstMessageClientClosed, openAIWSFirstReadFailureReason(fmt.Errorf("read: %w", syscall.ECONNRESET)))
-	require.Equal(t, openAIWSFirstMessageTimedOut, openAIWSFirstReadFailureReason(fmt.Errorf("failed to read frame header: %w", context.DeadlineExceeded)))
-	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(errors.New("read limited at 16777217 bytes")))
+	deadline := fmt.Errorf("failed to read frame header: %w", context.DeadlineExceeded)
+	require.Equal(t, openAIWSFirstMessageClientClosed, openAIWSFirstReadFailureReason(fmt.Errorf("failed to get reader: failed to read frame header: %w", io.EOF), false))
+	require.Equal(t, openAIWSFirstMessageClientClosed, openAIWSFirstReadFailureReason(fmt.Errorf("failed to read frame payload: %w", io.ErrUnexpectedEOF), false))
+	require.Equal(t, openAIWSFirstMessageClientClosed, openAIWSFirstReadFailureReason(coderws.CloseError{Code: coderws.StatusGoingAway}, false))
+	require.Equal(t, openAIWSFirstMessageClientClosed, openAIWSFirstReadFailureReason(&net.OpError{Op: "read", Err: os.NewSyscallError("read", syscall.ECONNRESET)}, false))
+	require.Equal(t, openAIWSFirstMessageTimedOut, openAIWSFirstReadFailureReason(deadline, true))
+	// The library's own control-frame timeout or a parent deadline is not the first-message wait.
+	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(deadline, false))
+	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(fmt.Errorf("read: %w", context.Canceled), false))
+	require.Equal(t, openAIWSFirstMessageMissing, openAIWSFirstReadFailureReason(errors.New("read limited at 16777217 bytes"), false))
 }
 
 func TestOpenAIWSFirstReadFailureNamesClientCloseAndTimeout(t *testing.T) {
 	original := openAIWSFirstMessageTimeout
-	openAIWSFirstMessageTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { openAIWSFirstMessageTimeout = original })
 
 	queue := opsFailureTestQueue(t)
@@ -175,19 +182,21 @@ func TestOpenAIWSFirstReadFailureNamesClientCloseAndTimeout(t *testing.T) {
 
 	for _, tc := range []struct {
 		name    string
+		timeout time.Duration
 		client  func(*coderws.Conn)
 		message string
 	}{
-		{"tcp_close_without_frame", func(conn *coderws.Conn) { _ = conn.CloseNow() }, openAIWSFirstMessageClientClosed},
-		{"close_frame", func(conn *coderws.Conn) { _ = conn.Close(coderws.StatusGoingAway, "bye") }, openAIWSFirstMessageClientClosed},
-		{"silent_client", func(conn *coderws.Conn) {
-			readCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		{"tcp_close_without_frame", 10 * time.Second, func(conn *coderws.Conn) { _ = conn.CloseNow() }, openAIWSFirstMessageClientClosed},
+		{"close_frame", 10 * time.Second, func(conn *coderws.Conn) { _ = conn.Close(coderws.StatusGoingAway, "bye") }, openAIWSFirstMessageClientClosed},
+		{"silent_client", 200 * time.Millisecond, func(conn *coderws.Conn) {
+			readCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_, _, _ = conn.Read(readCtx)
 		}, openAIWSFirstMessageTimedOut},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			openAIWSFirstMessageTimeout = tc.timeout
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			conn, _, err := coderws.Dial(ctx, url, nil)
 			require.NoError(t, err)
@@ -200,7 +209,15 @@ func TestOpenAIWSFirstReadFailureNamesClientCloseAndTimeout(t *testing.T) {
 				require.Equal(t, "request", job.entry.ErrorPhase)
 				require.Equal(t, "client", job.entry.ErrorOwner)
 				require.Contains(t, job.entry.ErrorBody, `"transport_status_code":101`)
-				require.Contains(t, job.entry.ErrorBody, `"websocket_first_frame_wait_ms":`)
+				require.Equal(t, "P3", job.entry.Severity)
+				require.False(t, job.entry.IsBusinessLimited)
+				var body struct {
+					WaitMS *int64 `json:"websocket_first_frame_wait_ms"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(job.entry.ErrorBody), &body))
+				require.NotNil(t, body.WaitMS)
+				require.GreaterOrEqual(t, *body.WaitMS, int64(0))
+				require.Less(t, *body.WaitMS, (tc.timeout + 2*time.Second).Milliseconds())
 			case <-ctx.Done():
 				t.Fatal("first-frame failure missing from Ops")
 			}

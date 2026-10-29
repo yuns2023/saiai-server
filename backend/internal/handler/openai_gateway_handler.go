@@ -1770,6 +1770,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	acceptedAt := time.Now()
 	readCtx, cancel := context.WithTimeout(ctx, openAIWSFirstMessageTimeout)
 	msgType, firstMessage, err := wsConn.Read(readCtx)
+	// Our own deadline, not the parent request or the library's control-frame timeout.
+	firstMessageTimedOut := errors.Is(readCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 	cancel()
 	if versionRejection != nil {
 		// Before any validation, account selection or upstream connection;
@@ -1788,7 +1790,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			zap.Duration("waited", waited),
 			zap.Duration("read_timeout", openAIWSFirstMessageTimeout),
 		)
-		closeOpenAIClientWSFirstReadFailure(c, wsConn, err, waited)
+		closeOpenAIClientWSFirstReadFailure(c, wsConn, err, firstMessageTimedOut, waited)
 		return
 	}
 	if msgType != coderws.MessageText && msgType != coderws.MessageBinary {

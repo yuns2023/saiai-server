@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -75,10 +74,12 @@ const (
 
 // The first frame never arrived. A client that drops the connection right
 // after the upgrade and a silent client that hits the read timeout are
-// different incidents, so name which one ended the session.
-func openAIWSFirstReadFailureReason(err error) string {
+// different incidents, so name which one ended the session. timedOut must
+// come from the first-message read context itself: the library returns the
+// same DeadlineExceeded for its own control-frame timeout.
+func openAIWSFirstReadFailureReason(err error, timedOut bool) string {
 	switch {
-	case errors.Is(err, context.DeadlineExceeded):
+	case timedOut:
 		return openAIWSFirstMessageTimedOut
 	case coderws.CloseStatus(err) != -1,
 		errors.Is(err, io.EOF),
@@ -90,8 +91,8 @@ func openAIWSFirstReadFailureReason(err error) string {
 	return openAIWSFirstMessageMissing
 }
 
-func closeOpenAIClientWSFirstReadFailure(c *gin.Context, conn *coderws.Conn, err error, waited time.Duration) {
-	failure := openAIClientWSOpsFailure(coderws.StatusPolicyViolation, openAIWSFirstReadFailureReason(err))
+func closeOpenAIClientWSFirstReadFailure(c *gin.Context, conn *coderws.Conn, err error, timedOut bool, waited time.Duration) {
+	failure := openAIClientWSOpsFailure(coderws.StatusPolicyViolation, openAIWSFirstReadFailureReason(err, timedOut))
 	waitMS := waited.Milliseconds()
 	failure.wsFirstFrameWaitMS = &waitMS
 	recordAndCloseOpenAIClientWS(c, conn, coderws.StatusPolicyViolation, failure)
