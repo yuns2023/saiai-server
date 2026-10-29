@@ -212,3 +212,36 @@ func (s *OpenAIGatewayService) deleteStickySessionAccountID(ctx context.Context,
 	}
 	return err
 }
+
+// The user-scoped binding remembers the account a user's session last used in
+// any group, so a Key moved to another group (or a smart-switch fallback) can
+// stay on the same upstream account and keep its prompt cache. It is only a
+// preference: readers apply every sticky eligibility check, including current
+// group membership, and never delete it; a later binding overwrites it.
+func openAIUserStickyCacheKey(userID int64, sessionHash string) string {
+	normalized := strings.TrimSpace(sessionHash)
+	if userID <= 0 || normalized == "" {
+		return ""
+	}
+	return fmt.Sprintf("openai_user_sticky:%d:%s", userID, normalized)
+}
+
+func (s *OpenAIGatewayService) getUserStickySessionAccountID(ctx context.Context, userID int64, sessionHash string) int64 {
+	key := openAIUserStickyCacheKey(userID, sessionHash)
+	if s == nil || s.cache == nil || key == "" {
+		return 0
+	}
+	accountID, err := s.cache.GetSessionAccountID(ctx, 0, key)
+	if err != nil || accountID <= 0 {
+		return 0
+	}
+	return accountID
+}
+
+func (s *OpenAIGatewayService) setUserStickySessionAccountID(ctx context.Context, userID int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	key := openAIUserStickyCacheKey(userID, sessionHash)
+	if s == nil || s.cache == nil || key == "" || accountID <= 0 {
+		return nil
+	}
+	return s.cache.SetSessionAccountID(ctx, 0, key, accountID, ttl)
+}
