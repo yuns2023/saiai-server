@@ -2223,6 +2223,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
 		reqLog.Warn("openai.websocket_proxy_failed",
 			zap.Int64("account_id", account.ID),
+			zap.String("relay_stage", service.OpenAIWSIngressTurnStage(err)),
 			zap.Error(err),
 			zap.String("close_status", closeStatus),
 			zap.String("close_reason", closeReason),
@@ -2230,6 +2231,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		var closeErr *service.OpenAIWSClientCloseError
 		if errors.As(err, &closeErr) {
 			closeOpenAIClientWSWithOps(c, wsConn, closeErr.StatusCode(), closeErr.Reason())
+			return
+		}
+		if failure, ok := openAIWSUpstreamCloseFailure(service.OpenAIWSUpstreamCloseStatus(err)); ok {
+			recordAndCloseOpenAIClientWS(c, wsConn, coderws.StatusCode(failure.wsCloseCode), failure)
 			return
 		}
 		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusInternalError, "upstream websocket proxy failed")

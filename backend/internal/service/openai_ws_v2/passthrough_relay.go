@@ -159,7 +159,6 @@ type relayState struct {
 	usage                  Usage
 	lastResponseID         string
 	terminalEventType      string
-	terminalFrameForwarded atomic.Bool
 	firstTokenMs           *int
 	turnTimingByID         map[string]*relayTurnTiming
 	turns                  *relayTurnTracker
@@ -458,7 +457,11 @@ func Relay(
 	result.UpstreamToClientFrames = upstreamToClientFrames.Load()
 	result.DroppedDownstreamFrames = droppedDownstreamFrames.Load()
 	if firstExit.stage == "read_client" && firstExit.graceful {
-		if state.terminalFrameForwarded.Load() && !state.turns.hasOutstanding() && (!hasSecondExit || secondExit.graceful) {
+		// No tracked turn is still waiting to settle and the drain reported no
+		// failure, so the client leaving is not a relay failure, even when the
+		// last terminal frame could no longer be delivered. Whether an earlier
+		// terminal was forwarded on this connection says nothing about it.
+		if !state.turns.hasOutstanding() && (!hasSecondExit || secondExit.graceful) {
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "relay_complete",
 				Graceful:        true,
@@ -807,7 +810,6 @@ func runUpstreamToClient(
 			continue
 		}
 		if observedEvent.terminal && state != nil {
-			state.terminalFrameForwarded.Store(true)
 			wroteCurrentTurn = false
 		}
 		markActivity()

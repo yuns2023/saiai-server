@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"testing"
@@ -711,4 +712,26 @@ func TestCloneOpenAIWSRawMessages(t *testing.T) {
 		require.NotNil(t, cloned)
 		require.Len(t, cloned, 0)
 	})
+}
+
+func TestOpenAIWSUpstreamCloseStatusOnlyTrustsUpstreamCloseFrames(t *testing.T) {
+	t.Parallel()
+
+	restart := coderws.CloseError{Code: coderws.StatusServiceRestart}
+	upstreamClose := wrapOpenAIWSIngressTurnError("read_upstream", fmt.Errorf("failed to get reader: %w", restart), true)
+	require.Equal(t, "read_upstream", OpenAIWSIngressTurnStage(upstreamClose))
+	require.Equal(t, coderws.StatusServiceRestart, OpenAIWSUpstreamCloseStatus(upstreamClose))
+	// A typed close wrapping the staged error keeps the stage reachable.
+	require.Equal(t, "read_upstream", OpenAIWSIngressTurnStage(NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "budget", upstreamClose)))
+
+	for name, err := range map[string]error{
+		"client close frame": wrapOpenAIWSIngressTurnError("read_client", restart, false),
+		"client disconnect":  wrapOpenAIWSIngressTurnError("client_disconnected", io.EOF, false),
+		"upstream EOF":       wrapOpenAIWSIngressTurnError("read_upstream", io.EOF, false),
+		"unstaged close":     restart,
+		"nil":                nil,
+	} {
+		require.Equal(t, coderws.StatusCode(-1), OpenAIWSUpstreamCloseStatus(err), name)
+	}
+	require.Empty(t, OpenAIWSIngressTurnStage(errors.New("plain error")))
 }
