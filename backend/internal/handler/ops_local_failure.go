@@ -169,6 +169,7 @@ func openAIClientWSOpsFailure(status coderws.StatusCode, reason string) opsLocal
 // falling back to HTTPS, which a bare close frame triggers.
 func rejectOpenAIWSBilling(ctx context.Context, c *gin.Context, conn *coderws.Conn, err error) {
 	status, code, message := billingErrorDetails(err)
+	message = service.ClientSafeUpstreamErrorMessage(message)
 	closeStatus := coderws.StatusPolicyViolation
 	if status == http.StatusServiceUnavailable {
 		closeStatus = coderws.StatusTryAgainLater

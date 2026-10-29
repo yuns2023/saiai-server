@@ -294,7 +294,7 @@ func TestOpenAIWSBillingRejectionCarriesHTTPReason(t *testing.T) {
 	}{
 		{"key window", service.ErrAPIKeyRateLimit5hExceeded, http.StatusTooManyRequests, "rate_limit_exceeded", "api key 5小时限额已用完", coderws.StatusPolicyViolation},
 		{"balance", service.ErrInsufficientBalance, http.StatusForbidden, "billing_error", "insufficient balance", coderws.StatusPolicyViolation},
-		{"billing unavailable", service.ErrBillingServiceUnavailable, http.StatusServiceUnavailable, "billing_service_error", "", coderws.StatusTryAgainLater},
+		{"billing unavailable", service.ErrBillingServiceUnavailable, http.StatusServiceUnavailable, "billing_service_error", "Billing service temporarily unavailable. Please retry later.", coderws.StatusTryAgainLater},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			queue := opsFailureTestQueue(t)
@@ -325,9 +325,8 @@ func TestOpenAIWSBillingRejectionCarriesHTTPReason(t *testing.T) {
 			require.Equal(t, "error", got.Type)
 			require.Equal(t, tc.status, got.Status)
 			require.Equal(t, tc.code, got.Error.Code)
-			if tc.message != "" {
-				require.Equal(t, tc.message, got.Error.Message)
-			}
+			require.Equal(t, tc.code, got.Error.Type, "type mirrors the HTTP error envelope")
+			require.Equal(t, tc.message, got.Error.Message)
 			_, _, err = conn.Read(ctx)
 			var closeErr coderws.CloseError
 			require.ErrorAs(t, err, &closeErr)
@@ -345,7 +344,7 @@ func TestOpenAIWSBillingRejectionCarriesHTTPReason(t *testing.T) {
 }
 
 func TestCloseOpenAIClientWSCutsReasonOnRuneBoundary(t *testing.T) {
-	reason := strings.Repeat("限", 60) // 180 bytes
+	reason := "a" + strings.Repeat("限", 60) // byte 120 falls inside a rune
 	r := gin.New()
 	r.GET("/ws", func(c *gin.Context) {
 		conn, err := coderws.Accept(c.Writer, c.Request, nil)
@@ -363,5 +362,5 @@ func TestCloseOpenAIClientWSCutsReasonOnRuneBoundary(t *testing.T) {
 	var closeErr coderws.CloseError
 	require.ErrorAs(t, err, &closeErr)
 	require.Equal(t, coderws.StatusPolicyViolation, closeErr.Code)
-	require.Equal(t, strings.Repeat("限", 40), closeErr.Reason)
+	require.Equal(t, "a"+strings.Repeat("限", 39), closeErr.Reason)
 }
