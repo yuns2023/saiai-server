@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -1883,7 +1884,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		reqLog.Info("openai.websocket_billing_eligibility_check_failed", zap.Error(err))
-		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "billing check failed")
+		rejectOpenAIWSBilling(ctx, c, wsConn, err)
 		return
 	}
 
@@ -2713,7 +2714,12 @@ func closeOpenAIClientWS(conn *coderws.Conn, status coderws.StatusCode, reason s
 	}
 	reason = strings.TrimSpace(reason)
 	if len(reason) > 120 {
-		reason = reason[:120]
+		// Cut on a rune boundary: a close reason must be valid UTF-8.
+		cut := 120
+		for cut > 0 && !utf8.RuneStart(reason[cut]) {
+			cut--
+		}
+		reason = reason[:cut]
 	}
 	_ = conn.Close(status, reason)
 	_ = conn.CloseNow()

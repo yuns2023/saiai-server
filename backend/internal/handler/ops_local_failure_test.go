@@ -282,3 +282,86 @@ func TestOpenAIWSUpstreamCloseIsLoggedAsProviderFailure(t *testing.T) {
 	}
 	require.Empty(t, queue)
 }
+
+func TestOpenAIWSBillingRejectionCarriesHTTPReason(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		err         error
+		status      int
+		code        string
+		message     string
+		closeStatus coderws.StatusCode
+	}{
+		{"key window", service.ErrAPIKeyRateLimit5hExceeded, http.StatusTooManyRequests, "rate_limit_exceeded", "api key 5小时限额已用完", coderws.StatusPolicyViolation},
+		{"balance", service.ErrInsufficientBalance, http.StatusForbidden, "billing_error", "insufficient balance", coderws.StatusPolicyViolation},
+		{"billing unavailable", service.ErrBillingServiceUnavailable, http.StatusServiceUnavailable, "billing_service_error", "", coderws.StatusTryAgainLater},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			queue := opsFailureTestQueue(t)
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			r := gin.New()
+			r.Use(OpsErrorLoggerMiddleware(ops))
+			r.GET("/ws", func(c *gin.Context) {
+				conn, err := coderws.Accept(c.Writer, c.Request, nil)
+				require.NoError(t, err)
+				rejectOpenAIWSBilling(c.Request.Context(), c, conn, tc.err)
+			})
+			server := httptest.NewServer(r)
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/ws", nil)
+			require.NoError(t, err)
+			defer func() { _ = conn.CloseNow() }()
+
+			_, frame, err := conn.Read(ctx)
+			require.NoError(t, err)
+			var got struct {
+				Type   string `json:"type"`
+				Status int    `json:"status"`
+				Error  struct{ Type, Code, Message string }
+			}
+			require.NoError(t, json.Unmarshal(frame, &got))
+			require.Equal(t, "error", got.Type)
+			require.Equal(t, tc.status, got.Status)
+			require.Equal(t, tc.code, got.Error.Code)
+			if tc.message != "" {
+				require.Equal(t, tc.message, got.Error.Message)
+			}
+			_, _, err = conn.Read(ctx)
+			var closeErr coderws.CloseError
+			require.ErrorAs(t, err, &closeErr)
+			require.Equal(t, tc.closeStatus, closeErr.Code)
+			require.Equal(t, got.Error.Message, closeErr.Reason)
+			select {
+			case job := <-queue:
+				require.Equal(t, tc.status, job.entry.StatusCode)
+				require.Equal(t, got.Error.Message, job.entry.ErrorMessage)
+			case <-ctx.Done():
+				t.Fatal("billing rejection missing from Ops")
+			}
+		})
+	}
+}
+
+func TestCloseOpenAIClientWSCutsReasonOnRuneBoundary(t *testing.T) {
+	reason := strings.Repeat("限", 60) // 180 bytes
+	r := gin.New()
+	r.GET("/ws", func(c *gin.Context) {
+		conn, err := coderws.Accept(c.Writer, c.Request, nil)
+		require.NoError(t, err)
+		closeOpenAIClientWS(conn, coderws.StatusPolicyViolation, reason)
+	})
+	server := httptest.NewServer(r)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/ws", nil)
+	require.NoError(t, err)
+	defer func() { _ = conn.CloseNow() }()
+	_, _, err = conn.Read(ctx)
+	var closeErr coderws.CloseError
+	require.ErrorAs(t, err, &closeErr)
+	require.Equal(t, coderws.StatusPolicyViolation, closeErr.Code)
+	require.Equal(t, strings.Repeat("限", 40), closeErr.Reason)
+}

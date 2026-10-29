@@ -163,6 +163,20 @@ func openAIClientWSOpsFailure(status coderws.StatusCode, reason string) opsLocal
 	return failure
 }
 
+// rejectOpenAIWSBilling ends a session that failed the billing check with the
+// same status, code and message as the HTTP error. Codex shows the message,
+// and stops after two attempts on 429 instead of reconnecting five times and
+// falling back to HTTPS, which a bare close frame triggers.
+func rejectOpenAIWSBilling(ctx context.Context, c *gin.Context, conn *coderws.Conn, err error) {
+	status, code, message := billingErrorDetails(err)
+	closeStatus := coderws.StatusPolicyViolation
+	if status == http.StatusServiceUnavailable {
+		closeStatus = coderws.StatusTryAgainLater
+	}
+	_ = rejectOpenAIWSSession(ctx, c, conn, &openAIWSSessionRejection{status: status, errType: code, code: code, message: message})
+	recordAndCloseOpenAIClientWS(c, conn, closeStatus, opsLocalFailure{status: status, errType: code, code: code, message: message, wsCloseCode: int(closeStatus)})
+}
+
 func recordAndCloseOpenAIClientWS(c *gin.Context, conn *coderws.Conn, status coderws.StatusCode, failure opsLocalFailure) {
 	if !opsWSHasCurrentUpstreamFailure(c) {
 		setOpsLocalFailure(c, failure)
