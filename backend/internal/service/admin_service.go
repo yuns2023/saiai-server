@@ -1669,9 +1669,6 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 	result := &AdminUpdateAPIKeyGroupIDResult{}
 
 	if *groupID == 0 {
-		if err := validateAPIKeyMeteringBasisChange(ctx, s.apiKeyRepo, apiKey, nil); err != nil {
-			return nil, err
-		}
 		// 0 表示解绑分组（不修改 user_allowed_groups，避免影响用户其他 Key）
 		apiKey.GroupID = nil
 		apiKey.Group = nil
@@ -1683,9 +1680,6 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 		}
 		if group.Status != StatusActive {
 			return nil, infraerrors.BadRequest("GROUP_NOT_ACTIVE", "target group is not active")
-		}
-		if err := validateAPIKeyMeteringBasisChange(ctx, s.apiKeyRepo, apiKey, group); err != nil {
-			return nil, err
 		}
 		// 订阅类型分组：用户须持有该分组的有效订阅才可绑定
 		if group.IsSubscriptionType() {
@@ -1779,13 +1773,6 @@ func (s *adminServiceImpl) ReplaceUserGroup(ctx context.Context, userID, oldGrou
 	}
 	if newGroup.IsSubscriptionType() {
 		return nil, infraerrors.BadRequest("GROUP_IS_SUBSCRIPTION", "subscription groups are not supported for replacement")
-	}
-	oldGroup, err := s.groupRepo.GetByIDLite(ctx, oldGroupID)
-	if err != nil {
-		return nil, err
-	}
-	if oldGroup.UsesHostedUsage() != newGroup.UsesHostedUsage() {
-		return nil, infraerrors.BadRequest("KEY_METERING_BASIS_CHANGE", "Switch Keys individually after explicitly resetting their quota and windows when changing the metering basis")
 	}
 
 	// 事务保证原子性

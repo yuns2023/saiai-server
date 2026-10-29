@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -1618,6 +1619,16 @@ func (h *OpenAIGatewayHandler) acquireResponsesUserSlot(
 	return wrapReleaseOnDone(ctx, userReleaseFunc), true
 }
 
+// bindOpenAIStickySession binds the group session and, for an authenticated
+// caller, the user-scoped preference that lets Responses scheduling keep the
+// same upstream account after the Key's group changes.
+func (h *OpenAIGatewayHandler) bindOpenAIStickySession(c *gin.Context, ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok && subject.UserID > 0 {
+		return h.gatewayService.BindStickySessionForUser(ctx, groupID, subject.UserID, sessionHash, accountID)
+	}
+	return h.gatewayService.BindStickySession(ctx, groupID, sessionHash, accountID)
+}
+
 func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	c *gin.Context,
 	groupID *int64,
@@ -1653,7 +1664,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 		return nil, false
 	}
 	if fastAcquired {
-		if err := h.gatewayService.BindStickySession(ctx, groupID, sessionHash, account.ID); err != nil {
+		if err := h.bindOpenAIStickySession(c, ctx, groupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
 		return wrapReleaseOnDone(ctx, fastReleaseFunc), true
@@ -1696,7 +1707,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 
 	// Slot acquired: no longer waiting in queue.
 	releaseWait()
-	if err := h.gatewayService.BindStickySession(ctx, groupID, sessionHash, account.ID); err != nil {
+	if err := h.bindOpenAIStickySession(c, ctx, groupID, sessionHash, account.ID); err != nil {
 		reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
 	return wrapReleaseOnDone(ctx, accountReleaseFunc), true
@@ -1883,7 +1894,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		reqLog.Info("openai.websocket_billing_eligibility_check_failed", zap.Error(err))
-		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, "billing check failed")
+		rejectOpenAIWSBilling(ctx, c, wsConn, err)
 		return
 	}
 
@@ -1997,7 +2008,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		accountReleaseFunc = fastReleaseFunc
 	}
 	slots.setAccount(wrapReleaseOnDone(ctx, accountReleaseFunc))
-	if err := h.gatewayService.BindStickySession(ctx, apiKey.GroupID, sessionHash, account.ID); err != nil {
+	if err := h.bindOpenAIStickySession(c, ctx, apiKey.GroupID, sessionHash, account.ID); err != nil {
 		reqLog.Warn("openai.websocket_bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
 
@@ -2198,7 +2209,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 			account = nextAccount
 			accountMaxConcurrency = nextAccountMaxConcurrency
-			if bindErr := h.gatewayService.BindStickySession(ctx, apiKey.GroupID, sessionHash, nextAccount.ID); bindErr != nil {
+			if bindErr := h.bindOpenAIStickySession(c, ctx, apiKey.GroupID, sessionHash, nextAccount.ID); bindErr != nil {
 				reqLog.Warn("openai.websocket_failover_bind_sticky_session_failed", zap.Int64("account_id", nextAccount.ID), zap.Error(bindErr))
 			}
 			h.gatewayService.RecordOpenAIAccountSwitch()
@@ -2713,7 +2724,12 @@ func closeOpenAIClientWS(conn *coderws.Conn, status coderws.StatusCode, reason s
 	}
 	reason = strings.TrimSpace(reason)
 	if len(reason) > 120 {
-		reason = reason[:120]
+		// Cut on a rune boundary: a close reason must be valid UTF-8.
+		cut := 120
+		for cut > 0 && !utf8.RuneStart(reason[cut]) {
+			cut--
+		}
+		reason = reason[:cut]
 	}
 	_ = conn.Close(status, reason)
 	_ = conn.CloseNow()

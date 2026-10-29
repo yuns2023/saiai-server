@@ -7,6 +7,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"go.uber.org/zap"
 )
 
 const (
@@ -32,7 +35,10 @@ type OpenAIAccountScheduleDecision struct {
 	Layer             string
 	StickyPreviousHit bool
 	StickySessionHit  bool
-	CandidateCount    int
+	// StickyUserFallbackHit marks a session sticky served by the user-scoped
+	// binding after the group binding was missing or ineligible.
+	StickyUserFallbackHit bool
+	CandidateCount        int
 	// TopK is a legacy name: it now reports the number of eligible
 	// candidates in the last load-balanced priority tier (no top-K cut).
 	TopK                int
@@ -46,6 +52,7 @@ type OpenAIAccountSchedulerMetricsSnapshot struct {
 	SelectTotal             int64
 	StickyPreviousHitTotal  int64
 	StickySessionHitTotal   int64
+	StickyUserFallbackTotal int64
 	LoadBalanceSelectTotal  int64
 	AccountSwitchTotal      int64
 	SchedulerLatencyMsTotal int64
@@ -65,6 +72,7 @@ type openAIAccountSchedulerMetrics struct {
 	selectTotal            atomic.Int64
 	stickyPreviousHitTotal atomic.Int64
 	stickySessionHitTotal  atomic.Int64
+	stickyUserFallbackHit  atomic.Int64
 	loadBalanceSelectTotal atomic.Int64
 	accountSwitchTotal     atomic.Int64
 	latencyMsTotal         atomic.Int64
@@ -83,6 +91,9 @@ func (m *openAIAccountSchedulerMetrics) recordSelect(decision OpenAIAccountSched
 	}
 	if decision.StickySessionHit {
 		m.stickySessionHitTotal.Add(1)
+	}
+	if decision.StickyUserFallbackHit {
+		m.stickyUserFallbackHit.Add(1)
 	}
 	if decision.Layer == openAIAccountScheduleLayerLoadBalance {
 		m.loadBalanceSelectTotal.Add(1)
@@ -145,19 +156,17 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			decision.SelectedAccountID = selection.Account.ID
 			decision.SelectedAccountType = selection.Account.Type
 			if req.SessionHash != "" {
-				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
+				_ = s.bindStickySession(ctx, req, selection.Account.ID)
 			}
 			return selection, decision, nil
 		}
 	}
 
-	selection, err := s.selectBySessionHash(ctx, req)
-	if err != nil {
-		return nil, decision, err
-	}
+	selection, userFallback := s.selectBySessionHash(ctx, req)
 	if selection != nil && selection.Account != nil {
 		decision.Layer = openAIAccountScheduleLayerSessionSticky
 		decision.StickySessionHit = true
+		decision.StickyUserFallbackHit = userFallback
 		decision.SelectedAccountID = selection.Account.ID
 		decision.SelectedAccountType = selection.Account.Type
 		return selection, decision, nil
@@ -178,63 +187,111 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	return selection, decision, nil
 }
 
+// selectBySessionHash tries the group binding first. When it is missing or no
+// longer eligible, a Responses request (user scope) tries the account the
+// user's session last used in any group: a Key moved to another group keeps its
+// upstream account and prompt cache when that account is also in the new
+// group. The second result reports a user-scoped hit.
 func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
-) (*AccountSelectionResult, error) {
+) (*AccountSelectionResult, bool) {
 	sessionHash := strings.TrimSpace(req.SessionHash)
 	if sessionHash == "" || s == nil || s.service == nil || s.service.cache == nil {
-		return nil, nil
+		return nil, false
 	}
 
 	accountID := req.StickyAccountID
 	if accountID <= 0 {
-		var err error
-		accountID, err = s.service.getStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		if err != nil || accountID <= 0 {
-			return nil, nil
+		if id, err := s.service.getStickySessionAccountID(ctx, req.GroupID, sessionHash); err == nil && id > 0 {
+			accountID = id
 		}
 	}
-	if accountID <= 0 {
-		return nil, nil
+	if accountID > 0 {
+		if selection := s.trySessionStickyAccount(ctx, req, sessionHash, accountID, false); selection != nil {
+			return selection, false
+		}
+	}
+	if !req.UseUserScope {
+		return nil, false
+	}
+	userAccountID := s.service.getUserStickySessionAccountID(ctx, req.UserID, sessionHash)
+	if userAccountID <= 0 || userAccountID == accountID {
+		return nil, false
+	}
+	selection := s.trySessionStickyAccount(ctx, req, sessionHash, userAccountID, true)
+	if selection != nil {
+		logger.FromContext(ctx).Info("openai.sticky_user_fallback_hit",
+			zap.Int64("group_id", derefGroupID(req.GroupID)),
+			zap.Int64("account_id", userAccountID),
+			zap.Int64("group_sticky_account_id", accountID),
+			zap.Bool("acquired", selection.Acquired))
+	}
+	return selection, selection != nil
+}
+
+// trySessionStickyAccount applies the sticky eligibility checks to accountID.
+// An ineligible group binding is deleted as before; the user-scoped binding is
+// only skipped, since it may still be valid in the user's other group. Like a
+// group sticky, a user-scoped hit is historical affinity for this session hash
+// and skips the soft new-session 5h admission of load balancing; rate limits,
+// status and every other check above still apply.
+func (s *defaultOpenAIAccountScheduler) trySessionStickyAccount(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+	sessionHash string,
+	accountID int64,
+	userScoped bool,
+) *AccountSelectionResult {
+	drop := func() {
+		if !userScoped {
+			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		}
 	}
 	if req.ExcludedIDs != nil {
 		if _, excluded := req.ExcludedIDs[accountID]; excluded {
-			return nil, nil
+			return nil
 		}
 	}
 
 	account, err := s.service.getSchedulableAccount(ctx, accountID)
 	if err != nil || account == nil {
-		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
+		drop()
+		return nil
 	}
 	if !s.service.isOpenAIAccountCurrentlyInGroup(ctx, accountID, req.GroupID) {
-		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
+		drop()
+		return nil
 	}
 	if req.RequiredAccountType != "" && account.Type != req.RequiredAccountType {
 		// A sticky from a different protocol is not an eligible reservation.
 		// Leave the other protocol's binding intact and continue selection.
-		return nil, nil
+		return nil
 	}
 	if shouldClearStickySession(account, req.RequestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
-		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
+		drop()
+		return nil
 	}
 	if !s.isAccountRequestCompatible(account, req) {
-		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
+		drop()
+		return nil
 	}
 
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 	if acquireErr == nil && result.Acquired {
-		_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL())
+		if userScoped {
+			_ = s.bindStickySession(ctx, req, accountID)
+		} else {
+			_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL())
+			if req.UseUserScope {
+				_ = s.service.setUserStickySessionAccountID(ctx, req.UserID, sessionHash, accountID, s.service.openAIWSSessionStickyTTL())
+			}
+		}
 		return &AccountSelectionResult{
 			Account:     account,
 			Acquired:    true,
 			ReleaseFunc: result.ReleaseFunc,
-		}, nil
+		}
 	}
 
 	cfg := s.service.schedulingConfig()
@@ -248,9 +305,18 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 				Timeout:        cfg.StickySessionWaitTimeout,
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
 			},
-		}, nil
+		}
 	}
-	return nil, nil
+	return nil
+}
+
+// bindStickySession records the selected account for the group session and,
+// for Responses requests, as the user's session preference.
+func (s *defaultOpenAIAccountScheduler) bindStickySession(ctx context.Context, req OpenAIAccountScheduleRequest, accountID int64) error {
+	if req.UseUserScope {
+		return s.service.BindStickySessionForUser(ctx, req.GroupID, req.UserID, req.SessionHash, accountID)
+	}
+	return s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, accountID)
 }
 
 func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
@@ -424,7 +490,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalancePriorityLayer(
 		}
 		if result != nil && result.Acquired {
 			if req.SessionHash != "" {
-				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, fresh.ID)
+				_ = s.bindStickySession(ctx, req, fresh.ID)
 			}
 			return &AccountSelectionResult{
 				Account:     fresh,
@@ -503,6 +569,7 @@ func (s *defaultOpenAIAccountScheduler) SnapshotMetrics() OpenAIAccountScheduler
 		SelectTotal:             selectTotal,
 		StickyPreviousHitTotal:  prevHit,
 		StickySessionHitTotal:   sessionHit,
+		StickyUserFallbackTotal: s.metrics.stickyUserFallbackHit.Load(),
 		LoadBalanceSelectTotal:  s.metrics.loadBalanceSelectTotal.Load(),
 		AccountSwitchTotal:      switchTotal,
 		SchedulerLatencyMsTotal: latencyTotal,

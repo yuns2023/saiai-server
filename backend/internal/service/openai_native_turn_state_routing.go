@@ -57,7 +57,7 @@ func (s *OpenAIGatewayService) SelectAccountForNativeCodexRequest(
 	result, acquireErr := s.tryAcquireAccountSlot(ctx, owner, account.Concurrency)
 	if acquireErr == nil && result.Acquired {
 		if strings.TrimSpace(sessionHash) != "" {
-			_ = s.BindStickySession(ctx, groupID, sessionHash, owner)
+			_ = s.BindStickySessionForUser(ctx, groupID, userID, sessionHash, owner)
 		}
 		return &AccountSelectionResult{Account: account, Acquired: true, ReleaseFunc: result.ReleaseFunc}, decision, nil
 	}

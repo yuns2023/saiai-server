@@ -160,59 +160,62 @@ type hostedUserRepo struct {
 	user *User
 }
 
-func (r *hostedUserRepo) GetByID(context.Context, int64) (*User, error) { return r.user, nil }
+func (r *hostedUserRepo) GetByID(context.Context, int64) (*User, error)               { return r.user, nil }
+func (r *hostedUserRepo) AddGroupToAllowedGroups(context.Context, int64, int64) error { return nil }
 
-func TestHostedUsageGroupSwitchDoesNotReinterpretOutstandingCounters(t *testing.T) {
+// Keys move freely between hosted and billed groups. Outstanding quota and
+// window usage is kept as recorded; only later requests use the new basis.
+func TestHostedUsageGroupSwitchKeepsOutstandingCounters(t *testing.T) {
+	hosted := hostedUsageGroup()
+	paid := &Group{ID: 4, Platform: PlatformOpenAI, RateMultiplier: 1}
+	start := time.Now()
 	for _, tc := range []struct {
-		name             string
-		quota, window    float64
-		expired, blocked bool
+		name     string
+		from, to *Group
 	}{
-		{"unused", 0, 0, false, false},
-		{"quota used", 1, 0, false, true},
-		{"active window", 0, 1, false, true},
-		{"expired window", 0, 1, true, false},
+		{"hosted to paid", hosted, paid},
+		{"paid to hosted", paid, hosted},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			old := hostedUsageGroup()
-			target := &Group{ID: 4, Platform: PlatformOpenAI, RateMultiplier: 1}
-			start := time.Now()
-			if tc.expired {
-				start = start.Add(-6 * time.Hour)
-			}
-			repo := &hostedKeyRepo{key: &APIKey{ID: 2, UserID: 1, GroupID: &old.ID, Group: old, QuotaUsed: tc.quota},
-				data: &APIKeyRateLimitData{Usage5h: tc.window, Window5hStart: &start}}
-			svc := &APIKeyService{apiKeyRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: target}, userRepo: &hostedUserRepo{user: &User{ID: 1}}}
-			_, err := svc.Update(context.Background(), 2, 1, UpdateAPIKeyRequest{GroupID: &target.ID})
-			if tc.blocked {
-				require.ErrorContains(t, err, "Reset Key quota")
-				require.False(t, repo.updated)
-			} else {
-				require.NoError(t, err)
-				require.True(t, repo.updated)
-			}
+			key := &APIKey{ID: 2, UserID: 1, GroupID: &tc.from.ID, Group: tc.from, QuotaUsed: 5,
+				Usage5h: 3, Usage1d: 4, Usage7d: 5, Window5hStart: &start, Window1dStart: &start, Window7dStart: &start}
+			repo := &hostedKeyRepo{key: key, data: &APIKeyRateLimitData{Usage5h: 3, Window5hStart: &start}}
+			svc := &APIKeyService{apiKeyRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: tc.to}, userRepo: &hostedUserRepo{user: &User{ID: 1, AllowedGroups: []int64{hosted.ID}}}}
+			got, err := svc.Update(context.Background(), 2, 1, UpdateAPIKeyRequest{GroupID: &tc.to.ID})
+			require.NoError(t, err)
+			require.True(t, repo.updated)
+			require.Equal(t, tc.to.ID, *got.GroupID)
+			require.Equal(t, 5.0, got.QuotaUsed)
+			require.Equal(t, []float64{3, 4, 5}, []float64{got.Usage5h, got.Usage1d, got.Usage7d})
+			require.Equal(t, []*time.Time{&start, &start, &start}, []*time.Time{got.Window5hStart, got.Window1dStart, got.Window7dStart})
 		})
 	}
 }
 
-func TestHostedUsageAdminRebindingAndUnbindingKeepMeteringGuard(t *testing.T) {
+func TestHostedUsageAdminRebindingAndUnbindingKeepCounters(t *testing.T) {
 	for _, targetID := range []int64{0, 4} {
 		t.Run(fmt.Sprintf("target=%d", targetID), func(t *testing.T) {
 			g := hostedUsageGroup()
 			repo := &hostedKeyRepo{key: &APIKey{ID: 2, GroupID: &g.ID, Group: g, QuotaUsed: 1}}
 			svc := &adminServiceImpl{apiKeyRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: &Group{ID: 4, Status: StatusActive}}}
-			_, err := svc.AdminUpdateAPIKeyGroupID(context.Background(), 2, &targetID)
-			require.ErrorContains(t, err, "Reset Key quota")
-			require.False(t, repo.updated)
+			got, err := svc.AdminUpdateAPIKeyGroupID(context.Background(), 2, &targetID)
+			require.NoError(t, err)
+			require.True(t, repo.updated)
+			require.Equal(t, 1.0, got.APIKey.QuotaUsed)
+			if targetID == 0 {
+				require.Nil(t, got.APIKey.GroupID)
+			} else {
+				require.Equal(t, targetID, *got.APIKey.GroupID)
+			}
 		})
 	}
 	g := hostedUsageGroup()
 	g.Status = StatusActive
 	repo := &hostedKeyRepo{key: &APIKey{ID: 2, QuotaUsed: 1}}
-	svc := &adminServiceImpl{apiKeyRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: g}}
+	svc := &adminServiceImpl{apiKeyRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: g}, userRepo: &hostedUserRepo{}}
 	_, err := svc.AdminUpdateAPIKeyGroupID(context.Background(), 2, &g.ID)
-	require.ErrorContains(t, err, "Reset Key quota", "an unbound Key is also a billed-to-hosted transition")
-	require.False(t, repo.updated)
+	require.NoError(t, err, "binding an unbound Key to a hosted group")
+	require.True(t, repo.updated)
 }
 
 type hostedGroupRepo struct {
@@ -227,13 +230,13 @@ func (r *hostedGroupRepo) GetByIDLite(_ context.Context, id int64) (*Group, erro
 	return r.groups[id], nil
 }
 
-func TestHostedUsageBulkReplacementRequiresIndividualTransitions(t *testing.T) {
+func TestHostedUsageBulkReplacementPassesValidationAcrossMeteringBases(t *testing.T) {
 	hosted, paid := hostedUsageGroup(), &Group{ID: 4, IsExclusive: true, Status: StatusActive}
 	hosted.Status = StatusActive
 	svc := &adminServiceImpl{groupRepo: &hostedGroupRepo{groups: map[int64]*Group{hosted.ID: hosted, paid.ID: paid}}}
 	for _, pair := range [][2]int64{{hosted.ID, paid.ID}, {paid.ID, hosted.ID}} {
 		_, err := svc.ReplaceUserGroup(context.Background(), 1, pair[0], pair[1])
-		require.ErrorContains(t, err, "Switch Keys individually", "reject before any entitlement or transaction mutation")
+		require.ErrorContains(t, err, "entClient is nil", "no metering-basis rejection before the transaction")
 	}
 }
 

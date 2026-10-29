@@ -607,9 +607,6 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 			return nil, ErrGroupNotAllowed
 		}
 
-		if err := validateAPIKeyMeteringBasisChange(ctx, s.apiKeyRepo, apiKey, group); err != nil {
-			return nil, err
-		}
 		apiKey.GroupID = req.GroupID
 	}
 
