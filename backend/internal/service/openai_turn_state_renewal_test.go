@@ -40,7 +40,7 @@ func TestOpenAINativeTurnStateSuccessSlidingExpiry(t *testing.T) {
 	svc.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 120
 	account := auditOAuthPolicyAccount()
 	svc.bindOpenAINativeTurnState(account, 55, "mock_session", "MOCK_STATE")
-	require.Greater(t, time.Until(turnStateDeadline(svc, 55, "MOCK_STATE")), 59*time.Minute)
+	require.Greater(t, time.Until(turnStateDeadline(svc, 55, "MOCK_STATE")), 23*time.Hour)
 	require.Equal(t, 2*time.Minute, svc.openAIWSSessionStickyTTL())
 	headers := http.Header{}
 	headers.Set(openAIWSTurnStateHeader, "MOCK_STATE")
@@ -51,7 +51,7 @@ func TestOpenAINativeTurnStateSuccessSlidingExpiry(t *testing.T) {
 		require.NoError(t, svc.validateOpenAINativeTurnState(context.Background(), account, 55, "mock_session", headers))
 		require.Equal(t, before, turnStateDeadline(svc, 55, "MOCK_STATE"))
 		svc.renewOpenAINativeTurnStateAfterSuccess(context.Background(), account, 55, keys)
-		require.Greater(t, time.Until(turnStateDeadline(svc, 55, "MOCK_STATE")), 59*time.Minute)
+		require.Greater(t, time.Until(turnStateDeadline(svc, 55, "MOCK_STATE")), 23*time.Hour)
 	}
 	before := ageTurnStateOwner(svc, 55, "MOCK_STATE", -time.Second)
 	svc.renewOpenAINativeTurnStateAfterSuccess(context.Background(), account, 55, keys)
@@ -104,7 +104,7 @@ func TestOpenAINativeTurnStateHTTPRenewsOnlySuccess(t *testing.T) {
 			require.Equal(t, 1, upstream.callCount)
 			for state, deadline := range before {
 				if tc.renew {
-					require.Greater(t, time.Until(turnStateDeadline(svc, 0, state)), 59*time.Minute)
+					require.Greater(t, time.Until(turnStateDeadline(svc, 0, state)), 23*time.Hour)
 				} else {
 					require.Equal(t, deadline, turnStateDeadline(svc, 0, state))
 				}
@@ -161,7 +161,7 @@ func TestOpenAINativeTurnStateSharedRenewal(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	require.Greater(t, time.Until(cache.deadline), 59*time.Minute)
+	require.Greater(t, time.Until(cache.deadline), 23*time.Hour)
 	require.NoError(t, second.validateOpenAINativeTurnState(context.Background(), account, 55, "", headers))
 	before := turnStateDeadline(first, 55, "MOCK_STATE")
 	cache.fail = true
@@ -231,7 +231,7 @@ func TestOpenAINativeTurnStateWSRenewsOnlySuccessfulTurn(t *testing.T) {
 			}
 			for state, deadline := range before {
 				if event == "response.completed" && state != "MOCK_UNRELATED_STATE" {
-					require.Greater(t, time.Until(turnStateDeadline(svc, 0, state)), 59*time.Minute)
+					require.Greater(t, time.Until(turnStateDeadline(svc, 0, state)), 23*time.Hour)
 				} else {
 					require.Equal(t, deadline, turnStateDeadline(svc, 0, state))
 				}

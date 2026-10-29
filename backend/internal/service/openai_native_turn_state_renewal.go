@@ -12,7 +12,9 @@ import (
 
 // Ownership is independent of scheduler stickiness. Only provider observations
 // and successful uses renew it; validation and failed attempts never do.
-const openAINativeTurnStateOwnershipTTL = time.Hour
+// A turn can idle for hours on a long tool run before its next request; the
+// owner must still be known then, or the request is rejected with a 409.
+const openAINativeTurnStateOwnershipTTL = 24 * time.Hour
 const openAINativeTurnStateRenewalInterval = time.Minute
 
 // Implemented by Redis with an atomic owner comparison and conditional expiry.

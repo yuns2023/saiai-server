@@ -79,7 +79,7 @@ func TestOpenAINativeTurnStateContinuousUseDoesNotRenewOwnership(t *testing.T) {
 	store := svc.getOpenAIWSStateStore().(*defaultOpenAIWSStateStore)
 	key := openAITurnStateAccountKey(55, state)
 	initial := store.responseToAccount[key].expiresAt
-	require.InDelta(t, time.Hour.Seconds(), time.Until(initial).Seconds(), 2)
+	require.InDelta(t, (24 * time.Hour).Seconds(), time.Until(initial).Seconds(), 2)
 	headers := make(http.Header)
 	headers.Set(openAIWSTurnStateHeader, state)
 	for range 3 {
