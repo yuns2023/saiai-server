@@ -5,6 +5,7 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -136,4 +137,64 @@ func TestSmartSwitchDecodedBodyLimitMatchesRequestBodyLimit(t *testing.T) {
 		require.False(t, ok)
 		require.Contains(t, recorder.Body.String(), tc.want)
 	}
+}
+
+func TestSmartSwitchExhaustedUsesBusinessCodes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		reasons []string
+		status  int
+		code    string
+	}{
+		{[]string{"subscription_limit_or_expiry", "insufficient_balance"}, http.StatusForbidden, "INSUFFICIENT_BALANCE"},
+		{[]string{"subscription_limit_or_expiry", "payg_budget_exhausted"}, http.StatusTooManyRequests, "USAGE_LIMIT_EXCEEDED"},
+		{[]string{"subscription_unavailable", "payg_budget_exhausted"}, http.StatusForbidden, "USAGE_LIMIT_EXCEEDED"},
+		{[]string{"group_unavailable", "insufficient_balance"}, http.StatusServiceUnavailable, "SMART_SWITCH_UNAVAILABLE"},
+	} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		abortSmartSwitchExhausted(c, &service.SmartSwitchExhaustedError{Reasons: tc.reasons})
+		require.True(t, c.IsAborted())
+		require.Equal(t, tc.status, recorder.Code, tc.reasons)
+		require.Contains(t, recorder.Body.String(), `"code":"`+tc.code+`"`)
+		require.Contains(t, recorder.Body.String(), strings.Join(tc.reasons, ", "))
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	abortSmartSwitchExhausted(c, &service.SmartSwitchExhaustedError{Reasons: []string{"subscription_unavailable", "payg_budget_exhausted", "subscription_unavailable"}})
+	var body ErrorResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+	require.Equal(t, smartSwitchLimitedMessage+" (subscription_unavailable, payg_budget_exhausted)", body.Message)
+}
+
+// Production case: subscription window spent and no balance for the PAYG group.
+func TestSmartSwitchAuthReportsInsufficientBalance(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now()
+	limit := 1.0
+	original := &service.Group{ID: 1, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true, SubscriptionType: service.SubscriptionTypeSubscription, WeeklyLimitUSD: &limit}
+	paid := &service.Group{ID: 2, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	user := &service.User{ID: 1, Status: service.StatusActive, Balance: 0}
+	key := &service.APIKey{ID: 1, UserID: 1, Key: "TEST_ONLY", Status: service.StatusActive, User: user, Group: paid, GroupID: &paid.ID, SmartSwitch: &domain.KeySmartSwitchPolicy{Enabled: true, GroupIDs: []int64{2, 1}, PaygConfirmed: true}}
+	sub := &service.UserSubscription{ID: 1, UserID: 1, GroupID: 1, Status: service.SubscriptionStatusActive, ExpiresAt: now.Add(time.Hour), WeeklyUsageUSD: 1, DailyWindowStart: &now, WeeklyWindowStart: &now, MonthlyWindowStart: &now, FiveHourWindowStart: &now}
+	subs := &stubUserSubscriptionRepo{getActive: func(context.Context, int64, int64) (*service.UserSubscription, error) {
+		copy := *sub
+		return &copy, nil
+	}}
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	cfg.Gateway.MaxBodySize = 1 << 20
+	keys := service.NewAPIKeyService(smartAuthKeyRepo{key: key}, smartAuthUserRepo{user: user}, smartAuthGroupRepo{groups: map[int64]*service.Group{1: original, 2: paid}}, subs, nil, nil, cfg)
+	subsvc := service.NewSubscriptionService(nil, subs, nil, nil, cfg)
+	t.Cleanup(subsvc.Stop)
+	router := gin.New()
+	router.POST("/v1/messages", apiKeyAuthWithSubscription(keys, subsvc, nil, cfg), func(c *gin.Context) {
+		t.Error("request without balance or subscription quota reached the handler")
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet","messages":[]}`))
+	request.Header.Set("x-api-key", "TEST_ONLY")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"code":"INSUFFICIENT_BALANCE"`)
+	require.Contains(t, response.Body.String(), "insufficient_balance, subscription_limit_or_expiry")
 }

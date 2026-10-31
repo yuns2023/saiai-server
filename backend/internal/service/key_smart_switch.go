@@ -249,7 +249,61 @@ func (s *APIKeyService) SelectSmartSwitchGroup(ctx context.Context, key *APIKey,
 		copy.User = user
 		return &SmartSwitchSelection{Key: &copy, Subscription: sub, Skipped: skipped}, nil
 	}
-	return nil, ErrSmartSwitchUnavailable
+	return nil, &SmartSwitchExhaustedError{Reasons: skipped}
+}
+
+// smartSwitchBusinessReasons are skips caused by the user's own balance, Key
+// budget or subscription, which the non-switching path reports as business limits.
+var smartSwitchBusinessReasons = map[string]bool{
+	"insufficient_balance":         true,
+	"payg_budget_exhausted":        true,
+	"subscription_unavailable":     true,
+	"subscription_limit_or_expiry": true,
+}
+
+// SmartSwitchExhaustedError reports why no policy group qualified. Reasons are
+// the stable skip codes in policy order. It matches ErrSmartSwitchUnavailable.
+type SmartSwitchExhaustedError struct {
+	Reasons []string
+}
+
+func (e *SmartSwitchExhaustedError) Error() string {
+	return ErrSmartSwitchUnavailable.Message + ": " + strings.Join(e.Reasons, ",")
+}
+
+func (e *SmartSwitchExhaustedError) Unwrap() error { return ErrSmartSwitchUnavailable }
+
+// BusinessLimited is true only when every group was skipped for a business
+// reason. A mix with platform or configuration reasons stays a service error.
+func (e *SmartSwitchExhaustedError) BusinessLimited() bool {
+	for _, reason := range e.Reasons {
+		if !smartSwitchBusinessReasons[reason] {
+			return false
+		}
+	}
+	return len(e.Reasons) > 0
+}
+
+func (e *SmartSwitchExhaustedError) Has(reason string) bool {
+	for _, r := range e.Reasons {
+		if r == reason {
+			return true
+		}
+	}
+	return false
+}
+
+// UniqueReasons returns the reasons without duplicates, keeping their order.
+func (e *SmartSwitchExhaustedError) UniqueReasons() []string {
+	seen := make(map[string]bool, len(e.Reasons))
+	unique := make([]string, 0, len(e.Reasons))
+	for _, reason := range e.Reasons {
+		if !seen[reason] {
+			seen[reason] = true
+			unique = append(unique, reason)
+		}
+	}
+	return unique
 }
 
 func smartSwitchSubscriptionUnavailable(err error) bool {
