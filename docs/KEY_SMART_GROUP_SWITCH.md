@@ -123,6 +123,15 @@ Claude/OpenAI/Google 平台，不自动替换请求模型。模型映射不得�
 | 上游明确拒绝且确认可重试 | 先按现有组内规则处理，再考虑下一组 |
 | 超时且执行结果不明、响应已提交或已输出 | 不跨组重放 |
 
+请求前选组没有任何候选可用时，响应附带去重后的跳过原因代码。所有候选都因用户
+自身原因（`insufficient_balance`、`payg_budget_exhausted`、`subscription_unavailable`、
+`subscription_limit_or_expiry`）被跳过时，沿用不切换路径的业务错误码，Ops 记为业务限制、
+不计入 SLA：含余额不足返回 403 `INSUFFICIENT_BALANCE`；否则含 `subscription_limit_or_expiry` 返回 429
+`USAGE_LIMIT_EXCEEDED`（该历史原因码同时包含触限、到期和暂停，暂未细分）；其余返回 403
+`USAGE_LIMIT_EXCEEDED`。只要混有平台或配置原因
+（如 `group_unavailable`、`model_unavailable`、`group_inactive`），仍返回 503
+`SMART_SWITCH_UNAVAILABLE`。组内无可用账号后再推进候选失败时，仍按选号失败处理。
+
 原绑定分组在关闭智能切换时保持现有语义；开启时它只确定服务归属和关闭后的
 回退配置，不能因为该组过期/停用而在候选评估前阻断所有合法候选。
 原分组被删除导致服务归属无法确定时停止并要求修正配置，不能猜测目标平台。

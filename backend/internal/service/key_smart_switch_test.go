@@ -112,6 +112,10 @@ func TestSmartSwitchGlobalQuotaAndPaidBudget(t *testing.T) {
 	key.SmartSwitch.PaygBudgetUSD = &zero
 	_, err = svc.SelectSmartSwitchGroup(context.Background(), key, "", nil, &SubscriptionService{})
 	require.ErrorIs(t, err, ErrSmartSwitchUnavailable)
+	var exhausted *SmartSwitchExhaustedError
+	require.ErrorAs(t, err, &exhausted)
+	require.Equal(t, []string{"subscription_limit_or_expiry", "payg_budget_exhausted"}, exhausted.Reasons)
+	require.True(t, exhausted.BusinessLimited())
 	subs.sub.DailyUsageUSD = 0
 	result, err := svc.SelectSmartSwitchGroup(context.Background(), key, "", nil, &SubscriptionService{})
 	require.NoError(t, err)
@@ -127,6 +131,63 @@ func TestSmartSwitchUnavailableGroupAndPermissionRevocation(t *testing.T) {
 	group.IsExclusive = true
 	_, err = svc.SelectSmartSwitchGroup(context.Background(), key, "", map[int64]bool{1: true}, &SubscriptionService{})
 	require.ErrorIs(t, err, ErrSmartSwitchUnavailable)
+}
+
+func TestSmartSwitchExhaustedReasons(t *testing.T) {
+	selectErr := func(t *testing.T, mutate func(*APIKeyService, *APIKey, *smartSubRepo), excluded map[int64]bool) *SmartSwitchExhaustedError {
+		svc, key, subs := smartFixture()
+		mutate(svc, key, subs)
+		_, err := svc.SelectSmartSwitchGroup(context.Background(), key, "claude-sonnet", excluded, &SubscriptionService{})
+		require.ErrorIs(t, err, ErrSmartSwitchUnavailable)
+		var exhausted *SmartSwitchExhaustedError
+		require.ErrorAs(t, err, &exhausted)
+		return exhausted
+	}
+	t.Run("subscription_limit_and_no_balance", func(t *testing.T) {
+		exhausted := selectErr(t, func(_ *APIKeyService, key *APIKey, subs *smartSubRepo) {
+			subs.sub.DailyUsageUSD = 10
+			key.User.Balance = 0
+		}, nil)
+		require.Equal(t, []string{"subscription_limit_or_expiry", "insufficient_balance"}, exhausted.Reasons)
+		require.True(t, exhausted.BusinessLimited())
+		require.True(t, exhausted.Has("insufficient_balance"))
+	})
+	t.Run("missing_subscription_is_business", func(t *testing.T) {
+		exhausted := selectErr(t, func(_ *APIKeyService, key *APIKey, subs *smartSubRepo) {
+			subs.err = ErrSubscriptionNotFound
+			key.User.Balance = 0
+		}, nil)
+		require.Equal(t, []string{"subscription_unavailable", "insufficient_balance"}, exhausted.Reasons)
+		require.True(t, exhausted.BusinessLimited())
+	})
+	t.Run("excluded_group_keeps_service_error", func(t *testing.T) {
+		exhausted := selectErr(t, func(_ *APIKeyService, key *APIKey, _ *smartSubRepo) {
+			key.User.Balance = 0
+		}, map[int64]bool{1: true})
+		require.Equal(t, []string{"group_unavailable", "insufficient_balance"}, exhausted.Reasons)
+		require.False(t, exhausted.BusinessLimited())
+	})
+	t.Run("blocked_model_keeps_service_error", func(t *testing.T) {
+		exhausted := selectErr(t, func(svc *APIKeyService, key *APIKey, _ *smartSubRepo) {
+			svc.groupRepo.(smartGroupRepo).groups[1].BlockedModelPatterns = []string{"claude-*"}
+			key.User.Balance = 0
+		}, nil)
+		require.Equal(t, []string{"model_unavailable", "insufficient_balance"}, exhausted.Reasons)
+		require.False(t, exhausted.BusinessLimited())
+	})
+	t.Run("dependency_error_after_business_skip_is_returned", func(t *testing.T) {
+		svc, key, subs := smartFixture()
+		key.SmartSwitch.GroupIDs = []int64{2, 1}
+		key.User.Balance = 0
+		subs.err = errors.New("database unavailable")
+		_, err := svc.SelectSmartSwitchGroup(context.Background(), key, "claude-sonnet", nil, &SubscriptionService{})
+		require.ErrorIs(t, err, subs.err)
+		var exhausted *SmartSwitchExhaustedError
+		require.False(t, errors.As(err, &exhausted))
+	})
+	duplicate := &SmartSwitchExhaustedError{Reasons: []string{"insufficient_balance", "subscription_unavailable", "insufficient_balance"}}
+	require.Equal(t, []string{"insufficient_balance", "subscription_unavailable"}, duplicate.UniqueReasons())
+	require.False(t, (&SmartSwitchExhaustedError{}).BusinessLimited())
 }
 
 func TestSmartSwitchPolicyValidation(t *testing.T) {

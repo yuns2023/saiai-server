@@ -113,7 +113,10 @@ func applySmartSwitch(c *gin.Context, key *service.APIKey, keys *service.APIKeyS
 			AbortWithError(c, 429, "API_KEY_RATE_LIMIT_EXCEEDED", "API key usage limit exceeded")
 			return nil, false
 		}
-		if errors.Is(err, service.ErrSmartSwitchUnavailable) {
+		var exhausted *service.SmartSwitchExhaustedError
+		if errors.As(err, &exhausted) {
+			abortSmartSwitchExhausted(c, exhausted)
+		} else if errors.Is(err, service.ErrSmartSwitchUnavailable) {
 			AbortWithError(c, 503, "SMART_SWITCH_UNAVAILABLE", "No eligible group in the smart switching policy")
 		} else {
 			AbortWithError(c, 503, "SMART_SWITCH_CHECK_FAILED", "Unable to validate smart switching eligibility")
@@ -126,6 +129,30 @@ func applySmartSwitch(c *gin.Context, key *service.APIKey, keys *service.APIKeyS
 	c.Request = c.Request.WithContext(service.WithSmartSwitchContext(c.Request.Context()))
 	SetSmartSwitchSelection(c, selection)
 	return selection.Key, true
+}
+
+// abortSmartSwitchExhausted uses the non-switching path's business codes when
+// every group was skipped for balance, budget or subscription, so Ops keeps
+// them out of the SLA and the user sees what to fix. The skip codes are stable
+// and contain no upstream data.
+const smartSwitchLimitedMessage = "Every group in the smart switching policy is blocked by a usage limit, the Key budget or the subscription status"
+
+func abortSmartSwitchExhausted(c *gin.Context, exhausted *service.SmartSwitchExhaustedError) {
+	reasons := " (" + strings.Join(exhausted.UniqueReasons(), ", ") + ")"
+	switch {
+	case !exhausted.BusinessLimited():
+		AbortWithError(c, 503, "SMART_SWITCH_UNAVAILABLE", "No eligible group in the smart switching policy"+reasons)
+	case exhausted.Has("insufficient_balance"):
+		// Topping up is the action that can unblock a pay-as-you-go group.
+		AbortWithError(c, 403, "INSUFFICIENT_BALANCE", "Insufficient account balance; no other group in the smart switching policy is available"+reasons)
+	case exhausted.Has("subscription_limit_or_expiry"):
+		// Matches the non-switching subscription limit. This legacy reason also
+		// covers an expired or suspended subscription.
+		AbortWithError(c, 429, "USAGE_LIMIT_EXCEEDED", smartSwitchLimitedMessage+reasons)
+	default:
+		// The Key budget or a missing/expired subscription does not recover by retrying.
+		AbortWithError(c, 403, "USAGE_LIMIT_EXCEEDED", smartSwitchLimitedMessage+reasons)
+	}
 }
 
 type SmartSwitchNext func(map[int64]bool) (*service.SmartSwitchSelection, error)
