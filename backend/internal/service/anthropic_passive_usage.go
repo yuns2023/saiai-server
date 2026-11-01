@@ -95,7 +95,8 @@ func sampleAnthropicPassiveUsageHeaders(headers http.Header, now time.Time) anth
 
 	// 5h utilization is only meaningful together with the 5h window that
 	// UpdateSessionWindow derives from 5h-status/5h-reset.
-	fiveHourStatus := strings.ToLower(strings.TrimSpace(headers.Get(anthropicFiveHourHeaderPrefix + "status")))
+	// Same exact value UpdateSessionWindow uses for its window and rate-limit logic.
+	fiveHourStatus := headers.Get(anthropicFiveHourHeaderPrefix + "status")
 	if _, known := anthropicKnownWindowStatuses[fiveHourStatus]; known {
 		sample.hasValidFiveHour = true
 		if util, ok := parseAnthropicUtilizationHeader(headers.Get(anthropicFiveHourHeaderPrefix + "utilization")); ok {
@@ -174,9 +175,8 @@ func parseAnthropicUtilizationHeader(raw string) (float64, bool) {
 // applyAnthropicFiveHourAbsence records whether the account still reports a
 // 5h window. Only a success response with a valid shared 7d window and no 5h
 // header at all marks it absent; partial or aggregate-only responses decide
-// nothing. A valid 5h status always writes false, independent of the request's
-// account snapshot, so a concurrent Ultra-shaped response cannot leave a
-// stale true behind.
+// nothing. A valid 5h status always writes false instead of consulting the
+// request's (possibly stale) account snapshot; the last write still wins.
 func applyAnthropicFiveHourAbsence(account *Account, sample anthropicPassiveUsageSample) {
 	if account == nil || !account.IsAnthropicOAuthOrSetupToken() || sample.updates == nil {
 		return
