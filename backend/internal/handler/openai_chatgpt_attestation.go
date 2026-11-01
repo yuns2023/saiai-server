@@ -59,7 +59,7 @@ func (h *OpenAIGatewayHandler) ChatGPTAttestationChallenge(c *gin.Context) {
 		// The integrity GET has no conversation ID. When this scope has exactly
 		// one live conversation account, retain it after the short upload lease
 		// expires instead of scheduling its next challenge onto another account.
-		candidateID, ok := h.chatGPTAffinityCandidate(c, key.GroupID, scope)
+		candidateID, ok := h.chatGPTAffinityCandidate(c, key.GroupID, scope, false)
 		if !ok {
 			return
 		}
@@ -121,8 +121,10 @@ func (h *OpenAIGatewayHandler) ChatGPTAttestationChallenge(c *gin.Context) {
 
 // chatGPTAffinityCandidate picks the account for a new device affinity: the
 // scope's only live conversation account when usable, else a scheduled one.
+// requireAvailable also requires that account to be available right now, so a
+// device whose recent chats all used a rate-limited account moves on.
 // Errors are answered here (ok=false).
-func (h *OpenAIGatewayHandler) chatGPTAffinityCandidate(c *gin.Context, groupID *int64, scope service.ChatGPTTurnScope) (int64, bool) {
+func (h *OpenAIGatewayHandler) chatGPTAffinityCandidate(c *gin.Context, groupID *int64, scope service.ChatGPTTurnScope, requireAvailable bool) (int64, bool) {
 	turns, err := h.gatewayService.ChatGPTTurnCache()
 	var accounts []int64
 	if err == nil {
@@ -133,7 +135,12 @@ func (h *OpenAIGatewayHandler) chatGPTAffinityCandidate(c *gin.Context, groupID 
 		return 0, false
 	}
 	if len(accounts) == 1 && h.chatGPTAffinityOwnerUsable(c, groupID, accounts[0]) {
-		return accounts[0], true
+		if !requireAvailable {
+			return accounts[0], true
+		}
+		if _, err := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), groupID, accounts[0]); err == nil {
+			return accounts[0], true
+		}
 	}
 	selection, _, selectErr := h.gatewayService.SelectChatGPTOAuthAccount(c.Request.Context(), groupID, h.gatewayService.GenerateSessionHash(c, nil), "")
 	if selectErr != nil || selection == nil || selection.Account == nil {

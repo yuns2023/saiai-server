@@ -44,7 +44,7 @@ func (h *OpenAIGatewayHandler) chatGPTSentinelAffinityOwner(c *gin.Context, grou
 		}
 	}
 	if err == nil && owner == 0 {
-		candidateID, ok := h.chatGPTAffinityCandidate(c, groupID, scope)
+		candidateID, ok := h.chatGPTAffinityCandidate(c, groupID, scope, true)
 		if !ok {
 			return 0, false
 		}

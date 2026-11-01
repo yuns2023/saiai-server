@@ -276,6 +276,44 @@ func TestChatGPTSentinelCoolingAffinity(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	})
 
+	t.Run("the only live conversation account cooling down is skipped", func(t *testing.T) {
+		f := newChatGPTControlFixture(t)
+		memory := f.cache.ChatGPTTurnCache
+		uploads, ok := memory.(service.ChatGPTUploadCache)
+		require.True(t, ok)
+		f.cache.ChatGPTTurnCache = &chatGPTBoundUpdatesCache{ChatGPTTurnCache: memory, ChatGPTUploadCache: uploads, accounts: []int64{249}}
+		for _, cooling := range []bool{false, true} {
+			if cooling {
+				reset := time.Now().Add(10 * time.Minute)
+				f.accounts.accounts[1].RateLimitResetAt = &reset
+			}
+			f.providerAccounts = nil
+			w, _ := f.run("POST", service.ChatGPTSentinelPreparePath, chatGPTSentinelBody, "")
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			if cooling {
+				require.Equal(t, []string{"TEST_ONLY_ACCOUNT"}, f.providerAccounts)
+				require.EqualValues(t, 248, f.deviceAffinity())
+			} else {
+				require.Equal(t, []string{chatGPTControlOtherAccount}, f.providerAccounts, "an available live conversation account is kept")
+				require.EqualValues(t, 249, f.deviceAffinity())
+			}
+		}
+	})
+
+	t.Run("a first claim skips the cooling live conversation account", func(t *testing.T) {
+		f := newChatGPTControlFixture(t)
+		memory := f.cache.ChatGPTTurnCache
+		uploads, ok := memory.(service.ChatGPTUploadCache)
+		require.True(t, ok)
+		f.cache.ChatGPTTurnCache = &chatGPTBoundUpdatesCache{ChatGPTTurnCache: memory, ChatGPTUploadCache: uploads, accounts: []int64{249}}
+		reset := time.Now().Add(10 * time.Minute)
+		f.accounts.accounts[1].RateLimitResetAt = &reset
+		w, _ := f.run("POST", service.ChatGPTSentinelPreparePath, chatGPTSentinelBody, "")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, []string{"TEST_ONLY_ACCOUNT"}, f.providerAccounts)
+		require.EqualValues(t, 248, f.deviceAffinity())
+	})
+
 	t.Run("a conversation on a cooling account reports the cooldown", func(t *testing.T) {
 		f := newChatGPTControlFixture(t)
 		f.bindConversation(f.scope, 248)
