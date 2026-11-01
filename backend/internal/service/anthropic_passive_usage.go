@@ -59,11 +59,28 @@ type anthropicPassiveUsageSample struct {
 	hasFiveHourUtilization     bool
 	// hasFiveHourHeader is true when any 5h-* header is present, valid or not.
 	hasFiveHourHeader bool
-	// hasValidFiveHour is true when a 5h status or utilization is usable.
+	// hasValidFiveHour is true when 5h-status carries a known value.
 	hasValidFiveHour  bool
 	hasValidSevenDay  bool
 	unknownWindows    []string
 	hasUnifiedHeaders bool
+}
+
+// hasUsageData reports whether any utilization or reset value was sampled, as
+// opposed to bookkeeping updates such as clearing a stale value.
+func (s anthropicPassiveUsageSample) hasUsageData() bool {
+	for key, value := range s.updates {
+		if value != nil && key != anthropicFiveHourAbsentExtraKey {
+			return true
+		}
+	}
+	return false
+}
+
+var anthropicKnownWindowStatuses = map[string]struct{}{
+	"allowed":         {},
+	"allowed_warning": {},
+	"rejected":        {},
 }
 
 // sampleAnthropicPassiveUsageHeaders reads the usage windows from a response
@@ -76,14 +93,16 @@ func sampleAnthropicPassiveUsageHeaders(headers http.Header, now time.Time) anth
 		return sample
 	}
 
-	if util, ok := parseAnthropicUtilizationHeader(headers.Get(anthropicFiveHourHeaderPrefix + "utilization")); ok {
-		sample.updates["session_window_utilization"] = util
-		sample.fiveHourUtilizationPercent = normalizeUtilizationPercent(util)
-		sample.hasFiveHourUtilization = true
+	// 5h utilization is only meaningful together with the 5h window that
+	// UpdateSessionWindow derives from 5h-status/5h-reset.
+	fiveHourStatus := strings.ToLower(strings.TrimSpace(headers.Get(anthropicFiveHourHeaderPrefix + "status")))
+	if _, known := anthropicKnownWindowStatuses[fiveHourStatus]; known {
 		sample.hasValidFiveHour = true
-	}
-	if strings.TrimSpace(headers.Get(anthropicFiveHourHeaderPrefix+"status")) != "" {
-		sample.hasValidFiveHour = true
+		if util, ok := parseAnthropicUtilizationHeader(headers.Get(anthropicFiveHourHeaderPrefix + "utilization")); ok {
+			sample.updates["session_window_utilization"] = util
+			sample.fiveHourUtilizationPercent = normalizeUtilizationPercent(util)
+			sample.hasFiveHourUtilization = true
+		}
 	}
 
 	for _, window := range []struct{ header, key string }{
@@ -155,16 +174,16 @@ func parseAnthropicUtilizationHeader(raw string) (float64, bool) {
 // applyAnthropicFiveHourAbsence records whether the account still reports a
 // 5h window. Only a success response with a valid shared 7d window and no 5h
 // header at all marks it absent; partial or aggregate-only responses decide
-// nothing.
+// nothing. A valid 5h status always writes false, independent of the request's
+// account snapshot, so a concurrent Ultra-shaped response cannot leave a
+// stale true behind.
 func applyAnthropicFiveHourAbsence(account *Account, sample anthropicPassiveUsageSample) {
 	if account == nil || !account.IsAnthropicOAuthOrSetupToken() || sample.updates == nil {
 		return
 	}
 	switch {
 	case sample.hasValidFiveHour:
-		if account.IsAnthropicFiveHourWindowAbsent() {
-			sample.updates[anthropicFiveHourAbsentExtraKey] = false
-		}
+		sample.updates[anthropicFiveHourAbsentExtraKey] = false
 	case !sample.hasFiveHourHeader && sample.hasValidSevenDay:
 		sample.updates[anthropicFiveHourAbsentExtraKey] = true
 		// A stale 5h utilization plus a future window end would otherwise keep
@@ -197,7 +216,7 @@ var anthropicRateLimitHeaderDiag = &anthropicHeaderDiagnostics{
 // logAnthropicRateLimitHeaderShape surfaces upstream header-shape changes:
 // a response without any 5h header (at most hourly per account) and each new
 // window name (once per process, bounded).
-func logAnthropicRateLimitHeaderShape(account *Account, headers http.Header, sample anthropicPassiveUsageSample, now time.Time) {
+func logAnthropicRateLimitHeaderShape(account *Account, headers http.Header, sample anthropicPassiveUsageSample, source string, now time.Time) {
 	if account == nil || !account.IsAnthropicOAuthOrSetupToken() || !sample.hasUnifiedHeaders {
 		return
 	}
@@ -227,12 +246,14 @@ func logAnthropicRateLimitHeaderShape(account *Account, headers http.Header, sam
 	if logMissing {
 		slog.Warn("anthropic_ratelimit_5h_headers_absent",
 			"account_id", account.ID,
-			"five_hour_absent_marked", sample.hasValidSevenDay,
+			"source", source,
+			"shared_7d_present", sample.hasValidSevenDay,
 			"headers", anthropicUnifiedHeaderSummary(headers))
 	}
 	if len(newWindows) > 0 {
 		slog.Warn("anthropic_ratelimit_unknown_window",
 			"account_id", account.ID,
+			"source", source,
 			"windows", newWindows,
 			"headers", anthropicUnifiedHeaderSummary(headers))
 	}
@@ -245,11 +266,15 @@ func anthropicUnifiedHeaderSummary(headers http.Header) []string {
 		if !strings.HasPrefix(lower, anthropicUnifiedRateLimitHeaderPrefix) {
 			continue
 		}
+		short := strings.TrimPrefix(lower, anthropicUnifiedRateLimitHeaderPrefix)
+		if len(short) > anthropicHeaderDiagMaxValueLen {
+			short = short[:anthropicHeaderDiagMaxValueLen]
+		}
 		value := strings.TrimSpace(headers.Get(name))
 		if len(value) > anthropicHeaderDiagMaxValueLen {
 			value = value[:anthropicHeaderDiagMaxValueLen]
 		}
-		out = append(out, strings.TrimPrefix(lower, anthropicUnifiedRateLimitHeaderPrefix)+"="+value)
+		out = append(out, short+"="+value)
 	}
 	sort.Strings(out)
 	if len(out) > anthropicHeaderDiagMaxHeaders {

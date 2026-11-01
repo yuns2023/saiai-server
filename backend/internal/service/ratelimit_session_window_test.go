@@ -432,7 +432,7 @@ func TestUpdateSessionWindow_NoClearUtilizationOnCorrection(t *testing.T) {
 }
 
 func TestUpdateSessionWindow_NoStatusHeader(t *testing.T) {
-	// Should return immediately if no status header.
+	// Empty headers carry no window data: nothing to update.
 	repo := &sessionWindowMockRepo{}
 	svc := newRateLimitServiceForTest(repo)
 

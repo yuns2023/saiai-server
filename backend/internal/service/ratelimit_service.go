@@ -1613,10 +1613,12 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 		}
 	}
 	applyAnthropicFiveHourAbsence(account, sample)
-	logAnthropicRateLimitHeaderShape(account, headers, sample, now)
+	logAnthropicRateLimitHeaderShape(account, headers, sample, "success", now)
 
 	if len(extraUpdates) > 0 {
-		extraUpdates["passive_usage_sampled_at"] = now.UTC().Format(time.RFC3339)
+		if sample.hasUsageData() {
+			extraUpdates["passive_usage_sampled_at"] = now.UTC().Format(time.RFC3339)
+		}
 		if err := s.accountRepo.UpdateExtra(ctx, account.ID, extraUpdates); err != nil {
 			slog.Warn("passive_usage_update_failed", "account_id", account.ID, "error", err)
 		} else if status != "" && sample.hasFiveHourUtilization {
@@ -1709,11 +1711,14 @@ func (s *RateLimitService) sampleAnthropicRateLimitUsage(ctx context.Context, ac
 	if s == nil || s.accountRepo == nil || account == nil {
 		return
 	}
-	updates := sampleAnthropicPassiveUsageHeaders(headers, time.Now()).updates
+	now := time.Now()
+	sample := sampleAnthropicPassiveUsageHeaders(headers, now)
+	logAnthropicRateLimitHeaderShape(account, headers, sample, "429", now)
+	updates := sample.updates
 	if len(updates) == 0 {
 		return
 	}
-	updates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
+	updates["passive_usage_sampled_at"] = now.UTC().Format(time.RFC3339)
 	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 		slog.Warn("anthropic_429_passive_usage_update_failed", "account_id", account.ID, "error", err)
 	}

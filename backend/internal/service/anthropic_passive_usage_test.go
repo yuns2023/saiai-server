@@ -105,8 +105,13 @@ func TestUpdateSessionWindow_ClaudeMaxKeepsFiveHourAndRestoresAbsence(t *testing
 		if got, ok := updates["passive_usage_7d_utilization"].(float64); !ok || got != 0.66 {
 			t.Fatalf("7d utilization = %v, want 0.66", updates["passive_usage_7d_utilization"])
 		}
-		if _, ok := updates[anthropicFiveHourAbsentExtraKey]; ok {
-			t.Fatalf("absence flag must not be written for an account that was never absent: %v", updates)
+		// Written regardless of the request's snapshot so a concurrent
+		// Ultra-shaped response cannot leave a stale true behind.
+		if got, ok := updates[anthropicFiveHourAbsentExtraKey].(bool); !ok || got {
+			t.Fatalf("expected absence flag false, got %v", updates[anthropicFiveHourAbsentExtraKey])
+		}
+		if _, ok := updates["passive_usage_sampled_at"]; !ok {
+			t.Fatal("expected passive_usage_sampled_at")
 		}
 	})
 
@@ -324,5 +329,72 @@ func TestFiveHourAbsentAccount_SkipsFiveHourGateFallbackAndDisplay(t *testing.T)
 	nullFlag := newClaudeSetupTokenAccount(3, map[string]any{anthropicFiveHourAbsentExtraKey: nil})
 	if nullFlag.IsAnthropicFiveHourWindowAbsent() {
 		t.Fatal("a JSON null flag must read as not absent")
+	}
+}
+
+func TestUpdateSessionWindow_FiveHourNeedsKnownStatus(t *testing.T) {
+	future := strconv.FormatInt(time.Now().Add(2*time.Hour).Unix(), 10)
+	cases := map[string]http.Header{
+		"unknown status": {
+			"Anthropic-Ratelimit-Unified-5h-Status":      {"garbage"},
+			"Anthropic-Ratelimit-Unified-5h-Utilization": {"0.95"},
+			"Anthropic-Ratelimit-Unified-5h-Reset":       {future},
+		},
+		"utilization without status": {
+			"Anthropic-Ratelimit-Unified-5h-Utilization": {"0.95"},
+			"Anthropic-Ratelimit-Unified-5h-Reset":       {future},
+		},
+	}
+	for name, headers := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := &sessionWindowMockRepo{}
+			svc := newRateLimitServiceForTest(repo)
+			account := newClaudeSetupTokenAccount(5, map[string]any{anthropicFiveHourAbsentExtraKey: true})
+			svc.UpdateSessionWindow(context.Background(), account, headers)
+			for _, call := range repo.updateExtraCalls {
+				// A new window may clear the old value (nil), but 0.95 must not be stored.
+				if value := call.Updates["session_window_utilization"]; value != nil {
+					t.Fatalf("5h utilization must not be sampled without a known 5h status: %v", call.Updates)
+				}
+				if _, ok := call.Updates[anthropicFiveHourAbsentExtraKey]; ok {
+					t.Fatalf("absence must not be cleared without a known 5h status: %v", call.Updates)
+				}
+			}
+		})
+	}
+}
+
+func TestUpdateSessionWindow_BookkeepingOnlyKeepsSampledAt(t *testing.T) {
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", strconv.FormatInt(time.Now().Add(3*time.Hour).Unix(), 10))
+
+	svc.UpdateSessionWindow(context.Background(), newClaudeSetupTokenAccount(6, map[string]any{}), headers)
+
+	if len(repo.updateExtraCalls) != 1 {
+		t.Fatalf("expected 1 UpdateExtra call, got %d", len(repo.updateExtraCalls))
+	}
+	updates := repo.updateExtraCalls[0].Updates
+	if _, ok := updates["passive_usage_sampled_at"]; ok {
+		t.Fatalf("clearing a stale value or the absence flag is not a usage sample: %v", updates)
+	}
+}
+
+func TestHandle429_LogsUnknownWindow(t *testing.T) {
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-9d_probe429-status", "rejected")
+	headers.Set("anthropic-ratelimit-unified-reset", strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10))
+
+	svc.handle429ForModel(context.Background(), newClaudeSetupTokenAccount(8, map[string]any{}), headers, nil, "claude-opus-5")
+
+	anthropicRateLimitHeaderDiag.mu.Lock()
+	_, logged := anthropicRateLimitHeaderDiag.unknownWindows["9d_probe429"]
+	anthropicRateLimitHeaderDiag.mu.Unlock()
+	if !logged {
+		t.Fatal("an unknown window seen only on a 429 must still be logged")
 	}
 }
