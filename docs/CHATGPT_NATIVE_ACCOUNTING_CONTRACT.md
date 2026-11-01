@@ -23,7 +23,8 @@ The Gateway performs no automatic provider retry. Ownership follows the real
 Cookie expiry, capped at 30 days; session cookies use 24 hours. Device tokens,
 challenge values and device proof headers are redacted from diagnostics.
 Local mocks establish this missing protocol boundary, not live device-check
-acceptance or proof that every upstream unusual-activity denial is resolved.
+acceptance or proof that every upstream unusual-activity denial is resolved
+(one confirmed cause, cross-account Sentinel tokens, is described below).
 
 macOS Desktop 26.930.51102 requests `GET /ios/attestation_challenge` through
 its native backend client before generation; Windows/web preparation uses the
@@ -40,6 +41,54 @@ silently switches accounts. Multi-account continuation with an incompatible
 challenge is rejected, not repaired by altering the client's integrity data.
 These local replay checks do not establish actual Apple DeviceCheck/provider
 acceptance on an installed Desktop.
+
+Windows Codex Desktop 26.1027.6604.0 sends no `_devicecheck` Cookie and no
+`app_attest_challenge`, but it sends a stable `oai-did` on every Chat POST.
+Before each generation it calls
+`POST /sentinel/chat-requirements/prepare` (body `{"p": ...}`). The response's
+`prepare_token` comes back verbatim on `f/conversation` as the
+`openai-sentinel-chat-requirements-prepare-token` header (observed digests
+matched; no finalize step). The provider accepts that token only on the
+account that issued it. A token issued by another pooled account is answered
+with HTTP 403 `Unusual activity has been detected from your device`. On
+2026-11-01 this was reproduced on the isolated test Gateway with an installed
+Desktop and two accounts on their own egress proxies:
+- Sentinel prepare and generation on the same account: 10/10 succeeded.
+- On different accounts: 2/2 returned that 403, in both directions.
+- `f/conversation/prepare` on another account had no effect.
+
+The Gateway therefore treats the Sentinel token like the Mac challenge (#150,
+#151, #152):
+
+- Sentinel prepare is a non-billable control request without a model slot. It
+  is issued on the device affinity, i.e. `UploadSessionKey(oai-did)` (shared
+  with uploads and Mac integrity), claimed when absent. An existing device
+  proof or #148 conversation owner takes precedence.
+- A temporarily unavailable affinity is re-picked through the scheduler. So is
+  a scope's single live conversation account that is cooling.
+- The 2xx response (at most 1 MiB, any supported Content-Encoding) is
+  inspected only to bind a scoped digest of `prepare_token` to its issuing
+  account for 30 minutes, before the unchanged bytes reach the client.
+  - Unreadable response or missing token: 502.
+  - Store failure: 503.
+  - Non-2xx responses are relayed unbound.
+- A generation carrying the token must use that account and agree with every
+  other owner. An unknown token or a conflict returns 409
+  `integrity_context_unavailable` with no provider request. If the required
+  conversation/turn account itself is unavailable, its state is reported
+  instead (429 with `Retry-After`, or the stale-binding 409). A store failure
+  returns 503.
+- Owner-routed control requests (`conversation/init`, `f/conversation/prepare`
+  with a `conversation_id`) and generations point the device affinity at their
+  account. This uses an atomic replace that is allowed only on device-affinity
+  keys, so the next Sentinel prepare of a continued conversation lands on its
+  owner. A 409 points it at the account the turn needs, so a refreshed token
+  succeeds.
+
+The affinity is a preference, not a lock. Interleaved conversations on one
+device can still end in a 409, never in a cross-account provider request.
+Moving a device to another conversation's account also moves later uploads;
+files already uploaded keep their owner.
 
 Public OpenAI Responses usage is not the native ChatGPT conversation
 protocol. The public Responses stream reports usage in its completed response,
