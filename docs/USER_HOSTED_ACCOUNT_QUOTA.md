@@ -38,7 +38,10 @@ paging and refreshing never invokes an upstream client, refreshes tokens or
 sends a model request.
 
 - Claude OAuth/setup-token: read existing session-window utilization and
-  passive weekly snapshots, timestamped by `passive_usage_sampled_at`.
+  passive weekly snapshots, timestamped by `passive_usage_sampled_at`. Weekly
+  windows are sampled whether or not the response has 5h headers. When
+  `passive_usage_5h_absent` is true (no 5h window upstream, e.g. Claude Ultra),
+  the 5-hour window is omitted instead of showing a stale or derived value.
 - Codex OAuth: read existing 5-hour/weekly snapshots, timestamped by
   `codex_usage_updated_at`. Relative reset times require that sample timestamp.
 - Other account types, or missing/invalid samples: show no quota data. Do not

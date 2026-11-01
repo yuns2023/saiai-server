@@ -23,6 +23,11 @@ but the final runtime choice uses the global account priority.
 The five-hour gate rejects a new binding only when the utilization sample and
 future reset time are both valid and utilization is strictly greater than 80%.
 Exactly 80%, missing or malformed data, and an expired reset time pass the gate.
+A Claude OAuth/setup-token account with `extra.passive_usage_5h_absent = true`
+also passes: its latest success response carried the shared weekly window but
+no 5h headers at all (Claude Ultra since 2026-10-30), so a stored 5h sample or
+window end is stale. A later response with a known `5h-status` resets the flag
+to false. The weekly limit is still enforced through upstream 429 handling.
 An existing confirmed or pending sticky session, a previously bound pinned
 device, and an OpenAI `previous_response_id` affinity continue on their bound
 account.
