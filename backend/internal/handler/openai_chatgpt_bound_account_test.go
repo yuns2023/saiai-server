@@ -29,6 +29,8 @@ type chatGPTBoundFixture struct {
 	scope    service.ChatGPTTurnScope
 
 	providerAccounts []string
+	// noDevice omits the device identity header, like a Windows Chat client.
+	noDevice bool
 }
 
 const (
@@ -97,7 +99,9 @@ func (f *chatGPTBoundFixture) run(method, path, body, cookie string) (*httptest.
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(method, path, bytes.NewBufferString(body))
-	c.Request.Header.Set("OAI-DID", chatGPTBoundDeviceID)
+	if !f.noDevice {
+		c.Request.Header.Set("OAI-DID", chatGPTBoundDeviceID)
+	}
 	if cookie != "" {
 		c.Request.Header.Set("Cookie", cookie)
 	}

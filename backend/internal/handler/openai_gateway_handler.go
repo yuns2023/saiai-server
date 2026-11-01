@@ -331,6 +331,39 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			}
 		}
 	}
+	if !isTurnStream {
+		// Control requests for an existing conversation (init, prepare) must
+		// reach the account that holds it: any other shared account answers
+		// conversation_inaccessible. Missing ownership never falls back to the
+		// scheduler, whose sticky would then pin the wrong account.
+		if conversationID := strings.TrimSpace(gjson.GetBytes(body, "conversation_id").String()); conversationID != "" {
+			subject, ok := middleware2.GetAuthSubjectFromContext(c)
+			if !ok {
+				h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
+				return
+			}
+			controlScope := service.ChatGPTTurnScope{UserID: subject.UserID, APIKeyID: apiKey.ID, GroupID: apiKey.Group.ID}
+			var owner *service.ChatGPTDeliveryOwner
+			controlCache, cacheErr := h.gatewayService.ChatGPTTurnCache()
+			if cacheErr == nil {
+				owner, _, cacheErr = service.ResolveChatGPTConversationOwner(c.Request.Context(), controlCache, controlScope, conversationID)
+			}
+			if cacheErr != nil {
+				h.errorResponse(c, http.StatusServiceUnavailable, "accounting_unavailable", "Chat conversation ownership is unavailable")
+				return
+			}
+			if owner == nil {
+				h.errorResponse(c, http.StatusConflict, "conversation_context_unavailable", "ChatGPT conversation ownership is unavailable; start a new conversation")
+				return
+			}
+			if conversationOwnerID != 0 && conversationOwnerID != owner.AccountID {
+				h.errorResponse(c, http.StatusConflict, "integrity_context_unavailable", "Chat device and conversation accounts differ")
+				return
+			}
+			conversationOwnerID = owner.AccountID
+			boundContext = chatGPTBoundConversation
+		}
+	}
 	if isModelRequest {
 		challenge, challengeErr := service.ChatGPTRequestAttestation(body)
 		if challengeErr != nil {
