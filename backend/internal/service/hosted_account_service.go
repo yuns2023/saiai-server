@@ -105,7 +105,7 @@ func hostedAccountSnapshot(account *Account, now time.Time) HostedAccount {
 	extra := account.Extra
 	if account.IsAnthropicOAuthOrSetupToken() {
 		result.UpdatedAt = hostedSnapshotTime(extra["passive_usage_sampled_at"], now)
-		if used, ok := hostedQuotaNumber(extra["session_window_utilization"]); ok && used >= 0 && used <= 1 {
+		if used, ok := hostedQuotaNumber(extra["session_window_utilization"]); ok && used >= 0 && used <= 1 && !account.IsAnthropicFiveHourWindowAbsent() {
 			result.Windows = append(result.Windows, newHostedQuotaWindow("five_hour", used*100, account.SessionWindowEnd, now))
 		}
 		for _, window := range []struct{ key, prefix string }{

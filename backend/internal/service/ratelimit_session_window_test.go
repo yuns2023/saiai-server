@@ -366,21 +366,39 @@ func TestUpdateSessionWindow_ClearsUtilizationOnWindowReset(t *testing.T) {
 
 	svc.UpdateSessionWindow(context.Background(), account, headers)
 
-	// Should have 2 UpdateExtra calls: one to clear utilization, one to store new utilization
-	if len(repo.updateExtraCalls) != 2 {
-		t.Fatalf("expected 2 UpdateExtra calls, got %d", len(repo.updateExtraCalls))
+	// One UpdateExtra call: the new window's utilization replaces the old one.
+	// Weekly windows keep their own reset and are not cleared on a 5h reset.
+	if len(repo.updateExtraCalls) != 1 {
+		t.Fatalf("expected 1 UpdateExtra call, got %d", len(repo.updateExtraCalls))
 	}
-
-	// First call: clear utilization (nil value)
-	clearCall := repo.updateExtraCalls[0]
-	if clearCall.Updates["session_window_utilization"] != nil {
-		t.Errorf("expected utilization cleared to nil, got %v", clearCall.Updates["session_window_utilization"])
-	}
-
-	// Second call: store new utilization
-	storeCall := repo.updateExtraCalls[1]
+	storeCall := repo.updateExtraCalls[0]
 	if val, ok := storeCall.Updates["session_window_utilization"].(float64); !ok || val != 0.15 {
 		t.Errorf("expected utilization stored as 0.15, got %v", storeCall.Updates["session_window_utilization"])
+	}
+	if _, ok := storeCall.Updates["passive_usage_7d_utilization"]; ok {
+		t.Errorf("weekly utilization must not be cleared on a 5h window reset: %v", storeCall.Updates)
+	}
+}
+
+func TestUpdateSessionWindow_ClearsStaleUtilizationWhenNewWindowHasNone(t *testing.T) {
+	resetUnix := time.Now().Add(3 * time.Hour).Unix()
+
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+
+	account := &Account{ID: 34} // no existing window → needInitWindow=true
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprintf("%d", resetUnix))
+
+	svc.UpdateSessionWindow(context.Background(), account, headers)
+
+	if len(repo.updateExtraCalls) != 1 {
+		t.Fatalf("expected 1 UpdateExtra call, got %d", len(repo.updateExtraCalls))
+	}
+	value, ok := repo.updateExtraCalls[0].Updates["session_window_utilization"]
+	if !ok || value != nil {
+		t.Errorf("expected stale utilization cleared to nil, got %v (present=%v)", value, ok)
 	}
 }
 

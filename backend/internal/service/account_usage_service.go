@@ -1446,6 +1446,10 @@ func (s *AccountUsageService) estimateSetupTokenUsage(account *Account) *UsageIn
 
 func (s *AccountUsageService) estimateSetupTokenUsageAt(account *Account, now time.Time) *UsageInfo {
 	info := &UsageInfo{}
+	if account.IsAnthropicFiveHourWindowAbsent() {
+		// 上游已不提供 5h 窗口（Claude Ultra），不展示残留或伪造的 5h 窗口。
+		return info
+	}
 
 	// 如果有session_window信息
 	if account.SessionWindowEnd != nil {
@@ -1494,7 +1498,7 @@ func (s *AccountUsageService) estimateSetupTokenUsageAt(account *Account, now ti
 		}
 	}
 
-	// Setup Token无法获取7d数据
+	// 周窗口由调用方 applyPassiveAnthropicWeeklyUsage 从被动采样补齐
 	return info
 }
 

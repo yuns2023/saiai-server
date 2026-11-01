@@ -65,6 +65,9 @@ func shouldRejectNewSessionForHighFiveHourUsageWithPolicy(account *Account, now 
 	)
 	switch {
 	case account.IsAnthropicOAuthOrSetupToken():
+		if account.IsAnthropicFiveHourWindowAbsent() {
+			return false
+		}
 		usedRatio, ok = validUtilization(account.Extra, "session_window_utilization", 1)
 		if !ok || account.SessionWindowEnd == nil || account.SessionWindowEnd.IsZero() {
 			return false
