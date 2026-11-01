@@ -33,12 +33,26 @@ func (h *OpenAIGatewayHandler) chatGPTSentinelAffinityOwner(c *gin.Context, grou
 			return 0, false
 		}
 	}
+	// The affinity only steers the device, so a cooling one is re-picked
+	// (the scheduler skips cooling accounts); a conversation that needs the
+	// cooling account is still refused at f/conversation.
+	replace := false
+	if err == nil && owner != 0 {
+		_, accountErr := h.gatewayService.GetChatGPTBoundAccount(c.Request.Context(), groupID, owner)
+		if unavailable, typed := service.AsChatGPTBoundAccountUnavailable(accountErr); typed && unavailable.Kind == service.ChatGPTBoundAccountTemporary {
+			owner, replace = 0, true
+		}
+	}
 	if err == nil && owner == 0 {
 		candidateID, ok := h.chatGPTAffinityCandidate(c, groupID, scope)
 		if !ok {
 			return 0, false
 		}
-		owner, err = cache.ClaimChatGPTUploadOwner(c.Request.Context(), sessionKey, candidateID, service.ChatGPTUploadSessionTTL)
+		if replace {
+			owner, err = candidateID, cache.SetChatGPTUploadOwner(c.Request.Context(), sessionKey, candidateID, service.ChatGPTUploadSessionTTL)
+		} else {
+			owner, err = cache.ClaimChatGPTUploadOwner(c.Request.Context(), sessionKey, candidateID, service.ChatGPTUploadSessionTTL)
+		}
 	}
 	if err != nil || owner == 0 {
 		h.errorResponse(c, 503, "integrity_context_unavailable", "Chat integrity ownership is unavailable")

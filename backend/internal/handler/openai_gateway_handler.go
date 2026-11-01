@@ -423,11 +423,18 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				return
 			}
 			if owner == 0 || (conversationOwnerID != 0 && conversationOwnerID != owner) || (turn != nil && turn.AccountID != owner) {
-				// Let the refreshed token come from the account this turn needs.
+				needed, neededContext := conversationOwnerID, boundContext
 				if turn != nil {
-					h.preferChatGPTDeviceAffinity(c, cookieScope, turn.AccountID)
-				} else {
-					h.preferChatGPTDeviceAffinity(c, cookieScope, conversationOwnerID)
+					needed, neededContext = turn.AccountID, chatGPTBoundConversation
+				}
+				if needed != 0 {
+					// An unavailable owner is the real error, not the token.
+					if _, accountErr := h.gatewayService.GetChatGPTBoundAccount(forwardCtx, apiKey.GroupID, needed); accountErr != nil {
+						h.writeChatGPTBoundAccountUnavailable(c, accountErr, neededContext, cookieScope, streamStarted, chatGPTNoOAuthAccountEnvelope)
+						return
+					}
+					// Let the refreshed token come from the account this turn needs.
+					h.preferChatGPTDeviceAffinity(c, cookieScope, needed)
 				}
 				h.handleStreamingAwareError(c, http.StatusConflict, "integrity_context_unavailable", "Chat integrity must belong to this conversation account; refresh integrity before retrying", streamStarted)
 				return

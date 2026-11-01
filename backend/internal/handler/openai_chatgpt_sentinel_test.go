@@ -260,6 +260,59 @@ func TestChatGPTSentinelCombinesWithOtherOwners(t *testing.T) {
 	})
 }
 
+func TestChatGPTSentinelCoolingAffinity(t *testing.T) {
+	t.Run("a new chat moves to an available account", func(t *testing.T) {
+		f := newChatGPTControlFixture(t)
+		_, err := f.cache.ClaimChatGPTUploadOwner(context.Background(), f.scope.UploadSessionKey(chatGPTBoundDeviceID), 249, time.Minute)
+		require.NoError(t, err)
+		reset := time.Now().Add(10 * time.Minute)
+		f.accounts.accounts[1].RateLimitResetAt = &reset
+		w, _ := f.run("POST", service.ChatGPTSentinelPreparePath, chatGPTSentinelBody, "")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, []string{"TEST_ONLY_ACCOUNT"}, f.providerAccounts)
+		require.EqualValues(t, 248, f.deviceAffinity())
+		f.headers = chatGPTSentinelHeaders(chatGPTOwnerToken)
+		w, _ = f.run("POST", "/chatgpt/backend-api/f/conversation", chatGPTNewChatBody, "")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	})
+
+	t.Run("a conversation on a cooling account reports the cooldown", func(t *testing.T) {
+		f := newChatGPTControlFixture(t)
+		f.bindConversation(f.scope, 248)
+		f.bindSentinel(chatGPTOtherToken, 249)
+		reset := time.Now().Add(10 * time.Minute)
+		f.setOwner(func(a *service.Account) { a.RateLimitResetAt = &reset })
+		f.headers = chatGPTSentinelHeaders(chatGPTOtherToken)
+		w, _ := f.run("POST", "/chatgpt/backend-api/f/conversation", chatGPTFollowUpBody, "")
+		require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+		require.NotEmpty(t, w.Header().Get("Retry-After"))
+		require.Empty(t, f.calls)
+	})
+
+	t.Run("a cooling device proof owner is never replaced", func(t *testing.T) {
+		f := newChatGPTControlFixture(t)
+		reset := time.Now().Add(10 * time.Minute)
+		f.setOwner(func(a *service.Account) { a.RateLimitResetAt = &reset })
+		w, _ := f.run("POST", service.ChatGPTSentinelPreparePath, chatGPTSentinelBody, chatGPTBoundCookie)
+		require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+		require.Empty(t, f.calls)
+		require.EqualValues(t, 248, f.binding())
+	})
+
+	t.Run("a conversation on a removed account must start over", func(t *testing.T) {
+		f := newChatGPTControlFixture(t)
+		f.bindConversation(f.scope, 248)
+		f.bindSentinel(chatGPTOtherToken, 249)
+		f.setOwner(func(a *service.Account) { a.Status = service.StatusError })
+		f.headers = chatGPTSentinelHeaders(chatGPTOtherToken)
+		w, _ := f.run("POST", "/chatgpt/backend-api/f/conversation", chatGPTFollowUpBody, "")
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		errType, _, _ := chatGPTBoundErrorBody(t, w)
+		require.Equal(t, "conversation_context_unavailable", errType)
+		require.Empty(t, f.calls)
+	})
+}
+
 func TestChatGPTSentinelPrepareShapes(t *testing.T) {
 	t.Run("compressed 100 KiB response", func(t *testing.T) {
 		f := newChatGPTControlFixture(t)
