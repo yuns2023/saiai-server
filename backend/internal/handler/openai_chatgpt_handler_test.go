@@ -142,7 +142,7 @@ func TestChatGPTControlsDoNotRequireModelBilling(t *testing.T) {
 	}{
 		{http.MethodPost, "/chatgpt/backend-api/conversation/init", h.ChatGPTConversation},
 		{http.MethodPost, "/chatgpt/backend-api/f/conversation/prepare", h.ChatGPTConversation},
-		{http.MethodPost, "/chatgpt/backend-api/sentinel/chat-requirements/prepare", h.ChatGPTConversation},
+		// Sentinel prepare binds its token to an account: openai_chatgpt_sentinel_test.go.
 		{http.MethodGet, "/chatgpt/backend-api/models?language=zh-CN&x=a%2Bb&x=c", h.ChatGPTModels},
 		{http.MethodGet, "/chatgpt/backend-api/estuary/content?id=file_fixture&cid=opaque-content-id", h.ChatGPTEstuaryContent},
 	}
@@ -257,7 +257,7 @@ func TestChatGPTControlsRepeatedFailuresDoNotConsumeCodexSlots(t *testing.T) {
 			}{
 				{http.MethodPost, "/chatgpt/backend-api/conversation/init", h.ChatGPTConversation},
 				{http.MethodPost, "/chatgpt/backend-api/f/conversation/prepare", h.ChatGPTConversation},
-				{http.MethodPost, "/chatgpt/backend-api/sentinel/chat-requirements/prepare", h.ChatGPTConversation},
+				// Sentinel prepare binds its token to an account: openai_chatgpt_sentinel_test.go.
 				{http.MethodGet, "/chatgpt/backend-api/models?language=zh-CN&x=a%2Bb&x=c", h.ChatGPTModels},
 				{http.MethodGet, "/chatgpt/backend-api/estuary/content?id=file_fixture&cid=opaque-content-id", h.ChatGPTEstuaryContent},
 			}

@@ -200,6 +200,10 @@ func chatGPTMultipartUploadCapability(contentType string, body []byte) (string, 
 }
 
 func decodeChatGPTUploadMetadata(raw []byte, encoding string) ([]byte, error) {
+	return decodeChatGPTBody(raw, encoding, 64*1024)
+}
+
+func decodeChatGPTBody(raw []byte, encoding string, limit int) ([]byte, error) {
 	var reader io.Reader = bytes.NewReader(raw)
 	switch strings.ToLower(strings.TrimSpace(encoding)) {
 	case "", "identity":
@@ -229,8 +233,8 @@ func decodeChatGPTUploadMetadata(raw []byte, encoding string) ([]byte, error) {
 	default:
 		return nil, errors.New("unsupported upload metadata encoding")
 	}
-	decoded, err := io.ReadAll(io.LimitReader(reader, 64*1024+1))
-	if err != nil || len(decoded) > 64*1024 {
+	decoded, err := io.ReadAll(io.LimitReader(reader, int64(limit)+1))
+	if err != nil || len(decoded) > limit {
 		return nil, errors.New("invalid upload metadata size")
 	}
 	return decoded, nil

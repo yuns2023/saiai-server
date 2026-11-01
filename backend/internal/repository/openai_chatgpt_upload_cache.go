@@ -64,6 +64,13 @@ func (c *gatewayCache) BindChatGPTUploadOwner(ctx context.Context, keys []string
 	}
 	return nil
 }
+func (c *gatewayCache) SetChatGPTUploadOwner(ctx context.Context, key string, owner int64, ttl time.Duration) error {
+	if !service.ValidChatGPTUploadOwnerUpdate(key, owner, ttl) {
+		return errors.New("invalid native Chat upload owner update")
+	}
+	return c.rdb.Set(ctx, key, strconv.FormatInt(owner, 10), ttl).Err()
+}
+
 func (c *gatewayCache) ReleaseChatGPTUploadOwner(ctx context.Context, key string, owner int64) error {
 	if owner <= 0 {
 		return errors.New("invalid native Chat upload release")

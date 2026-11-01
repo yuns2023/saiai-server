@@ -27,6 +27,10 @@ type ChatGPTUploadCache interface {
 	// ReleaseChatGPTUploadOwner deletes key only while it still maps to owner,
 	// so a concurrent re-registration to another account is never removed.
 	ReleaseChatGPTUploadOwner(context.Context, string, int64) error
+	// SetChatGPTUploadOwner atomically replaces the owner and TTL. Only the
+	// soft device affinity (UploadSessionKey) is ever rewritten; file, URL,
+	// attestation and Sentinel ownership stays immutable.
+	SetChatGPTUploadOwner(context.Context, string, int64, time.Duration) error
 }
 
 func (s *OpenAIGatewayService) ChatGPTUploadCache() (ChatGPTUploadCache, error) {
@@ -50,6 +54,13 @@ func (s ChatGPTTurnScope) UploadedFileKey(id string) string { return s.uploadKey
 func (s ChatGPTTurnScope) UploadURLKey(raw string) string   { return s.uploadKey("url", raw) }
 func (s ChatGPTTurnScope) UploadSessionKey(device string) string {
 	return s.uploadKey("session", device)
+}
+
+// ValidChatGPTUploadOwnerUpdate guards SetChatGPTUploadOwner: only a device
+// affinity key may be replaced, never a file, URL or integrity owner.
+func ValidChatGPTUploadOwnerUpdate(key string, owner int64, ttl time.Duration) bool {
+	prefix, _, found := strings.Cut(key, "}:session:")
+	return found && strings.HasPrefix(prefix, "chatgpt:upload:{") && owner > 0 && ttl > 0 && ttl <= ChatGPTUploadTTL
 }
 
 func ValidChatGPTUploadFileID(id string) bool {
@@ -196,6 +207,16 @@ func (s *chatGPTMemoryTurnCache) ReleaseChatGPTUploadOwner(_ context.Context, ke
 	if prior, ok := s.uploads[key]; ok && prior.accountID == accountID {
 		delete(s.uploads, key)
 	}
+	return nil
+}
+func (s *chatGPTMemoryTurnCache) SetChatGPTUploadOwner(_ context.Context, key string, accountID int64, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanup()
+	if _, ok := s.uploads[key]; !ValidChatGPTUploadOwnerUpdate(key, accountID, ttl) || (!ok && len(s.uploads) >= 4096) {
+		return errors.New("invalid native Chat upload owner update")
+	}
+	s.uploads[key] = chatGPTMemoryUpload{accountID, time.Now().Add(ttl)}
 	return nil
 }
 func (s *chatGPTMemoryTurnCache) BindChatGPTUploadOwner(_ context.Context, keys []string, accountID int64, ttl time.Duration) error {

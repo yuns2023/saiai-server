@@ -61,6 +61,15 @@ func TestNativeChatRedisUploadOwnershipIsAtomicScopedAndNeverExtended(t *testing
 	require.False(t, rdb.Exists(ctx, capability).Val() > 0, "a conflict must leave no partial binding")
 	require.NoError(t, cache.BindChatGPTUploadOwner(ctx, []string{file, capability}, winner, time.Hour))
 	require.LessOrEqual(t, rdb.PTTL(ctx, file).Val(), ttl, "repeated binding must not extend existing ownership")
+	// Only the soft device affinity is replaced, atomically with its TTL.
+	require.NoError(t, cache.SetChatGPTUploadOwner(ctx, session, winner+20, 2*time.Minute))
+	replaced, err := cache.GetChatGPTUploadOwner(ctx, session)
+	require.NoError(t, err)
+	require.Equal(t, winner+20, replaced)
+	require.Greater(t, rdb.PTTL(ctx, session).Val(), time.Minute)
+	require.Error(t, cache.SetChatGPTUploadOwner(ctx, session, winner, 2*time.Hour))
+	require.Error(t, cache.SetChatGPTUploadOwner(ctx, session, 0, time.Minute))
+	require.Error(t, cache.SetChatGPTUploadOwner(ctx, file, winner+20, time.Minute), "hard owners are never replaced")
 	other := service.ChatGPTTurnScope{UserID: scope.UserID, APIKeyID: 4, GroupID: 3}
 	missing, err := cache.GetChatGPTUploadOwner(ctx, other.UploadedFileKey("file-TEST_ONLY"))
 	require.NoError(t, err)

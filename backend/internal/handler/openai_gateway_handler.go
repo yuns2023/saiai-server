@@ -109,6 +109,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	isModelRequest := c.Request.URL.Path == "/chatgpt/backend-api/f/conversation"
 	isResumeRequest := c.Request.URL.Path == "/chatgpt/backend-api/f/conversation/resume"
 	isTurnStream := isModelRequest || isResumeRequest
+	isSentinelPrepare := c.Request.URL.Path == service.ChatGPTSentinelPreparePath
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformOpenAI {
 		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{
@@ -363,6 +364,21 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			conversationOwnerID = owner.AccountID
 			boundContext = chatGPTBoundConversation
 		}
+		// Sentinel prepare carries no conversation ID. Its token only works on
+		// the account that issued it, so issue it on the device's current
+		// account: the conversation it last used, else a claimed one.
+		if isSentinelPrepare && conversationOwnerID == 0 {
+			if cookieScope == (service.ChatGPTTurnScope{}) {
+				h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
+				return
+			}
+			owner, ok := h.chatGPTSentinelAffinityOwner(c, apiKey.GroupID, cookieScope)
+			if !ok {
+				return
+			}
+			conversationOwnerID = owner
+			boundContext = chatGPTBoundIntegrity
+		}
 	}
 	if isModelRequest {
 		challenge, challengeErr := service.ChatGPTRequestAttestation(body)
@@ -381,6 +397,38 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				return
 			}
 			if owner == 0 || (conversationOwnerID != 0 && conversationOwnerID != owner) || (turn != nil && turn.AccountID != owner) {
+				h.handleStreamingAwareError(c, http.StatusConflict, "integrity_context_unavailable", "Chat integrity must belong to this conversation account; refresh integrity before retrying", streamStarted)
+				return
+			}
+			conversationOwnerID = owner
+			if boundContext == chatGPTBoundDevice {
+				boundContext = chatGPTBoundIntegrity
+			}
+		}
+		sentinelToken, tokenErr := service.ChatGPTRequestSentinelToken(c.Request.Header)
+		if tokenErr != nil {
+			h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", "Invalid Chat integrity metadata", streamStarted)
+			return
+		}
+		if sentinelToken != "" {
+			// The provider answers a token issued by another account with
+			// "Unusual activity". An unknown token is never rescheduled.
+			cache, cacheErr := h.gatewayService.ChatGPTUploadCache()
+			var owner int64
+			if cacheErr == nil {
+				owner, cacheErr = cache.GetChatGPTUploadOwner(forwardCtx, turnScope.SentinelKey(sentinelToken))
+			}
+			if cacheErr != nil {
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "integrity_context_unavailable", "Chat integrity ownership is unavailable", streamStarted)
+				return
+			}
+			if owner == 0 || (conversationOwnerID != 0 && conversationOwnerID != owner) || (turn != nil && turn.AccountID != owner) {
+				// Let the refreshed token come from the account this turn needs.
+				if turn != nil {
+					h.preferChatGPTDeviceAffinity(c, cookieScope, turn.AccountID)
+				} else {
+					h.preferChatGPTDeviceAffinity(c, cookieScope, conversationOwnerID)
+				}
 				h.handleStreamingAwareError(c, http.StatusConflict, "integrity_context_unavailable", "Chat integrity must belong to this conversation account; refresh integrity before retrying", streamStarted)
 				return
 			}
@@ -445,6 +493,12 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		}
 		if selection.Account.ID != turn.AccountID {
 			releaseChatGPTControlSelection(selection)
+			// A concurrent replay created the turn elsewhere; it must not
+			// override an owner or integrity token bound to this account.
+			if conversationOwnerID != 0 {
+				h.handleStreamingAwareError(c, http.StatusConflict, "integrity_context_unavailable", "Chat device and turn accounts differ", streamStarted)
+				return
+			}
 			selection, selectErr = h.gatewayService.SelectChatGPTBoundAccount(forwardCtx, apiKey.GroupID, turn.AccountID)
 			if selectErr != nil || selection == nil {
 				h.writeChatGPTBoundAccountUnavailable(c, selectErr, chatGPTBoundConversation, cookieScope, streamStarted, gatewayErrorEnvelope{
@@ -456,6 +510,9 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 	}
 	account := selection.Account
 	setOpsSelectedAccount(c, account.ID, service.PlatformOpenAI)
+	if isModelRequest || (!isTurnStream && boundContext == chatGPTBoundConversation) {
+		h.preferChatGPTDeviceAffinity(c, cookieScope, account.ID)
+	}
 	if !isTurnStream {
 		// The shared scheduler opportunistically acquires an account slot even
 		// for short native-Chat control-plane requests. They are not model
@@ -498,6 +555,10 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if isSentinelPrepare {
+		h.relayChatGPTSentinelPrepare(c, resp, cookieScope, account.ID)
+		return
+	}
 	for key, values := range resp.Header {
 		if !shouldCopyChatGPTResponseHeader(key) {
 			continue

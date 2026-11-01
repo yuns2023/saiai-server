@@ -59,26 +59,9 @@ func (h *OpenAIGatewayHandler) ChatGPTAttestationChallenge(c *gin.Context) {
 		// The integrity GET has no conversation ID. When this scope has exactly
 		// one live conversation account, retain it after the short upload lease
 		// expires instead of scheduling its next challenge onto another account.
-		turns, turnErr := h.gatewayService.ChatGPTTurnCache()
-		var accounts []int64
-		if turnErr == nil {
-			accounts, turnErr = turns.ListChatGPTUpdateAccounts(c.Request.Context(), scope.UpdatesKey())
-		}
-		if turnErr != nil {
-			h.errorResponse(c, 503, "integrity_context_unavailable", "Chat integrity ownership is unavailable")
+		candidateID, ok := h.chatGPTAffinityCandidate(c, key.GroupID, scope)
+		if !ok {
 			return
-		}
-		var candidateID int64
-		if len(accounts) == 1 && h.chatGPTAffinityOwnerUsable(c, key.GroupID, accounts[0]) {
-			candidateID = accounts[0]
-		} else {
-			selection, _, selectErr := h.gatewayService.SelectChatGPTOAuthAccount(c.Request.Context(), key.GroupID, h.gatewayService.GenerateSessionHash(c, nil), "")
-			if selectErr != nil || selection == nil || selection.Account == nil {
-				h.errorResponse(c, 503, "service_unavailable", "No available OpenAI OAuth account")
-				return
-			}
-			candidateID = selection.Account.ID
-			releaseChatGPTControlSelection(selection)
 		}
 		owner, err = cache.ClaimChatGPTUploadOwner(c.Request.Context(), sessionKey, candidateID, service.ChatGPTUploadSessionTTL)
 	}
@@ -134,4 +117,29 @@ func (h *OpenAIGatewayHandler) ChatGPTAttestationChallenge(c *gin.Context) {
 	} else {
 		_, _ = io.Copy(c.Writer, response.Body)
 	}
+}
+
+// chatGPTAffinityCandidate picks the account for a new device affinity: the
+// scope's only live conversation account when usable, else a scheduled one.
+// Errors are answered here (ok=false).
+func (h *OpenAIGatewayHandler) chatGPTAffinityCandidate(c *gin.Context, groupID *int64, scope service.ChatGPTTurnScope) (int64, bool) {
+	turns, err := h.gatewayService.ChatGPTTurnCache()
+	var accounts []int64
+	if err == nil {
+		accounts, err = turns.ListChatGPTUpdateAccounts(c.Request.Context(), scope.UpdatesKey())
+	}
+	if err != nil {
+		h.errorResponse(c, 503, "integrity_context_unavailable", "Chat integrity ownership is unavailable")
+		return 0, false
+	}
+	if len(accounts) == 1 && h.chatGPTAffinityOwnerUsable(c, groupID, accounts[0]) {
+		return accounts[0], true
+	}
+	selection, _, selectErr := h.gatewayService.SelectChatGPTOAuthAccount(c.Request.Context(), groupID, h.gatewayService.GenerateSessionHash(c, nil), "")
+	if selectErr != nil || selection == nil || selection.Account == nil {
+		h.errorResponse(c, 503, "service_unavailable", "No available OpenAI OAuth account")
+		return 0, false
+	}
+	releaseChatGPTControlSelection(selection)
+	return selection.Account.ID, true
 }

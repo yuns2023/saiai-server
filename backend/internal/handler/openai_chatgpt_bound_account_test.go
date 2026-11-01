@@ -29,8 +29,17 @@ type chatGPTBoundFixture struct {
 	scope    service.ChatGPTTurnScope
 
 	providerAccounts []string
-	// noDevice omits the device identity header, like a Windows Chat client.
+	// noDevice omits the device identity header (Windows Desktop 26.1027
+	// does send OAI-DID; older or third-party clients may not).
 	noDevice bool
+	slots    *chatGPTSlotCache
+	// headers are added to every request; sentinelStatus/sentinelBody
+	// replace the provider's Sentinel prepare response when set.
+	headers          http.Header
+	sentinelStatus   int
+	sentinelBody     string
+	sentinelEncoding string
+	noSubject        bool
 }
 
 const (
@@ -52,6 +61,18 @@ func newChatGPTBoundFixture(t *testing.T) *chatGPTBoundFixture {
 		case "/backend-api/devicecheck":
 			w.Header().Add("Set-Cookie", "_devicecheck=TEST_ONLY_NEW_PROOF; Domain=.chatgpt.com; Path=/; Max-Age=600; Secure; HttpOnly")
 			_, _ = io.WriteString(w, `{}`)
+		case "/backend-api/sentinel/chat-requirements/prepare":
+			if f.sentinelEncoding != "" {
+				w.Header().Set("Content-Encoding", f.sentinelEncoding)
+			}
+			if f.sentinelStatus != 0 {
+				w.WriteHeader(f.sentinelStatus)
+			}
+			if f.sentinelBody != "" {
+				_, _ = io.WriteString(w, f.sentinelBody)
+				return
+			}
+			_, _ = io.WriteString(w, `{"persona":"TEST_ONLY","prepare_token":"TEST_ONLY_PREPARE_`+r.Header.Get("ChatGPT-Account-ID")+`","turnstile":{"required":false}}`)
 		case "/backend-api/f/conversation":
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = io.WriteString(w, "data: {\"type\":\"message_stream_complete\",\"conversation_id\":\"TEST_ONLY_CONVERSATION\"}\n\ndata: [DONE]\n\n")
@@ -67,6 +88,7 @@ func newChatGPTBoundFixture(t *testing.T) *chatGPTBoundFixture {
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	f.cache = &chatGPTSharedTurnCache{&chatGPTStickyCache{bindings: make(map[string]int64)}, service.NewChatGPTMemoryTurnCache()}
 	slots := &chatGPTSlotCache{active: make(map[string]int64), attempts: make(map[int64]int)}
+	f.slots = slots
 	concurrency := service.NewConcurrencyService(slots)
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
 	t.Cleanup(billing.Stop)
@@ -105,9 +127,16 @@ func (f *chatGPTBoundFixture) run(method, path, body, cookie string) (*httptest.
 	if cookie != "" {
 		c.Request.Header.Set("Cookie", cookie)
 	}
+	for name, values := range f.headers {
+		for _, value := range values {
+			c.Request.Header.Add(name, value)
+		}
+	}
 	gid := f.gid
 	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 23, GroupID: &gid, Group: &service.Group{ID: gid, Platform: service.PlatformOpenAI, RateMultiplier: 1}, User: &service.User{ID: 21, Balance: 100}})
-	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 21, Concurrency: 2})
+	if !f.noSubject {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 21, Concurrency: 2})
+	}
 	switch c.Request.URL.Path {
 	case "/chatgpt/backend-api/models":
 		f.h.ChatGPTModels(c)
