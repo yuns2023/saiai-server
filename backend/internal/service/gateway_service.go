@@ -3054,6 +3054,16 @@ func (s *GatewayService) checkClaudeCodeRestriction(ctx context.Context, groupID
 	return group, resolvedID, nil
 }
 
+// ResolveSchedulingGroup returns the group account selection will actually
+// schedule on for groupID: the group itself, or its claude_code_only fallback
+// chain target when this request is not a Claude Code client. It returns nil
+// for no group or a forced platform (no claude_code_only resolution), and the
+// resolution error otherwise (account selection reports that error itself).
+func (s *GatewayService) ResolveSchedulingGroup(ctx context.Context, groupID *int64) (*Group, error) {
+	group, _, err := s.checkClaudeCodeRestriction(ctx, groupID)
+	return group, err
+}
+
 func (s *GatewayService) resolvePlatform(ctx context.Context, groupID *int64, group *Group) (string, bool, error) {
 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)
 	if hasForcePlatform && forcePlatform != "" {

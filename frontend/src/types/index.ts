@@ -13,6 +13,22 @@ export interface SelectOption {
 export type ClaudeEnvironmentMode = 'off' | 'rewrite' | 'remove'
 // SAIAI client proof v1 (docs/CLIENT_PROOF_V1.md). 'enforce' is reserved and not selectable.
 export type ClientAttestationPolicy = 'off' | 'observe' | 'enforce'
+export type ClaudeEntrypointPolicy = 'off' | 'observe' | 'enforce'
+
+/** One row of GET /admin/groups/:id/claude-entrypoint-observations. */
+export interface ClaudeEntrypointObservation {
+  ua_entrypoint: string
+  body_entrypoint: string
+  body_status: 'valid' | 'missing' | 'malformed' | 'ambiguous'
+  cli_version: string
+  result: 'allowed' | 'violation_observed' | 'rejected'
+  reason: string
+  requests: number
+  first_seen_at: string
+  last_seen_at: string
+  sample_user_agent: string
+}
+
 export type ClientAttestationStatus = 'valid' | 'missing' | 'invalid' | 'stale' | 'replay' | 'unknown_device' | 'revoked' | 'unverified'
 
 export interface BasePaginationResponse<T> {
@@ -462,6 +478,8 @@ export interface AdminGroup extends Group {
 	client_attestation_policy?: ClientAttestationPolicy
 	claude_device_limit_mode: 'off' | 'audit' | 'enforce'
 	claude_device_base_limit: number
+	claude_entrypoint_policy?: ClaudeEntrypointPolicy
+	claude_entrypoint_allowlist?: string[]
 
   // 模型路由配置（仅管理员可见，内部信息）
   model_routing: Record<string, number[]> | null
@@ -598,6 +616,8 @@ export interface CreateGroupRequest {
 	codex_timezone_action?: 'reject' | 'rewrite'
 	client_attestation_policy?: ClientAttestationPolicy
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
+	claude_entrypoint_policy?: ClaudeEntrypointPolicy
+	claude_entrypoint_allowlist?: string[]
 	claude_device_base_limit?: number
   claude_environment_mode?: ClaudeEnvironmentMode
   claude_environment_rewrite?: boolean
@@ -653,6 +673,8 @@ export interface UpdateGroupRequest {
 	codex_timezone_action?: 'reject' | 'rewrite'
 	client_attestation_policy?: ClientAttestationPolicy
 	claude_device_limit_mode?: 'off' | 'audit' | 'enforce'
+	claude_entrypoint_policy?: ClaudeEntrypointPolicy
+	claude_entrypoint_allowlist?: string[]
 	claude_device_base_limit?: number
   claude_environment_mode?: ClaudeEnvironmentMode
   claude_environment_rewrite?: boolean

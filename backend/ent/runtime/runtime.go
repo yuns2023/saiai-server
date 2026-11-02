@@ -606,6 +606,16 @@ func init() {
 	groupDescClaudeDeviceBaseLimit := groupFields[50].Descriptor()
 	// group.DefaultClaudeDeviceBaseLimit holds the default value on creation for the claude_device_base_limit field.
 	group.DefaultClaudeDeviceBaseLimit = groupDescClaudeDeviceBaseLimit.Default.(int)
+	// groupDescClaudeEntrypointPolicy is the schema descriptor for claude_entrypoint_policy field.
+	groupDescClaudeEntrypointPolicy := groupFields[51].Descriptor()
+	// group.DefaultClaudeEntrypointPolicy holds the default value on creation for the claude_entrypoint_policy field.
+	group.DefaultClaudeEntrypointPolicy = groupDescClaudeEntrypointPolicy.Default.(string)
+	// group.ClaudeEntrypointPolicyValidator is a validator for the "claude_entrypoint_policy" field. It is called by the builders before save.
+	group.ClaudeEntrypointPolicyValidator = groupDescClaudeEntrypointPolicy.Validators[0].(func(string) error)
+	// groupDescClaudeEntrypointAllowlist is the schema descriptor for claude_entrypoint_allowlist field.
+	groupDescClaudeEntrypointAllowlist := groupFields[52].Descriptor()
+	// group.DefaultClaudeEntrypointAllowlist holds the default value on creation for the claude_entrypoint_allowlist field.
+	group.DefaultClaudeEntrypointAllowlist = groupDescClaudeEntrypointAllowlist.Default.([]string)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
 	idempotencyrecordMixinFields0 := idempotencyrecordMixin[0].Fields()
 	_ = idempotencyrecordMixinFields0

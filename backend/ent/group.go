@@ -128,6 +128,10 @@ type Group struct {
 	ClaudeDeviceLimitMode string `json:"claude_device_limit_mode,omitempty"`
 	// ClaudeDeviceBaseLimit holds the value of the "claude_device_base_limit" field.
 	ClaudeDeviceBaseLimit int `json:"claude_device_base_limit,omitempty"`
+	// ClaudeEntrypointPolicy holds the value of the "claude_entrypoint_policy" field.
+	ClaudeEntrypointPolicy string `json:"claude_entrypoint_policy,omitempty"`
+	// ClaudeEntrypointAllowlist holds the value of the "claude_entrypoint_allowlist" field.
+	ClaudeEntrypointAllowlist []string `json:"claude_entrypoint_allowlist,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the GroupQuery when eager-loading is set.
 	Edges        GroupEdges `json:"edges"`
@@ -247,7 +251,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case group.FieldModelRouting, group.FieldBlockedModelPatterns, group.FieldModelRateMultipliers, group.FieldSupportedModelScopes, group.FieldInputModerationCategories, group.FieldInputModerationPolicy:
+		case group.FieldModelRouting, group.FieldBlockedModelPatterns, group.FieldModelRateMultipliers, group.FieldSupportedModelScopes, group.FieldInputModerationCategories, group.FieldInputModerationPolicy, group.FieldClaudeEntrypointAllowlist:
 			values[i] = new([]byte)
 		case group.FieldIsExclusive, group.FieldHostedUsageEnabled, group.FieldShowAccountQuota, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldInputModerationEnabled, group.FieldInputModerationAutoDisableUser, group.FieldCodexCnTimezoneGuard:
 			values[i] = new(sql.NullBool)
@@ -255,7 +259,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case group.FieldID, group.FieldRequiredLevelID, group.FieldDefaultValidityDays, group.FieldSoraStorageQuotaBytes, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldInputModerationCooldownMinutes, group.FieldInputModerationDisableAfterHits, group.FieldInputModerationStrikeWindowHours, group.FieldInputModerationMinConfidence, group.FieldInputModerationDedupeMinutes, group.FieldClaudeDeviceBaseLimit:
 			values[i] = new(sql.NullInt64)
-		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldInputModerationActionMode, group.FieldCodexClientPolicy, group.FieldCodexTimezoneAction, group.FieldClientAttestationPolicy, group.FieldClaudeDeviceLimitMode:
+		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldInputModerationActionMode, group.FieldCodexClientPolicy, group.FieldCodexTimezoneAction, group.FieldClientAttestationPolicy, group.FieldClaudeDeviceLimitMode, group.FieldClaudeEntrypointPolicy:
 			values[i] = new(sql.NullString)
 		case group.FieldCreatedAt, group.FieldUpdatedAt, group.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -632,6 +636,20 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ClaudeDeviceBaseLimit = int(value.Int64)
 			}
+		case group.FieldClaudeEntrypointPolicy:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field claude_entrypoint_policy", values[i])
+			} else if value.Valid {
+				_m.ClaudeEntrypointPolicy = value.String
+			}
+		case group.FieldClaudeEntrypointAllowlist:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field claude_entrypoint_allowlist", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.ClaudeEntrypointAllowlist); err != nil {
+					return fmt.Errorf("unmarshal field claude_entrypoint_allowlist: %w", err)
+				}
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -906,6 +924,12 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("claude_device_base_limit=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ClaudeDeviceBaseLimit))
+	builder.WriteString(", ")
+	builder.WriteString("claude_entrypoint_policy=")
+	builder.WriteString(_m.ClaudeEntrypointPolicy)
+	builder.WriteString(", ")
+	builder.WriteString("claude_entrypoint_allowlist=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ClaudeEntrypointAllowlist))
 	builder.WriteByte(')')
 	return builder.String()
 }

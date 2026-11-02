@@ -374,6 +374,8 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 			ClientAttestationPolicy:          apiKey.Group.ClientAttestationPolicy,
 			ClaudeDeviceLimitMode:            apiKey.Group.ClaudeDeviceLimitMode,
 			ClaudeDeviceBaseLimit:            apiKey.Group.ClaudeDeviceBaseLimit,
+			ClaudeEntrypointPolicy:           apiKey.Group.ClaudeEntrypointPolicy,
+			ClaudeEntrypointAllowlist:        apiKey.Group.ClaudeEntrypointAllowlist,
 		}
 	}
 	return snapshot
@@ -467,6 +469,8 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			ClientAttestationPolicy:          snapshot.Group.ClientAttestationPolicy,
 			ClaudeDeviceLimitMode:            snapshot.Group.ClaudeDeviceLimitMode,
 			ClaudeDeviceBaseLimit:            snapshot.Group.ClaudeDeviceBaseLimit,
+			ClaudeEntrypointPolicy:           snapshot.Group.ClaudeEntrypointPolicy,
+			ClaudeEntrypointAllowlist:        snapshot.Group.ClaudeEntrypointAllowlist,
 		}
 	}
 	s.compileAPIKeyIPRules(apiKey)

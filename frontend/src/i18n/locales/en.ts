@@ -2307,6 +2307,55 @@ export default {
         enforce: 'Enforce',
         baseDevices: 'Base device count'
       },
+      claudeEntrypoint: {
+        title: 'Claude client entrypoint allowlist',
+        policy: 'Entrypoint check',
+        policyOff: 'Off',
+        policyObserve: 'Observe (record only)',
+        policyEnforce: 'Enforce',
+        policyOffHint: 'The Claude client entrypoint declared by POST /v1/messages requests is not checked or recorded.',
+        policyObserveHint: 'Records the User-Agent entrypoint and the billing-header cc_entrypoint of every request and flags requests outside the allowlist. Nothing is rejected. Observe for a few days before switching to Enforce.',
+        policyEnforceHint: 'A request passes only when the User-Agent entrypoint and the body cc_entrypoint are both allowed and equal; otherwise it gets HTTP 400 (claude_entrypoint_not_allowed). Entrypoints are declared by the client: this filters third-party clients, it does not prove a request came from an official client.',
+        allowlist: 'Allowed entrypoints',
+        allowlistPlaceholder: 'Type an entrypoint, then Enter or comma',
+        allowlistHint: 'Default: cli, claude-vscode, sdk-cli. Lowercase letters, digits, dot, underscore or hyphen; at most 32 items. An empty list allows nothing.',
+        allowlistInvalid: 'Invalid entrypoint: {value}',
+        allowlistTooMany: 'At most 32 items',
+        restoreDefault: 'Restore default',
+        removeItem: 'Remove',
+        observations: 'Entrypoint observations',
+        observationsHint: 'Only requests in Observe or Enforce mode are recorded, written about every 30 seconds, counted per UTC day and kept for 90 days.',
+        observationsEmpty: 'No requests in the selected range',
+        observationsLoadFailed: 'Failed to load entrypoint observations',
+        days: 'Last {days} days',
+        refresh: 'Refresh',
+        addToAllowlist: 'Allow',
+        addedToAllowlist: 'Added to the allowlist; save the group to apply',
+        columns: {
+          uaEntrypoint: 'UA entrypoint',
+          bodyEntrypoint: 'Body entrypoint',
+          version: 'Version',
+          result: 'Result',
+          reason: 'Reason',
+          requests: 'Requests',
+          lastSeen: 'Last seen',
+          sampleUserAgent: 'Sample User-Agent'
+        },
+        results: {
+          allowed: 'Allowed',
+          violation_observed: 'Not allowed (observed)',
+          rejected: 'Rejected'
+        },
+        reasons: {
+          ok: 'Compliant',
+          ua_not_allowed: 'UA entrypoint not allowed',
+          body_missing: 'Billing header missing',
+          body_malformed: 'Billing header malformed',
+          body_ambiguous: 'Billing header duplicated or ambiguous',
+          body_not_allowed: 'Body entrypoint not allowed',
+          mismatch: 'UA and body entrypoints differ'
+        }
+      },
       invalidRequestFallback: {
         title: 'Invalid Request Fallback Group',
         hint: 'Triggered only when upstream explicitly returns prompt too long. Leave empty to disable fallback.',

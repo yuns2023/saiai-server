@@ -72,6 +72,7 @@ var ProviderSet = wire.NewSet(
 	NewInputModerationStateCache,
 	NewInputModerationTaskQueue,
 	NewClaudeDeviceRepository,
+	NewClaudeEntrypointObservationRepository,
 	NewClientDeviceRepository,
 	NewClientProofNonceStore,
 

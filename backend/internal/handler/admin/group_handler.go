@@ -20,6 +20,7 @@ type GroupHandler struct {
 	adminService         service.AdminService
 	dashboardService     *service.DashboardService
 	groupCapacityService *service.GroupCapacityService
+	entrypointObserver   *service.ClaudeEntrypointObservationService
 }
 
 type optionalLimitField struct {
@@ -71,12 +72,59 @@ func (f optionalLimitField) ToServiceInput() *float64 {
 	return &zero
 }
 
+// entrypointAllowlistField distinguishes an absent claude_entrypoint_allowlist
+// (keep / default) from an explicit array; null and non-arrays are rejected.
+type entrypointAllowlistField struct {
+	set   bool
+	items []string
+}
+
+func (f *entrypointAllowlistField) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return fmt.Errorf("claude_entrypoint_allowlist must be an array of strings")
+	}
+	var raw []json.RawMessage
+	if err := json.Unmarshal(trimmed, &raw); err != nil {
+		return fmt.Errorf("claude_entrypoint_allowlist must be an array of strings")
+	}
+	items := make([]string, 0, len(raw))
+	for _, element := range raw {
+		var item string
+		if element = bytes.TrimSpace(element); len(element) == 0 || element[0] != '"' || json.Unmarshal(element, &item) != nil {
+			return fmt.Errorf("claude_entrypoint_allowlist must be an array of strings")
+		}
+		items = append(items, item)
+	}
+	f.set = true
+	f.items = items
+	return nil
+}
+
+// createValue returns nil (use the default) when the field was absent.
+func (f entrypointAllowlistField) createValue() []string {
+	if !f.set {
+		return nil
+	}
+	return f.items
+}
+
+// updateValue returns nil (keep the stored list) when the field was absent.
+func (f entrypointAllowlistField) updateValue() *[]string {
+	if !f.set {
+		return nil
+	}
+	items := f.items
+	return &items
+}
+
 // NewGroupHandler creates a new admin group handler
-func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService) *GroupHandler {
+func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, entrypointObserver *service.ClaudeEntrypointObservationService) *GroupHandler {
 	return &GroupHandler{
 		adminService:         adminService,
 		dashboardService:     dashboardService,
 		groupCapacityService: groupCapacityService,
+		entrypointObserver:   entrypointObserver,
 	}
 }
 
@@ -136,6 +184,8 @@ type CreateGroupRequest struct {
 	ClientAttestationPolicy          string                         `json:"client_attestation_policy" binding:"omitempty,oneof=off observe"` // "enforce" is reserved, not selectable in v1
 	ClaudeDeviceLimitMode            string                         `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
 	ClaudeDeviceBaseLimit            int                            `json:"claude_device_base_limit"`
+	ClaudeEntrypointPolicy           string                         `json:"claude_entrypoint_policy"`
+	ClaudeEntrypointAllowlist        entrypointAllowlistField       `json:"claude_entrypoint_allowlist"`
 	// 从指定分组复制账号（创建后自动绑定）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }
@@ -197,6 +247,8 @@ type UpdateGroupRequest struct {
 	ClientAttestationPolicy          *string                        `json:"client_attestation_policy" binding:"omitempty,oneof=off observe"`
 	ClaudeDeviceLimitMode            *string                        `json:"claude_device_limit_mode" binding:"omitempty,oneof=off audit enforce"`
 	ClaudeDeviceBaseLimit            *int                           `json:"claude_device_base_limit"`
+	ClaudeEntrypointPolicy           *string                        `json:"claude_entrypoint_policy"`
+	ClaudeEntrypointAllowlist        entrypointAllowlistField       `json:"claude_entrypoint_allowlist"`
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }
@@ -338,6 +390,8 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		ClientAttestationPolicy:          req.ClientAttestationPolicy,
 		ClaudeDeviceLimitMode:            req.ClaudeDeviceLimitMode,
 		ClaudeDeviceBaseLimit:            req.ClaudeDeviceBaseLimit,
+		ClaudeEntrypointPolicy:           req.ClaudeEntrypointPolicy,
+		ClaudeEntrypointAllowlist:        req.ClaudeEntrypointAllowlist.createValue(),
 		CopyAccountsFromGroupIDs:         req.CopyAccountsFromGroupIDs,
 	})
 	if err != nil {
@@ -415,6 +469,8 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		ClientAttestationPolicy:          req.ClientAttestationPolicy,
 		ClaudeDeviceLimitMode:            req.ClaudeDeviceLimitMode,
 		ClaudeDeviceBaseLimit:            req.ClaudeDeviceBaseLimit,
+		ClaudeEntrypointPolicy:           req.ClaudeEntrypointPolicy,
+		ClaudeEntrypointAllowlist:        req.ClaudeEntrypointAllowlist.updateValue(),
 		CopyAccountsFromGroupIDs:         req.CopyAccountsFromGroupIDs,
 	})
 	if err != nil {
@@ -441,6 +497,32 @@ func (h *GroupHandler) Delete(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "Group deleted successfully"})
+}
+
+// GetClaudeEntrypointObservations lists what Claude entrypoints requests to
+// this group declared over the last `days` UTC days (1..90, default 7).
+// Observations are flushed every 30 s, so the newest requests may be missing.
+// GET /api/v1/admin/groups/:id/claude-entrypoint-observations?days=7
+func (h *GroupHandler) GetClaudeEntrypointObservations(c *gin.Context) {
+	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	days := 7
+	if raw := strings.TrimSpace(c.Query("days")); raw != "" {
+		days, err = strconv.Atoi(raw)
+		if err != nil || days < 1 || days > service.ClaudeEntrypointObservationMaxDays {
+			response.BadRequest(c, fmt.Sprintf("days must be an integer between 1 and %d", service.ClaudeEntrypointObservationMaxDays))
+			return
+		}
+	}
+	rows, err := h.entrypointObserver.List(c.Request.Context(), groupID, days)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"days": days, "items": rows})
 }
 
 // GetStats handles getting group statistics

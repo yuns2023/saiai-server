@@ -213,6 +213,13 @@ func (Group) Fields() []ent.Field {
 		field.String("client_attestation_policy").MaxLen(16).Default("off"),
 		field.String("claude_device_limit_mode").MaxLen(16).Default("off"),
 		field.Int("claude_device_base_limit").Default(1),
+		// Claude entrypoint allowlist for POST /v1/messages
+		// (docs/CLAUDE_ENTRYPOINT_POLICY.md, migration 117): "off" skips the
+		// check, "observe" records without rejecting, "enforce" rejects with 400.
+		field.String("claude_entrypoint_policy").MaxLen(16).Default("off"),
+		field.JSON("claude_entrypoint_allowlist", []string{}).
+			Default([]string{"cli", "claude-vscode", "sdk-cli"}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 	}
 }
 

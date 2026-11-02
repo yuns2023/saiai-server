@@ -9666,6 +9666,9 @@ type GroupMutation struct {
 	claude_device_limit_mode                *string
 	claude_device_base_limit                *int
 	addclaude_device_base_limit             *int
+	claude_entrypoint_policy                *string
+	claude_entrypoint_allowlist             *[]string
+	appendclaude_entrypoint_allowlist       []string
 	clearedFields                           map[string]struct{}
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
@@ -12486,6 +12489,93 @@ func (m *GroupMutation) ResetClaudeDeviceBaseLimit() {
 	m.addclaude_device_base_limit = nil
 }
 
+// SetClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field.
+func (m *GroupMutation) SetClaudeEntrypointPolicy(s string) {
+	m.claude_entrypoint_policy = &s
+}
+
+// ClaudeEntrypointPolicy returns the value of the "claude_entrypoint_policy" field in the mutation.
+func (m *GroupMutation) ClaudeEntrypointPolicy() (r string, exists bool) {
+	v := m.claude_entrypoint_policy
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClaudeEntrypointPolicy returns the old "claude_entrypoint_policy" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldClaudeEntrypointPolicy(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClaudeEntrypointPolicy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClaudeEntrypointPolicy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClaudeEntrypointPolicy: %w", err)
+	}
+	return oldValue.ClaudeEntrypointPolicy, nil
+}
+
+// ResetClaudeEntrypointPolicy resets all changes to the "claude_entrypoint_policy" field.
+func (m *GroupMutation) ResetClaudeEntrypointPolicy() {
+	m.claude_entrypoint_policy = nil
+}
+
+// SetClaudeEntrypointAllowlist sets the "claude_entrypoint_allowlist" field.
+func (m *GroupMutation) SetClaudeEntrypointAllowlist(s []string) {
+	m.claude_entrypoint_allowlist = &s
+	m.appendclaude_entrypoint_allowlist = nil
+}
+
+// ClaudeEntrypointAllowlist returns the value of the "claude_entrypoint_allowlist" field in the mutation.
+func (m *GroupMutation) ClaudeEntrypointAllowlist() (r []string, exists bool) {
+	v := m.claude_entrypoint_allowlist
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClaudeEntrypointAllowlist returns the old "claude_entrypoint_allowlist" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldClaudeEntrypointAllowlist(ctx context.Context) (v []string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClaudeEntrypointAllowlist is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClaudeEntrypointAllowlist requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClaudeEntrypointAllowlist: %w", err)
+	}
+	return oldValue.ClaudeEntrypointAllowlist, nil
+}
+
+// AppendClaudeEntrypointAllowlist adds s to the "claude_entrypoint_allowlist" field.
+func (m *GroupMutation) AppendClaudeEntrypointAllowlist(s []string) {
+	m.appendclaude_entrypoint_allowlist = append(m.appendclaude_entrypoint_allowlist, s...)
+}
+
+// AppendedClaudeEntrypointAllowlist returns the list of values that were appended to the "claude_entrypoint_allowlist" field in this mutation.
+func (m *GroupMutation) AppendedClaudeEntrypointAllowlist() ([]string, bool) {
+	if len(m.appendclaude_entrypoint_allowlist) == 0 {
+		return nil, false
+	}
+	return m.appendclaude_entrypoint_allowlist, true
+}
+
+// ResetClaudeEntrypointAllowlist resets all changes to the "claude_entrypoint_allowlist" field.
+func (m *GroupMutation) ResetClaudeEntrypointAllowlist() {
+	m.claude_entrypoint_allowlist = nil
+	m.appendclaude_entrypoint_allowlist = nil
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *GroupMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -12871,7 +12961,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 54)
+	fields := make([]string, 0, 56)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -13034,6 +13124,12 @@ func (m *GroupMutation) Fields() []string {
 	if m.claude_device_base_limit != nil {
 		fields = append(fields, group.FieldClaudeDeviceBaseLimit)
 	}
+	if m.claude_entrypoint_policy != nil {
+		fields = append(fields, group.FieldClaudeEntrypointPolicy)
+	}
+	if m.claude_entrypoint_allowlist != nil {
+		fields = append(fields, group.FieldClaudeEntrypointAllowlist)
+	}
 	return fields
 }
 
@@ -13150,6 +13246,10 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.ClaudeDeviceLimitMode()
 	case group.FieldClaudeDeviceBaseLimit:
 		return m.ClaudeDeviceBaseLimit()
+	case group.FieldClaudeEntrypointPolicy:
+		return m.ClaudeEntrypointPolicy()
+	case group.FieldClaudeEntrypointAllowlist:
+		return m.ClaudeEntrypointAllowlist()
 	}
 	return nil, false
 }
@@ -13267,6 +13367,10 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldClaudeDeviceLimitMode(ctx)
 	case group.FieldClaudeDeviceBaseLimit:
 		return m.OldClaudeDeviceBaseLimit(ctx)
+	case group.FieldClaudeEntrypointPolicy:
+		return m.OldClaudeEntrypointPolicy(ctx)
+	case group.FieldClaudeEntrypointAllowlist:
+		return m.OldClaudeEntrypointAllowlist(ctx)
 	}
 	return nil, fmt.Errorf("unknown Group field %s", name)
 }
@@ -13653,6 +13757,20 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetClaudeDeviceBaseLimit(v)
+		return nil
+	case group.FieldClaudeEntrypointPolicy:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClaudeEntrypointPolicy(v)
+		return nil
+	case group.FieldClaudeEntrypointAllowlist:
+		v, ok := value.([]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClaudeEntrypointAllowlist(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
@@ -14254,6 +14372,12 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldClaudeDeviceBaseLimit:
 		m.ResetClaudeDeviceBaseLimit()
+		return nil
+	case group.FieldClaudeEntrypointPolicy:
+		m.ResetClaudeEntrypointPolicy()
+		return nil
+	case group.FieldClaudeEntrypointAllowlist:
+		m.ResetClaudeEntrypointAllowlist()
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)

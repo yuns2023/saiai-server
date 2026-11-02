@@ -75,6 +75,7 @@ func provideCleanup(
 	moderationEvidenceCleanup *service.ModerationEvidenceCleanupService,
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
+	claudeEntrypointObservations *service.ClaudeEntrypointObservationService,
 	pricing *service.PricingService,
 	emailQueue *service.EmailQueueService,
 	billingCache *service.BillingCacheService,
@@ -150,6 +151,10 @@ func provideCleanup(
 				if idempotencyCleanup != nil {
 					idempotencyCleanup.Stop()
 				}
+				return nil
+			}},
+			{"ClaudeEntrypointObservationService", func() error {
+				claudeEntrypointObservations.Stop()
 				return nil
 			}},
 			{"TokenRefreshService", func() error {

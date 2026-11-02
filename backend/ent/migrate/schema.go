@@ -463,6 +463,8 @@ var (
 		{Name: "client_attestation_policy", Type: field.TypeString, Size: 16, Default: "off"},
 		{Name: "claude_device_limit_mode", Type: field.TypeString, Size: 16, Default: "off"},
 		{Name: "claude_device_base_limit", Type: field.TypeInt, Default: 1},
+		{Name: "claude_entrypoint_policy", Type: field.TypeString, Size: 16, Default: "off"},
+		{Name: "claude_entrypoint_allowlist", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "required_level_id", Type: field.TypeInt64, Nullable: true},
 	}
 	// GroupsTable holds the schema information for the "groups" table.
@@ -473,7 +475,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "groups_access_levels_required_groups",
-				Columns:    []*schema.Column{GroupsColumns[54]},
+				Columns:    []*schema.Column{GroupsColumns[56]},
 				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -512,7 +514,7 @@ var (
 			{
 				Name:    "group_required_level_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[54]},
+				Columns: []*schema.Column{GroupsColumns[56]},
 			},
 		},
 	}

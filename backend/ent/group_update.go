@@ -1010,6 +1010,32 @@ func (_u *GroupUpdate) AddClaudeDeviceBaseLimit(v int) *GroupUpdate {
 	return _u
 }
 
+// SetClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field.
+func (_u *GroupUpdate) SetClaudeEntrypointPolicy(v string) *GroupUpdate {
+	_u.mutation.SetClaudeEntrypointPolicy(v)
+	return _u
+}
+
+// SetNillableClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableClaudeEntrypointPolicy(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetClaudeEntrypointPolicy(*v)
+	}
+	return _u
+}
+
+// SetClaudeEntrypointAllowlist sets the "claude_entrypoint_allowlist" field.
+func (_u *GroupUpdate) SetClaudeEntrypointAllowlist(v []string) *GroupUpdate {
+	_u.mutation.SetClaudeEntrypointAllowlist(v)
+	return _u
+}
+
+// AppendClaudeEntrypointAllowlist appends value to the "claude_entrypoint_allowlist" field.
+func (_u *GroupUpdate) AppendClaudeEntrypointAllowlist(v []string) *GroupUpdate {
+	_u.mutation.AppendClaudeEntrypointAllowlist(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdate) AddAPIKeyIDs(ids ...int64) *GroupUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1331,6 +1357,11 @@ func (_u *GroupUpdate) check() error {
 			return &ValidationError{Name: "claude_device_limit_mode", err: fmt.Errorf(`ent: validator failed for field "Group.claude_device_limit_mode": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ClaudeEntrypointPolicy(); ok {
+		if err := group.ClaudeEntrypointPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "claude_entrypoint_policy", err: fmt.Errorf(`ent: validator failed for field "Group.claude_entrypoint_policy": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -1636,6 +1667,17 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedClaudeDeviceBaseLimit(); ok {
 		_spec.AddField(group.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ClaudeEntrypointPolicy(); ok {
+		_spec.SetField(group.FieldClaudeEntrypointPolicy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClaudeEntrypointAllowlist(); ok {
+		_spec.SetField(group.FieldClaudeEntrypointAllowlist, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedClaudeEntrypointAllowlist(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldClaudeEntrypointAllowlist, value)
+		})
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2953,6 +2995,32 @@ func (_u *GroupUpdateOne) AddClaudeDeviceBaseLimit(v int) *GroupUpdateOne {
 	return _u
 }
 
+// SetClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field.
+func (_u *GroupUpdateOne) SetClaudeEntrypointPolicy(v string) *GroupUpdateOne {
+	_u.mutation.SetClaudeEntrypointPolicy(v)
+	return _u
+}
+
+// SetNillableClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableClaudeEntrypointPolicy(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetClaudeEntrypointPolicy(*v)
+	}
+	return _u
+}
+
+// SetClaudeEntrypointAllowlist sets the "claude_entrypoint_allowlist" field.
+func (_u *GroupUpdateOne) SetClaudeEntrypointAllowlist(v []string) *GroupUpdateOne {
+	_u.mutation.SetClaudeEntrypointAllowlist(v)
+	return _u
+}
+
+// AppendClaudeEntrypointAllowlist appends value to the "claude_entrypoint_allowlist" field.
+func (_u *GroupUpdateOne) AppendClaudeEntrypointAllowlist(v []string) *GroupUpdateOne {
+	_u.mutation.AppendClaudeEntrypointAllowlist(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdateOne) AddAPIKeyIDs(ids ...int64) *GroupUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -3287,6 +3355,11 @@ func (_u *GroupUpdateOne) check() error {
 			return &ValidationError{Name: "claude_device_limit_mode", err: fmt.Errorf(`ent: validator failed for field "Group.claude_device_limit_mode": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ClaudeEntrypointPolicy(); ok {
+		if err := group.ClaudeEntrypointPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "claude_entrypoint_policy", err: fmt.Errorf(`ent: validator failed for field "Group.claude_entrypoint_policy": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -3609,6 +3682,17 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedClaudeDeviceBaseLimit(); ok {
 		_spec.AddField(group.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ClaudeEntrypointPolicy(); ok {
+		_spec.SetField(group.FieldClaudeEntrypointPolicy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClaudeEntrypointAllowlist(); ok {
+		_spec.SetField(group.FieldClaudeEntrypointAllowlist, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedClaudeEntrypointAllowlist(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldClaudeEntrypointAllowlist, value)
+		})
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

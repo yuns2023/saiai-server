@@ -58,6 +58,7 @@ type GatewayHandler struct {
 	usageRecordWorkerPool     *service.UsageRecordWorkerPool
 	inputModerationService    *service.InputModerationService
 	claudeDeviceService       *service.ClaudeDeviceService
+	claudeEntrypointObserver  *service.ClaudeEntrypointObservationService
 	errorPassthroughService   *service.ErrorPassthroughService
 	opsService                *service.OpsService
 	concurrencyHelper         *ConcurrencyHelper
@@ -81,6 +82,7 @@ func NewGatewayHandler(
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
 	inputModerationService *service.InputModerationService,
 	claudeDeviceService *service.ClaudeDeviceService,
+	claudeEntrypointObserver *service.ClaudeEntrypointObservationService,
 	errorPassthroughService *service.ErrorPassthroughService,
 	opsService *service.OpsService,
 	userMsgQueueService *service.UserMessageQueueService,
@@ -117,6 +119,7 @@ func NewGatewayHandler(
 		usageRecordWorkerPool:     usageRecordWorkerPool,
 		inputModerationService:    inputModerationService,
 		claudeDeviceService:       claudeDeviceService,
+		claudeEntrypointObserver:  claudeEntrypointObserver,
 		errorPassthroughService:   errorPassthroughService,
 		opsService:                opsService,
 		concurrencyHelper:         NewConcurrencyHelper(concurrencyService, SSEPingFormatClaude, pingInterval),
@@ -593,6 +596,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	SetClaudeCodeClientContext(c, body, parsedReq)
 	isClaudeCodeClient := service.IsClaudeCodeClient(c.Request.Context())
 
+	// Claude entrypoint allowlist: checked for every group this request can be
+	// sent through. The initial check runs before the version gate so that
+	// version-rejected clients are observed too.
+	entrypointPolicy := newClaudeEntrypointPolicyState(c, body, subject.UserID, apiKey.ID)
+	if !h.applyClaudeEntrypointPolicyForKey(c, entrypointPolicy, apiKey, false) {
+		return
+	}
+
 	// 版本检查：仅对 Claude Code 客户端，拒绝低于最低版本的请求
 	if !h.checkClaudeCodeVersion(c) {
 		return
@@ -984,6 +995,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", shapeErr.Error(), streamStarted)
 						return
 					}
+					if !h.applyClaudeEntrypointPolicyForKey(c, entrypointPolicy, currentAPIKey, streamStarted) {
+						return
+					}
 					var rebound bool
 					sessionKey, sessionBoundAccountID, stickyBindingSource, rebound = h.rebindSmartSwitchGroupState(c, currentAPIKey, platform, parsedReq, streamStarted)
 					if !rebound {
@@ -1302,6 +1316,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						// 兜底重试按"直接请求兜底分组"处理：清除强制平台，允许按分组平台调度
 						ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, "")
 						c.Request = c.Request.WithContext(ctx)
+						if !h.applyClaudeEntrypointPolicyForKey(c, entrypointPolicy, fallbackAPIKey, streamStarted) {
+							return
+						}
 						currentAPIKey = fallbackAPIKey
 						currentSubscription = nil
 						fallbackUsed = true

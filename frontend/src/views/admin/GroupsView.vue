@@ -712,6 +712,18 @@
           </div>
         </div>
 
+        <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
+          <h4 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ t('admin.groups.claudeEntrypoint.title') }}
+          </h4>
+          <ClaudeEntrypointPolicyEditor
+            v-model:policy="createForm.claude_entrypoint_policy"
+            v-model:allowlist="createForm.claude_entrypoint_allowlist"
+            :group-id="null"
+            testid-prefix="createForm"
+          />
+        </div>
+
         <div v-if="createForm.platform === 'openai'" class="border-t pt-4">
           <label class="input-label">{{ t('admin.groups.clientLimits.codexPolicy') }}</label>
           <select v-model="createForm.codex_client_policy" class="input w-full">
@@ -1512,6 +1524,18 @@
           </div>
         </div>
 
+        <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
+          <h4 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ t('admin.groups.claudeEntrypoint.title') }}
+          </h4>
+          <ClaudeEntrypointPolicyEditor
+            v-model:policy="editForm.claude_entrypoint_policy"
+            v-model:allowlist="editForm.claude_entrypoint_allowlist"
+            :group-id="editingGroup?.id ?? null"
+            testid-prefix="editForm"
+          />
+        </div>
+
         <div v-if="editForm.platform === 'openai'" class="border-t pt-4">
           <label class="input-label">{{ t('admin.groups.clientLimits.codexPolicy') }}</label>
           <select v-model="editForm.codex_client_policy" class="input w-full">
@@ -1978,7 +2002,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { adminAPI } from '@/api/admin'
-import type { InputModerationPolicy, AccessLevel, AdminGroup, ClaudeEnvironmentMode, GroupPlatform, SubscriptionType } from '@/types'
+import type { InputModerationPolicy, AccessLevel, AdminGroup, ClaudeEntrypointPolicy, ClaudeEnvironmentMode, GroupPlatform, SubscriptionType } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -1992,6 +2016,7 @@ import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import GroupRateMultipliersModal from '@/components/admin/group/GroupRateMultipliersModal.vue'
 import ModerationPolicyEditor from '@/components/admin/group/ModerationPolicyEditor.vue'
+import ClaudeEntrypointPolicyEditor from '@/components/admin/group/ClaudeEntrypointPolicyEditor.vue'
 import GroupCapacityBadge from '@/components/common/GroupCapacityBadge.vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
@@ -2187,6 +2212,9 @@ const sortableGroups = ref<AdminGroup[]>([])
 
 
 
+// Mirrors service.DefaultClaudeEntrypointAllowlist (migration 117 default).
+const DEFAULT_CLAUDE_ENTRYPOINT_ALLOWLIST = ['cli', 'claude-vscode', 'sdk-cli']
+
 const createForm = reactive({
   name: '',
   description: '',
@@ -2229,6 +2257,8 @@ const createForm = reactive({
   codex_timezone_action: 'reject' as 'reject' | 'rewrite',
   client_attestation_policy: 'off' as 'off' | 'observe',
   claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
+  claude_entrypoint_policy: 'off' as ClaudeEntrypointPolicy,
+  claude_entrypoint_allowlist: [...DEFAULT_CLAUDE_ENTRYPOINT_ALLOWLIST] as string[],
   claude_device_base_limit: 1,
   // 模型路由开关
   model_routing_enabled: false,
@@ -2494,6 +2524,8 @@ const editForm = reactive({
   codex_timezone_action: 'reject' as 'reject' | 'rewrite',
   client_attestation_policy: 'off' as 'off' | 'observe',
   claude_device_limit_mode: 'off' as 'off' | 'audit' | 'enforce',
+  claude_entrypoint_policy: 'off' as ClaudeEntrypointPolicy,
+  claude_entrypoint_allowlist: [...DEFAULT_CLAUDE_ENTRYPOINT_ALLOWLIST] as string[],
   claude_device_base_limit: 1,
   // 模型路由开关
   model_routing_enabled: false,
@@ -2654,6 +2686,8 @@ const closeCreateModal = () => {
   createForm.codex_timezone_action = 'reject'
   createForm.client_attestation_policy = 'off'
   createForm.claude_device_limit_mode = 'off'
+  createForm.claude_entrypoint_policy = 'off'
+  createForm.claude_entrypoint_allowlist = [...DEFAULT_CLAUDE_ENTRYPOINT_ALLOWLIST]
   createForm.claude_device_base_limit = 1
   createForm.copy_accounts_from_group_ids = []
   createModelRoutingRules.value = []
@@ -2763,6 +2797,10 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.client_attestation_policy = group.client_attestation_policy === 'observe' ? 'observe' : 'off'
   editForm.claude_device_limit_mode = group.claude_device_limit_mode || 'off'
   editForm.claude_device_base_limit = group.claude_device_base_limit || 1
+  editForm.claude_entrypoint_policy = group.claude_entrypoint_policy || 'off'
+  editForm.claude_entrypoint_allowlist = Array.isArray(group.claude_entrypoint_allowlist)
+    ? [...group.claude_entrypoint_allowlist]
+    : [...DEFAULT_CLAUDE_ENTRYPOINT_ALLOWLIST]
   editForm.model_routing_enabled = group.model_routing_enabled || false
   editForm.copy_accounts_from_group_ids = [] // 复制账号字段每次编辑时重置为空
   // 加载模型路由规则（异步加载账号名称）
@@ -2884,6 +2922,7 @@ watch(
     }
     if (newVal !== 'anthropic') {
       createForm.fallback_group_id_on_invalid_request = null
+      createForm.claude_entrypoint_policy = 'off'
     }
     if (newVal !== 'openai') {
       createForm.codex_client_policy = 'off'
@@ -2903,6 +2942,7 @@ watch(
     }
     if (newVal !== 'anthropic') {
       editForm.fallback_group_id_on_invalid_request = null
+      editForm.claude_entrypoint_policy = 'off'
     }
     if (newVal !== 'openai') {
       editForm.codex_client_policy = 'off'

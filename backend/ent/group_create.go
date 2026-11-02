@@ -730,6 +730,26 @@ func (_c *GroupCreate) SetNillableClaudeDeviceBaseLimit(v *int) *GroupCreate {
 	return _c
 }
 
+// SetClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field.
+func (_c *GroupCreate) SetClaudeEntrypointPolicy(v string) *GroupCreate {
+	_c.mutation.SetClaudeEntrypointPolicy(v)
+	return _c
+}
+
+// SetNillableClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableClaudeEntrypointPolicy(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetClaudeEntrypointPolicy(*v)
+	}
+	return _c
+}
+
+// SetClaudeEntrypointAllowlist sets the "claude_entrypoint_allowlist" field.
+func (_c *GroupCreate) SetClaudeEntrypointAllowlist(v []string) *GroupCreate {
+	_c.mutation.SetClaudeEntrypointAllowlist(v)
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *GroupCreate) AddAPIKeyIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -1008,6 +1028,14 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultClaudeDeviceBaseLimit
 		_c.mutation.SetClaudeDeviceBaseLimit(v)
 	}
+	if _, ok := _c.mutation.ClaudeEntrypointPolicy(); !ok {
+		v := group.DefaultClaudeEntrypointPolicy
+		_c.mutation.SetClaudeEntrypointPolicy(v)
+	}
+	if _, ok := _c.mutation.ClaudeEntrypointAllowlist(); !ok {
+		v := group.DefaultClaudeEntrypointAllowlist
+		_c.mutation.SetClaudeEntrypointAllowlist(v)
+	}
 	return nil
 }
 
@@ -1165,6 +1193,17 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.ClaudeDeviceBaseLimit(); !ok {
 		return &ValidationError{Name: "claude_device_base_limit", err: errors.New(`ent: missing required field "Group.claude_device_base_limit"`)}
+	}
+	if _, ok := _c.mutation.ClaudeEntrypointPolicy(); !ok {
+		return &ValidationError{Name: "claude_entrypoint_policy", err: errors.New(`ent: missing required field "Group.claude_entrypoint_policy"`)}
+	}
+	if v, ok := _c.mutation.ClaudeEntrypointPolicy(); ok {
+		if err := group.ClaudeEntrypointPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "claude_entrypoint_policy", err: fmt.Errorf(`ent: validator failed for field "Group.claude_entrypoint_policy": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.ClaudeEntrypointAllowlist(); !ok {
+		return &ValidationError{Name: "claude_entrypoint_allowlist", err: errors.New(`ent: missing required field "Group.claude_entrypoint_allowlist"`)}
 	}
 	return nil
 }
@@ -1404,6 +1443,14 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ClaudeDeviceBaseLimit(); ok {
 		_spec.SetField(group.FieldClaudeDeviceBaseLimit, field.TypeInt, value)
 		_node.ClaudeDeviceBaseLimit = value
+	}
+	if value, ok := _c.mutation.ClaudeEntrypointPolicy(); ok {
+		_spec.SetField(group.FieldClaudeEntrypointPolicy, field.TypeString, value)
+		_node.ClaudeEntrypointPolicy = value
+	}
+	if value, ok := _c.mutation.ClaudeEntrypointAllowlist(); ok {
+		_spec.SetField(group.FieldClaudeEntrypointAllowlist, field.TypeJSON, value)
+		_node.ClaudeEntrypointAllowlist = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -2457,6 +2504,30 @@ func (u *GroupUpsert) UpdateClaudeDeviceBaseLimit() *GroupUpsert {
 // AddClaudeDeviceBaseLimit adds v to the "claude_device_base_limit" field.
 func (u *GroupUpsert) AddClaudeDeviceBaseLimit(v int) *GroupUpsert {
 	u.Add(group.FieldClaudeDeviceBaseLimit, v)
+	return u
+}
+
+// SetClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field.
+func (u *GroupUpsert) SetClaudeEntrypointPolicy(v string) *GroupUpsert {
+	u.Set(group.FieldClaudeEntrypointPolicy, v)
+	return u
+}
+
+// UpdateClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateClaudeEntrypointPolicy() *GroupUpsert {
+	u.SetExcluded(group.FieldClaudeEntrypointPolicy)
+	return u
+}
+
+// SetClaudeEntrypointAllowlist sets the "claude_entrypoint_allowlist" field.
+func (u *GroupUpsert) SetClaudeEntrypointAllowlist(v []string) *GroupUpsert {
+	u.Set(group.FieldClaudeEntrypointAllowlist, v)
+	return u
+}
+
+// UpdateClaudeEntrypointAllowlist sets the "claude_entrypoint_allowlist" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateClaudeEntrypointAllowlist() *GroupUpsert {
+	u.SetExcluded(group.FieldClaudeEntrypointAllowlist)
 	return u
 }
 
@@ -3531,6 +3602,34 @@ func (u *GroupUpsertOne) AddClaudeDeviceBaseLimit(v int) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateClaudeDeviceBaseLimit() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateClaudeDeviceBaseLimit()
+	})
+}
+
+// SetClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field.
+func (u *GroupUpsertOne) SetClaudeEntrypointPolicy(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClaudeEntrypointPolicy(v)
+	})
+}
+
+// UpdateClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateClaudeEntrypointPolicy() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClaudeEntrypointPolicy()
+	})
+}
+
+// SetClaudeEntrypointAllowlist sets the "claude_entrypoint_allowlist" field.
+func (u *GroupUpsertOne) SetClaudeEntrypointAllowlist(v []string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClaudeEntrypointAllowlist(v)
+	})
+}
+
+// UpdateClaudeEntrypointAllowlist sets the "claude_entrypoint_allowlist" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateClaudeEntrypointAllowlist() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClaudeEntrypointAllowlist()
 	})
 }
 
@@ -4771,6 +4870,34 @@ func (u *GroupUpsertBulk) AddClaudeDeviceBaseLimit(v int) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateClaudeDeviceBaseLimit() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateClaudeDeviceBaseLimit()
+	})
+}
+
+// SetClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field.
+func (u *GroupUpsertBulk) SetClaudeEntrypointPolicy(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClaudeEntrypointPolicy(v)
+	})
+}
+
+// UpdateClaudeEntrypointPolicy sets the "claude_entrypoint_policy" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateClaudeEntrypointPolicy() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClaudeEntrypointPolicy()
+	})
+}
+
+// SetClaudeEntrypointAllowlist sets the "claude_entrypoint_allowlist" field.
+func (u *GroupUpsertBulk) SetClaudeEntrypointAllowlist(v []string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClaudeEntrypointAllowlist(v)
+	})
+}
+
+// UpdateClaudeEntrypointAllowlist sets the "claude_entrypoint_allowlist" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateClaudeEntrypointAllowlist() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClaudeEntrypointAllowlist()
 	})
 }
 

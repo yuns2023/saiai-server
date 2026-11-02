@@ -75,6 +75,10 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 	if groupIn.ClaudeDeviceBaseLimit <= 0 {
 		groupIn.ClaudeDeviceBaseLimit = 1
 	}
+	groupIn.ClaudeEntrypointPolicy = service.NormalizeClaudeEntrypointPolicy(groupIn.ClaudeEntrypointPolicy)
+	if groupIn.ClaudeEntrypointAllowlist == nil {
+		groupIn.ClaudeEntrypointAllowlist = service.DefaultClaudeEntrypointAllowlist()
+	}
 	builder := r.client.Group.Create().
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
@@ -120,7 +124,9 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetCodexTimezoneAction(groupIn.CodexTimezoneAction).
 		SetClientAttestationPolicy(groupIn.ClientAttestationPolicy).
 		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
-		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)
+		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit).
+		SetClaudeEntrypointPolicy(groupIn.ClaudeEntrypointPolicy).
+		SetClaudeEntrypointAllowlist(groupIn.ClaudeEntrypointAllowlist)
 
 	// 模型路由 JSONB 也承载无需迁移的分组兼容开关。
 	if storedRouting := service.EncodeGroupModelRouting(groupIn.ModelRouting, groupIn.EffectiveClaudeEnvironmentMode()); storedRouting != nil {
@@ -219,7 +225,9 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetCodexTimezoneAction(service.NormalizeCodexTimezoneAction(groupIn.CodexTimezoneAction)).
 		SetClientAttestationPolicy(service.NormalizeClientAttestationPolicy(groupIn.ClientAttestationPolicy)).
 		SetClaudeDeviceLimitMode(groupIn.ClaudeDeviceLimitMode).
-		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit)
+		SetClaudeDeviceBaseLimit(groupIn.ClaudeDeviceBaseLimit).
+		SetClaudeEntrypointPolicy(service.NormalizeClaudeEntrypointPolicy(groupIn.ClaudeEntrypointPolicy)).
+		SetClaudeEntrypointAllowlist(groupIn.EffectiveClaudeEntrypointAllowlist())
 	if groupIn.RequiredLevelID != nil {
 		builder = builder.SetRequiredLevelID(*groupIn.RequiredLevelID)
 	} else {

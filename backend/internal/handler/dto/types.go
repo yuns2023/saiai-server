@@ -159,6 +159,8 @@ type AdminGroup struct {
 	ClientAttestationPolicy          string                         `json:"client_attestation_policy"`
 	ClaudeDeviceLimitMode            string                         `json:"claude_device_limit_mode"`
 	ClaudeDeviceBaseLimit            int                            `json:"claude_device_base_limit"`
+	ClaudeEntrypointPolicy           string                         `json:"claude_entrypoint_policy"`
+	ClaudeEntrypointAllowlist        []string                       `json:"claude_entrypoint_allowlist"`
 
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64 `json:"model_routing"`

@@ -2392,6 +2392,55 @@ export default {
         enforce: '强制限制',
         baseDevices: '基础设备数量'
       },
+      claudeEntrypoint: {
+        title: 'Claude 客户端入口白名单',
+        policy: '入口检查模式',
+        policyOff: '关闭',
+        policyObserve: '观察（只记录，不拦截）',
+        policyEnforce: '拦截',
+        policyOffHint: '不检查 POST /v1/messages 请求声明的 Claude 客户端入口，也不记录观察清单。',
+        policyObserveHint: '记录每个请求的 UA 入口与请求体计费头 cc_entrypoint，并标出不符合白名单的请求；不会拒绝任何请求。建议先观察几天再切到拦截。',
+        policyEnforceHint: '仅当 UA 入口和请求体 cc_entrypoint 都在白名单内且两者一致时放行，否则返回 HTTP 400（claude_entrypoint_not_allowed）。入口由客户端自行声明，只能过滤第三方客户端，不能证明请求来自官方客户端。',
+        allowlist: '允许的入口',
+        allowlistPlaceholder: '输入入口后按回车或逗号添加',
+        allowlistHint: '默认：cli, claude-vscode, sdk-cli。每项为小写字母、数字、点、下划线或连字符，最多 32 项；清空表示不允许任何入口。',
+        allowlistInvalid: '入口格式无效：{value}',
+        allowlistTooMany: '最多 32 项',
+        restoreDefault: '恢复默认',
+        removeItem: '移除',
+        observations: '入口观察清单',
+        observationsHint: '仅记录观察或拦截模式下的请求，约每 30 秒写入一次；按 UTC 日期统计，保留 90 天。',
+        observationsEmpty: '所选时间范围内暂无记录',
+        observationsLoadFailed: '加载入口观察清单失败',
+        days: '最近 {days} 天',
+        refresh: '刷新',
+        addToAllowlist: '加入白名单',
+        addedToAllowlist: '已加入白名单，保存后生效',
+        columns: {
+          uaEntrypoint: 'UA 入口',
+          bodyEntrypoint: '请求体入口',
+          version: '版本',
+          result: '结果',
+          reason: '原因',
+          requests: '请求数',
+          lastSeen: '最后出现',
+          sampleUserAgent: 'UA 样例'
+        },
+        results: {
+          allowed: '放行',
+          violation_observed: '不符合（仅观察）',
+          rejected: '已拦截'
+        },
+        reasons: {
+          ok: '符合',
+          ua_not_allowed: 'UA 入口不在白名单',
+          body_missing: '请求体缺少计费头',
+          body_malformed: '计费头格式错误',
+          body_ambiguous: '计费头重复或有歧义',
+          body_not_allowed: '请求体入口不在白名单',
+          mismatch: 'UA 与请求体入口不一致'
+        }
+      },
       invalidRequestFallback: {
         title: '无效请求兜底分组',
         hint: '仅当上游明确返回 prompt too long 时才会触发，留空表示不兜底',

@@ -12,7 +12,8 @@ import (
 // v2: groups.codex_cn_timezone_guard.
 // v3: groups.codex_timezone_action.
 // v4: groups.client_attestation_policy.
-const apiKeyAuthSnapshotSchemaVersion = 4
+// v5: groups.claude_entrypoint_policy / claude_entrypoint_allowlist.
+const apiKeyAuthSnapshotSchemaVersion = 5
 
 // APIKeyAuthSnapshot API Key 认证缓存快照（仅包含认证所需字段）
 type APIKeyAuthSnapshot struct {
@@ -115,6 +116,8 @@ type APIKeyAuthGroupSnapshot struct {
 	ClientAttestationPolicy          string                 `json:"client_attestation_policy"`
 	ClaudeDeviceLimitMode            string                 `json:"claude_device_limit_mode"`
 	ClaudeDeviceBaseLimit            int                    `json:"claude_device_base_limit"`
+	ClaudeEntrypointPolicy           string                 `json:"claude_entrypoint_policy"`
+	ClaudeEntrypointAllowlist        []string               `json:"claude_entrypoint_allowlist"`
 }
 
 // APIKeyAuthCacheEntry 缓存条目，支持负缓存

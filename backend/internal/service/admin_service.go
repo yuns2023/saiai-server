@@ -190,6 +190,9 @@ type CreateGroupInput struct {
 	ClientAttestationPolicy          string
 	ClaudeDeviceLimitMode            string
 	ClaudeDeviceBaseLimit            int
+	// Claude entrypoint allowlist: "" means off; a nil allowlist uses the default.
+	ClaudeEntrypointPolicy    string
+	ClaudeEntrypointAllowlist []string
 	// 从指定分组复制账号（创建分组后在同一事务内绑定）
 	CopyAccountsFromGroupIDs []int64
 }
@@ -253,6 +256,10 @@ type UpdateGroupInput struct {
 	ClientAttestationPolicy          *string
 	ClaudeDeviceLimitMode            *string
 	ClaudeDeviceBaseLimit            *int
+	// Claude entrypoint allowlist: nil keeps the stored value; a non-nil empty
+	// allowlist stores [] (nothing allowed).
+	ClaudeEntrypointPolicy    *string
+	ClaudeEntrypointAllowlist *[]string
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64
 }
@@ -1072,6 +1079,20 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		}
 	}
 
+	claudeEntrypointPolicy, err := ValidateClaudeEntrypointPolicy(input.ClaudeEntrypointPolicy)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateClaudeEntrypointPolicyPlatform(claudeEntrypointPolicy, platform); err != nil {
+		return nil, err
+	}
+	claudeEntrypointAllowlist := DefaultClaudeEntrypointAllowlist()
+	if input.ClaudeEntrypointAllowlist != nil {
+		if claudeEntrypointAllowlist, err = NormalizeClaudeEntrypointAllowlist(input.ClaudeEntrypointAllowlist); err != nil {
+			return nil, err
+		}
+	}
+
 	claudeEnvironmentMode := NormalizeClaudeEnvironmentMode(input.ClaudeEnvironmentMode, input.ClaudeEnvironmentRewrite)
 	group := &Group{
 		Name:                             input.Name,
@@ -1124,6 +1145,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ClientAttestationPolicy:          NormalizeClientAttestationPolicy(input.ClientAttestationPolicy),
 		ClaudeDeviceLimitMode:            normalizeClaudeDeviceLimitMode(input.ClaudeDeviceLimitMode),
 		ClaudeDeviceBaseLimit:            normalizePositiveInt(input.ClaudeDeviceBaseLimit, 1, 1, 100),
+		ClaudeEntrypointPolicy:           claudeEntrypointPolicy,
+		ClaudeEntrypointAllowlist:        claudeEntrypointAllowlist,
 	}
 	if err := group.ValidateHostedUsage(); err != nil {
 		return nil, err
@@ -1516,6 +1539,25 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.ClaudeDeviceBaseLimit != nil {
 		group.ClaudeDeviceBaseLimit = normalizePositiveInt(*input.ClaudeDeviceBaseLimit, 1, 1, 100)
+	}
+	if input.ClaudeEntrypointPolicy != nil {
+		policy, policyErr := ValidateClaudeEntrypointPolicy(*input.ClaudeEntrypointPolicy)
+		if policyErr != nil {
+			return nil, policyErr
+		}
+		group.ClaudeEntrypointPolicy = policy
+	}
+	if input.ClaudeEntrypointAllowlist != nil {
+		allowlist, allowlistErr := NormalizeClaudeEntrypointAllowlist(*input.ClaudeEntrypointAllowlist)
+		if allowlistErr != nil {
+			return nil, allowlistErr
+		}
+		group.ClaudeEntrypointAllowlist = allowlist
+	}
+	// Checked on the final platform so a platform change cannot leave an
+	// active policy on a non-anthropic group.
+	if err := validateClaudeEntrypointPolicyPlatform(group.ClaudeEntrypointPolicyMode(), group.Platform); err != nil {
+		return nil, err
 	}
 
 	if err := group.ValidateHostedUsage(); err != nil {

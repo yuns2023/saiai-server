@@ -110,6 +110,9 @@ type Group struct {
 	ClientAttestationPolicy          string
 	ClaudeDeviceLimitMode            string
 	ClaudeDeviceBaseLimit            int
+	// Claude entrypoint allowlist for /v1/messages (claude_entrypoint_policy.go).
+	ClaudeEntrypointPolicy    string
+	ClaudeEntrypointAllowlist []string
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

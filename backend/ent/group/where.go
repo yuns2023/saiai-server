@@ -295,6 +295,11 @@ func ClaudeDeviceBaseLimit(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldClaudeDeviceBaseLimit, v))
 }
 
+// ClaudeEntrypointPolicy applies equality check predicate on the "claude_entrypoint_policy" field. It's identical to ClaudeEntrypointPolicyEQ.
+func ClaudeEntrypointPolicy(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldClaudeEntrypointPolicy, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCreatedAt, v))
@@ -2293,6 +2298,71 @@ func ClaudeDeviceBaseLimitLT(v int) predicate.Group {
 // ClaudeDeviceBaseLimitLTE applies the LTE predicate on the "claude_device_base_limit" field.
 func ClaudeDeviceBaseLimitLTE(v int) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldClaudeDeviceBaseLimit, v))
+}
+
+// ClaudeEntrypointPolicyEQ applies the EQ predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldClaudeEntrypointPolicy, v))
+}
+
+// ClaudeEntrypointPolicyNEQ applies the NEQ predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldClaudeEntrypointPolicy, v))
+}
+
+// ClaudeEntrypointPolicyIn applies the In predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldClaudeEntrypointPolicy, vs...))
+}
+
+// ClaudeEntrypointPolicyNotIn applies the NotIn predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldClaudeEntrypointPolicy, vs...))
+}
+
+// ClaudeEntrypointPolicyGT applies the GT predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldClaudeEntrypointPolicy, v))
+}
+
+// ClaudeEntrypointPolicyGTE applies the GTE predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldClaudeEntrypointPolicy, v))
+}
+
+// ClaudeEntrypointPolicyLT applies the LT predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldClaudeEntrypointPolicy, v))
+}
+
+// ClaudeEntrypointPolicyLTE applies the LTE predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldClaudeEntrypointPolicy, v))
+}
+
+// ClaudeEntrypointPolicyContains applies the Contains predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldClaudeEntrypointPolicy, v))
+}
+
+// ClaudeEntrypointPolicyHasPrefix applies the HasPrefix predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldClaudeEntrypointPolicy, v))
+}
+
+// ClaudeEntrypointPolicyHasSuffix applies the HasSuffix predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldClaudeEntrypointPolicy, v))
+}
+
+// ClaudeEntrypointPolicyEqualFold applies the EqualFold predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldClaudeEntrypointPolicy, v))
+}
+
+// ClaudeEntrypointPolicyContainsFold applies the ContainsFold predicate on the "claude_entrypoint_policy" field.
+func ClaudeEntrypointPolicyContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldClaudeEntrypointPolicy, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

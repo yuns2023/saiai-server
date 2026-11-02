@@ -454,6 +454,14 @@ func ProvideIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Co
 	return svc
 }
 
+// ProvideClaudeEntrypointObservationService creates and starts the Claude
+// entrypoint observation recorder (flushed on shutdown by provideCleanup).
+func ProvideClaudeEntrypointObservationService(repo ClaudeEntrypointObservationRepository) *ClaudeEntrypointObservationService {
+	svc := NewClaudeEntrypointObservationService(repo)
+	svc.Start()
+	return svc
+}
+
 // ProvideScheduledTestService creates ScheduledTestService.
 func ProvideScheduledTestService(
 	planRepo ScheduledTestPlanRepository,
@@ -609,6 +617,7 @@ var ProviderSet = wire.NewSet(
 	NewDigestSessionStore,
 	ProvideIdempotencyCoordinator,
 	ProvideIdempotencyCleanupService,
+	ProvideClaudeEntrypointObservationService,
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
 	NewGroupCapacityService,

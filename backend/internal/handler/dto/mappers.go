@@ -163,6 +163,8 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		ClientAttestationPolicy:          g.ClientAttestationPolicy,
 		ClaudeDeviceLimitMode:            g.ClaudeDeviceLimitMode,
 		ClaudeDeviceBaseLimit:            g.ClaudeDeviceBaseLimit,
+		ClaudeEntrypointPolicy:           g.ClaudeEntrypointPolicyMode(),
+		ClaudeEntrypointAllowlist:        g.EffectiveClaudeEntrypointAllowlist(),
 		ModelRouting:                     g.ModelRouting,
 		ModelRoutingEnabled:              g.ModelRoutingEnabled,
 		BlockedModelPatterns:             g.BlockedModelPatterns,

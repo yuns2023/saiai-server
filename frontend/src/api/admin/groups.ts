@@ -9,7 +9,8 @@ import type {
   GroupPlatform,
   CreateGroupRequest,
   UpdateGroupRequest,
-  PaginatedResponse
+  PaginatedResponse,
+  ClaudeEntrypointObservation
 } from '@/types'
 
 /**
@@ -246,6 +247,23 @@ export async function getCapacitySummary(): Promise<
   return data
 }
 
+/**
+ * List the Claude entrypoints declared by requests to a group (observe/enforce
+ * groups only; flushed every 30 s).
+ * @param id - Group ID
+ * @param days - UTC days to include (1..90)
+ */
+export async function getClaudeEntrypointObservations(
+  id: number,
+  days = 7
+): Promise<{ days: number; items: ClaudeEntrypointObservation[] }> {
+  const { data } = await apiClient.get<{ days: number; items: ClaudeEntrypointObservation[] }>(
+    `/admin/groups/${id}/claude-entrypoint-observations`,
+    { params: { days } }
+  )
+  return data
+}
+
 export const groupsAPI = {
   list,
   getAll,
@@ -262,7 +280,8 @@ export const groupsAPI = {
   batchSetGroupRateMultipliers,
   updateSortOrder,
   getUsageSummary,
-  getCapacitySummary
+  getCapacitySummary,
+  getClaudeEntrypointObservations
 }
 
 export default groupsAPI

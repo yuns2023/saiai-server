@@ -54,6 +54,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // moderationEvidenceCleanup
 		&service.UsageCleanupService{},
 		idempotencyCleanupSvc,
+		nil, // claudeEntrypointObservations (Stop is nil-safe)
 		pricingSvc,
 		emailQueueSvc,
 		billingCacheSvc,

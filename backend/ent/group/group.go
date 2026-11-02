@@ -123,6 +123,10 @@ const (
 	FieldClaudeDeviceLimitMode = "claude_device_limit_mode"
 	// FieldClaudeDeviceBaseLimit holds the string denoting the claude_device_base_limit field in the database.
 	FieldClaudeDeviceBaseLimit = "claude_device_base_limit"
+	// FieldClaudeEntrypointPolicy holds the string denoting the claude_entrypoint_policy field in the database.
+	FieldClaudeEntrypointPolicy = "claude_entrypoint_policy"
+	// FieldClaudeEntrypointAllowlist holds the string denoting the claude_entrypoint_allowlist field in the database.
+	FieldClaudeEntrypointAllowlist = "claude_entrypoint_allowlist"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -261,6 +265,8 @@ var Columns = []string{
 	FieldClientAttestationPolicy,
 	FieldClaudeDeviceLimitMode,
 	FieldClaudeDeviceBaseLimit,
+	FieldClaudeEntrypointPolicy,
+	FieldClaudeEntrypointAllowlist,
 }
 
 var (
@@ -380,6 +386,12 @@ var (
 	ClaudeDeviceLimitModeValidator func(string) error
 	// DefaultClaudeDeviceBaseLimit holds the default value on creation for the "claude_device_base_limit" field.
 	DefaultClaudeDeviceBaseLimit int
+	// DefaultClaudeEntrypointPolicy holds the default value on creation for the "claude_entrypoint_policy" field.
+	DefaultClaudeEntrypointPolicy string
+	// ClaudeEntrypointPolicyValidator is a validator for the "claude_entrypoint_policy" field. It is called by the builders before save.
+	ClaudeEntrypointPolicyValidator func(string) error
+	// DefaultClaudeEntrypointAllowlist holds the default value on creation for the "claude_entrypoint_allowlist" field.
+	DefaultClaudeEntrypointAllowlist []string
 )
 
 // OrderOption defines the ordering options for the Group queries.
@@ -628,6 +640,11 @@ func ByClaudeDeviceLimitMode(opts ...sql.OrderTermOption) OrderOption {
 // ByClaudeDeviceBaseLimit orders the results by the claude_device_base_limit field.
 func ByClaudeDeviceBaseLimit(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldClaudeDeviceBaseLimit, opts...).ToFunc()
+}
+
+// ByClaudeEntrypointPolicy orders the results by the claude_entrypoint_policy field.
+func ByClaudeEntrypointPolicy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClaudeEntrypointPolicy, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

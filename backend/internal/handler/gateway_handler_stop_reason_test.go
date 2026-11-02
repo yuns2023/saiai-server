@@ -224,7 +224,7 @@ func TestGatewayHandlerMessages_FailoverRecordsOnlyFinalStopReasonAndWarnsOnce(t
 	gateway := service.NewGatewayService(accounts, stopReasonGroupRepo{group: group}, usageRepo, stopReasonBillingRepo{}, users, nil, nil, stopReasonGatewayCache{}, cfg,
 		nil, concurrency, service.NewBillingService(cfg, pricing), rateLimit, billingCache, nil, repository.NewHTTPUpstream(cfg),
 		&service.DeferredService{}, nil, nil, nil, nil, nil)
-	h := NewGatewayHandler(gateway, nil, nil, nil, concurrency, billingCache, nil, nil, nil, nil, nil, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gateway, nil, nil, nil, concurrency, billingCache, nil, nil, nil, nil, nil, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{ID: 801, UserID: user.ID, Key: "TEST_ONLY_KEY", Status: service.StatusActive, GroupID: &groupID, User: user,
 		Group: group}
