@@ -245,24 +245,33 @@ function resultClass(result: string): string {
   return 'text-green-600 dark:text-green-400'
 }
 
+// Only the latest request may update the list (days or group may change
+// while an older request is still in flight).
+let loadSeq = 0
+
 async function loadObservations() {
   if (!props.groupId) return
+  const seq = ++loadSeq
   loading.value = true
   loadError.value = ''
   try {
     const data = await adminAPI.groups.getClaudeEntrypointObservations(props.groupId, days.value)
+    if (seq !== loadSeq) return
     observations.value = data.items || []
   } catch {
+    if (seq !== loadSeq) return
     observations.value = []
     loadError.value = t('admin.groups.claudeEntrypoint.observationsLoadFailed')
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
 watch(
   () => [props.groupId, props.policy !== 'off'] as const,
   ([groupId, active]) => {
+    loadSeq++
+    loading.value = false
     observations.value = []
     if (groupId && active) void loadObservations()
   },

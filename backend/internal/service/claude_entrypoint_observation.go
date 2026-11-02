@@ -126,14 +126,12 @@ func (s *ClaudeEntrypointObservationService) Record(in ClaudeEntrypointObservati
 	if s == nil {
 		return
 	}
-	now := s.now().UTC()
 	bodyEntrypoint := claudebilling.EntrypointNone
 	if in.Facts.BodyStatus == claudebilling.EntrypointBodyValid {
 		bodyEntrypoint = claudebilling.SanitizeEntrypointForRecord(in.Facts.BodyEntrypoint)
 	}
 	key := ClaudeEntrypointObservationKey{
 		GroupID:        in.GroupID,
-		Day:            now.Format("2006-01-02"),
 		UAEntrypoint:   claudebilling.SanitizeEntrypointForRecord(in.Facts.UAEntrypoint),
 		BodyEntrypoint: bodyEntrypoint,
 		BodyStatus:     in.Facts.BodyStatus,
@@ -146,6 +144,9 @@ func (s *ClaudeEntrypointObservationService) Record(in ClaudeEntrypointObservati
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// The clock is read under the lock so first/last seen stay ordered.
+	now := s.now().UTC()
+	key.Day = now.Format("2006-01-02")
 	if row, ok := s.pending[key]; ok {
 		row.Requests++
 		row.LastSeenAt = now
@@ -276,7 +277,8 @@ func (s *ClaudeEntrypointObservationService) DeleteExpired(ctx context.Context) 
 	if s == nil || s.repo == nil {
 		return
 	}
-	before := s.now().UTC().AddDate(0, 0, -claudeEntrypointObservationRetentionDays).Format("2006-01-02")
+	// Keeps exactly the 90 UTC days (today included) the admin list can show.
+	before := s.now().UTC().AddDate(0, 0, -(claudeEntrypointObservationRetentionDays - 1)).Format("2006-01-02")
 	writeCtx, cancel := context.WithTimeout(ctx, claudeEntrypointObservationWriteTimeout)
 	defer cancel()
 	if _, err := s.repo.DeleteClaudeEntrypointObservationsBefore(writeCtx, before); err != nil {

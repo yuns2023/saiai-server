@@ -50,7 +50,9 @@ outside the top-level `system` field.
   escapes decoded). Exactly one `x-anthropic-billing-header:` must appear
   (0 → `missing`, more → `ambiguous`); on that header's line exactly one
   non-empty `cc_entrypoint=<value>;` must appear (none/empty → `malformed`,
-  several → `ambiguous`). A header in `messages` or `tools` is ignored.
+  several → `ambiguous`). Fields are split on `;` and only a field named
+  exactly `cc_entrypoint` counts. A `system` block with duplicate `type` or
+  `text` keys is `ambiguous`. A header in `messages` or `tools` is ignored.
 
 ## Decision
 
@@ -73,6 +75,8 @@ sent through, each with that group's own policy:
    scheduler resolves to when the request is not recognized as Claude Code.
 
 So smart switching from an `off` group A to an `enforce` group B rejects at B.
+If the `claude_code_only` fallback chain cannot be resolved for the check, the
+request fails closed with the same 503 account selection would return.
 
 ## Rejection
 
@@ -104,7 +108,7 @@ User-Agent sample (≤256 chars). Results: `allowed`, `violation_observed`
   new keys are dropped and counted (WARN
   `gateway.claude_entrypoint_observations_dropped`). A failed batch is logged
   and dropped, never retried. The request path never waits on the database.
-- Rows older than 90 days are deleted once a day.
+- Rows outside the last 90 UTC days (today included) are deleted once a day.
 - `GET /api/v1/admin/groups/:id/claude-entrypoint-observations?days=7`
   (`days` 1..90) aggregates the range by (UA entrypoint, body entrypoint, body
   status, version, result, reason), newest first, at most 500 rows. Rows still

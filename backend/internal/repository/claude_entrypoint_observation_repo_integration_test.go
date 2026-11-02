@@ -77,6 +77,15 @@ func TestClaudeEntrypointObservationRepo_UpsertAndAggregate(t *testing.T) {
 	require.Equal(t, int64(7), requests)
 	require.Equal(t, "ua-2", sample)
 
+	// An older batch arriving late (another instance) adds requests but keeps
+	// the newer sample.
+	require.NoError(t, repo.UpsertClaudeEntrypointObservations(ctx, []service.ClaudeEntrypointObservation{
+		row("2026-11-01", "t3-code", "violation_observed", 0, t0, t0.Add(time.Minute), "ua-late-old"),
+	}))
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT sample_user_agent FROM group_claude_entrypoint_observations
+		WHERE group_id=$1 AND day='2026-11-01' AND ua_entrypoint='t3-code'`, groupID).Scan(&sample))
+	require.Equal(t, "ua-2", sample)
+
 	items, err := repo.ListClaudeEntrypointObservations(ctx, groupID, "2026-10-27", 500)
 	require.NoError(t, err)
 	require.Len(t, items, 2, "rows before sinceDay excluded, days aggregated")

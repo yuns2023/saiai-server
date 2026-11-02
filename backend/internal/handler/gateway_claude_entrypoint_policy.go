@@ -62,8 +62,14 @@ func (h *GatewayHandler) applyClaudeEntrypointPolicyForKey(c *gin.Context, state
 		return true
 	}
 	resolved, err := h.gatewayService.ResolveSchedulingGroup(c.Request.Context(), key.GroupID)
-	if err != nil || resolved == nil || resolved.ID == group.ID {
-		// Resolution errors are reported by account selection itself.
+	if err != nil {
+		// Fail closed: account selection resolves the chain again, and a
+		// transient error here must not let it reach an unchecked group. The
+		// response matches what account selection returns for the same error.
+		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
+		return false
+	}
+	if resolved == nil || resolved.ID == group.ID {
 		return true
 	}
 	return h.applyClaudeEntrypointPolicy(c, state, resolved, streamStarted)

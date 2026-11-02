@@ -96,14 +96,38 @@ func ParseBodyEntrypoint(body []byte) (entrypoint, status string) {
 	case system.Type == gjson.String:
 		texts = append(texts, system.String())
 	case system.IsArray():
+		duplicateKey := false
 		system.ForEach(func(_, block gjson.Result) bool {
-			if block.IsObject() && block.Get("type").String() == "text" {
-				if text := block.Get("text"); text.Type == gjson.String {
-					texts = append(texts, text.String())
+			if !block.IsObject() {
+				return true
+			}
+			// gjson reads the first of duplicate keys, encoding/json the
+			// last: a block with two "type" or "text" keys is ambiguous.
+			var blockType, text gjson.Result
+			typeKeys, textKeys := 0, 0
+			block.ForEach(func(key, value gjson.Result) bool {
+				switch key.String() {
+				case "type":
+					typeKeys++
+					blockType = value
+				case "text":
+					textKeys++
+					text = value
 				}
+				return true
+			})
+			if typeKeys > 1 || textKeys > 1 {
+				duplicateKey = true
+				return false
+			}
+			if blockType.Type == gjson.String && blockType.String() == "text" && text.Type == gjson.String {
+				texts = append(texts, text.String())
 			}
 			return true
 		})
+		if duplicateKey {
+			return "", EntrypointBodyAmbiguous
+		}
 	default:
 		return "", EntrypointBodyMissing
 	}
@@ -134,19 +158,29 @@ func ParseBodyEntrypoint(body []byte) (entrypoint, status string) {
 		return "", EntrypointBodyMissing
 	}
 
-	switch strings.Count(headerLine, ccEntrypointMarker) {
-	case 0:
+	// Fields are "name=value;" separated by ';'. Only a field named exactly
+	// cc_entrypoint counts; a trailing field without ';' is unterminated.
+	fields := strings.Split(headerLine, ";")
+	found := 0
+	value := ""
+	for i, field := range fields {
+		field = strings.TrimSpace(field)
+		if !strings.HasPrefix(field, ccEntrypointMarker) {
+			continue
+		}
+		found++
+		if i == len(fields)-1 {
+			return "", EntrypointBodyMalformed
+		}
+		value = field[len(ccEntrypointMarker):]
+	}
+	switch {
+	case found == 0:
 		return "", EntrypointBodyMalformed
-	case 1:
-	default:
+	case found > 1:
 		return "", EntrypointBodyAmbiguous
 	}
-	value := headerLine[strings.Index(headerLine, ccEntrypointMarker)+len(ccEntrypointMarker):]
-	semi := strings.IndexByte(value, ';')
-	if semi < 0 {
-		return "", EntrypointBodyMalformed
-	}
-	entrypoint = NormalizeEntrypoint(value[:semi])
+	entrypoint = NormalizeEntrypoint(value)
 	if entrypoint == "" {
 		return "", EntrypointBodyMalformed
 	}

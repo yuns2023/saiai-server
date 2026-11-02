@@ -386,3 +386,17 @@ func TestClaudeEntrypointPolicyStateParsesOnce(t *testing.T) {
 	require.True(t, state.parsed)
 	require.Equal(t, claudebilling.EntrypointBodyValid, state.facts.BodyStatus)
 }
+
+func TestMessagesClaudeEntrypointFallbackResolutionErrorFailsClosed(t *testing.T) {
+	missing := int64(99)
+	groupA := anthropicGroup(entrypointGroupA, service.ClaudeEntrypointPolicyOff)
+	groupA.ClaudeCodeOnly = true
+	groupA.FallbackGroupID = &missing
+	h := newEntrypointHarness(t, map[int64]*service.Group{entrypointGroupA: groupA}, entrypointGroupA)
+	rec := h.serve(t, h.key(entrypointGroupA), entrypointT3CodeUA, entrypointBody("t3-code"), nil)
+	// Same status/shape account selection returns for an unresolvable chain;
+	// the check must not let a later successful resolution skip the fallback.
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "No available accounts")
+	require.Zero(t, h.lab.upstreamCalls())
+}

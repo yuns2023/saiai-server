@@ -332,7 +332,7 @@ func TestClaudeEntrypointObservationService_StopFlushesAndListBounds(t *testing.
 	require.Equal(t, []string{"2026-10-27", "2026-08-05"}, repo.listDays)
 
 	svc.DeleteExpired(context.Background())
-	require.Equal(t, []string{"2026-08-04"}, repo.deleted)
+	require.Equal(t, []string{"2026-08-05"}, repo.deleted)
 
 	var nilSvc *ClaudeEntrypointObservationService
 	nilSvc.Record(ClaudeEntrypointObservationInput{})

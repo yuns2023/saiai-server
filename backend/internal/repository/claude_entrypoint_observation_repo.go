@@ -61,7 +61,10 @@ func (r *claudeEntrypointObservationRepository) upsertChunk(ctx context.Context,
 		requests = group_claude_entrypoint_observations.requests + EXCLUDED.requests,
 		first_seen_at = LEAST(group_claude_entrypoint_observations.first_seen_at, EXCLUDED.first_seen_at),
 		last_seen_at = GREATEST(group_claude_entrypoint_observations.last_seen_at, EXCLUDED.last_seen_at),
-		sample_user_agent = EXCLUDED.sample_user_agent`)
+		sample_user_agent = CASE
+			WHEN EXCLUDED.last_seen_at >= group_claude_entrypoint_observations.last_seen_at THEN EXCLUDED.sample_user_agent
+			ELSE group_claude_entrypoint_observations.sample_user_agent
+		END`)
 	_, err := r.sql.ExecContext(ctx, b.String(), args...)
 	return err
 }

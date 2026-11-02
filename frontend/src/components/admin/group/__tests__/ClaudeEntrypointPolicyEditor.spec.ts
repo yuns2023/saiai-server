@@ -52,6 +52,20 @@ describe('ClaudeEntrypointPolicyEditor', () => {
     expect(toast.success).toHaveBeenCalled()
   })
 
+  it('ignores a slower response for an older day range', async () => {
+    let resolveOld: (value: unknown) => void = () => {}
+    api.list.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+    api.list.mockResolvedValueOnce({ days: 1, items: [observation('cli', 'allowed')] })
+    const wrapper = mountEditor({ groupId: 42 })
+    await wrapper.find('select.input.w-auto').setValue(1)
+    await flushPromises()
+    resolveOld({ days: 7, items: [observation('t3-code'), observation('x')] })
+    await flushPromises()
+    const rows = wrapper.findAll('[data-testid="editForm-claude-entrypoint-observations"] tbody tr')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('cli')
+  })
+
   it('does not load observations on create or when the policy is off', async () => {
     mountEditor({ groupId: null })
     mountEditor({ groupId: 42, policy: 'off' })
