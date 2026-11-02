@@ -2409,7 +2409,10 @@ export default {
         restoreDefault: '恢复默认',
         removeItem: '移除',
         observations: '入口观察清单',
-        observationsHint: '仅记录观察或拦截模式下的请求，约每 30 秒写入一次；按 UTC 日期统计，保留 90 天。',
+        observationsHint: '仅记录观察或拦截模式下的请求，约每 30 秒写入一次；按 UTC 日期统计，保留 90 天。同一组（入口、版本、结果、原因）只保留最近一次的 UA 样例。',
+        observationsTruncated: '结果超过 500 行，仅显示最近出现的 500 行，请缩短时间范围。',
+        collectorDropped: '上一个写入周期因缓冲区已满丢弃了 {count} 个请求的记录。',
+        collectorError: '最近一次写入失败：{time}（该批记录已丢弃）。',
         observationsEmpty: '所选时间范围内暂无记录',
         observationsLoadFailed: '加载入口观察清单失败',
         days: '最近 {days} 天',
@@ -2427,12 +2430,14 @@ export default {
           sampleUserAgent: 'UA 样例'
         },
         results: {
-          allowed: '放行',
+          allowed: '入口校验通过',
           violation_observed: '不符合（仅观察）',
           rejected: '已拦截'
         },
         reasons: {
           ok: '符合',
+          aux_body_missing_allowed: '官方辅助探测请求（无计费头，豁免）',
+          ua_ambiguous: '多个 User-Agent 头',
           ua_not_allowed: 'UA 入口不在白名单',
           body_missing: '请求体缺少计费头',
           body_malformed: '计费头格式错误',
@@ -4100,6 +4105,15 @@ export default {
       cacheCreation1hTokens: '缓存创建',
       cacheReadTokens: '缓存读取 Token',
       stopReason: '停止原因',
+      clientEntrypoint: {
+        badge: '入口告警',
+        onlyAlerts: '仅看入口告警',
+        ua: 'UA 入口',
+        body: '请求体入口',
+        reason: '原因',
+        group: '分组',
+        policy: '模式'
+      },
       stopReasonNotRecorded: '未记录',
       failedToLoad: '加载使用记录失败',
       billingType: '计费类型',

@@ -27204,6 +27204,7 @@ type UsageLogMutation struct {
 	stop_reason                         *string
 	client_attestation                  *int16
 	addclient_attestation               *int16
+	client_entrypoint                   *map[string]interface{}
 	input_tokens                        *int
 	addinput_tokens                     *int
 	output_tokens                       *int
@@ -27819,6 +27820,55 @@ func (m *UsageLogMutation) ResetClientAttestation() {
 	m.client_attestation = nil
 	m.addclient_attestation = nil
 	delete(m.clearedFields, usagelog.FieldClientAttestation)
+}
+
+// SetClientEntrypoint sets the "client_entrypoint" field.
+func (m *UsageLogMutation) SetClientEntrypoint(value map[string]interface{}) {
+	m.client_entrypoint = &value
+}
+
+// ClientEntrypoint returns the value of the "client_entrypoint" field in the mutation.
+func (m *UsageLogMutation) ClientEntrypoint() (r map[string]interface{}, exists bool) {
+	v := m.client_entrypoint
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientEntrypoint returns the old "client_entrypoint" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldClientEntrypoint(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientEntrypoint is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientEntrypoint requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientEntrypoint: %w", err)
+	}
+	return oldValue.ClientEntrypoint, nil
+}
+
+// ClearClientEntrypoint clears the value of the "client_entrypoint" field.
+func (m *UsageLogMutation) ClearClientEntrypoint() {
+	m.client_entrypoint = nil
+	m.clearedFields[usagelog.FieldClientEntrypoint] = struct{}{}
+}
+
+// ClientEntrypointCleared returns if the "client_entrypoint" field was cleared in this mutation.
+func (m *UsageLogMutation) ClientEntrypointCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldClientEntrypoint]
+	return ok
+}
+
+// ResetClientEntrypoint resets all changes to the "client_entrypoint" field.
+func (m *UsageLogMutation) ResetClientEntrypoint() {
+	m.client_entrypoint = nil
+	delete(m.clearedFields, usagelog.FieldClientEntrypoint)
 }
 
 // SetGroupID sets the "group_id" field.
@@ -29890,7 +29940,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 45)
+	fields := make([]string, 0, 46)
 	if m.smart_switch != nil {
 		fields = append(fields, usagelog.FieldSmartSwitch)
 	}
@@ -29920,6 +29970,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.client_attestation != nil {
 		fields = append(fields, usagelog.FieldClientAttestation)
+	}
+	if m.client_entrypoint != nil {
+		fields = append(fields, usagelog.FieldClientEntrypoint)
 	}
 	if m.group != nil {
 		fields = append(fields, usagelog.FieldGroupID)
@@ -30054,6 +30107,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.StopReason()
 	case usagelog.FieldClientAttestation:
 		return m.ClientAttestation()
+	case usagelog.FieldClientEntrypoint:
+		return m.ClientEntrypoint()
 	case usagelog.FieldGroupID:
 		return m.GroupID()
 	case usagelog.FieldSubscriptionID:
@@ -30153,6 +30208,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldStopReason(ctx)
 	case usagelog.FieldClientAttestation:
 		return m.OldClientAttestation(ctx)
+	case usagelog.FieldClientEntrypoint:
+		return m.OldClientEntrypoint(ctx)
 	case usagelog.FieldGroupID:
 		return m.OldGroupID(ctx)
 	case usagelog.FieldSubscriptionID:
@@ -30301,6 +30358,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetClientAttestation(v)
+		return nil
+	case usagelog.FieldClientEntrypoint:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientEntrypoint(v)
 		return nil
 	case usagelog.FieldGroupID:
 		v, ok := value.(int64)
@@ -30895,6 +30959,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldClientAttestation) {
 		fields = append(fields, usagelog.FieldClientAttestation)
 	}
+	if m.FieldCleared(usagelog.FieldClientEntrypoint) {
+		fields = append(fields, usagelog.FieldClientEntrypoint)
+	}
 	if m.FieldCleared(usagelog.FieldGroupID) {
 		fields = append(fields, usagelog.FieldGroupID)
 	}
@@ -30959,6 +31026,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldClientAttestation:
 		m.ClearClientAttestation()
+		return nil
+	case usagelog.FieldClientEntrypoint:
+		m.ClearClientEntrypoint()
 		return nil
 	case usagelog.FieldGroupID:
 		m.ClearGroupID()
@@ -31033,6 +31103,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldClientAttestation:
 		m.ResetClientAttestation()
+		return nil
+	case usagelog.FieldClientEntrypoint:
+		m.ResetClientEntrypoint()
 		return nil
 	case usagelog.FieldGroupID:
 		m.ResetGroupID()

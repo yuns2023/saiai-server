@@ -103,12 +103,20 @@ func TestGroupHandlerClaudeEntrypointObservations(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var resp struct {
 		Data struct {
-			Days  int                                          `json:"days"`
-			Items []service.ClaudeEntrypointObservationSummary `json:"items"`
+			Days      int                                          `json:"days"`
+			Items     []service.ClaudeEntrypointObservationSummary `json:"items"`
+			Truncated *bool                                        `json:"truncated"`
+			Collector *struct {
+				DroppedLastFlush *int64 `json:"dropped_last_flush"`
+			} `json:"collector"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, 7, resp.Data.Days)
+	require.NotNil(t, resp.Data.Truncated)
+	require.False(t, *resp.Data.Truncated)
+	require.NotNil(t, resp.Data.Collector)
+	require.NotNil(t, resp.Data.Collector.DroppedLastFlush)
 	require.Len(t, resp.Data.Items, 1)
 	require.Equal(t, "t3-code", resp.Data.Items[0].UAEntrypoint)
 	require.NotEmpty(t, repo.since)

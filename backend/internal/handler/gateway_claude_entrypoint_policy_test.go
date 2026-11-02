@@ -17,6 +17,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claudebilling"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -28,11 +29,12 @@ import (
 // records, off is untouched, and smart-switch / claude_code_only fallback
 // target groups are checked with their own policy.
 const (
-	entrypointModel     = "claude-sonnet-4-5"
-	entrypointT3CodeUA  = "claude-cli/2.1.316 (external, t3-code, agent-sdk/0.3.276)"
-	entrypointGroupA    = int64(51)
-	entrypointGroupB    = int64(52)
-	entrypointAccountID = int64(5201)
+	entrypointModel      = "claude-sonnet-4-5"
+	entrypointHaikuModel = "claude-haiku-4-5"
+	entrypointT3CodeUA   = "claude-cli/2.1.316 (external, t3-code, agent-sdk/0.3.276)"
+	entrypointGroupA     = int64(51)
+	entrypointGroupB     = int64(52)
+	entrypointAccountID  = int64(5201)
 )
 
 func entrypointBody(entrypoint string) string {
@@ -129,6 +131,13 @@ func (r entrypointGroupRepo) GetByIDLite(ctx context.Context, id int64) (*servic
 	return r.GetByID(ctx, id)
 }
 
+// entrypointSettingRepo has no settings (no Claude Code version bounds).
+type entrypointSettingRepo struct{ service.SettingRepository }
+
+func (entrypointSettingRepo) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
 // entrypointHTTPUpstream forwards to the local httptest upstream.
 type entrypointHTTPUpstream struct{}
 
@@ -168,6 +177,7 @@ type entrypointHarness struct {
 	user      *service.User
 	billing   *service.BillingCacheService
 	upstreamU string
+	usage     *stopReasonLab
 }
 
 func anthropicGroup(id int64, policy string) *service.Group {
@@ -195,7 +205,7 @@ func newEntrypointHarness(t *testing.T, groups map[int64]*service.Group, account
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	cfg.Pricing.DataDir, cfg.Pricing.UpdateIntervalHours = t.TempDir(), 24
 	require.NoError(t, os.WriteFile(filepath.Join(cfg.Pricing.DataDir, "model_pricing.json"),
-		[]byte(`{"`+entrypointModel+`":{"input_cost_per_token":0.000003,"output_cost_per_token":0.000015}}`), 0o600))
+		[]byte(`{"`+entrypointModel+`":{"input_cost_per_token":0.000003,"output_cost_per_token":0.000015},"`+entrypointHaikuModel+`":{"input_cost_per_token":0.000001,"output_cost_per_token":0.000005}}`), 0o600))
 	pricing := service.NewPricingService(cfg, nil)
 	require.NoError(t, pricing.Initialize())
 	t.Cleanup(pricing.Stop)
@@ -203,7 +213,8 @@ func newEntrypointHarness(t *testing.T, groups map[int64]*service.Group, account
 	user := &service.User{ID: 711, Status: service.StatusActive, Role: service.RoleUser, Balance: 100, Concurrency: 5}
 	users := stopReasonUserRepo{user: user}
 	accounts := entrypointAccountRepo{lab: lab}
-	usageRepo := stopReasonUsageRepo{lab: &stopReasonLab{}}
+	usageLab := &stopReasonLab{}
+	usageRepo := stopReasonUsageRepo{lab: usageLab}
 	concurrency := service.NewConcurrencyService(stopReasonConcurrency{})
 	billingCache := service.NewBillingCacheService(nil, users, nil, nil, cfg)
 	t.Cleanup(billingCache.Stop)
@@ -213,14 +224,21 @@ func newEntrypointHarness(t *testing.T, groups map[int64]*service.Group, account
 		&service.DeferredService{}, nil, nil, nil, nil, nil)
 	obsRepo := &entrypointObservationRepo{}
 	observer := service.NewClaudeEntrypointObservationService(obsRepo)
-	h := NewGatewayHandler(gateway, nil, nil, nil, concurrency, billingCache, nil, nil, nil, nil, nil, observer, nil, nil, nil, cfg, nil)
-	return &entrypointHarness{lab: lab, handler: h, observer: observer, obsRepo: obsRepo, user: user, billing: billingCache, upstreamU: upstream.URL}
+	h := NewGatewayHandler(gateway, nil, nil, nil, concurrency, billingCache, nil, nil, nil, nil, nil, observer, nil, nil, nil, cfg,
+		service.NewSettingService(entrypointSettingRepo{}, cfg))
+	return &entrypointHarness{lab: lab, handler: h, observer: observer, obsRepo: obsRepo, user: user, billing: billingCache, upstreamU: upstream.URL, usage: usageLab}
 }
 
 func (h *entrypointHarness) key(groupID int64) *service.APIKey {
 	id := groupID
 	return &service.APIKey{ID: 900 + groupID, UserID: h.user.ID, Key: "TEST_ONLY_KEY", Status: service.StatusActive,
 		GroupID: &id, User: h.user, Group: h.lab.groups[groupID]}
+}
+
+func (h *entrypointHarness) usageRows() []service.UsageLog {
+	h.usage.mu.Lock()
+	defer h.usage.mu.Unlock()
+	return append([]service.UsageLog(nil), h.usage.usage...)
 }
 
 func (h *entrypointHarness) serve(t *testing.T, apiKey *service.APIKey, ua, body string, setup func(*gin.Context)) *httptest.ResponseRecorder {
@@ -390,7 +408,7 @@ func TestClaudeEntrypointPolicyStateParsesOnce(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	c.Request.Header.Set("User-Agent", entrypointT3CodeUA)
 	body := []byte(entrypointBody("t3-code"))
-	state := newClaudeEntrypointPolicyState(c, body, 1, 2)
+	state := newClaudeEntrypointPolicyState(c, body, nil, 1, 2)
 	require.False(t, state.parsed, "no parsing until a group with an active policy is checked")
 	h := &GatewayHandler{}
 	require.True(t, h.applyClaudeEntrypointPolicy(c, state, anthropicGroup(1, service.ClaudeEntrypointPolicyOff), false))
@@ -422,4 +440,136 @@ func TestMessagesClaudeEntrypointFallbackResolutionErrorFailsClosed(t *testing.T
 	require.Equal(t, 1, h.lab.groupReads[entrypointGroupB], "stopped at the failed resolution")
 	h.lab.mu.Unlock()
 	require.Empty(t, h.observations())
+}
+
+// auxProbeBody is the official Claude Code haiku max_tokens=1 probe shape
+// without a billing header.
+func auxProbeBody() string {
+	return `{"model":"` + entrypointHaikuModel + `","max_tokens":1,"messages":[{"role":"user","content":"quota"}],` +
+		`"metadata":{"user_id":"{\"device_id\":\"TEST_ONLY_DEVICE\",\"session_id\":\"TEST_ONLY_SESSION\"}"}}`
+}
+
+func TestMessagesClaudeEntrypointAuxProbeExemption(t *testing.T) {
+	h := newEntrypointHarness(t, map[int64]*service.Group{entrypointGroupA: anthropicGroup(entrypointGroupA, service.ClaudeEntrypointPolicyEnforce)}, entrypointGroupA)
+	probe := func(c *gin.Context) { c.Request.Header.Set("anthropic-beta", "oauth-2025-04-20") }
+
+	// Allowed UA, probe shape, no billing header: exempt.
+	rec := h.serve(t, h.key(entrypointGroupA), "claude-cli/2.1.316 (external, cli)", auxProbeBody(), probe)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, 1, h.lab.upstreamCalls())
+	rows := h.observations()
+	require.Len(t, rows, 1)
+	require.Equal(t, service.ClaudeEntrypointResultAllowed, rows[0].Result)
+	require.Equal(t, service.ClaudeEntrypointReasonAuxBodyMissing, rows[0].Reason)
+	require.Equal(t, "missing", rows[0].BodyStatus)
+
+	// t3-code UA with the same probe: still rejected.
+	rec = h.serve(t, h.key(entrypointGroupA), entrypointT3CodeUA, auxProbeBody(), probe)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "claude_entrypoint_not_allowed")
+
+	// Allowed UA without the probe shape (no oauth beta): body_missing.
+	rec = h.serve(t, h.key(entrypointGroupA), "claude-cli/2.1.316 (external, cli)", auxProbeBody(), nil)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	// Allowed UA, regular request without header: rejected.
+	rec = h.serve(t, h.key(entrypointGroupA), "claude-cli/2.1.316 (external, cli)",
+		`{"model":"`+entrypointModel+`","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`, probe)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Equal(t, 1, h.lab.upstreamCalls())
+	reasons := map[string]int64{}
+	for _, row := range h.observations() {
+		reasons[row.Reason] += row.Requests
+	}
+	require.Equal(t, int64(1), reasons[service.ClaudeEntrypointReasonUANotAllowed])
+	require.Equal(t, int64(2), reasons[service.ClaudeEntrypointReasonBodyMissing])
+}
+
+func TestMessagesClaudeEntrypointDuplicateUserAgentRejected(t *testing.T) {
+	h := newEntrypointHarness(t, map[int64]*service.Group{entrypointGroupA: anthropicGroup(entrypointGroupA, service.ClaudeEntrypointPolicyEnforce)}, entrypointGroupA)
+	rec := h.serve(t, h.key(entrypointGroupA), "claude-cli/2.1.316 (external, cli)", entrypointBody("cli"), func(c *gin.Context) {
+		c.Request.Header.Add("User-Agent", "claude-cli/2.1.316 (external, t3-code)")
+	})
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `UA: \u003cambiguous\u003e`, "HTML-escaped by c.JSON")
+	require.Zero(t, h.lab.upstreamCalls())
+	rows := h.observations()
+	require.Len(t, rows, 1)
+	require.Equal(t, service.ClaudeEntrypointReasonUAAmbiguous, rows[0].Reason)
+	require.Equal(t, "<ambiguous>", rows[0].UAEntrypoint)
+}
+
+func TestClaudeEntrypointPolicySkippedOnForcedPlatform(t *testing.T) {
+	newCtx := func(force *string) (*gin.Context, *httptest.ResponseRecorder) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1/messages", nil)
+		c.Request.Header.Set("User-Agent", entrypointT3CodeUA)
+		if force != nil {
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, *force))
+		}
+		return c, rec
+	}
+	group := anthropicGroup(entrypointGroupA, service.ClaudeEntrypointPolicyEnforce)
+	id := group.ID
+	key := &service.APIKey{GroupID: &id, Group: group}
+	obsRepo := &entrypointObservationRepo{}
+	h := &GatewayHandler{claudeEntrypointObserver: service.NewClaudeEntrypointObservationService(obsRepo)}
+
+	antigravity := service.PlatformAntigravity
+	c, rec := newCtx(&antigravity)
+	state := newClaudeEntrypointPolicyState(c, []byte(entrypointBody("t3-code")), nil, 1, 2)
+	require.True(t, h.applyClaudeEntrypointPolicyForKey(c, state, key, false), "forced platform skips the policy")
+	require.False(t, state.parsed)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// The prompt-too-long fallback clears the forced platform ("") first and
+	// is then checked like any other group.
+	cleared := ""
+	c, rec = newCtx(&cleared)
+	state = newClaudeEntrypointPolicyState(c, []byte(entrypointBody("t3-code")), nil, 1, 2)
+	require.False(t, h.applyClaudeEntrypointPolicyForKey(c, state, key, false))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "claude_entrypoint_not_allowed")
+}
+
+func TestMessagesClaudeEntrypointUsageFlag(t *testing.T) {
+	groups := map[int64]*service.Group{
+		entrypointGroupA: anthropicGroup(entrypointGroupA, service.ClaudeEntrypointPolicyObserve),
+		entrypointGroupB: anthropicGroup(entrypointGroupB, service.ClaudeEntrypointPolicyObserve),
+	}
+	h := newEntrypointHarness(t, groups, entrypointGroupA)
+
+	// Observe + t3-code: served, usage row carries the warning.
+	rec := h.serve(t, h.key(entrypointGroupA), entrypointT3CodeUA, entrypointBody("t3-code"), nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	// Compliant request: no warning.
+	rec = h.serve(t, h.key(entrypointGroupA), "claude-cli/2.1.316 (external, cli)", entrypointBody("cli"), nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	usage := h.usageRows()
+	require.Len(t, usage, 2)
+	require.Equal(t, &service.ClientEntrypointFlag{UA: "t3-code", Body: "t3-code", BodyStatus: "valid",
+		Reason: service.ClaudeEntrypointReasonUANotAllowed, GroupID: entrypointGroupA, Policy: "observe"}, usage[0].ClientEntrypoint)
+	require.Nil(t, usage[1].ClientEntrypoint)
+}
+
+func TestMessagesClaudeEntrypointUsageFlagFirstNonCompliantGroup(t *testing.T) {
+	groups := map[int64]*service.Group{
+		entrypointGroupA: anthropicGroup(entrypointGroupA, service.ClaudeEntrypointPolicyObserve),
+		entrypointGroupB: anthropicGroup(entrypointGroupB, service.ClaudeEntrypointPolicyObserve),
+	}
+	groups[entrypointGroupB].ClaudeEntrypointAllowlist = []string{"cli"}
+	h := newEntrypointHarness(t, groups, entrypointGroupB)
+	rec := h.serve(t, h.key(entrypointGroupA), "claude-cli/2.1.316 (external, sdk-cli)", entrypointBody("sdk-cli"), func(c *gin.Context) {
+		c.Set("smart_switch_next", middleware2.SmartSwitchNext(func(map[int64]bool) (*service.SmartSwitchSelection, error) {
+			return &service.SmartSwitchSelection{Key: h.key(entrypointGroupB)}, nil
+		}))
+	})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	usage := h.usageRows()
+	require.Len(t, usage, 1)
+	// A (default list) allows sdk-cli; B (cli only) does not: B is recorded.
+	require.NotNil(t, usage[0].ClientEntrypoint)
+	require.Equal(t, entrypointGroupB, usage[0].ClientEntrypoint.GroupID)
+	require.Equal(t, service.ClaudeEntrypointReasonUANotAllowed, usage[0].ClientEntrypoint.Reason)
 }

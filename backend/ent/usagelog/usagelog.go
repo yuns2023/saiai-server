@@ -34,6 +34,8 @@ const (
 	FieldStopReason = "stop_reason"
 	// FieldClientAttestation holds the string denoting the client_attestation field in the database.
 	FieldClientAttestation = "client_attestation"
+	// FieldClientEntrypoint holds the string denoting the client_entrypoint field in the database.
+	FieldClientEntrypoint = "client_entrypoint"
 	// FieldGroupID holds the string denoting the group_id field in the database.
 	FieldGroupID = "group_id"
 	// FieldSubscriptionID holds the string denoting the subscription_id field in the database.
@@ -166,6 +168,7 @@ var Columns = []string{
 	FieldUpstreamModel,
 	FieldStopReason,
 	FieldClientAttestation,
+	FieldClientEntrypoint,
 	FieldGroupID,
 	FieldSubscriptionID,
 	FieldInputTokens,

@@ -705,6 +705,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		IPAddress:             l.IPAddress,
 		StopReason:            l.StopReason,
 		ClientAttestation:     l.ClientAttestation,
+		ClientEntrypoint:      l.ClientEntrypoint,
 		Account:               AccountSummaryFromService(l.Account),
 		SessionAccountCount:   l.SessionAccountCount,
 		SessionAccounts:       SessionAccountSummariesFromService(l.SessionAccounts),

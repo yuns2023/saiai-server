@@ -740,6 +740,16 @@ func ClientAttestationNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldClientAttestation))
 }
 
+// ClientEntrypointIsNil applies the IsNil predicate on the "client_entrypoint" field.
+func ClientEntrypointIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldClientEntrypoint))
+}
+
+// ClientEntrypointNotNil applies the NotNil predicate on the "client_entrypoint" field.
+func ClientEntrypointNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldClientEntrypoint))
+}
+
 // GroupIDEQ applies the EQ predicate on the "group_id" field.
 func GroupIDEQ(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldGroupID, v))

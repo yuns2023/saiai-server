@@ -18,6 +18,14 @@ BEGIN
         ALTER TABLE groups ADD CONSTRAINT groups_claude_entrypoint_policy_check
             CHECK (claude_entrypoint_policy IN ('off', 'observe', 'enforce'));
     END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'groups_claude_entrypoint_allowlist_array_check'
+          AND conrelid = 'groups'::regclass
+    ) THEN
+        ALTER TABLE groups ADD CONSTRAINT groups_claude_entrypoint_allowlist_array_check
+            CHECK (jsonb_typeof(claude_entrypoint_allowlist) = 'array');
+    END IF;
 END $$;
 
 -- Daily (UTC) aggregate of evaluated requests for groups whose policy is
@@ -43,3 +51,11 @@ CREATE TABLE IF NOT EXISTS group_claude_entrypoint_observations (
 
 CREATE INDEX IF NOT EXISTS idx_group_claude_entrypoint_observations_day
     ON group_claude_entrypoint_observations (day);
+
+-- Per-request warning shown in the admin usage list: set only for requests an
+-- observe group found non-compliant but still served. Metadata-only: nullable,
+-- no default, no backfill, no index.
+-- Last statement on purpose (as in 116): the brief ACCESS EXCLUSIVE lock on
+-- usage_logs is taken only after the groups/observation work, and is held for
+-- the shortest possible time before COMMIT (lock_timeout above still applies).
+ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS client_entrypoint JSONB;

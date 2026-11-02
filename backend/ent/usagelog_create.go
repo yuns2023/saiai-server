@@ -120,6 +120,12 @@ func (_c *UsageLogCreate) SetNillableClientAttestation(v *int16) *UsageLogCreate
 	return _c
 }
 
+// SetClientEntrypoint sets the "client_entrypoint" field.
+func (_c *UsageLogCreate) SetClientEntrypoint(v map[string]interface{}) *UsageLogCreate {
+	_c.mutation.SetClientEntrypoint(v)
+	return _c
+}
+
 // SetGroupID sets the "group_id" field.
 func (_c *UsageLogCreate) SetGroupID(v int64) *UsageLogCreate {
 	_c.mutation.SetGroupID(v)
@@ -943,6 +949,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldClientAttestation, field.TypeInt16, value)
 		_node.ClientAttestation = &value
 	}
+	if value, ok := _c.mutation.ClientEntrypoint(); ok {
+		_spec.SetField(usagelog.FieldClientEntrypoint, field.TypeJSON, value)
+		_node.ClientEntrypoint = value
+	}
 	if value, ok := _c.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)
 		_node.InputTokens = value
@@ -1365,6 +1375,24 @@ func (u *UsageLogUpsert) AddClientAttestation(v int16) *UsageLogUpsert {
 // ClearClientAttestation clears the value of the "client_attestation" field.
 func (u *UsageLogUpsert) ClearClientAttestation() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldClientAttestation)
+	return u
+}
+
+// SetClientEntrypoint sets the "client_entrypoint" field.
+func (u *UsageLogUpsert) SetClientEntrypoint(v map[string]interface{}) *UsageLogUpsert {
+	u.Set(usagelog.FieldClientEntrypoint, v)
+	return u
+}
+
+// UpdateClientEntrypoint sets the "client_entrypoint" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateClientEntrypoint() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldClientEntrypoint)
+	return u
+}
+
+// ClearClientEntrypoint clears the value of the "client_entrypoint" field.
+func (u *UsageLogUpsert) ClearClientEntrypoint() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldClientEntrypoint)
 	return u
 }
 
@@ -2216,6 +2244,27 @@ func (u *UsageLogUpsertOne) UpdateClientAttestation() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearClientAttestation() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearClientAttestation()
+	})
+}
+
+// SetClientEntrypoint sets the "client_entrypoint" field.
+func (u *UsageLogUpsertOne) SetClientEntrypoint(v map[string]interface{}) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetClientEntrypoint(v)
+	})
+}
+
+// UpdateClientEntrypoint sets the "client_entrypoint" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateClientEntrypoint() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateClientEntrypoint()
+	})
+}
+
+// ClearClientEntrypoint clears the value of the "client_entrypoint" field.
+func (u *UsageLogUpsertOne) ClearClientEntrypoint() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearClientEntrypoint()
 	})
 }
 
@@ -3337,6 +3386,27 @@ func (u *UsageLogUpsertBulk) UpdateClientAttestation() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearClientAttestation() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearClientAttestation()
+	})
+}
+
+// SetClientEntrypoint sets the "client_entrypoint" field.
+func (u *UsageLogUpsertBulk) SetClientEntrypoint(v map[string]interface{}) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetClientEntrypoint(v)
+	})
+}
+
+// UpdateClientEntrypoint sets the "client_entrypoint" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateClientEntrypoint() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateClientEntrypoint()
+	})
+}
+
+// ClearClientEntrypoint clears the value of the "client_entrypoint" field.
+func (u *UsageLogUpsertBulk) ClearClientEntrypoint() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearClientEntrypoint()
 	})
 }
 

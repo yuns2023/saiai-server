@@ -84,6 +84,8 @@ export interface CreateUsageCleanupTaskRequest {
 
 export interface AdminUsageQueryParams extends UsageQueryParams {
   moderation_flagged?: boolean
+  /** Only rows with a Claude entrypoint warning (client_entrypoint IS NOT NULL). */
+  entrypoint_flagged?: boolean
   user_id?: number
   exact_total?: boolean
   account_switch?: boolean
@@ -124,6 +126,7 @@ export async function getStats(params: {
   billing_type?: number | null
   account_switch?: boolean
   moderation_flagged?: boolean
+  entrypoint_flagged?: boolean
   period?: string
   start_date?: string
   end_date?: string

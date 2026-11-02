@@ -22,6 +22,10 @@ const EntrypointNone = "<none>"
 // contains characters outside [a-z0-9._/-].
 const EntrypointInvalid = "<invalid>"
 
+// EntrypointAmbiguous is the recorded/displayed UA entrypoint when the
+// request carries more than one User-Agent header value.
+const EntrypointAmbiguous = "<ambiguous>"
+
 const (
 	billingHeaderMarker  = "x-anthropic-billing-header:"
 	ccEntrypointMarker   = "cc_entrypoint="
@@ -29,8 +33,9 @@ const (
 )
 
 // uaEntrypointPattern matches "claude-cli/<semver><suffix> (<user-type>, <entrypoint>[, ...])".
-// The entrypoint is the first token after the user-type token.
-var uaEntrypointPattern = regexp.MustCompile(`(?i)^claude-cli/(\d+\.\d+\.\d+)\S*\s+\(([^,()]+),\s*([^,()]+)`)
+// The entrypoint is the first token after the user-type token; the comment
+// segment must be closed by ")".
+var uaEntrypointPattern = regexp.MustCompile(`(?i)^claude-cli/(\d+\.\d+\.\d+)\S*\s+\(([^,()]+),\s*([^,()]+)(?:,[^()]*)?\)`)
 
 // EntrypointFacts is what a /v1/messages request declares about its Claude
 // client entrypoint. Values are client-declared, never verified.
@@ -38,6 +43,9 @@ type EntrypointFacts struct {
 	// UAEntrypoint is the trimmed, lower-cased UA entrypoint, or "" when the
 	// User-Agent is not a claude-cli UA with an entrypoint.
 	UAEntrypoint string
+	// UAAmbiguous is set when the request has more than one User-Agent
+	// value; UAEntrypoint and UAVersion are then empty.
+	UAAmbiguous bool
 	// UAVersion is the claude-cli semver from the UA, or "".
 	UAVersion string
 	// BodyEntrypoint is the trimmed, lower-cased cc_entrypoint of the single
@@ -191,12 +199,36 @@ func ParseBodyEntrypoint(body []byte) (entrypoint, status string) {
 	return entrypoint, EntrypointBodyValid
 }
 
-// ParseEntrypointFacts combines ParseUserAgentEntrypoint and ParseBodyEntrypoint.
-func ParseEntrypointFacts(userAgent string, body []byte) EntrypointFacts {
+// ParseEntrypointFacts combines ParseUserAgentEntrypoint and
+// ParseBodyEntrypoint. userAgents are all User-Agent header values; more
+// than one is ambiguous.
+func ParseEntrypointFacts(userAgents []string, body []byte) EntrypointFacts {
 	var facts EntrypointFacts
-	facts.UAEntrypoint, facts.UAVersion, _ = ParseUserAgentEntrypoint(userAgent)
+	switch {
+	case len(userAgents) > 1:
+		facts.UAAmbiguous = true
+	case len(userAgents) == 1:
+		facts.UAEntrypoint, facts.UAVersion, _ = ParseUserAgentEntrypoint(userAgents[0])
+	}
 	facts.BodyEntrypoint, facts.BodyStatus = ParseBodyEntrypoint(body)
 	return facts
+}
+
+// RecordedUAEntrypoint is the sanitized UA entrypoint for storage/display.
+func (f EntrypointFacts) RecordedUAEntrypoint() string {
+	if f.UAAmbiguous {
+		return EntrypointAmbiguous
+	}
+	return SanitizeEntrypointForRecord(f.UAEntrypoint)
+}
+
+// RecordedBodyEntrypoint is the sanitized body entrypoint ("<none>" unless
+// the body status is valid).
+func (f EntrypointFacts) RecordedBodyEntrypoint() string {
+	if f.BodyStatus != EntrypointBodyValid {
+		return EntrypointNone
+	}
+	return SanitizeEntrypointForRecord(f.BodyEntrypoint)
 }
 
 // NormalizeEntrypoint is the comparison form: trimmed and lower-cased.

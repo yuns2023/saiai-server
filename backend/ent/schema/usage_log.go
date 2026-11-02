@@ -66,6 +66,11 @@ func (UsageLog) Fields() []ent.Field {
 		field.Int16("client_attestation").
 			Optional().
 			Nillable(),
+		// ClientEntrypoint is the Claude entrypoint warning (migration 117,
+		// docs/CLAUDE_ENTRYPOINT_POLICY.md): set only when an observe group
+		// found the request non-compliant but served it. NULL otherwise.
+		field.JSON("client_entrypoint", map[string]any{}).
+			Optional(),
 		field.Int64("group_id").
 			Optional().
 			Nillable(),

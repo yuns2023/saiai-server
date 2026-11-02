@@ -2324,7 +2324,10 @@ export default {
         restoreDefault: 'Restore default',
         removeItem: 'Remove',
         observations: 'Entrypoint observations',
-        observationsHint: 'Only requests in Observe or Enforce mode are recorded, written about every 30 seconds, counted per UTC day and kept for 90 days.',
+        observationsHint: 'Only requests in Observe or Enforce mode are recorded, written about every 30 seconds, counted per UTC day and kept for 90 days. Only the latest User-Agent sample is kept per (entrypoint, version, result, reason).',
+        observationsTruncated: 'More than 500 rows: only the 500 most recently seen are shown. Narrow the range.',
+        collectorDropped: 'The last write window dropped {count} requests because the buffer was full.',
+        collectorError: 'The last write failed at {time} (that batch was dropped).',
         observationsEmpty: 'No requests in the selected range',
         observationsLoadFailed: 'Failed to load entrypoint observations',
         days: 'Last {days} days',
@@ -2342,12 +2345,14 @@ export default {
           sampleUserAgent: 'Sample User-Agent'
         },
         results: {
-          allowed: 'Allowed',
+          allowed: 'Entrypoint check passed',
           violation_observed: 'Not allowed (observed)',
           rejected: 'Rejected'
         },
         reasons: {
           ok: 'Compliant',
+          aux_body_missing_allowed: 'Official aux probe without billing header (exempt)',
+          ua_ambiguous: 'Multiple User-Agent headers',
           ua_not_allowed: 'UA entrypoint not allowed',
           body_missing: 'Billing header missing',
           body_malformed: 'Billing header malformed',
@@ -3945,6 +3950,15 @@ export default {
       cacheCreation1hTokens: 'Cache Write',
       cacheReadTokens: 'Cache Read Tokens',
       stopReason: 'Stop Reason',
+      clientEntrypoint: {
+        badge: 'Entrypoint warning',
+        onlyAlerts: 'Entrypoint warnings only',
+        ua: 'UA entrypoint',
+        body: 'Body entrypoint',
+        reason: 'Reason',
+        group: 'Group',
+        policy: 'Mode'
+      },
       stopReasonNotRecorded: 'Not recorded',
       failedToLoad: 'Failed to load usage records',
       billingType: 'Billing Type',

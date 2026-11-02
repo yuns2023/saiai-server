@@ -151,6 +151,11 @@ func (h *UsageHandler) List(c *gin.Context) {
 		response.BadRequest(c, moderationErr.Error())
 		return
 	}
+	entrypointFlagged, entrypointErr := parseOptionalBoolQuery(c, "entrypoint_flagged")
+	if entrypointErr != nil {
+		response.BadRequest(c, entrypointErr.Error())
+		return
+	}
 	accountSwitch, err := parseOptionalBoolQuery(c, "account_switch")
 	if err != nil {
 		response.BadRequest(c, err.Error())
@@ -236,6 +241,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		EndTime:           endTime,
 		AccountSwitch:     accountSwitch,
 		ModerationFlagged: moderationFlagged,
+		EntrypointFlagged: entrypointFlagged,
 		ExactTotal:        exactTotal,
 	}
 
@@ -302,6 +308,11 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 	moderationFlagged, moderationErr := parseOptionalBoolQuery(c, "moderation_flagged")
 	if moderationErr != nil {
 		response.BadRequest(c, moderationErr.Error())
+		return
+	}
+	entrypointFlagged, entrypointErr := parseOptionalBoolQuery(c, "entrypoint_flagged")
+	if entrypointErr != nil {
+		response.BadRequest(c, entrypointErr.Error())
 		return
 	}
 	accountSwitch, err := parseOptionalBoolQuery(c, "account_switch")
@@ -400,6 +411,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		EndTime:           &endTime,
 		AccountSwitch:     accountSwitch,
 		ModerationFlagged: moderationFlagged,
+		EntrypointFlagged: entrypointFlagged,
 	}
 
 	stats, err := h.usageService.GetStatsWithFilters(c.Request.Context(), filters)

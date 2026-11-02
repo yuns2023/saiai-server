@@ -23,6 +23,10 @@ func TestParseUserAgentEntrypoint(t *testing.T) {
 		{"claude-cli not at start", "proxy claude-cli/2.1.316 (external, cli)", "", "", false},
 		{"no parens", "claude-cli/2.1.316", "", "", false},
 		{"one token in parens", "claude-cli/2.1.316 (cli)", "", "", false},
+		{"unclosed comment", "claude-cli/2.1.316 (external, cli", "", "", false},
+		{"unclosed comment with more tokens", "claude-cli/2.1.316 (external, cli, workload/cron", "", "", false},
+		{"nested paren", "claude-cli/2.1.316 (external, cli, x(y))", "", "", false},
+		{"trailing text after comment", "claude-cli/2.1.316 (external, cli) extra", "cli", "2.1.316", true},
 		{"no space before parens", "claude-cli/2.1.316(external, cli)", "", "", false},
 		{"bad version", "claude-cli/2.1 (external, cli)", "", "", false},
 		{"empty", "", "", "", false},
@@ -97,11 +101,20 @@ func TestParseBodyEntrypoint(t *testing.T) {
 }
 
 func TestParseEntrypointFacts(t *testing.T) {
-	facts := ParseEntrypointFacts("claude-cli/2.1.316 (external, t3-code, agent-sdk/0.3.276)",
+	facts := ParseEntrypointFacts([]string{"claude-cli/2.1.316 (external, t3-code, agent-sdk/0.3.276)"},
 		[]byte(`{"system":[{"type":"text","text":`+quote(billingHeader("t3-code"))+`}]}`))
 	want := EntrypointFacts{UAEntrypoint: "t3-code", UAVersion: "2.1.316", BodyEntrypoint: "t3-code", BodyStatus: EntrypointBodyValid}
 	if facts != want {
 		t.Fatalf("got %+v, want %+v", facts, want)
+	}
+
+	dup := ParseEntrypointFacts([]string{"claude-cli/2.1.316 (external, cli)", "claude-cli/2.1.316 (external, t3-code)"}, nil)
+	if !dup.UAAmbiguous || dup.UAEntrypoint != "" || dup.RecordedUAEntrypoint() != EntrypointAmbiguous {
+		t.Fatalf("duplicate User-Agent values must be ambiguous: %+v", dup)
+	}
+	none := ParseEntrypointFacts(nil, []byte(`{}`))
+	if none.UAAmbiguous || none.RecordedUAEntrypoint() != EntrypointNone || none.RecordedBodyEntrypoint() != EntrypointNone {
+		t.Fatalf("no User-Agent: %+v", none)
 	}
 }
 

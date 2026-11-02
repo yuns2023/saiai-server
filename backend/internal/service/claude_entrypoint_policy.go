@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claudebilling"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/gin-gonic/gin"
 )
 
 // Claude entrypoint policy (groups.claude_entrypoint_policy, migration 117).
@@ -21,7 +22,12 @@ const (
 
 // Decision reasons, in evaluation order.
 const (
-	ClaudeEntrypointReasonOK             = "ok"
+	ClaudeEntrypointReasonOK = "ok"
+	// ClaudeEntrypointReasonAuxBodyMissing is compliant: an allowed UA sent
+	// the official haiku max_tokens=1 aux probe without a billing header.
+	ClaudeEntrypointReasonAuxBodyMissing = "aux_body_missing_allowed"
+	// ClaudeEntrypointReasonUAAmbiguous: more than one User-Agent value.
+	ClaudeEntrypointReasonUAAmbiguous    = "ua_ambiguous"
 	ClaudeEntrypointReasonUANotAllowed   = "ua_not_allowed"
 	ClaudeEntrypointReasonBodyMissing    = "body_missing"
 	ClaudeEntrypointReasonBodyMalformed  = "body_malformed"
@@ -137,7 +143,13 @@ type ClaudeEntrypointDecision struct {
 // DecideClaudeEntrypoint is compliant iff the UA entrypoint is allowed, the
 // body billing header is valid, its entrypoint is allowed and both agree.
 // The first failing check (in the order of the reason constants) wins.
-func DecideClaudeEntrypoint(facts claudebilling.EntrypointFacts, allowlist []string) ClaudeEntrypointDecision {
+//
+// auxProbe exempts exactly one case: an allowed UA whose body has no billing
+// header (status missing) on a request matching the official Claude Code
+// haiku max_tokens=1 aux probe (IsClaudeCodeAuxProbeRequest). It is
+// compliant with reason aux_body_missing_allowed; malformed, ambiguous,
+// not-allowed or mismatched bodies still fail.
+func DecideClaudeEntrypoint(facts claudebilling.EntrypointFacts, allowlist []string, auxProbe bool) ClaudeEntrypointDecision {
 	allowed := func(entrypoint string) bool {
 		if entrypoint == "" {
 			return false
@@ -151,8 +163,12 @@ func DecideClaudeEntrypoint(facts claudebilling.EntrypointFacts, allowlist []str
 	}
 	reason := ClaudeEntrypointReasonOK
 	switch {
+	case facts.UAAmbiguous:
+		reason = ClaudeEntrypointReasonUAAmbiguous
 	case !allowed(facts.UAEntrypoint):
 		reason = ClaudeEntrypointReasonUANotAllowed
+	case facts.BodyStatus == claudebilling.EntrypointBodyMissing && auxProbe:
+		return ClaudeEntrypointDecision{Compliant: true, Reason: ClaudeEntrypointReasonAuxBodyMissing}
 	case facts.BodyStatus == claudebilling.EntrypointBodyMissing:
 		reason = ClaudeEntrypointReasonBodyMissing
 	case facts.BodyStatus == claudebilling.EntrypointBodyMalformed:
@@ -182,10 +198,8 @@ func ClaudeEntrypointResult(policy string, decision ClaudeEntrypointDecision) st
 // ClaudeEntrypointRejectionMessage is the client-facing 400 message. It only
 // states what the request declared; it does not claim client verification.
 func ClaudeEntrypointRejectionMessage(facts claudebilling.EntrypointFacts, allowlist []string) string {
-	body := claudebilling.EntrypointNone
-	if facts.BodyStatus == claudebilling.EntrypointBodyValid {
-		body = claudebilling.SanitizeEntrypointForRecord(facts.BodyEntrypoint)
-	} else if facts.BodyStatus != claudebilling.EntrypointBodyMissing {
+	body := facts.RecordedBodyEntrypoint()
+	if facts.BodyStatus != claudebilling.EntrypointBodyValid && facts.BodyStatus != claudebilling.EntrypointBodyMissing {
 		body = "<" + facts.BodyStatus + ">"
 	}
 	allowed := "none"
@@ -193,5 +207,24 @@ func ClaudeEntrypointRejectionMessage(facts claudebilling.EntrypointFacts, allow
 		allowed = strings.Join(allowlist, ", ")
 	}
 	return fmt.Sprintf("This group does not allow this Claude client entrypoint (UA: %s, body: %s). Allowed: %s.",
-		claudebilling.SanitizeEntrypointForRecord(facts.UAEntrypoint), body, allowed)
+		facts.RecordedUAEntrypoint(), body, allowed)
+}
+
+// IsClaudeCodeAuxProbeRequest reports whether the request matches the
+// official Claude Code haiku max_tokens=1 auxiliary probe that the Claude
+// OAuth request-shape gate already exempts (it may lack a billing header).
+func IsClaudeCodeAuxProbeRequest(c *gin.Context, parsed *ParsedRequest) bool {
+	return isClaudeOAuthHaikuMaxTokensOneAuxRequest(c, parsed)
+}
+
+// ClientEntrypointFlag is stored in usage_logs.client_entrypoint for a
+// request that an observe group found non-compliant but still served
+// (docs/CLAUDE_ENTRYPOINT_POLICY.md). Values are sanitized. Admin-only.
+type ClientEntrypointFlag struct {
+	UA         string `json:"ua"`
+	Body       string `json:"body"`
+	BodyStatus string `json:"body_status"`
+	Reason     string `json:"reason"`
+	GroupID    int64  `json:"group_id"`
+	Policy     string `json:"policy"`
 }

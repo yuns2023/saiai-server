@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -42,14 +43,37 @@ func TestDecideClaudeEntrypoint(t *testing.T) {
 		{"ua checked first", claudebilling.EntrypointFacts{UAEntrypoint: "t3-code", BodyStatus: claudebilling.EntrypointBodyMissing}, defaults, ClaudeEntrypointReasonUANotAllowed},
 		{"empty allowlist", validFacts("cli", "cli"), []string{}, ClaudeEntrypointReasonUANotAllowed},
 		{"custom allowlist", validFacts("t3-code", "t3-code"), []string{"t3-code"}, ClaudeEntrypointReasonOK},
+		{"ambiguous UA first", claudebilling.EntrypointFacts{UAAmbiguous: true, BodyStatus: claudebilling.EntrypointBodyMissing}, defaults, ClaudeEntrypointReasonUAAmbiguous},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			decision := DecideClaudeEntrypoint(tc.facts, tc.allowlist)
+			decision := DecideClaudeEntrypoint(tc.facts, tc.allowlist, false)
 			require.Equal(t, tc.reason, decision.Reason)
 			require.Equal(t, tc.reason == ClaudeEntrypointReasonOK, decision.Compliant)
 		})
 	}
+}
+
+func TestDecideClaudeEntrypointAuxProbeExemption(t *testing.T) {
+	defaults := DefaultClaudeEntrypointAllowlist()
+	missing := func(ua string) claudebilling.EntrypointFacts {
+		return claudebilling.EntrypointFacts{UAEntrypoint: ua, BodyStatus: claudebilling.EntrypointBodyMissing}
+	}
+	got := DecideClaudeEntrypoint(missing("cli"), defaults, true)
+	require.Equal(t, ClaudeEntrypointDecision{Compliant: true, Reason: ClaudeEntrypointReasonAuxBodyMissing}, got)
+	require.Equal(t, ClaudeEntrypointResultAllowed, ClaudeEntrypointResult(ClaudeEntrypointPolicyEnforce, got))
+
+	require.Equal(t, ClaudeEntrypointReasonUANotAllowed, DecideClaudeEntrypoint(missing("t3-code"), defaults, true).Reason, "UA must be allowed")
+	require.Equal(t, ClaudeEntrypointReasonBodyMissing, DecideClaudeEntrypoint(missing("cli"), defaults, false).Reason, "not a probe")
+	require.Equal(t, ClaudeEntrypointReasonUAAmbiguous, DecideClaudeEntrypoint(claudebilling.EntrypointFacts{UAAmbiguous: true, BodyStatus: claudebilling.EntrypointBodyMissing}, defaults, true).Reason)
+	for status, reason := range map[string]string{
+		claudebilling.EntrypointBodyMalformed: ClaudeEntrypointReasonBodyMalformed,
+		claudebilling.EntrypointBodyAmbiguous: ClaudeEntrypointReasonBodyAmbiguous,
+	} {
+		require.Equal(t, reason, DecideClaudeEntrypoint(claudebilling.EntrypointFacts{UAEntrypoint: "cli", BodyStatus: status}, defaults, true).Reason)
+	}
+	require.Equal(t, ClaudeEntrypointReasonBodyNotAllowed, DecideClaudeEntrypoint(validFacts("cli", "t3-code"), defaults, true).Reason)
+	require.Equal(t, ClaudeEntrypointReasonMismatch, DecideClaudeEntrypoint(validFacts("cli", "sdk-cli"), defaults, true).Reason)
 }
 
 func TestClaudeEntrypointResult(t *testing.T) {
@@ -68,6 +92,9 @@ func TestClaudeEntrypointRejectionMessage(t *testing.T) {
 	require.Equal(t,
 		"This group does not allow this Claude client entrypoint (UA: <none>, body: <ambiguous>). Allowed: none.",
 		ClaudeEntrypointRejectionMessage(claudebilling.EntrypointFacts{BodyStatus: claudebilling.EntrypointBodyAmbiguous}, []string{}))
+	require.Equal(t,
+		"This group does not allow this Claude client entrypoint (UA: <ambiguous>, body: <none>). Allowed: cli.",
+		ClaudeEntrypointRejectionMessage(claudebilling.EntrypointFacts{UAAmbiguous: true, BodyStatus: claudebilling.EntrypointBodyMissing}, []string{"cli"}))
 }
 
 func TestGroupClaudeEntrypointAccessors(t *testing.T) {
@@ -228,6 +255,7 @@ type entrypointObservationRepoStub struct {
 	deleted  []string
 	err      error
 	listDays []string
+	listRows int
 }
 
 func (r *entrypointObservationRepoStub) UpsertClaudeEntrypointObservations(_ context.Context, rows []ClaudeEntrypointObservation) error {
@@ -248,7 +276,8 @@ func (r *entrypointObservationRepoStub) ListClaudeEntrypointObservations(_ conte
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.listDays = append(r.listDays, since)
-	return nil, nil
+	rows := make([]ClaudeEntrypointObservationSummary, r.listRows)
+	return rows, nil
 }
 
 func TestClaudeEntrypointObservationService_AggregatesAndFlushes(t *testing.T) {
@@ -325,9 +354,9 @@ func TestClaudeEntrypointObservationService_StopFlushesAndListBounds(t *testing.
 	require.Len(t, repo.upserts, 1, "Stop flushes")
 	repo.mu.Unlock()
 
-	_, err := svc.List(context.Background(), 1, 7)
+	_, _, err := svc.List(context.Background(), 1, 7)
 	require.NoError(t, err)
-	_, err = svc.List(context.Background(), 1, 1000)
+	_, _, err = svc.List(context.Background(), 1, 1000)
 	require.NoError(t, err)
 	require.Equal(t, []string{"2026-10-27", "2026-08-05"}, repo.listDays)
 
@@ -352,4 +381,98 @@ func TestClaudeEntrypointObservationService_ShouldLogViolationRateLimits(t *test
 	require.True(t, svc.ShouldLogViolation(1, "cli", "t3-code"), "per entrypoint pair")
 	now = now.Add(time.Minute)
 	require.True(t, svc.ShouldLogViolation(1, "t3-code", "t3-code"))
+}
+
+func TestClaudeEntrypointObservationService_ListTruncated(t *testing.T) {
+	repo := &entrypointObservationRepoStub{listRows: claudeEntrypointObservationListLimit}
+	svc := NewClaudeEntrypointObservationService(repo)
+	rows, truncated, err := svc.List(context.Background(), 1, 7)
+	require.NoError(t, err)
+	require.False(t, truncated)
+	require.Len(t, rows, claudeEntrypointObservationListLimit)
+
+	repo.listRows = claudeEntrypointObservationListLimit + 1
+	rows, truncated, err = svc.List(context.Background(), 1, 7)
+	require.NoError(t, err)
+	require.True(t, truncated)
+	require.Len(t, rows, claudeEntrypointObservationListLimit)
+}
+
+func TestClaudeEntrypointObservationService_ClockRollback(t *testing.T) {
+	repo := &entrypointObservationRepoStub{}
+	svc := NewClaudeEntrypointObservationService(repo)
+	t0 := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	now := t0
+	svc.now = func() time.Time { return now }
+	in := ClaudeEntrypointObservationInput{GroupID: 1, Facts: validFacts("cli", "cli"), Policy: ClaudeEntrypointPolicyObserve,
+		Result: ClaudeEntrypointResultAllowed, Reason: ClaudeEntrypointReasonOK, UserAgent: "ua-first"}
+	svc.Record(in)
+	now = t0.Add(-10 * time.Second) // clock steps back
+	in.UserAgent = "ua-older"
+	svc.Record(in)
+	now = t0.Add(5 * time.Second)
+	in.UserAgent = "ua-newest"
+	svc.Record(in)
+	now = t0.Add(time.Second) // back again, still after first
+	in.UserAgent = "ua-not-latest"
+	svc.Record(in)
+	svc.Flush(context.Background())
+	require.Len(t, repo.upserts, 1)
+	row := repo.upserts[0][0]
+	require.Equal(t, int64(4), row.Requests)
+	require.True(t, row.FirstSeenAt.Equal(t0.Add(-10*time.Second)), "first = min")
+	require.True(t, row.LastSeenAt.Equal(t0.Add(5*time.Second)), "last = max")
+	require.Equal(t, "ua-newest", row.SampleUserAgent, "sample only from a request at or after last")
+}
+
+func TestClaudeEntrypointObservationService_PerGroupCapAndCollectorStatus(t *testing.T) {
+	repo := &entrypointObservationRepoStub{}
+	svc := NewClaudeEntrypointObservationService(repo)
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	record := func(groupID int64, version string) {
+		facts := validFacts("cli", "cli")
+		facts.UAVersion = version
+		svc.Record(ClaudeEntrypointObservationInput{GroupID: groupID, Facts: facts, Policy: ClaudeEntrypointPolicyObserve,
+			Result: ClaudeEntrypointResultAllowed, Reason: ClaudeEntrypointReasonOK})
+	}
+	for i := 0; i < claudeEntrypointObservationMaxKeysPerGroup+5; i++ {
+		record(1, strconv.Itoa(i))
+	}
+	record(2, "x") // another group still has room
+	svc.Flush(context.Background())
+	require.Len(t, repo.upserts[0], claudeEntrypointObservationMaxKeysPerGroup+1)
+	status := svc.CollectorStatus()
+	require.Equal(t, int64(5), status.DroppedLastFlush)
+	require.Nil(t, status.LastErrorAt)
+
+	// The cap resets each flush window; a write error is reported.
+	repo.err = errors.New("db down")
+	record(1, "after-flush")
+	svc.Flush(context.Background())
+	status = svc.CollectorStatus()
+	require.Zero(t, status.DroppedLastFlush)
+	require.NotNil(t, status.LastErrorAt)
+	require.True(t, status.LastErrorAt.Equal(now))
+	require.Len(t, repo.upserts[1], 1)
+}
+
+func TestClaudeEntrypointObservationService_LogLimiterIsBounded(t *testing.T) {
+	svc := NewClaudeEntrypointObservationService(nil)
+	now := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	logged := 0
+	for i := 0; i < 5000; i++ {
+		if svc.ShouldLogViolation(int64(i), "t3-code", "t3-code") {
+			logged++
+		}
+	}
+	require.Equal(t, claudeEntrypointViolationLogMaxPerWindow, logged, "global cap per window, churn cannot reset it")
+	svc.logMu.Lock()
+	require.LessOrEqual(t, len(svc.logLogged), claudeEntrypointViolationLogMaxKeys)
+	require.Equal(t, int64(5000-claudeEntrypointViolationLogMaxPerWindow), svc.logSuppressed)
+	svc.logMu.Unlock()
+
+	now = now.Add(time.Minute)
+	require.True(t, svc.ShouldLogViolation(1, "t3-code", "t3-code"), "new window")
 }

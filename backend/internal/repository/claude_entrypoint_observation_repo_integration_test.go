@@ -19,7 +19,8 @@ func TestMigration117ClaudeEntrypointPolicyAppliesTwice(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
 	_, err = tx.ExecContext(ctx, `CREATE SCHEMA claude_entrypoint_migration_test; SET LOCAL search_path=claude_entrypoint_migration_test;
- CREATE TABLE groups(id BIGINT PRIMARY KEY); INSERT INTO groups VALUES(1);`)
+ CREATE TABLE groups(id BIGINT PRIMARY KEY); INSERT INTO groups VALUES(1);
+ CREATE TABLE usage_logs(id BIGINT PRIMARY KEY); INSERT INTO usage_logs VALUES(1);`)
 	require.NoError(t, err)
 	migration, err := migrations.FS.ReadFile("117_group_claude_entrypoint_policy.sql")
 	require.NoError(t, err)
@@ -41,6 +42,15 @@ func TestMigration117ClaudeEntrypointPolicyAppliesTwice(t *testing.T) {
 	require.Error(t, err, "CHECK constraint rejects unknown policies")
 	_, err = tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT invalid_policy`)
 	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `SAVEPOINT invalid_allowlist`)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `UPDATE groups SET claude_entrypoint_allowlist='{"cli":true}'::jsonb WHERE id=1`)
+	require.Error(t, err, "CHECK constraint requires a JSON array")
+	_, err = tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT invalid_allowlist`)
+	require.NoError(t, err)
+	var entrypoint *string
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT client_entrypoint::text FROM usage_logs WHERE id=1`).Scan(&entrypoint))
+	require.Nil(t, entrypoint, "existing usage rows stay NULL")
 }
 
 func TestClaudeEntrypointObservationRepo_UpsertAndAggregate(t *testing.T) {

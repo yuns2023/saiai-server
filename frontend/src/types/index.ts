@@ -29,6 +29,24 @@ export interface ClaudeEntrypointObservation {
   sample_user_agent: string
 }
 
+/** usage_logs.client_entrypoint (admin-only). */
+export interface ClientEntrypointFlag {
+  ua: string
+  body: string
+  body_status: string
+  reason: string
+  group_id: number
+  policy: string
+}
+
+/** GET /admin/groups/:id/claude-entrypoint-observations response. */
+export interface ClaudeEntrypointObservationList {
+  days: number
+  items: ClaudeEntrypointObservation[]
+  truncated: boolean
+  collector: { dropped_last_flush: number; last_error_at: string | null }
+}
+
 export type ClientAttestationStatus = 'valid' | 'missing' | 'invalid' | 'stale' | 'replay' | 'unknown_device' | 'revoked' | 'unverified'
 
 export interface BasePaginationResponse<T> {
@@ -1287,6 +1305,9 @@ export interface AdminUsageLog extends UsageLog {
 
   // SAIAI 客户端校验状态码（1 通过 … 8 未校验；null 表示未采集；仅管理员可见）
   client_attestation?: number | null
+
+  // Claude 入口告警（观察模式下不合规但已放行；null 表示无告警；仅管理员可见）
+  client_entrypoint?: ClientEntrypointFlag | null
 
   // 最小账号信息（仅管理员接口返回）
   account?: UsageLogAccountSummary

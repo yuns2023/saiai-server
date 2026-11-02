@@ -490,6 +490,9 @@ type AdminUsageLog struct {
 	// ClientAttestation SAIAI 客户端校验状态（1 通过 … 8 未校验；null 表示未采集；仅管理员可见）
 	ClientAttestation *int16 `json:"client_attestation"`
 
+	// ClientEntrypoint Claude 入口告警（观察模式下不合规但已放行；null 表示无告警；仅管理员可见）
+	ClientEntrypoint *service.ClientEntrypointFlag `json:"client_entrypoint"`
+
 	// AccountID / UpstreamModel / UpstreamEndpoint describe upstream routing
 	// (account, model after mapping, normalized upstream path); admin only.
 	// UpstreamModel is omitted when no mapping was applied.

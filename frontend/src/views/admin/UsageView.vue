@@ -26,7 +26,7 @@
             </div>
           </div>
         </div>
-        <div v-if="!filters.moderation_flagged" class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div v-if="!filters.moderation_flagged && !filters.entrypoint_flagged" class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <ModelDistributionChart
             v-model:source="modelDistributionSource"
             v-model:metric="modelDistributionMetric"
@@ -54,7 +54,7 @@
             :breakdown-filters="breakdownFilters"
           />
         </div>
-        <div v-if="!filters.moderation_flagged" class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div v-if="!filters.moderation_flagged && !filters.entrypoint_flagged" class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <EndpointDistributionChart
             v-model:source="endpointDistributionSource"
             v-model:metric="endpointDistributionMetric"
@@ -330,6 +330,7 @@ const applyRouteQueryFilters = () => {
     user_id: queryUserId,
     api_key_id: queryAPIKeyId,
     moderation_flagged: getSingleQueryValue(route.query.moderation_flagged) === 'true' || undefined,
+    entrypoint_flagged: getSingleQueryValue(route.query.entrypoint_flagged) === 'true' || undefined,
     session_id: querySessionId,
     ...activeRangeParams()
   }
@@ -398,7 +399,7 @@ const resetModelStatsCache = () => {
 }
 
 const loadModelStats = async (source: ModelDistributionSource, force = false) => {
-  if (filters.value.moderation_flagged) return
+  if (filters.value.moderation_flagged || filters.value.entrypoint_flagged) return
   if (!force && loadedModelSources[source]) {
     return
   }
@@ -454,7 +455,7 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
 }
 
 const loadChartData = async () => {
-  if (filters.value.moderation_flagged) return
+  if (filters.value.moderation_flagged || filters.value.entrypoint_flagged) return
   const seq = ++chartReqSeq
   chartsLoading.value = true
   try {

@@ -418,6 +418,60 @@ func TestUsageLogRepositoryClientAttestationRoundTrip(t *testing.T) {
 	}, 3*time.Second, 20*time.Millisecond)
 }
 
+func TestUsageLogRepositoryClientEntrypointRoundTripAndFilter(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("usage-client-entrypoint-%d@example.com", time.Now().UnixNano())})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-usage-client-entrypoint-" + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-client-entrypoint-" + uuid.NewString()})
+	flag := &service.ClientEntrypointFlag{UA: "t3-code", Body: "t3-code", BodyStatus: "valid", Reason: "ua_not_allowed", GroupID: 3, Policy: "observe"}
+	newLog := func(flag *service.ClientEntrypointFlag) *service.UsageLog {
+		return &service.UsageLog{UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID, RequestID: uuid.NewString(),
+			Model: "claude-sonnet-4-5", InputTokens: 3, TotalCost: 0.1, ActualCost: 0.1, ClientEntrypoint: flag, CreatedAt: time.Now().UTC()}
+	}
+
+	flagged := newLog(flag)
+	_, err := repo.Create(ctx, flagged)
+	require.NoError(t, err)
+	got, err := repo.GetByID(ctx, flagged.ID)
+	require.NoError(t, err)
+	require.Equal(t, flag, got.ClientEntrypoint)
+
+	clean := newLog(nil)
+	_, err = repo.Create(ctx, clean)
+	require.NoError(t, err)
+	got, err = repo.GetByID(ctx, clean.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.ClientEntrypoint)
+	var isNull bool
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT client_entrypoint IS NULL FROM usage_logs WHERE id = $1", clean.ID).Scan(&isNull))
+	require.True(t, isNull)
+
+	single := newLog(flag)
+	_, err = repo.createSingle(ctx, integrationDB, single)
+	require.NoError(t, err)
+	fallback := newLog(flag)
+	require.NoError(t, execUsageLogInsertNoResult(ctx, integrationDB, prepareUsageLogInsert(fallback)))
+	var reason string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT client_entrypoint->>'reason' FROM usage_logs WHERE request_id = $1", fallback.RequestID).Scan(&reason))
+	require.Equal(t, "ua_not_allowed", reason)
+
+	logs, _, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 50}, usagestats.UsageLogFilters{APIKeyID: apiKey.ID, EntrypointFlagged: true, ExactTotal: true})
+	require.NoError(t, err)
+	require.Len(t, logs, 3)
+	for _, log := range logs {
+		require.NotNil(t, log.ClientEntrypoint)
+	}
+	stats, err := repo.GetStatsWithFilters(ctx, usagestats.UsageLogFilters{APIKeyID: apiKey.ID, EntrypointFlagged: true})
+	require.NoError(t, err)
+	require.Equal(t, int64(3), stats.TotalRequests)
+	all, _, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 50}, usagestats.UsageLogFilters{APIKeyID: apiKey.ID})
+	require.NoError(t, err)
+	require.Len(t, all, 4)
+}
+
 func TestUsageLogRepositoryCreateBestEffort_QueueFullReturnsDropped(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)

@@ -76,6 +76,15 @@
         </div>
       </div>
       <p class="input-hint mb-2">{{ t('admin.groups.claudeEntrypoint.observationsHint') }}</p>
+      <p v-if="truncated" class="mb-2 text-xs text-amber-600 dark:text-amber-400" :data-testid="`${testidPrefix}-claude-entrypoint-truncated`">
+        {{ t('admin.groups.claudeEntrypoint.observationsTruncated') }}
+      </p>
+      <p v-if="collector && collector.dropped_last_flush > 0" class="mb-2 text-xs text-amber-600 dark:text-amber-400">
+        {{ t('admin.groups.claudeEntrypoint.collectorDropped', { count: collector.dropped_last_flush }) }}
+      </p>
+      <p v-if="collector && collector.last_error_at" class="mb-2 text-xs text-amber-600 dark:text-amber-400">
+        {{ t('admin.groups.claudeEntrypoint.collectorError', { time: formatDateTime(collector.last_error_at) }) }}
+      </p>
       <p v-if="loadError" class="text-xs text-red-500">{{ loadError }}</p>
       <p v-else-if="!loading && observations.length === 0" class="text-xs text-gray-500 dark:text-gray-400">
         {{ t('admin.groups.claudeEntrypoint.observationsEmpty') }}
@@ -134,7 +143,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/format'
-import type { ClaudeEntrypointObservation, ClaudeEntrypointPolicy } from '@/types'
+import type { ClaudeEntrypointObservation, ClaudeEntrypointObservationList, ClaudeEntrypointPolicy } from '@/types'
 
 const DEFAULT_ALLOWLIST = ['cli', 'claude-vscode', 'sdk-cli']
 const MAX_ITEMS = 32
@@ -166,6 +175,8 @@ const days = ref(7)
 const loading = ref(false)
 const loadError = ref('')
 const observations = ref<ClaudeEntrypointObservation[]>([])
+const truncated = ref(false)
+const collector = ref<ClaudeEntrypointObservationList['collector'] | null>(null)
 
 const policyHint = computed(() => {
   switch (props.policy) {
@@ -258,9 +269,13 @@ async function loadObservations() {
     const data = await adminAPI.groups.getClaudeEntrypointObservations(props.groupId, days.value)
     if (seq !== loadSeq) return
     observations.value = data.items || []
+    truncated.value = Boolean(data.truncated)
+    collector.value = data.collector || null
   } catch {
     if (seq !== loadSeq) return
     observations.value = []
+    truncated.value = false
+    collector.value = null
     loadError.value = t('admin.groups.claudeEntrypoint.observationsLoadFailed')
   } finally {
     if (seq === loadSeq) loading.value = false
@@ -273,6 +288,8 @@ watch(
     loadSeq++
     loading.value = false
     observations.value = []
+    truncated.value = false
+    collector.value = null
     if (groupId && active) void loadObservations()
   },
   { immediate: true }

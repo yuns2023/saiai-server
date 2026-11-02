@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claudebilling"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -19,31 +21,52 @@ const claudeEntrypointNotAllowedCode = "claude_entrypoint_not_allowed"
 // original body, and only when a group with an active policy is checked.
 // Not safe for concurrent use.
 type claudeEntrypointPolicyState struct {
-	userAgent string
-	body      []byte
-	userID    int64
-	apiKeyID  int64
+	userAgents []string
+	body       []byte
+	request    *service.ParsedRequest
+	userID     int64
+	apiKeyID   int64
 
-	parsed   bool
-	facts    claudebilling.EntrypointFacts
-	recorded map[int64]struct{}
+	parsed    bool
+	facts     claudebilling.EntrypointFacts
+	auxProbe  bool
+	recorded  map[int64]struct{}
+	usageFlag *service.ClientEntrypointFlag
 }
 
-func newClaudeEntrypointPolicyState(c *gin.Context, body []byte, userID, apiKeyID int64) *claudeEntrypointPolicyState {
+func newClaudeEntrypointPolicyState(c *gin.Context, body []byte, request *service.ParsedRequest, userID, apiKeyID int64) *claudeEntrypointPolicyState {
 	return &claudeEntrypointPolicyState{
-		userAgent: c.GetHeader("User-Agent"),
-		body:      body,
-		userID:    userID,
-		apiKeyID:  apiKeyID,
+		userAgents: c.Request.Header.Values("User-Agent"),
+		body:       body,
+		request:    request,
+		userID:     userID,
+		apiKeyID:   apiKeyID,
 	}
 }
 
-func (s *claudeEntrypointPolicyState) getFacts() claudebilling.EntrypointFacts {
+func (s *claudeEntrypointPolicyState) getFacts(c *gin.Context) claudebilling.EntrypointFacts {
 	if !s.parsed {
-		s.facts = claudebilling.ParseEntrypointFacts(s.userAgent, s.body)
+		s.facts = claudebilling.ParseEntrypointFacts(s.userAgents, s.body)
+		// Only needed for the narrow aux-probe exemption (missing header).
+		s.auxProbe = s.facts.BodyStatus == claudebilling.EntrypointBodyMissing && service.IsClaudeCodeAuxProbeRequest(c, s.request)
 		s.parsed = true
 	}
 	return s.facts
+}
+
+// sampleUserAgent is the User-Agent recorded in the observation list.
+func (s *claudeEntrypointPolicyState) sampleUserAgent() string {
+	return strings.Join(s.userAgents, " | ")
+}
+
+// clientEntrypointFlag returns the usage_logs.client_entrypoint value: the
+// first group that found the request non-compliant but still served it
+// (observe), or nil.
+func (s *claudeEntrypointPolicyState) clientEntrypointFlag() *service.ClientEntrypointFlag {
+	if s == nil {
+		return nil
+	}
+	return s.usageFlag
 }
 
 // applyClaudeEntrypointPolicyForKey checks the key's group and, when the
@@ -52,6 +75,12 @@ func (s *claudeEntrypointPolicyState) getFacts() claudebilling.EntrypointFacts {
 // stop.
 func (h *GatewayHandler) applyClaudeEntrypointPolicyForKey(c *gin.Context, state *claudeEntrypointPolicyState, key *service.APIKey, streamStarted bool) bool {
 	if state == nil || key == nil {
+		return true
+	}
+	// Forced-platform routes skip the policy, like claude_code_only
+	// (checkClaudeCodeRestriction). The prompt-too-long fallback clears the
+	// forced platform before it is checked.
+	if forcePlatform, ok := c.Request.Context().Value(ctxkey.ForcePlatform).(string); ok && forcePlatform != "" {
 		return true
 	}
 	group := key.Group
@@ -85,9 +114,9 @@ func (h *GatewayHandler) applyClaudeEntrypointPolicy(c *gin.Context, state *clau
 	if policy == service.ClaudeEntrypointPolicyOff {
 		return true
 	}
-	facts := state.getFacts()
+	facts := state.getFacts(c)
 	allowlist := group.EffectiveClaudeEntrypointAllowlist()
-	decision := service.DecideClaudeEntrypoint(facts, allowlist)
+	decision := service.DecideClaudeEntrypoint(facts, allowlist, state.auxProbe)
 	result := service.ClaudeEntrypointResult(policy, decision)
 
 	if _, done := state.recorded[group.ID]; !done {
@@ -101,18 +130,29 @@ func (h *GatewayHandler) applyClaudeEntrypointPolicy(c *gin.Context, state *clau
 			Policy:    policy,
 			Result:    result,
 			Reason:    decision.Reason,
-			UserAgent: state.userAgent,
+			UserAgent: state.sampleUserAgent(),
 		})
 	}
 
-	if !decision.Compliant && h.claudeEntrypointObserver.ShouldLogViolation(group.ID, facts.UAEntrypoint, facts.BodyEntrypoint) {
+	if !decision.Compliant && policy == service.ClaudeEntrypointPolicyObserve && state.usageFlag == nil {
+		state.usageFlag = &service.ClientEntrypointFlag{
+			UA:         facts.RecordedUAEntrypoint(),
+			Body:       facts.RecordedBodyEntrypoint(),
+			BodyStatus: facts.BodyStatus,
+			Reason:     decision.Reason,
+			GroupID:    group.ID,
+			Policy:     policy,
+		}
+	}
+
+	if !decision.Compliant && h.claudeEntrypointObserver.ShouldLogViolation(group.ID, facts.RecordedUAEntrypoint(), facts.RecordedBodyEntrypoint()) {
 		requestLogger(c, "handler.gateway.messages").Warn("gateway.claude_entrypoint_policy",
 			zap.Int64("group_id", group.ID),
 			zap.String("policy", policy),
 			zap.String("result", result),
 			zap.String("reason", decision.Reason),
-			zap.String("ua_entrypoint", claudebilling.SanitizeEntrypointForRecord(facts.UAEntrypoint)),
-			zap.String("body_entrypoint", claudebilling.SanitizeEntrypointForRecord(facts.BodyEntrypoint)),
+			zap.String("ua_entrypoint", facts.RecordedUAEntrypoint()),
+			zap.String("body_entrypoint", facts.RecordedBodyEntrypoint()),
 			zap.String("body_status", facts.BodyStatus),
 			zap.Int64("user_id", state.userID),
 			zap.Int64("api_key_id", state.apiKeyID),

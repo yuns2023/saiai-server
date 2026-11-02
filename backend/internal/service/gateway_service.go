@@ -9335,16 +9335,17 @@ type RecordUsageInput struct {
 	APIKey             *APIKey
 	User               *User
 	Account            *Account
-	Subscription       *UserSubscription  // 可选：订阅信息
-	InboundEndpoint    string             // 入站端点（客户端请求路径）
-	UpstreamEndpoint   string             // 上游端点（标准化后的上游路径）
-	SessionID          *string            // 原始客户端会话 ID，用于使用记录关联
-	UserAgent          string             // 请求的 User-Agent
-	IPAddress          string             // 请求的客户端 IP 地址
-	RequestPayloadHash string             // 请求体语义哈希，用于降低 request_id 误复用时的静默误去重风险
-	ForceCacheBilling  bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
-	APIKeyService      APIKeyQuotaUpdater // 可选：用于更新API Key配额
-	ClientAttestation  *int16             // SAIAI 客户端校验状态（请求级）；最终分组策略为 off 时不落库
+	Subscription       *UserSubscription     // 可选：订阅信息
+	InboundEndpoint    string                // 入站端点（客户端请求路径）
+	UpstreamEndpoint   string                // 上游端点（标准化后的上游路径）
+	SessionID          *string               // 原始客户端会话 ID，用于使用记录关联
+	UserAgent          string                // 请求的 User-Agent
+	IPAddress          string                // 请求的客户端 IP 地址
+	RequestPayloadHash string                // 请求体语义哈希，用于降低 request_id 误复用时的静默误去重风险
+	ForceCacheBilling  bool                  // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
+	APIKeyService      APIKeyQuotaUpdater    // 可选：用于更新API Key配额
+	ClientAttestation  *int16                // SAIAI 客户端校验状态（请求级）；最终分组策略为 off 时不落库
+	ClientEntrypoint   *ClientEntrypointFlag // 观察模式下不合规但已放行的 Claude 入口（请求级）；合规为 nil
 }
 
 // APIKeyQuotaUpdater defines the interface for updating API Key quota and rate limit usage
@@ -9786,6 +9787,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		UpstreamModel:              optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
 		StopReason:                 result.StopReason,
 		ClientAttestation:          ClientAttestationForUsage(input.ClientAttestation, apiKey),
+		ClientEntrypoint:           input.ClientEntrypoint,
 		ReasoningEffort:            result.ReasoningEffort,
 		InboundEndpoint:            optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:           optionalTrimmedStringPtr(input.UpstreamEndpoint),

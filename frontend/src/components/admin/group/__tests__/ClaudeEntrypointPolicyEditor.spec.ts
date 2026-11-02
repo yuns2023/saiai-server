@@ -66,6 +66,16 @@ describe('ClaudeEntrypointPolicyEditor', () => {
     expect(rows[0].text()).toContain('cli')
   })
 
+  it('shows the truncation notice and collector status', async () => {
+    api.list.mockResolvedValueOnce({ days: 7, items: [observation('cli', 'allowed')], truncated: true,
+      collector: { dropped_last_flush: 3, last_error_at: '2026-11-02T01:00:00Z' } })
+    const wrapper = mountEditor({ groupId: 42 })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="editForm-claude-entrypoint-truncated"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('admin.groups.claudeEntrypoint.collectorDropped')
+    expect(wrapper.text()).toContain('admin.groups.claudeEntrypoint.collectorError')
+  })
+
   it('does not load observations on create or when the policy is off', async () => {
     mountEditor({ groupId: null })
     mountEditor({ groupId: 42, policy: 'off' })

@@ -254,6 +254,9 @@ type UserDashboardStats struct {
 // UsageLogFilters represents filters for usage log queries
 type UsageLogFilters struct {
 	ModerationFlagged bool
+	// EntrypointFlagged restricts results to rows with a Claude entrypoint
+	// warning (usage_logs.client_entrypoint IS NOT NULL). Admin-only.
+	EntrypointFlagged bool
 	UserID            int64
 	APIKeyID          int64
 	AccountID         int64

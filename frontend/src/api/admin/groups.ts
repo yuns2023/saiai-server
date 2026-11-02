@@ -10,7 +10,7 @@ import type {
   CreateGroupRequest,
   UpdateGroupRequest,
   PaginatedResponse,
-  ClaudeEntrypointObservation
+  ClaudeEntrypointObservationList
 } from '@/types'
 
 /**
@@ -256,8 +256,8 @@ export async function getCapacitySummary(): Promise<
 export async function getClaudeEntrypointObservations(
   id: number,
   days = 7
-): Promise<{ days: number; items: ClaudeEntrypointObservation[] }> {
-  const { data } = await apiClient.get<{ days: number; items: ClaudeEntrypointObservation[] }>(
+): Promise<ClaudeEntrypointObservationList> {
+  const { data } = await apiClient.get<ClaudeEntrypointObservationList>(
     `/admin/groups/${id}/claude-entrypoint-observations`,
     { params: { days } }
   )

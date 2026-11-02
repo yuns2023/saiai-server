@@ -44,6 +44,8 @@ type UsageLog struct {
 	StopReason *string `json:"stop_reason,omitempty"`
 	// ClientAttestation holds the value of the "client_attestation" field.
 	ClientAttestation *int16 `json:"client_attestation,omitempty"`
+	// ClientEntrypoint holds the value of the "client_entrypoint" field.
+	ClientEntrypoint map[string]interface{} `json:"client_entrypoint,omitempty"`
 	// GroupID holds the value of the "group_id" field.
 	GroupID *int64 `json:"group_id,omitempty"`
 	// SubscriptionID holds the value of the "subscription_id" field.
@@ -197,7 +199,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usagelog.FieldSmartSwitch, usagelog.FieldPricingSnapshot, usagelog.FieldModerationRef:
+		case usagelog.FieldSmartSwitch, usagelog.FieldClientEntrypoint, usagelog.FieldPricingSnapshot, usagelog.FieldModerationRef:
 			values[i] = new([]byte)
 		case usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
@@ -295,6 +297,14 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ClientAttestation = new(int16)
 				*_m.ClientAttestation = int16(value.Int64)
+			}
+		case usagelog.FieldClientEntrypoint:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field client_entrypoint", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.ClientEntrypoint); err != nil {
+					return fmt.Errorf("unmarshal field client_entrypoint: %w", err)
+				}
 			}
 		case usagelog.FieldGroupID:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -618,6 +628,9 @@ func (_m *UsageLog) String() string {
 		builder.WriteString("client_attestation=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
+	builder.WriteString(", ")
+	builder.WriteString("client_entrypoint=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ClientEntrypoint))
 	builder.WriteString(", ")
 	if v := _m.GroupID; v != nil {
 		builder.WriteString("group_id=")

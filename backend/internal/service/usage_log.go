@@ -117,6 +117,10 @@ type UsageLog struct {
 	// ClientAttestation is the SAIAI client proof status (clientproof.Status).
 	// Nil means not collected: the final group's policy is off.
 	ClientAttestation *int16
+	// ClientEntrypoint is set when an observe group found the request's
+	// Claude entrypoint non-compliant but still served it. Nil otherwise
+	// (compliant, exempted, policy off, or not /v1/messages). Admin-only.
+	ClientEntrypoint *ClientEntrypointFlag
 	// ServiceTier records the OpenAI service tier used for billing, e.g. "priority" / "flex".
 	ServiceTier *string
 	// ReasoningEffort is the request's reasoning effort level.

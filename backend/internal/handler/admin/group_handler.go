@@ -517,12 +517,17 @@ func (h *GroupHandler) GetClaudeEntrypointObservations(c *gin.Context) {
 			return
 		}
 	}
-	rows, err := h.entrypointObserver.List(c.Request.Context(), groupID, days)
+	rows, truncated, err := h.entrypointObserver.List(c.Request.Context(), groupID, days)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, gin.H{"days": days, "items": rows})
+	response.Success(c, gin.H{
+		"days":      days,
+		"items":     rows,
+		"truncated": truncated,
+		"collector": h.entrypointObserver.CollectorStatus(),
+	})
 }
 
 // GetStats handles getting group statistics

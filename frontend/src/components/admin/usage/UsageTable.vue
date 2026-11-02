@@ -22,6 +22,14 @@
             >
               {{ t(`admin.users.clientProof.status.${attestationBadge(row)}`) }}
             </span>
+            <span
+              v-if="row.client_entrypoint"
+              class="ml-1 inline-flex cursor-help items-center rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-500/20 dark:text-amber-300"
+              :title="clientEntrypointTooltip(row)"
+              data-testid="usage-client-entrypoint-badge"
+            >
+              {{ t('admin.usage.clientEntrypoint.badge') }}
+            </span>
           </div>
         </template>
 
@@ -442,6 +450,24 @@ const { t } = useI18n()
 const attestationBadge = (row: AdminUsageLog) => {
   const status = clientAttestationStatusFromCode(row.client_attestation)
   return status && status !== 'valid' ? status : null
+}
+
+// Claude entrypoint warning: an observe group found the declared entrypoint
+// non-compliant but the request was served.
+const clientEntrypointTooltip = (row: AdminUsageLog): string => {
+  const flag = row.client_entrypoint
+  if (!flag) return ''
+  const body = flag.body_status === 'valid' ? flag.body : `<${flag.body_status}>`
+  const policy = flag.policy === 'enforce'
+    ? t('admin.groups.claudeEntrypoint.policyEnforce')
+    : t('admin.groups.claudeEntrypoint.policyObserve')
+  return [
+    `${t('admin.usage.clientEntrypoint.ua')}: ${flag.ua}`,
+    `${t('admin.usage.clientEntrypoint.body')}: ${body}`,
+    `${t('admin.usage.clientEntrypoint.reason')}: ${t(`admin.groups.claudeEntrypoint.reasons.${flag.reason}`)}`,
+    `${t('admin.usage.clientEntrypoint.group')}: #${flag.group_id}`,
+    `${t('admin.usage.clientEntrypoint.policy')}: ${policy}`
+  ].join('\n')
 }
 
 // Tooltip state - cost

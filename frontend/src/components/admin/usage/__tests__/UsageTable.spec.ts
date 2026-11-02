@@ -373,4 +373,29 @@ describe('admin UsageTable tooltip', () => {
     }
     wrapper.unmount()
   })
+
+  it('shows the Claude entrypoint warning badge with details', () => {
+    const flagged = { request_id: 'TEST_ONLY_ENTRYPOINT', user_id: 7,
+      client_entrypoint: { ua: 't3-code', body: 't3-code', body_status: 'valid', reason: 'ua_not_allowed', group_id: 12, policy: 'observe' } }
+    const wrapper = mount(UsageTable, {
+      props: { data: [flagged], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-user" :row="data[0]" /></div>' } } },
+    })
+    const badge = wrapper.get('[data-testid="usage-client-entrypoint-badge"]')
+    expect(badge.text()).toBe('admin.usage.clientEntrypoint.badge')
+    const title = badge.attributes('title') || ''
+    expect(title).toContain('admin.usage.clientEntrypoint.ua: t3-code')
+    expect(title).toContain('admin.usage.clientEntrypoint.body: t3-code')
+    expect(title).toContain('admin.groups.claudeEntrypoint.reasons.ua_not_allowed')
+    expect(title).toContain('#12')
+    expect(title).toContain('admin.groups.claudeEntrypoint.policyObserve')
+    wrapper.unmount()
+
+    const clean = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_NO_ENTRYPOINT', user_id: 7, client_entrypoint: null }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-user" :row="data[0]" /></div>' } } },
+    })
+    expect(clean.find('[data-testid="usage-client-entrypoint-badge"]').exists()).toBe(false)
+    clean.unmount()
+  })
 })

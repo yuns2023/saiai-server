@@ -202,6 +202,18 @@ func (_u *UsageLogUpdate) ClearClientAttestation() *UsageLogUpdate {
 	return _u
 }
 
+// SetClientEntrypoint sets the "client_entrypoint" field.
+func (_u *UsageLogUpdate) SetClientEntrypoint(v map[string]interface{}) *UsageLogUpdate {
+	_u.mutation.SetClientEntrypoint(v)
+	return _u
+}
+
+// ClearClientEntrypoint clears the value of the "client_entrypoint" field.
+func (_u *UsageLogUpdate) ClearClientEntrypoint() *UsageLogUpdate {
+	_u.mutation.ClearClientEntrypoint()
+	return _u
+}
+
 // SetGroupID sets the "group_id" field.
 func (_u *UsageLogUpdate) SetGroupID(v int64) *UsageLogUpdate {
 	_u.mutation.SetGroupID(v)
@@ -1099,6 +1111,12 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.ClientAttestationCleared() {
 		_spec.ClearField(usagelog.FieldClientAttestation, field.TypeInt16)
 	}
+	if value, ok := _u.mutation.ClientEntrypoint(); ok {
+		_spec.SetField(usagelog.FieldClientEntrypoint, field.TypeJSON, value)
+	}
+	if _u.mutation.ClientEntrypointCleared() {
+		_spec.ClearField(usagelog.FieldClientEntrypoint, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)
 	}
@@ -1628,6 +1646,18 @@ func (_u *UsageLogUpdateOne) AddClientAttestation(v int16) *UsageLogUpdateOne {
 // ClearClientAttestation clears the value of the "client_attestation" field.
 func (_u *UsageLogUpdateOne) ClearClientAttestation() *UsageLogUpdateOne {
 	_u.mutation.ClearClientAttestation()
+	return _u
+}
+
+// SetClientEntrypoint sets the "client_entrypoint" field.
+func (_u *UsageLogUpdateOne) SetClientEntrypoint(v map[string]interface{}) *UsageLogUpdateOne {
+	_u.mutation.SetClientEntrypoint(v)
+	return _u
+}
+
+// ClearClientEntrypoint clears the value of the "client_entrypoint" field.
+func (_u *UsageLogUpdateOne) ClearClientEntrypoint() *UsageLogUpdateOne {
+	_u.mutation.ClearClientEntrypoint()
 	return _u
 }
 
@@ -2557,6 +2587,12 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.ClientAttestationCleared() {
 		_spec.ClearField(usagelog.FieldClientAttestation, field.TypeInt16)
+	}
+	if value, ok := _u.mutation.ClientEntrypoint(); ok {
+		_spec.SetField(usagelog.FieldClientEntrypoint, field.TypeJSON, value)
+	}
+	if _u.mutation.ClientEntrypointCleared() {
+		_spec.ClearField(usagelog.FieldClientEntrypoint, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)
