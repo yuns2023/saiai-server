@@ -40,14 +40,14 @@ func (r *claudeEntrypointObservationRepository) upsertChunk(ctx context.Context,
 		return nil
 	}
 	var b strings.Builder
-	b.WriteString(`INSERT INTO group_claude_entrypoint_observations (
+	_, _ = b.WriteString(`INSERT INTO group_claude_entrypoint_observations (
 		group_id, day, ua_entrypoint, body_entrypoint, body_status, cli_version, policy, result, reason,
 		requests, first_seen_at, last_seen_at, sample_user_agent
 	) VALUES `)
 	args := make([]any, 0, len(rows)*13)
 	for i, row := range rows {
 		if i > 0 {
-			b.WriteString(", ")
+			_, _ = b.WriteString(", ")
 		}
 		base := i * 13
 		// day is passed as text and cast, so the session time zone cannot shift it.
@@ -56,7 +56,7 @@ func (r *claudeEntrypointObservationRepository) upsertChunk(ctx context.Context,
 		args = append(args, row.GroupID, row.Day, row.UAEntrypoint, row.BodyEntrypoint, row.BodyStatus, row.CLIVersion,
 			row.Policy, row.Result, row.Reason, row.Requests, row.FirstSeenAt, row.LastSeenAt, row.SampleUserAgent)
 	}
-	b.WriteString(` ON CONFLICT (group_id, day, ua_entrypoint, body_entrypoint, body_status, cli_version, policy, result, reason)
+	_, _ = b.WriteString(` ON CONFLICT (group_id, day, ua_entrypoint, body_entrypoint, body_status, cli_version, policy, result, reason)
 	DO UPDATE SET
 		requests = group_claude_entrypoint_observations.requests + EXCLUDED.requests,
 		first_seen_at = LEAST(group_claude_entrypoint_observations.first_seen_at, EXCLUDED.first_seen_at),
