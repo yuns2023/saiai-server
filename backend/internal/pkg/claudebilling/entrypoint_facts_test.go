@@ -77,6 +77,8 @@ func TestParseBodyEntrypoint(t *testing.T) {
 		{"duplicate type key in block", `{"system":[{"type":"image","type":"text","text":` + quote(billingHeader("cli")) + `}]}`, "", EntrypointBodyAmbiguous},
 		{"field name suffix is not cc_entrypoint", `{"system":` + quote("x-anthropic-billing-header: cc_version=2.1.316.abc; not_cc_entrypoint=cli; cch=12345;") + `}`, "", EntrypointBodyMalformed},
 		{"cc_entrypoint plus suffixed field", `{"system":` + quote("x-anthropic-billing-header: x_cc_entrypoint=t3-code; cc_entrypoint=cli;") + `}`, "cli", EntrypointBodyValid},
+		{"duplicate with unterminated last", `{"system":` + quote("x-anthropic-billing-header: cc_entrypoint=cli; cc_entrypoint=t3-code") + `}`, "", EntrypointBodyAmbiguous},
+		{"many separators", `{"system":` + quote("x-anthropic-billing-header: cc_entrypoint=cli;"+strings.Repeat(";", 100000)) + `}`, "cli", EntrypointBodyValid},
 		{"header without trailing fields", `{"system":` + quote("x-anthropic-billing-header: cc_entrypoint=cli;") + `}`, "cli", EntrypointBodyValid},
 	}
 	for _, tc := range cases {

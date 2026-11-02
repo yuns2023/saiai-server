@@ -160,25 +160,29 @@ func ParseBodyEntrypoint(body []byte) (entrypoint, status string) {
 
 	// Fields are "name=value;" separated by ';'. Only a field named exactly
 	// cc_entrypoint counts; a trailing field without ';' is unterminated.
-	fields := strings.Split(headerLine, ";")
+	// Scanned in place (no Split) so a long run of ';' cannot amplify memory.
 	found := 0
 	value := ""
-	for i, field := range fields {
-		field = strings.TrimSpace(field)
-		if !strings.HasPrefix(field, ccEntrypointMarker) {
-			continue
+	unterminated := false
+	for rest := headerLine; ; {
+		field, tail, terminated := strings.Cut(rest, ";")
+		if field = strings.TrimSpace(field); strings.HasPrefix(field, ccEntrypointMarker) {
+			found++
+			value = field[len(ccEntrypointMarker):]
+			unterminated = !terminated
 		}
-		found++
-		if i == len(fields)-1 {
-			return "", EntrypointBodyMalformed
+		if !terminated {
+			break
 		}
-		value = field[len(ccEntrypointMarker):]
+		rest = tail
 	}
 	switch {
 	case found == 0:
 		return "", EntrypointBodyMalformed
 	case found > 1:
 		return "", EntrypointBodyAmbiguous
+	case unterminated:
+		return "", EntrypointBodyMalformed
 	}
 	entrypoint = NormalizeEntrypoint(value)
 	if entrypoint == "" {

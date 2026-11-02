@@ -50,7 +50,8 @@ outside the top-level `system` field.
   escapes decoded). Exactly one `x-anthropic-billing-header:` must appear
   (0 → `missing`, more → `ambiguous`); on that header's line exactly one
   non-empty `cc_entrypoint=<value>;` must appear (none/empty → `malformed`,
-  several → `ambiguous`). Fields are split on `;` and only a field named
+  several → `ambiguous`; a single unterminated one → `malformed`). Fields are
+  split on `;` and only a field named
   exactly `cc_entrypoint` counts. A `system` block with duplicate `type` or
   `text` keys is `ambiguous`. A header in `messages` or `tools` is ignored.
 

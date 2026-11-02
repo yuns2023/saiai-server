@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -40,10 +41,12 @@ func entrypointBody(entrypoint string) string {
 }
 
 type entrypointLab struct {
-	mu       sync.Mutex
-	calls    int
-	accounts []service.Account
-	groups   map[int64]*service.Group
+	mu             sync.Mutex
+	calls          int
+	accounts       []service.Account
+	groups         map[int64]*service.Group
+	groupReads     map[int64]int
+	failGroupReads map[int64]int
 }
 
 func (l *entrypointLab) upstream(w http.ResponseWriter, r *http.Request) {
@@ -104,6 +107,16 @@ type entrypointGroupRepo struct {
 }
 
 func (r entrypointGroupRepo) GetByID(_ context.Context, id int64) (*service.Group, error) {
+	r.lab.mu.Lock()
+	r.lab.groupReads[id]++
+	failing := r.lab.failGroupReads[id] > 0
+	if failing {
+		r.lab.failGroupReads[id]--
+	}
+	r.lab.mu.Unlock()
+	if failing {
+		return nil, errors.New("TEST_ONLY transient group read failure")
+	}
 	group, ok := r.lab.groups[id]
 	if !ok {
 		return nil, service.ErrGroupNotFound
@@ -167,7 +180,7 @@ func anthropicGroup(id int64, policy string) *service.Group {
 func newEntrypointHarness(t *testing.T, groups map[int64]*service.Group, accountGroup int64) *entrypointHarness {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	lab := &entrypointLab{groups: groups}
+	lab := &entrypointLab{groups: groups, groupReads: map[int64]int{}, failGroupReads: map[int64]int{}}
 	upstream := httptest.NewServer(http.HandlerFunc(lab.upstream))
 	t.Cleanup(upstream.Close)
 	lab.accounts = []service.Account{{ID: entrypointAccountID, Name: "TEST_ONLY_UPSTREAM", Platform: service.PlatformAnthropic,
@@ -388,15 +401,25 @@ func TestClaudeEntrypointPolicyStateParsesOnce(t *testing.T) {
 }
 
 func TestMessagesClaudeEntrypointFallbackResolutionErrorFailsClosed(t *testing.T) {
-	missing := int64(99)
+	fallback := entrypointGroupB
 	groupA := anthropicGroup(entrypointGroupA, service.ClaudeEntrypointPolicyOff)
 	groupA.ClaudeCodeOnly = true
-	groupA.FallbackGroupID = &missing
-	h := newEntrypointHarness(t, map[int64]*service.Group{entrypointGroupA: groupA}, entrypointGroupA)
+	groupA.FallbackGroupID = &fallback
+	groups := map[int64]*service.Group{
+		entrypointGroupA: groupA,
+		entrypointGroupB: anthropicGroup(entrypointGroupB, service.ClaudeEntrypointPolicyEnforce),
+	}
+	h := newEntrypointHarness(t, groups, entrypointGroupB)
+	// The first read of B fails transiently; later reads (account selection)
+	// would succeed. The check must stop the request instead of letting
+	// selection reach the unchecked enforce group B.
+	h.lab.failGroupReads[entrypointGroupB] = 1
 	rec := h.serve(t, h.key(entrypointGroupA), entrypointT3CodeUA, entrypointBody("t3-code"), nil)
-	// Same status/shape account selection returns for an unresolvable chain;
-	// the check must not let a later successful resolution skip the fallback.
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
 	require.Contains(t, rec.Body.String(), "No available accounts")
 	require.Zero(t, h.lab.upstreamCalls())
+	h.lab.mu.Lock()
+	require.Equal(t, 1, h.lab.groupReads[entrypointGroupB], "stopped at the failed resolution")
+	h.lab.mu.Unlock()
+	require.Empty(t, h.observations())
 }
