@@ -203,11 +203,13 @@ func (s *ClaudeEntrypointObservationService) ShouldLogViolation(groupID int64, u
 	if s == nil {
 		return true
 	}
-	now := s.now()
 	key := strings.Join([]string{strconv.FormatInt(groupID, 10), uaEntrypoint, bodyEntrypoint}, "|")
 	s.logMu.Lock()
 	defer s.logMu.Unlock()
-	if s.logWindow.IsZero() || now.Sub(s.logWindow) >= claudeEntrypointViolationLogInterval || now.Before(s.logWindow) {
+	// Read the clock under the lock; a time before the current window (clock
+	// step back) stays in the current window instead of resetting it.
+	now := s.now()
+	if s.logWindow.IsZero() || now.Sub(s.logWindow) >= claudeEntrypointViolationLogInterval {
 		if s.logSuppressed > 0 {
 			logger.L().Warn("gateway.claude_entrypoint_policy_logs_suppressed",
 				zap.Int64("suppressed", s.logSuppressed))
@@ -218,6 +220,7 @@ func (s *ClaudeEntrypointObservationService) ShouldLogViolation(groupID int64, u
 		s.logSuppressed = 0
 	}
 	if _, seen := s.logLogged[key]; seen {
+		s.logSuppressed++
 		return false
 	}
 	if len(s.logLogged) >= claudeEntrypointViolationLogMaxKeys || s.logCount >= claudeEntrypointViolationLogMaxPerWindow {

@@ -475,4 +475,12 @@ func TestClaudeEntrypointObservationService_LogLimiterIsBounded(t *testing.T) {
 
 	now = now.Add(time.Minute)
 	require.True(t, svc.ShouldLogViolation(1, "t3-code", "t3-code"), "new window")
+
+	// A clock step back (or a goroutine that read an older time) must not
+	// reset the window: the same pair stays suppressed and is counted.
+	now = now.Add(-30 * time.Second)
+	require.False(t, svc.ShouldLogViolation(1, "t3-code", "t3-code"))
+	svc.logMu.Lock()
+	require.Equal(t, int64(1), svc.logSuppressed, "duplicates are counted as suppressed")
+	svc.logMu.Unlock()
 }
