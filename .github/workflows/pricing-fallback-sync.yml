@@ -10,15 +10,20 @@ on:
   pull_request:
     branches:
       - main
-    # Every pull request emits a result, but only pricing-contract changes
-    # compare against the mutable upstream snapshot. Exact main commits remain
-    # subject to the remote freshness gate before production eligibility.
+    # Every pull request emits a result. Snapshot or remote-URL changes compare
+    # byte-for-byte against the mutable upstream; tooling changes and protected
+    # main/schedule/manual runs use the semantic check, which fails only on an
+    # unusable feed. Upstream drift alone never turns main red: running
+    # Gateways bill from the remote feed, and the release-time Ops pricing gate
+    # judges drift against production-billed keys.
 
 permissions:
   contents: read
 
 concurrency:
-  group: pricing-fallback-check-${{ github.event.pull_request.number || github.ref }}
+  # Per event, so a scheduled or manual run never cancels the push run that
+  # release preparation requires for the exact main SHA.
+  group: pricing-fallback-check-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -32,7 +37,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Select remote freshness scope
+      - name: Test semantic pricing comparison
+        run: python3 tools/test_pricing_fallback_diff.py
+
+      - name: Select pricing check mode
         id: scope
         shell: bash
         env:
@@ -42,39 +50,72 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" != pull_request ]]; then
-            echo 'check_remote=true' >> "$GITHUB_OUTPUT"
+            echo 'mode=semantic' >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
           git cat-file -e "${BASE_SHA}^{commit}"
           git cat-file -e "${HEAD_SHA}^{commit}"
-          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
+          snapshot=backend/resources/model-pricing/model_prices_and_context_window.json
+          config=backend/internal/config/config.go
+          remote_url() {
+            git show "$1:$config" 2>/dev/null \
+              | sed -n 's/.*viper.SetDefault("pricing.remote_url", "\(https:[^"]*\)").*/\1/p' \
+              | head -n 1
+          }
+          base_url="$(remote_url "$BASE_SHA")"
+          head_url="$(remote_url "$HEAD_SHA")"
+          if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- "$snapshot" \
+            || [[ -z "$head_url" || "$base_url" != "$head_url" ]]; then
+            # A snapshot sync or remote-URL change must be an exact copy.
+            echo 'mode=exact' >> "$GITHUB_OUTPUT"
+          elif ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
             .github/workflows/pricing-fallback-sync.yml \
             tools/pricing_fallback_sync.sh \
-            backend/internal/config/config.go \
-            backend/resources/model-pricing/model_prices_and_context_window.json; then
-            echo 'check_remote=false' >> "$GITHUB_OUTPUT"
-            {
-              echo 'Bundled pricing files are unchanged in this pull request.'
-              echo 'Remote freshness remains enforced on protected main, schedule, and manual runs.'
-            } >> "$GITHUB_STEP_SUMMARY"
+            tools/pricing_fallback_diff.py \
+            tools/test_pricing_fallback_diff.py; then
+            echo 'mode=semantic' >> "$GITHUB_OUTPUT"
           else
-            echo 'check_remote=true' >> "$GITHUB_OUTPUT"
+            echo 'mode=skip' >> "$GITHUB_OUTPUT"
+            {
+              echo 'Bundled pricing files and tooling are unchanged in this pull request.'
+              echo 'Main, schedule, and manual runs still validate the feeds semantically.'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Verify bundled pricing fallback snapshot
-        if: steps.scope.outputs.check_remote == 'true'
+      - name: Verify bundled pricing fallback snapshot (exact)
+        if: steps.scope.outputs.mode == 'exact'
         shell: bash
         run: |
           set -euo pipefail
           if bash tools/pricing_fallback_sync.sh check; then
-            echo 'Bundled pricing fallback is current.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Bundled pricing fallback is an exact copy of the remote feed.' >> "$GITHUB_STEP_SUMMARY"
           else
             {
               echo '## Pricing fallback update required'
               echo
-              echo 'Run `tools/pricing_fallback_sync.sh sync` locally and submit the resulting change through a reviewed pull request.'
+              echo 'This pull request changes the snapshot or remote URL, so it must be an exact copy.'
+              echo 'Run `tools/pricing_fallback_sync.sh sync` again and push the result.'
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
+
+      - name: Validate bundled pricing fallback (semantic)
+        if: steps.scope.outputs.mode == 'semantic'
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          bash tools/pricing_fallback_sync.sh check --semantic --github > semantic.txt || status=$?
+          cat semantic.txt
+          {
+            echo '## Pricing fallback semantic check'
+            echo
+            echo '```'
+            cat semantic.txt
+            echo '```'
+            echo
+            echo 'Drift alone does not fail this check. Production billing impact is judged at release time by the Ops pricing gate.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

@@ -38,15 +38,28 @@ Use the repository helper instead of ad-hoc curl commands:
 
 ```bash
 bash tools/pricing_fallback_sync.sh check
+bash tools/pricing_fallback_sync.sh check --semantic [--billed-keys FILE]
 bash tools/pricing_fallback_sync.sh sync
 ```
 
-- `check` compares the current remote source against the bundled fallback snapshot
+- `check` compares the current remote source against the bundled fallback
+  snapshot byte-for-byte (use it to confirm a fresh `sync`)
+- `check --semantic` reports added/removed models and changed billing fields
+  (`tools/pricing_fallback_diff.py`). It fails only when a feed is unusable
+  (invalid JSON, duplicate keys, non-finite numbers, too few priced models or
+  a large shrink) or, with `--billed-keys` (one resolved price key per line),
+  when a billed key was removed, is missing from the fallback, or changed a
+  billing field. Drift alone, and a fallback whose last sync is more than
+  7 days old, only warn.
 - `sync` refreshes the bundled fallback file from `pricing.remote_url`
 
-The repository also includes a read-only `Pricing Fallback Check` GitHub
-Actions workflow. It reports drift; maintainers run the sync command locally
-and submit the updated snapshot through a reviewed pull request.
+The read-only `Pricing Fallback Check` GitHub Actions workflow (job `check`)
+runs the semantic check on `main`, the daily schedule and manual runs, so
+upstream drift alone does not turn `main` red. Pull requests that change the
+snapshot or the default `pricing.remote_url` must be an exact copy of the
+remote; pull requests that change only the pricing tooling run the semantic
+check. Maintainers run the sync command locally and submit the updated
+snapshot through a reviewed pull request.
 
 ## Reference Corrections
 Do not hand-edit the synced JSON: `sync` overwrites it and runtime refreshes

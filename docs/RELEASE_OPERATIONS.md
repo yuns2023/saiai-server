@@ -34,13 +34,19 @@ Existing data and bundled fallbacks provide recovery when loading remote
 data fails. This community reference feed is distinct from billing factors
 and configured price overrides.
 
-`Pricing Fallback Check` compares the repository's bundled JSON byte-for-byte
-with the mutable remote feed. A mismatch means that the bundled snapshot
-differs; it does not prove production's runtime pricing is stale. The workflow
-checks freshness but does not automatically commit updated snapshots.
-Inspect runtime update evidence separately before reporting a pricing outage.
-Refresh the fallback with `tools/pricing_fallback_sync.sh sync`, review its
-diff, and commit it as a separate pricing change when preparing a release.
+`Pricing Fallback Check` validates the bundled JSON against the mutable
+remote feed semantically on `main`, the schedule and manual runs: it fails
+only on an unusable feed, and reports added/removed models and changed
+billing fields as warnings. A difference does not prove production's runtime
+pricing is stale. Pull requests that change the snapshot or the default remote
+URL still compare byte-for-byte. The workflow does not automatically commit
+updated snapshots. Inspect runtime update evidence separately before
+reporting a pricing outage. Refresh the fallback with
+`tools/pricing_fallback_sync.sh sync`, review its diff, and commit it as a
+separate pricing change when preparing a release. Release eligibility judges
+drift against production-billed keys with
+`tools/pricing_fallback_sync.sh check --semantic --billed-keys FILE`
+(or the operator's equivalent release gate).
 Required exact-commit checks still apply before production eligibility.
 
 ### Code and release validation
