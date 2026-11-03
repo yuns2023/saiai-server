@@ -45,13 +45,23 @@ func TestMigration118AccountErrorAtTrigger(t *testing.T) {
 	first := errorAt(2)
 	require.True(t, first.Valid)
 
+	// NOW() is constant inside this transaction, so plant a distinctly older
+	// first-error time (trigger off) to prove repeats keep it rather than re-stamp.
+	planted := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	_, err = tx.ExecContext(ctx, `ALTER TABLE accounts DISABLE TRIGGER accounts_track_error_at`)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET error_at=$1 WHERE id=2`, planted)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `ALTER TABLE accounts ENABLE TRIGGER accounts_track_error_at`)
+	require.NoError(t, err)
+
 	// Repeated error and full-row writes (admin update re-sends status + a stale error_at) keep the first time.
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET status='error', error_message='401 again', error_at=$1 WHERE id=2`, time.Unix(0, 0))
 	require.NoError(t, err)
-	require.Equal(t, first.Time, errorAt(2).Time)
+	require.True(t, planted.Equal(errorAt(2).Time))
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET priority=5 WHERE id=2`)
 	require.NoError(t, err)
-	require.Equal(t, first.Time, errorAt(2).Time)
+	require.True(t, planted.Equal(errorAt(2).Time))
 
 	// Leaving error clears it; a direct write while active is ignored.
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET status='active', error_message='' WHERE id=2`)

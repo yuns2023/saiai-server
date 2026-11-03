@@ -8,7 +8,8 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key
+      t: (key: string, params?: Record<string, unknown>) =>
+        params ? `${key} ${JSON.stringify(params)}` : key
     })
   }
 })
@@ -174,6 +175,7 @@ describe('AccountStatusIndicator', () => {
 
     expect(wrapper.text()).toContain('admin.accounts.status.errorSince')
     expect(wrapper.text()).not.toContain('admin.accounts.status.errorSinceUnknown')
+    expect(wrapper.text()).toMatch(/"time":"[^"]*2026[^"]*"/)
     expect(wrapper.text()).toContain('OAuth access token has been revoked.')
   })
 
@@ -190,5 +192,16 @@ describe('AccountStatusIndicator', () => {
     })
 
     expect(wrapper.text()).toContain('admin.accounts.status.errorSinceUnknown')
+  })
+
+  it('没有错误信息的错误账号仍显示出错时间', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({ status: 'error', error_message: '', error_at: '2026-11-03T06:21:00Z' })
+      },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text()).toContain('admin.accounts.status.errorSince')
   })
 })

@@ -29,7 +29,7 @@
     </template>
 
     <!-- Error Info Indicator -->
-    <div v-if="hasError && account.error_message" class="group/error relative">
+    <div v-if="hasError" class="group/error relative">
       <svg
         class="h-4 w-4 cursor-help text-red-500 transition-colors hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
         fill="none"
@@ -47,10 +47,10 @@
       <div
         class="invisible absolute left-0 top-full z-100 mt-1.5 min-w-[200px] max-w-[300px] rounded-lg bg-gray-800 px-3 py-2 text-xs text-white opacity-0 shadow-xl transition-all duration-200 group-hover/error:visible group-hover/error:opacity-100 dark:bg-gray-900"
       >
-        <div class="mb-1 text-gray-400">
+        <div :class="['text-gray-400', { 'mb-1': account.error_message }]">
           {{ errorAtText }}
         </div>
-        <div class="whitespace-pre-wrap wrap-break-word leading-relaxed text-gray-300">
+        <div v-if="account.error_message" class="whitespace-pre-wrap wrap-break-word leading-relaxed text-gray-300">
           {{ account.error_message }}
         </div>
         <!-- 上方小三角 -->
