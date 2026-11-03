@@ -144,9 +144,54 @@ class PricingDiffTests(unittest.TestCase):
             with self.subTest(name):
                 remote = feed(10)
                 remote["model-1"] = {**extra, **remote["model-1"]}
-                code, _, err, _ = self.run_main(feed(10), remote, billed=["model-1"])
-                self.assertEqual(code, 2)
-                self.assertIn("model-1", err)
+                code, _, err, report = self.run_main(feed(10), remote, billed=["model-1"])
+                self.assertEqual(code, 1)
+                self.assertEqual(report["billed_ambiguous"], ["model-1"])
+                self.assertIn("ambiguous", err)
+                code, out, _, report = self.run_main(feed(10), remote, billed=["model-0"])
+                self.assertEqual(code, 0)  # unbilled ambiguous entry only warns
+                self.assertIn("ambiguous", out)
+                self.assertEqual(report["removed"], [])
+
+    def test_repeated_keys_matter_only_for_decoded_fields(self) -> None:
+        base = json.dumps(feed(10))
+        meta_repeat = base.replace('"max_input_tokens": 1000', '"max_input_tokens": 1, "max_input_tokens": 2', 1)
+        code, _, _, report = self.run_main(None, None, raw=(base, meta_repeat))
+        self.assertEqual(code, 0)
+        self.assertEqual(report["ambiguous"], {})
+        price_repeat = base.replace('"input_cost_per_token": 1e-06', '"input_cost_per_token": 1e-06, "input_cost_per_token": 5e-06', 1)
+        code, _, _, report = self.run_main(None, None, raw=(base, price_repeat))
+        self.assertEqual(code, 0)
+        self.assertEqual(list(report["ambiguous"]), ["model-0"])
+        model_repeat = base[:-1] + ', "model-0": ' + json.dumps(feed(10)["model-0"]) + "}"
+        code, out, _, report = self.run_main(None, None, raw=(base, model_repeat))
+        self.assertEqual(code, 0)
+        self.assertEqual(report["repeated_model_keys"], ["model-0"])
+        self.assertIn("repeated at top level", out)
+
+    def test_overflow_only_matters_in_decoded_fields(self) -> None:
+        base = json.dumps(feed(10))
+        meta = base.replace('"max_input_tokens": 1000', '"max_input_tokens": 1e400', 1)
+        code, _, _, report = self.run_main(None, None, raw=(base, meta))
+        self.assertEqual(code, 0)  # Go never decodes max_input_tokens
+        self.assertEqual(report["removed"], [])
+        price = base.replace('"input_cost_per_token": 1e-06', '"input_cost_per_token": 1e400', 1)
+        code, _, _, report = self.run_main(None, None, raw=(base, price))
+        self.assertEqual(code, 0)
+        self.assertEqual(report["removed"], ["model-0"])  # Go skips the entry
+        code, _, _, _ = self.run_main(None, None, raw=(base, price), billed=["model-0"])
+        self.assertEqual(code, 1)
+
+    def test_missing_price_equals_explicit_zero(self) -> None:
+        remote = feed(10)
+        remote["model-0"] = {**remote["model-0"], "cache_read_input_token_cost": 0,
+                             "long_context_input_token_threshold": 0, "supports_service_tier": False}
+        code, _, _, report = self.run_main(feed(10), remote, billed=["model-0"])
+        self.assertEqual(code, 0)
+        self.assertEqual(report["billing_changed"], {})
+        remote["model-0"]["cache_read_input_token_cost"] = 1e-7
+        code, _, _, _ = self.run_main(feed(10), remote, billed=["model-0"])
+        self.assertEqual(code, 1)
 
     def test_out_of_range_threshold_is_skipped_like_go(self) -> None:
         remote = feed(10)
@@ -177,11 +222,8 @@ class PricingDiffTests(unittest.TestCase):
             "html": "<html>rate limited</html>",
             "array": "[]",
             "truncated": json.dumps(feed())[:-5],
-            "duplicate": '{"a": {"input_cost_per_token": 1}, "a": {"input_cost_per_token": 2}}',
-            "nan": '{"a": {"input_cost_per_token": NaN}}',
-            "overflow": '{"a": {"input_cost_per_token": 1e400}}',
-            "overflow_metadata": '{"a": {"input_cost_per_token": 1, "max_tokens": 1e400}}',
-
+            "nan_anywhere": '{"a": {"input_cost_per_token": 1, "max_tokens": NaN}}',
+            "infinity_literal": '{"a": {"input_cost_per_token": Infinity}}',
         }
         for name, text in cases.items():
             with self.subTest(name):
@@ -240,7 +282,9 @@ class PricingDiffTests(unittest.TestCase):
     def test_bundled_fallback_is_a_valid_feed(self) -> None:
         bundled = ROOT / "backend/resources/model-pricing/model_prices_and_context_window.json"
         document = diff.load_feed(bundled.read_text(encoding="utf-8"), "bundled")
-        self.assertGreaterEqual(len(diff.priced_views(document, "bundled")), 1000)
+        views, ambiguous = diff.priced_views(document)
+        self.assertGreaterEqual(len(views), 1000)
+        self.assertEqual(ambiguous, {})
 
 
 if __name__ == "__main__":

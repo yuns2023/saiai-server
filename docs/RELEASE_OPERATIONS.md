@@ -35,8 +35,9 @@ data fails. This community reference feed is distinct from billing factors
 and configured price overrides.
 
 `Pricing Fallback Check` validates the bundled JSON against the mutable
-remote feed semantically on `main`, the schedule and manual runs: it fails
-only on an unusable feed, and reports added/removed models and changed
+remote feed semantically on `main`, the schedule and manual runs: drift
+alone does not fail it, but a failed download or an unusable feed does. It
+reports added/removed models and changed
 billing fields as warnings. A difference does not prove production's runtime
 pricing is stale. Pull requests that change the snapshot or the default remote
 URL still compare byte-for-byte. The workflow does not automatically commit

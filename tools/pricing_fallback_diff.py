@@ -6,16 +6,19 @@ Gateways download pricing.remote_url and refresh it every few minutes. A byte
 difference therefore says nothing about billing by itself. This helper reports
 what changed in the fields the Gateway parser reads and fails only when:
 
-* either document is not a valid pricing feed (exit 2): not a JSON object,
-  duplicate keys, non-finite numbers, an entry the Go parser would reject,
-  fewer than --min-priced-models usable entries, or a remote that lost more
-  than --max-shrink-ratio of the fallback's usable entries; or
+* either document is not a usable pricing feed (exit 2): not JSON (Go's
+  top-level Unmarshal would reject it, e.g. NaN), not an object, fewer than
+  --min-priced-models usable entries, or a remote that lost more than
+  --max-shrink-ratio of the fallback's usable entries; or
 * --billed-keys is given and a billed key is affected (exit 1): removed from
-  the remote, missing from the fallback, or with different billing fields.
+  the remote, missing from the fallback, with different billing fields, or
+  ambiguous (a decoded billing field repeated or spelled several ways).
 
-Everything else (added models, metadata-only drift, unread cost fields) is a
-warning. With --fallback-age-days, drift on a fallback older than
---max-age-days adds a staleness warning; it never fails.
+Only fields the Go parser decodes are validated: odd values, overflows or
+repeated keys in other metadata never fail. Everything else (added models,
+metadata-only drift, unread cost fields, unbilled ambiguous entries) is a
+warning. With --fallback-synced-at, drift on a fallback last synced more
+than --max-age-days ago adds a staleness warning; it never fails.
 """
 
 from __future__ import annotations
@@ -68,110 +71,125 @@ class FeedError(ValueError):
     """The document is not a pricing feed the Gateway can use."""
 
 
+class JSONObject(dict):
+    """A decoded JSON object that remembers keys repeated inside it.
+
+    Go keeps the last value of a repeated key (map or struct field), so the
+    dict does too; whether the repetition matters is decided per field.
+    """
+
+    duplicates: frozenset[str] = frozenset()
+
+
+def _track_duplicates(pairs: list[tuple[str, Any]]) -> JSONObject:
+    result = JSONObject()
+    repeated = set()
+    for key, value in pairs:
+        if key in result:
+            repeated.add(key)
+        result[key] = value
+    result.duplicates = frozenset(repeated)
+    return result
+
+
 def _reject_constant(value: str) -> Any:
-    raise FeedError(f"non-finite number {value}")
+    # NaN/Infinity are not JSON; Go's top-level Unmarshal rejects the whole feed.
+    raise FeedError(f"non-JSON constant {value}")
 
 
-def _finite_float(text: str) -> float:
-    number = float(text)
-    if not math.isfinite(number):
-        raise FeedError(f"number {text} overflows float64")
-    return number
-
-
-def go_fields(name: str, entry: dict[str, Any]) -> dict[str, Any]:
+def go_fields(entry: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
     """Map JSON keys to LiteLLMRawEntry fields the way encoding/json matches them.
 
-    Go matches struct tags case-insensitively. When one field appears under
-    several spellings, Go's result depends on decode order, type errors and
-    pointer-vs-value null handling, so such an entry is rejected instead of
-    emulated; so are non-ASCII keys that fold onto a known field.
+    Go matches struct tags case-insensitively. When a decoded field appears
+    more than once (repeated key or several spellings) Go's result depends on
+    decode order, type errors and pointer-vs-value null handling, so the entry
+    is reported as ambiguous instead of emulated; so is a non-ASCII key that
+    folds onto a known field. Repeats of fields Go ignores do not matter.
     """
     fields: dict[str, Any] = {}
+    repeated = getattr(entry, "duplicates", frozenset())
     for key, value in entry.items():
         folded = key.lower() if key.isascii() else key.casefold()
         if folded not in BILLING_FIELDS:
             continue
         if not key.isascii():
-            raise FeedError(f"{name}: non-ASCII key {key!r} folds onto {folded}")
-        if folded in fields:
-            raise FeedError(f"{name}: field {folded} appears under several spellings")
+            return fields, f"non-ASCII key {key!r} folds onto {folded}"
+        if folded in fields or key in repeated:
+            return fields, f"field {folded} appears more than once"
         fields[folded] = value
-    return fields
-
-
-def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise FeedError(f"duplicate key {key!r}")
-        result[key] = value
-    return result
+    return fields, None
 
 
 def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def billing_view(name: str, entry: Any) -> dict[str, Any] | None:
-    """Return the Go parser's view of one entry, or None when it is skipped.
+def billing_view(entry: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """Return (Go parser view, ambiguity) for one entry.
 
-    Go skips entries that do not decode into LiteLLMRawEntry (wrong field type
-    or non-object) and entries without an input or output token price; absent
-    and null decode identically.
+    The view is None when Go skips the entry: not an object, a decoded field
+    of the wrong type or out of range (a float64 overflow such as 1e400 is an
+    Unmarshal error), or neither an input nor an output token price. Go
+    copies only non-nil prices into float64 fields, so a missing or null
+    price equals an explicit 0, and missing bool/string fields are false/"".
+    Fields Go does not decode are never validated.
     """
     if not isinstance(entry, dict):
-        return None
-    entry = go_fields(name, entry)
+        return None, None
+    fields, ambiguity = go_fields(entry)
+    if ambiguity is not None:
+        return None, ambiguity
     view: dict[str, Any] = {}
     for field in FLOAT_FIELDS:
-        value = entry.get(field)
+        value = fields.get(field)
         if value is None:
             view[field] = None
-        elif _is_number(value):
-            try:
-                number = float(value)
-            except OverflowError:
-                number = math.inf
-            if not math.isfinite(number):
-                raise FeedError(f"{name}.{field} is not a finite float64")
-            view[field] = number
-        else:
-            return None
+            continue
+        if not _is_number(value):
+            return None, None
+        try:
+            number = float(value)
+        except OverflowError:
+            return None, None
+        if not math.isfinite(number):
+            return None, None
+        view[field] = number
     for field in INT_FIELDS:
-        value = entry.get(field)
+        value = fields.get(field)
         if value is None:
-            view[field] = None
+            view[field] = 0
         elif isinstance(value, int) and not isinstance(value, bool) and INT64_MIN <= value <= INT64_MAX:
             view[field] = value
         else:
-            return None
+            return None, None
     for field in BOOL_FIELDS:
-        value = entry.get(field)
+        value = fields.get(field)
         if value is None:
             view[field] = False
         elif isinstance(value, bool):
             view[field] = value
         else:
-            return None
+            return None, None
     for field in STRING_FIELDS:
-        value = entry.get(field)
+        value = fields.get(field)
         if value is None:
             view[field] = ""
         elif isinstance(value, str):
             view[field] = value
         else:
-            return None
+            return None, None
     if view["input_cost_per_token"] is None and view["output_cost_per_token"] is None:
-        return None
-    return view
+        return None, None
+    for field in FLOAT_FIELDS:
+        if view[field] is None:
+            view[field] = 0.0
+    return view, None
 
 
 def load_feed(text: str, label: str) -> dict[str, Any]:
     try:
         document = json.loads(
-            text, object_pairs_hook=_no_duplicates, parse_constant=_reject_constant,
-            parse_float=_finite_float,
+            text, object_pairs_hook=_track_duplicates, parse_constant=_reject_constant,
         )
     except FeedError as error:
         raise FeedError(f"{label}: {error}") from None
@@ -182,18 +200,18 @@ def load_feed(text: str, label: str) -> dict[str, Any]:
     return document
 
 
-def priced_views(document: dict[str, Any], label: str) -> dict[str, dict[str, Any]]:
+def priced_views(document: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
     views: dict[str, dict[str, Any]] = {}
+    ambiguous: dict[str, str] = {}
     for name, entry in document.items():
         if name in DOC_KEYS:
             continue
-        try:
-            view = billing_view(name, entry)
-        except FeedError as error:
-            raise FeedError(f"{label}: {error}") from None
-        if view is not None:
+        view, ambiguity = billing_view(entry)
+        if ambiguity is not None:
+            ambiguous[name] = ambiguity
+        elif view is not None:
             views[name] = view
-    return views
+    return views, ambiguous
 
 
 def unread_cost_fields(entry: Any) -> dict[str, Any]:
@@ -207,10 +225,11 @@ def unread_cost_fields(entry: Any) -> dict[str, Any]:
 
 
 def compare(fallback: dict[str, Any], remote: dict[str, Any]) -> dict[str, Any]:
-    fallback_views = priced_views(fallback, "fallback")
-    remote_views = priced_views(remote, "remote")
-    added = sorted(set(remote_views) - set(fallback_views))
-    removed = sorted(set(fallback_views) - set(remote_views))
+    fallback_views, fallback_ambiguous = priced_views(fallback)
+    remote_views, remote_ambiguous = priced_views(remote)
+    ambiguous = set(fallback_ambiguous) | set(remote_ambiguous)
+    added = sorted(set(remote_views) - set(fallback_views) - ambiguous)
+    removed = sorted(set(fallback_views) - set(remote_views) - ambiguous)
     billing_changed: dict[str, list[str]] = {}
     unread_cost_changed: list[str] = []
     metadata_only: list[str] = []
@@ -229,7 +248,11 @@ def compare(fallback: dict[str, Any], remote: dict[str, Any]) -> dict[str, Any]:
         for name in set(fallback) | set(remote)
         if name not in fallback_views
         and name not in remote_views
+        and name not in ambiguous
         and fallback.get(name) != remote.get(name)
+    )
+    repeated_models = sorted(
+        set(getattr(fallback, "duplicates", ())) | set(getattr(remote, "duplicates", ()))
     )
     return {
         "fallback_priced_models": len(fallback_views),
@@ -238,28 +261,29 @@ def compare(fallback: dict[str, Any], remote: dict[str, Any]) -> dict[str, Any]:
         "removed": removed,
         "billing_changed": billing_changed,
         "unread_cost_changed": unread_cost_changed,
+        "ambiguous": {
+            name: (remote_ambiguous.get(name) or fallback_ambiguous[name])
+            for name in sorted(ambiguous)
+        },
+        "repeated_model_keys": repeated_models,
         "metadata_only_changed": len(metadata_only),
         "unpriced_or_doc_changed": len(unpriced_changed),
-        "drift": bool(
-            added or removed or billing_changed or unread_cost_changed
-            or metadata_only or unpriced_changed
-        ),
+        "drift": fallback != remote,
+        "_views": (fallback_views, remote_views),
     }
 
 
-def billed_impact(report: dict[str, Any], fallback: dict[str, Any], remote: dict[str, Any],
-                  billed: set[str]) -> dict[str, list[str]]:
-    fallback_views = priced_views(fallback, "fallback")
-    remote_views = priced_views(remote, "remote")
-    removed = sorted(billed & set(report["removed"]))
-    missing = sorted(key for key in billed if key in remote_views and key not in fallback_views)
-    changed = sorted(billed & set(report["billing_changed"]))
-    unknown = sorted(key for key in billed if key not in remote_views and key not in fallback_views)
+def billed_impact(report: dict[str, Any], billed: set[str]) -> dict[str, list[str]]:
+    fallback_views, remote_views = report["_views"]
+    ambiguous = set(report["ambiguous"])
     return {
-        "billed_removed": removed,
-        "billed_missing_from_fallback": missing,
-        "billed_cost_changed": changed,
-        "billed_in_neither": unknown,
+        "billed_removed": sorted(billed & set(report["removed"])),
+        "billed_missing_from_fallback": sorted(
+            key for key in billed - ambiguous if key in remote_views and key not in fallback_views),
+        "billed_cost_changed": sorted(billed & set(report["billing_changed"])),
+        "billed_ambiguous": sorted(billed & ambiguous),
+        "billed_in_neither": sorted(
+            key for key in billed - ambiguous if key not in remote_views and key not in fallback_views),
     }
 
 
@@ -327,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
         fallback = load_feed(args.fallback.read_text(encoding="utf-8"), "fallback")
         remote = load_feed(args.remote.read_text(encoding="utf-8"), "remote")
         report = compare(fallback, remote)
+        views = report.pop("_views")
         billed = read_billed_keys(args.billed_keys) if args.billed_keys else None
     except (FeedError, OSError, UnicodeDecodeError) as error:
         print(f"INVALID: {error}", file=sys.stderr)
@@ -346,13 +371,14 @@ def main(argv: list[str] | None = None) -> int:
     warnings: list[str] = []
     blocking: list[str] = []
     if billed is not None:
-        impact = billed_impact(report, fallback, remote, billed)
+        impact = billed_impact({**report, "_views": views}, billed)
         report["billed_keys"] = len(billed)
         report.update(impact)
         for field, text in (
             ("billed_removed", "billed key removed from remote"),
             ("billed_missing_from_fallback", "billed key missing from fallback"),
             ("billed_cost_changed", "billed key billing fields changed"),
+            ("billed_ambiguous", "billed key has an ambiguous billing field"),
         ):
             if impact[field]:
                 blocking.append(f"{text}: " + ", ".join(safe(key) for key in impact[field]))
@@ -361,6 +387,18 @@ def main(argv: list[str] | None = None) -> int:
                 "billed key in neither feed (alias/override or retired; review): "
                 + ", ".join(safe(key) for key in impact["billed_in_neither"])
             )
+    unbilled_ambiguous = [name for name in report["ambiguous"] if billed is None or name not in billed]
+    if unbilled_ambiguous:
+        warnings.append(
+            "entries ignored as ambiguous (a decoded billing field repeated or spelled several ways): "
+            + ", ".join(safe(name) for name in unbilled_ambiguous[:20])
+            + (f", ... (+{len(unbilled_ambiguous) - 20})" if len(unbilled_ambiguous) > 20 else "")
+        )
+    if report["repeated_model_keys"]:
+        warnings.append(
+            "model keys repeated at top level (last one wins, as in Go): "
+            + ", ".join(safe(name) for name in report["repeated_model_keys"][:20])
+        )
     if report["drift"]:
         warnings.append("fallback differs from remote (not a failure by itself)")
         if args.fallback_synced_at is not None:

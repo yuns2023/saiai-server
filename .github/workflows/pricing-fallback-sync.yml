@@ -12,10 +12,12 @@ on:
       - main
     # Every pull request emits a result. Snapshot or remote-URL changes compare
     # byte-for-byte against the mutable upstream; tooling changes and protected
-    # main/schedule/manual runs use the semantic check, which fails only on an
-    # unusable feed. Upstream drift alone never turns main red: running
-    # Gateways bill from the remote feed, and the release-time Ops pricing gate
-    # judges drift against production-billed keys.
+    # main/schedule/manual runs use the semantic check. Upstream drift alone
+    # does not fail it (running Gateways bill from the remote feed, and the
+    # release-time Ops pricing gate judges drift against production-billed
+    # keys), but main can still go red when the download fails, the helper
+    # tests fail, or a feed is unusable (not JSON, too few priced models, or a
+    # >20% shrink).
 
 permissions:
   contents: read
@@ -120,6 +122,6 @@ jobs:
             cat semantic.txt
             echo '```'
             echo
-            echo 'Drift alone does not fail this check. Production billing impact is judged at release time by the Ops pricing gate.'
+            echo 'Drift alone does not fail this check; a failed download or an unusable feed does. Production billing impact is judged at release time by the Ops pricing gate.'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"

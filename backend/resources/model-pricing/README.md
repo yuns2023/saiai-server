@@ -45,17 +45,21 @@ bash tools/pricing_fallback_sync.sh sync
 - `check` compares the current remote source against the bundled fallback
   snapshot byte-for-byte (use it to confirm a fresh `sync`)
 - `check --semantic` reports added/removed models and changed billing fields
-  (`tools/pricing_fallback_diff.py`). It fails only when a feed is unusable
-  (invalid JSON, duplicate keys, non-finite numbers, too few priced models or
-  a large shrink) or, with `--billed-keys` (one resolved price key per line),
-  when a billed key was removed, is missing from the fallback, or changed a
-  billing field. Drift alone, and a fallback whose last sync is more than
-  7 days old, only warn.
+  (`tools/pricing_fallback_diff.py`), validating only the fields the Gateway
+  parser decodes. It fails when the download fails or a feed is unusable
+  (not JSON, too few priced models, or a large shrink) or, with
+  `--billed-keys` (one resolved price key per line), when a billed key was
+  removed, is missing from the fallback, changed a billing field, or has an
+  ambiguous billing field (repeated or spelled several ways). A missing
+  price equals an explicit 0, as in the parser. Drift alone, odd values in
+  other metadata, and a fallback whose last sync is more than 7 days old
+  only warn.
 - `sync` refreshes the bundled fallback file from `pricing.remote_url`
 
 The read-only `Pricing Fallback Check` GitHub Actions workflow (job `check`)
 runs the semantic check on `main`, the daily schedule and manual runs, so
-upstream drift alone does not turn `main` red. Pull requests that change the
+upstream drift alone does not turn `main` red (a failed download, failed
+helper tests or an unusable feed still do). Pull requests that change the
 snapshot or the default `pricing.remote_url` must be an exact copy of the
 remote; pull requests that change only the pricing tooling run the semantic
 check. Maintainers run the sync command locally and submit the updated

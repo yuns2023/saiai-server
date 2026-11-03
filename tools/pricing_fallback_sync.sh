@@ -44,6 +44,12 @@ if [[ -z "${REMOTE_URL}" ]]; then
   echo "failed to detect pricing.remote_url from $CONFIG_FILE" >&2
   exit 1
 fi
+# The URL is printed and kept in CI logs and release evidence: refuse
+# embedded credentials, query strings and fragments instead of echoing them.
+if [[ ! "$REMOTE_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._~/%+-]*$ ]]; then
+  echo "pricing.remote_url must be a plain https URL without userinfo, query or fragment" >&2
+  exit 1
+fi
 
 TMP_FILE="$(mktemp)"
 trap 'rm -f "$TMP_FILE"' EXIT
