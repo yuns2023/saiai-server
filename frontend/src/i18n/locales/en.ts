@@ -1,7 +1,7 @@
 export default {
   hostedUsage: {
     adminLabel: 'Independent hosted-account metering',
-    adminHint: 'Requires a zero-rate exclusive standard OpenAI group. Authorized users are not charged; Key limits use standard reference usage. Hosted requests do not add platform account cost. Existing counters are neither reset nor backfilled.',
+    adminHint: 'Requires a zero-rate exclusive standard OpenAI or Anthropic group. Authorized users are not charged; Key limits use standard reference usage. Hosted requests do not add platform account cost. Existing counters are neither reset nor backfilled.',
     adminBlockedReason: 'Set the rate multiplier to 0 and use an exclusive standard group first.',
     badge: 'Hosted · no platform charge',
     reference: 'Reference usage',

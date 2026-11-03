@@ -25,7 +25,7 @@ func TestHostedUsageRequiresExplicitNarrowPolicy(t *testing.T) {
 		{"paid", func(g *Group) { g.RateMultiplier = 1 }},
 		{"public", func(g *Group) { g.IsExclusive = false }},
 		{"subscription", func(g *Group) { g.SubscriptionType = SubscriptionTypeSubscription }},
-		{"other platform", func(g *Group) { g.Platform = PlatformAnthropic }},
+		{"other platform", func(g *Group) { g.Platform = PlatformGemini }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := hostedUsageGroup()

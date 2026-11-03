@@ -1,14 +1,22 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { isHostedUsageEligible } from '../hostedUsage'
+import { isHostedUsageEligible, supportsHostedUsage } from '../hostedUsage'
 
 const base = { platform: 'openai', is_exclusive: true, subscription_type: 'standard', rate_multiplier: 0 }
 
 describe('isHostedUsageEligible', () => {
-  it('accepts a zero-rate exclusive standard OpenAI group', () => {
+  it('accepts a zero-rate exclusive standard OpenAI or Anthropic group', () => {
     expect(isHostedUsageEligible(base)).toBe(true)
     expect(isHostedUsageEligible({ ...base, rate_multiplier: '0' })).toBe(true)
+    expect(isHostedUsageEligible({ ...base, platform: 'anthropic' })).toBe(true)
+  })
+
+  it('offers the hosted option only on supported platforms', () => {
+    expect(supportsHostedUsage('openai')).toBe(true)
+    expect(supportsHostedUsage('anthropic')).toBe(true)
+    expect(supportsHostedUsage('gemini')).toBe(false)
+    expect(supportsHostedUsage(undefined)).toBe(false)
   })
 
   it.each([
@@ -17,7 +25,7 @@ describe('isHostedUsageEligible', () => {
     ['missing rate', { rate_multiplier: null }],
     ['public group', { is_exclusive: false }],
     ['subscription group', { subscription_type: 'subscription' }],
-    ['non-OpenAI platform', { platform: 'anthropic' }],
+    ['unsupported platform', { platform: 'gemini' }],
   ])('rejects %s', (_, patch) => {
     expect(isHostedUsageEligible({ ...base, ...patch })).toBe(false)
   })

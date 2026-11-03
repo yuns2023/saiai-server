@@ -3020,12 +3020,17 @@ func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64
 		if !group.IsActive() {
 			return nil, nil, ErrGroupNotActive
 		}
+		// The usage is billed to the Key's group, not the fallback, so a hop
+		// into or out of a hosted group would cross its metering boundary.
+		if currentID != *groupID && group.UsesHostedUsage() {
+			return nil, nil, ErrClaudeCodeOnly
+		}
 
 		if !group.ClaudeCodeOnly || IsClaudeCodeClient(ctx) {
 			return group, &currentID, nil
 		}
 
-		if group.FallbackGroupID == nil || smartSwitchContext(ctx) {
+		if group.FallbackGroupID == nil || smartSwitchContext(ctx) || group.UsesHostedUsage() {
 			return nil, nil, ErrClaudeCodeOnly
 		}
 		currentID = *group.FallbackGroupID
@@ -9705,6 +9710,9 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		groupDefault := apiKey.Group.RateMultiplier
 		multiplier = s.getUserGroupRateMultiplier(ctx, user.ID, *apiKey.GroupID, groupDefault)
 	}
+	if apiKey.Group.UsesHostedUsage() {
+		multiplier = 0
+	}
 
 	var cost *CostBreakdown
 	billingModel := resolveGatewayBillingModel(result)
@@ -9775,6 +9783,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		mediaType = &result.MediaType
 	}
 	accountRateMultiplier := account.BillingRateMultiplier()
+	meteredCost := applyHostedUsage(apiKey.Group, cost, &accountRateMultiplier)
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
 	usageLog := &UsageLog{
 		ModerationRef:              input.ModerationRef,
@@ -9806,6 +9815,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		PricingSnapshot:            cost.PricingSnapshot,
 		TotalCost:                  cost.TotalCost,
 		ActualCost:                 cost.ActualCost,
+		MeteredCost:                meteredCost,
 		RateMultiplier:             multiplier,
 		ModelRateMultiplier:        &modelRate,
 		UserPaygDiscountMultiplier: &userDiscount,
@@ -9856,7 +9866,8 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 			BillingModel:          billingModel,
 			RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
 			IsSubscriptionBill:    isSubscriptionBilling,
-			AccountRateMultiplier: accountRateMultiplier,
+			AccountRateMultiplier: account.BillingRateMultiplier(),
+			MeteredCost:           meteredCost,
 			APIKeyService:         input.APIKeyService,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err

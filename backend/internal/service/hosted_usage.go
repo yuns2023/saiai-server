@@ -3,15 +3,25 @@ package service
 import infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 
 // Hosted metering is an explicit, zero-charge policy for an exclusive OpenAI
-// group. A zero user/group multiplier alone never enables this policy.
+// or Anthropic group. A zero user/group multiplier alone never enables this
+// policy.
 func (g *Group) UsesHostedUsage() bool {
-	return g != nil && g.HostedUsageEnabled && g.Platform == PlatformOpenAI &&
+	return g != nil && g.HostedUsageEnabled && hostedUsagePlatform(g.Platform) &&
 		g.IsExclusive && g.SubscriptionType == SubscriptionTypeStandard && g.RateMultiplier == 0
+}
+
+// hostedUsagePlatform lists the platforms whose usage recording applies
+// applyHostedUsage. Adding one requires wiring its RecordUsage path first.
+func hostedUsagePlatform(platform string) bool {
+	return platform == PlatformOpenAI || platform == PlatformAnthropic
 }
 
 func (g *Group) ValidateHostedUsage() error {
 	if g != nil && g.HostedUsageEnabled && !g.UsesHostedUsage() {
-		return infraerrors.BadRequest("INVALID_HOSTED_USAGE", "Hosted usage requires an exclusive standard OpenAI group with zero billing multiplier")
+		return infraerrors.BadRequest("INVALID_HOSTED_USAGE", "Hosted usage requires an exclusive standard OpenAI or Anthropic group with zero billing multiplier")
+	}
+	if g.UsesHostedUsage() && (g.FallbackGroupID != nil || g.FallbackGroupIDOnInvalidRequest != nil) {
+		return infraerrors.BadRequest("INVALID_HOSTED_USAGE", "Hosted groups cannot use fallback groups")
 	}
 	return nil
 }

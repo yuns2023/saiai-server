@@ -1300,7 +1300,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						}
 						if fallbackGroup.Platform != service.PlatformAnthropic ||
 							fallbackGroup.SubscriptionType == service.SubscriptionTypeSubscription ||
-							fallbackGroup.FallbackGroupIDOnInvalidRequest != nil {
+							fallbackGroup.FallbackGroupIDOnInvalidRequest != nil ||
+							fallbackGroup.UsesHostedUsage() {
 							reqLog.Warn("gateway.fallback_group_invalid",
 								zap.Int64("fallback_group_id", fallbackGroup.ID),
 								zap.String("fallback_platform", fallbackGroup.Platform),

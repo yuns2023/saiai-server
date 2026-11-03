@@ -443,7 +443,7 @@
           </div>
         </div>
 
-        <div v-if="createForm.platform === 'openai'" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="supportsHostedUsage(createForm.platform)" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
             <input
               v-model="createForm.hosted_usage_enabled"
@@ -1251,7 +1251,7 @@
           <Select v-model="editForm.status" :options="editStatusOptions" />
         </div>
 
-        <div v-if="editForm.platform === 'openai'" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="supportsHostedUsage(editForm.platform)" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
             <input
               v-model="editForm.hosted_usage_enabled"
@@ -2020,7 +2020,7 @@ import ClaudeEntrypointPolicyEditor from '@/components/admin/group/ClaudeEntrypo
 import GroupCapacityBadge from '@/components/common/GroupCapacityBadge.vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
-import { isHostedUsageEligible } from '@/utils/hostedUsage'
+import { isHostedUsageEligible, supportsHostedUsage } from '@/utils/hostedUsage'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 

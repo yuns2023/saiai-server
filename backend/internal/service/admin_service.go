@@ -1276,6 +1276,10 @@ func (s *adminServiceImpl) validateFallbackGroup(ctx context.Context, currentGro
 			return ErrGroupNotActive
 		}
 
+		if fallbackGroup.UsesHostedUsage() {
+			return infraerrors.BadRequest("INVALID_HOSTED_USAGE", "Hosted groups cannot be fallback groups")
+		}
+
 		// 降级分组不能启用 claude_code_only，否则会造成死循环
 		if nextID == fallbackGroupID && fallbackGroup.ClaudeCodeOnly {
 			return fmt.Errorf("fallback group cannot have claude_code_only enabled")
@@ -1312,6 +1316,9 @@ func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Con
 	}
 	if fallbackGroup.Platform != PlatformAnthropic {
 		return fmt.Errorf("fallback group must be anthropic platform")
+	}
+	if fallbackGroup.UsesHostedUsage() {
+		return infraerrors.BadRequest("INVALID_HOSTED_USAGE", "Hosted groups cannot be fallback groups")
 	}
 	if fallbackGroup.SubscriptionType == SubscriptionTypeSubscription {
 		return fmt.Errorf("fallback group cannot be subscription type")
