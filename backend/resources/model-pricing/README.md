@@ -51,7 +51,8 @@ bash tools/pricing_fallback_sync.sh sync
   `--billed-keys` (one resolved price key per line), when a billed key was
   removed, is missing from the fallback, changed a billing field, or has an
   ambiguous billing field (repeated or spelled several ways). A missing
-  price equals an explicit 0, as in the parser. Drift alone, odd values in
+  price equals an explicit 0, as in the parser. Ambiguous entries never count
+  as usable models for the priced-model floor and shrink checks. Drift alone, odd values in
   other metadata, and a fallback whose last sync is more than 7 days old
   only warn.
 - `sync` refreshes the bundled fallback file from `pricing.remote_url`

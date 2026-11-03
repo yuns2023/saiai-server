@@ -163,6 +163,12 @@ class PricingDiffTests(unittest.TestCase):
         code, _, _, report = self.run_main(None, None, raw=(base, price_repeat))
         self.assertEqual(code, 0)
         self.assertEqual(list(report["ambiguous"]), ["model-0"])
+        same_value = base.replace('"output_cost_per_token": 2e-06',
+                                  '"output_cost_per_token": 2e-06, "output_cost_per_token": 2e-06', 1)
+        code, out, _, report = self.run_main(None, None, raw=(base, same_value))
+        self.assertEqual(code, 0)
+        self.assertTrue(report["drift"])  # equal final values, but now ambiguous
+        self.assertEqual(report["remote_ambiguous_models"], 1)
         model_repeat = base[:-1] + ', "model-0": ' + json.dumps(feed(10)["model-0"]) + "}"
         code, out, _, report = self.run_main(None, None, raw=(base, model_repeat))
         self.assertEqual(code, 0)
@@ -238,6 +244,7 @@ class PricingDiffTests(unittest.TestCase):
         code, _, err, _ = self.run_main(feed(10), feed(7))
         self.assertEqual(code, 2)
         self.assertIn("lost more than 20%", err)
+        self.assertIn("ambiguous excluded", err)
         code, _, _, _ = self.run_main(feed(10), feed(9))
         self.assertEqual(code, 0)
 

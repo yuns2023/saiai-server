@@ -47,7 +47,8 @@ fi
 # The URL is printed and kept in CI logs and release evidence: refuse
 # embedded credentials, query strings and fragments instead of echoing them.
 if [[ ! "$REMOTE_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._~/%+-]*$ ]]; then
-  echo "pricing.remote_url must be a plain https URL without userinfo, query or fragment" >&2
+  echo "pricing.remote_url must be a plain https URL (DNS name or IPv4 host, optional port," \
+    "path of [A-Za-z0-9._~/%+-] only; no userinfo, query or fragment)" >&2
   exit 1
 fi
 

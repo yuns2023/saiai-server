@@ -268,7 +268,11 @@ def compare(fallback: dict[str, Any], remote: dict[str, Any]) -> dict[str, Any]:
         "repeated_model_keys": repeated_models,
         "metadata_only_changed": len(metadata_only),
         "unpriced_or_doc_changed": len(unpriced_changed),
-        "drift": fallback != remote,
+        # Equal final values can still differ in repeated/ambiguous fields.
+        "drift": (fallback != remote or fallback_ambiguous != remote_ambiguous
+                  or getattr(fallback, "duplicates", None) != getattr(remote, "duplicates", None)),
+        "fallback_ambiguous_models": len(fallback_ambiguous),
+        "remote_ambiguous_models": len(remote_ambiguous),
         "_views": (fallback_views, remote_views),
     }
 
@@ -360,12 +364,17 @@ def main(argv: list[str] | None = None) -> int:
     problems: list[str] = []
     for label in ("fallback", "remote"):
         count = report[f"{label}_priced_models"]
+        # Ambiguous entries are uncertain, so they never count as usable models.
         if count < args.min_priced_models:
-            problems.append(f"{label} has {count} priced models (< {args.min_priced_models})")
+            problems.append(
+                f"{label} has {count} usable priced models (< {args.min_priced_models}; "
+                f"{report[f'{label}_ambiguous_models']} ambiguous excluded)"
+            )
     floor = report["fallback_priced_models"] * (1 - args.max_shrink_ratio)
     if report["remote_priced_models"] < floor:
         problems.append(
-            f"remote lost more than {args.max_shrink_ratio:.0%} of the fallback's priced models"
+            f"remote lost more than {args.max_shrink_ratio:.0%} of the fallback's priced models "
+            f"({report['remote_ambiguous_models']} ambiguous excluded)"
         )
 
     warnings: list[str] = []
