@@ -202,6 +202,7 @@ describe('AccountStatusIndicator', () => {
       global: { stubs: { Icon: true } }
     })
 
-    expect(wrapper.text()).toContain('admin.accounts.status.errorSince')
+    expect(wrapper.text()).not.toContain('admin.accounts.status.errorSinceUnknown')
+    expect(wrapper.text()).toMatch(/admin\.accounts\.status\.errorSince \{"time":"[^"]*2026[^"]*"\}/)
   })
 })
