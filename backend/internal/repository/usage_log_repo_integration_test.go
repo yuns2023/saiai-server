@@ -1776,6 +1776,7 @@ func (s *UsageLogRepoSuite) TestAccountCostAndHostedReference() {
 	s.Require().NoError(err)
 	s.Require().InDelta(2.0, resp.Summary.TotalCost, 1e-9)
 	s.Require().InDelta(7.0, resp.Summary.TotalStandardCost, 1e-9)
+	s.Require().Equal(int64(1), resp.Summary.TotalHostedReqs)
 	s.Require().InDelta(4.5, resp.Summary.TotalHostedCost, 1e-9)
 }
 

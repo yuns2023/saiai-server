@@ -22,6 +22,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.metricShare': 'Share',
   'admin.dashboard.actual': 'Actual',
   'admin.dashboard.standard': 'Standard',
+  'usage.accountBilled': 'Account billed',
   'admin.dashboard.metricTokens': 'By Tokens',
   'admin.dashboard.metricActualCost': 'By Actual Cost',
   'admin.dashboard.noDataAvailable': 'No data available',
@@ -70,6 +71,28 @@ describe('ModelDistributionChart', () => {
       actual_cost: 1.4,
     },
   ]
+
+  it('labels account cost and hides the duplicate base price on the account basis', () => {
+    const wrapper = mount(ModelDistributionChart, {
+      props: { modelStats: [modelStats[0]], accountCostBasis: true },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+    const headers = wrapper.findAll('thead th').map((th) => th.text())
+    expect(headers).toContain('Account billed')
+    expect(headers).not.toContain('Actual')
+    expect(headers).not.toContain('Standard')
+    expect(wrapper.find('tbody tr').findAll('td')).toHaveLength(5)
+    expect(wrapper.find('tbody tr').text()).not.toContain('$1.50')
+  })
+
+  it('keeps both cost columns by default', () => {
+    const wrapper = mount(ModelDistributionChart, {
+      props: { modelStats: [modelStats[0]] },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+    const headers = wrapper.findAll('thead th').map((th) => th.text())
+    expect(headers).toEqual(expect.arrayContaining(['Actual', 'Standard']))
+  })
 
   it('passes usage page filters to the expanded user breakdown', async () => {
     getUserBreakdown.mockResolvedValue({ users: [] })

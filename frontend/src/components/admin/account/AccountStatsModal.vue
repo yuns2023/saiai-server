@@ -68,9 +68,9 @@
               {{ t('admin.accounts.stats.accumulatedCost') }}
               <span class="text-gray-400 dark:text-gray-500">
                 ({{ t('usage.userBilled') }}: ${{ formatCost(stats.summary.total_user_cost) }}<template
-                  v-if="stats.summary.total_hosted_cost"
+                  v-if="(stats.summary.total_hosted_requests ?? 0) > 0"
                 > · <span :title="t('admin.accounts.stats.hostedReferenceHint')" data-testid="account-stats-hosted-cost">{{ t('admin.accounts.stats.hostedReference') }} ≈${{
-                  formatCost(stats.summary.total_hosted_cost)
+                  formatCost(stats.summary.total_hosted_cost ?? 0)
                 }}</span></template>)
               </span>
             </p>
@@ -369,18 +369,20 @@
         </div>
 
         <!-- Model Distribution -->
-        <ModelDistributionChart :model-stats="stats.models" :loading="false" />
+        <ModelDistributionChart :model-stats="stats.models" :loading="false" account-cost-basis />
 
         <EndpointDistributionChart
           :endpoint-stats="stats.endpoints || []"
           :loading="false"
           :title="t('usage.inboundEndpoint')"
+          account-cost-basis
         />
 
         <EndpointDistributionChart
           :endpoint-stats="stats.upstream_endpoints || []"
           :loading="false"
           :title="t('usage.upstreamEndpoint')"
+          account-cost-basis
         />
       </template>
 

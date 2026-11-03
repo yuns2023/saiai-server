@@ -38,9 +38,15 @@ describe('AccountStatsModal', () => {
     wrapper.unmount()
   })
 
-  it('shows account billed without the duplicate standard cost and adds the hosted reference', async () => {
+  it.each([
+    ['a priced hosted share', 9.5, '≈$9.50'],
+    ['hosted requests with a zero reference price', 0, '≈$0.0000']
+  ])('shows account billed without the duplicate standard cost and adds the hosted reference for %s', async (_, hostedCost, expected) => {
     const hosted = stats(5)
-    getStats.mockResolvedValueOnce({ ...hosted, summary: { ...hosted.summary, total_standard_cost: 9.5, total_hosted_cost: 9.5 } })
+    getStats.mockResolvedValueOnce({
+      ...hosted,
+      summary: { ...hosted.summary, total_standard_cost: hostedCost, total_hosted_requests: 5, total_hosted_cost: hostedCost }
+    })
     const wrapper = mount(AccountStatsModal, {
       props: { show: false, account: { id: 2, name: 'Hosted', status: 'active' } as Account },
       global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, DateTimeRangePicker: true, ModelDistributionChart: true, EndpointDistributionChart: true, LoadingSpinner: true } }
@@ -48,7 +54,24 @@ describe('AccountStatsModal', () => {
     await wrapper.setProps({ show: true })
     await flushPromises()
     expect(wrapper.text()).not.toContain('admin.accounts.stats.standardCost')
-    expect(wrapper.get('[data-testid="account-stats-hosted-cost"]').text()).toBe('admin.accounts.stats.hostedReference ≈$9.50')
+    expect(wrapper.get('[data-testid="account-stats-hosted-cost"]').text()).toBe(`admin.accounts.stats.hostedReference ${expected}`)
+    wrapper.unmount()
+  })
+
+  it('omits the hosted reference for accounts without hosted requests', async () => {
+    getStats.mockResolvedValueOnce(stats(5))
+    const wrapper = mount(AccountStatsModal, {
+      props: { show: false, account: { id: 3, name: 'Plain', status: 'active' } as Account },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, DateTimeRangePicker: true, ModelDistributionChart: true, EndpointDistributionChart: true, LoadingSpinner: true } }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="account-stats-hosted-cost"]').exists()).toBe(false)
+    // Distribution tables are told that actual_cost is the account cost here
+    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).props('accountCostBasis')).toBe(true)
+    for (const chart of wrapper.findAllComponents({ name: 'EndpointDistributionChart' })) {
+      expect(chart.props('accountCostBasis')).toBe(true)
+    }
     wrapper.unmount()
   })
 })

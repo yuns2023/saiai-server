@@ -114,8 +114,8 @@
               <th class="pb-2 text-right">{{ t('admin.dashboard.requests') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.tokens') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.metricShare') }}</th>
-              <th class="pb-2 text-right">{{ t('admin.dashboard.actual') }}</th>
-              <th class="pb-2 text-right">{{ t('admin.dashboard.standard') }}</th>
+              <th class="pb-2 text-right">{{ accountCostBasis ? t('usage.accountBilled') : t('admin.dashboard.actual') }}</th>
+              <th v-if="!accountCostBasis" class="pb-2 text-right">{{ t('admin.dashboard.standard') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -146,12 +146,12 @@
                 <td class="py-1.5 text-right text-green-600 dark:text-green-400">
                   ${{ formatCost(model.actual_cost) }}
                 </td>
-                <td class="py-1.5 text-right text-gray-400 dark:text-gray-500">
+                <td v-if="!accountCostBasis" class="py-1.5 text-right text-gray-400 dark:text-gray-500">
                   ${{ formatCost(model.cost) }}
                 </td>
               </tr>
               <tr v-if="expandedKey === `model-${model.model}`">
-                <td colspan="6" class="p-0">
+                <td :colspan="accountCostBasis ? 5 : 6" class="p-0">
                   <UserBreakdownSubTable
                     :items="breakdownItems"
                     :loading="breakdownLoading"
@@ -296,6 +296,8 @@ const props = withDefaults(defineProps<{
   startTime?: string
   endTime?: string
   breakdownFilters?: UserBreakdownParams
+  /** actual_cost is the account cost (account-only scope): label it so and hide the base price, which equals it at 1x. */
+  accountCostBasis?: boolean
 }>(), {
   upstreamModelStats: () => [],
   mappingModelStats: () => [],

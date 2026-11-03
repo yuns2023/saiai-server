@@ -4111,6 +4111,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 			COALESCE(SUM(total_cost), 0) as cost,
 			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as actual_cost,
 			COALESCE(SUM(actual_cost), 0) as user_cost,
+			COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
 			COALESCE(SUM(metered_cost), 0) as hosted_cost
 		FROM usage_logs
 		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
@@ -4132,6 +4133,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 	}()
 
 	history := make([]AccountUsageHistory, 0)
+	var totalHostedRequests int64
 	var totalHostedCost float64
 	for rows.Next() {
 		var date string
@@ -4140,10 +4142,12 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		var cost float64
 		var actualCost float64
 		var userCost float64
+		var hostedRequests int64
 		var hostedCost float64
-		if err = rows.Scan(&date, &requests, &tokens, &cost, &actualCost, &userCost, &hostedCost); err != nil {
+		if err = rows.Scan(&date, &requests, &tokens, &cost, &actualCost, &userCost, &hostedRequests, &hostedCost); err != nil {
 			return nil, err
 		}
+		totalHostedRequests += hostedRequests
 		totalHostedCost += hostedCost
 		t, _ := time.Parse("2006-01-02", date)
 		history = append(history, AccountUsageHistory{
@@ -4195,6 +4199,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		TotalCost:         totalAccountCost,
 		TotalUserCost:     totalUserCost,
 		TotalStandardCost: totalStandardCost,
+		TotalHostedReqs:   totalHostedRequests,
 		TotalHostedCost:   totalHostedCost,
 		TotalRequests:     totalRequests,
 		TotalTokens:       totalTokens,
