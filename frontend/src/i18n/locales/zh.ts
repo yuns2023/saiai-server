@@ -1267,6 +1267,7 @@ export default {
       groupDistribution: '分组使用分布',
       metricTokens: '按总 Token',
       metricActualCost: '按计费消耗（含订阅额度）',
+      metricAccountCost: '按账号计费',
       metricShare: '占比',
       tokenUsageTrend: 'Token 使用趋势',
       noDataAvailable: '暂无数据',

@@ -58,8 +58,12 @@ describe('AccountStatsModal', () => {
     wrapper.unmount()
   })
 
-  it('omits the hosted reference for accounts without hosted requests', async () => {
-    getStats.mockResolvedValueOnce(stats(5))
+  it.each([
+    ['explicit zero hosted fields', { total_hosted_requests: 0, total_hosted_cost: 0 }],
+    ['an older response without hosted fields', {}]
+  ])('omits the hosted reference and scopes drill-downs to the account for %s', async (_, extra) => {
+    const plain = stats(5)
+    getStats.mockResolvedValueOnce({ ...plain, summary: { ...plain.summary, ...extra }, upstream_endpoints: [{ endpoint: '/v1/messages', requests: 5, total_tokens: 2, cost: 1, actual_cost: 1 }] })
     const wrapper = mount(AccountStatsModal, {
       props: { show: false, account: { id: 3, name: 'Plain', status: 'active' } as Account },
       global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, DateTimeRangePicker: true, ModelDistributionChart: true, EndpointDistributionChart: true, LoadingSpinner: true } }
@@ -68,10 +72,17 @@ describe('AccountStatsModal', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="account-stats-hosted-cost"]').exists()).toBe(false)
     // Distribution tables are told that actual_cost is the account cost here
-    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).props('accountCostBasis')).toBe(true)
-    for (const chart of wrapper.findAllComponents({ name: 'EndpointDistributionChart' })) {
+    const model = wrapper.findComponent({ name: 'ModelDistributionChart' })
+    const endpoints = wrapper.findAllComponents({ name: 'EndpointDistributionChart' })
+    for (const chart of [model, ...endpoints]) {
       expect(chart.props('accountCostBasis')).toBe(true)
+      expect(chart.props('breakdownFilters')).toEqual({ account_id: 3 })
+      expect(chart.props('startTime')).toEqual(expect.any(String))
+      expect(chart.props('endTime')).toEqual(expect.any(String))
     }
+    expect(endpoints[0].props('source')).toBe('inbound')
+    expect(endpoints[1].props('source')).toBe('upstream')
+    expect(endpoints[1].props('upstreamEndpointStats')).toHaveLength(1)
     wrapper.unmount()
   })
 })

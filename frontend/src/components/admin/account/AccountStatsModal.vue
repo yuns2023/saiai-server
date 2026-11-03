@@ -369,19 +369,34 @@
         </div>
 
         <!-- Model Distribution -->
-        <ModelDistributionChart :model-stats="stats.models" :loading="false" account-cost-basis />
+        <ModelDistributionChart
+          :model-stats="stats.models"
+          :loading="false"
+          :start-time="range.startTime"
+          :end-time="range.endTime"
+          :breakdown-filters="breakdownFilters"
+          account-cost-basis
+        />
 
         <EndpointDistributionChart
           :endpoint-stats="stats.endpoints || []"
           :loading="false"
           :title="t('usage.inboundEndpoint')"
+          :start-time="range.startTime"
+          :end-time="range.endTime"
+          :breakdown-filters="breakdownFilters"
           account-cost-basis
         />
 
         <EndpointDistributionChart
-          :endpoint-stats="stats.upstream_endpoints || []"
+          :endpoint-stats="[]"
+          :upstream-endpoint-stats="stats.upstream_endpoints || []"
           :loading="false"
           :title="t('usage.upstreamEndpoint')"
+          source="upstream"
+          :start-time="range.startTime"
+          :end-time="range.endTime"
+          :breakdown-filters="breakdownFilters"
           account-cost-basis
         />
       </template>
@@ -460,6 +475,8 @@ const emit = defineEmits<{
 const loading = ref(false)
 const stats = ref<AccountUsageStatsResponse | null>(null)
 const range = ref(presetTimeRange('30days'))
+// Row drill-downs stay scoped to this account (the range comes from the picker).
+const breakdownFilters = computed(() => (props.account ? { account_id: props.account.id } : undefined))
 const statsTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 const rangeLabel = computed(() => {
   const fmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })

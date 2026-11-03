@@ -1256,6 +1256,7 @@ export default {
       groupDistribution: 'Group Usage Distribution',
       metricTokens: 'By Total Tokens',
       metricActualCost: 'By Billed Usage (Includes Subscription Quota)',
+      metricAccountCost: 'By Account Billed',
       metricShare: 'Share',
       tokenUsageTrend: 'Token Usage Trend',
       userUsageTrend: 'User Usage Trend (Top 12)',
