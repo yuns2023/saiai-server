@@ -440,7 +440,7 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 
 		// 4. 将主动查询结果同步到被动缓存（并评估 5h 阈值），下次 passive 加载即为最新值。
 		// 必须在补入旧被动周窗口之前同步，避免旧周窗口被当作新样本写回。
-		mergeAccountExtra(account, s.syncActiveToPassive(ctx, account.ID, usage))
+		mergeAccountExtra(account, s.syncActiveToPassive(ctx, account.ID, usage, fresh))
 		applyPassiveAnthropicWeeklyUsage(usage, account.Extra, now)
 
 		// 5. 添加窗口统计（有独立缓存，1 分钟）
@@ -537,7 +537,7 @@ func buildPassiveUsageWindow(extra map[string]any, utilizationKey, resetKey stri
 // syncActiveToPassive 将主动查询的最新数据回写到 Extra 被动缓存，
 // 这样下次被动加载时能看到最新值。
 // 返回成功写入的字段（写入失败或无数据时返回 nil）。
-func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID int64, usage *UsageInfo) map[string]any {
+func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID int64, usage *UsageInfo, fresh bool) map[string]any {
 	extraUpdates := make(map[string]any, 4)
 
 	if usage.FiveHour != nil {
@@ -565,8 +565,9 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 	if len(extraUpdates) > 0 {
 		// passive_usage_sampled_at 是 5h 与周窗口共用的采样时间：主动结果缺周窗口时不推进，
 		// 否则保留的旧周百分比会被当成新样本。代价：只有 5h 的结果更新了 5h 百分比但不推进时间，
-		// 5h 估算可能使用稍旧的采样时间。
-		if usage.SevenDay != nil {
+		// 5h 估算可能使用稍旧的采样时间。缓存命中（fresh=false）仍写回并评估阈值，但数据最多已
+		// 3 分钟，不能把它标成刚采样，否则估算会用新成本除旧百分比。
+		if fresh && usage.SevenDay != nil {
 			extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
 		}
 		if err := s.accountRepo.UpdateExtra(ctx, accountID, extraUpdates); err != nil {

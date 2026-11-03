@@ -307,14 +307,20 @@ func TestSyncActiveToPassiveSampleTimeAndThreshold(t *testing.T) {
 
 	written := svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{
 		FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &fiveReset}, SevenDay: &UsageProgress{Utilization: 20, ResetsAt: &weekReset},
-	})
+	}, true)
 	require.Contains(t, written, "passive_usage_sampled_at")
+
+	written = svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{
+		FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &fiveReset}, SevenDay: &UsageProgress{Utilization: 20, ResetsAt: &weekReset},
+	}, false)
+	require.InDelta(t, 0.2, written["passive_usage_7d_utilization"], 1e-9, "cache hits still sync values")
+	require.NotContains(t, written, "passive_usage_sampled_at", "cache hits must not restamp the sample time")
 	require.InDelta(t, 0.5, written["session_window_utilization"], 1e-9)
 
-	written = svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{FiveHour: &UsageProgress{Utilization: 100, ResetsAt: &fiveReset}})
+	written = svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{FiveHour: &UsageProgress{Utilization: 100, ResetsAt: &fiveReset}}, true)
 	require.InDelta(t, 1.0, written["session_window_utilization"], 1e-9, "5h-only results still update the 5h value")
 	require.NotContains(t, written, "passive_usage_sampled_at", "no weekly window: the shared sample time must not advance")
-	require.Len(t, repo.updates, 2)
+	require.Len(t, repo.updates, 3)
 	require.NotNil(t, repo.account.RateLimitResetAt, "5h threshold is still evaluated for a 5h-only result")
 	require.WithinDuration(t, fiveReset, *repo.account.RateLimitResetAt, time.Second)
 }
