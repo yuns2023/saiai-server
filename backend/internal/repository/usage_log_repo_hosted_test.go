@@ -78,7 +78,7 @@ func TestGetUsageTrendWithFiltersReadsHostedInclusiveAggregatesAsIs(t *testing.T
 		WithArgs(start, end).
 		WillReturnRows(sqlmock.NewRows(trendColumns).AddRow("2026-10-24", 6, 60, 0, 0, 0, 60, 0.6, 0.4))
 
-	trend, err := repo.GetUsageTrendWithFilters(context.Background(), start, end, "day", 0, 0, 0, 0, "", nil, nil, nil, "")
+	trend, err := repo.GetUsageTrendWithFilters(context.Background(), start, end, "day", 0, 0, 0, 0, "", nil, nil, nil, "", "")
 	require.NoError(t, err)
 	require.Equal(t, int64(6), trend[0].Requests)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -94,7 +94,7 @@ func TestGetUsageTrendWithFiltersFilteredQueryKeepsHostedRows(t *testing.T) {
 		WithArgs(start, end, int64(7)).
 		WillReturnRows(sqlmock.NewRows(trendColumns))
 
-	_, err := repo.GetUsageTrendWithFilters(context.Background(), start, end, "day", 7, 0, 0, 0, "", nil, nil, nil, "")
+	_, err := repo.GetUsageTrendWithFilters(context.Background(), start, end, "day", 7, 0, 0, 0, "", nil, nil, nil, "", "")
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

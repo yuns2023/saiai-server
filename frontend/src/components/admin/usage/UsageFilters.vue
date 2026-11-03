@@ -161,6 +161,12 @@
           <Select v-model="filters.group_id" :options="groupOptions" searchable @change="emitChange" />
         </div>
 
+        <!-- Platform Filter: platform of the account that served the request -->
+        <div v-if="showPlatformFilter" class="w-full sm:w-auto sm:min-w-[180px]" data-testid="usage-filter-platform">
+          <label class="input-label">{{ t('admin.usage.platform') }}</label>
+          <Select v-model="filters.platform" :options="platformOptions" @change="emitChange" />
+        </div>
+
         <div class="w-full sm:w-auto">
           <label class="input-label" for="usage-total-cost-threshold">{{ t('admin.usage.highCostThreshold') }}</label>
           <div class="flex items-center gap-2">
@@ -257,11 +263,14 @@ interface Props {
   endTime?: string
   showActions?: boolean
   showSessionDiagnostics?: boolean
+  /** Usage cleanup does not support the platform filter, so its dialog hides it. */
+  showPlatformFilter?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   showActions: true,
-  showSessionDiagnostics: true
+  showSessionDiagnostics: true,
+  showPlatformFilter: true
 })
 const emit = defineEmits([
   'update:modelValue',
@@ -306,6 +315,15 @@ const requestTypeOptions = ref<SelectOption[]>([
   { value: 'ws_v2', label: t('usage.ws') },
   { value: 'stream', label: t('usage.stream') },
   { value: 'sync', label: t('usage.sync') }
+])
+
+const platformOptions = ref<SelectOption[]>([
+  { value: null, label: t('admin.usage.allPlatforms') },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'antigravity', label: 'Antigravity' },
+  { value: 'sora', label: 'Sora' }
 ])
 
 const billingTypeOptions = ref<SelectOption[]>([

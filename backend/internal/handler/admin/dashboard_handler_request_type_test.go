@@ -18,9 +18,11 @@ type dashboardUsageRepoCapture struct {
 	trendRequestType *int16
 	trendStream      *bool
 	trendSessionID   string
+	trendPlatform    string
 	modelRequestType *int16
 	modelStream      *bool
 	modelSessionID   string
+	modelPlatform    string
 	rankingLimit     int
 	ranking          []usagestats.UserSpendingRankingItem
 	rankingTotal     float64
@@ -35,11 +37,12 @@ func (s *dashboardUsageRepoCapture) GetUsageTrendWithFilters(
 	requestType *int16,
 	stream *bool,
 	billingType *int8,
-	sessionID string,
+	sessionID, platform string,
 ) ([]usagestats.TrendDataPoint, error) {
 	s.trendRequestType = requestType
 	s.trendStream = stream
 	s.trendSessionID = sessionID
+	s.trendPlatform = platform
 	return []usagestats.TrendDataPoint{}, nil
 }
 
@@ -50,11 +53,12 @@ func (s *dashboardUsageRepoCapture) GetModelStatsWithFilters(
 	requestType *int16,
 	stream *bool,
 	billingType *int8,
-	sessionID string,
+	sessionID, platform string,
 ) ([]usagestats.ModelStat, error) {
 	s.modelRequestType = requestType
 	s.modelStream = stream
 	s.modelSessionID = sessionID
+	s.modelPlatform = platform
 	return []usagestats.ModelStat{}, nil
 }
 

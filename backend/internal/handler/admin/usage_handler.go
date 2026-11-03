@@ -140,6 +140,11 @@ func (h *UsageHandler) List(c *gin.Context) {
 		groupID = id
 	}
 
+	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
 	model := c.Query("model")
 	sessionID, err := normalizeSessionIDFilter(c.Query("session_id"))
 	if err != nil {
@@ -231,6 +236,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		APIKeyID:          apiKeyID,
 		AccountID:         accountID,
 		GroupID:           groupID,
+		Platform:          platform,
 		Model:             model,
 		SessionID:         sessionID,
 		RequestType:       requestType,
@@ -299,6 +305,11 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		groupID = id
 	}
 
+	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
 	model := c.Query("model")
 	sessionID, err := normalizeSessionIDFilter(c.Query("session_id"))
 	if err != nil {
@@ -402,6 +413,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		APIKeyID:          apiKeyID,
 		AccountID:         accountID,
 		GroupID:           groupID,
+		Platform:          platform,
 		Model:             model,
 		SessionID:         sessionID,
 		RequestType:       requestType,

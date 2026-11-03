@@ -124,4 +124,32 @@ describe('UsageFilters', () => {
     expect(modelValue.start_date).toBe('2026-09-18')
     expect(modelValue.end_date).toBe('2026-09-19')
   })
+
+  it('filters by serving account platform and hides the control for cleanup', async () => {
+    listGroups.mockResolvedValue({ items: [] })
+    getModelStats.mockResolvedValue({ models: [] })
+    const modelValue: Record<string, unknown> = { group_id: 3 }
+    const wrapper = mount(UsageFilters, {
+      props: { modelValue, exporting: false, startDate: '2026-09-18', endDate: '2026-09-19', showActions: false },
+      global: { stubs: { Select: true } },
+    })
+    await flushPromises()
+
+    const platformField = wrapper.get('[data-testid="usage-filter-platform"]')
+    expect(platformField.text()).toContain('admin.usage.platform')
+    const select = platformField.findComponent({ name: 'Select' })
+    expect((select.props('options') as Array<{ value: unknown }>).map(option => option.value)).toEqual([
+      null, 'anthropic', 'openai', 'gemini', 'antigravity', 'sora',
+    ])
+    expect(select.props('options')[0].label).toBe('admin.usage.allPlatforms')
+
+    select.vm.$emit('update:modelValue', 'gemini')
+    select.vm.$emit('change', 'gemini')
+    expect(modelValue).toMatchObject({ platform: 'gemini', group_id: 3 })
+    expect(wrapper.emitted('change')).toHaveLength(1)
+
+    await wrapper.setProps({ showPlatformFilter: false })
+    expect(wrapper.find('[data-testid="usage-filter-platform"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })

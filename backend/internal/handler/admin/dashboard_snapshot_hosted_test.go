@@ -31,7 +31,7 @@ func (r *dashboardPlatformUsageRepoProbe) GetPlatformModelStats(ctx context.Cont
 	return []usagestats.ModelStat{{Model: "platform-model", Requests: 9}}, nil
 }
 
-func (r *dashboardPlatformUsageRepoProbe) GetModelStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, sessionID string) ([]usagestats.ModelStat, error) {
+func (r *dashboardPlatformUsageRepoProbe) GetModelStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, sessionID, platform string) ([]usagestats.ModelStat, error) {
 	r.modelCalls.Add(1)
 	return []usagestats.ModelStat{{Model: "all-model", Requests: 10}}, nil
 }

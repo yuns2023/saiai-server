@@ -14,7 +14,8 @@ import type {
   UserSpendingRankingResponse,
   APIKeySpendingRankingResponse,
   UserBreakdownItem,
-  UsageRequestType
+  UsageRequestType,
+  AccountPlatform
 } from '@/types'
 
 /**
@@ -57,6 +58,8 @@ export interface TrendParams {
   session_id?: string
   account_id?: number
   group_id?: number
+  /** Platform of the serving account (accounts.platform); null/undefined = all. */
+  platform?: AccountPlatform | null
   request_type?: UsageRequestType
   stream?: boolean
   billing_type?: number | null
@@ -91,6 +94,8 @@ export interface ModelStatsParams {
   session_id?: string
   account_id?: number
   group_id?: number
+  /** Platform of the serving account (accounts.platform); null/undefined = all. */
+  platform?: AccountPlatform | null
   request_type?: UsageRequestType
   stream?: boolean
   billing_type?: number | null
@@ -121,6 +126,8 @@ export interface GroupStatsParams {
   api_key_id?: number
   account_id?: number
   group_id?: number
+  /** Platform of the serving account (accounts.platform); null/undefined = all. */
+  platform?: AccountPlatform | null
   session_id?: string
   request_type?: UsageRequestType
   stream?: boolean
@@ -179,6 +186,8 @@ export interface UserBreakdownParams {
   api_key_id?: number
   account_id?: number
   group_id?: number
+  /** Platform of the serving account (accounts.platform); null/undefined = all. */
+  platform?: AccountPlatform | null
   model_filter?: string
   session_id?: string
   request_type?: UsageRequestType

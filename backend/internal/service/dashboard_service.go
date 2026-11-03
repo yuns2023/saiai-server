@@ -124,45 +124,45 @@ func (s *DashboardService) GetDashboardStats(ctx context.Context) (*usagestats.D
 	return stats, nil
 }
 
-func (s *DashboardService) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8, sessionID string) ([]usagestats.TrendDataPoint, error) {
-	trend, err := s.usageRepo.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType, sessionID)
+func (s *DashboardService) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8, sessionID, platform string) ([]usagestats.TrendDataPoint, error) {
+	trend, err := s.usageRepo.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType, sessionID, platform)
 	if err != nil {
 		return nil, fmt.Errorf("get usage trend with filters: %w", err)
 	}
 	return trend, nil
 }
 
-func (s *DashboardService) GetModelStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, sessionID string) ([]usagestats.ModelStat, error) {
-	stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID)
+func (s *DashboardService) GetModelStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, sessionID, platform string) ([]usagestats.ModelStat, error) {
+	stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID, platform)
 	if err != nil {
 		return nil, fmt.Errorf("get model stats with filters: %w", err)
 	}
 	return stats, nil
 }
 
-func (s *DashboardService) GetModelStatsWithFiltersBySource(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, modelSource string, sessionID string) ([]usagestats.ModelStat, error) {
+func (s *DashboardService) GetModelStatsWithFiltersBySource(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, modelSource string, sessionID, platform string) ([]usagestats.ModelStat, error) {
 	normalizedSource := usagestats.NormalizeModelSource(modelSource)
 	if normalizedSource == usagestats.ModelSourceRequested {
-		return s.GetModelStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID)
+		return s.GetModelStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID, platform)
 	}
 
 	type modelStatsBySourceRepo interface {
-		GetModelStatsWithFiltersBySource(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, source string, sessionID string) ([]usagestats.ModelStat, error)
+		GetModelStatsWithFiltersBySource(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, source string, sessionID, platform string) ([]usagestats.ModelStat, error)
 	}
 
 	if sourceRepo, ok := s.usageRepo.(modelStatsBySourceRepo); ok {
-		stats, err := sourceRepo.GetModelStatsWithFiltersBySource(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, normalizedSource, sessionID)
+		stats, err := sourceRepo.GetModelStatsWithFiltersBySource(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, normalizedSource, sessionID, platform)
 		if err != nil {
 			return nil, fmt.Errorf("get model stats with filters by source: %w", err)
 		}
 		return stats, nil
 	}
 
-	return s.GetModelStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID)
+	return s.GetModelStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID, platform)
 }
 
-func (s *DashboardService) GetGroupStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, sessionID string) ([]usagestats.GroupStat, error) {
-	stats, err := s.usageRepo.GetGroupStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID)
+func (s *DashboardService) GetGroupStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, sessionID, platform string) ([]usagestats.GroupStat, error) {
+	stats, err := s.usageRepo.GetGroupStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID, platform)
 	if err != nil {
 		return nil, fmt.Errorf("get group stats with filters: %w", err)
 	}

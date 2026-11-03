@@ -355,7 +355,7 @@ func (r *usageLogRepository) applyDashboardHostedStatsAggregated(ctx context.Con
 // before the watermark) are subtracted on read; buckets whose raw logs were
 // purged by retention get nothing subtracted and stay hosted-inclusive.
 func (r *usageLogRepository) GetPlatformUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string) ([]TrendDataPoint, error) {
-	if shouldUsePreaggregatedTrend(granularity, 0, 0, 0, 0, "", nil, nil, nil, "") {
+	if shouldUsePreaggregatedTrend(granularity, 0, 0, 0, 0, "", nil, nil, nil, "", "") {
 		// Watermark first (see applyDashboardHostedStatsAggregated).
 		watermark, err := r.dashboardAggregationWatermark(ctx)
 		if err != nil {
@@ -370,13 +370,13 @@ func (r *usageLogRepository) GetPlatformUsageTrend(ctx context.Context, startTim
 			return subtractTrendPoints(aggregated, hosted), nil
 		}
 	}
-	return r.queryUsageTrendFromLogs(ctx, startTime, endTime, granularity, 0, 0, 0, 0, "", nil, nil, nil, "", hostedScopeExclude)
+	return r.queryUsageTrendFromLogs(ctx, startTime, endTime, granularity, 0, 0, 0, 0, "", nil, nil, nil, "", "", hostedScopeExclude)
 }
 
 // GetPlatformModelStats returns the admin-dashboard model distribution of
 // platform usage (hosted rows excluded, requested model dimension).
 func (r *usageLogRepository) GetPlatformModelStats(ctx context.Context, startTime, endTime time.Time) ([]ModelStat, error) {
-	return r.getModelStatsWithFiltersBySource(ctx, startTime, endTime, 0, 0, 0, 0, nil, nil, nil, usagestats.ModelSourceRequested, "", hostedScopeExclude)
+	return r.getModelStatsWithFiltersBySource(ctx, startTime, endTime, 0, 0, 0, 0, nil, nil, nil, usagestats.ModelSourceRequested, "", "", hostedScopeExclude)
 }
 
 // hostedTrendBounds maps a trend range to the raw created_at interval covered
@@ -425,7 +425,7 @@ func (r *usageLogRepository) getHostedTrendForAggregateBuckets(ctx context.Conte
 	if !upper.After(lower) {
 		return nil, nil
 	}
-	return r.queryUsageTrendFromLogs(ctx, lower, upper, granularity, 0, 0, 0, 0, "", nil, nil, nil, "", hostedScopeOnly)
+	return r.queryUsageTrendFromLogs(ctx, lower, upper, granularity, 0, 0, 0, 0, "", nil, nil, nil, "", "", hostedScopeOnly)
 }
 
 // subtractTrendPoints subtracts hosted from the matching base buckets (by date

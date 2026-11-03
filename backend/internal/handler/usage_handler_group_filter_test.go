@@ -49,23 +49,23 @@ func (r *usageGroupFilterRepo) GetUserDashboardStatsWithFilters(_ context.Contex
 	return &usagestats.UserDashboardStats{TotalAPIKeys: 9, ActiveAPIKeys: 9, TodayRequests: 2}, nil
 }
 
-func (r *usageGroupFilterRepo) GetUsageTrendWithFilters(_ context.Context, _, _ time.Time, _ string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8, sessionID string) ([]usagestats.TrendDataPoint, error) {
-	if model != "" || requestType != nil || stream != nil || billingType != nil || sessionID != "" {
+func (r *usageGroupFilterRepo) GetUsageTrendWithFilters(_ context.Context, _, _ time.Time, _ string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8, sessionID, platform string) ([]usagestats.TrendDataPoint, error) {
+	if model != "" || requestType != nil || stream != nil || billingType != nil || sessionID != "" || platform != "" {
 		panic("user trend must not inherit admin filters")
 	}
 	r.record("trend", userID, apiKeyID, accountID, groupID)
 	return []usagestats.TrendDataPoint{}, nil
 }
 
-func (r *usageGroupFilterRepo) GetModelStatsWithFilters(_ context.Context, _, _ time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, sessionID string) ([]usagestats.ModelStat, error) {
-	if requestType != nil || stream != nil || billingType != nil || sessionID != "" {
+func (r *usageGroupFilterRepo) GetModelStatsWithFilters(_ context.Context, _, _ time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, sessionID, platform string) ([]usagestats.ModelStat, error) {
+	if requestType != nil || stream != nil || billingType != nil || sessionID != "" || platform != "" {
 		panic("user model stats must not inherit admin filters")
 	}
 	r.record("models", userID, apiKeyID, accountID, groupID)
 	return []usagestats.ModelStat{}, nil
 }
 
-func (r *usageGroupFilterRepo) GetGroupStatsWithFilters(_ context.Context, _, _ time.Time, userID, apiKeyID, accountID, groupID int64, _ *int16, _ *bool, _ *int8, _ string) ([]usagestats.GroupStat, error) {
+func (r *usageGroupFilterRepo) GetGroupStatsWithFilters(_ context.Context, _, _ time.Time, userID, apiKeyID, accountID, groupID int64, _ *int16, _ *bool, _ *int8, _, _ string) ([]usagestats.GroupStat, error) {
 	r.record("groups", userID, apiKeyID, accountID, groupID)
 	return []usagestats.GroupStat{
 		{GroupID: 31, GroupName: "自建CCMax", Requests: 9},

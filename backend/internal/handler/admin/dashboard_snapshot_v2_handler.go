@@ -41,6 +41,7 @@ type dashboardSnapshotV2Filters struct {
 	APIKeyID    int64
 	AccountID   int64
 	GroupID     int64
+	Platform    string
 	Model       string
 	SessionID   string
 	RequestType *int16
@@ -56,6 +57,7 @@ type dashboardSnapshotV2CacheKey struct {
 	APIKeyID          int64  `json:"api_key_id"`
 	AccountID         int64  `json:"account_id"`
 	GroupID           int64  `json:"group_id"`
+	Platform          string `json:"platform,omitempty"`
 	Model             string `json:"model"`
 	SessionID         string `json:"session_id"`
 	RequestType       *int16 `json:"request_type"`
@@ -114,6 +116,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		APIKeyID:          filters.APIKeyID,
 		AccountID:         filters.AccountID,
 		GroupID:           filters.GroupID,
+		Platform:          filters.Platform,
 		Model:             filters.Model,
 		SessionID:         filters.SessionID,
 		RequestType:       filters.RequestType,
@@ -209,6 +212,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 			filters.Stream,
 			filters.BillingType,
 			filters.SessionID,
+			filters.Platform,
 		)
 		if err != nil {
 			return nil, errors.New("failed to get usage trend")
@@ -236,6 +240,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 			filters.Stream,
 			filters.BillingType,
 			filters.SessionID,
+			filters.Platform,
 		)
 		if err != nil {
 			return nil, errors.New("failed to get model statistics")
@@ -256,6 +261,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 			filters.Stream,
 			filters.BillingType,
 			filters.SessionID,
+			filters.Platform,
 		)
 		if err != nil {
 			return nil, errors.New("failed to get group statistics")
@@ -280,7 +286,13 @@ func parseDashboardSnapshotV2Filters(c *gin.Context) (*dashboardSnapshotV2Filter
 		return nil, err
 	}
 
+	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
+	if err != nil {
+		return nil, err
+	}
+
 	filters := &dashboardSnapshotV2Filters{
+		Platform:  platform,
 		Model:     strings.TrimSpace(c.Query("model")),
 		SessionID: sessionID,
 	}
@@ -342,6 +354,6 @@ func parseDashboardSnapshotV2Filters(c *gin.Context) (*dashboardSnapshotV2Filter
 }
 
 func (f *dashboardSnapshotV2Filters) hasAny() bool {
-	return f != nil && (f.UserID > 0 || f.APIKeyID > 0 || f.AccountID > 0 || f.GroupID > 0 ||
+	return f != nil && (f.UserID > 0 || f.APIKeyID > 0 || f.AccountID > 0 || f.GroupID > 0 || f.Platform != "" ||
 		f.Model != "" || f.SessionID != "" || f.RequestType != nil || f.Stream != nil || f.BillingType != nil)
 }

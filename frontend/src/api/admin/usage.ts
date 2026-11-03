@@ -4,7 +4,7 @@
  */
 
 import { apiClient } from '../client'
-import type { AdminUsageLog, UsageQueryParams, PaginatedResponse, UsageRequestType } from '@/types'
+import type { AccountPlatform, AdminUsageLog, UsageQueryParams, PaginatedResponse, UsageRequestType } from '@/types'
 import type { EndpointStat } from '@/types'
 
 // ==================== Types ====================
@@ -88,6 +88,8 @@ export interface AdminUsageQueryParams extends UsageQueryParams {
   /** Only rows with a Claude entrypoint warning (client_entrypoint IS NOT NULL). */
   entrypoint_flagged?: boolean
   user_id?: number
+  /** Platform of the serving account (accounts.platform); null/undefined = all. */
+  platform?: AccountPlatform | null
   exact_total?: boolean
   account_switch?: boolean
 }
@@ -120,6 +122,8 @@ export async function getStats(params: {
   api_key_id?: number
   account_id?: number
   group_id?: number
+  /** Platform of the serving account (accounts.platform); null/undefined = all. */
+  platform?: AccountPlatform | null
   model?: string
   session_id?: string
   request_type?: UsageRequestType

@@ -29,7 +29,7 @@ func (r *dashboardUsageRepoCacheProbe) GetUsageTrendWithFilters(
 	requestType *int16,
 	stream *bool,
 	billingType *int8,
-	sessionID string,
+	sessionID, platform string,
 ) ([]usagestats.TrendDataPoint, error) {
 	r.trendCalls.Add(1)
 	return []usagestats.TrendDataPoint{{

@@ -231,7 +231,7 @@ func (h *DashboardHandler) GetRealtimeMetrics(c *gin.Context) {
 
 // GetUsageTrend handles getting usage trend data
 // GET /api/v1/admin/dashboard/trend
-// Query params: start_time/end_time (RFC3339) or start_date/end_date (YYYY-MM-DD), granularity (day/hour), user_id, api_key_id, model, account_id, group_id, request_type, stream, billing_type
+// Query params: start_time/end_time (RFC3339) or start_date/end_date (YYYY-MM-DD), granularity (day/hour), user_id, api_key_id, model, account_id, group_id, platform, request_type, stream, billing_type
 func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 	startTime, endTime, err := parseTimeRange(c)
 	if err != nil {
@@ -247,6 +247,11 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 	var stream *bool
 	var billingType *int8
 	sessionID, err := normalizeSessionIDFilter(c.Query("session_id"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -301,7 +306,7 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 		}
 	}
 
-	trend, hit, err := h.getUsageTrendCached(c.Request.Context(), startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType, sessionID)
+	trend, hit, err := h.getUsageTrendCached(c.Request.Context(), startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType, sessionID, platform)
 	if err != nil {
 		response.Error(c, 500, "Failed to get usage trend")
 		return
@@ -318,7 +323,7 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 
 // GetModelStats handles getting model usage statistics
 // GET /api/v1/admin/dashboard/models
-// Query params: start_time/end_time (RFC3339) or start_date/end_date (YYYY-MM-DD), user_id, api_key_id, account_id, group_id, request_type, stream, billing_type
+// Query params: start_time/end_time (RFC3339) or start_date/end_date (YYYY-MM-DD), user_id, api_key_id, account_id, group_id, platform, request_type, stream, billing_type
 func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 	startTime, endTime, err := parseTimeRange(c)
 	if err != nil {
@@ -333,6 +338,11 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 	var stream *bool
 	var billingType *int8
 	sessionID, err := normalizeSessionIDFilter(c.Query("session_id"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -391,7 +401,7 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 		}
 	}
 
-	stats, hit, err := h.getModelStatsCached(c.Request.Context(), startTime, endTime, userID, apiKeyID, accountID, groupID, modelSource, requestType, stream, billingType, sessionID)
+	stats, hit, err := h.getModelStatsCached(c.Request.Context(), startTime, endTime, userID, apiKeyID, accountID, groupID, modelSource, requestType, stream, billingType, sessionID, platform)
 	if err != nil {
 		response.Error(c, 500, "Failed to get model statistics")
 		return
@@ -407,7 +417,7 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 
 // GetGroupStats handles getting group usage statistics
 // GET /api/v1/admin/dashboard/groups
-// Query params: start_time/end_time (RFC3339) or start_date/end_date (YYYY-MM-DD), user_id, api_key_id, account_id, group_id, request_type, stream, billing_type
+// Query params: start_time/end_time (RFC3339) or start_date/end_date (YYYY-MM-DD), user_id, api_key_id, account_id, group_id, platform, request_type, stream, billing_type
 func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 	startTime, endTime, err := parseTimeRange(c)
 	if err != nil {
@@ -420,6 +430,11 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 	var stream *bool
 	var billingType *int8
 	sessionID, err := normalizeSessionIDFilter(c.Query("session_id"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -471,7 +486,7 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 		}
 	}
 
-	stats, hit, err := h.getGroupStatsCached(c.Request.Context(), startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID)
+	stats, hit, err := h.getGroupStatsCached(c.Request.Context(), startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID, platform)
 	if err != nil {
 		response.Error(c, 500, "Failed to get group statistics")
 		return
@@ -698,7 +713,7 @@ func (h *DashboardHandler) GetBatchAPIKeysUsage(c *gin.Context) {
 
 // GetUserBreakdown handles getting per-user usage breakdown within a dimension.
 // GET /api/v1/admin/dashboard/user-breakdown
-// Query params: start_time/end_time (RFC3339) or start_date/end_date, group_id, model, endpoint, endpoint_type, limit
+// Query params: start_time/end_time (RFC3339) or start_date/end_date, group_id, platform, model, endpoint, endpoint_type, limit
 func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
 	startTime, endTime, err := parseTimeRange(c)
 	if err != nil {
@@ -724,6 +739,11 @@ func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
 			}
 			*field.value = id
 		}
+	}
+	dim.Platform, err = normalizeUsagePlatformFilter(c.Query("platform"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
 	}
 	dim.Model = c.Query("model")
 	dim.ModelFilter = c.Query("model_filter")

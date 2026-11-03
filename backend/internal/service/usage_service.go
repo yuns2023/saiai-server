@@ -347,7 +347,7 @@ func (s *UsageService) GetUserUsageTrendByUserID(ctx context.Context, userID int
 
 // GetAPIKeyUsageTrend returns usage trend data filtered by API Key.
 func (s *UsageService) GetAPIKeyUsageTrend(ctx context.Context, apiKeyID int64, startTime, endTime time.Time, granularity string) ([]usagestats.TrendDataPoint, error) {
-	trend, err := s.usageRepo.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, 0, apiKeyID, 0, 0, "", nil, nil, nil, "")
+	trend, err := s.usageRepo.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, 0, apiKeyID, 0, 0, "", nil, nil, nil, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("get api key usage trend: %w", err)
 	}
@@ -365,7 +365,7 @@ func (s *UsageService) GetUserModelStats(ctx context.Context, userID int64, star
 
 // GetAPIKeyModelStats returns per-model usage stats for a specific API Key.
 func (s *UsageService) GetAPIKeyModelStats(ctx context.Context, apiKeyID int64, startTime, endTime time.Time) ([]usagestats.ModelStat, error) {
-	stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, startTime, endTime, 0, apiKeyID, 0, 0, nil, nil, nil, "")
+	stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, startTime, endTime, 0, apiKeyID, 0, 0, nil, nil, nil, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("get api key model stats: %w", err)
 	}
@@ -395,7 +395,7 @@ func (s *UsageService) GetUserGroupUsageTrend(ctx context.Context, userID, apiKe
 	if userID <= 0 {
 		return nil, errUserScopeRequired
 	}
-	trend, err := s.usageRepo.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, 0, groupID, "", nil, nil, nil, "")
+	trend, err := s.usageRepo.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, 0, groupID, "", nil, nil, nil, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("get user group usage trend: %w", err)
 	}
@@ -408,7 +408,7 @@ func (s *UsageService) GetUserGroupModelStats(ctx context.Context, userID, apiKe
 	if userID <= 0 {
 		return nil, errUserScopeRequired
 	}
-	stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, 0, groupID, nil, nil, nil, "")
+	stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, 0, groupID, nil, nil, nil, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("get user group model stats: %w", err)
 	}
@@ -421,7 +421,7 @@ func (s *UsageService) ListUserUsageGroups(ctx context.Context, userID int64, st
 	if userID <= 0 {
 		return nil, errUserScopeRequired
 	}
-	stats, err := s.usageRepo.GetGroupStatsWithFilters(ctx, startTime, endTime, userID, 0, 0, 0, nil, nil, nil, "")
+	stats, err := s.usageRepo.GetGroupStatsWithFilters(ctx, startTime, endTime, userID, 0, 0, 0, nil, nil, nil, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("list user usage groups: %w", err)
 	}

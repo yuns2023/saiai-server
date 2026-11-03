@@ -293,7 +293,7 @@ func TestUsageLogRepositoryGetUsageTrendWithFiltersRequestTypePriority(t *testin
 		WithArgs(start, end, requestType).
 		WillReturnRows(sqlmock.NewRows([]string{"date", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens", "cost", "actual_cost"}))
 
-	trend, err := repo.GetUsageTrendWithFilters(context.Background(), start, end, "day", 0, 0, 0, 0, "", &requestType, &stream, nil, "")
+	trend, err := repo.GetUsageTrendWithFilters(context.Background(), start, end, "day", 0, 0, 0, 0, "", &requestType, &stream, nil, "", "")
 	require.NoError(t, err)
 	require.Empty(t, trend)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -312,7 +312,7 @@ func TestUsageLogRepositoryGetModelStatsWithFiltersRequestTypePriority(t *testin
 		WithArgs(start, end, requestType).
 		WillReturnRows(sqlmock.NewRows([]string{"model", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens", "cost", "actual_cost"}))
 
-	stats, err := repo.GetModelStatsWithFilters(context.Background(), start, end, 0, 0, 0, 0, &requestType, &stream, nil, "")
+	stats, err := repo.GetModelStatsWithFilters(context.Background(), start, end, 0, 0, 0, 0, &requestType, &stream, nil, "", "")
 	require.NoError(t, err)
 	require.Empty(t, stats)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -710,7 +710,7 @@ func TestUsageTrendQuarterHourPreservesFilters(t *testing.T) {
 	mock.ExpectQuery(expression+`(?s).*user_id = \$3 AND api_key_id = \$4 AND account_id = \$5 AND group_id = \$6 AND model = \$7`).
 		WithArgs(start, end, int64(1), int64(2), int64(3), int64(4), "model").
 		WillReturnRows(sqlmock.NewRows(columns).AddRow("2026-10-18 00:15", 2, 10, 5, 10, 80, 105, 1, 1))
-	rows, err := repo.GetUsageTrendWithFilters(context.Background(), start, end, "15m", 1, 2, 3, 4, "model", nil, nil, nil, "")
+	rows, err := repo.GetUsageTrendWithFilters(context.Background(), start, end, "15m", 1, 2, 3, 4, "model", nil, nil, nil, "", "")
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "2026-10-18 00:15", rows[0].Date)
@@ -719,7 +719,7 @@ func TestUsageTrendQuarterHourPreservesFilters(t *testing.T) {
 	_, err = repo.GetUserUsageTrendByUserID(context.Background(), 1, start, end, "15m")
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
-	require.False(t, shouldUsePreaggregatedTrend("15m", 0, 0, 0, 0, "", nil, nil, nil, ""))
+	require.False(t, shouldUsePreaggregatedTrend("15m", 0, 0, 0, 0, "", nil, nil, nil, "", ""))
 	require.Equal(t, "TO_CHAR(created_at, 'YYYY-MM-DD')", trendDateExpression("'; DROP TABLE users; --", "created_at"))
 }
 

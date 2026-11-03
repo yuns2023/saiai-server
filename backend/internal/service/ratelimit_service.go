@@ -485,7 +485,7 @@ func (s *RateLimitService) PreCheckUsage(ctx context.Context, account *Account, 
 			start := geminiDailyWindowStart(now)
 			totals, ok := s.getGeminiUsageTotals(account.ID, start, now)
 			if !ok {
-				stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, start, now, 0, 0, account.ID, 0, nil, nil, nil, "")
+				stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, start, now, 0, 0, account.ID, 0, nil, nil, nil, "", "")
 				if err != nil {
 					return true, err
 				}
@@ -532,7 +532,7 @@ func (s *RateLimitService) PreCheckUsage(ctx context.Context, account *Account, 
 
 		if limit > 0 {
 			start := now.Truncate(time.Minute)
-			stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, start, now, 0, 0, account.ID, 0, nil, nil, nil, "")
+			stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, start, now, 0, 0, account.ID, 0, nil, nil, nil, "", "")
 			if err != nil {
 				return true, err
 			}
@@ -723,7 +723,7 @@ func (s *RateLimitService) getGeminiUsageTotalsBatch(ctx context.Context, accoun
 	}
 
 	for _, accountID := range ids {
-		stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, start, end, 0, 0, accountID, 0, nil, nil, nil, "")
+		stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, start, end, 0, 0, accountID, 0, nil, nil, nil, "", "")
 		if err != nil {
 			return nil, err
 		}

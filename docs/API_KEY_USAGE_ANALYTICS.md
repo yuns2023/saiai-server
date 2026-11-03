@@ -9,6 +9,22 @@ user discounts. The admin UI starts with a $2 threshold that can be changed
 or turned off. The filter applies to the record list and its CSV export;
 summary cards and charts continue to cover the selected time range.
 
+## Admin provider (platform) filter
+
+The admin usage endpoints `GET /api/v1/admin/usage`, `/admin/usage/stats` and
+the dashboard endpoints `/admin/dashboard/trend`, `/models`, `/groups`,
+`/snapshot-v2` and `/user-breakdown` accept an optional `platform`
+(`anthropic`, `openai`, `gemini`, `antigravity` or `sora`). It selects records
+by the platform of the upstream account that served them
+(`accounts.platform`), including soft-deleted accounts so history stays
+filterable. An empty value disables the filter; any other value returns 400.
+The pre-aggregated trend buckets have no account dimension, so a platform
+filter always reads raw `usage_logs`. `snapshot-v2` rejects `platform` together
+with `exclude_hosted`. The admin usage records page applies it to the list,
+summary cards, every chart and drill-down and the CSV export, and accepts a
+`?platform=` deep link. Usage cleanup tasks do not support it, so the cleanup
+dialog does not offer it. The user-facing usage page has no platform filter.
+
 The user dashboard treats an API Key as a general reporting dimension. It does
 not create or expose employee, member, or cost-center entities. A customer can
 choose any naming convention for Key names.

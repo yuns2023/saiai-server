@@ -1600,17 +1600,17 @@ func (s *UsageLogRepoSuite) TestGetUsageTrendWithFilters() {
 	endTime := base.Add(48 * time.Hour)
 
 	// Test with user filter
-	trend, err := s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "day", user.ID, 0, 0, 0, "", nil, nil, nil, "")
+	trend, err := s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "day", user.ID, 0, 0, 0, "", nil, nil, nil, "", "")
 	s.Require().NoError(err, "GetUsageTrendWithFilters user filter")
 	s.Require().Len(trend, 2)
 
 	// Test with apiKey filter
-	trend, err = s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "day", 0, apiKey.ID, 0, 0, "", nil, nil, nil, "")
+	trend, err = s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "day", 0, apiKey.ID, 0, 0, "", nil, nil, nil, "", "")
 	s.Require().NoError(err, "GetUsageTrendWithFilters apiKey filter")
 	s.Require().Len(trend, 2)
 
 	// Test with both filters
-	trend, err = s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "day", user.ID, apiKey.ID, 0, 0, "", nil, nil, nil, "")
+	trend, err = s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "day", user.ID, apiKey.ID, 0, 0, "", nil, nil, nil, "", "")
 	s.Require().NoError(err, "GetUsageTrendWithFilters both filters")
 	s.Require().Len(trend, 2)
 }
@@ -1627,7 +1627,7 @@ func (s *UsageLogRepoSuite) TestGetUsageTrendWithFilters_HourlyGranularity() {
 	startTime := base.Add(-1 * time.Hour)
 	endTime := base.Add(3 * time.Hour)
 
-	trend, err := s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "hour", user.ID, 0, 0, 0, "", nil, nil, nil, "")
+	trend, err := s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "hour", user.ID, 0, 0, 0, "", nil, nil, nil, "", "")
 	s.Require().NoError(err, "GetUsageTrendWithFilters hourly")
 	s.Require().Len(trend, 2)
 }
@@ -1673,17 +1673,17 @@ func (s *UsageLogRepoSuite) TestGetModelStatsWithFilters() {
 	endTime := base.Add(2 * time.Hour)
 
 	// Test with user filter
-	stats, err := s.repo.GetModelStatsWithFilters(s.ctx, startTime, endTime, user.ID, 0, 0, 0, nil, nil, nil, "")
+	stats, err := s.repo.GetModelStatsWithFilters(s.ctx, startTime, endTime, user.ID, 0, 0, 0, nil, nil, nil, "", "")
 	s.Require().NoError(err, "GetModelStatsWithFilters user filter")
 	s.Require().Len(stats, 2)
 
 	// Test with apiKey filter
-	stats, err = s.repo.GetModelStatsWithFilters(s.ctx, startTime, endTime, 0, apiKey.ID, 0, 0, nil, nil, nil, "")
+	stats, err = s.repo.GetModelStatsWithFilters(s.ctx, startTime, endTime, 0, apiKey.ID, 0, 0, nil, nil, nil, "", "")
 	s.Require().NoError(err, "GetModelStatsWithFilters apiKey filter")
 	s.Require().Len(stats, 2)
 
 	// Test with account filter
-	stats, err = s.repo.GetModelStatsWithFilters(s.ctx, startTime, endTime, 0, 0, account.ID, 0, nil, nil, nil, "")
+	stats, err = s.repo.GetModelStatsWithFilters(s.ctx, startTime, endTime, 0, 0, account.ID, 0, nil, nil, nil, "", "")
 	s.Require().NoError(err, "GetModelStatsWithFilters account filter")
 	s.Require().Len(stats, 2)
 }
@@ -1966,7 +1966,7 @@ func (s *UsageLogRepoSuite) TestDashboardHosted_BucketsStayInclusiveAndPlatformR
 
 	// Admin usage page: buckets as-is, no double counting.
 	for _, g := range []string{"day", "hour"} {
-		trend, err := s.repo.GetUsageTrendWithFilters(s.ctx, dayStart, dayEnd, g, 0, 0, 0, 0, "", nil, nil, nil, "")
+		trend, err := s.repo.GetUsageTrendWithFilters(s.ctx, dayStart, dayEnd, g, 0, 0, 0, 0, "", nil, nil, nil, "", "")
 		s.Require().NoError(err)
 		var req, tok int64
 		for _, p := range trend {
@@ -1981,7 +1981,7 @@ func (s *UsageLogRepoSuite) TestDashboardHosted_BucketsStayInclusiveAndPlatformR
 	for _, g := range []string{"day", "hour"} {
 		platform, err := s.repo.GetPlatformUsageTrend(s.ctx, dayStart, dayEnd, g)
 		s.Require().NoError(err)
-		want, err := s.repo.queryUsageTrendFromLogs(s.ctx, dayStart, dayEnd, g, 0, 0, 0, 0, "", nil, nil, nil, "", hostedScopeExclude)
+		want, err := s.repo.queryUsageTrendFromLogs(s.ctx, dayStart, dayEnd, g, 0, 0, 0, 0, "", nil, nil, nil, "", "", hostedScopeExclude)
 		s.Require().NoError(err)
 		wantByDate := map[string]TrendDataPoint{}
 		for _, p := range want {

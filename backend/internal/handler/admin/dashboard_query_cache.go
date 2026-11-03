@@ -25,6 +25,7 @@ type dashboardTrendCacheKey struct {
 	APIKeyID    int64  `json:"api_key_id"`
 	AccountID   int64  `json:"account_id"`
 	GroupID     int64  `json:"group_id"`
+	Platform    string `json:"platform,omitempty"`
 	Model       string `json:"model"`
 	SessionID   string `json:"session_id"`
 	RequestType *int16 `json:"request_type"`
@@ -42,6 +43,7 @@ type dashboardModelGroupCacheKey struct {
 	APIKeyID    int64  `json:"api_key_id"`
 	AccountID   int64  `json:"account_id"`
 	GroupID     int64  `json:"group_id"`
+	Platform    string `json:"platform,omitempty"`
 	SessionID   string `json:"session_id"`
 	ModelSource string `json:"model_source,omitempty"`
 	RequestType *int16 `json:"request_type"`
@@ -91,7 +93,7 @@ func (h *DashboardHandler) getUsageTrendCached(
 	requestType *int16,
 	stream *bool,
 	billingType *int8,
-	sessionID string,
+	sessionID, platform string,
 ) ([]usagestats.TrendDataPoint, bool, error) {
 	key := mustMarshalDashboardCacheKey(dashboardTrendCacheKey{
 		StartTime:   startTime.UTC().Format(time.RFC3339),
@@ -101,6 +103,7 @@ func (h *DashboardHandler) getUsageTrendCached(
 		APIKeyID:    apiKeyID,
 		AccountID:   accountID,
 		GroupID:     groupID,
+		Platform:    platform,
 		Model:       model,
 		SessionID:   sessionID,
 		RequestType: requestType,
@@ -108,7 +111,7 @@ func (h *DashboardHandler) getUsageTrendCached(
 		BillingType: billingType,
 	})
 	entry, hit, err := dashboardTrendCache.GetOrLoad(key, func() (any, error) {
-		return h.dashboardService.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType, sessionID)
+		return h.dashboardService.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType, sessionID, platform)
 	})
 	if err != nil {
 		return nil, hit, err
@@ -125,7 +128,7 @@ func (h *DashboardHandler) getModelStatsCached(
 	requestType *int16,
 	stream *bool,
 	billingType *int8,
-	sessionID string,
+	sessionID, platform string,
 ) ([]usagestats.ModelStat, bool, error) {
 	key := mustMarshalDashboardCacheKey(dashboardModelGroupCacheKey{
 		StartTime:   startTime.UTC().Format(time.RFC3339),
@@ -134,6 +137,7 @@ func (h *DashboardHandler) getModelStatsCached(
 		APIKeyID:    apiKeyID,
 		AccountID:   accountID,
 		GroupID:     groupID,
+		Platform:    platform,
 		SessionID:   sessionID,
 		ModelSource: usagestats.NormalizeModelSource(modelSource),
 		RequestType: requestType,
@@ -141,7 +145,7 @@ func (h *DashboardHandler) getModelStatsCached(
 		BillingType: billingType,
 	})
 	entry, hit, err := dashboardModelStatsCache.GetOrLoad(key, func() (any, error) {
-		return h.dashboardService.GetModelStatsWithFiltersBySource(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, modelSource, sessionID)
+		return h.dashboardService.GetModelStatsWithFiltersBySource(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, modelSource, sessionID, platform)
 	})
 	if err != nil {
 		return nil, hit, err
@@ -157,7 +161,7 @@ func (h *DashboardHandler) getGroupStatsCached(
 	requestType *int16,
 	stream *bool,
 	billingType *int8,
-	sessionID string,
+	sessionID, platform string,
 ) ([]usagestats.GroupStat, bool, error) {
 	key := mustMarshalDashboardCacheKey(dashboardModelGroupCacheKey{
 		StartTime:   startTime.UTC().Format(time.RFC3339),
@@ -166,13 +170,14 @@ func (h *DashboardHandler) getGroupStatsCached(
 		APIKeyID:    apiKeyID,
 		AccountID:   accountID,
 		GroupID:     groupID,
+		Platform:    platform,
 		SessionID:   sessionID,
 		RequestType: requestType,
 		Stream:      stream,
 		BillingType: billingType,
 	})
 	entry, hit, err := dashboardGroupStatsCache.GetOrLoad(key, func() (any, error) {
-		return h.dashboardService.GetGroupStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID)
+		return h.dashboardService.GetGroupStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, sessionID, platform)
 	})
 	if err != nil {
 		return nil, hit, err

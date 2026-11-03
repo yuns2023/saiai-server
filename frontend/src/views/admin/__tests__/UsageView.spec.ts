@@ -4,7 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import UsageView from '../UsageView.vue'
 import { presetTimeRange } from '@/utils/dateTimeRange'
 
-const { list, getStats, getSnapshotV2, getModelStats, getById, routeQuery } = vi.hoisted(() => {
+const { list, getStats, getSnapshotV2, getModelStats, getById, exportList, saveAs, routeQuery } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -18,6 +18,8 @@ const { list, getStats, getSnapshotV2, getModelStats, getById, routeQuery } = vi
     getSnapshotV2: vi.fn(),
     getModelStats: vi.fn(),
     getById: vi.fn(),
+    exportList: vi.fn(),
+    saveAs: vi.fn(),
   }
 })
 
@@ -46,9 +48,11 @@ vi.mock('@/api/admin', () => ({
 
 vi.mock('@/api/admin/usage', () => ({
   adminUsageAPI: {
-    list: vi.fn(),
+    list: exportList,
   },
 }))
+
+vi.mock('file-saver', () => ({ saveAs }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
@@ -87,9 +91,18 @@ const UsageFiltersStub = {
   emits: ['update:modelValue', 'change'],
   template: '<div><button data-test="filter-user" @click="$emit(\'update:modelValue\', { ...modelValue, user_id: 42, model: \'claude-opus\' }); $emit(\'change\')">filter user</button><slot name="after-reset" /></div>'
 }
+const PlatformFiltersStub = {
+  props: ['modelValue'],
+  emits: ['update:modelValue', 'change', 'reset', 'export'],
+  template: `<div>
+    <button data-test="filter-platform" @click="$emit('update:modelValue', { ...modelValue, platform: 'openai', group_id: 7 }); $emit('change')">platform</button>
+    <button data-test="filter-reset" @click="$emit('reset')">reset</button>
+    <button data-test="filter-export" @click="$emit('export')">export</button>
+  </div>`
+}
 const ModelDistributionChartStub = {
   props: ['metric', 'breakdownFilters'],
-  emits: ['update:metric'],
+  emits: ['update:metric', 'update:source'],
   template: `
     <div data-test="model-chart">
       <span class="metric">{{ metric }}</span>
@@ -442,5 +455,71 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(persisted).not.toContain('duration')
     expect(persisted.includes('latency')).toBe(visible)
     vi.mocked(localStorage.getItem).mockImplementation(() => null)
+  })
+
+  it('passes the platform filter to logs, totals, every chart, breakdowns and the CSV export', async () => {
+    exportList.mockReset()
+    exportList.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    const wrapper = mount(UsageView, { global: { stubs: {
+      AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: PlatformFiltersStub, UsageTable: true,
+      InputRiskAlerts: true, UsageExportProgress: true, UsageCleanupDialog: true,
+      UserBalanceHistoryModal: true, Pagination: true, Select: true, DateTimeRangePicker: true,
+      Icon: true, TokenUsageTrend: true, CacheUsageTrend: true,
+      ModelDistributionChart: ModelDistributionChartStub, GroupDistributionChart: GroupDistributionChartStub,
+      EndpointDistributionChart: EndpointDistributionChartStub,
+    } } })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    for (const request of [list, getStats, getModelStats, getSnapshotV2]) {
+      expect(request.mock.lastCall![0].platform).toBeUndefined()
+    }
+
+    await wrapper.find('[data-test="filter-platform"]').trigger('click')
+    await flushPromises()
+    const expected = expect.objectContaining({ platform: 'openai', group_id: 7 })
+    expect(list).toHaveBeenLastCalledWith(expected, expect.anything())
+    expect(getStats).toHaveBeenLastCalledWith(expected)
+    expect(getModelStats).toHaveBeenLastCalledWith(expected)
+    expect(getSnapshotV2).toHaveBeenLastCalledWith(expected)
+    for (const chart of [ModelDistributionChartStub, GroupDistributionChartStub, EndpointDistributionChartStub]) {
+      expect(wrapper.findComponent(chart).props('breakdownFilters')).toEqual(expected)
+    }
+
+    // Switching the model source refetches with the same platform.
+    wrapper.findComponent(ModelDistributionChartStub).vm.$emit('update:source', 'upstream')
+    await flushPromises()
+    expect(getModelStats).toHaveBeenLastCalledWith(expect.objectContaining({ platform: 'openai', model_source: 'upstream' }))
+
+    await wrapper.find('[data-test="filter-export"]').trigger('click')
+    await flushPromises()
+    expect(exportList).toHaveBeenCalledWith(expect.objectContaining({ platform: 'openai', exact_total: true }), expect.anything())
+
+    await wrapper.find('[data-test="filter-reset"]').trigger('click')
+    await flushPromises()
+    for (const request of [list, getStats, getModelStats, getSnapshotV2]) {
+      expect(request.mock.lastCall![0].platform).toBeUndefined()
+    }
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['openai', 'openai'],
+    [' Anthropic ', 'anthropic'],
+    ['claude', undefined],
+  ])('applies the platform deep link %j as %j', async (query, platform) => {
+    Object.assign(routeQuery, { platform: query })
+    const wrapper = mount(UsageView, { global: { stubs: {
+      AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: true, UsageTable: true,
+      InputRiskAlerts: true, UsageExportProgress: true, UsageCleanupDialog: true,
+      UserBalanceHistoryModal: true, Pagination: true, Select: true, DateTimeRangePicker: true,
+      Icon: true, ModelDistributionChart: true, GroupDistributionChart: true,
+      EndpointDistributionChart: true, TokenUsageTrend: true, CacheUsageTrend: true,
+    } } })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    for (const request of [list, getStats, getModelStats, getSnapshotV2]) {
+      expect(request.mock.lastCall![0].platform).toBe(platform)
+    }
+    wrapper.unmount()
   })
 })

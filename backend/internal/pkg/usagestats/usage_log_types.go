@@ -194,6 +194,7 @@ type UserBreakdownDimension struct {
 	UserID       int64
 	APIKeyID     int64
 	AccountID    int64
+	Platform     string // serving account platform (accounts.platform); empty disables
 	Model        string // filter by model name (non-empty to enable)
 	ModelFilter  string // requested model filter from the usage page
 	ModelType    string // "requested", "upstream", or "mapping"
@@ -261,6 +262,7 @@ type UsageLogFilters struct {
 	APIKeyID          int64
 	AccountID         int64
 	GroupID           int64
+	Platform          string // serving account platform (accounts.platform, soft-deleted included); empty disables
 	Model             string
 	SessionID         string
 	RequestType       *int16

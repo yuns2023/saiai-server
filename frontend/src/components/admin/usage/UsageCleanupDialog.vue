@@ -8,6 +8,7 @@
         :exporting="false"
         :show-actions="false"
         :show-session-diagnostics="false"
+        :show-platform-filter="false"
         @change="noop"
       />
 
@@ -160,7 +161,10 @@ let pollTimer: number | null = null
 const noop = () => {}
 
 const resetFilters = () => {
-  localFilters.value = { ...props.filters }
+  // Cleanup tasks cannot filter by platform; never carry it into the dialog.
+  const cleanupFilters = { ...props.filters }
+  delete cleanupFilters.platform
+  localFilters.value = cleanupFilters
   localStartDate.value = props.startDate
   localEndDate.value = props.endDate
   localFilters.value.start_date = localStartDate.value

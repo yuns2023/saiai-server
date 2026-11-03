@@ -160,7 +160,7 @@ import ModelDistributionChart from '@/components/charts/ModelDistributionChart.v
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import type { UserBreakdownParams } from '@/api/admin/dashboard'
 import Icon from '@/components/icons/Icon.vue'
-import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
+import type { AccountPlatform, AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -243,6 +243,7 @@ const breakdownFilters = computed<UserBreakdownParams>(() => {
     api_key_id: filters.value.api_key_id,
     account_id: filters.value.account_id,
     group_id: filters.value.group_id,
+    platform: filters.value.platform,
     model_filter: filters.value.model,
     session_id: filters.value.session_id,
     request_type: requestType,
@@ -286,6 +287,12 @@ const getSingleQueryValue = (value: string | null | Array<string | null> | undef
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
+const USAGE_PLATFORMS: readonly AccountPlatform[] = ['anthropic', 'openai', 'gemini', 'antigravity', 'sora']
+const getPlatformQueryValue = (value: string | null | Array<string | null> | undefined): AccountPlatform | undefined => {
+  const raw = getSingleQueryValue(value)?.trim().toLowerCase()
+  return USAGE_PLATFORMS.find((platform) => platform === raw)
+}
+
 const getNumericQueryValue = (value: string | null | Array<string | null> | undefined): number | undefined => {
   const raw = getSingleQueryValue(value)
   if (!raw) return undefined
@@ -301,6 +308,7 @@ const applyRouteQueryFilters = () => {
   const queryUserId = getNumericQueryValue(route.query.user_id)
   const queryAPIKeyId = getNumericQueryValue(route.query.api_key_id)
   const querySessionId = getSingleQueryValue(route.query.session_id)
+  const queryPlatform = getPlatformQueryValue(route.query.platform)
 
   if (queryStartDate) {
     startDate.value = queryStartDate
@@ -332,6 +340,7 @@ const applyRouteQueryFilters = () => {
     moderation_flagged: getSingleQueryValue(route.query.moderation_flagged) === 'true' || undefined,
     entrypoint_flagged: getSingleQueryValue(route.query.entrypoint_flagged) === 'true' || undefined,
     session_id: querySessionId,
+    platform: queryPlatform,
     ...activeRangeParams()
   }
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
@@ -419,6 +428,7 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
       api_key_id: filters.value.api_key_id,
       account_id: filters.value.account_id,
       group_id: filters.value.group_id,
+      platform: filters.value.platform,
       session_id: filters.value.session_id,
       request_type: requestType,
       stream: legacyStream === null ? undefined : legacyStream,
@@ -472,6 +482,7 @@ const loadChartData = async () => {
       api_key_id: filters.value.api_key_id,
       account_id: filters.value.account_id,
       group_id: filters.value.group_id,
+      platform: filters.value.platform,
       session_id: filters.value.session_id,
       request_type: requestType,
       stream: legacyStream === null ? undefined : legacyStream,
