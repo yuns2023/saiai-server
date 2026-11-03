@@ -11,16 +11,16 @@ vi.mock('vue-i18n', async () => {
 const mixed = { requests: 1482, tokens: 185_100_000, cost: 0.72, standard_cost: 106.46, user_cost: 0.36 }
 
 describe('AccountTodayStatsCell', () => {
-  it('shows standard usage with the hosted share for mixed accounts', () => {
+  it('shows only account billed plus a separate hosted reference for mixed accounts', () => {
     const wrapper = mount(AccountTodayStatsCell, {
       props: { stats: { ...mixed, hosted_requests: 1474, hosted_cost: 105.74 } }
     })
-    const standard = wrapper.find('[data-testid="today-stats-standard"]')
-    expect(standard.text()).toContain('admin.accounts.stats.standardUsage')
-    expect(standard.attributes('aria-label')).toContain('$106.46')
-    expect(wrapper.text()).toContain('admin.accounts.stats.standardUsage: $106.46')
-    expect(wrapper.find('[data-testid="today-stats-hosted"]').text()).toBe('└ admin.accounts.stats.hostedIncluded ≈$105.74')
-    // Account and user billed amounts keep their own basis
+    // Standard usage equals account billed at 1x, so it is no longer shown
+    expect(wrapper.text()).not.toContain('standardUsage')
+    expect(wrapper.text()).not.toContain('$106.46')
+    const hosted = wrapper.find('[data-testid="today-stats-hosted"]')
+    expect(hosted.text()).toBe('└ admin.accounts.stats.hostedReference ≈$105.74')
+    expect(hosted.attributes('title')).toBe('admin.accounts.stats.hostedReferenceHint')
     expect(wrapper.text()).toContain('usage.accountBilled:$0.72')
     expect(wrapper.text()).toContain('usage.userBilled:$0.36')
   })
@@ -37,7 +37,7 @@ describe('AccountTodayStatsCell', () => {
     ['an older response without hosted fields', {}]
   ])('omits the hosted share for %s', (_, extra) => {
     const wrapper = mount(AccountTodayStatsCell, { props: { stats: { ...mixed, ...extra } } })
-    expect(wrapper.find('[data-testid="today-stats-standard"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('usage.accountBilled:$0.72')
     expect(wrapper.find('[data-testid="today-stats-hosted"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('≈')
   })

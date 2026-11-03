@@ -291,7 +291,7 @@ type UsageStats struct {
 	TotalSubscriptionCost    float64        `json:"total_subscription_cost"`
 	TotalUnclassifiedCost    float64        `json:"total_unclassified_cost"`
 	TotalAccountCost         *float64       `json:"total_account_cost,omitempty"`
-	TotalMeteredCost         *float64       `json:"total_metered_cost,omitempty"` // hosted SUM(metered_cost); user/API-key scopes only, nil without hosted rows
+	TotalMeteredCost         *float64       `json:"total_metered_cost,omitempty"` // hosted SUM(metered_cost); nil without hosted rows
 	AverageDurationMs        float64        `json:"average_duration_ms"`
 	Endpoints                []EndpointStat `json:"endpoints,omitempty"`
 	UpstreamEndpoints        []EndpointStat `json:"upstream_endpoints,omitempty"`
@@ -367,6 +367,7 @@ type AccountUsageSummary struct {
 	TotalCost         float64 `json:"total_cost"`      // 账号口径费用
 	TotalUserCost     float64 `json:"total_user_cost"` // 用户口径费用
 	TotalStandardCost float64 `json:"total_standard_cost"`
+	TotalHostedCost   float64 `json:"total_hosted_cost"` // 托管折算用量 SUM(metered_cost)；托管行不计入账号口径费用
 	TotalRequests     int64   `json:"total_requests"`
 	TotalTokens       int64   `json:"total_tokens"`
 	AvgDailyCost      float64 `json:"avg_daily_cost"` // 账号口径日均

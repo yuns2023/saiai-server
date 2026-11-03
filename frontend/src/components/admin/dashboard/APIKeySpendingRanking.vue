@@ -86,8 +86,8 @@
               <th scope="col" class="pb-2 pr-3 text-right" :title="t('usage.userBilled')">{{ t('admin.dashboard.rankingActualShort') }}</th>
               <th scope="col" class="pb-2 pr-3 text-right">{{ t('admin.dashboard.requests') }}</th>
               <th scope="col" class="pb-2 pr-3 text-right">Token</th>
-              <th scope="col" class="whitespace-nowrap pb-2 pr-3 text-right" :title="t('usage.inputCacheReadRateHint')">
-                {{ t('usage.inputCacheReadRate') }}
+              <th scope="col" class="whitespace-nowrap pb-2 pr-3 text-right" :title="t('tokens.cacheReadRateHelp')">
+                {{ t('tokens.cacheReadRate') }}
               </th>
               <th scope="col" class="pb-2 text-right">{{ t('admin.dashboard.spendingRankingUsage') }}</th>
             </tr>

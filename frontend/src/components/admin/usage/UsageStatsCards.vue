@@ -15,9 +15,6 @@
       <div>
         <p class="text-xs font-medium text-gray-500">{{ t('tokens.total') }}</p>
         <TokenUsageSummary :data="stats" period="total" />
-        <p class="text-xs text-gray-400" data-testid="input-cache-read-rate" :title="t('usage.inputCacheReadRateHint')">
-          {{ t('usage.inputCacheReadRate') }} {{ inputCacheReadRate === null ? '—' : `${inputCacheReadRate.toFixed(1)}%` }}
-        </p>
       </div>
     </div>
     <div class="card p-4 flex items-center gap-3">
@@ -25,11 +22,15 @@
         <Icon name="dollar" size="md" />
       </div>
       <div class="min-w-0 flex-1">
-        <UsageBillingSummary :stats="stats" :base-cost="stats?.total_cost ?? null">
+        <UsageBillingSummary :stats="stats">
           <template v-if="stats?.total_account_cost != null" #extra>
-            <span>
+            <span :title="t('usage.accountBilledHint')" data-testid="usage-stats-account-cost">
               {{ t('usage.accountBilled') }}
               <span class="font-medium text-gray-700 dark:text-gray-300">${{ stats.total_account_cost.toFixed(4) }}</span>
+            </span>
+            <span v-if="stats.total_metered_cost != null" :title="t('admin.accounts.stats.hostedReferenceHint')" data-testid="usage-stats-hosted-cost">
+              {{ t('admin.accounts.stats.hostedReference') }}
+              <span class="font-medium text-gray-700 dark:text-gray-300">≈${{ stats.total_metered_cost.toFixed(4) }}</span>
             </span>
           </template>
         </UsageBillingSummary>
@@ -47,23 +48,13 @@
 <script setup lang="ts">
 import UsageBillingSummary from '@/components/common/UsageBillingSummary.vue'
 import TokenUsageSummary from '@/components/common/TokenUsageSummary.vue'
-import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import Icon from '@/components/icons/Icon.vue'
 
-const props = defineProps<{ stats: AdminUsageStatsResponse | null }>()
+defineProps<{ stats: AdminUsageStatsResponse | null }>()
 
 const { t } = useI18n()
-
-const inputCacheReadRate = computed(() => {
-  const input = props.stats?.total_input_tokens || 0
-  const cacheWrite = props.stats?.total_cache_creation_tokens || 0
-  const cacheRead = props.stats?.total_cache_read_tokens || 0
-  const totalInput = input + cacheWrite + cacheRead
-  if (totalInput <= 0) return null
-  return (cacheRead / totalInput) * 100
-})
 
 const formatDuration = (ms: number) =>
   ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`

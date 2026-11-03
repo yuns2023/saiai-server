@@ -1706,6 +1706,7 @@ export interface AccountUsageSummary {
   total_cost: number // Account cost (account multiplier)
   total_user_cost: number
   total_standard_cost: number
+  total_hosted_cost?: number // hosted reference usage, not part of total_cost
   total_requests: number
   total_tokens: number
   avg_daily_cost: number // Account cost

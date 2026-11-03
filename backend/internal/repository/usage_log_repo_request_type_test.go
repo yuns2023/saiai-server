@@ -343,7 +343,8 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) 
 			"total_balance_cost", "total_subscription_cost", "total_unclassified_cost",
 			"total_account_cost",
 			"avg_duration_ms",
-		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 0.3, 0.6, 0.1, 1.2, 20.0))
+			"total_metered_cost",
+		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 0.3, 0.6, 0.1, 1.2, 20.0, nil))
 
 	stats, err := repo.GetStatsWithFilters(context.Background(), filters)
 	require.NoError(t, err)
@@ -354,6 +355,10 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) 
 	require.Equal(t, int64(1), stats.TotalCacheCreationTokens)
 	require.Equal(t, int64(3), stats.TotalCacheReadTokens)
 	require.Equal(t, int64(9), stats.TotalTokens)
+	// Account cost is returned without an account filter; no hosted rows → nil.
+	require.NotNil(t, stats.TotalAccountCost)
+	require.Equal(t, 1.2, *stats.TotalAccountCost)
+	require.Nil(t, stats.TotalMeteredCost)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -379,7 +384,8 @@ func TestUsageLogRepositoryGetStatsWithFiltersSessionID(t *testing.T) {
 			"total_balance_cost", "total_subscription_cost", "total_unclassified_cost",
 			"total_account_cost",
 			"avg_duration_ms",
-		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 0.3, 0.6, 0.1, 1.2, 20.0))
+			"total_metered_cost",
+		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 0.3, 0.6, 0.1, 0.9, 20.0, 0.25))
 
 	stats, err := repo.GetStatsWithFilters(context.Background(), filters)
 	require.NoError(t, err)
@@ -390,6 +396,10 @@ func TestUsageLogRepositoryGetStatsWithFiltersSessionID(t *testing.T) {
 	require.Equal(t, int64(1), stats.TotalCacheCreationTokens)
 	require.Equal(t, int64(3), stats.TotalCacheReadTokens)
 	require.Equal(t, int64(9), stats.TotalTokens)
+	require.NotNil(t, stats.TotalAccountCost)
+	require.Equal(t, 0.9, *stats.TotalAccountCost)
+	require.NotNil(t, stats.TotalMeteredCost)
+	require.Equal(t, 0.25, *stats.TotalMeteredCost)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -725,7 +735,7 @@ func TestUsageStatsBillingBreakdownFilters(t *testing.T) {
 			buckets := []float64{0, 0, 0}
 			buckets[billingType] = 2
 			mock.ExpectQuery(query).WithArgs(int64(7), int64(8), int16(billingType), start, end).
-				WillReturnRows(sqlmock.NewRows([]string{"requests", "input", "output", "write", "read", "cache", "base", "total", "balance", "subscription", "unclassified", "account", "duration"}).AddRow(1, 0, 0, 0, 0, 0, 3, 2, buckets[0], buckets[1], buckets[2], 3, 10))
+				WillReturnRows(sqlmock.NewRows([]string{"requests", "input", "output", "write", "read", "cache", "base", "total", "balance", "subscription", "unclassified", "account", "duration", "metered"}).AddRow(1, 0, 0, 0, 0, 0, 3, 2, buckets[0], buckets[1], buckets[2], 3, 10, nil))
 			stats, err := repo.GetStatsWithFilters(context.Background(), usagestats.UsageLogFilters{UserID: 7, APIKeyID: 8, BillingType: &billingType, StartTime: &start, EndTime: &end})
 			require.NoError(t, err)
 			require.Equal(t, buckets[0], stats.TotalBalanceCost)

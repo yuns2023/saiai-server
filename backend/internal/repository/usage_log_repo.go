@@ -3850,13 +3850,15 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			COALESCE(SUM(actual_cost) FILTER (WHERE billing_type = 1), 0) as total_subscription_cost,
 			COALESCE(SUM(actual_cost) FILTER (WHERE billing_type IS NULL OR billing_type NOT IN (0, 1)), 0) as total_unclassified_cost,
 			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as total_account_cost,
-			COALESCE(AVG(duration_ms), 0) as avg_duration_ms
+			COALESCE(AVG(duration_ms), 0) as avg_duration_ms,
+			SUM(metered_cost) as total_metered_cost
 		FROM usage_logs
 		%s
 	`, buildWhere(conditions))
 
 	stats := &UsageStats{}
 	var totalAccountCost float64
+	var meteredCost sql.NullFloat64
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -3875,11 +3877,16 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		&stats.TotalUnclassifiedCost,
 		&totalAccountCost,
 		&stats.AverageDurationMs,
+		&meteredCost,
 	); err != nil {
 		return nil, err
 	}
-	if filters.AccountID > 0 {
-		stats.TotalAccountCost = &totalAccountCost
+	// Admin-only query: account cost is always meaningful here. Hosted rows
+	// carry account_rate_multiplier 0, so their reference usage is reported
+	// separately as total_metered_cost (nil without hosted rows).
+	stats.TotalAccountCost = &totalAccountCost
+	if meteredCost.Valid {
+		stats.TotalMeteredCost = &meteredCost.Float64
 	}
 	stats.TotalTokens = stats.TotalInputTokens + stats.TotalOutputTokens + stats.TotalCacheTokens
 
@@ -4103,7 +4110,8 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
 			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as actual_cost,
-			COALESCE(SUM(actual_cost), 0) as user_cost
+			COALESCE(SUM(actual_cost), 0) as user_cost,
+			COALESCE(SUM(metered_cost), 0) as hosted_cost
 		FROM usage_logs
 		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
 		GROUP BY date
@@ -4124,6 +4132,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 	}()
 
 	history := make([]AccountUsageHistory, 0)
+	var totalHostedCost float64
 	for rows.Next() {
 		var date string
 		var requests int64
@@ -4131,9 +4140,11 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		var cost float64
 		var actualCost float64
 		var userCost float64
-		if err = rows.Scan(&date, &requests, &tokens, &cost, &actualCost, &userCost); err != nil {
+		var hostedCost float64
+		if err = rows.Scan(&date, &requests, &tokens, &cost, &actualCost, &userCost, &hostedCost); err != nil {
 			return nil, err
 		}
+		totalHostedCost += hostedCost
 		t, _ := time.Parse("2006-01-02", date)
 		history = append(history, AccountUsageHistory{
 			Date:       date,
@@ -4184,6 +4195,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		TotalCost:         totalAccountCost,
 		TotalUserCost:     totalUserCost,
 		TotalStandardCost: totalStandardCost,
+		TotalHostedCost:   totalHostedCost,
 		TotalRequests:     totalRequests,
 		TotalTokens:       totalTokens,
 		AvgDailyCost:      totalAccountCost / float64(divisor),

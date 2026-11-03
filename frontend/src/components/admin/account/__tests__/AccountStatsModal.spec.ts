@@ -37,4 +37,18 @@ describe('AccountStatsModal', () => {
     expect(wrapper.text()).not.toContain('111')
     wrapper.unmount()
   })
+
+  it('shows account billed without the duplicate standard cost and adds the hosted reference', async () => {
+    const hosted = stats(5)
+    getStats.mockResolvedValueOnce({ ...hosted, summary: { ...hosted.summary, total_standard_cost: 9.5, total_hosted_cost: 9.5 } })
+    const wrapper = mount(AccountStatsModal, {
+      props: { show: false, account: { id: 2, name: 'Hosted', status: 'active' } as Account },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, DateTimeRangePicker: true, ModelDistributionChart: true, EndpointDistributionChart: true, LoadingSpinner: true } }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('admin.accounts.stats.standardCost')
+    expect(wrapper.get('[data-testid="account-stats-hosted-cost"]').text()).toBe('admin.accounts.stats.hostedReference ≈$9.50')
+    wrapper.unmount()
+  })
 })

@@ -165,13 +165,11 @@ const keyBreakdownPagination = reactive({
 
 const formatLocalDate = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-const today = new Date()
-const sixDaysAgo = new Date(today)
-sixDaysAgo.setDate(sixDaysAgo.getDate() - 6)
 const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
-const startDate = ref(formatLocalDate(sixDaysAgo))
-const endDate = ref(formatLocalDate(today))
-const granularity = ref<'day' | 'hour' | '15m'>('day')
+// Default window: today as a calendar day with hourly buckets, like the admin dashboard.
+const startDate = ref(formatLocalDate(new Date()))
+const endDate = ref(startDate.value)
+const granularity = ref<'day' | 'hour' | '15m'>('hour')
 
 // Requested-model names from the chart breakdown seed the analytics model filter.
 const analyticsModelNames = computed(() => modelStats.value.map((model) => model.model))
@@ -318,7 +316,12 @@ const loadGroupOptions = async () => {
   }
 }
 
-const loadRangeData = () => {
+const loadRangeData = (range?: { startDate: string; endDate: string }) => {
+  if (range) {
+    // Same rule as the admin dashboard: a single day uses hourly buckets, longer ranges daily.
+    const days = Math.ceil((new Date(range.endDate).getTime() - new Date(range.startDate).getTime()) / 86_400_000)
+    granularity.value = days <= 1 ? 'hour' : 'day'
+  }
   keyBreakdownPagination.page = 1
   void Promise.all([loadCharts(), loadRecent(), loadKeyBreakdown(), loadGroupOptions()])
 }

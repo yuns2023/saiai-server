@@ -212,6 +212,26 @@ describe('user DashboardView API Key analytics', () => {
     expect(wrapper.findComponent({ name: 'UserDashboardStats' }).props('stats')).toMatchObject({ today_requests: 31 })
   })
 
+  it('defaults to today with hourly buckets and switches to daily for longer ranges', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const now = new Date()
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    expect(mocks.getDashboardTrend).toHaveBeenLastCalledWith(
+      expect.objectContaining({ start_date: today, end_date: today, granularity: 'hour' })
+    )
+
+    const charts = wrapper.findComponent({ name: 'UserDashboardCharts' })
+    charts.vm.$emit('update:startDate', '2026-10-28')
+    charts.vm.$emit('update:endDate', '2026-11-03')
+    charts.vm.$emit('dateRangeChange', { startDate: '2026-10-28', endDate: '2026-11-03', preset: '7days' })
+    await flushPromises()
+    expect(mocks.getDashboardTrend).toHaveBeenLastCalledWith(
+      expect.objectContaining({ start_date: '2026-10-28', end_date: '2026-11-03', granularity: 'day' })
+    )
+  })
+
   it('exports every Key ranking page with the filters frozen at export start', async () => {
     const wrapper = mountDashboard()
     await flushPromises()

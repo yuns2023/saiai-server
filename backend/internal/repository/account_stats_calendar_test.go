@@ -38,9 +38,9 @@ func TestAccountStatsRangeSummary(t *testing.T) {
 			require.NoError(t, err)
 			start := time.Date(2026, 10, 1, 0, 0, 0, 0, loc)
 			end := start.AddDate(0, 0, 30)
-			rows := sqlmock.NewRows([]string{"date", "requests", "tokens", "cost", "actual_cost", "user_cost"})
+			rows := sqlmock.NewRows([]string{"date", "requests", "tokens", "cost", "actual_cost", "user_cost", "hosted_cost"})
 			if populated {
-				rows.AddRow("2026-10-17", 2, 100, 3.0, 2.0, 1.0)
+				rows.AddRow("2026-10-17", 2, 100, 3.0, 2.0, 1.0, 0.5)
 			}
 			mock.ExpectQuery(`TO_CHAR\(created_at AT TIME ZONE \$4, 'YYYY-MM-DD'\).*created_at >= \$2 AND created_at < \$3`).WithArgs(int64(1), start, end, "Asia/Shanghai").WillReturnRows(rows)
 			mock.ExpectQuery(`SELECT COALESCE\(AVG\(duration_ms\)`).WithArgs(int64(1), start, end).WillReturnRows(sqlmock.NewRows([]string{"duration"}).AddRow(1200))
@@ -55,6 +55,7 @@ func TestAccountStatsRangeSummary(t *testing.T) {
 				require.Equal(t, 1, result.Summary.ActualDaysUsed)
 				require.Equal(t, 2.0, result.Summary.AvgDailyCost)
 				require.Equal(t, 1.0, result.Summary.AvgDailyUserCost)
+				require.Equal(t, 0.5, result.Summary.TotalHostedCost)
 			} else {
 				require.Zero(t, result.Summary.ActualDaysUsed)
 				require.Zero(t, result.Summary.AvgDailyCost)

@@ -1738,6 +1738,47 @@ func (s *UsageLogRepoSuite) TestGetAccountUsageStats() {
 	s.Require().Len(resp.Models, 2)
 }
 
+// Admin stats and the account stats modal report account cost without an
+// account filter and keep hosted reference usage separate from it.
+func (s *UsageLogRepoSuite) TestAccountCostAndHostedReference() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "acct-hosted@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-acct-hosted", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-hosted-ref"})
+	base := time.Date(2025, 2, 10, 0, 0, 0, 0, time.UTC)
+	one, zero, metered := 1.0, 0.0, 4.5
+	for _, row := range []*service.UsageLog{
+		{TotalCost: 2, ActualCost: 1, AccountRateMultiplier: &one},
+		{TotalCost: 5, ActualCost: 0, AccountRateMultiplier: &zero, MeteredCost: &metered},
+	} {
+		row.UserID, row.APIKeyID, row.AccountID = user.ID, apiKey.ID, account.ID
+		row.RequestID, row.Model, row.CreatedAt = uuid.New().String(), "gpt-5", base.Add(time.Hour)
+		_, err := s.repo.Create(s.ctx, row)
+		s.Require().NoError(err)
+	}
+	start, end := base, base.Add(24*time.Hour)
+
+	stats, err := s.repo.GetStatsWithFilters(s.ctx, usagestats.UsageLogFilters{UserID: user.ID, StartTime: &start, EndTime: &end})
+	s.Require().NoError(err)
+	s.Require().NotNil(stats.TotalAccountCost)
+	s.Require().InDelta(2.0, *stats.TotalAccountCost, 1e-9)
+	s.Require().NotNil(stats.TotalMeteredCost)
+	s.Require().InDelta(4.5, *stats.TotalMeteredCost, 1e-9)
+
+	// No hosted rows in range: account cost 0, hosted reference absent.
+	later := end.Add(24 * time.Hour)
+	empty, err := s.repo.GetStatsWithFilters(s.ctx, usagestats.UsageLogFilters{UserID: user.ID, StartTime: &end, EndTime: &later})
+	s.Require().NoError(err)
+	s.Require().NotNil(empty.TotalAccountCost)
+	s.Require().Zero(*empty.TotalAccountCost)
+	s.Require().Nil(empty.TotalMeteredCost)
+
+	resp, err := s.repo.GetAccountUsageStats(s.ctx, account.ID, start, end)
+	s.Require().NoError(err)
+	s.Require().InDelta(2.0, resp.Summary.TotalCost, 1e-9)
+	s.Require().InDelta(7.0, resp.Summary.TotalStandardCost, 1e-9)
+	s.Require().InDelta(4.5, resp.Summary.TotalHostedCost, 1e-9)
+}
+
 func (s *UsageLogRepoSuite) TestGetAccountUsageStats_EmptyRange() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-emptystats"})
 
