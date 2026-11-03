@@ -346,33 +346,25 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 	}
 
 	if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
-		usage, err := s.getOpenAIUsage(ctx, account)
-		if err == nil {
-			s.tryClearRecoverableAccountError(ctx, account)
-		}
-		return usage, err
+		return s.getOpenAIUsage(ctx, account)
 	}
 
+	// Gemini 用量只来自本地统计，没有上游成功的证据，不能据此清除账号错误
 	if account.Platform == PlatformGemini {
-		usage, err := s.getGeminiUsage(ctx, account)
-		if err == nil {
-			s.tryClearRecoverableAccountError(ctx, account)
-		}
-		return usage, err
+		return s.getGeminiUsage(ctx, account)
 	}
 
 	// Antigravity 平台：使用 AntigravityQuotaFetcher 获取额度
+	// 抓取失败时返回降级结果而非错误，同样不能据此清除账号错误
 	if account.Platform == PlatformAntigravity {
-		usage, err := s.getAntigravityUsage(ctx, account)
-		if err == nil {
-			s.tryClearRecoverableAccountError(ctx, account)
-		}
-		return usage, err
+		return s.getAntigravityUsage(ctx, account)
 	}
 
 	// 只有oauth类型账号可以通过API获取usage（有profile scope）
 	if account.CanGetUsage() {
 		var apiResp *ClaudeUsageResponse
+		// fresh 表示本次（可能与并发请求共享的）flight 真的请求了上游并成功；缓存命中可能早于账号出错，不算恢复证据
+		fresh := false
 
 		// 1. 检查缓存（成功响应 3 分钟 / 错误响应 1 分钟）
 		if cached, ok := s.cache.apiCache.Load(accountID); ok {
@@ -409,7 +401,7 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 							return nil, cache.err
 						}
 						if cache.response != nil && age < apiCacheTTL {
-							return cache.response, nil
+							return oauthUsageFlightResult{resp: cache.response}, nil
 						}
 					}
 				}
@@ -427,12 +419,13 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 					response:  resp,
 					timestamp: time.Now(),
 				})
-				return resp, nil
+				return oauthUsageFlightResult{resp: resp, fresh: true}, nil
 			})
 			if flightErr != nil {
 				return nil, flightErr
 			}
-			apiResp, _ = result.(*ClaudeUsageResponse)
+			flight, _ := result.(oauthUsageFlightResult)
+			apiResp, fresh = flight.resp, flight.fresh
 		}
 
 		// 3. 构建 UsageInfo（每次都重新计算 RemainingSeconds）
@@ -446,7 +439,9 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 		// 5. 将主动查询结果同步到被动缓存，下次 passive 加载即为最新值
 		s.syncActiveToPassive(ctx, account.ID, usage)
 
-		s.tryClearRecoverableAccountError(ctx, account)
+		if fresh {
+			s.tryClearRecoverableAccountError(ctx, account)
+		}
 		return usage, nil
 	}
 
@@ -598,6 +593,8 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	if shouldRefreshOpenAICodexSnapshot(account, usage, now) && s.shouldProbeOpenAICodexSnapshot(account.ID, now) {
 		if updates, resetAt, observedAt, err := s.fetchCodexUsageViaWham(ctx, account); err == nil && (len(updates) > 0 || resetAt != nil) {
 			s.persistOpenAICodexProbeSnapshot(account.ID, observedAt, updates, resetAt)
+			// 只有真实的上游探测成功才算恢复证据；仅读取 Extra 快照时不清除账号错误
+			s.tryClearRecoverableAccountError(ctx, account)
 			mergeAccountExtra(account, updates)
 			if resetAt != nil {
 				account.RateLimitResetAt = resetAt
@@ -1293,6 +1290,14 @@ func parseTime(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse time: %s", s)
 }
 
+// oauthUsageFlightResult 是 Anthropic usage singleflight 的结果；fresh 表示本次 flight 真的请求了上游
+type oauthUsageFlightResult struct {
+	resp  *ClaudeUsageResponse
+	fresh bool
+}
+
+// tryClearRecoverableAccountError 仅在调用方刚拿到上游成功响应时调用，否则会造成"假恢复"：
+// 账号被置回 active 后很快再次出错，error_at 也被重置为新的时间。
 func (s *AccountUsageService) tryClearRecoverableAccountError(ctx context.Context, account *Account) {
 	if account == nil || account.Status != StatusError {
 		return
@@ -1303,8 +1308,13 @@ func (s *AccountUsageService) tryClearRecoverableAccountError(ctx context.Contex
 		return
 	}
 
-	if !strings.Contains(msg, "token refresh failed") &&
-		!strings.Contains(msg, "invalid_client") &&
+	// refresh token 失效（invalid_grant 等）只能靠重新授权恢复：旧 access token 查用量成功不代表能续期，
+	// 清回 active 后下次刷新会再失败。
+	if strings.Contains(msg, "token refresh failed") {
+		return
+	}
+
+	if !strings.Contains(msg, "invalid_client") &&
 		!strings.Contains(msg, "missing_project_id") &&
 		!strings.Contains(msg, "unauthenticated") {
 		return
