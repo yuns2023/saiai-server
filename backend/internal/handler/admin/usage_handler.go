@@ -140,7 +140,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		groupID = id
 	}
 
-	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
+	platform, err := parseUsagePlatformFilter(c)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -305,7 +305,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		groupID = id
 	}
 
-	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
+	platform, err := parseUsagePlatformFilter(c)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return

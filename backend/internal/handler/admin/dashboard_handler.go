@@ -251,7 +251,7 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
+	platform, err := parseUsagePlatformFilter(c)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -342,7 +342,7 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
+	platform, err := parseUsagePlatformFilter(c)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -434,7 +434,7 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
+	platform, err := parseUsagePlatformFilter(c)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -740,7 +740,7 @@ func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
 			*field.value = id
 		}
 	}
-	dim.Platform, err = normalizeUsagePlatformFilter(c.Query("platform"))
+	dim.Platform, err = parseUsagePlatformFilter(c)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return

@@ -190,3 +190,32 @@ func TestGetUserBreakdownPlatformFilter(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Empty(t, repo.capturedDim.Platform)
 }
+
+func TestUsageEndpointsRejectRepeatedPlatform(t *testing.T) {
+	for _, query := range []string{"platform=openai&platform=anthropic", "platform=&platform=openai", "platform=openai&platform=openai"} {
+		usageRepo := &adminUsageRepoCapture{}
+		usageRouter := newAdminUsageRequestTypeTestRouter(usageRepo)
+		for _, path := range []string{"/admin/usage", "/admin/usage/stats"} {
+			rec := servePlatformRequest(usageRouter, path+"?"+query)
+			require.Equal(t, http.StatusBadRequest, rec.Code, path+"?"+query)
+			require.Contains(t, rec.Body.String(), "at most once", path+"?"+query)
+		}
+		require.Empty(t, usageRepo.listFilters.Platform, query)
+		require.Empty(t, usageRepo.statsFilters.Platform, query)
+
+		dashboardRepo := &usagePlatformRepoCapture{}
+		dashboardRouter := newUsagePlatformDashboardRouter(dashboardRepo)
+		for _, path := range []string{"trend", "models", "groups", "snapshot-v2"} {
+			rec := servePlatformRequest(dashboardRouter, "/admin/dashboard/"+path+"?include_stats=false&"+query)
+			require.Equal(t, http.StatusBadRequest, rec.Code, path+"?"+query)
+		}
+		require.Empty(t, dashboardRepo.trendPlatforms, query)
+		require.Empty(t, dashboardRepo.modelPlatforms, query)
+		require.Empty(t, dashboardRepo.groupPlatforms, query)
+
+		breakdownRepo := &userBreakdownRepoCapture{}
+		rec := servePlatformRequest(newUserBreakdownRouter(breakdownRepo), "/admin/dashboard/user-breakdown?"+query)
+		require.Equal(t, http.StatusBadRequest, rec.Code, "user-breakdown?"+query)
+		require.Empty(t, breakdownRepo.capturedDim.Platform, query)
+	}
+}

@@ -286,7 +286,7 @@ func parseDashboardSnapshotV2Filters(c *gin.Context) (*dashboardSnapshotV2Filter
 		return nil, err
 	}
 
-	platform, err := normalizeUsagePlatformFilter(c.Query("platform"))
+	platform, err := parseUsagePlatformFilter(c)
 	if err != nil {
 		return nil, err
 	}

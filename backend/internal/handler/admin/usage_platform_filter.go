@@ -5,9 +5,29 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 )
 
-var errInvalidUsagePlatformFilter = errors.New("invalid platform, use anthropic/openai/gemini/antigravity/sora")
+var (
+	errInvalidUsagePlatformFilter  = errors.New("invalid platform, use anthropic/openai/gemini/antigravity/sora")
+	errRepeatedUsagePlatformFilter = errors.New("platform must be given at most once")
+)
+
+// parseUsagePlatformFilter reads the optional platform query. A repeated
+// parameter is rejected (even if one value is empty) so every endpoint
+// interprets ?platform=a&platform=b the same way instead of silently using
+// the first value.
+func parseUsagePlatformFilter(c *gin.Context) (string, error) {
+	values := c.QueryArray("platform")
+	switch len(values) {
+	case 0:
+		return "", nil
+	case 1:
+		return normalizeUsagePlatformFilter(values[0])
+	default:
+		return "", errRepeatedUsagePlatformFilter
+	}
+}
 
 // normalizeUsagePlatformFilter validates the optional platform query of the
 // admin usage and dashboard endpoints. The value filters by the platform of
