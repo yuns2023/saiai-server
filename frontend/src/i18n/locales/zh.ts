@@ -2942,7 +2942,7 @@ export default {
         activeQuery: '查询',
         standardCost: '标准 ${cost}',
         standardCostHint: '本窗口平台用量（标准价，所有用户；窗口按上游重置时间倒推，可能与左侧请求统计的起点不同）',
-        statsHint: '按账号记录的窗口起点统计',
+        statsHint: '请求数、Token 与 A/U 金额按请求统计口径计算，起点可能与标准价窗口不同',
         rollingHint: '*上游重置时间未知，按滚动窗口统计',
         estimatedCapacity: '估 ${cost}',
         estimatedCapacityHint: '估算总额度（按标准价折算，平台外使用会使估算偏低）'

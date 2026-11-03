@@ -3491,7 +3491,7 @@ export default {
         activeQuery: 'Query',
         standardCost: 'Std ${cost}',
         standardCostHint: 'Platform usage this window (standard price, all users; window derived from the upstream reset time, so its start may differ from the request stats)',
-        statsHint: 'Counted from the account\'s recorded window start',
+        statsHint: 'Requests, tokens and A/U use the request-stats window; its start may differ from the standard-cost window',
         rollingHint: '*Upstream reset time unknown; counted over a rolling window',
         estimatedCapacity: 'Est ${cost}',
         estimatedCapacityHint: 'Estimated total quota (at standard price; usage outside the platform makes this an underestimate)'
