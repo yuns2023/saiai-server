@@ -17,7 +17,8 @@ the dashboard endpoints `/admin/dashboard/trend`, `/models`, `/groups`,
 (`anthropic`, `openai`, `gemini`, `antigravity` or `sora`). It selects records
 by the platform of the upstream account that served them
 (`accounts.platform`), including soft-deleted accounts so history stays
-filterable. An empty value disables the filter; any other value returns 400.
+filterable. An empty value disables the filter; any other value, or a
+repeated `platform` parameter, returns 400.
 The pre-aggregated trend buckets have no account dimension, so a platform
 filter always reads raw `usage_logs`. `snapshot-v2` rejects `platform` together
 with `exclude_hosted`. The admin usage records page applies it to the list,

@@ -410,3 +410,56 @@ func (s *UsageLogRepoSuite) TestPlatformFilter_FastPaginationAcrossPages() {
 	}
 	s.Require().Len(seen, len(openaiIDs))
 }
+
+// TestPlatformFilter_StatsAccountAndMeteredCost: with only Platform set, the
+// always-on account cost and the hosted metered cost are summed over the
+// platform-filtered rows only.
+func (s *UsageLogRepoSuite) TestPlatformFilter_StatsAccountAndMeteredCost() {
+	base := time.Date(2019, 6, 6, 10, 0, 0, 0, time.UTC)
+	start, end := base.Add(-time.Hour), base.Add(time.Hour)
+
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "platform-metered@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-platform-metered", Name: "k"})
+	anthropicAcc := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-pm-anthropic", Platform: service.PlatformAnthropic})
+	openaiAcc := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-pm-openai", Platform: service.PlatformOpenAI})
+
+	create := func(account *service.Account, totalCost, actualCost float64, accountMultiplier float64, metered *float64, at time.Time) {
+		_, err := s.repo.Create(s.ctx, &service.UsageLog{
+			UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+			RequestID: uuid.New().String(), Model: "m",
+			InputTokens: 10, OutputTokens: 20,
+			TotalCost: totalCost, ActualCost: actualCost, MeteredCost: metered,
+			AccountRateMultiplier: &accountMultiplier,
+			CreatedAt:             at,
+		})
+		s.Require().NoError(err)
+	}
+	metered := 3.0
+	create(openaiAcc, 1.5, 0, 1, &metered, base)                    // hosted row
+	create(openaiAcc, 0.5, 0.5, 1, nil, base.Add(time.Minute))      // plain openai row
+	create(anthropicAcc, 1.0, 1.0, 2, nil, base.Add(2*time.Minute)) // plain anthropic row
+
+	statsFor := func(platform string) *UsageStats {
+		stats, err := s.repo.GetStatsWithFilters(s.ctx, usagestats.UsageLogFilters{Platform: platform, StartTime: &start, EndTime: &end})
+		s.Require().NoError(err)
+		s.Require().NotNil(stats.TotalAccountCost, "platform=%s", platform)
+		return stats
+	}
+
+	openai := statsFor(service.PlatformOpenAI)
+	s.Require().Equal(int64(2), openai.TotalRequests)
+	s.Require().InDelta(2.0, *openai.TotalAccountCost, 1e-9)
+	s.Require().NotNil(openai.TotalMeteredCost)
+	s.Require().InDelta(3.0, *openai.TotalMeteredCost, 1e-9)
+
+	anthropic := statsFor(service.PlatformAnthropic)
+	s.Require().Equal(int64(1), anthropic.TotalRequests)
+	s.Require().InDelta(2.0, *anthropic.TotalAccountCost, 1e-9) // 1.0 × account multiplier 2
+	s.Require().Nil(anthropic.TotalMeteredCost, "no hosted rows on this platform")
+
+	all := statsFor("")
+	s.Require().Equal(int64(3), all.TotalRequests)
+	s.Require().InDelta(4.0, *all.TotalAccountCost, 1e-9)
+	s.Require().NotNil(all.TotalMeteredCost)
+	s.Require().InDelta(3.0, *all.TotalMeteredCost, 1e-9)
+}
