@@ -1701,6 +1701,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		LoadFactor:              m.LoadFactor,
 		Status:                  m.Status,
 		ErrorMessage:            derefString(m.ErrorMessage),
+		ErrorAt:                 m.ErrorAt,
 		LastUsedAt:              m.LastUsedAt,
 		ExpiresAt:               m.ExpiresAt,
 		AutoPauseOnExpired:      m.AutoPauseOnExpired,

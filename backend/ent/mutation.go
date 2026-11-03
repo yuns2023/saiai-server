@@ -3484,6 +3484,7 @@ type AccountMutation struct {
 	addpayg_discount_multiplier *float64
 	status                      *string
 	error_message               *string
+	error_at                    *time.Time
 	last_used_at                *time.Time
 	expires_at                  *time.Time
 	auto_pause_on_expired       *bool
@@ -4389,6 +4390,55 @@ func (m *AccountMutation) ResetErrorMessage() {
 	delete(m.clearedFields, account.FieldErrorMessage)
 }
 
+// SetErrorAt sets the "error_at" field.
+func (m *AccountMutation) SetErrorAt(t time.Time) {
+	m.error_at = &t
+}
+
+// ErrorAt returns the value of the "error_at" field in the mutation.
+func (m *AccountMutation) ErrorAt() (r time.Time, exists bool) {
+	v := m.error_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldErrorAt returns the old "error_at" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldErrorAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldErrorAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldErrorAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldErrorAt: %w", err)
+	}
+	return oldValue.ErrorAt, nil
+}
+
+// ClearErrorAt clears the value of the "error_at" field.
+func (m *AccountMutation) ClearErrorAt() {
+	m.error_at = nil
+	m.clearedFields[account.FieldErrorAt] = struct{}{}
+}
+
+// ErrorAtCleared returns if the "error_at" field was cleared in this mutation.
+func (m *AccountMutation) ErrorAtCleared() bool {
+	_, ok := m.clearedFields[account.FieldErrorAt]
+	return ok
+}
+
+// ResetErrorAt resets all changes to the "error_at" field.
+func (m *AccountMutation) ResetErrorAt() {
+	m.error_at = nil
+	delete(m.clearedFields, account.FieldErrorAt)
+}
+
 // SetLastUsedAt sets the "last_used_at" field.
 func (m *AccountMutation) SetLastUsedAt(t time.Time) {
 	m.last_used_at = &t
@@ -5174,7 +5224,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 29)
+	fields := make([]string, 0, 30)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -5225,6 +5275,9 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.error_message != nil {
 		fields = append(fields, account.FieldErrorMessage)
+	}
+	if m.error_at != nil {
+		fields = append(fields, account.FieldErrorAt)
 	}
 	if m.last_used_at != nil {
 		fields = append(fields, account.FieldLastUsedAt)
@@ -5304,6 +5357,8 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.Status()
 	case account.FieldErrorMessage:
 		return m.ErrorMessage()
+	case account.FieldErrorAt:
+		return m.ErrorAt()
 	case account.FieldLastUsedAt:
 		return m.LastUsedAt()
 	case account.FieldExpiresAt:
@@ -5371,6 +5426,8 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldStatus(ctx)
 	case account.FieldErrorMessage:
 		return m.OldErrorMessage(ctx)
+	case account.FieldErrorAt:
+		return m.OldErrorAt(ctx)
 	case account.FieldLastUsedAt:
 		return m.OldLastUsedAt(ctx)
 	case account.FieldExpiresAt:
@@ -5522,6 +5579,13 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetErrorMessage(v)
+		return nil
+	case account.FieldErrorAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetErrorAt(v)
 		return nil
 	case account.FieldLastUsedAt:
 		v, ok := value.(time.Time)
@@ -5715,6 +5779,9 @@ func (m *AccountMutation) ClearedFields() []string {
 	if m.FieldCleared(account.FieldErrorMessage) {
 		fields = append(fields, account.FieldErrorMessage)
 	}
+	if m.FieldCleared(account.FieldErrorAt) {
+		fields = append(fields, account.FieldErrorAt)
+	}
 	if m.FieldCleared(account.FieldLastUsedAt) {
 		fields = append(fields, account.FieldLastUsedAt)
 	}
@@ -5773,6 +5840,9 @@ func (m *AccountMutation) ClearField(name string) error {
 		return nil
 	case account.FieldErrorMessage:
 		m.ClearErrorMessage()
+		return nil
+	case account.FieldErrorAt:
+		m.ClearErrorAt()
 		return nil
 	case account.FieldLastUsedAt:
 		m.ClearLastUsedAt()
@@ -5862,6 +5932,9 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldErrorMessage:
 		m.ResetErrorMessage()
+		return nil
+	case account.FieldErrorAt:
+		m.ResetErrorAt()
 		return nil
 	case account.FieldLastUsedAt:
 		m.ResetLastUsedAt()

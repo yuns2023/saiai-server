@@ -2866,6 +2866,8 @@ export default {
         overloaded: '过载中',
         tempUnschedulable: '临时不可调度',
         rateLimitedUntil: '限流中，当前不参与调度，预计 {time} 自动恢复',
+        errorSince: '出错于 {time}',
+        errorSinceUnknown: '出错时间未知（升级前已出错）',
         rateLimitedAutoResume: '{time} 自动恢复',
         modelRateLimitedUntil: '{model} 限流至 {time}',
         modelCreditOveragesUntil: '{model} 正在使用 AI Credits，至 {time}',

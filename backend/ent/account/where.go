@@ -130,6 +130,11 @@ func ErrorMessage(v string) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldErrorMessage, v))
 }
 
+// ErrorAt applies equality check predicate on the "error_at" field. It's identical to ErrorAtEQ.
+func ErrorAt(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldErrorAt, v))
+}
+
 // LastUsedAt applies equality check predicate on the "last_used_at" field. It's identical to LastUsedAtEQ.
 func LastUsedAt(v time.Time) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldLastUsedAt, v))
@@ -968,6 +973,56 @@ func ErrorMessageEqualFold(v string) predicate.Account {
 // ErrorMessageContainsFold applies the ContainsFold predicate on the "error_message" field.
 func ErrorMessageContainsFold(v string) predicate.Account {
 	return predicate.Account(sql.FieldContainsFold(FieldErrorMessage, v))
+}
+
+// ErrorAtEQ applies the EQ predicate on the "error_at" field.
+func ErrorAtEQ(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldErrorAt, v))
+}
+
+// ErrorAtNEQ applies the NEQ predicate on the "error_at" field.
+func ErrorAtNEQ(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldErrorAt, v))
+}
+
+// ErrorAtIn applies the In predicate on the "error_at" field.
+func ErrorAtIn(vs ...time.Time) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldErrorAt, vs...))
+}
+
+// ErrorAtNotIn applies the NotIn predicate on the "error_at" field.
+func ErrorAtNotIn(vs ...time.Time) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldErrorAt, vs...))
+}
+
+// ErrorAtGT applies the GT predicate on the "error_at" field.
+func ErrorAtGT(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldErrorAt, v))
+}
+
+// ErrorAtGTE applies the GTE predicate on the "error_at" field.
+func ErrorAtGTE(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldErrorAt, v))
+}
+
+// ErrorAtLT applies the LT predicate on the "error_at" field.
+func ErrorAtLT(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldErrorAt, v))
+}
+
+// ErrorAtLTE applies the LTE predicate on the "error_at" field.
+func ErrorAtLTE(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldErrorAt, v))
+}
+
+// ErrorAtIsNil applies the IsNil predicate on the "error_at" field.
+func ErrorAtIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldErrorAt))
+}
+
+// ErrorAtNotNil applies the NotNil predicate on the "error_at" field.
+func ErrorAtNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldErrorAt))
 }
 
 // LastUsedAtEQ applies the EQ predicate on the "last_used_at" field.

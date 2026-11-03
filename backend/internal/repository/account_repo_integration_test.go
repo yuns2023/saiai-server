@@ -614,6 +614,25 @@ func (s *AccountRepoSuite) TestSetError() {
 	s.Require().NoError(err)
 	s.Require().Equal(service.StatusError, got.Status)
 	s.Require().Equal("something went wrong", got.ErrorMessage)
+	s.Require().NotNil(got.ErrorAt, "trigger stamps error_at on active -> error")
+	firstErrorAt := *got.ErrorAt
+
+	// A repeated error and an admin full-row update keep the first error time.
+	s.Require().NoError(s.repo.SetError(s.ctx, account.ID, "still wrong"))
+	got, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	got.Priority = 7
+	s.Require().NoError(s.repo.Update(s.ctx, got))
+	got, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("still wrong", got.ErrorMessage)
+	s.Require().NotNil(got.ErrorAt)
+	s.Require().True(firstErrorAt.Equal(*got.ErrorAt))
+
+	s.Require().NoError(s.repo.ClearError(s.ctx, account.ID))
+	got, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(got.ErrorAt, "leaving error clears error_at")
 }
 
 func (s *AccountRepoSuite) TestClearError_SyncSchedulerSnapshotOnRecovery() {

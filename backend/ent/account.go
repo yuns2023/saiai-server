@@ -53,6 +53,8 @@ type Account struct {
 	Status string `json:"status,omitempty"`
 	// ErrorMessage holds the value of the "error_message" field.
 	ErrorMessage *string `json:"error_message,omitempty"`
+	// ErrorAt holds the value of the "error_at" field.
+	ErrorAt *time.Time `json:"error_at,omitempty"`
 	// LastUsedAt holds the value of the "last_used_at" field.
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	// Account expiration time (NULL means no expiration).
@@ -162,7 +164,7 @@ func (*Account) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullInt64)
 		case account.FieldName, account.FieldNotes, account.FieldPlatform, account.FieldType, account.FieldStatus, account.FieldErrorMessage, account.FieldTempUnschedulableReason, account.FieldSessionWindowStatus:
 			values[i] = new(sql.NullString)
-		case account.FieldCreatedAt, account.FieldUpdatedAt, account.FieldDeletedAt, account.FieldLastUsedAt, account.FieldExpiresAt, account.FieldRateLimitedAt, account.FieldRateLimitResetAt, account.FieldOverloadUntil, account.FieldTempUnschedulableUntil, account.FieldSessionWindowStart, account.FieldSessionWindowEnd:
+		case account.FieldCreatedAt, account.FieldUpdatedAt, account.FieldDeletedAt, account.FieldErrorAt, account.FieldLastUsedAt, account.FieldExpiresAt, account.FieldRateLimitedAt, account.FieldRateLimitResetAt, account.FieldOverloadUntil, account.FieldTempUnschedulableUntil, account.FieldSessionWindowStart, account.FieldSessionWindowEnd:
 			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -295,6 +297,13 @@ func (_m *Account) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ErrorMessage = new(string)
 				*_m.ErrorMessage = value.String
+			}
+		case account.FieldErrorAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field error_at", values[i])
+			} else if value.Valid {
+				_m.ErrorAt = new(time.Time)
+				*_m.ErrorAt = value.Time
 			}
 		case account.FieldLastUsedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -498,6 +507,11 @@ func (_m *Account) String() string {
 	if v := _m.ErrorMessage; v != nil {
 		builder.WriteString("error_message=")
 		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.ErrorAt; v != nil {
+		builder.WriteString("error_at=")
+		builder.WriteString(v.Format(time.ANSIC))
 	}
 	builder.WriteString(", ")
 	if v := _m.LastUsedAt; v != nil {

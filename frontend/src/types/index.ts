@@ -852,6 +852,7 @@ export interface Account {
   payg_discount_multiplier?: number // Legacy read-only compatibility field; not used for new billing
   status: 'active' | 'inactive' | 'error'
   error_message: string | null
+  error_at?: string | null // 进入 error 状态的时间；升级前已出错的账号为 null
   last_used_at: string | null
   expires_at: number | null
   auto_pause_on_expired: boolean

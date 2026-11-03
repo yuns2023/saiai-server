@@ -47,6 +47,9 @@
       <div
         class="invisible absolute left-0 top-full z-100 mt-1.5 min-w-[200px] max-w-[300px] rounded-lg bg-gray-800 px-3 py-2 text-xs text-white opacity-0 shadow-xl transition-all duration-200 group-hover/error:visible group-hover/error:opacity-100 dark:bg-gray-900"
       >
+        <div class="mb-1 text-gray-400">
+          {{ errorAtText }}
+        </div>
         <div class="whitespace-pre-wrap wrap-break-word leading-relaxed text-gray-300">
           {{ account.error_message }}
         </div>
@@ -159,7 +162,13 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { Account } from '@/types'
-import { formatCountdown, formatDateTime, formatCountdownWithSuffix, formatTime } from '@/utils/format'
+import {
+  formatCountdown,
+  formatDateTime,
+  formatCountdownWithSuffix,
+  formatRelativeWithDateTime,
+  formatTime
+} from '@/utils/format'
 
 const { t } = useI18n()
 
@@ -282,6 +291,12 @@ const isTempUnschedulable = computed(() => {
 // Computed: has error status
 const hasError = computed(() => {
   return props.account.status === 'error'
+})
+
+// Computed: when the account entered error status (null for accounts that errored before error_at existed)
+const errorAtText = computed(() => {
+  if (!props.account.error_at) return t('admin.accounts.status.errorSinceUnknown')
+  return t('admin.accounts.status.errorSince', { time: formatRelativeWithDateTime(props.account.error_at) })
 })
 
 // Computed: countdown text for rate limit (429)

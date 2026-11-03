@@ -2666,6 +2666,8 @@ export default {
         overloaded: 'Overloaded',
         tempUnschedulable: 'Temp Unschedulable',
         rateLimitedUntil: 'Rate limited and removed from scheduling. Auto resumes at {time}',
+        errorSince: 'Error since {time}',
+        errorSinceUnknown: 'Error time unknown (errored before upgrade)',
         rateLimitedAutoResume: 'Auto resumes in {time}',
         modelRateLimitedUntil: '{model} rate limited until {time}',
         modelCreditOveragesUntil: '{model} using AI Credits until {time}',

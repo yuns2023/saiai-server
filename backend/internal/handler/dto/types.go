@@ -200,6 +200,7 @@ type Account struct {
 	PaygDiscountMultiplier float64        `json:"payg_discount_multiplier"`
 	Status                 string         `json:"status"`
 	ErrorMessage           string         `json:"error_message"`
+	ErrorAt                *time.Time     `json:"error_at"`
 	LastUsedAt             *time.Time     `json:"last_used_at"`
 	ExpiresAt              *int64         `json:"expires_at"`
 	AutoPauseOnExpired     bool           `json:"auto_pause_on_expired"`

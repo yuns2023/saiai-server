@@ -297,6 +297,26 @@ func (_u *AccountUpdate) ClearErrorMessage() *AccountUpdate {
 	return _u
 }
 
+// SetErrorAt sets the "error_at" field.
+func (_u *AccountUpdate) SetErrorAt(v time.Time) *AccountUpdate {
+	_u.mutation.SetErrorAt(v)
+	return _u
+}
+
+// SetNillableErrorAt sets the "error_at" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableErrorAt(v *time.Time) *AccountUpdate {
+	if v != nil {
+		_u.SetErrorAt(*v)
+	}
+	return _u
+}
+
+// ClearErrorAt clears the value of the "error_at" field.
+func (_u *AccountUpdate) ClearErrorAt() *AccountUpdate {
+	_u.mutation.ClearErrorAt()
+	return _u
+}
+
 // SetLastUsedAt sets the "last_used_at" field.
 func (_u *AccountUpdate) SetLastUsedAt(v time.Time) *AccountUpdate {
 	_u.mutation.SetLastUsedAt(v)
@@ -804,6 +824,12 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.ErrorMessageCleared() {
 		_spec.ClearField(account.FieldErrorMessage, field.TypeString)
+	}
+	if value, ok := _u.mutation.ErrorAt(); ok {
+		_spec.SetField(account.FieldErrorAt, field.TypeTime, value)
+	}
+	if _u.mutation.ErrorAtCleared() {
+		_spec.ClearField(account.FieldErrorAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.LastUsedAt(); ok {
 		_spec.SetField(account.FieldLastUsedAt, field.TypeTime, value)
@@ -1329,6 +1355,26 @@ func (_u *AccountUpdateOne) SetNillableErrorMessage(v *string) *AccountUpdateOne
 // ClearErrorMessage clears the value of the "error_message" field.
 func (_u *AccountUpdateOne) ClearErrorMessage() *AccountUpdateOne {
 	_u.mutation.ClearErrorMessage()
+	return _u
+}
+
+// SetErrorAt sets the "error_at" field.
+func (_u *AccountUpdateOne) SetErrorAt(v time.Time) *AccountUpdateOne {
+	_u.mutation.SetErrorAt(v)
+	return _u
+}
+
+// SetNillableErrorAt sets the "error_at" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableErrorAt(v *time.Time) *AccountUpdateOne {
+	if v != nil {
+		_u.SetErrorAt(*v)
+	}
+	return _u
+}
+
+// ClearErrorAt clears the value of the "error_at" field.
+func (_u *AccountUpdateOne) ClearErrorAt() *AccountUpdateOne {
+	_u.mutation.ClearErrorAt()
 	return _u
 }
 
@@ -1869,6 +1915,12 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if _u.mutation.ErrorMessageCleared() {
 		_spec.ClearField(account.FieldErrorMessage, field.TypeString)
+	}
+	if value, ok := _u.mutation.ErrorAt(); ok {
+		_spec.SetField(account.FieldErrorAt, field.TypeTime, value)
+	}
+	if _u.mutation.ErrorAtCleared() {
+		_spec.ClearField(account.FieldErrorAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.LastUsedAt(); ok {
 		_spec.SetField(account.FieldLastUsedAt, field.TypeTime, value)

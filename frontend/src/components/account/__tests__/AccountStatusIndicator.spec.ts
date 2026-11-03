@@ -159,4 +159,36 @@ describe('AccountStatusIndicator', () => {
     // AICredits 积分耗尽状态应显示
     expect(wrapper.text()).toContain('admin.accounts.status.creditsExhausted')
   })
+
+  it('错误账号的提示里显示出错时间', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          status: 'error',
+          error_message: 'Authentication failed (401): OAuth access token has been revoked.',
+          error_at: '2026-11-03T06:21:00Z'
+        })
+      },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text()).toContain('admin.accounts.status.errorSince')
+    expect(wrapper.text()).not.toContain('admin.accounts.status.errorSinceUnknown')
+    expect(wrapper.text()).toContain('OAuth access token has been revoked.')
+  })
+
+  it('升级前已出错（无 error_at）的账号提示出错时间未知', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          status: 'error',
+          error_message: 'Authentication failed (401)',
+          error_at: null
+        })
+      },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text()).toContain('admin.accounts.status.errorSinceUnknown')
+  })
 })

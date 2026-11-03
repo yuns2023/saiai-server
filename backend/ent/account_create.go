@@ -224,6 +224,20 @@ func (_c *AccountCreate) SetNillableErrorMessage(v *string) *AccountCreate {
 	return _c
 }
 
+// SetErrorAt sets the "error_at" field.
+func (_c *AccountCreate) SetErrorAt(v time.Time) *AccountCreate {
+	_c.mutation.SetErrorAt(v)
+	return _c
+}
+
+// SetNillableErrorAt sets the "error_at" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableErrorAt(v *time.Time) *AccountCreate {
+	if v != nil {
+		_c.SetErrorAt(*v)
+	}
+	return _c
+}
+
 // SetLastUsedAt sets the "last_used_at" field.
 func (_c *AccountCreate) SetLastUsedAt(v time.Time) *AccountCreate {
 	_c.mutation.SetLastUsedAt(v)
@@ -698,6 +712,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 		_spec.SetField(account.FieldErrorMessage, field.TypeString, value)
 		_node.ErrorMessage = &value
 	}
+	if value, ok := _c.mutation.ErrorAt(); ok {
+		_spec.SetField(account.FieldErrorAt, field.TypeTime, value)
+		_node.ErrorAt = &value
+	}
 	if value, ok := _c.mutation.LastUsedAt(); ok {
 		_spec.SetField(account.FieldLastUsedAt, field.TypeTime, value)
 		_node.LastUsedAt = &value
@@ -1116,6 +1134,24 @@ func (u *AccountUpsert) UpdateErrorMessage() *AccountUpsert {
 // ClearErrorMessage clears the value of the "error_message" field.
 func (u *AccountUpsert) ClearErrorMessage() *AccountUpsert {
 	u.SetNull(account.FieldErrorMessage)
+	return u
+}
+
+// SetErrorAt sets the "error_at" field.
+func (u *AccountUpsert) SetErrorAt(v time.Time) *AccountUpsert {
+	u.Set(account.FieldErrorAt, v)
+	return u
+}
+
+// UpdateErrorAt sets the "error_at" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateErrorAt() *AccountUpsert {
+	u.SetExcluded(account.FieldErrorAt)
+	return u
+}
+
+// ClearErrorAt clears the value of the "error_at" field.
+func (u *AccountUpsert) ClearErrorAt() *AccountUpsert {
+	u.SetNull(account.FieldErrorAt)
 	return u
 }
 
@@ -1659,6 +1695,27 @@ func (u *AccountUpsertOne) UpdateErrorMessage() *AccountUpsertOne {
 func (u *AccountUpsertOne) ClearErrorMessage() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearErrorMessage()
+	})
+}
+
+// SetErrorAt sets the "error_at" field.
+func (u *AccountUpsertOne) SetErrorAt(v time.Time) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetErrorAt(v)
+	})
+}
+
+// UpdateErrorAt sets the "error_at" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateErrorAt() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateErrorAt()
+	})
+}
+
+// ClearErrorAt clears the value of the "error_at" field.
+func (u *AccountUpsertOne) ClearErrorAt() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearErrorAt()
 	})
 }
 
@@ -2402,6 +2459,27 @@ func (u *AccountUpsertBulk) UpdateErrorMessage() *AccountUpsertBulk {
 func (u *AccountUpsertBulk) ClearErrorMessage() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearErrorMessage()
+	})
+}
+
+// SetErrorAt sets the "error_at" field.
+func (u *AccountUpsertBulk) SetErrorAt(v time.Time) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetErrorAt(v)
+	})
+}
+
+// UpdateErrorAt sets the "error_at" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateErrorAt() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateErrorAt()
+	})
+}
+
+// ClearErrorAt clears the value of the "error_at" field.
+func (u *AccountUpsertBulk) ClearErrorAt() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearErrorAt()
 	})
 }
 

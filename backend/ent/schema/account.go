@@ -124,6 +124,13 @@ func (Account) Fields() []ent.Field {
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "text"}),
 
+		// error_at: 进入 error 状态的时间（首次出错，重复出错不刷新）。
+		// 由 migrations/118_account_error_at.sql 的触发器维护，应用层不写。
+		field.Time("error_at").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
+
 		// last_used_at: 最后使用时间，用于统计和调度
 		field.Time("last_used_at").
 			Optional().

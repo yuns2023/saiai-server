@@ -257,6 +257,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		PaygDiscountMultiplier:  a.PaygDiscountRate(),
 		Status:                  a.Status,
 		ErrorMessage:            a.ErrorMessage,
+		ErrorAt:                 a.ErrorAt,
 		LastUsedAt:              a.LastUsedAt,
 		ExpiresAt:               timeToUnixSeconds(a.ExpiresAt),
 		AutoPauseOnExpired:      a.AutoPauseOnExpired,
