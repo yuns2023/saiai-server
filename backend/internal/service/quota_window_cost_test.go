@@ -306,4 +306,8 @@ func TestSyncActiveToPassiveKeepsSampleTimeConsistent(t *testing.T) {
 	require.NotContains(t, written, "passive_usage_sampled_at", "no weekly window: the shared sample time must not advance")
 	require.NotContains(t, written, "session_window_utilization", "a new 5h value must not pair with an old sample time")
 	require.Len(t, repo.updates, 2)
+
+	written = svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{FiveHour: &UsageProgress{Utilization: 50}})
+	require.Nil(t, written, "five_hour only: nothing is written (5h passive value waits for header sampling)")
+	require.Len(t, repo.updates, 2)
 }
