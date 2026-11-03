@@ -2,25 +2,44 @@
   <div :title="tooltip">
     <!-- Window stats row (above progress bar) -->
     <div
-      v-if="windowStats && (windowStats.requests > 0 || windowStats.tokens > 0)"
+      v-if="windowStats || estimatedCapacity != null"
       class="mb-0.5 flex items-center"
+      data-testid="window-stats"
     >
-      <div class="flex items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
-        <span class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800">
-          {{ formatRequests }} req
-        </span>
-        <span class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800">
-          {{ formatTokens }}
-        </span>
-        <span class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800" :title="t('usage.accountBilled')">
-          A ${{ formatAccountCost }}
+      <div class="flex flex-wrap items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
+        <template v-if="windowStats && hasActivity">
+          <span class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800">
+            {{ formatRequests }} req
+          </span>
+          <span class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800">
+            {{ formatTokens }}
+          </span>
+          <span class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800" :title="t('usage.accountBilled')">
+            A ${{ formatAccountCost }}
+          </span>
+          <span
+            v-if="windowStats?.user_cost != null"
+            class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
+            :title="t('usage.userBilled')"
+          >
+            U ${{ formatUserCost }}
+          </span>
+        </template>
+        <span
+          v-if="windowStats"
+          class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
+          :title="standardCostTitle"
+          data-testid="window-standard-cost"
+        >
+          {{ t('admin.accounts.usageWindow.standardCost', { cost: formatStandardCost }) }}{{ statsRolling ? '*' : '' }}
         </span>
         <span
-          v-if="windowStats?.user_cost != null"
+          v-if="estimatedCapacity != null"
           class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
-          :title="t('usage.userBilled')"
+          :title="t('admin.accounts.usageWindow.estimatedCapacityHint')"
+          data-testid="window-estimated-capacity"
         >
-          U ${{ formatUserCost }}
+          {{ t('admin.accounts.usageWindow.estimatedCapacity', { cost: estimatedCapacity.toFixed(2) }) }}
         </span>
       </div>
     </div>
@@ -61,7 +80,7 @@ import { computed, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { WindowStats } from '@/types'
-import { formatCompactNumber } from '@/utils/format'
+import { formatCompactNumber, formatCountdown } from '@/utils/format'
 
 const props = defineProps<{
   label: string
@@ -70,6 +89,10 @@ const props = defineProps<{
   color: 'indigo' | 'emerald' | 'purple' | 'amber'
   tooltip?: string
   windowStats?: WindowStats | null
+  // Window stats fell back to a rolling window because the reset time is unknown.
+  statsRolling?: boolean
+  // Full-window capacity estimate at standard price (null/undefined = unknown).
+  estimatedCapacity?: number | null
   showNowWhenIdle?: boolean
 }>()
 
@@ -151,27 +174,12 @@ const shouldShowResetTime = computed(() => {
 const formatResetTime = computed(() => {
   // For rolling windows, when utilization is 0%, treat as immediately available.
   if (props.showNowWhenIdle && props.utilization <= 0) {
-    return '现在'
+    return t('common.now')
   }
 
   if (!props.resetsAt) return '-'
 
-  const date = new Date(props.resetsAt)
-  const diffMs = date.getTime() - now.value.getTime()
-
-  if (diffMs <= 0) return '现在'
-
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-  const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
-
-  if (diffHours >= 24) {
-    const days = Math.floor(diffHours / 24)
-    return `${days}d ${diffHours % 24}h`
-  } else if (diffHours > 0) {
-    return `${diffHours}h ${diffMins}m`
-  } else {
-    return `${diffMins}m`
-  }
+  return formatCountdown(props.resetsAt, now.value) ?? t('common.now')
 })
 
 // Window stats formatters
@@ -189,6 +197,18 @@ const formatAccountCost = computed(() => {
   if (!props.windowStats) return '0.00'
   return props.windowStats.cost.toFixed(2)
 })
+
+const hasActivity = computed(() =>
+  Boolean(props.windowStats && (props.windowStats.requests > 0 || props.windowStats.tokens > 0))
+)
+
+const formatStandardCost = computed(() => (props.windowStats?.standard_cost ?? 0).toFixed(2))
+
+const standardCostTitle = computed(() =>
+  props.statsRolling
+    ? `${t('admin.accounts.usageWindow.standardCostHint')} ${t('admin.accounts.usageWindow.rollingHint')}`
+    : t('admin.accounts.usageWindow.standardCostHint')
+)
 
 const formatUserCost = computed(() => {
   if (!props.windowStats || props.windowStats.user_cost == null) return '0.00'

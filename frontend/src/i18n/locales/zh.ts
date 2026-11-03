@@ -42,7 +42,9 @@ export default {
   "resetAt": "重置时间：{time}",
   "resetUnknown": "重置时间未知",
   "resetElapsed": "重置时间已到，等待新数据",
-  "remaining": "预计 {hours} 小时 {minutes} 分钟后重置",
+  "remaining": "预计 {time}后重置",
+  "usedCost": "本窗口平台用量（标准价）：{cost}",
+  "estimatedCapacity": "估算总额度（按标准价折算，平台外使用会使估算偏低）：{cost}",
   "loadError": "加载托管账号失败，请稍后重试",
   "accessChanged": "分组授权或展示设置已变更，请刷新分组列表。",
   "loading": "加载中…",
@@ -416,10 +418,11 @@ export default {
       hoursAgo: '{n}小时前',
       daysAgo: '{n}天前',
       countdown: {
-        daysHours: '{d}d {h}h',
-        hoursMinutes: '{h}h {m}m',
-        minutes: '{m}m',
-        withSuffix: '{time} 后解除'
+        daysHours: '{d} 天 {h} 小时',
+        hoursMinutes: '{h} 小时 {m} 分钟',
+        minutes: '{m} 分钟',
+        lessThanMinute: '不到 1 分钟',
+        withSuffix: '{time}后解除'
       }
     }
   },
@@ -2930,7 +2933,12 @@ export default {
         claude: 'Claude',
         fableWeekly: 'Fable 7天独立额度',
         passiveSampled: '被动采样',
-        activeQuery: '查询'
+        activeQuery: '查询',
+        standardCost: '标准 ${cost}',
+        standardCostHint: '本窗口平台用量（标准价，所有用户）',
+        rollingHint: '*上游重置时间未知，按滚动窗口统计',
+        estimatedCapacity: '估 ${cost}',
+        estimatedCapacityHint: '估算总额度（按标准价折算，平台外使用会使估算偏低）'
       },
       tier: {
         free: 'Free',

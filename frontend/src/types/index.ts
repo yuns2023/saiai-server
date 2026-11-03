@@ -965,6 +965,8 @@ export interface UsageProgress {
   resets_at: string | null
   remaining_seconds: number
   window_stats?: WindowStats | null // 窗口期统计（从窗口开始到当前的使用量）
+  window_stats_rolling?: boolean // 重置时间未知，window_stats 按滚动窗口统计
+  estimated_capacity_usd?: number | null // 按标准价折算的整窗口额度估算
   used_requests?: number
   limit_requests?: number
 }

@@ -50,6 +50,12 @@
                   {{ window.resets_at ? t('hostedAccounts.resetAt', { time: formatTime(window.resets_at) }) : t('hostedAccounts.resetUnknown') }}
                 </p>
                 <p v-if="window.resets_at" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ resetCountdown(window) }}</p>
+                <p v-if="window.used_cost_usd != null" class="mt-1 text-xs text-gray-600 dark:text-gray-300" data-testid="hosted-used-cost">
+                  {{ t('hostedAccounts.usedCost', { cost: formatUSD(window.used_cost_usd) }) }}
+                </p>
+                <p v-if="window.estimated_capacity_usd != null" class="mt-1 text-xs text-gray-600 dark:text-gray-300" data-testid="hosted-estimated-capacity">
+                  {{ t('hostedAccounts.estimatedCapacity', { cost: formatUSD(window.estimated_capacity_usd) }) }}
+                </p>
               </div>
             </div>
             <div class="mt-4 border-t border-gray-100 pt-3 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400">
@@ -71,6 +77,7 @@ import { useNow } from '@vueuse/core'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import { hostedAccountsAPI, type HostedAccount, type HostedGroup, type HostedQuotaWindow } from '@/api/hosted-accounts'
+import { formatCountdown } from '@/utils/format'
 
 const { t, locale } = useI18n()
 const now = useNow({ interval: 1000 })
@@ -91,10 +98,10 @@ const windowExpired = (window: HostedQuotaWindow) => window.expired ||
 const isStale = (account: HostedAccount) => account.stale || account.updated_at === null ||
   now.value.getTime() - new Date(account.updated_at).getTime() >= 15 * 60 * 1000 || account.windows.some(windowExpired)
 const resetCountdown = (window: HostedQuotaWindow) => {
-  if (windowExpired(window)) return t('hostedAccounts.resetElapsed')
-  const minutes = Math.ceil((new Date(window.resets_at!).getTime() - now.value.getTime()) / 60000)
-  return t('hostedAccounts.remaining', { hours: Math.floor(minutes / 60), minutes: minutes % 60 })
+  const countdown = windowExpired(window) ? null : formatCountdown(window.resets_at, now.value)
+  return countdown ? t('hostedAccounts.remaining', { time: countdown }) : t('hostedAccounts.resetElapsed')
 }
+const formatUSD = (value: number) => `$${value.toFixed(2)}`
 
 async function loadAccounts() {
   accountsController?.abort()

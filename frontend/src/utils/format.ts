@@ -274,12 +274,15 @@ export function formatCompactNumber(
 /**
  * 格式化倒计时（从现在到目标时间的剩余时间）
  * @param targetDate 目标日期字符串或 Date 对象
+ * @param now 当前时间（页面自带响应式时钟时传入，默认 new Date()）
  * @returns 倒计时字符串，如 "2h 41m", "3d 5h", "15m"
  */
-export function formatCountdown(targetDate: string | Date | null | undefined): string | null {
+export function formatCountdown(
+  targetDate: string | Date | null | undefined,
+  now: Date = new Date()
+): string | null {
   if (!targetDate) return null
 
-  const now = new Date()
   const target = new Date(targetDate)
   const diffMs = target.getTime() - now.getTime()
 
@@ -300,6 +303,10 @@ export function formatCountdown(targetDate: string | Date | null | undefined): s
   if (diffHours > 0) {
     // 小于1天：显示 "Xh Ym"
     return i18n.global.t('common.time.countdown.hoursMinutes', { h: diffHours, m: remainingMins })
+  }
+  if (diffMins === 0) {
+    // 不足 1 分钟：不显示 "0m"
+    return i18n.global.t('common.time.countdown.lessThanMinute')
   }
   // 小于1小时：显示 "Ym"
   return i18n.global.t('common.time.countdown.minutes', { m: diffMins })

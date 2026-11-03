@@ -5,6 +5,15 @@ import type { HostedAccount } from '@/api/hosted-accounts'
 
 const mocks = vi.hoisted(() => ({ groups: vi.fn(), list: vi.fn() }))
 vi.mock('@/api/hosted-accounts', () => ({ hostedAccountsAPI: mocks }))
+// formatCountdown reads the global i18n instance.
+vi.mock('@/i18n', async () => {
+  const { default: messages } = await import('@/i18n/locales/en')
+  const t = (key: string, params: Record<string, unknown> = {}) => {
+    const message = key.split('.').reduce<unknown>((value, part) => (value as Record<string, unknown>)?.[part], messages)
+    return String(message ?? key).replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? ''))
+  }
+  return { i18n: { global: { t } }, getLocale: () => 'en' }
+})
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
   const { default: messages } = await import('@/i18n/locales/en')
@@ -23,7 +32,7 @@ const sampledAt = '2026-10-01T12:00:00Z'
 const makeAccount = (overrides: Partial<HostedAccount> = {}): HostedAccount => ({
   id: 1, name: 'My hosted account', platform: 'anthropic', status: 'available',
   updated_at: sampledAt, stale: false,
-  windows: [{ key: 'five_hour', utilization: 35, resets_at: '2026-10-01T13:00:00Z', expired: false }],
+  windows: [{ key: 'five_hour', utilization: 35, resets_at: '2026-10-01T13:00:00Z', expired: false, used_cost_usd: null, estimated_capacity_usd: null }],
   ...overrides
 })
 const result = (items: HostedAccount[], total = items.length) => ({ items, total, page: 1, page_size: 20, pages: Math.ceil(total / 20) })
@@ -67,7 +76,7 @@ describe('HostedAccountsView', () => {
   it('keeps unknown usage distinct from measured zero', async () => {
     mocks.list.mockResolvedValue(result([
       makeAccount({ windows: [], updated_at: null, stale: true }),
-      makeAccount({ id: 2, name: 'Measured zero', windows: [{ key: 'five_hour', utilization: 0, resets_at: null, expired: false }] })
+      makeAccount({ id: 2, name: 'Measured zero', windows: [{ key: 'five_hour', utilization: 0, resets_at: null, expired: false, used_cost_usd: null, estimated_capacity_usd: null }] })
     ]))
     const view = render(); await flushPromises()
     const cards = view.findAll('[data-testid="hosted-account"]')
@@ -140,5 +149,47 @@ describe('HostedAccountsView', () => {
     const signal = mocks.list.mock.calls[mocks.list.mock.calls.length - 1][2] as AbortSignal
     view.unmount(); wrapper = undefined
     expect(signal.aborted).toBe(true)
+  })
+
+  it.each([
+    [59 * 1000, 'Expected reset in less than 1m'],
+    [(23 * 60 + 59) * 60 * 1000, 'Expected reset in 23h 59m'],
+    [24 * 3600 * 1000, 'Expected reset in 1d 0h'],
+    [((5 * 24 + 18) * 60 + 30) * 60 * 1000, 'Expected reset in 5d 18h']
+  ])('formats a reset %i ms away as "%s"', async (offset, text) => {
+    const resetsAt = new Date(new Date(sampledAt).getTime() + offset).toISOString()
+    mocks.list.mockResolvedValue(result([makeAccount({ windows: [{ key: 'seven_day', utilization: 35, resets_at: resetsAt, expired: false, used_cost_usd: null, estimated_capacity_usd: null }] })]))
+    const view = render(); await flushPromises()
+    expect(view.text()).toContain(text)
+  })
+
+  it('counts down on the page clock', async () => {
+    const view = render(); await flushPromises()
+    expect(view.text()).toContain('Expected reset in 1h 0m')
+    vi.advanceTimersByTime(59 * 60 * 1000 + 30 * 1000); await flushPromises()
+    expect(view.text()).toContain('Expected reset in less than 1m')
+  })
+
+  it('shows platform usage and the estimate only when the server provides them', async () => {
+    mocks.list.mockResolvedValue(result([
+      makeAccount({ windows: [
+        { key: 'five_hour', utilization: 50, resets_at: '2026-10-01T13:00:00Z', expired: false, used_cost_usd: 12.345, estimated_capacity_usd: 24.5 },
+        { key: 'seven_day', utilization: 5, resets_at: '2026-10-03T13:00:00Z', expired: false, used_cost_usd: 0, estimated_capacity_usd: null },
+        { key: 'seven_day_sonnet', utilization: 5, resets_at: '2026-10-03T13:00:00Z', expired: false, used_cost_usd: null, estimated_capacity_usd: null }
+      ] }),
+      makeAccount({ id: 2, name: 'Hidden costs' })
+    ]))
+    const view = render(); await flushPromises()
+    const cards = view.findAll('[data-testid="hosted-account"]')
+    const used = cards[0].findAll('[data-testid="hosted-used-cost"]')
+    expect(used).toHaveLength(2)
+    expect(used[0].text()).toBe('Platform usage this window (standard price): $12.35')
+    expect(used[1].text()).toContain('$0.00')
+    const estimates = cards[0].findAll('[data-testid="hosted-estimated-capacity"]')
+    expect(estimates).toHaveLength(1)
+    expect(estimates[0].text()).toContain('underestimate')
+    expect(estimates[0].text()).toContain('$24.50')
+    expect(cards[1].find('[data-testid="hosted-used-cost"]').exists()).toBe(false)
+    expect(cards[1].find('[data-testid="hosted-estimated-capacity"]').exists()).toBe(false)
   })
 })

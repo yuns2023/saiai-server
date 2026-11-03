@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"math"
 	"strconv"
 	"time"
@@ -18,10 +19,21 @@ type HostedAccountService struct {
 	users    UserRepository
 	groups   GroupRepository
 	accounts AccountRepository
+	costs    AccountWindowCostReader
 }
 
-func NewHostedAccountService(users UserRepository, groups GroupRepository, accounts AccountRepository) *HostedAccountService {
-	return &HostedAccountService{users: users, groups: groups, accounts: accounts}
+// HostedGroupAudienceReader lists users who can use a group (allowlist or
+// subscription), up to limit rows.
+type HostedGroupAudienceReader interface {
+	ListGroupAudienceUserIDs(ctx context.Context, groupID int64, limit int) ([]int64, error)
+}
+
+func NewHostedAccountService(users UserRepository, groups GroupRepository, accounts AccountRepository, usageLogs UsageLogRepository) *HostedAccountService {
+	s := &HostedAccountService{users: users, groups: groups, accounts: accounts}
+	if reader, ok := usageLogs.(AccountWindowCostReader); ok {
+		s.costs = reader
+	}
+	return s
 }
 
 type HostedGroup struct {
@@ -35,6 +47,11 @@ type HostedQuotaWindow struct {
 	Utilization float64    `json:"utilization"`
 	ResetsAt    *time.Time `json:"resets_at"`
 	Expired     bool       `json:"expired"`
+	// Platform usage of the account (all users, standard price) in the current
+	// window, and the full-window capacity estimated from it. Null when unknown
+	// or not disclosed to this viewer.
+	UsedCostUSD          *float64 `json:"used_cost_usd"`
+	EstimatedCapacityUSD *float64 `json:"estimated_capacity_usd"`
 }
 
 // This allowlist deliberately excludes credentials, Extra, email, proxy,
@@ -96,7 +113,90 @@ func (s *HostedAccountService) ListAccounts(ctx context.Context, userID, groupID
 	for i := range accounts {
 		result = append(result, hostedAccountSnapshot(&accounts[i], now))
 	}
+	if len(accounts) > 0 && s.groupHasOnlyViewer(ctx, groupID, userID) {
+		disclosed := make([]int, 0, len(accounts))
+		for i := range accounts {
+			if hostedAccountUsedOnlyBy(&accounts[i], groupID, userID) {
+				disclosed = append(disclosed, i)
+			}
+		}
+		s.attachWindowCosts(ctx, accounts, result, disclosed, now)
+	}
 	return result, page, nil
+}
+
+// groupHasOnlyViewer is the disclosure guard for window costs: the account
+// total includes every user's requests, so it is shown only when the viewer is
+// the group's sole allowed or subscribed user. Errors hide the costs.
+func (s *HostedAccountService) groupHasOnlyViewer(ctx context.Context, groupID, userID int64) bool {
+	reader, ok := s.users.(HostedGroupAudienceReader)
+	if !ok || s.costs == nil {
+		return false
+	}
+	ids, err := reader.ListGroupAudienceUserIDs(ctx, groupID, 2)
+	if err != nil {
+		slog.Warn("hosted_group_audience_failed", "group_id", groupID, "error", err)
+		return false
+	}
+	return len(ids) == 1 && ids[0] == userID
+}
+
+// hostedAccountUsedOnlyBy reports whether no other group or carpool user can
+// route requests to the account.
+func hostedAccountUsedOnlyBy(account *Account, groupID, userID int64) bool {
+	if len(account.GroupIDs) == 0 {
+		return false
+	}
+	for _, id := range account.GroupIDs {
+		if id != groupID {
+			return false
+		}
+	}
+	for _, id := range account.CarpoolUserIDs {
+		if id != userID {
+			return false
+		}
+	}
+	return true
+}
+
+// attachWindowCosts fills the cost fields of result[i] for every index in
+// indexes with a single query. Failures leave the fields null (unknown).
+func (s *HostedAccountService) attachWindowCosts(ctx context.Context, accounts []Account, result []HostedAccount, indexes []int, now time.Time) {
+	if s.costs == nil || len(indexes) == 0 {
+		return
+	}
+	type target struct {
+		account, window int
+		cost            quotaCostWindow
+	}
+	targets := make([]target, 0, len(indexes)*2)
+	queries := make([]AccountWindowCostQuery, 0, len(indexes)*2)
+	for _, i := range indexes {
+		for _, w := range quotaCostWindows(&accounts[i], result[i], now) {
+			for j := range result[i].Windows {
+				if result[i].Windows[j].Key == w.Key {
+					targets = append(targets, target{account: i, window: j, cost: w})
+					queries = append(queries, w.query(accounts[i].ID, now))
+					break
+				}
+			}
+		}
+	}
+	if len(queries) == 0 {
+		return
+	}
+	costs, err := s.costs.GetAccountWindowCosts(ctx, queries)
+	if err != nil || len(costs) != len(queries) {
+		slog.Warn("hosted_window_costs_failed", "queries", len(queries), "error", err)
+		return
+	}
+	for k, t := range targets {
+		used := costs[k].UsedCost
+		window := &result[t.account].Windows[t.window]
+		window.UsedCostUSD = &used
+		window.EstimatedCapacityUSD = t.cost.estimate(costs[k].SampledCost)
+	}
 }
 
 func hostedAccountSnapshot(account *Account, now time.Time) HostedAccount {

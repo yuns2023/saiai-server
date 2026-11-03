@@ -473,6 +473,35 @@ func (r *userRepository) ExistsByEmail(ctx context.Context, email string) (bool,
 	return r.client.User.Query().Where(dbuser.EmailEQ(email)).Exist(ctx)
 }
 
+// ListGroupAudienceUserIDs returns up to limit non-deleted users who can use
+// the group through the exclusive allowlist or a (non-deleted) subscription.
+func (r *userRepository) ListGroupAudienceUserIDs(ctx context.Context, groupID int64, limit int) ([]int64, error) {
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT u.id
+		FROM (
+			SELECT user_id FROM user_allowed_groups WHERE group_id = $1
+			UNION
+			SELECT user_id FROM user_subscriptions WHERE group_id = $1 AND deleted_at IS NULL
+		) a
+		JOIN users u ON u.id = a.user_id AND u.deleted_at IS NULL
+		ORDER BY u.id
+		LIMIT $2
+	`, groupID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	ids := make([]int64, 0, limit)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (r *userRepository) AddGroupToAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	client := clientFromContext(ctx, r.client)
 	return client.UserAllowedGroup.Create().

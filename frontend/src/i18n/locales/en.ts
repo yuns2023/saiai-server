@@ -42,7 +42,9 @@ export default {
   "resetAt": "Resets: {time}",
   "resetUnknown": "Reset time unknown",
   "resetElapsed": "Reset time reached; awaiting new data",
-  "remaining": "Expected reset in {hours}h {minutes}m",
+  "remaining": "Expected reset in {time}",
+  "usedCost": "Platform usage this window (standard price): {cost}",
+  "estimatedCapacity": "Estimated total quota (at standard price; usage outside the platform makes this an underestimate): {cost}",
   "loadError": "Failed to load hosted accounts. Please try again.",
   "accessChanged": "Group access or visibility has changed. Refresh the group list.",
   "loading": "Loading…",
@@ -419,6 +421,7 @@ export default {
         daysHours: '{d}d {h}h',
         hoursMinutes: '{h}h {m}m',
         minutes: '{m}m',
+        lessThanMinute: 'less than 1m',
         withSuffix: '{time} to lift'
       }
     }
@@ -3479,7 +3482,12 @@ export default {
         claude: 'Claude',
         fableWeekly: 'Fable 7-Day Dedicated Limit',
         passiveSampled: 'Passive',
-        activeQuery: 'Query'
+        activeQuery: 'Query',
+        standardCost: 'Std ${cost}',
+        standardCostHint: 'Platform usage this window (standard price, all users)',
+        rollingHint: '*Upstream reset time unknown; counted over a rolling window',
+        estimatedCapacity: 'Est ${cost}',
+        estimatedCapacityHint: 'Estimated total quota (at standard price; usage outside the platform makes this an underestimate)'
       },
       tier: {
         free: 'Free',

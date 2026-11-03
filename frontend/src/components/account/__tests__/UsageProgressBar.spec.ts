@@ -2,6 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import UsageProgressBar from '../UsageProgressBar.vue'
 
+vi.mock('@/i18n', async () => {
+  const { default: messages } = await import('@/i18n/locales/en')
+  const t = (key: string, params: Record<string, unknown> = {}) => {
+    const message = key.split('.').reduce<unknown>((value, part) => (value as Record<string, unknown>)?.[part], messages)
+    return String(message ?? key).replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? ''))
+  }
+  return { i18n: { global: { t } }, getLocale: () => 'en' }
+})
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {
@@ -33,7 +42,7 @@ describe('UsageProgressBar', () => {
       }
     })
 
-    expect(wrapper.text()).toContain('现在')
+    expect(wrapper.text()).toContain('common.now')
     expect(wrapper.text()).not.toContain('2h 30m')
   })
 
@@ -49,7 +58,7 @@ describe('UsageProgressBar', () => {
     })
 
     expect(wrapper.text()).toContain('2h 30m')
-    expect(wrapper.text()).not.toContain('现在')
+    expect(wrapper.text()).not.toContain('common.now')
   })
 
   it('showNowWhenIdle=false 时保持原有倒计时行为', () => {
@@ -64,7 +73,7 @@ describe('UsageProgressBar', () => {
     })
 
     expect(wrapper.text()).toContain('2h 30m')
-    expect(wrapper.text()).not.toContain('现在')
+    expect(wrapper.text()).not.toContain('common.now')
   })
 
   it('在根元素上暴露额度说明', () => {
@@ -78,5 +87,29 @@ describe('UsageProgressBar', () => {
     })
 
     expect(wrapper.attributes('title')).toBe('Fable 7天独立额度')
+  })
+
+  it('uses the shared countdown format for multi-day resets', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '7d', utilization: 12, resetsAt: '2026-03-22T18:30:00Z', color: 'emerald' }
+    })
+    expect(wrapper.text()).toContain('5d 18h')
+  })
+
+  it('shows standard cost and estimate, including a known zero', () => {
+    const stats = { requests: 0, tokens: 0, cost: 0, standard_cost: 0, user_cost: 0 }
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '7d', utilization: 12, color: 'emerald', windowStats: stats, estimatedCapacity: 123.456, statsRolling: true }
+    })
+    expect(wrapper.get('[data-testid="window-standard-cost"]').text()).toBe('admin.accounts.usageWindow.standardCost*')
+    expect(wrapper.find('[data-testid="window-estimated-capacity"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('req')
+  })
+
+  it('hides cost chips when stats are unknown', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '7d', utilization: 12, color: 'emerald', windowStats: null, estimatedCapacity: null }
+    })
+    expect(wrapper.find('[data-testid="window-stats"]').exists()).toBe(false)
   })
 })

@@ -63,7 +63,7 @@ func TestHostedAccountHandlerAuthorizationAndSafeResponse(t *testing.T) {
 	u := &hostedHandlerUsers{grants: []int64{10}}
 	g := &hostedHandlerGroups{visible: true}
 	a := &hostedHandlerAccounts{}
-	h := NewHostedAccountHandler(service.NewHostedAccountService(u, g, a))
+	h := NewHostedAccountHandler(service.NewHostedAccountService(u, g, a, nil))
 	request := func(path string, authenticated bool) *httptest.ResponseRecorder {
 		r := gin.New()
 		r.Use(func(c *gin.Context) {

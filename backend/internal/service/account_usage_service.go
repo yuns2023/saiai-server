@@ -154,8 +154,12 @@ type UsageProgress struct {
 	ResetsAt         *time.Time   `json:"resets_at"`              // 重置时间
 	RemainingSeconds int          `json:"remaining_seconds"`      // 距重置剩余秒数
 	WindowStats      *WindowStats `json:"window_stats,omitempty"` // 窗口期统计（从窗口开始到当前的使用量）
-	UsedRequests     int64        `json:"used_requests,omitempty"`
-	LimitRequests    int64        `json:"limit_requests,omitempty"`
+	// WindowStatsRolling 表示上游重置时间缺失，WindowStats 退回到滚动窗口（now-5h / now-7d）。
+	WindowStatsRolling bool `json:"window_stats_rolling,omitempty"`
+	// EstimatedCapacityUSD 按标准价折算的整窗口额度估算（平台外使用会使其偏低）；未知时为空。
+	EstimatedCapacityUSD *float64 `json:"estimated_capacity_usd,omitempty"`
+	UsedRequests         int64    `json:"used_requests,omitempty"`
+	LimitRequests        int64    `json:"limit_requests,omitempty"`
 }
 
 // AntigravityModelQuota Antigravity 单个模型的配额信息
@@ -615,21 +619,37 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		return usage, nil
 	}
 
-	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, now.Add(-5*time.Hour)); err == nil {
-		if usage.FiveHour == nil {
-			usage.FiveHour = &UsageProgress{Utilization: 0}
+	for _, w := range []struct {
+		key      string
+		progress **UsageProgress
+	}{{"five_hour", &usage.FiveHour}, {"seven_day", &usage.SevenDay}} {
+		var reset *time.Time
+		if *w.progress != nil {
+			reset = (*w.progress).ResetsAt
 		}
-		usage.FiveHour.WindowStats = windowStatsFromAccountStats(stats)
-	}
-
-	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, now.Add(-7*24*time.Hour)); err == nil {
-		if usage.SevenDay == nil {
-			usage.SevenDay = &UsageProgress{Utilization: 0}
+		// 优先使用上游重置时间推出的窗口起点；重置时间缺失时才退回滚动窗口并标记。
+		start, rolling := codexWindowStatsStart(w.key, reset, now)
+		if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, start); err == nil {
+			if *w.progress == nil {
+				*w.progress = &UsageProgress{Utilization: 0}
+			}
+			(*w.progress).WindowStats = windowStatsFromAccountStats(stats)
+			(*w.progress).WindowStatsRolling = rolling
 		}
-		usage.SevenDay.WindowStats = windowStatsFromAccountStats(stats)
 	}
+	s.attachQuotaWindowEstimates(ctx, account, usage, now)
 
 	return usage, nil
+}
+
+// codexWindowStatsStart returns the admin window-stats start: reset minus the
+// window length when the reset is valid, otherwise the legacy rolling start.
+func codexWindowStatsStart(key string, reset *time.Time, now time.Time) (time.Time, bool) {
+	if window, ok := resolveQuotaCostWindow(key, nil, reset, now); ok {
+		return window.Start, false
+	}
+	length, _ := quotaWindowLength(key)
+	return now.Add(-length), true
 }
 
 func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now time.Time) bool {
@@ -1068,6 +1088,55 @@ func (s *AccountUsageService) addWindowStats(ctx context.Context, account *Accou
 	// 为 FiveHour 添加 WindowStats（5h 窗口统计）
 	if usage.FiveHour != nil {
 		usage.FiveHour.WindowStats = windowStats
+	}
+
+	// 周窗口：起点由上游重置时间倒推（不改动调度依赖的 GetCurrentWindowStartTime）；
+	// 重置时间无效时不给统计，避免把滚动窗口当成本窗口。
+	now := time.Now()
+	if usage.SevenDay != nil {
+		if window, ok := resolveQuotaCostWindow("seven_day", nil, usage.SevenDay.ResetsAt, now); ok {
+			if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, window.Start); err == nil {
+				usage.SevenDay.WindowStats = windowStatsFromAccountStats(stats)
+			} else {
+				log.Printf("Failed to get 7d window stats for account %d: %v", account.ID, err)
+			}
+		}
+	}
+	s.attachQuotaWindowEstimates(ctx, account, usage, now)
+}
+
+// attachQuotaWindowEstimates adds the same capacity estimate the hosted page
+// shows (derived from the account's sampled snapshot) to the admin usage.
+func (s *AccountUsageService) attachQuotaWindowEstimates(ctx context.Context, account *Account, usage *UsageInfo, now time.Time) {
+	reader, ok := s.usageLogRepo.(AccountWindowCostReader)
+	if !ok || account == nil || usage == nil {
+		return
+	}
+	targets := make([]*UsageProgress, 0, 2)
+	windows := make([]quotaCostWindow, 0, 2)
+	queries := make([]AccountWindowCostQuery, 0, 2)
+	for _, w := range quotaCostWindows(account, hostedAccountSnapshot(account, now), now) {
+		progress := usage.FiveHour
+		if w.Key == "seven_day" {
+			progress = usage.SevenDay
+		}
+		if progress == nil || w.SampledAt == nil {
+			continue
+		}
+		targets = append(targets, progress)
+		windows = append(windows, w)
+		queries = append(queries, w.query(account.ID, now))
+	}
+	if len(queries) == 0 {
+		return
+	}
+	costs, err := reader.GetAccountWindowCosts(ctx, queries)
+	if err != nil || len(costs) != len(queries) {
+		log.Printf("Failed to get window costs for account %d: %v", account.ID, err)
+		return
+	}
+	for i, progress := range targets {
+		progress.EstimatedCapacityUSD = windows[i].estimate(costs[i].SampledCost)
 	}
 }
 

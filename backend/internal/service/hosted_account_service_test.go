@@ -50,7 +50,7 @@ func TestHostedAccountPermissionsAndRevocation(t *testing.T) {
 	u := &hostedUsersStub{user: user}
 	g := &hostedGroupsStub{group: group}
 	a := &hostedAccountsStub{rows: []Account{{ID: 2, Name: "Hosted", Status: StatusActive, Schedulable: true}}}
-	svc := NewHostedAccountService(u, g, a)
+	svc := NewHostedAccountService(u, g, a, nil)
 	params := pagination.PaginationParams{Page: 2, PageSize: 20}
 	rows, page, err := svc.ListAccounts(context.Background(), 1, 10, params)
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestHostedAccountGroupListFiltersVisibility(t *testing.T) {
 		{ID: 4, Status: "inactive", IsExclusive: true, ShowAccountQuota: true},
 		{ID: 5, Status: StatusActive, IsExclusive: true, ShowAccountQuota: true},
 	}}
-	svc := NewHostedAccountService(&hostedUsersStub{user: user}, groups, nil)
+	svc := NewHostedAccountService(&hostedUsersStub{user: user}, groups, nil, nil)
 	result, err := svc.ListGroups(context.Background(), 1)
 	require.NoError(t, err)
 	require.Equal(t, []HostedGroup{{ID: 1, Name: "Visible", Platform: PlatformAnthropic}}, result)

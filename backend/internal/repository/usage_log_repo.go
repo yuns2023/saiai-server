@@ -2219,6 +2219,63 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 	return result, nil
 }
 
+// GetAccountWindowCosts sums usage_logs.total_cost (standard price, all users)
+// for many (account, window) pairs in one statement. Each query yields the cost
+// in [Start, End) and in [Start, SampleEnd); results keep the query order and
+// windows without rows report zeros. The LATERAL subquery lets every pair use
+// the (account_id, created_at) index.
+func (r *usageLogRepository) GetAccountWindowCosts(ctx context.Context, queries []service.AccountWindowCostQuery) ([]service.AccountWindowCost, error) {
+	result := make([]service.AccountWindowCost, len(queries))
+	if len(queries) == 0 {
+		return result, nil
+	}
+	accountIDs := make([]int64, len(queries))
+	starts := make([]string, len(queries))
+	sampleEnds := make([]string, len(queries))
+	ends := make([]string, len(queries))
+	for i, q := range queries {
+		accountIDs[i] = q.AccountID
+		starts[i] = q.Start.UTC().Format(time.RFC3339Nano)
+		sampleEnds[i] = q.SampleEnd.UTC().Format(time.RFC3339Nano)
+		ends[i] = q.End.UTC().Format(time.RFC3339Nano)
+	}
+	query := `
+		SELECT q.ord, c.used_cost, c.sampled_cost
+		FROM unnest($1::bigint[], $2::timestamptz[], $3::timestamptz[], $4::timestamptz[])
+			WITH ORDINALITY AS q(account_id, start_at, sample_end, end_at, ord)
+		CROSS JOIN LATERAL (
+			SELECT
+				COALESCE(SUM(ul.total_cost), 0) AS used_cost,
+				COALESCE(SUM(ul.total_cost) FILTER (WHERE ul.created_at < q.sample_end), 0) AS sampled_cost
+			FROM usage_logs ul
+			WHERE ul.account_id = q.account_id
+				AND ul.created_at >= q.start_at
+				AND ul.created_at < q.end_at
+		) c
+		ORDER BY q.ord
+	`
+	rows, err := r.sql.QueryContext(ctx, query, pq.Array(accountIDs), pq.Array(starts), pq.Array(sampleEnds), pq.Array(ends))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var ord int64
+		var cost service.AccountWindowCost
+		if err := rows.Scan(&ord, &cost.UsedCost, &cost.SampledCost); err != nil {
+			return nil, err
+		}
+		if ord < 1 || ord > int64(len(result)) {
+			return nil, fmt.Errorf("account window cost: unexpected ordinal %d", ord)
+		}
+		result[ord-1] = cost
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // GetGeminiUsageTotalsBatch 批量聚合 Gemini 账号在窗口内的 Pro/Flash 请求与用量。
 // 模型分类规则与 service.geminiModelClassFromName 一致：model 包含 flash/lite 视为 flash，其余视为 pro。
 func (r *usageLogRepository) GetGeminiUsageTotalsBatch(ctx context.Context, accountIDs []int64, startTime, endTime time.Time) (map[int64]service.GeminiUsageTotals, error) {

@@ -12,6 +12,9 @@ export interface HostedQuotaWindow {
   utilization: number
   resets_at: string | null
   expired: boolean
+  // Platform usage of the whole account this window (standard price); null = unknown or not shown.
+  used_cost_usd: number | null
+  estimated_capacity_usd: number | null
 }
 
 export interface HostedAccount {
