@@ -563,7 +563,11 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 	}
 
 	if len(extraUpdates) > 0 {
-		extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
+		// passive_usage_sampled_at 是 5h 与周窗口共用的采样时间：主动结果缺周窗口时不推进它，
+		// 否则保留的旧周百分比会被当成新样本（额度估算会偏高）。
+		if usage.SevenDay != nil {
+			extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
+		}
 		if err := s.accountRepo.UpdateExtra(ctx, accountID, extraUpdates); err != nil {
 			slog.Warn("sync_active_to_passive_failed", "account_id", accountID, "error", err)
 		} else {

@@ -120,11 +120,17 @@ func TestAttachQuotaWindowEstimatesRequiresMatchingReset(t *testing.T) {
 	require.NotNil(t, usage.FiveHour.EstimatedCapacityUSD)
 	require.InDelta(t, 4.0, *usage.FiveHour.EstimatedCapacityUSD, 1e-9)
 
-	moved := fiveReset.Add(time.Hour)
+	near := fiveReset.Add(59 * time.Second)
+	usage = &UsageInfo{FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &near}}
+	svc.attachQuotaWindowEstimates(context.Background(), &account, usage, now)
+	require.NotNil(t, usage.FiveHour.EstimatedCapacityUSD, "within the 1 minute tolerance")
+	require.Equal(t, 2, costs.calls)
+
+	moved := fiveReset.Add(61 * time.Second)
 	usage = &UsageInfo{FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &moved}}
 	svc.attachQuotaWindowEstimates(context.Background(), &account, usage, now)
 	require.Nil(t, usage.FiveHour.EstimatedCapacityUSD, "displayed window differs from the sampled one")
-	require.Equal(t, 1, costs.calls, "no query when nothing is estimable")
+	require.Equal(t, 2, costs.calls, "no query when nothing is estimable")
 }
 
 type hostedAudienceUsersStub struct {
