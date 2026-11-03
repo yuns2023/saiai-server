@@ -2088,7 +2088,7 @@ const fallbackGroupOptions = computed(() => {
     { value: null, label: t('admin.groups.claudeCode.noFallback') }
   ]
   const eligibleGroups = groups.value.filter(
-    (g) => g.platform === 'anthropic' && !g.claude_code_only && g.status === 'active'
+    (g) => g.platform === 'anthropic' && !g.claude_code_only && g.status === 'active' && !g.hosted_usage_enabled
   )
   eligibleGroups.forEach((g) => {
     options.push({ value: g.id, label: g.name })
@@ -2103,7 +2103,7 @@ const fallbackGroupOptionsForEdit = computed(() => {
   ]
   const currentId = editingGroup.value?.id
   const eligibleGroups = groups.value.filter(
-    (g) => g.platform === 'anthropic' && !g.claude_code_only && g.status === 'active' && g.id !== currentId
+    (g) => g.platform === 'anthropic' && !g.claude_code_only && g.status === 'active' && !g.hosted_usage_enabled && g.id !== currentId
   )
   eligibleGroups.forEach((g) => {
     options.push({ value: g.id, label: g.name })
@@ -2121,6 +2121,7 @@ const invalidRequestFallbackOptions = computed(() => {
       g.platform === 'anthropic' &&
       g.status === 'active' &&
       g.subscription_type !== 'subscription' &&
+      !g.hosted_usage_enabled &&
       g.fallback_group_id_on_invalid_request === null
   )
   eligibleGroups.forEach((g) => {
@@ -2140,6 +2141,7 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
       g.platform === 'anthropic' &&
       g.status === 'active' &&
       g.subscription_type !== 'subscription' &&
+      !g.hosted_usage_enabled &&
       g.fallback_group_id_on_invalid_request === null &&
       g.id !== currentId
   )
@@ -2929,6 +2931,7 @@ watch(
       createForm.codex_cn_timezone_guard = false
     }
     if (!['anthropic', 'antigravity'].includes(newVal)) createForm.claude_device_limit_mode = 'off'
+    if (!supportsHostedUsage(newVal)) createForm.hosted_usage_enabled = false
   }
 )
 
@@ -2949,6 +2952,7 @@ watch(
       editForm.codex_cn_timezone_guard = false
     }
     if (!['anthropic', 'antigravity'].includes(newVal)) editForm.claude_device_limit_mode = 'off'
+    if (!supportsHostedUsage(newVal)) editForm.hosted_usage_enabled = false
   }
 )
 

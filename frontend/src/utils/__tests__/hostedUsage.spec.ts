@@ -43,6 +43,11 @@ describe('GroupsView rate multiplier inputs', () => {
     }
   })
 
+  it('keeps hosted groups out of fallback choices and clears hosted on unsupported platforms', () => {
+    expect(source.match(/!g\.hosted_usage_enabled/g)).toHaveLength(4)
+    expect(source.match(/if \(!supportsHostedUsage\(newVal\)\) (?:create|edit)Form\.hosted_usage_enabled = false/g)).toHaveLength(2)
+  })
+
   it('shows the blocked reason next to both hosted checkboxes', () => {
     expect(source.match(/data-testid="hosted-usage-blocked-reason"/g)).toHaveLength(2)
     expect(source.match(/:disabled="!(?:create|edit)Form\.hosted_usage_enabled && !isHostedUsageEligible\((?:create|edit)Form\)"/g)).toHaveLength(2)
