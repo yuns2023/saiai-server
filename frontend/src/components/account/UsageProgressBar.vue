@@ -26,7 +26,7 @@
           </span>
         </template>
         <span
-          v-if="windowStats"
+          v-if="windowStats?.standard_cost != null"
           class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
           :title="standardCostTitle"
           data-testid="window-standard-cost"
@@ -202,7 +202,7 @@ const hasActivity = computed(() =>
   Boolean(props.windowStats && (props.windowStats.requests > 0 || props.windowStats.tokens > 0))
 )
 
-const formatStandardCost = computed(() => (props.windowStats?.standard_cost ?? 0).toFixed(2))
+const formatStandardCost = computed(() => props.windowStats?.standard_cost?.toFixed(2) ?? '')
 
 const standardCostTitle = computed(() =>
   props.statsRolling

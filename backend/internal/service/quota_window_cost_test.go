@@ -93,17 +93,39 @@ func TestQuotaCostWindowSampleAndEstimate(t *testing.T) {
 func TestCodexWindowStatsStartFallsBackOnlyWithoutReset(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	reset := now.Add(2 * time.Hour)
-	start, rolling := codexWindowStatsStart("five_hour", &reset, now)
+	start, rolling, ok := codexWindowStatsStart("five_hour", &reset, now)
+	require.True(t, ok)
 	require.False(t, rolling)
 	require.Equal(t, now.Add(-3*time.Hour), start)
-	start, rolling = codexWindowStatsStart("seven_day", nil, now)
+	start, rolling, ok = codexWindowStatsStart("seven_day", nil, now)
+	require.True(t, ok)
 	require.True(t, rolling)
 	require.Equal(t, now.Add(-7*24*time.Hour), start)
-	expired := now.Add(-time.Minute)
-	_, rolling = codexWindowStatsStart("five_hour", &expired, now)
-	require.True(t, rolling)
+	for _, invalid := range []time.Time{now.Add(-time.Minute), now, now.Add(5*time.Hour + time.Second)} {
+		_, _, ok = codexWindowStatsStart("five_hour", &invalid, now)
+		require.False(t, ok, "an elapsed or too-far reset gives no stats rather than a rolling window")
+	}
 }
 
+func TestAttachQuotaWindowEstimatesRequiresMatchingReset(t *testing.T) {
+	now := time.Now()
+	account := hostedCostFixture(now, 4, []int64{10})
+	fiveReset := *account.SessionWindowEnd
+	costs := &windowCostUsageStub{}
+	svc := &AccountUsageService{usageLogRepo: costs}
+
+	usage := &UsageInfo{FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &fiveReset}}
+	svc.attachQuotaWindowEstimates(context.Background(), &account, usage, now)
+	require.Equal(t, 1, costs.calls)
+	require.NotNil(t, usage.FiveHour.EstimatedCapacityUSD)
+	require.InDelta(t, 4.0, *usage.FiveHour.EstimatedCapacityUSD, 1e-9)
+
+	moved := fiveReset.Add(time.Hour)
+	usage = &UsageInfo{FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &moved}}
+	svc.attachQuotaWindowEstimates(context.Background(), &account, usage, now)
+	require.Nil(t, usage.FiveHour.EstimatedCapacityUSD, "displayed window differs from the sampled one")
+	require.Equal(t, 1, costs.calls, "no query when nothing is estimable")
+}
 
 type hostedAudienceUsersStub struct {
 	hostedUsersStub

@@ -12,6 +12,9 @@ const (
 	// Below this utilization the capacity estimate is dominated by rounding of
 	// the upstream percentage, so it is not shown.
 	quotaEstimateMinUtilization = 10.0
+	// Admin progress and the sampled snapshot describe the same window when
+	// their reset times agree within this tolerance.
+	quotaResetMatchTolerance = time.Minute
 )
 
 // AccountWindowCostQuery asks for the standard-price usage (usage_logs.total_cost,
@@ -128,4 +131,11 @@ func quotaCostWindows(account *Account, snapshot HostedAccount, now time.Time) [
 		result = append(result, window.withSample(w.Utilization, snapshot.UpdatedAt, now))
 	}
 	return result
+}
+
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
 }

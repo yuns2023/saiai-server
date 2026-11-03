@@ -435,13 +435,16 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 		// 3. 构建 UsageInfo（每次都重新计算 RemainingSeconds）
 		now := time.Now()
 		usage := s.buildUsageInfo(apiResp, &now)
+
+		// 4. 只有真实请求了上游才同步到被动缓存：缓存命中不能推进 passive_usage_sampled_at，
+		// 也不能把下面补入的旧被动周窗口当作新样本写回（否则额度估算会用旧百分比配新成本）。
+		if fresh {
+			mergeAccountExtra(account, s.syncActiveToPassive(ctx, account.ID, usage))
+		}
 		applyPassiveAnthropicWeeklyUsage(usage, account.Extra, now)
 
-		// 4. 添加窗口统计（有独立缓存，1 分钟）
+		// 5. 添加窗口统计（有独立缓存，1 分钟）
 		s.addWindowStats(ctx, account, usage)
-
-		// 5. 将主动查询结果同步到被动缓存，下次 passive 加载即为最新值
-		s.syncActiveToPassive(ctx, account.ID, usage)
 
 		if fresh {
 			s.tryClearRecoverableAccountError(ctx, account)
@@ -533,7 +536,8 @@ func buildPassiveUsageWindow(extra map[string]any, utilizationKey, resetKey stri
 
 // syncActiveToPassive 将主动查询的最新数据回写到 Extra 被动缓存，
 // 这样下次被动加载时能看到最新值。
-func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID int64, usage *UsageInfo) {
+// 返回成功写入的字段（写入失败或无数据时返回 nil）。
+func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID int64, usage *UsageInfo) map[string]any {
 	extraUpdates := make(map[string]any, 4)
 
 	if usage.FiveHour != nil {
@@ -566,7 +570,7 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 			evalAccount, err := s.accountRepo.GetByID(ctx, accountID)
 			if err != nil {
 				slog.Warn("sync_active_to_passive_get_account_failed", "account_id", accountID, "error", err)
-				return
+				return extraUpdates
 			}
 			if evalAccount != nil {
 				mergeAccountExtra(evalAccount, extraUpdates)
@@ -574,8 +578,10 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 					setClaudeOAuth5hThresholdRateLimit(ctx, s.accountRepo, evalAccount, usage.FiveHour.Utilization, usage.FiveHour.ResetsAt, "active_usage_sync")
 				}
 			}
+			return extraUpdates
 		}
 	}
+	return nil
 }
 
 func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
@@ -603,9 +609,9 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 			if resetAt != nil {
 				account.RateLimitResetAt = resetAt
 			}
-			if usage.UpdatedAt == nil {
-				usage.UpdatedAt = &now
-			}
+			// 探测可能跨秒：以探测完成后的时间评估新快照，避免把刚写入的样本当成未来样本。
+			now = time.Now()
+			usage.UpdatedAt = &now
 			if progress := buildCodexUsageProgressFromExtra(account.Extra, "5h", now); progress != nil {
 				usage.FiveHour = progress
 			}
@@ -627,8 +633,12 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		if *w.progress != nil {
 			reset = (*w.progress).ResetsAt
 		}
-		// 优先使用上游重置时间推出的窗口起点；重置时间缺失时才退回滚动窗口并标记。
-		start, rolling := codexWindowStatsStart(w.key, reset, now)
+		// 优先使用上游重置时间推出的窗口起点；重置时间缺失时才退回滚动窗口并标记；
+		// 重置时间存在但无效（已过、过远）时不给统计。
+		start, rolling, ok := codexWindowStatsStart(w.key, reset, now)
+		if !ok {
+			continue
+		}
 		if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, start); err == nil {
 			if *w.progress == nil {
 				*w.progress = &UsageProgress{Utilization: 0}
@@ -643,13 +653,17 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 }
 
 // codexWindowStatsStart returns the admin window-stats start: reset minus the
-// window length when the reset is valid, otherwise the legacy rolling start.
-func codexWindowStatsStart(key string, reset *time.Time, now time.Time) (time.Time, bool) {
-	if window, ok := resolveQuotaCostWindow(key, nil, reset, now); ok {
-		return window.Start, false
+// window length when the reset is valid, the legacy rolling start (rolling=true)
+// when the reset is missing, and ok=false when a reset exists but is invalid.
+func codexWindowStatsStart(key string, reset *time.Time, now time.Time) (start time.Time, rolling bool, ok bool) {
+	if window, valid := resolveQuotaCostWindow(key, nil, reset, now); valid {
+		return window.Start, false, true
+	}
+	if reset != nil {
+		return time.Time{}, false, false
 	}
 	length, _ := quotaWindowLength(key)
-	return now.Add(-length), true
+	return now.Add(-length), true, true
 }
 
 func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now time.Time) bool {
@@ -1120,7 +1134,9 @@ func (s *AccountUsageService) attachQuotaWindowEstimates(ctx context.Context, ac
 		if w.Key == "seven_day" {
 			progress = usage.SevenDay
 		}
-		if progress == nil || w.SampledAt == nil {
+		// 只给与展示进度同一窗口的样本估算（主动查询结果可能与被动快照不一致）。
+		if progress == nil || w.SampledAt == nil || progress.ResetsAt == nil ||
+			absDuration(progress.ResetsAt.Sub(w.Reset)) > quotaResetMatchTolerance {
 			continue
 		}
 		targets = append(targets, progress)

@@ -106,6 +106,13 @@ describe('UsageProgressBar', () => {
     expect(wrapper.text()).not.toContain('req')
   })
 
+  it('does not turn a missing standard cost into $0.00', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '5h', utilization: 12, color: 'indigo', windowStats: { requests: 1, tokens: 10, cost: 1 } }
+    })
+    expect(wrapper.find('[data-testid="window-standard-cost"]').exists()).toBe(false)
+  })
+
   it('hides cost chips when stats are unknown', () => {
     const wrapper = mount(UsageProgressBar, {
       props: { label: '7d', utilization: 12, color: 'emerald', windowStats: null, estimatedCapacity: null }
