@@ -273,3 +273,37 @@ func TestHostedAccountWindowCostsDisclosureGuard(t *testing.T) {
 		require.Nil(t, windowByKey(rows[0], "five_hour").UsedCostUSD)
 	})
 }
+
+type syncPassiveAccountsStub struct {
+	AccountRepository
+	updates []map[string]any
+}
+
+func (r *syncPassiveAccountsStub) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+	r.updates = append(r.updates, updates)
+	return nil
+}
+
+func (r *syncPassiveAccountsStub) GetByID(context.Context, int64) (*Account, error) {
+	return nil, errors.New("not needed")
+}
+
+func TestSyncActiveToPassiveKeepsSampleTimeConsistent(t *testing.T) {
+	repo := &syncPassiveAccountsStub{}
+	svc := &AccountUsageService{accountRepo: repo}
+	reset := time.Now().Add(time.Hour)
+
+	written := svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{
+		FiveHour: &UsageProgress{Utilization: 50}, SevenDay: &UsageProgress{Utilization: 20, ResetsAt: &reset},
+	})
+	require.Contains(t, written, "passive_usage_sampled_at")
+	require.InDelta(t, 0.5, written["session_window_utilization"], 1e-9)
+
+	written = svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{
+		FiveHour:      &UsageProgress{Utilization: 50},
+		SevenDayFable: &UsageProgress{Utilization: 30},
+	})
+	require.NotContains(t, written, "passive_usage_sampled_at", "no weekly window: the shared sample time must not advance")
+	require.NotContains(t, written, "session_window_utilization", "a new 5h value must not pair with an old sample time")
+	require.Len(t, repo.updates, 2)
+}

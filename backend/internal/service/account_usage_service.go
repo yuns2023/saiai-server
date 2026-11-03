@@ -540,7 +540,10 @@ func buildPassiveUsageWindow(extra map[string]any, utilizationKey, resetKey stri
 func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID int64, usage *UsageInfo) map[string]any {
 	extraUpdates := make(map[string]any, 4)
 
-	if usage.FiveHour != nil {
+	// passive_usage_sampled_at 是 5h 与周窗口共用的采样时间，只有主动结果同时带周窗口时才推进。
+	// 缺周窗口时也不写 5h 百分比：否则新百分比会配上旧采样时间（额度估算失真）。
+	// 这种情况下 5h 被动值等下一次网关响应头采样更新。
+	if usage.FiveHour != nil && usage.SevenDay != nil {
 		extraUpdates["session_window_utilization"] = usage.FiveHour.Utilization / 100
 	}
 	if usage.SevenDay != nil {
@@ -563,8 +566,6 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 	}
 
 	if len(extraUpdates) > 0 {
-		// passive_usage_sampled_at 是 5h 与周窗口共用的采样时间：主动结果缺周窗口时不推进它，
-		// 否则保留的旧周百分比会被当成新样本（额度估算会偏高）。
 		if usage.SevenDay != nil {
 			extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
 		}
