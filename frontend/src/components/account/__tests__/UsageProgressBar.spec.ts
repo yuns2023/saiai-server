@@ -99,18 +99,21 @@ describe('UsageProgressBar', () => {
   it('shows standard cost and estimate, including a known zero', () => {
     const stats = { requests: 0, tokens: 0, cost: 0, standard_cost: 0, user_cost: 0 }
     const wrapper = mount(UsageProgressBar, {
-      props: { label: '7d', utilization: 12, color: 'emerald', windowStats: stats, estimatedCapacity: 123.456, statsRolling: true }
+      props: { label: '7d', utilization: 12, color: 'emerald', windowStats: stats, standardCost: 0, estimatedCapacity: 123.456 }
     })
-    expect(wrapper.get('[data-testid="window-standard-cost"]').text()).toBe('admin.accounts.usageWindow.standardCost*')
+    expect(wrapper.get('[data-testid="window-standard-cost"]').text()).toBe('admin.accounts.usageWindow.standardCost')
     expect(wrapper.find('[data-testid="window-estimated-capacity"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('req')
   })
 
-  it('does not turn a missing standard cost into $0.00', () => {
+  it('hides standard cost for an unknown or rolling window but keeps req/A/U', () => {
+    const stats = { requests: 3, tokens: 30, cost: 1, standard_cost: 2, user_cost: 0 }
     const wrapper = mount(UsageProgressBar, {
-      props: { label: '5h', utilization: 12, color: 'indigo', windowStats: { requests: 1, tokens: 10, cost: 1 } }
+      props: { label: '5h', utilization: 12, color: 'indigo', windowStats: stats, statsRolling: true, standardCost: null }
     })
     expect(wrapper.find('[data-testid="window-standard-cost"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="window-requests"]').text()).toBe('3 req*')
+    expect(wrapper.text()).toContain('A $1.00')
   })
 
   it('hides cost chips when stats are unknown', () => {

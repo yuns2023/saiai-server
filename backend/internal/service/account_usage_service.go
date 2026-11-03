@@ -156,6 +156,8 @@ type UsageProgress struct {
 	WindowStats      *WindowStats `json:"window_stats,omitempty"` // 窗口期统计（从窗口开始到当前的使用量）
 	// WindowStatsRolling 表示上游重置时间缺失，WindowStats 退回到滚动窗口（now-5h / now-7d）。
 	WindowStatsRolling bool `json:"window_stats_rolling,omitempty"`
+	// StandardCostUSD 本窗口 [reset-窗口长度, now) 的平台用量（标准价，所有用户）；窗口无效时为空。
+	StandardCostUSD *float64 `json:"standard_cost_usd,omitempty"`
 	// EstimatedCapacityUSD 按标准价折算的整窗口额度估算（平台外使用会使其偏低）；未知时为空。
 	EstimatedCapacityUSD *float64 `json:"estimated_capacity_usd,omitempty"`
 	UsedRequests         int64    `json:"used_requests,omitempty"`
@@ -436,11 +438,9 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 		now := time.Now()
 		usage := s.buildUsageInfo(apiResp, &now)
 
-		// 4. 只有真实请求了上游才同步到被动缓存：缓存命中不能推进 passive_usage_sampled_at，
-		// 也不能把下面补入的旧被动周窗口当作新样本写回（否则额度估算会用旧百分比配新成本）。
-		if fresh {
-			mergeAccountExtra(account, s.syncActiveToPassive(ctx, account.ID, usage))
-		}
+		// 4. 将主动查询结果同步到被动缓存（并评估 5h 阈值），下次 passive 加载即为最新值。
+		// 必须在补入旧被动周窗口之前同步，避免旧周窗口被当作新样本写回。
+		mergeAccountExtra(account, s.syncActiveToPassive(ctx, account.ID, usage))
 		applyPassiveAnthropicWeeklyUsage(usage, account.Extra, now)
 
 		// 5. 添加窗口统计（有独立缓存，1 分钟）
@@ -540,10 +540,7 @@ func buildPassiveUsageWindow(extra map[string]any, utilizationKey, resetKey stri
 func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID int64, usage *UsageInfo) map[string]any {
 	extraUpdates := make(map[string]any, 4)
 
-	// passive_usage_sampled_at 是 5h 与周窗口共用的采样时间，只有主动结果同时带周窗口时才推进。
-	// 缺周窗口时也不写 5h 百分比：否则新百分比会配上旧采样时间（额度估算失真）。
-	// 这种情况下 5h 被动值等下一次网关响应头采样更新。
-	if usage.FiveHour != nil && usage.SevenDay != nil {
+	if usage.FiveHour != nil {
 		extraUpdates["session_window_utilization"] = usage.FiveHour.Utilization / 100
 	}
 	if usage.SevenDay != nil {
@@ -566,6 +563,9 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 	}
 
 	if len(extraUpdates) > 0 {
+		// passive_usage_sampled_at 是 5h 与周窗口共用的采样时间：主动结果缺周窗口时不推进，
+		// 否则保留的旧周百分比会被当成新样本。代价：只有 5h 的结果更新了 5h 百分比但不推进时间，
+		// 5h 估算可能使用稍旧的采样时间。
 		if usage.SevenDay != nil {
 			extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
 		}
@@ -661,7 +661,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 // window length when the reset is valid, the legacy rolling start (rolling=true)
 // when the reset is missing, and ok=false when a reset exists but is invalid.
 func codexWindowStatsStart(key string, reset *time.Time, now time.Time) (start time.Time, rolling bool, ok bool) {
-	if window, valid := resolveQuotaCostWindow(key, nil, reset, now); valid {
+	if window, valid := resolveQuotaCostWindow(key, reset, now); valid {
 		return window.Start, false, true
 	}
 	if reset != nil {
@@ -1113,7 +1113,7 @@ func (s *AccountUsageService) addWindowStats(ctx context.Context, account *Accou
 	// 重置时间无效时不给统计，避免把滚动窗口当成本窗口。
 	now := time.Now()
 	if usage.SevenDay != nil {
-		if window, ok := resolveQuotaCostWindow("seven_day", nil, usage.SevenDay.ResetsAt, now); ok {
+		if window, ok := resolveQuotaCostWindow("seven_day", usage.SevenDay.ResetsAt, now); ok {
 			if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, window.Start); err == nil {
 				usage.SevenDay.WindowStats = windowStatsFromAccountStats(stats)
 			} else {
@@ -1124,29 +1124,42 @@ func (s *AccountUsageService) addWindowStats(ctx context.Context, account *Accou
 	s.attachQuotaWindowEstimates(ctx, account, usage, now)
 }
 
-// attachQuotaWindowEstimates adds the same capacity estimate the hosted page
-// shows (derived from the account's sampled snapshot) to the admin usage.
+// attachQuotaWindowEstimates sets the admin standard-price window cost and the
+// capacity estimate for five_hour/seven_day. Both use the window
+// [reset - length, now) derived from the displayed reset; the estimate also
+// needs a sampled snapshot window with the same reset (±1 minute), computed by
+// the same helper as the hosted page. Invalid windows stay unknown.
 func (s *AccountUsageService) attachQuotaWindowEstimates(ctx context.Context, account *Account, usage *UsageInfo, now time.Time) {
 	reader, ok := s.usageLogRepo.(AccountWindowCostReader)
 	if !ok || account == nil || usage == nil {
 		return
 	}
+	sampled := make(map[string]quotaCostWindow, 2)
+	for _, w := range quotaCostWindows(hostedAccountSnapshot(account, now), now) {
+		sampled[w.Key] = w
+	}
 	targets := make([]*UsageProgress, 0, 2)
 	windows := make([]quotaCostWindow, 0, 2)
 	queries := make([]AccountWindowCostQuery, 0, 2)
-	for _, w := range quotaCostWindows(account, hostedAccountSnapshot(account, now), now) {
-		progress := usage.FiveHour
-		if w.Key == "seven_day" {
-			progress = usage.SevenDay
-		}
-		// 只给与展示进度同一窗口的样本估算（主动查询结果可能与被动快照不一致）。
-		if progress == nil || w.SampledAt == nil || progress.ResetsAt == nil ||
-			absDuration(progress.ResetsAt.Sub(w.Reset)) > quotaResetMatchTolerance {
+	for _, item := range []struct {
+		key      string
+		progress *UsageProgress
+	}{{"five_hour", usage.FiveHour}, {"seven_day", usage.SevenDay}} {
+		if item.progress == nil {
 			continue
 		}
-		targets = append(targets, progress)
-		windows = append(windows, w)
-		queries = append(queries, w.query(account.ID, now))
+		window, valid := resolveQuotaCostWindow(item.key, item.progress.ResetsAt, now)
+		if !valid {
+			continue
+		}
+		// 只用与展示进度同一窗口的样本估算（主动查询结果可能与被动快照不一致）。
+		if snap, found := sampled[item.key]; found && snap.SampledAt != nil &&
+			absDuration(window.Reset.Sub(snap.Reset)) <= quotaResetMatchTolerance {
+			window = window.withSample(snap.Utilization, snap.SampledAt, now)
+		}
+		targets = append(targets, item.progress)
+		windows = append(windows, window)
+		queries = append(queries, window.query(account.ID, now))
 	}
 	if len(queries) == 0 {
 		return
@@ -1157,6 +1170,8 @@ func (s *AccountUsageService) attachQuotaWindowEstimates(ctx context.Context, ac
 		return
 	}
 	for i, progress := range targets {
+		used := costs[i].UsedCost
+		progress.StandardCostUSD = &used
 		progress.EstimatedCapacityUSD = windows[i].estimate(costs[i].SampledCost)
 	}
 }

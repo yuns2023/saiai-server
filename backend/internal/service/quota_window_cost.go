@@ -61,21 +61,17 @@ func quotaWindowLength(key string) (time.Duration, bool) {
 	}
 }
 
-// resolveQuotaCostWindow returns the window [start, reset) containing now.
-// start is normally reset minus the window length; a recorded start (Anthropic
-// SessionWindowStart) is preferred when it is consistent with reset. A missing,
-// elapsed, or too-far-future reset gives no window: callers must report the
-// cost as unknown rather than fall back to a rolling window.
-func resolveQuotaCostWindow(key string, recordedStart, reset *time.Time, now time.Time) (quotaCostWindow, bool) {
+// resolveQuotaCostWindow returns the window [reset - length, reset) containing
+// now. A missing, elapsed, or too-far-future reset gives no window: callers
+// must report the cost as unknown rather than fall back to a rolling window.
+// The scheduler's own window start (GetCurrentWindowStartTime /
+// SessionWindowStart) is deliberately not used here.
+func resolveQuotaCostWindow(key string, reset *time.Time, now time.Time) (quotaCostWindow, bool) {
 	length, ok := quotaWindowLength(key)
 	if !ok || reset == nil || !now.Before(*reset) || reset.Sub(now) > length {
 		return quotaCostWindow{}, false
 	}
-	start := reset.Add(-length)
-	if recordedStart != nil && !recordedStart.After(now) && recordedStart.Before(*reset) && reset.Sub(*recordedStart) <= length {
-		start = *recordedStart
-	}
-	return quotaCostWindow{Key: key, Start: start, Reset: *reset}, true
+	return quotaCostWindow{Key: key, Start: reset.Add(-length), Reset: *reset}, true
 }
 
 // withSample records the utilization sample when it is reliable enough for a
@@ -117,14 +113,10 @@ func (w quotaCostWindow) estimate(sampledCost float64) *float64 {
 // quotaCostWindows derives the five_hour and seven_day cost windows from the
 // same snapshot the hosted page displays. Model-scoped weekly windows are not
 // included: their cost cannot be attributed from usage_logs.
-func quotaCostWindows(account *Account, snapshot HostedAccount, now time.Time) []quotaCostWindow {
+func quotaCostWindows(snapshot HostedAccount, now time.Time) []quotaCostWindow {
 	result := make([]quotaCostWindow, 0, 2)
 	for _, w := range snapshot.Windows {
-		var recordedStart *time.Time
-		if w.Key == "five_hour" && account.IsAnthropicOAuthOrSetupToken() {
-			recordedStart = account.SessionWindowStart
-		}
-		window, ok := resolveQuotaCostWindow(w.Key, recordedStart, w.ResetsAt, now)
+		window, ok := resolveQuotaCostWindow(w.Key, w.ResetsAt, now)
 		if !ok {
 			continue
 		}

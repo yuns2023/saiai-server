@@ -17,38 +17,31 @@ func TestResolveQuotaCostWindowValidity(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
 
-	_, ok := resolveQuotaCostWindow("five_hour", nil, nil, now)
+	_, ok := resolveQuotaCostWindow("five_hour", nil, now)
 	require.False(t, ok, "missing reset")
-	_, ok = resolveQuotaCostWindow("five_hour", nil, at(0), now)
+	_, ok = resolveQuotaCostWindow("five_hour", at(0), now)
 	require.False(t, ok, "reset equal to now is expired")
-	_, ok = resolveQuotaCostWindow("seven_day", nil, at(-time.Second), now)
+	_, ok = resolveQuotaCostWindow("seven_day", at(-time.Second), now)
 	require.False(t, ok, "expired reset")
-	_, ok = resolveQuotaCostWindow("five_hour", nil, at(5*time.Hour+time.Second), now)
+	_, ok = resolveQuotaCostWindow("five_hour", at(5*time.Hour+time.Second), now)
 	require.False(t, ok, "reset further away than the window length")
-	_, ok = resolveQuotaCostWindow("seven_day_sonnet", nil, at(time.Hour), now)
+	_, ok = resolveQuotaCostWindow("seven_day_sonnet", at(time.Hour), now)
 	require.False(t, ok, "model-scoped windows have no cost window")
 
-	w, ok := resolveQuotaCostWindow("five_hour", nil, at(5*time.Hour), now)
+	w, ok := resolveQuotaCostWindow("five_hour", at(5*time.Hour), now)
 	require.True(t, ok, "start exactly at now is valid")
 	require.Equal(t, now, w.Start)
-	w, ok = resolveQuotaCostWindow("seven_day", nil, at(48*time.Hour), now)
+	w, ok = resolveQuotaCostWindow("seven_day", at(48*time.Hour), now)
 	require.True(t, ok)
 	require.Equal(t, now.Add(48*time.Hour-7*24*time.Hour), w.Start)
 	require.Equal(t, now.Add(48*time.Hour), w.Reset)
 
-	// A consistent recorded start wins; inconsistent ones fall back to reset-length.
-	w, _ = resolveQuotaCostWindow("five_hour", at(-90*time.Minute), at(3*time.Hour), now)
-	require.Equal(t, now.Add(-90*time.Minute), w.Start)
-	for _, recorded := range []*time.Time{at(time.Minute), at(-3 * time.Hour), at(3 * time.Hour)} {
-		w, _ = resolveQuotaCostWindow("five_hour", recorded, at(3*time.Hour), now)
-		require.Equal(t, now.Add(-2*time.Hour), w.Start)
-	}
 }
 
 func TestQuotaCostWindowSampleAndEstimate(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	reset := now.Add(3 * time.Hour)
-	base, ok := resolveQuotaCostWindow("five_hour", nil, &reset, now)
+	base, ok := resolveQuotaCostWindow("five_hour", &reset, now)
 	require.True(t, ok)
 	fresh := now.Add(-time.Minute)
 
@@ -84,7 +77,7 @@ func TestQuotaCostWindowSampleAndEstimate(t *testing.T) {
 	require.Nil(t, w.estimate(math.NaN()))
 
 	newReset := now.Add(5*time.Hour - 5*time.Minute)
-	fresh5h, ok := resolveQuotaCostWindow("five_hour", nil, &newReset, now)
+	fresh5h, ok := resolveQuotaCostWindow("five_hour", &newReset, now)
 	require.True(t, ok)
 	edge := fresh5h.withSample(40, &fresh5h.Start, now)
 	require.NotNil(t, edge.SampledAt, "sample exactly at window start is inside the window")
@@ -116,21 +109,29 @@ func TestAttachQuotaWindowEstimatesRequiresMatchingReset(t *testing.T) {
 
 	usage := &UsageInfo{FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &fiveReset}}
 	svc.attachQuotaWindowEstimates(context.Background(), &account, usage, now)
-	require.Equal(t, 1, costs.calls)
-	require.NotNil(t, usage.FiveHour.EstimatedCapacityUSD)
+	require.Equal(t, fiveReset.Add(-5*time.Hour), costs.queries[0].Start)
+	require.InDelta(t, 4.0, *usage.FiveHour.StandardCostUSD, 1e-9)
 	require.InDelta(t, 4.0, *usage.FiveHour.EstimatedCapacityUSD, 1e-9)
 
 	near := fiveReset.Add(59 * time.Second)
 	usage = &UsageInfo{FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &near}}
 	svc.attachQuotaWindowEstimates(context.Background(), &account, usage, now)
 	require.NotNil(t, usage.FiveHour.EstimatedCapacityUSD, "within the 1 minute tolerance")
-	require.Equal(t, 2, costs.calls)
 
 	moved := fiveReset.Add(61 * time.Second)
 	usage = &UsageInfo{FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &moved}}
 	svc.attachQuotaWindowEstimates(context.Background(), &account, usage, now)
+	require.NotNil(t, usage.FiveHour.StandardCostUSD, "standard cost follows the displayed valid window")
 	require.Nil(t, usage.FiveHour.EstimatedCapacityUSD, "displayed window differs from the sampled one")
-	require.Equal(t, 2, costs.calls, "no query when nothing is estimable")
+
+	for name, reset := range map[string]*time.Time{"missing": nil, "elapsed": ptrTime(now.Add(-time.Minute)), "too far": ptrTime(now.Add(6 * time.Hour))} {
+		calls := costs.calls
+		usage = &UsageInfo{FiveHour: &UsageProgress{Utilization: 50, ResetsAt: reset}, SevenDay: &UsageProgress{Utilization: 5}}
+		svc.attachQuotaWindowEstimates(context.Background(), &account, usage, now)
+		require.Nil(t, usage.FiveHour.StandardCostUSD, name)
+		require.Nil(t, usage.SevenDay.StandardCostUSD, name)
+		require.Equal(t, calls, costs.calls, name+": no query without a valid window")
+	}
 }
 
 type hostedAudienceUsersStub struct {
@@ -169,7 +170,8 @@ func (r *windowCostUsageStub) GetAccountWindowCosts(_ context.Context, queries [
 
 func hostedCostFixture(now time.Time, id int64, groups []int64) Account {
 	fiveReset := now.Add(2 * time.Hour)
-	fiveStart := fiveReset.Add(-5 * time.Hour)
+	// The scheduler's recorded start (hour-truncated prediction) must not move the cost window.
+	fiveStart := fiveReset.Add(-4 * time.Hour)
 	return Account{ID: id, Name: "Hosted", Platform: PlatformAnthropic, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
 		GroupIDs: groups, SessionWindowStart: &fiveStart, SessionWindowEnd: &fiveReset,
 		Extra: map[string]any{
@@ -207,6 +209,7 @@ func TestHostedAccountWindowCostsDisclosureGuard(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, costs.calls)
 		require.Len(t, costs.queries, 4, "five_hour and seven_day for both accounts; never sub-windows")
+		require.Equal(t, accounts[0].SessionWindowEnd.Add(-5*time.Hour), costs.queries[0].Start, "cost window is exactly reset - 5h")
 		five := windowByKey(rows[0], "five_hour")
 		require.InDelta(t, 4.0, *five.UsedCostUSD, 1e-9)
 		require.InDelta(t, 4.0, *five.EstimatedCapacityUSD, 1e-9, "sampled $2 at 50%")
@@ -277,6 +280,7 @@ func TestHostedAccountWindowCostsDisclosureGuard(t *testing.T) {
 type syncPassiveAccountsStub struct {
 	AccountRepository
 	updates []map[string]any
+	account *Account
 }
 
 func (r *syncPassiveAccountsStub) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
@@ -285,29 +289,32 @@ func (r *syncPassiveAccountsStub) UpdateExtra(_ context.Context, _ int64, update
 }
 
 func (r *syncPassiveAccountsStub) GetByID(context.Context, int64) (*Account, error) {
-	return nil, errors.New("not needed")
+	copied := *r.account
+	return &copied, nil
 }
 
-func TestSyncActiveToPassiveKeepsSampleTimeConsistent(t *testing.T) {
-	repo := &syncPassiveAccountsStub{}
+func (r *syncPassiveAccountsStub) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
+	r.account.RateLimitResetAt = &resetAt
+	return nil
+}
+
+func TestSyncActiveToPassiveSampleTimeAndThreshold(t *testing.T) {
+	repo := &syncPassiveAccountsStub{account: &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+		Extra: map[string]any{"claude_oauth_5h_rate_limit_threshold_percent": 90.0}}}
 	svc := &AccountUsageService{accountRepo: repo}
-	reset := time.Now().Add(time.Hour)
+	fiveReset := time.Now().Add(time.Hour)
+	weekReset := time.Now().Add(48 * time.Hour)
 
 	written := svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{
-		FiveHour: &UsageProgress{Utilization: 50}, SevenDay: &UsageProgress{Utilization: 20, ResetsAt: &reset},
+		FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &fiveReset}, SevenDay: &UsageProgress{Utilization: 20, ResetsAt: &weekReset},
 	})
 	require.Contains(t, written, "passive_usage_sampled_at")
 	require.InDelta(t, 0.5, written["session_window_utilization"], 1e-9)
 
-	written = svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{
-		FiveHour:      &UsageProgress{Utilization: 50},
-		SevenDayFable: &UsageProgress{Utilization: 30},
-	})
+	written = svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{FiveHour: &UsageProgress{Utilization: 100, ResetsAt: &fiveReset}})
+	require.InDelta(t, 1.0, written["session_window_utilization"], 1e-9, "5h-only results still update the 5h value")
 	require.NotContains(t, written, "passive_usage_sampled_at", "no weekly window: the shared sample time must not advance")
-	require.NotContains(t, written, "session_window_utilization", "a new 5h value must not pair with an old sample time")
 	require.Len(t, repo.updates, 2)
-
-	written = svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{FiveHour: &UsageProgress{Utilization: 50}})
-	require.Nil(t, written, "five_hour only: nothing is written (5h passive value waits for header sampling)")
-	require.Len(t, repo.updates, 2)
+	require.NotNil(t, repo.account.RateLimitResetAt, "5h threshold is still evaluated for a 5h-only result")
+	require.WithinDuration(t, fiveReset, *repo.account.RateLimitResetAt, time.Second)
 }

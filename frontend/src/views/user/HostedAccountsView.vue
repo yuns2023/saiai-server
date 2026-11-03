@@ -50,10 +50,10 @@
                   {{ window.resets_at ? t('hostedAccounts.resetAt', { time: formatTime(window.resets_at) }) : t('hostedAccounts.resetUnknown') }}
                 </p>
                 <p v-if="window.resets_at" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ resetCountdown(window) }}</p>
-                <p v-if="window.used_cost_usd != null" class="mt-1 text-xs text-gray-600 dark:text-gray-300" data-testid="hosted-used-cost">
+                <p v-if="window.used_cost_usd != null && !windowExpired(window)" class="mt-1 text-xs text-gray-600 dark:text-gray-300" data-testid="hosted-used-cost">
                   {{ t('hostedAccounts.usedCost', { cost: formatUSD(window.used_cost_usd) }) }}
                 </p>
-                <p v-if="window.estimated_capacity_usd != null" class="mt-1 text-xs text-gray-600 dark:text-gray-300" data-testid="hosted-estimated-capacity">
+                <p v-if="window.estimated_capacity_usd != null && estimateUsable(account, window)" class="mt-1 text-xs text-gray-600 dark:text-gray-300" data-testid="hosted-estimated-capacity">
                   {{ t('hostedAccounts.estimatedCapacity', { cost: formatUSD(window.estimated_capacity_usd) }) }}
                 </p>
               </div>
@@ -98,10 +98,14 @@ const windowExpired = (window: HostedQuotaWindow) => window.expired ||
 const isStale = (account: HostedAccount) => account.stale || account.updated_at === null ||
   now.value.getTime() - new Date(account.updated_at).getTime() >= 15 * 60 * 1000 || account.windows.some(windowExpired)
 const resetCountdown = (window: HostedQuotaWindow) => {
-  const countdown = windowExpired(window) ? null : formatCountdown(window.resets_at, now.value)
+  const countdown = windowExpired(window) ? null : formatCountdown(window.resets_at, now.value, 'hostedAccounts.countdown')
   return countdown ? t('hostedAccounts.remaining', { time: countdown }) : t('hostedAccounts.resetElapsed')
 }
 const formatUSD = (value: number) => `$${value.toFixed(2)}`
+// The estimate pairs platform cost with a utilization sample; it is only shown
+// while that sample is fresh and its window has not reset.
+const estimateUsable = (account: HostedAccount, window: HostedQuotaWindow) => !windowExpired(window) &&
+  account.updated_at !== null && now.value.getTime() - new Date(account.updated_at).getTime() < 15 * 60 * 1000
 
 async function loadAccounts() {
   accountsController?.abort()

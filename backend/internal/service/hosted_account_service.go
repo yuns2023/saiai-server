@@ -173,7 +173,7 @@ func (s *HostedAccountService) attachWindowCosts(ctx context.Context, accounts [
 	targets := make([]target, 0, len(indexes)*2)
 	queries := make([]AccountWindowCostQuery, 0, len(indexes)*2)
 	for _, i := range indexes {
-		for _, w := range quotaCostWindows(&accounts[i], result[i], now) {
+		for _, w := range quotaCostWindows(result[i], now) {
 			for j := range result[i].Windows {
 				if result[i].Windows[j].Key == w.Key {
 					targets = append(targets, target{account: i, window: j, cost: w})

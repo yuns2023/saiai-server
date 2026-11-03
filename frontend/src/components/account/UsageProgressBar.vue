@@ -2,14 +2,18 @@
   <div :title="tooltip">
     <!-- Window stats row (above progress bar) -->
     <div
-      v-if="windowStats || estimatedCapacity != null"
+      v-if="(windowStats && hasActivity) || standardCost != null || estimatedCapacity != null"
       class="mb-0.5 flex items-center"
       data-testid="window-stats"
     >
       <div class="flex flex-wrap items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
         <template v-if="windowStats && hasActivity">
-          <span class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800">
-            {{ formatRequests }} req
+          <span
+            class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
+            :title="statsRolling ? t('admin.accounts.usageWindow.rollingHint') : undefined"
+            data-testid="window-requests"
+          >
+            {{ formatRequests }} req{{ statsRolling ? '*' : '' }}
           </span>
           <span class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800">
             {{ formatTokens }}
@@ -26,12 +30,12 @@
           </span>
         </template>
         <span
-          v-if="windowStats?.standard_cost != null"
+          v-if="standardCost != null"
           class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
-          :title="standardCostTitle"
+          :title="t('admin.accounts.usageWindow.standardCostHint')"
           data-testid="window-standard-cost"
         >
-          {{ t('admin.accounts.usageWindow.standardCost', { cost: formatStandardCost }) }}{{ statsRolling ? '*' : '' }}
+          {{ t('admin.accounts.usageWindow.standardCost', { cost: standardCost.toFixed(2) }) }}
         </span>
         <span
           v-if="estimatedCapacity != null"
@@ -91,6 +95,8 @@ const props = defineProps<{
   windowStats?: WindowStats | null
   // Window stats fell back to a rolling window because the reset time is unknown.
   statsRolling?: boolean
+  // Platform usage at standard price in [reset - window, now); null/undefined = unknown.
+  standardCost?: number | null
   // Full-window capacity estimate at standard price (null/undefined = unknown).
   estimatedCapacity?: number | null
   showNowWhenIdle?: boolean
@@ -200,14 +206,6 @@ const formatAccountCost = computed(() => {
 
 const hasActivity = computed(() =>
   Boolean(props.windowStats && (props.windowStats.requests > 0 || props.windowStats.tokens > 0))
-)
-
-const formatStandardCost = computed(() => props.windowStats?.standard_cost?.toFixed(2) ?? '')
-
-const standardCostTitle = computed(() =>
-  props.statsRolling
-    ? `${t('admin.accounts.usageWindow.standardCostHint')} ${t('admin.accounts.usageWindow.rollingHint')}`
-    : t('admin.accounts.usageWindow.standardCostHint')
 )
 
 const formatUserCost = computed(() => {

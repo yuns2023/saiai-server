@@ -43,6 +43,12 @@ export default {
   "resetUnknown": "Reset time unknown",
   "resetElapsed": "Reset time reached; awaiting new data",
   "remaining": "Expected reset in {time}",
+  "countdown": {
+    "daysHours": "{d} days {h} hours",
+    "hoursMinutes": "{h} hours {m} minutes",
+    "minutes": "{m} minutes",
+    "lessThanMinute": "less than 1 minute"
+  },
   "usedCost": "Platform usage this window (standard price): {cost}",
   "estimatedCapacity": "Estimated total quota (at standard price; usage outside the platform makes this an underestimate): {cost}",
   "loadError": "Failed to load hosted accounts. Please try again.",
@@ -421,7 +427,7 @@ export default {
         daysHours: '{d}d {h}h',
         hoursMinutes: '{h}h {m}m',
         minutes: '{m}m',
-        lessThanMinute: 'less than 1m',
+        lessThanMinute: '<1m',
         withSuffix: '{time} to lift'
       }
     }

@@ -275,11 +275,13 @@ export function formatCompactNumber(
  * 格式化倒计时（从现在到目标时间的剩余时间）
  * @param targetDate 目标日期字符串或 Date 对象
  * @param now 当前时间（页面自带响应式时钟时传入，默认 new Date()）
+ * @param keyPrefix 文案前缀（需含 daysHours/hoursMinutes/minutes/lessThanMinute），默认紧凑格式
  * @returns 倒计时字符串，如 "2h 41m", "3d 5h", "15m"
  */
 export function formatCountdown(
   targetDate: string | Date | null | undefined,
-  now: Date = new Date()
+  now: Date = new Date(),
+  keyPrefix = 'common.time.countdown'
 ): string | null {
   if (!targetDate) return null
 
@@ -298,18 +300,18 @@ export function formatCountdown(
 
   if (diffDays > 0) {
     // 超过1天：显示 "Xd Yh"
-    return i18n.global.t('common.time.countdown.daysHours', { d: diffDays, h: remainingHours })
+    return i18n.global.t(`${keyPrefix}.daysHours`, { d: diffDays, h: remainingHours })
   }
   if (diffHours > 0) {
     // 小于1天：显示 "Xh Ym"
-    return i18n.global.t('common.time.countdown.hoursMinutes', { h: diffHours, m: remainingMins })
+    return i18n.global.t(`${keyPrefix}.hoursMinutes`, { h: diffHours, m: remainingMins })
   }
   if (diffMins === 0) {
     // 不足 1 分钟：不显示 "0m"
-    return i18n.global.t('common.time.countdown.lessThanMinute')
+    return i18n.global.t(`${keyPrefix}.lessThanMinute`)
   }
   // 小于1小时：显示 "Ym"
-  return i18n.global.t('common.time.countdown.minutes', { m: diffMins })
+  return i18n.global.t(`${keyPrefix}.minutes`, { m: diffMins })
 }
 
 /**
