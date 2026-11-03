@@ -2,7 +2,7 @@
   <div :title="tooltip">
     <!-- Window stats row (above progress bar) -->
     <div
-      v-if="(windowStats && hasActivity) || standardCost != null || estimatedCapacity != null"
+      v-if="(windowStats && hasActivity) || showStandardCost || showEstimate"
       class="mb-0.5 flex items-center"
       data-testid="window-stats"
     >
@@ -10,7 +10,7 @@
         <template v-if="windowStats && hasActivity">
           <span
             class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
-            :title="statsRolling ? t('admin.accounts.usageWindow.rollingHint') : undefined"
+            :title="statsRolling ? t('admin.accounts.usageWindow.rollingHint') : t('admin.accounts.usageWindow.statsHint')"
             data-testid="window-requests"
           >
             {{ formatRequests }} req{{ statsRolling ? '*' : '' }}
@@ -30,20 +30,20 @@
           </span>
         </template>
         <span
-          v-if="standardCost != null"
+          v-if="showStandardCost"
           class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
           :title="t('admin.accounts.usageWindow.standardCostHint')"
           data-testid="window-standard-cost"
         >
-          {{ t('admin.accounts.usageWindow.standardCost', { cost: standardCost.toFixed(2) }) }}
+          {{ t('admin.accounts.usageWindow.standardCost', { cost: (standardCost ?? 0).toFixed(2) }) }}
         </span>
         <span
-          v-if="estimatedCapacity != null"
+          v-if="showEstimate"
           class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
           :title="t('admin.accounts.usageWindow.estimatedCapacityHint')"
           data-testid="window-estimated-capacity"
         >
-          {{ t('admin.accounts.usageWindow.estimatedCapacity', { cost: estimatedCapacity.toFixed(2) }) }}
+          {{ t('admin.accounts.usageWindow.estimatedCapacity', { cost: (estimatedCapacity ?? 0).toFixed(2) }) }}
         </span>
       </div>
     </div>
@@ -203,6 +203,14 @@ const formatAccountCost = computed(() => {
   if (!props.windowStats) return '0.00'
   return props.windowStats.cost.toFixed(2)
 })
+
+// Window costs belong to the window that was current when loaded; hide them
+// once the countdown passes the reset (the parent may not have refreshed yet).
+const windowStillCurrent = computed(
+  () => !props.resetsAt || new Date(props.resetsAt).getTime() > now.value.getTime()
+)
+const showStandardCost = computed(() => props.standardCost != null && windowStillCurrent.value)
+const showEstimate = computed(() => props.estimatedCapacity != null && windowStillCurrent.value)
 
 const hasActivity = computed(() =>
   Boolean(props.windowStats && (props.windowStats.requests > 0 || props.windowStats.tokens > 0))

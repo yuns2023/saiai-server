@@ -62,7 +62,7 @@ describe('HostedAccountsView', () => {
     expect(view.text()).toContain('My hosted account')
     expect(view.text()).toContain('35.0%')
     expect(view.text()).toContain('Data updated:')
-    expect(view.text()).toContain('Expected reset in 1 hours 0 minutes')
+    expect(view.text()).toContain('Expected reset in 1h 0m')
     expect(mocks.list).toHaveBeenCalledWith(10, 1, expect.any(AbortSignal))
   })
 
@@ -152,10 +152,10 @@ describe('HostedAccountsView', () => {
   })
 
   it.each([
-    [59 * 1000, 'Expected reset in less than 1 minute'],
-    [(23 * 60 + 59) * 60 * 1000, 'Expected reset in 23 hours 59 minutes'],
-    [24 * 3600 * 1000, 'Expected reset in 1 days 0 hours'],
-    [((5 * 24 + 18) * 60 + 30) * 60 * 1000, 'Expected reset in 5 days 18 hours']
+    [59 * 1000, 'Expected reset in less than a minute'],
+    [(23 * 60 + 59) * 60 * 1000, 'Expected reset in 23h 59m'],
+    [24 * 3600 * 1000, 'Expected reset in 1d 0h'],
+    [((5 * 24 + 18) * 60 + 30) * 60 * 1000, 'Expected reset in 5d 18h']
   ])('formats a reset %i ms away as "%s"', async (offset, text) => {
     const resetsAt = new Date(new Date(sampledAt).getTime() + offset).toISOString()
     mocks.list.mockResolvedValue(result([makeAccount({ windows: [{ key: 'seven_day', utilization: 35, resets_at: resetsAt, expired: false, used_cost_usd: null, estimated_capacity_usd: null }] })]))
@@ -165,9 +165,9 @@ describe('HostedAccountsView', () => {
 
   it('counts down on the page clock', async () => {
     const view = render(); await flushPromises()
-    expect(view.text()).toContain('Expected reset in 1 hours 0 minutes')
+    expect(view.text()).toContain('Expected reset in 1h 0m')
     vi.advanceTimersByTime(59 * 60 * 1000 + 30 * 1000); await flushPromises()
-    expect(view.text()).toContain('Expected reset in less than 1 minute')
+    expect(view.text()).toContain('Expected reset in less than a minute')
   })
 
   it('shows platform usage and the estimate only when the server provides them', async () => {

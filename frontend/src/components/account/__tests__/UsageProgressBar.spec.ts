@@ -116,6 +116,17 @@ describe('UsageProgressBar', () => {
     expect(wrapper.text()).toContain('A $1.00')
   })
 
+  it('hides window costs once the reset passes', async () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '5h', utilization: 12, color: 'indigo', resetsAt: '2026-03-17T00:01:30Z', standardCost: 1.5, estimatedCapacity: 10 }
+    })
+    expect(wrapper.find('[data-testid="window-standard-cost"]').exists()).toBe(true)
+    vi.advanceTimersByTime(2 * 60 * 1000)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="window-standard-cost"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="window-estimated-capacity"]').exists()).toBe(false)
+  })
+
   it('hides cost chips when stats are unknown', () => {
     const wrapper = mount(UsageProgressBar, {
       props: { label: '7d', utilization: 12, color: 'emerald', windowStats: null, estimatedCapacity: null }

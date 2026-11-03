@@ -44,10 +44,10 @@ export default {
   "resetElapsed": "Reset time reached; awaiting new data",
   "remaining": "Expected reset in {time}",
   "countdown": {
-    "daysHours": "{d} days {h} hours",
-    "hoursMinutes": "{h} hours {m} minutes",
-    "minutes": "{m} minutes",
-    "lessThanMinute": "less than 1 minute"
+    "daysHours": "{d}d {h}h",
+    "hoursMinutes": "{h}h {m}m",
+    "minutes": "{m} min",
+    "lessThanMinute": "less than a minute"
   },
   "usedCost": "Platform usage this window (standard price): {cost}",
   "estimatedCapacity": "Estimated total quota (at standard price; usage outside the platform makes this an underestimate): {cost}",
@@ -3490,7 +3490,8 @@ export default {
         passiveSampled: 'Passive',
         activeQuery: 'Query',
         standardCost: 'Std ${cost}',
-        standardCostHint: 'Platform usage this window (standard price, all users)',
+        standardCostHint: 'Platform usage this window (standard price, all users; window derived from the upstream reset time, so its start may differ from the request stats)',
+        statsHint: 'Counted from the account\'s recorded window start',
         rollingHint: '*Upstream reset time unknown; counted over a rolling window',
         estimatedCapacity: 'Est ${cost}',
         estimatedCapacityHint: 'Estimated total quota (at standard price; usage outside the platform makes this an underestimate)'

@@ -49,7 +49,6 @@ export default {
     "minutes": "{m} 分钟",
     "lessThanMinute": "不到 1 分钟"
   },
-  "estimateStale": "",
   "usedCost": "本窗口平台用量（标准价）：{cost}",
   "estimatedCapacity": "估算总额度（按标准价折算，平台外使用会使估算偏低）：{cost}",
   "loadError": "加载托管账号失败，请稍后重试",
@@ -2942,7 +2941,8 @@ export default {
         passiveSampled: '被动采样',
         activeQuery: '查询',
         standardCost: '标准 ${cost}',
-        standardCostHint: '本窗口平台用量（标准价，所有用户）',
+        standardCostHint: '本窗口平台用量（标准价，所有用户；窗口按上游重置时间倒推，可能与左侧请求统计的起点不同）',
+        statsHint: '按账号记录的窗口起点统计',
         rollingHint: '*上游重置时间未知，按滚动窗口统计',
         estimatedCapacity: '估 ${cost}',
         estimatedCapacityHint: '估算总额度（按标准价折算，平台外使用会使估算偏低）'
