@@ -59,10 +59,14 @@ jobs:
           git cat-file -e "${HEAD_SHA}^{commit}"
           snapshot=backend/resources/model-pricing/model_prices_and_context_window.json
           config=backend/internal/config/config.go
+          # Prints the default remote URL only when exactly one is declared;
+          # anything else (missing file, none, several) yields "" -> exact.
           remote_url() {
-            git show "$1:$config" 2>/dev/null \
-              | sed -n 's/.*viper.SetDefault("pricing.remote_url", "\(https:[^"]*\)").*/\1/p' \
-              | head -n 1
+            local urls
+            urls="$(git show "$1:$config" 2>/dev/null \
+              | sed -n 's/.*viper.SetDefault("pricing.remote_url", "\(https:[^"]*\)").*/\1/p')" || true
+            [[ -n "$urls" && "$(printf '%s\n' "$urls" | wc -l)" -eq 1 ]] && printf '%s' "$urls"
+            return 0
           }
           base_url="$(remote_url "$BASE_SHA")"
           head_url="$(remote_url "$HEAD_SHA")"

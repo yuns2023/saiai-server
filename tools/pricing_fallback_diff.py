@@ -24,6 +24,7 @@ import argparse
 import json
 import math
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,8 @@ STRING_FIELDS = ("litellm_provider", "mode")
 BILLING_FIELDS = FLOAT_FIELDS + INT_FIELDS + BOOL_FIELDS + STRING_FIELDS
 DOC_KEYS = ("sample_spec",)
 
+INT64_MIN, INT64_MAX = -(2**63), 2**63 - 1
+
 EXIT_PASS = 0
 EXIT_BLOCK = 1
 EXIT_INVALID = 2
@@ -67,6 +70,34 @@ class FeedError(ValueError):
 
 def _reject_constant(value: str) -> Any:
     raise FeedError(f"non-finite number {value}")
+
+
+def _finite_float(text: str) -> float:
+    number = float(text)
+    if not math.isfinite(number):
+        raise FeedError(f"number {text} overflows float64")
+    return number
+
+
+def go_fields(name: str, entry: dict[str, Any]) -> dict[str, Any]:
+    """Map JSON keys to LiteLLMRawEntry fields the way encoding/json does.
+
+    Go matches struct tags case-insensitively and a later key overwrites an
+    earlier one, so {"input_cost_per_token": 1, "INPUT_COST_PER_TOKEN": 9}
+    decodes to 9. Non-ASCII keys that fold onto a known field are rejected
+    instead of emulating Go's special Unicode folding.
+    """
+    fields: dict[str, Any] = {}
+    for key, value in entry.items():
+        if key in BILLING_FIELDS:
+            fields[key] = value
+            continue
+        folded = key.lower() if key.isascii() else key.casefold()
+        if folded in BILLING_FIELDS:
+            if not key.isascii():
+                raise FeedError(f"{name}: non-ASCII key {key!r} folds onto {folded}")
+            fields[folded] = value
+    return fields
 
 
 def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -91,6 +122,7 @@ def billing_view(name: str, entry: Any) -> dict[str, Any] | None:
     """
     if not isinstance(entry, dict):
         return None
+    entry = go_fields(name, entry)
     view: dict[str, Any] = {}
     for field in FLOAT_FIELDS:
         value = entry.get(field)
@@ -110,7 +142,7 @@ def billing_view(name: str, entry: Any) -> dict[str, Any] | None:
         value = entry.get(field)
         if value is None:
             view[field] = None
-        elif isinstance(value, int) and not isinstance(value, bool):
+        elif isinstance(value, int) and not isinstance(value, bool) and INT64_MIN <= value <= INT64_MAX:
             view[field] = value
         else:
             return None
@@ -138,7 +170,8 @@ def billing_view(name: str, entry: Any) -> dict[str, Any] | None:
 def load_feed(text: str, label: str) -> dict[str, Any]:
     try:
         document = json.loads(
-            text, object_pairs_hook=_no_duplicates, parse_constant=_reject_constant
+            text, object_pairs_hook=_no_duplicates, parse_constant=_reject_constant,
+            parse_float=_finite_float,
         )
     except FeedError as error:
         raise FeedError(f"{label}: {error}") from None
@@ -276,11 +309,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--billed-keys", type=Path, help="one resolved price key per line")
     parser.add_argument("--min-priced-models", type=int, default=1000)
     parser.add_argument("--max-shrink-ratio", type=float, default=0.2)
-    parser.add_argument("--fallback-age-days", type=float)
+    parser.add_argument("--fallback-synced-at", type=int,
+                        help="Unix time of the fallback's last sync commit")
     parser.add_argument("--max-age-days", type=float, default=7.0)
     parser.add_argument("--json", type=Path, help="write the machine-readable report here")
     parser.add_argument("--github", action="store_true", help="emit GitHub Actions annotations")
     args = parser.parse_args(argv)
+    if args.min_priced_models < 1:
+        parser.error("--min-priced-models must be positive")
+    if not 0 <= args.max_shrink_ratio < 1:
+        parser.error("--max-shrink-ratio must be in [0, 1)")
+    if not args.max_age_days > 0:
+        parser.error("--max-age-days must be positive")
 
     try:
         fallback = load_feed(args.fallback.read_text(encoding="utf-8"), "fallback")
@@ -320,15 +360,16 @@ def main(argv: list[str] | None = None) -> int:
                 "billed key in neither feed (alias/override or retired; review): "
                 + ", ".join(safe(key) for key in impact["billed_in_neither"])
             )
-    if report["drift"] and args.fallback_age_days is not None:
-        report["fallback_age_days"] = round(args.fallback_age_days, 2)
-        if args.fallback_age_days > args.max_age_days:
-            warnings.append(
-                f"fallback differs from remote and was last synced {args.fallback_age_days:.1f} days ago"
-                f" (> {args.max_age_days:g}); run tools/pricing_fallback_sync.sh sync"
-            )
-    elif report["drift"]:
-        warnings.append("fallback differs from remote")
+    if report["drift"]:
+        warnings.append("fallback differs from remote (not a failure by itself)")
+        if args.fallback_synced_at is not None:
+            age_days = (time.time() - args.fallback_synced_at) / 86400
+            report["fallback_age_days"] = round(age_days, 2)
+            if age_days > args.max_age_days:
+                warnings.append(
+                    f"fallback was last synced {age_days:.1f} days ago"
+                    f" (> {args.max_age_days:g}); run tools/pricing_fallback_sync.sh sync"
+                )
     report["problems"] = problems
     report["blocking"] = blocking
     report["warnings"] = warnings
@@ -340,7 +381,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.github:
             print(f"::warning title=Pricing fallback::{warning.splitlines()[0][:300]}")
     if args.json:
-        args.json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        try:
+            args.json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        except OSError as error:
+            print(f"INVALID: cannot write report: {error}", file=sys.stderr)
+            return EXIT_INVALID
     if problems:
         for problem in problems:
             print(f"INVALID: {problem}", file=sys.stderr)
