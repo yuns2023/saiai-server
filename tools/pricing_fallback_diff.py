@@ -80,23 +80,23 @@ def _finite_float(text: str) -> float:
 
 
 def go_fields(name: str, entry: dict[str, Any]) -> dict[str, Any]:
-    """Map JSON keys to LiteLLMRawEntry fields the way encoding/json does.
+    """Map JSON keys to LiteLLMRawEntry fields the way encoding/json matches them.
 
-    Go matches struct tags case-insensitively and a later key overwrites an
-    earlier one, so {"input_cost_per_token": 1, "INPUT_COST_PER_TOKEN": 9}
-    decodes to 9. Non-ASCII keys that fold onto a known field are rejected
-    instead of emulating Go's special Unicode folding.
+    Go matches struct tags case-insensitively. When one field appears under
+    several spellings, Go's result depends on decode order, type errors and
+    pointer-vs-value null handling, so such an entry is rejected instead of
+    emulated; so are non-ASCII keys that fold onto a known field.
     """
     fields: dict[str, Any] = {}
     for key, value in entry.items():
-        if key in BILLING_FIELDS:
-            fields[key] = value
-            continue
         folded = key.lower() if key.isascii() else key.casefold()
-        if folded in BILLING_FIELDS:
-            if not key.isascii():
-                raise FeedError(f"{name}: non-ASCII key {key!r} folds onto {folded}")
-            fields[folded] = value
+        if folded not in BILLING_FIELDS:
+            continue
+        if not key.isascii():
+            raise FeedError(f"{name}: non-ASCII key {key!r} folds onto {folded}")
+        if folded in fields:
+            raise FeedError(f"{name}: field {folded} appears under several spellings")
+        fields[folded] = value
     return fields
 
 
@@ -202,7 +202,7 @@ def unread_cost_fields(entry: Any) -> dict[str, Any]:
     return {
         key: value
         for key, value in entry.items()
-        if "cost" in key and key not in BILLING_FIELDS
+        if "cost" in key.lower() and key.lower() not in BILLING_FIELDS
     }
 
 
@@ -217,11 +217,12 @@ def compare(fallback: dict[str, Any], remote: dict[str, Any]) -> dict[str, Any]:
     for name in sorted(set(fallback_views) & set(remote_views)):
         old_view, new_view = fallback_views[name], remote_views[name]
         fields = [field for field in BILLING_FIELDS if old_view[field] != new_view[field]]
+        unread = unread_cost_fields(fallback[name]) != unread_cost_fields(remote[name])
         if fields:
             billing_changed[name] = fields
-        elif unread_cost_fields(fallback[name]) != unread_cost_fields(remote[name]):
+        if unread:
             unread_cost_changed.append(name)
-        elif fallback[name] != remote[name]:
+        if not fields and not unread and fallback[name] != remote[name]:
             metadata_only.append(name)
     unpriced_changed = sorted(
         name
@@ -319,8 +320,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--min-priced-models must be positive")
     if not 0 <= args.max_shrink_ratio < 1:
         parser.error("--max-shrink-ratio must be in [0, 1)")
-    if not args.max_age_days > 0:
-        parser.error("--max-age-days must be positive")
+    if not (math.isfinite(args.max_age_days) and args.max_age_days > 0):
+        parser.error("--max-age-days must be a finite positive number")
 
     try:
         fallback = load_feed(args.fallback.read_text(encoding="utf-8"), "fallback")

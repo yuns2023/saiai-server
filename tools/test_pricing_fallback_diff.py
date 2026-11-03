@@ -131,14 +131,22 @@ class PricingDiffTests(unittest.TestCase):
 
     def test_go_case_insensitive_field_overrides_are_seen(self) -> None:
         remote = feed(10)
-        remote["model-0"] = {**remote["model-0"], "INPUT_COST_PER_TOKEN": 9e-6}
+        remote["model-0"] = {k: v for k, v in remote["model-0"].items() if k != "input_cost_per_token"}
+        remote["model-0"]["INPUT_COST_PER_TOKEN"] = 9e-6
         code, _, _, report = self.run_main(feed(10), remote, billed=["model-0"])
         self.assertEqual(code, 1)
         self.assertEqual(report["billing_changed"], {"model-0": ["input_cost_per_token"]})
-        later_wins = feed(10)
-        later_wins["model-1"] = {"Input_Cost_Per_Token": 5e-6, **later_wins["model-1"]}
-        code, _, _, report = self.run_main(feed(10), later_wins, billed=["model-1"])
-        self.assertEqual(code, 0)  # the exact key comes later and wins, as in Go
+        for name, extra in {
+            "type_error_then_valid": {"INPUT_COST_PER_TOKEN": "bad"},
+            "null_does_not_clear_value_field": {"supports_service_tier": True, "SUPPORTS_SERVICE_TIER": None},
+            "non_ascii_fold": {"\u017fupports_service_tier": True},
+        }.items():
+            with self.subTest(name):
+                remote = feed(10)
+                remote["model-1"] = {**extra, **remote["model-1"]}
+                code, _, err, _ = self.run_main(feed(10), remote, billed=["model-1"])
+                self.assertEqual(code, 2)
+                self.assertIn("model-1", err)
 
     def test_out_of_range_threshold_is_skipped_like_go(self) -> None:
         remote = feed(10)
@@ -173,7 +181,7 @@ class PricingDiffTests(unittest.TestCase):
             "nan": '{"a": {"input_cost_per_token": NaN}}',
             "overflow": '{"a": {"input_cost_per_token": 1e400}}',
             "overflow_metadata": '{"a": {"input_cost_per_token": 1, "max_tokens": 1e400}}',
-            "non_ascii_fold": '{"a": {"input_cost_per_token": 1, "\u0131nput_cost_per_token": 2}}',
+
         }
         for name, text in cases.items():
             with self.subTest(name):
