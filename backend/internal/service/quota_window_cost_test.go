@@ -329,7 +329,9 @@ func TestPassiveUsageSampledAfter(t *testing.T) {
 	extra := func(v any) map[string]any { return map[string]any{"passive_usage_sampled_at": v} }
 	require.True(t, passiveUsageSampledAfter(extra(cachedAt.Add(time.Minute).Format(time.RFC3339)), cachedAt), "a newer passive sample must not be overwritten by a cache hit")
 	require.False(t, passiveUsageSampledAfter(extra(cachedAt.Add(-time.Minute).Format(time.RFC3339)), cachedAt))
-	require.False(t, passiveUsageSampledAfter(extra(cachedAt.Format(time.RFC3339)), cachedAt))
+	require.True(t, passiveUsageSampledAfter(extra(cachedAt.Format(time.RFC3339)), cachedAt.Add(100*time.Millisecond)),
+		"a second-precision sample in the same second may be newer than the cache")
+	require.False(t, passiveUsageSampledAfter(extra(cachedAt.Add(-time.Second).Format(time.RFC3339)), cachedAt.Add(100*time.Millisecond)))
 	require.False(t, passiveUsageSampledAfter(extra("bad"), cachedAt))
 	require.False(t, passiveUsageSampledAfter(extra(nil), cachedAt))
 	require.False(t, passiveUsageSampledAfter(nil, cachedAt))

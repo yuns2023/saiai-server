@@ -573,8 +573,8 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 	if len(extraUpdates) > 0 {
 		// passive_usage_sampled_at 是 5h 与周窗口共用的采样时间：主动结果缺周窗口时不推进，
 		// 否则保留的旧周百分比会被当成新样本。代价：只有 5h 的结果更新了 5h 百分比但不推进时间，
-		// 5h 估算会用旧采样时间配新百分比（偏低）。上游只在周窗口尚未开始时省略周重置时间，
-		// 此时 5h 用量几乎为 0、低于估算门槛，实际很少触发（11-04 两站 5h≥10% 的账号均带周数据）。缓存命中（fresh=false）仍写回并评估阈值，但数据最多已
+		// 5h 估算会用旧采样时间配新百分比（偏低）。已观测到的省略周重置时间的情形是周窗口尚未开始，
+		// 此时 5h 用量几乎为 0、低于估算门槛（11-04 两站 5h≥10% 的账号均带周数据）。缓存命中（fresh=false）仍写回并评估阈值，但数据最多已
 		// 3 分钟，不能把它标成刚采样，否则估算会用新成本除旧百分比。
 		if fresh && usage.SevenDay != nil {
 			extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
@@ -1415,11 +1415,13 @@ type oauthUsageFlightResult struct {
 	observedAt time.Time
 }
 
-// passiveUsageSampledAfter 报告被动采样时间是否晚于 t（采样时间缺失或无法解析时为 false）。
+// passiveUsageSampledAfter 报告被动采样是否可能晚于 t（采样时间缺失或无法解析时为 false）。
+// 采样时间只精确到秒，与 t 同一秒时无法判断先后，按“更新”保守处理。
+// 只比较调用方读到的账号快照，不能防止之后并发写入的被动采样被覆盖。
 func passiveUsageSampledAfter(extra map[string]any, t time.Time) bool {
 	raw, _ := extra["passive_usage_sampled_at"].(string)
 	sampledAt, err := time.Parse(time.RFC3339, raw)
-	return err == nil && sampledAt.After(t)
+	return err == nil && !sampledAt.Before(t.Truncate(time.Second))
 }
 
 // tryClearRecoverableAccountError 仅在调用方刚拿到上游成功响应时调用，否则会造成"假恢复"：

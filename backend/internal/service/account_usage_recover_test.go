@@ -224,3 +224,38 @@ func TestGetUsageOpenAIWhamSuccessKeepsDeadRefreshTokenError(t *testing.T) {
 		require.Zero(t, repo.clearCount(), msg)
 	}
 }
+
+type usageExtraCountingRepo struct {
+	*usageRecoverRepo
+	extraWrites int
+}
+
+func (r *usageExtraCountingRepo) UpdateExtra(context.Context, int64, map[string]any) error {
+	r.extraWrites++
+	return nil
+}
+
+func TestGetUsageAnthropicCachedResponseKeepsNewerPassiveSample(t *testing.T) {
+	cachedAt := time.Now().Add(-2 * time.Minute)
+	for name, tc := range map[string]struct {
+		sampledAt time.Time
+		writes    int
+	}{
+		"passive sample newer than the cache": {cachedAt.Add(time.Minute), 0},
+		"passive sample older than the cache": {cachedAt.Add(-time.Minute), 1},
+	} {
+		account := &Account{ID: 78, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Status: StatusActive,
+			Credentials: map[string]any{"access_token": "TEST_ONLY_TOKEN"},
+			Extra:       map[string]any{"passive_usage_sampled_at": tc.sampledAt.UTC().Format(time.RFC3339)}}
+		fetcher := &countingClaudeUsageFetcher{}
+		svc, base := newClaudeRecoverFixture(account, fetcher)
+		repo := &usageExtraCountingRepo{usageRecoverRepo: base}
+		svc.accountRepo = repo
+		svc.cache.apiCache.Store(account.ID, &apiUsageCache{response: &ClaudeUsageResponse{}, timestamp: cachedAt})
+
+		_, err := svc.GetUsage(context.Background(), account.ID)
+		require.NoError(t, err, name)
+		require.Zero(t, fetcher.callCount(), name)
+		require.Equal(t, tc.writes, repo.extraWrites, name)
+	}
+}
