@@ -49,6 +49,7 @@
           :window-stats="usageInfo.five_hour.window_stats"
           :standard-cost="usageInfo.five_hour.standard_cost_usd"
           :estimated-capacity="usageInfo.five_hour.estimated_capacity_usd"
+          :estimate-sampled-at="usageInfo.five_hour.estimate_sampled_at"
           color="indigo"
         />
 
@@ -61,6 +62,7 @@
           :window-stats="usageInfo.seven_day.window_stats"
           :standard-cost="usageInfo.seven_day.standard_cost_usd"
           :estimated-capacity="usageInfo.seven_day.estimated_capacity_usd"
+          :estimate-sampled-at="usageInfo.seven_day.estimate_sampled_at"
           color="emerald"
         />
 
@@ -132,6 +134,7 @@
           :stats-rolling="usageInfo.five_hour.window_stats_rolling"
           :standard-cost="usageInfo.five_hour.standard_cost_usd"
           :estimated-capacity="usageInfo.five_hour.estimated_capacity_usd"
+          :estimate-sampled-at="usageInfo.five_hour.estimate_sampled_at"
           :show-now-when-idle="true"
           color="indigo"
         />
@@ -144,6 +147,7 @@
           :stats-rolling="usageInfo.seven_day.window_stats_rolling"
           :standard-cost="usageInfo.seven_day.standard_cost_usd"
           :estimated-capacity="usageInfo.seven_day.estimated_capacity_usd"
+          :estimate-sampled-at="usageInfo.seven_day.estimate_sampled_at"
           :show-now-when-idle="true"
           color="emerald"
         />

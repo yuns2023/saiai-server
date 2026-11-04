@@ -15,6 +15,8 @@ export interface HostedQuotaWindow {
   // Platform usage of the whole account this window (standard price); null = unknown or not shown.
   used_cost_usd: number | null
   estimated_capacity_usd: number | null
+  // Time of the utilization sample behind the estimate (stops advancing while the account is idle).
+  estimate_sampled_at?: string | null
 }
 
 export interface HostedAccount {

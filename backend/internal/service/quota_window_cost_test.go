@@ -54,7 +54,6 @@ func TestQuotaCostWindowSampleAndEstimate(t *testing.T) {
 		"NaN":            {math.NaN(), &fresh},
 		"infinite":       {math.Inf(1), &fresh},
 		"no sample time": {50, nil},
-		"stale":          {50, ptrTime(now.Add(-hostedQuotaFreshness))},
 		"future sample":  {50, ptrTime(now.Add(time.Second))},
 		"before window":  {50, ptrTime(base.Start.Add(-time.Second))},
 	} {
@@ -75,6 +74,12 @@ func TestQuotaCostWindowSampleAndEstimate(t *testing.T) {
 	require.InDelta(t, 25.0, *w.estimate(10), 1e-9)
 	require.Nil(t, w.estimate(0), "no platform usage gives no estimate, not $0")
 	require.Nil(t, w.estimate(math.NaN()))
+
+	old := now.Add(-2 * time.Hour)
+	w = base.withSample(40, &old, now)
+	require.Equal(t, &old, w.SampledAt, "an old sample inside the window still backs an estimate")
+	require.Equal(t, old, w.query(7, now).SampleEnd)
+	require.InDelta(t, 25.0, *w.estimate(10), 1e-9)
 
 	newReset := now.Add(5*time.Hour - 5*time.Minute)
 	fresh5h, ok := resolveQuotaCostWindow("five_hour", &newReset, now)
@@ -112,6 +117,24 @@ func TestAttachQuotaWindowEstimatesRequiresMatchingReset(t *testing.T) {
 	require.Equal(t, fiveReset.Add(-5*time.Hour), costs.queries[0].Start)
 	require.InDelta(t, 4.0, *usage.FiveHour.StandardCostUSD, 1e-9)
 	require.InDelta(t, 4.0, *usage.FiveHour.EstimatedCapacityUSD, 1e-9)
+	sampledAt, err := time.Parse(time.RFC3339, account.Extra["passive_usage_sampled_at"].(string))
+	require.NoError(t, err)
+	require.Equal(t, sampledAt, *usage.FiveHour.EstimateSampledAt)
+
+	// An idle account keeps its estimate while the sample is inside the window.
+	idle := hostedCostFixture(now, 4, []int64{10})
+	idleAt := now.Add(-2 * time.Hour).UTC().Truncate(time.Second)
+	idle.Extra["passive_usage_sampled_at"] = idleAt.Format(time.RFC3339)
+	usage = &UsageInfo{FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &fiveReset}}
+	svc.attachQuotaWindowEstimates(context.Background(), &idle, usage, now)
+	require.InDelta(t, 4.0, *usage.FiveHour.EstimatedCapacityUSD, 1e-9)
+	require.True(t, idleAt.Equal(*usage.FiveHour.EstimateSampledAt))
+	require.True(t, idleAt.Equal(costs.queries[0].SampleEnd), "platform usage is counted only up to the old sample")
+	idle.Extra["passive_usage_sampled_at"] = fiveReset.Add(-5*time.Hour - time.Second).UTC().Format(time.RFC3339)
+	usage = &UsageInfo{FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &fiveReset}}
+	svc.attachQuotaWindowEstimates(context.Background(), &idle, usage, now)
+	require.Nil(t, usage.FiveHour.EstimatedCapacityUSD, "a sample from the previous window gives no estimate")
+	require.Nil(t, usage.FiveHour.EstimateSampledAt)
 
 	near := fiveReset.Add(59 * time.Second)
 	usage = &UsageInfo{FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &near}}
@@ -216,6 +239,9 @@ func TestHostedAccountWindowCostsDisclosureGuard(t *testing.T) {
 		seven := windowByKey(rows[0], "seven_day")
 		require.InDelta(t, 4.0, *seven.UsedCostUSD, 1e-9)
 		require.Nil(t, seven.EstimatedCapacityUSD, "utilization 5% is below the estimate threshold")
+		require.Nil(t, seven.EstimateSampledAt)
+		require.NotNil(t, five.EstimateSampledAt)
+		require.Equal(t, accounts[0].Extra["passive_usage_sampled_at"], five.EstimateSampledAt.UTC().Format(time.RFC3339))
 		sonnet := windowByKey(rows[0], "seven_day_sonnet")
 		require.Nil(t, sonnet.UsedCostUSD)
 		require.Nil(t, sonnet.EstimatedCapacityUSD)

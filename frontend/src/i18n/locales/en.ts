@@ -51,6 +51,7 @@ export default {
   },
   "usedCost": "Platform usage this window (standard price): {cost}",
   "estimatedCapacity": "Estimated total quota (at standard price; usage outside the platform makes this an underestimate): {cost}",
+  "estimateSampledAt": " (based on the usage sample from {time})",
   "loadError": "Failed to load hosted accounts. Please try again.",
   "accessChanged": "Group access or visibility has changed. Refresh the group list.",
   "loading": "Loading…",

@@ -51,6 +51,7 @@ export default {
   },
   "usedCost": "本窗口平台用量（标准价）：{cost}",
   "estimatedCapacity": "估算总额度（按标准价折算，平台外使用会使估算偏低）：{cost}",
+  "estimateSampledAt": "（依据 {time} 的用量采样）",
   "loadError": "加载托管账号失败，请稍后重试",
   "accessChanged": "分组授权或展示设置已变更，请刷新分组列表。",
   "loading": "加载中…",

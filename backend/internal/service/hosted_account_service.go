@@ -52,6 +52,9 @@ type HostedQuotaWindow struct {
 	// or not disclosed to this viewer.
 	UsedCostUSD          *float64 `json:"used_cost_usd"`
 	EstimatedCapacityUSD *float64 `json:"estimated_capacity_usd"`
+	// Time of the utilization sample behind the estimate; it stops advancing
+	// while the account is idle. Null whenever the estimate is null.
+	EstimateSampledAt *time.Time `json:"estimate_sampled_at"`
 }
 
 // This allowlist deliberately excludes credentials, Extra, email, proxy,
@@ -196,6 +199,9 @@ func (s *HostedAccountService) attachWindowCosts(ctx context.Context, accounts [
 		window := &result[t.account].Windows[t.window]
 		window.UsedCostUSD = &used
 		window.EstimatedCapacityUSD = t.cost.estimate(costs[k].SampledCost)
+		if window.EstimatedCapacityUSD != nil {
+			window.EstimateSampledAt = t.cost.SampledAt
+		}
 	}
 }
 

@@ -160,6 +160,8 @@ type UsageProgress struct {
 	StandardCostUSD *float64 `json:"standard_cost_usd,omitempty"`
 	// EstimatedCapacityUSD 按标准价折算的整窗口额度估算（平台外使用会使其偏低）；未知时为空。
 	EstimatedCapacityUSD *float64 `json:"estimated_capacity_usd,omitempty"`
+	// EstimateSampledAt 估算所用用量采样的时间（可能早于当前，账号空闲时不再更新）。
+	EstimateSampledAt *time.Time `json:"estimate_sampled_at,omitempty"`
 	UsedRequests         int64    `json:"used_requests,omitempty"`
 	LimitRequests        int64    `json:"limit_requests,omitempty"`
 }
@@ -1174,6 +1176,9 @@ func (s *AccountUsageService) attachQuotaWindowEstimates(ctx context.Context, ac
 		used := costs[i].UsedCost
 		progress.StandardCostUSD = &used
 		progress.EstimatedCapacityUSD = windows[i].estimate(costs[i].SampledCost)
+		if progress.EstimatedCapacityUSD != nil {
+			progress.EstimateSampledAt = windows[i].SampledAt
+		}
 	}
 }
 

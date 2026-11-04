@@ -75,10 +75,12 @@ func resolveQuotaCostWindow(key string, reset *time.Time, now time.Time) (quotaC
 }
 
 // withSample records the utilization sample when it is reliable enough for a
-// capacity estimate: at least 10%, finite, fresh, and taken inside the window.
+// capacity estimate: at least 10%, finite, and taken inside the window. The
+// sample may be old: the estimate pairs it only with platform usage up to the
+// sample time, so idle accounts keep their estimate until the window resets.
 func (w quotaCostWindow) withSample(utilization float64, sampledAt *time.Time, now time.Time) quotaCostWindow {
 	if math.IsNaN(utilization) || math.IsInf(utilization, 0) || utilization < quotaEstimateMinUtilization ||
-		sampledAt == nil || sampledAt.After(now) || now.Sub(*sampledAt) >= hostedQuotaFreshness ||
+		sampledAt == nil || sampledAt.After(now) ||
 		sampledAt.Before(w.Start) || !sampledAt.Before(w.Reset) {
 		return w
 	}

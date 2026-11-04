@@ -968,6 +968,7 @@ export interface UsageProgress {
   window_stats_rolling?: boolean // 重置时间未知，window_stats 按滚动窗口统计
   standard_cost_usd?: number | null // 本窗口 [reset-窗口长度, now) 标准价平台用量；窗口无效时为空
   estimated_capacity_usd?: number | null // 按标准价折算的整窗口额度估算
+  estimate_sampled_at?: string | null // 估算所用采样的时间；账号空闲时不再更新
   used_requests?: number
   limit_requests?: number
 }

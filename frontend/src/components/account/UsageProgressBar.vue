@@ -43,7 +43,7 @@
           :title="t('admin.accounts.usageWindow.estimatedCapacityHint')"
           data-testid="window-estimated-capacity"
         >
-          {{ t('admin.accounts.usageWindow.estimatedCapacity', { cost: (estimatedCapacity ?? 0).toFixed(2) }) }}
+          {{ t('admin.accounts.usageWindow.estimatedCapacity', { cost: (estimatedCapacity ?? 0).toFixed(2) }) }}<template v-if="estimateAge"> · {{ estimateAge }}</template>
         </span>
       </div>
     </div>
@@ -99,6 +99,8 @@ const props = defineProps<{
   standardCost?: number | null
   // Full-window capacity estimate at standard price (null/undefined = unknown).
   estimatedCapacity?: number | null
+  // When the estimate's utilization sample was taken (idle accounts keep an old one).
+  estimateSampledAt?: string | null
   showNowWhenIdle?: boolean
 }>()
 
@@ -211,6 +213,15 @@ const windowStillCurrent = computed(
 )
 const showStandardCost = computed(() => props.standardCost != null && windowStillCurrent.value)
 const showEstimate = computed(() => props.estimatedCapacity != null && windowStillCurrent.value)
+// Age of the estimate's sample, shown once it is at least 15 minutes old.
+const estimateAge = computed(() => {
+  if (!props.estimateSampledAt) return ''
+  const minutes = Math.floor((now.value.getTime() - new Date(props.estimateSampledAt).getTime()) / 60_000)
+  if (!Number.isFinite(minutes) || minutes < 15) return ''
+  if (minutes < 60) return t('common.time.minutesAgo', { n: minutes })
+  if (minutes < 24 * 60) return t('common.time.hoursAgo', { n: Math.floor(minutes / 60) })
+  return t('common.time.daysAgo', { n: Math.floor(minutes / (24 * 60)) })
+})
 
 const hasActivity = computed(() =>
   Boolean(props.windowStats && (props.windowStats.requests > 0 || props.windowStats.tokens > 0))

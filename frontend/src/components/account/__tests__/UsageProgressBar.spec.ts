@@ -106,6 +106,17 @@ describe('UsageProgressBar', () => {
     expect(wrapper.text()).not.toContain('req')
   })
 
+  it('labels an estimate whose sample is at least 15 minutes old', async () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '5h', utilization: 26, color: 'indigo', resetsAt: '2026-03-17T02:30:00Z', estimatedCapacity: 41.5, estimateSampledAt: '2026-03-16T23:46:00Z' }
+    })
+    const chip = () => wrapper.get('[data-testid="window-estimated-capacity"]').text()
+    expect(chip()).not.toContain('common.time')
+    vi.advanceTimersByTime(60 * 1000)
+    await wrapper.vm.$nextTick()
+    expect(chip()).toContain('common.time.minutesAgo')
+  })
+
   it('hides standard cost for an unknown or rolling window but keeps req/A/U', () => {
     const stats = { requests: 3, tokens: 30, cost: 1, standard_cost: 2, user_cost: 0 }
     const wrapper = mount(UsageProgressBar, {

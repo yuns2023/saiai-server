@@ -193,23 +193,27 @@ describe('HostedAccountsView', () => {
     expect(cards[1].find('[data-testid="hosted-estimated-capacity"]').exists()).toBe(false)
   })
 
-  it('hides the estimate once the sample is stale and the costs once the window resets', async () => {
+  it('keeps an old estimate with its sample time until the window resets', async () => {
     mocks.list.mockResolvedValue(result([makeAccount({ windows: [
-      { key: 'five_hour', utilization: 50, resets_at: '2026-10-01T12:30:00Z', expired: false, used_cost_usd: 3, estimated_capacity_usd: 6 }
+      { key: 'five_hour', utilization: 50, resets_at: '2026-10-01T12:30:00Z', expired: false, used_cost_usd: 3, estimated_capacity_usd: 6, estimate_sampled_at: sampledAt }
     ] })]))
     const view = render(); await flushPromises()
-    expect(view.find('[data-testid="hosted-estimated-capacity"]').exists()).toBe(true)
+    const estimate = () => view.find('[data-testid="hosted-estimated-capacity"]')
+    expect(estimate().exists()).toBe(true)
+    expect(estimate().text()).not.toContain('based on the usage sample')
     vi.advanceTimersByTime(14 * 60 * 1000); await flushPromises()
-    expect(view.find('[data-testid="hosted-estimated-capacity"]').exists()).toBe(true)
+    expect(estimate().text()).not.toContain('based on the usage sample')
     vi.advanceTimersByTime(60 * 1000); await flushPromises()
-    expect(view.find('[data-testid="hosted-estimated-capacity"]').exists()).toBe(false)
+    expect(estimate().exists()).toBe(true)
+    expect(estimate().text()).toContain('based on the usage sample')
     expect(view.find('[data-testid="hosted-used-cost"]').exists()).toBe(true)
     vi.advanceTimersByTime(15 * 60 * 1000); await flushPromises()
+    expect(estimate().exists()).toBe(false)
     expect(view.find('[data-testid="hosted-used-cost"]').exists()).toBe(false)
     expect(view.text()).toContain('Reset time reached; awaiting new data')
   })
 
-  it('hides the estimate when the window resets before the sample goes stale', async () => {
+  it('hides the estimate when the window resets', async () => {
     mocks.list.mockResolvedValue(result([makeAccount({ windows: [
       { key: 'five_hour', utilization: 50, resets_at: '2026-10-01T12:05:00Z', expired: false, used_cost_usd: 3, estimated_capacity_usd: 6 }
     ] })]))

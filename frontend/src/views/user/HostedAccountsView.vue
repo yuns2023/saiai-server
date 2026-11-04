@@ -53,8 +53,9 @@
                 <p v-if="window.used_cost_usd != null && !windowExpired(window)" class="mt-1 text-xs text-gray-600 dark:text-gray-300" data-testid="hosted-used-cost">
                   {{ t('hostedAccounts.usedCost', { cost: formatUSD(window.used_cost_usd) }) }}
                 </p>
-                <p v-if="window.estimated_capacity_usd != null && estimateUsable(account, window)" class="mt-1 text-xs text-gray-600 dark:text-gray-300" data-testid="hosted-estimated-capacity">
+                <p v-if="window.estimated_capacity_usd != null && !windowExpired(window)" class="mt-1 text-xs text-gray-600 dark:text-gray-300" data-testid="hosted-estimated-capacity">
                   {{ t('hostedAccounts.estimatedCapacity', { cost: formatUSD(window.estimated_capacity_usd) }) }}
+                  <template v-if="estimateAged(window)">{{ t('hostedAccounts.estimateSampledAt', { time: formatTime(window.estimate_sampled_at!) }) }}</template>
                 </p>
               </div>
             </div>
@@ -102,10 +103,10 @@ const resetCountdown = (window: HostedQuotaWindow) => {
   return countdown ? t('hostedAccounts.remaining', { time: countdown }) : t('hostedAccounts.resetElapsed')
 }
 const formatUSD = (value: number) => `$${value.toFixed(2)}`
-// The estimate pairs platform cost with a utilization sample; it is only shown
-// while that sample is fresh and its window has not reset.
-const estimateUsable = (account: HostedAccount, window: HostedQuotaWindow) => !windowExpired(window) &&
-  account.updated_at !== null && now.value.getTime() - new Date(account.updated_at).getTime() < 15 * 60 * 1000
+// The estimate pairs a utilization sample with platform cost up to that sample,
+// so it stays valid until the window resets; an old sample is labelled.
+const estimateAged = (window: HostedQuotaWindow) => !!window.estimate_sampled_at &&
+  now.value.getTime() - new Date(window.estimate_sampled_at).getTime() >= 15 * 60 * 1000
 
 async function loadAccounts() {
   accountsController?.abort()
