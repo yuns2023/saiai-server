@@ -162,8 +162,8 @@ type UsageProgress struct {
 	EstimatedCapacityUSD *float64 `json:"estimated_capacity_usd,omitempty"`
 	// EstimateSampledAt 估算所用用量采样的时间（可能早于当前，账号空闲时不再更新）。
 	EstimateSampledAt *time.Time `json:"estimate_sampled_at,omitempty"`
-	UsedRequests         int64    `json:"used_requests,omitempty"`
-	LimitRequests        int64    `json:"limit_requests,omitempty"`
+	UsedRequests      int64      `json:"used_requests,omitempty"`
+	LimitRequests     int64      `json:"limit_requests,omitempty"`
 }
 
 // AntigravityModelQuota Antigravity 单个模型的配额信息
@@ -373,6 +373,8 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 		var apiResp *ClaudeUsageResponse
 		// fresh 表示本次（可能与并发请求共享的）flight 真的请求了上游并成功；缓存命中可能早于账号出错，不算恢复证据
 		fresh := false
+		// observedAt 是这份 usage 实际从上游取到的时间（缓存命中时早于现在）
+		var observedAt time.Time
 
 		// 1. 检查缓存（成功响应 3 分钟 / 错误响应 1 分钟）
 		if cached, ok := s.cache.apiCache.Load(accountID); ok {
@@ -383,7 +385,7 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 					return nil, cache.err
 				}
 				if cache.response != nil && age < apiCacheTTL {
-					apiResp = cache.response
+					apiResp, observedAt = cache.response, cache.timestamp
 				}
 			}
 		}
@@ -409,7 +411,7 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 							return nil, cache.err
 						}
 						if cache.response != nil && age < apiCacheTTL {
-							return oauthUsageFlightResult{resp: cache.response}, nil
+							return oauthUsageFlightResult{resp: cache.response, observedAt: cache.timestamp}, nil
 						}
 					}
 				}
@@ -423,17 +425,18 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 					return nil, fetchErr
 				}
 				// 缓存成功响应
+				fetchedAt := time.Now()
 				s.cache.apiCache.Store(accountID, &apiUsageCache{
 					response:  resp,
-					timestamp: time.Now(),
+					timestamp: fetchedAt,
 				})
-				return oauthUsageFlightResult{resp: resp, fresh: true}, nil
+				return oauthUsageFlightResult{resp: resp, fresh: true, observedAt: fetchedAt}, nil
 			})
 			if flightErr != nil {
 				return nil, flightErr
 			}
 			flight, _ := result.(oauthUsageFlightResult)
-			apiResp, fresh = flight.resp, flight.fresh
+			apiResp, fresh, observedAt = flight.resp, flight.fresh, flight.observedAt
 		}
 
 		// 3. 构建 UsageInfo（每次都重新计算 RemainingSeconds）
@@ -442,7 +445,10 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 
 		// 4. 将主动查询结果同步到被动缓存（并评估 5h 阈值），下次 passive 加载即为最新值。
 		// 必须在补入旧被动周窗口之前同步，避免旧周窗口被当作新样本写回。
-		mergeAccountExtra(account, s.syncActiveToPassive(ctx, account.ID, usage, fresh))
+		// 缓存命中的结果若早于之后的被动采样则不回写：否则旧百分比会配上更新的采样时间，额度估算偏高。
+		if fresh || !passiveUsageSampledAfter(account.Extra, observedAt) {
+			mergeAccountExtra(account, s.syncActiveToPassive(ctx, account.ID, usage, fresh))
+		}
 		applyPassiveAnthropicWeeklyUsage(usage, account.Extra, now)
 
 		// 5. 添加窗口统计（有独立缓存，1 分钟）
@@ -567,7 +573,8 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 	if len(extraUpdates) > 0 {
 		// passive_usage_sampled_at 是 5h 与周窗口共用的采样时间：主动结果缺周窗口时不推进，
 		// 否则保留的旧周百分比会被当成新样本。代价：只有 5h 的结果更新了 5h 百分比但不推进时间，
-		// 5h 估算可能使用稍旧的采样时间。缓存命中（fresh=false）仍写回并评估阈值，但数据最多已
+		// 5h 估算会用旧采样时间配新百分比（偏低）。上游只在周窗口尚未开始时省略周重置时间，
+		// 此时 5h 用量几乎为 0、低于估算门槛，实际很少触发（11-04 两站 5h≥10% 的账号均带周数据）。缓存命中（fresh=false）仍写回并评估阈值，但数据最多已
 		// 3 分钟，不能把它标成刚采样，否则估算会用新成本除旧百分比。
 		if fresh && usage.SevenDay != nil {
 			extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
@@ -1403,8 +1410,16 @@ func parseTime(s string) (time.Time, error) {
 
 // oauthUsageFlightResult 是 Anthropic usage singleflight 的结果；fresh 表示本次 flight 真的请求了上游
 type oauthUsageFlightResult struct {
-	resp  *ClaudeUsageResponse
-	fresh bool
+	resp       *ClaudeUsageResponse
+	fresh      bool
+	observedAt time.Time
+}
+
+// passiveUsageSampledAfter 报告被动采样时间是否晚于 t（采样时间缺失或无法解析时为 false）。
+func passiveUsageSampledAfter(extra map[string]any, t time.Time) bool {
+	raw, _ := extra["passive_usage_sampled_at"].(string)
+	sampledAt, err := time.Parse(time.RFC3339, raw)
+	return err == nil && sampledAt.After(t)
 }
 
 // tryClearRecoverableAccountError 仅在调用方刚拿到上游成功响应时调用，否则会造成"假恢复"：

@@ -324,6 +324,17 @@ func (r *syncPassiveAccountsStub) SetRateLimited(_ context.Context, _ int64, res
 	return nil
 }
 
+func TestPassiveUsageSampledAfter(t *testing.T) {
+	cachedAt := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	extra := func(v any) map[string]any { return map[string]any{"passive_usage_sampled_at": v} }
+	require.True(t, passiveUsageSampledAfter(extra(cachedAt.Add(time.Minute).Format(time.RFC3339)), cachedAt), "a newer passive sample must not be overwritten by a cache hit")
+	require.False(t, passiveUsageSampledAfter(extra(cachedAt.Add(-time.Minute).Format(time.RFC3339)), cachedAt))
+	require.False(t, passiveUsageSampledAfter(extra(cachedAt.Format(time.RFC3339)), cachedAt))
+	require.False(t, passiveUsageSampledAfter(extra("bad"), cachedAt))
+	require.False(t, passiveUsageSampledAfter(extra(nil), cachedAt))
+	require.False(t, passiveUsageSampledAfter(nil, cachedAt))
+}
+
 func TestSyncActiveToPassiveSampleTimeAndThreshold(t *testing.T) {
 	repo := &syncPassiveAccountsStub{account: &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
 		Extra: map[string]any{"claude_oauth_5h_rate_limit_threshold_percent": 90.0}}}
