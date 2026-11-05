@@ -175,3 +175,38 @@ func TestAcquireUserSlotWithWait_AcquiresAfterRelease(t *testing.T) {
 	require.Zero(t, users)
 	require.Zero(t, keys)
 }
+
+// When the wait's deadline expires inside an acquire call, the error still
+// names the limit that blocked the earlier attempts.
+func TestAcquireUserSlotWithWait_DeadlineDuringAcquireNamesAPIKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cache := &deadlinePairCache{pairSlotCacheMock: newPairSlotCacheMock()}
+	helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Second)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(ctx)
+	streamStarted := false
+
+	_, err := helper.AcquireUserSlotWithWait(c, UserSlot{UserID: 1, Concurrency: 10, APIKeyID: 7, APIKeyConcurrency: 1}, false, &streamStarted)
+	var concurrencyErr *ConcurrencyError
+	require.True(t, errors.As(err, &concurrencyErr), "got %v", err)
+	require.Equal(t, slotTypeAPIKey, concurrencyErr.SlotType)
+}
+
+// deadlinePairCache reports the key as full on the first call, then blocks
+// until the context ends and returns its error, like a Redis call cut short.
+type deadlinePairCache struct {
+	*pairSlotCacheMock
+	calls int
+}
+
+func (m *deadlinePairCache) AcquireUserAPIKeySlot(ctx context.Context, _ int64, _ int, _ int64, _ int, _ string) (service.SlotAcquireOutcome, error) {
+	m.calls++
+	if m.calls == 1 {
+		return service.SlotAPIKeyFull, nil
+	}
+	<-ctx.Done()
+	return service.SlotAcquireError, ctx.Err()
+}

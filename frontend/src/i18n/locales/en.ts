@@ -907,7 +907,7 @@ export default {
     rateLimitColumn: 'Spending Window Limits',
     maxConcurrency: 'Max Concurrency',
     maxConcurrencyColumn: 'Concurrency',
-    maxConcurrencyHint: 'Maximum requests this key runs at the same time (1–1000, default 5); extra requests wait in line. All keys share your account concurrency of {total}, first come, first served.',
+    maxConcurrencyHint: 'Maximum requests this key runs at the same time (1–1000, default 5). Beyond it, requests wait for a free slot and get a 429 if the wait is too long. All keys share your account concurrency of {total}.',
     maxConcurrencyInvalid: 'Max concurrency must be a whole number from 1 to 1000',
     rateLimitSection: 'Spending Window Limits',
     resetUsage: 'Reset',

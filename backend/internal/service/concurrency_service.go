@@ -227,6 +227,8 @@ func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, 
 // was not loaded and falls back to DefaultAPIKeyMaxConcurrency, never to
 // unlimited.
 func (s *ConcurrencyService) AcquireUserAPIKeySlot(ctx context.Context, userID int64, userMax int, apiKeyID int64, keyMax int) (*AcquireResult, error) {
+	// The Redis cache always implements UserAPIKeySlotCache (compile-time
+	// assertion in repository); only test doubles without it fall back.
 	pairCache, ok := s.cache.(UserAPIKeySlotCache)
 	if apiKeyID <= 0 || !ok {
 		return s.AcquireUserSlot(ctx, userID, userMax)

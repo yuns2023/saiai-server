@@ -118,3 +118,36 @@ func (s *ConcurrencyCacheSuite) TestCleanupStaleProcessSlots_APIKeySlots() {
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), []string{"newproc-1"}, members)
 }
+
+// A retried acquire with the same request ID (e.g. a resent command whose
+// first reply was lost) must find its own slots, not report a full limit.
+func (s *ConcurrencyCacheSuite) TestUserAPIKeySlot_SameRequestIDRetry() {
+	pair := s.pairCache()
+	cases := []struct {
+		name            string
+		userMax, keyMax int
+	}{
+		{"key full", 10, 1},
+		{"user full", 1, 10},
+		{"both full", 1, 1},
+		{"unlimited user", 0, 1},
+	}
+	for i, tc := range cases {
+		userID, keyID := int64(60+i), int64(960+i)
+		for attempt := 0; attempt < 2; attempt++ {
+			out, err := pair.AcquireUserAPIKeySlot(s.ctx, userID, tc.userMax, keyID, tc.keyMax, "same")
+			require.NoError(s.T(), err, tc.name)
+			require.Equal(s.T(), service.SlotAcquired, out, tc.name)
+		}
+		require.Equal(s.T(), int64(1), s.zcard(apiKeySlotKey(keyID)), tc.name)
+		wantUser := int64(1)
+		if tc.userMax <= 0 {
+			wantUser = 0
+		}
+		require.Equal(s.T(), wantUser, s.zcard(userSlotKey(userID)), tc.name)
+
+		out, err := pair.AcquireUserAPIKeySlot(s.ctx, userID, tc.userMax, keyID, tc.keyMax, "other")
+		require.NoError(s.T(), err, tc.name)
+		require.NotEqual(s.T(), service.SlotAcquired, out, tc.name)
+	}
+}

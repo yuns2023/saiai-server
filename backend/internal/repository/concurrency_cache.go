@@ -96,6 +96,17 @@ var (
 		local expireBefore = now - ttl
 
 		redis.call('ZREMRANGEBYSCORE', apiKeyKey, '-inf', expireBefore)
+		-- 同一 requestID 重试（如客户端重发命令）：两个槽由本脚本同时写入，
+		-- key 槽在即视为已占用，刷新时间戳，不能把自己算作已满。
+		if redis.call('ZSCORE', apiKeyKey, requestID) ~= false then
+			redis.call('ZADD', apiKeyKey, now, requestID)
+			redis.call('EXPIRE', apiKeyKey, ttl)
+			if userMax > 0 then
+				redis.call('ZADD', userKey, now, requestID)
+				redis.call('EXPIRE', userKey, ttl)
+			end
+			return 1
+		end
 		if redis.call('ZCARD', apiKeyKey) >= keyMax then
 			return -2
 		end

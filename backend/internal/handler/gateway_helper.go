@@ -403,6 +403,11 @@ func (h *ConcurrencyHelper) waitForAcquire(c *gin.Context, slotType string, acqu
 			// Try to acquire slot
 			result, err := acquireSlot()
 			if err != nil {
+				// The wait ran out during this attempt: report it like the
+				// ctx.Done branch so the blocking limit is not lost.
+				if ctx.Err() != nil {
+					return nil, &ConcurrencyError{SlotType: blockedBy, IsTimeout: true}
+				}
 				return nil, err
 			}
 

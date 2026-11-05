@@ -910,7 +910,7 @@ export default {
     rateLimitColumn: '周期消费限额',
     maxConcurrency: '最大并发',
     maxConcurrencyColumn: '并发',
-    maxConcurrencyHint: '此密钥同时处理的请求数上限（1–1000，默认 5），超出的请求会排队等待。所有密钥共用账户总并发 {total}，先到先得。',
+    maxConcurrencyHint: '此密钥同时处理的请求数上限（1–1000，默认 5）。超出时请求会等待空闲名额，等待过久返回 429。所有密钥共用账户总并发 {total}。',
     maxConcurrencyInvalid: '最大并发须为 1–1000 的整数',
     rateLimitSection: '周期消费限额',
     resetUsage: '重置',
