@@ -151,3 +151,24 @@ func (s *ConcurrencyCacheSuite) TestUserAPIKeySlot_SameRequestIDRetry() {
 		require.NotEqual(s.T(), service.SlotAcquired, out, tc.name)
 	}
 }
+
+// A retry that finds its key slot but not its user slot (e.g. half a release
+// went through) refreshes the key slot without re-adding the user slot.
+func (s *ConcurrencyCacheSuite) TestUserAPIKeySlot_RetryDoesNotReAddUserSlot() {
+	pair := s.pairCache()
+	userID, keyID := int64(70), int64(970)
+	out, err := pair.AcquireUserAPIKeySlot(s.ctx, userID, 1, keyID, 5, "half")
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), service.SlotAcquired, out)
+	require.NoError(s.T(), s.rdb.ZRem(s.ctx, userSlotKey(userID), "half").Err())
+	ok, err := s.cache.AcquireUserSlot(s.ctx, userID, 1, "plain")
+	require.NoError(s.T(), err)
+	require.True(s.T(), ok)
+
+	out, err = pair.AcquireUserAPIKeySlot(s.ctx, userID, 1, keyID, 5, "half")
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), service.SlotAcquired, out)
+	members, err := s.rdb.ZRange(s.ctx, userSlotKey(userID), 0, -1).Result()
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), []string{"plain"}, members, "user total must stay at its limit")
+}
