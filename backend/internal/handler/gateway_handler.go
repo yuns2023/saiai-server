@@ -677,7 +677,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}()
 
 	// 1. 首先获取用户并发槽位
-	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted)
+	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, userSlotOf(subject), reqStream, &streamStarted)
 	if err != nil {
 		reqLog.Warn("gateway.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", streamStarted)
@@ -2164,7 +2164,7 @@ func calculateSubscriptionRemaining(group *service.Group, sub *service.UserSubsc
 // handleConcurrencyError handles concurrency-related errors with proper 429 response
 func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotType string, streamStarted bool) {
 	h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error",
-		fmt.Sprintf("Concurrency limit exceeded for %s, please retry later", slotType), streamStarted)
+		fmt.Sprintf("Concurrency limit exceeded for %s, please retry later", concurrencyLimitSlotType(err, slotType)), streamStarted)
 }
 
 func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, platform string, streamStarted bool) {

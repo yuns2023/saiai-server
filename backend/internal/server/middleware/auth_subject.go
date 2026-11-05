@@ -7,6 +7,10 @@ import "github.com/gin-gonic/gin"
 type AuthSubject struct {
 	UserID      int64
 	Concurrency int
+	// APIKeyID/APIKeyConcurrency are set only for API-key authenticated
+	// requests; APIKeyID 0 means no per-key concurrency slot.
+	APIKeyID          int64
+	APIKeyConcurrency int
 }
 
 func GetAuthSubjectFromContext(c *gin.Context) (AuthSubject, bool) {

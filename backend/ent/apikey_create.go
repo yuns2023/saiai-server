@@ -216,6 +216,20 @@ func (_c *APIKeyCreate) SetNillableExpiresAt(v *time.Time) *APIKeyCreate {
 	return _c
 }
 
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (_c *APIKeyCreate) SetMaxConcurrency(v int) *APIKeyCreate {
+	_c.mutation.SetMaxConcurrency(v)
+	return _c
+}
+
+// SetNillableMaxConcurrency sets the "max_concurrency" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableMaxConcurrency(v *int) *APIKeyCreate {
+	if v != nil {
+		_c.SetMaxConcurrency(*v)
+	}
+	return _c
+}
+
 // SetRateLimit5h sets the "rate_limit_5h" field.
 func (_c *APIKeyCreate) SetRateLimit5h(v float64) *APIKeyCreate {
 	_c.mutation.SetRateLimit5h(v)
@@ -438,6 +452,10 @@ func (_c *APIKeyCreate) defaults() error {
 		v := apikey.DefaultQuotaUsed
 		_c.mutation.SetQuotaUsed(v)
 	}
+	if _, ok := _c.mutation.MaxConcurrency(); !ok {
+		v := apikey.DefaultMaxConcurrency
+		_c.mutation.SetMaxConcurrency(v)
+	}
 	if _, ok := _c.mutation.RateLimit5h(); !ok {
 		v := apikey.DefaultRateLimit5h
 		_c.mutation.SetRateLimit5h(v)
@@ -511,6 +529,9 @@ func (_c *APIKeyCreate) check() error {
 	}
 	if _, ok := _c.mutation.QuotaUsed(); !ok {
 		return &ValidationError{Name: "quota_used", err: errors.New(`ent: missing required field "APIKey.quota_used"`)}
+	}
+	if _, ok := _c.mutation.MaxConcurrency(); !ok {
+		return &ValidationError{Name: "max_concurrency", err: errors.New(`ent: missing required field "APIKey.max_concurrency"`)}
 	}
 	if _, ok := _c.mutation.RateLimit5h(); !ok {
 		return &ValidationError{Name: "rate_limit_5h", err: errors.New(`ent: missing required field "APIKey.rate_limit_5h"`)}
@@ -619,6 +640,10 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ExpiresAt(); ok {
 		_spec.SetField(apikey.FieldExpiresAt, field.TypeTime, value)
 		_node.ExpiresAt = &value
+	}
+	if value, ok := _c.mutation.MaxConcurrency(); ok {
+		_spec.SetField(apikey.FieldMaxConcurrency, field.TypeInt, value)
+		_node.MaxConcurrency = value
 	}
 	if value, ok := _c.mutation.RateLimit5h(); ok {
 		_spec.SetField(apikey.FieldRateLimit5h, field.TypeFloat64, value)
@@ -1013,6 +1038,24 @@ func (u *APIKeyUpsert) UpdateExpiresAt() *APIKeyUpsert {
 // ClearExpiresAt clears the value of the "expires_at" field.
 func (u *APIKeyUpsert) ClearExpiresAt() *APIKeyUpsert {
 	u.SetNull(apikey.FieldExpiresAt)
+	return u
+}
+
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (u *APIKeyUpsert) SetMaxConcurrency(v int) *APIKeyUpsert {
+	u.Set(apikey.FieldMaxConcurrency, v)
+	return u
+}
+
+// UpdateMaxConcurrency sets the "max_concurrency" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateMaxConcurrency() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldMaxConcurrency)
+	return u
+}
+
+// AddMaxConcurrency adds v to the "max_concurrency" field.
+func (u *APIKeyUpsert) AddMaxConcurrency(v int) *APIKeyUpsert {
+	u.Add(apikey.FieldMaxConcurrency, v)
 	return u
 }
 
@@ -1521,6 +1564,27 @@ func (u *APIKeyUpsertOne) UpdateExpiresAt() *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) ClearExpiresAt() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearExpiresAt()
+	})
+}
+
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (u *APIKeyUpsertOne) SetMaxConcurrency(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetMaxConcurrency(v)
+	})
+}
+
+// AddMaxConcurrency adds v to the "max_concurrency" field.
+func (u *APIKeyUpsertOne) AddMaxConcurrency(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddMaxConcurrency(v)
+	})
+}
+
+// UpdateMaxConcurrency sets the "max_concurrency" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateMaxConcurrency() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateMaxConcurrency()
 	})
 }
 
@@ -2222,6 +2286,27 @@ func (u *APIKeyUpsertBulk) UpdateExpiresAt() *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) ClearExpiresAt() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearExpiresAt()
+	})
+}
+
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (u *APIKeyUpsertBulk) SetMaxConcurrency(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetMaxConcurrency(v)
+	})
+}
+
+// AddMaxConcurrency adds v to the "max_concurrency" field.
+func (u *APIKeyUpsertBulk) AddMaxConcurrency(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddMaxConcurrency(v)
+	})
+}
+
+// UpdateMaxConcurrency sets the "max_concurrency" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateMaxConcurrency() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateMaxConcurrency()
 	})
 }
 

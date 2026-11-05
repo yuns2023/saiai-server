@@ -84,6 +84,7 @@ func TestAPIContracts(t *testing.T) {
 					"ip_whitelist": null,
 					"ip_blacklist": null,
 					"last_used_at": null,
+					"max_concurrency": 5,
 					"quota": 0,
 					"quota_used": 0,
 					"rate_limit_5h": 0,
@@ -114,13 +115,14 @@ func TestAPIContracts(t *testing.T) {
 			setup: func(t *testing.T, deps *contractDeps) {
 				t.Helper()
 				deps.apiKeyRepo.MustSeed(&service.APIKey{
-					ID:        100,
-					UserID:    1,
-					Key:       "sk_custom_1234567890",
-					Name:      "Key One",
-					Status:    service.StatusActive,
-					CreatedAt: deps.now,
-					UpdatedAt: deps.now,
+					ID:             100,
+					UserID:         1,
+					Key:            "sk_custom_1234567890",
+					Name:           "Key One",
+					Status:         service.StatusActive,
+					MaxConcurrency: 8,
+					CreatedAt:      deps.now,
+					UpdatedAt:      deps.now,
 				})
 			},
 			method:     http.MethodGet,
@@ -141,6 +143,7 @@ func TestAPIContracts(t *testing.T) {
 							"ip_whitelist": null,
 							"ip_blacklist": null,
 							"last_used_at": null,
+							"max_concurrency": 8,
 							"quota": 0,
 							"quota_used": 0,
 							"rate_limit_5h": 0,

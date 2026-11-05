@@ -101,9 +101,10 @@ func TestConcurrencyHelper_TryAcquireUserSlot(t *testing.T) {
 	}
 	helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Second)
 
-	release, acquired, err := helper.TryAcquireUserSlot(context.Background(), 101, 2)
+	release, acquired, apiKeyFull, err := helper.TryAcquireUserSlot(context.Background(), UserSlot{UserID: 101, Concurrency: 2})
 	require.NoError(t, err)
 	require.True(t, acquired)
+	require.False(t, apiKeyFull)
 	require.NotNil(t, release)
 
 	release()

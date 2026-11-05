@@ -168,6 +168,10 @@
             </div>
           </template>
 
+          <template #cell-max_concurrency="{ row }">
+            <span class="text-sm text-gray-900 dark:text-white">{{ row.max_concurrency }}</span>
+          </template>
+
           <template #cell-rate_limit="{ row }">
             <div v-if="row.rate_limit_5h > 0 || row.rate_limit_1d > 0 || row.rate_limit_7d > 0" class="space-y-1.5 min-w-[140px]">
               <div v-if="row.group?.hosted_usage_enabled" class="text-xs text-gray-500" :title="t('hostedUsage.hint')">{{ t('hostedUsage.windowLimit') }}</div>
@@ -576,6 +580,21 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- Max Concurrency -->
+        <div>
+          <label class="input-label">{{ t('keys.maxConcurrency') }}</label>
+          <input
+            v-model.number="formData.max_concurrency"
+            type="number"
+            min="1"
+            max="1000"
+            step="1"
+            class="input"
+            data-testid="key-max-concurrency"
+          />
+          <p class="input-hint">{{ t('keys.maxConcurrencyHint', { total: authStore.user?.concurrency ?? 0 }) }}</p>
         </div>
 
         <!-- Rate Limit Section -->
@@ -995,6 +1014,7 @@
 	import { useI18n } from 'vue-i18n'
 	import { useAppStore } from '@/stores/app'
 	import { useOnboardingStore } from '@/stores/onboarding'
+	import { useAuthStore } from '@/stores/auth'
 	import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
@@ -1038,7 +1058,10 @@ interface GroupOption {
 }
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
+// Matches DefaultAPIKeyMaxConcurrency on the server.
+const DEFAULT_KEY_MAX_CONCURRENCY = 5
 const { copyToClipboard: clipboardCopy } = useClipboard()
 
 const columns = computed<Column[]>(() => [
@@ -1046,6 +1069,7 @@ const columns = computed<Column[]>(() => [
   { key: 'name', label: t('common.name'), sortable: true },
   { key: 'use_key', label: t('keys.useKey'), sortable: false },
   { key: 'group', label: t('keys.group'), sortable: false },
+  { key: 'max_concurrency', label: t('keys.maxConcurrencyColumn'), sortable: false },
   { key: 'usage', label: t('keys.usage'), sortable: false },
   { key: 'rate_limit', label: t('keys.rateLimitColumn'), sortable: false },
   { key: 'expires_at', label: t('keys.expiresAt'), sortable: true },
@@ -1136,6 +1160,7 @@ const formData = ref({
   rate_limit_5h: null as number | null,
   rate_limit_1d: null as number | null,
   rate_limit_7d: null as number | null,
+  max_concurrency: DEFAULT_KEY_MAX_CONCURRENCY as number | string,
   enable_expiration: false,
   expiration_preset: '30' as '7' | '30' | '90' | 'custom',
   expiration_date: ''
@@ -1347,6 +1372,7 @@ const editKey = (key: ApiKey) => {
     rate_limit_5h: key.rate_limit_5h || null,
     rate_limit_1d: key.rate_limit_1d || null,
     rate_limit_7d: key.rate_limit_7d || null,
+    max_concurrency: key.max_concurrency || DEFAULT_KEY_MAX_CONCURRENCY,
     enable_expiration: hasExpiration,
     expiration_preset: 'custom',
     expiration_date: key.expires_at ? formatDateTimeLocal(key.expires_at) : ''
@@ -1448,6 +1474,12 @@ const handleSubmit = async () => {
     }
   }
 
+  const maxConcurrency = Number(formData.value.max_concurrency)
+  if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1 || maxConcurrency > 1000) {
+    appStore.showError(t('keys.maxConcurrencyInvalid'))
+    return
+  }
+
   // Parse IP lists only if IP restriction is enabled
   const parseIPList = (text: string): string[] =>
     text.split('\n').map(ip => ip.trim()).filter(ip => ip.length > 0)
@@ -1507,6 +1539,7 @@ const handleSubmit = async () => {
         rate_limit_5h: rateLimitData.rate_limit_5h,
         rate_limit_1d: rateLimitData.rate_limit_1d,
         rate_limit_7d: rateLimitData.rate_limit_7d,
+        max_concurrency: maxConcurrency,
       })
       appStore.showSuccess(t('keys.keyUpdatedSuccess'))
     } else {
@@ -1519,7 +1552,7 @@ const handleSubmit = async () => {
         ipBlacklist,
         quota,
         expiresInDays,
-        rateLimitData,
+        { ...rateLimitData, max_concurrency: maxConcurrency },
         smartSwitch
       )
       appStore.showSuccess(t('keys.keyCreatedSuccess'))
@@ -1580,6 +1613,7 @@ const closeModals = () => {
     rate_limit_5h: null,
     rate_limit_1d: null,
     rate_limit_7d: null,
+    max_concurrency: DEFAULT_KEY_MAX_CONCURRENCY,
     enable_expiration: false,
     expiration_preset: '30',
     expiration_date: ''

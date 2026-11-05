@@ -108,7 +108,7 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string, nativeCod
 	}
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	streamStarted := false
-	userRelease, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, false, &streamStarted, reqLog)
+	userRelease, acquired := h.acquireResponsesUserSlot(c, userSlotOf(subject), false, &streamStarted, reqLog)
 	if !acquired {
 		return
 	}

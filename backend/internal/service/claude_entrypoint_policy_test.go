@@ -227,7 +227,7 @@ func TestAPIKeyService_SnapshotRoundTripsClaudeEntrypointPolicy(t *testing.T) {
 				ClaudeEntrypointPolicy: ClaudeEntrypointPolicyEnforce, ClaudeEntrypointAllowlist: allowlist},
 		}
 		snapshot := svc.snapshotFromAPIKey(key)
-		require.Equal(t, 5, snapshot.SchemaVersion)
+		require.Equal(t, apiKeyAuthSnapshotSchemaVersion, snapshot.SchemaVersion)
 		encoded, err := json.Marshal(&APIKeyAuthCacheEntry{Snapshot: snapshot})
 		require.NoError(t, err)
 		require.Contains(t, string(encoded), `"claude_entrypoint_policy":"enforce"`)

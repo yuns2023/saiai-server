@@ -306,6 +306,7 @@ func (s *APIKeyService) snapshotFromAPIKey(apiKey *APIKey) *APIKeyAuthSnapshot {
 		RateLimit5h:        apiKey.RateLimit5h,
 		RateLimit1d:        apiKey.RateLimit1d,
 		RateLimit7d:        apiKey.RateLimit7d,
+		MaxConcurrency:     apiKey.MaxConcurrency,
 		SmartSwitch:        apiKey.SmartSwitch.Clone(),
 		SmartSwitchVersion: apiKey.SmartSwitchVersion,
 		User: APIKeyAuthUserSnapshot{
@@ -400,6 +401,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		RateLimit5h:        snapshot.RateLimit5h,
 		RateLimit1d:        snapshot.RateLimit1d,
 		RateLimit7d:        snapshot.RateLimit7d,
+		MaxConcurrency:     snapshot.MaxConcurrency,
 		SmartSwitch:        snapshot.SmartSwitch.Clone(),
 		SmartSwitchVersion: snapshot.SmartSwitchVersion,
 		User: &User{

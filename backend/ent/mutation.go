@@ -106,6 +106,8 @@ type APIKeyMutation struct {
 	quota_used                *float64
 	addquota_used             *float64
 	expires_at                *time.Time
+	max_concurrency           *int
+	addmax_concurrency        *int
 	rate_limit_5h             *float64
 	addrate_limit_5h          *float64
 	rate_limit_1d             *float64
@@ -1047,6 +1049,62 @@ func (m *APIKeyMutation) ResetExpiresAt() {
 	delete(m.clearedFields, apikey.FieldExpiresAt)
 }
 
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (m *APIKeyMutation) SetMaxConcurrency(i int) {
+	m.max_concurrency = &i
+	m.addmax_concurrency = nil
+}
+
+// MaxConcurrency returns the value of the "max_concurrency" field in the mutation.
+func (m *APIKeyMutation) MaxConcurrency() (r int, exists bool) {
+	v := m.max_concurrency
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMaxConcurrency returns the old "max_concurrency" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldMaxConcurrency(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMaxConcurrency is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMaxConcurrency requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMaxConcurrency: %w", err)
+	}
+	return oldValue.MaxConcurrency, nil
+}
+
+// AddMaxConcurrency adds i to the "max_concurrency" field.
+func (m *APIKeyMutation) AddMaxConcurrency(i int) {
+	if m.addmax_concurrency != nil {
+		*m.addmax_concurrency += i
+	} else {
+		m.addmax_concurrency = &i
+	}
+}
+
+// AddedMaxConcurrency returns the value that was added to the "max_concurrency" field in this mutation.
+func (m *APIKeyMutation) AddedMaxConcurrency() (r int, exists bool) {
+	v := m.addmax_concurrency
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetMaxConcurrency resets all changes to the "max_concurrency" field.
+func (m *APIKeyMutation) ResetMaxConcurrency() {
+	m.max_concurrency = nil
+	m.addmax_concurrency = nil
+}
+
 // SetRateLimit5h sets the "rate_limit_5h" field.
 func (m *APIKeyMutation) SetRateLimit5h(f float64) {
 	m.rate_limit_5h = &f
@@ -1672,7 +1730,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 26)
+	fields := make([]string, 0, 27)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1723,6 +1781,9 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.expires_at != nil {
 		fields = append(fields, apikey.FieldExpiresAt)
+	}
+	if m.max_concurrency != nil {
+		fields = append(fields, apikey.FieldMaxConcurrency)
 	}
 	if m.rate_limit_5h != nil {
 		fields = append(fields, apikey.FieldRateLimit5h)
@@ -1793,6 +1854,8 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.QuotaUsed()
 	case apikey.FieldExpiresAt:
 		return m.ExpiresAt()
+	case apikey.FieldMaxConcurrency:
+		return m.MaxConcurrency()
 	case apikey.FieldRateLimit5h:
 		return m.RateLimit5h()
 	case apikey.FieldRateLimit1d:
@@ -1854,6 +1917,8 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldQuotaUsed(ctx)
 	case apikey.FieldExpiresAt:
 		return m.OldExpiresAt(ctx)
+	case apikey.FieldMaxConcurrency:
+		return m.OldMaxConcurrency(ctx)
 	case apikey.FieldRateLimit5h:
 		return m.OldRateLimit5h(ctx)
 	case apikey.FieldRateLimit1d:
@@ -2000,6 +2065,13 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetExpiresAt(v)
 		return nil
+	case apikey.FieldMaxConcurrency:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMaxConcurrency(v)
+		return nil
 	case apikey.FieldRateLimit5h:
 		v, ok := value.(float64)
 		if !ok {
@@ -2083,6 +2155,9 @@ func (m *APIKeyMutation) AddedFields() []string {
 	if m.addquota_used != nil {
 		fields = append(fields, apikey.FieldQuotaUsed)
 	}
+	if m.addmax_concurrency != nil {
+		fields = append(fields, apikey.FieldMaxConcurrency)
+	}
 	if m.addrate_limit_5h != nil {
 		fields = append(fields, apikey.FieldRateLimit5h)
 	}
@@ -2117,6 +2192,8 @@ func (m *APIKeyMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedQuota()
 	case apikey.FieldQuotaUsed:
 		return m.AddedQuotaUsed()
+	case apikey.FieldMaxConcurrency:
+		return m.AddedMaxConcurrency()
 	case apikey.FieldRateLimit5h:
 		return m.AddedRateLimit5h()
 	case apikey.FieldRateLimit1d:
@@ -2165,6 +2242,13 @@ func (m *APIKeyMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddQuotaUsed(v)
+		return nil
+	case apikey.FieldMaxConcurrency:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMaxConcurrency(v)
 		return nil
 	case apikey.FieldRateLimit5h:
 		v, ok := value.(float64)
@@ -2348,6 +2432,9 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldExpiresAt:
 		m.ResetExpiresAt()
+		return nil
+	case apikey.FieldMaxConcurrency:
+		m.ResetMaxConcurrency()
 		return nil
 	case apikey.FieldRateLimit5h:
 		m.ResetRateLimit5h()

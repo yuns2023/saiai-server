@@ -30,6 +30,7 @@ var (
 	ErrAPIKeyInvalidChars       = infraerrors.BadRequest("API_KEY_INVALID_CHARS", "api key can only contain letters, numbers, underscores, and hyphens")
 	ErrAPIKeyRateLimited        = infraerrors.TooManyRequests("API_KEY_RATE_LIMITED", "too many failed attempts, please try again later")
 	ErrInvalidIPPattern         = infraerrors.BadRequest("INVALID_IP_PATTERN", "invalid IP or CIDR pattern")
+	ErrAPIKeyMaxConcurrency     = infraerrors.BadRequest("API_KEY_MAX_CONCURRENCY_INVALID", fmt.Sprintf("max_concurrency must be between 1 and %d", MaxAPIKeyMaxConcurrency))
 	// ErrAPIKeyExpired        = infraerrors.Forbidden("API_KEY_EXPIRED", "api key has expired")
 	ErrAPIKeyExpired = infraerrors.Forbidden("API_KEY_EXPIRED", "api key 已过期")
 	// ErrAPIKeyQuotaExhausted = infraerrors.TooManyRequests("API_KEY_QUOTA_EXHAUSTED", "api key quota exhausted")
@@ -40,6 +41,18 @@ var (
 	ErrAPIKeyRateLimit1dExceeded = infraerrors.TooManyRequests("API_KEY_RATE_1D_EXCEEDED", "api key 日限额已用完")
 	ErrAPIKeyRateLimit7dExceeded = infraerrors.TooManyRequests("API_KEY_RATE_7D_EXCEEDED", "api key 7天限额已用完")
 )
+
+const (
+	// DefaultAPIKeyMaxConcurrency applies to new keys and, via migration 120,
+	// to keys created before per-key concurrency existed.
+	DefaultAPIKeyMaxConcurrency = 5
+	// MaxAPIKeyMaxConcurrency matches the api_keys_max_concurrency_range check.
+	MaxAPIKeyMaxConcurrency = 1000
+)
+
+func validAPIKeyMaxConcurrency(v *int) bool {
+	return v == nil || (*v >= 1 && *v <= MaxAPIKeyMaxConcurrency)
+}
 
 const (
 	apiKeyMaxErrorsPerHour = 20
@@ -174,6 +187,9 @@ type CreateAPIKeyRequest struct {
 	RateLimit5h float64 `json:"rate_limit_5h"`
 	RateLimit1d float64 `json:"rate_limit_1d"`
 	RateLimit7d float64 `json:"rate_limit_7d"`
+
+	// MaxConcurrency (nil = DefaultAPIKeyMaxConcurrency)
+	MaxConcurrency *int `json:"max_concurrency"`
 }
 
 // UpdateAPIKeyRequest 更新API Key请求
@@ -196,6 +212,8 @@ type UpdateAPIKeyRequest struct {
 	RateLimit1d         *float64 `json:"rate_limit_1d"`
 	RateLimit7d         *float64 `json:"rate_limit_7d"`
 	ResetRateLimitUsage *bool    `json:"reset_rate_limit_usage"` // Reset all usage counters to 0
+
+	MaxConcurrency *int `json:"max_concurrency"` // nil = no change
 }
 
 // APIKeyService API Key服务
@@ -343,6 +361,10 @@ func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group 
 
 // Create 创建API Key
 func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIKeyRequest) (*APIKey, error) {
+	if !validAPIKeyMaxConcurrency(req.MaxConcurrency) {
+		return nil, ErrAPIKeyMaxConcurrency
+	}
+
 	// 验证用户存在
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -432,6 +454,11 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		RateLimit1d: req.RateLimit1d,
 		RateLimit7d: req.RateLimit7d,
 		SmartSwitch: req.SmartSwitch.Clone(),
+
+		MaxConcurrency: DefaultAPIKeyMaxConcurrency,
+	}
+	if req.MaxConcurrency != nil {
+		apiKey.MaxConcurrency = *req.MaxConcurrency
 	}
 
 	// Set expiration time if specified
@@ -543,6 +570,9 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	// 验证所有权
 	if apiKey.UserID != userID {
 		return nil, ErrInsufficientPerms
+	}
+	if !validAPIKeyMaxConcurrency(req.MaxConcurrency) {
+		return nil, ErrAPIKeyMaxConcurrency
 	}
 
 	// 验证 IP 白名单格式
@@ -660,6 +690,9 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	}
 	if req.RateLimit7d != nil {
 		apiKey.RateLimit7d = *req.RateLimit7d
+	}
+	if req.MaxConcurrency != nil {
+		apiKey.MaxConcurrency = *req.MaxConcurrency
 	}
 	resetRateLimit := req.ResetRateLimitUsage != nil && *req.ResetRateLimitUsage
 	if resetRateLimit {

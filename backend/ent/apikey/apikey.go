@@ -49,6 +49,8 @@ const (
 	FieldQuotaUsed = "quota_used"
 	// FieldExpiresAt holds the string denoting the expires_at field in the database.
 	FieldExpiresAt = "expires_at"
+	// FieldMaxConcurrency holds the string denoting the max_concurrency field in the database.
+	FieldMaxConcurrency = "max_concurrency"
 	// FieldRateLimit5h holds the string denoting the rate_limit_5h field in the database.
 	FieldRateLimit5h = "rate_limit_5h"
 	// FieldRateLimit1d holds the string denoting the rate_limit_1d field in the database.
@@ -118,6 +120,7 @@ var Columns = []string{
 	FieldQuota,
 	FieldQuotaUsed,
 	FieldExpiresAt,
+	FieldMaxConcurrency,
 	FieldRateLimit5h,
 	FieldRateLimit1d,
 	FieldRateLimit7d,
@@ -169,6 +172,8 @@ var (
 	DefaultQuota float64
 	// DefaultQuotaUsed holds the default value on creation for the "quota_used" field.
 	DefaultQuotaUsed float64
+	// DefaultMaxConcurrency holds the default value on creation for the "max_concurrency" field.
+	DefaultMaxConcurrency int
 	// DefaultRateLimit5h holds the default value on creation for the "rate_limit_5h" field.
 	DefaultRateLimit5h float64
 	// DefaultRateLimit1d holds the default value on creation for the "rate_limit_1d" field.
@@ -259,6 +264,11 @@ func ByQuotaUsed(opts ...sql.OrderTermOption) OrderOption {
 // ByExpiresAt orders the results by the expires_at field.
 func ByExpiresAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldExpiresAt, opts...).ToFunc()
+}
+
+// ByMaxConcurrency orders the results by the max_concurrency field.
+func ByMaxConcurrency(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMaxConcurrency, opts...).ToFunc()
 }
 
 // ByRateLimit5h orders the results by the rate_limit_5h field.

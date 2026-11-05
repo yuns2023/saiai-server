@@ -48,7 +48,7 @@ export async function getById(id: number): Promise<ApiKey> {
  * @param ipBlacklist - Optional IP blacklist
  * @param quota - Optional quota limit in USD (0 = unlimited)
  * @param expiresInDays - Optional days until expiry (undefined = never expires)
- * @param rateLimitData - Optional rate limit fields
+ * @param rateLimitData - Optional rate limit fields and max concurrency
  * @returns Created API key
  */
 export async function create(
@@ -59,7 +59,7 @@ export async function create(
   ipBlacklist?: string[],
   quota?: number,
   expiresInDays?: number,
-  rateLimitData?: { rate_limit_5h?: number; rate_limit_1d?: number; rate_limit_7d?: number },
+  rateLimitData?: { rate_limit_5h?: number; rate_limit_1d?: number; rate_limit_7d?: number; max_concurrency?: number },
   smartSwitch?: KeySmartSwitchPolicy
 ): Promise<ApiKey> {
   const payload: CreateApiKeyRequest = { name, smart_switch: smartSwitch }
@@ -89,6 +89,9 @@ export async function create(
   }
   if (rateLimitData?.rate_limit_7d && rateLimitData.rate_limit_7d > 0) {
     payload.rate_limit_7d = rateLimitData.rate_limit_7d
+  }
+  if (rateLimitData?.max_concurrency !== undefined) {
+    payload.max_concurrency = rateLimitData.max_concurrency
   }
 
   const { data } = await apiClient.post<ApiKey>('/keys', payload)

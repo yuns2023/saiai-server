@@ -307,6 +307,27 @@ func (_u *APIKeyUpdate) ClearExpiresAt() *APIKeyUpdate {
 	return _u
 }
 
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (_u *APIKeyUpdate) SetMaxConcurrency(v int) *APIKeyUpdate {
+	_u.mutation.ResetMaxConcurrency()
+	_u.mutation.SetMaxConcurrency(v)
+	return _u
+}
+
+// SetNillableMaxConcurrency sets the "max_concurrency" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableMaxConcurrency(v *int) *APIKeyUpdate {
+	if v != nil {
+		_u.SetMaxConcurrency(*v)
+	}
+	return _u
+}
+
+// AddMaxConcurrency adds value to the "max_concurrency" field.
+func (_u *APIKeyUpdate) AddMaxConcurrency(v int) *APIKeyUpdate {
+	_u.mutation.AddMaxConcurrency(v)
+	return _u
+}
+
 // SetRateLimit5h sets the "rate_limit_5h" field.
 func (_u *APIKeyUpdate) SetRateLimit5h(v float64) *APIKeyUpdate {
 	_u.mutation.ResetRateLimit5h()
@@ -714,6 +735,12 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.ExpiresAtCleared() {
 		_spec.ClearField(apikey.FieldExpiresAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.MaxConcurrency(); ok {
+		_spec.SetField(apikey.FieldMaxConcurrency, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedMaxConcurrency(); ok {
+		_spec.AddField(apikey.FieldMaxConcurrency, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.RateLimit5h(); ok {
 		_spec.SetField(apikey.FieldRateLimit5h, field.TypeFloat64, value)
@@ -1166,6 +1193,27 @@ func (_u *APIKeyUpdateOne) ClearExpiresAt() *APIKeyUpdateOne {
 	return _u
 }
 
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (_u *APIKeyUpdateOne) SetMaxConcurrency(v int) *APIKeyUpdateOne {
+	_u.mutation.ResetMaxConcurrency()
+	_u.mutation.SetMaxConcurrency(v)
+	return _u
+}
+
+// SetNillableMaxConcurrency sets the "max_concurrency" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableMaxConcurrency(v *int) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetMaxConcurrency(*v)
+	}
+	return _u
+}
+
+// AddMaxConcurrency adds value to the "max_concurrency" field.
+func (_u *APIKeyUpdateOne) AddMaxConcurrency(v int) *APIKeyUpdateOne {
+	_u.mutation.AddMaxConcurrency(v)
+	return _u
+}
+
 // SetRateLimit5h sets the "rate_limit_5h" field.
 func (_u *APIKeyUpdateOne) SetRateLimit5h(v float64) *APIKeyUpdateOne {
 	_u.mutation.ResetRateLimit5h()
@@ -1603,6 +1651,12 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if _u.mutation.ExpiresAtCleared() {
 		_spec.ClearField(apikey.FieldExpiresAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.MaxConcurrency(); ok {
+		_spec.SetField(apikey.FieldMaxConcurrency, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedMaxConcurrency(); ok {
+		_spec.AddField(apikey.FieldMaxConcurrency, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.RateLimit5h(); ok {
 		_spec.SetField(apikey.FieldRateLimit5h, field.TypeFloat64, value)

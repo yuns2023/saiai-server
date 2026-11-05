@@ -60,6 +60,7 @@ type APIKey struct {
 	Quota               float64                      `json:"quota"`      // Quota limit in USD (0 = unlimited)
 	QuotaUsed           float64                      `json:"quota_used"` // Used quota amount in USD
 	ExpiresAt           *time.Time                   `json:"expires_at"` // Expiration time (nil = never expires)
+	MaxConcurrency      int                          `json:"max_concurrency"`
 	CreatedAt           time.Time                    `json:"created_at"`
 	UpdatedAt           time.Time                    `json:"updated_at"`
 

@@ -97,6 +97,26 @@ func NewConcurrencyService(cache ConcurrencyCache) *ConcurrencyService {
 type AcquireResult struct {
 	Acquired    bool
 	ReleaseFunc func() // Must be called when done (typically via defer)
+	// APIKeyFull is set when Acquired is false because the API key, not the
+	// user, has no free slot.
+	APIKeyFull bool
+}
+
+// SlotAcquireOutcome is the result of a combined user + API key acquire.
+type SlotAcquireOutcome int
+
+const (
+	SlotAcquireError SlotAcquireOutcome = iota
+	SlotAcquired
+	SlotUserFull
+	SlotAPIKeyFull
+)
+
+// UserAPIKeySlotCache takes a user slot and an API key slot atomically under
+// one request ID. Implemented by the Redis concurrency cache.
+type UserAPIKeySlotCache interface {
+	AcquireUserAPIKeySlot(ctx context.Context, userID int64, userMax int, apiKeyID int64, keyMax int, requestID string) (SlotAcquireOutcome, error)
+	ReleaseUserAPIKeySlot(ctx context.Context, userID int64, apiKeyID int64, requestID string) error
 }
 
 type AccountWithConcurrency struct {
@@ -199,6 +219,44 @@ func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, 
 		Acquired:    false,
 		ReleaseFunc: nil,
 	}, nil
+}
+
+// AcquireUserAPIKeySlot takes a user slot and, for API-key requests
+// (apiKeyID > 0), a slot of that key in one step: either both or neither.
+// userMax <= 0 keeps the user unlimited; keyMax <= 0 means the key's limit
+// was not loaded and falls back to DefaultAPIKeyMaxConcurrency, never to
+// unlimited.
+func (s *ConcurrencyService) AcquireUserAPIKeySlot(ctx context.Context, userID int64, userMax int, apiKeyID int64, keyMax int) (*AcquireResult, error) {
+	pairCache, ok := s.cache.(UserAPIKeySlotCache)
+	if apiKeyID <= 0 || !ok {
+		return s.AcquireUserSlot(ctx, userID, userMax)
+	}
+	if keyMax <= 0 {
+		keyMax = DefaultAPIKeyMaxConcurrency
+	}
+
+	requestID := generateRequestID()
+	outcome, err := pairCache.AcquireUserAPIKeySlot(ctx, userID, userMax, apiKeyID, keyMax, requestID)
+	if err != nil {
+		return nil, err
+	}
+	switch outcome {
+	case SlotAcquired:
+		return &AcquireResult{
+			Acquired: true,
+			ReleaseFunc: func() {
+				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := pairCache.ReleaseUserAPIKeySlot(bgCtx, userID, apiKeyID, requestID); err != nil {
+					logger.LegacyPrintf("service.concurrency", "Warning: failed to release user/api key slot for %d/%d (req=%s): %v", userID, apiKeyID, requestID, err)
+				}
+			},
+		}, nil
+	case SlotAPIKeyFull:
+		return &AcquireResult{APIKeyFull: true}, nil
+	default:
+		return &AcquireResult{}, nil
+	}
 }
 
 // ============================================

@@ -18,6 +18,7 @@ vi.mock('@/api', () => ({
   usageAPI: { getDashboardApiKeysUsage: mocks.getUsage }
 }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: mocks.showSuccess, showError: mocks.showError }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { concurrency: 3 } }) }))
 vi.mock('@/stores/onboarding', () => ({ useOnboardingStore: () => ({ isCurrentStep: mocks.isCurrentStep, nextStep: mocks.nextStep }) }))
 vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copyToClipboard: mocks.copyToClipboard }) }))
 vi.mock('vue-i18n', async () => {
@@ -33,7 +34,7 @@ const groups = [
 function makeKey(overrides: Partial<ApiKey> = {}): ApiKey {
   return {
     id: 10, user_id: 1, name: 'Existing', key: 'TEST_ONLY_EXISTING_KEY', group_id: 1, group: groups[0],
-    status: 'active', ip_whitelist: [], ip_blacklist: [], quota: 0, quota_used: 0,
+    status: 'active', ip_whitelist: [], ip_blacklist: [], quota: 0, quota_used: 0, max_concurrency: 5,
     rate_limit_5h: 0, rate_limit_1d: 0, rate_limit_7d: 0, usage_5h: 0, usage_1d: 0, usage_7d: 0,
     window_5h_start: null, window_1d_start: null, window_7d_start: null,
     reset_5h_at: null, reset_1d_at: null, reset_7d_at: null,
@@ -237,6 +238,45 @@ describe('user KeysView setup guidance', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(mocks.update).toHaveBeenCalledWith(10, expect.objectContaining({ group_id: null, smart_switch: { ...policy, enabled: false } }))
+  })
+
+  it('creates a key with the default max concurrency of 5', async () => {
+    const wrapper = await mountView()
+    await fillCreateForm(wrapper)
+    const input = wrapper.find('[data-testid="key-max-concurrency"]')
+    expect((input.element as HTMLInputElement).value).toBe('5')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.create.mock.calls[0][7]).toEqual(expect.objectContaining({ max_concurrency: 5 }))
+  })
+
+  it('saves an edited max concurrency above the account total', async () => {
+    mocks.list.mockResolvedValue({ items: [makeKey({ max_concurrency: 4 })], total: 1, page: 1, page_size: 10, pages: 1 })
+    const wrapper = await mountView()
+    await buttonWithText(wrapper, 'common.edit').trigger('click')
+    const input = wrapper.find('[data-testid="key-max-concurrency"]')
+    expect((input.element as HTMLInputElement).value).toBe('4')
+    await input.setValue('12')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith(10, expect.objectContaining({ max_concurrency: 12 }))
+  })
+
+  it.each(['0', '1001', '2.5', ''])('rejects max concurrency %j without saving', async (value) => {
+    const wrapper = await mountView()
+    await buttonWithText(wrapper, 'common.edit').trigger('click')
+    await wrapper.find('[data-testid="key-max-concurrency"]').setValue(value)
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.showError).toHaveBeenCalledWith('keys.maxConcurrencyInvalid')
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
+
+  it('shows each key max concurrency in the list', async () => {
+    mocks.list.mockResolvedValue({ items: [makeKey({ max_concurrency: 7 })], total: 1, page: 1, page_size: 10, pages: 1 })
+    const wrapper = await mountView()
+    expect(wrapper.find('thead').text()).toContain('keys.maxConcurrencyColumn')
+    expect(wrapper.find('tbody').text()).toContain('7')
   })
 
   it('omits a disabled smart switching policy when creating a key', async () => {

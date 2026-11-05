@@ -49,6 +49,9 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		SetRateLimit7d(key.RateLimit7d).
 		SetSmartSwitch(key.SmartSwitch).
 		SetSmartSwitchVersion(key.SmartSwitchVersion)
+	if key.MaxConcurrency > 0 {
+		builder.SetMaxConcurrency(key.MaxConcurrency)
+	}
 
 	if len(key.IPWhitelist) > 0 {
 		builder.SetIPWhitelist(key.IPWhitelist)
@@ -132,6 +135,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			apikey.FieldRateLimit5h,
 			apikey.FieldRateLimit1d,
 			apikey.FieldRateLimit7d,
+			apikey.FieldMaxConcurrency,
 			apikey.FieldSmartSwitch,
 			apikey.FieldSmartSwitchVersion,
 		).
@@ -244,6 +248,9 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 		SetUpdatedAt(now).
 		SetSmartSwitch(policy).
 		AddSmartSwitchVersion(1)
+	if key.MaxConcurrency > 0 {
+		builder.SetMaxConcurrency(key.MaxConcurrency)
+	}
 	if key.GroupID != nil {
 		builder.SetGroupID(*key.GroupID)
 	} else {
@@ -629,6 +636,7 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 		RateLimit5h:         m.RateLimit5h,
 		RateLimit1d:         m.RateLimit1d,
 		RateLimit7d:         m.RateLimit7d,
+		MaxConcurrency:      m.MaxConcurrency,
 		SmartSwitch:         m.SmartSwitch.Clone(),
 		SmartSwitchVersion:  m.SmartSwitchVersion,
 		SmartSwitchPaygUsed: m.SmartSwitchPaygUsed,

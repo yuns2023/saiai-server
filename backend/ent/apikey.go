@@ -55,6 +55,8 @@ type APIKey struct {
 	QuotaUsed float64 `json:"quota_used,omitempty"`
 	// Expiration time for this API key (null = never expires)
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// Max concurrent requests for this API key (user concurrency still applies)
+	MaxConcurrency int `json:"max_concurrency,omitempty"`
 	// Rate limit in USD per 5 hours (0 = unlimited)
 	RateLimit5h float64 `json:"rate_limit_5h,omitempty"`
 	// Rate limit in USD per day (0 = unlimited)
@@ -132,7 +134,7 @@ func (*APIKey) scanValues(columns []string) ([]any, error) {
 			values[i] = new([]byte)
 		case apikey.FieldSmartSwitchPaygUsed, apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
 			values[i] = new(sql.NullFloat64)
-		case apikey.FieldID, apikey.FieldUserID, apikey.FieldGroupID, apikey.FieldSmartSwitchVersion:
+		case apikey.FieldID, apikey.FieldUserID, apikey.FieldGroupID, apikey.FieldSmartSwitchVersion, apikey.FieldMaxConcurrency:
 			values[i] = new(sql.NullInt64)
 		case apikey.FieldKey, apikey.FieldName, apikey.FieldStatus:
 			values[i] = new(sql.NullString)
@@ -270,6 +272,12 @@ func (_m *APIKey) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ExpiresAt = new(time.Time)
 				*_m.ExpiresAt = value.Time
+			}
+		case apikey.FieldMaxConcurrency:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field max_concurrency", values[i])
+			} else if value.Valid {
+				_m.MaxConcurrency = int(value.Int64)
 			}
 		case apikey.FieldRateLimit5h:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -437,6 +445,9 @@ func (_m *APIKey) String() string {
 		builder.WriteString("expires_at=")
 		builder.WriteString(v.Format(time.ANSIC))
 	}
+	builder.WriteString(", ")
+	builder.WriteString("max_concurrency=")
+	builder.WriteString(fmt.Sprintf("%v", _m.MaxConcurrency))
 	builder.WriteString(", ")
 	builder.WriteString("rate_limit_5h=")
 	builder.WriteString(fmt.Sprintf("%v", _m.RateLimit5h))

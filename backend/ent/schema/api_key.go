@@ -78,6 +78,11 @@ func (APIKey) Fields() []ent.Field {
 			Nillable().
 			Comment("Expiration time for this API key (null = never expires)"),
 
+		// Per-key concurrency cap; the user's concurrency still caps the total.
+		field.Int("max_concurrency").
+			Default(5).
+			Comment("Max concurrent requests for this API key (user concurrency still applies)"),
+
 		// ========== Rate limit fields ==========
 		// Rate limit configuration (0 = unlimited)
 		field.Float("rate_limit_5h").

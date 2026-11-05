@@ -547,6 +547,7 @@ export interface ApiKey {
   quota: number // Quota limit in USD (0 = unlimited)
   quota_used: number // Used quota amount in USD
   expires_at: string | null // Expiration time (null = never expires)
+  max_concurrency: number // Max concurrent requests of this key (account concurrency still applies)
   created_at: string
   updated_at: string
   group?: Group
@@ -576,6 +577,7 @@ export interface CreateApiKeyRequest {
   rate_limit_5h?: number
   rate_limit_1d?: number
   rate_limit_7d?: number
+  max_concurrency?: number // Omitted = 5
 }
 
 export interface UpdateApiKeyRequest {
@@ -592,6 +594,7 @@ export interface UpdateApiKeyRequest {
   rate_limit_1d?: number
   rate_limit_7d?: number
   reset_rate_limit_usage?: boolean
+  max_concurrency?: number // Omitted = no change
 }
 
 export interface CreateGroupRequest {

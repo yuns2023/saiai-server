@@ -76,8 +76,10 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 		// INSUFFICIENT_BALANCE）都能被 ops_error_logger 归因到具体用户。
 		c.Set(string(ContextKeyAPIKey), apiKey)
 		c.Set(string(ContextKeyUser), AuthSubject{
-			UserID:      apiKey.User.ID,
-			Concurrency: apiKey.User.Concurrency,
+			UserID:            apiKey.User.ID,
+			Concurrency:       apiKey.User.Concurrency,
+			APIKeyID:          apiKey.ID,
+			APIKeyConcurrency: apiKey.MaxConcurrency,
 		})
 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
 		setGroupContext(c, apiKey.Group)

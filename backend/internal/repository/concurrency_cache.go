@@ -27,6 +27,8 @@ const (
 	accountSlotKeyPrefix = "concurrency:account:"
 	// 格式: concurrency:user:{userID}
 	userSlotKeyPrefix = "concurrency:user:"
+	// 格式: concurrency:apikey:{apiKeyID}
+	apiKeySlotKeyPrefix = "concurrency:apikey:"
 	// 等待队列计数器格式: concurrency:wait:{userID}
 	waitQueueKeyPrefix = "concurrency:wait:"
 	// 账号级等待队列计数器格式: wait:account:{accountID}
@@ -74,6 +76,40 @@ var (
 		end
 
 		return 0
+	`)
+
+	// acquireUserAPIKeyScript 同时占用 API Key 与用户槽位（同一 requestID），
+	// 任一已满则都不占用，避免占着 key 名额等用户名额。
+	// KEYS[1] = concurrency:user:{id}，KEYS[2] = concurrency:apikey:{id}
+	// ARGV[1] = 用户上限（<=0 不限），ARGV[2] = key 上限，ARGV[3] = TTL（秒），ARGV[4] = requestID
+	// 返回 1 = 已占用，-1 = 用户已满，-2 = key 已满
+	acquireUserAPIKeyScript = redis.NewScript(`
+		local userKey = KEYS[1]
+		local apiKeyKey = KEYS[2]
+		local userMax = tonumber(ARGV[1])
+		local keyMax = tonumber(ARGV[2])
+		local ttl = tonumber(ARGV[3])
+		local requestID = ARGV[4]
+
+		local timeResult = redis.call('TIME')
+		local now = tonumber(timeResult[1])
+		local expireBefore = now - ttl
+
+		redis.call('ZREMRANGEBYSCORE', apiKeyKey, '-inf', expireBefore)
+		if redis.call('ZCARD', apiKeyKey) >= keyMax then
+			return -2
+		end
+		if userMax > 0 then
+			redis.call('ZREMRANGEBYSCORE', userKey, '-inf', expireBefore)
+			if redis.call('ZCARD', userKey) >= userMax then
+				return -1
+			end
+			redis.call('ZADD', userKey, now, requestID)
+			redis.call('EXPIRE', userKey, ttl)
+		end
+		redis.call('ZADD', apiKeyKey, now, requestID)
+		redis.call('EXPIRE', apiKeyKey, ttl)
+		return 1
 	`)
 
 	// getCountScript 统计有序集合中的槽位数量并清理过期条目
@@ -222,6 +258,10 @@ func userSlotKey(userID int64) string {
 	return fmt.Sprintf("%s%d", userSlotKeyPrefix, userID)
 }
 
+func apiKeySlotKey(apiKeyID int64) string {
+	return fmt.Sprintf("%s%d", apiKeySlotKeyPrefix, apiKeyID)
+}
+
 func waitQueueKey(userID int64) string {
 	return fmt.Sprintf("%s%d", waitQueueKeyPrefix, userID)
 }
@@ -309,6 +349,32 @@ func (c *concurrencyCache) AcquireUserSlot(ctx context.Context, userID int64, ma
 func (c *concurrencyCache) ReleaseUserSlot(ctx context.Context, userID int64, requestID string) error {
 	key := userSlotKey(userID)
 	return c.rdb.ZRem(ctx, key, requestID).Err()
+}
+
+var _ service.UserAPIKeySlotCache = (*concurrencyCache)(nil)
+
+func (c *concurrencyCache) AcquireUserAPIKeySlot(ctx context.Context, userID int64, userMax int, apiKeyID int64, keyMax int, requestID string) (service.SlotAcquireOutcome, error) {
+	keys := []string{userSlotKey(userID), apiKeySlotKey(apiKeyID)}
+	result, err := acquireUserAPIKeyScript.Run(ctx, c.rdb, keys, userMax, keyMax, c.slotTTLSeconds, requestID).Int()
+	if err != nil {
+		return service.SlotAcquireError, err
+	}
+	switch result {
+	case 1:
+		return service.SlotAcquired, nil
+	case -2:
+		return service.SlotAPIKeyFull, nil
+	default:
+		return service.SlotUserFull, nil
+	}
+}
+
+func (c *concurrencyCache) ReleaseUserAPIKeySlot(ctx context.Context, userID int64, apiKeyID int64, requestID string) error {
+	pipe := c.rdb.Pipeline()
+	pipe.ZRem(ctx, userSlotKey(userID), requestID)
+	pipe.ZRem(ctx, apiKeySlotKey(apiKeyID), requestID)
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 func (c *concurrencyCache) GetUserConcurrency(ctx context.Context, userID int64) (int, error) {
@@ -500,7 +566,7 @@ func (c *concurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeR
 	}
 
 	// 1. 清理有序集合中非当前进程前缀的成员
-	slotPatterns := []string{accountSlotKeyPrefix + "*", userSlotKeyPrefix + "*"}
+	slotPatterns := []string{accountSlotKeyPrefix + "*", userSlotKeyPrefix + "*", apiKeySlotKeyPrefix + "*"}
 	for _, pattern := range slotPatterns {
 		if err := c.cleanupSlotsByPattern(ctx, pattern, activeRequestPrefix); err != nil {
 			return err

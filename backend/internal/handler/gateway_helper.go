@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -139,10 +141,24 @@ const (
 	SSEPingFormatComment SSEPingFormat = ":\n\n"
 )
 
+// slotTypeAPIKey is the ConcurrencyError.SlotType of a request that waited
+// in vain because its API key, not its user, was at its concurrency limit.
+const slotTypeAPIKey = "api key"
+
 // ConcurrencyError represents a concurrency limit error with context
 type ConcurrencyError struct {
 	SlotType  string
 	IsTimeout bool
+}
+
+// concurrencyLimitSlotType names the limit in a client-facing error: the
+// SlotType of a ConcurrencyError when err is one, otherwise fallback.
+func concurrencyLimitSlotType(err error, fallback string) string {
+	var concurrencyErr *ConcurrencyError
+	if errors.As(err, &concurrencyErr) && concurrencyErr.SlotType != "" {
+		return concurrencyErr.SlotType
+	}
+	return fallback
 }
 
 func (e *ConcurrencyError) Error() string {
@@ -215,17 +231,39 @@ func (h *ConcurrencyHelper) DecrementAccountWaitCount(ctx context.Context, accou
 	h.concurrencyService.DecrementAccountWaitCount(ctx, accountID)
 }
 
-// TryAcquireUserSlot 尝试立即获取用户并发槽位。
-// 返回值: (releaseFunc, acquired, error)
-func (h *ConcurrencyHelper) TryAcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int) (func(), bool, error) {
-	result, err := h.concurrencyService.AcquireUserSlot(ctx, userID, maxConcurrency)
+// UserSlot is the user, and for API-key requests the key, whose concurrency
+// a request occupies. Every request holds one slot of each.
+type UserSlot struct {
+	UserID            int64
+	Concurrency       int
+	APIKeyID          int64 // 0 = no per-key slot
+	APIKeyConcurrency int
+}
+
+func userSlotOf(subject middleware2.AuthSubject) UserSlot {
+	return UserSlot{
+		UserID:            subject.UserID,
+		Concurrency:       subject.Concurrency,
+		APIKeyID:          subject.APIKeyID,
+		APIKeyConcurrency: subject.APIKeyConcurrency,
+	}
+}
+
+func (h *ConcurrencyHelper) acquireUserSlot(ctx context.Context, slot UserSlot) (*service.AcquireResult, error) {
+	return h.concurrencyService.AcquireUserAPIKeySlot(ctx, slot.UserID, slot.Concurrency, slot.APIKeyID, slot.APIKeyConcurrency)
+}
+
+// TryAcquireUserSlot 尝试立即获取用户（及 API Key）并发槽位。
+// 返回值: (releaseFunc, acquired, error)；未获取时 apiKeyFull 表示是 key 已满。
+func (h *ConcurrencyHelper) TryAcquireUserSlot(ctx context.Context, slot UserSlot) (release func(), acquired bool, apiKeyFull bool, err error) {
+	result, err := h.acquireUserSlot(ctx, slot)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	if !result.Acquired {
-		return nil, false, nil
+		return nil, false, result.APIKeyFull, nil
 	}
-	return result.ReleaseFunc, true, nil
+	return result.ReleaseFunc, true, false, nil
 }
 
 // TryAcquireAccountSlot 尝试立即获取账号并发槽位。
@@ -244,21 +282,12 @@ func (h *ConcurrencyHelper) TryAcquireAccountSlot(ctx context.Context, accountID
 // AcquireUserSlotWithWait acquires a user concurrency slot, waiting if necessary.
 // For streaming requests, sends ping events during the wait.
 // streamStarted is updated if streaming response has begun.
-func (h *ConcurrencyHelper) AcquireUserSlotWithWait(c *gin.Context, userID int64, maxConcurrency int, isStream bool, streamStarted *bool) (func(), error) {
-	ctx := c.Request.Context()
-
-	// Try to acquire immediately
-	releaseFunc, acquired, err := h.TryAcquireUserSlot(ctx, userID, maxConcurrency)
-	if err != nil {
-		return nil, err
-	}
-
-	if acquired {
-		return releaseFunc, nil
-	}
-
-	// Need to wait - handle streaming ping if needed
-	return h.waitForSlotWithPing(c, "user", userID, maxConcurrency, isStream, streamStarted)
+// A timeout returns a ConcurrencyError whose SlotType names the limit that
+// blocked the last attempt ("user" or "api key").
+func (h *ConcurrencyHelper) AcquireUserSlotWithWait(c *gin.Context, slot UserSlot, isStream bool, streamStarted *bool) (func(), error) {
+	return h.waitForAcquire(c, "user", func(ctx context.Context) (*service.AcquireResult, error) {
+		return h.acquireUserSlot(ctx, slot)
+	}, maxConcurrencyWait, isStream, streamStarted, true)
 }
 
 // AcquireAccountSlotWithWait acquires an account concurrency slot, waiting if necessary.
@@ -289,14 +318,29 @@ func (h *ConcurrencyHelper) waitForSlotWithPing(c *gin.Context, slotType string,
 
 // waitForSlotWithPingTimeout waits for a concurrency slot with a custom timeout.
 func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType string, id int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool, tryImmediate bool) (func(), error) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
-	defer cancel()
-
-	acquireSlot := func() (*service.AcquireResult, error) {
+	return h.waitForAcquire(c, slotType, func(ctx context.Context) (*service.AcquireResult, error) {
 		if slotType == "user" {
 			return h.concurrencyService.AcquireUserSlot(ctx, id, maxConcurrency)
 		}
 		return h.concurrencyService.AcquireAccountSlot(ctx, id, maxConcurrency)
+	}, timeout, isStream, streamStarted, tryImmediate)
+}
+
+// waitForAcquire retries acquire with backoff until it succeeds or timeout.
+func (h *ConcurrencyHelper) waitForAcquire(c *gin.Context, slotType string, acquire func(context.Context) (*service.AcquireResult, error), timeout time.Duration, isStream bool, streamStarted *bool, tryImmediate bool) (func(), error) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+	defer cancel()
+
+	blockedBy := slotType
+	acquireSlot := func() (*service.AcquireResult, error) {
+		result, err := acquire(ctx)
+		if err == nil && !result.Acquired {
+			blockedBy = slotType
+			if result.APIKeyFull {
+				blockedBy = slotTypeAPIKey
+			}
+		}
+		return result, err
 	}
 
 	if tryImmediate {
@@ -337,7 +381,7 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 		select {
 		case <-ctx.Done():
 			return nil, &ConcurrencyError{
-				SlotType:  slotType,
+				SlotType:  blockedBy,
 				IsTimeout: true,
 			}
 

@@ -139,8 +139,10 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// cooldown rejections to the authenticated user and key.
 		c.Set(string(ContextKeyAPIKey), apiKey)
 		c.Set(string(ContextKeyUser), AuthSubject{
-			UserID:      apiKey.User.ID,
-			Concurrency: apiKey.User.Concurrency,
+			UserID:            apiKey.User.ID,
+			Concurrency:       apiKey.User.Concurrency,
+			APIKeyID:          apiKey.ID,
+			APIKeyConcurrency: apiKey.MaxConcurrency,
 		})
 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
 		c.Request = c.Request.WithContext(service.WithAccountUserID(service.WithTrustedUser(c.Request.Context(), apiKey.User.IsTrusted), apiKey.UserID))

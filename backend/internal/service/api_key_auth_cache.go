@@ -13,7 +13,8 @@ import (
 // v3: groups.codex_timezone_action.
 // v4: groups.client_attestation_policy.
 // v5: groups.claude_entrypoint_policy / claude_entrypoint_allowlist.
-const apiKeyAuthSnapshotSchemaVersion = 5
+// v6: api_keys.max_concurrency.
+const apiKeyAuthSnapshotSchemaVersion = 6
 
 // APIKeyAuthSnapshot API Key 认证缓存快照（仅包含认证所需字段）
 type APIKeyAuthSnapshot struct {
@@ -41,6 +42,8 @@ type APIKeyAuthSnapshot struct {
 	RateLimit5h float64 `json:"rate_limit_5h"`
 	RateLimit1d float64 `json:"rate_limit_1d"`
 	RateLimit7d float64 `json:"rate_limit_7d"`
+
+	MaxConcurrency int `json:"max_concurrency"`
 }
 
 // APIKeyAuthUserSnapshot 用户快照

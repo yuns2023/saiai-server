@@ -44,6 +44,8 @@ type CreateAPIKeyRequest struct {
 	RateLimit5h *float64 `json:"rate_limit_5h"`
 	RateLimit1d *float64 `json:"rate_limit_1d"`
 	RateLimit7d *float64 `json:"rate_limit_7d"`
+
+	MaxConcurrency *int `json:"max_concurrency"` // nil = default
 }
 
 // UpdateAPIKeyRequest represents the update API key request payload
@@ -63,6 +65,8 @@ type UpdateAPIKeyRequest struct {
 	RateLimit1d         *float64 `json:"rate_limit_1d"`
 	RateLimit7d         *float64 `json:"rate_limit_7d"`
 	ResetRateLimitUsage *bool    `json:"reset_rate_limit_usage"` // 重置限速用量
+
+	MaxConcurrency *int `json:"max_concurrency"` // nil = no change
 }
 
 // List handles listing user's API keys with pagination
@@ -152,13 +156,14 @@ func (h *APIKeyHandler) Create(c *gin.Context) {
 	}
 
 	svcReq := service.CreateAPIKeyRequest{
-		SmartSwitch:   req.SmartSwitch,
-		Name:          req.Name,
-		GroupID:       req.GroupID,
-		CustomKey:     req.CustomKey,
-		IPWhitelist:   req.IPWhitelist,
-		IPBlacklist:   req.IPBlacklist,
-		ExpiresInDays: req.ExpiresInDays,
+		SmartSwitch:    req.SmartSwitch,
+		Name:           req.Name,
+		GroupID:        req.GroupID,
+		CustomKey:      req.CustomKey,
+		IPWhitelist:    req.IPWhitelist,
+		IPBlacklist:    req.IPBlacklist,
+		ExpiresInDays:  req.ExpiresInDays,
+		MaxConcurrency: req.MaxConcurrency,
 	}
 	if req.Quota != nil {
 		svcReq.Quota = *req.Quota
@@ -213,6 +218,7 @@ func (h *APIKeyHandler) Update(c *gin.Context) {
 		RateLimit1d:         req.RateLimit1d,
 		RateLimit7d:         req.RateLimit7d,
 		ResetRateLimitUsage: req.ResetRateLimitUsage,
+		MaxConcurrency:      req.MaxConcurrency,
 	}
 	if req.Name != "" {
 		svcReq.Name = &req.Name
