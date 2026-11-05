@@ -332,3 +332,80 @@ func TestCodexMissingProxyIdentityLogUsesOnlyPresenceFlags(t *testing.T) {
 		}
 	}
 }
+
+// `codex app-server` hosted by a third party (#225163: the Claude Code Codex
+// plugin) names itself in originator and the User-Agent product. It is still
+// the official binary and passes through the local proxy, so it must reach
+// scheduling on HTTP and WS; terminal-only groups still reject it.
+func TestOpenAICodexEmbeddedAppServerAdmission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const ua = "Claude Code/0.166.0 (Windows 10.0.19045; x86_64) WindowsTerminal (Claude Code; 1.0.6)"
+	for _, tc := range []struct {
+		name, policy, originator string
+		admitted                 bool
+	}{
+		{"local proxy", "local_proxy_only", "Claude Code", true},
+		{"official clients", "official_clients", "Claude Code", true},
+		{"terminal only", "cli_only", "Claude Code", false},
+		{"local proxy without originator", "local_proxy_only", "", false},
+		{"local proxy with mismatched originator", "local_proxy_only", "other-host", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var slotCalls atomic.Int32
+			cache := &concurrencyCacheMock{
+				acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) {
+					slotCalls.Add(1)
+					return false, errors.New("TEST_ONLY_STOP_BEFORE_UPSTREAM")
+				},
+			}
+			handler := newOpenAIHandlerForPreviousResponseIDValidation(t, cache)
+			groupID := int64(2)
+			apiKey := &service.APIKey{
+				ID: 101, GroupID: &groupID,
+				Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, CodexClientPolicy: tc.policy},
+				User:  &service.User{ID: 1},
+			}
+			router := gin.New()
+			router.Use(func(requestContext *gin.Context) {
+				requestContext.Set(string(middleware.ContextKeyAPIKey), apiKey)
+				requestContext.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1, Concurrency: 1})
+			})
+			router.POST("/v1/responses", handler.Responses)
+			router.GET("/v1/responses", handler.ResponsesWebSocket)
+			headers := http.Header{}
+			headers.Set("User-Agent", ua)
+			if tc.originator != "" {
+				headers.Set("originator", tc.originator)
+			}
+			headers.Set("version", "0.166.0")
+			headers.Set("chatgpt-account-id", "TEST_ONLY_ACCOUNT")
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"TEST_ONLY_MODEL","stream":true,"input":"TEST_ONLY_INPUT"}`))
+			request.Header = headers.Clone()
+			router.ServeHTTP(recorder, request)
+			if tc.admitted {
+				require.Equal(t, int32(1), slotCalls.Load())
+				require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+			} else {
+				require.Equal(t, http.StatusForbidden, recorder.Code)
+				require.Zero(t, slotCalls.Load())
+			}
+			server := httptest.NewServer(router)
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			connection, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", &coderws.DialOptions{HTTPHeader: headers})
+			require.NoError(t, err)
+			defer func() { _ = connection.CloseNow() }()
+			require.NoError(t, connection.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"TEST_ONLY_MODEL","input":"TEST_ONLY_INPUT"}`)))
+			_, _, err = connection.Read(ctx)
+			require.Error(t, err)
+			if !tc.admitted {
+				require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err))
+				require.Zero(t, slotCalls.Load())
+				return
+			}
+			require.Equal(t, int32(2), slotCalls.Load())
+		})
+	}
+}

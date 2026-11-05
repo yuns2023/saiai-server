@@ -160,3 +160,17 @@ func TestCodexModelsDiscoveryFiltersGroupBlockedModels(t *testing.T) {
 	require.Empty(t, (*outgoing)[0].Header.Get("If-None-Match"))
 	require.Equal(t, "codex-tui/0.164.0", (*outgoing)[0].Header.Get("User-Agent"))
 }
+
+// A third-party `codex app-server` host (#225163) is an official Codex
+// binary: discovery keeps its identity instead of the gateway's.
+func TestCodexModelsDiscoveryKeepsEmbeddedHostIdentity(t *testing.T) {
+	const manifest = `{"models":[{"slug":"TEST_ONLY_MODEL"}]}`
+	const ua = "Claude Code/0.166.0 (Windows 10.0.19045; x86_64) WindowsTerminal (Claude Code; 1.0.6)"
+	h, outgoing := newCodexModelsAdmissionHandler(t, manifest, http.Header{})
+	header := http.Header{"User-Agent": {ua}, "Originator": {"Claude Code"}}
+	rec := serveCodexModels(h, &service.Group{ID: 9, Platform: service.PlatformOpenAI, CodexClientPolicy: "local_proxy_only"}, header)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, *outgoing, 1)
+	require.Equal(t, ua, (*outgoing)[0].Header.Get("User-Agent"))
+	require.Equal(t, "Claude Code", (*outgoing)[0].Header.Get("Originator"))
+}

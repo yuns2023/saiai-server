@@ -23,11 +23,12 @@ func captureCodexPolicyDiagnostics(c *gin.Context, policy string) {
 		}
 		d.Checks = append(d.Checks, service.OpsDiagnosticCheck{Field: field, Actual: actual})
 	}
-	add("User-Agent", pkgopenai.IsCodexOfficialClientRequest(c.GetHeader("User-Agent")), "recognized", "unrecognized")
+	embedded := pkgopenai.IsCodexEmbeddedClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	add("User-Agent", embedded || pkgopenai.IsCodexOfficialClientRequest(c.GetHeader("User-Agent")), "recognized", "unrecognized")
 	if strings.TrimSpace(c.GetHeader("User-Agent")) == "" {
 		d.Checks[0].Actual = "missing"
 	}
-	add("originator", pkgopenai.IsCodexOfficialClientOriginator(c.GetHeader("originator")), "recognized", "unrecognized")
+	add("originator", embedded || pkgopenai.IsCodexOfficialClientOriginator(c.GetHeader("originator")), "recognized", "unrecognized")
 	if strings.TrimSpace(c.GetHeader("originator")) == "" {
 		d.Checks[1].Actual = "omitted"
 	}

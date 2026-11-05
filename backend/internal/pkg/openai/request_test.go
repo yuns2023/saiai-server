@@ -228,3 +228,40 @@ func TestCodexChromeSidepanelAdmission(t *testing.T) {
 		t.Fatal("sidepanel must not qualify for terminal-only groups")
 	}
 }
+
+// `codex app-server` uses its host's clientInfo.name as originator and
+// User-Agent product (#225163, Claude Code Codex plugin).
+func TestIsCodexEmbeddedClientByHeaders(t *testing.T) {
+	const ua = "Claude Code/0.166.0 (Windows 10.0.19045; x86_64) WindowsTerminal (Claude Code; 1.0.6)"
+	for _, tc := range []struct {
+		name, ua, originator string
+		want                 bool
+	}{
+		{"Claude Code plugin", ua, "Claude Code", true},
+		{"originator case and spaces", ua, "  claude code ", true},
+		{"prerelease engine", "Zed/0.167.0-alpha.3 (Mac OS 15.1.0; arm64) unknown (Zed; 0.200.1)", "Zed", true},
+		{"build metadata", "Zed/0.167.0-alpha-beta+build.5 (Mac OS 15.1.0; arm64) unknown (Zed; 0.200.1)", "Zed", true},
+		{"terminal with version", "my-host/0.166.0 (Ubuntu 24.4.0; x86_64) ghostty/1.2.0-dev (my-host; 1)", "my-host", true},
+		{"SAIAI daemon check", "saiai_daemon_check/0.164.0 (Debian 13.0.0; x86_64) xterm-256color (saiai_daemon_check; 1.1.53)", "saiai_daemon_check", false},
+		{"missing originator", ua, "", false},
+		{"mismatched originator", ua, "other-host", false},
+		{"missing client suffix", "Claude Code/0.166.0 (Windows 10.0.19045; x86_64) WindowsTerminal", "Claude Code", false},
+		{"missing platform", "Claude Code/0.166.0 WindowsTerminal (Claude Code; 1.0.6)", "Claude Code", false},
+		{"two-part version", "Mozilla/5.0 (Windows NT 10.0; Win64) AppleWebKit (KHTML; like Gecko)", "Mozilla", false},
+		{"bare product", "Claude Code/0.166.0", "Claude Code", false},
+		{"trailing text", ua + " extra", "Claude Code", false},
+		{"nested product", "a/b/0.166.0 (Windows 10; x86_64) unknown (a; 1)", "a/b", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsCodexEmbeddedClientByHeaders(tc.ua, tc.originator); got != tc.want {
+				t.Fatalf("IsCodexEmbeddedClientByHeaders(%q, %q) = %v, want %v", tc.ua, tc.originator, got, tc.want)
+			}
+			if got := IsCodexOfficialClientByHeaders(tc.ua, tc.originator); got != tc.want {
+				t.Fatalf("IsCodexOfficialClientByHeaders(%q, %q) = %v, want %v", tc.ua, tc.originator, got, tc.want)
+			}
+		})
+	}
+	if IsCodexTerminalRequest(ua) {
+		t.Fatal("an embedded host must not qualify for terminal-only groups")
+	}
+}
