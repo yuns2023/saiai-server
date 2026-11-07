@@ -187,6 +187,56 @@ func TestCarpoolUserRelationRoundTrip(t *testing.T) {
 	require.Empty(t, saved.CarpoolUserIDs)
 }
 
+func TestCarpoolAPIKeyRelationRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	user := mustCreateUser(t, client, &service.User{})
+	kept := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Name: "kept"})
+	softDeleted := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Name: "soft-deleted"})
+	hardDeleted := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Name: "hard-deleted"})
+	repo := NewAccountRepository(client, integrationDB, nil)
+	account := &service.Account{Name: "key-allowlist-test", Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Status: service.StatusActive, CarpoolAPIKeys: []service.CarpoolAPIKeyRef{{ID: kept.ID}, {ID: softDeleted.ID}, {ID: hardDeleted.ID}}, Extra: map[string]any{"claude_oauth_carpool_users_only": true}}
+	require.NoError(t, repo.Create(ctx, account))
+	t.Cleanup(func() {
+		_ = client.Account.DeleteOneID(account.ID).Exec(ctx)
+		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM api_keys WHERE user_id = $1", user.ID)
+		_ = client.User.DeleteOneID(user.ID).Exec(ctx)
+	})
+	saved, err := repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []service.CarpoolAPIKeyRef{{ID: kept.ID, UserID: user.ID, Name: "kept"}, {ID: softDeleted.ID, UserID: user.ID, Name: "soft-deleted"}, {ID: hardDeleted.ID, UserID: user.ID, Name: "hard-deleted"}}, saved.CarpoolAPIKeys)
+
+	_, err = integrationDB.ExecContext(ctx, "UPDATE api_keys SET deleted_at = NOW() WHERE id = $1", softDeleted.ID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "DELETE FROM api_keys WHERE id = $1", hardDeleted.ID)
+	require.NoError(t, err)
+	saved, err = repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.Equal(t, []service.CarpoolAPIKeyRef{{ID: kept.ID, UserID: user.ID, Name: "kept"}}, saved.CarpoolAPIKeys)
+	var rows int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM claude_oauth_account_api_keys WHERE account_id = $1", account.ID).Scan(&rows))
+	require.Equal(t, 2, rows, "hard delete cascades; the soft-deleted row stays but is filtered")
+
+	// Unrelated edits keep the loaded list; only an empty list clears it.
+	saved.Name = "renamed"
+	require.NoError(t, repo.Update(ctx, saved))
+	saved, err = repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.Len(t, saved.CarpoolAPIKeys, 1)
+	saved.CarpoolAPIKeys = nil
+	require.NoError(t, repo.Update(ctx, saved))
+	saved, err = repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.Empty(t, saved.CarpoolAPIKeys)
+
+	other := &service.Account{Name: "key-allowlist-cascade", Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Status: service.StatusActive, CarpoolAPIKeys: []service.CarpoolAPIKeyRef{{ID: kept.ID}}}
+	require.NoError(t, repo.Create(ctx, other))
+	_, err = integrationDB.ExecContext(ctx, "DELETE FROM accounts WHERE id = $1", other.ID)
+	require.NoError(t, err)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM claude_oauth_account_api_keys WHERE account_id = $1", other.ID).Scan(&rows))
+	require.Zero(t, rows, "account delete cascades")
+}
+
 func TestClaudeDeviceMigrationPreservesBonusesOnce(t *testing.T) {
 	ctx := context.Background()
 	tx, err := integrationDB.BeginTx(ctx, nil)

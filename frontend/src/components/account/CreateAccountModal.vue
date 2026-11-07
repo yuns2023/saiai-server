@@ -1598,6 +1598,7 @@
                   </span>
                 </label>
                 <CarpoolUserSelector v-if="carpoolUsersOnly" v-model="carpoolUserIDs" class="mt-3 pl-7" />
+                <CarpoolAPIKeySelector v-if="carpoolUsersOnly" v-model="carpoolAPIKeys" class="mt-3 pl-7" />
               </div>
               <label v-if="claudeOAuthMode === 'carpool'" class="flex items-start gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600">
                 <input v-model="claudeOAuthCarpoolTrustedOnly" data-testid="carpool-trusted-only" type="checkbox" class="mt-0.5 h-4 w-4 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" />
@@ -2686,6 +2687,7 @@ import {
 import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import type {
+  CarpoolAPIKeyRef,
   Proxy,
   AdminGroup,
   AccountPlatform,
@@ -2695,6 +2697,7 @@ import type {
   CreateAccountRequest
 } from '@/types'
 import CarpoolUserSelector from './CarpoolUserSelector.vue'
+import CarpoolAPIKeySelector from './CarpoolAPIKeySelector.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -2916,6 +2919,7 @@ const claudeOAuthCarpoolDeviceLimit = ref<number>(5)
 const claudeOAuthCarpoolTrustedOnly = ref(false)
 const carpoolUsersOnly = ref(false)
 const carpoolUserIDs = ref<number[]>([])
+const carpoolAPIKeys = ref<CarpoolAPIKeyRef[]>([])
 const claudeOAuthCarpoolUnlimitedDevices = ref(false)
 const claudeOAuthCarpoolAutoExpand = ref(false)
 const carpoolMaintenanceIntervalHours = ref<number>(24)
@@ -3462,7 +3466,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
     const normalizedPayload = payload.platform === 'openai'
       ? payload
       : { ...payload, extra: buildAccountBlockedModelsExtra(payload.extra as Record<string, unknown> | undefined) }
-    await adminAPI.accounts.create(withMixedChannelConfirmFlag({ ...normalizedPayload, carpool_user_ids: carpoolUserIDs.value }))
+    await adminAPI.accounts.create(withMixedChannelConfirmFlag({ ...normalizedPayload, carpool_user_ids: carpoolUserIDs.value, carpool_api_key_ids: carpoolAPIKeys.value.map(k => k.id) }))
     appStore.showSuccess(t('admin.accounts.accountCreated'))
     emit('created')
     handleClose()
@@ -3549,6 +3553,7 @@ const resetForm = () => {
   claudeOAuthCarpoolTrustedOnly.value = false
   carpoolUsersOnly.value = false
   carpoolUserIDs.value = []
+  carpoolAPIKeys.value = []
   claudeOAuthCarpoolUnlimitedDevices.value = false
   claudeOAuthCarpoolAutoExpand.value = false
   carpoolMaintenanceIntervalHours.value = 24
@@ -3968,7 +3973,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     }
 
     await adminAPI.accounts.create({
-          carpool_user_ids: carpoolUserIDs.value,
+          carpool_user_ids: carpoolUserIDs.value, carpool_api_key_ids: carpoolAPIKeys.value.map(k => k.id),
       name: form.name,
       notes: form.notes,
       platform: 'openai',
@@ -4049,7 +4054,7 @@ const handleOpenAIValidateRT = async (refreshTokenInput: string) => {
         const accountName = refreshTokens.length > 1 ? `${form.name} #${i + 1}` : form.name
 
         await adminAPI.accounts.create({
-          carpool_user_ids: carpoolUserIDs.value,
+          carpool_user_ids: carpoolUserIDs.value, carpool_api_key_ids: carpoolAPIKeys.value.map(k => k.id),
           name: accountName,
           notes: form.notes,
           platform: 'openai',
@@ -4423,7 +4428,7 @@ const handleCookieAuth = async (sessionKey: string) => {
         }
 
         await adminAPI.accounts.create({
-          carpool_user_ids: carpoolUserIDs.value,
+          carpool_user_ids: carpoolUserIDs.value, carpool_api_key_ids: carpoolAPIKeys.value.map(k => k.id),
           name: accountName,
           notes: form.notes,
           platform: form.platform,

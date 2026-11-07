@@ -131,6 +131,9 @@ type APIKeyMutation struct {
 	usage_logs                map[int64]struct{}
 	removedusage_logs         map[int64]struct{}
 	clearedusage_logs         bool
+	carpool_accounts          map[int64]struct{}
+	removedcarpool_accounts   map[int64]struct{}
+	clearedcarpool_accounts   bool
 	done                      bool
 	oldValue                  func(context.Context) (*APIKey, error)
 	predicates                []predicate.APIKey
@@ -1696,6 +1699,60 @@ func (m *APIKeyMutation) ResetUsageLogs() {
 	m.removedusage_logs = nil
 }
 
+// AddCarpoolAccountIDs adds the "carpool_accounts" edge to the Account entity by ids.
+func (m *APIKeyMutation) AddCarpoolAccountIDs(ids ...int64) {
+	if m.carpool_accounts == nil {
+		m.carpool_accounts = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.carpool_accounts[ids[i]] = struct{}{}
+	}
+}
+
+// ClearCarpoolAccounts clears the "carpool_accounts" edge to the Account entity.
+func (m *APIKeyMutation) ClearCarpoolAccounts() {
+	m.clearedcarpool_accounts = true
+}
+
+// CarpoolAccountsCleared reports if the "carpool_accounts" edge to the Account entity was cleared.
+func (m *APIKeyMutation) CarpoolAccountsCleared() bool {
+	return m.clearedcarpool_accounts
+}
+
+// RemoveCarpoolAccountIDs removes the "carpool_accounts" edge to the Account entity by IDs.
+func (m *APIKeyMutation) RemoveCarpoolAccountIDs(ids ...int64) {
+	if m.removedcarpool_accounts == nil {
+		m.removedcarpool_accounts = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.carpool_accounts, ids[i])
+		m.removedcarpool_accounts[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedCarpoolAccounts returns the removed IDs of the "carpool_accounts" edge to the Account entity.
+func (m *APIKeyMutation) RemovedCarpoolAccountsIDs() (ids []int64) {
+	for id := range m.removedcarpool_accounts {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// CarpoolAccountsIDs returns the "carpool_accounts" edge IDs in the mutation.
+func (m *APIKeyMutation) CarpoolAccountsIDs() (ids []int64) {
+	for id := range m.carpool_accounts {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetCarpoolAccounts resets all changes to the "carpool_accounts" edge.
+func (m *APIKeyMutation) ResetCarpoolAccounts() {
+	m.carpool_accounts = nil
+	m.clearedcarpool_accounts = false
+	m.removedcarpool_accounts = nil
+}
+
 // Where appends a list predicates to the APIKeyMutation builder.
 func (m *APIKeyMutation) Where(ps ...predicate.APIKey) {
 	m.predicates = append(m.predicates, ps...)
@@ -2469,7 +2526,7 @@ func (m *APIKeyMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *APIKeyMutation) AddedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
 	if m.user != nil {
 		edges = append(edges, apikey.EdgeUser)
 	}
@@ -2478,6 +2535,9 @@ func (m *APIKeyMutation) AddedEdges() []string {
 	}
 	if m.usage_logs != nil {
 		edges = append(edges, apikey.EdgeUsageLogs)
+	}
+	if m.carpool_accounts != nil {
+		edges = append(edges, apikey.EdgeCarpoolAccounts)
 	}
 	return edges
 }
@@ -2500,15 +2560,24 @@ func (m *APIKeyMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case apikey.EdgeCarpoolAccounts:
+		ids := make([]ent.Value, 0, len(m.carpool_accounts))
+		for id := range m.carpool_accounts {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *APIKeyMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
 	if m.removedusage_logs != nil {
 		edges = append(edges, apikey.EdgeUsageLogs)
+	}
+	if m.removedcarpool_accounts != nil {
+		edges = append(edges, apikey.EdgeCarpoolAccounts)
 	}
 	return edges
 }
@@ -2523,13 +2592,19 @@ func (m *APIKeyMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case apikey.EdgeCarpoolAccounts:
+		ids := make([]ent.Value, 0, len(m.removedcarpool_accounts))
+		for id := range m.removedcarpool_accounts {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *APIKeyMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
 	if m.cleareduser {
 		edges = append(edges, apikey.EdgeUser)
 	}
@@ -2538,6 +2613,9 @@ func (m *APIKeyMutation) ClearedEdges() []string {
 	}
 	if m.clearedusage_logs {
 		edges = append(edges, apikey.EdgeUsageLogs)
+	}
+	if m.clearedcarpool_accounts {
+		edges = append(edges, apikey.EdgeCarpoolAccounts)
 	}
 	return edges
 }
@@ -2552,6 +2630,8 @@ func (m *APIKeyMutation) EdgeCleared(name string) bool {
 		return m.clearedgroup
 	case apikey.EdgeUsageLogs:
 		return m.clearedusage_logs
+	case apikey.EdgeCarpoolAccounts:
+		return m.clearedcarpool_accounts
 	}
 	return false
 }
@@ -2582,6 +2662,9 @@ func (m *APIKeyMutation) ResetEdge(name string) error {
 		return nil
 	case apikey.EdgeUsageLogs:
 		m.ResetUsageLogs()
+		return nil
+	case apikey.EdgeCarpoolAccounts:
+		m.ResetCarpoolAccounts()
 		return nil
 	}
 	return fmt.Errorf("unknown APIKey edge %s", name)
@@ -3588,6 +3671,9 @@ type AccountMutation struct {
 	carpool_users               map[int64]struct{}
 	removedcarpool_users        map[int64]struct{}
 	clearedcarpool_users        bool
+	carpool_api_keys            map[int64]struct{}
+	removedcarpool_api_keys     map[int64]struct{}
+	clearedcarpool_api_keys     bool
 	groups                      map[int64]struct{}
 	removedgroups               map[int64]struct{}
 	clearedgroups               bool
@@ -5142,6 +5228,60 @@ func (m *AccountMutation) ResetCarpoolUsers() {
 	m.removedcarpool_users = nil
 }
 
+// AddCarpoolAPIKeyIDs adds the "carpool_api_keys" edge to the APIKey entity by ids.
+func (m *AccountMutation) AddCarpoolAPIKeyIDs(ids ...int64) {
+	if m.carpool_api_keys == nil {
+		m.carpool_api_keys = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.carpool_api_keys[ids[i]] = struct{}{}
+	}
+}
+
+// ClearCarpoolAPIKeys clears the "carpool_api_keys" edge to the APIKey entity.
+func (m *AccountMutation) ClearCarpoolAPIKeys() {
+	m.clearedcarpool_api_keys = true
+}
+
+// CarpoolAPIKeysCleared reports if the "carpool_api_keys" edge to the APIKey entity was cleared.
+func (m *AccountMutation) CarpoolAPIKeysCleared() bool {
+	return m.clearedcarpool_api_keys
+}
+
+// RemoveCarpoolAPIKeyIDs removes the "carpool_api_keys" edge to the APIKey entity by IDs.
+func (m *AccountMutation) RemoveCarpoolAPIKeyIDs(ids ...int64) {
+	if m.removedcarpool_api_keys == nil {
+		m.removedcarpool_api_keys = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.carpool_api_keys, ids[i])
+		m.removedcarpool_api_keys[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedCarpoolAPIKeys returns the removed IDs of the "carpool_api_keys" edge to the APIKey entity.
+func (m *AccountMutation) RemovedCarpoolAPIKeysIDs() (ids []int64) {
+	for id := range m.removedcarpool_api_keys {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// CarpoolAPIKeysIDs returns the "carpool_api_keys" edge IDs in the mutation.
+func (m *AccountMutation) CarpoolAPIKeysIDs() (ids []int64) {
+	for id := range m.carpool_api_keys {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetCarpoolAPIKeys resets all changes to the "carpool_api_keys" edge.
+func (m *AccountMutation) ResetCarpoolAPIKeys() {
+	m.carpool_api_keys = nil
+	m.clearedcarpool_api_keys = false
+	m.removedcarpool_api_keys = nil
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by ids.
 func (m *AccountMutation) AddGroupIDs(ids ...int64) {
 	if m.groups == nil {
@@ -6065,9 +6205,12 @@ func (m *AccountMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *AccountMutation) AddedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.carpool_users != nil {
 		edges = append(edges, account.EdgeCarpoolUsers)
+	}
+	if m.carpool_api_keys != nil {
+		edges = append(edges, account.EdgeCarpoolAPIKeys)
 	}
 	if m.groups != nil {
 		edges = append(edges, account.EdgeGroups)
@@ -6088,6 +6231,12 @@ func (m *AccountMutation) AddedIDs(name string) []ent.Value {
 	case account.EdgeCarpoolUsers:
 		ids := make([]ent.Value, 0, len(m.carpool_users))
 		for id := range m.carpool_users {
+			ids = append(ids, id)
+		}
+		return ids
+	case account.EdgeCarpoolAPIKeys:
+		ids := make([]ent.Value, 0, len(m.carpool_api_keys))
+		for id := range m.carpool_api_keys {
 			ids = append(ids, id)
 		}
 		return ids
@@ -6113,9 +6262,12 @@ func (m *AccountMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *AccountMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.removedcarpool_users != nil {
 		edges = append(edges, account.EdgeCarpoolUsers)
+	}
+	if m.removedcarpool_api_keys != nil {
+		edges = append(edges, account.EdgeCarpoolAPIKeys)
 	}
 	if m.removedgroups != nil {
 		edges = append(edges, account.EdgeGroups)
@@ -6133,6 +6285,12 @@ func (m *AccountMutation) RemovedIDs(name string) []ent.Value {
 	case account.EdgeCarpoolUsers:
 		ids := make([]ent.Value, 0, len(m.removedcarpool_users))
 		for id := range m.removedcarpool_users {
+			ids = append(ids, id)
+		}
+		return ids
+	case account.EdgeCarpoolAPIKeys:
+		ids := make([]ent.Value, 0, len(m.removedcarpool_api_keys))
+		for id := range m.removedcarpool_api_keys {
 			ids = append(ids, id)
 		}
 		return ids
@@ -6154,9 +6312,12 @@ func (m *AccountMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *AccountMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.clearedcarpool_users {
 		edges = append(edges, account.EdgeCarpoolUsers)
+	}
+	if m.clearedcarpool_api_keys {
+		edges = append(edges, account.EdgeCarpoolAPIKeys)
 	}
 	if m.clearedgroups {
 		edges = append(edges, account.EdgeGroups)
@@ -6176,6 +6337,8 @@ func (m *AccountMutation) EdgeCleared(name string) bool {
 	switch name {
 	case account.EdgeCarpoolUsers:
 		return m.clearedcarpool_users
+	case account.EdgeCarpoolAPIKeys:
+		return m.clearedcarpool_api_keys
 	case account.EdgeGroups:
 		return m.clearedgroups
 	case account.EdgeProxy:
@@ -6203,6 +6366,9 @@ func (m *AccountMutation) ResetEdge(name string) error {
 	switch name {
 	case account.EdgeCarpoolUsers:
 		m.ResetCarpoolUsers()
+		return nil
+	case account.EdgeCarpoolAPIKeys:
+		m.ResetCarpoolAPIKeys()
 		return nil
 	case account.EdgeGroups:
 		m.ResetGroups()

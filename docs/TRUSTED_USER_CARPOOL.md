@@ -7,19 +7,21 @@ Anthropic OAuth or setup-token account in `carpool` mode can opt into
 `extra.claude_oauth_carpool_trusted_only: true` (default absent/off).
 
 The independent `extra.claude_oauth_carpool_users_only` switch restricts the
-account to the administrator-selected `carpool_user_ids`. Both switches default
-to off. Enabled conditions combine with AND:
+account to the administrator-selected `carpool_user_ids` and `carpool_api_key_ids`;
+matching either list is enough, so listing a user admits all of that user's keys.
+Both switches default to off. Enabled conditions combine with AND:
 
-| Trusted-only | Specified-users-only | Additional eligibility requirement |
+| Trusted-only | Specified-users-or-keys-only | Additional eligibility requirement |
 | --- | --- | --- |
 | Off | Off | None |
 | On | Off | Trusted user |
-| Off | On | User belongs to the selected list |
-| On | On | Trusted user AND membership in the selected list |
+| Off | On | User or key belongs to the selected lists |
+| On | On | Trusted user AND membership in the selected lists |
 
-An enabled empty list denies everyone. Membership comes from the authenticated
-SAIAI Key owner, never request metadata. Migration `107_carpool_account_users.sql`
-adds the cascading account/user relation; selection, sticky reuse and final
+An enabled switch with both lists empty denies everyone. Membership comes from the
+authenticated SAIAI Key and its owner, never request metadata. Migrations
+`107_carpool_account_users.sql` and `121_carpool_account_api_keys.sql` add the
+cascading account/user and account/key relations; selection, sticky reuse and final
 forwarding use the same predicate. See [account scheduling](GATEWAY_ACCOUNT_SCHEDULING.md#carpool-user-access).
 
 Trust is an account eligibility condition, not a new OAuth traffic mode, user

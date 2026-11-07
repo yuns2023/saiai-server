@@ -210,6 +210,7 @@ func (Account) Fields() []ent.Field {
 func (Account) Edges() []ent.Edge {
 	return []ent.Edge{
 		edge.To("carpool_users", User.Type).StorageKey(edge.Table("claude_oauth_account_users"), edge.Columns("account_id", "user_id")),
+		edge.To("carpool_api_keys", APIKey.Type).StorageKey(edge.Table("claude_oauth_account_api_keys"), edge.Columns("account_id", "api_key_id")),
 		// groups: 账户所属的分组（多对多关系）
 		// 通过 account_groups 中间表实现
 		// 一个账户可以属于多个分组，一个分组可以包含多个账户

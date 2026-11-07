@@ -138,6 +138,7 @@ func (APIKey) Edges() []ent.Edge {
 			Field("group_id").
 			Unique(),
 		edge.To("usage_logs", UsageLog.Type),
+		edge.From("carpool_accounts", Account.Type).Ref("carpool_api_keys"),
 	}
 }
 

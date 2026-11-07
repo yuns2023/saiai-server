@@ -1110,6 +1110,7 @@
                   </span>
                 </label>
                 <CarpoolUserSelector v-if="carpoolUsersOnly" v-model="carpoolUserIDs" class="mt-3 pl-7" />
+                <CarpoolAPIKeySelector v-if="carpoolUsersOnly" v-model="carpoolAPIKeys" class="mt-3 pl-7" />
               </div>
               <label v-if="claudeOAuthMode === 'carpool'" class="flex items-start gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600">
                 <input v-model="claudeOAuthCarpoolTrustedOnly" data-testid="carpool-trusted-only" type="checkbox" class="mt-0.5 h-4 w-4 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" />
@@ -2000,8 +2001,9 @@ import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import ClaudeDeviceOwnerInfo from './ClaudeDeviceOwnerInfo.vue'
 import type { ClaudeCarpoolDeviceOverview, ClaudePinnedBinding, ClaudeSharedBucket, ClaudeSingleDeviceSlot } from '@/api/admin/accounts'
-import type { Account, Proxy, AdminGroup, CheckMixedChannelRequest, CheckMixedChannelResponse } from '@/types'
+import type { Account, CarpoolAPIKeyRef, Proxy, AdminGroup, CheckMixedChannelRequest, CheckMixedChannelResponse } from '@/types'
 import CarpoolUserSelector from './CarpoolUserSelector.vue'
+import CarpoolAPIKeySelector from './CarpoolAPIKeySelector.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -2145,6 +2147,7 @@ const claudeOAuthCarpoolDeviceLimit = ref<number>(5)
 const claudeOAuthCarpoolTrustedOnly = ref(false)
 const carpoolUsersOnly = ref(false)
 const carpoolUserIDs = ref<number[]>([])
+const carpoolAPIKeys = ref<CarpoolAPIKeyRef[]>([])
 const claudeOAuthCarpoolUnlimitedDevices = ref(false)
 const claudeOAuthCarpoolAutoExpand = ref(false)
 const carpoolMaintenanceIntervalHours = ref<number>(24)
@@ -2758,6 +2761,7 @@ function loadQuotaControlSettings(account: Account) {
   claudeOAuthCarpoolTrustedOnly.value = false
   carpoolUsersOnly.value = false
   carpoolUserIDs.value = []
+  carpoolAPIKeys.value = []
   claudeOAuthCarpoolUnlimitedDevices.value = false
   claudeOAuthCarpoolAutoExpand.value = false
   carpoolMaintenanceIntervalHours.value = 24
@@ -2835,6 +2839,7 @@ function loadQuotaControlSettings(account: Account) {
   claudeOAuthCarpoolTrustedOnly.value = accountExtra.claude_oauth_carpool_trusted_only === true
   carpoolUsersOnly.value = accountExtra.claude_oauth_carpool_users_only === true
   carpoolUserIDs.value = [...(account.carpool_user_ids || [])]
+  carpoolAPIKeys.value = [...(account.carpool_api_keys || [])]
   claudeOAuthCarpoolUnlimitedDevices.value =
     account.claude_oauth_carpool_unlimited_devices === true || accountExtra.claude_oauth_carpool_unlimited_devices === true
   claudeOAuthCarpoolAutoExpand.value =
@@ -3501,6 +3506,7 @@ const handleSubmit = async () => {
       }
       newExtra.claude_oauth_carpool_users_only = claudeOAuthMode.value === 'carpool' && carpoolUsersOnly.value
       updatePayload.carpool_user_ids = carpoolUserIDs.value
+      updatePayload.carpool_api_key_ids = carpoolAPIKeys.value.map(k => k.id)
       delete newExtra.claude_oauth_carpool_trusted_only
       if (claudeOAuthMode.value === 'carpool' && claudeOAuthCarpoolTrustedOnly.value) {
         newExtra.claude_oauth_carpool_trusted_only = true

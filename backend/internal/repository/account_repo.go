@@ -22,6 +22,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	dbaccount "github.com/Wei-Shaw/sub2api/ent/account"
 	dbaccountgroup "github.com/Wei-Shaw/sub2api/ent/accountgroup"
+	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	dbgroup "github.com/Wei-Shaw/sub2api/ent/group"
 	dbpredicate "github.com/Wei-Shaw/sub2api/ent/predicate"
 	dbproxy "github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -96,7 +97,7 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 		SetSchedulable(account.Schedulable).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
 
-	builder.AddCarpoolUserIDs(account.CarpoolUserIDs...)
+	builder.AddCarpoolUserIDs(account.CarpoolUserIDs...).AddCarpoolAPIKeyIDs(carpoolAPIKeyIDs(account.CarpoolAPIKeys)...)
 
 	if account.RateMultiplier != nil {
 		builder.SetRateMultiplier(*account.RateMultiplier)
@@ -211,6 +212,10 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 	if err != nil {
 		return nil, err
 	}
+	carpoolAPIKeys, err := r.loadCarpoolAPIKeys(ctx, accountIDs)
+	if err != nil {
+		return nil, err
+	}
 	groupsByAccount, groupIDsByAccount, accountGroupsByAccount, err := r.loadAccountGroups(ctx, accountIDs)
 	if err != nil {
 		return nil, err
@@ -223,6 +228,7 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 			continue
 		}
 		out.CarpoolUserIDs = carpoolUsers[entAcc.ID]
+		out.CarpoolAPIKeys = carpoolAPIKeys[entAcc.ID]
 
 		// Prefer the preloaded proxy edge when available.
 		if entAcc.Edges.Proxy != nil {
@@ -344,6 +350,7 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
 
 	builder.ClearCarpoolUsers().AddCarpoolUserIDs(account.CarpoolUserIDs...)
+	builder.ClearCarpoolAPIKeys().AddCarpoolAPIKeyIDs(carpoolAPIKeyIDs(account.CarpoolAPIKeys)...)
 
 	if account.RateMultiplier != nil {
 		builder.SetRateMultiplier(*account.RateMultiplier)
@@ -1525,6 +1532,10 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	if err != nil {
 		return nil, err
 	}
+	carpoolAPIKeys, err := r.loadCarpoolAPIKeys(ctx, accountIDs)
+	if err != nil {
+		return nil, err
+	}
 	groupsByAccount, groupIDsByAccount, accountGroupsByAccount, err := r.loadAccountGroups(ctx, accountIDs)
 	if err != nil {
 		return nil, err
@@ -1537,6 +1548,7 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 			continue
 		}
 		out.CarpoolUserIDs = carpoolUsers[acc.ID]
+		out.CarpoolAPIKeys = carpoolAPIKeys[acc.ID]
 		if acc.ProxyID != nil {
 			if proxy, ok := proxyMap[*acc.ProxyID]; ok {
 				out.Proxy = proxy
@@ -2008,6 +2020,32 @@ func (r *accountRepository) loadCarpoolUsers(ctx context.Context, ids []int64) (
 		}
 	}
 	return out, nil
+}
+
+// loadCarpoolAPIKeys skips soft-deleted keys: deletion does not fire the
+// join-table cascade, but such keys can no longer authenticate.
+func (r *accountRepository) loadCarpoolAPIKeys(ctx context.Context, ids []int64) (map[int64][]service.CarpoolAPIKeyRef, error) {
+	out := make(map[int64][]service.CarpoolAPIKeyRef)
+	accounts, err := r.client.Account.Query().Where(dbaccount.IDIn(ids...)).Select(dbaccount.FieldID).WithCarpoolAPIKeys(func(q *dbent.APIKeyQuery) {
+		q.Where(apikey.DeletedAtIsNil()).Select(apikey.FieldID, apikey.FieldUserID, apikey.FieldName)
+	}).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range accounts {
+		for _, k := range a.Edges.CarpoolAPIKeys {
+			out[a.ID] = append(out[a.ID], service.CarpoolAPIKeyRef{ID: k.ID, UserID: k.UserID, Name: k.Name})
+		}
+	}
+	return out, nil
+}
+
+func carpoolAPIKeyIDs(refs []service.CarpoolAPIKeyRef) []int64 {
+	ids := make([]int64, len(refs))
+	for i, ref := range refs {
+		ids[i] = ref.ID
+	}
+	return ids
 }
 
 // AdvanceCarpoolMaintenance does not overwrite a concurrently edited schedule.

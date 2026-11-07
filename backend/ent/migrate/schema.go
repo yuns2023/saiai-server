@@ -1415,6 +1415,31 @@ var (
 			},
 		},
 	}
+	// ClaudeOauthAccountAPIKeysColumns holds the columns for the "claude_oauth_account_api_keys" table.
+	ClaudeOauthAccountAPIKeysColumns = []*schema.Column{
+		{Name: "account_id", Type: field.TypeInt},
+		{Name: "api_key_id", Type: field.TypeInt},
+	}
+	// ClaudeOauthAccountAPIKeysTable holds the schema information for the "claude_oauth_account_api_keys" table.
+	ClaudeOauthAccountAPIKeysTable = &schema.Table{
+		Name:       "claude_oauth_account_api_keys",
+		Columns:    ClaudeOauthAccountAPIKeysColumns,
+		PrimaryKey: []*schema.Column{ClaudeOauthAccountAPIKeysColumns[0], ClaudeOauthAccountAPIKeysColumns[1]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "claude_oauth_account_api_keys_account_id",
+				Columns:    []*schema.Column{ClaudeOauthAccountAPIKeysColumns[0]},
+				RefColumns: []*schema.Column{AccountsColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+			{
+				Symbol:     "claude_oauth_account_api_keys_api_key_id",
+				Columns:    []*schema.Column{ClaudeOauthAccountAPIKeysColumns[1]},
+				RefColumns: []*schema.Column{APIKeysColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		APIKeysTable,
@@ -1444,6 +1469,7 @@ var (
 		UserAttributeValuesTable,
 		UserSubscriptionsTable,
 		ClaudeOauthAccountUsersTable,
+		ClaudeOauthAccountAPIKeysTable,
 	}
 )
 
@@ -1554,4 +1580,6 @@ func init() {
 	}
 	ClaudeOauthAccountUsersTable.ForeignKeys[0].RefTable = AccountsTable
 	ClaudeOauthAccountUsersTable.ForeignKeys[1].RefTable = UsersTable
+	ClaudeOauthAccountAPIKeysTable.ForeignKeys[0].RefTable = AccountsTable
+	ClaudeOauthAccountAPIKeysTable.ForeignKeys[1].RefTable = APIKeysTable
 }
