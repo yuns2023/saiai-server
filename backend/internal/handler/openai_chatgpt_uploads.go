@@ -19,7 +19,8 @@ import (
 )
 
 // Native upload control is separate from model turns: no token/fixed-turn
-// billing, Responses adaptation, prompt/body editing or model-slot retention.
+// billing, Responses adaptation, prompt/body editing (except the creation
+// body's timezone offset, see rewriteChatGPTTimezone) or model-slot retention.
 func (h *OpenAIGatewayHandler) ChatGPTUpload(c *gin.Context) {
 	key, _, scope, ok := h.chatGPTDeliveryContext(c)
 	if !ok {
@@ -43,6 +44,9 @@ func (h *OpenAIGatewayHandler) ChatGPTUpload(c *gin.Context) {
 	create := path == "/chatgpt/backend-api/files"
 	var owner int64
 	if create {
+		if body, ok = h.rewriteChatGPTTimezone(c, key.Group, body); !ok {
+			return
+		}
 		var metadata struct {
 			FileSize int64 `json:"file_size"`
 		}

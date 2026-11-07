@@ -124,6 +124,9 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		}})
 		return
 	}
+	if body, ok = h.rewriteChatGPTTimezone(c, apiKey.Group, body); !ok {
+		return
+	}
 	model, thinkingEffort := service.ChatGPTRequestMetadata(body)
 	if isTurnStream && (!service.ValidChatGPTMetadataValue(model, 100) || !service.ValidChatGPTMetadataValue(thinkingEffort, 32)) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Invalid ChatGPT model metadata")
