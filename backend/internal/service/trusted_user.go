@@ -1,12 +1,37 @@
 package service
 
-import "context"
+import (
+	"context"
+	"errors"
+
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+)
 
 type trustedUserContextKey struct{}
 type accountUserIDContextKey struct{}
+type accountAPIKeyIDContextKey struct{}
+
+// maxCarpoolAPIKeys bounds the per-account key allowlist; each entry is
+// validated with one lookup on save.
+const maxCarpoolAPIKeys = 200
+
+// CarpoolAPIKeyRef is one entry of a carpool account's key allowlist. Only ID
+// is used for admission; UserID and Name are read back from the key row for
+// display and hosted cost disclosure.
+type CarpoolAPIKeyRef struct {
+	ID     int64  `json:"id"`
+	UserID int64  `json:"user_id"`
+	Name   string `json:"name"`
+}
 
 func WithAccountUserID(ctx context.Context, id int64) context.Context {
 	return context.WithValue(ctx, accountUserIDContextKey{}, id)
+}
+
+// WithAccountAPIKeyID carries the authenticated SAIAI Key ID for carpool key
+// allowlists. Never populate it from request headers.
+func WithAccountAPIKeyID(ctx context.Context, id int64) context.Context {
+	return context.WithValue(ctx, accountAPIKeyIDContextKey{}, id)
 }
 
 // WithTrustedUser carries the authenticated SAIAI Key owner's administrator-managed
@@ -51,5 +76,42 @@ func accountAllowsUser(ctx context.Context, account *Account) bool {
 			return true
 		}
 	}
+	keyID, _ := ctx.Value(accountAPIKeyIDContextKey{}).(int64)
+	if keyID <= 0 {
+		return false
+	}
+	for _, allowed := range account.CarpoolAPIKeys {
+		if keyID == allowed.ID {
+			return true
+		}
+	}
 	return false
+}
+
+// resolveCarpoolAPIKeys deduplicates the requested key IDs and rejects missing
+// or deleted keys, so a bad entry fails the whole save instead of being dropped.
+func (s *adminServiceImpl) resolveCarpoolAPIKeys(ctx context.Context, ids []int64) ([]CarpoolAPIKeyRef, error) {
+	if len(ids) > maxCarpoolAPIKeys {
+		return nil, infraerrors.BadRequest("INVALID_CARPOOL_API_KEYS", "carpool_api_key_ids must contain at most 200 positive key IDs")
+	}
+	refs := make([]CarpoolAPIKeyRef, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		if id <= 0 {
+			return nil, infraerrors.BadRequest("INVALID_CARPOOL_API_KEYS", "carpool_api_key_ids must contain at most 200 positive key IDs")
+		}
+		key, err := s.apiKeyRepo.GetByID(ctx, id)
+		if errors.Is(err, ErrAPIKeyNotFound) {
+			return nil, infraerrors.BadRequest("INVALID_CARPOOL_API_KEYS", "api key not found")
+		}
+		if err != nil {
+			return nil, err
+		}
+		refs = append(refs, CarpoolAPIKeyRef{ID: key.ID, UserID: key.UserID, Name: key.Name})
+	}
+	return refs, nil
 }

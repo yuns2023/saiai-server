@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -264,4 +265,128 @@ func TestCarpoolUserConditionsIntersection(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestCarpoolKeyAllowlist(t *testing.T) {
+	for _, trustSwitch := range []bool{false, true} {
+		for _, trusted := range []bool{false, true} {
+			for _, userMember := range []bool{false, true} {
+				for _, keyMember := range []bool{false, true} {
+					a := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, CarpoolUserIDs: []int64{7}, CarpoolAPIKeys: []CarpoolAPIKeyRef{{ID: 30, UserID: 8}}, Extra: map[string]any{"claude_oauth_mode": "carpool", "claude_oauth_carpool_trusted_only": trustSwitch, "claude_oauth_carpool_users_only": true}}
+					userID, keyID := int64(8), int64(31)
+					if userMember {
+						userID = 7
+					}
+					if keyMember {
+						keyID = 30
+					}
+					ctx := WithAccountAPIKeyID(WithAccountUserID(WithTrustedUser(context.Background(), trusted), userID), keyID)
+					name := fmt.Sprintf("trustSwitch=%v/trusted=%v/user=%v/key=%v", trustSwitch, trusted, userMember, keyMember)
+					require.Equal(t, (!trustSwitch || trusted) && (userMember || keyMember), accountAllowsUser(ctx, a), name)
+				}
+			}
+		}
+	}
+
+	a := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, CarpoolAPIKeys: []CarpoolAPIKeyRef{{ID: 30}}, Extra: map[string]any{"claude_oauth_mode": "carpool", "claude_oauth_carpool_users_only": true}}
+	require.False(t, accountAllowsUser(WithAccountUserID(context.Background(), 8), a), "missing key identity must not match")
+	require.False(t, accountAllowsUser(WithAccountAPIKeyID(context.Background(), 30), a), "missing user identity must not match")
+	a.Extra["claude_oauth_carpool_users_only"] = false
+	require.True(t, accountAllowsUser(WithAccountUserID(context.Background(), 8), a), "key list is inert while the switch is off")
+}
+
+func TestCarpoolKeyAllowlistSelection(t *testing.T) {
+	for _, load := range []bool{false, true} {
+		for _, tc := range []struct{ member, restrictedExcluded bool }{{false, false}, {true, false}, {true, true}} {
+			member := tc.member
+			t.Run(fmt.Sprintf("load=%v/member=%v/excluded=%v", load, member, tc.restrictedExcluded), func(t *testing.T) {
+				groupID := int64(7)
+				restricted := Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 5, Priority: 1, AccountGroups: []AccountGroup{{GroupID: groupID}}, Extra: map[string]any{"claude_oauth_mode": "carpool", "claude_oauth_carpool_users_only": true}}
+				restricted.CarpoolAPIKeys = []CarpoolAPIKeyRef{{ID: 30, UserID: 8}}
+				normal := restricted
+				normal.ID = 2
+				normal.Priority = 2
+				normal.Extra = nil
+				repo := &mockAccountRepoForPlatform{accounts: []Account{restricted, normal}, accountsByID: map[int64]*Account{1: &restricted, 2: &normal}}
+				cfg := testConfig()
+				cfg.Gateway.Scheduling.LoadBatchEnabled = load
+				group := &Group{ID: groupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true}
+				svc := &GatewayService{accountRepo: repo, cache: &oauthStickyGatewayCacheStub{}, cfg: cfg, groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{groupID: group}}}
+				if load {
+					svc.concurrencyService = NewConcurrencyService(stubConcurrencyCache{})
+				}
+				// Same owner, different keys: only the listed key reaches the restricted account.
+				keyID := int64(31)
+				if member {
+					keyID = 30
+				}
+				ctx := context.WithValue(WithAccountAPIKeyID(WithAccountUserID(context.Background(), 8), keyID), ctxkey.ForcePlatform, PlatformAnthropic)
+				// A listed key whose restricted account is unavailable falls back to the shared pool.
+				var excluded map[int64]struct{}
+				if tc.restrictedExcluded {
+					excluded = map[int64]struct{}{1: {}}
+				}
+				result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "", "claude-test", excluded, "")
+				require.NoError(t, err)
+				expected := int64(2)
+				if member && !tc.restrictedExcluded {
+					expected = 1
+				}
+				require.Equal(t, expected, result.Account.ID)
+				if result.ReleaseFunc != nil {
+					result.ReleaseFunc()
+				}
+			})
+		}
+	}
+}
+
+type carpoolKeyRepoStub struct {
+	apiKeyRepoStub
+	keys    map[int64]*APIKey
+	lookups []int64
+}
+
+func (s *carpoolKeyRepoStub) GetByID(_ context.Context, id int64) (*APIKey, error) {
+	s.lookups = append(s.lookups, id)
+	if key, ok := s.keys[id]; ok {
+		return key, nil
+	}
+	return nil, ErrAPIKeyNotFound
+}
+
+func TestResolveCarpoolAPIKeys(t *testing.T) {
+	repo := &carpoolKeyRepoStub{keys: map[int64]*APIKey{30: {ID: 30, UserID: 8, Name: "team-a"}, 31: {ID: 31, UserID: 9, Name: "team-b"}}}
+	svc := &adminServiceImpl{apiKeyRepo: repo}
+
+	refs, err := svc.resolveCarpoolAPIKeys(context.Background(), []int64{30, 31, 30})
+	require.NoError(t, err)
+	require.Equal(t, []CarpoolAPIKeyRef{{ID: 30, UserID: 8, Name: "team-a"}, {ID: 31, UserID: 9, Name: "team-b"}}, refs)
+	require.Equal(t, []int64{30, 31}, repo.lookups, "duplicates are looked up once")
+
+	refs, err = svc.resolveCarpoolAPIKeys(context.Background(), []int64{})
+	require.NoError(t, err)
+	require.Empty(t, refs)
+
+	for name, ids := range map[string][]int64{"missing or deleted": {30, 99}, "non-positive": {0}} {
+		_, err = svc.resolveCarpoolAPIKeys(context.Background(), ids)
+		require.Error(t, err, name)
+		require.Equal(t, http.StatusBadRequest, infraerrors.Code(err), name)
+	}
+
+	repo.lookups = nil
+	tooMany := make([]int64, maxCarpoolAPIKeys+1)
+	for i := range tooMany {
+		tooMany[i] = 30
+	}
+	_, err = svc.resolveCarpoolAPIKeys(context.Background(), tooMany)
+	require.Equal(t, http.StatusBadRequest, infraerrors.Code(err))
+	require.Empty(t, repo.lookups, "oversized lists are rejected before any lookup, duplicates included")
+}
+
+func TestHostedDisclosureCountsCarpoolKeyOwners(t *testing.T) {
+	a := &Account{GroupIDs: []int64{10}, CarpoolAPIKeys: []CarpoolAPIKeyRef{{ID: 30, UserID: 1}}}
+	require.True(t, hostedAccountUsedOnlyBy(a, 10, 1))
+	a.CarpoolAPIKeys = append(a.CarpoolAPIKeys, CarpoolAPIKeyRef{ID: 31, UserID: 2})
+	require.False(t, hostedAccountUsedOnlyBy(a, 10, 1))
 }

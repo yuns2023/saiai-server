@@ -173,6 +173,41 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
+  it('round-trips the carpool key allowlist as key IDs', async () => {
+    const account = {
+      ...buildAccount(),
+      type: 'oauth',
+      credentials: { access_token: 'test-token' },
+      extra: { claude_oauth_mode: 'carpool', claude_oauth_carpool_users_only: true },
+      claude_oauth_mode: 'carpool',
+      carpool_user_ids: [7],
+      carpool_api_keys: [{ id: 30, user_id: 8, name: 'team-a' }, { id: 31, user_id: 8, name: 'team-b' }]
+    } as any
+
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    listClaudeCarpoolDevicesMock.mockReset()
+    updateAccountMock.mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    listClaudeCarpoolDevicesMock.mockResolvedValue({ unlimited_devices: false, recorded_limit: 5, recorded_count: 0, overflow_count: 0, recorded_items: [], overflow_items: [] })
+
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    const chips = wrapper.findAll('button').filter(b => b.text().startsWith('admin.accounts.carpoolSelectedAPIKey'))
+    expect(chips).toHaveLength(2)
+    await chips[1].trigger('click')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload.carpool_user_ids).toEqual([7])
+    expect(payload.carpool_api_key_ids).toEqual([30])
+    expect(payload.extra).toMatchObject({ claude_oauth_carpool_users_only: true })
+  })
+
   it('persists unlimited carpool devices and hides the bounded registry', async () => {
     const account = {
       ...buildAccount(),

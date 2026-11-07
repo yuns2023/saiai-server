@@ -77,6 +77,8 @@ const (
 	FieldSessionWindowStatus = "session_window_status"
 	// EdgeCarpoolUsers holds the string denoting the carpool_users edge name in mutations.
 	EdgeCarpoolUsers = "carpool_users"
+	// EdgeCarpoolAPIKeys holds the string denoting the carpool_api_keys edge name in mutations.
+	EdgeCarpoolAPIKeys = "carpool_api_keys"
 	// EdgeGroups holds the string denoting the groups edge name in mutations.
 	EdgeGroups = "groups"
 	// EdgeProxy holds the string denoting the proxy edge name in mutations.
@@ -92,6 +94,11 @@ const (
 	// CarpoolUsersInverseTable is the table name for the User entity.
 	// It exists in this package in order to avoid circular dependency with the "user" package.
 	CarpoolUsersInverseTable = "users"
+	// CarpoolAPIKeysTable is the table that holds the carpool_api_keys relation/edge. The primary key declared below.
+	CarpoolAPIKeysTable = "claude_oauth_account_api_keys"
+	// CarpoolAPIKeysInverseTable is the table name for the APIKey entity.
+	// It exists in this package in order to avoid circular dependency with the "apikey" package.
+	CarpoolAPIKeysInverseTable = "api_keys"
 	// GroupsTable is the table that holds the groups relation/edge. The primary key declared below.
 	GroupsTable = "account_groups"
 	// GroupsInverseTable is the table name for the Group entity.
@@ -159,6 +166,9 @@ var (
 	// CarpoolUsersPrimaryKey and CarpoolUsersColumn2 are the table columns denoting the
 	// primary key for the carpool_users relation (M2M).
 	CarpoolUsersPrimaryKey = []string{"account_id", "user_id"}
+	// CarpoolAPIKeysPrimaryKey and CarpoolAPIKeysColumn2 are the table columns denoting the
+	// primary key for the carpool_api_keys relation (M2M).
+	CarpoolAPIKeysPrimaryKey = []string{"account_id", "api_key_id"}
 	// GroupsPrimaryKey and GroupsColumn2 are the table columns denoting the
 	// primary key for the groups relation (M2M).
 	GroupsPrimaryKey = []string{"account_id", "group_id"}
@@ -380,6 +390,20 @@ func ByCarpoolUsers(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	}
 }
 
+// ByCarpoolAPIKeysCount orders the results by carpool_api_keys count.
+func ByCarpoolAPIKeysCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newCarpoolAPIKeysStep(), opts...)
+	}
+}
+
+// ByCarpoolAPIKeys orders the results by carpool_api_keys terms.
+func ByCarpoolAPIKeys(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newCarpoolAPIKeysStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
 // ByGroupsCount orders the results by groups count.
 func ByGroupsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -433,6 +457,13 @@ func newCarpoolUsersStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(CarpoolUsersInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.M2M, false, CarpoolUsersTable, CarpoolUsersPrimaryKey...),
+	)
+}
+func newCarpoolAPIKeysStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(CarpoolAPIKeysInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2M, false, CarpoolAPIKeysTable, CarpoolAPIKeysPrimaryKey...),
 	)
 }
 func newGroupsStep() *sqlgraph.Step {

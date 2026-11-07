@@ -250,6 +250,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		Credentials:             a.Credentials,
 		Extra:                   a.Extra,
 		CarpoolUserIDs:          a.CarpoolUserIDs,
+		CarpoolAPIKeys:          a.CarpoolAPIKeys,
 		ProxyID:                 a.ProxyID,
 		Concurrency:             a.Concurrency,
 		LoadFactor:              a.LoadFactor,

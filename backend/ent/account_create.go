@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/account"
+	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
@@ -421,6 +422,21 @@ func (_c *AccountCreate) AddCarpoolUsers(v ...*User) *AccountCreate {
 	return _c.AddCarpoolUserIDs(ids...)
 }
 
+// AddCarpoolAPIKeyIDs adds the "carpool_api_keys" edge to the APIKey entity by IDs.
+func (_c *AccountCreate) AddCarpoolAPIKeyIDs(ids ...int64) *AccountCreate {
+	_c.mutation.AddCarpoolAPIKeyIDs(ids...)
+	return _c
+}
+
+// AddCarpoolAPIKeys adds the "carpool_api_keys" edges to the APIKey entity.
+func (_c *AccountCreate) AddCarpoolAPIKeys(v ...*APIKey) *AccountCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddCarpoolAPIKeyIDs(ids...)
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_c *AccountCreate) AddGroupIDs(ids ...int64) *AccountCreate {
 	_c.mutation.AddGroupIDs(ids...)
@@ -773,6 +789,22 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.CarpoolAPIKeysIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolAPIKeysTable,
+			Columns: account.CarpoolAPIKeysPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

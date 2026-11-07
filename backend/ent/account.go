@@ -89,6 +89,8 @@ type Account struct {
 type AccountEdges struct {
 	// CarpoolUsers holds the value of the carpool_users edge.
 	CarpoolUsers []*User `json:"carpool_users,omitempty"`
+	// CarpoolAPIKeys holds the value of the carpool_api_keys edge.
+	CarpoolAPIKeys []*APIKey `json:"carpool_api_keys,omitempty"`
 	// Groups holds the value of the groups edge.
 	Groups []*Group `json:"groups,omitempty"`
 	// Proxy holds the value of the proxy edge.
@@ -99,7 +101,7 @@ type AccountEdges struct {
 	AccountGroups []*AccountGroup `json:"account_groups,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [5]bool
+	loadedTypes [6]bool
 }
 
 // CarpoolUsersOrErr returns the CarpoolUsers value or an error if the edge
@@ -111,10 +113,19 @@ func (e AccountEdges) CarpoolUsersOrErr() ([]*User, error) {
 	return nil, &NotLoadedError{edge: "carpool_users"}
 }
 
+// CarpoolAPIKeysOrErr returns the CarpoolAPIKeys value or an error if the edge
+// was not loaded in eager-loading.
+func (e AccountEdges) CarpoolAPIKeysOrErr() ([]*APIKey, error) {
+	if e.loadedTypes[1] {
+		return e.CarpoolAPIKeys, nil
+	}
+	return nil, &NotLoadedError{edge: "carpool_api_keys"}
+}
+
 // GroupsOrErr returns the Groups value or an error if the edge
 // was not loaded in eager-loading.
 func (e AccountEdges) GroupsOrErr() ([]*Group, error) {
-	if e.loadedTypes[1] {
+	if e.loadedTypes[2] {
 		return e.Groups, nil
 	}
 	return nil, &NotLoadedError{edge: "groups"}
@@ -125,7 +136,7 @@ func (e AccountEdges) GroupsOrErr() ([]*Group, error) {
 func (e AccountEdges) ProxyOrErr() (*Proxy, error) {
 	if e.Proxy != nil {
 		return e.Proxy, nil
-	} else if e.loadedTypes[2] {
+	} else if e.loadedTypes[3] {
 		return nil, &NotFoundError{label: proxy.Label}
 	}
 	return nil, &NotLoadedError{edge: "proxy"}
@@ -134,7 +145,7 @@ func (e AccountEdges) ProxyOrErr() (*Proxy, error) {
 // UsageLogsOrErr returns the UsageLogs value or an error if the edge
 // was not loaded in eager-loading.
 func (e AccountEdges) UsageLogsOrErr() ([]*UsageLog, error) {
-	if e.loadedTypes[3] {
+	if e.loadedTypes[4] {
 		return e.UsageLogs, nil
 	}
 	return nil, &NotLoadedError{edge: "usage_logs"}
@@ -143,7 +154,7 @@ func (e AccountEdges) UsageLogsOrErr() ([]*UsageLog, error) {
 // AccountGroupsOrErr returns the AccountGroups value or an error if the edge
 // was not loaded in eager-loading.
 func (e AccountEdges) AccountGroupsOrErr() ([]*AccountGroup, error) {
-	if e.loadedTypes[4] {
+	if e.loadedTypes[5] {
 		return e.AccountGroups, nil
 	}
 	return nil, &NotLoadedError{edge: "account_groups"}
@@ -403,6 +414,11 @@ func (_m *Account) Value(name string) (ent.Value, error) {
 // QueryCarpoolUsers queries the "carpool_users" edge of the Account entity.
 func (_m *Account) QueryCarpoolUsers() *UserQuery {
 	return NewAccountClient(_m.config).QueryCarpoolUsers(_m)
+}
+
+// QueryCarpoolAPIKeys queries the "carpool_api_keys" edge of the Account entity.
+func (_m *Account) QueryCarpoolAPIKeys() *APIKeyQuery {
+	return NewAccountClient(_m.config).QueryCarpoolAPIKeys(_m)
 }
 
 // QueryGroups queries the "groups" edge of the Account entity.

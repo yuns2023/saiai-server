@@ -145,7 +145,8 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			APIKeyConcurrency: apiKey.MaxConcurrency,
 		})
 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
-		c.Request = c.Request.WithContext(service.WithAccountUserID(service.WithTrustedUser(c.Request.Context(), apiKey.User.IsTrusted), apiKey.UserID))
+		ctx := service.WithAccountUserID(service.WithTrustedUser(c.Request.Context(), apiKey.User.IsTrusted), apiKey.UserID)
+		c.Request = c.Request.WithContext(service.WithAccountAPIKeyID(ctx, apiKey.ID))
 		smartSwitch := smartSwitchRequest(c, apiKey) && cfg.RunMode != config.RunModeSimple
 		setGroupContext(c, apiKey.Group)
 		// Disabling a group must stop every API-key route for already-issued

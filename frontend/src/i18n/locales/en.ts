@@ -2553,10 +2553,13 @@ export default {
 
     // Accounts
     accounts: {
-      carpoolUsersOnly: 'Specified users only',
-      carpoolUsersOnlyHint: 'Applies to users across all their API keys. Only listed users may use this account; an empty list denies everyone. When trusted-only is also enabled, both conditions must hold.',
+      carpoolUsersOnly: 'Specified users or keys only',
+      carpoolUsersOnlyHint: 'Only listed users or API keys may use this account; matching either list is enough, and two empty lists deny everyone. A listed user may use all of their keys; to allow a single key, list only that key, not its user. When trusted-only is also enabled, both conditions must hold.',
       carpoolSelectedUser: 'User #{id}',
       carpoolUserSearchFailed: 'User search failed. Please retry.',
+      carpoolSelectedAPIKey: '{name} (key #{id}, user #{userId})',
+      carpoolAPIKeySearchPlaceholder: 'Search key names, or enter a user ID to list their keys',
+      carpoolAPIKeySearchFailed: 'Key search failed. Please retry.',
       carpoolTrustedOnly: 'Trusted users only',
       carpoolTrustedOnlyHint: 'Only users marked trusted by an administrator may use this account. Scheduling and device limits still apply.',
       title: 'Account Management',

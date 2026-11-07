@@ -260,6 +260,11 @@ func TestHostedAccountWindowCostsDisclosureGuard(t *testing.T) {
 			"account in two groups": {[]int64{1}, hostedCostFixture(now, 4, []int64{10, 11})},
 			"groups not loaded":     {[]int64{1}, hostedCostFixture(now, 4, nil)},
 			"carpool user":          {[]int64{1}, func() Account { a := hostedCostFixture(now, 4, []int64{10}); a.CarpoolUserIDs = []int64{3}; return a }()},
+			"carpool key of other user": {[]int64{1}, func() Account {
+				a := hostedCostFixture(now, 4, []int64{10})
+				a.CarpoolAPIKeys = []CarpoolAPIKeyRef{{ID: 30, UserID: 1}, {ID: 31, UserID: 3}}
+				return a
+			}()},
 		} {
 			costs := &windowCostUsageStub{}
 			rows, _, err := newService(tc.audience, []Account{tc.account}, costs).ListAccounts(context.Background(), 1, 10, params)

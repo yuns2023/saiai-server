@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/account"
+	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -560,6 +561,21 @@ func (_u *AccountUpdate) AddCarpoolUsers(v ...*User) *AccountUpdate {
 	return _u.AddCarpoolUserIDs(ids...)
 }
 
+// AddCarpoolAPIKeyIDs adds the "carpool_api_keys" edge to the APIKey entity by IDs.
+func (_u *AccountUpdate) AddCarpoolAPIKeyIDs(ids ...int64) *AccountUpdate {
+	_u.mutation.AddCarpoolAPIKeyIDs(ids...)
+	return _u
+}
+
+// AddCarpoolAPIKeys adds the "carpool_api_keys" edges to the APIKey entity.
+func (_u *AccountUpdate) AddCarpoolAPIKeys(v ...*APIKey) *AccountUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddCarpoolAPIKeyIDs(ids...)
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_u *AccountUpdate) AddGroupIDs(ids ...int64) *AccountUpdate {
 	_u.mutation.AddGroupIDs(ids...)
@@ -619,6 +635,27 @@ func (_u *AccountUpdate) RemoveCarpoolUsers(v ...*User) *AccountUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveCarpoolUserIDs(ids...)
+}
+
+// ClearCarpoolAPIKeys clears all "carpool_api_keys" edges to the APIKey entity.
+func (_u *AccountUpdate) ClearCarpoolAPIKeys() *AccountUpdate {
+	_u.mutation.ClearCarpoolAPIKeys()
+	return _u
+}
+
+// RemoveCarpoolAPIKeyIDs removes the "carpool_api_keys" edge to APIKey entities by IDs.
+func (_u *AccountUpdate) RemoveCarpoolAPIKeyIDs(ids ...int64) *AccountUpdate {
+	_u.mutation.RemoveCarpoolAPIKeyIDs(ids...)
+	return _u
+}
+
+// RemoveCarpoolAPIKeys removes "carpool_api_keys" edges to APIKey entities.
+func (_u *AccountUpdate) RemoveCarpoolAPIKeys(v ...*APIKey) *AccountUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveCarpoolAPIKeyIDs(ids...)
 }
 
 // ClearGroups clears all "groups" edges to the Group entity.
@@ -935,6 +972,51 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.CarpoolAPIKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolAPIKeysTable,
+			Columns: account.CarpoolAPIKeysPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedCarpoolAPIKeysIDs(); len(nodes) > 0 && !_u.mutation.CarpoolAPIKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolAPIKeysTable,
+			Columns: account.CarpoolAPIKeysPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.CarpoolAPIKeysIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolAPIKeysTable,
+			Columns: account.CarpoolAPIKeysPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {
@@ -1621,6 +1703,21 @@ func (_u *AccountUpdateOne) AddCarpoolUsers(v ...*User) *AccountUpdateOne {
 	return _u.AddCarpoolUserIDs(ids...)
 }
 
+// AddCarpoolAPIKeyIDs adds the "carpool_api_keys" edge to the APIKey entity by IDs.
+func (_u *AccountUpdateOne) AddCarpoolAPIKeyIDs(ids ...int64) *AccountUpdateOne {
+	_u.mutation.AddCarpoolAPIKeyIDs(ids...)
+	return _u
+}
+
+// AddCarpoolAPIKeys adds the "carpool_api_keys" edges to the APIKey entity.
+func (_u *AccountUpdateOne) AddCarpoolAPIKeys(v ...*APIKey) *AccountUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddCarpoolAPIKeyIDs(ids...)
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_u *AccountUpdateOne) AddGroupIDs(ids ...int64) *AccountUpdateOne {
 	_u.mutation.AddGroupIDs(ids...)
@@ -1680,6 +1777,27 @@ func (_u *AccountUpdateOne) RemoveCarpoolUsers(v ...*User) *AccountUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveCarpoolUserIDs(ids...)
+}
+
+// ClearCarpoolAPIKeys clears all "carpool_api_keys" edges to the APIKey entity.
+func (_u *AccountUpdateOne) ClearCarpoolAPIKeys() *AccountUpdateOne {
+	_u.mutation.ClearCarpoolAPIKeys()
+	return _u
+}
+
+// RemoveCarpoolAPIKeyIDs removes the "carpool_api_keys" edge to APIKey entities by IDs.
+func (_u *AccountUpdateOne) RemoveCarpoolAPIKeyIDs(ids ...int64) *AccountUpdateOne {
+	_u.mutation.RemoveCarpoolAPIKeyIDs(ids...)
+	return _u
+}
+
+// RemoveCarpoolAPIKeys removes "carpool_api_keys" edges to APIKey entities.
+func (_u *AccountUpdateOne) RemoveCarpoolAPIKeys(v ...*APIKey) *AccountUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveCarpoolAPIKeyIDs(ids...)
 }
 
 // ClearGroups clears all "groups" edges to the Group entity.
@@ -2026,6 +2144,51 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.CarpoolAPIKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolAPIKeysTable,
+			Columns: account.CarpoolAPIKeysPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedCarpoolAPIKeysIDs(); len(nodes) > 0 && !_u.mutation.CarpoolAPIKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolAPIKeysTable,
+			Columns: account.CarpoolAPIKeysPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.CarpoolAPIKeysIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: false,
+			Table:   account.CarpoolAPIKeysTable,
+			Columns: account.CarpoolAPIKeysPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

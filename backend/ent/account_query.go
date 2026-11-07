@@ -15,6 +15,7 @@ import (
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
+	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -25,16 +26,17 @@ import (
 // AccountQuery is the builder for querying Account entities.
 type AccountQuery struct {
 	config
-	ctx               *QueryContext
-	order             []account.OrderOption
-	inters            []Interceptor
-	predicates        []predicate.Account
-	withCarpoolUsers  *UserQuery
-	withGroups        *GroupQuery
-	withProxy         *ProxyQuery
-	withUsageLogs     *UsageLogQuery
-	withAccountGroups *AccountGroupQuery
-	modifiers         []func(*sql.Selector)
+	ctx                *QueryContext
+	order              []account.OrderOption
+	inters             []Interceptor
+	predicates         []predicate.Account
+	withCarpoolUsers   *UserQuery
+	withCarpoolAPIKeys *APIKeyQuery
+	withGroups         *GroupQuery
+	withProxy          *ProxyQuery
+	withUsageLogs      *UsageLogQuery
+	withAccountGroups  *AccountGroupQuery
+	modifiers          []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
 	path func(context.Context) (*sql.Selector, error)
@@ -86,6 +88,28 @@ func (_q *AccountQuery) QueryCarpoolUsers() *UserQuery {
 			sqlgraph.From(account.Table, account.FieldID, selector),
 			sqlgraph.To(user.Table, user.FieldID),
 			sqlgraph.Edge(sqlgraph.M2M, false, account.CarpoolUsersTable, account.CarpoolUsersPrimaryKey...),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryCarpoolAPIKeys chains the current query on the "carpool_api_keys" edge.
+func (_q *AccountQuery) QueryCarpoolAPIKeys() *APIKeyQuery {
+	query := (&APIKeyClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(account.Table, account.FieldID, selector),
+			sqlgraph.To(apikey.Table, apikey.FieldID),
+			sqlgraph.Edge(sqlgraph.M2M, false, account.CarpoolAPIKeysTable, account.CarpoolAPIKeysPrimaryKey...),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -368,16 +392,17 @@ func (_q *AccountQuery) Clone() *AccountQuery {
 		return nil
 	}
 	return &AccountQuery{
-		config:            _q.config,
-		ctx:               _q.ctx.Clone(),
-		order:             append([]account.OrderOption{}, _q.order...),
-		inters:            append([]Interceptor{}, _q.inters...),
-		predicates:        append([]predicate.Account{}, _q.predicates...),
-		withCarpoolUsers:  _q.withCarpoolUsers.Clone(),
-		withGroups:        _q.withGroups.Clone(),
-		withProxy:         _q.withProxy.Clone(),
-		withUsageLogs:     _q.withUsageLogs.Clone(),
-		withAccountGroups: _q.withAccountGroups.Clone(),
+		config:             _q.config,
+		ctx:                _q.ctx.Clone(),
+		order:              append([]account.OrderOption{}, _q.order...),
+		inters:             append([]Interceptor{}, _q.inters...),
+		predicates:         append([]predicate.Account{}, _q.predicates...),
+		withCarpoolUsers:   _q.withCarpoolUsers.Clone(),
+		withCarpoolAPIKeys: _q.withCarpoolAPIKeys.Clone(),
+		withGroups:         _q.withGroups.Clone(),
+		withProxy:          _q.withProxy.Clone(),
+		withUsageLogs:      _q.withUsageLogs.Clone(),
+		withAccountGroups:  _q.withAccountGroups.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -392,6 +417,17 @@ func (_q *AccountQuery) WithCarpoolUsers(opts ...func(*UserQuery)) *AccountQuery
 		opt(query)
 	}
 	_q.withCarpoolUsers = query
+	return _q
+}
+
+// WithCarpoolAPIKeys tells the query-builder to eager-load the nodes that are connected to
+// the "carpool_api_keys" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *AccountQuery) WithCarpoolAPIKeys(opts ...func(*APIKeyQuery)) *AccountQuery {
+	query := (&APIKeyClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withCarpoolAPIKeys = query
 	return _q
 }
 
@@ -517,8 +553,9 @@ func (_q *AccountQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Acco
 	var (
 		nodes       = []*Account{}
 		_spec       = _q.querySpec()
-		loadedTypes = [5]bool{
+		loadedTypes = [6]bool{
 			_q.withCarpoolUsers != nil,
+			_q.withCarpoolAPIKeys != nil,
 			_q.withGroups != nil,
 			_q.withProxy != nil,
 			_q.withUsageLogs != nil,
@@ -550,6 +587,13 @@ func (_q *AccountQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Acco
 		if err := _q.loadCarpoolUsers(ctx, query, nodes,
 			func(n *Account) { n.Edges.CarpoolUsers = []*User{} },
 			func(n *Account, e *User) { n.Edges.CarpoolUsers = append(n.Edges.CarpoolUsers, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withCarpoolAPIKeys; query != nil {
+		if err := _q.loadCarpoolAPIKeys(ctx, query, nodes,
+			func(n *Account) { n.Edges.CarpoolAPIKeys = []*APIKey{} },
+			func(n *Account, e *APIKey) { n.Edges.CarpoolAPIKeys = append(n.Edges.CarpoolAPIKeys, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -637,6 +681,67 @@ func (_q *AccountQuery) loadCarpoolUsers(ctx context.Context, query *UserQuery, 
 		nodes, ok := nids[n.ID]
 		if !ok {
 			return fmt.Errorf(`unexpected "carpool_users" node returned %v`, n.ID)
+		}
+		for kn := range nodes {
+			assign(kn, n)
+		}
+	}
+	return nil
+}
+func (_q *AccountQuery) loadCarpoolAPIKeys(ctx context.Context, query *APIKeyQuery, nodes []*Account, init func(*Account), assign func(*Account, *APIKey)) error {
+	edgeIDs := make([]driver.Value, len(nodes))
+	byID := make(map[int64]*Account)
+	nids := make(map[int64]map[*Account]struct{})
+	for i, node := range nodes {
+		edgeIDs[i] = node.ID
+		byID[node.ID] = node
+		if init != nil {
+			init(node)
+		}
+	}
+	query.Where(func(s *sql.Selector) {
+		joinT := sql.Table(account.CarpoolAPIKeysTable)
+		s.Join(joinT).On(s.C(apikey.FieldID), joinT.C(account.CarpoolAPIKeysPrimaryKey[1]))
+		s.Where(sql.InValues(joinT.C(account.CarpoolAPIKeysPrimaryKey[0]), edgeIDs...))
+		columns := s.SelectedColumns()
+		s.Select(joinT.C(account.CarpoolAPIKeysPrimaryKey[0]))
+		s.AppendSelect(columns...)
+		s.SetDistinct(false)
+	})
+	if err := query.prepareQuery(ctx); err != nil {
+		return err
+	}
+	qr := QuerierFunc(func(ctx context.Context, q Query) (Value, error) {
+		return query.sqlAll(ctx, func(_ context.Context, spec *sqlgraph.QuerySpec) {
+			assign := spec.Assign
+			values := spec.ScanValues
+			spec.ScanValues = func(columns []string) ([]any, error) {
+				values, err := values(columns[1:])
+				if err != nil {
+					return nil, err
+				}
+				return append([]any{new(sql.NullInt64)}, values...), nil
+			}
+			spec.Assign = func(columns []string, values []any) error {
+				outValue := values[0].(*sql.NullInt64).Int64
+				inValue := values[1].(*sql.NullInt64).Int64
+				if nids[inValue] == nil {
+					nids[inValue] = map[*Account]struct{}{byID[outValue]: {}}
+					return assign(columns[1:], values[1:])
+				}
+				nids[inValue][byID[outValue]] = struct{}{}
+				return nil
+			}
+		})
+	})
+	neighbors, err := withInterceptors[[]*APIKey](ctx, query, qr, query.inters)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected "carpool_api_keys" node returned %v`, n.ID)
 		}
 		for kn := range nodes {
 			assign(kn, n)

@@ -834,8 +834,15 @@ export interface TempUnschedulableStatus {
   state?: TempUnschedulableState
 }
 
+export interface CarpoolAPIKeyRef {
+  id: number
+  user_id: number
+  name: string
+}
+
 export interface Account {
   carpool_user_ids?: number[]
+  carpool_api_keys?: CarpoolAPIKeyRef[]
   id: number
   name: string
   notes?: string | null
@@ -1045,6 +1052,7 @@ export interface CodexUsageSnapshot {
 
 export interface CreateAccountRequest {
   carpool_user_ids?: number[]
+  carpool_api_key_ids?: number[]
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1064,6 +1072,7 @@ export interface CreateAccountRequest {
 
 export interface UpdateAccountRequest {
   carpool_user_ids?: number[]
+  carpool_api_key_ids?: number[]
   name?: string
   notes?: string | null
   type?: AccountType

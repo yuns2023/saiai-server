@@ -17,7 +17,8 @@ import (
 )
 
 type Account struct {
-	CarpoolUserIDs []int64 `json:"carpool_user_ids"`
+	CarpoolUserIDs []int64            `json:"carpool_user_ids"`
+	CarpoolAPIKeys []CarpoolAPIKeyRef `json:"carpool_api_keys"`
 	ID             int64
 	Name           string
 	Notes          *string

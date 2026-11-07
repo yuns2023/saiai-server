@@ -277,9 +277,13 @@ an unrelated error cannot disable an otherwise healthy account.
 
 `claude_oauth_carpool_trusted_only` and `claude_oauth_carpool_users_only` are
 independent account switches for Anthropic OAuth/setup-token carpool. Enabled
-conditions are combined with AND. An enabled empty user list denies everyone.
+conditions are combined with AND.
 Membership is stored in `claude_oauth_account_users` with user/account foreign keys,
-and exposed to administrators as `carpool_user_ids`. The authenticated SAIAI Key
-owner supplies the user ID, never client metadata. Selection, sticky reuse and
+and exposed to administrators as `carpool_user_ids`. The same switch also admits
+the API keys listed in `claude_oauth_account_api_keys` (`carpool_api_key_ids` on
+write, `carpool_api_keys` with owner and name on read); a request passes when its
+user OR its key is listed, and an enabled switch with both lists empty denies
+everyone. Soft-deleted keys are dropped when the list is loaded. The authenticated
+SAIAI Key and its owner supply both IDs, never client metadata. Selection, sticky reuse and
 forwarding apply the same predicate. Existing group permissions, request-shape
 validation, device capacity and upstream limits continue to apply.

@@ -75,6 +75,8 @@ const (
 	EdgeGroup = "group"
 	// EdgeUsageLogs holds the string denoting the usage_logs edge name in mutations.
 	EdgeUsageLogs = "usage_logs"
+	// EdgeCarpoolAccounts holds the string denoting the carpool_accounts edge name in mutations.
+	EdgeCarpoolAccounts = "carpool_accounts"
 	// Table holds the table name of the apikey in the database.
 	Table = "api_keys"
 	// UserTable is the table that holds the user relation/edge.
@@ -98,6 +100,11 @@ const (
 	UsageLogsInverseTable = "usage_logs"
 	// UsageLogsColumn is the table column denoting the usage_logs relation/edge.
 	UsageLogsColumn = "api_key_id"
+	// CarpoolAccountsTable is the table that holds the carpool_accounts relation/edge. The primary key declared below.
+	CarpoolAccountsTable = "claude_oauth_account_api_keys"
+	// CarpoolAccountsInverseTable is the table name for the Account entity.
+	// It exists in this package in order to avoid circular dependency with the "account" package.
+	CarpoolAccountsInverseTable = "accounts"
 )
 
 // Columns holds all SQL columns for apikey fields.
@@ -131,6 +138,12 @@ var Columns = []string{
 	FieldWindow1dStart,
 	FieldWindow7dStart,
 }
+
+var (
+	// CarpoolAccountsPrimaryKey and CarpoolAccountsColumn2 are the table columns denoting the
+	// primary key for the carpool_accounts relation (M2M).
+	CarpoolAccountsPrimaryKey = []string{"account_id", "api_key_id"}
+)
 
 // ValidColumn reports if the column name is valid (part of the table columns).
 func ValidColumn(column string) bool {
@@ -343,6 +356,20 @@ func ByUsageLogs(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newUsageLogsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByCarpoolAccountsCount orders the results by carpool_accounts count.
+func ByCarpoolAccountsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newCarpoolAccountsStep(), opts...)
+	}
+}
+
+// ByCarpoolAccounts orders the results by carpool_accounts terms.
+func ByCarpoolAccounts(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newCarpoolAccountsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newUserStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -362,5 +389,12 @@ func newUsageLogsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(UsageLogsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, UsageLogsTable, UsageLogsColumn),
+	)
+}
+func newCarpoolAccountsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(CarpoolAccountsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2M, true, CarpoolAccountsTable, CarpoolAccountsPrimaryKey...),
 	)
 }

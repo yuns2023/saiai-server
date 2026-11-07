@@ -266,6 +266,7 @@ type UpdateGroupInput struct {
 
 type CreateAccountInput struct {
 	CarpoolUserIDs         *[]int64
+	CarpoolAPIKeyIDs       *[]int64
 	Name                   string
 	Notes                  *string
 	Platform               string
@@ -290,6 +291,7 @@ type CreateAccountInput struct {
 
 type UpdateAccountInput struct {
 	CarpoolUserIDs         *[]int64
+	CarpoolAPIKeyIDs       *[]int64
 	Name                   string
 	Notes                  *string
 	Type                   string // Account type: oauth, setup-token, apikey
@@ -1967,6 +1969,13 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if input.CarpoolUserIDs != nil {
 		account.CarpoolUserIDs = *input.CarpoolUserIDs
 	}
+	if input.CarpoolAPIKeyIDs != nil {
+		refs, err := s.resolveCarpoolAPIKeys(ctx, *input.CarpoolAPIKeyIDs)
+		if err != nil {
+			return nil, err
+		}
+		account.CarpoolAPIKeys = refs
+	}
 
 	if account.Extra != nil {
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
@@ -2043,6 +2052,13 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if input.CarpoolUserIDs != nil {
 		account.CarpoolUserIDs = *input.CarpoolUserIDs
+	}
+	if input.CarpoolAPIKeyIDs != nil {
+		refs, err := s.resolveCarpoolAPIKeys(ctx, *input.CarpoolAPIKeyIDs)
+		if err != nil {
+			return nil, err
+		}
+		account.CarpoolAPIKeys = refs
 	}
 
 	// Extra 使用 map：需要区分“未提供(nil)”与“显式清空({})”。
