@@ -110,7 +110,11 @@ func TestChatGPTNativeUploadPreservesBytesAndBindsSubsequentModelToOwner(t *test
 			id, _ = strconv.ParseInt(value, 10, 64)
 		}
 		user := &service.User{ID: 21, Balance: 100}
-		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: id, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, RateMultiplier: 1}, User: user})
+		group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, RateMultiplier: 1}
+		if c.GetHeader("TEST-Timezone-Guard") != "" {
+			group.CodexCNTimezoneGuard, group.CodexTimezoneAction = true, service.CodexTimezoneActionReject
+		}
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: id, GroupID: &groupID, Group: group, User: user})
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 21, Concurrency: 2})
 	})
 	router.POST("/chatgpt/backend-api/files", h.ChatGPTUpload)
@@ -182,6 +186,25 @@ func TestChatGPTNativeUploadPreservesBytesAndBindsSubsequentModelToOwner(t *test
 	require.Equal(t, 200, w.Code)
 	w = request("GET", "/chatgpt/backend-api/files/download/file-TEST_ONLY_UPLOAD", nil, "", 24)
 	require.Equal(t, 404, w.Code)
+
+	// A guarded group (even with action reject) rewrites only the creation
+	// body's UTC+8 offset; the other upload bodies above stay byte-identical.
+	previous := codexTimezoneNow
+	codexTimezoneNow = func() time.Time { return time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC) }
+	defer func() { codexTimezoneNow = previous }()
+	calls = len(captured)
+	guarded := httptest.NewRequest("POST", "/chatgpt/backend-api/files",
+		bytes.NewBufferString(`{"file_name":"TEST_ONLY.png","file_size":16,"timezone_offset_min":-480}`))
+	guarded.Header.Set("Content-Type", "application/json")
+	guarded.Header.Set("TEST-Key-ID", "23")
+	guarded.Header.Set("TEST-Timezone-Guard", "1")
+	guarded.Header.Add("X-Desktop-Future", "first")
+	guarded.Header.Add("X-Desktop-Future", "second")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, guarded)
+	require.Equal(t, 200, w.Code)
+	require.Len(t, captured, calls+1)
+	require.Equal(t, `{"file_name":"TEST_ONLY.png","file_size":16,"timezone_offset_min":420}`, captured[calls].body)
 }
 
 func TestChatGPTAttachmentOwnerRejectsMixedAndForeignFiles(t *testing.T) {

@@ -24,6 +24,9 @@ func (h *OpenAIGatewayHandler) rewriteChatGPTTimezone(c *gin.Context, group *ser
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "ChatGPT body repeats a timezone field")
 		return nil, false
 	case err != nil:
+		requestLogger(c, "handler.openai_gateway.chatgpt_timezone",
+			zap.Int64("group_id", group.ID), zap.Bool("clock_unavailable", errors.Is(err, pkgopenai.ErrCodexRewriteClock)),
+			zap.Error(err)).Warn("openai.chatgpt_timezone_rewrite_failed")
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Timezone rewrite is unavailable; retry later")
 		return nil, false
 	}
