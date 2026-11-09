@@ -9,6 +9,36 @@ user discounts. The admin UI starts with a $2 threshold that can be changed
 or turned off. The filter applies to the record list and its CSV export;
 summary cards and charts continue to cover the selected time range.
 
+## Admin request body size (`request_body_bytes`)
+
+Each usage record stores the inbound client payload size in
+`usage_logs.request_body_bytes` (migration 122). It is administrator
+diagnostics only: it is in the admin usage record (`request_body_bytes`,
+explicit `null` when unknown), the admin table ("Request body size",
+human-readable KiB/MiB) and the admin CSV export (exact integer bytes, empty
+when unknown, `0` kept). It is not in the user usage record or `/v1/usage`,
+and it has no effect on billing, billing fingerprints or idempotency.
+
+The size is frozen right after the gateway reads the request, before any
+decompression, normalization, timezone rewrite or signature cleaning:
+
+- HTTP (`/v1/messages`, Gemini native, `/v1/responses`, Image API): the body
+  as received. A client-compressed body counts its compressed bytes.
+- Responses WebSocket: per logical turn, the client's reassembled
+  `response.create` message (decompressed application message, not frame
+  bytes), measured before the gateway transform. Turn 1 uses the original
+  first message even when a continuation migration replaces it; an account
+  failover replay keeps the original turn's size; a terminal event that
+  matches no turn records `NULL`.
+- Native ChatGPT turns: the original conversation POST, stored in the turn
+  snapshot and used by synchronous, resumed and asynchronous settlement.
+  Snapshots written before this field record `NULL`.
+
+`NULL` means unknown: records before migration 122, or paths without a
+trustworthy size. Only successful requests that write a usage record are
+covered; failed requests (their size is in Ops error logs) and `count_tokens`
+are not.
+
 ## Admin provider (platform) filter
 
 The admin usage endpoints `GET /api/v1/admin/usage`, `/admin/usage/stats` and
@@ -230,10 +260,19 @@ actual cost, and the four token classes. Totals (`total_cost`,
 the selected scope, before the ranking limit; shares use the standard cost. Historical
 usage of soft-deleted Keys is retained; zero-usage Keys are omitted. Raw Key values
 are never selected or returned. Results use a 30-second cache separated by time
-range, user scope, and limit.
+range, user scope, limit and sort.
 
-The dashboard user spending ranking (`users-ranking`) uses the same basis and
-fields. The dashboard Key/user usage trends pick their Top N by tokens across
+Each row also carries request size aggregates over records with a known
+`request_body_bytes`: `request_body_bytes_total` (0 when none is known),
+`request_body_bytes_avg` and `request_body_bytes_max` (`null` when none is
+known) and `request_body_bytes_known_count`. The optional `sort` parameter is
+`cost` (default, the order above) or `request_body_bytes`, which orders by the
+total, then the maximum (`NULLS LAST`), then the cost order; the order is
+applied before `limit`. Any other value is rejected with 400.
+
+The dashboard user spending ranking (`users-ranking`) uses the same basis,
+fields, size aggregates and `sort` parameter (its 5-minute cache is also
+separated by sort). The dashboard Key/user usage trends pick their Top N by tokens across
 hosted and billed usage. Dashboard platform totals, trends and model
 distribution still exclude hosted rows and report them in the separate hosted
 usage card. Per-user drill-downs from distribution charts order users by
