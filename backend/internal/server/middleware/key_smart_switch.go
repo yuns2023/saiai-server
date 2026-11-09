@@ -110,7 +110,8 @@ func applySmartSwitch(c *gin.Context, key *service.APIKey, keys *service.APIKeyS
 			AbortWithError(c, 403, "API_KEY_EXPIRED", "API key has expired")
 			return nil, false
 		case errors.Is(err, service.ErrAPIKeyRateLimit5hExceeded), errors.Is(err, service.ErrAPIKeyRateLimit1dExceeded), errors.Is(err, service.ErrAPIKeyRateLimit7dExceeded):
-			AbortWithError(c, 429, "API_KEY_RATE_LIMIT_EXCEEDED", "API key usage limit exceeded")
+			markNoRetry(c)
+			AbortWithError(c, 429, "API_KEY_RATE_LIMIT_EXCEEDED", service.LimitErrorMessage(err))
 			return nil, false
 		}
 		var exhausted *service.SmartSwitchExhaustedError
@@ -143,6 +144,9 @@ func abortSmartSwitchExhausted(c *gin.Context, exhausted *service.SmartSwitchExh
 	// knows what to wait for.
 	if len(exhausted.LimitDetails) > 0 {
 		reasons += ": " + strings.Join(exhausted.LimitDetails, "; ")
+	}
+	if exhausted.BusinessLimited() {
+		markNoRetry(c)
 	}
 	switch {
 	case !exhausted.BusinessLimited():

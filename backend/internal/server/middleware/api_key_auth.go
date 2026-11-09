@@ -262,7 +262,8 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 						code = "USAGE_LIMIT_EXCEEDED"
 						status = 429
 					}
-					AbortWithError(c, status, code, service.SubscriptionErrorMessage(validateErr))
+					markNoRetry(c)
+					AbortWithError(c, status, code, service.LimitErrorMessage(validateErr))
 					return
 				}
 
@@ -328,6 +329,7 @@ func abortAPIKeyQuotaExhausted(c *gin.Context) {
 		})
 		return
 	}
+	markNoRetry(c)
 	AbortWithError(c, http.StatusTooManyRequests, code, "API key 额度已用完")
 }
 

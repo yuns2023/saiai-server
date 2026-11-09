@@ -31,11 +31,49 @@ func (e *SubscriptionLimitError) Message() string {
 		msg += fmt.Sprintf(" (subscription group %q)", e.groupName)
 	}
 	if e.resetAt != nil {
-		// Round up so the shown minute is never before the actual reset.
-		reset := e.resetAt.Add(time.Minute - time.Nanosecond).Truncate(time.Minute)
-		msg += ", resets at " + reset.In(timezone.Location()).Format("2006-01-02 15:04 -07:00")
+		msg += ", resets at " + formatLimitResetTime(*e.resetAt)
 	}
 	return msg
+}
+
+// formatLimitResetTime rounds up to the minute, so the shown time is never
+// before the actual reset, in the configured timezone.
+func formatLimitResetTime(t time.Time) string {
+	return t.Add(time.Minute - time.Nanosecond).Truncate(time.Minute).In(timezone.Location()).Format("2006-01-02 15:04 -07:00")
+}
+
+// APIKeyRateLimitError is an API Key 5h/1d/7d limit error that also carries
+// the reset time of the exhausted window. errors.Is still matches the wrapped
+// ErrAPIKeyRateLimit*Exceeded value.
+type APIKeyRateLimitError struct {
+	err     error
+	resetAt *time.Time
+}
+
+func (e *APIKeyRateLimitError) Error() string { return e.Message() }
+
+func (e *APIKeyRateLimitError) Unwrap() error { return e.err }
+
+// Message is the client-facing text, e.g. `api key 7天限额已用完，将于
+// 2026-11-11 00:00 +08:00 重置`.
+func (e *APIKeyRateLimitError) Message() string {
+	msg := infraerrors.Message(e.err)
+	if e.resetAt != nil {
+		msg += "，将于 " + formatLimitResetTime(*e.resetAt) + " 重置"
+	}
+	return msg
+}
+
+// apiKeyRateLimitExceeded wraps limitErr with the reset time of the window
+// that started at windowStart (omitted when unknown or already past).
+func apiKeyRateLimitExceeded(limitErr error, windowStart *time.Time, window time.Duration) error {
+	wrapped := &APIKeyRateLimitError{err: limitErr}
+	if windowStart != nil {
+		if reset := windowStart.Add(window); reset.After(time.Now()) {
+			wrapped.resetAt = &reset
+		}
+	}
+	return wrapped
 }
 
 func isSubscriptionUsageLimitError(err error) bool {
@@ -78,13 +116,17 @@ func withSubscriptionLimitDetail(err error, sub *UserSubscription, group *Group)
 	return limitErr
 }
 
-// SubscriptionErrorMessage is the client-facing text of a subscription
-// validation error: the detailed text of a usage-limit error, otherwise the
-// error's plain message.
-func SubscriptionErrorMessage(err error) string {
+// LimitErrorMessage is the client-facing text of a subscription or API Key
+// limit error: the detailed text when it carries one, otherwise the error's
+// plain message.
+func LimitErrorMessage(err error) string {
 	var limitErr *SubscriptionLimitError
 	if errors.As(err, &limitErr) {
 		return limitErr.Message()
+	}
+	var keyLimitErr *APIKeyRateLimitError
+	if errors.As(err, &keyLimitErr) {
+		return keyLimitErr.Message()
 	}
 	var appErr *infraerrors.ApplicationError
 	if errors.As(err, &appErr) && appErr.Message != "" {

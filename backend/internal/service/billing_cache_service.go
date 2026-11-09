@@ -613,13 +613,13 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 
 	// Check limits
 	if apiKey.RateLimit5h > 0 && usage5h >= apiKey.RateLimit5h {
-		return ErrAPIKeyRateLimit5hExceeded
+		return apiKeyRateLimitExceeded(ErrAPIKeyRateLimit5hExceeded, w5h, RateLimitWindow5h)
 	}
 	if apiKey.RateLimit1d > 0 && usage1d >= apiKey.RateLimit1d {
-		return ErrAPIKeyRateLimit1dExceeded
+		return apiKeyRateLimitExceeded(ErrAPIKeyRateLimit1dExceeded, w1d, RateLimitWindow1d)
 	}
 	if apiKey.RateLimit7d > 0 && usage7d >= apiKey.RateLimit7d {
-		return ErrAPIKeyRateLimit7dExceeded
+		return apiKeyRateLimitExceeded(ErrAPIKeyRateLimit7dExceeded, w7d, RateLimitWindow7d)
 	}
 	return nil
 }

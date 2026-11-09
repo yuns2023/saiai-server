@@ -120,13 +120,13 @@ func (s *APIKeyService) SelectSmartSwitchGroup(ctx context.Context, key *APIKey,
 		return nil, ErrAPIKeyQuotaExhausted
 	}
 	if fresh.RateLimit5h > 0 && fresh.EffectiveUsage5h() >= fresh.RateLimit5h {
-		return nil, ErrAPIKeyRateLimit5hExceeded
+		return nil, apiKeyRateLimitExceeded(ErrAPIKeyRateLimit5hExceeded, fresh.Window5hStart, RateLimitWindow5h)
 	}
 	if fresh.RateLimit1d > 0 && fresh.EffectiveUsage1d() >= fresh.RateLimit1d {
-		return nil, ErrAPIKeyRateLimit1dExceeded
+		return nil, apiKeyRateLimitExceeded(ErrAPIKeyRateLimit1dExceeded, fresh.Window1dStart, RateLimitWindow1d)
 	}
 	if fresh.RateLimit7d > 0 && fresh.EffectiveUsage7d() >= fresh.RateLimit7d {
-		return nil, ErrAPIKeyRateLimit7dExceeded
+		return nil, apiKeyRateLimitExceeded(ErrAPIKeyRateLimit7dExceeded, fresh.Window7dStart, RateLimitWindow7d)
 	}
 	user, err := s.userRepo.GetByID(ctx, key.UserID)
 	if err != nil {

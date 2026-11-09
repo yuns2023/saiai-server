@@ -264,7 +264,7 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 				if err := h.billingCacheService.CheckBillingEligibility(
 					c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription,
 				); err != nil {
-					status, code, message := billingErrorDetails(err)
+					status, code, message := billingErrorResponse(c, err)
 					h.errorResponse(c, status, code, message)
 					return
 				}
@@ -1150,7 +1150,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// 2. Re-check billing eligibility after wait
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		reqLog.Info("openai.billing_eligibility_check_failed", zap.Error(err))
-		status, code, message := billingErrorDetails(err)
+		status, code, message := billingErrorResponse(c, err)
 		h.handleStreamingAwareError(c, status, code, message, streamStarted)
 		return
 	}

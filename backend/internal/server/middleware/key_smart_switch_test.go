@@ -159,6 +159,11 @@ func TestSmartSwitchExhaustedUsesBusinessCodes(t *testing.T) {
 		require.Equal(t, tc.status, recorder.Code, tc.reasons)
 		require.Contains(t, recorder.Body.String(), `"code":"`+tc.code+`"`)
 		require.Contains(t, recorder.Body.String(), strings.Join(tc.reasons, ", "))
+		if tc.status == http.StatusServiceUnavailable {
+			require.Empty(t, recorder.Header().Get("x-should-retry"), tc.reasons)
+		} else {
+			require.Equal(t, "false", recorder.Header().Get("x-should-retry"), tc.reasons)
+		}
 	}
 	// Limit details are kept whichever branch wins (here insufficient balance).
 	recorder := httptest.NewRecorder()
@@ -237,6 +242,8 @@ func TestSmartSwitchAuthReportsSubscriptionLimitReset(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	require.Equal(t, http.StatusTooManyRequests, response.Code, response.Body.String())
+	// Claude Code and the OpenAI SDKs stop retrying a limit that will not recover soon.
+	require.Equal(t, "false", response.Header().Get("x-should-retry"))
 	var body ErrorResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Equal(t, "USAGE_LIMIT_EXCEEDED", body.Code)

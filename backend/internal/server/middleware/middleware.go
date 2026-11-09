@@ -75,6 +75,13 @@ func AbortWithError(c *gin.Context, statusCode int, code, message string) {
 	c.Abort()
 }
 
+// markNoRetry tells SDK clients (Claude Code, OpenAI SDKs) not to retry a
+// request blocked by the user's own limit, quota or budget: it does not
+// recover within their retry backoff, and retrying only repeats the error.
+func markNoRetry(c *gin.Context) {
+	c.Header("x-should-retry", "false")
+}
+
 // ──────────────────────────────────────────────────────────
 // RequireGroupAssignment — 未分组 Key 拦截中间件
 // ──────────────────────────────────────────────────────────

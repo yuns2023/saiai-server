@@ -118,7 +118,7 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string, nativeCod
 		defer userRelease()
 	}
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
-		status, code, message := billingErrorDetails(err)
+		status, code, message := billingErrorResponse(c, err)
 		h.errorResponse(c, status, code, message)
 		return
 	}

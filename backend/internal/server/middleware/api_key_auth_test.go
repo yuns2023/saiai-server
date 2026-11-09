@@ -178,6 +178,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		// internal error dump.
 		require.Contains(t, w.Body.String(), `daily usage limit exceeded (subscription group \"sub\"), resets at `)
 		require.NotContains(t, w.Body.String(), "code=429")
+		require.Equal(t, "false", w.Header().Get("x-should-retry"))
 	})
 }
 
