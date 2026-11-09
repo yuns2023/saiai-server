@@ -33,11 +33,12 @@ func runAnthropicModelsPage(t *testing.T, query string, models []service.ModelsC
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models"+query, nil)
-	writeAnthropicModelsPage(c, models)
+	if query, ok := parseAnthropicModelsPageQuery(c); ok {
+		writeAnthropicModelsPage(c, query, models)
+	}
 	var body anthropicModelsPageBody
 	if rec.Code == http.StatusOK {
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-		require.Equal(t, "private, no-store", rec.Header().Get("Cache-Control"))
 	}
 	return rec.Code, body
 }
@@ -82,6 +83,18 @@ func TestWriteAnthropicModelsPagePaginatesVisibleCatalog(t *testing.T) {
 	require.Empty(t, body.Data)
 	require.False(t, body.HasMore)
 	require.Nil(t, body.FirstID)
+
+	code, body = runAnthropicModelsPage(t, "?before_id=claude-opus-5-5", visible)
+	require.Equal(t, http.StatusOK, code)
+	require.Empty(t, body.Data)
+	require.False(t, body.HasMore)
+
+	// Every model blocked: an empty, well-formed list.
+	code, body = runAnthropicModelsPage(t, "", visibleCatalogModels(visible, &service.Group{BlockedModelPatterns: []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"}}))
+	require.Equal(t, http.StatusOK, code)
+	require.NotNil(t, body.Data)
+	require.Empty(t, body.Data)
+	require.False(t, body.HasMore)
 }
 
 func TestWriteAnthropicModelsPageDefaultsAndRejectsBadInput(t *testing.T) {
@@ -94,7 +107,7 @@ func TestWriteAnthropicModelsPageDefaultsAndRejectsBadInput(t *testing.T) {
 	require.Len(t, body.Data, 20, "default limit matches the Anthropic API")
 	require.True(t, body.HasMore)
 
-	for _, query := range []string{"?limit=0", "?limit=-1", "?limit=1001", "?limit=abc", "?limit=99999999999999999999", "?after_id=a&before_id=b"} {
+	for _, query := range []string{"?limit=0", "?limit=-1", "?limit=1001", "?limit=abc", "?limit=99999999999999999999", "?limit=", "?limit=1&limit=2", "?after_id=a&after_id=b", "?after_id=a&before_id=b"} {
 		code, _ := runAnthropicModelsPage(t, query, modelsCatalogFixture("a"))
 		require.Equal(t, http.StatusBadRequest, code, query)
 	}

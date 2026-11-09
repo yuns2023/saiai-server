@@ -188,6 +188,8 @@ func TestListAnthropicModelsWithoutOAuthSourceIsUnavailable(t *testing.T) {
 func TestListAnthropicModelsRejectsRepeatedCursor(t *testing.T) {
 	upstream := &modelsCatalogRecordingUpstream{responses: []func(*http.Request) (*http.Response, error){
 		modelsCatalogJSON(http.StatusOK, `{"data":[{"id":"a"}],"has_more":true,"last_id":"a"}`),
+		modelsCatalogJSON(http.StatusOK, `{"data":[{"id":"b"}],"has_more":true,"last_id":"b"}`),
+		modelsCatalogJSON(http.StatusOK, `{"data":[{"id":"c"}],"has_more":true,"last_id":"a"}`),
 	}}
 	groupID := int64(10)
 	svc := newAnthropicModelsCatalogService(upstream,
@@ -195,7 +197,55 @@ func TestListAnthropicModelsRejectsRepeatedCursor(t *testing.T) {
 	)
 	_, err := svc.ListAnthropicModels(context.Background(), &groupID)
 	require.Error(t, err)
-	require.Len(t, upstream.requests, 2)
+	require.Len(t, upstream.requests, 3, "a cursor seen before stops paging")
+}
+
+func TestListAnthropicModelsAcceptsEmptyCatalog(t *testing.T) {
+	upstream := &modelsCatalogRecordingUpstream{responses: []func(*http.Request) (*http.Response, error){
+		modelsCatalogJSON(http.StatusOK, `{"data":[],"has_more":false}`),
+	}}
+	groupID := int64(11)
+	svc := newAnthropicModelsCatalogService(upstream,
+		Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "t"}},
+	)
+	models, err := svc.ListAnthropicModels(context.Background(), &groupID)
+	require.NoError(t, err)
+	require.NotNil(t, models)
+	require.Empty(t, models)
+}
+
+func TestListAnthropicModelsRotatesPastFailedSources(t *testing.T) {
+	upstream := &modelsCatalogRecordingUpstream{responses: []func(*http.Request) (*http.Response, error){
+		modelsCatalogJSON(http.StatusUnauthorized, `{}`),
+		modelsCatalogJSON(http.StatusUnauthorized, `{}`),
+		modelsCatalogJSON(http.StatusUnauthorized, `{}`),
+		modelsCatalogJSON(http.StatusOK, `{"data":[{"id":"claude-opus-5-5"}],"has_more":false}`),
+	}}
+	groupID := int64(12)
+	accounts := []Account{}
+	for id := int64(1); id <= 4; id++ {
+		accounts = append(accounts, Account{ID: id, Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "t"}})
+	}
+	svc := newAnthropicModelsCatalogService(upstream, accounts...)
+	_, err := svc.ListAnthropicModels(context.Background(), &groupID)
+	require.Error(t, err)
+	require.Equal(t, []int64{1, 2, 3}, upstream.accounts)
+
+	// The next refresh (after the cache backoff) skips the failed sources.
+	svc.anthropicModels.entries["anthropic:12"].failedAt = time.Now().Add(-modelsCatalogRetryBackoff - time.Second)
+	models, err := svc.ListAnthropicModels(context.Background(), &groupID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"claude-opus-5-5"}, modelsCatalogIDs(models))
+	require.Equal(t, []int64{1, 2, 3, 4}, upstream.accounts)
+}
+
+func TestModelsCatalogCacheRejectsOversizedCatalog(t *testing.T) {
+	var cache modelsCatalogCache
+	big := ModelsCatalogEntry{ID: "a", Raw: make([]byte, modelsCatalogMaxBytes)}
+	_, err := cache.get(context.Background(), "k", func(context.Context) ([]ModelsCatalogEntry, error) {
+		return []ModelsCatalogEntry{big}, nil
+	})
+	require.Error(t, err)
 }
 
 func TestOpenAIModelsFromCodexManifest(t *testing.T) {
@@ -206,7 +256,10 @@ func TestOpenAIModelsFromCodexManifest(t *testing.T) {
 	require.Contains(t, ids, "gpt-image-2")
 	require.JSONEq(t, `{"id":"gpt-6.1-sol","object":"model","created":0,"owned_by":"openai","type":"model","display_name":"GPT-6.1 Sol"}`, string(models[0].Raw))
 
-	_, err = openAIModelsFromCodexManifest([]byte(`{"models":[]}`))
+	models, err = openAIModelsFromCodexManifest([]byte(`{"models":[]}`))
+	require.NoError(t, err, "an empty manifest is a valid catalog")
+	require.Equal(t, []string{"gpt-image-2"}, modelsCatalogIDs(models))
+	_, err = openAIModelsFromCodexManifest([]byte(`{"other":[]}`))
 	require.Error(t, err)
 	_, err = openAIModelsFromCodexManifest([]byte(`not json`))
 	require.Error(t, err)
@@ -214,12 +267,12 @@ func TestOpenAIModelsFromCodexManifest(t *testing.T) {
 
 func TestObserveCodexClientVersionRaisesCatalogVersion(t *testing.T) {
 	codexModelsCatalogVersion.mu.Lock()
-	saved := codexModelsCatalogVersion
+	savedVersion, savedSet := codexModelsCatalogVersion.version, codexModelsCatalogVersion.set
 	codexModelsCatalogVersion.set = false
 	codexModelsCatalogVersion.mu.Unlock()
 	t.Cleanup(func() {
 		codexModelsCatalogVersion.mu.Lock()
-		codexModelsCatalogVersion.version, codexModelsCatalogVersion.set = saved.version, saved.set
+		codexModelsCatalogVersion.version, codexModelsCatalogVersion.set = savedVersion, savedSet
 		codexModelsCatalogVersion.mu.Unlock()
 	})
 
@@ -230,5 +283,7 @@ func TestObserveCodexClientVersionRaisesCatalogVersion(t *testing.T) {
 	require.Equal(t, "0.180.0", currentCodexModelsCatalogVersion())
 	ObserveCodexClientVersion("codex_cli_rs/0.190.0-alpha.1 (Linux)", "codex_cli_rs", "0.190.0-alpha.1")
 	ObserveCodexClientVersion("curl/8.0", "", "0.200.0")
-	require.Equal(t, "0.180.0", currentCodexModelsCatalogVersion())
+	ObserveCodexClientVersion("codex_cli_rs/0.999.0 (Linux)", "codex_cli_rs", "0.999.0")
+	ObserveCodexClientVersion("codex_cli_rs/1.0.0 (Linux)", "codex_cli_rs", "1.0.0")
+	require.Equal(t, "0.180.0", currentCodexModelsCatalogVersion(), "implausible versions are ignored")
 }

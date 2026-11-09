@@ -22,6 +22,7 @@ const (
 	modelsCatalogFetchTimeout = 20 * time.Second
 	modelsCatalogMaxEntries   = 256
 	modelsCatalogMaxModels    = 2000
+	modelsCatalogMaxBytes     = 2 << 20
 )
 
 // ErrModelsCatalogUnavailable means no upstream catalog could be fetched and
@@ -46,24 +47,29 @@ type modelsCatalogCache struct {
 	mu      sync.Mutex
 	entries map[string]*modelsCatalogCacheEntry
 	refresh singleflight.Group
+	// sourceFailures maps an upstream account ID to the time its last catalog
+	// fetch failed, for sources that rotate across accounts.
+	sourceFailures sync.Map
 }
 
 // get returns the cached catalog for key, refreshing it through fetch when it
 // is missing or older than modelsCatalogTTL. The refresh runs detached from
 // the caller's context so a client hanging up does not abort it for others.
 func (c *modelsCatalogCache) get(ctx context.Context, key string, fetch func(context.Context) ([]ModelsCatalogEntry, error)) ([]ModelsCatalogEntry, error) {
-	now := time.Now()
-	models, needsRefresh := c.lookup(key, now)
-	if !needsRefresh {
-		if models == nil {
-			return nil, ErrModelsCatalogUnavailable
-		}
-		return models, nil
+	if models, needsRefresh := c.lookup(key, time.Now()); !needsRefresh {
+		return cachedModelsOrUnavailable(models)
 	}
 	resultCh := c.refresh.DoChan(key, func() (any, error) {
+		// Another refresh may have finished (or failed) since our lookup.
+		if models, needsRefresh := c.lookup(key, time.Now()); !needsRefresh {
+			return cachedModelsOrUnavailable(models)
+		}
 		fetchCtx, cancel := context.WithTimeout(context.Background(), modelsCatalogFetchTimeout)
 		defer cancel()
 		fresh, err := fetch(fetchCtx)
+		if err == nil && modelsCatalogBytes(fresh) > modelsCatalogMaxBytes {
+			err = errors.New("models catalog exceeds the size limit")
+		}
 		if err != nil {
 			c.markFailed(key, time.Now())
 			return nil, err
@@ -71,25 +77,43 @@ func (c *modelsCatalogCache) get(ctx context.Context, key string, fetch func(con
 		c.store(key, fresh, time.Now())
 		return fresh, nil
 	})
+	// On failure or caller cancel, serve whatever copy is still within its
+	// stale window at this moment.
+	fallback := func(err error) ([]ModelsCatalogEntry, error) {
+		if models, _ := c.lookup(key, time.Now()); models != nil {
+			return models, nil
+		}
+		return nil, err
+	}
 	select {
 	case <-ctx.Done():
-		if models != nil {
-			return models, nil
-		}
-		return nil, ctx.Err()
+		return fallback(ctx.Err())
 	case result := <-resultCh:
-		if result.Err == nil {
-			return result.Val.([]ModelsCatalogEntry), nil
+		if result.Err != nil {
+			return fallback(result.Err)
 		}
-		if models != nil {
-			return models, nil
-		}
-		return nil, result.Err
+		return result.Val.([]ModelsCatalogEntry), nil
 	}
 }
 
-// lookup reports the cached models (nil when absent or expired) and whether a
-// refresh should be attempted now.
+func cachedModelsOrUnavailable(models []ModelsCatalogEntry) ([]ModelsCatalogEntry, error) {
+	if models == nil {
+		return nil, ErrModelsCatalogUnavailable
+	}
+	return models, nil
+}
+
+func modelsCatalogBytes(models []ModelsCatalogEntry) int {
+	total := 0
+	for _, model := range models {
+		total += len(model.ID) + len(model.Raw)
+	}
+	return total
+}
+
+// lookup reports the cached models (nil when absent or expired; an empty
+// non-nil slice is a valid empty catalog) and whether a refresh should be
+// attempted now.
 func (c *modelsCatalogCache) lookup(key string, now time.Time) ([]ModelsCatalogEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

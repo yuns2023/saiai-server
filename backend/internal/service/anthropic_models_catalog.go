@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -20,6 +21,9 @@ const (
 	anthropicModelsCatalogMaxPages    = 5
 	anthropicModelsCatalogMaxAccounts = 3
 	anthropicModelsCatalogBodyLimit   = 4 << 20
+	// A source that failed discovery is skipped for this long so that the
+	// next refresh reaches other accounts of the group.
+	anthropicModelsSourceCooldown = 10 * time.Minute
 )
 
 // ListAnthropicModels returns the official Anthropic model catalog as seen by
@@ -39,12 +43,17 @@ func (s *GatewayService) fetchAnthropicModelsCatalog(ctx context.Context, groupI
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	sources := make([]*Account, 0, len(accounts))
 	for i := range accounts {
 		account := &accounts[i]
-		if account.Platform == PlatformAnthropic && account.IsAnthropicOAuthOrSetupToken() && account.IsSchedulable() {
-			sources = append(sources, account)
+		if account.Platform != PlatformAnthropic || !account.IsAnthropicOAuthOrSetupToken() || !account.IsSchedulable() {
+			continue
 		}
+		if failedAt, ok := s.anthropicModels.sourceFailures.Load(account.ID); ok && now.Sub(failedAt.(time.Time)) < anthropicModelsSourceCooldown {
+			continue
+		}
+		sources = append(sources, account)
 	}
 	if len(sources) == 0 {
 		return nil, ErrModelsCatalogUnavailable
@@ -62,7 +71,11 @@ func (s *GatewayService) fetchAnthropicModelsCatalog(ctx context.Context, groupI
 	for _, account := range sources {
 		models, fetchErr := s.fetchAnthropicModelsFromAccount(ctx, account)
 		if fetchErr == nil {
+			s.anthropicModels.sourceFailures.Delete(account.ID)
 			return models, nil
+		}
+		if ctx.Err() == nil {
+			s.anthropicModels.sourceFailures.Store(account.ID, time.Now())
 		}
 		lastErr = fetchErr
 		logger.LegacyPrintf("service.gateway", "Anthropic models catalog fetch failed (account=%d group=%d): %v", account.ID, derefGroupID(groupID), fetchErr)
@@ -97,6 +110,7 @@ func (s *GatewayService) fetchAnthropicModelsFromAccount(ctx context.Context, ac
 	models := make([]ModelsCatalogEntry, 0, 32)
 	seen := make(map[string]struct{})
 	afterID := ""
+	usedCursors := make(map[string]struct{})
 	for page := 0; page < anthropicModelsCatalogMaxPages; page++ {
 		query := url.Values{}
 		query.Set("beta", "true")
@@ -141,14 +155,12 @@ func (s *GatewayService) fetchAnthropicModelsFromAccount(ctx context.Context, ac
 			return nil, errors.New("upstream models list is too large")
 		}
 		if !meta.hasMore {
-			if len(models) == 0 {
-				return nil, errors.New("upstream models list is empty")
-			}
 			return models, nil
 		}
-		if meta.lastID == "" || meta.lastID == afterID {
+		if _, used := usedCursors[meta.lastID]; meta.lastID == "" || used {
 			return nil, errors.New("upstream models list has_more without a new last_id")
 		}
+		usedCursors[meta.lastID] = struct{}{}
 		afterID = meta.lastID
 	}
 	return nil, errors.New("upstream models list exceeds the page limit")

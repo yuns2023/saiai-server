@@ -20,7 +20,12 @@ import (
 // version seen from official Codex clients replaces it at runtime.
 const codexModelsCatalogBaselineVersion = "0.167.0"
 
-const openAIModelsCatalogMaxAttempts = 3
+const (
+	openAIModelsCatalogMaxAttempts = 3
+	// Observed versions are client-supplied; anything beyond this many minor
+	// releases past the baseline is treated as bogus and ignored.
+	codexModelsCatalogMaxMinorAhead = 100
+)
 
 var codexModelsCatalogVersion struct {
 	mu      sync.Mutex
@@ -29,11 +34,14 @@ var codexModelsCatalogVersion struct {
 }
 
 // ObserveCodexClientVersion records the engine version of an official Codex
-// client so later catalog fetches ask the manifest for current models.
-// Prerelease versions are ignored.
+// client whose manifest request just succeeded, so later catalog fetches ask
+// for current models. Prerelease and implausible versions are ignored.
 func ObserveCodexClientVersion(userAgent, originator, versionHeader string) {
 	_, version, isCodex, known := openai.CodexEngineVersion(userAgent, originator, versionHeader)
-	if !isCodex || !known || strings.Contains(version.String(), "-") {
+	if !isCodex || !known || len(version.Prerelease) > 0 {
+		return
+	}
+	if !plausibleCodexCatalogVersion(version) {
 		return
 	}
 	codexModelsCatalogVersion.mu.Lock()
@@ -42,6 +50,12 @@ func ObserveCodexClientVersion(userAgent, originator, versionHeader string) {
 		codexModelsCatalogVersion.version = version
 		codexModelsCatalogVersion.set = true
 	}
+}
+
+func plausibleCodexCatalogVersion(version openai.CodexSemver) bool {
+	baseline, _ := openai.ParseCodexSemver(codexModelsCatalogBaselineVersion)
+	limit, ok := openai.ParseCodexSemver(fmt.Sprintf("%d.%d.0", baseline.Major, baseline.Minor+codexModelsCatalogMaxMinorAhead))
+	return ok && version.Major == baseline.Major && version.Compare(limit) < 0
 }
 
 func currentCodexModelsCatalogVersion() string {
@@ -102,7 +116,7 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsCatalog(ctx context.Context, gro
 // instead of an invented timestamp.
 func openAIModelsFromCodexManifest(body []byte) ([]ModelsCatalogEntry, error) {
 	var manifest struct {
-		Models []struct {
+		Models *[]struct {
 			Slug        string `json:"slug"`
 			DisplayName string `json:"display_name"`
 		} `json:"models"`
@@ -110,9 +124,12 @@ func openAIModelsFromCodexManifest(body []byte) ([]ModelsCatalogEntry, error) {
 	if err := json.Unmarshal(body, &manifest); err != nil {
 		return nil, fmt.Errorf("invalid Codex models manifest: %w", err)
 	}
-	models := make([]ModelsCatalogEntry, 0, len(manifest.Models)+2)
+	if manifest.Models == nil {
+		return nil, errors.New("Codex models manifest has no models array")
+	}
+	models := make([]ModelsCatalogEntry, 0, len(*manifest.Models)+2)
 	seen := make(map[string]struct{})
-	for _, item := range manifest.Models {
+	for _, item := range *manifest.Models {
 		slug := strings.TrimSpace(item.Slug)
 		if slug == "" {
 			continue
@@ -126,9 +143,6 @@ func openAIModelsFromCodexManifest(body []byte) ([]ModelsCatalogEntry, error) {
 			return nil, err
 		}
 		models = appendUniqueModels(models, seen, []ModelsCatalogEntry{{ID: slug, Raw: raw}})
-	}
-	if len(models) == 0 {
-		return nil, errors.New("Codex models manifest lists no models")
 	}
 	if len(models) > modelsCatalogMaxModels {
 		return nil, errors.New("Codex models manifest is too large")
