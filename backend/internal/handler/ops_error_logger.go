@@ -717,7 +717,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		// Settings reads must outlive a client disconnect: the request context
 		// is already canceled when the client hung up, and a canceled settings
 		// lookup fails open, which made ignore_context_canceled unreachable.
-		settingsCtx := context.WithoutCancel(c.Request.Context())
+		// Keep them bounded, since they no longer inherit the request's end.
+		settingsCtx, cancelSettings := context.WithTimeout(context.WithoutCancel(c.Request.Context()), opsSettingsReadTimeout)
+		defer cancelSettings()
 		if !ops.IsMonitoringEnabled(settingsCtx) {
 			return
 		}
@@ -1639,16 +1641,33 @@ func strconvItoa(v int) string {
 	return strconv.Itoa(v)
 }
 
-// opsClientCanceledUpstream reports a failure caused by the client hanging up:
-// the request context was canceled and the upstream call failed with that
-// cancellation. The generic "Upstream request failed" body hides the cause, so
-// the message/body match alone never sees it. A real upstream error followed by
-// a disconnect keeps its own upstream message and is still logged.
+// opsSettingsReadTimeout bounds the Ops settings reads done after the handler
+// returns, which run detached from the request context.
+const opsSettingsReadTimeout = 2 * time.Second
+
+// opsClientCanceledUpstream is a heuristic for a failure caused by the client
+// hanging up: the request context was canceled and every recorded upstream
+// failure is that cancellation. The generic "Upstream request failed" body
+// hides the cause, so the message/body match alone never sees it. A request
+// that hit a real upstream error first (for example a 503 before failover) is
+// still logged, so the retry history is kept.
 func opsClientCanceledUpstream(c *gin.Context) bool {
 	if c == nil || c.Request == nil || !errors.Is(c.Request.Context().Err(), context.Canceled) {
 		return false
 	}
-	return strings.Contains(strings.ToLower(c.GetString(service.OpsUpstreamErrorMessageKey)), opsErrContextCanceled)
+	if !strings.Contains(strings.ToLower(c.GetString(service.OpsUpstreamErrorMessageKey)), opsErrContextCanceled) {
+		return false
+	}
+	if v, ok := c.Get(service.OpsUpstreamErrorsKey); ok {
+		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok {
+			for _, event := range events {
+				if event != nil && !strings.Contains(strings.ToLower(event.Message), opsErrContextCanceled) {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 // shouldSkipOpsErrorLog determines if an error should be skipped from logging based on settings.
