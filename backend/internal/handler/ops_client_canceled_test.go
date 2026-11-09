@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,13 +107,21 @@ func TestOpsErrorLogger_MonitoringSwitchReadSurvivesClientCancel(test *testing.T
 // opsBlockingSettingsStub, once armed, never answers until the caller gives up.
 type opsBlockingSettingsStub struct {
 	opsLogFilterSettingsStub
-	armed bool
+	armed     bool
+	mu        sync.Mutex
+	deadlines []time.Time
+	liveAtUse []bool
 }
 
 func (repo *opsBlockingSettingsStub) GetValue(ctx context.Context, key string) (string, error) {
 	if !repo.armed {
 		return repo.opsLogFilterSettingsStub.GetValue(ctx, key)
 	}
+	deadline, _ := ctx.Deadline()
+	repo.mu.Lock()
+	repo.deadlines = append(repo.deadlines, deadline)
+	repo.liveAtUse = append(repo.liveAtUse, ctx.Err() == nil)
+	repo.mu.Unlock()
 	<-ctx.Done()
 	return "", ctx.Err()
 }
@@ -141,5 +150,13 @@ func TestOpsErrorLogger_DetachedSettingsReadsAreBounded(test *testing.T) {
 	case <-done:
 	case <-time.After(3 * opsSettingsReadTimeout):
 		test.Fatal("ops settings reads were not bounded")
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.NotEmpty(test, repo.deadlines)
+	require.True(test, repo.liveAtUse[0], "first settings read must not inherit the canceled request context")
+	for _, deadline := range repo.deadlines {
+		require.False(test, deadline.IsZero(), "settings reads must carry a deadline")
+		require.Equal(test, repo.deadlines[0], deadline, "settings reads share one budget")
 	}
 }

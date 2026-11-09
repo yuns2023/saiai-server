@@ -1650,7 +1650,9 @@ const opsSettingsReadTimeout = 2 * time.Second
 // failure is that cancellation. The generic "Upstream request failed" body
 // hides the cause, so the message/body match alone never sees it. A request
 // that hit a real upstream error first (for example a 503 before failover) is
-// still logged, so the retry history is kept.
+// not treated as canceled here; the older message/body text match in
+// shouldSkipOpsErrorLog can still skip it when the response itself names the
+// cancellation.
 func opsClientCanceledUpstream(c *gin.Context) bool {
 	if c == nil || c.Request == nil || !errors.Is(c.Request.Context().Err(), context.Canceled) {
 		return false
