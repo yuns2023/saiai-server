@@ -54,7 +54,7 @@ func (s *GatewayService) fetchAnthropicModelsCatalog(ctx context.Context, groupI
 			continue
 		}
 		if failedAt, ok := s.anthropicModels.sourceFailures.Load(account.ID); ok {
-			if now.Sub(failedAt.(time.Time)) < anthropicModelsSourceCooldown {
+			if at, isTime := failedAt.(time.Time); isTime && now.Sub(at) < anthropicModelsSourceCooldown {
 				continue
 			}
 			s.anthropicModels.sourceFailures.CompareAndDelete(account.ID, failedAt)

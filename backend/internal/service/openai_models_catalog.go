@@ -97,7 +97,7 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsCatalog(ctx context.Context, gro
 		manifest, err := s.FetchNativeCodexModelsManifest(ctx, account, rawQuery, "", headers)
 		if err == nil {
 			if manifest.NotModified {
-				err = errors.New("Codex models manifest returned 304 to an unconditional request")
+				err = errors.New("codex models manifest returned 304 to an unconditional request")
 			} else {
 				return openAIModelsFromCodexManifest(manifest.Body)
 			}
@@ -124,10 +124,10 @@ func openAIModelsFromCodexManifest(body []byte) ([]ModelsCatalogEntry, error) {
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(body, &manifest); err != nil {
-		return nil, fmt.Errorf("invalid Codex models manifest: %w", err)
+		return nil, fmt.Errorf("invalid codex models manifest: %w", err)
 	}
 	if manifest.Models == nil {
-		return nil, errors.New("Codex models manifest has no models array")
+		return nil, errors.New("codex models manifest has no models array")
 	}
 	models := make([]ModelsCatalogEntry, 0, len(*manifest.Models)+2)
 	seen := make(map[string]struct{})
@@ -147,7 +147,7 @@ func openAIModelsFromCodexManifest(body []byte) ([]ModelsCatalogEntry, error) {
 		models = appendUniqueModels(models, seen, []ModelsCatalogEntry{{ID: slug, Raw: raw}})
 	}
 	if len(models) > modelsCatalogMaxModels {
-		return nil, errors.New("Codex models manifest is too large")
+		return nil, errors.New("codex models manifest is too large")
 	}
 	for _, model := range openai.DefaultModels {
 		if !strings.HasPrefix(model.ID, "gpt-image-") {

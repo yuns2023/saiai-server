@@ -92,7 +92,11 @@ func (c *modelsCatalogCache) get(ctx context.Context, key string, fetch func(con
 		if result.Err != nil {
 			return fallback(result.Err)
 		}
-		return result.Val.([]ModelsCatalogEntry), nil
+		models, ok := result.Val.([]ModelsCatalogEntry)
+		if !ok {
+			return fallback(ErrModelsCatalogUnavailable)
+		}
+		return models, nil
 	}
 }
 
