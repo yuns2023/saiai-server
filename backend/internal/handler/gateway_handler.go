@@ -2167,6 +2167,7 @@ func calculateSubscriptionRemaining(group *service.Group, sub *service.UserSubsc
 
 // handleConcurrencyError handles concurrency-related errors with proper 429 response
 func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotType string, streamStarted bool) {
+	markOpsUserConcurrency(c, err, slotType)
 	h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error",
 		fmt.Sprintf("Concurrency limit exceeded for %s, please retry later", concurrencyLimitSlotType(err, slotType)), streamStarted)
 }
@@ -2699,12 +2700,21 @@ func sendMockInterceptResponse(c *gin.Context, model string, interceptType Inter
 }
 
 // billingErrorResponse is billingErrorDetails for a response about to be
-// written on c. Its only 429s are the API Key's own limits, which do not
-// recover within a client's retry backoff, so it tells SDK clients (Claude
-// Code, OpenAI SDKs) not to retry.
+// written on c. Its 429s (the API Key's own limits) and 403s (balance,
+// subscription) do not recover within a client's retry backoff, so it tells
+// SDK clients (Claude Code, OpenAI SDKs) not to retry; the header only reaches
+// the client when nothing was flushed yet (no wait ping, no WebSocket). The
+// API Key limits are marked as the user's own limit for Ops.
 func billingErrorResponse(c *gin.Context, err error) (status int, code, message string) {
 	status, code, message = billingErrorDetails(err)
-	if status == http.StatusTooManyRequests && c != nil {
+	if c == nil {
+		return status, code, message
+	}
+	switch status {
+	case http.StatusTooManyRequests:
+		service.MarkOpsUserLimit(c)
+		c.Header("x-should-retry", "false")
+	case http.StatusForbidden:
 		c.Header("x-should-retry", "false")
 	}
 	return status, code, message

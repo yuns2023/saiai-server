@@ -1019,6 +1019,12 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 		phase := classifyOpsPhase(normalizedType, parsed.Message, parsed.Code)
 		isBusinessLimited := classifyOpsIsBusinessLimited(normalizedType, phase, parsed.Code, status, parsed.Message)
+		if service.IsOpsUserLimit(c) {
+			// The gateway rejected the request for the user's or Key's own
+			// concurrency, limit or quota (see service.OpsUserLimitKey).
+			phase = "request"
+			isBusinessLimited = true
+		}
 
 		errorOwner := classifyOpsErrorOwner(phase, parsed.Message)
 		errorSource := classifyOpsErrorSource(phase, parsed.Message)
@@ -1502,11 +1508,7 @@ func classifyOpsPhase(errType, message, code string) string {
 		return "routing"
 	case "user_concurrency":
 		return "request"
-	case opsCodeInsufficientBalance, opsCodeUsageLimitExceeded, opsCodeSubscriptionNotFound, opsCodeSubscriptionInvalid,
-		"API_KEY_RATE_LIMIT_EXCEEDED", "API_KEY_QUOTA_EXHAUSTED":
-		return "request"
-	}
-	if isOpsLocalUserLimitMessage(message) {
+	case opsCodeInsufficientBalance, opsCodeUsageLimitExceeded, opsCodeSubscriptionNotFound, opsCodeSubscriptionInvalid:
 		return "request"
 	}
 
@@ -1539,8 +1541,8 @@ func classifyOpsPhase(errType, message, code string) string {
 }
 
 // classifyOpsBusinessAwareSeverity keeps business-limited rows (balance,
-// usage limit, subscription, inactive user, user/API Key concurrency and
-// limits; see classifyOpsIsBusinessLimited)
+// usage limit, subscription, inactive user, and user/API Key concurrency,
+// limits and quota marked with service.OpsUserLimitKey)
 // at P3: they are excluded from the SLA and are not service faults, whatever
 // their status (often 429).
 func classifyOpsBusinessAwareSeverity(errType string, status int, businessLimited bool) string {
@@ -1585,38 +1587,9 @@ func classifyOpsIsRetryable(errType string, statusCode int) bool {
 	}
 }
 
-// opsLocalUserLimitMessagePrefixes are the gateway's own texts for a user's or
-// API Key's concurrency and 5h/1d/7d limits (handleConcurrencyError,
-// openAIWSUserSlotFullReason, service.ErrAPIKeyRateLimit*Exceeded; the API Key
-// texts may carry a reset-time suffix). The account concurrency text is a
-// platform capacity limit and stays out.
-var opsLocalUserLimitMessagePrefixes = []string{
-	"concurrency limit exceeded for user, please retry later",
-	"concurrency limit exceeded for api key, please retry later",
-	"too many concurrent requests, please retry later",
-	"too many concurrent requests for this api key, please retry later",
-	strings.ToLower(service.ErrAPIKeyRateLimit5hExceeded.Message),
-	strings.ToLower(service.ErrAPIKeyRateLimit1dExceeded.Message),
-	strings.ToLower(service.ErrAPIKeyRateLimit7dExceeded.Message),
-}
-
-func isOpsLocalUserLimitMessage(message string) bool {
-	msg := strings.ToLower(strings.TrimSpace(message))
-	for _, prefix := range opsLocalUserLimitMessagePrefixes {
-		if strings.HasPrefix(msg, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func classifyOpsIsBusinessLimited(errType, phase, code string, status int, message string) bool {
 	switch strings.TrimSpace(code) {
-	case opsCodeInsufficientBalance, opsCodeUsageLimitExceeded, opsCodeSubscriptionNotFound, opsCodeSubscriptionInvalid, opsCodeUserInactive,
-		"user_concurrency", "API_KEY_RATE_LIMIT_EXCEEDED", "API_KEY_QUOTA_EXHAUSTED":
-		return true
-	}
-	if isOpsLocalUserLimitMessage(message) {
+	case opsCodeInsufficientBalance, opsCodeUsageLimitExceeded, opsCodeSubscriptionNotFound, opsCodeSubscriptionInvalid, opsCodeUserInactive:
 		return true
 	}
 	if phase == "billing" || phase == "concurrency" {

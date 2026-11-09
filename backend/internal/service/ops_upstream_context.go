@@ -46,6 +46,13 @@ const (
 	// ops_error_logger 中间件检查此 key，为 true 时跳过错误记录。
 	OpsSkipPassthroughKey = "ops_skip_passthrough"
 
+	// OpsUserLimitKey marks a response the gateway itself wrote because the
+	// user's or API Key's own concurrency slot, limit or quota was exhausted.
+	// Ops logs it as a business limit (request phase, client owner, P3). A
+	// marker, not the response text: upstream errors relayed with the same
+	// wording, and local infrastructure failures, must stay in the SLA.
+	OpsUserLimitKey = "ops_user_limit"
+
 	// Success request-body capture is opt-in and API-key scoped. When enabled,
 	// gateway services may attach a sanitized snapshot of the final upstream
 	// request for post-rewrite debugging.
@@ -617,4 +624,21 @@ func ParseOpsUpstreamErrors(raw string) ([]*OpsUpstreamErrorEvent, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// MarkOpsUserLimit sets OpsUserLimitKey on c (see there).
+func MarkOpsUserLimit(c *gin.Context) {
+	if c != nil {
+		c.Set(OpsUserLimitKey, true)
+	}
+}
+
+// IsOpsUserLimit reports whether MarkOpsUserLimit was called on c.
+func IsOpsUserLimit(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	v, ok := c.Get(OpsUserLimitKey)
+	marked, _ := v.(bool)
+	return ok && marked
 }

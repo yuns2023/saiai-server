@@ -110,6 +110,7 @@ func applySmartSwitch(c *gin.Context, key *service.APIKey, keys *service.APIKeyS
 			AbortWithError(c, 403, "API_KEY_EXPIRED", "API key has expired")
 			return nil, false
 		case errors.Is(err, service.ErrAPIKeyRateLimit5hExceeded), errors.Is(err, service.ErrAPIKeyRateLimit1dExceeded), errors.Is(err, service.ErrAPIKeyRateLimit7dExceeded):
+			service.MarkOpsUserLimit(c)
 			markNoRetry(c)
 			AbortWithError(c, 429, "API_KEY_RATE_LIMIT_EXCEEDED", service.LimitErrorMessage(err))
 			return nil, false

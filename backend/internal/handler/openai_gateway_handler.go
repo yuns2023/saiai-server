@@ -2016,6 +2016,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	if !userAcquired {
+		service.MarkOpsUserLimit(c)
 		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusTryAgainLater, openAIWSUserSlotFullReason(apiKeyFull))
 		return
 	}
@@ -2202,6 +2203,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					return nil, nil, service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to acquire user concurrency slot", err)
 				}
 				if !userAcquired {
+					service.MarkOpsUserLimit(c)
 					return nil, nil, service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, openAIWSUserSlotFullReason(apiKeyFull), nil)
 				}
 				accountReleaseFunc, accountAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(ctx, account.ID, accountMaxConcurrency)
@@ -2278,6 +2280,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return nil, service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to acquire user concurrency slot during account failover", acquireUserErr)
 			}
 			if !userAcquired {
+				service.MarkOpsUserLimit(c)
 				return nil, service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, openAIWSUserSlotFullReason(apiKeyFull), nil)
 			}
 			slots.setUser(wrapReleaseOnDone(ctx, userReleaseFunc))
@@ -2603,6 +2606,7 @@ func openAIWSUserSlotFullReason(apiKeyFull bool) string {
 
 // handleConcurrencyError handles concurrency-related errors with proper 429 response
 func (h *OpenAIGatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotType string, streamStarted bool) {
+	markOpsUserConcurrency(c, err, slotType)
 	h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error",
 		fmt.Sprintf("Concurrency limit exceeded for %s, please retry later", concurrencyLimitSlotType(err, slotType)), streamStarted)
 }

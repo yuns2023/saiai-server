@@ -161,6 +161,20 @@ func concurrencyLimitSlotType(err error, fallback string) string {
 	return fallback
 }
 
+// markOpsUserConcurrency marks a user or API Key slot that was really full
+// (or its wait timed out) as the user's own limit for Ops. Slot store failures
+// arrive here with the same client text and stay platform errors.
+func markOpsUserConcurrency(c *gin.Context, err error, slotType string) {
+	var concurrencyErr *ConcurrencyError
+	if !errors.As(err, &concurrencyErr) {
+		return
+	}
+	switch concurrencyLimitSlotType(err, slotType) {
+	case "user", slotTypeAPIKey:
+		service.MarkOpsUserLimit(c)
+	}
+}
+
 func (e *ConcurrencyError) Error() string {
 	if e.IsTimeout {
 		return fmt.Sprintf("timeout waiting for %s concurrency slot", e.SlotType)
