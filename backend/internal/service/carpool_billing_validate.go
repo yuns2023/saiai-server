@@ -121,8 +121,9 @@ func isClaudeOAuthCountTokensAuxRequest(c *gin.Context, parsed *ParsedRequest) b
 	if strings.TrimSpace(c.GetHeader("X-Claude-Code-Session-Id")) == "" {
 		return false
 	}
+	// Claude Code background sessions (`--bg`, claude agents) send x-app: cli-bg.
 	xApp := strings.TrimSpace(c.GetHeader("x-app"))
-	return xApp == "" || strings.EqualFold(xApp, "cli")
+	return xApp == "" || strings.EqualFold(xApp, "cli") || strings.EqualFold(xApp, "cli-bg")
 }
 
 func looksLikeClaudeOAuthTraffic(c *gin.Context, parsed *ParsedRequest, body []byte) bool {

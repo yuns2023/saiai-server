@@ -258,6 +258,49 @@ func TestPrepareOAuthRequestIdentity_CountTokensAuxRequestAllowedWithoutMetadata
 	require.Empty(t, rec.Body.String())
 }
 
+func TestPrepareOAuthRequestIdentity_CountTokensAuxRequestAllowsBackgroundSessionXApp(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hello"}],"tools":[]}`)
+
+	for _, xApp := range []string{"cli-bg", "other"} {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		req := httptest.NewRequest("POST", "/v1/messages/count_tokens", nil)
+		req.Header.Set("User-Agent", "claude-cli/2.1.319 (external, cli)")
+		req.Header.Set("anthropic-beta", "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,token-counting-2024-11-01")
+		req.Header.Set("X-Claude-Code-Session-Id", "00000000-0000-4000-8000-000000000009")
+		req.Header.Set("X-Claude-Code-Request-Class", "auxiliary")
+		req.Header.Set("x-app", xApp)
+		c.Request = req
+
+		svc := &GatewayService{
+			identityService: NewIdentityService(&identityCacheStub{}, strings.Repeat("x", 32)),
+		}
+		account := &Account{
+			ID:       123,
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeSetupToken,
+		}
+		parsed := &ParsedRequest{
+			Body:  body,
+			Model: "claude-sonnet-4-6",
+		}
+
+		newBody, identity, err := svc.prepareOAuthRequestIdentity(c.Request.Context(), c, account, parsed, body, true)
+		if xApp == "cli-bg" {
+			require.NoError(t, err)
+			require.NotNil(t, identity)
+			require.Nil(t, identity.Fingerprint)
+			require.Equal(t, body, newBody)
+		} else {
+			require.ErrorIs(t, err, ErrClaudeCodeOnly)
+			require.Nil(t, identity)
+		}
+		require.Empty(t, rec.Body.String())
+	}
+}
+
 func TestPrepareOAuthRequestIdentity_CountTokensAuxRequestRequiresTokenCountingBeta(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
