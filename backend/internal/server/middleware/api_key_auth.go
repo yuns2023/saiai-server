@@ -262,7 +262,8 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 						code = "USAGE_LIMIT_EXCEEDED"
 						status = 429
 					}
-					AbortWithError(c, status, code, validateErr.Error())
+					markNoRetry(c)
+					AbortWithError(c, status, code, service.LimitErrorMessage(validateErr))
 					return
 				}
 
@@ -274,6 +275,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			} else {
 				// 非订阅模式 或 订阅模式但 subscriptionService 未注入：回退到余额检查
 				if apiKey.User.Balance <= 0 && !apiKey.Group.UsesHostedUsage() {
+					markNoRetry(c)
 					AbortWithError(c, 403, "INSUFFICIENT_BALANCE", "Insufficient account balance")
 					return
 				}
@@ -314,6 +316,8 @@ func abortInvalidAPIKey(c *gin.Context) {
 func abortAPIKeyQuotaExhausted(c *gin.Context) {
 	const code = "API_KEY_QUOTA_EXHAUSTED"
 	const message = "API key 额度已用完，请联系管理员调整额度或更换 API key。"
+	service.MarkOpsUserLimit(c)
+	markNoRetry(c)
 	path := c.Request.URL.Path
 	if path == "/v1/responses" || strings.HasPrefix(path, "/v1/responses/") ||
 		path == "/responses" || strings.HasPrefix(path, "/responses/") {

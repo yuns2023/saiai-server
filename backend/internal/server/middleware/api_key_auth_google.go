@@ -120,7 +120,8 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 					errors.Is(err, service.ErrMonthlyLimitExceeded) {
 					status = 429
 				}
-				abortWithGoogleError(c, status, err.Error())
+				markNoRetry(c)
+				abortWithGoogleError(c, status, service.LimitErrorMessage(err))
 				return
 			}
 
@@ -132,6 +133,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			}
 		} else {
 			if apiKey.User.Balance <= 0 {
+				markNoRetry(c)
 				abortWithGoogleError(c, 403, "Insufficient account balance")
 				return
 			}

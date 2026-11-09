@@ -110,7 +110,9 @@ func applySmartSwitch(c *gin.Context, key *service.APIKey, keys *service.APIKeyS
 			AbortWithError(c, 403, "API_KEY_EXPIRED", "API key has expired")
 			return nil, false
 		case errors.Is(err, service.ErrAPIKeyRateLimit5hExceeded), errors.Is(err, service.ErrAPIKeyRateLimit1dExceeded), errors.Is(err, service.ErrAPIKeyRateLimit7dExceeded):
-			AbortWithError(c, 429, "API_KEY_RATE_LIMIT_EXCEEDED", "API key usage limit exceeded")
+			service.MarkOpsUserLimit(c)
+			markNoRetry(c)
+			AbortWithError(c, 429, "API_KEY_RATE_LIMIT_EXCEEDED", service.LimitErrorMessage(err))
 			return nil, false
 		}
 		var exhausted *service.SmartSwitchExhaustedError
@@ -139,6 +141,14 @@ const smartSwitchLimitedMessage = "Every group in the smart switching policy is 
 
 func abortSmartSwitchExhausted(c *gin.Context, exhausted *service.SmartSwitchExhaustedError) {
 	reasons := " (" + strings.Join(exhausted.UniqueReasons(), ", ") + ")"
+	// Say which subscription limits block and when they reset, so the user
+	// knows what to wait for.
+	if len(exhausted.LimitDetails) > 0 {
+		reasons += ": " + strings.Join(exhausted.LimitDetails, "; ")
+	}
+	if exhausted.BusinessLimited() {
+		markNoRetry(c)
+	}
 	switch {
 	case !exhausted.BusinessLimited():
 		AbortWithError(c, 503, "SMART_SWITCH_UNAVAILABLE", "No eligible group in the smart switching policy"+reasons)

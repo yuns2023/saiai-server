@@ -1019,6 +1019,12 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 		phase := classifyOpsPhase(normalizedType, parsed.Message, parsed.Code)
 		isBusinessLimited := classifyOpsIsBusinessLimited(normalizedType, phase, parsed.Code, status, parsed.Message)
+		if service.IsOpsUserLimit(c) {
+			// The gateway rejected the request for the user's or Key's own
+			// concurrency, limit or quota (see service.OpsUserLimitKey).
+			phase = "request"
+			isBusinessLimited = true
+		}
 
 		errorOwner := classifyOpsErrorOwner(phase, parsed.Message)
 		errorSource := classifyOpsErrorSource(phase, parsed.Message)
@@ -1041,7 +1047,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 			ErrorPhase:        phase,
 			ErrorType:         normalizedType,
-			Severity:          classifyOpsSeverity(normalizedType, status),
+			Severity:          classifyOpsBusinessAwareSeverity(normalizedType, status, isBusinessLimited),
 			StatusCode:        status,
 			IsBusinessLimited: isBusinessLimited,
 			IsCountTokens:     isCountTokensRequest(c),
@@ -1532,6 +1538,18 @@ func classifyOpsPhase(errType, message, code string) string {
 	default:
 		return "internal"
 	}
+}
+
+// classifyOpsBusinessAwareSeverity keeps business-limited rows (balance,
+// usage limit, subscription, inactive user, and user/API Key concurrency,
+// limits and quota marked with service.OpsUserLimitKey)
+// at P3: they are excluded from the SLA and are not service faults, whatever
+// their status (often 429).
+func classifyOpsBusinessAwareSeverity(errType string, status int, businessLimited bool) string {
+	if businessLimited {
+		return "P3"
+	}
+	return classifyOpsSeverity(errType, status)
 }
 
 func classifyOpsSeverity(errType string, status int) string {

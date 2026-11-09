@@ -120,13 +120,13 @@ func (s *APIKeyService) SelectSmartSwitchGroup(ctx context.Context, key *APIKey,
 		return nil, ErrAPIKeyQuotaExhausted
 	}
 	if fresh.RateLimit5h > 0 && fresh.EffectiveUsage5h() >= fresh.RateLimit5h {
-		return nil, ErrAPIKeyRateLimit5hExceeded
+		return nil, apiKeyRateLimitExceeded(ErrAPIKeyRateLimit5hExceeded, fresh.Window5hStart, RateLimitWindow5h)
 	}
 	if fresh.RateLimit1d > 0 && fresh.EffectiveUsage1d() >= fresh.RateLimit1d {
-		return nil, ErrAPIKeyRateLimit1dExceeded
+		return nil, apiKeyRateLimitExceeded(ErrAPIKeyRateLimit1dExceeded, fresh.Window1dStart, RateLimitWindow1d)
 	}
 	if fresh.RateLimit7d > 0 && fresh.EffectiveUsage7d() >= fresh.RateLimit7d {
-		return nil, ErrAPIKeyRateLimit7dExceeded
+		return nil, apiKeyRateLimitExceeded(ErrAPIKeyRateLimit7dExceeded, fresh.Window7dStart, RateLimitWindow7d)
 	}
 	user, err := s.userRepo.GetByID(ctx, key.UserID)
 	if err != nil {
@@ -151,6 +151,7 @@ func (s *APIKeyService) SelectSmartSwitchGroup(ctx context.Context, key *APIKey,
 		return nil, ErrSmartSwitchInvalid
 	}
 	skipped := []string{}
+	var limitDetails []string
 	visited := map[int64]bool{}
 	for _, id := range key.SmartSwitch.GroupIDs {
 		if id <= 0 || visited[id] {
@@ -205,12 +206,14 @@ func (s *APIKeyService) SelectSmartSwitchGroup(ctx context.Context, key *APIKey,
 			if validateErr != nil {
 				if smartSwitchSubscriptionUnavailable(validateErr) {
 					skipped = append(skipped, "subscription_limit_or_expiry")
+					limitDetails = appendSubscriptionLimitDetail(limitDetails, validateErr)
 					continue
 				}
 				return nil, validateErr
 			}
-			if sub.ExhaustedLimitError(group) != nil {
+			if limitErr := sub.ExhaustedLimitError(group); limitErr != nil {
 				skipped = append(skipped, "subscription_limit_or_expiry")
+				limitDetails = appendSubscriptionLimitDetail(limitDetails, limitErr)
 				continue
 			}
 			if maintenance {
@@ -249,7 +252,7 @@ func (s *APIKeyService) SelectSmartSwitchGroup(ctx context.Context, key *APIKey,
 		copy.User = user
 		return &SmartSwitchSelection{Key: &copy, Subscription: sub, Skipped: skipped}, nil
 	}
-	return nil, &SmartSwitchExhaustedError{Reasons: skipped}
+	return nil, &SmartSwitchExhaustedError{Reasons: skipped, LimitDetails: limitDetails}
 }
 
 // smartSwitchBusinessReasons are skips caused by the user's own balance, Key
@@ -265,6 +268,9 @@ var smartSwitchBusinessReasons = map[string]bool{
 // the stable skip codes in policy order. It matches ErrSmartSwitchUnavailable.
 type SmartSwitchExhaustedError struct {
 	Reasons []string
+	// LimitDetails are client-facing texts of the subscription usage limits
+	// that blocked groups (limit, group name, reset time).
+	LimitDetails []string
 }
 
 func (e *SmartSwitchExhaustedError) Error() string {
@@ -304,6 +310,14 @@ func (e *SmartSwitchExhaustedError) UniqueReasons() []string {
 		}
 	}
 	return unique
+}
+
+func appendSubscriptionLimitDetail(details []string, err error) []string {
+	var limitErr *SubscriptionLimitError
+	if errors.As(err, &limitErr) {
+		return append(details, limitErr.Message())
+	}
+	return details
 }
 
 func smartSwitchSubscriptionUnavailable(err error) bool {

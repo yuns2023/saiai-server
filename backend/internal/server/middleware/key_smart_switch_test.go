@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
@@ -158,9 +159,21 @@ func TestSmartSwitchExhaustedUsesBusinessCodes(t *testing.T) {
 		require.Equal(t, tc.status, recorder.Code, tc.reasons)
 		require.Contains(t, recorder.Body.String(), `"code":"`+tc.code+`"`)
 		require.Contains(t, recorder.Body.String(), strings.Join(tc.reasons, ", "))
+		if tc.status == http.StatusServiceUnavailable {
+			require.Empty(t, recorder.Header().Get("x-should-retry"), tc.reasons)
+		} else {
+			require.Equal(t, "false", recorder.Header().Get("x-should-retry"), tc.reasons)
+		}
 	}
+	// Limit details are kept whichever branch wins (here insufficient balance).
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
+	abortSmartSwitchExhausted(c, &service.SmartSwitchExhaustedError{Reasons: []string{"subscription_limit_or_expiry", "insufficient_balance"}, LimitDetails: []string{"weekly usage limit exceeded"}})
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "(subscription_limit_or_expiry, insufficient_balance): weekly usage limit exceeded")
+
+	recorder = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(recorder)
 	abortSmartSwitchExhausted(c, &service.SmartSwitchExhaustedError{Reasons: []string{"subscription_unavailable", "payg_budget_exhausted", "subscription_unavailable"}})
 	var body ErrorResponse
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
@@ -197,4 +210,43 @@ func TestSmartSwitchAuthReportsInsufficientBalance(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), `"code":"INSUFFICIENT_BALANCE"`)
 	require.Contains(t, response.Body.String(), "insufficient_balance, subscription_limit_or_expiry")
+}
+
+// Production case (#227384): the only policy group is a subscription whose
+// weekly window is spent; the message names the limit, group and reset time.
+func TestSmartSwitchAuthReportsSubscriptionLimitReset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now()
+	weekStart := now.Add(-48 * time.Hour)
+	limit := 1.0
+	original := &service.Group{ID: 1, Name: "CC3000", Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true, SubscriptionType: service.SubscriptionTypeSubscription, WeeklyLimitUSD: &limit}
+	paid := &service.Group{ID: 2, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	user := &service.User{ID: 1, Status: service.StatusActive, Balance: 0}
+	key := &service.APIKey{ID: 1, UserID: 1, Key: "TEST_ONLY", Status: service.StatusActive, User: user, Group: paid, GroupID: &paid.ID, SmartSwitch: &domain.KeySmartSwitchPolicy{Enabled: true, GroupIDs: []int64{1}, PaygConfirmed: true}}
+	sub := &service.UserSubscription{ID: 1, UserID: 1, GroupID: 1, Status: service.SubscriptionStatusActive, ExpiresAt: now.Add(240 * time.Hour), WeeklyUsageUSD: 1.2, DailyWindowStart: &now, WeeklyWindowStart: &weekStart, MonthlyWindowStart: &weekStart, FiveHourWindowStart: &now}
+	subs := &stubUserSubscriptionRepo{getActive: func(context.Context, int64, int64) (*service.UserSubscription, error) {
+		copy := *sub
+		return &copy, nil
+	}}
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	cfg.Gateway.MaxBodySize = 1 << 20
+	keys := service.NewAPIKeyService(smartAuthKeyRepo{key: key}, smartAuthUserRepo{user: user}, smartAuthGroupRepo{groups: map[int64]*service.Group{1: original, 2: paid}}, subs, nil, nil, cfg)
+	subsvc := service.NewSubscriptionService(nil, subs, nil, nil, cfg)
+	t.Cleanup(subsvc.Stop)
+	router := gin.New()
+	router.POST("/v1/messages", apiKeyAuthWithSubscription(keys, subsvc, nil, cfg), func(c *gin.Context) {
+		t.Error("request over the weekly limit reached the handler")
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet","messages":[]}`))
+	request.Header.Set("x-api-key", "TEST_ONLY")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusTooManyRequests, response.Code, response.Body.String())
+	// Claude Code and the OpenAI SDKs stop retrying a limit that will not recover soon.
+	require.Equal(t, "false", response.Header().Get("x-should-retry"))
+	var body ErrorResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Equal(t, "USAGE_LIMIT_EXCEEDED", body.Code)
+	reset := weekStart.Add(7 * 24 * time.Hour).Add(time.Minute - time.Nanosecond).Truncate(time.Minute).In(timezone.Location()).Format("2006-01-02 15:04 -07:00")
+	require.Equal(t, smartSwitchLimitedMessage+` (subscription_limit_or_expiry): weekly usage limit exceeded (subscription group "CC3000"), resets at `+reset, body.Message)
 }

@@ -132,6 +132,12 @@ Claude/OpenAI/Google 平台，不自动替换请求模型。模型映射不得�
 （如 `group_unavailable`、`model_unavailable`、`group_inactive`），仍返回 503
 `SMART_SWITCH_UNAVAILABLE`。组内无可用账号后再推进候选失败时，仍按选号失败处理。
 
+订阅额度触限的候选会在消息末尾追加可读详情（任何分支都追加）：额度类型、订阅分组名和
+窗口重置时间，例如 `...(subscription_limit_or_expiry): weekly usage limit exceeded
+(subscription group "CC3000"), resets at 2026-11-11 00:00 +08:00`；Key 自身 5h/1d/7d
+限额同样附重置时间。全业务原因的拒绝带 `x-should-retry: false`，Claude Code 与 OpenAI SDK
+不再自动重试（Codex CLI 不读该头）；含平台原因的 503 不带，保持可重试。
+
 原绑定分组在关闭智能切换时保持现有语义；开启时它只确定服务归属和关闭后的
 回退配置，不能因为该组过期/停用而在候选评估前阻断所有合法候选。
 原分组被删除导致服务归属无法确定时停止并要求修正配置，不能猜测目标平台。

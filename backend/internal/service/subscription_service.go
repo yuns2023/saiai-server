@@ -880,18 +880,18 @@ func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, grou
 		needsMaintenance = true
 	}
 
-	// 3. 检查用量限额
+	// 3. 检查用量限额（错误带上分组名和窗口重置时间，供客户端提示）
 	if !sub.CheckFiveHourLimit(group, 0) {
-		return needsMaintenance, ErrFiveHourLimitExceeded
+		return needsMaintenance, withSubscriptionLimitDetail(ErrFiveHourLimitExceeded, sub, group)
 	}
 	if !sub.CheckDailyLimit(group, 0) {
-		return needsMaintenance, ErrDailyLimitExceeded
+		return needsMaintenance, withSubscriptionLimitDetail(ErrDailyLimitExceeded, sub, group)
 	}
 	if !sub.CheckWeeklyLimit(group, 0) {
-		return needsMaintenance, ErrWeeklyLimitExceeded
+		return needsMaintenance, withSubscriptionLimitDetail(ErrWeeklyLimitExceeded, sub, group)
 	}
 	if !sub.CheckMonthlyLimit(group, 0) {
-		return needsMaintenance, ErrMonthlyLimitExceeded
+		return needsMaintenance, withSubscriptionLimitDetail(ErrMonthlyLimitExceeded, sub, group)
 	}
 
 	return needsMaintenance, nil

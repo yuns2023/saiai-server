@@ -613,13 +613,13 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 
 	// Check limits
 	if apiKey.RateLimit5h > 0 && usage5h >= apiKey.RateLimit5h {
-		return ErrAPIKeyRateLimit5hExceeded
+		return apiKeyRateLimitExceeded(ErrAPIKeyRateLimit5hExceeded, w5h, RateLimitWindow5h)
 	}
 	if apiKey.RateLimit1d > 0 && usage1d >= apiKey.RateLimit1d {
-		return ErrAPIKeyRateLimit1dExceeded
+		return apiKeyRateLimitExceeded(ErrAPIKeyRateLimit1dExceeded, w1d, RateLimitWindow1d)
 	}
 	if apiKey.RateLimit7d > 0 && usage7d >= apiKey.RateLimit7d {
-		return ErrAPIKeyRateLimit7dExceeded
+		return apiKeyRateLimitExceeded(ErrAPIKeyRateLimit7dExceeded, w7d, RateLimitWindow7d)
 	}
 	return nil
 }
@@ -677,10 +677,13 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	if isSubscriptionMode {
 		if apiKey != nil && apiKey.SmartSwitchOriginalGroupID != nil {
 			if err := s.checkSmartSwitchSubscription(ctx, user.ID, group, subscription); err != nil {
-				return err
+				return withSubscriptionLimitDetail(err, subscription, group)
 			}
 		} else if err := s.checkSubscriptionEligibility(ctx, user.ID, group, subscription); err != nil {
-			return err
+			// Cached usage decided this; the request snapshot's window may differ
+			// (the cache keeps no daily/weekly/monthly start), so name the group
+			// without a reset time.
+			return withSubscriptionLimitDetail(err, nil, group)
 		}
 	} else if !group.UsesHostedUsage() {
 		if err := s.checkBalanceEligibility(ctx, user.ID); err != nil {
