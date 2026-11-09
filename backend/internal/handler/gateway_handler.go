@@ -1465,6 +1465,13 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
+	// Anthropic groups serve the official upstream catalog; account model
+	// mappings are not a whitelist for discovery.
+	if platform == service.PlatformAnthropic {
+		h.serveAnthropicModels(c, apiKey)
+		return
+	}
+
 	// Get available models from account configurations (without platform filter)
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, "")
 
@@ -1541,10 +1548,6 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
 	default:
-		if platform == service.PlatformAnthropic {
-			h.serveAnthropicModels(c, apiKey)
-			return
-		}
 		models := claude.DefaultModels
 		if apiKey != nil && apiKey.Group != nil {
 			filtered := make([]claude.Model, 0, len(models))

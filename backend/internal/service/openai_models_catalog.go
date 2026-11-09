@@ -102,8 +102,10 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsCatalog(ctx context.Context, gro
 				return openAIModelsFromCodexManifest(manifest.Body)
 			}
 		}
+		// Any account-level failure (including account types that cannot
+		// serve a manifest) moves on to another account of the group.
 		lastErr = err
-		if !IsRetryableCodexModelsManifestError(err) || ctx.Err() != nil {
+		if ctx.Err() != nil {
 			return nil, err
 		}
 		excluded[account.ID] = struct{}{}
