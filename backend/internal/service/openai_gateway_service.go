@@ -584,6 +584,7 @@ type OpenAIGatewayService struct {
 	responseHeaderFilter     *responseheaders.CompiledHeaderFilter
 	codexSnapshotThrottle    *accountWriteThrottle
 	codexModelsManifestCache codexModelsManifestCache
+	openAIModelsCatalog      modelsCatalogCache
 	unpricedModelGuard       *openAIUnpricedModelGuard
 	nativeRelayInstanceID    string
 	chatGPTTurnCacheOnce     sync.Once

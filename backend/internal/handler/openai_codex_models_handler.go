@@ -28,6 +28,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	// Discovery is open to every valid key of the group: it is read-only and
 	// unbilled, and model turns keep their own client policy. Non-official
 	// clients are fetched with the gateway's Codex identity instead of theirs.
+	service.ObserveCodexClientVersion(c.GetHeader("User-Agent"), c.GetHeader("originator"), c.GetHeader("version"))
 	headers := c.Request.Header
 	ifNoneMatch := c.GetHeader("If-None-Match")
 	filterBlocked := len(apiKey.Group.BlockedModelPatterns) > 0

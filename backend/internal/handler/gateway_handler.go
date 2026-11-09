@@ -1541,6 +1541,9 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
 	default:
+		if platform == service.PlatformAnthropic && h.serveAnthropicModelsCatalog(c, apiKey) {
+			return
+		}
 		models := claude.DefaultModels
 		if apiKey != nil && apiKey.Group != nil {
 			filtered := make([]claude.Model, 0, len(models))

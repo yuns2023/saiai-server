@@ -80,7 +80,21 @@ func RegisterGatewayRoutes(
 				h.OpenAIGateway.CodexModels(c)
 				return
 			}
+			if getGroupPlatform(c) == service.PlatformOpenAI {
+				h.OpenAIGateway.OpenAIModels(c)
+				return
+			}
 			h.Gateway.Models(c)
+		})
+		gateway.GET("/models/:model", func(c *gin.Context) {
+			switch getGroupPlatform(c) {
+			case service.PlatformOpenAI:
+				h.OpenAIGateway.OpenAIModelDetail(c)
+			case service.PlatformAnthropic:
+				h.Gateway.ModelDetail(c)
+			default:
+				c.JSON(http.StatusNotFound, gin.H{"type": "error", "error": gin.H{"type": "not_found_error", "message": "model: " + c.Param("model")}})
+			}
 		})
 		gateway.GET("/usage", h.Gateway.Usage)
 		// OpenAI Responses API
