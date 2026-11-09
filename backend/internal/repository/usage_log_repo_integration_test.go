@@ -2005,7 +2005,7 @@ func (s *UsageLogRepoSuite) TestDashboardHosted_BucketsStayInclusiveAndPlatformR
 	s.Require().Equal(int64(1), models[0].Requests)
 
 	// Rankings and Top-N trends keep hosted usage, ranked by standard total_cost.
-	ranking, err := s.repo.GetUserSpendingRanking(s.ctx, dayStart, dayEnd, 12)
+	ranking, err := s.repo.GetUserSpendingRanking(s.ctx, dayStart, dayEnd, 12, usagestats.SpendingRankingSortCost)
 	s.Require().NoError(err)
 	s.Require().Len(ranking.Ranking, 2)
 	s.Require().Equal(hostedUser.ID, ranking.Ranking[0].UserID)
@@ -2018,7 +2018,7 @@ func (s *UsageLogRepoSuite) TestDashboardHosted_BucketsStayInclusiveAndPlatformR
 	s.Require().InDelta(1.0, ranking.TotalActualCost, 1e-9)
 	s.Require().Equal(int64(3), ranking.TotalRequests)
 
-	keys, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, 0, 12)
+	keys, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, 0, 12, usagestats.SpendingRankingSortCost)
 	s.Require().NoError(err)
 	s.Require().Len(keys.Ranking, 2)
 	s.Require().Equal(hostedKey.ID, keys.Ranking[0].APIKeyID)

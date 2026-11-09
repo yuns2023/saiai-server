@@ -582,6 +582,18 @@ func parseRankingLimit(raw string) int {
 	return limit
 }
 
+// parseRankingSort reads the optional whitelisted "sort" query parameter of
+// the spending rankings. Empty keeps the default cost order; anything unknown
+// is rejected with 400.
+func parseRankingSort(c *gin.Context) (usagestats.SpendingRankingSort, bool) {
+	sort, ok := usagestats.ParseSpendingRankingSort(strings.TrimSpace(c.Query("sort")))
+	if !ok {
+		response.BadRequest(c, "sort must be cost or request_body_bytes")
+		return "", false
+	}
+	return sort, true
+}
+
 // GetUserSpendingRanking handles getting user spending ranking data.
 // GET /api/v1/admin/dashboard/users-ranking
 func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
@@ -591,15 +603,21 @@ func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 		return
 	}
 	limit := parseRankingLimit(c.DefaultQuery("limit", "12"))
+	sort, ok := parseRankingSort(c)
+	if !ok {
+		return
+	}
 
 	keyRaw, _ := json.Marshal(struct {
 		Start string `json:"start"`
 		End   string `json:"end"`
 		Limit int    `json:"limit"`
+		Sort  string `json:"sort"`
 	}{
 		Start: startTime.UTC().Format(time.RFC3339),
 		End:   endTime.UTC().Format(time.RFC3339),
 		Limit: limit,
+		Sort:  string(sort),
 	})
 	cacheKey := string(keyRaw)
 	if cached, ok := dashboardUsersRankingCache.Get(cacheKey); ok {
@@ -608,7 +626,7 @@ func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 		return
 	}
 
-	ranking, err := h.dashboardService.GetUserSpendingRanking(c.Request.Context(), startTime, endTime, limit)
+	ranking, err := h.dashboardService.GetUserSpendingRanking(c.Request.Context(), startTime, endTime, limit, sort)
 	if err != nil {
 		response.Error(c, 500, "Failed to get user spending ranking")
 		return

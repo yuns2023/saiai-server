@@ -413,22 +413,27 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	// User 3 is hosted: zero actual_cost, ranked by its standard cost.
-	rows := sqlmock.NewRows([]string{"user_id", "email", "cost", "actual_cost", "requests", "hosted_requests", "tokens", "total_cost", "total_actual_cost", "total_requests", "total_tokens"}).
-		AddRow(int64(3), "gamma@example.com", 20.0, 0.0, int64(5), int64(5), int64(300), 50.0, 25.0, int64(30), int64(2600)).
-		AddRow(int64(2), "beta@example.com", 15.0, 12.5, int64(9), int64(0), int64(900), 50.0, 25.0, int64(30), int64(2600)).
-		AddRow(int64(1), "alpha@example.com", 15.0, 12.5, int64(8), int64(0), int64(800), 50.0, 25.0, int64(30), int64(2600))
+	rows := sqlmock.NewRows([]string{"user_id", "email", "cost", "actual_cost", "requests", "hosted_requests", "tokens",
+		"request_body_bytes_total", "request_body_bytes_avg", "request_body_bytes_max", "request_body_bytes_known_count",
+		"total_cost", "total_actual_cost", "total_requests", "total_tokens"}).
+		AddRow(int64(3), "gamma@example.com", 20.0, 0.0, int64(5), int64(5), int64(300), int64(0), nil, nil, int64(0), 50.0, 25.0, int64(30), int64(2600)).
+		AddRow(int64(2), "beta@example.com", 15.0, 12.5, int64(9), int64(0), int64(900), int64(3000), int64(1000), int64(2000), int64(3), 50.0, 25.0, int64(30), int64(2600)).
+		AddRow(int64(1), "alpha@example.com", 15.0, 12.5, int64(8), int64(0), int64(800), int64(0), int64(0), int64(0), int64(2), 50.0, 25.0, int64(30), int64(2600))
 
 	mock.ExpectQuery(`(?s)WITH user_spend AS \(.*SUM\(u.total_cost\).*COUNT\(\*\) FILTER \(WHERE u.metered_cost IS NOT NULL\).*WHERE u.created_at >= \$1 AND u.created_at < \$2\s+GROUP BY.*SUM\(cost\) OVER \(\).*ORDER BY cost DESC, actual_cost DESC, tokens DESC, user_id ASC\s+LIMIT \$3`).
 		WithArgs(start, end, 12).
 		WillReturnRows(rows)
 
-	got, err := repo.GetUserSpendingRanking(context.Background(), start, end, 12)
+	got, err := repo.GetUserSpendingRanking(context.Background(), start, end, 12, usagestats.SpendingRankingSortCost)
 	require.NoError(t, err)
 	require.Equal(t, &usagestats.UserSpendingRankingResponse{
 		Ranking: []usagestats.UserSpendingRankingItem{
 			{UserID: 3, Email: "gamma@example.com", Cost: 20.0, ActualCost: 0, Requests: 5, HostedRequests: 5, Tokens: 300},
-			{UserID: 2, Email: "beta@example.com", Cost: 15.0, ActualCost: 12.5, Requests: 9, Tokens: 900},
-			{UserID: 1, Email: "alpha@example.com", Cost: 15.0, ActualCost: 12.5, Requests: 8, Tokens: 800},
+			{UserID: 2, Email: "beta@example.com", Cost: 15.0, ActualCost: 12.5, Requests: 9, Tokens: 900,
+				RequestBodySizeStats: usagestats.RequestBodySizeStats{RequestBodyBytesTotal: 3000, RequestBodyBytesAvg: int64Ptr(1000), RequestBodyBytesMax: int64Ptr(2000), RequestBodyBytesKnownCount: 3}},
+			// Known empty bodies: avg/max are 0, not NULL.
+			{UserID: 1, Email: "alpha@example.com", Cost: 15.0, ActualCost: 12.5, Requests: 8, Tokens: 800,
+				RequestBodySizeStats: usagestats.RequestBodySizeStats{RequestBodyBytesAvg: int64Ptr(0), RequestBodyBytesMax: int64Ptr(0), RequestBodyBytesKnownCount: 2}},
 		},
 		TotalCost:       50.0,
 		TotalActualCost: 25.0,
@@ -436,6 +441,25 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 		TotalTokens:     2600,
 	}, got)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUsageLogRepositoryGetUserSpendingRankingSortByRequestBodyBytes(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+
+	order := `request_body_bytes_total DESC, request_body_bytes_max DESC NULLS LAST, cost DESC, actual_cost DESC, tokens DESC, user_id ASC`
+	mock.ExpectQuery(`(?s)WITH user_spend AS \(.*COALESCE\(SUM\(u.request_body_bytes\), 0\)::bigint AS request_body_bytes_total.*COUNT\(u.request_body_bytes\) AS request_body_bytes_known_count.*`+
+		`ORDER BY `+order+`\s+LIMIT \$3.*FROM ranked\s+ORDER BY `+order+`\s*$`).
+		WithArgs(start, end, 5).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id"}))
+	_, err := repo.GetUserSpendingRanking(context.Background(), start, end, 5, usagestats.SpendingRankingSortRequestBodyBytes)
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	_, err = repo.GetUserSpendingRanking(context.Background(), start, end, 5, usagestats.SpendingRankingSort("tokens"))
+	require.Error(t, err)
 }
 
 func TestBuildRequestTypeFilterConditionLegacyFallback(t *testing.T) {
@@ -753,4 +777,8 @@ func TestUsageStatsBillingBreakdownFilters(t *testing.T) {
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
 }

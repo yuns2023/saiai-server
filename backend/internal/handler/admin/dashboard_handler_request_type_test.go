@@ -24,6 +24,7 @@ type dashboardUsageRepoCapture struct {
 	modelSessionID   string
 	modelPlatform    string
 	rankingLimit     int
+	rankingSort      usagestats.SpendingRankingSort
 	ranking          []usagestats.UserSpendingRankingItem
 	rankingTotal     float64
 }
@@ -66,8 +67,10 @@ func (s *dashboardUsageRepoCapture) GetUserSpendingRanking(
 	ctx context.Context,
 	startTime, endTime time.Time,
 	limit int,
+	sort usagestats.SpendingRankingSort,
 ) (*usagestats.UserSpendingRankingResponse, error) {
 	s.rankingLimit = limit
+	s.rankingSort = sort
 	return &usagestats.UserSpendingRankingResponse{
 		Ranking:         s.ranking,
 		TotalActualCost: s.rankingTotal,
@@ -254,4 +257,47 @@ func TestDashboardUsersRankingLimitAndCache(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec2.Code)
 	require.Equal(t, "hit", rec2.Header().Get("X-Snapshot-Cache"))
+}
+
+func TestDashboardUsersRankingSortParamAndCacheKey(t *testing.T) {
+	dashboardUsersRankingCache = newSnapshotCache(5 * time.Minute)
+	repo := &dashboardUsageRepoCapture{
+		ranking: []usagestats.UserSpendingRankingItem{{
+			UserID: 7, Email: "rank@example.com", Requests: 3,
+			RequestBodySizeStats: usagestats.RequestBodySizeStats{RequestBodyBytesTotal: 0},
+		}},
+	}
+	router := newDashboardRequestTypeTestRouter(repo)
+	base := "/admin/dashboard/users-ranking?start_date=2025-01-01&end_date=2025-01-02"
+	get := func(query string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, base+query, nil))
+		return rec
+	}
+
+	rec := get("")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, usagestats.SpendingRankingSortCost, repo.rankingSort)
+	require.Equal(t, "miss", rec.Header().Get("X-Snapshot-Cache"))
+	// Unknown sizes: total 0, avg/max explicit null.
+	require.Contains(t, rec.Body.String(), `"request_body_bytes_total":0`)
+	require.Contains(t, rec.Body.String(), `"request_body_bytes_avg":null`)
+	require.Contains(t, rec.Body.String(), `"request_body_bytes_max":null`)
+	require.Contains(t, rec.Body.String(), `"request_body_bytes_known_count":0`)
+
+	// The sort is part of the cache key: a cost snapshot never serves a size sort.
+	rec = get("&sort=request_body_bytes")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "miss", rec.Header().Get("X-Snapshot-Cache"))
+	require.Equal(t, usagestats.SpendingRankingSortRequestBodyBytes, repo.rankingSort)
+	rec = get("&sort=request_body_bytes")
+	require.Equal(t, "hit", rec.Header().Get("X-Snapshot-Cache"))
+	// Explicit cost equals the default order and cache entry.
+	rec = get("&sort=cost")
+	require.Equal(t, "hit", rec.Header().Get("X-Snapshot-Cache"))
+
+	repo.rankingSort = ""
+	rec = get("&sort=tokens")
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Empty(t, repo.rankingSort)
 }

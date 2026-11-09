@@ -19,14 +19,15 @@ type apiKeyRankingRepoCapture struct {
 	service.UsageLogRepository
 	userID    int64
 	limit     int
+	sort      usagestats.SpendingRankingSort
 	startTime time.Time
 	endTime   time.Time
 	calls     int
 	err       error
 }
 
-func (r *apiKeyRankingRepoCapture) GetAPIKeySpendingRanking(_ context.Context, start, end time.Time, userID int64, limit int) (*usagestats.APIKeySpendingRankingResponse, error) {
-	r.startTime, r.endTime, r.userID, r.limit = start, end, userID, limit
+func (r *apiKeyRankingRepoCapture) GetAPIKeySpendingRanking(_ context.Context, start, end time.Time, userID int64, limit int, sort usagestats.SpendingRankingSort) (*usagestats.APIKeySpendingRankingResponse, error) {
+	r.startTime, r.endTime, r.userID, r.limit, r.sort = start, end, userID, limit, sort
 	r.calls++
 	return &usagestats.APIKeySpendingRankingResponse{
 		Ranking: []usagestats.APIKeySpendingRankingItem{{
@@ -100,6 +101,7 @@ func TestAPIKeySpendingRankingRejectsInvalidFilters(t *testing.T) {
 		"user_id=bad", "user_id=0", "user_id=-7", "user_id=1.5", "user_id=9223372036854775808",
 		"start_time=bad&end_time=bad", "start_time=2026-03-01T00:00:00Z",
 		"start_time=2026-03-02T00:00:00Z&end_time=2026-03-01T00:00:00Z",
+		"sort=tokens", "sort=request_body_bytes%3B",
 	} {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/admin/dashboard/api-keys-ranking?"+query, nil))
@@ -123,4 +125,32 @@ func TestAPIKeySpendingRankingCalendarRangeAndErrorRetry(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, 2, repo.calls)
 	require.Equal(t, "miss", w.Header().Get("X-Snapshot-Cache"))
+}
+
+func TestAPIKeySpendingRankingSortIsPartOfCacheKey(t *testing.T) {
+	repo := &apiKeyRankingRepoCapture{}
+	router := newAPIKeyRankingRouter(t, repo)
+	base := "/admin/dashboard/api-keys-ranking?start_time=2026-03-01T00:00:00Z&end_time=2026-03-02T00:00:00Z&user_id=7"
+	for _, tc := range []struct {
+		query string
+		sort  usagestats.SpendingRankingSort
+		cache string
+		calls int
+	}{
+		{"", usagestats.SpendingRankingSortCost, "miss", 1},
+		{"&sort=request_body_bytes", usagestats.SpendingRankingSortRequestBodyBytes, "miss", 2},
+		{"&sort=request_body_bytes", usagestats.SpendingRankingSortRequestBodyBytes, "hit", 2},
+		{"&sort=cost", usagestats.SpendingRankingSortCost, "hit", 2},
+	} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, base+tc.query, nil))
+		require.Equal(t, http.StatusOK, w.Code, tc.query)
+		require.Equal(t, tc.cache, w.Header().Get("X-Snapshot-Cache"), tc.query)
+		require.Equal(t, tc.calls, repo.calls, tc.query)
+		if tc.cache == "miss" {
+			require.Equal(t, tc.sort, repo.sort, tc.query)
+		}
+		require.Contains(t, w.Body.String(), `"request_body_bytes_avg":null`)
+		require.Contains(t, w.Body.String(), `"request_body_bytes_known_count":0`)
+	}
 }

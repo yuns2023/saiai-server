@@ -167,6 +167,7 @@ type UserSpendingRankingItem struct {
 	Requests       int64   `json:"requests"`
 	HostedRequests int64   `json:"hosted_requests"` // 其中托管请求数（metered_cost IS NOT NULL）
 	Tokens         int64   `json:"tokens"`
+	RequestBodySizeStats
 }
 
 // UserSpendingRankingResponse represents ranking rows plus total spend for the time range.

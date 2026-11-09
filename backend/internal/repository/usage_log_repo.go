@@ -2475,9 +2475,13 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 // GetUserSpendingRanking returns user spending ranking aggregated within the time range.
 // Users are ranked by standard total_cost so hosted usage (actual_cost is always 0,
 // total_cost holds the reference price) ranks alongside billed usage.
-func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTime, endTime time.Time, limit int) (result *UserSpendingRankingResponse, err error) {
+func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTime, endTime time.Time, limit int, sort usagestats.SpendingRankingSort) (result *UserSpendingRankingResponse, err error) {
 	if limit <= 0 {
 		limit = 12
+	}
+	order, err := spendingRankingOrderBy(sort, "", "user_id ASC")
+	if err != nil {
+		return nil, err
 	}
 
 	query := `
@@ -2489,7 +2493,8 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 				COALESCE(SUM(u.actual_cost), 0) as actual_cost,
 				COUNT(*) as requests,
 				COUNT(*) FILTER (WHERE u.metered_cost IS NOT NULL) as hosted_requests,
-				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens
+				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens,
+				` + requestBodySizeAggregates + `
 			FROM usage_logs u
 			LEFT JOIN users us ON u.user_id = us.id
 			WHERE u.created_at >= $1 AND u.created_at < $2
@@ -2504,12 +2509,16 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 				requests,
 				hosted_requests,
 				tokens,
+				request_body_bytes_total,
+				request_body_bytes_avg,
+				request_body_bytes_max,
+				request_body_bytes_known_count,
 				COALESCE(SUM(cost) OVER (), 0) as total_cost,
 				COALESCE(SUM(actual_cost) OVER (), 0) as total_actual_cost,
 				COALESCE(SUM(requests) OVER (), 0) as total_requests,
 				COALESCE(SUM(tokens) OVER (), 0) as total_tokens
 			FROM user_spend
-			ORDER BY cost DESC, actual_cost DESC, tokens DESC, user_id ASC
+			ORDER BY ` + order + `
 			LIMIT $3
 		)
 		SELECT
@@ -2520,12 +2529,16 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 			requests,
 			hosted_requests,
 			tokens,
+			request_body_bytes_total,
+			request_body_bytes_avg,
+			request_body_bytes_max,
+			request_body_bytes_known_count,
 			total_cost,
 			total_actual_cost,
 			total_requests,
 			total_tokens
 		FROM ranked
-		ORDER BY cost DESC, actual_cost DESC, tokens DESC, user_id ASC
+		ORDER BY ` + order + `
 	`
 
 	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit)
@@ -2546,9 +2559,13 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 	totalTokens := int64(0)
 	for rows.Next() {
 		var row UserSpendingRankingItem
-		if err = rows.Scan(&row.UserID, &row.Email, &row.Cost, &row.ActualCost, &row.Requests, &row.HostedRequests, &row.Tokens, &totalCost, &totalActualCost, &totalRequests, &totalTokens); err != nil {
+		var sizeAvg, sizeMax sql.NullInt64
+		if err = rows.Scan(&row.UserID, &row.Email, &row.Cost, &row.ActualCost, &row.Requests, &row.HostedRequests, &row.Tokens,
+			&row.RequestBodyBytesTotal, &sizeAvg, &sizeMax, &row.RequestBodyBytesKnownCount,
+			&totalCost, &totalActualCost, &totalRequests, &totalTokens); err != nil {
 			return nil, err
 		}
+		row.RequestBodyBytesAvg, row.RequestBodyBytesMax = nullInt64Ptr(sizeAvg), nullInt64Ptr(sizeMax)
 		ranking = append(ranking, row)
 	}
 	if err = rows.Err(); err != nil {
