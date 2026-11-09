@@ -26,6 +26,9 @@ const (
 	anthropicModelsSourceCooldown = 10 * time.Minute
 )
 
+// anthropicModelsSourceTimeout bounds one source account's catalog fetch.
+var anthropicModelsSourceTimeout = 6 * time.Second
+
 // ListAnthropicModels returns the official Anthropic model catalog as seen by
 // the group's OAuth/setup-token accounts. Only accounts that talk to
 // api.anthropic.com directly are used as a source: API-key accounts may point
@@ -50,8 +53,11 @@ func (s *GatewayService) fetchAnthropicModelsCatalog(ctx context.Context, groupI
 		if account.Platform != PlatformAnthropic || !account.IsAnthropicOAuthOrSetupToken() || !account.IsSchedulable() {
 			continue
 		}
-		if failedAt, ok := s.anthropicModels.sourceFailures.Load(account.ID); ok && now.Sub(failedAt.(time.Time)) < anthropicModelsSourceCooldown {
-			continue
+		if failedAt, ok := s.anthropicModels.sourceFailures.Load(account.ID); ok {
+			if now.Sub(failedAt.(time.Time)) < anthropicModelsSourceCooldown {
+				continue
+			}
+			s.anthropicModels.sourceFailures.Delete(account.ID)
 		}
 		sources = append(sources, account)
 	}
@@ -69,7 +75,14 @@ func (s *GatewayService) fetchAnthropicModelsCatalog(ctx context.Context, groupI
 	}
 	var lastErr error
 	for _, account := range sources {
-		models, fetchErr := s.fetchAnthropicModelsFromAccount(ctx, account)
+		// Each source gets its own deadline so one hanging account cannot use
+		// up the whole refresh and keep being picked first.
+		sourceCtx, cancel := context.WithTimeout(ctx, anthropicModelsSourceTimeout)
+		models, fetchErr := s.fetchAnthropicModelsFromAccount(sourceCtx, account)
+		cancel()
+		if fetchErr == nil && modelsCatalogBytes(models) > modelsCatalogMaxBytes {
+			fetchErr = errors.New("upstream models list exceeds the size limit")
+		}
 		if fetchErr == nil {
 			s.anthropicModels.sourceFailures.Delete(account.ID)
 			return models, nil

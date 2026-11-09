@@ -79,7 +79,11 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			return
 		}
 
-		service.ObserveCodexClientVersion(c.GetHeader("User-Agent"), c.GetHeader("originator"), c.GetHeader("version"))
+		// Only a version the official upstream just answered for (query and
+		// headers agree) may raise the gateway's own catalog version.
+		if account.IsOpenAIOAuth() && !manifest.NotModified && c.Query("client_version") == c.GetHeader("version") {
+			service.ObserveCodexClientVersion(c.GetHeader("User-Agent"), c.GetHeader("originator"), c.GetHeader("version"))
+		}
 		body := manifest.Body
 		if filterBlocked {
 			if manifest.NotModified {

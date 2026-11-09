@@ -89,6 +89,47 @@ func TestModelsCatalogCacheServesStaleCopyAfterFailedRefresh(t *testing.T) {
 	require.Equal(t, 3, calls)
 }
 
+func TestModelsCatalogCacheDropsCopyThatExpiresDuringRefresh(t *testing.T) {
+	var cache modelsCatalogCache
+	cache.store("k", []ModelsCatalogEntry{{ID: "a"}}, time.Now().Add(-modelsCatalogTTL-time.Second))
+	_, err := cache.get(context.Background(), "k", func(context.Context) ([]ModelsCatalogEntry, error) {
+		// The stale window closes while the refresh is in flight.
+		cache.mu.Lock()
+		cache.entries["k"].staleUntil = time.Now().Add(-time.Second)
+		cache.mu.Unlock()
+		return nil, errors.New("upstream down")
+	})
+	require.Error(t, err, "a copy past its stale window is not served")
+}
+
+func TestListAnthropicModelsRotatesPastSlowAndOversizedSources(t *testing.T) {
+	big := `{"data":[{"id":"x","pad":"` + strings.Repeat("p", modelsCatalogMaxBytes) + `"}],"has_more":false}`
+	upstream := &modelsCatalogRecordingUpstream{responses: []func(*http.Request) (*http.Response, error){
+		func(req *http.Request) (*http.Response, error) {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		},
+		modelsCatalogJSON(http.StatusOK, big),
+		modelsCatalogJSON(http.StatusOK, `{"data":[{"id":"claude-opus-5-5"}],"has_more":false}`),
+	}}
+	groupID := int64(13)
+	accounts := []Account{}
+	for id := int64(1); id <= 3; id++ {
+		accounts = append(accounts, Account{ID: id, Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "t"}})
+	}
+	savedTimeout := anthropicModelsSourceTimeout
+	anthropicModelsSourceTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { anthropicModelsSourceTimeout = savedTimeout })
+	svc := newAnthropicModelsCatalogService(upstream, accounts...)
+	models, err := svc.fetchAnthropicModelsCatalog(context.Background(), &groupID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"claude-opus-5-5"}, modelsCatalogIDs(models))
+	_, slowSkipped := svc.anthropicModels.sourceFailures.Load(int64(1))
+	_, bigSkipped := svc.anthropicModels.sourceFailures.Load(int64(2))
+	require.True(t, slowSkipped)
+	require.True(t, bigSkipped)
+}
+
 func TestModelsCatalogCacheRefreshSurvivesCallerCancel(t *testing.T) {
 	var cache modelsCatalogCache
 	release := make(chan struct{})
