@@ -1319,6 +1319,8 @@ export default {
       rankingBodySize: '请求体',
       rankingBodySizeHint: '成功并产生使用记录的请求的请求体总大小（HTTP 按收到的原始字节，客户端压缩过则为压缩后大小；WebSocket 按每轮解压后的消息）。没有记录大小的旧记录不计入。',
       rankingBodySizeDetail: '平均 {avg} · 最大 {max} · 已记录 {count} 次',
+      rankingShareOfTopN: '占前 {n} 名的比例 {percent}%',
+      rankingShareOfTopNNote: '饼图比例仅为占前 {n} 名的比例',
       spendShort: '消费',
       requestsShort: '请求',
       tokensShort: 'Token',

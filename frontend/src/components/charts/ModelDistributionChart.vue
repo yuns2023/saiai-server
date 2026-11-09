@@ -202,6 +202,11 @@
     <div v-else-if="rankingDisplayItems.length > 0 && rankingChartData" class="flex items-center gap-6">
       <div class="h-48 w-48">
         <Doughnut :data="rankingChartData" :options="rankingDoughnutOptions" />
+        <p
+          v-if="rankingBySize"
+          class="mt-1 text-center text-[11px] text-gray-400"
+          data-testid="ranking-size-share-note"
+        >{{ t('admin.dashboard.rankingShareOfTopNNote', { n: rankingItems.length }) }}</p>
       </div>
       <div class="max-h-48 flex-1 overflow-y-auto">
         <table class="w-full text-xs">
@@ -531,8 +536,12 @@ const rankingDoughnutOptions = computed(() => ({
           const value = context.raw as number
           const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0)
           const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0'
-          const formatted = rankingBySize.value ? formatRequestBodyBytes(value) : `$${formatCost(value)}`
-          return `${context.label}: ${formatted} (${percentage}%)`
+          if (rankingBySize.value) {
+            // Size slices only cover the returned Top N (there is no scope-wide size total).
+            const share = t('admin.dashboard.rankingShareOfTopN', { n: context.dataset.data.length, percent: percentage })
+            return `${context.label}: ${formatRequestBodyBytes(value)} (${share})`
+          }
+          return `${context.label}: $${formatCost(value)} (${percentage}%)`
         }
       }
     }

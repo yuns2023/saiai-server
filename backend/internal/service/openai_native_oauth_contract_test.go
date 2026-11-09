@@ -513,7 +513,7 @@ func TestOpenAINativeOAuth_ErrorCredentialRedactionPreservesEnvelope(t *testing.
 func TestOpenAINativeOAuth_FreshWSFailoverIsByteIdenticalAndBoundStateIsRejected(t *testing.T) {
 	fresh := []byte("{\n \"type\":\"response.create\", \"model\":\"gpt-6.1-sol\", \"future\":{\"keep\":true}, \"input\":[] }")
 	tracker := newOpenAIWSPassthroughReplayTracker(NewOpenAIWSStateStore(nil), 0)
-	tracker.RegisterTurn(1, coderws.MessageBinary, fresh)
+	tracker.RegisterTurnWithRequestBodyBytes(1, coderws.MessageBinary, fresh, nil)
 	failure, ok := tracker.BuildFailoverError(11, nil)
 	require.True(t, ok)
 	require.Equal(t, coderws.MessageBinary, failure.MessageType())

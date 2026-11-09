@@ -264,8 +264,9 @@ range, user scope, limit and sort.
 
 Each row also carries request size aggregates over records with a known
 `request_body_bytes`: `request_body_bytes_total` (0 when none is known),
-`request_body_bytes_avg` and `request_body_bytes_max` (`null` when none is
-known) and `request_body_bytes_known_count`. The optional `sort` parameter is
+`request_body_bytes_avg` (mean over known sizes, rounded to whole bytes) and
+`request_body_bytes_max` (`null` when none is known) and
+`request_body_bytes_known_count`. The optional `sort` parameter is
 `cost` (default, the order above) or `request_body_bytes`, which orders by the
 total, then the maximum (`NULLS LAST`), then the cost order; the order is
 applied before `limit`. Any other value is rejected with 400.

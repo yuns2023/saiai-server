@@ -156,7 +156,7 @@ func TestOpenAIWSReplayTrackerCarriesOriginalRequestBodyBytes(t *testing.T) {
 	require.Equal(t, size, *failure.RequestBodyBytes())
 
 	unknown := newOpenAIWSPassthroughReplayTracker(NewOpenAIWSStateStore(nil), 0)
-	unknown.RegisterTurn(1, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`))
+	unknown.RegisterTurnWithRequestBodyBytes(1, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`), nil)
 	failure, ok = unknown.BuildFailoverError(11, nil)
 	require.True(t, ok)
 	require.Nil(t, failure.RequestBodyBytes())
@@ -302,4 +302,58 @@ func TestOpenAIWSPassthroughRequestBodyBytesFirstTurnMidConnectionReplay(t *test
 	require.True(t, ok)
 	require.NotNil(t, turn1)
 	require.Equal(t, firstOriginal, *turn1)
+}
+
+// The first client frame is a non-turn control frame: the caller-supplied
+// first-turn size belongs to it and must not be used. The first
+// response.create reports its own raw size, and the account failover replay
+// of that turn keeps the same size.
+func TestOpenAIWSPassthroughRequestBodyBytesControlFirstFrameThenFailover(t *testing.T) {
+	resetAt := time.Now().Add(90 * time.Minute).Truncate(time.Second)
+	accountAConnection := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(fmt.Sprintf(`{"type":"error","error":{"code":"usage_limit_reached","type":"usage_limit_reached","message":"usage limit reached","resets_at":%d}}`, resetAt.Unix())),
+	}}
+	// Hold the quota error until both the control frame and the create are written.
+	gate := &openAIWSQuotaGateConn{openAIWSCaptureConn: accountAConnection, nextTurnWritten: make(chan struct{}), gateRead: 1}
+	accountBConnection := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(`{"type":"response.completed","response":{"id":"resp_bb_ctrl_b","status":"completed","output":[],"usage":{"input_tokens":8,"output_tokens":2}}}`),
+	}}
+	dialer := &openAIWSQuotaHandshakeDialer{queue: &openAIWSQueueDialer{conns: []openAIWSClientConn{gate, accountBConnection}}, resetAt: resetAt}
+	gateway := newOpenAIWSTransformRelayGateway(dialer)
+	accountA := &Account{ID: 898, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Extra: map[string]any{"responses_websockets_v2_enabled": true}}
+	accountB := &Account{ID: 899, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Extra: map[string]any{"responses_websockets_v2_enabled": true}}
+	recorder := &openAIWSBodyBytesRecorder{}
+	controlSize := int64(31)
+	hooks := &OpenAIWSIngressHooks{
+		TransformUpstreamPayload: growOpenAIWSPayload,
+		AfterTurn:                recorder.afterTurn,
+		OnAccountExhausted: func(*OpenAIWSAccountFailoverError) (*OpenAIWSFailoverTarget, error) {
+			return &OpenAIWSFailoverTarget{Account: accountB, Token: "TEST_ONLY_OAUTH_B"}, nil
+		},
+		// The handler's original first Read: the control frame.
+		FirstTurnRequestBodyBytes: &controlSize,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	client, serverErrors := serveOpenAIWSTransformRelay(t, ctx, gateway, accountA, hooks)
+	control := []byte(`{"type":"session.update","session":{}}`)
+	create := []byte(`{"type":"response.create","model":"gpt-5.5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"TEST_ONLY_RAW after a control frame"}]}]}`)
+	require.NoError(t, client.Write(ctx, coderws.MessageText, control))
+	require.NoError(t, client.Write(ctx, coderws.MessageText, create))
+	require.Equal(t, "resp_bb_ctrl_b", gjson.GetBytes(readOpenAIWSUntilTerminal(t, ctx, client), "response.id").String())
+	_ = client.Close(coderws.StatusNormalClosure, "done")
+	select {
+	case err := <-serverErrors:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("relay did not finish")
+	}
+	accountBConnection.mu.Lock()
+	bWrites := len(accountBConnection.rawWrites)
+	accountBConnection.mu.Unlock()
+	require.Equal(t, 1, bWrites, "the create was replayed on account B")
+	turn1, ok := recorder.get(1)
+	require.True(t, ok)
+	require.NotNil(t, turn1)
+	require.Equal(t, int64(len(create)), *turn1)
 }

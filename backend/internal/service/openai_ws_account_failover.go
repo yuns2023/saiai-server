@@ -119,11 +119,6 @@ func newOpenAIWSPassthroughReplayTracker(_ OpenAIWSStateStore, _ int64) *openAIW
 	}
 }
 
-// RegisterTurn records a pending turn without a known client size.
-func (t *openAIWSPassthroughReplayTracker) RegisterTurn(turn int, messageType coderws.MessageType, payload []byte) {
-	t.RegisterTurnWithRequestBodyBytes(turn, messageType, payload, nil)
-}
-
 // RegisterTurnWithRequestBodyBytes records a pending turn and the original
 // client message size a failover replay of it must report.
 func (t *openAIWSPassthroughReplayTracker) RegisterTurnWithRequestBodyBytes(turn int, messageType coderws.MessageType, payload []byte, requestBodyBytes *int64) {

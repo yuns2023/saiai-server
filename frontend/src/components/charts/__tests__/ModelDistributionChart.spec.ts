@@ -41,7 +41,8 @@ vi.mock('vue-i18n', async () => {
 
 vi.mock('vue-chartjs', () => ({
   Doughnut: {
-    props: ['data'],
+    name: 'Doughnut',
+    props: ['data', 'options'],
     template: '<div class="chart-data">{{ JSON.stringify(data) }}</div>',
   },
 }))
@@ -290,7 +291,29 @@ describe('ModelDistributionChart', () => {
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     expect(chartData.datasets[0].data).toEqual([48 * 1024 * 1024, 0])
 
+    // The tooltip and note say the share is of the top N, not of the whole scope.
+    expect(wrapper.find('[data-testid="ranking-size-share-note"]').text()).toBe('admin.dashboard.rankingShareOfTopNNote')
+    const label = wrapper.findComponent({ name: 'Doughnut' }).props('options').plugins.tooltip.callbacks.label
+    const tooltip = label({ raw: 48 * 1024 * 1024, label: '#1 alpha@example.com', dataset: { data: chartData.datasets[0].data } })
+    expect(tooltip).toBe('#1 alpha@example.com: 48.0 MiB (admin.dashboard.rankingShareOfTopN)')
+
     await wrapper.find('[data-testid="ranking-sort-cost"]').trigger('click')
     expect(wrapper.emitted('update:rankingSort')).toEqual([['cost']])
+  })
+
+  it('keeps the cost-mode tooltip percentage of the whole scope', async () => {
+    const wrapper = mount(ModelDistributionChart, {
+      props: {
+        modelStats: [],
+        enableRankingView: true,
+        rankingItems: [{ user_id: 1, email: 'alpha@example.com', cost: 12, actual_cost: 0, requests: 10, hosted_requests: 0, tokens: 1000 }],
+        rankingTotalCost: 30,
+      },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+    await wrapper.findAll('button').find((button) => button.text() === 'User Spending Ranking')!.trigger('click')
+    expect(wrapper.find('[data-testid="ranking-size-share-note"]').exists()).toBe(false)
+    const label = wrapper.findComponent({ name: 'Doughnut' }).props('options').plugins.tooltip.callbacks.label
+    expect(label({ raw: 12, label: '#1 alpha@example.com', dataset: { data: [12, 18] } })).toBe('#1 alpha@example.com: $12.00 (40.0%)')
   })
 })

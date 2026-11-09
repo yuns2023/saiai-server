@@ -35,7 +35,6 @@ type RelayResult struct {
 	ReasoningEffort         string
 	RequestServiceTier      string
 	RequestPayloadHash      string
-	RequestBodyBytes        *int64
 	Usage                   Usage
 	RequestID               string
 	TerminalEventType       string
@@ -1392,7 +1391,6 @@ func applyRelayTurnMetadataToResult(result *RelayResult, metadata RelayTurnMetad
 	result.ReasoningEffort = metadata.ReasoningEffort
 	result.RequestServiceTier = metadata.RequestServiceTier
 	result.RequestPayloadHash = metadata.RequestPayloadHash
-	result.RequestBodyBytes = openAIWSRelayCloneInt64Ptr(metadata.RequestBodyBytes)
 }
 
 func openAIWSRelayGetOrInitTurnTiming(state *relayState, responseID string, now time.Time) *relayTurnTiming {

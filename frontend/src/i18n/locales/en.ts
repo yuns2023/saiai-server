@@ -1310,6 +1310,8 @@ export default {
       rankingBodySize: 'Request body',
       rankingBodySizeHint: 'Total inbound request payload of successful requests with a usage record (HTTP: as received, compressed if the client compressed it; WebSocket: decompressed message per turn). Older records without a size are not counted.',
       rankingBodySizeDetail: 'Avg {avg} · Max {max} · {count} requests with a recorded size',
+      rankingShareOfTopN: '{percent}% share of top {n}',
+      rankingShareOfTopNNote: 'Slices show the share of the top {n} only',
       spendShort: 'Spend',
       requestsShort: 'Req',
       tokensShort: 'Tok',

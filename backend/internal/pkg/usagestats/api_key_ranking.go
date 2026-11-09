@@ -25,7 +25,8 @@ func ParseSpendingRankingSort(raw string) (SpendingRankingSort, bool) {
 
 // RequestBodySizeStats aggregates usage_logs.request_body_bytes for a ranking
 // row. Rows with an unknown (NULL) size are excluded from every field: Total
-// is 0 and Avg/Max are null when no row in the range has a known size.
+// is 0 and Avg/Max are null when no row in the range has a known size. Avg is
+// the mean over known sizes rounded to whole bytes (ROUND(AVG(...))).
 type RequestBodySizeStats struct {
 	RequestBodyBytesTotal      int64  `json:"request_body_bytes_total"`
 	RequestBodyBytesAvg        *int64 `json:"request_body_bytes_avg"`

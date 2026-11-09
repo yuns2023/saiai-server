@@ -35,7 +35,7 @@ func TestRelay_RequestBodyBytesPerTurnBeforeTransform(t *testing.T) {
 	defer cancel()
 
 	var turns []RelayTurnResult
-	result, relayExit := Relay(ctx, clientConn, &delayedReadFrameConn{base: upstreamConn, firstDelay: 20 * time.Millisecond}, firstPayload, RelayOptions{
+	_, relayExit := Relay(ctx, clientConn, &delayedReadFrameConn{base: upstreamConn, firstDelay: 20 * time.Millisecond}, firstPayload, RelayOptions{
 		FirstClientMessageBytes: &firstOriginal,
 		TransformClientFrame: func(_ int, _ coderws.MessageType, payload []byte) ([]byte, error) {
 			// Grow every sent frame so a post-transform measurement is visible.
@@ -69,9 +69,6 @@ func TestRelay_RequestBodyBytesPerTurnBeforeTransform(t *testing.T) {
 	writes := upstreamConn.Writes()
 	require.Len(t, writes, 2)
 	require.Greater(t, len(writes[1].payload), len(secondRaw)+4000, "upstream got the transformed frame")
-	// The aggregate result follows the last completed (matched) turn.
-	require.NotNil(t, result.RequestBodyBytes)
-	require.Equal(t, int64(len(secondRaw)), *result.RequestBodyBytes)
 }
 
 func TestRelay_RequestBodyBytesUnknownFirstTurnStaysNil(t *testing.T) {
@@ -90,4 +87,85 @@ func TestRelay_RequestBodyBytesUnknownFirstTurnStaysNil(t *testing.T) {
 	require.Nil(t, relayExit)
 	require.Len(t, turns, 1)
 	require.Nil(t, turns[0].RequestBodyBytes, "the relay never measures the frame it was handed")
+}
+
+func runRelayForBodyBytes(t *testing.T, first []byte, firstBytes *int64, clientFrames [][]byte, upstreamEvents []string) []RelayTurnResult {
+	t.Helper()
+	frames := make([]passthroughTestFrame, 0, len(clientFrames))
+	for _, frame := range clientFrames {
+		frames = append(frames, passthroughTestFrame{msgType: coderws.MessageText, payload: frame})
+	}
+	clientConn := newPassthroughTestFrameConn(frames, false)
+	events := make([]passthroughTestFrame, 0, len(upstreamEvents))
+	for _, event := range upstreamEvents {
+		events = append(events, passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(event)})
+	}
+	upstreamConn := newPassthroughTestFrameConn(events, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var turns []RelayTurnResult
+	_, relayExit := Relay(ctx, clientConn, &delayedReadFrameConn{base: upstreamConn, firstDelay: 30 * time.Millisecond}, first, RelayOptions{
+		FirstClientMessageBytes: firstBytes,
+		OnTurnComplete:          func(turn RelayTurnResult) { turns = append(turns, turn) },
+	})
+	require.Nil(t, relayExit)
+	return turns
+}
+
+// A non-turn first frame never consumes the caller's first-turn size: the
+// first response.create read later reports its own raw size.
+func TestRelay_RequestBodyBytesControlFirstFrame(t *testing.T) {
+	t.Parallel()
+	callerSize := int64(999)
+	create := []byte(`{"type":"response.create","model":"m","input":"TEST_ONLY_CREATE_AFTER_CONTROL"}`)
+	turns := runRelayForBodyBytes(t, []byte(`{"type":"session.update","session":{}}`), &callerSize, [][]byte{create}, []string{
+		`{"type":"response.completed","response":{"id":"resp_after_control","usage":{"input_tokens":1,"output_tokens":1}}}`,
+	})
+	require.Len(t, turns, 1)
+	require.Equal(t, 1, turns[0].Turn)
+	require.NotNil(t, turns[0].RequestBodyBytes)
+	require.Equal(t, int64(len(create)), *turns[0].RequestBodyBytes)
+}
+
+// Two overlapping turns of different sizes, both bound before completion,
+// complete in reverse order: each keeps its own size.
+func TestRelay_RequestBodyBytesOverlappingTurnsReverseCompletion(t *testing.T) {
+	t.Parallel()
+	firstSize := int64(111)
+	second := []byte(`{"type":"response.create","model":"m","input":"TEST_ONLY_SECOND_TURN_WITH_A_DIFFERENT_SIZE"}`)
+	turns := runRelayForBodyBytes(t, []byte(`{"type":"response.create","model":"m","input":[]}`), &firstSize, [][]byte{second}, []string{
+		`{"type":"response.created","response":{"id":"resp_overlap_1"}}`,
+		`{"type":"response.created","response":{"id":"resp_overlap_2"}}`,
+		`{"type":"response.completed","response":{"id":"resp_overlap_2","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		`{"type":"response.completed","response":{"id":"resp_overlap_1","usage":{"input_tokens":1,"output_tokens":1}}}`,
+	})
+	require.Len(t, turns, 2)
+	require.Equal(t, "resp_overlap_2", turns[0].RequestID)
+	require.Equal(t, 2, turns[0].Turn)
+	require.Equal(t, int64(len(second)), *turns[0].RequestBodyBytes)
+	require.Equal(t, "resp_overlap_1", turns[1].RequestID)
+	require.Equal(t, 1, turns[1].Turn)
+	require.Equal(t, firstSize, *turns[1].RequestBodyBytes)
+}
+
+// A duplicate terminal of turn 1 while turn 2 is outstanding is unmatched and
+// records no size; it never borrows turn 2's.
+func TestRelay_RequestBodyBytesDuplicateTerminalDoesNotBorrow(t *testing.T) {
+	t.Parallel()
+	firstSize := int64(222)
+	second := []byte(`{"type":"response.create","model":"m","input":"TEST_ONLY_SECOND_TURN_DUPLICATE_CASE"}`)
+	turns := runRelayForBodyBytes(t, []byte(`{"type":"response.create","model":"m","input":[]}`), &firstSize, [][]byte{second}, []string{
+		`{"type":"response.created","response":{"id":"resp_dup_1"}}`,
+		`{"type":"response.created","response":{"id":"resp_dup_2"}}`,
+		`{"type":"response.completed","response":{"id":"resp_dup_1","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		`{"type":"response.completed","response":{"id":"resp_dup_1","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		`{"type":"response.completed","response":{"id":"resp_dup_2","usage":{"input_tokens":1,"output_tokens":1}}}`,
+	})
+	require.Len(t, turns, 3)
+	require.Equal(t, firstSize, *turns[0].RequestBodyBytes)
+	require.Equal(t, "resp_dup_1", turns[1].RequestID)
+	require.Zero(t, turns[1].Turn)
+	require.Nil(t, turns[1].RequestBodyBytes)
+	require.Equal(t, "resp_dup_2", turns[2].RequestID)
+	require.Equal(t, int64(len(second)), *turns[2].RequestBodyBytes)
 }

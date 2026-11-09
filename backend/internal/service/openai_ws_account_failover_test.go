@@ -14,10 +14,11 @@ func TestOpenAIWSPassthroughReplayTrackerRejectsCrossAccountContinuation(t *test
 	store := NewOpenAIWSStateStore(nil)
 	tracker := newOpenAIWSPassthroughReplayTracker(store, 77)
 
-	tracker.RegisterTurn(
+	tracker.RegisterTurnWithRequestBodyBytes(
 		1,
 		coderws.MessageText,
 		[]byte(`{"type":"response.create","model":"gpt-5.3-codex","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`),
+		nil,
 	)
 	tracker.ObserveUpstreamFrame([]byte(`{
 		"type":"response.completed",
@@ -33,10 +34,11 @@ func TestOpenAIWSPassthroughReplayTrackerRejectsCrossAccountContinuation(t *test
 
 	_, ok := store.GetResponseReplayForUser(77, "resp_turn_1")
 	require.False(t, ok, "native OAuth must not create a sanitized history cache")
-	tracker.RegisterTurn(
+	tracker.RegisterTurnWithRequestBodyBytes(
 		2,
 		coderws.MessageText,
 		[]byte(`{"type":"response.create","model":"gpt-5.3-codex","previous_response_id":"resp_turn_1","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`),
+		nil,
 	)
 	failoverErr, ok := tracker.BuildFailoverError(11, nil)
 	require.False(t, ok)
@@ -45,10 +47,11 @@ func TestOpenAIWSPassthroughReplayTrackerRejectsCrossAccountContinuation(t *test
 
 func TestOpenAIWSPassthroughReplayTrackerFailsClosedWithoutPriorReplay(t *testing.T) {
 	tracker := newOpenAIWSPassthroughReplayTracker(NewOpenAIWSStateStore(nil), 77)
-	tracker.RegisterTurn(
+	tracker.RegisterTurnWithRequestBodyBytes(
 		1,
 		coderws.MessageText,
 		[]byte(`{"type":"response.create","model":"gpt-5.3-codex","previous_response_id":"resp_unknown","input":[{"type":"input_text","text":"continue"}]}`),
+		nil,
 	)
 	_, ok := tracker.BuildFailoverError(11, nil)
 	require.False(t, ok)
@@ -56,15 +59,17 @@ func TestOpenAIWSPassthroughReplayTrackerFailsClosedWithoutPriorReplay(t *testin
 
 func TestOpenAIWSPassthroughReplayTrackerFailsClosedForAmbiguousPipelinedTurns(t *testing.T) {
 	tracker := newOpenAIWSPassthroughReplayTracker(NewOpenAIWSStateStore(nil), 77)
-	tracker.RegisterTurn(
+	tracker.RegisterTurnWithRequestBodyBytes(
 		1,
 		coderws.MessageText,
 		[]byte(`{"type":"response.create","model":"gpt-5.3-codex","input":[{"type":"input_text","text":"first"}]}`),
+		nil,
 	)
-	tracker.RegisterTurn(
+	tracker.RegisterTurnWithRequestBodyBytes(
 		2,
 		coderws.MessageText,
 		[]byte(`{"type":"response.create","model":"gpt-5.3-codex","input":[{"type":"input_text","text":"second"}]}`),
+		nil,
 	)
 
 	_, ok := tracker.BuildFailoverError(11, nil)

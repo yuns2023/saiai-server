@@ -605,7 +605,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		Model:              relayResult.RequestModel,
 		ReasoningEffort:    openAIWSOptionalString(relayResult.ReasoningEffort),
 		RequestPayloadHash: relayResult.RequestPayloadHash,
-		RequestBodyBytes:   cloneInt64Ptr(relayResult.RequestBodyBytes),
 		ServiceTier: resolveOpenAIServiceTier(
 			normalizeOpenAIReportedServiceTier(relayResult.Usage.ServiceTier),
 			normalizeOpenAIServiceTier(relayResult.RequestServiceTier),

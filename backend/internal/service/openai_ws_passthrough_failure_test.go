@@ -146,9 +146,9 @@ func TestOpenAIWSCFRayAcceptsOnlyRayIdentifiers(t *testing.T) {
 
 func TestOpenAIWSReplayTrackerCompleteResponseSettlesOnlyThatTurn(t *testing.T) {
 	tracker := newOpenAIWSPassthroughReplayTracker(nil, 0)
-	tracker.RegisterTurn(1, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`))
+	tracker.RegisterTurnWithRequestBodyBytes(1, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`), nil)
 	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.created","response":{"id":"resp_1"}}`))
-	tracker.RegisterTurn(2, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`))
+	tracker.RegisterTurnWithRequestBodyBytes(2, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`), nil)
 	_, ok := tracker.BuildFailoverError(7, nil)
 	require.False(t, ok, "two pending turns cannot be replayed")
 	tracker.CompleteResponse("resp_unknown")
@@ -247,10 +247,10 @@ func TestOpenAIWSPassthroughClientInterruptedTurnIsBilledAndBound(t *testing.T) 
 
 func TestOpenAIWSReplayTrackerIgnoresSettledAndAcknowledgementIDs(t *testing.T) {
 	tracker := newOpenAIWSPassthroughReplayTracker(nil, 0)
-	tracker.RegisterTurn(1, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`))
+	tracker.RegisterTurnWithRequestBodyBytes(1, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`), nil)
 	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.created","response":{"id":"resp_a"}}`))
 	tracker.CompleteResponse("resp_a")
-	tracker.RegisterTurn(2, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`))
+	tracker.RegisterTurnWithRequestBodyBytes(2, coderws.MessageText, []byte(`{"type":"response.create","model":"m","input":[]}`), nil)
 	// A duplicate terminal of the settled response and an acknowledgement
 	// carrying an event id must not bind turn 2.
 	tracker.ObserveUpstreamFrame([]byte(`{"type":"response.incomplete","response":{"id":"resp_a","incomplete_details":{"reason":"interrupted"}}}`))

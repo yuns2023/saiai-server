@@ -1542,7 +1542,8 @@ export interface UserUsageTrendPoint {
 export type SpendingRankingSort = 'cost' | 'request_body_bytes'
 
 // Inbound request size aggregates of a ranking row. Rows without a recorded
-// size are excluded: total 0, avg/max null when nothing is known.
+// size are excluded: total 0, avg/max null when nothing is known. avg is the
+// mean over known sizes rounded to whole bytes.
 export interface RequestBodySizeStats {
   request_body_bytes_total?: number
   request_body_bytes_avg?: number | null
