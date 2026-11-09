@@ -50,7 +50,9 @@ const (
 	// user's or API Key's own concurrency slot, limit or quota was exhausted.
 	// Ops logs it as a business limit (request phase, client owner, P3). A
 	// marker, not the response text: upstream errors relayed with the same
-	// wording, and local infrastructure failures, must stay in the SLA.
+	// wording, and local infrastructure failures, must stay in the SLA. Set it
+	// only on a rejection that ends the request or WebSocket connection: it is
+	// a per-context flag and is never cleared.
 	OpsUserLimitKey = "ops_user_limit"
 
 	// Success request-body capture is opt-in and API-key scoped. When enabled,

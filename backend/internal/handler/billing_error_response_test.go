@@ -73,6 +73,12 @@ func TestBillingErrorResponseMarksKeyLimitOnly(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, status)
 	require.False(t, service.IsOpsUserLimit(c))
 	require.Equal(t, "false", c.Writer.Header().Get("x-should-retry"))
+
+	// A database error in the fallback 403 keeps the client's default.
+	c, _ = gin.CreateTestContext(httptest.NewRecorder())
+	status, _, _ = billingErrorResponse(c, errors.New("pq: connection refused"))
+	require.Equal(t, http.StatusForbidden, status)
+	require.Empty(t, c.Writer.Header().Get("x-should-retry"))
 }
 
 // End to end through the logger: the same 429 text is P3/business only when

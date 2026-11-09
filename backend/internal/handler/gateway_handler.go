@@ -2700,24 +2700,34 @@ func sendMockInterceptResponse(c *gin.Context, model string, interceptType Inter
 }
 
 // billingErrorResponse is billingErrorDetails for a response about to be
-// written on c. Its 429s (the API Key's own limits) and 403s (balance,
-// subscription) do not recover within a client's retry backoff, so it tells
-// SDK clients (Claude Code, OpenAI SDKs) not to retry; the header only reaches
-// the client when nothing was flushed yet (no wait ping, no WebSocket). The
-// API Key limits are marked as the user's own limit for Ops.
+// written on c. Its 429s (the API Key's own limits) and the balance and
+// subscription 403s do not recover within a client's retry backoff, so it
+// tells SDK clients (Claude Code, OpenAI SDKs) not to retry; the header only
+// reaches the client when nothing was flushed yet (no wait ping, no
+// WebSocket). Other 403s (e.g. a database error in the fallback branch) keep
+// the default. The API Key limits are marked as the user's own limit for Ops.
 func billingErrorResponse(c *gin.Context, err error) (status int, code, message string) {
 	status, code, message = billingErrorDetails(err)
 	if c == nil {
 		return status, code, message
 	}
-	switch status {
-	case http.StatusTooManyRequests:
+	if status == http.StatusTooManyRequests {
 		service.MarkOpsUserLimit(c)
 		c.Header("x-should-retry", "false")
-	case http.StatusForbidden:
+	} else if status == http.StatusForbidden && isBillingBusinessRejection(err) {
 		c.Header("x-should-retry", "false")
 	}
 	return status, code, message
+}
+
+func isBillingBusinessRejection(err error) bool {
+	var limitErr *service.SubscriptionLimitError
+	return errors.As(err, &limitErr) ||
+		errors.Is(err, service.ErrInsufficientBalance) ||
+		errors.Is(err, service.ErrSubscriptionInvalid) ||
+		errors.Is(err, service.ErrSubscriptionNotFound) ||
+		errors.Is(err, service.ErrSubscriptionExpired) ||
+		errors.Is(err, service.ErrSubscriptionSuspended)
 }
 
 func billingErrorDetails(err error) (status int, code, message string) {
