@@ -23,6 +23,9 @@ type OpenAIWSAccountFailoverError struct {
 	messageType coderws.MessageType
 	payload     []byte
 	cause       error
+	// requestBodyBytes is the original client message size of the failed
+	// logical turn (nil when unknown); the replay payload is never measured.
+	requestBodyBytes *int64
 }
 
 func (e *OpenAIWSAccountFailoverError) Error() string {
@@ -70,6 +73,15 @@ func (e *OpenAIWSAccountFailoverError) ReplayPayload() []byte {
 	return cloneOpenAIWSPayloadBytes(e.payload)
 }
 
+// RequestBodyBytes returns the original client message size of the replayed
+// logical turn, or nil when unknown.
+func (e *OpenAIWSAccountFailoverError) RequestBodyBytes() *int64 {
+	if e == nil {
+		return nil
+	}
+	return cloneInt64Ptr(e.requestBodyBytes)
+}
+
 // OpenAIWSFailoverTarget is supplied by the ingress handler after it excludes
 // the exhausted account and acquires a compatible replacement account.
 type OpenAIWSFailoverTarget struct {
@@ -82,6 +94,8 @@ type openAIWSPassthroughReplayTurn struct {
 	messageType coderws.MessageType
 	payload     []byte
 	responseID  string
+	// requestBodyBytes is the client's original message size for this turn.
+	requestBodyBytes *int64
 }
 
 // Only pending raw frames are retained for a byte-identical fresh-turn retry.
@@ -105,14 +119,22 @@ func newOpenAIWSPassthroughReplayTracker(_ OpenAIWSStateStore, _ int64) *openAIW
 	}
 }
 
+// RegisterTurn records a pending turn without a known client size.
 func (t *openAIWSPassthroughReplayTracker) RegisterTurn(turn int, messageType coderws.MessageType, payload []byte) {
+	t.RegisterTurnWithRequestBodyBytes(turn, messageType, payload, nil)
+}
+
+// RegisterTurnWithRequestBodyBytes records a pending turn and the original
+// client message size a failover replay of it must report.
+func (t *openAIWSPassthroughReplayTracker) RegisterTurnWithRequestBodyBytes(turn int, messageType coderws.MessageType, payload []byte, requestBodyBytes *int64) {
 	if t == nil || turn <= 0 || strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" {
 		return
 	}
 	entry := &openAIWSPassthroughReplayTurn{
-		turn:        turn,
-		messageType: messageType,
-		payload:     cloneOpenAIWSPayloadBytes(payload),
+		turn:             turn,
+		messageType:      messageType,
+		payload:          cloneOpenAIWSPayloadBytes(payload),
+		requestBodyBytes: cloneInt64Ptr(requestBodyBytes),
 	}
 	t.mu.Lock()
 	t.pending = append(t.pending, entry)
@@ -180,6 +202,8 @@ func (t *openAIWSPassthroughReplayTracker) BuildFailoverError(accountID int64, c
 		messageType: entry.messageType,
 		payload:     replayPayload,
 		cause:       cause,
+		// The original client size of this logical turn, not len(replayPayload).
+		requestBodyBytes: cloneInt64Ptr(entry.requestBodyBytes),
 	}, true
 }
 

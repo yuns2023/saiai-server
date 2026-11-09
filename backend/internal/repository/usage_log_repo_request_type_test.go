@@ -92,6 +92,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			nil, // no upstream stop_reason
 			nil, // client attestation not collected
 			nil, // no client entrypoint warning
+			nil, // request body size unknown
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -176,6 +177,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			nil, // no upstream stop_reason
 			nil, // client attestation not collected
 			nil, // no client entrypoint warning
+			nil, // request body size unknown
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
@@ -563,11 +565,13 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // stop_reason
 			sql.NullInt16{},   // client_attestation
 			[]byte(nil),       // client_entrypoint
+			sql.NullInt64{},   // request_body_bytes
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
 		require.Equal(t, "priority", *log.ServiceTier)
 		require.Equal(t, service.RequestTypeWSV2, log.RequestType)
+		require.Nil(t, log.RequestBodyBytes)
 		require.True(t, log.Stream)
 		require.True(t, log.OpenAIWSMode)
 	})
@@ -615,6 +619,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // stop_reason
 			sql.NullInt16{},   // client_attestation
 			[]byte(nil),       // client_entrypoint
+			sql.NullInt64{},   // request_body_bytes
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -667,6 +672,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{Valid: true, String: "refusal"}, // stop_reason
 			sql.NullInt16{Valid: true, Int16: 5},           // client_attestation
 			[]byte(`{"ua":"t3-code","body":"t3-code","body_status":"valid","reason":"ua_not_allowed","group_id":3,"policy":"observe"}`), // client_entrypoint
+			sql.NullInt64{Valid: true, Int64: 0}, // request_body_bytes: genuinely empty body, not NULL
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -678,6 +684,8 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 		require.NotNil(t, log.ClientEntrypoint)
 		require.Equal(t, "t3-code", log.ClientEntrypoint.UA)
 		require.Equal(t, int64(3), log.ClientEntrypoint.GroupID)
+		require.NotNil(t, log.RequestBodyBytes)
+		require.Equal(t, int64(0), *log.RequestBodyBytes)
 	})
 
 }

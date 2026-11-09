@@ -175,6 +175,33 @@ func (_u *UsageLogUpdate) ClearStopReason() *UsageLogUpdate {
 	return _u
 }
 
+// SetRequestBodyBytes sets the "request_body_bytes" field.
+func (_u *UsageLogUpdate) SetRequestBodyBytes(v int64) *UsageLogUpdate {
+	_u.mutation.ResetRequestBodyBytes()
+	_u.mutation.SetRequestBodyBytes(v)
+	return _u
+}
+
+// SetNillableRequestBodyBytes sets the "request_body_bytes" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableRequestBodyBytes(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetRequestBodyBytes(*v)
+	}
+	return _u
+}
+
+// AddRequestBodyBytes adds value to the "request_body_bytes" field.
+func (_u *UsageLogUpdate) AddRequestBodyBytes(v int64) *UsageLogUpdate {
+	_u.mutation.AddRequestBodyBytes(v)
+	return _u
+}
+
+// ClearRequestBodyBytes clears the value of the "request_body_bytes" field.
+func (_u *UsageLogUpdate) ClearRequestBodyBytes() *UsageLogUpdate {
+	_u.mutation.ClearRequestBodyBytes()
+	return _u
+}
+
 // SetClientAttestation sets the "client_attestation" field.
 func (_u *UsageLogUpdate) SetClientAttestation(v int16) *UsageLogUpdate {
 	_u.mutation.ResetClientAttestation()
@@ -1102,6 +1129,15 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.StopReasonCleared() {
 		_spec.ClearField(usagelog.FieldStopReason, field.TypeString)
 	}
+	if value, ok := _u.mutation.RequestBodyBytes(); ok {
+		_spec.SetField(usagelog.FieldRequestBodyBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedRequestBodyBytes(); ok {
+		_spec.AddField(usagelog.FieldRequestBodyBytes, field.TypeInt64, value)
+	}
+	if _u.mutation.RequestBodyBytesCleared() {
+		_spec.ClearField(usagelog.FieldRequestBodyBytes, field.TypeInt64)
+	}
 	if value, ok := _u.mutation.ClientAttestation(); ok {
 		_spec.SetField(usagelog.FieldClientAttestation, field.TypeInt16, value)
 	}
@@ -1619,6 +1655,33 @@ func (_u *UsageLogUpdateOne) SetNillableStopReason(v *string) *UsageLogUpdateOne
 // ClearStopReason clears the value of the "stop_reason" field.
 func (_u *UsageLogUpdateOne) ClearStopReason() *UsageLogUpdateOne {
 	_u.mutation.ClearStopReason()
+	return _u
+}
+
+// SetRequestBodyBytes sets the "request_body_bytes" field.
+func (_u *UsageLogUpdateOne) SetRequestBodyBytes(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetRequestBodyBytes()
+	_u.mutation.SetRequestBodyBytes(v)
+	return _u
+}
+
+// SetNillableRequestBodyBytes sets the "request_body_bytes" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableRequestBodyBytes(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetRequestBodyBytes(*v)
+	}
+	return _u
+}
+
+// AddRequestBodyBytes adds value to the "request_body_bytes" field.
+func (_u *UsageLogUpdateOne) AddRequestBodyBytes(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddRequestBodyBytes(v)
+	return _u
+}
+
+// ClearRequestBodyBytes clears the value of the "request_body_bytes" field.
+func (_u *UsageLogUpdateOne) ClearRequestBodyBytes() *UsageLogUpdateOne {
+	_u.mutation.ClearRequestBodyBytes()
 	return _u
 }
 
@@ -2578,6 +2641,15 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.StopReasonCleared() {
 		_spec.ClearField(usagelog.FieldStopReason, field.TypeString)
+	}
+	if value, ok := _u.mutation.RequestBodyBytes(); ok {
+		_spec.SetField(usagelog.FieldRequestBodyBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedRequestBodyBytes(); ok {
+		_spec.AddField(usagelog.FieldRequestBodyBytes, field.TypeInt64, value)
+	}
+	if _u.mutation.RequestBodyBytesCleared() {
+		_spec.ClearField(usagelog.FieldRequestBodyBytes, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.ClientAttestation(); ok {
 		_spec.SetField(usagelog.FieldClientAttestation, field.TypeInt16, value)

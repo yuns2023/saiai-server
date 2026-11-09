@@ -490,6 +490,9 @@ type AdminUsageLog struct {
 	// StopReason 上游 Anthropic 原生 stop_reason（仅管理员可见；null 表示未记录/不适用）
 	StopReason *string `json:"stop_reason"`
 
+	// RequestBodyBytes 客户端入站请求体字节数（仅管理员可见；null 表示未知/旧记录）
+	RequestBodyBytes *int64 `json:"request_body_bytes"`
+
 	// ClientAttestation SAIAI 客户端校验状态（1 通过 … 8 未校验；null 表示未采集；仅管理员可见）
 	ClientAttestation *int16 `json:"client_attestation"`
 

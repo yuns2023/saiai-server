@@ -188,6 +188,20 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
+	// firstClientMessage may be a migrated or replayed payload; its logical
+	// turn's client size comes from the caller and is never re-measured.
+	var firstTurnRequestBodyBytes *int64
+	if hooks != nil {
+		firstTurnRequestBodyBytes = cloneInt64Ptr(hooks.FirstTurnRequestBodyBytes)
+	}
+	firstFrameIsTurn := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "type").String()) == "response.create"
+	clientTurnRequestBodyBytes := func(turn int, payload []byte) *int64 {
+		if turn == 1 && firstFrameIsTurn {
+			return firstTurnRequestBodyBytes
+		}
+		// Later turns are relayed as read from the client.
+		return RequestBodyBytesOf(payload)
+	}
 	stateStore := s.getOpenAIWSStateStore()
 	userID := getOpenAIUserIDFromContext(c)
 	var replayTracker *openAIWSPassthroughReplayTracker
@@ -295,7 +309,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						return validationErr
 					}
 				}
-				replayTracker.RegisterTurn(1, firstClientMessageType, firstClientMessage)
+				replayTracker.RegisterTurnWithRequestBodyBytes(1, firstClientMessageType, firstClientMessage, firstTurnRequestBodyBytes)
 				if failure, ready := replayTracker.BuildFailoverError(account.ID, err); ready {
 					return failure
 				}
@@ -349,6 +363,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			// (gateway.openai_ws.read_timeout_seconds, default 15m).
 			OutstandingTurnDrainTimeout: s.openAIWSReadTimeout(),
 			FirstMessageType:            firstClientMessageType,
+			FirstClientMessageBytes:     firstTurnRequestBodyBytes,
 			BufferResponseStart:         replayTracker != nil,
 			ValidateClientFrame:         validateOpenAIWSV2ClientFrame,
 			// The final upstream send point for passthrough: the first frame
@@ -394,7 +409,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 					turnStateMu.Unlock()
 				}
-				replayTracker.RegisterTurn(turn, messageType, payload)
+				replayTracker.RegisterTurnWithRequestBodyBytes(turn, messageType, payload, clientTurnRequestBodyBytes(turn, payload))
 				if exhaustedUntil.Load() > time.Now().Unix() {
 					if failure, ready := replayTracker.BuildFailoverError(account.ID, errors.New("observed Codex quota exhausted")); ready {
 						return failure
@@ -524,6 +539,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					Model:              turn.RequestModel,
 					ReasoningEffort:    openAIWSOptionalString(turn.ReasoningEffort),
 					RequestPayloadHash: turn.RequestPayloadHash,
+					// Matched turn only; an unmatched terminal stays nil.
+					RequestBodyBytes: cloneInt64Ptr(turn.RequestBodyBytes),
 					ServiceTier: resolveOpenAIServiceTier(
 						normalizeOpenAIReportedServiceTier(turn.Usage.ServiceTier),
 						requestServiceTier,
@@ -588,6 +605,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		Model:              relayResult.RequestModel,
 		ReasoningEffort:    openAIWSOptionalString(relayResult.ReasoningEffort),
 		RequestPayloadHash: relayResult.RequestPayloadHash,
+		RequestBodyBytes:   cloneInt64Ptr(relayResult.RequestBodyBytes),
 		ServiceTier: resolveOpenAIServiceTier(
 			normalizeOpenAIReportedServiceTier(relayResult.Usage.ServiceTier),
 			normalizeOpenAIServiceTier(relayResult.RequestServiceTier),

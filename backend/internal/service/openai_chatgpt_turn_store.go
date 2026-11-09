@@ -42,6 +42,10 @@ type ChatGPTTurnSnapshot struct {
 	SubscriptionID         int64
 	Images                 ChatGPTImageEvidence
 	ImageBilling           *ChatGPTImageBilling
+	// RequestBodyBytes is the size of the original conversation POST body as
+	// received, frozen before any rewrite. Async/resumed settlement reads it
+	// from here; snapshots written before this field existed decode as nil.
+	RequestBodyBytes *int64 `json:",omitempty"`
 }
 
 // ChatGPTTurnCache is implemented by the shared Redis Gateway cache. Operations
@@ -279,6 +283,7 @@ func cloneChatGPTTurnSnapshot(input ChatGPTTurnSnapshot) *ChatGPTTurnSnapshot {
 		billing := *input.ImageBilling
 		copy.ImageBilling = &billing
 	}
+	copy.RequestBodyBytes = cloneInt64Ptr(input.RequestBodyBytes)
 	return &copy
 }
 

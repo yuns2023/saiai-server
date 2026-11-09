@@ -32,6 +32,8 @@ const (
 	FieldUpstreamModel = "upstream_model"
 	// FieldStopReason holds the string denoting the stop_reason field in the database.
 	FieldStopReason = "stop_reason"
+	// FieldRequestBodyBytes holds the string denoting the request_body_bytes field in the database.
+	FieldRequestBodyBytes = "request_body_bytes"
 	// FieldClientAttestation holds the string denoting the client_attestation field in the database.
 	FieldClientAttestation = "client_attestation"
 	// FieldClientEntrypoint holds the string denoting the client_entrypoint field in the database.
@@ -167,6 +169,7 @@ var Columns = []string{
 	FieldModel,
 	FieldUpstreamModel,
 	FieldStopReason,
+	FieldRequestBodyBytes,
 	FieldClientAttestation,
 	FieldClientEntrypoint,
 	FieldGroupID,
@@ -329,6 +332,11 @@ func ByUpstreamModel(opts ...sql.OrderTermOption) OrderOption {
 // ByStopReason orders the results by the stop_reason field.
 func ByStopReason(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldStopReason, opts...).ToFunc()
+}
+
+// ByRequestBodyBytes orders the results by the request_body_bytes field.
+func ByRequestBodyBytes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequestBodyBytes, opts...).ToFunc()
 }
 
 // ByClientAttestation orders the results by the client_attestation field.

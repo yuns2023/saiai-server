@@ -271,3 +271,30 @@ func TestUsageLogStopReasonIsAdminOnly(t *testing.T) {
 	require.True(t, stopReason.Exists())
 	require.Equal(t, gjson.Null, stopReason.Type)
 }
+
+func TestUsageLogRequestBodyBytesIsAdminOnly(t *testing.T) {
+	size := int64(48 << 20)
+	log := &service.UsageLog{RequestID: "req-size", Model: "gpt-5.4", RequestBodyBytes: &size}
+
+	adminJSON, err := json.Marshal(UsageLogFromServiceAdmin(log))
+	require.NoError(t, err)
+	require.Equal(t, size, gjson.GetBytes(adminJSON, "request_body_bytes").Int())
+
+	userJSON, err := json.Marshal(UsageLogFromService(log))
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(userJSON, "request_body_bytes").Exists())
+
+	// NULL (unknown) is explicit null for admins; 0 (empty body) stays 0.
+	nullJSON, err := json.Marshal(UsageLogFromServiceAdmin(&service.UsageLog{RequestID: "req-null"}))
+	require.NoError(t, err)
+	value := gjson.GetBytes(nullJSON, "request_body_bytes")
+	require.True(t, value.Exists())
+	require.Equal(t, gjson.Null, value.Type)
+
+	zero := int64(0)
+	zeroJSON, err := json.Marshal(UsageLogFromServiceAdmin(&service.UsageLog{RequestID: "req-zero", RequestBodyBytes: &zero}))
+	require.NoError(t, err)
+	value = gjson.GetBytes(zeroJSON, "request_body_bytes")
+	require.Equal(t, gjson.Number, value.Type)
+	require.Equal(t, int64(0), value.Int())
+}

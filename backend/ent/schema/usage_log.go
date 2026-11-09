@@ -60,6 +60,12 @@ func (UsageLog) Fields() []ent.Field {
 			MaxLen(32).
 			Optional().
 			Nillable(),
+		// RequestBodyBytes is the inbound client request payload size as
+		// received (HTTP body bytes before decompression, or the WebSocket
+		// response.create message). Admin diagnostics only. NULL means unknown.
+		field.Int64("request_body_bytes").
+			Optional().
+			Nillable(),
 		// ClientAttestation stores the SAIAI client proof status (1 valid ..
 		// 8 unverified, docs/CLIENT_PROOF_V1.md). NULL means not collected
 		// (group policy off or rows written before migration 116).

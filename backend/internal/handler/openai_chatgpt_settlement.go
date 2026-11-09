@@ -45,6 +45,9 @@ func (h *OpenAIGatewayHandler) settleChatGPTTurn(ctx context.Context, cache serv
 	value.BasePriceUSD = sealed.BasePriceUSD
 	value.RequestedModel, value.ThinkingEffort = sealed.RequestedModel, sealed.ThinkingEffort
 	value.RequestID, value.RequestPayloadHash = sealed.Identity.RequestID, sealed.Identity.PayloadHash
+	// Always the original POST size from the snapshot; a resume, poll or
+	// update request that triggered settlement must never supply its own.
+	value.RequestBodyBytes = sealed.RequestBodyBytes
 	value.ImageGenerationSeen = sealed.Images.GenerationSeen
 	value.ImageCount, value.ImageSize, value.ImageCostUSD = sealed.ImageBilling.Count, sealed.ImageBilling.Size, sealed.ImageBilling.CostUSD
 	value.Duration = time.Since(sealed.StartedAt)

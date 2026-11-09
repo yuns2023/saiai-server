@@ -35,6 +35,7 @@ type RelayResult struct {
 	ReasoningEffort         string
 	RequestServiceTier      string
 	RequestPayloadHash      string
+	RequestBodyBytes        *int64
 	Usage                   Usage
 	RequestID               string
 	TerminalEventType       string
@@ -62,6 +63,10 @@ type RelayTurnResult struct {
 	Duration           time.Duration
 	FirstTokenMs       *int
 	Failure            *RelayFailure
+	// RequestBodyBytes is the client's application message size for this
+	// turn, measured before TransformClientFrame. Nil when unknown or when the
+	// terminal event could not be matched to a registered turn.
+	RequestBodyBytes *int64
 	// ClientInterrupted marks a response.incomplete (interrupted) that the
 	// provider ended after acknowledging a client response.interrupt for this
 	// response. It is a billable, successful turn, not a failure.
@@ -88,6 +93,10 @@ type RelayTurnMetadata struct {
 	ReasoningEffort    string
 	RequestServiceTier string
 	RequestPayloadHash string
+	// RequestBodyBytes is set by the relay (never by the TurnMetadata
+	// callback, which only sees the transformed bytes): the client message
+	// size before TransformClientFrame, or FirstClientMessageBytes for turn 1.
+	RequestBodyBytes *int64
 	// SentAt is when the relay started writing the turn upstream.
 	SentAt time.Time
 }
@@ -122,6 +131,11 @@ type RelayOptions struct {
 	FirstMessageType            coderws.MessageType
 	OnUsageParseFailure         func(eventType string, usageRaw string)
 	OnClientTurn                func(turn int, messageType coderws.MessageType, payload []byte) error
+	// FirstClientMessageBytes is the size of the client's original message
+	// for the first frame's logical turn. The first frame handed to the relay
+	// may be a rebuilt (continuation migration) or replayed payload, so the
+	// relay never measures it; nil records an unknown size.
+	FirstClientMessageBytes *int64
 	// ValidateClientFrame runs on every client frame, including control
 	// frames that do not start a turn, before it can be written upstream. A
 	// rejection ends the relay like a rejected turn: the frame is dropped and
@@ -330,7 +344,7 @@ func Relay(
 			return result, &RelayExit{Stage: relayStageClientTurnRejected, Err: err}
 		}
 		firstClientMessage = transformed
-		metadata := relayTurnMetadata(turn, firstClientMessage, options.TurnMetadata)
+		metadata := relayTurnMetadata(turn, firstClientMessage, options.TurnMetadata, options.FirstClientMessageBytes)
 		metadata.SentAt = state.nowTime()
 		state.turns.register(metadata)
 		applyRelayTurnMetadataToResult(&result, metadata)
@@ -568,6 +582,8 @@ func runClientToUpstream(
 			return
 		}
 		receivedAt := state.nowTime()
+		// The reassembled application message as read, before any transform.
+		clientMessageBytes := int64(len(payload))
 		markActivity()
 		if state != nil && state.validateClientFrame != nil {
 			if err := state.validateClientFrame(msgType, payload); err != nil {
@@ -603,7 +619,7 @@ func runClientToUpstream(
 		payload = transformed
 		if clientTurn {
 			if state != nil && state.turns != nil {
-				metadata := relayTurnMetadata(turn, payload, turnMetadata)
+				metadata := relayTurnMetadata(turn, payload, turnMetadata, &clientMessageBytes)
 				metadata.SentAt = state.nowTime()
 				state.turns.register(metadata)
 				turnRegistered = true
@@ -1062,6 +1078,7 @@ func emitTurnComplete(
 		ReasoningEffort:    metadata.ReasoningEffort,
 		RequestServiceTier: metadata.RequestServiceTier,
 		RequestPayloadHash: metadata.RequestPayloadHash,
+		RequestBodyBytes:   openAIWSRelayCloneInt64Ptr(metadata.RequestBodyBytes),
 		Usage:              observed.usage,
 		RequestID:          responseID,
 		TerminalEventType:  observed.eventType,
@@ -1341,20 +1358,26 @@ func isRelayClientTurn(payload []byte) bool {
 	return strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create"
 }
 
+// relayTurnMetadata captures accounting metadata for the transformed payload.
+// requestBodyBytes is measured by the caller before the transform and always
+// wins over anything the capture callback returns.
 func relayTurnMetadata(
 	turn int,
 	payload []byte,
 	capture func(turn int, payload []byte) RelayTurnMetadata,
+	requestBodyBytes *int64,
 ) RelayTurnMetadata {
 	metadata := RelayTurnMetadata{
-		Turn:         turn,
-		RequestModel: strings.TrimSpace(gjson.GetBytes(payload, "model").String()),
+		Turn:             turn,
+		RequestModel:     strings.TrimSpace(gjson.GetBytes(payload, "model").String()),
+		RequestBodyBytes: openAIWSRelayCloneInt64Ptr(requestBodyBytes),
 	}
 	if capture == nil {
 		return metadata
 	}
 	captured := capture(turn, payload)
 	captured.Turn = turn
+	captured.RequestBodyBytes = metadata.RequestBodyBytes
 	if strings.TrimSpace(captured.RequestModel) == "" {
 		captured.RequestModel = metadata.RequestModel
 	}
@@ -1369,6 +1392,7 @@ func applyRelayTurnMetadataToResult(result *RelayResult, metadata RelayTurnMetad
 	result.ReasoningEffort = metadata.ReasoningEffort
 	result.RequestServiceTier = metadata.RequestServiceTier
 	result.RequestPayloadHash = metadata.RequestPayloadHash
+	result.RequestBodyBytes = openAIWSRelayCloneInt64Ptr(metadata.RequestBodyBytes)
 }
 
 func openAIWSRelayGetOrInitTurnTiming(state *relayState, responseID string, now time.Time) *relayTurnTiming {
@@ -1397,6 +1421,14 @@ func openAIWSRelayDeleteTurnTiming(state *relayState, responseID string) (relayT
 	}
 	delete(state.turnTimingByID, responseID)
 	return *timing, true
+}
+
+func openAIWSRelayCloneInt64Ptr(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	cloned := *v
+	return &cloned
 }
 
 func openAIWSRelayCloneIntPtr(v *int) *int {

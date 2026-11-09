@@ -262,6 +262,13 @@ type OpenAIWSIngressHooks struct {
 	AfterTurn          func(turn int, result *OpenAIForwardResult, turnErr error)
 	OnUpstreamError    func(failure *OpenAIWSUpstreamFailure)
 	OnAccountExhausted func(failure *OpenAIWSAccountFailoverError) (*OpenAIWSFailoverTarget, error)
+
+	// FirstTurnRequestBodyBytes is the size of the client's original first
+	// message as the handler read it (before a continuation migration may
+	// replace the first frame). On account failover the wrapper sets it to the
+	// replayed logical turn's original size. Nil records an unknown size; the
+	// forwarder never re-measures the frame it was handed.
+	FirstTurnRequestBodyBytes *int64
 }
 
 type OpenAIWSUpstreamFailure struct {
@@ -2499,10 +2506,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		defer resumableClient.Stop()
 	}
 
+	var replayRequestBodyBytes *int64
 	for failoverCount := 0; ; failoverCount++ {
 		attemptHooks := hooks
 		if retryFirstTurn {
-			attemptHooks = remapOpenAIWSIngressHooksForFailover(hooks, turnOffset)
+			attemptHooks = remapOpenAIWSIngressHooksForFailover(hooks, turnOffset, replayRequestBodyBytes)
 		}
 		err := s.proxyResponsesWebSocketFromClientOnce(
 			s.withOpenAIProviderAttemptBudget(ctx, c, currentAccount),
@@ -2558,12 +2566,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		currentToken = target.Token
 		currentMessageType = failoverErr.MessageType()
 		currentMessage = failoverErr.ReplayPayload()
+		// The replay is the same logical turn: keep its original client size
+		// instead of measuring the replay payload.
+		replayRequestBodyBytes = failoverErr.RequestBodyBytes()
 		turnOffset = logicalTurn - 1
 		retryFirstTurn = true
 	}
 }
 
-func remapOpenAIWSIngressHooksForFailover(hooks *OpenAIWSIngressHooks, turnOffset int) *OpenAIWSIngressHooks {
+func remapOpenAIWSIngressHooksForFailover(hooks *OpenAIWSIngressHooks, turnOffset int, replayRequestBodyBytes *int64) *OpenAIWSIngressHooks {
 	if hooks == nil {
 		return nil
 	}
@@ -2609,7 +2620,8 @@ func remapOpenAIWSIngressHooksForFailover(hooks *OpenAIWSIngressHooks, turnOffse
 				hooks.AfterTurn(logicalTurn(turn), result, turnErr)
 			}
 		},
-		OnAccountExhausted: hooks.OnAccountExhausted,
+		OnAccountExhausted:        hooks.OnAccountExhausted,
+		FirstTurnRequestBodyBytes: cloneInt64Ptr(replayRequestBodyBytes),
 	}
 }
 
@@ -3340,6 +3352,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 	currentPayload := firstPayload.payloadRaw
 	currentOriginalModel := firstPayload.originalModel
 	currentPayloadBytes := firstPayload.payloadBytes
+	// Client size of the current logical turn, for usage diagnostics only.
+	// Turn 1 comes from the caller (the frame handed in may be a migrated
+	// payload); later turns are measured as read, before normalization.
+	var currentRequestBodyBytes *int64
+	if hooks != nil {
+		currentRequestBodyBytes = cloneInt64Ptr(hooks.FirstTurnRequestBodyBytes)
+	}
 	isStrictAffinityTurn := func(payload []byte) bool {
 		if !storeDisabled {
 			return false
@@ -3803,6 +3822,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 			// usage hash keeps the base behaviour.
 			result.RequestPayloadHash = HashUsageRequestPayload(sendPayload)
 		}
+		if relayErr == nil && result != nil {
+			result.RequestBodyBytes = cloneInt64Ptr(currentRequestBodyBytes)
+		}
 		if relayErr != nil {
 			lastTurnClean = false
 			if recoverIngressPrevResponseNotFound(relayErr, turn, connID) {
@@ -3878,6 +3900,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 			return fmt.Errorf("read client websocket request: %w", readErr)
 		}
 
+		nextRequestBodyBytes := RequestBodyBytesOf(nextClientMessage)
 		nextPayload, parseErr := parseClientPayload(nextClientMessage)
 		if parseErr != nil {
 			return parseErr
@@ -3930,6 +3953,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 		currentPayload = nextPayload.payloadRaw
 		currentOriginalModel = nextPayload.originalModel
 		currentPayloadBytes = nextPayload.payloadBytes
+		currentRequestBodyBytes = nextRequestBodyBytes
 		storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(currentPayload, account)
 		if !storeDisabled {
 			unpinSessionConn(sessionConnID)

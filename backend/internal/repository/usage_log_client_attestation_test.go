@@ -16,19 +16,19 @@ func TestUsageLogClientAttestationInAllInsertPaths(t *testing.T) {
 	log := &service.UsageLog{RequestID: "client-attestation", APIKeyID: 2, ClientAttestation: &status}
 	prepared := prepareUsageLogInsert(log)
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
-	require.Equal(t, "smallint", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-2])
-	require.Equal(t, sql.NullInt16{Int16: 4, Valid: true}, prepared.args[len(prepared.args)-2])
-	require.Equal(t, sql.NullInt16{}, prepareUsageLogInsert(&service.UsageLog{RequestID: "none", APIKeyID: 2}).args[len(prepared.args)-2])
+	require.Equal(t, "smallint", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-3])
+	require.Equal(t, sql.NullInt16{Int16: 4, Valid: true}, prepared.args[len(prepared.args)-3])
+	require.Equal(t, sql.NullInt16{}, prepareUsageLogInsert(&service.UsageLog{RequestID: "none", APIKeyID: 2}).args[len(prepared.args)-3])
 
 	batchQuery, batchArgs := buildUsageLogBatchInsertQuery(
 		[]string{usageLogBatchKey(log.RequestID, log.APIKeyID)},
 		map[string]usageLogInsertPrepared{usageLogBatchKey(log.RequestID, log.APIKeyID): prepared},
 	)
 	require.Equal(t, 3, strings.Count(batchQuery, "client_attestation"))
-	require.Equal(t, sql.NullInt16{Int16: 4, Valid: true}, batchArgs[len(batchArgs)-2])
+	require.Equal(t, sql.NullInt16{Int16: 4, Valid: true}, batchArgs[len(batchArgs)-3])
 
 	bestEffortQuery, bestEffortArgs := buildUsageLogBestEffortInsertQuery([]usageLogInsertPrepared{prepared})
 	require.Equal(t, 3, strings.Count(bestEffortQuery, "client_attestation"))
-	require.Equal(t, sql.NullInt16{Int16: 4, Valid: true}, bestEffortArgs[len(bestEffortArgs)-2])
+	require.Equal(t, sql.NullInt16{Int16: 4, Valid: true}, bestEffortArgs[len(bestEffortArgs)-3])
 	require.Equal(t, 1, strings.Count(usageLogSelectColumns, "client_attestation"))
 }

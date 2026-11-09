@@ -2169,3 +2169,85 @@ func (s *UsageLogRepoSuite) TestListBilledPricingModels() {
 	s.Require().NoError(err)
 	s.Require().ElementsMatch([]string{"gpt-6.1-sol", "gpt-image-2", "blank-snapshot"}, models)
 }
+
+func TestUsageLogRepositoryRequestBodyBytesRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("usage-body-bytes-%d@example.com", time.Now().UnixNano())})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-usage-body-bytes-" + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-body-bytes-" + uuid.NewString()})
+	newLog := func(size *int64) *service.UsageLog {
+		return &service.UsageLog{UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID, RequestID: uuid.NewString(),
+			Model: "gpt-5.4", InputTokens: 3, TotalCost: 0.1, ActualCost: 0.1, RequestBodyBytes: size, CreatedAt: time.Now().UTC()}
+	}
+	stored := func(log *service.UsageLog) *int64 {
+		var value *int64
+		require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT request_body_bytes FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", log.RequestID, apiKey.ID).Scan(&value))
+		return value
+	}
+	big, zero, other := int64(48<<20), int64(0), int64(777)
+
+	// Batched Create + GetByID round trip.
+	batched := newLog(&big)
+	_, err := repo.Create(ctx, batched)
+	require.NoError(t, err)
+	got, err := repo.GetByID(ctx, batched.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.RequestBodyBytes)
+	require.Equal(t, big, *got.RequestBodyBytes)
+
+	// NULL stays NULL (unknown), and 0 stays 0 (empty body).
+	null := newLog(nil)
+	_, err = repo.Create(ctx, null)
+	require.NoError(t, err)
+	require.Nil(t, stored(null))
+	got, err = repo.GetByID(ctx, null.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.RequestBodyBytes)
+
+	empty := newLog(&zero)
+	_, err = repo.Create(ctx, empty)
+	require.NoError(t, err)
+	require.NotNil(t, stored(empty))
+	require.Equal(t, zero, *stored(empty))
+	got, err = repo.GetByID(ctx, empty.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.RequestBodyBytes)
+	require.Equal(t, zero, *got.RequestBodyBytes)
+
+	single := newLog(&other)
+	_, err = repo.createSingle(ctx, integrationDB, single)
+	require.NoError(t, err)
+	require.Equal(t, other, *stored(single))
+
+	singleNull := newLog(nil)
+	_, err = repo.createSingle(ctx, integrationDB, singleNull)
+	require.NoError(t, err)
+	require.Nil(t, stored(singleNull))
+
+	fallback := newLog(&other)
+	require.NoError(t, execUsageLogInsertNoResult(ctx, integrationDB, prepareUsageLogInsert(fallback)))
+	require.Equal(t, other, *stored(fallback))
+
+	bestEffort := newLog(&big)
+	require.NoError(t, repo.CreateBestEffort(ctx, bestEffort))
+	require.Eventually(t, func() bool {
+		var value *int64
+		err := integrationDB.QueryRowContext(ctx, "SELECT request_body_bytes FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", bestEffort.RequestID, apiKey.ID).Scan(&value)
+		return err == nil && value != nil && *value == big
+	}, 3*time.Second, 20*time.Millisecond)
+
+	bestEffortNull := newLog(nil)
+	require.NoError(t, repo.CreateBestEffort(ctx, bestEffortNull))
+	require.Eventually(t, func() bool {
+		var isNull bool
+		err := integrationDB.QueryRowContext(ctx, "SELECT request_body_bytes IS NULL FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", bestEffortNull.RequestID, apiKey.ID).Scan(&isNull)
+		return err == nil && isNull
+	}, 3*time.Second, 20*time.Millisecond)
+
+	logs, _, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 50}, usagestats.UsageLogFilters{APIKeyID: apiKey.ID, ExactTotal: true})
+	require.NoError(t, err)
+	require.Len(t, logs, 8)
+}

@@ -27528,6 +27528,8 @@ type UsageLogMutation struct {
 	model                               *string
 	upstream_model                      *string
 	stop_reason                         *string
+	request_body_bytes                  *int64
+	addrequest_body_bytes               *int64
 	client_attestation                  *int16
 	addclient_attestation               *int16
 	client_entrypoint                   *map[string]interface{}
@@ -28076,6 +28078,76 @@ func (m *UsageLogMutation) StopReasonCleared() bool {
 func (m *UsageLogMutation) ResetStopReason() {
 	m.stop_reason = nil
 	delete(m.clearedFields, usagelog.FieldStopReason)
+}
+
+// SetRequestBodyBytes sets the "request_body_bytes" field.
+func (m *UsageLogMutation) SetRequestBodyBytes(i int64) {
+	m.request_body_bytes = &i
+	m.addrequest_body_bytes = nil
+}
+
+// RequestBodyBytes returns the value of the "request_body_bytes" field in the mutation.
+func (m *UsageLogMutation) RequestBodyBytes() (r int64, exists bool) {
+	v := m.request_body_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestBodyBytes returns the old "request_body_bytes" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldRequestBodyBytes(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestBodyBytes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestBodyBytes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestBodyBytes: %w", err)
+	}
+	return oldValue.RequestBodyBytes, nil
+}
+
+// AddRequestBodyBytes adds i to the "request_body_bytes" field.
+func (m *UsageLogMutation) AddRequestBodyBytes(i int64) {
+	if m.addrequest_body_bytes != nil {
+		*m.addrequest_body_bytes += i
+	} else {
+		m.addrequest_body_bytes = &i
+	}
+}
+
+// AddedRequestBodyBytes returns the value that was added to the "request_body_bytes" field in this mutation.
+func (m *UsageLogMutation) AddedRequestBodyBytes() (r int64, exists bool) {
+	v := m.addrequest_body_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearRequestBodyBytes clears the value of the "request_body_bytes" field.
+func (m *UsageLogMutation) ClearRequestBodyBytes() {
+	m.request_body_bytes = nil
+	m.addrequest_body_bytes = nil
+	m.clearedFields[usagelog.FieldRequestBodyBytes] = struct{}{}
+}
+
+// RequestBodyBytesCleared returns if the "request_body_bytes" field was cleared in this mutation.
+func (m *UsageLogMutation) RequestBodyBytesCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldRequestBodyBytes]
+	return ok
+}
+
+// ResetRequestBodyBytes resets all changes to the "request_body_bytes" field.
+func (m *UsageLogMutation) ResetRequestBodyBytes() {
+	m.request_body_bytes = nil
+	m.addrequest_body_bytes = nil
+	delete(m.clearedFields, usagelog.FieldRequestBodyBytes)
 }
 
 // SetClientAttestation sets the "client_attestation" field.
@@ -30266,7 +30338,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 46)
+	fields := make([]string, 0, 47)
 	if m.smart_switch != nil {
 		fields = append(fields, usagelog.FieldSmartSwitch)
 	}
@@ -30293,6 +30365,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.stop_reason != nil {
 		fields = append(fields, usagelog.FieldStopReason)
+	}
+	if m.request_body_bytes != nil {
+		fields = append(fields, usagelog.FieldRequestBodyBytes)
 	}
 	if m.client_attestation != nil {
 		fields = append(fields, usagelog.FieldClientAttestation)
@@ -30431,6 +30506,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.UpstreamModel()
 	case usagelog.FieldStopReason:
 		return m.StopReason()
+	case usagelog.FieldRequestBodyBytes:
+		return m.RequestBodyBytes()
 	case usagelog.FieldClientAttestation:
 		return m.ClientAttestation()
 	case usagelog.FieldClientEntrypoint:
@@ -30532,6 +30609,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldUpstreamModel(ctx)
 	case usagelog.FieldStopReason:
 		return m.OldStopReason(ctx)
+	case usagelog.FieldRequestBodyBytes:
+		return m.OldRequestBodyBytes(ctx)
 	case usagelog.FieldClientAttestation:
 		return m.OldClientAttestation(ctx)
 	case usagelog.FieldClientEntrypoint:
@@ -30677,6 +30756,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetStopReason(v)
+		return nil
+	case usagelog.FieldRequestBodyBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestBodyBytes(v)
 		return nil
 	case usagelog.FieldClientAttestation:
 		v, ok := value.(int16)
@@ -30945,6 +31031,9 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 // this mutation.
 func (m *UsageLogMutation) AddedFields() []string {
 	var fields []string
+	if m.addrequest_body_bytes != nil {
+		fields = append(fields, usagelog.FieldRequestBodyBytes)
+	}
 	if m.addclient_attestation != nil {
 		fields = append(fields, usagelog.FieldClientAttestation)
 	}
@@ -31028,6 +31117,8 @@ func (m *UsageLogMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case usagelog.FieldRequestBodyBytes:
+		return m.AddedRequestBodyBytes()
 	case usagelog.FieldClientAttestation:
 		return m.AddedClientAttestation()
 	case usagelog.FieldInputTokens:
@@ -31087,6 +31178,13 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case usagelog.FieldRequestBodyBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRequestBodyBytes(v)
+		return nil
 	case usagelog.FieldClientAttestation:
 		v, ok := value.(int16)
 		if !ok {
@@ -31282,6 +31380,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldStopReason) {
 		fields = append(fields, usagelog.FieldStopReason)
 	}
+	if m.FieldCleared(usagelog.FieldRequestBodyBytes) {
+		fields = append(fields, usagelog.FieldRequestBodyBytes)
+	}
 	if m.FieldCleared(usagelog.FieldClientAttestation) {
 		fields = append(fields, usagelog.FieldClientAttestation)
 	}
@@ -31349,6 +31450,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldStopReason:
 		m.ClearStopReason()
+		return nil
+	case usagelog.FieldRequestBodyBytes:
+		m.ClearRequestBodyBytes()
 		return nil
 	case usagelog.FieldClientAttestation:
 		m.ClearClientAttestation()
@@ -31426,6 +31530,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldStopReason:
 		m.ResetStopReason()
+		return nil
+	case usagelog.FieldRequestBodyBytes:
+		m.ResetRequestBodyBytes()
 		return nil
 	case usagelog.FieldClientAttestation:
 		m.ResetClientAttestation()

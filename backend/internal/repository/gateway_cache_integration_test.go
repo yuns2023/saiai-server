@@ -252,3 +252,38 @@ func (s *GatewayCacheSuite) TestRefreshSessionTTLForAccount() {
 	require.NoError(s.T(), err)
 	require.EqualValues(s.T(), 18, owner)
 }
+
+// Every Lua script that rewrites a turn snapshot decodes and re-encodes it
+// with cjson; the original request size must survive unchanged (and a legacy
+// snapshot without the field must stay without it).
+func (s *GatewayCacheSuite) TestChatGPTTurnSnapshotKeepsRequestBodyBytesThroughLuaRewrites() {
+	cache, ok := s.cache.(service.ChatGPTTurnCache)
+	require.True(s.T(), ok)
+	scope := service.ChatGPTTurnScope{UserID: 7, APIKeyID: 8, GroupID: 9}
+	for _, tc := range []struct {
+		name string
+		size *int64
+	}{
+		{"known", func() *int64 { v := int64(48 << 20); return &v }()},
+		{"zero", func() *int64 { v := int64(0); return &v }()},
+		{"legacy", nil},
+	} {
+		turn := &service.ChatGPTTurnSnapshot{Identity: service.ChatGPTTurnBillingIdentity{RequestID: "body-bytes-" + tc.name, PayloadHash: "digest"},
+			AccountID: 5, BasePriceUSD: 0.03, StartedAt: time.Now(), RequestBodyBytes: tc.size}
+		key := scope.TurnKey(turn.Identity)
+		_, err := cache.PutChatGPTTurnIfAbsent(s.ctx, key, turn, time.Minute)
+		require.NoError(s.T(), err, tc.name)
+		_, err = cache.MergeChatGPTTurnImages(s.ctx, key, service.ChatGPTImageEvidence{GenerationSeen: true})
+		require.NoError(s.T(), err, tc.name)
+		_, err = cache.SetChatGPTTurnAsyncStatus(s.ctx, key, 1)
+		require.NoError(s.T(), err, tc.name)
+		require.NoError(s.T(), cache.MarkChatGPTTurnTerminal(s.ctx, key), tc.name)
+		sealed, err := cache.SealChatGPTTurnBilling(s.ctx, key)
+		require.NoError(s.T(), err, tc.name)
+		require.Equal(s.T(), tc.size, sealed.RequestBodyBytes, tc.name)
+		require.NoError(s.T(), cache.CompleteChatGPTTurn(s.ctx, key), tc.name)
+		got, err := cache.GetChatGPTTurn(s.ctx, key)
+		require.NoError(s.T(), err, tc.name)
+		require.Equal(s.T(), tc.size, got.RequestBodyBytes, tc.name)
+	}
+}

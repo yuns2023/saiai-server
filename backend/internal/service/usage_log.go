@@ -114,6 +114,11 @@ type UsageLog struct {
 	// StopReason is the sanitized Anthropic-native upstream stop_reason.
 	// Nil means not reported, not applicable (non-Anthropic platforms) or invalid.
 	StopReason *string
+	// RequestBodyBytes is the inbound client request payload size as received
+	// (HTTP body bytes before decompression/normalization; for Responses
+	// WebSocket the turn's response.create message). Admin diagnostics only;
+	// never used for billing. Nil means unknown; 0 means a genuinely empty body.
+	RequestBodyBytes *int64
 	// ClientAttestation is the SAIAI client proof status (clientproof.Status).
 	// Nil means not collected: the final group's policy is off.
 	ClientAttestation *int16
@@ -325,4 +330,20 @@ type UsageModerationEvent struct {
 	EventID        int64  `json:"event_id,omitempty"`
 	EvidenceCount  int    `json:"evidence_count,omitempty"`
 	EvidenceStatus string `json:"evidence_status,omitempty"`
+}
+
+// RequestBodyBytesOf freezes the inbound payload size of a body that was just
+// read from the client. Callers must invoke it before any decompression,
+// normalization or rewrite and pass the scalar along instead of re-measuring.
+func RequestBodyBytesOf(body []byte) *int64 {
+	size := int64(len(body))
+	return &size
+}
+
+func cloneInt64Ptr(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
 }

@@ -77,6 +77,8 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string, nativeCod
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
+	// Freeze the inbound wire payload size (multipart or compressed JSON as received).
+	requestBodyBytes := service.RequestBodyBytesOf(body)
 	metadataBody, metadataEndpoint := body, endpoint
 	if nativeCodex {
 		// Both native Codex generation and edit requests are JSON. Decode only
@@ -199,6 +201,7 @@ func (h *OpenAIGatewayHandler) images(c *gin.Context, endpoint string, nativeCod
 				Result:            result, APIKey: apiKey, User: apiKey.User, Account: account, Subscription: subscription,
 				InboundEndpoint: inboundEndpoint, UpstreamEndpoint: upstreamEndpoint,
 				UserAgent: userAgent, IPAddress: clientIP, RequestPayloadHash: payloadHash, APIKeyService: h.apiKeyService,
+				RequestBodyBytes: requestBodyBytes,
 			}); err != nil {
 				logger.L().Warn("openai.image_usage_record_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}

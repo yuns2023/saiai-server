@@ -106,6 +106,20 @@ func (_c *UsageLogCreate) SetNillableStopReason(v *string) *UsageLogCreate {
 	return _c
 }
 
+// SetRequestBodyBytes sets the "request_body_bytes" field.
+func (_c *UsageLogCreate) SetRequestBodyBytes(v int64) *UsageLogCreate {
+	_c.mutation.SetRequestBodyBytes(v)
+	return _c
+}
+
+// SetNillableRequestBodyBytes sets the "request_body_bytes" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableRequestBodyBytes(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetRequestBodyBytes(*v)
+	}
+	return _c
+}
+
 // SetClientAttestation sets the "client_attestation" field.
 func (_c *UsageLogCreate) SetClientAttestation(v int16) *UsageLogCreate {
 	_c.mutation.SetClientAttestation(v)
@@ -945,6 +959,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldStopReason, field.TypeString, value)
 		_node.StopReason = &value
 	}
+	if value, ok := _c.mutation.RequestBodyBytes(); ok {
+		_spec.SetField(usagelog.FieldRequestBodyBytes, field.TypeInt64, value)
+		_node.RequestBodyBytes = &value
+	}
 	if value, ok := _c.mutation.ClientAttestation(); ok {
 		_spec.SetField(usagelog.FieldClientAttestation, field.TypeInt16, value)
 		_node.ClientAttestation = &value
@@ -1351,6 +1369,30 @@ func (u *UsageLogUpsert) UpdateStopReason() *UsageLogUpsert {
 // ClearStopReason clears the value of the "stop_reason" field.
 func (u *UsageLogUpsert) ClearStopReason() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldStopReason)
+	return u
+}
+
+// SetRequestBodyBytes sets the "request_body_bytes" field.
+func (u *UsageLogUpsert) SetRequestBodyBytes(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldRequestBodyBytes, v)
+	return u
+}
+
+// UpdateRequestBodyBytes sets the "request_body_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateRequestBodyBytes() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldRequestBodyBytes)
+	return u
+}
+
+// AddRequestBodyBytes adds v to the "request_body_bytes" field.
+func (u *UsageLogUpsert) AddRequestBodyBytes(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldRequestBodyBytes, v)
+	return u
+}
+
+// ClearRequestBodyBytes clears the value of the "request_body_bytes" field.
+func (u *UsageLogUpsert) ClearRequestBodyBytes() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldRequestBodyBytes)
 	return u
 }
 
@@ -2216,6 +2258,34 @@ func (u *UsageLogUpsertOne) UpdateStopReason() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearStopReason() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearStopReason()
+	})
+}
+
+// SetRequestBodyBytes sets the "request_body_bytes" field.
+func (u *UsageLogUpsertOne) SetRequestBodyBytes(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestBodyBytes(v)
+	})
+}
+
+// AddRequestBodyBytes adds v to the "request_body_bytes" field.
+func (u *UsageLogUpsertOne) AddRequestBodyBytes(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRequestBodyBytes(v)
+	})
+}
+
+// UpdateRequestBodyBytes sets the "request_body_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateRequestBodyBytes() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestBodyBytes()
+	})
+}
+
+// ClearRequestBodyBytes clears the value of the "request_body_bytes" field.
+func (u *UsageLogUpsertOne) ClearRequestBodyBytes() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRequestBodyBytes()
 	})
 }
 
@@ -3358,6 +3428,34 @@ func (u *UsageLogUpsertBulk) UpdateStopReason() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearStopReason() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearStopReason()
+	})
+}
+
+// SetRequestBodyBytes sets the "request_body_bytes" field.
+func (u *UsageLogUpsertBulk) SetRequestBodyBytes(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestBodyBytes(v)
+	})
+}
+
+// AddRequestBodyBytes adds v to the "request_body_bytes" field.
+func (u *UsageLogUpsertBulk) AddRequestBodyBytes(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRequestBodyBytes(v)
+	})
+}
+
+// UpdateRequestBodyBytes sets the "request_body_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateRequestBodyBytes() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestBodyBytes()
+	})
+}
+
+// ClearRequestBodyBytes clears the value of the "request_body_bytes" field.
+func (u *UsageLogUpsertBulk) ClearRequestBodyBytes() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRequestBodyBytes()
 	})
 }
 

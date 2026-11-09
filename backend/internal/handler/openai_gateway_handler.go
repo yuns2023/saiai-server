@@ -124,6 +124,9 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 		}})
 		return
 	}
+	// Freeze the original POST size before the timezone rewrite. Only a model
+	// request stores it (in the turn snapshot); resume bodies are never used.
+	requestBodyBytes := service.RequestBodyBytesOf(body)
 	if body, ok = h.rewriteChatGPTTimezone(c, apiKey.Group, body); !ok {
 		return
 	}
@@ -494,7 +497,8 @@ func (h *OpenAIGatewayHandler) ChatGPTConversation(c *gin.Context) {
 			UserMessageHash:        service.ChatGPTUserMessageHash(body),
 			BillingSnapshotVersion: 1, SubscriptionID: subscriptionID,
 			RequestedModel: model, ThinkingEffort: thinkingEffort, StartedAt: requestStart,
-			AsyncPending: h.cfg.Gateway.OpenAIChatUpdatesEnabled,
+			AsyncPending:     h.cfg.Gateway.OpenAIChatUpdatesEnabled,
+			RequestBodyBytes: requestBodyBytes,
 		}, service.ChatGPTTurnContextTTL)
 		if err != nil || turn == nil || turn.RequestedModel != model || turn.ThinkingEffort != thinkingEffort {
 			releaseChatGPTControlSelection(selection)
@@ -956,6 +960,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
+	// Freeze the inbound wire payload size before decompression / compact normalization.
+	requestBodyBytes := service.RequestBodyBytesOf(body)
 
 	if len(body) == 0 {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
@@ -1346,6 +1352,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				RequestPayloadHash: requestPayloadHash,
+				RequestBodyBytes:   requestBodyBytes,
 				APIKeyService:      h.apiKeyService,
 			}); err != nil {
 				logger.L().With(
@@ -1930,6 +1937,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	originalFirstMessage := append([]byte(nil), firstMessage...)
+	// Turn 1's client size: the original first Read, never a migrated frame.
+	firstTurnRequestBodyBytes := service.RequestBodyBytesOf(originalFirstMessage)
 
 	reqModel := strings.TrimSpace(gjson.GetBytes(firstMessage, "model").String())
 	setOpsRequestContext(c, reqModel, true, firstMessage)
@@ -2243,6 +2252,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					UserAgent:          userAgent,
 					IPAddress:          clientIP,
 					RequestPayloadHash: requestPayloadHash,
+					RequestBodyBytes:   result.RequestBodyBytes,
 					APIKeyService:      h.apiKeyService,
 				}); err != nil {
 					reqLog.Error("openai.websocket_record_usage_failed",
@@ -2344,6 +2354,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			)
 			return &service.OpenAIWSFailoverTarget{Account: nextAccount, Token: nextToken}, nil
 		},
+		FirstTurnRequestBodyBytes: firstTurnRequestBodyBytes,
 	}
 
 	if err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, msgType, firstMessage, hooks); err != nil {

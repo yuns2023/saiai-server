@@ -95,6 +95,11 @@ func StopReason(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldStopReason, v))
 }
 
+// RequestBodyBytes applies equality check predicate on the "request_body_bytes" field. It's identical to RequestBodyBytesEQ.
+func RequestBodyBytes(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRequestBodyBytes, v))
+}
+
 // ClientAttestation applies equality check predicate on the "client_attestation" field. It's identical to ClientAttestationEQ.
 func ClientAttestation(v int16) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldClientAttestation, v))
@@ -688,6 +693,56 @@ func StopReasonEqualFold(v string) predicate.UsageLog {
 // StopReasonContainsFold applies the ContainsFold predicate on the "stop_reason" field.
 func StopReasonContainsFold(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldContainsFold(FieldStopReason, v))
+}
+
+// RequestBodyBytesEQ applies the EQ predicate on the "request_body_bytes" field.
+func RequestBodyBytesEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRequestBodyBytes, v))
+}
+
+// RequestBodyBytesNEQ applies the NEQ predicate on the "request_body_bytes" field.
+func RequestBodyBytesNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldRequestBodyBytes, v))
+}
+
+// RequestBodyBytesIn applies the In predicate on the "request_body_bytes" field.
+func RequestBodyBytesIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldRequestBodyBytes, vs...))
+}
+
+// RequestBodyBytesNotIn applies the NotIn predicate on the "request_body_bytes" field.
+func RequestBodyBytesNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldRequestBodyBytes, vs...))
+}
+
+// RequestBodyBytesGT applies the GT predicate on the "request_body_bytes" field.
+func RequestBodyBytesGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldRequestBodyBytes, v))
+}
+
+// RequestBodyBytesGTE applies the GTE predicate on the "request_body_bytes" field.
+func RequestBodyBytesGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldRequestBodyBytes, v))
+}
+
+// RequestBodyBytesLT applies the LT predicate on the "request_body_bytes" field.
+func RequestBodyBytesLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldRequestBodyBytes, v))
+}
+
+// RequestBodyBytesLTE applies the LTE predicate on the "request_body_bytes" field.
+func RequestBodyBytesLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldRequestBodyBytes, v))
+}
+
+// RequestBodyBytesIsNil applies the IsNil predicate on the "request_body_bytes" field.
+func RequestBodyBytesIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldRequestBodyBytes))
+}
+
+// RequestBodyBytesNotNil applies the NotNil predicate on the "request_body_bytes" field.
+func RequestBodyBytesNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldRequestBodyBytes))
 }
 
 // ClientAttestationEQ applies the EQ predicate on the "client_attestation" field.

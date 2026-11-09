@@ -41,6 +41,9 @@ type CreateUsageLogRequest struct {
 	RateMultiplier        float64 `json:"rate_multiplier"`
 	Stream                bool    `json:"stream"`
 	DurationMs            *int    `json:"duration_ms"`
+	// RequestBodyBytes is passed through only when the caller measured the
+	// inbound payload itself; nil stores NULL (unknown).
+	RequestBodyBytes *int64 `json:"request_body_bytes,omitempty"`
 }
 
 // UsageStats 使用统计
@@ -136,6 +139,7 @@ func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*
 		RateMultiplier:        req.RateMultiplier,
 		Stream:                req.Stream,
 		DurationMs:            req.DurationMs,
+		RequestBodyBytes:      cloneInt64Ptr(req.RequestBodyBytes),
 	}
 
 	inserted, err := s.usageRepo.Create(txCtx, usageLog)

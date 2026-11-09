@@ -312,11 +312,15 @@ type OpenAIForwardResult struct {
 	// RequestPayloadHash identifies the exact request payload associated with this result.
 	// WebSocket transports populate it per turn so usage records do not reuse the first frame's hash.
 	RequestPayloadHash string
-	Stream             bool
-	OpenAIWSMode       bool
-	ResponseHeaders    http.Header
-	Duration           time.Duration
-	FirstTokenMs       *int
+	// RequestBodyBytes is the size of the client application message for this
+	// logical turn (WebSocket: the reassembled response.create message, before
+	// any gateway transform). Nil when unknown; never a connection-level value.
+	RequestBodyBytes *int64
+	Stream           bool
+	OpenAIWSMode     bool
+	ResponseHeaders  http.Header
+	Duration         time.Duration
+	FirstTokenMs     *int
 	// Image API accounting metadata. Zero values keep Responses API behavior unchanged.
 	TextInputTokens   int
 	ImageInputTokens  int
@@ -4384,7 +4388,10 @@ type OpenAIRecordUsageInput struct {
 	UserAgent          string // 请求的 User-Agent
 	IPAddress          string // 请求的客户端 IP 地址
 	RequestPayloadHash string
-	APIKeyService      APIKeyQuotaUpdater
+	// RequestBodyBytes is the inbound client payload size frozen when the
+	// request (or WebSocket turn) was read. Admin diagnostics only; nil = unknown.
+	RequestBodyBytes *int64
+	APIKeyService    APIKeyQuotaUpdater
 	// ClientAttestation is the request-level SAIAI client proof status. It is
 	// persisted only when the final key's group collects attestation.
 	ClientAttestation *int16
@@ -4413,9 +4420,12 @@ type OpenAIChatGPTTurnUsageInput struct {
 	UserAgent           string
 	IPAddress           string
 	RequestPayloadHash  string
-	Duration            time.Duration
-	APIKeyService       APIKeyQuotaUpdater
-	ClientAttestation   *int16
+	// RequestBodyBytes is the original conversation POST size stored in the
+	// turn snapshot. Resume/poll requests never supply it. nil = unknown.
+	RequestBodyBytes  *int64
+	Duration          time.Duration
+	APIKeyService     APIKeyQuotaUpdater
+	ClientAttestation *int16
 }
 
 // IsValidOpenAIChatGPTTurnPrice reports whether a configured fixed price is
@@ -4511,6 +4521,7 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		// Native Chat settles asynchronously; the status is from the request
 		// that triggered settlement.
 		ClientAttestation: ClientAttestationForUsage(input.ClientAttestation, apiKey),
+		RequestBodyBytes:  cloneInt64Ptr(input.RequestBodyBytes),
 		InputTokens:       0,
 		OutputTokens:      0,
 		// Native Chat uses these existing cost components for the text turn
@@ -4685,6 +4696,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	meteredCost := applyHostedUsage(apiKey.Group, cost, &accountRateMultiplier)
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
 	usageLog := &UsageLog{
+		RequestBodyBytes:           cloneInt64Ptr(input.RequestBodyBytes),
 		ModerationRef:              input.ModerationRef,
 		UserID:                     user.ID,
 		APIKeyID:                   apiKey.ID,
