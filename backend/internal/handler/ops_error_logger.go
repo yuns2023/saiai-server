@@ -1041,7 +1041,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 			ErrorPhase:        phase,
 			ErrorType:         normalizedType,
-			Severity:          classifyOpsSeverity(normalizedType, status),
+			Severity:          classifyOpsBusinessAwareSeverity(normalizedType, status, isBusinessLimited),
 			StatusCode:        status,
 			IsBusinessLimited: isBusinessLimited,
 			IsCountTokens:     isCountTokensRequest(c),
@@ -1532,6 +1532,16 @@ func classifyOpsPhase(errType, message, code string) string {
 	default:
 		return "internal"
 	}
+}
+
+// classifyOpsBusinessAwareSeverity keeps user-level business limits (quota,
+// balance, subscription, user concurrency) at P3: they are excluded from the
+// SLA and are not service faults, whatever their status (often 429).
+func classifyOpsBusinessAwareSeverity(errType string, status int, businessLimited bool) string {
+	if businessLimited {
+		return "P3"
+	}
+	return classifyOpsSeverity(errType, status)
 }
 
 func classifyOpsSeverity(errType string, status int) string {

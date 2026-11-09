@@ -677,10 +677,10 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	if isSubscriptionMode {
 		if apiKey != nil && apiKey.SmartSwitchOriginalGroupID != nil {
 			if err := s.checkSmartSwitchSubscription(ctx, user.ID, group, subscription); err != nil {
-				return err
+				return withSubscriptionLimitDetail(err, subscription, group)
 			}
 		} else if err := s.checkSubscriptionEligibility(ctx, user.ID, group, subscription); err != nil {
-			return err
+			return withSubscriptionLimitDetail(err, subscription, group)
 		}
 	} else if !group.UsesHostedUsage() {
 		if err := s.checkBalanceEligibility(ctx, user.ID); err != nil {

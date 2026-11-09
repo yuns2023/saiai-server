@@ -262,7 +262,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 						code = "USAGE_LIMIT_EXCEEDED"
 						status = 429
 					}
-					AbortWithError(c, status, code, validateErr.Error())
+					AbortWithError(c, status, code, service.SubscriptionErrorMessage(validateErr))
 					return
 				}
 

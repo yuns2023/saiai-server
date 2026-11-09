@@ -148,7 +148,12 @@ func abortSmartSwitchExhausted(c *gin.Context, exhausted *service.SmartSwitchExh
 	case exhausted.Has("subscription_limit_or_expiry"):
 		// Matches the non-switching subscription limit. This legacy reason also
 		// covers an expired or suspended subscription.
-		AbortWithError(c, 429, "USAGE_LIMIT_EXCEEDED", smartSwitchLimitedMessage+reasons)
+		// Say which limit blocks and when it resets, so the user knows to wait.
+		details := ""
+		if len(exhausted.LimitDetails) > 0 {
+			details = ": " + strings.Join(exhausted.LimitDetails, "; ")
+		}
+		AbortWithError(c, 429, "USAGE_LIMIT_EXCEEDED", smartSwitchLimitedMessage+reasons+details)
 	default:
 		// The Key budget or a missing/expired subscription does not recover by retrying.
 		AbortWithError(c, 403, "USAGE_LIMIT_EXCEEDED", smartSwitchLimitedMessage+reasons)

@@ -2718,6 +2718,10 @@ func billingErrorDetails(err error) (status int, code, message string) {
 		msg := pkgerrors.Message(err)
 		return http.StatusTooManyRequests, "rate_limit_exceeded", msg
 	}
+	var limitErr *service.SubscriptionLimitError
+	if errors.As(err, &limitErr) {
+		return http.StatusForbidden, "billing_error", limitErr.Message()
+	}
 	msg := pkgerrors.Message(err)
 	if msg == "" {
 		logger.L().With(

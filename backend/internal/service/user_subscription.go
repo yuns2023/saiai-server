@@ -144,17 +144,20 @@ func (s *UserSubscription) CheckMonthlyLimit(group *Group, additionalCost float6
 // admission accepts usage equal to a limit; smart switching treats that window
 // as exhausted so it moves on instead of sending a request that can only overrun.
 func (s *UserSubscription) ExhaustedLimitError(group *Group) error {
+	var err error
 	switch {
 	case group.HasFiveHourLimit() && s.FiveHourUsageUSD >= *group.FiveHourLimitUSD:
-		return ErrFiveHourLimitExceeded
+		err = ErrFiveHourLimitExceeded
 	case group.HasDailyLimit() && s.DailyUsageUSD >= *group.DailyLimitUSD:
-		return ErrDailyLimitExceeded
+		err = ErrDailyLimitExceeded
 	case group.HasWeeklyLimit() && s.WeeklyUsageUSD >= *group.WeeklyLimitUSD:
-		return ErrWeeklyLimitExceeded
+		err = ErrWeeklyLimitExceeded
 	case group.HasMonthlyLimit() && s.MonthlyUsageUSD >= *group.MonthlyLimitUSD:
-		return ErrMonthlyLimitExceeded
+		err = ErrMonthlyLimitExceeded
+	default:
+		return nil
 	}
-	return nil
+	return withSubscriptionLimitDetail(err, s, group)
 }
 
 func (s *UserSubscription) CheckAllLimits(group *Group, additionalCost float64) (fiveHour, daily, weekly, monthly bool) {
