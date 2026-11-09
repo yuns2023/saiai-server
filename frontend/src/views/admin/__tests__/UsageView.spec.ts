@@ -502,6 +502,45 @@ describe('admin UsageView distribution metric toggles', () => {
     wrapper.unmount()
   })
 
+  it('exports exact request body bytes: empty for unknown, 0 kept as 0', async () => {
+    exportList.mockReset()
+    saveAs.mockReset()
+    const row = (id: string, bytes: number | null | undefined) => ({ request_id: id, created_at: '2026-11-09T00:00:00Z', model: 'm',
+      input_tokens: 1, output_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, total_cost: 0, actual_cost: 0, duration_ms: 1,
+      billing_type: 0, request_body_bytes: bytes })
+    exportList.mockResolvedValue({ items: [row('r-big', 50331648), row('r-zero', 0), row('r-null', null), row('r-old', undefined)], total: 4, pages: 1 })
+    const wrapper = mount(UsageView, { global: { stubs: {
+      AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: PlatformFiltersStub, UsageTable: true,
+      InputRiskAlerts: true, UsageExportProgress: true, UsageCleanupDialog: true,
+      UserBalanceHistoryModal: true, Pagination: true, Select: true, DateTimeRangePicker: true,
+      Icon: true, TokenUsageTrend: true, CacheUsageTrend: true,
+      ModelDistributionChart: ModelDistributionChartStub, GroupDistributionChart: GroupDistributionChartStub,
+      EndpointDistributionChart: EndpointDistributionChartStub,
+    } } })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    await wrapper.find('[data-test="filter-export"]').trigger('click')
+    await flushPromises()
+    expect(saveAs).toHaveBeenCalledTimes(1)
+    const blob = saveAs.mock.calls[0][0] as Blob
+    // FileReader completes on a real timer.
+    vi.useRealTimers()
+    const text = await new Promise<string>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.readAsText(blob)
+    })
+    vi.useFakeTimers()
+    const lines = text.replace(/^\uFEFF/, '').trim().split('\r\n')
+    // Fixture cells contain no commas; every cell is quoted.
+    const cells = (line: string) => line.split(',').map((cell) => cell.replace(/^"(.*)"$/, '$1'))
+    const column = cells(lines[0]).indexOf('admin.usage.requestBodyBytesCsv')
+    expect(column).toBeGreaterThan(-1)
+    const values = lines.slice(1).map((line) => cells(line)[column])
+    expect(values).toEqual(['50331648', '0', '', ''])
+    wrapper.unmount()
+  })
+
   it.each([
     ['openai', 'openai'],
     [' Anthropic ', 'anthropic'],

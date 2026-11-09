@@ -355,6 +355,23 @@ describe('admin UsageTable tooltip', () => {
   })
 
   it.each([
+    [null, '-'],
+    [undefined, '-'],
+    [0, '0 B'],
+    [1536, '1.5 KiB'],
+    [48 * 1024 * 1024, '48.0 MiB'],
+  ] as const)('request body size %s renders %s', (bytes, expected) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ request_id: 'TEST_ONLY_BODY_BYTES', request_body_bytes: bytes }], loading: false, columns: [] },
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><slot name="cell-request_body_bytes" :row="data[0]" /></div>' } } },
+    })
+    const cell = wrapper.get('[data-testid=usage-request-body-bytes]')
+    expect(cell.text()).toBe(expected)
+    if (bytes != null) expect(cell.attributes('title')).toBe(`${bytes} B`)
+    wrapper.unmount()
+  })
+
+  it.each([
     [null, null],
     [1, null],
     [2, 'admin.users.clientProof.status.missing'],

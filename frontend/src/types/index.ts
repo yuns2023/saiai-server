@@ -1320,6 +1320,9 @@ export interface AdminUsageLog extends UsageLog {
   // 上游 Anthropic 原生 stop_reason（仅管理员可见；null 表示未记录/不适用）
   stop_reason?: string | null
 
+  // 客户端入站请求体字节数（仅管理员可见；null 表示未知/旧记录，0 表示空请求体）
+  request_body_bytes?: number | null
+
   // SAIAI 客户端校验状态码（1 通过 … 8 未校验；null 表示未采集；仅管理员可见）
   client_attestation?: number | null
 
@@ -1535,7 +1538,19 @@ export interface UserUsageTrendPoint {
   actual_cost: number // 实际扣除
 }
 
-export interface UserSpendingRankingItem {
+// Ranking order: default standard cost, or total inbound request body bytes.
+export type SpendingRankingSort = 'cost' | 'request_body_bytes'
+
+// Inbound request size aggregates of a ranking row. Rows without a recorded
+// size are excluded: total 0, avg/max null when nothing is known.
+export interface RequestBodySizeStats {
+  request_body_bytes_total?: number
+  request_body_bytes_avg?: number | null
+  request_body_bytes_max?: number | null
+  request_body_bytes_known_count?: number
+}
+
+export interface UserSpendingRankingItem extends RequestBodySizeStats {
   user_id: number
   email: string
   cost: number // 标准计费（排序依据；托管行即参考用量）
@@ -1555,7 +1570,7 @@ export interface UserSpendingRankingResponse {
   end_date: string
 }
 
-export interface APIKeySpendingRankingItem {
+export interface APIKeySpendingRankingItem extends RequestBodySizeStats {
   api_key_id: number
   key_name: string
   user_id: number

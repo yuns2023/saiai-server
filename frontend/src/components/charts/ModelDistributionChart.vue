@@ -67,6 +67,26 @@
             {{ accountCostBasis ? t('admin.dashboard.metricAccountCost') : t('admin.dashboard.metricActualCost') }}
           </button>
         </div>
+        <div
+          v-if="enableRankingView && activeView === 'spending_ranking'"
+          class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-700 dark:bg-dark-800"
+          data-testid="ranking-sort"
+        >
+          <button
+            v-for="option in rankingSortOptions"
+            :key="option.value"
+            type="button"
+            class="rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
+            :class="rankingSort === option.value
+              ? 'bg-white text-gray-900 shadow-xs dark:bg-dark-700 dark:text-white'
+              : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
+            :aria-pressed="rankingSort === option.value"
+            :data-testid="`ranking-sort-${option.value}`"
+            @click="emit('update:rankingSort', option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
         <div v-if="enableRankingView" class="inline-flex rounded-lg bg-gray-100 p-1 dark:bg-dark-800">
           <button
             type="button"
@@ -192,6 +212,7 @@
               <th class="pb-2 text-right">{{ t('admin.dashboard.spendingRankingTokens') }}</th>
               <th class="pb-2 text-right" :title="t('admin.dashboard.rankingBasisHint')">{{ t('admin.dashboard.standard') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.rankingActualShort') }}</th>
+              <th class="pb-2 text-right" :title="t('admin.dashboard.rankingBodySizeHint')">{{ t('admin.dashboard.rankingBodySize') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -237,6 +258,13 @@
               <td class="py-1.5 text-right text-green-600 dark:text-green-400">
                 ${{ formatCost(item.actual_cost) }}
               </td>
+              <td
+                class="whitespace-nowrap py-1.5 text-right text-gray-600 dark:text-gray-400"
+                :title="!item.isOther && item.request_body_bytes_known_count ? t('admin.dashboard.rankingBodySizeDetail', requestBodySizeDetailParams(item)) : undefined"
+                data-testid="ranking-body-size"
+              >
+                {{ !item.isOther && item.request_body_bytes_known_count ? formatRequestBodyBytes(item.request_body_bytes_total) : '-' }}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -262,10 +290,11 @@ import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
-import type { ModelStat, UserSpendingRankingItem, UserBreakdownItem } from '@/types'
+import type { ModelStat, SpendingRankingSort, UserSpendingRankingItem, UserBreakdownItem } from '@/types'
 import type { UserBreakdownParams } from '@/api/admin/dashboard'
 import { getUserBreakdown } from '@/api/admin/dashboard'
 import { distributionChartColors, stableChartColor } from '@/utils/chartColors'
+import { formatRequestBodyBytes, requestBodySizeDetailParams } from '@/utils/requestBodyBytes'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
@@ -285,6 +314,8 @@ const props = withDefaults(defineProps<{
   rankingTotalActualCost?: number
   rankingTotalRequests?: number
   rankingTotalTokens?: number
+  /** Ranking order; the parent reloads the ranking when it changes. */
+  rankingSort?: SpendingRankingSort
   loading?: boolean
   metric?: DistributionMetric
   showSourceToggle?: boolean
@@ -308,6 +339,7 @@ const props = withDefaults(defineProps<{
   rankingTotalActualCost: 0,
   rankingTotalRequests: 0,
   rankingTotalTokens: 0,
+  rankingSort: 'cost',
   loading: false,
   metric: 'tokens',
   showSourceToggle: false,
@@ -361,7 +393,14 @@ const emit = defineEmits<{
   'update:metric': [value: DistributionMetric]
   'update:source': [value: ModelSource]
   'ranking-click': [item: UserSpendingRankingItem]
+  'update:rankingSort': [value: SpendingRankingSort]
 }>()
+
+const rankingSortOptions = computed<{ value: SpendingRankingSort; label: string }[]>(() => [
+  { value: 'cost', label: t('admin.dashboard.rankingSortCost') },
+  { value: 'request_body_bytes', label: t('admin.dashboard.rankingSortBodySize') }
+])
+const rankingBySize = computed(() => props.rankingSort === 'request_body_bytes')
 
 const enableRankingView = computed(() => props.enableRankingView)
 const activeView = ref<'model_distribution' | 'spending_ranking'>('model_distribution')
@@ -399,10 +438,12 @@ const rankingChartData = computed(() => {
   if (!props.rankingItems?.length) return null
 
   const labels = props.rankingItems.map((item, index) => `#${index + 1} ${getRankingUserLabel(item)}`)
-  const data = props.rankingItems.map((item) => item.cost)
+  // Sorted by request size, the slices show each user's total request bytes;
+  // there is no scope total for sizes, so no "others" slice.
+  const data = props.rankingItems.map((item) => rankingBySize.value ? (item.request_body_bytes_total ?? 0) : item.cost)
   const backgroundColor = chartColors.slice(0, props.rankingItems.length)
 
-  if (otherRankingItem.value) {
+  if (otherRankingItem.value && !rankingBySize.value) {
     labels.push(t('admin.dashboard.spendingRankingOther'))
     data.push(otherRankingItem.value.cost)
     backgroundColor.push('#94a3b8')
@@ -490,7 +531,8 @@ const rankingDoughnutOptions = computed(() => ({
           const value = context.raw as number
           const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0)
           const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0'
-          return `${context.label}: $${formatCost(value)} (${percentage}%)`
+          const formatted = rankingBySize.value ? formatRequestBodyBytes(value) : `$${formatCost(value)}`
+          return `${context.label}: ${formatted} (${percentage}%)`
         }
       }
     }

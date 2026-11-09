@@ -285,6 +285,7 @@
               :ranking-total-actual-cost="rankingTotalActualCost"
               :ranking-total-requests="rankingTotalRequests"
               :ranking-total-tokens="rankingTotalTokens"
+              :ranking-sort="rankingSort"
               :loading="chartsLoading"
               :ranking-loading="rankingLoading"
               :ranking-error="rankingError"
@@ -294,6 +295,7 @@
               :end-time="activeRangePreset === 'last24Hours' ? rollingEndTime : undefined"
               :breakdown-filters="platformBreakdownFilters"
               @ranking-click="goToUserUsage"
+              @update:ranking-sort="changeRankingSort"
             />
             <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
           <CacheUsageTrend class="lg:col-span-2" :trend-data="trendData" :loading="chartsLoading" />
@@ -346,7 +348,8 @@ import type {
   TrendDataPoint,
   ModelStat,
   UserUsageTrendPoint,
-  UserSpendingRankingItem
+  UserSpendingRankingItem,
+  SpendingRankingSort
 } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -409,6 +412,7 @@ let chartLoadSeq = 0
 let usersTrendLoadSeq = 0
 let rankingLoadSeq = 0
 const rankingLimit = 12
+const rankingSort = ref<SpendingRankingSort>('cost')
 
 // Helper function to format date in local timezone
 const formatLocalDate = (date: Date): string => {
@@ -725,6 +729,12 @@ const loadUsersTrend = async () => {
   }
 }
 
+const changeRankingSort = (sort: SpendingRankingSort) => {
+  if (rankingSort.value === sort) return
+  rankingSort.value = sort
+  void loadUserSpendingRanking()
+}
+
 const loadUserSpendingRanking = async () => {
   const currentSeq = ++rankingLoadSeq
   rankingLoading.value = true
@@ -732,7 +742,8 @@ const loadUserSpendingRanking = async () => {
   try {
     const response = await adminAPI.dashboard.getUserSpendingRanking({
       ...activeRangeParams(),
-      limit: rankingLimit
+      limit: rankingLimit,
+      sort: rankingSort.value === 'cost' ? undefined : rankingSort.value
     })
     if (currentSeq !== rankingLoadSeq) return
     rankingItems.value = response.ranking || []

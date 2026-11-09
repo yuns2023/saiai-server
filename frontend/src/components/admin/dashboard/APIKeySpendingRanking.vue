@@ -8,10 +8,26 @@
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
           <UserIdentityTooltip v-if="selectedUser" :user-id="selectedUser.id"><span>{{ selectedUser.email || `#${selectedUser.id}` }}</span></UserIdentityTooltip>
           <template v-else>{{ t('admin.dashboard.keyRankingGlobal') }}</template>
-          · {{ t('admin.dashboard.keyRankingBasis') }}
+          · {{ sort === 'cost' ? t('admin.dashboard.keyRankingBasis') : t('admin.dashboard.rankingSortBodySize') }}
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
+        <div class="inline-flex rounded-lg bg-gray-100 p-1 dark:bg-dark-800" role="group" data-testid="key-ranking-sort">
+          <button
+            v-for="option in sortOptions"
+            :key="option.value"
+            type="button"
+            class="rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
+            :class="sort === option.value
+              ? 'bg-white text-gray-900 shadow-xs dark:bg-dark-700 dark:text-white'
+              : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
+            :aria-pressed="sort === option.value"
+            :data-testid="`key-ranking-sort-${option.value}`"
+            @click="sort = option.value"
+          >
+            {{ option.label }}
+          </button>
+        </div>
         <button v-if="selectedUser" type="button" class="btn btn-secondary btn-sm" @click="selectUser(null)">
           {{ t('admin.dashboard.keyRankingGlobal') }}
         </button>
@@ -76,7 +92,7 @@
         · {{ formatTokenCount(ranking.total_tokens) }} Token
       </p>
       <div class="overflow-x-auto">
-        <table class="w-full min-w-[880px] text-sm">
+        <table class="w-full min-w-[980px] text-sm">
           <thead class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
             <tr>
               <th scope="col" class="pb-2 pr-3 text-left">Key</th>
@@ -88,6 +104,9 @@
               <th scope="col" class="pb-2 pr-3 text-right">Token</th>
               <th scope="col" class="whitespace-nowrap pb-2 pr-3 text-right" :title="t('tokens.cacheReadRateHelp')">
                 {{ t('tokens.cacheReadRate') }}
+              </th>
+              <th scope="col" class="whitespace-nowrap pb-2 pr-3 text-right" :title="t('admin.dashboard.rankingBodySizeHint')">
+                {{ t('admin.dashboard.rankingBodySize') }}
               </th>
               <th scope="col" class="pb-2 text-right">{{ t('admin.dashboard.spendingRankingUsage') }}</th>
             </tr>
@@ -133,6 +152,13 @@
               <td class="py-3 pr-3 text-right tabular-nums" :title="tokenBreakdown(item)">
                 {{ formatCacheReadRate(cacheReadRate(item)) }}
               </td>
+              <td class="whitespace-nowrap py-3 pr-3 text-right tabular-nums" data-testid="key-ranking-body-size">
+                <span v-if="item.request_body_bytes_known_count" :title="t('admin.dashboard.rankingBodySizeDetail', requestBodySizeDetailParams(item))">
+                  {{ formatRequestBodyBytes(item.request_body_bytes_total) }}
+                  <span class="block text-xs text-gray-400">{{ t('admin.dashboard.rankingBodySizeDetail', requestBodySizeDetailParams(item)) }}</span>
+                </span>
+                <span v-else class="text-gray-400">-</span>
+              </td>
               <td class="py-3 text-right">
                 <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" @click="goToUsage(item)">
                   {{ t('admin.dashboard.keyRankingDetails') }}
@@ -149,15 +175,16 @@
 
 <script setup lang="ts">
 import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { getAPIKeySpendingRanking } from '@/api/admin/dashboard'
 import { searchUsers as findUsers, type SimpleUser } from '@/api/admin/usage'
-import type { APIKeySpendingRankingItem, APIKeySpendingRankingResponse } from '@/types'
+import type { APIKeySpendingRankingItem, APIKeySpendingRankingResponse, SpendingRankingSort } from '@/types'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { cacheReadRate, formatCacheReadRate, formatTokenCount } from '@/utils/usageTokens'
+import { formatRequestBodyBytes, requestBodySizeDetailParams } from '@/utils/requestBodyBytes'
 
 const props = defineProps<{
   startDate?: string
@@ -172,6 +199,11 @@ const ranking = ref<APIKeySpendingRankingResponse | null>(null)
 const loading = ref(false)
 const error = ref(false)
 const selectedUser = ref<SimpleUser | null>(null)
+const sort = ref<SpendingRankingSort>('cost')
+const sortOptions = computed<{ value: SpendingRankingSort; label: string }[]>(() => [
+  { value: 'cost', label: t('admin.dashboard.rankingSortCost') },
+  { value: 'request_body_bytes', label: t('admin.dashboard.rankingSortBodySize') }
+])
 const userQuery = ref('')
 const userResults = ref<SimpleUser[]>([])
 const searchLoading = ref(false)
@@ -197,7 +229,8 @@ const loadRanking = async () => {
   ranking.value = null
   try {
     const result = await getAPIKeySpendingRanking({
-      ...rangeParams(), user_id: selectedUser.value?.id, limit: rankingLimit
+      ...rangeParams(), user_id: selectedUser.value?.id, limit: rankingLimit,
+      sort: sort.value === 'cost' ? undefined : sort.value
     })
     if (seq === rankingSeq) ranking.value = result
   } catch {
@@ -257,7 +290,7 @@ const tokenBreakdown = (item: APIKeySpendingRankingItem) =>
 const formatCost = (value: number) => value.toFixed(4)
 
 watch(
-  () => [props.startDate, props.endDate, props.startTime, props.endTime, selectedUser.value?.id],
+  () => [props.startDate, props.endDate, props.startTime, props.endTime, selectedUser.value?.id, sort.value],
   loadRanking,
   { immediate: true }
 )

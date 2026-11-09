@@ -164,4 +164,27 @@ describe('APIKeySpendingRanking', () => {
     expect(wrapper.find('[role="alert"]').text()).toBe('Search failed')
     expect(getRanking).toHaveBeenCalledTimes(1)
   })
+
+  it('reloads with the request-size sort and shows size totals, "-" when unknown', async () => {
+    getRanking.mockResolvedValue(makeResponse({ ranking: [
+      makeRow({ request_body_bytes_total: 48 * 1024 * 1024, request_body_bytes_avg: 1536, request_body_bytes_max: 40 * 1024 * 1024, request_body_bytes_known_count: 3 }),
+      makeRow({ api_key_id: 12, request_body_bytes_total: 0, request_body_bytes_avg: null, request_body_bytes_max: null, request_body_bytes_known_count: 0 }),
+    ] }))
+    const wrapper = createWrapper()
+    await flushPromises()
+    expect(getRanking.mock.lastCall![0].sort).toBeUndefined()
+    const cells = wrapper.findAll('[data-testid="key-ranking-body-size"]')
+    expect(cells[0].text()).toContain('48.0 MiB')
+    expect(cells[1].text()).toBe('-')
+
+    await wrapper.find('[data-testid="key-ranking-sort-request_body_bytes"]').trigger('click')
+    await flushPromises()
+    expect(getRanking).toHaveBeenCalledTimes(2)
+    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'request_body_bytes', limit: 12 }))
+
+    await wrapper.find('[data-testid="key-ranking-sort-cost"]').trigger('click')
+    await flushPromises()
+    expect(getRanking).toHaveBeenCalledTimes(3)
+    expect(getRanking.mock.lastCall![0].sort).toBeUndefined()
+  })
 })

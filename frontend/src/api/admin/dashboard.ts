@@ -13,6 +13,7 @@ import type {
   UserUsageTrendPoint,
   UserSpendingRankingResponse,
   APIKeySpendingRankingResponse,
+  SpendingRankingSort,
   UserBreakdownItem,
   UsageRequestType,
   AccountPlatform
@@ -264,6 +265,8 @@ export interface UserTrendResponse {
 export interface UserSpendingRankingParams
   extends Pick<TrendParams, 'start_date' | 'end_date' | 'start_time' | 'end_time'> {
   limit?: number
+  /** Omitted or 'cost' keeps the default cost order. */
+  sort?: SpendingRankingSort
 }
 
 export interface APIKeySpendingRankingParams extends UserSpendingRankingParams {

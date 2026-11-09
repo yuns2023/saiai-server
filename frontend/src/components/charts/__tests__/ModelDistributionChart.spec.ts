@@ -263,4 +263,34 @@ describe('ModelDistributionChart', () => {
     expect(rows[2].text()).toContain('$10.00')
     expect(rows[2].text()).toContain('$9.00')
   })
+
+  it('shows request body sizes and switches the ranking sort', async () => {
+    const wrapper = mount(ModelDistributionChart, {
+      props: {
+        modelStats: [],
+        enableRankingView: true,
+        rankingSort: 'request_body_bytes',
+        rankingItems: [
+          { user_id: 1, email: 'alpha@example.com', cost: 1, actual_cost: 1, requests: 2, hosted_requests: 0, tokens: 10,
+            request_body_bytes_total: 48 * 1024 * 1024, request_body_bytes_avg: 1024, request_body_bytes_max: 40 * 1024 * 1024, request_body_bytes_known_count: 2 },
+          { user_id: 2, email: 'beta@example.com', cost: 9, actual_cost: 9, requests: 1, hosted_requests: 0, tokens: 10,
+            request_body_bytes_total: 0, request_body_bytes_avg: null, request_body_bytes_max: null, request_body_bytes_known_count: 0 },
+        ],
+        rankingTotalCost: 30,
+        rankingTotalRequests: 20,
+      },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+    expect(wrapper.find('[data-testid="ranking-sort"]').exists()).toBe(false)
+    await wrapper.findAll('button').find((button) => button.text() === 'User Spending Ranking')!.trigger('click')
+
+    const cells = wrapper.findAll('[data-testid="ranking-body-size"]')
+    expect(cells.map((cell) => cell.text())).toEqual(['48.0 MiB', '-', '-'])
+    // Sorted by size, slices are byte totals and there is no "others" slice.
+    const chartData = JSON.parse(wrapper.find('.chart-data').text())
+    expect(chartData.datasets[0].data).toEqual([48 * 1024 * 1024, 0])
+
+    await wrapper.find('[data-testid="ranking-sort-cost"]').trigger('click')
+    expect(wrapper.emitted('update:rankingSort')).toEqual([['cost']])
+  })
 })

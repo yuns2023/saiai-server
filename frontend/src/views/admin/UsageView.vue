@@ -148,6 +148,7 @@ import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admi
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffort, getEffectiveReasoningEffort } from '@/utils/format'
 import { escapeCsvCell } from '@/utils/csv'
+import { requestBodyBytesCsvValue } from '@/utils/requestBodyBytes'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateTimeRangePicker from '@/components/common/DateTimeRangePicker.vue'
 import { localDateTime, presetTimeRange, type DateTimeRange } from '@/utils/dateTimeRange'
@@ -559,7 +560,7 @@ const exportToCsv = async () => {
       t('usage.sessionId'),
       t('usage.type'),
       t('admin.usage.inputTokens'), t('admin.usage.outputTokens'),
-      t('admin.usage.cacheReadTokens'), t('admin.usage.cacheCreationTokens'), t('admin.usage.stopReason'),
+      t('admin.usage.cacheReadTokens'), t('admin.usage.cacheCreationTokens'), t('admin.usage.stopReason'), t('admin.usage.requestBodyBytesCsv'),
       t('admin.usage.inputCost'), t('admin.usage.outputCost'),
       t('admin.usage.cacheReadCost'), t('admin.usage.cacheCreationCost'),
       t('usage.rate'), t('usage.groupModelMultiplier'), t('usage.paygUserDiscount'), t('usage.legacyPaygAccountDiscount'), t('usage.accountMultiplier'), t('usage.original'), t('usage.billingSource'), t('usage.userBilled'), t('usage.accountBilled'),
@@ -576,7 +577,7 @@ const exportToCsv = async () => {
         log.created_at, log.user?.email || '', log.api_key?.name || '', log.account?.name || '', log.model,
         log.upstream_model || '', formatReasoningEffort(getEffectiveReasoningEffort(log)), log.group?.name || '',
         log.inbound_endpoint || '', log.upstream_endpoint || '', log.session_id || '', getRequestTypeLabel(log),
-        log.input_tokens, log.output_tokens, log.cache_read_tokens, log.cache_creation_tokens, log.stop_reason || '',
+        log.input_tokens, log.output_tokens, log.cache_read_tokens, log.cache_creation_tokens, log.stop_reason || '', requestBodyBytesCsvValue(log.request_body_bytes),
         log.input_cost?.toFixed(6) || '0.000000', log.output_cost?.toFixed(6) || '0.000000',
         log.cache_read_cost?.toFixed(6) || '0.000000', log.cache_creation_cost?.toFixed(6) || '0.000000',
         log.rate_multiplier?.toFixed(2) || '1.00', (log.model_rate_multiplier ?? 1).toFixed(4), (log.user_payg_discount_multiplier ?? 1).toFixed(4), (log.account_payg_discount_multiplier ?? 1).toFixed(4), (log.account_rate_multiplier ?? 1).toFixed(2),
@@ -620,6 +621,7 @@ const allColumns = computed(() => [
   { key: 'group', label: t('admin.usage.group'), sortable: false },
   { key: 'stream', label: t('usage.type'), sortable: false },
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
+  { key: 'request_body_bytes', label: t('admin.usage.requestBodyBytes'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
   { key: 'latency', label: t('usage.latency'), sortable: false },
   { key: 'created_at', label: t('usage.time'), sortable: true },

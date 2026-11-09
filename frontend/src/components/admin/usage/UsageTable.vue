@@ -182,6 +182,20 @@
           </div>
         </template>
 
+        <template #header-request_body_bytes="{ column }">
+          <span class="cursor-help" :title="t('admin.usage.requestBodyBytesHint')">{{ column.label }}</span>
+        </template>
+
+        <template #cell-request_body_bytes="{ row }">
+          <span
+            v-if="row.request_body_bytes != null"
+            class="text-sm font-mono text-gray-600 dark:text-gray-400"
+            :title="`${row.request_body_bytes} B`"
+            data-testid="usage-request-body-bytes"
+          >{{ formatRequestBodyBytes(row.request_body_bytes) }}</span>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500" :title="t('admin.usage.stopReasonNotRecorded')" data-testid="usage-request-body-bytes">-</span>
+        </template>
+
         <template #header-cost="{ column }">
           <UsageCostLegend :label="column.label" show-account-cost show-reference />
         </template>
@@ -437,6 +451,7 @@ import UsageCostCell from '@/components/common/UsageCostCell.vue'
 import UsageLatencyCell from '@/components/common/UsageLatencyCell.vue'
 import UsageCostLegend from '@/components/common/UsageCostLegend.vue'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
+import { formatRequestBodyBytes } from '@/utils/requestBodyBytes'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
