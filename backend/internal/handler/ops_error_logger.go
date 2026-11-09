@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"runtime"
@@ -713,7 +714,11 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		if ops == nil {
 			return
 		}
-		if !ops.IsMonitoringEnabled(c.Request.Context()) {
+		// Settings reads must outlive a client disconnect: the request context
+		// is already canceled when the client hung up, and a canceled settings
+		// lookup fails open, which made ignore_context_canceled unreachable.
+		settingsCtx := context.WithoutCancel(c.Request.Context())
+		if !ops.IsMonitoringEnabled(settingsCtx) {
 			return
 		}
 
@@ -729,7 +734,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			if apiKey != nil {
 				event.GroupID = apiKey.GroupID
 			}
-			if ops.FilterOpsLogEvents(c.Request.Context(), []service.OpsLogFilterEvent{event}) {
+			if ops.FilterOpsLogEvents(settingsCtx, []service.OpsLogFilterEvent{event}) {
 				return
 			}
 		}
@@ -975,7 +980,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		}
 
 		// Skip logging if the error should be filtered based on settings
-		if shouldSkipOpsErrorLog(c.Request.Context(), ops, parsed.Message, string(body), c.Request.URL.Path, localAuthReason) {
+		if shouldSkipOpsErrorLog(settingsCtx, ops, parsed.Message, string(body), c.Request.URL.Path, localAuthReason, opsClientCanceledUpstream(c)) {
 			return
 		}
 
@@ -1634,9 +1639,21 @@ func strconvItoa(v int) string {
 	return strconv.Itoa(v)
 }
 
+// opsClientCanceledUpstream reports a failure caused by the client hanging up:
+// the request context was canceled and the upstream call failed with that
+// cancellation. The generic "Upstream request failed" body hides the cause, so
+// the message/body match alone never sees it. A real upstream error followed by
+// a disconnect keeps its own upstream message and is still logged.
+func opsClientCanceledUpstream(c *gin.Context) bool {
+	if c == nil || c.Request == nil || !errors.Is(c.Request.Context().Err(), context.Canceled) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(c.GetString(service.OpsUpstreamErrorMessageKey)), opsErrContextCanceled)
+}
+
 // shouldSkipOpsErrorLog determines if an error should be skipped from logging based on settings.
 // Returns true for errors that should be filtered according to OpsAdvancedSettings.
-func shouldSkipOpsErrorLog(ctx context.Context, ops *service.OpsService, message, body, requestPath, localAuthReason string) bool {
+func shouldSkipOpsErrorLog(ctx context.Context, ops *service.OpsService, message, body, requestPath, localAuthReason string, clientCanceled bool) bool {
 	if ops == nil {
 		return false
 	}
@@ -1658,7 +1675,7 @@ func shouldSkipOpsErrorLog(ctx context.Context, ops *service.OpsService, message
 
 	// Check if context canceled errors should be ignored (client disconnects)
 	if settings.IgnoreContextCanceled {
-		if strings.Contains(msgLower, opsErrContextCanceled) || strings.Contains(bodyLower, opsErrContextCanceled) {
+		if clientCanceled || strings.Contains(msgLower, opsErrContextCanceled) || strings.Contains(bodyLower, opsErrContextCanceled) {
 			return true
 		}
 	}

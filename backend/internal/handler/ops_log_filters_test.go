@@ -199,9 +199,9 @@ func TestOpsLogFilter_LegacyInvalidKeySwitchRequiresLocalAuthSource(test *testin
 	}}
 	ops := service.NewOpsService(nil, repo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	for _, reason := range []string{service.OpsLocalAuthInvalidAPIKey, service.OpsLocalAuthAPIKeyRequired, service.OpsLocalAuthAPIKeyDisabled} {
-		require.True(test, shouldSkipOpsErrorLog(context.Background(), ops, "Invalid API key", `{"code":"INVALID_API_KEY"}`, "/v1/responses", reason))
+		require.True(test, shouldSkipOpsErrorLog(context.Background(), ops, "Invalid API key", `{"code":"INVALID_API_KEY"}`, "/v1/responses", reason, false))
 	}
-	require.False(test, shouldSkipOpsErrorLog(context.Background(), ops, "Invalid API key", `{"code":"INVALID_API_KEY"}`, "/v1/responses", ""))
+	require.False(test, shouldSkipOpsErrorLog(context.Background(), ops, "Invalid API key", `{"code":"INVALID_API_KEY"}`, "/v1/responses", "", false))
 }
 
 func TestOpsLogFilter_StaleSameStatusCannotHideUnknownTerminalFailure(test *testing.T) {
