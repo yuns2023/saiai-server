@@ -31,7 +31,9 @@ func (e *SubscriptionLimitError) Message() string {
 		msg += fmt.Sprintf(" (subscription group %q)", e.groupName)
 	}
 	if e.resetAt != nil {
-		msg += ", resets at " + e.resetAt.In(timezone.Location()).Format("2006-01-02 15:04 -07:00")
+		// Round up so the shown minute is never before the actual reset.
+		reset := e.resetAt.Add(time.Minute - time.Nanosecond).Truncate(time.Minute)
+		msg += ", resets at " + reset.In(timezone.Location()).Format("2006-01-02 15:04 -07:00")
 	}
 	return msg
 }

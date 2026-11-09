@@ -139,6 +139,11 @@ const smartSwitchLimitedMessage = "Every group in the smart switching policy is 
 
 func abortSmartSwitchExhausted(c *gin.Context, exhausted *service.SmartSwitchExhaustedError) {
 	reasons := " (" + strings.Join(exhausted.UniqueReasons(), ", ") + ")"
+	// Say which subscription limits block and when they reset, so the user
+	// knows what to wait for.
+	if len(exhausted.LimitDetails) > 0 {
+		reasons += ": " + strings.Join(exhausted.LimitDetails, "; ")
+	}
 	switch {
 	case !exhausted.BusinessLimited():
 		AbortWithError(c, 503, "SMART_SWITCH_UNAVAILABLE", "No eligible group in the smart switching policy"+reasons)
@@ -148,12 +153,7 @@ func abortSmartSwitchExhausted(c *gin.Context, exhausted *service.SmartSwitchExh
 	case exhausted.Has("subscription_limit_or_expiry"):
 		// Matches the non-switching subscription limit. This legacy reason also
 		// covers an expired or suspended subscription.
-		// Say which limit blocks and when it resets, so the user knows to wait.
-		details := ""
-		if len(exhausted.LimitDetails) > 0 {
-			details = ": " + strings.Join(exhausted.LimitDetails, "; ")
-		}
-		AbortWithError(c, 429, "USAGE_LIMIT_EXCEEDED", smartSwitchLimitedMessage+reasons+details)
+		AbortWithError(c, 429, "USAGE_LIMIT_EXCEEDED", smartSwitchLimitedMessage+reasons)
 	default:
 		// The Key budget or a missing/expired subscription does not recover by retrying.
 		AbortWithError(c, 403, "USAGE_LIMIT_EXCEEDED", smartSwitchLimitedMessage+reasons)

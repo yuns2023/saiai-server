@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -680,7 +681,7 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 				return withSubscriptionLimitDetail(err, subscription, group)
 			}
 		} else if err := s.checkSubscriptionEligibility(ctx, user.ID, group, subscription); err != nil {
-			return withSubscriptionLimitDetail(err, subscription, group)
+			return cachedSubscriptionLimitDetail(err, subscription, group)
 		}
 	} else if !group.UsesHostedUsage() {
 		if err := s.checkBalanceEligibility(ctx, user.ID); err != nil {
@@ -717,6 +718,21 @@ func (s *BillingCacheService) checkBalanceEligibility(ctx context.Context, userI
 	}
 
 	return nil
+}
+
+// cachedSubscriptionLimitDetail details a limit error decided on cached usage.
+// The reset time comes from the request's subscription snapshot, so it is
+// shown only when that snapshot agrees the same window is spent.
+func cachedSubscriptionLimitDetail(err error, sub *UserSubscription, group *Group) error {
+	if !isSubscriptionUsageLimitError(err) {
+		return err
+	}
+	if sub != nil {
+		if exhausted := sub.ExhaustedLimitError(group); exhausted != nil && errors.Is(exhausted, err) {
+			return exhausted
+		}
+	}
+	return withSubscriptionLimitDetail(err, nil, group)
 }
 
 // checkSubscriptionEligibility 检查订阅模式资格

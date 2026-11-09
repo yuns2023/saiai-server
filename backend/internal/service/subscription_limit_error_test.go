@@ -16,7 +16,7 @@ func TestWithSubscriptionLimitDetailNamesGroupAndReset(t *testing.T) {
 
 	err := withSubscriptionLimitDetail(ErrWeeklyLimitExceeded, sub, group)
 	require.ErrorIs(t, err, ErrWeeklyLimitExceeded)
-	reset := weekStart.Add(7 * 24 * time.Hour).In(timezone.Location()).Format("2006-01-02 15:04 -07:00")
+	reset := weekStart.Add(7 * 24 * time.Hour).Add(time.Minute - time.Nanosecond).Truncate(time.Minute).In(timezone.Location()).Format("2006-01-02 15:04 -07:00")
 	require.Equal(t, `weekly usage limit exceeded (subscription group "CC3000"), resets at `+reset, SubscriptionErrorMessage(err))
 	require.Equal(t, SubscriptionErrorMessage(err), err.Error())
 
@@ -56,4 +56,29 @@ func TestValidateAndCheckLimitsReportsResetTime(t *testing.T) {
 
 	require.ErrorIs(t, sub.ExhaustedLimitError(group), ErrMonthlyLimitExceeded)
 	require.Contains(t, SubscriptionErrorMessage(sub.ExhaustedLimitError(group)), "resets at ")
+}
+
+func TestCachedSubscriptionLimitDetailNeedsAgreeingSnapshot(t *testing.T) {
+	limit := 10.0
+	now := time.Now()
+	weekStart := now.Add(-24 * time.Hour)
+	group := &Group{Name: "CC3000", WeeklyLimitUSD: &limit}
+
+	// Snapshot agrees: reset time shown.
+	spent := &UserSubscription{WeeklyWindowStart: &weekStart, WeeklyUsageUSD: 10}
+	require.Contains(t, SubscriptionErrorMessage(cachedSubscriptionLimitDetail(ErrWeeklyLimitExceeded, spent, group)), "resets at ")
+
+	// Snapshot disagrees (cache ahead of it): group only, no guessed time.
+	behind := &UserSubscription{WeeklyWindowStart: &weekStart, WeeklyUsageUSD: 3}
+	err := cachedSubscriptionLimitDetail(ErrWeeklyLimitExceeded, behind, group)
+	require.ErrorIs(t, err, ErrWeeklyLimitExceeded)
+	require.Equal(t, `weekly usage limit exceeded (subscription group "CC3000")`, SubscriptionErrorMessage(err))
+
+	require.Same(t, ErrSubscriptionInvalid, cachedSubscriptionLimitDetail(ErrSubscriptionInvalid, spent, group))
+}
+
+func TestSubscriptionLimitResetRoundsUpToMinute(t *testing.T) {
+	reset := time.Date(2030, 1, 2, 12, 0, 59, 0, timezone.Location())
+	err := &SubscriptionLimitError{err: ErrFiveHourLimitExceeded, resetAt: &reset}
+	require.Equal(t, "5-hour usage limit exceeded, resets at 2030-01-02 12:01 "+reset.Format("-07:00"), err.Message())
 }

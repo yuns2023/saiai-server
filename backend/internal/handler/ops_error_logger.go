@@ -1534,9 +1534,10 @@ func classifyOpsPhase(errType, message, code string) string {
 	}
 }
 
-// classifyOpsBusinessAwareSeverity keeps user-level business limits (quota,
-// balance, subscription, user concurrency) at P3: they are excluded from the
-// SLA and are not service faults, whatever their status (often 429).
+// classifyOpsBusinessAwareSeverity keeps business-limited rows (balance,
+// usage limit, subscription, inactive user; see classifyOpsIsBusinessLimited)
+// at P3: they are excluded from the SLA and are not service faults, whatever
+// their status (often 429).
 func classifyOpsBusinessAwareSeverity(errType string, status int, businessLimited bool) string {
 	if businessLimited {
 		return "P3"

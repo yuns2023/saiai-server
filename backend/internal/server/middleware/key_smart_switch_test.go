@@ -160,8 +160,15 @@ func TestSmartSwitchExhaustedUsesBusinessCodes(t *testing.T) {
 		require.Contains(t, recorder.Body.String(), `"code":"`+tc.code+`"`)
 		require.Contains(t, recorder.Body.String(), strings.Join(tc.reasons, ", "))
 	}
+	// Limit details are kept whichever branch wins (here insufficient balance).
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
+	abortSmartSwitchExhausted(c, &service.SmartSwitchExhaustedError{Reasons: []string{"subscription_limit_or_expiry", "insufficient_balance"}, LimitDetails: []string{"weekly usage limit exceeded"}})
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "(subscription_limit_or_expiry, insufficient_balance): weekly usage limit exceeded")
+
+	recorder = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(recorder)
 	abortSmartSwitchExhausted(c, &service.SmartSwitchExhaustedError{Reasons: []string{"subscription_unavailable", "payg_budget_exhausted", "subscription_unavailable"}})
 	var body ErrorResponse
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
@@ -233,6 +240,6 @@ func TestSmartSwitchAuthReportsSubscriptionLimitReset(t *testing.T) {
 	var body ErrorResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Equal(t, "USAGE_LIMIT_EXCEEDED", body.Code)
-	reset := weekStart.Add(7 * 24 * time.Hour).In(timezone.Location()).Format("2006-01-02 15:04 -07:00")
+	reset := weekStart.Add(7 * 24 * time.Hour).Add(time.Minute - time.Nanosecond).Truncate(time.Minute).In(timezone.Location()).Format("2006-01-02 15:04 -07:00")
 	require.Equal(t, smartSwitchLimitedMessage+` (subscription_limit_or_expiry): weekly usage limit exceeded (subscription group "CC3000"), resets at `+reset, body.Message)
 }
