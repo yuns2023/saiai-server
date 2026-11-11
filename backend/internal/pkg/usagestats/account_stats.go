@@ -15,4 +15,9 @@ type AccountStats struct {
 
 	HostedRequests int64   `json:"hosted_requests"`
 	HostedCost     float64 `json:"hosted_cost"`
+
+	// SubscriptionRevenue: 订阅折算收入（元）= Σ 订阅行 actual_cost × 分组当前 subscription_revenue_rate；
+	// SubscriptionRevenueUnpricedCost: 分组未配置倍率（或无分组）的订阅消耗（$），未计入上面的折算。
+	SubscriptionRevenue             float64 `json:"subscription_revenue"`
+	SubscriptionRevenueUnpricedCost float64 `json:"subscription_revenue_unpriced_cost"`
 }

@@ -51,6 +51,8 @@ const (
 	FieldMonthlyLimitUsd = "monthly_limit_usd"
 	// FieldDefaultValidityDays holds the string denoting the default_validity_days field in the database.
 	FieldDefaultValidityDays = "default_validity_days"
+	// FieldSubscriptionRevenueRate holds the string denoting the subscription_revenue_rate field in the database.
+	FieldSubscriptionRevenueRate = "subscription_revenue_rate"
 	// FieldImagePrice1k holds the string denoting the image_price_1k field in the database.
 	FieldImagePrice1k = "image_price_1k"
 	// FieldImagePrice2k holds the string denoting the image_price_2k field in the database.
@@ -229,6 +231,7 @@ var Columns = []string{
 	FieldWeeklyLimitUsd,
 	FieldMonthlyLimitUsd,
 	FieldDefaultValidityDays,
+	FieldSubscriptionRevenueRate,
 	FieldImagePrice1k,
 	FieldImagePrice2k,
 	FieldImagePrice4k,
@@ -490,6 +493,11 @@ func ByMonthlyLimitUsd(opts ...sql.OrderTermOption) OrderOption {
 // ByDefaultValidityDays orders the results by the default_validity_days field.
 func ByDefaultValidityDays(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDefaultValidityDays, opts...).ToFunc()
+}
+
+// BySubscriptionRevenueRate orders the results by the subscription_revenue_rate field.
+func BySubscriptionRevenueRate(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSubscriptionRevenueRate, opts...).ToFunc()
 }
 
 // ByImagePrice1k orders the results by the image_price_1k field.

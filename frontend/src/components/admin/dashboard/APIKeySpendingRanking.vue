@@ -90,6 +90,13 @@
         <span class="font-medium tabular-nums text-gray-900 dark:text-white">${{ formatCost(ranking.total_actual_cost) }}</span>
         · {{ ranking.total_requests.toLocaleString() }} {{ t('admin.dashboard.requests') }}
         · {{ formatTokenCount(ranking.total_tokens) }} Token
+        <template v-if="ranking.total_subscription_revenue != null">
+          ·
+          <SubscriptionRevenueText
+            :revenue="ranking.total_subscription_revenue"
+            :unpriced-cost="ranking.total_subscription_revenue_unpriced_cost"
+          />
+        </template>
       </p>
       <div class="overflow-x-auto">
         <table class="w-full min-w-[980px] text-sm">
@@ -100,6 +107,7 @@
               <th scope="col" class="pb-2 pr-3 text-right" :title="t('admin.dashboard.rankingBasisHint')">{{ t('admin.dashboard.standard') }}</th>
               <th scope="col" class="pb-2 pr-3 text-right">{{ t('admin.dashboard.metricShare') }}</th>
               <th scope="col" class="pb-2 pr-3 text-right" :title="t('usage.userBilled')">{{ t('admin.dashboard.rankingActualShort') }}</th>
+              <th scope="col" class="whitespace-nowrap pb-2 pr-3 text-right" :title="t('usage.subscriptionRevenueHint')">{{ t('usage.subscriptionRevenue') }}</th>
               <th scope="col" class="pb-2 pr-3 text-right">{{ t('admin.dashboard.requests') }}</th>
               <th scope="col" class="pb-2 pr-3 text-right">Token</th>
               <th scope="col" class="whitespace-nowrap pb-2 pr-3 text-right" :title="t('tokens.cacheReadRateHelp')">
@@ -147,6 +155,15 @@
               </td>
               <td class="py-3 pr-3 text-right tabular-nums">{{ costShare(item).toFixed(1) }}%</td>
               <td class="py-3 pr-3 text-right tabular-nums text-green-600 dark:text-green-400">${{ formatCost(item.actual_cost) }}</td>
+              <td class="whitespace-nowrap py-3 pr-3 text-right text-xs" data-testid="key-ranking-subscription-revenue">
+                <SubscriptionRevenueText
+                  v-if="item.subscription_revenue != null && (item.subscription_revenue > 0 || (item.subscription_revenue_unpriced_cost ?? 0) > 0)"
+                  compact
+                  :revenue="item.subscription_revenue"
+                  :unpriced-cost="item.subscription_revenue_unpriced_cost"
+                />
+                <span v-else class="text-gray-400">-</span>
+              </td>
               <td class="py-3 pr-3 text-right tabular-nums">{{ item.requests.toLocaleString() }}</td>
               <td class="py-3 pr-3 text-right tabular-nums">{{ formatTokenCount(item.tokens) }}</td>
               <td class="py-3 pr-3 text-right tabular-nums" :title="tokenBreakdown(item)">
@@ -180,6 +197,7 @@ import { onClickOutside } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { getAPIKeySpendingRanking } from '@/api/admin/dashboard'
+import SubscriptionRevenueText from '@/components/common/SubscriptionRevenueText.vue'
 import { searchUsers as findUsers, type SimpleUser } from '@/api/admin/usage'
 import type { APIKeySpendingRankingItem, APIKeySpendingRankingResponse, SpendingRankingSort } from '@/types'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'

@@ -146,6 +146,10 @@ type WindowStats struct {
 	// 托管分组（metered_cost 非空）的请求数与折算用量；托管行的 cost/user_cost 为 0。
 	HostedRequests int64   `json:"hosted_requests"`
 	HostedCost     float64 `json:"hosted_cost"`
+
+	// 订阅折算收入（元，按分组当前统计倍率）与未配置倍率的订阅消耗（$）。仅管理员账号视图使用。
+	SubscriptionRevenue             float64 `json:"subscription_revenue"`
+	SubscriptionRevenueUnpricedCost float64 `json:"subscription_revenue_unpriced_cost"`
 }
 
 // UsageProgress 使用量进度
@@ -1271,6 +1275,9 @@ func windowStatsFromAccountStats(stats *usagestats.AccountStats) *WindowStats {
 
 		HostedRequests: stats.HostedRequests,
 		HostedCost:     stats.HostedCost,
+
+		SubscriptionRevenue:             stats.SubscriptionRevenue,
+		SubscriptionRevenueUnpricedCost: stats.SubscriptionRevenueUnpricedCost,
 	}
 }
 

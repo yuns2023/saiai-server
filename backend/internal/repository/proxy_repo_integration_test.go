@@ -197,6 +197,49 @@ func (s *ProxyRepoSuite) TestCountAccountsByProxyID() {
 	s.Require().Equal(int64(2), count)
 }
 
+func (s *ProxyRepoSuite) TestListAccountSummariesByProxyID_IncludesRuntimeStatus() {
+	proxy := s.mustCreateProxy(&service.Proxy{Name: "p-summary", Protocol: "http", Host: "127.0.0.1", Port: 8081, Status: service.StatusActive})
+	resetAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	healthy := mustCreateAccount(s.T(), s.tx.Client(), &service.Account{Name: "healthy", ProxyID: &proxy.ID})
+	broken := mustCreateAccount(s.T(), s.tx.Client(), &service.Account{
+		Name:             "broken",
+		ProxyID:          &proxy.ID,
+		Status:           service.StatusError,
+		ErrorMessage:     "token revoked",
+		RateLimitResetAt: &resetAt,
+		Extra: map[string]any{
+			"model_rate_limits": map[string]any{
+				"claude-fable-5": map[string]any{"rate_limit_reset_at": resetAt.Format(time.RFC3339)},
+			},
+			"claude_oauth_mode": "carpool",
+		},
+	})
+
+	got, err := s.repo.ListAccountSummariesByProxyID(s.ctx, proxy.ID)
+	s.Require().NoError(err)
+	s.Require().Len(got, 2)
+	byID := map[int64]service.ProxyAccountSummary{}
+	for _, item := range got {
+		byID[item.ID] = item
+	}
+
+	h := byID[healthy.ID]
+	s.Require().Equal(service.StatusActive, h.Status)
+	s.Require().True(h.Schedulable)
+	s.Require().Empty(h.ErrorMessage)
+	s.Require().Nil(h.RateLimitResetAt)
+	s.Require().Nil(h.Extra)
+
+	b := byID[broken.ID]
+	s.Require().Equal(service.StatusError, b.Status)
+	s.Require().Equal("token revoked", b.ErrorMessage)
+	s.Require().NotNil(b.ErrorAt, "error_at is maintained by the migration 118 trigger")
+	s.Require().NotNil(b.RateLimitResetAt)
+	s.Require().True(b.RateLimitResetAt.Equal(resetAt))
+	s.Require().Contains(b.Extra, "model_rate_limits")
+	s.Require().NotContains(b.Extra, "claude_oauth_mode", "only status-related extra keys are exposed")
+}
+
 func (s *ProxyRepoSuite) TestCountAccountsByProxyID_Zero() {
 	proxy := s.mustCreateProxy(&service.Proxy{Name: "p-zero", Protocol: "http", Host: "127.0.0.1", Port: 8080, Status: service.StatusActive})
 

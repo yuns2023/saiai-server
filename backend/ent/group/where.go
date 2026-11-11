@@ -145,6 +145,11 @@ func DefaultValidityDays(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldDefaultValidityDays, v))
 }
 
+// SubscriptionRevenueRate applies equality check predicate on the "subscription_revenue_rate" field. It's identical to SubscriptionRevenueRateEQ.
+func SubscriptionRevenueRate(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldSubscriptionRevenueRate, v))
+}
+
 // ImagePrice1k applies equality check predicate on the "image_price_1k" field. It's identical to ImagePrice1kEQ.
 func ImagePrice1k(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldImagePrice1k, v))
@@ -1103,6 +1108,56 @@ func DefaultValidityDaysLT(v int) predicate.Group {
 // DefaultValidityDaysLTE applies the LTE predicate on the "default_validity_days" field.
 func DefaultValidityDaysLTE(v int) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldDefaultValidityDays, v))
+}
+
+// SubscriptionRevenueRateEQ applies the EQ predicate on the "subscription_revenue_rate" field.
+func SubscriptionRevenueRateEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldSubscriptionRevenueRate, v))
+}
+
+// SubscriptionRevenueRateNEQ applies the NEQ predicate on the "subscription_revenue_rate" field.
+func SubscriptionRevenueRateNEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldSubscriptionRevenueRate, v))
+}
+
+// SubscriptionRevenueRateIn applies the In predicate on the "subscription_revenue_rate" field.
+func SubscriptionRevenueRateIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldSubscriptionRevenueRate, vs...))
+}
+
+// SubscriptionRevenueRateNotIn applies the NotIn predicate on the "subscription_revenue_rate" field.
+func SubscriptionRevenueRateNotIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldSubscriptionRevenueRate, vs...))
+}
+
+// SubscriptionRevenueRateGT applies the GT predicate on the "subscription_revenue_rate" field.
+func SubscriptionRevenueRateGT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldSubscriptionRevenueRate, v))
+}
+
+// SubscriptionRevenueRateGTE applies the GTE predicate on the "subscription_revenue_rate" field.
+func SubscriptionRevenueRateGTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldSubscriptionRevenueRate, v))
+}
+
+// SubscriptionRevenueRateLT applies the LT predicate on the "subscription_revenue_rate" field.
+func SubscriptionRevenueRateLT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldSubscriptionRevenueRate, v))
+}
+
+// SubscriptionRevenueRateLTE applies the LTE predicate on the "subscription_revenue_rate" field.
+func SubscriptionRevenueRateLTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldSubscriptionRevenueRate, v))
+}
+
+// SubscriptionRevenueRateIsNil applies the IsNil predicate on the "subscription_revenue_rate" field.
+func SubscriptionRevenueRateIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldSubscriptionRevenueRate))
+}
+
+// SubscriptionRevenueRateNotNil applies the NotNil predicate on the "subscription_revenue_rate" field.
+func SubscriptionRevenueRateNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldSubscriptionRevenueRate))
 }
 
 // ImagePrice1kEQ applies the EQ predicate on the "image_price_1k" field.

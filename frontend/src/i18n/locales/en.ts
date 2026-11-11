@@ -977,6 +977,9 @@ export default {
     actualCost: 'Billed usage (includes subscription quota)',
     balanceCharge: 'Balance charged',
     subscriptionUsage: 'Subscription quota used',
+    subscriptionRevenue: 'Sub. revenue',
+    subscriptionRevenueHint: 'Estimated subscription revenue: subscription quota used × the group\'s current revenue rate (CNY per $1). Not a payment record; changing a group\'s rate re-prices past periods.',
+    subscriptionRevenueUnpriced: '{cost} of subscription usage is in groups without a rate and is not included',
     subscriptionUsageHint: 'Quota usage, not payment. The selected period total does not represent the remaining quota in the current cycle.',
     unclassifiedUsage: 'Unclassified usage',
     billingSource: 'Billing source',
@@ -2170,7 +2173,10 @@ export default {
         monthlyLimit: 'Monthly Limit (USD)',
         defaultValidityDays: 'Default Validity (Days)',
         validityHint: 'Number of days the subscription is valid when assigned to a user',
-        noLimit: 'No limit'
+        noLimit: 'No limit',
+        revenueRate: 'Subscription revenue rate (CNY per $1 quota)',
+        revenueRatePlaceholder: 'Not set, e.g. 0.64',
+        revenueRateHint: 'Statistics only; never affects charges or limits. "Subscription revenue" in usage, rankings and account stats = subscription quota used × this group\'s current rate, so changing it re-prices past periods. Leave empty for not set; 0 means free.'
       },
       imagePricing: {
         title: 'Image Generation Pricing',

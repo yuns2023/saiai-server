@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { usageInputContext, usageLongContext } from '../usageLongContext'
-import type { AdminUsageLog, LongContextPricing } from '@/types'
+import type { AdminUsageLog, LongContextPricing, UsageLog } from '@/types'
 
 const row = { model: 'gpt-6-astra', input_tokens: 1058, cache_read_tokens: 341248, cache_creation_tokens: 0, service_tier: 'default' }
 const info: LongContextPricing = { applied: true, mode: 'whole_request', threshold: 272000, total_input_tokens: 342306,
@@ -70,5 +70,17 @@ describe('input context size against the model long-context tier', () => {
     expect(usageInputContext({ ...row, image_count: 1 })).toBeNull()
     expect(usageInputContext({ ...row, inbound_endpoint: '/v1/images/edits' })).toBeNull()
     expect(usageInputContext(null)).toBeNull()
+  })
+})
+
+describe('user rows with the trimmed pricing snapshot', () => {
+  it('reads the same long-context evidence as admin rows', () => {
+    const userRow: UsageLog = { ...(row as unknown as UsageLog), pricing_snapshot: { service_tier: 'default', long_context: info } }
+    expect(usageLongContext(userRow)).toEqual(info)
+    expect(usageInputContext(userRow)).toEqual({ total: 342306, threshold: 272000 })
+  })
+  it('an empty but present snapshot blocks the inferred historical hint', () => {
+    expect(usageLongContext({ ...row, pricing_snapshot: {} })).toBeNull()
+    expect(usageLongContext({ ...row })).toMatchObject({ inferred: true })
   })
 })

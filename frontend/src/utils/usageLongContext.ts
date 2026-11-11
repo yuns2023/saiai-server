@@ -1,7 +1,9 @@
-import type { AdminUsageLog, LongContextPricing } from '@/types'
+import type { LongContextPricing, UsageLog } from '@/types'
 import { isNativeChatUsage } from './nativeChatUsage'
 
-type Record = Pick<AdminUsageLog, 'model' | 'input_tokens' | 'cache_read_tokens' | 'cache_creation_tokens'> & Partial<AdminUsageLog>
+// Works for admin rows (full pricing snapshot) and user rows (the trimmed
+// snapshot): only the long-context evidence and service tier are read.
+type Record = Pick<UsageLog, 'model' | 'input_tokens' | 'cache_read_tokens' | 'cache_creation_tokens'> & Partial<UsageLog>
 
 export function usageLongContext(row?: Record | null): LongContextPricing | null {
   if (!row || isNativeChatUsage(row) || (row.image_count || 0) > 0 || /\/images\/(generations|edits)$/.test(row.inbound_endpoint || '')) return null

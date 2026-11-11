@@ -1083,16 +1083,20 @@ func (r *accountRepository) ClearRateLimit(ctx context.Context, id int64) error 
 
 // ClearQuotaSnapshot removes only locally observed provider quota-window state.
 // It deliberately preserves credentials, account configuration, error state,
-// overload state, temporary scheduling rules, and unrelated extra fields.
+// overload state, temporary scheduling rules, and unrelated extra fields. The
+// only model-level cooldown it drops is the Anthropic Fable one: it is written
+// solely by the Fable 5h/7d_oi quota 429 handlers, so it is quota state too.
 func (r *accountRepository) ClearQuotaSnapshot(ctx context.Context, id int64) error {
 	result, err := r.sql.ExecContext(ctx, `
 		UPDATE accounts
-		SET extra = COALESCE(extra, '{}'::jsonb)
+		SET extra = (COALESCE(extra, '{}'::jsonb)
 				- 'session_window_utilization'
 				- 'passive_usage_7d_utilization'
 				- 'passive_usage_7d_reset'
 				- 'passive_usage_7d_sonnet_utilization'
 				- 'passive_usage_7d_sonnet_reset'
+				- 'passive_usage_7d_oi_utilization'
+				- 'passive_usage_7d_oi_reset'
 				- 'passive_usage_sampled_at'
 				- 'codex_primary_used_percent'
 				- 'codex_primary_reset_after_seconds'
@@ -1109,7 +1113,8 @@ func (r *accountRepository) ClearQuotaSnapshot(ctx context.Context, id int64) er
 				- 'codex_7d_used_percent'
 				- 'codex_7d_reset_after_seconds'
 				- 'codex_7d_window_minutes'
-				- 'codex_7d_reset_at',
+				- 'codex_7d_reset_at')
+				#- ARRAY['model_rate_limits', $2]::text[],
 			session_window_start = NULL,
 			session_window_end = NULL,
 			session_window_status = NULL,
@@ -1117,7 +1122,7 @@ func (r *accountRepository) ClearQuotaSnapshot(ctx context.Context, id int64) er
 			rate_limit_reset_at = NULL,
 			updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL
-	`, id)
+	`, id, service.AnthropicFableRateLimitKey)
 	if err != nil {
 		return err
 	}

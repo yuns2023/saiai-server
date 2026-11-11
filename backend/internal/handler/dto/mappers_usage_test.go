@@ -298,3 +298,44 @@ func TestUsageLogRequestBodyBytesIsAdminOnly(t *testing.T) {
 	require.Equal(t, gjson.Number, value.Type)
 	require.Equal(t, int64(0), value.Int())
 }
+
+func TestUsageLogPricingSnapshotIsTrimmedForUsers(t *testing.T) {
+	input := 5.0
+	snapshot := &service.PricingSnapshot{
+		Version: "v1", Alias: "alias", Override: service.ModelPriceOverride{Input: &input},
+		BilledModel: "gpt-6-sol", ResolvedModel: "gpt-6-sol-2026", Source: "override", ServiceTier: "priority",
+		Reference:          &service.ModelPricing{InputPricePerToken: 0.000002},
+		Effective:          &service.ModelPricing{InputPricePerToken: 0.000003, LongContextInputThreshold: 272000, LongContextInputMultiplier: 2, LongContextOutputMultiplier: 1.5, LongContextCacheReadMultiplier: 2, LongContextCacheCreationMultiplier: 2},
+		ReferenceTotalCost: 1.23,
+		LongContext:        &service.LongContextPricing{Applied: true, Mode: "whole_request", Threshold: 272000, TotalInputTokens: 300000, InputMultiplier: 2},
+	}
+	log := &service.UsageLog{Model: "gpt-6-sol", PricingSnapshot: snapshot}
+
+	userJSON, err := json.Marshal(UsageLogFromService(log))
+	require.NoError(t, err)
+	user := gjson.GetBytes(userJSON, "pricing_snapshot")
+	require.True(t, user.Exists())
+	require.Equal(t, "priority", user.Get("service_tier").String())
+	require.True(t, user.Get("long_context.applied").Bool())
+	require.Equal(t, int64(272000), user.Get("effective.long_context_threshold").Int())
+	require.Equal(t, 1.5, user.Get("effective.long_context_output_multiplier").Float())
+	for _, hidden := range []string{"version", "alias", "override", "billed_model", "resolved_model", "source", "reference", "reference_total_cost", "effective.input"} {
+		require.False(t, user.Get(hidden).Exists(), "user snapshot must not expose %s", hidden)
+	}
+	require.NotContains(t, string(userJSON), "0.000003")
+
+	adminJSON, err := json.Marshal(UsageLogFromServiceAdmin(log))
+	require.NoError(t, err)
+	admin := gjson.GetBytes(adminJSON, "pricing_snapshot")
+	require.Equal(t, "override", admin.Get("source").String(), "admin keeps the full snapshot")
+	require.Equal(t, 1.23, admin.Get("reference_total_cost").Float())
+
+	// A present but empty snapshot stays present, so the UI does not fall back
+	// to inferring a long-context surcharge for it.
+	emptyJSON, err := json.Marshal(UsageLogFromService(&service.UsageLog{PricingSnapshot: &service.PricingSnapshot{}}))
+	require.NoError(t, err)
+	require.True(t, gjson.GetBytes(emptyJSON, "pricing_snapshot").IsObject())
+	noneJSON, err := json.Marshal(UsageLogFromService(&service.UsageLog{}))
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(noneJSON, "pricing_snapshot").Exists())
+}

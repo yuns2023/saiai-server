@@ -2102,29 +2102,52 @@ func (r *usageLogRepository) Delete(ctx context.Context, id int64) error {
 	return err
 }
 
-// GetAccountTodayStats 获取账号今日统计
-func (r *usageLogRepository) GetAccountTodayStats(ctx context.Context, accountID int64) (*usagestats.AccountStats, error) {
-	today := timezone.Today()
-
-	query := `
+// accountStatsSQL aggregates account stats in two steps: rows are first
+// grouped by (keyColumns, group_id) on usage_logs alone, then joined to groups
+// so subscription consumption can be priced with each group's current
+// statistics-only revenue rate. Only the per-group partials touch the join.
+// Subscription rows are billing_type = 1 by history, regardless of the group's
+// current type; hosted rows (metered_cost set) carry no subscription charge.
+// Rows whose group has no rate (or no group at all) count as unpriced.
+func accountStatsSQL(keyColumn, where string) string {
+	outerKey, innerKey, groupBy := "", "", ""
+	if keyColumn != "" {
+		outerKey, innerKey = "s."+keyColumn+", ", keyColumn+", "
+		groupBy = "GROUP BY s." + keyColumn
+	}
+	return `
 		SELECT
-			COUNT(*) as requests,
-			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
-			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as cost,
-			COALESCE(SUM(total_cost), 0) as standard_cost,
-			COALESCE(SUM(actual_cost), 0) as user_cost,
-			COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
-			COALESCE(SUM(metered_cost), 0) as hosted_cost
-		FROM usage_logs
-		WHERE account_id = $1 AND created_at >= $2
-	`
+			` + outerKey + `
+			COALESCE(SUM(s.requests), 0)::bigint as requests,
+			COALESCE(SUM(s.tokens), 0)::bigint as tokens,
+			COALESCE(SUM(s.cost), 0) as cost,
+			COALESCE(SUM(s.standard_cost), 0) as standard_cost,
+			COALESCE(SUM(s.user_cost), 0) as user_cost,
+			COALESCE(SUM(s.hosted_requests), 0)::bigint as hosted_requests,
+			COALESCE(SUM(s.hosted_cost), 0) as hosted_cost,
+			COALESCE(SUM(s.subscription_cost * g.subscription_revenue_rate), 0) as subscription_revenue,
+			COALESCE(SUM(s.subscription_cost) FILTER (WHERE g.subscription_revenue_rate IS NULL), 0) as subscription_revenue_unpriced_cost
+		FROM (
+			SELECT
+				` + innerKey + `group_id,
+				COUNT(*) as requests,
+				SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) as tokens,
+				SUM(total_cost * COALESCE(account_rate_multiplier, 1)) as cost,
+				SUM(total_cost) as standard_cost,
+				SUM(actual_cost) as user_cost,
+				COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
+				SUM(metered_cost) as hosted_cost,
+				SUM(actual_cost) FILTER (WHERE billing_type = 1 AND metered_cost IS NULL) as subscription_cost
+			FROM usage_logs
+			` + where + `
+			GROUP BY ` + innerKey + `group_id
+		) s
+		LEFT JOIN groups g ON g.id = s.group_id
+		` + groupBy
+}
 
-	stats := &usagestats.AccountStats{}
-	if err := scanSingleRow(
-		ctx,
-		r.sql,
-		query,
-		[]any{accountID, today},
+func accountStatsScanTargets(stats *usagestats.AccountStats) []any {
+	return []any{
 		&stats.Requests,
 		&stats.Tokens,
 		&stats.Cost,
@@ -2132,41 +2155,21 @@ func (r *usageLogRepository) GetAccountTodayStats(ctx context.Context, accountID
 		&stats.UserCost,
 		&stats.HostedRequests,
 		&stats.HostedCost,
-	); err != nil {
-		return nil, err
+		&stats.SubscriptionRevenue,
+		&stats.SubscriptionRevenueUnpricedCost,
 	}
-	return stats, nil
+}
+
+// GetAccountTodayStats 获取账号今日统计
+func (r *usageLogRepository) GetAccountTodayStats(ctx context.Context, accountID int64) (*usagestats.AccountStats, error) {
+	return r.GetAccountWindowStats(ctx, accountID, timezone.Today())
 }
 
 // GetAccountWindowStats 获取账号时间窗口内的统计
 func (r *usageLogRepository) GetAccountWindowStats(ctx context.Context, accountID int64, startTime time.Time) (*usagestats.AccountStats, error) {
-	query := `
-		SELECT
-			COUNT(*) as requests,
-			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
-			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as cost,
-			COALESCE(SUM(total_cost), 0) as standard_cost,
-			COALESCE(SUM(actual_cost), 0) as user_cost,
-			COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
-			COALESCE(SUM(metered_cost), 0) as hosted_cost
-		FROM usage_logs
-		WHERE account_id = $1 AND created_at >= $2
-	`
-
+	query := accountStatsSQL("", "WHERE account_id = $1 AND created_at >= $2")
 	stats := &usagestats.AccountStats{}
-	if err := scanSingleRow(
-		ctx,
-		r.sql,
-		query,
-		[]any{accountID, startTime},
-		&stats.Requests,
-		&stats.Tokens,
-		&stats.Cost,
-		&stats.StandardCost,
-		&stats.UserCost,
-		&stats.HostedRequests,
-		&stats.HostedCost,
-	); err != nil {
+	if err := scanSingleRow(ctx, r.sql, query, []any{accountID, startTime}, accountStatsScanTargets(stats)...); err != nil {
 		return nil, err
 	}
 	return stats, nil
@@ -2180,20 +2183,7 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 		return result, nil
 	}
 
-	query := `
-		SELECT
-			account_id,
-			COUNT(*) as requests,
-			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
-			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as cost,
-			COALESCE(SUM(total_cost), 0) as standard_cost,
-			COALESCE(SUM(actual_cost), 0) as user_cost,
-			COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
-			COALESCE(SUM(metered_cost), 0) as hosted_cost
-		FROM usage_logs
-		WHERE account_id = ANY($1) AND created_at >= $2
-		GROUP BY account_id
-	`
+	query := accountStatsSQL("account_id", "WHERE account_id = ANY($1) AND created_at >= $2")
 	rows, err := r.sql.QueryContext(ctx, query, pq.Array(accountIDs), startTime)
 	if err != nil {
 		return nil, err
@@ -2203,16 +2193,7 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 	for rows.Next() {
 		var accountID int64
 		stats := &usagestats.AccountStats{}
-		if err := rows.Scan(
-			&accountID,
-			&stats.Requests,
-			&stats.Tokens,
-			&stats.Cost,
-			&stats.StandardCost,
-			&stats.UserCost,
-			&stats.HostedRequests,
-			&stats.HostedCost,
-		); err != nil {
+		if err := rows.Scan(append([]any{&accountID}, accountStatsScanTargets(stats)...)...); err != nil {
 			return nil, err
 		}
 		result[accountID] = stats
@@ -2494,9 +2475,11 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 				COUNT(*) as requests,
 				COUNT(*) FILTER (WHERE u.metered_cost IS NOT NULL) as hosted_requests,
 				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens,
-				` + requestBodySizeAggregates + `
+				` + requestBodySizeAggregates + `,
+				` + subscriptionRevenueAggregates + `
 			FROM usage_logs u
 			LEFT JOIN users us ON u.user_id = us.id
+			LEFT JOIN groups g ON g.id = u.group_id
 			WHERE u.created_at >= $1 AND u.created_at < $2
 			GROUP BY u.user_id, us.email
 		),
@@ -2513,10 +2496,14 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 				request_body_bytes_avg,
 				request_body_bytes_max,
 				request_body_bytes_known_count,
+				subscription_revenue,
+				subscription_revenue_unpriced_cost,
 				COALESCE(SUM(cost) OVER (), 0) as total_cost,
 				COALESCE(SUM(actual_cost) OVER (), 0) as total_actual_cost,
 				COALESCE(SUM(requests) OVER (), 0) as total_requests,
-				COALESCE(SUM(tokens) OVER (), 0) as total_tokens
+				COALESCE(SUM(tokens) OVER (), 0) as total_tokens,
+				COALESCE(SUM(subscription_revenue) OVER (), 0) as total_subscription_revenue,
+				COALESCE(SUM(subscription_revenue_unpriced_cost) OVER (), 0) as total_subscription_revenue_unpriced_cost
 			FROM user_spend
 			ORDER BY ` + order + `
 			LIMIT $3
@@ -2533,10 +2520,14 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 			request_body_bytes_avg,
 			request_body_bytes_max,
 			request_body_bytes_known_count,
+			subscription_revenue,
+			subscription_revenue_unpriced_cost,
 			total_cost,
 			total_actual_cost,
 			total_requests,
-			total_tokens
+			total_tokens,
+			total_subscription_revenue,
+			total_subscription_revenue_unpriced_cost
 		FROM ranked
 		ORDER BY ` + order + `
 	`
@@ -2557,12 +2548,14 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 	totalActualCost := 0.0
 	totalRequests := int64(0)
 	totalTokens := int64(0)
+	totalRevenue, totalUnpriced := 0.0, 0.0
 	for rows.Next() {
 		var row UserSpendingRankingItem
 		var sizeAvg, sizeMax sql.NullInt64
 		if err = rows.Scan(&row.UserID, &row.Email, &row.Cost, &row.ActualCost, &row.Requests, &row.HostedRequests, &row.Tokens,
 			&row.RequestBodyBytesTotal, &sizeAvg, &sizeMax, &row.RequestBodyBytesKnownCount,
-			&totalCost, &totalActualCost, &totalRequests, &totalTokens); err != nil {
+			&row.SubscriptionRevenue, &row.SubscriptionRevenueUnpricedCost,
+			&totalCost, &totalActualCost, &totalRequests, &totalTokens, &totalRevenue, &totalUnpriced); err != nil {
 			return nil, err
 		}
 		row.RequestBodyBytesAvg, row.RequestBodyBytesMax = nullInt64Ptr(sizeAvg), nullInt64Ptr(sizeMax)
@@ -2578,6 +2571,11 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 		TotalActualCost: totalActualCost,
 		TotalRequests:   totalRequests,
 		TotalTokens:     totalTokens,
+
+		TotalSubscriptionRevenueStats: usagestats.TotalSubscriptionRevenueStats{
+			TotalSubscriptionRevenue:             totalRevenue,
+			TotalSubscriptionRevenueUnpricedCost: totalUnpriced,
+		},
 	}, nil
 }
 
@@ -3929,29 +3927,51 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		conditions = append(conditions, "client_entrypoint IS NOT NULL")
 	}
 
+	// Subscription revenue reuses every filter above, then prices each group's
+	// subscription consumption (billing_type = 1 by history, hosted rows
+	// excluded) with the group's current statistics-only rate. Groups without a
+	// rate, and rows without a group, are reported as unpriced consumption.
+	revenueConditions := append(append([]string{}, conditions...), "billing_type = 1", "metered_cost IS NULL")
 	query := fmt.Sprintf(`
-		SELECT
-			COUNT(*) as total_requests,
-			COALESCE(SUM(input_tokens), 0) as total_input_tokens,
-			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
-			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
-			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
-			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
-			COALESCE(SUM(total_cost), 0) as total_cost,
-			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE billing_type = 0), 0) as total_balance_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE billing_type = 1), 0) as total_subscription_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE billing_type IS NULL OR billing_type NOT IN (0, 1)), 0) as total_unclassified_cost,
-			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as total_account_cost,
-			COALESCE(AVG(duration_ms), 0) as avg_duration_ms,
-			SUM(metered_cost) as total_metered_cost
-		FROM usage_logs
-		%s
-	`, buildWhere(conditions))
+		WITH base AS (
+			SELECT
+				COUNT(*) as total_requests,
+				COALESCE(SUM(input_tokens), 0) as total_input_tokens,
+				COALESCE(SUM(output_tokens), 0) as total_output_tokens,
+				COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
+				COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+				COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
+				COALESCE(SUM(total_cost), 0) as total_cost,
+				COALESCE(SUM(actual_cost), 0) as total_actual_cost,
+				COALESCE(SUM(actual_cost) FILTER (WHERE billing_type = 0), 0) as total_balance_cost,
+				COALESCE(SUM(actual_cost) FILTER (WHERE billing_type = 1), 0) as total_subscription_cost,
+				COALESCE(SUM(actual_cost) FILTER (WHERE billing_type IS NULL OR billing_type NOT IN (0, 1)), 0) as total_unclassified_cost,
+				COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as total_account_cost,
+				COALESCE(AVG(duration_ms), 0) as avg_duration_ms,
+				SUM(metered_cost) as total_metered_cost
+			FROM usage_logs
+			%s
+		),
+		revenue AS (
+			SELECT
+				COALESCE(SUM(s.subscription_cost * g.subscription_revenue_rate), 0) as subscription_revenue,
+				COALESCE(SUM(s.subscription_cost) FILTER (WHERE g.subscription_revenue_rate IS NULL), 0) as subscription_revenue_unpriced_cost
+			FROM (
+				SELECT group_id, SUM(actual_cost) as subscription_cost
+				FROM usage_logs
+				%s
+				GROUP BY group_id
+			) s
+			LEFT JOIN groups g ON g.id = s.group_id
+		)
+		SELECT base.*, revenue.subscription_revenue, revenue.subscription_revenue_unpriced_cost
+		FROM base CROSS JOIN revenue
+	`, buildWhere(conditions), buildWhere(revenueConditions))
 
 	stats := &UsageStats{}
 	var totalAccountCost float64
 	var meteredCost sql.NullFloat64
+	var subscriptionRevenue, subscriptionRevenueUnpriced float64
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -3971,9 +3991,13 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		&totalAccountCost,
 		&stats.AverageDurationMs,
 		&meteredCost,
+		&subscriptionRevenue,
+		&subscriptionRevenueUnpriced,
 	); err != nil {
 		return nil, err
 	}
+	stats.TotalSubscriptionRevenue = &subscriptionRevenue
+	stats.SubscriptionRevenueUnpricedCost = &subscriptionRevenueUnpriced
 	// Admin-only query: account cost is always meaningful here. Hosted rows
 	// carry account_rate_multiplier 0, so their reference usage is reported
 	// separately as total_metered_cost (nil without hosted rows).

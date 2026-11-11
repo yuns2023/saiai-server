@@ -168,6 +168,7 @@ type UserSpendingRankingItem struct {
 	HostedRequests int64   `json:"hosted_requests"` // 其中托管请求数（metered_cost IS NOT NULL）
 	Tokens         int64   `json:"tokens"`
 	RequestBodySizeStats
+	SubscriptionRevenueStats
 }
 
 // UserSpendingRankingResponse represents ranking rows plus total spend for the time range.
@@ -177,6 +178,23 @@ type UserSpendingRankingResponse struct {
 	TotalActualCost float64                   `json:"total_actual_cost"`
 	TotalRequests   int64                     `json:"total_requests"`
 	TotalTokens     int64                     `json:"total_tokens"`
+	TotalSubscriptionRevenueStats
+}
+
+// SubscriptionRevenueStats is the admin-only subscription revenue estimate of
+// one ranking row: subscription consumption priced with each group's CURRENT
+// statistics-only rate (yuan), plus the subscription consumption ($) whose
+// group has no rate configured and is therefore not included.
+type SubscriptionRevenueStats struct {
+	SubscriptionRevenue             float64 `json:"subscription_revenue"`
+	SubscriptionRevenueUnpricedCost float64 `json:"subscription_revenue_unpriced_cost"`
+}
+
+// TotalSubscriptionRevenueStats totals SubscriptionRevenueStats over the whole
+// scope, before the ranking limit is applied.
+type TotalSubscriptionRevenueStats struct {
+	TotalSubscriptionRevenue             float64 `json:"total_subscription_revenue"`
+	TotalSubscriptionRevenueUnpricedCost float64 `json:"total_subscription_revenue_unpriced_cost"`
 }
 
 // UserBreakdownItem represents per-user usage breakdown within a dimension (group, model, endpoint).
@@ -281,24 +299,29 @@ type UsageLogFilters struct {
 
 // UsageStats represents usage statistics
 type UsageStats struct {
-	TotalRequests            int64          `json:"total_requests"`
-	TotalInputTokens         int64          `json:"total_input_tokens"`
-	TotalOutputTokens        int64          `json:"total_output_tokens"`
-	TotalCacheCreationTokens int64          `json:"total_cache_creation_tokens"`
-	TotalCacheReadTokens     int64          `json:"total_cache_read_tokens"`
-	TotalCacheTokens         int64          `json:"total_cache_tokens"`
-	TotalTokens              int64          `json:"total_tokens"`
-	TotalCost                float64        `json:"total_cost"`
-	TotalActualCost          float64        `json:"total_actual_cost"`
-	TotalBalanceCost         float64        `json:"total_balance_cost"`
-	TotalSubscriptionCost    float64        `json:"total_subscription_cost"`
-	TotalUnclassifiedCost    float64        `json:"total_unclassified_cost"`
-	TotalAccountCost         *float64       `json:"total_account_cost,omitempty"`
-	TotalMeteredCost         *float64       `json:"total_metered_cost,omitempty"` // hosted SUM(metered_cost); nil without hosted rows
-	AverageDurationMs        float64        `json:"average_duration_ms"`
-	Endpoints                []EndpointStat `json:"endpoints,omitempty"`
-	UpstreamEndpoints        []EndpointStat `json:"upstream_endpoints,omitempty"`
-	EndpointPaths            []EndpointStat `json:"endpoint_paths,omitempty"`
+	TotalRequests            int64    `json:"total_requests"`
+	TotalInputTokens         int64    `json:"total_input_tokens"`
+	TotalOutputTokens        int64    `json:"total_output_tokens"`
+	TotalCacheCreationTokens int64    `json:"total_cache_creation_tokens"`
+	TotalCacheReadTokens     int64    `json:"total_cache_read_tokens"`
+	TotalCacheTokens         int64    `json:"total_cache_tokens"`
+	TotalTokens              int64    `json:"total_tokens"`
+	TotalCost                float64  `json:"total_cost"`
+	TotalActualCost          float64  `json:"total_actual_cost"`
+	TotalBalanceCost         float64  `json:"total_balance_cost"`
+	TotalSubscriptionCost    float64  `json:"total_subscription_cost"`
+	TotalUnclassifiedCost    float64  `json:"total_unclassified_cost"`
+	TotalAccountCost         *float64 `json:"total_account_cost,omitempty"`
+	TotalMeteredCost         *float64 `json:"total_metered_cost,omitempty"` // hosted SUM(metered_cost); nil without hosted rows
+	// Admin-only (nil elsewhere): subscription consumption priced with each
+	// group's current statistics-only revenue rate (yuan), and the subscription
+	// consumption ($) whose group has no rate configured.
+	TotalSubscriptionRevenue        *float64       `json:"total_subscription_revenue,omitempty"`
+	SubscriptionRevenueUnpricedCost *float64       `json:"subscription_revenue_unpriced_cost,omitempty"`
+	AverageDurationMs               float64        `json:"average_duration_ms"`
+	Endpoints                       []EndpointStat `json:"endpoints,omitempty"`
+	UpstreamEndpoints               []EndpointStat `json:"upstream_endpoints,omitempty"`
+	EndpointPaths                   []EndpointStat `json:"endpoint_paths,omitempty"`
 }
 
 // BatchUserUsageStats represents usage stats for a single user

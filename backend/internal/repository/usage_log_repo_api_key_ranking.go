@@ -20,6 +20,13 @@ const requestBodySizeAggregates = `COALESCE(SUM(u.request_body_bytes), 0)::bigin
 				MAX(u.request_body_bytes) AS request_body_bytes_max,
 				COUNT(u.request_body_bytes) AS request_body_bytes_known_count`
 
+// subscriptionRevenueAggregates prices subscription consumption (billing_type
+// = 1 by history, hosted rows excluded) with each group's current
+// statistics-only revenue rate; it needs "LEFT JOIN groups g ON g.id =
+// u.group_id". Consumption whose group has no rate (or no group) is unpriced.
+const subscriptionRevenueAggregates = `COALESCE(SUM(u.actual_cost * g.subscription_revenue_rate) FILTER (WHERE u.billing_type = 1 AND u.metered_cost IS NULL), 0) AS subscription_revenue,
+				COALESCE(SUM(u.actual_cost) FILTER (WHERE u.billing_type = 1 AND u.metered_cost IS NULL AND g.subscription_revenue_rate IS NULL), 0) AS subscription_revenue_unpriced_cost`
+
 // spendingRankingOrderBy returns a fixed ORDER BY list for a whitelisted sort.
 // It is applied before LIMIT and again on the final SELECT; idOrder is the
 // stable tie-break. prefix qualifies columns (e.g. "r.").
@@ -83,8 +90,10 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 				COALESCE(SUM(u.cache_creation_tokens), 0) AS cache_creation_tokens,
 				COALESCE(SUM(u.cache_read_tokens), 0) AS cache_read_tokens,
 				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) AS tokens,
+				%s,
 				%s
 			FROM usage_logs u
+			LEFT JOIN groups g ON g.id = u.group_id
 			WHERE u.created_at >= $1 AND u.created_at < $2%s
 			GROUP BY u.api_key_id, u.user_id
 		), ranked AS (
@@ -92,7 +101,9 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 				COALESCE(SUM(cost) OVER (), 0) AS total_cost,
 				COALESCE(SUM(actual_cost) OVER (), 0) AS total_actual_cost,
 				COALESCE(SUM(requests) OVER (), 0) AS total_requests,
-				COALESCE(SUM(tokens) OVER (), 0) AS total_tokens
+				COALESCE(SUM(tokens) OVER (), 0) AS total_tokens,
+				COALESCE(SUM(subscription_revenue) OVER (), 0) AS total_subscription_revenue,
+				COALESCE(SUM(subscription_revenue_unpriced_cost) OVER (), 0) AS total_subscription_revenue_unpriced_cost
 			FROM key_spend
 			ORDER BY %s
 			LIMIT $%d
@@ -101,12 +112,14 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 			r.cost, r.actual_cost, r.requests, r.hosted_requests, r.tokens, r.input_tokens, r.output_tokens,
 			r.cache_creation_tokens, r.cache_read_tokens,
 			r.request_body_bytes_total, r.request_body_bytes_avg, r.request_body_bytes_max, r.request_body_bytes_known_count,
-			r.total_cost, r.total_actual_cost, r.total_requests, r.total_tokens
+			r.subscription_revenue, r.subscription_revenue_unpriced_cost,
+			r.total_cost, r.total_actual_cost, r.total_requests, r.total_tokens,
+			r.total_subscription_revenue, r.total_subscription_revenue_unpriced_cost
 		FROM ranked r
 		LEFT JOIN api_keys k ON k.id = r.api_key_id
 		LEFT JOIN users us ON us.id = r.user_id
 		ORDER BY %s
-	`, requestBodySizeAggregates, userFilter, rankedOrder, len(args), finalOrder)
+	`, requestBodySizeAggregates, subscriptionRevenueAggregates, userFilter, rankedOrder, len(args), finalOrder)
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -128,7 +141,9 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 			&item.Cost, &item.ActualCost, &item.Requests, &item.HostedRequests, &item.Tokens, &item.InputTokens, &item.OutputTokens,
 			&item.CacheCreationTokens, &item.CacheReadTokens,
 			&item.RequestBodyBytesTotal, &sizeAvg, &sizeMax, &item.RequestBodyBytesKnownCount,
+			&item.SubscriptionRevenue, &item.SubscriptionRevenueUnpricedCost,
 			&result.TotalCost, &result.TotalActualCost, &result.TotalRequests, &result.TotalTokens,
+			&result.TotalSubscriptionRevenue, &result.TotalSubscriptionRevenueUnpricedCost,
 		); err != nil {
 			return nil, err
 		}

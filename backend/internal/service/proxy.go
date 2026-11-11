@@ -59,4 +59,17 @@ type ProxyAccountSummary struct {
 	Platform string
 	Type     string
 	Notes    *string
+
+	// Runtime state, so the proxy's account list can show each account's
+	// status the same way the account list does.
+	Status                 string
+	Schedulable            bool
+	ErrorMessage           string
+	ErrorAt                *time.Time
+	RateLimitResetAt       *time.Time
+	OverloadUntil          *time.Time
+	TempUnschedulableUntil *time.Time
+	// Extra carries only the extra keys the status badge reads
+	// (model_rate_limits, allow_overages), never the full account extra.
+	Extra map[string]any
 }

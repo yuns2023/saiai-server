@@ -56,6 +56,8 @@ type Group struct {
 	MonthlyLimitUsd *float64 `json:"monthly_limit_usd,omitempty"`
 	// DefaultValidityDays holds the value of the "default_validity_days" field.
 	DefaultValidityDays int `json:"default_validity_days,omitempty"`
+	// SubscriptionRevenueRate holds the value of the "subscription_revenue_rate" field.
+	SubscriptionRevenueRate *float64 `json:"subscription_revenue_rate,omitempty"`
 	// ImagePrice1k holds the value of the "image_price_1k" field.
 	ImagePrice1k *float64 `json:"image_price_1k,omitempty"`
 	// ImagePrice2k holds the value of the "image_price_2k" field.
@@ -255,7 +257,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new([]byte)
 		case group.FieldIsExclusive, group.FieldHostedUsageEnabled, group.FieldShowAccountQuota, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldInputModerationEnabled, group.FieldInputModerationAutoDisableUser, group.FieldCodexCnTimezoneGuard:
 			values[i] = new(sql.NullBool)
-		case group.FieldRateMultiplier, group.FieldFiveHourLimitUsd, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k, group.FieldSoraImagePrice360, group.FieldSoraImagePrice540, group.FieldSoraVideoPricePerRequest, group.FieldSoraVideoPricePerRequestHd:
+		case group.FieldRateMultiplier, group.FieldFiveHourLimitUsd, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldSubscriptionRevenueRate, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k, group.FieldSoraImagePrice360, group.FieldSoraImagePrice540, group.FieldSoraVideoPricePerRequest, group.FieldSoraVideoPricePerRequestHd:
 			values[i] = new(sql.NullFloat64)
 		case group.FieldID, group.FieldRequiredLevelID, group.FieldDefaultValidityDays, group.FieldSoraStorageQuotaBytes, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldInputModerationCooldownMinutes, group.FieldInputModerationDisableAfterHits, group.FieldInputModerationStrikeWindowHours, group.FieldInputModerationMinConfidence, group.FieldInputModerationDedupeMinutes, group.FieldClaudeDeviceBaseLimit:
 			values[i] = new(sql.NullInt64)
@@ -398,6 +400,13 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field default_validity_days", values[i])
 			} else if value.Valid {
 				_m.DefaultValidityDays = int(value.Int64)
+			}
+		case group.FieldSubscriptionRevenueRate:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field subscription_revenue_rate", values[i])
+			} else if value.Valid {
+				_m.SubscriptionRevenueRate = new(float64)
+				*_m.SubscriptionRevenueRate = value.Float64
 			}
 		case group.FieldImagePrice1k:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -798,6 +807,11 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("default_validity_days=")
 	builder.WriteString(fmt.Sprintf("%v", _m.DefaultValidityDays))
+	builder.WriteString(", ")
+	if v := _m.SubscriptionRevenueRate; v != nil {
+		builder.WriteString("subscription_revenue_rate=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteString(", ")
 	if v := _m.ImagePrice1k; v != nil {
 		builder.WriteString("image_price_1k=")

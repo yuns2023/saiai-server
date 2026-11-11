@@ -527,6 +527,20 @@
               />
             </div>
           </div>
+          <div class="mt-3">
+            <label class="input-label">{{ t('admin.groups.subscription.revenueRate') }}</label>
+            <input
+              v-model.number="createForm.subscription_revenue_rate"
+              type="number"
+              step="0.0001"
+              min="0"
+              max="1000"
+              class="input"
+              data-testid="group-subscription-revenue-rate"
+              :placeholder="t('admin.groups.subscription.revenueRatePlaceholder')"
+            />
+            <p class="input-hint">{{ t('admin.groups.subscription.revenueRateHint') }}</p>
+          </div>
         </div>
 
         <!-- 图片生成计费配置（仅 gemini 平台） -->
@@ -1338,6 +1352,20 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
+          </div>
+          <div class="mt-3">
+            <label class="input-label">{{ t('admin.groups.subscription.revenueRate') }}</label>
+            <input
+              v-model.number="editForm.subscription_revenue_rate"
+              type="number"
+              step="0.0001"
+              min="0"
+              max="1000"
+              class="input"
+              data-testid="group-subscription-revenue-rate"
+              :placeholder="t('admin.groups.subscription.revenueRatePlaceholder')"
+            />
+            <p class="input-hint">{{ t('admin.groups.subscription.revenueRateHint') }}</p>
           </div>
         </div>
 
@@ -2231,6 +2259,8 @@ const createForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
+  // 统计用订阅折算倍率（元 / $1 订阅额度），null = 未配置
+  subscription_revenue_rate: null as number | null,
   // 图片生成计费配置（仅 gemini 平台使用）
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
@@ -2498,6 +2528,8 @@ const editForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
+  // 统计用订阅折算倍率（元 / $1 订阅额度），null = 未配置
+  subscription_revenue_rate: null as number | null,
   // 图片生成计费配置（仅 gemini 平台使用）
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
@@ -2662,6 +2694,7 @@ const closeCreateModal = () => {
   createForm.daily_limit_usd = null
   createForm.weekly_limit_usd = null
   createForm.monthly_limit_usd = null
+  createForm.subscription_revenue_rate = null
   createForm.image_price_1k = null
   createForm.image_price_2k = null
   createForm.image_price_4k = null
@@ -2739,6 +2772,7 @@ const handleCreateGroup = async () => {
     requestData.daily_limit_usd = emptyToNull(requestData.daily_limit_usd)
     requestData.weekly_limit_usd = emptyToNull(requestData.weekly_limit_usd)
     requestData.monthly_limit_usd = emptyToNull(requestData.monthly_limit_usd)
+    requestData.subscription_revenue_rate = emptyToNull(requestData.subscription_revenue_rate)
     await adminAPI.groups.create(requestData)
     appStore.showSuccess(t('admin.groups.groupCreated'))
     closeCreateModal()
@@ -2772,6 +2806,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.daily_limit_usd = group.daily_limit_usd
   editForm.weekly_limit_usd = group.weekly_limit_usd
   editForm.monthly_limit_usd = group.monthly_limit_usd
+  editForm.subscription_revenue_rate = group.subscription_revenue_rate ?? null
   editForm.image_price_1k = group.image_price_1k
   editForm.image_price_2k = group.image_price_2k
   editForm.image_price_4k = group.image_price_4k
@@ -2858,6 +2893,7 @@ const handleUpdateGroup = async () => {
     payload.daily_limit_usd = emptyToNull(payload.daily_limit_usd)
     payload.weekly_limit_usd = emptyToNull(payload.weekly_limit_usd)
     payload.monthly_limit_usd = emptyToNull(payload.monthly_limit_usd)
+    payload.subscription_revenue_rate = emptyToNull(payload.subscription_revenue_rate)
     await adminAPI.groups.update(editingGroup.value.id, payload)
     appStore.showSuccess(t('admin.groups.groupUpdated'))
     closeEditModal()

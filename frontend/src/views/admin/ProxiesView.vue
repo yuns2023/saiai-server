@@ -820,7 +820,7 @@
     <BaseDialog
       :show="showAccountsModal"
       :title="t('admin.proxies.accountsTitle', { name: accountsProxy?.name || '' })"
-      width="normal"
+      width="wide"
       @close="closeAccountsModal"
     >
       <div v-if="accountsLoading" class="flex items-center justify-center py-8 text-sm text-gray-500">
@@ -836,6 +836,7 @@
             <tr>
               <th class="px-4 py-2 text-left">{{ t('admin.proxies.accountName') }}</th>
               <th class="px-4 py-2 text-left">{{ t('admin.accounts.columns.platformType') }}</th>
+              <th class="px-4 py-2 text-left">{{ t('admin.accounts.columns.status') }}</th>
               <th class="px-4 py-2 text-left">{{ t('admin.proxies.accountNotes') }}</th>
             </tr>
           </thead>
@@ -844,6 +845,9 @@
               <td class="px-4 py-2 font-medium text-gray-900 dark:text-white">{{ account.name }}</td>
               <td class="px-4 py-2">
                 <PlatformTypeBadge :platform="account.platform" :type="account.type" />
+              </td>
+              <td class="px-4 py-2">
+                <AccountStatusIndicator :account="account" :temp-unsched-details="false" />
               </td>
               <td class="px-4 py-2 text-gray-600 dark:text-gray-300">
                 {{ account.notes || '-' }}
@@ -878,6 +882,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
+import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'

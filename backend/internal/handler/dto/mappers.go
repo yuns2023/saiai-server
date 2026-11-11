@@ -148,6 +148,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 	}
 	out := &AdminGroup{
 		Group:                            groupFromServiceBase(g),
+		SubscriptionRevenueRate:          g.SubscriptionRevenueRate,
 		InputModerationEnabled:           g.InputModerationEnabled,
 		InputModerationAutoDisableUser:   g.InputModerationAutoDisableUser,
 		InputModerationCategories:        g.InputModerationCategories,
@@ -544,11 +545,19 @@ func ProxyAccountSummaryFromService(a *service.ProxyAccountSummary) *ProxyAccoun
 		return nil
 	}
 	return &ProxyAccountSummary{
-		ID:       a.ID,
-		Name:     a.Name,
-		Platform: a.Platform,
-		Type:     a.Type,
-		Notes:    a.Notes,
+		ID:                     a.ID,
+		Name:                   a.Name,
+		Platform:               a.Platform,
+		Type:                   a.Type,
+		Notes:                  a.Notes,
+		Status:                 a.Status,
+		Schedulable:            a.Schedulable,
+		ErrorMessage:           a.ErrorMessage,
+		ErrorAt:                a.ErrorAt,
+		RateLimitResetAt:       a.RateLimitResetAt,
+		OverloadUntil:          a.OverloadUntil,
+		TempUnschedulableUntil: a.TempUnschedulableUntil,
+		Extra:                  a.Extra,
 	}
 }
 
@@ -679,7 +688,38 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		APIKey:                        APIKeyFromService(l.APIKey),
 		Group:                         GroupFromServiceShallow(l.Group),
 		Subscription:                  UserSubscriptionFromService(l.Subscription),
+		PricingSnapshot:               userPricingSnapshotFromService(l.PricingSnapshot),
 	}
+}
+
+// userPricingSnapshotFromService copies the long-context evidence of a pricing
+// snapshot into a fresh user DTO. A present snapshot always yields a non-nil
+// result (even when empty), because the frontend treats "snapshot present"
+// as proof that no inferred long-context hint applies.
+func userPricingSnapshotFromService(s *service.PricingSnapshot) *UserPricingSnapshot {
+	if s == nil {
+		return nil
+	}
+	out := &UserPricingSnapshot{
+		ServiceTier:                s.ServiceTier,
+		PriorityBilledAsStandard:   s.PriorityBilledAsStandard,
+		LongContextThreshold:       s.LongContextThreshold,
+		LongContextExtraMultiplier: s.LongContextExtraMultiplier,
+	}
+	if s.LongContext != nil {
+		lc := *s.LongContext
+		out.LongContext = &lc
+	}
+	if e := s.Effective; e != nil {
+		out.Effective = &UserLongContextPolicy{
+			LongContextThreshold:            e.LongContextInputThreshold,
+			LongContextInputMultiplier:      e.LongContextInputMultiplier,
+			LongContextOutputMultiplier:     e.LongContextOutputMultiplier,
+			LongContextCacheReadMultiplier:  e.LongContextCacheReadMultiplier,
+			LongContextCacheWriteMultiplier: e.LongContextCacheCreationMultiplier,
+		}
+	}
+	return out
 }
 
 // UsageLogFromService converts a service UsageLog to DTO for regular users.

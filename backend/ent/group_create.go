@@ -274,6 +274,20 @@ func (_c *GroupCreate) SetNillableDefaultValidityDays(v *int) *GroupCreate {
 	return _c
 }
 
+// SetSubscriptionRevenueRate sets the "subscription_revenue_rate" field.
+func (_c *GroupCreate) SetSubscriptionRevenueRate(v float64) *GroupCreate {
+	_c.mutation.SetSubscriptionRevenueRate(v)
+	return _c
+}
+
+// SetNillableSubscriptionRevenueRate sets the "subscription_revenue_rate" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableSubscriptionRevenueRate(v *float64) *GroupCreate {
+	if v != nil {
+		_c.SetSubscriptionRevenueRate(*v)
+	}
+	return _c
+}
+
 // SetImagePrice1k sets the "image_price_1k" field.
 func (_c *GroupCreate) SetImagePrice1k(v float64) *GroupCreate {
 	_c.mutation.SetImagePrice1k(v)
@@ -1300,6 +1314,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 		_spec.SetField(group.FieldDefaultValidityDays, field.TypeInt, value)
 		_node.DefaultValidityDays = value
 	}
+	if value, ok := _c.mutation.SubscriptionRevenueRate(); ok {
+		_spec.SetField(group.FieldSubscriptionRevenueRate, field.TypeFloat64, value)
+		_node.SubscriptionRevenueRate = &value
+	}
 	if value, ok := _c.mutation.ImagePrice1k(); ok {
 		_spec.SetField(group.FieldImagePrice1k, field.TypeFloat64, value)
 		_node.ImagePrice1k = &value
@@ -1904,6 +1922,30 @@ func (u *GroupUpsert) UpdateDefaultValidityDays() *GroupUpsert {
 // AddDefaultValidityDays adds v to the "default_validity_days" field.
 func (u *GroupUpsert) AddDefaultValidityDays(v int) *GroupUpsert {
 	u.Add(group.FieldDefaultValidityDays, v)
+	return u
+}
+
+// SetSubscriptionRevenueRate sets the "subscription_revenue_rate" field.
+func (u *GroupUpsert) SetSubscriptionRevenueRate(v float64) *GroupUpsert {
+	u.Set(group.FieldSubscriptionRevenueRate, v)
+	return u
+}
+
+// UpdateSubscriptionRevenueRate sets the "subscription_revenue_rate" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateSubscriptionRevenueRate() *GroupUpsert {
+	u.SetExcluded(group.FieldSubscriptionRevenueRate)
+	return u
+}
+
+// AddSubscriptionRevenueRate adds v to the "subscription_revenue_rate" field.
+func (u *GroupUpsert) AddSubscriptionRevenueRate(v float64) *GroupUpsert {
+	u.Add(group.FieldSubscriptionRevenueRate, v)
+	return u
+}
+
+// ClearSubscriptionRevenueRate clears the value of the "subscription_revenue_rate" field.
+func (u *GroupUpsert) ClearSubscriptionRevenueRate() *GroupUpsert {
+	u.SetNull(group.FieldSubscriptionRevenueRate)
 	return u
 }
 
@@ -2902,6 +2944,34 @@ func (u *GroupUpsertOne) AddDefaultValidityDays(v int) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateDefaultValidityDays() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateDefaultValidityDays()
+	})
+}
+
+// SetSubscriptionRevenueRate sets the "subscription_revenue_rate" field.
+func (u *GroupUpsertOne) SetSubscriptionRevenueRate(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetSubscriptionRevenueRate(v)
+	})
+}
+
+// AddSubscriptionRevenueRate adds v to the "subscription_revenue_rate" field.
+func (u *GroupUpsertOne) AddSubscriptionRevenueRate(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddSubscriptionRevenueRate(v)
+	})
+}
+
+// UpdateSubscriptionRevenueRate sets the "subscription_revenue_rate" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateSubscriptionRevenueRate() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateSubscriptionRevenueRate()
+	})
+}
+
+// ClearSubscriptionRevenueRate clears the value of the "subscription_revenue_rate" field.
+func (u *GroupUpsertOne) ClearSubscriptionRevenueRate() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearSubscriptionRevenueRate()
 	})
 }
 
@@ -4170,6 +4240,34 @@ func (u *GroupUpsertBulk) AddDefaultValidityDays(v int) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateDefaultValidityDays() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateDefaultValidityDays()
+	})
+}
+
+// SetSubscriptionRevenueRate sets the "subscription_revenue_rate" field.
+func (u *GroupUpsertBulk) SetSubscriptionRevenueRate(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetSubscriptionRevenueRate(v)
+	})
+}
+
+// AddSubscriptionRevenueRate adds v to the "subscription_revenue_rate" field.
+func (u *GroupUpsertBulk) AddSubscriptionRevenueRate(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddSubscriptionRevenueRate(v)
+	})
+}
+
+// UpdateSubscriptionRevenueRate sets the "subscription_revenue_rate" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateSubscriptionRevenueRate() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateSubscriptionRevenueRate()
+	})
+}
+
+// ClearSubscriptionRevenueRate clears the value of the "subscription_revenue_rate" field.
+func (u *GroupUpsertBulk) ClearSubscriptionRevenueRate() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearSubscriptionRevenueRate()
 	})
 }
 

@@ -688,12 +688,18 @@ func (s *AccountRepoSuite) TestClearQuotaSnapshot_RemovesObservedWindowsAndPrese
 		SessionWindowEnd:    &resetAt,
 		SessionWindowStatus: "rejected",
 		Extra: map[string]any{
-			"session_window_utilization":             1.0,
-			"passive_usage_7d_utilization":           1.0,
-			"passive_usage_7d_reset":                 resetAt.Unix(),
-			"passive_usage_7d_sonnet_utilization":    1.0,
-			"passive_usage_7d_sonnet_reset":          resetAt.Unix(),
-			"passive_usage_sampled_at":               now.Format(time.RFC3339),
+			"session_window_utilization":          1.0,
+			"passive_usage_7d_utilization":        1.0,
+			"passive_usage_7d_reset":              resetAt.Unix(),
+			"passive_usage_7d_sonnet_utilization": 1.0,
+			"passive_usage_7d_sonnet_reset":       resetAt.Unix(),
+			"passive_usage_7d_oi_utilization":     1.0,
+			"passive_usage_7d_oi_reset":           resetAt.Unix(),
+			"passive_usage_sampled_at":            now.Format(time.RFC3339),
+			"model_rate_limits": map[string]any{
+				service.AnthropicFableRateLimitKey: map[string]any{"rate_limit_reset_at": resetAt.Format(time.RFC3339)},
+				"claude-opus-5-5":                  map[string]any{"rate_limit_reset_at": resetAt.Format(time.RFC3339)},
+			},
 			"codex_5h_used_percent":                  100.0,
 			"codex_5h_reset_at":                      resetAt.Format(time.RFC3339),
 			"codex_7d_used_percent":                  100.0,
@@ -718,6 +724,8 @@ func (s *AccountRepoSuite) TestClearQuotaSnapshot_RemovesObservedWindowsAndPrese
 		"passive_usage_7d_reset",
 		"passive_usage_7d_sonnet_utilization",
 		"passive_usage_7d_sonnet_reset",
+		"passive_usage_7d_oi_utilization",
+		"passive_usage_7d_oi_reset",
 		"passive_usage_sampled_at",
 		"codex_5h_used_percent",
 		"codex_5h_reset_at",
@@ -727,6 +735,10 @@ func (s *AccountRepoSuite) TestClearQuotaSnapshot_RemovesObservedWindowsAndPrese
 		_, exists := got.Extra[key]
 		s.Require().False(exists, "quota snapshot key %q should be removed", key)
 	}
+	modelLimits, ok := got.Extra["model_rate_limits"].(map[string]any)
+	s.Require().True(ok, "unrelated model rate limits should be preserved")
+	s.Require().NotContains(modelLimits, service.AnthropicFableRateLimitKey)
+	s.Require().Contains(modelLimits, "claude-opus-5-5")
 	s.Require().Equal("carpool", got.Extra["claude_oauth_mode"])
 	s.Require().Equal(true, got.Extra["claude_oauth_carpool_unlimited_devices"])
 }

@@ -43,6 +43,8 @@ type Group struct {
 	WeeklyLimitUSD      *float64
 	MonthlyLimitUSD     *float64
 	DefaultValidityDays int
+	// SubscriptionRevenueRate 统计用：每消耗 $1 订阅额度折合多少元；nil=未配置。不参与计费。
+	SubscriptionRevenueRate *float64
 
 	// 图片生成计费配置（antigravity 和 gemini 平台使用）
 	ImagePrice1K *float64

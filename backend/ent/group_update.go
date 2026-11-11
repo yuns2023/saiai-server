@@ -351,6 +351,33 @@ func (_u *GroupUpdate) AddDefaultValidityDays(v int) *GroupUpdate {
 	return _u
 }
 
+// SetSubscriptionRevenueRate sets the "subscription_revenue_rate" field.
+func (_u *GroupUpdate) SetSubscriptionRevenueRate(v float64) *GroupUpdate {
+	_u.mutation.ResetSubscriptionRevenueRate()
+	_u.mutation.SetSubscriptionRevenueRate(v)
+	return _u
+}
+
+// SetNillableSubscriptionRevenueRate sets the "subscription_revenue_rate" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableSubscriptionRevenueRate(v *float64) *GroupUpdate {
+	if v != nil {
+		_u.SetSubscriptionRevenueRate(*v)
+	}
+	return _u
+}
+
+// AddSubscriptionRevenueRate adds value to the "subscription_revenue_rate" field.
+func (_u *GroupUpdate) AddSubscriptionRevenueRate(v float64) *GroupUpdate {
+	_u.mutation.AddSubscriptionRevenueRate(v)
+	return _u
+}
+
+// ClearSubscriptionRevenueRate clears the value of the "subscription_revenue_rate" field.
+func (_u *GroupUpdate) ClearSubscriptionRevenueRate() *GroupUpdate {
+	_u.mutation.ClearSubscriptionRevenueRate()
+	return _u
+}
+
 // SetImagePrice1k sets the "image_price_1k" field.
 func (_u *GroupUpdate) SetImagePrice1k(v float64) *GroupUpdate {
 	_u.mutation.ResetImagePrice1k()
@@ -1461,6 +1488,15 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedDefaultValidityDays(); ok {
 		_spec.AddField(group.FieldDefaultValidityDays, field.TypeInt, value)
 	}
+	if value, ok := _u.mutation.SubscriptionRevenueRate(); ok {
+		_spec.SetField(group.FieldSubscriptionRevenueRate, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedSubscriptionRevenueRate(); ok {
+		_spec.AddField(group.FieldSubscriptionRevenueRate, field.TypeFloat64, value)
+	}
+	if _u.mutation.SubscriptionRevenueRateCleared() {
+		_spec.ClearField(group.FieldSubscriptionRevenueRate, field.TypeFloat64)
+	}
 	if value, ok := _u.mutation.ImagePrice1k(); ok {
 		_spec.SetField(group.FieldImagePrice1k, field.TypeFloat64, value)
 	}
@@ -2333,6 +2369,33 @@ func (_u *GroupUpdateOne) SetNillableDefaultValidityDays(v *int) *GroupUpdateOne
 // AddDefaultValidityDays adds value to the "default_validity_days" field.
 func (_u *GroupUpdateOne) AddDefaultValidityDays(v int) *GroupUpdateOne {
 	_u.mutation.AddDefaultValidityDays(v)
+	return _u
+}
+
+// SetSubscriptionRevenueRate sets the "subscription_revenue_rate" field.
+func (_u *GroupUpdateOne) SetSubscriptionRevenueRate(v float64) *GroupUpdateOne {
+	_u.mutation.ResetSubscriptionRevenueRate()
+	_u.mutation.SetSubscriptionRevenueRate(v)
+	return _u
+}
+
+// SetNillableSubscriptionRevenueRate sets the "subscription_revenue_rate" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableSubscriptionRevenueRate(v *float64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetSubscriptionRevenueRate(*v)
+	}
+	return _u
+}
+
+// AddSubscriptionRevenueRate adds value to the "subscription_revenue_rate" field.
+func (_u *GroupUpdateOne) AddSubscriptionRevenueRate(v float64) *GroupUpdateOne {
+	_u.mutation.AddSubscriptionRevenueRate(v)
+	return _u
+}
+
+// ClearSubscriptionRevenueRate clears the value of the "subscription_revenue_rate" field.
+func (_u *GroupUpdateOne) ClearSubscriptionRevenueRate() *GroupUpdateOne {
+	_u.mutation.ClearSubscriptionRevenueRate()
 	return _u
 }
 
@@ -3475,6 +3538,15 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedDefaultValidityDays(); ok {
 		_spec.AddField(group.FieldDefaultValidityDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.SubscriptionRevenueRate(); ok {
+		_spec.SetField(group.FieldSubscriptionRevenueRate, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedSubscriptionRevenueRate(); ok {
+		_spec.AddField(group.FieldSubscriptionRevenueRate, field.TypeFloat64, value)
+	}
+	if _u.mutation.SubscriptionRevenueRateCleared() {
+		_spec.ClearField(group.FieldSubscriptionRevenueRate, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.ImagePrice1k(); ok {
 		_spec.SetField(group.FieldImagePrice1k, field.TypeFloat64, value)

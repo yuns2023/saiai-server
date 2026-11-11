@@ -265,6 +265,38 @@ describe('ModelDistributionChart', () => {
     expect(rows[2].text()).toContain('$9.00')
   })
 
+  it('shows subscription revenue per user and for Others', async () => {
+    const wrapper = mount(ModelDistributionChart, {
+      props: {
+        modelStats: [],
+        enableRankingView: true,
+        rankingItems: [
+          { user_id: 1, email: 'alpha@example.com', cost: 12, actual_cost: 10, requests: 10, hosted_requests: 0, tokens: 1000,
+            subscription_revenue: 6.4, subscription_revenue_unpriced_cost: 0 },
+          { user_id: 2, email: 'beta@example.com', cost: 8, actual_cost: 6, requests: 6, hosted_requests: 0, tokens: 600,
+            subscription_revenue: 0, subscription_revenue_unpriced_cost: 0 },
+        ],
+        rankingTotalCost: 30,
+        rankingTotalActualCost: 25,
+        rankingTotalRequests: 20,
+        rankingTotalTokens: 2000,
+        rankingTotalSubscriptionRevenue: 10,
+        rankingTotalSubscriptionRevenueUnpricedCost: 3,
+      },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+    const rankingButton = wrapper.findAll('button').find((button) => button.text() === 'User Spending Ranking')
+    await rankingButton!.trigger('click')
+
+    const cells = wrapper.findAll('[data-testid="ranking-subscription-revenue"]')
+    expect(cells).toHaveLength(3)
+    // Rendered by the real component (a missing import would leave an unknown element).
+    expect(cells[0].find('[data-testid="subscription-revenue"]').exists()).toBe(true)
+    expect(cells[0].text()).toContain('≈¥6.40')
+    expect(cells[1].text()).toBe('-')
+    expect(cells[2].text().replace(/\s+/g, '')).toBe('≈¥3.60+$3.00?')
+  })
+
   it('shows request body sizes and switches the ranking sort', async () => {
     const wrapper = mount(ModelDistributionChart, {
       props: {

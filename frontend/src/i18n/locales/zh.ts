@@ -980,6 +980,9 @@ export default {
     actualCost: '计费消耗（含订阅额度）',
     balanceCharge: '按量余额扣费',
     subscriptionUsage: '订阅额度消耗',
+    subscriptionRevenue: '订阅折算',
+    subscriptionRevenueHint: '估算的订阅实收：订阅额度消耗 × 所属分组当前的订阅折算倍率（元 / $1）。不是收款流水；修改分组倍率后历史统计会按新倍率重算。',
+    subscriptionRevenueUnpriced: '另有 {cost} 订阅消耗所在分组未配置倍率，未计入',
     subscriptionUsageHint: '套餐额度使用量，非实际支付金额；所选时段累计值不代表当前周期剩余额度。',
     unclassifiedUsage: '未分类消耗',
     billingSource: '扣费来源',
@@ -2254,7 +2257,10 @@ export default {
         monthlyLimit: '每月限额（USD）',
         defaultValidityDays: '默认有效期（天）',
         validityHint: '分配给用户时订阅的有效天数',
-        noLimit: '无限制'
+        noLimit: '无限制',
+        revenueRate: '订阅折算倍率（元 / $1 额度）',
+        revenueRatePlaceholder: '未配置，例如 0.64',
+        revenueRateHint: '只用于统计，不影响扣费和限额。使用记录、排行和账号统计里的「订阅折算」= 订阅额度消耗 × 分组当前的这个倍率；修改后历史统计也会按新倍率重算。留空表示未配置，0 表示免费。'
       },
       imagePricing: {
         title: '图片生成计费',
