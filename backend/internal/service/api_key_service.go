@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/dgraph-io/ristretto"
@@ -713,7 +714,12 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 
 	// Invalidate Redis rate limit cache so reset takes effect immediately
 	if resetRateLimit && s.rateLimitCacheInvalid != nil {
-		_ = s.rateLimitCacheInvalid.InvalidateAPIKeyRateLimit(ctx, apiKey.ID)
+		invalidateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		err := s.rateLimitCacheInvalid.InvalidateAPIKeyRateLimit(invalidateCtx, apiKey.ID)
+		cancel()
+		if err != nil {
+			logger.LegacyPrintf("service.api_key", "Warning: invalidate rate limit cache after reset failed for api key %d: %v", apiKey.ID, err)
+		}
 	}
 
 	return apiKey, nil
