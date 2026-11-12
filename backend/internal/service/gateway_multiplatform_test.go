@@ -2717,3 +2717,18 @@ func (*mockAccountRepoForPlatform) UpdateCredentials(context.Context, int64, map
 func (*mockAccountRepoForPlatform) MergeCredentials(context.Context, int64, map[string]any, CredentialsGuard) (bool, error) {
 	panic("unexpected MergeCredentials call")
 }
+
+// UpdateLocked emulates the repository: apply to the current row, then save.
+func (s *mockAccountRepoForPlatform) UpdateLocked(ctx context.Context, id int64, apply func(*Account) error) (*Account, error) {
+	account, err := s.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := apply(account); err != nil {
+		return nil, err
+	}
+	if err := s.Update(ctx, account); err != nil {
+		return nil, err
+	}
+	return account, nil
+}

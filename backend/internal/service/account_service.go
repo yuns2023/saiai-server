@@ -70,6 +70,10 @@ type AccountRepository interface {
 	ClearAntigravityQuotaScopes(ctx context.Context, id int64) error
 	ClearModelRateLimits(ctx context.Context, id int64) error
 	UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error
+	// UpdateLocked applies a change to the current row under a row lock and
+	// writes it in the same transaction (no network I/O inside apply). It
+	// starts its own transaction and rejects a caller's.
+	UpdateLocked(ctx context.Context, id int64, apply func(*Account) error) (*Account, error)
 	UpdateExtra(ctx context.Context, id int64, updates map[string]any) error
 	// UpdateCredentials replaces only the credentials column (token refresh).
 	// Unlike Update it leaves extra, status and runtime columns alone, so a

@@ -314,6 +314,13 @@ type UpdateAccountInput struct {
 	ExpiresAt              *int64
 	AutoPauseOnExpired     *bool
 	SkipMixedChannelCheck  bool // 跳过混合渠道检查（用户已确认风险）
+	// EditorSave marks a save from the admin edit endpoint, whose credentials
+	// and extra are a snapshot from when the page loaded. OAuth/setup-token
+	// token keys and runtime extra keys are then taken from the current row
+	// (see account_edit_protection.go). Set by the server-side handler only,
+	// never from the request body. Refresh/re-auth callers leave it false:
+	// they intend to write those keys.
+	EditorSave bool
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
@@ -2088,6 +2095,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
+	// Checks that read other tables run before the row lock, on this read.
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -2095,130 +2103,16 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if IsRetiredPlatform(account.Platform) {
 		return nil, ErrPlatformRetired
 	}
-	previousCarpool := *account
-	previousCarpool.Extra = maps.Clone(account.Extra)
-	wasOveragesEnabled := account.IsOveragesEnabled()
 	if err := NormalizeAccountBlockedModelPatternsExtra(input.Extra); err != nil {
 		return nil, err
-	}
-
-	if input.Name != "" {
-		account.Name = input.Name
-	}
-	if input.Type != "" {
-		account.Type = input.Type
-	}
-	if input.Notes != nil {
-		account.Notes = normalizeAccountNotes(input.Notes)
-	}
-	if len(input.Credentials) > 0 {
-		account.Credentials = input.Credentials
-	}
-	if input.CarpoolUserIDs != nil {
-		account.CarpoolUserIDs = *input.CarpoolUserIDs
-	}
-	if input.CarpoolAPIKeyIDs != nil {
-		refs, err := s.resolveCarpoolAPIKeys(ctx, *input.CarpoolAPIKeyIDs)
-		if err != nil {
-			return nil, err
-		}
-		account.CarpoolAPIKeys = refs
-	}
-
-	// Extra 使用 map：需要区分“未提供(nil)”与“显式清空({})”。
-	// 关闭配额限制时前端会删除 quota_* 键并提交 extra:{}，此时也必须落库。
-	if input.Extra != nil {
-		// 保留配额用量字段，防止编辑账号时意外重置
-		for _, key := range []string{"quota_used", "quota_daily_used", "quota_daily_start", "quota_weekly_used", "quota_weekly_start"} {
-			if v, ok := account.Extra[key]; ok {
-				input.Extra[key] = v
-			}
-		}
-		account.Extra = input.Extra
-		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
-			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
-			// 清除 AICredits 限流 key
-			if rawLimits, ok := account.Extra[modelRateLimitsKey].(map[string]any); ok {
-				delete(rawLimits, creditsExhaustedKey)
-			}
-		}
-		if account.Platform == PlatformAntigravity && !wasOveragesEnabled && account.IsOveragesEnabled() {
-			delete(account.Extra, modelRateLimitsKey)
-			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
-		}
-		// 校验并预计算固定时间重置的下次重置时间
-		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
-			return nil, err
-		}
-		ComputeQuotaResetAt(account.Extra)
-	}
-	applyClaudeOAuthSingleDeviceDefaults(account.Platform, account.Type, account.Extra)
-	if input.ProxyID != nil {
-		// 0 表示清除代理（前端发送 0 而不是 null 来表达清除意图）
-		if *input.ProxyID == 0 {
-			account.ProxyID = nil
-		} else {
-			account.ProxyID = input.ProxyID
-		}
-		account.Proxy = nil // 清除关联对象，防止 GORM Save 时根据 Proxy.ID 覆盖 ProxyID
-	}
-	// 只在指针非 nil 时更新 Concurrency（支持设置为 0）
-	if input.Concurrency != nil {
-		account.Concurrency = *input.Concurrency
-	}
-	// 只在指针非 nil 时更新 Priority（支持设置为 0）
-	if input.Priority != nil {
-		account.Priority = *input.Priority
-	}
-	if input.RateMultiplier != nil {
-		if *input.RateMultiplier < 0 {
-			return nil, errors.New("rate_multiplier must be >= 0")
-		}
-		account.RateMultiplier = input.RateMultiplier
 	}
 	if err := validatePaygDiscountMultiplier(input.PaygDiscountMultiplier); err != nil {
 		return nil, err
 	}
-	if input.PaygDiscountMultiplier != nil {
-		account.PaygDiscountMultiplier = input.PaygDiscountMultiplier
-	}
-	if input.LoadFactor != nil {
-		if *input.LoadFactor <= 0 {
-			account.LoadFactor = nil // 0 或负数表示清除
-		} else if *input.LoadFactor > 10000 {
-			return nil, errors.New("load_factor must be <= 10000")
-		} else {
-			account.LoadFactor = input.LoadFactor
-		}
-	}
-	if input.Status != "" {
-		account.Status = input.Status
-	}
-	if input.ExpiresAt != nil {
-		if *input.ExpiresAt <= 0 {
-			account.ExpiresAt = nil
-		} else {
-			expiresAt := time.Unix(*input.ExpiresAt, 0)
-			account.ExpiresAt = &expiresAt
-		}
-	}
-	if input.AutoPauseOnExpired != nil {
-		account.AutoPauseOnExpired = *input.AutoPauseOnExpired
-	}
-	normalizeSingleDeviceFixedHeaders(account)
-	if err := validateClaudeOAuthSingleDeviceConfig(account); err != nil {
-		return nil, err
-	}
-
-	// Sora apikey 账号的 base_url 必填校验
-	if account.Platform == PlatformSora && account.Type == AccountTypeAPIKey {
-		baseURL, _ := account.Credentials["base_url"].(string)
-		baseURL = strings.TrimSpace(baseURL)
-		if baseURL == "" {
-			return nil, errors.New("sora apikey 账号必须设置 base_url")
-		}
-		if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
-			return nil, errors.New("base_url 必须以 http:// 或 https:// 开头")
+	var carpoolAPIKeys []CarpoolAPIKeyRef
+	if input.CarpoolAPIKeyIDs != nil {
+		if carpoolAPIKeys, err = s.resolveCarpoolAPIKeys(ctx, *input.CarpoolAPIKeyIDs); err != nil {
+			return nil, err
 		}
 	}
 
@@ -2247,14 +2141,18 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
-	NormalizeCarpoolMaintenance(account, &previousCarpool, time.Now())
-	if err := s.accountRepo.Update(ctx, account); err != nil {
+	// The change is applied to the current row under a row lock, not to the
+	// read above: a charge, rate limit, usage sample or token refresh
+	// committed since then is kept.
+	if _, err := s.accountRepo.UpdateLocked(ctx, id, func(locked *Account) error {
+		return applyUpdateAccountInput(locked, input, carpoolAPIKeys, time.Now())
+	}); err != nil {
 		return nil, err
 	}
 
 	// 绑定分组
 	if input.GroupIDs != nil {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, *input.GroupIDs); err != nil {
+		if err := s.accountRepo.BindGroups(ctx, id, *input.GroupIDs); err != nil {
 			return nil, err
 		}
 	}
@@ -2265,6 +2163,157 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		return nil, err
 	}
 	return updated, nil
+}
+
+// applyUpdateAccountInput applies an UpdateAccountInput to the locked current
+// row, modifying account in place. It runs inside the row lock: no network or
+// other-table I/O here (quota reset times still read the wall clock).
+func applyUpdateAccountInput(account *Account, input *UpdateAccountInput, carpoolAPIKeys []CarpoolAPIKeyRef, now time.Time) error {
+	if IsRetiredPlatform(account.Platform) {
+		return ErrPlatformRetired
+	}
+	previousCarpool := *account
+	previousCarpool.Extra = cloneExtraMap(account.Extra)
+	currentCredentials := account.Credentials
+	currentExtra := cloneExtraMap(account.Extra)
+	storedType := account.Type
+	wasOveragesEnabled := account.IsOveragesEnabled()
+
+	if input.Name != "" {
+		account.Name = input.Name
+	}
+	if input.Type != "" {
+		account.Type = input.Type
+	}
+	if input.Notes != nil {
+		account.Notes = normalizeAccountNotes(input.Notes)
+	}
+	if len(input.Credentials) > 0 {
+		credentials := input.Credentials
+		if input.EditorSave && (storedType == AccountTypeOAuth || storedType == AccountTypeSetupToken) {
+			// The page never edits tokens; a rotated refresh_token must not be
+			// replaced by the one the page loaded.
+			credentials = keepCurrentKeys(credentials, currentCredentials, isEditorProtectedAuthCredentialKey)
+		}
+		account.Credentials = credentials
+	}
+	if input.CarpoolUserIDs != nil {
+		account.CarpoolUserIDs = *input.CarpoolUserIDs
+	}
+	if input.CarpoolAPIKeyIDs != nil {
+		account.CarpoolAPIKeys = carpoolAPIKeys
+	}
+
+	// Extra 使用 map：需要区分“未提供(nil)”与“显式清空({})”。
+	// 关闭配额限制时前端会删除 quota_* 键并提交 extra:{}，此时也必须落库。
+	if input.Extra != nil {
+		var extra map[string]any
+		if input.EditorSave {
+			// Runtime keys (usage samples, quota counters, rate limits, ...)
+			// come from the current row, not the page snapshot.
+			extra = keepCurrentKeys(input.Extra, currentExtra, isEditorRuntimeExtraKey)
+		} else {
+			extra = maps.Clone(input.Extra)
+			// 保留配额用量字段，防止编辑账号时意外重置
+			for _, key := range []string{"quota_used", "quota_daily_used", "quota_daily_start", "quota_weekly_used", "quota_weekly_start"} {
+				if v, ok := currentExtra[key]; ok {
+					extra[key] = v
+				}
+			}
+		}
+		account.Extra = extra
+		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
+			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
+			// 清除 AICredits 限流 key（model_rate_limits is a copy of the current one）
+			if rawLimits, ok := account.Extra[modelRateLimitsKey].(map[string]any); ok {
+				delete(rawLimits, creditsExhaustedKey)
+			}
+		}
+		if account.Platform == PlatformAntigravity && !wasOveragesEnabled && account.IsOveragesEnabled() {
+			delete(account.Extra, modelRateLimitsKey)
+			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
+		}
+		// 校验并预计算固定时间重置的下次重置时间
+		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
+			return err
+		}
+		if input.EditorSave {
+			applyQuotaResetAtForEdit(account.Extra, currentExtra)
+		} else {
+			ComputeQuotaResetAt(account.Extra)
+		}
+	}
+	applyClaudeOAuthSingleDeviceDefaults(account.Platform, account.Type, account.Extra)
+	if input.ProxyID != nil {
+		// 0 表示清除代理（前端发送 0 而不是 null 来表达清除意图）
+		if *input.ProxyID == 0 {
+			account.ProxyID = nil
+		} else {
+			account.ProxyID = input.ProxyID
+		}
+		account.Proxy = nil // 清除关联对象，防止 GORM Save 时根据 Proxy.ID 覆盖 ProxyID
+	}
+	// 只在指针非 nil 时更新 Concurrency（支持设置为 0）
+	if input.Concurrency != nil {
+		account.Concurrency = *input.Concurrency
+	}
+	// 只在指针非 nil 时更新 Priority（支持设置为 0）
+	if input.Priority != nil {
+		account.Priority = *input.Priority
+	}
+	if input.RateMultiplier != nil {
+		if *input.RateMultiplier < 0 {
+			return errors.New("rate_multiplier must be >= 0")
+		}
+		account.RateMultiplier = input.RateMultiplier
+	}
+	if input.PaygDiscountMultiplier != nil {
+		account.PaygDiscountMultiplier = input.PaygDiscountMultiplier
+	}
+	if input.LoadFactor != nil {
+		if *input.LoadFactor <= 0 {
+			account.LoadFactor = nil // 0 或负数表示清除
+		} else if *input.LoadFactor > 10000 {
+			return errors.New("load_factor must be <= 10000")
+		} else {
+			account.LoadFactor = input.LoadFactor
+		}
+	}
+	if input.Status != "" {
+		account.Status = input.Status
+	}
+	if input.ExpiresAt != nil {
+		if *input.ExpiresAt <= 0 {
+			account.ExpiresAt = nil
+		} else {
+			expiresAt := time.Unix(*input.ExpiresAt, 0)
+			account.ExpiresAt = &expiresAt
+		}
+	}
+	if input.AutoPauseOnExpired != nil {
+		account.AutoPauseOnExpired = *input.AutoPauseOnExpired
+	}
+	normalizeSingleDeviceFixedHeaders(account)
+	if err := validateClaudeOAuthSingleDeviceConfig(account); err != nil {
+		return err
+	}
+
+	// Sora apikey 账号的 base_url 必填校验
+	if account.Platform == PlatformSora && account.Type == AccountTypeAPIKey {
+		baseURL, _ := account.Credentials["base_url"].(string)
+		baseURL = strings.TrimSpace(baseURL)
+		if baseURL == "" {
+			return errors.New("sora apikey 账号必须设置 base_url")
+		}
+		if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+			return errors.New("base_url 必须以 http:// 或 https:// 开头")
+		}
+	}
+
+	// previousCarpool is the current row: unchanged carpool config keeps the
+	// maintenance schedule the worker advanced.
+	NormalizeCarpoolMaintenance(account, &previousCarpool, now)
+	return nil
 }
 
 // BulkUpdateAccounts updates multiple accounts in one request.
