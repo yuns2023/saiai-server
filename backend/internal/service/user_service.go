@@ -169,9 +169,8 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, req Chan
 		return fmt.Errorf("set password: %w", err)
 	}
 
-	// Increment TokenVersion to invalidate all existing tokens
-	// This ensures that any tokens issued before the password change become invalid
-	user.TokenVersion++
+	// SetPassword marks the save as a password change, which also increments
+	// the token version and so invalidates every token issued before it.
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return fmt.Errorf("update user: %w", err)
@@ -238,6 +237,11 @@ func (s *UserService) UpdateStatus(ctx context.Context, userID int64, status str
 
 	oldStatus := user.Status
 	user.Status = status
+	// Same rule as adminServiceImpl.UpdateUser: disabling ends sessions so
+	// re-enabling does not revive tokens issued before.
+	if oldStatus == StatusActive && status != StatusActive {
+		user.RevokeSessionsOnSave = true
+	}
 	if status == StatusActive && oldStatus != StatusActive && s.inputRiskRepo != nil {
 		if err := s.inputRiskRepo.ResetUserInputRiskState(ctx, userID); err != nil {
 			return fmt.Errorf("reset input moderation state: %w", err)

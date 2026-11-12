@@ -302,7 +302,7 @@ func (r *inputModerationRepository) ApplyInputModerationIncident(
 	userDisabled := false
 	if shouldDisable {
 		result, err := tx.ExecContext(ctx, `
-			UPDATE users SET status = 'disabled', updated_at = NOW()
+			UPDATE users SET status = 'disabled', token_version = token_version + 1, updated_at = NOW()
 			WHERE id = $1 AND status = 'active' AND role <> 'admin'`, event.UserID)
 		if err != nil {
 			return nil, fmt.Errorf("disable user after input moderation escalation: %w", err)

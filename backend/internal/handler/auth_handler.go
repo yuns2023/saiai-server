@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -598,7 +599,11 @@ func (h *AuthHandler) RevokeAllSessions(c *gin.Context) {
 		return
 	}
 
-	if err := h.authService.RevokeAllUserSessions(c.Request.Context(), subject.UserID); err != nil {
+	if err := h.authService.LogoutEverywhere(c.Request.Context(), subject.UserID); err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			response.ErrorFrom(c, err)
+			return
+		}
 		slog.Error("failed to revoke all sessions", "user_id", subject.UserID, "error", err)
 		response.InternalError(c, "Failed to revoke sessions")
 		return
