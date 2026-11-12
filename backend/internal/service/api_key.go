@@ -71,6 +71,12 @@ type APIKey struct {
 	Window5hStart *time.Time // Start of current 5h window
 	Window1dStart *time.Time // Start of current 1d window
 	Window7dStart *time.Time // Start of current 7d window
+
+	// Save intents for APIKeyRepository.Update; never persisted. Billing owns
+	// quota_used and the rate-limit counters, so an ordinary save must not
+	// write back the possibly stale values it loaded.
+	ResetQuotaUsedOnSave      bool `json:"-"`
+	ResetRateLimitUsageOnSave bool `json:"-"`
 }
 
 func (k *APIKey) IsActive() bool {

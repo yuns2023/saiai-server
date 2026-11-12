@@ -659,6 +659,7 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	}
 	if req.ResetQuota != nil && *req.ResetQuota {
 		apiKey.QuotaUsed = 0
+		apiKey.ResetQuotaUsedOnSave = true
 		// If resetting quota and status was quota_exhausted, reactivate
 		if apiKey.Status == StatusAPIKeyQuotaExhausted {
 			apiKey.Status = StatusActive
@@ -703,6 +704,7 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		apiKey.Window5hStart = nil
 		apiKey.Window1dStart = nil
 		apiKey.Window7dStart = nil
+		apiKey.ResetRateLimitUsageOnSave = true
 	}
 
 	if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
@@ -712,7 +714,8 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	s.InvalidateAuthCacheByKey(ctx, apiKey.Key)
 	s.compileAPIKeyIPRules(apiKey)
 
-	// Invalidate Redis rate limit cache so reset takes effect immediately
+	// Rate limits are checked against the database; this only removes a
+	// leftover Redis entry from releases that cached them.
 	if resetRateLimit && s.rateLimitCacheInvalid != nil {
 		invalidateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		err := s.rateLimitCacheInvalid.InvalidateAPIKeyRateLimit(invalidateCtx, apiKey.ID)
