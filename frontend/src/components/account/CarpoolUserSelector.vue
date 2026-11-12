@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
+import CarpoolUserLabel from './CarpoolUserLabel.vue'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
@@ -30,7 +31,11 @@ function toggle(id: number) {
     </div>
     <p v-if="error" role="alert">{{ t('admin.accounts.carpoolUserSearchFailed') }}</p>
     <div class="flex flex-wrap gap-2">
-      <button v-for="id in modelValue" :key="id" type="button" class="btn btn-secondary btn-sm" @click="toggle(id)">{{ t('admin.accounts.carpoolSelectedUser', { id }) }} ×</button>
+      <span v-for="id in modelValue" :key="id" class="btn btn-secondary btn-sm gap-1" data-testid="carpool-user-chip">
+        <span>{{ t('admin.accounts.carpoolSelectedUserPrefix') }}</span>
+        <CarpoolUserLabel :user-id="id" />
+        <button type="button" class="ml-1" :aria-label="t('common.delete')" @click="toggle(id)">×</button>
+      </span>
     </div>
     <label v-for="user in users" :key="user.id" class="flex items-center gap-2 text-sm">
       <input type="checkbox" class="h-4 w-4 shrink-0 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" :checked="modelValue.includes(user.id)" @change="toggle(user.id)" />

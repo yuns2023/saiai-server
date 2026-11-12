@@ -194,9 +194,9 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
     await flushPromises()
 
-    const chips = wrapper.findAll('button').filter(b => b.text().startsWith('admin.accounts.carpoolSelectedAPIKey'))
+    const chips = wrapper.findAll('[data-testid="carpool-key-chip"]')
     expect(chips).toHaveLength(2)
-    await chips[1].trigger('click')
+    await chips[1].get('button').trigger('click')
 
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()

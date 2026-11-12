@@ -2645,9 +2645,9 @@ export default {
     accounts: {
       carpoolUsersOnly: '仅限指定用户或 Key',
       carpoolUsersOnlyHint: '开启后只有名单内的用户或 API Key 可用，命中任意一项即可，两个名单都为空时全部拒绝。名单内用户的所有 Key 都可用；只想放行某个 Key 时，只选该 Key、不要选它的用户。同时开启“仅限可信用户”时须同时满足。',
-      carpoolSelectedUser: '用户 #{id}',
+      carpoolSelectedUserPrefix: '用户',
       carpoolUserSearchFailed: '用户搜索失败，请重试',
-      carpoolSelectedAPIKey: '{name}（Key #{id}，用户 #{userId}）',
+      carpoolSelectedAPIKey: '{name}（Key #{id}）用户',
       carpoolAPIKeySearchPlaceholder: '搜索 Key 名称，或输入用户 ID 列出其 Key',
       carpoolAPIKeySearchFailed: 'Key 搜索失败，请重试',
       carpoolTrustedOnly: '仅限可信用户',

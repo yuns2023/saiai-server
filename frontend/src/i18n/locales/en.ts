@@ -2568,9 +2568,9 @@ export default {
     accounts: {
       carpoolUsersOnly: 'Specified users or keys only',
       carpoolUsersOnlyHint: 'Only listed users or API keys may use this account; matching either list is enough, and two empty lists deny everyone. A listed user may use all of their keys; to allow a single key, list only that key, not its user. When trusted-only is also enabled, both conditions must hold.',
-      carpoolSelectedUser: 'User #{id}',
+      carpoolSelectedUserPrefix: 'User',
       carpoolUserSearchFailed: 'User search failed. Please retry.',
-      carpoolSelectedAPIKey: '{name} (key #{id}, user #{userId})',
+      carpoolSelectedAPIKey: '{name} (key #{id}) · user',
       carpoolAPIKeySearchPlaceholder: 'Search key names, or enter a user ID to list their keys',
       carpoolAPIKeySearchFailed: 'Key search failed. Please retry.',
       carpoolTrustedOnly: 'Trusted users only',

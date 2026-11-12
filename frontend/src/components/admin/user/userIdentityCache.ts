@@ -1,6 +1,7 @@
 export interface UserIdentity {
   username: string
   notes: string
+  email?: string
 }
 
 // Notes are edited rarely; a short TTL keeps hover tooltips cheap without going stale for long.
@@ -11,7 +12,7 @@ export function loadUserIdentity(userId: number): Promise<UserIdentity> {
   const hit = cache.get(userId)
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value
   // Loaded on first hover so pages embedding the tooltip do not pull the API client in at import time.
-  const value = import('@/api/admin/users').then(({ getById }) => getById(userId)).then((u) => ({ username: u.username ?? '', notes: u.notes ?? '' }))
+  const value = import('@/api/admin/users').then(({ getById }) => getById(userId)).then((u) => ({ username: u.username ?? '', notes: u.notes ?? '', email: u.email ?? '' }))
   const entry = { at: Date.now(), value }
   // Drop failures so the next hover retries.
   value.catch(() => {
