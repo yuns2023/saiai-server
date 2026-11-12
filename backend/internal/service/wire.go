@@ -496,6 +496,26 @@ func ProvideOpsScheduledReportService(
 	return svc
 }
 
+// ProvideAPIKeyService wires the Redis rate-limit cache into the API Key
+// service. Without it a manual usage reset only clears the database counters,
+// and requests keep failing on the stale cached usage until the window ends.
+func ProvideAPIKeyService(
+	apiKeyRepo APIKeyRepository,
+	userRepo UserRepository,
+	groupRepo GroupRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache APIKeyCache,
+	billingCache BillingCache,
+	cfg *config.Config,
+) *APIKeyService {
+	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg)
+	if billingCache != nil {
+		svc.SetRateLimitCacheInvalidator(billingCache)
+	}
+	return svc
+}
+
 // ProvideAPIKeyAuthCacheInvalidator 提供 API Key 认证缓存失效能力
 func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthCacheInvalidator {
 	// Start Pub/Sub subscriber for L1 cache invalidation across instances
@@ -541,7 +561,7 @@ var ProviderSet = wire.NewSet(
 	// Core services
 	NewAuthService,
 	ProvideUserService,
-	NewAPIKeyService,
+	ProvideAPIKeyService,
 	ProvideAPIKeyAuthCacheInvalidator,
 	NewGroupService,
 	NewAccessLevelService,
