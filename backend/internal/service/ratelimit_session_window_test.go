@@ -531,3 +531,11 @@ func TestUpdateSessionWindow_DoesNotRateLimitClaudeOAuthWithout5hReset(t *testin
 		t.Fatalf("expected no SetRateLimited calls without authoritative reset, got %d", len(repo.rateLimitCalls))
 	}
 }
+
+func (*sessionWindowMockRepo) UpdateCredentials(context.Context, int64, map[string]any) error {
+	panic("unexpected UpdateCredentials call")
+}
+
+func (*sessionWindowMockRepo) MergeCredentials(context.Context, int64, map[string]any, CredentialsGuard) (bool, error) {
+	panic("unexpected MergeCredentials call")
+}

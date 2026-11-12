@@ -137,12 +137,24 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 		if p.shouldAttemptBackfill(account.ID) {
 			p.markBackfillAttempted(account.ID)
 			if projectID, err := p.antigravityOAuthService.FillProjectID(ctx, account, accessToken); err == nil && projectID != "" {
-				account.Credentials["project_id"] = projectID
-				if updateErr := p.accountRepo.Update(ctx, account); updateErr != nil {
+				// Persist only project_id, and only if still unset: writing the
+				// whole account back would undo state changed since it was read.
+				applied, updateErr := p.accountRepo.MergeCredentials(ctx, account.ID,
+					map[string]any{"project_id": projectID},
+					CredentialsGuard{EmptyKeys: []string{"project_id"}})
+				switch {
+				case updateErr != nil:
+					// Keep using the detected value for this request (as before).
+					account.Credentials["project_id"] = projectID
 					slog.Warn("antigravity_project_id_backfill_persist_failed",
 						"account_id", account.ID,
 						"error", updateErr,
 					)
+				case applied:
+					account.Credentials["project_id"] = projectID
+				default:
+					// Someone set project_id meanwhile; use the stored value.
+					adoptStoredCredentials(ctx, p.accountRepo, account, "project_id")
 				}
 			}
 		}

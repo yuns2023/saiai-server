@@ -243,6 +243,13 @@ func (s *TokenRefreshService) listActiveAccounts(ctx context.Context) ([]Account
 // refreshWithRetry 带重试的刷新
 func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Account, refresher TokenRefresher, executor OAuthRefreshExecutor, refreshWindow time.Duration) error {
 	var lastErr error
+	// Recovery decisions (clear a 401 cooldown or a missing_project_id
+	// error) are made from the account as this refresh found it before the
+	// upstream call; the row re-read after the write may carry a cooldown or
+	// error set by another request meanwhile, which this refresh must not
+	// clear. The unified API supplies its lock-time read; the fallback path
+	// uses a copy of the caller's object.
+	startedWith := *account
 
 	for attempt := 1; attempt <= s.cfg.MaxRetries; attempt++ {
 		var newCredentials map[string]any
@@ -261,6 +268,9 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 				return s.refreshPolicy.handleAlreadyRefreshed()
 			} else {
 				account = result.Account
+				if result.RecoveryBasis != nil {
+					startedWith = *result.RecoveryBasis
+				}
 				_ = result.NewCredentials // 统一 API 已设置 _token_version 并更新 DB，无需重复操作
 			}
 		} else {
@@ -268,15 +278,16 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 			newCredentials, err = refresher.Refresh(ctx, account)
 			if newCredentials != nil {
 				newCredentials["_token_version"] = time.Now().UnixMilli()
-				account.Credentials = newCredentials
-				if saveErr := s.accountRepo.Update(ctx, account); saveErr != nil {
+				account.Credentials = newCredentials // callers read the new token from their object
+				if saveErr := s.accountRepo.UpdateCredentials(ctx, account.ID, newCredentials); saveErr != nil {
 					return fmt.Errorf("failed to save credentials: %w", saveErr)
 				}
+				account = rereadAfterCredentialsWrite(ctx, s.accountRepo, account, newCredentials)
 			}
 		}
 
 		if err == nil {
-			s.postRefreshActions(ctx, account)
+			s.postRefreshActions(ctx, &startedWith, account)
 			return nil
 		}
 
@@ -335,11 +346,14 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 }
 
 // postRefreshActions 刷新成功后的后续动作（清除错误状态、缓存失效、调度器同步等）
-func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *Account) {
+//
+// startedWith decides which recovery to apply; account is the refreshed one
+// (new credentials) used for cache invalidation and follow-up calls.
+func (s *TokenRefreshService) postRefreshActions(ctx context.Context, startedWith, account *Account) {
 	// Antigravity 账户：如果之前是因为缺少 project_id 而标记为 error，现在成功获取到了，清除错误状态
-	if account.Platform == PlatformAntigravity &&
-		account.Status == StatusError &&
-		strings.Contains(account.ErrorMessage, "missing_project_id:") {
+	if startedWith.Platform == PlatformAntigravity &&
+		startedWith.Status == StatusError &&
+		strings.Contains(startedWith.ErrorMessage, "missing_project_id:") {
 		if clearErr := s.accountRepo.ClearError(ctx, account.ID); clearErr != nil {
 			slog.Warn("token_refresh.clear_account_error_failed",
 				"account_id", account.ID,
@@ -350,7 +364,7 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 		}
 	}
 	// 刷新成功后清除临时不可调度状态（处理 OAuth 401 恢复场景）
-	if account.TempUnschedulableUntil != nil && time.Now().Before(*account.TempUnschedulableUntil) {
+	if startedWith.TempUnschedulableUntil != nil && time.Now().Before(*startedWith.TempUnschedulableUntil) {
 		if clearErr := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); clearErr != nil {
 			slog.Warn("token_refresh.clear_temp_unschedulable_failed",
 				"account_id", account.ID,
@@ -381,8 +395,17 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 		}
 	}
 	// 同步更新调度器缓存，确保调度获取的 Account 对象包含最新的 credentials
+	// Publish the committed row, not an in-memory object: a rate limit,
+	// disable or the clears above may have changed it since it was read, and
+	// writing an older object back would undo that for the scheduler.
 	if s.schedulerCache != nil {
-		if err := s.schedulerCache.SetAccount(ctx, account); err != nil {
+		committed, readErr := s.accountRepo.GetByID(ctx, account.ID)
+		if readErr != nil {
+			slog.Warn("token_refresh.sync_scheduler_cache_read_failed",
+				"account_id", account.ID,
+				"error", readErr,
+			)
+		} else if err := s.schedulerCache.SetAccount(ctx, committed); err != nil {
 			slog.Warn("token_refresh.sync_scheduler_cache_failed",
 				"account_id", account.ID,
 				"error", err,

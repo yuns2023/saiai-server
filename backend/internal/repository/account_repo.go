@@ -630,6 +630,89 @@ func (r *accountRepository) SetError(ctx context.Context, id int64, errorMsg str
 	return nil
 }
 
+// UpdateCredentials replaces only the credentials column. Token refresh used
+// Update, which rewrote the whole row from the object read before the
+// upstream call and so undid a rate limit, disable or usage sample written
+// during that call.
+func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
+	payload, err := json.Marshal(normalizeJSONMap(credentials))
+	if err != nil {
+		return err
+	}
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(ctx,
+		"UPDATE accounts SET credentials = $1::jsonb, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
+		string(payload), id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+	r.afterCredentialsWrite(ctx, id)
+	return nil
+}
+
+// MergeCredentials merges patch into the stored credentials (JSONB ||) when
+// guard holds, in one statement.
+func (r *accountRepository) MergeCredentials(ctx context.Context, id int64, patch map[string]any, guard service.CredentialsGuard) (bool, error) {
+	if len(patch) == 0 {
+		return false, nil
+	}
+	payload, err := json.Marshal(patch)
+	if err != nil {
+		return false, err
+	}
+	conds := []string{"id = $2", "deleted_at IS NULL"}
+	args := []any{string(payload), id}
+	if guard.AccessToken != "" {
+		args = append(args, guard.AccessToken)
+		conds = append(conds, "credentials->>'access_token' = $"+strconv.Itoa(len(args)))
+	}
+	for _, key := range guard.EmptyKeys {
+		args = append(args, key)
+		// [[:space:]] covers space, tab, newline, CR, VT, FF (ASCII
+		// whitespace, as the providers' blank checks see project_id).
+		conds = append(conds, "COALESCE(credentials->>$"+strconv.Itoa(len(args))+", '') ~ '^[[:space:]]*$'")
+	}
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(ctx,
+		"UPDATE accounts SET credentials = COALESCE(credentials, '{}'::jsonb) || $1::jsonb, updated_at = NOW() WHERE "+strings.Join(conds, " AND "),
+		args...)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		exists, existsErr := client.Account.Query().Where(dbaccount.IDEQ(id)).Exist(ctx)
+		if existsErr != nil {
+			return false, existsErr
+		}
+		if !exists {
+			return false, service.ErrAccountNotFound
+		}
+		return false, nil
+	}
+	r.afterCredentialsWrite(ctx, id)
+	return true, nil
+}
+
+// afterCredentialsWrite keeps Update's propagation: an outbox event and an
+// immediate snapshot re-read from the database (never from a caller object).
+func (r *accountRepository) afterCredentialsWrite(ctx context.Context, id int64) {
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue credentials update failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+}
+
 // syncSchedulerAccountSnapshot 在账号状态变更时主动同步快照到调度器缓存。
 // 当账号被设置为错误、禁用、不可调度或临时不可调度时调用，
 // 确保调度器和粘性会话逻辑能及时感知账号的最新状态，避免继续使用不可用账号。

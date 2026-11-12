@@ -351,21 +351,25 @@ func (s *RateLimitService) HandleUpstreamErrorForModel(ctx context.Context, acco
 		// OAuth 账号在 401 错误时临时不可调度（给 token 刷新窗口）；非 OAuth 账号保持原有 SetError 行为。
 		// Antigravity 除外：其 401 由 applyErrorPolicy 的 temp_unschedulable_rules 自行控制。
 		if account.Type == AccountTypeOAuth && account.Platform != PlatformAntigravity {
-			// 1. 失效缓存
+			// 1. Force the next request to refresh: set expires_at on the
+			// stored credentials only. The account object here is the one the
+			// request was scheduled with; writing it back whole would undo
+			// rate limits, disables or a refresh that landed since. (Not
+			// guarded on the token: the token actually sent may come from the
+			// token cache and differ from this object's credentials.)
+			if _, err := s.accountRepo.MergeCredentials(ctx, account.ID,
+				map[string]any{"expires_at": time.Now().Format(time.RFC3339)},
+				CredentialsGuard{}); err != nil {
+				slog.Warn("oauth_401_force_refresh_update_failed", "account_id", account.ID, "error", err)
+			} else {
+				slog.Info("oauth_401_force_refresh_set", "account_id", account.ID, "platform", account.Platform)
+			}
+			// 2. 失效缓存（after the DB write: narrows, but does not close, the
+			// window in which a reader re-caches the old expiry）
 			if s.tokenCacheInvalidator != nil {
 				if err := s.tokenCacheInvalidator.InvalidateToken(ctx, account); err != nil {
 					slog.Warn("oauth_401_invalidate_cache_failed", "account_id", account.ID, "error", err)
 				}
-			}
-			// 2. 设置 expires_at 为当前时间，强制下次请求刷新 token
-			if account.Credentials == nil {
-				account.Credentials = make(map[string]any)
-			}
-			account.Credentials["expires_at"] = time.Now().Format(time.RFC3339)
-			if err := s.accountRepo.Update(ctx, account); err != nil {
-				slog.Warn("oauth_401_force_refresh_update_failed", "account_id", account.ID, "error", err)
-			} else {
-				slog.Info("oauth_401_force_refresh_set", "account_id", account.ID, "platform", account.Platform)
 			}
 			// 3. 临时不可调度，替代 SetError（保持 status=active 让刷新服务能拾取）
 			msg := "Authentication failed (401): invalid or expired credentials"

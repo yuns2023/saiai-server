@@ -2549,3 +2549,11 @@ func (s *accountRepoStubForOAuthMode) IncrementQuotaUsed(context.Context, int64,
 	return nil
 }
 func (s *accountRepoStubForOAuthMode) ResetQuotaUsed(context.Context, int64) error { return nil }
+
+func (*accountRepoStubForOAuthMode) UpdateCredentials(context.Context, int64, map[string]any) error {
+	panic("unexpected UpdateCredentials call")
+}
+
+func (*accountRepoStubForOAuthMode) MergeCredentials(context.Context, int64, map[string]any, CredentialsGuard) (bool, error) {
+	panic("unexpected MergeCredentials call")
+}
