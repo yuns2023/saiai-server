@@ -2709,3 +2709,11 @@ func TestGatewayService_ResolveGatewayGroup_RejectsInactiveFallback(t *testing.T
 	require.Nil(t, group)
 	require.Nil(t, resolvedID)
 }
+
+func (*mockAccountRepoForPlatform) UpdateCredentials(context.Context, int64, map[string]any) error {
+	panic("unexpected UpdateCredentials call")
+}
+
+func (*mockAccountRepoForPlatform) MergeCredentials(context.Context, int64, map[string]any, CredentialsGuard) (bool, error) {
+	panic("unexpected MergeCredentials call")
+}

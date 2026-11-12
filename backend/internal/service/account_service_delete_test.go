@@ -272,3 +272,11 @@ func TestAccountService_Delete_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int64{55}, repo.deletedIDs) // 验证正确的 ID 被删除
 }
+
+func (*accountRepoStub) UpdateCredentials(context.Context, int64, map[string]any) error {
+	panic("unexpected UpdateCredentials call")
+}
+
+func (*accountRepoStub) MergeCredentials(context.Context, int64, map[string]any, CredentialsGuard) (bool, error) {
+	panic("unexpected MergeCredentials call")
+}

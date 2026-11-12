@@ -870,3 +870,11 @@ func TestGeminiMessagesCompatService_isModelSupportedByAccount(t *testing.T) {
 		})
 	}
 }
+
+func (*mockAccountRepoForGemini) UpdateCredentials(context.Context, int64, map[string]any) error {
+	panic("unexpected UpdateCredentials call")
+}
+
+func (*mockAccountRepoForGemini) MergeCredentials(context.Context, int64, map[string]any, CredentialsGuard) (bool, error) {
+	panic("unexpected MergeCredentials call")
+}

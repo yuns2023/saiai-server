@@ -361,3 +361,11 @@ func TestGroupIsolation_SimpleMode_GroupedAccountAlsoSchedulable(t *testing.T) {
 	require.NotNil(t, acc)
 	require.Equal(t, int64(1), acc.ID, "SimpleMode 应能调度已分组账号")
 }
+
+func (*groupAwareMockAccountRepo) UpdateCredentials(context.Context, int64, map[string]any) error {
+	panic("unexpected UpdateCredentials call")
+}
+
+func (*groupAwareMockAccountRepo) MergeCredentials(context.Context, int64, map[string]any, CredentialsGuard) (bool, error) {
+	panic("unexpected MergeCredentials call")
+}

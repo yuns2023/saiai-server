@@ -23,12 +23,30 @@ type tokenRefreshAccountRepo struct {
 	lastAccount    *Account
 	lastErrorMsg   string
 	updateErr      error
+	// wholeRowUpdates counts Update calls; refresh must never use it.
+	wholeRowUpdates int
 }
 
 func (r *tokenRefreshAccountRepo) Update(ctx context.Context, account *Account) error {
+	r.wholeRowUpdates++
+	return nil
+}
+
+// UpdateCredentials is the refresh write path; updateCalls/lastAccount keep
+// their meaning for the existing tests.
+func (r *tokenRefreshAccountRepo) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
 	r.updateCalls++
-	r.lastAccount = account
-	return r.updateErr
+	r.lastAccount = &Account{ID: id, Credentials: credentials}
+	if r.updateErr != nil {
+		return r.updateErr
+	}
+	// Persist like the database: only the credentials column changes.
+	if stored, ok := r.accountsByID[id]; ok {
+		row := *stored
+		row.Credentials = credentials
+		r.accountsByID[id] = &row
+	}
+	return nil
 }
 
 func (r *tokenRefreshAccountRepo) SetError(ctx context.Context, id int64, errorMsg string) error {

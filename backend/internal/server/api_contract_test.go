@@ -2006,3 +2006,11 @@ var (
 	_ service.UsageLogRepository         = (*stubUsageLogRepo)(nil)
 	_ service.SettingRepository          = (*stubSettingRepo)(nil)
 )
+
+func (*stubAccountRepo) UpdateCredentials(context.Context, int64, map[string]any) error {
+	panic("unexpected UpdateCredentials call")
+}
+
+func (*stubAccountRepo) MergeCredentials(context.Context, int64, map[string]any, service.CredentialsGuard) (bool, error) {
+	panic("unexpected MergeCredentials call")
+}

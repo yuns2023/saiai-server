@@ -71,11 +71,28 @@ type AccountRepository interface {
 	ClearModelRateLimits(ctx context.Context, id int64) error
 	UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error
 	UpdateExtra(ctx context.Context, id int64, updates map[string]any) error
+	// UpdateCredentials replaces only the credentials column (token refresh).
+	// Unlike Update it leaves extra, status and runtime columns alone, so a
+	// rate limit or disable written meanwhile is kept.
+	UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error
+	// MergeCredentials merges patch into the stored credentials when guard
+	// holds; it reports false (no error) when the guard fails.
+	MergeCredentials(ctx context.Context, id int64, patch map[string]any, guard CredentialsGuard) (bool, error)
 	BulkUpdate(ctx context.Context, ids []int64, updates AccountBulkUpdate) (int64, error)
 	// IncrementQuotaUsed 原子递增 API Key 账号的配额用量（总/日/周）
 	IncrementQuotaUsed(ctx context.Context, id int64, amount float64) error
 	// ResetQuotaUsed 重置 API Key 账号所有维度的配额用量为 0
 	ResetQuotaUsed(ctx context.Context, id int64) error
+}
+
+// CredentialsGuard conditions MergeCredentials on the stored credentials.
+type CredentialsGuard struct {
+	// AccessToken, if set, must equal the stored access_token: a patch based
+	// on a failed request does not touch a token refreshed since.
+	AccessToken string
+	// EmptyKeys must be absent, empty or ASCII-whitespace-only in the stored
+	// credentials: a backfill does not overwrite a value set meanwhile.
+	EmptyKeys []string
 }
 
 // AccountBulkUpdate describes the fields that can be updated in a bulk operation.

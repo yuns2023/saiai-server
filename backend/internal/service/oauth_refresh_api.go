@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -25,6 +26,12 @@ type OAuthRefreshResult struct {
 	NewCredentials map[string]any // 刷新后的 credentials（nil 表示未刷新）
 	Account        *Account       // 从 DB 重新读取的最新 account
 	LockHeld       bool           // 锁被其他 worker 持有（未执行刷新）
+	// RecoveryBasis is the account as re-read under the lock, before the
+	// upstream call. Post-refresh recovery (clearing a 401 cooldown or a
+	// missing_project_id error) decides from it, not from Account: state set
+	// by other requests during the upstream call is not this refresh's to
+	// clear.
+	RecoveryBasis *Account
 }
 
 // OAuthRefreshAPI 统一的 OAuth Token 刷新入口
@@ -81,6 +88,11 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 
 	// 2. 从 DB 重读最新 account（锁保护下，确保使用最新的 refresh_token）
 	freshAccount, err := api.accountRepo.GetByID(ctx, account.ID)
+	if errors.Is(err, ErrAccountNotFound) {
+		// Deleted meanwhile: refreshing would rotate the upstream token of an
+		// account that no longer exists.
+		return nil, err
+	}
 	if err != nil {
 		slog.Warn("oauth_refresh_db_reread_failed",
 			"account_id", account.ID,
@@ -99,6 +111,8 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		}, nil
 	}
 
+	recoveryBasis := *freshAccount
+
 	// 4. 执行平台特定刷新逻辑
 	newCredentials, refreshErr := executor.Refresh(ctx, freshAccount)
 	if refreshErr != nil {
@@ -106,16 +120,19 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	}
 
 	// 5. 设置版本号 + 更新 DB
+	// Only the credentials column is written: the upstream call above takes
+	// seconds, and a 429 mark, disable or usage sample written meanwhile must
+	// survive. The returned Account is re-read after the write.
 	if newCredentials != nil {
 		newCredentials["_token_version"] = time.Now().UnixMilli()
-		freshAccount.Credentials = newCredentials
-		if updateErr := api.accountRepo.Update(ctx, freshAccount); updateErr != nil {
+		if updateErr := api.accountRepo.UpdateCredentials(ctx, freshAccount.ID, newCredentials); updateErr != nil {
 			slog.Error("oauth_refresh_update_failed",
 				"account_id", freshAccount.ID,
 				"error", updateErr,
 			)
 			return nil, fmt.Errorf("oauth refresh succeeded but DB update failed: %w", updateErr)
 		}
+		freshAccount = rereadAfterCredentialsWrite(ctx, api.accountRepo, freshAccount, newCredentials)
 	}
 
 	_ = lockAcquired // suppress unused warning when tokenCache is nil
@@ -124,7 +141,39 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		Refreshed:      true,
 		NewCredentials: newCredentials,
 		Account:        freshAccount,
+		RecoveryBasis:  &recoveryBasis,
 	}, nil
+}
+
+// rereadAfterCredentialsWrite returns the committed account after a
+// credentials-only write; if the re-read fails it falls back to the object the
+// refresh started from, carrying the new credentials.
+func rereadAfterCredentialsWrite(ctx context.Context, repo AccountRepository, account *Account, credentials map[string]any) *Account {
+	if fresh, err := repo.GetByID(ctx, account.ID); err == nil && fresh != nil {
+		return fresh
+	}
+	fallback := *account
+	fallback.Credentials = credentials
+	return &fallback
+}
+
+// adoptStoredCredentials copies keys from the stored credentials into the
+// in-memory account after a guarded backfill lost to a concurrent write, so
+// the request does not use the rejected value.
+func adoptStoredCredentials(ctx context.Context, repo AccountRepository, account *Account, keys ...string) {
+	stored, err := repo.GetByID(ctx, account.ID)
+	if err != nil || stored == nil {
+		// Keeps whatever the request already had (never the rejected value).
+		slog.Warn("credentials_backfill_reread_failed", "account_id", account.ID, "error", err)
+		return
+	}
+	for _, k := range keys {
+		if v, ok := stored.Credentials[k]; ok {
+			account.Credentials[k] = v
+		} else {
+			delete(account.Credentials, k)
+		}
+	}
 }
 
 // MergeCredentials 将旧 credentials 中不存在于新 map 的字段保留到新 map 中

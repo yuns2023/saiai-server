@@ -19,7 +19,10 @@ type refreshAPIAccountRepo struct {
 	account     *Account // returned by GetByID
 	getByIDErr  error
 	updateErr   error
-	updateCalls int
+	updateCalls int // credentials-only writes
+	// wholeRowUpdates counts Update calls; refresh must never use it.
+	wholeRowUpdates int
+	savedCreds      map[string]any
 }
 
 func (r *refreshAPIAccountRepo) GetByID(_ context.Context, _ int64) (*Account, error) {
@@ -30,8 +33,22 @@ func (r *refreshAPIAccountRepo) GetByID(_ context.Context, _ int64) (*Account, e
 }
 
 func (r *refreshAPIAccountRepo) Update(_ context.Context, _ *Account) error {
+	r.wholeRowUpdates++
+	return nil
+}
+
+func (r *refreshAPIAccountRepo) UpdateCredentials(_ context.Context, _ int64, creds map[string]any) error {
 	r.updateCalls++
-	return r.updateErr
+	if r.updateErr != nil {
+		return r.updateErr
+	}
+	r.savedCreds = creds
+	if r.account != nil {
+		stored := *r.account
+		stored.Credentials = creds
+		r.account = &stored
+	}
+	return nil
 }
 
 // refreshAPIExecutorStub implements OAuthRefreshExecutor for tests.
@@ -40,6 +57,7 @@ type refreshAPIExecutorStub struct {
 	credentials  map[string]any
 	err          error
 	refreshCalls int
+	onRefresh    func()
 }
 
 func (e *refreshAPIExecutorStub) CanRefresh(_ *Account) bool { return true }
@@ -50,6 +68,9 @@ func (e *refreshAPIExecutorStub) NeedsRefresh(_ *Account, _ time.Duration) bool 
 
 func (e *refreshAPIExecutorStub) Refresh(_ context.Context, _ *Account) (map[string]any, error) {
 	e.refreshCalls++
+	if e.onRefresh != nil {
+		e.onRefresh()
+	}
 	if e.err != nil {
 		return nil, e.err
 	}
@@ -106,7 +127,10 @@ func TestRefreshIfNeeded_Success(t *testing.T) {
 	require.Equal(t, "new-token", result.NewCredentials["access_token"])
 	require.NotNil(t, result.NewCredentials["_token_version"]) // version stamp set
 	require.Equal(t, 1, repo.updateCalls)                      // DB updated
-	require.Equal(t, 1, cache.releaseCalls)                    // lock released
+	require.Zero(t, repo.wholeRowUpdates, "refresh writes credentials only")
+	require.Equal(t, "new-token", result.Account.GetCredential("access_token"), "returned account is the stored row")
+	require.NotNil(t, result.Account.Credentials["_token_version"])
+	require.Equal(t, 1, cache.releaseCalls) // lock released
 	require.Equal(t, 1, executor.refreshCalls)
 }
 

@@ -131,11 +131,28 @@ func (p *GeminiTokenProvider) GetAccessToken(ctx context.Context, account *Accou
 			if account.Credentials == nil {
 				account.Credentials = make(map[string]any)
 			}
-			account.Credentials["project_id"] = detected
+			patch := map[string]any{"project_id": detected}
 			if tierID != "" {
-				account.Credentials["tier_id"] = tierID
+				patch["tier_id"] = tierID
 			}
-			_ = p.accountRepo.Update(ctx, account)
+			// Persist only the detected fields, and only if project_id is
+			// still unset: a whole-row write would undo concurrent changes.
+			applied, err := p.accountRepo.MergeCredentials(ctx, account.ID, patch,
+				CredentialsGuard{EmptyKeys: []string{"project_id"}})
+			switch {
+			case err != nil:
+				log.Printf("[GeminiTokenProvider] Persist detected project_id failed: account=%d err=%v", account.ID, err)
+				for k, v := range patch { // keep using it for this request (as before)
+					account.Credentials[k] = v
+				}
+			case applied:
+				for k, v := range patch {
+					account.Credentials[k] = v
+				}
+			default:
+				// project_id was set meanwhile; use the stored values.
+				adoptStoredCredentials(ctx, p.accountRepo, account, "project_id", "tier_id")
+			}
 		}
 	}
 
