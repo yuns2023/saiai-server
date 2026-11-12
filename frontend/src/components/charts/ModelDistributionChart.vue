@@ -217,6 +217,7 @@
               <th class="pb-2 text-right">{{ t('admin.dashboard.spendingRankingTokens') }}</th>
               <th class="pb-2 text-right" :title="t('admin.dashboard.rankingBasisHint')">{{ t('admin.dashboard.standard') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.rankingActualShort') }}</th>
+              <th class="whitespace-nowrap pb-2 text-right" :title="t('usage.subscriptionRevenueHint')">{{ t('usage.subscriptionRevenue') }}</th>
               <th class="pb-2 text-right" :title="t('admin.dashboard.rankingBodySizeHint')">{{ t('admin.dashboard.rankingBodySize') }}</th>
             </tr>
           </thead>
@@ -263,6 +264,15 @@
               <td class="py-1.5 text-right text-green-600 dark:text-green-400">
                 ${{ formatCost(item.actual_cost) }}
               </td>
+              <td class="whitespace-nowrap py-1.5 text-right" data-testid="ranking-subscription-revenue">
+                <SubscriptionRevenueText
+                  v-if="(item.subscription_revenue ?? 0) > 0 || (item.subscription_revenue_unpriced_cost ?? 0) > 0"
+                  compact
+                  :revenue="item.subscription_revenue ?? 0"
+                  :unpriced-cost="item.subscription_revenue_unpriced_cost"
+                />
+                <span v-else class="text-gray-400">-</span>
+              </td>
               <td
                 class="whitespace-nowrap py-1.5 text-right text-gray-600 dark:text-gray-400"
                 :title="!item.isOther && item.request_body_bytes_known_count ? t('admin.dashboard.rankingBodySizeDetail', requestBodySizeDetailParams(item)) : undefined"
@@ -300,6 +310,7 @@ import type { UserBreakdownParams } from '@/api/admin/dashboard'
 import { getUserBreakdown } from '@/api/admin/dashboard'
 import { distributionChartColors, stableChartColor } from '@/utils/chartColors'
 import { formatRequestBodyBytes, requestBodySizeDetailParams } from '@/utils/requestBodyBytes'
+import SubscriptionRevenueText from '@/components/common/SubscriptionRevenueText.vue'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
@@ -319,6 +330,8 @@ const props = withDefaults(defineProps<{
   rankingTotalActualCost?: number
   rankingTotalRequests?: number
   rankingTotalTokens?: number
+  rankingTotalSubscriptionRevenue?: number
+  rankingTotalSubscriptionRevenueUnpricedCost?: number
   /** Ranking order; the parent reloads the ranking when it changes. */
   rankingSort?: SpendingRankingSort
   loading?: boolean
@@ -344,6 +357,8 @@ const props = withDefaults(defineProps<{
   rankingTotalActualCost: 0,
   rankingTotalRequests: 0,
   rankingTotalTokens: 0,
+  rankingTotalSubscriptionRevenue: 0,
+  rankingTotalSubscriptionRevenueUnpricedCost: 0,
   rankingSort: 'cost',
   loading: false,
   metric: 'tokens',
@@ -478,6 +493,10 @@ const otherRankingItem = computed<RankingDisplayItem | null>(() => {
   const otherActualCost = Math.max((props.rankingTotalActualCost || 0) - rankedActualCost, 0)
   const otherRequests = Math.max((props.rankingTotalRequests || 0) - rankedRequests, 0)
   const otherTokens = Math.max((props.rankingTotalTokens || 0) - rankedTokens, 0)
+  const rankedRevenue = props.rankingItems.reduce((sum, item) => sum + (item.subscription_revenue || 0), 0)
+  const rankedUnpriced = props.rankingItems.reduce((sum, item) => sum + (item.subscription_revenue_unpriced_cost || 0), 0)
+  const otherRevenue = Math.max((props.rankingTotalSubscriptionRevenue || 0) - rankedRevenue, 0)
+  const otherUnpriced = Math.max((props.rankingTotalSubscriptionRevenueUnpricedCost || 0) - rankedUnpriced, 0)
 
   if (otherCost <= 0.000001 && otherActualCost <= 0.000001 && otherRequests <= 0 && otherTokens <= 0) return null
 
@@ -489,6 +508,8 @@ const otherRankingItem = computed<RankingDisplayItem | null>(() => {
     requests: otherRequests,
     hosted_requests: 0,
     tokens: otherTokens,
+    subscription_revenue: otherRevenue,
+    subscription_revenue_unpriced_cost: otherUnpriced,
     isOther: true
   }
 })

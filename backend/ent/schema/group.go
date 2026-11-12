@@ -84,6 +84,12 @@ func (Group) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}),
 		field.Int("default_validity_days").
 			Default(30),
+		// subscription_revenue_rate: 统计用的订阅实收倍率（每消耗 $1 订阅额度折合多少元）。
+		// 计费/限额不读取；NULL 表示未配置。见 migrations/123_group_subscription_revenue_rate.sql。
+		field.Float("subscription_revenue_rate").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}),
 
 		// 图片生成计费配置（antigravity 和 gemini 平台使用）
 		field.Float("image_price_1k").

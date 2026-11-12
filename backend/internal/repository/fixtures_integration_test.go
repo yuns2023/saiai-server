@@ -101,6 +101,9 @@ func mustCreateGroup(t *testing.T, client *dbent.Client, g *service.Group) *serv
 	if g.MonthlyLimitUSD != nil {
 		create.SetMonthlyLimitUsd(*g.MonthlyLimitUSD)
 	}
+	if g.SubscriptionRevenueRate != nil {
+		create.SetSubscriptionRevenueRate(*g.SubscriptionRevenueRate)
+	}
 	if !g.CreatedAt.IsZero() {
 		create.SetCreatedAt(g.CreatedAt)
 	}

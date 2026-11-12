@@ -50,6 +50,7 @@ type APIKeySpendingRankingItem struct {
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
 	CacheReadTokens     int64   `json:"cache_read_tokens"`
 	RequestBodySizeStats
+	SubscriptionRevenueStats
 }
 
 // APIKeySpendingRankingResponse totals cover all Keys in the selected scope,
@@ -60,4 +61,5 @@ type APIKeySpendingRankingResponse struct {
 	TotalActualCost float64                     `json:"total_actual_cost"`
 	TotalRequests   int64                       `json:"total_requests"`
 	TotalTokens     int64                       `json:"total_tokens"`
+	TotalSubscriptionRevenueStats
 }

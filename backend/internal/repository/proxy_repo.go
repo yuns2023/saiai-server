@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -246,7 +247,13 @@ func (r *proxyRepository) CountAccountsByProxyID(ctx context.Context, proxyID in
 
 func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, proxyID int64) ([]service.ProxyAccountSummary, error) {
 	rows, err := r.sql.QueryContext(ctx, `
-		SELECT id, name, platform, type, notes
+		SELECT id, name, platform, type, notes,
+			status, schedulable, COALESCE(error_message, ''), error_at,
+			rate_limit_reset_at, overload_until, temp_unschedulable_until,
+			jsonb_strip_nulls(jsonb_build_object(
+				'model_rate_limits', extra->'model_rate_limits',
+				'allow_overages', extra->'allow_overages'
+			))
 		FROM accounts
 		WHERE proxy_id = $1 AND deleted_at IS NULL
 		ORDER BY id DESC
@@ -259,26 +266,38 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 	out := make([]service.ProxyAccountSummary, 0)
 	for rows.Next() {
 		var (
-			id       int64
-			name     string
-			platform string
-			accType  string
-			notes    sql.NullString
+			summary                service.ProxyAccountSummary
+			notes                  sql.NullString
+			errorAt                sql.NullTime
+			rateLimitResetAt       sql.NullTime
+			overloadUntil          sql.NullTime
+			tempUnschedulableUntil sql.NullTime
+			extraRaw               []byte
 		)
-		if err := rows.Scan(&id, &name, &platform, &accType, &notes); err != nil {
+		if err := rows.Scan(
+			&summary.ID, &summary.Name, &summary.Platform, &summary.Type, &notes,
+			&summary.Status, &summary.Schedulable, &summary.ErrorMessage, &errorAt,
+			&rateLimitResetAt, &overloadUntil, &tempUnschedulableUntil, &extraRaw,
+		); err != nil {
 			return nil, err
 		}
-		var notesPtr *string
 		if notes.Valid {
-			notesPtr = &notes.String
+			summary.Notes = &notes.String
 		}
-		out = append(out, service.ProxyAccountSummary{
-			ID:       id,
-			Name:     name,
-			Platform: platform,
-			Type:     accType,
-			Notes:    notesPtr,
-		})
+		summary.ErrorAt = nullTimePtr(errorAt)
+		summary.RateLimitResetAt = nullTimePtr(rateLimitResetAt)
+		summary.OverloadUntil = nullTimePtr(overloadUntil)
+		summary.TempUnschedulableUntil = nullTimePtr(tempUnschedulableUntil)
+		if len(extraRaw) > 0 {
+			extra := map[string]any{}
+			if err := json.Unmarshal(extraRaw, &extra); err != nil {
+				return nil, err
+			}
+			if len(extra) > 0 {
+				summary.Extra = extra
+			}
+		}
+		out = append(out, summary)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

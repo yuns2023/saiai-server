@@ -28,6 +28,17 @@
           >
             U ${{ formatUserCost }}
           </span>
+          <span
+            v-if="(windowStats?.subscription_revenue ?? 0) > 0 || (windowStats?.subscription_revenue_unpriced_cost ?? 0) > 0"
+            class="rounded-sm bg-emerald-50 px-1.5 py-0.5 dark:bg-emerald-900/20"
+            data-testid="window-subscription-revenue"
+          >
+            <SubscriptionRevenueText
+              compact
+              :revenue="windowStats?.subscription_revenue ?? 0"
+              :unpriced-cost="windowStats?.subscription_revenue_unpriced_cost"
+            />
+          </span>
         </template>
         <span
           v-if="showStandardCost"
@@ -84,6 +95,7 @@ import { computed, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { WindowStats } from '@/types'
+import SubscriptionRevenueText from '@/components/common/SubscriptionRevenueText.vue'
 import { formatCompactNumber, formatCountdown } from '@/utils/format'
 
 const props = defineProps<{

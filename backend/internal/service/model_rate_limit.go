@@ -11,6 +11,11 @@ const (
 	anthropicFableRateLimitKey = "claude-fable-5"
 )
 
+// AnthropicFableRateLimitKey is the model_rate_limits entry written by the
+// Anthropic Fable quota 429 handlers (5h and 7d_oi); the repository clears it
+// together with the local quota snapshot.
+const AnthropicFableRateLimitKey = anthropicFableRateLimitKey
+
 // isRateLimitActiveForKey 检查指定 key 的限流是否生效
 func (a *Account) isRateLimitActiveForKey(key string) bool {
 	resetAt := a.modelRateLimitResetAt(key)

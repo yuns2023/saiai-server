@@ -24,6 +24,9 @@ export interface AdminUsageStatsResponse {
   total_actual_cost: number
   total_account_cost?: number
   total_metered_cost?: number | null
+  // 订阅折算（元，按分组当前统计倍率）与未配置倍率的订阅消耗（$）
+  total_subscription_revenue?: number | null
+  subscription_revenue_unpriced_cost?: number | null
   average_duration_ms: number
   endpoints?: EndpointStat[]
   upstream_endpoints?: EndpointStat[]

@@ -144,6 +144,9 @@ type AccessLevel struct {
 type AdminGroup struct {
 	Group
 
+	// 统计用订阅实收倍率（元/$1 订阅额度）；null=未配置。仅管理员可见。
+	SubscriptionRevenueRate *float64 `json:"subscription_revenue_rate"`
+
 	InputModerationEnabled           bool                           `json:"input_moderation_enabled"`
 	InputModerationAutoDisableUser   bool                           `json:"input_moderation_auto_disable_user"`
 	InputModerationCategories        []string                       `json:"input_moderation_categories"`
@@ -366,6 +369,15 @@ type ProxyAccountSummary struct {
 	Platform string  `json:"platform"`
 	Type     string  `json:"type"`
 	Notes    *string `json:"notes,omitempty"`
+
+	Status                 string         `json:"status"`
+	Schedulable            bool           `json:"schedulable"`
+	ErrorMessage           string         `json:"error_message"`
+	ErrorAt                *time.Time     `json:"error_at"`
+	RateLimitResetAt       *time.Time     `json:"rate_limit_reset_at"`
+	OverloadUntil          *time.Time     `json:"overload_until"`
+	TempUnschedulableUntil *time.Time     `json:"temp_unschedulable_until"`
+	Extra                  map[string]any `json:"extra,omitempty"`
 }
 
 type RedeemCode struct {
@@ -471,6 +483,33 @@ type UsageLog struct {
 	APIKey       *APIKey           `json:"api_key,omitempty"`
 	Group        *Group            `json:"group,omitempty"`
 	Subscription *UserSubscription `json:"subscription,omitempty"`
+
+	// PricingSnapshot is the trimmed user view. AdminUsageLog declares its own
+	// full pricing_snapshot at a shallower depth, which wins in its JSON.
+	PricingSnapshot *UserPricingSnapshot `json:"pricing_snapshot,omitempty"`
+}
+
+// UserPricingSnapshot is the user-visible part of a usage row's pricing
+// snapshot: only the evidence needed to explain a long-context surcharge and
+// the billed service tier. It deliberately omits reference/effective unit
+// prices, model aliases/overrides, billed/resolved models and the price
+// source, which stay admin-only on AdminUsageLog.PricingSnapshot.
+type UserPricingSnapshot struct {
+	ServiceTier                string                      `json:"service_tier,omitempty"`
+	PriorityBilledAsStandard   bool                        `json:"priority_billed_as_standard,omitempty"`
+	LongContext                *service.LongContextPricing `json:"long_context,omitempty"`
+	LongContextThreshold       int                         `json:"long_context_threshold,omitempty"`
+	LongContextExtraMultiplier float64                     `json:"long_context_extra_multiplier,omitempty"`
+	Effective                  *UserLongContextPolicy      `json:"effective,omitempty"`
+}
+
+// UserLongContextPolicy is the long-context tier of the effective model price.
+type UserLongContextPolicy struct {
+	LongContextThreshold            int     `json:"long_context_threshold,omitempty"`
+	LongContextInputMultiplier      float64 `json:"long_context_input_multiplier,omitempty"`
+	LongContextOutputMultiplier     float64 `json:"long_context_output_multiplier,omitempty"`
+	LongContextCacheReadMultiplier  float64 `json:"long_context_cache_read_multiplier,omitempty"`
+	LongContextCacheWriteMultiplier float64 `json:"long_context_cache_write_multiplier,omitempty"`
 }
 
 // AdminUsageLog 是管理员接口使用的 usage log DTO（包含管理员字段）。

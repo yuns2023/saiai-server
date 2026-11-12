@@ -455,6 +455,8 @@ export interface Group {
   daily_limit_usd: number | null
   weekly_limit_usd: number | null
   monthly_limit_usd: number | null
+  // 统计用订阅折算倍率（元 / $1 订阅额度，仅管理员接口返回）；null = 未配置
+  subscription_revenue_rate?: number | null
   // 图片生成计费配置（仅 antigravity 平台使用）
   image_price_1k: number | null
   image_price_2k: number | null
@@ -611,6 +613,7 @@ export interface CreateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  subscription_revenue_rate?: number | null
   image_price_1k?: number | null
   image_price_2k?: number | null
   image_price_4k?: number | null
@@ -668,6 +671,7 @@ export interface UpdateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  subscription_revenue_rate?: number | null
   image_price_1k?: number | null
   image_price_2k?: number | null
   image_price_4k?: number | null
@@ -751,7 +755,7 @@ export interface Proxy {
   updated_at: string
 }
 
-export interface ProxyAccountSummary {
+export interface ProxyAccountSummary extends AccountStatusSnapshot {
   id: number
   name: string
   platform: AccountPlatform
@@ -838,6 +842,22 @@ export interface CarpoolAPIKeyRef {
   id: number
   user_id: number
   name: string
+}
+
+/** Account fields read by AccountStatusIndicator. */
+export type AccountStatusSnapshot = Pick<
+  Account,
+  | 'status'
+  | 'schedulable'
+  | 'error_message'
+  | 'error_at'
+  | 'rate_limit_reset_at'
+  | 'overload_until'
+  | 'temp_unschedulable_until'
+> & {
+  extra?: Record<string, unknown> & {
+    model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
+  }
 }
 
 export interface Account {
@@ -968,6 +988,9 @@ export interface WindowStats {
   user_cost?: number
   hosted_requests?: number // Hosted-group requests (metered_cost set; cost/user_cost are 0)
   hosted_cost?: number // Hosted reference usage: SUM(metered_cost)
+  // 订阅折算（元，按分组当前统计倍率）与未配置倍率的订阅消耗（$）
+  subscription_revenue?: number
+  subscription_revenue_unpriced_cost?: number
 }
 
 export interface UsageProgress {
@@ -1190,6 +1213,8 @@ export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2'
 
 export interface UsageLog {
   smart_switch?: { original_group_id: number; policy_version: number; reason: string }
+  // 用户可见的计价快照子集：只含长上下文证据与计费 tier（完整快照仅管理员）
+  pricing_snapshot?: UserUsagePricingSnapshot | null
   metered_cost?: number | null
   billing_unit?: 'turn'
   native_chat_turn_cost_usd?: number
@@ -1282,6 +1307,12 @@ export interface LongContextPricing {
   cache_write_multiplier: number
   inferred?: boolean
 }
+
+/** Long-context evidence and billed tier; the only pricing fields users receive. */
+export type UserUsagePricingSnapshot = Pick<
+  UsagePricingSnapshot,
+  'service_tier' | 'effective' | 'long_context' | 'long_context_threshold' | 'long_context_extra_multiplier'
+> & { priority_billed_as_standard?: boolean }
 
 export interface UsagePricingSnapshot {
   version: string
@@ -1559,6 +1590,9 @@ export interface UserSpendingRankingItem extends RequestBodySizeStats {
   requests: number
   hosted_requests: number
   tokens: number
+  // 订阅折算（元，按分组当前统计倍率）与未配置倍率的订阅消耗（$）；仅管理员接口
+  subscription_revenue?: number
+  subscription_revenue_unpriced_cost?: number
 }
 
 export interface UserSpendingRankingResponse {
@@ -1567,6 +1601,8 @@ export interface UserSpendingRankingResponse {
   total_actual_cost: number
   total_requests: number
   total_tokens: number
+  total_subscription_revenue?: number
+  total_subscription_revenue_unpriced_cost?: number
   start_date: string
   end_date: string
 }
@@ -1585,6 +1621,8 @@ export interface APIKeySpendingRankingItem extends RequestBodySizeStats {
   output_tokens: number
   cache_creation_tokens: number
   cache_read_tokens: number
+  subscription_revenue?: number
+  subscription_revenue_unpriced_cost?: number
 }
 
 export interface APIKeySpendingRankingResponse {
@@ -1593,6 +1631,8 @@ export interface APIKeySpendingRankingResponse {
   total_actual_cost: number
   total_requests: number
   total_tokens: number
+  total_subscription_revenue?: number
+  total_subscription_revenue_unpriced_cost?: number
   start_date: string
   end_date: string
 }

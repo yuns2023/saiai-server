@@ -713,6 +713,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		DailyLimitUSD:                    g.DailyLimitUsd,
 		WeeklyLimitUSD:                   g.WeeklyLimitUsd,
 		MonthlyLimitUSD:                  g.MonthlyLimitUsd,
+		SubscriptionRevenueRate:          g.SubscriptionRevenueRate,
 		ImagePrice1K:                     g.ImagePrice1k,
 		ImagePrice2K:                     g.ImagePrice2k,
 		ImagePrice4K:                     g.ImagePrice4k,

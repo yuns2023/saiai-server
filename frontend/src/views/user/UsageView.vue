@@ -257,6 +257,7 @@
                 <span v-if="row.cache_creation_1h_tokens > 0" class="inline-flex items-center rounded-sm px-1 py-px text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/30">1h</span>
                 <span v-if="row.cache_ttl_overridden" :title="t('usage.cacheTtlOverriddenHint')" class="inline-flex items-center rounded-sm px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">R</span>
               </span>
+              <InputContextIndicator :row="row" />
               <!-- Token Detail Tooltip -->
               <div
                 class="group relative"
@@ -287,6 +288,7 @@
               @show-detail="showCostDetail($event, row)"
               @hide-detail="hideCostDetail(row)"
             >
+              <LongContextIndicator :info="usageLongContext(row)" class="mt-1" />
               <NativeChatCharges :record="row" />
             </UsageCostCell>
           </template>
@@ -491,6 +493,7 @@
             <span class="text-gray-400">{{ t('usage.legacyPaygAccountDiscount') }}</span>
             <span class="font-semibold text-amber-400">{{ tooltipData.account_payg_discount_multiplier.toFixed(4) }}x</span>
           </div>
+          <LongContextIndicator :info="usageLongContext(tooltipData)" detailed class="border-t border-gray-700 pt-2" />
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.original') }}</span>
             <span class="font-medium text-white">${{ tooltipData?.total_cost.toFixed(6) }}</span>
@@ -547,6 +550,9 @@ import UsageCostCell from '@/components/common/UsageCostCell.vue'
 import UsageLatencyCell from '@/components/common/UsageLatencyCell.vue'
 import UsageCostLegend from '@/components/common/UsageCostLegend.vue'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
+import { usageLongContext } from '@/utils/usageLongContext'
+import LongContextIndicator from '@/components/common/LongContextIndicator.vue'
+import InputContextIndicator from '@/components/common/InputContextIndicator.vue'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 
 const { t } = useI18n()

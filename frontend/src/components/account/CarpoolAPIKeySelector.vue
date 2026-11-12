@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { CarpoolAPIKeyRef } from '@/types'
+import CarpoolUserLabel from './CarpoolUserLabel.vue'
 const props = defineProps<{ modelValue: CarpoolAPIKeyRef[] }>()
 const emit = defineEmits<{ (e: 'update:modelValue', keys: CarpoolAPIKeyRef[]): void }>()
 const { t } = useI18n()
@@ -35,11 +36,16 @@ function toggle(key: CarpoolAPIKeyRef) {
     </div>
     <p v-if="error" role="alert">{{ t('admin.accounts.carpoolAPIKeySearchFailed') }}</p>
     <div class="flex flex-wrap gap-2">
-      <button v-for="key in modelValue" :key="key.id" type="button" class="btn btn-secondary btn-sm" @click="toggle(key)">{{ t('admin.accounts.carpoolSelectedAPIKey', { name: key.name, id: key.id, userId: key.user_id }) }} ×</button>
+      <span v-for="key in modelValue" :key="key.id" class="btn btn-secondary btn-sm gap-1" data-testid="carpool-key-chip">
+        <span>{{ t('admin.accounts.carpoolSelectedAPIKey', { name: key.name, id: key.id }) }}</span>
+        <CarpoolUserLabel :user-id="key.user_id" />
+        <button type="button" class="ml-1" :aria-label="t('common.delete')" @click="toggle(key)">×</button>
+      </span>
     </div>
     <label v-for="key in keys" :key="key.id" class="flex items-center gap-2 text-sm">
       <input type="checkbox" class="h-4 w-4 shrink-0 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" :checked="selected(key.id)" @change="toggle(key)" />
-      <span>{{ t('admin.accounts.carpoolSelectedAPIKey', { name: key.name, id: key.id, userId: key.user_id }) }}</span>
+      <span>{{ t('admin.accounts.carpoolSelectedAPIKey', { name: key.name, id: key.id }) }}</span>
+      <CarpoolUserLabel :user-id="key.user_id" />
     </label>
   </div>
 </template>

@@ -346,7 +346,8 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) 
 			"total_account_cost",
 			"avg_duration_ms",
 			"total_metered_cost",
-		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 0.3, 0.6, 0.1, 1.2, 20.0, nil))
+			"subscription_revenue", "subscription_revenue_unpriced_cost",
+		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 0.3, 0.6, 0.1, 1.2, 20.0, nil, 0.25, 0.2))
 
 	stats, err := repo.GetStatsWithFilters(context.Background(), filters)
 	require.NoError(t, err)
@@ -361,6 +362,8 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) 
 	require.NotNil(t, stats.TotalAccountCost)
 	require.Equal(t, 1.2, *stats.TotalAccountCost)
 	require.Nil(t, stats.TotalMeteredCost)
+	require.Equal(t, 0.25, *stats.TotalSubscriptionRevenue)
+	require.Equal(t, 0.2, *stats.SubscriptionRevenueUnpricedCost)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -387,7 +390,8 @@ func TestUsageLogRepositoryGetStatsWithFiltersSessionID(t *testing.T) {
 			"total_account_cost",
 			"avg_duration_ms",
 			"total_metered_cost",
-		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 0.3, 0.6, 0.1, 0.9, 20.0, 0.25))
+			"subscription_revenue", "subscription_revenue_unpriced_cost",
+		}).AddRow(int64(1), int64(2), int64(3), int64(1), int64(3), int64(4), 1.2, 1.0, 0.3, 0.6, 0.1, 0.9, 20.0, 0.25, 0.0, 0.0))
 
 	stats, err := repo.GetStatsWithFilters(context.Background(), filters)
 	require.NoError(t, err)
@@ -415,10 +419,12 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 	// User 3 is hosted: zero actual_cost, ranked by its standard cost.
 	rows := sqlmock.NewRows([]string{"user_id", "email", "cost", "actual_cost", "requests", "hosted_requests", "tokens",
 		"request_body_bytes_total", "request_body_bytes_avg", "request_body_bytes_max", "request_body_bytes_known_count",
-		"total_cost", "total_actual_cost", "total_requests", "total_tokens"}).
-		AddRow(int64(3), "gamma@example.com", 20.0, 0.0, int64(5), int64(5), int64(300), int64(0), nil, nil, int64(0), 50.0, 25.0, int64(30), int64(2600)).
-		AddRow(int64(2), "beta@example.com", 15.0, 12.5, int64(9), int64(0), int64(900), int64(3000), int64(1000), int64(2000), int64(3), 50.0, 25.0, int64(30), int64(2600)).
-		AddRow(int64(1), "alpha@example.com", 15.0, 12.5, int64(8), int64(0), int64(800), int64(0), int64(0), int64(0), int64(2), 50.0, 25.0, int64(30), int64(2600))
+		"subscription_revenue", "subscription_revenue_unpriced_cost",
+		"total_cost", "total_actual_cost", "total_requests", "total_tokens",
+		"total_subscription_revenue", "total_subscription_revenue_unpriced_cost"}).
+		AddRow(int64(3), "gamma@example.com", 20.0, 0.0, int64(5), int64(5), int64(300), int64(0), nil, nil, int64(0), 0.0, 0.0, 50.0, 25.0, int64(30), int64(2600), 8.0, 2.5).
+		AddRow(int64(2), "beta@example.com", 15.0, 12.5, int64(9), int64(0), int64(900), int64(3000), int64(1000), int64(2000), int64(3), 8.0, 0.0, 50.0, 25.0, int64(30), int64(2600), 8.0, 2.5).
+		AddRow(int64(1), "alpha@example.com", 15.0, 12.5, int64(8), int64(0), int64(800), int64(0), int64(0), int64(0), int64(2), 0.0, 2.5, 50.0, 25.0, int64(30), int64(2600), 8.0, 2.5)
 
 	mock.ExpectQuery(`(?s)WITH user_spend AS \(.*SUM\(u.total_cost\).*COUNT\(\*\) FILTER \(WHERE u.metered_cost IS NOT NULL\).*WHERE u.created_at >= \$1 AND u.created_at < \$2\s+GROUP BY.*SUM\(cost\) OVER \(\).*ORDER BY cost DESC, actual_cost DESC, tokens DESC, user_id ASC\s+LIMIT \$3`).
 		WithArgs(start, end, 12).
@@ -430,15 +436,20 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 		Ranking: []usagestats.UserSpendingRankingItem{
 			{UserID: 3, Email: "gamma@example.com", Cost: 20.0, ActualCost: 0, Requests: 5, HostedRequests: 5, Tokens: 300},
 			{UserID: 2, Email: "beta@example.com", Cost: 15.0, ActualCost: 12.5, Requests: 9, Tokens: 900,
-				RequestBodySizeStats: usagestats.RequestBodySizeStats{RequestBodyBytesTotal: 3000, RequestBodyBytesAvg: int64Ptr(1000), RequestBodyBytesMax: int64Ptr(2000), RequestBodyBytesKnownCount: 3}},
+				RequestBodySizeStats:     usagestats.RequestBodySizeStats{RequestBodyBytesTotal: 3000, RequestBodyBytesAvg: int64Ptr(1000), RequestBodyBytesMax: int64Ptr(2000), RequestBodyBytesKnownCount: 3},
+				SubscriptionRevenueStats: usagestats.SubscriptionRevenueStats{SubscriptionRevenue: 8.0}},
 			// Known empty bodies: avg/max are 0, not NULL.
 			{UserID: 1, Email: "alpha@example.com", Cost: 15.0, ActualCost: 12.5, Requests: 8, Tokens: 800,
-				RequestBodySizeStats: usagestats.RequestBodySizeStats{RequestBodyBytesAvg: int64Ptr(0), RequestBodyBytesMax: int64Ptr(0), RequestBodyBytesKnownCount: 2}},
+				RequestBodySizeStats:     usagestats.RequestBodySizeStats{RequestBodyBytesAvg: int64Ptr(0), RequestBodyBytesMax: int64Ptr(0), RequestBodyBytesKnownCount: 2},
+				SubscriptionRevenueStats: usagestats.SubscriptionRevenueStats{SubscriptionRevenueUnpricedCost: 2.5}},
 		},
 		TotalCost:       50.0,
 		TotalActualCost: 25.0,
 		TotalRequests:   30,
 		TotalTokens:     2600,
+		TotalSubscriptionRevenueStats: usagestats.TotalSubscriptionRevenueStats{
+			TotalSubscriptionRevenue: 8.0, TotalSubscriptionRevenueUnpricedCost: 2.5,
+		},
 	}, got)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -767,7 +778,7 @@ func TestUsageStatsBillingBreakdownFilters(t *testing.T) {
 			buckets := []float64{0, 0, 0}
 			buckets[billingType] = 2
 			mock.ExpectQuery(query).WithArgs(int64(7), int64(8), int16(billingType), start, end).
-				WillReturnRows(sqlmock.NewRows([]string{"requests", "input", "output", "write", "read", "cache", "base", "total", "balance", "subscription", "unclassified", "account", "duration", "metered"}).AddRow(1, 0, 0, 0, 0, 0, 3, 2, buckets[0], buckets[1], buckets[2], 3, 10, nil))
+				WillReturnRows(sqlmock.NewRows([]string{"requests", "input", "output", "write", "read", "cache", "base", "total", "balance", "subscription", "unclassified", "account", "duration", "metered", "revenue", "unpriced"}).AddRow(1, 0, 0, 0, 0, 0, 3, 2, buckets[0], buckets[1], buckets[2], 3, 10, nil, 0, 0))
 			stats, err := repo.GetStatsWithFilters(context.Background(), usagestats.UsageLogFilters{UserID: 7, APIKeyID: 8, BillingType: &billingType, StartTime: &start, EndTime: &end})
 			require.NoError(t, err)
 			require.Equal(t, buckets[0], stats.TotalBalanceCost)

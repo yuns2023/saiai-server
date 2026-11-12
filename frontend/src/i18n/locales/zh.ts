@@ -980,6 +980,9 @@ export default {
     actualCost: '计费消耗（含订阅额度）',
     balanceCharge: '按量余额扣费',
     subscriptionUsage: '订阅额度消耗',
+    subscriptionRevenue: '订阅折算',
+    subscriptionRevenueHint: '估算的订阅实收：订阅额度消耗 × 所属分组当前的订阅折算倍率（元 / $1）。不是收款流水；修改分组倍率后历史统计会按新倍率重算。',
+    subscriptionRevenueUnpriced: '另有 {cost} 订阅消耗所在分组未配置倍率，未计入',
     subscriptionUsageHint: '套餐额度使用量，非实际支付金额；所选时段累计值不代表当前周期剩余额度。',
     unclassifiedUsage: '未分类消耗',
     billingSource: '扣费来源',
@@ -2254,7 +2257,10 @@ export default {
         monthlyLimit: '每月限额（USD）',
         defaultValidityDays: '默认有效期（天）',
         validityHint: '分配给用户时订阅的有效天数',
-        noLimit: '无限制'
+        noLimit: '无限制',
+        revenueRate: '订阅折算倍率（元 / $1 额度）',
+        revenueRatePlaceholder: '未配置，例如 0.64',
+        revenueRateHint: '只用于统计，不影响扣费和限额。使用记录、排行和账号统计里的「订阅折算」= 订阅额度消耗 × 分组当前的这个倍率；修改后历史统计也会按新倍率重算。留空表示未配置，0 表示免费。'
       },
       imagePricing: {
         title: '图片生成计费',
@@ -2639,9 +2645,9 @@ export default {
     accounts: {
       carpoolUsersOnly: '仅限指定用户或 Key',
       carpoolUsersOnlyHint: '开启后只有名单内的用户或 API Key 可用，命中任意一项即可，两个名单都为空时全部拒绝。名单内用户的所有 Key 都可用；只想放行某个 Key 时，只选该 Key、不要选它的用户。同时开启“仅限可信用户”时须同时满足。',
-      carpoolSelectedUser: '用户 #{id}',
+      carpoolSelectedUserPrefix: '用户',
       carpoolUserSearchFailed: '用户搜索失败，请重试',
-      carpoolSelectedAPIKey: '{name}（Key #{id}，用户 #{userId}）',
+      carpoolSelectedAPIKey: '{name}（Key #{id}）用户',
       carpoolAPIKeySearchPlaceholder: '搜索 Key 名称，或输入用户 ID 列出其 Key',
       carpoolAPIKeySearchFailed: 'Key 搜索失败，请重试',
       carpoolTrustedOnly: '仅限可信用户',

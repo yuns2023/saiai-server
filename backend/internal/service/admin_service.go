@@ -147,6 +147,9 @@ type CreateGroupInput struct {
 	DailyLimitUSD        *float64 // 日限额 (USD)
 	WeeklyLimitUSD       *float64 // 周限额 (USD)
 	MonthlyLimitUSD      *float64 // 月限额 (USD)
+	// 统计用订阅实收倍率（元/$1）。Update 时仅在 SubscriptionRevenueRateSet 为 true 时写入；nil 表示清空。
+	SubscriptionRevenueRate    *float64
+	SubscriptionRevenueRateSet bool
 	// 图片生成计费配置（仅 antigravity 平台使用）
 	ImagePrice1K *float64
 	ImagePrice2K *float64
@@ -213,6 +216,9 @@ type UpdateGroupInput struct {
 	DailyLimitUSD        *float64 // 日限额 (USD)
 	WeeklyLimitUSD       *float64 // 周限额 (USD)
 	MonthlyLimitUSD      *float64 // 月限额 (USD)
+	// 统计用订阅实收倍率（元/$1）。Update 时仅在 SubscriptionRevenueRateSet 为 true 时写入；nil 表示清空。
+	SubscriptionRevenueRate    *float64
+	SubscriptionRevenueRateSet bool
 	// 图片生成计费配置（仅 antigravity 平台使用）
 	ImagePrice1K *float64
 	ImagePrice2K *float64
@@ -969,8 +975,40 @@ func validateGroupRateMultiplier(rate float64) error {
 	return nil
 }
 
+// validateSubscriptionRevenueRate checks the statistics-only revenue rate
+// (yuan per $1 of subscription quota). nil clears it; the bounds match the
+// migration 123 CHECK constraint, and values with more than four decimals
+// (beyond float noise) are rejected so DECIMAL(10,4) does not silently round,
+// e.g. 0.00004 to 0. Accepted values are normalized by normalizeRevenueRate.
+func validateSubscriptionRevenueRate(rate *float64) error {
+	if rate == nil {
+		return nil
+	}
+	v := *rate
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1000 {
+		return infraerrors.BadRequest("INVALID_SUBSCRIPTION_REVENUE_RATE", "subscription_revenue_rate must be between 0 and 1000")
+	}
+	if scaled := v * 1e4; math.Abs(scaled-math.Round(scaled)) > 1e-6 {
+		return infraerrors.BadRequest("INVALID_SUBSCRIPTION_REVENUE_RATE", "subscription_revenue_rate allows at most 4 decimal places")
+	}
+	return nil
+}
+
+// normalizeRevenueRate rounds a validated rate to the four stored decimals so
+// the API response matches what a later read returns (0.1+0.2 -> 0.3).
+func normalizeRevenueRate(rate *float64) *float64 {
+	if rate == nil {
+		return nil
+	}
+	v := math.Round(*rate*1e4) / 1e4
+	return &v
+}
+
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
 	if err := validateGroupRateMultiplier(input.RateMultiplier); err != nil {
+		return nil, err
+	}
+	if err := validateSubscriptionRevenueRate(input.SubscriptionRevenueRate); err != nil {
 		return nil, err
 	}
 	if input.InputModerationPolicy == nil {
@@ -1112,6 +1150,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		DailyLimitUSD:                    dailyLimit,
 		WeeklyLimitUSD:                   weeklyLimit,
 		MonthlyLimitUSD:                  monthlyLimit,
+		SubscriptionRevenueRate:          normalizeRevenueRate(input.SubscriptionRevenueRate),
 		ImagePrice1K:                     imagePrice1K,
 		ImagePrice2K:                     imagePrice2K,
 		ImagePrice4K:                     imagePrice4K,
@@ -1332,6 +1371,11 @@ func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Con
 }
 
 func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *UpdateGroupInput) (*Group, error) {
+	if input.SubscriptionRevenueRateSet {
+		if err := validateSubscriptionRevenueRate(input.SubscriptionRevenueRate); err != nil {
+			return nil, err
+		}
+	}
 	group, err := s.groupRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1393,6 +1437,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	group.DailyLimitUSD = normalizeLimit(input.DailyLimitUSD)
 	group.WeeklyLimitUSD = normalizeLimit(input.WeeklyLimitUSD)
 	group.MonthlyLimitUSD = normalizeLimit(input.MonthlyLimitUSD)
+	if input.SubscriptionRevenueRateSet {
+		group.SubscriptionRevenueRate = normalizeRevenueRate(input.SubscriptionRevenueRate)
+	}
 	// 图片生成计费配置：负数表示清除（使用默认价格）
 	if input.ImagePrice1K != nil {
 		group.ImagePrice1K = normalizePrice(input.ImagePrice1K)

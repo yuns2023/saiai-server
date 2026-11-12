@@ -15,7 +15,7 @@
     <!-- Main Status Badge (shown when not rate limited/overloaded) -->
     <template v-else>
       <button
-        v-if="isTempUnschedulable"
+        v-if="isTempUnschedulable && tempUnschedDetails"
         type="button"
         :class="['badge text-xs', statusClass, 'cursor-pointer']"
         :title="t('admin.accounts.status.viewTempUnschedDetails')"
@@ -161,7 +161,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import type { Account } from '@/types'
+import type { Account, AccountStatusSnapshot } from '@/types'
 import {
   formatCountdown,
   formatDateTime,
@@ -172,9 +172,16 @@ import {
 
 const { t } = useI18n()
 
-const props = defineProps<{
-  account: Account
-}>()
+// Accepts a full Account (account list) or just the status fields (the
+// proxy's account list). The temp-unsched details button needs a full Account,
+// so callers passing a status snapshot set tempUnschedDetails to false.
+const props = withDefaults(
+  defineProps<{
+    account: Account | AccountStatusSnapshot
+    tempUnschedDetails?: boolean
+  }>(),
+  { tempUnschedDetails: true }
+)
 
 const emit = defineEmits<{
   (e: 'show-temp-unsched', account: Account): void
@@ -352,7 +359,7 @@ const statusText = computed(() => {
 })
 
 const handleTempUnschedClick = () => {
-  if (!isTempUnschedulable.value) return
-  emit('show-temp-unsched', props.account)
+  if (!isTempUnschedulable.value || !props.tempUnschedDetails) return
+  emit('show-temp-unsched', props.account as Account)
 }
 </script>
