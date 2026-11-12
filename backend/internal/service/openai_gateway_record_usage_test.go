@@ -61,6 +61,10 @@ type openAIRecordUsageUserRepoStub struct {
 	lastCtxErr  error
 }
 
+func (s *openAIRecordUsageUserRepoStub) AdjustBalance(context.Context, int64, string, float64) (BalanceAdjustment, error) {
+	panic("unexpected AdjustBalance call")
+}
+
 func (s *openAIRecordUsageUserRepoStub) DeductBalance(ctx context.Context, id int64, amount float64) error {
 	s.deductCalls++
 	s.lastAmount = amount

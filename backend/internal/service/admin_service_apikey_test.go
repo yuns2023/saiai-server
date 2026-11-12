@@ -53,6 +53,10 @@ func (s *userRepoStubForGroupUpdate) ListWithFilters(context.Context, pagination
 func (s *userRepoStubForGroupUpdate) UpdateBalance(context.Context, int64, float64) error {
 	panic("unexpected")
 }
+func (s *userRepoStubForGroupUpdate) AdjustBalance(context.Context, int64, string, float64) (BalanceAdjustment, error) {
+	panic("unexpected AdjustBalance call")
+}
+
 func (s *userRepoStubForGroupUpdate) DeductBalance(context.Context, int64, float64) error {
 	panic("unexpected")
 }

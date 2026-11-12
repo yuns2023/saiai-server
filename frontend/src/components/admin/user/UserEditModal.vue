@@ -155,7 +155,7 @@ const handleUpdateUser = async () => {
     appStore.showSuccess(t('admin.users.userUpdated'))
     emit('success'); emit('close')
   } catch (e: any) {
-    appStore.showError(e.response?.data?.detail || t('admin.users.failedToUpdate'))
+    appStore.showError(e?.message || e.response?.data?.detail || t('admin.users.failedToUpdate'))
   } finally { submitting.value = false }
 }
 </script>

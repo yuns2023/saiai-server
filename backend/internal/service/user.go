@@ -38,10 +38,17 @@ type User struct {
 	// statement; RevokeSessionsOnSave ends them without a password change.
 	// An ordinary save writes neither, so it cannot restore an old password
 	// or roll the version back.
-	PasswordChangedOnSave bool `json:"-"`
-	RevokeSessionsOnSave  bool `json:"-"`
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	//
+	// Balance and Sora storage usage are never written by Update: billing,
+	// redeem codes and admin adjustments change them atomically, and writing
+	// back a value read earlier would undo those changes. Concurrency is
+	// written only with ConcurrencyChangedOnSave, for the same reason (redeem
+	// codes add to it atomically).
+	PasswordChangedOnSave    bool `json:"-"`
+	RevokeSessionsOnSave     bool `json:"-"`
+	ConcurrencyChangedOnSave bool `json:"-"`
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier

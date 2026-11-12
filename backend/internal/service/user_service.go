@@ -16,6 +16,36 @@ var (
 	ErrInsufficientPerms = infraerrors.Forbidden("INSUFFICIENT_PERMISSIONS", "insufficient permissions")
 )
 
+// Balance adjustment operations accepted by UserRepository.AdjustBalance.
+const (
+	BalanceOpSet      = "set"
+	BalanceOpAdd      = "add"
+	BalanceOpSubtract = "subtract"
+)
+
+// BalanceAdjustment is the balance before and after one AdjustBalance call,
+// both read under the same row lock. Delta and Changed are computed in the
+// database's numeric type: NewBalance-OldBalance in float64 can round a real
+// change to zero on a large balance.
+type BalanceAdjustment struct {
+	OldBalance float64
+	NewBalance float64
+	Delta      float64
+	Changed    bool
+}
+
+// ErrBalanceOutOfRange rejects an adjustment whose result does not fit the
+// balance column.
+var ErrBalanceOutOfRange = infraerrors.BadRequest("BALANCE_OUT_OF_RANGE", "resulting balance is out of range")
+
+// NewNegativeBalanceError rejects an adjustment that would leave the balance
+// below zero.
+func NewNegativeBalanceError(current, result float64) error {
+	return infraerrors.BadRequest("BALANCE_NEGATIVE", fmt.Sprintf(
+		"balance cannot be negative, current balance: %.2f, requested operation would result in: %.2f",
+		current, result))
+}
+
 // UserListFilters contains all filter options for listing users
 type UserListFilters struct {
 	Status     string           // User status filter
@@ -41,6 +71,9 @@ type UserRepository interface {
 	ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters UserListFilters) ([]User, *pagination.PaginationResult, error)
 
 	UpdateBalance(ctx context.Context, id int64, amount float64) error
+	// AdjustBalance applies an admin set/add/subtract under a row lock and
+	// rejects any result below zero. op must be one of the BalanceOp values.
+	AdjustBalance(ctx context.Context, id int64, op string, amount float64) (BalanceAdjustment, error)
 	DeductBalance(ctx context.Context, id int64, amount float64) error
 	UpdateConcurrency(ctx context.Context, id int64, amount int) error
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
@@ -138,8 +171,9 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, req Updat
 		user.Username = *req.Username
 	}
 
-	if req.Concurrency != nil {
+	if req.Concurrency != nil && *req.Concurrency != user.Concurrency {
 		user.Concurrency = *req.Concurrency
+		user.ConcurrencyChangedOnSave = true
 	}
 
 	if err := s.userRepo.Update(ctx, user); err != nil {

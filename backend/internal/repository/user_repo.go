@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 type userRepository struct {
@@ -150,15 +152,19 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		SetUsername(userIn.Username).
 		SetNotes(userIn.Notes).
 		SetRole(userIn.Role).
-		SetBalance(userIn.Balance).
 		SetNillablePaygDiscountMultiplier(userIn.PaygDiscountMultiplier).
 		SetPaygDiscountOverrideEnabled(userIn.PaygDiscountOverrideEnabled).
 		SetIsTrusted(userIn.IsTrusted).
 		SetClaudeDeviceBaseLimit(userIn.ClaudeDeviceBaseCapacity()).
-		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
-		SetSoraStorageQuotaBytes(userIn.SoraStorageQuotaBytes).
-		SetSoraStorageUsedBytes(userIn.SoraStorageUsedBytes)
+		SetSoraStorageQuotaBytes(userIn.SoraStorageQuotaBytes)
+	// Balance and Sora storage usage are counters changed atomically elsewhere
+	// (billing, redeem codes, AdjustBalance); writing back the value read
+	// before this save would undo concurrent changes. Concurrency is written
+	// only when the caller asked to change it.
+	if userIn.ConcurrencyChangedOnSave {
+		builder.SetConcurrency(userIn.Concurrency)
+	}
 	// Credentials and the token version change only through explicit intents.
 	// A password change and the version increment share this statement, so
 	// sessions end exactly when the new password takes effect.
@@ -184,10 +190,15 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 
 	userIn.UpdatedAt = updated.UpdatedAt
 	userIn.TokenVersion = updated.TokenVersion
+	// Report the stored counters, not the values read before the save.
+	userIn.Balance = updated.Balance
+	userIn.Concurrency = updated.Concurrency
+	userIn.SoraStorageUsedBytes = updated.SoraStorageUsedBytes
 	// Consumed only after the save committed (or, inside a caller's
 	// transaction, succeeded); on failure the intents stay for a retry.
 	userIn.PasswordChangedOnSave = false
 	userIn.RevokeSessionsOnSave = false
+	userIn.ConcurrencyChangedOnSave = false
 	return nil
 }
 
@@ -393,6 +404,87 @@ func (r *userRepository) UpdateBalance(ctx context.Context, id int64, amount flo
 		return service.ErrUserNotFound
 	}
 	return nil
+}
+
+// AdjustBalance locks the user row (SELECT ... FOR UPDATE, then UPDATE in the
+// same transaction), computes the new balance from the stored one in numeric
+// arithmetic, and rejects a result below zero (also for "add" on an already
+// overdrawn balance). Old balance, new balance and the change all come from
+// that locked row; the change is computed in numeric, so a tiny adjustment
+// on a large balance is not lost to float rounding.
+//
+// Inside a caller's transaction a database error (such as a numeric overflow)
+// leaves that transaction failed; the caller must roll back.
+func (r *userRepository) AdjustBalance(ctx context.Context, id int64, op string, amount float64) (service.BalanceAdjustment, error) {
+	var expr string
+	switch op {
+	case service.BalanceOpSet:
+		expr = `$2::numeric`
+	case service.BalanceOpAdd:
+		expr = `balance + $2::numeric`
+	case service.BalanceOpSubtract:
+		expr = `balance - $2::numeric`
+	default:
+		return service.BalanceAdjustment{}, fmt.Errorf("unknown balance operation %q", op)
+	}
+	if math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return service.BalanceAdjustment{}, fmt.Errorf("balance amount must be finite")
+	}
+
+	client := clientFromContext(ctx, r.client)
+	var tx *dbent.Tx
+	if dbent.TxFromContext(ctx) == nil {
+		var err error
+		tx, err = client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return service.BalanceAdjustment{}, err
+		}
+		if err == nil {
+			defer func() { _ = tx.Rollback() }()
+			client = tx.Client()
+		}
+		// ErrTxStarted: the client is already transactional; the caller commits.
+	}
+
+	var adj service.BalanceAdjustment
+	var oldExact string
+	var next float64
+	var negative bool
+	err := scanSingleRow(ctx, client, `
+		SELECT balance::text, balance::float8, (`+expr+`)::float8, (`+expr+`) < 0
+		FROM users
+		WHERE id = $1 AND deleted_at IS NULL
+		FOR UPDATE
+	`, []any{id, amount}, &oldExact, &adj.OldBalance, &next, &negative)
+	if errors.Is(err, sql.ErrNoRows) {
+		return service.BalanceAdjustment{}, service.ErrUserNotFound
+	}
+	if err != nil {
+		return service.BalanceAdjustment{}, err
+	}
+	if negative {
+		return service.BalanceAdjustment{}, service.NewNegativeBalanceError(adj.OldBalance, next)
+	}
+	// The row is locked, so the expression sees the balance read above; the
+	// stored result is rounded to the column scale, hence RETURNING.
+	if err := scanSingleRow(ctx, client, `
+		UPDATE users
+		SET balance = `+expr+`, updated_at = NOW()
+		WHERE id = $1
+		RETURNING balance::float8, (balance - $3::numeric)::float8, balance <> $3::numeric
+	`, []any{id, amount, oldExact}, &adj.NewBalance, &adj.Delta, &adj.Changed); err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "22003" {
+			return service.BalanceAdjustment{}, service.ErrBalanceOutOfRange
+		}
+		return service.BalanceAdjustment{}, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return service.BalanceAdjustment{}, err
+		}
+	}
+	return adj, nil
 }
 
 // DeductBalance 扣除用户余额
