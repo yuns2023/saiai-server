@@ -427,6 +427,60 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 	return nil
 }
 
+// UpdateLocked applies a change to the account's current row under a row lock
+// and writes it back in the same transaction. Unlike reading early and calling
+// Update, changes committed by other writers before the lock (billing, rate
+// limits, usage samples, token refresh) are part of what apply sees, and later
+// ones wait for the commit. apply must not do network I/O: it runs while the
+// row is locked.
+//
+// It always runs its own transaction: the snapshot sync after commit and the
+// lock's scope would be wrong inside a caller's transaction, so that case is
+// rejected.
+func (r *accountRepository) UpdateLocked(ctx context.Context, id int64, apply func(*service.Account) error) (*service.Account, error) {
+	if dbent.TxFromContext(ctx) != nil {
+		return nil, errors.New("account UpdateLocked must not run inside a caller transaction")
+	}
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		if errors.Is(err, dbent.ErrTxStarted) {
+			return nil, errors.New("account UpdateLocked must not run on a transactional client")
+		}
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	txClient := tx.Client()
+
+	var lockedID int64
+	if err := scanSingleRow(ctx, txClient,
+		"SELECT id FROM accounts WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", []any{id}, &lockedID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, service.ErrAccountNotFound
+		}
+		return nil, err
+	}
+	// Reads and writes inside go through the transaction; the snapshot is
+	// synced after commit (no scheduler cache on the tx repository).
+	txRepo := &accountRepository{client: txClient, sql: txClient}
+	locked, err := txRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := apply(locked); err != nil {
+		return nil, err
+	}
+	// The outbox event is written in this transaction; a failed insert aborts
+	// it and the save fails at commit (previously it was only logged).
+	if err := txRepo.Update(ctx, locked); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return locked, nil
+}
+
 func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 	groupIDs, err := r.loadAccountGroupIDs(ctx, id)
 	if err != nil {

@@ -628,6 +628,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		ExpiresAt:             req.ExpiresAt,
 		AutoPauseOnExpired:    req.AutoPauseOnExpired,
 		SkipMixedChannelCheck: skipCheck,
+		EditorSave:            true, // config save: token and runtime keys keep their current values
 	})
 	if err != nil {
 		// 检查是否为混合渠道错误

@@ -220,3 +220,25 @@ func TestAccountHandlerBulkUpdateMixedChannelConfirmSkips(t *testing.T) {
 	require.Equal(t, float64(2), data["success"])
 	require.Equal(t, float64(0), data["failed"])
 }
+
+// The edit endpoint's payload is a page snapshot; the handler (not the body)
+// marks it so stale tokens and runtime extra keys are not written back.
+func TestAccountHandlerUpdateMarksEditorSave(t *testing.T) {
+	adminSvc := newStubAdminService()
+	router := setupAccountMixedChannelRouter(adminSvc)
+
+	body, _ := json.Marshal(map[string]any{
+		"name":        "edited",
+		"credentials": map[string]any{"refresh_token": "page-load"},
+		"editor_save": false,
+		"EditorSave":  false,
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts/3", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, adminSvc.lastUpdateAccount)
+	require.True(t, adminSvc.lastUpdateAccount.EditorSave)
+}
