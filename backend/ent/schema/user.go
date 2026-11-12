@@ -75,6 +75,11 @@ func (User) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "text"}).
 			Default(""),
 
+		// token_version invalidates issued JWTs and refresh tokens. Only
+		// incremented (password changes); never written from a loaded value.
+		field.Int64("token_version").
+			Default(0),
+
 		// TOTP 双因素认证字段
 		field.String("totp_secret_encrypted").
 			SchemaType(map[string]string{dialect.Postgres: "text"}).

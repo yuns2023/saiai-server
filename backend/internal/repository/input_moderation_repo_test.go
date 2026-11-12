@@ -142,7 +142,7 @@ func TestApplyInputModerationIncidentCooldownThenDisable(t *testing.T) {
 			mock.ExpectQuery("SELECT EXISTS").
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 			if tt.wantDisabled {
-				mock.ExpectExec("UPDATE users SET status = 'disabled'").
+				mock.ExpectExec("UPDATE users SET status = 'disabled', token_version = token_version \\+ 1").
 					WithArgs(int64(1)).
 					WillReturnResult(sqlmock.NewResult(0, 1))
 			}

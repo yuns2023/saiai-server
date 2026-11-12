@@ -29,9 +29,19 @@ type User struct {
 	Concurrency                 int
 	Status                      string
 	AllowedGroups               []int64
-	TokenVersion                int64 // Incremented on password change to invalidate existing tokens
-	CreatedAt                   time.Time
-	UpdatedAt                   time.Time
+	// TokenVersion is carried in issued JWTs and refresh tokens; a mismatch
+	// rejects them. Only the database increments it (see the save intents).
+	TokenVersion int64
+
+	// Save intents for UserRepository.Update; never persisted. A password
+	// change writes PasswordHash and ends every issued session in the same
+	// statement; RevokeSessionsOnSave ends them without a password change.
+	// An ordinary save writes neither, so it cannot restore an old password
+	// or roll the version back.
+	PasswordChangedOnSave bool `json:"-"`
+	RevokeSessionsOnSave  bool `json:"-"`
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier
@@ -130,6 +140,7 @@ func (u *User) SetPassword(password string) error {
 		return err
 	}
 	u.PasswordHash = string(hash)
+	u.PasswordChangedOnSave = true
 	return nil
 }
 

@@ -1132,6 +1132,7 @@ var (
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
 		{Name: "username", Type: field.TypeString, Size: 100, Default: ""},
 		{Name: "notes", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "token_version", Type: field.TypeInt64, Default: 0},
 		{Name: "totp_secret_encrypted", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
 		{Name: "totp_enabled", Type: field.TypeBool, Default: false},
 		{Name: "totp_enabled_at", Type: field.TypeTime, Nullable: true},
@@ -1148,13 +1149,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "users_access_levels_auto_users",
-				Columns:    []*schema.Column{UsersColumns[21]},
+				Columns:    []*schema.Column{UsersColumns[22]},
 				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "users_access_levels_manual_users",
-				Columns:    []*schema.Column{UsersColumns[22]},
+				Columns:    []*schema.Column{UsersColumns[23]},
 				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -1173,12 +1174,12 @@ var (
 			{
 				Name:    "user_auto_level_id",
 				Unique:  false,
-				Columns: []*schema.Column{UsersColumns[21]},
+				Columns: []*schema.Column{UsersColumns[22]},
 			},
 			{
 				Name:    "user_manual_level_id",
 				Unique:  false,
-				Columns: []*schema.Column{UsersColumns[22]},
+				Columns: []*schema.Column{UsersColumns[23]},
 			},
 		},
 	}

@@ -85,6 +85,9 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 	}
 
 	applyUserEntityToService(userIn, created)
+	// Create always writes the password; a SetPassword intent is spent.
+	userIn.PasswordChangedOnSave = false
+	userIn.RevokeSessionsOnSave = false
 	return nil
 }
 
@@ -142,11 +145,10 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		txClient = r.client
 	}
 
-	updated, err := txClient.User.UpdateOneID(userIn.ID).
+	builder := txClient.User.UpdateOneID(userIn.ID).
 		SetEmail(userIn.Email).
 		SetUsername(userIn.Username).
 		SetNotes(userIn.Notes).
-		SetPasswordHash(userIn.PasswordHash).
 		SetRole(userIn.Role).
 		SetBalance(userIn.Balance).
 		SetNillablePaygDiscountMultiplier(userIn.PaygDiscountMultiplier).
@@ -156,8 +158,16 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
 		SetSoraStorageQuotaBytes(userIn.SoraStorageQuotaBytes).
-		SetSoraStorageUsedBytes(userIn.SoraStorageUsedBytes).
-		Save(ctx)
+		SetSoraStorageUsedBytes(userIn.SoraStorageUsedBytes)
+	// Credentials and the token version change only through explicit intents.
+	// A password change and the version increment share this statement, so
+	// sessions end exactly when the new password takes effect.
+	if userIn.PasswordChangedOnSave {
+		builder.SetPasswordHash(userIn.PasswordHash).AddTokenVersion(1)
+	} else if userIn.RevokeSessionsOnSave {
+		builder.AddTokenVersion(1)
+	}
+	updated, err := builder.Save(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
 	}
@@ -173,6 +183,11 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 	}
 
 	userIn.UpdatedAt = updated.UpdatedAt
+	userIn.TokenVersion = updated.TokenVersion
+	// Consumed only after the save committed (or, inside a caller's
+	// transaction, succeeded); on failure the intents stay for a retry.
+	userIn.PasswordChangedOnSave = false
+	userIn.RevokeSessionsOnSave = false
 	return nil
 }
 
@@ -628,6 +643,7 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 	dst.PaygDiscountOverrideEnabled = src.PaygDiscountOverrideEnabled
 	dst.IsTrusted = src.IsTrusted
 	dst.ClaudeDeviceBaseLimit = src.ClaudeDeviceBaseLimit
+	dst.TokenVersion = src.TokenVersion
 	dst.CreatedAt = src.CreatedAt
 	dst.UpdatedAt = src.UpdatedAt
 }

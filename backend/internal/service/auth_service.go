@@ -13,6 +13,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -1085,9 +1086,10 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, token, newPasswo
 		return fmt.Errorf("hash password: %w", err)
 	}
 
-	// Update password and increment TokenVersion
+	// Saving a password change also increments the token version, which
+	// invalidates every issued JWT and refresh token.
 	user.PasswordHash = hashedPassword
-	user.TokenVersion++ // Invalidate all existing tokens
+	user.PasswordChangedOnSave = true
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error updating password for user %d: %v", user.ID, err)
@@ -1295,6 +1297,31 @@ func (s *AuthService) RevokeAllUserSessions(ctx context.Context, userID int64) e
 		return nil // No-op if cache not configured
 	}
 	return s.refreshTokenCache.DeleteUserRefreshTokens(ctx, userID)
+}
+
+// LogoutEverywhere ends every session of the user: issued access tokens stop
+// validating (token version) and refresh tokens are deleted. Deleting refresh
+// tokens alone left access tokens usable until they expired.
+func (s *AuthService) LogoutEverywhere(ctx context.Context, userID int64) error {
+	if s.entClient == nil {
+		return errors.New("logout everywhere: database client not configured")
+	}
+	n, err := s.entClient.User.Update().
+		Where(dbuser.IDEQ(userID), dbuser.DeletedAtIsNil()).
+		AddTokenVersion(1).
+		Save(ctx)
+	if err != nil {
+		return fmt.Errorf("increment token version: %w", err)
+	}
+	if n == 0 {
+		return ErrUserNotFound
+	}
+	if err := s.RevokeAllUserSessions(ctx, userID); err != nil {
+		// Access tokens are already invalid; refresh tokens fail the
+		// version check, so this only cleans up.
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to delete refresh tokens for user %d after logout everywhere: %v", userID, err)
+	}
+	return nil
 }
 
 // hashToken 计算Token的SHA256哈希

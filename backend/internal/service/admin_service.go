@@ -746,6 +746,11 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 
 	if input.Status != "" {
 		user.Status = input.Status
+		// Disabling ends the user's sessions, so re-enabling later does not
+		// revive tokens issued before.
+		if oldStatus == StatusActive && user.Status != StatusActive {
+			user.RevokeSessionsOnSave = true
+		}
 	}
 
 	if input.Concurrency != nil {
