@@ -833,6 +833,10 @@ func (r *stubUserRepo) UpdateBalance(ctx context.Context, id int64, amount float
 	return errors.New("not implemented")
 }
 
+func (r *stubUserRepo) AdjustBalance(context.Context, int64, string, float64) (service.BalanceAdjustment, error) {
+	panic("unexpected AdjustBalance call")
+}
+
 func (r *stubUserRepo) DeductBalance(ctx context.Context, id int64, amount float64) error {
 	return errors.New("not implemented")
 }

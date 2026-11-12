@@ -753,8 +753,11 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
-	if input.Concurrency != nil {
+	// Written only when it changes: the edit form always sends the value, and
+	// an unchanged one must not overwrite concurrency a redeem code just added.
+	if input.Concurrency != nil && *input.Concurrency != user.Concurrency {
 		user.Concurrency = *input.Concurrency
+		user.ConcurrencyChangedOnSave = true
 	}
 	if input.PaygDiscountMultiplier != nil {
 		user.PaygDiscountMultiplier = input.PaygDiscountMultiplier
@@ -787,6 +790,13 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
+	// The adjustment record is the admin's own change; Update returns the
+	// stored concurrency, which may also include a concurrent redeem code.
+	concurrencyDiff := 0
+	if user.ConcurrencyChangedOnSave {
+		concurrencyDiff = user.Concurrency - oldConcurrency
+	}
+
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, err
 	}
@@ -803,7 +813,6 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
-	concurrencyDiff := user.Concurrency - oldConcurrency
 	if concurrencyDiff != 0 {
 		code, err := GenerateRedeemCode()
 		if err != nil {
@@ -847,34 +856,37 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 }
 
 func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, balance float64, operation string, notes string) (*User, error) {
+	switch operation {
+	case BalanceOpSet, BalanceOpAdd, BalanceOpSubtract:
+	default:
+		return nil, infraerrors.BadRequest("INVALID_BALANCE_OPERATION", "operation must be one of set, add, subtract")
+	}
+	if math.IsNaN(balance) || math.IsInf(balance, 0) || balance < 0 {
+		return nil, infraerrors.BadRequest("INVALID_BALANCE_AMOUNT", "balance must be a finite number >= 0")
+	}
+
+	// AdjustBalance computes the new balance from the stored one under a row
+	// lock, so a charge or top-up landing meanwhile is kept, and the recorded
+	// difference is exactly what this adjustment changed. This method does not
+	// support a caller's transaction: the refresh, the record and the cache
+	// invalidation below assume the adjustment has committed.
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-
-	oldBalance := user.Balance
-
-	switch operation {
-	case "set":
-		user.Balance = balance
-	case "add":
-		user.Balance += balance
-	case "subtract":
-		user.Balance -= balance
-	}
-
-	if user.Balance < 0 {
-		return nil, fmt.Errorf("balance cannot be negative, current balance: %.2f, requested operation would result in: %.2f", oldBalance, user.Balance)
-	}
-
-	if err := s.userRepo.Update(ctx, user); err != nil {
+	adj, err := s.userRepo.AdjustBalance(ctx, userID, operation, balance)
+	if err != nil {
 		return nil, err
 	}
+	// The adjustment is committed; nothing below may fail the request, or a
+	// retry would apply it twice. The response prefers the stored balance (it
+	// may already include a later charge); the record uses the locked values.
+	user.Balance = adj.NewBalance
 	if refreshed, refreshErr := s.userRepo.GetByID(ctx, userID); refreshErr == nil {
 		user = refreshed
 	}
-	balanceDiff := user.Balance - oldBalance
-	if s.authCacheInvalidator != nil && balanceDiff != 0 {
+	balanceDiff := adj.Delta
+	if s.authCacheInvalidator != nil && adj.Changed {
 		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
 	}
 
@@ -888,7 +900,7 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 		}()
 	}
 
-	if balanceDiff != 0 {
+	if adj.Changed {
 		code, err := GenerateRedeemCode()
 		if err != nil {
 			logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
