@@ -380,3 +380,43 @@ func TestUsageBillingRepositoryApply_DeduplicatesAgainstArchivedKey(t *testing.T
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT balance FROM users WHERE id = $1", user.ID).Scan(&balance))
 	require.InDelta(t, 98.75, balance, 0.000001)
 }
+
+// A rate-limit window that has not started carries no usage: settlement opens
+// it with this request's cost, whatever the stored counter says. Same rule as
+// apiKeyRepository.IncrementRateLimitUsage.
+func TestUsageBillingRepositoryApply_UnsetRateLimitWindowStartsAtCost(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-billing-unset-window-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+		Balance:      100,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID: user.ID, Key: "sk-usage-billing-unset-" + uuid.NewString(), Name: "unset", RateLimit1d: 10,
+	})
+	_, err := integrationDB.ExecContext(ctx, `UPDATE api_keys SET usage_5h = 50, usage_1d = 50, usage_7d = 50,
+		window_5h_start = NULL, window_1d_start = NULL, window_7d_start = NULL WHERE id = $1`, apiKey.ID)
+	require.NoError(t, err)
+	account := mustCreateAccount(t, client, &service.Account{
+		Name: "usage-billing-unset-account-" + uuid.NewString(), Type: service.AccountTypeAPIKey,
+	})
+
+	_, err = repo.Apply(ctx, &service.UsageBillingCommand{
+		RequestID: uuid.NewString(), APIKeyID: apiKey.ID, UserID: user.ID, AccountID: account.ID,
+		AccountType: service.AccountTypeAPIKey, BalanceCost: 1.25, APIKeyRateLimitCost: 1.25,
+	})
+	require.NoError(t, err)
+
+	var u5h, u1d, u7d float64
+	var started bool
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT usage_5h, usage_1d, usage_7d,
+		window_5h_start IS NOT NULL AND window_1d_start IS NOT NULL AND window_7d_start IS NOT NULL
+		FROM api_keys WHERE id = $1`, apiKey.ID).Scan(&u5h, &u1d, &u7d, &started))
+	require.InDelta(t, 1.25, u5h, 1e-9)
+	require.InDelta(t, 1.25, u1d, 1e-9)
+	require.InDelta(t, 1.25, u7d, 1e-9)
+	require.True(t, started)
+}

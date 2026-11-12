@@ -9610,10 +9610,6 @@ func finalizePostUsageBilling(p *postUsageBillingParams, deps *billingDeps) {
 		deps.billingCacheService.QueueDeductBalance(p.User.ID, p.Cost.ActualCost)
 	}
 
-	if apiKeyUsageCost(p) > 0 && p.APIKey != nil && p.APIKey.HasRateLimits() {
-		deps.billingCacheService.QueueUpdateAPIKeyRateLimitUsage(p.APIKey.ID, apiKeyUsageCost(p))
-	}
-
 	deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
 }
 

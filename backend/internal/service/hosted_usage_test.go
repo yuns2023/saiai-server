@@ -108,10 +108,7 @@ func TestHostedUsageLegacySettlementAndCacheUseSameReference(t *testing.T) {
 	require.Equal(t, 1, quota.quotaCalls)
 	require.Equal(t, 1, quota.rateLimitCalls)
 	require.Equal(t, metered, quota.lastAmount)
-	require.Len(t, cache.cacheWriteChan, 1)
-	task := <-cache.cacheWriteChan
-	require.Equal(t, cacheWriteUpdateRateLimitUsage, task.kind)
-	require.Equal(t, metered, task.amount)
+	require.Empty(t, cache.cacheWriteChan, "API Key rate limits are not cached in Redis")
 }
 
 func TestHostedUsageAccountBudgetIsIndependentOfPlatformCostSnapshot(t *testing.T) {

@@ -421,8 +421,10 @@ func (s *APIKeyRepoSuite) TestIncrementQuotaUsedAndGetState() {
 	user := s.mustCreateUser("quota-state@test.com")
 	key := s.mustCreateApiKey(user.ID, "sk-quota-state", "QuotaState", nil)
 	key.Quota = 3
-	key.QuotaUsed = 1
 	s.Require().NoError(s.repo.Update(s.ctx, key), "Update quota")
+	// Update does not write quota_used (billing owns it); seed it by billing.
+	_, err := s.repo.IncrementQuotaUsed(s.ctx, key.ID, 1)
+	s.Require().NoError(err, "seed quota_used")
 
 	state, err := s.repo.IncrementQuotaUsedAndGetState(s.ctx, key.ID, 2.5)
 	s.Require().NoError(err, "IncrementQuotaUsedAndGetState")
@@ -503,4 +505,138 @@ func (s *APIKeyRepoSuite) TestTrustedUserAuthProjection() {
 		s.Require().NotNil(got.User)
 		s.Require().Equal(trusted, got.User.IsTrusted)
 	}
+}
+
+// Billing increments quota_used and the rate-limit counters concurrently with
+// user edits. An ordinary save of a key loaded before those increments must
+// keep them; only an explicit reset writes them.
+func (s *APIKeyRepoSuite) TestUpdate_KeepsBillingCountersUnlessReset() {
+	user := s.mustCreateUser("update-counters@test.com")
+	key := s.mustCreateApiKey(user.ID, "sk-update-counters", "Counters", nil)
+
+	stale, err := s.repo.GetByID(s.ctx, key.ID)
+	s.Require().NoError(err)
+	_, err = s.repo.IncrementQuotaUsed(s.ctx, key.ID, 5)
+	s.Require().NoError(err)
+	s.Require().NoError(s.repo.IncrementRateLimitUsage(s.ctx, key.ID, 7))
+
+	stale.Name = "Renamed"
+	stale.RateLimit1d = 100
+	s.Require().NoError(s.repo.Update(s.ctx, stale))
+
+	got, err := s.repo.GetByID(s.ctx, key.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("Renamed", got.Name)
+	s.Require().Equal(100.0, got.RateLimit1d)
+	s.Require().Equal(5.0, got.QuotaUsed, "save must not write back the loaded quota_used")
+	s.Require().Equal(7.0, got.Usage5h)
+	s.Require().Equal(7.0, got.Usage1d)
+	s.Require().Equal(7.0, got.Usage7d)
+	s.Require().NotNil(got.Window5hStart)
+	s.Require().NotNil(got.Window1dStart)
+	s.Require().NotNil(got.Window7dStart)
+
+	got.ResetQuotaUsedOnSave = true
+	got.ResetRateLimitUsageOnSave = true
+	s.Require().NoError(s.repo.Update(s.ctx, got))
+
+	reset, err := s.repo.GetByID(s.ctx, key.ID)
+	s.Require().NoError(err)
+	s.Require().Zero(reset.QuotaUsed)
+	s.Require().Zero(reset.Usage5h)
+	s.Require().Zero(reset.Usage1d)
+	s.Require().Zero(reset.Usage7d)
+	s.Require().Nil(reset.Window5hStart)
+	s.Require().Nil(reset.Window1dStart)
+	s.Require().Nil(reset.Window7dStart)
+	s.Require().Equal(100.0, reset.RateLimit1d, "reset keeps the limits")
+}
+
+// A window that has not started carries no usage: the first billed request
+// opens it with that request's cost, whatever the stored counter says.
+func (s *APIKeyRepoSuite) TestIncrementRateLimitUsage_UnsetWindowStartsAtCost() {
+	user := s.mustCreateUser("incr-unset-window@test.com")
+	key := s.mustCreateApiKey(user.ID, "sk-incr-unset-window", "Unset", nil)
+	_, err := s.client.APIKey.UpdateOneID(key.ID).
+		SetUsage5h(50).SetUsage1d(50).SetUsage7d(50).
+		ClearWindow5hStart().ClearWindow1dStart().ClearWindow7dStart().
+		Save(s.ctx)
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.IncrementRateLimitUsage(s.ctx, key.ID, 2))
+
+	data, err := s.repo.GetRateLimitData(s.ctx, key.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(2.0, data.Usage5h)
+	s.Require().Equal(2.0, data.Usage1d)
+	s.Require().Equal(2.0, data.Usage7d)
+	s.Require().NotNil(data.Window5hStart)
+	s.Require().NotNil(data.Window1dStart)
+	s.Require().NotNil(data.Window7dStart)
+}
+
+func (s *APIKeyRepoSuite) TestUpdate_ResetIntentsAreIndependentAndVersionGuarded() {
+	user := s.mustCreateUser("update-reset-intents@test.com")
+	key := s.mustCreateApiKey(user.ID, "sk-update-reset-intents", "Intents", nil)
+	_, err := s.repo.IncrementQuotaUsed(s.ctx, key.ID, 5)
+	s.Require().NoError(err)
+	s.Require().NoError(s.repo.IncrementRateLimitUsage(s.ctx, key.ID, 7))
+
+	// A stale revision must not reset anything.
+	stale, err := s.repo.GetByID(s.ctx, key.ID)
+	s.Require().NoError(err)
+	current, err := s.repo.GetByID(s.ctx, key.ID)
+	s.Require().NoError(err)
+	current.Name = "Moved on"
+	s.Require().NoError(s.repo.Update(s.ctx, current))
+	stale.ResetQuotaUsedOnSave = true
+	stale.ResetRateLimitUsageOnSave = true
+	s.Require().ErrorIs(s.repo.Update(s.ctx, stale), service.ErrSmartSwitchConflict)
+	got, err := s.repo.GetByID(s.ctx, key.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(5.0, got.QuotaUsed)
+	s.Require().Equal(7.0, got.Usage1d)
+
+	// Quota reset alone keeps the rate-limit counters.
+	got.ResetQuotaUsedOnSave = true
+	s.Require().NoError(s.repo.Update(s.ctx, got))
+	s.Require().False(got.ResetQuotaUsedOnSave, "a saved intent is consumed")
+	after, err := s.repo.GetByID(s.ctx, key.ID)
+	s.Require().NoError(err)
+	s.Require().Zero(after.QuotaUsed)
+	s.Require().Equal(7.0, after.Usage1d)
+	s.Require().NotNil(after.Window1dStart)
+
+	// Rate-limit reset alone keeps quota_used.
+	_, err = s.repo.IncrementQuotaUsed(s.ctx, key.ID, 2)
+	s.Require().NoError(err)
+	after.ResetRateLimitUsageOnSave = true
+	s.Require().NoError(s.repo.Update(s.ctx, after))
+	s.Require().False(after.ResetRateLimitUsageOnSave, "a saved intent is consumed")
+	final, err := s.repo.GetByID(s.ctx, key.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(2.0, final.QuotaUsed)
+	s.Require().Zero(final.Usage1d)
+	s.Require().Nil(final.Window1dStart)
+}
+
+func (s *APIKeyRepoSuite) TestUpdate_ResetOnDeletedKeyWritesNothing() {
+	user := s.mustCreateUser("update-reset-deleted@test.com")
+	key := s.mustCreateApiKey(user.ID, "sk-update-reset-deleted", "Deleted", nil)
+	s.Require().NoError(s.repo.IncrementRateLimitUsage(s.ctx, key.ID, 7))
+	loaded, err := s.repo.GetByID(s.ctx, key.ID)
+	s.Require().NoError(err)
+	s.Require().NoError(s.repo.Delete(s.ctx, key.ID))
+
+	loaded.ResetRateLimitUsageOnSave = true
+	s.Require().Error(s.repo.Update(s.ctx, loaded))
+
+	// The row is soft-deleted, so read it below the repository filters.
+	rows, err := s.repo.sql.QueryContext(s.ctx, "SELECT usage_1d FROM api_keys WHERE id = $1", key.ID)
+	s.Require().NoError(err)
+	defer func() { _ = rows.Close() }()
+	s.Require().True(rows.Next())
+	var usage1d float64
+	s.Require().NoError(rows.Scan(&usage1d))
+	s.Require().Equal(7.0, usage1d)
 }

@@ -238,13 +238,9 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 		SetName(key.Name).
 		SetStatus(key.Status).
 		SetQuota(key.Quota).
-		SetQuotaUsed(key.QuotaUsed).
 		SetRateLimit5h(key.RateLimit5h).
 		SetRateLimit1d(key.RateLimit1d).
 		SetRateLimit7d(key.RateLimit7d).
-		SetUsage5h(key.Usage5h).
-		SetUsage1d(key.Usage1d).
-		SetUsage7d(key.Usage7d).
 		SetUpdatedAt(now).
 		SetSmartSwitch(policy).
 		AddSmartSwitchVersion(1)
@@ -264,21 +260,15 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 		builder.ClearExpiresAt()
 	}
 
-	// Rate limit window start times
-	if key.Window5hStart != nil {
-		builder.SetWindow5hStart(*key.Window5hStart)
-	} else {
-		builder.ClearWindow5hStart()
+	// Billing increments quota_used and the rate-limit counters concurrently.
+	// Write them only for an explicit reset, in this same version-guarded
+	// statement, so an ordinary save cannot overwrite newer usage.
+	if key.ResetQuotaUsedOnSave {
+		builder.SetQuotaUsed(0)
 	}
-	if key.Window1dStart != nil {
-		builder.SetWindow1dStart(*key.Window1dStart)
-	} else {
-		builder.ClearWindow1dStart()
-	}
-	if key.Window7dStart != nil {
-		builder.SetWindow7dStart(*key.Window7dStart)
-	} else {
-		builder.ClearWindow7dStart()
+	if key.ResetRateLimitUsageOnSave {
+		builder.SetUsage5h(0).SetUsage1d(0).SetUsage7d(0).
+			ClearWindow5hStart().ClearWindow1dStart().ClearWindow7dStart()
 	}
 
 	// IP 限制字段
@@ -306,6 +296,9 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 	key.UpdatedAt = now
 	key.SmartSwitchVersion++
 	key.SmartSwitch = policy
+	// The resets are done; a later save of this object must not repeat them.
+	key.ResetQuotaUsedOnSave = false
+	key.ResetRateLimitUsageOnSave = false
 	return nil
 }
 
@@ -561,9 +554,9 @@ func (r *apiKeyRepository) UpdateLastUsed(ctx context.Context, id int64, usedAt 
 func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64, cost float64) error {
 	_, err := r.sql.ExecContext(ctx, `
 		UPDATE api_keys SET
-			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1 ELSE usage_5h + $1 END,
-			usage_1d = CASE WHEN window_1d_start IS NOT NULL AND window_1d_start + INTERVAL '24 hours' <= NOW() THEN $1 ELSE usage_1d + $1 END,
-			usage_7d = CASE WHEN window_7d_start IS NOT NULL AND window_7d_start + INTERVAL '7 days' <= NOW() THEN $1 ELSE usage_7d + $1 END,
+			usage_5h = CASE WHEN window_5h_start IS NULL OR window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1 ELSE usage_5h + $1 END,
+			usage_1d = CASE WHEN window_1d_start IS NULL OR window_1d_start + INTERVAL '24 hours' <= NOW() THEN $1 ELSE usage_1d + $1 END,
+			usage_7d = CASE WHEN window_7d_start IS NULL OR window_7d_start + INTERVAL '7 days' <= NOW() THEN $1 ELSE usage_7d + $1 END,
 			window_5h_start = CASE WHEN window_5h_start IS NULL OR window_5h_start + INTERVAL '5 hours' <= NOW() THEN NOW() ELSE window_5h_start END,
 			window_1d_start = CASE WHEN window_1d_start IS NULL OR window_1d_start + INTERVAL '24 hours' <= NOW() THEN date_trunc('day', NOW()) ELSE window_1d_start END,
 			window_7d_start = CASE WHEN window_7d_start IS NULL OR window_7d_start + INTERVAL '7 days' <= NOW() THEN date_trunc('day', NOW()) ELSE window_7d_start END,

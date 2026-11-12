@@ -42,7 +42,6 @@ const (
 	cacheWriteSetSubscription
 	cacheWriteUpdateSubscriptionUsage
 	cacheWriteDeductBalance
-	cacheWriteUpdateRateLimitUsage
 )
 
 // 异步缓存写入工作池配置
@@ -71,7 +70,6 @@ type cacheWriteTask struct {
 	kind             cacheWriteKind
 	userID           int64
 	groupID          int64
-	apiKeyID         int64
 	balance          float64
 	amount           float64
 	subscriptionData *subscriptionCacheData
@@ -103,6 +101,14 @@ type BillingCacheService struct {
 	cacheWriteDropFullLastLog   int64
 	cacheWriteDropClosedCount   uint64
 	cacheWriteDropClosedLastLog int64
+
+	// rateLimitWindowResets holds key IDs with a window reset in flight, so
+	// requests that see the same ended window schedule it once.
+	rateLimitWindowResets sync.Map
+	// runAsync runs window maintenance; tests replace it to run inline.
+	runAsync func(func())
+	// rateLimitLoadErrLastLog throttles the fail-open warning (unix nanos).
+	rateLimitLoadErrLastLog atomic.Int64
 }
 
 // NewBillingCacheService 创建计费缓存服务
@@ -199,12 +205,6 @@ func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
 					logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache failed for user %d: %v", task.userID, err)
 				}
 			}
-		case cacheWriteUpdateRateLimitUsage:
-			if s.cache != nil {
-				if err := s.cache.UpdateAPIKeyRateLimitUsage(ctx, task.apiKeyID, task.amount); err != nil {
-					logger.LegacyPrintf("service.billing_cache", "Warning: update rate limit usage cache failed for api key %d: %v", task.apiKeyID, err)
-				}
-			}
 		}
 		cancel()
 	}
@@ -221,8 +221,6 @@ func cacheWriteKindName(kind cacheWriteKind) string {
 		return "update_subscription_usage"
 	case cacheWriteDeductBalance:
 		return "deduct_balance"
-	case cacheWriteUpdateRateLimitUsage:
-		return "update_rate_limit_usage"
 	default:
 		return "unknown"
 	}
@@ -505,110 +503,91 @@ func (s *BillingCacheService) InvalidateSubscription(ctx context.Context, userID
 // API Key 限速缓存方法
 // ============================================
 
-// checkAPIKeyRateLimits checks rate limit windows for an API key.
-// It loads usage from Redis cache (falling back to DB on cache miss),
-// resets expired windows in-memory and triggers async DB reset,
-// and returns an error if any window limit is exceeded.
+// checkAPIKeyRateLimits checks the 5h/1d/7d windows of an API key against the
+// database, the only source of truth for these counters. Redis is not used:
+// a cached copy went stale on manual resets (production #229768) and could be
+// refilled with old values or drift from the database's window boundaries.
+// Each call is one primary-key read; only keys with a limit get here, and a
+// request may check again after waiting or when switching groups, which must
+// see the newest usage anyway.
 func (s *BillingCacheService) checkAPIKeyRateLimits(ctx context.Context, apiKey *APIKey) error {
-	if s.cache == nil {
-		// No cache: fall back to reading from DB directly
-		if s.apiKeyRateLimitLoader == nil {
-			return nil
-		}
-		data, err := s.apiKeyRateLimitLoader.GetRateLimitData(ctx, apiKey.ID)
-		if err != nil {
-			return nil // Don't block requests on DB errors
-		}
-		return s.evaluateRateLimits(ctx, apiKey, data.Usage5h, data.Usage1d, data.Usage7d,
-			data.Window5hStart, data.Window1dStart, data.Window7dStart)
+	if s.apiKeyRateLimitLoader == nil {
+		return nil
 	}
-
-	cacheData, err := s.cache.GetAPIKeyRateLimit(ctx, apiKey.ID)
+	data, err := s.apiKeyRateLimitLoader.GetRateLimitData(ctx, apiKey.ID)
 	if err != nil {
-		// Cache miss: load from DB and populate cache
-		if s.apiKeyRateLimitLoader == nil {
-			return nil
-		}
-		dbData, dbErr := s.apiKeyRateLimitLoader.GetRateLimitData(ctx, apiKey.ID)
-		if dbErr != nil {
-			return nil // Don't block requests on DB errors
-		}
-		// Build cache entry from DB data
-		cacheEntry := &APIKeyRateLimitCacheData{
-			Usage5h: dbData.Usage5h,
-			Usage1d: dbData.Usage1d,
-			Usage7d: dbData.Usage7d,
-		}
-		if dbData.Window5hStart != nil {
-			cacheEntry.Window5h = dbData.Window5hStart.Unix()
-		}
-		if dbData.Window1dStart != nil {
-			cacheEntry.Window1d = dbData.Window1dStart.Unix()
-		}
-		if dbData.Window7dStart != nil {
-			cacheEntry.Window7d = dbData.Window7dStart.Unix()
-		}
-		_ = s.cache.SetAPIKeyRateLimit(ctx, apiKey.ID, cacheEntry)
-		cacheData = cacheEntry
+		// Fail open as before, but say so: the database is now the only
+		// source and an outage silently lifts every Key rate limit.
+		s.logRateLimitLoadError(apiKey.ID, err)
+		return nil
 	}
+	return s.evaluateRateLimits(ctx, apiKey, data.Usage5h, data.Usage1d, data.Usage7d,
+		data.Window5hStart, data.Window1dStart, data.Window7dStart)
+}
 
-	var w5h, w1d, w7d *time.Time
-	if cacheData.Window5h > 0 {
-		t := time.Unix(cacheData.Window5h, 0)
-		w5h = &t
+func (s *BillingCacheService) logRateLimitLoadError(keyID int64, err error) {
+	now := time.Now().UnixNano()
+	last := s.rateLimitLoadErrLastLog.Load()
+	if now-last < int64(time.Minute) || !s.rateLimitLoadErrLastLog.CompareAndSwap(last, now) {
+		return
 	}
-	if cacheData.Window1d > 0 {
-		t := time.Unix(cacheData.Window1d, 0)
-		w1d = &t
+	logger.LegacyPrintf("service.billing_cache", "Warning: api key rate limit check skipped (fail open) for api key %d: %v", keyID, err)
+}
+
+// scheduleRateLimitWindowReset resets the ended windows of a key in the
+// database in the background, at most once at a time per key.
+func (s *BillingCacheService) scheduleRateLimitWindowReset(keyID int64) {
+	loader, ok := s.apiKeyRateLimitLoader.(interface {
+		ResetRateLimitWindows(ctx context.Context, id int64) error
+	})
+	if !ok {
+		return
 	}
-	if cacheData.Window7d > 0 {
-		t := time.Unix(cacheData.Window7d, 0)
-		w7d = &t
+	if _, running := s.rateLimitWindowResets.LoadOrStore(keyID, struct{}{}); running {
+		return
 	}
-	return s.evaluateRateLimits(ctx, apiKey, cacheData.Usage5h, cacheData.Usage1d, cacheData.Usage7d, w5h, w1d, w7d)
+	run := s.runAsync
+	if run == nil {
+		run = func(f func()) { go f() }
+	}
+	run(func() {
+		defer s.rateLimitWindowResets.Delete(keyID)
+		resetCtx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
+		defer cancel()
+		if err := loader.ResetRateLimitWindows(resetCtx, keyID); err != nil {
+			logger.LegacyPrintf("service.billing_cache", "Warning: reset rate limit windows failed for api key %d: %v", keyID, err)
+		}
+	})
 }
 
 // evaluateRateLimits checks usage against limits, triggering async resets for expired windows.
 func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *APIKey, usage5h, usage1d, usage7d float64, w5h, w1d, w7d *time.Time) error {
 	needsReset := false
 
-	// Reset expired windows in-memory for check purposes
-	if IsWindowExpired(w5h, RateLimitWindow5h) {
+	// An unset window has not started (nothing billed since creation or a
+	// reset): its usage is zero and there is nothing to maintain. Only a
+	// started window that has ended needs the async database reset.
+	if w5h == nil {
+		usage5h = 0
+	} else if IsWindowExpired(w5h, RateLimitWindow5h) {
 		usage5h = 0
 		needsReset = true
 	}
-	if IsWindowExpired(w1d, RateLimitWindow1d) {
+	if w1d == nil {
+		usage1d = 0
+	} else if IsWindowExpired(w1d, RateLimitWindow1d) {
 		usage1d = 0
 		needsReset = true
 	}
-	if IsWindowExpired(w7d, RateLimitWindow7d) {
+	if w7d == nil {
+		usage7d = 0
+	} else if IsWindowExpired(w7d, RateLimitWindow7d) {
 		usage7d = 0
 		needsReset = true
 	}
 
-	// Trigger async DB reset if any window expired
 	if needsReset {
-		keyID := apiKey.ID
-		go func() {
-			resetCtx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-			defer cancel()
-			if s.apiKeyRateLimitLoader != nil {
-				// Use the repo directly - reset then reload cache
-				if loader, ok := s.apiKeyRateLimitLoader.(interface {
-					ResetRateLimitWindows(ctx context.Context, id int64) error
-				}); ok {
-					if err := loader.ResetRateLimitWindows(resetCtx, keyID); err != nil {
-						logger.LegacyPrintf("service.billing_cache", "Warning: reset rate limit windows failed for api key %d: %v", keyID, err)
-					}
-				}
-			}
-			// Invalidate cache so next request loads fresh data
-			if s.cache != nil {
-				if err := s.cache.InvalidateAPIKeyRateLimit(resetCtx, keyID); err != nil {
-					logger.LegacyPrintf("service.billing_cache", "Warning: invalidate rate limit cache failed for api key %d: %v", keyID, err)
-				}
-			}
-		}()
+		s.scheduleRateLimitWindowReset(apiKey.ID)
 	}
 
 	// Check limits
@@ -622,18 +601,6 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 		return apiKeyRateLimitExceeded(ErrAPIKeyRateLimit7dExceeded, w7d, RateLimitWindow7d)
 	}
 	return nil
-}
-
-// QueueUpdateAPIKeyRateLimitUsage asynchronously updates rate limit usage in the cache.
-func (s *BillingCacheService) QueueUpdateAPIKeyRateLimitUsage(apiKeyID int64, cost float64) {
-	if s.cache == nil {
-		return
-	}
-	s.enqueueCacheWrite(cacheWriteTask{
-		kind:     cacheWriteUpdateRateLimitUsage,
-		apiKeyID: apiKeyID,
-		amount:   cost,
-	})
 }
 
 // ============================================
