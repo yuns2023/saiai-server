@@ -171,8 +171,11 @@ type UsageProgress struct {
 	EstimatedCapacityUSD *float64 `json:"estimated_capacity_usd,omitempty"`
 	// EstimateSampledAt 估算所用用量采样的时间（可能早于当前，账号空闲时不再更新）。
 	EstimateSampledAt *time.Time `json:"estimate_sampled_at,omitempty"`
-	UsedRequests      int64      `json:"used_requests,omitempty"`
-	LimitRequests     int64      `json:"limit_requests,omitempty"`
+	// WindowRestart 本窗口统计的重新计数点（上游中途清零但重置时间未变；自动识别或管理员手动）。
+	// 存在时 WindowStats / StandardCostUSD / 估算都从该时间起算。仅管理员视图使用。
+	WindowRestart *QuotaWindowRestartInfo `json:"window_restart,omitempty"`
+	UsedRequests  int64                   `json:"used_requests,omitempty"`
+	LimitRequests int64                   `json:"limit_requests,omitempty"`
 }
 
 // AntigravityModelQuota Antigravity 单个模型的配额信息
@@ -456,7 +459,7 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 		// 必须在补入旧被动周窗口之前同步，避免旧周窗口被当作新样本写回。
 		// 缓存命中的结果若早于之后的被动采样则不回写：否则旧百分比会配上更新的采样时间，额度估算偏高。
 		if fresh || !passiveUsageSampledAfter(account.Extra, observedAt) {
-			mergeAccountExtra(account, s.syncActiveToPassive(ctx, account.ID, usage, fresh))
+			mergeAccountExtra(account, s.syncActiveToPassive(ctx, account, usage, fresh))
 		}
 		applyPassiveAnthropicWeeklyUsage(usage, account.Extra, now)
 
@@ -554,7 +557,8 @@ func buildPassiveUsageWindow(extra map[string]any, utilizationKey, resetKey stri
 // syncActiveToPassive 将主动查询的最新数据回写到 Extra 被动缓存，
 // 这样下次被动加载时能看到最新值。
 // 返回成功写入的字段（写入失败或无数据时返回 nil）。
-func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID int64, usage *UsageInfo, fresh bool) map[string]any {
+func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, account *Account, usage *UsageInfo, fresh bool) map[string]any {
+	accountID := account.ID
 	extraUpdates := make(map[string]any, 4)
 
 	if usage.FiveHour != nil {
@@ -588,7 +592,14 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 		if fresh && usage.SevenDay != nil {
 			extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
 		}
-		if err := s.accountRepo.UpdateExtra(ctx, accountID, extraUpdates); err != nil {
+		var err error
+		if fresh {
+			// 只有刚从上游拉到的结果才参与中途重置识别；缓存写回（最多 3 分钟前）不能当新观测。
+			err = updateExtraDetectingWeeklyRestart(ctx, s.accountRepo, account, extraUpdates, time.Now())
+		} else {
+			err = s.accountRepo.UpdateExtra(ctx, accountID, extraUpdates)
+		}
+		if err != nil {
 			slog.Warn("sync_active_to_passive_failed", "account_id", accountID, "error", err)
 		} else {
 			evalAccount, err := s.accountRepo.GetByID(ctx, accountID)
@@ -649,6 +660,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		return usage, nil
 	}
 
+	restarts := parseQuotaWindowRestarts(account.Extra)
 	for _, w := range []struct {
 		key      string
 		progress **UsageProgress
@@ -659,7 +671,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		}
 		// 优先使用上游重置时间推出的窗口起点；重置时间缺失时才退回滚动窗口并标记；
 		// 重置时间存在但无效（已过、过远）时不给统计。
-		start, rolling, ok := codexWindowStatsStart(w.key, reset, now)
+		start, rolling, restart, ok := codexWindowStatsStart(w.key, reset, restarts[w.key], now)
 		if !ok {
 			continue
 		}
@@ -669,6 +681,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 			}
 			(*w.progress).WindowStats = windowStatsFromAccountStats(stats)
 			(*w.progress).WindowStatsRolling = rolling
+			(*w.progress).WindowRestart = restart.info()
 		}
 	}
 	s.attachQuotaWindowEstimates(ctx, account, usage, now)
@@ -679,15 +692,18 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 // codexWindowStatsStart returns the admin window-stats start: reset minus the
 // window length when the reset is valid, the legacy rolling start (rolling=true)
 // when the reset is missing, and ok=false when a reset exists but is invalid.
-func codexWindowStatsStart(key string, reset *time.Time, now time.Time) (start time.Time, rolling bool, ok bool) {
+// A recorded restart for the same window moves the start later (restart is
+// returned when it applied).
+func codexWindowStatsStart(key string, reset *time.Time, recorded *QuotaWindowRestart, now time.Time) (start time.Time, rolling bool, restart *QuotaWindowRestart, ok bool) {
 	if window, valid := resolveQuotaCostWindow(key, reset, now); valid {
-		return window.Start, false, true
+		window = window.withRestart(recorded, now)
+		return window.Start, false, window.Restart, true
 	}
 	if reset != nil {
-		return time.Time{}, false, false
+		return time.Time{}, false, nil, false
 	}
 	length, _ := quotaWindowLength(key)
-	return now.Add(-length), true, true
+	return now.Add(-length), true, nil, true
 }
 
 func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now time.Time) bool {
@@ -1133,14 +1149,25 @@ func (s *AccountUsageService) addWindowStats(ctx context.Context, account *Accou
 	now := time.Now()
 	if usage.SevenDay != nil {
 		if window, ok := resolveQuotaCostWindow("seven_day", usage.SevenDay.ResetsAt, now); ok {
+			window = window.withRestart(parseQuotaWindowRestarts(account.Extra)["seven_day"], now)
 			if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, window.Start); err == nil {
 				usage.SevenDay.WindowStats = windowStatsFromAccountStats(stats)
+				usage.SevenDay.WindowRestart = window.Restart.info()
 			} else {
 				log.Printf("Failed to get 7d window stats for account %d: %v", account.ID, err)
 			}
 		}
 	}
 	s.attachQuotaWindowEstimates(ctx, account, usage, now)
+}
+
+// sameQuotaWindowRestart reports whether two windows use the same restart
+// (both none, or both starting at the same time).
+func sameQuotaWindowRestart(a, b *QuotaWindowRestart) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Start.Equal(b.Start)
 }
 
 // attachQuotaWindowEstimates sets the admin standard-price window cost and the
@@ -1153,8 +1180,9 @@ func (s *AccountUsageService) attachQuotaWindowEstimates(ctx context.Context, ac
 	if !ok || account == nil || usage == nil {
 		return
 	}
+	restarts := parseQuotaWindowRestarts(account.Extra)
 	sampled := make(map[string]quotaCostWindow, 2)
-	for _, w := range quotaCostWindows(hostedAccountSnapshot(account, now), now) {
+	for _, w := range quotaCostWindows(hostedAccountSnapshot(account, now), restarts, now) {
 		sampled[w.Key] = w
 	}
 	targets := make([]*UsageProgress, 0, 2)
@@ -1171,9 +1199,11 @@ func (s *AccountUsageService) attachQuotaWindowEstimates(ctx context.Context, ac
 		if !valid {
 			continue
 		}
+		window = window.withRestart(restarts[item.key], now)
 		// 只用与展示进度同一窗口的样本估算（主动查询结果可能与被动快照不一致）。
+		// 重新计数后，样本必须与展示窗口用同一个起点（同一个 restart）。
 		if snap, found := sampled[item.key]; found && snap.SampledAt != nil &&
-			absDuration(window.Reset.Sub(snap.Reset)) <= quotaResetMatchTolerance {
+			absDuration(window.Reset.Sub(snap.Reset)) <= quotaResetMatchTolerance && sameQuotaWindowRestart(snap.Restart, window.Restart) {
 			window = window.withSample(snap.Utilization, snap.SampledAt, now)
 		}
 		targets = append(targets, item.progress)
@@ -1194,6 +1224,9 @@ func (s *AccountUsageService) attachQuotaWindowEstimates(ctx context.Context, ac
 		progress.EstimatedCapacityUSD = windows[i].estimate(costs[i].SampledCost)
 		if progress.EstimatedCapacityUSD != nil {
 			progress.EstimateSampledAt = windows[i].SampledAt
+		}
+		if windows[i].Restart != nil {
+			progress.WindowRestart = windows[i].Restart.info()
 		}
 	}
 }

@@ -91,16 +91,16 @@ func TestQuotaCostWindowSampleAndEstimate(t *testing.T) {
 func TestCodexWindowStatsStartFallsBackOnlyWithoutReset(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	reset := now.Add(2 * time.Hour)
-	start, rolling, ok := codexWindowStatsStart("five_hour", &reset, now)
+	start, rolling, _, ok := codexWindowStatsStart("five_hour", &reset, nil, now)
 	require.True(t, ok)
 	require.False(t, rolling)
 	require.Equal(t, now.Add(-3*time.Hour), start)
-	start, rolling, ok = codexWindowStatsStart("seven_day", nil, now)
+	start, rolling, _, ok = codexWindowStatsStart("seven_day", nil, nil, now)
 	require.True(t, ok)
 	require.True(t, rolling)
 	require.Equal(t, now.Add(-7*24*time.Hour), start)
 	for _, invalid := range []time.Time{now.Add(-time.Minute), now, now.Add(5*time.Hour + time.Second)} {
-		_, _, ok = codexWindowStatsStart("five_hour", &invalid, now)
+		_, _, _, ok = codexWindowStatsStart("five_hour", &invalid, nil, now)
 		require.False(t, ok, "an elapsed or too-far reset gives no stats rather than a rolling window")
 	}
 }
@@ -349,19 +349,19 @@ func TestSyncActiveToPassiveSampleTimeAndThreshold(t *testing.T) {
 	fiveReset := time.Now().Add(time.Hour)
 	weekReset := time.Now().Add(48 * time.Hour)
 
-	written := svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{
+	written := svc.syncActiveToPassive(context.Background(), &Account{ID: 1}, &UsageInfo{
 		FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &fiveReset}, SevenDay: &UsageProgress{Utilization: 20, ResetsAt: &weekReset},
 	}, true)
 	require.Contains(t, written, "passive_usage_sampled_at")
 
-	written = svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{
+	written = svc.syncActiveToPassive(context.Background(), &Account{ID: 1}, &UsageInfo{
 		FiveHour: &UsageProgress{Utilization: 50, ResetsAt: &fiveReset}, SevenDay: &UsageProgress{Utilization: 20, ResetsAt: &weekReset},
 	}, false)
 	require.InDelta(t, 0.2, written["passive_usage_7d_utilization"], 1e-9, "cache hits still sync values")
 	require.NotContains(t, written, "passive_usage_sampled_at", "cache hits must not restamp the sample time")
 	require.InDelta(t, 0.5, written["session_window_utilization"], 1e-9)
 
-	written = svc.syncActiveToPassive(context.Background(), 1, &UsageInfo{FiveHour: &UsageProgress{Utilization: 100, ResetsAt: &fiveReset}}, true)
+	written = svc.syncActiveToPassive(context.Background(), &Account{ID: 1}, &UsageInfo{FiveHour: &UsageProgress{Utilization: 100, ResetsAt: &fiveReset}}, true)
 	require.InDelta(t, 1.0, written["session_window_utilization"], 1e-9, "5h-only results still update the 5h value")
 	require.NotContains(t, written, "passive_usage_sampled_at", "no weekly window: the shared sample time must not advance")
 	require.Len(t, repo.updates, 3)

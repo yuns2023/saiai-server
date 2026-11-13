@@ -37,6 +37,10 @@
               <Icon name="refresh" size="sm" />
               {{ t('admin.accounts.clearQuotaSnapshot') }}
             </button>
+            <button v-if="canClearQuotaSnapshot" data-testid="menu-quota-window-restart" @click="$emit('quota-window-restart', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-emerald-600 hover:bg-gray-100 dark:hover:bg-dark-700">
+              <Icon name="clock" size="sm" />
+              {{ t('admin.accounts.quotaWindowRestart.menu') }}
+            </button>
             <button v-if="!isRetiredPlatform && hasQuotaLimit" @click="$emit('reset-quota', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-teal-600 hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="refresh" size="sm" />
               {{ t('admin.accounts.resetQuota') }}
@@ -55,7 +59,7 @@ import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
 
 const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null }>()
-const emit = defineEmits(['close', 'stats', 'reauth', 'refresh-token', 'recover-state', 'clear-quota-snapshot', 'reset-quota', 'codex-reset'])
+const emit = defineEmits(['close', 'stats', 'reauth', 'refresh-token', 'recover-state', 'clear-quota-snapshot', 'quota-window-restart', 'reset-quota', 'codex-reset'])
 const { t } = useI18n()
 const isRetiredPlatform = computed(() => props.account?.platform === 'antigravity' || props.account?.platform === 'sora')
 const isRateLimited = computed(() => {

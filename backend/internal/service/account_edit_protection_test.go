@@ -226,3 +226,18 @@ func TestApplyUpdateAccountInput_EditorProtectionUsesStoredType(t *testing.T) {
 	require.Equal(t, AccountTypeSetupToken, current.Type)
 	require.Equal(t, "current-r", current.Credentials["refresh_token"])
 }
+
+func TestApplyUpdateAccountInput_EditorKeepsQuotaWindowRestarts(t *testing.T) {
+	restarts := map[string]any{"seven_day": map[string]any{"start": 1794500000.0, "reset": 1794574800.0, "source": "manual"}}
+	current := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Status: StatusActive,
+		Credentials: map[string]any{"access_token": "t"},
+		Extra:       map[string]any{QuotaWindowRestartsExtraKey: restarts}}
+	// The page was loaded before the restart was recorded: its snapshot lacks the key.
+	require.NoError(t, applyUpdateAccountInput(current, &UpdateAccountInput{Extra: map[string]any{"window_cost_limit": 1.0}, EditorSave: true}, nil, time.Now()))
+	require.Equal(t, restarts, current.Extra[QuotaWindowRestartsExtraKey])
+
+	// A stale snapshot carrying an old restart must not bring it back after removal.
+	current.Extra = map[string]any{}
+	require.NoError(t, applyUpdateAccountInput(current, &UpdateAccountInput{Extra: map[string]any{QuotaWindowRestartsExtraKey: restarts}, EditorSave: true}, nil, time.Now()))
+	require.NotContains(t, current.Extra, QuotaWindowRestartsExtraKey)
+}

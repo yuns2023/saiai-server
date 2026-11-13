@@ -2827,6 +2827,24 @@ export default {
       clearQuotaSnapshotConfirm: '确定要清除账号“{name}”的本地 5h/7d 额度快照吗？这不会修改上游订阅或主动发送请求；下一次正常请求将重新记录真实额度。',
       clearQuotaSnapshotSuccess: '本地额度快照已清除',
       clearQuotaSnapshotFailed: '清除本地额度快照失败',
+      quotaWindowRestart: {
+        menu: '7 天从此重新计数',
+        title: '7 天统计重新计数',
+        description: '上游在窗口中途把用量清零、但重置时间没变时使用（例如升级套餐）。只影响后台统计（标准价、A/U、估算），不影响调度和限流；窗口到期后自动失效。',
+        loading: '正在读取当前窗口…',
+        noWindow: '没有有效的 7 天窗口（重置时间未知或已过），无法重新计数。',
+        currentReset: '当前 7 天窗口：{start} 至 {reset}',
+        current: '当前统计自 {time} 起（{source}）',
+        sourceAuto: '检测到用量下降',
+        sourceManual: '手动',
+        startLabel: '重新计数时间',
+        startHint: '可选 {min} 至现在，默认现在。手动重新计数后不再显示“估”（无法知道清零时的用量）。',
+        confirm: '重新计数',
+        clear: '撤销重新计数',
+        success: '已重新计数',
+        cleared: '已撤销重新计数',
+        failed: '操作失败'
+      },
       resetQuota: '重置配额',
       quotaLimit: '配额限制',
       quotaLimitPlaceholder: '0 表示不限制',
@@ -2970,7 +2988,11 @@ export default {
         statsHint: '请求数、Token 与 A/U 金额按请求统计口径计算，起点可能与标准价窗口不同',
         rollingHint: '*上游重置时间未知，按滚动窗口统计',
         estimatedCapacity: '估 ${cost}',
-        estimatedCapacityHint: '估算总额度（按标准价折算，平台外使用会使估算偏低）'
+        estimatedCapacityHint: '估算总额度（按标准价折算，平台外使用会使估算偏低）',
+        restartedChip: '自 {time}',
+        restartedHint: '统计自 {time} 起（{source}）：上游在窗口中途清零了用量，之前的用量不计入标准价、A/U 和估算',
+        restartSourceAuto: '检测到用量下降',
+        restartSourceManual: '手动'
       },
       tier: {
         free: 'Free',

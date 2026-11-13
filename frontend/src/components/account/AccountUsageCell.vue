@@ -63,6 +63,7 @@
           :standard-cost="usageInfo.seven_day.standard_cost_usd"
           :estimated-capacity="usageInfo.seven_day.estimated_capacity_usd"
           :estimate-sampled-at="usageInfo.seven_day.estimate_sampled_at"
+          :window-restart="usageInfo.seven_day.window_restart"
           color="emerald"
         />
 
@@ -148,6 +149,7 @@
           :standard-cost="usageInfo.seven_day.standard_cost_usd"
           :estimated-capacity="usageInfo.seven_day.estimated_capacity_usd"
           :estimate-sampled-at="usageInfo.seven_day.estimate_sampled_at"
+          :window-restart="usageInfo.seven_day.window_restart"
           :show-now-when-idle="true"
           color="emerald"
         />

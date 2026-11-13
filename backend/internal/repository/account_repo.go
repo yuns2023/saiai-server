@@ -64,6 +64,7 @@ var schedulerNeutralExtraKeys = map[string]struct{}{
 	"codex_usage_updated_at":                    {},
 	"session_window_utilization":                {},
 	"claude_oauth_carpool_last_maintenance_day": {},
+	service.QuotaWindowRestartsExtraKey:         {},
 }
 
 // NewAccountRepository 创建账户仓储实例。
@@ -1420,6 +1421,13 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	if affected == 0 {
 		return service.ErrAccountNotFound
 	}
+	r.afterExtraUpdate(ctx, id, updates)
+	return nil
+}
+
+// afterExtraUpdate refreshes the scheduler view after an extra merge: a
+// bucket rebuild for scheduling keys, otherwise only the account snapshot.
+func (r *accountRepository) afterExtraUpdate(ctx context.Context, id int64, updates map[string]any) {
 	if shouldEnqueueSchedulerOutboxForExtraUpdates(updates) {
 		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue extra update failed: account=%d err=%v", id, err)
@@ -1430,6 +1438,167 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		// 同时避免缓存局部 patch 覆盖掉并发写入的其它账号字段。
 		r.syncSchedulerAccountSnapshot(ctx, id)
 	}
+}
+
+// quotaWindowRestartDropEpsilon absorbs float error in "stored - new >= drop".
+const quotaWindowRestartDropEpsilon = 1e-9
+
+// UpdateExtraDetectingWeeklyRestart merges updates and, against the locked
+// stored values, records an automatic seven_day restart when the stored shared
+// 7d sample has the same reset (within the match tolerance) and a utilization
+// at least the minimum drop above obs. A manual restart for the same reset is
+// kept. The sample itself is always merged.
+func (r *accountRepository) UpdateExtraDetectingWeeklyRestart(ctx context.Context, id int64, updates map[string]any, obs service.WeeklyRestartObservation) (*service.QuotaWindowRestart, error) {
+	if len(updates) == 0 {
+		return nil, nil
+	}
+	payload, err := json.Marshal(updates)
+	if err != nil {
+		return nil, err
+	}
+	baseline := obs.Utilization
+	restart := &service.QuotaWindowRestart{
+		Start:               obs.ObservedAt.Truncate(time.Second),
+		Reset:               obs.Reset,
+		Source:              service.QuotaWindowRestartSourceAuto,
+		BaselineUtilization: &baseline,
+	}
+	restartPayload, err := json.Marshal(map[string]any{
+		"start":                restart.Start.Unix(),
+		"reset":                restart.Reset.Unix(),
+		"source":               restart.Source,
+		"baseline_utilization": baseline,
+	})
+	if err != nil {
+		return nil, err
+	}
+	client := clientFromContext(ctx, r.client)
+	rows, err := client.QueryContext(ctx, `
+		WITH cur AS (
+			SELECT id, COALESCE(extra, '{}'::jsonb) AS extra
+			FROM accounts
+			WHERE id = $1 AND deleted_at IS NULL
+			FOR UPDATE
+		),
+		d AS (
+			SELECT id, extra,
+				COALESCE(
+					jsonb_typeof(extra->'passive_usage_7d_reset') = 'number'
+					AND jsonb_typeof(extra->'passive_usage_7d_utilization') = 'number'
+					AND abs((extra->>'passive_usage_7d_reset')::numeric - $3::numeric) <= $4::numeric
+					AND (extra->>'passive_usage_7d_utilization')::double precision - $5::double precision >= $6::double precision
+					-- COALESCE: with no stored restart every test below is NULL, and
+					-- NOT NULL would turn the whole condition NULL (no detection).
+					AND NOT COALESCE(
+						jsonb_typeof(extra->'quota_window_restarts'->'seven_day') = 'object'
+						AND extra->'quota_window_restarts'->'seven_day'->>'source' = 'manual'
+						AND jsonb_typeof(extra->'quota_window_restarts'->'seven_day'->'reset') = 'number'
+						AND abs((extra->'quota_window_restarts'->'seven_day'->>'reset')::numeric - $3::numeric) <= $4::numeric,
+						false
+					),
+					false
+				) AS restarted
+			FROM cur
+		)
+		UPDATE accounts a
+		SET extra = CASE WHEN d.restarted THEN
+				(d.extra || $2::jsonb) || jsonb_build_object('quota_window_restarts',
+					(CASE WHEN jsonb_typeof(d.extra->'quota_window_restarts') = 'object'
+						THEN d.extra->'quota_window_restarts' ELSE '{}'::jsonb END)
+					|| jsonb_build_object('seven_day', $7::jsonb))
+			ELSE d.extra || $2::jsonb END,
+			updated_at = NOW()
+		FROM d
+		WHERE a.id = d.id
+		RETURNING d.restarted`,
+		id, string(payload), obs.Reset.Unix(), int64(quotaWindowRestartMatchToleranceSeconds),
+		obs.Utilization, service.QuotaWindowRestartMinDrop-quotaWindowRestartDropEpsilon, string(restartPayload),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, service.ErrAccountNotFound
+	}
+	var restarted bool
+	if err := rows.Scan(&restarted); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	written := map[string]any{}
+	for k, v := range updates {
+		written[k] = v
+	}
+	if restarted {
+		written[service.QuotaWindowRestartsExtraKey] = true
+		logger.LegacyPrintf("repository.account", "[QuotaWindowRestart] auto seven_day restart: account=%d start=%d reset=%d utilization=%.4f",
+			id, restart.Start.Unix(), restart.Reset.Unix(), obs.Utilization)
+	}
+	r.afterExtraUpdate(ctx, id, written)
+	if !restarted {
+		return nil, nil
+	}
+	return restart, nil
+}
+
+// quotaWindowRestartMatchToleranceSeconds mirrors the service's reset match tolerance.
+const quotaWindowRestartMatchToleranceSeconds = 60
+
+// SetQuotaWindowRestart stores or (restart == nil) removes one window's
+// restart, leaving every other extra key untouched.
+func (r *accountRepository) SetQuotaWindowRestart(ctx context.Context, id int64, window string, restart *service.QuotaWindowRestart) error {
+	client := clientFromContext(ctx, r.client)
+	var (
+		result sql.Result
+		err    error
+	)
+	if restart == nil {
+		result, err = client.ExecContext(ctx, `
+			UPDATE accounts
+			SET extra = CASE WHEN jsonb_typeof(extra->'quota_window_restarts') = 'object'
+					THEN jsonb_set(extra, '{quota_window_restarts}', (extra->'quota_window_restarts') - $2::text)
+					ELSE COALESCE(extra, '{}'::jsonb) END,
+				updated_at = NOW()
+			WHERE id = $1 AND deleted_at IS NULL`, id, window)
+	} else {
+		value := map[string]any{
+			"start":  restart.Start.Unix(),
+			"reset":  restart.Reset.Unix(),
+			"source": restart.Source,
+		}
+		if restart.BaselineUtilization != nil {
+			value["baseline_utilization"] = *restart.BaselineUtilization
+		}
+		payload, marshalErr := json.Marshal(value)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = client.ExecContext(ctx, `
+			UPDATE accounts
+			SET extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object('quota_window_restarts',
+					(CASE WHEN jsonb_typeof(extra->'quota_window_restarts') = 'object'
+						THEN extra->'quota_window_restarts' ELSE '{}'::jsonb END)
+					|| jsonb_build_object($2::text, $3::jsonb)),
+				updated_at = NOW()
+			WHERE id = $1 AND deleted_at IS NULL`, id, window, string(payload))
+	}
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+	r.afterExtraUpdate(ctx, id, map[string]any{service.QuotaWindowRestartsExtraKey: true})
 	return nil
 }
 

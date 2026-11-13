@@ -76,3 +76,15 @@ describe('AccountActionMenu quota snapshot action', () => {
     expect(wrapper.text()).not.toContain('admin.accounts.clearQuotaSnapshot')
   })
 })
+
+describe('AccountActionMenu quota window restart action', () => {
+  it('emits the account for Anthropic and OpenAI OAuth accounts only', async () => {
+    const account = makeAccount({})
+    const wrapper = mountMenu(account)
+    await wrapper.get('[data-testid="menu-quota-window-restart"]').trigger('click')
+    expect(wrapper.emitted('quota-window-restart')).toEqual([[account]])
+    expect(wrapper.emitted('close')).toBeTruthy()
+    expect(mountMenu(makeAccount({ platform: 'openai', type: 'oauth' })).find('[data-testid="menu-quota-window-restart"]').exists()).toBe(true)
+    expect(mountMenu(makeAccount({ type: 'apikey' })).find('[data-testid="menu-quota-window-restart"]').exists()).toBe(false)
+  })
+})
