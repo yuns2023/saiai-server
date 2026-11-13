@@ -80,7 +80,9 @@ jobs:
         with:
           node-version: '24'
           cache: 'pnpm'
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            frontend-aog/pnpm-lock.yaml
       - name: Install dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
@@ -91,4 +93,15 @@ jobs:
         run: |
           python tools/check_pnpm_audit_exceptions.py \
             --audit frontend/audit.json \
+            --exceptions .github/audit-exceptions.yml
+      - name: Install AOG UI dependencies
+        working-directory: frontend-aog
+        run: pnpm install --frozen-lockfile
+      - name: Run AOG UI pnpm audit
+        working-directory: frontend-aog
+        run: pnpm audit --audit-level=high --json > audit.json || true
+      - name: Check AOG UI audit exceptions
+        run: |
+          python tools/check_pnpm_audit_exceptions.py \
+            --audit frontend-aog/audit.json \
             --exceptions .github/audit-exceptions.yml

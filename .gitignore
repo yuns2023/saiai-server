@@ -33,6 +33,7 @@ backend/internal/web/dist/
 !backend/internal/web/dist/
 backend/internal/web/dist/*
 !backend/internal/web/dist/.keep
+backend/internal/web/dist-aog/
 
 # Runtime data and local configuration
 backend/data/

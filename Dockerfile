@@ -33,6 +33,21 @@ COPY frontend/ ./
 RUN pnpm run build
 
 # -----------------------------------------------------------------------------
+# Stage 1b: AOG customer UI builder (served only when SERVER_USER_UI=aog)
+# -----------------------------------------------------------------------------
+FROM ${NODE_IMAGE} AS frontend-aog-builder
+
+WORKDIR /app/frontend-aog
+
+RUN corepack enable && corepack prepare pnpm@10.34.4 --activate
+
+COPY frontend-aog/package.json frontend-aog/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY frontend-aog/ ./
+RUN pnpm run build
+
+# -----------------------------------------------------------------------------
 # Stage 2: Backend Builder
 # -----------------------------------------------------------------------------
 FROM ${GOLANG_IMAGE} AS backend-builder
@@ -61,6 +76,7 @@ COPY backend/ ./
 
 # Copy frontend dist from previous stage (must be after backend copy to avoid being overwritten)
 COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
+COPY --from=frontend-aog-builder /app/backend/internal/web/dist-aog ./internal/web/dist-aog
 
 # Build the binary (BuildType=release for CI builds, embed frontend)
 # Version precedence: build arg VERSION > cmd/server/VERSION
