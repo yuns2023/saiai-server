@@ -24,8 +24,13 @@ const requestBodySizeAggregates = `COALESCE(SUM(u.request_body_bytes), 0)::bigin
 // = 1 by history, hosted rows excluded) with each group's current
 // statistics-only revenue rate; it needs "LEFT JOIN groups g ON g.id =
 // u.group_id". Consumption whose group has no rate (or no group) is unpriced.
+// It also splits the billed actual_cost (hosted rows excluded) into balance,
+// subscription and unknown billing types for the admin revenue tooltip.
 const subscriptionRevenueAggregates = `COALESCE(SUM(u.actual_cost * g.subscription_revenue_rate) FILTER (WHERE u.billing_type = 1 AND u.metered_cost IS NULL), 0) AS subscription_revenue,
-				COALESCE(SUM(u.actual_cost) FILTER (WHERE u.billing_type = 1 AND u.metered_cost IS NULL AND g.subscription_revenue_rate IS NULL), 0) AS subscription_revenue_unpriced_cost`
+				COALESCE(SUM(u.actual_cost) FILTER (WHERE u.billing_type = 1 AND u.metered_cost IS NULL AND g.subscription_revenue_rate IS NULL), 0) AS subscription_revenue_unpriced_cost,
+				COALESCE(SUM(u.actual_cost) FILTER (WHERE u.billing_type = 0 AND u.metered_cost IS NULL), 0) AS balance_cost,
+				COALESCE(SUM(u.actual_cost) FILTER (WHERE u.billing_type = 1 AND u.metered_cost IS NULL), 0) AS subscription_cost,
+				COALESCE(SUM(u.actual_cost) FILTER (WHERE (u.billing_type IS NULL OR u.billing_type NOT IN (0, 1)) AND u.metered_cost IS NULL), 0) AS unclassified_cost`
 
 // spendingRankingOrderBy returns a fixed ORDER BY list for a whitelisted sort.
 // It is applied before LIMIT and again on the final SELECT; idOrder is the
@@ -103,7 +108,10 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 				COALESCE(SUM(requests) OVER (), 0) AS total_requests,
 				COALESCE(SUM(tokens) OVER (), 0) AS total_tokens,
 				COALESCE(SUM(subscription_revenue) OVER (), 0) AS total_subscription_revenue,
-				COALESCE(SUM(subscription_revenue_unpriced_cost) OVER (), 0) AS total_subscription_revenue_unpriced_cost
+				COALESCE(SUM(subscription_revenue_unpriced_cost) OVER (), 0) AS total_subscription_revenue_unpriced_cost,
+				COALESCE(SUM(balance_cost) OVER (), 0) AS total_balance_cost,
+				COALESCE(SUM(subscription_cost) OVER (), 0) AS total_subscription_cost,
+				COALESCE(SUM(unclassified_cost) OVER (), 0) AS total_unclassified_cost
 			FROM key_spend
 			ORDER BY %s
 			LIMIT $%d
@@ -113,8 +121,10 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 			r.cache_creation_tokens, r.cache_read_tokens,
 			r.request_body_bytes_total, r.request_body_bytes_avg, r.request_body_bytes_max, r.request_body_bytes_known_count,
 			r.subscription_revenue, r.subscription_revenue_unpriced_cost,
+			r.balance_cost, r.subscription_cost, r.unclassified_cost,
 			r.total_cost, r.total_actual_cost, r.total_requests, r.total_tokens,
-			r.total_subscription_revenue, r.total_subscription_revenue_unpriced_cost
+			r.total_subscription_revenue, r.total_subscription_revenue_unpriced_cost,
+			r.total_balance_cost, r.total_subscription_cost, r.total_unclassified_cost
 		FROM ranked r
 		LEFT JOIN api_keys k ON k.id = r.api_key_id
 		LEFT JOIN users us ON us.id = r.user_id
@@ -142,8 +152,10 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 			&item.CacheCreationTokens, &item.CacheReadTokens,
 			&item.RequestBodyBytesTotal, &sizeAvg, &sizeMax, &item.RequestBodyBytesKnownCount,
 			&item.SubscriptionRevenue, &item.SubscriptionRevenueUnpricedCost,
+			&item.BalanceCost, &item.SubscriptionCost, &item.UnclassifiedCost,
 			&result.TotalCost, &result.TotalActualCost, &result.TotalRequests, &result.TotalTokens,
 			&result.TotalSubscriptionRevenue, &result.TotalSubscriptionRevenueUnpricedCost,
+			&result.TotalBalanceCost, &result.TotalSubscriptionCost, &result.TotalUnclassifiedCost,
 		); err != nil {
 			return nil, err
 		}

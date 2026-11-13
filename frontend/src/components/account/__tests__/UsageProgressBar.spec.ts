@@ -127,6 +127,17 @@ describe('UsageProgressBar', () => {
     expect(wrapper.text()).toContain('A $1.00')
   })
 
+  it('shows U as revenue (balance + converted subscription) in one chip', () => {
+    // Prod REC5x 7d window 11-13: 自建CCMax balance $180.68 + subscription $263.27 × 0.64.
+    const stats = {
+      requests: 3, tokens: 30, cost: 1, standard_cost: 2, user_cost: 443.95,
+      balance_cost: 180.68, subscription_cost: 263.27, subscription_revenue: 168.4928, subscription_revenue_unpriced_cost: 0,
+    }
+    const wrapper = mount(UsageProgressBar, { props: { label: '7d', utilization: 36, color: 'emerald', windowStats: stats } })
+    expect(wrapper.get('[data-testid="window-revenue"]').text()).toBe('U 349.17')
+    expect(wrapper.text()).not.toContain('≈¥')
+  })
+
   it('hides window costs once the reset passes', async () => {
     const wrapper = mount(UsageProgressBar, {
       props: { label: '5h', utilization: 12, color: 'indigo', resetsAt: '2026-03-17T00:01:30Z', standardCost: 1.5, estimatedCapacity: 10 }

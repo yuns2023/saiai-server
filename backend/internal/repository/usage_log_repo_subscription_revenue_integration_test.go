@@ -49,6 +49,8 @@ func (s *UsageLogRepoSuite) TestSubscriptionRevenueAcrossStatsRankingsAndAccount
 	add(key, accountB, converted, sub, 10, nil)      // 5 yuan
 	add(otherKey, accountB, nil, sub, 7, nil)        // no group: unpriced $7
 	add(otherKey, accountB, priced, sub, 0, rate(9)) // hosted: ignored
+	add(otherKey, accountB, priced, bal, 3, rate(1)) // hosted with a stray charge: not balance revenue
+	add(otherKey, accountB, priced, 2, 2, nil)       // unknown billing type: unclassified $2
 
 	stats, err := s.repo.GetStatsWithFilters(s.ctx, usagestats.UsageLogFilters{StartTime: &dayStart, EndTime: &dayEnd})
 	s.Require().NoError(err)
@@ -70,12 +72,24 @@ func (s *UsageLogRepoSuite) TestSubscriptionRevenueAcrossStatsRankingsAndAccount
 	s.Require().InDelta(30.0, users.Ranking[0].SubscriptionRevenueUnpricedCost, 1e-9)
 	s.Require().InDelta(69.0, users.TotalSubscriptionRevenue, 1e-9, "totals are taken before LIMIT")
 	s.Require().InDelta(37.0, users.TotalSubscriptionRevenueUnpricedCost, 1e-9)
+	s.Require().InDelta(40.0, users.Ranking[0].BalanceCost, 1e-9)
+	s.Require().InDelta(190.0, users.Ranking[0].SubscriptionCost, 1e-9)
+	s.Require().InDelta(0.0, users.Ranking[0].UnclassifiedCost, 1e-9)
+	s.Require().InDelta(40.0, users.TotalBalanceCost, 1e-9, "hosted rows are not balance revenue")
+	s.Require().InDelta(197.0, users.TotalSubscriptionCost, 1e-9)
+	s.Require().InDelta(2.0, users.TotalUnclassifiedCost, 1e-9)
 
 	keys, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, other.ID, 12, usagestats.SpendingRankingSortCost)
 	s.Require().NoError(err)
 	s.Require().Len(keys.Ranking, 1)
 	s.Require().InDelta(0.0, keys.Ranking[0].SubscriptionRevenue, 1e-9)
 	s.Require().InDelta(7.0, keys.Ranking[0].SubscriptionRevenueUnpricedCost, 1e-9)
+	s.Require().InDelta(0.0, keys.Ranking[0].BalanceCost, 1e-9)
+	s.Require().InDelta(7.0, keys.Ranking[0].SubscriptionCost, 1e-9)
+	s.Require().InDelta(2.0, keys.Ranking[0].UnclassifiedCost, 1e-9)
+	s.Require().InDelta(0.0, keys.TotalBalanceCost, 1e-9)
+	s.Require().InDelta(7.0, keys.TotalSubscriptionCost, 1e-9)
+	s.Require().InDelta(2.0, keys.TotalUnclassifiedCost, 1e-9)
 
 	byAccount, err := s.repo.GetAccountWindowStatsBatch(s.ctx, []int64{accountA.ID, accountB.ID}, dayStart)
 	s.Require().NoError(err)
@@ -85,8 +99,13 @@ func (s *UsageLogRepoSuite) TestSubscriptionRevenueAcrossStatsRankingsAndAccount
 	s.Require().InDelta(220.0, byAccount[accountA.ID].UserCost, 1e-9)
 	s.Require().InDelta(5.0, byAccount[accountB.ID].SubscriptionRevenue, 1e-9)
 	s.Require().InDelta(7.0, byAccount[accountB.ID].SubscriptionRevenueUnpricedCost, 1e-9)
-	s.Require().Equal(int64(1), byAccount[accountB.ID].HostedRequests)
-	s.Require().InDelta(9.0, byAccount[accountB.ID].HostedCost, 1e-9)
+	s.Require().Equal(int64(2), byAccount[accountB.ID].HostedRequests)
+	s.Require().InDelta(10.0, byAccount[accountB.ID].HostedCost, 1e-9)
+	s.Require().InDelta(40.0, byAccount[accountA.ID].BalanceCost, 1e-9)
+	s.Require().InDelta(180.0, byAccount[accountA.ID].SubscriptionCost, 1e-9)
+	s.Require().InDelta(0.0, byAccount[accountB.ID].BalanceCost, 1e-9, "hosted rows are not balance revenue")
+	s.Require().InDelta(17.0, byAccount[accountB.ID].SubscriptionCost, 1e-9)
+	s.Require().InDelta(2.0, byAccount[accountB.ID].UnclassifiedCost, 1e-9)
 
 	single, err := s.repo.GetAccountWindowStats(s.ctx, accountB.ID, dayStart)
 	s.Require().NoError(err)

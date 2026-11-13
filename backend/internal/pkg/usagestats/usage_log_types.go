@@ -185,9 +185,16 @@ type UserSpendingRankingResponse struct {
 // one ranking row: subscription consumption priced with each group's CURRENT
 // statistics-only rate (yuan), plus the subscription consumption ($) whose
 // group has no rate configured and is therefore not included.
+//
+// BalanceCost / SubscriptionCost / UnclassifiedCost split the row's billed
+// actual_cost (hosted rows excluded) so the admin UI can show the revenue
+// estimate BalanceCost + SubscriptionRevenue with its parts.
 type SubscriptionRevenueStats struct {
 	SubscriptionRevenue             float64 `json:"subscription_revenue"`
 	SubscriptionRevenueUnpricedCost float64 `json:"subscription_revenue_unpriced_cost"`
+	BalanceCost                     float64 `json:"balance_cost"`
+	SubscriptionCost                float64 `json:"subscription_cost"`
+	UnclassifiedCost                float64 `json:"unclassified_cost"`
 }
 
 // TotalSubscriptionRevenueStats totals SubscriptionRevenueStats over the whole
@@ -195,6 +202,9 @@ type SubscriptionRevenueStats struct {
 type TotalSubscriptionRevenueStats struct {
 	TotalSubscriptionRevenue             float64 `json:"total_subscription_revenue"`
 	TotalSubscriptionRevenueUnpricedCost float64 `json:"total_subscription_revenue_unpriced_cost"`
+	TotalBalanceCost                     float64 `json:"total_balance_cost"`
+	TotalSubscriptionCost                float64 `json:"total_subscription_cost"`
+	TotalUnclassifiedCost                float64 `json:"total_unclassified_cost"`
 }
 
 // UserBreakdownItem represents per-user usage breakdown within a dimension (group, model, endpoint).

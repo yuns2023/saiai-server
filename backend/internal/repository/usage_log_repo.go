@@ -2126,7 +2126,10 @@ func accountStatsSQL(keyColumn, where string) string {
 			COALESCE(SUM(s.hosted_requests), 0)::bigint as hosted_requests,
 			COALESCE(SUM(s.hosted_cost), 0) as hosted_cost,
 			COALESCE(SUM(s.subscription_cost * g.subscription_revenue_rate), 0) as subscription_revenue,
-			COALESCE(SUM(s.subscription_cost) FILTER (WHERE g.subscription_revenue_rate IS NULL), 0) as subscription_revenue_unpriced_cost
+			COALESCE(SUM(s.subscription_cost) FILTER (WHERE g.subscription_revenue_rate IS NULL), 0) as subscription_revenue_unpriced_cost,
+			COALESCE(SUM(s.balance_cost), 0) as balance_cost,
+			COALESCE(SUM(s.subscription_cost), 0) as subscription_cost,
+			COALESCE(SUM(s.unclassified_cost), 0) as unclassified_cost
 		FROM (
 			SELECT
 				` + innerKey + `group_id,
@@ -2137,7 +2140,9 @@ func accountStatsSQL(keyColumn, where string) string {
 				SUM(actual_cost) as user_cost,
 				COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
 				SUM(metered_cost) as hosted_cost,
-				SUM(actual_cost) FILTER (WHERE billing_type = 1 AND metered_cost IS NULL) as subscription_cost
+				SUM(actual_cost) FILTER (WHERE billing_type = 1 AND metered_cost IS NULL) as subscription_cost,
+				SUM(actual_cost) FILTER (WHERE billing_type = 0 AND metered_cost IS NULL) as balance_cost,
+				SUM(actual_cost) FILTER (WHERE (billing_type IS NULL OR billing_type NOT IN (0, 1)) AND metered_cost IS NULL) as unclassified_cost
 			FROM usage_logs
 			` + where + `
 			GROUP BY ` + innerKey + `group_id
@@ -2157,6 +2162,9 @@ func accountStatsScanTargets(stats *usagestats.AccountStats) []any {
 		&stats.HostedCost,
 		&stats.SubscriptionRevenue,
 		&stats.SubscriptionRevenueUnpricedCost,
+		&stats.BalanceCost,
+		&stats.SubscriptionCost,
+		&stats.UnclassifiedCost,
 	}
 }
 
@@ -2503,7 +2511,13 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 				COALESCE(SUM(requests) OVER (), 0) as total_requests,
 				COALESCE(SUM(tokens) OVER (), 0) as total_tokens,
 				COALESCE(SUM(subscription_revenue) OVER (), 0) as total_subscription_revenue,
-				COALESCE(SUM(subscription_revenue_unpriced_cost) OVER (), 0) as total_subscription_revenue_unpriced_cost
+				COALESCE(SUM(subscription_revenue_unpriced_cost) OVER (), 0) as total_subscription_revenue_unpriced_cost,
+				balance_cost,
+				subscription_cost,
+				unclassified_cost,
+				COALESCE(SUM(balance_cost) OVER (), 0) as total_balance_cost,
+				COALESCE(SUM(subscription_cost) OVER (), 0) as total_subscription_cost,
+				COALESCE(SUM(unclassified_cost) OVER (), 0) as total_unclassified_cost
 			FROM user_spend
 			ORDER BY ` + order + `
 			LIMIT $3
@@ -2527,7 +2541,13 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 			total_requests,
 			total_tokens,
 			total_subscription_revenue,
-			total_subscription_revenue_unpriced_cost
+			total_subscription_revenue_unpriced_cost,
+			balance_cost,
+			subscription_cost,
+			unclassified_cost,
+			total_balance_cost,
+			total_subscription_cost,
+			total_unclassified_cost
 		FROM ranked
 		ORDER BY ` + order + `
 	`
@@ -2549,13 +2569,16 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 	totalRequests := int64(0)
 	totalTokens := int64(0)
 	totalRevenue, totalUnpriced := 0.0, 0.0
+	totalBalance, totalSubscription, totalUnclassified := 0.0, 0.0, 0.0
 	for rows.Next() {
 		var row UserSpendingRankingItem
 		var sizeAvg, sizeMax sql.NullInt64
 		if err = rows.Scan(&row.UserID, &row.Email, &row.Cost, &row.ActualCost, &row.Requests, &row.HostedRequests, &row.Tokens,
 			&row.RequestBodyBytesTotal, &sizeAvg, &sizeMax, &row.RequestBodyBytesKnownCount,
 			&row.SubscriptionRevenue, &row.SubscriptionRevenueUnpricedCost,
-			&totalCost, &totalActualCost, &totalRequests, &totalTokens, &totalRevenue, &totalUnpriced); err != nil {
+			&totalCost, &totalActualCost, &totalRequests, &totalTokens, &totalRevenue, &totalUnpriced,
+			&row.BalanceCost, &row.SubscriptionCost, &row.UnclassifiedCost,
+			&totalBalance, &totalSubscription, &totalUnclassified); err != nil {
 			return nil, err
 		}
 		row.RequestBodyBytesAvg, row.RequestBodyBytesMax = nullInt64Ptr(sizeAvg), nullInt64Ptr(sizeMax)
@@ -2575,6 +2598,9 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 		TotalSubscriptionRevenueStats: usagestats.TotalSubscriptionRevenueStats{
 			TotalSubscriptionRevenue:             totalRevenue,
 			TotalSubscriptionRevenueUnpricedCost: totalUnpriced,
+			TotalBalanceCost:                     totalBalance,
+			TotalSubscriptionCost:                totalSubscription,
+			TotalUnclassifiedCost:                totalUnclassified,
 		},
 	}, nil
 }

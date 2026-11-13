@@ -34,12 +34,18 @@
             </span>
           </template>
         </UsageBillingSummary>
-        <SubscriptionRevenueText
+        <p
           v-if="stats?.total_subscription_revenue != null"
-          class="mt-0.5 block text-xs"
-          :revenue="stats.total_subscription_revenue"
-          :unpriced-cost="stats.subscription_revenue_unpriced_cost"
-        />
+          class="mt-0.5 text-xs text-gray-500 dark:text-gray-400"
+          data-testid="usage-stats-revenue"
+        >
+          {{ t('usage.revenue') }}
+          <RevenueAmount
+            class="font-semibold text-emerald-700 dark:text-emerald-400"
+            :parts="revenueParts"
+            :billed-cost="stats.total_actual_cost"
+          />
+        </p>
       </div>
     </div>
     <div class="card p-4 flex items-center gap-3">
@@ -54,12 +60,22 @@
 <script setup lang="ts">
 import UsageBillingSummary from '@/components/common/UsageBillingSummary.vue'
 import TokenUsageSummary from '@/components/common/TokenUsageSummary.vue'
-import SubscriptionRevenueText from '@/components/common/SubscriptionRevenueText.vue'
+import RevenueAmount from '@/components/common/RevenueAmount.vue'
+import { computed } from 'vue'
+import { revenuePartsFromTotals } from '@/utils/revenue'
 import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import Icon from '@/components/icons/Icon.vue'
 
-defineProps<{ stats: AdminUsageStatsResponse | null }>()
+const props = defineProps<{ stats: AdminUsageStatsResponse | null }>()
+
+// The summary reports unpriced consumption without the total_ prefix.
+const revenueParts = computed(() =>
+  revenuePartsFromTotals({
+    ...(props.stats ?? {}),
+    total_subscription_revenue_unpriced_cost: props.stats?.subscription_revenue_unpriced_cost,
+  }),
+)
 
 const { t } = useI18n()
 

@@ -285,8 +285,7 @@
               :ranking-total-actual-cost="rankingTotalActualCost"
               :ranking-total-requests="rankingTotalRequests"
               :ranking-total-tokens="rankingTotalTokens"
-              :ranking-total-subscription-revenue="rankingTotalSubscriptionRevenue"
-              :ranking-total-subscription-revenue-unpriced-cost="rankingTotalSubscriptionRevenueUnpricedCost"
+              :ranking-total-revenue="rankingTotalRevenue"
               :ranking-sort="rankingSort"
               :loading="chartsLoading"
               :ranking-loading="rankingLoading"
@@ -346,6 +345,7 @@ import { useAppStore } from '@/stores/app'
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
 import type {
+  RevenueParts,
   DashboardStats,
   TrendDataPoint,
   ModelStat,
@@ -361,6 +361,7 @@ import Select from '@/components/common/Select.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import CacheUsageTrend from '@/components/charts/CacheUsageTrend.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
+import { revenuePartsFromTotals } from '@/utils/revenue'
 import APIKeySpendingRanking from '@/components/admin/dashboard/APIKeySpendingRanking.vue'
 
 import {
@@ -410,8 +411,7 @@ const rankingTotalCost = ref(0)
 const rankingTotalActualCost = ref(0)
 const rankingTotalRequests = ref(0)
 const rankingTotalTokens = ref(0)
-const rankingTotalSubscriptionRevenue = ref(0)
-const rankingTotalSubscriptionRevenueUnpricedCost = ref(0)
+const rankingTotalRevenue = ref<RevenueParts>({})
 let chartLoadSeq = 0
 let usersTrendLoadSeq = 0
 let rankingLoadSeq = 0
@@ -755,8 +755,7 @@ const loadUserSpendingRanking = async () => {
     rankingTotalActualCost.value = response.total_actual_cost || 0
     rankingTotalRequests.value = response.total_requests || 0
     rankingTotalTokens.value = response.total_tokens || 0
-    rankingTotalSubscriptionRevenue.value = response.total_subscription_revenue || 0
-    rankingTotalSubscriptionRevenueUnpricedCost.value = response.total_subscription_revenue_unpriced_cost || 0
+    rankingTotalRevenue.value = revenuePartsFromTotals(response)
   } catch (error) {
     if (currentSeq !== rankingLoadSeq) return
     console.error('Error loading user spending ranking:', error)
@@ -765,8 +764,7 @@ const loadUserSpendingRanking = async () => {
     rankingTotalActualCost.value = 0
     rankingTotalRequests.value = 0
     rankingTotalTokens.value = 0
-    rankingTotalSubscriptionRevenue.value = 0
-    rankingTotalSubscriptionRevenueUnpricedCost.value = 0
+    rankingTotalRevenue.value = {}
     rankingError.value = true
   } finally {
     if (currentSeq === rankingLoadSeq) {

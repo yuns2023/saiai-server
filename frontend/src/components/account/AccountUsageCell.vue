@@ -276,9 +276,9 @@
           <span
             v-if="todayStats.user_cost != null"
             class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
-            :title="t('usage.userBilled')"
+            data-testid="today-revenue"
           >
-            U ${{ formatKeyUserCost }}
+            <RevenueAmount label="U " :parts="todayStats" :billed-cost="todayStats.user_cost" />
           </span>
         </div>
       </div>
@@ -329,6 +329,7 @@ import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatCompactNumber } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
+import RevenueAmount from '@/components/common/RevenueAmount.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -730,10 +731,6 @@ const formatKeyCost = computed(() => {
   return props.todayStats.cost.toFixed(2)
 })
 
-const formatKeyUserCost = computed(() => {
-  if (!props.todayStats || props.todayStats.user_cost == null) return '0.00'
-  return props.todayStats.user_cost.toFixed(2)
-})
 
 onMounted(() => {
   if (!shouldAutoLoadUsageOnMount.value) return

@@ -24,20 +24,9 @@
           <span
             v-if="windowStats?.user_cost != null"
             class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
-            :title="t('usage.userBilled')"
+            data-testid="window-revenue"
           >
-            U ${{ formatUserCost }}
-          </span>
-          <span
-            v-if="(windowStats?.subscription_revenue ?? 0) > 0 || (windowStats?.subscription_revenue_unpriced_cost ?? 0) > 0"
-            class="rounded-sm bg-emerald-50 px-1.5 py-0.5 dark:bg-emerald-900/20"
-            data-testid="window-subscription-revenue"
-          >
-            <SubscriptionRevenueText
-              compact
-              :revenue="windowStats?.subscription_revenue ?? 0"
-              :unpriced-cost="windowStats?.subscription_revenue_unpriced_cost"
-            />
+            <RevenueAmount label="U " :parts="windowStats" :billed-cost="windowStats.user_cost" />
           </span>
         </template>
         <span
@@ -95,7 +84,7 @@ import { computed, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { WindowStats } from '@/types'
-import SubscriptionRevenueText from '@/components/common/SubscriptionRevenueText.vue'
+import RevenueAmount from '@/components/common/RevenueAmount.vue'
 import { formatCompactNumber, formatCountdown } from '@/utils/format'
 
 const props = defineProps<{
@@ -238,10 +227,5 @@ const estimateAge = computed(() => {
 const hasActivity = computed(() =>
   Boolean(props.windowStats && (props.windowStats.requests > 0 || props.windowStats.tokens > 0))
 )
-
-const formatUserCost = computed(() => {
-  if (!props.windowStats || props.windowStats.user_cost == null) return '0.00'
-  return props.windowStats.user_cost.toFixed(2)
-})
 
 </script>
