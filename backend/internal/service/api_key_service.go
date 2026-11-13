@@ -199,8 +199,8 @@ type UpdateAPIKeyRequest struct {
 	Name        *string                      `json:"name"`
 	GroupID     *int64                       `json:"group_id"`
 	Status      *string                      `json:"status"`
-	IPWhitelist []string                     `json:"ip_whitelist"` // IP 白名单（空数组清空）
-	IPBlacklist []string                     `json:"ip_blacklist"` // IP 黑名单（空数组清空）
+	IPWhitelist []string                     `json:"ip_whitelist"` // IP 白名单（nil = 不修改，空数组 = 清空）
+	IPBlacklist []string                     `json:"ip_blacklist"` // IP 黑名单（nil = 不修改，空数组 = 清空）
 
 	// Quota fields
 	Quota           *float64   `json:"quota"`       // Quota limit in USD (nil = no change, 0 = unlimited)
@@ -679,9 +679,14 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		}
 	}
 
-	// 更新 IP 限制（空数组会清空设置）
-	apiKey.IPWhitelist = req.IPWhitelist
-	apiKey.IPBlacklist = req.IPBlacklist
+	// 更新 IP 限制：字段缺省（nil）表示不修改，空数组表示清空。
+	// 只改状态/分组的请求（如启停、快速换组）不再顺带清掉名单。
+	if req.IPWhitelist != nil {
+		apiKey.IPWhitelist = req.IPWhitelist
+	}
+	if req.IPBlacklist != nil {
+		apiKey.IPBlacklist = req.IPBlacklist
+	}
 
 	// Update rate limit configuration
 	if req.RateLimit5h != nil {
