@@ -85,4 +85,48 @@ describe('AccountStatsModal', () => {
     expect(endpoints[1].props('upstreamEndpointStats')).toHaveLength(1)
     wrapper.unmount()
   })
+
+  it('shows revenue (balance + converted subscription) for total, daily average, today and the highest days', async () => {
+    const base = stats(5)
+    const dayRevenue = { balance_cost: 3, subscription_cost: 40, subscription_revenue: 20, subscription_revenue_unpriced_cost: 0, unclassified_cost: 0 }
+    getStats.mockResolvedValueOnce({
+      ...base,
+      summary: {
+        ...base.summary,
+        actual_days_used: 2,
+        total_user_cost: 52,
+        avg_daily_user_cost: 26,
+        revenue: { balance_cost: 12, subscription_cost: 40, subscription_revenue: 20, subscription_revenue_unpriced_cost: 6, unclassified_cost: 0 },
+        today: { date: '2026-04-05', cost: 43, user_cost: 43, requests: 2, tokens: 20, revenue: dayRevenue },
+        highest_cost_day: { date: '2026-04-05', label: '04/05', cost: 43, user_cost: 43, requests: 2, revenue: dayRevenue },
+        highest_request_day: { date: '2026-04-05', label: '04/05', cost: 43, user_cost: 43, requests: 2, revenue: dayRevenue },
+      },
+    })
+    const wrapper = mount(AccountStatsModal, {
+      props: { show: false, account: { id: 4, name: 'Revenue', status: 'active' } as Account },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, DateTimeRangePicker: true, ModelDistributionChart: true, EndpointDistributionChart: true, LoadingSpinner: true } }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    const text = (id: string) => wrapper.get(`[data-testid="${id}"]`).text().replace(/\s+/g, '')
+    expect(text('account-stats-total-revenue')).toBe('32.00+$6.00?')
+    expect(text('account-stats-avg-revenue')).toBe('16.00+$3.00?') // per day with usage
+    expect(text('account-stats-today-revenue')).toBe('23.00')
+    expect(text('account-stats-highest-cost-day-revenue')).toBe('23.00')
+    expect(text('account-stats-highest-request-day-revenue')).toBe('23.00')
+    expect(wrapper.text()).not.toContain('usage.userBilled')
+    wrapper.unmount()
+  })
+
+  it('shows 0.00 revenue for an older response without revenue parts', async () => {
+    getStats.mockResolvedValueOnce(stats(1))
+    const wrapper = mount(AccountStatsModal, {
+      props: { show: false, account: { id: 5, name: 'Old', status: 'active' } as Account },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, DateTimeRangePicker: true, ModelDistributionChart: true, EndpointDistributionChart: true, LoadingSpinner: true } }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="account-stats-total-revenue"]').text()).toBe('0.00')
+    wrapper.unmount()
+  })
 })

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
@@ -38,9 +39,10 @@ func TestAccountStatsRangeSummary(t *testing.T) {
 			require.NoError(t, err)
 			start := time.Date(2026, 10, 1, 0, 0, 0, 0, loc)
 			end := start.AddDate(0, 0, 30)
-			rows := sqlmock.NewRows([]string{"date", "requests", "tokens", "cost", "actual_cost", "user_cost", "hosted_requests", "hosted_cost"})
+			rows := sqlmock.NewRows([]string{"date", "requests", "tokens", "cost", "actual_cost", "user_cost", "hosted_requests", "hosted_cost",
+				"subscription_revenue", "subscription_revenue_unpriced_cost", "balance_cost", "subscription_cost", "unclassified_cost"})
 			if populated {
-				rows.AddRow("2026-10-17", 2, 100, 3.0, 2.0, 1.0, 1, 0.5)
+				rows.AddRow("2026-10-17", 2, 100, 3.0, 2.0, 1.0, 1, 0.5, 0.32, 0.1, 0.4, 0.6, 0.0)
 			}
 			mock.ExpectQuery(`TO_CHAR\(created_at AT TIME ZONE \$4, 'YYYY-MM-DD'\).*created_at >= \$2 AND created_at < \$3`).WithArgs(int64(1), start, end, "Asia/Shanghai").WillReturnRows(rows)
 			mock.ExpectQuery(`SELECT COALESCE\(AVG\(duration_ms\)`).WithArgs(int64(1), start, end).WillReturnRows(sqlmock.NewRows([]string{"duration"}).AddRow(1200))
@@ -57,6 +59,10 @@ func TestAccountStatsRangeSummary(t *testing.T) {
 				require.Equal(t, 1.0, result.Summary.AvgDailyUserCost)
 				require.Equal(t, int64(1), result.Summary.TotalHostedReqs)
 				require.Equal(t, 0.5, result.Summary.TotalHostedCost)
+				require.Equal(t, usagestats.SubscriptionRevenueStats{
+					SubscriptionRevenue: 0.32, SubscriptionRevenueUnpricedCost: 0.1, BalanceCost: 0.4, SubscriptionCost: 0.6,
+				}, result.Summary.Revenue)
+				require.Equal(t, result.Summary.Revenue, result.Summary.HighestCostDay.Revenue)
 			} else {
 				require.Zero(t, result.Summary.ActualDaysUsed)
 				require.Zero(t, result.Summary.AvgDailyCost)

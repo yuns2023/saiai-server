@@ -4248,20 +4248,46 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 	// Count calendar days touched by [start, end), including partial days.
 	daysCount := accountStatsCalendarDays(startTime, endTime)
 
+	// Rows are pre-aggregated per (day, group) so the revenue parts can price
+	// subscription usage with each group's current rate (same rules as
+	// accountStatsSQL: hosted rows excluded, no rate / no group = unpriced).
 	query := `
+		WITH per_group AS (
+			SELECT
+				TO_CHAR(created_at AT TIME ZONE $4, 'YYYY-MM-DD') as date,
+				group_id,
+				COUNT(*) as requests,
+				SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) as tokens,
+				SUM(total_cost) as cost,
+				SUM(total_cost * COALESCE(account_rate_multiplier, 1)) as actual_cost,
+				SUM(actual_cost) as user_cost,
+				COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
+				SUM(metered_cost) as hosted_cost,
+				SUM(actual_cost) FILTER (WHERE billing_type = 1 AND metered_cost IS NULL) as subscription_cost,
+				SUM(actual_cost) FILTER (WHERE billing_type = 0 AND metered_cost IS NULL) as balance_cost,
+				SUM(actual_cost) FILTER (WHERE (billing_type IS NULL OR billing_type NOT IN (0, 1)) AND metered_cost IS NULL) as unclassified_cost
+			FROM usage_logs
+			WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
+			GROUP BY date, group_id
+		)
 		SELECT
-			TO_CHAR(created_at AT TIME ZONE $4, 'YYYY-MM-DD') as date,
-			COUNT(*) as requests,
-			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
-			COALESCE(SUM(total_cost), 0) as cost,
-			COALESCE(SUM(total_cost * COALESCE(account_rate_multiplier, 1)), 0) as actual_cost,
-			COALESCE(SUM(actual_cost), 0) as user_cost,
-			COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
-			COALESCE(SUM(metered_cost), 0) as hosted_cost
-		FROM usage_logs
-		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
-		GROUP BY date
-		ORDER BY date ASC
+			p.date,
+			COALESCE(SUM(p.requests), 0)::bigint as requests,
+			COALESCE(SUM(p.tokens), 0)::bigint as tokens,
+			COALESCE(SUM(p.cost), 0) as cost,
+			COALESCE(SUM(p.actual_cost), 0) as actual_cost,
+			COALESCE(SUM(p.user_cost), 0) as user_cost,
+			COALESCE(SUM(p.hosted_requests), 0)::bigint as hosted_requests,
+			COALESCE(SUM(p.hosted_cost), 0) as hosted_cost,
+			COALESCE(SUM(p.subscription_cost * g.subscription_revenue_rate), 0) as subscription_revenue,
+			COALESCE(SUM(p.subscription_cost) FILTER (WHERE g.subscription_revenue_rate IS NULL), 0) as subscription_revenue_unpriced_cost,
+			COALESCE(SUM(p.balance_cost), 0) as balance_cost,
+			COALESCE(SUM(p.subscription_cost), 0) as subscription_cost,
+			COALESCE(SUM(p.unclassified_cost), 0) as unclassified_cost
+		FROM per_group p
+		LEFT JOIN groups g ON g.id = p.group_id
+		GROUP BY p.date
+		ORDER BY p.date ASC
 	`
 
 	rows, err := r.sql.QueryContext(ctx, query, accountID, startTime, endTime, startTime.Location().String())
@@ -4289,7 +4315,10 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		var userCost float64
 		var hostedRequests int64
 		var hostedCost float64
-		if err = rows.Scan(&date, &requests, &tokens, &cost, &actualCost, &userCost, &hostedRequests, &hostedCost); err != nil {
+		var revenue usagestats.SubscriptionRevenueStats
+		if err = rows.Scan(&date, &requests, &tokens, &cost, &actualCost, &userCost, &hostedRequests, &hostedCost,
+			&revenue.SubscriptionRevenue, &revenue.SubscriptionRevenueUnpricedCost,
+			&revenue.BalanceCost, &revenue.SubscriptionCost, &revenue.UnclassifiedCost); err != nil {
 			return nil, err
 		}
 		totalHostedRequests += hostedRequests
@@ -4303,6 +4332,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 			Cost:       cost,
 			ActualCost: actualCost,
 			UserCost:   userCost,
+			Revenue:    revenue,
 		})
 	}
 	if err = rows.Err(); err != nil {
@@ -4311,6 +4341,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 
 	var totalAccountCost, totalUserCost, totalStandardCost float64
 	var totalRequests, totalTokens int64
+	var totalRevenue usagestats.SubscriptionRevenueStats
 	var highestCostDay, highestRequestDay *AccountUsageHistory
 
 	for i := range history {
@@ -4320,6 +4351,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		totalStandardCost += h.Cost
 		totalRequests += h.Requests
 		totalTokens += h.Tokens
+		totalRevenue.Add(h.Revenue)
 
 		if highestCostDay == nil || h.ActualCost > highestCostDay.ActualCost {
 			highestCostDay = h
@@ -4353,23 +4385,26 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		AvgDailyRequests:  float64(totalRequests) / float64(divisor),
 		AvgDailyTokens:    float64(totalTokens) / float64(divisor),
 		AvgDurationMs:     avgDuration,
+		Revenue:           totalRevenue,
 	}
 
 	todayStr := time.Now().In(startTime.Location()).Format("2006-01-02")
 	for i := range history {
 		if history[i].Date == todayStr {
 			summary.Today = &struct {
-				Date     string  `json:"date"`
-				Cost     float64 `json:"cost"`
-				UserCost float64 `json:"user_cost"`
-				Requests int64   `json:"requests"`
-				Tokens   int64   `json:"tokens"`
+				Date     string                              `json:"date"`
+				Cost     float64                             `json:"cost"`
+				UserCost float64                             `json:"user_cost"`
+				Requests int64                               `json:"requests"`
+				Tokens   int64                               `json:"tokens"`
+				Revenue  usagestats.SubscriptionRevenueStats `json:"revenue"`
 			}{
 				Date:     history[i].Date,
 				Cost:     history[i].ActualCost,
 				UserCost: history[i].UserCost,
 				Requests: history[i].Requests,
 				Tokens:   history[i].Tokens,
+				Revenue:  history[i].Revenue,
 			}
 			break
 		}
@@ -4377,33 +4412,37 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 
 	if highestCostDay != nil {
 		summary.HighestCostDay = &struct {
-			Date     string  `json:"date"`
-			Label    string  `json:"label"`
-			Cost     float64 `json:"cost"`
-			UserCost float64 `json:"user_cost"`
-			Requests int64   `json:"requests"`
+			Date     string                              `json:"date"`
+			Label    string                              `json:"label"`
+			Cost     float64                             `json:"cost"`
+			UserCost float64                             `json:"user_cost"`
+			Requests int64                               `json:"requests"`
+			Revenue  usagestats.SubscriptionRevenueStats `json:"revenue"`
 		}{
 			Date:     highestCostDay.Date,
 			Label:    highestCostDay.Label,
 			Cost:     highestCostDay.ActualCost,
 			UserCost: highestCostDay.UserCost,
 			Requests: highestCostDay.Requests,
+			Revenue:  highestCostDay.Revenue,
 		}
 	}
 
 	if highestRequestDay != nil {
 		summary.HighestRequestDay = &struct {
-			Date     string  `json:"date"`
-			Label    string  `json:"label"`
-			Requests int64   `json:"requests"`
-			Cost     float64 `json:"cost"`
-			UserCost float64 `json:"user_cost"`
+			Date     string                              `json:"date"`
+			Label    string                              `json:"label"`
+			Requests int64                               `json:"requests"`
+			Cost     float64                             `json:"cost"`
+			UserCost float64                             `json:"user_cost"`
+			Revenue  usagestats.SubscriptionRevenueStats `json:"revenue"`
 		}{
 			Date:     highestRequestDay.Date,
 			Label:    highestRequestDay.Label,
 			Requests: highestRequestDay.Requests,
 			Cost:     highestRequestDay.ActualCost,
 			UserCost: highestRequestDay.UserCost,
+			Revenue:  highestRequestDay.Revenue,
 		}
 	}
 

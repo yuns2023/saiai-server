@@ -394,6 +394,8 @@ type AccountUsageHistory struct {
 	Cost       float64 `json:"cost"`        // 标准计费（total_cost）
 	ActualCost float64 `json:"actual_cost"` // 账号口径费用（total_cost * account_rate_multiplier）
 	UserCost   float64 `json:"user_cost"`   // 用户口径费用（actual_cost，受分组倍率影响）
+	// Revenue 管理员实收拆分（余额扣费 + 订阅折算，不含托管行）。
+	Revenue SubscriptionRevenueStats `json:"revenue"`
 }
 
 // AccountUsageSummary represents summary statistics for an account
@@ -412,27 +414,41 @@ type AccountUsageSummary struct {
 	AvgDailyRequests  float64 `json:"avg_daily_requests"`
 	AvgDailyTokens    float64 `json:"avg_daily_tokens"`
 	AvgDurationMs     float64 `json:"avg_duration_ms"`
-	Today             *struct {
-		Date     string  `json:"date"`
-		Cost     float64 `json:"cost"`
-		UserCost float64 `json:"user_cost"`
-		Requests int64   `json:"requests"`
-		Tokens   int64   `json:"tokens"`
+	// Revenue 区间内实收拆分合计；日均由前端按 actual_days_used 折算。
+	Revenue SubscriptionRevenueStats `json:"revenue"`
+	Today   *struct {
+		Date     string                   `json:"date"`
+		Cost     float64                  `json:"cost"`
+		UserCost float64                  `json:"user_cost"`
+		Requests int64                    `json:"requests"`
+		Tokens   int64                    `json:"tokens"`
+		Revenue  SubscriptionRevenueStats `json:"revenue"`
 	} `json:"today"`
 	HighestCostDay *struct {
-		Date     string  `json:"date"`
-		Label    string  `json:"label"`
-		Cost     float64 `json:"cost"`
-		UserCost float64 `json:"user_cost"`
-		Requests int64   `json:"requests"`
+		Date     string                   `json:"date"`
+		Label    string                   `json:"label"`
+		Cost     float64                  `json:"cost"`
+		UserCost float64                  `json:"user_cost"`
+		Requests int64                    `json:"requests"`
+		Revenue  SubscriptionRevenueStats `json:"revenue"`
 	} `json:"highest_cost_day"`
 	HighestRequestDay *struct {
-		Date     string  `json:"date"`
-		Label    string  `json:"label"`
-		Requests int64   `json:"requests"`
-		Cost     float64 `json:"cost"`
-		UserCost float64 `json:"user_cost"`
+		Date     string                   `json:"date"`
+		Label    string                   `json:"label"`
+		Requests int64                    `json:"requests"`
+		Cost     float64                  `json:"cost"`
+		UserCost float64                  `json:"user_cost"`
+		Revenue  SubscriptionRevenueStats `json:"revenue"`
 	} `json:"highest_request_day"`
+}
+
+// Add accumulates another row's revenue parts.
+func (s *SubscriptionRevenueStats) Add(o SubscriptionRevenueStats) {
+	s.SubscriptionRevenue += o.SubscriptionRevenue
+	s.SubscriptionRevenueUnpricedCost += o.SubscriptionRevenueUnpricedCost
+	s.BalanceCost += o.BalanceCost
+	s.SubscriptionCost += o.SubscriptionCost
+	s.UnclassifiedCost += o.UnclassifiedCost
 }
 
 // AccountUsageStatsResponse represents the full usage statistics response for an account

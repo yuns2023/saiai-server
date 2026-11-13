@@ -114,4 +114,55 @@ func (s *UsageLogRepoSuite) TestSubscriptionRevenueAcrossStatsRankingsAndAccount
 	empty, err := s.repo.GetAccountWindowStats(s.ctx, accountA.ID, dayEnd)
 	s.Require().NoError(err)
 	s.Require().Equal(usagestats.AccountStats{}, *empty, "an empty window still returns one zero row")
+
+	// The account stats modal splits revenue per day with the same rules.
+	modal, err := s.repo.GetAccountUsageStats(s.ctx, accountB.ID, dayStart, dayEnd)
+	s.Require().NoError(err)
+	s.Require().Len(modal.History, 1)
+	s.Require().Equal(int64(5), modal.History[0].Requests, "per-group pre-aggregation keeps request counts")
+	s.Require().Equal(int64(2), modal.Summary.TotalHostedReqs)
+	s.Require().InDelta(10.0, modal.Summary.TotalHostedCost, 1e-9)
+	want := usagestats.SubscriptionRevenueStats{
+		SubscriptionRevenue: 5, SubscriptionRevenueUnpricedCost: 7, BalanceCost: 0, SubscriptionCost: 17, UnclassifiedCost: 2,
+	}
+	s.Require().InDelta(want.SubscriptionRevenue, modal.Summary.Revenue.SubscriptionRevenue, 1e-9)
+	s.Require().InDelta(want.SubscriptionRevenueUnpricedCost, modal.Summary.Revenue.SubscriptionRevenueUnpricedCost, 1e-9)
+	s.Require().InDelta(want.BalanceCost, modal.Summary.Revenue.BalanceCost, 1e-9, "hosted rows are not balance revenue")
+	s.Require().InDelta(want.SubscriptionCost, modal.Summary.Revenue.SubscriptionCost, 1e-9)
+	s.Require().InDelta(want.UnclassifiedCost, modal.Summary.Revenue.UnclassifiedCost, 1e-9)
+	s.Require().NotNil(modal.Summary.HighestCostDay)
+	s.Require().Equal(modal.History[0].Revenue, modal.Summary.HighestCostDay.Revenue)
+	s.Require().Equal(modal.History[0].Revenue, modal.Summary.HighestRequestDay.Revenue)
+}
+
+// The modal sums revenue over several days and keeps each day's parts.
+func (s *UsageLogRepoSuite) TestAccountUsageStatsRevenueAcrossDays() {
+	day1 := time.Date(2026, 4, 5, 0, 0, 0, 0, time.UTC)
+	rate := 0.5
+	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "rev-days", SubscriptionType: service.SubscriptionTypeSubscription, SubscriptionRevenueRate: &rate})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-rev-days"})
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "rev-days@test.com"})
+	key := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-rev-days", Name: "rev-days"})
+	add := func(at time.Time, billing int8, actual float64) {
+		_, err := s.repo.Create(s.ctx, &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, GroupID: &group.ID,
+			RequestID: uuid.NewString(), Model: "claude-3", InputTokens: 10, TotalCost: actual, ActualCost: actual,
+			BillingType: billing, CreatedAt: at})
+		s.Require().NoError(err)
+	}
+	add(day1.Add(time.Hour), int8(service.BillingTypeSubscription), 40) // 20 converted
+	add(day1.Add(2*time.Hour), int8(service.BillingTypeBalance), 3)
+	add(day1.Add(25*time.Hour), int8(service.BillingTypeBalance), 9)
+
+	resp, err := s.repo.GetAccountUsageStats(s.ctx, account.ID, day1, day1.Add(48*time.Hour))
+	s.Require().NoError(err)
+	s.Require().Len(resp.History, 2)
+	s.Require().InDelta(20.0, resp.History[0].Revenue.SubscriptionRevenue, 1e-9)
+	s.Require().InDelta(3.0, resp.History[0].Revenue.BalanceCost, 1e-9)
+	s.Require().InDelta(9.0, resp.History[1].Revenue.BalanceCost, 1e-9)
+	s.Require().InDelta(20.0, resp.Summary.Revenue.SubscriptionRevenue, 1e-9)
+	s.Require().InDelta(12.0, resp.Summary.Revenue.BalanceCost, 1e-9)
+	s.Require().InDelta(40.0, resp.Summary.Revenue.SubscriptionCost, 1e-9)
+	s.Require().InDelta(52.0, resp.Summary.TotalUserCost, 1e-9)
+	s.Require().Equal(resp.History[0].Date, resp.Summary.HighestCostDay.Date)
+	s.Require().InDelta(20.0, resp.Summary.HighestCostDay.Revenue.SubscriptionRevenue, 1e-9)
 }

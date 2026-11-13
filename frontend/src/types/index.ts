@@ -1780,6 +1780,7 @@ export interface AccountUsageHistory {
   cost: number
   actual_cost: number // Account cost (account multiplier)
   user_cost: number // User/API key billed cost (group multiplier)
+  revenue?: RevenueParts
 }
 
 export interface AccountUsageSummary {
@@ -1797,12 +1798,14 @@ export interface AccountUsageSummary {
   avg_daily_requests: number
   avg_daily_tokens: number
   avg_duration_ms: number
+  revenue?: RevenueParts // admin revenue parts over the range
   today: {
     date: string
     cost: number
     user_cost: number
     requests: number
     tokens: number
+    revenue?: RevenueParts
   } | null
   highest_cost_day: {
     date: string
@@ -1810,6 +1813,7 @@ export interface AccountUsageSummary {
     cost: number
     user_cost: number
     requests: number
+    revenue?: RevenueParts
   } | null
   highest_request_day: {
     date: string
@@ -1817,6 +1821,7 @@ export interface AccountUsageSummary {
     requests: number
     cost: number
     user_cost: number
+    revenue?: RevenueParts
   } | null
 }
 
