@@ -7,6 +7,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -47,6 +48,13 @@ const (
 //go:embed all:dist
 var frontendFS embed.FS
 
+// aogFrontendFS holds the AOGCode customer UI (frontend-aog build output).
+// It is always embedded so one image can serve either UI; only
+// SERVER_USER_UI=aog activates it.
+//
+//go:embed all:dist-aog
+var aogFrontendFS embed.FS
+
 const saiaiCLIUnavailableMessage = "SAIAI client download is temporarily unavailable. Please retry later or contact your administrator."
 
 // PublicSettingsProvider is an interface to fetch public settings
@@ -62,27 +70,24 @@ type FrontendServer struct {
 	cache      *HTMLCache
 	settings   PublicSettingsProvider
 	cliDir     string
+	// userUI selects the customer UI. In aog mode aog holds the AOG build and
+	// the classic fields above keep serving the admin console.
+	userUI UserUI
+	aog    *uiBundle
 	// Forwarded origin headers are executable-wrapper inputs, so accept them
 	// only from the same explicitly configured proxy boundary used by Gin.
 	trustedProxyPrefixes []netip.Prefix
 }
 
-// NewFrontendServer creates a new frontend server with settings injection.
-// cliDir 指定完整 SAIAI client bundle 所在目录（例如
-// /var/lib/saiai-server/client-runtime/saiai-cli/）。为空或 bundle 不完整时，
-// /saiai-cli/* returns a user-safe 503 when the configured bundle is unavailable.
-// Operator remediation details belong in deployment diagnostics, not the public response.
-func NewFrontendServer(settingsProvider PublicSettingsProvider, cliDir string, trustedProxies ...string) (*FrontendServer, error) {
-	trustedProxyPrefixes, err := parseTrustedProxyPrefixes(trustedProxies)
-	if err != nil {
-		return nil, err
-	}
-	distFS, err := fs.Sub(frontendFS, "dist")
-	if err != nil {
-		return nil, err
-	}
+// uiBundle is one embedded SPA build with its own rendered-HTML cache.
+type uiBundle struct {
+	distFS     fs.FS
+	fileServer http.Handler
+	baseHTML   []byte
+	cache      *HTMLCache
+}
 
-	// Read base HTML once
+func newUIBundle(distFS fs.FS) (*uiBundle, error) {
 	file, err := distFS.Open("index.html")
 	if err != nil {
 		return nil, err
@@ -93,25 +98,104 @@ func NewFrontendServer(settingsProvider PublicSettingsProvider, cliDir string, t
 	if err != nil {
 		return nil, err
 	}
-
 	cache := NewHTMLCache()
 	cache.SetBaseHTML(baseHTML)
-
-	return &FrontendServer{
-		distFS:               distFS,
-		fileServer:           http.FileServer(http.FS(distFS)),
-		baseHTML:             baseHTML,
-		cache:                cache,
-		settings:             settingsProvider,
-		cliDir:               strings.TrimSpace(cliDir),
-		trustedProxyPrefixes: trustedProxyPrefixes,
+	return &uiBundle{
+		distFS:     distFS,
+		fileServer: http.FileServer(http.FS(distFS)),
+		baseHTML:   baseHTML,
+		cache:      cache,
 	}, nil
+}
+
+// NewFrontendServer creates a new frontend server with settings injection.
+// cliDir 指定完整 SAIAI client bundle 所在目录（例如
+// /var/lib/saiai-server/client-runtime/saiai-cli/）。为空或 bundle 不完整时，
+// /saiai-cli/* returns a user-safe 503 when the configured bundle is unavailable.
+// Operator remediation details belong in deployment diagnostics, not the public response.
+func NewFrontendServer(settingsProvider PublicSettingsProvider, cliDir string, trustedProxies ...string) (*FrontendServer, error) {
+	return NewFrontendServerWithOptions(settingsProvider, FrontendOptions{
+		CLIDir:         cliDir,
+		TrustedProxies: trustedProxies,
+		UserUI:         UserUIClassic,
+	})
+}
+
+// NewFrontendServerWithOptions creates a frontend server for the configured
+// user UI. In aog mode a missing or unreadable AOG build is an error: the
+// caller must not silently fall back to the classic customer pages.
+func NewFrontendServerWithOptions(settingsProvider PublicSettingsProvider, opts FrontendOptions) (*FrontendServer, error) {
+	classicFS, err := fs.Sub(frontendFS, "dist")
+	if err != nil {
+		return nil, err
+	}
+	var aogFS fs.FS
+	if opts.UserUI == UserUIAOG {
+		aogFS, err = fs.Sub(aogFrontendFS, "dist-aog")
+		if err != nil {
+			return nil, err
+		}
+	}
+	return newFrontendServer(settingsProvider, classicFS, aogFS, opts)
+}
+
+func newFrontendServer(settingsProvider PublicSettingsProvider, classicFS, aogFS fs.FS, opts FrontendOptions) (*FrontendServer, error) {
+	userUI, err := ParseUserUI(string(opts.UserUI))
+	if err != nil {
+		return nil, err
+	}
+	trustedProxyPrefixes, err := parseTrustedProxyPrefixes(opts.TrustedProxies)
+	if err != nil {
+		return nil, err
+	}
+
+	classic, err := newUIBundle(classicFS)
+	if err != nil {
+		return nil, err
+	}
+
+	server := &FrontendServer{
+		distFS:               classic.distFS,
+		fileServer:           classic.fileServer,
+		baseHTML:             classic.baseHTML,
+		cache:                classic.cache,
+		settings:             settingsProvider,
+		cliDir:               strings.TrimSpace(opts.CLIDir),
+		trustedProxyPrefixes: trustedProxyPrefixes,
+		userUI:               userUI,
+	}
+
+	if userUI == UserUIAOG {
+		if aogFS == nil {
+			return nil, errors.New("user UI aog requires the embedded dist-aog build")
+		}
+		aog, err := newUIBundle(aogFS)
+		if err != nil {
+			return nil, fmt.Errorf("user UI aog: embedded dist-aog build is unusable: %w", err)
+		}
+		server.aog = aog
+	}
+	return server, nil
+}
+
+// UserUI reports the active customer UI.
+func (s *FrontendServer) UserUI() UserUI {
+	if s == nil || s.userUI == "" {
+		return UserUIClassic
+	}
+	return s.userUI
 }
 
 // InvalidateCache invalidates the HTML cache (call when settings change)
 func (s *FrontendServer) InvalidateCache() {
-	if s != nil && s.cache != nil {
+	if s == nil {
+		return
+	}
+	if s.cache != nil {
 		s.cache.Invalidate()
+	}
+	if s.aog != nil && s.aog.cache != nil {
+		s.aog.cache.Invalidate()
 	}
 }
 
@@ -132,6 +216,11 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 			return
 		}
 
+		if s.aog != nil {
+			s.serveAOGMode(c, reqPath)
+			return
+		}
+
 		cleanPath := strings.TrimPrefix(reqPath, "/")
 		if cleanPath == "" {
 			cleanPath = "index.html"
@@ -147,6 +236,55 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 		s.fileServer.ServeHTTP(c.Writer, c.Request)
 		c.Abort()
 	}
+}
+
+// serveAOGMode routes a page or asset request when the AOG customer UI is
+// active. Ownership rules live in classifyAOGPath (ui_routing.go).
+func (s *FrontendServer) serveAOGMode(c *gin.Context, reqPath string) {
+	classic := s.classicBundle()
+	route, name := classifyAOGPath(reqPath,
+		func(n string) bool { return regularFileExists(classic.distFS, n) },
+		func(n string) bool { return regularFileExists(s.aog.distFS, n) },
+	)
+	switch route {
+	case routeClassicIndex:
+		s.serveBundleIndex(c, classic)
+	case routeAOGIndex:
+		s.serveBundleIndex(c, s.aog)
+	case routeClassicAsset:
+		serveBundleFile(c, classic, name)
+	case routeAOGAsset:
+		serveBundleFile(c, s.aog, name)
+	default:
+		c.String(http.StatusNotFound, "Not Found")
+		c.Abort()
+	}
+}
+
+func (s *FrontendServer) classicBundle() *uiBundle {
+	return &uiBundle{distFS: s.distFS, fileServer: s.fileServer, baseHTML: s.baseHTML, cache: s.cache}
+}
+
+// serveBundleFile serves exactly the cleaned file name, independent of any
+// ".." or duplicate slashes in the original request path.
+func serveBundleFile(c *gin.Context, bundle *uiBundle, name string) {
+	req := c.Request.Clone(c.Request.Context())
+	u := *c.Request.URL
+	u.Path = "/" + name
+	u.RawPath = ""
+	req.URL = &u
+	bundle.fileServer.ServeHTTP(c.Writer, req)
+	c.Abort()
+}
+
+// regularFileExists reports whether name is a regular file (not a directory)
+// in fsys, so directory listings are never served in aog mode.
+func regularFileExists(fsys fs.FS, name string) bool {
+	if name == "" || !fs.ValidPath(name) {
+		return false
+	}
+	info, err := fs.Stat(fsys, name)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // tryServeExternalCLI 处理 /saiai-cli/* 完整外部 bundle 白名单请求。
@@ -471,14 +609,21 @@ func (s *FrontendServer) fileExists(path string) bool {
 }
 
 func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
+	s.serveBundleIndex(c, s.classicBundle())
+}
+
+func (s *FrontendServer) serveBundleIndex(c *gin.Context, bundle *uiBundle) {
 	// Get nonce from context (generated by SecurityHeaders middleware)
 	nonce := middleware.GetNonceFromContext(c)
 
 	// Check cache first
-	cached := s.cache.Get()
+	cached := bundle.cache.Get()
 	if cached != nil {
-		// Check If-None-Match for 304 response
-		if match := c.GetHeader("If-None-Match"); match == cached.ETag {
+		// Check If-None-Match for 304 response. Not in aog mode: a 304 makes
+		// the browser reuse HTML whose inline config script carries an older
+		// nonce than this response's CSP, so the script (and with it the
+		// user UI handoff marker) is blocked.
+		if match := c.GetHeader("If-None-Match"); match == cached.ETag && s.UserUI() == UserUIClassic {
 			c.Status(http.StatusNotModified)
 			c.Abort()
 			return
@@ -501,7 +646,7 @@ func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
 	settings, err := s.settings.GetPublicSettingsForInjection(ctx)
 	if err != nil {
 		// Fallback: serve without injection
-		c.Data(http.StatusOK, "text/html; charset=utf-8", s.baseHTML)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", s.fallbackHTML(bundle, nonce))
 		c.Abort()
 		return
 	}
@@ -509,18 +654,18 @@ func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
 	settingsJSON, err := json.Marshal(settings)
 	if err != nil {
 		// Fallback: serve without injection
-		c.Data(http.StatusOK, "text/html; charset=utf-8", s.baseHTML)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", s.fallbackHTML(bundle, nonce))
 		c.Abort()
 		return
 	}
 
-	rendered := s.injectSettings(settingsJSON)
-	s.cache.Set(rendered, settingsJSON)
+	rendered := s.injectSettingsInto(bundle.baseHTML, settingsJSON)
+	bundle.cache.Set(rendered, settingsJSON)
 
 	// Replace nonce placeholder with actual nonce before serving
 	content := replaceNoncePlaceholder(rendered, nonce)
 
-	cached = s.cache.Get()
+	cached = bundle.cache.Get()
 	if cached != nil {
 		c.Header("ETag", cached.ETag)
 	}
@@ -529,14 +674,39 @@ func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
 	c.Abort()
 }
 
+// fallbackHTML is served when settings cannot be loaded. In aog mode it still
+// carries the user UI marker so the classic console keeps handing customer
+// pages to the AOG UI instead of rendering its own.
+func (s *FrontendServer) fallbackHTML(bundle *uiBundle, nonce string) []byte {
+	if s.UserUI() == UserUIClassic {
+		return bundle.baseHTML
+	}
+	marker := []byte(`<script nonce="` + NonceHTMLPlaceholder + `">` + s.userUIScript() + `</script>`)
+	headClose := []byte("</head>")
+	return replaceNoncePlaceholder(bytes.Replace(bundle.baseHTML, headClose, append(marker, headClose...), 1), nonce)
+}
+
+// userUIScript tells both SPAs which build owns customer pages. Classic mode
+// emits nothing so existing sites render byte-identical HTML.
+func (s *FrontendServer) userUIScript() string {
+	if s.UserUI() == UserUIClassic {
+		return ""
+	}
+	return `window.__SAIAI_USER_UI__="` + string(s.UserUI()) + `";`
+}
+
 func (s *FrontendServer) injectSettings(settingsJSON []byte) []byte {
+	return s.injectSettingsInto(s.baseHTML, settingsJSON)
+}
+
+func (s *FrontendServer) injectSettingsInto(baseHTML, settingsJSON []byte) []byte {
 	// Create the script tag to inject with nonce placeholder
 	// The placeholder will be replaced with actual nonce at request time
-	script := []byte(`<script nonce="` + NonceHTMLPlaceholder + `">window.__APP_CONFIG__=` + string(settingsJSON) + `;</script>`)
+	script := []byte(`<script nonce="` + NonceHTMLPlaceholder + `">window.__APP_CONFIG__=` + string(settingsJSON) + `;` + s.userUIScript() + `</script>`)
 
 	// Inject before </head>
 	headClose := []byte("</head>")
-	result := bytes.Replace(s.baseHTML, headClose, append(script, headClose...), 1)
+	result := bytes.Replace(baseHTML, headClose, append(script, headClose...), 1)
 
 	// Replace <title> with custom site name so the browser tab shows it immediately
 	result = injectSiteTitle(result, settingsJSON)

@@ -74,7 +74,20 @@ func SetupRouter(
 		if clientDir == "" {
 			clientDir = os.Getenv("SAIAI_CLI_DIR")
 		}
-		frontendServer, err := web.NewFrontendServer(settingService, clientDir, cfg.Server.TrustedProxies...)
+		userUI, err := web.ParseUserUI(cfg.Server.UserUI)
+		if err != nil {
+			log.Fatalf("Invalid server.user_ui: %v", err)
+		}
+		frontendServer, err := web.NewFrontendServerWithOptions(settingService, web.FrontendOptions{
+			CLIDir:         clientDir,
+			TrustedProxies: cfg.Server.TrustedProxies,
+			UserUI:         userUI,
+		})
+		if err != nil && userUI != web.UserUIClassic {
+			// The legacy fallback only knows the classic build and would quietly
+			// put the old customer pages back on an AOG site.
+			log.Fatalf("Failed to start %s user UI: %v", userUI, err)
+		}
 		if err != nil {
 			log.Printf("Warning: Failed to create frontend server with settings injection: %v, using legacy mode", err)
 			r.Use(web.ServeEmbeddedFrontend())
