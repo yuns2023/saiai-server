@@ -1,0 +1,340 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * AOGCode — the electronic receipt world.
+ * Paper content on a cool shell rail, deep blue-black ink, receipt blue for
+ * action and selection, hairline rules instead of cards, a double rule under
+ * every receipt header. Seal red only for the "credited" stamp and danger.
+ */
+:root {
+  --paper: #ffffff;
+  --shell: #f1f3f7;
+  --ink: #14203a;
+  --ink-2: #47536e;
+  --ink-3: #66708a;
+  --rule: #d9dee7;
+  --rule-soft: #eceff4;
+  --rule-strong: #14203a;
+  --blue: #1d4e89;
+  --blue-hover: #163e6e;
+  --blue-wash: #e6edf6;
+  --on-blue: #ffffff;
+  --seal: #b8262c;
+  --seal-wash: #fbeceb;
+  --ok: #1d7347;
+  --ok-wash: #e6f3ec;
+  --warn: #8a5a00;
+  --warn-wash: #fbf1dd;
+  --selection: #c9d9ee;
+  --focus: #1d4e89;
+}
+
+.dark {
+  --paper: #101828;
+  --shell: #0b1220;
+  --ink: #e6eaf2;
+  --ink-2: #aab3c6;
+  --ink-3: #8a94aa;
+  --rule: #26324a;
+  --rule-soft: #1a2438;
+  --rule-strong: #e6eaf2;
+  --blue: #86abde;
+  --blue-hover: #a3c0e8;
+  --blue-wash: #182640;
+  --on-blue: #0b1220;
+  --seal: #ec6b70;
+  --seal-wash: #2c1820;
+  --ok: #5cc596;
+  --ok-wash: #11291f;
+  --warn: #e2b04f;
+  --warn-wash: #2b2312;
+  --selection: #2a446b;
+  --focus: #86abde;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-shell: var(--shell);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-rule: var(--rule);
+  --color-rule-soft: var(--rule-soft);
+  --color-rule-strong: var(--rule-strong);
+  --color-blue: var(--blue);
+  --color-blue-hover: var(--blue-hover);
+  --color-blue-wash: var(--blue-wash);
+  --color-on-blue: var(--on-blue);
+  --color-seal: var(--seal);
+  --color-seal-wash: var(--seal-wash);
+  --color-ok: var(--ok);
+  --color-ok-wash: var(--ok-wash);
+  --color-warn: var(--warn);
+  --color-warn-wash: var(--warn-wash);
+
+  --font-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans SC', 'Source Han Sans SC', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  /* 1.2 product scale on a 14px base */
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --text-figure: 2.25rem;
+}
+
+@layer base {
+  html {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    font-size: var(--text-base);
+    line-height: 1.6;
+    min-height: 100dvh;
+  }
+  ::selection {
+    background: var(--selection);
+    color: var(--ink);
+  }
+  input,
+  textarea,
+  select {
+    caret-color: var(--blue);
+  }
+  a {
+    color: var(--blue);
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+  a:hover {
+    color: var(--blue-hover);
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--rule) transparent;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    color: var(--ink);
+  }
+  /* Every number on a receipt lines up. */
+  .num,
+  td,
+  th {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  /* The receipt header rule: the world's signature line. */
+  .rule-double {
+    border-bottom: 3px double var(--rule-strong);
+  }
+
+  .label {
+    font-size: var(--text-xs);
+    color: var(--ink-3);
+    letter-spacing: 0.02em;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    height: 2.25rem;
+    padding: 0 0.95rem;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 150ms ease-out,
+      border-color 150ms ease-out,
+      color 150ms ease-out;
+  }
+  .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .btn-primary {
+    background: var(--blue);
+    color: var(--on-blue);
+  }
+  .btn-primary:not(:disabled):hover {
+    background: var(--blue-hover);
+  }
+  .btn-line {
+    background: var(--paper);
+    border-color: var(--rule);
+    color: var(--ink);
+  }
+  .btn-line:not(:disabled):hover {
+    border-color: var(--ink-3);
+  }
+  .btn-quiet {
+    background: transparent;
+    color: var(--blue);
+    padding: 0 0.5rem;
+  }
+  .btn-quiet:not(:disabled):hover {
+    background: var(--blue-wash);
+  }
+  .btn-danger {
+    background: transparent;
+    border-color: var(--seal);
+    color: var(--seal);
+  }
+  .btn-danger:not(:disabled):hover {
+    background: var(--seal-wash);
+  }
+  .btn-sm {
+    height: 1.875rem;
+    padding: 0 0.65rem;
+    font-size: var(--text-xs);
+  }
+
+  .field {
+    display: block;
+    width: 100%;
+    height: 2.5rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: var(--paper);
+    color: var(--ink);
+    font-size: var(--text-base);
+    transition: border-color 150ms ease-out;
+  }
+  .field::placeholder {
+    color: var(--ink-3);
+  }
+  .field:hover {
+    border-color: var(--ink-3);
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--blue);
+    box-shadow: 0 0 0 1px var(--blue);
+  }
+  .field[aria-invalid='true'] {
+    border-color: var(--seal);
+  }
+  .field:disabled {
+    background: var(--shell);
+    color: var(--ink-3);
+  }
+  select.field {
+    appearance: none;
+    padding-right: 2rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2366708a' stroke-width='1.6'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    background-size: 1rem;
+  }
+
+  /* Statement table: ruled lines, no zebra, no cards. */
+  .ledger {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .ledger th {
+    text-align: left;
+    font-weight: 400;
+    font-size: var(--text-xs);
+    color: var(--ink-3);
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--rule-strong);
+    white-space: nowrap;
+  }
+  .ledger td {
+    padding: 0.7rem 0.75rem;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+  }
+  .ledger th:first-child,
+  .ledger td:first-child {
+    padding-left: 0;
+  }
+  .ledger th:last-child,
+  .ledger td:last-child {
+    padding-right: 0;
+  }
+  .ledger .amount {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    height: 1.25rem;
+    padding: 0 0.4rem;
+    border-radius: 3px;
+    font-size: var(--text-2xs);
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .tag-ok {
+    background: var(--ok-wash);
+    color: var(--ok);
+  }
+  .tag-warn {
+    background: var(--warn-wash);
+    color: var(--warn);
+  }
+  .tag-off {
+    background: var(--rule-soft);
+    color: var(--ink-2);
+  }
+  .tag-bad {
+    background: var(--seal-wash);
+    color: var(--seal);
+  }
+
+  .skeleton {
+    background: linear-gradient(90deg, var(--rule-soft), var(--shell), var(--rule-soft));
+    background-size: 200% 100%;
+    animation: skeleton 1.4s ease-in-out infinite;
+    border-radius: 3px;
+  }
+}
+
+@keyframes skeleton {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
