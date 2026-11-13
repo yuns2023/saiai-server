@@ -1001,6 +1001,11 @@ export interface WindowStats extends RevenueParts {
   hosted_cost?: number // Hosted reference usage: SUM(metered_cost)
 }
 
+export interface UsageWindowRestart {
+  start: string
+  source: 'auto' | 'manual'
+}
+
 export interface UsageProgress {
   utilization: number // Percentage (0-100+, 100 = 100%)
   resets_at: string | null
@@ -1010,6 +1015,8 @@ export interface UsageProgress {
   standard_cost_usd?: number | null // 本窗口 [reset-窗口长度, now) 标准价平台用量；窗口无效时为空
   estimated_capacity_usd?: number | null // 按标准价折算的整窗口额度估算
   estimate_sampled_at?: string | null // 估算所用采样的时间；账号空闲时不再更新
+  // 本窗口统计的重新计数点（上游中途清零但重置时间未变）；存在时标准价、A/U、估算都从此起算
+  window_restart?: UsageWindowRestart | null
   used_requests?: number
   limit_requests?: number
 }

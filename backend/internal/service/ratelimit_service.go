@@ -1623,7 +1623,7 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 		if sample.hasUsageData() {
 			extraUpdates["passive_usage_sampled_at"] = now.UTC().Format(time.RFC3339)
 		}
-		if err := s.accountRepo.UpdateExtra(ctx, account.ID, extraUpdates); err != nil {
+		if err := updateExtraDetectingWeeklyRestart(ctx, s.accountRepo, account, extraUpdates, now); err != nil {
 			slog.Warn("passive_usage_update_failed", "account_id", account.ID, "error", err)
 		} else if status != "" && sample.hasFiveHourUtilization {
 			evalAccount := *account
@@ -1723,7 +1723,7 @@ func (s *RateLimitService) sampleAnthropicRateLimitUsage(ctx context.Context, ac
 		return
 	}
 	updates["passive_usage_sampled_at"] = now.UTC().Format(time.RFC3339)
-	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
+	if err := updateExtraDetectingWeeklyRestart(ctx, s.accountRepo, account, updates, now); err != nil {
 		slog.Warn("anthropic_429_passive_usage_update_failed", "account_id", account.ID, "error", err)
 	}
 }

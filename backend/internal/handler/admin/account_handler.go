@@ -1871,6 +1871,70 @@ func (h *AccountHandler) ClearQuotaSnapshot(c *gin.Context) {
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
 
+type quotaWindowRestartRequest struct {
+	Window string `json:"window"`
+	// ExpectedReset is the window reset (unix seconds) the admin was looking at.
+	ExpectedReset int64 `json:"expected_reset"`
+	// Start (RFC3339) defaults to now.
+	Start *string `json:"start"`
+}
+
+// SetQuotaWindowRestart restarts a quota window's statistics (platform usage,
+// A/U, capacity estimate) at the given time, for accounts whose upstream usage
+// was reset mid-window without a new reset time.
+// POST /api/v1/admin/accounts/:id/quota-window-restart
+func (h *AccountHandler) SetQuotaWindowRestart(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	var req quotaWindowRestartRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if req.ExpectedReset <= 0 {
+		response.BadRequest(c, "expected_reset is required")
+		return
+	}
+	input := service.SetQuotaWindowRestartInput{Window: req.Window, ExpectedReset: time.Unix(req.ExpectedReset, 0)}
+	if req.Start != nil && strings.TrimSpace(*req.Start) != "" {
+		start, err := time.Parse(time.RFC3339, strings.TrimSpace(*req.Start))
+		if err != nil {
+			response.BadRequest(c, "start must be RFC3339")
+			return
+		}
+		input.Start = &start
+	}
+	restart, err := h.accountUsageService.SetManualQuotaWindowRestart(c.Request.Context(), accountID, input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, restart)
+}
+
+// ClearQuotaWindowRestart removes a quota window's statistics restart.
+// DELETE /api/v1/admin/accounts/:id/quota-window-restart?window=seven_day&expected_reset=<unix>
+func (h *AccountHandler) ClearQuotaWindowRestart(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	expectedReset, err := strconv.ParseInt(c.Query("expected_reset"), 10, 64)
+	if err != nil || expectedReset <= 0 {
+		response.BadRequest(c, "expected_reset is required")
+		return
+	}
+	if err := h.accountUsageService.ClearQuotaWindowRestart(c.Request.Context(), accountID, c.DefaultQuery("window", "seven_day"), time.Unix(expectedReset, 0)); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"cleared": true})
+}
+
 // ResetQuota handles resetting account quota usage
 // POST /api/v1/admin/accounts/:id/reset-quota
 func (h *AccountHandler) ResetQuota(c *gin.Context) {

@@ -2830,6 +2830,25 @@ export default {
       clearQuotaSnapshotConfirm: 'Clear the local 5h/7d quota snapshot for "{name}"? This does not change the upstream subscription or send a request. The next normal request will record the current quota again.',
       clearQuotaSnapshotSuccess: 'Local quota snapshot cleared',
       clearQuotaSnapshotFailed: 'Failed to clear local quota snapshot',
+      quotaWindowRestart: {
+        menu: 'Restart 7d Stats From Now',
+        title: 'Restart 7-Day Statistics',
+        description: 'Use when the upstream reset the usage mid-window without changing the reset time (e.g. a plan upgrade). Only admin statistics change (standard price, A/U, estimate); scheduling and rate limits are not affected. Expires with the window.',
+        loading: 'Loading the current window…',
+        noWindow: 'There is no valid 7-day window (reset time unknown or elapsed); statistics cannot be restarted.',
+        currentReset: 'Current 7-day window: {start} to {reset}',
+        current: 'Statistics currently start at {time} ({source})',
+        sourceAuto: 'usage drop detected',
+        sourceManual: 'manual',
+        startLabel: 'Restart time',
+        startHint: 'Between {min} and now; defaults to now. After a manual restart no estimate is shown (the usage at the reset is unknown).',
+        confirm: 'Restart',
+        clear: 'Undo restart',
+        success: 'Statistics restarted',
+        cleared: 'Restart removed',
+        failed: 'Operation failed',
+        invalidStart: 'The restart time is not valid; pick it again (an empty field does not mean now)'
+      },
       resetQuota: 'Reset Quota',
       quotaLimit: 'Quota Limit',
       quotaLimitPlaceholder: '0 means unlimited',
@@ -3519,7 +3538,11 @@ export default {
         statsHint: 'Requests, tokens and A/U use the request-stats window; its start may differ from the standard-cost window',
         rollingHint: '*Upstream reset time unknown; counted over a rolling window',
         estimatedCapacity: 'Est ${cost}',
-        estimatedCapacityHint: 'Estimated total quota (at standard price; usage outside the platform makes this an underestimate)'
+        estimatedCapacityHint: 'Estimated total quota (at standard price; usage outside the platform makes this an underestimate)',
+        restartedChip: 'since {time}',
+        restartedHint: 'Statistics start at {time} ({source}): the upstream reset the usage mid-window; earlier usage is excluded from standard price, A/U and the estimate',
+        restartSourceAuto: 'usage drop detected',
+        restartSourceManual: 'manual'
       },
       tier: {
         free: 'Free',

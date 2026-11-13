@@ -11,6 +11,7 @@ import type {
   PaginatedResponse,
   AccountUsageInfo,
   WindowStats,
+  UsageWindowRestart,
   ClaudeModel,
   AccountUsageStatsResponse,
   TempUnschedulableStatus,
@@ -384,6 +385,23 @@ export async function clearQuotaSnapshot(id: number): Promise<Account> {
     `/admin/accounts/${id}/clear-quota-snapshot`
   )
   return data
+}
+
+/**
+ * Restart a quota window's statistics (admin-only, statistics only) for an
+ * upstream reset that kept the window's reset time. expectedReset is the
+ * reset the admin was looking at (unix seconds); a moved window returns 409.
+ */
+export async function setQuotaWindowRestart(
+  id: number,
+  payload: { window: 'seven_day'; expected_reset: number; start?: string }
+): Promise<UsageWindowRestart> {
+  const { data } = await apiClient.post<UsageWindowRestart>(`/admin/accounts/${id}/quota-window-restart`, payload)
+  return data
+}
+
+export async function clearQuotaWindowRestart(id: number, expectedReset: number, window: 'seven_day' = 'seven_day'): Promise<void> {
+  await apiClient.delete(`/admin/accounts/${id}/quota-window-restart`, { params: { window, expected_reset: expectedReset } })
 }
 
 /**
@@ -779,6 +797,8 @@ export const accountsAPI = {
   clearRateLimit,
   recoverState,
   clearQuotaSnapshot,
+  setQuotaWindowRestart,
+  clearQuotaWindowRestart,
   resetAccountQuota,
   getTempUnschedulableStatus,
   resetTempUnschedulable,

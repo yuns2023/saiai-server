@@ -76,6 +76,7 @@ var editorRuntimeExtraKeys = map[string]struct{}{
 	"drive_tier_updated_at":                                     {},
 	"claude_oauth_carpool_last_maintenance_day":                 {},
 	"claude_oauth_single_device_admission_last_maintenance_day": {},
+	QuotaWindowRestartsExtraKey:                                 {},
 }
 
 // All passive_usage_* keys are usage samples written by the gateway.

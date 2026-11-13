@@ -2,7 +2,7 @@
   <div :title="tooltip">
     <!-- Window stats row (above progress bar) -->
     <div
-      v-if="(windowStats && hasActivity) || showStandardCost || showEstimate"
+      v-if="(windowStats && hasActivity) || showStandardCost || showEstimate || showRestart"
       class="mb-0.5 flex items-center"
       data-testid="window-stats"
     >
@@ -45,6 +45,14 @@
         >
           {{ t('admin.accounts.usageWindow.estimatedCapacity', { cost: (estimatedCapacity ?? 0).toFixed(2) }) }}<template v-if="estimateAge"> · {{ estimateAge }}</template>
         </span>
+        <span
+          v-if="showRestart"
+          class="rounded-sm bg-sky-50 px-1.5 py-0.5 text-sky-700 dark:bg-sky-900/20 dark:text-sky-300"
+          :title="restartHint"
+          data-testid="window-restart"
+        >
+          ↺ {{ t('admin.accounts.usageWindow.restartedChip', { time: restartShort }) }}
+        </span>
       </div>
     </div>
 
@@ -83,7 +91,7 @@ import { formatTokenCount } from '@/utils/usageTokens'
 import { computed, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import type { WindowStats } from '@/types'
+import type { UsageWindowRestart, WindowStats } from '@/types'
 import RevenueAmount from '@/components/common/RevenueAmount.vue'
 import { formatCompactNumber, formatCountdown } from '@/utils/format'
 
@@ -102,6 +110,8 @@ const props = defineProps<{
   estimatedCapacity?: number | null
   // When the estimate's utilization sample was taken (idle accounts keep an old one).
   estimateSampledAt?: string | null
+  // Statistics restart point (upstream reset usage mid-window); stats start here.
+  windowRestart?: UsageWindowRestart | null
   showNowWhenIdle?: boolean
 }>()
 
@@ -222,6 +232,26 @@ const estimateAge = computed(() => {
   if (minutes < 60) return t('common.time.minutesAgo', { n: minutes })
   if (minutes < 24 * 60) return t('common.time.hoursAgo', { n: Math.floor(minutes / 60) })
   return t('common.time.daysAgo', { n: Math.floor(minutes / (24 * 60)) })
+})
+
+const restartDate = computed(() => {
+  if (!props.windowRestart?.start) return null
+  const d = new Date(props.windowRestart.start)
+  return Number.isNaN(d.getTime()) ? null : d
+})
+const showRestart = computed(() => restartDate.value != null && windowStillCurrent.value)
+const restartShort = computed(() => {
+  const d = restartDate.value
+  if (!d) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+})
+const restartHint = computed(() => {
+  if (!restartDate.value) return ''
+  const source = props.windowRestart?.source === 'auto'
+    ? t('admin.accounts.usageWindow.restartSourceAuto')
+    : t('admin.accounts.usageWindow.restartSourceManual')
+  return t('admin.accounts.usageWindow.restartedHint', { time: restartDate.value.toLocaleString(), source })
 })
 
 const hasActivity = computed(() =>
