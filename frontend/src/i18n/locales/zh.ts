@@ -2843,7 +2843,8 @@ export default {
         clear: '撤销重新计数',
         success: '已重新计数',
         cleared: '已撤销重新计数',
-        failed: '操作失败'
+        failed: '操作失败',
+        invalidStart: '重新计数时间无效，请重新选择（留空不会按现在处理）'
       },
       resetQuota: '重置配额',
       quotaLimit: '配额限制',

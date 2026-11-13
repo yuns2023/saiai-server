@@ -60,6 +60,19 @@ describe('QuotaWindowRestartModal', () => {
     expect(api.setQuotaWindowRestart).toHaveBeenCalledWith(287, { window: 'seven_day', expected_reset: Date.parse(RESET) / 1000, start: undefined })
   })
 
+  it.each([
+    ['cleared', ''],
+    ['not a date', '2026-13-45T99:99'],
+  ])('refuses an edited start that is %s instead of falling back to now', async (_, value) => {
+    const wrapper = makeModal()
+    await flushPromises()
+    await wrapper.get('[data-testid="restart-start"]').setValue(value)
+    await wrapper.get('[data-testid="restart-confirm"]').trigger('click')
+    await flushPromises()
+    expect(api.setQuotaWindowRestart).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('admin.accounts.quotaWindowRestart.invalidStart')
+  })
+
   it('keeps a picked time across a failed submit and disables retry when the window cannot be re-read', async () => {
     api.setQuotaWindowRestart.mockRejectedValueOnce({ message: 'Network Error' })
     const wrapper = makeModal()

@@ -118,15 +118,21 @@ async function load(keepInput = false): Promise<string> {
 async function submit() {
   const account = props.account
   if (!account || !windowInfo.value || busy.value) return
+  // Only an untouched field means "now" (server time); an edited field that
+  // is empty or not a valid date must not silently fall back to now.
+  const edited = startLocal.value !== initialStartLocal.value
+  const start = edited ? new Date(startLocal.value) : null
+  if (start && (!startLocal.value || Number.isNaN(start.getTime()))) {
+    error.value = t('admin.accounts.quotaWindowRestart.invalidStart')
+    return
+  }
   busy.value = true
   error.value = ''
   try {
-    const edited = startLocal.value !== initialStartLocal.value
-    const start = edited && startLocal.value ? new Date(startLocal.value) : null
     await accountsAPI.setQuotaWindowRestart(account.id, {
       window: 'seven_day',
       expected_reset: Math.floor(windowInfo.value.reset.getTime() / 1000),
-      start: start && !Number.isNaN(start.getTime()) ? start.toISOString().replace(/\.\d{3}Z$/, 'Z') : undefined
+      start: start ? start.toISOString().replace(/\.\d{3}Z$/, 'Z') : undefined
     })
     appStore.showSuccess(t('admin.accounts.quotaWindowRestart.success'))
     emit('updated')

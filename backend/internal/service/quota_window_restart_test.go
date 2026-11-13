@@ -104,6 +104,11 @@ func TestQuotaCostWindowEstimateAfterRestart(t *testing.T) {
 	small := base.withRestart(&QuotaWindowRestart{Start: restartAt, Reset: reset, Source: "auto", BaselineUtilization: &baseline}, now).withSample(19.9, &sampled, now)
 	require.Nil(t, small.estimate(30), "less than 10 points since the restart")
 
+	// 38 − 0.28×100 is 9.999999999999996 in float64: still exactly 10 points.
+	edgeBaseline := 0.28
+	edge := base.withRestart(&QuotaWindowRestart{Start: restartAt, Reset: reset, Source: "auto", BaselineUtilization: &edgeBaseline}, now).withSample(38, &sampled, now)
+	require.NotNil(t, edge.estimate(30), "exactly 10 points since the restart gives an estimate")
+
 	manual := base.withRestart(&QuotaWindowRestart{Start: restartAt, Reset: reset, Source: "manual"}, now).withSample(40, &sampled, now)
 	require.NotNil(t, manual.SampledAt)
 	require.Nil(t, manual.estimate(30), "manual restarts have no baseline: no estimate")
@@ -298,7 +303,7 @@ func TestSetManualQuotaWindowRestart(t *testing.T) {
 	repo = &restartDetectorStub{syncPassiveAccountsStub: syncPassiveAccountsStub{account: expired}}
 	svc = &AccountUsageService{accountRepo: repo}
 	_, err = svc.SetManualQuotaWindowRestart(context.Background(), 8, SetQuotaWindowRestartInput{Window: "seven_day", ExpectedReset: now.Add(-time.Hour)})
-	require.True(t, badRequest(err), "an elapsed window cannot be restarted")
+	require.True(t, conflict(err), "the window the admin saw has elapsed: same 409 as a moved window")
 
 	svc, repo = newSvc()
 	require.NoError(t, svc.ClearQuotaWindowRestart(context.Background(), 7, " seven_day ", reset))

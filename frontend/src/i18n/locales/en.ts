@@ -2846,7 +2846,8 @@ export default {
         clear: 'Undo restart',
         success: 'Statistics restarted',
         cleared: 'Restart removed',
-        failed: 'Operation failed'
+        failed: 'Operation failed',
+        invalidStart: 'The restart time is not valid; pick it again (an empty field does not mean now)'
       },
       resetQuota: 'Reset Quota',
       quotaLimit: 'Quota Limit',

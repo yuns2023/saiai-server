@@ -134,7 +134,8 @@ func (w quotaCostWindow) estimate(sampledCost float64) *float64 {
 			return nil
 		}
 		used -= *w.Restart.BaselineUtilization * 100
-		if math.IsNaN(used) || used < quotaEstimateMinUtilization {
+		// Tolerance: 38 − 0.28×100 is 9.999999999999996 in float64.
+		if math.IsNaN(used) || used < quotaEstimateMinUtilization-1e-9 {
 			return nil
 		}
 	}

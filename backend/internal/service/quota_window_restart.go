@@ -267,10 +267,9 @@ func (s *AccountUsageService) SetManualQuotaWindowRestart(ctx context.Context, a
 	now := time.Now()
 	reset := currentQuotaWindowReset(account, input.Window, now)
 	window, valid := resolveQuotaCostWindow(input.Window, reset, now)
-	if !valid {
-		return nil, quotaWindowRestartInvalid("the account has no current window with a valid reset time")
-	}
-	if absDuration(window.Reset.Sub(input.ExpectedReset)) > quotaResetMatchTolerance {
+	// The admin saw a valid window (expected_reset); it has expired or was
+	// cleared since, which is the same "window moved" conflict as DELETE.
+	if !valid || absDuration(window.Reset.Sub(input.ExpectedReset)) > quotaResetMatchTolerance {
 		return nil, ErrQuotaWindowRestartConflict
 	}
 	start := now
