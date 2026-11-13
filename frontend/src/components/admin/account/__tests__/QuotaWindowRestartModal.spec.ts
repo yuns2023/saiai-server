@@ -60,6 +60,29 @@ describe('QuotaWindowRestartModal', () => {
     expect(api.setQuotaWindowRestart).toHaveBeenCalledWith(287, { window: 'seven_day', expected_reset: Date.parse(RESET) / 1000, start: undefined })
   })
 
+  it('keeps a picked time across a failed submit and disables retry when the window cannot be re-read', async () => {
+    api.setQuotaWindowRestart.mockRejectedValueOnce({ message: 'Network Error' })
+    const wrapper = makeModal()
+    await flushPromises()
+    const input = wrapper.get('[data-testid="restart-start"]')
+    const picked = new Date('2026-11-11T02:00:00Z')
+    const pad = (n: number) => String(n).padStart(2, '0')
+    await input.setValue(`${picked.getFullYear()}-${pad(picked.getMonth() + 1)}-${pad(picked.getDate())}T${pad(picked.getHours())}:${pad(picked.getMinutes())}:${pad(picked.getSeconds())}`)
+    await wrapper.get('[data-testid="restart-confirm"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="restart-confirm"]').trigger('click')
+    await flushPromises()
+    expect(api.setQuotaWindowRestart).toHaveBeenLastCalledWith(287, expect.objectContaining({ start: '2026-11-11T02:00:00Z' }))
+
+    api.setQuotaWindowRestart.mockRejectedValueOnce({ message: 'boom' })
+    api.getUsage.mockRejectedValueOnce({ message: 'reload failed' })
+    await wrapper.get('[data-testid="restart-confirm"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="restart-error"]').text()).toContain('boom')
+    expect(wrapper.get('[data-testid="restart-error"]').text()).toContain('reload failed')
+    expect(wrapper.get('[data-testid="restart-confirm"]').attributes('disabled')).toBeDefined()
+  })
+
   it('uses the active usage source for OpenAI accounts', async () => {
     makeModal(openai)
     await flushPromises()

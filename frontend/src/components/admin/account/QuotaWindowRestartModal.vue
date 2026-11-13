@@ -19,11 +19,11 @@
           type="datetime-local"
           step="1"
           class="input"
-          :min="toLocalInput(windowInfo.start)"
+          :min="toLocalInput(earliestStart(windowInfo.start))"
           :max="toLocalInput(new Date())"
           data-testid="restart-start"
         />
-        <p class="input-hint">{{ t('admin.accounts.quotaWindowRestart.startHint', { min: formatTime(windowInfo.start) }) }}</p>
+        <p class="input-hint">{{ t('admin.accounts.quotaWindowRestart.startHint', { min: formatTime(earliestStart(windowInfo.start)) }) }}</p>
       </template>
     </template>
     <template #footer>
@@ -69,6 +69,8 @@ const pad = (n: number) => String(n).padStart(2, '0')
 const toLocalInput = (d: Date) =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 const formatTime = (d: Date) => d.toLocaleString()
+// The server requires a start strictly after the window start (second precision).
+const earliestStart = (windowStart: Date) => new Date(windowStart.getTime() + 1000)
 const sourceText = (source: string) =>
   t(source === 'auto' ? 'admin.accounts.quotaWindowRestart.sourceAuto' : 'admin.accounts.quotaWindowRestart.sourceManual')
 const message = (value: unknown) => value instanceof Error ? value.message :
@@ -76,26 +78,38 @@ const message = (value: unknown) => value instanceof Error ? value.message :
 const close = () => { if (!busy.value) emit('close') }
 
 let loadSequence = 0
-async function load() {
+// keepInput: re-read after a failed action without discarding a time the
+// admin picked (a retry must not silently become "now").
+async function load(keepInput = false): Promise<string> {
   const account = props.account
-  if (!account) return
+  if (!account) return ''
   const sequence = ++loadSequence
+  const edited = keepInput && startLocal.value !== initialStartLocal.value
   loading.value = true
   error.value = ''
   try {
     const source = account.platform === 'anthropic' ? 'passive' : undefined
     const usage = await accountsAPI.getUsage(account.id, source)
-    if (sequence !== loadSequence || account.id !== props.account?.id) return
+    if (sequence !== loadSequence || account.id !== props.account?.id) return ''
     const resetsAt = usage.seven_day?.resets_at ? new Date(usage.seven_day.resets_at) : null
     const valid = resetsAt && !Number.isNaN(resetsAt.getTime()) && resetsAt.getTime() > Date.now() &&
       resetsAt.getTime() - Date.now() <= SEVEN_DAYS_MS
     windowInfo.value = valid ? { start: new Date(resetsAt.getTime() - SEVEN_DAYS_MS), reset: resetsAt } : null
     current.value = usage.seven_day?.window_restart ?? null
-    startLocal.value = toLocalInput(new Date())
-    initialStartLocal.value = startLocal.value
+    if (!edited) {
+      startLocal.value = toLocalInput(new Date())
+      initialStartLocal.value = startLocal.value
+    }
     loaded.value = true
+    return ''
   } catch (value) {
-    if (sequence === loadSequence) error.value = message(value)
+    if (sequence !== loadSequence) return ''
+    // Never act on a window that could not be re-read.
+    windowInfo.value = null
+    current.value = null
+    loaded.value = true
+    error.value = message(value)
+    return error.value
   } finally {
     if (sequence === loadSequence) loading.value = false
   }
@@ -128,8 +142,8 @@ async function submit() {
 // retried against the current reset without reopening the dialog.
 async function failed(value: unknown) {
   const text = message(value)
-  await load()
-  error.value = text
+  const reloadError = await load(true)
+  error.value = reloadError ? `${text} (${reloadError})` : text
 }
 
 async function clear() {
