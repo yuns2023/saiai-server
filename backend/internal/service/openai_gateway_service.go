@@ -4480,7 +4480,7 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		// Per-user rates are not validated as non-negative on write. A turn
 		// that already completed upstream must still settle, so a negative
 		// rate keeps the old behavior (charge at 1x) instead of failing.
-		if multiplier < 0 {
+		if multiplier < 0 && !apiKey.Group.UsesHostedUsage() {
 			logger.LegacyPrintf("service.openai_gateway", "native ChatGPT turn: negative rate multiplier %v for user=%d group=%d, charging at 1x", multiplier, user.ID, *apiKey.GroupID)
 			multiplier = 1.0
 		}
