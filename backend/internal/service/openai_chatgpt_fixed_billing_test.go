@@ -220,3 +220,35 @@ func TestRecordChatGPTOversizedImageDimensionsKeepUsageLogAndCharge(t *testing.T
 	require.Len(t, repo.commands, 1)
 	require.InDelta(t, .03, repo.commands[0].BalanceCost, 1e-12)
 }
+
+// A free group (rate 0) settles native turns at $0 like token-billed requests:
+// the turn is still recorded and deduplicated, with the base price kept as the
+// standard cost.
+func TestRecordChatGPTTurnUsageFreeGroupSettlesAtZero(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Default.RateMultiplier = 1
+	usageRepo := &chatGPTFixedUsageLogRepo{}
+	billingRepo := &chatGPTFixedBillingRepo{}
+	billingCache := NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(billingCache.Stop)
+	svc := NewOpenAIGatewayService(
+		nil, usageRepo, billingRepo, nil, nil, nil, nil, cfg,
+		nil, nil, nil, nil, billingCache, nil, &DeferredService{}, nil,
+	)
+	groupID := int64(63)
+	apiKey := &APIKey{ID: 8, GroupID: &groupID, Group: &Group{ID: groupID, Platform: PlatformOpenAI, RateMultiplier: 0}}
+	ctx := context.WithValue(context.Background(), ctxkey.RequestID, "free-turn")
+
+	require.NoError(t, svc.RecordChatGPTTurnUsage(ctx, &OpenAIChatGPTTurnUsageInput{
+		BasePriceUSD: 0.02, APIKey: apiKey, User: &User{ID: 9}, Account: &Account{ID: 10, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		RequestPayloadHash: "payload-hash",
+	}))
+	require.Len(t, billingRepo.commands, 1, "the free turn still goes through the deduplicating billing command")
+	require.Zero(t, billingRepo.commands[0].BalanceCost)
+	require.NotEmpty(t, billingRepo.commands[0].RequestFingerprint)
+	require.Len(t, usageRepo.logs, 1)
+	require.InDelta(t, 0.02, usageRepo.logs[0].TotalCost, 1e-12, "standard cost keeps the configured turn price")
+	require.Zero(t, usageRepo.logs[0].ActualCost)
+	require.Zero(t, usageRepo.logs[0].RateMultiplier)
+	require.Nil(t, usageRepo.logs[0].MeteredCost, "a free group is not a hosted group")
+}

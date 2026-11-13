@@ -4474,20 +4474,19 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		if resolver == nil {
 			resolver = newUserGroupRateResolver(nil, nil, resolveUserGroupRateCacheTTL(s.cfg), nil, "service.openai_gateway")
 		}
+		// A configured 0 (group or per-user rate) is a free group: like
+		// token-billed requests, the turn is recorded and settled at $0.
 		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
-		if multiplier <= 0 && !apiKey.Group.UsesHostedUsage() {
-			multiplier = 1.0
-		}
 	}
 	if apiKey.Group.UsesHostedUsage() {
 		multiplier = 0
 	}
-	if math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
-		return errors.New("record ChatGPT turn usage: finite rate multiplier is required")
+	if math.IsNaN(multiplier) || math.IsInf(multiplier, 0) || multiplier < 0 {
+		return errors.New("record ChatGPT turn usage: finite non-negative rate multiplier is required")
 	}
 	totalCost := input.BasePriceUSD + input.ImageCostUSD
 	actualCost := totalCost * multiplier
-	if !IsValidOpenAIChatGPTTurnPrice(actualCost) && !apiKey.Group.UsesHostedUsage() {
+	if multiplier > 0 && !IsValidOpenAIChatGPTTurnPrice(actualCost) {
 		return errors.New("record ChatGPT turn usage: effective fixed price is invalid")
 	}
 

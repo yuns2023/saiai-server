@@ -310,7 +310,10 @@ repriced from current settings. APIs identify native rows with
 `billing_unit=turn`, `token_usage_source=unknown`, and their `chat_tier`; the
 usage tables display one successful turn and unavailable token consumption,
 rather than interpreting placeholder zeros as measured usage.
-`actual_cost` applies the existing group/user rate multiplier. Subscription
+`actual_cost` applies the existing group/user rate multiplier. A configured
+0 rate (free group or per-user rate) settles the turn at $0 like token-billed
+requests: the turn is still recorded, counted and deduplicated, and `total_cost`
+keeps the configured price. Subscription
 usage, wallet balance, API-key quota/rate limits, and request fingerprinting
 use the existing atomic billing transaction and request-ID deduplication path;
 usage-log insertion follows the existing idempotent best-effort path. A retry
