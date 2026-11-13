@@ -252,3 +252,72 @@ func TestRecordChatGPTTurnUsageFreeGroupSettlesAtZero(t *testing.T) {
 	require.Zero(t, usageRepo.logs[0].RateMultiplier)
 	require.Nil(t, usageRepo.logs[0].MeteredCost, "a free group is not a hosted group")
 }
+
+func newChatGPTFixedBillingFixture(t *testing.T) (*OpenAIGatewayService, *chatGPTFixedUsageLogRepo, *chatGPTFixedBillingRepo) {
+	t.Helper()
+	cfg := &config.Config{}
+	cfg.Default.RateMultiplier = 1
+	usageRepo := &chatGPTFixedUsageLogRepo{}
+	billingRepo := &chatGPTFixedBillingRepo{}
+	billingCache := NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(billingCache.Stop)
+	svc := NewOpenAIGatewayService(
+		nil, usageRepo, billingRepo, nil, nil, nil, nil, cfg,
+		nil, nil, nil, nil, billingCache, nil, &DeferredService{}, nil,
+	)
+	return svc, usageRepo, billingRepo
+}
+
+// A free subscription group: billed as a subscription turn at $0, with the
+// image surcharge kept in the standard cost.
+func TestRecordChatGPTTurnUsageFreeSubscriptionGroup(t *testing.T) {
+	svc, usageRepo, billingRepo := newChatGPTFixedBillingFixture(t)
+	groupID := int64(64)
+	group := &Group{ID: groupID, Platform: PlatformOpenAI, SubscriptionType: SubscriptionTypeSubscription, RateMultiplier: 0}
+	subscription := &UserSubscription{ID: 65}
+	require.NoError(t, svc.RecordChatGPTTurnUsage(context.Background(), &OpenAIChatGPTTurnUsageInput{
+		BasePriceUSD: 0.04, ImageCostUSD: 0.01, ImageCount: 1,
+		APIKey: &APIKey{ID: 66, GroupID: &groupID, Group: group}, User: &User{ID: 67},
+		Account: &Account{ID: 68, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, Subscription: subscription,
+	}))
+	require.Len(t, billingRepo.commands, 1)
+	require.Zero(t, billingRepo.commands[0].SubscriptionCost)
+	require.Zero(t, billingRepo.commands[0].BalanceCost)
+	require.Equal(t, subscription.ID, *billingRepo.commands[0].SubscriptionID)
+	require.Len(t, usageRepo.logs, 1)
+	require.Equal(t, BillingTypeSubscription, usageRepo.logs[0].BillingType)
+	require.InDelta(t, 0.05, usageRepo.logs[0].TotalCost, 1e-12)
+	require.Zero(t, usageRepo.logs[0].ActualCost)
+}
+
+// Per-user rates go through the real resolver: 0 is free, a (never valid)
+// negative rate still settles the completed turn at 1x instead of failing.
+func TestRecordChatGPTTurnUsagePerUserRate(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rate float64
+		want float64
+	}{
+		{"zero is free", 0, 0},
+		{"negative falls back to 1x", -1, 0.02},
+		{"positive applies", 0.5, 0.01},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, usageRepo, billingRepo := newChatGPTFixedBillingFixture(t)
+			rate := tc.rate
+			repo := &openAIUserGroupRateRepoStub{rate: &rate}
+			svc.userGroupRateResolver = newUserGroupRateResolver(repo, nil, time.Minute, nil, "test")
+			groupID := int64(70)
+			group := &Group{ID: groupID, Platform: PlatformOpenAI, RateMultiplier: 1.5}
+			require.NoError(t, svc.RecordChatGPTTurnUsage(context.Background(), &OpenAIChatGPTTurnUsageInput{
+				BasePriceUSD: 0.02, APIKey: &APIKey{ID: 71, GroupID: &groupID, Group: group}, User: &User{ID: 72},
+				Account: &Account{ID: 73, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+			}))
+			require.Equal(t, 1, repo.calls)
+			require.Len(t, billingRepo.commands, 1)
+			require.InDelta(t, tc.want, billingRepo.commands[0].BalanceCost, 1e-12)
+			require.Len(t, usageRepo.logs, 1)
+			require.InDelta(t, tc.want, usageRepo.logs[0].ActualCost, 1e-12)
+		})
+	}
+}

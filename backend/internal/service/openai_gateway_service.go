@@ -4477,12 +4477,19 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		// A configured 0 (group or per-user rate) is a free group: like
 		// token-billed requests, the turn is recorded and settled at $0.
 		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
+		// Per-user rates are not validated as non-negative on write. A turn
+		// that already completed upstream must still settle, so a negative
+		// rate keeps the old behavior (charge at 1x) instead of failing.
+		if multiplier < 0 {
+			logger.LegacyPrintf("service.openai_gateway", "native ChatGPT turn: negative rate multiplier %v for user=%d group=%d, charging at 1x", multiplier, user.ID, *apiKey.GroupID)
+			multiplier = 1.0
+		}
 	}
 	if apiKey.Group.UsesHostedUsage() {
 		multiplier = 0
 	}
-	if math.IsNaN(multiplier) || math.IsInf(multiplier, 0) || multiplier < 0 {
-		return errors.New("record ChatGPT turn usage: finite non-negative rate multiplier is required")
+	if math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
+		return errors.New("record ChatGPT turn usage: finite rate multiplier is required")
 	}
 	totalCost := input.BasePriceUSD + input.ImageCostUSD
 	actualCost := totalCost * multiplier

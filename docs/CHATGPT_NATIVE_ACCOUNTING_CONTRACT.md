@@ -397,7 +397,9 @@ as the current turn's usage.
   and the usage log must commit idempotently. Logging success without applied
   billing is not settlement.
 - Fixed-turn billing deliberately records zero tokens and the configured
-  positive turn price. Any future provider-usage billing mode must treat
+  positive turn price as `total_cost`; only the charged `actual_cost` may be
+  zero, and only for a configured 0 group/user rate (a free group is still
+  recorded and settled, never unaccounted). Any future provider-usage billing mode must treat
   missing usage as an operator-visible accounting failure rather than silently
   recording zero cost.
 
