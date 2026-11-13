@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
+import RevenueAmount from '@/components/common/RevenueAmount.vue'
 import ModelDistributionChart from '../ModelDistributionChart.vue'
 
 const { getUserBreakdown } = vi.hoisted(() => ({ getUserBreakdown: vi.fn() }))
@@ -277,11 +278,12 @@ describe('ModelDistributionChart', () => {
             subscription_revenue: 0, subscription_revenue_unpriced_cost: 0, balance_cost: 6, subscription_cost: 0, unclassified_cost: 0 },
         ],
         rankingTotalCost: 30,
-        rankingTotalActualCost: 25,
+        // Scope: balance 12 + subscription 15 (incl. $3 unpriced) + unclassified 1 = billed 28.
+        rankingTotalActualCost: 28,
         rankingTotalRequests: 20,
         rankingTotalTokens: 2000,
         rankingTotalRevenue: {
-          subscription_revenue: 10, subscription_revenue_unpriced_cost: 3, balance_cost: 12, subscription_cost: 18.625, unclassified_cost: 0,
+          subscription_revenue: 10, subscription_revenue_unpriced_cost: 3, balance_cost: 12, subscription_cost: 15, unclassified_cost: 1,
         },
       },
       global: { stubs: { LoadingSpinner: true } },
@@ -297,6 +299,15 @@ describe('ModelDistributionChart', () => {
     expect(cells[1].text()).toBe('6.00')
     // Others: balance 12 − 9.6 = 2.4, converted 10 − 6.4 = 3.6, unpriced $3 flagged.
     expect(cells[2].text().replace(/\s+/g, '')).toBe('6.00+$3.00?')
+    // Every part of Others is scope total − ranked rows.
+    const others = wrapper.findAllComponents(RevenueAmount)[2]
+    const parts = others.props('parts')
+    expect(parts.balance_cost).toBeCloseTo(2.4)
+    expect(parts.subscription_cost).toBeCloseTo(5)
+    expect(parts.subscription_revenue).toBeCloseTo(3.6)
+    expect(parts.subscription_revenue_unpriced_cost).toBeCloseTo(3)
+    expect(parts.unclassified_cost).toBeCloseTo(1)
+    expect(others.props('billedCost')).toBeCloseTo(8.4) // 28 − 13.6 − 6
   })
 
   it('shows request body sizes and switches the ranking sort', async () => {

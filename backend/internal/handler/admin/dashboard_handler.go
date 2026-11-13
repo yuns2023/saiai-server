@@ -632,7 +632,7 @@ func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 		return
 	}
 
-	payload := gin.H{
+	payload := withRevenueTotals(gin.H{
 		"ranking":           ranking.Ranking,
 		"total_cost":        ranking.TotalCost,
 		"total_actual_cost": ranking.TotalActualCost,
@@ -640,7 +640,7 @@ func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 		"total_tokens":      ranking.TotalTokens,
 		"start_date":        startTime.Format("2006-01-02"),
 		"end_date":          inclusiveRangeEndDate(endTime),
-	}
+	}, ranking.TotalSubscriptionRevenueStats)
 	dashboardUsersRankingCache.Set(cacheKey, payload)
 	c.Header("X-Snapshot-Cache", "miss")
 	response.Success(c, payload)

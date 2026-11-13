@@ -17,7 +17,7 @@ vi.mock('vue-i18n', async () => {
 
 describe('RevenueAmount', () => {
   it('adds balance charges and converted subscription without a currency', () => {
-    // Real numbers of one account's 7d window: balance $932.70 + CC3000 $808.77 × 0.64.
+    // Balance $932.70 + subscription $808.77 at rate 0.64; rounds to 2 decimals.
     const wrapper = mount(RevenueAmount, {
       props: {
         label: 'U ',
@@ -43,6 +43,12 @@ describe('RevenueAmount', () => {
     expect(title).toContain('usage.subscriptionRevenueUnpriced($7.0000)')
     expect(title).toContain('usage.revenueUnclassified($4.0000)')
     expect(title).not.toContain('usage.revenueBilled')
+  })
+
+  it('shows sub-cent revenue as 0.00 but keeps the exact parts in the title', () => {
+    const wrapper = mount(RevenueAmount, { props: { parts: { balance_cost: 0.0049 } } })
+    expect(wrapper.text()).toBe('0.00')
+    expect(wrapper.attributes('title')).toContain('usage.revenueBalance($0.0049)')
   })
 
   it('treats missing parts as zero', () => {

@@ -76,6 +76,10 @@ func (s *dashboardUsageRepoCapture) GetUserSpendingRanking(
 		TotalActualCost: s.rankingTotal,
 		TotalRequests:   44,
 		TotalTokens:     1234,
+		TotalSubscriptionRevenueStats: usagestats.TotalSubscriptionRevenueStats{
+			TotalSubscriptionRevenue: 6.4, TotalSubscriptionRevenueUnpricedCost: 2,
+			TotalBalanceCost: 30, TotalSubscriptionCost: 12, TotalUnclassifiedCost: 1,
+		},
 	}, nil
 }
 
@@ -257,6 +261,15 @@ func TestDashboardUsersRankingLimitAndCache(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec2.Code)
 	require.Equal(t, "hit", rec2.Header().Get("X-Snapshot-Cache"))
+	// Revenue totals (pre-LIMIT) feed the Others row; they survive the cache.
+	for _, body := range []string{rec.Body.String(), rec2.Body.String()} {
+		for _, field := range []string{
+			`"total_subscription_revenue":6.4`, `"total_subscription_revenue_unpriced_cost":2`,
+			`"total_balance_cost":30`, `"total_subscription_cost":12`, `"total_unclassified_cost":1`,
+		} {
+			require.Contains(t, body, field)
+		}
+	}
 }
 
 func TestDashboardUsersRankingSortParamAndCacheKey(t *testing.T) {

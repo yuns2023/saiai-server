@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/gin-gonic/gin"
 )
 
@@ -47,7 +48,7 @@ func (h *DashboardHandler) GetAPIKeySpendingRanking(c *gin.Context) {
 		if err != nil {
 			return nil, err
 		}
-		return gin.H{
+		return withRevenueTotals(gin.H{
 			"ranking":           ranking.Ranking,
 			"total_cost":        ranking.TotalCost,
 			"total_actual_cost": ranking.TotalActualCost,
@@ -55,7 +56,7 @@ func (h *DashboardHandler) GetAPIKeySpendingRanking(c *gin.Context) {
 			"total_tokens":      ranking.TotalTokens,
 			"start_date":        startTime.Format("2006-01-02"),
 			"end_date":          inclusiveRangeEndDate(endTime),
-		}, nil
+		}, ranking.TotalSubscriptionRevenueStats), nil
 	})
 	if err != nil {
 		response.Error(c, 500, "Failed to get API Key spending ranking")
@@ -63,4 +64,17 @@ func (h *DashboardHandler) GetAPIKeySpendingRanking(c *gin.Context) {
 	}
 	c.Header("X-Snapshot-Cache", cacheStatusValue(hit))
 	response.Success(c, cached.Payload)
+}
+
+// withRevenueTotals adds the scope-wide (pre-LIMIT) revenue totals to a ranking
+// payload. The payloads are built by hand, so new response fields must be
+// copied explicitly; the admin UI derives the total and the Others row from
+// them.
+func withRevenueTotals(payload gin.H, totals usagestats.TotalSubscriptionRevenueStats) gin.H {
+	payload["total_subscription_revenue"] = totals.TotalSubscriptionRevenue
+	payload["total_subscription_revenue_unpriced_cost"] = totals.TotalSubscriptionRevenueUnpricedCost
+	payload["total_balance_cost"] = totals.TotalBalanceCost
+	payload["total_subscription_cost"] = totals.TotalSubscriptionCost
+	payload["total_unclassified_cost"] = totals.TotalUnclassifiedCost
+	return payload
 }
