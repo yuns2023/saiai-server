@@ -516,7 +516,10 @@ describe('AccountUsageCell', () => {
 		      tokens: 1_000_000_000,
 		      cost: 12.345,
 		      standard_cost: 12.345,
-		      user_cost: 6.789
+		      user_cost: 6.789,
+		      balance_cost: 1.789,
+		      subscription_cost: 5,
+		      subscription_revenue: 3.2
 		    }
 		  },
 		  global: {
@@ -532,11 +535,12 @@ describe('AccountUsageCell', () => {
 		expect(wrapper.text()).toContain('1.0M req')
 		expect(wrapper.text()).toContain('1.0B')
 		expect(wrapper.text()).toContain('A $12.35')
-		expect(wrapper.text()).toContain('U $6.79')
+		// U = balance 1.789 + subscription $5 × 0.64, without a currency.
+		expect(wrapper.get('[data-testid="today-revenue"]').text()).toBe('U 4.99')
 
 		const badges = wrapper.findAll('span[title]')
 		expect(badges.some(node => node.attributes('title') === 'usage.accountBilled')).toBe(true)
-		expect(badges.some(node => node.attributes('title') === 'usage.userBilled')).toBe(true)
+		expect(badges.some(node => node.attributes('title')?.startsWith('usage.revenueHint'))).toBe(true)
   })
 
   it('Key 账号在 today stats loading 时显示骨架屏', async () => {

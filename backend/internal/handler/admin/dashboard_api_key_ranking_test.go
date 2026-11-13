@@ -36,6 +36,10 @@ func (r *apiKeyRankingRepoCapture) GetAPIKeySpendingRanking(_ context.Context, s
 			OutputTokens: 50, CacheCreationTokens: 25, CacheReadTokens: 25,
 		}},
 		TotalActualCost: 40, TotalRequests: 30, TotalTokens: 2600,
+		TotalSubscriptionRevenueStats: usagestats.TotalSubscriptionRevenueStats{
+			TotalSubscriptionRevenue: 12.8, TotalSubscriptionRevenueUnpricedCost: 3,
+			TotalBalanceCost: 17, TotalSubscriptionCost: 23, TotalUnclassifiedCost: 0.5,
+		},
 	}, r.err
 }
 
@@ -84,6 +88,11 @@ func TestAPIKeySpendingRankingScopeCacheAndResponse(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 		require.Equal(t, tc.user, body.Data.Ranking[0].UserID)
 		require.Equal(t, 40.0, body.Data.TotalActualCost)
+		// Revenue totals reach the client on misses and cache hits alike.
+		require.Equal(t, usagestats.TotalSubscriptionRevenueStats{
+			TotalSubscriptionRevenue: 12.8, TotalSubscriptionRevenueUnpricedCost: 3,
+			TotalBalanceCost: 17, TotalSubscriptionCost: 23, TotalUnclassifiedCost: 0.5,
+		}, body.Data.TotalSubscriptionRevenueStats)
 		require.Equal(t, "2026-03-01", body.Data.StartDate)
 		require.Equal(t, "2026-03-02", body.Data.EndDate)
 		require.NotContains(t, w.Body.String(), `"key":`)

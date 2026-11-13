@@ -67,7 +67,11 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.stats.accumulatedCost') }}
               <span class="text-gray-400 dark:text-gray-500">
-                ({{ t('usage.userBilled') }}: ${{ formatCost(stats.summary.total_user_cost) }}<template
+                ({{ t('usage.revenue') }}: <RevenueAmount
+                  :parts="stats.summary.revenue ?? {}"
+                  :billed-cost="stats.summary.total_user_cost"
+                  data-testid="account-stats-total-revenue"
+                /><template
                   v-if="(stats.summary.total_hosted_requests ?? 0) > 0"
                 > · <span :title="t('admin.accounts.stats.hostedReferenceHint')" data-testid="account-stats-hosted-cost">{{ t('admin.accounts.stats.hostedReference') }} ≈${{
                   formatCost(stats.summary.total_hosted_cost ?? 0)
@@ -122,7 +126,11 @@
                 })
               }}
               <span class="text-gray-400 dark:text-gray-500">
-                ({{ t('usage.userBilled') }}: ${{ formatCost(stats.summary.avg_daily_user_cost) }})
+                ({{ t('usage.revenue') }}: <RevenueAmount
+                  :parts="avgDailyRevenue"
+                  :billed-cost="stats.summary.avg_daily_user_cost"
+                  data-testid="account-stats-avg-revenue"
+                />)
               </span>
             </p>
           </div>
@@ -180,10 +188,13 @@
                 >
               </div>
               <div class="flex items-center justify-between">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.userBilled') }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white"
-                  >${{ formatCost(stats.summary.today?.user_cost || 0) }}</span
-                >
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.revenue') }}</span>
+                <RevenueAmount
+                  class="text-sm font-semibold text-gray-900 dark:text-white"
+                  :parts="stats.summary.today?.revenue ?? {}"
+                  :billed-cost="stats.summary.today?.user_cost ?? 0"
+                  data-testid="account-stats-today-revenue"
+                />
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{
@@ -228,10 +239,13 @@
                 >
               </div>
               <div class="flex items-center justify-between">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.userBilled') }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white"
-                  >${{ formatCost(stats.summary.highest_cost_day?.user_cost || 0) }}</span
-                >
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.revenue') }}</span>
+                <RevenueAmount
+                  class="text-sm font-semibold text-gray-900 dark:text-white"
+                  :parts="stats.summary.highest_cost_day?.revenue ?? {}"
+                  :billed-cost="stats.summary.highest_cost_day?.user_cost ?? 0"
+                  data-testid="account-stats-highest-cost-day-revenue"
+                />
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{
@@ -282,10 +296,13 @@
                 >
               </div>
               <div class="flex items-center justify-between">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.userBilled') }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white"
-                  >${{ formatCost(stats.summary.highest_request_day?.user_cost || 0) }}</span
-                >
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.revenue') }}</span>
+                <RevenueAmount
+                  class="text-sm font-semibold text-gray-900 dark:text-white"
+                  :parts="stats.summary.highest_request_day?.revenue ?? {}"
+                  :billed-cost="stats.summary.highest_request_day?.user_cost ?? 0"
+                  data-testid="account-stats-highest-request-day-revenue"
+                />
               </div>
             </div>
           </div>
@@ -426,6 +443,7 @@
 
 <script setup lang="ts">
 import TokenCount from '@/components/common/TokenCount.vue'
+import RevenueAmount from '@/components/common/RevenueAmount.vue'
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -448,7 +466,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { adminAPI } from '@/api/admin'
 import DateTimeRangePicker from '@/components/common/DateTimeRangePicker.vue'
 import { presetTimeRange, type DateTimeRange } from '@/utils/dateTimeRange'
-import type { Account, AccountUsageStatsResponse } from '@/types'
+import type { Account, AccountUsageStatsResponse, RevenueParts } from '@/types'
 
 ChartJS.register(
   CategoryScale,
@@ -667,6 +685,19 @@ const handleClose = () => {
 }
 
 // Format helpers
+// Daily average of every revenue part, over the days that had usage (same
+// divisor as avg_daily_user_cost).
+const avgDailyRevenue = computed<RevenueParts>(() => {
+  const summary = stats.value?.summary
+  const total = summary?.revenue ?? {}
+  const days = Math.max(summary?.actual_days_used ?? 0, 1)
+  const result: RevenueParts = {}
+  for (const key of ['subscription_revenue', 'subscription_revenue_unpriced_cost', 'balance_cost', 'subscription_cost', 'unclassified_cost'] as const) {
+    result[key] = (total[key] ?? 0) / days
+  }
+  return result
+})
+
 const formatCost = (value: number): string => {
   if (value >= 1000) {
     return (value / 1000).toFixed(2) + 'K'

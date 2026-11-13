@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
+import RevenueAmount from '@/components/common/RevenueAmount.vue'
 import ModelDistributionChart from '../ModelDistributionChart.vue'
 
 const { getUserBreakdown } = vi.hoisted(() => ({ getUserBreakdown: vi.fn() }))
@@ -256,45 +257,57 @@ describe('ModelDistributionChart', () => {
     expect(rows).toHaveLength(3)
     expect(rows[0].find('[data-testid="ranking-hosted-badge"]').exists()).toBe(true)
     expect(rows[0].text()).toContain('$12.00')
-    expect(rows[0].text()).toContain('$0.00')
+    expect(rows[0].get('[data-testid="ranking-revenue"]').text()).toBe('0.00')
     expect(rows[1].find('[data-testid="ranking-hosted-badge"]').exists()).toBe(false)
     expect(rows[2].text()).toContain('Others')
     expect(rows[2].text()).toContain('4')
     expect(rows[2].text()).toContain('400')
     expect(rows[2].text()).toContain('$10.00')
-    expect(rows[2].text()).toContain('$9.00')
+    expect(rows[2].get('[data-testid="ranking-revenue"]').text()).toBe('0.00')
   })
 
-  it('shows subscription revenue per user and for Others', async () => {
+  it('shows revenue (balance + converted subscription) per user and for Others', async () => {
     const wrapper = mount(ModelDistributionChart, {
       props: {
         modelStats: [],
         enableRankingView: true,
         rankingItems: [
-          { user_id: 1, email: 'alpha@example.com', cost: 12, actual_cost: 10, requests: 10, hosted_requests: 0, tokens: 1000,
-            subscription_revenue: 6.4, subscription_revenue_unpriced_cost: 0 },
+          { user_id: 1, email: 'alpha@example.com', cost: 12, actual_cost: 13.6, requests: 10, hosted_requests: 0, tokens: 1000,
+            subscription_revenue: 6.4, subscription_revenue_unpriced_cost: 0, balance_cost: 3.6, subscription_cost: 10, unclassified_cost: 0 },
           { user_id: 2, email: 'beta@example.com', cost: 8, actual_cost: 6, requests: 6, hosted_requests: 0, tokens: 600,
-            subscription_revenue: 0, subscription_revenue_unpriced_cost: 0 },
+            subscription_revenue: 0, subscription_revenue_unpriced_cost: 0, balance_cost: 6, subscription_cost: 0, unclassified_cost: 0 },
         ],
         rankingTotalCost: 30,
-        rankingTotalActualCost: 25,
+        // Scope: balance 12 + subscription 15 (incl. $3 unpriced) + unclassified 1 = billed 28.
+        rankingTotalActualCost: 28,
         rankingTotalRequests: 20,
         rankingTotalTokens: 2000,
-        rankingTotalSubscriptionRevenue: 10,
-        rankingTotalSubscriptionRevenueUnpricedCost: 3,
+        rankingTotalRevenue: {
+          subscription_revenue: 10, subscription_revenue_unpriced_cost: 3, balance_cost: 12, subscription_cost: 15, unclassified_cost: 1,
+        },
       },
       global: { stubs: { LoadingSpinner: true } },
     })
     const rankingButton = wrapper.findAll('button').find((button) => button.text() === 'User Spending Ranking')
     await rankingButton!.trigger('click')
 
-    const cells = wrapper.findAll('[data-testid="ranking-subscription-revenue"]')
+    const cells = wrapper.findAll('[data-testid="ranking-revenue"]')
     expect(cells).toHaveLength(3)
     // Rendered by the real component (a missing import would leave an unknown element).
-    expect(cells[0].find('[data-testid="subscription-revenue"]').exists()).toBe(true)
-    expect(cells[0].text()).toContain('≈¥6.40')
-    expect(cells[1].text()).toBe('-')
-    expect(cells[2].text().replace(/\s+/g, '')).toBe('≈¥3.60+$3.00?')
+    expect(cells[0].find('[data-testid="revenue-amount"]').exists()).toBe(true)
+    expect(cells[0].text()).toBe('10.00')
+    expect(cells[1].text()).toBe('6.00')
+    // Others: balance 12 − 9.6 = 2.4, converted 10 − 6.4 = 3.6, unpriced $3 flagged.
+    expect(cells[2].text().replace(/\s+/g, '')).toBe('6.00+$3.00?')
+    // Every part of Others is scope total − ranked rows.
+    const others = wrapper.findAllComponents(RevenueAmount)[2]
+    const parts = others.props('parts')
+    expect(parts.balance_cost).toBeCloseTo(2.4)
+    expect(parts.subscription_cost).toBeCloseTo(5)
+    expect(parts.subscription_revenue).toBeCloseTo(3.6)
+    expect(parts.subscription_revenue_unpriced_cost).toBeCloseTo(3)
+    expect(parts.unclassified_cost).toBeCloseTo(1)
+    expect(others.props('billedCost')).toBeCloseTo(8.4) // 28 − 13.6 − 6
   })
 
   it('shows request body sizes and switches the ranking sort', async () => {

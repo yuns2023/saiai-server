@@ -216,8 +216,7 @@
               <th class="pb-2 text-right">{{ t('admin.dashboard.spendingRankingRequests') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.spendingRankingTokens') }}</th>
               <th class="pb-2 text-right" :title="t('admin.dashboard.rankingBasisHint')">{{ t('admin.dashboard.standard') }}</th>
-              <th class="pb-2 text-right">{{ t('admin.dashboard.rankingActualShort') }}</th>
-              <th class="whitespace-nowrap pb-2 text-right" :title="t('usage.subscriptionRevenueHint')">{{ t('usage.subscriptionRevenue') }}</th>
+              <th class="whitespace-nowrap pb-2 text-right" :title="t('usage.revenueHint')">{{ t('usage.revenue') }}</th>
               <th class="pb-2 text-right" :title="t('admin.dashboard.rankingBodySizeHint')">{{ t('admin.dashboard.rankingBodySize') }}</th>
             </tr>
           </thead>
@@ -261,17 +260,8 @@
               <td class="py-1.5 text-right font-medium text-gray-900 dark:text-white">
                 ${{ formatCost(item.cost) }}
               </td>
-              <td class="py-1.5 text-right text-green-600 dark:text-green-400">
-                ${{ formatCost(item.actual_cost) }}
-              </td>
-              <td class="whitespace-nowrap py-1.5 text-right" data-testid="ranking-subscription-revenue">
-                <SubscriptionRevenueText
-                  v-if="(item.subscription_revenue ?? 0) > 0 || (item.subscription_revenue_unpriced_cost ?? 0) > 0"
-                  compact
-                  :revenue="item.subscription_revenue ?? 0"
-                  :unpriced-cost="item.subscription_revenue_unpriced_cost"
-                />
-                <span v-else class="text-gray-400">-</span>
+              <td class="whitespace-nowrap py-1.5 text-right text-green-600 dark:text-green-400" data-testid="ranking-revenue">
+                <RevenueAmount :parts="item" :billed-cost="item.actual_cost" />
               </td>
               <td
                 class="whitespace-nowrap py-1.5 text-right text-gray-600 dark:text-gray-400"
@@ -305,12 +295,12 @@ import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
-import type { ModelStat, SpendingRankingSort, UserSpendingRankingItem, UserBreakdownItem } from '@/types'
+import type { ModelStat, RevenueParts, SpendingRankingSort, UserSpendingRankingItem, UserBreakdownItem } from '@/types'
 import type { UserBreakdownParams } from '@/api/admin/dashboard'
 import { getUserBreakdown } from '@/api/admin/dashboard'
 import { distributionChartColors, stableChartColor } from '@/utils/chartColors'
 import { formatRequestBodyBytes, requestBodySizeDetailParams } from '@/utils/requestBodyBytes'
-import SubscriptionRevenueText from '@/components/common/SubscriptionRevenueText.vue'
+import RevenueAmount from '@/components/common/RevenueAmount.vue'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
@@ -330,8 +320,8 @@ const props = withDefaults(defineProps<{
   rankingTotalActualCost?: number
   rankingTotalRequests?: number
   rankingTotalTokens?: number
-  rankingTotalSubscriptionRevenue?: number
-  rankingTotalSubscriptionRevenueUnpricedCost?: number
+  /** Revenue parts over the whole scope (before LIMIT), for the Others row. */
+  rankingTotalRevenue?: RevenueParts
   /** Ranking order; the parent reloads the ranking when it changes. */
   rankingSort?: SpendingRankingSort
   loading?: boolean
@@ -357,8 +347,7 @@ const props = withDefaults(defineProps<{
   rankingTotalActualCost: 0,
   rankingTotalRequests: 0,
   rankingTotalTokens: 0,
-  rankingTotalSubscriptionRevenue: 0,
-  rankingTotalSubscriptionRevenueUnpricedCost: 0,
+  rankingTotalRevenue: () => ({}),
   rankingSort: 'cost',
   loading: false,
   metric: 'tokens',
@@ -493,10 +482,13 @@ const otherRankingItem = computed<RankingDisplayItem | null>(() => {
   const otherActualCost = Math.max((props.rankingTotalActualCost || 0) - rankedActualCost, 0)
   const otherRequests = Math.max((props.rankingTotalRequests || 0) - rankedRequests, 0)
   const otherTokens = Math.max((props.rankingTotalTokens || 0) - rankedTokens, 0)
-  const rankedRevenue = props.rankingItems.reduce((sum, item) => sum + (item.subscription_revenue || 0), 0)
-  const rankedUnpriced = props.rankingItems.reduce((sum, item) => sum + (item.subscription_revenue_unpriced_cost || 0), 0)
-  const otherRevenue = Math.max((props.rankingTotalSubscriptionRevenue || 0) - rankedRevenue, 0)
-  const otherUnpriced = Math.max((props.rankingTotalSubscriptionRevenueUnpricedCost || 0) - rankedUnpriced, 0)
+  // Others = scope total − ranked rows, for every revenue part.
+  const revenueKeys = ['subscription_revenue', 'subscription_revenue_unpriced_cost', 'balance_cost', 'subscription_cost', 'unclassified_cost'] as const
+  const otherRevenue: RevenueParts = {}
+  for (const key of revenueKeys) {
+    const ranked = props.rankingItems.reduce((sum, item) => sum + (item[key] || 0), 0)
+    otherRevenue[key] = Math.max((props.rankingTotalRevenue?.[key] || 0) - ranked, 0)
+  }
 
   if (otherCost <= 0.000001 && otherActualCost <= 0.000001 && otherRequests <= 0 && otherTokens <= 0) return null
 
@@ -508,8 +500,7 @@ const otherRankingItem = computed<RankingDisplayItem | null>(() => {
     requests: otherRequests,
     hosted_requests: 0,
     tokens: otherTokens,
-    subscription_revenue: otherRevenue,
-    subscription_revenue_unpriced_cost: otherUnpriced,
+    ...otherRevenue,
     isOther: true
   }
 })

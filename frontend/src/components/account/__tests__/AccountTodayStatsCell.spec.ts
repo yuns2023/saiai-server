@@ -8,7 +8,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 // Account in a hosted group plus a 0.5x pay-as-you-go group (prod #295 on 10-29)
-const mixed = { requests: 1482, tokens: 185_100_000, cost: 0.72, standard_cost: 106.46, user_cost: 0.36 }
+const mixed = { requests: 1482, tokens: 185_100_000, cost: 0.72, standard_cost: 106.46, user_cost: 0.36, balance_cost: 0.36 }
 
 describe('AccountTodayStatsCell', () => {
   it('shows only account billed plus a separate hosted reference for mixed accounts', () => {
@@ -22,7 +22,8 @@ describe('AccountTodayStatsCell', () => {
     expect(hosted.text()).toBe('└ admin.accounts.stats.hostedReference ≈$105.74')
     expect(hosted.attributes('title')).toBe('admin.accounts.stats.hostedReferenceHint')
     expect(wrapper.text()).toContain('usage.accountBilled:$0.72')
-    expect(wrapper.text()).toContain('usage.userBilled:$0.36')
+    // 实收 = balance + converted subscription, without a currency.
+    expect(wrapper.text()).toContain('usage.revenue:0.36')
   })
 
   it('keeps the hosted share for hosted requests with a zero reference price', () => {

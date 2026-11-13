@@ -150,6 +150,11 @@ type WindowStats struct {
 	// 订阅折算收入（元，按分组当前统计倍率）与未配置倍率的订阅消耗（$）。仅管理员账号视图使用。
 	SubscriptionRevenue             float64 `json:"subscription_revenue"`
 	SubscriptionRevenueUnpricedCost float64 `json:"subscription_revenue_unpriced_cost"`
+
+	// 实收拆分（$，不含托管行）：管理员“实收” = BalanceCost + SubscriptionRevenue。
+	BalanceCost      float64 `json:"balance_cost"`
+	SubscriptionCost float64 `json:"subscription_cost"`
+	UnclassifiedCost float64 `json:"unclassified_cost"`
 }
 
 // UsageProgress 使用量进度
@@ -1278,6 +1283,10 @@ func windowStatsFromAccountStats(stats *usagestats.AccountStats) *WindowStats {
 
 		SubscriptionRevenue:             stats.SubscriptionRevenue,
 		SubscriptionRevenueUnpricedCost: stats.SubscriptionRevenueUnpricedCost,
+
+		BalanceCost:      stats.BalanceCost,
+		SubscriptionCost: stats.SubscriptionCost,
+		UnclassifiedCost: stats.UnclassifiedCost,
 	}
 }
 

@@ -48,10 +48,12 @@
       </div>
       <!-- Cost (User/API Key) -->
       <div v-if="props.stats.user_cost != null" class="flex items-center gap-1">
-        <span class="text-gray-500 dark:text-gray-400">{{ t('usage.userBilled') }}:</span>
-        <span class="font-medium text-gray-700 dark:text-gray-300">{{
-          formatCurrency(props.stats.user_cost)
-        }}</span>
+        <span class="text-gray-500 dark:text-gray-400">{{ t('usage.revenue') }}:</span>
+        <RevenueAmount
+          class="font-medium text-gray-700 dark:text-gray-300"
+          :parts="props.stats"
+          :billed-cost="props.stats.user_cost"
+        />
       </div>
     </div>
 
@@ -62,6 +64,7 @@
 
 <script setup lang="ts">
 import TokenCount from '@/components/common/TokenCount.vue'
+import RevenueAmount from '@/components/common/RevenueAmount.vue'
 import { useI18n } from 'vue-i18n'
 import type { WindowStats } from '@/types'
 import { formatNumber, formatCurrency } from '@/utils/format'

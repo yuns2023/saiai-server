@@ -19,8 +19,10 @@ func apiKeyRankingRows() *sqlmock.Rows {
 		"input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens",
 		"request_body_bytes_total", "request_body_bytes_avg", "request_body_bytes_max", "request_body_bytes_known_count",
 		"subscription_revenue", "subscription_revenue_unpriced_cost",
+		"balance_cost", "subscription_cost", "unclassified_cost",
 		"total_cost", "total_actual_cost", "total_requests", "total_tokens",
 		"total_subscription_revenue", "total_subscription_revenue_unpriced_cost",
+		"total_balance_cost", "total_subscription_cost", "total_unclassified_cost",
 	})
 }
 
@@ -62,8 +64,8 @@ func TestGetAPIKeySpendingRankingScopeAndTotals(t *testing.T) {
 				expectation.WithArgs(start, end, tc.want)
 			}
 			expectation.WillReturnRows(apiKeyRankingRows().
-				AddRow(11, "Work", 7, "user@example.com", 15.0, 0.0, 9, 9, 200, 100, 50, 25, 25, int64(9000), int64(1500), int64(4000), int64(6), 0.0, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0).
-				AddRow(12, "", 7, "user@example.com", 5.0, 4.25, 5, 0, 300, 0, 0, 100, 200, int64(0), nil, nil, int64(0), 6.4, 3.0, 60.0, 40.0, 30, 2600, 6.4, 3.0))
+				AddRow(11, "Work", 7, "user@example.com", 15.0, 0.0, 9, 9, 200, 100, 50, 25, 25, int64(9000), int64(1500), int64(4000), int64(6), 0.0, 0.0, 0.0, 0.0, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5).
+				AddRow(12, "", 7, "user@example.com", 5.0, 4.25, 5, 0, 300, 0, 0, 100, 200, int64(0), nil, nil, int64(0), 6.4, 3.0, 0.0, 4.25, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5))
 
 			got, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, tc.userID, tc.limit, usagestats.SpendingRankingSortCost)
 			require.NoError(t, err)
@@ -97,6 +99,10 @@ func TestGetAPIKeySpendingRankingScopeAndTotals(t *testing.T) {
 			require.Equal(t, 3.0, got.Ranking[1].SubscriptionRevenueUnpricedCost)
 			require.Equal(t, 6.4, got.TotalSubscriptionRevenue)
 			require.Equal(t, 3.0, got.TotalSubscriptionRevenueUnpricedCost)
+			require.Equal(t, 4.25, got.Ranking[1].SubscriptionCost)
+			require.Equal(t, 20.5, got.TotalBalanceCost)
+			require.Equal(t, 16.0, got.TotalSubscriptionCost)
+			require.Equal(t, 1.5, got.TotalUnclassifiedCost)
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
@@ -124,9 +130,9 @@ func TestGetAPIKeySpendingRankingFailures(t *testing.T) {
 			case "query":
 				query.WillReturnError(errors.New("unavailable"))
 			case "row":
-				query.WillReturnRows(apiKeyRankingRows().AddRow(1, "", 1, "", 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, nil, nil, 0, 0, 0, 1, 1, 1, 1, 0, 0).RowError(0, errors.New("read failed")))
+				query.WillReturnRows(apiKeyRankingRows().AddRow(1, "", 1, "", 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, nil, nil, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0).RowError(0, errors.New("read failed")))
 			case "scan":
-				query.WillReturnRows(apiKeyRankingRows().AddRow("bad ID", "", 1, "", 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, nil, nil, 0, 0, 0, 1, 1, 1, 1, 0, 0))
+				query.WillReturnRows(apiKeyRankingRows().AddRow("bad ID", "", 1, "", 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, nil, nil, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0))
 			}
 			got, err := repo.GetAPIKeySpendingRanking(context.Background(), time.Now(), time.Now(), 0, 12, usagestats.SpendingRankingSortCost)
 			require.Error(t, err)

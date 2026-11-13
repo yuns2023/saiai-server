@@ -20,4 +20,10 @@ type AccountStats struct {
 	// SubscriptionRevenueUnpricedCost: 分组未配置倍率（或无分组）的订阅消耗（$），未计入上面的折算。
 	SubscriptionRevenue             float64 `json:"subscription_revenue"`
 	SubscriptionRevenueUnpricedCost float64 `json:"subscription_revenue_unpriced_cost"`
+
+	// 实收拆分（$，均不含托管行）：余额扣费、订阅额度扣费（含未配置倍率部分）、
+	// 计费类型未知的扣费。管理员实收 = BalanceCost + SubscriptionRevenue。
+	BalanceCost      float64 `json:"balance_cost"`
+	SubscriptionCost float64 `json:"subscription_cost"`
+	UnclassifiedCost float64 `json:"unclassified_cost"`
 }

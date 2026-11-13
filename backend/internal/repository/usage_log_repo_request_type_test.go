@@ -421,10 +421,12 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 		"request_body_bytes_total", "request_body_bytes_avg", "request_body_bytes_max", "request_body_bytes_known_count",
 		"subscription_revenue", "subscription_revenue_unpriced_cost",
 		"total_cost", "total_actual_cost", "total_requests", "total_tokens",
-		"total_subscription_revenue", "total_subscription_revenue_unpriced_cost"}).
-		AddRow(int64(3), "gamma@example.com", 20.0, 0.0, int64(5), int64(5), int64(300), int64(0), nil, nil, int64(0), 0.0, 0.0, 50.0, 25.0, int64(30), int64(2600), 8.0, 2.5).
-		AddRow(int64(2), "beta@example.com", 15.0, 12.5, int64(9), int64(0), int64(900), int64(3000), int64(1000), int64(2000), int64(3), 8.0, 0.0, 50.0, 25.0, int64(30), int64(2600), 8.0, 2.5).
-		AddRow(int64(1), "alpha@example.com", 15.0, 12.5, int64(8), int64(0), int64(800), int64(0), int64(0), int64(0), int64(2), 0.0, 2.5, 50.0, 25.0, int64(30), int64(2600), 8.0, 2.5)
+		"total_subscription_revenue", "total_subscription_revenue_unpriced_cost",
+		"balance_cost", "subscription_cost", "unclassified_cost",
+		"total_balance_cost", "total_subscription_cost", "total_unclassified_cost"}).
+		AddRow(int64(3), "gamma@example.com", 20.0, 0.0, int64(5), int64(5), int64(300), int64(0), nil, nil, int64(0), 0.0, 0.0, 50.0, 25.0, int64(30), int64(2600), 8.0, 2.5, 0.0, 0.0, 0.0, 10.0, 15.0, 0.0).
+		AddRow(int64(2), "beta@example.com", 15.0, 12.5, int64(9), int64(0), int64(900), int64(3000), int64(1000), int64(2000), int64(3), 8.0, 0.0, 50.0, 25.0, int64(30), int64(2600), 8.0, 2.5, 0.0, 12.5, 0.0, 10.0, 15.0, 0.0).
+		AddRow(int64(1), "alpha@example.com", 15.0, 12.5, int64(8), int64(0), int64(800), int64(0), int64(0), int64(0), int64(2), 0.0, 2.5, 50.0, 25.0, int64(30), int64(2600), 8.0, 2.5, 10.0, 2.5, 0.0, 10.0, 15.0, 0.0)
 
 	mock.ExpectQuery(`(?s)WITH user_spend AS \(.*SUM\(u.total_cost\).*COUNT\(\*\) FILTER \(WHERE u.metered_cost IS NOT NULL\).*WHERE u.created_at >= \$1 AND u.created_at < \$2\s+GROUP BY.*SUM\(cost\) OVER \(\).*ORDER BY cost DESC, actual_cost DESC, tokens DESC, user_id ASC\s+LIMIT \$3`).
 		WithArgs(start, end, 12).
@@ -437,11 +439,11 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 			{UserID: 3, Email: "gamma@example.com", Cost: 20.0, ActualCost: 0, Requests: 5, HostedRequests: 5, Tokens: 300},
 			{UserID: 2, Email: "beta@example.com", Cost: 15.0, ActualCost: 12.5, Requests: 9, Tokens: 900,
 				RequestBodySizeStats:     usagestats.RequestBodySizeStats{RequestBodyBytesTotal: 3000, RequestBodyBytesAvg: int64Ptr(1000), RequestBodyBytesMax: int64Ptr(2000), RequestBodyBytesKnownCount: 3},
-				SubscriptionRevenueStats: usagestats.SubscriptionRevenueStats{SubscriptionRevenue: 8.0}},
+				SubscriptionRevenueStats: usagestats.SubscriptionRevenueStats{SubscriptionRevenue: 8.0, SubscriptionCost: 12.5}},
 			// Known empty bodies: avg/max are 0, not NULL.
 			{UserID: 1, Email: "alpha@example.com", Cost: 15.0, ActualCost: 12.5, Requests: 8, Tokens: 800,
 				RequestBodySizeStats:     usagestats.RequestBodySizeStats{RequestBodyBytesAvg: int64Ptr(0), RequestBodyBytesMax: int64Ptr(0), RequestBodyBytesKnownCount: 2},
-				SubscriptionRevenueStats: usagestats.SubscriptionRevenueStats{SubscriptionRevenueUnpricedCost: 2.5}},
+				SubscriptionRevenueStats: usagestats.SubscriptionRevenueStats{SubscriptionRevenueUnpricedCost: 2.5, BalanceCost: 10.0, SubscriptionCost: 2.5}},
 		},
 		TotalCost:       50.0,
 		TotalActualCost: 25.0,
@@ -449,6 +451,7 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 		TotalTokens:     2600,
 		TotalSubscriptionRevenueStats: usagestats.TotalSubscriptionRevenueStats{
 			TotalSubscriptionRevenue: 8.0, TotalSubscriptionRevenueUnpricedCost: 2.5,
+			TotalBalanceCost: 10.0, TotalSubscriptionCost: 15.0,
 		},
 	}, got)
 	require.NoError(t, mock.ExpectationsWereMet())

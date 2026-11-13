@@ -979,8 +979,19 @@ export interface Account {
   current_rpm?: number | null // 当前分钟 RPM 计数
 }
 
+// Admin-only revenue parts. 实收 = balance_cost + subscription_revenue (no currency).
+export interface RevenueParts {
+  // 订阅折算（按分组当前统计倍率）与未配置倍率的订阅消耗（$）
+  subscription_revenue?: number
+  subscription_revenue_unpriced_cost?: number
+  // 扣费拆分（$，不含托管行）：余额、订阅额度（含未配置倍率部分）、计费类型未知
+  balance_cost?: number
+  subscription_cost?: number
+  unclassified_cost?: number
+}
+
 // Account Usage types
-export interface WindowStats {
+export interface WindowStats extends RevenueParts {
   requests: number
   tokens: number
   cost: number // Account cost (account multiplier)
@@ -988,9 +999,6 @@ export interface WindowStats {
   user_cost?: number
   hosted_requests?: number // Hosted-group requests (metered_cost set; cost/user_cost are 0)
   hosted_cost?: number // Hosted reference usage: SUM(metered_cost)
-  // 订阅折算（元，按分组当前统计倍率）与未配置倍率的订阅消耗（$）
-  subscription_revenue?: number
-  subscription_revenue_unpriced_cost?: number
 }
 
 export interface UsageProgress {
@@ -1582,7 +1590,7 @@ export interface RequestBodySizeStats {
   request_body_bytes_known_count?: number
 }
 
-export interface UserSpendingRankingItem extends RequestBodySizeStats {
+export interface UserSpendingRankingItem extends RequestBodySizeStats, RevenueParts {
   user_id: number
   email: string
   cost: number // 标准计费（排序依据；托管行即参考用量）
@@ -1590,9 +1598,6 @@ export interface UserSpendingRankingItem extends RequestBodySizeStats {
   requests: number
   hosted_requests: number
   tokens: number
-  // 订阅折算（元，按分组当前统计倍率）与未配置倍率的订阅消耗（$）；仅管理员接口
-  subscription_revenue?: number
-  subscription_revenue_unpriced_cost?: number
 }
 
 export interface UserSpendingRankingResponse {
@@ -1603,11 +1608,14 @@ export interface UserSpendingRankingResponse {
   total_tokens: number
   total_subscription_revenue?: number
   total_subscription_revenue_unpriced_cost?: number
+  total_balance_cost?: number
+  total_subscription_cost?: number
+  total_unclassified_cost?: number
   start_date: string
   end_date: string
 }
 
-export interface APIKeySpendingRankingItem extends RequestBodySizeStats {
+export interface APIKeySpendingRankingItem extends RequestBodySizeStats, RevenueParts {
   api_key_id: number
   key_name: string
   user_id: number
@@ -1621,8 +1629,6 @@ export interface APIKeySpendingRankingItem extends RequestBodySizeStats {
   output_tokens: number
   cache_creation_tokens: number
   cache_read_tokens: number
-  subscription_revenue?: number
-  subscription_revenue_unpriced_cost?: number
 }
 
 export interface APIKeySpendingRankingResponse {
@@ -1633,6 +1639,9 @@ export interface APIKeySpendingRankingResponse {
   total_tokens: number
   total_subscription_revenue?: number
   total_subscription_revenue_unpriced_cost?: number
+  total_balance_cost?: number
+  total_subscription_cost?: number
+  total_unclassified_cost?: number
   start_date: string
   end_date: string
 }
@@ -1771,6 +1780,7 @@ export interface AccountUsageHistory {
   cost: number
   actual_cost: number // Account cost (account multiplier)
   user_cost: number // User/API key billed cost (group multiplier)
+  revenue?: RevenueParts
 }
 
 export interface AccountUsageSummary {
@@ -1788,12 +1798,14 @@ export interface AccountUsageSummary {
   avg_daily_requests: number
   avg_daily_tokens: number
   avg_duration_ms: number
+  revenue?: RevenueParts // admin revenue parts over the range
   today: {
     date: string
     cost: number
     user_cost: number
     requests: number
     tokens: number
+    revenue?: RevenueParts
   } | null
   highest_cost_day: {
     date: string
@@ -1801,6 +1813,7 @@ export interface AccountUsageSummary {
     cost: number
     user_cost: number
     requests: number
+    revenue?: RevenueParts
   } | null
   highest_request_day: {
     date: string
@@ -1808,6 +1821,7 @@ export interface AccountUsageSummary {
     requests: number
     cost: number
     user_cost: number
+    revenue?: RevenueParts
   } | null
 }
 
