@@ -1916,14 +1916,19 @@ func (h *AccountHandler) SetQuotaWindowRestart(c *gin.Context) {
 }
 
 // ClearQuotaWindowRestart removes a quota window's statistics restart.
-// DELETE /api/v1/admin/accounts/:id/quota-window-restart?window=seven_day
+// DELETE /api/v1/admin/accounts/:id/quota-window-restart?window=seven_day&expected_reset=<unix>
 func (h *AccountHandler) ClearQuotaWindowRestart(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
 		return
 	}
-	if err := h.accountUsageService.ClearQuotaWindowRestart(c.Request.Context(), accountID, c.DefaultQuery("window", "seven_day")); err != nil {
+	expectedReset, err := strconv.ParseInt(c.Query("expected_reset"), 10, 64)
+	if err != nil || expectedReset <= 0 {
+		response.BadRequest(c, "expected_reset is required")
+		return
+	}
+	if err := h.accountUsageService.ClearQuotaWindowRestart(c.Request.Context(), accountID, c.DefaultQuery("window", "seven_day"), time.Unix(expectedReset, 0)); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}

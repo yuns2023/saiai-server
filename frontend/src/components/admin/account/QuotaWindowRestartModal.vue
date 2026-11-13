@@ -28,7 +28,7 @@
     </template>
     <template #footer>
       <button class="btn btn-secondary" :disabled="busy" @click="close">{{ t('common.cancel') }}</button>
-      <button v-if="current" class="btn btn-secondary" :disabled="busy || loading" data-testid="restart-clear" @click="clear">
+      <button v-if="current && windowInfo" class="btn btn-secondary" :disabled="busy || loading" data-testid="restart-clear" @click="clear">
         {{ t('admin.accounts.quotaWindowRestart.clear') }}
       </button>
       <button class="btn btn-primary" :disabled="busy || loading || !windowInfo" data-testid="restart-confirm" @click="submit">
@@ -60,6 +60,9 @@ const error = ref('')
 const windowInfo = ref<{ start: Date; reset: Date } | null>(null)
 const current = ref<UsageWindowRestart | null>(null)
 const startLocal = ref('')
+// The default "now" is sent as no start (server time): a datetime-local value
+// has no UTC offset and is ambiguous in a DST fall-back hour.
+const initialStartLocal = ref('')
 
 const pad = (n: number) => String(n).padStart(2, '0')
 // datetime-local works in the browser's local time without a zone suffix.
@@ -89,6 +92,7 @@ async function load() {
     windowInfo.value = valid ? { start: new Date(resetsAt.getTime() - SEVEN_DAYS_MS), reset: resetsAt } : null
     current.value = usage.seven_day?.window_restart ?? null
     startLocal.value = toLocalInput(new Date())
+    initialStartLocal.value = startLocal.value
     loaded.value = true
   } catch (value) {
     if (sequence === loadSequence) error.value = message(value)
@@ -103,7 +107,8 @@ async function submit() {
   busy.value = true
   error.value = ''
   try {
-    const start = startLocal.value ? new Date(startLocal.value) : null
+    const edited = startLocal.value !== initialStartLocal.value
+    const start = edited && startLocal.value ? new Date(startLocal.value) : null
     await accountsAPI.setQuotaWindowRestart(account.id, {
       window: 'seven_day',
       expected_reset: Math.floor(windowInfo.value.reset.getTime() / 1000),
@@ -113,10 +118,18 @@ async function submit() {
     emit('updated')
     emit('close')
   } catch (value) {
-    error.value = message(value)
+    await failed(value)
   } finally {
     busy.value = false
   }
+}
+
+// Shows the error and re-reads the window, so a 409 (the window moved) can be
+// retried against the current reset without reopening the dialog.
+async function failed(value: unknown) {
+  const text = message(value)
+  await load()
+  error.value = text
 }
 
 async function clear() {
@@ -125,12 +138,13 @@ async function clear() {
   busy.value = true
   error.value = ''
   try {
-    await accountsAPI.clearQuotaWindowRestart(account.id)
+    if (!windowInfo.value) return
+    await accountsAPI.clearQuotaWindowRestart(account.id, Math.floor(windowInfo.value.reset.getTime() / 1000))
     appStore.showSuccess(t('admin.accounts.quotaWindowRestart.cleared'))
     emit('updated')
     emit('close')
   } catch (value) {
-    error.value = message(value)
+    await failed(value)
   } finally {
     busy.value = false
   }

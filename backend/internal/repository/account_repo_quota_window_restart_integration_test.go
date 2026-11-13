@@ -3,6 +3,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -61,6 +62,12 @@ func (s *AccountRepoSuite) TestUpdateExtraDetectingWeeklyRestart() {
 		{"stored utilization is a string", stored("0.50", reset.Unix()), 0.02, reset, false},
 		{"stored reset is null", stored(0.50, nil), 0.02, reset, false},
 		{"nil extra", nil, 0.02, reset, false},
+		{"stored utilization is a non-numeric string", stored("bad", reset.Unix()), 0.02, reset, false},
+		{"stored utilization is an object", stored(map[string]any{"x": 1}, reset.Unix()), 0.02, reset, false},
+		{"stored reset is an array", stored(0.50, []any{1, 2}), 0.02, reset, false},
+		{"stored reset is a non-numeric string", stored(0.50, "soon"), 0.02, reset, false},
+		{"stored utilization is tiny", stored(json.Number("1e-400"), reset.Unix()), 0.02, reset, false},
+		{"stored utilization is huge", stored(json.Number("1e400"), reset.Unix()), 0.02, reset, true},
 	}
 	for _, tc := range cases {
 		account := s.newRestartAccount("acc-restart-"+tc.name, tc.extra)
@@ -105,6 +112,18 @@ func (s *AccountRepoSuite) TestUpdateExtraDetectingWeeklyRestart_ManualRestartWi
 	entry := s.sevenDayRestart(account.ID)
 	s.Require().Equal("manual", entry["source"])
 	s.Require().Equal(float64(manualStart.Unix()), entry["start"])
+
+	// A malformed manual entry does not break the sample write.
+	odd := s.newRestartAccount("acc-restart-odd-manual", map[string]any{
+		"passive_usage_7d_utilization":      0.60,
+		"passive_usage_7d_reset":            reset.Unix(),
+		service.QuotaWindowRestartsExtraKey: map[string]any{"seven_day": map[string]any{"source": "manual", "reset": "soon"}},
+	})
+	restart, err = s.repo.UpdateExtraDetectingWeeklyRestart(s.ctx, odd.ID,
+		map[string]any{"passive_usage_7d_utilization": 0.01, "passive_usage_7d_reset": reset.Unix()},
+		service.WeeklyRestartObservation{Utilization: 0.01, Reset: reset, ObservedAt: now})
+	s.Require().NoError(err)
+	s.Require().NotNil(restart, "an unreadable manual entry does not block detection")
 
 	// A manual restart of an earlier window does not block detection; other
 	// window keys survive.

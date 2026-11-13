@@ -278,8 +278,9 @@ func (s *AccountUsageService) SetManualQuotaWindowRestart(ctx context.Context, a
 		start = *input.Start
 	}
 	start = start.Truncate(time.Second)
-	if start.Before(window.Start) || start.After(now) {
-		return nil, quotaWindowRestartInvalid(fmt.Sprintf("start must be between %s and now", window.Start.UTC().Format(time.RFC3339)))
+	// The window start itself is no restart: withRestart would ignore it.
+	if !start.After(window.Start) || start.After(now) {
+		return nil, quotaWindowRestartInvalid(fmt.Sprintf("start must be after %s and not in the future", window.Start.UTC().Format(time.RFC3339)))
 	}
 	restart := &QuotaWindowRestart{Start: start, Reset: window.Reset, Source: QuotaWindowRestartSourceManual}
 	if err := repo.SetQuotaWindowRestart(ctx, accountID, input.Window, restart); err != nil {
@@ -289,16 +290,25 @@ func (s *AccountUsageService) SetManualQuotaWindowRestart(ctx context.Context, a
 }
 
 // ClearQuotaWindowRestart removes the window's restart (manual or automatic).
-func (s *AccountUsageService) ClearQuotaWindowRestart(ctx context.Context, accountID int64, window string) error {
+// Like SetManualQuotaWindowRestart it is bound to the window the admin was
+// looking at: a moved window returns ErrQuotaWindowRestartConflict so a stale
+// dialog cannot remove the next window's restart.
+func (s *AccountUsageService) ClearQuotaWindowRestart(ctx context.Context, accountID int64, window string, expectedReset time.Time) error {
 	repo, ok := s.accountRepo.(AccountQuotaWindowRestartRepository)
 	if !ok {
 		return fmt.Errorf("quota window restart not supported")
 	}
-	if _, ok := QuotaWindowRestartWindows[strings.TrimSpace(window)]; !ok {
+	window = strings.TrimSpace(window)
+	if _, ok := QuotaWindowRestartWindows[window]; !ok {
 		return quotaWindowRestartInvalid(fmt.Sprintf("unsupported window %q", window))
 	}
-	if _, err := s.accountRepo.GetByID(ctx, accountID); err != nil {
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
 		return err
+	}
+	reset := currentQuotaWindowReset(account, window, time.Now())
+	if reset == nil || absDuration(reset.Sub(expectedReset)) > quotaResetMatchTolerance {
+		return ErrQuotaWindowRestartConflict
 	}
 	return repo.SetQuotaWindowRestart(ctx, accountID, window, nil)
 }

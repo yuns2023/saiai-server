@@ -52,6 +52,14 @@ describe('QuotaWindowRestartModal', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
+  it('sends no start when the default "now" is kept (server time, no DST ambiguity)', async () => {
+    const wrapper = makeModal()
+    await flushPromises()
+    await wrapper.get('[data-testid="restart-confirm"]').trigger('click')
+    await flushPromises()
+    expect(api.setQuotaWindowRestart).toHaveBeenCalledWith(287, { window: 'seven_day', expected_reset: Date.parse(RESET) / 1000, start: undefined })
+  })
+
   it('uses the active usage source for OpenAI accounts', async () => {
     makeModal(openai)
     await flushPromises()
@@ -65,7 +73,7 @@ describe('QuotaWindowRestartModal', () => {
     expect(wrapper.get('[data-testid="restart-current"]').text()).toContain('admin.accounts.quotaWindowRestart.current')
     await wrapper.get('[data-testid="restart-clear"]').trigger('click')
     await flushPromises()
-    expect(api.clearQuotaWindowRestart).toHaveBeenCalledWith(287)
+    expect(api.clearQuotaWindowRestart).toHaveBeenCalledWith(287, Date.parse(RESET) / 1000)
     expect(wrapper.emitted('updated')).toHaveLength(1)
   })
 
@@ -80,13 +88,18 @@ describe('QuotaWindowRestartModal', () => {
     }
   })
 
-  it('shows the server error (e.g. 409 when the window moved) and stays open', async () => {
-    api.setQuotaWindowRestart.mockRejectedValue({ message: 'quota window reset time changed; reload and retry' })
+  it('shows the server error (e.g. 409 when the window moved), re-reads the window and retries with the new reset', async () => {
+    const NEXT = '2026-11-19T13:00:00Z'
+    api.setQuotaWindowRestart.mockRejectedValueOnce({ message: 'quota window reset time changed; reload and retry' })
     const wrapper = makeModal()
     await flushPromises()
+    api.getUsage.mockResolvedValue({ seven_day: { utilization: 1, resets_at: NEXT, remaining_seconds: 1 } })
     await wrapper.get('[data-testid="restart-confirm"]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-testid="restart-error"]').text()).toContain('reload and retry')
     expect(wrapper.emitted('close')).toBeUndefined()
+    await wrapper.get('[data-testid="restart-confirm"]').trigger('click')
+    await flushPromises()
+    expect(api.setQuotaWindowRestart).toHaveBeenLastCalledWith(287, expect.objectContaining({ expected_reset: Date.parse(NEXT) / 1000 }))
   })
 })

@@ -278,6 +278,7 @@ func TestSetManualQuotaWindowRestart(t *testing.T) {
 
 	for name, start := range map[string]time.Time{
 		"before window start": reset.Add(-7*24*time.Hour - time.Second),
+		"at window start":     reset.Add(-7 * 24 * time.Hour),
 		"future":              now.Add(time.Minute),
 	} {
 		s := start
@@ -300,10 +301,14 @@ func TestSetManualQuotaWindowRestart(t *testing.T) {
 	require.True(t, badRequest(err), "an elapsed window cannot be restarted")
 
 	svc, repo = newSvc()
-	require.NoError(t, svc.ClearQuotaWindowRestart(context.Background(), 7, "seven_day"))
-	require.Equal(t, []string{"seven_day"}, repo.setWindows)
+	require.NoError(t, svc.ClearQuotaWindowRestart(context.Background(), 7, " seven_day ", reset))
+	require.Equal(t, []string{"seven_day"}, repo.setWindows, "the trimmed window is removed")
 	require.Nil(t, repo.set[0])
-	require.True(t, badRequest(svc.ClearQuotaWindowRestart(context.Background(), 7, "five_hour")))
+	require.True(t, badRequest(svc.ClearQuotaWindowRestart(context.Background(), 7, "five_hour", reset)))
+	svc, repo = newSvc()
+	require.True(t, conflict(svc.ClearQuotaWindowRestart(context.Background(), 7, "seven_day", reset.Add(-7*24*time.Hour))),
+		"a stale dialog cannot remove the next window's restart")
+	require.Empty(t, repo.set)
 }
 
 func TestSyncActiveToPassiveDetectsOnlyFreshResults(t *testing.T) {

@@ -1482,22 +1482,19 @@ func (r *accountRepository) UpdateExtraDetectingWeeklyRestart(ctx context.Contex
 		),
 		d AS (
 			SELECT id, extra,
-				COALESCE(
-					jsonb_typeof(extra->'passive_usage_7d_reset') = 'number'
-					AND jsonb_typeof(extra->'passive_usage_7d_utilization') = 'number'
-					AND abs((extra->>'passive_usage_7d_reset')::numeric - $3::numeric) <= $4::numeric
-					AND (extra->>'passive_usage_7d_utilization')::double precision - $5::double precision >= $6::double precision
-					-- COALESCE: with no stored restart every test below is NULL, and
-					-- NOT NULL would turn the whole condition NULL (no detection).
-					AND NOT COALESCE(
-						jsonb_typeof(extra->'quota_window_restarts'->'seven_day') = 'object'
-						AND extra->'quota_window_restarts'->'seven_day'->>'source' = 'manual'
-						AND jsonb_typeof(extra->'quota_window_restarts'->'seven_day'->'reset') = 'number'
-						AND abs((extra->'quota_window_restarts'->'seven_day'->>'reset')::numeric - $3::numeric) <= $4::numeric,
-						false
-					),
-					false
-				) AS restarted
+				-- CASE (not AND) guards every cast: AND has no evaluation order in
+				-- PostgreSQL, and a failed cast would drop the sample. numeric
+				-- (not double precision) cannot overflow on odd stored values.
+				CASE WHEN jsonb_typeof(extra->'passive_usage_7d_reset') = 'number'
+						AND jsonb_typeof(extra->'passive_usage_7d_utilization') = 'number'
+					THEN abs((extra->>'passive_usage_7d_reset')::numeric - $3::numeric) <= $4::numeric
+						AND (extra->>'passive_usage_7d_utilization')::numeric - $5::numeric >= $6::numeric
+						AND NOT CASE WHEN jsonb_typeof(extra->'quota_window_restarts'->'seven_day') = 'object'
+								AND extra->'quota_window_restarts'->'seven_day'->>'source' = 'manual'
+								AND jsonb_typeof(extra->'quota_window_restarts'->'seven_day'->'reset') = 'number'
+							THEN abs((extra->'quota_window_restarts'->'seven_day'->>'reset')::numeric - $3::numeric) <= $4::numeric
+							ELSE false END
+					ELSE false END AS restarted
 			FROM cur
 		)
 		UPDATE accounts a

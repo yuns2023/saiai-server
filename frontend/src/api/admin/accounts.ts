@@ -400,8 +400,8 @@ export async function setQuotaWindowRestart(
   return data
 }
 
-export async function clearQuotaWindowRestart(id: number, window: 'seven_day' = 'seven_day'): Promise<void> {
-  await apiClient.delete(`/admin/accounts/${id}/quota-window-restart`, { params: { window } })
+export async function clearQuotaWindowRestart(id: number, expectedReset: number, window: 'seven_day' = 'seven_day'): Promise<void> {
+  await apiClient.delete(`/admin/accounts/${id}/quota-window-restart`, { params: { window, expected_reset: expectedReset } })
 }
 
 /**
