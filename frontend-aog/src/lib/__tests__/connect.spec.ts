@@ -10,12 +10,22 @@ describe('connect', () => {
 
   it('quotes keys for each shell', () => {
     const key = "sk-it's"
-    expect(connectSnippet('anthropic', 'https://aog.example', key, 'unix').command).toBe(
+    expect(connectSnippet('anthropic', 'https://aog.example', key, 'unix', { oneLine: true }).command).toBe(
       "curl -fsSL https://aog.example/saiai-cli/setup.sh | bash -s -- 'https://aog.example' 'sk-it'\\''s'"
     )
-    expect(connectSnippet('openai', 'https://aog.example', key, 'powershell').command).toBe(
+    expect(connectSnippet('openai', 'https://aog.example', key, 'powershell', { oneLine: true }).command).toBe(
       "irm https://aog.example/saiai-cli/setup.ps1 | iex; Invoke-Saiai init-codex 'https://aog.example/v1' 'sk-it''s'"
     )
+  })
+
+  it('offers no one-line install by default until the client installer ships', () => {
+    for (const platform of ['anthropic', 'openai'] as const) {
+      for (const shell of ['unix', 'powershell', 'cmd'] as const) {
+        const s = connectSnippet(platform, 'https://aog.example', 'k', shell)
+        expect(s.command).toBeNull()
+        expect(s.envLines.length).toBe(2)
+      }
+    }
   })
 
   it('has no one-line command for Gemini, only env vars', () => {
