@@ -55,9 +55,11 @@ type SocialOAuthPendingStore interface {
 	Save(ctx context.Context, token string, pending *SocialOAuthPendingSignup, ttl time.Duration) error
 	Peek(ctx context.Context, token string) (*SocialOAuthPendingSignup, error)
 	Consume(ctx context.Context, token string) (*SocialOAuthPendingSignup, error)
-	// RecordFailure counts a failed completion attempt; once maxFailures is reached the
-	// pending entry is deleted atomically and exhausted=true is returned.
-	RecordFailure(ctx context.Context, token string, maxFailures int, ttl time.Duration) (exhausted bool, err error)
+	// ReserveAttempt atomically takes one invitation-check attempt from the pending entry's
+	// budget before the code is looked up. It returns the attempt number and ok=false when the
+	// entry is gone or the budget is spent (the entry is then deleted). The counter is not
+	// reset on exhaustion, so in-flight requests cannot start a fresh budget.
+	ReserveAttempt(ctx context.Context, token string, maxAttempts int, ttl time.Duration) (attempt int, ok bool, err error)
 }
 
 // socialOAuthMaxInvitationFailures is the wrong-invitation-code budget per pending sign-up.
@@ -252,17 +254,24 @@ func (s *SocialOAuthService) CompleteRegistration(ctx context.Context, provider 
 	}
 	var invitation *RedeemCode
 	if policy.InvitationRequired {
+		if strings.TrimSpace(invitationCode) == "" {
+			return nil, ErrInvitationCodeRequired
+		}
+		// At most socialOAuthMaxInvitationFailures code checks per pending sign-up, enforced
+		// atomically before the lookup so concurrent guesses share the same budget.
+		attempt, ok, rerr := s.pending.ReserveAttempt(ctx, token, socialOAuthMaxInvitationFailures, SocialOAuthPendingTTL)
+		if rerr != nil {
+			logger.LegacyPrintf("service.social_oauth", "[SocialOAuth] reserve attempt failed: %v", rerr)
+			return nil, ErrServiceUnavailable
+		}
+		if !ok {
+			return nil, ErrSocialOAuthPendingInvalid
+		}
 		invitation, err = s.lookupInvitation(ctx, invitationCode)
-		if errors.Is(err, ErrInvitationCodeInvalid) {
-			exhausted, ferr := s.pending.RecordFailure(ctx, token, socialOAuthMaxInvitationFailures, SocialOAuthPendingTTL)
-			if ferr != nil {
-				logger.LegacyPrintf("service.social_oauth", "[SocialOAuth] record pending failure failed: %v", ferr)
-				return nil, ErrServiceUnavailable
-			}
-			if exhausted {
-				return nil, ErrSocialOAuthPendingInvalid
-			}
-			return nil, err
+		if errors.Is(err, ErrInvitationCodeInvalid) && attempt >= socialOAuthMaxInvitationFailures {
+			// Last attempt spent on a wrong code: invalidate now.
+			_, _ = s.pending.Consume(ctx, token)
+			return nil, ErrSocialOAuthPendingInvalid
 		}
 		if err != nil {
 			return nil, err

@@ -166,7 +166,9 @@ func (h *AuthHandler) SocialOAuthCallback(provider service.SocialOAuthProvider) 
 			return
 		}
 		if providerErr := strings.TrimSpace(c.Query("error")); providerErr != "" {
-			redirectOAuthError(c, frontendCallback, "provider_error", providerErr, singleLine(c.Query("error_description")))
+			// Only a fixed code: provider/attacker-supplied text is not reflected into the page.
+			log.Printf("[SocialOAuth] %s provider error=%q", provider, truncateLogValue(providerErr, 128))
+			redirectOAuthError(c, frontendCallback, "provider_error", "", "")
 			return
 		}
 		code := strings.TrimSpace(c.Query("code"))
@@ -208,7 +210,7 @@ func (h *AuthHandler) SocialOAuthCallback(provider service.SocialOAuthProvider) 
 
 		result, err := h.socialOAuth.SignIn(c.Request.Context(), identity)
 		if err != nil {
-			redirectOAuthError(c, frontendCallback, "login_failed", infraerrors.Reason(err), infraerrors.Message(err))
+			redirectOAuthError(c, frontendCallback, "login_failed", infraerrors.Reason(err), "")
 			return
 		}
 

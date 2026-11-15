@@ -213,19 +213,22 @@ type memPendingStore struct {
 	onConsume func()
 }
 
-func (m *memPendingStore) RecordFailure(_ context.Context, token string, maxFailures int, _ time.Duration) (bool, error) {
+func (m *memPendingStore) ReserveAttempt(_ context.Context, token string, maxAttempts int, _ time.Duration) (int, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.failures == nil {
 		m.failures = map[string]int{}
 	}
-	m.failures[token]++
-	if m.failures[token] >= maxFailures {
-		delete(m.entries, token)
-		delete(m.failures, token)
-		return true, nil
+	e, ok := m.entries[token]
+	if !ok || !m.now.Before(e.expires) {
+		return 0, false, nil
 	}
-	return false, nil
+	m.failures[token]++
+	if m.failures[token] > maxAttempts {
+		delete(m.entries, token)
+		return 0, false, nil
+	}
+	return m.failures[token], true, nil
 }
 
 type memHandoffStore struct {
@@ -790,6 +793,33 @@ func TestSocialOAuth_Invitation_WrongCodeBudget(t *testing.T) {
 	require.Empty(t, f.redeem.used)
 }
 
+func TestSocialOAuth_Invitation_ConcurrentGuessesShareBudget(t *testing.T) {
+	f := newSocialFixture(t, map[string]string{SettingKeyInvitationCodeEnabled: "true"})
+	ctx := context.Background()
+	res, err := f.svc.SignIn(ctx, googleIdentity())
+	require.NoError(t, err)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	lookups := 0
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := f.svc.CompleteRegistration(ctx, SocialOAuthProviderGoogle, res.PendingToken, "WRONG")
+			if errors.Is(err, ErrInvitationCodeInvalid) {
+				mu.Lock()
+				lookups++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	require.Less(t, lookups, socialOAuthMaxInvitationFailures, "never more than the budget of retryable code checks")
+	_, err = f.svc.CompleteRegistration(ctx, SocialOAuthProviderGoogle, res.PendingToken, "INVITE-OK")
+	require.ErrorIs(t, err, ErrSocialOAuthPendingInvalid)
+	require.Empty(t, f.users.users)
+}
+
 func TestSocialOAuth_NewUserDefaultsReadStrictly(t *testing.T) {
 	f := newSocialFixture(t, map[string]string{
 		SettingKeyDefaultBalance:       "7.5",
@@ -830,7 +860,7 @@ func TestSocialOAuthRedirectURL_OriginOnly(t *testing.T) {
 	require.Equal(t, "https://a.example/api/v1/auth/oauth/github/callback", SocialOAuthRedirectURL("https://a.example", SocialOAuthProviderGitHub))
 	require.Equal(t, "https://a.example/api/v1/auth/oauth/github/callback", SocialOAuthRedirectURL("https://a.example/", SocialOAuthProviderGitHub))
 	require.Equal(t, "http://a.example:8080/api/v1/auth/oauth/google/callback", SocialOAuthRedirectURL("http://a.example:8080", SocialOAuthProviderGoogle))
-	for _, bad := range []string{"", "a.example", "ftp://a.example", "https://a.example/app", "https://a.example/app/", "https://a.example?x=1", "https://a.example#f", "https://u:p@a.example"} {
+	for _, bad := range []string{"", "a.example", "ftp://a.example", "https://a.example/app", "https://a.example/app/", "https://a.example?x=1", "https://a.example#f", "https://u:p@a.example", "https://a.example?", "https://a.example#", "https://a.example/?"} {
 		require.Empty(t, SocialOAuthRedirectURL(bad, SocialOAuthProviderGoogle), bad)
 	}
 }

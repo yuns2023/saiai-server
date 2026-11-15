@@ -91,23 +91,50 @@ func (s *SocialOAuthPendingStoreSuite) TestMissing() {
 	require.Nil(s.T(), got)
 }
 
-func (s *SocialOAuthPendingStoreSuite) TestFailureBudgetDeletesPending() {
+func (s *SocialOAuthPendingStoreSuite) TestAttemptBudget() {
 	token := strings.Repeat("f", 64)
 	s.RequireNoError(s.store.Save(s.ctx, token, s.pending(), time.Minute))
-	for i := 1; i < 3; i++ {
-		exhausted, err := s.store.RecordFailure(s.ctx, token, 3, time.Minute)
+	for i := 1; i <= 3; i++ {
+		n, ok, err := s.store.ReserveAttempt(s.ctx, token, 3, time.Minute)
 		s.RequireNoError(err)
-		require.False(s.T(), exhausted)
+		require.True(s.T(), ok)
+		require.Equal(s.T(), i, n)
 	}
-	exhausted, err := s.store.RecordFailure(s.ctx, token, 3, time.Minute)
+	_, ok, err := s.store.ReserveAttempt(s.ctx, token, 3, time.Minute)
 	s.RequireNoError(err)
-	require.True(s.T(), exhausted)
+	require.False(s.T(), ok, "budget spent")
 	got, err := s.store.Peek(s.ctx, token)
 	s.RequireNoError(err)
-	require.Nil(s.T(), got)
+	require.Nil(s.T(), got, "pending deleted once the budget is spent")
 	ttl, err := s.rdb.TTL(s.ctx, hashedKey(socialOAuthPendingFailKeyPrefix, token)).Result()
 	s.RequireNoError(err)
-	require.True(s.T(), ttl < 0, "counter removed with the entry")
+	s.AssertTTLWithin(ttl, time.Second, time.Minute)
+
+	// Unknown entries never get a budget.
+	_, ok, err = s.store.ReserveAttempt(s.ctx, strings.Repeat("e", 64), 3, time.Minute)
+	s.RequireNoError(err)
+	require.False(s.T(), ok)
+}
+
+func (s *SocialOAuthPendingStoreSuite) TestConcurrentAttemptsBounded() {
+	token := strings.Repeat("7", 64)
+	s.RequireNoError(s.store.Save(s.ctx, token, s.pending(), time.Minute))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	granted := 0
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, ok, err := s.store.ReserveAttempt(s.ctx, token, 5, time.Minute); err == nil && ok {
+				mu.Lock()
+				granted++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	require.Equal(s.T(), 5, granted)
 }
 
 func (s *SocialOAuthPendingStoreSuite) TestHandoffConsumeOnce() {

@@ -30,19 +30,24 @@ end
 return v
 `)
 
-// socialOAuthFailureScript counts a failure and deletes the pending entry once the budget is spent.
-// KEYS[1] = pending key, KEYS[2] = failure counter; ARGV[1] = max failures, ARGV[2] = ttl ms.
-var socialOAuthFailureScript = redis.NewScript(`
+// socialOAuthAttemptScript takes one attempt from a pending entry's budget.
+// KEYS[1] = pending key, KEYS[2] = attempt counter; ARGV[1] = max attempts, ARGV[2] = ttl ms.
+// Returns 0 when the entry is gone or the budget is spent (the entry is deleted then; the
+// counter is kept until it expires so in-flight requests cannot restart the budget),
+// otherwise the attempt number.
+var socialOAuthAttemptScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then
+  return 0
+end
 local n = redis.call('INCR', KEYS[2])
 if n == 1 then
   redis.call('PEXPIRE', KEYS[2], ARGV[2])
 end
-if n >= tonumber(ARGV[1]) then
+if n > tonumber(ARGV[1]) then
   redis.call('DEL', KEYS[1])
-  redis.call('DEL', KEYS[2])
-  return 1
+  return 0
 end
-return 0
+return n
 `)
 
 // hashedKey never uses the raw handle as a Redis key.
@@ -126,15 +131,15 @@ func (s *socialOAuthPendingStore) Consume(ctx context.Context, token string) (*s
 	return &pending, nil
 }
 
-func (s *socialOAuthPendingStore) RecordFailure(ctx context.Context, token string, maxFailures int, ttl time.Duration) (bool, error) {
-	n, err := socialOAuthFailureScript.Run(ctx, s.rdb,
+func (s *socialOAuthPendingStore) ReserveAttempt(ctx context.Context, token string, maxAttempts int, ttl time.Duration) (int, bool, error) {
+	n, err := socialOAuthAttemptScript.Run(ctx, s.rdb,
 		[]string{socialOAuthPendingKey(token), hashedKey(socialOAuthPendingFailKeyPrefix, token)},
-		maxFailures, ttl.Milliseconds(),
+		maxAttempts, ttl.Milliseconds(),
 	).Int()
 	if err != nil {
-		return false, fmt.Errorf("record pending failure: %w", err)
+		return 0, false, fmt.Errorf("reserve pending attempt: %w", err)
 	}
-	return n == 1, nil
+	return n, n > 0, nil
 }
 
 type socialOAuthHandoffStore struct {

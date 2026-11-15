@@ -92,10 +92,10 @@ func SocialOAuthRedirectURL(frontendURL string, provider SocialOAuthProvider) st
 		return ""
 	}
 	// The API is served at the site root, so only a bare origin can derive the callback URL.
-	if u.Path != "" && u.Path != "/" {
+	if u.Path != "" && u.Path != "/" || u.ForceQuery || strings.ContainsAny(base, "?#") || u.Host == "" {
 		return ""
 	}
-	return strings.TrimRight(base, "/") + provider.CallbackPath()
+	return strings.ToLower(u.Scheme) + "://" + u.Host + provider.CallbackPath()
 }
 
 // GetSocialOAuthConfig returns the effective configuration for a provider.

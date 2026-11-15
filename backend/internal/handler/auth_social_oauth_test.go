@@ -496,9 +496,10 @@ func TestSocialOAuthCallback_StateChecks(t *testing.T) {
 	frag, _ = doCallback(t, r, service.SocialOAuthProviderGoogle, "?state="+url.QueryEscape(state), google.cookies)
 	require.Equal(t, "missing_params", frag.Get("error"))
 
-	// Provider-reported error.
-	frag, _ = doCallback(t, r, service.SocialOAuthProviderGoogle, "?error=access_denied", google.cookies)
+	// Provider-reported error: only a fixed code is reflected, never the provider's text.
+	frag, _ = doCallback(t, r, service.SocialOAuthProviderGoogle, "?error=%3Cscript%3E&error_description=evil", google.cookies)
 	require.Equal(t, "provider_error", frag.Get("error"))
+	require.Len(t, frag, 1)
 
 	// Wrong PKCE verifier/code => token exchange fails.
 	frag, _ = doCallback(t, r, service.SocialOAuthProviderGoogle, "?code=bad-code&state="+url.QueryEscape(state), google.cookies)
@@ -550,6 +551,7 @@ func TestSocialOAuthCallback_DisabledUserRefused(t *testing.T) {
 	frag := fullFlow(t, service.SocialOAuthProviderGoogle, backend, newFakeProvider(t))
 	require.Equal(t, "login_failed", frag.Get("error"))
 	require.Equal(t, "USER_NOT_ACTIVE", frag.Get("error_message"))
+	require.Empty(t, frag.Get("error_description"))
 	require.Empty(t, frag.Get("access_token"))
 }
 
@@ -671,14 +673,17 @@ func TestSocialOAuthHandoff_RejectsEverythingButTheRightBrowser(t *testing.T) {
 		require.Nil(t, res.data, msg)
 	}
 
-	// Code without the binder cookie (e.g. a link sent to a victim) is useless.
-	frag, _, r, _ := newFlow()
+	// Code without the binder cookie (e.g. a link sent to a victim) is useless, and does not
+	// burn the code for the browser that owns it.
+	frag, cookies0, r, _ := newFlow()
 	requireInvalid(doExchange(t, r, service.SocialOAuthProviderGoogle, frag.Get("code"), nil), "no cookie")
+	require.Equal(t, http.StatusOK, doExchange(t, r, service.SocialOAuthProviderGoogle, frag.Get("code"), cookies0).status)
 
-	// Wrong binder cookie (attacker's own browser).
-	frag, _, r, _ = newFlow()
+	// Wrong binder cookie (attacker's own browser): refused, and the code is spent.
+	frag, cookies0, r, _ = newFlow()
 	forged := []*http.Cookie{{Name: "google_oauth_handoff", Value: strings.Repeat("f", 64)}}
 	requireInvalid(doExchange(t, r, service.SocialOAuthProviderGoogle, frag.Get("code"), forged), "wrong cookie")
+	requireInvalid(doExchange(t, r, service.SocialOAuthProviderGoogle, frag.Get("code"), cookies0), "burned by a wrong binder")
 
 	// Reused code.
 	frag, cookies, r, _ := newFlow()
