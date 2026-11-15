@@ -317,11 +317,13 @@ func socialOAuthExchangeCode(ctx context.Context, endpoints socialOAuthEndpoints
 		providerErr, providerDesc := parseOAuthProviderError(body)
 		return "", fmt.Errorf("token status=%d error=%q description=%q", resp.StatusCode, providerErr, truncateLogValue(providerDesc, 256))
 	}
-	// GitHub reports errors with HTTP 200 and no access_token.
+	// GitHub reports errors with HTTP 200; any "error" field means failure.
+	if providerErr := strings.TrimSpace(getGJSON(body, "error")); providerErr != "" {
+		return "", fmt.Errorf("token response error=%q", providerErr)
+	}
 	token, ok := parseLinuxDoTokenResponse(body)
 	if !ok || strings.TrimSpace(token.AccessToken) == "" {
-		providerErr, _ := parseOAuthProviderError(body)
-		return "", fmt.Errorf("token response without access_token (error=%q)", providerErr)
+		return "", errors.New("token response without access_token")
 	}
 	authorization, err := buildBearerAuthorization(token.TokenType, token.AccessToken)
 	if err != nil {
@@ -390,8 +392,7 @@ func parseGoogleUserInfo(body string) (service.SocialOAuthIdentity, error) {
 	if sub.Type != gjson.String || strings.TrimSpace(sub.String()) == "" {
 		return service.SocialOAuthIdentity{}, errors.New("google userinfo missing sub")
 	}
-	verified := gjson.Get(body, "email_verified")
-	isVerified := verified.Type == gjson.True || (verified.Type == gjson.String && verified.String() == "true")
+	isVerified := gjson.Get(body, "email_verified").Type == gjson.True
 	email := strings.TrimSpace(gjson.Get(body, "email").String())
 	if !isVerified || email == "" {
 		return service.SocialOAuthIdentity{}, service.ErrSocialOAuthEmailNotVerified

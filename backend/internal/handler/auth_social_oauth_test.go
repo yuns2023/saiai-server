@@ -277,6 +277,7 @@ func TestSocialOAuthCallback_GoogleEmailNotVerified(t *testing.T) {
 		`{"sub":"1","email":"a@b.co","email_verified":false}`,
 		`{"sub":"1","email":"a@b.co"}`,
 		`{"sub":"1","email":"a@b.co","email_verified":"false"}`,
+		`{"sub":"1","email":"a@b.co","email_verified":"true"}`,
 		`{"sub":"1","email_verified":true}`,
 	} {
 		backend := &fakeSocialBackend{}
@@ -334,6 +335,15 @@ func TestSocialOAuthCallback_GitHubNonNumericID(t *testing.T) {
 		require.Equal(t, "userinfo_failed", frag.Get("error"), user)
 		require.Empty(t, backend.identities)
 	}
+}
+
+func TestSocialOAuthExchange_RejectsErrorWithToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"error":"bad_verification_code","access_token":"oops","token_type":"bearer"}`))
+	}))
+	defer srv.Close()
+	_, err := socialOAuthExchangeCode(context.Background(), socialOAuthEndpoints{TokenURL: srv.URL}, service.SocialOAuthConfig{ClientID: "c", ClientSecret: "s"}, "code", "verifier")
+	require.Error(t, err)
 }
 
 func TestSocialOAuthCallback_StateChecks(t *testing.T) {

@@ -395,6 +395,11 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		fmt.Println("IMPORTANT: Save this password! It will not be shown again.")
 	}
 
+	// Third-party sign-in synthetic addresses bind accounts to a provider identity;
+	// an admin created with one would be signed into by that provider account.
+	if service.IsReservedOAuthEmail(cfg.Admin.Email) {
+		return false, "", fmt.Errorf("admin email uses a reserved third-party sign-in domain")
+	}
 	admin := &service.User{
 		Email:       cfg.Admin.Email,
 		Role:        service.RoleAdmin,

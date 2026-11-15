@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -186,9 +187,10 @@ func (c *socialTotpCache) SetLoginSession(_ context.Context, token string, s *To
 }
 
 type memPendingStore struct {
-	mu      sync.Mutex
-	now     time.Time
-	entries map[string]memPendingEntry
+	mu        sync.Mutex
+	now       time.Time
+	entries   map[string]memPendingEntry
+	onConsume func()
 }
 
 type memPendingEntry struct {
@@ -227,7 +229,11 @@ func (m *memPendingStore) Peek(_ context.Context, token string) (*SocialOAuthPen
 }
 
 func (m *memPendingStore) Consume(_ context.Context, token string) (*SocialOAuthPendingSignup, error) {
-	return m.get(token, true), nil
+	v := m.get(token, true)
+	if m.onConsume != nil {
+		m.onConsume()
+	}
+	return v, nil
 }
 
 // ---- fixture --------------------------------------------------------------
@@ -474,6 +480,35 @@ func TestSocialOAuth_Invitation_RegistrationClosedBeforeComplete(t *testing.T) {
 	require.Empty(t, f.users.users)
 }
 
+func TestSocialOAuth_Invitation_PolicyChangeDuringComplete(t *testing.T) {
+	for name, change := range map[string][2]string{
+		"provider disabled":   {SettingKeyGoogleOAuthEnabled, "false"},
+		"registration closed": {SettingKeyRegistrationEnabled, "false"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newSocialFixture(t, map[string]string{SettingKeyInvitationCodeEnabled: "true"})
+			res, err := f.svc.SignIn(context.Background(), googleIdentity())
+			require.NoError(t, err)
+			// The change lands after the pre-consume checks passed.
+			f.pending.onConsume = func() { f.settings.set(change[0], change[1]) }
+			_, err = f.svc.CompleteRegistration(context.Background(), SocialOAuthProviderGoogle, res.PendingToken, "INVITE-OK")
+			require.Error(t, err)
+			require.Empty(t, f.users.users)
+			require.Empty(t, f.redeem.used)
+		})
+	}
+
+	// Invitation switched on while a no-invitation completion is in flight.
+	f := newSocialFixture(t, map[string]string{SettingKeyInvitationCodeEnabled: "true"})
+	res, err := f.svc.SignIn(context.Background(), googleIdentity())
+	require.NoError(t, err)
+	f.settings.set(SettingKeyInvitationCodeEnabled, "false")
+	f.pending.onConsume = func() { f.settings.set(SettingKeyInvitationCodeEnabled, "true") }
+	_, err = f.svc.CompleteRegistration(context.Background(), SocialOAuthProviderGoogle, res.PendingToken, "")
+	require.ErrorIs(t, err, ErrInvitationCodeInvalid)
+	require.Empty(t, f.users.users)
+}
+
 func TestSocialOAuth_Invitation_ClaimFailureRollsBackUser(t *testing.T) {
 	f := newSocialFixture(t, map[string]string{SettingKeyInvitationCodeEnabled: "true"})
 	res, err := f.svc.SignIn(context.Background(), googleIdentity())
@@ -593,6 +628,16 @@ func TestPublicSettings_SocialFlagsOnlyNoSecrets(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, pub.GoogleOAuthEnabled)
 	require.False(t, pub.GitHubOAuthEnabled)
+
+	injected, err := f.svc.settings.GetPublicSettingsForInjection(context.Background())
+	require.NoError(t, err)
+	raw, err := json.Marshal(injected)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"google_oauth_enabled":true`)
+	require.Contains(t, string(raw), `"github_oauth_enabled":false`)
+	for _, leak := range []string{"gsecret", "hsecret", "client_secret", "client_id", `"gid"`} {
+		require.NotContains(t, string(raw), leak)
+	}
 
 	empty := NewSettingService(&socialSettingRepo{values: map[string]string{}}, &config.Config{})
 	pub, err = empty.GetPublicSettings(context.Background())

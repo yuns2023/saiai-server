@@ -260,6 +260,19 @@ func (s *SocialOAuthService) CompleteRegistration(ctx context.Context, provider 
 		return nil, ErrSocialOAuthPendingInvalid
 	}
 
+	// Re-check after consumption so a provider/registration change that landed while this
+	// request was in flight is honoured (the session is gone either way; the user restarts).
+	if _, err := s.Config(ctx, provider); err != nil {
+		return nil, err
+	}
+	recheck, err := s.signupPolicy(ctx, identity)
+	if err != nil {
+		return nil, err
+	}
+	if recheck.InvitationRequired && invitation == nil {
+		return nil, ErrInvitationCodeInvalid
+	}
+
 	email := SocialOAuthSyntheticEmail(identity.Provider, identity.Subject)
 	if _, err := s.auth.userRepo.GetByEmail(ctx, email); err == nil {
 		return nil, ErrSocialOAuthAccountExists

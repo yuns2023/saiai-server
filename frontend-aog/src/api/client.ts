@@ -165,7 +165,8 @@ function expireSession(): void {
   window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
   if (hadSession) sessionStorage.setItem('auth_expired', '1')
   const here = window.location.pathname
-  if (!PUBLIC_PATHS.includes(here)) {
+  // The Google / GitHub callback page reports its own failures; bouncing it to /login would lose the hand-over.
+  if (!PUBLIC_PATHS.includes(here) && !here.startsWith('/auth/oauth/')) {
     const back = encodeURIComponent(`${here}${window.location.search}`)
     window.location.href = `/login?redirect=${back}`
   }

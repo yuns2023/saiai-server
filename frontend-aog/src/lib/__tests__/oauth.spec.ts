@@ -75,3 +75,21 @@ describe('isSocialProvider', () => {
     expect(isSocialProvider('linuxdo')).toBe(false)
   })
 })
+
+describe('captureOAuthFragmentAtStartup', () => {
+  it('clears the fragment on the callback page and hands it to the view once', async () => {
+    const { captureOAuthFragmentAtStartup, takeOAuthFragment: take } = await import('../oauth')
+    window.history.replaceState(null, '', '/auth/oauth/github/callback#access_token=early')
+    captureOAuthFragmentAtStartup()
+    expect(window.location.hash).toBe('')
+    expect(take()).toBe('#access_token=early')
+    expect(take()).toBe('')
+  })
+
+  it('leaves other pages alone', async () => {
+    const { captureOAuthFragmentAtStartup } = await import('../oauth')
+    window.history.replaceState(null, '', '/billing#section')
+    captureOAuthFragmentAtStartup()
+    expect(window.location.hash).toBe('#section')
+  })
+})

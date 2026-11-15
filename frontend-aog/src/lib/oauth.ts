@@ -57,14 +57,37 @@ export function parseOAuthFragment(hash: string, origin = window.location.origin
   return { kind: 'error', code: 'missing', reason: '' }
 }
 
+/** Fragment taken off the address bar at startup, waiting for the callback view. */
+let captured: string | null = null
+
 /**
  * Reads the fragment once and removes it from the address bar and the
  * current history entry, so tokens are not left in history or reused on reload.
+ * A fragment captured earlier by captureOAuthFragmentAtStartup is returned first.
  */
 export function takeOAuthFragment(win: Window = window): string {
+  if (captured !== null) {
+    const hash = captured
+    captured = null
+    return hash
+  }
   const hash = win.location.hash
   if (hash) {
     win.history.replaceState(win.history.state, '', `${win.location.pathname}${win.location.search}`)
   }
   return hash
+}
+
+
+const CALLBACK_PATH = /^\/auth\/oauth\/(google|github)\/callback\/?$/
+
+/**
+ * Called before the app restores a session or waits for settings: on the
+ * callback page, take the fragment off the address bar immediately and keep
+ * it in memory for the callback view.
+ */
+export function captureOAuthFragmentAtStartup(win: Window = window): void {
+  if (!CALLBACK_PATH.test(win.location.pathname)) return
+  captured = null
+  captured = takeOAuthFragment(win)
 }
