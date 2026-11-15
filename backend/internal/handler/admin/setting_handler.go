@@ -155,6 +155,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		UserInviteEnabled:                    settings.UserInviteEnabled,
 		UserInviteMaxUnused:                  settings.UserInviteMaxUnused,
 		UserInviteMaxTotal:                   settings.UserInviteMaxTotal,
+		UserInviteMaxPerWeek:                 settings.UserInviteMaxPerWeek,
 		TotpEnabled:                          settings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             settings.SMTPHost,
@@ -235,10 +236,11 @@ type UpdateSettingsRequest struct {
 	// nil = keep the stored value, so admin clients that predate the field do not wipe it.
 	InvitationCodeHint *string `json:"invitation_code_hint"`
 	// User-generated invitation codes; nil = keep the stored value.
-	UserInviteEnabled   *bool `json:"user_invite_enabled"`
-	UserInviteMaxUnused *int  `json:"user_invite_max_unused"`
-	UserInviteMaxTotal  *int  `json:"user_invite_max_total"`
-	TotpEnabled         bool  `json:"totp_enabled"` // TOTP 双因素认证
+	UserInviteEnabled    *bool `json:"user_invite_enabled"`
+	UserInviteMaxUnused  *int  `json:"user_invite_max_unused"`
+	UserInviteMaxTotal   *int  `json:"user_invite_max_total"`
+	UserInviteMaxPerWeek *int  `json:"user_invite_max_per_week"`
+	TotpEnabled          bool  `json:"totp_enabled"` // TOTP 双因素认证
 
 	// 邮件服务设置
 	SMTPHost     string `json:"smtp_host"`
@@ -665,6 +667,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 		userInviteMaxTotal = *req.UserInviteMaxTotal
 	}
+	userInviteMaxPerWeek := previousSettings.UserInviteMaxPerWeek
+	if req.UserInviteMaxPerWeek != nil {
+		if *req.UserInviteMaxPerWeek < 0 || *req.UserInviteMaxPerWeek > service.MaxUserInviteMaxPerWeek {
+			response.Error(c, http.StatusBadRequest, fmt.Sprintf("user_invite_max_per_week must be between 0 and %d", service.MaxUserInviteMaxPerWeek))
+			return
+		}
+		userInviteMaxPerWeek = *req.UserInviteMaxPerWeek
+	}
 
 	maintenanceEnabled := previousSettings.MaintenanceModeEnabled
 	if req.MaintenanceModeEnabled != nil {
@@ -687,6 +697,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		UserInviteEnabled:                userInviteEnabled,
 		UserInviteMaxUnused:              userInviteMaxUnused,
 		UserInviteMaxTotal:               userInviteMaxTotal,
+		UserInviteMaxPerWeek:             userInviteMaxPerWeek,
 		TotpEnabled:                      req.TotpEnabled,
 		SMTPHost:                         req.SMTPHost,
 		SMTPPort:                         req.SMTPPort,
@@ -820,6 +831,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		UserInviteEnabled:                    updatedSettings.UserInviteEnabled,
 		UserInviteMaxUnused:                  updatedSettings.UserInviteMaxUnused,
 		UserInviteMaxTotal:                   updatedSettings.UserInviteMaxTotal,
+		UserInviteMaxPerWeek:                 updatedSettings.UserInviteMaxPerWeek,
 		TotpEnabled:                          updatedSettings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             updatedSettings.SMTPHost,
@@ -993,6 +1005,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.UserInviteMaxTotal != after.UserInviteMaxTotal {
 		changed = append(changed, "user_invite_max_total")
+	}
+	if before.UserInviteMaxPerWeek != after.UserInviteMaxPerWeek {
+		changed = append(changed, "user_invite_max_per_week")
 	}
 	if before.SiteName != after.SiteName {
 		changed = append(changed, "site_name")

@@ -5083,6 +5083,8 @@ export default {
         userInviteMaxUnusedHint: 'Unused codes a user may hold at once, 1–100. They can generate another once one is used or revoked.',
         userInviteMaxTotal: 'Invitations per user (lifetime)',
         userInviteMaxTotalHint: 'Most people one user can invite, unused codes included. 0 = no limit.',
+        userInviteMaxPerWeek: 'Codes per user per week',
+        userInviteMaxPerWeekHint: 'Codes one user can generate in any rolling 7 days, counted by creation time; used and unused codes count, revoked ones do not (revoke-and-regenerate is separately capped at 20 a day). 0 = no limit, max 1000.',
         passwordReset: 'Password Reset',
         passwordResetHint: 'Allow users to reset their password via email',
         frontendUrl: 'Frontend URL',

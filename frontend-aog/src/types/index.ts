@@ -2115,6 +2115,11 @@ export interface UserInviteOverview {
   invited: number
   /** 20 codes generated in the last 24h (revoked ones included). */
   daily_limit_reached: boolean
+  /** Codes per rolling 7 days, revoked ones excluded; 0 = no weekly limit. */
+  max_per_week: number
+  /** Non-revoked codes generated in the last 7 days. */
+  created_this_week: number
+  weekly_limit_reached: boolean
   can_create: boolean
   codes: UserInviteCode[]
   pagination: { total: number; page: number; page_size: number; pages: number }

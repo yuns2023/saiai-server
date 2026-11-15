@@ -75,6 +75,9 @@ func (r *userInviteRepository) Counts(ctx context.Context, ownerID int64) (servi
 	if out.CreatedToday, err = createdTodayCount(ctx, r.client, ownerID); err != nil {
 		return out, err
 	}
+	if out.CreatedThisWeek, err = createdThisWeekCount(ctx, r.client, ownerID); err != nil {
+		return out, err
+	}
 	return out, nil
 }
 
@@ -85,6 +88,20 @@ func createdTodayCount(ctx context.Context, client *dbent.Client, ownerID int64)
 			redeemcode.OwnerUserIDEQ(ownerID),
 			redeemcode.TypeEQ(service.RedeemTypeInvitation),
 			redeemcode.CreatedAtGTE(time.Now().Add(-24*time.Hour)),
+		).
+		Count(ctx)
+}
+
+// createdThisWeekCount counts codes generated in the rolling last 7 days that were not revoked.
+// RevokeByOwner (and the admin "expire" action) keep the row and set status=expired, so expired
+// rows are the revoked ones; unused and used codes both count.
+func createdThisWeekCount(ctx context.Context, client *dbent.Client, ownerID int64) (int, error) {
+	return client.RedeemCode.Query().
+		Where(
+			redeemcode.OwnerUserIDEQ(ownerID),
+			redeemcode.TypeEQ(service.RedeemTypeInvitation),
+			redeemcode.StatusNEQ(service.StatusExpired),
+			redeemcode.CreatedAtGTE(time.Now().Add(-service.UserInviteWeekWindow)),
 		).
 		Count(ctx)
 }
@@ -174,6 +191,15 @@ func (r *userInviteRepository) CreateForOwner(ctx context.Context, ownerID int64
 	}
 	if createdToday >= service.MaxUserInviteCreatesPerDay {
 		return nil, service.ErrUserInviteDailyLimit
+	}
+	if limits.MaxPerWeek > 0 {
+		createdThisWeek, err := createdThisWeekCount(ctx, client, ownerID)
+		if err != nil {
+			return nil, err
+		}
+		if createdThisWeek >= limits.MaxPerWeek {
+			return nil, service.ErrUserInviteWeeklyLimit
+		}
 	}
 	if limits.MaxTotal > 0 {
 		invited, err := invitedCount(ctx, client, ownerID)

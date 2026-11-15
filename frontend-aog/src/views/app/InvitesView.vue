@@ -24,6 +24,12 @@ const busy = ref(false)
 const toRevoke = ref<UserInviteCode | null>(null)
 const justCreated = ref('')
 
+/** Codes still allowed in the rolling 7 days; null when the site sets no weekly cap. */
+const weekLeft = computed(() => {
+  const d = data.value
+  if (!d || !(d.max_per_week > 0)) return null
+  return Math.max(0, d.max_per_week - (d.created_this_week || 0))
+})
 const pages = computed(() => data.value?.pagination?.pages || 1)
 const total = computed(() => data.value?.pagination?.total || 0)
 
@@ -35,6 +41,7 @@ const blocker = computed(() => {
   if (!d.eligible) return t('invites.notEligible')
   if (d.unused >= d.max_unused) return t('invites.limitUnused')
   if (d.daily_limit_reached) return t('invites.limitDaily')
+  if (d.weekly_limit_reached) return t('invites.limitWeekly')
   if (d.max_total > 0 && d.invited + d.unused >= d.max_total) return t('invites.limitTotal')
   return ''
 })
@@ -72,6 +79,8 @@ function reasonText(e: unknown, fallback: string): string {
       return t('invites.limitTotal')
     case 'USER_INVITE_DAILY_LIMIT':
       return t('invites.limitDaily')
+    case 'USER_INVITE_WEEKLY_LIMIT':
+      return t('invites.limitWeekly')
     default:
       return errorMessage(e, fallback)
   }
@@ -132,6 +141,7 @@ function statusTag(c: UserInviteCode): { cls: string; text: string } {
     <div v-if="data" class="rule-double mt-6 flex flex-wrap items-center gap-x-6 gap-y-1 pb-3 text-sm" data-testid="invite-summary">
       <span class="num">{{ t('invites.unusedOf', { n: data.unused, max: data.max_unused }) }}</span>
       <span class="num">{{ data.max_total > 0 ? t('invites.invitedOf', { n: data.invited, max: data.max_total }) : t('invites.invited', { n: data.invited }) }}</span>
+      <span v-if="weekLeft !== null" class="num" data-testid="invite-week-left">{{ t('invites.weekLeft', { n: weekLeft, max: data.max_per_week }) }}</span>
     </div>
     <p v-if="blocker" class="mt-3 text-sm text-ink-2" role="status" data-testid="invite-blocker">
       {{ blocker }}

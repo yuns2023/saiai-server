@@ -12,6 +12,7 @@ import { groupsApi, keysApi } from '@/api'
 import { errorMessage } from '@/api/client'
 import { intlLocale } from '@/i18n'
 import { dateOnly, maskKey, money, rate, shortTime } from '@/lib/format'
+import { isAllowedPlatform } from '@/lib/platforms'
 import { useAppStore } from '@/stores/app'
 import type { ApiKey, CreateApiKeyRequest, Group, UpdateApiKeyRequest } from '@/types'
 
@@ -38,8 +39,15 @@ const toDelete = ref<ApiKey | null>(null)
 const justCreated = ref<number | null>(null)
 
 const groupById = computed(() => new Map(groups.value.map((g) => [g.id, g])))
-const platformOf = (k: ApiKey) => k.group?.platform ?? (k.group_id ? groupById.value.get(k.group_id)?.platform : undefined) ?? 'anthropic'
-const platformLabel: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Google', antigravity: 'Google', sora: 'OpenAI' }
+/**
+ * A key bound to a group of another platform (created before the site went
+ * Claude Code only, or by an admin) is listed neutrally, without setup steps.
+ * An unknown platform keeps the setup steps, as before.
+ */
+function keySupported(k: ApiKey): boolean {
+  const platform = k.group?.platform ?? (k.group_id ? groupById.value.get(k.group_id)?.platform : undefined)
+  return platform === undefined || isAllowedPlatform(platform)
+}
 
 let listSeq = 0
 async function loadKeys(p = page.value): Promise<void> {
@@ -234,7 +242,7 @@ function openRow(kind: 'edit' | 'connect', id: number): void {
                 <span class="tag" :class="statusTag(k).cls">{{ statusTag(k).text }}</span>
               </div>
               <div class="mt-0.5 text-xs text-ink-3">
-                {{ k.group?.name ?? groupById.get(k.group_id ?? -1)?.name ?? '—' }} · {{ platformLabel[platformOf(k)] ?? platformOf(k) }}
+                {{ keySupported(k) ? k.group?.name ?? groupById.get(k.group_id ?? -1)?.name ?? '—' : t('keys.otherGroup') }}
                 <template v-if="k.group"> · {{ rate(rates[k.group.id] ?? k.group.rate_multiplier) }}</template>
               </div>
             </div>
@@ -276,7 +284,7 @@ function openRow(kind: 'edit' | 'connect', id: number): void {
 
           <div v-if="connecting === k.id" class="border-t border-rule-soft pb-6 pt-4">
             <p v-if="justCreated === k.id" class="mb-4 text-sm text-ink">{{ t('keys.createdNext') }}</p>
-            <ConnectPanel :api-key="k.key" :platform="platformOf(k)" />
+            <ConnectPanel :api-key="k.key" :supported="keySupported(k)" />
           </div>
           <div v-if="editing === k.id" class="border-t border-rule-soft pb-6 pt-4">
             <KeyForm :groups="groups" :rates="rates" :initial="k" :busy="busy" @submit="save(k, $event)" @cancel="editing = null" />

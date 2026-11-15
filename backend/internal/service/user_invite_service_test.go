@@ -18,6 +18,7 @@ type fakeUserInviteRepo struct {
 	unused         int
 	invited        int
 	createdToday   int
+	createdWeek    int
 	codes          []UserInviteCode
 	createdLimits  *UserInviteLimits
 	createErr      error
@@ -30,7 +31,7 @@ func (f *fakeUserInviteRepo) HasQualifyingTopUp(context.Context, int64) (bool, e
 	return f.eligible, nil
 }
 func (f *fakeUserInviteRepo) Counts(context.Context, int64) (UserInviteCounts, error) {
-	return UserInviteCounts{Unused: f.unused, Invited: f.invited, CreatedToday: f.createdToday}, nil
+	return UserInviteCounts{Unused: f.unused, Invited: f.invited, CreatedToday: f.createdToday, CreatedThisWeek: f.createdWeek}, nil
 }
 func (f *fakeUserInviteRepo) ListByOwner(_ context.Context, _ int64, params pagination.PaginationParams) ([]UserInviteCode, *pagination.PaginationResult, error) {
 	out := append([]UserInviteCode(nil), f.codes...)
@@ -123,11 +124,43 @@ func TestUserInviteService_OverviewMasksAndComputesCanCreate(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, out.CanCreate, "rolling 24h cap reached")
 	require.True(t, out.DailyLimitReached)
+	require.Zero(t, out.MaxPerWeek, "weekly cap off by default")
+	require.False(t, out.WeeklyLimitReached)
 
 	// The paging block serializes with the lowercase keys the console reads.
 	raw, err := json.Marshal(out)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"pagination":{"total":3,"page":1,"page_size":20,"pages":`)
+}
+
+func TestUserInviteService_WeeklyCap(t *testing.T) {
+	repo := &fakeUserInviteRepo{eligible: true, createdWeek: 2}
+	svc := newUserInviteServiceForTest(map[string]string{
+		SettingKeyUserInviteEnabled:    "true",
+		SettingKeyUserInviteMaxPerWeek: "3",
+	}, repo)
+	out, err := svc.Overview(context.Background(), 7, pagination.PaginationParams{Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.True(t, out.CanCreate)
+	require.Equal(t, 3, out.MaxPerWeek)
+	require.Equal(t, 2, out.CreatedThisWeek)
+	require.False(t, out.WeeklyLimitReached)
+
+	_, err = svc.Create(context.Background(), 7)
+	require.NoError(t, err)
+	require.Equal(t, UserInviteLimits{MaxUnused: DefaultUserInviteMaxUnused, MaxPerWeek: 3}, *repo.createdLimits, "enforced under the row lock")
+
+	repo.createdWeek = 3
+	out, err = svc.Overview(context.Background(), 7, pagination.PaginationParams{Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.False(t, out.CanCreate)
+	require.True(t, out.WeeklyLimitReached)
+
+	raw, err := json.Marshal(out)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"max_per_week":3,"created_this_week":3,"weekly_limit_reached":true`)
+
+	require.True(t, isUserInviteExpectedError(ErrUserInviteWeeklyLimit))
 }
 
 func TestUserInviteService_RevokeValidatesInput(t *testing.T) {
@@ -147,6 +180,9 @@ func TestParseUserInviteLimits(t *testing.T) {
 	}
 	for raw, want := range map[string]int{"": 0, "x": 0, "-1": 0, "50": 50, "999999": MaxUserInviteMaxTotal} {
 		require.Equal(t, want, parseUserInviteMaxTotal(raw), raw)
+	}
+	for raw, want := range map[string]int{"": 0, "x": 0, "-1": 0, "3": 3, "999999": MaxUserInviteMaxPerWeek} {
+		require.Equal(t, want, parseUserInviteMaxPerWeek(raw), raw)
 	}
 }
 

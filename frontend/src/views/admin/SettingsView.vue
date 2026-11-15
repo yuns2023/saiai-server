@@ -410,7 +410,7 @@
                 </div>
                 <Toggle v-model="form.user_invite_enabled" />
               </div>
-              <div v-if="form.user_invite_enabled" class="mt-4 grid gap-4 sm:grid-cols-2">
+              <div v-if="form.user_invite_enabled" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
                   <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.settings.registration.userInviteMaxUnused') }}
@@ -427,6 +427,15 @@
                   <input v-model.number="form.user_invite_max_total" type="number" min="0" max="100000" step="1" class="input" />
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                     {{ t('admin.settings.registration.userInviteMaxTotalHint') }}
+                  </p>
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.registration.userInviteMaxPerWeek') }}
+                  </label>
+                  <input v-model.number="form.user_invite_max_per_week" type="number" min="0" max="1000" step="1" class="input" />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t('admin.settings.registration.userInviteMaxPerWeekHint') }}
                   </p>
                 </div>
               </div>
@@ -1663,6 +1672,7 @@ const form = reactive<SettingsForm>({
   user_invite_enabled: false,
   user_invite_max_unused: 5,
   user_invite_max_total: 0,
+  user_invite_max_per_week: 0,
   password_reset_enabled: false,
   totp_enabled: false,
   totp_encryption_key_configured: false,
@@ -2018,6 +2028,7 @@ async function saveSettings() {
       user_invite_enabled: form.user_invite_enabled,
       user_invite_max_unused: form.user_invite_max_unused,
       user_invite_max_total: form.user_invite_max_total,
+      user_invite_max_per_week: form.user_invite_max_per_week,
       password_reset_enabled: form.password_reset_enabled,
       totp_enabled: form.totp_enabled,
       default_balance: form.default_balance,

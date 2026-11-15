@@ -1,6 +1,7 @@
 /** Thin typed wrappers around the /api/v1 endpoints this app uses. */
 import { api } from './client'
 import type { OAuthExchangeResponse } from '@/lib/oauth'
+import { allowedGroups } from '@/lib/platforms'
 import type {
   ApiKey,
   AuthResponse,
@@ -119,9 +120,10 @@ export const keysApi = {
 }
 
 export const groupsApi = {
+  /** Groups a key can be bound to, limited to the platforms this UI offers. */
   async available(): Promise<Group[]> {
     const { data } = await api.get<Group[]>('/groups/available')
-    return data || []
+    return allowedGroups(data || [])
   },
   /** Per-user rate overrides keyed by group id. */
   async rates(): Promise<Record<number, number>> {

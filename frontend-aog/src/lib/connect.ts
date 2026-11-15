@@ -1,81 +1,88 @@
 /**
- * Connection instructions for a key.
+ * Connection instructions for a key (Claude Code only).
  *
- * The client is being renamed from "saiai" to "aog" and may move to its own
- * open-source project. Everything client-specific lives in CLIENT below so the
- * swap is a one-place change once the aog bundle ships.
+ * The site's local client is AITP (github.com/2742zdz/AITP, binary `aitp`).
+ * Everything client-specific lives in CLIENT below so a rename or a change to
+ * the installer contract is a one-place edit.
  */
-
-export const CLIENT = {
-  /** Name shown to users. */
-  displayName: 'aog',
-  /** Download path served by the gateway (SAIAI_CLIENT_DIR). */
-  bundlePath: '/saiai-cli',
-  /** PowerShell entry function defined by setup.ps1. */
-  powershellEntry: 'Invoke-Saiai',
-  /**
-   * Whether the one-line install command is offered. Off until the aog client
-   * (AITP) installer is published and served by the site; until then keys show
-   * only the manual base URL / environment values.
-   */
-  oneLineInstall: false
-} as const
-
-export type Platform = 'anthropic' | 'openai' | 'gemini' | string
-export type Shell = 'unix' | 'powershell' | 'cmd'
 
 const shellQuote = (v: string) => `'${v.replace(/'/g, "'\\''")}'`
 const psQuote = (v: string) => `'${v.replace(/'/g, "''")}'`
 
-export function cliOrigin(baseUrl: string): string {
-  try {
-    return new URL(baseUrl, window.location.origin).origin
-  } catch {
-    return window.location.origin
-  }
+export type Shell = 'unix' | 'powershell' | 'cmd'
+
+type InstallCommand = (root: string, key: string) => string
+
+/** Where setup.sh / setup.ps1 are downloaded from (the latest AITP GitHub release). */
+const INSTALLER_BASE = 'https://github.com/2742zdz/AITP/releases/latest/download'
+
+/**
+ * PowerShell line. When the root contains no double quote or % (true for the admin's
+ * api_base_url in practice) and the key is [A-Za-z0-9_-], cmd can wrap it in "..." unchanged.
+ */
+const powershellInstall: InstallCommand = (root, key) =>
+  `& ([scriptblock]::Create((irm ${INSTALLER_BASE}/setup.ps1))) -BaseUrl ${psQuote(root)} -ApiKey ${psQuote(key)}`
+
+/**
+ * One-line install per shell. `root` is the gateway root without /v1. The installer installs aitp, then runs
+ * `aitp init --base-url … --api-key …` and `aitp start`. Keys are
+ * [A-Za-z0-9_-] but are quoted anyway.
+ */
+const INSTALL: Record<Shell, InstallCommand> = {
+  unix: (root, key) =>
+    `curl -fsSL ${INSTALLER_BASE}/setup.sh | bash -s -- --base-url ${shellQuote(root)} --api-key ${shellQuote(key)}`,
+  powershell: powershellInstall,
+  cmd: (root, key) => `powershell -NoProfile -ExecutionPolicy Bypass -Command "${powershellInstall(root, key)}"`
 }
 
-/** Gateway root without a trailing /v1 (Anthropic clients add their own path). */
+export const CLIENT = {
+  /** Name shown to users. */
+  displayName: 'AITP',
+  installerBase: INSTALLER_BASE,
+  /** "What is this / how to uninstall" link. */
+  repoUrl: 'https://github.com/2742zdz/AITP',
+  uninstallCommand: 'aitp uninstall',
+  /** Offer the one-line install command (manual values stay available as a fallback). */
+  oneLineInstall: true,
+  install: INSTALL
+} as const
+
+/** Gateway root without a trailing /v1 (Claude Code adds its own path). Display/manual use only. */
 export function gatewayRoot(baseUrl: string): string {
-  try {
-    const u = new URL(baseUrl, window.location.origin)
-    u.pathname = u.pathname.replace(/\/+$/, '').replace(/\/v1$/, '') || '/'
-    return u.href.replace(/\/$/, '')
-  } catch {
-    return baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '') || window.location.origin
-  }
+  return parseRoot(baseUrl) ?? (stripLineBreaks(baseUrl).replace(/\/+$/, '').replace(/\/v1$/, '') || window.location.origin)
 }
 
-/** OpenAI-compatible base URL ending in /v1. */
-export function openAIBase(baseUrl: string): string {
+const stripLineBreaks = (v: string) => v.replace(/[\r\n]/g, '')
+
+/**
+ * The gateway root as a URL-serialized absolute http(s) URL (quotes, spaces and
+ * other unsafe characters percent-encoded; query and fragment dropped), or
+ * null when the base URL is not one. Install commands are only built from this.
+ */
+export function parseRoot(baseUrl: string): string | null {
+  if (/[\r\n]/.test(baseUrl)) return null
+  let u: URL
   try {
-    const u = new URL(baseUrl, window.location.origin)
-    const p = u.pathname.replace(/\/+$/, '')
-    u.pathname = p.endsWith('/v1') ? p : `${p}/v1`
-    return u.href.replace(/\/$/, '')
+    u = new URL(baseUrl)
   } catch {
-    const n = baseUrl.replace(/\/+$/, '')
-    return n.endsWith('/v1') ? n : `${n}/v1`
+    return null
   }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+  u.search = ''
+  u.hash = ''
+  u.pathname = u.pathname.replace(/\/+$/, '').replace(/\/v1$/, '') || '/'
+  return u.href.replace(/\/$/, '')
 }
 
-function bootstrap(shell: Shell, origin: string, unixArgs: string, psArgs: string): string {
-  const base = `${origin}${CLIENT.bundlePath}`
-  const ps = `irm ${base}/setup.ps1 | iex; ${CLIENT.powershellEntry} ${psArgs}`
-  switch (shell) {
-    case 'unix':
-      return unixArgs ? `curl -fsSL ${base}/setup.sh | bash -s -- ${unixArgs}` : `curl -fsSL ${base}/setup.sh | bash`
-    case 'powershell':
-      return ps
-    case 'cmd':
-      return `powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps}"`
-  }
-}
+/** Safe inside cmd's "...": no quote that would close it, no %VAR% expansion, single line. */
+const cmdSafe = (v: string) => !/["%\r\n]/.test(v)
 
 export interface ConnectSnippet {
-  /** One-line client install + configure command, when the platform has one. */
+  /** One-line AITP install + configure command; null when switched off or the inputs are unsafe. */
   command: string | null
-  /** Plain values for tools configured by hand. */
+  /** The site's API address is not an absolute http(s) URL, so no install command is offered. */
+  badBaseUrl: boolean
+  /** Plain values for configuring Claude Code by hand. */
   baseUrl: string
   envLines: string[]
 }
@@ -85,36 +92,17 @@ export interface ConnectOptions {
   oneLine?: boolean
 }
 
-export function connectSnippet(
-  platform: Platform,
-  rawBaseUrl: string,
-  apiKey: string,
-  shell: Shell,
-  options: ConnectOptions = {}
-): ConnectSnippet {
-  const origin = cliOrigin(rawBaseUrl)
+export function connectSnippet(rawBaseUrl: string, apiKey: string, shell: Shell, options: ConnectOptions = {}): ConnectSnippet {
   const oneLine = options.oneLine ?? CLIENT.oneLineInstall
-  if (platform === 'openai') {
-    const base = openAIBase(rawBaseUrl)
-    return {
-      command: oneLine ? bootstrap(shell, origin, `init-codex ${shellQuote(base)} ${shellQuote(apiKey)}`, `init-codex ${psQuote(base)} ${psQuote(apiKey)}`) : null,
-      baseUrl: base,
-      envLines: envLines(shell, [['OPENAI_BASE_URL', base], ['OPENAI_API_KEY', apiKey]])
-    }
-  }
-  if (platform === 'gemini') {
-    const base = rawBaseUrl.replace(/\/+$/, '')
-    return {
-      command: null,
-      baseUrl: base,
-      envLines: envLines(shell, [['GOOGLE_GEMINI_BASE_URL', base], ['GEMINI_API_KEY', apiKey]])
-    }
-  }
-  const root = gatewayRoot(rawBaseUrl)
+  const safeRoot = parseRoot(rawBaseUrl)
+  const keyOk = !/[\r\n]/.test(apiKey) && (shell !== 'cmd' || cmdSafe(apiKey))
+  const rootOk = safeRoot !== null && (shell !== 'cmd' || cmdSafe(safeRoot))
+  const root = safeRoot ?? gatewayRoot(rawBaseUrl)
   return {
-    command: oneLine ? bootstrap(shell, origin, `${shellQuote(root)} ${shellQuote(apiKey)}`, `${psQuote(root)} ${psQuote(apiKey)}`) : null,
+    command: oneLine && safeRoot !== null && rootOk && keyOk ? CLIENT.install[shell](safeRoot, apiKey) : null,
+    badBaseUrl: safeRoot === null,
     baseUrl: root,
-    envLines: envLines(shell, [['ANTHROPIC_BASE_URL', root], ['ANTHROPIC_AUTH_TOKEN', apiKey]])
+    envLines: envLines(shell, [['ANTHROPIC_BASE_URL', root], ['ANTHROPIC_AUTH_TOKEN', stripLineBreaks(apiKey)]])
   }
 }
 
@@ -122,7 +110,9 @@ export function connectSnippet(
 const cmdQuote = (v: string) => `"${v}"`
 
 function envLines(shell: Shell, pairs: Array<[string, string]>): string[] {
-  return pairs.map(([k, v]) => {
+  // A value with a double quote cannot be written as cmd's set "K=V"; leave that line out.
+  const usable = shell === 'cmd' ? pairs.filter(([, v]) => !v.includes('"')) : pairs
+  return usable.map(([k, v]) => {
     if (shell === 'powershell') return `$env:${k}=${psQuote(v)}`
     if (shell === 'cmd') return `set ${cmdQuote(`${k}=${v}`)}`
     return `export ${k}=${shellQuote(v)}`

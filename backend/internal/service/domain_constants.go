@@ -115,6 +115,7 @@ const (
 	SettingKeyUserInviteEnabled                = "user_invite_enabled"                 // 是否允许用户自助生成邀请码
 	SettingKeyUserInviteMaxUnused              = "user_invite_max_unused"              // 每个用户同时持有的未使用邀请码上限
 	SettingKeyUserInviteMaxTotal               = "user_invite_max_total"               // 每个用户累计可邀请人数上限（0 = 不限）
+	SettingKeyUserInviteMaxPerWeek             = "user_invite_max_per_week"            // 每个用户滚动 7 天内可生成的邀请码数（未被撤销的，0 = 不限）
 
 	// 邮件服务设置
 	SettingKeySMTPHost     = "smtp_host"      // SMTP服务器地址

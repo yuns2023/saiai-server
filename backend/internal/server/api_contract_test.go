@@ -580,6 +580,7 @@ func TestAPIContracts(t *testing.T) {
 						"user_invite_enabled": false,
 						"user_invite_max_unused": 5,
 						"user_invite_max_total": 0,
+						"user_invite_max_per_week": 0,
 						"home_content": "",
 					"hide_ccs_import_button": false,
 					"purchase_subscription_enabled": false,

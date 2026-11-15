@@ -137,7 +137,7 @@ func TestUserInviteRepo_CreateLimitsAndConcurrency(t *testing.T) {
 
 	counts, err := repo.Counts(ctx, owner.ID)
 	require.NoError(t, err)
-	require.Equal(t, service.UserInviteCounts{Unused: 3, Invited: 0, CreatedToday: 3}, counts)
+	require.Equal(t, service.UserInviteCounts{Unused: 3, Invited: 0, CreatedToday: 3, CreatedThisWeek: 3}, counts)
 
 	// Lifetime cap counts unused codes too.
 	_, err = repo.CreateForOwner(ctx, owner.ID, fmt.Sprintf("D%d", owner.ID), service.UserInviteLimits{MaxUnused: 10, MaxTotal: 3})
@@ -155,6 +155,89 @@ func TestUserInviteRepo_CreateLimitsAndConcurrency(t *testing.T) {
 	}
 	_, err = repo.CreateForOwner(ctx, owner.ID, fmt.Sprintf("F%d", owner.ID), service.UserInviteLimits{MaxUnused: 100})
 	require.ErrorIs(t, err, service.ErrUserInviteDailyLimit)
+}
+
+func TestUserInviteRepo_WeeklyLimitCountsNonRevokedCodesInWindow(t *testing.T) {
+	ctx, repo, owner := userInviteFixture(t, "week")
+	_, _, other := userInviteFixture(t, "week-other")
+	limits := service.UserInviteLimits{MaxUnused: 100, MaxPerWeek: 3}
+	create := func(tag string) (*service.UserInviteCode, error) {
+		return repo.CreateForOwner(ctx, owner.ID, fmt.Sprintf("W%s%d", tag, owner.ID), limits)
+	}
+
+	first, err := create("a")
+	require.NoError(t, err)
+	revoked, err := create("b")
+	require.NoError(t, err)
+	require.NoError(t, repo.RevokeByOwner(ctx, owner.ID, revoked.Code))
+	used, err := create("c")
+	require.NoError(t, err)
+	// A used code still counts: the cap bounds people invited per week.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE redeem_codes SET status = 'used', used_by = $1, used_at = NOW() WHERE code = $2", other.ID, used.Code)
+	require.NoError(t, err)
+	_, err = create("d")
+	require.NoError(t, err)
+
+	counts, err := repo.Counts(ctx, owner.ID)
+	require.NoError(t, err)
+	require.Equal(t, 3, counts.CreatedThisWeek, "revoked code excluded, unused + used counted")
+	require.Equal(t, 4, counts.CreatedToday, "the 24h churn cap still counts revoked codes")
+
+	_, err = create("e")
+	require.ErrorIs(t, err, service.ErrUserInviteWeeklyLimit)
+	_, err = repo.CreateForOwner(ctx, owner.ID, fmt.Sprintf("Wf%d", owner.ID), service.UserInviteLimits{MaxUnused: 100})
+	require.NoError(t, err, "0 = unlimited")
+
+	// Codes older than 7 days drop out of the window.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE redeem_codes SET created_at = NOW() - INTERVAL '8 days' WHERE code IN ($1, $2)", first.Code, used.Code)
+	require.NoError(t, err)
+	counts, err = repo.Counts(ctx, owner.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, counts.CreatedThisWeek)
+	_, err = create("g")
+	require.NoError(t, err)
+	_, err = create("h")
+	require.ErrorIs(t, err, service.ErrUserInviteWeeklyLimit)
+}
+
+func TestUserInviteRepo_WeeklyLimitLastSlotUnderConcurrency(t *testing.T) {
+	ctx, repo, owner := userInviteFixture(t, "week-race")
+	limits := service.UserInviteLimits{MaxUnused: 100, MaxPerWeek: 3}
+	for i := 0; i < 2; i++ {
+		_, err := repo.CreateForOwner(ctx, owner.ID, fmt.Sprintf("X%d-%d", owner.ID, i), limits)
+		require.NoError(t, err)
+	}
+
+	// One slot left: two concurrent generates, the row lock lets exactly one through.
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			_, err := repo.CreateForOwner(ctx, owner.ID, fmt.Sprintf("Y%d-%d", owner.ID, i), limits)
+			errs <- err
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	ok, limited := 0, 0
+	for err := range errs {
+		if err == nil {
+			ok++
+			continue
+		}
+		require.ErrorIs(t, err, service.ErrUserInviteWeeklyLimit)
+		limited++
+	}
+	require.Equal(t, 1, ok)
+	require.Equal(t, 1, limited)
+	counts, err := repo.Counts(ctx, owner.ID)
+	require.NoError(t, err)
+	require.Equal(t, 3, counts.CreatedThisWeek)
 }
 
 func TestUserInviteRepo_InactiveOrDeletedOwnerCannotCreate(t *testing.T) {

@@ -574,6 +574,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyUserInviteEnabled] = strconv.FormatBool(settings.UserInviteEnabled)
 	updates[SettingKeyUserInviteMaxUnused] = strconv.Itoa(parseUserInviteMaxUnused(strconv.Itoa(settings.UserInviteMaxUnused)))
 	updates[SettingKeyUserInviteMaxTotal] = strconv.Itoa(parseUserInviteMaxTotal(strconv.Itoa(settings.UserInviteMaxTotal)))
+	updates[SettingKeyUserInviteMaxPerWeek] = strconv.Itoa(parseUserInviteMaxPerWeek(strconv.Itoa(settings.UserInviteMaxPerWeek)))
 	updates[SettingKeyTotpEnabled] = strconv.FormatBool(settings.TotpEnabled)
 
 	// 邮件服务设置（只有非空才更新密码）
@@ -1014,6 +1015,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		UserInviteEnabled:                settings[SettingKeyUserInviteEnabled] == "true",
 		UserInviteMaxUnused:              parseUserInviteMaxUnused(settings[SettingKeyUserInviteMaxUnused]),
 		UserInviteMaxTotal:               parseUserInviteMaxTotal(settings[SettingKeyUserInviteMaxTotal]),
+		UserInviteMaxPerWeek:             parseUserInviteMaxPerWeek(settings[SettingKeyUserInviteMaxPerWeek]),
 		TotpEnabled:                      settings[SettingKeyTotpEnabled] == "true",
 		SMTPHost:                         settings[SettingKeySMTPHost],
 		SMTPUsername:                     settings[SettingKeySMTPUsername],
@@ -2415,6 +2417,8 @@ type UserInviteSettings struct {
 	Enabled   bool
 	MaxUnused int
 	MaxTotal  int // 0 = unlimited
+	// MaxPerWeek: codes a user may generate in a rolling 7 days, revoked ones excluded (0 = unlimited).
+	MaxPerWeek int
 }
 
 // GetUserInviteSettings reads the switches; any read error means "off" (fail closed).
@@ -2423,14 +2427,16 @@ func (s *SettingService) GetUserInviteSettings(ctx context.Context) UserInviteSe
 		SettingKeyUserInviteEnabled,
 		SettingKeyUserInviteMaxUnused,
 		SettingKeyUserInviteMaxTotal,
+		SettingKeyUserInviteMaxPerWeek,
 	})
 	if err != nil {
 		return UserInviteSettings{MaxUnused: DefaultUserInviteMaxUnused}
 	}
 	return UserInviteSettings{
-		Enabled:   values[SettingKeyUserInviteEnabled] == "true",
-		MaxUnused: parseUserInviteMaxUnused(values[SettingKeyUserInviteMaxUnused]),
-		MaxTotal:  parseUserInviteMaxTotal(values[SettingKeyUserInviteMaxTotal]),
+		Enabled:    values[SettingKeyUserInviteEnabled] == "true",
+		MaxUnused:  parseUserInviteMaxUnused(values[SettingKeyUserInviteMaxUnused]),
+		MaxTotal:   parseUserInviteMaxTotal(values[SettingKeyUserInviteMaxTotal]),
+		MaxPerWeek: parseUserInviteMaxPerWeek(values[SettingKeyUserInviteMaxPerWeek]),
 	}
 }
 
@@ -2455,6 +2461,18 @@ func parseUserInviteMaxTotal(raw string) int {
 	}
 	if v > MaxUserInviteMaxTotal {
 		return MaxUserInviteMaxTotal
+	}
+	return v
+}
+
+// parseUserInviteMaxPerWeek: 0 = unlimited (the default); invalid/negative → 0; above the cap → cap.
+func parseUserInviteMaxPerWeek(raw string) int {
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || v <= 0 {
+		return 0
+	}
+	if v > MaxUserInviteMaxPerWeek {
+		return MaxUserInviteMaxPerWeek
 	}
 	return v
 }
