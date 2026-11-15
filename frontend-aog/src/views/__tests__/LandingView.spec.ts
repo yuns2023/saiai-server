@@ -25,6 +25,22 @@ describe('LandingView', () => {
     expect(h1.find('span.whitespace-nowrap').text()).toBe('Claude Code')
   })
 
+  it('falls back to the translated headline and keeps text without the product name intact', () => {
+    expect(mountLanding({ site_subtitle: '' }).find('h1').text()).toBe('你的 Claude Code 专属入口')
+    const plain = mountLanding({ site_subtitle: '编码专用入口' }).find('h1')
+    expect(plain.text()).toBe('编码专用入口')
+    expect(plain.find('span.whitespace-nowrap').exists()).toBe(false)
+    const twice = mountLanding({ site_subtitle: 'Claude Code 用户的 Claude Code 入口' }).find('h1')
+    expect(twice.findAll('span.whitespace-nowrap')).toHaveLength(2)
+    expect(twice.text()).toBe('Claude Code 用户的 Claude Code 入口')
+  })
+
+  it('offers only sign-in when registration is closed', () => {
+    const links = mountLanding({ registration_enabled: false, invitation_code_enabled: true }).findAllComponents(RouterLinkStub).map((l) => l.props('to'))
+    expect(links).not.toContain('/register')
+    expect(links).toContain('/login')
+  })
+
   it('describes a Claude Code only service in both languages', () => {
     for (const locale of ['zh', 'en'] as const) {
       i18n.global.locale.value = locale
