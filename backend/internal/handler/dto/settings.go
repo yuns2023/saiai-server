@@ -28,6 +28,7 @@ type SystemSettings struct {
 	UserInviteEnabled                bool     `json:"user_invite_enabled"`
 	UserInviteMaxUnused              int      `json:"user_invite_max_unused"`
 	UserInviteMaxTotal               int      `json:"user_invite_max_total"`
+	UserInviteMaxPerWeek             int      `json:"user_invite_max_per_week"`
 	TotpEnabled                      bool     `json:"totp_enabled"`                   // TOTP 双因素认证
 	TotpEncryptionKeyConfigured      bool     `json:"totp_encryption_key_configured"` // TOTP 加密密钥是否已配置
 

@@ -53,3 +53,24 @@ describe('KeyForm numeric fields', () => {
     expect(value).toMatchObject({ name: 'k', quota: 12.5, max_concurrency: 3, expires_in_days: null })
   })
 })
+
+describe('KeyForm groups', () => {
+  it('shows no platform names in the group picker', () => {
+    const w = mountForm()
+    const options = w.findAll('select option').map((o) => o.text())
+    expect(options).toHaveLength(1)
+    expect(options[0]).toMatch(/^Claude · /)
+    expect(options[0]).not.toMatch(/anthropic/i)
+  })
+
+  it('keeps a key bound to a group outside the picker on its group when saving', async () => {
+    const other = { ...existing, group_id: 5, group: { id: 5, name: 'OpenAI Codex', platform: 'openai' } } as unknown as ApiKey
+    const w = mountForm(other)
+    const options = w.findAll('select option')
+    expect(options.map((o) => o.text())[0]).toBe(i18n.global.t('keys.otherGroup'))
+    expect(w.text()).not.toMatch(/openai/i)
+    await w.find('form').trigger('submit')
+    const [value] = w.emitted('submit')![0] as [KeyFormValue]
+    expect(value.group_id).toBe(5)
+  })
+})

@@ -12,6 +12,7 @@ type SystemSettings struct {
 	UserInviteEnabled                bool
 	UserInviteMaxUnused              int
 	UserInviteMaxTotal               int
+	UserInviteMaxPerWeek             int
 	TotpEnabled                      bool // TOTP 双因素认证
 
 	SMTPHost               string

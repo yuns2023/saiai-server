@@ -21,6 +21,10 @@ import (
 //     user signed up with do not count.
 //   - user_invite_max_unused: unused codes a user may hold at once (default 5).
 //   - user_invite_max_total: optional lifetime cap on people invited (0 = unlimited).
+//   - user_invite_max_per_week: optional cap on codes generated in a rolling 7 days (by
+//     created_at), counting every code in the window that is not expired (revoked by the owner
+//     or an admin), unused or used alike (0 = unlimited). Revoke-and-regenerate churn stays
+//     bounded by MaxUserInviteCreatesPerDay.
 //
 // Codes live in redeem_codes (type=invitation, owner_user_id=user) so the existing sign-up
 // paths consume them unchanged; the owner is copied to users.invited_by_user_id.
@@ -28,6 +32,9 @@ const (
 	DefaultUserInviteMaxUnused = 5
 	MaxUserInviteMaxUnused     = 100
 	MaxUserInviteMaxTotal      = 100000
+	MaxUserInviteMaxPerWeek    = 1000
+	// UserInviteWeekWindow is the rolling window of user_invite_max_per_week.
+	UserInviteWeekWindow = 7 * 24 * time.Hour
 	// MaxUserInviteCreatesPerDay bounds generate→revoke→generate churn per user (rolling 24h).
 	MaxUserInviteCreatesPerDay = 20
 )
@@ -38,13 +45,15 @@ var (
 	ErrUserInviteUnusedLimit = infraerrors.Conflict("USER_INVITE_UNUSED_LIMIT", "you already hold the maximum number of unused invitation codes")
 	ErrUserInviteTotalLimit  = infraerrors.Conflict("USER_INVITE_TOTAL_LIMIT", "you have reached the maximum number of invitations")
 	ErrUserInviteDailyLimit  = infraerrors.TooManyRequests("USER_INVITE_DAILY_LIMIT", "too many invitation codes generated today, try again later")
+	ErrUserInviteWeeklyLimit = infraerrors.TooManyRequests("USER_INVITE_WEEKLY_LIMIT", "weekly invitation limit reached, try again later")
 	ErrUserInviteNotFound    = infraerrors.NotFound("USER_INVITE_NOT_FOUND", "unused invitation code not found")
 )
 
 // UserInviteLimits is what CreateForOwner enforces under the owner's row lock.
 type UserInviteLimits struct {
-	MaxUnused int
-	MaxTotal  int // 0 = unlimited
+	MaxUnused  int
+	MaxTotal   int // 0 = unlimited
+	MaxPerWeek int // 0 = unlimited
 }
 
 // UserInviteCode is one code as its owner sees it. The repository returns the raw
@@ -57,11 +66,13 @@ type UserInviteCode struct {
 	InviteeEmail string     `json:"invitee_email,omitempty"`
 }
 
-// UserInviteCounts are the numbers CreateForOwner checks (unused, lifetime, rolling 24h).
+// UserInviteCounts are the numbers CreateForOwner checks (unused, lifetime, rolling 24h,
+// rolling 7 days without revoked codes).
 type UserInviteCounts struct {
-	Unused       int
-	Invited      int
-	CreatedToday int
+	Unused          int
+	Invited         int
+	CreatedToday    int
+	CreatedThisWeek int
 }
 
 // UserInvitePage is the list's paging block (pagination.PaginationResult has no JSON tags).
@@ -87,7 +98,8 @@ type UserInviteRepository interface {
 	ListByOwner(ctx context.Context, ownerID int64, params pagination.PaginationParams) ([]UserInviteCode, *pagination.PaginationResult, error)
 	// CreateForOwner locks the owner row, re-checks that the owner is active and the limits,
 	// and inserts the code, all in one transaction. Returns ErrUserNotActive / ErrUserNotFound /
-	// ErrUserInviteUnusedLimit / ErrUserInviteTotalLimit / ErrUserInviteDailyLimit.
+	// ErrUserInviteUnusedLimit / ErrUserInviteTotalLimit / ErrUserInviteDailyLimit /
+	// ErrUserInviteWeeklyLimit.
 	CreateForOwner(ctx context.Context, ownerID int64, code string, limits UserInviteLimits) (*UserInviteCode, error)
 	// RevokeByOwner expires one unused code owned by ownerID in a single conditional update.
 	RevokeByOwner(ctx context.Context, ownerID int64, code string) error
@@ -105,6 +117,11 @@ type UserInviteOverview struct {
 	Invited   int  `json:"invited"`
 	// DailyLimitReached: MaxUserInviteCreatesPerDay codes generated in the last 24h.
 	DailyLimitReached bool `json:"daily_limit_reached"`
+	// MaxPerWeek is user_invite_max_per_week (0 = unlimited); CreatedThisWeek counts the
+	// non-revoked codes generated in the rolling last 7 days.
+	MaxPerWeek         int  `json:"max_per_week"`
+	CreatedThisWeek    int  `json:"created_this_week"`
+	WeeklyLimitReached bool `json:"weekly_limit_reached"`
 	// CanCreate is the server's answer; the UI only mirrors it.
 	CanCreate  bool             `json:"can_create"`
 	Codes      []UserInviteCode `json:"codes"`
@@ -123,10 +140,11 @@ func NewUserInviteService(repo UserInviteRepository, settings *SettingService) *
 func (s *UserInviteService) Overview(ctx context.Context, userID int64, params pagination.PaginationParams) (*UserInviteOverview, error) {
 	cfg := s.settings.GetUserInviteSettings(ctx)
 	out := &UserInviteOverview{
-		Enabled:   cfg.Enabled,
-		MaxUnused: cfg.MaxUnused,
-		MaxTotal:  cfg.MaxTotal,
-		Codes:     []UserInviteCode{},
+		Enabled:    cfg.Enabled,
+		MaxUnused:  cfg.MaxUnused,
+		MaxTotal:   cfg.MaxTotal,
+		MaxPerWeek: cfg.MaxPerWeek,
+		Codes:      []UserInviteCode{},
 	}
 	eligible, err := s.repo.HasQualifyingTopUp(ctx, userID)
 	if err != nil {
@@ -137,11 +155,13 @@ func (s *UserInviteService) Overview(ctx context.Context, userID int64, params p
 	if err != nil {
 		return nil, err
 	}
-	out.Unused, out.Invited = counts.Unused, counts.Invited
+	out.Unused, out.Invited, out.CreatedThisWeek = counts.Unused, counts.Invited, counts.CreatedThisWeek
+	out.WeeklyLimitReached = cfg.MaxPerWeek > 0 && counts.CreatedThisWeek >= cfg.MaxPerWeek
 	// Same limit checks, same order as CreateForOwner (a concurrent change can still make the next POST fail).
 	out.CanCreate = cfg.Enabled && eligible &&
 		counts.Unused < cfg.MaxUnused &&
 		counts.CreatedToday < MaxUserInviteCreatesPerDay &&
+		!out.WeeklyLimitReached &&
 		(cfg.MaxTotal == 0 || counts.Invited+counts.Unused < cfg.MaxTotal)
 	out.DailyLimitReached = counts.CreatedToday >= MaxUserInviteCreatesPerDay
 	// Listing stays available after the switch is turned off: handed-out codes still work
@@ -176,7 +196,7 @@ func (s *UserInviteService) Create(ctx context.Context, userID int64) (*UserInvi
 	if !eligible {
 		return nil, ErrUserInviteNotEligible
 	}
-	limits := UserInviteLimits{MaxUnused: cfg.MaxUnused, MaxTotal: cfg.MaxTotal}
+	limits := UserInviteLimits{MaxUnused: cfg.MaxUnused, MaxTotal: cfg.MaxTotal, MaxPerWeek: cfg.MaxPerWeek}
 	// A random 32-hex collision is practically impossible; retry once anyway.
 	for attempt := 0; ; attempt++ {
 		code, err := GenerateRedeemCode()
@@ -218,7 +238,7 @@ var ErrUserInviteCodeTaken = errors.New("user invite: code already exists")
 
 func isUserInviteExpectedError(err error) bool {
 	return errors.Is(err, ErrUserInviteUnusedLimit) || errors.Is(err, ErrUserInviteTotalLimit) ||
-		errors.Is(err, ErrUserInviteDailyLimit) || errors.Is(err, ErrUserNotActive) || errors.Is(err, ErrUserNotFound)
+		errors.Is(err, ErrUserInviteDailyLimit) || errors.Is(err, ErrUserInviteWeeklyLimit) || errors.Is(err, ErrUserNotActive) || errors.Is(err, ErrUserNotFound)
 }
 
 // maskInviteeEmail keeps the first character of the local part and the domain: "a***@qq.com".

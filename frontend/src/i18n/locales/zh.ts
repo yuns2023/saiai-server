@@ -5245,6 +5245,8 @@ export default {
         userInviteMaxUnusedHint: '同时持有的未使用码数量，1–100。用掉或作废一个后才能再生成。',
         userInviteMaxTotal: '每人累计邀请上限',
         userInviteMaxTotalHint: '一个用户最多能邀请多少人（含未使用的码），0 表示不限。',
+        userInviteMaxPerWeek: '每人每周生成上限',
+        userInviteMaxPerWeekHint: '一个用户在任意滚动 7 天内最多能生成多少个邀请码；按生成时间计，已用和未用都算，已作废的不算（反复作废重生成另受每天 20 个的限制）。0 表示不限，最大 1000。',
         passwordReset: '忘记密码',
         passwordResetHint: '允许用户通过邮箱重置密码',
         frontendUrl: '前端地址',

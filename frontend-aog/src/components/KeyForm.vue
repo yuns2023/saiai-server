@@ -4,6 +4,7 @@ import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ApiKey, Group } from '@/types'
 import { rate } from '@/lib/format'
+import { isAllowedPlatform } from '@/lib/platforms'
 
 export interface KeyFormValue {
   name: string
@@ -37,7 +38,18 @@ const form = reactive<KeyFormValue>({
 })
 const more = ref(!!(k && (k.rate_limit_5h || k.rate_limit_1d || k.rate_limit_7d || k.ip_whitelist?.length || k.ip_blacklist?.length)))
 
-const platformLabel: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Google', antigravity: 'Google', sora: 'OpenAI' }
+/**
+ * `groups` only holds groups this UI offers. A key already bound to another
+ * group keeps it as a neutral option so editing other fields does not move it.
+ */
+const currentOther = computed(() => {
+  const id = k?.group_id
+  if (!id || props.groups.some((g) => g.id === id)) return null
+  // Off the list for another reason (disabled, subscription ended): a Claude group keeps its name.
+  const platform = k?.group?.platform
+  if (platform && !isAllowedPlatform(platform)) return { id, name: t('keys.otherGroup') }
+  return { id, name: k?.group?.name ?? `#${id}` }
+})
 const effectiveRate = (g: Group) => props.rates[g.id] ?? g.rate_multiplier
 /**
  * v-model.number yields "" for a cleared input and the raw string for
@@ -85,9 +97,8 @@ function submit(): void {
       <label class="block">
         <span class="label">{{ t('keys.group') }}</span>
         <select v-model="form.group_id" class="field mt-1">
-          <option v-for="g in groups" :key="g.id" :value="g.id">
-            {{ g.name }} · {{ platformLabel[g.platform] ?? g.platform }} · {{ rate(effectiveRate(g)) }}
-          </option>
+          <option v-if="currentOther" :value="currentOther.id">{{ currentOther.name }}</option>
+          <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }} · {{ rate(effectiveRate(g)) }}</option>
         </select>
       </label>
       <label class="block">
