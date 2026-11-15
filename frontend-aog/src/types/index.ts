@@ -172,6 +172,9 @@ export interface PublicSettings {
   purchase_subscription_url: string
   custom_menu_items: CustomMenuItem[]
   linuxdo_oauth_enabled: boolean
+  /** Absent on servers that predate Google / GitHub sign-in. */
+  google_oauth_enabled?: boolean
+  github_oauth_enabled?: boolean
   backend_mode_enabled: boolean
   maintenance_mode_enabled: boolean
   maintenance_message: string

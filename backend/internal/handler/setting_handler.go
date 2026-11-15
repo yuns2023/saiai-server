@@ -65,6 +65,8 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		PurchaseSubscriptionURL:          settings.PurchaseSubscriptionURL,
 		CustomMenuItems:                  dto.ParseUserVisibleMenuItems(settings.CustomMenuItems),
 		LinuxDoOAuthEnabled:              settings.LinuxDoOAuthEnabled,
+		GoogleOAuthEnabled:               settings.GoogleOAuthEnabled,
+		GitHubOAuthEnabled:               settings.GitHubOAuthEnabled,
 		SoraClientEnabled:                settings.SoraClientEnabled,
 		BackendModeEnabled:               settings.BackendModeEnabled,
 		MaintenanceModeEnabled:           settings.MaintenanceModeEnabled,

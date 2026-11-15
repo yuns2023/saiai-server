@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AuthFrame from '@/components/AuthFrame.vue'
 import TurnstileBox from '@/components/TurnstileBox.vue'
+import SocialSignIn from '@/components/SocialSignIn.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { needs2FA } from '@/api'
@@ -116,6 +117,8 @@ async function submitCode(): Promise<void> {
       <button type="submit" class="btn btn-primary h-10 w-full" :disabled="busy || code.trim().length < 6">{{ t('auth.verify') }}</button>
       <button type="button" class="btn btn-quiet w-full" @click="tempToken = ''; code = ''">{{ t('common.back') }}</button>
     </form>
+
+    <SocialSignIn v-if="!tempToken" :redirect="route.query.redirect" />
 
     <p v-if="canRegister && !tempToken" class="mt-6 border-t border-rule-soft pt-4 text-sm text-ink-2">
       {{ t('auth.noAccount') }}

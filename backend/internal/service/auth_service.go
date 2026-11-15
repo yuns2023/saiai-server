@@ -119,7 +119,7 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		return "", nil, ErrRegDisabled
 	}
 
-	// 防止用户注册 LinuxDo OAuth 合成邮箱，避免第三方登录与本地账号发生碰撞。
+	// 防止用户注册任一第三方登录（LinuxDo / Google / GitHub）合成邮箱，避免第三方登录与本地账号发生碰撞。
 	if isReservedEmail(email) {
 		return "", nil, ErrEmailReserved
 	}
@@ -858,9 +858,20 @@ func randomHexString(byteLength int) (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
+// isReservedEmail 判断邮箱是否属于任一第三方登录的合成邮箱域（LinuxDo / Google / GitHub）。
 func isReservedEmail(email string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(email))
-	return strings.HasSuffix(normalized, LinuxDoConnectSyntheticEmailDomain)
+	for _, domain := range reservedOAuthEmailDomains {
+		if strings.HasSuffix(normalized, domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsReservedOAuthEmail 供其他包（如管理员用户编辑）判断邮箱是否为第三方登录合成邮箱。
+func IsReservedOAuthEmail(email string) bool {
+	return isReservedEmail(email)
 }
 
 // GenerateToken 生成JWT access token

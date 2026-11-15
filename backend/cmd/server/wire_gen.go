@@ -79,7 +79,10 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	redeemService := service.NewRedeemService(redeemCodeRepository, userRepository, subscriptionService, redeemCache, billingCacheService, client, apiKeyAuthCacheInvalidator, claudeDeviceRepository, groupRepository)
 	totpCache := repository.NewTotpCache(redisClient)
 	totpService := service.NewTotpService(userRepository, secretEncryptor, totpCache, settingService, emailService, emailQueueService)
-	authHandler := handler.NewAuthHandler(configConfig, authService, userService, settingService, promoService, redeemService, totpService)
+	socialOAuthPendingStore := repository.NewSocialOAuthPendingStore(redisClient)
+	socialOAuthHandoffStore := repository.NewSocialOAuthHandoffStore(redisClient)
+	socialOAuthService := service.NewSocialOAuthService(authService, settingService, totpService, socialOAuthPendingStore, socialOAuthHandoffStore)
+	authHandler := handler.NewAuthHandler(configConfig, authService, userService, settingService, promoService, redeemService, totpService, socialOAuthService)
 	clientDeviceRepository := repository.NewClientDeviceRepository(db)
 	clientProofNonceStore := repository.NewClientProofNonceStore(redisClient)
 	clientDeviceService := service.NewClientDeviceService(clientDeviceRepository, clientProofNonceStore)
@@ -192,7 +195,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		return nil, err
 	}
 	jevSettingsService := service.NewJevSettingsService(settingRepository, secretEncryptor, configConfig)
-	settingHandler := handler.ProvideAdminSettingHandler(settingService, emailService, turnstileService, opsService, pricingService, billingService, pricingDriftService, usageLogRepository, jevSettingsService)
+	reservedEmailUserCounter := repository.NewReservedEmailUserCounter(client)
+	settingHandler := handler.ProvideAdminSettingHandler(settingService, emailService, turnstileService, opsService, pricingService, billingService, pricingDriftService, usageLogRepository, jevSettingsService, reservedEmailUserCounter)
 	opsHandler := admin.NewOpsHandler(opsService)
 	adminSubscriptionHandler := admin.NewSubscriptionHandler(subscriptionService)
 	usageCleanupRepository := repository.NewUsageCleanupRepository(client, db)

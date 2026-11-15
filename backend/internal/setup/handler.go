@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/sysutil"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -289,6 +290,10 @@ func install(c *gin.Context) {
 	// Admin validation
 	if !validateEmail(req.Admin.Email) {
 		response.Error(c, http.StatusBadRequest, "Invalid admin email format")
+		return
+	}
+	if service.IsReservedOAuthEmail(req.Admin.Email) {
+		response.Error(c, http.StatusBadRequest, "Admin email uses a reserved third-party sign-in domain")
 		return
 	}
 	if err := validatePassword(req.Admin.Password); err != nil {

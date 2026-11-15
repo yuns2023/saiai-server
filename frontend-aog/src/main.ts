@@ -5,7 +5,11 @@ import { router } from './router'
 import { i18n, getLocale } from './i18n'
 import { applyTheme, useAppStore } from './stores/app'
 import { useAuthStore } from './stores/auth'
+import { captureOAuthFragmentAtStartup } from './lib/oauth'
 import './styles/main.css'
+
+// Google / GitHub callback: clear tokens from the address bar before anything else runs.
+captureOAuthFragmentAtStartup()
 
 applyTheme()
 document.documentElement.lang = getLocale() === 'zh' ? 'zh-CN' : 'en'

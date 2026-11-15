@@ -77,6 +77,7 @@ func ProvideAdminSettingHandler(
 	pricingDrift *service.PricingDriftService,
 	usageRepo service.UsageLogRepository,
 	jevSettings *service.JevSettingsService,
+	reservedEmailCounter service.ReservedEmailUserCounter,
 ) *admin.SettingHandler {
 	handler := admin.NewSettingHandler(settingService, emailService, turnstileService, opsService)
 	handler.SetPricingService(pricingService)
@@ -84,6 +85,7 @@ func ProvideAdminSettingHandler(
 	handler.SetPricingDriftService(pricingDrift)
 	handler.SetPricingUsageReader(usageRepo)
 	handler.SetJevSettingsService(jevSettings)
+	handler.SetReservedEmailCounter(reservedEmailCounter)
 	return handler
 }
 

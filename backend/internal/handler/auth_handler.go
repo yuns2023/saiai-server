@@ -24,11 +24,15 @@ type AuthHandler struct {
 	promoService  *service.PromoService
 	redeemService *service.RedeemService
 	totpService   *service.TotpService
+
+	// Google / GitHub sign-in (nil = providers unavailable).
+	socialOAuth     socialOAuthBackend
+	socialEndpoints map[service.SocialOAuthProvider]socialOAuthEndpoints // test override
 }
 
 // NewAuthHandler creates a new AuthHandler
-func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService) *AuthHandler {
-	return &AuthHandler{
+func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService, socialOAuthService *service.SocialOAuthService) *AuthHandler {
+	h := &AuthHandler{
 		cfg:           cfg,
 		authService:   authService,
 		userService:   userService,
@@ -37,6 +41,10 @@ func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userSe
 		redeemService: redeemService,
 		totpService:   totpService,
 	}
+	if socialOAuthService != nil {
+		h.socialOAuth = socialOAuthService
+	}
+	return h
 }
 
 // RegisterRequest represents the registration request payload

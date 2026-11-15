@@ -87,6 +87,20 @@ const (
 // LinuxDoConnectSyntheticEmailDomain 是 LinuxDo Connect 用户的合成邮箱后缀（RFC 保留域名）。
 const LinuxDoConnectSyntheticEmailDomain = "@linuxdo-connect.invalid"
 
+// GoogleOAuthSyntheticEmailDomain / GitHubOAuthSyntheticEmailDomain 是 Google / GitHub 登录用户的合成邮箱后缀（RFC 保留域名）。
+// 账号只按 provider + subject 生成的合成邮箱匹配，第三方返回的真实邮箱从不用于查找或合并账号。
+const (
+	GoogleOAuthSyntheticEmailDomain = "@google-connect.invalid"
+	GitHubOAuthSyntheticEmailDomain = "@github-connect.invalid"
+)
+
+// reservedOAuthEmailDomains 列出所有第三方登录合成邮箱后缀；普通注册与任何改邮箱路径都不得使用这些后缀。
+var reservedOAuthEmailDomains = []string{
+	LinuxDoConnectSyntheticEmailDomain,
+	GoogleOAuthSyntheticEmailDomain,
+	GitHubOAuthSyntheticEmailDomain,
+}
+
 // Setting keys
 const (
 	// 注册设置
@@ -120,6 +134,18 @@ const (
 	SettingKeyLinuxDoConnectClientID     = "linuxdo_connect_client_id"
 	SettingKeyLinuxDoConnectClientSecret = "linuxdo_connect_client_secret"
 	SettingKeyLinuxDoConnectRedirectURL  = "linuxdo_connect_redirect_url"
+
+	// Google / GitHub 登录设置（默认关闭；回调地址由 frontend_url 推导）
+	SettingKeyGoogleOAuthEnabled      = "google_oauth_enabled"
+	SettingKeyGoogleOAuthClientID     = "google_oauth_client_id"
+	SettingKeyGoogleOAuthClientSecret = "google_oauth_client_secret"
+	SettingKeyGitHubOAuthEnabled      = "github_oauth_enabled"
+	SettingKeyGitHubOAuthClientID     = "github_oauth_client_id"
+	SettingKeyGitHubOAuthClientSecret = "github_oauth_client_secret"
+	// Set to "true" the first time a provider is enabled; never cleared. Lets the admin
+	// collision check distinguish our own synthetic accounts from pre-existing ones.
+	SettingKeyGoogleOAuthEverEnabled = "google_oauth_ever_enabled"
+	SettingKeyGitHubOAuthEverEnabled = "github_oauth_ever_enabled"
 
 	// OEM设置
 	SettingKeySoraClientEnabled           = "sora_client_enabled"           // 是否启用 Sora 客户端（管理员手动控制）

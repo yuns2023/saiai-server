@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -88,6 +89,7 @@ func generateMenuItemID() (string, error) {
 // SettingHandler 系统设置处理器
 type SettingHandler struct {
 	jevSettings         *service.JevSettingsService
+	reservedEmails      service.ReservedEmailUserCounter
 	pricingUsageReader  service.ModelPricingUsageReader
 	pricingRecentMu     sync.Mutex
 	pricingRecentAt     time.Time
@@ -103,6 +105,11 @@ type SettingHandler struct {
 }
 
 // SetPricingService wires the runtime pricing alias cache.
+// SetReservedEmailCounter wires the user counter used before enabling Google / GitHub sign-in.
+func (h *SettingHandler) SetReservedEmailCounter(counter service.ReservedEmailUserCounter) {
+	h.reservedEmails = counter
+}
+
 func (h *SettingHandler) SetPricingService(pricingService *service.PricingService) {
 	h.pricingService = pricingService
 }
@@ -160,6 +167,14 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		LinuxDoConnectClientID:               settings.LinuxDoConnectClientID,
 		LinuxDoConnectClientSecretConfigured: settings.LinuxDoConnectClientSecretConfigured,
 		LinuxDoConnectRedirectURL:            settings.LinuxDoConnectRedirectURL,
+		GoogleOAuthEnabled:                   settings.GoogleOAuthEnabled,
+		GoogleOAuthClientID:                  settings.GoogleOAuthClientID,
+		GoogleOAuthClientSecretConfigured:    settings.GoogleOAuthClientSecretConfigured,
+		GoogleOAuthRedirectURL:               h.socialOAuthRedirectURL(settings, service.SocialOAuthProviderGoogle),
+		GitHubOAuthEnabled:                   settings.GitHubOAuthEnabled,
+		GitHubOAuthClientID:                  settings.GitHubOAuthClientID,
+		GitHubOAuthClientSecretConfigured:    settings.GitHubOAuthClientSecretConfigured,
+		GitHubOAuthRedirectURL:               h.socialOAuthRedirectURL(settings, service.SocialOAuthProviderGitHub),
 		SiteName:                             settings.SiteName,
 		SiteLogo:                             settings.SiteLogo,
 		SiteSubtitle:                         settings.SiteSubtitle,
@@ -231,6 +246,14 @@ type UpdateSettingsRequest struct {
 	LinuxDoConnectClientID     string `json:"linuxdo_connect_client_id"`
 	LinuxDoConnectClientSecret string `json:"linuxdo_connect_client_secret"`
 	LinuxDoConnectRedirectURL  string `json:"linuxdo_connect_redirect_url"`
+
+	// Google / GitHub 登录。指针字段：旧客户端不传时保留现值；密钥留空 = 保留现值。
+	GoogleOAuthEnabled      *bool   `json:"google_oauth_enabled"`
+	GoogleOAuthClientID     *string `json:"google_oauth_client_id"`
+	GoogleOAuthClientSecret string  `json:"google_oauth_client_secret"`
+	GitHubOAuthEnabled      *bool   `json:"github_oauth_enabled"`
+	GitHubOAuthClientID     *string `json:"github_oauth_client_id"`
+	GitHubOAuthClientSecret string  `json:"github_oauth_client_secret"`
 
 	// OEM设置
 	SiteName                    string                `json:"site_name"`
@@ -420,6 +443,36 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
+	// Google / GitHub 登录参数验证
+	googleOAuth, msg := resolveSocialOAuthUpdate("Google",
+		req.GoogleOAuthEnabled, req.GoogleOAuthClientID, req.GoogleOAuthClientSecret,
+		previousSettings.GoogleOAuthEnabled, previousSettings.GoogleOAuthClientID, previousSettings.GoogleOAuthClientSecret,
+		h.settingService.EffectiveFrontendURL(req.FrontendURL), service.SocialOAuthProviderGoogle)
+	if msg != "" {
+		response.BadRequest(c, msg)
+		return
+	}
+	githubOAuth, msg := resolveSocialOAuthUpdate("GitHub",
+		req.GitHubOAuthEnabled, req.GitHubOAuthClientID, req.GitHubOAuthClientSecret,
+		previousSettings.GitHubOAuthEnabled, previousSettings.GitHubOAuthClientID, previousSettings.GitHubOAuthClientSecret,
+		h.settingService.EffectiveFrontendURL(req.FrontendURL), service.SocialOAuthProviderGitHub)
+	if msg != "" {
+		response.BadRequest(c, msg)
+		return
+	}
+	if googleOAuth.enabled && !previousSettings.GoogleOAuthEnabled && !previousSettings.GoogleOAuthEverEnabled {
+		if msg := h.syntheticEmailCollision(c.Request.Context(), "Google", service.SocialOAuthProviderGoogle); msg != "" {
+			response.BadRequest(c, msg)
+			return
+		}
+	}
+	if githubOAuth.enabled && !previousSettings.GitHubOAuthEnabled && !previousSettings.GitHubOAuthEverEnabled {
+		if msg := h.syntheticEmailCollision(c.Request.Context(), "GitHub", service.SocialOAuthProviderGitHub); msg != "" {
+			response.BadRequest(c, msg)
+			return
+		}
+	}
+
 	// 自定义菜单项验证
 	const (
 		maxCustomMenuItems    = 20
@@ -602,6 +655,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		LinuxDoConnectClientID:           req.LinuxDoConnectClientID,
 		LinuxDoConnectClientSecret:       req.LinuxDoConnectClientSecret,
 		LinuxDoConnectRedirectURL:        req.LinuxDoConnectRedirectURL,
+		GoogleOAuthEnabled:               googleOAuth.enabled,
+		GoogleOAuthClientID:              googleOAuth.clientID,
+		GoogleOAuthClientSecret:          googleOAuth.clientSecret,
+		GitHubOAuthEnabled:               githubOAuth.enabled,
+		GitHubOAuthClientID:              githubOAuth.clientID,
+		GitHubOAuthClientSecret:          githubOAuth.clientSecret,
 		SiteName:                         req.SiteName,
 		SiteLogo:                         req.SiteLogo,
 		SiteSubtitle:                     req.SiteSubtitle,
@@ -726,6 +785,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		LinuxDoConnectClientID:               updatedSettings.LinuxDoConnectClientID,
 		LinuxDoConnectClientSecretConfigured: updatedSettings.LinuxDoConnectClientSecretConfigured,
 		LinuxDoConnectRedirectURL:            updatedSettings.LinuxDoConnectRedirectURL,
+		GoogleOAuthEnabled:                   updatedSettings.GoogleOAuthEnabled,
+		GoogleOAuthClientID:                  updatedSettings.GoogleOAuthClientID,
+		GoogleOAuthClientSecretConfigured:    updatedSettings.GoogleOAuthClientSecretConfigured,
+		GoogleOAuthRedirectURL:               h.socialOAuthRedirectURL(updatedSettings, service.SocialOAuthProviderGoogle),
+		GitHubOAuthEnabled:                   updatedSettings.GitHubOAuthEnabled,
+		GitHubOAuthClientID:                  updatedSettings.GitHubOAuthClientID,
+		GitHubOAuthClientSecretConfigured:    updatedSettings.GitHubOAuthClientSecretConfigured,
+		GitHubOAuthRedirectURL:               h.socialOAuthRedirectURL(updatedSettings, service.SocialOAuthProviderGitHub),
 		SiteName:                             updatedSettings.SiteName,
 		SiteLogo:                             updatedSettings.SiteLogo,
 		SiteSubtitle:                         updatedSettings.SiteSubtitle,
@@ -845,6 +912,24 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.LinuxDoConnectRedirectURL != after.LinuxDoConnectRedirectURL {
 		changed = append(changed, "linuxdo_connect_redirect_url")
+	}
+	if before.GoogleOAuthEnabled != after.GoogleOAuthEnabled {
+		changed = append(changed, "google_oauth_enabled")
+	}
+	if before.GoogleOAuthClientID != after.GoogleOAuthClientID {
+		changed = append(changed, "google_oauth_client_id")
+	}
+	if strings.TrimSpace(req.GoogleOAuthClientSecret) != "" {
+		changed = append(changed, "google_oauth_client_secret")
+	}
+	if before.GitHubOAuthEnabled != after.GitHubOAuthEnabled {
+		changed = append(changed, "github_oauth_enabled")
+	}
+	if before.GitHubOAuthClientID != after.GitHubOAuthClientID {
+		changed = append(changed, "github_oauth_client_id")
+	}
+	if strings.TrimSpace(req.GitHubOAuthClientSecret) != "" {
+		changed = append(changed, "github_oauth_client_secret")
 	}
 	if before.SiteName != after.SiteName {
 		changed = append(changed, "site_name")
@@ -1325,6 +1410,68 @@ func validateCodexVersionGateSettings(minVersion, maxVersion string) string {
 	}
 	if minVersion != "" && maxVersion != "" && maxParsed.Compare(minParsed) < 0 {
 		return "codex_max_version must be greater than or equal to codex_min_version"
+	}
+	return ""
+}
+
+type socialOAuthUpdate struct {
+	enabled      bool
+	clientID     string
+	clientSecret string // empty = keep the stored secret
+}
+
+// resolveSocialOAuthUpdate merges a (possibly partial) update with the stored values and
+// validates it. Returns a non-empty message for a 400 response.
+func resolveSocialOAuthUpdate(
+	label string,
+	reqEnabled *bool, reqClientID *string, reqSecret string,
+	prevEnabled bool, prevClientID, prevSecret string,
+	frontendURL string, provider service.SocialOAuthProvider,
+) (socialOAuthUpdate, string) {
+	out := socialOAuthUpdate{enabled: prevEnabled, clientID: prevClientID, clientSecret: strings.TrimSpace(reqSecret)}
+	if reqEnabled != nil {
+		out.enabled = *reqEnabled
+	}
+	if reqClientID != nil {
+		out.clientID = strings.TrimSpace(*reqClientID)
+	}
+	if !out.enabled {
+		return out, ""
+	}
+	if out.clientID == "" {
+		return out, label + " Client ID is required when enabled"
+	}
+	if out.clientSecret == "" && strings.TrimSpace(prevSecret) == "" {
+		return out, label + " Client Secret is required when enabled"
+	}
+	if service.SocialOAuthRedirectURL(frontendURL, provider) == "" {
+		return out, label + " sign-in requires Frontend URL to be a bare origin such as https://example.com (no path, query or fragment) to derive the callback URL"
+	}
+	return out, ""
+}
+
+// socialOAuthRedirectURL is the callback URL admins must register with the provider.
+func (h *SettingHandler) socialOAuthRedirectURL(settings *service.SystemSettings, provider service.SocialOAuthProvider) string {
+	if settings == nil {
+		return ""
+	}
+	return service.SocialOAuthRedirectURL(h.settingService.EffectiveFrontendURL(settings.FrontendURL), provider)
+}
+
+// syntheticEmailCollision refuses the first-ever enable of a provider while users already
+// hold addresses in its reserved domain (they could be signed into by whoever owns the
+// matching provider account). Fails closed when the count cannot be read.
+func (h *SettingHandler) syntheticEmailCollision(ctx context.Context, label string, provider service.SocialOAuthProvider) string {
+	if h.reservedEmails == nil {
+		return "Cannot enable " + label + " sign-in: unable to check existing accounts"
+	}
+	n, err := h.reservedEmails.CountUsersWithEmailDomain(ctx, provider.SyntheticEmailDomain())
+	if err != nil {
+		return "Cannot enable " + label + " sign-in: unable to check existing accounts"
+	}
+	if n > 0 {
+		return fmt.Sprintf("Cannot enable %s sign-in: %d existing user(s) already use an email ending in %s; change those emails first",
+			label, n, provider.SyntheticEmailDomain())
 	}
 	return ""
 }

@@ -20,6 +20,12 @@ const routes: RouteRecordRaw[] = [
   { path: '/register', name: 'register', component: () => import('@/views/auth/RegisterView.vue'), meta: { title: 'auth.register', guestOnly: true } },
   { path: '/forgot-password', name: 'forgot', component: () => import('@/views/auth/ForgotPasswordView.vue'), meta: { title: 'auth.forgotTitle' } },
   { path: '/reset-password', name: 'reset', component: () => import('@/views/auth/ResetPasswordView.vue'), meta: { title: 'auth.resetTitle' } },
+  {
+    path: '/auth/oauth/:provider(google|github)/callback',
+    name: 'oauth-callback',
+    component: () => import('@/views/auth/OAuthCallbackView.vue'),
+    meta: { title: 'auth.signIn' }
+  },
   { path: '/key-usage', name: 'key-usage', component: () => import('@/views/KeyLookupView.vue'), meta: { title: 'lookup.title' } },
 
   { path: '/dashboard', name: 'overview', component: () => import('@/views/app/OverviewView.vue'), meta: { title: 'nav.overview', auth: true } },

@@ -14,6 +14,8 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 export interface ApiError {
   status: number
   code?: string | number
+  /** Structured backend reason (e.g. INVITATION_CODE_INVALID), when present. */
+  reason?: string
   message: string
   error?: unknown
 }
@@ -88,6 +90,7 @@ api.interceptors.response.use(
     return Promise.reject({
       status,
       code: data.code,
+      reason: typeof data.reason === 'string' ? data.reason : undefined,
       error: data.error,
       message: data.message || data.detail || error.message
     } satisfies ApiError)
@@ -165,7 +168,8 @@ function expireSession(): void {
   window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
   if (hadSession) sessionStorage.setItem('auth_expired', '1')
   const here = window.location.pathname
-  if (!PUBLIC_PATHS.includes(here)) {
+  // The Google / GitHub callback page reports its own failures; bouncing it to /login would lose the hand-over.
+  if (!PUBLIC_PATHS.includes(here) && !here.startsWith('/auth/oauth/')) {
     const back = encodeURIComponent(`${here}${window.location.search}`)
     window.location.href = `/login?redirect=${back}`
   }

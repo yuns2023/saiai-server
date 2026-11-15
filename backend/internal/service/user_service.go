@@ -155,6 +155,12 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, req Updat
 	oldConcurrency := user.Concurrency
 
 	// 更新字段
+	if req.Email != nil && *req.Email != user.Email {
+		// 第三方登录账号以合成邮箱绑定身份：既不允许改成合成邮箱，也不允许把合成邮箱改走。
+		if isReservedEmail(*req.Email) || isReservedEmail(user.Email) {
+			return nil, ErrEmailReserved
+		}
+	}
 	if req.Email != nil {
 		// 检查新邮箱是否已被使用
 		exists, err := s.userRepo.ExistsByEmail(ctx, *req.Email)

@@ -5106,6 +5106,18 @@ export default {
         quickSetCopy: 'Generate & Copy (current site)',
         redirectUrlSetAndCopied: 'Redirect URL generated and copied to clipboard'
       },
+      socialOAuth: {
+        title: '{provider} Sign-in',
+        description: 'Let users sign in / sign up with their {provider} account (off by default)',
+        enable: 'Enable {provider} sign-in',
+        enableHint: 'Show the button on the customer console (AOG) login / register pages',
+        secretHint: 'Used by the backend to exchange tokens (kept secret, never shown again)',
+        secretConfiguredHint: 'Secret configured. Leave empty to keep the current value.',
+        redirectUrl: 'Redirect URI',
+        redirectUrlMissing: 'Set the Frontend URL under Registration first; the redirect URI is derived from it.',
+        redirectUrlHint: 'Register exactly this URL as the authorized redirect URI of your {provider} app.',
+        accountHint: 'Accounts are bound by the {provider} account ID (never merged by email). First sign-in follows the registration and invitation settings; no email code is needed.'
+      },
       defaults: {
         title: 'Default User Settings',
         description: 'Default values for new users',

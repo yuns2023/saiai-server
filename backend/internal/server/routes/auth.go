@@ -70,6 +70,24 @@ func RegisterAuthRoutes(
 			}),
 			h.Auth.CompleteLinuxDoOAuthRegistration,
 		)
+		// Google / GitHub 登录（默认关闭；与 LinuxDo 路由同样的限流方式）
+		for _, provider := range []service.SocialOAuthProvider{service.SocialOAuthProviderGoogle, service.SocialOAuthProviderGitHub} {
+			base := "/oauth/" + string(provider)
+			auth.GET(base+"/start", h.Auth.SocialOAuthStart(provider))
+			auth.GET(base+"/callback", h.Auth.SocialOAuthCallback(provider))
+			auth.POST(base+"/complete-registration",
+				rateLimiter.LimitWithOptions("oauth-"+string(provider)+"-complete", 10, time.Minute, middleware.RateLimitOptions{
+					FailureMode: middleware.RateLimitFailClose,
+				}),
+				h.Auth.CompleteSocialOAuthRegistration(provider),
+			)
+			auth.POST(base+"/exchange",
+				rateLimiter.LimitWithOptions("oauth-"+string(provider)+"-exchange", 10, time.Minute, middleware.RateLimitOptions{
+					FailureMode: middleware.RateLimitFailClose,
+				}),
+				h.Auth.ExchangeSocialOAuthHandoff(provider),
+			)
+		}
 	}
 
 	// 公开设置（无需认证）

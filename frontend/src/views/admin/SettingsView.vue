@@ -614,7 +614,25 @@
             </div>
           </div>
         </div>
-        </div><!-- /Tab: Security — Registration, Turnstile, LinuxDo -->
+
+        <!-- Google / GitHub 登录 -->
+        <SocialOAuthSettingsCard
+          v-model:enabled="form.google_oauth_enabled"
+          v-model:client-id="form.google_oauth_client_id"
+          v-model:client-secret="form.google_oauth_client_secret"
+          label="Google"
+          :secret-configured="!!form.google_oauth_client_secret_configured"
+          :redirect-url="form.google_oauth_redirect_url || ''"
+        />
+        <SocialOAuthSettingsCard
+          v-model:enabled="form.github_oauth_enabled"
+          v-model:client-id="form.github_oauth_client_id"
+          v-model:client-secret="form.github_oauth_client_secret"
+          label="GitHub"
+          :secret-configured="!!form.github_oauth_client_secret_configured"
+          :redirect-url="form.github_oauth_redirect_url || ''"
+        />
+        </div><!-- /Tab: Security — Registration, Turnstile, LinuxDo, Google, GitHub -->
 
         <!-- Tab: Users -->
         <div v-show="activeTab === 'users'" class="space-y-6">
@@ -1508,6 +1526,7 @@ import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Toggle from '@/components/common/Toggle.vue'
+import SocialOAuthSettingsCard from '@/components/admin/SocialOAuthSettingsCard.vue'
 import ImageUpload from '@/components/common/ImageUpload.vue'
 import ChatGPTBillingSettings from '@/components/admin/ChatGPTBillingSettings.vue'
 import JevSettings from '@/components/admin/JevSettings.vue'
@@ -1576,6 +1595,12 @@ type SettingsForm = SystemSettings & {
   smtp_password: string
   turnstile_secret_key: string
   linuxdo_connect_client_secret: string
+  google_oauth_enabled: boolean
+  google_oauth_client_id: string
+  google_oauth_client_secret: string
+  github_oauth_enabled: boolean
+  github_oauth_client_id: string
+  github_oauth_client_secret: string
 }
 
 const form = reactive<SettingsForm>({
@@ -1627,6 +1652,17 @@ const form = reactive<SettingsForm>({
   linuxdo_connect_client_secret: '',
   linuxdo_connect_client_secret_configured: false,
   linuxdo_connect_redirect_url: '',
+  // Google / GitHub 登录
+  google_oauth_enabled: false,
+  google_oauth_client_id: '',
+  google_oauth_client_secret: '',
+  google_oauth_client_secret_configured: false,
+  google_oauth_redirect_url: '',
+  github_oauth_enabled: false,
+  github_oauth_client_id: '',
+  github_oauth_client_secret: '',
+  github_oauth_client_secret_configured: false,
+  github_oauth_redirect_url: '',
   // Model fallback
   enable_model_fallback: false,
   fallback_model_anthropic: 'claude-3-5-sonnet-20241022',
@@ -1815,6 +1851,8 @@ async function loadSettings() {
     form.smtp_password = ''
     form.turnstile_secret_key = ''
     form.linuxdo_connect_client_secret = ''
+    form.google_oauth_client_secret = ''
+    form.github_oauth_client_secret = ''
   } catch (error: any) {
     appStore.showError(
       t('admin.settings.failedToLoad') + ': ' + (error.message || t('common.unknownError'))
@@ -1953,6 +1991,12 @@ async function saveSettings() {
       linuxdo_connect_client_id: form.linuxdo_connect_client_id,
       linuxdo_connect_client_secret: form.linuxdo_connect_client_secret || undefined,
       linuxdo_connect_redirect_url: form.linuxdo_connect_redirect_url,
+      google_oauth_enabled: form.google_oauth_enabled,
+      google_oauth_client_id: form.google_oauth_client_id,
+      google_oauth_client_secret: form.google_oauth_client_secret || undefined,
+      github_oauth_enabled: form.github_oauth_enabled,
+      github_oauth_client_id: form.github_oauth_client_id,
+      github_oauth_client_secret: form.github_oauth_client_secret || undefined,
       enable_model_fallback: form.enable_model_fallback,
       fallback_model_anthropic: form.fallback_model_anthropic,
       fallback_model_openai: form.fallback_model_openai,
@@ -1977,6 +2021,8 @@ async function saveSettings() {
     form.smtp_password = ''
     form.turnstile_secret_key = ''
     form.linuxdo_connect_client_secret = ''
+    form.google_oauth_client_secret = ''
+    form.github_oauth_client_secret = ''
     // Refresh cached settings so sidebar/header update immediately
     await appStore.fetchPublicSettings(true)
     await adminSettingsStore.fetch(true)

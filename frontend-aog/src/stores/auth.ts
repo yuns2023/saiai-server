@@ -97,6 +97,37 @@ export const useAuthStore = defineStore('auth', () => {
     adopt(await authApi.register(req))
   }
 
+  /** Sign in with tokens handed over by the Google / GitHub callback, then load the user. */
+  async function adoptTokens(accessToken: string, refreshToken: string, expiresIn: number): Promise<void> {
+    generation++
+    useNoticesStore().reset()
+    stopTimers()
+    clearSession()
+    saveTokens(accessToken, refreshToken, expiresIn || undefined)
+    token.value = accessToken
+    user.value = null
+    const issuedIn = generation
+    let me: User & { run_mode?: 'standard' | 'simple' }
+    try {
+      me = await authApi.me()
+    } catch (e) {
+      if (issuedIn === generation) {
+        clearSession()
+        dropLocalState()
+      }
+      throw e
+    }
+    if (issuedIn !== generation) return
+    const { run_mode: _runMode, ...rest } = me
+    user.value = rest
+    saveUser(rest)
+    startTimers()
+  }
+
+  async function completeOAuthRegistration(provider: 'google' | 'github', pendingToken: string, invitationCode: string): Promise<void> {
+    adopt(await authApi.completeOAuthRegistration(provider, pendingToken, invitationCode))
+  }
+
   async function refreshUser(): Promise<User> {
     const issuedIn = generation
     const me = await authApi.me()
@@ -114,5 +145,18 @@ export const useAuthStore = defineStore('auth', () => {
     dropLocalState()
   }
 
-  return { user, token, isAuthenticated, isAdmin, restore, login, login2FA, register, refreshUser, logout }
+  return {
+    user,
+    token,
+    isAuthenticated,
+    isAdmin,
+    restore,
+    login,
+    login2FA,
+    register,
+    adoptTokens,
+    completeOAuthRegistration,
+    refreshUser,
+    logout
+  }
 })
