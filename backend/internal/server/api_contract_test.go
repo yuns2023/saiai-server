@@ -576,6 +576,7 @@ func TestAPIContracts(t *testing.T) {
 						"identity_patch_prompt": "",
 						"sora_client_enabled": false,
 						"invitation_code_enabled": false,
+						"invitation_code_hint": "",
 						"home_content": "",
 					"hide_ccs_import_button": false,
 					"purchase_subscription_enabled": false,
