@@ -67,6 +67,14 @@ export const authApi = {
     const { data } = await api.post('/auth/reset-password', { email, token, new_password: newPassword })
     return data
   },
+  /** Finishes an invitation-required first Google / GitHub sign-in (the pending token is single use). */
+  async completeOAuthRegistration(provider: 'google' | 'github', pendingToken: string, invitationCode: string): Promise<AuthResponse> {
+    const { data } = await api.post<AuthResponse>(`/auth/oauth/${provider}/complete-registration`, {
+      pending_oauth_token: pendingToken,
+      invitation_code: invitationCode
+    })
+    return data
+  },
   async publicSettings(): Promise<PublicSettings> {
     const { data } = await api.get<PublicSettings>('/settings/public')
     return data

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AuthFrame from '@/components/AuthFrame.vue'
 import TurnstileBox from '@/components/TurnstileBox.vue'
+import SocialSignIn from '@/components/SocialSignIn.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { authApi } from '@/api'
@@ -170,6 +171,8 @@ async function submit(): Promise<void> {
         {{ busy ? t('auth.creating') : t('auth.createAccount') }}
       </button>
     </form>
+
+    <SocialSignIn v-if="enabled" :redirect="route.query.redirect" />
 
     <p class="mt-6 border-t border-rule-soft pt-4 text-sm text-ink-2">
       {{ t('auth.haveAccount') }} <RouterLink to="/login">{{ t('auth.signIn') }}</RouterLink>

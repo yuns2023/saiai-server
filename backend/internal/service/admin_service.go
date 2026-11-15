@@ -658,6 +658,10 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 	if err := validatePaygDiscountMultiplier(input.PaygDiscountMultiplier); err != nil {
 		return nil, err
 	}
+	// 第三方登录合成邮箱只能由对应 OAuth 流程创建。
+	if isReservedEmail(input.Email) {
+		return nil, ErrEmailReserved
+	}
 	user := &User{
 		Email:                       input.Email,
 		Username:                    input.Username,
@@ -726,7 +730,11 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		return nil, err
 	}
 
-	if input.Email != "" {
+	if input.Email != "" && input.Email != user.Email {
+		// 不允许把任何账号改成第三方登录合成邮箱（否则可冒领该第三方身份）。
+		if isReservedEmail(input.Email) {
+			return nil, ErrEmailReserved
+		}
 		user.Email = input.Email
 	}
 	if input.Password != "" {

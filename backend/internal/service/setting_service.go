@@ -283,6 +283,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeySoraClientEnabled,
 		SettingKeyCustomMenuItems,
 		SettingKeyLinuxDoConnectEnabled,
+		SettingKeyGoogleOAuthEnabled,
+		SettingKeyGitHubOAuthEnabled,
 		SettingKeyBackendModeEnabled,
 		SettingKeyMaintenanceModeEnabled,
 		SettingKeyMaintenanceMessage,
@@ -331,6 +333,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SoraClientEnabled:                settings[SettingKeySoraClientEnabled] == "true",
 		CustomMenuItems:                  settings[SettingKeyCustomMenuItems],
 		LinuxDoOAuthEnabled:              linuxDoEnabled,
+		GoogleOAuthEnabled:               settings[SettingKeyGoogleOAuthEnabled] == "true",
+		GitHubOAuthEnabled:               settings[SettingKeyGitHubOAuthEnabled] == "true",
 		BackendModeEnabled:               settings[SettingKeyBackendModeEnabled] == "true",
 		MaintenanceModeEnabled:           settings[SettingKeyMaintenanceModeEnabled] == "true",
 		MaintenanceMessage:               maintenanceMessage(settings[SettingKeyMaintenanceMessage]),
@@ -386,6 +390,8 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		SoraClientEnabled                bool            `json:"sora_client_enabled"`
 		CustomMenuItems                  json.RawMessage `json:"custom_menu_items"`
 		LinuxDoOAuthEnabled              bool            `json:"linuxdo_oauth_enabled"`
+		GoogleOAuthEnabled               bool            `json:"google_oauth_enabled"`
+		GitHubOAuthEnabled               bool            `json:"github_oauth_enabled"`
 		BackendModeEnabled               bool            `json:"backend_mode_enabled"`
 		MaintenanceModeEnabled           bool            `json:"maintenance_mode_enabled"`
 		MaintenanceMessage               string          `json:"maintenance_message,omitempty"`
@@ -414,6 +420,8 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		SoraClientEnabled:                settings.SoraClientEnabled,
 		CustomMenuItems:                  filterUserVisibleMenuItems(settings.CustomMenuItems),
 		LinuxDoOAuthEnabled:              settings.LinuxDoOAuthEnabled,
+		GoogleOAuthEnabled:               settings.GoogleOAuthEnabled,
+		GitHubOAuthEnabled:               settings.GitHubOAuthEnabled,
 		BackendModeEnabled:               settings.BackendModeEnabled,
 		MaintenanceModeEnabled:           settings.MaintenanceModeEnabled,
 		MaintenanceMessage:               maintenanceMessage(settings.MaintenanceMessage),
@@ -580,6 +588,18 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyLinuxDoConnectRedirectURL] = settings.LinuxDoConnectRedirectURL
 	if settings.LinuxDoConnectClientSecret != "" {
 		updates[SettingKeyLinuxDoConnectClientSecret] = settings.LinuxDoConnectClientSecret
+	}
+
+	// Google / GitHub 登录（只有非空才更新密钥）
+	updates[SettingKeyGoogleOAuthEnabled] = strconv.FormatBool(settings.GoogleOAuthEnabled)
+	updates[SettingKeyGoogleOAuthClientID] = strings.TrimSpace(settings.GoogleOAuthClientID)
+	if strings.TrimSpace(settings.GoogleOAuthClientSecret) != "" {
+		updates[SettingKeyGoogleOAuthClientSecret] = strings.TrimSpace(settings.GoogleOAuthClientSecret)
+	}
+	updates[SettingKeyGitHubOAuthEnabled] = strconv.FormatBool(settings.GitHubOAuthEnabled)
+	updates[SettingKeyGitHubOAuthClientID] = strings.TrimSpace(settings.GitHubOAuthClientID)
+	if strings.TrimSpace(settings.GitHubOAuthClientSecret) != "" {
+		updates[SettingKeyGitHubOAuthClientSecret] = strings.TrimSpace(settings.GitHubOAuthClientSecret)
 	}
 
 	// OEM设置
@@ -1057,6 +1077,16 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.LinuxDoConnectClientSecret = strings.TrimSpace(linuxDoBase.ClientSecret)
 	}
 	result.LinuxDoConnectClientSecretConfigured = result.LinuxDoConnectClientSecret != ""
+
+	// Google / GitHub 登录（仅数据库设置，默认关闭）
+	result.GoogleOAuthEnabled = settings[SettingKeyGoogleOAuthEnabled] == "true"
+	result.GoogleOAuthClientID = strings.TrimSpace(settings[SettingKeyGoogleOAuthClientID])
+	result.GoogleOAuthClientSecret = strings.TrimSpace(settings[SettingKeyGoogleOAuthClientSecret])
+	result.GoogleOAuthClientSecretConfigured = result.GoogleOAuthClientSecret != ""
+	result.GitHubOAuthEnabled = settings[SettingKeyGitHubOAuthEnabled] == "true"
+	result.GitHubOAuthClientID = strings.TrimSpace(settings[SettingKeyGitHubOAuthClientID])
+	result.GitHubOAuthClientSecret = strings.TrimSpace(settings[SettingKeyGitHubOAuthClientSecret])
+	result.GitHubOAuthClientSecretConfigured = result.GitHubOAuthClientSecret != ""
 
 	// Model fallback settings
 	result.EnableModelFallback = settings[SettingKeyEnableModelFallback] == "true"

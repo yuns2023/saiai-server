@@ -31,6 +31,16 @@ type SystemSettings struct {
 	LinuxDoConnectClientSecretConfigured bool
 	LinuxDoConnectRedirectURL            string
 
+	// Google / GitHub 登录（回调地址由 FrontendURL 推导）
+	GoogleOAuthEnabled                bool
+	GoogleOAuthClientID               string
+	GoogleOAuthClientSecret           string
+	GoogleOAuthClientSecretConfigured bool
+	GitHubOAuthEnabled                bool
+	GitHubOAuthClientID               string
+	GitHubOAuthClientSecret           string
+	GitHubOAuthClientSecretConfigured bool
+
 	SiteName                    string
 	SiteLogo                    string
 	SiteSubtitle                string
@@ -118,6 +128,8 @@ type PublicSettings struct {
 	CustomMenuItems             string // JSON array of custom menu items
 
 	LinuxDoOAuthEnabled    bool
+	GoogleOAuthEnabled     bool
+	GitHubOAuthEnabled     bool
 	BackendModeEnabled     bool
 	MaintenanceModeEnabled bool
 	MaintenanceMessage     string

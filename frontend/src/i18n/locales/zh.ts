@@ -5268,6 +5268,18 @@ export default {
         quickSetCopy: '使用当前站点生成并复制',
         redirectUrlSetAndCopied: '已使用当前站点生成回调地址并复制到剪贴板'
       },
+      socialOAuth: {
+        title: '{provider} 登录',
+        description: '允许用户用 {provider} 账号登录 / 注册（默认关闭）',
+        enable: '启用 {provider} 登录',
+        enableHint: '在用户控制台（AOG）的登录 / 注册页面显示入口',
+        secretHint: '用于后端交换 token（请保密，保存后不会再显示）',
+        secretConfiguredHint: '密钥已配置，留空以保留当前值。',
+        redirectUrl: '回调地址（Redirect URI）',
+        redirectUrlMissing: '请先在「注册设置」中填写前端地址（Frontend URL），回调地址由它生成。',
+        redirectUrlHint: '把这个地址原样填到 {provider} 应用的授权回调地址中。',
+        accountHint: '账号按 {provider} 账号 ID 绑定（不按邮箱合并）；首次登录遵守注册开关与邀请码设置，无需邮箱验证码。'
+      },
       defaults: {
         title: '用户默认设置',
         description: '新用户的默认值',

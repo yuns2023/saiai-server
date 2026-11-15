@@ -70,6 +70,16 @@ export interface SystemSettings {
   linuxdo_connect_client_secret_configured: boolean
   linuxdo_connect_redirect_url: string
 
+  // Google / GitHub sign-in (secrets are write-only; redirect URLs are derived from frontend_url)
+  google_oauth_enabled?: boolean
+  google_oauth_client_id?: string
+  google_oauth_client_secret_configured?: boolean
+  google_oauth_redirect_url?: string
+  github_oauth_enabled?: boolean
+  github_oauth_client_id?: string
+  github_oauth_client_secret_configured?: boolean
+  github_oauth_redirect_url?: string
+
   // Model fallback configuration
   enable_model_fallback: boolean
   fallback_model_anthropic: string
@@ -141,6 +151,12 @@ export interface UpdateSettingsRequest {
   linuxdo_connect_client_id?: string
   linuxdo_connect_client_secret?: string
   linuxdo_connect_redirect_url?: string
+  google_oauth_enabled?: boolean
+  google_oauth_client_id?: string
+  google_oauth_client_secret?: string
+  github_oauth_enabled?: boolean
+  github_oauth_client_id?: string
+  github_oauth_client_secret?: string
   enable_model_fallback?: boolean
   fallback_model_anthropic?: string
   fallback_model_openai?: string
