@@ -61,23 +61,37 @@ func TestAdminUserAndRedeemEndpoints_SerializeInviter(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		var body map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-		return body["data"].(map[string]any)
+		return asMap(t, body["data"])
 	}
 
-	list := get("/users")["items"].([]any)[0].(map[string]any)
+	list := asMap(t, asSlice(t, get("/users")["items"])[0])
 	require.EqualValues(t, 42, list["invited_by_user_id"])
 	require.Equal(t, map[string]any{"id": float64(42), "email": "owner@example.com", "deleted": true}, list["invited_by"])
 
 	one := get("/users/1")
 	require.EqualValues(t, 42, one["invited_by_user_id"])
-	require.Equal(t, "owner@example.com", one["invited_by"].(map[string]any)["email"])
+	require.Equal(t, "owner@example.com", asMap(t, one["invited_by"])["email"])
 
-	code := get("/redeem")["items"].([]any)[0].(map[string]any)
+	code := asMap(t, asSlice(t, get("/redeem")["items"])[0])
 	require.EqualValues(t, 42, code["owner_user_id"])
-	require.Equal(t, "owner@example.com", code["owner"].(map[string]any)["email"])
+	require.Equal(t, "owner@example.com", asMap(t, code["owner"])["email"])
 
 	// Filter parsing.
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users?invited_by_user_id=abc", nil))
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func asMap(t *testing.T, v any) map[string]any {
+	t.Helper()
+	m, ok := v.(map[string]any)
+	require.True(t, ok, "want object, got %T", v)
+	return m
+}
+
+func asSlice(t *testing.T, v any) []any {
+	t.Helper()
+	a, ok := v.([]any)
+	require.True(t, ok, "want array, got %T", v)
+	return a
 }
