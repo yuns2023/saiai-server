@@ -124,6 +124,8 @@ export default {
       OAUTH_IDENTITY_INVALID: '{provider} 返回的账号信息无效，请重新发起登录。',
       OAUTH_EMAIL_NOT_VERIFIED: '你的 {provider} 账号没有已验证的邮箱，不能用于注册。',
       OAUTH_DISABLED: '本站暂未开启 {provider} 登录。',
+      OAUTH_PENDING_INVALID: '这次注册已失效，请重新发起 {provider} 登录。',
+      OAUTH_ACCOUNT_EXISTS: '该 {provider} 账号已注册，请重新发起登录。',
       SERVICE_UNAVAILABLE: '服务暂时不可用，请稍后重试。'
     }
   },

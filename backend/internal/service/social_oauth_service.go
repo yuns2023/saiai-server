@@ -270,7 +270,8 @@ func (s *SocialOAuthService) CompleteRegistration(ctx context.Context, provider 
 		return nil, err
 	}
 	if recheck.InvitationRequired && invitation == nil {
-		return nil, ErrInvitationCodeInvalid
+		// The session is already consumed, so this is not a retryable code error.
+		return nil, ErrSocialOAuthPendingInvalid
 	}
 
 	email := SocialOAuthSyntheticEmail(identity.Provider, identity.Subject)

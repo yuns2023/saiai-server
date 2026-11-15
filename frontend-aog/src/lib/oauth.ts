@@ -87,7 +87,8 @@ const CALLBACK_PATH = /^\/auth\/oauth\/(google|github)\/callback\/?$/
  * it in memory for the callback view.
  */
 export function captureOAuthFragmentAtStartup(win: Window = window): void {
-  if (!CALLBACK_PATH.test(win.location.pathname)) return
-  captured = null
-  captured = takeOAuthFragment(win)
+  if (!CALLBACK_PATH.test(win.location.pathname) || !win.location.hash) return
+  const hash = win.location.hash
+  win.history.replaceState(win.history.state, '', `${win.location.pathname}${win.location.search}`)
+  captured = hash
 }

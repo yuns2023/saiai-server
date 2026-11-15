@@ -78,7 +78,7 @@ describe('OAuthCallbackView', () => {
 
   it('collects the invitation code for a pending registration', async () => {
     api.completeOAuthRegistration
-      .mockRejectedValueOnce({ status: 400, code: 'INVITATION_CODE_INVALID', message: '邀请码无效' })
+      .mockRejectedValueOnce({ status: 400, code: 400, reason: 'INVITATION_CODE_INVALID', message: '邀请码无效' })
       .mockResolvedValueOnce({ access_token: 'at-3', refresh_token: 'rt-3', expires_in: 900, token_type: 'Bearer', user })
     const { wrapper, router } = await mountAt('google', `#error=invitation_required&pending_oauth_token=${pending}&redirect=%2Fdashboard`)
     expect(window.location.hash).toBe('')
@@ -95,6 +95,16 @@ describe('OAuthCallbackView', () => {
     expect(api.completeOAuthRegistration).toHaveBeenLastCalledWith('google', pending, 'INVITE-OK')
     expect(localStorage.getItem('auth_token')).toBe('at-3')
     expect(router.currentRoute.value.path).toBe('/dashboard')
+  })
+
+  it('ends the flow when the one-time session is gone', async () => {
+    api.completeOAuthRegistration.mockRejectedValueOnce({ status: 400, code: 400, reason: 'OAUTH_PENDING_INVALID', message: 'x' })
+    const { wrapper } = await mountAt('github', `#error=invitation_required&pending_oauth_token=${pending}`)
+    await wrapper.find('input[autocomplete="off"]').setValue('INVITE-OK')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('form').exists()).toBe(false)
+    expect(wrapper.find('[role=alert]').text()).toContain('重新发起 GitHub 登录')
   })
 
   it('explains errors from the backend', async () => {

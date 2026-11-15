@@ -505,8 +505,14 @@ func TestSocialOAuth_Invitation_PolicyChangeDuringComplete(t *testing.T) {
 	f.settings.set(SettingKeyInvitationCodeEnabled, "false")
 	f.pending.onConsume = func() { f.settings.set(SettingKeyInvitationCodeEnabled, "true") }
 	_, err = f.svc.CompleteRegistration(context.Background(), SocialOAuthProviderGoogle, res.PendingToken, "")
-	require.ErrorIs(t, err, ErrInvitationCodeInvalid)
+	require.ErrorIs(t, err, ErrSocialOAuthPendingInvalid, "consumed session: not a retryable code error")
 	require.Empty(t, f.users.users)
+
+	// Replaying the consumed handle after the settings settle still fails, nothing claimed.
+	f.pending.onConsume = nil
+	_, err = f.svc.CompleteRegistration(context.Background(), SocialOAuthProviderGoogle, res.PendingToken, "INVITE-OK")
+	require.ErrorIs(t, err, ErrSocialOAuthPendingInvalid)
+	require.Empty(t, f.redeem.used)
 }
 
 func TestSocialOAuth_Invitation_ClaimFailureRollsBackUser(t *testing.T) {

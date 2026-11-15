@@ -86,6 +86,14 @@ describe('captureOAuthFragmentAtStartup', () => {
     expect(take()).toBe('')
   })
 
+  it('is idempotent before the view takes the fragment', async () => {
+    const { captureOAuthFragmentAtStartup, takeOAuthFragment: take } = await import('../oauth')
+    window.history.replaceState(null, '', '/auth/oauth/google/callback#access_token=once')
+    captureOAuthFragmentAtStartup()
+    captureOAuthFragmentAtStartup()
+    expect(take()).toBe('#access_token=once')
+  })
+
   it('leaves other pages alone', async () => {
     const { captureOAuthFragmentAtStartup } = await import('../oauth')
     window.history.replaceState(null, '', '/billing#section')

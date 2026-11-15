@@ -111,7 +111,18 @@ async function submitInvite(): Promise<void> {
     await auth.completeOAuthRegistration(provider.value, pendingToken, invite.value.trim())
     await go()
   } catch (e) {
-    formError.value = errorMessage(e, t('auth.registerFailed'))
+    const reason = (e as { reason?: string } | undefined)?.reason
+    if (reason === 'INVITATION_CODE_INVALID' || reason === 'INVITATION_CODE_REQUIRED') {
+      // Rejected before the session was used: fix the code and retry.
+      formError.value = errorMessage(e, t('auth.registerFailed'))
+    } else {
+      // Anything else ends the one-time session; the user has to start sign-in again.
+      stage.value = 'error'
+      errorText.value =
+        reason && te(`auth.oauthErrors.${reason}`)
+          ? t(`auth.oauthErrors.${reason}`, { provider: providerName.value })
+          : errorMessage(e, t('auth.oauthErrors.generic', { provider: providerName.value }))
+    }
   } finally {
     busy.value = false
   }

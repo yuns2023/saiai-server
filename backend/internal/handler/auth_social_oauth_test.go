@@ -338,12 +338,17 @@ func TestSocialOAuthCallback_GitHubNonNumericID(t *testing.T) {
 }
 
 func TestSocialOAuthExchange_RejectsErrorWithToken(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"error":"bad_verification_code","access_token":"oops","token_type":"bearer"}`))
-	}))
-	defer srv.Close()
-	_, err := socialOAuthExchangeCode(context.Background(), socialOAuthEndpoints{TokenURL: srv.URL}, service.SocialOAuthConfig{ClientID: "c", ClientSecret: "s"}, "code", "verifier")
-	require.Error(t, err)
+	for _, body := range []string{
+		`{"error":"bad_verification_code","access_token":"oops","token_type":"bearer"}`,
+		`error=bad_verification_code&access_token=oops&token_type=bearer`,
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}))
+		_, err := socialOAuthExchangeCode(context.Background(), socialOAuthEndpoints{TokenURL: srv.URL}, service.SocialOAuthConfig{ClientID: "c", ClientSecret: "s"}, "code", "verifier")
+		srv.Close()
+		require.Error(t, err, body)
+	}
 }
 
 func TestSocialOAuthCallback_StateChecks(t *testing.T) {

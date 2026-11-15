@@ -14,6 +14,8 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 export interface ApiError {
   status: number
   code?: string | number
+  /** Structured backend reason (e.g. INVITATION_CODE_INVALID), when present. */
+  reason?: string
   message: string
   error?: unknown
 }
@@ -88,6 +90,7 @@ api.interceptors.response.use(
     return Promise.reject({
       status,
       code: data.code,
+      reason: typeof data.reason === 'string' ? data.reason : undefined,
       error: data.error,
       message: data.message || data.detail || error.message
     } satisfies ApiError)

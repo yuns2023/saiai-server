@@ -317,8 +317,8 @@ func socialOAuthExchangeCode(ctx context.Context, endpoints socialOAuthEndpoints
 		providerErr, providerDesc := parseOAuthProviderError(body)
 		return "", fmt.Errorf("token status=%d error=%q description=%q", resp.StatusCode, providerErr, truncateLogValue(providerDesc, 256))
 	}
-	// GitHub reports errors with HTTP 200; any "error" field means failure.
-	if providerErr := strings.TrimSpace(getGJSON(body, "error")); providerErr != "" {
+	// GitHub reports errors with HTTP 200; a non-empty error (JSON or form encoded) means failure.
+	if providerErr, _ := parseOAuthProviderError(body); providerErr != "" {
 		return "", fmt.Errorf("token response error=%q", providerErr)
 	}
 	token, ok := parseLinuxDoTokenResponse(body)

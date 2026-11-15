@@ -126,6 +126,8 @@ const en: typeof zh = {
       OAUTH_IDENTITY_INVALID: '{provider} returned an invalid account. Please start again.',
       OAUTH_EMAIL_NOT_VERIFIED: 'Your {provider} account has no verified email, so it cannot be used to sign up.',
       OAUTH_DISABLED: 'Signing in with {provider} is not enabled on this site.',
+      OAUTH_PENDING_INVALID: 'This sign-up has expired. Please start signing in with {provider} again.',
+      OAUTH_ACCOUNT_EXISTS: 'This {provider} account is already registered. Please sign in again.',
       SERVICE_UNAVAILABLE: 'The service is temporarily unavailable. Please try again later.'
     }
   },
