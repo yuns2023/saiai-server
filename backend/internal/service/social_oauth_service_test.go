@@ -521,7 +521,7 @@ func TestSocialOAuth_Invitation_ClaimFailureRollsBackUser(t *testing.T) {
 	require.NoError(t, err)
 	f.redeem.useErr = ErrRedeemCodeUsed // claimed concurrently by someone else
 	_, err = f.svc.CompleteRegistration(context.Background(), SocialOAuthProviderGoogle, res.PendingToken, "INVITE-OK")
-	require.ErrorIs(t, err, ErrInvitationCodeInvalid)
+	require.ErrorIs(t, err, ErrSocialOAuthPendingInvalid, "session already consumed: not retryable")
 	require.Empty(t, f.users.users, "user creation must not stick when the invitation cannot be claimed")
 }
 

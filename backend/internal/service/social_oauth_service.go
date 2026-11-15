@@ -438,7 +438,9 @@ func (s *SocialOAuthService) createUser(ctx context.Context, identity SocialOAut
 			}
 			if err := s.auth.redeemRepo.Use(txCtx, invitation.ID, user.ID); err != nil {
 				if errors.Is(err, ErrRedeemCodeUsed) || errors.Is(err, ErrRedeemCodeNotFound) {
-					return ErrInvitationCodeInvalid
+					// Claimed by someone else after our check; the pending session is already
+					// consumed, so report a non-retryable session error (the tx rolls back).
+					return ErrSocialOAuthPendingInvalid
 				}
 				logger.LegacyPrintf("service.social_oauth", "[SocialOAuth] claim invitation failed: user_id=%d err=%v", user.ID, err)
 				return ErrServiceUnavailable
