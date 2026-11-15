@@ -13,8 +13,12 @@ export type Shell = 'unix' | 'powershell' | 'cmd'
 
 type InstallCommand = (root: string, key: string) => string
 
-/** Where setup.sh / setup.ps1 are downloaded from (the latest AITP GitHub release). */
-const INSTALLER_BASE = 'https://github.com/2742zdz/AITP/releases/latest/download'
+/**
+ * Where setup.sh / setup.ps1 are downloaded from: aitp.lol (AITP's GitHub Pages site), which serves the
+ * latest release's installers after checking them against its signed manifest. The installer then
+ * downloads the program from the GitHub release itself.
+ */
+const INSTALLER_BASE = 'https://aitp.lol'
 
 /**
  * PowerShell line. When the root contains no double quote or % (true for the admin's

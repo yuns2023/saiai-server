@@ -14,7 +14,7 @@ describe('ConnectPanel', () => {
     const w = mountPanel()
     const install = w.find('[data-testid=connect-install]')
     expect(install.exists()).toBe(true)
-    expect(install.find('pre').text()).toContain('https://github.com/2742zdz/AITP/releases/latest/download/setup.')
+    expect(install.find('pre').text()).toContain('https://aitp.lol/setup.')
     expect(install.find('pre').text()).toContain("'sk-test'")
     expect(install.find('a').attributes('href')).toBe('https://github.com/2742zdz/AITP')
     const manual = w.find('[data-testid=connect-manual]')
