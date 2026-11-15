@@ -28,6 +28,15 @@ func NewFrontendServer(settingsProvider PublicSettingsProvider, cliDir string, t
 	return nil, errors.New("frontend not embedded")
 }
 
+// NewFrontendServerWithOptions returns an error when frontend is not embedded.
+func NewFrontendServerWithOptions(settingsProvider PublicSettingsProvider, opts FrontendOptions) (*FrontendServer, error) {
+	_ = opts
+	return nil, errors.New("frontend not embedded")
+}
+
+// UserUI reports classic for non-embed builds.
+func (s *FrontendServer) UserUI() UserUI { return UserUIClassic }
+
 // InvalidateCache is a no-op for non-embed builds
 func (s *FrontendServer) InvalidateCache() {}
 

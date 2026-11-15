@@ -34,7 +34,9 @@ jobs:
         with:
           node-version: '24'
           cache: 'pnpm'
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            frontend-aog/pnpm-lock.yaml
       - name: Install dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
@@ -49,6 +51,18 @@ jobs:
         run: pnpm exec vitest run --maxWorkers=2
       - name: Production build
         working-directory: frontend
+        run: pnpm run build
+      - name: AOG UI install
+        working-directory: frontend-aog
+        run: pnpm install --frozen-lockfile
+      - name: AOG UI type check
+        working-directory: frontend-aog
+        run: pnpm run typecheck
+      - name: AOG UI unit tests
+        working-directory: frontend-aog
+        run: pnpm exec vitest run --maxWorkers=2
+      - name: AOG UI production build
+        working-directory: frontend-aog
         run: pnpm run build
 
   # Backend suites run as parallel matrix legs; the required "test" check is

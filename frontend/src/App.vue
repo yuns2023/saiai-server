@@ -6,6 +6,7 @@ import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import { resolveDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
+import { isAOGUserUI } from '@/router/userUiHandoff'
 import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
 
@@ -16,6 +17,9 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
+// AOG sites: announcements are shown to customers by the AOG UI; the console
+// is admin-only and must not pop customer notices over admin work.
+const consoleOnly = isAOGUserUI()
 const showMaintenanceBanner = computed(
   () => Boolean(appStore.cachedPublicSettings?.maintenance_mode_enabled) && !route.path.startsWith('/admin')
 )
@@ -50,7 +54,7 @@ watch(
 // Watch for authentication state and manage subscription data + announcements
 function onVisibilityChange() {
   if (document.visibilityState === 'visible' && authStore.isAuthenticated) {
-    announcementStore.fetchAnnouncements()
+    if (!consoleOnly) announcementStore.fetchAnnouncements()
   }
 }
 
@@ -67,10 +71,10 @@ watch(
       // Announcements: new login vs page refresh restore
       if (oldValue === false) {
         // New login: delay 3s then force fetch
-        setTimeout(() => announcementStore.fetchAnnouncements(true), 3000)
+        if (!consoleOnly) setTimeout(() => announcementStore.fetchAnnouncements(true), 3000)
       } else {
         // Page refresh restore (oldValue was undefined)
-        announcementStore.fetchAnnouncements()
+        if (!consoleOnly) announcementStore.fetchAnnouncements()
       }
 
       // Register visibility change listener
@@ -88,7 +92,7 @@ watch(
 // Route change trigger (throttled by store)
 router.afterEach(() => {
   if (authStore.isAuthenticated) {
-    announcementStore.fetchAnnouncements()
+    if (!consoleOnly) announcementStore.fetchAnnouncements()
   }
 })
 
@@ -136,5 +140,5 @@ onMounted(async () => {
   <NavigationProgress />
   <RouterView />
   <Toast />
-  <AnnouncementPopup />
+  <AnnouncementPopup v-if="!consoleOnly" />
 </template>

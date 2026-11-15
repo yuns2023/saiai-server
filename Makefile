@@ -7,9 +7,10 @@ build: build-backend build-frontend
 build-backend:
 	@$(MAKE) -C backend build
 
-# 编译前端（需要已安装依赖）
+# 编译前端（需要已安装依赖）；两套都会被 embed 进后端
 build-frontend:
 	@pnpm --dir frontend run build
+	@pnpm --dir frontend-aog run build
 
 # 运行测试（后端 + 前端）
 test: test-backend test-frontend
@@ -20,3 +21,5 @@ test-backend:
 test-frontend:
 	@pnpm --dir frontend run lint:check
 	@pnpm --dir frontend run typecheck
+	@pnpm --dir frontend-aog run typecheck
+	@pnpm --dir frontend-aog exec vitest run

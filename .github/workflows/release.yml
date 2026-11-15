@@ -152,7 +152,9 @@ jobs:
         with:
           node-version: '24'
           cache: 'pnpm'
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            frontend-aog/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: frontend
@@ -162,11 +164,30 @@ jobs:
         working-directory: frontend
         run: pnpm run build
 
+      - name: Install AOG UI dependencies
+        working-directory: frontend-aog
+        run: pnpm install --frozen-lockfile
+
+      - name: Build AOG UI
+        working-directory: frontend-aog
+        run: pnpm run build
+
+      - name: Verify both embedded builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s backend/internal/web/dist/index.html
+          test -s backend/internal/web/dist-aog/index.html
+
+      # Both directories share the parent backend/internal/web/, which is the
+      # artifact root; the release job restores it to the same place.
       - name: Upload frontend artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: frontend-dist
-          path: backend/internal/web/dist/
+          path: |
+            backend/internal/web/dist/
+            backend/internal/web/dist-aog/
           retention-days: 1
 
   release:
@@ -207,7 +228,14 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: frontend-dist
-          path: backend/internal/web/dist/
+          path: backend/internal/web/
+
+      - name: Verify both embedded builds were restored
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s backend/internal/web/dist/index.html
+          test -s backend/internal/web/dist-aog/index.html
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6

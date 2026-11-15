@@ -10,6 +10,7 @@ import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useNavigationLoadingState } from '@/composables/useNavigationLoading'
 import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { resolveDocumentTitle } from './title'
+import { shouldHandOffToAOG } from './userUiHandoff'
 
 /**
  * Route definitions with lazy loading
@@ -442,6 +443,15 @@ let routePrefetch: ReturnType<typeof useRoutePrefetch> | null = null
 const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup']
 
 router.beforeEach((to, _from, next) => {
+  // AOG 站点：用户页、登录页由新前端负责，整页跳转过去（见 userUiHandoff.ts）
+  if (shouldHandOffToAOG(to.path, window.location.pathname)) {
+    // The page is unloading. Leave this navigation pending instead of
+    // aborting it: an aborted first navigation rejects router.isReady() in
+    // main.ts and surfaces as an uncaught error.
+    window.location.assign(to.fullPath)
+    return
+  }
+
   // 开始导航加载状态
   navigationLoading.startNavigation()
 

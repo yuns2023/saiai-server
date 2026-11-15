@@ -224,6 +224,7 @@ type ServerConfig struct {
 	ReadHeaderTimeout  int       `mapstructure:"read_header_timeout"`   // 读取请求头超时（秒）
 	IdleTimeout        int       `mapstructure:"idle_timeout"`          // 空闲连接超时（秒）
 	TrustedProxies     []string  `mapstructure:"trusted_proxies"`       // 可信代理列表（CIDR/IP）
+	UserUI             string    `mapstructure:"user_ui"`               // 用户端界面：classic（默认）| aog（AOGCode 新界面，管理后台仍为 classic）
 	MaxRequestBodySize int64     `mapstructure:"max_request_body_size"` // 全局最大请求体限制
 	H2C                H2CConfig `mapstructure:"h2c"`                   // HTTP/2 Cleartext 配置
 }
@@ -1213,6 +1214,7 @@ func setDefaults() {
 	viper.SetDefault("server.read_header_timeout", 30) // 30秒读取请求头
 	viper.SetDefault("server.idle_timeout", 120)       // 120秒空闲超时
 	viper.SetDefault("server.trusted_proxies", []string{})
+	viper.SetDefault("server.user_ui", "classic")
 	viper.SetDefault("server.max_request_body_size", int64(256*1024*1024))
 	// H2C 默认配置
 	viper.SetDefault("server.h2c.enabled", false)
@@ -1607,6 +1609,11 @@ func setDefaults() {
 func (c *Config) Validate() error {
 	if wait := c.Gateway.ClaudeSessionInitialSerial.WaitTimeoutMs; wait < 0 || wait > 300000 {
 		return fmt.Errorf("gateway.claude_session_initial_serial.wait_timeout_ms must be between 0 and 300000")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Server.UserUI)) {
+	case "", "classic", "aog":
+	default:
+		return fmt.Errorf("server.user_ui must be one of: classic/aog")
 	}
 	jwtSecret := strings.TrimSpace(c.JWT.Secret)
 	if jwtSecret == "" {

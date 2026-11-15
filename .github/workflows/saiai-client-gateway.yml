@@ -47,6 +47,8 @@ jobs:
           mkdir -p backend/internal/web/dist
           cp frontend/index.html backend/internal/web/dist/index.html
           cp frontend/public/logo.png backend/internal/web/dist/logo.png
+          mkdir -p backend/internal/web/dist-aog
+          cp frontend-aog/index.html backend/internal/web/dist-aog/index.html
 
       - name: Test external bundle and executable wrapper origin boundary
         working-directory: backend
