@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import AuthFrame from '@/components/AuthFrame.vue'
 import TurnstileBox from '@/components/TurnstileBox.vue'
 import SocialSignIn from '@/components/SocialSignIn.vue'
+import InviteHint from '@/components/InviteHint.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { authApi } from '@/api'
@@ -27,6 +28,7 @@ const turnstileKey = computed(() => (s.value?.turnstile_enabled ? s.value.turnst
 
 const email = ref('')
 const password = ref('')
+const confirm = ref('')
 const verifyCode = ref('')
 const invite = ref(typeof route.query.invite === 'string' ? route.query.invite : '')
 const promo = ref(typeof route.query.promo === 'string' ? route.query.promo : '')
@@ -45,8 +47,14 @@ const emailOk = computed(() => {
   return suffixes.value.length === 0 || suffixes.value.some((sfx) => v.endsWith(sfx.toLowerCase()))
 })
 const passwordOk = computed(() => password.value.length >= 6)
+const confirmOk = computed(() => confirm.value === password.value)
 const ready = computed(
-  () => emailOk.value && passwordOk.value && (!needCode.value || verifyCode.value.trim()) && (!needInvite.value || invite.value.trim())
+  () =>
+    emailOk.value &&
+    passwordOk.value &&
+    confirmOk.value &&
+    (!needCode.value || verifyCode.value.trim()) &&
+    (!needInvite.value || invite.value.trim())
 )
 
 function startCountdown(seconds: number): void {
@@ -154,9 +162,23 @@ async function submit(): Promise<void> {
         <span class="mt-1 block text-xs text-ink-3">{{ t('auth.passwordRule') }}</span>
       </label>
 
+      <label class="block">
+        <span class="label">{{ t('auth.confirmPasswordShort') }}</span>
+        <input
+          v-model="confirm"
+          class="field mt-1"
+          type="password"
+          autocomplete="new-password"
+          :aria-invalid="confirm && !confirmOk ? 'true' : undefined"
+          required
+        />
+        <span v-if="confirm && !confirmOk" class="mt-1 block text-xs text-seal">{{ t('auth.passwordMismatch') }}</span>
+      </label>
+
       <label v-if="needInvite" class="block">
         <span class="label">{{ t('auth.inviteCode') }}</span>
         <input v-model="invite" class="field mt-1" autocomplete="off" required />
+        <InviteHint />
       </label>
 
       <label v-if="promoOn" class="block">

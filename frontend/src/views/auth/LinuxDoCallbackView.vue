@@ -24,6 +24,7 @@
               :disabled="isSubmitting"
               @keyup.enter="handleSubmitInvitation"
             />
+            <InvitationCodeHint />
           </div>
           <transition name="fade">
             <p v-if="invitationError" class="text-sm text-red-600 dark:text-red-400">
@@ -70,6 +71,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
 import Icon from '@/components/icons/Icon.vue'
+import InvitationCodeHint from '@/components/auth/InvitationCodeHint.vue'
 import { useAuthStore, useAppStore } from '@/stores'
 import { completeLinuxDoOAuthRegistration } from '@/api/auth'
 

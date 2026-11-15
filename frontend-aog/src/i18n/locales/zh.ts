@@ -78,6 +78,7 @@ export default {
     passwordRule: '至少 6 位。',
     inviteCode: '邀请码',
     promoCode: '优惠码',
+    confirmPasswordShort: '确认密码',
     codeSent: '验证码已发送到 {email}，请查收。',
     sendCodeFailed: '验证码发送失败，请稍后重试。',
     registerFailed: '注册失败，请检查填写内容。',

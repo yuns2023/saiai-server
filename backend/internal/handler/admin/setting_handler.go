@@ -151,6 +151,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PasswordResetEnabled:                 settings.PasswordResetEnabled,
 		FrontendURL:                          settings.FrontendURL,
 		InvitationCodeEnabled:                settings.InvitationCodeEnabled,
+		InvitationCodeHint:                   settings.InvitationCodeHint,
 		TotpEnabled:                          settings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             settings.SMTPHost,
@@ -215,6 +216,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 	})
 }
 
+// MaxInvitationCodeHintRunes caps the public "how to get an invitation code" text.
+const MaxInvitationCodeHintRunes = 500
+
 // UpdateSettingsRequest 更新设置请求
 type UpdateSettingsRequest struct {
 	// 注册设置
@@ -225,7 +229,9 @@ type UpdateSettingsRequest struct {
 	PasswordResetEnabled             bool     `json:"password_reset_enabled"`
 	FrontendURL                      string   `json:"frontend_url"`
 	InvitationCodeEnabled            bool     `json:"invitation_code_enabled"`
-	TotpEnabled                      bool     `json:"totp_enabled"` // TOTP 双因素认证
+	// nil = keep the stored value, so admin clients that predate the field do not wipe it.
+	InvitationCodeHint *string `json:"invitation_code_hint"`
+	TotpEnabled        bool    `json:"totp_enabled"` // TOTP 双因素认证
 
 	// 邮件服务设置
 	SMTPHost     string `json:"smtp_host"`
@@ -623,6 +629,15 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 
+	if req.InvitationCodeHint != nil && utf8.RuneCountInString(strings.TrimSpace(*req.InvitationCodeHint)) > MaxInvitationCodeHintRunes {
+		response.Error(c, http.StatusBadRequest, "invitation_code_hint must be at most 500 characters")
+		return
+	}
+	invitationCodeHint := previousSettings.InvitationCodeHint
+	if req.InvitationCodeHint != nil {
+		invitationCodeHint = strings.TrimSpace(*req.InvitationCodeHint)
+	}
+
 	maintenanceEnabled := previousSettings.MaintenanceModeEnabled
 	if req.MaintenanceModeEnabled != nil {
 		maintenanceEnabled = *req.MaintenanceModeEnabled
@@ -640,6 +655,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PasswordResetEnabled:             req.PasswordResetEnabled,
 		FrontendURL:                      req.FrontendURL,
 		InvitationCodeEnabled:            req.InvitationCodeEnabled,
+		InvitationCodeHint:               invitationCodeHint,
 		TotpEnabled:                      req.TotpEnabled,
 		SMTPHost:                         req.SMTPHost,
 		SMTPPort:                         req.SMTPPort,
@@ -769,6 +785,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PasswordResetEnabled:                 updatedSettings.PasswordResetEnabled,
 		FrontendURL:                          updatedSettings.FrontendURL,
 		InvitationCodeEnabled:                updatedSettings.InvitationCodeEnabled,
+		InvitationCodeHint:                   updatedSettings.InvitationCodeHint,
 		TotpEnabled:                          updatedSettings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             updatedSettings.SMTPHost,
@@ -930,6 +947,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if strings.TrimSpace(req.GitHubOAuthClientSecret) != "" {
 		changed = append(changed, "github_oauth_client_secret")
+	}
+	if before.InvitationCodeHint != after.InvitationCodeHint {
+		changed = append(changed, "invitation_code_hint")
 	}
 	if before.SiteName != after.SiteName {
 		changed = append(changed, "site_name")
@@ -1194,38 +1214,7 @@ func (h *SettingHandler) SendTestEmail(c *gin.Context) {
 	}
 
 	siteName := h.settingService.GetSiteName(c.Request.Context())
-	subject := "[" + siteName + "] Test Email"
-	body := `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; }
-        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
-        .content { padding: 40px 30px; text-align: center; }
-        .success { color: #10b981; font-size: 48px; margin-bottom: 20px; }
-        .footer { background-color: #f8f9fa; padding: 20px; text-align: center; color: #999; font-size: 12px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>` + siteName + `</h1>
-        </div>
-        <div class="content">
-            <div class="success">✓</div>
-            <h2>Email Configuration Successful!</h2>
-            <p>This is a test email to verify your SMTP settings are working correctly.</p>
-        </div>
-        <div class="footer">
-            <p>This is an automated test message.</p>
-        </div>
-    </div>
-</body>
-</html>
-`
+	subject, body := service.BuildTestEmail(siteName)
 
 	if err := h.emailService.SendEmailWithConfig(config, req.Email, subject, body); err != nil {
 		response.BadRequest(c, "Failed to send test email: "+err.Error())

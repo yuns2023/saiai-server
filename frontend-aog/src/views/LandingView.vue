@@ -32,8 +32,8 @@ const sample = [
 
     <main class="mx-auto grid w-full max-w-6xl flex-1 items-center gap-14 px-5 py-12 sm:px-10 lg:grid-cols-[1.1fr_1fr]">
       <div>
-        <h1 class="max-w-[16ch] text-[clamp(2rem,4.6vw,3.25rem)] font-semibold leading-[1.15] tracking-[-0.02em]">
-          {{ t('landing.headline') }}
+        <h1 class="max-w-[18ch] text-balance text-[clamp(2rem,4.6vw,3.25rem)] font-semibold leading-[1.15] tracking-[-0.02em]">
+          {{ app.siteSubtitle || t('landing.headline') }}
         </h1>
         <p class="mt-5 max-w-[46ch] text-md leading-relaxed text-ink-2">{{ t('landing.sub') }}</p>
         <div class="mt-8 flex flex-wrap gap-3">

@@ -80,6 +80,7 @@ const en: typeof zh = {
     passwordRule: 'At least 6 characters.',
     inviteCode: 'Invitation code',
     promoCode: 'Promo code',
+    confirmPasswordShort: 'Confirm password',
     codeSent: 'We sent a code to {email}.',
     sendCodeFailed: 'Could not send the code. Try again shortly.',
     registerFailed: 'Could not create the account. Check the fields.',
