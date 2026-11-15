@@ -55,6 +55,27 @@ describe('LandingView', () => {
     expect(mountLanding({ registration_enabled: true, invitation_code_enabled: false }).text()).not.toContain('仅限邀请注册')
   })
 
+  it('words step 1 after the registration settings', () => {
+    const step1 = (settings: Partial<PublicSettings>) => mountLanding(settings).find('ol li').text()
+    expect(step1({ registration_enabled: true, invitation_code_enabled: true })).toContain('用邀请码注册')
+    const open = step1({ registration_enabled: true, invitation_code_enabled: false })
+    expect(open).toContain('注册账号')
+    expect(open).not.toContain('邀请码')
+    const closed = mountLanding({ registration_enabled: false, invitation_code_enabled: true })
+    expect(closed.find('ol li').text()).toContain('暂停开放注册')
+    expect(closed.findAllComponents(RouterLinkStub).map((l) => l.props('to'))).not.toContain('/register')
+  })
+
+  it('renders the docs link only for http(s) or site-relative URLs', () => {
+    const docs = (doc_url: string) => mountLanding({ registration_enabled: true, doc_url }).find('footer').findAll('a').filter((a) => a.text() === '使用文档')
+    expect(docs('javascript:alert(1)')).toHaveLength(0)
+    expect(docs(' JavaScript:alert(1) ')).toHaveLength(0)
+    expect(docs('//evil.example/docs')).toHaveLength(0)
+    expect(docs('data:text/html,hi')).toHaveLength(0)
+    expect(docs('https://docs.example.com/cc')[0].attributes('href')).toBe('https://docs.example.com/cc')
+    expect(docs('/docs')[0].attributes('href')).toBe('/docs')
+  })
+
   it('links the key lookup and the AITP repository in the footer', () => {
     const w = mountLanding({ site_name: 'CCYou.dev', registration_enabled: true })
     const footer = w.find('footer')

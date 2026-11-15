@@ -15,7 +15,17 @@ const app = useAppStore()
 const auth = useAuthStore()
 const canRegister = computed(() => app.settings?.registration_enabled !== false)
 const inviteOnly = computed(() => canRegister.value && app.settings?.invitation_code_enabled === true)
-const docUrl = computed(() => app.settings?.doc_url?.trim() || '')
+/** Admin-set docs link: only http(s) URLs or site-relative paths become a link. */
+const docUrl = computed(() => {
+  const raw = app.settings?.doc_url?.trim() || ''
+  if (/^\/(?![/\\])/.test(raw)) return raw
+  try {
+    const u = new URL(raw)
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : ''
+  } catch {
+    return ''
+  }
+})
 const contact = computed(() => app.settings?.contact_info?.trim() || '')
 const year = new Date().getFullYear()
 
@@ -25,11 +35,15 @@ const headline = computed(() => {
   return text.split(KEEP_TOGETHER).flatMap((part, i) => (i === 0 ? [{ text: part, keep: false }] : [{ text: KEEP_TOGETHER, keep: true }, { text: part, keep: false }]))
 })
 
-const steps = [
-  { title: 'landing.step1Title', body: 'landing.step1Body' },
-  { title: 'landing.step2Title', body: 'landing.step2Body' },
-  { title: 'landing.step3Title', body: 'landing.step3Body' }
-]
+/** Step 1 follows the public registration settings. */
+const steps = computed(() => {
+  const first = !canRegister.value ? 'landing.step1Closed' : inviteOnly.value ? 'landing.step1' : 'landing.step1Open'
+  return [
+    { title: `${first}Title`, body: `${first}Body` },
+    { title: 'landing.step2Title', body: 'landing.step2Body' },
+    { title: 'landing.step3Title', body: 'landing.step3Body' }
+  ]
+})
 
 const billing = ['landing.bill1', 'landing.bill2', 'landing.bill3']
 
