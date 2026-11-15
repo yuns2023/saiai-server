@@ -1737,7 +1737,7 @@ export default {
 
     // Users
     users: {
-      invitedByFilter: 'Invited by {email}',
+      invitedByFilter: 'Invited by {email} (other filters paused)',
       showInvitedBy: 'Show everyone this user invited',
       inviterDeleted: '(deleted)',
       clearInvitedByFilter: 'Clear invited-by filter',

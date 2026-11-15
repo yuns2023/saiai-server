@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ type fakeUserInviteRepo struct {
 	eligible       bool
 	unused         int
 	invited        int
+	createdToday   int
 	codes          []UserInviteCode
 	createdLimits  *UserInviteLimits
 	createErr      error
@@ -27,12 +29,12 @@ type fakeUserInviteRepo struct {
 func (f *fakeUserInviteRepo) HasQualifyingTopUp(context.Context, int64) (bool, error) {
 	return f.eligible, nil
 }
-func (f *fakeUserInviteRepo) Counts(context.Context, int64) (int, int, error) {
-	return f.unused, f.invited, nil
+func (f *fakeUserInviteRepo) Counts(context.Context, int64) (UserInviteCounts, error) {
+	return UserInviteCounts{Unused: f.unused, Invited: f.invited, CreatedToday: f.createdToday}, nil
 }
 func (f *fakeUserInviteRepo) ListByOwner(_ context.Context, _ int64, params pagination.PaginationParams) ([]UserInviteCode, *pagination.PaginationResult, error) {
 	out := append([]UserInviteCode(nil), f.codes...)
-	return out, &pagination.PaginationResult{Total: int64(len(out)), Page: params.Page, PageSize: params.PageSize}, nil
+	return out, &pagination.PaginationResult{Total: int64(len(out)), Page: params.Page, PageSize: params.PageSize, Pages: 1}, nil
 }
 func (f *fakeUserInviteRepo) CreateForOwner(_ context.Context, _ int64, code string, limits UserInviteLimits) (*UserInviteCode, error) {
 	f.createAttempts++
@@ -110,10 +112,22 @@ func TestUserInviteService_OverviewMasksAndComputesCanCreate(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, out.CanCreate)
 
-	repo.invited = 10
+	// Lifetime cap counts unused codes too, exactly like CreateForOwner: 9 invited + 1 unused = 10.
+	repo.invited = 9
 	out, err = svc.Overview(context.Background(), 7, pagination.PaginationParams{Page: 1, PageSize: 20})
 	require.NoError(t, err)
 	require.False(t, out.CanCreate, "lifetime cap reached")
+
+	repo.invited, repo.createdToday = 0, MaxUserInviteCreatesPerDay
+	out, err = svc.Overview(context.Background(), 7, pagination.PaginationParams{Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.False(t, out.CanCreate, "rolling 24h cap reached")
+	require.True(t, out.DailyLimitReached)
+
+	// The paging block serializes with the lowercase keys the console reads.
+	raw, err := json.Marshal(out)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"pagination":{"total":3,"page":1,"page_size":20,"pages":`)
 }
 
 func TestUserInviteService_RevokeValidatesInput(t *testing.T) {

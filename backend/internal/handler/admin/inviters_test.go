@@ -17,7 +17,9 @@ import (
 type inviterRefsRepo struct{ refs map[int64]service.InviterRef }
 
 func (r inviterRefsRepo) HasQualifyingTopUp(context.Context, int64) (bool, error) { return false, nil }
-func (r inviterRefsRepo) Counts(context.Context, int64) (int, int, error)          { return 0, 0, nil }
+func (r inviterRefsRepo) Counts(context.Context, int64) (service.UserInviteCounts, error) {
+	return service.UserInviteCounts{}, nil
+}
 func (r inviterRefsRepo) ListByOwner(context.Context, int64, pagination.PaginationParams) ([]service.UserInviteCode, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }

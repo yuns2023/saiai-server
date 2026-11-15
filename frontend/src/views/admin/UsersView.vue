@@ -695,7 +695,7 @@
 import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
@@ -931,14 +931,22 @@ const filters = reactive({
 const activeAttributeFilters = reactive<Record<number, string>>({})
 
 // "Users invited by X": not persisted, set from the 邀请人 column or ?invited_by=<id>.
+// While it is set, the saved role/status/group/attribute filters and the search box are
+// suspended (not cleared), so "everyone X invited" is never silently narrowed to nothing.
 const invitedByFilter = ref<{ id: number; email: string } | null>(null)
+const router = useRouter()
 const filterByInviter = (id: number, email?: string) => {
   invitedByFilter.value = { id, email: email || `#${id}` }
+  router.replace({ query: { ...route.query, invited_by: String(id), inviter: email || undefined } })
   pagination.page = 1
   loadUsers()
 }
 const clearInvitedByFilter = () => {
   invitedByFilter.value = null
+  const query = { ...route.query }
+  delete query.invited_by
+  delete query.inviter
+  router.replace({ query })
   pagination.page = 1
   loadUsers()
 }
@@ -1243,15 +1251,19 @@ const loadUsers = async () => {
     const response = await adminAPI.users.list(
       pagination.page,
       pagination.page_size,
-      {
-        role: filters.role as any,
-        status: filters.status as any,
-        search: searchQuery.value || undefined,
-        group_name: filters.group || undefined,
-        invited_by_user_id: invitedByFilter.value?.id,
-        attributes: Object.keys(attrFilters).length > 0 ? attrFilters : undefined,
-        include_subscriptions: hasVisibleSubscriptionsColumn.value
-      },
+      invitedByFilter.value
+        ? {
+            invited_by_user_id: invitedByFilter.value.id,
+            include_subscriptions: hasVisibleSubscriptionsColumn.value
+          }
+        : {
+            role: filters.role as any,
+            status: filters.status as any,
+            search: searchQuery.value || undefined,
+            group_name: filters.group || undefined,
+            attributes: Object.keys(attrFilters).length > 0 ? attrFilters : undefined,
+            include_subscriptions: hasVisibleSubscriptionsColumn.value
+          },
       { signal }
     )
     if (signal.aborted) {

@@ -135,10 +135,9 @@ func TestUserInviteRepo_CreateLimitsAndConcurrency(t *testing.T) {
 	}
 	require.Equal(t, 3, ok, "the row lock serializes the unused-count check")
 
-	unused, invited, err := repo.Counts(ctx, owner.ID)
+	counts, err := repo.Counts(ctx, owner.ID)
 	require.NoError(t, err)
-	require.Equal(t, 3, unused)
-	require.Equal(t, 0, invited)
+	require.Equal(t, service.UserInviteCounts{Unused: 3, Invited: 0, CreatedToday: 3}, counts)
 
 	// Lifetime cap counts unused codes too.
 	_, err = repo.CreateForOwner(ctx, owner.ID, fmt.Sprintf("D%d", owner.ID), service.UserInviteLimits{MaxUnused: 10, MaxTotal: 3})
@@ -238,9 +237,9 @@ func TestUserInviteRegistration_RecordsInviterEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, "UPDATE users SET deleted_at = NOW() WHERE id = $1", invitee.ID)
 	require.NoError(t, err)
-	_, invited, err := repo.Counts(ctx, owner.ID)
+	counts, err := repo.Counts(ctx, owner.ID)
 	require.NoError(t, err)
-	require.Equal(t, 1, invited)
+	require.Equal(t, 1, counts.Invited)
 
 	refs, err := repo.InviterRefs(ctx, []int64{owner.ID, invitee.ID})
 	require.NoError(t, err)

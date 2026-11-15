@@ -1757,7 +1757,7 @@ export default {
 
     // Users Management
     users: {
-      invitedByFilter: '{email} 邀请的用户',
+      invitedByFilter: '{email} 邀请的用户（其他筛选已暂停）',
       showInvitedBy: '查看此人邀请的所有用户',
       inviterDeleted: '（已删除）',
       clearInvitedByFilter: '清除邀请人筛选',

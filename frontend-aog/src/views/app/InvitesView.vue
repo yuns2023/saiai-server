@@ -34,6 +34,7 @@ const blocker = computed(() => {
   if (!d.enabled) return t('invites.disabled')
   if (!d.eligible) return t('invites.notEligible')
   if (d.unused >= d.max_unused) return t('invites.limitUnused')
+  if (d.daily_limit_reached) return t('invites.limitDaily')
   if (d.max_total > 0 && d.invited + d.unused >= d.max_total) return t('invites.limitTotal')
   return ''
 })
@@ -128,7 +129,7 @@ function statusTag(c: UserInviteCode): { cls: string; text: string } {
       </button>
     </div>
 
-    <div v-if="data" class="rule-double mt-6 flex flex-wrap items-center gap-x-6 gap-y-1 border-b pb-3 text-sm" data-testid="invite-summary">
+    <div v-if="data" class="rule-double mt-6 flex flex-wrap items-center gap-x-6 gap-y-1 pb-3 text-sm" data-testid="invite-summary">
       <span class="num">{{ t('invites.unusedOf', { n: data.unused, max: data.max_unused }) }}</span>
       <span class="num">{{ data.max_total > 0 ? t('invites.invitedOf', { n: data.invited, max: data.max_total }) : t('invites.invited', { n: data.invited }) }}</span>
     </div>
@@ -145,7 +146,7 @@ function statusTag(c: UserInviteCode): { cls: string; text: string } {
         <div v-for="i in 3" :key="i" class="skeleton h-10" />
       </div>
       <p v-else-if="!data?.codes.length" class="border-y border-rule py-10 text-center text-sm text-ink-2">{{ t('invites.empty') }}</p>
-      <ul v-else class="border-t border-rule-strong">
+      <ul v-else>
         <li
           v-for="c in data.codes"
           :key="c.code"
@@ -160,10 +161,13 @@ function statusTag(c: UserInviteCode): { cls: string; text: string } {
             <template v-if="c.status === 'used' && c.invitee_email">{{ t('invites.usedBy', { email: c.invitee_email }) }} · {{ shortTime(c.used_at, intlLocale()) }}</template>
             <template v-else>{{ t('invites.createdAt', { time: shortTime(c.created_at, intlLocale()) }) }}</template>
           </div>
-          <div v-if="c.status === 'unused'" class="flex flex-wrap items-center gap-1 md:justify-end">
-            <CopyButton :value="c.code" small />
-            <CopyButton :value="signupLink(c.code)" :label="t('invites.copyLink')" small />
-            <button type="button" class="btn btn-quiet btn-sm !text-seal hover:!bg-seal-wash" @click="toRevoke = c">{{ t('invites.revoke') }}</button>
+          <!-- Always rendered so every row keeps the same three columns. -->
+          <div class="flex flex-wrap items-center gap-1 md:min-w-[17rem] md:justify-end">
+            <template v-if="c.status === 'unused'">
+              <CopyButton :value="c.code" small />
+              <CopyButton :value="signupLink(c.code)" :label="t('invites.copyLink')" small />
+              <button type="button" class="btn btn-quiet btn-sm !text-seal hover:!bg-seal-wash" @click="toRevoke = c">{{ t('invites.revoke') }}</button>
+            </template>
           </div>
         </li>
       </ul>

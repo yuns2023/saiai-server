@@ -333,9 +333,7 @@ func (h *UserHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	out := dto.UserFromServiceAdmin(user)
-	attachUserInviters(c.Request.Context(), h.userInviteService, out)
-	response.Success(c, out)
+	response.Success(c, adminUserOut(c.Request.Context(), h.userInviteService, user))
 }
 
 // Create handles creating a new user
@@ -366,7 +364,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	response.Success(c, adminUserOut(c.Request.Context(), h.userInviteService, user))
 }
 
 // Update handles updating a user
@@ -406,7 +404,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	response.Success(c, adminUserOut(c.Request.Context(), h.userInviteService, user))
 }
 
 // Delete handles deleting a user
@@ -454,7 +452,7 @@ func (h *UserHandler) UpdateBalance(c *gin.Context) {
 		if execErr != nil {
 			return nil, execErr
 		}
-		return dto.UserFromServiceAdmin(user), nil
+		return adminUserOut(ctx, h.userInviteService, user), nil
 	})
 }
 
@@ -527,6 +525,11 @@ func (h *UserHandler) GetBalanceHistory(c *gin.Context) {
 	for i := range codes {
 		out = append(out, *dto.RedeemCodeFromServiceAdmin(&codes[i]))
 	}
+	ptrs := make([]*dto.AdminRedeemCode, len(out))
+	for i := range out {
+		ptrs[i] = &out[i]
+	}
+	attachCodeOwners(c.Request.Context(), h.userInviteService, ptrs...)
 
 	// Custom response with total_recharged alongside pagination
 	pages := int((total + int64(pageSize) - 1) / int64(pageSize))

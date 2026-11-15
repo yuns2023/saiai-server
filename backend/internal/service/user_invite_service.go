@@ -57,6 +57,21 @@ type UserInviteCode struct {
 	InviteeEmail string     `json:"invitee_email,omitempty"`
 }
 
+// UserInviteCounts are the numbers CreateForOwner checks (unused, lifetime, rolling 24h).
+type UserInviteCounts struct {
+	Unused       int
+	Invited      int
+	CreatedToday int
+}
+
+// UserInvitePage is the list's paging block (pagination.PaginationResult has no JSON tags).
+type UserInvitePage struct {
+	Total    int64 `json:"total"`
+	Page     int   `json:"page"`
+	PageSize int   `json:"page_size"`
+	Pages    int   `json:"pages"`
+}
+
 // InviterRef identifies an inviter for admin views (soft-deleted users included).
 type InviterRef struct {
 	ID      int64
@@ -67,8 +82,8 @@ type InviterRef struct {
 type UserInviteRepository interface {
 	// HasQualifyingTopUp reports a completed payment or a redeemed balance/subscription/concurrency code.
 	HasQualifyingTopUp(ctx context.Context, userID int64) (bool, error)
-	// Counts returns the owner's unused codes and the users who signed up with the owner's codes.
-	Counts(ctx context.Context, ownerID int64) (unused int, invited int, err error)
+	// Counts returns the numbers the generate limits are checked against.
+	Counts(ctx context.Context, ownerID int64) (UserInviteCounts, error)
 	ListByOwner(ctx context.Context, ownerID int64, params pagination.PaginationParams) ([]UserInviteCode, *pagination.PaginationResult, error)
 	// CreateForOwner locks the owner row, re-checks that the owner is active and the limits,
 	// and inserts the code, all in one transaction. Returns ErrUserNotActive / ErrUserNotFound /
@@ -88,10 +103,12 @@ type UserInviteOverview struct {
 	MaxTotal  int  `json:"max_total"`
 	Unused    int  `json:"unused"`
 	Invited   int  `json:"invited"`
+	// DailyLimitReached: MaxUserInviteCreatesPerDay codes generated in the last 24h.
+	DailyLimitReached bool `json:"daily_limit_reached"`
 	// CanCreate is the server's answer; the UI only mirrors it.
-	CanCreate  bool                         `json:"can_create"`
-	Codes      []UserInviteCode             `json:"codes"`
-	Pagination *pagination.PaginationResult `json:"pagination"`
+	CanCreate  bool             `json:"can_create"`
+	Codes      []UserInviteCode `json:"codes"`
+	Pagination UserInvitePage   `json:"pagination"`
 }
 
 type UserInviteService struct {
@@ -116,12 +133,17 @@ func (s *UserInviteService) Overview(ctx context.Context, userID int64, params p
 		return nil, err
 	}
 	out.Eligible = eligible
-	unused, invited, err := s.repo.Counts(ctx, userID)
+	counts, err := s.repo.Counts(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	out.Unused, out.Invited = unused, invited
-	out.CanCreate = cfg.Enabled && eligible && unused < cfg.MaxUnused && (cfg.MaxTotal == 0 || invited < cfg.MaxTotal)
+	out.Unused, out.Invited = counts.Unused, counts.Invited
+	// Same checks, same order as CreateForOwner, so the button never promises a 409.
+	out.CanCreate = cfg.Enabled && eligible &&
+		counts.Unused < cfg.MaxUnused &&
+		counts.CreatedToday < MaxUserInviteCreatesPerDay &&
+		(cfg.MaxTotal == 0 || counts.Invited+counts.Unused < cfg.MaxTotal)
+	out.DailyLimitReached = counts.CreatedToday >= MaxUserInviteCreatesPerDay
 	// Listing stays available after the switch is turned off: handed-out codes still work
 	// and the owner can still see and revoke them.
 	codes, page, err := s.repo.ListByOwner(ctx, userID, params)
@@ -136,7 +158,9 @@ func (s *UserInviteService) Overview(ctx context.Context, userID int64, params p
 	if codes != nil {
 		out.Codes = codes
 	}
-	out.Pagination = page
+	if page != nil {
+		out.Pagination = UserInvitePage{Total: page.Total, Page: page.Page, PageSize: page.PageSize, Pages: page.Pages}
+	}
 	return out, nil
 }
 

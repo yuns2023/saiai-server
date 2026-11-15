@@ -100,9 +100,7 @@ func (h *RedeemHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	out := dto.RedeemCodeFromServiceAdmin(code)
-	attachCodeOwners(c.Request.Context(), h.userInviteService, out)
-	response.Success(c, out)
+	response.Success(c, adminRedeemOut(c.Request.Context(), h.userInviteService, code))
 }
 
 // Generate handles generating new redeem codes
@@ -196,7 +194,7 @@ func (h *RedeemHandler) CreateAndRedeem(c *gin.Context) {
 		if redeemErr != nil {
 			return nil, redeemErr
 		}
-		return gin.H{"redeem_code": dto.RedeemCodeFromServiceAdmin(redeemed)}, nil
+		return gin.H{"redeem_code": adminRedeemOut(ctx, h.userInviteService, redeemed)}, nil
 	})
 }
 
@@ -209,7 +207,7 @@ func (h *RedeemHandler) resolveCreateAndRedeemExisting(ctx context.Context, exis
 	if existing.CanUse() {
 		redeemed, err := h.redeemService.Redeem(ctx, userID, existing.Code)
 		if err == nil {
-			return gin.H{"redeem_code": dto.RedeemCodeFromServiceAdmin(redeemed)}, nil
+			return gin.H{"redeem_code": adminRedeemOut(ctx, h.userInviteService, redeemed)}, nil
 		}
 		if !errors.Is(err, service.ErrRedeemCodeUsed) {
 			return nil, err
@@ -221,7 +219,7 @@ func (h *RedeemHandler) resolveCreateAndRedeemExisting(ctx context.Context, exis
 	}
 
 	if existing.UsedBy != nil && *existing.UsedBy == userID {
-		return gin.H{"redeem_code": dto.RedeemCodeFromServiceAdmin(existing)}, nil
+		return gin.H{"redeem_code": adminRedeemOut(ctx, h.userInviteService, existing)}, nil
 	}
 
 	return nil, infraerrors.Conflict("REDEEM_CODE_CONFLICT", "redeem code already used by another user")
@@ -283,7 +281,7 @@ func (h *RedeemHandler) Expire(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.RedeemCodeFromServiceAdmin(code))
+	response.Success(c, adminRedeemOut(c.Request.Context(), h.userInviteService, code))
 }
 
 // GetStats handles getting redeem code statistics

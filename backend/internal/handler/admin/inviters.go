@@ -65,3 +65,17 @@ func attachCodeOwners(ctx context.Context, invites *service.UserInviteService, c
 		}
 	}
 }
+
+// adminUserOut maps a user for admin responses, with the inviter resolved.
+func adminUserOut(ctx context.Context, invites *service.UserInviteService, u *service.User) *dto.AdminUser {
+	out := dto.UserFromServiceAdmin(u)
+	attachUserInviters(ctx, invites, out)
+	return out
+}
+
+// adminRedeemOut maps a redeem code for admin responses, with the owner resolved.
+func adminRedeemOut(ctx context.Context, invites *service.UserInviteService, rc *service.RedeemCode) *dto.AdminRedeemCode {
+	out := dto.RedeemCodeFromServiceAdmin(rc)
+	attachCodeOwners(ctx, invites, out)
+	return out
+}

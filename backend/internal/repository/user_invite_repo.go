@@ -63,16 +63,30 @@ func invitedCount(ctx context.Context, client *dbent.Client, ownerID int64) (int
 		Count(mixins.SkipSoftDelete(ctx))
 }
 
-func (r *userInviteRepository) Counts(ctx context.Context, ownerID int64) (int, int, error) {
-	unused, err := ownerUnusedQuery(r.client, ownerID).Count(ctx)
-	if err != nil {
-		return 0, 0, err
+func (r *userInviteRepository) Counts(ctx context.Context, ownerID int64) (service.UserInviteCounts, error) {
+	var out service.UserInviteCounts
+	var err error
+	if out.Unused, err = ownerUnusedQuery(r.client, ownerID).Count(ctx); err != nil {
+		return out, err
 	}
-	invited, err := invitedCount(ctx, r.client, ownerID)
-	if err != nil {
-		return 0, 0, err
+	if out.Invited, err = invitedCount(ctx, r.client, ownerID); err != nil {
+		return out, err
 	}
-	return unused, invited, nil
+	if out.CreatedToday, err = createdTodayCount(ctx, r.client, ownerID); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// createdTodayCount counts codes generated in the rolling last 24h, revoked ones included.
+func createdTodayCount(ctx context.Context, client *dbent.Client, ownerID int64) (int, error) {
+	return client.RedeemCode.Query().
+		Where(
+			redeemcode.OwnerUserIDEQ(ownerID),
+			redeemcode.TypeEQ(service.RedeemTypeInvitation),
+			redeemcode.CreatedAtGTE(time.Now().Add(-24*time.Hour)),
+		).
+		Count(ctx)
 }
 
 func (r *userInviteRepository) ListByOwner(ctx context.Context, ownerID int64, params pagination.PaginationParams) ([]service.UserInviteCode, *pagination.PaginationResult, error) {
@@ -154,13 +168,7 @@ func (r *userInviteRepository) CreateForOwner(ctx context.Context, ownerID int64
 	if unused >= limits.MaxUnused {
 		return nil, service.ErrUserInviteUnusedLimit
 	}
-	createdToday, err := client.RedeemCode.Query().
-		Where(
-			redeemcode.OwnerUserIDEQ(ownerID),
-			redeemcode.TypeEQ(service.RedeemTypeInvitation),
-			redeemcode.CreatedAtGTE(time.Now().Add(-24*time.Hour)),
-		).
-		Count(ctx)
+	createdToday, err := createdTodayCount(ctx, client, ownerID)
 	if err != nil {
 		return nil, err
 	}

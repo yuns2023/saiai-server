@@ -2113,8 +2113,10 @@ export interface UserInviteOverview {
   max_total: number
   unused: number
   invited: number
+  /** 20 codes generated in the last 24h (revoked ones included). */
+  daily_limit_reached: boolean
   can_create: boolean
   codes: UserInviteCode[]
-  pagination: { total: number; page: number; page_size: number; pages: number } | null
+  pagination: { total: number; page: number; page_size: number; pages: number }
 }
 
