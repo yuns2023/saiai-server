@@ -17,6 +17,15 @@ describe('linkify', () => {
     ])
   })
 
+  it('keeps a closing bracket that belongs to the URL', () => {
+    expect(linkify('见 https://en.wikipedia.org/wiki/Foo_(bar)。')).toEqual([
+      { text: '见 ' },
+      { text: 'https://en.wikipedia.org/wiki/Foo_(bar)', href: 'https://en.wikipedia.org/wiki/Foo_(bar)' },
+      { text: '。' }
+    ])
+    expect(linkify('(https://x.y/a)')[1]).toEqual({ text: 'https://x.y/a', href: 'https://x.y/a' })
+  })
+
   it('never links other schemes and never yields HTML', () => {
     const segs = linkify('javascript:alert(1) <img src=x onerror=alert(1)> data:text/html,x')
     expect(segs.every((s) => !s.href)).toBe(true)

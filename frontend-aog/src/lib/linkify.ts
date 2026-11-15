@@ -6,7 +6,7 @@ export interface TextSegment {
 
 // Stops at whitespace and at CJK/ASCII closing punctuation so "见 https://x.y/z。" keeps the full stop out.
 const URL_RE = /https?:\/\/[^\s<>"'，。；、！？）】」』]+/g
-const TRAILING = /[.,;:!?)\]]+$/
+const TRAILING = /[.,;:!?)\]]$/
 
 /**
  * Splits admin-written plain text into text and link segments. Only http(s) URLs become links;
@@ -17,8 +17,14 @@ export function linkify(src: string): TextSegment[] {
   let last = 0
   for (const m of src.matchAll(URL_RE)) {
     let url = m[0]
-    const trail = url.match(TRAILING)?.[0] ?? ''
-    if (trail) url = url.slice(0, -trail.length)
+    // Drop trailing punctuation, but keep a ")" or "]" that closes one opened inside the URL
+    // (https://en.wikipedia.org/wiki/Foo_(bar)).
+    while (TRAILING.test(url)) {
+      const tail = url[url.length - 1]
+      if (tail === ')' && count(url, '(') >= count(url, ')')) break
+      if (tail === ']' && count(url, '[') >= count(url, ']')) break
+      url = url.slice(0, -1)
+    }
     const start = m.index ?? 0
     if (start > last) out.push({ text: src.slice(last, start) })
     out.push({ text: url, href: url })
@@ -26,4 +32,8 @@ export function linkify(src: string): TextSegment[] {
   }
   if (last < src.length) out.push({ text: src.slice(last) })
   return out
+}
+
+function count(s: string, ch: string): number {
+  return s.split(ch).length - 1
 }

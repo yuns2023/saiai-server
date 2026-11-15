@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores'
 import { linkify } from '@/utils/linkify'
 
 // Admin-set "how to get an invitation code" text (Settings → Registration).
-// Rendered as text nodes; only http(s) URLs become links.
+// Rendered as text nodes; only http(s) URLs become links. Reads the store's
+// cached settings reactively: fetchPublicSettings() returns null while another
+// request is in flight, so its return value alone could miss the text.
 const appStore = useAppStore()
-const text = ref('')
-const segments = computed(() => linkify(text.value))
+const segments = computed(() => linkify(appStore.cachedPublicSettings?.invitation_code_hint?.trim() || ''))
 
-onMounted(async () => {
-  const settings = await appStore.fetchPublicSettings()
-  text.value = settings?.invitation_code_hint?.trim() || ''
+onMounted(() => {
+  void appStore.fetchPublicSettings()
 })
 </script>
 
