@@ -693,7 +693,7 @@
 
 <script setup lang="ts">
 import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
@@ -933,23 +933,36 @@ const activeAttributeFilters = reactive<Record<number, string>>({})
 // "Users invited by X": not persisted, set from the 邀请人 column or ?invited_by=<id>.
 // While it is set, the saved role/status/group/attribute filters and the search box are
 // suspended (not cleared), so "everyone X invited" is never silently narrowed to nothing.
+// The URL (?invited_by=&inviter=) is the single source of truth; the watcher below loads.
 const invitedByFilter = ref<{ id: number; email: string } | null>(null)
 const router = useRouter()
+const invitedByFromQuery = (): { id: number; email: string } | null => {
+  const id = Number(route.query.invited_by)
+  if (!Number.isInteger(id) || id <= 0) return null
+  return { id, email: typeof route.query.inviter === 'string' && route.query.inviter ? route.query.inviter : `#${id}` }
+}
 const filterByInviter = (id: number, email?: string) => {
-  invitedByFilter.value = { id, email: email || `#${id}` }
   router.replace({ query: { ...route.query, invited_by: String(id), inviter: email || undefined } })
-  pagination.page = 1
-  loadUsers()
 }
 const clearInvitedByFilter = () => {
-  invitedByFilter.value = null
   const query = { ...route.query }
   delete query.invited_by
   delete query.inviter
   router.replace({ query })
-  pagination.page = 1
-  loadUsers()
 }
+watch(
+  () => [route.query.invited_by, route.query.inviter],
+  () => {
+    const next = invitedByFromQuery()
+    if (next?.id === invitedByFilter.value?.id) {
+      invitedByFilter.value = next
+      return
+    }
+    invitedByFilter.value = next
+    pagination.page = 1
+    loadUsers()
+  }
+)
 
 // Visible filters tracking (which filters are shown in the UI)
 // Keys: 'role', 'status', 'attr_${id}'
@@ -1504,10 +1517,7 @@ onMounted(async () => {
   await loadAttributeDefinitions()
   loadSavedFilters()
   loadSavedColumns()
-  const invitedBy = Number(route.query.invited_by)
-  if (Number.isInteger(invitedBy) && invitedBy > 0) {
-    invitedByFilter.value = { id: invitedBy, email: typeof route.query.inviter === 'string' ? route.query.inviter : `#${invitedBy}` }
-  }
+  invitedByFilter.value = invitedByFromQuery()
   loadUsers()
   if (hasVisibleGroupsColumn.value || visibleFilters.has('group')) {
     loadAllGroups()

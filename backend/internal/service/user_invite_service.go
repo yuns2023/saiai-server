@@ -138,7 +138,7 @@ func (s *UserInviteService) Overview(ctx context.Context, userID int64, params p
 		return nil, err
 	}
 	out.Unused, out.Invited = counts.Unused, counts.Invited
-	// Same checks, same order as CreateForOwner, so the button never promises a 409.
+	// Same limit checks, same order as CreateForOwner (a concurrent change can still make the next POST fail).
 	out.CanCreate = cfg.Enabled && eligible &&
 		counts.Unused < cfg.MaxUnused &&
 		counts.CreatedToday < MaxUserInviteCreatesPerDay &&
