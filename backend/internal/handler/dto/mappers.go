@@ -73,6 +73,7 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 		GroupRates:                      u.GroupRates,
 		SoraStorageQuotaBytes:           u.SoraStorageQuotaBytes,
 		SoraStorageUsedBytes:            u.SoraStorageUsedBytes,
+		InvitedByUserID:                 u.InvitedByUserID,
 	}
 }
 
@@ -576,8 +577,9 @@ func RedeemCodeFromServiceAdmin(rc *service.RedeemCode) *AdminRedeemCode {
 		return nil
 	}
 	return &AdminRedeemCode{
-		RedeemCode: redeemCodeFromServiceBase(rc),
-		Notes:      rc.Notes,
+		RedeemCode:  redeemCodeFromServiceBase(rc),
+		Notes:       rc.Notes,
+		OwnerUserID: rc.OwnerUserID,
 	}
 }
 

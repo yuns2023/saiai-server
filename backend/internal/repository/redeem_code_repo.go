@@ -275,6 +275,7 @@ func redeemCodeEntityToService(m *dbent.RedeemCode) *service.RedeemCode {
 		CreatedAt:    m.CreatedAt,
 		GroupID:      m.GroupID,
 		ValidityDays: m.ValidityDays,
+		OwnerUserID:  m.OwnerUserID,
 	}
 	if m.Edges.User != nil {
 		out.User = userEntityToService(m.Edges.User)

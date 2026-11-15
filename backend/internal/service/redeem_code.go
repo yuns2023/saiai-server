@@ -19,6 +19,8 @@ type RedeemCode struct {
 
 	GroupID      *int64
 	ValidityDays int
+	// OwnerUserID is the user who generated this invitation code; nil for admin codes.
+	OwnerUserID *int64
 
 	User  *User
 	Group *Group

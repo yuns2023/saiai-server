@@ -33,15 +33,17 @@ type UserHandler struct {
 	concurrencyService  *service.ConcurrencyService
 	claudeDeviceService *service.ClaudeDeviceService
 	clientDeviceService *service.ClientDeviceService
+	userInviteService   *service.UserInviteService
 }
 
 // NewUserHandler creates a new admin user handler
-func NewUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService, claudeDeviceService *service.ClaudeDeviceService, clientDeviceService *service.ClientDeviceService) *UserHandler {
+func NewUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService, claudeDeviceService *service.ClaudeDeviceService, clientDeviceService *service.ClientDeviceService, userInviteService *service.UserInviteService) *UserHandler {
 	return &UserHandler{
 		adminService:        adminService,
 		concurrencyService:  concurrencyService,
 		claudeDeviceService: claudeDeviceService,
 		clientDeviceService: clientDeviceService,
+		userInviteService:   userInviteService,
 	}
 }
 
@@ -211,6 +213,14 @@ func (h *UserHandler) List(c *gin.Context) {
 		GroupName:  strings.TrimSpace(c.Query("group_name")),
 		Attributes: parseAttributeFilters(c),
 	}
+	if raw := strings.TrimSpace(c.Query("invited_by_user_id")); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "Invalid invited_by_user_id")
+			return
+		}
+		filters.InvitedByUserID = &id
+	}
 	if raw, ok := c.GetQuery("include_subscriptions"); ok {
 		includeSubscriptions := parseBoolQueryWithDefault(raw, true)
 		filters.IncludeSubscriptions = &includeSubscriptions
@@ -276,6 +286,11 @@ func (h *UserHandler) List(c *gin.Context) {
 			out[i].ClientAttestation7d = summary.ClientAttestation7d
 		}
 	}
+	adminUsers := make([]*dto.AdminUser, len(out))
+	for i := range out {
+		adminUsers[i] = &out[i].AdminUser
+	}
+	attachUserInviters(c.Request.Context(), h.userInviteService, adminUsers...)
 
 	response.Paginated(c, out, total, page, pageSize)
 }
@@ -318,7 +333,7 @@ func (h *UserHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	response.Success(c, adminUserOut(c.Request.Context(), h.userInviteService, user))
 }
 
 // Create handles creating a new user
@@ -349,7 +364,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	response.Success(c, adminUserOut(c.Request.Context(), h.userInviteService, user))
 }
 
 // Update handles updating a user
@@ -389,7 +404,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	response.Success(c, adminUserOut(c.Request.Context(), h.userInviteService, user))
 }
 
 // Delete handles deleting a user
@@ -437,7 +452,7 @@ func (h *UserHandler) UpdateBalance(c *gin.Context) {
 		if execErr != nil {
 			return nil, execErr
 		}
-		return dto.UserFromServiceAdmin(user), nil
+		return adminUserOut(ctx, h.userInviteService, user), nil
 	})
 }
 
@@ -510,6 +525,11 @@ func (h *UserHandler) GetBalanceHistory(c *gin.Context) {
 	for i := range codes {
 		out = append(out, *dto.RedeemCodeFromServiceAdmin(&codes[i]))
 	}
+	ptrs := make([]*dto.AdminRedeemCode, len(out))
+	for i := range out {
+		ptrs[i] = &out[i]
+	}
+	attachCodeOwners(c.Request.Context(), h.userInviteService, ptrs...)
 
 	// Custom response with total_recharged alongside pagination
 	pages := int((total + int64(pageSize) - 1) / int64(pageSize))

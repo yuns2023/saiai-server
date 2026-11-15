@@ -137,16 +137,11 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 			logger.LegacyPrintf("service.auth", "%s", "[Auth] Invitation registration enabled but redeem repository is not configured")
 			return "", nil, ErrServiceUnavailable
 		}
-		// 验证邀请码
-		redeemCode, err := s.redeemRepo.GetByCode(ctx, invitationCode)
+		// 验证邀请码（类型、状态，以及用户生成的码其创建者仍有效）
+		redeemCode, err := s.lookupInvitationCode(ctx, invitationCode)
 		if err != nil {
-			logger.LegacyPrintf("service.auth", "[Auth] Invalid invitation code: %s, error: %v", invitationCode, err)
-			return "", nil, ErrInvitationCodeInvalid
-		}
-		// 检查类型和状态
-		if redeemCode.Type != RedeemTypeInvitation || redeemCode.Status != StatusUnused {
-			logger.LegacyPrintf("service.auth", "[Auth] Invitation code invalid: type=%s, status=%s", redeemCode.Type, redeemCode.Status)
-			return "", nil, ErrInvitationCodeInvalid
+			logger.LegacyPrintf("service.auth", "[Auth] Invitation code rejected: %v", err)
+			return "", nil, err
 		}
 		invitationRedeemCode = redeemCode
 	}
@@ -200,6 +195,10 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		Balance:      defaultBalance,
 		Concurrency:  defaultConcurrency,
 		Status:       StatusActive,
+	}
+	if invitationRedeemCode != nil {
+		// Recorded in the same transaction that consumes the code (below).
+		user.InvitedByUserID = invitationRedeemCode.OwnerUserID
 	}
 
 	registrationCtx := ctx
@@ -591,14 +590,16 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				if invitationCode == "" {
 					return nil, nil, ErrOAuthInvitationRequired
 				}
-				redeemCode, err := s.redeemRepo.GetByCode(ctx, invitationCode)
+				redeemCode, err := s.lookupInvitationCode(ctx, invitationCode)
 				if err != nil {
-					return nil, nil, ErrInvitationCodeInvalid
-				}
-				if redeemCode.Type != RedeemTypeInvitation || redeemCode.Status != StatusUnused {
-					return nil, nil, ErrInvitationCodeInvalid
+					return nil, nil, err
 				}
 				invitationRedeemCode = redeemCode
+				// Creating the user and consuming the code must commit together.
+				if s.entClient == nil {
+					logger.LegacyPrintf("service.auth", "%s", "[Auth] Invitation OAuth registration requires a database transaction")
+					return nil, nil, ErrServiceUnavailable
+				}
 			}
 
 			randomPassword, err := randomHexString(32)
@@ -626,6 +627,9 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				Balance:      defaultBalance,
 				Concurrency:  defaultConcurrency,
 				Status:       StatusActive,
+			}
+			if invitationRedeemCode != nil {
+				newUser.InvitedByUserID = invitationRedeemCode.OwnerUserID
 			}
 
 			if s.entClient != nil && invitationRedeemCode != nil {
@@ -674,11 +678,6 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				} else {
 					user = newUser
 					s.assignDefaultSubscriptions(ctx, user.ID)
-					if invitationRedeemCode != nil {
-						if err := s.redeemRepo.Use(ctx, invitationRedeemCode.ID, user.ID); err != nil {
-							return nil, nil, ErrInvitationCodeInvalid
-						}
-					}
 				}
 			}
 		} else {

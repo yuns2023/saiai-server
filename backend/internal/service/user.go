@@ -32,6 +32,9 @@ type User struct {
 	// TokenVersion is carried in issued JWTs and refresh tokens; a mismatch
 	// rejects them. Only the database increments it (see the save intents).
 	TokenVersion int64
+	// InvitedByUserID is the owner of the invitation code used at sign-up; nil
+	// for admin-generated codes and older accounts. Written only by Create.
+	InvitedByUserID *int64
 
 	// Save intents for UserRepository.Update; never persisted. A password
 	// change writes PasswordHash and ends every issued session in the same

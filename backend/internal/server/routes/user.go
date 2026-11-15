@@ -87,6 +87,14 @@ func RegisterUserRoutes(
 			redeem.GET("/history", h.Redeem.GetHistory)
 		}
 
+		// 用户自助邀请码
+		invites := authenticated.Group("/invites")
+		{
+			invites.GET("", h.UserInvite.Overview)
+			invites.POST("", h.UserInvite.Create)
+			invites.DELETE("/:code", h.UserInvite.Revoke)
+		}
+
 		// 用户订阅
 		subscriptions := authenticated.Group("/subscriptions")
 		{

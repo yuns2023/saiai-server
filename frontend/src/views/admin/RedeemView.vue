@@ -125,6 +125,19 @@
             </UserIdentityTooltip>
           </template>
 
+          <template #cell-owner="{ row }">
+            <RouterLink
+              v-if="row.owner_user_id"
+              :to="{ path: '/admin/users', query: { invited_by: row.owner_user_id, inviter: row.owner?.email } }"
+              class="text-sm text-primary-600 hover:underline dark:text-primary-400"
+              :title="t('admin.redeem.ownerHint')"
+            >
+              {{ row.owner?.email || t('admin.redeem.userPrefix', { id: row.owner_user_id }) }}<span v-if="row.owner?.deleted" class="ml-1 text-xs text-gray-400">{{ t('admin.users.inviterDeleted') }}</span>
+            </RouterLink>
+            <span v-else-if="row.type === 'invitation'" class="text-sm text-gray-400">{{ t('admin.redeem.ownerAdmin') }}</span>
+            <span v-else class="text-sm text-gray-400">-</span>
+          </template>
+
           <template #cell-used_at="{ value }">
             <span class="text-sm text-gray-500 dark:text-dark-400">{{
               value ? formatDateTime(value) : '-'
@@ -396,6 +409,7 @@
 import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
@@ -500,6 +514,7 @@ const columns = computed<Column[]>(() => [
   { key: 'value', label: t('admin.redeem.columns.value'), sortable: true },
   { key: 'status', label: t('admin.redeem.columns.status'), sortable: true },
   { key: 'used_by', label: t('admin.redeem.columns.usedBy') },
+  { key: 'owner', label: t('admin.redeem.columns.owner') },
   { key: 'used_at', label: t('admin.redeem.columns.usedAt'), sortable: true },
   { key: 'actions', label: t('admin.redeem.columns.actions') }
 ])

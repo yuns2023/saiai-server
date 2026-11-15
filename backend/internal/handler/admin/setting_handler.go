@@ -152,6 +152,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		FrontendURL:                          settings.FrontendURL,
 		InvitationCodeEnabled:                settings.InvitationCodeEnabled,
 		InvitationCodeHint:                   settings.InvitationCodeHint,
+		UserInviteEnabled:                    settings.UserInviteEnabled,
+		UserInviteMaxUnused:                  settings.UserInviteMaxUnused,
+		UserInviteMaxTotal:                   settings.UserInviteMaxTotal,
 		TotpEnabled:                          settings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             settings.SMTPHost,
@@ -231,7 +234,11 @@ type UpdateSettingsRequest struct {
 	InvitationCodeEnabled            bool     `json:"invitation_code_enabled"`
 	// nil = keep the stored value, so admin clients that predate the field do not wipe it.
 	InvitationCodeHint *string `json:"invitation_code_hint"`
-	TotpEnabled        bool    `json:"totp_enabled"` // TOTP 双因素认证
+	// User-generated invitation codes; nil = keep the stored value.
+	UserInviteEnabled   *bool `json:"user_invite_enabled"`
+	UserInviteMaxUnused *int  `json:"user_invite_max_unused"`
+	UserInviteMaxTotal  *int  `json:"user_invite_max_total"`
+	TotpEnabled         bool  `json:"totp_enabled"` // TOTP 双因素认证
 
 	// 邮件服务设置
 	SMTPHost     string `json:"smtp_host"`
@@ -638,6 +645,27 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		invitationCodeHint = strings.TrimSpace(*req.InvitationCodeHint)
 	}
 
+	userInviteEnabled := previousSettings.UserInviteEnabled
+	if req.UserInviteEnabled != nil {
+		userInviteEnabled = *req.UserInviteEnabled
+	}
+	userInviteMaxUnused := previousSettings.UserInviteMaxUnused
+	if req.UserInviteMaxUnused != nil {
+		if *req.UserInviteMaxUnused < 1 || *req.UserInviteMaxUnused > service.MaxUserInviteMaxUnused {
+			response.Error(c, http.StatusBadRequest, fmt.Sprintf("user_invite_max_unused must be between 1 and %d", service.MaxUserInviteMaxUnused))
+			return
+		}
+		userInviteMaxUnused = *req.UserInviteMaxUnused
+	}
+	userInviteMaxTotal := previousSettings.UserInviteMaxTotal
+	if req.UserInviteMaxTotal != nil {
+		if *req.UserInviteMaxTotal < 0 || *req.UserInviteMaxTotal > service.MaxUserInviteMaxTotal {
+			response.Error(c, http.StatusBadRequest, fmt.Sprintf("user_invite_max_total must be between 0 and %d", service.MaxUserInviteMaxTotal))
+			return
+		}
+		userInviteMaxTotal = *req.UserInviteMaxTotal
+	}
+
 	maintenanceEnabled := previousSettings.MaintenanceModeEnabled
 	if req.MaintenanceModeEnabled != nil {
 		maintenanceEnabled = *req.MaintenanceModeEnabled
@@ -656,6 +684,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FrontendURL:                      req.FrontendURL,
 		InvitationCodeEnabled:            req.InvitationCodeEnabled,
 		InvitationCodeHint:               invitationCodeHint,
+		UserInviteEnabled:                userInviteEnabled,
+		UserInviteMaxUnused:              userInviteMaxUnused,
+		UserInviteMaxTotal:               userInviteMaxTotal,
 		TotpEnabled:                      req.TotpEnabled,
 		SMTPHost:                         req.SMTPHost,
 		SMTPPort:                         req.SMTPPort,
@@ -786,6 +817,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FrontendURL:                          updatedSettings.FrontendURL,
 		InvitationCodeEnabled:                updatedSettings.InvitationCodeEnabled,
 		InvitationCodeHint:                   updatedSettings.InvitationCodeHint,
+		UserInviteEnabled:                    updatedSettings.UserInviteEnabled,
+		UserInviteMaxUnused:                  updatedSettings.UserInviteMaxUnused,
+		UserInviteMaxTotal:                   updatedSettings.UserInviteMaxTotal,
 		TotpEnabled:                          updatedSettings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             updatedSettings.SMTPHost,
@@ -950,6 +984,15 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.InvitationCodeHint != after.InvitationCodeHint {
 		changed = append(changed, "invitation_code_hint")
+	}
+	if before.UserInviteEnabled != after.UserInviteEnabled {
+		changed = append(changed, "user_invite_enabled")
+	}
+	if before.UserInviteMaxUnused != after.UserInviteMaxUnused {
+		changed = append(changed, "user_invite_max_unused")
+	}
+	if before.UserInviteMaxTotal != after.UserInviteMaxTotal {
+		changed = append(changed, "user_invite_max_total")
 	}
 	if before.SiteName != after.SiteName {
 		changed = append(changed, "site_name")

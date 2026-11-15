@@ -25,6 +25,9 @@ type SystemSettings struct {
 	FrontendURL                      string   `json:"frontend_url"`
 	InvitationCodeEnabled            bool     `json:"invitation_code_enabled"`
 	InvitationCodeHint               string   `json:"invitation_code_hint"`
+	UserInviteEnabled                bool     `json:"user_invite_enabled"`
+	UserInviteMaxUnused              int      `json:"user_invite_max_unused"`
+	UserInviteMaxTotal               int      `json:"user_invite_max_total"`
 	TotpEnabled                      bool     `json:"totp_enabled"`                   // TOTP 双因素认证
 	TotpEncryptionKeyConfigured      bool     `json:"totp_encryption_key_configured"` // TOTP 加密密钥是否已配置
 
@@ -121,6 +124,7 @@ type PublicSettings struct {
 	PasswordResetEnabled             bool             `json:"password_reset_enabled"`
 	InvitationCodeEnabled            bool             `json:"invitation_code_enabled"`
 	InvitationCodeHint               string           `json:"invitation_code_hint"`
+	UserInviteEnabled                bool             `json:"user_invite_enabled"`
 	TotpEnabled                      bool             `json:"totp_enabled"` // TOTP 双因素认证
 	TurnstileEnabled                 bool             `json:"turnstile_enabled"`
 	TurnstileSiteKey                 string           `json:"turnstile_site_key"`

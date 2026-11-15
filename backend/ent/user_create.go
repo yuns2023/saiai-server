@@ -268,6 +268,20 @@ func (_c *UserCreate) SetNillableTokenVersion(v *int64) *UserCreate {
 	return _c
 }
 
+// SetInvitedByUserID sets the "invited_by_user_id" field.
+func (_c *UserCreate) SetInvitedByUserID(v int64) *UserCreate {
+	_c.mutation.SetInvitedByUserID(v)
+	return _c
+}
+
+// SetNillableInvitedByUserID sets the "invited_by_user_id" field if the given value is not nil.
+func (_c *UserCreate) SetNillableInvitedByUserID(v *int64) *UserCreate {
+	if v != nil {
+		_c.SetInvitedByUserID(*v)
+	}
+	return _c
+}
+
 // SetTotpSecretEncrypted sets the "totp_secret_encrypted" field.
 func (_c *UserCreate) SetTotpSecretEncrypted(v string) *UserCreate {
 	_c.mutation.SetTotpSecretEncrypted(v)
@@ -784,6 +798,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.TokenVersion(); ok {
 		_spec.SetField(user.FieldTokenVersion, field.TypeInt64, value)
 		_node.TokenVersion = value
+	}
+	if value, ok := _c.mutation.InvitedByUserID(); ok {
+		_spec.SetField(user.FieldInvitedByUserID, field.TypeInt64, value)
+		_node.InvitedByUserID = &value
 	}
 	if value, ok := _c.mutation.TotpSecretEncrypted(); ok {
 		_spec.SetField(user.FieldTotpSecretEncrypted, field.TypeString, value)
@@ -1307,6 +1325,30 @@ func (u *UserUpsert) AddTokenVersion(v int64) *UserUpsert {
 	return u
 }
 
+// SetInvitedByUserID sets the "invited_by_user_id" field.
+func (u *UserUpsert) SetInvitedByUserID(v int64) *UserUpsert {
+	u.Set(user.FieldInvitedByUserID, v)
+	return u
+}
+
+// UpdateInvitedByUserID sets the "invited_by_user_id" field to the value that was provided on create.
+func (u *UserUpsert) UpdateInvitedByUserID() *UserUpsert {
+	u.SetExcluded(user.FieldInvitedByUserID)
+	return u
+}
+
+// AddInvitedByUserID adds v to the "invited_by_user_id" field.
+func (u *UserUpsert) AddInvitedByUserID(v int64) *UserUpsert {
+	u.Add(user.FieldInvitedByUserID, v)
+	return u
+}
+
+// ClearInvitedByUserID clears the value of the "invited_by_user_id" field.
+func (u *UserUpsert) ClearInvitedByUserID() *UserUpsert {
+	u.SetNull(user.FieldInvitedByUserID)
+	return u
+}
+
 // SetTotpSecretEncrypted sets the "totp_secret_encrypted" field.
 func (u *UserUpsert) SetTotpSecretEncrypted(v string) *UserUpsert {
 	u.Set(user.FieldTotpSecretEncrypted, v)
@@ -1727,6 +1769,34 @@ func (u *UserUpsertOne) AddTokenVersion(v int64) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateTokenVersion() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateTokenVersion()
+	})
+}
+
+// SetInvitedByUserID sets the "invited_by_user_id" field.
+func (u *UserUpsertOne) SetInvitedByUserID(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetInvitedByUserID(v)
+	})
+}
+
+// AddInvitedByUserID adds v to the "invited_by_user_id" field.
+func (u *UserUpsertOne) AddInvitedByUserID(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddInvitedByUserID(v)
+	})
+}
+
+// UpdateInvitedByUserID sets the "invited_by_user_id" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateInvitedByUserID() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateInvitedByUserID()
+	})
+}
+
+// ClearInvitedByUserID clears the value of the "invited_by_user_id" field.
+func (u *UserUpsertOne) ClearInvitedByUserID() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearInvitedByUserID()
 	})
 }
 
@@ -2330,6 +2400,34 @@ func (u *UserUpsertBulk) AddTokenVersion(v int64) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateTokenVersion() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateTokenVersion()
+	})
+}
+
+// SetInvitedByUserID sets the "invited_by_user_id" field.
+func (u *UserUpsertBulk) SetInvitedByUserID(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetInvitedByUserID(v)
+	})
+}
+
+// AddInvitedByUserID adds v to the "invited_by_user_id" field.
+func (u *UserUpsertBulk) AddInvitedByUserID(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddInvitedByUserID(v)
+	})
+}
+
+// UpdateInvitedByUserID sets the "invited_by_user_id" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateInvitedByUserID() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateInvitedByUserID()
+	})
+}
+
+// ClearInvitedByUserID clears the value of the "invited_by_user_id" field.
+func (u *UserUpsertBulk) ClearInvitedByUserID() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearInvitedByUserID()
 	})
 }
 

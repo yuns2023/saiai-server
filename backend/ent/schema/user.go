@@ -79,6 +79,11 @@ func (User) Fields() []ent.Field {
 		// incremented (password changes); never written from a loaded value.
 		field.Int64("token_version").
 			Default(0),
+		// invited_by_user_id: owner of the invitation code used at sign-up
+		// (migration 125). Written once when the user is created.
+		field.Int64("invited_by_user_id").
+			Optional().
+			Nillable(),
 
 		// TOTP 双因素认证字段
 		field.String("totp_secret_encrypted").

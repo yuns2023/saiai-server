@@ -1757,6 +1757,10 @@ export default {
 
     // Users Management
     users: {
+      invitedByFilter: '{email} 邀请的用户（其他筛选已暂停）',
+      showInvitedBy: '查看此人邀请的所有用户',
+      inviterDeleted: '（已删除）',
+      clearInvitedByFilter: '清除邀请人筛选',
       trustedUser: '可信用户',
       trustedUserHint: '允许使用仅限可信用户的 carpool 账号，其他权限和限制不变。',
       title: '用户管理',
@@ -1804,6 +1808,7 @@ export default {
       paygDiscountMultiplierHint: '0 到 1，最多四位小数；1 为不打折，0.8 为八折，0 为免费。适用于该用户的所有 Key、分组和上游账号，同时影响余额扣费与订阅额度消耗。',
       paygDiscountMultiplierInvalid: '计费折扣倍率必须在 0 到 1 之间',
       columns: {
+        invitedBy: '邀请人',
         accessLevel: '用户等级',
         user: '用户',
         email: '邮箱',
@@ -3884,12 +3889,15 @@ export default {
       title: '兑换码管理',
       description: '生成和管理兑换码',
       generateCodes: '生成兑换码',
+      ownerAdmin: '管理员',
+      ownerHint: '查看用这个人的邀请码注册的所有用户',
       columns: {
         code: '兑换码',
         type: '类型',
         value: '面值',
         status: '状态',
         usedBy: '使用者',
+        owner: '创建者',
         usedAt: '使用时间',
         createdAt: '创建时间',
         actions: '操作'
@@ -5231,6 +5239,12 @@ export default {
         invitationCodeHowTo: '邀请码获取方式',
         invitationCodeHowToPlaceholder: '例如：加入 Telegram 群 https://t.me/xxx 向管理员索取',
         invitationCodeHowToHint: '显示在注册页邀请码输入框下方；纯文本，最多 500 字，其中的 http(s) 链接可点击。留空则不显示。',
+        userInvite: '用户自助邀请',
+        userInviteHint: '开启后，充值过或自己兑换过余额/订阅/并发码的用户可以生成邀请码（管理员手动加款不算）。关闭后已发出的码仍可使用。',
+        userInviteMaxUnused: '每人未使用邀请码上限',
+        userInviteMaxUnusedHint: '同时持有的未使用码数量，1–100。用掉或作废一个后才能再生成。',
+        userInviteMaxTotal: '每人累计邀请上限',
+        userInviteMaxTotalHint: '一个用户最多能邀请多少人（含未使用的码），0 表示不限。',
         passwordReset: '忘记密码',
         passwordResetHint: '允许用户通过邮箱重置密码',
         frontendUrl: '前端地址',

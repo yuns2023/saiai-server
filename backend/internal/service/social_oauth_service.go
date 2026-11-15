@@ -375,21 +375,7 @@ func (s *SocialOAuthService) signupPolicy(ctx context.Context, identity SocialOA
 }
 
 func (s *SocialOAuthService) lookupInvitation(ctx context.Context, code string) (*RedeemCode, error) {
-	code = strings.TrimSpace(code)
-	if code == "" {
-		return nil, ErrInvitationCodeRequired
-	}
-	if s.auth.redeemRepo == nil {
-		return nil, ErrServiceUnavailable
-	}
-	redeemCode, err := s.auth.redeemRepo.GetByCode(ctx, code)
-	if err != nil || redeemCode == nil {
-		return nil, ErrInvitationCodeInvalid
-	}
-	if redeemCode.Type != RedeemTypeInvitation || redeemCode.Status != StatusUnused {
-		return nil, ErrInvitationCodeInvalid
-	}
-	return redeemCode, nil
+	return s.auth.lookupInvitationCode(ctx, code)
 }
 
 func (s *SocialOAuthService) savePending(ctx context.Context, identity SocialOAuthIdentity) (string, error) {
@@ -434,6 +420,10 @@ func (s *SocialOAuthService) createUser(ctx context.Context, identity SocialOAut
 		Balance:      defaultBalance,
 		Concurrency:  defaultConcurrency,
 		Status:       StatusActive,
+	}
+	if invitation != nil {
+		// Written by Create inside the same transaction that consumes the code.
+		user.InvitedByUserID = invitation.OwnerUserID
 	}
 
 	create := func(ctx context.Context) error {

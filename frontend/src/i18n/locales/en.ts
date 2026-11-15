@@ -1737,6 +1737,10 @@ export default {
 
     // Users
     users: {
+      invitedByFilter: 'Invited by {email} (other filters paused)',
+      showInvitedBy: 'Show everyone this user invited',
+      inviterDeleted: '(deleted)',
+      clearInvitedByFilter: 'Clear invited-by filter',
       trustedUser: 'Trusted user',
       trustedUserHint: 'May use trusted-only carpool accounts. All other permissions and limits still apply.',
       title: 'User Management',
@@ -1779,6 +1783,7 @@ export default {
       paygDiscountMultiplierHint: '0 to 1 with at most four decimals; 1 is full price, 0.8 is 20% off, and 0 is free. Applies to all of this user\'s keys, groups, and upstream accounts, for both balance charges and subscription quota usage.',
       paygDiscountMultiplierInvalid: 'Billing discount must be between 0 and 1',
       columns: {
+        invitedBy: 'Invited by',
         accessLevel: 'Access Level',
         user: 'User',
         email: 'Email',
@@ -3761,6 +3766,8 @@ export default {
       title: 'Redeem Code Management',
       description: 'Generate and manage redeem codes',
       generateCodes: 'Generate Codes',
+      ownerAdmin: 'Admin',
+      ownerHint: 'Show everyone who signed up with this user\'s codes',
       searchCodes: 'Search codes or email...',
       allTypes: 'All Types',
       allStatus: 'All Status',
@@ -3778,6 +3785,7 @@ export default {
         value: 'Value',
         status: 'Status',
         usedBy: 'Used By',
+        owner: 'Created by',
         usedAt: 'Used At',
         actions: 'Actions'
       },
@@ -5069,6 +5077,12 @@ export default {
         invitationCodeHowTo: 'How to get an invitation code',
         invitationCodeHowToPlaceholder: 'e.g. Join our Telegram group https://t.me/xxx and ask an admin',
         invitationCodeHowToHint: 'Shown under the invitation code field on the sign-up page. Plain text, up to 500 characters; http(s) links are clickable. Leave empty to hide.',
+        userInvite: 'User invitations',
+        userInviteHint: 'Users who have topped up or redeemed a balance/subscription/concurrency code themselves can generate invitation codes (admin adjustments do not count). Codes already handed out keep working when this is off.',
+        userInviteMaxUnused: 'Unused codes per user',
+        userInviteMaxUnusedHint: 'Unused codes a user may hold at once, 1–100. They can generate another once one is used or revoked.',
+        userInviteMaxTotal: 'Invitations per user (lifetime)',
+        userInviteMaxTotalHint: 'Most people one user can invite, unused codes included. 0 = no limit.',
         passwordReset: 'Password Reset',
         passwordResetHint: 'Allow users to reset their password via email',
         frontendUrl: 'Frontend URL',

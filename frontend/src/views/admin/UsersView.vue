@@ -22,6 +22,18 @@
               />
             </div>
 
+            <!-- Invited-by filter (set from the 邀请人 column or ?invited_by=) -->
+            <span
+              v-if="invitedByFilter"
+              class="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-3 py-1 text-sm text-primary-700 dark:bg-primary-900/30 dark:text-primary-300"
+              data-testid="invited-by-filter"
+            >
+              {{ t('admin.users.invitedByFilter', { email: invitedByFilter.email }) }}
+              <button type="button" class="hover:text-primary-900" :aria-label="t('admin.users.clearInvitedByFilter')" @click="clearInvitedByFilter">
+                <Icon name="x" size="sm" />
+              </button>
+            </span>
+
             <!-- Role Filter (visible when enabled) -->
             <div v-if="visibleFilters.has('role')" class="w-full sm:w-32">
               <Select
@@ -249,6 +261,19 @@
                 <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
               </UserIdentityTooltip>
             </div>
+          </template>
+
+          <template #cell-invited_by="{ row }">
+            <button
+              v-if="row.invited_by_user_id"
+              type="button"
+              class="text-left text-sm text-primary-600 hover:underline dark:text-primary-400"
+              :title="t('admin.users.showInvitedBy')"
+              @click="filterByInviter(row.invited_by_user_id, row.invited_by?.email)"
+            >
+              {{ row.invited_by?.email || `#${row.invited_by_user_id}` }}<span v-if="row.invited_by?.deleted" class="ml-1 text-xs text-gray-400">{{ t('admin.users.inviterDeleted') }}</span>
+            </button>
+            <span v-else class="text-sm text-gray-400">-</span>
           </template>
 
           <template #cell-username="{ value, row }">
@@ -668,14 +693,15 @@
 
 <script setup lang="ts">
 import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import Icon from '@/components/icons/Icon.vue'
 
+const route = useRoute()
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
 import type { AdminUser, AdminGroup, UserAttributeDefinition } from '@/types'
@@ -756,6 +782,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'id', label: 'ID', sortable: true },
   { key: 'username', label: t('admin.users.columns.username'), sortable: true },
   { key: 'notes', label: t('admin.users.columns.notes'), sortable: false },
+  { key: 'invited_by', label: t('admin.users.columns.invitedBy'), sortable: false },
   // Dynamic attribute columns
   ...attributeColumns.value,
   { key: 'role', label: t('admin.users.columns.role'), sortable: true },
@@ -902,6 +929,40 @@ const filters = reactive({
   group: ''  // group name for fuzzy match, '' = all
 })
 const activeAttributeFilters = reactive<Record<number, string>>({})
+
+// "Users invited by X": not persisted, set from the 邀请人 column or ?invited_by=<id>.
+// While it is set, the saved role/status/group/attribute filters and the search box are
+// suspended (not cleared), so "everyone X invited" is never silently narrowed to nothing.
+// The URL (?invited_by=&inviter=) is the single source of truth; the watcher below loads.
+const invitedByFilter = ref<{ id: number; email: string } | null>(null)
+const router = useRouter()
+const invitedByFromQuery = (): { id: number; email: string } | null => {
+  const id = Number(route.query.invited_by)
+  if (!Number.isInteger(id) || id <= 0) return null
+  return { id, email: typeof route.query.inviter === 'string' && route.query.inviter ? route.query.inviter : `#${id}` }
+}
+const filterByInviter = (id: number, email?: string) => {
+  router.replace({ query: { ...route.query, invited_by: String(id), inviter: email || undefined } })
+}
+const clearInvitedByFilter = () => {
+  const query = { ...route.query }
+  delete query.invited_by
+  delete query.inviter
+  router.replace({ query })
+}
+watch(
+  () => [route.query.invited_by, route.query.inviter],
+  () => {
+    const next = invitedByFromQuery()
+    if (next?.id === invitedByFilter.value?.id) {
+      invitedByFilter.value = next
+      return
+    }
+    invitedByFilter.value = next
+    pagination.page = 1
+    loadUsers()
+  }
+)
 
 // Visible filters tracking (which filters are shown in the UI)
 // Keys: 'role', 'status', 'attr_${id}'
@@ -1203,14 +1264,19 @@ const loadUsers = async () => {
     const response = await adminAPI.users.list(
       pagination.page,
       pagination.page_size,
-      {
-        role: filters.role as any,
-        status: filters.status as any,
-        search: searchQuery.value || undefined,
-        group_name: filters.group || undefined,
-        attributes: Object.keys(attrFilters).length > 0 ? attrFilters : undefined,
-        include_subscriptions: hasVisibleSubscriptionsColumn.value
-      },
+      invitedByFilter.value
+        ? {
+            invited_by_user_id: invitedByFilter.value.id,
+            include_subscriptions: hasVisibleSubscriptionsColumn.value
+          }
+        : {
+            role: filters.role as any,
+            status: filters.status as any,
+            search: searchQuery.value || undefined,
+            group_name: filters.group || undefined,
+            attributes: Object.keys(attrFilters).length > 0 ? attrFilters : undefined,
+            include_subscriptions: hasVisibleSubscriptionsColumn.value
+          },
       { signal }
     )
     if (signal.aborted) {
@@ -1451,6 +1517,7 @@ onMounted(async () => {
   await loadAttributeDefinitions()
   loadSavedFilters()
   loadSavedColumns()
+  invitedByFilter.value = invitedByFromQuery()
   loadUsers()
   if (hasVisibleGroupsColumn.value || visibleFilters.has('group')) {
     loadAllGroups()

@@ -21,6 +21,7 @@ const nav = computed(() => [
   { to: '/keys', icon: 'key' as const, label: t('nav.keys') },
   { to: '/usage', icon: 'usage' as const, label: t('nav.usage') },
   { to: '/billing', icon: 'billing' as const, label: t('nav.billing') },
+  ...(app.settings?.user_invite_enabled ? [{ to: '/invites', icon: 'invite' as const, label: t('nav.invites') }] : []),
   { to: '/account', icon: 'account' as const, label: t('nav.account') },
   { to: '/notices', icon: 'bell' as const, label: t('nav.notices'), count: notices.unread.length }
 ])

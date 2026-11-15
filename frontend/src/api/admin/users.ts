@@ -60,6 +60,7 @@ export async function list(
     role?: 'admin' | 'user'
     search?: string
     group_name?: string         // fuzzy filter by allowed group name
+    invited_by_user_id?: number // users who signed up with this user's invitation codes
     attributes?: Record<number, string>  // attributeId -> value
     include_subscriptions?: boolean
   },
@@ -75,6 +76,7 @@ export async function list(
     role: filters?.role,
     search: filters?.search,
     group_name: filters?.group_name,
+    invited_by_user_id: filters?.invited_by_user_id,
     include_subscriptions: filters?.include_subscriptions
   }
 
