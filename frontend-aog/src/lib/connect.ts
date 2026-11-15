@@ -12,7 +12,13 @@ export const CLIENT = {
   /** Download path served by the gateway (SAIAI_CLIENT_DIR). */
   bundlePath: '/saiai-cli',
   /** PowerShell entry function defined by setup.ps1. */
-  powershellEntry: 'Invoke-Saiai'
+  powershellEntry: 'Invoke-Saiai',
+  /**
+   * Whether the one-line install command is offered. Off until the aog client
+   * (AITP) installer is published and served by the site; until then keys show
+   * only the manual base URL / environment values.
+   */
+  oneLineInstall: false
 } as const
 
 export type Platform = 'anthropic' | 'openai' | 'gemini' | string
@@ -74,12 +80,24 @@ export interface ConnectSnippet {
   envLines: string[]
 }
 
-export function connectSnippet(platform: Platform, rawBaseUrl: string, apiKey: string, shell: Shell): ConnectSnippet {
+export interface ConnectOptions {
+  /** Offer the one-line install command (defaults to CLIENT.oneLineInstall). */
+  oneLine?: boolean
+}
+
+export function connectSnippet(
+  platform: Platform,
+  rawBaseUrl: string,
+  apiKey: string,
+  shell: Shell,
+  options: ConnectOptions = {}
+): ConnectSnippet {
   const origin = cliOrigin(rawBaseUrl)
+  const oneLine = options.oneLine ?? CLIENT.oneLineInstall
   if (platform === 'openai') {
     const base = openAIBase(rawBaseUrl)
     return {
-      command: bootstrap(shell, origin, `init-codex ${shellQuote(base)} ${shellQuote(apiKey)}`, `init-codex ${psQuote(base)} ${psQuote(apiKey)}`),
+      command: oneLine ? bootstrap(shell, origin, `init-codex ${shellQuote(base)} ${shellQuote(apiKey)}`, `init-codex ${psQuote(base)} ${psQuote(apiKey)}`) : null,
       baseUrl: base,
       envLines: envLines(shell, [['OPENAI_BASE_URL', base], ['OPENAI_API_KEY', apiKey]])
     }
@@ -94,7 +112,7 @@ export function connectSnippet(platform: Platform, rawBaseUrl: string, apiKey: s
   }
   const root = gatewayRoot(rawBaseUrl)
   return {
-    command: bootstrap(shell, origin, `${shellQuote(root)} ${shellQuote(apiKey)}`, `${psQuote(root)} ${psQuote(apiKey)}`),
+    command: oneLine ? bootstrap(shell, origin, `${shellQuote(root)} ${shellQuote(apiKey)}`, `${psQuote(root)} ${psQuote(apiKey)}`) : null,
     baseUrl: root,
     envLines: envLines(shell, [['ANTHROPIC_BASE_URL', root], ['ANTHROPIC_AUTH_TOKEN', apiKey]])
   }
