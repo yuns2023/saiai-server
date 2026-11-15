@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -30,6 +31,36 @@ type fakeSocialBackend struct {
 	completeResult *service.SocialOAuthResult
 	completeErr    error
 	completeCalls  int
+
+	handoffs map[string]service.SocialOAuthHandoff
+}
+
+func (f *fakeSocialBackend) SaveHandoff(_ context.Context, code string, h *service.SocialOAuthHandoff) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.handoffs == nil {
+		f.handoffs = map[string]service.SocialOAuthHandoff{}
+	}
+	f.handoffs[code] = *h
+	return nil
+}
+
+func (f *fakeSocialBackend) ConsumeHandoff(_ context.Context, code string) (*service.SocialOAuthHandoff, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	h, ok := f.handoffs[code]
+	if !ok {
+		return nil, nil
+	}
+	delete(f.handoffs, code)
+	return &h, nil
+}
+
+// expireHandoffs simulates the server-side TTL elapsing.
+func (f *fakeSocialBackend) expireHandoffs() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.handoffs = nil
 }
 
 func (f *fakeSocialBackend) Config(_ context.Context, p service.SocialOAuthProvider) (service.SocialOAuthConfig, error) {
@@ -79,7 +110,9 @@ type fakeProvider struct {
 	googleInfo   string
 	githubUser   string
 	githubEmails string
-	tokenForms   []url.Values
+	// githubEmailsFn, when set, serves /user/emails per request (pagination tests).
+	githubEmailsFn func(r *http.Request) string
+	tokenForms     []url.Values
 }
 
 func newFakeProvider(t *testing.T) *fakeProvider {
@@ -102,19 +135,25 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"provider-at","token_type":"bearer"}`))
 	})
-	auth := func(next func(w http.ResponseWriter)) http.HandlerFunc {
+	auth := func(next func(w http.ResponseWriter, r *http.Request)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer provider-at" {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			next(w)
+			next(w, r)
 		}
 	}
-	mux.HandleFunc("/google/userinfo", auth(func(w http.ResponseWriter) { _, _ = w.Write([]byte(p.googleInfo)) }))
-	mux.HandleFunc("/github/user", auth(func(w http.ResponseWriter) { _, _ = w.Write([]byte(p.githubUser)) }))
-	mux.HandleFunc("/github/user/emails", auth(func(w http.ResponseWriter) { _, _ = w.Write([]byte(p.githubEmails)) }))
+	mux.HandleFunc("/google/userinfo", auth(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(p.googleInfo)) }))
+	mux.HandleFunc("/github/user", auth(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(p.githubUser)) }))
+	mux.HandleFunc("/github/user/emails", auth(func(w http.ResponseWriter, r *http.Request) {
+		if p.githubEmailsFn != nil {
+			_, _ = w.Write([]byte(p.githubEmailsFn(r)))
+			return
+		}
+		_, _ = w.Write([]byte(p.githubEmails))
+	}))
 	p.srv = httptest.NewServer(mux)
 	t.Cleanup(p.srv.Close)
 	return p
@@ -150,6 +189,7 @@ func newSocialRouter(backend *fakeSocialBackend, provider *fakeProvider) *gin.En
 		r.GET(base+"/start", h.SocialOAuthStart(p))
 		r.GET(base+"/callback", h.SocialOAuthCallback(p))
 		r.POST(base+"/complete-registration", h.CompleteSocialOAuthRegistration(p))
+		r.POST(base+"/exchange", h.ExchangeSocialOAuthHandoff(p))
 	}
 	return r
 }
@@ -194,11 +234,78 @@ func doCallback(t *testing.T, r *gin.Engine, provider service.SocialOAuthProvide
 
 func fullFlow(t *testing.T, provider service.SocialOAuthProvider, backend *fakeSocialBackend, fp *fakeProvider) url.Values {
 	t.Helper()
+	frag, _, _ := callbackFlow(t, provider, backend, fp)
+	return frag
+}
+
+// callbackFlow runs start + callback and returns the fragment, the binder cookie(s) and the router.
+func callbackFlow(t *testing.T, provider service.SocialOAuthProvider, backend *fakeSocialBackend, fp *fakeProvider) (url.Values, []*http.Cookie, *gin.Engine) {
+	t.Helper()
 	r := newSocialRouter(backend, fp)
 	start := doStart(t, r, provider, "?redirect=/keys", fp)
 	state := start.authURL.Query().Get("state")
-	frag, _ := doCallback(t, r, provider, "?code=good-code&state="+url.QueryEscape(state), start.cookies)
-	return frag
+	frag, w := doCallback(t, r, provider, "?code=good-code&state="+url.QueryEscape(state), start.cookies)
+	return frag, handoffCookies(w), r
+}
+
+func handoffCookies(w *httptest.ResponseRecorder) []*http.Cookie {
+	var out []*http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if strings.HasSuffix(c.Name, "_oauth_handoff") && c.MaxAge > 0 {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+type exchangeResult struct {
+	status  int
+	data    map[string]any
+	reason  string
+	cleared bool
+}
+
+func doExchange(t *testing.T, r *gin.Engine, provider service.SocialOAuthProvider, code string, cookies []*http.Cookie) exchangeResult {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"code": code})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/"+string(provider)+"/exchange", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for _, c := range cookies {
+		req.AddCookie(&http.Cookie{Name: c.Name, Value: c.Value})
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var env struct {
+		Data   map[string]any `json:"data"`
+		Reason string         `json:"reason"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env), w.Body.String())
+	res := exchangeResult{status: w.Code, data: env.Data, reason: env.Reason}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == string(provider)+"_oauth_handoff" && c.MaxAge < 0 {
+			res.cleared = true
+		}
+	}
+	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	return res
+}
+
+// outcomeFlow runs the whole browser flow including the exchange.
+func outcomeFlow(t *testing.T, provider service.SocialOAuthProvider, backend *fakeSocialBackend, fp *fakeProvider) (url.Values, map[string]any) {
+	t.Helper()
+	frag, cookies, r := callbackFlow(t, provider, backend, fp)
+	requireOnlyCode(t, frag)
+	res := doExchange(t, r, provider, frag.Get("code"), cookies)
+	require.Equal(t, http.StatusOK, res.status, res.reason)
+	require.True(t, res.cleared, "binder cookie cleared after exchange")
+	return frag, res.data
+}
+
+// requireOnlyCode asserts that nothing but the one-time code travels in the URL.
+func requireOnlyCode(t *testing.T, frag url.Values) {
+	t.Helper()
+	require.Len(t, frag, 1, "fragment: %v", frag)
+	require.True(t, isHexToken(frag.Get("code")))
 }
 
 // ---- tests -----------------------------------------------------------------
@@ -253,13 +360,14 @@ func TestSocialOAuthStart_DisabledProvider(t *testing.T) {
 func TestSocialOAuthCallback_GoogleHappyPath(t *testing.T) {
 	backend := &fakeSocialBackend{}
 	fp := newFakeProvider(t)
-	frag := fullFlow(t, service.SocialOAuthProviderGoogle, backend, fp)
+	_, out := outcomeFlow(t, service.SocialOAuthProviderGoogle, backend, fp)
 
-	require.Equal(t, "at-1", frag.Get("access_token"))
-	require.Equal(t, "rt-1", frag.Get("refresh_token"))
-	require.Equal(t, "900", frag.Get("expires_in"))
-	require.Equal(t, "/keys", frag.Get("redirect"))
-	require.Equal(t, "google", frag.Get("provider"))
+	require.Equal(t, "tokens", out["kind"])
+	require.Equal(t, "at-1", out["access_token"])
+	require.Equal(t, "rt-1", out["refresh_token"])
+	require.EqualValues(t, 900, out["expires_in"])
+	require.Equal(t, "/keys", out["redirect"])
+	require.Equal(t, "google", out["provider"])
 	require.Len(t, backend.identities, 1)
 	id := backend.identities[0]
 	require.Equal(t, service.SocialOAuthProviderGoogle, id.Provider)
@@ -302,8 +410,8 @@ func TestSocialOAuthCallback_GoogleMissingSub(t *testing.T) {
 func TestSocialOAuthCallback_GitHubHappyPathUsesNumericID(t *testing.T) {
 	backend := &fakeSocialBackend{}
 	fp := newFakeProvider(t)
-	frag := fullFlow(t, service.SocialOAuthProviderGitHub, backend, fp)
-	require.Equal(t, "at-1", frag.Get("access_token"))
+	_, out := outcomeFlow(t, service.SocialOAuthProviderGitHub, backend, fp)
+	require.Equal(t, "at-1", out["access_token"])
 	require.Len(t, backend.identities, 1)
 	id := backend.identities[0]
 	require.Equal(t, "583231", id.Subject, "subject is the numeric id, never login/email")
@@ -421,20 +529,20 @@ func TestSocialOAuthCallback_ClearsCookiesOnEveryOutcome(t *testing.T) {
 
 func TestSocialOAuthCallback_PendingRegistration(t *testing.T) {
 	backend := &fakeSocialBackend{result: &service.SocialOAuthResult{PendingToken: strings.Repeat("a", 64)}}
-	frag := fullFlow(t, service.SocialOAuthProviderGoogle, backend, newFakeProvider(t))
-	require.Equal(t, "invitation_required", frag.Get("error"))
-	require.Equal(t, strings.Repeat("a", 64), frag.Get("pending_oauth_token"))
-	require.Equal(t, "/keys", frag.Get("redirect"))
-	require.Empty(t, frag.Get("access_token"))
+	_, out := outcomeFlow(t, service.SocialOAuthProviderGoogle, backend, newFakeProvider(t))
+	require.Equal(t, "invitation", out["kind"])
+	require.Equal(t, strings.Repeat("a", 64), out["pending_oauth_token"])
+	require.Equal(t, "/keys", out["redirect"])
+	require.NotContains(t, out, "access_token")
 }
 
 func TestSocialOAuthCallback_TOTPUserGetsTempTokenOnly(t *testing.T) {
 	backend := &fakeSocialBackend{result: &service.SocialOAuthResult{Requires2FA: true, TempToken: "tmp-123", User: &service.User{ID: 9}}}
-	frag := fullFlow(t, service.SocialOAuthProviderGitHub, backend, newFakeProvider(t))
-	require.Equal(t, "1", frag.Get("requires_2fa"))
-	require.Equal(t, "tmp-123", frag.Get("temp_token"))
-	require.Empty(t, frag.Get("access_token"))
-	require.Empty(t, frag.Get("refresh_token"))
+	_, out := outcomeFlow(t, service.SocialOAuthProviderGitHub, backend, newFakeProvider(t))
+	require.Equal(t, "two_factor", out["kind"])
+	require.Equal(t, "tmp-123", out["temp_token"])
+	require.NotContains(t, out, "access_token")
+	require.NotContains(t, out, "refresh_token")
 }
 
 func TestSocialOAuthCallback_DisabledUserRefused(t *testing.T) {
@@ -462,8 +570,9 @@ func TestSocialOAuthStart_RedirectIsSanitized(t *testing.T) {
 	r := newSocialRouter(backend, fp)
 	for _, raw := range []string{"//evil.com", "/\\evil.com", "https://evil.com", "/a\r\nSet-Cookie:x=1", "javascript:alert(1)"} {
 		start := doStart(t, r, service.SocialOAuthProviderGoogle, "?redirect="+url.QueryEscape(raw), fp)
-		frag, _ := doCallback(t, r, service.SocialOAuthProviderGoogle, "?code=good-code&state="+url.QueryEscape(start.authURL.Query().Get("state")), start.cookies)
-		require.Equal(t, "/dashboard", frag.Get("redirect"), raw)
+		frag, w := doCallback(t, r, service.SocialOAuthProviderGoogle, "?code=good-code&state="+url.QueryEscape(start.authURL.Query().Get("state")), start.cookies)
+		res := doExchange(t, r, service.SocialOAuthProviderGoogle, frag.Get("code"), handoffCookies(w))
+		require.Equal(t, "/dashboard", res.data["redirect"], raw)
 	}
 }
 
@@ -517,4 +626,133 @@ func TestCompleteSocialOAuthRegistration(t *testing.T) {
 
 	w = post(`{}`)
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSocialOAuthHandoff_BinderCookieAttributes(t *testing.T) {
+	backend := &fakeSocialBackend{}
+	fp := newFakeProvider(t)
+	r := newSocialRouter(backend, fp)
+	start := doStart(t, r, service.SocialOAuthProviderGoogle, "", fp)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/google/callback?code=good-code&state="+url.QueryEscape(start.authURL.Query().Get("state")), nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	for _, c := range start.cookies {
+		req.AddCookie(&http.Cookie{Name: c.Name, Value: c.Value})
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	cookies := handoffCookies(w)
+	require.Len(t, cookies, 1)
+	c := cookies[0]
+	require.Equal(t, "google_oauth_handoff", c.Name)
+	require.True(t, c.HttpOnly)
+	require.True(t, c.Secure)
+	require.Equal(t, http.SameSiteLaxMode, c.SameSite)
+	require.Equal(t, "/api/v1/auth/oauth/google", c.Path)
+	require.LessOrEqual(t, c.MaxAge, 120)
+
+	// The stored handoff holds only the binder hash, never the binder itself.
+	for _, h := range backend.handoffs {
+		require.Equal(t, sha256Hex(c.Value), h.BinderHash)
+		require.NotEqual(t, c.Value, h.BinderHash)
+	}
+}
+
+func TestSocialOAuthHandoff_RejectsEverythingButTheRightBrowser(t *testing.T) {
+	newFlow := func() (url.Values, []*http.Cookie, *gin.Engine, *fakeSocialBackend) {
+		backend := &fakeSocialBackend{}
+		frag, cookies, r := callbackFlow(t, service.SocialOAuthProviderGoogle, backend, newFakeProvider(t))
+		requireOnlyCode(t, frag)
+		return frag, cookies, r, backend
+	}
+	requireInvalid := func(res exchangeResult, msg string) {
+		t.Helper()
+		require.Equal(t, http.StatusBadRequest, res.status, msg)
+		require.Equal(t, "OAUTH_HANDOFF_INVALID", res.reason, msg)
+		require.Nil(t, res.data, msg)
+	}
+
+	// Code without the binder cookie (e.g. a link sent to a victim) is useless.
+	frag, _, r, _ := newFlow()
+	requireInvalid(doExchange(t, r, service.SocialOAuthProviderGoogle, frag.Get("code"), nil), "no cookie")
+
+	// Wrong binder cookie (attacker's own browser).
+	frag, _, r, _ = newFlow()
+	forged := []*http.Cookie{{Name: "google_oauth_handoff", Value: strings.Repeat("f", 64)}}
+	requireInvalid(doExchange(t, r, service.SocialOAuthProviderGoogle, frag.Get("code"), forged), "wrong cookie")
+
+	// Reused code.
+	frag, cookies, r, _ := newFlow()
+	require.Equal(t, http.StatusOK, doExchange(t, r, service.SocialOAuthProviderGoogle, frag.Get("code"), cookies).status)
+	requireInvalid(doExchange(t, r, service.SocialOAuthProviderGoogle, frag.Get("code"), cookies), "reused")
+
+	// Other provider's exchange endpoint, even with the cookie renamed to match.
+	frag, cookies, r, _ = newFlow()
+	renamed := []*http.Cookie{{Name: "github_oauth_handoff", Value: cookies[0].Value}}
+	requireInvalid(doExchange(t, r, service.SocialOAuthProviderGitHub, frag.Get("code"), renamed), "other provider")
+
+	// Expired.
+	frag, cookies, r, backend := newFlow()
+	backend.expireHandoffs()
+	requireInvalid(doExchange(t, r, service.SocialOAuthProviderGoogle, frag.Get("code"), cookies), "expired")
+
+	// Malformed / forged code values.
+	_, cookies, r, _ = newFlow()
+	for _, code := range []string{"", "abc", strings.Repeat("A", 64), strings.Repeat("0", 64)} {
+		requireInvalid(doExchange(t, r, service.SocialOAuthProviderGoogle, code, cookies), "code "+code)
+	}
+}
+
+func TestSocialOAuthCallback_NoSecretsInURL(t *testing.T) {
+	for _, result := range []*service.SocialOAuthResult{
+		nil, // default: tokens
+		{PendingToken: strings.Repeat("a", 64)},
+		{Requires2FA: true, TempToken: "tmp-123", User: &service.User{ID: 9}},
+	} {
+		backend := &fakeSocialBackend{result: result}
+		frag, cookies, _ := callbackFlow(t, service.SocialOAuthProviderGoogle, backend, newFakeProvider(t))
+		requireOnlyCode(t, frag)
+		require.Len(t, cookies, 1)
+	}
+}
+
+func TestSocialOAuthCallback_GitHubEmailsPaginated(t *testing.T) {
+	backend := &fakeSocialBackend{}
+	fp := newFakeProvider(t)
+	var page1 []map[string]any
+	for i := 0; i < githubEmailsPerPage; i++ {
+		page1 = append(page1, map[string]any{"email": "x" + strconv.Itoa(i) + "@example.com", "primary": false, "verified": true})
+	}
+	b1, _ := json.Marshal(page1)
+	pages := map[string]string{"1": string(b1), "2": `[{"email":"octo@example.com","primary":true,"verified":true}]`}
+	var requested []string
+	fp.githubEmailsFn = func(r *http.Request) string {
+		require.Equal(t, "100", r.URL.Query().Get("per_page"))
+		requested = append(requested, r.URL.Query().Get("page"))
+		return pages[r.URL.Query().Get("page")]
+	}
+	_, out := outcomeFlow(t, service.SocialOAuthProviderGitHub, backend, fp)
+	require.Equal(t, "tokens", out["kind"])
+	require.Equal(t, []string{"1", "2"}, requested)
+	require.Equal(t, "octo@example.com", backend.identities[0].VerifiedEmail)
+
+	// Bounded: full pages without a match stop after githubEmailsMaxPage.
+	backend = &fakeSocialBackend{}
+	fp = newFakeProvider(t)
+	requested = nil
+	fp.githubEmailsFn = func(r *http.Request) string {
+		requested = append(requested, r.URL.Query().Get("page"))
+		return string(b1)
+	}
+	frag := fullFlow(t, service.SocialOAuthProviderGitHub, backend, fp)
+	require.Equal(t, "email_not_verified", frag.Get("error"))
+	require.Len(t, requested, githubEmailsMaxPage)
+}
+
+func TestSocialOAuthCallback_OversizedProviderResponse(t *testing.T) {
+	backend := &fakeSocialBackend{}
+	fp := newFakeProvider(t)
+	fp.googleInfo = `{"sub":"1","email":"a@b.co","email_verified":true,"pad":"` + strings.Repeat("x", socialOAuthMaxBodyBytes) + `"}`
+	frag := fullFlow(t, service.SocialOAuthProviderGoogle, backend, fp)
+	require.Equal(t, "userinfo_failed", frag.Get("error"))
+	require.Empty(t, backend.identities)
 }

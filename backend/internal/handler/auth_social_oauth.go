@@ -2,9 +2,13 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -32,6 +36,13 @@ const (
 	socialOAuthDefaultRedirectTo = "/dashboard"
 	socialOAuthMaxRedirectLen    = 2048
 	socialOAuthHTTPTimeout       = 15 * time.Second
+	// Binder cookie lives a little longer than the server-side handoff (service.SocialOAuthHandoffTTL).
+	socialOAuthHandoffCookieMaxAgeSec = 120
+	// Provider responses (token, userinfo, emails) are capped; legitimate ones are a few KiB.
+	socialOAuthMaxBodyBytes = 1 << 20
+	// GitHub /user/emails pagination bound.
+	githubEmailsPerPage = 100
+	githubEmailsMaxPage = 5
 )
 
 // socialOAuthBackend is the service surface the handler needs (an interface so the HTTP
@@ -40,6 +51,8 @@ type socialOAuthBackend interface {
 	Config(ctx context.Context, provider service.SocialOAuthProvider) (service.SocialOAuthConfig, error)
 	SignIn(ctx context.Context, identity service.SocialOAuthIdentity) (*service.SocialOAuthResult, error)
 	CompleteRegistration(ctx context.Context, provider service.SocialOAuthProvider, token, invitationCode string) (*service.SocialOAuthResult, error)
+	SaveHandoff(ctx context.Context, code string, handoff *service.SocialOAuthHandoff) error
+	ConsumeHandoff(ctx context.Context, code string) (*service.SocialOAuthHandoff, error)
 }
 
 type socialOAuthEndpoints struct {
@@ -199,27 +212,127 @@ func (h *AuthHandler) SocialOAuthCallback(provider service.SocialOAuthProvider) 
 			return
 		}
 
-		fragment := url.Values{}
-		fragment.Set("provider", string(provider))
-		fragment.Set("redirect", redirectTo)
+		// Tokens, the 2FA temp token and the pending-registration handle never travel in the
+		// URL. The outcome is parked server-side under a one-time code that only this browser
+		// can redeem (it also needs the HttpOnly binder cookie set below).
+		handoff := &service.SocialOAuthHandoff{Provider: provider, Redirect: redirectTo}
 		switch {
 		case result.PendingToken != "":
-			fragment.Set("error", "invitation_required")
-			fragment.Set("pending_oauth_token", result.PendingToken)
+			handoff.Kind = service.SocialOAuthHandoffInvitation
+			handoff.PendingToken = result.PendingToken
 		case result.Requires2FA:
-			fragment.Set("requires_2fa", "1")
-			fragment.Set("temp_token", result.TempToken)
+			handoff.Kind = service.SocialOAuthHandoffTwoFactor
+			handoff.TempToken = result.TempToken
 		case result.TokenPair != nil:
-			fragment.Set("access_token", result.TokenPair.AccessToken)
-			fragment.Set("refresh_token", result.TokenPair.RefreshToken)
-			fragment.Set("expires_in", strconv.Itoa(result.TokenPair.ExpiresIn))
-			fragment.Set("token_type", "Bearer")
+			handoff.Kind = service.SocialOAuthHandoffTokens
+			handoff.AccessToken = result.TokenPair.AccessToken
+			handoff.RefreshToken = result.TokenPair.RefreshToken
+			handoff.ExpiresIn = result.TokenPair.ExpiresIn
 		default:
 			redirectOAuthError(c, frontendCallback, "login_failed", "SERVICE_UNAVAILABLE", "")
 			return
 		}
+		handoffCode, err1 := randomHexToken()
+		binder, err2 := randomHexToken()
+		if err1 != nil || err2 != nil {
+			redirectOAuthError(c, frontendCallback, "login_failed", "SERVICE_UNAVAILABLE", "")
+			return
+		}
+		handoff.BinderHash = sha256Hex(binder)
+		if err := h.socialOAuth.SaveHandoff(c.Request.Context(), handoffCode, handoff); err != nil {
+			log.Printf("[SocialOAuth] %s save handoff failed: %v", provider, err)
+			redirectOAuthError(c, frontendCallback, "login_failed", "SERVICE_UNAVAILABLE", "")
+			return
+		}
+		setPathCookie(c, path, socialOAuthCookieName(provider, "handoff"), binder, socialOAuthHandoffCookieMaxAgeSec, secure)
+
+		fragment := url.Values{}
+		fragment.Set("code", handoffCode)
 		redirectWithFragment(c, frontendCallback, fragment)
 	}
+}
+
+type exchangeSocialOAuthRequest struct {
+	Code string `json:"code" binding:"required"`
+}
+
+// errSocialOAuthHandoffInvalid is deliberately generic: unknown, reused, expired, wrong
+// browser and wrong provider all look the same to the caller.
+var errSocialOAuthHandoffInvalid = infraerrors.BadRequest("OAUTH_HANDOFF_INVALID", "sign-in hand-over is invalid or expired, please sign in again")
+
+// ExchangeSocialOAuthHandoff redeems the one-time callback code for the sign-in outcome.
+// Requires the HttpOnly binder cookie set by the callback in this browser.
+// POST /api/v1/auth/oauth/{google,github}/exchange
+func (h *AuthHandler) ExchangeSocialOAuthHandoff(provider service.SocialOAuthProvider) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		cookieName := socialOAuthCookieName(provider, "handoff")
+		binderCookie, cookieErr := c.Request.Cookie(cookieName)
+		// One attempt per binder: clear it before anything is written.
+		clearPathCookie(c, socialOAuthCookiePath(provider), cookieName, isRequestHTTPS(c))
+
+		var req exchangeSocialOAuthRequest
+		if err := c.ShouldBindJSON(&req); err != nil || !isHexToken(req.Code) {
+			response.ErrorFrom(c, errSocialOAuthHandoffInvalid)
+			return
+		}
+		if cookieErr != nil || !isHexToken(binderCookie.Value) || h.socialOAuth == nil {
+			response.ErrorFrom(c, errSocialOAuthHandoffInvalid)
+			return
+		}
+		handoff, err := h.socialOAuth.ConsumeHandoff(c.Request.Context(), req.Code)
+		if err != nil {
+			log.Printf("[SocialOAuth] %s consume handoff failed: %v", provider, err)
+			response.ErrorFrom(c, service.ErrServiceUnavailable)
+			return
+		}
+		if handoff == nil || handoff.Provider != provider ||
+			subtle.ConstantTimeCompare([]byte(sha256Hex(binderCookie.Value)), []byte(handoff.BinderHash)) != 1 {
+			response.ErrorFrom(c, errSocialOAuthHandoffInvalid)
+			return
+		}
+		out := gin.H{"kind": handoff.Kind, "redirect": handoff.Redirect, "provider": string(provider)}
+		switch handoff.Kind {
+		case service.SocialOAuthHandoffTokens:
+			out["access_token"] = handoff.AccessToken
+			out["refresh_token"] = handoff.RefreshToken
+			out["expires_in"] = handoff.ExpiresIn
+			out["token_type"] = "Bearer"
+		case service.SocialOAuthHandoffTwoFactor:
+			out["temp_token"] = handoff.TempToken
+		case service.SocialOAuthHandoffInvitation:
+			out["pending_oauth_token"] = handoff.PendingToken
+		default:
+			response.ErrorFrom(c, errSocialOAuthHandoffInvalid)
+			return
+		}
+		response.Success(c, out)
+	}
+}
+
+func randomHexToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func isHexToken(v string) bool {
+	if len(v) != 64 {
+		return false
+	}
+	for _, r := range v {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func sha256Hex(v string) string {
+	sum := sha256.Sum256([]byte(v))
+	return hex.EncodeToString(sum[:])
 }
 
 type completeSocialOAuthRequest struct {
@@ -306,20 +419,25 @@ func socialOAuthExchangeCode(ctx context.Context, endpoints socialOAuthEndpoints
 	form.Set("code_verifier", verifier)
 	resp, err := req.C().SetTimeout(socialOAuthHTTPTimeout).R().
 		SetContext(ctx).
+		DisableAutoReadResponse().
 		SetHeader("Accept", "application/json").
 		SetFormDataFromValues(form).
 		Post(endpoints.TokenURL)
 	if err != nil {
 		return "", fmt.Errorf("request token: %w", err)
 	}
-	body := strings.TrimSpace(resp.String())
+	body, err := readLimitedBody(resp)
+	if err != nil {
+		return "", fmt.Errorf("read token response: %w", err)
+	}
+	body = strings.TrimSpace(body)
 	if !resp.IsSuccessState() {
 		providerErr, providerDesc := parseOAuthProviderError(body)
-		return "", fmt.Errorf("token status=%d error=%q description=%q", resp.StatusCode, providerErr, truncateLogValue(providerDesc, 256))
+		return "", fmt.Errorf("token status=%d error=%q description=%q", resp.StatusCode, truncateLogValue(providerErr, 128), truncateLogValue(providerDesc, 256))
 	}
 	// GitHub reports errors with HTTP 200; a non-empty error (JSON or form encoded) means failure.
 	if providerErr, _ := parseOAuthProviderError(body); providerErr != "" {
-		return "", fmt.Errorf("token response error=%q", providerErr)
+		return "", fmt.Errorf("token response error=%q", truncateLogValue(providerErr, 128))
 	}
 	token, ok := parseLinuxDoTokenResponse(body)
 	if !ok || strings.TrimSpace(token.AccessToken) == "" {
@@ -337,32 +455,40 @@ func socialOAuthExchangeCode(ctx context.Context, endpoints socialOAuthEndpoints
 // primary+verified address from /user/emails.
 func socialOAuthFetchIdentity(ctx context.Context, provider service.SocialOAuthProvider, endpoints socialOAuthEndpoints, authorization string) (service.SocialOAuthIdentity, error) {
 	client := req.C().SetTimeout(socialOAuthHTTPTimeout)
-	get := func(target, accept string) (string, error) {
+	get := func(target, accept string, query map[string]string) (string, error) {
 		r := client.R().SetContext(ctx).
+			DisableAutoReadResponse().
 			SetHeader("Accept", accept).
 			SetHeader("Authorization", authorization)
 		if provider == service.SocialOAuthProviderGitHub {
 			r.SetHeader("X-GitHub-Api-Version", "2022-11-28")
 		}
+		for k, v := range query {
+			r.SetQueryParam(k, v)
+		}
 		resp, err := r.Get(target)
 		if err != nil {
 			return "", fmt.Errorf("request %s: %w", target, err)
 		}
+		body, err := readLimitedBody(resp)
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", target, err)
+		}
 		if !resp.IsSuccessState() {
 			return "", fmt.Errorf("%s status=%d", target, resp.StatusCode)
 		}
-		return resp.String(), nil
+		return body, nil
 	}
 
 	switch provider {
 	case service.SocialOAuthProviderGoogle:
-		body, err := get(endpoints.UserInfoURL, "application/json")
+		body, err := get(endpoints.UserInfoURL, "application/json", nil)
 		if err != nil {
 			return service.SocialOAuthIdentity{}, err
 		}
 		return parseGoogleUserInfo(body)
 	case service.SocialOAuthProviderGitHub:
-		userBody, err := get(endpoints.UserInfoURL, "application/vnd.github+json")
+		userBody, err := get(endpoints.UserInfoURL, "application/vnd.github+json", nil)
 		if err != nil {
 			return service.SocialOAuthIdentity{}, err
 		}
@@ -370,13 +496,27 @@ func socialOAuthFetchIdentity(ctx context.Context, provider service.SocialOAuthP
 		if err != nil {
 			return service.SocialOAuthIdentity{}, err
 		}
-		emailsBody, err := get(endpoints.EmailsURL, "application/vnd.github+json")
-		if err != nil {
-			return service.SocialOAuthIdentity{}, err
+		// /user/emails is paginated; walk a bounded number of pages.
+		email := ""
+		for page := 1; page <= githubEmailsMaxPage && email == ""; page++ {
+			emailsBody, err := get(endpoints.EmailsURL, "application/vnd.github+json", map[string]string{
+				"per_page": strconv.Itoa(githubEmailsPerPage),
+				"page":     strconv.Itoa(page),
+			})
+			if err != nil {
+				return service.SocialOAuthIdentity{}, err
+			}
+			found, count, err := parseGitHubPrimaryVerifiedEmail(emailsBody)
+			if err != nil {
+				return service.SocialOAuthIdentity{}, err
+			}
+			email = found
+			if count < githubEmailsPerPage {
+				break
+			}
 		}
-		email, err := parseGitHubPrimaryVerifiedEmail(emailsBody)
-		if err != nil {
-			return service.SocialOAuthIdentity{}, err
+		if email == "" {
+			return service.SocialOAuthIdentity{}, service.ErrSocialOAuthEmailNotVerified
 		}
 		return service.SocialOAuthIdentity{Provider: provider, Subject: subject, VerifiedEmail: email, Username: login}, nil
 	default:
@@ -421,18 +561,37 @@ func parseGitHubUser(body string) (subject string, login string, err error) {
 	return strconv.FormatInt(n, 10), strings.TrimSpace(gjson.Get(body, "login").String()), nil
 }
 
-func parseGitHubPrimaryVerifiedEmail(body string) (string, error) {
+// parseGitHubPrimaryVerifiedEmail returns the primary+verified address on one page ("" if
+// none) and the number of entries on the page.
+func parseGitHubPrimaryVerifiedEmail(body string) (string, int, error) {
 	if !gjson.Valid(body) || !gjson.Parse(body).IsArray() {
-		return "", errors.New("invalid github emails json")
+		return "", 0, errors.New("invalid github emails json")
 	}
-	for _, item := range gjson.Parse(body).Array() {
+	items := gjson.Parse(body).Array()
+	for _, item := range items {
 		if item.Get("primary").Type == gjson.True && item.Get("verified").Type == gjson.True {
 			if email := strings.TrimSpace(item.Get("email").String()); email != "" {
-				return email, nil
+				return email, len(items), nil
 			}
 		}
 	}
-	return "", service.ErrSocialOAuthEmailNotVerified
+	return "", len(items), nil
+}
+
+// readLimitedBody reads at most socialOAuthMaxBodyBytes of a provider response.
+func readLimitedBody(resp *req.Response) (string, error) {
+	if resp == nil || resp.Response == nil || resp.Body == nil {
+		return "", errors.New("empty response")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, socialOAuthMaxBodyBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(data) > socialOAuthMaxBodyBytes {
+		return "", errors.New("provider response too large")
+	}
+	return string(data), nil
 }
 
 // sanitizeSocialRedirectPath accepts only same-origin, path-absolute targets.

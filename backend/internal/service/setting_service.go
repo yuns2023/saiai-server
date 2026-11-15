@@ -596,10 +596,16 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	if strings.TrimSpace(settings.GoogleOAuthClientSecret) != "" {
 		updates[SettingKeyGoogleOAuthClientSecret] = strings.TrimSpace(settings.GoogleOAuthClientSecret)
 	}
+	if settings.GoogleOAuthEnabled {
+		updates[SettingKeyGoogleOAuthEverEnabled] = "true"
+	}
 	updates[SettingKeyGitHubOAuthEnabled] = strconv.FormatBool(settings.GitHubOAuthEnabled)
 	updates[SettingKeyGitHubOAuthClientID] = strings.TrimSpace(settings.GitHubOAuthClientID)
 	if strings.TrimSpace(settings.GitHubOAuthClientSecret) != "" {
 		updates[SettingKeyGitHubOAuthClientSecret] = strings.TrimSpace(settings.GitHubOAuthClientSecret)
+	}
+	if settings.GitHubOAuthEnabled {
+		updates[SettingKeyGitHubOAuthEverEnabled] = "true"
 	}
 
 	// OEM设置
@@ -1087,6 +1093,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.GitHubOAuthClientID = strings.TrimSpace(settings[SettingKeyGitHubOAuthClientID])
 	result.GitHubOAuthClientSecret = strings.TrimSpace(settings[SettingKeyGitHubOAuthClientSecret])
 	result.GitHubOAuthClientSecretConfigured = result.GitHubOAuthClientSecret != ""
+	result.GoogleOAuthEverEnabled = settings[SettingKeyGoogleOAuthEverEnabled] == "true"
+	result.GitHubOAuthEverEnabled = settings[SettingKeyGitHubOAuthEverEnabled] == "true"
 
 	// Model fallback settings
 	result.EnableModelFallback = settings[SettingKeyEnableModelFallback] == "true"

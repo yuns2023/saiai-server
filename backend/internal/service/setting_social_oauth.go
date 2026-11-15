@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -80,7 +81,7 @@ var (
 )
 
 // SocialOAuthRedirectURL derives the provider callback URL from the site's frontend URL.
-// Returns "" when the frontend URL is missing or not an absolute http(s) URL without query/userinfo.
+// Returns "" unless the frontend URL is a bare http(s) origin (no path, query, fragment or userinfo).
 func SocialOAuthRedirectURL(frontendURL string, provider SocialOAuthProvider) string {
 	base := strings.TrimSpace(frontendURL)
 	if base == "" || config.ValidateAbsoluteHTTPURL(base) != nil {
@@ -88,6 +89,10 @@ func SocialOAuthRedirectURL(frontendURL string, provider SocialOAuthProvider) st
 	}
 	u, err := url.Parse(base)
 	if err != nil || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return ""
+	}
+	// The API is served at the site root, so only a bare origin can derive the callback URL.
+	if u.Path != "" && u.Path != "/" {
 		return ""
 	}
 	return strings.TrimRight(base, "/") + provider.CallbackPath()
@@ -132,6 +137,12 @@ type SocialSignupPolicy struct {
 	RegistrationEnabled bool
 	InvitationRequired  bool
 	EmailSuffixes       []string
+	// New-user defaults, parsed with the same rules as GetDefaultBalance / GetDefaultConcurrency /
+	// GetDefaultSubscriptions but read strictly (a read error refuses the sign-up instead of
+	// silently granting config-file defaults).
+	DefaultBalance       float64
+	DefaultConcurrency   int
+	DefaultSubscriptions []DefaultSubscriptionSetting
 }
 
 // GetSocialSignupPolicy reads the registration policy in one query. Unlike IsRegistrationEnabled /
@@ -145,15 +156,30 @@ func (s *SettingService) GetSocialSignupPolicy(ctx context.Context) (SocialSignu
 		SettingKeyRegistrationEnabled,
 		SettingKeyInvitationCodeEnabled,
 		SettingKeyRegistrationEmailSuffixWhitelist,
+		SettingKeyDefaultBalance,
+		SettingKeyDefaultConcurrency,
+		SettingKeyDefaultSubscriptions,
 	})
 	if err != nil {
 		return SocialSignupPolicy{}, fmt.Errorf("get signup policy: %w", err)
 	}
-	return SocialSignupPolicy{
-		RegistrationEnabled: values[SettingKeyRegistrationEnabled] == "true",
-		InvitationRequired:  values[SettingKeyInvitationCodeEnabled] == "true",
-		EmailSuffixes:       ParseRegistrationEmailSuffixWhitelist(values[SettingKeyRegistrationEmailSuffixWhitelist]),
-	}, nil
+	policy := SocialSignupPolicy{
+		RegistrationEnabled:  values[SettingKeyRegistrationEnabled] == "true",
+		InvitationRequired:   values[SettingKeyInvitationCodeEnabled] == "true",
+		EmailSuffixes:        ParseRegistrationEmailSuffixWhitelist(values[SettingKeyRegistrationEmailSuffixWhitelist]),
+		DefaultSubscriptions: parseDefaultSubscriptions(values[SettingKeyDefaultSubscriptions]),
+	}
+	if s.cfg != nil {
+		policy.DefaultBalance = s.cfg.Default.UserBalance
+		policy.DefaultConcurrency = s.cfg.Default.UserConcurrency
+	}
+	if v, err := strconv.ParseFloat(values[SettingKeyDefaultBalance], 64); err == nil && v >= 0 {
+		policy.DefaultBalance = v
+	}
+	if v, err := strconv.Atoi(values[SettingKeyDefaultConcurrency]); err == nil && v > 0 {
+		policy.DefaultConcurrency = v
+	}
+	return policy, nil
 }
 
 // IsTotpEnabledStrict is IsTotpEnabled that reports read failures instead of treating them as "off".
@@ -177,4 +203,9 @@ func (s *SettingService) EffectiveFrontendURL(stored string) string {
 		return strings.TrimSpace(s.cfg.Server.FrontendURL)
 	}
 	return ""
+}
+
+// ReservedEmailUserCounter counts users whose email is in a reserved synthetic domain.
+type ReservedEmailUserCounter interface {
+	CountUsersWithEmailDomain(ctx context.Context, domain string) (int, error)
 }

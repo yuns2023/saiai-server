@@ -40,6 +40,8 @@ type SystemSettings struct {
 	GitHubOAuthClientID               string
 	GitHubOAuthClientSecret           string
 	GitHubOAuthClientSecretConfigured bool
+	GoogleOAuthEverEnabled            bool
+	GitHubOAuthEverEnabled            bool
 
 	SiteName                    string
 	SiteLogo                    string

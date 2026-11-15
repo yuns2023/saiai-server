@@ -30,29 +30,49 @@ export type OAuthCallbackResult =
   | { kind: 'invitation'; pendingToken: string; redirect: string | null }
   | { kind: 'error'; code: string; reason: string }
 
-/** Parses the fragment handed over by the backend callback ("#a=1&b=2" or "a=1&b=2"). */
-export function parseOAuthFragment(hash: string, origin = window.location.origin): OAuthCallbackResult {
-  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
-  const redirect = safeRedirectTarget(params.get('redirect'), origin)
-  const error = params.get('error') ?? ''
+/** What the URL fragment may carry: a one-time handoff code, or an error description. */
+export type OAuthFragment = { kind: 'code'; code: string } | { kind: 'error'; code: string; reason: string }
 
-  if (error === 'invitation_required') {
-    const pendingToken = params.get('pending_oauth_token') ?? ''
-    if (/^[0-9a-f]{64}$/.test(pendingToken)) return { kind: 'invitation', pendingToken, redirect }
-    return { kind: 'error', code: 'missing', reason: '' }
+const HANDOFF_CODE = /^[0-9a-f]{64}$/
+
+/**
+ * Parses the fragment set by the backend callback. Only `code=<handoff>` or `error=…` are
+ * accepted; anything else (in particular tokens or handles put there by a third party) is
+ * treated as an error and never used to sign in.
+ */
+export function parseOAuthFragment(hash: string): OAuthFragment {
+  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
+  const error = params.get('error') ?? ''
+  if (error) return { kind: 'error', code: error, reason: params.get('error_message') ?? '' }
+  const keys = [...new Set(params.keys())]
+  const code = params.get('code') ?? ''
+  if (keys.length === 1 && keys[0] === 'code' && params.getAll('code').length === 1 && HANDOFF_CODE.test(code)) {
+    return { kind: 'code', code }
   }
-  if (error) {
-    return { kind: 'error', code: error, reason: params.get('error_message') ?? '' }
+  return { kind: 'error', code: 'missing', reason: '' }
+}
+
+/** Shape of POST /auth/oauth/{provider}/exchange. */
+export interface OAuthExchangeResponse {
+  kind: 'tokens' | 'two_factor' | 'invitation'
+  redirect?: string
+  access_token?: string
+  refresh_token?: string
+  expires_in?: number
+  temp_token?: string
+  pending_oauth_token?: string
+}
+
+/** Turns the server-verified exchange response into a callback outcome. */
+export function outcomeFromExchange(data: OAuthExchangeResponse, origin = window.location.origin): OAuthCallbackResult {
+  const redirect = safeRedirectTarget(data.redirect, origin)
+  if (data.kind === 'tokens' && data.access_token && data.refresh_token) {
+    const expiresIn = typeof data.expires_in === 'number' && data.expires_in > 0 ? data.expires_in : 0
+    return { kind: 'tokens', accessToken: data.access_token, refreshToken: data.refresh_token, expiresIn, redirect }
   }
-  if (params.get('requires_2fa') === '1') {
-    const tempToken = params.get('temp_token') ?? ''
-    return tempToken ? { kind: 'twoFactor', tempToken, redirect } : { kind: 'error', code: 'missing', reason: '' }
-  }
-  const accessToken = params.get('access_token') ?? ''
-  const refreshToken = params.get('refresh_token') ?? ''
-  const expiresIn = Number.parseInt(params.get('expires_in') ?? '', 10)
-  if (accessToken && refreshToken) {
-    return { kind: 'tokens', accessToken, refreshToken, expiresIn: Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 0, redirect }
+  if (data.kind === 'two_factor' && data.temp_token) return { kind: 'twoFactor', tempToken: data.temp_token, redirect }
+  if (data.kind === 'invitation' && data.pending_oauth_token && HANDOFF_CODE.test(data.pending_oauth_token)) {
+    return { kind: 'invitation', pendingToken: data.pending_oauth_token, redirect }
   }
   return { kind: 'error', code: 'missing', reason: '' }
 }

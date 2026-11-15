@@ -6,7 +6,8 @@ import AuthFrame from '@/components/AuthFrame.vue'
 import { useAuthStore } from '@/stores/auth'
 import { errorMessage } from '@/api/client'
 import { postLoginTarget } from '@/lib/redirect'
-import { isSocialProvider, parseOAuthFragment, takeOAuthFragment, type OAuthCallbackResult } from '@/lib/oauth'
+import { isSocialProvider, outcomeFromExchange, parseOAuthFragment, takeOAuthFragment, type OAuthCallbackResult } from '@/lib/oauth'
+import { authApi } from '@/api'
 
 const { t, te } = useI18n()
 const auth = useAuthStore()
@@ -55,11 +56,28 @@ async function go(): Promise<void> {
 }
 
 onMounted(async () => {
-  // Read the hand-over once and drop it from the address bar and history right away.
-  const result = parseOAuthFragment(takeOAuthFragment())
+  // main.ts already took the fragment off the address bar; only a one-time code is honoured.
+  const fragment = parseOAuthFragment(takeOAuthFragment())
   if (!provider.value) {
     stage.value = 'error'
     errorText.value = t('auth.oauthErrors.generic', { provider: providerName.value })
+    return
+  }
+  if (fragment.kind === 'error') {
+    stage.value = 'error'
+    errorText.value = describeError(fragment)
+    return
+  }
+  let result: OAuthCallbackResult
+  try {
+    result = outcomeFromExchange(await authApi.exchangeOAuthHandoff(provider.value, fragment.code))
+  } catch (e) {
+    const reason = (e as { reason?: string } | undefined)?.reason
+    stage.value = 'error'
+    errorText.value =
+      reason && te(`auth.oauthErrors.${reason}`)
+        ? t(`auth.oauthErrors.${reason}`, { provider: providerName.value })
+        : errorMessage(e, t('auth.oauthErrors.generic', { provider: providerName.value }))
     return
   }
   switch (result.kind) {

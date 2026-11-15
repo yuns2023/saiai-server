@@ -43,6 +43,25 @@ func (r *socialSettingRepo) GetValue(_ context.Context, key string) (string, err
 	return "", ErrSettingNotFound
 }
 
+func (r *socialSettingRepo) GetAll(_ context.Context) (map[string]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := map[string]string{}
+	for k, v := range r.values {
+		out[k] = v
+	}
+	return out, nil
+}
+
+func (r *socialSettingRepo) SetMultiple(_ context.Context, values map[string]string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for k, v := range values {
+		r.values[k] = v
+	}
+	return nil
+}
+
 func (r *socialSettingRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -190,7 +209,46 @@ type memPendingStore struct {
 	mu        sync.Mutex
 	now       time.Time
 	entries   map[string]memPendingEntry
+	failures  map[string]int
 	onConsume func()
+}
+
+func (m *memPendingStore) RecordFailure(_ context.Context, token string, maxFailures int, _ time.Duration) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failures == nil {
+		m.failures = map[string]int{}
+	}
+	m.failures[token]++
+	if m.failures[token] >= maxFailures {
+		delete(m.entries, token)
+		delete(m.failures, token)
+		return true, nil
+	}
+	return false, nil
+}
+
+type memHandoffStore struct {
+	mu      sync.Mutex
+	entries map[string]SocialOAuthHandoff
+}
+
+func (m *memHandoffStore) Save(_ context.Context, code string, h *SocialOAuthHandoff, _ time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries[code] = *h
+	return nil
+}
+
+func (m *memHandoffStore) Consume(_ context.Context, code string) (*SocialOAuthHandoff, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	h, ok := m.entries[code]
+	if !ok {
+		return nil, nil
+	}
+	delete(m.entries, code)
+	return &h, nil
 }
 
 type memPendingEntry struct {
@@ -245,6 +303,7 @@ type socialFixture struct {
 	redeem   *socialRedeemRepo
 	pending  *memPendingStore
 	totp     *socialTotpCache
+	subs     *defaultSubscriptionAssignerStub
 }
 
 func newSocialFixture(t *testing.T, values map[string]string) *socialFixture {
@@ -272,13 +331,14 @@ func newSocialFixture(t *testing.T, values map[string]string) *socialFixture {
 	redeem := &socialRedeemRepo{codes: map[string]*RedeemCode{
 		"INVITE-OK": {ID: 7, Code: "INVITE-OK", Type: RedeemTypeInvitation, Status: StatusUnused},
 	}, used: map[int64]int64{}}
-	auth := NewAuthService(nil, users, redeem, socialRefreshCache{}, cfg, settingSvc, nil, nil, nil, nil, nil)
+	subs := &defaultSubscriptionAssignerStub{}
+	auth := NewAuthService(nil, users, redeem, socialRefreshCache{}, cfg, settingSvc, nil, nil, nil, nil, subs)
 	totpCache := &socialTotpCache{sessions: map[string]*TotpLoginSession{}}
 	totp := NewTotpService(users, nil, totpCache, settingSvc, nil, nil)
 	pending := newMemPendingStore()
-	svc := NewSocialOAuthService(auth, settingSvc, totp, pending)
+	svc := NewSocialOAuthService(auth, settingSvc, totp, pending, &memHandoffStore{entries: map[string]SocialOAuthHandoff{}})
 	svc.runInTx = users.runInTx
-	return &socialFixture{svc: svc, settings: settingRepo, users: users, redeem: redeem, pending: pending, totp: totpCache}
+	return &socialFixture{svc: svc, settings: settingRepo, users: users, redeem: redeem, pending: pending, totp: totpCache, subs: subs}
 }
 
 func googleIdentity() SocialOAuthIdentity {
@@ -711,4 +771,83 @@ func TestReservedOAuthDomains_SelfServiceCannotLeaveSyntheticEmail(t *testing.T)
 	name := "new name"
 	_, err = us.UpdateProfile(ctx, u.ID, UpdateProfileRequest{Email: &same, Username: &name})
 	require.NoError(t, err)
+}
+
+func TestSocialOAuth_Invitation_WrongCodeBudget(t *testing.T) {
+	f := newSocialFixture(t, map[string]string{SettingKeyInvitationCodeEnabled: "true"})
+	ctx := context.Background()
+	res, err := f.svc.SignIn(ctx, googleIdentity())
+	require.NoError(t, err)
+	for i := 1; i < socialOAuthMaxInvitationFailures; i++ {
+		_, err = f.svc.CompleteRegistration(ctx, SocialOAuthProviderGoogle, res.PendingToken, "WRONG")
+		require.ErrorIs(t, err, ErrInvitationCodeInvalid, "attempt %d", i)
+	}
+	_, err = f.svc.CompleteRegistration(ctx, SocialOAuthProviderGoogle, res.PendingToken, "WRONG")
+	require.ErrorIs(t, err, ErrSocialOAuthPendingInvalid, "budget spent: session invalidated")
+	_, err = f.svc.CompleteRegistration(ctx, SocialOAuthProviderGoogle, res.PendingToken, "INVITE-OK")
+	require.ErrorIs(t, err, ErrSocialOAuthPendingInvalid)
+	require.Empty(t, f.users.users)
+	require.Empty(t, f.redeem.used)
+}
+
+func TestSocialOAuth_NewUserDefaultsReadStrictly(t *testing.T) {
+	f := newSocialFixture(t, map[string]string{
+		SettingKeyDefaultBalance:       "7.5",
+		SettingKeyDefaultConcurrency:   "4",
+		SettingKeyDefaultSubscriptions: `[{"group_id":3,"validity_days":30}]`,
+	})
+	res, err := f.svc.SignIn(context.Background(), githubIdentity())
+	require.NoError(t, err)
+	require.Equal(t, 7.5, res.User.Balance)
+	require.Equal(t, 4, res.User.Concurrency)
+	require.Len(t, f.subs.calls, 1)
+	require.Equal(t, int64(3), f.subs.calls[0].GroupID)
+
+	// A failure reading those keys refuses the sign-up rather than granting config defaults.
+	f2 := newSocialFixture(t, nil)
+	f2.svc.settings = NewSettingService(&keyFailRepo{socialSettingRepo: f2.settings, key: SettingKeyDefaultBalance}, f2.svc.auth.cfg)
+	_, err = f2.svc.SignIn(context.Background(), githubIdentity())
+	require.ErrorIs(t, err, ErrServiceUnavailable)
+	require.Empty(t, f2.users.users)
+}
+
+// keyFailRepo fails any multi-read that includes key.
+type keyFailRepo struct {
+	*socialSettingRepo
+	key string
+}
+
+func (r *keyFailRepo) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	for _, k := range keys {
+		if k == r.key {
+			return nil, errors.New("read failed")
+		}
+	}
+	return r.socialSettingRepo.GetMultiple(ctx, keys)
+}
+
+func TestSocialOAuthRedirectURL_OriginOnly(t *testing.T) {
+	require.Equal(t, "https://a.example/api/v1/auth/oauth/github/callback", SocialOAuthRedirectURL("https://a.example", SocialOAuthProviderGitHub))
+	require.Equal(t, "https://a.example/api/v1/auth/oauth/github/callback", SocialOAuthRedirectURL("https://a.example/", SocialOAuthProviderGitHub))
+	require.Equal(t, "http://a.example:8080/api/v1/auth/oauth/google/callback", SocialOAuthRedirectURL("http://a.example:8080", SocialOAuthProviderGoogle))
+	for _, bad := range []string{"", "a.example", "ftp://a.example", "https://a.example/app", "https://a.example/app/", "https://a.example?x=1", "https://a.example#f", "https://u:p@a.example"} {
+		require.Empty(t, SocialOAuthRedirectURL(bad, SocialOAuthProviderGoogle), bad)
+	}
+}
+
+func TestUpdateSettings_RecordsSocialOAuthEverEnabled(t *testing.T) {
+	f := newSocialFixture(t, nil)
+	settings := &SystemSettings{GoogleOAuthEnabled: true, GoogleOAuthClientID: "gid", FrontendURL: "https://aog.example.com"}
+	require.NoError(t, f.svc.settings.UpdateSettings(context.Background(), settings))
+	require.Equal(t, "true", f.settings.values[SettingKeyGoogleOAuthEverEnabled])
+	_, wrote := f.settings.values[SettingKeyGitHubOAuthEverEnabled]
+	require.False(t, wrote, "only set when the provider is enabled")
+
+	// Disabling never clears the marker.
+	settings.GoogleOAuthEnabled = false
+	require.NoError(t, f.svc.settings.UpdateSettings(context.Background(), settings))
+	require.Equal(t, "true", f.settings.values[SettingKeyGoogleOAuthEverEnabled])
+	all, err := f.svc.settings.GetAllSettings(context.Background())
+	require.NoError(t, err)
+	require.True(t, all.GoogleOAuthEverEnabled)
 }

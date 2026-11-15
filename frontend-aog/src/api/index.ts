@@ -1,5 +1,6 @@
 /** Thin typed wrappers around the /api/v1 endpoints this app uses. */
 import { api } from './client'
+import type { OAuthExchangeResponse } from '@/lib/oauth'
 import type {
   ApiKey,
   AuthResponse,
@@ -65,6 +66,11 @@ export const authApi = {
   },
   async resetPassword(email: string, token: string, newPassword: string): Promise<{ message: string }> {
     const { data } = await api.post('/auth/reset-password', { email, token, new_password: newPassword })
+    return data
+  },
+  /** Redeems the one-time callback code; the HttpOnly binder cookie proves this browser started the flow. */
+  async exchangeOAuthHandoff(provider: 'google' | 'github', code: string): Promise<OAuthExchangeResponse> {
+    const { data } = await api.post<OAuthExchangeResponse>(`/auth/oauth/${provider}/exchange`, { code })
     return data
   },
   /** Finishes an invitation-required first Google / GitHub sign-in (the pending token is single use). */

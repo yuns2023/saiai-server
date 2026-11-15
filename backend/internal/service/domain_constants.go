@@ -142,6 +142,10 @@ const (
 	SettingKeyGitHubOAuthEnabled      = "github_oauth_enabled"
 	SettingKeyGitHubOAuthClientID     = "github_oauth_client_id"
 	SettingKeyGitHubOAuthClientSecret = "github_oauth_client_secret"
+	// Set to "true" the first time a provider is enabled; never cleared. Lets the admin
+	// collision check distinguish our own synthetic accounts from pre-existing ones.
+	SettingKeyGoogleOAuthEverEnabled = "google_oauth_ever_enabled"
+	SettingKeyGitHubOAuthEverEnabled = "github_oauth_ever_enabled"
 
 	// OEM设置
 	SettingKeySoraClientEnabled           = "sora_client_enabled"           // 是否启用 Sora 客户端（管理员手动控制）

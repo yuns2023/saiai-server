@@ -55,7 +55,13 @@ type SocialOAuthPendingStore interface {
 	Save(ctx context.Context, token string, pending *SocialOAuthPendingSignup, ttl time.Duration) error
 	Peek(ctx context.Context, token string) (*SocialOAuthPendingSignup, error)
 	Consume(ctx context.Context, token string) (*SocialOAuthPendingSignup, error)
+	// RecordFailure counts a failed completion attempt; once maxFailures is reached the
+	// pending entry is deleted atomically and exhausted=true is returned.
+	RecordFailure(ctx context.Context, token string, maxFailures int, ttl time.Duration) (exhausted bool, err error)
 }
+
+// socialOAuthMaxInvitationFailures is the wrong-invitation-code budget per pending sign-up.
+const socialOAuthMaxInvitationFailures = 5
 
 // SocialOAuthResult is the outcome of a sign-in. Exactly one of TokenPair, Requires2FA or
 // PendingToken is set.
@@ -75,13 +81,14 @@ type SocialOAuthService struct {
 	settings *SettingService
 	totp     *TotpService
 	pending  SocialOAuthPendingStore
+	handoff  SocialOAuthHandoffStore
 	// runInTx runs fn inside a database transaction; replaced in tests.
 	runInTx func(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 // NewSocialOAuthService creates the Google / GitHub sign-in service.
-func NewSocialOAuthService(auth *AuthService, settings *SettingService, totp *TotpService, pending SocialOAuthPendingStore) *SocialOAuthService {
-	s := &SocialOAuthService{auth: auth, settings: settings, totp: totp, pending: pending}
+func NewSocialOAuthService(auth *AuthService, settings *SettingService, totp *TotpService, pending SocialOAuthPendingStore, handoff SocialOAuthHandoffStore) *SocialOAuthService {
+	s := &SocialOAuthService{auth: auth, settings: settings, totp: totp, pending: pending, handoff: handoff}
 	s.runInTx = s.entTx
 	return s
 }
@@ -193,7 +200,7 @@ func (s *SocialOAuthService) SignIn(ctx context.Context, identity SocialOAuthIde
 		return &SocialOAuthResult{PendingToken: token}, nil
 	}
 
-	user, err = s.createUser(ctx, identity, nil)
+	user, err = s.createUser(ctx, identity, policy, nil)
 	if errors.Is(err, ErrEmailExists) {
 		// Concurrent first sign-in for the same subject: treat as an existing account.
 		existing, getErr := s.auth.userRepo.GetByEmail(ctx, email)
@@ -246,6 +253,17 @@ func (s *SocialOAuthService) CompleteRegistration(ctx context.Context, provider 
 	var invitation *RedeemCode
 	if policy.InvitationRequired {
 		invitation, err = s.lookupInvitation(ctx, invitationCode)
+		if errors.Is(err, ErrInvitationCodeInvalid) {
+			exhausted, ferr := s.pending.RecordFailure(ctx, token, socialOAuthMaxInvitationFailures, SocialOAuthPendingTTL)
+			if ferr != nil {
+				logger.LegacyPrintf("service.social_oauth", "[SocialOAuth] record pending failure failed: %v", ferr)
+				return nil, ErrServiceUnavailable
+			}
+			if exhausted {
+				return nil, ErrSocialOAuthPendingInvalid
+			}
+			return nil, err
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -281,7 +299,7 @@ func (s *SocialOAuthService) CompleteRegistration(ctx context.Context, provider 
 		return nil, ErrServiceUnavailable
 	}
 
-	user, err := s.createUser(ctx, identity, invitation)
+	user, err := s.createUser(ctx, identity, recheck, invitation)
 	if errors.Is(err, ErrEmailExists) {
 		return nil, ErrSocialOAuthAccountExists
 	}
@@ -388,7 +406,7 @@ func (s *SocialOAuthService) savePending(ctx context.Context, identity SocialOAu
 
 // createUser creates the synthetic-email account. With an invitation, account creation and
 // invitation consumption share one transaction: if the code cannot be claimed, no user remains.
-func (s *SocialOAuthService) createUser(ctx context.Context, identity SocialOAuthIdentity, invitation *RedeemCode) (*User, error) {
+func (s *SocialOAuthService) createUser(ctx context.Context, identity SocialOAuthIdentity, policy SocialSignupPolicy, invitation *RedeemCode) (*User, error) {
 	randomPassword, err := randomHexString(32)
 	if err != nil {
 		return nil, ErrServiceUnavailable
@@ -397,12 +415,8 @@ func (s *SocialOAuthService) createUser(ctx context.Context, identity SocialOAut
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
-	defaultBalance := s.auth.cfg.Default.UserBalance
-	defaultConcurrency := s.auth.cfg.Default.UserConcurrency
-	if s.settings != nil {
-		defaultBalance = s.settings.GetDefaultBalance(ctx)
-		defaultConcurrency = s.settings.GetDefaultConcurrency(ctx)
-	}
+	defaultBalance := policy.DefaultBalance
+	defaultConcurrency := policy.DefaultConcurrency
 	user := &User{
 		Email:        SocialOAuthSyntheticEmail(identity.Provider, identity.Subject),
 		Username:     identity.Username,
@@ -451,8 +465,26 @@ func (s *SocialOAuthService) createUser(ctx context.Context, identity SocialOAut
 			return nil, err
 		}
 	}
-	s.auth.assignDefaultSubscriptions(ctx, user.ID)
+	// Same post-commit, log-only pattern as the other registration paths, but with the
+	// subscription list from the strictly read policy.
+	s.assignDefaultSubscriptions(ctx, user.ID, policy.DefaultSubscriptions)
 	return user, nil
+}
+
+func (s *SocialOAuthService) assignDefaultSubscriptions(ctx context.Context, userID int64, items []DefaultSubscriptionSetting) {
+	if s.auth == nil || s.auth.defaultSubAssigner == nil || userID <= 0 {
+		return
+	}
+	for _, item := range items {
+		if _, _, err := s.auth.defaultSubAssigner.AssignOrExtendSubscription(ctx, &AssignSubscriptionInput{
+			UserID:       userID,
+			GroupID:      item.GroupID,
+			ValidityDays: item.ValidityDays,
+			Notes:        "auto assigned by default user subscriptions setting",
+		}); err != nil {
+			logger.LegacyPrintf("service.social_oauth", "[SocialOAuth] assign default subscription failed: user_id=%d group_id=%d err=%v", userID, item.GroupID, err)
+		}
+	}
 }
 
 func (s *SocialOAuthService) entTx(ctx context.Context, fn func(ctx context.Context) error) error {
@@ -482,4 +514,52 @@ func isWellFormedPendingToken(token string) bool {
 	}
 	_, err := hex.DecodeString(token)
 	return err == nil && strings.ToLower(token) == token
+}
+
+// SocialOAuthHandoffTTL bounds how long the frontend has to redeem a callback handoff code.
+const SocialOAuthHandoffTTL = 90 * time.Second
+
+// Handoff outcome kinds.
+const (
+	SocialOAuthHandoffTokens     = "tokens"
+	SocialOAuthHandoffTwoFactor  = "two_factor"
+	SocialOAuthHandoffInvitation = "invitation"
+)
+
+// SocialOAuthHandoff is the callback outcome kept server-side until the browser that started
+// the flow redeems it. Only the frontend gets a random code in the URL fragment; redeeming it
+// also needs the HttpOnly binder cookie whose SHA-256 is BinderHash.
+type SocialOAuthHandoff struct {
+	Provider     SocialOAuthProvider `json:"provider"`
+	BinderHash   string              `json:"binder_hash"`
+	Kind         string              `json:"kind"`
+	Redirect     string              `json:"redirect"`
+	AccessToken  string              `json:"access_token,omitempty"`
+	RefreshToken string              `json:"refresh_token,omitempty"`
+	ExpiresIn    int                 `json:"expires_in,omitempty"`
+	TempToken    string              `json:"temp_token,omitempty"`
+	PendingToken string              `json:"pending_token,omitempty"`
+}
+
+// SocialOAuthHandoffStore keeps callback handoffs (Redis in production). Consume must be an
+// atomic get-and-delete and return (nil, nil) for unknown or expired codes.
+type SocialOAuthHandoffStore interface {
+	Save(ctx context.Context, code string, handoff *SocialOAuthHandoff, ttl time.Duration) error
+	Consume(ctx context.Context, code string) (*SocialOAuthHandoff, error)
+}
+
+// SaveHandoff stores a callback outcome under a one-time code.
+func (s *SocialOAuthService) SaveHandoff(ctx context.Context, code string, handoff *SocialOAuthHandoff) error {
+	if s == nil || s.handoff == nil {
+		return ErrServiceUnavailable
+	}
+	return s.handoff.Save(ctx, code, handoff, SocialOAuthHandoffTTL)
+}
+
+// ConsumeHandoff atomically takes a callback outcome; (nil, nil) when unknown or expired.
+func (s *SocialOAuthService) ConsumeHandoff(ctx context.Context, code string) (*SocialOAuthHandoff, error) {
+	if s == nil || s.handoff == nil {
+		return nil, ErrServiceUnavailable
+	}
+	return s.handoff.Consume(ctx, code)
 }

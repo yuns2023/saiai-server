@@ -81,6 +81,12 @@ func RegisterAuthRoutes(
 				}),
 				h.Auth.CompleteSocialOAuthRegistration(provider),
 			)
+			auth.POST(base+"/exchange",
+				rateLimiter.LimitWithOptions("oauth-"+string(provider)+"-exchange", 10, time.Minute, middleware.RateLimitOptions{
+					FailureMode: middleware.RateLimitFailClose,
+				}),
+				h.Auth.ExchangeSocialOAuthHandoff(provider),
+			)
 		}
 	}
 

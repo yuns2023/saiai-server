@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isSocialProvider, oauthStartUrl, parseOAuthFragment, takeOAuthFragment } from '../oauth'
+import { isSocialProvider, oauthStartUrl, outcomeFromExchange, parseOAuthFragment, takeOAuthFragment } from '../oauth'
 
 const origin = 'https://aog.example'
 const pending = 'a'.repeat(64)
@@ -14,48 +14,52 @@ describe('oauthStartUrl', () => {
 })
 
 describe('parseOAuthFragment', () => {
-  it('reads tokens and keeps a safe redirect', () => {
-    expect(parseOAuthFragment('#access_token=at&refresh_token=rt&expires_in=900&token_type=Bearer&redirect=%2Fusage', origin)).toEqual({
+  const code = 'c'.repeat(64)
+
+  it('accepts only a one-time handoff code', () => {
+    expect(parseOAuthFragment(`#code=${code}`)).toEqual({ kind: 'code', code })
+  })
+
+  it('never turns tokens or handles in the URL into a sign-in', () => {
+    for (const forged of [
+      '#access_token=at&refresh_token=rt&expires_in=900&token_type=Bearer',
+      '#requires_2fa=1&temp_token=tmp',
+      `#pending_oauth_token=${pending}`,
+      `#code=${code}&access_token=at&refresh_token=rt`,
+      `#code=${code}&code=${code}`,
+      '#code=short',
+      `#code=${code.toUpperCase()}`,
+      ''
+    ]) {
+      expect(parseOAuthFragment(forged)).toEqual({ kind: 'error', code: 'missing', reason: '' })
+    }
+  })
+
+  it('reports errors with the backend reason', () => {
+    expect(parseOAuthFragment('#error=login_failed&error_message=USER_NOT_ACTIVE')).toEqual({
+      kind: 'error',
+      code: 'login_failed',
+      reason: 'USER_NOT_ACTIVE'
+    })
+  })
+})
+
+describe('outcomeFromExchange', () => {
+  it('maps the server-verified outcome and keeps only safe redirects', () => {
+    expect(outcomeFromExchange({ kind: 'tokens', access_token: 'at', refresh_token: 'rt', expires_in: 900, redirect: '/usage' }, origin)).toEqual({
       kind: 'tokens',
       accessToken: 'at',
       refreshToken: 'rt',
       expiresIn: 900,
       redirect: '/usage'
     })
-  })
-
-  it('drops unsafe redirects', () => {
     for (const bad of ['//evil.example', '/\\evil.example', 'https://evil.example/x', '/a\r\nb', 'keys']) {
-      const r = parseOAuthFragment(`access_token=at&refresh_token=rt&redirect=${encodeURIComponent(bad)}`, origin)
-      expect(r).toMatchObject({ kind: 'tokens', redirect: null })
+      expect(outcomeFromExchange({ kind: 'tokens', access_token: 'at', refresh_token: 'rt', redirect: bad }, origin)).toMatchObject({ redirect: null })
     }
-  })
-
-  it('recognizes two-step verification without tokens', () => {
-    expect(parseOAuthFragment('#requires_2fa=1&temp_token=tmp&redirect=%2Fkeys&provider=github', origin)).toEqual({
-      kind: 'twoFactor',
-      tempToken: 'tmp',
-      redirect: '/keys'
-    })
-  })
-
-  it('recognizes a pending registration and validates the handle', () => {
-    expect(parseOAuthFragment(`#error=invitation_required&pending_oauth_token=${pending}&redirect=%2F`, origin)).toEqual({
-      kind: 'invitation',
-      pendingToken: pending,
-      redirect: '/'
-    })
-    expect(parseOAuthFragment('#error=invitation_required&pending_oauth_token=short', origin)).toEqual({ kind: 'error', code: 'missing', reason: '' })
-  })
-
-  it('reports errors with the backend reason', () => {
-    expect(parseOAuthFragment('#error=login_failed&error_message=USER_NOT_ACTIVE', origin)).toEqual({
-      kind: 'error',
-      code: 'login_failed',
-      reason: 'USER_NOT_ACTIVE'
-    })
-    expect(parseOAuthFragment('', origin)).toEqual({ kind: 'error', code: 'missing', reason: '' })
-    expect(parseOAuthFragment('#access_token=at', origin).kind).toBe('error')
+    expect(outcomeFromExchange({ kind: 'two_factor', temp_token: 'tmp', redirect: '/keys' }, origin)).toEqual({ kind: 'twoFactor', tempToken: 'tmp', redirect: '/keys' })
+    expect(outcomeFromExchange({ kind: 'invitation', pending_oauth_token: pending, redirect: '/' }, origin)).toEqual({ kind: 'invitation', pendingToken: pending, redirect: '/' })
+    expect(outcomeFromExchange({ kind: 'invitation', pending_oauth_token: 'short' }, origin).kind).toBe('error')
+    expect(outcomeFromExchange({ kind: 'tokens', access_token: 'at' }, origin).kind).toBe('error')
   })
 })
 

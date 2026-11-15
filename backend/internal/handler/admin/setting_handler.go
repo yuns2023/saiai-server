@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -88,6 +89,7 @@ func generateMenuItemID() (string, error) {
 // SettingHandler 系统设置处理器
 type SettingHandler struct {
 	jevSettings         *service.JevSettingsService
+	reservedEmails      service.ReservedEmailUserCounter
 	pricingUsageReader  service.ModelPricingUsageReader
 	pricingRecentMu     sync.Mutex
 	pricingRecentAt     time.Time
@@ -103,6 +105,11 @@ type SettingHandler struct {
 }
 
 // SetPricingService wires the runtime pricing alias cache.
+// SetReservedEmailCounter wires the user counter used before enabling Google / GitHub sign-in.
+func (h *SettingHandler) SetReservedEmailCounter(counter service.ReservedEmailUserCounter) {
+	h.reservedEmails = counter
+}
+
 func (h *SettingHandler) SetPricingService(pricingService *service.PricingService) {
 	h.pricingService = pricingService
 }
@@ -452,6 +459,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if msg != "" {
 		response.BadRequest(c, msg)
 		return
+	}
+	if googleOAuth.enabled && !previousSettings.GoogleOAuthEnabled && !previousSettings.GoogleOAuthEverEnabled {
+		if msg := h.syntheticEmailCollision(c.Request.Context(), "Google", service.SocialOAuthProviderGoogle); msg != "" {
+			response.BadRequest(c, msg)
+			return
+		}
+	}
+	if githubOAuth.enabled && !previousSettings.GitHubOAuthEnabled && !previousSettings.GitHubOAuthEverEnabled {
+		if msg := h.syntheticEmailCollision(c.Request.Context(), "GitHub", service.SocialOAuthProviderGitHub); msg != "" {
+			response.BadRequest(c, msg)
+			return
+		}
 	}
 
 	// 自定义菜单项验证
@@ -1426,7 +1445,7 @@ func resolveSocialOAuthUpdate(
 		return out, label + " Client Secret is required when enabled"
 	}
 	if service.SocialOAuthRedirectURL(frontendURL, provider) == "" {
-		return out, label + " sign-in requires Frontend URL (an absolute http(s) URL without query) to derive the callback URL"
+		return out, label + " sign-in requires Frontend URL to be a bare origin such as https://example.com (no path, query or fragment) to derive the callback URL"
 	}
 	return out, ""
 }
@@ -1437,4 +1456,22 @@ func (h *SettingHandler) socialOAuthRedirectURL(settings *service.SystemSettings
 		return ""
 	}
 	return service.SocialOAuthRedirectURL(h.settingService.EffectiveFrontendURL(settings.FrontendURL), provider)
+}
+
+// syntheticEmailCollision refuses the first-ever enable of a provider while users already
+// hold addresses in its reserved domain (they could be signed into by whoever owns the
+// matching provider account). Fails closed when the count cannot be read.
+func (h *SettingHandler) syntheticEmailCollision(ctx context.Context, label string, provider service.SocialOAuthProvider) string {
+	if h.reservedEmails == nil {
+		return "Cannot enable " + label + " sign-in: unable to check existing accounts"
+	}
+	n, err := h.reservedEmails.CountUsersWithEmailDomain(ctx, provider.SyntheticEmailDomain())
+	if err != nil {
+		return "Cannot enable " + label + " sign-in: unable to check existing accounts"
+	}
+	if n > 0 {
+		return fmt.Sprintf("Cannot enable %s sign-in: %d existing user(s) already use an email ending in %s; change those emails first",
+			label, n, provider.SyntheticEmailDomain())
+	}
+	return ""
 }
