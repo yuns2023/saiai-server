@@ -12,6 +12,8 @@ export interface Toast {
 
 export type ThemePref = 'light' | 'dark' | 'system'
 const THEME_KEY = 'theme'
+/** Backend default for site_subtitle (setting_service.go); never shown to customers. */
+const DEFAULT_BACKEND_SUBTITLE = 'Subscription to API Conversion Platform'
 
 export const useAppStore = defineStore('app', () => {
   const settings = ref<PublicSettings | null>(window.__APP_CONFIG__ ?? null)
@@ -21,8 +23,14 @@ export const useAppStore = defineStore('app', () => {
   const theme = ref<ThemePref>(readTheme())
   let toastSeq = 0
 
-  const siteName = computed(() => settings.value?.site_name?.trim() || 'AOGCode')
-  const siteLogo = computed(() => settings.value?.site_logo?.trim() || '')
+  const siteName = computed(() => settings.value?.site_name?.trim() || 'CCYou.dev')
+  /** Admin-set tagline; the backend's English placeholder default counts as unset. */
+  const siteSubtitle = computed(() => {
+    const v = settings.value?.site_subtitle?.trim() || ''
+    return v === DEFAULT_BACKEND_SUBTITLE ? '' : v
+  })
+  const invitationCodeHint = computed(() => settings.value?.invitation_code_hint?.trim() || '')
+  const siteLogo = computed(() => settings.value?.site_logo?.trim() || '/_aog/favicon.svg')
   const apiBaseUrl = computed(() => settings.value?.api_base_url?.trim() || window.location.origin)
 
   async function loadSettings(force = false): Promise<PublicSettings | null> {
@@ -53,7 +61,21 @@ export const useAppStore = defineStore('app', () => {
     applyTheme(pref)
   }
 
-  return { settings, settingsFailed, toasts, theme, siteName, siteLogo, apiBaseUrl, loadSettings, notify, dismiss, setTheme }
+  return {
+    settings,
+    settingsFailed,
+    toasts,
+    theme,
+    siteName,
+    siteSubtitle,
+    siteLogo,
+    invitationCodeHint,
+    apiBaseUrl,
+    loadSettings,
+    notify,
+    dismiss,
+    setTheme
+  }
 })
 
 function readTheme(): ThemePref {

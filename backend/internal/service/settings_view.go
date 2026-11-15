@@ -8,6 +8,7 @@ type SystemSettings struct {
 	PasswordResetEnabled             bool
 	FrontendURL                      string
 	InvitationCodeEnabled            bool
+	InvitationCodeHint               string
 	TotpEnabled                      bool // TOTP 双因素认证
 
 	SMTPHost               string
@@ -111,6 +112,7 @@ type PublicSettings struct {
 	PromoCodeEnabled                 bool
 	PasswordResetEnabled             bool
 	InvitationCodeEnabled            bool
+	InvitationCodeHint               string
 	TotpEnabled                      bool // TOTP 双因素认证
 	TurnstileEnabled                 bool
 	TurnstileSiteKey                 string

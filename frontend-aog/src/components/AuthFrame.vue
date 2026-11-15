@@ -12,6 +12,7 @@ const app = useAppStore()
       <RouterLink to="/" class="flex items-center gap-2 text-ink no-underline">
         <img v-if="app.siteLogo" :src="app.siteLogo" alt="" class="h-6 w-6 rounded-sm object-contain" />
         <span class="text-md font-semibold tracking-tight">{{ app.siteName }}</span>
+        <span v-if="app.siteSubtitle" class="hidden text-sm text-ink-3 sm:inline">{{ app.siteSubtitle }}</span>
       </RouterLink>
       <PrefsMenu compact />
     </header>

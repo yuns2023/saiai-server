@@ -95,6 +95,32 @@
           </p>
         </div>
 
+        <!-- Confirm Password Input -->
+        <div>
+          <label for="confirm_password" class="input-label">
+            {{ t('auth.confirmPassword') }}
+          </label>
+          <div class="relative">
+            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
+              <Icon name="lock" size="md" class="text-gray-400 dark:text-dark-500" />
+            </div>
+            <input
+              id="confirm_password"
+              v-model="formData.confirm_password"
+              :type="showPassword ? 'text' : 'password'"
+              required
+              autocomplete="new-password"
+              :disabled="isLoading"
+              class="input pl-11"
+              :class="{ 'input-error': errors.confirm_password }"
+              :placeholder="t('auth.confirmPasswordRegisterPlaceholder')"
+            />
+          </div>
+          <p v-if="errors.confirm_password" class="input-error-text">
+            {{ errors.confirm_password }}
+          </p>
+        </div>
+
         <!-- Invitation Code Input (Required when enabled) -->
         <div v-if="invitationCodeEnabled">
           <label for="invitation_code" class="input-label">
@@ -146,6 +172,7 @@
               {{ errors.invitation_code }}
             </p>
           </transition>
+          <InvitationCodeHint />
         </div>
 
         <!-- Promo Code Input (Optional) -->
@@ -289,6 +316,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
 import LinuxDoOAuthSection from '@/components/auth/LinuxDoOAuthSection.vue'
+import InvitationCodeHint from '@/components/auth/InvitationCodeHint.vue'
 import Icon from '@/components/icons/Icon.vue'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { useAuthStore, useAppStore } from '@/stores'
@@ -352,6 +380,7 @@ let invitationValidateTimeout: ReturnType<typeof setTimeout> | null = null
 const formData = reactive({
   email: '',
   password: '',
+  confirm_password: '',
   promo_code: '',
   invitation_code: ''
 })
@@ -359,6 +388,7 @@ const formData = reactive({
 const errors = reactive({
   email: '',
   password: '',
+  confirm_password: '',
   turnstile: '',
   invitation_code: ''
 })
@@ -583,6 +613,7 @@ function validateForm(): boolean {
   // Reset errors
   errors.email = ''
   errors.password = ''
+  errors.confirm_password = ''
   errors.turnstile = ''
   errors.invitation_code = ''
 
@@ -608,6 +639,14 @@ function validateForm(): boolean {
     isValid = false
   } else if (formData.password.length < 6) {
     errors.password = t('auth.passwordMinLength')
+    isValid = false
+  }
+
+  if (!formData.confirm_password) {
+    errors.confirm_password = t('auth.confirmPasswordRequired')
+    isValid = false
+  } else if (formData.password !== formData.confirm_password) {
+    errors.confirm_password = t('auth.passwordsDoNotMatch')
     isValid = false
   }
 

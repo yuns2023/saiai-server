@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AuthFrame from '@/components/AuthFrame.vue'
+import InviteHint from '@/components/InviteHint.vue'
 import { useAuthStore } from '@/stores/auth'
 import { errorMessage } from '@/api/client'
 import { postLoginTarget } from '@/lib/redirect'
@@ -164,6 +165,7 @@ async function submitInvite(): Promise<void> {
       <label class="block">
         <span class="label">{{ t('auth.inviteCode') }}</span>
         <input v-model="invite" class="field mt-1" autocomplete="off" required autofocus />
+        <InviteHint />
       </label>
       <p v-if="formError" class="text-sm text-seal" role="alert">{{ formError }}</p>
       <button type="submit" class="btn btn-primary h-10 w-full" :disabled="busy || !invite.trim()">

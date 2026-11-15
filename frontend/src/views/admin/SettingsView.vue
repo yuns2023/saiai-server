@@ -381,6 +381,22 @@
               </div>
               <Toggle v-model="form.invitation_code_enabled" />
             </div>
+            <!-- How to get an invitation code (shown under the field on the sign-up page) -->
+            <div v-if="form.invitation_code_enabled" class="border-t border-gray-100 pt-4 dark:border-dark-700">
+              <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t('admin.settings.registration.invitationCodeHowTo') }}
+              </label>
+              <textarea
+                v-model="form.invitation_code_hint"
+                rows="2"
+                maxlength="500"
+                class="input"
+                :placeholder="t('admin.settings.registration.invitationCodeHowToPlaceholder')"
+              ></textarea>
+              <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.registration.invitationCodeHowToHint') }}
+              </p>
+            </div>
             <!-- Password Reset - Only show when email verification is enabled -->
             <div
               v-if="form.email_verify_enabled"
@@ -1609,6 +1625,7 @@ const form = reactive<SettingsForm>({
   registration_email_suffix_whitelist: [],
   promo_code_enabled: true,
   invitation_code_enabled: false,
+  invitation_code_hint: '',
   password_reset_enabled: false,
   totp_enabled: false,
   totp_encryption_key_configured: false,
@@ -1960,6 +1977,7 @@ async function saveSettings() {
       ),
       promo_code_enabled: form.promo_code_enabled,
       invitation_code_enabled: form.invitation_code_enabled,
+      invitation_code_hint: form.invitation_code_hint,
       password_reset_enabled: form.password_reset_enabled,
       totp_enabled: form.totp_enabled,
       default_balance: form.default_balance,
