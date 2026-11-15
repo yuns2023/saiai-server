@@ -14,7 +14,9 @@ import type {
   UsageQueryParams,
   UsageStatsResponse,
   User,
-  UserAnnouncement
+  UserAnnouncement,
+  UserInviteCode,
+  UserInviteOverview
 } from '@/types'
 
 export type LoginResult = AuthResponse | { requires_2fa: true; temp_token: string; user_email_masked?: string }
@@ -197,6 +199,20 @@ export const redeemApi = {
   async history(): Promise<RedeemHistoryItem[]> {
     const { data } = await api.get<RedeemHistoryItem[]>('/redeem/history')
     return data || []
+  }
+}
+
+export const invitesApi = {
+  async overview(page: number, pageSize: number): Promise<UserInviteOverview> {
+    const { data } = await api.get<UserInviteOverview>('/invites', { params: { page, page_size: pageSize } })
+    return data
+  },
+  async create(): Promise<UserInviteCode> {
+    const { data } = await api.post<UserInviteCode>('/invites')
+    return data
+  },
+  async revoke(code: string): Promise<void> {
+    await api.delete(`/invites/${encodeURIComponent(code)}`)
   }
 }
 

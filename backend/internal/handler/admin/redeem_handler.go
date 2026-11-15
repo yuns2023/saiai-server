@@ -19,15 +19,17 @@ import (
 
 // RedeemHandler handles admin redeem code management
 type RedeemHandler struct {
-	adminService  service.AdminService
-	redeemService *service.RedeemService
+	adminService      service.AdminService
+	redeemService     *service.RedeemService
+	userInviteService *service.UserInviteService
 }
 
 // NewRedeemHandler creates a new admin redeem handler
-func NewRedeemHandler(adminService service.AdminService, redeemService *service.RedeemService) *RedeemHandler {
+func NewRedeemHandler(adminService service.AdminService, redeemService *service.RedeemService, userInviteService *service.UserInviteService) *RedeemHandler {
 	return &RedeemHandler{
-		adminService:  adminService,
-		redeemService: redeemService,
+		adminService:      adminService,
+		redeemService:     redeemService,
+		userInviteService: userInviteService,
 	}
 }
 
@@ -75,6 +77,11 @@ func (h *RedeemHandler) List(c *gin.Context) {
 	for i := range codes {
 		out = append(out, *dto.RedeemCodeFromServiceAdmin(&codes[i]))
 	}
+	ptrs := make([]*dto.AdminRedeemCode, len(out))
+	for i := range out {
+		ptrs[i] = &out[i]
+	}
+	attachCodeOwners(c.Request.Context(), h.userInviteService, ptrs...)
 	response.Paginated(c, out, total, page, pageSize)
 }
 
@@ -93,7 +100,9 @@ func (h *RedeemHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.RedeemCodeFromServiceAdmin(code))
+	out := dto.RedeemCodeFromServiceAdmin(code)
+	attachCodeOwners(c.Request.Context(), h.userInviteService, out)
+	response.Success(c, out)
 }
 
 // Generate handles generating new redeem codes

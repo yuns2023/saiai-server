@@ -437,6 +437,23 @@ func (h *AuthHandler) ValidateInvitationCode(c *gin.Context) {
 		return
 	}
 
+	// A user-generated code stops working once its owner is deleted or disabled; same
+	// rule as the sign-up paths, so the pre-check never says "valid" for a code they reject.
+	if h.authService != nil {
+		usable, err := h.authService.InvitationOwnerUsable(c.Request.Context(), redeemCode)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		if !usable {
+			response.Success(c, ValidateInvitationCodeResponse{
+				Valid:     false,
+				ErrorCode: "INVITATION_CODE_INVALID",
+			})
+			return
+		}
+	}
+
 	response.Success(c, ValidateInvitationCodeResponse{
 		Valid: true,
 	})

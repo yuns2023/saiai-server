@@ -159,6 +159,8 @@ export interface PublicSettings {
   invitation_code_enabled: boolean
   /** Admin-set "how to get an invitation code" text; plain text, URLs become links. */
   invitation_code_hint?: string
+  /** Users may generate their own invitation codes (Settings → Registration). */
+  user_invite_enabled?: boolean
   turnstile_enabled: boolean
   turnstile_site_key: string
   site_name: string
@@ -2092,3 +2094,27 @@ export interface ModerationDecisionSnapshot {
  action_mode: string
  group_updated_at: string
 }
+
+/** GET /invites — the signed-in user's invitation page. */
+export interface UserInviteCode {
+  code: string
+  status: 'unused' | 'used' | 'expired' | string
+  created_at: string
+  used_at?: string
+  /** Masked by the server, e.g. a***@qq.com. */
+  invitee_email?: string
+}
+
+export interface UserInviteOverview {
+  enabled: boolean
+  eligible: boolean
+  max_unused: number
+  /** 0 = no lifetime limit. */
+  max_total: number
+  unused: number
+  invited: number
+  can_create: boolean
+  codes: UserInviteCode[]
+  pagination: { total: number; page: number; page_size: number; pages: number } | null
+}
+

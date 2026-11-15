@@ -31,6 +31,9 @@ export interface SystemSettings {
   frontend_url: string
   invitation_code_enabled: boolean
   invitation_code_hint: string
+  user_invite_enabled: boolean
+  user_invite_max_unused: number
+  user_invite_max_total: number
   totp_enabled: boolean // TOTP 双因素认证
   totp_encryption_key_configured: boolean // TOTP 加密密钥是否已配置
   // Default settings
@@ -121,6 +124,9 @@ export interface UpdateSettingsRequest {
   frontend_url?: string
   invitation_code_enabled?: boolean
   invitation_code_hint?: string
+  user_invite_enabled?: boolean
+  user_invite_max_unused?: number
+  user_invite_max_total?: number
   totp_enabled?: boolean // TOTP 双因素认证
   default_balance?: number
   default_concurrency?: number

@@ -43,6 +43,17 @@ type AdminUser struct {
 	GroupRates            map[int64]float64 `json:"group_rates,omitempty"`
 	SoraStorageQuotaBytes int64             `json:"sora_storage_quota_bytes"`
 	SoraStorageUsedBytes  int64             `json:"sora_storage_used_bytes"`
+	// InvitedByUserID is the owner of the invitation code used at sign-up (nil = admin code
+	// or no code). InvitedBy carries the inviter's email where the handler resolved it.
+	InvitedByUserID *int64          `json:"invited_by_user_id"`
+	InvitedBy       *InviterSummary `json:"invited_by,omitempty"`
+}
+
+// InviterSummary names the user behind an invitation; Deleted marks soft-deleted accounts.
+type InviterSummary struct {
+	ID      int64  `json:"id"`
+	Email   string `json:"email"`
+	Deleted bool   `json:"deleted"`
 }
 
 type APIKey struct {
@@ -407,6 +418,9 @@ type AdminRedeemCode struct {
 	RedeemCode
 
 	Notes string `json:"notes"`
+	// OwnerUserID is the user who generated an invitation code (nil = admin-generated).
+	OwnerUserID *int64          `json:"owner_user_id"`
+	Owner       *InviterSummary `json:"owner,omitempty"`
 }
 
 // UsageLog 是普通用户接口使用的 usage log DTO（不包含管理员字段）。

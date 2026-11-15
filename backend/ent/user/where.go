@@ -145,6 +145,11 @@ func TokenVersion(v int64) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldTokenVersion, v))
 }
 
+// InvitedByUserID applies equality check predicate on the "invited_by_user_id" field. It's identical to InvitedByUserIDEQ.
+func InvitedByUserID(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldInvitedByUserID, v))
+}
+
 // TotpSecretEncrypted applies equality check predicate on the "totp_secret_encrypted" field. It's identical to TotpSecretEncryptedEQ.
 func TotpSecretEncrypted(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldTotpSecretEncrypted, v))
@@ -968,6 +973,56 @@ func TokenVersionLT(v int64) predicate.User {
 // TokenVersionLTE applies the LTE predicate on the "token_version" field.
 func TokenVersionLTE(v int64) predicate.User {
 	return predicate.User(sql.FieldLTE(FieldTokenVersion, v))
+}
+
+// InvitedByUserIDEQ applies the EQ predicate on the "invited_by_user_id" field.
+func InvitedByUserIDEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldInvitedByUserID, v))
+}
+
+// InvitedByUserIDNEQ applies the NEQ predicate on the "invited_by_user_id" field.
+func InvitedByUserIDNEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldInvitedByUserID, v))
+}
+
+// InvitedByUserIDIn applies the In predicate on the "invited_by_user_id" field.
+func InvitedByUserIDIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldIn(FieldInvitedByUserID, vs...))
+}
+
+// InvitedByUserIDNotIn applies the NotIn predicate on the "invited_by_user_id" field.
+func InvitedByUserIDNotIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldInvitedByUserID, vs...))
+}
+
+// InvitedByUserIDGT applies the GT predicate on the "invited_by_user_id" field.
+func InvitedByUserIDGT(v int64) predicate.User {
+	return predicate.User(sql.FieldGT(FieldInvitedByUserID, v))
+}
+
+// InvitedByUserIDGTE applies the GTE predicate on the "invited_by_user_id" field.
+func InvitedByUserIDGTE(v int64) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldInvitedByUserID, v))
+}
+
+// InvitedByUserIDLT applies the LT predicate on the "invited_by_user_id" field.
+func InvitedByUserIDLT(v int64) predicate.User {
+	return predicate.User(sql.FieldLT(FieldInvitedByUserID, v))
+}
+
+// InvitedByUserIDLTE applies the LTE predicate on the "invited_by_user_id" field.
+func InvitedByUserIDLTE(v int64) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldInvitedByUserID, v))
+}
+
+// InvitedByUserIDIsNil applies the IsNil predicate on the "invited_by_user_id" field.
+func InvitedByUserIDIsNil() predicate.User {
+	return predicate.User(sql.FieldIsNull(FieldInvitedByUserID))
+}
+
+// InvitedByUserIDNotNil applies the NotNil predicate on the "invited_by_user_id" field.
+func InvitedByUserIDNotNil() predicate.User {
+	return predicate.User(sql.FieldNotNull(FieldInvitedByUserID))
 }
 
 // TotpSecretEncryptedEQ applies the EQ predicate on the "totp_secret_encrypted" field.

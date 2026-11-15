@@ -112,6 +112,9 @@ const (
 	SettingKeyFrontendURL                      = "frontend_url"                        // 前端基础URL，用于生成邮件中的重置密码链接
 	SettingKeyInvitationCodeEnabled            = "invitation_code_enabled"             // 是否启用邀请码注册
 	SettingKeyInvitationCodeHint               = "invitation_code_hint"                // 邀请码获取渠道说明（纯文本，前台把 URL 显示为链接）
+	SettingKeyUserInviteEnabled                = "user_invite_enabled"                 // 是否允许用户自助生成邀请码
+	SettingKeyUserInviteMaxUnused              = "user_invite_max_unused"              // 每个用户同时持有的未使用邀请码上限
+	SettingKeyUserInviteMaxTotal               = "user_invite_max_total"               // 每个用户累计可邀请人数上限（0 = 不限）
 
 	// 邮件服务设置
 	SettingKeySMTPHost     = "smtp_host"      // SMTP服务器地址

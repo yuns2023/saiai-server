@@ -114,6 +114,16 @@ export interface AdminUser extends User {
   // Sora 存储配额（字节）
   sora_storage_quota_bytes: number
   sora_storage_used_bytes: number
+  // 注册时所用邀请码的创建者（null = 管理员生成的码或未用邀请码）
+  invited_by_user_id?: number | null
+  invited_by?: InviterSummary | null
+}
+
+/** 邀请关系里的用户（含已软删除的用户，deleted=true）。 */
+export interface InviterSummary {
+  id: number
+  email: string
+  deleted: boolean
 }
 
 export interface LoginRequest {
@@ -158,6 +168,7 @@ export interface PublicSettings {
   password_reset_enabled: boolean
   invitation_code_enabled: boolean
   invitation_code_hint?: string
+  user_invite_enabled?: boolean
   turnstile_enabled: boolean
   turnstile_site_key: string
   site_name: string
@@ -1429,6 +1440,10 @@ export interface RedeemCode {
   validity_days?: number // 订阅类型专用
   user?: User
   group?: Group // 关联的分组
+  notes?: string
+  // 用户自助生成的邀请码的创建者（null = 管理员生成）
+  owner_user_id?: number | null
+  owner?: InviterSummary | null
 }
 
 export interface GenerateRedeemCodesRequest {

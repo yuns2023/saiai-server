@@ -671,6 +671,7 @@ func userEntityToService(u *dbent.User) *service.User {
 		Concurrency:                 u.Concurrency,
 		Status:                      u.Status,
 		TokenVersion:                u.TokenVersion,
+		InvitedByUserID:             u.InvitedByUserID,
 		SoraStorageQuotaBytes:       u.SoraStorageQuotaBytes,
 		SoraStorageUsedBytes:        u.SoraStorageUsedBytes,
 		TotpSecretEncrypted:         u.TotpSecretEncrypted,

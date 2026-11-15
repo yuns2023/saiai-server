@@ -321,6 +321,33 @@ func (_u *UserUpdate) AddTokenVersion(v int64) *UserUpdate {
 	return _u
 }
 
+// SetInvitedByUserID sets the "invited_by_user_id" field.
+func (_u *UserUpdate) SetInvitedByUserID(v int64) *UserUpdate {
+	_u.mutation.ResetInvitedByUserID()
+	_u.mutation.SetInvitedByUserID(v)
+	return _u
+}
+
+// SetNillableInvitedByUserID sets the "invited_by_user_id" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableInvitedByUserID(v *int64) *UserUpdate {
+	if v != nil {
+		_u.SetInvitedByUserID(*v)
+	}
+	return _u
+}
+
+// AddInvitedByUserID adds value to the "invited_by_user_id" field.
+func (_u *UserUpdate) AddInvitedByUserID(v int64) *UserUpdate {
+	_u.mutation.AddInvitedByUserID(v)
+	return _u
+}
+
+// ClearInvitedByUserID clears the value of the "invited_by_user_id" field.
+func (_u *UserUpdate) ClearInvitedByUserID() *UserUpdate {
+	_u.mutation.ClearInvitedByUserID()
+	return _u
+}
+
 // SetTotpSecretEncrypted sets the "totp_secret_encrypted" field.
 func (_u *UserUpdate) SetTotpSecretEncrypted(v string) *UserUpdate {
 	_u.mutation.SetTotpSecretEncrypted(v)
@@ -955,6 +982,15 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedTokenVersion(); ok {
 		_spec.AddField(user.FieldTokenVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.InvitedByUserID(); ok {
+		_spec.SetField(user.FieldInvitedByUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedInvitedByUserID(); ok {
+		_spec.AddField(user.FieldInvitedByUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.InvitedByUserIDCleared() {
+		_spec.ClearField(user.FieldInvitedByUserID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.TotpSecretEncrypted(); ok {
 		_spec.SetField(user.FieldTotpSecretEncrypted, field.TypeString, value)
@@ -1806,6 +1842,33 @@ func (_u *UserUpdateOne) AddTokenVersion(v int64) *UserUpdateOne {
 	return _u
 }
 
+// SetInvitedByUserID sets the "invited_by_user_id" field.
+func (_u *UserUpdateOne) SetInvitedByUserID(v int64) *UserUpdateOne {
+	_u.mutation.ResetInvitedByUserID()
+	_u.mutation.SetInvitedByUserID(v)
+	return _u
+}
+
+// SetNillableInvitedByUserID sets the "invited_by_user_id" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableInvitedByUserID(v *int64) *UserUpdateOne {
+	if v != nil {
+		_u.SetInvitedByUserID(*v)
+	}
+	return _u
+}
+
+// AddInvitedByUserID adds value to the "invited_by_user_id" field.
+func (_u *UserUpdateOne) AddInvitedByUserID(v int64) *UserUpdateOne {
+	_u.mutation.AddInvitedByUserID(v)
+	return _u
+}
+
+// ClearInvitedByUserID clears the value of the "invited_by_user_id" field.
+func (_u *UserUpdateOne) ClearInvitedByUserID() *UserUpdateOne {
+	_u.mutation.ClearInvitedByUserID()
+	return _u
+}
+
 // SetTotpSecretEncrypted sets the "totp_secret_encrypted" field.
 func (_u *UserUpdateOne) SetTotpSecretEncrypted(v string) *UserUpdateOne {
 	_u.mutation.SetTotpSecretEncrypted(v)
@@ -2470,6 +2533,15 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.AddedTokenVersion(); ok {
 		_spec.AddField(user.FieldTokenVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.InvitedByUserID(); ok {
+		_spec.SetField(user.FieldInvitedByUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedInvitedByUserID(); ok {
+		_spec.AddField(user.FieldInvitedByUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.InvitedByUserIDCleared() {
+		_spec.ClearField(user.FieldInvitedByUserID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.TotpSecretEncrypted(); ok {
 		_spec.SetField(user.FieldTotpSecretEncrypted, field.TypeString, value)

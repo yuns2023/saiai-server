@@ -68,6 +68,11 @@ func (RedeemCode) Fields() []ent.Field {
 			Nillable(),
 		field.Int("validity_days").
 			Default(30),
+		// owner_user_id: the user who generated this invitation code from the
+		// user console; nil for admin-generated codes (migration 125).
+		field.Int64("owner_user_id").
+			Optional().
+			Nillable(),
 	}
 }
 

@@ -51,6 +51,8 @@ const (
 	FieldNotes = "notes"
 	// FieldTokenVersion holds the string denoting the token_version field in the database.
 	FieldTokenVersion = "token_version"
+	// FieldInvitedByUserID holds the string denoting the invited_by_user_id field in the database.
+	FieldInvitedByUserID = "invited_by_user_id"
 	// FieldTotpSecretEncrypted holds the string denoting the totp_secret_encrypted field in the database.
 	FieldTotpSecretEncrypted = "totp_secret_encrypted"
 	// FieldTotpEnabled holds the string denoting the totp_enabled field in the database.
@@ -199,6 +201,7 @@ var Columns = []string{
 	FieldUsername,
 	FieldNotes,
 	FieldTokenVersion,
+	FieldInvitedByUserID,
 	FieldTotpSecretEncrypted,
 	FieldTotpEnabled,
 	FieldTotpEnabledAt,
@@ -377,6 +380,11 @@ func ByNotes(opts ...sql.OrderTermOption) OrderOption {
 // ByTokenVersion orders the results by the token_version field.
 func ByTokenVersion(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldTokenVersion, opts...).ToFunc()
+}
+
+// ByInvitedByUserID orders the results by the invited_by_user_id field.
+func ByInvitedByUserID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInvitedByUserID, opts...).ToFunc()
 }
 
 // ByTotpSecretEncrypted orders the results by the totp_secret_encrypted field.

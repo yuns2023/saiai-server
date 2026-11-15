@@ -40,6 +40,7 @@ type Handlers struct {
 	HostedAccount  *HostedAccountHandler
 	Usage          *UsageHandler
 	Redeem         *RedeemHandler
+	UserInvite     *UserInviteHandler
 	Subscription   *SubscriptionHandler
 	Announcement   *AnnouncementHandler
 	Admin          *AdminHandlers

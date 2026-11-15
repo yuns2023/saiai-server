@@ -267,6 +267,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyPasswordResetEnabled,
 		SettingKeyInvitationCodeEnabled,
 		SettingKeyInvitationCodeHint,
+		SettingKeyUserInviteEnabled,
 		SettingKeyTotpEnabled,
 		SettingKeyTurnstileEnabled,
 		SettingKeyTurnstileSiteKey,
@@ -318,6 +319,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		PasswordResetEnabled:             passwordResetEnabled,
 		InvitationCodeEnabled:            settings[SettingKeyInvitationCodeEnabled] == "true",
 		InvitationCodeHint:               strings.TrimSpace(settings[SettingKeyInvitationCodeHint]),
+		UserInviteEnabled:                settings[SettingKeyUserInviteEnabled] == "true",
 		TotpEnabled:                      settings[SettingKeyTotpEnabled] == "true",
 		TurnstileEnabled:                 settings[SettingKeyTurnstileEnabled] == "true",
 		TurnstileSiteKey:                 settings[SettingKeyTurnstileSiteKey],
@@ -376,6 +378,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		PasswordResetEnabled             bool            `json:"password_reset_enabled"`
 		InvitationCodeEnabled            bool            `json:"invitation_code_enabled"`
 		InvitationCodeHint               string          `json:"invitation_code_hint,omitempty"`
+		UserInviteEnabled                bool            `json:"user_invite_enabled"`
 		TotpEnabled                      bool            `json:"totp_enabled"`
 		TurnstileEnabled                 bool            `json:"turnstile_enabled"`
 		TurnstileSiteKey                 string          `json:"turnstile_site_key,omitempty"`
@@ -407,6 +410,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		PasswordResetEnabled:             settings.PasswordResetEnabled,
 		InvitationCodeEnabled:            settings.InvitationCodeEnabled,
 		InvitationCodeHint:               settings.InvitationCodeHint,
+		UserInviteEnabled:                settings.UserInviteEnabled,
 		TotpEnabled:                      settings.TotpEnabled,
 		TurnstileEnabled:                 settings.TurnstileEnabled,
 		TurnstileSiteKey:                 settings.TurnstileSiteKey,
@@ -567,6 +571,9 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyFrontendURL] = settings.FrontendURL
 	updates[SettingKeyInvitationCodeEnabled] = strconv.FormatBool(settings.InvitationCodeEnabled)
 	updates[SettingKeyInvitationCodeHint] = strings.TrimSpace(settings.InvitationCodeHint)
+	updates[SettingKeyUserInviteEnabled] = strconv.FormatBool(settings.UserInviteEnabled)
+	updates[SettingKeyUserInviteMaxUnused] = strconv.Itoa(parseUserInviteMaxUnused(strconv.Itoa(settings.UserInviteMaxUnused)))
+	updates[SettingKeyUserInviteMaxTotal] = strconv.Itoa(parseUserInviteMaxTotal(strconv.Itoa(settings.UserInviteMaxTotal)))
 	updates[SettingKeyTotpEnabled] = strconv.FormatBool(settings.TotpEnabled)
 
 	// 邮件服务设置（只有非空才更新密码）
@@ -1004,6 +1011,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		FrontendURL:                      settings[SettingKeyFrontendURL],
 		InvitationCodeEnabled:            settings[SettingKeyInvitationCodeEnabled] == "true",
 		InvitationCodeHint:               strings.TrimSpace(settings[SettingKeyInvitationCodeHint]),
+		UserInviteEnabled:                settings[SettingKeyUserInviteEnabled] == "true",
+		UserInviteMaxUnused:              parseUserInviteMaxUnused(settings[SettingKeyUserInviteMaxUnused]),
+		UserInviteMaxTotal:               parseUserInviteMaxTotal(settings[SettingKeyUserInviteMaxTotal]),
 		TotpEnabled:                      settings[SettingKeyTotpEnabled] == "true",
 		SMTPHost:                         settings[SettingKeySMTPHost],
 		SMTPUsername:                     settings[SettingKeySMTPUsername],
@@ -2398,4 +2408,53 @@ func maxInt64(value int64, min int64) int64 {
 		return min
 	}
 	return value
+}
+
+// UserInviteSettings are the admin switches for user-generated invitation codes.
+type UserInviteSettings struct {
+	Enabled   bool
+	MaxUnused int
+	MaxTotal  int // 0 = unlimited
+}
+
+// GetUserInviteSettings reads the switches; any read error means "off" (fail closed).
+func (s *SettingService) GetUserInviteSettings(ctx context.Context) UserInviteSettings {
+	values, err := s.settingRepo.GetMultiple(ctx, []string{
+		SettingKeyUserInviteEnabled,
+		SettingKeyUserInviteMaxUnused,
+		SettingKeyUserInviteMaxTotal,
+	})
+	if err != nil {
+		return UserInviteSettings{MaxUnused: DefaultUserInviteMaxUnused}
+	}
+	return UserInviteSettings{
+		Enabled:   values[SettingKeyUserInviteEnabled] == "true",
+		MaxUnused: parseUserInviteMaxUnused(values[SettingKeyUserInviteMaxUnused]),
+		MaxTotal:  parseUserInviteMaxTotal(values[SettingKeyUserInviteMaxTotal]),
+	}
+}
+
+// parseUserInviteMaxUnused: missing/invalid/non-positive → default; above the cap → cap.
+// A bad stored value can never mean "unlimited".
+func parseUserInviteMaxUnused(raw string) int {
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || v <= 0 {
+		return DefaultUserInviteMaxUnused
+	}
+	if v > MaxUserInviteMaxUnused {
+		return MaxUserInviteMaxUnused
+	}
+	return v
+}
+
+// parseUserInviteMaxTotal: 0 = unlimited (the default); invalid/negative → 0; above the cap → cap.
+func parseUserInviteMaxTotal(raw string) int {
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || v <= 0 {
+		return 0
+	}
+	if v > MaxUserInviteMaxTotal {
+		return MaxUserInviteMaxTotal
+	}
+	return v
 }

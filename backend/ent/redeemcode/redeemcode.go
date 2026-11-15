@@ -34,6 +34,8 @@ const (
 	FieldGroupID = "group_id"
 	// FieldValidityDays holds the string denoting the validity_days field in the database.
 	FieldValidityDays = "validity_days"
+	// FieldOwnerUserID holds the string denoting the owner_user_id field in the database.
+	FieldOwnerUserID = "owner_user_id"
 	// EdgeUser holds the string denoting the user edge name in mutations.
 	EdgeUser = "user"
 	// EdgeGroup holds the string denoting the group edge name in mutations.
@@ -69,6 +71,7 @@ var Columns = []string{
 	FieldCreatedAt,
 	FieldGroupID,
 	FieldValidityDays,
+	FieldOwnerUserID,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -156,6 +159,11 @@ func ByGroupID(opts ...sql.OrderTermOption) OrderOption {
 // ByValidityDays orders the results by the validity_days field.
 func ByValidityDays(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldValidityDays, opts...).ToFunc()
+}
+
+// ByOwnerUserID orders the results by the owner_user_id field.
+func ByOwnerUserID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOwnerUserID, opts...).ToFunc()
 }
 
 // ByUserField orders the results by user field.

@@ -32,6 +32,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/keys', name: 'keys', component: () => import('@/views/app/KeysView.vue'), meta: { title: 'nav.keys', auth: true } },
   { path: '/usage', name: 'usage', component: () => import('@/views/app/UsageView.vue'), meta: { title: 'nav.usage', auth: true } },
   { path: '/billing', name: 'billing', component: () => import('@/views/app/BillingView.vue'), meta: { title: 'nav.billing', auth: true } },
+  { path: '/invites', name: 'invites', component: () => import('@/views/app/InvitesView.vue'), meta: { title: 'nav.invites', auth: true } },
   { path: '/account', name: 'account', component: () => import('@/views/app/AccountView.vue'), meta: { title: 'nav.account', auth: true } },
   { path: '/notices', name: 'notices', component: () => import('@/views/app/NoticesView.vue'), meta: { title: 'nav.notices', auth: true } },
 

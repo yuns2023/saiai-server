@@ -71,6 +71,7 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
 		SetSoraStorageQuotaBytes(userIn.SoraStorageQuotaBytes).
+		SetNillableInvitedByUserID(userIn.InvitedByUserID).
 		Save(ctx)
 	if err != nil {
 		return translatePersistenceError(err, nil, service.ErrEmailExists)
@@ -257,6 +258,10 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 				dbuser.HasAPIKeysWith(apikey.KeyContainsFold(filters.Search)),
 			),
 		)
+	}
+
+	if filters.InvitedByUserID != nil {
+		q = q.Where(dbuser.InvitedByUserIDEQ(*filters.InvitedByUserID))
 	}
 
 	if filters.GroupName != "" {
@@ -736,6 +741,7 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 	dst.IsTrusted = src.IsTrusted
 	dst.ClaudeDeviceBaseLimit = src.ClaudeDeviceBaseLimit
 	dst.TokenVersion = src.TokenVersion
+	dst.InvitedByUserID = src.InvitedByUserID
 	dst.CreatedAt = src.CreatedAt
 	dst.UpdatedAt = src.UpdatedAt
 }

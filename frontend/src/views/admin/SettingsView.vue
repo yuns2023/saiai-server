@@ -397,6 +397,40 @@
                 {{ t('admin.settings.registration.invitationCodeHowToHint') }}
               </p>
             </div>
+            <!-- User-generated invitation codes -->
+            <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">{{
+                    t('admin.settings.registration.userInvite')
+                  }}</label>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ t('admin.settings.registration.userInviteHint') }}
+                  </p>
+                </div>
+                <Toggle v-model="form.user_invite_enabled" />
+              </div>
+              <div v-if="form.user_invite_enabled" class="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.registration.userInviteMaxUnused') }}
+                  </label>
+                  <input v-model.number="form.user_invite_max_unused" type="number" min="1" max="100" step="1" class="input" />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t('admin.settings.registration.userInviteMaxUnusedHint') }}
+                  </p>
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.registration.userInviteMaxTotal') }}
+                  </label>
+                  <input v-model.number="form.user_invite_max_total" type="number" min="0" max="100000" step="1" class="input" />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t('admin.settings.registration.userInviteMaxTotalHint') }}
+                  </p>
+                </div>
+              </div>
+            </div>
             <!-- Password Reset - Only show when email verification is enabled -->
             <div
               v-if="form.email_verify_enabled"
@@ -1626,6 +1660,9 @@ const form = reactive<SettingsForm>({
   promo_code_enabled: true,
   invitation_code_enabled: false,
   invitation_code_hint: '',
+  user_invite_enabled: false,
+  user_invite_max_unused: 5,
+  user_invite_max_total: 0,
   password_reset_enabled: false,
   totp_enabled: false,
   totp_encryption_key_configured: false,
@@ -1978,6 +2015,9 @@ async function saveSettings() {
       promo_code_enabled: form.promo_code_enabled,
       invitation_code_enabled: form.invitation_code_enabled,
       invitation_code_hint: form.invitation_code_hint,
+      user_invite_enabled: form.user_invite_enabled,
+      user_invite_max_unused: form.user_invite_max_unused,
+      user_invite_max_total: form.user_invite_max_total,
       password_reset_enabled: form.password_reset_enabled,
       totp_enabled: form.totp_enabled,
       default_balance: form.default_balance,
