@@ -28,4 +28,15 @@ describe('ConnectPanel', () => {
     expect(w.find('[data-testid=connect-unsupported]').exists()).toBe(true)
     expect(w.find('pre').exists()).toBe(false)
   })
+
+  it('explains a misconfigured API address and opens the manual section', async () => {
+    const w = mountPanel()
+    const { useAppStore } = await import('@/stores/app')
+    const app = useAppStore()
+    app.$patch({ settings: { api_base_url: 'https://[invalid]/" & echo X & rem "' } as never })
+    await w.vm.$nextTick()
+    expect(w.find('[data-testid=connect-install]').exists()).toBe(false)
+    expect(w.find('[data-testid=connect-no-oneline]').exists()).toBe(true)
+    expect(w.find('[data-testid=connect-manual]').attributes('open')).toBeDefined()
+  })
 })

@@ -200,6 +200,46 @@ func TestUserInviteRepo_WeeklyLimitCountsNonRevokedCodesInWindow(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrUserInviteWeeklyLimit)
 }
 
+func TestUserInviteRepo_WeeklyLimitLastSlotUnderConcurrency(t *testing.T) {
+	ctx, repo, owner := userInviteFixture(t, "week-race")
+	limits := service.UserInviteLimits{MaxUnused: 100, MaxPerWeek: 3}
+	for i := 0; i < 2; i++ {
+		_, err := repo.CreateForOwner(ctx, owner.ID, fmt.Sprintf("X%d-%d", owner.ID, i), limits)
+		require.NoError(t, err)
+	}
+
+	// One slot left: two concurrent generates, the row lock lets exactly one through.
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			_, err := repo.CreateForOwner(ctx, owner.ID, fmt.Sprintf("Y%d-%d", owner.ID, i), limits)
+			errs <- err
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	ok, limited := 0, 0
+	for err := range errs {
+		if err == nil {
+			ok++
+			continue
+		}
+		require.ErrorIs(t, err, service.ErrUserInviteWeeklyLimit)
+		limited++
+	}
+	require.Equal(t, 1, ok)
+	require.Equal(t, 1, limited)
+	counts, err := repo.Counts(ctx, owner.ID)
+	require.NoError(t, err)
+	require.Equal(t, 3, counts.CreatedThisWeek)
+}
+
 func TestUserInviteRepo_InactiveOrDeletedOwnerCannotCreate(t *testing.T) {
 	ctx, repo, owner := userInviteFixture(t, "inactive")
 	_, err := integrationDB.ExecContext(ctx, "UPDATE users SET status = 'disabled' WHERE id = $1", owner.ID)

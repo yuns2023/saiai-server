@@ -214,6 +214,8 @@ export default {
     manual: '手动配置（不装 {client}）',
     manualOnly: '手动配置 Claude Code',
     manualHint: '在启动 claude 的终端里设置这两个环境变量：',
+    badBaseUrl: '本站的 API 地址配置有误，暂时无法生成一键命令，请联系管理员；也可以先按下面的方式手动配置。',
+    noOneLine: '这个终端里无法安全生成 {client} 一键命令，请换一个终端类型或按下面的方式手动配置。',
     unsupported: '这个 Key 所在的分组不能用于 Claude Code。点“编辑”换一个分组后再来接入。'
   },
   keys: {

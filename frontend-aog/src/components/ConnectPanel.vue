@@ -54,6 +54,10 @@ const envText = computed(() => snippet.value.envLines.join('\n'))
       </p>
     </div>
 
+    <p v-if="!snippet.command && CLIENT.oneLineInstall" class="text-sm text-ink-2" data-testid="connect-no-oneline">
+      {{ snippet.badBaseUrl ? t('connect.badBaseUrl') : t('connect.noOneLine', { client: CLIENT.displayName }) }}
+    </p>
+
     <details class="group" :open="!snippet.command" data-testid="connect-manual">
       <summary class="cursor-pointer select-none text-sm text-ink-2 hover:text-ink">
         {{ snippet.command ? t('connect.manual', { client: CLIENT.displayName }) : t('connect.manualOnly') }}

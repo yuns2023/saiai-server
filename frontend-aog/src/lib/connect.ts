@@ -47,20 +47,41 @@ export const CLIENT = {
   install: INSTALL
 } as const
 
-/** Gateway root without a trailing /v1 (Claude Code adds its own path). */
+/** Gateway root without a trailing /v1 (Claude Code adds its own path). Display/manual use only. */
 export function gatewayRoot(baseUrl: string): string {
-  try {
-    const u = new URL(baseUrl, window.location.origin)
-    u.pathname = u.pathname.replace(/\/+$/, '').replace(/\/v1$/, '') || '/'
-    return u.href.replace(/\/$/, '')
-  } catch {
-    return baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '') || window.location.origin
-  }
+  return parseRoot(baseUrl) ?? (stripLineBreaks(baseUrl).replace(/\/+$/, '').replace(/\/v1$/, '') || window.location.origin)
 }
 
+const stripLineBreaks = (v: string) => v.replace(/[\r\n]/g, '')
+
+/**
+ * The gateway root as a URL-serialized absolute http(s) URL (quotes, spaces and
+ * other unsafe characters percent-encoded; query and fragment dropped), or
+ * null when the base URL is not one. Install commands are only built from this.
+ */
+export function parseRoot(baseUrl: string): string | null {
+  if (/[\r\n]/.test(baseUrl)) return null
+  let u: URL
+  try {
+    u = new URL(baseUrl)
+  } catch {
+    return null
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+  u.search = ''
+  u.hash = ''
+  u.pathname = u.pathname.replace(/\/+$/, '').replace(/\/v1$/, '') || '/'
+  return u.href.replace(/\/$/, '')
+}
+
+/** Safe inside cmd's "...": no quote that would close it, no %VAR% expansion, single line. */
+const cmdSafe = (v: string) => !/["%\r\n]/.test(v)
+
 export interface ConnectSnippet {
-  /** One-line AITP install + configure command, or null when it is switched off. */
+  /** One-line AITP install + configure command; null when switched off or the inputs are unsafe. */
   command: string | null
+  /** The site's API address is not an absolute http(s) URL, so no install command is offered. */
+  badBaseUrl: boolean
   /** Plain values for configuring Claude Code by hand. */
   baseUrl: string
   envLines: string[]
@@ -73,11 +94,15 @@ export interface ConnectOptions {
 
 export function connectSnippet(rawBaseUrl: string, apiKey: string, shell: Shell, options: ConnectOptions = {}): ConnectSnippet {
   const oneLine = options.oneLine ?? CLIENT.oneLineInstall
-  const root = gatewayRoot(rawBaseUrl)
+  const safeRoot = parseRoot(rawBaseUrl)
+  const keyOk = !/[\r\n]/.test(apiKey) && (shell !== 'cmd' || cmdSafe(apiKey))
+  const rootOk = safeRoot !== null && (shell !== 'cmd' || cmdSafe(safeRoot))
+  const root = safeRoot ?? gatewayRoot(rawBaseUrl)
   return {
-    command: oneLine ? CLIENT.install[shell](root, apiKey) : null,
+    command: oneLine && safeRoot !== null && rootOk && keyOk ? CLIENT.install[shell](safeRoot, apiKey) : null,
+    badBaseUrl: safeRoot === null,
     baseUrl: root,
-    envLines: envLines(shell, [['ANTHROPIC_BASE_URL', root], ['ANTHROPIC_AUTH_TOKEN', apiKey]])
+    envLines: envLines(shell, [['ANTHROPIC_BASE_URL', root], ['ANTHROPIC_AUTH_TOKEN', stripLineBreaks(apiKey)]])
   }
 }
 
@@ -85,7 +110,9 @@ export function connectSnippet(rawBaseUrl: string, apiKey: string, shell: Shell,
 const cmdQuote = (v: string) => `"${v}"`
 
 function envLines(shell: Shell, pairs: Array<[string, string]>): string[] {
-  return pairs.map(([k, v]) => {
+  // A value with a double quote cannot be written as cmd's set "K=V"; leave that line out.
+  const usable = shell === 'cmd' ? pairs.filter(([, v]) => !v.includes('"')) : pairs
+  return usable.map(([k, v]) => {
     if (shell === 'powershell') return `$env:${k}=${psQuote(v)}`
     if (shell === 'cmd') return `set ${cmdQuote(`${k}=${v}`)}`
     return `export ${k}=${shellQuote(v)}`

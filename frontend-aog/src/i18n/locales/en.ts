@@ -216,6 +216,8 @@ const en: typeof zh = {
     manual: 'Manual setup (without {client})',
     manualOnly: 'Set up Claude Code manually',
     manualHint: 'Set these two environment variables in the terminal you start claude from:',
+    badBaseUrl: 'This site’s API address is misconfigured, so no one-line command can be generated. Contact the administrator, or set things up by hand below.',
+    noOneLine: 'A {client} one-line command cannot be generated safely for this terminal. Pick another terminal type or set things up by hand below.',
     unsupported: 'This key’s group cannot be used with Claude Code. Choose another group under “Edit”, then connect.'
   },
   keys: {

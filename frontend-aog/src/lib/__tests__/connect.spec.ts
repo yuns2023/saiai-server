@@ -70,4 +70,35 @@ describe('connect', () => {
     // Interactive cmd keeps %% literally, so the value is passed through inside the quotes.
     expect(connectSnippet(base, 'k', 'cmd').envLines[0]).toBe('set "ANTHROPIC_BASE_URL=https://ccyou.example/a$b&c%d"')
   })
+
+  it('never builds an install command from a base URL that is not an absolute http(s) URL', () => {
+    const evil = 'https://[invalid]/" & echo X & rem "'
+    for (const shell of ['unix', 'powershell', 'cmd'] as const) {
+      const s = connectSnippet(evil, 'k', shell)
+      expect(s.command).toBeNull()
+      expect(s.badBaseUrl).toBe(true)
+    }
+    // cmd cannot carry a value with " inside set "K=V", so that line is left out.
+    expect(connectSnippet(evil, 'k', 'cmd').envLines).toEqual(['set "ANTHROPIC_AUTH_TOKEN=k"'])
+    for (const bad of ['/relative', 'ftp://ccyou.example', 'javascript:alert(1)', 'https://ccyou.example\r\n& calc', '']) {
+      expect(connectSnippet(bad, 'k', 'unix').command).toBeNull()
+    }
+  })
+
+  it('uses the URL-serialized root, so quotes and spaces in a valid URL are percent-encoded', () => {
+    const s = connectSnippet('https://ccyou.example/a" b/v1?x="y"#"z"', 'k', 'powershell')
+    expect(s.command).toBe(
+      "& ([scriptblock]::Create((irm https://github.com/2742zdz/AITP/releases/latest/download/setup.ps1))) -BaseUrl 'https://ccyou.example/a%22%20b' -ApiKey 'k'"
+    )
+    // The encoded form contains %, which cmd could expand, so cmd gets no one-liner.
+    expect(connectSnippet('https://ccyou.example/a" b', 'k', 'cmd').command).toBeNull()
+    expect(s.badBaseUrl).toBe(false)
+  })
+
+  it('skips only the cmd one-liner when cmd would expand % or the key has a quote or line break', () => {
+    expect(connectSnippet('https://ccyou.example/%OS%', 'k', 'cmd').command).toBeNull()
+    expect(connectSnippet('https://ccyou.example/%OS%', 'k', 'powershell').command).not.toBeNull()
+    expect(connectSnippet('https://ccyou.example', 'a"b', 'cmd').command).toBeNull()
+    expect(connectSnippet('https://ccyou.example', 'a\nb', 'unix').command).toBeNull()
+  })
 })
