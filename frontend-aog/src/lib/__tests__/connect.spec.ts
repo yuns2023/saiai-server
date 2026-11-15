@@ -9,34 +9,34 @@ describe('connect', () => {
 
   it('points the AITP client at the site', () => {
     expect(CLIENT.displayName).toBe('AITP')
-    expect(CLIENT.installerBase).toBe('https://github.com/2742zdz/AITP/releases/latest/download')
+    expect(CLIENT.installerBase).toBe('https://aitp.lol')
     expect(CLIENT.oneLineInstall).toBe(true)
   })
 
   it('builds the exact install command for each shell', () => {
     const key = 'sk-aaa_BBB-000'
     expect(connectSnippet('https://ccyou.example/v1', key, 'unix').command).toBe(
-      "curl -fsSL https://github.com/2742zdz/AITP/releases/latest/download/setup.sh | bash -s -- --base-url 'https://ccyou.example' --api-key 'sk-aaa_BBB-000'"
+      "curl -fsSL https://aitp.lol/setup.sh | bash -s -- --base-url 'https://ccyou.example' --api-key 'sk-aaa_BBB-000'"
     )
     expect(connectSnippet('https://ccyou.example/v1', key, 'powershell').command).toBe(
-      "& ([scriptblock]::Create((irm https://github.com/2742zdz/AITP/releases/latest/download/setup.ps1))) -BaseUrl 'https://ccyou.example' -ApiKey 'sk-aaa_BBB-000'"
+      "& ([scriptblock]::Create((irm https://aitp.lol/setup.ps1))) -BaseUrl 'https://ccyou.example' -ApiKey 'sk-aaa_BBB-000'"
     )
     expect(connectSnippet('https://ccyou.example/v1', key, 'cmd').command).toBe(
-      'powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://github.com/2742zdz/AITP/releases/latest/download/setup.ps1))) -BaseUrl \'https://ccyou.example\' -ApiKey \'sk-aaa_BBB-000\'"'
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://aitp.lol/setup.ps1))) -BaseUrl \'https://ccyou.example\' -ApiKey \'sk-aaa_BBB-000\'"'
     )
   })
 
   it("quotes a key containing ' for each shell", () => {
     const key = "sk-it's"
     expect(connectSnippet('https://ccyou.example', key, 'unix').command).toBe(
-      "curl -fsSL https://github.com/2742zdz/AITP/releases/latest/download/setup.sh | bash -s -- --base-url 'https://ccyou.example' --api-key 'sk-it'\\''s'"
+      "curl -fsSL https://aitp.lol/setup.sh | bash -s -- --base-url 'https://ccyou.example' --api-key 'sk-it'\\''s'"
     )
     expect(connectSnippet('https://ccyou.example', key, 'powershell').command).toBe(
-      "& ([scriptblock]::Create((irm https://github.com/2742zdz/AITP/releases/latest/download/setup.ps1))) -BaseUrl 'https://ccyou.example' -ApiKey 'sk-it''s'"
+      "& ([scriptblock]::Create((irm https://aitp.lol/setup.ps1))) -BaseUrl 'https://ccyou.example' -ApiKey 'sk-it''s'"
     )
     const cmd = connectSnippet('https://ccyou.example', key, 'cmd').command!
     expect(cmd).toBe(
-      'powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://github.com/2742zdz/AITP/releases/latest/download/setup.ps1))) -BaseUrl \'https://ccyou.example\' -ApiKey \'sk-it\'\'s\'"'
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://aitp.lol/setup.ps1))) -BaseUrl \'https://ccyou.example\' -ApiKey \'sk-it\'\'s\'"'
     )
     // cmd wraps the whole PowerShell line in one pair of double quotes, so none may appear inside.
     expect(cmd.slice(cmd.indexOf('"') + 1, -1)).not.toContain('"')
@@ -44,7 +44,7 @@ describe('connect', () => {
 
   it('keeps any gateway path in --base-url', () => {
     const s = connectSnippet('https://api.ccyou.example/relay/v1', 'k', 'unix')
-    expect(s.command).toBe("curl -fsSL https://github.com/2742zdz/AITP/releases/latest/download/setup.sh | bash -s -- --base-url 'https://api.ccyou.example/relay' --api-key 'k'")
+    expect(s.command).toBe("curl -fsSL https://aitp.lol/setup.sh | bash -s -- --base-url 'https://api.ccyou.example/relay' --api-key 'k'")
     expect(s.baseUrl).toBe('https://api.ccyou.example/relay')
   })
 
@@ -88,7 +88,7 @@ describe('connect', () => {
   it('uses the URL-serialized root, so quotes and spaces in a valid URL are percent-encoded', () => {
     const s = connectSnippet('https://ccyou.example/a" b/v1?x="y"#"z"', 'k', 'powershell')
     expect(s.command).toBe(
-      "& ([scriptblock]::Create((irm https://github.com/2742zdz/AITP/releases/latest/download/setup.ps1))) -BaseUrl 'https://ccyou.example/a%22%20b' -ApiKey 'k'"
+      "& ([scriptblock]::Create((irm https://aitp.lol/setup.ps1))) -BaseUrl 'https://ccyou.example/a%22%20b' -ApiKey 'k'"
     )
     // The encoded form contains %, which cmd could expand, so cmd gets no one-liner.
     expect(connectSnippet('https://ccyou.example/a" b', 'k', 'cmd').command).toBeNull()
