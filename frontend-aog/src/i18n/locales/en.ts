@@ -403,7 +403,7 @@ const en: typeof zh = {
     noteTitle: 'Good to know',
     notePartial: 'You can pay in several transfers or pay more; we credit what actually arrives.',
     noteChain: 'Use the selected chain only; cross-chain transfers are not supported.',
-    noteExchange: 'Exchanges set a minimum withdrawal and deduct a fee, so less may arrive than you withdraw; we credit what arrives.',
+    noteExchange: 'Exchanges usually have a minimum withdrawal and may charge a fee, so less may arrive than you withdraw; we credit what arrives.',
     noteFinality: 'Credited once final on chain (about {n} min on {network}).',
     noteFinalityGeneric: 'Credited once final on chain.',
     noteLate: 'Transfers that arrive after the order expires are credited too.',

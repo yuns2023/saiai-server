@@ -412,21 +412,26 @@ const cryptoPayEVMConfirmingMaxBlocks = 30_000
 
 // scanEVMConfirmingTail records display-only observations for (finalized,
 // latest], newest window capped at cryptoPayEVMConfirmingMaxBlocks, in chunks
-// of evmBlocksPerScan. It never moves cursors; credit still waits for the
+// of evmBlocksPerScan walking from latest backwards so a timeout still shows
+// the newest transfers. It never moves cursors; credit still waits for the
 // finalized scan.
 func (s *CryptoPayService) scanEVMConfirmingTail(ctx context.Context, sc chain.EVMScanner, addresses []string, finalized, latest uint64) error {
-	from := finalized + 1
-	if latest >= cryptoPayEVMConfirmingMaxBlocks && latest-cryptoPayEVMConfirmingMaxBlocks+1 > from {
-		from = latest - cryptoPayEVMConfirmingMaxBlocks + 1
+	if latest <= finalized {
+		return nil
+	}
+	low := finalized + 1
+	if latest-finalized > cryptoPayEVMConfirmingMaxBlocks {
+		low = latest - cryptoPayEVMConfirmingMaxBlocks + 1
 	}
 	step := s.evmBlocksPerScan
 	if step == 0 {
 		step = 1
 	}
-	for from <= latest {
-		to := latest
-		if latest-from >= step {
-			to = from + step - 1
+	to := latest
+	for {
+		from := low
+		if to-low >= step {
+			from = to - step + 1
 		}
 		obs, err := sc.ScanRange(ctx, from, to, addresses, false)
 		if err != nil {
@@ -438,9 +443,11 @@ func (s *CryptoPayService) scanEVMConfirmingTail(ctx context.Context, sc chain.E
 		if _, err := s.IngestObservations(ctx, obs); err != nil {
 			return err
 		}
-		from = to + 1
+		if from == low {
+			return nil
+		}
+		to = from - 1
 	}
-	return nil
 }
 
 // scanEVMBatch walks one batch forward in chunks of evmBlocksPerScan blocks.

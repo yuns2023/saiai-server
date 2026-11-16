@@ -1742,7 +1742,7 @@ func TestCryptoPay_ConfirmingTailCoversWholeUnfinalizedGap(t *testing.T) {
 	env.evm.logs = []chain.Observation{late}
 	env.evm.calls = nil
 	env.svc.RunWorkerPass(ctx)
-	require.Equal(t, []string{"1001-3000/false/1", "3001-5000/false/1", "5001-7000/false/1"}, tails())
+	require.Equal(t, []string{"5001-7000/false/1", "3001-5000/false/1", "1001-3000/false/1"}, tails(), "newest chunk first")
 	require.Equal(t, "observed", depositStatus(t, "arbitrum-one", late.TxHash, late.EventKey), "shown as confirming long before finalization")
 
 	// A huge gap is capped to the newest window.
@@ -1751,7 +1751,7 @@ func TestCryptoPay_ConfirmingTailCoversWholeUnfinalizedGap(t *testing.T) {
 	env.svc.RunWorkerPass(ctx)
 	got := tails()
 	require.NotEmpty(t, got)
-	require.True(t, strings.HasPrefix(got[0], "70001-"), got[0])
-	require.Equal(t, "98001-100000/false/1", got[len(got)-1])
+	require.Equal(t, "98001-100000/false/1", got[0])
+	require.Equal(t, "70001-72000/false/1", got[len(got)-1])
 	require.Len(t, got, 15)
 }
