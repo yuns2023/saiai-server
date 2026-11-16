@@ -65,6 +65,8 @@ describe('helpers', () => {
   it('cryptoOrderError maps reasons and statuses', () => {
     expect(cryptoOrderError({ status: 409, reason: 'CRYPTO_PAY_ADDRESS_UNAVAILABLE' })).toBe('addressUnavailable')
     expect(cryptoOrderError({ status: 503, reason: 'CRYPTO_PAY_DISABLED' })).toBe('disabled')
+    expect(cryptoOrderError({ status: 400, reason: 'CRYPTO_PAY_AMOUNT_INVALID' })).toBe('amountInvalid')
+    expect(cryptoOrderError({ status: 400, reason: 'CRYPTO_PAY_NETWORK_UNSUPPORTED' })).toBe('networkUnsupported')
     expect(cryptoOrderError({ status: 409 })).toBe('addressUnavailable')
     expect(cryptoOrderError({ status: 400, reason: 'OTHER' })).toBeNull()
     expect(cryptoOrderError(undefined)).toBeNull()

@@ -52,11 +52,7 @@ export interface CryptoOrder {
   status: CryptoOrderStatus
   created_at: string
   expires_at: string
-  /**
-   * Contract: "finalized+observed inflows to this address since created_at (all assets)".
-   * Whether it includes not-yet-final amounts is ambiguous, so the UI never derives
-   * "paid" from it; `status` (server: finalized ≥ amount) is authoritative.
-   */
+  /** Finalized inflows only (incl. credited/held) since created_at, all assets; no overlap with confirming_amount. */
   received_amount: string
   /** Observed, not yet finalized. */
   confirming_amount: string
@@ -86,6 +82,8 @@ export interface CreateCryptoOrderInput {
 /** Structured reasons the order endpoint can fail with. */
 export const CRYPTO_PAY_ADDRESS_UNAVAILABLE = 'CRYPTO_PAY_ADDRESS_UNAVAILABLE'
 export const CRYPTO_PAY_DISABLED = 'CRYPTO_PAY_DISABLED'
+export const CRYPTO_PAY_AMOUNT_INVALID = 'CRYPTO_PAY_AMOUNT_INVALID'
+export const CRYPTO_PAY_NETWORK_UNSUPPORTED = 'CRYPTO_PAY_NETWORK_UNSUPPORTED'
 
 export const cryptoPayApi = {
   async config(): Promise<CryptoPayConfig> {
@@ -131,11 +129,13 @@ export function pageCount(p: { total: number; page_size: number }): number {
 }
 
 /** Maps an order-creation failure to a known reason (by structured reason/code, then HTTP status). */
-export function cryptoOrderError(err: unknown): 'addressUnavailable' | 'disabled' | null {
+export function cryptoOrderError(err: unknown): 'addressUnavailable' | 'disabled' | 'amountInvalid' | 'networkUnsupported' | null {
   const e = (err ?? {}) as { status?: number; code?: unknown; reason?: unknown }
   const tag = typeof e.reason === 'string' ? e.reason : typeof e.code === 'string' ? e.code : ''
   if (tag === CRYPTO_PAY_ADDRESS_UNAVAILABLE) return 'addressUnavailable'
   if (tag === CRYPTO_PAY_DISABLED) return 'disabled'
+  if (tag === CRYPTO_PAY_AMOUNT_INVALID) return 'amountInvalid'
+  if (tag === CRYPTO_PAY_NETWORK_UNSUPPORTED) return 'networkUnsupported'
   if (!tag && e.status === 409) return 'addressUnavailable'
   if (!tag && e.status === 503) return 'disabled'
   return null

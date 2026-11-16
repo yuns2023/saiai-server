@@ -63,6 +63,11 @@ const creditedFull = computed(() => !!order.value && isPositive(order.value.amou
 const lastCreditedAt = computed(() => order.value?.deposits.find((d) => d.credited_at)?.credited_at ?? null)
 const hasHeld = computed(() => !!order.value?.deposits.some((d) => d.status === 'held'))
 const hasOrphaned = computed(() => !!order.value?.deposits.some((d) => d.status === 'orphaned'))
+/** The fixed per-chain address accepts every whitelisted asset on that chain. */
+const acceptedAssets = computed(() => {
+  const list = net.value?.assets.map((a) => a.symbol).filter(Boolean) ?? []
+  return (list.length ? list : [order.value?.asset ?? '']).join(t('crypto.assetsOr'))
+})
 const addressUrl = computed(() => (order.value ? explorerUrl(net.value?.explorer_address_url, 'addr', order.value.address) : ''))
 
 function txUrl(hash: string): string {
@@ -241,7 +246,7 @@ onUnmounted(() => {
           </div>
 
           <div class="mt-5 rounded border border-seal/40 bg-seal-wash px-3 py-2.5 text-sm" role="note" data-testid="crypto-warning">
-            <p class="font-semibold text-seal">{{ t('crypto.warnTitle', { asset: order.asset, network: networkLabel }) }}</p>
+            <p class="font-semibold text-seal">{{ t('crypto.warnTitle', { assets: acceptedAssets, network: networkLabel }) }}</p>
             <p class="mt-0.5 text-ink">{{ t('crypto.warnBody') }}</p>
           </div>
 

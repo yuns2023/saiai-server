@@ -32,7 +32,7 @@ const config: CryptoPayConfig = {
     {
       network: 'arbitrum-one',
       label: 'Arbitrum',
-      assets: [{ symbol: 'USDC', contract: '0xaf88d065e77c8cc2239327c5edb3a432268e5831' }],
+      assets: [{ symbol: 'USDC', contract: '0xaf88d065e77c8cc2239327c5edb3a432268e5831' }, { symbol: 'USDT', contract: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9' }],
       finality_hint_minutes: 20,
       explorer_tx_url: 'https://arbiscan.io/tx/{tx}',
       explorer_address_url: 'https://arbiscan.io/address/{addr}'
@@ -104,7 +104,7 @@ describe('CryptoCheckoutView', () => {
     expect(w.find('[data-testid=crypto-qr]').attributes('src')).toContain('QR')
     expect(w.text()).toContain('向此地址发送 $10.00 USDC（Arbitrum）')
     expect(w.text()).toContain('Arbitrum 约 20 分钟')
-    expect(w.find('[data-testid=crypto-warning]').text()).toContain('只能转入 Arbitrum 链上的 USDC')
+    expect(w.find('[data-testid=crypto-warning]').text()).toContain('只能转入 Arbitrum 链上的 USDC 或 USDT')
     expect(w.find('a[href="https://arbiscan.io/address/0x1111111111111111111111111111111111111111"]').exists()).toBe(true)
     expect(w.findComponent(RouterLinkStub).props('to')).toBe('/billing')
     expect(w.find('[data-testid=crypto-countdown]').text()).toBe('10:00')
@@ -118,6 +118,14 @@ describe('CryptoCheckoutView', () => {
     await vi.advanceTimersByTimeAsync(4000)
     expect(api.getOrder).toHaveBeenCalledTimes(2)
     expect(api.getOrder).toHaveBeenLastCalledWith('7')
+  })
+
+  it('warns with every asset the chain address accepts (en)', async () => {
+    i18n.global.locale.value = 'en'
+    const w = await mountView(order())
+    expect(w.find('[data-testid=crypto-warning]').text()).toContain('Only USDC or USDT on Arbitrum')
+    expect(w.text()).toContain('View on block explorer')
+    i18n.global.locale.value = 'zh'
   })
 
   it('shows hours when more than an hour is left', async () => {

@@ -132,6 +132,15 @@ describe('BillingView stablecoin top-up', () => {
     expect(push).toHaveBeenCalledWith({ name: 'crypto-checkout', params: { id: '42' } })
   })
 
+  it('explains a rejected amount from the server', async () => {
+    crypto.config.mockResolvedValue(enabled)
+    crypto.createOrder.mockRejectedValue({ status: 400, reason: 'CRYPTO_PAY_AMOUNT_INVALID', message: 'bad' })
+    const w = await mountView()
+    await w.find('[data-testid=crypto-topup] form').trigger('submit')
+    await flushPromises()
+    expect(w.find('[data-testid=crypto-topup] [role=alert]').text()).toContain('金额不正确')
+  })
+
   it('blocks invalid amounts and explains an unavailable address', async () => {
     crypto.config.mockResolvedValue(enabled)
     crypto.createOrder.mockRejectedValue({ status: 409, reason: 'CRYPTO_PAY_ADDRESS_UNAVAILABLE', message: 'x' })
