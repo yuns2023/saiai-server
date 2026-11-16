@@ -178,6 +178,29 @@ func ProvidePaymentExpiryService(db *sql.DB, paymentService *PaymentService) *Pa
 	return svc
 }
 
+// ProvideCryptoPayChainDeps wires the chain package (see BuildCryptoPayChainDeps).
+func ProvideCryptoPayChainDeps(cfg *config.Config) CryptoPayChainDeps {
+	return BuildCryptoPayChainDeps(cfg.CryptoPay, nil)
+}
+
+// ProvideCryptoPayService creates the stablecoin top-up service.
+func ProvideCryptoPayService(db *sql.DB, settingRepo SettingRepository, cfg *config.Config, deps CryptoPayChainDeps,
+	billingCache *BillingCacheService, authCache APIKeyAuthCacheInvalidator) *CryptoPayService {
+	var balanceCache cryptoPayBalanceCache
+	if billingCache != nil {
+		balanceCache = billingCache
+	}
+	return NewCryptoPayService(db, settingRepo, cfg.CryptoPay, deps, balanceCache, authCache)
+}
+
+// ProvideCryptoPayWorker creates and starts the crypto pay worker. It does not
+// start at all unless crypto_pay.enabled and a network are configured.
+func ProvideCryptoPayWorker(db *sql.DB, svc *CryptoPayService) *CryptoPayWorker {
+	w := NewCryptoPayWorker(db, svc, svc.scanInterval)
+	w.Start()
+	return w
+}
+
 // ProvideModerationEvidenceCleanupService creates and starts the hourly
 // evidence retention worker. It does not depend on ops feature flags.
 func ProvideModerationEvidenceCleanupService(db *sql.DB, repo InputModerationEvidenceRepository) *ModerationEvidenceCleanupService {
@@ -646,6 +669,9 @@ var ProviderSet = wire.NewSet(
 	NewPaymentConfigService,
 	NewPaymentService,
 	ProvidePaymentExpiryService,
+	ProvideCryptoPayChainDeps,
+	ProvideCryptoPayService,
+	ProvideCryptoPayWorker,
 	ProvideModerationEvidenceCleanupService,
 	NewInputModerationEvidenceService,
 )

@@ -72,6 +72,7 @@ func provideCleanup(
 	accountExpiry *service.AccountExpiryService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	paymentExpiry *service.PaymentExpiryService,
+	cryptoPayWorker *service.CryptoPayWorker,
 	moderationEvidenceCleanup *service.ModerationEvidenceCleanupService,
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
@@ -177,6 +178,10 @@ func provideCleanup(
 			}},
 			{"PaymentExpiryService", func() error {
 				paymentExpiry.Stop()
+				return nil
+			}},
+			{"CryptoPayWorker", func() error {
+				cryptoPayWorker.Stop()
 				return nil
 			}},
 			{"ModerationEvidenceCleanupService", func() error {

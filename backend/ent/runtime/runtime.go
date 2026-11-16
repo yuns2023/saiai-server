@@ -11,6 +11,14 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/announcement"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopayaddress"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopayauditlog"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopaycredit"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopaydeposit"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopaykeyset"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopayorder"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopayscancursor"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopaysolanapoolentry"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
@@ -366,6 +374,242 @@ func init() {
 	announcementreadDescCreatedAt := announcementreadFields[3].Descriptor()
 	// announcementread.DefaultCreatedAt holds the default value on creation for the created_at field.
 	announcementread.DefaultCreatedAt = announcementreadDescCreatedAt.Default.(func() time.Time)
+	cryptopayaddressFields := schema.CryptoPayAddress{}.Fields()
+	_ = cryptopayaddressFields
+	// cryptopayaddressDescNetwork is the schema descriptor for network field.
+	cryptopayaddressDescNetwork := cryptopayaddressFields[1].Descriptor()
+	// cryptopayaddress.NetworkValidator is a validator for the "network" field. It is called by the builders before save.
+	cryptopayaddress.NetworkValidator = cryptopayaddressDescNetwork.Validators[0].(func(string) error)
+	// cryptopayaddressDescAddress is the schema descriptor for address field.
+	cryptopayaddressDescAddress := cryptopayaddressFields[2].Descriptor()
+	// cryptopayaddress.AddressValidator is a validator for the "address" field. It is called by the builders before save.
+	cryptopayaddress.AddressValidator = cryptopayaddressDescAddress.Validators[0].(func(string) error)
+	// cryptopayaddressDescDerivationPath is the schema descriptor for derivation_path field.
+	cryptopayaddressDescDerivationPath := cryptopayaddressFields[6].Descriptor()
+	// cryptopayaddress.DerivationPathValidator is a validator for the "derivation_path" field. It is called by the builders before save.
+	cryptopayaddress.DerivationPathValidator = cryptopayaddressDescDerivationPath.Validators[0].(func(string) error)
+	// cryptopayaddressDescCreatedAt is the schema descriptor for created_at field.
+	cryptopayaddressDescCreatedAt := cryptopayaddressFields[9].Descriptor()
+	// cryptopayaddress.DefaultCreatedAt holds the default value on creation for the created_at field.
+	cryptopayaddress.DefaultCreatedAt = cryptopayaddressDescCreatedAt.Default.(func() time.Time)
+	cryptopayauditlogFields := schema.CryptoPayAuditLog{}.Fields()
+	_ = cryptopayauditlogFields
+	// cryptopayauditlogDescAction is the schema descriptor for action field.
+	cryptopayauditlogDescAction := cryptopayauditlogFields[0].Descriptor()
+	// cryptopayauditlog.ActionValidator is a validator for the "action" field. It is called by the builders before save.
+	cryptopayauditlog.ActionValidator = cryptopayauditlogDescAction.Validators[0].(func(string) error)
+	// cryptopayauditlogDescOperator is the schema descriptor for operator field.
+	cryptopayauditlogDescOperator := cryptopayauditlogFields[4].Descriptor()
+	// cryptopayauditlog.DefaultOperator holds the default value on creation for the operator field.
+	cryptopayauditlog.DefaultOperator = cryptopayauditlogDescOperator.Default.(string)
+	// cryptopayauditlog.OperatorValidator is a validator for the "operator" field. It is called by the builders before save.
+	cryptopayauditlog.OperatorValidator = cryptopayauditlogDescOperator.Validators[0].(func(string) error)
+	// cryptopayauditlogDescDetail is the schema descriptor for detail field.
+	cryptopayauditlogDescDetail := cryptopayauditlogFields[5].Descriptor()
+	// cryptopayauditlog.DefaultDetail holds the default value on creation for the detail field.
+	cryptopayauditlog.DefaultDetail = cryptopayauditlogDescDetail.Default.(string)
+	// cryptopayauditlogDescCreatedAt is the schema descriptor for created_at field.
+	cryptopayauditlogDescCreatedAt := cryptopayauditlogFields[6].Descriptor()
+	// cryptopayauditlog.DefaultCreatedAt holds the default value on creation for the created_at field.
+	cryptopayauditlog.DefaultCreatedAt = cryptopayauditlogDescCreatedAt.Default.(func() time.Time)
+	cryptopaycreditFields := schema.CryptoPayCredit{}.Fields()
+	_ = cryptopaycreditFields
+	// cryptopaycreditDescOperator is the schema descriptor for operator field.
+	cryptopaycreditDescOperator := cryptopaycreditFields[4].Descriptor()
+	// cryptopaycredit.DefaultOperator holds the default value on creation for the operator field.
+	cryptopaycredit.DefaultOperator = cryptopaycreditDescOperator.Default.(string)
+	// cryptopaycredit.OperatorValidator is a validator for the "operator" field. It is called by the builders before save.
+	cryptopaycredit.OperatorValidator = cryptopaycreditDescOperator.Validators[0].(func(string) error)
+	// cryptopaycreditDescCreatedAt is the schema descriptor for created_at field.
+	cryptopaycreditDescCreatedAt := cryptopaycreditFields[5].Descriptor()
+	// cryptopaycredit.DefaultCreatedAt holds the default value on creation for the created_at field.
+	cryptopaycredit.DefaultCreatedAt = cryptopaycreditDescCreatedAt.Default.(func() time.Time)
+	cryptopaydepositFields := schema.CryptoPayDeposit{}.Fields()
+	_ = cryptopaydepositFields
+	// cryptopaydepositDescNetwork is the schema descriptor for network field.
+	cryptopaydepositDescNetwork := cryptopaydepositFields[0].Descriptor()
+	// cryptopaydeposit.NetworkValidator is a validator for the "network" field. It is called by the builders before save.
+	cryptopaydeposit.NetworkValidator = cryptopaydepositDescNetwork.Validators[0].(func(string) error)
+	// cryptopaydepositDescTxHash is the schema descriptor for tx_hash field.
+	cryptopaydepositDescTxHash := cryptopaydepositFields[1].Descriptor()
+	// cryptopaydeposit.TxHashValidator is a validator for the "tx_hash" field. It is called by the builders before save.
+	cryptopaydeposit.TxHashValidator = cryptopaydepositDescTxHash.Validators[0].(func(string) error)
+	// cryptopaydepositDescEventKey is the schema descriptor for event_key field.
+	cryptopaydepositDescEventKey := cryptopaydepositFields[2].Descriptor()
+	// cryptopaydeposit.EventKeyValidator is a validator for the "event_key" field. It is called by the builders before save.
+	cryptopaydeposit.EventKeyValidator = cryptopaydepositDescEventKey.Validators[0].(func(string) error)
+	// cryptopaydepositDescAddress is the schema descriptor for address field.
+	cryptopaydepositDescAddress := cryptopaydepositFields[5].Descriptor()
+	// cryptopaydeposit.AddressValidator is a validator for the "address" field. It is called by the builders before save.
+	cryptopaydeposit.AddressValidator = cryptopaydepositDescAddress.Validators[0].(func(string) error)
+	// cryptopaydepositDescAssetSymbol is the schema descriptor for asset_symbol field.
+	cryptopaydepositDescAssetSymbol := cryptopaydepositFields[6].Descriptor()
+	// cryptopaydeposit.AssetSymbolValidator is a validator for the "asset_symbol" field. It is called by the builders before save.
+	cryptopaydeposit.AssetSymbolValidator = cryptopaydepositDescAssetSymbol.Validators[0].(func(string) error)
+	// cryptopaydepositDescAssetContract is the schema descriptor for asset_contract field.
+	cryptopaydepositDescAssetContract := cryptopaydepositFields[7].Descriptor()
+	// cryptopaydeposit.AssetContractValidator is a validator for the "asset_contract" field. It is called by the builders before save.
+	cryptopaydeposit.AssetContractValidator = cryptopaydepositDescAssetContract.Validators[0].(func(string) error)
+	// cryptopaydepositDescTokenAccount is the schema descriptor for token_account field.
+	cryptopaydepositDescTokenAccount := cryptopaydepositFields[8].Descriptor()
+	// cryptopaydeposit.DefaultTokenAccount holds the default value on creation for the token_account field.
+	cryptopaydeposit.DefaultTokenAccount = cryptopaydepositDescTokenAccount.Default.(string)
+	// cryptopaydeposit.TokenAccountValidator is a validator for the "token_account" field. It is called by the builders before save.
+	cryptopaydeposit.TokenAccountValidator = cryptopaydepositDescTokenAccount.Validators[0].(func(string) error)
+	// cryptopaydepositDescFromAddress is the schema descriptor for from_address field.
+	cryptopaydepositDescFromAddress := cryptopaydepositFields[9].Descriptor()
+	// cryptopaydeposit.DefaultFromAddress holds the default value on creation for the from_address field.
+	cryptopaydeposit.DefaultFromAddress = cryptopaydepositDescFromAddress.Default.(string)
+	// cryptopaydeposit.FromAddressValidator is a validator for the "from_address" field. It is called by the builders before save.
+	cryptopaydeposit.FromAddressValidator = cryptopaydepositDescFromAddress.Validators[0].(func(string) error)
+	// cryptopaydepositDescBlockHash is the schema descriptor for block_hash field.
+	cryptopaydepositDescBlockHash := cryptopaydepositFields[14].Descriptor()
+	// cryptopaydeposit.DefaultBlockHash holds the default value on creation for the block_hash field.
+	cryptopaydeposit.DefaultBlockHash = cryptopaydepositDescBlockHash.Default.(string)
+	// cryptopaydeposit.BlockHashValidator is a validator for the "block_hash" field. It is called by the builders before save.
+	cryptopaydeposit.BlockHashValidator = cryptopaydepositDescBlockHash.Validators[0].(func(string) error)
+	// cryptopaydepositDescStatus is the schema descriptor for status field.
+	cryptopaydepositDescStatus := cryptopaydepositFields[16].Descriptor()
+	// cryptopaydeposit.DefaultStatus holds the default value on creation for the status field.
+	cryptopaydeposit.DefaultStatus = cryptopaydepositDescStatus.Default.(string)
+	// cryptopaydeposit.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	cryptopaydeposit.StatusValidator = cryptopaydepositDescStatus.Validators[0].(func(string) error)
+	// cryptopaydepositDescHoldReason is the schema descriptor for hold_reason field.
+	cryptopaydepositDescHoldReason := cryptopaydepositFields[17].Descriptor()
+	// cryptopaydeposit.DefaultHoldReason holds the default value on creation for the hold_reason field.
+	cryptopaydeposit.DefaultHoldReason = cryptopaydepositDescHoldReason.Default.(string)
+	// cryptopaydeposit.HoldReasonValidator is a validator for the "hold_reason" field. It is called by the builders before save.
+	cryptopaydeposit.HoldReasonValidator = cryptopaydepositDescHoldReason.Validators[0].(func(string) error)
+	// cryptopaydepositDescObservedAt is the schema descriptor for observed_at field.
+	cryptopaydepositDescObservedAt := cryptopaydepositFields[18].Descriptor()
+	// cryptopaydeposit.DefaultObservedAt holds the default value on creation for the observed_at field.
+	cryptopaydeposit.DefaultObservedAt = cryptopaydepositDescObservedAt.Default.(func() time.Time)
+	// cryptopaydepositDescCreatedAt is the schema descriptor for created_at field.
+	cryptopaydepositDescCreatedAt := cryptopaydepositFields[22].Descriptor()
+	// cryptopaydeposit.DefaultCreatedAt holds the default value on creation for the created_at field.
+	cryptopaydeposit.DefaultCreatedAt = cryptopaydepositDescCreatedAt.Default.(func() time.Time)
+	// cryptopaydepositDescUpdatedAt is the schema descriptor for updated_at field.
+	cryptopaydepositDescUpdatedAt := cryptopaydepositFields[23].Descriptor()
+	// cryptopaydeposit.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	cryptopaydeposit.DefaultUpdatedAt = cryptopaydepositDescUpdatedAt.Default.(func() time.Time)
+	// cryptopaydeposit.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	cryptopaydeposit.UpdateDefaultUpdatedAt = cryptopaydepositDescUpdatedAt.UpdateDefault.(func() time.Time)
+	cryptopaykeysetFields := schema.CryptoPayKeyset{}.Fields()
+	_ = cryptopaykeysetFields
+	// cryptopaykeysetDescNetwork is the schema descriptor for network field.
+	cryptopaykeysetDescNetwork := cryptopaykeysetFields[0].Descriptor()
+	// cryptopaykeyset.NetworkValidator is a validator for the "network" field. It is called by the builders before save.
+	cryptopaykeyset.NetworkValidator = cryptopaykeysetDescNetwork.Validators[0].(func(string) error)
+	// cryptopaykeysetDescFamily is the schema descriptor for family field.
+	cryptopaykeysetDescFamily := cryptopaykeysetFields[1].Descriptor()
+	// cryptopaykeyset.FamilyValidator is a validator for the "family" field. It is called by the builders before save.
+	cryptopaykeyset.FamilyValidator = cryptopaykeysetDescFamily.Validators[0].(func(string) error)
+	// cryptopaykeysetDescXpub is the schema descriptor for xpub field.
+	cryptopaykeysetDescXpub := cryptopaykeysetFields[3].Descriptor()
+	// cryptopaykeyset.DefaultXpub holds the default value on creation for the xpub field.
+	cryptopaykeyset.DefaultXpub = cryptopaykeysetDescXpub.Default.(string)
+	// cryptopaykeysetDescPathTemplate is the schema descriptor for path_template field.
+	cryptopaykeysetDescPathTemplate := cryptopaykeysetFields[4].Descriptor()
+	// cryptopaykeyset.PathTemplateValidator is a validator for the "path_template" field. It is called by the builders before save.
+	cryptopaykeyset.PathTemplateValidator = cryptopaykeysetDescPathTemplate.Validators[0].(func(string) error)
+	// cryptopaykeysetDescFingerprint is the schema descriptor for fingerprint field.
+	cryptopaykeysetDescFingerprint := cryptopaykeysetFields[5].Descriptor()
+	// cryptopaykeyset.FingerprintValidator is a validator for the "fingerprint" field. It is called by the builders before save.
+	cryptopaykeyset.FingerprintValidator = cryptopaykeysetDescFingerprint.Validators[0].(func(string) error)
+	// cryptopaykeysetDescSignerPubkey is the schema descriptor for signer_pubkey field.
+	cryptopaykeysetDescSignerPubkey := cryptopaykeysetFields[6].Descriptor()
+	// cryptopaykeyset.DefaultSignerPubkey holds the default value on creation for the signer_pubkey field.
+	cryptopaykeyset.DefaultSignerPubkey = cryptopaykeysetDescSignerPubkey.Default.(string)
+	// cryptopaykeyset.SignerPubkeyValidator is a validator for the "signer_pubkey" field. It is called by the builders before save.
+	cryptopaykeyset.SignerPubkeyValidator = cryptopaykeysetDescSignerPubkey.Validators[0].(func(string) error)
+	// cryptopaykeysetDescNextIndex is the schema descriptor for next_index field.
+	cryptopaykeysetDescNextIndex := cryptopaykeysetFields[7].Descriptor()
+	// cryptopaykeyset.DefaultNextIndex holds the default value on creation for the next_index field.
+	cryptopaykeyset.DefaultNextIndex = cryptopaykeysetDescNextIndex.Default.(int64)
+	// cryptopaykeysetDescPoolSize is the schema descriptor for pool_size field.
+	cryptopaykeysetDescPoolSize := cryptopaykeysetFields[8].Descriptor()
+	// cryptopaykeyset.DefaultPoolSize holds the default value on creation for the pool_size field.
+	cryptopaykeyset.DefaultPoolSize = cryptopaykeysetDescPoolSize.Default.(int)
+	// cryptopaykeysetDescActive is the schema descriptor for active field.
+	cryptopaykeysetDescActive := cryptopaykeysetFields[9].Descriptor()
+	// cryptopaykeyset.DefaultActive holds the default value on creation for the active field.
+	cryptopaykeyset.DefaultActive = cryptopaykeysetDescActive.Default.(bool)
+	// cryptopaykeysetDescCreatedBy is the schema descriptor for created_by field.
+	cryptopaykeysetDescCreatedBy := cryptopaykeysetFields[10].Descriptor()
+	// cryptopaykeyset.DefaultCreatedBy holds the default value on creation for the created_by field.
+	cryptopaykeyset.DefaultCreatedBy = cryptopaykeysetDescCreatedBy.Default.(string)
+	// cryptopaykeyset.CreatedByValidator is a validator for the "created_by" field. It is called by the builders before save.
+	cryptopaykeyset.CreatedByValidator = cryptopaykeysetDescCreatedBy.Validators[0].(func(string) error)
+	// cryptopaykeysetDescCreatedAt is the schema descriptor for created_at field.
+	cryptopaykeysetDescCreatedAt := cryptopaykeysetFields[11].Descriptor()
+	// cryptopaykeyset.DefaultCreatedAt holds the default value on creation for the created_at field.
+	cryptopaykeyset.DefaultCreatedAt = cryptopaykeysetDescCreatedAt.Default.(func() time.Time)
+	// cryptopaykeysetDescUpdatedAt is the schema descriptor for updated_at field.
+	cryptopaykeysetDescUpdatedAt := cryptopaykeysetFields[12].Descriptor()
+	// cryptopaykeyset.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	cryptopaykeyset.DefaultUpdatedAt = cryptopaykeysetDescUpdatedAt.Default.(func() time.Time)
+	// cryptopaykeyset.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	cryptopaykeyset.UpdateDefaultUpdatedAt = cryptopaykeysetDescUpdatedAt.UpdateDefault.(func() time.Time)
+	cryptopayorderFields := schema.CryptoPayOrder{}.Fields()
+	_ = cryptopayorderFields
+	// cryptopayorderDescNetwork is the schema descriptor for network field.
+	cryptopayorderDescNetwork := cryptopayorderFields[2].Descriptor()
+	// cryptopayorder.NetworkValidator is a validator for the "network" field. It is called by the builders before save.
+	cryptopayorder.NetworkValidator = cryptopayorderDescNetwork.Validators[0].(func(string) error)
+	// cryptopayorderDescAsset is the schema descriptor for asset field.
+	cryptopayorderDescAsset := cryptopayorderFields[3].Descriptor()
+	// cryptopayorder.AssetValidator is a validator for the "asset" field. It is called by the builders before save.
+	cryptopayorder.AssetValidator = cryptopayorderDescAsset.Validators[0].(func(string) error)
+	// cryptopayorderDescCreatedAt is the schema descriptor for created_at field.
+	cryptopayorderDescCreatedAt := cryptopayorderFields[5].Descriptor()
+	// cryptopayorder.DefaultCreatedAt holds the default value on creation for the created_at field.
+	cryptopayorder.DefaultCreatedAt = cryptopayorderDescCreatedAt.Default.(func() time.Time)
+	cryptopayscancursorFields := schema.CryptoPayScanCursor{}.Fields()
+	_ = cryptopayscancursorFields
+	// cryptopayscancursorDescScopeKey is the schema descriptor for scope_key field.
+	cryptopayscancursorDescScopeKey := cryptopayscancursorFields[0].Descriptor()
+	// cryptopayscancursor.ScopeKeyValidator is a validator for the "scope_key" field. It is called by the builders before save.
+	cryptopayscancursor.ScopeKeyValidator = cryptopayscancursorDescScopeKey.Validators[0].(func(string) error)
+	// cryptopayscancursorDescNetwork is the schema descriptor for network field.
+	cryptopayscancursorDescNetwork := cryptopayscancursorFields[1].Descriptor()
+	// cryptopayscancursor.NetworkValidator is a validator for the "network" field. It is called by the builders before save.
+	cryptopayscancursor.NetworkValidator = cryptopayscancursorDescNetwork.Validators[0].(func(string) error)
+	// cryptopayscancursorDescPosition is the schema descriptor for position field.
+	cryptopayscancursorDescPosition := cryptopayscancursorFields[2].Descriptor()
+	// cryptopayscancursor.DefaultPosition holds the default value on creation for the position field.
+	cryptopayscancursor.DefaultPosition = cryptopayscancursorDescPosition.Default.(string)
+	// cryptopayscancursorDescVersion is the schema descriptor for version field.
+	cryptopayscancursorDescVersion := cryptopayscancursorFields[3].Descriptor()
+	// cryptopayscancursor.DefaultVersion holds the default value on creation for the version field.
+	cryptopayscancursor.DefaultVersion = cryptopayscancursorDescVersion.Default.(int64)
+	// cryptopayscancursorDescLastError is the schema descriptor for last_error field.
+	cryptopayscancursorDescLastError := cryptopayscancursorFields[6].Descriptor()
+	// cryptopayscancursor.DefaultLastError holds the default value on creation for the last_error field.
+	cryptopayscancursor.DefaultLastError = cryptopayscancursorDescLastError.Default.(string)
+	// cryptopayscancursorDescCreatedAt is the schema descriptor for created_at field.
+	cryptopayscancursorDescCreatedAt := cryptopayscancursorFields[7].Descriptor()
+	// cryptopayscancursor.DefaultCreatedAt holds the default value on creation for the created_at field.
+	cryptopayscancursor.DefaultCreatedAt = cryptopayscancursorDescCreatedAt.Default.(func() time.Time)
+	// cryptopayscancursorDescUpdatedAt is the schema descriptor for updated_at field.
+	cryptopayscancursorDescUpdatedAt := cryptopayscancursorFields[8].Descriptor()
+	// cryptopayscancursor.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	cryptopayscancursor.DefaultUpdatedAt = cryptopayscancursorDescUpdatedAt.Default.(func() time.Time)
+	// cryptopayscancursor.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	cryptopayscancursor.UpdateDefaultUpdatedAt = cryptopayscancursorDescUpdatedAt.UpdateDefault.(func() time.Time)
+	cryptopaysolanapoolentryFields := schema.CryptoPaySolanaPoolEntry{}.Fields()
+	_ = cryptopaysolanapoolentryFields
+	// cryptopaysolanapoolentryDescNetwork is the schema descriptor for network field.
+	cryptopaysolanapoolentryDescNetwork := cryptopaysolanapoolentryFields[1].Descriptor()
+	// cryptopaysolanapoolentry.NetworkValidator is a validator for the "network" field. It is called by the builders before save.
+	cryptopaysolanapoolentry.NetworkValidator = cryptopaysolanapoolentryDescNetwork.Validators[0].(func(string) error)
+	// cryptopaysolanapoolentryDescAddress is the schema descriptor for address field.
+	cryptopaysolanapoolentryDescAddress := cryptopaysolanapoolentryFields[3].Descriptor()
+	// cryptopaysolanapoolentry.AddressValidator is a validator for the "address" field. It is called by the builders before save.
+	cryptopaysolanapoolentry.AddressValidator = cryptopaysolanapoolentryDescAddress.Validators[0].(func(string) error)
+	// cryptopaysolanapoolentryDescCreatedAt is the schema descriptor for created_at field.
+	cryptopaysolanapoolentryDescCreatedAt := cryptopaysolanapoolentryFields[6].Descriptor()
+	// cryptopaysolanapoolentry.DefaultCreatedAt holds the default value on creation for the created_at field.
+	cryptopaysolanapoolentry.DefaultCreatedAt = cryptopaysolanapoolentryDescCreatedAt.Default.(func() time.Time)
 	errorpassthroughruleMixin := schema.ErrorPassthroughRule{}.Mixin()
 	errorpassthroughruleMixinFields0 := errorpassthroughruleMixin[0].Fields()
 	_ = errorpassthroughruleMixinFields0

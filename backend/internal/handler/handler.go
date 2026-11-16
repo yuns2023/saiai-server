@@ -29,6 +29,7 @@ type AdminHandlers struct {
 	ErrorPassthrough *admin.ErrorPassthroughHandler
 	APIKey           *admin.AdminAPIKeyHandler
 	Payment          *admin.PaymentHandler
+	CryptoPay        *admin.CryptoPayHandler
 }
 
 // Handlers contains all HTTP handlers
@@ -50,6 +51,7 @@ type Handlers struct {
 	Totp           *TotpHandler
 	Payment        *PaymentHandler
 	PaymentWebhook *PaymentWebhookHandler
+	CryptoPay      *CryptoPayHandler
 }
 
 // BuildInfo contains build-time information

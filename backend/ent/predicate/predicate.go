@@ -24,6 +24,30 @@ type Announcement func(*sql.Selector)
 // AnnouncementRead is the predicate function for announcementread builders.
 type AnnouncementRead func(*sql.Selector)
 
+// CryptoPayAddress is the predicate function for cryptopayaddress builders.
+type CryptoPayAddress func(*sql.Selector)
+
+// CryptoPayAuditLog is the predicate function for cryptopayauditlog builders.
+type CryptoPayAuditLog func(*sql.Selector)
+
+// CryptoPayCredit is the predicate function for cryptopaycredit builders.
+type CryptoPayCredit func(*sql.Selector)
+
+// CryptoPayDeposit is the predicate function for cryptopaydeposit builders.
+type CryptoPayDeposit func(*sql.Selector)
+
+// CryptoPayKeyset is the predicate function for cryptopaykeyset builders.
+type CryptoPayKeyset func(*sql.Selector)
+
+// CryptoPayOrder is the predicate function for cryptopayorder builders.
+type CryptoPayOrder func(*sql.Selector)
+
+// CryptoPayScanCursor is the predicate function for cryptopayscancursor builders.
+type CryptoPayScanCursor func(*sql.Selector)
+
+// CryptoPaySolanaPoolEntry is the predicate function for cryptopaysolanapoolentry builders.
+type CryptoPaySolanaPoolEntry func(*sql.Selector)
+
 // ErrorPassthroughRule is the predicate function for errorpassthroughrule builders.
 type ErrorPassthroughRule func(*sql.Selector)
 
