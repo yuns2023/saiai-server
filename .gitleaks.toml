@@ -55,6 +55,7 @@ description = "Public BIP32/BIP39/SLIP-10 test vectors and public Solana mainnet
 targetRules = ["generic-api-key"]
 paths = [
   '''^backend/cmd/cryptopay-offline/testdata/bip39_trezor_english\.json$''',
+  '''^backend/tools/cryptopay/cmd/cryptopay-offline/testdata/bip39_trezor_english\.json$''',
   '''^backend/internal/cryptopay/hdkey/hdkey_test\.go$''',
   '''^backend/internal/cryptopay/chain/testdata/[^/]+\.json$''',
 ]
