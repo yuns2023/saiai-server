@@ -180,6 +180,9 @@ type CryptoPayConfig struct {
 	// EVMBlocksPerScan caps one eth_getLogs range; the cursor advances after
 	// every chunk so a slow scan always makes progress.
 	EVMBlocksPerScan int `mapstructure:"evm_blocks_per_scan"`
+	// ScanUnitsPerPass caps scan units (EVM address batch / Solana token
+	// account) per network per pass; each gets the full batch timeout.
+	ScanUnitsPerPass int `mapstructure:"scan_units_per_pass"`
 }
 
 type IdempotencyConfig struct {
@@ -1468,6 +1471,7 @@ func setDefaults() {
 	viper.SetDefault("crypto_pay.scan_interval_seconds", 30)
 	viper.SetDefault("crypto_pay.scan_batch_timeout_seconds", 60)
 	viper.SetDefault("crypto_pay.evm_blocks_per_scan", 2000)
+	viper.SetDefault("crypto_pay.scan_units_per_pass", 20)
 
 	// Idempotency
 	viper.SetDefault("idempotency.observe_only", true)

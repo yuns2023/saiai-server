@@ -116,7 +116,7 @@ func TestParseCryptoPayNetworks(t *testing.T) {
 	require.Empty(t, nets, "disabled by default")
 	require.Empty(t, warns)
 
-	nets, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet"})
+	nets, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet"})
 	require.Empty(t, warns)
 	require.Len(t, nets, 2)
 	require.Equal(t, chain.ArbitrumOne, nets[0].Network)
@@ -126,7 +126,7 @@ func TestParseCryptoPayNetworks(t *testing.T) {
 	require.Equal(t, chain.SolanaTokenProgram, nets[1].Assets[0].TokenProgram)
 
 	// Fail-closed: any invalid value disables the WHOLE feature, not just that network.
-	nets, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, EVMNetwork: "arbitrum-one",
+	nets, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20, EVMNetwork: "arbitrum-one",
 		EVMAssets: "USDC:0x0000000000000000000000000000000000000001:6", SolanaNetwork: "solana-devnet"})
 	require.Empty(t, nets)
 	require.Len(t, warns, 3)
@@ -134,7 +134,7 @@ func TestParseCryptoPayNetworks(t *testing.T) {
 		EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnt"})
 	require.Empty(t, nets, "a typo in one network disables both")
 	require.NotEmpty(t, warns)
-	nets, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 0, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, EVMNetwork: "arbitrum-one"})
+	nets, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 0, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20, EVMNetwork: "arbitrum-one"})
 	require.Empty(t, nets)
 	require.NotEmpty(t, warns)
 	nets, _ = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 0, EVMNetwork: "arbitrum-one"})
@@ -146,7 +146,7 @@ func TestParseCryptoPayNetworks(t *testing.T) {
 	worker.Start()
 	worker.Stop() // never started: returns immediately
 
-	nets, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, EVMNetwork: "arbitrum-sepolia",
+	nets, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20, EVMNetwork: "arbitrum-sepolia",
 		EVMAssets: "usdc:0x75FAF114EAFB1BDBE2F0316DF893FD58CE46AA4D:6", SolanaNetwork: ""})
 	require.Empty(t, warns)
 	require.Len(t, nets, 1)
@@ -154,18 +154,18 @@ func TestParseCryptoPayNetworks(t *testing.T) {
 	require.Equal(t, "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d", nets[0].Assets[0].Contract)
 
 	for _, bad := range []string{"DAI:0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d:6", "USDC:0x1234:6", "USDC:0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d:18", "USDC"} {
-		nets, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, EVMNetwork: "arbitrum-sepolia", EVMAssets: bad})
+		nets, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20, EVMNetwork: "arbitrum-sepolia", EVMAssets: bad})
 		require.Empty(t, nets, bad)
 		require.Len(t, warns, 2, bad)
 	}
-	_, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, EVMNetwork: "ethereum"})
+	_, warns = parseCryptoPayNetworks(config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20, EVMNetwork: "ethereum"})
 	require.Len(t, warns, 2)
 }
 
 func newCryptoPayUnitService(t *testing.T, values map[string]string) *CryptoPayService {
 	t.Helper()
 	return NewCryptoPayService(nil, &cryptoPayFakeSettings{values: values},
-		config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet"}, CryptoPayChainDeps{}, nil, nil)
+		config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet"}, CryptoPayChainDeps{}, nil, nil)
 }
 
 func TestCryptoPaySettingsDefaultsAndValidation(t *testing.T) {

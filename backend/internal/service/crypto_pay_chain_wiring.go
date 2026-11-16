@@ -22,7 +22,7 @@ func BuildCryptoPayChainDeps(cfg config.CryptoPayConfig, httpClient *http.Client
 		DeriveEVMAddress:     chain.EVMAddressFromXpub,
 		VerifySolanaManifest: chain.VerifySolanaPoolManifest,
 		SolanaATA:            chain.SolanaATA,
-		IsRetryLater:         cryptoPayIsRetryLater,
+		ClassifyChainError:   cryptoPayClassifyChainError,
 	}
 	networks, _ := parseCryptoPayNetworks(cfg) // warnings are logged by NewCryptoPayService
 	for _, n := range networks {
@@ -62,18 +62,28 @@ func BuildCryptoPayChainDeps(cfg config.CryptoPayConfig, httpClient *http.Client
 	return deps
 }
 
-// cryptoPayIsRetryLater: "not finalized yet", "tx unknown" and transient
-// RPC failures mean retry later, never "no deposit".
-func cryptoPayIsRetryLater(err error) bool {
+// cryptoPayClassifyChainError sorts rescan failures: "not finalized yet",
+// "tx unknown", rate limits, 5xx, timeouts and transport errors mean retry
+// later (never "no deposit"); 401/403/other 4xx mean the RPC endpoint or its
+// key is misconfigured.
+func cryptoPayClassifyChainError(err error) CryptoPayChainErrorClass {
 	if errors.Is(err, chain.ErrNotFinalized) || errors.Is(err, chain.ErrTxNotFound) {
-		return true
+		return CryptoPayChainErrorRetry
 	}
 	var callErr *chain.RPCCallError
-	if errors.As(err, &callErr) {
-		switch callErr.Kind {
-		case chain.RPCKindTransport, chain.RPCKindTimeout, chain.RPCKindHTTPStatus:
-			return true
+	if !errors.As(err, &callErr) {
+		return CryptoPayChainErrorOther
+	}
+	switch callErr.Kind {
+	case chain.RPCKindTransport, chain.RPCKindTimeout:
+		return CryptoPayChainErrorRetry
+	case chain.RPCKindHTTPStatus:
+		if callErr.HTTPStatus == 429 || callErr.HTTPStatus >= 500 {
+			return CryptoPayChainErrorRetry
+		}
+		if callErr.HTTPStatus >= 400 {
+			return CryptoPayChainErrorMisconfigured
 		}
 	}
-	return false
+	return CryptoPayChainErrorOther
 }

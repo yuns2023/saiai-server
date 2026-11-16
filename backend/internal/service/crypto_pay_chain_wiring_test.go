@@ -25,7 +25,7 @@ func TestBuildCryptoPayChainDepsMasterOffMakesNoRequests(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := config.CryptoPayConfig{Enabled: false, EVMNetwork: "arbitrum-one", EVMRPCURL: srv.URL,
-		SolanaNetwork: "solana-mainnet", SolanaRPCURL: srv.URL, ScanIntervalSeconds: 1, ScanBatchTimeoutSeconds: 1, EVMBlocksPerScan: 2000}
+		SolanaNetwork: "solana-mainnet", SolanaRPCURL: srv.URL, ScanIntervalSeconds: 1, ScanBatchTimeoutSeconds: 1, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20}
 	deps := BuildCryptoPayChainDeps(cfg, srv.Client())
 	require.Nil(t, deps.EVMScanner)
 	require.Nil(t, deps.SolanaScanner)
@@ -60,12 +60,22 @@ func TestBuildCryptoPayChainDepsMasterOffMakesNoRequests(t *testing.T) {
 	require.Zero(t, atomic.LoadInt64(&hits))
 }
 
-func TestCryptoPayIsRetryLater(t *testing.T) {
-	require.True(t, cryptoPayIsRetryLater(fmt.Errorf("x: %w", chain.ErrNotFinalized)))
-	require.True(t, cryptoPayIsRetryLater(fmt.Errorf("x: %w", chain.ErrTxNotFound)))
-	for _, k := range []chain.RPCErrorKind{chain.RPCKindTransport, chain.RPCKindTimeout, chain.RPCKindHTTPStatus} {
-		require.True(t, cryptoPayIsRetryLater(fmt.Errorf("wrapped: %w", &chain.RPCCallError{Method: "eth_getTransactionReceipt", Kind: k})), k)
+func TestCryptoPayClassifyChainError(t *testing.T) {
+	retry := []error{
+		fmt.Errorf("x: %w", chain.ErrNotFinalized),
+		fmt.Errorf("x: %w", chain.ErrTxNotFound),
+		&chain.RPCCallError{Method: "m", Kind: chain.RPCKindTransport},
+		fmt.Errorf("wrapped: %w", &chain.RPCCallError{Method: "m", Kind: chain.RPCKindTimeout}),
+		&chain.RPCCallError{Method: "m", Kind: chain.RPCKindHTTPStatus, HTTPStatus: 429},
+		&chain.RPCCallError{Method: "m", Kind: chain.RPCKindHTTPStatus, HTTPStatus: 502},
 	}
-	require.False(t, cryptoPayIsRetryLater(&chain.RPCCallError{Method: "m", Kind: chain.RPCKindDecode}))
-	require.False(t, cryptoPayIsRetryLater(errors.New("other")))
+	for _, err := range retry {
+		require.Equal(t, CryptoPayChainErrorRetry, cryptoPayClassifyChainError(err), err.Error())
+	}
+	for _, status := range []int{400, 401, 403, 404} {
+		err := &chain.RPCCallError{Method: "m", Kind: chain.RPCKindHTTPStatus, HTTPStatus: status}
+		require.Equal(t, CryptoPayChainErrorMisconfigured, cryptoPayClassifyChainError(err), status)
+	}
+	require.Equal(t, CryptoPayChainErrorOther, cryptoPayClassifyChainError(&chain.RPCCallError{Method: "m", Kind: chain.RPCKindDecode}))
+	require.Equal(t, CryptoPayChainErrorOther, cryptoPayClassifyChainError(errors.New("other")))
 }

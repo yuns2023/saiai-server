@@ -56,8 +56,8 @@ func (w *CryptoPayWorker) Stop() {
 }
 
 func (w *CryptoPayWorker) runOnce() {
-	// The parent context only ends on Stop; each phase has its own budget
-	// (RunWorkerPass) so a slow chain cannot block settlement.
+	// The parent context only ends on Stop; every unit of work has its own
+	// timeout (RunWorkerPass).
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -98,22 +98,11 @@ func (w *CryptoPayWorker) runOnce() {
 	w.svc.RunWorkerPass(ctx)
 }
 
-// RunWorkerPass is one worker iteration with the regular phase budget
-// (2 x scan interval); the worker and tests use the same code path.
+// RunWorkerPass is one worker iteration (the worker and tests use it):
+// settle the finalized backlog first, then scan. The pass has no overall
+// deadline; each scan unit has its own timeout and the backlog its own.
 func (s *CryptoPayService) RunWorkerPass(ctx context.Context) {
-	s.runWorkerPass(ctx, s.phaseBudget)
-}
-
-// runWorkerPass settles the finalized backlog first, then scans; every phase
-// gets its own budget (0 = parent ctx only).
-func (s *CryptoPayService) runWorkerPass(ctx context.Context, budget time.Duration) {
-	phase := func() (context.Context, context.CancelFunc) {
-		if budget <= 0 {
-			return context.WithCancel(ctx)
-		}
-		return context.WithTimeout(ctx, budget)
-	}
-	backlogCtx, cancel := phase()
+	backlogCtx, cancel := context.WithTimeout(ctx, cryptoPayBacklogPassTimeout)
 	if credited, err := s.CreditFinalizedBacklog(backlogCtx); err != nil {
 		cryptoPayLogf("worker: credit backlog failed: %v", err)
 	} else if credited > 0 {
@@ -128,8 +117,10 @@ func (s *CryptoPayService) runWorkerPass(ctx context.Context, budget time.Durati
 		return
 	}
 	if st.ScanningEnabled && (s.evmScanner() != nil || s.solanaScanner() != nil) {
-		if err := s.scanNetworks(ctx, budget); err != nil {
+		if err := s.scanNetworks(ctx); err != nil {
 			cryptoPayLogf("worker: scan errors: %v", err)
 		}
 	}
 }
+
+const cryptoPayBacklogPassTimeout = 2 * time.Minute

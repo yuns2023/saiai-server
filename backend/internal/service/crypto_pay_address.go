@@ -92,8 +92,13 @@ func (s *CryptoPayService) allocateEVMAddress(ctx context.Context, userID int64,
 	if derive == nil {
 		return false, cryptoPayAddressUnavailable("address derivation is not available")
 	}
-	// The scan start height comes from RPC, outside the transaction.
+	// The scan start height comes from RPC, outside the transaction. Without
+	// a ready scanner there is no provable start height: refuse (an address
+	// handed out now could never be watched from the right block).
 	var startBlock sql.NullInt64
+	if s.evmScanner() == nil {
+		return false, cryptoPayAddressUnavailable("no deposit address is available right now; retry later")
+	}
 	if sc := s.evmScanner(); sc != nil {
 		rpcCtx, cancel := context.WithTimeout(ctx, cryptoPayFinalizedRPCTimeout)
 		height, err := sc.FinalizedBlock(rpcCtx)
@@ -106,8 +111,8 @@ func (s *CryptoPayService) allocateEVMAddress(ctx context.Context, userID int64,
 		}
 		startBlock = sql.NullInt64{Int64: int64(height), Valid: true}
 	}
-	// No scanner wired: start_block stays NULL and the worker uses
-	// crypto_pay.evm_scan_from_block (it alerts and skips while that is 0).
+	// Solana pool addresses need no start height: their token accounts are
+	// walked from the full signature history (see scanSolana).
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err

@@ -648,8 +648,16 @@ func (s *CryptoPayService) RescanTransaction(ctx context.Context, networkName, t
 		obs, err = sc.ObservationsForTx(ctx, txHash, addresses, "finalized")
 	}
 	if err != nil {
-		if s.deps.IsRetryLater != nil && s.deps.IsRetryLater(err) {
-			return nil, infraerrors.Conflict(CryptoPayReasonTxNotReady, "transaction is not finalized or not found yet; retry later").WithCause(err)
+		class := CryptoPayChainErrorOther
+		if s.deps.ClassifyChainError != nil {
+			class = s.deps.ClassifyChainError(err)
+		}
+		switch class {
+		case CryptoPayChainErrorRetry:
+			return nil, infraerrors.Conflict(CryptoPayReasonTxNotReady, "transaction is not finalized or not found yet, or the RPC is busy; retry later").WithCause(err)
+		case CryptoPayChainErrorMisconfigured:
+			cryptoPayLogf("ALERT %s RPC rejected the request (check the endpoint URL / API key): %v", n.Network, err)
+			return nil, infraerrors.New(502, CryptoPayReasonRPCMisconfigured, "chain RPC endpoint is misconfigured").WithCause(err)
 		}
 		return nil, infraerrors.ServiceUnavailable("CRYPTO_PAY_CHAIN_ERROR", "chain lookup failed").WithCause(err)
 	}

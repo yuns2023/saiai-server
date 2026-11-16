@@ -55,6 +55,7 @@ const (
 	CryptoPayReasonNetworkUnsupported = "CRYPTO_PAY_NETWORK_UNSUPPORTED"
 	CryptoPayReasonTxNotReady         = "CRYPTO_PAY_TX_NOT_READY"
 	CryptoPayReasonSettingsInvalid    = "CRYPTO_PAY_SETTINGS_INVALID"
+	CryptoPayReasonRPCMisconfigured   = "CRYPTO_PAY_RPC_MISCONFIGURED"
 )
 
 // CryptoPayEVMDeriver derives the lowercase 0x address at m/44'/60'/0'/0/index
@@ -76,11 +77,19 @@ type CryptoPayChainDeps struct {
 	DeriveEVMAddress     CryptoPayEVMDeriver
 	VerifySolanaManifest CryptoPaySolanaManifestVerifier
 	SolanaATA            CryptoPaySolanaATAFunc
-	// IsRetryLater reports scanner errors that mean "not finalized yet / tx
-	// unknown, retry later" (chain.ErrNotFinalized, chain.ErrTxNotFound).
-	// Such errors are never treated as "no deposit". nil = none recognized.
-	IsRetryLater func(error) bool
+	// ClassifyChainError sorts scanner errors for admin rescan (retry later /
+	// RPC misconfigured / other). nil = everything is "other".
+	ClassifyChainError func(error) CryptoPayChainErrorClass
 }
+
+// CryptoPayChainErrorClass classifies a chain lookup failure.
+type CryptoPayChainErrorClass int
+
+const (
+	CryptoPayChainErrorOther CryptoPayChainErrorClass = iota
+	CryptoPayChainErrorRetry
+	CryptoPayChainErrorMisconfigured
+)
 
 // cryptoPayNetwork is one configured, validated network.
 type cryptoPayNetwork struct {
@@ -136,6 +145,9 @@ func parseCryptoPayNetworks(cfg config.CryptoPayConfig) ([]*cryptoPayNetwork, []
 	}
 	if cfg.Enabled && cfg.ScanBatchTimeoutSeconds <= 0 {
 		warnings = append(warnings, "crypto_pay.scan_batch_timeout_seconds must be positive")
+	}
+	if cfg.Enabled && cfg.ScanUnitsPerPass <= 0 {
+		warnings = append(warnings, "crypto_pay.scan_units_per_pass must be positive")
 	}
 	if cfg.Enabled && strings.TrimSpace(cfg.EVMNetwork) != "" && cfg.EVMBlocksPerScan <= 0 {
 		warnings = append(warnings, "crypto_pay.evm_blocks_per_scan must be positive")

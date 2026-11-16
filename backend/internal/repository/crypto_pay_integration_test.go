@@ -79,6 +79,8 @@ type fakeEVMScanner struct {
 	finErr    error
 	block     map[string]bool // ScanRange waits for ctx cancellation if any address is listed
 	failFor   map[string]bool // ScanRange fails fast if any address is listed
+	delay     map[string]time.Duration
+	maxSpan   uint64 // >0: wider ranges wait for ctx cancellation (provider too slow)
 }
 
 func (f *fakeEVMScanner) Network() chain.Network { return chain.ArbitrumOne }
@@ -90,9 +92,16 @@ func (f *fakeEVMScanner) FinalizedBlock(context.Context) (uint64, error) {
 }
 func (f *fakeEVMScanner) ScanRange(ctx context.Context, from, to uint64, addresses []string, finalized bool) ([]chain.Observation, error) {
 	for _, a := range addresses {
-		if f.block[a] {
+		if f.block[a] || (f.maxSpan > 0 && to-from+1 > f.maxSpan) {
 			<-ctx.Done()
 			return nil, ctx.Err()
+		}
+		if d := f.delay[a]; d > 0 {
+			select {
+			case <-time.After(d):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 	}
 	f.mu.Lock()
@@ -125,8 +134,6 @@ func (f *fakeEVMScanner) ScanRange(ctx context.Context, from, to uint64, address
 func (f *fakeEVMScanner) ObservationsForTx(context.Context, string, []string, bool) ([]chain.Observation, error) {
 	return f.txObs, f.txErr
 }
-
-var errFakeNotFinalized = errors.New("fake: not finalized yet")
 
 type fakeSolanaScanner struct {
 	block map[string]bool // token accounts whose scan waits for ctx cancellation
@@ -190,14 +197,16 @@ func (e *cryptoEnv) set(t *testing.T, key, value string) {
 	require.NoError(t, e.settings.Set(context.Background(), key, value))
 }
 
-func newCryptoEnv(t *testing.T, withScanners bool) *cryptoEnv {
+// newCryptoEnv always wires fake scanners (EVM allocation needs one); the
+// argument is kept for readability of older call sites.
+func newCryptoEnv(t *testing.T, _ bool) *cryptoEnv {
 	t.Helper()
-	return newCryptoEnvWith(t, withScanners, true, 60, 30)
+	return newCryptoEnvWith(t, nil)
 }
 
-// newCryptoEnvWith: the worker phase budget is 2 x intervalSeconds and each
-// scan unit gets min(batchTimeoutSeconds, phase/3).
-func newCryptoEnvWith(t *testing.T, withScanners, enabled bool, batchTimeoutSeconds, intervalSeconds int) *cryptoEnv {
+// newCryptoEnvWith lets a test adjust the deployment config (unit timeout,
+// units per pass, master switch).
+func newCryptoEnvWith(t *testing.T, mutate func(*config.CryptoPayConfig)) *cryptoEnv {
 	t.Helper()
 	resetCryptoTables(t)
 	// These tests commit real rows; remove them so suites that count users
@@ -210,16 +219,18 @@ func newCryptoEnvWith(t *testing.T, withScanners, enabled bool, batchTimeoutSeco
 	env := &cryptoEnv{settings: NewSettingRepository(integrationEntClient)}
 	env.set(t, service.SettingCryptoPayAllowNewAddresses, "true")
 	deps := service.CryptoPayChainDeps{DeriveEVMAddress: fakeDeriveEVM, VerifySolanaManifest: fakeVerifyManifest, SolanaATA: fakeATA,
-		IsRetryLater: func(err error) bool { return errors.Is(err, errFakeNotFinalized) }}
-	if withScanners {
-		env.evm = &fakeEVMScanner{finalized: 1000, latest: 1010}
-		env.sol = &fakeSolanaScanner{obs: map[string][]chain.Observation{}}
-		deps.EVMScanner, deps.SolanaScanner = env.evm, env.sol
+		ClassifyChainError: service.BuildCryptoPayChainDeps(config.CryptoPayConfig{}, nil).ClassifyChainError}
+	env.evm = &fakeEVMScanner{finalized: 1000, latest: 1010}
+	env.sol = &fakeSolanaScanner{obs: map[string][]chain.Observation{}}
+	deps.EVMScanner, deps.SolanaScanner = env.evm, env.sol
+	cfg := config.CryptoPayConfig{
+		Enabled: true, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet", SolanaPoolSignerPubkey: cryptoTestSigner,
+		ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 1000,
 	}
-	env.svc = service.NewCryptoPayService(integrationDB, env.settings, config.CryptoPayConfig{
-		Enabled: enabled, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet", SolanaPoolSignerPubkey: cryptoTestSigner,
-		ScanIntervalSeconds: intervalSeconds, ScanBatchTimeoutSeconds: batchTimeoutSeconds, EVMBlocksPerScan: 2000,
-	}, deps, nil, nil)
+	if mutate != nil {
+		mutate(&cfg)
+	}
+	env.svc = service.NewCryptoPayService(integrationDB, env.settings, cfg, deps, nil, nil)
 	return env
 }
 
@@ -794,10 +805,17 @@ func TestCryptoPay_RescanUsesChainAndSamePath(t *testing.T) {
 
 	_, err := env.svc.RescanTransaction(ctx, "arbitrum-one", strings.ToUpper(o.TxHash[2:]), "admin:9")
 	require.Error(t, err, "hash without 0x is rejected")
-	env.evm.txErr = fmt.Errorf("wrapped: %w", errFakeNotFinalized)
+	env.evm.txErr = fmt.Errorf("wrapped: %w", chain.ErrNotFinalized)
 	_, err = env.svc.RescanTransaction(ctx, "arbitrum-one", o.TxHash, "admin:9")
 	require.Equal(t, service.CryptoPayReasonTxNotReady, infraerrors.Reason(err), "not finalized is retry-later, never success")
 	require.Equal(t, 409, infraerrors.Code(err))
+	env.evm.txErr = &chain.RPCCallError{Method: "eth_getTransactionReceipt", Kind: chain.RPCKindHTTPStatus, HTTPStatus: 503}
+	_, err = env.svc.RescanTransaction(ctx, "arbitrum-one", o.TxHash, "admin:9")
+	require.Equal(t, service.CryptoPayReasonTxNotReady, infraerrors.Reason(err), "5xx = retry later")
+	env.evm.txErr = &chain.RPCCallError{Method: "eth_getTransactionReceipt", Kind: chain.RPCKindHTTPStatus, HTTPStatus: 401}
+	_, err = env.svc.RescanTransaction(ctx, "arbitrum-one", o.TxHash, "admin:9")
+	require.Equal(t, service.CryptoPayReasonRPCMisconfigured, infraerrors.Reason(err))
+	require.Equal(t, 502, infraerrors.Code(err))
 	env.evm.txErr = errors.New("rpc down")
 	_, err = env.svc.RescanTransaction(ctx, "arbitrum-one", o.TxHash, "admin:9")
 	require.Equal(t, 503, infraerrors.Code(err))
@@ -934,7 +952,7 @@ func allocateEVMAt(t *testing.T, env *cryptoEnv, finalized uint64) (int64, strin
 
 func TestCryptoPay_EVMStuckBatchDoesNotStarveOthers(t *testing.T) {
 	ctx := context.Background()
-	env := newCryptoEnvWith(t, true, true, 60, 3) // phase 6s, unit timeout min(60s, 2s)
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.ScanBatchTimeoutSeconds = 2 })
 	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
 	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
 	importTestEVMKeyset(t, env, "xpubSTUCK")
@@ -1144,7 +1162,7 @@ func TestCryptoPay_OrderDepositsTruncatedAndSettingsAudit(t *testing.T) {
 
 func TestCryptoPay_SolanaStuckOverdueAccountDoesNotStarveActive(t *testing.T) {
 	ctx := context.Background()
-	env := newCryptoEnvWith(t, true, true, 60, 3) // real phase budget 6s, unit timeout 2s
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.ScanBatchTimeoutSeconds = 2 })
 	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
 	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
 	_, err := env.svc.ImportSolanaKeyset(ctx, testManifest(t, "starve", 2, cryptoTestSigner), "admin:test")
@@ -1180,7 +1198,7 @@ func TestCryptoPay_SolanaStuckOverdueAccountDoesNotStarveActive(t *testing.T) {
 
 func TestCryptoPay_IngestPrefixCommittedThenTimeoutThenRetry(t *testing.T) {
 	ctx := context.Background()
-	env := newCryptoEnvWith(t, true, true, 60, 3) // unit timeout 2s
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.ScanBatchTimeoutSeconds = 2 })
 	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
 	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
 	importTestEVMKeyset(t, env, "xpubPREFIX")
@@ -1245,4 +1263,70 @@ func TestCryptoPay_SettingsFailClosedForMoneyMoves(t *testing.T) {
 	v, err := env.settings.GetValue(ctx, service.SettingCryptoPayHoldThreshold)
 	require.NoError(t, err)
 	require.Equal(t, "1", v, "setting rolled back with the failed audit")
+}
+
+func TestCryptoPay_TailUnitGetsFullSlice(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.ScanBatchTimeoutSeconds = 2 })
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	importTestEVMKeyset(t, env, "xpubTAIL")
+	_, a1 := allocateEVMAt(t, env, 100)
+	_, a2 := allocateEVMAt(t, env, 20_000)
+	_, slow := allocateEVMAt(t, env, 40_000)                                // last in the queue
+	env.evm.block = map[string]bool{a1: true, a2: true}                     // always exhaust their 2s
+	env.evm.delay = map[string]time.Duration{slow: 1900 * time.Millisecond} // needs ~95% of the slice
+	env.evm.finalized, env.evm.latest = 41_000, 41_000
+	env.svc.RunWorkerPass(ctx)
+	pos, _ := cursorPosition(t, slow)
+	require.Equal(t, "41000", pos, "the third unit still gets its full timeout in pass 1")
+}
+
+func TestCryptoPay_UnitsPerPassCoverAllUnits(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.ScanUnitsPerPass, c.EVMBlocksPerScan = 20, 3_000_000 })
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	importTestEVMKeyset(t, env, "xpubKPASS")
+	for i := 0; i < 100; i++ {
+		allocateEVMAt(t, env, uint64(100+i*20_000)) // 100 separate batches
+	}
+	env.evm.finalized, env.evm.latest = 2_100_000, 2_100_000
+	for pass := 1; pass <= 5; pass++ {
+		env.evm.calls = nil
+		env.svc.RunWorkerPass(ctx)
+		require.LessOrEqual(t, countRows(t, `SELECT COUNT(*) FROM crypto_pay_scan_cursors WHERE last_attempt_at IS NOT NULL`), pass*20)
+	}
+	require.Equal(t, 100, countRows(t, `SELECT COUNT(*) FROM crypto_pay_scan_cursors WHERE last_attempt_at IS NOT NULL`),
+		"every unit ran within 5 passes of 20")
+}
+
+func TestCryptoPay_EVMAdaptiveSpanHalvesOnTimeout(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.ScanBatchTimeoutSeconds = 1 })
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	importTestEVMKeyset(t, env, "xpubSPAN")
+	_, to := allocateEVMAt(t, env, 100)
+	env.evm.finalized, env.evm.latest = 2_099, 2_099
+	env.evm.maxSpan = 500      // provider only answers ranges up to 500 blocks in time
+	env.svc.RunWorkerPass(ctx) // 2000 → timeout, span 1000
+	env.svc.RunWorkerPass(ctx) // 1000 → timeout, span 500
+	pos, lastErr := cursorPosition(t, to)
+	require.Empty(t, pos)
+	require.NotEmpty(t, lastErr)
+	env.svc.RunWorkerPass(ctx) // 500-block chunks succeed
+	pos, _ = cursorPosition(t, to)
+	require.Equal(t, "2099", pos)
+	require.Contains(t, env.evm.calls, "100-599/true/1")
+}
+
+func TestCryptoPay_EVMAllocationRequiresScanner(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnv(t, true)
+	importTestEVMKeyset(t, env, "xpubNOSCAN")
+	noScanner := service.NewCryptoPayService(integrationDB, env.settings, config.CryptoPayConfig{
+		Enabled: true, EVMNetwork: "arbitrum-one", ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20,
+	}, service.CryptoPayChainDeps{DeriveEVMAddress: fakeDeriveEVM}, nil, nil)
+	user := createCryptoUser(t)
+	_, err := noScanner.CreateOrder(ctx, user, "arbitrum-one", "USDC", "5")
+	require.Equal(t, service.CryptoPayReasonAddressUnavailable, infraerrors.Reason(err))
+	require.Equal(t, 0, countRows(t, `SELECT COUNT(*) FROM crypto_pay_addresses`))
 }
