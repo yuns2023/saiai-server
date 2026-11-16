@@ -1,0 +1,476 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { i18n } from '@/i18n'
+import type { CryptoDeposit, CryptoOrder, CryptoPayConfig } from '@/api'
+
+const api = vi.hoisted(() => ({ config: vi.fn(), getOrder: vi.fn() }))
+vi.mock('@/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api')>()
+  return { ...actual, cryptoPayApi: { ...actual.cryptoPayApi, ...api } }
+})
+const routeHolder = vi.hoisted(() => ({ route: null as unknown as { params: { id: string } } }))
+vi.mock('vue-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-router')>()
+  const { reactive } = await import('vue')
+  routeHolder.route = reactive({ params: { id: '7' } })
+  return { ...actual, useRoute: () => routeHolder.route }
+})
+/** QR mock echoes its input; in manual mode each call waits until released. */
+const qrControl = vi.hoisted(() => ({ manual: false, pending: [] as Array<() => void>, calls: [] as string[] }))
+vi.mock('qrcode', () => ({
+  default: {
+    toDataURL: (text: string) => {
+      qrControl.calls.push(text)
+      // Call-indexed so an overwrite by an older drawing is observable.
+      const image = `data:image/png;base64,QR:${text}#${qrControl.calls.length}`
+      if (!qrControl.manual) return Promise.resolve(image)
+      return new Promise<string>((resolve) => qrControl.pending.push(() => resolve(image)))
+    }
+  }
+}))
+
+import CryptoCheckoutView from '../CryptoCheckoutView.vue'
+import CopyButton from '@/components/CopyButton.vue'
+import { useAuthStore } from '@/stores/auth'
+
+const NOW = new Date('2026-11-16T08:00:00Z').getTime()
+
+const config: CryptoPayConfig = {
+  enabled: true,
+  min_amount: '1',
+  max_amount: '10000',
+  order_ttl_minutes: 180,
+  networks: [
+    {
+      network: 'arbitrum-one',
+      label: 'Arbitrum',
+      assets: [{ symbol: 'USDC', contract: '0xaf88d065e77c8cc2239327c5edb3a432268e5831' }, { symbol: 'USDT', contract: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9' }],
+      finality_hint_minutes: 20,
+      explorer_tx_url: 'https://arbiscan.io/tx/{tx}',
+      explorer_address_url: 'https://arbiscan.io/address/{addr}'
+    },
+    {
+      network: 'solana-mainnet',
+      label: 'Solana',
+      assets: [{ symbol: 'USDC', contract: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' }, { symbol: 'USDT', contract: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB' }],
+      finality_hint_minutes: 1,
+      explorer_tx_url: 'https://solscan.io/tx/{tx}',
+      explorer_address_url: 'https://solscan.io/account/{addr}'
+    }
+  ]
+}
+
+function deposit(over: Partial<CryptoDeposit> = {}): CryptoDeposit {
+  return {
+    id: 1,
+    network: 'arbitrum-one',
+    asset: 'USDC',
+    amount: '10',
+    tx_hash: '0x' + 'ab'.repeat(32),
+    status: 'confirming',
+    block_time: new Date(NOW - 60_000).toISOString(),
+    credited_at: null,
+    ...over
+  }
+}
+
+function order(over: Partial<CryptoOrder> = {}): CryptoOrder {
+  return {
+    id: 7,
+    network: 'arbitrum-one',
+    asset: 'USDC',
+    amount: '10',
+    address: '0x1111111111111111111111111111111111111111',
+    status: 'pending',
+    created_at: new Date(NOW - 60_000).toISOString(),
+    expires_at: new Date(NOW + 10 * 60_000).toISOString(),
+    received_amount: '0',
+    confirming_amount: '0',
+    credited_amount: '0',
+    deposits: [],
+    deposits_truncated: false,
+    ...over
+  }
+}
+
+async function mountView(o: CryptoOrder) {
+  api.getOrder.mockResolvedValue(o)
+  const w = mount(CryptoCheckoutView, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
+  await flushPromises()
+  return w
+}
+
+enableAutoUnmount(afterEach)
+
+describe('CryptoCheckoutView', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    vi.setSystemTime(NOW)
+    setActivePinia(createPinia())
+    vi.spyOn(useAuthStore(), 'refreshUser').mockResolvedValue(undefined as never)
+    i18n.global.locale.value = 'zh'
+    api.config.mockReset().mockResolvedValue(config)
+    api.getOrder.mockReset()
+    routeHolder.route.params.id = '7'
+    qrControl.manual = false
+    qrControl.pending = []
+    qrControl.calls = []
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('pending: amount, address, QR, countdown ticking and 5 s polling', async () => {
+    const w = await mountView(order())
+    expect(w.find('[data-testid=crypto-amount]').text()).toBe('$10.00')
+    expect(w.find('[data-testid=crypto-address]').text()).toBe('0x1111111111111111111111111111111111111111')
+    expect(w.find('[data-testid=crypto-qr]').attributes('src')).toBe('data:image/png;base64,QR:0x1111111111111111111111111111111111111111#1')
+    expect(w.text()).toContain('向此地址发送 $10.00 USDC（Arbitrum）')
+    expect(w.text()).toContain('Arbitrum 约 20 分钟')
+    expect(w.find('[data-testid=crypto-warning]').text()).toContain('只能转入 Arbitrum 链上的 USDC 或 USDT')
+    expect(w.find('a[href="https://arbiscan.io/address/0x1111111111111111111111111111111111111111"]').exists()).toBe(true)
+    expect(w.findComponent(RouterLinkStub).props('to')).toBe('/billing')
+    expect(w.find('[data-testid=crypto-countdown]').text()).toBe('10:00')
+    expect(w.find('[data-testid=crypto-status]').text()).toBe('待付款')
+    expect(w.find('[data-testid=crypto-remaining]').text()).toContain('$10.00')
+    expect(w.find('[data-testid=crypto-expired]').exists()).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(w.find('[data-testid=crypto-countdown]').text()).toBe('09:59')
+    expect(api.getOrder).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(api.getOrder).toHaveBeenCalledTimes(2)
+    expect(api.getOrder).toHaveBeenLastCalledWith('7')
+  })
+
+  it('warns with every asset the chain address accepts (en)', async () => {
+    i18n.global.locale.value = 'en'
+    const w = await mountView(order())
+    expect(w.find('[data-testid=crypto-warning]').text()).toContain('Only USDC or USDT on Arbitrum')
+    expect(w.text()).toContain('View on block explorer')
+    i18n.global.locale.value = 'zh'
+  })
+
+  it('shows hours when more than an hour is left', async () => {
+    const w = await mountView(order({ expires_at: new Date(NOW + 3 * 3600_000 - 1000).toISOString() }))
+    expect(w.find('[data-testid=crypto-countdown]').text()).toBe('2:59:59')
+  })
+
+  it('confirming: observed but not final', async () => {
+    const w = await mountView(order({ confirming_amount: '10', deposits: [deposit()] }))
+    expect(w.find('[data-testid=crypto-confirming]').text()).toBe('$10.00')
+    expect(w.find('[data-testid=crypto-received]').text()).toBe('$0.00')
+    expect(w.find('[data-testid=crypto-status]').text()).toBe('待付款')
+    const table = w.find('[data-testid=crypto-deposits]')
+    expect(table.text()).toContain('确认中')
+    expect(table.find('a').attributes('href')).toBe(`https://arbiscan.io/tx/0x${'ab'.repeat(32)}`)
+  })
+
+  it('never claims "paid" before the server does, even if received already covers the amount', async () => {
+    const w = await mountView(order({ received_amount: '10', confirming_amount: '10', deposits: [deposit()] }))
+    expect(w.find('[data-testid=crypto-status]').text()).toBe('待付款')
+    expect(w.find('[data-testid=crypto-paid-full]').exists()).toBe(false)
+    expect(w.find('.seal').exists()).toBe(false)
+  })
+
+  it('paid: shows credited state and keeps polling for overpayment', async () => {
+    const credited = deposit({ amount: '12.345678', status: 'credited', credited_at: new Date(NOW).toISOString() })
+    const w = await mountView(order({ status: 'paid', received_amount: '12.345678', credited_amount: '12.345678', deposits: [credited] }))
+    expect(w.find('[data-testid=crypto-status]').text()).toBe('已付足')
+    expect(w.find('[data-testid=crypto-paid-full]').exists()).toBe(true)
+    expect(w.find('[data-testid=crypto-credited]').text()).toBe('$12.345678')
+    expect(w.find('.seal').exists()).toBe(true)
+    expect(w.find('[data-testid=crypto-remaining]').exists()).toBe(false)
+
+    // A further transfer lands: balance header is refreshed.
+    api.getOrder.mockResolvedValue(order({ status: 'paid', received_amount: '13.345678', credited_amount: '13.345678', deposits: [deposit({ id: 2, amount: '1', status: 'credited' }), credited] }))
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.getOrder).toHaveBeenCalledTimes(2)
+    expect(w.find('[data-testid=crypto-credited]').text()).toBe('$13.345678')
+    expect(useAuthStore().refreshUser).toHaveBeenCalled()
+  })
+
+  it('expired with a late deposit: notice, no countdown, 30 s polling', async () => {
+    const late = deposit({ status: 'credited', amount: '4', credited_at: new Date(NOW).toISOString() })
+    const w = await mountView(
+      order({ status: 'expired', expires_at: new Date(NOW - 60_000).toISOString(), received_amount: '4', credited_amount: '4', deposits: [late] })
+    )
+    expect(w.find('[data-testid=crypto-expired]').text()).toBe('订单已过期，转账仍会按实收入账')
+    expect(w.find('[data-testid=crypto-countdown]').exists()).toBe(false)
+    expect(w.find('[data-testid=crypto-status]').text()).toBe('已过期')
+    expect(w.find('[data-testid=crypto-remaining]').text()).toContain('$6.00')
+    expect(w.find('[data-testid=crypto-deposits]').text()).toContain('已入账')
+
+    await vi.advanceTimersByTimeAsync(29_000)
+    expect(api.getOrder).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(api.getOrder).toHaveBeenCalledTimes(2)
+  })
+
+  it('a pending order whose deadline passes switches to the expired notice', async () => {
+    const w = await mountView(order({ expires_at: new Date(NOW + 2000).toISOString() }))
+    expect(w.find('[data-testid=crypto-expired]').exists()).toBe(false)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(w.find('[data-testid=crypto-expired]').exists()).toBe(true)
+    expect(w.find('[data-testid=crypto-status]').text()).toBe('已过期')
+  })
+
+  it('notes when the deposit list is truncated', async () => {
+    const w = await mountView(order({ deposits: [deposit()], deposits_truncated: true }))
+    expect(w.find('[data-testid=crypto-truncated]').text()).toBe('仅显示最近 1000 笔，金额合计为全部到账')
+    const plain = await mountView(order({ deposits: [deposit()] }))
+    expect(plain.find('[data-testid=crypto-truncated]').exists()).toBe(false)
+  })
+
+  it('held: explains manual review', async () => {
+    const w = await mountView(order({ received_amount: '6000', deposits: [deposit({ amount: '6000', status: 'held' })], status: 'paid' }))
+    expect(w.find('[data-testid=crypto-held]').exists()).toBe(true)
+    expect(w.find('[data-testid=crypto-deposits]').text()).toContain('待审核')
+    expect(w.find('[data-testid=crypto-credited]').text()).toBe('$0.00')
+    expect(w.find('.seal').exists()).toBe(false)
+  })
+
+  it('stops polling on unmount and while hidden', async () => {
+    const w = await mountView(order())
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(api.getOrder).toHaveBeenCalledTimes(1)
+    hidden.mockReturnValue(false)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(api.getOrder).toHaveBeenCalledTimes(2)
+    w.unmount()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(api.getOrder).toHaveBeenCalledTimes(2)
+  })
+
+  it('a late failure for the previous order does not poison the new one', async () => {
+    let failOld!: (e: unknown) => void
+    api.getOrder.mockImplementationOnce(() => new Promise((_, reject) => (failOld = reject)))
+    api.getOrder.mockResolvedValue(order({ id: 8, amount: '25' }))
+    const w = mount(CryptoCheckoutView, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
+    await flushPromises()
+    routeHolder.route.params.id = '8'
+    await flushPromises()
+    failOld({ status: 404 })
+    await flushPromises()
+    expect(w.find('[data-testid=crypto-load-error]').exists()).toBe(false)
+    expect(w.find('[data-testid=crypto-amount]').text()).toBe('$25.00')
+    expect(api.getOrder).toHaveBeenLastCalledWith('8')
+    // Polling continues for the new order.
+    const calls = api.getOrder.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.getOrder.mock.calls.length).toBe(calls + 1)
+  })
+
+  it('unmounting during a request (even after a route change) makes no further requests', async () => {
+    let finish!: (o: CryptoOrder) => void
+    api.getOrder.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)))
+    api.getOrder.mockResolvedValue(order())
+    const w = mount(CryptoCheckoutView, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
+    await flushPromises()
+    routeHolder.route.params.id = '8'
+    await flushPromises()
+    w.unmount()
+    finish(order())
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(api.getOrder).toHaveBeenCalledTimes(1)
+  })
+
+  it('a tab opened in the background loads once and then waits', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    const w = await mountView(order())
+    expect(w.find('[data-testid=crypto-amount]').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(api.getOrder).toHaveBeenCalledTimes(1)
+  })
+
+  it('A → B → A route switches with late answers and late QR keep address, copy, QR and chain consistent', async () => {
+    const A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    const B = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
+    const orderA = order({ id: 7, address: A })
+    const orderB = order({ id: 9, network: 'solana-mainnet', asset: 'USDT', address: B })
+    const waiting: Array<{ id: string; resolve: (o: CryptoOrder) => void }> = []
+    api.getOrder.mockImplementation((id: string) => new Promise<CryptoOrder>((resolve) => waiting.push({ id, resolve })))
+    qrControl.manual = true
+
+    const w = mount(CryptoCheckoutView, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
+    await flushPromises()
+    const consistent = (addr: string, label: string) => {
+      expect(w.find('[data-testid=crypto-address]').text()).toBe(addr)
+      expect(w.findComponent(CopyButton).props('value')).toBe(addr)
+      expect(w.find('#send-title').text()).toContain(label)
+      expect(w.find('[data-testid=crypto-warning]').text()).toContain(label)
+      const src = w.find('[data-testid=crypto-qr]')
+      if (src.exists()) expect(src.attributes('src')).toMatch(new RegExp(`^data:image/png;base64,QR:${addr}#\\d+$`))
+    }
+
+    // A loads; its QR is still being drawn.
+    waiting.shift()!.resolve(orderA)
+    await flushPromises()
+    consistent(A, 'Arbitrum')
+    expect(qrControl.calls).toEqual([A])
+    expect(w.find('[data-testid=crypto-qr]').exists()).toBe(false)
+
+    // Switch to B; A's QR finishes late and must not appear.
+    routeHolder.route.params.id = '9'
+    await flushPromises()
+    expect(waiting.map((x) => x.id)).toEqual(['9'])
+    qrControl.pending.shift()!()
+    await flushPromises()
+    expect(w.find('[data-testid=crypto-address]').exists()).toBe(false)
+    expect(w.find('[data-testid=crypto-qr]').exists()).toBe(false)
+
+    // Back to A before B answers; B's late answer is dropped and A is fetched.
+    routeHolder.route.params.id = '7'
+    await flushPromises()
+    waiting.shift()!.resolve(orderB)
+    await flushPromises()
+    expect(w.find('[data-testid=crypto-address]').exists()).toBe(false)
+    expect(waiting.map((x) => x.id)).toEqual(['7'])
+    waiting.shift()!.resolve(orderA)
+    await flushPromises()
+    consistent(A, 'Arbitrum')
+    qrControl.pending.shift()!()
+    await flushPromises()
+    consistent(A, 'Arbitrum')
+    expect(w.find('[data-testid=crypto-qr]').attributes('src')).toBe(`data:image/png;base64,QR:${A}#2`)
+    expect(qrControl.calls).toEqual([A, A])
+
+    // And a clean switch to B shows B everywhere.
+    routeHolder.route.params.id = '9'
+    await flushPromises()
+    waiting.shift()!.resolve(orderB)
+    await flushPromises()
+    qrControl.pending.shift()!()
+    await flushPromises()
+    consistent(B, 'Solana')
+    expect(qrControl.calls.at(-1)).toBe(B)
+  })
+
+  it('an older QR drawing finishing last never overwrites the current one (A → B → A)', async () => {
+    const A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    const waiting: Array<{ id: string; resolve: (o: CryptoOrder) => void }> = []
+    api.getOrder.mockImplementation((id: string) => new Promise<CryptoOrder>((resolve) => waiting.push({ id, resolve })))
+    qrControl.manual = true
+    const w = mount(CryptoCheckoutView, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
+    await flushPromises()
+    waiting.shift()!.resolve(order({ id: 7, address: A }))
+    await flushPromises()
+    expect(qrControl.calls).toEqual([A]) // first A drawing stays pending
+
+    routeHolder.route.params.id = '9'
+    await flushPromises()
+    routeHolder.route.params.id = '7'
+    await flushPromises()
+    waiting.shift()!.resolve(order({ id: 9, network: 'solana-mainnet', address: 'So1' })) // late B, dropped
+    await flushPromises()
+    waiting.shift()!.resolve(order({ id: 7, address: A }))
+    await flushPromises()
+    expect(qrControl.calls).toEqual([A, A])
+
+    const [first, second] = qrControl.pending
+    second()
+    await flushPromises()
+    expect(w.find('[data-testid=crypto-qr]').attributes('src')).toBe(`data:image/png;base64,QR:${A}#2`)
+    first()
+    await flushPromises()
+    expect(w.find('[data-testid=crypto-qr]').attributes('src')).toBe(`data:image/png;base64,QR:${A}#2`)
+    expect(w.find('[data-testid=crypto-address]').text()).toBe(A)
+  })
+
+  it('refresh failures (500, 429) show a stale banner, hide "remaining", back off, and reset on success', async () => {
+    const w = await mountView(order({ received_amount: '4' }))
+    expect(w.find('[data-testid=crypto-remaining]').exists()).toBe(true)
+    api.getOrder.mockRejectedValueOnce({ status: 500 }).mockRejectedValueOnce({ status: 429 }).mockRejectedValueOnce({ status: 503 })
+
+    await vi.advanceTimersByTimeAsync(5000) // 2nd call: 500
+    expect(api.getOrder).toHaveBeenCalledTimes(2)
+    expect(w.find('[data-testid=crypto-stale]').text()).toContain(`到账信息更新失败，最后更新于 ${new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(NOW))}`)
+    expect(w.find('[data-testid=crypto-remaining]').exists()).toBe(false)
+    expect(w.find('[data-testid=crypto-address]').exists()).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(5000) // after 1 failure: 5 s → 3rd call: 429
+    expect(api.getOrder).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(9000) // after 2 failures: 10 s
+    expect(api.getOrder).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(1000) // 4th call: 503
+    expect(api.getOrder).toHaveBeenCalledTimes(4)
+    await vi.advanceTimersByTimeAsync(19_000) // after 3 failures: 20 s
+    expect(api.getOrder).toHaveBeenCalledTimes(4)
+
+    // Manual retry skips the wait; success clears the banner and the backoff.
+    await w.find('[data-testid=crypto-retry]').trigger('click')
+    await flushPromises()
+    expect(api.getOrder).toHaveBeenCalledTimes(5)
+    expect(w.find('[data-testid=crypto-stale]').exists()).toBe(false)
+    expect(w.find('[data-testid=crypto-remaining]').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.getOrder).toHaveBeenCalledTimes(6)
+  })
+
+  it('backoff is capped at 60 s', async () => {
+    await mountView(order())
+    api.getOrder.mockRejectedValue({ status: 0, code: 'NETWORK' })
+    await vi.advanceTimersByTimeAsync(5000 + 5000 + 10000 + 20000) // calls 2..5
+    expect(api.getOrder).toHaveBeenCalledTimes(5)
+    await vi.advanceTimersByTimeAsync(59_000)
+    expect(api.getOrder).toHaveBeenCalledTimes(5)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(api.getOrder).toHaveBeenCalledTimes(6)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(api.getOrder).toHaveBeenCalledTimes(7)
+  })
+
+  it.each([404, 403])('%i after a successful load switches to not-found and drops the address', async (status) => {
+    qrControl.manual = true // the address QR is still being drawn when the order disappears
+    const w = await mountView(order())
+    expect(w.find('[data-testid=crypto-address]').exists()).toBe(true)
+    api.getOrder.mockRejectedValueOnce({ status })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(w.find('[data-testid=crypto-address]').exists()).toBe(false)
+    expect(w.find('[data-testid=crypto-load-error]').text()).toContain('没有找到这个订单')
+    // A QR finishing after not-found is ignored.
+    qrControl.pending.shift()!()
+    await flushPromises()
+    expect(w.find('[data-testid=crypto-qr]').exists()).toBe(false)
+    expect(w.find('img').exists()).toBe(false)
+    // hidden → visible round trip does not refetch; nor does time passing.
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(10_000)
+    hidden.mockReturnValue(false)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(api.getOrder).toHaveBeenCalledTimes(2)
+    expect(w.find('[data-testid=crypto-load-error]').exists()).toBe(true)
+  })
+
+  it('refuses to show a pay-to block without an address', async () => {
+    const w = await mountView(order({ address: '   ' }))
+    expect(w.find('[data-testid=crypto-no-address]').exists()).toBe(true)
+    expect(w.find('[data-testid=crypto-address]').exists()).toBe(false)
+    expect(w.findComponent(CopyButton).exists()).toBe(false)
+    expect(w.find('[data-testid=crypto-remaining]').exists()).toBe(false)
+    expect(qrControl.calls).toEqual([])
+  })
+
+  it('remaining is exact and ignores confirming amounts', async () => {
+    const w = await mountView(order({ amount: '10', received_amount: '9.999999', confirming_amount: '5' }))
+    expect(w.find('[data-testid=crypto-remaining]').text()).toContain('$0.000001')
+    const none = await mountView(order({ amount: '10', received_amount: '0', confirming_amount: '10' }))
+    expect(none.find('[data-testid=crypto-remaining]').text()).toContain('$10.00')
+  })
+
+  it('reports a missing order without polling', async () => {
+    api.getOrder.mockRejectedValue({ status: 404, message: 'not found' })
+    const w = mount(CryptoCheckoutView, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
+    await flushPromises()
+    expect(w.find('[data-testid=crypto-load-error]').text()).toContain('没有找到这个订单')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(api.getOrder).toHaveBeenCalledTimes(1)
+  })
+})
