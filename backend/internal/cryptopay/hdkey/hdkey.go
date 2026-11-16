@@ -127,7 +127,12 @@ func (k *ExtendedPublicKey) PublicChild(index uint32) (*ExtendedPublicKey, error
 	data = append(data, parentPub...)
 	data = binary.BigEndian.AppendUint32(data, index)
 	il, ir := hmacSHA512(k.ChainCode[:], data)
+	return k.publicChildFromIL(index, parentPub, il, ir)
+}
 
+// publicChildFromIL is the part of CKDpub after the HMAC (split out so tests
+// can drive the IL >= n and point-at-infinity branches).
+func (k *ExtendedPublicKey) publicChildFromIL(index uint32, parentPub, il, ir []byte) (*ExtendedPublicKey, error) {
 	var tweak secp256k1.ModNScalar
 	if overflow := tweak.SetByteSlice(il); overflow {
 		return nil, ErrInvalidChild
@@ -156,6 +161,10 @@ func NewMasterKey(seed []byte) (*ExtendedPrivateKey, error) {
 		return nil, fmt.Errorf("hdkey: seed length %d out of range [16,64]", len(seed))
 	}
 	il, ir := hmacSHA512([]byte("Bitcoin seed"), seed)
+	return masterFromIL(il, ir)
+}
+
+func masterFromIL(il, ir []byte) (*ExtendedPrivateKey, error) {
 	k := &ExtendedPrivateKey{}
 	if overflow := k.Key.SetByteSlice(il); overflow || k.Key.IsZero() {
 		return nil, ErrInvalidChild
@@ -184,6 +193,12 @@ func (k *ExtendedPrivateKey) Child(index uint32) (*ExtendedPrivateKey, error) {
 	}
 	data = binary.BigEndian.AppendUint32(data, index)
 	il, ir := hmacSHA512(k.ChainCode[:], data)
+	return k.childFromIL(index, parentPub, il, ir)
+}
+
+// childFromIL is the part of CKDpriv after the HMAC (split out for tests of
+// the IL >= n and zero-key branches).
+func (k *ExtendedPrivateKey) childFromIL(index uint32, parentPub, il, ir []byte) (*ExtendedPrivateKey, error) {
 	var tweak secp256k1.ModNScalar
 	if overflow := tweak.SetByteSlice(il); overflow {
 		return nil, ErrInvalidChild

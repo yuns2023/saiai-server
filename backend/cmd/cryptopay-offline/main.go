@@ -122,9 +122,13 @@ func cmdEVMXpub(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(stdout, "path:  %s\nxpub:  %s\n", chain.EVMAccountPath, xpub)
+	if _, err := fmt.Fprintf(stdout, "path:  %s\nxpub:  %s\n", chain.EVMAccountPath, xpub); err != nil {
+		return err
+	}
 	for i, a := range addrs {
-		_, _ = fmt.Fprintf(stdout, "%s/0/%d  %s\n", chain.EVMAccountPath, i, a)
+		if _, err := fmt.Fprintf(stdout, "%s/0/%d  %s\n", chain.EVMAccountPath, i, a); err != nil {
+			return err
+		}
 	}
 	return nil
 }

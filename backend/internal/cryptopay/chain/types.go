@@ -1,6 +1,25 @@
 // Package chain holds chain-level logic for stablecoin deposits: verified asset
 // constants, scanners and watch-only address derivation. It must not depend on
 // ent, service or the database. See tmp-crypto/CONTRACT.md for the contract.
+//
+// Trust boundary: the configured JSON-RPC endpoints are TRUSTED. This package
+// is not a light client; it does not verify consensus, block headers or
+// Merkle proofs. It does defend against inconsistent/incomplete responses
+// (response id, tx/signature binding, block-hash cross-checks, malformed
+// logs and balances are errors, never "no inflow"), but a malicious or
+// compromised RPC provider can fabricate deposits. Use providers you
+// control or trust, and consider cross-checking two providers before crediting
+// large amounts. Endpoint URLs (which often embed API keys) never appear in
+// returned errors.
+//
+// What counts as an inflow:
+//   - EVM: each ERC-20 Transfer log (whitelisted contract, value > 0) to a
+//     watched address; identity (tx hash, RPC logIndex).
+//   - Solana: the POSITIVE NET change of one token account's balance within
+//     one successful transaction (post - pre from pre/postTokenBalances, for a
+//     whitelisted mint + token program, owner = deposit address). A receive and
+//     a send inside the same transaction net out; a zero or negative net change
+//     is not an inflow. Identity (signature, token account).
 package chain
 
 import (

@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -56,9 +59,102 @@ func (e *HTTPStatusError) Error() string {
 var ErrResponseTooLarge = errors.New("chain: rpc response exceeds size limit")
 
 type rpcClient struct {
-	opts   RPCOptions
-	client *http.Client
-	nextID atomic.Uint64
+	opts    RPCOptions
+	client  *http.Client
+	nextID  atomic.Uint64
+	secrets []string // substrings that must never appear in returned errors
+}
+
+// redactedError hides the endpoint (which often embeds an API key in its
+// path or query) while keeping errors.Is/As on the underlying cause
+// (context.DeadlineExceeded, net.Error, ...).
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
+
+// Timeout reports whether the underlying error is a timeout.
+func (e *redactedError) Timeout() bool {
+	var ne interface{ Timeout() bool }
+	return errors.As(e.err, &ne) && ne.Timeout()
+}
+
+const redactedMarker = "[REDACTED]"
+
+func endpointSecrets(raw string, headers map[string]string) []string {
+	set := map[string]struct{}{raw: {}}
+	if u, err := url.Parse(raw); err == nil {
+		set[u.String()] = struct{}{}
+		if p := strings.Trim(u.EscapedPath(), "/"); len(p) >= 6 {
+			set[p] = struct{}{}
+			set[u.Path] = struct{}{}
+		}
+		if p := strings.Trim(u.EscapedPath(), "/"); p != "" {
+			for _, seg := range strings.Split(p, "/") {
+				if len(seg) >= 6 {
+					set[seg] = struct{}{}
+				}
+			}
+		}
+		if u.RawQuery != "" {
+			set[u.RawQuery] = struct{}{}
+			for _, vs := range u.Query() {
+				for _, v := range vs {
+					if len(v) >= 4 {
+						set[v] = struct{}{}
+						set[url.QueryEscape(v)] = struct{}{}
+					}
+				}
+			}
+		}
+		if u.User != nil {
+			set[u.User.String()] = struct{}{}
+			if pw, ok := u.User.Password(); ok && pw != "" {
+				set[pw] = struct{}{}
+			}
+		}
+	}
+	for _, v := range headers {
+		if len(v) >= 4 {
+			set[v] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for s := range set {
+		if len(s) >= 4 {
+			out = append(out, s)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+	return out
+}
+
+func (c *rpcClient) redact(s string) string {
+	for _, sec := range c.secrets {
+		s = strings.ReplaceAll(s, sec, redactedMarker)
+	}
+	return s
+}
+
+func (c *rpcClient) redactRPCError(e *RPCError) *RPCError {
+	out := &RPCError{Code: e.Code, Message: c.redact(e.Message)}
+	if len(e.Data) > 0 {
+		out.Data = json.RawMessage(c.redact(string(e.Data)))
+	}
+	return out
+}
+
+func (c *rpcClient) transportError(method string, err error) error {
+	cause := err
+	op := "request"
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		cause, op = ue.Err, ue.Op
+	}
+	return &redactedError{msg: fmt.Sprintf("chain: %s: %s failed: %s", method, op, c.redact(cause.Error())), err: cause}
 }
 
 func newRPCClient(opts RPCOptions) (*rpcClient, error) {
@@ -78,7 +174,7 @@ func newRPCClient(opts RPCOptions) (*rpcClient, error) {
 	if c == nil {
 		c = &http.Client{Timeout: opts.Timeout}
 	}
-	return &rpcClient{opts: opts, client: c}, nil
+	return &rpcClient{opts: opts, client: c, secrets: endpointSecrets(opts.URL, opts.Headers)}, nil
 }
 
 type rpcRequest struct {
@@ -106,7 +202,7 @@ func (c *rpcClient) call(ctx context.Context, method string, params any) (json.R
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.opts.URL, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, c.transportError(method, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -116,12 +212,12 @@ func (c *rpcClient) call(ctx context.Context, method string, params any) (json.R
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("chain: %s: %w", method, err)
+		return nil, c.transportError(method, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, c.opts.MaxResponseBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("chain: %s: read body: %w", method, err)
+		return nil, c.transportError(method, err)
 	}
 	if int64(len(data)) > c.opts.MaxResponseBytes {
 		return nil, fmt.Errorf("chain: %s: %w", method, ErrResponseTooLarge)
@@ -134,19 +230,25 @@ func (c *rpcClient) call(ctx context.Context, method string, params any) (json.R
 		// Some providers return a JSON-RPC error body with a non-200 status.
 		var r rpcResponse
 		if json.Unmarshal(data, &r) == nil && r.Error != nil {
-			return nil, fmt.Errorf("chain: %s: %w", method, r.Error)
+			return nil, fmt.Errorf("chain: %s: http %d: %w", method, resp.StatusCode, c.redactRPCError(r.Error))
 		}
-		return nil, fmt.Errorf("chain: %s: %w", method, &HTTPStatusError{StatusCode: resp.StatusCode, Body: string(snippet)})
+		return nil, fmt.Errorf("chain: %s: %w", method, &HTTPStatusError{StatusCode: resp.StatusCode, Body: c.redact(string(snippet))})
 	}
 	var r rpcResponse
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, fmt.Errorf("chain: %s: decode response: %w", method, err)
 	}
+	wantID := strconv.FormatUint(id, 10)
 	if r.Error != nil {
-		return nil, fmt.Errorf("chain: %s: %w", method, r.Error)
+		// A null id is legal for errors the server could not attribute; any
+		// other id must be ours, or the error belongs to another request.
+		if gotID := string(bytes.TrimSpace(r.ID)); gotID != wantID && gotID != "null" && gotID != "" {
+			return nil, fmt.Errorf("chain: %s: error response id %s does not match request id %d", method, c.redact(gotID), id)
+		}
+		return nil, fmt.Errorf("chain: %s: %w", method, c.redactRPCError(r.Error))
 	}
-	if string(bytes.TrimSpace(r.ID)) != strconv.FormatUint(id, 10) {
-		return nil, fmt.Errorf("chain: %s: response id %s does not match request id %d", method, r.ID, id)
+	if string(bytes.TrimSpace(r.ID)) != wantID {
+		return nil, fmt.Errorf("chain: %s: response id %s does not match request id %d", method, c.redact(string(r.ID)), id)
 	}
 	if len(r.Result) == 0 {
 		return nil, fmt.Errorf("chain: %s: response has neither result nor error", method)

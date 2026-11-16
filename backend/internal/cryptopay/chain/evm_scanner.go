@@ -376,6 +376,8 @@ var tooMuchDataPhrases = []string{
 	"too large",
 	"query timeout",
 	"log response size exceeded",
+	"blocks range", // QuickNode: "eth_getLogs is limited to a 10000 blocks range"
+	"limited to a",
 }
 
 func isTooMuchDataError(err error) bool {
@@ -383,8 +385,8 @@ func isTooMuchDataError(err error) bool {
 		return true
 	}
 	var he *HTTPStatusError
-	if errors.As(err, &he) && he.StatusCode == http.StatusRequestEntityTooLarge {
-		return true
+	if errors.As(err, &he) && (he.StatusCode == http.StatusRequestEntityTooLarge || he.StatusCode == http.StatusGatewayTimeout) {
+		return true // 504: the query was too heavy for the gateway; a smaller one may pass
 	}
 	var re *RPCError
 	if !errors.As(err, &re) {
@@ -415,8 +417,14 @@ func (s *EVMRPCScanner) logsToObservations(ctx context.Context, logs []rpcLog, w
 		if !ok {
 			continue // not a whitelisted token contract
 		}
-		if len(l.Topics) != 3 || strings.ToLower(l.Topics[0]) != topic0 {
-			continue // not an ERC-20 Transfer (ERC-721 has 4 topics)
+		if len(l.Topics) == 0 || strings.ToLower(l.Topics[0]) != topic0 {
+			continue // another event of the token contract (receipt path)
+		}
+		if len(l.Topics) != 3 {
+			// A whitelisted ERC-20 always emits Transfer with 3 topics; any
+			// other shape is a corrupt/incomplete response. Fail instead of
+			// skipping so the caller's cursor cannot move past it.
+			return nil, fmt.Errorf("chain: %s Transfer log in tx %v has %d topics, want 3", asset.Symbol, derefOr(l.TransactionHash), len(l.Topics))
 		}
 		to, err := topicToAddress(l.Topics[2])
 		if err != nil {
@@ -641,4 +649,11 @@ func isHex32(s string) bool {
 	}
 	_, err := hex.DecodeString(s[2:])
 	return err == nil
+}
+
+func derefOr(p *string) string {
+	if p == nil {
+		return "<nil>"
+	}
+	return *p
 }

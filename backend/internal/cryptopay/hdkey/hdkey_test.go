@@ -3,7 +3,10 @@ package hdkey
 import (
 	"encoding/hex"
 	"errors"
+	"math/big"
 	"testing"
+
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 // BIP32 test vectors copied verbatim from
@@ -206,5 +209,61 @@ func TestParsePath(t *testing.T) {
 		if _, err := ParsePath(bad); err == nil {
 			t.Errorf("expected error for %q", bad)
 		}
+	}
+}
+
+// secp256k1 group order n (SEC 2, also secp256k1.Params().N).
+func groupOrderBytes() []byte {
+	b := secp256k1.Params().N.Bytes()
+	out := make([]byte, 32)
+	copy(out[32-len(b):], b)
+	return out
+}
+
+func TestBIP32InvalidChildBranches(t *testing.T) {
+	ir := make([]byte, 32)
+	n := groupOrderBytes()
+	// Master: IL = n and IL = 0 are invalid.
+	if _, err := masterFromIL(n, ir); !errors.Is(err, ErrInvalidChild) {
+		t.Fatalf("master IL=n: %v", err)
+	}
+	if _, err := masterFromIL(make([]byte, 32), ir); !errors.Is(err, ErrInvalidChild) {
+		t.Fatalf("master IL=0: %v", err)
+	}
+
+	// Parent private key k = 7; IL = n - 7 makes child key 0 and child point infinity.
+	parent, err := masterFromIL(append(make([]byte, 31), 7), ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := parent.Neuter()
+	nMinus7 := new(big.Int).Sub(secp256k1.Params().N, big.NewInt(7)).FillBytes(make([]byte, 32))
+	parentPub := pub.PubKey.SerializeCompressed()
+
+	if _, err := parent.childFromIL(0, parentPub, nMinus7, ir); !errors.Is(err, ErrInvalidChild) {
+		t.Fatalf("zero child private key: %v", err)
+	}
+	if _, err := pub.publicChildFromIL(0, parentPub, nMinus7, ir); !errors.Is(err, ErrInvalidChild) {
+		t.Fatalf("point at infinity: %v", err)
+	}
+	// IL >= n on both paths.
+	if _, err := parent.childFromIL(0, parentPub, n, ir); !errors.Is(err, ErrInvalidChild) {
+		t.Fatalf("priv IL=n: %v", err)
+	}
+	if _, err := pub.publicChildFromIL(0, parentPub, n, ir); !errors.Is(err, ErrInvalidChild) {
+		t.Fatalf("pub IL=n: %v", err)
+	}
+	// A valid IL on both paths yields the same public key.
+	one := append(make([]byte, 31), 1)
+	c1, err := parent.childFromIL(0, parentPub, one, ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := pub.publicChildFromIL(0, parentPub, one, ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c1.Neuter().String() != c2.String() {
+		t.Fatal("private/public child mismatch")
 	}
 }
