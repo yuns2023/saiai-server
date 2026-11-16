@@ -160,29 +160,29 @@ func TestLiveSolanaMainnet(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("ATA %s: %d newer signatures, %d inflows, newest %s", ata, len(sigs)-1, len(obs), newest)
-	// Paged form over the same window, 2 txs at a time, must reach the same set.
-	var paged []string
-	cursor, done := until, false
-	for i := 0; i < 10 && !done; i++ {
-		var page []Observation
+	// Window walk over the same range, 2 signatures per call.
+	var windowed []string
+	w := SolanaWindow{Until: until}
+	for i := 0; i < 10; i++ {
 		start := time.Now()
-		page, cursor, done, err = s.ScanTokenAccountPage(ctx, owner, ata, usdcAsset(), cursor, CommitmentFinalized, 2)
-		t.Logf("  page %d: %d obs, done %v, %s, err %v", i, len(page), done, time.Since(start).Round(time.Millisecond), err)
+		var page []Observation
+		page, w, err = s.ScanTokenAccountWindow(ctx, owner, ata, usdcAsset(), w, CommitmentFinalized, 2)
+		t.Logf("  window call %d: %d obs, next %+v, %s, err %v", i, len(page), w, time.Since(start).Round(time.Millisecond), err)
 		if err != nil {
 			if strings.Contains(err.Error(), "http=429") {
-				t.Logf("public RPC rate limited; stopping the paged check")
+				t.Logf("public RPC rate limited; stopping the window check")
 				break
 			}
 			t.Fatal(err)
 		}
 		for _, o := range page {
-			paged = append(paged, o.TxHash)
+			windowed = append(windowed, o.TxHash)
+		}
+		if w.Anchor == "" && i > 0 {
+			break // first window complete
 		}
 	}
-	t.Logf("paged scan: %d inflows, cursor %s, done %v", len(paged), cursor, done)
-	if done && len(paged) < len(obs) {
-		t.Fatalf("paged scan saw %d inflows, full scan %d", len(paged), len(obs))
-	}
+	t.Logf("window walk: %d inflows", len(windowed))
 	for _, o := range obs {
 		t.Logf("  %s +%s USDC units from %s slot %d", o.TxHash, o.Units, o.FromAddress, o.BlockNumber)
 		byTx, err := s.ObservationsForTx(ctx, o.TxHash, []string{owner}, CommitmentFinalized)

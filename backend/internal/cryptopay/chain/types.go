@@ -117,13 +117,28 @@ type SolanaScanner interface {
 	// ScanTokenAccount returns inflows for signatures newer than untilSig (exclusive; "" = full history).
 	// A null getTransaction is an error (retry), never "no inflow".
 	ScanTokenAccount(ctx context.Context, owner, tokenAccount string, asset Asset, untilSig string, commitment string) (obs []Observation, newestSig string, err error)
-	// ScanTokenAccountPage is the bounded, resumable form: it lists all
-	// signatures newer than untilSig, processes them oldest first, fetching at
-	// most maxTx transactions, and returns cursor = newest processed signature
-	// (pass it as untilSig next time) and done = nothing left. No new
-	// signatures: (nil, untilSig, true, nil). Any error: (nil, "", false, err).
-	ScanTokenAccountPage(ctx context.Context, owner, tokenAccount string, asset Asset, untilSig, commitment string, maxTx int) (obs []Observation, cursor string, done bool, err error)
+	// ScanTokenAccountWindow is the bounded, stateless, caller-persisted walk
+	// for commitment "finalized": one signature page (limit maxTx) per call.
+	// On any error it returns (nil, w, err) so nothing advances.
+	ScanTokenAccountWindow(ctx context.Context, owner, tokenAccount string, asset Asset, w SolanaWindow, commitment string, maxTx int) (obs []Observation, next SolanaWindow, err error)
 	ObservationsForTx(ctx context.Context, signature string, owners []string, commitment string) ([]Observation, error)
+}
+
+// SolanaWindow is the scan position of one token account, persisted by the
+// caller between ScanTokenAccountWindow calls (all fields, verbatim).
+//
+// Until is the newest signature already fully processed ("" = none). A
+// window is the set of signatures newer than Until that existed when its
+// first page was listed; Anchor is the newest of them (set on the first
+// page) and Before is the oldest signature processed so far in the window.
+// The walk goes newest to older inside the window; when it is complete the
+// next window starts at Until = Anchor, so signatures that arrived meanwhile
+// are picked up then. Every call either errors (window unchanged) or makes
+// progress, and is safe to repeat after a restart.
+type SolanaWindow struct {
+	Until  string `json:"until"`
+	Anchor string `json:"anchor"`
+	Before string `json:"before"`
 }
 
 // SolanaPoolManifest is the offline-signed list of Solana deposit owners.

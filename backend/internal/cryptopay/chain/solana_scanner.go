@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/mr-tron/base58"
@@ -31,10 +30,6 @@ type SolanaScannerConfig struct {
 	// MaxPages bounds one ScanTokenAccount walk (default 1000 pages); hitting
 	// it is an error, never a truncated success.
 	MaxPages int
-	// MaxListPagesPerCall bounds the getSignaturesForAddress pages one
-	// ScanTokenAccountPage call may list (default 20); a larger backlog is
-	// listed across calls.
-	MaxListPagesPerCall int
 	// MaxSupportedTransactionVersion passed to getTransaction (default 1).
 	// Mainnet already carries version-1 transactions (verified 2026-11-16);
 	// with 0 the node rejects them with -32015 and the scan would stall.
@@ -49,10 +44,6 @@ type SolanaRPCScanner struct {
 	pageLimit  int
 	maxPages   int
 	maxVersion int
-
-	maxListPagesPerCall int
-	backlogMu           sync.Mutex
-	backlog             map[string]*sigBacklog
 }
 
 var _ SolanaScanner = (*SolanaRPCScanner)(nil)
@@ -98,11 +89,6 @@ func NewSolanaScanner(cfg SolanaScannerConfig) (*SolanaRPCScanner, error) {
 	if s.maxPages <= 0 {
 		s.maxPages = 1000
 	}
-	s.maxListPagesPerCall = cfg.MaxListPagesPerCall
-	if s.maxListPagesPerCall <= 0 {
-		s.maxListPagesPerCall = 20
-	}
-	s.backlog = map[string]*sigBacklog{}
 	if cfg.MaxSupportedTransactionVersion != nil {
 		s.maxVersion = *cfg.MaxSupportedTransactionVersion
 	}
@@ -241,7 +227,7 @@ func (s *SolanaRPCScanner) scanSignature(ctx context.Context, si rpcSignatureInf
 // (so storing it unconditionally never rewinds a watermark), and "" only when
 // the account has no history at all and untilSig was "".
 //
-// Prefer ScanTokenAccountPage for production scanning: this walk processes
+// Prefer ScanTokenAccountWindow for production scanning: this walk processes
 // every new signature in one call and can be stalled by dust spam.
 func (s *SolanaRPCScanner) ScanTokenAccount(ctx context.Context, owner, tokenAccount string, asset Asset, untilSig string, commitment string) ([]Observation, string, error) {
 	wl, err := s.prepareTokenAccountScan(owner, tokenAccount, asset, commitment)
@@ -269,166 +255,93 @@ func (s *SolanaRPCScanner) ScanTokenAccount(ctx context.Context, owner, tokenAcc
 	return out, newest, nil
 }
 
-// sigBacklog is the per-token-account state ScanTokenAccountPage keeps in
-// memory between calls, so that neither listing nor processing has to be
-// redone from scratch when the backlog is large (dust spam).
-type sigBacklog struct {
-	base     string             // caller cursor this state continues from
-	listed   []rpcSignatureInfo // newest first, newer than base (listing in progress)
-	before   string             // next `before` for the listing ("" = from the newest)
-	pages    int                // pages listed so far for this backlog
-	listDone bool
-	pending  []rpcSignatureInfo // oldest first, ready to process (after listDone)
-}
-
-const maxBacklogEntries = 10000
-
-func backlogKey(tokenAccount, commitment string) string { return tokenAccount + "|" + commitment }
-
-func (s *SolanaRPCScanner) loadBacklog(key, base string) *sigBacklog {
-	s.backlogMu.Lock()
-	defer s.backlogMu.Unlock()
-	if b, ok := s.backlog[key]; ok && b.base == base {
-		cp := *b
-		return &cp
-	}
-	return &sigBacklog{base: base}
-}
-
-func (s *SolanaRPCScanner) storeBacklog(key string, b *sigBacklog) {
-	s.backlogMu.Lock()
-	defer s.backlogMu.Unlock()
-	if b == nil {
-		delete(s.backlog, key)
-		return
-	}
-	if len(s.backlog) >= maxBacklogEntries {
-		s.backlog = map[string]*sigBacklog{}
-	}
-	s.backlog[key] = b
-}
-
-// continueListing lists up to budget pages of signatures newer than b.base.
-func (s *SolanaRPCScanner) continueListing(ctx context.Context, b *sigBacklog, tokenAccount, commitment string, budget int) error {
-	for n := 0; n < budget && !b.listDone; n++ {
-		if b.pages >= s.maxPages {
-			return fmt.Errorf("chain: %s has more than %d signature pages; raise MaxPages", tokenAccount, s.maxPages)
-		}
-		opts := map[string]any{"limit": s.pageLimit, "commitment": commitment}
-		if b.before != "" {
-			opts["before"] = b.before
-		}
-		if b.base != "" {
-			opts["until"] = b.base
-		}
-		raw, err := s.rpc.call(ctx, "getSignaturesForAddress", []any{tokenAccount, opts})
-		if err != nil {
-			return err
-		}
-		if isJSONNull(raw) {
-			return errors.New("chain: getSignaturesForAddress returned null")
-		}
-		var batch []rpcSignatureInfo
-		if err := json.Unmarshal(raw, &batch); err != nil {
-			return fmt.Errorf("chain: getSignaturesForAddress: %w", err)
-		}
-		b.pages++
-		reachedBase := false
-		for _, si := range batch {
-			if si.Signature == "" {
-				return errors.New("chain: getSignaturesForAddress returned an empty signature")
-			}
-			if b.base != "" && si.Signature == b.base {
-				reachedBase = true
-				break
-			}
-			b.listed = append(b.listed, si)
-		}
-		if reachedBase || len(batch) < s.pageLimit {
-			b.listDone = true
-			b.pending = make([]rpcSignatureInfo, len(b.listed))
-			for i, si := range b.listed { // reverse: oldest first, same-slot order preserved
-				b.pending[len(b.listed)-1-i] = si
-			}
-			b.listed = nil
-			return nil
-		}
-		b.before = batch[len(batch)-1].Signature
-	}
-	return nil
-}
-
-// ScanTokenAccountPage implements SolanaScanner. It lists the signatures
-// newer than untilSig, then processes them OLDEST first, fetching at most
-// maxTx of them (signatures already marked failed in the listing count toward
-// maxTx but are not fetched). cursor is the newest processed signature, so the
-// next call with untilSig=cursor resumes right after it; done reports that
-// nothing unprocessed remains.
+// ScanTokenAccountWindow implements SolanaScanner: a stateless, bounded,
+// caller-persisted walk. See SolanaWindow. Intended for commitment
+// "finalized" (the window is anchored on signatures that must not vanish);
+// other commitments are rejected.
 //
-//   - Nothing newer than untilSig: (nil, untilSig, true, nil).
-//   - Any error: (nil, "", false, err); no cursor advances.
-//   - Listing a very large backlog is itself bounded per call
-//     (MaxListPagesPerCall); while it is still in progress the call returns
-//     (nil, untilSig, false, nil) and the next call with the same untilSig
-//     continues where it stopped.
+// One call = one getSignaturesForAddress page (limit=maxTx, until=w.Until,
+// before=w.Before) plus one getTransaction per listed signature that did not
+// already fail in the listing. Within the window the walk goes newest to
+// older; observations of one call are returned oldest first.
 //
-// Listing and unprocessed signatures are cached in memory per token account
-// and reused only when the next call passes the returned cursor, so a large
-// spam backlog costs one listing in total, not one per call.
-func (s *SolanaRPCScanner) ScanTokenAccountPage(ctx context.Context, owner, tokenAccount string, asset Asset, untilSig, commitment string, maxTx int) ([]Observation, string, bool, error) {
-	if maxTx <= 0 {
-		return nil, "", false, fmt.Errorf("chain: maxTx must be > 0, got %d", maxTx)
+//   - Empty page, no anchor: nothing new; next == w.
+//   - Empty page with an anchor, or a short page (< maxTx): the window is
+//     complete; next = {Until: anchor}.
+//   - Full page: next = {Until: w.Until, Anchor: anchor, Before: last sig}.
+//   - Any error: (nil, w, err); the caller keeps its window.
+func (s *SolanaRPCScanner) ScanTokenAccountWindow(ctx context.Context, owner, tokenAccount string, asset Asset, w SolanaWindow, commitment string, maxTx int) ([]Observation, SolanaWindow, error) {
+	if commitment != CommitmentFinalized {
+		return nil, w, fmt.Errorf("chain: ScanTokenAccountWindow requires commitment %q", CommitmentFinalized)
+	}
+	if maxTx <= 0 || maxTx > 1000 {
+		return nil, w, fmt.Errorf("chain: maxTx must be in 1..1000, got %d", maxTx)
+	}
+	if w.Anchor == "" && w.Before != "" {
+		return nil, w, errors.New("chain: window has Before without Anchor")
 	}
 	wl, err := s.prepareTokenAccountScan(owner, tokenAccount, asset, commitment)
 	if err != nil {
-		return nil, "", false, err
+		return nil, w, err
 	}
-	key := backlogKey(tokenAccount, commitment)
-	b := s.loadBacklog(key, untilSig)
-	if b.listDone && len(b.pending) == 0 {
-		b = &sigBacklog{base: untilSig}
+	opts := map[string]any{"limit": maxTx, "commitment": commitment}
+	if w.Until != "" {
+		opts["until"] = w.Until
 	}
-	if !b.listDone {
-		if err := s.continueListing(ctx, b, tokenAccount, commitment, s.maxListPagesPerCall); err != nil {
-			if b.pages > s.maxPages {
-				s.storeBacklog(key, nil)
-			} else {
-				s.storeBacklog(key, b) // listing so far stays valid
-			}
-			return nil, "", false, err
+	if w.Before != "" {
+		opts["before"] = w.Before
+	}
+	raw, err := s.rpc.call(ctx, "getSignaturesForAddress", []any{tokenAccount, opts})
+	if err != nil {
+		return nil, w, err
+	}
+	if isJSONNull(raw) {
+		return nil, w, errors.New("chain: getSignaturesForAddress returned null")
+	}
+	var page []rpcSignatureInfo
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return nil, w, fmt.Errorf("chain: getSignaturesForAddress: %w", err)
+	}
+	if len(page) > maxTx {
+		return nil, w, fmt.Errorf("chain: getSignaturesForAddress returned %d signatures for limit %d", len(page), maxTx)
+	}
+	seen := make(map[string]struct{}, len(page))
+	for _, si := range page {
+		if si.Signature == "" {
+			return nil, w, errors.New("chain: getSignaturesForAddress returned an empty signature")
 		}
-		if !b.listDone {
-			s.storeBacklog(key, b)
-			return nil, untilSig, false, nil
+		if si.Signature == w.Until || si.Signature == w.Before || si.Signature == w.Anchor {
+			return nil, w, fmt.Errorf("chain: getSignaturesForAddress returned window bound %s inside the page", clip(si.Signature))
 		}
+		if _, dup := seen[si.Signature]; dup {
+			return nil, w, fmt.Errorf("chain: getSignaturesForAddress returned %s twice", clip(si.Signature))
+		}
+		seen[si.Signature] = struct{}{}
 	}
-	if len(b.pending) == 0 {
-		s.storeBacklog(key, nil)
-		return nil, untilSig, true, nil
+	if len(page) == 0 {
+		if w.Anchor == "" {
+			return nil, w, nil
+		}
+		return nil, SolanaWindow{Until: w.Anchor}, nil
+	}
+	anchor := w.Anchor
+	if anchor == "" {
+		anchor = page[0].Signature
 	}
 	var out []Observation
-	cursor := ""
-	n := min(maxTx, len(b.pending))
-	for _, si := range b.pending[:n] {
-		o, err := s.scanSignature(ctx, si, owner, tokenAccount, wl, commitment)
+	for i := len(page) - 1; i >= 0; i-- { // oldest first within the page
+		o, err := s.scanSignature(ctx, page[i], owner, tokenAccount, wl, commitment)
 		if err != nil {
-			// Drop the cached listing: at "confirmed" a listed signature can
-			// vanish with its fork, and a fresh listing is the only way out.
-			s.storeBacklog(key, nil)
-			return nil, "", false, err
+			return nil, w, err
 		}
 		if o != nil {
 			out = append(out, *o)
 		}
-		cursor = si.Signature
 	}
-	rest := b.pending[n:]
-	if len(rest) == 0 {
-		s.storeBacklog(key, nil)
-		return out, cursor, true, nil
+	if len(page) < maxTx {
+		return out, SolanaWindow{Until: anchor}, nil
 	}
-	s.storeBacklog(key, &sigBacklog{base: cursor, listDone: true, pending: rest})
-	return out, cursor, false, nil
+	return out, SolanaWindow{Until: w.Until, Anchor: anchor, Before: page[len(page)-1].Signature}, nil
 }
 
 // ObservationsForTx implements SolanaScanner: every whitelisted token account
