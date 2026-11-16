@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,11 +31,16 @@ func TestParseOwnerUserIDBody(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, id, "explicit null clears")
 
+	id, err = parse("{\"owner_user_id\": 7}\n  ")
+	require.NoError(t, err)
+	require.Equal(t, int64(7), *id, "trailing whitespace is fine")
+
 	for _, body := range []string{
 		``, `{}`, `null`, `[]`, `{"owner": 5}`,
 		`{"owner_user_id": 0}`, `{"owner_user_id": -1}`, `{"owner_user_id": "5"}`,
 		`{"owner_user_id": 5.0}`, `{"owner_user_id": 5e0}`, `{"owner_user_id": 99999999999999999999}`,
 		`{"owner_user_id": true}`, `{"owner_user_id": {}}`,
+		`{"owner_user_id": 1}{"owner_user_id": null}`, `{"owner_user_id": 1} 2`, `{"owner_user_id": 1}]`,
 	} {
 		_, err := parse(body)
 		require.ErrorIs(t, err, service.ErrHostedOwnerInvalidOwnerID, body)
@@ -56,10 +62,10 @@ func TestListAccountsByOwnerFiltersInMemory(t *testing.T) {
 		return ids, total
 	}
 	ids, total := filter("", "", "", "", 0, 1, 20)
-	require.Equal(t, []int64{1, 2, 3}, ids)
+	require.Equal(t, []int64{3, 2, 1}, ids, "newest first, like the regular list")
 	require.Equal(t, int64(3), total)
 	ids, _ = filter(service.PlatformAnthropic, "", "", "", 0, 1, 20)
-	require.Equal(t, []int64{1, 3}, ids)
+	require.Equal(t, []int64{3, 1}, ids)
 	ids, _ = filter("", "", service.StatusError, "", 0, 1, 20)
 	require.Equal(t, []int64{3}, ids)
 	future, past := time.Now().Add(time.Hour), time.Now().Add(-time.Hour)
@@ -78,9 +84,14 @@ func TestListAccountsByOwnerFiltersInMemory(t *testing.T) {
 	ids, _ = filter("", "", "", "", service.AccountListGroupUngrouped, 1, 20)
 	require.Equal(t, []int64{2}, ids)
 	ids, total = filter("", "", "", "", 0, 2, 2)
-	require.Equal(t, []int64{3}, ids)
+	require.Equal(t, []int64{1}, ids)
 	require.Equal(t, int64(3), total)
 	ids, total = filter("", "", "", "", 0, 9, 2)
 	require.Empty(t, ids)
 	require.Equal(t, int64(3), total)
+	ids, total = filter("", "", "", "", 0, math.MaxInt, 20)
+	require.Empty(t, ids, "huge page values must not overflow into a panic")
+	require.Equal(t, int64(3), total)
+	ids, _ = filter("", "", "", "", 0, 1, math.MaxInt)
+	require.Equal(t, []int64{3, 2, 1}, ids)
 }

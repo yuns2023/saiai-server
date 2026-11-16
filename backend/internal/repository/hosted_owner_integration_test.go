@@ -235,6 +235,30 @@ func TestHostedOwnerQueriesUseSnapshot(t *testing.T) {
 	_, err = f.logs.createSingle(ctx, integrationDB, afterClear)
 	require.NoError(t, err)
 	require.False(t, f.storedFor(afterClear).Valid)
+
+	// A soft-deleted account stays readable in the history of every past owner.
+	_, err = f.repo.SetAccountOwner(ctx, f.account.ID, &f.ownerA.ID, 0)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE accounts SET deleted_at = NOW() WHERE id = $1", f.account.ID)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "UPDATE accounts SET deleted_at = NULL, owner_user_id = NULL WHERE id = $1", f.account.ID)
+	})
+	ids, err = f.repo.ListCurrentOwnedAccountIDs(ctx, f.ownerA.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, ids, "deleted accounts are never current")
+	ever, err = f.repo.ListEverOwnedAccounts(ctx, f.ownerA.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, ever, 1)
+	ok, err = f.repo.CanViewOwnedAccount(ctx, f.ownerA.ID, f.account.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	records, err = f.repo.ListOwnedUsage(ctx, service.HostedOwnerUsageQuery{OwnerUserID: f.ownerA.ID, AccountID: f.account.ID,
+		Start: now.Add(-7 * 24 * time.Hour), End: now.Add(time.Minute), Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, records, 3)
+	_, err = f.repo.SetAccountOwner(ctx, f.account.ID, nil, 0)
+	require.ErrorIs(t, err, service.ErrAccountNotFound, "deleted accounts cannot be reassigned")
 }
 
 func TestHostedOwnerUsageKeysetPagination(t *testing.T) {

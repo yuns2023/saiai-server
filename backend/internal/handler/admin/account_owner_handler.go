@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +57,13 @@ func parseOwnerUserIDBody(c *gin.Context) (*int64, error) {
 	var body map[string]json.RawMessage
 	decoder := json.NewDecoder(c.Request.Body)
 	if err := decoder.Decode(&body); err != nil || body == nil {
+		return nil, service.ErrHostedOwnerInvalidOwnerID
+	}
+	// Exactly one JSON object: trailing data is rejected, never ignored.
+	if decoder.More() {
+		return nil, service.ErrHostedOwnerInvalidOwnerID
+	}
+	if _, err := decoder.Token(); err != io.EOF {
 		return nil, service.ErrHostedOwnerInvalidOwnerID
 	}
 	raw, ok := body["owner_user_id"]
@@ -126,6 +135,8 @@ func filterOwnedAccounts(all []service.Account, page, pageSize int, platform, ac
 		}
 		filtered = append(filtered, account)
 	}
+	// Same order as the regular admin list (newest first).
+	sort.SliceStable(filtered, func(i, j int) bool { return filtered[i].ID > filtered[j].ID })
 	total := int64(len(filtered))
 	if page < 1 {
 		page = 1
@@ -133,10 +144,19 @@ func filterOwnedAccounts(all []service.Account, page, pageSize int, platform, ac
 	if pageSize < 1 {
 		pageSize = 20
 	}
-	start := (page - 1) * pageSize
-	if start >= len(filtered) {
+	// Clamp before any arithmetic so huge page/pageSize values cannot overflow:
+	// with pageSize <= len and page <= pages, (page-1)*pageSize <= len.
+	if pageSize > len(filtered) {
+		pageSize = len(filtered)
+	}
+	if pageSize < 1 {
 		return []service.Account{}, total
 	}
+	pages := (len(filtered) + pageSize - 1) / pageSize
+	if page > pages {
+		return []service.Account{}, total
+	}
+	start := (page - 1) * pageSize
 	end := start + pageSize
 	if end > len(filtered) {
 		end = len(filtered)
@@ -156,6 +176,18 @@ func ownedAccountMatchesStatus(account service.Account, status string, now time.
 	default:
 		return account.Status == status
 	}
+}
+
+// exportAccountsByOwner returns every account of one owner that matches the
+// export filters (all pages), so an owner-filtered export never includes
+// other owners' accounts.
+func (h *AccountHandler) exportAccountsByOwner(ctx context.Context, ownerUserID int64, platform, accountType, status, search string) ([]service.Account, error) {
+	all, err := h.hostedOwnerService.ListAccountsOwnedBy(ctx, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	accounts, _ := filterOwnedAccounts(all, 1, len(all)+1, platform, accountType, status, search, 0)
+	return accounts, nil
 }
 
 func containsInt64(values []int64, target int64) bool {

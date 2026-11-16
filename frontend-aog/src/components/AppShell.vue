@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -30,11 +30,33 @@ const nav = computed(() => [
   { to: '/notices', icon: 'bell' as const, label: t('nav.notices'), count: notices.unread.length }
 ])
 
-watch(() => route.fullPath, () => (drawerOpen.value = false))
+/** Re-checks hosted-account ownership when due (TTL / failure backoff in the store); never blocks. */
+function checkHosted(): void {
+  if (auth.isAuthenticated) hosted.ensureLoaded()
+}
+
+function onVisibility(): void {
+  if (document.visibilityState === 'visible') checkHosted()
+}
+
+watch(
+  () => route.fullPath,
+  () => {
+    drawerOpen.value = false
+    checkHosted()
+  }
+)
 
 onMounted(() => {
   if (!notices.loaded) notices.load().catch(() => undefined)
-  hosted.ensureLoaded()
+  checkHosted()
+  window.addEventListener('focus', checkHosted)
+  document.addEventListener('visibilitychange', onVisibility)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('focus', checkHosted)
+  document.removeEventListener('visibilitychange', onVisibility)
 })
 
 async function signOut(): Promise<void> {

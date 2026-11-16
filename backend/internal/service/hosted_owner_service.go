@@ -39,6 +39,10 @@ const (
 	// hostedOwnerMaxAccounts bounds every per-owner account list (current and
 	// historical). Real owners have a handful of accounts.
 	hostedOwnerMaxAccounts = 200
+	// hostedOwnerAdminMaxAccounts bounds the admin owner filter/export, which
+	// loads one owner's accounts and filters them in memory. Documented limit:
+	// an owner with more accounts than this is truncated in that view.
+	hostedOwnerAdminMaxAccounts = 2000
 	// hostedOwnerCursorMaxLen bounds the opaque cursor before decoding.
 	hostedOwnerCursorMaxLen = 128
 	hostedOwnerCursorPrefix = "v1:"
@@ -327,12 +331,12 @@ func (s *HostedOwnerService) SetAccountOwner(ctx context.Context, accountID int6
 	if ownerUserID != nil {
 		id := *ownerUserID
 		change.OwnerUserID = &id
-		emails, err := s.repo.GetUserEmails(ctx, []int64{id})
-		if err != nil {
-			return nil, err
-		}
-		if email, ok := emails[id]; ok {
-			change.OwnerEmail = &email
+		// The change is already committed: the email is display-only, so a
+		// lookup failure must not report the assignment as failed.
+		if emails, err := s.repo.GetUserEmails(ctx, []int64{id}); err == nil {
+			if email, ok := emails[id]; ok {
+				change.OwnerEmail = &email
+			}
 		}
 	}
 	return change, nil
@@ -360,7 +364,7 @@ func (s *HostedOwnerService) ListAccountsOwnedBy(ctx context.Context, ownerUserI
 	if ownerUserID <= 0 {
 		return []Account{}, nil
 	}
-	ids, err := s.repo.ListCurrentOwnedAccountIDs(ctx, ownerUserID, hostedOwnerMaxAccounts)
+	ids, err := s.repo.ListCurrentOwnedAccountIDs(ctx, ownerUserID, hostedOwnerAdminMaxAccounts)
 	if err != nil {
 		return nil, err
 	}

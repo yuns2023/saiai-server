@@ -1246,7 +1246,8 @@ const handleExportData = async () => {
               platform: params.platform,
               type: params.type,
               status: params.status,
-              search: params.search
+              search: params.search,
+              owner_user_id: params.owner_user_id
             }
           }
     )
