@@ -393,14 +393,7 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 			start := ((first + g) % groups) * cryptoPayEVMBatchAddresses
 			end := min(start+cryptoPayEVMBatchAddresses, len(active))
 			tailCtx, cancel := context.WithTimeout(ctx, s.batchTimeout)
-			tailTo := min(latest, finalized+s.evmBlocksPerScan)
-			obs, scanErr := sc.ScanRange(tailCtx, finalized+1, tailTo, active[start:end], false)
-			if scanErr == nil {
-				for i := range obs {
-					obs[i].Finalized = false
-				}
-				_, scanErr = s.IngestObservations(tailCtx, obs)
-			}
+			scanErr := s.scanEVMConfirmingTail(tailCtx, sc, active[start:end], finalized, latest)
 			cancel()
 			if scanErr != nil {
 				// A failing group must not keep the others from their turn.
@@ -409,6 +402,52 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// cryptoPayEVMConfirmingMaxBlocks caps the unfinalized window shown as
+// "confirming" (about 2 h of Arbitrum blocks). Arbitrum's finalized tag lags
+// latest by ~20 min (≈5000 blocks), so the window must span far more than one
+// getLogs chunk or new transfers stay invisible until shortly before credit.
+const cryptoPayEVMConfirmingMaxBlocks = 30_000
+
+// scanEVMConfirmingTail records display-only observations for (finalized,
+// latest], newest window capped at cryptoPayEVMConfirmingMaxBlocks, in chunks
+// of evmBlocksPerScan walking from latest backwards so a timeout still shows
+// the newest transfers. It never moves cursors; credit still waits for the
+// finalized scan.
+func (s *CryptoPayService) scanEVMConfirmingTail(ctx context.Context, sc chain.EVMScanner, addresses []string, finalized, latest uint64) error {
+	if latest <= finalized {
+		return nil
+	}
+	low := finalized + 1
+	if latest-finalized > cryptoPayEVMConfirmingMaxBlocks {
+		low = latest - cryptoPayEVMConfirmingMaxBlocks + 1
+	}
+	step := s.evmBlocksPerScan
+	if step == 0 {
+		step = 1
+	}
+	to := latest
+	for {
+		from := low
+		if to-low >= step {
+			from = to - step + 1
+		}
+		obs, err := sc.ScanRange(ctx, from, to, addresses, false)
+		if err != nil {
+			return err
+		}
+		for i := range obs {
+			obs[i].Finalized = false
+		}
+		if _, err := s.IngestObservations(ctx, obs); err != nil {
+			return err
+		}
+		if from == low {
+			return nil
+		}
+		to = from - 1
+	}
 }
 
 // scanEVMBatch walks one batch forward in chunks of evmBlocksPerScan blocks.

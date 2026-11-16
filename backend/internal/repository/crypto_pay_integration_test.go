@@ -1716,3 +1716,42 @@ func TestCryptoPay_SolanaPauseAfterProgressIsBenign(t *testing.T) {
 	env.svc.RunWorkerPass(ctx)
 	require.Equal(t, "3.00000000", userBalance(t, user))
 }
+
+// Arbitrum's finalized tag lags latest by ~5000 blocks, more than one getLogs
+// chunk: the confirming scan must cover the whole gap (capped) in chunks.
+func TestCryptoPay_ConfirmingTailCoversWholeUnfinalizedGap(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.EVMBlocksPerScan = 2000 })
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	importTestEVMKeyset(t, env, "xpubTAILGAP")
+	_, addr := allocateEVMAt(t, env, 1000)
+	_, err := integrationDB.Exec(`UPDATE crypto_pay_addresses SET last_order_at = NOW()`)
+	require.NoError(t, err)
+	tails := func() []string {
+		var out []string
+		for _, c := range env.evm.calls {
+			if strings.Contains(c, "/false/") {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+
+	env.evm.finalized, env.evm.latest = 1000, 7000
+	late := evmObs(addr, 2_700_000, 6500, false)
+	env.evm.logs = []chain.Observation{late}
+	env.evm.calls = nil
+	env.svc.RunWorkerPass(ctx)
+	require.Equal(t, []string{"5001-7000/false/1", "3001-5000/false/1", "1001-3000/false/1"}, tails(), "newest chunk first")
+	require.Equal(t, "observed", depositStatus(t, "arbitrum-one", late.TxHash, late.EventKey), "shown as confirming long before finalization")
+
+	// A huge gap is capped to the newest window.
+	env.evm.finalized, env.evm.latest = 1000, 100_000
+	env.evm.calls = nil
+	env.svc.RunWorkerPass(ctx)
+	got := tails()
+	require.NotEmpty(t, got)
+	require.Equal(t, "98001-100000/false/1", got[0])
+	require.Equal(t, "70001-72000/false/1", got[len(got)-1])
+	require.Len(t, got, 15)
+}

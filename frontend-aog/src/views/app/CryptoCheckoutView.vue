@@ -300,6 +300,7 @@ onUnmounted(() => {
           <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-2">
             <li>{{ t('crypto.notePartial') }}</li>
             <li>{{ t('crypto.noteChain') }}</li>
+            <li>{{ t('crypto.noteExchange') }}</li>
             <li>
               {{ net ? t('crypto.noteFinality', { network: networkLabel, n: net.finality_hint_minutes }) : t('crypto.noteFinalityGeneric') }}
             </li>
