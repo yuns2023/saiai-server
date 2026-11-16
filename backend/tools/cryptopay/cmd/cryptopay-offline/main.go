@@ -36,6 +36,14 @@ Commands (run on the air-gapped machine):
   signer-pubkey  --mnemonic-file F [--signer-index K]
   verify-evm     --mnemonic-file F --index i  print EVM address m/44'/60'/0'/0/i
   verify-solana  --mnemonic-file F --index i  print Solana owner m/44'/501'/i'/0'
+
+Sweep (see README.md):
+  treasury-address --mnemonic-file F          EVM + Solana treasury addresses (fund them with a little ETH / SOL)
+  ledger init|list|close|export --ledger L [--op ID] [--out F]  offline signing ledger
+  nonce-register --ledger L --address A       register a Solana durable nonce account (authority = treasury)
+  dest-register  --ledger L --network N --label X   register an external address (typed twice)
+  sweep-sign     --mnemonic-file F --ledger L --plan plan.json --out signed.json [--allow-high-fee]
+  send-sign      --mnemonic-file F --ledger L --plan plan.json --dest LABEL --amount 2.7 --out signed.json [--allow-high-fee]
 `
 
 func main() {
@@ -64,6 +72,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdVerifyEVM(rest, stdout, stderr)
 	case "verify-solana":
 		return cmdVerifySolana(rest, stdout, stderr)
+	case "treasury-address":
+		return cmdTreasuryAddress(rest, stdout, stderr)
+	case "ledger":
+		return cmdLedger(rest, stdout, stderr)
+	case "nonce-register":
+		return cmdNonceRegister(rest, stdout, stderr)
+	case "dest-register":
+		return cmdDestRegister(rest, stdout, stderr)
+	case "sweep-sign":
+		return cmdSweepSign(rest, stdout, stderr)
+	case "send-sign":
+		return cmdSendSign(rest, stdout, stderr)
 	case "-h", "--help", "help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return nil

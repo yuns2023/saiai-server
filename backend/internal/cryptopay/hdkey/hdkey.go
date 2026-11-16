@@ -3,7 +3,7 @@
 //
 // The server only ever uses the public half (ParseExtendedPublicKey +
 // PublicChild). Private derivation exists for the air-gapped
-// cmd/cryptopay-offline tool and its tests.
+// tools/cryptopay/cmd/cryptopay-offline tool and its tests.
 package hdkey
 
 import (

@@ -65,7 +65,7 @@ func abandonAccountXpub(t *testing.T) string {
 
 func TestEVMAddressFromXpub(t *testing.T) {
 	xpub := abandonAccountXpub(t)
-	// Independently derived in Python (see cmd/cryptopay-offline tests) and
+	// Independently derived in Python (see tools/cryptopay/cmd/cryptopay-offline tests) and
 	// the widely published MetaMask address 0x9858EfFD232B4033E47d90003D41EC34EcaEda94.
 	want := []string{
 		"0x9858effd232b4033e47d90003d41ec34ecaeda94",
