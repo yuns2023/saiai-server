@@ -8,7 +8,7 @@ export default {
     badgeFree: 'Own-account hosting · not charged',
     badgeFee: 'Own-account hosting · fee {rate}× standard price',
     reference: 'Reference usage',
-    hint: 'Uses the official standard model price recorded for each request; Key quotas and window limits count this amount. The actual charge is the hosting fee (standard price × group rate; a 0 rate is not charged). Separate from upstream quota percentages. Earlier records retain their original basis.',
+    hint: 'Uses this site’s standard model price recorded for each request; Key quotas and window limits count this amount. The actual charge is the hosting fee (standard price × group rate; a 0 rate is not charged). Separate from upstream quota percentages. Earlier records retain their original basis.',
     total: 'Hosted usage',
     windowLimit: 'Window usage limit'
   },
