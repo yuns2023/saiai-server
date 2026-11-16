@@ -96,6 +96,7 @@ func TestVerifySolanaPoolManifest(t *testing.T) {
 			return b
 		}(),
 		"trailing data":     append(append([]byte{}, good...), []byte(`{}`)...),
+		"trailing bracket":  append(append([]byte{}, good...), ']'),
 		"bad version":       signedManifest(t, func(m *SolanaPoolManifest) { m.Version = 2 }, signer),
 		"evm network":       signedManifest(t, func(m *SolanaPoolManifest) { m.Network = ArbitrumOne }, signer),
 		"unknown network":   signedManifest(t, func(m *SolanaPoolManifest) { m.Network = "solana-testnet" }, signer),

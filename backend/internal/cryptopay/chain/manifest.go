@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/mr-tron/base58"
 )
@@ -49,7 +50,7 @@ func VerifySolanaPoolManifest(raw []byte, trustedSignerPubkey string) (*SolanaPo
 	if err := dec.Decode(&m); err != nil {
 		return nil, fmt.Errorf("chain: decode manifest: %w", err)
 	}
-	if dec.More() {
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, errors.New("chain: trailing data after manifest JSON")
 	}
 

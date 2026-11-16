@@ -52,6 +52,9 @@ type EVMRPCScanner struct {
 type blockHeader struct {
 	Hash string
 	Time time.Time
+	// Finalized is true when the header was fetched at or below a known
+	// finalized head; only such entries may back a Finalized observation.
+	Finalized bool
 }
 
 const evmBlockCacheSize = 4096
@@ -151,7 +154,9 @@ func (s *EVMRPCScanner) FinalizedBlock(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	s.remember(n, b)
+	if _, err := s.remember(n, b, true); err != nil {
+		return 0, fmt.Errorf("chain: finalized block timestamp: %w", err)
+	}
 	return n, nil
 }
 
@@ -173,35 +178,45 @@ func (s *EVMRPCScanner) getBlock(ctx context.Context, tag string) (*rpcBlock, er
 	return &b, nil
 }
 
-func (s *EVMRPCScanner) remember(n uint64, b *rpcBlock) {
+func (s *EVMRPCScanner) remember(n uint64, b *rpcBlock, finalized bool) (blockHeader, error) {
 	ts, err := parseHexUint64(b.Timestamp)
 	if err != nil {
-		return
+		return blockHeader{}, err
 	}
+	h := blockHeader{Hash: strings.ToLower(b.Hash), Time: time.Unix(int64(ts), 0).UTC(), Finalized: finalized}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.blockCache) >= evmBlockCacheSize {
 		s.blockCache = map[uint64]blockHeader{}
 	}
-	s.blockCache[n] = blockHeader{Hash: strings.ToLower(b.Hash), Time: time.Unix(int64(ts), 0).UTC()}
+	if old, ok := s.blockCache[n]; !ok || !old.Finalized || finalized {
+		s.blockCache[n] = h // never downgrade a finalized entry
+	}
+	return h, nil
 }
 
 // header returns hash+time of block n, verifying it matches wantHash (the
 // hash the log/receipt claims). A mismatch means a reorg happened between the
-// two reads and is an error.
-func (s *EVMRPCScanner) header(ctx context.Context, n uint64, wantHash string) (blockHeader, error) {
+// two reads and is an error. When finalized is true the caller has already
+// checked n <= finalized head; a cached header that was fetched before block
+// n was finalized is not trusted and is re-read from the node.
+func (s *EVMRPCScanner) header(ctx context.Context, n uint64, wantHash string, finalized bool) (blockHeader, error) {
 	s.mu.Lock()
 	h, ok := s.blockCache[n]
 	s.mu.Unlock()
-	if !ok || h.Hash != wantHash {
+	if !ok || h.Hash != wantHash || (finalized && !h.Finalized) {
 		b, err := s.getBlock(ctx, "0x"+strconv.FormatUint(n, 16))
 		if err != nil {
 			return blockHeader{}, err
 		}
-		s.remember(n, b)
-		s.mu.Lock()
-		h = s.blockCache[n]
-		s.mu.Unlock()
+		if got, err := parseHexUint64(b.Number); err != nil || got != n {
+			return blockHeader{}, fmt.Errorf("chain: eth_getBlockByNumber(%d) returned block %q", n, b.Number)
+		}
+		// Use the header we just fetched, not whatever the shared cache holds
+		// now (a concurrent non-finalized scan may have written to it).
+		if h, err = s.remember(n, b, finalized); err != nil {
+			return blockHeader{}, fmt.Errorf("chain: block %d timestamp: %w", n, err)
+		}
 	}
 	if h.Hash != wantHash {
 		return blockHeader{}, fmt.Errorf("chain: block %d hash %s != log block hash %s (reorg in progress?)", n, h.Hash, wantHash)
@@ -445,7 +460,7 @@ func (s *EVMRPCScanner) logsToObservations(ctx context.Context, logs []rpcLog, w
 			continue
 		}
 		seen[key] = struct{}{}
-		hdr, err := s.header(ctx, bn, blockHash)
+		hdr, err := s.header(ctx, bn, blockHash, finalized)
 		if err != nil {
 			return nil, err
 		}
@@ -524,11 +539,22 @@ func (s *EVMRPCScanner) ObservationsForTx(ctx context.Context, txHash string, ad
 		}
 	}
 	// Re-check the receipt's block is canonical even if no log matches.
-	if _, err := s.header(ctx, bn, strings.ToLower(*rc.BlockHash)); err != nil {
+	if !strings.EqualFold(rc.TransactionHash, txHash) {
+		return nil, fmt.Errorf("chain: receipt is for %q, requested %s", rc.TransactionHash, txHash)
+	}
+	receiptBlockHash := strings.ToLower(*rc.BlockHash)
+	if _, err := s.header(ctx, bn, receiptBlockHash, finalized); err != nil {
 		return nil, err
 	}
-	if rc.Status != "0x1" {
+	switch rc.Status {
+	case "0x1":
+	case "0x0":
 		return nil, nil // reverted: no transfer happened
+	default:
+		return nil, fmt.Errorf("chain: receipt %s has unexpected status %q", txHash, rc.Status)
+	}
+	if rc.Logs == nil {
+		return nil, fmt.Errorf("chain: successful receipt %s has no logs field", txHash)
 	}
 	watched := make(map[string]struct{}, len(addrs))
 	for _, a := range addrs {
@@ -545,6 +571,10 @@ func (s *EVMRPCScanner) ObservationsForTx(ctx context.Context, txHash string, ad
 		if rc.Logs[i].TransactionHash == nil {
 			h := txHash
 			rc.Logs[i].TransactionHash = &h
+		}
+		if !strings.EqualFold(*rc.Logs[i].TransactionHash, txHash) || !strings.EqualFold(*rc.Logs[i].BlockHash, receiptBlockHash) ||
+			!strings.EqualFold(*rc.Logs[i].BlockNumber, *rc.BlockNumber) {
+			return nil, fmt.Errorf("chain: receipt %s contains a log from another tx/block", txHash)
 		}
 	}
 	return s.logsToObservations(ctx, rc.Logs, watched, finalized, finalizedHead)

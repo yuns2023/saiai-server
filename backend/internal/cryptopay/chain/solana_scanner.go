@@ -166,6 +166,11 @@ func (s *SolanaRPCScanner) ScanTokenAccount(ctx context.Context, owner, tokenAcc
 		if err != nil {
 			return nil, "", err
 		}
+		if isJSONNull(raw) {
+			// null is not "end of history": failing here keeps the caller's
+			// watermark where it was instead of skipping older signatures.
+			return nil, "", errors.New("chain: getSignaturesForAddress returned null")
+		}
 		var batch []rpcSignatureInfo
 		if err := json.Unmarshal(raw, &batch); err != nil {
 			return nil, "", fmt.Errorf("chain: getSignaturesForAddress: %w", err)
@@ -253,17 +258,30 @@ func (s *SolanaRPCScanner) ObservationsForTx(ctx context.Context, signature stri
 	var out []Observation
 	for _, acct := range accounts {
 		d := deltas[acct]
-		if _, ok := ownerSet[d.owner]; !ok {
-			continue
-		}
-		if d.bad != nil {
+		if d.bad != nil && !d.identityChanged {
+			// Malformed RPC metadata (missing fields, bad amount, duplicates)
+			// cannot be produced by a sender; fail so the caller retries
+			// instead of silently reporting "no inflow".
 			return nil, fmt.Errorf("chain: tx %s: %w", signature, d.bad)
 		}
-		if d.delta.Sign() <= 0 {
+		if _, ok := ownerSet[d.owner]; !ok {
 			continue
 		}
 		asset, ok := s.whitelisted(d.mint, d.program)
 		if !ok {
+			continue
+		}
+		if d.bad != nil {
+			// mint/owner/program changed inside the tx. Fatal for the owner's
+			// canonical ATA; any other account (e.g. one an attacker
+			// re-assigned to our owner in the same tx) is not a deposit and
+			// must not block the real inflows of this transaction.
+			if ata, err := SolanaATA(d.owner, d.mint, d.program); err == nil && ata == acct {
+				return nil, fmt.Errorf("chain: tx %s: %w", signature, d.bad)
+			}
+			continue
+		}
+		if d.delta.Sign() <= 0 {
 			continue
 		}
 		out = append(out, s.observation(tx, signature, asset, d.owner, acct, d, deltas, commitment))
@@ -321,7 +339,8 @@ type rpcSolanaTx struct {
 		PostTokenBalances []rpcTokenBalance `json:"postTokenBalances"`
 	} `json:"meta"`
 	Transaction struct {
-		Message struct {
+		Signatures []string `json:"signatures"`
+		Message    struct {
 			AccountKeys []struct {
 				Pubkey string `json:"pubkey"`
 			} `json:"accountKeys"`
@@ -363,6 +382,9 @@ func (s *SolanaRPCScanner) getTransaction(ctx context.Context, sig, commitment s
 	if tx.Meta == nil {
 		return nil, fmt.Errorf("chain: getTransaction(%s): missing meta", sig)
 	}
+	if len(tx.Transaction.Signatures) == 0 || tx.Transaction.Signatures[0] != sig {
+		return nil, fmt.Errorf("chain: getTransaction(%s): response is for a different transaction", sig)
+	}
 	if len(tx.Transaction.Message.AccountKeys) == 0 {
 		return nil, fmt.Errorf("chain: getTransaction(%s): no account keys (jsonParsed expected)", sig)
 	}
@@ -377,12 +399,20 @@ type tokenDelta struct {
 	// an error when the account is one we care about, so an unrelated account
 	// in the same transaction cannot stall our scan.
 	bad error
+	// identityChanged marks bad as "mint/owner/program differs between pre
+	// and post" (a sender can cause this) as opposed to malformed metadata.
+	identityChanged bool
 }
 
 // tokenDeltas returns post-pre per token account. An account missing from pre
 // (created in this tx) counts as 0 before; missing from post (closed) counts
 // as 0 after.
 func tokenDeltas(tx *rpcSolanaTx) (map[string]tokenDelta, error) {
+	// A missing/null balance list is not "no balances": treating a missing
+	// pre list as all-zero would turn existing balances into fake inflows.
+	if tx.Meta.PreTokenBalances == nil || tx.Meta.PostTokenBalances == nil {
+		return nil, errors.New("token balance metadata missing")
+	}
 	keys := tx.Transaction.Message.AccountKeys
 	type entry struct {
 		mint, owner, program string
@@ -429,10 +459,13 @@ func tokenDeltas(tx *rpcSolanaTx) (map[string]tokenDelta, error) {
 		before := big.NewInt(0)
 		if q, ok := pre[acct]; ok {
 			switch {
+			case p.bad != nil:
+				// keep the post-side metadata error; never reclassify it
 			case q.bad != nil:
 				d.bad = q.bad
 			case q.mint != p.mint || q.owner != p.owner || q.program != p.program:
 				d.bad = fmt.Errorf("token account %s changed mint/owner/program within the transaction", acct)
+				d.identityChanged = true
 			default:
 				before = q.amount
 			}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 )
@@ -98,7 +99,8 @@ type rpcResponse struct {
 func (c *rpcClient) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	defer cancel()
-	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", ID: c.nextID.Add(1), Method: method, Params: params})
+	id := c.nextID.Add(1)
+	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params})
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +144,9 @@ func (c *rpcClient) call(ctx context.Context, method string, params any) (json.R
 	}
 	if r.Error != nil {
 		return nil, fmt.Errorf("chain: %s: %w", method, r.Error)
+	}
+	if string(bytes.TrimSpace(r.ID)) != strconv.FormatUint(id, 10) {
+		return nil, fmt.Errorf("chain: %s: response id %s does not match request id %d", method, r.ID, id)
 	}
 	if len(r.Result) == 0 {
 		return nil, fmt.Errorf("chain: %s: response has neither result nor error", method)

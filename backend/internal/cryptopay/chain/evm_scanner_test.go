@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -382,5 +384,88 @@ func TestRPCResponseSizeLimitTriggersSplit(t *testing.T) {
 	}
 	if len(c.getLogsReq) < 3 {
 		t.Fatalf("expected bisection, requests %v", c.getLogsReq)
+	}
+}
+
+// A header cached by a non-finalized scan must not vouch for a finalized
+// observation: after a reorg the stale hash would otherwise match the cache.
+func TestEVMNonFinalizedCacheNotTrustedForFinalized(t *testing.T) {
+	c := &evmChain{finalized: 40, latest: 100, logs: []fakeLog{
+		{block: 50, contract: tUSDC, from: tPayer, to: tAlice, units: 1, logIndex: 0, tx: "x"},
+	}}
+	reorged := false
+	_, srv := newFakeRPC(t, func(method string, params json.RawMessage) (any, *RPCError) {
+		res, rerr := c.handle(method, params)
+		if reorged && method == "eth_getBlockByNumber" && rerr == nil {
+			if b, _ := res.(map[string]any); b["number"] == hexQ(50) {
+				b["hash"] = fmt.Sprintf("0x%064x", 0xbeef) // canonical block 50 changed
+			}
+		}
+		return res, rerr
+	})
+	s, err := NewEVMScanner(EVMScannerConfig{Network: ArbitrumOne, RPC: RPCOptions{URL: srv.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if obs, err := s.ScanRange(ctx, 0, 100, []string{tAlice}, false); err != nil || len(obs) != 1 || obs[0].Finalized {
+		t.Fatalf("unfinalized scan: %+v %v", obs, err)
+	}
+	reorged = true
+	c.finalized = 100 // the (stale) log still carries the old block hash
+	if _, err := s.ScanRange(ctx, 0, 100, []string{tAlice}, true); err == nil {
+		t.Fatal("finalized scan must re-verify the header and detect the reorg")
+	}
+}
+
+func TestEVMReceiptConsistencyChecks(t *testing.T) {
+	h := txHash("ok")
+	good := fakeLog{block: 10, contract: tUSDC, from: tPayer, to: tAlice, units: 1, logIndex: 0, tx: "ok"}.json()
+	foreign := fakeLog{block: 10, contract: tUSDC, from: tPayer, to: tAlice, units: 1, logIndex: 1, tx: "other"}.json()
+	c := &evmChain{finalized: 100, latest: 100, receipts: map[string]map[string]any{
+		h:                {"transactionHash": txHash("someone-else"), "blockNumber": hexQ(10), "blockHash": blockHash(10), "status": "0x1", "logs": []any{good}},
+		txHash("mixed"):  {"transactionHash": txHash("mixed"), "blockNumber": hexQ(10), "blockHash": blockHash(10), "status": "0x1", "logs": []any{foreign}},
+		txHash("nolog"):  {"transactionHash": txHash("nolog"), "blockNumber": hexQ(10), "blockHash": blockHash(10), "status": "0x1"},
+		txHash("nostat"): {"transactionHash": txHash("nostat"), "blockNumber": hexQ(10), "blockHash": blockHash(10), "logs": []any{}},
+	}}
+	s, _ := newTestEVMScanner(t, c, EVMScannerConfig{})
+	for _, name := range []string{"ok", "mixed", "nolog", "nostat"} {
+		if obs, err := s.ObservationsForTx(context.Background(), txHash(name), []string{tAlice}, true); err == nil {
+			t.Errorf("%s: expected error, got %+v", name, obs)
+		}
+	}
+}
+
+func TestRPCResponseIDMismatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":999,"result":"0x10"}`))
+	}))
+	defer srv.Close()
+	s, _ := NewEVMScanner(EVMScannerConfig{Network: ArbitrumOne, RPC: RPCOptions{URL: srv.URL}})
+	if _, err := s.LatestBlock(context.Background()); err == nil {
+		t.Fatal("mismatched response id must be rejected")
+	}
+}
+
+func TestEVMBadTimestampOnRefetchIsError(t *testing.T) {
+	c := &evmChain{finalized: 100, latest: 100, logs: []fakeLog{
+		{block: 50, contract: tUSDC, from: tPayer, to: tAlice, units: 1, logIndex: 0, tx: "x"},
+	}}
+	broken := false
+	_, srv := newFakeRPC(t, func(method string, params json.RawMessage) (any, *RPCError) {
+		res, rerr := c.handle(method, params)
+		if b, _ := res.(map[string]any); broken && method == "eth_getBlockByNumber" && b["number"] == hexQ(50) {
+			b["timestamp"] = "0xzz"
+		}
+		return res, rerr
+	})
+	s, _ := NewEVMScanner(EVMScannerConfig{Network: ArbitrumOne, RPC: RPCOptions{URL: srv.URL}})
+	// Populate the cache with a same-hash, non-finalized header first.
+	if _, err := s.ScanRange(context.Background(), 0, 100, []string{tAlice}, false); err != nil {
+		t.Fatal(err)
+	}
+	broken = true
+	if _, err := s.ScanRange(context.Background(), 0, 100, []string{tAlice}, true); err == nil {
+		t.Fatal("unparseable header timestamp must fail")
 	}
 }

@@ -44,8 +44,10 @@ func EVMAddressFromPubKey(pub *secp256k1.PublicKey) string {
 
 // EVMAddressFromXpub derives m/44'/60'/0'/0/index from the account xpub at
 // m/44'/60'/0' and returns the lowercase 0x address. The xpub must be a mainnet
-// xpub at depth 3 with child number 0' (anything else is rejected so that a
-// wrong-level key can never silently produce a different address set).
+// xpub at depth 3 with child number 0' (rejects xprv and wrong-level keys).
+// An xpub cannot prove its ancestors were 44'/60': a depth-3 account-0 key from
+// another path would pass, so imports must still be cross-checked against the
+// first addresses printed by cmd/cryptopay-offline evm-xpub.
 func EVMAddressFromXpub(xpub string, index uint32) (string, error) {
 	acct, err := ParseEVMAccountXpub(xpub)
 	if err != nil {
@@ -68,7 +70,8 @@ func ParseEVMAccountXpub(xpub string) (*hdkey.ExtendedPublicKey, error) {
 	return acct, nil
 }
 
-// EVMAddressFromAccount derives /0/index from a parsed account xpub.
+// EVMAddressFromAccount derives /0/index from an account xpub that MUST come
+// from ParseEVMAccountXpub (the level checks are not repeated here).
 func EVMAddressFromAccount(acct *hdkey.ExtendedPublicKey, index uint32) (string, error) {
 	return evmAddressFromAccount(acct, index)
 }

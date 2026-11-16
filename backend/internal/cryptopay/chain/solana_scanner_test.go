@@ -42,7 +42,7 @@ type fakeSolTx struct {
 	extraKey []string
 }
 
-func (tx fakeSolTx) json() any {
+func (tx fakeSolTx) json(sig string) any {
 	if tx.null {
 		return nil
 	}
@@ -83,7 +83,7 @@ func (tx fakeSolTx) json() any {
 	return map[string]any{
 		"slot": tx.slot, "blockTime": bt, "version": 0,
 		"meta":        map[string]any{"err": metaErr, "preTokenBalances": pre, "postTokenBalances": post},
-		"transaction": map[string]any{"message": map[string]any{"accountKeys": keys, "recentBlockhash": sKey("bh")}},
+		"transaction": map[string]any{"signatures": []string{sig}, "message": map[string]any{"accountKeys": keys, "recentBlockhash": sKey("bh")}},
 	}
 }
 
@@ -141,7 +141,7 @@ func (c *solChain) handle(method string, params json.RawMessage) (any, *RPCError
 		if !ok {
 			return nil, nil
 		}
-		return tx.json(), nil
+		return tx.json(sig), nil
 	}
 	return nil, &RPCError{Code: -32601, Message: "method not found"}
 }
@@ -385,5 +385,106 @@ func TestSolanaObservationsForTxRealMainnetV1(t *testing.T) {
 	ata, _ := SolanaATA(owners[0], sUSDT, SolanaTokenProgram)
 	if ata != o.TokenAccount {
 		t.Fatalf("token account is not the owner's ATA: %s vs %s", ata, o.TokenAccount)
+	}
+}
+
+func TestSolanaNullSignaturePageIsError(t *testing.T) {
+	owner := sKey("carol")
+	ata, _ := SolanaATA(owner, sUSDC, SolanaTokenProgram)
+	c := &solChain{honorUntil: true, txs: map[string]fakeSolTx{}}
+	for _, n := range []string{"n1", "n2", "n3"} {
+		c.order = append([]string{sSig(n)}, c.order...)
+		c.txs[sSig(n)] = fakeSolTx{slot: 1, post: []tb{{ata, sUSDC, owner, "", "1"}}, pre: []tb{}}
+	}
+	page := 0
+	_, srv := newFakeRPC(t, func(method string, params json.RawMessage) (any, *RPCError) {
+		if method == "getSignaturesForAddress" {
+			page++
+			if page == 2 {
+				return nil, nil // provider glitch mid-walk
+			}
+		}
+		return c.handle(method, params)
+	})
+	s, err := NewSolanaScanner(SolanaScannerConfig{Network: SolanaMainnet, RPC: RPCOptions{URL: srv.URL}, PageLimit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs, newest, err := s.ScanTokenAccount(context.Background(), owner, ata, usdcAsset(), "", CommitmentFinalized)
+	if err == nil {
+		t.Fatalf("null page must fail the scan, got %d obs newest %q", len(obs), newest)
+	}
+}
+
+func TestSolanaMissingBalanceMetadataIsError(t *testing.T) {
+	owner := sKey("dave")
+	ata, _ := SolanaATA(owner, sUSDC, SolanaTokenProgram)
+	sig := sSig("nometa")
+	_, srv := newFakeRPC(t, func(method string, params json.RawMessage) (any, *RPCError) {
+		tx, _ := fakeSolTx{slot: 3, post: []tb{{ata, sUSDC, owner, "", "50"}}}.json(sig).(map[string]any)
+		meta, _ := tx["meta"].(map[string]any)
+		meta["preTokenBalances"] = nil // pre list missing: must not be read as zero
+		return tx, nil
+	})
+	s, _ := NewSolanaScanner(SolanaScannerConfig{Network: SolanaMainnet, RPC: RPCOptions{URL: srv.URL}})
+	if _, err := s.ObservationsForTx(context.Background(), sig, []string{owner}, CommitmentFinalized); err == nil {
+		t.Fatal("missing preTokenBalances must be an error")
+	}
+}
+
+func TestSolanaResponseForOtherTxIsError(t *testing.T) {
+	owner := sKey("erin")
+	ata, _ := SolanaATA(owner, sUSDC, SolanaTokenProgram)
+	_, srv := newFakeRPC(t, func(method string, params json.RawMessage) (any, *RPCError) {
+		return fakeSolTx{slot: 3, pre: []tb{}, post: []tb{{ata, sUSDC, owner, "", "50"}}}.json(sSig("A")), nil
+	})
+	s, _ := NewSolanaScanner(SolanaScannerConfig{Network: SolanaMainnet, RPC: RPCOptions{URL: srv.URL}})
+	if _, err := s.ObservationsForTx(context.Background(), sSig("B"), []string{owner}, CommitmentFinalized); err == nil {
+		t.Fatal("response for another signature must be rejected")
+	}
+}
+
+// An attacker re-assigns a token account (any mint) to our owner in the same tx
+// as a real USDC deposit: the manual rescan must still see the real deposit.
+func TestSolanaObservationsForTxIgnoresHijackedNonATA(t *testing.T) {
+	owner, attacker := sKey("frank"), sKey("attacker")
+	ata, _ := SolanaATA(owner, sUSDC, SolanaTokenProgram)
+	junkUSDC, junkFake := sKey("junk-usdc"), sKey("junk-fake")
+	sig := sSig("hijack")
+	c := &solChain{txs: map[string]fakeSolTx{sig: {slot: 9,
+		pre:  []tb{{junkUSDC, sUSDC, attacker, "", "1"}, {junkFake, sKey("fake-mint"), attacker, "", "1"}},
+		post: []tb{{ata, sUSDC, owner, "", "70"}, {junkUSDC, sUSDC, owner, "", "1"}, {junkFake, sKey("fake-mint"), owner, "", "1"}}}}}
+	s := newTestSolScanner(t, c, 10)
+	obs, err := s.ObservationsForTx(context.Background(), sig, []string{owner}, CommitmentFinalized)
+	if err != nil || len(obs) != 1 || obs[0].TokenAccount != ata || obs[0].Units.Int64() != 70 {
+		t.Fatalf("got %+v %v", obs, err)
+	}
+}
+
+func TestSolanaObservationsForTxNonATAAndMalformed(t *testing.T) {
+	owner := sKey("gina")
+	aux := sKey("gina-aux-usdc") // a non-ATA USDC account owned by our owner
+	ok, bad := sSig("nonata"), sSig("malformed")
+	c := &solChain{txs: map[string]fakeSolTx{
+		ok: {slot: 1, pre: []tb{{aux, sUSDC, owner, "", "5"}}, post: []tb{{aux, sUSDC, owner, "", "8"}}},
+		// Missing programId on an account (RPC fault): must be an error, not "no inflow".
+		bad: {slot: 2, pre: []tb{{aux, sUSDC, owner, "", "5"}}, post: []tb{{aux, sUSDC, owner, "", "8"}}},
+	}}
+	_, srv := newFakeRPC(t, func(method string, params json.RawMessage) (any, *RPCError) {
+		res, rerr := c.handle(method, params)
+		if tx, _ := res.(map[string]any); tx != nil && tx["slot"] == uint64(2) {
+			meta, _ := tx["meta"].(map[string]any)
+			post, _ := meta["postTokenBalances"].([]map[string]any)
+			post[0]["programId"] = ""
+		}
+		return res, rerr
+	})
+	s, _ := NewSolanaScanner(SolanaScannerConfig{Network: SolanaMainnet, RPC: RPCOptions{URL: srv.URL}})
+	obs, err := s.ObservationsForTx(context.Background(), ok, []string{owner}, CommitmentFinalized)
+	if err != nil || len(obs) != 1 || obs[0].TokenAccount != aux || obs[0].Units.Int64() != 3 {
+		t.Fatalf("non-ATA inflow: %+v %v", obs, err)
+	}
+	if _, err := s.ObservationsForTx(context.Background(), bad, []string{owner}, CommitmentFinalized); err == nil {
+		t.Fatal("malformed balance metadata must be an error")
 	}
 }
