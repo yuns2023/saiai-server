@@ -56,6 +56,7 @@ type CryptoPayService struct {
 	signerPubkey     string
 	evmScanFromBlock uint64
 	scanInterval     time.Duration
+	batchTimeout     time.Duration
 	balanceCache     cryptoPayBalanceCache
 	authCache        APIKeyAuthCacheInvalidator
 	now              func() time.Time
@@ -79,6 +80,7 @@ func NewCryptoPayService(db *sql.DB, settingRepo SettingRepository, cfg config.C
 		interval = 30
 	}
 	s.scanInterval = time.Duration(interval) * time.Second
+	s.batchTimeout = time.Duration(max(cfg.ScanBatchTimeoutSeconds, 1)) * time.Second
 	for _, n := range networks {
 		s.byNetwork[n.Network] = n
 	}
@@ -162,6 +164,9 @@ type CryptoPayOrder struct {
 	ConfirmingAmount string             `json:"confirming_amount"`
 	CreditedAmount   string             `json:"credited_amount"`
 	Deposits         []CryptoPayDeposit `json:"deposits"`
+	// DepositsTruncated is true when more inflows exist than are listed
+	// (the amounts above always cover all of them).
+	DepositsTruncated bool `json:"deposits_truncated"`
 }
 
 type CryptoPayUserAddress struct {
@@ -369,10 +374,17 @@ func (s *CryptoPayService) ListUserOrders(ctx context.Context, userID int64, pag
 // buildOrder computes amounts and status from inflows to the order's address
 // with block_time >= created_at (all assets on that network).
 func (s *CryptoPayService) buildOrder(ctx context.Context, r *cryptoPayOrderRow) (*CryptoPayOrder, error) {
+	// One read-only REPEATABLE READ snapshot, so the three totals and the
+	// list agree with each other even while the worker writes.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
 	// received = finalized inflows only (finalized/credited/held); confirming =
 	// observed, not yet finalized. They never overlap.
 	var received, confirming, credited decimal.Decimal
-	if err := s.db.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(amount) FILTER (WHERE status IN ('finalized','credited','held')), 0),
 		       COALESCE(SUM(amount) FILTER (WHERE status = 'observed'), 0),
 		       COALESCE(SUM(amount) FILTER (WHERE status = 'credited'), 0)
@@ -380,22 +392,30 @@ func (s *CryptoPayService) buildOrder(ctx context.Context, r *cryptoPayOrderRow)
 		r.addressID, r.createdAt).Scan(&received, &confirming, &credited); err != nil {
 		return nil, fmt.Errorf("sum crypto pay deposits: %w", err)
 	}
-	deposits, err := s.queryDeposits(ctx, `WHERE address_id = $1 AND block_time >= $2 ORDER BY block_time DESC, id DESC LIMIT $3`,
-		r.addressID, r.createdAt, cryptoPayOrderDepositCap)
+	deposits, err := s.queryDeposits(ctx, tx, `WHERE address_id = $1 AND block_time >= $2 ORDER BY block_time DESC, id DESC LIMIT $3`,
+		r.addressID, r.createdAt, cryptoPayOrderDepositCap+1)
 	if err != nil {
 		return nil, err
+	}
+	truncated := len(deposits) > cryptoPayOrderDepositCap
+	if truncated {
+		deposits = deposits[:cryptoPayOrderDepositCap]
 	}
 	return &CryptoPayOrder{
 		ID: r.id, Network: r.network, Asset: r.asset, Amount: r.amount.StringFixed(cryptoPayOrderAmountDecimals), Address: r.address,
 		Status:    computeCryptoPayOrderStatus(r.amount, received, r.expiresAt, s.now()),
 		CreatedAt: r.createdAt, ExpiresAt: r.expiresAt,
 		ReceivedAmount: formatCryptoAmount(received), ConfirmingAmount: formatCryptoAmount(confirming),
-		CreditedAmount: formatCryptoAmount(credited), Deposits: deposits,
+		CreditedAmount: formatCryptoAmount(credited), Deposits: deposits, DepositsTruncated: truncated,
 	}, nil
 }
 
-func (s *CryptoPayService) queryDeposits(ctx context.Context, where string, args ...any) ([]CryptoPayDeposit, error) {
-	rows, err := s.db.QueryContext(ctx, `
+type cryptoPayQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func (s *CryptoPayService) queryDeposits(ctx context.Context, q cryptoPayQueryer, where string, args ...any) ([]CryptoPayDeposit, error) {
+	rows, err := q.QueryContext(ctx, `
 		SELECT id, network, asset_symbol, amount, tx_hash, status, block_time, credited_at
 		FROM crypto_pay_deposits `+where, args...)
 	if err != nil {
@@ -430,7 +450,7 @@ func (s *CryptoPayService) ListUserDeposits(ctx context.Context, userID int64, p
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM crypto_pay_deposits WHERE user_id = $1`, userID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count crypto pay deposits: %w", err)
 	}
-	items, err := s.queryDeposits(ctx, `WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`,
+	items, err := s.queryDeposits(ctx, s.db, `WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`,
 		userID, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return nil, 0, err

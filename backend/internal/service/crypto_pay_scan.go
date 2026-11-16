@@ -17,16 +17,15 @@ import (
 // activeWindow) are scanned every tick; every other address is scanned at
 // least once per fullSweepInterval.
 const (
-	cryptoPayActiveWindow         = 24 * time.Hour
-	cryptoPayFullSweepInterval    = 23 * time.Hour // < 24h so each address is covered within a day
-	cryptoPayEVMBatchAddresses    = 100
-	cryptoPayEVMGroupSpread       = 10_000  // addresses whose next block differs by less are scanned together
-	cryptoPayEVMMaxSpan           = 200_000 // blocks per ScanRange call per tick
-	cryptoPayEVMMaxBatchesTick    = 50
-	cryptoPaySolanaMaxScansTick   = 300
-	cryptoPayEVMOrphanWindow      = 2 * time.Hour
-	cryptoPaySolanaOrphanWindow   = 30 * time.Minute
-	cryptoPaySolanaAccountTimeout = 60 * time.Second
+	cryptoPayActiveWindow       = 24 * time.Hour
+	cryptoPayFullSweepInterval  = 23 * time.Hour // < 24h so each address is covered within a day
+	cryptoPayEVMBatchAddresses  = 100
+	cryptoPayEVMGroupSpread     = 10_000  // addresses whose next block differs by less are scanned together
+	cryptoPayEVMMaxSpan         = 200_000 // blocks per ScanRange call per tick
+	cryptoPayEVMMaxBatchesTick  = 50
+	cryptoPaySolanaMaxScansTick = 300
+	cryptoPayEVMOrphanWindow    = 2 * time.Hour
+	cryptoPaySolanaOrphanWindow = 30 * time.Minute
 )
 
 var errCryptoPayCursorConflict = errors.New("crypto pay scan cursor changed concurrently")
@@ -256,16 +255,40 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 		}
 		items = append(items, cryptoPayEVMScanItem{addr: a, cursor: c, from: from})
 	}
+	// Group addresses whose next block is close into batches, then run the
+	// least recently attempted batches first. Success and failure both touch
+	// the cursors' updated_at, so a batch that keeps failing or timing out
+	// rotates behind healthy ones instead of starving them.
 	sort.Slice(items, func(i, j int) bool { return items[i].from < items[j].from })
-	batches := 0
-	var errs []error
-	for start := 0; start < len(items) && batches < cryptoPayEVMMaxBatchesTick; batches++ {
+	type evmBatch struct {
+		items       []cryptoPayEVMScanItem
+		lastAttempt time.Time // zero = never attempted
+	}
+	var batchList []evmBatch
+	for start := 0; start < len(items); {
 		end := start + 1
 		for end < len(items) && end-start < cryptoPayEVMBatchAddresses && items[end].from-items[start].from < cryptoPayEVMGroupSpread {
 			end++
 		}
-		batch := items[start:end]
+		b := evmBatch{items: items[start:end]}
+		for _, it := range b.items {
+			if it.cursor.updatedAt.Valid && it.cursor.updatedAt.Time.After(b.lastAttempt) {
+				b.lastAttempt = it.cursor.updatedAt.Time
+			}
+		}
+		batchList = append(batchList, b)
 		start = end
+	}
+	sort.SliceStable(batchList, func(i, j int) bool { return batchList[i].lastAttempt.Before(batchList[j].lastAttempt) })
+	if len(batchList) > cryptoPayEVMMaxBatchesTick {
+		batchList = batchList[:cryptoPayEVMMaxBatchesTick]
+	}
+	var errs []error
+	for _, b := range batchList {
+		if ctx.Err() != nil {
+			break
+		}
+		batch := b.items
 		from := batch[0].from
 		if from > finalized {
 			continue // already at the finalized head
@@ -278,21 +301,31 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 		for i, it := range batch {
 			list[i] = it.addr.address
 		}
-		obs, scanErr := sc.ScanRange(ctx, from, to, list, true)
-		if scanErr != nil {
+		batchErr := func() error {
+			batchCtx, cancel := context.WithTimeout(ctx, s.batchTimeout)
+			defer cancel()
+			obs, scanErr := sc.ScanRange(batchCtx, from, to, list, true)
+			if scanErr != nil {
+				return fmt.Errorf("scan %d-%d: %w", from, to, scanErr)
+			}
+			for i := range obs {
+				if !obs[i].Finalized {
+					return fmt.Errorf("scanner returned an unfinalized log for finalized range %d-%d", from, to)
+				}
+			}
+			if _, err := s.IngestObservations(batchCtx, obs); err != nil {
+				return fmt.Errorf("ingest %d-%d: %w", from, to, err)
+			}
+			return nil
+		}()
+		if batchErr != nil {
+			// Cursors stay put (the range is retried); the error is visible
+			// in reconciliation and the batch rotates to the back.
 			for _, it := range batch {
-				s.recordCursorError(ctx, network, it.cursor.scope, scanErr)
+				s.recordCursorError(ctx, network, it.cursor.scope, batchErr)
 			}
-			errs = append(errs, fmt.Errorf("scan %d-%d: %w", from, to, scanErr))
+			errs = append(errs, batchErr)
 			continue
-		}
-		for i := range obs {
-			if !obs[i].Finalized {
-				return fmt.Errorf("scanner returned an unfinalized log for a finalized range")
-			}
-		}
-		if _, err := s.IngestObservations(ctx, obs); err != nil {
-			return fmt.Errorf("ingest %d-%d: %w", from, to, err)
 		}
 		position := strconv.FormatUint(to, 10)
 		for _, it := range batch {
@@ -300,7 +333,7 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 				continue // this address was already past the range
 			}
 			if err := s.advanceCursor(ctx, network, it.cursor, position, to == finalized); err != nil {
-				return err
+				errs = append(errs, fmt.Errorf("advance %s: %w", it.cursor.scope, err))
 			}
 		}
 	}
@@ -308,7 +341,9 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 	if latest > finalized && len(active) > 0 {
 		for start := 0; start < len(active); start += cryptoPayEVMBatchAddresses {
 			end := min(start+cryptoPayEVMBatchAddresses, len(active))
-			obs, scanErr := sc.ScanRange(ctx, finalized+1, latest, active[start:end], false)
+			tailCtx, cancel := context.WithTimeout(ctx, s.batchTimeout)
+			obs, scanErr := sc.ScanRange(tailCtx, finalized+1, latest, active[start:end], false)
+			cancel()
 			if scanErr != nil {
 				errs = append(errs, fmt.Errorf("scan unfinalized tail: %w", scanErr))
 				break
@@ -397,7 +432,7 @@ func (s *CryptoPayService) scanSolana(ctx context.Context, sc chain.SolanaScanne
 		if ctx.Err() != nil {
 			break
 		}
-		accountCtx, cancel := context.WithTimeout(ctx, cryptoPaySolanaAccountTimeout)
+		accountCtx, cancel := context.WithTimeout(ctx, s.batchTimeout)
 		obs, newest, scanErr := sc.ScanTokenAccount(accountCtx, it.owner, it.account, it.asset, c.position, "finalized")
 		cancel()
 		if scanErr != nil {
@@ -405,25 +440,32 @@ func (s *CryptoPayService) scanSolana(ctx context.Context, sc chain.SolanaScanne
 			errs = append(errs, fmt.Errorf("scan %s: %w", it.account, scanErr))
 			continue
 		}
+		var ingestErr error
 		for i := range obs {
 			if !obs[i].Finalized {
-				return fmt.Errorf("scanner returned an unfinalized inflow at finalized commitment")
+				ingestErr = fmt.Errorf("scanner returned an unfinalized inflow at finalized commitment")
 			}
 		}
-		if _, err := s.IngestObservations(ctx, obs); err != nil {
-			return fmt.Errorf("ingest %s: %w", it.account, err)
+		if ingestErr == nil {
+			_, ingestErr = s.IngestObservations(ctx, obs)
+		}
+		if ingestErr != nil {
+			s.recordCursorError(ctx, network, it.scope, ingestErr)
+			errs = append(errs, fmt.Errorf("ingest %s: %w", it.account, ingestErr))
+			continue
 		}
 		position := c.position
 		if newest != "" {
 			position = newest
 		}
 		if err := s.advanceCursor(ctx, network, c, position, true); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("advance %s: %w", it.scope, err))
+			continue
 		}
 		if !it.active {
 			continue
 		}
-		pendingCtx, pendingCancel := context.WithTimeout(ctx, cryptoPaySolanaAccountTimeout)
+		pendingCtx, pendingCancel := context.WithTimeout(ctx, s.batchTimeout)
 		pending, _, pendErr := sc.ScanTokenAccount(pendingCtx, it.owner, it.account, it.asset, position, "confirmed")
 		pendingCancel()
 		if pendErr != nil {

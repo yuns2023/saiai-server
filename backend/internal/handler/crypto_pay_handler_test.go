@@ -101,7 +101,7 @@ func cryptoPaySorted(keys ...string) []string {
 
 var (
 	cryptoPayOrderKeys = cryptoPaySorted("id", "network", "asset", "amount", "address", "status", "created_at", "expires_at",
-		"received_amount", "confirming_amount", "credited_amount", "deposits")
+		"received_amount", "confirming_amount", "credited_amount", "deposits", "deposits_truncated")
 	cryptoPayDepositKeys = cryptoPaySorted("id", "network", "asset", "amount", "tx_hash", "status", "block_time", "credited_at")
 )
 
@@ -150,6 +150,7 @@ func TestCryptoPayHandlerOrderJSONAndAmountParsing(t *testing.T) {
 	require.Equal(t, cryptoPayDepositKeys, cryptoPayKeys(t, deps[0]))
 	require.Equal(t, "1.01", order.(map[string]any)["received_amount"])
 	require.Equal(t, "12.50", order.(map[string]any)["amount"])
+	require.Equal(t, false, order.(map[string]any)["deposits_truncated"])
 
 	// A JSON number keeps its exact text (no float64 round trip).
 	cryptoPayDo(t, r, http.MethodPost, "/orders", `{"network":"arbitrum-one","asset":"USDC","amount":0.1000001}`)
@@ -246,7 +247,7 @@ func cryptoPayErrorReason(t *testing.T, r *gin.Engine, body string) (int, string
 }
 
 func TestCryptoPayHandlerErrorReasons(t *testing.T) {
-	cfg := config.CryptoPayConfig{Enabled: true, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet"}
+	cfg := config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet"}
 	on := service.NewCryptoPayService(nil, cryptoPayHandlerSettings{values: map[string]string{service.SettingCryptoPayAllowNewAddresses: "true"}},
 		cfg, service.CryptoPayChainDeps{}, nil, nil)
 	r := cryptoPayTestRouter(NewCryptoPayHandler(on))

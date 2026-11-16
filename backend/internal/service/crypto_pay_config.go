@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -124,8 +125,24 @@ var (
 )
 
 // parseCryptoPayNetworks turns the deployment config into validated networks.
-// Problems are returned as warnings and disable only the affected network.
+// Fail-closed: if ANY configured value is invalid the whole feature is
+// disabled (no networks) and the problems are returned as warnings. Only an
+// empty network name means "this network is off".
 func parseCryptoPayNetworks(cfg config.CryptoPayConfig) ([]*cryptoPayNetwork, []string) {
+	networks, warnings := parseCryptoPayNetworksLenient(cfg)
+	if cfg.Enabled && cfg.ScanIntervalSeconds <= 0 {
+		warnings = append(warnings, "crypto_pay.scan_interval_seconds must be positive")
+	}
+	if cfg.Enabled && cfg.ScanBatchTimeoutSeconds <= 0 {
+		warnings = append(warnings, "crypto_pay.scan_batch_timeout_seconds must be positive")
+	}
+	if len(warnings) > 0 {
+		return nil, append(warnings, "crypto_pay DISABLED: fix the configuration above")
+	}
+	return networks, nil
+}
+
+func parseCryptoPayNetworksLenient(cfg config.CryptoPayConfig) ([]*cryptoPayNetwork, []string) {
 	var networks []*cryptoPayNetwork
 	var warnings []string
 	if !cfg.Enabled {
@@ -276,6 +293,9 @@ type CryptoPaySettings struct {
 	MaxAmount           decimal.Decimal
 	OrderTTLMinutes     int
 	HoldThresholdAmount decimal.Decimal
+	// Invalid lists stored keys with unusable values; non-empty forces all
+	// switches off.
+	Invalid []string
 }
 
 // CryptoPayAdminSettings is the admin settings DTO (money as strings).
@@ -289,6 +309,7 @@ type CryptoPayAdminSettings struct {
 	HoldThresholdAmount string `json:"hold_threshold_amount"`
 	// Read-only deployment status.
 	FeatureConfigured  bool     `json:"feature_configured"`
+	InvalidSettings    []string `json:"invalid_settings"`
 	Networks           []string `json:"networks"`
 	EVMScannerReady    bool     `json:"evm_scanner_ready"`
 	SolanaScannerReady bool     `json:"solana_scanner_ready"`
@@ -320,20 +341,57 @@ func (s *CryptoPayService) GetSettings(ctx context.Context) (*CryptoPaySettings,
 	if err != nil {
 		return nil, fmt.Errorf("get crypto pay settings: %w", err)
 	}
-	st := &CryptoPaySettings{
-		AllowNewAddresses:   values[SettingCryptoPayAllowNewAddresses] == "true",
-		ScanningEnabled:     values[SettingCryptoPayScanningEnabled] == "true",
-		AutoCreditEnabled:   values[SettingCryptoPayAutoCreditEnabled] == "true",
-		MinAmount:           parseCryptoPayDecimal(values[SettingCryptoPayMinAmount], cryptoPayDefaultMinAmount),
-		MaxAmount:           parseCryptoPayDecimal(values[SettingCryptoPayMaxAmount], cryptoPayDefaultMaxAmount),
-		OrderTTLMinutes:     parsePositiveInt(values[SettingCryptoPayOrderTTLMinutes], cryptoPayDefaultOrderTTLMinutes),
-		HoldThresholdAmount: parseCryptoPayDecimal(values[SettingCryptoPayHoldThreshold], cryptoPayDefaultHoldThreshold),
+	// Fail-closed: a missing value means its default (switches off); a
+	// present but invalid value disables all three switches.
+	var invalid []string
+	parseBool := func(key string) bool {
+		switch values[key] {
+		case "", "false":
+			return false
+		case "true":
+			return true
+		default:
+			invalid = append(invalid, key)
+			return false
+		}
 	}
-	if st.OrderTTLMinutes > cryptoPayMaxOrderTTLMinutes {
-		st.OrderTTLMinutes = cryptoPayDefaultOrderTTLMinutes
+	parseAmount := func(key string, fallback decimal.Decimal) decimal.Decimal {
+		raw := values[key]
+		if raw == "" {
+			return fallback
+		}
+		v := parseCryptoPayDecimal(raw, decimal.Decimal{})
+		if !v.IsPositive() {
+			invalid = append(invalid, key)
+			return fallback
+		}
+		return v
+	}
+	st := &CryptoPaySettings{
+		AllowNewAddresses:   parseBool(SettingCryptoPayAllowNewAddresses),
+		ScanningEnabled:     parseBool(SettingCryptoPayScanningEnabled),
+		AutoCreditEnabled:   parseBool(SettingCryptoPayAutoCreditEnabled),
+		MinAmount:           parseAmount(SettingCryptoPayMinAmount, cryptoPayDefaultMinAmount),
+		MaxAmount:           parseAmount(SettingCryptoPayMaxAmount, cryptoPayDefaultMaxAmount),
+		OrderTTLMinutes:     cryptoPayDefaultOrderTTLMinutes,
+		HoldThresholdAmount: parseAmount(SettingCryptoPayHoldThreshold, cryptoPayDefaultHoldThreshold),
+	}
+	if raw := values[SettingCryptoPayOrderTTLMinutes]; raw != "" {
+		ttl, perr := strconv.Atoi(raw)
+		if perr != nil || ttl <= 0 || ttl > cryptoPayMaxOrderTTLMinutes {
+			invalid = append(invalid, SettingCryptoPayOrderTTLMinutes)
+		} else {
+			st.OrderTTLMinutes = ttl
+		}
 	}
 	if st.MaxAmount.LessThan(st.MinAmount) {
+		invalid = append(invalid, SettingCryptoPayMaxAmount)
 		st.MinAmount, st.MaxAmount = cryptoPayDefaultMinAmount, cryptoPayDefaultMaxAmount
+	}
+	if len(invalid) > 0 {
+		cryptoPayLogf("ALERT invalid crypto pay settings %v: all switches forced off", invalid)
+		st.AllowNewAddresses, st.ScanningEnabled, st.AutoCreditEnabled = false, false, false
+		st.Invalid = invalid
 	}
 	return st, nil
 }
@@ -352,7 +410,7 @@ func (s *CryptoPayService) GetAdminSettings(ctx context.Context) (*CryptoPayAdmi
 		AllowNewAddresses: st.AllowNewAddresses, ScanningEnabled: st.ScanningEnabled, AutoCreditEnabled: st.AutoCreditEnabled,
 		MinAmount: st.MinAmount.String(), MaxAmount: st.MaxAmount.String(), OrderTTLMinutes: st.OrderTTLMinutes,
 		HoldThresholdAmount: st.HoldThresholdAmount.String(),
-		FeatureConfigured:   len(s.networks) > 0, Networks: names,
+		FeatureConfigured:   len(s.networks) > 0, Networks: names, InvalidSettings: append([]string{}, st.Invalid...),
 		EVMScannerReady: s.evmScanner() != nil, SolanaScannerReady: s.solanaScanner() != nil,
 	}, nil
 }
@@ -406,14 +464,38 @@ func (s *CryptoPayService) UpdateSettings(ctx context.Context, req UpdateCryptoP
 		return nil, infraerrors.BadRequest("CRYPTO_PAY_SETTINGS_INVALID", "max_amount is less than min_amount")
 	}
 	if len(updates) > 0 {
-		if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
-			return nil, fmt.Errorf("save crypto pay settings: %w", err)
-		}
-		if err := s.writeAuditDirect(ctx, "SETTINGS_UPDATED", nil, nil, nil, operator, updates); err != nil {
-			// Settings are already stored; do not fail the request (a retry
-			// would be a no-op anyway), but make the gap visible.
-			cryptoPayLogf("audit settings update failed: %v", err)
+		if err := s.saveSettingsWithAudit(ctx, updates, operator); err != nil {
+			return nil, err
 		}
 	}
 	return s.GetAdminSettings(ctx)
+}
+
+// saveSettingsWithAudit writes the settings rows and their audit row in one
+// transaction: either both are stored or the request fails.
+func (s *CryptoPayService) saveSettingsWithAudit(ctx context.Context, updates map[string]string, operator string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	keys := make([]string, 0, len(updates))
+	for k := range updates {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW())
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`, k, updates[k]); err != nil {
+			return fmt.Errorf("save crypto pay setting %s: %w", k, err)
+		}
+	}
+	if err := writeCryptoPayAudit(ctx, tx, "SETTINGS_UPDATED", nil, nil, nil, operator, updates); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit crypto pay settings: %w", err)
+	}
+	return nil
 }

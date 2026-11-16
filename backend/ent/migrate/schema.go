@@ -520,6 +520,16 @@ var (
 				Unique:  false,
 				Columns: []*schema.Column{CryptoPayDepositsColumns[17], CryptoPayDepositsColumns[0]},
 			},
+			{
+				Name:    "cryptopaydeposit_updated_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{CryptoPayDepositsColumns[24], CryptoPayDepositsColumns[0]},
+			},
+			{
+				Name:    "cryptopaydeposit_address_id_observed_at",
+				Unique:  false,
+				Columns: []*schema.Column{CryptoPayDepositsColumns[4], CryptoPayDepositsColumns[19]},
+			},
 		},
 	}
 	// CryptoPayKeysetsColumns holds the columns for the "crypto_pay_keysets" table.

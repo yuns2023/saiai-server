@@ -57,5 +57,8 @@ func (CryptoPayDeposit) Indexes() []ent.Index {
 		index.Fields("user_id", "created_at"),
 		index.Fields("address_id", "block_time"),
 		index.Fields("status", "id"),
+		// Partial (WHERE status = 'finalized') in migration 127.
+		index.Fields("updated_at", "id"),
+		index.Fields("address_id", "observed_at"),
 	}
 }

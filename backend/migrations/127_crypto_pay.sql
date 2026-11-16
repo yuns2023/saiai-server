@@ -110,6 +110,12 @@ CREATE INDEX IF NOT EXISTS idx_crypto_pay_deposits_address_block_time
     ON crypto_pay_deposits(address_id, block_time);
 CREATE INDEX IF NOT EXISTS idx_crypto_pay_deposits_status
     ON crypto_pay_deposits(status, id);
+-- Credit backlog sweep: finalized rows, least recently touched first.
+CREATE INDEX IF NOT EXISTS idx_crypto_pay_deposits_finalized_backlog
+    ON crypto_pay_deposits(updated_at, id) WHERE status = 'finalized';
+-- Scan activity check: recent inflows per address.
+CREATE INDEX IF NOT EXISTS idx_crypto_pay_deposits_address_observed
+    ON crypto_pay_deposits(address_id, observed_at);
 
 -- Orders are hints (suggested amount + countdown); they never own funds.
 CREATE TABLE IF NOT EXISTS crypto_pay_orders (

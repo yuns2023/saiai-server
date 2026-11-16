@@ -71,17 +71,23 @@ func cryptoPayUnitsToAmount(units decimal.Decimal, decimals int32) decimal.Decim
 	return units.Shift(-decimals)
 }
 
+// errCryptoPayObsIgnorable marks observations that are not ours to credit
+// (unconfigured network, non-whitelisted asset). Any other normalization
+// error on a whitelisted asset is a hard error: the batch fails and the scan
+// cursor does not advance, so a real transfer is never skipped silently.
+var errCryptoPayObsIgnorable = errors.New("observation not creditable here")
+
 func (s *CryptoPayService) normalizeObservation(o chain.Observation) (*cryptoPayNormalizedObs, error) {
 	n, ok := s.byNetwork[o.Network]
 	if !ok {
-		return nil, fmt.Errorf("network %q not configured", o.Network)
-	}
-	if o.Asset.Network != o.Network {
-		return nil, fmt.Errorf("asset network mismatch")
+		return nil, fmt.Errorf("%w: network %q not configured", errCryptoPayObsIgnorable, o.Network)
 	}
 	asset, ok := n.assetByContract(o.Asset.Contract, o.Asset.TokenProgram)
 	if !ok {
-		return nil, fmt.Errorf("asset %q not whitelisted", o.Asset.Contract)
+		return nil, fmt.Errorf("%w: asset %q not whitelisted", errCryptoPayObsIgnorable, o.Asset.Contract)
+	}
+	if o.Asset.Network != o.Network {
+		return nil, fmt.Errorf("asset network mismatch")
 	}
 	if o.Asset.Decimals != asset.Decimals {
 		return nil, fmt.Errorf("asset decimals mismatch")
@@ -138,6 +144,9 @@ func (s *CryptoPayService) normalizeObservation(o chain.Observation) (*cryptoPay
 // fully persisted (the caller must not advance its cursor); crediting
 // failures are logged only, because the backlog sweep retries them.
 func (s *CryptoPayService) IngestObservations(ctx context.Context, observations []chain.Observation) (*CryptoPayIngestResult, error) {
+	if !s.Enabled() {
+		return nil, infraerrors.ServiceUnavailable(CryptoPayReasonDisabled, "crypto top-up is disabled on this deployment")
+	}
 	res, err := s.ingest(ctx, observations)
 	if err != nil {
 		return res, err
@@ -162,6 +171,10 @@ func (s *CryptoPayService) ingest(ctx context.Context, observations []chain.Obse
 	for _, o := range observations {
 		norm, err := s.normalizeObservation(o)
 		if err != nil {
+			if !errors.Is(err, errCryptoPayObsIgnorable) {
+				cryptoPayLogf("ALERT invalid observation of a whitelisted asset network=%s tx=%s event=%s: %v", o.Network, o.TxHash, o.EventKey, err)
+				return res, fmt.Errorf("invalid observation tx=%s event=%s: %w", o.TxHash, o.EventKey, err)
+			}
 			res.Ignored++
 			cryptoPayLogf("ignore observation network=%s tx=%s event=%s: %v", o.Network, o.TxHash, o.EventKey, err)
 			continue
@@ -251,7 +264,9 @@ func (s *CryptoPayService) upsertDeposit(ctx context.Context, o *cryptoPayNormal
 		string(o.network), o.txHash, o.eventKey).Scan(&id, &cur.status, &cur.contract, &cur.blockHash, &cur.addressID, &cur.units); err != nil {
 		return 0, "", "", fmt.Errorf("lock deposit: %w", err)
 	}
-	sameContent := cur.units.Equal(o.units) && cur.addressID == addressID && strings.EqualFold(cur.contract, o.asset.Contract)
+	// o.asset.Contract comes from the whitelist (EVM lowercase), and stored
+	// rows were written from it, so an exact compare is right for both families.
+	sameContent := cur.units.Equal(o.units) && cur.addressID == addressID && cur.contract == o.asset.Contract
 	settled := cur.status == cryptoDepositFinalized || cur.status == cryptoDepositCredited || cur.status == cryptoDepositHeld
 	if settled {
 		if !sameContent || (o.finalized && o.blockHash != "" && cur.blockHash != "" && o.blockHash != cur.blockHash) {
@@ -319,7 +334,13 @@ func (s *CryptoPayService) OrphanStaleObservations(ctx context.Context, network 
 			WHERE c.scope_key = 'evm:' || d.network || ':fin:' || d.address
 			  AND c.position ~ '^[0-9]+$' AND c.position::numeric >= d.block_number)`
 	}
-	res, err := s.db.ExecContext(ctx, query, string(network), cutoff)
+	// The status change and its audit rows are one statement (one transaction).
+	query = `WITH orphaned AS (` + query + ` RETURNING d.id, d.user_id, d.tx_hash, d.event_key, d.block_number)
+		INSERT INTO crypto_pay_audit_logs (action, deposit_id, user_id, operator, detail)
+		SELECT 'DEPOSIT_ORPHANED', id, user_id, 'system',
+		       json_build_object('tx_hash', tx_hash, 'event_key', event_key, 'block_number', block_number, 'window', $3::text)::text
+		FROM orphaned`
+	res, err := s.db.ExecContext(ctx, query, string(network), cutoff, window.String())
 	if err != nil {
 		return 0, fmt.Errorf("orphan stale observations: %w", err)
 	}
@@ -413,6 +434,10 @@ func (s *CryptoPayService) creditDeposit(ctx context.Context, depositID int64, o
 		if _, err := tx.ExecContext(ctx, `UPDATE crypto_pay_deposits SET status = 'credited', credited_at = COALESCE(credited_at, NOW()), updated_at = NOW() WHERE id = $1`, depositID); err != nil {
 			return nil, err
 		}
+		if err := writeCryptoPayAudit(ctx, tx, "DEPOSIT_STATUS_REPAIRED", &depositID, &d.userID, nil, operator,
+			map[string]any{"from": d.status, "mode": mode, "reason": "credit row already exists"}); err != nil {
+			return nil, err
+		}
 		out.Status = cryptoDepositCredited
 		return out, tx.Commit()
 	}
@@ -452,6 +477,9 @@ func (s *CryptoPayService) creditDeposit(ctx context.Context, depositID int64, o
 	return out, nil
 }
 
+// holdReason returns why a deposit must be held instead of credited:
+// the asset is no longer whitelisted, the user is deleted/not active, or
+// amount >= hold_threshold_amount (inclusive). "" = credit it.
 func (s *CryptoPayService) holdReason(network, contract string, amount decimal.Decimal, userStatus string, userDeleted bool, st *CryptoPaySettings) string {
 	n, ok := s.byNetwork[chain.Network(network)]
 	if !ok {
@@ -471,7 +499,7 @@ func (s *CryptoPayService) holdReason(network, contract string, amount decimal.D
 
 func (n *cryptoPayNetwork) assetByContractAnyProgram(contract string) (chain.Asset, bool) {
 	for _, a := range n.Assets {
-		if strings.EqualFold(a.Contract, contract) {
+		if a.Contract == contract { // EVM contracts are stored lowercase; Solana mints are case-sensitive
 			return a, true
 		}
 	}
@@ -497,6 +525,9 @@ func (s *CryptoPayService) invalidateBalanceCaches(ctx context.Context, userID i
 // CreditFinalizedBacklog credits finalized deposits left behind by a crash or
 // by a paused auto credit. No-op unless auto_credit_enabled.
 func (s *CryptoPayService) CreditFinalizedBacklog(ctx context.Context) (int, error) {
+	if !s.Enabled() {
+		return 0, nil
+	}
 	st, err := s.GetSettings(ctx)
 	if err != nil || !st.AutoCreditEnabled {
 		return 0, err
@@ -548,6 +579,10 @@ func (s *CryptoPayService) CreditFinalizedBacklog(ctx context.Context) (int, err
 // ReleaseDeposit credits a held (or finalized, e.g. while auto credit is
 // paused) deposit through the same crediting transaction, skipping hold rules.
 func (s *CryptoPayService) ReleaseDeposit(ctx context.Context, depositID int64, operator string) (*CryptoPayCreditOutcome, error) {
+	if !s.Enabled() {
+		// Deployments without crypto pay (saiai.top, abapi) never move money.
+		return nil, infraerrors.ServiceUnavailable(CryptoPayReasonDisabled, "crypto top-up is disabled on this deployment")
+	}
 	st, err := s.GetSettings(ctx)
 	if err != nil {
 		return nil, err
@@ -570,6 +605,9 @@ type CryptoPayRescanResult struct {
 // change of that account in the tx) are picked up only through this path, and
 // are accepted as long as the asset (mint + token program) is whitelisted.
 func (s *CryptoPayService) RescanTransaction(ctx context.Context, networkName, txHash, operator string) (*CryptoPayRescanResult, error) {
+	if !s.Enabled() {
+		return nil, infraerrors.ServiceUnavailable(CryptoPayReasonDisabled, "crypto top-up is disabled on this deployment")
+	}
 	n, ok := s.network(networkName)
 	if !ok {
 		return nil, infraerrors.BadRequest(CryptoPayReasonNetworkUnsupported, "unsupported network")
@@ -614,7 +652,11 @@ func (s *CryptoPayService) RescanTransaction(ctx context.Context, networkName, t
 	// Only finalized inflows of exactly this transaction are accepted.
 	accepted := make([]chain.Observation, 0, len(obs))
 	for _, o := range obs {
-		if o.Finalized && o.Network == n.Network && strings.EqualFold(strings.TrimSpace(o.TxHash), txHash) {
+		got := strings.TrimSpace(o.TxHash)
+		if n.Family == chain.FamilyEVM {
+			got = strings.ToLower(got) // EVM hashes are hex; Solana signatures are case-sensitive
+		}
+		if o.Finalized && o.Network == n.Network && got == txHash {
 			accepted = append(accepted, o)
 		}
 	}
