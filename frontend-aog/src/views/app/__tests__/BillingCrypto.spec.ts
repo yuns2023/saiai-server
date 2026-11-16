@@ -134,6 +134,28 @@ describe('BillingView stablecoin top-up', () => {
     expect(text).not.toContain('$2.00')
   })
 
+  it('a late failure for an older page does not replace the newer page', async () => {
+    crypto.config.mockResolvedValue(enabled)
+    const row = (id: number, amount: string) => ({ id, network: 'arbitrum-one', asset: 'USDC', amount, tx_hash: `0x${id}`, status: 'credited', block_time: '2026-11-16T08:00:00Z', credited_at: null })
+    crypto.deposits.mockResolvedValueOnce({ items: [row(1, '1')], total: 25, page: 1, page_size: 10 })
+    const w = await mountView()
+    let page2!: (e: unknown) => void
+    let page3!: (v: unknown) => void
+    crypto.deposits.mockImplementationOnce(() => new Promise((_, reject) => (page2 = reject)))
+    crypto.deposits.mockImplementationOnce(() => new Promise((r) => (page3 = r)))
+    const section = () => w.find('[data-testid=crypto-deposits-section]')
+    const pager = () => section().findComponent({ name: 'Pager' })
+    pager().vm.$emit('go', 2)
+    pager().vm.$emit('go', 3)
+    page3({ items: [row(3, '3')], total: 21, page: 3, page_size: 10 })
+    await flushPromises()
+    page2({ status: 500, message: 'boom' })
+    await flushPromises()
+    expect(section().text()).toContain('$3.00')
+    expect(w.find('[data-testid=crypto-deposits-error]').exists()).toBe(false)
+    expect(pager().props()).toMatchObject({ page: 3, total: 21, pages: 3 })
+  })
+
   it('creates an order with a string amount and opens the checkout page', async () => {
     crypto.config.mockResolvedValue(enabled)
     crypto.createOrder.mockResolvedValue({ id: 42 })

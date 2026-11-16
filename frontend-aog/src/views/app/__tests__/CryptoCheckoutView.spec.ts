@@ -22,7 +22,8 @@ vi.mock('qrcode', () => ({
   default: {
     toDataURL: (text: string) => {
       qrControl.calls.push(text)
-      const image = `data:image/png;base64,QR:${text}`
+      // Call-indexed so an overwrite by an older drawing is observable.
+      const image = `data:image/png;base64,QR:${text}#${qrControl.calls.length}`
       if (!qrControl.manual) return Promise.resolve(image)
       return new Promise<string>((resolve) => qrControl.pending.push(() => resolve(image)))
     }
@@ -125,7 +126,7 @@ describe('CryptoCheckoutView', () => {
     const w = await mountView(order())
     expect(w.find('[data-testid=crypto-amount]').text()).toBe('$10.00')
     expect(w.find('[data-testid=crypto-address]').text()).toBe('0x1111111111111111111111111111111111111111')
-    expect(w.find('[data-testid=crypto-qr]').attributes('src')).toContain('QR')
+    expect(w.find('[data-testid=crypto-qr]').attributes('src')).toBe('data:image/png;base64,QR:0x1111111111111111111111111111111111111111#1')
     expect(w.text()).toContain('向此地址发送 $10.00 USDC（Arbitrum）')
     expect(w.text()).toContain('Arbitrum 约 20 分钟')
     expect(w.find('[data-testid=crypto-warning]').text()).toContain('只能转入 Arbitrum 链上的 USDC 或 USDT')
@@ -304,7 +305,7 @@ describe('CryptoCheckoutView', () => {
       expect(w.find('#send-title').text()).toContain(label)
       expect(w.find('[data-testid=crypto-warning]').text()).toContain(label)
       const src = w.find('[data-testid=crypto-qr]')
-      if (src.exists()) expect(src.attributes('src')).toBe(`data:image/png;base64,QR:${addr}`)
+      if (src.exists()) expect(src.attributes('src')).toMatch(new RegExp(`^data:image/png;base64,QR:${addr}#\\d+$`))
     }
 
     // A loads; its QR is still being drawn.
@@ -336,7 +337,7 @@ describe('CryptoCheckoutView', () => {
     qrControl.pending.shift()!()
     await flushPromises()
     consistent(A, 'Arbitrum')
-    expect(w.find('[data-testid=crypto-qr]').attributes('src')).toBe(`data:image/png;base64,QR:${A}`)
+    expect(w.find('[data-testid=crypto-qr]').attributes('src')).toBe(`data:image/png;base64,QR:${A}#2`)
     expect(qrControl.calls).toEqual([A, A])
 
     // And a clean switch to B shows B everywhere.
@@ -348,6 +349,37 @@ describe('CryptoCheckoutView', () => {
     await flushPromises()
     consistent(B, 'Solana')
     expect(qrControl.calls.at(-1)).toBe(B)
+  })
+
+  it('an older QR drawing finishing last never overwrites the current one (A → B → A)', async () => {
+    const A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    const waiting: Array<{ id: string; resolve: (o: CryptoOrder) => void }> = []
+    api.getOrder.mockImplementation((id: string) => new Promise<CryptoOrder>((resolve) => waiting.push({ id, resolve })))
+    qrControl.manual = true
+    const w = mount(CryptoCheckoutView, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
+    await flushPromises()
+    waiting.shift()!.resolve(order({ id: 7, address: A }))
+    await flushPromises()
+    expect(qrControl.calls).toEqual([A]) // first A drawing stays pending
+
+    routeHolder.route.params.id = '9'
+    await flushPromises()
+    routeHolder.route.params.id = '7'
+    await flushPromises()
+    waiting.shift()!.resolve(order({ id: 9, network: 'solana-mainnet', address: 'So1' })) // late B, dropped
+    await flushPromises()
+    waiting.shift()!.resolve(order({ id: 7, address: A }))
+    await flushPromises()
+    expect(qrControl.calls).toEqual([A, A])
+
+    const [first, second] = qrControl.pending
+    second()
+    await flushPromises()
+    expect(w.find('[data-testid=crypto-qr]').attributes('src')).toBe(`data:image/png;base64,QR:${A}#2`)
+    first()
+    await flushPromises()
+    expect(w.find('[data-testid=crypto-qr]').attributes('src')).toBe(`data:image/png;base64,QR:${A}#2`)
+    expect(w.find('[data-testid=crypto-address]').text()).toBe(A)
   })
 
   it('refresh failures (500, 429) show a stale banner, hide "remaining", back off, and reset on success', async () => {
@@ -393,18 +425,28 @@ describe('CryptoCheckoutView', () => {
     expect(api.getOrder).toHaveBeenCalledTimes(7)
   })
 
-  it('404 after a successful load switches to not-found and drops the address', async () => {
+  it.each([404, 403])('%i after a successful load switches to not-found and drops the address', async (status) => {
+    qrControl.manual = true // the address QR is still being drawn when the order disappears
     const w = await mountView(order())
     expect(w.find('[data-testid=crypto-address]').exists()).toBe(true)
-    api.getOrder.mockRejectedValueOnce({ status: 404 })
+    api.getOrder.mockRejectedValueOnce({ status })
     await vi.advanceTimersByTimeAsync(5000)
     expect(w.find('[data-testid=crypto-address]').exists()).toBe(false)
-    expect(w.find('[data-testid=crypto-qr]').exists()).toBe(false)
     expect(w.find('[data-testid=crypto-load-error]').text()).toContain('没有找到这个订单')
-    // No more polling, and becoming visible again does not refetch.
+    // A QR finishing after not-found is ignored.
+    qrControl.pending.shift()!()
+    await flushPromises()
+    expect(w.find('[data-testid=crypto-qr]').exists()).toBe(false)
+    expect(w.find('img').exists()).toBe(false)
+    // hidden → visible round trip does not refetch; nor does time passing.
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(10_000)
+    hidden.mockReturnValue(false)
     document.dispatchEvent(new Event('visibilitychange'))
     await vi.advanceTimersByTimeAsync(120_000)
     expect(api.getOrder).toHaveBeenCalledTimes(2)
+    expect(w.find('[data-testid=crypto-load-error]').exists()).toBe(true)
   })
 
   it('refuses to show a pay-to block without an address', async () => {
@@ -412,6 +454,7 @@ describe('CryptoCheckoutView', () => {
     expect(w.find('[data-testid=crypto-no-address]').exists()).toBe(true)
     expect(w.find('[data-testid=crypto-address]').exists()).toBe(false)
     expect(w.findComponent(CopyButton).exists()).toBe(false)
+    expect(w.find('[data-testid=crypto-remaining]').exists()).toBe(false)
     expect(qrControl.calls).toEqual([])
   })
 

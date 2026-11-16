@@ -68,7 +68,7 @@ const countdown = computed(() => {
 const remaining = computed(() => {
   const o = order.value
   // Stale figures must not tell the user how much more to send (they might pay twice).
-  if (!o || o.status === 'paid' || stale.value) return null
+  if (!o || o.status === 'paid' || stale.value || !addressOk.value) return null
   const due = toUnits(o.amount)
   const got = toUnits(o.received_amount)
   if (due === null || got === null || got >= due) return null
