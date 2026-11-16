@@ -178,8 +178,9 @@ func ownedAccountMatchesStatus(account service.Account, status string, now time.
 	}
 }
 
-// exportAccountsByOwner returns every account of one owner that matches the
-// export filters (all pages), so an owner-filtered export never includes
+// exportAccountsByOwner returns the accounts of one owner (up to the admin
+// owner bound, see ListAccountsOwnedBy) that match the export filters across
+// all pages, so an owner-filtered export never includes
 // other owners' accounts.
 func (h *AccountHandler) exportAccountsByOwner(ctx context.Context, ownerUserID int64, platform, accountType, status, search string) ([]service.Account, error) {
 	all, err := h.hostedOwnerService.ListAccountsOwnedBy(ctx, ownerUserID)

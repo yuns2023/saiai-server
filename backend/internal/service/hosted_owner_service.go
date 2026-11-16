@@ -359,7 +359,8 @@ func (s *HostedOwnerService) OwnerEmails(ctx context.Context, accounts []Account
 }
 
 // ListAccountsOwnedBy returns the non-deleted accounts currently owned by a
-// user (admin filter). Bounded by hostedOwnerMaxAccounts.
+// user (admin filter/export). Bounded by hostedOwnerAdminMaxAccounts; an
+// owner with more accounts is truncated in those views (documented limit).
 func (s *HostedOwnerService) ListAccountsOwnedBy(ctx context.Context, ownerUserID int64) ([]Account, error) {
 	if ownerUserID <= 0 {
 		return []Account{}, nil
