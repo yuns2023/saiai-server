@@ -36,14 +36,20 @@ type Account struct {
 	// historical export compatibility. New billing uses the owning user's factor.
 	PaygDiscountMultiplier *float64
 	LoadFactor             *int // 调度负载因子；nil 表示使用 Concurrency
-	Status                 string
-	ErrorMessage           string
-	ErrorAt                *time.Time // 进入 error 状态的时间，由数据库触发器维护
-	LastUsedAt             *time.Time
-	ExpiresAt              *time.Time
-	AutoPauseOnExpired     bool
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	// OwnerUserID is the hosted owner (platform user who brought the account).
+	// Informational for admin views only: copies held in the scheduler cache
+	// can be stale (whole-object cache write-backs), so never use this field
+	// for authorization or usage attribution — usage rows snapshot the owner
+	// from the database inside the INSERT.
+	OwnerUserID        *int64
+	Status             string
+	ErrorMessage       string
+	ErrorAt            *time.Time // 进入 error 状态的时间，由数据库触发器维护
+	LastUsedAt         *time.Time
+	ExpiresAt          *time.Time
+	AutoPauseOnExpired bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 
 	Schedulable bool
 

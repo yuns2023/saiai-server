@@ -3663,6 +3663,8 @@ type AccountMutation struct {
 	addconcurrency              *int
 	load_factor                 *int
 	addload_factor              *int
+	owner_user_id               *int64
+	addowner_user_id            *int64
 	priority                    *int
 	addpriority                 *int
 	rate_multiplier             *float64
@@ -4325,6 +4327,76 @@ func (m *AccountMutation) ResetLoadFactor() {
 	m.load_factor = nil
 	m.addload_factor = nil
 	delete(m.clearedFields, account.FieldLoadFactor)
+}
+
+// SetOwnerUserID sets the "owner_user_id" field.
+func (m *AccountMutation) SetOwnerUserID(i int64) {
+	m.owner_user_id = &i
+	m.addowner_user_id = nil
+}
+
+// OwnerUserID returns the value of the "owner_user_id" field in the mutation.
+func (m *AccountMutation) OwnerUserID() (r int64, exists bool) {
+	v := m.owner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOwnerUserID returns the old "owner_user_id" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldOwnerUserID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOwnerUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOwnerUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOwnerUserID: %w", err)
+	}
+	return oldValue.OwnerUserID, nil
+}
+
+// AddOwnerUserID adds i to the "owner_user_id" field.
+func (m *AccountMutation) AddOwnerUserID(i int64) {
+	if m.addowner_user_id != nil {
+		*m.addowner_user_id += i
+	} else {
+		m.addowner_user_id = &i
+	}
+}
+
+// AddedOwnerUserID returns the value that was added to the "owner_user_id" field in this mutation.
+func (m *AccountMutation) AddedOwnerUserID() (r int64, exists bool) {
+	v := m.addowner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearOwnerUserID clears the value of the "owner_user_id" field.
+func (m *AccountMutation) ClearOwnerUserID() {
+	m.owner_user_id = nil
+	m.addowner_user_id = nil
+	m.clearedFields[account.FieldOwnerUserID] = struct{}{}
+}
+
+// OwnerUserIDCleared returns if the "owner_user_id" field was cleared in this mutation.
+func (m *AccountMutation) OwnerUserIDCleared() bool {
+	_, ok := m.clearedFields[account.FieldOwnerUserID]
+	return ok
+}
+
+// ResetOwnerUserID resets all changes to the "owner_user_id" field.
+func (m *AccountMutation) ResetOwnerUserID() {
+	m.owner_user_id = nil
+	m.addowner_user_id = nil
+	delete(m.clearedFields, account.FieldOwnerUserID)
 }
 
 // SetPriority sets the "priority" field.
@@ -5468,7 +5540,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 30)
+	fields := make([]string, 0, 31)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -5504,6 +5576,9 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.load_factor != nil {
 		fields = append(fields, account.FieldLoadFactor)
+	}
+	if m.owner_user_id != nil {
+		fields = append(fields, account.FieldOwnerUserID)
 	}
 	if m.priority != nil {
 		fields = append(fields, account.FieldPriority)
@@ -5591,6 +5666,8 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.Concurrency()
 	case account.FieldLoadFactor:
 		return m.LoadFactor()
+	case account.FieldOwnerUserID:
+		return m.OwnerUserID()
 	case account.FieldPriority:
 		return m.Priority()
 	case account.FieldRateMultiplier:
@@ -5660,6 +5737,8 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldConcurrency(ctx)
 	case account.FieldLoadFactor:
 		return m.OldLoadFactor(ctx)
+	case account.FieldOwnerUserID:
+		return m.OldOwnerUserID(ctx)
 	case account.FieldPriority:
 		return m.OldPriority(ctx)
 	case account.FieldRateMultiplier:
@@ -5788,6 +5867,13 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetLoadFactor(v)
+		return nil
+	case account.FieldOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOwnerUserID(v)
 		return nil
 	case account.FieldPriority:
 		v, ok := value.(int)
@@ -5929,6 +6015,9 @@ func (m *AccountMutation) AddedFields() []string {
 	if m.addload_factor != nil {
 		fields = append(fields, account.FieldLoadFactor)
 	}
+	if m.addowner_user_id != nil {
+		fields = append(fields, account.FieldOwnerUserID)
+	}
 	if m.addpriority != nil {
 		fields = append(fields, account.FieldPriority)
 	}
@@ -5950,6 +6039,8 @@ func (m *AccountMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedConcurrency()
 	case account.FieldLoadFactor:
 		return m.AddedLoadFactor()
+	case account.FieldOwnerUserID:
+		return m.AddedOwnerUserID()
 	case account.FieldPriority:
 		return m.AddedPriority()
 	case account.FieldRateMultiplier:
@@ -5978,6 +6069,13 @@ func (m *AccountMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddLoadFactor(v)
+		return nil
+	case account.FieldOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddOwnerUserID(v)
 		return nil
 	case account.FieldPriority:
 		v, ok := value.(int)
@@ -6019,6 +6117,9 @@ func (m *AccountMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(account.FieldLoadFactor) {
 		fields = append(fields, account.FieldLoadFactor)
+	}
+	if m.FieldCleared(account.FieldOwnerUserID) {
+		fields = append(fields, account.FieldOwnerUserID)
 	}
 	if m.FieldCleared(account.FieldErrorMessage) {
 		fields = append(fields, account.FieldErrorMessage)
@@ -6081,6 +6182,9 @@ func (m *AccountMutation) ClearField(name string) error {
 		return nil
 	case account.FieldLoadFactor:
 		m.ClearLoadFactor()
+		return nil
+	case account.FieldOwnerUserID:
+		m.ClearOwnerUserID()
 		return nil
 	case account.FieldErrorMessage:
 		m.ClearErrorMessage()
@@ -6161,6 +6265,9 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldLoadFactor:
 		m.ResetLoadFactor()
+		return nil
+	case account.FieldOwnerUserID:
+		m.ResetOwnerUserID()
 		return nil
 	case account.FieldPriority:
 		m.ResetPriority()
@@ -35472,6 +35579,8 @@ type UsageLogMutation struct {
 	stop_reason                         *string
 	request_body_bytes                  *int64
 	addrequest_body_bytes               *int64
+	account_owner_user_id               *int64
+	addaccount_owner_user_id            *int64
 	client_attestation                  *int16
 	addclient_attestation               *int16
 	client_entrypoint                   *map[string]interface{}
@@ -36090,6 +36199,76 @@ func (m *UsageLogMutation) ResetRequestBodyBytes() {
 	m.request_body_bytes = nil
 	m.addrequest_body_bytes = nil
 	delete(m.clearedFields, usagelog.FieldRequestBodyBytes)
+}
+
+// SetAccountOwnerUserID sets the "account_owner_user_id" field.
+func (m *UsageLogMutation) SetAccountOwnerUserID(i int64) {
+	m.account_owner_user_id = &i
+	m.addaccount_owner_user_id = nil
+}
+
+// AccountOwnerUserID returns the value of the "account_owner_user_id" field in the mutation.
+func (m *UsageLogMutation) AccountOwnerUserID() (r int64, exists bool) {
+	v := m.account_owner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAccountOwnerUserID returns the old "account_owner_user_id" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldAccountOwnerUserID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAccountOwnerUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAccountOwnerUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAccountOwnerUserID: %w", err)
+	}
+	return oldValue.AccountOwnerUserID, nil
+}
+
+// AddAccountOwnerUserID adds i to the "account_owner_user_id" field.
+func (m *UsageLogMutation) AddAccountOwnerUserID(i int64) {
+	if m.addaccount_owner_user_id != nil {
+		*m.addaccount_owner_user_id += i
+	} else {
+		m.addaccount_owner_user_id = &i
+	}
+}
+
+// AddedAccountOwnerUserID returns the value that was added to the "account_owner_user_id" field in this mutation.
+func (m *UsageLogMutation) AddedAccountOwnerUserID() (r int64, exists bool) {
+	v := m.addaccount_owner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearAccountOwnerUserID clears the value of the "account_owner_user_id" field.
+func (m *UsageLogMutation) ClearAccountOwnerUserID() {
+	m.account_owner_user_id = nil
+	m.addaccount_owner_user_id = nil
+	m.clearedFields[usagelog.FieldAccountOwnerUserID] = struct{}{}
+}
+
+// AccountOwnerUserIDCleared returns if the "account_owner_user_id" field was cleared in this mutation.
+func (m *UsageLogMutation) AccountOwnerUserIDCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldAccountOwnerUserID]
+	return ok
+}
+
+// ResetAccountOwnerUserID resets all changes to the "account_owner_user_id" field.
+func (m *UsageLogMutation) ResetAccountOwnerUserID() {
+	m.account_owner_user_id = nil
+	m.addaccount_owner_user_id = nil
+	delete(m.clearedFields, usagelog.FieldAccountOwnerUserID)
 }
 
 // SetClientAttestation sets the "client_attestation" field.
@@ -38280,7 +38459,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 47)
+	fields := make([]string, 0, 48)
 	if m.smart_switch != nil {
 		fields = append(fields, usagelog.FieldSmartSwitch)
 	}
@@ -38310,6 +38489,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.request_body_bytes != nil {
 		fields = append(fields, usagelog.FieldRequestBodyBytes)
+	}
+	if m.account_owner_user_id != nil {
+		fields = append(fields, usagelog.FieldAccountOwnerUserID)
 	}
 	if m.client_attestation != nil {
 		fields = append(fields, usagelog.FieldClientAttestation)
@@ -38450,6 +38632,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.StopReason()
 	case usagelog.FieldRequestBodyBytes:
 		return m.RequestBodyBytes()
+	case usagelog.FieldAccountOwnerUserID:
+		return m.AccountOwnerUserID()
 	case usagelog.FieldClientAttestation:
 		return m.ClientAttestation()
 	case usagelog.FieldClientEntrypoint:
@@ -38553,6 +38737,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldStopReason(ctx)
 	case usagelog.FieldRequestBodyBytes:
 		return m.OldRequestBodyBytes(ctx)
+	case usagelog.FieldAccountOwnerUserID:
+		return m.OldAccountOwnerUserID(ctx)
 	case usagelog.FieldClientAttestation:
 		return m.OldClientAttestation(ctx)
 	case usagelog.FieldClientEntrypoint:
@@ -38705,6 +38891,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRequestBodyBytes(v)
+		return nil
+	case usagelog.FieldAccountOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAccountOwnerUserID(v)
 		return nil
 	case usagelog.FieldClientAttestation:
 		v, ok := value.(int16)
@@ -38976,6 +39169,9 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addrequest_body_bytes != nil {
 		fields = append(fields, usagelog.FieldRequestBodyBytes)
 	}
+	if m.addaccount_owner_user_id != nil {
+		fields = append(fields, usagelog.FieldAccountOwnerUserID)
+	}
 	if m.addclient_attestation != nil {
 		fields = append(fields, usagelog.FieldClientAttestation)
 	}
@@ -39061,6 +39257,8 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case usagelog.FieldRequestBodyBytes:
 		return m.AddedRequestBodyBytes()
+	case usagelog.FieldAccountOwnerUserID:
+		return m.AddedAccountOwnerUserID()
 	case usagelog.FieldClientAttestation:
 		return m.AddedClientAttestation()
 	case usagelog.FieldInputTokens:
@@ -39126,6 +39324,13 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRequestBodyBytes(v)
+		return nil
+	case usagelog.FieldAccountOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAccountOwnerUserID(v)
 		return nil
 	case usagelog.FieldClientAttestation:
 		v, ok := value.(int16)
@@ -39325,6 +39530,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldRequestBodyBytes) {
 		fields = append(fields, usagelog.FieldRequestBodyBytes)
 	}
+	if m.FieldCleared(usagelog.FieldAccountOwnerUserID) {
+		fields = append(fields, usagelog.FieldAccountOwnerUserID)
+	}
 	if m.FieldCleared(usagelog.FieldClientAttestation) {
 		fields = append(fields, usagelog.FieldClientAttestation)
 	}
@@ -39395,6 +39603,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldRequestBodyBytes:
 		m.ClearRequestBodyBytes()
+		return nil
+	case usagelog.FieldAccountOwnerUserID:
+		m.ClearAccountOwnerUserID()
 		return nil
 	case usagelog.FieldClientAttestation:
 		m.ClearClientAttestation()
@@ -39475,6 +39686,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldRequestBodyBytes:
 		m.ResetRequestBodyBytes()
+		return nil
+	case usagelog.FieldAccountOwnerUserID:
+		m.ResetAccountOwnerUserID()
 		return nil
 	case usagelog.FieldClientAttestation:
 		m.ResetClientAttestation()

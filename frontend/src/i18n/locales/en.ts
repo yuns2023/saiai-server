@@ -2719,6 +2719,7 @@ export default {
       columns: {
         name: 'Name',
         platformType: 'Platform/Type',
+        owner: 'Owner',
         platform: 'Platform',
         type: 'Type',
         capacity: 'Current Concurrency',
@@ -2854,6 +2855,22 @@ export default {
         cleared: 'Restart removed',
         failed: 'Operation failed',
         invalidStart: 'The restart time is not valid; pick it again (an empty field does not mean now)'
+      },
+      owner: {
+        menu: 'Set Owner',
+        title: 'Set Account Owner',
+        current: 'Current owner: {owner}',
+        none: 'No owner set',
+        rule: 'The owner is the user who brought this upstream account; they can see its usage on their own page. Once an account has belonged to a user, it can only be cleared or set back to that user. To give it to someone else, delete the account and import it again.',
+        pickLabel: 'Owner',
+        clear: 'Clear Owner',
+        saved: 'Owner updated',
+        cleared: 'Owner cleared',
+        failed: 'Failed to set owner',
+        transferForbidden: 'This account already belonged to a different user. It can only be cleared or set back to that user. To give it to someone else, delete the account and import it again.',
+        filterPlaceholder: 'Owner user ID',
+        filterHint: "Enter the owner's user ID to show only that user's accounts",
+        filterInvalid: 'Enter a positive user ID; clear the field to stop filtering by owner'
       },
       resetQuota: 'Reset Quota',
       quotaLimit: 'Quota Limit',

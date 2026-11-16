@@ -58,6 +58,13 @@ type AccountHandler struct {
 	sessionLimitCache       service.SessionLimitCache
 	rpmCache                service.RPMCache
 	tokenCacheInvalidator   service.TokenCacheInvalidator
+	hostedOwnerService      *service.HostedOwnerService
+}
+
+// SetHostedOwnerService wires the hosted owner service (owner column, owner
+// filter and the owner endpoint). Nil leaves those features disabled.
+func (h *AccountHandler) SetHostedOwnerService(s *service.HostedOwnerService) {
+	h.hostedOwnerService = s
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -194,6 +201,7 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 			item.CurrentConcurrency = counts[account.ID]
 		}
 	}
+	h.fillOwnerEmails(ctx, []service.Account{*account}, []AccountWithConcurrency{item})
 
 	if account.IsAnthropicOAuthOrSetupToken() {
 		if h.accountUsageService != nil && account.GetWindowCostLimit() > 0 {
@@ -257,7 +265,21 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID)
+	ownerUserID, err := parseOwnerFilter(c)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	var (
+		accounts []service.Account
+		total    int64
+	)
+	if ownerUserID > 0 && h.hostedOwnerService != nil {
+		accounts, total, err = h.listAccountsByOwner(c.Request.Context(), ownerUserID, page, pageSize, platform, accountType, status, search, groupID)
+	} else {
+		accounts, total, err = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -378,6 +400,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 		result[i] = item
 	}
+	h.fillOwnerEmails(c.Request.Context(), accounts, result)
 
 	etag := buildAccountsListETag(result, total, page, pageSize, platform, accountType, status, search, lite)
 	if etag != "" {

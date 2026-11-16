@@ -40,6 +40,6 @@ func TestUsageLogStopReasonInAllInsertPaths(t *testing.T) {
 	require.Equal(t, 3, strings.Count(bestEffortQuery, "stop_reason"))
 	require.Equal(t, sql.NullString{String: "refusal", Valid: true}, bestEffortArgs[len(bestEffortArgs)-4])
 
-	require.True(t, strings.HasSuffix(usageLogSelectColumns, ", stop_reason, client_attestation, client_entrypoint, request_body_bytes"))
+	require.True(t, strings.HasSuffix(usageLogSelectColumns, ", stop_reason, client_attestation, client_entrypoint, request_body_bytes, account_owner_user_id"))
 	require.Equal(t, 1, strings.Count(usageLogSelectColumns, "stop_reason"))
 }

@@ -37,6 +37,7 @@ export async function list(
     status?: string
     group?: string
     search?: string
+    owner_user_id?: number
     lite?: string
   },
   options?: {
@@ -69,6 +70,7 @@ export async function listWithEtag(
     status?: string
     group?: string
     search?: string
+    owner_user_id?: number
     lite?: string
   },
   options?: {
@@ -768,7 +770,28 @@ export async function consumeCodexResetCredit(id: number, creditId: string, idem
   return data
 }
 
+export interface AccountOwnerResult {
+  account_id: number
+  owner_user_id: number | null
+  owner_email: string | null
+}
+
+/** Server reason when an account that already belonged to another user is given to someone else. */
+export const ACCOUNT_OWNER_TRANSFER_FORBIDDEN = 'ACCOUNT_OWNER_TRANSFER_FORBIDDEN'
+
+/**
+ * Set (or clear with null) the account's owner (号主). The key is always sent:
+ * the server treats a missing owner_user_id as a bad request, not as "clear".
+ */
+export async function setAccountOwner(id: number, ownerUserId: number | null): Promise<AccountOwnerResult> {
+  const { data } = await apiClient.put<AccountOwnerResult>(`/admin/accounts/${id}/owner`, {
+    owner_user_id: ownerUserId
+  })
+  return data
+}
+
 export const accountsAPI = {
+  setAccountOwner,
   listCodexResetCredits,
   consumeCodexResetCredit,
   list,

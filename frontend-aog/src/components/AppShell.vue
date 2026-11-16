@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { useHostedStore } from '@/stores/hosted'
 import { useNoticesStore } from '@/stores/notices'
 import Icon from './Icon.vue'
 import PrefsMenu from './PrefsMenu.vue'
@@ -12,6 +13,7 @@ const { t } = useI18n()
 const app = useAppStore()
 const auth = useAuthStore()
 const notices = useNoticesStore()
+const hosted = useHostedStore()
 const route = useRoute()
 const router = useRouter()
 const drawerOpen = ref(false)
@@ -20,6 +22,8 @@ const nav = computed(() => [
   { to: '/dashboard', icon: 'overview' as const, label: t('nav.overview') },
   { to: '/keys', icon: 'key' as const, label: t('nav.keys') },
   { to: '/usage', icon: 'usage' as const, label: t('nav.usage') },
+  // Only for owners of hosted accounts; unknown (loading or failed) stays hidden.
+  ...(hosted.hasAny ? [{ to: '/hosted', icon: 'hosted' as const, label: t('nav.hosted') }] : []),
   { to: '/billing', icon: 'billing' as const, label: t('nav.billing') },
   ...(app.settings?.user_invite_enabled ? [{ to: '/invites', icon: 'invite' as const, label: t('nav.invites') }] : []),
   { to: '/account', icon: 'account' as const, label: t('nav.account') },
@@ -30,6 +34,7 @@ watch(() => route.fullPath, () => (drawerOpen.value = false))
 
 onMounted(() => {
   if (!notices.loaded) notices.load().catch(() => undefined)
+  hosted.ensureLoaded()
 })
 
 async function signOut(): Promise<void> {

@@ -129,6 +129,49 @@ describe('API Client', () => {
     })
   })
 
+  describe('结构化错误 reason', () => {
+    it('HTTP 错误保留后端信封里的 reason', async () => {
+      const adapter = vi.fn().mockRejectedValue({
+        response: {
+          status: 409,
+          data: { code: 409, message: 'transfer forbidden', reason: 'ACCOUNT_OWNER_TRANSFER_FORBIDDEN' },
+        },
+        config: { url: '/admin/accounts/12/owner' },
+        code: 'ERR_BAD_REQUEST',
+      })
+      apiClient.defaults.adapter = adapter
+
+      await expect(apiClient.put('/admin/accounts/12/owner', { owner_user_id: 5 })).rejects.toEqual(
+        expect.objectContaining({
+          status: 409,
+          reason: 'ACCOUNT_OWNER_TRANSFER_FORBIDDEN',
+          message: 'transfer forbidden',
+        })
+      )
+    })
+
+    it('HTTP 200 + code!=0 也保留 reason；没有 reason 时不加该属性', async () => {
+      apiClient.defaults.adapter = vi.fn().mockResolvedValue({
+        status: 200,
+        data: { code: 409, message: 'conflict', reason: 'ACCOUNT_OWNER_TRANSFER_FORBIDDEN', data: null },
+        headers: {},
+        config: {},
+        statusText: 'OK',
+      })
+      await expect(apiClient.get('/test')).rejects.toEqual(
+        expect.objectContaining({ code: 409, reason: 'ACCOUNT_OWNER_TRANSFER_FORBIDDEN' })
+      )
+
+      apiClient.defaults.adapter = vi.fn().mockRejectedValue({
+        response: { status: 404, data: { code: 404, message: 'not found' } },
+        config: { url: '/test' },
+        code: 'ERR_BAD_REQUEST',
+      })
+      const error = await apiClient.get('/test').catch((value) => value)
+      expect(Object.prototype.hasOwnProperty.call(error, 'reason')).toBe(false)
+    })
+  })
+
   // --- 401 Token 刷新 ---
 
   describe('401 Token 刷新', () => {

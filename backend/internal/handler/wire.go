@@ -33,7 +33,9 @@ func ProvideAdminHandlers(
 	apiKeyHandler *admin.AdminAPIKeyHandler,
 	paymentHandler *admin.PaymentHandler,
 	cryptoPayHandler *admin.CryptoPayHandler,
+	hostedOwnerService *service.HostedOwnerService,
 ) *AdminHandlers {
+	accountHandler.SetHostedOwnerService(hostedOwnerService)
 	return &AdminHandlers{
 		Dashboard:        dashboardHandler,
 		User:             userHandler,
@@ -98,6 +100,7 @@ func ProvideHandlers(
 	userHandler *UserHandler,
 	apiKeyHandler *APIKeyHandler,
 	hostedAccountHandler *HostedAccountHandler,
+	hostedOwnerHandler *HostedOwnerHandler,
 	usageHandler *UsageHandler,
 	redeemHandler *RedeemHandler,
 	userInviteHandler *UserInviteHandler,
@@ -120,6 +123,7 @@ func ProvideHandlers(
 		User:           userHandler,
 		APIKey:         apiKeyHandler,
 		HostedAccount:  hostedAccountHandler,
+		HostedOwner:    hostedOwnerHandler,
 		Usage:          usageHandler,
 		Redeem:         redeemHandler,
 		UserInvite:     userInviteHandler,
@@ -144,6 +148,7 @@ var ProviderSet = wire.NewSet(
 	NewUserHandler,
 	NewAPIKeyHandler,
 	NewHostedAccountHandler,
+	NewHostedOwnerHandler,
 	NewUsageHandler,
 	NewRedeemHandler,
 	NewUserInviteHandler,

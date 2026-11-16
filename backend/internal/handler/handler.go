@@ -39,6 +39,7 @@ type Handlers struct {
 	User           *UserHandler
 	APIKey         *APIKeyHandler
 	HostedAccount  *HostedAccountHandler
+	HostedOwner    *HostedOwnerHandler
 	Usage          *UsageHandler
 	Redeem         *RedeemHandler
 	UserInvite     *UserInviteHandler

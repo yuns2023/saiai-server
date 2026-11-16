@@ -38,5 +38,5 @@ func TestUsageLogRequestBodyBytesInAllInsertPaths(t *testing.T) {
 	require.Equal(t, want, bestEffortArgs[len(bestEffortArgs)-1])
 
 	require.Equal(t, 1, strings.Count(usageLogSelectColumns, "request_body_bytes"))
-	require.True(t, strings.HasSuffix(usageLogSelectColumns, ", request_body_bytes"))
+	require.True(t, strings.HasSuffix(usageLogSelectColumns, ", request_body_bytes, account_owner_user_id"))
 }

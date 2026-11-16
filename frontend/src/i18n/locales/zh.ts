@@ -2759,6 +2759,7 @@ export default {
       columns: {
         name: '名称',
         platformType: '平台/类型',
+        owner: '号主',
         platform: '平台',
         type: '类型',
         capacity: '当前并发',
@@ -2851,6 +2852,22 @@ export default {
         cleared: '已撤销重新计数',
         failed: '操作失败',
         invalidStart: '重新计数时间无效，请重新选择（留空不会按现在处理）'
+      },
+      owner: {
+        menu: '设置号主',
+        title: '设置号主',
+        current: '当前号主：{owner}',
+        none: '当前未设置号主',
+        rule: '号主是带来这个上游账号的用户，可在自己的页面查看该账号的用量。账号一旦属于某个用户，之后只能清除号主或设回该用户；如需交给其他用户，请删除该账号后重新导入。',
+        pickLabel: '选择号主',
+        clear: '清除号主',
+        saved: '号主已更新',
+        cleared: '号主已清除',
+        failed: '设置号主失败',
+        transferForbidden: '该账号曾属于其他用户，只能清除号主或设回原号主。如需交给其他用户，请删除该账号后重新导入。',
+        filterPlaceholder: '号主用户 ID',
+        filterHint: '输入号主的用户 ID，只显示该用户的账号',
+        filterInvalid: '请输入正整数用户 ID；清空则不按号主筛选'
       },
       resetQuota: '重置配额',
       quotaLimit: '配额限制',

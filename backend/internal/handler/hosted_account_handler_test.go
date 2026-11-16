@@ -95,7 +95,8 @@ func TestHostedAccountHandlerAuthorizationAndSafeResponse(t *testing.T) {
 	require.Len(t, envelope.Data.Items, 1)
 	row := envelope.Data.Items[0]
 	require.Len(t, row, 7)
-	require.Equal(t, "Hosted account", row["name"])
+	require.Equal(t, "托管号 #2", row["name"], "the admin account name is never shown to users")
+	require.NotContains(t, w.Body.String(), "Hosted account")
 	for _, private := range []string{"TEST_ONLY_PRIVATE_TOKEN", "TEST_ONLY_PRIVATE_EMAIL", "TEST_ONLY_RAW_ERROR", "credentials", "extra", "proxy"} {
 		require.NotContains(t, w.Body.String(), private)
 	}
