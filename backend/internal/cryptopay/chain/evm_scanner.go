@@ -63,7 +63,7 @@ var _ EVMScanner = (*EVMRPCScanner)(nil)
 // NewEVMScanner builds an EVM scanner.
 func NewEVMScanner(cfg EVMScannerConfig) (*EVMRPCScanner, error) {
 	if cfg.Network.Family() != FamilyEVM {
-		return nil, fmt.Errorf("chain: %q is not an EVM network", cfg.Network)
+		return nil, fmt.Errorf("chain: %s is not an EVM network", clip(string(cfg.Network)))
 	}
 	assets := cfg.Assets
 	if assets == nil {
@@ -209,7 +209,7 @@ func (s *EVMRPCScanner) header(ctx context.Context, n uint64, wantHash string, f
 			return blockHeader{}, err
 		}
 		if got, err := parseHexUint64(b.Number); err != nil || got != n {
-			return blockHeader{}, fmt.Errorf("chain: eth_getBlockByNumber(%d) returned block %q", n, b.Number)
+			return blockHeader{}, fmt.Errorf("chain: eth_getBlockByNumber(%d) returned block %s", n, clip(b.Number))
 		}
 		// Use the header we just fetched, not whatever the shared cache holds
 		// now (a concurrent non-finalized scan may have written to it).
@@ -218,7 +218,7 @@ func (s *EVMRPCScanner) header(ctx context.Context, n uint64, wantHash string, f
 		}
 	}
 	if h.Hash != wantHash {
-		return blockHeader{}, fmt.Errorf("chain: block %d hash %s != log block hash %s (reorg in progress?)", n, h.Hash, wantHash)
+		return blockHeader{}, fmt.Errorf("chain: block %d hash %s != log block hash %s (reorg in progress?)", n, clip(h.Hash), clip(wantHash))
 	}
 	return h, nil
 }
@@ -380,7 +380,7 @@ func (s *EVMRPCScanner) logsToObservations(ctx context.Context, logs []rpcLog, w
 			// A whitelisted ERC-20 always emits Transfer with 3 topics; any
 			// other shape is a corrupt/incomplete response. Fail instead of
 			// skipping so the caller's cursor cannot move past it.
-			return nil, fmt.Errorf("chain: %s Transfer log in tx %v has %d topics, want 3", asset.Symbol, derefOr(l.TransactionHash), len(l.Topics))
+			return nil, fmt.Errorf("chain: %s Transfer log in tx %v has %d topics, want 3", asset.Symbol, clip(derefOr(l.TransactionHash)), len(l.Topics))
 		}
 		to, err := topicToAddress(l.Topics[2])
 		if err != nil {
@@ -413,7 +413,7 @@ func (s *EVMRPCScanner) logsToObservations(ctx context.Context, logs []rpcLog, w
 		}
 		txHash := strings.ToLower(*l.TransactionHash)
 		if !isHex32(txHash) {
-			return nil, fmt.Errorf("chain: bad tx hash %q", txHash)
+			return nil, fmt.Errorf("chain: bad tx hash %s", clip(txHash))
 		}
 		blockHash := strings.ToLower(*l.BlockHash)
 		if finalized && bn > finalizedHead {
@@ -468,7 +468,7 @@ type rpcReceipt struct {
 func (s *EVMRPCScanner) ObservationsForTx(ctx context.Context, txHash string, addresses []string, finalized bool) ([]Observation, error) {
 	txHash = strings.ToLower(strings.TrimSpace(txHash))
 	if !isHex32(txHash) {
-		return nil, fmt.Errorf("chain: invalid tx hash %q", txHash)
+		return nil, fmt.Errorf("chain: invalid tx hash %s", clip(txHash))
 	}
 	addrs, err := normalizeEVMAddressSet(addresses)
 	if err != nil {
@@ -504,7 +504,7 @@ func (s *EVMRPCScanner) ObservationsForTx(ctx context.Context, txHash string, ad
 	}
 	// Re-check the receipt's block is canonical even if no log matches.
 	if !strings.EqualFold(rc.TransactionHash, txHash) {
-		return nil, fmt.Errorf("chain: receipt is for %q, requested %s", rc.TransactionHash, txHash)
+		return nil, fmt.Errorf("chain: receipt is for %s, requested %s", clip(rc.TransactionHash), clip(txHash))
 	}
 	receiptBlockHash := strings.ToLower(*rc.BlockHash)
 	if _, err := s.header(ctx, bn, receiptBlockHash, finalized); err != nil {
@@ -515,7 +515,7 @@ func (s *EVMRPCScanner) ObservationsForTx(ctx context.Context, txHash string, ad
 	case "0x0":
 		return nil, nil // reverted: no transfer happened
 	default:
-		return nil, fmt.Errorf("chain: receipt %s has unexpected status %q", txHash, rc.Status)
+		return nil, fmt.Errorf("chain: receipt %s has unexpected status %s", clip(txHash), clip(rc.Status))
 	}
 	if rc.Logs == nil {
 		return nil, fmt.Errorf("chain: successful receipt %s has no logs field", txHash)
@@ -565,13 +565,13 @@ func normalizeEVMAddressSet(in []string) ([]string, error) {
 func topicToAddress(topic string) (string, error) {
 	t := strings.ToLower(topic)
 	if len(t) != 66 || !strings.HasPrefix(t, "0x") {
-		return "", fmt.Errorf("chain: bad address topic %q", topic)
+		return "", fmt.Errorf("chain: bad address topic %s", clip(topic))
 	}
 	if _, err := hex.DecodeString(t[2:]); err != nil {
-		return "", fmt.Errorf("chain: bad address topic %q", topic)
+		return "", fmt.Errorf("chain: bad address topic %s", clip(topic))
 	}
 	if strings.Trim(t[2:26], "0") != "" {
-		return "", fmt.Errorf("chain: address topic %q has non-zero high bytes", topic)
+		return "", fmt.Errorf("chain: address topic %s has non-zero high bytes", clip(topic))
 	}
 	return "0x" + t[26:], nil
 }
@@ -579,7 +579,7 @@ func topicToAddress(topic string) (string, error) {
 func parseUint256Data(data string) (*big.Int, error) {
 	d := strings.ToLower(data)
 	if !strings.HasPrefix(d, "0x") || len(d) != 66 {
-		return nil, fmt.Errorf("transfer data %q is not one 32-byte word", data)
+		return nil, fmt.Errorf("transfer data %s is not one 32-byte word", clip(data))
 	}
 	b, err := hex.DecodeString(d[2:])
 	if err != nil {
@@ -590,11 +590,11 @@ func parseUint256Data(data string) (*big.Int, error) {
 
 func parseHexUint64(s string) (uint64, error) {
 	if !strings.HasPrefix(s, "0x") && !strings.HasPrefix(s, "0X") {
-		return 0, fmt.Errorf("chain: %q is not 0x hex", s)
+		return 0, fmt.Errorf("chain: %s is not 0x hex", clip(s))
 	}
 	n, err := strconv.ParseUint(s[2:], 16, 64)
 	if err != nil {
-		return 0, fmt.Errorf("chain: bad hex quantity %q: %w", s, err)
+		return 0, fmt.Errorf("chain: bad hex quantity %s", clip(s))
 	}
 	return n, nil
 }

@@ -526,3 +526,55 @@ func TestManifestEquivalentEncodingsAndTamper(t *testing.T) {
 		t.Fatal("tampered network must fail verification")
 	}
 }
+
+// HTTP 429 wins over the response-size classification.
+func TestEVMOversized429DoesNotSplit(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Method == "eth_getBlockByNumber" {
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"number":"0x64","hash":"%s","timestamp":"0x1"}}`, req.ID, blockHash(100))
+			return
+		}
+		calls++
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(strings.Repeat("slow down ", 500))) // ~5 KB > MaxResponseBytes
+	}))
+	defer srv.Close()
+	opts := RPCOptions{URL: srv.URL, MaxResponseBytes: 1024}
+	c, _ := newRPCClient(opts)
+	_, err := c.call(context.Background(), "eth_getLogs", []any{})
+	var ce *RPCCallError
+	if !errors.As(err, &ce) || ce.HTTPStatus != 429 || ce.Kind != RPCKindHTTPStatus || errors.Is(err, ErrTooMuchData) {
+		t.Fatalf("oversized 429: %v", err)
+	}
+	s, _ := NewEVMScanner(EVMScannerConfig{Network: ArbitrumOne, RPC: opts})
+	calls = 0
+	if _, err := s.ScanRange(context.Background(), 0, 100, []string{tAlice, tBob}, true); err == nil {
+		t.Fatal("rate limit must be an error")
+	}
+	if calls != 1 {
+		t.Fatalf("oversized 429 caused %d eth_getLogs calls, want 1", calls)
+	}
+}
+
+func TestErrorEchoesAreClipped(t *testing.T) {
+	long := strings.Repeat("Z", 200)
+	for _, err := range []error{
+		func() error { _, err := parseHexUint64("0x" + long); return err }(),
+		func() error { _, err := parseHexUint64(long); return err }(),
+		func() error { _, err := topicToAddress(long); return err }(),
+		func() error { _, err := parseUint256Data("0x" + long); return err }(),
+		func() error { _, err := NormalizeEVMAddress(long); return err }(),
+		func() error { _, err := DecodeSolanaPubkey(long); return err }(),
+		func() error { _, err := decodeSignature(long); return err }(),
+	} {
+		if err == nil || strings.Contains(err.Error(), strings.Repeat("Z", 33)) {
+			t.Errorf("echo not clipped: %v", err)
+		}
+	}
+}

@@ -234,6 +234,14 @@ func (c *rpcClient) call(ctx context.Context, method string, params any) (json.R
 	if err != nil {
 		return nil, c.fail(method, classifyTransport(ctx, err), status, nil)
 	}
+	if status == http.StatusTooManyRequests {
+		// Rate limited: report it even if the body is huge (never split).
+		var r rpcResponse
+		if int64(len(data)) <= c.opts.MaxResponseBytes && json.Unmarshal(data, &r) == nil && r.Error != nil && idMatches(r.ID, id, true) {
+			return nil, c.fail(method, RPCKindHTTPStatus, status, r.Error)
+		}
+		return nil, c.fail(method, RPCKindHTTPStatus, status, nil)
+	}
 	if int64(len(data)) > c.opts.MaxResponseBytes {
 		return nil, c.fail(method, RPCKindTooMuchData, status, nil)
 	}
@@ -277,4 +285,13 @@ func (c *rpcClient) call(ctx context.Context, method string, params any) (json.R
 
 func isJSONNull(raw json.RawMessage) bool {
 	return len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null"
+}
+
+// clip renders a provider- or caller-supplied value for an error message,
+// truncated to at most 32 characters.
+func clip(s string) string {
+	if len(s) > 32 {
+		s = s[:32] + "..."
+	}
+	return strconv.Quote(s)
 }

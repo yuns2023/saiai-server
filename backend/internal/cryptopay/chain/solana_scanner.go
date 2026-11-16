@@ -51,7 +51,7 @@ var _ SolanaScanner = (*SolanaRPCScanner)(nil)
 // NewSolanaScanner builds a Solana scanner.
 func NewSolanaScanner(cfg SolanaScannerConfig) (*SolanaRPCScanner, error) {
 	if cfg.Network.Family() != FamilySolana {
-		return nil, fmt.Errorf("chain: %q is not a Solana network", cfg.Network)
+		return nil, fmt.Errorf("chain: %s is not a Solana network", clip(string(cfg.Network)))
 	}
 	assets := cfg.Assets
 	if assets == nil {
@@ -114,7 +114,7 @@ func (s *SolanaRPCScanner) whitelisted(mint, program string) (Asset, bool) {
 
 func validateCommitment(c string) error {
 	if c != CommitmentFinalized && c != CommitmentConfirmed {
-		return fmt.Errorf("chain: unsupported commitment %q (want finalized or confirmed)", c)
+		return fmt.Errorf("chain: unsupported commitment %s (want finalized or confirmed)", clip(c))
 	}
 	return nil
 }
@@ -432,7 +432,7 @@ func tokenDeltas(tx *rpcSolanaTx) (map[string]tokenDelta, error) {
 			case b.Mint == "" || b.Owner == "" || b.ProgramID == "":
 				e.bad = fmt.Errorf("token balance for %s lacks mint/owner/programId", acct)
 			case !ok || amt.Sign() < 0:
-				e.bad = fmt.Errorf("token balance amount %q for %s is not a non-negative integer", b.UITokenAmount.Amount, acct)
+				e.bad = fmt.Errorf("token balance amount %s for %s is not a non-negative integer", clip(b.UITokenAmount.Amount), clip(acct))
 			default:
 				e.amount = amt
 			}
@@ -490,11 +490,11 @@ func tokenDeltas(tx *rpcSolanaTx) (map[string]tokenDelta, error) {
 
 func decodeSignature(sig string) ([]byte, error) {
 	if sig == "" || len(sig) > 90 {
-		return nil, fmt.Errorf("chain: invalid Solana signature %q", sig)
+		return nil, fmt.Errorf("chain: invalid Solana signature %s", clip(sig))
 	}
 	b, err := base58.Decode(sig)
 	if err != nil || len(b) != 64 {
-		return nil, fmt.Errorf("chain: invalid Solana signature %q", sig)
+		return nil, fmt.Errorf("chain: invalid Solana signature %s", clip(sig))
 	}
 	return b, nil
 }

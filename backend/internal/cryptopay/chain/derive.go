@@ -95,10 +95,10 @@ func evmAddressFromAccount(acct *hdkey.ExtendedPublicKey, index uint32) (string,
 func NormalizeEVMAddress(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if len(s) != 42 || (s[:2] != "0x" && s[:2] != "0X") {
-		return "", fmt.Errorf("chain: invalid EVM address %q", s)
+		return "", fmt.Errorf("chain: invalid EVM address %s", clip(s))
 	}
 	if _, err := hex.DecodeString(s[2:]); err != nil {
-		return "", fmt.Errorf("chain: invalid EVM address %q", s)
+		return "", fmt.Errorf("chain: invalid EVM address %s", clip(s))
 	}
 	return "0x" + strings.ToLower(s[2:]), nil
 }
@@ -106,16 +106,16 @@ func NormalizeEVMAddress(s string) (string, error) {
 // DecodeSolanaPubkey decodes a base58 Solana address and requires 32 bytes.
 func DecodeSolanaPubkey(s string) ([]byte, error) {
 	if s == "" || len(s) > 44 {
-		return nil, fmt.Errorf("chain: invalid Solana address %q", s)
+		return nil, fmt.Errorf("chain: invalid Solana address %s", clip(s))
 	}
 	b, err := base58.Decode(s)
 	if err != nil || len(b) != 32 {
-		return nil, fmt.Errorf("chain: invalid Solana address %q", s)
+		return nil, fmt.Errorf("chain: invalid Solana address %s", clip(s))
 	}
 	// Reject non-canonical encodings (e.g. extra leading '1's are length-checked
 	// above, but make the round trip explicit).
 	if base58.Encode(b) != s {
-		return nil, fmt.Errorf("chain: non-canonical Solana address %q", s)
+		return nil, fmt.Errorf("chain: non-canonical Solana address %s", clip(s))
 	}
 	return b, nil
 }

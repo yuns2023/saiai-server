@@ -84,10 +84,10 @@ func validateSolanaPoolManifest(m *SolanaPoolManifest, signer []byte) error {
 		return fmt.Errorf("chain: unsupported manifest version %d", m.Version)
 	}
 	if m.Network.Family() != FamilySolana {
-		return fmt.Errorf("chain: manifest network %q is not a known Solana network", m.Network)
+		return fmt.Errorf("chain: manifest network %s is not a known Solana network", clip(string(m.Network)))
 	}
 	if m.PathTemplate != SolanaPoolPathTemplate {
-		return fmt.Errorf("chain: manifest path_template %q, want %q", m.PathTemplate, SolanaPoolPathTemplate)
+		return fmt.Errorf("chain: manifest path_template %s, want %q", clip(m.PathTemplate), SolanaPoolPathTemplate)
 	}
 	if len(m.Entries) == 0 {
 		return errors.New("chain: manifest has no entries")
