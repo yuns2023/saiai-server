@@ -99,11 +99,15 @@ func (s *CryptoPayService) allocateEVMAddress(ctx context.Context, userID int64,
 		height, err := sc.FinalizedBlock(rpcCtx)
 		cancel()
 		if err != nil {
-			cryptoPayLogf("finalized height for new %s address unavailable (scan falls back to evm_scan_from_block): %v", network, err)
-		} else {
-			startBlock = sql.NullInt64{Int64: int64(height), Valid: true}
+			// Without a provable scan start the address could never be
+			// scanned; refuse rather than hand out an unwatched address.
+			cryptoPayLogf("finalized height for new %s address unavailable: %v", network, err)
+			return false, cryptoPayAddressUnavailable("no deposit address is available right now; retry later")
 		}
+		startBlock = sql.NullInt64{Int64: int64(height), Valid: true}
 	}
+	// No scanner wired: start_block stays NULL and the worker uses
+	// crypto_pay.evm_scan_from_block (it alerts and skips while that is 0).
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err

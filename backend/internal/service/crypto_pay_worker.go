@@ -56,11 +56,9 @@ func (w *CryptoPayWorker) Stop() {
 }
 
 func (w *CryptoPayWorker) runOnce() {
-	timeout := 4 * w.interval
-	if timeout < time.Minute {
-		timeout = time.Minute
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	// The parent context only ends on Stop; each phase has its own budget
+	// (RunWorkerPass) so a slow chain cannot block settlement.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
 		select {
@@ -69,7 +67,9 @@ func (w *CryptoPayWorker) runOnce() {
 		case <-ctx.Done():
 		}
 	}()
-	conn, err := w.db.Conn(ctx)
+	lockCtx, lockCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer lockCancel()
+	conn, err := w.db.Conn(lockCtx)
 	if err != nil {
 		cryptoPayLogf("worker: get database connection failed: %v", err)
 		return
@@ -80,7 +80,7 @@ func (w *CryptoPayWorker) runOnce() {
 		}
 	}()
 	var locked bool
-	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", cryptoPayWorkerAdvisoryLockID).Scan(&locked); err != nil {
+	if err := conn.QueryRowContext(lockCtx, "SELECT pg_try_advisory_lock($1)", cryptoPayWorkerAdvisoryLockID).Scan(&locked); err != nil {
 		cryptoPayLogf("worker: acquire advisory lock failed: %v", err)
 		return
 	}
@@ -95,24 +95,47 @@ func (w *CryptoPayWorker) runOnce() {
 			cryptoPayLogf("worker: release advisory lock failed: %v", unlockErr)
 		}
 	}()
-	w.svc.RunWorkerPass(ctx)
+	w.svc.runWorkerPass(ctx, w.phaseBudget())
+}
+
+func (w *CryptoPayWorker) phaseBudget() time.Duration {
+	if budget := 2 * w.interval; budget > time.Minute {
+		return budget
+	}
+	return time.Minute
 }
 
 // RunWorkerPass is one worker iteration (exported for tests and manual runs).
 func (s *CryptoPayService) RunWorkerPass(ctx context.Context) {
-	st, err := s.GetSettings(ctx)
+	s.runWorkerPass(ctx, 0)
+}
+
+// runWorkerPass settles the finalized backlog first, then scans; every phase
+// gets its own budget (0 = parent ctx only).
+func (s *CryptoPayService) runWorkerPass(ctx context.Context, budget time.Duration) {
+	phase := func() (context.Context, context.CancelFunc) {
+		if budget <= 0 {
+			return context.WithCancel(ctx)
+		}
+		return context.WithTimeout(ctx, budget)
+	}
+	backlogCtx, cancel := phase()
+	if credited, err := s.CreditFinalizedBacklog(backlogCtx); err != nil {
+		cryptoPayLogf("worker: credit backlog failed: %v", err)
+	} else if credited > 0 {
+		cryptoPayLogf("worker: credited %d finalized deposits from backlog", credited)
+	}
+	cancel()
+	settingsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	st, err := s.GetSettings(settingsCtx)
+	cancel()
 	if err != nil {
 		cryptoPayLogf("worker: settings unavailable: %v", err)
 		return
 	}
 	if st.ScanningEnabled && (s.evmScanner() != nil || s.solanaScanner() != nil) {
-		if err := s.ScanOnce(ctx); err != nil {
+		if err := s.scanNetworks(ctx, budget); err != nil {
 			cryptoPayLogf("worker: scan errors: %v", err)
 		}
-	}
-	if credited, err := s.CreditFinalizedBacklog(ctx); err != nil {
-		cryptoPayLogf("worker: credit backlog failed: %v", err)
-	} else if credited > 0 {
-		cryptoPayLogf("worker: credited %d finalized deposits from backlog", credited)
 	}
 }

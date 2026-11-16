@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strconv"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -59,10 +60,25 @@ func (a *cryptoPayAmount) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// createCryptoPayOrderRequest: network/asset/amount are validated by the
+// service so every bad value maps to its contract reason (a missing or
+// non-string/number amount → CRYPTO_PAY_AMOUNT_INVALID).
 type createCryptoPayOrderRequest struct {
-	Network string          `json:"network" binding:"required"`
-	Asset   string          `json:"asset" binding:"required"`
-	Amount  cryptoPayAmount `json:"amount" binding:"required"`
+	Network string          `json:"network"`
+	Asset   string          `json:"asset"`
+	Amount  json.RawMessage `json:"amount"`
+}
+
+func parseCryptoPayAmount(raw json.RawMessage) (string, bool) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || raw[0] == 'n' || raw[0] == '{' || raw[0] == '[' || raw[0] == 't' || raw[0] == 'f' {
+		return "", false
+	}
+	var a cryptoPayAmount
+	if err := a.UnmarshalJSON(raw); err != nil || string(a) == "" {
+		return "", false
+	}
+	return string(a), true
 }
 
 // CryptoPayPagination clamps page/page_size for crypto pay lists.
@@ -97,7 +113,12 @@ func (h *CryptoPayHandler) CreateOrder(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	order, err := h.svc.CreateOrder(c.Request.Context(), subject.UserID, req.Network, req.Asset, string(req.Amount))
+	amount, ok := parseCryptoPayAmount(req.Amount)
+	if !ok {
+		response.ErrorFrom(c, infraerrors.BadRequest(service.CryptoPayReasonAmountInvalid, "amount must be a decimal string"))
+		return
+	}
+	order, err := h.svc.CreateOrder(c.Request.Context(), subject.UserID, req.Network, req.Asset, amount)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

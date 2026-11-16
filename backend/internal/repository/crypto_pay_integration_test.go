@@ -128,6 +128,7 @@ type fakeEVMScanner struct {
 	onScan    func()
 	txObs     []chain.Observation
 	txErr     error
+	finErr    error
 }
 
 func (f *fakeEVMScanner) Network() chain.Network { return chain.ArbitrumOne }
@@ -135,7 +136,7 @@ func (f *fakeEVMScanner) LatestBlock(context.Context) (uint64, error) {
 	return f.latest, nil
 }
 func (f *fakeEVMScanner) FinalizedBlock(context.Context) (uint64, error) {
-	return f.finalized, nil
+	return f.finalized, f.finErr
 }
 func (f *fakeEVMScanner) ScanRange(_ context.Context, from, to uint64, addresses []string, finalized bool) ([]chain.Observation, error) {
 	f.mu.Lock()
@@ -167,6 +168,7 @@ func (f *fakeEVMScanner) ObservationsForTx(context.Context, string, []string, bo
 var errFakeNotFinalized = errors.New("fake: not finalized yet")
 
 type fakeSolanaScanner struct {
+	txObs []chain.Observation
 	mu    sync.Mutex
 	obs   map[string][]chain.Observation // token account -> inflows (newest last)
 	until []string
@@ -196,7 +198,7 @@ func (f *fakeSolanaScanner) ScanTokenAccount(_ context.Context, _, tokenAccount 
 	return out, newest, nil
 }
 func (f *fakeSolanaScanner) ObservationsForTx(context.Context, string, []string, string) ([]chain.Observation, error) {
-	return nil, nil
+	return f.txObs, nil
 }
 
 // ---- harness ----
@@ -868,4 +870,63 @@ func TestCryptoPay_MigrationConstraints(t *testing.T) {
 	require.NoError(t, err)
 	_, err = integrationDB.Exec(`INSERT INTO crypto_pay_credits (deposit_id, user_id, amount) VALUES ($1, $2, 1)`, depositID, user)
 	require.Error(t, err, "one ledger row per deposit")
+}
+
+func TestCryptoPay_SolanaManifestNetworkAndNonATARescan(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnv(t, true)
+	// A devnet manifest (valid signature) is rejected on a mainnet deployment.
+	m := chain.SolanaPoolManifest{Version: 1, Network: chain.SolanaDevnet, PathTemplate: "m/44'/501'/{i}'/0'", SignerPubkey: cryptoTestSigner, Signature: "sig",
+		Entries: []chain.SolanaPoolEntry{{Index: 0, Address: fakeBase58("devnet-0")}}}
+	raw, err := json.Marshal(m)
+	require.NoError(t, err)
+	_, err = env.svc.ImportSolanaKeyset(ctx, raw, "admin:test")
+	require.Equal(t, service.CryptoPayReasonNetworkUnsupported, infraerrors.Reason(err))
+	require.Equal(t, 0, countRows(t, `SELECT COUNT(*) FROM crypto_pay_keysets`))
+
+	_, err = env.svc.ImportSolanaKeyset(ctx, testManifest(t, "nonata", 1, cryptoTestSigner), "admin:test")
+	require.NoError(t, err)
+	user := createCryptoUser(t)
+	addr, err := env.svc.EnsureAddress(ctx, user, chain.SolanaMainnet)
+	require.NoError(t, err)
+	// Inflow to a non-ATA token account owned by the deposit address: only via rescan.
+	other := fakeBase58("non-ata-account")
+	sig := fakeSolSig("nonata-tx")
+	env.sol.txObs = []chain.Observation{{Network: chain.SolanaMainnet, Asset: chain.MainnetAssets()[2], TxHash: sig, EventKey: "acct:" + other,
+		ToAddress: addr.Address, TokenAccount: other, Units: big.NewInt(3_000_000), BlockNumber: 9, BlockTime: time.Now(), Finalized: true}}
+	res, err := env.svc.RescanTransaction(ctx, "solana-mainnet", sig, "admin:2")
+	require.NoError(t, err)
+	require.Len(t, res.Results, 1)
+	require.True(t, res.Results[0].Credited)
+	require.Equal(t, "3.00000000", userBalance(t, user))
+}
+
+func TestCryptoPay_EVMAllocationNeedsStartHeightAndLaggingCatchUp(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnv(t, true)
+	env.settings.values[service.SettingCryptoPayScanningEnabled] = "true"
+	importTestEVMKeyset(t, env, "xpubTEST10")
+	user := createCryptoUser(t)
+
+	// Scanner wired but finalized height unavailable → no unwatched address is handed out.
+	env.evm.finErr = errors.New("rpc down")
+	_, err := env.svc.EnsureAddress(ctx, user, chain.ArbitrumOne)
+	require.Equal(t, service.CryptoPayReasonAddressUnavailable, infraerrors.Reason(err))
+	require.Equal(t, 0, countRows(t, `SELECT COUNT(*) FROM crypto_pay_addresses`))
+	env.evm.finErr = nil
+
+	// An inactive address far behind the head is scanned every tick until caught up.
+	env.evm.finalized = 100
+	to := evmAddressFor(t, env, user)
+	env.evm.finalized, env.evm.latest = 500_000, 500_000
+	env.svc.RunWorkerPass(ctx)
+	env.svc.RunWorkerPass(ctx)
+	env.svc.RunWorkerPass(ctx)
+	require.Equal(t, []string{"100-200099/true/1", "200100-400099/true/1", "400100-500000/true/1"}, env.evm.calls)
+	var pos string
+	require.NoError(t, integrationDB.QueryRow(`SELECT position FROM crypto_pay_scan_cursors WHERE scope_key = $1`, "evm:arbitrum-one:fin:"+to).Scan(&pos))
+	require.Equal(t, "500000", pos)
+	env.evm.calls = nil
+	env.svc.RunWorkerPass(ctx)
+	require.Empty(t, env.evm.calls, "caught up and inactive: next sweep within 23h")
 }

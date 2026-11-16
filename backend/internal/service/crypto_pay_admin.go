@@ -194,7 +194,7 @@ func (s *CryptoPayService) Reconciliation(ctx context.Context) (*CryptoPayReconc
 	if out.CursorErrors, err = s.queryCursors(ctx, `WHERE last_error <> '' ORDER BY updated_at DESC LIMIT 50`); err != nil {
 		return nil, err
 	}
-	if out.StaleCursors, err = s.queryCursors(ctx, `WHERE last_scanned_at IS NULL OR last_scanned_at < NOW() - INTERVAL '25 hours' ORDER BY last_scanned_at NULLS FIRST LIMIT 50`); err != nil {
+	if out.StaleCursors, err = s.queryCursors(ctx, `WHERE COALESCE(last_scanned_at, updated_at) < NOW() - INTERVAL '25 hours' ORDER BY COALESCE(last_scanned_at, updated_at) LIMIT 50`); err != nil {
 		return nil, err
 	}
 	return out, nil

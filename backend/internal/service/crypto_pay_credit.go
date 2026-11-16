@@ -29,7 +29,10 @@ const (
 	cryptoCreditRelease = "release" // admin release of a held/finalized deposit; hold rules skipped
 )
 
-const cryptoPayCreditBacklogBatch = 200
+const (
+	cryptoPayCreditBacklogBatch = 200
+	cryptoPayBacklogRowTimeout  = 15 * time.Second
+)
 
 var cryptoPayEVMEventKeyRe = regexp.MustCompile(`^log:[0-9]{1,10}$`)
 
@@ -498,7 +501,9 @@ func (s *CryptoPayService) CreditFinalizedBacklog(ctx context.Context) (int, err
 	if err != nil || !st.AutoCreditEnabled {
 		return 0, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM crypto_pay_deposits WHERE status = 'finalized' ORDER BY id LIMIT $1`, cryptoPayCreditBacklogBatch)
+	// Oldest-touched first: a row that keeps failing is touched below and
+	// rotates to the back, so it cannot monopolize the batch.
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM crypto_pay_deposits WHERE status = 'finalized' ORDER BY updated_at, id LIMIT $1`, cryptoPayCreditBacklogBatch)
 	if err != nil {
 		return 0, fmt.Errorf("list finalized deposits: %w", err)
 	}
@@ -516,9 +521,21 @@ func (s *CryptoPayService) CreditFinalizedBacklog(ctx context.Context) (int, err
 	}
 	credited := 0
 	for _, id := range ids {
-		outcome, err := s.creditDeposit(ctx, id, cryptoPayOperatorSystem, cryptoCreditAuto, st)
+		if ctx.Err() != nil {
+			break
+		}
+		// Per-row budget: one row stuck on a lock cannot eat the whole pass.
+		rowCtx, cancel := context.WithTimeout(ctx, cryptoPayBacklogRowTimeout)
+		outcome, err := s.creditDeposit(rowCtx, id, cryptoPayOperatorSystem, cryptoCreditAuto, st)
+		cancel()
 		if err != nil {
 			cryptoPayLogf("backlog credit deposit %d failed: %v", id, err)
+			touchCtx, touchCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			if _, touchErr := s.db.ExecContext(touchCtx, `UPDATE crypto_pay_deposits SET updated_at = NOW()
+				WHERE id = (SELECT id FROM crypto_pay_deposits WHERE id = $1 AND status = 'finalized' FOR UPDATE SKIP LOCKED)`, id); touchErr != nil {
+				cryptoPayLogf("backlog rotate deposit %d failed: %v", id, touchErr)
+			}
+			touchCancel()
 			continue
 		}
 		if outcome.Credited {
@@ -547,7 +564,11 @@ type CryptoPayRescanResult struct {
 
 // RescanTransaction re-reads one finalized transaction from the chain and runs
 // its inflows to known addresses through the same ingestion and crediting
-// path (hold rules apply; amounts always come from the chain).
+// path (hold rules apply; amounts always come from the chain). On Solana the
+// worker only walks each user's USDC/USDT associated token accounts; inflows
+// to any other token account owned by a deposit address (positive net balance
+// change of that account in the tx) are picked up only through this path, and
+// are accepted as long as the asset (mint + token program) is whitelisted.
 func (s *CryptoPayService) RescanTransaction(ctx context.Context, networkName, txHash, operator string) (*CryptoPayRescanResult, error) {
 	n, ok := s.network(networkName)
 	if !ok {

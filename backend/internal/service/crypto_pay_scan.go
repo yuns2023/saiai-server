@@ -17,15 +17,16 @@ import (
 // activeWindow) are scanned every tick; every other address is scanned at
 // least once per fullSweepInterval.
 const (
-	cryptoPayActiveWindow       = 24 * time.Hour
-	cryptoPayFullSweepInterval  = 23 * time.Hour // < 24h so each address is covered within a day
-	cryptoPayEVMBatchAddresses  = 100
-	cryptoPayEVMGroupSpread     = 10_000  // addresses whose next block differs by less are scanned together
-	cryptoPayEVMMaxSpan         = 200_000 // blocks per ScanRange call per tick
-	cryptoPayEVMMaxBatchesTick  = 50
-	cryptoPaySolanaMaxScansTick = 300
-	cryptoPayEVMOrphanWindow    = 2 * time.Hour
-	cryptoPaySolanaOrphanWindow = 30 * time.Minute
+	cryptoPayActiveWindow         = 24 * time.Hour
+	cryptoPayFullSweepInterval    = 23 * time.Hour // < 24h so each address is covered within a day
+	cryptoPayEVMBatchAddresses    = 100
+	cryptoPayEVMGroupSpread       = 10_000  // addresses whose next block differs by less are scanned together
+	cryptoPayEVMMaxSpan           = 200_000 // blocks per ScanRange call per tick
+	cryptoPayEVMMaxBatchesTick    = 50
+	cryptoPaySolanaMaxScansTick   = 300
+	cryptoPayEVMOrphanWindow      = 2 * time.Hour
+	cryptoPaySolanaOrphanWindow   = 30 * time.Minute
+	cryptoPaySolanaAccountTimeout = 60 * time.Second
 )
 
 var errCryptoPayCursorConflict = errors.New("crypto pay scan cursor changed concurrently")
@@ -35,6 +36,7 @@ type cryptoPayCursor struct {
 	position    string
 	version     int64
 	lastScanned sql.NullTime
+	updatedAt   sql.NullTime // last success or failure; rotates failing scopes back
 	exists      bool
 }
 
@@ -59,13 +61,13 @@ func (s *CryptoPayService) loadCursors(ctx context.Context, scopes []string) (ma
 		return out, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT scope_key, position, version, last_scanned_at FROM crypto_pay_scan_cursors WHERE scope_key = ANY($1)`, pq.Array(scopes))
+		SELECT scope_key, position, version, last_scanned_at, updated_at FROM crypto_pay_scan_cursors WHERE scope_key = ANY($1)`, pq.Array(scopes))
 	if err != nil {
 		return nil, fmt.Errorf("load scan cursors: %w", err)
 	}
 	for rows.Next() {
 		c := &cryptoPayCursor{exists: true}
-		if err := rows.Scan(&c.scope, &c.position, &c.version, &c.lastScanned); err != nil {
+		if err := rows.Scan(&c.scope, &c.position, &c.version, &c.lastScanned, &c.updatedAt); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -77,17 +79,21 @@ func (s *CryptoPayService) loadCursors(ctx context.Context, scopes []string) (ma
 // advanceCursor stores a new position with compare-and-swap on version. It is
 // called only after the scanned range was fully ingested, so a lost race or a
 // crash merely repeats an idempotent scan.
-func (s *CryptoPayService) advanceCursor(ctx context.Context, network chain.Network, c *cryptoPayCursor, position string) error {
+// caughtUp=false (range capped below the finalized head) leaves
+// last_scanned_at NULL so the cursor is scanned again next tick instead of
+// waiting for the daily sweep.
+func (s *CryptoPayService) advanceCursor(ctx context.Context, network chain.Network, c *cryptoPayCursor, position string, caughtUp bool) error {
 	var res sql.Result
 	var err error
 	if !c.exists {
 		res, err = s.db.ExecContext(ctx, `
 			INSERT INTO crypto_pay_scan_cursors (scope_key, network, position, version, last_scanned_at)
-			VALUES ($1, $2, $3, 1, NOW()) ON CONFLICT (scope_key) DO NOTHING`, c.scope, string(network), position)
+			VALUES ($1, $2, $3, 1, CASE WHEN $4 THEN NOW() END) ON CONFLICT (scope_key) DO NOTHING`, c.scope, string(network), position, caughtUp)
 	} else {
 		res, err = s.db.ExecContext(ctx, `
-			UPDATE crypto_pay_scan_cursors SET position = $2, version = version + 1, last_scanned_at = NOW(), last_error = '', updated_at = NOW()
-			WHERE scope_key = $1 AND version = $3`, c.scope, position, c.version)
+			UPDATE crypto_pay_scan_cursors SET position = $2, version = version + 1,
+				last_scanned_at = CASE WHEN $4 THEN NOW() END, last_error = '', updated_at = NOW()
+			WHERE scope_key = $1 AND version = $3`, c.scope, position, c.version, caughtUp)
 	}
 	if err != nil {
 		return fmt.Errorf("advance scan cursor: %w", err)
@@ -109,6 +115,10 @@ func (s *CryptoPayService) recordCursorError(ctx context.Context, network chain.
 	if len(msg) > 500 {
 		msg = msg[:500]
 	}
+	// Own budget: the error must be recorded (and the scope rotated) even
+	// when the scan itself used up the caller's deadline.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO crypto_pay_scan_cursors (scope_key, network, last_error) VALUES ($1, $2, $3)
 		ON CONFLICT (scope_key) DO UPDATE SET last_error = EXCLUDED.last_error, updated_at = NOW()`, scope, string(network), msg); err != nil {
@@ -149,8 +159,22 @@ func (s *CryptoPayService) scanAddresses(ctx context.Context, network chain.Netw
 
 // ScanOnce runs one pass over every configured network that has a scanner.
 func (s *CryptoPayService) ScanOnce(ctx context.Context) error {
+	return s.scanNetworks(ctx, 0)
+}
+
+// scanNetworks scans each network with its own time budget (0 = parent ctx
+// only) so a slow chain cannot starve the other one.
+func (s *CryptoPayService) scanNetworks(parent context.Context, budget time.Duration) error {
+	phase := func() (context.Context, context.CancelFunc) {
+		if budget <= 0 {
+			return context.WithCancel(parent)
+		}
+		return context.WithTimeout(parent, budget)
+	}
 	var errs []error
 	if sc := s.evmScanner(); sc != nil {
+		ctx, cancel := phase()
+		defer cancel()
 		if err := s.scanEVM(ctx, sc); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", sc.Network(), err))
 		}
@@ -159,6 +183,8 @@ func (s *CryptoPayService) ScanOnce(ctx context.Context) error {
 		}
 	}
 	if sc := s.solanaScanner(); sc != nil {
+		ctx, cancel := phase()
+		defer cancel()
 		if err := s.scanSolana(ctx, sc); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", sc.Network(), err))
 		}
@@ -207,6 +233,8 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 		if a.active {
 			active = append(active, a.address)
 		}
+		// A cursor that has not reached the finalized head yet has a NULL
+		// last_scanned_at (see advanceCursor), so it stays due every tick.
 		if !c.due(now, a.active) {
 			continue
 		}
@@ -271,7 +299,7 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 			if it.from > to+1 {
 				continue // this address was already past the range
 			}
-			if err := s.advanceCursor(ctx, network, it.cursor, position); err != nil {
+			if err := s.advanceCursor(ctx, network, it.cursor, position, to == finalized); err != nil {
 				return err
 			}
 		}
@@ -336,27 +364,42 @@ func (s *CryptoPayService) scanSolana(ctx context.Context, sc chain.SolanaScanne
 	now := s.now()
 	// Never-scanned and oldest first, so the per-tick budget rotates fairly.
 	sort.SliceStable(items, func(i, j int) bool {
+		// Least recently attempted first (success or failure both touch
+		// updated_at), so failing accounts rotate behind healthy ones.
 		ci, cj := cursors[items[i].scope], cursors[items[j].scope]
-		if items[i].active != items[j].active {
-			return items[i].active
+		if ci.updatedAt.Valid != cj.updatedAt.Valid {
+			return !ci.updatedAt.Valid
 		}
-		if ci.lastScanned.Valid != cj.lastScanned.Valid {
-			return !ci.lastScanned.Valid
-		}
-		return ci.lastScanned.Time.Before(cj.lastScanned.Time)
+		return ci.updatedAt.Time.Before(cj.updatedAt.Time)
 	})
-	var errs []error
-	scans := 0
+	// Overdue inactive accounts get a reserved half of the budget so a large
+	// active set can never starve them; active accounts fill the rest.
+	var overdue, active []item
 	for _, it := range items {
-		c := cursors[it.scope]
-		if !c.due(now, it.active) {
+		if !cursors[it.scope].due(now, it.active) {
 			continue
 		}
-		if scans >= cryptoPaySolanaMaxScansTick {
+		if it.active {
+			active = append(active, it)
+		} else {
+			overdue = append(overdue, it)
+		}
+	}
+	reserved := min(len(overdue), cryptoPaySolanaMaxScansTick/2)
+	selected := append([]item{}, overdue[:reserved]...)
+	selected = append(selected, active[:min(len(active), cryptoPaySolanaMaxScansTick-reserved)]...)
+	if room := cryptoPaySolanaMaxScansTick - len(selected); room > 0 {
+		selected = append(selected, overdue[reserved:reserved+min(room, len(overdue)-reserved)]...)
+	}
+	var errs []error
+	for _, it := range selected {
+		c := cursors[it.scope]
+		if ctx.Err() != nil {
 			break
 		}
-		scans++
-		obs, newest, scanErr := sc.ScanTokenAccount(ctx, it.owner, it.account, it.asset, c.position, "finalized")
+		accountCtx, cancel := context.WithTimeout(ctx, cryptoPaySolanaAccountTimeout)
+		obs, newest, scanErr := sc.ScanTokenAccount(accountCtx, it.owner, it.account, it.asset, c.position, "finalized")
+		cancel()
 		if scanErr != nil {
 			s.recordCursorError(ctx, network, it.scope, scanErr)
 			errs = append(errs, fmt.Errorf("scan %s: %w", it.account, scanErr))
@@ -374,13 +417,15 @@ func (s *CryptoPayService) scanSolana(ctx context.Context, sc chain.SolanaScanne
 		if newest != "" {
 			position = newest
 		}
-		if err := s.advanceCursor(ctx, network, c, position); err != nil {
+		if err := s.advanceCursor(ctx, network, c, position, true); err != nil {
 			return err
 		}
 		if !it.active {
 			continue
 		}
-		pending, _, pendErr := sc.ScanTokenAccount(ctx, it.owner, it.account, it.asset, position, "confirmed")
+		pendingCtx, pendingCancel := context.WithTimeout(ctx, cryptoPaySolanaAccountTimeout)
+		pending, _, pendErr := sc.ScanTokenAccount(pendingCtx, it.owner, it.account, it.asset, position, "confirmed")
+		pendingCancel()
 		if pendErr != nil {
 			errs = append(errs, fmt.Errorf("scan confirmed %s: %w", it.account, pendErr))
 			continue

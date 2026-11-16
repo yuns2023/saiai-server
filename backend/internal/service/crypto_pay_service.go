@@ -36,7 +36,7 @@ const (
 	cryptoPayMaxPendingOrders = 10
 	// Orders are suggestions in dollars: at most 2 decimals, rendered "25.50".
 	cryptoPayOrderAmountDecimals = 2
-	cryptoPayOrderDepositCap     = 200
+	cryptoPayOrderDepositCap     = 1000 // safety bound on Order.deposits; far above one order window
 	cryptoPayOperatorSystem      = "system"
 )
 

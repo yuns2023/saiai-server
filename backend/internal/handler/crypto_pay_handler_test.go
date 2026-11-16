@@ -260,6 +260,16 @@ func TestCryptoPayHandlerErrorReasons(t *testing.T) {
 	code, reason = cryptoPayErrorReason(t, r, `{"network":"arbitrum-one","asset":"USDC","amount":"abc"}`)
 	require.Equal(t, http.StatusBadRequest, code)
 	require.Equal(t, "CRYPTO_PAY_AMOUNT_INVALID", reason)
+	for _, body := range []string{`{"network":"arbitrum-one","asset":"USDC"}`, `{"network":"arbitrum-one","asset":"USDC","amount":""}`,
+		`{"network":"arbitrum-one","asset":"USDC","amount":true}`, `{"network":"arbitrum-one","asset":"USDC","amount":{"v":1}}`,
+		`{"network":"arbitrum-one","asset":"USDC","amount":null}`} {
+		code, reason = cryptoPayErrorReason(t, r, body)
+		require.Equal(t, http.StatusBadRequest, code, body)
+		require.Equal(t, "CRYPTO_PAY_AMOUNT_INVALID", reason, body)
+	}
+	code, reason = cryptoPayErrorReason(t, r, `{"asset":"USDC","amount":"10"}`)
+	require.Equal(t, http.StatusBadRequest, code)
+	require.Equal(t, "CRYPTO_PAY_NETWORK_UNSUPPORTED", reason, "missing network")
 	code, reason = cryptoPayErrorReason(t, r, `{"network":"ethereum","asset":"USDC","amount":"10"}`)
 	require.Equal(t, http.StatusBadRequest, code)
 	require.Equal(t, "CRYPTO_PAY_NETWORK_UNSUPPORTED", reason)
