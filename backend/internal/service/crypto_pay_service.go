@@ -34,8 +34,10 @@ const (
 
 const (
 	cryptoPayMaxPendingOrders = 10
-	cryptoPayOrderDepositCap  = 200
-	cryptoPayOperatorSystem   = "system"
+	// Orders are suggestions in dollars: at most 2 decimals, rendered "25.50".
+	cryptoPayOrderAmountDecimals = 2
+	cryptoPayOrderDepositCap     = 200
+	cryptoPayOperatorSystem      = "system"
 )
 
 type cryptoPayBalanceCache interface {
@@ -238,17 +240,17 @@ func (s *CryptoPayService) CreateOrder(ctx context.Context, userID int64, networ
 	}
 	n, ok := s.network(networkName)
 	if !ok {
-		return nil, infraerrors.BadRequest("CRYPTO_PAY_NETWORK_INVALID", "unsupported network")
+		return nil, infraerrors.BadRequest(CryptoPayReasonNetworkUnsupported, "unsupported network")
 	}
 	asset, ok := n.asset(strings.TrimSpace(assetSymbol))
 	if !ok {
-		return nil, infraerrors.BadRequest("CRYPTO_PAY_ASSET_INVALID", "unsupported asset")
+		return nil, infraerrors.BadRequest("CRYPTO_PAY_ASSET_UNSUPPORTED", "unsupported asset")
 	}
 	amount, err := decimal.NewFromString(strings.TrimSpace(amountRaw))
-	if err != nil || !amount.IsPositive() || !amount.Equal(amount.Truncate(asset.Decimals)) ||
+	if err != nil || !amount.IsPositive() || !amount.Equal(amount.Truncate(cryptoPayOrderAmountDecimals)) ||
 		amount.LessThan(st.MinAmount) || amount.GreaterThan(st.MaxAmount) {
-		return nil, infraerrors.BadRequest("CRYPTO_PAY_AMOUNT_INVALID",
-			fmt.Sprintf("amount must be between %s and %s with at most %d decimals", st.MinAmount, st.MaxAmount, asset.Decimals))
+		return nil, infraerrors.BadRequest(CryptoPayReasonAmountInvalid,
+			fmt.Sprintf("amount must be between %s and %s with at most %d decimals", st.MinAmount, st.MaxAmount, cryptoPayOrderAmountDecimals))
 	}
 	if err := s.requireActiveUser(ctx, userID); err != nil {
 		return nil, err
@@ -367,9 +369,11 @@ func (s *CryptoPayService) ListUserOrders(ctx context.Context, userID int64, pag
 // buildOrder computes amounts and status from inflows to the order's address
 // with block_time >= created_at (all assets on that network).
 func (s *CryptoPayService) buildOrder(ctx context.Context, r *cryptoPayOrderRow) (*CryptoPayOrder, error) {
+	// received = finalized inflows only (finalized/credited/held); confirming =
+	// observed, not yet finalized. They never overlap.
 	var received, confirming, credited decimal.Decimal
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(amount) FILTER (WHERE status IN ('observed','finalized','credited','held')), 0),
+		SELECT COALESCE(SUM(amount) FILTER (WHERE status IN ('finalized','credited','held')), 0),
 		       COALESCE(SUM(amount) FILTER (WHERE status = 'observed'), 0),
 		       COALESCE(SUM(amount) FILTER (WHERE status = 'credited'), 0)
 		FROM crypto_pay_deposits WHERE address_id = $1 AND block_time >= $2`,
@@ -382,8 +386,8 @@ func (s *CryptoPayService) buildOrder(ctx context.Context, r *cryptoPayOrderRow)
 		return nil, err
 	}
 	return &CryptoPayOrder{
-		ID: r.id, Network: r.network, Asset: r.asset, Amount: formatCryptoAmount(r.amount), Address: r.address,
-		Status:    computeCryptoPayOrderStatus(r.amount, received.Sub(confirming), r.expiresAt, s.now()),
+		ID: r.id, Network: r.network, Asset: r.asset, Amount: r.amount.StringFixed(cryptoPayOrderAmountDecimals), Address: r.address,
+		Status:    computeCryptoPayOrderStatus(r.amount, received, r.expiresAt, s.now()),
 		CreatedAt: r.createdAt, ExpiresAt: r.expiresAt,
 		ReceivedAmount: formatCryptoAmount(received), ConfirmingAmount: formatCryptoAmount(confirming),
 		CreditedAmount: formatCryptoAmount(credited), Deposits: deposits,
@@ -485,5 +489,3 @@ func writeCryptoPayAudit(ctx context.Context, q cryptoPayExecer, action string, 
 func (s *CryptoPayService) writeAuditDirect(ctx context.Context, action string, depositID, userID, keysetID *int64, operator string, detail any) error {
 	return writeCryptoPayAudit(ctx, s.db, action, depositID, userID, keysetID, operator, detail)
 }
-
-func cryptoPayInt64Ptr(v int64) *int64 { return &v }

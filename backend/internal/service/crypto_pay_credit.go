@@ -347,8 +347,8 @@ func (s *CryptoPayService) creditDeposit(ctx context.Context, depositID int64, o
 	defer func() { _ = tx.Rollback() }()
 	var d struct {
 		status, network, contract, holdReason string
-		userID                                         int64
-		amount                                         decimal.Decimal
+		userID                                int64
+		amount                                decimal.Decimal
 	}
 	err = tx.QueryRowContext(ctx, `
 		SELECT d.status, d.network, d.asset_contract, d.hold_reason, d.user_id, d.amount
@@ -551,7 +551,7 @@ type CryptoPayRescanResult struct {
 func (s *CryptoPayService) RescanTransaction(ctx context.Context, networkName, txHash, operator string) (*CryptoPayRescanResult, error) {
 	n, ok := s.network(networkName)
 	if !ok {
-		return nil, infraerrors.BadRequest("CRYPTO_PAY_NETWORK_INVALID", "unsupported network")
+		return nil, infraerrors.BadRequest(CryptoPayReasonNetworkUnsupported, "unsupported network")
 	}
 	txHash = strings.TrimSpace(txHash)
 	if n.Family == chain.FamilyEVM {
@@ -585,6 +585,9 @@ func (s *CryptoPayService) RescanTransaction(ctx context.Context, networkName, t
 		obs, err = sc.ObservationsForTx(ctx, txHash, addresses, "finalized")
 	}
 	if err != nil {
+		if s.deps.IsRetryLater != nil && s.deps.IsRetryLater(err) {
+			return nil, infraerrors.Conflict(CryptoPayReasonTxNotReady, "transaction is not finalized or not found yet; retry later").WithCause(err)
+		}
 		return nil, infraerrors.ServiceUnavailable("CRYPTO_PAY_CHAIN_ERROR", "chain lookup failed").WithCause(err)
 	}
 	// Only finalized inflows of exactly this transaction are accepted.

@@ -50,6 +50,9 @@ const (
 const (
 	CryptoPayReasonDisabled           = "CRYPTO_PAY_DISABLED"
 	CryptoPayReasonAddressUnavailable = "CRYPTO_PAY_ADDRESS_UNAVAILABLE"
+	CryptoPayReasonAmountInvalid      = "CRYPTO_PAY_AMOUNT_INVALID"
+	CryptoPayReasonNetworkUnsupported = "CRYPTO_PAY_NETWORK_UNSUPPORTED"
+	CryptoPayReasonTxNotReady         = "CRYPTO_PAY_TX_NOT_READY"
 )
 
 // CryptoPayEVMDeriver derives the lowercase 0x address at m/44'/60'/0'/0/index
@@ -71,6 +74,10 @@ type CryptoPayChainDeps struct {
 	DeriveEVMAddress     CryptoPayEVMDeriver
 	VerifySolanaManifest CryptoPaySolanaManifestVerifier
 	SolanaATA            CryptoPaySolanaATAFunc
+	// IsRetryLater reports scanner errors that mean "not finalized yet / tx
+	// unknown, retry later" (chain.ErrNotFinalized, chain.ErrTxNotFound).
+	// Such errors are never treated as "no deposit". nil = none recognized.
+	IsRetryLater func(error) bool
 }
 
 // cryptoPayNetwork is one configured, validated network.
@@ -281,10 +288,10 @@ type CryptoPayAdminSettings struct {
 	OrderTTLMinutes     int    `json:"order_ttl_minutes"`
 	HoldThresholdAmount string `json:"hold_threshold_amount"`
 	// Read-only deployment status.
-	FeatureConfigured bool     `json:"feature_configured"`
-	Networks          []string `json:"networks"`
-	EVMScannerReady   bool     `json:"evm_scanner_ready"`
-	SolanaScannerReady bool    `json:"solana_scanner_ready"`
+	FeatureConfigured  bool     `json:"feature_configured"`
+	Networks           []string `json:"networks"`
+	EVMScannerReady    bool     `json:"evm_scanner_ready"`
+	SolanaScannerReady bool     `json:"solana_scanner_ready"`
 }
 
 // UpdateCryptoPaySettingsRequest is a partial update; nil fields are kept.

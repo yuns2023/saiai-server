@@ -25,8 +25,8 @@ func (CryptoPayCredit) Fields() []ent.Field {
 	return []ent.Field{
 		field.Int64("deposit_id").Unique(),
 		field.Int64("user_id"),
-		field.Other("amount", decimal.Decimal{}).SchemaType(map[string]string{dialect.Postgres: "numeric(20,8)"}),
-		field.Other("balance_after", decimal.NullDecimal{}).Optional().SchemaType(map[string]string{dialect.Postgres: "numeric(20,8)"}),
+		field.Other("amount", decimal.Decimal{}).SchemaType(map[string]string{dialect.Postgres: "numeric(20,8)", dialect.SQLite: "numeric"}),
+		field.Other("balance_after", decimal.NullDecimal{}).Optional().SchemaType(map[string]string{dialect.Postgres: "numeric(20,8)", dialect.SQLite: "numeric"}),
 		field.String("operator").MaxLen(100).Default("system"),
 		field.Time("created_at").Immutable().Default(time.Now).SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
 	}

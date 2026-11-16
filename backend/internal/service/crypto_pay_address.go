@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	cryptoPayEVMPathTemplate    = "m/44'/60'/0'/0/{i}"
-	cryptoPayMaxEVMIndex        = 1<<31 - 1 // non-hardened child indexes only
-	cryptoPayMaxPoolEntries     = 100000
-	cryptoPayPoolInsertChunk    = 1000
+	cryptoPayEVMPathTemplate     = "m/44'/60'/0'/0/{i}"
+	cryptoPayMaxEVMIndex         = 1<<31 - 1 // non-hardened child indexes only
+	cryptoPayMaxPoolEntries      = 100000
+	cryptoPayPoolInsertChunk     = 1000
 	cryptoPayFinalizedRPCTimeout = 10 * time.Second
 )
 
@@ -56,7 +56,7 @@ func (s *CryptoPayService) findAddress(ctx context.Context, q interface {
 func (s *CryptoPayService) EnsureAddress(ctx context.Context, userID int64, network chain.Network) (*cryptoPayAddressRow, error) {
 	n, ok := s.byNetwork[network]
 	if !ok {
-		return nil, infraerrors.BadRequest("CRYPTO_PAY_NETWORK_INVALID", "unsupported network")
+		return nil, infraerrors.BadRequest(CryptoPayReasonNetworkUnsupported, "unsupported network")
 	}
 	existing, err := s.findAddress(ctx, s.db, userID, network)
 	if err == nil {
@@ -230,7 +230,7 @@ func cryptoPayFingerprint(raw []byte) string {
 func (s *CryptoPayService) ImportEVMKeyset(ctx context.Context, networkName, xpub, operator string) (*CryptoPayKeysetInfo, error) {
 	n, ok := s.network(networkName)
 	if !ok || n.Family != chain.FamilyEVM {
-		return nil, infraerrors.BadRequest("CRYPTO_PAY_NETWORK_INVALID", "network is not a configured EVM network")
+		return nil, infraerrors.BadRequest(CryptoPayReasonNetworkUnsupported, "network is not a configured EVM network")
 	}
 	if s.deps.DeriveEVMAddress == nil {
 		return nil, infraerrors.ServiceUnavailable("CRYPTO_PAY_DERIVATION_UNAVAILABLE", "address derivation is not available")
@@ -295,7 +295,7 @@ func (s *CryptoPayService) ImportSolanaKeyset(ctx context.Context, raw []byte, o
 	}
 	n, ok := s.byNetwork[manifest.Network]
 	if !ok || n.Family != chain.FamilySolana {
-		return nil, infraerrors.BadRequest("CRYPTO_PAY_NETWORK_INVALID", "manifest network is not a configured Solana network")
+		return nil, infraerrors.BadRequest(CryptoPayReasonNetworkUnsupported, "manifest network is not a configured Solana network")
 	}
 	if len(manifest.Entries) == 0 || len(manifest.Entries) > cryptoPayMaxPoolEntries {
 		return nil, infraerrors.BadRequest("CRYPTO_PAY_MANIFEST_INVALID", "manifest has no entries or too many entries")
@@ -333,12 +333,12 @@ func (s *CryptoPayService) ImportSolanaKeyset(ctx context.Context, raw []byte, o
 	for start := 0; start < len(manifest.Entries); start += cryptoPayPoolInsertChunk {
 		end := min(start+cryptoPayPoolInsertChunk, len(manifest.Entries))
 		var sb strings.Builder
-		sb.WriteString(`INSERT INTO crypto_pay_solana_pool_entries (keyset_id, network, derivation_index, address) VALUES `)
+		_, _ = sb.WriteString(`INSERT INTO crypto_pay_solana_pool_entries (keyset_id, network, derivation_index, address) VALUES `)
 		args := make([]any, 0, (end-start)*2+2)
 		args = append(args, id, string(n.Network))
 		for i, e := range manifest.Entries[start:end] {
 			if i > 0 {
-				sb.WriteString(",")
+				_, _ = sb.WriteString(",")
 			}
 			fmt.Fprintf(&sb, "($1, $2, $%d, $%d)", len(args)+1, len(args)+2)
 			args = append(args, int64(e.Index), e.Address)

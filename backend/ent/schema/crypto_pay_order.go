@@ -28,7 +28,7 @@ func (CryptoPayOrder) Fields() []ent.Field {
 		field.Int64("address_id"),
 		field.String("network").MaxLen(32),
 		field.String("asset").MaxLen(16),
-		field.Other("amount", decimal.Decimal{}).SchemaType(map[string]string{dialect.Postgres: "numeric(20,8)"}),
+		field.Other("amount", decimal.Decimal{}).SchemaType(map[string]string{dialect.Postgres: "numeric(20,8)", dialect.SQLite: "numeric"}),
 		field.Time("created_at").Immutable().Default(time.Now).SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
 		field.Time("expires_at").SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
 	}
