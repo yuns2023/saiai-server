@@ -83,6 +83,7 @@ type Config struct {
 	Gemini                  GeminiConfig                  `mapstructure:"gemini"`
 	Update                  UpdateConfig                  `mapstructure:"update"`
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
+	CryptoPay               CryptoPayConfig               `mapstructure:"crypto_pay"`
 }
 
 type LogConfig struct {
@@ -144,6 +145,35 @@ type UpdateConfig struct {
 	// 支持 http/https/socks5/socks5h 协议
 	// 例如: "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"
 	ProxyURL string `mapstructure:"proxy_url"`
+}
+
+// CryptoPayConfig configures the self-hosted stablecoin top-up. Everything
+// defaults to off; a missing or invalid value disables the affected network
+// (or the whole feature) instead of failing startup. Runtime switches
+// (new addresses / scanning / auto credit) live in the settings table.
+type CryptoPayConfig struct {
+	// Enabled is the deployment-level master switch (only ccyou.dev sets it).
+	Enabled bool `mapstructure:"enabled"`
+	// EVMNetwork is "arbitrum-one" or "arbitrum-sepolia"; empty disables EVM.
+	EVMNetwork string `mapstructure:"evm_network"`
+	EVMRPCURL  string `mapstructure:"evm_rpc_url"`
+	// EVMAssets overrides the asset list: "SYMBOL:0xcontract:decimals,...".
+	// Required for testnets; mainnet defaults to the verified constants.
+	EVMAssets string `mapstructure:"evm_assets"`
+	// EVMScanFromBlock is used for addresses allocated while no scanner was
+	// available (their own start height is unknown). 0 = such addresses are
+	// skipped and logged until an operator sets it.
+	EVMScanFromBlock uint64 `mapstructure:"evm_scan_from_block"`
+	// SolanaNetwork is "solana-mainnet" or "solana-devnet"; empty disables Solana.
+	SolanaNetwork string `mapstructure:"solana_network"`
+	SolanaRPCURL  string `mapstructure:"solana_rpc_url"`
+	// SolanaAssets overrides the asset list: "SYMBOL:mint:tokenProgram:decimals,...".
+	SolanaAssets string `mapstructure:"solana_assets"`
+	// SolanaPoolSignerPubkey is the trusted base58 ed25519 key that signs
+	// offline pool manifests. Empty = pool import refused.
+	SolanaPoolSignerPubkey string `mapstructure:"solana_pool_signer_pubkey"`
+	// ScanIntervalSeconds is the worker tick (active addresses every tick).
+	ScanIntervalSeconds int `mapstructure:"scan_interval_seconds"`
 }
 
 type IdempotencyConfig struct {
@@ -1418,6 +1448,18 @@ func setDefaults() {
 	viper.SetDefault("usage_cleanup.batch_size", 5000)
 	viper.SetDefault("usage_cleanup.worker_interval_seconds", 10)
 	viper.SetDefault("usage_cleanup.task_timeout_seconds", 1800)
+
+	// Crypto pay (stablecoin top-up): off by default everywhere.
+	viper.SetDefault("crypto_pay.enabled", false)
+	viper.SetDefault("crypto_pay.evm_network", "arbitrum-one")
+	viper.SetDefault("crypto_pay.evm_rpc_url", "")
+	viper.SetDefault("crypto_pay.evm_assets", "")
+	viper.SetDefault("crypto_pay.evm_scan_from_block", 0)
+	viper.SetDefault("crypto_pay.solana_network", "solana-mainnet")
+	viper.SetDefault("crypto_pay.solana_rpc_url", "")
+	viper.SetDefault("crypto_pay.solana_assets", "")
+	viper.SetDefault("crypto_pay.solana_pool_signer_pubkey", "")
+	viper.SetDefault("crypto_pay.scan_interval_seconds", 30)
 
 	// Idempotency
 	viper.SetDefault("idempotency.observe_only", true)

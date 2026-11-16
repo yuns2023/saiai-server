@@ -178,6 +178,34 @@ func ProvidePaymentExpiryService(db *sql.DB, paymentService *PaymentService) *Pa
 	return svc
 }
 
+// ProvideCryptoPayChainDeps returns the chain implementations for crypto pay.
+// TODO(cryptopay): wire the chain package (EVM/Solana scanners built from
+// cfg.CryptoPay RPC URLs, chain.EVMAddressFromXpub, chain.VerifySolanaPoolManifest,
+// chain.SolanaATA) once it is merged. Until then everything is nil: the worker
+// idles, address allocation and keyset import report "unavailable".
+func ProvideCryptoPayChainDeps(cfg *config.Config) CryptoPayChainDeps {
+	_ = cfg
+	return CryptoPayChainDeps{}
+}
+
+// ProvideCryptoPayService creates the stablecoin top-up service.
+func ProvideCryptoPayService(db *sql.DB, settingRepo SettingRepository, cfg *config.Config, deps CryptoPayChainDeps,
+	billingCache *BillingCacheService, authCache APIKeyAuthCacheInvalidator) *CryptoPayService {
+	var balanceCache cryptoPayBalanceCache
+	if billingCache != nil {
+		balanceCache = billingCache
+	}
+	return NewCryptoPayService(db, settingRepo, cfg.CryptoPay, deps, balanceCache, authCache)
+}
+
+// ProvideCryptoPayWorker creates and starts the crypto pay worker. It does not
+// start at all unless crypto_pay.enabled and a network are configured.
+func ProvideCryptoPayWorker(db *sql.DB, svc *CryptoPayService) *CryptoPayWorker {
+	w := NewCryptoPayWorker(db, svc, svc.scanInterval)
+	w.Start()
+	return w
+}
+
 // ProvideModerationEvidenceCleanupService creates and starts the hourly
 // evidence retention worker. It does not depend on ops feature flags.
 func ProvideModerationEvidenceCleanupService(db *sql.DB, repo InputModerationEvidenceRepository) *ModerationEvidenceCleanupService {
@@ -646,6 +674,9 @@ var ProviderSet = wire.NewSet(
 	NewPaymentConfigService,
 	NewPaymentService,
 	ProvidePaymentExpiryService,
+	ProvideCryptoPayChainDeps,
+	ProvideCryptoPayService,
+	ProvideCryptoPayWorker,
 	ProvideModerationEvidenceCleanupService,
 	NewInputModerationEvidenceService,
 )

@@ -32,6 +32,7 @@ func ProvideAdminHandlers(
 	errorPassthroughHandler *admin.ErrorPassthroughHandler,
 	apiKeyHandler *admin.AdminAPIKeyHandler,
 	paymentHandler *admin.PaymentHandler,
+	cryptoPayHandler *admin.CryptoPayHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:        dashboardHandler,
@@ -57,6 +58,7 @@ func ProvideAdminHandlers(
 		ErrorPassthrough: errorPassthroughHandler,
 		APIKey:           apiKeyHandler,
 		Payment:          paymentHandler,
+		CryptoPay:        cryptoPayHandler,
 	}
 }
 
@@ -108,6 +110,7 @@ func ProvideHandlers(
 	totpHandler *TotpHandler,
 	paymentHandler *PaymentHandler,
 	paymentWebhookHandler *PaymentWebhookHandler,
+	cryptoPayHandler *CryptoPayHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
@@ -129,6 +132,7 @@ func ProvideHandlers(
 		Totp:           totpHandler,
 		Payment:        paymentHandler,
 		PaymentWebhook: paymentWebhookHandler,
+		CryptoPay:      cryptoPayHandler,
 	}
 }
 
@@ -150,6 +154,7 @@ var ProviderSet = wire.NewSet(
 	NewTotpHandler,
 	NewPaymentHandler,
 	NewPaymentWebhookHandler,
+	NewCryptoPayHandler,
 	ProvideSettingHandler,
 
 	// Admin handlers
@@ -176,6 +181,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewErrorPassthroughHandler,
 	admin.NewAdminAPIKeyHandler,
 	admin.NewPaymentHandler,
+	admin.NewCryptoPayHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

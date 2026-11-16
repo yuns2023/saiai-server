@@ -220,7 +220,10 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	paymentConfigService := service.NewPaymentConfigService(client, settingRepository, secretEncryptor)
 	paymentService := service.NewPaymentService(client, userRepository, redeemService, paymentConfigService)
 	paymentHandler := admin.NewPaymentHandler(paymentService, paymentConfigService)
-	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accessLevelHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, adminSubscriptionHandler, adminUsageHandler, moderationEvidenceHandler, userAttributeHandler, errorPassthroughHandler, adminAPIKeyHandler, paymentHandler)
+	cryptoPayChainDeps := service.ProvideCryptoPayChainDeps(configConfig)
+	cryptoPayService := service.ProvideCryptoPayService(db, settingRepository, configConfig, cryptoPayChainDeps, billingCacheService, apiKeyAuthCacheInvalidator)
+	cryptoPayHandler := admin.NewCryptoPayHandler(cryptoPayService)
+	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accessLevelHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, adminSubscriptionHandler, adminUsageHandler, moderationEvidenceHandler, userAttributeHandler, errorPassthroughHandler, adminAPIKeyHandler, paymentHandler, cryptoPayHandler)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	inputModerationClient := repository.NewConfiguredInputModerationClient(jevSettingsService)
 	inputModerationTaskQueue := repository.NewInputModerationTaskQueue(redisClient)
@@ -233,10 +236,11 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	totpHandler := handler.NewTotpHandler(totpService)
 	handlerPaymentHandler := handler.NewPaymentHandler(paymentService, paymentConfigService)
 	paymentWebhookHandler := handler.NewPaymentWebhookHandler(paymentService)
+	handlerCryptoPayHandler := handler.NewCryptoPayHandler(cryptoPayService)
 	idempotencyRepository := repository.NewIdempotencyRepository(client, db)
 	idempotencyCoordinator := service.ProvideIdempotencyCoordinator(idempotencyRepository, configConfig)
 	idempotencyCleanupService := service.ProvideIdempotencyCleanupService(idempotencyRepository, configConfig)
-	handlers := handler.ProvideHandlers(authHandler, clientHandler, userHandler, apiKeyHandler, hostedAccountHandler, usageHandler, redeemHandler, userInviteHandler, subscriptionHandler, announcementHandler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, handlerPaymentHandler, paymentWebhookHandler, idempotencyCoordinator, idempotencyCleanupService)
+	handlers := handler.ProvideHandlers(authHandler, clientHandler, userHandler, apiKeyHandler, hostedAccountHandler, usageHandler, redeemHandler, userInviteHandler, subscriptionHandler, announcementHandler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, handlerPaymentHandler, paymentWebhookHandler, handlerCryptoPayHandler, idempotencyCoordinator, idempotencyCleanupService)
 	jwtAuthMiddleware := middleware.NewJWTAuthMiddleware(authService, userService)
 	adminAuthMiddleware := middleware.NewAdminAuthMiddleware(authService, userService, settingService)
 	apiKeyAuthMiddleware := middleware.NewAPIKeyAuthMiddleware(apiKeyService, subscriptionService, inputModerationService, configConfig)
@@ -252,8 +256,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	accountExpiryService := service.ProvideAccountExpiryService(accountRepository)
 	subscriptionExpiryService := service.ProvideSubscriptionExpiryService(userSubscriptionRepository)
 	paymentExpiryService := service.ProvidePaymentExpiryService(db, paymentService)
+	cryptoPayWorker := service.ProvideCryptoPayWorker(db, cryptoPayService)
 	moderationEvidenceCleanupService := service.ProvideModerationEvidenceCleanupService(db, inputModerationEvidenceRepository)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, carpoolMaintenanceService, accountExpiryService, subscriptionExpiryService, paymentExpiryService, moderationEvidenceCleanupService, usageCleanupService, idempotencyCleanupService, claudeEntrypointObservationService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, inputModerationService, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, openAIGatewayService, backupService)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, carpoolMaintenanceService, accountExpiryService, subscriptionExpiryService, paymentExpiryService, cryptoPayWorker, moderationEvidenceCleanupService, usageCleanupService, idempotencyCleanupService, claudeEntrypointObservationService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, inputModerationService, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, openAIGatewayService, backupService)
 	application := &Application{
 		Server:  httpServer,
 		Cleanup: v,
@@ -287,6 +292,7 @@ func provideCleanup(
 	accountExpiry *service.AccountExpiryService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	paymentExpiry *service.PaymentExpiryService,
+	cryptoPayWorker *service.CryptoPayWorker,
 	moderationEvidenceCleanup *service.ModerationEvidenceCleanupService,
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
@@ -391,6 +397,10 @@ func provideCleanup(
 			}},
 			{"PaymentExpiryService", func() error {
 				paymentExpiry.Stop()
+				return nil
+			}},
+			{"CryptoPayWorker", func() error {
+				cryptoPayWorker.Stop()
 				return nil
 			}},
 			{"ModerationEvidenceCleanupService", func() error {
