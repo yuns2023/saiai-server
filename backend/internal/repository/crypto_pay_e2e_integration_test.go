@@ -72,7 +72,7 @@ func newRealChainService(t *testing.T, cfg config.CryptoPayConfig) (*service.Cry
 		service.SettingCryptoPayScanningEnabled: "true", service.SettingCryptoPayAutoCreditEnabled: "true"} {
 		require.NoError(t, settings.Set(context.Background(), k, v))
 	}
-	cfg.Enabled, cfg.ScanIntervalSeconds, cfg.ScanBatchTimeoutSeconds, cfg.EVMBlocksPerScan, cfg.ScanUnitsPerPass, cfg.SolanaPageSize = true, 30, 20, 2000, 20, 200
+	cfg.Enabled, cfg.ScanIntervalSeconds, cfg.ScanBatchTimeoutSeconds, cfg.EVMBlocksPerScan, cfg.ScanUnitsPerPass, cfg.SolanaPageSize, cfg.ConfirmingUnitsPerPass = true, 30, 20, 2000, 20, 200, 5
 	deps := service.BuildCryptoPayChainDeps(cfg, nil)
 	return service.NewCryptoPayService(integrationDB, settings, cfg, deps, nil, nil), settings
 }

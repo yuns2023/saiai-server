@@ -49,23 +49,25 @@ type cryptoPayBalanceCache interface {
 // deposit ingestion, crediting and the read APIs. Chain access is injected
 // (CryptoPayChainDeps) and RPC calls are never made inside a DB transaction.
 type CryptoPayService struct {
-	db               *sql.DB
-	settingRepo      SettingRepository
-	networks         []*cryptoPayNetwork
-	byNetwork        map[chain.Network]*cryptoPayNetwork
-	deps             CryptoPayChainDeps
-	signerPubkey     string
-	evmScanFromBlock uint64
-	scanInterval     time.Duration
-	batchTimeout     time.Duration
-	unitsPerPass     int
-	spanMu           sync.Mutex
-	evmSpans         map[string]*cryptoPayEVMSpan
-	evmBlocksPerScan uint64
-	solanaPageSize   int
-	balanceCache     cryptoPayBalanceCache
-	authCache        APIKeyAuthCacheInvalidator
-	now              func() time.Time
+	db                *sql.DB
+	settingRepo       SettingRepository
+	networks          []*cryptoPayNetwork
+	byNetwork         map[chain.Network]*cryptoPayNetwork
+	deps              CryptoPayChainDeps
+	signerPubkey      string
+	evmScanFromBlock  uint64
+	scanInterval      time.Duration
+	batchTimeout      time.Duration
+	unitsPerPass      int
+	spanMu            sync.Mutex
+	evmSpans          map[string]*cryptoPayEVMSpan
+	confirmOffsets    map[chain.Network]int
+	confirmingPerPass int
+	evmBlocksPerScan  uint64
+	solanaPageSize    int
+	balanceCache      cryptoPayBalanceCache
+	authCache         APIKeyAuthCacheInvalidator
+	now               func() time.Time
 }
 
 // NewCryptoPayService builds the service. A disabled or invalid configuration
@@ -89,6 +91,8 @@ func NewCryptoPayService(db *sql.DB, settingRepo SettingRepository, cfg config.C
 	s.batchTimeout = time.Duration(max(cfg.ScanBatchTimeoutSeconds, 1)) * time.Second
 	s.unitsPerPass = max(cfg.ScanUnitsPerPass, 1)
 	s.evmSpans = map[string]*cryptoPayEVMSpan{}
+	s.confirmOffsets = map[chain.Network]int{}
+	s.confirmingPerPass = max(cfg.ConfirmingUnitsPerPass, 1)
 	s.evmBlocksPerScan = uint64(max(cfg.EVMBlocksPerScan, 1))
 	s.solanaPageSize = max(cfg.SolanaPageSize, 1)
 	for _, n := range networks {

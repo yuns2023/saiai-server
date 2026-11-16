@@ -146,6 +146,9 @@ func parseCryptoPayNetworks(cfg config.CryptoPayConfig) ([]*cryptoPayNetwork, []
 	if cfg.Enabled && cfg.ScanBatchTimeoutSeconds <= 0 {
 		warnings = append(warnings, "crypto_pay.scan_batch_timeout_seconds must be positive")
 	}
+	if cfg.Enabled && cfg.ConfirmingUnitsPerPass <= 0 {
+		warnings = append(warnings, "crypto_pay.confirming_units_per_pass must be positive")
+	}
 	if cfg.Enabled && cfg.ScanUnitsPerPass <= 0 {
 		warnings = append(warnings, "crypto_pay.scan_units_per_pass must be positive")
 	}

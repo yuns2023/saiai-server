@@ -298,7 +298,7 @@ func newCryptoEnvWith(t *testing.T, mutate func(*config.CryptoPayConfig)) *crypt
 	deps.EVMScanner, deps.SolanaScanner = env.evm, env.sol
 	cfg := config.CryptoPayConfig{
 		Enabled: true, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet", SolanaPoolSignerPubkey: cryptoTestSigner,
-		ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 1000, SolanaPageSize: 200,
+		ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 1000, SolanaPageSize: 200, ConfirmingUnitsPerPass: 5,
 	}
 	if mutate != nil {
 		mutate(&cfg)
@@ -1396,7 +1396,7 @@ func TestCryptoPay_EVMAllocationRequiresScanner(t *testing.T) {
 	env := newCryptoEnv(t, true)
 	importTestEVMKeyset(t, env, "xpubNOSCAN")
 	noScanner := service.NewCryptoPayService(integrationDB, env.settings, config.CryptoPayConfig{
-		Enabled: true, EVMNetwork: "arbitrum-one", ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20,
+		Enabled: true, EVMNetwork: "arbitrum-one", ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20, ConfirmingUnitsPerPass: 5,
 	}, service.CryptoPayChainDeps{DeriveEVMAddress: fakeDeriveEVM}, nil, nil)
 	user := createCryptoUser(t)
 	_, err := noScanner.CreateOrder(ctx, user, "arbitrum-one", "USDC", "5")
@@ -1473,20 +1473,15 @@ func TestCryptoPay_SolanaWindowErrorKeepsWindowAndRestartResumes(t *testing.T) {
 			TxHash: fakeSolSig(fmt.Sprintf("w-%d", i)), EventKey: "acct:" + ata, ToAddress: addr.Address, TokenAccount: ata,
 			Units: big.NewInt(1_000_000), BlockNumber: uint64(i), BlockTime: time.Now()})
 	}
-	// Legacy plain-signature cursor is read as {Until: sig}: w-0 already processed.
-	_, err = integrationDB.Exec(`INSERT INTO crypto_pay_scan_cursors (scope_key, network, position, version) VALUES ($1, 'solana-mainnet', $2, 1)`,
-		scope, fakeSolSig("w-0"))
-	require.NoError(t, err)
-
 	// One page (w-4, w-3) succeeds, then the RPC fails mid-window.
 	failAfterFirst := &onceFailingSolana{fakeSolanaScanner: env.sol}
 	svc := service.NewCryptoPayService(integrationDB, env.settings, config.CryptoPayConfig{
 		Enabled: true, SolanaNetwork: "solana-mainnet", SolanaPoolSignerPubkey: cryptoTestSigner,
-		ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, ScanUnitsPerPass: 20, SolanaPageSize: 2,
+		ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, ScanUnitsPerPass: 20, SolanaPageSize: 2, ConfirmingUnitsPerPass: 5,
 	}, service.CryptoPayChainDeps{SolanaScanner: failAfterFirst, SolanaATA: fakeATA}, nil, nil)
 	svc.RunWorkerPass(ctx)
 	w := solanaWindowOf(t, scope)
-	require.Equal(t, chain.SolanaWindow{Until: fakeSolSig("w-0"), Anchor: fakeSolSig("w-4"), Before: fakeSolSig("w-3")}, w,
+	require.Equal(t, chain.SolanaWindow{Anchor: fakeSolSig("w-4"), Before: fakeSolSig("w-3")}, w,
 		"the window after the last successful call is kept")
 	require.Equal(t, "2.00000000", userBalance(t, user))
 	var lastErr string
@@ -1496,8 +1491,8 @@ func TestCryptoPay_SolanaWindowErrorKeepsWindowAndRestartResumes(t *testing.T) {
 	// "Restart": a fresh service resumes from the persisted window.
 	env.svc.RunWorkerPass(ctx)
 	require.Equal(t, chain.SolanaWindow{Until: fakeSolSig("w-4")}, solanaWindowOf(t, scope))
-	require.Equal(t, "4.00000000", userBalance(t, user), "w-1..w-4 credited once each; w-0 was before the legacy cursor")
-	require.Equal(t, 4, countRows(t, `SELECT COUNT(*) FROM crypto_pay_credits`))
+	require.Equal(t, "5.00000000", userBalance(t, user), "w-0..w-4 credited once each")
+	require.Equal(t, 5, countRows(t, `SELECT COUNT(*) FROM crypto_pay_credits`))
 }
 
 // onceFailingSolana fails every window call after the first one.
@@ -1512,4 +1507,110 @@ func (o *onceFailingSolana) ScanTokenAccountWindow(ctx context.Context, owner, t
 		return nil, w, errors.New("fake: rpc failed mid-window")
 	}
 	return o.fakeSolanaScanner.ScanTokenAccountWindow(ctx, owner, tokenAccount, asset, w, commitment, maxTx)
+}
+
+func newSolanaWindowFixture(t *testing.T, env *cryptoEnv, seed string, n int) (int64, string, string) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := env.svc.ImportSolanaKeyset(ctx, testManifest(t, seed, 1, cryptoTestSigner), "admin:test")
+	require.NoError(t, err)
+	user := createCryptoUser(t)
+	addr, err := env.svc.EnsureAddress(ctx, user, chain.SolanaMainnet)
+	require.NoError(t, err)
+	usdc := chain.MainnetAssets()[2]
+	ata, _ := fakeATA(addr.Address, usdc.Contract, usdc.TokenProgram)
+	for i := 0; i < n; i++ {
+		env.sol.obs[ata] = append(env.sol.obs[ata], chain.Observation{Network: chain.SolanaMainnet, Asset: usdc,
+			TxHash: fakeSolSig(fmt.Sprintf("%s-%d", seed, i)), EventKey: "acct:" + ata, ToAddress: addr.Address, TokenAccount: ata,
+			Units: big.NewInt(1_000_000), BlockNumber: uint64(i), BlockTime: time.Now()})
+	}
+	return user, ata, "sol:solana-mainnet:" + usdc.Contract + ":" + ata
+}
+
+func TestCryptoPay_SolanaNonJSONCursorIsVisibleError(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnv(t, true)
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
+	user, _, scope := newSolanaWindowFixture(t, env, "nonjson", 2)
+	_, err := integrationDB.Exec(`INSERT INTO crypto_pay_scan_cursors (scope_key, network, position, version) VALUES ($1, 'solana-mainnet', 'plainSignature', 1)`, scope)
+	require.NoError(t, err)
+	env.svc.RunWorkerPass(ctx)
+	var pos, lastErr string
+	require.NoError(t, integrationDB.QueryRow(`SELECT position, last_error FROM crypto_pay_scan_cursors WHERE scope_key = $1`, scope).Scan(&pos, &lastErr))
+	require.Equal(t, "plainSignature", pos, "never silently reset")
+	require.Contains(t, lastErr, "invalid Solana scan window")
+	require.Equal(t, "0.00000000", userBalance(t, user))
+}
+
+func TestCryptoPay_SolanaCursorWriteFailureIsRecorded(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.SolanaPageSize = 1 })
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
+	user, _, scope := newSolanaWindowFixture(t, env, "cwf", 3)
+	// The second cursor write of the walk (version 1 -> 2) fails in the DB.
+	_, err := integrationDB.Exec(`
+		CREATE OR REPLACE FUNCTION crypto_pay_test_fail_cursor() RETURNS trigger AS $$
+		BEGIN
+			IF NEW.scope_key = '` + scope + `' AND NEW.version = 2 AND OLD.version = 1 THEN
+				RAISE EXCEPTION 'injected cursor write failure';
+			END IF;
+			RETURN NEW;
+		END $$ LANGUAGE plpgsql;
+		CREATE TRIGGER crypto_pay_test_fail_cursor BEFORE UPDATE ON crypto_pay_scan_cursors
+			FOR EACH ROW EXECUTE FUNCTION crypto_pay_test_fail_cursor();`)
+	require.NoError(t, err)
+	dropped := false
+	drop := func() {
+		if !dropped {
+			_, _ = integrationDB.Exec(`DROP TRIGGER IF EXISTS crypto_pay_test_fail_cursor ON crypto_pay_scan_cursors; DROP FUNCTION IF EXISTS crypto_pay_test_fail_cursor()`)
+			dropped = true
+		}
+	}
+	t.Cleanup(drop)
+
+	env.svc.RunWorkerPass(ctx) // page 1 persisted; page 2 ingested, its cursor write fails
+	var lastErr string
+	require.NoError(t, integrationDB.QueryRow(`SELECT last_error FROM crypto_pay_scan_cursors WHERE scope_key = $1`, scope).Scan(&lastErr))
+	require.Contains(t, lastErr, "injected cursor write failure", "a genuine cursor write failure stays visible")
+	require.Equal(t, 2, countRows(t, `SELECT COUNT(*) FROM crypto_pay_deposits`))
+
+	drop()
+	env.svc.RunWorkerPass(ctx) // page 2 is replayed (idempotent), then page 3 and close
+	require.Equal(t, "3.00000000", userBalance(t, user), "nothing credited twice")
+	require.Equal(t, 3, countRows(t, `SELECT COUNT(*) FROM crypto_pay_credits`))
+	require.NoError(t, integrationDB.QueryRow(`SELECT last_error FROM crypto_pay_scan_cursors WHERE scope_key = $1`, scope).Scan(&lastErr))
+	require.Empty(t, lastErr)
+}
+
+func TestCryptoPay_ConfirmingScanIsCappedAndRotates(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.ConfirmingUnitsPerPass, c.EVMBlocksPerScan = 1, 3_000_000 })
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	importTestEVMKeyset(t, env, "xpubCONFIRM")
+	for i := 0; i < 101; i++ { // 2 groups of active addresses
+		allocateEVMAt(t, env, 100)
+	}
+	_, err := integrationDB.Exec(`UPDATE crypto_pay_addresses SET last_order_at = NOW()`)
+	require.NoError(t, err)
+	env.evm.finalized, env.evm.latest = 1000, 1100
+	tails := func() []string {
+		var out []string
+		for _, c := range env.evm.calls {
+			if strings.Contains(c, "/false/") {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+	env.evm.calls = nil
+	env.svc.RunWorkerPass(ctx)
+	first := tails()
+	require.Len(t, first, 1, "at most confirming_units_per_pass groups")
+	env.evm.calls = nil
+	env.svc.RunWorkerPass(ctx)
+	second := tails()
+	require.Len(t, second, 1)
+	require.NotEqual(t, first[0], second[0], "groups rotate (100 vs 1 addresses)")
 }

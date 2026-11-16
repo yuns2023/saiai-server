@@ -28,11 +28,12 @@ import (
 // There is no category priority.
 const (
 	cryptoPayActiveWindow       = 24 * time.Hour
-	cryptoPayLongInterval       = 23 * time.Hour // < 24h so every address is covered daily
+	cryptoPayLongInterval       = 23 * time.Hour // idle units are revisited about daily (subject to units-per-pass capacity)
 	cryptoPayEVMBatchAddresses  = 100
 	cryptoPayEVMGroupSpread     = 10_000 // addresses whose next block differs by less share a batch
 	cryptoPayEVMOrphanWindow    = 2 * time.Hour
 	cryptoPaySolanaOrphanWindow = 30 * time.Minute
+	cryptoPayCommitGrace        = 5 * time.Second
 )
 
 var errCryptoPayCursorConflict = errors.New("crypto pay scan cursor changed concurrently")
@@ -223,9 +224,19 @@ func (s *CryptoPayService) scanNetworks(ctx context.Context) error {
 // runUnit runs one scan unit with the full unit timeout and records the
 // attempt, unless the pass itself was cancelled (shutdown): an interrupted
 // unit did not get its full slice and keeps its place in the queue.
-func (s *CryptoPayService) runUnit(ctx context.Context, network chain.Network, scopes []string, fn func(context.Context) error) error {
-	unitCtx, cancel := context.WithTimeout(ctx, s.batchTimeout)
-	err := fn(unitCtx)
+//
+// fn gets two contexts: unitCtx for chain calls and ingestion, and commitCtx
+// for cursor writes. commitCtx is one shared budget per unit that ends
+// cryptoPayCommitGrace after the unit deadline and ignores shutdown, so a
+// write after a successful ingest is not lost to the deadline, while a whole
+// unit can delay shutdown by at most the grace. Cursors not written in time
+// are simply rescanned (ingestion is idempotent).
+func (s *CryptoPayService) runUnit(ctx context.Context, network chain.Network, scopes []string, fn func(unitCtx, commitCtx context.Context) error) error {
+	deadline := time.Now().Add(s.batchTimeout)
+	unitCtx, cancel := context.WithDeadline(ctx, deadline)
+	commitCtx, commitCancel := context.WithDeadline(context.WithoutCancel(ctx), deadline.Add(cryptoPayCommitGrace))
+	err := fn(unitCtx, commitCtx)
+	commitCancel()
 	cancel()
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -347,16 +358,20 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		err := s.runUnit(ctx, network, b.scopes(), func(unitCtx context.Context) error {
-			return s.scanEVMBatch(unitCtx, sc, b, finalized)
+		err := s.runUnit(ctx, network, b.scopes(), func(unitCtx, commitCtx context.Context) error {
+			return s.scanEVMBatch(unitCtx, commitCtx, sc, b, finalized)
 		})
 		if err != nil {
 			errs = append(errs, err)
 		}
 	}
-	// Unfinalized tail for active addresses: display only ("confirming").
+	// Unfinalized tail for active addresses: display only ("confirming"). At
+	// most confirmingPerPass groups of 100 per pass, rotated round-robin.
 	if latest > finalized && len(active) > 0 {
-		for start := 0; start < len(active) && ctx.Err() == nil; start += cryptoPayEVMBatchAddresses {
+		groups := (len(active) + cryptoPayEVMBatchAddresses - 1) / cryptoPayEVMBatchAddresses
+		first := s.nextConfirmingOffset(network, groups)
+		for g := 0; g < min(groups, s.confirmingPerPass) && ctx.Err() == nil; g++ {
+			start := ((first + g) % groups) * cryptoPayEVMBatchAddresses
 			end := min(start+cryptoPayEVMBatchAddresses, len(active))
 			tailCtx, cancel := context.WithTimeout(ctx, s.batchTimeout)
 			tailTo := min(latest, finalized+s.evmBlocksPerScan)
@@ -380,7 +395,7 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 // scanEVMBatch walks one batch forward in chunks of evmBlocksPerScan blocks.
 // Each chunk is ingested and its cursors advanced before the next one, so a
 // timeout keeps every completed chunk and the next attempt resumes after it.
-func (s *CryptoPayService) scanEVMBatch(ctx context.Context, sc chain.EVMScanner, b *cryptoPayEVMBatch, finalized uint64) error {
+func (s *CryptoPayService) scanEVMBatch(ctx, commitCtx context.Context, sc chain.EVMScanner, b *cryptoPayEVMBatch, finalized uint64) error {
 	network := sc.Network()
 	for {
 		from := uint64(0)
@@ -427,7 +442,7 @@ func (s *CryptoPayService) scanEVMBatch(ctx context.Context, sc chain.EVMScanner
 			if it.from > to {
 				continue
 			}
-			if err := s.persistCursor(ctx, network, it.cursor, position, to == finalized); err != nil {
+			if err := s.advanceCursor(commitCtx, network, it.cursor, position, to == finalized); err != nil {
 				return err
 			}
 			it.from = to + 1
@@ -444,12 +459,7 @@ type cryptoPaySolanaUnit struct {
 }
 
 // scanSolana runs the fair queue of the users' USDC/USDT associated token
-// accounts. Each attempt walks the account's signatures newer than the
-// persisted cursor in one ScanTokenAccount call: the chain interface returns
-// the newest signature only once the whole walk succeeded, so the cursor
-// cannot be persisted per page. Deposit-account histories are short (each
-// signature is an inflow to that user), ingestion is idempotent per event,
-// and a timed-out walk keeps every observation already ingested.
+// accounts; each unit is one window walk (see scanSolanaAccount).
 func (s *CryptoPayService) scanSolana(ctx context.Context, sc chain.SolanaScanner) error {
 	network := sc.Network()
 	n := s.byNetwork[network]
@@ -497,8 +507,8 @@ func (s *CryptoPayService) scanSolana(ctx context.Context, sc chain.SolanaScanne
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		err := s.runUnit(ctx, network, []string{u.scope}, func(unitCtx context.Context) error {
-			return s.scanSolanaAccount(unitCtx, sc, u)
+		err := s.runUnit(ctx, network, []string{u.scope}, func(unitCtx, commitCtx context.Context) error {
+			return s.scanSolanaAccount(unitCtx, commitCtx, sc, u)
 		})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", u.account, err))
@@ -507,18 +517,19 @@ func (s *CryptoPayService) scanSolana(ctx context.Context, sc chain.SolanaScanne
 	return errors.Join(errs...)
 }
 
-// cryptoPayParseSolanaWindow reads a persisted Solana cursor: JSON of
-// chain.SolanaWindow, or a legacy plain signature meaning {Until: sig}.
+// cryptoPayParseSolanaWindow reads a persisted Solana cursor. The feature has
+// never been deployed with another format: position is always the JSON of a
+// chain.SolanaWindow ("" = no window yet). Anything else is an error that
+// stays visible in last_error; it is never silently rescanned from scratch.
 func cryptoPayParseSolanaWindow(position string) (chain.SolanaWindow, error) {
 	var w chain.SolanaWindow
 	if position == "" {
 		return w, nil
 	}
-	if !strings.HasPrefix(position, "{") {
-		return chain.SolanaWindow{Until: position}, nil
-	}
-	if err := json.Unmarshal([]byte(position), &w); err != nil {
-		return w, fmt.Errorf("invalid Solana scan window: %w", err)
+	dec := json.NewDecoder(strings.NewReader(position))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&w); err != nil {
+		return w, fmt.Errorf("invalid Solana scan window cursor: %w", err)
 	}
 	return w, nil
 }
@@ -535,15 +546,16 @@ func cryptoPayEncodeSolanaWindow(w chain.SolanaWindow) (string, error) {
 // resumes exactly there. The loop stops when a call changes nothing (window
 // closed, no new signatures: caught up) or the unit timeout ends; a timeout
 // after progress is not a failure (the unit stays due and resumes next pass).
-func (s *CryptoPayService) scanSolanaAccount(ctx context.Context, sc chain.SolanaScanner, u *cryptoPaySolanaUnit) error {
+func (s *CryptoPayService) scanSolanaAccount(ctx, commitCtx context.Context, sc chain.SolanaScanner, u *cryptoPaySolanaUnit) error {
 	c := u.cursor
 	w, err := cryptoPayParseSolanaWindow(c.position)
 	if err != nil {
 		return err
 	}
 	progressed := false
-	stop := func(err error) error {
-		if progressed && ctx.Err() != nil {
+	// Only the expected pause at the unit deadline, after progress, is benign.
+	paused := func(err error) error {
+		if progressed && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil
 		}
 		return err
@@ -551,7 +563,7 @@ func (s *CryptoPayService) scanSolanaAccount(ctx context.Context, sc chain.Solan
 	for {
 		obs, next, err := sc.ScanTokenAccountWindow(ctx, u.owner, u.account, u.asset, w, "finalized", s.solanaPageSize)
 		if err != nil {
-			return stop(fmt.Errorf("scan: %w", err))
+			return paused(fmt.Errorf("scan: %w", err))
 		}
 		for i := range obs {
 			if !obs[i].Finalized {
@@ -559,15 +571,16 @@ func (s *CryptoPayService) scanSolanaAccount(ctx context.Context, sc chain.Solan
 			}
 		}
 		if _, err := s.IngestObservations(ctx, obs); err != nil {
-			return stop(fmt.Errorf("ingest: %w", err))
+			return paused(fmt.Errorf("ingest: %w", err))
 		}
 		caughtUp := next == w && next.Anchor == ""
 		position, err := cryptoPayEncodeSolanaWindow(next)
 		if err != nil {
 			return err
 		}
-		if err := s.persistCursor(ctx, sc.Network(), c, position, caughtUp); err != nil {
-			return stop(err)
+		// A cursor write failure is always returned (recorded, visible).
+		if err := s.advanceCursor(commitCtx, sc.Network(), c, position, caughtUp); err != nil {
+			return err
 		}
 		progressed = true
 		w = next
@@ -656,12 +669,12 @@ func cryptoPayTimeoutCause(ctx context.Context, err error) error {
 	return err
 }
 
-// persistCursor advances a cursor after its range/window was ingested. The
-// write gets its own short budget, detached from the unit deadline: once the
-// observations are stored, losing the cursor write to the deadline would make
-// the next attempt replay the same work forever.
-func (s *CryptoPayService) persistCursor(ctx context.Context, network chain.Network, c *cryptoPayCursor, position string, caughtUp bool) error {
-	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	return s.advanceCursor(wctx, network, c, position, caughtUp)
+// nextConfirmingOffset returns the group to start the confirming scan at and
+// advances the in-memory round-robin offset (display only; resets on restart).
+func (s *CryptoPayService) nextConfirmingOffset(network chain.Network, groups int) int {
+	s.spanMu.Lock()
+	defer s.spanMu.Unlock()
+	off := s.confirmOffsets[network] % groups
+	s.confirmOffsets[network] = (off + s.confirmingPerPass) % groups
+	return off
 }

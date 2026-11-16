@@ -187,6 +187,9 @@ type CryptoPayConfig struct {
 	// page and at most this many transactions; the window is persisted after
 	// every call.
 	SolanaPageSize int `mapstructure:"solana_page_size"`
+	// ConfirmingUnitsPerPass caps the display-only confirming EVM scan (groups
+	// of 100 active addresses) per pass; groups rotate across passes.
+	ConfirmingUnitsPerPass int `mapstructure:"confirming_units_per_pass"`
 }
 
 type IdempotencyConfig struct {
@@ -1477,6 +1480,7 @@ func setDefaults() {
 	viper.SetDefault("crypto_pay.evm_blocks_per_scan", 2000)
 	viper.SetDefault("crypto_pay.scan_units_per_pass", 20)
 	viper.SetDefault("crypto_pay.solana_page_size", 200)
+	viper.SetDefault("crypto_pay.confirming_units_per_pass", 5)
 
 	// Idempotency
 	viper.SetDefault("idempotency.observe_only", true)

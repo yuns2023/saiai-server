@@ -247,7 +247,7 @@ func cryptoPayErrorReason(t *testing.T, r *gin.Engine, body string) (int, string
 }
 
 func TestCryptoPayHandlerErrorReasons(t *testing.T) {
-	cfg := config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20, SolanaPageSize: 200, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet"}
+	cfg := config.CryptoPayConfig{Enabled: true, ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20, SolanaPageSize: 200, ConfirmingUnitsPerPass: 5, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet"}
 	on := service.NewCryptoPayService(nil, cryptoPayHandlerSettings{values: map[string]string{service.SettingCryptoPayAllowNewAddresses: "true"}},
 		cfg, service.CryptoPayChainDeps{}, nil, nil)
 	r := cryptoPayTestRouter(NewCryptoPayHandler(on))
