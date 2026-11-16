@@ -180,7 +180,9 @@ describe('admin DashboardView', () => {
         hosted_total_metered_cost: 12.5,
         hosted_today_requests: 7,
         hosted_today_tokens: 890,
-        hosted_today_metered_cost: 0.25
+        hosted_today_metered_cost: 0.25,
+        hosted_total_service_fee: 1.25,
+        hosted_today_service_fee: 0.025
       },
       trend: [],
       models: []
@@ -197,6 +199,24 @@ describe('admin DashboardView', () => {
     expect(line.text()).toContain('890')
     expect(line.text()).toContain('$12.50')
     expect(line.text()).toContain('$0.250')
+    const todayFee = line.get('[data-testid="hosted-service-fee-today"]')
+    const totalFee = line.get('[data-testid="hosted-service-fee-total"]')
+    expect(todayFee.text()).toBe('admin.dashboard.hostedServiceFee $0.025')
+    expect(totalFee.text()).toBe('admin.dashboard.hostedServiceFee $1.25')
+    expect(todayFee.attributes('title')).toBe('admin.dashboard.hostedServiceFeeHint')
+    expect(totalFee.attributes('title')).toBe('admin.dashboard.hostedServiceFeeHint')
+    wrapper.unmount()
+  })
+
+  it('shows a zero service fee when the backend predates the fee fields', async () => {
+    getSnapshotV2.mockResolvedValue({
+      stats: { ...createDashboardStats(), hosted_total_requests: 5, hosted_total_metered_cost: 1, hosted_today_requests: 1 },
+      trend: [],
+      models: []
+    })
+    const wrapper = mountDashboard()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="hosted-service-fee-total"]').text()).toBe('admin.dashboard.hostedServiceFee $0.0000')
     wrapper.unmount()
   })
 })

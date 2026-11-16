@@ -101,12 +101,12 @@
                   :platform="row.group.platform"
                   :subscription-type="row.group.subscription_type"
                   :rate-multiplier="row.group.rate_multiplier"
-                  :user-rate-multiplier="row.group.hosted_usage_enabled ? 0 : userGroupRates[row.group.id]"
+                  :user-rate-multiplier="row.group.hosted_usage_enabled ? null : userGroupRates[row.group.id]"
                 />
                 <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
                   t('keys.noGroup')
                 }}</span>
-                <span v-if="row.group?.hosted_usage_enabled" class="text-xs text-emerald-600" :title="t('hostedUsage.hint')">{{ t('hostedUsage.badge') }}</span>
+                <span v-if="row.group?.hosted_usage_enabled" class="text-xs text-emerald-600" :title="t('hostedUsage.hint')" data-testid="hosted-fee-badge">{{ hostedFeeBadge(t, row.group.rate_multiplier) }}</span>
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
                 <svg
                   class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
@@ -1039,6 +1039,7 @@ import KeySmartSwitchEditor from '@/components/keys/KeySmartSwitchEditor.vue'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
 import { formatDateTime } from '@/utils/format'
+import { hostedFeeBadge } from '@/utils/hostedUsage'
 
 // Helper to format date for datetime-local input
 const formatDateTimeLocal = (isoDate: string): string => {
@@ -1224,7 +1225,8 @@ const groupOptions = computed(() =>
     label: group.name,
     description: group.description,
     rate: group.rate_multiplier,
-    userRate: group.hosted_usage_enabled ? 0 : userGroupRates.value[group.id] ?? null,
+    // Hosted groups charge the group rate as a service fee; user overrides never apply.
+    userRate: group.hosted_usage_enabled ? null : userGroupRates.value[group.id] ?? null,
     subscriptionType: group.subscription_type,
     platform: group.platform
   }))

@@ -145,12 +145,31 @@ describe('user KeysView setup guidance', () => {
     mocks.list.mockResolvedValue({ items: [makeKey({ group_id: group.id, group, rate_limit_5h: 200, usage_5h: 10 })], total: 1, pages: 1 })
     mocks.getUsage.mockResolvedValue({ stats: { 10: { today_actual_cost: 0, total_actual_cost: 0, today_usage_cost: 10, total_usage_cost: 40 } } })
     const wrapper = await mountView()
-    expect(wrapper.text()).toContain('hostedUsage.badge')
+    expect(wrapper.get('[data-testid="hosted-fee-badge"]').text()).toBe('hostedUsage.badgeFree')
     expect(wrapper.text()).toContain('hostedUsage.reference')
     expect(wrapper.text()).toContain('hostedUsage.windowLimit')
     expect(wrapper.text()).toContain('$10.0000')
     expect(wrapper.text()).toContain('$40.0000')
     expect(wrapper.text()).toContain('$10.00/$200.00')
+  })
+
+  it('shows the hosted group rate as the service fee and never the user override', async () => {
+    const group = { ...groups[1], rate_multiplier: 0.1, hosted_usage_enabled: true }
+    mocks.getAvailable.mockResolvedValue([groups[0], group])
+    mocks.getUserGroupRates.mockResolvedValue({ [group.id]: 0.5 })
+    mocks.list.mockResolvedValue({ items: [makeKey({ group_id: group.id, group })], total: 1, pages: 1 })
+    const wrapper = await mountView()
+    const badge = wrapper.findComponent({ name: 'GroupBadge' })
+    expect(badge.props('rateMultiplier')).toBe(0.1)
+    expect(badge.props('userRateMultiplier')).toBeNull()
+    expect(wrapper.get('[data-testid="hosted-fee-badge"]').text()).toBe('hostedUsage.badgeFee')
+  })
+
+  it('keeps the user override for ordinary groups', async () => {
+    mocks.getUserGroupRates.mockResolvedValue({ 1: 0.5 })
+    const wrapper = await mountView()
+    expect(wrapper.findComponent({ name: 'GroupBadge' }).props('userRateMultiplier')).toBe(0.5)
+    expect(wrapper.find('[data-testid="hosted-fee-badge"]').exists()).toBe(false)
   })
 
   it('removes the raw-key column and makes Use Key primary', async () => {

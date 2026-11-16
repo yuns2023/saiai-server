@@ -160,11 +160,57 @@ describe('KeyUsageView', () => {
     await wrapper.get('input[type="password"]').setValue('TEST_ONLY_HOSTED')
     await wrapper.get('input[type="password"]').trigger('keydown.enter')
     await flushPromises()
-    expect(wrapper.text()).toContain('hostedUsage.badge')
+    expect(wrapper.text()).toContain('hostedUsage.badgeFree')
+    expect(wrapper.text()).not.toContain('hostedUsage.badgeFee')
     expect(wrapper.text()).toContain('hostedUsage.reference')
     expect(wrapper.text()).toContain('$12.34')
     expect(wrapper.text()).toContain('$0.75')
     expect(wrapper.text()).not.toContain('9195.54')
+    wrapper.unmount()
+  })
+
+  it('shows the hosting fee and the wallet for a charged hosted group (no charge_exempt)', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        mode: 'unrestricted', billing_mode: 'balance', isValid: true, status: 'active',
+        planName: '自有账号托管', usage_basis: 'standard_reference', hosted_fee_rate: 0.1,
+        billing: { type: 'wallet', available: true, balance_visible: true, balance: 42.5 },
+        usage: { range: { requests: 3, actual_cost: 1.23, usage_cost: 12.3 } },
+      }),
+    } as Response)
+    const wrapper = mount(KeyUsageView, {
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, LocaleSwitcher: true, Icon: true } },
+    })
+    await wrapper.get('input[type="password"]').setValue('TEST_ONLY_HOSTED_FEE')
+    await wrapper.get('input[type="password"]').trigger('keydown.enter')
+    await flushPromises()
+    expect(wrapper.text()).toContain('hostedUsage.badgeFee')
+    expect(wrapper.text()).not.toContain('hostedUsage.badgeFree')
+    expect(wrapper.text()).toContain('keyUsage.rangeCost')
+    expect(wrapper.text()).toContain('$1.23 · hostedUsage.reference $12.30')
+    expect(wrapper.text()).toContain('$42.50')
+    wrapper.unmount()
+  })
+
+  it('keeps charge_exempt authoritative even if a fee rate is present', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        mode: 'unrestricted', billing_mode: 'balance', isValid: true, status: 'active', hosted_fee_rate: 0.1,
+        billing: { type: 'wallet', available: true, balance_visible: false, charge_exempt: true },
+        usage: { range: { requests: 1, actual_cost: 0, usage_cost: 5 } },
+      }),
+    } as Response)
+    const wrapper = mount(KeyUsageView, {
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, LocaleSwitcher: true, Icon: true } },
+    })
+    await wrapper.get('input[type="password"]').setValue('TEST_ONLY_HOSTED_FREE')
+    await wrapper.get('input[type="password"]').trigger('keydown.enter')
+    await flushPromises()
+    expect(wrapper.text()).toContain('hostedUsage.badgeFree')
+    expect(wrapper.text()).not.toContain('hostedUsage.badgeFee')
+    expect(wrapper.text()).not.toContain('keyUsage.rangeCost')
     wrapper.unmount()
   })
 

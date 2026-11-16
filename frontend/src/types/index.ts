@@ -1520,6 +1520,9 @@ export interface DashboardStats {
   hosted_today_requests?: number
   hosted_today_tokens?: number
   hosted_today_metered_cost?: number
+  // 托管服务费收入：托管行实扣（actual_cost）合计，同样仅覆盖日志保留期；免费托管分组为 0。
+  hosted_total_service_fee?: number
+  hosted_today_service_fee?: number
 }
 
 export interface UsageStatsResponse {
