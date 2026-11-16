@@ -178,25 +178,9 @@ func ProvidePaymentExpiryService(db *sql.DB, paymentService *PaymentService) *Pa
 	return svc
 }
 
-// ProvideCryptoPayChainDeps returns the chain implementations for crypto pay.
-// Until the chain package (branch feat/crypto-checkout-chains) is merged
-// everything is nil: the worker idles, address allocation and keyset import
-// report "unavailable".
-//
-// TODO(cryptopay): after merge, when cfg.CryptoPay.Enabled:
-//   - EVMScanner: chain.NewEVMScanner(chain.EVMScannerConfig{Network: cfg.CryptoPay.EVMNetwork,
-//     RPC: chain.RPCOptions{URL: cfg.CryptoPay.EVMRPCURL}, Assets: <nil on mainnet, parsed evm_assets on testnet>})
-//   - SolanaScanner: chain.NewSolanaScanner(chain.SolanaScannerConfig{Network: cfg.CryptoPay.SolanaNetwork,
-//     RPC: chain.RPCOptions{URL: cfg.CryptoPay.SolanaRPCURL}, Assets: ...}) (dedicated RPC required)
-//   - DeriveEVMAddress: chain.EVMAddressFromXpub; VerifySolanaManifest: chain.VerifySolanaPoolManifest;
-//     SolanaATA: chain.SolanaATA
-//   - IsRetryLater: errors.Is(err, chain.ErrNotFinalized) || errors.Is(err, chain.ErrTxNotFound)
-//
-// A constructor error or empty RPC URL leaves that scanner nil (logged without
-// the URL: RPC URLs may embed API keys).
+// ProvideCryptoPayChainDeps wires the chain package (see BuildCryptoPayChainDeps).
 func ProvideCryptoPayChainDeps(cfg *config.Config) CryptoPayChainDeps {
-	_ = cfg
-	return CryptoPayChainDeps{}
+	return BuildCryptoPayChainDeps(cfg.CryptoPay, nil)
 }
 
 // ProvideCryptoPayService creates the stablecoin top-up service.
