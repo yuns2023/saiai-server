@@ -100,6 +100,11 @@ func RequestBodyBytes(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldRequestBodyBytes, v))
 }
 
+// AccountOwnerUserID applies equality check predicate on the "account_owner_user_id" field. It's identical to AccountOwnerUserIDEQ.
+func AccountOwnerUserID(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAccountOwnerUserID, v))
+}
+
 // ClientAttestation applies equality check predicate on the "client_attestation" field. It's identical to ClientAttestationEQ.
 func ClientAttestation(v int16) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldClientAttestation, v))
@@ -743,6 +748,56 @@ func RequestBodyBytesIsNil() predicate.UsageLog {
 // RequestBodyBytesNotNil applies the NotNil predicate on the "request_body_bytes" field.
 func RequestBodyBytesNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldRequestBodyBytes))
+}
+
+// AccountOwnerUserIDEQ applies the EQ predicate on the "account_owner_user_id" field.
+func AccountOwnerUserIDEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAccountOwnerUserID, v))
+}
+
+// AccountOwnerUserIDNEQ applies the NEQ predicate on the "account_owner_user_id" field.
+func AccountOwnerUserIDNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldAccountOwnerUserID, v))
+}
+
+// AccountOwnerUserIDIn applies the In predicate on the "account_owner_user_id" field.
+func AccountOwnerUserIDIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldAccountOwnerUserID, vs...))
+}
+
+// AccountOwnerUserIDNotIn applies the NotIn predicate on the "account_owner_user_id" field.
+func AccountOwnerUserIDNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldAccountOwnerUserID, vs...))
+}
+
+// AccountOwnerUserIDGT applies the GT predicate on the "account_owner_user_id" field.
+func AccountOwnerUserIDGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldAccountOwnerUserID, v))
+}
+
+// AccountOwnerUserIDGTE applies the GTE predicate on the "account_owner_user_id" field.
+func AccountOwnerUserIDGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldAccountOwnerUserID, v))
+}
+
+// AccountOwnerUserIDLT applies the LT predicate on the "account_owner_user_id" field.
+func AccountOwnerUserIDLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldAccountOwnerUserID, v))
+}
+
+// AccountOwnerUserIDLTE applies the LTE predicate on the "account_owner_user_id" field.
+func AccountOwnerUserIDLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldAccountOwnerUserID, v))
+}
+
+// AccountOwnerUserIDIsNil applies the IsNil predicate on the "account_owner_user_id" field.
+func AccountOwnerUserIDIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldAccountOwnerUserID))
+}
+
+// AccountOwnerUserIDNotNil applies the NotNil predicate on the "account_owner_user_id" field.
+func AccountOwnerUserIDNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldAccountOwnerUserID))
 }
 
 // ClientAttestationEQ applies the EQ predicate on the "client_attestation" field.

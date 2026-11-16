@@ -37,6 +37,7 @@ export async function list(
     status?: string
     group?: string
     search?: string
+    owner_user_id?: number
     lite?: string
   },
   options?: {
@@ -69,6 +70,7 @@ export async function listWithEtag(
     status?: string
     group?: string
     search?: string
+    owner_user_id?: number
     lite?: string
   },
   options?: {
@@ -650,6 +652,7 @@ export async function exportData(options?: {
     type?: string
     status?: string
     search?: string
+    owner_user_id?: number
   }
   includeProxies?: boolean
 }): Promise<AdminDataPayload> {
@@ -657,11 +660,12 @@ export async function exportData(options?: {
   if (options?.ids && options.ids.length > 0) {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
-    const { platform, type, status, search } = options.filters
+    const { platform, type, status, search, owner_user_id } = options.filters
     if (platform) params.platform = platform
     if (type) params.type = type
     if (status) params.status = status
     if (search) params.search = search
+    if (owner_user_id && owner_user_id > 0) params.owner_user_id = String(owner_user_id)
   }
   if (options?.includeProxies === false) {
     params.include_proxies = 'false'
@@ -768,7 +772,28 @@ export async function consumeCodexResetCredit(id: number, creditId: string, idem
   return data
 }
 
+export interface AccountOwnerResult {
+  account_id: number
+  owner_user_id: number | null
+  owner_email: string | null
+}
+
+/** Server reason when an account that already belonged to another user is given to someone else. */
+export const ACCOUNT_OWNER_TRANSFER_FORBIDDEN = 'ACCOUNT_OWNER_TRANSFER_FORBIDDEN'
+
+/**
+ * Set (or clear with null) the account's owner (号主). The key is always sent:
+ * the server treats a missing owner_user_id as a bad request, not as "clear".
+ */
+export async function setAccountOwner(id: number, ownerUserId: number | null): Promise<AccountOwnerResult> {
+  const { data } = await apiClient.put<AccountOwnerResult>(`/admin/accounts/${id}/owner`, {
+    owner_user_id: ownerUserId
+  })
+  return data
+}
+
 export const accountsAPI = {
+  setAccountOwner,
   listCodexResetCredits,
   consumeCodexResetCredit,
   list,

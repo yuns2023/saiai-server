@@ -2019,6 +2019,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		RateMultiplier:          &rateMultiplier,
 		PaygDiscountMultiplier:  &paygDiscountMultiplier,
 		LoadFactor:              m.LoadFactor,
+		OwnerUserID:             copyInt64Ptr(m.OwnerUserID),
 		Status:                  m.Status,
 		ErrorMessage:            derefString(m.ErrorMessage),
 		ErrorAt:                 m.ErrorAt,
@@ -2366,4 +2367,12 @@ func (r *accountRepository) AdvanceCarpoolMaintenance(ctx context.Context, id in
 		`UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) || $1::jsonb
    WHERE id = $2 AND deleted_at IS NULL AND COALESCE(extra->>'claude_oauth_carpool_next_maintenance_at', '') = $3`, string(payload), id, expected)
 	return err
+}
+
+func copyInt64Ptr(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
 }

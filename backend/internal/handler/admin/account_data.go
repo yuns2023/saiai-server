@@ -391,6 +391,16 @@ func (h *AccountHandler) resolveExportAccounts(ctx context.Context, ids []int64,
 	if len(search) > 100 {
 		search = search[:100]
 	}
+	ownerUserID, err := parseOwnerFilter(c)
+	if err != nil {
+		return nil, err
+	}
+	if ownerUserID > 0 {
+		if h.hostedOwnerService == nil {
+			return nil, errInvalidOwnerFilter
+		}
+		return h.exportAccountsByOwner(ctx, ownerUserID, platform, accountType, status, search)
+	}
 	return h.listAccountsFiltered(ctx, platform, accountType, status, search)
 }
 

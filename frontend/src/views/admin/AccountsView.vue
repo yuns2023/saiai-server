@@ -197,6 +197,9 @@
               </span>
             </div>
           </template>
+          <template #cell-owner="{ row }">
+            <AccountOwnerCell :owner-user-id="row.owner_user_id" :owner-email="row.owner_email" />
+          </template>
           <template #cell-capacity="{ row }">
             <AccountCapacityCell :account="row" />
           </template>
@@ -290,7 +293,8 @@
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @stats="handleViewStats" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @clear-quota-snapshot="handleClearQuotaSnapshot" @quota-window-restart="handleQuotaWindowRestart" @reset-quota="handleResetQuota" @codex-reset="handleCodexReset" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @stats="handleViewStats" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @clear-quota-snapshot="handleClearQuotaSnapshot" @quota-window-restart="handleQuotaWindowRestart" @reset-quota="handleResetQuota" @codex-reset="handleCodexReset" @set-owner="handleSetOwner" />
+    <AccountOwnerModal :show="showOwner" :account="ownerAcc" @close="closeOwnerModal" @updated="handleOwnerUpdated" />
     <CodexResetModal :show="showCodexReset" :account="codexResetAcc" @close="showCodexReset = false" @updated="reload" />
     <QuotaWindowRestartModal :show="showQuotaWindowRestart" :account="quotaWindowRestartAcc" @close="showQuotaWindowRestart = false" @updated="usageManualRefreshToken += 1" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
@@ -335,16 +339,19 @@ import QuotaWindowRestartModal from '@/components/admin/account/QuotaWindowResta
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
+import AccountOwnerModal from '@/components/admin/account/AccountOwnerModal.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
+import AccountOwnerCell from '@/components/account/AccountOwnerCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
+import type { AccountOwnerResult } from '@/api/admin/accounts'
 import type { Account, AccountPlatform, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats } from '@/types'
 
 const { t } = useI18n()
@@ -388,6 +395,8 @@ const codexResetAcc = ref<Account | null>(null)
 const showReAuth = ref(false)
 const showStats = ref(false)
 const showErrorPassthrough = ref(false)
+const showOwner = ref(false)
+const ownerAcc = ref<Account | null>(null)
 const edAcc = ref<Account | null>(null)
 const tempUnschedAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
@@ -602,7 +611,8 @@ const {
   handlePageSizeChange: baseHandlePageSizeChange
 } = useTableLoader<Account, any>({
   fetchFn: adminAPI.accounts.list,
-  initialParams: { platform: '', type: '', status: '', group: '', search: '' }
+  // owner_user_id stays undefined (not sent) unless a positive user ID is entered.
+  initialParams: { platform: '', type: '', status: '', group: '', search: '', owner_user_id: undefined }
 })
 
 const selectableAccounts = computed(() => accounts.value.filter((account) => !isRetiredPlatform(account.platform)))
@@ -715,7 +725,8 @@ const isAnyModalOpen = computed(() => {
     showQuotaWindowRestart.value ||
     showReAuth.value ||
     showStats.value ||
-    showErrorPassthrough.value
+    showErrorPassthrough.value ||
+    showOwner.value
   )
 })
 
@@ -740,6 +751,8 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
     current.overload_until !== next.overload_until ||
     current.temp_unschedulable_until !== next.temp_unschedulable_until ||
+    current.owner_user_id !== next.owner_user_id ||
+    current.owner_email !== next.owner_email ||
     buildOpenAIUsageRefreshKey(current) !== buildOpenAIUsageRefreshKey(next)
   )
 }
@@ -762,6 +775,7 @@ const syncAccountRefs = (nextAccount: Account) => {
   if (tempUnschedAcc.value?.id === nextAccount.id) tempUnschedAcc.value = nextAccount
   if (deletingAcc.value?.id === nextAccount.id) deletingAcc.value = nextAccount
   if (quotaSnapshotAcc.value?.id === nextAccount.id) quotaSnapshotAcc.value = nextAccount
+  if (ownerAcc.value?.id === nextAccount.id) ownerAcc.value = nextAccount
   if (menu.acc?.id === nextAccount.id) menu.acc = nextAccount
 }
 
@@ -808,7 +822,7 @@ const refreshAccountsIncrementally = async () => {
         status?: string
         group?: string
         search?: string
-
+        owner_user_id?: number
       },
       { etag: autoRefreshETag.value }
     )
@@ -912,6 +926,7 @@ const allColumns = computed(() => {
     { key: 'id', label: 'ID', sortable: true },
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
+    { key: 'owner', label: t('admin.accounts.columns.owner'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
@@ -939,7 +954,7 @@ const toggleableColumns = computed(() =>
 )
 
 const columnWidths: Record<string, string> = {
-  select: 'w-12', id: 'w-20', name: 'w-72', platform_type: 'w-44',
+  select: 'w-12', id: 'w-20', name: 'w-72', platform_type: 'w-44', owner: 'min-w-40',
   capacity: 'w-24', status: 'w-40', schedulable: 'w-20',
   today_stats: 'min-w-40', groups: 'min-w-80', usage: 'min-w-60'
 }
@@ -1160,6 +1175,7 @@ const accountMatchesCurrentFilters = (account: Account) => {
       return false
     }
   }
+  if (params.owner_user_id && account.owner_user_id !== params.owner_user_id) return false
   const search = String(params.search || '').trim().toLowerCase()
   if (search && !account.name.toLowerCase().includes(search)) return false
   return true
@@ -1230,7 +1246,8 @@ const handleExportData = async () => {
               platform: params.platform,
               type: params.type,
               status: params.status,
-              search: params.search
+              search: params.search,
+              owner_user_id: params.owner_user_id
             }
           }
     )
@@ -1295,6 +1312,15 @@ const confirmClearQuotaSnapshot = async () => {
     console.error('Failed to clear local quota snapshot:', error)
     appStore.showError(error?.message || t('admin.accounts.clearQuotaSnapshotFailed'))
   }
+}
+const handleSetOwner = (account: Account) => { ownerAcc.value = account; showOwner.value = true }
+const closeOwnerModal = () => { showOwner.value = false; ownerAcc.value = null }
+// The owner endpoint returns only the owner fields, so patch them onto the current row.
+const handleOwnerUpdated = (result: AccountOwnerResult) => {
+  const current = accounts.value.find(account => account.id === result.account_id)
+  if (!current) return
+  patchAccountInList({ ...current, owner_user_id: result.owner_user_id, owner_email: result.owner_email })
+  enterAutoRefreshSilentWindow()
 }
 const handleCodexReset = (account: Account) => { codexResetAcc.value = account; showCodexReset.value = true }
 const handleQuotaWindowRestart = (account: Account) => { quotaWindowRestartAcc.value = account; showQuotaWindowRestart.value = true }

@@ -202,6 +202,33 @@ func (_u *UsageLogUpdate) ClearRequestBodyBytes() *UsageLogUpdate {
 	return _u
 }
 
+// SetAccountOwnerUserID sets the "account_owner_user_id" field.
+func (_u *UsageLogUpdate) SetAccountOwnerUserID(v int64) *UsageLogUpdate {
+	_u.mutation.ResetAccountOwnerUserID()
+	_u.mutation.SetAccountOwnerUserID(v)
+	return _u
+}
+
+// SetNillableAccountOwnerUserID sets the "account_owner_user_id" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableAccountOwnerUserID(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetAccountOwnerUserID(*v)
+	}
+	return _u
+}
+
+// AddAccountOwnerUserID adds value to the "account_owner_user_id" field.
+func (_u *UsageLogUpdate) AddAccountOwnerUserID(v int64) *UsageLogUpdate {
+	_u.mutation.AddAccountOwnerUserID(v)
+	return _u
+}
+
+// ClearAccountOwnerUserID clears the value of the "account_owner_user_id" field.
+func (_u *UsageLogUpdate) ClearAccountOwnerUserID() *UsageLogUpdate {
+	_u.mutation.ClearAccountOwnerUserID()
+	return _u
+}
+
 // SetClientAttestation sets the "client_attestation" field.
 func (_u *UsageLogUpdate) SetClientAttestation(v int16) *UsageLogUpdate {
 	_u.mutation.ResetClientAttestation()
@@ -1138,6 +1165,15 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.RequestBodyBytesCleared() {
 		_spec.ClearField(usagelog.FieldRequestBodyBytes, field.TypeInt64)
 	}
+	if value, ok := _u.mutation.AccountOwnerUserID(); ok {
+		_spec.SetField(usagelog.FieldAccountOwnerUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedAccountOwnerUserID(); ok {
+		_spec.AddField(usagelog.FieldAccountOwnerUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.AccountOwnerUserIDCleared() {
+		_spec.ClearField(usagelog.FieldAccountOwnerUserID, field.TypeInt64)
+	}
 	if value, ok := _u.mutation.ClientAttestation(); ok {
 		_spec.SetField(usagelog.FieldClientAttestation, field.TypeInt16, value)
 	}
@@ -1682,6 +1718,33 @@ func (_u *UsageLogUpdateOne) AddRequestBodyBytes(v int64) *UsageLogUpdateOne {
 // ClearRequestBodyBytes clears the value of the "request_body_bytes" field.
 func (_u *UsageLogUpdateOne) ClearRequestBodyBytes() *UsageLogUpdateOne {
 	_u.mutation.ClearRequestBodyBytes()
+	return _u
+}
+
+// SetAccountOwnerUserID sets the "account_owner_user_id" field.
+func (_u *UsageLogUpdateOne) SetAccountOwnerUserID(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetAccountOwnerUserID()
+	_u.mutation.SetAccountOwnerUserID(v)
+	return _u
+}
+
+// SetNillableAccountOwnerUserID sets the "account_owner_user_id" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableAccountOwnerUserID(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetAccountOwnerUserID(*v)
+	}
+	return _u
+}
+
+// AddAccountOwnerUserID adds value to the "account_owner_user_id" field.
+func (_u *UsageLogUpdateOne) AddAccountOwnerUserID(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddAccountOwnerUserID(v)
+	return _u
+}
+
+// ClearAccountOwnerUserID clears the value of the "account_owner_user_id" field.
+func (_u *UsageLogUpdateOne) ClearAccountOwnerUserID() *UsageLogUpdateOne {
+	_u.mutation.ClearAccountOwnerUserID()
 	return _u
 }
 
@@ -2650,6 +2713,15 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.RequestBodyBytesCleared() {
 		_spec.ClearField(usagelog.FieldRequestBodyBytes, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.AccountOwnerUserID(); ok {
+		_spec.SetField(usagelog.FieldAccountOwnerUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedAccountOwnerUserID(); ok {
+		_spec.AddField(usagelog.FieldAccountOwnerUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.AccountOwnerUserIDCleared() {
+		_spec.ClearField(usagelog.FieldAccountOwnerUserID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.ClientAttestation(); ok {
 		_spec.SetField(usagelog.FieldClientAttestation, field.TypeInt16, value)

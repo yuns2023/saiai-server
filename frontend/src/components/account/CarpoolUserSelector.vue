@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import CarpoolUserLabel from './CarpoolUserLabel.vue'
-import { ref } from 'vue'
+import { ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { AdminUser } from '@/types'
-const props = defineProps<{ modelValue: number[] }>()
+// single: pick at most one user (radio); choosing another user replaces the selection.
+const props = defineProps<{ modelValue: number[]; single?: boolean }>()
 const emit = defineEmits<{ (e: 'update:modelValue', ids: number[]): void }>()
 const { t } = useI18n()
 const search = ref('')
 const users = ref<AdminUser[]>([])
 const error = ref(false)
 const loading = ref(false)
+// Groups the radios of one single-mode picker so keyboard navigation works natively.
+const radioName = `carpool-user-${useId()}`
 async function find() {
   loading.value = true
   error.value = false
@@ -20,7 +23,8 @@ async function find() {
   finally { loading.value = false }
 }
 function toggle(id: number) {
-  emit('update:modelValue', props.modelValue.includes(id) ? props.modelValue.filter(v => v !== id) : [...props.modelValue, id])
+  if (props.modelValue.includes(id)) emit('update:modelValue', props.modelValue.filter(v => v !== id))
+  else emit('update:modelValue', props.single ? [id] : [...props.modelValue, id])
 }
 </script>
 <template>
@@ -38,7 +42,7 @@ function toggle(id: number) {
       </span>
     </div>
     <label v-for="user in users" :key="user.id" class="flex items-center gap-2 text-sm">
-      <input type="checkbox" class="h-4 w-4 shrink-0 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" :checked="modelValue.includes(user.id)" @change="toggle(user.id)" />
+      <input :type="single ? 'radio' : 'checkbox'" :name="single ? radioName : undefined" class="h-4 w-4 shrink-0 rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500" :checked="modelValue.includes(user.id)" @change="toggle(user.id)" />
       <UserIdentityTooltip :user-id="user.id" :username="user.username" :notes="user.notes" :pin-on-click="false"><span>{{ user.email }}</span></UserIdentityTooltip> (#{{ user.id }})
     </label>
   </div>

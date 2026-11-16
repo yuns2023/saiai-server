@@ -57,6 +57,13 @@ func RegisterUserRoutes(
 			groups.GET("/:id/account-quota", h.HostedAccount.ListAccounts)
 		}
 
+		// 托管号主：归属于本人的上游账号及其用量（只读）
+		hosted := authenticated.Group("/hosted")
+		{
+			hosted.GET("/owned-accounts", h.HostedOwner.ListOwnedAccounts)
+			hosted.GET("/owned-accounts/:id/usage", h.HostedOwner.ListOwnedAccountUsage)
+		}
+
 		// 使用记录
 		usage := authenticated.Group("/usage")
 		{

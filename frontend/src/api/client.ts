@@ -92,9 +92,11 @@ apiClient.interceptors.response.use(
         response.data = apiResponse.data
       } else {
         // API error
+        const reason = (apiResponse as { reason?: unknown }).reason
         return Promise.reject({
           status: response.status,
           code: apiResponse.code,
+          ...(typeof reason === 'string' ? { reason } : {}),
           message: apiResponse.message || 'Unknown error'
         })
       }
@@ -263,11 +265,12 @@ apiClient.interceptors.response.use(
         }
       }
 
-      // Return structured error
+      // Return structured error (reason: machine-readable code from the backend envelope, when set)
       return Promise.reject({
         status,
         code: apiData.code,
         error: apiData.error,
+        ...(typeof apiData.reason === 'string' ? { reason: apiData.reason } : {}),
         message: apiData.message || apiData.detail || error.message
       })
     }

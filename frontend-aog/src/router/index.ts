@@ -31,6 +31,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/dashboard', name: 'overview', component: () => import('@/views/app/OverviewView.vue'), meta: { title: 'nav.overview', auth: true } },
   { path: '/keys', name: 'keys', component: () => import('@/views/app/KeysView.vue'), meta: { title: 'nav.keys', auth: true } },
   { path: '/usage', name: 'usage', component: () => import('@/views/app/UsageView.vue'), meta: { title: 'nav.usage', auth: true } },
+  { path: '/hosted', name: 'hosted', component: () => import('@/views/app/HostedView.vue'), meta: { title: 'nav.hosted', auth: true } },
   { path: '/billing', name: 'billing', component: () => import('@/views/app/BillingView.vue'), meta: { title: 'nav.billing', auth: true } },
   {
     path: '/billing/crypto/:id(\\d+)',

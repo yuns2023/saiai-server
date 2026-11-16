@@ -59,6 +59,8 @@ type HostedQuotaWindow struct {
 
 // This allowlist deliberately excludes credentials, Extra, email, proxy,
 // account notes, raw error messages and internal scheduling configuration.
+// Name is a safe display label (HostedAccountDisplayName), never the admin
+// account name: admin names can embed seller emails and internal notes.
 type HostedAccount struct {
 	ID        int64               `json:"id"`
 	Name      string              `json:"name"`
@@ -211,7 +213,7 @@ func (s *HostedAccountService) attachWindowCosts(ctx context.Context, accounts [
 }
 
 func hostedAccountSnapshot(account *Account, now time.Time) HostedAccount {
-	result := HostedAccount{ID: account.ID, Name: account.Name, Platform: account.Platform,
+	result := HostedAccount{ID: account.ID, Name: HostedAccountDisplayName(account.ID), Platform: account.Platform,
 		Status: hostedAccountStatus(account, now), Stale: true, Windows: make([]HostedQuotaWindow, 0)}
 	extra := account.Extra
 	if account.IsAnthropicOAuthOrSetupToken() {

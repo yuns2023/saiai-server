@@ -256,6 +256,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		ProxyID:                 a.ProxyID,
 		Concurrency:             a.Concurrency,
 		LoadFactor:              a.LoadFactor,
+		OwnerUserID:             copyInt64Pointer(a.OwnerUserID),
 		Priority:                a.Priority,
 		RateMultiplier:          a.BillingRateMultiplier(),
 		PaygDiscountMultiplier:  a.PaygDiscountRate(),
@@ -948,4 +949,12 @@ func PromoCodeUsageFromService(u *service.PromoCodeUsage) *PromoCodeUsage {
 		UsedAt:      u.UsedAt,
 		User:        UserFromServiceShallow(u.User),
 	}
+}
+
+func copyInt64Pointer(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
 }

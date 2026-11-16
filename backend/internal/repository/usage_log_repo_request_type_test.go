@@ -604,6 +604,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt16{},   // client_attestation
 			[]byte(nil),       // client_entrypoint
 			sql.NullInt64{},   // request_body_bytes
+			sql.NullInt64{},   // account_owner_user_id
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -658,6 +659,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt16{},   // client_attestation
 			[]byte(nil),       // client_entrypoint
 			sql.NullInt64{},   // request_body_bytes
+			sql.NullInt64{},   // account_owner_user_id
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -711,6 +713,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt16{Valid: true, Int16: 5},           // client_attestation
 			[]byte(`{"ua":"t3-code","body":"t3-code","body_status":"valid","reason":"ua_not_allowed","group_id":3,"policy":"observe"}`), // client_entrypoint
 			sql.NullInt64{Valid: true, Int64: 0}, // request_body_bytes: genuinely empty body, not NULL
+			sql.NullInt64{},                      // account_owner_user_id
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)

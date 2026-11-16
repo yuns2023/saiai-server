@@ -4,6 +4,7 @@ import { authApi, needs2FA, type LoginResult } from '@/api'
 import { refreshAccessToken, SESSION_EXPIRED_EVENT } from '@/api/client'
 import { clearSession, getExpiresAt, getRefreshToken, getToken, readUser, saveTokens, saveUser } from '@/api/session'
 import type { AuthResponse, RegisterRequest, User } from '@/types'
+import { useHostedStore } from './hosted'
 import { useNoticesStore } from './notices'
 
 const USER_REFRESH_MS = 60_000
@@ -55,6 +56,7 @@ export const useAuthStore = defineStore('auth', () => {
   function dropLocalState(): void {
     generation++
     useNoticesStore().reset()
+    useHostedStore().reset()
     stopTimers()
     token.value = null
     user.value = null
@@ -75,6 +77,7 @@ export const useAuthStore = defineStore('auth', () => {
   function adopt(response: AuthResponse): void {
     generation++
     useNoticesStore().reset()
+    useHostedStore().reset()
     saveTokens(response.access_token, response.refresh_token, response.expires_in)
     const { run_mode: _runMode, ...rest } = response.user
     token.value = response.access_token
@@ -101,6 +104,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function adoptTokens(accessToken: string, refreshToken: string, expiresIn: number): Promise<void> {
     generation++
     useNoticesStore().reset()
+    useHostedStore().reset()
     stopTimers()
     clearSession()
     saveTokens(accessToken, refreshToken, expiresIn || undefined)

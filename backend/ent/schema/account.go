@@ -99,6 +99,15 @@ func (Account) Fields() []ent.Field {
 
 		field.Int("load_factor").Optional().Nillable(),
 
+		// owner_user_id: platform user who brought this upstream account
+		// (hosted owner). NULL = platform-owned. Written ONLY by the dedicated
+		// owner endpoint (AccountRepository.SetOwner); generic account updates
+		// never set it, so whole-row write-backs cannot revert it.
+		// Migration 128 adds the FK (ON DELETE SET NULL).
+		field.Int64("owner_user_id").
+			Optional().
+			Nillable(),
+
 		// priority: 账户优先级，数值越小优先级越高
 		// 调度器会优先使用高优先级的账户
 		field.Int("priority").

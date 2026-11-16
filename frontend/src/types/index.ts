@@ -904,6 +904,10 @@ export interface Account {
   group_ids?: number[] // Groups this account belongs to
   groups?: Group[] // Preloaded group objects
 
+  // 号主：带来该上游账号的平台用户（null 表示未设置）
+  owner_user_id: number | null
+  owner_email: string | null
+
   // Rate limit & scheduling fields
   schedulable: boolean
   rate_limited_at: string | null

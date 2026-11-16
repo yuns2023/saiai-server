@@ -66,6 +66,13 @@ func (UsageLog) Fields() []ent.Field {
 		field.Int64("request_body_bytes").
 			Optional().
 			Nillable(),
+		// AccountOwnerUserID snapshots accounts.owner_user_id as seen by the
+		// usage INSERT statement (read from accounts inside the INSERT, never
+		// from cached account objects). NULL = platform account or a row
+		// written before migration 128. Never backfilled or updated.
+		field.Int64("account_owner_user_id").
+			Optional().
+			Nillable(),
 		// ClientAttestation stores the SAIAI client proof status (1 valid ..
 		// 8 unverified, docs/CLIENT_PROOF_V1.md). NULL means not collected
 		// (group policy off or rows written before migration 116).

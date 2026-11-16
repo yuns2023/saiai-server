@@ -119,6 +119,11 @@ type UsageLog struct {
 	// WebSocket the turn's response.create message). Admin diagnostics only;
 	// never used for billing. Nil means unknown; 0 means a genuinely empty body.
 	RequestBodyBytes *int64
+	// AccountOwnerUserID is the hosted owner snapshot read from accounts by the
+	// usage INSERT statement itself (see usage_log_repo). Read-only on this
+	// struct: inserts ignore any value set here. Nil = platform account or a
+	// row written before migration 128.
+	AccountOwnerUserID *int64
 	// ClientAttestation is the SAIAI client proof status (clientproof.Status).
 	// Nil means not collected: the final group's policy is off.
 	ClientAttestation *int16

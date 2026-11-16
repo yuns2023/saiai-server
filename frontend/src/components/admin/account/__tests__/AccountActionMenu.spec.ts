@@ -77,6 +77,17 @@ describe('AccountActionMenu quota snapshot action', () => {
   })
 })
 
+describe('AccountActionMenu set owner action', () => {
+  it('emits the account for active platforms and hides it for retired ones', async () => {
+    const account = makeAccount({ type: 'apikey' })
+    const wrapper = mountMenu(account)
+    await wrapper.get('[data-testid="menu-set-owner"]').trigger('click')
+    expect(wrapper.emitted('set-owner')).toEqual([[account]])
+    expect(wrapper.emitted('close')).toBeTruthy()
+    expect(mountMenu(makeAccount({ platform: 'sora' })).find('[data-testid="menu-set-owner"]').exists()).toBe(false)
+  })
+})
+
 describe('AccountActionMenu quota window restart action', () => {
   it('emits the account for Anthropic and OpenAI OAuth accounts only', async () => {
     const account = makeAccount({})
