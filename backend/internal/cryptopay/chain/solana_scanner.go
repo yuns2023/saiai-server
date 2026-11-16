@@ -266,9 +266,11 @@ func (s *SolanaRPCScanner) ScanTokenAccount(ctx context.Context, owner, tokenAcc
 // older; observations of one call are returned oldest first.
 //
 //   - Empty page, no anchor: nothing new; next == w.
-//   - Empty page with an anchor, or a short page (< maxTx): the window is
-//     complete; next = {Until: anchor}.
-//   - Full page: next = {Until: w.Until, Anchor: anchor, Before: last sig}.
+//   - Empty page with an anchor: the window is complete; next = {Until: Anchor}.
+//   - Any non-empty page (full or short): next = {Until: w.Until,
+//     Anchor: anchor, Before: last sig}. A short page does not close the
+//     window, because nodes may return fewer than `limit` signatures while
+//     older ones exist; the following (empty) page closes it.
 //   - Any error: (nil, w, err); the caller keeps its window.
 func (s *SolanaRPCScanner) ScanTokenAccountWindow(ctx context.Context, owner, tokenAccount string, asset Asset, w SolanaWindow, commitment string, maxTx int) ([]Observation, SolanaWindow, error) {
 	if commitment != CommitmentFinalized {
@@ -277,8 +279,16 @@ func (s *SolanaRPCScanner) ScanTokenAccountWindow(ctx context.Context, owner, to
 	if maxTx <= 0 || maxTx > 1000 {
 		return nil, w, fmt.Errorf("chain: maxTx must be in 1..1000, got %d", maxTx)
 	}
-	if w.Anchor == "" && w.Before != "" {
-		return nil, w, errors.New("chain: window has Before without Anchor")
+	if (w.Anchor == "") != (w.Before == "") {
+		return nil, w, errors.New("chain: window must have both Anchor and Before, or neither")
+	}
+	for _, f := range []string{w.Until, w.Anchor, w.Before} {
+		if f == "" {
+			continue
+		}
+		if _, err := decodeSignature(f); err != nil {
+			return nil, w, fmt.Errorf("chain: window field: %w", err)
+		}
 	}
 	wl, err := s.prepareTokenAccountScan(owner, tokenAccount, asset, commitment)
 	if err != nil {
@@ -338,9 +348,8 @@ func (s *SolanaRPCScanner) ScanTokenAccountWindow(ctx context.Context, owner, to
 			out = append(out, *o)
 		}
 	}
-	if len(page) < maxTx {
-		return out, SolanaWindow{Until: anchor}, nil
-	}
+	// A short page does NOT close the window: nodes may return fewer than
+	// `limit` while older signatures still exist. Only an empty page closes it.
 	return out, SolanaWindow{Until: w.Until, Anchor: anchor, Before: page[len(page)-1].Signature}, nil
 }
 

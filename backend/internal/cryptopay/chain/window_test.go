@@ -49,6 +49,9 @@ type windowHarness struct {
 	failSig  string // fail getTransaction of this signature
 	listN    int
 	txN      int
+	// mutatePage, if set, may replace the listing result of call n.
+	mutatePage func(n int, page []map[string]any) any
+	srvURL     string
 }
 
 func newWindowHarness(t *testing.T, n int) (*windowHarness, []string) {
@@ -63,6 +66,14 @@ func newWindowHarness(t *testing.T, n int) (*windowHarness, []string) {
 			if h.failList == h.listN {
 				return nil, &RPCError{Code: -32000, Message: "node behind"}
 			}
+			if h.mutatePage != nil {
+				res, rerr := h.c.handle(method, params)
+				if rerr != nil {
+					return nil, rerr
+				}
+				page, _ := res.([]map[string]any)
+				return h.mutatePage(h.listN, page), nil
+			}
 		case "getTransaction":
 			h.txN++
 			if h.failSig != "" && strings.Contains(string(params), h.failSig) {
@@ -71,6 +82,7 @@ func newWindowHarness(t *testing.T, n int) (*windowHarness, []string) {
 		}
 		return h.c.handle(method, params)
 	})
+	h.srvURL = srv.URL
 	h.s, _ = NewSolanaScanner(SolanaScannerConfig{Network: SolanaMainnet, RPC: RPCOptions{URL: srv.URL}})
 	return h, credited
 }
@@ -121,8 +133,8 @@ func sameSet(t *testing.T, got, want []string) {
 func TestSolanaWindow2500(t *testing.T) {
 	h, credited := newWindowHarness(t, 2500)
 	got, w, calls := h.walk(SolanaWindow{}, 200)
-	if calls != 13 { // ceil(2500/200); the 13th page is short (100)
-		t.Fatalf("calls = %d, want 13", calls)
+	if calls != 14 { // ceil(2500/200) pages + 1 empty page that closes the window
+		t.Fatalf("calls = %d, want 14", calls)
 	}
 	sameSet(t, got, credited)
 	if w != (SolanaWindow{Until: sSig("d2499")}) {
@@ -262,5 +274,102 @@ func TestSolanaWindowRejectsBadPagesAndInputs(t *testing.T) {
 	dupH.c.order = append([]string{dupH.c.order[0]}, dupH.c.order...)
 	if _, _, err := dupH.call(SolanaWindow{}, 50); err == nil {
 		t.Fatal("duplicate signature in page must be rejected")
+	}
+}
+
+// A node returning a short page while older signatures exist must not close
+// the window; the older signatures are processed on later calls.
+func TestSolanaWindowShortPageDoesNotClose(t *testing.T) {
+	h, credited := newWindowHarness(t, 500)
+	h.mutatePage = func(n int, page []map[string]any) any {
+		if n == 2 && len(page) > 37 {
+			return page[:37] // second page truncated by the node
+		}
+		return page
+	}
+	got, w, calls := h.walk(SolanaWindow{}, 200)
+	sameSet(t, got, credited)
+	if w.Until != sSig("d499") || calls < 4 {
+		t.Fatalf("calls %d window %+v", calls, w)
+	}
+}
+
+// Restart: a new scanner instance resumes from a JSON round-tripped window.
+func TestSolanaWindowResumeAfterRestart(t *testing.T) {
+	h, credited := newWindowHarness(t, 450)
+	obs, w, err := h.call(SolanaWindow{}, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, o := range obs {
+		got = append(got, o.TxHash)
+	}
+	raw, _ := json.Marshal(w)
+	var restored SolanaWindow
+	if err := json.Unmarshal(raw, &restored); err != nil || restored != w {
+		t.Fatalf("round trip: %s %v", raw, err)
+	}
+	fresh, err := NewSolanaScanner(SolanaScannerConfig{Network: SolanaMainnet, RPC: RPCOptions{URL: h.srvURL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.s = fresh
+	rest, w, _ := h.walk(restored, 200)
+	got = append(got, rest...)
+	sameSet(t, got, credited)
+	if w.Until != sSig("d449") {
+		t.Fatalf("final window %+v", w)
+	}
+}
+
+// Malformed pages and impossible windows leave the window unchanged.
+func TestSolanaWindowMalformedPagesAndWindows(t *testing.T) {
+	h, _ := newWindowHarness(t, 300)
+	_, mid, err := h.call(SolanaWindow{}, 100) // a mid-window position
+	if err != nil || mid.Anchor == "" {
+		t.Fatalf("setup: %+v %v", mid, err)
+	}
+	cases := map[string]func(page []map[string]any) any{
+		"null page":   func([]map[string]any) any { return nil },
+		"not a list":  func([]map[string]any) any { return map[string]any{"x": 1} },
+		"over limit":  func(p []map[string]any) any { return append(p, p[0]) },
+		"empty sig":   func(p []map[string]any) any { p[3]["signature"] = ""; return p },
+		"echo Before": func(p []map[string]any) any { p[5]["signature"] = mid.Before; return p },
+		"echo Anchor": func(p []map[string]any) any { p[5]["signature"] = mid.Anchor; return p },
+		"duplicate":   func(p []map[string]any) any { p[6]["signature"] = p[7]["signature"]; return p },
+	}
+	for name, mut := range cases {
+		mut := mut
+		h.mutatePage = func(_ int, page []map[string]any) any {
+			cp := make([]map[string]any, len(page))
+			for i, e := range page {
+				m := map[string]any{}
+				for k, v := range e {
+					m[k] = v
+				}
+				cp[i] = m
+			}
+			return mut(cp)
+		}
+		before := h.txN
+		obs, next, err := h.call(mid, 100)
+		if err == nil || obs != nil || next != mid {
+			t.Errorf("%s: want (nil, unchanged, err), got %d %+v %v", name, len(obs), next, err)
+		}
+		if name != "null page" && name != "not a list" && h.txN != before {
+			t.Errorf("%s: transactions fetched before page validation", name)
+		}
+	}
+	h.mutatePage = nil
+	for name, w := range map[string]SolanaWindow{
+		"anchor without before": {Until: mid.Until, Anchor: mid.Anchor},
+		"before without anchor": {Before: mid.Before},
+		"bad until":             {Until: "not-a-signature"},
+		"short sig":             {Until: sKey("32 bytes is a pubkey, not a sig")},
+	} {
+		if obs, next, err := h.call(w, 100); err == nil || obs != nil || next != w {
+			t.Errorf("%s: must be rejected unchanged", name)
+		}
 	}
 }

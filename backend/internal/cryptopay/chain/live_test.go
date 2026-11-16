@@ -160,29 +160,41 @@ func TestLiveSolanaMainnet(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("ATA %s: %d newer signatures, %d inflows, newest %s", ata, len(sigs)-1, len(obs), newest)
-	// Window walk over the same range, 2 signatures per call.
+	// Window walk over the same range, 2 signatures per call: must close the
+	// window within a bounded number of calls and see every inflow the full
+	// scan saw (it may see more: signatures newer than the full scan's head).
 	var windowed []string
 	w := SolanaWindow{Until: until}
-	for i := 0; i < 10; i++ {
+	closed := false
+	for i := 0; i < 40 && !closed; i++ {
 		start := time.Now()
 		var page []Observation
 		page, w, err = s.ScanTokenAccountWindow(ctx, owner, ata, usdcAsset(), w, CommitmentFinalized, 2)
-		t.Logf("  window call %d: %d obs, next %+v, %s, err %v", i, len(page), w, time.Since(start).Round(time.Millisecond), err)
+		t.Logf("  window call %d: %d obs, anchor set %v, %s, err %v", i, len(page), w.Anchor != "", time.Since(start).Round(time.Millisecond), err)
 		if err != nil {
 			if strings.Contains(err.Error(), "http=429") {
-				t.Logf("public RPC rate limited; stopping the window check")
-				break
+				t.Skipf("public RPC rate limited during window walk")
 			}
 			t.Fatal(err)
 		}
 		for _, o := range page {
 			windowed = append(windowed, o.TxHash)
 		}
-		if w.Anchor == "" && i > 0 {
-			break // first window complete
+		closed = w.Anchor == "" && i > 0
+	}
+	if !closed {
+		t.Fatal("window did not close within 40 calls")
+	}
+	have := map[string]bool{}
+	for _, h := range windowed {
+		have[h] = true
+	}
+	for _, o := range obs {
+		if !have[o.TxHash] {
+			t.Fatalf("window walk missed inflow %s seen by ScanTokenAccount", o.TxHash)
 		}
 	}
-	t.Logf("window walk: %d inflows", len(windowed))
+	t.Logf("window walk: %d inflows (full scan %d)", len(windowed), len(obs))
 	for _, o := range obs {
 		t.Logf("  %s +%s USDC units from %s slot %d", o.TxHash, o.Units, o.FromAddress, o.BlockNumber)
 		byTx, err := s.ObservationsForTx(ctx, o.TxHash, []string{owner}, CommitmentFinalized)

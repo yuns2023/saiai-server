@@ -135,6 +135,16 @@ type SolanaScanner interface {
 // next window starts at Until = Anchor, so signatures that arrived meanwhile
 // are picked up then. Every call either errors (window unchanged) or makes
 // progress, and is safe to repeat after a restart.
+//
+// Caller obligations:
+//   - Commit the returned observations BEFORE, or atomically with, persisting
+//     next; never persist next and lose the observations.
+//   - Bind a stored window to (network, token account, asset); never reuse it
+//     for another account or asset.
+//   - Serialize concurrent scans of one account (lock, or CAS on the stored
+//     window) so an older window cannot overwrite a newer one.
+//   - Ingest idempotently on (network, signature, event key): repeating a call
+//     after a crash returns the same observations again.
 type SolanaWindow struct {
 	Until  string `json:"until"`
 	Anchor string `json:"anchor"`
