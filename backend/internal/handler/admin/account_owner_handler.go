@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -198,6 +199,21 @@ func containsInt64(values []int64, target int64) bool {
 		}
 	}
 	return false
+}
+
+// fillAccountOwnerEmail sets OwnerEmail on one admin account DTO (best effort).
+func fillAccountOwnerEmail(ctx context.Context, svc *service.HostedOwnerService, account *service.Account, out *dto.Account) {
+	if svc == nil || account == nil || out == nil || out.OwnerUserID == nil {
+		return
+	}
+	emails, err := svc.OwnerEmails(ctx, []service.Account{*account})
+	if err != nil {
+		return
+	}
+	if email, ok := emails[*out.OwnerUserID]; ok {
+		value := email
+		out.OwnerEmail = &value
+	}
 }
 
 // fillOwnerEmails sets OwnerEmail on admin account DTOs (one batch query).

@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"context"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -94,4 +97,38 @@ func TestListAccountsByOwnerFiltersInMemory(t *testing.T) {
 	require.Equal(t, int64(3), total)
 	ids, _ = filter("", "", "", "", 0, 1, math.MaxInt)
 	require.Equal(t, []int64{3, 2, 1}, ids)
+}
+
+type ownerEmailRepoStub struct {
+	service.HostedOwnerRepository
+	emails map[int64]string
+	err    error
+}
+
+func (r ownerEmailRepoStub) GetUserEmails(context.Context, []int64) (map[int64]string, error) {
+	return r.emails, r.err
+}
+
+func TestFillAccountOwnerEmail(t *testing.T) {
+	owner := int64(5)
+	account := &service.Account{ID: 1, OwnerUserID: &owner}
+	out := dto.AccountFromService(account)
+	require.NotNil(t, out.OwnerUserID)
+
+	fillAccountOwnerEmail(context.Background(), nil, account, out)
+	require.Nil(t, out.OwnerEmail, "no service → unchanged")
+
+	svc := service.NewHostedOwnerService(ownerEmailRepoStub{err: errors.New("db down")}, nil)
+	fillAccountOwnerEmail(context.Background(), svc, account, out)
+	require.Nil(t, out.OwnerEmail, "lookup failure is best effort")
+
+	svc = service.NewHostedOwnerService(ownerEmailRepoStub{emails: map[int64]string{5: "owner@example.invalid"}}, nil)
+	fillAccountOwnerEmail(context.Background(), svc, account, out)
+	require.NotNil(t, out.OwnerEmail)
+	require.Equal(t, "owner@example.invalid", *out.OwnerEmail)
+
+	unowned := &service.Account{ID: 2}
+	unownedOut := dto.AccountFromService(unowned)
+	fillAccountOwnerEmail(context.Background(), svc, unowned, unownedOut)
+	require.Nil(t, unownedOut.OwnerEmail)
 }

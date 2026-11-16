@@ -16,6 +16,12 @@ import (
 type OpenAIOAuthHandler struct {
 	openaiOAuthService *service.OpenAIOAuthService
 	adminService       service.AdminService
+	hostedOwnerService *service.HostedOwnerService
+}
+
+// SetHostedOwnerService lets account responses carry the owner email.
+func (h *OpenAIOAuthHandler) SetHostedOwnerService(s *service.HostedOwnerService) {
+	h.hostedOwnerService = s
 }
 
 func oauthPlatformFromPath(c *gin.Context) string {
@@ -226,7 +232,9 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.AccountFromService(updatedAccount))
+	out := dto.AccountFromService(updatedAccount)
+	fillAccountOwnerEmail(c.Request.Context(), h.hostedOwnerService, updatedAccount, out)
+	response.Success(c, out)
 }
 
 // CreateAccountFromOAuth creates a new OpenAI/Sora OAuth account from token info

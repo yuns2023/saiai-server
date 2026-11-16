@@ -36,6 +36,7 @@ func ProvideAdminHandlers(
 	hostedOwnerService *service.HostedOwnerService,
 ) *AdminHandlers {
 	accountHandler.SetHostedOwnerService(hostedOwnerService)
+	openaiOAuthHandler.SetHostedOwnerService(hostedOwnerService)
 	return &AdminHandlers{
 		Dashboard:        dashboardHandler,
 		User:             userHandler,
