@@ -47,7 +47,7 @@ func EVMAddressFromPubKey(pub *secp256k1.PublicKey) string {
 // xpub at depth 3 with child number 0' (rejects xprv and wrong-level keys).
 // An xpub cannot prove its ancestors were 44'/60': a depth-3 account-0 key from
 // another path would pass, so imports must still be cross-checked against the
-// first addresses printed by cmd/cryptopay-offline evm-xpub.
+// first addresses printed by tools/cryptopay/cmd/cryptopay-offline evm-xpub.
 func EVMAddressFromXpub(xpub string, index uint32) (string, error) {
 	acct, err := ParseEVMAccountXpub(xpub)
 	if err != nil {
