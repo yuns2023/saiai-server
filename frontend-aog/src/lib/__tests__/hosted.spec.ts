@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { localMidnight, rangeProblem, rfc3339, utcWindow } from '../hosted'
+import { feeRate, groupRate, groupRateText, isHostedGroup, localMidnight, rangeProblem, rfc3339, utcWindow } from '../hosted'
 
 /** Runs the block with the process time zone switched (Node re-reads TZ on assignment). */
 function inZone(zone: string, fn: () => void): () => void {
@@ -70,4 +70,29 @@ describe('hosted date range', () => {
       expect(rangeProblem('2026-10-16', '2026-11-14')).toBeNull()
     })
   )
+})
+
+describe('hosted group rate', () => {
+  const t = (key: string, named: Record<string, unknown>) => `${key}${named.rate !== undefined ? `:${named.rate}` : ''}`
+  const normal = { id: 1, rate_multiplier: 1 }
+  const charged = { id: 2, rate_multiplier: 1.2, hosted_usage_enabled: true }
+  const free = { id: 3, rate_multiplier: 0, hosted_usage_enabled: true }
+  const overrides = { 1: 0.5, 2: 0.5, 3: 0.5 }
+
+  it('applies user overrides to normal groups only', () => {
+    expect(groupRate(normal, overrides)).toBe(0.5)
+    expect(groupRate(charged, overrides)).toBe(1.2)
+    expect(groupRate(free, overrides)).toBe(0)
+    expect(isHostedGroup(charged)).toBe(true)
+    expect(isHostedGroup(normal)).toBe(false)
+    expect(isHostedGroup(null)).toBe(false)
+  })
+
+  it('labels hosted groups by their fee, never "×rate"', () => {
+    expect(groupRateText(normal, overrides, t)).toBe('×0.5')
+    expect(groupRateText(charged, overrides, t)).toBe('keys.hostedFee:1.2')
+    expect(groupRateText(free, overrides, t)).toBe('keys.hostedFree')
+    expect(feeRate(1.23456)).toBe('1.2346')
+    expect(feeRate(2)).toBe('2')
+  })
 })

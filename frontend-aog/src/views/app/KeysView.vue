@@ -11,7 +11,8 @@ import Pager from '@/components/Pager.vue'
 import { groupsApi, keysApi } from '@/api'
 import { errorMessage } from '@/api/client'
 import { intlLocale } from '@/i18n'
-import { dateOnly, maskKey, money, rate, shortTime } from '@/lib/format'
+import { dateOnly, maskKey, money, shortTime } from '@/lib/format'
+import { groupRateText } from '@/lib/hosted'
 import { isAllowedPlatform } from '@/lib/platforms'
 import { useAppStore } from '@/stores/app'
 import type { ApiKey, CreateApiKeyRequest, Group, UpdateApiKeyRequest } from '@/types'
@@ -47,6 +48,12 @@ const groupById = computed(() => new Map(groups.value.map((g) => [g.id, g])))
 function keySupported(k: ApiKey): boolean {
   const platform = k.group?.platform ?? (k.group_id ? groupById.value.get(k.group_id)?.platform : undefined)
   return platform === undefined || isAllowedPlatform(platform)
+}
+
+/** Group rate, or the hosting fee for hosted groups (the key's group may omit the flag; the group list has it). */
+function keyRateText(g: Group): string {
+  const hosted = g.hosted_usage_enabled ?? groupById.value.get(g.id)?.hosted_usage_enabled
+  return groupRateText({ ...g, hosted_usage_enabled: hosted }, rates.value, t)
 }
 
 let listSeq = 0
@@ -243,7 +250,7 @@ function openRow(kind: 'edit' | 'connect', id: number): void {
               </div>
               <div class="mt-0.5 text-xs text-ink-3">
                 {{ keySupported(k) ? k.group?.name ?? groupById.get(k.group_id ?? -1)?.name ?? '—' : t('keys.otherGroup') }}
-                <template v-if="k.group"> · {{ rate(rates[k.group.id] ?? k.group.rate_multiplier) }}</template>
+                <template v-if="k.group"> · <span data-testid="key-group-rate">{{ keyRateText(k.group) }}</span></template>
               </div>
             </div>
 

@@ -224,6 +224,13 @@
                   <span class="text-sky-600 dark:text-sky-400" :title="t('admin.dashboard.hostedMeteredCost')"
                     >${{ formatCost(stats.hosted_today_metered_cost ?? 0) }}</span
                   >
+                  <span class="text-gray-400 dark:text-gray-500">·</span>
+                  <span
+                    class="text-emerald-600 dark:text-emerald-400"
+                    :title="t('admin.dashboard.hostedServiceFeeHint')"
+                    data-testid="hosted-service-fee-today"
+                    >{{ t('admin.dashboard.hostedServiceFee') }} ${{ formatCost(stats.hosted_today_service_fee ?? 0) }}</span
+                  >
                 </p>
               </div>
               <div>
@@ -235,6 +242,13 @@
                   <span class="text-gray-400 dark:text-gray-500">·</span>
                   <span class="text-sky-600 dark:text-sky-400" :title="t('admin.dashboard.hostedMeteredCost')"
                     >${{ formatCost(stats.hosted_total_metered_cost ?? 0) }}</span
+                  >
+                  <span class="text-gray-400 dark:text-gray-500">·</span>
+                  <span
+                    class="text-emerald-600 dark:text-emerald-400"
+                    :title="t('admin.dashboard.hostedServiceFeeHint')"
+                    data-testid="hosted-service-fee-total"
+                    >{{ t('admin.dashboard.hostedServiceFee') }} ${{ formatCost(stats.hosted_total_service_fee ?? 0) }}</span
                   >
                 </p>
               </div>

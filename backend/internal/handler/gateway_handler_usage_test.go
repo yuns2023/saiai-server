@@ -327,3 +327,27 @@ func TestGatewayUsageHostedExemptionDoesNotExposeWallet(t *testing.T) {
 		require.NotContains(t, billing, "balance")
 	}
 }
+
+func TestGatewayUsageHostedWithFeeUsesWallet(t *testing.T) {
+	for _, balance := range []float64{0, 5} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/usage", nil)
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 2, Status: service.StatusAPIKeyActive,
+			User: &service.User{ID: 1, Balance: balance},
+			Group: &service.Group{Platform: service.PlatformAnthropic, SubscriptionType: service.SubscriptionTypeStandard,
+				IsExclusive: true, HostedUsageEnabled: true, RateMultiplier: 0.1}})
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 1})
+		(&GatewayHandler{}).Usage(c)
+		require.Equal(t, http.StatusOK, recorder.Code)
+		var response map[string]any
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+		require.Equal(t, "自有账号托管", response["planName"])
+		require.Equal(t, "standard_reference", response["usage_basis"])
+		require.Equal(t, 0.1, response["hosted_fee_rate"])
+		billing, ok := response["billing"].(map[string]any)
+		require.True(t, ok)
+		require.NotContains(t, billing, "charge_exempt", "a hosted group with a fee is charged")
+		require.Equal(t, balance > 0, billing["available"], "availability follows the wallet")
+	}
+}

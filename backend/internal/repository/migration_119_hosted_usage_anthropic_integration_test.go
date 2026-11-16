@@ -32,7 +32,7 @@ func TestMigration119HostedUsageAllowsAnthropicGroups(t *testing.T) {
 	require.NoError(t, groups.Create(ctx, openai), "OpenAI hosted groups keep working")
 
 	// The rest of the rule is unchanged.
-	for _, set := range []string{"platform='gemini'", "rate_multiplier=1", "is_exclusive=false", "subscription_type='subscription'"} {
+	for _, set := range []string{"platform='gemini'", "rate_multiplier=-1", "is_exclusive=false", "subscription_type='subscription'"} {
 		_, err = tx.ExecContext(ctx, "SAVEPOINT p")
 		require.NoError(t, err)
 		_, err = tx.ExecContext(ctx, "UPDATE groups SET "+set+" WHERE id=$1", g.ID)
@@ -40,6 +40,9 @@ func TestMigration119HostedUsageAllowsAnthropicGroups(t *testing.T) {
 		_, err = tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT p")
 		require.NoError(t, err)
 	}
+	// Migration 130: a non-negative rate is the hosting service fee.
+	_, err = tx.ExecContext(ctx, "UPDATE groups SET rate_multiplier=0.1 WHERE id=$1", g.ID)
+	require.NoError(t, err, "a hosted group may charge a service fee")
 	// Without hosted usage the other combinations stay allowed.
 	_, err = tx.ExecContext(ctx, "UPDATE groups SET hosted_usage_enabled=false, rate_multiplier=1, is_exclusive=false WHERE id=$1", g.ID)
 	require.NoError(t, err)

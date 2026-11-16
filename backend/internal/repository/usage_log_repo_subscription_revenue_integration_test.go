@@ -49,7 +49,7 @@ func (s *UsageLogRepoSuite) TestSubscriptionRevenueAcrossStatsRankingsAndAccount
 	add(key, accountB, converted, sub, 10, nil)      // 5 yuan
 	add(otherKey, accountB, nil, sub, 7, nil)        // no group: unpriced $7
 	add(otherKey, accountB, priced, sub, 0, rate(9)) // hosted: ignored
-	add(otherKey, accountB, priced, bal, 3, rate(1)) // hosted with a stray charge: not balance revenue
+	add(otherKey, accountB, priced, bal, 3, rate(1)) // hosted service fee: balance revenue (P2a)
 	add(otherKey, accountB, priced, 2, 2, nil)       // unknown billing type: unclassified $2
 
 	stats, err := s.repo.GetStatsWithFilters(s.ctx, usagestats.UsageLogFilters{StartTime: &dayStart, EndTime: &dayEnd})
@@ -75,7 +75,7 @@ func (s *UsageLogRepoSuite) TestSubscriptionRevenueAcrossStatsRankingsAndAccount
 	s.Require().InDelta(40.0, users.Ranking[0].BalanceCost, 1e-9)
 	s.Require().InDelta(190.0, users.Ranking[0].SubscriptionCost, 1e-9)
 	s.Require().InDelta(0.0, users.Ranking[0].UnclassifiedCost, 1e-9)
-	s.Require().InDelta(40.0, users.TotalBalanceCost, 1e-9, "hosted rows are not balance revenue")
+	s.Require().InDelta(43.0, users.TotalBalanceCost, 1e-9, "hosted service fees are balance revenue")
 	s.Require().InDelta(197.0, users.TotalSubscriptionCost, 1e-9)
 	s.Require().InDelta(2.0, users.TotalUnclassifiedCost, 1e-9)
 
@@ -84,10 +84,10 @@ func (s *UsageLogRepoSuite) TestSubscriptionRevenueAcrossStatsRankingsAndAccount
 	s.Require().Len(keys.Ranking, 1)
 	s.Require().InDelta(0.0, keys.Ranking[0].SubscriptionRevenue, 1e-9)
 	s.Require().InDelta(7.0, keys.Ranking[0].SubscriptionRevenueUnpricedCost, 1e-9)
-	s.Require().InDelta(0.0, keys.Ranking[0].BalanceCost, 1e-9)
+	s.Require().InDelta(3.0, keys.Ranking[0].BalanceCost, 1e-9, "hosted service fee")
 	s.Require().InDelta(7.0, keys.Ranking[0].SubscriptionCost, 1e-9)
 	s.Require().InDelta(2.0, keys.Ranking[0].UnclassifiedCost, 1e-9)
-	s.Require().InDelta(0.0, keys.TotalBalanceCost, 1e-9)
+	s.Require().InDelta(3.0, keys.TotalBalanceCost, 1e-9)
 	s.Require().InDelta(7.0, keys.TotalSubscriptionCost, 1e-9)
 	s.Require().InDelta(2.0, keys.TotalUnclassifiedCost, 1e-9)
 
@@ -103,7 +103,7 @@ func (s *UsageLogRepoSuite) TestSubscriptionRevenueAcrossStatsRankingsAndAccount
 	s.Require().InDelta(10.0, byAccount[accountB.ID].HostedCost, 1e-9)
 	s.Require().InDelta(40.0, byAccount[accountA.ID].BalanceCost, 1e-9)
 	s.Require().InDelta(180.0, byAccount[accountA.ID].SubscriptionCost, 1e-9)
-	s.Require().InDelta(0.0, byAccount[accountB.ID].BalanceCost, 1e-9, "hosted rows are not balance revenue")
+	s.Require().InDelta(3.0, byAccount[accountB.ID].BalanceCost, 1e-9, "hosted service fees are balance revenue")
 	s.Require().InDelta(17.0, byAccount[accountB.ID].SubscriptionCost, 1e-9)
 	s.Require().InDelta(2.0, byAccount[accountB.ID].UnclassifiedCost, 1e-9)
 
@@ -123,11 +123,11 @@ func (s *UsageLogRepoSuite) TestSubscriptionRevenueAcrossStatsRankingsAndAccount
 	s.Require().Equal(int64(2), modal.Summary.TotalHostedReqs)
 	s.Require().InDelta(10.0, modal.Summary.TotalHostedCost, 1e-9)
 	want := usagestats.SubscriptionRevenueStats{
-		SubscriptionRevenue: 5, SubscriptionRevenueUnpricedCost: 7, BalanceCost: 0, SubscriptionCost: 17, UnclassifiedCost: 2,
+		SubscriptionRevenue: 5, SubscriptionRevenueUnpricedCost: 7, BalanceCost: 3, SubscriptionCost: 17, UnclassifiedCost: 2,
 	}
 	s.Require().InDelta(want.SubscriptionRevenue, modal.Summary.Revenue.SubscriptionRevenue, 1e-9)
 	s.Require().InDelta(want.SubscriptionRevenueUnpricedCost, modal.Summary.Revenue.SubscriptionRevenueUnpricedCost, 1e-9)
-	s.Require().InDelta(want.BalanceCost, modal.Summary.Revenue.BalanceCost, 1e-9, "hosted rows are not balance revenue")
+	s.Require().InDelta(want.BalanceCost, modal.Summary.Revenue.BalanceCost, 1e-9, "hosted service fees are balance revenue")
 	s.Require().InDelta(want.SubscriptionCost, modal.Summary.Revenue.SubscriptionCost, 1e-9)
 	s.Require().InDelta(want.UnclassifiedCost, modal.Summary.Revenue.UnclassifiedCost, 1e-9)
 	s.Require().NotNil(modal.Summary.HighestCostDay)

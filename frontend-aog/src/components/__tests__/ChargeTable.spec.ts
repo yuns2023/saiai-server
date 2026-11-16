@@ -81,8 +81,16 @@ describe('ChargeTable breakdown', () => {
   it('shows metered amount for hosted rows instead of implying a balance charge', async () => {
     // Hosted policy: zero rate, nothing charged, metered = standard total.
     const r = row({ rate_multiplier: 0, actual_cost: 0, metered_cost: 0.0045 })
-    expect(await line(r, '计量金额')).toBe('$0.0045')
+    expect(await line(r, '标准价计量')).toBe('$0.0045')
     expect(await line(r, '余额扣费')).toBe('$0')
+  })
+
+  it('shows the hosting fee as the charge and the standard price as metered for charged hosted rows', async () => {
+    // Charged hosted group: fee = standard × group rate; metered stays at the standard price.
+    const r = row({ rate_multiplier: 1.2, actual_cost: 0.0054, metered_cost: 0.0045 })
+    expect(await line(r, '计费倍率')).toBe('×1.2')
+    expect(await line(r, '余额扣费')).toBe('$0.0054')
+    expect(await line(r, '标准价计量')).toBe('$0.0045')
   })
 
   it('labels subscription charges as subscription usage', async () => {

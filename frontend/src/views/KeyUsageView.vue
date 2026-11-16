@@ -445,6 +445,7 @@ import { useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import NativeChatCharges from '@/components/common/NativeChatCharges.vue'
+import { hostedFeeBadge } from '@/utils/hostedUsage'
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
@@ -565,6 +566,10 @@ interface KeyUsageResponse {
   isValid: boolean
   status: string
   planName?: string
+  // Hosted group with a service fee: standard price × this rate is charged to the wallet.
+  // Absent for free hosted groups (billing.charge_exempt) and non-hosted groups.
+  hosted_fee_rate?: number
+  usage_basis?: string
   remaining?: number
   balance?: number
   billing?: BillingInfo
@@ -834,7 +839,10 @@ const detailRows = computed<DetailRow[]>(() => {
   rows.push({
     iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-500', iconSvg: ICON_CHECK,
     label: t('keyUsage.billingSource'),
-    value: data.billing?.charge_exempt ? t('hostedUsage.badge') : data.billing_mode === 'subscription'
+    // charge_exempt is authoritative (free hosting); a charged hosted group reports hosted_fee_rate.
+    value: data.billing?.charge_exempt ? hostedFeeBadge(t, 0)
+      : typeof data.hosted_fee_rate === 'number' ? hostedFeeBadge(t, data.hosted_fee_rate)
+      : data.billing_mode === 'subscription'
       ? (data.billing?.plan_name || data.planName || t('keyUsage.subscriptionPlan'))
       : t('keyUsage.payAsYouGo'),
     valueClass: '',
@@ -916,10 +924,16 @@ const usageStatCells = computed<StatCell[]>(() => {
   if (!usage) return []
 
   const range = usage.range || usage.today || {}
+  const chargeExempt = resultData.value?.billing?.charge_exempt === true
+  // Charged hosted group: the cost is the service fee; Key limits count the standard-price reference.
+  const hostedFee = !chargeExempt && typeof resultData.value?.hosted_fee_rate === 'number'
+  const costValue = chargeExempt
+    ? (range.usage_cost == null ? '—' : usd(range.usage_cost))
+    : usd(range.actual_cost) + (hostedFee && range.usage_cost != null ? ` · ${t('hostedUsage.reference')} ${usd(range.usage_cost)}` : '')
 
   return [
     { label: t('keyUsage.rangeRequests'), value: fmtNum(range.requests) },
-    { label: resultData.value?.billing?.charge_exempt ? t('hostedUsage.reference') : t('keyUsage.rangeCost'), value: resultData.value?.billing?.charge_exempt ? (range.usage_cost == null ? '—' : usd(range.usage_cost)) : usd(range.actual_cost) },
+    { label: chargeExempt ? t('hostedUsage.reference') : t('keyUsage.rangeCost'), value: costValue },
     { label: t('keyUsage.avgDuration'), value: range.average_duration_ms ? `${Math.round(range.average_duration_ms)} ms` : '-' },
     { label: t('keyUsage.rpmTpm'), value: `${usage.rpm || 0} / ${usage.tpm || 0}` },
   ]

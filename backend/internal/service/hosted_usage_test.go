@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -22,7 +23,9 @@ func TestHostedUsageRequiresExplicitNarrowPolicy(t *testing.T) {
 		name   string
 		change func(*Group)
 	}{
-		{"paid", func(g *Group) { g.RateMultiplier = 1 }},
+		{"negative fee", func(g *Group) { g.RateMultiplier = -0.1 }},
+		{"NaN fee", func(g *Group) { g.RateMultiplier = math.NaN() }},
+		{"infinite fee", func(g *Group) { g.RateMultiplier = math.Inf(1) }},
 		{"public", func(g *Group) { g.IsExclusive = false }},
 		{"subscription", func(g *Group) { g.SubscriptionType = SubscriptionTypeSubscription }},
 		{"other platform", func(g *Group) { g.Platform = PlatformGemini }},
@@ -237,21 +240,33 @@ func TestHostedUsageBulkReplacementPassesValidationAcrossMeteringBases(t *testin
 	}
 }
 
-func TestHostedUsageAdminPolicyPersistsAndRejectsPartialPaidChange(t *testing.T) {
+func TestHostedUsageAdminPolicyPersistsAndTreatsRateAsServiceFee(t *testing.T) {
 	repo := &groupRepoStubForAdmin{}
 	svc := &adminServiceImpl{groupRepo: repo}
 	g, err := svc.CreateGroup(context.Background(), &CreateGroupInput{Name: "hosted", Platform: PlatformOpenAI, IsExclusive: true, HostedUsageEnabled: true})
 	require.NoError(t, err)
 	require.True(t, repo.created.UsesHostedUsage())
+	require.True(t, repo.created.HostedChargeFree())
 	repo.getByID = g
 	_, err = svc.UpdateGroup(context.Background(), g.ID, &UpdateGroupInput{Name: "renamed"})
 	require.NoError(t, err)
 	require.True(t, repo.updated.UsesHostedUsage())
 	repo.updated = nil
-	rate := 1.0
+	// A positive rate on a hosted group is the hosting service fee: the group
+	// stays hosted (Key limits at standard price, no account cost) and charges
+	// the wallet standard × rate.
+	rate := 0.1
 	_, err = svc.UpdateGroup(context.Background(), g.ID, &UpdateGroupInput{RateMultiplier: &rate})
+	require.NoError(t, err)
+	require.NotNil(t, repo.updated)
+	require.True(t, repo.updated.UsesHostedUsage())
+	require.Equal(t, 0.1, repo.updated.HostedFeeRate())
+	require.False(t, repo.updated.HostedChargeFree())
+	repo.updated = nil
+	negative := -1.0
+	_, err = svc.UpdateGroup(context.Background(), g.ID, &UpdateGroupInput{RateMultiplier: &negative})
 	require.Error(t, err)
-	require.Nil(t, repo.updated, "disable hosted policy explicitly before restoring paid behavior")
+	require.Nil(t, repo.updated)
 }
 
 func TestHostedUsageAuthCacheRoundTrip(t *testing.T) {

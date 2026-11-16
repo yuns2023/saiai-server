@@ -149,7 +149,10 @@ const en: typeof zh = {
     subscriptionLeft: 'Subscription left',
     balance: 'Account balance',
     rangeSpend: 'Charged in range',
-    rangeRequests: 'Requests in range'
+    rangeRequests: 'Requests in range',
+    billing: 'Billing',
+    hostedFee: 'Own-account hosting · fee {rate}× standard price',
+    hostedStandard: 'Standard-price usage in range {amount} (key caps and limits count the standard price)'
   },
   notFound: {
     title: 'Page not found',
@@ -174,7 +177,7 @@ const en: typeof zh = {
     perCall: 'Per-call price',
     unitNote: 'Unit price is this call’s cost per million tokens.',
     tokensUnknown: 'Token usage was not reported; billed per call.',
-    metered: 'Metered (counts toward key caps, not charged)',
+    metered: 'Metered at standard price (counts toward key caps and limits)',
     standard: 'Standard price',
     groupRate: 'Billing rate',
     modelRate: 'Model rate',
@@ -266,7 +269,9 @@ const en: typeof zh = {
     enable: 'Enable',
     createdNext: 'Key created. Copy the command below and run it once in a terminal to start.',
     deleteTitle: 'Delete {name}?',
-    deleteBody: 'Tools using this key stop working immediately. This cannot be undone.'
+    deleteBody: 'Tools using this key stop working immediately. This cannot be undone.',
+    hostedFee: 'Hosting fee {rate}× standard price',
+    hostedFree: 'Own-account hosting · not charged'
   },
   usage: {
     title: 'Usage',
@@ -291,7 +296,7 @@ const en: typeof zh = {
   },
   hosted: {
     title: 'My hosted accounts',
-    lead: 'Usage of the upstream accounts that belong to you. Other users’ requests show usage only, never who made them. Standard price is the official list price, for reference.',
+    lead: 'Usage of the upstream accounts that belong to you. Other users’ requests show usage only, never who made them. Standard price uses this site’s model pricing, for reference.',
     empty: 'You have no hosted accounts yet. Once an administrator assigns an upstream account to you, it appears here.',
     current: 'Current accounts',
     history: 'Past hosted accounts',
@@ -317,8 +322,9 @@ const en: typeof zh = {
     self: 'You',
     others: 'Other users',
     requests: '{n} req',
+    serviceFee: 'fee {amount}',
     usageTitle: 'Calls on {name}',
-    usageLead: 'Standard price uses official list prices, for reference only; the charged amount is shown for your own calls only.',
+    usageLead: 'Standard price uses site model list prices, for reference only; the charged amount is shown for your own calls only.',
     time: 'Time',
     model: 'Model',
     input: 'Input',

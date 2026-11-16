@@ -147,7 +147,10 @@ export default {
     subscriptionLeft: '订阅剩余额度',
     balance: '账户余额',
     rangeSpend: '期间扣费',
-    rangeRequests: '期间请求'
+    rangeRequests: '期间请求',
+    billing: '计费',
+    hostedFee: '自有账号托管 · 服务费 {rate}× 标准价',
+    hostedStandard: '期间标准价用量 {amount}（Key 额度与限额按标准价计算）'
   },
   notFound: {
     title: '页面不存在',
@@ -172,7 +175,7 @@ export default {
     perCall: '按次计费',
     unitNote: '单价为本次费用按 Tokens 折算的每百万价格。',
     tokensUnknown: '上游未提供 Tokens 用量，按次计费。',
-    metered: '计量金额（计入 Key 额度，不扣余额）',
+    metered: '标准价计量（计入 Key 额度与限额）',
     standard: '标准计费',
     groupRate: '计费倍率',
     modelRate: '模型倍率',
@@ -264,7 +267,9 @@ export default {
     enable: '启用',
     createdNext: 'Key 已创建。复制下面的命令在终端运行一次，即可开始使用。',
     deleteTitle: '删除 {name}？',
-    deleteBody: '删除后使用这个 Key 的工具会立刻无法调用，且无法恢复。'
+    deleteBody: '删除后使用这个 Key 的工具会立刻无法调用，且无法恢复。',
+    hostedFee: '托管服务费 {rate}× 标准价',
+    hostedFree: '自有账号托管 · 不扣费'
   },
   usage: {
     title: '用量',
@@ -289,7 +294,7 @@ export default {
   },
   hosted: {
     title: '我的托管号',
-    lead: '这里显示归属于你的上游账号的用量；其他用户的请求只显示用量，不显示其身份。标准价为官方价格参考。',
+    lead: '这里显示归属于你的上游账号的用量；其他用户的请求只显示用量，不显示其身份。标准价按本站模型价格计算，仅供参考。',
     empty: '你名下还没有托管号。管理员把上游账号归属到你之后，会显示在这里。',
     current: '当前托管号',
     history: '历史托管号',
@@ -315,8 +320,9 @@ export default {
     self: '自用',
     others: '其他用户',
     requests: '{n} 次',
+    serviceFee: '服务费 {amount}',
     usageTitle: '{name} 的调用记录',
-    usageLead: '标准价按官方价格计算，仅供参考；实扣只对你自己的调用显示。',
+    usageLead: '标准价按本站模型价格计算，仅供参考；实扣只对你自己的调用显示。',
     time: '时间',
     model: '模型',
     input: '输入',

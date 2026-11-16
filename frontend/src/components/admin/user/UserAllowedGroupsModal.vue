@@ -87,6 +87,13 @@
                     :placeholder="String(config.defaultRate)"
                     class="hide-spinner w-24 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium transition-colors focus:border-primary-500 focus:outline-hidden focus:ring-2 focus:ring-primary-500/20 dark:border-dark-500 dark:bg-dark-700 dark:focus:border-primary-500"
                   />
+                  <span
+                    v-if="config.hosted"
+                    class="text-xs text-amber-600 dark:text-amber-400"
+                    data-testid="hosted-custom-rate-ignored"
+                  >
+                    {{ t('admin.groups.hostedOverridesIgnored') }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -145,6 +152,13 @@
                     :placeholder="String(config.defaultRate)"
                     class="hide-spinner w-24 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium transition-colors focus:border-primary-500 focus:outline-hidden focus:ring-2 focus:ring-primary-500/20 dark:border-dark-500 dark:bg-dark-700 dark:focus:border-primary-500"
                   />
+                  <span
+                    v-if="config.hosted"
+                    class="text-xs text-amber-600 dark:text-amber-400"
+                    data-testid="hosted-custom-rate-ignored"
+                  >
+                    {{ t('admin.groups.hostedOverridesIgnored') }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -193,6 +207,7 @@ interface GroupRateConfig {
   groupName: string
   platform: GroupPlatform
   isExclusive: boolean
+  hosted: boolean
   defaultRate: number
   customRate: number | null
   isSelected: boolean
@@ -246,6 +261,8 @@ const load = async () => {
       isExclusive: g.is_exclusive,
       defaultRate: g.rate_multiplier,
       customRate: userGroupRates[g.id] ?? null,
+      // Hosted groups charge the group fee rate; per-user rates never apply.
+      hosted: !!g.hosted_usage_enabled,
       // 专属分组：检查是否在 allowed_groups 中
       // 公开分组：始终选中
       isSelected: g.is_exclusive ? userAllowedGroups.includes(g.id) : true,

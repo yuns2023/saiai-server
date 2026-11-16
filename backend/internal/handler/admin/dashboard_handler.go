@@ -162,6 +162,8 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		"hosted_today_requests":     stats.HostedTodayRequests,
 		"hosted_today_tokens":       stats.HostedTodayTokens,
 		"hosted_today_metered_cost": stats.HostedTodayMeteredCost,
+		"hosted_total_service_fee":  stats.HostedTotalServiceFee,
+		"hosted_today_service_fee":  stats.HostedTodayServiceFee,
 
 		// 预聚合新鲜度
 		"hourly_active_users": stats.HourlyActiveUsers,

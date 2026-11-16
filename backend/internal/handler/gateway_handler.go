@@ -2009,7 +2009,7 @@ func (h *GatewayHandler) attachUsageBillingDetails(
 		return nil
 	}
 
-	if apiKey.Group.UsesHostedUsage() {
+	if apiKey.Group.HostedChargeFree() {
 		// Keep the legacy mode while explicitly describing the exemption. A
 		// hosted Key never exposes an unrelated platform wallet amount.
 		resp["billing_mode"] = "balance"
@@ -2021,6 +2021,13 @@ func (h *GatewayHandler) attachUsageBillingDetails(
 
 	resp["billing_mode"] = "balance"
 	resp["planName"] = "钱包余额"
+	if apiKey.Group.UsesHostedUsage() {
+		// A hosted group with a service fee charges the wallet like any
+		// balance group; Key usage still counts at the standard price.
+		resp["planName"] = "自有账号托管"
+		resp["usage_basis"] = "standard_reference"
+		resp["hosted_fee_rate"] = apiKey.Group.HostedFeeRate()
+	}
 
 	latestUser := apiKey.User
 	if h.userService != nil {

@@ -372,7 +372,7 @@
           <p class="input-hint">{{ t('admin.groups.copyAccounts.hint') }}</p>
         </div>
         <div>
-          <label class="input-label">{{ t('admin.groups.form.rateMultiplier') }}</label>
+          <label class="input-label" data-testid="group-rate-label">{{ createForm.hosted_usage_enabled ? t('hostedUsage.feeRateLabel') : t('admin.groups.form.rateMultiplier') }}</label>
           <input
             v-model.number="createForm.rate_multiplier"
             type="number"
@@ -382,7 +382,7 @@
             class="input"
             data-tour="group-form-multiplier"
           />
-          <p class="input-hint">{{ t('admin.groups.rateMultiplierHint') }}</p>
+          <p class="input-hint">{{ createForm.hosted_usage_enabled ? t('hostedUsage.feeRateHint') : t('admin.groups.rateMultiplierHint') }}</p>
         </div>
         <div>
           <label class="input-label">{{ t('admin.groups.requiredLevel') }}</label>
@@ -1191,7 +1191,7 @@
           <p class="input-hint">{{ t('admin.groups.copyAccounts.hintEdit') }}</p>
         </div>
         <div>
-          <label class="input-label">{{ t('admin.groups.form.rateMultiplier') }}</label>
+          <label class="input-label" data-testid="group-rate-label">{{ editForm.hosted_usage_enabled ? t('hostedUsage.feeRateLabel') : t('admin.groups.form.rateMultiplier') }}</label>
           <input
             v-model.number="editForm.rate_multiplier"
             type="number"
@@ -1201,6 +1201,7 @@
             class="input"
             data-tour="group-form-multiplier"
           />
+          <p v-if="editForm.hosted_usage_enabled" class="input-hint">{{ t('hostedUsage.feeRateHint') }}</p>
         </div>
         <div>
           <label class="input-label">{{ t('admin.groups.requiredLevel') }}</label>

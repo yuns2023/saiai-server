@@ -12,7 +12,7 @@ vi.mock('@/api', async (importOriginal) => {
 
 import HostedView from '../HostedView.vue'
 
-const summary = { self_requests: 3, self_standard_cost: 1.23, others_requests: 2, others_standard_cost: 0.7 }
+const summary = { self_requests: 3, self_standard_cost: 1.23, self_service_fee: 0.25, others_requests: 2, others_standard_cost: 0.7 }
 
 const current: OwnedAccount = {
   account_id: 12,
@@ -103,7 +103,7 @@ describe('HostedView', () => {
 
   it('shows the explanatory note', async () => {
     const w = await mountView([current])
-    expect(w.find('[data-testid=hosted-note]').text()).toBe('这里显示归属于你的上游账号的用量；其他用户的请求只显示用量，不显示其身份。标准价为官方价格参考。')
+    expect(w.find('[data-testid=hosted-note]').text()).toBe('这里显示归属于你的上游账号的用量；其他用户的请求只显示用量，不显示其身份。标准价按本站模型价格计算，仅供参考。')
   })
 
   it('renders current accounts first and past ones in their own section', async () => {
@@ -138,6 +138,22 @@ describe('HostedView', () => {
     expect(stats).toContain('近 7 天')
     expect(stats).toContain('3 次 · $1.23')
     expect(stats).toContain('2 次 · $0.7000')
+  })
+
+  it('shows my service fee next to my own usage, only when the server reports it', async () => {
+    const w = await mountView([current, past])
+    const fees = w.find('[data-testid=hosted-account-12]').findAll('[data-testid=hosted-self-fee]').map((f) => f.text())
+    expect(fees).toEqual(['服务费 $0.2500', '服务费 $0.2500'])
+    // Standard-price numbers stay as they were.
+    expect(w.find('[data-testid=hosted-account-12] [data-testid=hosted-self]').text()).toContain('3 次 · $1.23')
+    // Older servers send no fee: nothing is shown rather than a made-up $0.
+    expect(w.find('[data-testid=hosted-account-7] [data-testid=hosted-self-fee]').exists()).toBe(false)
+  })
+
+  it('shows a zero fee (free hosting) as $0', async () => {
+    const free = { ...summary, self_service_fee: 0 }
+    const w = await mountView([{ ...current, last_24h: free, last_7d: free }])
+    expect(w.findAll('[data-testid=hosted-self-fee]').map((f) => f.text())).toEqual(['服务费 $0', '服务费 $0'])
   })
 
   it('shows a friendly empty state when the user owns nothing', async () => {

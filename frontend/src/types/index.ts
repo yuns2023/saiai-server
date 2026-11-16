@@ -1013,7 +1013,7 @@ export interface WindowStats extends RevenueParts {
   cost: number // Account cost (account multiplier)
   standard_cost?: number
   user_cost?: number
-  hosted_requests?: number // Hosted-group requests (metered_cost set; cost/user_cost are 0)
+  hosted_requests?: number // Hosted-group requests (metered_cost set; account cost 0, user_cost = service fee, 0 when free)
   hosted_cost?: number // Hosted reference usage: SUM(metered_cost)
 }
 
@@ -1520,6 +1520,9 @@ export interface DashboardStats {
   hosted_today_requests?: number
   hosted_today_tokens?: number
   hosted_today_metered_cost?: number
+  // 托管服务费收入：托管行实扣（actual_cost）合计，同样仅覆盖日志保留期；免费托管分组为 0。
+  hosted_total_service_fee?: number
+  hosted_today_service_fee?: number
 }
 
 export interface UsageStatsResponse {

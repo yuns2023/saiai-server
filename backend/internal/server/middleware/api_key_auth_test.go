@@ -194,6 +194,9 @@ func TestHostedUsageOnlyExemptsWalletEligibility(t *testing.T) {
 		{"expired", func(k *service.APIKey) { past := time.Now().Add(-time.Hour); k.ExpiresAt = &past }, http.StatusForbidden},
 		{"inactive group", func(k *service.APIKey) { k.Group.Status = "inactive" }, http.StatusForbidden},
 		{"ordinary zero multiplier", func(k *service.APIKey) { k.Group.HostedUsageEnabled = false }, http.StatusForbidden},
+		{"hosted fee, empty wallet", func(k *service.APIKey) { k.Group.RateMultiplier = 0.1 }, http.StatusForbidden},
+		{"hosted fee, funded wallet", func(k *service.APIKey) { k.Group.RateMultiplier = 0.1; k.User.Balance = 5 }, http.StatusOK},
+		{"free hosted, negative wallet", func(k *service.APIKey) { k.User.Balance = -3 }, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &service.Group{ID: 42, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true,

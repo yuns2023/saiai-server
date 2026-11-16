@@ -55,6 +55,10 @@ type HostedOwnerUsageTotals struct {
 	SelfStandardCost   float64 `json:"self_standard_cost"`
 	OthersRequests     int64   `json:"others_requests"`
 	OthersStandardCost float64 `json:"others_standard_cost"`
+	// SelfServiceFee is the hosting service fee the owner was charged for
+	// their own hosted-group requests (hosted rows only; ordinary PAYG use of
+	// the same account through other groups is not a service fee).
+	SelfServiceFee float64 `json:"self_service_fee"`
 }
 
 // OwnedHostedAccount is the owner-facing allowlist view of one account. It

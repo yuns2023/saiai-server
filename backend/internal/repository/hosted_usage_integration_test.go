@@ -118,7 +118,7 @@ func TestHostedUsagePersistsReferenceAndDeduplicatesKeyLimits(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT rate_multiplier FROM accounts WHERE id=$1", account.ID).Scan(&platformCost))
 	require.Equal(t, 1.0, platformCost)
 
-	// An invalid partial group edit cannot turn hosted mode into paid mode.
-	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET rate_multiplier=1 WHERE id=$1", g.ID)
+	// A negative rate is never a valid hosting fee (migration 130 keeps >= 0).
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET rate_multiplier=-1 WHERE id=$1", g.ID)
 	require.Error(t, err)
 }

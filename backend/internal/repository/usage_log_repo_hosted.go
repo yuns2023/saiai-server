@@ -346,6 +346,8 @@ func (r *usageLogRepository) applyDashboardHostedStatsAggregated(ctx context.Con
 	stats.HostedTodayRequests = todayAll.Requests
 	stats.HostedTodayTokens = todayAll.tokens()
 	stats.HostedTodayMeteredCost = todayAll.MeteredCost
+	stats.HostedTotalServiceFee = totalAll.ActualCost
+	stats.HostedTodayServiceFee = todayAll.ActualCost
 	return nil
 }
 

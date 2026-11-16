@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -92,4 +93,35 @@ func TestDashboardSnapshotExcludeHostedNeverFallsBackToInclusiveQueries(t *testi
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/snapshot?start_date=2026-03-01&end_date=2026-03-07&include_stats=false&include_model_stats=false&exclude_hosted=true", nil))
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	require.Equal(t, int32(0), repo.trendCalls.Load())
+}
+
+type dashboardStatsRepoProbe struct {
+	service.UsageLogRepository
+	stats *usagestats.DashboardStats
+}
+
+func (r *dashboardStatsRepoProbe) GetDashboardStats(context.Context) (*usagestats.DashboardStats, error) {
+	return r.stats, nil
+}
+
+// GetStats builds its payload by hand; the hosted service fee fields must be
+// serialized there (P2a).
+func TestDashboardStatsSerializesHostedServiceFee(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &dashboardStatsRepoProbe{stats: &usagestats.DashboardStats{
+		HostedTotalMeteredCost: 12, HostedTodayMeteredCost: 2, HostedTotalServiceFee: 1.2, HostedTodayServiceFee: 0.2,
+	}}
+	handler := NewDashboardHandler(service.NewDashboardService(repo, nil, nil, nil), nil)
+	router := gin.New()
+	router.GET("/stats", handler.GetStats)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var body struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, 1.2, body.Data["hosted_total_service_fee"])
+	require.Equal(t, 0.2, body.Data["hosted_today_service_fee"])
+	require.Equal(t, 12.0, body.Data["hosted_total_metered_cost"])
 }

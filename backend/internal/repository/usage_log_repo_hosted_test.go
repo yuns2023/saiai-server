@@ -318,3 +318,37 @@ func TestCeilToLocalHourKeepsRepeatedDSTHour(t *testing.T) {
 	aligned := time.Date(2026, 11, 1, 6, 0, 0, 0, time.UTC).In(ny)
 	require.True(t, ceilToLocalHour(aligned).Equal(aligned))
 }
+
+// Hosted rows with a service fee: the aggregated path removes the fee from the
+// platform actual cost and reports it as hosted service fee (P2a).
+func TestApplyDashboardHostedStatsReportsServiceFee(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+	loc := timezone.Location()
+	todayStart := time.Date(2026, 10, 26, 0, 0, 0, 0, loc)
+	tomorrow := time.Date(2026, 10, 27, 0, 0, 0, 0, loc)
+	watermark := todayStart.Add(10 * time.Hour)
+	history := map[string]hostedUsage{
+		"2026-10-24": {Requests: 2, InputTokens: 100, TotalCost: 1.0, ActualCost: 0.1, DurationMs: 100, MeteredCost: 1.0},
+	}
+	today := hostedUsage{Requests: 1, InputTokens: 50, TotalCost: 0.5, ActualCost: 0.05, DurationMs: 50, MeteredCost: 0.5}
+	buckets := map[string]hostedUsage{
+		"2026-10-24": {Requests: 10, InputTokens: 500, TotalCost: 3, ActualCost: 2.1, DurationMs: 1000},
+		"2026-10-26": {Requests: 5, InputTokens: 250, TotalCost: 1.5, ActualCost: 1.05, DurationMs: 500},
+	}
+	mock.ExpectQuery(`SELECT TO_CHAR\(created_at, 'YYYY-MM-DD'\) AS day`).WithArgs(usagestats.HostedUsageMeteringEpoch, todayStart).WillReturnRows(hostedDayRows(history))
+	mock.ExpectQuery(`FROM usage_logs\s+WHERE created_at >= \$1 AND created_at < \$2\s+AND metered_cost IS NOT NULL\s*$`).WithArgs(todayStart, tomorrow, watermark).WillReturnRows(hostedUsageRow(today, today))
+	mock.ExpectQuery(`FROM usage_dashboard_daily\s+WHERE bucket_date >= \$1::date`).WillReturnRows(dailyBucketRows(buckets))
+
+	stats := &DashboardStats{
+		TotalRequests: 15, TotalInputTokens: 750, TotalCost: 4.5, TotalActualCost: 3.15,
+		TodayRequests: 5, TodayInputTokens: 250, TodayCost: 1.5, TodayActualCost: 1.05,
+	}
+	require.NoError(t, repo.applyDashboardHostedStatsAggregated(context.Background(), stats, todayStart, watermark, 1500))
+	require.InDelta(t, 3.0, stats.TotalActualCost, 1e-9, "platform actual cost excludes hosted fees")
+	require.InDelta(t, 1.0, stats.TodayActualCost, 1e-9)
+	require.InDelta(t, 0.15, stats.HostedTotalServiceFee, 1e-9)
+	require.InDelta(t, 0.05, stats.HostedTodayServiceFee, 1e-9)
+	require.InDelta(t, 1.5, stats.HostedTotalMeteredCost, 1e-9)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
