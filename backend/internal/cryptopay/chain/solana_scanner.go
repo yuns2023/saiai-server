@@ -1,0 +1,467 @@
+package chain
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math/big"
+	"sort"
+	"time"
+
+	"github.com/mr-tron/base58"
+)
+
+// Solana commitments accepted by the scanner.
+const (
+	CommitmentFinalized = "finalized"
+	CommitmentConfirmed = "confirmed"
+)
+
+// SolanaScannerConfig configures a Solana JSON-RPC scanner.
+type SolanaScannerConfig struct {
+	Network Network
+	RPC     RPCOptions
+	// Assets is the token whitelist. nil = MainnetAssets() rows of Network.
+	// Required (non-nil) for networks without mainnet assets (e.g. devnet).
+	Assets []Asset
+	// PageLimit for getSignaturesForAddress (1..1000, default 1000).
+	PageLimit int
+	// MaxPages bounds one ScanTokenAccount walk (default 1000 pages); hitting
+	// it is an error, never a truncated success.
+	MaxPages int
+	// MaxSupportedTransactionVersion passed to getTransaction (default 1).
+	// Mainnet already carries version-1 transactions (verified 2026-11-16);
+	// with 0 the node rejects them with -32015 and the scan would stall.
+	MaxSupportedTransactionVersion *int
+}
+
+// SolanaRPCScanner implements SolanaScanner over plain JSON-RPC.
+type SolanaRPCScanner struct {
+	network    Network
+	rpc        *rpcClient
+	assets     []Asset
+	pageLimit  int
+	maxPages   int
+	maxVersion int
+}
+
+var _ SolanaScanner = (*SolanaRPCScanner)(nil)
+
+// NewSolanaScanner builds a Solana scanner.
+func NewSolanaScanner(cfg SolanaScannerConfig) (*SolanaRPCScanner, error) {
+	if cfg.Network.Family() != FamilySolana {
+		return nil, fmt.Errorf("chain: %q is not a Solana network", cfg.Network)
+	}
+	assets := cfg.Assets
+	if assets == nil {
+		assets = assetsForNetwork(MainnetAssets(), cfg.Network)
+	}
+	if len(assets) == 0 {
+		return nil, fmt.Errorf("chain: no whitelisted assets for %s", cfg.Network)
+	}
+	seen := map[string]struct{}{}
+	for _, a := range assets {
+		if a.Network != cfg.Network {
+			return nil, fmt.Errorf("chain: asset %s is for %s, scanner is %s", a.Symbol, a.Network, cfg.Network)
+		}
+		if _, err := DecodeSolanaPubkey(a.Contract); err != nil {
+			return nil, fmt.Errorf("chain: asset %s mint: %w", a.Symbol, err)
+		}
+		if _, err := DecodeSolanaPubkey(a.TokenProgram); err != nil {
+			return nil, fmt.Errorf("chain: asset %s token program: %w", a.Symbol, err)
+		}
+		if _, dup := seen[a.Contract]; dup {
+			return nil, fmt.Errorf("chain: duplicate asset mint %s", a.Contract)
+		}
+		seen[a.Contract] = struct{}{}
+	}
+	s := &SolanaRPCScanner{
+		network:    cfg.Network,
+		assets:     append([]Asset(nil), assets...),
+		pageLimit:  cfg.PageLimit,
+		maxPages:   cfg.MaxPages,
+		maxVersion: 1,
+	}
+	if s.pageLimit <= 0 || s.pageLimit > 1000 {
+		s.pageLimit = 1000
+	}
+	if s.maxPages <= 0 {
+		s.maxPages = 1000
+	}
+	if cfg.MaxSupportedTransactionVersion != nil {
+		s.maxVersion = *cfg.MaxSupportedTransactionVersion
+	}
+	rpc, err := newRPCClient(cfg.RPC)
+	if err != nil {
+		return nil, err
+	}
+	s.rpc = rpc
+	return s, nil
+}
+
+// Network implements SolanaScanner.
+func (s *SolanaRPCScanner) Network() Network { return s.network }
+
+func (s *SolanaRPCScanner) whitelisted(mint, program string) (Asset, bool) {
+	for _, a := range s.assets {
+		if a.Contract == mint && a.TokenProgram == program {
+			return a, true
+		}
+	}
+	return Asset{}, false
+}
+
+func validateCommitment(c string) error {
+	if c != CommitmentFinalized && c != CommitmentConfirmed {
+		return fmt.Errorf("chain: unsupported commitment %q (want finalized or confirmed)", c)
+	}
+	return nil
+}
+
+type rpcSignatureInfo struct {
+	Signature string          `json:"signature"`
+	Slot      uint64          `json:"slot"`
+	Err       json.RawMessage `json:"err"`
+}
+
+// ScanTokenAccount implements SolanaScanner. Observations are returned oldest
+// first. newestSig is the newest signature returned by the node at this
+// commitment; when there is nothing newer than untilSig it is untilSig itself
+// (so storing it unconditionally never rewinds a watermark), and "" only when
+// the account has no history at all and untilSig was "".
+func (s *SolanaRPCScanner) ScanTokenAccount(ctx context.Context, owner, tokenAccount string, asset Asset, untilSig string, commitment string) ([]Observation, string, error) {
+	if err := validateCommitment(commitment); err != nil {
+		return nil, "", err
+	}
+	if _, err := DecodeSolanaPubkey(owner); err != nil {
+		return nil, "", err
+	}
+	if _, err := DecodeSolanaPubkey(tokenAccount); err != nil {
+		return nil, "", err
+	}
+	if asset.Network != s.network {
+		return nil, "", fmt.Errorf("chain: asset network %s != scanner %s", asset.Network, s.network)
+	}
+	wl, ok := s.whitelisted(asset.Contract, asset.TokenProgram)
+	if !ok {
+		return nil, "", fmt.Errorf("chain: asset %s/%s is not whitelisted", asset.Contract, asset.TokenProgram)
+	}
+
+	var sigs []rpcSignatureInfo
+	before := ""
+	reachedUntil := false
+	for page := 0; ; page++ {
+		if page >= s.maxPages {
+			return nil, "", fmt.Errorf("chain: %s has more than %d signature pages; raise MaxPages", tokenAccount, s.maxPages)
+		}
+		opts := map[string]any{"limit": s.pageLimit, "commitment": commitment}
+		if before != "" {
+			opts["before"] = before
+		}
+		if untilSig != "" {
+			opts["until"] = untilSig
+		}
+		raw, err := s.rpc.call(ctx, "getSignaturesForAddress", []any{tokenAccount, opts})
+		if err != nil {
+			return nil, "", err
+		}
+		var batch []rpcSignatureInfo
+		if err := json.Unmarshal(raw, &batch); err != nil {
+			return nil, "", fmt.Errorf("chain: getSignaturesForAddress: %w", err)
+		}
+		for _, si := range batch {
+			if si.Signature == "" {
+				return nil, "", errors.New("chain: getSignaturesForAddress returned an empty signature")
+			}
+			if untilSig != "" && si.Signature == untilSig {
+				reachedUntil = true
+				break
+			}
+			sigs = append(sigs, si)
+		}
+		if reachedUntil || len(batch) < s.pageLimit {
+			break
+		}
+		before = batch[len(batch)-1].Signature
+	}
+
+	newest := untilSig
+	if len(sigs) > 0 {
+		newest = sigs[0].Signature
+	}
+
+	var out []Observation
+	// Oldest first.
+	for i := len(sigs) - 1; i >= 0; i-- {
+		si := sigs[i]
+		if !isJSONNull(si.Err) {
+			continue // failed transaction
+		}
+		tx, err := s.getTransaction(ctx, si.Signature, commitment)
+		if err != nil {
+			return nil, "", err
+		}
+		if !isJSONNull(tx.Meta.Err) {
+			continue
+		}
+		deltas, err := tokenDeltas(tx)
+		if err != nil {
+			return nil, "", fmt.Errorf("chain: tx %s: %w", si.Signature, err)
+		}
+		d, ok := deltas[tokenAccount]
+		if ok && d.bad != nil {
+			return nil, "", fmt.Errorf("chain: tx %s: %w", si.Signature, d.bad)
+		}
+		if !ok || d.mint != wl.Contract || d.program != wl.TokenProgram || d.owner != owner || d.delta.Sign() <= 0 {
+			continue
+		}
+		out = append(out, s.observation(tx, si.Signature, wl, owner, tokenAccount, d, deltas, commitment))
+	}
+	return out, newest, nil
+}
+
+// ObservationsForTx implements SolanaScanner: every whitelisted token account
+// owned by one of owners whose balance increased in the transaction.
+func (s *SolanaRPCScanner) ObservationsForTx(ctx context.Context, signature string, owners []string, commitment string) ([]Observation, error) {
+	if err := validateCommitment(commitment); err != nil {
+		return nil, err
+	}
+	ownerSet := make(map[string]struct{}, len(owners))
+	for _, o := range owners {
+		if _, err := DecodeSolanaPubkey(o); err != nil {
+			return nil, err
+		}
+		ownerSet[o] = struct{}{}
+	}
+	tx, err := s.getTransaction(ctx, signature, commitment)
+	if err != nil {
+		return nil, err
+	}
+	if !isJSONNull(tx.Meta.Err) {
+		return nil, nil
+	}
+	deltas, err := tokenDeltas(tx)
+	if err != nil {
+		return nil, fmt.Errorf("chain: tx %s: %w", signature, err)
+	}
+	accounts := make([]string, 0, len(deltas))
+	for acct := range deltas {
+		accounts = append(accounts, acct)
+	}
+	sort.Strings(accounts)
+	var out []Observation
+	for _, acct := range accounts {
+		d := deltas[acct]
+		if _, ok := ownerSet[d.owner]; !ok {
+			continue
+		}
+		if d.bad != nil {
+			return nil, fmt.Errorf("chain: tx %s: %w", signature, d.bad)
+		}
+		if d.delta.Sign() <= 0 {
+			continue
+		}
+		asset, ok := s.whitelisted(d.mint, d.program)
+		if !ok {
+			continue
+		}
+		out = append(out, s.observation(tx, signature, asset, d.owner, acct, d, deltas, commitment))
+	}
+	return out, nil
+}
+
+func (s *SolanaRPCScanner) observation(tx *rpcSolanaTx, sig string, asset Asset, owner, tokenAccount string, d tokenDelta, all map[string]tokenDelta, commitment string) Observation {
+	o := Observation{
+		Network:      s.network,
+		Asset:        asset,
+		TxHash:       sig,
+		EventKey:     "acct:" + tokenAccount,
+		ToAddress:    owner,
+		TokenAccount: tokenAccount,
+		FromAddress:  senderOwner(all, asset),
+		Units:        new(big.Int).Set(d.delta),
+		BlockNumber:  tx.Slot,
+		Finalized:    commitment == CommitmentFinalized,
+	}
+	if tx.BlockTime != nil {
+		o.BlockTime = time.Unix(*tx.BlockTime, 0).UTC()
+	}
+	return o
+}
+
+// senderOwner picks the owner with the largest decrease of the same mint
+// (informational only).
+func senderOwner(all map[string]tokenDelta, asset Asset) string {
+	best := ""
+	var bestDelta *big.Int
+	keys := make([]string, 0, len(all))
+	for k := range all {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		d := all[k]
+		if d.bad != nil || d.mint != asset.Contract || d.program != asset.TokenProgram || d.delta.Sign() >= 0 {
+			continue
+		}
+		if bestDelta == nil || d.delta.Cmp(bestDelta) < 0 {
+			best, bestDelta = d.owner, d.delta
+		}
+	}
+	return best
+}
+
+type rpcSolanaTx struct {
+	Slot      uint64 `json:"slot"`
+	BlockTime *int64 `json:"blockTime"`
+	Meta      *struct {
+		Err               json.RawMessage   `json:"err"`
+		PreTokenBalances  []rpcTokenBalance `json:"preTokenBalances"`
+		PostTokenBalances []rpcTokenBalance `json:"postTokenBalances"`
+	} `json:"meta"`
+	Transaction struct {
+		Message struct {
+			AccountKeys []struct {
+				Pubkey string `json:"pubkey"`
+			} `json:"accountKeys"`
+		} `json:"message"`
+	} `json:"transaction"`
+}
+
+type rpcTokenBalance struct {
+	AccountIndex  int    `json:"accountIndex"`
+	Mint          string `json:"mint"`
+	Owner         string `json:"owner"`
+	ProgramID     string `json:"programId"`
+	UITokenAmount struct {
+		Amount string `json:"amount"`
+	} `json:"uiTokenAmount"`
+}
+
+func (s *SolanaRPCScanner) getTransaction(ctx context.Context, sig, commitment string) (*rpcSolanaTx, error) {
+	if _, err := decodeSignature(sig); err != nil {
+		return nil, err
+	}
+	raw, err := s.rpc.call(ctx, "getTransaction", []any{sig, map[string]any{
+		"commitment":                     commitment,
+		"maxSupportedTransactionVersion": s.maxVersion,
+		"encoding":                       "jsonParsed",
+	}})
+	if err != nil {
+		return nil, err
+	}
+	if isJSONNull(raw) {
+		// Not yet visible at this commitment on this node: retry later. Never
+		// treat as "no inflow".
+		return nil, fmt.Errorf("%w: getTransaction(%s) returned null at %s", ErrTxNotFound, sig, commitment)
+	}
+	var tx rpcSolanaTx
+	if err := json.Unmarshal(raw, &tx); err != nil {
+		return nil, fmt.Errorf("chain: getTransaction(%s): %w", sig, err)
+	}
+	if tx.Meta == nil {
+		return nil, fmt.Errorf("chain: getTransaction(%s): missing meta", sig)
+	}
+	if len(tx.Transaction.Message.AccountKeys) == 0 {
+		return nil, fmt.Errorf("chain: getTransaction(%s): no account keys (jsonParsed expected)", sig)
+	}
+	return &tx, nil
+}
+
+type tokenDelta struct {
+	mint, owner, program string
+	delta                *big.Int
+	// bad is set when this account's balance entries cannot be interpreted
+	// (identity changed within the tx, missing fields, duplicates). It is only
+	// an error when the account is one we care about, so an unrelated account
+	// in the same transaction cannot stall our scan.
+	bad error
+}
+
+// tokenDeltas returns post-pre per token account. An account missing from pre
+// (created in this tx) counts as 0 before; missing from post (closed) counts
+// as 0 after.
+func tokenDeltas(tx *rpcSolanaTx) (map[string]tokenDelta, error) {
+	keys := tx.Transaction.Message.AccountKeys
+	type entry struct {
+		mint, owner, program string
+		amount               *big.Int
+		bad                  error
+	}
+	read := func(list []rpcTokenBalance) (map[string]entry, error) {
+		m := make(map[string]entry, len(list))
+		for _, b := range list {
+			if b.AccountIndex < 0 || b.AccountIndex >= len(keys) {
+				return nil, fmt.Errorf("token balance accountIndex %d out of range (%d keys)", b.AccountIndex, len(keys))
+			}
+			acct := keys[b.AccountIndex].Pubkey
+			e := entry{mint: b.Mint, owner: b.Owner, program: b.ProgramID}
+			amt, ok := new(big.Int).SetString(b.UITokenAmount.Amount, 10)
+			switch {
+			case b.Mint == "" || b.Owner == "" || b.ProgramID == "":
+				e.bad = fmt.Errorf("token balance for %s lacks mint/owner/programId", acct)
+			case !ok || amt.Sign() < 0:
+				e.bad = fmt.Errorf("token balance amount %q for %s is not a non-negative integer", b.UITokenAmount.Amount, acct)
+			default:
+				e.amount = amt
+			}
+			if prev, dup := m[acct]; dup {
+				prev.bad = fmt.Errorf("duplicate token balance entries for %s", acct)
+				m[acct] = prev
+				continue
+			}
+			m[acct] = e
+		}
+		return m, nil
+	}
+	pre, err := read(tx.Meta.PreTokenBalances)
+	if err != nil {
+		return nil, err
+	}
+	post, err := read(tx.Meta.PostTokenBalances)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]tokenDelta, len(post)+len(pre))
+	for acct, p := range post {
+		d := tokenDelta{mint: p.mint, owner: p.owner, program: p.program, bad: p.bad}
+		before := big.NewInt(0)
+		if q, ok := pre[acct]; ok {
+			switch {
+			case q.bad != nil:
+				d.bad = q.bad
+			case q.mint != p.mint || q.owner != p.owner || q.program != p.program:
+				d.bad = fmt.Errorf("token account %s changed mint/owner/program within the transaction", acct)
+			default:
+				before = q.amount
+			}
+		}
+		if d.bad == nil {
+			d.delta = new(big.Int).Sub(p.amount, before)
+		}
+		out[acct] = d
+	}
+	for acct, q := range pre {
+		if _, ok := post[acct]; ok {
+			continue
+		}
+		d := tokenDelta{mint: q.mint, owner: q.owner, program: q.program, bad: q.bad}
+		if d.bad == nil {
+			d.delta = new(big.Int).Neg(q.amount)
+		}
+		out[acct] = d
+	}
+	return out, nil
+}
+
+func decodeSignature(sig string) ([]byte, error) {
+	if sig == "" || len(sig) > 90 {
+		return nil, fmt.Errorf("chain: invalid Solana signature %q", sig)
+	}
+	b, err := base58.Decode(sig)
+	if err != nil || len(b) != 64 {
+		return nil, fmt.Errorf("chain: invalid Solana signature %q", sig)
+	}
+	return b, nil
+}
