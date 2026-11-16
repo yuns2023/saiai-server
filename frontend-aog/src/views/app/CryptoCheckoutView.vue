@@ -21,6 +21,8 @@ import { useAuthStore } from '@/stores/auth'
 /** Polling cadence: live orders every 5 s; after expiry late transfers are rarer, so 30 s. */
 const LIVE_POLL_MS = 5000
 const EXPIRED_POLL_MS = 30000
+/** Retry delays after consecutive refresh failures (capped at the last). */
+const BACKOFF_MS = [5000, 10000, 20000, 60000]
 
 const { t } = useI18n()
 const route = useRoute()
@@ -33,6 +35,18 @@ const loading = ref(true)
 const loadError = ref<'' | 'failed' | 'notFound'>('')
 const qr = ref('')
 const now = ref(Date.now())
+/** Consecutive refresh failures since the last success. */
+const failures = ref(0)
+const lastUpdated = ref<number | null>(null)
+/** Data on screen is from an earlier successful load; the latest refresh failed. */
+const stale = computed(() => !!order.value && failures.value > 0)
+const lastUpdatedText = computed(() =>
+  lastUpdated.value === null
+    ? '—'
+    : new Intl.DateTimeFormat(intlLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(lastUpdated.value))
+)
+/** Never show a pay-to block without a real address. */
+const addressOk = computed(() => !!order.value && typeof order.value.address === 'string' && order.value.address.trim() !== '')
 
 const net = computed(() => config.value?.networks.find((n) => n.network === order.value?.network) ?? null)
 const networkLabel = computed(() => net.value?.label || order.value?.network || '')
@@ -40,7 +54,7 @@ const expiresAt = computed(() => (order.value ? new Date(order.value.expires_at)
 const isExpired = computed(() => !!order.value && (order.value.status === 'expired' || (order.value.status === 'pending' && now.value >= expiresAt.value)))
 /** Past the deadline whatever the status (a paid order keeps polling, but slower once expired). */
 const pastDeadline = computed(() => !!order.value && now.value >= expiresAt.value)
-/** Only the server decides "paid" (finalized ≥ amount); received may still include unconfirmed inflows. */
+/** The server decides "paid" (finalized received_amount ≥ amount). */
 const paidFull = computed(() => order.value?.status === 'paid')
 const displayStatus = computed(() => (order.value?.status === 'pending' && isExpired.value ? 'expired' : order.value?.status ?? 'pending'))
 const countdown = computed(() => {
@@ -53,7 +67,8 @@ const countdown = computed(() => {
 })
 const remaining = computed(() => {
   const o = order.value
-  if (!o || o.status === 'paid') return null
+  // Stale figures must not tell the user how much more to send (they might pay twice).
+  if (!o || o.status === 'paid' || stale.value) return null
   const due = toUnits(o.amount)
   const got = toUnits(o.received_amount)
   if (due === null || got === null || got >= due) return null
@@ -110,13 +125,23 @@ async function refresh(): Promise<void> {
       const before = order.value?.id === latest.id ? order.value.credited_amount : null
       order.value = latest
       loadError.value = ''
+      failures.value = 0
+      lastUpdated.value = Date.now()
       // Balance moved: refresh the header figure (best effort).
       if (before !== null && compareDecimal(latest.credited_amount, before) > 0) auth.refreshUser().catch(() => undefined)
     }
   } catch (e) {
-    if (current() && !order.value) {
+    if (current()) {
       const status = (e as { status?: number } | undefined)?.status
-      loadError.value = status === 404 || status === 403 ? 'notFound' : 'failed'
+      if (status === 404 || status === 403) {
+        // Gone or not ours (even after a successful load): drop the address and QR.
+        order.value = null
+        loadError.value = 'notFound'
+      } else {
+        // 429 / 503 / network / 5xx: keep what we have, mark it stale, back off.
+        failures.value++
+        if (!order.value) loadError.value = 'failed'
+      }
     }
   } finally {
     inFlight = false
@@ -130,7 +155,14 @@ function schedule(): void {
   window.clearTimeout(pollTimer)
   pollTimer = undefined
   if (stopped || document.hidden || loadError.value === 'notFound') return
-  pollTimer = window.setTimeout(tick, pastDeadline.value || order.value?.status === 'expired' ? EXPIRED_POLL_MS : LIVE_POLL_MS)
+  const base = pastDeadline.value || order.value?.status === 'expired' ? EXPIRED_POLL_MS : LIVE_POLL_MS
+  const backoff = failures.value > 0 ? BACKOFF_MS[Math.min(failures.value, BACKOFF_MS.length) - 1] : 0
+  pollTimer = window.setTimeout(tick, Math.max(base, backoff))
+}
+
+/** "Retry now": skip the backoff wait. */
+function retryNow(): void {
+  tick()
 }
 
 async function tick(): Promise<void> {
@@ -143,19 +175,22 @@ function onVisibility(): void {
   if (document.hidden) {
     window.clearTimeout(pollTimer)
     pollTimer = undefined
-  } else {
+  } else if (loadError.value !== 'notFound') {
     now.value = Date.now()
     tick()
   }
 }
 
+let qrSeq = 0
 watch(
-  () => order.value?.address,
+  () => (addressOk.value ? order.value!.address : ''),
   async (address) => {
+    const seq = ++qrSeq
     qr.value = ''
     if (!address) return
+    // QR content is exactly the deposit address.
     const image = await QRCode.toDataURL(address, { width: 280, margin: 1, color: { dark: '#14203a', light: '#ffffff' } }).catch(() => '')
-    if (!stopped && order.value?.address === address) qr.value = image
+    if (!stopped && seq === qrSeq && order.value?.address === address) qr.value = image
   }
 )
 
@@ -164,6 +199,8 @@ watch(orderId, () => {
   order.value = null
   loading.value = true
   loadError.value = ''
+  failures.value = 0
+  lastUpdated.value = null
   tick()
 })
 
@@ -199,7 +236,7 @@ onUnmounted(() => {
 
     <p v-else-if="!order" class="mt-6 text-sm text-seal" role="alert" data-testid="crypto-load-error">
       {{ loadError === 'notFound' ? t('crypto.notFound') : t('crypto.loadFailed') }}
-      <button v-if="loadError !== 'notFound'" type="button" class="btn btn-quiet btn-sm" @click="tick">{{ t('common.retry') }}</button>
+      <button v-if="loadError !== 'notFound'" type="button" class="btn btn-quiet btn-sm" @click="retryNow">{{ t('common.retry') }}</button>
     </p>
 
     <template v-else>
@@ -226,8 +263,17 @@ onUnmounted(() => {
         {{ t('crypto.expired') }}
       </p>
 
+      <p v-if="stale" class="mt-4 flex flex-wrap items-center gap-2 rounded border border-seal/40 bg-seal-wash px-3 py-2 text-sm text-seal" role="alert" data-testid="crypto-stale">
+        <span>{{ t('crypto.stale', { time: lastUpdatedText }) }}</span>
+        <button type="button" class="btn btn-quiet btn-sm" data-testid="crypto-retry" @click="retryNow">{{ t('crypto.retryNow') }}</button>
+      </p>
+
+      <p v-if="!addressOk" class="mt-8 rounded border border-seal/40 bg-seal-wash px-3 py-2 text-sm text-seal" role="alert" data-testid="crypto-no-address">
+        {{ t('crypto.noAddress') }}
+      </p>
+
       <!-- Where to send -->
-      <div class="mt-8 grid gap-10 lg:grid-cols-[minmax(0,1fr)_auto]">
+      <div v-else class="mt-8 grid gap-10 lg:grid-cols-[minmax(0,1fr)_auto]">
         <section aria-labelledby="send-title" class="min-w-0">
           <h2 id="send-title" class="text-md font-semibold">
             {{ t('crypto.sendTo', { amount: usd(order.amount), asset: order.asset, network: networkLabel }) }}

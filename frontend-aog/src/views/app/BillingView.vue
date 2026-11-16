@@ -389,15 +389,21 @@ async function loadCrypto(): Promise<void> {
   }
 }
 
+/** Only the latest deposits request may write the list (pagination clicks can overlap). */
+let depositsSeq = 0
+
 async function loadDeposits(p = depositsPage.value): Promise<void> {
+  const seq = ++depositsSeq
   try {
     const res = await cryptoPayApi.deposits(p, 10)
+    if (seq !== depositsSeq) return
     deposits.value = res.items
     depositsPage.value = res.page || p
     depositsPages.value = pageCount(res)
     depositsTotal.value = res.total || 0
     depositsFailed.value = false
   } catch {
+    if (seq !== depositsSeq) return
     // Unknown is not "none": show the failure with a retry instead of an empty list.
     depositsFailed.value = true
   }

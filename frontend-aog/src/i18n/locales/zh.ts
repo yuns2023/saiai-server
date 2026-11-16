@@ -415,6 +415,9 @@ export default {
     orphanedNote: '已作废的到账因链上重组未生效，不会入账。',
     inflows: '本单到账',
     truncated: '仅显示最近 1000 笔，金额合计为全部到账',
+    stale: '到账信息更新失败，最后更新于 {time}，正在重试',
+    retryNow: '立即重试',
+    noAddress: '订单缺少充值地址，请勿转账。请返回重新下单或联系管理员。',
     noInflows: '尚未检测到转账，到账后这里会自动更新。',
     loadFailed: '订单加载失败。',
     notFound: '没有找到这个订单。'

@@ -417,6 +417,9 @@ const en: typeof zh = {
     orphanedNote: 'Void deposits were dropped by a chain reorganisation and will not be credited.',
     inflows: 'Deposits for this order',
     truncated: 'Showing the latest 1,000 transfers; totals include all',
+    stale: 'Could not update payment status (last updated {time}). Retrying…',
+    retryNow: 'Retry now',
+    noAddress: 'This order has no deposit address. Do not send funds; go back and create a new order or contact support.',
     noInflows: 'No transfer detected yet. This page updates when one arrives.',
     loadFailed: 'Could not load the order.',
     notFound: 'Order not found.'
