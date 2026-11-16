@@ -58,3 +58,11 @@ paths = [
   '''^backend/internal/cryptopay/hdkey/hdkey_test\.go$''',
   '''^backend/internal/cryptopay/chain/testdata/[^/]+\.json$''',
 ]
+
+[[allowlists]]
+description = "Public Solana mainnet token-account address used as a test fixture (removed from the file later, still in branch history)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^backend/internal/service/crypto_pay_unit_test\.go$''']
+regexes = ['''TokenAccount:\s*"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"''']
