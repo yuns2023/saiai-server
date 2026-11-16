@@ -168,6 +168,7 @@ func (s *CryptoPayService) IngestObservations(ctx context.Context, observations 
 
 func (s *CryptoPayService) ingest(ctx context.Context, observations []chain.Observation) (*CryptoPayIngestResult, error) {
 	res := &CryptoPayIngestResult{}
+	norms := make([]*cryptoPayNormalizedObs, 0, len(observations))
 	for _, o := range observations {
 		norm, err := s.normalizeObservation(o)
 		if err != nil {
@@ -179,18 +180,46 @@ func (s *CryptoPayService) ingest(ctx context.Context, observations []chain.Obse
 			cryptoPayLogf("ignore observation network=%s tx=%s event=%s: %v", o.Network, o.TxHash, o.EventKey, err)
 			continue
 		}
-		var addressID, userID int64
-		err = s.db.QueryRowContext(ctx, `SELECT id, user_id FROM crypto_pay_addresses WHERE network = $1 AND address = $2`,
-			string(norm.network), norm.toAddress).Scan(&addressID, &userID)
-		if errors.Is(err, sql.ErrNoRows) {
+		norms = append(norms, norm)
+	}
+	// One read for rows that already exist and are settled with identical
+	// content: replaying a page (after a timeout or restart) then costs one
+	// query instead of a transaction per event. Everything else goes through
+	// the locked upsert.
+	settled, err := s.settledDeposits(ctx, norms)
+	if err != nil {
+		return res, err
+	}
+	type addrRef struct{ id, userID int64 }
+	addrCache := map[string]*addrRef{}
+	for _, norm := range norms {
+		if known, ok := settled[cryptoPayDepositKey(norm)]; ok && known.matches(norm) {
+			res.Unchanged++
+			res.DepositIDs = append(res.DepositIDs, known.id)
+			if known.status == cryptoDepositFinalized {
+				res.CreditableIDs = append(res.CreditableIDs, known.id)
+			}
+			continue
+		}
+		key := string(norm.network) + "|" + norm.toAddress
+		ref, ok := addrCache[key]
+		if !ok {
+			ref = &addrRef{}
+			err := s.db.QueryRowContext(ctx, `SELECT id, user_id FROM crypto_pay_addresses WHERE network = $1 AND address = $2`,
+				string(norm.network), norm.toAddress).Scan(&ref.id, &ref.userID)
+			if errors.Is(err, sql.ErrNoRows) {
+				ref = nil
+			} else if err != nil {
+				return res, fmt.Errorf("lookup deposit address: %w", err)
+			}
+			addrCache[key] = ref
+		}
+		if ref == nil {
 			res.Ignored++
 			cryptoPayLogf("ignore observation to unknown address network=%s tx=%s to=%s", norm.network, norm.txHash, norm.toAddress)
 			continue
 		}
-		if err != nil {
-			return res, fmt.Errorf("lookup deposit address: %w", err)
-		}
-		id, outcome, status, err := s.upsertDeposit(ctx, norm, addressID, userID)
+		id, outcome, status, err := s.upsertDeposit(ctx, norm, ref.id, ref.userID)
 		if err != nil {
 			return res, err
 		}
@@ -214,6 +243,56 @@ func (s *CryptoPayService) ingest(ctx context.Context, observations []chain.Obse
 		}
 	}
 	return res, nil
+}
+
+type cryptoPaySettledDeposit struct {
+	id        int64
+	status    string
+	units     decimal.Decimal
+	contract  string
+	address   string
+	blockHash string
+}
+
+func cryptoPayDepositKey(o *cryptoPayNormalizedObs) string {
+	return string(o.network) + "|" + o.txHash + "|" + o.eventKey
+}
+
+// matches: a finalized observation with the same content as a settled row
+// changes nothing (the locked upsert would return "unchanged").
+func (d *cryptoPaySettledDeposit) matches(o *cryptoPayNormalizedObs) bool {
+	return o.finalized && d.units.Equal(o.units) && d.contract == o.asset.Contract && d.address == o.toAddress &&
+		(o.blockHash == "" || d.blockHash == "" || o.blockHash == d.blockHash)
+}
+
+func (s *CryptoPayService) settledDeposits(ctx context.Context, norms []*cryptoPayNormalizedObs) (map[string]*cryptoPaySettledDeposit, error) {
+	out := map[string]*cryptoPaySettledDeposit{}
+	if len(norms) == 0 {
+		return out, nil
+	}
+	nets, txs, keys := make([]string, len(norms)), make([]string, len(norms)), make([]string, len(norms))
+	for i, n := range norms {
+		nets[i], txs[i], keys[i] = string(n.network), n.txHash, n.eventKey
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT d.network, d.tx_hash, d.event_key, d.id, d.status, d.units, d.asset_contract, d.address, d.block_hash
+		FROM crypto_pay_deposits d
+		JOIN unnest($1::text[], $2::text[], $3::text[]) AS k(network, tx_hash, event_key)
+		  ON d.network = k.network AND d.tx_hash = k.tx_hash AND d.event_key = k.event_key
+		WHERE d.status IN ('finalized', 'credited', 'held')`, pq.Array(nets), pq.Array(txs), pq.Array(keys))
+	if err != nil {
+		return nil, fmt.Errorf("lookup existing deposits: %w", err)
+	}
+	for rows.Next() {
+		var network, tx, key string
+		d := &cryptoPaySettledDeposit{}
+		if err := rows.Scan(&network, &tx, &key, &d.id, &d.status, &d.units, &d.contract, &d.address, &d.blockHash); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		out[network+"|"+tx+"|"+key] = d
+	}
+	return out, errors.Join(rows.Err(), rows.Close())
 }
 
 // upsertDeposit applies one observation under a row lock. Transitions:

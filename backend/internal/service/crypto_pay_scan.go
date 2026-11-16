@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/cryptopay/chain"
@@ -226,16 +228,30 @@ func (s *CryptoPayService) scanNetworks(ctx context.Context) error {
 // unit did not get its full slice and keeps its place in the queue.
 //
 // fn gets two contexts: unitCtx for chain calls and ingestion, and commitCtx
-// for cursor writes. commitCtx is one shared budget per unit that ends
-// cryptoPayCommitGrace after the unit deadline and ignores shutdown, so a
-// write after a successful ingest is not lost to the deadline, while a whole
-// unit can delay shutdown by at most the grace. Cursors not written in time
-// are simply rescanned (ingestion is idempotent).
+// for cursor writes. commitCtx is one shared budget per unit: it outlives the
+// unit deadline by cryptoPayCommitGrace so a write after a successful ingest
+// is not lost to that deadline, and on shutdown (parent cancelled) it ends
+// at most cryptoPayCommitGrace later, so a unit delays shutdown by at most the
+// grace. Cursors not written in time are simply rescanned (ingestion is
+// idempotent).
 func (s *CryptoPayService) runUnit(ctx context.Context, network chain.Network, scopes []string, fn func(unitCtx, commitCtx context.Context) error) error {
 	deadline := time.Now().Add(s.batchTimeout)
 	unitCtx, cancel := context.WithDeadline(ctx, deadline)
 	commitCtx, commitCancel := context.WithDeadline(context.WithoutCancel(ctx), deadline.Add(cryptoPayCommitGrace))
+	var graceTimer *time.Timer
+	var graceMu sync.Mutex
+	stopWatch := context.AfterFunc(ctx, func() {
+		graceMu.Lock()
+		defer graceMu.Unlock()
+		graceTimer = time.AfterFunc(cryptoPayCommitGrace, commitCancel)
+	})
 	err := fn(unitCtx, commitCtx)
+	stopWatch()
+	graceMu.Lock()
+	if graceTimer != nil {
+		graceTimer.Stop()
+	}
+	graceMu.Unlock()
 	commitCancel()
 	cancel()
 	if ctx.Err() != nil {
@@ -369,8 +385,11 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 	// most confirmingPerPass groups of 100 per pass, rotated round-robin.
 	if latest > finalized && len(active) > 0 {
 		groups := (len(active) + cryptoPayEVMBatchAddresses - 1) / cryptoPayEVMBatchAddresses
-		first := s.nextConfirmingOffset(network, groups)
+		first := s.confirmingOffset(network, groups)
+		attempted := 0
+		defer func() { s.advanceConfirmingOffset(network, groups, attempted) }()
 		for g := 0; g < min(groups, s.confirmingPerPass) && ctx.Err() == nil; g++ {
+			attempted++
 			start := ((first + g) % groups) * cryptoPayEVMBatchAddresses
 			end := min(start+cryptoPayEVMBatchAddresses, len(active))
 			tailCtx, cancel := context.WithTimeout(ctx, s.batchTimeout)
@@ -384,8 +403,8 @@ func (s *CryptoPayService) scanEVM(ctx context.Context, sc chain.EVMScanner) err
 			}
 			cancel()
 			if scanErr != nil {
+				// A failing group must not keep the others from their turn.
 				errs = append(errs, fmt.Errorf("unfinalized tail: %w", scanErr))
-				break
 			}
 		}
 	}
@@ -411,7 +430,7 @@ func (s *CryptoPayService) scanEVMBatch(ctx, commitCtx context.Context, sc chain
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		span := s.evmSpanFor(b.scopes())
+		span := s.adaptiveSize(b.scopes(), s.evmBlocksPerScan)
 		to := finalized
 		if to-from >= span {
 			to = from + span - 1
@@ -424,7 +443,7 @@ func (s *CryptoPayService) scanEVMBatch(ctx, commitCtx context.Context, sc chain
 		}
 		obs, err := sc.ScanRange(ctx, from, to, list, true)
 		if err != nil {
-			s.evmSpanFeedback(b.scopes(), cryptoPayTimeoutCause(ctx, err))
+			s.adaptiveFeedback(b.scopes(), s.evmBlocksPerScan, cryptoPayTimeoutCause(ctx, err))
 			return fmt.Errorf("scan %d-%d: %w", from, to, err)
 		}
 		for i := range obs {
@@ -433,10 +452,10 @@ func (s *CryptoPayService) scanEVMBatch(ctx, commitCtx context.Context, sc chain
 			}
 		}
 		if _, err := s.IngestObservations(ctx, obs); err != nil {
-			s.evmSpanFeedback(b.scopes(), cryptoPayTimeoutCause(ctx, err))
+			s.adaptiveFeedback(b.scopes(), s.evmBlocksPerScan, cryptoPayTimeoutCause(ctx, err))
 			return fmt.Errorf("ingest %d-%d: %w", from, to, err)
 		}
-		s.evmSpanFeedback(b.scopes(), nil)
+		s.adaptiveFeedback(b.scopes(), s.evmBlocksPerScan, nil)
 		position := strconv.FormatUint(to, 10)
 		for _, it := range b.items {
 			if it.from > to {
@@ -526,10 +545,16 @@ func cryptoPayParseSolanaWindow(position string) (chain.SolanaWindow, error) {
 	if position == "" {
 		return w, nil
 	}
+	if strings.TrimSpace(position) == "null" {
+		return w, errors.New("invalid Solana scan window cursor: null")
+	}
 	dec := json.NewDecoder(strings.NewReader(position))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&w); err != nil {
 		return w, fmt.Errorf("invalid Solana scan window cursor: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return w, errors.New("invalid Solana scan window cursor: trailing data")
 	}
 	return w, nil
 }
@@ -553,15 +578,21 @@ func (s *CryptoPayService) scanSolanaAccount(ctx, commitCtx context.Context, sc 
 		return err
 	}
 	progressed := false
+	scopes := []string{u.scope}
+	defSize := uint64(s.solanaPageSize)
 	// Only the expected pause at the unit deadline, after progress, is benign.
+	// A page that could not complete even with the full slice halves the page
+	// size for this account, so a slow database cannot replay it forever.
 	paused := func(err error) error {
 		if progressed && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil
 		}
+		s.adaptiveFeedback(scopes, defSize, cryptoPayTimeoutCause(ctx, err))
 		return err
 	}
 	for {
-		obs, next, err := sc.ScanTokenAccountWindow(ctx, u.owner, u.account, u.asset, w, "finalized", s.solanaPageSize)
+		pageSize := int(s.adaptiveSize(scopes, defSize))
+		obs, next, err := sc.ScanTokenAccountWindow(ctx, u.owner, u.account, u.asset, w, "finalized", pageSize)
 		if err != nil {
 			return paused(fmt.Errorf("scan: %w", err))
 		}
@@ -582,6 +613,7 @@ func (s *CryptoPayService) scanSolanaAccount(ctx, commitCtx context.Context, sc 
 		if err := s.advanceCursor(commitCtx, sc.Network(), c, position, caughtUp); err != nil {
 			return err
 		}
+		s.adaptiveFeedback(scopes, defSize, nil)
 		progressed = true
 		w = next
 		if caughtUp {
@@ -607,10 +639,11 @@ func (s *CryptoPayService) scanSolanaAccount(ctx, commitCtx context.Context, sc 
 	return nil
 }
 
-// Adaptive EVM span: a chunk that times out halves the span of its cursors
-// (min 1 block); cryptoPayEVMSpanResetStreak consecutive successful chunks
-// restore the configured span. A 1-block chunk that still times out keeps
-// failing visibly (last_error) and is retried every pass.
+// Adaptive work size per scope (EVM span in blocks, Solana page size in
+// transactions): a chunk/page that times out before completing halves it
+// (min 1); cryptoPayEVMSpanResetStreak consecutive successes restore the
+// configured value. A size-1 unit that still times out keeps failing visibly
+// (last_error) and is retried every pass.
 const cryptoPayEVMSpanResetStreak = 3
 
 type cryptoPayEVMSpan struct {
@@ -618,10 +651,10 @@ type cryptoPayEVMSpan struct {
 	streak int
 }
 
-func (s *CryptoPayService) evmSpanFor(scopes []string) uint64 {
+func (s *CryptoPayService) adaptiveSize(scopes []string, def uint64) uint64 {
 	s.spanMu.Lock()
 	defer s.spanMu.Unlock()
-	span := s.evmBlocksPerScan
+	span := def
 	for _, sc := range scopes {
 		if st, ok := s.evmSpans[sc]; ok && st.span < span {
 			span = st.span
@@ -630,7 +663,7 @@ func (s *CryptoPayService) evmSpanFor(scopes []string) uint64 {
 	return span
 }
 
-func (s *CryptoPayService) evmSpanFeedback(scopes []string, err error) {
+func (s *CryptoPayService) adaptiveFeedback(scopes []string, def uint64, err error) {
 	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return // only timeouts shrink the span
 	}
@@ -639,7 +672,7 @@ func (s *CryptoPayService) evmSpanFeedback(scopes []string, err error) {
 	for _, sc := range scopes {
 		st, ok := s.evmSpans[sc]
 		if !ok {
-			st = &cryptoPayEVMSpan{span: s.evmBlocksPerScan}
+			st = &cryptoPayEVMSpan{span: def}
 		}
 		if err != nil {
 			st.span /= 2
@@ -669,12 +702,18 @@ func cryptoPayTimeoutCause(ctx context.Context, err error) error {
 	return err
 }
 
-// nextConfirmingOffset returns the group to start the confirming scan at and
-// advances the in-memory round-robin offset (display only; resets on restart).
-func (s *CryptoPayService) nextConfirmingOffset(network chain.Network, groups int) int {
+// confirmingOffset is the group the confirming scan starts at (in-memory
+// round-robin; display only, resets on restart).
+func (s *CryptoPayService) confirmingOffset(network chain.Network, groups int) int {
 	s.spanMu.Lock()
 	defer s.spanMu.Unlock()
-	off := s.confirmOffsets[network] % groups
-	s.confirmOffsets[network] = (off + s.confirmingPerPass) % groups
-	return off
+	return s.confirmOffsets[network] % groups
+}
+
+// advanceConfirmingOffset moves the round-robin past the groups actually
+// attempted this pass (failed ones included), so every group gets a turn.
+func (s *CryptoPayService) advanceConfirmingOffset(network chain.Network, groups, attempted int) {
+	s.spanMu.Lock()
+	defer s.spanMu.Unlock()
+	s.confirmOffsets[network] = (s.confirmOffsets[network]%groups + attempted) % groups
 }

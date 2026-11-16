@@ -81,6 +81,7 @@ type fakeEVMScanner struct {
 	failFor   map[string]bool // ScanRange fails fast if any address is listed
 	delay     map[string]time.Duration
 	maxSpan   uint64 // >0: wider ranges wait for ctx cancellation (provider too slow)
+	tailFirst []string
 }
 
 func (f *fakeEVMScanner) Network() chain.Network { return chain.ArbitrumOne }
@@ -107,6 +108,9 @@ func (f *fakeEVMScanner) ScanRange(ctx context.Context, from, to uint64, address
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, fmt.Sprintf("%d-%d/%v/%d", from, to, finalized, len(addresses)))
+	if !finalized && len(addresses) > 0 {
+		f.tailFirst = append(f.tailFirst, addresses[0])
+	}
 	for _, a := range addresses {
 		if f.failFor[a] {
 			return nil, errors.New("fake: batch fails")
@@ -139,6 +143,7 @@ type fakeSolanaScanner struct {
 	block     map[string]bool // token accounts whose scan waits for ctx cancellation
 	pageDelay time.Duration   // per ScanTokenAccountWindow call
 	failCalls int             // next N window calls fail
+	blockFrom int             // >0: calls from this number on wait for ctx cancellation
 	pages     int
 	txObs     []chain.Observation
 	mu        sync.Mutex
@@ -196,8 +201,13 @@ func (f *fakeSolanaScanner) ScanTokenAccountWindow(ctx context.Context, _, token
 		}
 	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.pages++
+	if f.blockFrom > 0 && f.pages >= f.blockFrom {
+		f.mu.Unlock()
+		<-ctx.Done()
+		return nil, w, ctx.Err()
+	}
+	defer f.mu.Unlock()
 	f.until = append(f.until, tokenAccount+"<"+w.Until)
 	if f.failCalls > 0 {
 		f.failCalls--
@@ -1421,7 +1431,7 @@ func TestCryptoPay_SolanaLargeBacklogProgressesAcrossPasses(t *testing.T) {
 			TxHash: fakeSolSig(fmt.Sprintf("bl-%d", i)), EventKey: "acct:" + ata, ToAddress: addr.Address, TokenAccount: ata,
 			Units: big.NewInt(1), BlockNumber: uint64(i), BlockTime: time.Now()})
 	}
-	env.sol.pageDelay = 300 * time.Millisecond // ~3 pages of 200 per 1s unit
+	env.sol.pageDelay = 300 * time.Millisecond // a few pages of 200 per 1s unit
 	scope := "sol:solana-mainnet:" + usdc.Contract + ":" + ata
 	deposits := func() int { return countRows(t, `SELECT COUNT(*) FROM crypto_pay_deposits`) }
 
@@ -1429,14 +1439,17 @@ func TestCryptoPay_SolanaLargeBacklogProgressesAcrossPasses(t *testing.T) {
 	first := deposits()
 	require.Greater(t, first, 0, "pass 1 persisted at least one page")
 	require.Less(t, first, 2500, "a single 1s unit cannot walk 2500 signatures at 300ms/page")
-	var lastErr string
-	require.NoError(t, integrationDB.QueryRow(`SELECT last_error FROM crypto_pay_scan_cursors WHERE scope_key = $1`, scope).Scan(&lastErr))
-	require.Empty(t, lastErr, "a timeout after progress is not a failure")
-	for pass := 0; pass < 20 && deposits() < 2500; pass++ {
+	// (Whether pass 1 ended benignly depends on DB speed; the deterministic
+	// "pause after progress" check is TestCryptoPay_SolanaPauseAfterProgressIsBenign.)
+	credits := func() int { return countRows(t, `SELECT COUNT(*) FROM crypto_pay_credits`) }
+	// Walk until every inflow is stored, then let the backlog sweep (200 rows
+	// per pass) credit whatever an interrupted page left finalized.
+	// Bounded by wall clock, not pass count: progress per pass depends on DB speed.
+	for start := time.Now(); time.Since(start) < 5*time.Minute && (deposits() < 2500 || credits() < 2500); {
 		env.svc.RunWorkerPass(ctx)
 	}
 	require.Equal(t, 2500, deposits())
-	env.svc.RunWorkerPass(ctx) // backlog sweep credits anything left finalized
+	env.svc.RunWorkerPass(ctx) // one more pass: the window closes / nothing changes
 	require.Equal(t, "0.00250000", userBalance(t, user), "2500 x 0.000001, each credited once")
 	require.Equal(t, 2500, countRows(t, `SELECT COUNT(*) FROM crypto_pay_credits`))
 	var pos string
@@ -1613,4 +1626,93 @@ func TestCryptoPay_ConfirmingScanIsCappedAndRotates(t *testing.T) {
 	second := tails()
 	require.Len(t, second, 1)
 	require.NotEqual(t, first[0], second[0], "groups rotate (100 vs 1 addresses)")
+}
+
+func TestCryptoPay_ConfirmingFailingGroupsDoNotStarveOthers(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.ConfirmingUnitsPerPass, c.EVMBlocksPerScan = 5, 3_000_000 })
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	importTestEVMKeyset(t, env, "xpubCONF10")
+	var keysetID int64
+	require.NoError(t, integrationDB.QueryRow(`SELECT id FROM crypto_pay_keysets WHERE active`).Scan(&keysetID))
+	// 1000 active addresses = 10 confirming groups (inserted directly; one user per row is not needed for display scans).
+	for g := 0; g < 1000; g += 250 {
+		_, err := integrationDB.Exec(`
+			WITH u AS (
+				INSERT INTO users (email, password_hash, balance)
+				SELECT 'crypto-conf-' || n || '@example.test', 'x', 0 FROM generate_series($1::int, $1::int + 249) n
+				RETURNING id, email)
+			INSERT INTO crypto_pay_addresses (user_id, network, address, keyset_id, keyset_version, derivation_index, derivation_path, start_block, last_order_at)
+			SELECT u.id, 'arbitrum-one', '0x' || lpad(to_hex(1000000 + n), 40, '0'), $2, 1, 1000 + n, 'p', 900, NOW()
+			FROM u JOIN generate_series($1::int, $1::int + 249) n ON u.email = 'crypto-conf-' || n || '@example.test'`, g, keysetID)
+		require.NoError(t, err)
+	}
+	addrs := []string{}
+	rows, err := integrationDB.Query(`SELECT address FROM crypto_pay_addresses ORDER BY id`)
+	require.NoError(t, err)
+	for rows.Next() {
+		var a string
+		require.NoError(t, rows.Scan(&a))
+		addrs = append(addrs, a)
+	}
+	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
+	require.Len(t, addrs, 1000)
+	// Groups 0 and 5 always fail.
+	env.evm.failFor = map[string]bool{addrs[0]: true, addrs[500]: true}
+	env.evm.finalized, env.evm.latest = 1000, 1100
+	seen := map[string]bool{}
+	for pass := 0; pass < 2; pass++ {
+		env.evm.tailFirst = nil
+		env.svc.RunWorkerPass(ctx)
+		require.Len(t, env.evm.tailFirst, 5, "at most the cap per pass, failures included")
+		for _, a := range env.evm.tailFirst {
+			seen[a] = true
+		}
+	}
+	for g := 0; g < 10; g++ {
+		require.True(t, seen[addrs[g*100]], "group %d got its turn within 2 passes", g)
+	}
+}
+
+func TestCryptoPay_ShutdownBoundsBlockedCursorWrite(t *testing.T) {
+	env := newCryptoEnv(t, true)
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	_, _, scope := newSolanaWindowFixture(t, env, "shutdown", 1)
+	_, err := integrationDB.Exec(`INSERT INTO crypto_pay_scan_cursors (scope_key, network, position, version) VALUES ($1, 'solana-mainnet', '', 1)`, scope)
+	require.NoError(t, err)
+	lockTx, err := integrationDB.Begin()
+	require.NoError(t, err)
+	_, err = lockTx.Exec(`SELECT 1 FROM crypto_pay_scan_cursors WHERE scope_key = $1 FOR UPDATE`, scope)
+	require.NoError(t, err)
+	defer func() { _ = lockTx.Rollback() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(time.Second, cancel) // shutdown 1s into the unit (unit timeout is 60s)
+	start := time.Now()
+	env.svc.RunWorkerPass(ctx)
+	elapsed := time.Since(start)
+	require.Less(t, elapsed, 8*time.Second, "blocked cursor write ends within the 5s grace after shutdown, not the 60s unit budget")
+	require.Greater(t, elapsed, 5*time.Second)
+}
+
+func TestCryptoPay_SolanaPauseAfterProgressIsBenign(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.ScanBatchTimeoutSeconds, c.SolanaPageSize = 1, 1 })
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
+	user, _, scope := newSolanaWindowFixture(t, env, "pause", 3)
+	env.sol.blockFrom = 2 // page 1 persisted, then the unit deadline hits while the scanner waits
+	env.svc.RunWorkerPass(ctx)
+	var lastErr string
+	var attempted, scanned sql.NullTime
+	require.NoError(t, integrationDB.QueryRow(`SELECT last_error, last_attempt_at, last_scanned_at FROM crypto_pay_scan_cursors WHERE scope_key = $1`, scope).
+		Scan(&lastErr, &attempted, &scanned))
+	require.Empty(t, lastErr, "the deadline pause after progress is not a failure")
+	require.True(t, attempted.Valid)
+	require.False(t, scanned.Valid, "not caught up: stays due")
+	require.Equal(t, fakeSolSig("pause-2"), solanaWindowOf(t, scope).Anchor)
+	env.sol.blockFrom = 0
+	env.svc.RunWorkerPass(ctx)
+	require.Equal(t, "3.00000000", userBalance(t, user))
 }

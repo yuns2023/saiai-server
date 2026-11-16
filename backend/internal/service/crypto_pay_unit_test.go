@@ -330,3 +330,16 @@ func TestCryptoPayNormalizeObservationRejectsUntrusted(t *testing.T) {
 	_, err = svc.normalizeObservation(mismatchedKey)
 	require.Error(t, err)
 }
+
+func TestCryptoPayParseSolanaWindowStrict(t *testing.T) {
+	w, err := cryptoPayParseSolanaWindow("")
+	require.NoError(t, err)
+	require.Equal(t, chain.SolanaWindow{}, w)
+	w, err = cryptoPayParseSolanaWindow(`{"until":"a","anchor":"b","before":"c"}`)
+	require.NoError(t, err)
+	require.Equal(t, chain.SolanaWindow{Until: "a", Anchor: "b", Before: "c"}, w)
+	for _, bad := range []string{"null", " null ", "plainSig", `{"until":"a"} {}`, `{"until":"a"}x`, `{"until":"a","extra":1}`, `[]`} {
+		_, err := cryptoPayParseSolanaWindow(bad)
+		require.Error(t, err, bad)
+	}
+}
