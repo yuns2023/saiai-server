@@ -1,3 +1,5 @@
+import { rate } from './format'
+
 /**
  * Date range for the hosted-account usage API: local calendar days in the UI,
  * a half-open UTC window [start of first day, start of the day after the last
@@ -45,4 +47,38 @@ export function utcWindow(from: string, to: string): { start: string; end: strin
   const last = localMidnight(to) as Date
   const end = new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1)
   return { start: rfc3339(start), end: rfc3339(end) }
+}
+
+/* ---------- Hosted groups (own-account hosting) ---------- */
+
+interface RatedGroup {
+  id: number
+  rate_multiplier: number
+  hosted_usage_enabled?: boolean
+}
+
+export function isHostedGroup(g: { hosted_usage_enabled?: boolean } | null | undefined): boolean {
+  return g?.hosted_usage_enabled === true
+}
+
+/**
+ * The rate a key on this group is billed at. A hosted group's rate is its
+ * service fee (standard price × rate); user overrides never apply to it.
+ */
+export function groupRate(g: RatedGroup, overrides: Record<number, number>): number {
+  return isHostedGroup(g) ? g.rate_multiplier : overrides[g.id] ?? g.rate_multiplier
+}
+
+/** A fee rate as "1.2" (no trailing zeros, at most 4 decimals). */
+export function feeRate(value: number): string {
+  return String(Number(value.toFixed(4)))
+}
+
+type Translate = (key: string, named: Record<string, unknown>) => string
+
+/** What a group costs, for key lists and pickers: "×0.8", or the hosting fee / "not charged" for hosted groups. */
+export function groupRateText(g: RatedGroup, overrides: Record<number, number>, t: Translate): string {
+  const r = groupRate(g, overrides)
+  if (!isHostedGroup(g)) return rate(r)
+  return r > 0 ? t('keys.hostedFee', { rate: feeRate(r) }) : t('keys.hostedFree', {})
 }

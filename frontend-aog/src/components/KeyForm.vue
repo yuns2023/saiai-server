@@ -3,7 +3,7 @@
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ApiKey, Group } from '@/types'
-import { rate } from '@/lib/format'
+import { groupRateText } from '@/lib/hosted'
 import { isAllowedPlatform } from '@/lib/platforms'
 
 export interface KeyFormValue {
@@ -50,7 +50,6 @@ const currentOther = computed(() => {
   if (platform && !isAllowedPlatform(platform)) return { id, name: t('keys.otherGroup') }
   return { id, name: k?.group?.name ?? `#${id}` }
 })
-const effectiveRate = (g: Group) => props.rates[g.id] ?? g.rate_multiplier
 /**
  * v-model.number yields "" for a cleared input and the raw string for
  * unparsable text, so every numeric field is normalised here: empty → null,
@@ -98,7 +97,7 @@ function submit(): void {
         <span class="label">{{ t('keys.group') }}</span>
         <select v-model="form.group_id" class="field mt-1">
           <option v-if="currentOther" :value="currentOther.id">{{ currentOther.name }}</option>
-          <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }} · {{ rate(effectiveRate(g)) }}</option>
+          <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }} · {{ groupRateText(g, rates, t) }}</option>
         </select>
       </label>
       <label class="block">

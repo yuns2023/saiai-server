@@ -74,3 +74,19 @@ describe('KeyForm groups', () => {
     expect(value.group_id).toBe(5)
   })
 })
+
+describe('KeyForm group picker', () => {
+  it('shows the hosting fee for hosted groups and ignores user overrides there', () => {
+    const groups = [
+      { id: 2, name: 'Claude', platform: 'anthropic', rate_multiplier: 0.8 },
+      { id: 3, name: 'Mine', platform: 'anthropic', rate_multiplier: 1.2, hosted_usage_enabled: true },
+      { id: 4, name: 'Mine free', platform: 'anthropic', rate_multiplier: 0, hosted_usage_enabled: true }
+    ] as Group[]
+    i18n.global.locale.value = 'zh'
+    const w = mount(KeyForm, { props: { groups, rates: { 2: 0.5, 3: 0.5, 4: 0.5 } }, global: { plugins: [i18n] } })
+    const options = w.findAll('option').map((o) => o.text())
+    expect(options).toContain('Claude · ×0.5')
+    expect(options).toContain('Mine · 托管服务费 1.2× 标准价')
+    expect(options).toContain('Mine free · 自有账号托管 · 不扣费')
+  })
+})

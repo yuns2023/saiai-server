@@ -4480,14 +4480,14 @@ func (s *OpenAIGatewayService) RecordChatGPTTurnUsage(ctx context.Context, input
 		}
 	}
 	if apiKey.Group.UsesHostedUsage() {
-		multiplier = 0
+		multiplier = apiKey.Group.HostedFeeRate()
 	}
 	if math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
 		return errors.New("record ChatGPT turn usage: finite rate multiplier is required")
 	}
 	totalCost := input.BasePriceUSD + input.ImageCostUSD
 	actualCost := totalCost * multiplier
-	if !IsValidOpenAIChatGPTTurnPrice(actualCost) && !apiKey.Group.UsesHostedUsage() {
+	if !IsValidOpenAIChatGPTTurnPrice(actualCost) && !apiKey.Group.HostedChargeFree() {
 		return errors.New("record ChatGPT turn usage: effective fixed price is invalid")
 	}
 
@@ -4645,7 +4645,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	if apiKey.Group.UsesHostedUsage() {
-		multiplier = 0
+		multiplier = apiKey.Group.HostedFeeRate()
 	}
 	billingModel := result.Model
 	if resolvedModel := resolveOpenAIBillingModel(result); resolvedModel != "" {

@@ -1710,7 +1710,9 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 			COALESCE(SUM(metered_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS hosted_total_metered_cost,
 			COUNT(*) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz AND metered_cost IS NOT NULL) AS hosted_today_requests,
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz AND metered_cost IS NOT NULL), 0) AS hosted_today_tokens,
-			COALESCE(SUM(metered_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS hosted_today_metered_cost
+			COALESCE(SUM(metered_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS hosted_today_metered_cost,
+			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz AND metered_cost IS NOT NULL), 0) AS hosted_total_service_fee,
+			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz AND metered_cost IS NOT NULL), 0) AS hosted_today_service_fee
 		FROM scoped
 	`
 	var totalDurationMs int64
@@ -1740,6 +1742,8 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		&stats.HostedTodayRequests,
 		&stats.HostedTodayTokens,
 		&stats.HostedTodayMeteredCost,
+		&stats.HostedTotalServiceFee,
+		&stats.HostedTodayServiceFee,
 	); err != nil {
 		return err
 	}
@@ -2149,7 +2153,7 @@ func accountStatsSQL(keyColumn, where string) string {
 				COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
 				SUM(metered_cost) as hosted_cost,
 				SUM(actual_cost) FILTER (WHERE billing_type = 1 AND metered_cost IS NULL) as subscription_cost,
-				SUM(actual_cost) FILTER (WHERE billing_type = 0 AND metered_cost IS NULL) as balance_cost,
+				SUM(actual_cost) FILTER (WHERE billing_type = 0) as balance_cost, -- includes hosted service fees (zero for free hosted groups)
 				SUM(actual_cost) FILTER (WHERE (billing_type IS NULL OR billing_type NOT IN (0, 1)) AND metered_cost IS NULL) as unclassified_cost
 			FROM usage_logs
 			` + where + `
@@ -4272,7 +4276,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 				COUNT(*) FILTER (WHERE metered_cost IS NOT NULL) as hosted_requests,
 				SUM(metered_cost) as hosted_cost,
 				SUM(actual_cost) FILTER (WHERE billing_type = 1 AND metered_cost IS NULL) as subscription_cost,
-				SUM(actual_cost) FILTER (WHERE billing_type = 0 AND metered_cost IS NULL) as balance_cost,
+				SUM(actual_cost) FILTER (WHERE billing_type = 0) as balance_cost, -- includes hosted service fees (zero for free hosted groups)
 				SUM(actual_cost) FILTER (WHERE (billing_type IS NULL OR billing_type NOT IN (0, 1)) AND metered_cost IS NULL) as unclassified_cost
 			FROM usage_logs
 			WHERE account_id = $1 AND created_at >= $2 AND created_at < $3

@@ -28,6 +28,8 @@ export interface HostedWindow {
 export interface HostedUsageSummary {
   self_requests: number
   self_standard_cost: number
+  /** Hosting service fee charged to me for my own requests (absent from older servers). */
+  self_service_fee?: number | null
   others_requests: number
   others_standard_cost: number
 }

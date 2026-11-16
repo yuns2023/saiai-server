@@ -652,7 +652,7 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 			// without a reset time.
 			return withSubscriptionLimitDetail(err, nil, group)
 		}
-	} else if !group.UsesHostedUsage() {
+	} else if !group.HostedChargeFree() {
 		if err := s.checkBalanceEligibility(ctx, user.ID); err != nil {
 			return err
 		}

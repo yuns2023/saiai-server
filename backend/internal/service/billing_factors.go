@@ -5,6 +5,10 @@ package service
 // Balance charges and subscription window usage both use ActualCost.
 // Account cost continues to use TotalCost.
 func applyUserBillingFactors(cost *CostBreakdown, group *Group, user *User, billedModel string) (modelRate, userDiscount float64) {
+	// Hosted fees are the standard price times the group fee rate only.
+	if group.UsesHostedUsage() {
+		return 1, 1
+	}
 	modelRate = group.ModelRateFor(billedModel)
 	userDiscount = user.PaygDiscountRate()
 	if cost != nil {

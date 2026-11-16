@@ -24,11 +24,13 @@ const requestBodySizeAggregates = `COALESCE(SUM(u.request_body_bytes), 0)::bigin
 // = 1 by history, hosted rows excluded) with each group's current
 // statistics-only revenue rate; it needs "LEFT JOIN groups g ON g.id =
 // u.group_id". Consumption whose group has no rate (or no group) is unpriced.
-// It also splits the billed actual_cost (hosted rows excluded) into balance,
-// subscription and unknown billing types for the admin revenue tooltip.
+// It also splits the billed actual_cost into balance, subscription and unknown
+// billing types for the admin revenue tooltip. Balance includes hosted rows
+// (their actual_cost is the hosting service fee, zero for free hosted groups);
+// the subscription and unknown splits exclude hosted rows.
 const subscriptionRevenueAggregates = `COALESCE(SUM(u.actual_cost * g.subscription_revenue_rate) FILTER (WHERE u.billing_type = 1 AND u.metered_cost IS NULL), 0) AS subscription_revenue,
 				COALESCE(SUM(u.actual_cost) FILTER (WHERE u.billing_type = 1 AND u.metered_cost IS NULL AND g.subscription_revenue_rate IS NULL), 0) AS subscription_revenue_unpriced_cost,
-				COALESCE(SUM(u.actual_cost) FILTER (WHERE u.billing_type = 0 AND u.metered_cost IS NULL), 0) AS balance_cost,
+				COALESCE(SUM(u.actual_cost) FILTER (WHERE u.billing_type = 0), 0) AS balance_cost,
 				COALESCE(SUM(u.actual_cost) FILTER (WHERE u.billing_type = 1 AND u.metered_cost IS NULL), 0) AS subscription_cost,
 				COALESCE(SUM(u.actual_cost) FILTER (WHERE (u.billing_type IS NULL OR u.billing_type NOT IN (0, 1)) AND u.metered_cost IS NULL), 0) AS unclassified_cost`
 

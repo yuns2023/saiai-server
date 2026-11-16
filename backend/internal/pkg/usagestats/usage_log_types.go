@@ -92,6 +92,10 @@ type DashboardStats struct {
 	HostedTodayRequests    int64   `json:"hosted_today_requests"`
 	HostedTodayTokens      int64   `json:"hosted_today_tokens"`
 	HostedTodayMeteredCost float64 `json:"hosted_today_metered_cost"`
+	// Hosted service fees actually charged (SUM(actual_cost) of hosted rows),
+	// within the raw usage log retention; zero for free hosted groups.
+	HostedTotalServiceFee float64 `json:"hosted_total_service_fee"`
+	HostedTodayServiceFee float64 `json:"hosted_today_service_fee"`
 }
 
 // TrendDataPoint represents a single point in trend data

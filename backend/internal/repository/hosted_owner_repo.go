@@ -199,7 +199,9 @@ func (r *hostedOwnerRepository) SummarizeOwnedUsage(ctx context.Context, ownerUs
 		       COUNT(*) AS requests_7d,
 		       COALESCE(SUM(total_cost), 0) AS cost_7d,
 		       COUNT(*) FILTER (WHERE created_at >= $4) AS requests_24h,
-		       COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $4), 0) AS cost_24h
+		       COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $4), 0) AS cost_24h,
+		       COALESCE(SUM(actual_cost) FILTER (WHERE metered_cost IS NOT NULL), 0) AS fee_7d,
+		       COALESCE(SUM(actual_cost) FILTER (WHERE metered_cost IS NOT NULL AND created_at >= $4), 0) AS fee_24h
 		FROM usage_logs
 		WHERE account_owner_user_id = $1
 		  AND account_id = ANY($2)
@@ -217,14 +219,15 @@ func (r *hostedOwnerRepository) SummarizeOwnedUsage(ctx context.Context, ownerUs
 			isSelf             bool
 			requests7d, req24h int64
 			cost7d, cost24h    float64
+			fee7d, fee24h      float64
 		)
-		if err := rows.Scan(&accountID, &isSelf, &requests7d, &cost7d, &req24h, &cost24h); err != nil {
+		if err := rows.Scan(&accountID, &isSelf, &requests7d, &cost7d, &req24h, &cost24h, &fee7d, &fee24h); err != nil {
 			return nil, nil, err
 		}
 		week, day := last7d[accountID], last24h[accountID]
 		if isSelf {
-			week.SelfRequests, week.SelfStandardCost = requests7d, cost7d
-			day.SelfRequests, day.SelfStandardCost = req24h, cost24h
+			week.SelfRequests, week.SelfStandardCost, week.SelfServiceFee = requests7d, cost7d, fee7d
+			day.SelfRequests, day.SelfStandardCost, day.SelfServiceFee = req24h, cost24h, fee24h
 		} else {
 			week.OthersRequests, week.OthersStandardCost = requests7d, cost7d
 			day.OthersRequests, day.OthersStandardCost = req24h, cost24h

@@ -7,16 +7,31 @@ import Icon from '@/components/Icon.vue'
 import { useAppStore } from '@/stores/app'
 import { intlLocale } from '@/i18n'
 import { compact, cost, count, dateOnly, daysAgo, money, shortTime, ymd } from '@/lib/format'
+import { feeRate } from '@/lib/hosted'
 
 interface Totals {
   requests?: number
   total_tokens?: number
   actual_cost?: number
   cost?: number
+  /** Hosted keys: usage at the standard price (what key caps and limits count). */
+  usage_cost?: number
 }
 interface LookupResult {
   billing_mode?: 'subscription' | 'balance'
-  billing?: { type: 'wallet' | 'subscription'; balance?: number; balance_visible?: boolean; available?: boolean; plan_name?: string }
+  billing?: {
+    type: 'wallet' | 'subscription'
+    balance?: number
+    balance_visible?: boolean
+    available?: boolean
+    plan_name?: string
+    /** Free own-account hosting: never charged. */
+    charge_exempt?: boolean
+  }
+  /** "standard_reference" for hosted keys. */
+  usage_basis?: string
+  /** Charged own-account hosting: wallet pays standard price × this rate. */
+  hosted_fee_rate?: number
   isValid: boolean
   status: string
   mode: 'quota_limited' | 'unrestricted'
@@ -66,11 +81,31 @@ const statusView = computed(() => {
   return { cls: 'tag-off', text: s || '—' }
 })
 
+/** Own-account hosting: free, or charged a service fee on the standard price. */
+const hostedView = computed(() => {
+  const r = result.value
+  if (!r) return null
+  if (r.billing?.charge_exempt) return { free: true, text: t('keys.hostedFree') }
+  const fee = r.hosted_fee_rate
+  if (typeof fee !== 'number' || !Number.isFinite(fee)) return null
+  return fee > 0 ? { free: false, text: t('lookup.hostedFee', { rate: feeRate(fee) }) } : { free: true, text: t('keys.hostedFree') }
+})
+
+/** Plan line under the totals; skipped when the billing cell already says "not charged". */
+const planText = computed(() => {
+  const r = result.value
+  if (!r) return ''
+  if (r.billing?.charge_exempt && !r.quota) return ''
+  return hostedView.value?.text ?? r.planName ?? ''
+})
+
 /** Which pot the remaining number belongs to. */
-const remainingView = computed(() => {
+const remainingView = computed<{ label: string; value: number | null; text?: string } | null>(() => {
   const r = result.value
   if (!r) return null
   if (r.quota) return { label: t('lookup.quotaLeft'), value: r.quota.remaining }
+  // A free hosted key never draws on a wallet, so there is no balance to show.
+  if (r.billing?.charge_exempt) return { label: t('lookup.billing'), value: null, text: t('keys.hostedFree') }
   const subscription = r.billing_mode === 'subscription' || r.billing?.type === 'subscription'
   if (subscription) return { label: t('lookup.subscriptionLeft'), value: r.remaining ?? null }
   const wallet = r.billing?.balance_visible === false ? null : r.billing?.balance ?? r.balance ?? r.remaining
@@ -158,7 +193,8 @@ async function lookup(): Promise<void> {
           </div>
           <div>
             <dt class="label">{{ remainingView?.label }}</dt>
-            <dd class="num mt-0.5 text-md font-semibold">{{ money(remainingView?.value) }}</dd>
+            <dd v-if="remainingView?.text" class="mt-0.5 text-sm" data-testid="lookup-remaining">{{ remainingView.text }}</dd>
+            <dd v-else class="num mt-0.5 text-md font-semibold" data-testid="lookup-remaining">{{ money(remainingView?.value) }}</dd>
           </div>
           <div>
             <dt class="label">{{ t('lookup.rangeSpend') }}</dt>
@@ -169,9 +205,12 @@ async function lookup(): Promise<void> {
             <dd class="num mt-0.5 text-md">{{ count(rangeTotals?.requests, intlLocale()) }}</dd>
           </div>
         </dl>
-        <p v-if="result.planName || result.expires_at" class="mt-3 text-sm text-ink-2">
-          <template v-if="result.planName">{{ result.planName }}</template>
-          <template v-if="result.expires_at"> · {{ t('keys.expires') }} {{ dateOnly(result.expires_at, intlLocale()) }}</template>
+        <p v-if="planText || result.expires_at" class="mt-3 text-sm text-ink-2" data-testid="lookup-plan">
+          <template v-if="planText">{{ planText }}</template>
+          <template v-if="result.expires_at">{{ planText ? ' · ' : '' }}{{ t('keys.expires') }} {{ dateOnly(result.expires_at, intlLocale()) }}</template>
+        </p>
+        <p v-if="hostedView && rangeTotals?.usage_cost != null" class="mt-1 text-xs text-ink-3" data-testid="lookup-hosted-standard">
+          {{ t('lookup.hostedStandard', { amount: money(rangeTotals.usage_cost, 4) }) }}
         </p>
 
         <h2 class="mt-8 text-md font-semibold">{{ t('overview.recent') }}</h2>

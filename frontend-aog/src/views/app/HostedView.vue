@@ -283,7 +283,12 @@ onUnmounted(() => {
                       <span class="label">{{ t('hosted.others') }}</span>
                       <template v-for="p in periods(a)" :key="p.key">
                         <span class="whitespace-nowrap text-ink-2">{{ p.label }}</span>
-                        <span class="num whitespace-nowrap">{{ requests(p.s?.self_requests) }} · {{ cost(p.s?.self_standard_cost) }}</span>
+                        <span class="num whitespace-nowrap" data-testid="hosted-self">
+                        {{ requests(p.s?.self_requests) }} · {{ cost(p.s?.self_standard_cost) }}
+                        <span v-if="p.s?.self_service_fee != null" class="block text-xs text-ink-3" data-testid="hosted-self-fee">
+                          {{ t('hosted.serviceFee', { amount: cost(p.s.self_service_fee) }) }}
+                        </span>
+                      </span>
                         <span class="num whitespace-nowrap">{{ requests(p.s?.others_requests) }} · {{ cost(p.s?.others_standard_cost) }}</span>
                       </template>
                     </span>

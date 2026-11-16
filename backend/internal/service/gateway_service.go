@@ -9709,7 +9709,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		multiplier = s.getUserGroupRateMultiplier(ctx, user.ID, *apiKey.GroupID, groupDefault)
 	}
 	if apiKey.Group.UsesHostedUsage() {
-		multiplier = 0
+		multiplier = apiKey.Group.HostedFeeRate()
 	}
 
 	var cost *CostBreakdown
