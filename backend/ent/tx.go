@@ -26,6 +26,22 @@ type Tx struct {
 	Announcement *AnnouncementClient
 	// AnnouncementRead is the client for interacting with the AnnouncementRead builders.
 	AnnouncementRead *AnnouncementReadClient
+	// CryptoPayAddress is the client for interacting with the CryptoPayAddress builders.
+	CryptoPayAddress *CryptoPayAddressClient
+	// CryptoPayAuditLog is the client for interacting with the CryptoPayAuditLog builders.
+	CryptoPayAuditLog *CryptoPayAuditLogClient
+	// CryptoPayCredit is the client for interacting with the CryptoPayCredit builders.
+	CryptoPayCredit *CryptoPayCreditClient
+	// CryptoPayDeposit is the client for interacting with the CryptoPayDeposit builders.
+	CryptoPayDeposit *CryptoPayDepositClient
+	// CryptoPayKeyset is the client for interacting with the CryptoPayKeyset builders.
+	CryptoPayKeyset *CryptoPayKeysetClient
+	// CryptoPayOrder is the client for interacting with the CryptoPayOrder builders.
+	CryptoPayOrder *CryptoPayOrderClient
+	// CryptoPayScanCursor is the client for interacting with the CryptoPayScanCursor builders.
+	CryptoPayScanCursor *CryptoPayScanCursorClient
+	// CryptoPaySolanaPoolEntry is the client for interacting with the CryptoPaySolanaPoolEntry builders.
+	CryptoPaySolanaPoolEntry *CryptoPaySolanaPoolEntryClient
 	// ErrorPassthroughRule is the client for interacting with the ErrorPassthroughRule builders.
 	ErrorPassthroughRule *ErrorPassthroughRuleClient
 	// Group is the client for interacting with the Group builders.
@@ -203,6 +219,14 @@ func (tx *Tx) init() {
 	tx.AccountGroup = NewAccountGroupClient(tx.config)
 	tx.Announcement = NewAnnouncementClient(tx.config)
 	tx.AnnouncementRead = NewAnnouncementReadClient(tx.config)
+	tx.CryptoPayAddress = NewCryptoPayAddressClient(tx.config)
+	tx.CryptoPayAuditLog = NewCryptoPayAuditLogClient(tx.config)
+	tx.CryptoPayCredit = NewCryptoPayCreditClient(tx.config)
+	tx.CryptoPayDeposit = NewCryptoPayDepositClient(tx.config)
+	tx.CryptoPayKeyset = NewCryptoPayKeysetClient(tx.config)
+	tx.CryptoPayOrder = NewCryptoPayOrderClient(tx.config)
+	tx.CryptoPayScanCursor = NewCryptoPayScanCursorClient(tx.config)
+	tx.CryptoPaySolanaPoolEntry = NewCryptoPaySolanaPoolEntryClient(tx.config)
 	tx.ErrorPassthroughRule = NewErrorPassthroughRuleClient(tx.config)
 	tx.Group = NewGroupClient(tx.config)
 	tx.IdempotencyRecord = NewIdempotencyRecordClient(tx.config)

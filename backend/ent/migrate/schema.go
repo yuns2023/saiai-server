@@ -372,6 +372,262 @@ var (
 			},
 		},
 	}
+	// CryptoPayAddressesColumns holds the columns for the "crypto_pay_addresses" table.
+	CryptoPayAddressesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "network", Type: field.TypeString, Size: 32},
+		{Name: "address", Type: field.TypeString, Size: 64},
+		{Name: "keyset_id", Type: field.TypeInt64},
+		{Name: "keyset_version", Type: field.TypeInt},
+		{Name: "derivation_index", Type: field.TypeInt64},
+		{Name: "derivation_path", Type: field.TypeString, Size: 100},
+		{Name: "start_block", Type: field.TypeInt64, Nullable: true},
+		{Name: "last_order_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// CryptoPayAddressesTable holds the schema information for the "crypto_pay_addresses" table.
+	CryptoPayAddressesTable = &schema.Table{
+		Name:       "crypto_pay_addresses",
+		Columns:    CryptoPayAddressesColumns,
+		PrimaryKey: []*schema.Column{CryptoPayAddressesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "cryptopayaddress_user_id_network",
+				Unique:  true,
+				Columns: []*schema.Column{CryptoPayAddressesColumns[1], CryptoPayAddressesColumns[2]},
+			},
+			{
+				Name:    "cryptopayaddress_network_address",
+				Unique:  true,
+				Columns: []*schema.Column{CryptoPayAddressesColumns[2], CryptoPayAddressesColumns[3]},
+			},
+			{
+				Name:    "cryptopayaddress_keyset_id_derivation_index",
+				Unique:  true,
+				Columns: []*schema.Column{CryptoPayAddressesColumns[4], CryptoPayAddressesColumns[6]},
+			},
+			{
+				Name:    "cryptopayaddress_network_last_order_at",
+				Unique:  false,
+				Columns: []*schema.Column{CryptoPayAddressesColumns[2], CryptoPayAddressesColumns[9]},
+			},
+		},
+	}
+	// CryptoPayAuditLogsColumns holds the columns for the "crypto_pay_audit_logs" table.
+	CryptoPayAuditLogsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "action", Type: field.TypeString, Size: 50},
+		{Name: "deposit_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "keyset_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "operator", Type: field.TypeString, Size: 100, Default: "system"},
+		{Name: "detail", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// CryptoPayAuditLogsTable holds the schema information for the "crypto_pay_audit_logs" table.
+	CryptoPayAuditLogsTable = &schema.Table{
+		Name:       "crypto_pay_audit_logs",
+		Columns:    CryptoPayAuditLogsColumns,
+		PrimaryKey: []*schema.Column{CryptoPayAuditLogsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "cryptopayauditlog_deposit_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{CryptoPayAuditLogsColumns[2], CryptoPayAuditLogsColumns[7]},
+			},
+			{
+				Name:    "cryptopayauditlog_action_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{CryptoPayAuditLogsColumns[1], CryptoPayAuditLogsColumns[7]},
+			},
+		},
+	}
+	// CryptoPayCreditsColumns holds the columns for the "crypto_pay_credits" table.
+	CryptoPayCreditsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "deposit_id", Type: field.TypeInt64, Unique: true},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "amount", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "balance_after", Type: field.TypeOther, Nullable: true, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "operator", Type: field.TypeString, Size: 100, Default: "system"},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// CryptoPayCreditsTable holds the schema information for the "crypto_pay_credits" table.
+	CryptoPayCreditsTable = &schema.Table{
+		Name:       "crypto_pay_credits",
+		Columns:    CryptoPayCreditsColumns,
+		PrimaryKey: []*schema.Column{CryptoPayCreditsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "cryptopaycredit_user_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{CryptoPayCreditsColumns[2], CryptoPayCreditsColumns[6]},
+			},
+		},
+	}
+	// CryptoPayDepositsColumns holds the columns for the "crypto_pay_deposits" table.
+	CryptoPayDepositsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "network", Type: field.TypeString, Size: 32},
+		{Name: "tx_hash", Type: field.TypeString, Size: 128},
+		{Name: "event_key", Type: field.TypeString, Size: 128},
+		{Name: "address_id", Type: field.TypeInt64},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "address", Type: field.TypeString, Size: 64},
+		{Name: "asset_symbol", Type: field.TypeString, Size: 16},
+		{Name: "asset_contract", Type: field.TypeString, Size: 64},
+		{Name: "token_account", Type: field.TypeString, Size: 64, Default: ""},
+		{Name: "from_address", Type: field.TypeString, Size: 64, Default: ""},
+		{Name: "units", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(78,0)"}},
+		{Name: "decimals", Type: field.TypeInt16},
+		{Name: "amount", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "block_number", Type: field.TypeInt64},
+		{Name: "block_hash", Type: field.TypeString, Size: 128, Default: ""},
+		{Name: "block_time", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "status", Type: field.TypeString, Size: 16, Default: "observed"},
+		{Name: "hold_reason", Type: field.TypeString, Size: 64, Default: ""},
+		{Name: "observed_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "finalized_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "credited_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "orphaned_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// CryptoPayDepositsTable holds the schema information for the "crypto_pay_deposits" table.
+	CryptoPayDepositsTable = &schema.Table{
+		Name:       "crypto_pay_deposits",
+		Columns:    CryptoPayDepositsColumns,
+		PrimaryKey: []*schema.Column{CryptoPayDepositsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "cryptopaydeposit_network_tx_hash_event_key",
+				Unique:  true,
+				Columns: []*schema.Column{CryptoPayDepositsColumns[1], CryptoPayDepositsColumns[2], CryptoPayDepositsColumns[3]},
+			},
+			{
+				Name:    "cryptopaydeposit_user_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{CryptoPayDepositsColumns[5], CryptoPayDepositsColumns[23]},
+			},
+			{
+				Name:    "cryptopaydeposit_address_id_block_time",
+				Unique:  false,
+				Columns: []*schema.Column{CryptoPayDepositsColumns[4], CryptoPayDepositsColumns[16]},
+			},
+			{
+				Name:    "cryptopaydeposit_status_id",
+				Unique:  false,
+				Columns: []*schema.Column{CryptoPayDepositsColumns[17], CryptoPayDepositsColumns[0]},
+			},
+		},
+	}
+	// CryptoPayKeysetsColumns holds the columns for the "crypto_pay_keysets" table.
+	CryptoPayKeysetsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "network", Type: field.TypeString, Size: 32},
+		{Name: "family", Type: field.TypeString, Size: 16},
+		{Name: "version", Type: field.TypeInt},
+		{Name: "xpub", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "path_template", Type: field.TypeString, Size: 100},
+		{Name: "fingerprint", Type: field.TypeString, Size: 64},
+		{Name: "signer_pubkey", Type: field.TypeString, Size: 64, Default: ""},
+		{Name: "next_index", Type: field.TypeInt64, Default: 0},
+		{Name: "pool_size", Type: field.TypeInt, Default: 0},
+		{Name: "active", Type: field.TypeBool, Default: true},
+		{Name: "created_by", Type: field.TypeString, Size: 100, Default: ""},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// CryptoPayKeysetsTable holds the schema information for the "crypto_pay_keysets" table.
+	CryptoPayKeysetsTable = &schema.Table{
+		Name:       "crypto_pay_keysets",
+		Columns:    CryptoPayKeysetsColumns,
+		PrimaryKey: []*schema.Column{CryptoPayKeysetsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "cryptopaykeyset_network_version",
+				Unique:  true,
+				Columns: []*schema.Column{CryptoPayKeysetsColumns[1], CryptoPayKeysetsColumns[3]},
+			},
+			{
+				Name:    "cryptopaykeyset_network_fingerprint",
+				Unique:  true,
+				Columns: []*schema.Column{CryptoPayKeysetsColumns[1], CryptoPayKeysetsColumns[6]},
+			},
+		},
+	}
+	// CryptoPayOrdersColumns holds the columns for the "crypto_pay_orders" table.
+	CryptoPayOrdersColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "address_id", Type: field.TypeInt64},
+		{Name: "network", Type: field.TypeString, Size: 32},
+		{Name: "asset", Type: field.TypeString, Size: 16},
+		{Name: "amount", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "expires_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// CryptoPayOrdersTable holds the schema information for the "crypto_pay_orders" table.
+	CryptoPayOrdersTable = &schema.Table{
+		Name:       "crypto_pay_orders",
+		Columns:    CryptoPayOrdersColumns,
+		PrimaryKey: []*schema.Column{CryptoPayOrdersColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "cryptopayorder_user_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{CryptoPayOrdersColumns[1], CryptoPayOrdersColumns[6]},
+			},
+		},
+	}
+	// CryptoPayScanCursorsColumns holds the columns for the "crypto_pay_scan_cursors" table.
+	CryptoPayScanCursorsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "scope_key", Type: field.TypeString, Unique: true, Size: 200},
+		{Name: "network", Type: field.TypeString, Size: 32},
+		{Name: "position", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "version", Type: field.TypeInt64, Default: 0},
+		{Name: "last_scanned_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "last_error", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// CryptoPayScanCursorsTable holds the schema information for the "crypto_pay_scan_cursors" table.
+	CryptoPayScanCursorsTable = &schema.Table{
+		Name:       "crypto_pay_scan_cursors",
+		Columns:    CryptoPayScanCursorsColumns,
+		PrimaryKey: []*schema.Column{CryptoPayScanCursorsColumns[0]},
+	}
+	// CryptoPaySolanaPoolEntriesColumns holds the columns for the "crypto_pay_solana_pool_entries" table.
+	CryptoPaySolanaPoolEntriesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "keyset_id", Type: field.TypeInt64},
+		{Name: "network", Type: field.TypeString, Size: 32},
+		{Name: "derivation_index", Type: field.TypeInt64},
+		{Name: "address", Type: field.TypeString, Size: 64},
+		{Name: "assigned_user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "assigned_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// CryptoPaySolanaPoolEntriesTable holds the schema information for the "crypto_pay_solana_pool_entries" table.
+	CryptoPaySolanaPoolEntriesTable = &schema.Table{
+		Name:       "crypto_pay_solana_pool_entries",
+		Columns:    CryptoPaySolanaPoolEntriesColumns,
+		PrimaryKey: []*schema.Column{CryptoPaySolanaPoolEntriesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "cryptopaysolanapoolentry_keyset_id_derivation_index",
+				Unique:  true,
+				Columns: []*schema.Column{CryptoPaySolanaPoolEntriesColumns[1], CryptoPaySolanaPoolEntriesColumns[3]},
+			},
+			{
+				Name:    "cryptopaysolanapoolentry_network_address",
+				Unique:  true,
+				Columns: []*schema.Column{CryptoPaySolanaPoolEntriesColumns[2], CryptoPaySolanaPoolEntriesColumns[4]},
+			},
+		},
+	}
 	// ErrorPassthroughRulesColumns holds the columns for the "error_passthrough_rules" table.
 	ErrorPassthroughRulesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1453,6 +1709,14 @@ var (
 		AccountGroupsTable,
 		AnnouncementsTable,
 		AnnouncementReadsTable,
+		CryptoPayAddressesTable,
+		CryptoPayAuditLogsTable,
+		CryptoPayCreditsTable,
+		CryptoPayDepositsTable,
+		CryptoPayKeysetsTable,
+		CryptoPayOrdersTable,
+		CryptoPayScanCursorsTable,
+		CryptoPaySolanaPoolEntriesTable,
 		ErrorPassthroughRulesTable,
 		GroupsTable,
 		IdempotencyRecordsTable,
@@ -1503,6 +1767,30 @@ func init() {
 	AnnouncementReadsTable.ForeignKeys[1].RefTable = UsersTable
 	AnnouncementReadsTable.Annotation = &entsql.Annotation{
 		Table: "announcement_reads",
+	}
+	CryptoPayAddressesTable.Annotation = &entsql.Annotation{
+		Table: "crypto_pay_addresses",
+	}
+	CryptoPayAuditLogsTable.Annotation = &entsql.Annotation{
+		Table: "crypto_pay_audit_logs",
+	}
+	CryptoPayCreditsTable.Annotation = &entsql.Annotation{
+		Table: "crypto_pay_credits",
+	}
+	CryptoPayDepositsTable.Annotation = &entsql.Annotation{
+		Table: "crypto_pay_deposits",
+	}
+	CryptoPayKeysetsTable.Annotation = &entsql.Annotation{
+		Table: "crypto_pay_keysets",
+	}
+	CryptoPayOrdersTable.Annotation = &entsql.Annotation{
+		Table: "crypto_pay_orders",
+	}
+	CryptoPayScanCursorsTable.Annotation = &entsql.Annotation{
+		Table: "crypto_pay_scan_cursors",
+	}
+	CryptoPaySolanaPoolEntriesTable.Annotation = &entsql.Annotation{
+		Table: "crypto_pay_solana_pool_entries",
 	}
 	ErrorPassthroughRulesTable.Annotation = &entsql.Annotation{
 		Table: "error_passthrough_rules",

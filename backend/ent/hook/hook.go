@@ -81,6 +81,102 @@ func (f AnnouncementReadFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.V
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AnnouncementReadMutation", m)
 }
 
+// The CryptoPayAddressFunc type is an adapter to allow the use of ordinary
+// function as CryptoPayAddress mutator.
+type CryptoPayAddressFunc func(context.Context, *ent.CryptoPayAddressMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f CryptoPayAddressFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.CryptoPayAddressMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.CryptoPayAddressMutation", m)
+}
+
+// The CryptoPayAuditLogFunc type is an adapter to allow the use of ordinary
+// function as CryptoPayAuditLog mutator.
+type CryptoPayAuditLogFunc func(context.Context, *ent.CryptoPayAuditLogMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f CryptoPayAuditLogFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.CryptoPayAuditLogMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.CryptoPayAuditLogMutation", m)
+}
+
+// The CryptoPayCreditFunc type is an adapter to allow the use of ordinary
+// function as CryptoPayCredit mutator.
+type CryptoPayCreditFunc func(context.Context, *ent.CryptoPayCreditMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f CryptoPayCreditFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.CryptoPayCreditMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.CryptoPayCreditMutation", m)
+}
+
+// The CryptoPayDepositFunc type is an adapter to allow the use of ordinary
+// function as CryptoPayDeposit mutator.
+type CryptoPayDepositFunc func(context.Context, *ent.CryptoPayDepositMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f CryptoPayDepositFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.CryptoPayDepositMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.CryptoPayDepositMutation", m)
+}
+
+// The CryptoPayKeysetFunc type is an adapter to allow the use of ordinary
+// function as CryptoPayKeyset mutator.
+type CryptoPayKeysetFunc func(context.Context, *ent.CryptoPayKeysetMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f CryptoPayKeysetFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.CryptoPayKeysetMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.CryptoPayKeysetMutation", m)
+}
+
+// The CryptoPayOrderFunc type is an adapter to allow the use of ordinary
+// function as CryptoPayOrder mutator.
+type CryptoPayOrderFunc func(context.Context, *ent.CryptoPayOrderMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f CryptoPayOrderFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.CryptoPayOrderMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.CryptoPayOrderMutation", m)
+}
+
+// The CryptoPayScanCursorFunc type is an adapter to allow the use of ordinary
+// function as CryptoPayScanCursor mutator.
+type CryptoPayScanCursorFunc func(context.Context, *ent.CryptoPayScanCursorMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f CryptoPayScanCursorFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.CryptoPayScanCursorMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.CryptoPayScanCursorMutation", m)
+}
+
+// The CryptoPaySolanaPoolEntryFunc type is an adapter to allow the use of ordinary
+// function as CryptoPaySolanaPoolEntry mutator.
+type CryptoPaySolanaPoolEntryFunc func(context.Context, *ent.CryptoPaySolanaPoolEntryMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f CryptoPaySolanaPoolEntryFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.CryptoPaySolanaPoolEntryMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.CryptoPaySolanaPoolEntryMutation", m)
+}
+
 // The ErrorPassthroughRuleFunc type is an adapter to allow the use of ordinary
 // function as ErrorPassthroughRule mutator.
 type ErrorPassthroughRuleFunc func(context.Context, *ent.ErrorPassthroughRuleMutation) (ent.Value, error)

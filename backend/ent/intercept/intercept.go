@@ -14,6 +14,14 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/announcement"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopayaddress"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopayauditlog"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopaycredit"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopaydeposit"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopaykeyset"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopayorder"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopayscancursor"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopaysolanapoolentry"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
@@ -253,6 +261,222 @@ func (f TraverseAnnouncementRead) Traverse(ctx context.Context, q ent.Query) err
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *ent.AnnouncementReadQuery", q)
+}
+
+// The CryptoPayAddressFunc type is an adapter to allow the use of ordinary function as a Querier.
+type CryptoPayAddressFunc func(context.Context, *ent.CryptoPayAddressQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f CryptoPayAddressFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.CryptoPayAddressQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayAddressQuery", q)
+}
+
+// The TraverseCryptoPayAddress type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseCryptoPayAddress func(context.Context, *ent.CryptoPayAddressQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseCryptoPayAddress) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseCryptoPayAddress) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.CryptoPayAddressQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayAddressQuery", q)
+}
+
+// The CryptoPayAuditLogFunc type is an adapter to allow the use of ordinary function as a Querier.
+type CryptoPayAuditLogFunc func(context.Context, *ent.CryptoPayAuditLogQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f CryptoPayAuditLogFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.CryptoPayAuditLogQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayAuditLogQuery", q)
+}
+
+// The TraverseCryptoPayAuditLog type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseCryptoPayAuditLog func(context.Context, *ent.CryptoPayAuditLogQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseCryptoPayAuditLog) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseCryptoPayAuditLog) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.CryptoPayAuditLogQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayAuditLogQuery", q)
+}
+
+// The CryptoPayCreditFunc type is an adapter to allow the use of ordinary function as a Querier.
+type CryptoPayCreditFunc func(context.Context, *ent.CryptoPayCreditQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f CryptoPayCreditFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.CryptoPayCreditQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayCreditQuery", q)
+}
+
+// The TraverseCryptoPayCredit type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseCryptoPayCredit func(context.Context, *ent.CryptoPayCreditQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseCryptoPayCredit) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseCryptoPayCredit) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.CryptoPayCreditQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayCreditQuery", q)
+}
+
+// The CryptoPayDepositFunc type is an adapter to allow the use of ordinary function as a Querier.
+type CryptoPayDepositFunc func(context.Context, *ent.CryptoPayDepositQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f CryptoPayDepositFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.CryptoPayDepositQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayDepositQuery", q)
+}
+
+// The TraverseCryptoPayDeposit type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseCryptoPayDeposit func(context.Context, *ent.CryptoPayDepositQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseCryptoPayDeposit) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseCryptoPayDeposit) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.CryptoPayDepositQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayDepositQuery", q)
+}
+
+// The CryptoPayKeysetFunc type is an adapter to allow the use of ordinary function as a Querier.
+type CryptoPayKeysetFunc func(context.Context, *ent.CryptoPayKeysetQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f CryptoPayKeysetFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.CryptoPayKeysetQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayKeysetQuery", q)
+}
+
+// The TraverseCryptoPayKeyset type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseCryptoPayKeyset func(context.Context, *ent.CryptoPayKeysetQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseCryptoPayKeyset) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseCryptoPayKeyset) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.CryptoPayKeysetQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayKeysetQuery", q)
+}
+
+// The CryptoPayOrderFunc type is an adapter to allow the use of ordinary function as a Querier.
+type CryptoPayOrderFunc func(context.Context, *ent.CryptoPayOrderQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f CryptoPayOrderFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.CryptoPayOrderQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayOrderQuery", q)
+}
+
+// The TraverseCryptoPayOrder type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseCryptoPayOrder func(context.Context, *ent.CryptoPayOrderQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseCryptoPayOrder) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseCryptoPayOrder) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.CryptoPayOrderQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayOrderQuery", q)
+}
+
+// The CryptoPayScanCursorFunc type is an adapter to allow the use of ordinary function as a Querier.
+type CryptoPayScanCursorFunc func(context.Context, *ent.CryptoPayScanCursorQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f CryptoPayScanCursorFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.CryptoPayScanCursorQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayScanCursorQuery", q)
+}
+
+// The TraverseCryptoPayScanCursor type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseCryptoPayScanCursor func(context.Context, *ent.CryptoPayScanCursorQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseCryptoPayScanCursor) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseCryptoPayScanCursor) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.CryptoPayScanCursorQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.CryptoPayScanCursorQuery", q)
+}
+
+// The CryptoPaySolanaPoolEntryFunc type is an adapter to allow the use of ordinary function as a Querier.
+type CryptoPaySolanaPoolEntryFunc func(context.Context, *ent.CryptoPaySolanaPoolEntryQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f CryptoPaySolanaPoolEntryFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.CryptoPaySolanaPoolEntryQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.CryptoPaySolanaPoolEntryQuery", q)
+}
+
+// The TraverseCryptoPaySolanaPoolEntry type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseCryptoPaySolanaPoolEntry func(context.Context, *ent.CryptoPaySolanaPoolEntryQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseCryptoPaySolanaPoolEntry) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseCryptoPaySolanaPoolEntry) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.CryptoPaySolanaPoolEntryQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.CryptoPaySolanaPoolEntryQuery", q)
 }
 
 // The ErrorPassthroughRuleFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -810,6 +1034,22 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.AnnouncementQuery, predicate.Announcement, announcement.OrderOption]{typ: ent.TypeAnnouncement, tq: q}, nil
 	case *ent.AnnouncementReadQuery:
 		return &query[*ent.AnnouncementReadQuery, predicate.AnnouncementRead, announcementread.OrderOption]{typ: ent.TypeAnnouncementRead, tq: q}, nil
+	case *ent.CryptoPayAddressQuery:
+		return &query[*ent.CryptoPayAddressQuery, predicate.CryptoPayAddress, cryptopayaddress.OrderOption]{typ: ent.TypeCryptoPayAddress, tq: q}, nil
+	case *ent.CryptoPayAuditLogQuery:
+		return &query[*ent.CryptoPayAuditLogQuery, predicate.CryptoPayAuditLog, cryptopayauditlog.OrderOption]{typ: ent.TypeCryptoPayAuditLog, tq: q}, nil
+	case *ent.CryptoPayCreditQuery:
+		return &query[*ent.CryptoPayCreditQuery, predicate.CryptoPayCredit, cryptopaycredit.OrderOption]{typ: ent.TypeCryptoPayCredit, tq: q}, nil
+	case *ent.CryptoPayDepositQuery:
+		return &query[*ent.CryptoPayDepositQuery, predicate.CryptoPayDeposit, cryptopaydeposit.OrderOption]{typ: ent.TypeCryptoPayDeposit, tq: q}, nil
+	case *ent.CryptoPayKeysetQuery:
+		return &query[*ent.CryptoPayKeysetQuery, predicate.CryptoPayKeyset, cryptopaykeyset.OrderOption]{typ: ent.TypeCryptoPayKeyset, tq: q}, nil
+	case *ent.CryptoPayOrderQuery:
+		return &query[*ent.CryptoPayOrderQuery, predicate.CryptoPayOrder, cryptopayorder.OrderOption]{typ: ent.TypeCryptoPayOrder, tq: q}, nil
+	case *ent.CryptoPayScanCursorQuery:
+		return &query[*ent.CryptoPayScanCursorQuery, predicate.CryptoPayScanCursor, cryptopayscancursor.OrderOption]{typ: ent.TypeCryptoPayScanCursor, tq: q}, nil
+	case *ent.CryptoPaySolanaPoolEntryQuery:
+		return &query[*ent.CryptoPaySolanaPoolEntryQuery, predicate.CryptoPaySolanaPoolEntry, cryptopaysolanapoolentry.OrderOption]{typ: ent.TypeCryptoPaySolanaPoolEntry, tq: q}, nil
 	case *ent.ErrorPassthroughRuleQuery:
 		return &query[*ent.ErrorPassthroughRuleQuery, predicate.ErrorPassthroughRule, errorpassthroughrule.OrderOption]{typ: ent.TypeErrorPassthroughRule, tq: q}, nil
 	case *ent.GroupQuery:
