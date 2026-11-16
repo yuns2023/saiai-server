@@ -62,6 +62,7 @@ type CryptoPayService struct {
 	spanMu           sync.Mutex
 	evmSpans         map[string]*cryptoPayEVMSpan
 	evmBlocksPerScan uint64
+	solanaPageSize   int
 	balanceCache     cryptoPayBalanceCache
 	authCache        APIKeyAuthCacheInvalidator
 	now              func() time.Time
@@ -89,6 +90,7 @@ func NewCryptoPayService(db *sql.DB, settingRepo SettingRepository, cfg config.C
 	s.unitsPerPass = max(cfg.ScanUnitsPerPass, 1)
 	s.evmSpans = map[string]*cryptoPayEVMSpan{}
 	s.evmBlocksPerScan = uint64(max(cfg.EVMBlocksPerScan, 1))
+	s.solanaPageSize = max(cfg.SolanaPageSize, 1)
 	for _, n := range networks {
 		s.byNetwork[n.Network] = n
 	}

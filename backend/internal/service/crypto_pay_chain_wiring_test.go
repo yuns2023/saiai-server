@@ -25,7 +25,7 @@ func TestBuildCryptoPayChainDepsMasterOffMakesNoRequests(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := config.CryptoPayConfig{Enabled: false, EVMNetwork: "arbitrum-one", EVMRPCURL: srv.URL,
-		SolanaNetwork: "solana-mainnet", SolanaRPCURL: srv.URL, ScanIntervalSeconds: 1, ScanBatchTimeoutSeconds: 1, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20}
+		SolanaNetwork: "solana-mainnet", SolanaRPCURL: srv.URL, ScanIntervalSeconds: 1, ScanBatchTimeoutSeconds: 1, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 20, SolanaPageSize: 200}
 	deps := BuildCryptoPayChainDeps(cfg, srv.Client())
 	require.Nil(t, deps.EVMScanner)
 	require.Nil(t, deps.SolanaScanner)

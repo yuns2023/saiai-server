@@ -183,6 +183,10 @@ type CryptoPayConfig struct {
 	// ScanUnitsPerPass caps scan units (EVM address batch / Solana token
 	// account) per network per pass; each gets the full batch timeout.
 	ScanUnitsPerPass int `mapstructure:"scan_units_per_pass"`
+	// SolanaPageSize is maxTx per Solana window call (1..1000): one signature
+	// page and at most this many transactions; the window is persisted after
+	// every call.
+	SolanaPageSize int `mapstructure:"solana_page_size"`
 }
 
 type IdempotencyConfig struct {
@@ -1472,6 +1476,7 @@ func setDefaults() {
 	viper.SetDefault("crypto_pay.scan_batch_timeout_seconds", 60)
 	viper.SetDefault("crypto_pay.evm_blocks_per_scan", 2000)
 	viper.SetDefault("crypto_pay.scan_units_per_pass", 20)
+	viper.SetDefault("crypto_pay.solana_page_size", 200)
 
 	// Idempotency
 	viper.SetDefault("idempotency.observe_only", true)

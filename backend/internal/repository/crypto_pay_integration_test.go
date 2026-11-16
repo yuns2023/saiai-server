@@ -136,11 +136,14 @@ func (f *fakeEVMScanner) ObservationsForTx(context.Context, string, []string, bo
 }
 
 type fakeSolanaScanner struct {
-	block map[string]bool // token accounts whose scan waits for ctx cancellation
-	txObs []chain.Observation
-	mu    sync.Mutex
-	obs   map[string][]chain.Observation // token account -> inflows (newest last)
-	until []string
+	block     map[string]bool // token accounts whose scan waits for ctx cancellation
+	pageDelay time.Duration   // per ScanTokenAccountWindow call
+	failCalls int             // next N window calls fail
+	pages     int
+	txObs     []chain.Observation
+	mu        sync.Mutex
+	obs       map[string][]chain.Observation // token account -> inflows (newest last)
+	until     []string
 }
 
 func (f *fakeSolanaScanner) Network() chain.Network { return chain.SolanaMainnet }
@@ -170,6 +173,76 @@ func (f *fakeSolanaScanner) ScanTokenAccount(ctx context.Context, _, tokenAccoun
 	}
 	return out, newest, nil
 }
+
+// ScanTokenAccountWindow mimics chain.ScanTokenAccountWindow: one listing
+// page (newest first, until=w.Until exclusive, before=w.Before exclusive,
+// limit maxTx); observations of the call oldest first; empty page without
+// anchor => next == w; empty page with anchor => {Until: anchor}; non-empty
+// page => {Until, Anchor, Before: oldest listed}; Anchor and Before must be
+// both set or both empty; any error => (nil, w, err).
+func (f *fakeSolanaScanner) ScanTokenAccountWindow(ctx context.Context, _, tokenAccount string, _ chain.Asset, w chain.SolanaWindow, commitment string, maxTx int) ([]chain.Observation, chain.SolanaWindow, error) {
+	if f.block[tokenAccount] {
+		<-ctx.Done()
+		return nil, w, ctx.Err()
+	}
+	if commitment != "finalized" || maxTx <= 0 || maxTx > 1000 || (w.Anchor == "") != (w.Before == "") {
+		return nil, w, errors.New("fake: bad window call")
+	}
+	if f.pageDelay > 0 {
+		select {
+		case <-time.After(f.pageDelay):
+		case <-ctx.Done():
+			return nil, w, ctx.Err()
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pages++
+	f.until = append(f.until, tokenAccount+"<"+w.Until)
+	if f.failCalls > 0 {
+		f.failCalls--
+		return nil, w, errors.New("fake: rpc failed mid-window")
+	}
+	all := f.obs[tokenAccount] // chronological (oldest first)
+	idx := func(sig string) int {
+		for i, o := range all {
+			if o.TxHash == sig {
+				return i
+			}
+		}
+		return -1
+	}
+	lo, hi := 0, len(all) // candidates all[lo:hi]
+	if w.Until != "" {
+		lo = idx(w.Until) + 1
+	}
+	if w.Before != "" {
+		hi = idx(w.Before)
+	}
+	var page []chain.Observation // newest first
+	for k := hi - 1; k >= lo && len(page) < maxTx; k-- {
+		page = append(page, all[k])
+	}
+	if len(page) == 0 {
+		if w.Anchor == "" {
+			return nil, w, nil
+		}
+		return nil, chain.SolanaWindow{Until: w.Anchor}, nil
+	}
+	anchor := w.Anchor
+	if anchor == "" {
+		anchor = page[0].TxHash
+	}
+	out := make([]chain.Observation, 0, len(page))
+	for k := len(page) - 1; k >= 0; k-- {
+		o := page[k]
+		o.Finalized = true
+		out = append(out, o)
+	}
+	// Only an empty page closes the window (a short page keeps it open).
+	return out, chain.SolanaWindow{Until: w.Until, Anchor: anchor, Before: page[len(page)-1].TxHash}, nil
+}
+
 func (f *fakeSolanaScanner) ObservationsForTx(context.Context, string, []string, string) ([]chain.Observation, error) {
 	return f.txObs, nil
 }
@@ -225,7 +298,7 @@ func newCryptoEnvWith(t *testing.T, mutate func(*config.CryptoPayConfig)) *crypt
 	deps.EVMScanner, deps.SolanaScanner = env.evm, env.sol
 	cfg := config.CryptoPayConfig{
 		Enabled: true, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet", SolanaPoolSignerPubkey: cryptoTestSigner,
-		ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 1000,
+		ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, EVMBlocksPerScan: 2000, ScanUnitsPerPass: 1000, SolanaPageSize: 200,
 	}
 	if mutate != nil {
 		mutate(&cfg)
@@ -788,8 +861,8 @@ func TestCryptoPay_SolanaScanPerTokenAccount(t *testing.T) {
 	require.Contains(t, env.sol.until, ata+"<"+first.TxHash, "the walk resumes after the persisted signature")
 	var pos string
 	require.NoError(t, integrationDB.QueryRow(`SELECT position FROM crypto_pay_scan_cursors WHERE scope_key = $1`,
-		"sol:solana-mainnet:USDT:"+ata).Scan(&pos))
-	require.Equal(t, second.TxHash, pos)
+		"sol:solana-mainnet:"+chain.MainnetAssets()[3].Contract+":"+ata).Scan(&pos))
+	require.Equal(t, `{"until":"`+second.TxHash+`","anchor":"","before":""}`, pos)
 }
 
 func TestCryptoPay_RescanUsesChainAndSamePath(t *testing.T) {
@@ -1329,4 +1402,114 @@ func TestCryptoPay_EVMAllocationRequiresScanner(t *testing.T) {
 	_, err := noScanner.CreateOrder(ctx, user, "arbitrum-one", "USDC", "5")
 	require.Equal(t, service.CryptoPayReasonAddressUnavailable, infraerrors.Reason(err))
 	require.Equal(t, 0, countRows(t, `SELECT COUNT(*) FROM crypto_pay_addresses`))
+}
+
+func TestCryptoPay_SolanaLargeBacklogProgressesAcrossPasses(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.ScanBatchTimeoutSeconds, c.SolanaPageSize = 1, 200 })
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
+	_, err := env.svc.ImportSolanaKeyset(ctx, testManifest(t, "backlog", 1, cryptoTestSigner), "admin:test")
+	require.NoError(t, err)
+	user := createCryptoUser(t)
+	addr, err := env.svc.EnsureAddress(ctx, user, chain.SolanaMainnet)
+	require.NoError(t, err)
+	usdc := chain.MainnetAssets()[2]
+	ata, _ := fakeATA(addr.Address, usdc.Contract, usdc.TokenProgram)
+	for i := 0; i < 2500; i++ {
+		env.sol.obs[ata] = append(env.sol.obs[ata], chain.Observation{Network: chain.SolanaMainnet, Asset: usdc,
+			TxHash: fakeSolSig(fmt.Sprintf("bl-%d", i)), EventKey: "acct:" + ata, ToAddress: addr.Address, TokenAccount: ata,
+			Units: big.NewInt(1), BlockNumber: uint64(i), BlockTime: time.Now()})
+	}
+	env.sol.pageDelay = 300 * time.Millisecond // ~3 pages of 200 per 1s unit
+	scope := "sol:solana-mainnet:" + usdc.Contract + ":" + ata
+	deposits := func() int { return countRows(t, `SELECT COUNT(*) FROM crypto_pay_deposits`) }
+
+	env.svc.RunWorkerPass(ctx)
+	first := deposits()
+	require.Greater(t, first, 0, "pass 1 persisted at least one page")
+	require.Less(t, first, 2500, "a single 1s unit cannot walk 2500 signatures at 300ms/page")
+	var lastErr string
+	require.NoError(t, integrationDB.QueryRow(`SELECT last_error FROM crypto_pay_scan_cursors WHERE scope_key = $1`, scope).Scan(&lastErr))
+	require.Empty(t, lastErr, "a timeout after progress is not a failure")
+	for pass := 0; pass < 20 && deposits() < 2500; pass++ {
+		env.svc.RunWorkerPass(ctx)
+	}
+	require.Equal(t, 2500, deposits())
+	env.svc.RunWorkerPass(ctx) // backlog sweep credits anything left finalized
+	require.Equal(t, "0.00250000", userBalance(t, user), "2500 x 0.000001, each credited once")
+	require.Equal(t, 2500, countRows(t, `SELECT COUNT(*) FROM crypto_pay_credits`))
+	var pos string
+	var scanned sql.NullTime
+	require.NoError(t, integrationDB.QueryRow(`SELECT position, last_scanned_at FROM crypto_pay_scan_cursors WHERE scope_key = $1`, scope).Scan(&pos, &scanned))
+	require.Equal(t, `{"until":"`+fakeSolSig("bl-2499")+`","anchor":"","before":""}`, pos)
+	require.True(t, scanned.Valid, "caught up once done")
+}
+
+func solanaWindowOf(t *testing.T, scope string) chain.SolanaWindow {
+	t.Helper()
+	var pos string
+	require.NoError(t, integrationDB.QueryRow(`SELECT position FROM crypto_pay_scan_cursors WHERE scope_key = $1`, scope).Scan(&pos))
+	var w chain.SolanaWindow
+	require.NoError(t, json.Unmarshal([]byte(pos), &w), pos)
+	return w
+}
+
+func TestCryptoPay_SolanaWindowErrorKeepsWindowAndRestartResumes(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, func(c *config.CryptoPayConfig) { c.SolanaPageSize = 2 })
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
+	_, err := env.svc.ImportSolanaKeyset(ctx, testManifest(t, "window", 1, cryptoTestSigner), "admin:test")
+	require.NoError(t, err)
+	user := createCryptoUser(t)
+	addr, err := env.svc.EnsureAddress(ctx, user, chain.SolanaMainnet)
+	require.NoError(t, err)
+	usdc := chain.MainnetAssets()[2]
+	ata, _ := fakeATA(addr.Address, usdc.Contract, usdc.TokenProgram)
+	scope := "sol:solana-mainnet:" + usdc.Contract + ":" + ata
+	for i := 0; i < 5; i++ {
+		env.sol.obs[ata] = append(env.sol.obs[ata], chain.Observation{Network: chain.SolanaMainnet, Asset: usdc,
+			TxHash: fakeSolSig(fmt.Sprintf("w-%d", i)), EventKey: "acct:" + ata, ToAddress: addr.Address, TokenAccount: ata,
+			Units: big.NewInt(1_000_000), BlockNumber: uint64(i), BlockTime: time.Now()})
+	}
+	// Legacy plain-signature cursor is read as {Until: sig}: w-0 already processed.
+	_, err = integrationDB.Exec(`INSERT INTO crypto_pay_scan_cursors (scope_key, network, position, version) VALUES ($1, 'solana-mainnet', $2, 1)`,
+		scope, fakeSolSig("w-0"))
+	require.NoError(t, err)
+
+	// One page (w-4, w-3) succeeds, then the RPC fails mid-window.
+	failAfterFirst := &onceFailingSolana{fakeSolanaScanner: env.sol}
+	svc := service.NewCryptoPayService(integrationDB, env.settings, config.CryptoPayConfig{
+		Enabled: true, SolanaNetwork: "solana-mainnet", SolanaPoolSignerPubkey: cryptoTestSigner,
+		ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: 60, ScanUnitsPerPass: 20, SolanaPageSize: 2,
+	}, service.CryptoPayChainDeps{SolanaScanner: failAfterFirst, SolanaATA: fakeATA}, nil, nil)
+	svc.RunWorkerPass(ctx)
+	w := solanaWindowOf(t, scope)
+	require.Equal(t, chain.SolanaWindow{Until: fakeSolSig("w-0"), Anchor: fakeSolSig("w-4"), Before: fakeSolSig("w-3")}, w,
+		"the window after the last successful call is kept")
+	require.Equal(t, "2.00000000", userBalance(t, user))
+	var lastErr string
+	require.NoError(t, integrationDB.QueryRow(`SELECT last_error FROM crypto_pay_scan_cursors WHERE scope_key = $1`, scope).Scan(&lastErr))
+	require.Contains(t, lastErr, "mid-window")
+
+	// "Restart": a fresh service resumes from the persisted window.
+	env.svc.RunWorkerPass(ctx)
+	require.Equal(t, chain.SolanaWindow{Until: fakeSolSig("w-4")}, solanaWindowOf(t, scope))
+	require.Equal(t, "4.00000000", userBalance(t, user), "w-1..w-4 credited once each; w-0 was before the legacy cursor")
+	require.Equal(t, 4, countRows(t, `SELECT COUNT(*) FROM crypto_pay_credits`))
+}
+
+// onceFailingSolana fails every window call after the first one.
+type onceFailingSolana struct {
+	*fakeSolanaScanner
+	calls int
+}
+
+func (o *onceFailingSolana) ScanTokenAccountWindow(ctx context.Context, owner, tokenAccount string, asset chain.Asset, w chain.SolanaWindow, commitment string, maxTx int) ([]chain.Observation, chain.SolanaWindow, error) {
+	o.calls++
+	if o.calls > 1 {
+		return nil, w, errors.New("fake: rpc failed mid-window")
+	}
+	return o.fakeSolanaScanner.ScanTokenAccountWindow(ctx, owner, tokenAccount, asset, w, commitment, maxTx)
 }

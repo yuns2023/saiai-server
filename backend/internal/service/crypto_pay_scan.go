@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/cryptopay/chain"
@@ -59,8 +61,10 @@ func cryptoPayEVMCursorScope(network chain.Network, address string) string {
 	return "evm:" + string(network) + ":fin:" + address
 }
 
-func cryptoPaySolanaCursorScope(network chain.Network, symbol, tokenAccount string) string {
-	return "sol:" + string(network) + ":" + symbol + ":" + tokenAccount
+// cryptoPaySolanaCursorScope binds a persisted window to (network, mint,
+// token account): a window is only ever resumed for the same triple.
+func cryptoPaySolanaCursorScope(network chain.Network, mint, tokenAccount string) string {
+	return "sol:" + string(network) + ":" + mint + ":" + tokenAccount
 }
 
 func (s *CryptoPayService) loadCursors(ctx context.Context, scopes []string) (map[string]*cryptoPayCursor, error) {
@@ -423,7 +427,7 @@ func (s *CryptoPayService) scanEVMBatch(ctx context.Context, sc chain.EVMScanner
 			if it.from > to {
 				continue
 			}
-			if err := s.advanceCursor(ctx, network, it.cursor, position, to == finalized); err != nil {
+			if err := s.persistCursor(ctx, network, it.cursor, position, to == finalized); err != nil {
 				return err
 			}
 			it.from = to + 1
@@ -466,7 +470,7 @@ func (s *CryptoPayService) scanSolana(ctx context.Context, sc chain.SolanaScanne
 				cryptoPayLogf("ALERT ATA for %s/%s failed: %v", a.address, asset.Symbol, aerr)
 				continue
 			}
-			scope := cryptoPaySolanaCursorScope(network, asset.Symbol, account)
+			scope := cryptoPaySolanaCursorScope(network, asset.Contract, account)
 			units = append(units, &cryptoPaySolanaUnit{owner: a.address, account: account, asset: asset, active: a.active, scope: scope})
 			scopes = append(scopes, scope)
 		}
@@ -503,33 +507,80 @@ func (s *CryptoPayService) scanSolana(ctx context.Context, sc chain.SolanaScanne
 	return errors.Join(errs...)
 }
 
+// cryptoPayParseSolanaWindow reads a persisted Solana cursor: JSON of
+// chain.SolanaWindow, or a legacy plain signature meaning {Until: sig}.
+func cryptoPayParseSolanaWindow(position string) (chain.SolanaWindow, error) {
+	var w chain.SolanaWindow
+	if position == "" {
+		return w, nil
+	}
+	if !strings.HasPrefix(position, "{") {
+		return chain.SolanaWindow{Until: position}, nil
+	}
+	if err := json.Unmarshal([]byte(position), &w); err != nil {
+		return w, fmt.Errorf("invalid Solana scan window: %w", err)
+	}
+	return w, nil
+}
+
+func cryptoPayEncodeSolanaWindow(w chain.SolanaWindow) (string, error) {
+	b, err := json.Marshal(w)
+	return string(b), err
+}
+
+// scanSolanaAccount walks the account with chain.ScanTokenAccountWindow: one
+// signature page (at most solanaPageSize transactions) per call. After each
+// successful call the observations are ingested first, then the returned
+// window is persisted verbatim with CAS, so a restart or another instance
+// resumes exactly there. The loop stops when a call changes nothing (window
+// closed, no new signatures: caught up) or the unit timeout ends; a timeout
+// after progress is not a failure (the unit stays due and resumes next pass).
 func (s *CryptoPayService) scanSolanaAccount(ctx context.Context, sc chain.SolanaScanner, u *cryptoPaySolanaUnit) error {
 	c := u.cursor
-	obs, newest, err := sc.ScanTokenAccount(ctx, u.owner, u.account, u.asset, c.position, "finalized")
+	w, err := cryptoPayParseSolanaWindow(c.position)
 	if err != nil {
-		return fmt.Errorf("scan: %w", err)
-	}
-	for i := range obs {
-		if !obs[i].Finalized {
-			return fmt.Errorf("scanner returned an unfinalized inflow at finalized commitment")
-		}
-	}
-	if _, err := s.IngestObservations(ctx, obs); err != nil {
-		return fmt.Errorf("ingest: %w", err)
-	}
-	position := c.position
-	if newest != "" {
-		position = newest
-	}
-	if err := s.advanceCursor(ctx, sc.Network(), c, position, true); err != nil {
 		return err
+	}
+	progressed := false
+	stop := func(err error) error {
+		if progressed && ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	for {
+		obs, next, err := sc.ScanTokenAccountWindow(ctx, u.owner, u.account, u.asset, w, "finalized", s.solanaPageSize)
+		if err != nil {
+			return stop(fmt.Errorf("scan: %w", err))
+		}
+		for i := range obs {
+			if !obs[i].Finalized {
+				return fmt.Errorf("scanner returned an unfinalized inflow at finalized commitment")
+			}
+		}
+		if _, err := s.IngestObservations(ctx, obs); err != nil {
+			return stop(fmt.Errorf("ingest: %w", err))
+		}
+		caughtUp := next == w && next.Anchor == ""
+		position, err := cryptoPayEncodeSolanaWindow(next)
+		if err != nil {
+			return err
+		}
+		if err := s.persistCursor(ctx, sc.Network(), c, position, caughtUp); err != nil {
+			return stop(err)
+		}
+		progressed = true
+		w = next
+		if caughtUp {
+			break
+		}
 	}
 	if !u.active {
 		return nil
 	}
 	// Confirmed-but-not-final inflows: display only; failures do not matter
 	// for crediting and are retried next attempt.
-	pending, _, err := sc.ScanTokenAccount(ctx, u.owner, u.account, u.asset, position, "confirmed")
+	pending, _, err := sc.ScanTokenAccount(ctx, u.owner, u.account, u.asset, w.Until, "confirmed")
 	if err != nil {
 		cryptoPayLogf("confirmed scan of %s failed: %v", u.account, err)
 		return nil
@@ -603,4 +654,14 @@ func cryptoPayTimeoutCause(ctx context.Context, err error) error {
 		return context.DeadlineExceeded
 	}
 	return err
+}
+
+// persistCursor advances a cursor after its range/window was ingested. The
+// write gets its own short budget, detached from the unit deadline: once the
+// observations are stored, losing the cursor write to the deadline would make
+// the next attempt replay the same work forever.
+func (s *CryptoPayService) persistCursor(ctx context.Context, network chain.Network, c *cryptoPayCursor, position string, caughtUp bool) error {
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return s.advanceCursor(wctx, network, c, position, caughtUp)
 }

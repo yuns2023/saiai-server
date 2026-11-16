@@ -149,6 +149,9 @@ func parseCryptoPayNetworks(cfg config.CryptoPayConfig) ([]*cryptoPayNetwork, []
 	if cfg.Enabled && cfg.ScanUnitsPerPass <= 0 {
 		warnings = append(warnings, "crypto_pay.scan_units_per_pass must be positive")
 	}
+	if cfg.Enabled && strings.TrimSpace(cfg.SolanaNetwork) != "" && (cfg.SolanaPageSize <= 0 || cfg.SolanaPageSize > 1000) {
+		warnings = append(warnings, "crypto_pay.solana_page_size must be in 1..1000")
+	}
 	if cfg.Enabled && strings.TrimSpace(cfg.EVMNetwork) != "" && cfg.EVMBlocksPerScan <= 0 {
 		warnings = append(warnings, "crypto_pay.evm_blocks_per_scan must be positive")
 	}
