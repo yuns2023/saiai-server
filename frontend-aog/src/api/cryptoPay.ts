@@ -57,8 +57,10 @@ export interface CryptoOrder {
   /** Observed, not yet finalized. */
   confirming_amount: string
   credited_amount: string
-  /** Newest first. */
+  /** Newest first; at most the latest 1000. */
   deposits: CryptoDeposit[]
+  /** True when `deposits` was cut to the latest 1000 (the amount totals still cover all). */
+  deposits_truncated: boolean
 }
 
 export interface CryptoPage<T> {
@@ -96,7 +98,7 @@ export const cryptoPayApi = {
   },
   async getOrder(id: number | string): Promise<CryptoOrder> {
     const { data } = await api.get<CryptoOrder>(`/crypto-pay/orders/${encodeURIComponent(String(id))}`)
-    return { ...data, deposits: data?.deposits ?? [] }
+    return { ...data, deposits: data?.deposits ?? [], deposits_truncated: data?.deposits_truncated === true }
   },
   async myOrders(page = 1, pageSize = 20): Promise<CryptoPage<CryptoOrder>> {
     const { data } = await api.get<CryptoPage<CryptoOrder>>('/crypto-pay/orders/my', { params: { page, page_size: pageSize } })

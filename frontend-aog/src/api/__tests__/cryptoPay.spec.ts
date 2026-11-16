@@ -31,6 +31,7 @@ describe('cryptoPayApi', () => {
     expect(http.get).toHaveBeenCalledWith('/crypto-pay/orders/7')
     expect(o.amount).toBe('10.000001')
     expect(o.deposits).toEqual([])
+    expect(o.deposits_truncated).toBe(false)
   })
 
   it('paginates orders and deposits', async () => {

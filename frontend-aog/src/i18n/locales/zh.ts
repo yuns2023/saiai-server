@@ -414,6 +414,7 @@ export default {
     heldNote: '有到账正在人工审核，审核通过后入账。',
     orphanedNote: '已作废的到账因链上重组未生效，不会入账。',
     inflows: '本单到账',
+    truncated: '仅显示最近 1000 笔，金额合计为全部到账',
     noInflows: '尚未检测到转账，到账后这里会自动更新。',
     loadFailed: '订单加载失败。',
     notFound: '没有找到这个订单。'

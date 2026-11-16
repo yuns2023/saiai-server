@@ -416,6 +416,7 @@ const en: typeof zh = {
     heldNote: 'A deposit is under manual review and will be credited once approved.',
     orphanedNote: 'Void deposits were dropped by a chain reorganisation and will not be credited.',
     inflows: 'Deposits for this order',
+    truncated: 'Showing the latest 1,000 transfers; totals include all',
     noInflows: 'No transfer detected yet. This page updates when one arrives.',
     loadFailed: 'Could not load the order.',
     notFound: 'Order not found.'

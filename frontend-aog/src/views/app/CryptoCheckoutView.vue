@@ -324,6 +324,7 @@ onUnmounted(() => {
             </tbody>
           </table>
         </div>
+        <p v-if="order.deposits_truncated" class="mt-2 text-xs text-ink-3" data-testid="crypto-truncated">{{ t('crypto.truncated') }}</p>
       </section>
     </template>
   </section>

@@ -68,6 +68,7 @@ function order(over: Partial<CryptoOrder> = {}): CryptoOrder {
     confirming_amount: '0',
     credited_amount: '0',
     deposits: [],
+    deposits_truncated: false,
     ...over
   }
 }
@@ -190,6 +191,13 @@ describe('CryptoCheckoutView', () => {
     await vi.advanceTimersByTimeAsync(2000)
     expect(w.find('[data-testid=crypto-expired]').exists()).toBe(true)
     expect(w.find('[data-testid=crypto-status]').text()).toBe('已过期')
+  })
+
+  it('notes when the deposit list is truncated', async () => {
+    const w = await mountView(order({ deposits: [deposit()], deposits_truncated: true }))
+    expect(w.find('[data-testid=crypto-truncated]').text()).toBe('仅显示最近 1000 笔，金额合计为全部到账')
+    const plain = await mountView(order({ deposits: [deposit()] }))
+    expect(plain.find('[data-testid=crypto-truncated]').exists()).toBe(false)
   })
 
   it('held: explains manual review', async () => {
