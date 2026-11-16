@@ -6,9 +6,16 @@ import QRCode from 'qrcode'
 import Pager from '@/components/Pager.vue'
 import SealStamp from '@/components/SealStamp.vue'
 import {
+  cryptoOrderError,
+  cryptoPayApi,
+  explorerUrl,
+  pageCount,
   paymentAPI,
   redeemApi,
   subscriptionsApi,
+  type CryptoDeposit,
+  type CryptoDepositStatus,
+  type CryptoPayConfig,
   type PaymentConfig,
   type PaymentMethod,
   type PaymentOrder,
@@ -20,6 +27,7 @@ import {
 import { errorMessage } from '@/api/client'
 import { intlLocale } from '@/i18n'
 import { currency, dateOnly, dateTime, money } from '@/lib/format'
+import { normaliseAmount, usd } from '@/lib/decimal'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 
@@ -320,10 +328,103 @@ async function loadPayment(): Promise<void> {
   }
 }
 
+/* ---------- Stablecoin (independent of the native payment switch) ---------- */
+const cryptoConfig = ref<CryptoPayConfig | null>(null)
+const cryptoNetwork = ref('')
+const cryptoAsset = ref('')
+/** Kept as a string: amounts never go through Number. */
+const cryptoAmount = ref('50')
+const cryptoCreating = ref(false)
+const cryptoError = ref('')
+const deposits = ref<CryptoDeposit[]>([])
+const depositsPage = ref(1)
+const depositsPages = ref(1)
+const depositsTotal = ref(0)
+const depositsFailed = ref(false)
+
+const cryptoEnabled = computed(() => !!cryptoConfig.value?.enabled && cryptoConfig.value.networks.length > 0)
+const cryptoNet = computed(() => cryptoConfig.value?.networks.find((n) => n.network === cryptoNetwork.value) ?? null)
+const cryptoAmountValue = computed(() => {
+  const c = cryptoConfig.value
+  return c ? normaliseAmount(cryptoAmount.value, c.min_amount, c.max_amount) : null
+})
+const cryptoQuick = computed(() => {
+  const c = cryptoConfig.value
+  return c ? ['10', '50', '100', '200'].filter((v) => normaliseAmount(v, c.min_amount, c.max_amount) !== null) : []
+})
+/** Native payment block: hidden only when it has nothing to offer and stablecoins are on. */
+const showNativePay = computed(() => loadingPay.value || payLoadFailed.value || !!config.value?.enabled || !!externalUrl.value || !cryptoEnabled.value)
+
+watch(cryptoNet, (n) => {
+  if (!n?.assets.some((a) => a.symbol === cryptoAsset.value)) cryptoAsset.value = n?.assets[0]?.symbol ?? ''
+})
+
+function depositTag(s: CryptoDepositStatus): string {
+  if (s === 'credited') return 'tag-ok'
+  if (s === 'confirming' || s === 'held') return 'tag-warn'
+  return 'tag-off'
+}
+
+function networkLabel(network: string): string {
+  return cryptoConfig.value?.networks.find((n) => n.network === network)?.label || network
+}
+
+function depositTxUrl(d: CryptoDeposit): string {
+  const n = cryptoConfig.value?.networks.find((x) => x.network === d.network)
+  return explorerUrl(n?.explorer_tx_url, 'tx', d.tx_hash)
+}
+
+function shortHash(hash: string): string {
+  return hash.length > 16 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash
+}
+
+async function loadCrypto(): Promise<void> {
+  try {
+    const c = await cryptoPayApi.config()
+    cryptoConfig.value = c
+    cryptoNetwork.value = c.networks[0]?.network ?? ''
+    if (normaliseAmount(cryptoAmount.value, c.min_amount, c.max_amount) === null) cryptoAmount.value = c.min_amount
+  } catch {
+    cryptoConfig.value = null
+  }
+}
+
+async function loadDeposits(p = depositsPage.value): Promise<void> {
+  try {
+    const res = await cryptoPayApi.deposits(p, 10)
+    deposits.value = res.items
+    depositsPage.value = res.page || p
+    depositsPages.value = pageCount(res)
+    depositsTotal.value = res.total || 0
+    depositsFailed.value = false
+  } catch {
+    // Unknown is not "none": show the failure with a retry instead of an empty list.
+    depositsFailed.value = true
+  }
+}
+
+async function createCryptoOrder(): Promise<void> {
+  const amountValue = cryptoAmountValue.value
+  if (!cryptoEnabled.value || !cryptoNet.value || !cryptoAsset.value || !amountValue || cryptoCreating.value) return
+  cryptoCreating.value = true
+  cryptoError.value = ''
+  try {
+    const o = await cryptoPayApi.createOrder({ network: cryptoNet.value.network, asset: cryptoAsset.value, amount: amountValue })
+    await router.push({ name: 'crypto-checkout', params: { id: String(o.id) } })
+  } catch (e) {
+    const reason = cryptoOrderError(e)
+    cryptoError.value = reason ? t(`crypto.${reason}`) : errorMessage(e, t('crypto.orderFailed'))
+  } finally {
+    cryptoCreating.value = false
+  }
+}
+
 onMounted(() => {
   loadHistory()
   loadSubs()
   loadPayment()
+  loadCrypto()
+  loadDeposits(1)
 })
 onUnmounted(() => {
   unmounted = true
@@ -388,137 +489,212 @@ onUnmounted(() => {
         </table>
       </section>
 
-      <!-- Pay -->
-      <section aria-labelledby="pay-title">
-        <h2 id="pay-title" class="text-md font-semibold">{{ t('billing.payTitle') }}</h2>
-        <p v-if="returnMissing" class="mt-3 rounded border border-warn/40 bg-warn-wash px-3 py-2 text-sm text-warn" role="status">
-          {{ t('billing.returnMissing', { no: returnMissing }) }}
-        </p>
+      <div class="space-y-12">
+        <!-- Pay -->
+        <section v-if="showNativePay" aria-labelledby="pay-title">
+          <h2 id="pay-title" class="text-md font-semibold">{{ t('billing.payTitle') }}</h2>
+          <p v-if="returnMissing" class="mt-3 rounded border border-warn/40 bg-warn-wash px-3 py-2 text-sm text-warn" role="status">
+            {{ t('billing.returnMissing', { no: returnMissing }) }}
+          </p>
 
-        <div v-if="loadingPay" class="mt-4 space-y-3"><div class="skeleton h-10" /><div class="skeleton h-10" /></div>
+          <div v-if="loadingPay" class="mt-4 space-y-3"><div class="skeleton h-10" /><div class="skeleton h-10" /></div>
 
-        <p v-else-if="payLoadFailed" class="mt-3 text-sm text-seal" role="alert">
-          {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadPayment">{{ t('common.retry') }}</button>
-        </p>
+          <p v-else-if="payLoadFailed" class="mt-3 text-sm text-seal" role="alert">
+            {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadPayment">{{ t('common.retry') }}</button>
+          </p>
 
-        <template v-else-if="config?.enabled">
-          <div role="group" class="mt-4 flex rounded border border-rule p-0.5" :aria-label="t('billing.payTitle')">
+          <template v-else-if="config?.enabled">
+            <div role="group" class="mt-4 flex rounded border border-rule p-0.5" :aria-label="t('billing.payTitle')">
+              <button
+                type="button"
+                class="h-8 flex-1 rounded-[3px] text-sm transition-colors duration-150"
+                :class="mode === 'balance' ? 'bg-blue text-on-blue' : 'text-ink-2 hover:text-ink'"
+                :aria-pressed="mode === 'balance'"
+                @click="mode = 'balance'"
+              >
+                {{ t('billing.modeBalance') }}
+              </button>
+              <button
+                type="button"
+                class="h-8 flex-1 rounded-[3px] text-sm transition-colors duration-150 disabled:opacity-40"
+                :class="mode === 'subscription' ? 'bg-blue text-on-blue' : 'text-ink-2 hover:text-ink'"
+                :aria-pressed="mode === 'subscription'"
+                :disabled="!plans.length"
+                @click="mode = 'subscription'"
+              >
+                {{ t('billing.modePlan') }}
+              </button>
+            </div>
+
+            <div v-if="mode === 'balance'" class="mt-4">
+              <label class="block">
+                <span class="label">{{ t('billing.amount') }}</span>
+                <input
+                  v-model.number="amount"
+                  class="field num mt-1"
+                  type="number"
+                  inputmode="decimal"
+                  :min="config.min_amount"
+                  :max="config.max_amount"
+                  step="0.01"
+                  :aria-invalid="!amountOk ? 'true' : undefined"
+                />
+              </label>
+              <span class="mt-1 block text-xs text-ink-3">{{ t('billing.amountRange', { min: money(config.min_amount, 0), max: money(config.max_amount, 0) }) }}</span>
+              <div v-if="quick.length" class="mt-2 flex flex-wrap gap-2">
+                <button
+                  v-for="q in quick"
+                  :key="q"
+                  type="button"
+                  class="btn btn-sm num"
+                  :class="amount === q ? 'btn-primary' : 'btn-line'"
+                  @click="amount = q"
+                >
+                  {{ money(q, 0) }}
+                </button>
+              </div>
+            </div>
+
+            <ul v-else class="mt-4 border-t border-rule-strong" role="radiogroup" :aria-label="t('billing.modePlan')">
+              <li v-for="p in plans" :key="p.id" class="border-b border-rule-soft">
+                <label class="flex cursor-pointer items-start gap-3 py-3">
+                  <input v-model="planId" type="radio" name="plan" :value="p.id" class="mt-1 accent-[var(--blue)]" />
+                  <span class="min-w-0 flex-1">
+                    <span class="flex items-baseline justify-between gap-3">
+                      <span class="font-medium">{{ p.name }}</span>
+                      <span class="num">
+                        <s v-if="p.original_price && p.original_price > p.price" class="mr-1.5 text-xs text-ink-3">{{ currency(p.original_price, p.currency, intlLocale()) }}</s>
+                        {{ currency(p.price, p.currency, intlLocale()) }}
+                      </span>
+                    </span>
+                    <span class="mt-0.5 block text-xs text-ink-3">{{ validity(p) }}<template v-if="p.description"> · {{ p.description }}</template></span>
+                  </span>
+                </label>
+              </li>
+            </ul>
+
+            <label class="mt-4 block">
+              <span class="label">{{ t('billing.method') }}</span>
+              <select v-model="methodId" class="field mt-1" :disabled="!usableMethods.length">
+                <option v-for="m in usableMethods" :key="m.id" :value="m.id">{{ methodLabel(m.type) }} · {{ m.currency }}</option>
+              </select>
+            </label>
+            <p v-if="!usableMethods.length" class="mt-1 text-xs text-seal">{{ t('billing.noMethod') }}</p>
+
+            <div class="mt-5 flex items-baseline justify-between border-t border-rule-strong pt-3">
+              <span class="text-sm text-ink-2">
+                {{ t('billing.payable') }}
+                <span v-if="mode === 'balance' && config.recharge_fee_rate" class="text-xs text-ink-3">· {{ t('billing.fee', { rate: config.recharge_fee_rate }) }}</span>
+              </span>
+              <span class="num text-lg font-semibold">{{ payTotal }}</span>
+            </div>
             <button
               type="button"
-              class="h-8 flex-1 rounded-[3px] text-sm transition-colors duration-150"
-              :class="mode === 'balance' ? 'bg-blue text-on-blue' : 'text-ink-2 hover:text-ink'"
-              :aria-pressed="mode === 'balance'"
-              @click="mode = 'balance'"
+              class="btn btn-primary mt-4 h-10 w-full"
+              :disabled="paying || !method || (mode === 'balance' ? !amountOk : !plan)"
+              @click="pay"
             >
-              {{ t('billing.modeBalance') }}
+              {{ paying ? t('billing.creatingOrder') : t('billing.pay') }}
             </button>
-            <button
-              type="button"
-              class="h-8 flex-1 rounded-[3px] text-sm transition-colors duration-150 disabled:opacity-40"
-              :class="mode === 'subscription' ? 'bg-blue text-on-blue' : 'text-ink-2 hover:text-ink'"
-              :aria-pressed="mode === 'subscription'"
-              :disabled="!plans.length"
-              @click="mode = 'subscription'"
-            >
-              {{ t('billing.modePlan') }}
-            </button>
+
+            <!-- Active order -->
+            <div v-if="order" class="mt-6 border border-rule p-4">
+              <div class="flex items-baseline justify-between gap-3 text-sm">
+                <span class="text-ink-2">{{ t('billing.order') }} <span class="num font-mono text-xs">{{ order.out_trade_no || `#${order.id}` }}</span></span>
+                <span class="tag" :class="statusTag(order.status)">{{ t(`billing.status_${order.status}`) }}</span>
+              </div>
+              <div v-if="orderLive" class="mt-4 flex flex-col items-center gap-3 text-center">
+                <img v-if="qr" :src="qr" alt="" width="200" height="200" class="rounded border border-rule bg-white p-2" />
+                <p class="text-sm text-ink-2">{{ t('billing.scan') }}</p>
+                <div class="flex gap-2">
+                  <a v-if="safePayUrl" :href="safePayUrl" target="_blank" rel="noopener noreferrer" class="btn btn-line no-underline">{{ t('billing.openPay') }}</a>
+                  <button v-if="order.status === 'PENDING'" type="button" class="btn btn-quiet" @click="cancelOrder">{{ t('billing.cancelOrder') }}</button>
+                </div>
+              </div>
+              <p v-else-if="order.status === 'FAILED'" class="mt-3 text-sm text-seal">{{ t('billing.fulfilFailed') }}</p>
+            </div>
+          </template>
+
+          <div v-else-if="externalUrl" class="mt-4">
+            <p class="text-sm text-ink-2">{{ t('billing.external') }}</p>
+            <a :href="externalUrl" target="_blank" rel="noopener noreferrer" class="btn btn-primary mt-3 no-underline">{{ t('billing.openExternal') }}</a>
           </div>
+          <p v-else class="mt-3 text-sm text-ink-2">{{ t('billing.payOff') }}</p>
+        </section>
 
-          <div v-if="mode === 'balance'" class="mt-4">
-            <label class="block">
-              <span class="label">{{ t('billing.amount') }}</span>
+        <!-- Stablecoin -->
+        <section v-if="cryptoEnabled && cryptoConfig" aria-labelledby="crypto-title" data-testid="crypto-topup">
+          <h2 id="crypto-title" class="text-md font-semibold">{{ t('crypto.title') }}</h2>
+          <p class="mt-1 text-sm text-ink-2">{{ t('crypto.lead') }}</p>
+          <form class="mt-4" novalidate @submit.prevent="createCryptoOrder">
+            <span class="label">{{ t('crypto.network') }}</span>
+            <div role="group" class="mt-1 flex rounded border border-rule p-0.5" :aria-label="t('crypto.network')">
+              <button
+                v-for="n in cryptoConfig.networks"
+                :key="n.network"
+                type="button"
+                class="h-8 flex-1 rounded-[3px] text-sm transition-colors duration-150"
+                :class="cryptoNetwork === n.network ? 'bg-blue text-on-blue' : 'text-ink-2 hover:text-ink'"
+                :aria-pressed="cryptoNetwork === n.network"
+                @click="cryptoNetwork = n.network"
+              >
+                {{ n.label || n.network }}
+              </button>
+            </div>
+
+            <span class="label mt-4 block">{{ t('crypto.asset') }}</span>
+            <div role="group" class="mt-1 flex rounded border border-rule p-0.5" :aria-label="t('crypto.asset')">
+              <button
+                v-for="a in cryptoNet?.assets ?? []"
+                :key="a.symbol"
+                type="button"
+                class="h-8 flex-1 rounded-[3px] text-sm transition-colors duration-150"
+                :class="cryptoAsset === a.symbol ? 'bg-blue text-on-blue' : 'text-ink-2 hover:text-ink'"
+                :aria-pressed="cryptoAsset === a.symbol"
+                @click="cryptoAsset = a.symbol"
+              >
+                {{ a.symbol }}
+              </button>
+            </div>
+
+            <label class="mt-4 block">
+              <span class="label">{{ t('crypto.amount') }}</span>
               <input
-                v-model.number="amount"
+                v-model.trim="cryptoAmount"
                 class="field num mt-1"
-                type="number"
+                type="text"
                 inputmode="decimal"
-                :min="config.min_amount"
-                :max="config.max_amount"
-                step="0.01"
-                :aria-invalid="!amountOk ? 'true' : undefined"
+                autocomplete="off"
+                :aria-invalid="!cryptoAmountValue ? 'true' : undefined"
+                data-testid="crypto-amount-input"
               />
             </label>
-            <span class="mt-1 block text-xs text-ink-3">{{ t('billing.amountRange', { min: money(config.min_amount, 0), max: money(config.max_amount, 0) }) }}</span>
-            <div v-if="quick.length" class="mt-2 flex flex-wrap gap-2">
+            <span class="mt-1 block text-xs text-ink-3">{{ t('crypto.amountRange', { min: `$${cryptoConfig.min_amount}`, max: `$${cryptoConfig.max_amount}` }) }}</span>
+            <div v-if="cryptoQuick.length" class="mt-2 flex flex-wrap gap-2">
               <button
-                v-for="q in quick"
+                v-for="q in cryptoQuick"
                 :key="q"
                 type="button"
                 class="btn btn-sm num"
-                :class="amount === q ? 'btn-primary' : 'btn-line'"
-                @click="amount = q"
+                :class="cryptoAmountValue === q ? 'btn-primary' : 'btn-line'"
+                @click="cryptoAmount = q"
               >
-                {{ money(q, 0) }}
+                ${{ q }}
               </button>
             </div>
-          </div>
 
-          <ul v-else class="mt-4 border-t border-rule-strong" role="radiogroup" :aria-label="t('billing.modePlan')">
-            <li v-for="p in plans" :key="p.id" class="border-b border-rule-soft">
-              <label class="flex cursor-pointer items-start gap-3 py-3">
-                <input v-model="planId" type="radio" name="plan" :value="p.id" class="mt-1 accent-[var(--blue)]" />
-                <span class="min-w-0 flex-1">
-                  <span class="flex items-baseline justify-between gap-3">
-                    <span class="font-medium">{{ p.name }}</span>
-                    <span class="num">
-                      <s v-if="p.original_price && p.original_price > p.price" class="mr-1.5 text-xs text-ink-3">{{ currency(p.original_price, p.currency, intlLocale()) }}</s>
-                      {{ currency(p.price, p.currency, intlLocale()) }}
-                    </span>
-                  </span>
-                  <span class="mt-0.5 block text-xs text-ink-3">{{ validity(p) }}<template v-if="p.description"> · {{ p.description }}</template></span>
-                </span>
-              </label>
-            </li>
-          </ul>
-
-          <label class="mt-4 block">
-            <span class="label">{{ t('billing.method') }}</span>
-            <select v-model="methodId" class="field mt-1" :disabled="!usableMethods.length">
-              <option v-for="m in usableMethods" :key="m.id" :value="m.id">{{ methodLabel(m.type) }} · {{ m.currency }}</option>
-            </select>
-          </label>
-          <p v-if="!usableMethods.length" class="mt-1 text-xs text-seal">{{ t('billing.noMethod') }}</p>
-
-          <div class="mt-5 flex items-baseline justify-between border-t border-rule-strong pt-3">
-            <span class="text-sm text-ink-2">
-              {{ t('billing.payable') }}
-              <span v-if="mode === 'balance' && config.recharge_fee_rate" class="text-xs text-ink-3">· {{ t('billing.fee', { rate: config.recharge_fee_rate }) }}</span>
-            </span>
-            <span class="num text-lg font-semibold">{{ payTotal }}</span>
-          </div>
-          <button
-            type="button"
-            class="btn btn-primary mt-4 h-10 w-full"
-            :disabled="paying || !method || (mode === 'balance' ? !amountOk : !plan)"
-            @click="pay"
-          >
-            {{ paying ? t('billing.creatingOrder') : t('billing.pay') }}
-          </button>
-
-          <!-- Active order -->
-          <div v-if="order" class="mt-6 border border-rule p-4">
-            <div class="flex items-baseline justify-between gap-3 text-sm">
-              <span class="text-ink-2">{{ t('billing.order') }} <span class="num font-mono text-xs">{{ order.out_trade_no || `#${order.id}` }}</span></span>
-              <span class="tag" :class="statusTag(order.status)">{{ t(`billing.status_${order.status}`) }}</span>
-            </div>
-            <div v-if="orderLive" class="mt-4 flex flex-col items-center gap-3 text-center">
-              <img v-if="qr" :src="qr" alt="" width="200" height="200" class="rounded border border-rule bg-white p-2" />
-              <p class="text-sm text-ink-2">{{ t('billing.scan') }}</p>
-              <div class="flex gap-2">
-                <a v-if="safePayUrl" :href="safePayUrl" target="_blank" rel="noopener noreferrer" class="btn btn-line no-underline">{{ t('billing.openPay') }}</a>
-                <button v-if="order.status === 'PENDING'" type="button" class="btn btn-quiet" @click="cancelOrder">{{ t('billing.cancelOrder') }}</button>
-              </div>
-            </div>
-            <p v-else-if="order.status === 'FAILED'" class="mt-3 text-sm text-seal">{{ t('billing.fulfilFailed') }}</p>
-          </div>
-        </template>
-
-        <div v-else-if="externalUrl" class="mt-4">
-          <p class="text-sm text-ink-2">{{ t('billing.external') }}</p>
-          <a :href="externalUrl" target="_blank" rel="noopener noreferrer" class="btn btn-primary mt-3 no-underline">{{ t('billing.openExternal') }}</a>
-        </div>
-        <p v-else class="mt-3 text-sm text-ink-2">{{ t('billing.payOff') }}</p>
-      </section>
+            <button
+              type="submit"
+              class="btn btn-primary mt-5 h-10 w-full"
+              :disabled="cryptoCreating || !cryptoAmountValue || !cryptoAsset"
+              data-testid="crypto-submit"
+            >
+              {{ cryptoCreating ? t('crypto.creating') : t('crypto.submit') }}
+            </button>
+            <p v-if="cryptoError" class="mt-2 text-sm text-seal" role="alert">{{ cryptoError }}</p>
+          </form>
+        </section>
+      </div>
     </div>
 
     <!-- Subscriptions -->
@@ -549,6 +725,50 @@ onUnmounted(() => {
           </tr>
         </tbody>
       </table>
+    </section>
+
+    <!-- Stablecoin deposits: shown whenever the feature is on or there is history -->
+    <section v-if="cryptoEnabled || depositsTotal > 0 || depositsFailed" class="mt-12" aria-labelledby="deposits-title" data-testid="crypto-deposits-section">
+      <h2 id="deposits-title" class="text-md font-semibold">{{ t('crypto.deposits') }}</h2>
+      <p v-if="depositsFailed" class="mt-3 border-t border-rule-strong py-4 text-sm text-seal" role="alert" data-testid="crypto-deposits-error">
+        {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadDeposits()">{{ t('common.retry') }}</button>
+      </p>
+      <p v-else-if="!deposits.length" class="mt-3 border-t border-rule-strong py-4 text-sm text-ink-3">{{ t('crypto.noDeposits') }}</p>
+      <template v-else>
+        <div class="overflow-x-auto">
+          <table class="ledger mt-3">
+            <thead>
+              <tr>
+                <th>{{ t('crypto.when') }}</th>
+                <th class="hidden sm:table-cell">{{ t('crypto.network') }}</th>
+                <th class="hidden sm:table-cell">{{ t('crypto.tx') }}</th>
+                <th>{{ t('billing.status') }}</th>
+                <th class="amount">{{ t('crypto.received') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="d in deposits" :key="d.id">
+                <td class="num text-ink-2">
+                  <span class="whitespace-nowrap">{{ dateTime(d.block_time, intlLocale()) }}</span>
+                  <span class="mt-0.5 block whitespace-nowrap text-xs sm:hidden">
+                    {{ networkLabel(d.network) }} ·
+                    <a v-if="depositTxUrl(d)" :href="depositTxUrl(d)" target="_blank" rel="noopener noreferrer" class="font-mono" :title="d.tx_hash">{{ shortHash(d.tx_hash) }}</a>
+                    <span v-else class="font-mono" :title="d.tx_hash">{{ shortHash(d.tx_hash) }}</span>
+                  </span>
+                </td>
+                <td class="hidden sm:table-cell">{{ networkLabel(d.network) }}</td>
+                <td class="hidden font-mono text-xs leading-5 sm:table-cell">
+                  <a v-if="depositTxUrl(d)" :href="depositTxUrl(d)" target="_blank" rel="noopener noreferrer" :title="d.tx_hash">{{ shortHash(d.tx_hash) }}</a>
+                  <span v-else :title="d.tx_hash">{{ shortHash(d.tx_hash) }}</span>
+                </td>
+                <td><span class="tag" :class="depositTag(d.status)">{{ t(`crypto.status_${d.status}`) }}</span></td>
+                <td class="amount num"><span class="whitespace-nowrap">{{ usd(d.amount) }}</span> <span class="block text-xs text-ink-3 sm:inline">{{ d.asset }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <Pager :page="depositsPage" :pages="depositsPages" :total="depositsTotal" @go="loadDeposits" />
+      </template>
     </section>
 
     <!-- Orders -->

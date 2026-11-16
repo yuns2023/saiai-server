@@ -69,6 +69,7 @@ async function signOut(): Promise<void> {
               :to="item.to"
               class="flex h-9 items-center gap-2.5 rounded px-2.5 text-sm text-ink-2 no-underline transition-colors duration-150 hover:bg-rule-soft hover:text-ink"
               active-class="!bg-blue-wash !text-blue font-medium"
+              :class="route.path.startsWith(`${item.to}/`) && '!bg-blue-wash !text-blue font-medium'"
             >
               <Icon :name="item.icon" :size="17" />
               <span class="flex-1">{{ item.label }}</span>

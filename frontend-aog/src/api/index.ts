@@ -229,6 +229,7 @@ export const announcementsApi = {
 }
 
 export * from './payment'
+export * from './cryptoPay'
 
 /** GET /subscriptions/summary. Limits are omitted (undefined) when the group has none. */
 export interface SubscriptionSummary {
