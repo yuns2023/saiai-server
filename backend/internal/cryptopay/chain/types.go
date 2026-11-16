@@ -1,6 +1,25 @@
 // Package chain holds chain-level logic for stablecoin deposits: verified asset
 // constants, scanners and watch-only address derivation. It must not depend on
 // ent, service or the database. See tmp-crypto/CONTRACT.md for the contract.
+//
+// Trust boundary: the configured JSON-RPC endpoints are TRUSTED. This package
+// is not a light client; it does not verify consensus, block headers or
+// Merkle proofs. It does defend against inconsistent/incomplete responses
+// (response id, tx/signature binding, block-hash cross-checks, malformed
+// logs and balances are errors, never "no inflow"), but a malicious or
+// compromised RPC provider can fabricate deposits. Use providers you
+// control or trust, and consider cross-checking two providers before crediting
+// large amounts. Endpoint URLs (which often embed API keys) never appear in
+// returned errors.
+//
+// What counts as an inflow:
+//   - EVM: each ERC-20 Transfer log (whitelisted contract, value > 0) to a
+//     watched address; identity (tx hash, RPC logIndex).
+//   - Solana: the POSITIVE NET change of one token account's balance within
+//     one successful transaction (post - pre from pre/postTokenBalances, for a
+//     whitelisted mint + token program, owner = deposit address). A receive and
+//     a send inside the same transaction net out; a zero or negative net change
+//     is not an inflow. Identity (signature, token account).
 package chain
 
 import (
@@ -98,7 +117,38 @@ type SolanaScanner interface {
 	// ScanTokenAccount returns inflows for signatures newer than untilSig (exclusive; "" = full history).
 	// A null getTransaction is an error (retry), never "no inflow".
 	ScanTokenAccount(ctx context.Context, owner, tokenAccount string, asset Asset, untilSig string, commitment string) (obs []Observation, newestSig string, err error)
+	// ScanTokenAccountWindow is the bounded, stateless, caller-persisted walk
+	// for commitment "finalized": one signature page (limit maxTx) per call.
+	// On any error it returns (nil, w, err) so nothing advances.
+	ScanTokenAccountWindow(ctx context.Context, owner, tokenAccount string, asset Asset, w SolanaWindow, commitment string, maxTx int) (obs []Observation, next SolanaWindow, err error)
 	ObservationsForTx(ctx context.Context, signature string, owners []string, commitment string) ([]Observation, error)
+}
+
+// SolanaWindow is the scan position of one token account, persisted by the
+// caller between ScanTokenAccountWindow calls (all fields, verbatim).
+//
+// Until is the newest signature already fully processed ("" = none). A
+// window is the set of signatures newer than Until that existed when its
+// first page was listed; Anchor is the newest of them (set on the first
+// page) and Before is the oldest signature processed so far in the window.
+// The walk goes newest to older inside the window; when it is complete the
+// next window starts at Until = Anchor, so signatures that arrived meanwhile
+// are picked up then. Every call either errors (window unchanged) or makes
+// progress, and is safe to repeat after a restart.
+//
+// Caller obligations:
+//   - Commit the returned observations BEFORE, or atomically with, persisting
+//     next; never persist next and lose the observations.
+//   - Bind a stored window to (network, token account, asset); never reuse it
+//     for another account or asset.
+//   - Serialize concurrent scans of one account (lock, or CAS on the stored
+//     window) so an older window cannot overwrite a newer one.
+//   - Ingest idempotently on (network, signature, event key): repeating a call
+//     after a crash returns the same observations again.
+type SolanaWindow struct {
+	Until  string `json:"until"`
+	Anchor string `json:"anchor"`
+	Before string `json:"before"`
 }
 
 // SolanaPoolManifest is the offline-signed list of Solana deposit owners.
