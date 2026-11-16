@@ -117,6 +117,12 @@ type SolanaScanner interface {
 	// ScanTokenAccount returns inflows for signatures newer than untilSig (exclusive; "" = full history).
 	// A null getTransaction is an error (retry), never "no inflow".
 	ScanTokenAccount(ctx context.Context, owner, tokenAccount string, asset Asset, untilSig string, commitment string) (obs []Observation, newestSig string, err error)
+	// ScanTokenAccountPage is the bounded, resumable form: it lists all
+	// signatures newer than untilSig, processes them oldest first, fetching at
+	// most maxTx transactions, and returns cursor = newest processed signature
+	// (pass it as untilSig next time) and done = nothing left. No new
+	// signatures: (nil, untilSig, true, nil). Any error: (nil, "", false, err).
+	ScanTokenAccountPage(ctx context.Context, owner, tokenAccount string, asset Asset, untilSig, commitment string, maxTx int) (obs []Observation, cursor string, done bool, err error)
 	ObservationsForTx(ctx context.Context, signature string, owners []string, commitment string) ([]Observation, error)
 }
 
