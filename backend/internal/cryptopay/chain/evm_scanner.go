@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -359,50 +358,7 @@ func (s *EVMRPCScanner) getLogs(ctx context.Context, from, to uint64, addrs []st
 	return logs, nil
 }
 
-// Provider phrases for "narrow your query" (Geth/Erigon/Alchemy/Infura/
-// QuickNode/Ankr/Arbitrum Nitro). A false positive only causes a bisection,
-// which ends in an error at a single block/address; it can never hide data.
-var tooMuchDataPhrases = []string{
-	"query returned more than",
-	"more than 10000 results",
-	"too many results",
-	"range too large",
-	"range is too large",
-	"block range",
-	"exceed maximum block range",
-	"limit exceeded",
-	"response size",
-	"response is too big",
-	"too large",
-	"query timeout",
-	"log response size exceeded",
-	"blocks range", // QuickNode: "eth_getLogs is limited to a 10000 blocks range"
-	"limited to a",
-}
-
-func isTooMuchDataError(err error) bool {
-	if errors.Is(err, ErrResponseTooLarge) {
-		return true
-	}
-	var he *HTTPStatusError
-	if errors.As(err, &he) && (he.StatusCode == http.StatusRequestEntityTooLarge || he.StatusCode == http.StatusGatewayTimeout) {
-		return true // 504: the query was too heavy for the gateway; a smaller one may pass
-	}
-	var re *RPCError
-	if !errors.As(err, &re) {
-		return false
-	}
-	if re.Code == -32005 {
-		return true
-	}
-	msg := strings.ToLower(re.Message)
-	for _, p := range tooMuchDataPhrases {
-		if strings.Contains(msg, p) {
-			return true
-		}
-	}
-	return false
-}
+func isTooMuchDataError(err error) bool { return errors.Is(err, ErrTooMuchData) }
 
 func (s *EVMRPCScanner) logsToObservations(ctx context.Context, logs []rpcLog, watched map[string]struct{}, finalized bool, finalizedHead uint64) ([]Observation, error) {
 	topic0 := TransferTopic0

@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -31,130 +29,116 @@ type RPCOptions struct {
 	URL              string
 	Timeout          time.Duration // per request; default 30s
 	UserAgent        string        // default DefaultUserAgent
-	MaxResponseBytes int64         // default 16 MiB; larger responses fail with ErrResponseTooLarge
+	MaxResponseBytes int64         // default 16 MiB; larger responses fail with ErrTooMuchData
 	Headers          map[string]string
 	HTTPClient       *http.Client // optional; Timeout above still applies via context
 }
 
-// RPCError is a JSON-RPC error object returned by the node.
+// RPCError is the JSON-RPC error object on the wire. It is never returned
+// as an error (its Message/Data are provider-controlled text).
 type RPCError struct {
 	Code    int             `json:"code"`
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
-func (e *RPCError) Error() string { return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message) }
+// RPCErrorKind is the fixed classification of an RPC failure.
+type RPCErrorKind string
 
-// HTTPStatusError is a non-200 HTTP response from the RPC endpoint.
-type HTTPStatusError struct {
-	StatusCode int
-	Body       string
+const (
+	RPCKindTimeout     RPCErrorKind = "timeout"
+	RPCKindCanceled    RPCErrorKind = "canceled"
+	RPCKindTransport   RPCErrorKind = "transport"
+	RPCKindHTTPStatus  RPCErrorKind = "http_status"
+	RPCKindRPCError    RPCErrorKind = "rpc_error"
+	RPCKindTooMuchData RPCErrorKind = "too_much_data"
+	RPCKindDecode      RPCErrorKind = "decode"
+)
+
+// ErrTooMuchData is the sentinel behind RPCKindTooMuchData: the provider
+// refused or could not deliver the result size (narrow the query).
+var ErrTooMuchData = errors.New("chain: rpc result too large for provider; narrow the query")
+
+// RPCCallError is the only error type returned by the RPC client. It
+// deliberately carries NO provider-supplied text, URL, header or body: only
+// the method name, the HTTP status, the JSON-RPC numeric code and a fixed
+// classification. Unwrap exposes only sentinels (context.DeadlineExceeded,
+// context.Canceled, ErrTooMuchData), never the raw transport error.
+type RPCCallError struct {
+	Method     string
+	Kind       RPCErrorKind
+	HTTPStatus int // 0 if no HTTP response
+	RPCCode    int // valid when HasRPCCode
+	HasRPCCode bool
 }
 
-func (e *HTTPStatusError) Error() string {
-	return fmt.Sprintf("rpc http status %d: %s", e.StatusCode, e.Body)
+func (e *RPCCallError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "chain: rpc %s: %s", e.Method, e.Kind)
+	if e.HTTPStatus != 0 {
+		fmt.Fprintf(&b, " http=%d", e.HTTPStatus)
+	}
+	if e.HasRPCCode {
+		fmt.Fprintf(&b, " code=%d", e.RPCCode)
+	}
+	return b.String()
 }
 
-// ErrResponseTooLarge means the response exceeded MaxResponseBytes.
-var ErrResponseTooLarge = errors.New("chain: rpc response exceeds size limit")
+// Unwrap exposes only sentinel errors.
+func (e *RPCCallError) Unwrap() error {
+	switch e.Kind {
+	case RPCKindTimeout:
+		return context.DeadlineExceeded
+	case RPCKindCanceled:
+		return context.Canceled
+	case RPCKindTooMuchData:
+		return ErrTooMuchData
+	}
+	return nil
+}
+
+// Timeout reports whether the call timed out.
+func (e *RPCCallError) Timeout() bool { return e.Kind == RPCKindTimeout }
 
 type rpcClient struct {
-	opts    RPCOptions
-	client  *http.Client
-	nextID  atomic.Uint64
-	secrets []string // substrings that must never appear in returned errors
+	opts   RPCOptions
+	client *http.Client
+	nextID atomic.Uint64
 }
 
-// redactedError hides the endpoint (which often embeds an API key in its
-// path or query) while keeping errors.Is/As on the underlying cause
-// (context.DeadlineExceeded, net.Error, ...).
-type redactedError struct {
-	msg string
-	err error
+// Provider phrases for "narrow your query" (Geth/Erigon/Alchemy/Infura/
+// QuickNode/Ankr/Arbitrum Nitro). Only used for classification; the text is
+// never kept. A false positive only causes a bisection, which ends in an
+// error at a single block/address; it can never hide data.
+var tooMuchDataPhrases = []string{
+	"query returned more than",
+	"too many results",
+	"range too large",
+	"range is too large",
+	"block range",
+	"blocks range", // QuickNode: "eth_getLogs is limited to a 10000 blocks range"
+	"limited to a",
+	"exceed maximum block range",
+	"response size",
+	"response is too big",
+	"too large",
+	"query timeout",
 }
 
-func (e *redactedError) Error() string { return e.msg }
-func (e *redactedError) Unwrap() error { return e.err }
-
-// Timeout reports whether the underlying error is a timeout.
-func (e *redactedError) Timeout() bool {
-	var ne interface{ Timeout() bool }
-	return errors.As(e.err, &ne) && ne.Timeout()
-}
-
-const redactedMarker = "[REDACTED]"
-
-func endpointSecrets(raw string, headers map[string]string) []string {
-	set := map[string]struct{}{raw: {}}
-	if u, err := url.Parse(raw); err == nil {
-		set[u.String()] = struct{}{}
-		if p := strings.Trim(u.EscapedPath(), "/"); len(p) >= 6 {
-			set[p] = struct{}{}
-			set[u.Path] = struct{}{}
-		}
-		if p := strings.Trim(u.EscapedPath(), "/"); p != "" {
-			for _, seg := range strings.Split(p, "/") {
-				if len(seg) >= 6 {
-					set[seg] = struct{}{}
-				}
-			}
-		}
-		if u.RawQuery != "" {
-			set[u.RawQuery] = struct{}{}
-			for _, vs := range u.Query() {
-				for _, v := range vs {
-					if len(v) >= 4 {
-						set[v] = struct{}{}
-						set[url.QueryEscape(v)] = struct{}{}
-					}
-				}
-			}
-		}
-		if u.User != nil {
-			set[u.User.String()] = struct{}{}
-			if pw, ok := u.User.Password(); ok && pw != "" {
-				set[pw] = struct{}{}
-			}
+func rpcErrorIsTooMuchData(e *RPCError) bool {
+	msg := strings.ToLower(e.Message)
+	if strings.Contains(msg, "rate limit") || strings.Contains(msg, "too many requests") {
+		return false
+	}
+	if e.Code == -32005 { // Infura "limit exceeded"
+		return true
+	}
+	for _, p := range tooMuchDataPhrases {
+		if strings.Contains(msg, p) {
+			return true
 		}
 	}
-	for _, v := range headers {
-		if len(v) >= 4 {
-			set[v] = struct{}{}
-		}
-	}
-	out := make([]string, 0, len(set))
-	for s := range set {
-		if len(s) >= 4 {
-			out = append(out, s)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
-	return out
-}
-
-func (c *rpcClient) redact(s string) string {
-	for _, sec := range c.secrets {
-		s = strings.ReplaceAll(s, sec, redactedMarker)
-	}
-	return s
-}
-
-func (c *rpcClient) redactRPCError(e *RPCError) *RPCError {
-	out := &RPCError{Code: e.Code, Message: c.redact(e.Message)}
-	if len(e.Data) > 0 {
-		out.Data = json.RawMessage(c.redact(string(e.Data)))
-	}
-	return out
-}
-
-func (c *rpcClient) transportError(method string, err error) error {
-	cause := err
-	op := "request"
-	var ue *url.Error
-	if errors.As(err, &ue) {
-		cause, op = ue.Err, ue.Op
-	}
-	return &redactedError{msg: fmt.Sprintf("chain: %s: %s failed: %s", method, op, c.redact(cause.Error())), err: cause}
+	return false
 }
 
 func newRPCClient(opts RPCOptions) (*rpcClient, error) {
@@ -174,7 +158,7 @@ func newRPCClient(opts RPCOptions) (*rpcClient, error) {
 	if c == nil {
 		c = &http.Client{Timeout: opts.Timeout}
 	}
-	return &rpcClient{opts: opts, client: c, secrets: endpointSecrets(opts.URL, opts.Headers)}, nil
+	return &rpcClient{opts: opts, client: c}, nil
 }
 
 type rpcRequest struct {
@@ -190,19 +174,49 @@ type rpcResponse struct {
 	Error  *RPCError       `json:"error"`
 }
 
+func (c *rpcClient) fail(method string, kind RPCErrorKind, status int, rpcErr *RPCError) error {
+	e := &RPCCallError{Method: method, Kind: kind, HTTPStatus: status}
+	if rpcErr != nil {
+		e.RPCCode, e.HasRPCCode = rpcErr.Code, true
+	}
+	return e
+}
+
+func classifyTransport(ctx context.Context, err error) RPCErrorKind {
+	var te interface{ Timeout() bool }
+	switch {
+	case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
+		return RPCKindCanceled
+	case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) ||
+		(errors.As(err, &te) && te.Timeout()):
+		return RPCKindTimeout
+	}
+	return RPCKindTransport
+}
+
+// idMatches allows a null/absent id only on error responses.
+func idMatches(raw json.RawMessage, want uint64, allowNull bool) bool {
+	got := string(bytes.TrimSpace(raw))
+	if got == strconv.FormatUint(want, 10) {
+		return true
+	}
+	return allowNull && (got == "" || got == "null")
+}
+
 // call performs one JSON-RPC request and returns the raw result ("null" is
-// returned as-is; callers decide whether null is an error).
+// returned as-is; callers decide whether null is an error). Every error is a
+// *RPCCallError without provider-supplied text.
 func (c *rpcClient) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	defer cancel()
 	id := c.nextID.Add(1)
 	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params})
 	if err != nil {
-		return nil, err
+		return nil, c.fail(method, RPCKindDecode, 0, nil)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.opts.URL, bytes.NewReader(body))
 	if err != nil {
-		return nil, c.transportError(method, err)
+		return nil, c.fail(method, RPCKindTransport, 0, nil)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -212,46 +226,51 @@ func (c *rpcClient) call(ctx context.Context, method string, params any) (json.R
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, c.transportError(method, err)
+		return nil, c.fail(method, classifyTransport(ctx, err), 0, nil)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	status := resp.StatusCode
 	data, err := io.ReadAll(io.LimitReader(resp.Body, c.opts.MaxResponseBytes+1))
 	if err != nil {
-		return nil, c.transportError(method, err)
+		return nil, c.fail(method, classifyTransport(ctx, err), status, nil)
 	}
 	if int64(len(data)) > c.opts.MaxResponseBytes {
-		return nil, fmt.Errorf("chain: %s: %w", method, ErrResponseTooLarge)
+		return nil, c.fail(method, RPCKindTooMuchData, status, nil)
 	}
-	if resp.StatusCode != http.StatusOK {
-		snippet := data
-		if len(snippet) > 512 {
-			snippet = snippet[:512]
-		}
-		// Some providers return a JSON-RPC error body with a non-200 status.
-		var r rpcResponse
-		if json.Unmarshal(data, &r) == nil && r.Error != nil {
-			return nil, fmt.Errorf("chain: %s: http %d: %w", method, resp.StatusCode, c.redactRPCError(r.Error))
-		}
-		return nil, fmt.Errorf("chain: %s: %w", method, &HTTPStatusError{StatusCode: resp.StatusCode, Body: c.redact(string(snippet))})
-	}
+
 	var r rpcResponse
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("chain: %s: decode response: %w", method, err)
-	}
-	wantID := strconv.FormatUint(id, 10)
-	if r.Error != nil {
-		// A null id is legal for errors the server could not attribute; any
-		// other id must be ours, or the error belongs to another request.
-		if gotID := string(bytes.TrimSpace(r.ID)); gotID != wantID && gotID != "null" && gotID != "" {
-			return nil, fmt.Errorf("chain: %s: error response id %s does not match request id %d", method, c.redact(gotID), id)
+	decodeErr := json.Unmarshal(data, &r)
+	if status != http.StatusOK {
+		var rpcErr *RPCError
+		if decodeErr == nil && r.Error != nil && idMatches(r.ID, id, true) {
+			rpcErr = r.Error
 		}
-		return nil, fmt.Errorf("chain: %s: %w", method, c.redactRPCError(r.Error))
+		switch {
+		case status == http.StatusTooManyRequests:
+			return nil, c.fail(method, RPCKindHTTPStatus, status, rpcErr) // rate limited: never split
+		case status == http.StatusRequestEntityTooLarge || status == http.StatusGatewayTimeout:
+			return nil, c.fail(method, RPCKindTooMuchData, status, rpcErr)
+		case rpcErr != nil && rpcErrorIsTooMuchData(rpcErr):
+			return nil, c.fail(method, RPCKindTooMuchData, status, rpcErr)
+		case rpcErr != nil:
+			return nil, c.fail(method, RPCKindRPCError, status, rpcErr)
+		}
+		return nil, c.fail(method, RPCKindHTTPStatus, status, nil)
 	}
-	if string(bytes.TrimSpace(r.ID)) != wantID {
-		return nil, fmt.Errorf("chain: %s: response id %s does not match request id %d", method, c.redact(string(r.ID)), id)
+	if decodeErr != nil {
+		return nil, c.fail(method, RPCKindDecode, status, nil)
 	}
-	if len(r.Result) == 0 {
-		return nil, fmt.Errorf("chain: %s: response has neither result nor error", method)
+	if r.Error != nil {
+		if !idMatches(r.ID, id, true) {
+			return nil, c.fail(method, RPCKindDecode, status, nil) // someone else's error
+		}
+		if rpcErrorIsTooMuchData(r.Error) {
+			return nil, c.fail(method, RPCKindTooMuchData, status, r.Error)
+		}
+		return nil, c.fail(method, RPCKindRPCError, status, r.Error)
+	}
+	if !idMatches(r.ID, id, false) || len(r.Result) == 0 {
+		return nil, c.fail(method, RPCKindDecode, status, nil)
 	}
 	return r.Result, nil
 }

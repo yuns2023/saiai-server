@@ -14,34 +14,106 @@ import (
 	"time"
 )
 
-// ---- RPC error redaction ----
+// ---- RPC errors carry no provider text ----
 
 const (
-	secretPath  = "PATHKEYsecret0123456789"
-	secretQuery = "QUERYKEYsecret9876543210"
+	secretPath   = "PATHKEYsecret0123456789"
+	secretQuery  = "QUERYKEYsecret9876543210"
+	secretBearer = "BEARERtokenSecret55555"
 )
 
-func assertNoSecret(t *testing.T, err error, what string) {
+var allSecrets = []string{secretPath, secretQuery, secretBearer, "api_key", "Bearer"}
+
+// assertCleanChain walks the whole Unwrap chain and checks every Error().
+func assertCleanChain(t *testing.T, err error, what string) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("%s: expected an error", what)
 	}
-	msg := err.Error()
-	if strings.Contains(msg, secretPath) || strings.Contains(msg, secretQuery) || strings.Contains(msg, "api_key=") {
-		t.Fatalf("%s: error leaks endpoint secret: %s", what, msg)
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		for _, sec := range allSecrets {
+			if strings.Contains(e.Error(), sec) {
+				t.Fatalf("%s: error chain leaks %q: %s", what, sec, e.Error())
+			}
+		}
 	}
 }
 
-func TestRPCErrorsNeverContainEndpointSecrets(t *testing.T) {
+// cannedRPC answers according to the "case" query parameter, echoing the
+// request id unless the case says otherwise.
+func cannedRPC(t *testing.T) *httptest.Server {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID json.RawMessage `json:"id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		id := string(req.ID)
+		auth := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		write := func(status int, body string) {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+		}
+		rpcErr := func(status int, idv string, code int, msg string) {
+			write(status, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"error":{"code":%d,"message":%q}}`, idv, code, msg))
+		}
+		switch r.URL.Query().Get("case") {
+		case "echo-bearer-500":
+			write(500, "bad token "+auth+" for "+r.URL.String())
+		case "echo-bearer-rpc":
+			rpcErr(200, id, -32000, "token "+auth+" path "+r.URL.Path+" query "+r.URL.RawQuery)
+		case "span-512":
+			write(502, strings.Repeat("x", 500)+secretQuery+secretPath)
+		case "escaped-data":
+			escaped := ""
+			for _, ch := range secretQuery {
+				escaped += fmt.Sprintf(`\u%04x`, ch)
+			}
+			write(200, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"x","data":"%s"}}`, id, escaped))
+		case "429-rpc":
+			rpcErr(429, id, -32005, "rate limited, query returned more than 10000 results")
+		case "504-rpc":
+			rpcErr(504, id, -32603, "internal error")
+		case "413":
+			write(413, "too big")
+		case "200-limit":
+			rpcErr(200, id, -32005, "query returned more than 10000 results")
+		case "200-quicknode":
+			rpcErr(200, id, -32614, "eth_getLogs is limited to a 10000 blocks range")
+		case "200-ratelimited":
+			rpcErr(200, id, -32005, "Too many requests, rate limit exceeded")
+		case "200-internal":
+			rpcErr(200, id, -32000, "internal error")
+		case "500-plain":
+			write(500, "oops")
+		case "500-foreign-id":
+			rpcErr(500, "999999", -32005, "query returned more than 10000 results")
+		case "200-foreign-id":
+			rpcErr(200, "999999", -32005, "query returned more than 10000 results")
+		case "200-null-id":
+			rpcErr(200, "null", -32700, "parse error")
+		default:
+			write(200, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":"0x1"}`, id))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestRPCErrorsCarryNoProviderText(t *testing.T) {
 	ctx := context.Background()
 	suffix := "/v2/" + secretPath + "?api_key=" + secretQuery
+	headers := map[string]string{"Authorization": "Bearer " + secretBearer}
 
 	// Connection refused.
-	c, _ := newRPCClient(RPCOptions{URL: "http://127.0.0.1:1" + suffix, Timeout: 2 * time.Second})
+	c, _ := newRPCClient(RPCOptions{URL: "http://127.0.0.1:1" + suffix, Timeout: 2 * time.Second, Headers: headers})
 	_, err := c.call(ctx, "eth_blockNumber", []any{})
-	assertNoSecret(t, err, "connect failure")
+	assertCleanChain(t, err, "connect failure")
+	var ce *RPCCallError
+	if !errors.As(err, &ce) || ce.Kind != RPCKindTransport {
+		t.Fatalf("connect failure kind: %v", err)
+	}
 
-	// Timeout: caller deadline must still be recognizable via errors.Is.
+	// Caller deadline: errors.Is and Timeout() preserved.
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
@@ -49,87 +121,97 @@ func TestRPCErrorsNeverContainEndpointSecrets(t *testing.T) {
 		}
 	}))
 	defer slow.Close()
-	c, _ = newRPCClient(RPCOptions{URL: slow.URL + suffix, Timeout: 5 * time.Second})
+	c, _ = newRPCClient(RPCOptions{URL: slow.URL + suffix, Timeout: 5 * time.Second, Headers: headers})
 	dctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 	_, err = c.call(dctx, "eth_blockNumber", []any{})
 	cancel()
-	assertNoSecret(t, err, "timeout")
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("timeout must keep errors.Is(context.DeadlineExceeded): %v", err)
-	}
+	assertCleanChain(t, err, "timeout")
 	var to interface{ Timeout() bool }
-	if !errors.As(err, &to) || !to.Timeout() {
-		t.Fatalf("timeout must report Timeout(): %v", err)
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &to) || !to.Timeout() {
+		t.Fatalf("timeout semantics lost: %v", err)
+	}
+	cctx, ccancel := context.WithCancel(ctx)
+	ccancel()
+	_, err = c.call(cctx, "eth_blockNumber", []any{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel semantics lost: %v", err)
 	}
 
-	// Non-200 bodies and JSON-RPC errors echoing the URL.
-	echo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.Contains(r.URL.RawQuery, "mode=json"):
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":null,"error":{"code":403,"message":"key %s not allowed for %s","data":"%s"}}`,
-				secretQuery, r.URL.Path, r.URL.String())
-		case strings.Contains(r.URL.RawQuery, "mode=ok200"):
-			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"bad key %s"}}`, secretPath)
-		default:
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = fmt.Fprintf(w, "upstream failed for %s", r.URL.String())
-		}
-	}))
-	defer echo.Close()
-	for _, mode := range []string{"plain", "json", "ok200"} {
-		c, _ = newRPCClient(RPCOptions{URL: echo.URL + suffix + "&mode=" + mode})
-		_, err = c.call(ctx, "eth_blockNumber", []any{})
-		assertNoSecret(t, err, "echo "+mode)
-	}
-	// Status classification still works through redaction.
-	c, _ = newRPCClient(RPCOptions{URL: echo.URL + suffix})
-	_, err = c.call(ctx, "eth_blockNumber", []any{})
-	var he *HTTPStatusError
-	if !errors.As(err, &he) || he.StatusCode != 500 {
-		t.Fatalf("HTTPStatusError lost: %v", err)
+	srv := cannedRPC(t)
+	for _, cs := range []string{"echo-bearer-500", "echo-bearer-rpc", "span-512", "escaped-data"} {
+		c, _ = newRPCClient(RPCOptions{URL: srv.URL + suffix + "&case=" + cs, Headers: headers})
+		_, err = c.call(ctx, "eth_getLogs", []any{})
+		assertCleanChain(t, err, cs)
 	}
 }
 
-func TestRPCErrorResponseIDMismatch(t *testing.T) {
+func TestRPCClassificationThroughHTTP(t *testing.T) {
+	srv := cannedRPC(t)
+	cases := []struct {
+		name    string
+		kind    RPCErrorKind
+		status  int
+		code    int
+		hasCode bool
+		tooMuch bool
+	}{
+		{"429-rpc", RPCKindHTTPStatus, 429, -32005, true, false},
+		{"504-rpc", RPCKindTooMuchData, 504, -32603, true, true},
+		{"413", RPCKindTooMuchData, 413, 0, false, true},
+		{"200-limit", RPCKindTooMuchData, 200, -32005, true, true},
+		{"200-quicknode", RPCKindTooMuchData, 200, -32614, true, true},
+		{"200-ratelimited", RPCKindRPCError, 200, -32005, true, false},
+		{"200-internal", RPCKindRPCError, 200, -32000, true, false},
+		{"500-plain", RPCKindHTTPStatus, 500, 0, false, false},
+		{"500-foreign-id", RPCKindHTTPStatus, 500, 0, false, false},
+		{"200-foreign-id", RPCKindDecode, 200, 0, false, false},
+		{"200-null-id", RPCKindRPCError, 200, -32700, true, false},
+	}
+	for _, tc := range cases {
+		c, _ := newRPCClient(RPCOptions{URL: srv.URL + "/?case=" + tc.name})
+		_, err := c.call(context.Background(), "eth_getLogs", []any{})
+		var ce *RPCCallError
+		if !errors.As(err, &ce) {
+			t.Fatalf("%s: not an RPCCallError: %v", tc.name, err)
+		}
+		if ce.Kind != tc.kind || ce.HTTPStatus != tc.status || ce.HasRPCCode != tc.hasCode || ce.RPCCode != tc.code {
+			t.Errorf("%s: got %+v", tc.name, ce)
+		}
+		if isTooMuchDataError(err) != tc.tooMuch {
+			t.Errorf("%s: too-much-data = %v", tc.name, !tc.tooMuch)
+		}
+	}
+	c, _ := newRPCClient(RPCOptions{URL: srv.URL + "/?case=ok"})
+	if res, err := c.call(context.Background(), "eth_blockNumber", []any{}); err != nil || string(res) != `"0x1"` {
+		t.Fatalf("ok case: %s %v", res, err)
+	}
+}
+
+// A 429 must never trigger a split (it would multiply requests while rate limited).
+func TestEVMRateLimitedDoesNotSplit(t *testing.T) {
+	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":4242,"error":{"code":-32005,"message":"query returned more than 10000 results"}}`))
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		switch req.Method {
+		case "eth_getBlockByNumber":
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"number":"0x64","hash":"%s","timestamp":"0x1"}}`, req.ID, blockHash(100))
+		default:
+			calls++
+			w.WriteHeader(429)
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"error":{"code":-32005,"message":"rate limited"}}`, req.ID)
+		}
 	}))
 	defer srv.Close()
-	c, _ := newRPCClient(RPCOptions{URL: srv.URL})
-	_, err := c.call(context.Background(), "eth_getLogs", []any{})
-	if err == nil || isTooMuchDataError(err) {
-		t.Fatalf("foreign error response must not be treated as ours: %v", err)
+	s, _ := NewEVMScanner(EVMScannerConfig{Network: ArbitrumOne, RPC: RPCOptions{URL: srv.URL}})
+	if _, err := s.ScanRange(context.Background(), 0, 100, []string{tAlice, tBob}, true); err == nil {
+		t.Fatal("rate limit must be an error")
 	}
-}
-
-// ---- provider "narrow the query" classification ----
-
-func TestIsTooMuchDataErrorTable(t *testing.T) {
-	wrap := func(e error) error { return fmt.Errorf("chain: eth_getLogs: %w", e) }
-	cases := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"geth/infura 10000", wrap(&RPCError{Code: -32005, Message: "query returned more than 10000 results"}), true},
-		{"infura code only", wrap(&RPCError{Code: -32005, Message: "rate limited?"}), true},
-		{"alchemy", wrap(&RPCError{Code: -32602, Message: "Log response size exceeded. You can make eth_getLogs requests with up to a 2K block range"}), true},
-		{"quicknode", wrap(&RPCError{Code: -32614, Message: "eth_getLogs is limited to a 10000 blocks range"}), true},
-		{"generic range too large", wrap(&RPCError{Code: -32000, Message: "range too large"}), true},
-		{"response size cap", wrap(ErrResponseTooLarge), true},
-		{"http 413", wrap(&HTTPStatusError{StatusCode: 413}), true},
-		{"http 504", wrap(&HTTPStatusError{StatusCode: 504}), true},
-		{"http 429", wrap(&HTTPStatusError{StatusCode: 429}), false},
-		{"http 500", wrap(&HTTPStatusError{StatusCode: 500}), false},
-		{"unknown rpc", wrap(&RPCError{Code: -32000, Message: "internal error"}), false},
-		{"header not found", wrap(&RPCError{Code: -32000, Message: "header not found"}), false},
-		{"deadline", wrap(context.DeadlineExceeded), false},
-	}
-	for _, c := range cases {
-		if got := isTooMuchDataError(c.err); got != c.want {
-			t.Errorf("%s: got %v want %v", c.name, got, c.want)
-		}
+	if calls != 1 {
+		t.Fatalf("429 caused %d eth_getLogs calls, want 1 (no split)", calls)
 	}
 }
 
@@ -306,6 +388,23 @@ func TestSolanaReceiveThenSendSameTx(t *testing.T) {
 	if err != nil || len(obs) != 1 || obs[0].TxHash != sSig("net-positive") || obs[0].Units.Int64() != 5 {
 		t.Fatalf("only the positive net change is an inflow: %+v %v", obs, err)
 	}
+	// The manual rescan path must agree for every case.
+	want := map[string]int64{"net-positive": 5, "net-zero": 0, "net-negative": 0}
+	for name, units := range want {
+		byTx, err := s.ObservationsForTx(context.Background(), sSig(name), []string{owner}, CommitmentFinalized)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if units == 0 {
+			if len(byTx) != 0 {
+				t.Errorf("%s: ObservationsForTx returned %+v", name, byTx)
+			}
+			continue
+		}
+		if len(byTx) != 1 || byTx[0].Units.Int64() != units || byTx[0].EventKey != obs[0].EventKey || byTx[0].TokenAccount != ata {
+			t.Errorf("%s: ObservationsForTx %+v disagrees with scan %+v", name, byTx, obs[0])
+		}
+	}
 }
 
 // ---- v0 transaction with the receiving account loaded from a lookup table ----
@@ -331,6 +430,18 @@ func TestSolanaV0LookupTableAccountBothPathsAgree(t *testing.T) {
 		ata    = "6oCkp6gpyjxVTeL6ahMYcekN2x2pzt1KY8g2LqemaTNE"
 		owner2 = "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"
 	)
+	// The receiving accounts really are in the lookup-table segment.
+	msg, _ := txJSON["transaction"].(map[string]any)["message"].(map[string]any)
+	keys, _ := msg["accountKeys"].([]any)
+	for _, idx := range []int{15, 20} {
+		k, _ := keys[idx].(map[string]any)
+		if k["source"] != "lookupTable" {
+			t.Fatalf("account %d source = %v, want lookupTable", idx, k["source"])
+		}
+	}
+	if k, _ := keys[15].(map[string]any); k["pubkey"] != ata {
+		t.Fatalf("index 15 is %v", k["pubkey"])
+	}
 	_, srv := newFakeRPC(t, func(method string, params json.RawMessage) (any, *RPCError) {
 		switch method {
 		case "getSignaturesForAddress":
