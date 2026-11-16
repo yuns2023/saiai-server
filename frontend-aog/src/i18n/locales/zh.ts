@@ -401,6 +401,7 @@ export default {
     noteTitle: '说明',
     notePartial: '可分多次付或多付，按实际到账金额入账。',
     noteChain: '只能用所选的链转账，不支持跨链。',
+    noteExchange: '从交易所提现时，交易所有最低提现金额并扣手续费，实际到账可能少于提现金额；按到账金额入账。',
     noteFinality: '链上最终确认后入账（{network} 约 {n} 分钟）。',
     noteFinalityGeneric: '链上最终确认后入账。',
     noteLate: '订单过期后到账也会入账。',
