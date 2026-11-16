@@ -177,6 +177,9 @@ type CryptoPayConfig struct {
 	// ScanBatchTimeoutSeconds bounds one scanner call (one EVM address batch
 	// or one Solana token account) so a stuck batch cannot eat a whole pass.
 	ScanBatchTimeoutSeconds int `mapstructure:"scan_batch_timeout_seconds"`
+	// EVMBlocksPerScan caps one eth_getLogs range; the cursor advances after
+	// every chunk so a slow scan always makes progress.
+	EVMBlocksPerScan int `mapstructure:"evm_blocks_per_scan"`
 }
 
 type IdempotencyConfig struct {
@@ -1464,6 +1467,7 @@ func setDefaults() {
 	viper.SetDefault("crypto_pay.solana_pool_signer_pubkey", "")
 	viper.SetDefault("crypto_pay.scan_interval_seconds", 30)
 	viper.SetDefault("crypto_pay.scan_batch_timeout_seconds", 60)
+	viper.SetDefault("crypto_pay.evm_blocks_per_scan", 2000)
 
 	// Idempotency
 	viper.SetDefault("idempotency.observe_only", true)

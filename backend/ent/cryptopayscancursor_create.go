@@ -76,6 +76,20 @@ func (_c *CryptoPayScanCursorCreate) SetNillableLastScannedAt(v *time.Time) *Cry
 	return _c
 }
 
+// SetLastAttemptAt sets the "last_attempt_at" field.
+func (_c *CryptoPayScanCursorCreate) SetLastAttemptAt(v time.Time) *CryptoPayScanCursorCreate {
+	_c.mutation.SetLastAttemptAt(v)
+	return _c
+}
+
+// SetNillableLastAttemptAt sets the "last_attempt_at" field if the given value is not nil.
+func (_c *CryptoPayScanCursorCreate) SetNillableLastAttemptAt(v *time.Time) *CryptoPayScanCursorCreate {
+	if v != nil {
+		_c.SetLastAttemptAt(*v)
+	}
+	return _c
+}
+
 // SetLastError sets the "last_error" field.
 func (_c *CryptoPayScanCursorCreate) SetLastError(v string) *CryptoPayScanCursorCreate {
 	_c.mutation.SetLastError(v)
@@ -255,6 +269,10 @@ func (_c *CryptoPayScanCursorCreate) createSpec() (*CryptoPayScanCursor, *sqlgra
 		_spec.SetField(cryptopayscancursor.FieldLastScannedAt, field.TypeTime, value)
 		_node.LastScannedAt = &value
 	}
+	if value, ok := _c.mutation.LastAttemptAt(); ok {
+		_spec.SetField(cryptopayscancursor.FieldLastAttemptAt, field.TypeTime, value)
+		_node.LastAttemptAt = &value
+	}
 	if value, ok := _c.mutation.LastError(); ok {
 		_spec.SetField(cryptopayscancursor.FieldLastError, field.TypeString, value)
 		_node.LastError = value
@@ -388,6 +406,24 @@ func (u *CryptoPayScanCursorUpsert) UpdateLastScannedAt() *CryptoPayScanCursorUp
 // ClearLastScannedAt clears the value of the "last_scanned_at" field.
 func (u *CryptoPayScanCursorUpsert) ClearLastScannedAt() *CryptoPayScanCursorUpsert {
 	u.SetNull(cryptopayscancursor.FieldLastScannedAt)
+	return u
+}
+
+// SetLastAttemptAt sets the "last_attempt_at" field.
+func (u *CryptoPayScanCursorUpsert) SetLastAttemptAt(v time.Time) *CryptoPayScanCursorUpsert {
+	u.Set(cryptopayscancursor.FieldLastAttemptAt, v)
+	return u
+}
+
+// UpdateLastAttemptAt sets the "last_attempt_at" field to the value that was provided on create.
+func (u *CryptoPayScanCursorUpsert) UpdateLastAttemptAt() *CryptoPayScanCursorUpsert {
+	u.SetExcluded(cryptopayscancursor.FieldLastAttemptAt)
+	return u
+}
+
+// ClearLastAttemptAt clears the value of the "last_attempt_at" field.
+func (u *CryptoPayScanCursorUpsert) ClearLastAttemptAt() *CryptoPayScanCursorUpsert {
+	u.SetNull(cryptopayscancursor.FieldLastAttemptAt)
 	return u
 }
 
@@ -541,6 +577,27 @@ func (u *CryptoPayScanCursorUpsertOne) UpdateLastScannedAt() *CryptoPayScanCurso
 func (u *CryptoPayScanCursorUpsertOne) ClearLastScannedAt() *CryptoPayScanCursorUpsertOne {
 	return u.Update(func(s *CryptoPayScanCursorUpsert) {
 		s.ClearLastScannedAt()
+	})
+}
+
+// SetLastAttemptAt sets the "last_attempt_at" field.
+func (u *CryptoPayScanCursorUpsertOne) SetLastAttemptAt(v time.Time) *CryptoPayScanCursorUpsertOne {
+	return u.Update(func(s *CryptoPayScanCursorUpsert) {
+		s.SetLastAttemptAt(v)
+	})
+}
+
+// UpdateLastAttemptAt sets the "last_attempt_at" field to the value that was provided on create.
+func (u *CryptoPayScanCursorUpsertOne) UpdateLastAttemptAt() *CryptoPayScanCursorUpsertOne {
+	return u.Update(func(s *CryptoPayScanCursorUpsert) {
+		s.UpdateLastAttemptAt()
+	})
+}
+
+// ClearLastAttemptAt clears the value of the "last_attempt_at" field.
+func (u *CryptoPayScanCursorUpsertOne) ClearLastAttemptAt() *CryptoPayScanCursorUpsertOne {
+	return u.Update(func(s *CryptoPayScanCursorUpsert) {
+		s.ClearLastAttemptAt()
 	})
 }
 
@@ -864,6 +921,27 @@ func (u *CryptoPayScanCursorUpsertBulk) UpdateLastScannedAt() *CryptoPayScanCurs
 func (u *CryptoPayScanCursorUpsertBulk) ClearLastScannedAt() *CryptoPayScanCursorUpsertBulk {
 	return u.Update(func(s *CryptoPayScanCursorUpsert) {
 		s.ClearLastScannedAt()
+	})
+}
+
+// SetLastAttemptAt sets the "last_attempt_at" field.
+func (u *CryptoPayScanCursorUpsertBulk) SetLastAttemptAt(v time.Time) *CryptoPayScanCursorUpsertBulk {
+	return u.Update(func(s *CryptoPayScanCursorUpsert) {
+		s.SetLastAttemptAt(v)
+	})
+}
+
+// UpdateLastAttemptAt sets the "last_attempt_at" field to the value that was provided on create.
+func (u *CryptoPayScanCursorUpsertBulk) UpdateLastAttemptAt() *CryptoPayScanCursorUpsertBulk {
+	return u.Update(func(s *CryptoPayScanCursorUpsert) {
+		s.UpdateLastAttemptAt()
+	})
+}
+
+// ClearLastAttemptAt clears the value of the "last_attempt_at" field.
+func (u *CryptoPayScanCursorUpsertBulk) ClearLastAttemptAt() *CryptoPayScanCursorUpsertBulk {
+	return u.Update(func(s *CryptoPayScanCursorUpsert) {
+		s.ClearLastAttemptAt()
 	})
 }
 

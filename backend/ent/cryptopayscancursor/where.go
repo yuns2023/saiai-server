@@ -79,6 +79,11 @@ func LastScannedAt(v time.Time) predicate.CryptoPayScanCursor {
 	return predicate.CryptoPayScanCursor(sql.FieldEQ(FieldLastScannedAt, v))
 }
 
+// LastAttemptAt applies equality check predicate on the "last_attempt_at" field. It's identical to LastAttemptAtEQ.
+func LastAttemptAt(v time.Time) predicate.CryptoPayScanCursor {
+	return predicate.CryptoPayScanCursor(sql.FieldEQ(FieldLastAttemptAt, v))
+}
+
 // LastError applies equality check predicate on the "last_error" field. It's identical to LastErrorEQ.
 func LastError(v string) predicate.CryptoPayScanCursor {
 	return predicate.CryptoPayScanCursor(sql.FieldEQ(FieldLastError, v))
@@ -377,6 +382,56 @@ func LastScannedAtIsNil() predicate.CryptoPayScanCursor {
 // LastScannedAtNotNil applies the NotNil predicate on the "last_scanned_at" field.
 func LastScannedAtNotNil() predicate.CryptoPayScanCursor {
 	return predicate.CryptoPayScanCursor(sql.FieldNotNull(FieldLastScannedAt))
+}
+
+// LastAttemptAtEQ applies the EQ predicate on the "last_attempt_at" field.
+func LastAttemptAtEQ(v time.Time) predicate.CryptoPayScanCursor {
+	return predicate.CryptoPayScanCursor(sql.FieldEQ(FieldLastAttemptAt, v))
+}
+
+// LastAttemptAtNEQ applies the NEQ predicate on the "last_attempt_at" field.
+func LastAttemptAtNEQ(v time.Time) predicate.CryptoPayScanCursor {
+	return predicate.CryptoPayScanCursor(sql.FieldNEQ(FieldLastAttemptAt, v))
+}
+
+// LastAttemptAtIn applies the In predicate on the "last_attempt_at" field.
+func LastAttemptAtIn(vs ...time.Time) predicate.CryptoPayScanCursor {
+	return predicate.CryptoPayScanCursor(sql.FieldIn(FieldLastAttemptAt, vs...))
+}
+
+// LastAttemptAtNotIn applies the NotIn predicate on the "last_attempt_at" field.
+func LastAttemptAtNotIn(vs ...time.Time) predicate.CryptoPayScanCursor {
+	return predicate.CryptoPayScanCursor(sql.FieldNotIn(FieldLastAttemptAt, vs...))
+}
+
+// LastAttemptAtGT applies the GT predicate on the "last_attempt_at" field.
+func LastAttemptAtGT(v time.Time) predicate.CryptoPayScanCursor {
+	return predicate.CryptoPayScanCursor(sql.FieldGT(FieldLastAttemptAt, v))
+}
+
+// LastAttemptAtGTE applies the GTE predicate on the "last_attempt_at" field.
+func LastAttemptAtGTE(v time.Time) predicate.CryptoPayScanCursor {
+	return predicate.CryptoPayScanCursor(sql.FieldGTE(FieldLastAttemptAt, v))
+}
+
+// LastAttemptAtLT applies the LT predicate on the "last_attempt_at" field.
+func LastAttemptAtLT(v time.Time) predicate.CryptoPayScanCursor {
+	return predicate.CryptoPayScanCursor(sql.FieldLT(FieldLastAttemptAt, v))
+}
+
+// LastAttemptAtLTE applies the LTE predicate on the "last_attempt_at" field.
+func LastAttemptAtLTE(v time.Time) predicate.CryptoPayScanCursor {
+	return predicate.CryptoPayScanCursor(sql.FieldLTE(FieldLastAttemptAt, v))
+}
+
+// LastAttemptAtIsNil applies the IsNil predicate on the "last_attempt_at" field.
+func LastAttemptAtIsNil() predicate.CryptoPayScanCursor {
+	return predicate.CryptoPayScanCursor(sql.FieldIsNull(FieldLastAttemptAt))
+}
+
+// LastAttemptAtNotNil applies the NotNil predicate on the "last_attempt_at" field.
+func LastAttemptAtNotNil() predicate.CryptoPayScanCursor {
+	return predicate.CryptoPayScanCursor(sql.FieldNotNull(FieldLastAttemptAt))
 }
 
 // LastErrorEQ applies the EQ predicate on the "last_error" field.

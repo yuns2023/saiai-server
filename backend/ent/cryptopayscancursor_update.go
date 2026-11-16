@@ -111,6 +111,26 @@ func (_u *CryptoPayScanCursorUpdate) ClearLastScannedAt() *CryptoPayScanCursorUp
 	return _u
 }
 
+// SetLastAttemptAt sets the "last_attempt_at" field.
+func (_u *CryptoPayScanCursorUpdate) SetLastAttemptAt(v time.Time) *CryptoPayScanCursorUpdate {
+	_u.mutation.SetLastAttemptAt(v)
+	return _u
+}
+
+// SetNillableLastAttemptAt sets the "last_attempt_at" field if the given value is not nil.
+func (_u *CryptoPayScanCursorUpdate) SetNillableLastAttemptAt(v *time.Time) *CryptoPayScanCursorUpdate {
+	if v != nil {
+		_u.SetLastAttemptAt(*v)
+	}
+	return _u
+}
+
+// ClearLastAttemptAt clears the value of the "last_attempt_at" field.
+func (_u *CryptoPayScanCursorUpdate) ClearLastAttemptAt() *CryptoPayScanCursorUpdate {
+	_u.mutation.ClearLastAttemptAt()
+	return _u
+}
+
 // SetLastError sets the "last_error" field.
 func (_u *CryptoPayScanCursorUpdate) SetLastError(v string) *CryptoPayScanCursorUpdate {
 	_u.mutation.SetLastError(v)
@@ -220,6 +240,12 @@ func (_u *CryptoPayScanCursorUpdate) sqlSave(ctx context.Context) (_node int, er
 	if _u.mutation.LastScannedAtCleared() {
 		_spec.ClearField(cryptopayscancursor.FieldLastScannedAt, field.TypeTime)
 	}
+	if value, ok := _u.mutation.LastAttemptAt(); ok {
+		_spec.SetField(cryptopayscancursor.FieldLastAttemptAt, field.TypeTime, value)
+	}
+	if _u.mutation.LastAttemptAtCleared() {
+		_spec.ClearField(cryptopayscancursor.FieldLastAttemptAt, field.TypeTime)
+	}
 	if value, ok := _u.mutation.LastError(); ok {
 		_spec.SetField(cryptopayscancursor.FieldLastError, field.TypeString, value)
 	}
@@ -326,6 +352,26 @@ func (_u *CryptoPayScanCursorUpdateOne) SetNillableLastScannedAt(v *time.Time) *
 // ClearLastScannedAt clears the value of the "last_scanned_at" field.
 func (_u *CryptoPayScanCursorUpdateOne) ClearLastScannedAt() *CryptoPayScanCursorUpdateOne {
 	_u.mutation.ClearLastScannedAt()
+	return _u
+}
+
+// SetLastAttemptAt sets the "last_attempt_at" field.
+func (_u *CryptoPayScanCursorUpdateOne) SetLastAttemptAt(v time.Time) *CryptoPayScanCursorUpdateOne {
+	_u.mutation.SetLastAttemptAt(v)
+	return _u
+}
+
+// SetNillableLastAttemptAt sets the "last_attempt_at" field if the given value is not nil.
+func (_u *CryptoPayScanCursorUpdateOne) SetNillableLastAttemptAt(v *time.Time) *CryptoPayScanCursorUpdateOne {
+	if v != nil {
+		_u.SetLastAttemptAt(*v)
+	}
+	return _u
+}
+
+// ClearLastAttemptAt clears the value of the "last_attempt_at" field.
+func (_u *CryptoPayScanCursorUpdateOne) ClearLastAttemptAt() *CryptoPayScanCursorUpdateOne {
+	_u.mutation.ClearLastAttemptAt()
 	return _u
 }
 
@@ -467,6 +513,12 @@ func (_u *CryptoPayScanCursorUpdateOne) sqlSave(ctx context.Context) (_node *Cry
 	}
 	if _u.mutation.LastScannedAtCleared() {
 		_spec.ClearField(cryptopayscancursor.FieldLastScannedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.LastAttemptAt(); ok {
+		_spec.SetField(cryptopayscancursor.FieldLastAttemptAt, field.TypeTime, value)
+	}
+	if _u.mutation.LastAttemptAtCleared() {
+		_spec.ClearField(cryptopayscancursor.FieldLastAttemptAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.LastError(); ok {
 		_spec.SetField(cryptopayscancursor.FieldLastError, field.TypeString, value)

@@ -14698,6 +14698,7 @@ type CryptoPayScanCursorMutation struct {
 	version         *int64
 	addversion      *int64
 	last_scanned_at *time.Time
+	last_attempt_at *time.Time
 	last_error      *string
 	created_at      *time.Time
 	updated_at      *time.Time
@@ -15018,6 +15019,55 @@ func (m *CryptoPayScanCursorMutation) ResetLastScannedAt() {
 	delete(m.clearedFields, cryptopayscancursor.FieldLastScannedAt)
 }
 
+// SetLastAttemptAt sets the "last_attempt_at" field.
+func (m *CryptoPayScanCursorMutation) SetLastAttemptAt(t time.Time) {
+	m.last_attempt_at = &t
+}
+
+// LastAttemptAt returns the value of the "last_attempt_at" field in the mutation.
+func (m *CryptoPayScanCursorMutation) LastAttemptAt() (r time.Time, exists bool) {
+	v := m.last_attempt_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastAttemptAt returns the old "last_attempt_at" field's value of the CryptoPayScanCursor entity.
+// If the CryptoPayScanCursor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CryptoPayScanCursorMutation) OldLastAttemptAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastAttemptAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastAttemptAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastAttemptAt: %w", err)
+	}
+	return oldValue.LastAttemptAt, nil
+}
+
+// ClearLastAttemptAt clears the value of the "last_attempt_at" field.
+func (m *CryptoPayScanCursorMutation) ClearLastAttemptAt() {
+	m.last_attempt_at = nil
+	m.clearedFields[cryptopayscancursor.FieldLastAttemptAt] = struct{}{}
+}
+
+// LastAttemptAtCleared returns if the "last_attempt_at" field was cleared in this mutation.
+func (m *CryptoPayScanCursorMutation) LastAttemptAtCleared() bool {
+	_, ok := m.clearedFields[cryptopayscancursor.FieldLastAttemptAt]
+	return ok
+}
+
+// ResetLastAttemptAt resets all changes to the "last_attempt_at" field.
+func (m *CryptoPayScanCursorMutation) ResetLastAttemptAt() {
+	m.last_attempt_at = nil
+	delete(m.clearedFields, cryptopayscancursor.FieldLastAttemptAt)
+}
+
 // SetLastError sets the "last_error" field.
 func (m *CryptoPayScanCursorMutation) SetLastError(s string) {
 	m.last_error = &s
@@ -15160,7 +15210,7 @@ func (m *CryptoPayScanCursorMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *CryptoPayScanCursorMutation) Fields() []string {
-	fields := make([]string, 0, 8)
+	fields := make([]string, 0, 9)
 	if m.scope_key != nil {
 		fields = append(fields, cryptopayscancursor.FieldScopeKey)
 	}
@@ -15175,6 +15225,9 @@ func (m *CryptoPayScanCursorMutation) Fields() []string {
 	}
 	if m.last_scanned_at != nil {
 		fields = append(fields, cryptopayscancursor.FieldLastScannedAt)
+	}
+	if m.last_attempt_at != nil {
+		fields = append(fields, cryptopayscancursor.FieldLastAttemptAt)
 	}
 	if m.last_error != nil {
 		fields = append(fields, cryptopayscancursor.FieldLastError)
@@ -15203,6 +15256,8 @@ func (m *CryptoPayScanCursorMutation) Field(name string) (ent.Value, bool) {
 		return m.Version()
 	case cryptopayscancursor.FieldLastScannedAt:
 		return m.LastScannedAt()
+	case cryptopayscancursor.FieldLastAttemptAt:
+		return m.LastAttemptAt()
 	case cryptopayscancursor.FieldLastError:
 		return m.LastError()
 	case cryptopayscancursor.FieldCreatedAt:
@@ -15228,6 +15283,8 @@ func (m *CryptoPayScanCursorMutation) OldField(ctx context.Context, name string)
 		return m.OldVersion(ctx)
 	case cryptopayscancursor.FieldLastScannedAt:
 		return m.OldLastScannedAt(ctx)
+	case cryptopayscancursor.FieldLastAttemptAt:
+		return m.OldLastAttemptAt(ctx)
 	case cryptopayscancursor.FieldLastError:
 		return m.OldLastError(ctx)
 	case cryptopayscancursor.FieldCreatedAt:
@@ -15277,6 +15334,13 @@ func (m *CryptoPayScanCursorMutation) SetField(name string, value ent.Value) err
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetLastScannedAt(v)
+		return nil
+	case cryptopayscancursor.FieldLastAttemptAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastAttemptAt(v)
 		return nil
 	case cryptopayscancursor.FieldLastError:
 		v, ok := value.(string)
@@ -15347,6 +15411,9 @@ func (m *CryptoPayScanCursorMutation) ClearedFields() []string {
 	if m.FieldCleared(cryptopayscancursor.FieldLastScannedAt) {
 		fields = append(fields, cryptopayscancursor.FieldLastScannedAt)
 	}
+	if m.FieldCleared(cryptopayscancursor.FieldLastAttemptAt) {
+		fields = append(fields, cryptopayscancursor.FieldLastAttemptAt)
+	}
 	return fields
 }
 
@@ -15363,6 +15430,9 @@ func (m *CryptoPayScanCursorMutation) ClearField(name string) error {
 	switch name {
 	case cryptopayscancursor.FieldLastScannedAt:
 		m.ClearLastScannedAt()
+		return nil
+	case cryptopayscancursor.FieldLastAttemptAt:
+		m.ClearLastAttemptAt()
 		return nil
 	}
 	return fmt.Errorf("unknown CryptoPayScanCursor nullable field %s", name)
@@ -15386,6 +15456,9 @@ func (m *CryptoPayScanCursorMutation) ResetField(name string) error {
 		return nil
 	case cryptopayscancursor.FieldLastScannedAt:
 		m.ResetLastScannedAt()
+		return nil
+	case cryptopayscancursor.FieldLastAttemptAt:
+		m.ResetLastAttemptAt()
 		return nil
 	case cryptopayscancursor.FieldLastError:
 		m.ResetLastError()

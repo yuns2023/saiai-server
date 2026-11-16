@@ -129,6 +129,7 @@ func (f *fakeEVMScanner) ObservationsForTx(context.Context, string, []string, bo
 var errFakeNotFinalized = errors.New("fake: not finalized yet")
 
 type fakeSolanaScanner struct {
+	block map[string]bool // token accounts whose scan waits for ctx cancellation
 	txObs []chain.Observation
 	mu    sync.Mutex
 	obs   map[string][]chain.Observation // token account -> inflows (newest last)
@@ -136,7 +137,11 @@ type fakeSolanaScanner struct {
 }
 
 func (f *fakeSolanaScanner) Network() chain.Network { return chain.SolanaMainnet }
-func (f *fakeSolanaScanner) ScanTokenAccount(_ context.Context, _, tokenAccount string, _ chain.Asset, untilSig, commitment string) ([]chain.Observation, string, error) {
+func (f *fakeSolanaScanner) ScanTokenAccount(ctx context.Context, _, tokenAccount string, _ chain.Asset, untilSig, commitment string) ([]chain.Observation, string, error) {
+	if f.block[tokenAccount] {
+		<-ctx.Done()
+		return nil, "", ctx.Err()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if commitment == "finalized" {
@@ -187,10 +192,12 @@ func (e *cryptoEnv) set(t *testing.T, key, value string) {
 
 func newCryptoEnv(t *testing.T, withScanners bool) *cryptoEnv {
 	t.Helper()
-	return newCryptoEnvWith(t, withScanners, true, 60)
+	return newCryptoEnvWith(t, withScanners, true, 60, 30)
 }
 
-func newCryptoEnvWith(t *testing.T, withScanners, enabled bool, batchTimeoutSeconds int) *cryptoEnv {
+// newCryptoEnvWith: the worker phase budget is 2 x intervalSeconds and each
+// scan unit gets min(batchTimeoutSeconds, phase/3).
+func newCryptoEnvWith(t *testing.T, withScanners, enabled bool, batchTimeoutSeconds, intervalSeconds int) *cryptoEnv {
 	t.Helper()
 	resetCryptoTables(t)
 	// These tests commit real rows; remove them so suites that count users
@@ -211,7 +218,7 @@ func newCryptoEnvWith(t *testing.T, withScanners, enabled bool, batchTimeoutSeco
 	}
 	env.svc = service.NewCryptoPayService(integrationDB, env.settings, config.CryptoPayConfig{
 		Enabled: enabled, EVMNetwork: "arbitrum-one", SolanaNetwork: "solana-mainnet", SolanaPoolSignerPubkey: cryptoTestSigner,
-		ScanIntervalSeconds: 30, ScanBatchTimeoutSeconds: batchTimeoutSeconds,
+		ScanIntervalSeconds: intervalSeconds, ScanBatchTimeoutSeconds: batchTimeoutSeconds, EVMBlocksPerScan: 2000,
 	}, deps, nil, nil)
 	return env
 }
@@ -722,13 +729,14 @@ func TestCryptoPay_WorkerScansWithCursorsAndCAS(t *testing.T) {
 	require.Equal(t, "1010", pos)
 	require.Contains(t, lastErr, "rpc down")
 
-	// A concurrent writer bumping the cursor makes the CAS fail; its position wins.
+	// A concurrent writer bumping the cursor makes the CAS fail (benign: logged
+	// only, the unit stops); its position wins.
 	env.evm.fail = nil
 	env.evm.onScan = func() {
 		_, _ = integrationDB.Exec(`UPDATE crypto_pay_scan_cursors SET position = '1099', version = version + 10 WHERE scope_key = $1`, "evm:arbitrum-one:fin:"+to)
 	}
 	err = env.svc.ScanOnce(ctx)
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.NoError(t, integrationDB.QueryRow(`SELECT position FROM crypto_pay_scan_cursors WHERE scope_key = $1`, "evm:arbitrum-one:fin:"+to).Scan(&pos))
 	require.Equal(t, "1099", pos)
 
@@ -889,14 +897,15 @@ func TestCryptoPay_EVMAllocationNeedsStartHeightAndLaggingCatchUp(t *testing.T) 
 	require.Equal(t, 0, countRows(t, `SELECT COUNT(*) FROM crypto_pay_addresses`))
 	env.evm.finErr = nil
 
-	// An inactive address far behind the head is scanned every tick until caught up.
+	// An inactive address far behind the head is walked in 2000-block chunks
+	// (cursor advanced after each) until it reaches the head.
 	env.evm.finalized = 100
 	to := evmAddressFor(t, env, user)
 	env.evm.finalized, env.evm.latest = 500_000, 500_000
 	env.svc.RunWorkerPass(ctx)
-	env.svc.RunWorkerPass(ctx)
-	env.svc.RunWorkerPass(ctx)
-	require.Equal(t, []string{"100-200099/true/1", "200100-400099/true/1", "400100-500000/true/1"}, env.evm.calls)
+	require.Len(t, env.evm.calls, 250)
+	require.Equal(t, "100-2099/true/1", env.evm.calls[0])
+	require.Equal(t, "498100-500000/true/1", env.evm.calls[249])
 	var pos string
 	require.NoError(t, integrationDB.QueryRow(`SELECT position FROM crypto_pay_scan_cursors WHERE scope_key = $1`, "evm:arbitrum-one:fin:"+to).Scan(&pos))
 	require.Equal(t, "500000", pos)
@@ -925,7 +934,7 @@ func allocateEVMAt(t *testing.T, env *cryptoEnv, finalized uint64) (int64, strin
 
 func TestCryptoPay_EVMStuckBatchDoesNotStarveOthers(t *testing.T) {
 	ctx := context.Background()
-	env := newCryptoEnvWith(t, true, true, 1) // 1s per-batch budget
+	env := newCryptoEnvWith(t, true, true, 60, 3) // phase 6s, unit timeout min(60s, 2s)
 	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
 	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
 	importTestEVMKeyset(t, env, "xpubSTUCK")
@@ -961,10 +970,10 @@ func TestCryptoPay_EVMFailingBatchesRotate(t *testing.T) {
 
 	env.svc.RunWorkerPass(ctx)
 	pos, _ := cursorPosition(t, healthy)
-	require.Empty(t, pos, "first tick spends the 50-batch budget on the never-attempted failing batches")
-	env.svc.RunWorkerPass(ctx)
-	pos, _ = cursorPosition(t, healthy)
-	require.Equal(t, "1200000", pos, "failed batches rotate to the back; the healthy one gets its turn")
+	require.Equal(t, "1200000", pos, "fast failures cost no budget; the healthy batch is reached in the same pass")
+	require.Equal(t, 50, countRows(t, `SELECT COUNT(*) FROM crypto_pay_scan_cursors WHERE last_error <> '' AND last_attempt_at IS NOT NULL`))
+	env.svc.RunWorkerPass(ctx) // failing batches are retried every pass (they never reached the head)
+	require.Equal(t, 50, countRows(t, `SELECT COUNT(*) FROM crypto_pay_scan_cursors WHERE last_error <> ''`))
 }
 
 func TestCryptoPay_InvalidKnownAssetObservationBlocksCursor(t *testing.T) {
@@ -1131,4 +1140,109 @@ func TestCryptoPay_OrderDepositsTruncatedAndSettingsAudit(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "250", out.HoldThresholdAmount)
 	require.Equal(t, 1, countRows(t, `SELECT COUNT(*) FROM crypto_pay_audit_logs WHERE action = 'SETTINGS_UPDATED' AND operator = 'admin:7'`))
+}
+
+func TestCryptoPay_SolanaStuckOverdueAccountDoesNotStarveActive(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, true, true, 60, 3) // real phase budget 6s, unit timeout 2s
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
+	_, err := env.svc.ImportSolanaKeyset(ctx, testManifest(t, "starve", 2, cryptoTestSigner), "admin:test")
+	require.NoError(t, err)
+	stuckUser := createCryptoUser(t)
+	stuck, err := env.svc.EnsureAddress(ctx, stuckUser, chain.SolanaMainnet) // inactive, overdue (never scanned)
+	require.NoError(t, err)
+	user := createCryptoUser(t)
+	_, err = env.svc.CreateOrder(ctx, user, "solana-mainnet", "USDC", "1") // active
+	require.NoError(t, err)
+	addr, err := env.svc.EnsureAddress(ctx, user, chain.SolanaMainnet)
+	require.NoError(t, err)
+	env.sol.block = map[string]bool{}
+	for _, a := range chain.MainnetAssets()[2:] {
+		acct, _ := fakeATA(stuck.Address, a.Contract, a.TokenProgram)
+		env.sol.block[acct] = true // always times out
+	}
+	usdc := chain.MainnetAssets()[2]
+	ata, _ := fakeATA(addr.Address, usdc.Contract, usdc.TokenProgram)
+	mk := func(seed string, units int64) chain.Observation {
+		return chain.Observation{Network: chain.SolanaMainnet, Asset: usdc, TxHash: fakeSolSig(seed), EventKey: "acct:" + ata,
+			ToAddress: addr.Address, TokenAccount: ata, Units: big.NewInt(units), BlockNumber: 5, BlockTime: time.Now().Add(time.Minute)}
+	}
+	env.sol.obs[ata] = []chain.Observation{mk("starve-1", 1_000_000)}
+	env.svc.RunWorkerPass(ctx)
+	env.sol.mu.Lock()
+	env.sol.obs[ata] = append(env.sol.obs[ata], mk("starve-2", 500_000))
+	env.sol.mu.Unlock()
+	env.svc.RunWorkerPass(ctx)
+	require.Equal(t, "1.50000000", userBalance(t, user), "active account advanced on both passes")
+	require.Equal(t, 2, countRows(t, `SELECT COUNT(*) FROM crypto_pay_scan_cursors WHERE last_error LIKE '%deadline%'`))
+}
+
+func TestCryptoPay_IngestPrefixCommittedThenTimeoutThenRetry(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnvWith(t, true, true, 60, 3) // unit timeout 2s
+	env.set(t, service.SettingCryptoPayScanningEnabled, "true")
+	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
+	importTestEVMKeyset(t, env, "xpubPREFIX")
+	user := createCryptoUser(t)
+	env.evm.finalized = 900
+	order, err := env.svc.CreateOrder(ctx, user, "arbitrum-one", "USDC", "1")
+	require.NoError(t, err)
+	to := order.Address
+	first, second := evmObs(to, 1_000_000, 950, true), evmObs(to, 2_000_000, 960, true)
+	pre := second
+	pre.Finalized = false
+	_, err = env.svc.IngestObservations(ctx, []chain.Observation{pre}) // row exists as observed
+	require.NoError(t, err)
+
+	// Hold the second row's lock: ingest commits the first event, then times out.
+	lockTx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = lockTx.Exec(`SELECT id FROM crypto_pay_deposits WHERE tx_hash = $1 FOR UPDATE`, second.TxHash)
+	require.NoError(t, err)
+	env.evm.finalized, env.evm.latest = 1000, 1000
+	env.evm.logs = []chain.Observation{first, second}
+	env.svc.RunWorkerPass(ctx)
+	require.NoError(t, lockTx.Rollback())
+	require.Equal(t, "finalized", depositStatus(t, "arbitrum-one", first.TxHash, "log:0"), "prefix committed (credited by the backlog sweep next pass)")
+	pos, lastErr := cursorPosition(t, to)
+	require.Empty(t, pos, "cursor not advanced past the unfinished chunk")
+	require.NotEmpty(t, lastErr)
+
+	env.svc.RunWorkerPass(ctx)
+	pos, _ = cursorPosition(t, to)
+	require.Equal(t, "1000", pos)
+	require.Equal(t, "3.00000000", userBalance(t, user))
+	require.Equal(t, 2, countRows(t, `SELECT COUNT(*) FROM crypto_pay_credits`), "first event credited once, tail persisted")
+}
+
+func TestCryptoPay_SettingsFailClosedForMoneyMoves(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnv(t, true)
+	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
+	env.set(t, service.SettingCryptoPayHoldThreshold, "1")
+	importTestEVMKeyset(t, env, "xpubSETTINGS")
+	user, to := allocateEVMAt(t, env, 1)
+	o := evmObs(to, 2_000_000, 5, true)
+	res, err := env.svc.IngestObservations(ctx, []chain.Observation{o})
+	require.NoError(t, err)
+	require.Equal(t, "held", depositStatus(t, "arbitrum-one", o.TxHash, "log:0"))
+
+	// A present-but-empty value is invalid (only an absent key means default).
+	env.set(t, service.SettingCryptoPayMaxAmount, "")
+	_, err = env.svc.ReleaseDeposit(ctx, res.DepositIDs[0], "admin:1")
+	require.Equal(t, service.CryptoPayReasonSettingsInvalid, infraerrors.Reason(err))
+	require.Equal(t, 409, infraerrors.Code(err))
+	env.evm.txObs = []chain.Observation{o}
+	_, err = env.svc.RescanTransaction(ctx, "arbitrum-one", o.TxHash, "admin:1")
+	require.Equal(t, service.CryptoPayReasonSettingsInvalid, infraerrors.Reason(err))
+	require.Equal(t, "0.00000000", userBalance(t, user))
+
+	// Settings write and its audit row are one transaction.
+	threshold := "300"
+	_, err = env.svc.UpdateSettings(ctx, service.UpdateCryptoPaySettingsRequest{HoldThresholdAmount: &threshold}, strings.Repeat("x", 200))
+	require.Error(t, err, "audit insert fails (operator too long)")
+	v, err := env.settings.GetValue(ctx, service.SettingCryptoPayHoldThreshold)
+	require.NoError(t, err)
+	require.Equal(t, "1", v, "setting rolled back with the failed audit")
 }

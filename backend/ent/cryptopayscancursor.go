@@ -27,6 +27,8 @@ type CryptoPayScanCursor struct {
 	Version int64 `json:"version,omitempty"`
 	// LastScannedAt holds the value of the "last_scanned_at" field.
 	LastScannedAt *time.Time `json:"last_scanned_at,omitempty"`
+	// LastAttemptAt holds the value of the "last_attempt_at" field.
+	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
 	// LastError holds the value of the "last_error" field.
 	LastError string `json:"last_error,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
@@ -45,7 +47,7 @@ func (*CryptoPayScanCursor) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullInt64)
 		case cryptopayscancursor.FieldScopeKey, cryptopayscancursor.FieldNetwork, cryptopayscancursor.FieldPosition, cryptopayscancursor.FieldLastError:
 			values[i] = new(sql.NullString)
-		case cryptopayscancursor.FieldLastScannedAt, cryptopayscancursor.FieldCreatedAt, cryptopayscancursor.FieldUpdatedAt:
+		case cryptopayscancursor.FieldLastScannedAt, cryptopayscancursor.FieldLastAttemptAt, cryptopayscancursor.FieldCreatedAt, cryptopayscancursor.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -98,6 +100,13 @@ func (_m *CryptoPayScanCursor) assignValues(columns []string, values []any) erro
 			} else if value.Valid {
 				_m.LastScannedAt = new(time.Time)
 				*_m.LastScannedAt = value.Time
+			}
+		case cryptopayscancursor.FieldLastAttemptAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field last_attempt_at", values[i])
+			} else if value.Valid {
+				_m.LastAttemptAt = new(time.Time)
+				*_m.LastAttemptAt = value.Time
 			}
 		case cryptopayscancursor.FieldLastError:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -167,6 +176,11 @@ func (_m *CryptoPayScanCursor) String() string {
 	builder.WriteString(", ")
 	if v := _m.LastScannedAt; v != nil {
 		builder.WriteString("last_scanned_at=")
+		builder.WriteString(v.Format(time.ANSIC))
+	}
+	builder.WriteString(", ")
+	if v := _m.LastAttemptAt; v != nil {
+		builder.WriteString("last_attempt_at=")
 		builder.WriteString(v.Format(time.ANSIC))
 	}
 	builder.WriteString(", ")

@@ -139,7 +139,10 @@ CREATE TABLE IF NOT EXISTS crypto_pay_scan_cursors (
     position        TEXT NOT NULL DEFAULT '',
     -- Compare-and-swap guard: updates must match the version they read.
     version         BIGINT NOT NULL DEFAULT 0,
+    -- Last time the cursor reached the head (NULL while catching up).
     last_scanned_at TIMESTAMPTZ,
+    -- Every scan attempt (success or failure); orders the fair scan queue.
+    last_attempt_at TIMESTAMPTZ,
     last_error      TEXT NOT NULL DEFAULT '',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),

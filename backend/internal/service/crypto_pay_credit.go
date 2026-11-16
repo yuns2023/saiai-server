@@ -583,7 +583,7 @@ func (s *CryptoPayService) ReleaseDeposit(ctx context.Context, depositID int64, 
 		// Deployments without crypto pay (saiai.top, abapi) never move money.
 		return nil, infraerrors.ServiceUnavailable(CryptoPayReasonDisabled, "crypto top-up is disabled on this deployment")
 	}
-	st, err := s.GetSettings(ctx)
+	st, err := s.settingsForMoneyMove(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -607,6 +607,10 @@ type CryptoPayRescanResult struct {
 func (s *CryptoPayService) RescanTransaction(ctx context.Context, networkName, txHash, operator string) (*CryptoPayRescanResult, error) {
 	if !s.Enabled() {
 		return nil, infraerrors.ServiceUnavailable(CryptoPayReasonDisabled, "crypto top-up is disabled on this deployment")
+	}
+	st, err := s.settingsForMoneyMove(ctx)
+	if err != nil {
+		return nil, err
 	}
 	n, ok := s.network(networkName)
 	if !ok {
@@ -664,10 +668,6 @@ func (s *CryptoPayService) RescanTransaction(ctx context.Context, networkName, t
 	if err != nil {
 		return nil, err
 	}
-	st, err := s.GetSettings(ctx)
-	if err != nil {
-		return nil, err
-	}
 	out := &CryptoPayRescanResult{Observations: len(obs), Ignored: res.Ignored + len(obs) - len(accepted), Results: []CryptoPayCreditOutcome{}}
 	for _, id := range res.DepositIDs {
 		outcome, credErr := s.creditDeposit(ctx, id, operator, cryptoCreditRescan, st)
@@ -698,4 +698,18 @@ func (s *CryptoPayService) networkAddresses(ctx context.Context, network chain.N
 		out = append(out, a)
 	}
 	return out, errors.Join(rows.Err(), rows.Close())
+}
+
+// settingsForMoneyMove refuses admin money movements while any stored
+// setting is invalid (fail-closed).
+func (s *CryptoPayService) settingsForMoneyMove(ctx context.Context) (*CryptoPaySettings, error) {
+	st, err := s.GetSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(st.Invalid) > 0 {
+		return nil, infraerrors.Conflict(CryptoPayReasonSettingsInvalid,
+			"crypto pay settings are invalid ("+strings.Join(st.Invalid, ", ")+"); fix them before moving funds")
+	}
+	return st, nil
 }

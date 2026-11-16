@@ -26,6 +26,7 @@ func (CryptoPayScanCursor) Fields() []ent.Field {
 		field.String("position").SchemaType(map[string]string{dialect.Postgres: "text"}).Default(""),
 		field.Int64("version").Default(0),
 		field.Time("last_scanned_at").Optional().Nillable().SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
+		field.Time("last_attempt_at").Optional().Nillable().SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
 		field.String("last_error").SchemaType(map[string]string{dialect.Postgres: "text"}).Default(""),
 		field.Time("created_at").Immutable().Default(time.Now).SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
 		field.Time("updated_at").Default(time.Now).UpdateDefault(time.Now).SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),

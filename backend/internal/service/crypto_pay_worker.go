@@ -95,19 +95,13 @@ func (w *CryptoPayWorker) runOnce() {
 			cryptoPayLogf("worker: release advisory lock failed: %v", unlockErr)
 		}
 	}()
-	w.svc.runWorkerPass(ctx, w.phaseBudget())
+	w.svc.RunWorkerPass(ctx)
 }
 
-func (w *CryptoPayWorker) phaseBudget() time.Duration {
-	if budget := 2 * w.interval; budget > time.Minute {
-		return budget
-	}
-	return time.Minute
-}
-
-// RunWorkerPass is one worker iteration (exported for tests and manual runs).
+// RunWorkerPass is one worker iteration with the regular phase budget
+// (2 x scan interval); the worker and tests use the same code path.
 func (s *CryptoPayService) RunWorkerPass(ctx context.Context) {
-	s.runWorkerPass(ctx, 0)
+	s.runWorkerPass(ctx, s.phaseBudget)
 }
 
 // runWorkerPass settles the finalized backlog first, then scans; every phase

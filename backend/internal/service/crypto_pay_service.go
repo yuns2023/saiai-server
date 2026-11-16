@@ -57,6 +57,8 @@ type CryptoPayService struct {
 	evmScanFromBlock uint64
 	scanInterval     time.Duration
 	batchTimeout     time.Duration
+	phaseBudget      time.Duration
+	evmBlocksPerScan uint64
 	balanceCache     cryptoPayBalanceCache
 	authCache        APIKeyAuthCacheInvalidator
 	now              func() time.Time
@@ -81,6 +83,8 @@ func NewCryptoPayService(db *sql.DB, settingRepo SettingRepository, cfg config.C
 	}
 	s.scanInterval = time.Duration(interval) * time.Second
 	s.batchTimeout = time.Duration(max(cfg.ScanBatchTimeoutSeconds, 1)) * time.Second
+	s.phaseBudget = 2 * s.scanInterval
+	s.evmBlocksPerScan = uint64(max(cfg.EVMBlocksPerScan, 1))
 	for _, n := range networks {
 		s.byNetwork[n.Network] = n
 	}

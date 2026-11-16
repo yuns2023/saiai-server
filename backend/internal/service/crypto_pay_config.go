@@ -54,6 +54,7 @@ const (
 	CryptoPayReasonAmountInvalid      = "CRYPTO_PAY_AMOUNT_INVALID"
 	CryptoPayReasonNetworkUnsupported = "CRYPTO_PAY_NETWORK_UNSUPPORTED"
 	CryptoPayReasonTxNotReady         = "CRYPTO_PAY_TX_NOT_READY"
+	CryptoPayReasonSettingsInvalid    = "CRYPTO_PAY_SETTINGS_INVALID"
 )
 
 // CryptoPayEVMDeriver derives the lowercase 0x address at m/44'/60'/0'/0/index
@@ -135,6 +136,9 @@ func parseCryptoPayNetworks(cfg config.CryptoPayConfig) ([]*cryptoPayNetwork, []
 	}
 	if cfg.Enabled && cfg.ScanBatchTimeoutSeconds <= 0 {
 		warnings = append(warnings, "crypto_pay.scan_batch_timeout_seconds must be positive")
+	}
+	if cfg.Enabled && strings.TrimSpace(cfg.EVMNetwork) != "" && cfg.EVMBlocksPerScan <= 0 {
+		warnings = append(warnings, "crypto_pay.evm_blocks_per_scan must be positive")
 	}
 	if len(warnings) > 0 {
 		return nil, append(warnings, "crypto_pay DISABLED: fix the configuration above")
@@ -344,11 +348,13 @@ func (s *CryptoPayService) GetSettings(ctx context.Context) (*CryptoPaySettings,
 	// Fail-closed: a missing value means its default (switches off); a
 	// present but invalid value disables all three switches.
 	var invalid []string
+	// Only an ABSENT key means "default"; a present empty string is invalid.
 	parseBool := func(key string) bool {
-		switch values[key] {
-		case "", "false":
+		raw, ok := values[key]
+		switch {
+		case !ok || raw == "false":
 			return false
-		case "true":
+		case raw == "true":
 			return true
 		default:
 			invalid = append(invalid, key)
@@ -356,8 +362,8 @@ func (s *CryptoPayService) GetSettings(ctx context.Context) (*CryptoPaySettings,
 		}
 	}
 	parseAmount := func(key string, fallback decimal.Decimal) decimal.Decimal {
-		raw := values[key]
-		if raw == "" {
+		raw, ok := values[key]
+		if !ok {
 			return fallback
 		}
 		v := parseCryptoPayDecimal(raw, decimal.Decimal{})
@@ -376,7 +382,7 @@ func (s *CryptoPayService) GetSettings(ctx context.Context) (*CryptoPaySettings,
 		OrderTTLMinutes:     cryptoPayDefaultOrderTTLMinutes,
 		HoldThresholdAmount: parseAmount(SettingCryptoPayHoldThreshold, cryptoPayDefaultHoldThreshold),
 	}
-	if raw := values[SettingCryptoPayOrderTTLMinutes]; raw != "" {
+	if raw, ok := values[SettingCryptoPayOrderTTLMinutes]; ok {
 		ttl, perr := strconv.Atoi(raw)
 		if perr != nil || ttl <= 0 || ttl > cryptoPayMaxOrderTTLMinutes {
 			invalid = append(invalid, SettingCryptoPayOrderTTLMinutes)

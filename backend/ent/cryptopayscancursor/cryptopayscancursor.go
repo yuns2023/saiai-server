@@ -23,6 +23,8 @@ const (
 	FieldVersion = "version"
 	// FieldLastScannedAt holds the string denoting the last_scanned_at field in the database.
 	FieldLastScannedAt = "last_scanned_at"
+	// FieldLastAttemptAt holds the string denoting the last_attempt_at field in the database.
+	FieldLastAttemptAt = "last_attempt_at"
 	// FieldLastError holds the string denoting the last_error field in the database.
 	FieldLastError = "last_error"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
@@ -41,6 +43,7 @@ var Columns = []string{
 	FieldPosition,
 	FieldVersion,
 	FieldLastScannedAt,
+	FieldLastAttemptAt,
 	FieldLastError,
 	FieldCreatedAt,
 	FieldUpdatedAt,
@@ -106,6 +109,11 @@ func ByVersion(opts ...sql.OrderTermOption) OrderOption {
 // ByLastScannedAt orders the results by the last_scanned_at field.
 func ByLastScannedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLastScannedAt, opts...).ToFunc()
+}
+
+// ByLastAttemptAt orders the results by the last_attempt_at field.
+func ByLastAttemptAt(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldLastAttemptAt, opts...).ToFunc()
 }
 
 // ByLastError orders the results by the last_error field.

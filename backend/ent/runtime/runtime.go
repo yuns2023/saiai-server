@@ -583,15 +583,15 @@ func init() {
 	// cryptopayscancursor.DefaultVersion holds the default value on creation for the version field.
 	cryptopayscancursor.DefaultVersion = cryptopayscancursorDescVersion.Default.(int64)
 	// cryptopayscancursorDescLastError is the schema descriptor for last_error field.
-	cryptopayscancursorDescLastError := cryptopayscancursorFields[5].Descriptor()
+	cryptopayscancursorDescLastError := cryptopayscancursorFields[6].Descriptor()
 	// cryptopayscancursor.DefaultLastError holds the default value on creation for the last_error field.
 	cryptopayscancursor.DefaultLastError = cryptopayscancursorDescLastError.Default.(string)
 	// cryptopayscancursorDescCreatedAt is the schema descriptor for created_at field.
-	cryptopayscancursorDescCreatedAt := cryptopayscancursorFields[6].Descriptor()
+	cryptopayscancursorDescCreatedAt := cryptopayscancursorFields[7].Descriptor()
 	// cryptopayscancursor.DefaultCreatedAt holds the default value on creation for the created_at field.
 	cryptopayscancursor.DefaultCreatedAt = cryptopayscancursorDescCreatedAt.Default.(func() time.Time)
 	// cryptopayscancursorDescUpdatedAt is the schema descriptor for updated_at field.
-	cryptopayscancursorDescUpdatedAt := cryptopayscancursorFields[7].Descriptor()
+	cryptopayscancursorDescUpdatedAt := cryptopayscancursorFields[8].Descriptor()
 	// cryptopayscancursor.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	cryptopayscancursor.DefaultUpdatedAt = cryptopayscancursorDescUpdatedAt.Default.(func() time.Time)
 	// cryptopayscancursor.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
