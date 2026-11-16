@@ -1,14 +1,14 @@
 export default {
   hostedUsage: {
     adminLabel: '托管账号独立计量',
-    adminHint: '仅限 OpenAI / Anthropic 专属普通分组。费率倍数即托管服务费率：按官方标准价 × 费率从钱包扣费，0 = 不扣费（无需余额）。Key 额度与周期限额仍按官方标准价计量；托管请求不计平台账号成本。不会清空或追补已有计数。',
+    adminHint: '仅限 OpenAI / Anthropic 专属普通分组。费率倍数即托管服务费率：按标准价（本站模型价格） × 费率从钱包扣费，0 = 不扣费（无需余额）。Key 额度与周期限额仍按标准价（本站模型价格）计量；托管请求不计平台账号成本。不会清空或追补已有计数。',
     adminBlockedReason: '需为专属普通分组，且费率倍数为不小于 0 的有效数字。',
     feeRateLabel: '托管服务费率（× 标准价，0 = 不扣费）',
-    feeRateHint: '托管分组按官方标准价 × 此费率扣费；用户专属倍率、模型倍率和用户折扣均不适用。',
+    feeRateHint: '托管分组按标准价 × 此费率扣费；用户专属倍率、模型倍率和用户折扣均不适用。',
     badgeFree: '自有账号托管 · 不扣费',
     badgeFee: '自有账号托管 · 服务费 {rate}× 标准价',
     reference: '折算用量',
-    hint: '按每次请求记录的模型官方标准价折算，Key 额度与周期限额按此计量；实际扣费为托管服务费（标准价 × 分组费率，0 倍率不扣费）。与上游账号额度百分比分别统计。启用前记录保持原有口径。',
+    hint: '按每次请求记录的模型标准价折算，Key 额度与周期限额按此计量；实际扣费为托管服务费（标准价 × 分组费率，0 倍率不扣费）。与上游账号额度百分比分别统计。启用前记录保持原有口径。',
     total: '托管用量',
     windowLimit: '周期用量限额'
   },
@@ -707,7 +707,7 @@ export default {
       standardCostHelp: '按配置基础价计算、未乘倍率前的费用。',
       usageCost: '参考用量',
       usageCostShort: '参考',
-      usageCostHelp: '托管分组按官方标准价计量的金额（实际消费为托管服务费，0 倍率时为 0）；其他分组与实际消费相同。',
+      usageCostHelp: '托管分组按标准价计量的金额（实际消费为托管服务费，0 倍率时为 0）；其他分组与实际消费相同。',
       tokenMix: 'Token 构成',
       deleted: '已删除',
       viewKeyRecords: '查看该 Key 的使用记录',
@@ -1257,9 +1257,9 @@ export default {
     dashboard: {
       title: '管理控制台',
       hostedUsage: '托管用量',
-      hostedUsageTooltip: '托管分组（按官方标准价计量，服务费按分组费率另收）的用量，不计入上方平台的请求数、Token 和费用；RPM/TPM（网关负载）与活跃用户数仍包含托管流量。“累计”为原始使用日志保留期内的托管用量；超出保留期的历史平台累计已无法拆分，仍包含托管用量。',
+      hostedUsageTooltip: '托管分组（按标准价计量，服务费按分组费率另收）的用量，不计入上方平台的请求数、Token 和费用；RPM/TPM（网关负载）与活跃用户数仍包含托管流量。“累计”为原始使用日志保留期内的托管用量；超出保留期的历史平台累计已无法拆分，仍包含托管用量。',
       hostedToday: '今日',
-      hostedMeteredCost: '计量金额（官方标准价）',
+      hostedMeteredCost: '计量金额（标准价）',
       hostedServiceFee: '服务费收入',
       hostedServiceFeeHint: '托管行实扣合计（日志保留期内）',
       description: '系统概览与统计数据',

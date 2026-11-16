@@ -58,3 +58,39 @@ func TestHostedFeeCountsAsBalanceRevenueAndOwnerFee(t *testing.T) {
 	require.InDelta(t, 1.0, last7d[account.ID].SelfServiceFee, 1e-9, "only hosted rows count as service fee")
 	require.Equal(t, int64(3), last7d[account.ID].SelfRequests)
 }
+
+// The raw-log dashboard path reports hosted fees separately from platform
+// actual cost (P2a). A private far-future window keeps other tests' rows out.
+func TestHostedFeeRawDashboardPath(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	logs := newUsageLogRepositoryWithSQL(client, integrationDB)
+	suffix := uuid.NewString()
+	user := mustCreateUser(t, client, &service.User{Email: "fee-dash-" + suffix + "@example.invalid"})
+	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-fee-dash-" + suffix, Name: "fee-dash"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "fee-dash-" + suffix, Platform: service.PlatformAnthropic, Type: service.AccountTypeSetupToken})
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM usage_logs WHERE api_key_id = $1", key.ID)
+	})
+	day := time.Date(2031, 3, 4, 0, 0, 0, 0, time.UTC)
+	std := 10.0
+	for _, log := range []*service.UsageLog{
+		{TotalCost: std, ActualCost: 1.0, MeteredCost: &std}, // hosted, fee 0.10
+		{TotalCost: std, ActualCost: 0, MeteredCost: &std},   // free hosted
+		{TotalCost: 4, ActualCost: 2.0},                      // ordinary
+	} {
+		log.UserID, log.APIKeyID, log.AccountID = user.ID, key.ID, account.ID
+		log.RequestID, log.Model, log.InputTokens = uuid.NewString(), "claude-sonnet-5", 1
+		log.BillingType = service.BillingTypeBalance
+		log.CreatedAt = day.Add(time.Hour)
+		_, err := logs.createSingle(ctx, integrationDB, log)
+		require.NoError(t, err)
+	}
+	stats := &DashboardStats{}
+	require.NoError(t, logs.fillDashboardUsageStatsFromUsageLogs(ctx, stats, day, day.Add(24*time.Hour), day, day.Add(23*time.Hour)))
+	require.InDelta(t, 2.0, stats.TotalActualCost, 1e-9, "platform actual cost excludes hosted rows")
+	require.InDelta(t, 1.0, stats.HostedTotalServiceFee, 1e-9)
+	require.InDelta(t, 1.0, stats.HostedTodayServiceFee, 1e-9)
+	require.InDelta(t, 20.0, stats.HostedTotalMeteredCost, 1e-9)
+	require.Equal(t, int64(2), stats.HostedTotalRequests)
+}

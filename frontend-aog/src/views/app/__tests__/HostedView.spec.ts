@@ -103,7 +103,7 @@ describe('HostedView', () => {
 
   it('shows the explanatory note', async () => {
     const w = await mountView([current])
-    expect(w.find('[data-testid=hosted-note]').text()).toBe('这里显示归属于你的上游账号的用量；其他用户的请求只显示用量，不显示其身份。标准价为官方价格参考。')
+    expect(w.find('[data-testid=hosted-note]').text()).toBe('这里显示归属于你的上游账号的用量；其他用户的请求只显示用量，不显示其身份。标准价按本站模型价格计算，仅供参考。')
   })
 
   it('renders current accounts first and past ones in their own section', async () => {

@@ -2474,8 +2474,9 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 }
 
 // GetUserSpendingRanking returns user spending ranking aggregated within the time range.
-// Users are ranked by standard total_cost so hosted usage (actual_cost is always 0,
-// total_cost holds the reference price) ranks alongside billed usage.
+// Users are ranked by standard total_cost so hosted usage (actual_cost is only the
+// hosting service fee, 0 for free hosted groups; total_cost holds the standard
+// price) ranks alongside billed usage.
 func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTime, endTime time.Time, limit int, sort usagestats.SpendingRankingSort) (result *UserSpendingRankingResponse, err error) {
 	if limit <= 0 {
 		limit = 12
@@ -3779,7 +3780,7 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 	if dim.ExcludeHosted {
 		query += hostedScopeExclude.clause("ul.metered_cost")
 	}
-	// Standard cost first: hosted rows have zero actual_cost but a reference total_cost.
+	// Standard cost first: hosted rows' actual_cost is only the service fee (0 when free) but total_cost is the standard price.
 	query += " GROUP BY ul.user_id, u.email ORDER BY cost DESC, actual_cost DESC, total_tokens DESC, user_id ASC"
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)

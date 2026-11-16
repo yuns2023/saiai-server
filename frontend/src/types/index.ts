@@ -1013,7 +1013,7 @@ export interface WindowStats extends RevenueParts {
   cost: number // Account cost (account multiplier)
   standard_cost?: number
   user_cost?: number
-  hosted_requests?: number // Hosted-group requests (metered_cost set; cost/user_cost are 0)
+  hosted_requests?: number // Hosted-group requests (metered_cost set; account cost 0, user_cost = service fee, 0 when free)
   hosted_cost?: number // Hosted reference usage: SUM(metered_cost)
 }
 

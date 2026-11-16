@@ -59,8 +59,9 @@ func nullInt64Ptr(value sql.NullInt64) *int64 {
 
 // GetAPIKeySpendingRanking includes historical usage of soft-deleted Keys.
 // A zero userID selects global usage; a positive ID filters by the recorded user.
-// Keys are ranked by standard total_cost so hosted Keys (actual_cost is always 0,
-// total_cost holds the reference price) rank alongside billed Keys.
+// Keys are ranked by standard total_cost so hosted Keys (actual_cost is only the
+// hosting service fee, 0 for free hosted groups; total_cost holds the standard
+// price) rank alongside billed Keys.
 func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, startTime, endTime time.Time, userID int64, limit int, sort usagestats.SpendingRankingSort) (result *usagestats.APIKeySpendingRankingResponse, err error) {
 	if userID < 0 {
 		return nil, fmt.Errorf("user ID must not be negative")

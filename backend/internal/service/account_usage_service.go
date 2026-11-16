@@ -143,7 +143,7 @@ type WindowStats struct {
 	StandardCost float64 `json:"standard_cost"`
 	UserCost     float64 `json:"user_cost"`
 
-	// 托管分组（metered_cost 非空）的请求数与折算用量；托管行的 cost/user_cost 为 0。
+	// 托管分组（metered_cost 非空）的请求数与折算用量；托管行账号成本为 0，用户实扣为托管服务费（免费托管为 0）。
 	HostedRequests int64   `json:"hosted_requests"`
 	HostedCost     float64 `json:"hosted_cost"`
 

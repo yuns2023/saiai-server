@@ -296,7 +296,7 @@ const en: typeof zh = {
   },
   hosted: {
     title: 'My hosted accounts',
-    lead: 'Usage of the upstream accounts that belong to you. Other users’ requests show usage only, never who made them. Standard price is the official list price, for reference.',
+    lead: 'Usage of the upstream accounts that belong to you. Other users’ requests show usage only, never who made them. Standard price uses this site’s model pricing, for reference.',
     empty: 'You have no hosted accounts yet. Once an administrator assigns an upstream account to you, it appears here.',
     current: 'Current accounts',
     history: 'Past hosted accounts',
@@ -324,7 +324,7 @@ const en: typeof zh = {
     requests: '{n} req',
     serviceFee: 'fee {amount}',
     usageTitle: 'Calls on {name}',
-    usageLead: 'Standard price uses official list prices, for reference only; the charged amount is shown for your own calls only.',
+    usageLead: 'Standard price uses site model list prices, for reference only; the charged amount is shown for your own calls only.',
     time: 'Time',
     model: 'Model',
     input: 'Input',
