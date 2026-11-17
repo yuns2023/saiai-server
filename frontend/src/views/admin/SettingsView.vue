@@ -1162,6 +1162,22 @@
               </p>
             </div>
 
+            <!-- One-time AITP install codes on the AOG Key page (needs a valid API base URL) -->
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.site.aitpInstallCode') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.site.aitpInstallCodeHint') }}
+                </p>
+              </div>
+              <label class="toggle">
+                <input v-model="form.aitp_install_code_enabled" type="checkbox" data-testid="aitp-install-code-enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
             <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-700">
               <div class="mb-4 flex items-start justify-between gap-4">
                 <div>
@@ -1847,7 +1863,8 @@ const form = reactive<SettingsForm>({
   maintenance_mode_enabled: false,
   maintenance_message: '',
   client_brand_name: '',
-  client_setup_command: ''
+  client_setup_command: '',
+  aitp_install_code_enabled: false
 })
 
 const defaultSubscriptionGroupOptions = computed<DefaultSubscriptionGroupOption[]>(() =>
@@ -2183,7 +2200,8 @@ async function saveSettings() {
       maintenance_mode_enabled: form.maintenance_mode_enabled,
       maintenance_message: form.maintenance_message,
       client_brand_name: form.client_brand_name,
-      client_setup_command: form.client_setup_command
+      client_setup_command: form.client_setup_command,
+      aitp_install_code_enabled: form.aitp_install_code_enabled
     }
     const updated = await adminAPI.settings.updateSettings(payload)
     Object.assign(form, updated)

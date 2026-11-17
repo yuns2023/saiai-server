@@ -32,6 +32,8 @@ export const useAppStore = defineStore('app', () => {
   const invitationCodeHint = computed(() => settings.value?.invitation_code_hint?.trim() || '')
   const siteLogo = computed(() => settings.value?.site_logo?.trim() || '/_aog/favicon.svg')
   const apiBaseUrl = computed(() => settings.value?.api_base_url?.trim() || window.location.origin)
+  /** Admin switch for one-time install codes; anything but true (missing, old server) is off. */
+  const aitpInstallCodeEnabled = computed(() => settings.value?.aitp_install_code_enabled === true)
 
   async function loadSettings(force = false): Promise<PublicSettings | null> {
     if (settings.value && !force) return settings.value
@@ -71,6 +73,7 @@ export const useAppStore = defineStore('app', () => {
     siteLogo,
     invitationCodeHint,
     apiBaseUrl,
+    aitpInstallCodeEnabled,
     loadSettings,
     notify,
     dismiss,

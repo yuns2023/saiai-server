@@ -15,8 +15,8 @@ func Logger() gin.HandlerFunc {
 		// 开始时间
 		startTime := time.Now()
 
-		// 请求路径
-		path := c.Request.URL.Path
+		// 请求路径（一次性安装码 /i/<code> 已脱敏）
+		path := RedactedLogPath(c.Request.URL.Path)
 
 		// 处理请求
 		c.Next()

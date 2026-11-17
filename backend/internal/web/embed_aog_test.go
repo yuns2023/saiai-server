@@ -90,7 +90,7 @@ func TestFrontendServer_AOGMode_Routing(t *testing.T) {
 	}
 
 	// API and setup API paths still bypass the frontend.
-	for _, p := range []string{"/api/v1/settings/public", "/v1/messages", "/setup/status", "/health"} {
+	for _, p := range []string{"/api/v1/settings/public", "/v1/messages", "/setup/status", "/health", "/i/0123456789AB"} {
 		assert.Equal(t, http.StatusTeapot, doGet(router, p).Code, p)
 	}
 }

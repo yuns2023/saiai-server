@@ -320,6 +320,10 @@ const (
 	// Both empty = the original SAIAI texts, byte for byte.
 	SettingKeyClientBrandName    = "client_brand_name"
 	SettingKeyClientSetupCommand = "client_setup_command"
+
+	// One-time AITP install codes on the Key page (see aitp_install_code_service.go).
+	// Default off: the Key page keeps the full install command.
+	SettingKeyAITPInstallCodeEnabled = "aitp_install_code_enabled"
 )
 
 // AdminAPIKeyPrefix is the prefix for admin API keys (distinct from user "sk-" keys).

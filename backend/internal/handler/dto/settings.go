@@ -117,6 +117,9 @@ type SystemSettings struct {
 	// Client brand used in client-facing texts; both empty = original SAIAI texts.
 	ClientBrandName    string `json:"client_brand_name"`
 	ClientSetupCommand string `json:"client_setup_command"`
+
+	// One-time AITP install codes on the Key page (default off).
+	AITPInstallCodeEnabled bool `json:"aitp_install_code_enabled"`
 }
 
 type DefaultSubscriptionSetting struct {
@@ -155,6 +158,7 @@ type PublicSettings struct {
 	BackendModeEnabled               bool             `json:"backend_mode_enabled"`
 	MaintenanceModeEnabled           bool             `json:"maintenance_mode_enabled"`
 	MaintenanceMessage               string           `json:"maintenance_message"`
+	AITPInstallCodeEnabled           bool             `json:"aitp_install_code_enabled"`
 	Version                          string           `json:"version"`
 }
 

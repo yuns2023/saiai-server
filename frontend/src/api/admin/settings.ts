@@ -123,6 +123,8 @@ export interface SystemSettings {
   // Client brand in client-facing error texts; empty = original SAIAI wording
   client_brand_name: string
   client_setup_command: string
+  // AOG Key page: one-time AITP install codes instead of the full command (default off)
+  aitp_install_code_enabled: boolean
 }
 
 export interface UpdateSettingsRequest {
@@ -201,6 +203,7 @@ export interface UpdateSettingsRequest {
   maintenance_message?: string
   client_brand_name?: string
   client_setup_command?: string
+  aitp_install_code_enabled?: boolean
 }
 
 /**

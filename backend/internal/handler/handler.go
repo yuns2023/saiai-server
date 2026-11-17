@@ -55,6 +55,8 @@ type Handlers struct {
 	Payment        *PaymentHandler
 	PaymentWebhook *PaymentWebhookHandler
 	CryptoPay      *CryptoPayHandler
+	// AITPInstallCode serves one-time install codes (/api/v1/keys/:id/install-code, /i/:code).
+	AITPInstallCode *AITPInstallCodeHandler
 }
 
 // BuildInfo contains build-time information

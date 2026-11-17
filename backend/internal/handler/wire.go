@@ -118,6 +118,7 @@ func ProvideHandlers(
 	paymentHandler *PaymentHandler,
 	paymentWebhookHandler *PaymentWebhookHandler,
 	cryptoPayHandler *CryptoPayHandler,
+	aitpInstallCodeHandler *AITPInstallCodeHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
@@ -142,6 +143,8 @@ func ProvideHandlers(
 		Payment:        paymentHandler,
 		PaymentWebhook: paymentWebhookHandler,
 		CryptoPay:      cryptoPayHandler,
+
+		AITPInstallCode: aitpInstallCodeHandler,
 	}
 }
 
@@ -166,6 +169,7 @@ var ProviderSet = wire.NewSet(
 	NewPaymentHandler,
 	NewPaymentWebhookHandler,
 	NewCryptoPayHandler,
+	NewAITPInstallCodeHandler,
 	ProvideSettingHandler,
 
 	// Admin handlers

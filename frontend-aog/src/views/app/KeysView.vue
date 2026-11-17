@@ -291,7 +291,7 @@ function openRow(kind: 'edit' | 'connect', id: number): void {
 
           <div v-if="connecting === k.id" class="border-t border-rule-soft pb-6 pt-4">
             <p v-if="justCreated === k.id" class="mb-4 text-sm text-ink">{{ t('keys.createdNext') }}</p>
-            <ConnectPanel :api-key="k.key" :supported="keySupported(k)" />
+            <ConnectPanel :api-key="k.key" :api-key-id="k.id" :supported="keySupported(k)" />
           </div>
           <div v-if="editing === k.id" class="border-t border-rule-soft pb-6 pt-4">
             <KeyForm :groups="groups" :rates="rates" :initial="k" :busy="busy" @submit="save(k, $event)" @cancel="editing = null" />

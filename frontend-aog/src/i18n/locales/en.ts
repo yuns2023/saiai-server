@@ -236,7 +236,21 @@ const en: typeof zh = {
     manualHint: 'Set these two environment variables in the terminal you start claude from:',
     badBaseUrl: 'This site’s API address is misconfigured, so no one-line command can be generated. Contact the administrator, or set things up by hand below.',
     noOneLine: 'A {client} one-line command cannot be generated safely for this terminal. Pick another terminal type or set things up by hand below.',
-    unsupported: 'This key’s group cannot be used with Claude Code. Choose another group under “Edit”, then connect.'
+    unsupported: 'This key’s group cannot be used with Claude Code. Choose another group under “Edit”, then connect.',
+    codeLead: 'Generate a short one-time command. Run it once in a terminal to install {client} with this key; the command does not contain the key itself.',
+    codeGenerate: 'Generate install command',
+    codeGenerating: 'Generating…',
+    codeRegenerate: 'Generate again',
+    codeValidity: 'Valid for 10 minutes and works once; generate a new one after it is used or expired.',
+    codeExpiresAt: 'Valid until {time}',
+    codeOlderStillValid: 'Generating again does not revoke earlier commands; they stay valid until they expire.',
+    codeExpired: 'This install command has expired. Generate a new one.',
+    codeFull: 'Full command (without an install code)',
+    codeErrDisabled: 'Install codes are turned off on this site. Use the full command below.',
+    codeErrRateLimited: 'Too many commands generated. Try again in a few minutes, or use the full command below.',
+    codeErrBaseUrl: 'This site’s API address is missing or misconfigured, so no install code can be generated. Contact the administrator, or use the full command below.',
+    codeErrKey: 'This key is disabled or expired, so no install command can be generated.',
+    codeErrFailed: 'Could not generate a command. Try again later, or use the full command below.'
   },
   keys: {
     title: 'API keys',

@@ -78,6 +78,12 @@ func Default() *Writer {
 	return defaultWriter
 }
 
+// NewFromEnv builds a Writer from the environment like Default, without the process-wide
+// cache (for tests of trace consumers).
+func NewFromEnv() *Writer {
+	return newFromEnv()
+}
+
 func newFromEnv() *Writer {
 	if strings.TrimSpace(os.Getenv(envEnabled)) != "1" {
 		return &Writer{}

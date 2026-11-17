@@ -5334,6 +5334,9 @@ export default {
         apiBaseUrlPlaceholder: 'https://api.example.com',
         apiBaseUrlHint:
           'Used for "Use Key" and "Import to CC Switch" features. Leave empty to use current site URL.',
+        aitpInstallCode: 'One-time install codes on the Key page',
+        aitpInstallCodeHint:
+          'When on, the Key page of the new user UI (AOG) shows a short one-time command (valid for 10 minutes, works once); the full command stays available. Requires a valid http(s) API Base URL above, otherwise no code can be generated.',
         apiEndpoints: 'API routes',
         apiEndpointsHint: 'When configured, users receive an enabled route at random when using a key and can switch manually. The default API URL is used when empty.',
         apiEndpointsEmpty: 'No additional routes configured; the default API URL will be used.',

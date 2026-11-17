@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CLIENT, connectSnippet, gatewayRoot } from '../connect'
+import { CLIENT, connectSnippet, gatewayRoot, installCodeCommand, installCodeKind, isInstallCode } from '../connect'
 
 describe('connect', () => {
   it('normalizes the gateway root (no /v1, no trailing slash)', () => {
@@ -100,5 +100,31 @@ describe('connect', () => {
     expect(connectSnippet('https://ccyou.example/%OS%', 'k', 'powershell').command).not.toBeNull()
     expect(connectSnippet('https://ccyou.example', 'a"b', 'cmd').command).toBeNull()
     expect(connectSnippet('https://ccyou.example', 'a\nb', 'unix').command).toBeNull()
+  })
+
+  it('builds the exact one-time install code command for each shell', () => {
+    const origin = 'https://ccyou.dev'
+    expect(installCodeCommand('unix', origin, 'Q7M2K9XW4TRB')).toBe('curl -fsSL -X POST https://ccyou.dev/i/Q7M2K9XW4TRB | bash')
+    expect(installCodeCommand('powershell', origin, 'Q7M2K9XW4TRB')).toBe('irm https://ccyou.dev/i/Q7M2K9XW4TRB -Method Post | iex')
+    expect(installCodeCommand('cmd', origin, 'Q7M2K9XW4TRB')).toBe(
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://ccyou.dev/i/Q7M2K9XW4TRB -Method Post | iex"'
+    )
+    expect(installCodeCommand('unix', 'http://127.0.0.1:8080', 'Q7M2K9XW4TRB')).toBe('curl -fsSL -X POST http://127.0.0.1:8080/i/Q7M2K9XW4TRB | bash')
+  })
+
+  it('quotes an origin a shell could expand (an IPv6 literal is a glob in zsh)', () => {
+    expect(installCodeCommand('unix', 'http://[::1]:8080', 'Q7M2K9XW4TRB')).toBe("curl -fsSL -X POST 'http://[::1]:8080/i/Q7M2K9XW4TRB' | bash")
+    expect(installCodeCommand('powershell', 'http://[::1]:8080', 'Q7M2K9XW4TRB')).toBe("irm 'http://[::1]:8080/i/Q7M2K9XW4TRB' -Method Post | iex")
+  })
+
+  it('maps shells to the script kind and recognizes codes', () => {
+    expect(installCodeKind('unix')).toBe('unix')
+    expect(installCodeKind('powershell')).toBe('powershell')
+    expect(installCodeKind('cmd')).toBe('powershell')
+    expect(isInstallCode('Q7M2K9XW4TRB')).toBe(true)
+    expect(isInstallCode('0123456789AB')).toBe(true)
+    for (const bad of ['', 'q7m2k9xw4trb', 'Q7M2K9XW4TR', 'Q7M2K9XW4TRBX', 'Q7M2K9XW4TRI', 'Q7M2K9XW4TRO', "Q7M2K9XW4T'B", 'Q7M2K9XW4T B', null, 12]) {
+      expect(isInstallCode(bad)).toBe(false)
+    }
   })
 })

@@ -601,6 +601,7 @@ func TestAPIContracts(t *testing.T) {
 					"maintenance_message": "系统正在升级维护，请稍候再试。",
 					"client_brand_name": "",
 					"client_setup_command": "",
+					"aitp_install_code_enabled": false,
 					"custom_menu_items": []
 				}
 			}`,

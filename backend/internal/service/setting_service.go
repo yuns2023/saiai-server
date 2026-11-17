@@ -295,6 +295,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyBackendModeEnabled,
 		SettingKeyMaintenanceModeEnabled,
 		SettingKeyMaintenanceMessage,
+		SettingKeyAITPInstallCodeEnabled,
 	}
 
 	settings, err := s.settingRepo.GetMultiple(ctx, keys)
@@ -347,6 +348,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		BackendModeEnabled:               settings[SettingKeyBackendModeEnabled] == "true",
 		MaintenanceModeEnabled:           settings[SettingKeyMaintenanceModeEnabled] == "true",
 		MaintenanceMessage:               maintenanceMessage(settings[SettingKeyMaintenanceMessage]),
+		AITPInstallCodeEnabled:           settings[SettingKeyAITPInstallCodeEnabled] == "true",
 	}, nil
 }
 
@@ -406,6 +408,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		BackendModeEnabled               bool            `json:"backend_mode_enabled"`
 		MaintenanceModeEnabled           bool            `json:"maintenance_mode_enabled"`
 		MaintenanceMessage               string          `json:"maintenance_message,omitempty"`
+		AITPInstallCodeEnabled           bool            `json:"aitp_install_code_enabled"`
 		Version                          string          `json:"version,omitempty"`
 	}{
 		RegistrationEnabled:              settings.RegistrationEnabled,
@@ -438,6 +441,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		BackendModeEnabled:               settings.BackendModeEnabled,
 		MaintenanceModeEnabled:           settings.MaintenanceModeEnabled,
 		MaintenanceMessage:               maintenanceMessage(settings.MaintenanceMessage),
+		AITPInstallCodeEnabled:           settings.AITPInstallCodeEnabled,
 		Version:                          s.version,
 	}, nil
 }
@@ -706,6 +710,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	clientSetupCommand := strings.TrimSpace(settings.ClientSetupCommand)
 	updates[SettingKeyClientBrandName] = clientBrandName
 	updates[SettingKeyClientSetupCommand] = clientSetupCommand
+	updates[SettingKeyAITPInstallCodeEnabled] = strconv.FormatBool(settings.AITPInstallCodeEnabled)
 
 	err = s.settingRepo.SetMultiple(ctx, updates)
 	if err == nil {
@@ -1058,6 +1063,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		MaintenanceMessage:               maintenanceMessage(settings[SettingKeyMaintenanceMessage]),
 		ClientBrandName:                  strings.TrimSpace(settings[SettingKeyClientBrandName]),
 		ClientSetupCommand:               strings.TrimSpace(settings[SettingKeyClientSetupCommand]),
+		AITPInstallCodeEnabled:           settings[SettingKeyAITPInstallCodeEnabled] == "true",
 	}
 	applyRedeemPurchaseSystemSettings(result, settings)
 

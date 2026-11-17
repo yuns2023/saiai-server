@@ -454,6 +454,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 			"/sora/v1/models",
 			"/antigravity/test",
 			"/setup/init",
+			"/i/0123456789AB",
 			"/health",
 			"/responses",
 			"/responses/compact",
@@ -502,6 +503,46 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.True(t, nextCalled, "next handler should be called for compact API route")
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.JSONEq(t, `{"ok":true}`, w.Body.String())
+	})
+
+	// One-time AITP install codes (/i/<code>) are piped into a shell: whatever the
+	// method, code or setting, the SPA must never answer them (classic and AOG mode).
+	t.Run("install_code_paths_never_get_the_spa", func(t *testing.T) {
+		classicServer, err := NewFrontendServer(&mockSettingsProvider{settings: map[string]string{"test": "value"}}, "")
+		require.NoError(t, err)
+		classicFS, aogFS := aogTestFS()
+		aogServer, err := newFrontendServer(&aogTestSettings{}, classicFS, aogFS, FrontendOptions{UserUI: UserUIAOG})
+		require.NoError(t, err)
+
+		for name, server := range map[string]*FrontendServer{"classic": classicServer, "aog": aogServer} {
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(middleware.CSPNonceKey, "test-nonce")
+				c.Next()
+			})
+			router.Use(server.Middleware())
+			// Stand-ins for the real handlers; setting/code checks are covered in
+			// handler/aitp_install_code_handler_test.go.
+			router.POST("/i/:code", func(c *gin.Context) { c.String(http.StatusOK, "echo script") })
+			router.GET("/i/:code", func(c *gin.Context) { c.String(http.StatusMethodNotAllowed, "use POST") })
+			router.HEAD("/i/:code", func(c *gin.Context) { c.Status(http.StatusMethodNotAllowed) })
+
+			for _, target := range []string{"/i/0123456789AB", "/i/bad", "/i/%3Cscript%3E", "/i/", "/i/a/b"} {
+				for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodHead} {
+					w := httptest.NewRecorder()
+					router.ServeHTTP(w, httptest.NewRequest(method, target, nil))
+					label := name + " " + method + " " + target
+					assert.NotContains(t, w.Header().Get("Content-Type"), "text/html", label)
+					body := strings.ToLower(w.Body.String())
+					assert.NotContains(t, body, "<html", label)
+					assert.NotContains(t, body, "<!doctype", label)
+					assert.NotContains(t, body, "__app_config__", label)
+				}
+			}
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/i/0123456789AB", nil))
+			assert.Equal(t, "echo script", w.Body.String(), name)
+		}
 	})
 
 	t.Run("serves_index_for_spa_routes", func(t *testing.T) {
@@ -1014,6 +1055,7 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 			"/sora/v1/models",
 			"/antigravity/test",
 			"/setup/init",
+			"/i/0123456789AB",
 			"/health",
 			"/responses",
 			"/responses/compact",

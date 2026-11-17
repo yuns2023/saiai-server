@@ -234,7 +234,21 @@ export default {
     manualHint: '在启动 claude 的终端里设置这两个环境变量：',
     badBaseUrl: '本站的 API 地址配置有误，暂时无法生成一键命令，请联系管理员；也可以先按下面的方式手动配置。',
     noOneLine: '这个终端里无法安全生成 {client} 一键命令，请换一个终端类型或按下面的方式手动配置。',
-    unsupported: '这个 Key 所在的分组不能用于 Claude Code。点“编辑”换一个分组后再来接入。'
+    unsupported: '这个 Key 所在的分组不能用于 Claude Code。点“编辑”换一个分组后再来接入。',
+    codeLead: '生成一条一次性短命令，在终端运行一次即可安装 {client} 并填好这个 Key；命令里不含 Key 本身。',
+    codeGenerate: '生成安装命令',
+    codeGenerating: '生成中…',
+    codeRegenerate: '重新生成',
+    codeValidity: '10 分钟内有效，只能使用一次；用过或过期后请重新生成。',
+    codeExpiresAt: '有效至 {time}',
+    codeOlderStillValid: '重新生成不会作废之前生成的命令，它们在过期前仍然有效。',
+    codeExpired: '这条安装命令已过期，请重新生成。',
+    codeFull: '完整命令（不使用安装码）',
+    codeErrDisabled: '本站已关闭安装码，请展开下面的完整命令使用。',
+    codeErrRateLimited: '生成太频繁，请几分钟后再试；也可以展开下面的完整命令使用。',
+    codeErrBaseUrl: '本站的 API 地址未配置或配置有误，暂时无法生成安装码，请联系管理员；也可以展开下面的完整命令使用。',
+    codeErrKey: '这个 Key 已停用或过期，无法生成安装命令。',
+    codeErrFailed: '生成失败，请稍后重试；也可以展开下面的完整命令使用。'
   },
   keys: {
     title: 'API Key',
