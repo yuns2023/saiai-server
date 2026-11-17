@@ -52,7 +52,8 @@ type RedeemCodeRepository interface {
 	// ListByUserPaginated returns paginated balance/concurrency history for a specific user.
 	// codeType filter is optional - pass empty string to return all types.
 	ListByUserPaginated(ctx context.Context, userID int64, params pagination.PaginationParams, codeType string) ([]RedeemCode, *pagination.PaginationResult, error)
-	// SumPositiveBalanceByUser returns the total recharged amount (sum of positive balance values) for a user.
+	// SumPositiveBalanceByUser returns the total recharged amount for a user: positive balance/admin_balance
+	// code values plus credited stablecoin top-ups.
 	SumPositiveBalanceByUser(ctx context.Context, userID int64) (float64, error)
 }
 

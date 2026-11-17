@@ -91,7 +91,8 @@ type InviterRef struct {
 }
 
 type UserInviteRepository interface {
-	// HasQualifyingTopUp reports a completed payment or a redeemed balance/subscription/concurrency code.
+	// HasQualifyingTopUp reports a completed payment, a credited stablecoin top-up, or a redeemed
+	// balance/subscription/concurrency code.
 	HasQualifyingTopUp(ctx context.Context, userID int64) (bool, error)
 	// Counts returns the numbers the generate limits are checked against.
 	Counts(ctx context.Context, ownerID int64) (UserInviteCounts, error)
