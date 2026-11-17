@@ -15,6 +15,13 @@ type SystemSettings struct {
 	UserInviteMaxPerWeek             int
 	TotpEnabled                      bool // TOTP 双因素认证
 
+	// User-bought balance redeem codes (setting_redeem_purchase.go).
+	RedeemPurchaseEnabled         bool
+	RedeemPurchaseMinAmount       float64
+	RedeemPurchaseMaxAmount       float64
+	RedeemPurchaseWindowMaxAmount float64
+	RedeemPurchaseWindowMaxCount  int
+
 	SMTPHost               string
 	SMTPPort               int
 	SMTPUsername           string

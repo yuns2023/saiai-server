@@ -25,6 +25,11 @@ export function isAdminSubscriptionRecord(type: string): boolean {
   return (ADMIN_SUBSCRIPTION_RECORD_TYPES as readonly string[]).includes(type)
 }
 
+/** A user bought a balance code with balance (debit) or revoked it (refund). */
+export function isRedeemPurchaseRecord(type: string): boolean {
+  return type === 'purchase_debit' || type === 'purchase_refund'
+}
+
 /** Any record of an admin operation (balance, concurrency, subscription). */
 export function isAdminOperationRecord(type: string): boolean {
   return type === 'admin_balance' || type === 'admin_concurrency' || isAdminSubscriptionRecord(type)

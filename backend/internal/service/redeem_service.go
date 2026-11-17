@@ -26,6 +26,8 @@ const (
 	redeemMaxErrorsPerHour  = 20
 	redeemRateLimitDuration = time.Hour
 	redeemLockDuration      = 10 * time.Second // 锁超时时间，防止死锁
+	// redeemAuthCacheInvalidateTimeout bounds the post-commit auth cache invalidation.
+	redeemAuthCacheInvalidateTimeout = 5 * time.Second
 )
 
 // RedeemCache defines cache operations for redeem service
@@ -55,6 +57,9 @@ type RedeemCodeRepository interface {
 	// SumPositiveBalanceByUser returns the total recharged amount for a user: positive balance/admin_balance
 	// code values plus credited stablecoin top-ups.
 	SumPositiveBalanceByUser(ctx context.Context, userID int64) (float64, error)
+	// IsPurchased reports whether a user bought this code with their balance
+	// (a redeem_code_purchases row exists, active or revoked).
+	IsPurchased(ctx context.Context, id int64) (bool, error)
 }
 
 // GenerateCodesRequest 生成兑换码请求
@@ -398,10 +403,15 @@ func (s *RedeemService) validateClaudeDeviceRedeemCode(ctx context.Context, code
 
 // invalidateRedeemCaches 失效兑换相关的缓存
 func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64, redeemCode *RedeemCode) {
+	// Runs after the commit: a client that hangs up right then must not skip
+	// the auth cache invalidation, so it gets its own deadline instead of the
+	// request's cancellation.
+	authCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), redeemAuthCacheInvalidateTimeout)
+	defer cancel()
 	switch redeemCode.Type {
 	case RedeemTypeBalance:
 		if s.authCacheInvalidator != nil {
-			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(authCtx, userID)
 		}
 		if s.billingCacheService == nil {
 			return
@@ -413,14 +423,14 @@ func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64
 		}()
 	case RedeemTypeConcurrency:
 		if s.authCacheInvalidator != nil {
-			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(authCtx, userID)
 		}
 		if s.billingCacheService == nil {
 			return
 		}
 	case RedeemTypeSubscription:
 		if s.authCacheInvalidator != nil {
-			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(authCtx, userID)
 		}
 		if s.billingCacheService == nil {
 			return
@@ -435,7 +445,7 @@ func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64
 		}
 	case RedeemTypeClaudeDevice:
 		if s.authCacheInvalidator != nil {
-			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(authCtx, userID)
 		}
 	}
 }
@@ -478,6 +488,14 @@ func (s *RedeemService) Delete(ctx context.Context, id int64) error {
 	// 不允许删除已使用的兑换码
 	if code.IsUsed() {
 		return infraerrors.Conflict("REDEEM_CODE_DELETE_USED", "cannot delete used redeem code")
+	}
+	if IsRedeemPurchaseRecordType(code.Type) {
+		return ErrRedeemPurchaseRecordImmutable
+	}
+	if purchased, err := s.redeemRepo.IsPurchased(ctx, id); err != nil {
+		return fmt.Errorf("check purchased redeem code: %w", err)
+	} else if purchased {
+		return ErrRedeemPurchaseRecordImmutable
 	}
 
 	if err := s.redeemRepo.Delete(ctx, id); err != nil {

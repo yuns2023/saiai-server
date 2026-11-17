@@ -44,6 +44,7 @@ type Handlers struct {
 	Usage          *UsageHandler
 	Redeem         *RedeemHandler
 	UserInvite     *UserInviteHandler
+	RedeemPurchase *RedeemPurchaseHandler
 	Subscription   *SubscriptionHandler
 	Announcement   *AnnouncementHandler
 	Admin          *AdminHandlers

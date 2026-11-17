@@ -1136,6 +1136,35 @@ var (
 			},
 		},
 	}
+	// RedeemCodePurchasesColumns holds the columns for the "redeem_code_purchases" table.
+	RedeemCodePurchasesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "buyer_user_id", Type: field.TypeInt64},
+		{Name: "redeem_code_id", Type: field.TypeInt64, Unique: true},
+		{Name: "amount", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "decimal(20,8)", "sqlite3": "numeric"}},
+		{Name: "request_id", Type: field.TypeString, Size: 64},
+		{Name: "status", Type: field.TypeString, Size: 16},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "revoked_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// RedeemCodePurchasesTable holds the schema information for the "redeem_code_purchases" table.
+	RedeemCodePurchasesTable = &schema.Table{
+		Name:       "redeem_code_purchases",
+		Columns:    RedeemCodePurchasesColumns,
+		PrimaryKey: []*schema.Column{RedeemCodePurchasesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "redeemcodepurchase_buyer_user_id_request_id",
+				Unique:  true,
+				Columns: []*schema.Column{RedeemCodePurchasesColumns[1], RedeemCodePurchasesColumns[4]},
+			},
+			{
+				Name:    "redeemcodepurchase_buyer_user_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{RedeemCodePurchasesColumns[1], RedeemCodePurchasesColumns[6]},
+			},
+		},
+	}
 	// SecuritySecretsColumns holds the columns for the "security_secrets" table.
 	SecuritySecretsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1740,6 +1769,7 @@ var (
 		PromoCodeUsagesTable,
 		ProxiesTable,
 		RedeemCodesTable,
+		RedeemCodePurchasesTable,
 		SecuritySecretsTable,
 		SettingsTable,
 		SubscriptionPlansTable,
@@ -1839,6 +1869,9 @@ func init() {
 	RedeemCodesTable.ForeignKeys[1].RefTable = UsersTable
 	RedeemCodesTable.Annotation = &entsql.Annotation{
 		Table: "redeem_codes",
+	}
+	RedeemCodePurchasesTable.Annotation = &entsql.Annotation{
+		Table: "redeem_code_purchases",
 	}
 	SecuritySecretsTable.Annotation = &entsql.Annotation{
 		Table: "security_secrets",

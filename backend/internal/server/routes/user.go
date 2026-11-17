@@ -92,6 +92,10 @@ func RegisterUserRoutes(
 		{
 			redeem.POST("", h.Redeem.Redeem)
 			redeem.GET("/history", h.Redeem.GetHistory)
+			// 用户用余额购买兑换码（开关关闭时仍可查看与撤回）
+			redeem.GET("/purchases", h.RedeemPurchase.List)
+			redeem.POST("/purchases", h.RedeemPurchase.Create)
+			redeem.POST("/purchases/:id/revoke", h.RedeemPurchase.Revoke)
 		}
 
 		// 用户自助邀请码

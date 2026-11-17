@@ -2845,8 +2845,9 @@ func IsAdminOperationRecordType(codeType string) bool {
 	return false
 }
 
-// checkRedeemCodeDeletable returns ErrAdminRecordImmutable for admin
-// operation records. A missing code stays deletable (deleting it is a no-op).
+// checkRedeemCodeDeletable refuses immutable history records (see
+// checkImmutableHistoryRecord). A missing code stays deletable (deleting it is
+// a no-op).
 func (s *adminServiceImpl) checkRedeemCodeDeletable(ctx context.Context, id int64) error {
 	code, err := s.redeemCodeRepo.GetByID(ctx, id)
 	if err != nil {
@@ -2855,8 +2856,27 @@ func (s *adminServiceImpl) checkRedeemCodeDeletable(ctx context.Context, id int6
 		}
 		return err
 	}
+	return s.checkImmutableHistoryRecord(ctx, code)
+}
+
+// checkImmutableHistoryRecord refuses deleting or expiring a redeem_codes row
+// that is the only record of a balance/benefit change: admin operation
+// records (ErrAdminRecordImmutable), purchase_debit / purchase_refund records
+// and codes bought by users, active or revoked (ErrRedeemPurchaseRecordImmutable).
+// The purchase link is read from the database; the foreign key is only a backstop.
+func (s *adminServiceImpl) checkImmutableHistoryRecord(ctx context.Context, code *RedeemCode) error {
 	if IsAdminOperationRecordType(code.Type) {
 		return ErrAdminRecordImmutable
+	}
+	if IsRedeemPurchaseRecordType(code.Type) {
+		return ErrRedeemPurchaseRecordImmutable
+	}
+	purchased, err := s.redeemCodeRepo.IsPurchased(ctx, code.ID)
+	if err != nil {
+		return err
+	}
+	if purchased {
+		return ErrRedeemPurchaseRecordImmutable
 	}
 	return nil
 }
@@ -2872,7 +2892,7 @@ func (s *adminServiceImpl) BatchDeleteRedeemCodes(ctx context.Context, ids []int
 	var deleted int64
 	for _, id := range ids {
 		if s.checkRedeemCodeDeletable(ctx, id) != nil {
-			continue // admin operation records are kept; the count shows what was deleted
+			continue // history records (and lookup failures) are kept; the count shows what was deleted
 		}
 		if err := s.redeemCodeRepo.Delete(ctx, id); err == nil {
 			deleted++
@@ -2886,8 +2906,8 @@ func (s *adminServiceImpl) ExpireRedeemCode(ctx context.Context, id int64) (*Red
 	if err != nil {
 		return nil, err
 	}
-	if IsAdminOperationRecordType(code.Type) {
-		return nil, ErrAdminRecordImmutable
+	if err := s.checkImmutableHistoryRecord(ctx, code); err != nil {
+		return nil, err
 	}
 	code.Status = StatusExpired
 	if err := s.redeemCodeRepo.Update(ctx, code); err != nil {

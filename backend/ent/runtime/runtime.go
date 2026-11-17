@@ -29,6 +29,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
+	"github.com/Wei-Shaw/sub2api/ent/redeemcodepurchase"
 	"github.com/Wei-Shaw/sub2api/ent/schema"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
@@ -1288,6 +1289,34 @@ func init() {
 	redeemcodeDescValidityDays := redeemcodeFields[9].Descriptor()
 	// redeemcode.DefaultValidityDays holds the default value on creation for the validity_days field.
 	redeemcode.DefaultValidityDays = redeemcodeDescValidityDays.Default.(int)
+	redeemcodepurchaseFields := schema.RedeemCodePurchase{}.Fields()
+	_ = redeemcodepurchaseFields
+	// redeemcodepurchaseDescRequestID is the schema descriptor for request_id field.
+	redeemcodepurchaseDescRequestID := redeemcodepurchaseFields[3].Descriptor()
+	// redeemcodepurchase.RequestIDValidator is a validator for the "request_id" field. It is called by the builders before save.
+	redeemcodepurchase.RequestIDValidator = func() func(string) error {
+		validators := redeemcodepurchaseDescRequestID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(request_id string) error {
+			for _, fn := range fns {
+				if err := fn(request_id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// redeemcodepurchaseDescStatus is the schema descriptor for status field.
+	redeemcodepurchaseDescStatus := redeemcodepurchaseFields[4].Descriptor()
+	// redeemcodepurchase.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	redeemcodepurchase.StatusValidator = redeemcodepurchaseDescStatus.Validators[0].(func(string) error)
+	// redeemcodepurchaseDescCreatedAt is the schema descriptor for created_at field.
+	redeemcodepurchaseDescCreatedAt := redeemcodepurchaseFields[5].Descriptor()
+	// redeemcodepurchase.DefaultCreatedAt holds the default value on creation for the created_at field.
+	redeemcodepurchase.DefaultCreatedAt = redeemcodepurchaseDescCreatedAt.Default.(func() time.Time)
 	securitysecretMixin := schema.SecuritySecret{}.Mixin()
 	securitysecretMixinFields0 := securitysecretMixin[0].Fields()
 	_ = securitysecretMixinFields0
