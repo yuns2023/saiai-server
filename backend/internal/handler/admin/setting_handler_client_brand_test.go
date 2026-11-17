@@ -86,3 +86,20 @@ func TestDiffSettings_ClientBrandIsAudited(t *testing.T) {
 	require.Contains(t, changed, "client_setup_command")
 	require.NotContains(t, diffSettings(after, after, UpdateSettingsRequest{}), "client_brand_name")
 }
+
+// A stored value that no longer passes validation (written outside the admin
+// API) must not block saves from clients that omit the fields, and is never
+// used for client texts.
+func TestUpdateSettings_InvalidStoredClientBrandDoesNotBlockOtherSaves(t *testing.T) {
+	h, _, repo, router := modelPriceHandlerFixture(t)
+	router.PUT("/settings", h.UpdateSettings)
+	repo.values[service.SettingKeyClientBrandName] = "SAIAI"
+	repo.values[service.SettingKeyClientSetupCommand] = "aitp init"
+
+	w := priceHandlerRequest(router, http.MethodPut, "/settings", map[string]any{"site_name": "CCYou.dev", "maintenance_mode_enabled": true})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, "SAIAI", repo.values[service.SettingKeyClientBrandName], "kept as stored")
+	brand := h.settingService.ClientBrand(context.Background())
+	require.Equal(t, "", brand.Name(), "invalid stored brand ignored")
+	require.Equal(t, "aitp init", brand.SetupCommand())
+}
