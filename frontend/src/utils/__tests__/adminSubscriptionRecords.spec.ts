@@ -4,7 +4,8 @@ import {
   adminSubscriptionRecordValue,
   decodeResetWindows,
   isAdminOperationRecord,
-  isAdminSubscriptionRecord
+  isAdminSubscriptionRecord,
+  isRedeemPurchaseRecord
 } from '../adminSubscriptionRecords'
 
 const t = (key: string, params?: Record<string, unknown>) =>
@@ -17,6 +18,10 @@ describe('adminSubscriptionRecords', () => {
     expect(isAdminOperationRecord('admin_balance')).toBe(true)
     expect(isAdminOperationRecord('admin_sub_reset')).toBe(true)
     expect(isAdminOperationRecord('balance')).toBe(false)
+    expect(isRedeemPurchaseRecord('purchase_debit')).toBe(true)
+    expect(isRedeemPurchaseRecord('purchase_refund')).toBe(true)
+    expect(isRedeemPurchaseRecord('balance')).toBe(false)
+    expect(isAdminOperationRecord('purchase_debit')).toBe(false)
   })
 
   it('decodes reset window bits in a fixed order', () => {

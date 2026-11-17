@@ -833,6 +833,59 @@
             </div>
           </div>
         </div>
+        <!-- User-bought balance redeem codes -->
+        <div class="card" data-testid="redeem-purchase-settings">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.redeemPurchase.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.redeemPurchase.description') }}
+            </p>
+          </div>
+          <div class="space-y-6 p-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="font-medium text-gray-900 dark:text-white">{{
+                  t('admin.settings.redeemPurchase.enabled')
+                }}</label>
+                <p class="text-sm text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.redeemPurchase.enabledHint') }}
+                </p>
+              </div>
+              <Toggle v-model="form.redeem_purchase_enabled" />
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.redeemPurchase.minAmount') }}
+                </label>
+                <input v-model.number="form.redeem_purchase_min_amount" type="number" min="0" max="1000000" step="0.01" class="input" />
+              </div>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.redeemPurchase.maxAmount') }}
+                </label>
+                <input v-model.number="form.redeem_purchase_max_amount" type="number" min="0" max="1000000" step="0.01" class="input" />
+              </div>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.redeemPurchase.windowMaxAmount') }}
+                </label>
+                <input v-model.number="form.redeem_purchase_window_max_amount" type="number" min="0" max="1000000" step="0.01" class="input" />
+              </div>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.redeemPurchase.windowMaxCount') }}
+                </label>
+                <input v-model.number="form.redeem_purchase_window_max_count" type="number" min="0" max="10000" step="1" class="input" />
+              </div>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.redeemPurchase.limitsHint') }}
+            </p>
+          </div>
+        </div>
         </div><!-- /Tab: Users -->
 
         <!-- Tab: Gateway — Claude Code, Scheduling -->
@@ -1710,6 +1763,11 @@ const form = reactive<SettingsForm>({
   user_invite_max_unused: 5,
   user_invite_max_total: 0,
   user_invite_max_per_week: 0,
+  redeem_purchase_enabled: false,
+  redeem_purchase_min_amount: 1,
+  redeem_purchase_max_amount: 500,
+  redeem_purchase_window_max_amount: 1000,
+  redeem_purchase_window_max_count: 20,
   password_reset_enabled: false,
   totp_enabled: false,
   totp_encryption_key_configured: false,
@@ -2068,6 +2126,11 @@ async function saveSettings() {
       user_invite_max_unused: form.user_invite_max_unused,
       user_invite_max_total: form.user_invite_max_total,
       user_invite_max_per_week: form.user_invite_max_per_week,
+      redeem_purchase_enabled: form.redeem_purchase_enabled,
+      redeem_purchase_min_amount: form.redeem_purchase_min_amount,
+      redeem_purchase_max_amount: form.redeem_purchase_max_amount,
+      redeem_purchase_window_max_amount: form.redeem_purchase_window_max_amount,
+      redeem_purchase_window_max_count: form.redeem_purchase_window_max_count,
       password_reset_enabled: form.password_reset_enabled,
       totp_enabled: form.totp_enabled,
       default_balance: form.default_balance,

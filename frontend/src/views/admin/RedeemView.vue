@@ -92,6 +92,9 @@
           <template #cell-value="{ value, row }">
             <span class="text-sm font-medium text-gray-900 dark:text-white">
               <template v-if="row.type === 'balance'">${{ value.toFixed(2) }}</template>
+              <template v-else-if="isRedeemPurchaseRecord(row.type)"
+                >{{ value < 0 ? '-' : '+' }}${{ Math.abs(value).toFixed(2) }}</template
+              >
               <template v-else-if="isAdminSubscriptionRecord(row.type)">
                 {{ adminSubscriptionRecordValue(row, t) }}
               </template>
@@ -409,7 +412,11 @@
 </template>
 
 <script setup lang="ts">
-import { adminSubscriptionRecordValue, isAdminSubscriptionRecord } from '@/utils/adminSubscriptionRecords'
+import {
+  adminSubscriptionRecordValue,
+  isAdminSubscriptionRecord,
+  isRedeemPurchaseRecord
+} from '@/utils/adminSubscriptionRecords'
 import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -543,7 +550,10 @@ const filterTypeOptions = computed(() => [
   { value: 'admin_concurrency', label: t('admin.redeem.types.admin_concurrency') },
   { value: 'admin_sub_adjust', label: t('admin.redeem.types.admin_sub_adjust') },
   { value: 'admin_sub_revoke', label: t('admin.redeem.types.admin_sub_revoke') },
-  { value: 'admin_sub_reset', label: t('admin.redeem.types.admin_sub_reset') }
+  { value: 'admin_sub_reset', label: t('admin.redeem.types.admin_sub_reset') },
+  // A user bought a code with balance / revoked it (records, not codes)
+  { value: 'purchase_debit', label: t('admin.redeem.types.purchase_debit') },
+  { value: 'purchase_refund', label: t('admin.redeem.types.purchase_refund') }
 ])
 
 const filterStatusOptions = computed(() => [

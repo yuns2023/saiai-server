@@ -133,8 +133,9 @@
               >
                 {{ t('redeem.adminAdjustment') }}
               </p>
+              <!-- Purchase debit/refund rows are records, not codes: no code shown -->
               <p
-                v-else
+                v-else-if="!isRedeemPurchaseRecord(item.type)"
                 class="font-mono text-xs text-gray-400 dark:text-dark-500"
               >
                 {{ item.code.slice(0, 8) }}...
@@ -178,7 +179,8 @@ import {
   adminSubscriptionRecordTitle,
   adminSubscriptionRecordValue,
   isAdminOperationRecord,
-  isAdminSubscriptionRecord
+  isAdminSubscriptionRecord,
+  isRedeemPurchaseRecord
 } from '@/utils/adminSubscriptionRecords'
 import type { AdminUser } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -209,7 +211,9 @@ const typeOptions = computed(() => [
   { value: 'subscription', label: t('admin.users.typeSubscription') },
   { value: 'admin_sub_adjust', label: t('admin.users.typeAdminSubAdjust') },
   { value: 'admin_sub_revoke', label: t('admin.users.typeAdminSubRevoke') },
-  { value: 'admin_sub_reset', label: t('admin.users.typeAdminSubReset') }
+  { value: 'admin_sub_reset', label: t('admin.users.typeAdminSubReset') },
+  { value: 'purchase_debit', label: t('admin.users.typePurchaseDebit') },
+  { value: 'purchase_refund', label: t('admin.users.typePurchaseRefund') }
 ])
 
 // Watch modal open
@@ -244,8 +248,9 @@ const loadHistory = async (page: number) => {
 // Helper: check if admin type
 const isAdminType = (type: string) => isAdminOperationRecord(type)
 
-// Helper: check if balance type (includes admin_balance)
-const isBalanceType = (type: string) => type === 'balance' || type === 'admin_balance'
+// Helper: check if balance type (includes admin_balance and code purchase debit/refund)
+const isBalanceType = (type: string) =>
+  type === 'balance' || type === 'admin_balance' || isRedeemPurchaseRecord(type)
 
 // Helper: check if subscription type (redeemed or changed by an admin)
 const isSubscriptionType = (type: string) => type === 'subscription' || isAdminSubscriptionRecord(type)
@@ -309,6 +314,10 @@ const getItemTitle = (item: BalanceHistoryItem) => {
       return item.value >= 0 ? t('redeem.concurrencyAddedAdmin') : t('redeem.concurrencyReducedAdmin')
     case 'subscription':
       return t('redeem.subscriptionAssigned')
+    case 'purchase_debit':
+      return t('admin.users.typePurchaseDebit')
+    case 'purchase_refund':
+      return t('admin.users.typePurchaseRefund')
     default:
       if (isAdminSubscriptionRecord(item.type)) return adminSubscriptionRecordTitle(item, t)
       return t('common.unknown')

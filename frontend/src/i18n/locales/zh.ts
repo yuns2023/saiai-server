@@ -2061,6 +2061,8 @@ export default {
       typeAdminSubAdjust: '订阅时长（管理员调整）',
       typeAdminSubRevoke: '订阅撤销（管理员）',
       typeAdminSubReset: '订阅额度重置（管理员）',
+      typePurchaseDebit: '购买兑换码（扣余额）',
+      typePurchaseRefund: '撤回已购兑换码（退款）',
       failedToLoadBalanceHistory: '加载余额记录失败',
       createdAt: '创建时间',
       totalRecharged: '总充值',
@@ -3962,7 +3964,10 @@ export default {
         // 管理员在订阅管理页面调整/撤销/重置订阅时产生的记录
         admin_sub_adjust: '订阅时长（管理员）',
         admin_sub_revoke: '订阅撤销（管理员）',
-        admin_sub_reset: '订阅额度重置（管理员）'
+        admin_sub_reset: '订阅额度重置（管理员）',
+        // 用户用余额购买兑换码 / 撤回时产生的记录（不可删除或作废）
+        purchase_debit: '购买兑换码（扣款）',
+        purchase_refund: '撤回已购码（退款）'
       },
       // 用于选择器和筛选器的直接键
       balance: '余额',
@@ -5345,7 +5350,7 @@ export default {
         invitationCodeHowToPlaceholder: '例如：加入 Telegram 群 https://t.me/xxx 向管理员索取',
         invitationCodeHowToHint: '显示在注册页邀请码输入框下方；纯文本，最多 500 字，其中的 http(s) 链接可点击。留空则不显示。',
         userInvite: '用户自助邀请',
-        userInviteHint: '开启后，充值过或自己兑换过余额/订阅/并发码的用户可以生成邀请码（管理员手动加款不算）。关闭后已发出的码仍可使用。',
+        userInviteHint: '开启后，充值过或自己兑换过余额/订阅/并发码的用户可以生成邀请码（管理员手动加款和用户用余额购买的兑换码都不算）。关闭后已发出的码仍可使用。',
         userInviteMaxUnused: '每人未使用邀请码上限',
         userInviteMaxUnusedHint: '同时持有的未使用码数量，1–100。用掉或作废一个后才能再生成。',
         userInviteMaxTotal: '每人累计邀请上限',
@@ -5404,6 +5409,17 @@ export default {
         redirectUrlMissing: '请先在「注册设置」中填写前端地址（Frontend URL），回调地址由它生成。',
         redirectUrlHint: '把这个地址原样填到 {provider} 应用的授权回调地址中。',
         accountHint: '账号按 {provider} 账号 ID 绑定（不按邮箱合并）；首次登录遵守注册开关与邀请码设置，无需邮箱验证码。'
+      },
+      redeemPurchase: {
+        title: '用户购买兑换码',
+        description: '用户用账户余额购买余额兑换码，送人或替别人付款；兑换走普通兑换流程。买到的码和扣款/退款记录不能删除或作废。',
+        enabled: '允许用户购买兑换码',
+        enabledHint: '关闭后不能再买新码；已买的码仍可兑换，用户也仍能查看和撤回未使用的码。任何余额都可用于购买。',
+        minAmount: '单笔最低面额（USD）',
+        maxAmount: '单笔最高面额（USD）',
+        windowMaxAmount: '每人 24 小时购买总额（USD）',
+        windowMaxCount: '每人 24 小时购买次数',
+        limitsHint: '金额最多两位小数，0–1000000；次数 0–10000。24 小时为滚动窗口，已撤回的购买也计入。0 表示不允许，而不是不限。'
       },
       defaults: {
         title: '用户默认设置',

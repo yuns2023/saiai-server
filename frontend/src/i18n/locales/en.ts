@@ -2003,6 +2003,8 @@ export default {
       typeAdminSubAdjust: 'Subscription Length (Admin)',
       typeAdminSubRevoke: 'Subscription Revoked (Admin)',
       typeAdminSubReset: 'Subscription Quota Reset (Admin)',
+      typePurchaseDebit: 'Bought Redeem Code (Debit)',
+      typePurchaseRefund: 'Revoked Bought Code (Refund)',
       failedToLoadBalanceHistory: 'Failed to load balance history',
       createdAt: 'Created',
       totalRecharged: 'Total Recharged',
@@ -3879,7 +3881,10 @@ export default {
         admin_concurrency: 'Concurrency (Admin)',
         admin_sub_adjust: 'Subscription Length (Admin)',
         admin_sub_revoke: 'Subscription Revoked (Admin)',
-        admin_sub_reset: 'Subscription Quota Reset (Admin)'
+        admin_sub_reset: 'Subscription Quota Reset (Admin)',
+        // Records written when a user buys a code with balance / revokes it (cannot be deleted or expired)
+        purchase_debit: 'Code Purchase (Debit)',
+        purchase_refund: 'Code Purchase Revoked (Refund)'
       },
       selectGroup: 'Select Group',
       selectGroupPlaceholder: 'Choose a subscription group',
@@ -5182,7 +5187,7 @@ export default {
         invitationCodeHowToPlaceholder: 'e.g. Join our Telegram group https://t.me/xxx and ask an admin',
         invitationCodeHowToHint: 'Shown under the invitation code field on the sign-up page. Plain text, up to 500 characters; http(s) links are clickable. Leave empty to hide.',
         userInvite: 'User invitations',
-        userInviteHint: 'Users who have topped up or redeemed a balance/subscription/concurrency code themselves can generate invitation codes (admin adjustments do not count). Codes already handed out keep working when this is off.',
+        userInviteHint: 'Users who have topped up or redeemed a balance/subscription/concurrency code themselves can generate invitation codes (admin adjustments and codes bought with balance do not count). Codes already handed out keep working when this is off.',
         userInviteMaxUnused: 'Unused codes per user',
         userInviteMaxUnusedHint: 'Unused codes a user may hold at once, 1–100. They can generate another once one is used or revoked.',
         userInviteMaxTotal: 'Invitations per user (lifetime)',
@@ -5241,6 +5246,17 @@ export default {
         redirectUrlMissing: 'Set the Frontend URL under Registration first; the redirect URI is derived from it.',
         redirectUrlHint: 'Register exactly this URL as the authorized redirect URI of your {provider} app.',
         accountHint: 'Accounts are bound by the {provider} account ID (never merged by email). First sign-in follows the registration and invitation settings; no email code is needed.'
+      },
+      redeemPurchase: {
+        title: 'Users buying redeem codes',
+        description: 'Users spend their balance on a balance redeem code to give away or pay for someone; it is redeemed through the normal redeem flow. Bought codes and their debit/refund records cannot be deleted or expired.',
+        enabled: 'Allow users to buy redeem codes',
+        enabledHint: 'When off, no new codes can be bought; bought codes still redeem, and users can still see and revoke their unused ones. Any balance can be spent.',
+        minAmount: 'Minimum per code (USD)',
+        maxAmount: 'Maximum per code (USD)',
+        windowMaxAmount: 'Total per user in 24 hours (USD)',
+        windowMaxCount: 'Purchases per user in 24 hours',
+        limitsHint: 'Amounts have at most 2 decimals, 0–1000000; counts 0–10000. The 24 hours are a rolling window and revoked purchases count. 0 means none allowed, not unlimited.'
       },
       defaults: {
         title: 'Default User Settings',

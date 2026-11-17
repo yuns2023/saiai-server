@@ -1247,7 +1247,9 @@ export type AdminOperationRecordType =
   | 'admin_sub_adjust'
   | 'admin_sub_revoke'
   | 'admin_sub_reset'
-export type RedeemRecordType = RedeemCodeType | AdminOperationRecordType
+// A user bought a code with balance (debit) / revoked it (refund); history rows, never codes.
+export type RedeemPurchaseRecordType = 'purchase_debit' | 'purchase_refund'
+export type RedeemRecordType = RedeemCodeType | AdminOperationRecordType | RedeemPurchaseRecordType
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2'
 
 export interface UsageLog {
