@@ -110,6 +110,10 @@ type SystemSettings struct {
 
 	MaintenanceModeEnabled bool   `json:"maintenance_mode_enabled"`
 	MaintenanceMessage     string `json:"maintenance_message"`
+
+	// Client brand used in client-facing texts; both empty = original SAIAI texts.
+	ClientBrandName    string `json:"client_brand_name"`
+	ClientSetupCommand string `json:"client_setup_command"`
 }
 
 type DefaultSubscriptionSetting struct {

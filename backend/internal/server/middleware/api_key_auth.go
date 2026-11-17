@@ -293,11 +293,30 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 	}
 }
 
+// invalidCodexAPIKeyMessage is the original Responses-route text;
+// invalidCodexAPIKeyMessageFor returns it when the site is unbranded.
+const invalidCodexAPIKeyMessage = "API key 无效或已删除，请更新 SAIAI Key 后重新初始化 Codex。"
+
+func invalidCodexAPIKeyMessageFor(brand service.ClientBrand) string {
+	if !brand.Customized() {
+		return invalidCodexAPIKeyMessage
+	}
+	key := "API Key"
+	if brand.Name() != "" {
+		key = brand.Name() + " Key"
+	}
+	step := "重新初始化 Codex"
+	if brand.SetupCommand() != "" {
+		step = "重新运行 " + brand.SetupCommand()
+	}
+	return "API key 无效或已删除，请更新 " + key + " 后" + step + "。"
+}
+
 func abortInvalidAPIKey(c *gin.Context) {
 	path := c.Request.URL.Path
 	if path == "/v1/responses" || strings.HasPrefix(path, "/v1/responses/") ||
 		path == "/responses" || strings.HasPrefix(path, "/responses/") {
-		const message = "API key 无效或已删除，请更新 SAIAI Key 后重新初始化 Codex。"
+		message := invalidCodexAPIKeyMessageFor(service.ClientBrandFromGin(c))
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 			"code": "INVALID_API_KEY", "message": message,
 			"error": gin.H{"code": "INVALID_API_KEY", "type": "authentication_error", "message": message},

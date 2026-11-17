@@ -39,7 +39,10 @@ func setOpsLocalFailure(c *gin.Context, failure opsLocalFailure) {
 	if _, exists := c.Get(opsLocalFailureKey); exists {
 		return
 	}
-	failure.message = service.ClientSafeUpstreamErrorMessage(failure.message)
+	// Ops record only. Text already worded for the client is recorded as
+	// sent; raw upstream text that still names the restricted identity gets
+	// the unbranded replacement.
+	failure.message = service.ClientSafeUpstreamErrorMessage(service.ClientBrand{}, failure.message)
 	c.Set(opsLocalFailureKey, failure)
 }
 
@@ -181,7 +184,8 @@ func rejectOpenAIWSBilling(ctx context.Context, c *gin.Context, conn *coderws.Co
 // billing check, shared by the handshake and later-turn checks.
 func openAIWSBillingRejection(c *gin.Context, err error) *openAIWSSessionRejection {
 	status, code, message := billingErrorResponse(c, err)
-	message = service.ClientSafeUpstreamErrorMessage(message)
+	// Client-visible: the error frame and close reason.
+	message = service.ClientSafeUpstreamErrorMessage(service.ClientBrandFromGin(c), message)
 	return &openAIWSSessionRejection{status: status, errType: code, code: code, message: message, reason: message}
 }
 

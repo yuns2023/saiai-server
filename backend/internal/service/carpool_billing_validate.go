@@ -241,7 +241,7 @@ func (s *GatewayService) ValidateClaudeOAuthRequestShapeForGroup(ctx context.Con
 	logClaudeOAuthRealClaudeCodeReject(c, nil, diag)
 	SetOpsFullRequestHeadersCapture(c)
 	SetOpsRequestBodyCaptureOptions(c, OpsRequestBodyCaptureOptions{MaxBytes: 64 * 1024})
-	return s.claudeOAuthClientRequestError(c, forCountTokens, claudeOAuthRealClaudeCodeRequiredMessage, ErrClaudeCodeOnly)
+	return s.claudeOAuthClientRequestError(c, forCountTokens, ClientBrandFromGin(c).ClaudeCodeRequiredMessage(), ErrClaudeCodeOnly)
 }
 
 func diagnoseClaudeOAuthRealClaudeCodeRequest(c *gin.Context, parsed *ParsedRequest, body []byte) claudeOAuthRealClaudeCodeDiagnostic {
@@ -477,7 +477,7 @@ func (s *GatewayService) validateCarpoolBillingIntegrityWithResult(
 				return 0, "", nil
 			}
 			if account != nil && account.IsAnthropicOAuthOrSetupToken() {
-				return 0, "", s.claudeOAuthAccountFailoverError(c, account, http.StatusBadRequest, "invalid_request_error", claudeOAuthRealClaudeCodeRequiredMessage, ErrClaudeCodeOnly)
+				return 0, "", s.claudeOAuthAccountFailoverError(c, account, http.StatusBadRequest, "invalid_request_error", ClientBrandFromGin(c).ClaudeCodeRequiredMessage(), ErrClaudeCodeOnly)
 			}
 		}
 		return reject("billing_cch_malformed", "cch field missing or malformed")

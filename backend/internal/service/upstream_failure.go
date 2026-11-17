@@ -16,16 +16,19 @@ const (
 
 	// DeviceAuthorizationUnavailableClientMessage is intentionally provider-neutral.
 	// The original upstream detail remains available in restricted Ops logs.
+	// Client responses use ClientBrand.DeviceAuthorizationUnavailableMessage,
+	// which returns this text when the site has no client brand settings.
 	DeviceAuthorizationUnavailableClientMessage = "SAIAI 服务通道暂时不可用，请稍后重试；如持续出现，请联系支持。"
 )
 
 // ClientSafeUpstreamErrorMessage enforces the client-facing provider identity
 // boundary. Keep the original upstream message in restricted Ops context before
 // calling this helper; provider identities must never be returned to clients,
-// including through configurable passthrough rules.
-func ClientSafeUpstreamErrorMessage(message string) string {
+// including through configurable passthrough rules. brand words the
+// replacement; Ops-only callers pass the zero ClientBrand (original text).
+func ClientSafeUpstreamErrorMessage(brand ClientBrand, message string) string {
 	if containsRestrictedUpstreamIdentity(message) {
-		return DeviceAuthorizationUnavailableClientMessage
+		return brand.DeviceAuthorizationUnavailableMessage()
 	}
 	return message
 }

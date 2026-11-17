@@ -102,6 +102,10 @@ type SystemSettings struct {
 	// Maintenance mode: reject new business requests while keeping recovery routes available.
 	MaintenanceModeEnabled bool
 	MaintenanceMessage     string
+
+	// Client brand used in client-facing texts; both empty = original SAIAI texts.
+	ClientBrandName    string
+	ClientSetupCommand string
 }
 
 type DefaultSubscriptionSetting struct {

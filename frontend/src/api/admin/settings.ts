@@ -114,6 +114,9 @@ export interface SystemSettings {
   allow_ungrouped_key_scheduling: boolean
   maintenance_mode_enabled: boolean
   maintenance_message: string
+  // Client brand in client-facing error texts; empty = original SAIAI wording
+  client_brand_name: string
+  client_setup_command: string
 }
 
 export interface UpdateSettingsRequest {
@@ -185,6 +188,8 @@ export interface UpdateSettingsRequest {
   allow_ungrouped_key_scheduling?: boolean
   maintenance_mode_enabled?: boolean
   maintenance_message?: string
+  client_brand_name?: string
+  client_setup_command?: string
 }
 
 /**

@@ -375,7 +375,8 @@ func BuildOpsLogFilterProposal(detail *OpsErrorLogDetail) *OpsLogFilterProposal 
 		if status < 400 || status > 599 {
 			return proposal
 		}
-		message = truncateString(ClientSafeUpstreamErrorMessage(logredact.RedactText(message)), 256)
+		// Admin-only Ops proposal: keep the original wording.
+		message = truncateString(ClientSafeUpstreamErrorMessage(ClientBrand{}, logredact.RedactText(message)), 256)
 		if strings.TrimSpace(message) == "" {
 			return proposal
 		}

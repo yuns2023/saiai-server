@@ -113,6 +113,10 @@ type paymentEntitlementCacheInvalidator interface {
 	InvalidatePaymentEntitlementCaches(ctx context.Context, userID int64, orderType string, groupID *int64)
 }
 
+// paymentBalanceRechargeSubject is the original balance recharge subject;
+// orders use ClientBrand.BalanceRechargeSubject (this text when unbranded).
+const paymentBalanceRechargeSubject = "SAIAI Balance Recharge"
+
 type PaymentService struct {
 	entClient       *dbent.Client
 	userRepo        paymentUserReader
@@ -170,7 +174,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreatePaymentOrder
 	feeRate := cfg.RechargeFeeRate
 	balanceCreditRate := instance.BalanceCreditRate
 	settlementAmount := amount / balanceCreditRate
-	subject := "SAIAI Balance Recharge"
+	subject := ClientBrandFromContext(ctx).BalanceRechargeSubject()
 	if plan != nil {
 		feeRate = 0
 		balanceCreditRate = 1

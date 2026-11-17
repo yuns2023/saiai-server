@@ -199,6 +199,11 @@ type SettingService struct {
 	onS3Update            func()       // Callback when Sora S3 settings are updated
 	version               string       // Application version
 	maintenanceCache      atomic.Value // *cachedMaintenanceStatus
+
+	// Per-instance (per-site) client brand cache; see client_brand.go.
+	clientBrandCache      atomic.Pointer[cachedClientBrand]
+	clientBrandSF         singleflight.Group
+	clientBrandRefreshing atomic.Bool
 }
 
 // NewSettingService 创建系统设置服务实例
@@ -694,8 +699,16 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyMaintenanceModeEnabled] = strconv.FormatBool(settings.MaintenanceModeEnabled)
 	updates[SettingKeyMaintenanceMessage] = maintenanceMessage(settings.MaintenanceMessage)
 
+	// Client brand: callers pass the resolved values (the admin handler keeps
+	// the stored ones when a request omits them).
+	clientBrandName := strings.TrimSpace(settings.ClientBrandName)
+	clientSetupCommand := strings.TrimSpace(settings.ClientSetupCommand)
+	updates[SettingKeyClientBrandName] = clientBrandName
+	updates[SettingKeyClientSetupCommand] = clientSetupCommand
+
 	err = s.settingRepo.SetMultiple(ctx, updates)
 	if err == nil {
+		s.storeClientBrand(clientBrandName, clientSetupCommand)
 		s.maintenanceCache.Store(&cachedMaintenanceStatus{
 			status: MaintenanceStatus{
 				Enabled: settings.MaintenanceModeEnabled,
@@ -1042,6 +1055,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		BackendModeEnabled:               settings[SettingKeyBackendModeEnabled] == "true",
 		MaintenanceModeEnabled:           settings[SettingKeyMaintenanceModeEnabled] == "true",
 		MaintenanceMessage:               maintenanceMessage(settings[SettingKeyMaintenanceMessage]),
+		ClientBrandName:                  strings.TrimSpace(settings[SettingKeyClientBrandName]),
+		ClientSetupCommand:               strings.TrimSpace(settings[SettingKeyClientSetupCommand]),
 	}
 
 	// 解析整数类型

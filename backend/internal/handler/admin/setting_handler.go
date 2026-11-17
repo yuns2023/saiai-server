@@ -217,6 +217,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		BackendModeEnabled:                   settings.BackendModeEnabled,
 		MaintenanceModeEnabled:               settings.MaintenanceModeEnabled,
 		MaintenanceMessage:                   settings.MaintenanceMessage,
+		ClientBrandName:                      settings.ClientBrandName,
+		ClientSetupCommand:                   settings.ClientSetupCommand,
 	})
 }
 
@@ -324,6 +326,11 @@ type UpdateSettingsRequest struct {
 
 	MaintenanceModeEnabled *bool   `json:"maintenance_mode_enabled"`
 	MaintenanceMessage     *string `json:"maintenance_message"`
+
+	// Client brand; nil = keep the stored value (older admin clients and
+	// scripts omit them), "" = clear (original SAIAI texts).
+	ClientBrandName    *string `json:"client_brand_name"`
+	ClientSetupCommand *string `json:"client_setup_command"`
 }
 
 // UpdateSettings 更新系统设置
@@ -685,6 +692,25 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		maintenanceMessage = *req.MaintenanceMessage
 	}
 
+	clientBrandName := previousSettings.ClientBrandName
+	if req.ClientBrandName != nil {
+		normalized, err := service.NormalizeClientBrandName(*req.ClientBrandName)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		clientBrandName = normalized
+	}
+	clientSetupCommand := previousSettings.ClientSetupCommand
+	if req.ClientSetupCommand != nil {
+		normalized, err := service.NormalizeClientSetupCommand(*req.ClientSetupCommand)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		clientSetupCommand = normalized
+	}
+
 	settings := &service.SystemSettings{
 		RegistrationEnabled:              req.RegistrationEnabled,
 		EmailVerifyEnabled:               req.EmailVerifyEnabled,
@@ -757,6 +783,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		BackendModeEnabled:          req.BackendModeEnabled,
 		MaintenanceModeEnabled:      maintenanceEnabled,
 		MaintenanceMessage:          maintenanceMessage,
+		ClientBrandName:             clientBrandName,
+		ClientSetupCommand:          clientSetupCommand,
 		OpsMonitoringEnabled: func() bool {
 			if req.OpsMonitoringEnabled != nil {
 				return *req.OpsMonitoringEnabled
@@ -891,6 +919,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CodexMaxVersion:                      updatedSettings.CodexMaxVersion,
 		AllowUngroupedKeyScheduling:          updatedSettings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                   updatedSettings.BackendModeEnabled,
+		ClientBrandName:                      updatedSettings.ClientBrandName,
+		ClientSetupCommand:                   updatedSettings.ClientSetupCommand,
 	})
 }
 
@@ -1011,6 +1041,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.SiteName != after.SiteName {
 		changed = append(changed, "site_name")
+	}
+	if before.ClientBrandName != after.ClientBrandName {
+		changed = append(changed, "client_brand_name")
+	}
+	if before.ClientSetupCommand != after.ClientSetupCommand {
+		changed = append(changed, "client_setup_command")
 	}
 	if before.SiteLogo != after.SiteLogo {
 		changed = append(changed, "site_logo")

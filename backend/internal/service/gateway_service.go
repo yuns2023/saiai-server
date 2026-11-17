@@ -67,6 +67,8 @@ const (
 )
 
 const (
+	// claudeOAuthRealClaudeCodeRequiredMessage is the original text; clients get
+	// ClientBrand.ClaudeCodeRequiredMessage (this text when unbranded).
 	claudeOAuthRealClaudeCodeRequiredMessage = "Please use the official Claude Code client. If it is already installed, run SAIAI CLI initialization and try again. Contact your administrator if the issue persists."
 	claudeOAuthCarpoolDevicesFullMessage     = "Claude OAuth carpool devices are full for this account"
 
@@ -1888,7 +1890,7 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 		}
 		if !isClaudeOAuthHaikuMaxTokensOneAuxRequest(c, parsed) {
 			logClaudeOAuthRealClaudeCodeReject(c, account, realClaudeCodeDiag)
-			return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, claudeOAuthRealClaudeCodeRequiredMessage, ErrClaudeCodeOnly)
+			return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, ClientBrandFromGin(c).ClaudeCodeRequiredMessage(), ErrClaudeCodeOnly)
 		}
 		logger.LegacyPrintf(
 			"service.gateway",
@@ -1997,7 +1999,7 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 		}, nil
 	case ClaudeOAuthModePinned:
 		if !isLoginBackedClaudeOAuthRequest(c, parsed) {
-			return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, claudeOAuthRealClaudeCodeRequiredMessage, ErrClaudeOAuthLoginStateRequired)
+			return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, ClientBrandFromGin(c).ClaudeCodeRequiredMessage(), ErrClaudeOAuthLoginStateRequired)
 		}
 		msg, billingCCHSeed, billingCCHMode, err := validatePinnedClaudeOAuthBillingWithResult(body, parsed.Model, billingUA)
 		if err != nil {
@@ -8111,7 +8113,7 @@ func (s *GatewayService) handleErrorResponseForModel(ctx context.Context, resp *
 		// a restricted upstream provider identity when a new error wording evades
 		// the semantic account-failure classifier above.
 		if containsRestrictedUpstreamIdentity(upstreamMsg) || containsRestrictedUpstreamIdentity(string(body)) {
-			writeAnthropicError(c, http.StatusBadGateway, "upstream_error", DeviceAuthorizationUnavailableClientMessage)
+			writeAnthropicError(c, http.StatusBadGateway, "upstream_error", ClientBrandFromGin(c).DeviceAuthorizationUnavailableMessage())
 			return nil, fmt.Errorf("upstream error: %d (client response redacted)", resp.StatusCode)
 		}
 		c.Data(http.StatusBadRequest, "application/json", body)

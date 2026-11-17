@@ -84,7 +84,7 @@ func recordOpenAIWSUpstreamFailure(c *gin.Context, failure *service.OpenAIWSUpst
 	if status < 400 || status > 599 {
 		status = http.StatusBadGateway
 	}
-	message := truncateString(service.ClientSafeUpstreamErrorMessage(logredact.RedactText(failure.Message)), 2048)
+	message := truncateString(service.ClientSafeUpstreamErrorMessage(service.ClientBrand{}, logredact.RedactText(failure.Message)), 2048)
 	errType := normalizeOpsErrorType(opsWSErrorIdentifier(failure.ErrorType), opsWSErrorIdentifier(failure.Code))
 	payload := gin.H{
 		"error":                 gin.H{"type": errType, "code": opsWSErrorIdentifier(failure.Code), "message": message},
@@ -162,7 +162,7 @@ func recordOpenAIWSUpstreamFailure(c *gin.Context, failure *service.OpenAIWSUpst
 }
 
 func opsWSErrorIdentifier(value string) string {
-	value = strings.TrimSpace(service.ClientSafeUpstreamErrorMessage(logredact.RedactText(value)))
+	value = strings.TrimSpace(service.ClientSafeUpstreamErrorMessage(service.ClientBrand{}, logredact.RedactText(value)))
 	if len(value) > 128 {
 		return ""
 	}
