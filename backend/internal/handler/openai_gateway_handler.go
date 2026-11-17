@@ -2470,21 +2470,26 @@ func (h *OpenAIGatewayHandler) admitOpenAIWSLaterTurn(
 	if err != nil {
 		return err
 	}
-	return h.checkOpenAIWSTurnBilling(ctx, c, conn, fresh, subscription, turn)
+	return h.checkOpenAIWSTurnBilling(ctx, c, conn, connectKey.Group, fresh, subscription, turn)
 }
 
-// checkOpenAIWSTurnBilling re-runs CheckBillingEligibility for a later turn
-// with the freshly loaded key (current group settings, e.g. a free hosted
-// group stays exempt) and the session's subscription. Balance and
-// subscription usage are read through the billing cache that usage
-// deductions update, as on every HTTP request. A definite rejection ends the
-// session with the same error the handshake check sends. A lookup failure
-// (cache/DB error, open breaker) lets the turn through: the session was
-// admitted at the handshake and availability wins over strictness here.
+// checkOpenAIWSTurnBilling re-runs the billing eligibility check for a later
+// turn with the freshly loaded key (current group settings) and the session's
+// subscription. Balance and subscription usage are read through the billing
+// cache that usage deductions update, as on every HTTP request. A definite
+// rejection ends the session with the same error the handshake check sends.
+// A lookup failure (cache/DB error, open breaker) lets the turn through: the
+// session was admitted at the handshake and availability wins here.
+//
+// Usage of every turn is settled with the connect-time key, group and
+// subscription. If the group's billing mode changed since (standard vs
+// subscription, free vs charged hosting), admission under the new mode would
+// not match that settlement, so the client must reconnect.
 func (h *OpenAIGatewayHandler) checkOpenAIWSTurnBilling(
 	ctx context.Context,
 	c *gin.Context,
 	conn *coderws.Conn,
+	connectGroup *service.Group,
 	key *service.APIKey,
 	subscription *service.UserSubscription,
 	turn int,
@@ -2492,7 +2497,11 @@ func (h *OpenAIGatewayHandler) checkOpenAIWSTurnBilling(
 	if h.billingCacheService == nil || key == nil || key.User == nil {
 		return nil
 	}
-	err := h.billingCacheService.CheckBillingEligibility(ctx, key.User, key, key.Group, subscription)
+	if openAIWSBillingMode(connectGroup) != openAIWSBillingMode(key.Group) {
+		requestLogger(c, "handler.openai_gateway.responses_ws", zap.Int("turn", turn)).Info("openai.websocket_group_billing_mode_changed")
+		return rejectOpenAIWSSession(ctx, c, conn, openAIWSGroupChangedRejection())
+	}
+	err := h.billingCacheService.CheckSessionTurnEligibility(ctx, key.User, key, key.Group, subscription)
 	if err == nil {
 		return nil
 	}
@@ -2527,6 +2536,19 @@ func (h *OpenAIGatewayHandler) loadOpenAIWSSessionKey(ctx context.Context, apiKe
 		}
 	}
 	return freshAPIKey, nil
+}
+
+// openAIWSBillingMode is how the session's turns are settled: by
+// subscription, free hosting, or the wallet (standard or charged hosting).
+func openAIWSBillingMode(group *service.Group) string {
+	switch {
+	case group != nil && group.IsSubscriptionType():
+		return "subscription"
+	case group.HostedChargeFree():
+		return "hosted_free"
+	default:
+		return "wallet"
+	}
 }
 
 // sameOpenAIWSGroup reports whether the freshly loaded key is still bound to

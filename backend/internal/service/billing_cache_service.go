@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -665,6 +666,42 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 		}
 	}
 
+	return nil
+}
+
+// CheckSessionTurnEligibility is CheckBillingEligibility for a later turn of
+// a long-lived session (Responses WebSocket), which never passes through the
+// auth middleware again. That middleware normally normalizes ended
+// subscription windows (ValidateAndCheckLimits) and schedules their reset; a
+// session spanning a window boundary would otherwise keep reading the ended
+// window's exhausted usage from the cache. So a cached subscription
+// rejection (usage limit, inactive status, or a cache-miss lookup that found
+// no active row) is confirmed against the fresh database row with the rules
+// the smart-switch path uses: the row must still be the session's
+// subscription, within its (normalized) limits. Infrastructure failures stay
+// ErrBillingServiceUnavailable so callers can tell them from a definite
+// rejection.
+func (s *BillingCacheService) CheckSessionTurnEligibility(ctx context.Context, user *User, apiKey *APIKey, group *Group, subscription *UserSubscription) error {
+	err := s.CheckBillingEligibility(ctx, user, apiKey, group, subscription)
+	if err == nil || s.subRepo == nil || user == nil || group == nil || !group.IsSubscriptionType() || subscription == nil {
+		return err
+	}
+	if !isSubscriptionUsageLimitError(err) && !errors.Is(err, ErrSubscriptionNotFound) && !errors.Is(err, ErrSubscriptionInvalid) {
+		return err
+	}
+	if freshErr := s.checkSmartSwitchSubscription(ctx, user.ID, group, subscription); freshErr != nil {
+		if isSubscriptionUsageLimitError(freshErr) || errors.Is(freshErr, ErrSubscriptionNotFound) ||
+			errors.Is(freshErr, ErrSubscriptionExpired) || errors.Is(freshErr, ErrSubscriptionSuspended) {
+			return withSubscriptionLimitDetail(freshErr, subscription, group)
+		}
+		logger.LegacyPrintf("service.billing_cache", "ALERT: session subscription recheck failed for user %d group %d: %v", user.ID, group.ID, freshErr)
+		return ErrBillingServiceUnavailable.WithCause(freshErr)
+	}
+	// The cached rejection was stale. Key rate limits were skipped by the
+	// early return above; apply them now.
+	if apiKey != nil && apiKey.HasRateLimits() {
+		return s.checkAPIKeyRateLimits(ctx, apiKey)
+	}
 	return nil
 }
 

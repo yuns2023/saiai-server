@@ -39,9 +39,13 @@ func (s *wsTurnBillingUserRepoStub) GetByID(_ context.Context, id int64) (*servi
 type wsTurnBillingSubRepoStub struct {
 	service.UserSubscriptionRepository
 	sub *service.UserSubscription
+	err error
 }
 
 func (s *wsTurnBillingSubRepoStub) GetActiveByUserIDAndGroupID(context.Context, int64, int64) (*service.UserSubscription, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
 	if s.sub == nil {
 		return nil, service.ErrSubscriptionNotFound
 	}
@@ -158,15 +162,20 @@ func TestOpenAIWSLaterTurnBillingCases(t *testing.T) {
 		ID: 11, Platform: service.PlatformOpenAI, Status: service.StatusActive,
 		SubscriptionType: service.SubscriptionTypeSubscription, DailyLimitUSD: &daily,
 	}
+	today := time.Now().Add(-time.Hour)
+	yesterday := time.Now().Add(-25 * time.Hour)
 	activeSub := func(dailyUsage float64) *service.UserSubscription {
-		return &service.UserSubscription{ID: 21, UserID: 2, GroupID: 11, Status: service.SubscriptionStatusActive, ExpiresAt: future, DailyUsageUSD: dailyUsage}
+		return &service.UserSubscription{ID: 21, UserID: 2, GroupID: 11, Status: service.SubscriptionStatusActive, ExpiresAt: future, DailyUsageUSD: dailyUsage, DailyWindowStart: &today}
 	}
+	endedWindowSub := activeSub(6)
+	endedWindowSub.DailyWindowStart = &yesterday
 	cases := []struct {
 		name     string
 		group    *service.Group
 		balance  float64
 		repoErr  error
 		sub      *service.UserSubscription
+		subRepo  *wsTurnBillingSubRepoStub
 		rejected bool
 	}{
 		{name: "balance positive", group: &service.Group{ID: 7, Platform: service.PlatformOpenAI, Status: service.StatusActive}, balance: 1},
@@ -175,14 +184,19 @@ func TestOpenAIWSLaterTurnBillingCases(t *testing.T) {
 		{name: "charged hosted needs wallet", group: hostedGroup(0.1), balance: 0, rejected: true},
 		{name: "subscription within limit ignores wallet", group: subGroup, balance: 0, sub: activeSub(1)},
 		{name: "subscription over daily limit", group: subGroup, balance: 100, sub: activeSub(6), rejected: true},
+		// The session crossed the daily boundary: yesterday's exhausted
+		// usage is still stored, but the window has ended.
+		{name: "subscription ended window is not a rejection", group: subGroup, sub: activeSub(6), subRepo: &wsTurnBillingSubRepoStub{sub: endedWindowSub}},
+		{name: "subscription revoked mid-session", group: subGroup, balance: 100, sub: activeSub(0), subRepo: &wsTurnBillingSubRepoStub{}, rejected: true},
+		{name: "subscription lookup failure fails open", group: subGroup, sub: activeSub(0), subRepo: &wsTurnBillingSubRepoStub{err: errors.New("TEST_ONLY_DB_DOWN")}},
 		{name: "balance lookup failure fails open", group: &service.Group{ID: 7, Platform: service.PlatformOpenAI, Status: service.StatusActive}, repoErr: errors.New("TEST_ONLY_DB_DOWN")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			users := &wsTurnBillingUserRepoStub{err: tc.repoErr}
 			users.balance.Store(tc.balance)
-			var subs *wsTurnBillingSubRepoStub
-			if tc.sub != nil {
+			subs := tc.subRepo
+			if subs == nil && tc.sub != nil {
 				subs = &wsTurnBillingSubRepoStub{sub: tc.sub}
 			}
 			h, key := newWSTurnBillingHandler(t, tc.group, users, subs)
@@ -217,5 +231,32 @@ func TestOpenAIWSFailoverReplaySkipsBillingCheck(t *testing.T) {
 	fresh, err := h.checkOpenAIWSSessionPayload(c.Request.Context(), c, nil, key, &sessionGroup, key.UserID, 2, []byte(wsTurnBillingPayload))
 	require.NoError(t, err)
 	require.NotNil(t, fresh)
+	require.Zero(t, users.reads.Load())
+}
+
+// Turns are settled with the connect-time group. A later turn whose group
+// switched billing mode in place (same group ID) must reconnect instead of
+// being admitted under rules that differ from its settlement.
+func TestOpenAIWSLaterTurnBillingModeChangeRequiresReconnect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	connectGroup := &service.Group{
+		ID: 9, Platform: service.PlatformOpenAI, Status: service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard, IsExclusive: true,
+		HostedUsageEnabled: true, RateMultiplier: 0.1,
+	}
+	freeNow := *connectGroup
+	freeNow.RateMultiplier = 0
+	users := &wsTurnBillingUserRepoStub{}
+	users.balance.Store(float64(0))
+	h, key := newWSTurnBillingHandler(t, &freeNow, users, nil)
+	connectKey := *key
+	connectKey.Group = connectGroup
+	c := wsTurnBillingTestContext()
+	var sessionGroup atomic.Pointer[service.Group]
+	sessionGroup.Store(connectGroup)
+	err := h.admitOpenAIWSLaterTurn(c.Request.Context(), c, nil, &connectKey, &sessionGroup, nil, key.UserID, 2, []byte(wsTurnBillingPayload))
+	var rejection *openAIWSSessionRejection
+	require.ErrorAs(t, err, &rejection)
+	require.Equal(t, "api_key_group_changed", rejection.code)
 	require.Zero(t, users.reads.Load())
 }
