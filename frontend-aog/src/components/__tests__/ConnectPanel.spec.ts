@@ -232,6 +232,22 @@ describe('ConnectPanel install codes', () => {
     expect(shortCommand(w).exists()).toBe(false)
   })
 
+  it('hides the code after a system sleep that paused the monotonic clock', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] })
+    api.installCode.mockResolvedValueOnce(reply('Q7M2K9XW4TRB'))
+    const w = mountPanel({ codes: true })
+    await w.find('[data-testid=connect-code-generate]').trigger('click')
+    await flushPromises()
+    expect(shortCommand(w).exists()).toBe(true)
+
+    // Only the wall clock moved on (performance.now() stood still); the tab becomes visible.
+    vi.setSystemTime(Date.now() + 11 * 60 * 1000)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await w.vm.$nextTick()
+    expect(shortCommand(w).exists()).toBe(false)
+    expect(w.find('[data-testid=connect-code-expired]').exists()).toBe(true)
+  })
+
   it('a response that arrives after the panel closed changes nothing', async () => {
     const pending = deferred<InstallCodeResponse>()
     api.installCode.mockReturnValueOnce(pending.promise)

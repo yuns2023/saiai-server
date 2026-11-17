@@ -35,9 +35,11 @@ const envText = computed(() => snippet.value.envLines.join('\n'))
 // ---- one-time install codes (admin switch; off = the panel exactly as before) ----
 
 /**
- * Code lifetime (the server's AITPInstallCodeTTL). Validity is counted on the monotonic
- * clock from the request start, which precedes the server's SET, so neither a skewed nor a
- * changed wall clock keeps a dead code on screen or hides a live one early.
+ * Code lifetime (the server's AITPInstallCodeTTL), counted from the request start, which
+ * precedes the server's SET. A code is hidden once EITHER the monotonic clock (immune to
+ * wall-clock changes) OR the wall clock (keeps running while some browsers pause the
+ * monotonic clock in system sleep) says 10 minutes have passed; a wrong but steady wall
+ * clock changes neither.
  */
 const CODE_TTL_MS = 10 * 60 * 1000
 const monotonic = () => performance.now()
@@ -52,7 +54,7 @@ interface CodeSlot {
   code: string | null
   /** monotonic() deadline */
   deadline: number
-  /** Wall-clock time shown as "valid until". */
+  /** Wall-clock deadline, also shown as "valid until". */
   expiresAt: number
   error: string
 }
@@ -70,9 +72,13 @@ watch(
 )
 
 const now = ref(monotonic())
+const wallNow = ref(Date.now())
 let ticker: number | undefined
 let disposed = false
-const tick = () => (now.value = monotonic())
+const tick = () => {
+  now.value = monotonic()
+  wallNow.value = Date.now()
+}
 /** Re-check expiry while a code is shown; started by the first code, so the off state runs no timer. */
 function startTicker(): void {
   if (ticker !== undefined || disposed) return
@@ -86,7 +92,9 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', tick)
 })
 
-const expired = computed(() => !!current.value?.code && now.value >= current.value.deadline)
+const expired = computed(
+  () => !!current.value?.code && (now.value >= current.value.deadline || wallNow.value >= current.value.expiresAt)
+)
 const shortCommand = computed(() =>
   current.value?.code && !expired.value ? installCodeCommand(shell.value, window.location.origin, current.value.code) : null
 )
