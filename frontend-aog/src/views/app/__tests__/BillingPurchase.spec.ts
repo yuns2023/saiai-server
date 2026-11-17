@@ -198,6 +198,51 @@ describe('BillingView buy a redeem code', () => {
     })
   }
 
+  const replayCases: Array<[RedeemPurchase['status'], string]> = [
+    ['revoked', '这次购买已撤回，面额已退回余额。'],
+    ['used', '这张码已被兑换。'],
+    ['unknown', '请联系客服核对']
+  ]
+  for (const [status, text] of replayCases) {
+    it(`a replayed ${status} purchase is reported as such, without handing out the code`, async () => {
+      purchaseApi.overview.mockResolvedValue(overview(true))
+      const w = await mountView()
+      await w.find('[data-testid=purchase-amount]').setValue('10')
+      await w.find('[data-testid=purchase-form]').trigger('submit')
+      // Lost response, then the code was revoked / redeemed meanwhile; the same-request retry replays it.
+      purchaseApi.purchase.mockRejectedValueOnce({ status: 0, code: 'NETWORK', message: 'network' })
+      await w.find('[data-testid=dialog-confirm]').trigger('click')
+      await flushPromises()
+      const replayed = { ...row(9, status), amount: 10, replayed: true }
+      purchaseApi.purchase.mockResolvedValueOnce(replayed)
+      await w.find('[data-testid=purchase-retry]').trigger('click')
+      await flushPromises()
+
+      const done = w.find('[data-testid=purchase-done]')
+      expect(done.attributes('data-status')).toBe(status)
+      expect(done.find('[data-testid=purchase-done-state]').text()).toBe(text)
+      expect(done.find('[data-testid=purchase-done-code]').exists()).toBe(false)
+      expect(done.text()).not.toContain('兑换码已生成')
+      expect(done.text()).not.toContain(replayed.code)
+      expect(done.text()).not.toContain('复制')
+    })
+  }
+
+  it('an unused result shows the code, copy and the bearer warning', async () => {
+    purchaseApi.overview.mockResolvedValue(overview(true))
+    purchaseApi.purchase.mockResolvedValueOnce({ ...row(9, 'unused'), amount: 10, replayed: false })
+    const w = await mountView()
+    await w.find('[data-testid=purchase-form]').trigger('submit')
+    await w.find('[data-testid=dialog-confirm]').trigger('click')
+    await flushPromises()
+    const done = w.find('[data-testid=purchase-done]')
+    expect(done.text()).toContain('兑换码已生成')
+    expect(done.find('[data-testid=purchase-done-code]').text()).toBe(row(9, 'unused').code)
+    expect(done.text()).toContain('复制')
+    expect(done.text()).toContain('等同现金')
+    expect(done.find('[data-testid=purchase-done-state]').exists()).toBe(false)
+  })
+
   it('a definite refusal offers no blind retry', async () => {
     purchaseApi.overview.mockResolvedValue(overview(true))
     purchaseApi.purchase.mockRejectedValueOnce({ status: 429, reason: 'REDEEM_PURCHASE_WINDOW_COUNT_LIMIT', message: 'limit' })

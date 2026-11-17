@@ -502,6 +502,13 @@ const balanceAfter = computed(() => {
   return balance == null || !intent.value ? null : balance - Number(intent.value.amount)
 })
 
+/** A replayed purchase may already be revoked or redeemed: say so instead of handing out the code. */
+function boughtStateText(p: RedeemPurchase): string {
+  if (p.status === 'revoked') return t('purchase.doneRevoked')
+  if (p.status === 'used') return t('purchase.doneUsed')
+  return t('purchase.unknownHint')
+}
+
 function purchaseTag(p: RedeemPurchase): string {
   if (p.status === 'unused') return 'tag-ok'
   if (p.status === 'unknown') return 'tag-warn'
@@ -951,17 +958,25 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <!-- The code just bought, in full, once -->
-          <div v-if="bought" class="mt-6 border-t border-rule-strong pt-4" role="status" data-testid="purchase-done">
+          <!-- The purchase just made (or replayed): the code itself only while it is still unused -->
+          <div v-if="bought" class="mt-6 border-t border-rule-strong pt-4" role="status" data-testid="purchase-done" :data-status="bought.status">
             <div class="flex items-baseline justify-between gap-3">
-              <span class="text-sm font-medium">{{ t('purchase.doneTitle') }}</span>
+              <span class="flex items-center gap-2 text-sm font-medium">
+                {{ bought.status === 'unused' ? t('purchase.doneTitle') : t('purchase.doneOtherTitle') }}
+                <span v-if="bought.status !== 'unused'" class="tag" :class="purchaseTag(bought)">{{ t(`purchase.status_${bought.status}`) }}</span>
+              </span>
               <span class="num text-lg font-semibold">{{ money(bought.amount) }}</span>
             </div>
-            <div class="mt-3 flex items-center gap-2 rounded bg-shell px-3 py-2">
-              <code class="min-w-0 flex-1 break-all font-mono text-sm" data-testid="purchase-done-code">{{ bought.code }}</code>
-              <CopyButton :value="bought.code" small />
-            </div>
-            <p class="mt-2 text-xs text-ink-3">{{ t('purchase.doneNote') }}</p>
+            <template v-if="bought.status === 'unused'">
+              <div class="mt-3 flex items-center gap-2 rounded bg-shell px-3 py-2">
+                <code class="min-w-0 flex-1 break-all font-mono text-sm" data-testid="purchase-done-code">{{ bought.code }}</code>
+                <CopyButton :value="bought.code" small />
+              </div>
+              <p class="mt-2 text-xs text-ink-3">{{ t('purchase.doneNote') }}</p>
+            </template>
+            <p v-else class="mt-2 text-sm" :class="bought.status === 'unknown' ? 'text-warn' : 'text-ink-2'" data-testid="purchase-done-state">
+              {{ boughtStateText(bought) }}
+            </p>
             <button type="button" class="btn btn-quiet btn-sm mt-1 -ml-2" @click="bought = null">{{ t('purchase.doneHide') }}</button>
           </div>
         </section>

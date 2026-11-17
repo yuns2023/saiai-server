@@ -26,6 +26,8 @@ const (
 	redeemMaxErrorsPerHour  = 20
 	redeemRateLimitDuration = time.Hour
 	redeemLockDuration      = 10 * time.Second // 锁超时时间，防止死锁
+	// redeemAuthCacheInvalidateTimeout bounds the post-commit auth cache invalidation.
+	redeemAuthCacheInvalidateTimeout = 5 * time.Second
 )
 
 // RedeemCache defines cache operations for redeem service
@@ -401,10 +403,15 @@ func (s *RedeemService) validateClaudeDeviceRedeemCode(ctx context.Context, code
 
 // invalidateRedeemCaches 失效兑换相关的缓存
 func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64, redeemCode *RedeemCode) {
+	// Runs after the commit: a client that hangs up right then must not skip
+	// the auth cache invalidation, so it gets its own deadline instead of the
+	// request's cancellation.
+	authCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), redeemAuthCacheInvalidateTimeout)
+	defer cancel()
 	switch redeemCode.Type {
 	case RedeemTypeBalance:
 		if s.authCacheInvalidator != nil {
-			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(authCtx, userID)
 		}
 		if s.billingCacheService == nil {
 			return
@@ -416,14 +423,14 @@ func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64
 		}()
 	case RedeemTypeConcurrency:
 		if s.authCacheInvalidator != nil {
-			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(authCtx, userID)
 		}
 		if s.billingCacheService == nil {
 			return
 		}
 	case RedeemTypeSubscription:
 		if s.authCacheInvalidator != nil {
-			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(authCtx, userID)
 		}
 		if s.billingCacheService == nil {
 			return
@@ -438,7 +445,7 @@ func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64
 		}
 	case RedeemTypeClaudeDevice:
 		if s.authCacheInvalidator != nil {
-			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(authCtx, userID)
 		}
 	}
 }
