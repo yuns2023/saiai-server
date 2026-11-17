@@ -580,6 +580,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	updates[SettingKeyUserInviteMaxUnused] = strconv.Itoa(parseUserInviteMaxUnused(strconv.Itoa(settings.UserInviteMaxUnused)))
 	updates[SettingKeyUserInviteMaxTotal] = strconv.Itoa(parseUserInviteMaxTotal(strconv.Itoa(settings.UserInviteMaxTotal)))
 	updates[SettingKeyUserInviteMaxPerWeek] = strconv.Itoa(parseUserInviteMaxPerWeek(strconv.Itoa(settings.UserInviteMaxPerWeek)))
+	redeemPurchaseSettingUpdates(settings, updates)
 	updates[SettingKeyTotpEnabled] = strconv.FormatBool(settings.TotpEnabled)
 
 	// 邮件服务设置（只有非空才更新密码）
@@ -1058,6 +1059,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		ClientBrandName:                  strings.TrimSpace(settings[SettingKeyClientBrandName]),
 		ClientSetupCommand:               strings.TrimSpace(settings[SettingKeyClientSetupCommand]),
 	}
+	applyRedeemPurchaseSystemSettings(result, settings)
 
 	// 解析整数类型
 	if port, err := strconv.Atoi(settings[SettingKeySMTPPort]); err == nil {

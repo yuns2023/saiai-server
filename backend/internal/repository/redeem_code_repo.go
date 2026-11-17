@@ -7,6 +7,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/cryptopaycredit"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
+	"github.com/Wei-Shaw/sub2api/ent/redeemcodepurchase"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -242,15 +243,23 @@ func (r *redeemCodeRepository) ListByUserPaginated(ctx context.Context, userID i
 	return redeemCodeEntitiesToService(codes), paginationResultFromTotal(int64(total), params), nil
 }
 
+func (r *redeemCodeRepository) IsPurchased(ctx context.Context, id int64) (bool, error) {
+	return clientFromContext(ctx, r.client).RedeemCodePurchase.Query().
+		Where(redeemcodepurchase.RedeemCodeIDEQ(id)).
+		Exist(ctx)
+}
+
 // SumPositiveBalanceByUser returns the user's total recharged amount: positive balance/admin_balance
 // codes the user redeemed plus credited stablecoin top-ups. Native payment orders are not added
 // separately: fulfilling an order redeems a balance code for it, which the code sum already counts.
+// Codes bought by users with their balance are not recharges, whoever redeemed them.
 func (r *redeemCodeRepository) SumPositiveBalanceByUser(ctx context.Context, userID int64) (float64, error) {
 	codes, err := scanSum(ctx, r.client.RedeemCode.Query().
 		Where(
 			redeemcode.UsedByEQ(userID),
 			redeemcode.ValueGT(0),
 			redeemcode.TypeIn("balance", "admin_balance"),
+			redeemCodeNotPurchased(),
 		).
 		Aggregate(dbent.As(dbent.Sum(redeemcode.FieldValue), "sum")))
 	if err != nil {

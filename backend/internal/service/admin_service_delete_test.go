@@ -256,6 +256,8 @@ type redeemRepoStub struct {
 	deletedIDs    []int64
 	codesByID     map[int64]*RedeemCode
 	updated       []*RedeemCode
+	purchasedIDs  map[int64]bool
+	purchasedErr  error
 }
 
 func (s *redeemRepoStub) Create(ctx context.Context, code *RedeemCode) error {
@@ -315,6 +317,10 @@ func (s *redeemRepoStub) ListByUserPaginated(ctx context.Context, userID int64, 
 
 func (s *redeemRepoStub) SumPositiveBalanceByUser(ctx context.Context, userID int64) (float64, error) {
 	panic("unexpected SumPositiveBalanceByUser call")
+}
+
+func (s *redeemRepoStub) IsPurchased(ctx context.Context, id int64) (bool, error) {
+	return s.purchasedIDs[id], s.purchasedErr
 }
 
 type subscriptionInvalidateCall struct {
@@ -589,4 +595,55 @@ func TestAdminService_BatchDeleteRedeemCodes_PartialFailures(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(2), deleted)
 	require.Equal(t, []int64{1, 2, 3}, repo.deletedIDs)
+}
+
+func TestAdminService_PurchaseRecordsAndPurchasedCodesAreImmutable(t *testing.T) {
+	cases := map[string]*RedeemCode{
+		"purchase_debit":          {ID: 2, Type: RedeemTypePurchaseDebit, Status: StatusUsed},
+		"purchase_refund":         {ID: 2, Type: RedeemTypePurchaseRefund, Status: StatusUsed},
+		"purchased unused code":   {ID: 2, Type: RedeemTypeBalance, Status: StatusUnused},
+		"purchased revoked code":  {ID: 2, Type: RedeemTypeBalance, Status: StatusExpired},
+		"purchased redeemed code": {ID: 2, Type: RedeemTypeBalance, Status: StatusUsed},
+	}
+	for name, code := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := &redeemRepoStub{
+				codesByID: map[int64]*RedeemCode{
+					1: {ID: 1, Type: RedeemTypeBalance, Status: StatusUnused},
+					2: code,
+				},
+				// The link is what makes a balance code immutable; record types are refused by type.
+				purchasedIDs: map[int64]bool{2: code.Type == RedeemTypeBalance},
+			}
+			svc := &adminServiceImpl{redeemCodeRepo: repo}
+
+			require.ErrorIs(t, svc.DeleteRedeemCode(context.Background(), 2), ErrRedeemPurchaseRecordImmutable)
+			_, err := svc.ExpireRedeemCode(context.Background(), 2)
+			require.ErrorIs(t, err, ErrRedeemPurchaseRecordImmutable)
+
+			deleted, err := svc.BatchDeleteRedeemCodes(context.Background(), []int64{1, 2})
+			require.NoError(t, err)
+			require.Equal(t, int64(1), deleted)
+			require.Equal(t, []int64{1}, repo.deletedIDs)
+			require.Empty(t, repo.updated)
+		})
+	}
+}
+
+func TestAdminService_PurchaseLinkLookupFailureRefusesDelete(t *testing.T) {
+	lookupErr := errors.New("db down")
+	repo := &redeemRepoStub{
+		codesByID:    map[int64]*RedeemCode{1: {ID: 1, Type: RedeemTypeBalance, Status: StatusUnused}},
+		purchasedErr: lookupErr,
+	}
+	svc := &adminServiceImpl{redeemCodeRepo: repo}
+
+	require.ErrorIs(t, svc.DeleteRedeemCode(context.Background(), 1), lookupErr)
+	_, err := svc.ExpireRedeemCode(context.Background(), 1)
+	require.ErrorIs(t, err, lookupErr)
+	deleted, err := svc.BatchDeleteRedeemCodes(context.Background(), []int64{1})
+	require.NoError(t, err)
+	require.Zero(t, deleted)
+	require.Empty(t, repo.deletedIDs)
+	require.Empty(t, repo.updated)
 }

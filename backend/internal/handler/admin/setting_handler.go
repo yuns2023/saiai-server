@@ -156,6 +156,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		UserInviteMaxUnused:                  settings.UserInviteMaxUnused,
 		UserInviteMaxTotal:                   settings.UserInviteMaxTotal,
 		UserInviteMaxPerWeek:                 settings.UserInviteMaxPerWeek,
+		RedeemPurchaseSettings:               dto.RedeemPurchaseSettingsFromService(settings),
 		TotpEnabled:                          settings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             settings.SMTPHost,
@@ -243,6 +244,13 @@ type UpdateSettingsRequest struct {
 	UserInviteMaxTotal   *int  `json:"user_invite_max_total"`
 	UserInviteMaxPerWeek *int  `json:"user_invite_max_per_week"`
 	TotpEnabled          bool  `json:"totp_enabled"` // TOTP 双因素认证
+
+	// User-bought balance redeem codes; nil = keep the stored value.
+	RedeemPurchaseEnabled         *bool    `json:"redeem_purchase_enabled"`
+	RedeemPurchaseMinAmount       *float64 `json:"redeem_purchase_min_amount"`
+	RedeemPurchaseMaxAmount       *float64 `json:"redeem_purchase_max_amount"`
+	RedeemPurchaseWindowMaxAmount *float64 `json:"redeem_purchase_window_max_amount"`
+	RedeemPurchaseWindowMaxCount  *int     `json:"redeem_purchase_window_max_count"`
 
 	// 邮件服务设置
 	SMTPHost     string `json:"smtp_host"`
@@ -682,6 +690,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 		userInviteMaxPerWeek = *req.UserInviteMaxPerWeek
 	}
+	redeemPurchase, msg := resolveRedeemPurchaseSettings(&req, previousSettings)
+	if msg != "" {
+		response.Error(c, http.StatusBadRequest, msg)
+		return
+	}
 
 	maintenanceEnabled := previousSettings.MaintenanceModeEnabled
 	if req.MaintenanceModeEnabled != nil {
@@ -811,6 +824,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}(),
 	}
 
+	redeemPurchase.apply(settings)
+
 	if h.pricingService != nil && req.PricingModelAliases != nil {
 		for requestModel, pricingModel := range settings.PricingModelAliases {
 			if strings.TrimSpace(requestModel) == "" || strings.TrimSpace(pricingModel) == "" {
@@ -860,6 +875,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		UserInviteMaxUnused:                  updatedSettings.UserInviteMaxUnused,
 		UserInviteMaxTotal:                   updatedSettings.UserInviteMaxTotal,
 		UserInviteMaxPerWeek:                 updatedSettings.UserInviteMaxPerWeek,
+		RedeemPurchaseSettings:               dto.RedeemPurchaseSettingsFromService(updatedSettings),
 		TotpEnabled:                          updatedSettings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             updatedSettings.SMTPHost,
@@ -1039,6 +1055,7 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.UserInviteMaxPerWeek != after.UserInviteMaxPerWeek {
 		changed = append(changed, "user_invite_max_per_week")
 	}
+	changed = append(changed, diffRedeemPurchaseSettings(before, after)...)
 	if before.SiteName != after.SiteName {
 		changed = append(changed, "site_name")
 	}

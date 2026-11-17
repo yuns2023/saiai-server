@@ -48,6 +48,8 @@ func (r *userInviteRepository) HasQualifyingTopUp(ctx context.Context, userID in
 			redeemcode.TypeIn(userInviteQualifyingTypes...),
 			// A negative balance code is a deduction, not a top-up.
 			redeemcode.Or(redeemcode.TypeNEQ(service.RedeemTypeBalance), redeemcode.ValueGT(0)),
+			// Neither is a code someone (this user included) bought with balance.
+			redeemCodeNotPurchased(),
 		).
 		Exist(ctx)
 }

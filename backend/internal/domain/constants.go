@@ -80,6 +80,14 @@ const (
 	AdjustmentTypeAdminSubReset  = "admin_sub_reset"  // 管理员重置订阅额度：value = 重置档位位掩码（1=5小时 2=日 4=周 8=月）
 )
 
+// User redeem-code purchase records in redeem_codes (migration 132). Like the
+// admin types above they are history rows, never redeemable codes: status is
+// used, used_by is the buyer.
+const (
+	RedeemTypePurchaseDebit  = "purchase_debit"  // 用户购买兑换码扣款：value = -金额
+	RedeemTypePurchaseRefund = "purchase_refund" // 用户撤回已购兑换码退款：value = +金额
+)
+
 // Subscription usage windows reset by an admin, as bits of an admin_sub_reset record value.
 const (
 	SubscriptionResetFiveHour = 1

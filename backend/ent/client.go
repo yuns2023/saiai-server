@@ -39,6 +39,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
+	"github.com/Wei-Shaw/sub2api/ent/redeemcodepurchase"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
@@ -106,6 +107,8 @@ type Client struct {
 	Proxy *ProxyClient
 	// RedeemCode is the client for interacting with the RedeemCode builders.
 	RedeemCode *RedeemCodeClient
+	// RedeemCodePurchase is the client for interacting with the RedeemCodePurchase builders.
+	RedeemCodePurchase *RedeemCodePurchaseClient
 	// SecuritySecret is the client for interacting with the SecuritySecret builders.
 	SecuritySecret *SecuritySecretClient
 	// Setting is the client for interacting with the Setting builders.
@@ -161,6 +164,7 @@ func (c *Client) init() {
 	c.PromoCodeUsage = NewPromoCodeUsageClient(c.config)
 	c.Proxy = NewProxyClient(c.config)
 	c.RedeemCode = NewRedeemCodeClient(c.config)
+	c.RedeemCodePurchase = NewRedeemCodePurchaseClient(c.config)
 	c.SecuritySecret = NewSecuritySecretClient(c.config)
 	c.Setting = NewSettingClient(c.config)
 	c.SubscriptionPlan = NewSubscriptionPlanClient(c.config)
@@ -287,6 +291,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		PromoCodeUsage:           NewPromoCodeUsageClient(cfg),
 		Proxy:                    NewProxyClient(cfg),
 		RedeemCode:               NewRedeemCodeClient(cfg),
+		RedeemCodePurchase:       NewRedeemCodePurchaseClient(cfg),
 		SecuritySecret:           NewSecuritySecretClient(cfg),
 		Setting:                  NewSettingClient(cfg),
 		SubscriptionPlan:         NewSubscriptionPlanClient(cfg),
@@ -340,6 +345,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		PromoCodeUsage:           NewPromoCodeUsageClient(cfg),
 		Proxy:                    NewProxyClient(cfg),
 		RedeemCode:               NewRedeemCodeClient(cfg),
+		RedeemCodePurchase:       NewRedeemCodePurchaseClient(cfg),
 		SecuritySecret:           NewSecuritySecretClient(cfg),
 		Setting:                  NewSettingClient(cfg),
 		SubscriptionPlan:         NewSubscriptionPlanClient(cfg),
@@ -385,8 +391,8 @@ func (c *Client) Use(hooks ...Hook) {
 		c.CryptoPaySolanaPoolEntry, c.ErrorPassthroughRule, c.Group,
 		c.IdempotencyRecord, c.PaymentAuditLog, c.PaymentOrder,
 		c.PaymentProviderInstance, c.PromoCode, c.PromoCodeUsage, c.Proxy,
-		c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.RedeemCode, c.RedeemCodePurchase, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
 		c.UserAttributeDefinition, c.UserAttributeValue, c.UserSubscription,
 	} {
 		n.Use(hooks...)
@@ -403,8 +409,8 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.CryptoPaySolanaPoolEntry, c.ErrorPassthroughRule, c.Group,
 		c.IdempotencyRecord, c.PaymentAuditLog, c.PaymentOrder,
 		c.PaymentProviderInstance, c.PromoCode, c.PromoCodeUsage, c.Proxy,
-		c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.RedeemCode, c.RedeemCodePurchase, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
 		c.UserAttributeDefinition, c.UserAttributeValue, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
@@ -462,6 +468,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.Proxy.mutate(ctx, m)
 	case *RedeemCodeMutation:
 		return c.RedeemCode.mutate(ctx, m)
+	case *RedeemCodePurchaseMutation:
+		return c.RedeemCodePurchase.mutate(ctx, m)
 	case *SecuritySecretMutation:
 		return c.SecuritySecret.mutate(ctx, m)
 	case *SettingMutation:
@@ -4166,6 +4174,139 @@ func (c *RedeemCodeClient) mutate(ctx context.Context, m *RedeemCodeMutation) (V
 	}
 }
 
+// RedeemCodePurchaseClient is a client for the RedeemCodePurchase schema.
+type RedeemCodePurchaseClient struct {
+	config
+}
+
+// NewRedeemCodePurchaseClient returns a client for the RedeemCodePurchase from the given config.
+func NewRedeemCodePurchaseClient(c config) *RedeemCodePurchaseClient {
+	return &RedeemCodePurchaseClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `redeemcodepurchase.Hooks(f(g(h())))`.
+func (c *RedeemCodePurchaseClient) Use(hooks ...Hook) {
+	c.hooks.RedeemCodePurchase = append(c.hooks.RedeemCodePurchase, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `redeemcodepurchase.Intercept(f(g(h())))`.
+func (c *RedeemCodePurchaseClient) Intercept(interceptors ...Interceptor) {
+	c.inters.RedeemCodePurchase = append(c.inters.RedeemCodePurchase, interceptors...)
+}
+
+// Create returns a builder for creating a RedeemCodePurchase entity.
+func (c *RedeemCodePurchaseClient) Create() *RedeemCodePurchaseCreate {
+	mutation := newRedeemCodePurchaseMutation(c.config, OpCreate)
+	return &RedeemCodePurchaseCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of RedeemCodePurchase entities.
+func (c *RedeemCodePurchaseClient) CreateBulk(builders ...*RedeemCodePurchaseCreate) *RedeemCodePurchaseCreateBulk {
+	return &RedeemCodePurchaseCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *RedeemCodePurchaseClient) MapCreateBulk(slice any, setFunc func(*RedeemCodePurchaseCreate, int)) *RedeemCodePurchaseCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &RedeemCodePurchaseCreateBulk{err: fmt.Errorf("calling to RedeemCodePurchaseClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*RedeemCodePurchaseCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &RedeemCodePurchaseCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for RedeemCodePurchase.
+func (c *RedeemCodePurchaseClient) Update() *RedeemCodePurchaseUpdate {
+	mutation := newRedeemCodePurchaseMutation(c.config, OpUpdate)
+	return &RedeemCodePurchaseUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *RedeemCodePurchaseClient) UpdateOne(_m *RedeemCodePurchase) *RedeemCodePurchaseUpdateOne {
+	mutation := newRedeemCodePurchaseMutation(c.config, OpUpdateOne, withRedeemCodePurchase(_m))
+	return &RedeemCodePurchaseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *RedeemCodePurchaseClient) UpdateOneID(id int64) *RedeemCodePurchaseUpdateOne {
+	mutation := newRedeemCodePurchaseMutation(c.config, OpUpdateOne, withRedeemCodePurchaseID(id))
+	return &RedeemCodePurchaseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for RedeemCodePurchase.
+func (c *RedeemCodePurchaseClient) Delete() *RedeemCodePurchaseDelete {
+	mutation := newRedeemCodePurchaseMutation(c.config, OpDelete)
+	return &RedeemCodePurchaseDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *RedeemCodePurchaseClient) DeleteOne(_m *RedeemCodePurchase) *RedeemCodePurchaseDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *RedeemCodePurchaseClient) DeleteOneID(id int64) *RedeemCodePurchaseDeleteOne {
+	builder := c.Delete().Where(redeemcodepurchase.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &RedeemCodePurchaseDeleteOne{builder}
+}
+
+// Query returns a query builder for RedeemCodePurchase.
+func (c *RedeemCodePurchaseClient) Query() *RedeemCodePurchaseQuery {
+	return &RedeemCodePurchaseQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeRedeemCodePurchase},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a RedeemCodePurchase entity by its id.
+func (c *RedeemCodePurchaseClient) Get(ctx context.Context, id int64) (*RedeemCodePurchase, error) {
+	return c.Query().Where(redeemcodepurchase.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *RedeemCodePurchaseClient) GetX(ctx context.Context, id int64) *RedeemCodePurchase {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *RedeemCodePurchaseClient) Hooks() []Hook {
+	return c.hooks.RedeemCodePurchase
+}
+
+// Interceptors returns the client interceptors.
+func (c *RedeemCodePurchaseClient) Interceptors() []Interceptor {
+	return c.inters.RedeemCodePurchase
+}
+
+func (c *RedeemCodePurchaseClient) mutate(ctx context.Context, m *RedeemCodePurchaseMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&RedeemCodePurchaseCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&RedeemCodePurchaseUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&RedeemCodePurchaseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&RedeemCodePurchaseDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown RedeemCodePurchase mutation op: %q", m.Op())
+	}
+}
+
 // SecuritySecretClient is a client for the SecuritySecret schema.
 type SecuritySecretClient struct {
 	config
@@ -5893,9 +6034,9 @@ type (
 		CryptoPayKeyset, CryptoPayOrder, CryptoPayScanCursor, CryptoPaySolanaPoolEntry,
 		ErrorPassthroughRule, Group, IdempotencyRecord, PaymentAuditLog, PaymentOrder,
 		PaymentProviderInstance, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
-		SecuritySecret, Setting, SubscriptionPlan, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserSubscription []ent.Hook
+		RedeemCodePurchase, SecuritySecret, Setting, SubscriptionPlan,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, AccessLevel, Account, AccountGroup, Announcement, AnnouncementRead,
@@ -5903,9 +6044,9 @@ type (
 		CryptoPayKeyset, CryptoPayOrder, CryptoPayScanCursor, CryptoPaySolanaPoolEntry,
 		ErrorPassthroughRule, Group, IdempotencyRecord, PaymentAuditLog, PaymentOrder,
 		PaymentProviderInstance, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
-		SecuritySecret, Setting, SubscriptionPlan, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserSubscription []ent.Interceptor
+		RedeemCodePurchase, SecuritySecret, Setting, SubscriptionPlan,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserSubscription []ent.Interceptor
 	}
 )
 

@@ -55,6 +55,9 @@ type RedeemCodeRepository interface {
 	// SumPositiveBalanceByUser returns the total recharged amount for a user: positive balance/admin_balance
 	// code values plus credited stablecoin top-ups.
 	SumPositiveBalanceByUser(ctx context.Context, userID int64) (float64, error)
+	// IsPurchased reports whether a user bought this code with their balance
+	// (a redeem_code_purchases row exists, active or revoked).
+	IsPurchased(ctx context.Context, id int64) (bool, error)
 }
 
 // GenerateCodesRequest 生成兑换码请求
@@ -478,6 +481,14 @@ func (s *RedeemService) Delete(ctx context.Context, id int64) error {
 	// 不允许删除已使用的兑换码
 	if code.IsUsed() {
 		return infraerrors.Conflict("REDEEM_CODE_DELETE_USED", "cannot delete used redeem code")
+	}
+	if IsRedeemPurchaseRecordType(code.Type) {
+		return ErrRedeemPurchaseRecordImmutable
+	}
+	if purchased, err := s.redeemRepo.IsPurchased(ctx, id); err != nil {
+		return fmt.Errorf("check purchased redeem code: %w", err)
+	} else if purchased {
+		return ErrRedeemPurchaseRecordImmutable
 	}
 
 	if err := s.redeemRepo.Delete(ctx, id); err != nil {

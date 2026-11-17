@@ -37,6 +37,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
+	"github.com/Wei-Shaw/sub2api/ent/redeemcodepurchase"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
@@ -84,6 +85,7 @@ const (
 	TypePromoCodeUsage           = "PromoCodeUsage"
 	TypeProxy                    = "Proxy"
 	TypeRedeemCode               = "RedeemCode"
+	TypeRedeemCodePurchase       = "RedeemCodePurchase"
 	TypeSecuritySecret           = "SecuritySecret"
 	TypeSetting                  = "Setting"
 	TypeSubscriptionPlan         = "SubscriptionPlan"
@@ -32339,6 +32341,747 @@ func (m *RedeemCodeMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown RedeemCode edge %s", name)
+}
+
+// RedeemCodePurchaseMutation represents an operation that mutates the RedeemCodePurchase nodes in the graph.
+type RedeemCodePurchaseMutation struct {
+	config
+	op                Op
+	typ               string
+	id                *int64
+	buyer_user_id     *int64
+	addbuyer_user_id  *int64
+	redeem_code_id    *int64
+	addredeem_code_id *int64
+	amount            *decimal.Decimal
+	request_id        *string
+	status            *string
+	created_at        *time.Time
+	revoked_at        *time.Time
+	clearedFields     map[string]struct{}
+	done              bool
+	oldValue          func(context.Context) (*RedeemCodePurchase, error)
+	predicates        []predicate.RedeemCodePurchase
+}
+
+var _ ent.Mutation = (*RedeemCodePurchaseMutation)(nil)
+
+// redeemcodepurchaseOption allows management of the mutation configuration using functional options.
+type redeemcodepurchaseOption func(*RedeemCodePurchaseMutation)
+
+// newRedeemCodePurchaseMutation creates new mutation for the RedeemCodePurchase entity.
+func newRedeemCodePurchaseMutation(c config, op Op, opts ...redeemcodepurchaseOption) *RedeemCodePurchaseMutation {
+	m := &RedeemCodePurchaseMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeRedeemCodePurchase,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withRedeemCodePurchaseID sets the ID field of the mutation.
+func withRedeemCodePurchaseID(id int64) redeemcodepurchaseOption {
+	return func(m *RedeemCodePurchaseMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *RedeemCodePurchase
+		)
+		m.oldValue = func(ctx context.Context) (*RedeemCodePurchase, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().RedeemCodePurchase.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withRedeemCodePurchase sets the old RedeemCodePurchase of the mutation.
+func withRedeemCodePurchase(node *RedeemCodePurchase) redeemcodepurchaseOption {
+	return func(m *RedeemCodePurchaseMutation) {
+		m.oldValue = func(context.Context) (*RedeemCodePurchase, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m RedeemCodePurchaseMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m RedeemCodePurchaseMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *RedeemCodePurchaseMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *RedeemCodePurchaseMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().RedeemCodePurchase.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetBuyerUserID sets the "buyer_user_id" field.
+func (m *RedeemCodePurchaseMutation) SetBuyerUserID(i int64) {
+	m.buyer_user_id = &i
+	m.addbuyer_user_id = nil
+}
+
+// BuyerUserID returns the value of the "buyer_user_id" field in the mutation.
+func (m *RedeemCodePurchaseMutation) BuyerUserID() (r int64, exists bool) {
+	v := m.buyer_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBuyerUserID returns the old "buyer_user_id" field's value of the RedeemCodePurchase entity.
+// If the RedeemCodePurchase object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodePurchaseMutation) OldBuyerUserID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBuyerUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBuyerUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBuyerUserID: %w", err)
+	}
+	return oldValue.BuyerUserID, nil
+}
+
+// AddBuyerUserID adds i to the "buyer_user_id" field.
+func (m *RedeemCodePurchaseMutation) AddBuyerUserID(i int64) {
+	if m.addbuyer_user_id != nil {
+		*m.addbuyer_user_id += i
+	} else {
+		m.addbuyer_user_id = &i
+	}
+}
+
+// AddedBuyerUserID returns the value that was added to the "buyer_user_id" field in this mutation.
+func (m *RedeemCodePurchaseMutation) AddedBuyerUserID() (r int64, exists bool) {
+	v := m.addbuyer_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetBuyerUserID resets all changes to the "buyer_user_id" field.
+func (m *RedeemCodePurchaseMutation) ResetBuyerUserID() {
+	m.buyer_user_id = nil
+	m.addbuyer_user_id = nil
+}
+
+// SetRedeemCodeID sets the "redeem_code_id" field.
+func (m *RedeemCodePurchaseMutation) SetRedeemCodeID(i int64) {
+	m.redeem_code_id = &i
+	m.addredeem_code_id = nil
+}
+
+// RedeemCodeID returns the value of the "redeem_code_id" field in the mutation.
+func (m *RedeemCodePurchaseMutation) RedeemCodeID() (r int64, exists bool) {
+	v := m.redeem_code_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRedeemCodeID returns the old "redeem_code_id" field's value of the RedeemCodePurchase entity.
+// If the RedeemCodePurchase object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodePurchaseMutation) OldRedeemCodeID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRedeemCodeID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRedeemCodeID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRedeemCodeID: %w", err)
+	}
+	return oldValue.RedeemCodeID, nil
+}
+
+// AddRedeemCodeID adds i to the "redeem_code_id" field.
+func (m *RedeemCodePurchaseMutation) AddRedeemCodeID(i int64) {
+	if m.addredeem_code_id != nil {
+		*m.addredeem_code_id += i
+	} else {
+		m.addredeem_code_id = &i
+	}
+}
+
+// AddedRedeemCodeID returns the value that was added to the "redeem_code_id" field in this mutation.
+func (m *RedeemCodePurchaseMutation) AddedRedeemCodeID() (r int64, exists bool) {
+	v := m.addredeem_code_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetRedeemCodeID resets all changes to the "redeem_code_id" field.
+func (m *RedeemCodePurchaseMutation) ResetRedeemCodeID() {
+	m.redeem_code_id = nil
+	m.addredeem_code_id = nil
+}
+
+// SetAmount sets the "amount" field.
+func (m *RedeemCodePurchaseMutation) SetAmount(d decimal.Decimal) {
+	m.amount = &d
+}
+
+// Amount returns the value of the "amount" field in the mutation.
+func (m *RedeemCodePurchaseMutation) Amount() (r decimal.Decimal, exists bool) {
+	v := m.amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAmount returns the old "amount" field's value of the RedeemCodePurchase entity.
+// If the RedeemCodePurchase object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodePurchaseMutation) OldAmount(ctx context.Context) (v decimal.Decimal, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAmount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAmount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAmount: %w", err)
+	}
+	return oldValue.Amount, nil
+}
+
+// ResetAmount resets all changes to the "amount" field.
+func (m *RedeemCodePurchaseMutation) ResetAmount() {
+	m.amount = nil
+}
+
+// SetRequestID sets the "request_id" field.
+func (m *RedeemCodePurchaseMutation) SetRequestID(s string) {
+	m.request_id = &s
+}
+
+// RequestID returns the value of the "request_id" field in the mutation.
+func (m *RedeemCodePurchaseMutation) RequestID() (r string, exists bool) {
+	v := m.request_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestID returns the old "request_id" field's value of the RedeemCodePurchase entity.
+// If the RedeemCodePurchase object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodePurchaseMutation) OldRequestID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestID: %w", err)
+	}
+	return oldValue.RequestID, nil
+}
+
+// ResetRequestID resets all changes to the "request_id" field.
+func (m *RedeemCodePurchaseMutation) ResetRequestID() {
+	m.request_id = nil
+}
+
+// SetStatus sets the "status" field.
+func (m *RedeemCodePurchaseMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *RedeemCodePurchaseMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the RedeemCodePurchase entity.
+// If the RedeemCodePurchase object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodePurchaseMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *RedeemCodePurchaseMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *RedeemCodePurchaseMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *RedeemCodePurchaseMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the RedeemCodePurchase entity.
+// If the RedeemCodePurchase object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodePurchaseMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *RedeemCodePurchaseMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetRevokedAt sets the "revoked_at" field.
+func (m *RedeemCodePurchaseMutation) SetRevokedAt(t time.Time) {
+	m.revoked_at = &t
+}
+
+// RevokedAt returns the value of the "revoked_at" field in the mutation.
+func (m *RedeemCodePurchaseMutation) RevokedAt() (r time.Time, exists bool) {
+	v := m.revoked_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRevokedAt returns the old "revoked_at" field's value of the RedeemCodePurchase entity.
+// If the RedeemCodePurchase object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodePurchaseMutation) OldRevokedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRevokedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRevokedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRevokedAt: %w", err)
+	}
+	return oldValue.RevokedAt, nil
+}
+
+// ClearRevokedAt clears the value of the "revoked_at" field.
+func (m *RedeemCodePurchaseMutation) ClearRevokedAt() {
+	m.revoked_at = nil
+	m.clearedFields[redeemcodepurchase.FieldRevokedAt] = struct{}{}
+}
+
+// RevokedAtCleared returns if the "revoked_at" field was cleared in this mutation.
+func (m *RedeemCodePurchaseMutation) RevokedAtCleared() bool {
+	_, ok := m.clearedFields[redeemcodepurchase.FieldRevokedAt]
+	return ok
+}
+
+// ResetRevokedAt resets all changes to the "revoked_at" field.
+func (m *RedeemCodePurchaseMutation) ResetRevokedAt() {
+	m.revoked_at = nil
+	delete(m.clearedFields, redeemcodepurchase.FieldRevokedAt)
+}
+
+// Where appends a list predicates to the RedeemCodePurchaseMutation builder.
+func (m *RedeemCodePurchaseMutation) Where(ps ...predicate.RedeemCodePurchase) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the RedeemCodePurchaseMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *RedeemCodePurchaseMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.RedeemCodePurchase, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *RedeemCodePurchaseMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *RedeemCodePurchaseMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (RedeemCodePurchase).
+func (m *RedeemCodePurchaseMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *RedeemCodePurchaseMutation) Fields() []string {
+	fields := make([]string, 0, 7)
+	if m.buyer_user_id != nil {
+		fields = append(fields, redeemcodepurchase.FieldBuyerUserID)
+	}
+	if m.redeem_code_id != nil {
+		fields = append(fields, redeemcodepurchase.FieldRedeemCodeID)
+	}
+	if m.amount != nil {
+		fields = append(fields, redeemcodepurchase.FieldAmount)
+	}
+	if m.request_id != nil {
+		fields = append(fields, redeemcodepurchase.FieldRequestID)
+	}
+	if m.status != nil {
+		fields = append(fields, redeemcodepurchase.FieldStatus)
+	}
+	if m.created_at != nil {
+		fields = append(fields, redeemcodepurchase.FieldCreatedAt)
+	}
+	if m.revoked_at != nil {
+		fields = append(fields, redeemcodepurchase.FieldRevokedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *RedeemCodePurchaseMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case redeemcodepurchase.FieldBuyerUserID:
+		return m.BuyerUserID()
+	case redeemcodepurchase.FieldRedeemCodeID:
+		return m.RedeemCodeID()
+	case redeemcodepurchase.FieldAmount:
+		return m.Amount()
+	case redeemcodepurchase.FieldRequestID:
+		return m.RequestID()
+	case redeemcodepurchase.FieldStatus:
+		return m.Status()
+	case redeemcodepurchase.FieldCreatedAt:
+		return m.CreatedAt()
+	case redeemcodepurchase.FieldRevokedAt:
+		return m.RevokedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *RedeemCodePurchaseMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case redeemcodepurchase.FieldBuyerUserID:
+		return m.OldBuyerUserID(ctx)
+	case redeemcodepurchase.FieldRedeemCodeID:
+		return m.OldRedeemCodeID(ctx)
+	case redeemcodepurchase.FieldAmount:
+		return m.OldAmount(ctx)
+	case redeemcodepurchase.FieldRequestID:
+		return m.OldRequestID(ctx)
+	case redeemcodepurchase.FieldStatus:
+		return m.OldStatus(ctx)
+	case redeemcodepurchase.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case redeemcodepurchase.FieldRevokedAt:
+		return m.OldRevokedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown RedeemCodePurchase field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *RedeemCodePurchaseMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case redeemcodepurchase.FieldBuyerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBuyerUserID(v)
+		return nil
+	case redeemcodepurchase.FieldRedeemCodeID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRedeemCodeID(v)
+		return nil
+	case redeemcodepurchase.FieldAmount:
+		v, ok := value.(decimal.Decimal)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAmount(v)
+		return nil
+	case redeemcodepurchase.FieldRequestID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestID(v)
+		return nil
+	case redeemcodepurchase.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case redeemcodepurchase.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case redeemcodepurchase.FieldRevokedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRevokedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown RedeemCodePurchase field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *RedeemCodePurchaseMutation) AddedFields() []string {
+	var fields []string
+	if m.addbuyer_user_id != nil {
+		fields = append(fields, redeemcodepurchase.FieldBuyerUserID)
+	}
+	if m.addredeem_code_id != nil {
+		fields = append(fields, redeemcodepurchase.FieldRedeemCodeID)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *RedeemCodePurchaseMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case redeemcodepurchase.FieldBuyerUserID:
+		return m.AddedBuyerUserID()
+	case redeemcodepurchase.FieldRedeemCodeID:
+		return m.AddedRedeemCodeID()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *RedeemCodePurchaseMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case redeemcodepurchase.FieldBuyerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddBuyerUserID(v)
+		return nil
+	case redeemcodepurchase.FieldRedeemCodeID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRedeemCodeID(v)
+		return nil
+	}
+	return fmt.Errorf("unknown RedeemCodePurchase numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *RedeemCodePurchaseMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(redeemcodepurchase.FieldRevokedAt) {
+		fields = append(fields, redeemcodepurchase.FieldRevokedAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *RedeemCodePurchaseMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *RedeemCodePurchaseMutation) ClearField(name string) error {
+	switch name {
+	case redeemcodepurchase.FieldRevokedAt:
+		m.ClearRevokedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown RedeemCodePurchase nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *RedeemCodePurchaseMutation) ResetField(name string) error {
+	switch name {
+	case redeemcodepurchase.FieldBuyerUserID:
+		m.ResetBuyerUserID()
+		return nil
+	case redeemcodepurchase.FieldRedeemCodeID:
+		m.ResetRedeemCodeID()
+		return nil
+	case redeemcodepurchase.FieldAmount:
+		m.ResetAmount()
+		return nil
+	case redeemcodepurchase.FieldRequestID:
+		m.ResetRequestID()
+		return nil
+	case redeemcodepurchase.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case redeemcodepurchase.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case redeemcodepurchase.FieldRevokedAt:
+		m.ResetRevokedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown RedeemCodePurchase field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *RedeemCodePurchaseMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *RedeemCodePurchaseMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *RedeemCodePurchaseMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *RedeemCodePurchaseMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *RedeemCodePurchaseMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *RedeemCodePurchaseMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *RedeemCodePurchaseMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown RedeemCodePurchase unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *RedeemCodePurchaseMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown RedeemCodePurchase edge %s", name)
 }
 
 // SecuritySecretMutation represents an operation that mutates the SecuritySecret nodes in the graph.

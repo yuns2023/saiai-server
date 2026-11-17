@@ -581,6 +581,11 @@ func TestAPIContracts(t *testing.T) {
 						"user_invite_max_unused": 5,
 						"user_invite_max_total": 0,
 						"user_invite_max_per_week": 0,
+						"redeem_purchase_enabled": false,
+						"redeem_purchase_min_amount": 1,
+						"redeem_purchase_max_amount": 500,
+						"redeem_purchase_window_max_amount": 1000,
+						"redeem_purchase_window_max_count": 20,
 						"home_content": "",
 					"hide_ccs_import_button": false,
 					"purchase_subscription_enabled": false,
@@ -1307,6 +1312,10 @@ func (stubRedeemCodeRepo) ListByUserPaginated(ctx context.Context, userID int64,
 
 func (stubRedeemCodeRepo) SumPositiveBalanceByUser(ctx context.Context, userID int64) (float64, error) {
 	return 0, errors.New("not implemented")
+}
+
+func (stubRedeemCodeRepo) IsPurchased(ctx context.Context, id int64) (bool, error) {
+	return false, errors.New("not implemented")
 }
 
 type stubUserSubscriptionRepo struct {

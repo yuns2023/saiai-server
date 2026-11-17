@@ -32,6 +32,9 @@ type SystemSettings struct {
 	TotpEnabled                      bool     `json:"totp_enabled"`                   // TOTP 双因素认证
 	TotpEncryptionKeyConfigured      bool     `json:"totp_encryption_key_configured"` // TOTP 加密密钥是否已配置
 
+	// User-bought balance redeem codes (flattened into this object).
+	RedeemPurchaseSettings
+
 	SMTPHost               string `json:"smtp_host"`
 	SMTPPort               int    `json:"smtp_port"`
 	SMTPUsername           string `json:"smtp_username"`
