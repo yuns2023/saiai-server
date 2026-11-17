@@ -800,6 +800,9 @@ func (s *SubscriptionService) resetEndedUsageWindow(ctx context.Context, sub *Us
 }
 
 // CheckAndResetWindows 检查并重置过期的窗口
+// The daily/weekly/monthly resets are conditional on the window start found
+// on sub, so after a no-op (already reset elsewhere) sub's updated fields do
+// not reflect the stored row; do not use it as a fresh snapshot.
 func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *UserSubscription) error {
 	// 使用当天零点作为新窗口起始时间
 	windowStart := startOfDay(time.Now())
