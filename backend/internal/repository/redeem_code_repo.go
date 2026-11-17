@@ -5,10 +5,12 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/cryptopaycredit"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/shopspring/decimal"
 )
 
 type redeemCodeRepository struct {
@@ -240,26 +242,56 @@ func (r *redeemCodeRepository) ListByUserPaginated(ctx context.Context, userID i
 	return redeemCodeEntitiesToService(codes), paginationResultFromTotal(int64(total), params), nil
 }
 
-// SumPositiveBalanceByUser returns total recharged amount (sum of value > 0 where type is balance/admin_balance).
+// SumPositiveBalanceByUser returns the user's total recharged amount: positive balance/admin_balance
+// codes the user redeemed plus credited stablecoin top-ups. Native payment orders are not added
+// separately: fulfilling an order redeems a balance code for it, which the code sum already counts.
 func (r *redeemCodeRepository) SumPositiveBalanceByUser(ctx context.Context, userID int64) (float64, error) {
-	var result []struct {
-		Sum float64 `json:"sum"`
-	}
-	err := r.client.RedeemCode.Query().
+	codes, err := scanSum(ctx, r.client.RedeemCode.Query().
 		Where(
 			redeemcode.UsedByEQ(userID),
 			redeemcode.ValueGT(0),
 			redeemcode.TypeIn("balance", "admin_balance"),
 		).
-		Aggregate(dbent.As(dbent.Sum(redeemcode.FieldValue), "sum")).
-		Scan(ctx, &result)
+		Aggregate(dbent.As(dbent.Sum(redeemcode.FieldValue), "sum")))
 	if err != nil {
 		return 0, err
 	}
-	if len(result) == 0 {
-		return 0, nil
+	crypto, err := scanSum(ctx, creditedCryptoTopUps(r.client, userID).
+		Aggregate(dbent.As(dbent.Sum(cryptopaycredit.FieldAmount), "sum")))
+	if err != nil {
+		return 0, err
 	}
-	return result[0].Sum, nil
+	// Both sums stay exact decimals; the interface's float64 is produced once, here.
+	return codes.Add(crypto).InexactFloat64(), nil
+}
+
+// creditedCryptoTopUps selects the user's stablecoin top-ups that reached the balance. A
+// crypto_pay_credits row is written only in the transaction that adds its amount to users.balance
+// (CryptoPayService.creditDeposit); observed, finalized-but-uncredited, held and orphaned deposits
+// have none. Crypto credits create no redeem code or payment order, so adding them to code- or
+// order-based checks never counts one top-up twice.
+func creditedCryptoTopUps(client *dbent.Client, userID int64) *dbent.CryptoPayCreditQuery {
+	return client.CryptoPayCredit.Query().Where(
+		cryptopaycredit.UserIDEQ(userID),
+		cryptopaycredit.AmountGT(decimal.Zero),
+	)
+}
+
+// scanSum runs a single numeric "sum" aggregate without going through float64; an empty set
+// (SQL NULL) is 0.
+func scanSum(ctx context.Context, sel interface {
+	Scan(context.Context, any) error
+}) (decimal.Decimal, error) {
+	var result []struct {
+		Sum decimal.NullDecimal `json:"sum"`
+	}
+	if err := sel.Scan(ctx, &result); err != nil {
+		return decimal.Zero, err
+	}
+	if len(result) == 0 || !result[0].Sum.Valid {
+		return decimal.Zero, nil
+	}
+	return result[0].Sum.Decimal, nil
 }
 
 func redeemCodeEntityToService(m *dbent.RedeemCode) *service.RedeemCode {

@@ -37,6 +37,11 @@ func (r *userInviteRepository) HasQualifyingTopUp(ctx context.Context, userID in
 	if err != nil || paid {
 		return paid, err
 	}
+	// Stablecoin top-ups reach the balance with neither a payment order nor a redeem code.
+	crypto, err := creditedCryptoTopUps(r.client, userID).Exist(ctx)
+	if err != nil || crypto {
+		return crypto, err
+	}
 	return r.client.RedeemCode.Query().
 		Where(
 			redeemcode.UsedByEQ(userID),
