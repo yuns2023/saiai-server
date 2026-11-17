@@ -108,6 +108,9 @@ type BillingCacheService struct {
 	rateLimitWindowResets sync.Map
 	// runAsync runs window maintenance; tests replace it to run inline.
 	runAsync func(func())
+	// subscriptionWindowMaintenance is SubscriptionService.DoWindowMaintenance,
+	// registered by NewSubscriptionService (which depends on this service).
+	subscriptionWindowMaintenance atomic.Pointer[func(*UserSubscription)]
 	// rateLimitLoadErrLastLog throttles the fail-open warning (unix nanos).
 	rateLimitLoadErrLastLog atomic.Int64
 }
@@ -613,18 +616,40 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 // fresh row must be the subscription this request will charge: a replacement
 // since selection fails closed rather than validating one row and billing another.
 func (s *BillingCacheService) checkSmartSwitchSubscription(ctx context.Context, userID int64, group *Group, subscription *UserSubscription) error {
+	_, _, err := s.checkFreshSubscription(ctx, userID, group, subscription)
+	return err
+}
+
+// checkFreshSubscription validates the fresh row of subscription (see
+// checkSmartSwitchSubscription). On success it returns the row with ended
+// windows normalized in memory and whether those windows need the
+// persistent reset (SubscriptionService.DoWindowMaintenance).
+func (s *BillingCacheService) checkFreshSubscription(ctx context.Context, userID int64, group *Group, subscription *UserSubscription) (*UserSubscription, bool, error) {
 	fresh, err := s.subRepo.GetActiveByUserIDAndGroupID(ctx, userID, group.ID)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	if fresh.ID != subscription.ID {
-		return ErrSubscriptionNotFound
+		return nil, false, ErrSubscriptionNotFound
 	}
 	owned := *fresh
-	if _, err := (&SubscriptionService{}).ValidateAndCheckLimits(&owned, group); err != nil {
-		return err
+	needsMaintenance, err := (&SubscriptionService{}).ValidateAndCheckLimits(&owned, group)
+	if err != nil {
+		return nil, false, err
 	}
-	return owned.ExhaustedLimitError(group)
+	if err := owned.ExhaustedLimitError(group); err != nil {
+		return nil, false, err
+	}
+	return &owned, needsMaintenance, nil
+}
+
+// SetSubscriptionWindowMaintenance registers the persistent window reset
+// used by CheckSessionTurnEligibility.
+func (s *BillingCacheService) SetSubscriptionWindowMaintenance(maintain func(*UserSubscription)) {
+	if s == nil || maintain == nil {
+		return
+	}
+	s.subscriptionWindowMaintenance.Store(&maintain)
 }
 
 // CheckBillingEligibility 检查用户是否有资格发起请求
@@ -689,7 +714,8 @@ func (s *BillingCacheService) CheckSessionTurnEligibility(ctx context.Context, u
 	if !isSubscriptionUsageLimitError(err) && !errors.Is(err, ErrSubscriptionNotFound) && !errors.Is(err, ErrSubscriptionInvalid) {
 		return err
 	}
-	if freshErr := s.checkSmartSwitchSubscription(ctx, user.ID, group, subscription); freshErr != nil {
+	owned, needsMaintenance, freshErr := s.checkFreshSubscription(ctx, user.ID, group, subscription)
+	if freshErr != nil {
 		if isSubscriptionUsageLimitError(freshErr) || errors.Is(freshErr, ErrSubscriptionNotFound) ||
 			errors.Is(freshErr, ErrSubscriptionExpired) || errors.Is(freshErr, ErrSubscriptionSuspended) {
 			return withSubscriptionLimitDetail(freshErr, subscription, group)
@@ -697,8 +723,16 @@ func (s *BillingCacheService) CheckSessionTurnEligibility(ctx context.Context, u
 		logger.LegacyPrintf("service.billing_cache", "ALERT: session subscription recheck failed for user %d group %d: %v", user.ID, group.ID, freshErr)
 		return ErrBillingServiceUnavailable.WithCause(freshErr)
 	}
-	// The cached rejection was stale. Key rate limits were skipped by the
-	// early return above; apply them now.
+	// The cached rejection was stale. Ended windows passed only because they
+	// were zeroed in memory; persist their reset (which also invalidates the
+	// cache) as the auth middleware does, so usage in the new window counts
+	// toward the limit again instead of being zeroed on every later turn.
+	if needsMaintenance {
+		if maintain := s.subscriptionWindowMaintenance.Load(); maintain != nil {
+			(*maintain)(owned)
+		}
+	}
+	// Key rate limits were skipped by the early return above; apply them now.
 	if apiKey != nil && apiKey.HasRateLimits() {
 		return s.checkAPIKeyRateLimits(ctx, apiKey)
 	}

@@ -260,3 +260,49 @@ func TestOpenAIWSLaterTurnBillingModeChangeRequiresReconnect(t *testing.T) {
 	require.Equal(t, "api_key_group_changed", rejection.code)
 	require.Zero(t, users.reads.Load())
 }
+
+// A session that crosses a daily boundary: the turn after the boundary passes
+// and persists the window reset (as the auth middleware would), so usage of
+// the new window is enforced on the following turns instead of being zeroed
+// in memory forever.
+func TestOpenAIWSLaterTurnPersistsEndedSubscriptionWindow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	daily := 5.0
+	group := &service.Group{
+		ID: 11, Platform: service.PlatformOpenAI, Status: service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeSubscription, DailyLimitUSD: &daily,
+	}
+	yesterday := time.Now().Add(-25 * time.Hour)
+	stored := &service.UserSubscription{
+		ID: 21, UserID: 2, GroupID: 11, Status: service.SubscriptionStatusActive,
+		ExpiresAt: time.Now().Add(24 * time.Hour), DailyUsageUSD: 6, DailyWindowStart: &yesterday,
+	}
+	subs := &wsTurnBillingSubRepoStub{sub: stored}
+	users := &wsTurnBillingUserRepoStub{}
+	users.balance.Store(float64(0))
+	h, key := newWSTurnBillingHandler(t, group, users, subs)
+	var maintained []*service.UserSubscription
+	h.billingCacheService.SetSubscriptionWindowMaintenance(func(sub *service.UserSubscription) {
+		maintained = append(maintained, sub)
+		now := time.Now()
+		stored.DailyWindowStart = &now
+		stored.DailyUsageUSD = 0
+	})
+	sessionSub := *stored
+	c := wsTurnBillingTestContext()
+	var sessionGroup atomic.Pointer[service.Group]
+	sessionGroup.Store(group)
+	admit := func(turn int) error {
+		return h.admitOpenAIWSLaterTurn(c.Request.Context(), c, nil, key, &sessionGroup, &sessionSub, key.UserID, turn, []byte(wsTurnBillingPayload))
+	}
+
+	require.NoError(t, admit(2))
+	require.Len(t, maintained, 1)
+	require.Equal(t, int64(21), maintained[0].ID)
+
+	stored.DailyUsageUSD = 6 // spent in the new window
+	var rejection *openAIWSSessionRejection
+	require.ErrorAs(t, admit(3), &rejection)
+	require.Equal(t, "billing_error", rejection.code)
+	require.Len(t, maintained, 1)
+}

@@ -66,6 +66,7 @@ func NewSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscript
 	}
 	svc.initSubCache(cfg)
 	svc.initMaintenanceQueue(cfg)
+	billingCacheService.SetSubscriptionWindowMaintenance(svc.DoWindowMaintenance)
 	return svc
 }
 
