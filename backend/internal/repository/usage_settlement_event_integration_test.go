@@ -565,21 +565,21 @@ func TestSettlementEvent_SegmentBudgetBoundsStatementTimeouts(t *testing.T) {
 	require.NoError(t, budget.bound(deadlineCtx, tx))
 	lock, stmt := read(tx)
 	require.Equal(t, "1s", lock)
-	stmtMS, err := time.ParseDuration(stmt)
+	stmtTimeout, err := time.ParseDuration(stmt)
 	require.NoError(t, err)
-	require.LessOrEqual(t, stmtMS, 1800*time.Millisecond)
-	require.Greater(t, stmtMS, 1500*time.Millisecond)
+	require.LessOrEqual(t, stmtTimeout, 1800*time.Millisecond)
+	require.Greater(t, stmtTimeout, 1500*time.Millisecond)
 
 	// Less than 1s left: lock_timeout follows the remaining budget.
 	short := settlementSegmentBudget{deadline: time.Now().Add(400 * time.Millisecond)}
 	require.NoError(t, short.bound(ctx, tx))
 	lock, stmt = read(tx)
-	lockMS, err := time.ParseDuration(lock)
+	lockTimeout, err := time.ParseDuration(lock)
 	require.NoError(t, err)
-	stmtMS, err = time.ParseDuration(stmt)
+	stmtTimeout, err = time.ParseDuration(stmt)
 	require.NoError(t, err)
-	require.LessOrEqual(t, lockMS, 400*time.Millisecond)
-	require.Equal(t, lockMS, stmtMS)
+	require.LessOrEqual(t, lockTimeout, 400*time.Millisecond)
+	require.Equal(t, lockTimeout, stmtTimeout)
 
 	// Exhausted: no statement is attempted.
 	gone := settlementSegmentBudget{deadline: time.Now().Add(20 * time.Millisecond)}
