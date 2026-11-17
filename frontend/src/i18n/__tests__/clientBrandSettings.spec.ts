@@ -19,9 +19,14 @@ describe('client brand settings', () => {
       expect(en.admin.settings.site[key]).toBeTruthy()
       expect(zh.admin.settings.site[key]).toBeTruthy()
     }
-    expect(zh.admin.settings.site.clientBrandNameHint).toContain('留空 = 保持原 SAIAI 文案')
-    expect(zh.admin.settings.site.clientSetupCommandHint).toContain('留空 = 保持原 SAIAI 文案')
-    expect(en.admin.settings.site.clientBrandNameHint).toContain('keep the original SAIAI wording')
+    // The SAIAI wording survives only when both fields are empty.
+    expect(zh.admin.settings.site.clientBrandNameHint).toContain('两项都留空 = 保持原 SAIAI 文案')
+    expect(zh.admin.settings.site.clientSetupCommandHint).toContain('两项都留空 = 保持原 SAIAI 文案')
+    expect(en.admin.settings.site.clientBrandNameHint).toContain('kept only when both fields are empty')
+    expect(en.admin.settings.site.clientSetupCommandHint).toContain('kept only when both fields are empty')
+    // Admin-authored passthrough rule texts are out of scope.
+    expect(zh.admin.settings.site.clientBrandNameHint).toContain('管理员自定义的错误透传规则文案不会被替换，请自行避免写入 SAIAI')
+    expect(en.admin.settings.site.clientBrandNameHint).toContain('admin-defined error passthrough rules are not rewritten')
   })
 
   it('edits and saves both fields on the admin settings page', () => {

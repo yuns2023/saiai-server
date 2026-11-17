@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/model"
 	pkgerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -338,4 +339,57 @@ func TestUnbrandedErrorBodiesAreByteIdentical(t *testing.T) {
 
 	frame := codexTimezoneGuardRejection(codexTimezoneGuardMessageFor(service.ClientBrand{}, "codex_cli_rs/0.170.0 (Ubuntu 24.4.0; x86_64) xterm-256color")).frame()
 	require.Equal(t, `{"error":{"code":"codex_timezone_reinit_required","message":"`+baselineCodexReinitGeneric+`","type":"invalid_request_error"},"status":400,"type":"error"}`, string(frame))
+}
+
+// passthroughRuleRepoStub feeds rules to a real ErrorPassthroughService.
+type passthroughRuleRepoStub struct {
+	service.ErrorPassthroughRepository
+	rules []*model.ErrorPassthroughRule
+}
+
+func (r *passthroughRuleRepoStub) List(context.Context) ([]*model.ErrorPassthroughRule, error) {
+	return r.rules, nil
+}
+
+// Failover exhausted after the stream started, through the real passthrough
+// rule path (handleFailoverExhausted → rule → SSE error event). Admin-authored
+// CustomMessage text is out of scope and is passed through unchanged.
+func TestErrorPassthroughRuleFailoverSSEUsesRequestBrand(t *testing.T) {
+	const adminText = "SAIAI 维护中，请稍后再试"
+	branded := handlerTestBrand(t, "CCYou", "aitp init")
+	sse := func(message string) string {
+		return `data: {"type":"error","error":{"type":"upstream_error","message":"` + message + `"}}` + "\n\n"
+	}
+	for _, tc := range []struct {
+		name            string
+		brand           service.ClientBrand
+		passthroughBody bool
+		customMessage   string
+		want            string
+	}{
+		{"restricted identity, empty settings", service.ClientBrand{}, true, "", sse(baselineHandlerDeviceUnavailable)},
+		{"restricted identity, branded", branded, true, "", sse("CCYou 服务通道暂时不可用，请稍后重试；如持续出现，请联系支持。")},
+		{"admin custom message, branded", branded, false, adminText, sse(adminText)},
+		{"admin custom message, empty settings", service.ClientBrand{}, false, adminText, sse(adminText)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			responseCode := http.StatusServiceUnavailable
+			rule := &model.ErrorPassthroughRule{
+				ID: 1, Name: "TEST_ONLY_RULE", Enabled: true, Priority: 1,
+				ErrorCodes: []int{http.StatusBadRequest}, Keywords: []string{"upstream failure"}, MatchMode: model.MatchModeAll,
+				Platforms: []string{service.PlatformAnthropic}, ResponseCode: &responseCode, PassthroughBody: tc.passthroughBody,
+			}
+			if tc.customMessage != "" {
+				custom := tc.customMessage
+				rule.CustomMessage = &custom
+			}
+			h := &GatewayHandler{errorPassthroughService: service.NewErrorPassthroughService(&passthroughRuleRepoStub{rules: []*model.ErrorPassthroughRule{rule}}, nil)}
+			c, recorder := brandedTestContext(t, http.MethodPost, "/v1/messages", tc.brand)
+			h.handleFailoverExhausted(c, &service.UpstreamFailoverError{
+				StatusCode:   http.StatusBadRequest,
+				ResponseBody: []byte(`{"type":"error","error":{"type":"invalid_request_error","message":"ReClaude upstream failure"}}`),
+			}, service.PlatformAnthropic, true)
+			require.Equal(t, tc.want, recorder.Body.String())
+		})
+	}
 }

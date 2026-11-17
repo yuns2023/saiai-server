@@ -5309,11 +5309,11 @@ export default {
         clientBrandName: 'Client Brand Name',
         clientBrandNamePlaceholder: 'e.g. CCYou',
         clientBrandNameHint:
-          'Used in error messages returned to clients (e.g. "use the official client"). Leave empty to keep the original SAIAI wording; once either field is set, messages no longer mention SAIAI (so neither field may contain it). Up to 32 characters.',
+          'Used in error messages returned to clients (e.g. "use the official client"). The original SAIAI wording is kept only when both fields are empty; filling either one switches all these messages to custom or neutral wording that never mentions SAIAI (so neither field may contain it). Custom messages in admin-defined error passthrough rules are not rewritten; keep SAIAI out of them yourself. Up to 32 characters.',
         clientSetupCommand: 'Client Setup Command',
         clientSetupCommandPlaceholder: 'e.g. aitp init',
         clientSetupCommandHint:
-          'The command named in "re-run setup" hints. Leave empty to keep the original SAIAI wording; with only a brand name set, hints say "re-run your client setup". Up to 64 characters.',
+          'The command named in "re-run setup" hints. The original SAIAI wording is kept only when both fields are empty; once either is filled, hints name this command, or say "re-run your client setup" when only the brand name is set. Up to 64 characters.',
         apiBaseUrl: 'API Base URL',
         apiBaseUrlPlaceholder: 'https://api.example.com',
         apiBaseUrlHint:

@@ -5468,11 +5468,11 @@ export default {
         clientBrandName: '客户端品牌名',
         clientBrandNamePlaceholder: '例如：CCYou',
         clientBrandNameHint:
-          '用于返回给客户端的错误提示（如“请使用官方客户端”）。留空 = 保持原 SAIAI 文案；任一项填写后提示中不再出现 SAIAI（因此不能填写 SAIAI）。最多 32 个字符。',
+          '用于返回给客户端的错误提示（如“请使用官方客户端”）。两项都留空 = 保持原 SAIAI 文案；任一项填写后，这些提示全部改用自定义或中性措辞，不再出现 SAIAI（因此不能填写 SAIAI）。管理员自定义的错误透传规则文案不会被替换，请自行避免写入 SAIAI。最多 32 个字符。',
         clientSetupCommand: '客户端初始化命令',
         clientSetupCommandPlaceholder: '例如：aitp init',
         clientSetupCommandHint:
-          '错误提示中“重新运行初始化”的命令。留空 = 保持原 SAIAI 文案；只填品牌名时显示“重新运行客户端初始化”。最多 64 个字符。',
+          '错误提示中“重新运行初始化”所用的命令。两项都留空 = 保持原 SAIAI 文案；任一项填写后即切换为自定义措辞：填写本项时提示运行该命令，只填品牌名时显示“重新运行客户端初始化”。最多 64 个字符。',
         apiBaseUrl: 'API 端点地址',
         apiBaseUrlHint: '用于"使用密钥"和"导入到 CC Switch"功能，留空则使用当前站点地址',
         apiBaseUrlPlaceholder: 'https://api.example.com',

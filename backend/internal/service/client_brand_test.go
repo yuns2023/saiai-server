@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/model"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -676,4 +677,62 @@ func TestBalanceRechargeSubjectFollowsRequestBrand(t *testing.T) {
 func TestUnbrandedCodexCapacityBodyIsByteIdentical(t *testing.T) {
 	got := normalizeOpenAICodexCapacityError(ClientBrand{}, auditOAuthPolicyAccount(), []byte(`{"error":{"type":"usage_limit_reached","plan_type":"plus"}}`))
 	require.Equal(t, `{"error":{"code":"saiai_upstream_capacity_unavailable","message":"`+baselineCodexCapacity+`","type":"server_error"}}`, string(got))
+}
+
+// passthroughRuleRepoStub feeds rules to a real ErrorPassthroughService.
+type passthroughRuleRepoStub struct {
+	ErrorPassthroughRepository
+	rules []*model.ErrorPassthroughRule
+}
+
+func (r *passthroughRuleRepoStub) List(context.Context) ([]*model.ErrorPassthroughRule, error) {
+	return r.rules, nil
+}
+
+func clientBrandPassthroughRule(passthroughBody bool, customMessage string) *model.ErrorPassthroughRule {
+	responseCode := http.StatusServiceUnavailable
+	rule := &model.ErrorPassthroughRule{
+		ID: 1, Name: "TEST_ONLY_RULE", Enabled: true, Priority: 1,
+		ErrorCodes: []int{http.StatusBadRequest}, Keywords: []string{"upstream failure"}, MatchMode: model.MatchModeAll,
+		Platforms: []string{PlatformAnthropic}, ResponseCode: &responseCode, PassthroughBody: passthroughBody,
+	}
+	if customMessage != "" {
+		rule.CustomMessage = &customMessage
+	}
+	return rule
+}
+
+// Non-failover upstream error through the real passthrough rule path
+// (handleErrorResponse → applyErrorPassthroughRule → JSON). Admin-authored
+// CustomMessage text is out of scope and is passed through unchanged.
+func TestErrorPassthroughRuleNonFailoverJSONUsesRequestBrand(t *testing.T) {
+	const adminText = "SAIAI 维护中，请稍后再试"
+	branded := testClientBrand(t, "CCYou", "aitp init")
+	for _, tc := range []struct {
+		name            string
+		brand           ClientBrand
+		passthroughBody bool
+		customMessage   string
+		want            string
+	}{
+		{"restricted identity, empty settings", ClientBrand{}, true, "", `{"error":{"message":"` + baselineDeviceUnavailable + `","type":"upstream_error"},"type":"error"}`},
+		{"restricted identity, branded", branded, true, "", `{"error":{"message":"CCYou 服务通道暂时不可用，请稍后重试；如持续出现，请联系支持。","type":"upstream_error"},"type":"error"}`},
+		{"admin custom message, branded", branded, false, adminText, `{"error":{"message":"` + adminText + `","type":"upstream_error"},"type":"error"}`},
+		{"admin custom message, empty settings", ClientBrand{}, false, adminText, `{"error":{"message":"` + adminText + `","type":"upstream_error"},"type":"error"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rules := NewErrorPassthroughService(&passthroughRuleRepoStub{rules: []*model.ErrorPassthroughRule{clientBrandPassthroughRule(tc.passthroughBody, tc.customMessage)}}, nil)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			withClientBrandRequest(c, tc.brand)
+			BindErrorPassthroughService(c, rules)
+			body := `{"type":"error","error":{"type":"invalid_request_error","message":"ReClaude upstream failure"}}`
+			resp := &http.Response{StatusCode: http.StatusBadRequest, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
+			_, err := (&GatewayService{}).handleErrorResponse(context.Background(), resp, c, &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey})
+			require.Error(t, err)
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code, "rule status code")
+			require.Equal(t, tc.want, recorder.Body.String())
+		})
+	}
 }
