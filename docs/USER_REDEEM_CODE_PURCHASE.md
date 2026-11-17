@@ -109,18 +109,20 @@ off.
 Request: `{"amount": 10.5, "request_id": "<UUID>"}`. Response: the purchase
 item plus `"replayed": true|false`.
 
-- `amount` is a JSON number, or a string holding a valid JSON number. Anything
-  else (for example `"+10"` or `" 10 "`) fails JSON binding with a plain 400.
-  The number must then match `^[0-9]+(\.[0-9]{1,2})?$`, be at most 32
-  characters and be above 0: `10.500`, `1e2` and negative values are rejected
-  with 400 `REDEEM_PURCHASE_INVALID_AMOUNT`, never rounded. The parsed decimal
-  is the only value used for every column and comparison.
+- `amount` is a JSON number, or a string holding a valid JSON number. A
+  malformed numeric string such as `"+10"` or `" 10 "` fails JSON binding
+  with a plain 400 without `reason`. A missing or `null` amount passes binding
+  as an empty value and is rejected by the check below. The number must match
+  `^[0-9]+(\.[0-9]{1,2})?$`, be at most 32 characters and be above 0:
+  `10.500`, `1e2` and negative values are rejected with 400
+  `REDEEM_PURCHASE_INVALID_AMOUNT`, never rounded. The parsed decimal is the
+  only value used for every column and comparison.
 - `request_id` is the idempotency key: a canonical 36-character UUID in any
   letter case, stored in lower case. The nil UUID is rejected (400
   `REDEEM_PURCHASE_INVALID_REQUEST_ID`). Use one `request_id` per purchase
   intent, and reuse it when retrying.
-- `request_id` is checked before `amount`. Both checks run before any
-  database access.
+- After JSON binding, `request_id` is checked before `amount`. Both checks run
+  before any database access.
 
 The purchase then runs in one transaction, in this order:
 
