@@ -16,9 +16,9 @@ import (
 // Rules (admin settings, all default off / conservative):
 //   - user_invite_enabled: users may generate codes. Turning it off stops new codes; codes
 //     already handed out keep working (a code is a bearer token like admin codes).
-//   - Eligibility: the user has topped up (a completed payment order) or redeemed a
-//     balance / subscription / concurrency code. Admin adjustments and the invitation the
-//     user signed up with do not count.
+//   - Eligibility: the user has topped up (a completed payment order or a credited stablecoin
+//     top-up) or redeemed a balance / subscription / concurrency code. Admin adjustments and the
+//     invitation the user signed up with do not count.
 //   - user_invite_max_unused: unused codes a user may hold at once (default 5).
 //   - user_invite_max_total: optional lifetime cap on people invited (0 = unlimited).
 //   - user_invite_max_per_week: optional cap on codes generated in a rolling 7 days (by

@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -154,4 +155,19 @@ func TestTopUpChecks_PaymentOrderCountsOnceNextToCodesAndCrypto(t *testing.T) {
 	sum, err = redeemRepo.SumPositiveBalanceByUser(ctx, small)
 	require.NoError(t, err)
 	require.Equal(t, 0.3, sum)
+
+	// The code SUM below has 20 significant digits, more than a float64 holds: it must reach the
+	// final float64 conversion as an exact decimal. (Each code value alone is float-exact.)
+	large := cryptoTopUpUser(t)
+	usedCode(t, large, service.RedeemTypeBalance, 123456789012.3456)
+	usedCode(t, large, service.RedeemTypeBalance, 0.00007891)
+	var codeSum string
+	require.NoError(t, integrationDB.QueryRow("SELECT SUM(value)::text FROM redeem_codes WHERE used_by = $1", large).Scan(&codeSum))
+	require.Equal(t, "123456789012.34567891", codeSum)
+	_, status = ingestOne(t, env, evmObs(evmAddressFor(t, env, large), 2, 22, true)) // 0.000002
+	require.Equal(t, "credited", status)
+	sum, err = redeemRepo.SumPositiveBalanceByUser(ctx, large)
+	require.NoError(t, err)
+	want := decimal.RequireFromString(codeSum).Add(decimal.RequireFromString("0.000002")).InexactFloat64()
+	require.Equal(t, want, sum)
 }

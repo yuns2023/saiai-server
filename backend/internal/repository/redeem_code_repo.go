@@ -261,8 +261,8 @@ func (r *redeemCodeRepository) SumPositiveBalanceByUser(ctx context.Context, use
 	if err != nil {
 		return 0, err
 	}
-	// Add as decimals so combining the two sums adds no float noise of its own (0.1 + 0.2).
-	return decimal.NewFromFloat(codes).Add(decimal.NewFromFloat(crypto)).InexactFloat64(), nil
+	// Both sums stay exact decimals; the interface's float64 is produced once, here.
+	return codes.Add(crypto).InexactFloat64(), nil
 }
 
 // creditedCryptoTopUps selects the user's stablecoin top-ups that reached the balance. A
@@ -277,20 +277,21 @@ func creditedCryptoTopUps(client *dbent.Client, userID int64) *dbent.CryptoPayCr
 	)
 }
 
-// scanSum runs a single "sum" aggregate; an empty set (SQL NULL) is 0.
+// scanSum runs a single numeric "sum" aggregate without going through float64; an empty set
+// (SQL NULL) is 0.
 func scanSum(ctx context.Context, sel interface {
 	Scan(context.Context, any) error
-}) (float64, error) {
+}) (decimal.Decimal, error) {
 	var result []struct {
-		Sum float64 `json:"sum"`
+		Sum decimal.NullDecimal `json:"sum"`
 	}
 	if err := sel.Scan(ctx, &result); err != nil {
-		return 0, err
+		return decimal.Zero, err
 	}
-	if len(result) == 0 {
-		return 0, nil
+	if len(result) == 0 || !result[0].Sum.Valid {
+		return decimal.Zero, nil
 	}
-	return result[0].Sum, nil
+	return result[0].Sum.Decimal, nil
 }
 
 func redeemCodeEntityToService(m *dbent.RedeemCode) *service.RedeemCode {
