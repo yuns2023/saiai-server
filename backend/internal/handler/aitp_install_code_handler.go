@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -69,7 +70,9 @@ func (h *AITPInstallCodeHandler) Create(c *gin.Context) {
 		zap.String("shell", shellForLog),
 	)
 	if err != nil {
-		audit.Info("aitp install code not issued", zap.String("result", "refused"), zap.Error(err))
+		// The reason code only: error texts may carry infrastructure details (5xx causes are
+		// logged by response.ErrorFrom).
+		audit.Info("aitp install code not issued", zap.String("result", "refused"), zap.String("reason", infraerrors.Reason(err)))
 		response.ErrorFrom(c, err)
 		return
 	}

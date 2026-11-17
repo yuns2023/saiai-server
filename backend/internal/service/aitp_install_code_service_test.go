@@ -311,6 +311,8 @@ func TestAITPInstallRoot(t *testing.T) {
 		"http://127.0.0.1:8080":             "http://127.0.0.1:8080",
 		"https://[2001:db8::1]:8443/a_b~c.": "https://[2001:db8::1]:8443/a_b~c.",
 		"https://x.example:65535":           "https://x.example:65535",
+		"http://[::1]:8080/v1":              "http://[::1]:8080",
+		"https://[::ffff:192.0.2.1]":        "https://[::ffff:192.0.2.1]",
 		"https://ccyou.dev/\u00a0":          "https://ccyou.dev", // surrounding Unicode space is trimmed like JS trim()
 	} {
 		got, ok := AITPInstallRoot(raw)
@@ -329,7 +331,8 @@ func TestAITPInstallRoot(t *testing.T) {
 		"https://ccyou.dev/a‘b", "https://ccyou.dev/a’b", "https://ccyou.dev/a‚b", "https://ccyou.dev/a‛b",
 		"https://bücher.example", "https://ccyou.dev/ü", "https://ccyou.dev/a\u00a0b", "https://ccyou.dev/a\u2028b",
 		"https://ccyou.dev:0", "https://ccyou.dev:65536", "https://ccyou.dev:99999", "https://ccyou.dev:123456",
-		"https://ccyou.dev:", "https://[::1", "https://[::1]x",
+		"https://ccyou.dev:", "https://[::1", "https://[::1]x", "https://[.]", "https://[::::]", "https://[127.0.0.1]",
+		"https://[::ffff:1.2.3.4x]", "https://[1:2:3:4:5:6:7:8:9]",
 	} {
 		got, ok := AITPInstallRoot(raw)
 		require.False(t, ok, "%q accepted as %q", raw, got)

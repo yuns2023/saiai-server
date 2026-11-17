@@ -203,7 +203,7 @@ describe('ConnectPanel install codes', () => {
   })
 
   it('hides an expired command', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] })
     api.installCode.mockResolvedValueOnce(reply('Q7M2K9XW4TRB'))
     const w = mountPanel({ codes: true })
     await w.find('[data-testid=connect-code-generate]').trigger('click')
@@ -216,12 +216,40 @@ describe('ConnectPanel install codes', () => {
     expect(w.find('[data-testid=connect-code-expired]').text()).toBe('这条安装命令已过期，请重新生成。')
   })
 
-  it('never trusts a server deadline past the code lifetime, nor shows a code it does not recognize', async () => {
+  it('counts validity on the local monotonic clock, whatever the server or wall clock says', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] })
+    // A client clock running ahead makes the server time look past: still shown.
     api.installCode.mockResolvedValueOnce({ code: 'Q7M2K9XW4TRB', expires_at: new Date(Date.now() - 60_000).toISOString() })
     const w = mountPanel({ codes: true })
     await w.find('[data-testid=connect-code-generate]').trigger('click')
     await flushPromises()
-    // A client clock running ahead makes the server time look past; the local 10 minutes still apply.
+    expect(shortCommand(w).exists()).toBe(true)
+
+    // A wall clock set back does not keep the code alive past 10 minutes.
+    vi.setSystemTime(Date.now() - 60 * 60 * 1000)
+    vi.advanceTimersByTime(10 * 60 * 1000 + 5000)
+    await w.vm.$nextTick()
+    expect(shortCommand(w).exists()).toBe(false)
+  })
+
+  it('a response that arrives after the panel closed changes nothing', async () => {
+    const pending = deferred<InstallCodeResponse>()
+    api.installCode.mockReturnValueOnce(pending.promise)
+    const intervals = vi.spyOn(window, 'setInterval')
+    const w = mountPanel({ codes: true })
+    await w.find('[data-testid=connect-code-generate]').trigger('click')
+    w.unmount()
+    pending.resolve(reply('Q7M2K9XW4TRB'))
+    await flushPromises()
+    expect(intervals).not.toHaveBeenCalled()
+    intervals.mockRestore()
+  })
+
+  it('never shows a code it does not recognize', async () => {
+    api.installCode.mockResolvedValueOnce(reply('Q7M2K9XW4TRB'))
+    const w = mountPanel({ codes: true })
+    await w.find('[data-testid=connect-code-generate]').trigger('click')
+    await flushPromises()
     expect(shortCommand(w).exists()).toBe(true)
 
     api.installCode.mockResolvedValueOnce({ code: "abc'; rm -rf ~", expires_at: inTenMinutes() })

@@ -34,8 +34,13 @@ const envText = computed(() => snippet.value.envLines.join('\n'))
 
 // ---- one-time install codes (admin switch; off = the panel exactly as before) ----
 
-/** Server TTL; the local deadline counts from the request start, so skewed clocks never show a dead code. */
+/**
+ * Code lifetime (the server's AITPInstallCodeTTL). Validity is counted on the monotonic
+ * clock from the request start, which precedes the server's SET, so neither a skewed nor a
+ * changed wall clock keeps a dead code on screen or hides a live one early.
+ */
 const CODE_TTL_MS = 10 * 60 * 1000
+const monotonic = () => performance.now()
 
 /** Short command instead of the full one, wherever the full one-line command would be offered. */
 const codeMode = computed(() => app.aitpInstallCodeEnabled && !!snippet.value.command)
@@ -45,7 +50,10 @@ interface CodeSlot {
   seq: number
   loading: boolean
   code: string | null
+  /** monotonic() deadline */
   deadline: number
+  /** Wall-clock time shown as "valid until". */
+  expiresAt: number
   error: string
 }
 const slots = ref<Record<string, CodeSlot>>({})
@@ -61,13 +69,22 @@ watch(
   }
 )
 
-const now = ref(Date.now())
+const now = ref(monotonic())
 let ticker: number | undefined
+let disposed = false
+const tick = () => (now.value = monotonic())
 /** Re-check expiry while a code is shown; started by the first code, so the off state runs no timer. */
 function startTicker(): void {
-  if (ticker === undefined) ticker = window.setInterval(() => (now.value = Date.now()), 5000)
+  if (ticker !== undefined || disposed) return
+  ticker = window.setInterval(tick, 5000)
+  // Background tabs throttle timers: re-check as soon as the page is visible again.
+  document.addEventListener('visibilitychange', tick)
 }
-onBeforeUnmount(() => window.clearInterval(ticker))
+onBeforeUnmount(() => {
+  disposed = true
+  window.clearInterval(ticker)
+  document.removeEventListener('visibilitychange', tick)
+})
 
 const expired = computed(() => !!current.value?.code && now.value >= current.value.deadline)
 const shortCommand = computed(() =>
@@ -75,7 +92,7 @@ const shortCommand = computed(() =>
 )
 const expiresText = computed(() =>
   current.value?.code
-    ? new Intl.DateTimeFormat(intlLocale(), { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(current.value.deadline))
+    ? new Intl.DateTimeFormat(intlLocale(), { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(current.value.expiresAt))
     : ''
 )
 
@@ -99,31 +116,34 @@ async function generate(): Promise<void> {
   const requestShell = shell.value
   const key = slotKey(keyId, installCodeKind(requestShell))
   const seq = ++requestSeq
-  const startedAt = Date.now()
+  const startedMono = monotonic()
+  const startedWall = Date.now()
   const previous = slots.value[key]
   slots.value = {
     ...slots.value,
-    [key]: { seq, loading: true, code: previous?.code ?? null, deadline: previous?.deadline ?? 0, error: '' }
+    [key]: { seq, loading: true, code: previous?.code ?? null, deadline: previous?.deadline ?? 0, expiresAt: previous?.expiresAt ?? 0, error: '' }
   }
-  // Only the latest request of the same (key, kind) may write its slot; other slots are never touched.
-  const stillCurrent = () => slots.value[key]?.seq === seq
+  // Only the latest request of the same (key, kind), on a still mounted panel, may write its
+  // slot; other slots are never touched.
+  const stillCurrent = () => !disposed && slots.value[key]?.seq === seq
   try {
     const res = await keysApi.installCode(keyId, requestShell)
     if (!stillCurrent()) return
     if (!isInstallCode(res?.code)) throw new Error('unexpected install code')
-    const serverDeadline = Date.parse(res.expires_at)
-    const deadline = Math.min(
-      startedAt + CODE_TTL_MS,
-      Number.isFinite(serverDeadline) && serverDeadline > startedAt ? serverDeadline : Infinity
-    )
-    now.value = Date.now()
+    tick()
     startTicker()
-    slots.value = { ...slots.value, [key]: { seq, loading: false, code: res.code, deadline, error: '' } }
+    slots.value = {
+      ...slots.value,
+      [key]: { seq, loading: false, code: res.code, deadline: startedMono + CODE_TTL_MS, expiresAt: startedWall + CODE_TTL_MS, error: '' }
+    }
   } catch (e) {
     if (!stillCurrent()) return
     // A failed regenerate keeps the previous command: it stays valid until it expires.
     const prev = slots.value[key]
-    slots.value = { ...slots.value, [key]: { seq, loading: false, code: prev?.code ?? null, deadline: prev?.deadline ?? 0, error: codeErrorText(e) } }
+    slots.value = {
+      ...slots.value,
+      [key]: { seq, loading: false, code: prev?.code ?? null, deadline: prev?.deadline ?? 0, expiresAt: prev?.expiresAt ?? 0, error: codeErrorText(e) }
+    }
   }
 }
 </script>

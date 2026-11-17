@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
@@ -420,6 +421,13 @@ func AITPInstallRoot(apiBaseURL string) (string, bool) {
 	m := aitpInstallRootPattern.FindStringSubmatch(root)
 	if m == nil {
 		return "", false
+	}
+	// A bracketed host must really be an IPv6 address ("[.]" passes the character class).
+	if host := m[1]; strings.HasPrefix(host, "[") {
+		addr, err := netip.ParseAddr(strings.Trim(host, "[]"))
+		if err != nil || !addr.Is6() || addr.Zone() != "" {
+			return "", false
+		}
 	}
 	if port := m[3]; port != "" {
 		n, err := strconv.Atoi(port)
