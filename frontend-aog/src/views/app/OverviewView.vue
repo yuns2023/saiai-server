@@ -34,7 +34,7 @@ const hostedCurrent = computed(() => hosted.accounts.filter((a) => a.current).le
 
 /** Invitation status; stays null (row hidden) when the site has invites off or the request fails. */
 const invites = ref<UserInviteOverview | null>(null)
-/** While the first answer is pending the row holds its place, so the charges below do not jump. */
+/** While the answer is pending the row holds a placeholder, so the charges below jump less (it can still grow on phones or go away). */
 const invitesPending = ref(false)
 /** One short status; the exact reason (and every other limit) is explained on /invites. */
 const inviteLine = computed(() => {
