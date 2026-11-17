@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -107,6 +108,15 @@ type BillingCacheService struct {
 	rateLimitWindowResets sync.Map
 	// runAsync runs window maintenance; tests replace it to run inline.
 	runAsync func(func())
+	// subscriptionWindowMaintenance is SubscriptionService.DoWindowMaintenance,
+	// registered by NewSubscriptionService (which depends on this service).
+	subscriptionWindowMaintenance atomic.Pointer[func(*UserSubscription)]
+	// sessionWindowMaintenance: subscription ID -> unix nanos of the last
+	// window maintenance scheduled from a session turn.
+	sessionWindowMaintenance       sync.Map
+	sessionWindowMaintenanceClaims atomic.Uint64
+	// sessionRecheckErrLastLog throttles the session recheck alert (unix nanos).
+	sessionRecheckErrLastLog atomic.Int64
 	// rateLimitLoadErrLastLog throttles the fail-open warning (unix nanos).
 	rateLimitLoadErrLastLog atomic.Int64
 }
@@ -612,18 +622,40 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 // fresh row must be the subscription this request will charge: a replacement
 // since selection fails closed rather than validating one row and billing another.
 func (s *BillingCacheService) checkSmartSwitchSubscription(ctx context.Context, userID int64, group *Group, subscription *UserSubscription) error {
+	_, _, err := s.checkFreshSubscription(ctx, userID, group, subscription)
+	return err
+}
+
+// checkFreshSubscription validates the fresh row of subscription (see
+// checkSmartSwitchSubscription). On success it returns the row with ended
+// windows normalized in memory and whether those windows need the
+// persistent reset (SubscriptionService.DoWindowMaintenance).
+func (s *BillingCacheService) checkFreshSubscription(ctx context.Context, userID int64, group *Group, subscription *UserSubscription) (*UserSubscription, bool, error) {
 	fresh, err := s.subRepo.GetActiveByUserIDAndGroupID(ctx, userID, group.ID)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	if fresh.ID != subscription.ID {
-		return ErrSubscriptionNotFound
+		return nil, false, ErrSubscriptionNotFound
 	}
 	owned := *fresh
-	if _, err := (&SubscriptionService{}).ValidateAndCheckLimits(&owned, group); err != nil {
-		return err
+	needsMaintenance, err := (&SubscriptionService{}).ValidateAndCheckLimits(&owned, group)
+	if err != nil {
+		return nil, false, err
 	}
-	return owned.ExhaustedLimitError(group)
+	if err := owned.ExhaustedLimitError(group); err != nil {
+		return nil, false, err
+	}
+	return &owned, needsMaintenance, nil
+}
+
+// SetSubscriptionWindowMaintenance registers the persistent window reset
+// used by CheckSessionTurnEligibility.
+func (s *BillingCacheService) SetSubscriptionWindowMaintenance(maintain func(*UserSubscription)) {
+	if s == nil || maintain == nil {
+		return
+	}
+	s.subscriptionWindowMaintenance.Store(&maintain)
 }
 
 // CheckBillingEligibility 检查用户是否有资格发起请求
@@ -666,6 +698,154 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	}
 
 	return nil
+}
+
+// CheckSessionTurnEligibility is CheckBillingEligibility for a later turn of
+// a long-lived session (Responses WebSocket), which never passes through the
+// auth middleware again. That middleware normalizes ended subscription
+// windows (ValidateAndCheckLimits) and schedules their persistent reset on
+// every request; this does the same for the session:
+//
+//   - Every turn of a subscription session whose windows look ended schedules
+//     window maintenance (asynchronously, at most once per subscription per
+//     sessionWindowMaintenanceInterval), so usage of a new window is not added
+//     to the ended one.
+//   - A cached subscription rejection (usage limit, inactive status, or a
+//     cache-miss lookup that found no active row) is confirmed against the
+//     fresh database row with the rules the smart-switch path uses: the row
+//     must still be the session's subscription, within its normalized limits.
+//
+// Infrastructure failures stay ErrBillingServiceUnavailable so callers can
+// tell them from a definite rejection.
+func (s *BillingCacheService) CheckSessionTurnEligibility(ctx context.Context, user *User, apiKey *APIKey, group *Group, subscription *UserSubscription) error {
+	subscriptionMode := s.subRepo != nil && user != nil && group != nil && group.IsSubscriptionType() && subscription != nil
+	if subscriptionMode && s.cfg.RunMode != config.RunModeSimple && subscriptionWindowsNeedMaintenance(subscription, group) {
+		// The session's snapshot is from the handshake: once a window has
+		// ended there it stays ended, so the maintenance reads the fresh row.
+		s.scheduleSessionWindowMaintenance(user.ID, group, subscription.ID, nil)
+	}
+	err := s.CheckBillingEligibility(ctx, user, apiKey, group, subscription)
+	if err == nil || !subscriptionMode {
+		return err
+	}
+	if !isSubscriptionUsageLimitError(err) && !errors.Is(err, ErrSubscriptionNotFound) && !errors.Is(err, ErrSubscriptionInvalid) {
+		return err
+	}
+	owned, needsMaintenance, freshErr := s.checkFreshSubscription(ctx, user.ID, group, subscription)
+	if freshErr != nil {
+		if isSubscriptionUsageLimitError(freshErr) || errors.Is(freshErr, ErrSubscriptionNotFound) ||
+			errors.Is(freshErr, ErrSubscriptionExpired) || errors.Is(freshErr, ErrSubscriptionSuspended) {
+			return withSubscriptionLimitDetail(freshErr, subscription, group)
+		}
+		// An outage hits every turn of every session; log once a minute.
+		now := time.Now().UnixNano()
+		last := s.sessionRecheckErrLastLog.Load()
+		if now-last >= int64(time.Minute) && s.sessionRecheckErrLastLog.CompareAndSwap(last, now) {
+			logger.LegacyPrintf("service.billing_cache", "ALERT: session subscription recheck failed for user %d group %d: %v", user.ID, group.ID, freshErr)
+		}
+		return ErrBillingServiceUnavailable.WithCause(freshErr)
+	}
+	// The cached rejection was stale: ended windows passed only because they
+	// were zeroed in memory. Persist their reset (which also invalidates the
+	// cache) so usage in the new window counts toward the limit again.
+	if needsMaintenance {
+		s.scheduleSessionWindowMaintenance(user.ID, group, owned.ID, owned)
+	}
+	// Key rate limits were skipped by the early return above; apply them now.
+	if apiKey != nil && apiKey.HasRateLimits() {
+		return s.checkAPIKeyRateLimits(ctx, apiKey)
+	}
+	return nil
+}
+
+// sessionWindowMaintenanceInterval bounds how often one subscription's
+// windows are maintained from session turns.
+const sessionWindowMaintenanceInterval = time.Minute
+
+// claimSessionWindowMaintenance atomically takes the per-subscription slot
+// for this interval and returns the claim's value. Every
+// sessionWindowMaintenanceSweep claims it drops entries older than the
+// interval, which bounds the map under sustained traffic (not a strict TTL).
+func (s *BillingCacheService) claimSessionWindowMaintenance(subscriptionID int64) (int64, bool) {
+	now := time.Now().UnixNano()
+	for {
+		last, loaded := s.sessionWindowMaintenance.LoadOrStore(subscriptionID, now)
+		if !loaded {
+			break
+		}
+		lastNanos, _ := last.(int64)
+		if now-lastNanos < int64(sessionWindowMaintenanceInterval) {
+			return 0, false
+		}
+		if s.sessionWindowMaintenance.CompareAndSwap(subscriptionID, last, now) {
+			break
+		}
+	}
+	if s.sessionWindowMaintenanceClaims.Add(1)%sessionWindowMaintenanceSweep == 0 {
+		s.sessionWindowMaintenance.Range(func(key, value any) bool {
+			if lastNanos, _ := value.(int64); now-lastNanos >= int64(sessionWindowMaintenanceInterval) {
+				s.sessionWindowMaintenance.CompareAndDelete(key, value)
+			}
+			return true
+		})
+	}
+	return now, true
+}
+
+const sessionWindowMaintenanceSweep = 256
+
+// subscriptionWindowsNeedMaintenance applies the auth middleware's window
+// check (ValidateAndCheckLimits) to a copy of sub.
+func subscriptionWindowsNeedMaintenance(sub *UserSubscription, group *Group) bool {
+	owned := *sub
+	needsMaintenance, _ := (&SubscriptionService{}).ValidateAndCheckLimits(&owned, group)
+	return needsMaintenance
+}
+
+// scheduleSessionWindowMaintenance runs SubscriptionService window
+// maintenance off the turn path (it may run synchronously with a 5 s
+// timeout when no maintenance queue is configured), at most once per
+// subscription per interval. fresh is the row the caller just read;
+// otherwise it is loaded here rather than using the session's handshake
+// snapshot. Either may still be stale by the time maintenance runs (queued,
+// or reset meanwhile by another request/instance); the window reset itself
+// is conditional on the start it observed (ResetEndedUsageWindow), so a late
+// reset does not zero new-window usage.
+func (s *BillingCacheService) scheduleSessionWindowMaintenance(userID int64, group *Group, subscriptionID int64, fresh *UserSubscription) {
+	maintain := s.subscriptionWindowMaintenance.Load()
+	if maintain == nil {
+		return
+	}
+	claim, claimed := s.claimSessionWindowMaintenance(subscriptionID)
+	if !claimed {
+		return
+	}
+	run := s.runAsync
+	if run == nil {
+		run = func(f func()) { go f() }
+	}
+	run(func() {
+		sub := fresh
+		if sub == nil {
+			loadCtx, cancel := context.WithTimeout(context.Background(), balanceLoadTimeout)
+			row, err := s.subRepo.GetActiveByUserIDAndGroupID(loadCtx, userID, group.ID)
+			cancel()
+			if err != nil {
+				// Let the next turn retry instead of waiting out the interval
+				// (only this claim: a later one may have replaced it).
+				s.sessionWindowMaintenance.CompareAndDelete(subscriptionID, claim)
+				return
+			}
+			if row == nil || row.ID != subscriptionID {
+				return
+			}
+			if !subscriptionWindowsNeedMaintenance(row, group) {
+				return
+			}
+			sub = row
+		}
+		(*maintain)(sub)
+	})
 }
 
 // checkBalanceEligibility 检查余额模式资格

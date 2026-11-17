@@ -66,6 +66,7 @@ func NewSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscript
 	}
 	svc.initSubCache(cfg)
 	svc.initMaintenanceQueue(cfg)
+	billingCacheService.SetSubscriptionWindowMaintenance(svc.DoWindowMaintenance)
 	return svc
 }
 
@@ -764,7 +765,44 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 	return s.userSubRepo.GetByID(ctx, subscriptionID)
 }
 
+// SubscriptionUsageWindow names a daily/weekly/monthly usage window.
+type SubscriptionUsageWindow string
+
+const (
+	SubscriptionUsageWindowDaily   SubscriptionUsageWindow = "daily"
+	SubscriptionUsageWindowWeekly  SubscriptionUsageWindow = "weekly"
+	SubscriptionUsageWindowMonthly SubscriptionUsageWindow = "monthly"
+)
+
+// endedUsageWindowResetter is implemented by the database repository: a
+// reset conditional on the window start the caller observed.
+type endedUsageWindowResetter interface {
+	ResetEndedUsageWindow(ctx context.Context, id int64, window SubscriptionUsageWindow, expectedStart, newWindowStart time.Time) error
+}
+
+// resetEndedUsageWindow resets an ended window found on sub. sub may be a
+// stale copy (L1 cache, session snapshot, queued maintenance), so the reset
+// applies only if the stored window still starts where sub says; otherwise
+// it was already reset and new-window usage must be kept. Repositories
+// without the conditional reset (test stubs) use the plain reset.
+func (s *SubscriptionService) resetEndedUsageWindow(ctx context.Context, sub *UserSubscription, window SubscriptionUsageWindow, expectedStart, newWindowStart time.Time) error {
+	if resetter, ok := s.userSubRepo.(endedUsageWindowResetter); ok {
+		return resetter.ResetEndedUsageWindow(ctx, sub.ID, window, expectedStart, newWindowStart)
+	}
+	switch window {
+	case SubscriptionUsageWindowDaily:
+		return s.userSubRepo.ResetDailyUsage(ctx, sub.ID, newWindowStart)
+	case SubscriptionUsageWindowWeekly:
+		return s.userSubRepo.ResetWeeklyUsage(ctx, sub.ID, newWindowStart)
+	default:
+		return s.userSubRepo.ResetMonthlyUsage(ctx, sub.ID, newWindowStart)
+	}
+}
+
 // CheckAndResetWindows 检查并重置过期的窗口
+// The daily/weekly/monthly resets are conditional on the window start found
+// on sub, so after a no-op (already reset elsewhere) sub's updated fields do
+// not reflect the stored row; do not use it as a fresh snapshot.
 func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *UserSubscription) error {
 	// 使用当天零点作为新窗口起始时间
 	windowStart := startOfDay(time.Now())
@@ -783,7 +821,7 @@ func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *Use
 
 	// 日窗口重置（24小时）
 	if sub.NeedsDailyReset() {
-		if err := s.userSubRepo.ResetDailyUsage(ctx, sub.ID, windowStart); err != nil {
+		if err := s.resetEndedUsageWindow(ctx, sub, SubscriptionUsageWindowDaily, *sub.DailyWindowStart, windowStart); err != nil {
 			return err
 		}
 		sub.DailyWindowStart = &windowStart
@@ -793,7 +831,7 @@ func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *Use
 
 	// 周窗口重置（7天）
 	if sub.NeedsWeeklyReset() {
-		if err := s.userSubRepo.ResetWeeklyUsage(ctx, sub.ID, windowStart); err != nil {
+		if err := s.resetEndedUsageWindow(ctx, sub, SubscriptionUsageWindowWeekly, *sub.WeeklyWindowStart, windowStart); err != nil {
 			return err
 		}
 		sub.WeeklyWindowStart = &windowStart
@@ -803,7 +841,7 @@ func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *Use
 
 	// 月窗口重置（30天）
 	if sub.NeedsMonthlyReset() {
-		if err := s.userSubRepo.ResetMonthlyUsage(ctx, sub.ID, windowStart); err != nil {
+		if err := s.resetEndedUsageWindow(ctx, sub, SubscriptionUsageWindowMonthly, *sub.MonthlyWindowStart, windowStart); err != nil {
 			return err
 		}
 		sub.MonthlyWindowStart = &windowStart

@@ -168,14 +168,21 @@ func openAIClientWSOpsFailure(status coderws.StatusCode, reason string) opsLocal
 // and stops after two attempts on 429 instead of reconnecting five times and
 // falling back to HTTPS, which a bare close frame triggers.
 func rejectOpenAIWSBilling(ctx context.Context, c *gin.Context, conn *coderws.Conn, err error) {
-	status, code, message := billingErrorResponse(c, err)
-	message = service.ClientSafeUpstreamErrorMessage(message)
+	rejection := openAIWSBillingRejection(c, err)
 	closeStatus := coderws.StatusPolicyViolation
-	if status == http.StatusServiceUnavailable {
+	if rejection.status == http.StatusServiceUnavailable {
 		closeStatus = coderws.StatusTryAgainLater
 	}
-	_ = rejectOpenAIWSSession(ctx, c, conn, &openAIWSSessionRejection{status: status, errType: code, code: code, message: message})
-	recordAndCloseOpenAIClientWS(c, conn, closeStatus, opsLocalFailure{status: status, errType: code, code: code, message: message, wsCloseCode: int(closeStatus)})
+	_ = rejectOpenAIWSSession(ctx, c, conn, rejection)
+	recordAndCloseOpenAIClientWS(c, conn, closeStatus, opsLocalFailure{status: rejection.status, errType: rejection.code, code: rejection.code, message: rejection.message, wsCloseCode: int(closeStatus)})
+}
+
+// openAIWSBillingRejection is the error frame (and close reason) of a failed
+// billing check, shared by the handshake and later-turn checks.
+func openAIWSBillingRejection(c *gin.Context, err error) *openAIWSSessionRejection {
+	status, code, message := billingErrorResponse(c, err)
+	message = service.ClientSafeUpstreamErrorMessage(message)
+	return &openAIWSSessionRejection{status: status, errType: code, code: code, message: message, reason: message}
 }
 
 func recordAndCloseOpenAIClientWS(c *gin.Context, conn *coderws.Conn, status coderws.StatusCode, failure opsLocalFailure) {
