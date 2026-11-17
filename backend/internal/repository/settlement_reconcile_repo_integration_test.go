@@ -70,8 +70,10 @@ func TestSettlementReconcileRepository(t *testing.T) {
 
 	repo := NewSettlementReconcileRepository(integrationDB)
 	from, to := at("2020-01-01T00:00:00Z"), at("2020-01-03T00:00:00Z")
-	summary, err := repo.SettlementSummary(ctx, from, to)
+	q := service.SettlementReconcileQuery{From: from, To: to, CoverageStart: at("2020-01-01T12:00:00Z"), Page: 1, PageSize: 100, Now: to}
+	data, err := repo.Reconcile(ctx, q)
 	require.NoError(t, err)
+	summary := data.Summary
 	require.Len(t, summary, 1)
 	require.Equal(t, int64(7), summary[0].EventCount)
 	require.Equal(t, int64(1), summary[0].InvalidAmountCount)
@@ -79,9 +81,7 @@ func TestSettlementReconcileRepository(t *testing.T) {
 	require.InDelta(t, 3, summary[0].ChargeInput, 1e-9)
 	require.Equal(t, int64(4242), *summary[0].GroupID)
 
-	q := service.SettlementReconcileQuery{From: from, To: to, CoverageStart: at("2020-01-01T12:00:00Z"), Page: 1, PageSize: 100, Now: to}
-	diffs, counts, total, err := repo.SettlementDiffs(ctx, q)
-	require.NoError(t, err)
+	diffs, counts, total := data.Diffs, data.Counts, data.Total
 	got := map[string]service.SettlementReconcileDiff{}
 	for _, d := range diffs {
 		got[d.RequestID[len(prefix):]] = d
@@ -116,9 +116,28 @@ func TestSettlementReconcileRepository(t *testing.T) {
 
 	// Paging keeps the order and the total.
 	q.PageSize, q.Page = 4, 2
-	page2, _, total2, err := repo.SettlementDiffs(ctx, q)
+	page2, err := repo.Reconcile(ctx, q)
 	require.NoError(t, err)
-	require.Equal(t, total, total2)
-	require.Len(t, page2, 2)
-	require.Equal(t, diffs[4].RequestID, page2[0].RequestID)
+	require.Equal(t, total, page2.Total)
+	require.Len(t, page2.Diffs, 2)
+	require.Equal(t, diffs[4].RequestID, page2.Diffs[0].RequestID)
+}
+
+// A reconcile query that exceeds the database-side statement timeout returns
+// the dedicated 503 error instead of hanging the admin request.
+func TestSettlementReconcileRepository_StatementTimeout(t *testing.T) {
+	settlementReconcileStatementTimeout = "200ms"
+	t.Cleanup(func() { settlementReconcileStatementTimeout = "15s" })
+	release := holdSettlementTableLock(t)
+	defer release()
+	repo := NewSettlementReconcileRepository(integrationDB)
+	from := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	// The client-side deadline only keeps a broken implementation from
+	// hanging the test; the database timeout must fire first.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	started := time.Now()
+	_, err := repo.Reconcile(ctx, service.SettlementReconcileQuery{From: from, To: from.Add(time.Hour), CoverageStart: from, Page: 1, PageSize: 10, Now: from})
+	require.ErrorIs(t, err, service.ErrSettlementReconcileTimeout)
+	require.Less(t, time.Since(started), 3*time.Second)
 }

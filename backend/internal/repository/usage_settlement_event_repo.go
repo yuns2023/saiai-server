@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -15,9 +16,12 @@ import (
 
 // Shadow settlement event write inside the billing transaction (P2b).
 //
-// The segment runs under SAVEPOINT settlement_evt with short local lock and
-// statement timeouts so a slow event table can never drag the charge into a
-// timeout. Any failure rolls back to the savepoint and billing still commits
+// The segment runs under SAVEPOINT settlement_evt with a total time budget
+// (at most 2s, and always leaving a reserve of the billing context for
+// ROLLBACK TO and COMMIT). Before each segment statement the local
+// statement_timeout is set to the remaining budget and lock_timeout to the
+// smaller of 1s and that budget, so a slow event table can never drag the
+// charge into a timeout; an exhausted budget skips straight to ROLLBACK TO. Any failure rolls back to the savepoint and billing still commits
 // (error log + counter); only a failed ROLLBACK TO (the transaction is no
 // longer usable) is returned. The one fatal outcome is an existing event for
 // an identity the dedup claim just accepted: that means the dedup/archive
@@ -25,12 +29,53 @@ import (
 // charging the sale a second time.
 
 const (
-	settlementEventLockTimeout      = "1s"
-	settlementEventStatementTimeout = "2s"
+	settlementEventMaxLockTimeout = time.Second
+	// settlementEventSegmentBudget bounds the whole segment.
+	settlementEventSegmentBudget = 2 * time.Second
+	// settlementEventReserve is billing context time kept for ROLLBACK TO
+	// and COMMIT after the segment.
+	settlementEventReserve = 1500 * time.Millisecond
+	// settlementEventMinStatementBudget is the smallest budget worth running
+	// another statement with.
+	settlementEventMinStatementBudget = 50 * time.Millisecond
 	// settlementEventMinBudget is the minimum remaining billing context time
 	// needed to attempt the event write.
 	settlementEventMinBudget = 3 * time.Second
 )
+
+// settlementNow is the segment clock (replaced in tests).
+var settlementNow = time.Now
+
+var errSettlementSegmentBudgetExhausted = errors.New("settlement event segment budget exhausted")
+
+// settlementSegmentBudget is the absolute deadline of one event segment.
+type settlementSegmentBudget struct {
+	deadline time.Time
+}
+
+func newSettlementSegmentBudget(ctx context.Context) settlementSegmentBudget {
+	deadline := settlementNow().Add(settlementEventSegmentBudget)
+	if ctxDeadline, ok := ctx.Deadline(); ok {
+		if reserved := ctxDeadline.Add(-settlementEventReserve); reserved.Before(deadline) {
+			deadline = reserved
+		}
+	}
+	return settlementSegmentBudget{deadline: deadline}
+}
+
+// bound sets the local timeouts for the next segment statement to the
+// remaining budget, or reports the budget as exhausted.
+func (b settlementSegmentBudget) bound(ctx context.Context, tx *sql.Tx) error {
+	remaining := b.deadline.Sub(settlementNow())
+	if remaining < settlementEventMinStatementBudget {
+		return errSettlementSegmentBudgetExhausted
+	}
+	lockTimeout := remaining
+	if lockTimeout > settlementEventMaxLockTimeout {
+		lockTimeout = settlementEventMaxLockTimeout
+	}
+	return setSettlementTimeouts(ctx, tx, strconv.FormatInt(lockTimeout.Milliseconds(), 10), strconv.FormatInt(remaining.Milliseconds(), 10))
+}
 
 func recordUsageSettlementEvent(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) error {
 	if cmd == nil || cmd.Settlement == nil {
@@ -52,7 +97,7 @@ func recordUsageSettlementEvent(ctx context.Context, tx *sql.Tx, cmd *service.Us
 		return fmt.Errorf("settlement savepoint: %w", err)
 	}
 
-	segErr := writeUsageSettlementEventSegment(ctx, tx, cmd)
+	segErr := writeUsageSettlementEventSegment(ctx, tx, cmd, newSettlementSegmentBudget(ctx))
 	if errors.Is(segErr, service.ErrUsageSettlementEventConflict) {
 		logger.L().Error("usage settlement event exists without billing dedup record; rolling back billing",
 			zap.String("request_id", cmd.RequestID),
@@ -74,6 +119,14 @@ func recordUsageSettlementEvent(ctx context.Context, tx *sql.Tx, cmd *service.Us
 	if _, err := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT settlement_evt`); err != nil {
 		return fmt.Errorf("rollback to settlement savepoint after %v: %w", segErr, err)
 	}
+	if errors.Is(segErr, errSettlementSegmentBudgetExhausted) {
+		service.RecordUsageSettlementSkippedLowBudget()
+		logger.L().Error("usage settlement event skipped: segment time budget exhausted; billing continues",
+			zap.String("request_id", cmd.RequestID),
+			zap.Int64("api_key_id", cmd.APIKeyID),
+		)
+		return nil
+	}
 	recordShadowSettlementFailure(cmd, segErr)
 	return nil
 }
@@ -92,15 +145,12 @@ func recordShadowSettlementFailure(cmd *service.UsageBillingCommand, err error) 
 // writeUsageSettlementEventSegment runs inside the savepoint. Every statement,
 // including reading and restoring the session timeouts, is undone by
 // ROLLBACK TO on failure. On success it restores the pre-segment timeouts.
-func writeUsageSettlementEventSegment(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) error {
+func writeUsageSettlementEventSegment(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, budget settlementSegmentBudget) error {
 	var prevLockTimeout, prevStatementTimeout string
 	if err := tx.QueryRowContext(ctx, `SELECT current_setting('lock_timeout'), current_setting('statement_timeout')`).Scan(&prevLockTimeout, &prevStatementTimeout); err != nil {
 		return err
 	}
-	if err := setSettlementTimeouts(ctx, tx, settlementEventLockTimeout, settlementEventStatementTimeout); err != nil {
-		return err
-	}
-	if err := insertUsageSettlementEvent(ctx, tx, cmd); err != nil {
+	if err := insertUsageSettlementEvent(ctx, tx, cmd, budget); err != nil {
 		return err
 	}
 	return setSettlementTimeouts(ctx, tx, prevLockTimeout, prevStatementTimeout)
@@ -111,7 +161,10 @@ func setSettlementTimeouts(ctx context.Context, tx *sql.Tx, lockTimeout, stateme
 	return err
 }
 
-func insertUsageSettlementEvent(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) error {
+func insertUsageSettlementEvent(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, budget settlementSegmentBudget) error {
+	if err := budget.bound(ctx, tx); err != nil {
+		return err
+	}
 	var owner sql.NullInt64
 	accountFound := true
 	err := tx.QueryRowContext(ctx, `SELECT owner_user_id FROM accounts WHERE id = $1`, cmd.AccountID).Scan(&owner)
@@ -132,6 +185,9 @@ func insertUsageSettlementEvent(ctx context.Context, tx *sql.Tx, cmd *service.Us
 	var invalid any
 	if len(ev.InvalidFields) > 0 {
 		invalid = pq.Array(ev.InvalidFields)
+	}
+	if err := budget.bound(ctx, tx); err != nil {
+		return err
 	}
 	var id int64
 	err = tx.QueryRowContext(ctx, `

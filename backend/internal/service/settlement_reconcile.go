@@ -51,6 +51,9 @@ var (
 	ErrSettlementReconcileInvalidWindow = infraerrors.BadRequest("INVALID_RECONCILE_WINDOW", "from and to are required RFC3339 times with from < to and a window of at most 7 days")
 	ErrSettlementReconcileCoverage      = infraerrors.BadRequest("INVALID_RECONCILE_COVERAGE_START", "coverage_start is a required RFC3339 time")
 	ErrSettlementReconcileInvalidPage   = infraerrors.BadRequest("INVALID_RECONCILE_PAGE", "page must be 1-1000 and page_size 1-500")
+	// ErrSettlementReconcileTimeout is a database-side statement timeout:
+	// narrow the window and retry.
+	ErrSettlementReconcileTimeout = infraerrors.ServiceUnavailable("SETTLEMENT_RECONCILE_TIMEOUT", "settlement reconcile query timed out; narrow the time window and retry")
 )
 
 type SettlementReconcileQuery struct {
@@ -117,9 +120,18 @@ type SettlementReconcileResult struct {
 	ProcessMetrics UsageSettlementMetricsSnapshot `json:"process_metrics"`
 }
 
+// SettlementReconcileData is one consistent read of the reconcile view.
+type SettlementReconcileData struct {
+	Summary []SettlementReconcileSummaryRow
+	Diffs   []SettlementReconcileDiff
+	Counts  []SettlementReconcileDiffCount
+	Total   int64
+}
+
 type SettlementReconcileRepository interface {
-	SettlementSummary(ctx context.Context, from, to time.Time) ([]SettlementReconcileSummaryRow, error)
-	SettlementDiffs(ctx context.Context, q SettlementReconcileQuery) ([]SettlementReconcileDiff, []SettlementReconcileDiffCount, int64, error)
+	// Reconcile reads everything in one read-only snapshot with a
+	// database-side statement timeout (ErrSettlementReconcileTimeout).
+	Reconcile(ctx context.Context, q SettlementReconcileQuery) (*SettlementReconcileData, error)
 }
 
 type SettlementReconcileService struct {
@@ -156,14 +168,14 @@ func (s *SettlementReconcileService) Reconcile(ctx context.Context, q Settlement
 		return nil, infraerrors.ServiceUnavailable("SETTLEMENT_RECONCILE_UNAVAILABLE", "settlement reconcile unavailable")
 	}
 	q.Now = s.now()
-	summary, err := s.repo.SettlementSummary(ctx, q.From, q.To)
+	data, err := s.repo.Reconcile(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	diffs, counts, total, err := s.repo.SettlementDiffs(ctx, q)
-	if err != nil {
-		return nil, err
+	if data == nil {
+		data = &SettlementReconcileData{}
 	}
+	summary, diffs, counts, total := data.Summary, data.Diffs, data.Counts, data.Total
 	if summary == nil {
 		summary = []SettlementReconcileSummaryRow{}
 	}

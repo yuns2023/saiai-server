@@ -505,3 +505,132 @@ func TestSettlementEvent_ServicePathsWSTurnsAndNativeChat(t *testing.T) {
 	require.InDelta(t, 0.0125, chat.ChargeInput, 1e-12)
 	require.Equal(t, "balance", chat.ChargeSource)
 }
+
+// jumpSettlementClock makes the segment clock jump forward by `by` from its
+// `fromCall`-th reading on, simulating a slow earlier segment statement.
+func jumpSettlementClock(t *testing.T, fromCall int, by time.Duration) {
+	t.Helper()
+	calls := 0
+	settlementNow = func() time.Time {
+		calls++
+		if calls >= fromCall {
+			return time.Now().Add(by)
+		}
+		return time.Now()
+	}
+	t.Cleanup(func() { settlementNow = time.Now })
+}
+
+// Entry budget is sufficient, but the owner read (second segment clock
+// reading) consumed the segment budget: the INSERT is skipped, billing commits.
+func TestSettlementEvent_SegmentBudgetExhaustedMidSegmentSkipsEvent(t *testing.T) {
+	ctx := context.Background()
+	f := newSettlementFixture(t, service.PlatformAnthropic)
+	f.setOwner(t, &f.user.ID)
+	repo := NewUsageBillingRepository(nil, integrationDB)
+	before := service.GetUsageSettlementMetricsSnapshot()
+	jumpSettlementClock(t, 3, settlementEventSegmentBudget-10*time.Millisecond)
+
+	id := "segment-budget-" + uuid.NewString()
+	res, err := repo.Apply(ctx, f.hostedCmd(id, 1, 4, 0.2))
+	require.NoError(t, err)
+	require.True(t, res.Applied)
+	_, ok := loadSettlementEvent(t, id, f.key.ID)
+	require.False(t, ok)
+	after := service.GetUsageSettlementMetricsSnapshot()
+	require.Equal(t, before.SkippedLowBudget+1, after.SkippedLowBudget)
+	require.Equal(t, before.WriteFailures, after.WriteFailures)
+	state := loadSettlementBillingState(t, f)
+	require.InDelta(t, 99, state.Balance, 1e-9)
+	require.InDelta(t, 4, state.Quota, 1e-9)
+	require.Equal(t, 1, state.Dedup)
+}
+
+func TestSettlementEvent_SegmentBudgetBoundsStatementTimeouts(t *testing.T) {
+	ctx := context.Background()
+	f := newSettlementFixture(t, service.PlatformAnthropic)
+	f.setOwner(t, &f.user.ID)
+	read := func(tx *sql.Tx) (string, string) {
+		var lock, stmt string
+		require.NoError(t, tx.QueryRowContext(ctx, "SELECT current_setting('lock_timeout'), current_setting('statement_timeout')").Scan(&lock, &stmt))
+		return lock, stmt
+	}
+
+	// The billing context leaves 1.8s after the reserve: statement_timeout is
+	// the remaining segment budget (< 2s) and lock_timeout is capped at 1s.
+	tx := testTx(t)
+	deadlineCtx, cancel := context.WithTimeout(ctx, settlementEventReserve+1800*time.Millisecond)
+	defer cancel()
+	budget := newSettlementSegmentBudget(deadlineCtx)
+	require.NoError(t, budget.bound(deadlineCtx, tx))
+	lock, stmt := read(tx)
+	require.Equal(t, "1s", lock)
+	stmtMS, err := time.ParseDuration(stmt)
+	require.NoError(t, err)
+	require.LessOrEqual(t, stmtMS, 1800*time.Millisecond)
+	require.Greater(t, stmtMS, 1500*time.Millisecond)
+
+	// Less than 1s left: lock_timeout follows the remaining budget.
+	short := settlementSegmentBudget{deadline: time.Now().Add(400 * time.Millisecond)}
+	require.NoError(t, short.bound(ctx, tx))
+	lock, stmt = read(tx)
+	lockMS, err := time.ParseDuration(lock)
+	require.NoError(t, err)
+	stmtMS, err = time.ParseDuration(stmt)
+	require.NoError(t, err)
+	require.LessOrEqual(t, lockMS, 400*time.Millisecond)
+	require.Equal(t, lockMS, stmtMS)
+
+	// Exhausted: no statement is attempted.
+	gone := settlementSegmentBudget{deadline: time.Now().Add(20 * time.Millisecond)}
+	require.ErrorIs(t, gone.bound(ctx, tx), errSettlementSegmentBudgetExhausted)
+
+	// Budget skip inside the full segment restores the pre-segment timeouts.
+	restoreTx := testTx(t)
+	_, err = restoreTx.ExecContext(ctx, "SET LOCAL lock_timeout = '7s'; SET LOCAL statement_timeout = '9s'")
+	require.NoError(t, err)
+	jumpSettlementClock(t, 3, settlementEventSegmentBudget)
+	require.NoError(t, recordUsageSettlementEvent(ctx, restoreTx, f.hostedCmd("segment-restore-"+uuid.NewString(), 1, 1, 0.2)))
+	lock, stmt = read(restoreTx)
+	require.Equal(t, "7s", lock)
+	require.Equal(t, "9s", stmt)
+}
+
+// Real waits: the owner read waits ~0.9s on a held accounts lock, so the
+// INSERT (blocked on the event table) only gets the rest of the 1.6s segment
+// budget instead of a fresh 1s lock_timeout. Billing still commits.
+func TestSettlementEvent_SlowOwnerReadShrinksInsertBudget(t *testing.T) {
+	ctx := context.Background()
+	f := newSettlementFixture(t, service.PlatformAnthropic)
+	f.setOwner(t, &f.user.ID)
+	repo := NewUsageBillingRepository(nil, integrationDB)
+
+	accountsConn, err := integrationDB.Conn(ctx)
+	require.NoError(t, err)
+	defer func() { _ = accountsConn.Close() }()
+	_, err = accountsConn.ExecContext(ctx, "BEGIN")
+	require.NoError(t, err)
+	_, err = accountsConn.ExecContext(ctx, "LOCK TABLE accounts IN ACCESS EXCLUSIVE MODE")
+	require.NoError(t, err)
+	releaseEvents := holdSettlementTableLock(t)
+	defer releaseEvents()
+	go func() {
+		time.Sleep(900 * time.Millisecond)
+		_, _ = accountsConn.ExecContext(context.Background(), "ROLLBACK")
+	}()
+
+	billingCtx, cancel := context.WithTimeout(ctx, settlementEventReserve+1600*time.Millisecond)
+	defer cancel()
+	id := "slow-owner-" + uuid.NewString()
+	started := time.Now()
+	res, err := repo.Apply(billingCtx, f.hostedCmd(id, 1, 2, 0.2))
+	elapsed := time.Since(started)
+	releaseEvents()
+	require.NoError(t, err)
+	require.True(t, res.Applied)
+	require.Less(t, elapsed, 1750*time.Millisecond, "INSERT bounded by the remaining segment budget, not a fresh 1s")
+	require.Greater(t, elapsed, 1400*time.Millisecond)
+	_, ok := loadSettlementEvent(t, id, f.key.ID)
+	require.False(t, ok)
+	require.InDelta(t, 99, loadSettlementBillingState(t, f).Balance, 1e-9)
+}

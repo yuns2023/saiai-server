@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -18,19 +17,23 @@ import (
 type settlementReconcileRepoStub struct {
 	calls int
 	lastQ service.SettlementReconcileQuery
+	err   error
 }
 
-func (s *settlementReconcileRepoStub) SettlementSummary(_ context.Context, _, _ time.Time) ([]service.SettlementReconcileSummaryRow, error) {
+func (s *settlementReconcileRepoStub) Reconcile(_ context.Context, q service.SettlementReconcileQuery) (*service.SettlementReconcileData, error) {
 	s.calls++
-	group := int64(3)
-	return []service.SettlementReconcileSummaryRow{{Category: service.SettlementCategoryHostedSelf, GroupID: &group, ChargeSource: service.SettlementChargeSourceBalance, EventCount: 2, StandardCost: 1, ChargeInput: 0.2}}, nil
-}
-
-func (s *settlementReconcileRepoStub) SettlementDiffs(_ context.Context, q service.SettlementReconcileQuery) ([]service.SettlementReconcileDiff, []service.SettlementReconcileDiffCount, int64, error) {
 	s.lastQ = q
+	if s.err != nil {
+		return nil, s.err
+	}
+	group := int64(3)
 	cat := service.SettlementCategoryHostedSelf
-	return []service.SettlementReconcileDiff{{RequestID: "r1", APIKeyID: 9, Kind: service.SettlementDiffLogOnly, Status: service.SettlementDiffStatusCoverageUnknown, Category: &cat}},
-		[]service.SettlementReconcileDiffCount{{Kind: service.SettlementDiffLogOnly, Status: service.SettlementDiffStatusCoverageUnknown, Count: 1}}, 1, nil
+	return &service.SettlementReconcileData{
+		Summary: []service.SettlementReconcileSummaryRow{{Category: service.SettlementCategoryHostedSelf, GroupID: &group, ChargeSource: service.SettlementChargeSourceBalance, EventCount: 2, StandardCost: 1, ChargeInput: 0.2}},
+		Diffs:   []service.SettlementReconcileDiff{{RequestID: "r1", APIKeyID: 9, Kind: service.SettlementDiffLogOnly, Status: service.SettlementDiffStatusCoverageUnknown, Category: &cat}},
+		Counts:  []service.SettlementReconcileDiffCount{{Kind: service.SettlementDiffLogOnly, Status: service.SettlementDiffStatusCoverageUnknown, Count: 1}},
+		Total:   1,
+	}, nil
 }
 
 func newSettlementRouter(repo service.SettlementReconcileRepository, cfg *config.Config) *gin.Engine {
@@ -157,4 +160,12 @@ func TestSettlementReconcileSimpleModeNotApplicable(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Equal(t, "not_applicable", body.Data["status"])
 	require.Zero(t, repo.calls)
+}
+
+func TestSettlementReconcileTimeoutIs503(t *testing.T) {
+	r := newSettlementRouter(&settlementReconcileRepoStub{err: service.ErrSettlementReconcileTimeout}, &config.Config{})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/reconcile?from=2026-11-10T00:00:00Z&to=2026-11-12T00:00:00Z&coverage_start=2026-11-10T00:00:00Z", nil))
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Body.String(), "SETTLEMENT_RECONCILE_TIMEOUT")
 }

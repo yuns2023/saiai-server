@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -17,10 +18,43 @@ func NewSettlementReconcileRepository(sqlDB *sql.DB) service.SettlementReconcile
 	return &settlementReconcileRepository{db: sqlDB}
 }
 
-// SettlementSummary groups the window's events by category, priced group and
+// settlementReconcileStatementTimeout bounds each reconcile query on the
+// database side (replaced in tests).
+var settlementReconcileStatementTimeout = "15s"
+
+// Reconcile reads the summary, the diff counts and one diff page in a single
+// read-only snapshot with a database-side statement timeout.
+func (r *settlementReconcileRepository) Reconcile(ctx context.Context, q service.SettlementReconcileQuery) (*service.SettlementReconcileData, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('statement_timeout', $1, true)`, settlementReconcileStatementTimeout); err != nil {
+		return nil, err
+	}
+	out := &service.SettlementReconcileData{}
+	if out.Summary, err = settlementSummary(ctx, tx, q.From, q.To); err != nil {
+		return nil, mapSettlementReconcileError(err)
+	}
+	if out.Diffs, out.Counts, out.Total, err = settlementDiffs(ctx, tx, q); err != nil {
+		return nil, mapSettlementReconcileError(err)
+	}
+	return out, nil
+}
+
+func mapSettlementReconcileError(err error) error {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && pqErr.Code == "57014" { // query_canceled (statement_timeout)
+		return service.ErrSettlementReconcileTimeout
+	}
+	return err
+}
+
+// settlementSummary groups the window's events by category, priced group and
 // charge source. Amounts exclude rows with normalized (invalid) amounts.
-func (r *settlementReconcileRepository) SettlementSummary(ctx context.Context, from, to time.Time) ([]service.SettlementReconcileSummaryRow, error) {
-	rows, err := r.db.QueryContext(ctx, `
+func settlementSummary(ctx context.Context, tx *sql.Tx, from, to time.Time) ([]service.SettlementReconcileSummaryRow, error) {
+	rows, err := tx.QueryContext(ctx, `
 		SELECT category, group_id, charge_source,
 			COUNT(*),
 			COUNT(*) FILTER (WHERE anomaly),
@@ -102,16 +136,9 @@ const settlementDiffsCTE = `
 	)
 `
 
-func (r *settlementReconcileRepository) SettlementDiffs(ctx context.Context, q service.SettlementReconcileQuery) ([]service.SettlementReconcileDiff, []service.SettlementReconcileDiffCount, int64, error) {
+func settlementDiffs(ctx context.Context, tx *sql.Tx, q service.SettlementReconcileQuery) ([]service.SettlementReconcileDiff, []service.SettlementReconcileDiffCount, int64, error) {
 	graceCutoff := q.Now.Add(-service.SettlementReconcileLogGrace)
 	args := []any{q.From, q.To, q.CoverageStart, graceCutoff}
-
-	// One snapshot for the counts and the page.
-	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
-	if err != nil {
-		return nil, nil, 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
 
 	counts := []service.SettlementReconcileDiffCount{}
 	var total int64
