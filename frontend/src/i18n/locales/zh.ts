@@ -5491,6 +5491,9 @@ export default {
           '错误提示中“重新运行初始化”所用的命令。两项都留空 = 保持原 SAIAI 文案；任一项填写后即切换为自定义措辞：填写本项时提示运行该命令，只填品牌名时显示“重新运行客户端初始化”。最多 64 个字符。',
         apiBaseUrl: 'API 端点地址',
         apiBaseUrlHint: '用于"使用密钥"和"导入到 CC Switch"功能，留空则使用当前站点地址',
+        aitpInstallCode: 'Key 页面使用一次性安装码',
+        aitpInstallCodeHint:
+          '开启后，新版用户界面（AOG）的 Key 页面显示一条一次性短命令（10 分钟内有效，只能使用一次），完整命令仍可展开使用。需要上面的 API 端点地址填写为有效的 http(s) 地址，否则无法生成安装码。',
         apiBaseUrlPlaceholder: 'https://api.example.com',
         apiEndpoints: 'API 线路',
         apiEndpointsHint: '配置后，用户在“使用密钥”时会随机获得一条启用线路，也可以手动切换。未配置时使用默认 API 地址。',

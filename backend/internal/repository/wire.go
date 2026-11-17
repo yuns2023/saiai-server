@@ -101,6 +101,7 @@ var ProviderSet = wire.NewSet(
 	NewTotpCache,
 	NewSocialOAuthPendingStore,
 	NewSocialOAuthHandoffStore,
+	NewAITPInstallCodeStore,
 	NewReservedEmailUserCounter,
 	NewRefreshTokenCache,
 	NewErrorPassthroughCache,

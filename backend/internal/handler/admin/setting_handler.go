@@ -220,6 +220,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		MaintenanceMessage:                   settings.MaintenanceMessage,
 		ClientBrandName:                      settings.ClientBrandName,
 		ClientSetupCommand:                   settings.ClientSetupCommand,
+		AITPInstallCodeEnabled:               settings.AITPInstallCodeEnabled,
 	})
 }
 
@@ -339,6 +340,9 @@ type UpdateSettingsRequest struct {
 	// scripts omit them), "" = clear (original SAIAI texts).
 	ClientBrandName    *string `json:"client_brand_name"`
 	ClientSetupCommand *string `json:"client_setup_command"`
+
+	// One-time AITP install codes on the Key page; nil = keep the stored value.
+	AITPInstallCodeEnabled *bool `json:"aitp_install_code_enabled"`
 }
 
 // UpdateSettings 更新系统设置
@@ -724,6 +728,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		clientSetupCommand = normalized
 	}
 
+	aitpInstallCodeEnabled := previousSettings.AITPInstallCodeEnabled
+	if req.AITPInstallCodeEnabled != nil {
+		aitpInstallCodeEnabled = *req.AITPInstallCodeEnabled
+	}
+
 	settings := &service.SystemSettings{
 		RegistrationEnabled:              req.RegistrationEnabled,
 		EmailVerifyEnabled:               req.EmailVerifyEnabled,
@@ -798,6 +807,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		MaintenanceMessage:          maintenanceMessage,
 		ClientBrandName:             clientBrandName,
 		ClientSetupCommand:          clientSetupCommand,
+		AITPInstallCodeEnabled:      aitpInstallCodeEnabled,
 		OpsMonitoringEnabled: func() bool {
 			if req.OpsMonitoringEnabled != nil {
 				return *req.OpsMonitoringEnabled
@@ -937,6 +947,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		BackendModeEnabled:                   updatedSettings.BackendModeEnabled,
 		ClientBrandName:                      updatedSettings.ClientBrandName,
 		ClientSetupCommand:                   updatedSettings.ClientSetupCommand,
+		AITPInstallCodeEnabled:               updatedSettings.AITPInstallCodeEnabled,
 	})
 }
 
@@ -1064,6 +1075,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.ClientSetupCommand != after.ClientSetupCommand {
 		changed = append(changed, "client_setup_command")
+	}
+	if before.AITPInstallCodeEnabled != after.AITPInstallCodeEnabled {
+		changed = append(changed, "aitp_install_code_enabled")
 	}
 	if before.SiteLogo != after.SiteLogo {
 		changed = append(changed, "site_logo")

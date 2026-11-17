@@ -182,7 +182,16 @@ export interface PublicSettings {
   backend_mode_enabled: boolean
   maintenance_mode_enabled: boolean
   maintenance_message: string
+  /** The Key page offers one-time AITP install codes (absent on older servers = off). */
+  aitp_install_code_enabled?: boolean
   version: string
+}
+
+/** POST /keys/:id/install-code. The code is a one-time secret for the key: never log it. */
+export interface InstallCodeResponse {
+  code: string
+  /** RFC 3339. */
+  expires_at: string
 }
 
 export interface APIEndpoint {

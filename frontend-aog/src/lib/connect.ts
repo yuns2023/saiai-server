@@ -110,6 +110,30 @@ export function connectSnippet(rawBaseUrl: string, apiKey: string, shell: Shell,
   }
 }
 
+/** Script an install code redeems to: the CMD tab runs the PowerShell script. */
+export type InstallCodeKind = 'unix' | 'powershell'
+
+export const installCodeKind = (shell: Shell): InstallCodeKind => (shell === 'unix' ? 'unix' : 'powershell')
+
+/** One-time install codes: 12 Crockford base32 characters (the server's alphabet). */
+export const isInstallCode = (v: unknown): v is string => typeof v === 'string' && /^[0-9A-HJKMNP-TV-Z]{12}$/.test(v)
+
+/** scheme://host[:port] with nothing a shell would expand (an IPv6 literal's [] is a glob in zsh). */
+const plainOrigin = (v: string) => /^https?:\/\/[A-Za-z0-9.-]+(:\d{1,5})?$/.test(v)
+
+/**
+ * Short command that redeems a one-time install code: POST <origin>/i/<code> returns the
+ * install script for this shell, with the key filled in by the server. `origin` is the
+ * page's own origin (the redeem endpoint lives on the Server that serves this page),
+ * kept separate from the API root the installer configures.
+ */
+export function installCodeCommand(shell: Shell, origin: string, code: string): string {
+  const url = `${origin}/i/${code}`
+  if (shell === 'unix') return `curl -fsSL -X POST ${plainOrigin(origin) ? url : shellQuote(url)} | bash`
+  const ps = `irm ${plainOrigin(origin) ? url : psQuote(url)} -Method Post | iex`
+  return shell === 'cmd' ? `powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps}"` : ps
+}
+
 /** cmd.exe: set "K=V" keeps spaces and & | < > literal for interactive use. */
 const cmdQuote = (v: string) => `"${v}"`
 

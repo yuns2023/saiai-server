@@ -4,13 +4,15 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import Icon from './Icon.vue'
 
-const props = defineProps<{ value: string; label?: string; small?: boolean }>()
+/** guard: checked at click time; returning false copies nothing (e.g. a one-time command that just expired). */
+const props = defineProps<{ value: string; label?: string; small?: boolean; guard?: () => boolean }>()
 const { t } = useI18n()
 const app = useAppStore()
 const copied = ref(false)
 let timer: number | undefined
 
 async function copy(): Promise<void> {
+  if (props.guard && !props.guard()) return
   try {
     await navigator.clipboard.writeText(props.value)
   } catch {

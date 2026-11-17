@@ -1,5 +1,6 @@
 /** Thin typed wrappers around the /api/v1 endpoints this app uses. */
 import { api } from './client'
+import type { Shell } from '@/lib/connect'
 import type { OAuthExchangeResponse } from '@/lib/oauth'
 import { allowedGroups } from '@/lib/platforms'
 import type {
@@ -7,6 +8,7 @@ import type {
   AuthResponse,
   CreateApiKeyRequest,
   Group,
+  InstallCodeResponse,
   PaginatedResponse,
   PublicSettings,
   RegisterRequest,
@@ -116,6 +118,11 @@ export const keysApi = {
   },
   async remove(id: number): Promise<void> {
     await api.delete(`/keys/${id}`)
+  },
+  /** One-time AITP install code for one of the user's keys (admin switch aitp_install_code_enabled). */
+  async installCode(id: number, shell: Shell): Promise<InstallCodeResponse> {
+    const { data } = await api.post<InstallCodeResponse>(`/keys/${id}/install-code`, { shell })
+    return data
   }
 }
 

@@ -46,6 +46,8 @@ func RegisterUserRoutes(
 			keys.POST("", h.APIKey.Create)
 			keys.PUT("/:id", h.APIKey.Update)
 			keys.DELETE("/:id", h.APIKey.Delete)
+			// One-time AITP install code for this key (setting aitp_install_code_enabled).
+			keys.POST("/:id/install-code", h.AITPInstallCode.Create)
 		}
 
 		// 用户可用分组（非管理员接口）

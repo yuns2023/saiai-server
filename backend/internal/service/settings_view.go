@@ -113,6 +113,9 @@ type SystemSettings struct {
 	// Client brand used in client-facing texts; both empty = original SAIAI texts.
 	ClientBrandName    string
 	ClientSetupCommand string
+
+	// The Key page offers one-time AITP install codes (default off).
+	AITPInstallCodeEnabled bool
 }
 
 type DefaultSubscriptionSetting struct {
@@ -153,6 +156,7 @@ type PublicSettings struct {
 	BackendModeEnabled     bool
 	MaintenanceModeEnabled bool
 	MaintenanceMessage     string
+	AITPInstallCodeEnabled bool
 	Version                string
 }
 

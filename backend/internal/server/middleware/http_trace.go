@@ -17,7 +17,10 @@ import (
 //
 // 顺序要求：必须在 RequestLogger 之后 —— 依赖 ctx 里的 ClientRequestID 作 trace_id。
 func HTTPTrace() gin.HandlerFunc {
-	tracer := httptrace.Default()
+	return httpTrace(httptrace.Default())
+}
+
+func httpTrace(tracer *httptrace.Writer) gin.HandlerFunc {
 	if !tracer.Enabled() {
 		return func(c *gin.Context) { c.Next() }
 	}
@@ -30,27 +33,35 @@ func HTTPTrace() gin.HandlerFunc {
 
 		traceID := httptrace.TraceIDFromRequest(c.Request)
 		start := time.Now()
+		path := c.Request.URL.Path
+		installCode := traceIsAITPInstallCodePath(path)
 
-		var body []byte
-		if c.Request.Body != nil {
-			body, _ = io.ReadAll(c.Request.Body)
-			_ = c.Request.Body.Close()
-			c.Request.Body = io.NopCloser(bytes.NewReader(body))
+		fields := map[string]any{
+			"method":  c.Request.Method,
+			"url":     c.Request.URL.RequestURI(),
+			"headers": httptrace.CloneHeader(c.Request.Header),
 		}
-
-		tracer.WritePhase(traceID, "inbound_request", map[string]any{
-			"method":   c.Request.Method,
-			"url":      c.Request.URL.RequestURI(),
-			"headers":  httptrace.CloneHeader(c.Request.Header),
-			"body_b64": base64.StdEncoding.EncodeToString(body),
-		})
+		if installCode {
+			// The code is in the URL; the bodies carry the code or the plaintext key.
+			fields["url"] = RedactedLogPath(path)
+			fields["body_omitted"] = true
+		} else {
+			var body []byte
+			if c.Request.Body != nil {
+				body, _ = io.ReadAll(c.Request.Body)
+				_ = c.Request.Body.Close()
+				c.Request.Body = io.NopCloser(bytes.NewReader(body))
+			}
+			fields["body_b64"] = base64.StdEncoding.EncodeToString(body)
+		}
+		tracer.WritePhase(traceID, "inbound_request", fields)
 
 		tw := &traceResponseWriter{
 			ResponseWriter: c.Writer,
 			tracer:         tracer,
 			traceID:        traceID,
 			start:          start,
-			omitBody:       traceOmitsResponseBody(c.Request.URL.Path),
+			omitBody:       installCode || traceOmitsResponseBody(path),
 		}
 		c.Writer = tw
 		c.Next()
@@ -74,6 +85,12 @@ type traceResponseWriter struct {
 // covered by evidence retention, holds or user deletion.
 func traceOmitsResponseBody(path string) bool {
 	return strings.Contains(path, "/input-moderation-events/")
+}
+
+// traceIsAITPInstallCodePath: one-time install codes. /i/<code> answers with the plaintext
+// API key, the create endpoint with a fresh code; neither body nor the code may be traced.
+func traceIsAITPInstallCodePath(path string) bool {
+	return isAITPInstallCodeRedeemPath(path) || isAITPInstallCodeCreatePath(path)
 }
 
 func (w *traceResponseWriter) WriteHeader(code int) {

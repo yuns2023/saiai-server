@@ -73,6 +73,7 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		BackendModeEnabled:               settings.BackendModeEnabled,
 		MaintenanceModeEnabled:           settings.MaintenanceModeEnabled,
 		MaintenanceMessage:               settings.MaintenanceMessage,
+		AITPInstallCodeEnabled:           settings.AITPInstallCodeEnabled,
 		Version:                          h.version,
 	})
 }
