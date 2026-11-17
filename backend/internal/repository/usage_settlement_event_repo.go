@@ -46,13 +46,9 @@ func recordUsageSettlementEvent(ctx context.Context, tx *sql.Tx, cmd *service.Us
 		return nil
 	}
 
-	var prevLockTimeout, prevStatementTimeout string
-	if err := tx.QueryRowContext(ctx, `SELECT current_setting('lock_timeout'), current_setting('statement_timeout')`).Scan(&prevLockTimeout, &prevStatementTimeout); err != nil {
-		// Before the savepoint nothing can be undone selectively: a failed
-		// statement here aborts the transaction, same as an effect failure.
-		return fmt.Errorf("read timeouts before settlement event: %w", err)
-	}
 	if _, err := tx.ExecContext(ctx, `SAVEPOINT settlement_evt`); err != nil {
+		// Without a savepoint nothing can be undone selectively; same as an
+		// effect failure.
 		return fmt.Errorf("settlement savepoint: %w", err)
 	}
 
@@ -64,19 +60,21 @@ func recordUsageSettlementEvent(ctx context.Context, tx *sql.Tx, cmd *service.Us
 		)
 		return segErr
 	}
-	if segErr != nil {
-		if _, err := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT settlement_evt`); err != nil {
-			return fmt.Errorf("rollback to settlement savepoint after %v: %w", segErr, err)
+	if segErr == nil {
+		// The segment restored the pre-segment timeouts before returning, so
+		// RELEASE carries the original values into the outer transaction.
+		_, err := tx.ExecContext(ctx, `RELEASE SAVEPOINT settlement_evt`)
+		if err == nil {
+			return nil
 		}
-		recordShadowSettlementFailure(cmd, segErr)
-	} else if _, err := tx.ExecContext(ctx, `RELEASE SAVEPOINT settlement_evt`); err != nil {
-		return fmt.Errorf("release settlement savepoint: %w", err)
+		segErr = fmt.Errorf("release settlement savepoint: %w", err)
 	}
-	// RELEASE keeps the segment's SET LOCAL values and ROLLBACK TO undoes
-	// them; restore the pre-segment values explicitly in both cases.
-	if _, err := tx.ExecContext(ctx, `SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $2, true)`, prevLockTimeout, prevStatementTimeout); err != nil {
-		return fmt.Errorf("restore timeouts after settlement event: %w", err)
+	// ROLLBACK TO undoes the event and the segment's SET LOCAL values, so the
+	// pre-segment timeouts are in effect again without another statement.
+	if _, err := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT settlement_evt`); err != nil {
+		return fmt.Errorf("rollback to settlement savepoint after %v: %w", segErr, err)
 	}
+	recordShadowSettlementFailure(cmd, segErr)
 	return nil
 }
 
@@ -91,10 +89,29 @@ func recordShadowSettlementFailure(cmd *service.UsageBillingCommand, err error) 
 	)
 }
 
+// writeUsageSettlementEventSegment runs inside the savepoint. Every statement,
+// including reading and restoring the session timeouts, is undone by
+// ROLLBACK TO on failure. On success it restores the pre-segment timeouts.
 func writeUsageSettlementEventSegment(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) error {
-	if _, err := tx.ExecContext(ctx, `SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $2, true)`, settlementEventLockTimeout, settlementEventStatementTimeout); err != nil {
+	var prevLockTimeout, prevStatementTimeout string
+	if err := tx.QueryRowContext(ctx, `SELECT current_setting('lock_timeout'), current_setting('statement_timeout')`).Scan(&prevLockTimeout, &prevStatementTimeout); err != nil {
 		return err
 	}
+	if err := setSettlementTimeouts(ctx, tx, settlementEventLockTimeout, settlementEventStatementTimeout); err != nil {
+		return err
+	}
+	if err := insertUsageSettlementEvent(ctx, tx, cmd); err != nil {
+		return err
+	}
+	return setSettlementTimeouts(ctx, tx, prevLockTimeout, prevStatementTimeout)
+}
+
+func setSettlementTimeouts(ctx context.Context, tx *sql.Tx, lockTimeout, statementTimeout string) error {
+	_, err := tx.ExecContext(ctx, `SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $2, true)`, lockTimeout, statementTimeout)
+	return err
+}
+
+func insertUsageSettlementEvent(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) error {
 	var owner sql.NullInt64
 	accountFound := true
 	err := tx.QueryRowContext(ctx, `SELECT owner_user_id FROM accounts WHERE id = $1`, cmd.AccountID).Scan(&owner)

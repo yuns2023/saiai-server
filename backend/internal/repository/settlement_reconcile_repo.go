@@ -51,7 +51,8 @@ func (r *settlementReconcileRepository) SettlementSummary(ctx context.Context, f
 
 // settlementDiffsCTE selects candidate identities whose event or usage log
 // falls in [from, to) (usage logs only when they should have an event: hosted
-// metering or an owned account), then joins the other side by identity across
+// metering or an owned account; legacy logs without a request_id have no
+// identity and are skipped), then joins the other side by identity across
 // windows and classifies each identity. Amount tolerance 1e-9 (both sides are
 // numeric(20,10) written from the same float).
 const settlementDiffsCTE = `
@@ -61,6 +62,7 @@ const settlementDiffsCTE = `
 		UNION
 		SELECT request_id, api_key_id FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
+			AND request_id IS NOT NULL
 			AND (metered_cost IS NOT NULL OR account_owner_user_id IS NOT NULL)
 	),
 	joined AS (

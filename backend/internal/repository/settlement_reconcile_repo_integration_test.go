@@ -61,6 +61,10 @@ func TestSettlementReconcileRepository(t *testing.T) {
 	usage(prefix+"H", "2020-01-02T06:00:00Z", 1, 0.5, nil, nil)
 	event(prefix+"I", "2020-01-02T07:00:00Z", 0, 0, &owner, []string{"standard_cost", "charge_input"})
 	usage(prefix+"I", "2020-01-02T07:00:01Z", 9, 9, &one, &owner)
+	// K: legacy log without request_id cannot be matched and is skipped.
+	_, err := integrationDB.ExecContext(ctx, `INSERT INTO usage_logs (user_id, api_key_id, account_id, request_id, model, total_cost, actual_cost, metered_cost, created_at)
+		VALUES ($1, $2, $3, NULL, 'TEST_ONLY_model', 1, 1, 1, $4)`, f.user.ID, f.key.ID, f.account.ID, at("2020-01-02T08:00:00Z"))
+	require.NoError(t, err)
 	event(prefix+"J", "2020-01-02T23:59:59Z", 1, 0.5, &owner, nil)
 	usage(prefix+"J", "2020-01-03T00:00:05Z", 1, 0.5, &one, &owner)
 
