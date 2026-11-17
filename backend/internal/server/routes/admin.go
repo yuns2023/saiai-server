@@ -76,6 +76,9 @@ func RegisterAdminRoutes(
 		// API Key 管理
 		registerAdminAPIKeyRoutes(admin, h)
 
+		// 影子结算事件核对（只读）
+		registerSettlementRoutes(admin, h)
+
 	}
 }
 
@@ -531,5 +534,12 @@ func registerErrorPassthroughRoutes(admin *gin.RouterGroup, h *handler.Handlers)
 		rules.POST("", h.Admin.ErrorPassthrough.Create)
 		rules.PUT("/:id", h.Admin.ErrorPassthrough.Update)
 		rules.DELETE("/:id", h.Admin.ErrorPassthrough.Delete)
+	}
+}
+
+func registerSettlementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	settlement := admin.Group("/settlement")
+	{
+		settlement.GET("/reconcile", h.Admin.Settlement.Reconcile)
 	}
 }

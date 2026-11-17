@@ -4782,6 +4782,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		AccountRateMultiplier: account.BillingRateMultiplier(),
 		MeteredCost:           meteredCost,
 		APIKeyService:         input.APIKeyService,
+		PriceMissing:          pricingMissing,
 	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {

@@ -40,6 +40,10 @@ type UsageBillingCommand struct {
 	APIKeyQuotaCost     float64
 	APIKeyRateLimitCost float64
 	AccountQuotaCost    float64
+
+	// Settlement feeds the shadow settlement event. It is not part of the
+	// request fingerprint.
+	Settlement *UsageSettlementInput
 }
 
 func (c *UsageBillingCommand) Normalize() {
