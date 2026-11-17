@@ -756,9 +756,10 @@ func (s *BillingCacheService) CheckSessionTurnEligibility(ctx context.Context, u
 const sessionWindowMaintenanceInterval = time.Minute
 
 // claimSessionWindowMaintenance atomically takes the per-subscription slot
-// for this interval. Every sessionWindowMaintenanceSweep claims it drops
-// entries older than the interval, so the map holds only recent ones.
-func (s *BillingCacheService) claimSessionWindowMaintenance(subscriptionID int64) bool {
+// for this interval and returns the claim's value. Every
+// sessionWindowMaintenanceSweep claims it drops entries older than the
+// interval, which bounds the map under sustained traffic (not a strict TTL).
+func (s *BillingCacheService) claimSessionWindowMaintenance(subscriptionID int64) (int64, bool) {
 	now := time.Now().UnixNano()
 	for {
 		last, loaded := s.sessionWindowMaintenance.LoadOrStore(subscriptionID, now)
@@ -767,7 +768,7 @@ func (s *BillingCacheService) claimSessionWindowMaintenance(subscriptionID int64
 		}
 		lastNanos, _ := last.(int64)
 		if now-lastNanos < int64(sessionWindowMaintenanceInterval) {
-			return false
+			return 0, false
 		}
 		if s.sessionWindowMaintenance.CompareAndSwap(subscriptionID, last, now) {
 			break
@@ -781,7 +782,7 @@ func (s *BillingCacheService) claimSessionWindowMaintenance(subscriptionID int64
 			return true
 		})
 	}
-	return true
+	return now, true
 }
 
 const sessionWindowMaintenanceSweep = 256
@@ -805,7 +806,8 @@ func (s *BillingCacheService) scheduleSessionWindowMaintenance(userID int64, gro
 	if maintain == nil {
 		return
 	}
-	if !s.claimSessionWindowMaintenance(subscriptionID) {
+	claim, claimed := s.claimSessionWindowMaintenance(subscriptionID)
+	if !claimed {
 		return
 	}
 	run := s.runAsync
@@ -819,8 +821,9 @@ func (s *BillingCacheService) scheduleSessionWindowMaintenance(userID int64, gro
 			row, err := s.subRepo.GetActiveByUserIDAndGroupID(loadCtx, userID, group.ID)
 			cancel()
 			if err != nil {
-				// Let the next turn retry instead of waiting out the interval.
-				s.sessionWindowMaintenance.Delete(subscriptionID)
+				// Let the next turn retry instead of waiting out the interval
+				// (only this claim: a later one may have replaced it).
+				s.sessionWindowMaintenance.CompareAndDelete(subscriptionID, claim)
 				return
 			}
 			if row == nil || row.ID != subscriptionID {
