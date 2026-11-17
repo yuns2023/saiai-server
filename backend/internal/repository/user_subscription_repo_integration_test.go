@@ -764,3 +764,56 @@ func (s *UserSubscriptionRepoSuite) TestTxContext_RollbackIsolation() {
 	_, err = repo.GetByID(context.Background(), sub.ID)
 	s.Require().ErrorIs(err, service.ErrSubscriptionNotFound)
 }
+
+// Window maintenance that runs late with a copy read before another reset
+// (queued WS session maintenance, another instance's stale L1 copy) must not
+// wipe usage already recorded in the new window.
+func (s *UserSubscriptionRepoSuite) TestCheckAndResetWindows_StaleCopyKeepsNewWindowUsage() {
+	user := s.mustCreateUser("stale-reset@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-stale-reset")
+	old := time.Now().Add(-40 * 24 * time.Hour).Truncate(time.Microsecond)
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetDailyWindowStart(old).SetWeeklyWindowStart(old).SetMonthlyWindowStart(old)
+		c.SetDailyUsageUsd(4).SetWeeklyUsageUsd(4).SetMonthlyUsageUsd(4)
+	})
+	svc := service.NewSubscriptionService(nil, s.repo, nil, s.client, nil)
+
+	staleCopy, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err)
+	firstCopy, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err)
+
+	s.Require().NoError(svc.CheckAndResetWindows(s.ctx, firstCopy))
+	s.Require().NoError(s.repo.IncrementUsage(s.ctx, sub.ID, 3)) // new-window usage
+	s.Require().NoError(svc.CheckAndResetWindows(s.ctx, staleCopy))
+
+	got, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err)
+	s.Require().InDelta(3.0, got.DailyUsageUSD, 1e-6)
+	s.Require().InDelta(3.0, got.WeeklyUsageUSD, 1e-6)
+	s.Require().InDelta(3.0, got.MonthlyUsageUSD, 1e-6)
+	s.Require().True(got.DailyWindowStart.After(old))
+}
+
+// The conditional reset still resets a window that starts where expected.
+func (s *UserSubscriptionRepoSuite) TestResetEndedUsageWindow_ExpectedStart() {
+	user := s.mustCreateUser("cond-reset@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-cond-reset")
+	old := time.Now().Add(-2 * 24 * time.Hour).Truncate(time.Microsecond)
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetDailyWindowStart(old).SetDailyUsageUsd(9)
+	})
+	repo := s.repo
+	newStart := time.Now().Truncate(time.Microsecond)
+
+	s.Require().NoError(repo.ResetEndedUsageWindow(s.ctx, sub.ID, service.SubscriptionUsageWindowDaily, old.Add(time.Second), newStart))
+	got, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err)
+	s.Require().InDelta(9.0, got.DailyUsageUSD, 1e-6, "a different expected start is a no-op")
+
+	s.Require().NoError(repo.ResetEndedUsageWindow(s.ctx, sub.ID, service.SubscriptionUsageWindowDaily, old, newStart))
+	got, err = s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err)
+	s.Require().InDelta(0.0, got.DailyUsageUSD, 1e-6)
+	s.Require().WithinDuration(newStart, *got.DailyWindowStart, time.Microsecond)
+}

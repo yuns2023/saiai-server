@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -352,6 +353,31 @@ func (r *userSubscriptionRepository) EnsureFiveHourWindow(ctx context.Context, i
 		return err
 	}
 	return nil
+}
+
+// ResetEndedUsageWindow resets one daily/weekly/monthly window only if it
+// still starts at expectedStart, i.e. nobody has reset it since the caller
+// read the row. Automatic window maintenance can run late (queued, or from a
+// stale snapshot on another instance); an unconditional reset would then
+// wipe usage already recorded in the new window.
+func (r *userSubscriptionRepository) ResetEndedUsageWindow(ctx context.Context, id int64, window service.SubscriptionUsageWindow, expectedStart, newWindowStart time.Time) error {
+	var updateSQL string
+	switch window {
+	case service.SubscriptionUsageWindowDaily:
+		updateSQL = `UPDATE user_subscriptions SET daily_usage_usd = 0, daily_window_start = $1, updated_at = NOW()
+			WHERE id = $2 AND deleted_at IS NULL AND daily_window_start IS NOT DISTINCT FROM $3`
+	case service.SubscriptionUsageWindowWeekly:
+		updateSQL = `UPDATE user_subscriptions SET weekly_usage_usd = 0, weekly_window_start = $1, updated_at = NOW()
+			WHERE id = $2 AND deleted_at IS NULL AND weekly_window_start IS NOT DISTINCT FROM $3`
+	case service.SubscriptionUsageWindowMonthly:
+		updateSQL = `UPDATE user_subscriptions SET monthly_usage_usd = 0, monthly_window_start = $1, updated_at = NOW()
+			WHERE id = $2 AND deleted_at IS NULL AND monthly_window_start IS NOT DISTINCT FROM $3`
+	default:
+		return fmt.Errorf("unknown subscription usage window %q", window)
+	}
+	client := clientFromContext(ctx, r.client)
+	_, err := client.ExecContext(ctx, updateSQL, newWindowStart, id, expectedStart)
+	return err
 }
 
 func (r *userSubscriptionRepository) ResetWeeklyUsage(ctx context.Context, id int64, newWindowStart time.Time) error {

@@ -115,6 +115,8 @@ type BillingCacheService struct {
 	// window maintenance scheduled from a session turn.
 	sessionWindowMaintenance       sync.Map
 	sessionWindowMaintenanceClaims atomic.Uint64
+	// sessionRecheckErrLastLog throttles the session recheck alert (unix nanos).
+	sessionRecheckErrLastLog atomic.Int64
 	// rateLimitLoadErrLastLog throttles the fail-open warning (unix nanos).
 	rateLimitLoadErrLastLog atomic.Int64
 }
@@ -735,7 +737,12 @@ func (s *BillingCacheService) CheckSessionTurnEligibility(ctx context.Context, u
 			errors.Is(freshErr, ErrSubscriptionExpired) || errors.Is(freshErr, ErrSubscriptionSuspended) {
 			return withSubscriptionLimitDetail(freshErr, subscription, group)
 		}
-		logger.LegacyPrintf("service.billing_cache", "ALERT: session subscription recheck failed for user %d group %d: %v", user.ID, group.ID, freshErr)
+		// An outage hits every turn of every session; log once a minute.
+		now := time.Now().UnixNano()
+		last := s.sessionRecheckErrLastLog.Load()
+		if now-last >= int64(time.Minute) && s.sessionRecheckErrLastLog.CompareAndSwap(last, now) {
+			logger.LegacyPrintf("service.billing_cache", "ALERT: session subscription recheck failed for user %d group %d: %v", user.ID, group.ID, freshErr)
+		}
 		return ErrBillingServiceUnavailable.WithCause(freshErr)
 	}
 	// The cached rejection was stale: ended windows passed only because they
@@ -798,9 +805,12 @@ func subscriptionWindowsNeedMaintenance(sub *UserSubscription, group *Group) boo
 // scheduleSessionWindowMaintenance runs SubscriptionService window
 // maintenance off the turn path (it may run synchronously with a 5 s
 // timeout when no maintenance queue is configured), at most once per
-// subscription per interval. fresh is the current row when the caller has
-// it; otherwise it is loaded here, never maintaining a stale snapshot (a
-// reset decided on old window starts would zero the new window's usage).
+// subscription per interval. fresh is the row the caller just read;
+// otherwise it is loaded here rather than using the session's handshake
+// snapshot. Either may still be stale by the time maintenance runs (queued,
+// or reset meanwhile by another request/instance); the window reset itself
+// is conditional on the start it observed (ResetEndedUsageWindow), so a late
+// reset does not zero new-window usage.
 func (s *BillingCacheService) scheduleSessionWindowMaintenance(userID int64, group *Group, subscriptionID int64, fresh *UserSubscription) {
 	maintain := s.subscriptionWindowMaintenance.Load()
 	if maintain == nil {
