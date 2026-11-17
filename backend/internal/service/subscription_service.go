@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"math"
 	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -31,7 +35,7 @@ var (
 	ErrSubscriptionAlreadyExists  = infraerrors.Conflict("SUBSCRIPTION_ALREADY_EXISTS", "subscription already exists for this user and group")
 	ErrSubscriptionAssignConflict = infraerrors.Conflict("SUBSCRIPTION_ASSIGN_CONFLICT", "subscription exists but request conflicts with existing assignment semantics")
 	ErrGroupNotSubscriptionType   = infraerrors.BadRequest("GROUP_NOT_SUBSCRIPTION_TYPE", "group is not a subscription type")
-	ErrInvalidInput               = infraerrors.BadRequest("INVALID_INPUT", "at least one of resetDaily, resetWeekly, or resetMonthly must be true")
+	ErrInvalidInput               = infraerrors.BadRequest("INVALID_INPUT", "at least one of resetFiveHour, resetDaily, resetWeekly, or resetMonthly must be true")
 	ErrDailyLimitExceeded         = infraerrors.TooManyRequests("DAILY_LIMIT_EXCEEDED", "daily usage limit exceeded")
 	ErrWeeklyLimitExceeded        = infraerrors.TooManyRequests("WEEKLY_LIMIT_EXCEEDED", "weekly usage limit exceeded")
 	ErrMonthlyLimitExceeded       = infraerrors.TooManyRequests("MONTHLY_LIMIT_EXCEEDED", "monthly usage limit exceeded")
@@ -46,6 +50,7 @@ type SubscriptionService struct {
 	userSubRepo         UserSubscriptionRepository
 	billingCacheService *BillingCacheService
 	entClient           *dbent.Client
+	adminRecordRepo     RedeemCodeRepository // records admin adjust/revoke/reset; nil in unit tests
 
 	// L1 缓存：加速中间件热路径的订阅查询
 	subCacheL1     *ristretto.Cache
@@ -464,15 +469,148 @@ func normalizeAssignValidityDays(days int) int {
 	return days
 }
 
-// RevokeSubscription 撤销订阅
-func (s *SubscriptionService) RevokeSubscription(ctx context.Context, subscriptionID int64) error {
-	// 先获取订阅信息用于失效缓存
-	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
+// MaxAdminSubscriptionNotesRunes caps the optional admin note on a
+// subscription adjust/revoke/reset record. The note is shown to the user.
+const MaxAdminSubscriptionNotesRunes = 500
+
+var (
+	ErrAdminNotesTooLong = infraerrors.BadRequest("ADMIN_NOTES_TOO_LONG", "notes must be at most 500 characters")
+	ErrAdminNotesInvalid = infraerrors.BadRequest("ADMIN_NOTES_INVALID", "notes must not contain control or bidirectional formatting characters")
+	ErrAdjustNoChange    = infraerrors.BadRequest("ADJUST_NO_CHANGE", "subscription is already at the maximum expiration date")
+	errCallerTransaction = errors.New("admin subscription change must not run inside a caller transaction")
+)
+
+// SetAdminRecordRepository wires the repository used to record admin
+// subscription operations (adjust, revoke, reset) in the user's redeem history.
+func (s *SubscriptionService) SetAdminRecordRepository(repo RedeemCodeRepository) {
+	s.adminRecordRepo = repo
+}
+
+// normalizeAdminSubscriptionNotes trims the note and rejects what would
+// render misleadingly to the user (control and bidi formatting characters,
+// except ordinary line breaks and tabs) or exceed the length limit.
+func normalizeAdminSubscriptionNotes(notes string) (string, error) {
+	notes = strings.TrimSpace(notes)
+	if utf8.RuneCountInString(notes) > MaxAdminSubscriptionNotesRunes {
+		return "", ErrAdminNotesTooLong
+	}
+	for _, r := range notes {
+		if r == '\n' || r == '\r' || r == '\t' {
+			continue
+		}
+		if unicode.IsControl(r) || (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069) || r == 0x200E || r == 0x200F {
+			return "", ErrAdminNotesInvalid
+		}
+	}
+	return notes, nil
+}
+
+// runInTx runs fn in its own transaction (or directly when no ent client is
+// configured: unit tests with stub repositories). Callers invalidate caches
+// after it returns, which is only correct once the change has committed, so
+// running inside a caller's transaction is refused.
+func (s *SubscriptionService) runInTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.entClient == nil {
+		return fn(ctx)
+	}
+	if dbent.TxFromContext(ctx) != nil {
+		return errCallerTransaction
+	}
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := fn(dbent.NewTxContext(ctx, tx)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+// subscriptionRowLocker is implemented by the database repository.
+type subscriptionRowLocker interface {
+	LockByID(ctx context.Context, id int64) error
+}
+
+// lockForAdminChange locks the subscription row for the rest of the
+// transaction, so two admin changes to one subscription cannot both read the
+// same expiry and lose one update while both get recorded.
+func (s *SubscriptionService) lockForAdminChange(ctx context.Context, subscriptionID int64) error {
+	if locker, ok := s.userSubRepo.(subscriptionRowLocker); ok {
+		return locker.LockByID(ctx, subscriptionID)
+	}
+	return nil
+}
+
+// recordAdminSubscriptionChange writes the redeem history row for an admin
+// subscription operation. Call it inside the transaction of the change so
+// both commit or roll back together.
+func (s *SubscriptionService) recordAdminSubscriptionChange(ctx context.Context, sub *UserSubscription, recordType string, value float64, days int, notes string) error {
+	if s.adminRecordRepo == nil {
+		return nil // unit tests without the repository
+	}
+	code, err := GenerateRedeemCode()
+	if err != nil {
+		return fmt.Errorf("generate admin record code: %w", err)
+	}
+	now := time.Now()
+	userID, groupID := sub.UserID, sub.GroupID
+	record := &RedeemCode{
+		Code:         code,
+		Type:         recordType,
+		Value:        value,
+		Status:       StatusUsed,
+		UsedBy:       &userID,
+		UsedAt:       &now,
+		Notes:        notes,
+		GroupID:      &groupID,
+		ValidityDays: days,
+	}
+	if err := s.adminRecordRepo.Create(ctx, record); err != nil {
+		return fmt.Errorf("record admin subscription change: %w", err)
+	}
+	return nil
+}
+
+// RevokeSubscription 撤销订阅，并在用户的兑换记录里留下一条管理员撤销记录
+// （value = -撤销时剩余天数，向上取整；已过期为 0）。
+func (s *SubscriptionService) RevokeSubscription(ctx context.Context, subscriptionID int64, notes string) error {
+	notes, err := normalizeAdminSubscriptionNotes(notes)
 	if err != nil {
 		return err
 	}
 
-	if err := s.userSubRepo.Delete(ctx, subscriptionID); err != nil {
+	var sub *UserSubscription
+	if err := s.runInTx(ctx, func(txCtx context.Context) error {
+		if err := s.lockForAdminChange(txCtx, subscriptionID); err != nil {
+			return err
+		}
+		current, err := s.userSubRepo.GetByID(txCtx, subscriptionID)
+		if err != nil {
+			return err
+		}
+		remaining := 0
+		if left := time.Until(current.ExpiresAt); left > 0 {
+			remaining = int(math.Ceil(left.Hours() / 24))
+		}
+		if err := s.userSubRepo.Delete(txCtx, subscriptionID); err != nil {
+			return err
+		}
+		if err := s.recordAdminSubscriptionChange(txCtx, current, AdjustmentTypeAdminSubRevoke, float64(-remaining), -remaining, notes); err != nil {
+			return err
+		}
+		sub = current
+		return nil
+	}); err != nil {
 		return err
 	}
 
@@ -490,11 +628,14 @@ func (s *SubscriptionService) RevokeSubscription(ctx context.Context, subscripti
 	return nil
 }
 
-// ExtendSubscription 调整订阅时长（正数延长，负数缩短）
-func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscriptionID int64, days int) (*UserSubscription, error) {
-	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
+// ExtendSubscription 调整订阅时长（正数延长，负数缩短），并在用户的兑换记录里
+// 留下一条管理员调整记录。记录的是本次生效的天数：通常就是请求的天数（已过期
+// 的订阅从现在起算）；被 MaxExpiresAt 截断时记截断后的实际天数（可带小数），
+// 已在上限、没有任何变化时拒绝。
+func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscriptionID int64, days int, notes string) (*UserSubscription, error) {
+	notes, err := normalizeAdminSubscriptionNotes(notes)
 	if err != nil {
-		return nil, ErrSubscriptionNotFound
+		return nil, err
 	}
 
 	// 限制调整天数范围
@@ -505,42 +646,64 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 		days = -MaxValidityDays
 	}
 
-	now := time.Now()
-	isExpired := !sub.ExpiresAt.After(now)
-
-	// 如果订阅已过期，不允许负向调整
-	if isExpired && days < 0 {
-		return nil, infraerrors.BadRequest("CANNOT_SHORTEN_EXPIRED", "cannot shorten an expired subscription")
-	}
-
-	// 计算新的过期时间
-	var newExpiresAt time.Time
-	if isExpired {
-		// 已过期：从当前时间开始增加天数
-		newExpiresAt = now.AddDate(0, 0, days)
-	} else {
-		// 未过期：从原过期时间增加/减少天数
-		newExpiresAt = sub.ExpiresAt.AddDate(0, 0, days)
-	}
-
-	if newExpiresAt.After(MaxExpiresAt) {
-		newExpiresAt = MaxExpiresAt
-	}
-
-	// 检查新的过期时间必须大于当前时间
-	if !newExpiresAt.After(now) {
-		return nil, ErrAdjustWouldExpire
-	}
-
-	if err := s.userSubRepo.ExtendExpiry(ctx, subscriptionID, newExpiresAt); err != nil {
-		return nil, err
-	}
-
-	// 如果订阅已过期，恢复为active状态
-	if sub.Status == SubscriptionStatusExpired {
-		if err := s.userSubRepo.UpdateStatus(ctx, subscriptionID, SubscriptionStatusActive); err != nil {
-			return nil, err
+	var sub *UserSubscription
+	if err := s.runInTx(ctx, func(txCtx context.Context) error {
+		if err := s.lockForAdminChange(txCtx, subscriptionID); err != nil {
+			return err
 		}
+		current, err := s.userSubRepo.GetByID(txCtx, subscriptionID)
+		if err != nil {
+			return ErrSubscriptionNotFound
+		}
+
+		now := time.Now()
+		isExpired := !current.ExpiresAt.After(now)
+
+		// 如果订阅已过期，不允许负向调整
+		if isExpired && days < 0 {
+			return infraerrors.BadRequest("CANNOT_SHORTEN_EXPIRED", "cannot shorten an expired subscription")
+		}
+
+		// 计算新的过期时间：已过期从当前时间起算，未过期从原过期时间起算
+		base := current.ExpiresAt
+		if isExpired {
+			base = now
+		}
+		newExpiresAt := base.AddDate(0, 0, days)
+		recordedDays := float64(days)
+		if newExpiresAt.After(MaxExpiresAt) {
+			newExpiresAt = MaxExpiresAt
+			if !newExpiresAt.After(base) {
+				return ErrAdjustNoChange
+			}
+			recordedDays = math.Round(newExpiresAt.Sub(base).Hours()/24*100) / 100
+		}
+
+		// 检查新的过期时间必须大于当前时间
+		if !newExpiresAt.After(now) {
+			return ErrAdjustWouldExpire
+		}
+
+		if err := s.userSubRepo.ExtendExpiry(txCtx, subscriptionID, newExpiresAt); err != nil {
+			return err
+		}
+
+		// 如果订阅已过期，恢复为active状态
+		if current.Status == SubscriptionStatusExpired {
+			if err := s.userSubRepo.UpdateStatus(txCtx, subscriptionID, SubscriptionStatusActive); err != nil {
+				return err
+			}
+			current.Status = SubscriptionStatusActive
+		}
+
+		if err := s.recordAdminSubscriptionChange(txCtx, current, AdjustmentTypeAdminSubAdjust, recordedDays, int(math.Round(recordedDays)), notes); err != nil {
+			return err
+		}
+		current.ExpiresAt = newExpiresAt
+		sub = current
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	// 失效订阅缓存
@@ -554,7 +717,12 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 		}()
 	}
 
-	return s.userSubRepo.GetByID(ctx, subscriptionID)
+	// The change is committed: a failed re-read must not turn it into an
+	// error (a retry would apply it twice), so fall back to the local copy.
+	if refreshed, err := s.userSubRepo.GetByID(ctx, subscriptionID); err == nil {
+		return refreshed, nil
+	}
+	return sub, nil
 }
 
 // GetByID 根据ID获取订阅
@@ -720,37 +888,68 @@ func (s *SubscriptionService) CheckAndActivateWindow(ctx context.Context, sub *U
 	return firstErr
 }
 
-// AdminResetQuota manually resets the daily, weekly, and/or monthly usage windows.
-// Uses startOfDay(now) as the new window start, matching automatic resets.
-func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionID int64, resetFiveHour, resetDaily, resetWeekly, resetMonthly bool) (*UserSubscription, error) {
+// AdminResetQuota manually resets the five-hour, daily, weekly, and/or monthly
+// usage windows and records which ones in the user's redeem history.
+// The five-hour window restarts now; the others restart at startOfDay(now),
+// matching automatic resets.
+func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionID int64, resetFiveHour, resetDaily, resetWeekly, resetMonthly bool, notes string) (*UserSubscription, error) {
 	if !resetFiveHour && !resetDaily && !resetWeekly && !resetMonthly {
 		return nil, ErrInvalidInput
 	}
-	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
+	notes, err := normalizeAdminSubscriptionNotes(notes)
 	if err != nil {
 		return nil, err
 	}
-	windowStart := startOfDay(time.Now())
-	if resetFiveHour {
-		if err := s.userSubRepo.ResetFiveHourUsage(ctx, sub.ID, time.Now()); err != nil {
-			return nil, err
+
+	var sub *UserSubscription
+	if err := s.runInTx(ctx, func(txCtx context.Context) error {
+		if err := s.lockForAdminChange(txCtx, subscriptionID); err != nil {
+			return err
 		}
-	}
-	if resetDaily {
-		if err := s.userSubRepo.ResetDailyUsage(ctx, sub.ID, windowStart); err != nil {
-			return nil, err
+		current, err := s.userSubRepo.GetByID(txCtx, subscriptionID)
+		if err != nil {
+			return err
 		}
-	}
-	if resetWeekly {
-		if err := s.userSubRepo.ResetWeeklyUsage(ctx, sub.ID, windowStart); err != nil {
-			return nil, err
+		now := time.Now()
+		windowStart := startOfDay(now)
+		windows := 0
+		if resetFiveHour {
+			if err := s.userSubRepo.ResetFiveHourUsage(txCtx, current.ID, now); err != nil {
+				return err
+			}
+			current.FiveHourUsageUSD, current.FiveHourWindowStart = 0, &now
+			windows |= SubscriptionResetFiveHour
 		}
-	}
-	if resetMonthly {
-		if err := s.userSubRepo.ResetMonthlyUsage(ctx, sub.ID, windowStart); err != nil {
-			return nil, err
+		if resetDaily {
+			if err := s.userSubRepo.ResetDailyUsage(txCtx, current.ID, windowStart); err != nil {
+				return err
+			}
+			current.DailyUsageUSD, current.DailyWindowStart = 0, &windowStart
+			windows |= SubscriptionResetDaily
 		}
+		if resetWeekly {
+			if err := s.userSubRepo.ResetWeeklyUsage(txCtx, current.ID, windowStart); err != nil {
+				return err
+			}
+			current.WeeklyUsageUSD, current.WeeklyWindowStart = 0, &windowStart
+			windows |= SubscriptionResetWeekly
+		}
+		if resetMonthly {
+			if err := s.userSubRepo.ResetMonthlyUsage(txCtx, current.ID, windowStart); err != nil {
+				return err
+			}
+			current.MonthlyUsageUSD, current.MonthlyWindowStart = 0, &windowStart
+			windows |= SubscriptionResetMonthly
+		}
+		if err := s.recordAdminSubscriptionChange(txCtx, current, AdjustmentTypeAdminSubReset, float64(windows), 0, notes); err != nil {
+			return err
+		}
+		sub = current
+		return nil
+	}); err != nil {
+		return nil, err
 	}
+
 	// Invalidate L1 ristretto cache. Ristretto's Del() is asynchronous by design,
 	// so call Wait() immediately after to flush pending operations and guarantee
 	// the deleted key is not returned on the very next Get() call.
@@ -761,8 +960,13 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 	if s.billingCacheService != nil {
 		_ = s.billingCacheService.InvalidateSubscription(ctx, sub.UserID, sub.GroupID)
 	}
-	// Return the refreshed subscription from DB
-	return s.userSubRepo.GetByID(ctx, subscriptionID)
+	// Return the refreshed subscription from DB. The reset is committed, so a
+	// failed re-read falls back to the local copy instead of an error that
+	// would invite a second reset.
+	if refreshed, err := s.userSubRepo.GetByID(ctx, subscriptionID); err == nil {
+		return refreshed, nil
+	}
+	return sub, nil
 }
 
 // SubscriptionUsageWindow names a daily/weekly/monthly usage window.

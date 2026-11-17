@@ -114,22 +114,25 @@ export async function extend(
 /**
  * Revoke subscription
  * @param id - Subscription ID
+ * @param notes - Optional note, shown to the user in their redeem history
  * @returns Success confirmation
  */
-export async function revoke(id: number): Promise<{ message: string }> {
-  const { data } = await apiClient.delete<{ message: string }>(`/admin/subscriptions/${id}`)
+export async function revoke(id: number, notes?: string): Promise<{ message: string }> {
+  const { data } = await apiClient.delete<{ message: string }>(`/admin/subscriptions/${id}`, {
+    data: notes ? { notes } : undefined
+  })
   return data
 }
 
 /**
- * Reset daily, weekly, and/or monthly usage quota for a subscription
+ * Reset five-hour, daily, weekly, and/or monthly usage quota for a subscription
  * @param id - Subscription ID
- * @param options - Which windows to reset
+ * @param options - Which windows to reset, plus an optional note shown to the user
  * @returns Updated subscription
  */
 export async function resetQuota(
   id: number,
-  options: { five_hour?: boolean; daily: boolean; weekly: boolean; monthly: boolean }
+  options: { five_hour?: boolean; daily: boolean; weekly: boolean; monthly: boolean; notes?: string }
 ): Promise<UserSubscription> {
   const { data } = await apiClient.post<UserSubscription>(
     `/admin/subscriptions/${id}/reset-quota`,

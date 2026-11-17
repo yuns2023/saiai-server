@@ -254,6 +254,8 @@ func (s *proxyRepoStub) ListAccountSummariesByProxyID(ctx context.Context, proxy
 type redeemRepoStub struct {
 	deleteErrByID map[int64]error
 	deletedIDs    []int64
+	codesByID     map[int64]*RedeemCode
+	updated       []*RedeemCode
 }
 
 func (s *redeemRepoStub) Create(ctx context.Context, code *RedeemCode) error {
@@ -265,7 +267,11 @@ func (s *redeemRepoStub) CreateBatch(ctx context.Context, codes []RedeemCode) er
 }
 
 func (s *redeemRepoStub) GetByID(ctx context.Context, id int64) (*RedeemCode, error) {
-	panic("unexpected GetByID call")
+	if code, ok := s.codesByID[id]; ok {
+		cp := *code
+		return &cp, nil
+	}
+	return nil, ErrRedeemCodeNotFound
 }
 
 func (s *redeemRepoStub) GetByCode(ctx context.Context, code string) (*RedeemCode, error) {
@@ -273,7 +279,8 @@ func (s *redeemRepoStub) GetByCode(ctx context.Context, code string) (*RedeemCod
 }
 
 func (s *redeemRepoStub) Update(ctx context.Context, code *RedeemCode) error {
-	panic("unexpected Update call")
+	s.updated = append(s.updated, code)
+	return nil
 }
 
 func (s *redeemRepoStub) Delete(ctx context.Context, id int64) error {
@@ -533,6 +540,41 @@ func TestAdminService_BatchDeleteRedeemCodes_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(3), deleted)
 	require.Equal(t, []int64{1, 2, 3}, repo.deletedIDs)
+}
+
+func TestAdminService_AdminOperationRecordsCannotBeDeletedOrExpired(t *testing.T) {
+	for _, recordType := range []string{
+		AdjustmentTypeAdminBalance, AdjustmentTypeAdminConcurrency,
+		AdjustmentTypeAdminSubAdjust, AdjustmentTypeAdminSubRevoke, AdjustmentTypeAdminSubReset,
+	} {
+		t.Run(recordType, func(t *testing.T) {
+			repo := &redeemRepoStub{codesByID: map[int64]*RedeemCode{
+				1: {ID: 1, Type: RedeemTypeBalance, Status: StatusUsed},
+				2: {ID: 2, Type: recordType, Status: StatusUsed},
+			}}
+			svc := &adminServiceImpl{redeemCodeRepo: repo}
+
+			require.ErrorIs(t, svc.DeleteRedeemCode(context.Background(), 2), ErrAdminRecordImmutable)
+			_, err := svc.ExpireRedeemCode(context.Background(), 2)
+			require.ErrorIs(t, err, ErrAdminRecordImmutable)
+
+			deleted, err := svc.BatchDeleteRedeemCodes(context.Background(), []int64{1, 2, 3})
+			require.NoError(t, err)
+			require.Equal(t, int64(2), deleted)
+			require.Equal(t, []int64{1, 3}, repo.deletedIDs, "admin records are skipped, others (and missing ids) deleted")
+			require.Empty(t, repo.updated)
+		})
+	}
+}
+
+func TestAdminService_ExpireRedeemCode_OrdinaryCode(t *testing.T) {
+	repo := &redeemRepoStub{codesByID: map[int64]*RedeemCode{1: {ID: 1, Type: RedeemTypeSubscription, Status: StatusUnused}}}
+	svc := &adminServiceImpl{redeemCodeRepo: repo}
+
+	code, err := svc.ExpireRedeemCode(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, StatusExpired, code.Status)
+	require.Len(t, repo.updated, 1)
 }
 
 func TestAdminService_BatchDeleteRedeemCodes_PartialFailures(t *testing.T) {

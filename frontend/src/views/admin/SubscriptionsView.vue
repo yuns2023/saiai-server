@@ -428,7 +428,6 @@
               <button
                 v-if="row.status === 'active'"
                 @click="handleResetQuota(row)"
-                :disabled="resettingQuota && resettingSubscription?.id === row.id"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20 dark:hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Icon name="refresh" size="sm" />
@@ -653,6 +652,17 @@
           </div>
           <p class="input-hint">{{ t('admin.subscriptions.adjustHint') }}</p>
         </div>
+        <div>
+          <label class="input-label">{{ t('admin.subscriptions.notesLabel') }}</label>
+          <textarea
+            v-model="extendForm.notes"
+            rows="2"
+            class="input"
+            :maxlength="ADMIN_NOTES_MAX_LENGTH"
+            :placeholder="t('admin.subscriptions.notesPlaceholder')"
+          ></textarea>
+          <p class="input-hint">{{ t('admin.subscriptions.notesVisibleHint') }}</p>
+        </div>
       </form>
       <template #footer>
         <div v-if="extendingSubscription" class="flex justify-end gap-3">
@@ -671,27 +681,47 @@
       </template>
     </BaseDialog>
 
-    <!-- Revoke Confirmation Dialog -->
-    <ConfirmDialog
+    <!-- Revoke Dialog -->
+    <BaseDialog
       :show="showRevokeDialog"
       :title="t('admin.subscriptions.revokeSubscription')"
-      :message="t('admin.subscriptions.revokeConfirm', { user: revokingSubscription?.user?.email })"
-      :confirm-text="t('admin.subscriptions.revoke')"
-      :cancel-text="t('common.cancel')"
-      :danger="true"
-      @confirm="confirmRevoke"
-      @cancel="showRevokeDialog = false"
-    />
+      width="narrow"
+      @close="closeRevokeDialog"
+    >
+      <form id="revoke-subscription-form" class="space-y-4" @submit.prevent="confirmRevoke">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('admin.subscriptions.revokeConfirm', { user: revokingSubscription?.user?.email }) }}
+        </p>
+        <div>
+          <label class="input-label">{{ t('admin.subscriptions.notesLabel') }}</label>
+          <textarea
+            v-model="revokeNotes"
+            rows="2"
+            class="input"
+            :maxlength="ADMIN_NOTES_MAX_LENGTH"
+            :placeholder="t('admin.subscriptions.notesPlaceholder')"
+          ></textarea>
+          <p class="input-hint">{{ t('admin.subscriptions.notesVisibleHint') }}</p>
+        </div>
+      </form>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button type="button" class="btn btn-secondary" :disabled="revoking" @click="closeRevokeDialog">
+            {{ t('common.cancel') }}
+          </button>
+          <button type="submit" form="revoke-subscription-form" class="btn btn-danger" :disabled="revoking">
+            {{ t('admin.subscriptions.revoke') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
 
-    <!-- Reset Quota Confirmation Dialog -->
-    <ConfirmDialog
+    <!-- Reset Quota Dialog -->
+    <SubscriptionResetQuotaDialog
       :show="showResetQuotaConfirm"
-      :title="t('admin.subscriptions.resetQuotaTitle')"
-      :message="t('admin.subscriptions.resetQuotaConfirm', { user: resettingSubscription?.user?.email })"
-      :confirm-text="t('admin.subscriptions.resetQuota')"
-      :cancel-text="t('common.cancel')"
-      @confirm="confirmResetQuota"
-      @cancel="showResetQuotaConfirm = false"
+      :subscription="resettingSubscription"
+      @close="closeResetQuotaDialog"
+      @reset="onQuotaReset"
     />
     <!-- Subscription Guide Modal -->
     <teleport to="body">
@@ -785,13 +815,14 @@ import type { UserSubscription, Group, GroupPlatform, SubscriptionType } from '@
 import type { SimpleUser } from '@/api/admin/usage'
 import type { Column } from '@/components/common/types'
 import { formatDateOnly } from '@/utils/format'
+import { ADMIN_NOTES_MAX_LENGTH } from '@/utils/adminSubscriptionRecords'
+import SubscriptionResetQuotaDialog from '@/components/admin/subscription/SubscriptionResetQuotaDialog.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
@@ -981,7 +1012,6 @@ const showRevokeDialog = ref(false)
 const showResetQuotaConfirm = ref(false)
 const submitting = ref(false)
 const resettingSubscription = ref<UserSubscription | null>(null)
-const resettingQuota = ref(false)
 const extendingSubscription = ref<UserSubscription | null>(null)
 const revokingSubscription = ref<UserSubscription | null>(null)
 
@@ -992,8 +1022,12 @@ const assignForm = reactive({
 })
 
 const extendForm = reactive({
-  days: 30
+  days: 30,
+  notes: ''
 })
+
+const revokeNotes = ref('')
+const revoking = ref(false)
 
 // Group options for filter (all groups)
 const groupOptions = computed(() => [
@@ -1249,22 +1283,30 @@ const handleAssignSubscription = async () => {
 const handleExtend = (subscription: UserSubscription) => {
   extendingSubscription.value = subscription
   extendForm.days = 30
+  extendForm.notes = ''
   showExtendModal.value = true
 }
 
-const closeExtendModal = () => {
+const hideExtendModal = () => {
   showExtendModal.value = false
   extendingSubscription.value = null
+}
+
+// User-initiated close: keep the dialog until its request settles, so the
+// result cannot land on a dialog opened later for another subscription.
+const closeExtendModal = () => {
+  if (!submitting.value) hideExtendModal()
 }
 
 const handleExtendSubscription = async () => {
   if (!extendingSubscription.value) return
 
-  // 前端验证：调整后的过期时间必须在未来
+  // 前端验证：调整后的过期时间必须在未来。与后端一致：已过期的订阅从现在起算。
   if (extendingSubscription.value.expires_at) {
-    const expiresAt = new Date(extendingSubscription.value.expires_at)
-    const newExpiresAt = new Date(expiresAt.getTime() + extendForm.days * 24 * 60 * 60 * 1000)
-    if (newExpiresAt <= new Date()) {
+    const now = Date.now()
+    const base = Math.max(new Date(extendingSubscription.value.expires_at).getTime(), now)
+    const newExpiresAt = base + extendForm.days * 24 * 60 * 60 * 1000
+    if (newExpiresAt <= now) {
       appStore.showError(t('admin.subscriptions.adjustWouldExpire'))
       return
     }
@@ -1273,13 +1315,14 @@ const handleExtendSubscription = async () => {
   submitting.value = true
   try {
     await adminAPI.subscriptions.extend(extendingSubscription.value.id, {
-      days: extendForm.days
+      days: extendForm.days,
+      notes: extendForm.notes.trim() || undefined
     })
     appStore.showSuccess(t('admin.subscriptions.subscriptionAdjusted'))
-    closeExtendModal()
+    hideExtendModal()
     loadSubscriptions()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToAdjust'))
+    appStore.showError(error?.message || error.response?.data?.detail || t('admin.subscriptions.failedToAdjust'))
     console.error('Error adjusting subscription:', error)
   } finally {
     submitting.value = false
@@ -1288,21 +1331,33 @@ const handleExtendSubscription = async () => {
 
 const handleRevoke = (subscription: UserSubscription) => {
   revokingSubscription.value = subscription
+  revokeNotes.value = ''
   showRevokeDialog.value = true
 }
 
-const confirmRevoke = async () => {
-  if (!revokingSubscription.value) return
+const hideRevokeDialog = () => {
+  showRevokeDialog.value = false
+  revokingSubscription.value = null
+}
 
+// User-initiated close: keep the dialog until its request settles.
+const closeRevokeDialog = () => {
+  if (!revoking.value) hideRevokeDialog()
+}
+
+const confirmRevoke = async () => {
+  if (!revokingSubscription.value || revoking.value) return
+  revoking.value = true
   try {
-    await adminAPI.subscriptions.revoke(revokingSubscription.value.id)
+    await adminAPI.subscriptions.revoke(revokingSubscription.value.id, revokeNotes.value.trim() || undefined)
     appStore.showSuccess(t('admin.subscriptions.subscriptionRevoked'))
-    showRevokeDialog.value = false
-    revokingSubscription.value = null
+    hideRevokeDialog()
     loadSubscriptions()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToRevoke'))
+    appStore.showError(error?.message || error.response?.data?.detail || t('admin.subscriptions.failedToRevoke'))
     console.error('Error revoking subscription:', error)
+  } finally {
+    revoking.value = false
   }
 }
 
@@ -1311,22 +1366,14 @@ const handleResetQuota = (subscription: UserSubscription) => {
   showResetQuotaConfirm.value = true
 }
 
-const confirmResetQuota = async () => {
-  if (!resettingSubscription.value) return
-  if (resettingQuota.value) return
-  resettingQuota.value = true
-  try {
-    await adminAPI.subscriptions.resetQuota(resettingSubscription.value.id, { five_hour: true, daily: true, weekly: true, monthly: true })
-    appStore.showSuccess(t('admin.subscriptions.quotaResetSuccess'))
-    showResetQuotaConfirm.value = false
-    resettingSubscription.value = null
-    await loadSubscriptions()
-  } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToResetQuota'))
-    console.error('Error resetting quota:', error)
-  } finally {
-    resettingQuota.value = false
-  }
+const closeResetQuotaDialog = () => {
+  showResetQuotaConfirm.value = false
+  resettingSubscription.value = null
+}
+
+const onQuotaReset = async () => {
+  closeResetQuotaDialog()
+  await loadSubscriptions()
 }
 
 // Helper functions

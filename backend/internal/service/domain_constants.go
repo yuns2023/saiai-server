@@ -69,6 +69,17 @@ const (
 const (
 	AdjustmentTypeAdminBalance     = domain.AdjustmentTypeAdminBalance     // 管理员调整余额
 	AdjustmentTypeAdminConcurrency = domain.AdjustmentTypeAdminConcurrency // 管理员调整并发数
+	AdjustmentTypeAdminSubAdjust   = domain.AdjustmentTypeAdminSubAdjust   // 管理员调整订阅时长
+	AdjustmentTypeAdminSubRevoke   = domain.AdjustmentTypeAdminSubRevoke   // 管理员撤销订阅
+	AdjustmentTypeAdminSubReset    = domain.AdjustmentTypeAdminSubReset    // 管理员重置订阅额度
+)
+
+// Subscription usage window bits of an admin_sub_reset record value.
+const (
+	SubscriptionResetFiveHour = domain.SubscriptionResetFiveHour
+	SubscriptionResetDaily    = domain.SubscriptionResetDaily
+	SubscriptionResetWeekly   = domain.SubscriptionResetWeekly
+	SubscriptionResetMonthly  = domain.SubscriptionResetMonthly
 )
 
 // Group subscription type constants

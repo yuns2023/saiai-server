@@ -174,6 +174,12 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI, type BalanceHistoryItem } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
+import {
+  adminSubscriptionRecordTitle,
+  adminSubscriptionRecordValue,
+  isAdminOperationRecord,
+  isAdminSubscriptionRecord
+} from '@/utils/adminSubscriptionRecords'
 import type { AdminUser } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -200,7 +206,10 @@ const typeOptions = computed(() => [
   { value: 'admin_balance', label: t('admin.users.typeAdminBalance') },
   { value: 'concurrency', label: t('admin.users.typeConcurrency') },
   { value: 'admin_concurrency', label: t('admin.users.typeAdminConcurrency') },
-  { value: 'subscription', label: t('admin.users.typeSubscription') }
+  { value: 'subscription', label: t('admin.users.typeSubscription') },
+  { value: 'admin_sub_adjust', label: t('admin.users.typeAdminSubAdjust') },
+  { value: 'admin_sub_revoke', label: t('admin.users.typeAdminSubRevoke') },
+  { value: 'admin_sub_reset', label: t('admin.users.typeAdminSubReset') }
 ])
 
 // Watch modal open
@@ -233,13 +242,13 @@ const loadHistory = async (page: number) => {
 }
 
 // Helper: check if admin type
-const isAdminType = (type: string) => type === 'admin_balance' || type === 'admin_concurrency'
+const isAdminType = (type: string) => isAdminOperationRecord(type)
 
 // Helper: check if balance type (includes admin_balance)
 const isBalanceType = (type: string) => type === 'balance' || type === 'admin_balance'
 
-// Helper: check if subscription type
-const isSubscriptionType = (type: string) => type === 'subscription'
+// Helper: check if subscription type (redeemed or changed by an admin)
+const isSubscriptionType = (type: string) => type === 'subscription' || isAdminSubscriptionRecord(type)
 
 // Icon name based on type
 const getIconName = (item: BalanceHistoryItem) => {
@@ -301,6 +310,7 @@ const getItemTitle = (item: BalanceHistoryItem) => {
     case 'subscription':
       return t('redeem.subscriptionAssigned')
     default:
+      if (isAdminSubscriptionRecord(item.type)) return adminSubscriptionRecordTitle(item, t)
       return t('common.unknown')
   }
 }
@@ -310,6 +320,9 @@ const formatValue = (item: BalanceHistoryItem) => {
   if (isBalanceType(item.type)) {
     const sign = item.value >= 0 ? '+' : ''
     return `${sign}$${item.value.toFixed(2)}`
+  }
+  if (isAdminSubscriptionRecord(item.type)) {
+    return adminSubscriptionRecordValue(item, t)
   }
   if (isSubscriptionType(item.type)) {
     const days = item.validity_days || Math.round(item.value)
