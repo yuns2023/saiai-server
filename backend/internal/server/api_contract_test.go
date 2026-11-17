@@ -594,6 +594,8 @@ func TestAPIContracts(t *testing.T) {
 					"backend_mode_enabled": false,
 					"maintenance_mode_enabled": false,
 					"maintenance_message": "系统正在升级维护，请稍候再试。",
+					"client_brand_name": "",
+					"client_setup_command": "",
 					"custom_menu_items": []
 				}
 			}`,

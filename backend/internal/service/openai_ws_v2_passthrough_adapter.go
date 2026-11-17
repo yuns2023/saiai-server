@@ -188,6 +188,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
+	// One brand snapshot for the whole session; per-frame code never reads settings.
+	clientBrand := ClientBrandFromGin(c)
 	// firstClientMessage may be a migrated or replayed payload; its logical
 	// turn's client size comes from the caller and is never re-measured.
 	var firstTurnRequestBodyBytes *int64
@@ -379,7 +381,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return !hideOpenAICodexQuota(account) || !isOpenAICodexQuotaEvent(frame.Payload)
 			},
 			TransformUpstreamFrame: func(payload []byte) []byte {
-				return normalizeOpenAICodexCapacityError(account, payload)
+				return normalizeOpenAICodexCapacityError(clientBrand, account, payload)
 			},
 			OnClientTurn: func(turn int, messageType coderws.MessageType, payload []byte) error {
 				if account.IsOpenAIOAuth() {
@@ -506,7 +508,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						Turn: turn.Turn, AccountID: account.ID, Model: turn.RequestModel,
 						ResponseID: redactCredential(turn.RequestID), EventType: turn.TerminalEventType,
 						Status: turn.Failure.Status, ErrorType: redactCredential(turn.Failure.ErrorType),
-						Code: redactCredential(turn.Failure.Code), Message: ClientSafeUpstreamErrorMessage(redactCredential(turn.Failure.Message)),
+						Code: redactCredential(turn.Failure.Code), Message: ClientSafeUpstreamErrorMessage(ClientBrand{}, redactCredential(turn.Failure.Message)),
 						IncompleteReason:   redactCredential(turn.Failure.IncompleteReason),
 						RequestPayloadHash: turn.RequestPayloadHash,
 						UpstreamRequestID:  redactCredential(handshakeHeaders.Get("x-request-id")),

@@ -67,6 +67,8 @@ func SetupRouter(
 	// Keep liveness and the public maintenance message available while
 	// rejecting new business/API requests during an upgrade.
 	r.Use(middleware2.MaintenanceMode(settingService))
+	// One client brand snapshot per request (empty settings = original texts).
+	r.Use(middleware2.ClientBrand(settingService))
 
 	// Serve embedded frontend with settings injection if available
 	if web.HasEmbeddedFrontend() {

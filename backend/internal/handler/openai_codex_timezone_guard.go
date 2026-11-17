@@ -99,6 +99,28 @@ func codexTimezoneGuardMessage(userAgent string) string {
 	return codexTimezoneGuardMessageGeneric
 }
 
+// codexTimezoneGuardMessageFor is codexTimezoneGuardMessage with the setup
+// step worded for the site's client brand. Unbranded sites get the original
+// text; the Desktop text names no setup step and never changes.
+func codexTimezoneGuardMessageFor(brand service.ClientBrand, userAgent string) string {
+	message := codexTimezoneGuardMessage(userAgent)
+	if !brand.Customized() {
+		return message
+	}
+	step := "重新运行客户端初始化"
+	if brand.SetupCommand() != "" {
+		step = "重新运行 " + brand.SetupCommand()
+	}
+	switch message {
+	case codexTimezoneGuardMessageGeneric:
+		return "请求内容或历史中包含中国地区时区信息。请" + step + "（会关闭 Codex 的时区上报），重启 Codex 并新开会话后再使用。"
+	case codexTimezoneGuardMessageOld:
+		return "当前 Codex 版本过旧，会上报本机时区。请将 Codex 升级到 0.163 或以上，" + step + "，重启 Codex 并新开会话后再使用。"
+	default:
+		return message
+	}
+}
+
 // codexTimezoneNow is the server clock for the rewrite date (tests stub it).
 var codexTimezoneNow = time.Now
 
@@ -320,7 +342,7 @@ func (h *OpenAIGatewayHandler) rejectCodexTimezoneHTTP(c *gin.Context, group *se
 		Status:  http.StatusBadRequest,
 		Type:    codexTimezoneGuardErrType,
 		Code:    codexTimezoneGuardCode,
-		Message: codexTimezoneGuardMessage(c.GetHeader("User-Agent")),
+		Message: codexTimezoneGuardMessageFor(service.ClientBrandFromGin(c), c.GetHeader("User-Agent")),
 	}, streamStarted)
 }
 
@@ -409,7 +431,7 @@ func checkCodexTimezoneGuardWS(ctx context.Context, c *gin.Context, conn *coderw
 
 func rejectCodexTimezoneWS(ctx context.Context, c *gin.Context, conn *coderws.Conn, group *service.Group, userID int64, rejection *codexTimezoneRejection, turn int) error {
 	logCodexTimezoneGuardRejection(c, group, userID, rejection, "ws", turn)
-	return rejectOpenAIWSSession(ctx, c, conn, codexTimezoneGuardRejection(codexTimezoneGuardMessage(c.GetHeader("User-Agent"))))
+	return rejectOpenAIWSSession(ctx, c, conn, codexTimezoneGuardRejection(codexTimezoneGuardMessageFor(service.ClientBrandFromGin(c), c.GetHeader("User-Agent"))))
 }
 
 // rewriteCodexTimezoneWS is applied to every client frame right before it is

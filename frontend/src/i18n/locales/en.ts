@@ -5306,6 +5306,14 @@ export default {
         siteSubtitle: 'Site Subtitle',
         siteSubtitlePlaceholder: 'Subscription to API Conversion Platform',
         siteSubtitleHint: 'Displayed on login and register pages',
+        clientBrandName: 'Client Brand Name',
+        clientBrandNamePlaceholder: 'e.g. CCYou',
+        clientBrandNameHint:
+          'Used in error messages returned to clients (e.g. "use the official client"). Leave empty to keep the original SAIAI wording; once either field is set, messages no longer mention SAIAI. Up to 32 characters.',
+        clientSetupCommand: 'Client Setup Command',
+        clientSetupCommandPlaceholder: 'e.g. aitp init',
+        clientSetupCommandHint:
+          'The command named in "re-run setup" hints. Leave empty to keep the original SAIAI wording; with only a brand name set, hints say "re-run your client setup". Up to 64 characters.',
         apiBaseUrl: 'API Base URL',
         apiBaseUrlPlaceholder: 'https://api.example.com',
         apiBaseUrlHint:

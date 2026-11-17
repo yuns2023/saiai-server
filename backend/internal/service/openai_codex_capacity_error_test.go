@@ -25,7 +25,7 @@ func TestCodexCapacityErrorsRemoveClientUpsellTriggers(t *testing.T) {
 		`{"type":"response.done","response":{"id":"resp_owned","status":"failed","error":{"type":"insufficient_quota","message":"buy credits"}}}`,
 	} {
 		for _, account := range []*Account{auditOAuthPolicyAccount(), newOpenAINativeRelayAccount("https://relay.example")} {
-			normalized := normalizeOpenAICodexCapacityError(account, []byte(payload))
+			normalized := normalizeOpenAICodexCapacityError(ClientBrand{}, account, []byte(payload))
 			require.Contains(t, string(normalized), codexUpstreamCapacityCode)
 			require.NotContains(t, string(normalized), "usage_limit_reached")
 			require.NotContains(t, string(normalized), "plan_type")
@@ -36,7 +36,7 @@ func TestCodexCapacityErrorsRemoveClientUpsellTriggers(t *testing.T) {
 			require.Equal(t, gjson.Get(payload, "response.usage.output_tokens").Int(), gjson.GetBytes(normalized, "response.usage.output_tokens").Int())
 		}
 		apiKey := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
-		require.Equal(t, payload, string(normalizeOpenAICodexCapacityError(apiKey, []byte(payload))))
+		require.Equal(t, payload, string(normalizeOpenAICodexCapacityError(ClientBrand{}, apiKey, []byte(payload))))
 	}
 }
 
@@ -48,7 +48,7 @@ func TestCodexCapacityNormalizationLeavesUnrelatedFramesUnchanged(t *testing.T) 
 		`{"type":"response.done","response":{"status":"completed","error":{"type":"usage_limit_reached"}}}`,
 		`not json`,
 	} {
-		require.Equal(t, payload, string(normalizeOpenAICodexCapacityError(auditOAuthPolicyAccount(), []byte(payload))))
+		require.Equal(t, payload, string(normalizeOpenAICodexCapacityError(ClientBrand{}, auditOAuthPolicyAccount(), []byte(payload))))
 	}
 }
 

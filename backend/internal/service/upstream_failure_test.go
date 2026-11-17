@@ -57,9 +57,9 @@ func TestClientSafeUpstreamErrorMessage_RedactsRestrictedIdentity(t *testing.T) 
 		"ReClaude client status unavailable",
 		`{"error":{"message":"RECLAUDE failed"}}`,
 	} {
-		require.Equal(t, DeviceAuthorizationUnavailableClientMessage, ClientSafeUpstreamErrorMessage(message))
+		require.Equal(t, DeviceAuthorizationUnavailableClientMessage, ClientSafeUpstreamErrorMessage(ClientBrand{}, message))
 	}
-	require.Equal(t, "ordinary upstream error", ClientSafeUpstreamErrorMessage("ordinary upstream error"))
+	require.Equal(t, "ordinary upstream error", ClientSafeUpstreamErrorMessage(ClientBrand{}, "ordinary upstream error"))
 }
 
 func TestRateLimitService_DeviceAuthorizationRevokedDisablesPoolAccount(t *testing.T) {

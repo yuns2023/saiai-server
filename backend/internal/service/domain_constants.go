@@ -315,6 +315,11 @@ const (
 	// Maintenance mode settings.
 	SettingKeyMaintenanceModeEnabled = "maintenance_mode_enabled"
 	SettingKeyMaintenanceMessage     = "maintenance_message"
+
+	// Per-site client brand used in client-facing texts (see client_brand.go).
+	// Both empty = the original SAIAI texts, byte for byte.
+	SettingKeyClientBrandName    = "client_brand_name"
+	SettingKeyClientSetupCommand = "client_setup_command"
 )
 
 // AdminAPIKeyPrefix is the prefix for admin API keys (distinct from user "sk-" keys).

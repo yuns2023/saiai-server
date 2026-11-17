@@ -1524,7 +1524,51 @@ func enforceCodexContinuationAccountBoundary(c *gin.Context, account *service.Ac
 	return codexLocalProxyRequestMatched(c, c.GetHeader("User-Agent"), strings.ToLower(strings.TrimSpace(c.GetHeader("originator"))))
 }
 
-const codexLocalProxyIdentityIncompleteMessage = "本地代理身份信息不完整，请重新运行 SAIAI Codex 初始化并重启代理及 Codex。"
+// Original local-proxy texts; the brand-aware helpers below return them
+// unchanged when the site has no client brand settings.
+const (
+	codexLocalProxyIdentityIncompleteMessage = "本地代理身份信息不完整，请重新运行 SAIAI Codex 初始化并重启代理及 Codex。"
+	codexLocalProxyRequiredMessage           = "此分组仅允许通过 SAIAI 本地代理使用官方 Codex 客户端。"
+	codexLocalProxyRequiredWSReason          = "SAIAI local proxy with official Codex required"
+	// codexLocalProxyNeutralWSReason is used when the branded reason would
+	// not fit a WebSocket close frame (closeOpenAIClientWS cuts at 120 bytes).
+	codexLocalProxyNeutralWSReason = "Local proxy with official Codex required"
+	openAIWSCloseReasonMaxBytes    = 120
+)
+
+func codexLocalProxyIdentityIncompleteMessageFor(brand service.ClientBrand) string {
+	switch {
+	case !brand.Customized():
+		return codexLocalProxyIdentityIncompleteMessage
+	case brand.SetupCommand() != "":
+		return "本地代理身份信息不完整，请重新运行 " + brand.SetupCommand() + " 并重启代理及 Codex。"
+	default:
+		return "本地代理身份信息不完整，请重新运行客户端初始化并重启代理及 Codex。"
+	}
+}
+
+func codexLocalProxyRequiredMessageFor(brand service.ClientBrand) string {
+	switch {
+	case !brand.Customized():
+		return codexLocalProxyRequiredMessage
+	case brand.Name() != "":
+		return "此分组仅允许通过 " + brand.Name() + " 本地代理使用官方 Codex 客户端。"
+	default:
+		return "此分组仅允许通过本地代理使用官方 Codex 客户端。"
+	}
+}
+
+func codexLocalProxyRequiredWSReasonFor(brand service.ClientBrand) string {
+	if !brand.Customized() {
+		return codexLocalProxyRequiredWSReason
+	}
+	if brand.Name() != "" {
+		if reason := brand.Name() + " local proxy with official Codex required"; len(reason) <= openAIWSCloseReasonMaxBytes {
+			return reason
+		}
+	}
+	return codexLocalProxyNeutralWSReason
+}
 
 func (h *OpenAIGatewayHandler) validateCodexClientPolicyHTTP(c *gin.Context, group *service.Group) bool {
 	if group == nil || codexClientPolicyMatched(c, group.CodexClientPolicy) {
@@ -1532,9 +1576,10 @@ func (h *OpenAIGatewayHandler) validateCodexClientPolicyHTTP(c *gin.Context, gro
 	}
 	logCodexClientPolicyRejection(c, group)
 	if strings.EqualFold(strings.TrimSpace(group.CodexClientPolicy), "local_proxy_only") {
-		message := "此分组仅允许通过 SAIAI 本地代理使用官方 Codex 客户端。"
+		brand := service.ClientBrandFromGin(c)
+		message := codexLocalProxyRequiredMessageFor(brand)
 		if pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
-			message = codexLocalProxyIdentityIncompleteMessage
+			message = codexLocalProxyIdentityIncompleteMessageFor(brand)
 		}
 		h.errorResponse(c, http.StatusForbidden, "saiai_local_proxy_required", message)
 		return false
@@ -1959,7 +2004,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		logCodexClientPolicyRejection(c, apiKey.Group)
 		reason := "approved Codex client required"
 		if strings.EqualFold(strings.TrimSpace(apiKey.Group.CodexClientPolicy), "local_proxy_only") {
-			reason = "SAIAI local proxy with official Codex required"
+			reason = codexLocalProxyRequiredWSReasonFor(service.ClientBrandFromGin(c))
 			if pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
 				// WS close reasons must fit the protocol's 123-byte UTF-8 limit.
 				reason = "本地代理身份信息不完整，请重新初始化并重启代理及 Codex。"
@@ -2881,7 +2926,7 @@ var (
 // the error is delivered as an SSE error event so the half-written stream can
 // terminate cleanly; Retry-After is suppressed in that branch.
 func (h *OpenAIGatewayHandler) writeError(c *gin.Context, e gatewayErrorEnvelope, streamStarted bool) {
-	e.Message = service.ClientSafeUpstreamErrorMessage(e.Message)
+	e.Message = service.ClientSafeUpstreamErrorMessage(service.ClientBrandFromGin(c), e.Message)
 	if streamStarted {
 		setOpsLocalFailure(c, opsLocalFailure{status: e.Status, errType: e.Type, code: e.Code, message: e.Message})
 		flusher, ok := c.Writer.(http.Flusher)

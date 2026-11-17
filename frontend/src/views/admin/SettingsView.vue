@@ -1056,6 +1056,42 @@
               </div>
             </div>
 
+            <!-- Client brand used in client-facing error messages -->
+            <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.site.clientBrandName') }}
+                </label>
+                <input
+                  v-model="form.client_brand_name"
+                  type="text"
+                  maxlength="32"
+                  class="input"
+                  data-testid="client-brand-name"
+                  :placeholder="t('admin.settings.site.clientBrandNamePlaceholder')"
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.site.clientBrandNameHint') }}
+                </p>
+              </div>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.site.clientSetupCommand') }}
+                </label>
+                <input
+                  v-model="form.client_setup_command"
+                  type="text"
+                  maxlength="64"
+                  class="input font-mono text-sm"
+                  data-testid="client-setup-command"
+                  :placeholder="t('admin.settings.site.clientSetupCommandPlaceholder')"
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.site.clientSetupCommandHint') }}
+                </p>
+              </div>
+            </div>
+
             <!-- API Base URL -->
             <div>
               <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1750,7 +1786,9 @@ const form = reactive<SettingsForm>({
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
   maintenance_mode_enabled: false,
-  maintenance_message: ''
+  maintenance_message: '',
+  client_brand_name: '',
+  client_setup_command: ''
 })
 
 const defaultSubscriptionGroupOptions = computed<DefaultSubscriptionGroupOption[]>(() =>
@@ -2079,7 +2117,9 @@ async function saveSettings() {
       codex_max_version: form.codex_max_version,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
       maintenance_mode_enabled: form.maintenance_mode_enabled,
-      maintenance_message: form.maintenance_message
+      maintenance_message: form.maintenance_message,
+      client_brand_name: form.client_brand_name,
+      client_setup_command: form.client_setup_command
     }
     const updated = await adminAPI.settings.updateSettings(payload)
     Object.assign(form, updated)

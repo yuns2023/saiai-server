@@ -83,7 +83,11 @@ const (
 	totpLoginTTL    = 5 * time.Minute
 	totpAttemptsTTL = 15 * time.Minute
 	maxTotpAttempts = 5
-	totpIssuer      = "SAiAi"
+	// totpIssuer is the original issuer; new enrollments use
+	// ClientBrand.TOTPIssuer (this value when unbranded).
+	totpIssuer = "SAiAi"
+	// totpNeutralIssuer is used when only client_setup_command is set.
+	totpNeutralIssuer = "2FA"
 )
 
 // TotpService handles TOTP operations
@@ -170,7 +174,7 @@ func (s *TotpService) InitiateSetup(ctx context.Context, userID int64, emailCode
 
 	// Generate a new TOTP key
 	key, err := totp.Generate(totp.GenerateOpts{
-		Issuer:      totpIssuer,
+		Issuer:      ClientBrandFromContext(ctx).TOTPIssuer(),
 		AccountName: user.Email,
 	})
 	if err != nil {

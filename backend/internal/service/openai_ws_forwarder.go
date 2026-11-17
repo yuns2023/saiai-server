@@ -1844,6 +1844,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	)
 
 	payload := s.buildOpenAIWSCreatePayload(reqBody, account)
+	// One brand snapshot for the whole response; per-event code never reads settings.
+	clientBrand := ClientBrandFromGin(c)
 	payloadStrategy, removedKeys := "passthrough", []string(nil)
 	if account.Type != AccountTypeOAuth {
 		payloadStrategy, removedKeys = applyOpenAIWSRetryPayloadStrategy(payload, attempt)
@@ -2166,7 +2168,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if clientDisconnected {
 			return
 		}
-		message = normalizeOpenAICodexCapacityError(account, message)
+		message = normalizeOpenAICodexCapacityError(clientBrand, account, message)
 		frame := make([]byte, 0, len(message)+8)
 		frame = append(frame, "data: "...)
 		frame = append(frame, message...)
@@ -2425,7 +2427,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			responseID = strings.TrimSpace(gjson.GetBytes(finalResponse, "id").String())
 		}
 
-		c.Data(http.StatusOK, "application/json", normalizeOpenAICodexCapacityError(account, finalResponse))
+		c.Data(http.StatusOK, "application/json", normalizeOpenAICodexCapacityError(clientBrand, account, finalResponse))
 	} else {
 		flushStreamWriter(true)
 	}
@@ -2654,6 +2656,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 		return errors.New("token is empty")
 	}
 	officialCodexClient := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	// One brand snapshot for the whole session; per-frame code never reads settings.
+	clientBrand := ClientBrandFromGin(c)
 	nativeRelay := account.IsOpenAICodexNativeRelay()
 	if account.Type == AccountTypeOAuth && !officialCodexClient {
 		return NewOpenAIWSClientCloseError(
@@ -3092,7 +3096,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketFromClientOnce(
 	}
 
 	writeClientMessage := func(message []byte) error {
-		message = normalizeOpenAICodexCapacityError(account, message)
+		message = normalizeOpenAICodexCapacityError(clientBrand, account, message)
 		writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
 		defer cancel()
 		return clientConn.Write(writeCtx, coderws.MessageText, message)

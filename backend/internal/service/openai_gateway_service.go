@@ -3299,8 +3299,9 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		"upstream_error",
 		"Upstream request failed",
 	); matched {
-		if normalized := normalizeOpenAICodexCapacityError(account, body); !bytes.Equal(normalized, body) {
-			status, errType, errMsg = http.StatusServiceUnavailable, "server_error", codexUpstreamCapacityMessage
+		brand := ClientBrandFromGin(c)
+		if normalized := normalizeOpenAICodexCapacityError(brand, account, body); !bytes.Equal(normalized, body) {
+			status, errType, errMsg = http.StatusServiceUnavailable, "server_error", brand.CodexUpstreamCapacityMessage()
 		}
 		c.JSON(status, gin.H{
 			"error": gin.H{
@@ -3530,6 +3531,8 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 		flusher.Flush()
 		return nil
 	}
+	// One brand snapshot for the whole stream; the per-event path never reads settings.
+	clientBrand := ClientBrandFromGin(c)
 
 	usage := &OpenAIUsage{}
 	var firstTokenMs *int
@@ -3676,7 +3679,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				}
 			}
 			s.observeOpenAINativeMetadataTurnState(c, account, s.openAINativeResponseSessionHash(c), dataBytes)
-			if normalized := normalizeOpenAICodexCapacityError(account, dataBytes); !bytes.Equal(normalized, dataBytes) {
+			if normalized := normalizeOpenAICodexCapacityError(clientBrand, account, dataBytes); !bytes.Equal(normalized, dataBytes) {
 				line = "data: " + string(normalized)
 				if needModelReplace {
 					line = s.replaceModelInSSELine(line, mappedModel, originalModel)
@@ -4000,7 +4003,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
-	c.Data(resp.StatusCode, contentType, normalizeOpenAICodexCapacityError(account, body))
+	c.Data(resp.StatusCode, contentType, normalizeOpenAICodexCapacityError(ClientBrandFromGin(c), account, body))
 
 	return usage, nil
 }
@@ -4057,7 +4060,7 @@ func (s *OpenAIGatewayService) handleOAuthSSEToJSON(resp *http.Response, c *gin.
 			contentType = "text/event-stream"
 		}
 	}
-	c.Data(resp.StatusCode, contentType, normalizeOpenAICodexCapacityError(account, body))
+	c.Data(resp.StatusCode, contentType, normalizeOpenAICodexCapacityError(ClientBrandFromGin(c), account, body))
 
 	return usage, nil
 }

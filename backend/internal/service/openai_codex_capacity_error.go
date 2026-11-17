@@ -12,10 +12,13 @@ import (
 )
 
 const codexUpstreamCapacityCode = "saiai_upstream_capacity_unavailable"
+
+// codexUpstreamCapacityMessage is the original text; clients get
+// ClientBrand.CodexUpstreamCapacityMessage (this text when unbranded).
 const codexUpstreamCapacityMessage = "SAIAI upstream capacity is temporarily unavailable. Please retry later or contact your administrator. This is not your SAIAI balance or quota."
 
 func writeOpenAICodexCapacityError(ctx *gin.Context, account *Account, body []byte) bool {
-	normalized := normalizeOpenAICodexCapacityError(account, body)
+	normalized := normalizeOpenAICodexCapacityError(ClientBrandFromGin(ctx), account, body)
 	if bytes.Equal(normalized, body) {
 		return false
 	}
@@ -24,7 +27,10 @@ func writeOpenAICodexCapacityError(ctx *gin.Context, account *Account, body []by
 	return true
 }
 
-func normalizeOpenAICodexCapacityError(account *Account, payload []byte) []byte {
+// normalizeOpenAICodexCapacityError rewrites a quota error (plain error,
+// response.failed, failed response.done) into the capacity error. brand is the
+// request's snapshot; stream callers resolve it once, never per frame.
+func normalizeOpenAICodexCapacityError(brand ClientBrand, account *Account, payload []byte) []byte {
 	if !hideOpenAICodexQuota(account) || !gjson.ValidBytes(payload) {
 		return payload
 	}
@@ -54,7 +60,7 @@ func normalizeOpenAICodexCapacityError(account *Account, payload []byte) []byte 
 		return payload
 	}
 	replacement, _ := json.Marshal(map[string]string{
-		"type": "server_error", "code": codexUpstreamCapacityCode, "message": codexUpstreamCapacityMessage,
+		"type": "server_error", "code": codexUpstreamCapacityCode, "message": brand.CodexUpstreamCapacityMessage(),
 	})
 	normalized, err := sjson.SetRawBytes(payload, path, replacement)
 	if err != nil {
