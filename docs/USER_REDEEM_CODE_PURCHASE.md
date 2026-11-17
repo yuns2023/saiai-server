@@ -57,12 +57,15 @@ list; for other users the section is hidden.
 All three endpoints require a signed-in user (JWT) and act on that user only.
 Responses use the standard envelope: `{"code": 0, "message": "success",
 "data": …}` on success, and `{"code": <HTTP status>, "message": …,
-"reason": "<CODE>"}` on errors.
+"reason": "<CODE>"}` on errors. A request body that is not valid JSON for the
+request fields gets a plain 400 without `reason`.
 
 ### `GET /api/v1/redeem/purchases?page=&page_size=`
 
 Lists the user's purchases, newest first, together with the form state.
-`page_size` defaults to 20 and is capped at 50. It works with the switch off.
+`page_size` (or `limit`) defaults to 20; values from 51 to 1000 are cut to
+50, and invalid or larger values fall back to 20. It works with the switch
+off.
 
 ```json
 {
@@ -106,17 +109,20 @@ Lists the user's purchases, newest first, together with the form state.
 Request: `{"amount": 10.5, "request_id": "<UUID>"}`. Response: the purchase
 item plus `"replayed": true|false`.
 
-- `amount` is a JSON number or a numeric string. After trimming it must match
-  `^[0-9]+(\.[0-9]{1,2})?$`, be at most 32 characters and be above 0.
-  `10.500`, `1e2` and signed values are rejected (400
-  `REDEEM_PURCHASE_INVALID_AMOUNT`), never rounded. The parsed decimal is the
-  only value used for every column and comparison.
+- `amount` is a JSON number, or a string holding a valid JSON number. Anything
+  else (for example `"+10"` or `" 10 "`) fails JSON binding with a plain 400.
+  The number must then match `^[0-9]+(\.[0-9]{1,2})?$`, be at most 32
+  characters and be above 0: `10.500`, `1e2` and negative values are rejected
+  with 400 `REDEEM_PURCHASE_INVALID_AMOUNT`, never rounded. The parsed decimal
+  is the only value used for every column and comparison.
 - `request_id` is the idempotency key: a canonical 36-character UUID in any
   letter case, stored in lower case. The nil UUID is rejected (400
   `REDEEM_PURCHASE_INVALID_REQUEST_ID`). Use one `request_id` per purchase
   intent, and reuse it when retrying.
+- `request_id` is checked before `amount`. Both checks run before any
+  database access.
 
-The purchase runs in one transaction, in this order:
+The purchase then runs in one transaction, in this order:
 
 1. Lock the buyer row (`SELECT … FOR UPDATE`). The buyer must be active (403
    `USER_NOT_ACTIVE`).
@@ -150,8 +156,8 @@ Concurrent requests:
 - Any other unique violation (a generated code collision) retries the whole
   transaction once with new codes.
 
-After commit, the buyer's auth cache and billing balance cache are
-invalidated with their own 3 s timeout, independent of the request's
+After commit, the buyer's auth cache and then the billing balance cache are
+invalidated. Both share one 3 s timeout that does not depend on the request's
 cancellation. A failure is only logged.
 
 ### `POST /api/v1/redeem/purchases/:id/revoke`
@@ -250,7 +256,8 @@ Where the records appear:
   or is invalidated again.
 - **Classic user 兑换 page.** Its history labels `purchase_debit` and
   `purchase_refund` rows 未知 / Unknown and does not format their value as
-  money. Records only come from the ccyou.dev UI today.
+  money. Only ccyou.dev has a purchase UI, but the user API is not limited to
+  it: a classic-site user who calls the API directly sees these labels.
 - **ccyou.dev keeps the `request_id` in memory only.** After a network error,
   timeout or 5xx the page offers a "retry the same request" button that
   resends the same `request_id`. After a page reload that id is gone; a
@@ -273,9 +280,11 @@ Check what a balance unlocks on the site:
    a level never drops when the balance falls. The same money can then raise
    the level of several accounts: top up to a threshold, buy a code for the
    whole balance (the buyer keeps the level), and the redeemer reaches the
-   threshold too.
-2. **Groups gated by level.** Check `groups.required_level_id`. Every account
-   that reaches the level through a transferred balance can use those groups.
+   threshold too. A manual level, when set, takes precedence over the
+   automatic one.
+2. **Groups gated by level.** Check `groups.required_level_id`. A transferred
+   balance can satisfy that level requirement on several accounts; the
+   group's other access conditions still apply.
 3. **Free balance.** `default_balance` for new users, promo-code bonuses and
    admin grants become transferable: free balance collected on several
    accounts can be pooled into one.

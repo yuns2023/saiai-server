@@ -64,16 +64,19 @@ field fail.
 ## Reading: cache and per-request snapshot
 
 - `SettingService.ClientBrand` keeps a per-instance cache with a 60 s TTL.
-  After expiry the old value is still served while one background refresh
-  runs (5 s timeout), so requests do not wait on the settings store. Only the
-  first read in a process blocks, for at most 1 s.
+  Refreshes are driven by requests: the first request after expiry starts one
+  background refresh (5 s timeout) and still gets the old value, so requests
+  do not wait on the settings store. Only requests that arrive before the
+  first load of a process has finished wait for it (they share one read, at
+  most 1 s).
 - A failed refresh keeps the last value read successfully and retries after
   5 s. If no value was ever read, the original texts are used and the read is
   retried after 5 s.
 - An admin save publishes the new value at once on the instance that handled
   the PUT; a load that was already in flight cannot overwrite it. Another
-  instance using the same database picks the value up when its cache expires
-  (about a minute).
+  instance using the same database picks the value up after its cache expires
+  and a request has triggered a successful refresh, normally within about a
+  minute of traffic; there is no fixed bound.
 - The global middleware `middleware.ClientBrand` (registered right after
   `MaintenanceMode` in `backend/internal/server/router.go`) reads the value
   once per request

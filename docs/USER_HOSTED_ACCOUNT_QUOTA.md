@@ -43,20 +43,27 @@ configuration are excluded.
 
 ### Window costs and capacity estimates
 
-The three cost fields are null unless the costs can only describe the
-viewer's own use: the viewer must be the group's only allowed or subscribed
-user, and the account must belong to no other group and list no other user or
-other user's key in its carpool lists. Only the `five_hour` and `seven_day`
-windows get costs, and only when the window has a usable reset time.
+The three cost fields are null unless the current configuration has a single
+user: the viewer must be the group's only allowed or subscribed user, and the
+account must belong to no other group and list no other user or other user's
+key in its carpool lists. This checks the configuration at request time only.
+The amounts are the account's usage by all users in the window, so usage by a
+user who was removed from the group earlier in the window is still included.
+Only the `five_hour` and `seven_day` windows get costs, and only when the
+window has a usable reset time.
 
 - `used_cost_usd`: platform usage of the account in the current window, all
   users, at standard price (`usage_logs.total_cost`).
 - `estimated_capacity_usd`: platform usage up to the sample time divided by
   the sampled utilization. It needs a sample of at least 10% taken inside the
-  window. Usage outside the platform is invisible, so in practice it is a
-  lower bound. `estimate_sampled_at` is the time of that sample.
+  window and some platform usage before it; otherwise the estimate and
+  `estimate_sampled_at` are null. Usage outside the platform is invisible, so
+  in practice it is a lower bound. `estimate_sampled_at` is the time of that
+  sample.
 - A recorded mid-window restart of the upstream window moves the window start.
-  A manual restart gives no estimate.
+  After an automatic restart the utilization recorded at the restart is
+  subtracted first, and the increase must be at least 10 percentage points. A
+  manual restart gives no estimate.
 
 Failures leave the fields null.
 
@@ -73,8 +80,10 @@ sends a model request.
   the 5-hour window is omitted instead of showing a stale or derived value.
 - Codex OAuth: read existing 5-hour/weekly snapshots, timestamped by
   `codex_usage_updated_at`. Relative reset times require that sample timestamp.
-- Other account types, or missing/invalid samples: show no quota data. Do not
-  infer upstream usage from local costs or scheduling status.
+- Other account types, or missing/invalid utilization values: show no quota
+  data for that window. Do not infer upstream usage from local costs or
+  scheduling status. A valid utilization without a valid sample timestamp is
+  still shown, marked stale.
 
 Missing utilization is distinct from a measured zero. Missing reset times stay
 unknown. Sample times are not replaced with page load time. Samples at least
@@ -84,7 +93,9 @@ marked stale. An elapsed window retains its sampled percentage and displays
 The timestamp is the account snapshot's last recorded sample time; existing
 storage does not provide a separate timestamp for every window.
 
-A fresh full 5-hour or overall weekly window displays quota exhausted. A full
+A fresh full 5-hour or overall weekly window displays quota exhausted when the
+account is otherwise available; error, paused, expired, rate-limited and
+temporarily unavailable states take precedence. A full
 model-specific window does not imply all models are exhausted. Scheduling
 errors are represented by generic status labels, never raw error text.
 
@@ -130,9 +141,12 @@ Both endpoints require the normal JWT user authentication, only read
 repositories, and send `Cache-Control: no-store`.
 
 - `GET /api/v1/hosted/owned-accounts` returns `{"items": [...]}`: the
-  accounts the user owns now (not deleted), then the accounts the user owned
-  in the past (from the ownership history; deleted accounts included), at most
-  200 of each. Item fields:
+  accounts the user owns now (not deleted, at most 200 by account ID), then
+  the accounts the user owned in the past (from the ownership history; deleted
+  accounts included). The history query reads at most 200 accounts by account
+  ID, current ones included, and drops the current ones afterwards, so with
+  many accounts some past ones can be missing. There is no paging. Item
+  fields:
   - `account_id`, `current`, `display_name` (`托管号 #<id>`), `platform`,
     `type`, `status`, `updated_at`, `stale`, `windows`.
   - For current accounts, status and windows follow the snapshot rules of the
@@ -162,9 +176,11 @@ repositories, and send `Cache-Control: no-store`.
 ### Page
 
 - Current accounts first, then past accounts (history only). Each row shows
-  the display label, a status tag, platform and account type, and a 24 h / 7 d
-  table of the owner's own calls (自用) against other users' calls (其他用户):
-  request count and standard cost, plus 服务费 for the owner's own calls.
+  the display label and a 24 h / 7 d table of the owner's own calls (自用)
+  against other users' calls (其他用户): request count and standard cost, plus
+  服务费 for the owner's own calls. Current accounts also show a status tag
+  and the platform and account type; past accounts show the platform when it
+  is still known.
 - Current accounts also show their limit windows: utilization bar, reset time,
   "awaiting new data" (已过重置时间，等待新数据) for an elapsed window, the
   sample time and a stale tag.
