@@ -1755,3 +1755,76 @@ func TestCryptoPay_ConfirmingTailCoversWholeUnfinalizedGap(t *testing.T) {
 	require.Equal(t, "70001-72000/false/1", got[len(got)-1])
 	require.Len(t, got, 15)
 }
+
+// A double-clicked release (concurrent releases of the same HELD deposit)
+// credits exactly once; the admin list's hold filter, user name/email and
+// credited_by reflect the release.
+func TestCryptoPay_ConcurrentReleaseOfHeldDepositAndHoldFilter(t *testing.T) {
+	ctx := context.Background()
+	env := newCryptoEnv(t, false)
+	env.set(t, service.SettingCryptoPayAutoCreditEnabled, "true")
+	env.set(t, service.SettingCryptoPayHoldThreshold, "5")
+	importTestEVMKeyset(t, env, "xpubTESTHOLDLIST")
+
+	user := createCryptoUser(t)
+	_, err := integrationDB.Exec(`UPDATE users SET username = 'held-user' WHERE id = $1`, user)
+	require.NoError(t, err)
+	to := evmAddressFor(t, env, user)
+	large := evmObs(to, 6_000_000, 40, true)
+	other := evmObs(to, 7_000_000, 41, true)
+	small := evmObs(to, 1_000_000, 42, true)
+	res, err := env.svc.IngestObservations(ctx, []chain.Observation{large, other, small})
+	require.NoError(t, err)
+	require.Equal(t, "held", depositStatus(t, "arbitrum-one", large.TxHash, "log:0"))
+	require.Equal(t, "held", depositStatus(t, "arbitrum-one", other.TxHash, "log:0"))
+	require.Equal(t, "credited", depositStatus(t, "arbitrum-one", small.TxHash, "log:0"))
+	var heldID int64
+	require.NoError(t, integrationDB.QueryRow(`SELECT id FROM crypto_pay_deposits WHERE tx_hash = $1`, large.TxHash).Scan(&heldID))
+
+	var credited int64
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out, err := env.svc.ReleaseDeposit(ctx, heldID, "admin:7")
+			if err == nil && out.Credited {
+				atomic.AddInt64(&credited, 1)
+			}
+		}()
+	}
+	wg.Wait()
+	require.Equal(t, int64(1), credited)
+	require.Equal(t, "7.00000000", userBalance(t, user), "1 auto + 6 released")
+	require.Equal(t, 1, countRows(t, `SELECT COUNT(*) FROM crypto_pay_credits WHERE deposit_id = $1`, heldID))
+	require.Equal(t, 1, countRows(t, `SELECT COUNT(*) FROM crypto_pay_audit_logs WHERE action = 'DEPOSIT_CREDITED' AND deposit_id = $1`, heldID))
+	require.Len(t, res.DepositIDs, 3)
+
+	list := func(hold string) []service.CryptoPayAdminDeposit {
+		items, total, err := env.svc.AdminListDeposits(ctx, service.CryptoPayAdminDepositFilter{Hold: hold}, 1, 50)
+		require.NoError(t, err)
+		require.Equal(t, int64(len(items)), total)
+		return items
+	}
+	held := list(service.CryptoPayHoldFilterHeld)
+	require.Len(t, held, 1)
+	require.Equal(t, other.TxHash, held[0].TxHash)
+	require.Equal(t, "", held[0].CreditedBy)
+	released := list(service.CryptoPayHoldFilterReleased)
+	require.Len(t, released, 1)
+	require.Equal(t, heldID, released[0].ID)
+	require.Equal(t, "credited", released[0].Status)
+	require.Equal(t, service.CryptoPayHoldAmountOverThreshold, released[0].HoldReason)
+	require.Equal(t, "admin:7", released[0].CreditedBy)
+	require.Equal(t, "held-user", released[0].UserName)
+	require.Contains(t, released[0].UserEmail, "@example.test")
+	require.Equal(t, "active", released[0].UserStatus)
+	require.False(t, released[0].UserDeleted)
+	require.Equal(t, "https://arbiscan.io/tx/{tx}", released[0].ExplorerTxURL)
+	require.Len(t, list(service.CryptoPayHoldFilterAny), 2)
+	require.Len(t, list(""), 3)
+
+	_, _, err = env.svc.AdminListDeposits(ctx, service.CryptoPayAdminDepositFilter{Hold: "bogus"}, 1, 50)
+	require.Error(t, err)
+	require.Equal(t, "CRYPTO_PAY_HOLD_FILTER_INVALID", infraerrors.Reason(err))
+}

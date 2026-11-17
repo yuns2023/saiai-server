@@ -465,6 +465,7 @@ export default {
     mySubscriptions: 'My Subscriptions',
     hostedAccounts: 'Hosted Accounts',
     buySubscription: 'Purchase & recharge',
+    cryptoDeposits: 'Held Stablecoin Deposits',
     docs: 'Docs'
   },
 
@@ -3938,6 +3939,59 @@ export default {
       failedToDelete: 'Failed to delete announcement',
       failedToLoadReadStatus: 'Failed to load read status',
       deleteConfirm: 'Are you sure you want to delete this announcement? This action cannot be undone.'
+    },
+
+    // Held stablecoin deposits
+    cryptoDeposits: {
+      title: 'Held Stablecoin Deposits',
+      description: 'On-chain deposits at or above the review threshold, from inactive users, or in a non-whitelisted asset are held until an admin releases them. Handle rejections and refunds offline.',
+      filterHeld: 'Held',
+      filterReleased: 'Released',
+      filterAll: 'All',
+      columns: {
+        user: 'User',
+        chain: 'Chain / Asset',
+        amount: 'Amount',
+        address: 'Deposit address',
+        txHash: 'Tx hash',
+        holdReason: 'Hold reason',
+        detectedAt: 'Detected',
+        status: 'Status',
+        actions: 'Actions'
+      },
+      holdReasons: {
+        amount_over_threshold: 'Over review threshold',
+        user_inactive: 'User not active',
+        asset_not_whitelisted: 'Asset not whitelisted'
+      },
+      statuses: {
+        held: 'Held',
+        credited: 'Credited',
+        observed: 'Confirming',
+        finalized: 'Awaiting credit',
+        orphaned: 'Orphaned'
+      },
+      userDeleted: 'User deleted',
+      userNotActive: 'User status: {status}',
+      releasedBy: 'Released by {operator}',
+      release: 'Release',
+      releaseTitle: 'Release deposit',
+      releaseMessage: 'Credit {amount} {asset} ({chain}) to the balance of {user}. This adds to the balance directly and cannot be undone here.',
+      releaseInactiveWarning: 'This user is currently "{status}". Release does not re-check the user status and will still credit.',
+      releaseThreshold: 'Review threshold: {amount}',
+      releasing: 'Releasing…',
+      releaseSuccess: 'Released: {amount} {asset} credited',
+      releaseAlready: 'This deposit was already credited; nothing was credited again',
+      releaseFailed: 'Release failed',
+      errors: {
+        CRYPTO_PAY_USER_DELETED: 'The user is deleted; cannot release',
+        CRYPTO_PAY_SETTINGS_INVALID: 'Stablecoin top-up settings are invalid; fix them before releasing',
+        CRYPTO_PAY_DISABLED: 'Stablecoin top-up is not enabled on this site',
+        CRYPTO_PAY_DEPOSIT_NOT_CREDITABLE: 'The deposit is not finalized yet; cannot release',
+        CRYPTO_PAY_DEPOSIT_NOT_FOUND: 'Deposit not found'
+      },
+      empty: 'No matching deposits',
+      failedToLoad: 'Failed to load deposits'
     },
 
     // Promo Codes

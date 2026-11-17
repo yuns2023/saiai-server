@@ -535,6 +535,9 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/access-levels', label: t('nav.accessLevels'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/payment', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true },
+    ...(adminSettingsStore.cryptoPayConfigured
+      ? [{ path: '/admin/crypto-deposits', label: t('nav.cryptoDeposits'), icon: CreditCardIcon, hideInSimpleMode: true }]
+      : []),
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
