@@ -58,6 +58,13 @@ the optional account/version headers.
 Policy rejection logs include `missing_version` and `missing_account_id` as
 booleans. They contain no raw account ID, authorization value, cookies, or body.
 
+The SAIAI wording of these messages (the invalid-Key text, the local-proxy
+texts and the WebSocket close reasons) is what a site sends when its client
+brand settings are empty. A site that sets `client_brand_name` or
+`client_setup_command` gets its own brand and setup command instead (for
+example `请更新 CCYou.dev Key 后重新运行 aitp init`); status codes and error
+codes are unchanged. See [per-site client brand](CLIENT_BRAND_SETTINGS.md).
+
 ## Codex China-region timezone guard
 
 Groups have an opt-in boolean `codex_cn_timezone_guard` (default off; migration
@@ -248,7 +255,11 @@ reinit message) and the original bytes are never forwarded.
 - The message tells users on a recognised Codex backend older than 0.163
   (`codex-tui`, `codex_exec`, `codex_vscode`, `codex_cli_rs`, `Codex Desktop`
   User-Agent) to upgrade; every other client gets the generic text asking for
-  `saiai cli` re-initialization, a Codex restart and a new session.
+  `saiai cli` re-initialization, a Codex restart and a new session. That
+  setup step is per-site: with `client_setup_command` set the text names
+  that command, with only `client_brand_name` set it says 重新运行客户端初始化
+  (see [per-site client brand](CLIENT_BRAND_SETTINGS.md)). The Desktop text
+  names no setup step and never changes.
 - Logs record `openai.codex_timezone_guard_rejected` with group, user, reason,
   zone, UA product/version, transport and turn — never the body. When the
   offending string is known (a CN zone match, or a malformed whole-string

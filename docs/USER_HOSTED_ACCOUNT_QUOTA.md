@@ -1,13 +1,20 @@
 # User visibility of hosted account quotas
 
+This page covers two views. The group-based view below is the classic user
+console page **Hosted Accounts** (`/hosted-accounts`). ccyou.dev
+(`frontend-aog`) instead has an ownership-based view, 我的托管号 (`/hosted`);
+see [Owner view on ccyou.dev](#owner-view-on-ccyoudev-frontend-aog).
+
 A hosted group is an exclusive group granted to its owning user. Administrators
 can enable **Allow users to view account quotas** when creating or editing that
 group. The setting defaults to false. Making the group public clears the setting.
-User authorization continues to use the existing group grants; no account-owner
-relationship is added.
+User authorization continues to use the existing group grants. The account
+ownership used by the ccyou.dev owner view (migration 128) plays no part in
+this view.
 
 The user **Hosted Accounts** page lists visible groups and shows each account's
-name, availability, supported quota windows, reset times and sample timestamp.
+display label (`托管号 #<id>`, never the admin account name), availability,
+supported quota windows, reset times and sample timestamp.
 Quotas describe the upstream account's overall usage, including usage outside
 this platform. Platform spending remains on the existing usage pages. Account
 percentages are not averaged into a group quota.
@@ -27,9 +34,31 @@ remain independent. Hidden, unauthorized and disabled groups return 404 on the
 account endpoint. Responses use `Cache-Control: no-store`.
 
 Account responses allowlist `id`, `name`, `platform`, `status`, `updated_at`,
-`stale`, and `windows`. Windows contain `key`, `utilization`, `resets_at`, and
-`expired`. Credentials, account extra fields, email, notes, proxy information,
-raw errors and scheduling configuration are excluded.
+`stale`, and `windows`. `name` is the display label `托管号 #<id>`, because
+admin account names can contain seller emails or notes. Windows contain `key`,
+`utilization`, `resets_at`, `expired`, `used_cost_usd`,
+`estimated_capacity_usd` and `estimate_sampled_at`. Credentials, account extra
+fields, email, notes, proxy information, raw errors and scheduling
+configuration are excluded.
+
+### Window costs and capacity estimates
+
+The three cost fields are null unless the costs can only describe the
+viewer's own use: the viewer must be the group's only allowed or subscribed
+user, and the account must belong to no other group and list no other user or
+other user's key in its carpool lists. Only the `five_hour` and `seven_day`
+windows get costs, and only when the window has a usable reset time.
+
+- `used_cost_usd`: platform usage of the account in the current window, all
+  users, at standard price (`usage_logs.total_cost`).
+- `estimated_capacity_usd`: platform usage up to the sample time divided by
+  the sampled utilization. It needs a sample of at least 10% taken inside the
+  window. Usage outside the platform is invisible, so in practice it is a
+  lower bound. `estimate_sampled_at` is the time of that sample.
+- A recorded mid-window restart of the upstream window moves the window start.
+  A manual restart gives no estimate.
+
+Failures leave the fields null.
 
 ## Snapshot semantics
 
@@ -76,3 +105,76 @@ minimum user level, credential redaction, pagination, missing versus zero data,
 expired snapshots, timestamp handling, group-switch races, UI refresh/error
 handling and PostgreSQL visibility round trips. Local validation uses mocks and
 disposable test databases; no real provider request is needed.
+
+## Owner view on ccyou.dev (frontend-aog)
+
+ccyou.dev does not use the group-based page above. Its user console has
+我的托管号 (`/hosted`), based on **account ownership** (migration
+`128_account_owner.sql`) instead of group grants and `show_account_quota`.
+
+- An administrator assigns an upstream account to the user who brought it
+  with `PUT /api/v1/admin/accounts/:id/owner`. An account that already
+  belonged to another user can only be cleared or set back to that user (409
+  `ACCOUNT_OWNER_TRANSFER_FORBIDDEN`).
+- Every usage row snapshots the account's owner when it is written
+  (`usage_logs.account_owner_user_id`). Owner views only count rows whose
+  snapshot is the viewer, so usage from before an assignment or from another
+  owner's period is never shown.
+- The navigation entry appears only when the user owns, or has owned, at least
+  one account. The overview page (`/dashboard`) then shows a 我的托管号 line
+  linking to `/hosted`.
+
+### API
+
+Both endpoints require the normal JWT user authentication, only read
+repositories, and send `Cache-Control: no-store`.
+
+- `GET /api/v1/hosted/owned-accounts` returns `{"items": [...]}`: the
+  accounts the user owns now (not deleted), then the accounts the user owned
+  in the past (from the ownership history; deleted accounts included), at most
+  200 of each. Item fields:
+  - `account_id`, `current`, `display_name` (`托管号 #<id>`), `platform`,
+    `type`, `status`, `updated_at`, `stale`, `windows`.
+  - For current accounts, status and windows follow the snapshot rules of the
+    group-based view above; the window cost and estimate fields are always
+    null here. Past accounts have null `type`, `status` and `updated_at` and
+    no windows.
+  - `last_24h` and `last_7d`: `self_requests`, `self_standard_cost`,
+    `self_service_fee`, `others_requests`, `others_standard_cost`. Standard
+    cost is `usage_logs.total_cost`, the site's standard price. The service fee
+    is what the owner was charged for their own hosted-metered requests
+    (`actual_cost` of rows with `metered_cost` set).
+- `GET /api/v1/hosted/owned-accounts/:id/usage?start=&end=&limit=&cursor=`
+  returns one page of calls served by the account, newest first, as
+  `{"items": [...], "next_cursor": …}`:
+  - `start` and `end` are RFC 3339 times, a half-open range of at most 31 days
+    (400 `INVALID_USAGE_RANGE`). `limit` is 1–100, default 50 (400
+    `INVALID_USAGE_LIMIT`). `cursor` is the opaque `next_cursor` of the
+    previous page (400 `INVALID_CURSOR`); it is null on the last page.
+  - An account the user neither owns nor owned gives 404
+    `HOSTED_ACCOUNT_NOT_FOUND`.
+  - Row fields: `created_at`, `model`, `input_tokens`, `output_tokens`,
+    `cache_creation_tokens`, `cache_read_tokens`, `standard_cost`, `is_self`,
+    `api_key_name`, `charged`. `api_key_name` and `charged` are filled only for
+    the owner's own calls. Other users' calls show usage only, never their
+    identity, key or charge.
+
+### Page
+
+- Current accounts first, then past accounts (history only). Each row shows
+  the display label, a status tag, platform and account type, and a 24 h / 7 d
+  table of the owner's own calls (自用) against other users' calls (其他用户):
+  request count and standard cost, plus 服务费 for the owner's own calls.
+- Current accounts also show their limit windows: utilization bar, reset time,
+  "awaiting new data" (已过重置时间，等待新数据) for an elapsed window, the
+  sample time and a stale tag.
+- Selecting an account lists its calls for today, 7 days, 30 days or a custom
+  range of up to 31 days, 50 rows at a time. The caller column says 自己 plus
+  the key name, or 其他用户. 实扣 (amount charged) is shown only for the
+  owner's own calls.
+- Known gaps: the page has labels for the windows `five_hour`, `seven_day`,
+  `seven_day_sonnet` and `seven_day_opus`, and for the statuses `available`,
+  `needs_attention`, `paused`, `expired`, `rate_limited` and
+  `temporarily_unavailable`. The backend can also send the window
+  `seven_day_fable` and the status `quota_exhausted`; the page shows those raw
+  keys.
